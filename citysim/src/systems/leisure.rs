@@ -260,6 +260,8 @@ pub fn door_ok(world: &World, id: EntityId, b: EntityId) -> bool {
             crate::systems::classes::class_of(world, id) != Class::Dreg
                 && crate::systems::reputation::appearance_of(world, id).dress >= 2
         }
+        // Jobs & lives phase 5: open while a contracted worker is on shift.
+        Some(BuildingKind::Dollhouse) => crate::systems::dollhouse::staffed_now(world, b),
         Some(BuildingKind::Club) => {
             let heat = crate::systems::reputation::rep(world, id).heat;
             if heat < world.config.leisure.door_heat {
@@ -334,6 +336,8 @@ pub(crate) fn gain_at(world: &World, b: EntityId) -> f32 {
         // Jobs & lives phase 4: the Vice venues and the Boutique.
         Some((k @ (BuildingKind::StripClub | BuildingKind::Brothel), _)) => crate::systems::vice::gain(world, k),
         Some((BuildingKind::Boutique, _)) => world.config.fashion.gain_boutique,
+        // Jobs & lives phase 5.
+        Some((BuildingKind::Dollhouse, _)) => world.config.vice.gain_dollhouse,
         _ => 0.0,
     }
 }
@@ -465,6 +469,8 @@ struct Cand {
 pub(crate) fn rung_of(world: &World, b: EntityId, price: i64) -> Rung {
     match kind_of(world, b) {
         Some(BuildingKind::Lounge) => Rung::High,
+        // Jobs & lives phase 5: the Dollhouse on the high rung.
+        Some(BuildingKind::Dollhouse) => Rung::High,
         Some(BuildingKind::Club) if price >= 12 => Rung::High,
         Some(BuildingKind::Club | BuildingKind::FightPit | BuildingKind::Den) => Rung::Mid,
         // Jobs & lives phase 4: the Vice venues on the mid rung; a Spire
@@ -525,7 +531,7 @@ fn paid_score(world: &World, id: EntityId, b: EntityId, rung: Rung, price: i64, 
 
 /// The kinds the ladder offers, cheap to dear (Jobs & lives phase 4's
 /// three last: none stands with their switches off).
-const LADDER: [BuildingKind; 10] = [
+const LADDER: [BuildingKind; 11] = [
     BuildingKind::Bar,
     BuildingKind::Arcade,
     BuildingKind::NoodleBar,
@@ -536,6 +542,7 @@ const LADDER: [BuildingKind; 10] = [
     BuildingKind::StripClub,
     BuildingKind::Brothel,
     BuildingKind::Boutique,
+    BuildingKind::Dollhouse,
 ];
 
 /// The nearest open venue of `kind` `id` may enter from `from` (door
@@ -1338,6 +1345,11 @@ fn phase4_visit(world: &mut World, id: EntityId, b: EntityId) {
     if !crate::systems::vice::on(world) && !crate::systems::fashion::on(world) {
         return;
     }
+    // Jobs & lives phase 5: a Dollhouse's visit, an Arcade's unit (nothing off).
+    crate::systems::dollhouse::on_visit(world, b, price_of(world, b));
+    if kind_of(world, b) == Some(BuildingKind::Arcade) {
+        crate::systems::braindance::on_arcade_visit(world, b);
+    }
     let price = price_of(world, b);
     let high = rung_of(world, b, price) == Rung::High;
     crate::systems::vice::on_visit(world, id, b, price);
@@ -1574,6 +1586,8 @@ pub fn stat_daily(world: &mut World) {
                 add_fun(world, id, gain_at(world, b));
                 add_belonging(world, id, 0.15);
                 world.remember(id, MemoryKind::Socialised, None, 0.2, 0.3, false);
+                // Jobs & lives phase 5 (§ 5.3): a black unit from the Bar's dealer (nothing off).
+                crate::systems::braindance::bar_visit(world, id, b, false);
             }
             ActionKind::Gamble => {
                 let stake = stake_of(world, purse);
@@ -1638,17 +1652,23 @@ pub fn stat_daily(world: &mut World) {
 /// A gang's standing fronts (owned by it, `front_of` it), ascending.
 pub fn fronts_of(world: &World, gang: EntityId) -> Vec<EntityId> {
     // Jobs & lives phase 4: the Vice venues front too (none stands off).
-    let mut out: Vec<EntityId> =
-        [BuildingKind::FightPit, BuildingKind::Den, BuildingKind::Club, BuildingKind::StripClub, BuildingKind::Brothel]
-            .iter()
-            .flat_map(|&k| world.buildings_of_kind(k).iter().copied())
-            .filter(|&b| {
-                standing(world, b)
-                    && world.comp::<Building>(b).is_some_and(|bd| {
-                        bd.owner == Some(gang) && bd.venue.as_ref().is_some_and(|v| v.front_of == Some(gang))
-                    })
-            })
-            .collect();
+    let mut out: Vec<EntityId> = [
+        BuildingKind::FightPit,
+        BuildingKind::Den,
+        BuildingKind::Club,
+        BuildingKind::StripClub,
+        BuildingKind::Brothel,
+        BuildingKind::Dollhouse,
+    ]
+    .iter()
+    .flat_map(|&k| world.buildings_of_kind(k).iter().copied())
+    .filter(|&b| {
+        standing(world, b)
+            && world
+                .comp::<Building>(b)
+                .is_some_and(|bd| bd.owner == Some(gang) && bd.venue.as_ref().is_some_and(|v| v.front_of == Some(gang)))
+    })
+    .collect();
     out.sort_unstable();
     out
 }
@@ -1685,7 +1705,13 @@ pub fn note_tribute(world: &mut World, gang: EntityId, coins: i64) {
 pub fn fronts_daily(world: &mut World, gang: EntityId) {
     // Fronts on the city's deed that still name this gang close too.
     let mut named: Vec<EntityId> = fronts_of(world, gang);
-    for k in [BuildingKind::FightPit, BuildingKind::Den, BuildingKind::StripClub, BuildingKind::Brothel] {
+    for k in [
+        BuildingKind::FightPit,
+        BuildingKind::Den,
+        BuildingKind::StripClub,
+        BuildingKind::Brothel,
+        BuildingKind::Dollhouse,
+    ] {
         for &b in world.buildings_of_kind(k) {
             if standing(world, b)
                 && !named.contains(&b)
@@ -1725,7 +1751,16 @@ pub fn fronts_daily(world: &mut World, gang: EntityId) {
     }
     // Jobs & lives phase 4 (§ 5.1): with `[vice]` on a gang builds a
     // StripClub or a Brothel front too.
-    let kinds: &[BuildingKind] = if crate::systems::vice::on(world) {
+    // Jobs & lives phase 5 (§ 5.2): with the chip on, a Dollhouse front too.
+    let kinds: &[BuildingKind] = if crate::systems::dollhouse::on(world) {
+        &[
+            BuildingKind::FightPit,
+            BuildingKind::Den,
+            BuildingKind::StripClub,
+            BuildingKind::Brothel,
+            BuildingKind::Dollhouse,
+        ]
+    } else if crate::systems::vice::on(world) {
         &[BuildingKind::FightPit, BuildingKind::Den, BuildingKind::StripClub, BuildingKind::Brothel]
     } else {
         &[BuildingKind::FightPit, BuildingKind::Den]

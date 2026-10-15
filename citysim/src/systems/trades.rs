@@ -20,7 +20,7 @@ pub fn row_of(world: &World, role: Role) -> Option<&TradeCfg> {
 }
 
 /// `id`'s trade row, if it holds a trade's Job.
-fn job_row(world: &World, id: EntityId) -> Option<&TradeCfg> {
+pub(crate) fn job_row(world: &World, id: EntityId) -> Option<&TradeCfg> {
     world.comp::<Job>(id).and_then(|j| row_of(world, j.role))
 }
 
@@ -211,6 +211,8 @@ pub fn accrue(world: &mut World, worker: EntityId, b: EntityId, ticks: u64) {
         Some(BuildingKind::PackingPlant) => crate::systems::industry::accrue_packing(world, worker, b, ticks),
         // Jobs & lives phase 3 (section 4): the gunsmiths.
         Some(BuildingKind::Gunsmith) => crate::systems::weapons::accrue_gunsmith(world, worker, b, ticks),
+        // Jobs & lives phase 5 (§ 5.3): the studio's units.
+        Some(BuildingKind::BdStudio) => crate::systems::braindance::accrue_studio(world, worker, b, ticks),
         _ => {}
     }
 }

@@ -886,7 +886,7 @@ enabled = true                     # off() = false: no pass, no Kit term, no Bod
 # running a truck by day 30: 5-6 -> 8); flyer 6000 -> 2000 (nobody but a corp ever holds it; the exec
 # flyer, [shop] exec_flyer_cash_mult: at 3000 the 42-44 runs bought 0-2); implant T1 150 -> 60 (cash only
 # below, so the cash buyers must exist; adults chromed 13-17 %, members 40-60 %).
-price = { motorcycle = [60], car = [500, 1400], truck = [900], flyer = [2000], implant = [60, 500, 1500], robot = [800, 2000, 5000], pack = [30, 80], bridge = [200, 600, 1800], deck = [60, 120, 600], camera = [120, 400, 1200], weapon = [60, 160, 400], clothing = [20, 60, 180] }
+price = { motorcycle = [60], car = [500, 1400], truck = [900], flyer = [2000], implant = [60, 500, 1500], robot = [800, 2000, 5000], pack = [30, 80], bridge = [200, 600, 1800], deck = [60, 120, 600], camera = [120, 400, 1200], weapon = [60, 160, 400], clothing = [20, 60, 180], recorder = [120] }
 # M14 phase 2 (outside the plan's knob list, the M13 price precedent): deck [400, 1500, 5000] ->
 # [60, 120, 600]. Hackers' wallets on seed 42 (hacking >= 0.4): median 19 / 8 / 5 coins on days 5 / 20 / 40,
 # p90 45 / 21 / 18, so at 400 no agent bought a deck in 120 days (decks owned: 2, both corp fleet). At
@@ -896,8 +896,8 @@ price = { motorcycle = [60], car = [500, 1400], truck = [900], flyer = [2000], i
 # Phase 5: motorcycle upkeep 1 -> 0 and wear 1 -> 0. Unpaid upkeep wore a bike 3 a day and wear 1 a
 # day wrecked every bike bought in the first week around day 100 (64 "worn out" on seed 42): no owner
 # could pay a repair. Crashes (crash_wear) still wreck them.
-upkeep = { motorcycle = [0], car = [2, 3], truck = [4], flyer = [15], implant = [0, 1, 3], robot = [4, 8, 15], pack = [0, 0], bridge = [0, 0, 0], deck = [1, 3, 8], camera = [1, 2, 4], weapon = [0, 0, 0], clothing = [0, 0, 0] }
-wear = { motorcycle = 0, car = 1, truck = 1, flyer = 1, implant = 0, robot = 1, pack = 0, bridge = 0, deck = 0, camera = 1, weapon = 0, clothing = 1 }
+upkeep = { motorcycle = [0], car = [2, 3], truck = [4], flyer = [15], implant = [0, 1, 3], robot = [4, 8, 15], pack = [0, 0], bridge = [0, 0, 0], deck = [1, 3, 8], camera = [1, 2, 4], weapon = [0, 0, 0], clothing = [0, 0, 0], recorder = [0] }
+wear = { motorcycle = 0, car = 1, truck = 1, flyer = 1, implant = 0, robot = 1, pack = 0, bridge = 0, deck = 0, camera = 1, weapon = 0, clothing = 1, recorder = 0 }
 parts_per = { motorcycle = 4, car = 8, truck = 12, flyer = 30, implant = 3, robot = 10, deck = 4, camera = 2, weapon = 3 }
 parts_price = 15
 import_frac = 0.6
@@ -1898,6 +1898,26 @@ floors_seed = 1
 floors_max = 2
 niche = "Vice"
 
+[buildings.dollhouse]
+capacity = 12
+stock_cap = 0
+staff = 0
+found_cost = 900
+value = 900
+floors_seed = 1
+floors_max = 2
+niche = "Vice"
+
+[buildings.bd_studio]
+capacity = 10
+stock_cap = 60
+staff = 0
+found_cost = 700
+value = 700
+floors_seed = 1
+floors_max = 1
+niche = "Vice"
+
 [buildings.boutique]
 capacity = 10
 stock_cap = 0
@@ -2767,6 +2787,48 @@ vice = true
 tipped = true
 min_dress = 2
 
+# Jobs & lives phase 5 (§ 5.2): the Dollhouse's posts, filled only by the chip contract (`chip`).
+[[trades]]
+id = "chip_host"
+label = "Contract Host"
+workplace = ["Dollhouse"]
+staff_per_floor = 3
+wage = 6
+shift = "evening"
+skill = "persuasion"
+model = "service"
+jobs2 = true
+vice = true
+chip = true
+
+# Jobs & lives phase 5 (§ 5.3): the BdStudio's staff (`produce`: units, [vice] bd_rate).
+[[trades]]
+id = "bd_actor"
+label = "BD Actor"
+workplace = ["BdStudio"]
+staff_per_floor = 3
+wage = 4
+shift = "evening"
+skill = "persuasion"
+model = "produce"
+jobs2 = true
+vice = true
+bd = true
+
+[[trades]]
+id = "bd_editor"
+label = "BD Editor"
+workplace = ["BdStudio"]
+staff_per_floor = 2
+wage = 7
+shift = "day"
+skill = "knowledge"
+model = "produce"
+grade = 1
+jobs2 = true
+vice = true
+bd = true
+
 [[trades]]
 id = "street_worker"
 label = "Street Worker"
@@ -3362,8 +3424,32 @@ p_street_sweep = 0.2               # a street pitch in a Sweep district is swept
 solicit_per_1000_day = 1.0         # ... reports a day at most per 1,000 residents (R3)
 brothels_licensed = true           # Dylan's answer 2: the levers' defaults (World::levers.vice)
 street_legal = false
-dollhouse_contracts = true         # phase 5's slots
-captive_chip_trafficking = true
+dollhouse_contracts = true         # phase 5: a corp's chip contract is legal (Dylan's answer 2)
+captive_chip_trafficking = true    # phase 5: a captive chipped at a gang's holding is Trafficking
+# Jobs & lives phase 5 (docs/JOBS_AND_LIVES.md § 5.2, § 5.3): numbers only. Sub-switches under `enabled`
+# (`CITYSIM_CHIP_OFF=1`, `CITYSIM_BD_OFF=1`, `CITYSIM_PATROL_SWEEP_OFF=1`). Placeholders.
+chip = true                        # § 5.2: the Dollhouse and the chip contract (needs [assets] enabled)
+bd = true                          # § 5.3: BD studios, units, the Recorder and black units
+patrol_sweep = true                # phase 4's carry-over: a street pitch in a patrolled district (guards out) ...
+p_patrol_sweep = 0.1               # ... is swept on this x the law's alertness (the same caps)
+dollhouses = 1                     # seeded per copy of each corp_rows row
+dollhouse_price = [10, 16, 30]     # a visit by district tier (Sump, Mid, Spire)
+gain_dollhouse = 0.6               # fun a visit gives
+chip_days = 30                     # a contract's length
+chip_mult = 2.0                    # its wage: the row's x this (Job.premium)
+chip_load = 0.4                    # the chip's Kit.load (an implant's sanity_cost is 0.08-0.25)
+chip_fee = 80                      # the install and the removal, each paid by the holder to the nearest Clinic
+chipped_sanity = 0.1               # the Chipped trait's one-time sanity cut at the removal
+captives_per_front = 1             # a gang's Dollhouse front holds at most this many captives
+bd_studios = 1                     # seeded per copy of each corp_rows row
+bd_rate = 0.5                      # units a bd row's staff make an hour, x (0.5 + skill)
+bd_floor = 5                       # a studio keeps this many units
+arcade_bd = 10                     # an Arcade's shelf, bought from a studio at ...
+bd_wholesale = 6                   # ... this a unit (Flow::Wholesale); the rest to the World's book
+black_bd_price_mult = 2.0          # a black unit: bd_wholesale x this, from a Bar's dealer ...
+p_black_buy = 1.0                  # ... on this chance a drink, if the drinker can spare it (Dealing against the dealer)
+recorder_members = 6               # a gang this big keeps one Recorder ([assets] price.recorder, bought abroad)
+recorders_per_1000 = 2.0           # Recorders alive at most, per 1,000 residents (R4)
 
 # ---------------------------------------------------------------------------
 # Jobs & lives phase 4, fashion (docs/JOBS_AND_LIVES.md § 9; Dylan's answer 1): clothing items on the owned-item

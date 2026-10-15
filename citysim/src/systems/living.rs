@@ -23,6 +23,9 @@ pub fn run(world: &mut World) {
     crate::systems::weapons::hourly(world);
     // Jobs & lives phase 4: the street's night (nothing with `[vice]` off).
     crate::systems::vice::hourly(world);
+    // Jobs & lives phase 5: an episode under a chip ends the contract
+    // (nothing with `[vice] chip` off).
+    crate::systems::dollhouse::hourly(world);
     if world.tick_of_day() != 0 {
         return;
     }
@@ -74,6 +77,10 @@ pub fn run(world: &mut World) {
     crate::systems::weapons::daily(world);
     // Jobs & lives phase 4: status's decay, the gangs' clothing (nothing with `[fashion]` off).
     crate::systems::fashion::daily(world);
+    // Jobs & lives phase 5: the chip contracts and the braindance day
+    // (nothing with `[vice] chip` / `bd` off).
+    crate::systems::dollhouse::daily(world);
+    crate::systems::braindance::daily(world);
     // L2 phase 2: the spots, the wealth decile, the venues' hand-over.
     crate::systems::leisure::daily(world);
     // The Real economy E27, E34, E37, E39, E40, E42: the kitchens' day, the

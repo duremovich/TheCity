@@ -164,6 +164,9 @@ pub fn build_on_lot(
             | BuildingKind::StripClub
             | BuildingKind::Brothel
             | BuildingKind::Boutique
+            // Jobs & lives phase 5 (§ 5.2, § 5.3).
+            | BuildingKind::Dollhouse
+            | BuildingKind::BdStudio
     ) {
         return Err(format!("cannot build a {} on a Lot", kind.label()));
     }
@@ -387,6 +390,9 @@ pub fn tier_ok(kind: BuildingKind, tier: u8) -> bool {
         // Jobs & lives phase 4: the Vice venues off the Spire, a Boutique off the Sump.
         BuildingKind::StripClub | BuildingKind::Brothel => tier <= 1,
         BuildingKind::Boutique => tier >= 1,
+        // Jobs & lives phase 5: a Dollhouse off the Sump, a BdStudio in the Mid.
+        BuildingKind::Dollhouse => tier >= 1,
+        BuildingKind::BdStudio => tier == 1,
         _ => true,
     }
 }

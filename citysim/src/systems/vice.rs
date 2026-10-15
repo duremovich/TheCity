@@ -159,6 +159,8 @@ pub fn on_visit(world: &mut World, visitor: EntityId, b: EntityId, price: i64) {
             row.strip_visits += 1;
             row.vice_revenue += price;
         }
+        // Jobs & lives phase 5: counted by `dollhouse::on_visit`; no tip.
+        BuildingKind::Dollhouse => return,
         BuildingKind::Brothel => {
             let row = ownership::jobs2_row(world);
             row.brothel_visits += 1;
@@ -202,16 +204,33 @@ pub fn is_street_pitch(world: &World, p: &Pitch) -> bool {
 }
 
 /// `streetwork::close_the_day`'s sweep of a street pitch: never with
-/// `street_legal` on; in a `Sweep` district on `p_street_sweep`, filing
-/// `Solicitation` while under the day's cap. Returns whether it is swept
-/// (the caller fines and closes it).
+/// `street_legal` on; in a `Sweep` district on `p_street_sweep`; with
+/// `patrol_sweep` on (phase 5's carry-over), in a district the law patrols
+/// or cracks down on with guards allocated, on `p_patrol_sweep` × the law's
+/// alertness (M16b's attention). Files `Solicitation` while under the day's
+/// cap. Returns whether it is swept (the caller fines and closes it, under
+/// `[jobs2] sweeps_per_day`).
 pub fn sweep_street(world: &mut World, p: &Pitch) -> bool {
     if world.levers.vice.street_legal {
         return false;
     }
-    let sweep = world.districts.get(p.district.index()).is_some_and(|d| d.stance == Stance::Sweep);
-    if !sweep || hash(world, PURPOSE_SWEEP, key(p.owner), world.day()) >= world.config.vice.p_street_sweep {
+    let d = world.districts.get(p.district.index());
+    let sweep = d.is_some_and(|d| d.stance == Stance::Sweep);
+    let u = hash(world, PURPOSE_SWEEP, key(p.owner), world.day());
+    let swept = if sweep {
+        u < world.config.vice.p_street_sweep
+    } else if world.config.vice.patrol_sweep
+        && d.is_some_and(|d| matches!(d.stance, Stance::Patrol | Stance::Crackdown(_)) && d.guards > 0)
+    {
+        u < world.config.vice.p_patrol_sweep * crate::systems::attention::alertness_mult(world, None)
+    } else {
+        false
+    };
+    if !swept {
         return false;
+    }
+    if !sweep {
+        ownership::jobs2_row(world).patrol_sweeps += 1;
     }
     let cap = crate::systems::weapons::per_capita_day(world, world.config.vice.solicit_per_1000_day);
     if world.jobs2.vice.solicit_today < cap {

@@ -893,7 +893,7 @@ pub fn dismiss_as(
 }
 
 /// Take the newest posting of `role` back off `employer`'s vacancies.
-fn withdraw_vacancy(world: &mut World, employer: EntityId, role: crate::components::Role) {
+pub(crate) fn withdraw_vacancy(world: &mut World, employer: EntityId, role: crate::components::Role) {
     if let Some(v) = world.vacancies.get_mut(&employer) {
         if let Some(i) = v.iter().rposition(|&r| r == role) {
             v.remove(i);

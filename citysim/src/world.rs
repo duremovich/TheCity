@@ -857,6 +857,10 @@ pub struct World {
     /// an empty store is not written).
     #[serde(default, skip_serializing_if = "all_none")]
     pub schooling: Vec<Option<crate::components::Schooling>>,
+    /// Jobs & lives phase 5 (§ 5.2, D9): the `Chipped` trait of agents whose
+    /// chip came out (only with `[vice] chip` on; an empty store is not written).
+    #[serde(default, skip_serializing_if = "all_none")]
+    pub chipped: Vec<Option<crate::components::Chipped>>,
     /// Hunger as sickness § 4: buildings whose bin holds scraps (rebuilt on load).
     #[serde(skip)]
     pub bins: BTreeSet<EntityId>,
@@ -1247,6 +1251,7 @@ components! {
     camp_raised: crate::econ::CampRaised,
     health: crate::components::Health,
     schooling: crate::components::Schooling,
+    chipped: crate::components::Chipped,
 }
 
 /// Scale S1: a memo cell on the world: skipped by serde and empty in a
@@ -1572,6 +1577,7 @@ impl World {
             camp_raised: Vec::new(),
             health: Vec::new(),
             schooling: Vec::new(),
+            chipped: Vec::new(),
             bins: BTreeSet::new(),
             rumours: Vec::new(),
             regard: BTreeMap::new(),
@@ -1711,6 +1717,8 @@ impl World {
         // Boutiques (no RNG; nothing with `[vice]` / `[fashion]` off).
         crate::prof::timed!("new::vice::seed", systems::vice::seed(&mut w));
         crate::prof::timed!("new::fashion::seed", systems::fashion::seed(&mut w));
+        crate::prof::timed!("new::dollhouse::seed", systems::dollhouse::seed(&mut w));
+        crate::prof::timed!("new::braindance::seed", systems::braindance::seed(&mut w));
         // Jobs and room J15: the trade places of every standing building the
         // map and the seeding passes put up (no RNG).
         crate::prof::timed!("new::trades::seed", systems::trades::seed(&mut w));
@@ -3208,6 +3216,10 @@ impl World {
         valence: f32,
         second_hand: bool,
     ) {
+        // Jobs & lives phase 5 (§ 5.2, D9): nothing is written under a chip.
+        if !self.jobs2.chip.contracts.is_empty() && systems::dollhouse::under_chip(self, id) {
+            return;
+        }
         let tick = self.tick;
         let mut cap = self.config.brain.memory_cap;
         let half_life = self.config.brain.memory_half_life_days;
@@ -3399,6 +3411,7 @@ impl World {
         self.camp_raised.resize_with(n.max(self.camp_raised.len()), || None);
         self.health.resize_with(n.max(self.health.len()), || None);
         self.schooling.resize_with(n.max(self.schooling.len()), || None);
+        self.chipped.resize_with(n.max(self.chipped.len()), || None);
         self.trace.resize_with(n.max(self.trace.len()), || None);
         self.life.resize_with(n.max(self.life.len()), || None);
         self.corp.resize_with(n.max(self.corp.len()), || None);
@@ -3496,6 +3509,9 @@ impl World {
         salience: f32,
         object: Option<EntityId>,
     ) {
+        if !self.jobs2.chip.contracts.is_empty() && systems::dollhouse::under_chip(self, id) {
+            return;
+        }
         let tick = self.tick;
         let cap = self.config.brain.memory_cap;
         let half_life = self.config.brain.memory_half_life_days;

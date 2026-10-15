@@ -548,6 +548,38 @@ pub struct Jobs2Cols {
     pub status_corp: f32,
     pub status_street: f32,
     pub status_dreg: f32,
+    /// Phase 5, the chip (§ 5.2): standing Dollhouses and their visits;
+    /// contracts begun and ended (and ended early by an episode); contracts
+    /// standing now; living adults with the `Chipped` trait; episodes of
+    /// contracted workers; captives chipped at a gang's holding and the
+    /// `Trafficking` reports filed.
+    pub dollhouses: u32,
+    pub dollhouse_visits: u32,
+    pub chip_hired: u32,
+    pub chip_ended: u32,
+    pub chip_early: u32,
+    pub chip_contracts: u32,
+    pub chipped_living: u32,
+    pub chip_episodes: u32,
+    pub captives_chipped: u32,
+    pub trafficking: u32,
+    /// Phase 5, braindance (§ 5.3): standing BdStudios; units made, sold
+    /// wholesale to Arcades, used at Arcade visits, sold to the World (and
+    /// its coins); Recorders alive; recorded deeds; black units made and
+    /// sold by dealers (and their coins).
+    pub bd_studios: u32,
+    pub bd_made: u32,
+    pub bd_wholesale: u32,
+    pub bd_viewed: u32,
+    pub bd_exported: u32,
+    pub bd_export_paid: i64,
+    pub recorders: u32,
+    pub recorded: u32,
+    pub black_made: u32,
+    pub black_sold: u32,
+    pub black_revenue: i64,
+    /// Phase 4's carry-over: street pitches swept outside a `Sweep` district.
+    pub patrol_sweeps: u32,
 }
 
 impl Jobs2Cols {
@@ -667,6 +699,28 @@ impl Jobs2Cols {
             "status_corp",
             "status_street",
             "status_dreg",
+            "dollhouses",
+            "dollhouse_visits",
+            "chip_hired",
+            "chip_ended",
+            "chip_early",
+            "chip_contracts",
+            "chipped_living",
+            "chip_episodes",
+            "captives_chipped",
+            "trafficking",
+            "bd_studios",
+            "bd_made",
+            "bd_wholesale",
+            "bd_viewed",
+            "bd_exported",
+            "bd_export_paid",
+            "recorders",
+            "recorded",
+            "black_made",
+            "black_sold",
+            "black_revenue",
+            "patrol_sweeps",
         ]
         .join(",")
     }
@@ -787,6 +841,28 @@ impl Jobs2Cols {
             format!("{:.3}", self.status_corp),
             format!("{:.3}", self.status_street),
             format!("{:.3}", self.status_dreg),
+            self.dollhouses.to_string(),
+            self.dollhouse_visits.to_string(),
+            self.chip_hired.to_string(),
+            self.chip_ended.to_string(),
+            self.chip_early.to_string(),
+            self.chip_contracts.to_string(),
+            self.chipped_living.to_string(),
+            self.chip_episodes.to_string(),
+            self.captives_chipped.to_string(),
+            self.trafficking.to_string(),
+            self.bd_studios.to_string(),
+            self.bd_made.to_string(),
+            self.bd_wholesale.to_string(),
+            self.bd_viewed.to_string(),
+            self.bd_exported.to_string(),
+            self.bd_export_paid.to_string(),
+            self.recorders.to_string(),
+            self.recorded.to_string(),
+            self.black_made.to_string(),
+            self.black_sold.to_string(),
+            self.black_revenue.to_string(),
+            self.patrol_sweeps.to_string(),
         ]
         .join(",")
     }

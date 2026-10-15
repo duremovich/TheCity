@@ -731,6 +731,53 @@ pub struct ViceCfg {
     /// Phase 5's slots, seeded now.
     pub dollhouse_contracts: bool,
     pub captive_chip_trafficking: bool,
+    // --- Jobs & lives phase 5 (§ 5.2, § 5.3). Sub-switches under
+    // `enabled` (`CITYSIM_CHIP_OFF=1`, `CITYSIM_BD_OFF=1`,
+    // `CITYSIM_PATROL_SWEEP_OFF=1`), each byte-identical off.
+    /// The chip contract and the Dollhouse (§ 5.2).
+    pub chip: bool,
+    /// The BD studios, the Braindance units and the Recorder (§ 5.3).
+    pub bd: bool,
+    /// Phase 4's carry-over: a street pitch outside a `Sweep` district is
+    /// swept on `p_patrol_sweep` × the law's alertness (under the same caps).
+    pub patrol_sweep: bool,
+    pub p_patrol_sweep: f32,
+    // --- The chip contract (§ 5.2). Numbers only.
+    /// Dollhouses seeded per copy of each `corp_rows` row.
+    pub dollhouses: u32,
+    /// A visit's price by district tier (Sump, Mid, Spire), and its fun.
+    pub dollhouse_price: [i64; 3],
+    pub gain_dollhouse: f32,
+    /// A contract runs this many days.
+    pub chip_days: u32,
+    /// Its wage is the row's × this (`Job.premium`).
+    pub chip_mult: f32,
+    /// The chip's `Kit.load` (above any implant tier's `sanity_cost`).
+    pub chip_load: f32,
+    /// The install and the removal, each paid by the holder to the Clinic.
+    pub chip_fee: i64,
+    /// The `Chipped` trait's one-time sanity cut at the removal.
+    pub chipped_sanity: f32,
+    /// A gang Dollhouse front's captives at most (a gang order each).
+    pub captives_per_front: u32,
+    // --- Braindance (§ 5.3).
+    /// BdStudios seeded per copy of each `corp_rows` row.
+    pub bd_studios: u32,
+    /// Units a studio's produce-model staff make an hour, × (0.5 + skill).
+    pub bd_rate: f32,
+    /// A studio keeps this many units; the rest go to the Arcades and the World.
+    pub bd_floor: u32,
+    /// An Arcade's shelf of units, bought from a studio at `bd_wholesale`.
+    pub arcade_bd: u32,
+    pub bd_wholesale: i64,
+    /// A black unit's price: `bd_wholesale × black_bd_price_mult`; a Bar
+    /// drinker with a dealer present buys one on `p_black_buy`.
+    pub black_bd_price_mult: f32,
+    pub p_black_buy: f32,
+    /// A gang with this many members keeps one Recorder, bought abroad;
+    /// alive at most per 1,000 residents.
+    pub recorder_members: usize,
+    pub recorders_per_1000: f32,
 }
 
 impl Default for ViceCfg {
@@ -761,6 +808,28 @@ impl Default for ViceCfg {
             street_legal: false,
             dollhouse_contracts: true,
             captive_chip_trafficking: true,
+            chip: false,
+            bd: false,
+            patrol_sweep: false,
+            p_patrol_sweep: 0.1,
+            dollhouses: 1,
+            dollhouse_price: [10, 16, 30],
+            gain_dollhouse: 0.6,
+            chip_days: 30,
+            chip_mult: 2.0,
+            chip_load: 0.4,
+            chip_fee: 80,
+            chipped_sanity: 0.1,
+            captives_per_front: 1,
+            bd_studios: 1,
+            bd_rate: 0.5,
+            bd_floor: 5,
+            arcade_bd: 10,
+            bd_wholesale: 6,
+            black_bd_price_mult: 2.0,
+            p_black_buy: 1.0,
+            recorder_members: 6,
+            recorders_per_1000: 2.0,
         }
     }
 }
@@ -1685,6 +1754,13 @@ pub struct TradeCfg {
     /// Jobs & lives phase 4: the row exists only with `[fashion]` on.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub fashion: bool,
+    /// Jobs & lives phase 5: the row exists only with `[vice] chip` on; its
+    /// posts are filled only by the chip contract (never the hiring pass).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub chip: bool,
+    /// Jobs & lives phase 5: the row exists only with `[vice] bd` on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub bd: bool,
     /// Jobs & lives phase 4: the row's on-duty staff take a visit's tip
     /// (`[vice] tip_share`) at a Vice venue or the Lounge.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -1979,6 +2055,34 @@ impl BuildingCfg {
             ..BuildingCfg::BASE
         }
     }
+    /// Jobs & lives phase 5 (§ 5.2): a Dollhouse (its contract hosts).
+    pub fn dollhouse() -> BuildingCfg {
+        BuildingCfg {
+            capacity: 12,
+            stock_cap: 0,
+            staff: 0,
+            found_cost: Some(900),
+            value: Some(900),
+            floors_seed: Some(1),
+            floors_max: Some(2),
+            niche: Some(crate::components::Niche::Vice),
+            ..BuildingCfg::BASE
+        }
+    }
+    /// Jobs & lives phase 5 (§ 5.3): a BdStudio (its staff make units).
+    pub fn bd_studio() -> BuildingCfg {
+        BuildingCfg {
+            capacity: 10,
+            stock_cap: 60,
+            staff: 0,
+            found_cost: Some(700),
+            value: Some(700),
+            floors_seed: Some(1),
+            floors_max: Some(1),
+            niche: Some(crate::components::Niche::Vice),
+            ..BuildingCfg::BASE
+        }
+    }
     pub fn gunsmith() -> BuildingCfg {
         BuildingCfg {
             capacity: 8,
@@ -2153,6 +2257,11 @@ pub struct BuildingsCfg {
     pub brothel: BuildingCfg,
     #[serde(default = "BuildingCfg::boutique")]
     pub boutique: BuildingCfg,
+    /// Jobs & lives phase 5: none stands with `[vice] chip` / `bd` off.
+    #[serde(default = "BuildingCfg::dollhouse")]
+    pub dollhouse: BuildingCfg,
+    #[serde(default = "BuildingCfg::bd_studio")]
+    pub bd_studio: BuildingCfg,
 }
 
 impl BuildingsCfg {
@@ -2194,6 +2303,8 @@ impl BuildingsCfg {
             BuildingKind::StripClub => &self.strip_club,
             BuildingKind::Brothel => &self.brothel,
             BuildingKind::Boutique => &self.boutique,
+            BuildingKind::Dollhouse => &self.dollhouse,
+            BuildingKind::BdStudio => &self.bd_studio,
         }
     }
 }
@@ -4352,6 +4463,9 @@ pub struct PerKind<T: Default> {
     /// Jobs & lives phase 4.
     #[serde(default)]
     pub clothing: T,
+    /// Jobs & lives phase 5.
+    #[serde(default)]
+    pub recorder: T,
 }
 
 impl AssetsCfg {
@@ -4380,6 +4494,7 @@ impl<T: Default> PerKind<T> {
             AssetClass::Camera => &self.camera,
             AssetClass::Weapon => &self.weapon,
             AssetClass::Clothing => &self.clothing,
+            AssetClass::Recorder => &self.recorder,
         }
     }
 }
@@ -4471,6 +4586,7 @@ impl AssetsCfg {
                 camera: vec![120, 400, 1200],
                 weapon: vec![60, 160, 400],
                 clothing: vec![20, 60, 180],
+                recorder: vec![120],
             },
             upkeep: PerKind {
                 motorcycle: vec![1],
@@ -4485,6 +4601,7 @@ impl AssetsCfg {
                 camera: vec![1, 2, 4],
                 weapon: vec![0, 0, 0],
                 clothing: vec![0, 0, 0],
+                recorder: vec![0],
             },
             wear: PerKind {
                 motorcycle: 1,
@@ -4499,6 +4616,7 @@ impl AssetsCfg {
                 camera: 1,
                 weapon: 0,
                 clothing: 1,
+                recorder: 0,
             },
             parts_per: PerKind {
                 motorcycle: 4,
@@ -4513,6 +4631,7 @@ impl AssetsCfg {
                 camera: 2,
                 weapon: 3,
                 clothing: 0,
+                recorder: 0,
             },
             parts_price: 15,
             import_frac: 0.6,
@@ -5290,6 +5409,8 @@ pub struct TechRequires {
     pub weapon: Vec<u8>,
     /// Jobs & lives phase 4.
     pub clothing: Vec<u8>,
+    /// Jobs & lives phase 5.
+    pub recorder: Vec<u8>,
 }
 
 impl TechRequires {
@@ -5308,6 +5429,7 @@ impl TechRequires {
             AssetClass::Camera => &self.camera,
             AssetClass::Weapon => &self.weapon,
             AssetClass::Clothing => &self.clothing,
+            AssetClass::Recorder => &self.recorder,
         }
     }
 }
@@ -5396,6 +5518,7 @@ impl Default for TechCfg {
                 bridge: Vec::new(),
                 weapon: vec![1, 2, 3],
                 clothing: Vec::new(),
+                recorder: Vec::new(),
             },
             tier_cost: vec![0, 0, 400, 1200],
             tier_coins: vec![0, 0, 800, 2500],
@@ -6948,6 +7071,16 @@ impl Config {
         }
         if std::env::var("CITYSIM_FASHION_OFF").is_ok_and(|v| v == "1") {
             cfg.fashion.enabled = false;
+        }
+        // Jobs & lives phase 5: the chip's, the BD's and the patrol sweep's.
+        if std::env::var("CITYSIM_CHIP_OFF").is_ok_and(|v| v == "1") {
+            cfg.vice.chip = false;
+        }
+        if std::env::var("CITYSIM_BD_OFF").is_ok_and(|v| v == "1") {
+            cfg.vice.bd = false;
+        }
+        if std::env::var("CITYSIM_PATROL_SWEEP_OFF").is_ok_and(|v| v == "1") {
+            cfg.vice.patrol_sweep = false;
         }
         cfg.districts.row_count();
         // Transit (docs/TRANSIT.md D12): `CITYSIM_TRANSIT=1` (or `0`)

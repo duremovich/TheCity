@@ -203,11 +203,17 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
                 staff(ui, app, world, id, "Staff");
             }
             // Jobs & lives phase 4 (sections 5.1, 9): a venue's price, its visits, its staff.
-            BuildingKind::StripClub | BuildingKind::Brothel | BuildingKind::Boutique => {
+            BuildingKind::StripClub | BuildingKind::Brothel | BuildingKind::Boutique | BuildingKind::Dollhouse => {
                 if let Some(v) = &b.venue {
                     let week: u32 = v.visits.iter().map(|&x| u32::from(x)).sum();
                     ui.label(format!("price {} · visits today {} · last 7 days {week}", v.price, v.visits_today));
                 }
+                staff(ui, app, world, id, "Staff");
+            }
+            // Jobs & lives phase 5 (section 5.3): a studio's units.
+            BuildingKind::BdStudio => {
+                let units = world.stock(id, citysim::Good::Braindance);
+                ui.label(format!("Braindance units held {units}"));
                 staff(ui, app, world, id, "Staff");
             }
             // Jobs & lives phase 3 (section 4): a Gunsmith's Parts and weapons.

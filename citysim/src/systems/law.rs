@@ -80,6 +80,8 @@ pub fn crime_salience(crime: Crime) -> f32 {
         Crime::Smuggling => 0.6,
         // Jobs & lives phase 4: petty.
         Crime::Solicitation => 0.1,
+        // Jobs & lives phase 5.
+        Crime::Trafficking => 0.9,
     }
 }
 
@@ -185,7 +187,9 @@ pub fn raise_crime_except(
         | Crime::UnlicensedArms
         | Crime::Smuggling
         // Jobs & lives phase 4: filed at a sweep.
-        | Crime::Solicitation => {}
+        | Crime::Solicitation
+        // Jobs & lives phase 5: filed at the holding, never raised on the street.
+        | Crime::Trafficking => {}
         Crime::Abduction => crate::systems::litter::deposit_near(world, tile, actor_building, 12, 1),
     }
 
@@ -278,7 +282,9 @@ pub fn raise_crime_except(
     let living_victim = victim.is_some_and(|v| !crate::systems::robots::is_robot(world, v) && living(world, v));
     if let Some(v) = victim.filter(|&v| !crate::systems::robots::is_robot(world, v)) {
         let kind = match crime {
-            Crime::Assault | Crime::Murder | Crime::Manslaughter | Crime::Abduction => MemoryKind::Fought,
+            Crime::Assault | Crime::Murder | Crime::Manslaughter | Crime::Abduction | Crime::Trafficking => {
+                MemoryKind::Fought
+            }
             Crime::Theft
             | Crime::Extortion
             | Crime::Vagrancy
@@ -553,6 +559,8 @@ pub fn sentence_ticks(world: &World, crime: Crime) -> Tick {
         Crime::GrandTheft => ext.grand_theft,
         Crime::Manslaughter => ext.manslaughter,
         Crime::Abduction => ext.abduction,
+        // Jobs & lives phase 5: Abduction's term.
+        Crime::Trafficking => ext.abduction,
         Crime::Dealing => ext.dealing,
         // M14 V18.
         // V42 `SetHackSentence` replaces the base.
@@ -725,6 +733,8 @@ fn fight_inner(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> 
     crate::systems::weapons::after_fight(world, winner, loser, died, arms);
     // Jobs & lives phase 4 (§ 9): the loser's worn clothing (nothing off).
     crate::systems::fashion::after_fight(world, winner, loser);
+    // Jobs & lives phase 5 (§ 5.3): a recorded deed (nothing off).
+    crate::systems::braindance::after_fight(world, winner);
     (winner, loser, died)
 }
 

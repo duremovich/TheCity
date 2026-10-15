@@ -1021,8 +1021,12 @@ pub fn roles_for(world: &World, kind: BuildingKind) -> Vec<(Role, usize)> {
     }
     // Class pay: a `classpay` row posts nothing with class pay off.
     let cfg = &world.config;
+    // Jobs & lives phase 5: a `chip` row's posts are the contract's
+    // (`dollhouse::daily`), never posted as vacancies.
     out.extend(cfg.trades_at(kind).iter().copied().filter(|&(r, _)| {
-        r.trade().and_then(|t| cfg.trade(t)).is_none_or(|row| crate::systems::classpay::trade_live(world, row))
+        r.trade()
+            .and_then(|t| cfg.trade(t))
+            .is_none_or(|row| crate::systems::classpay::trade_live(world, row) && !row.chip)
     }));
     out
 }

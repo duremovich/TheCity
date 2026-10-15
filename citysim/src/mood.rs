@@ -108,6 +108,10 @@ fn update_agent(world: &mut World, id: EntityId, w_need: f32, w_memory: f32, now
     let (Some(needs), Some(memory)) = (world.comp::<Needs>(id), world.comp::<Memory>(id)) else {
         return;
     };
+    // Jobs & lives phase 5 (§ 5.2, D9): no mood term while under a chip.
+    if !world.jobs2.chip.contracts.is_empty() && crate::systems::dollhouse::under_chip(world, id) {
+        return;
+    }
     let Some(mut mood) = world.comp::<Mood>(id).cloned() else { return };
     let pride = world.comp::<Personality>(id).map_or(0.5, |p| p.pride);
     let low_mood = world.config.demography.emigrate_mood;

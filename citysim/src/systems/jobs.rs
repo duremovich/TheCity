@@ -97,6 +97,8 @@ pub fn venue_price(world: &World, b: EntityId, kind: BuildingKind, tier: u8, own
     let mut base = match kind {
         BuildingKind::StripClub | BuildingKind::Brothel => crate::systems::vice::visit_price(world, kind, tier),
         BuildingKind::Boutique => crate::systems::fashion::groom_price(world, tier),
+        // Jobs & lives phase 5.
+        BuildingKind::Dollhouse => crate::systems::dollhouse::visit_price(world, tier),
         _ => cfg.price_base.of(kind, tier),
     };
     if kind == BuildingKind::NoodleBar {

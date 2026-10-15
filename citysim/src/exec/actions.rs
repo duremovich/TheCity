@@ -743,6 +743,10 @@ pub fn on_complete(
             // L2 L14: a drink's fun; a Club's or Den's visit.
             crate::systems::leisure::drink_fun(world, id);
             crate::systems::leisure::note_drink(world, id);
+            // Jobs & lives phase 5 (§ 5.3): a black unit from the Bar's dealer (nothing off).
+            if let Some(bar) = world.comp::<crate::components::Position>(id).and_then(|p| p.building) {
+                crate::systems::braindance::bar_visit(world, id, bar, true);
+            }
             StepResult::Done
         }
         // L2 L14: the leisure steps' completions.

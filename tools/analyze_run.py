@@ -927,6 +927,11 @@ VICE_TOTALS = ("strip_visits", "brothel_visits", "companion_visits", "vice_reven
                "boutique_visits", "clothes_sold", "clothes_stolen")
 VICE_SNAP = ("vice_venues", "street_pitches", "pimps", "boutiques", "clothing", "clothes_worn", "status_corp",
              "status_street", "status_dreg")
+# Phase 5, the chip and braindance (§ 5.2, § 5.3), and the patrol sweeps.
+CHIP_TOTALS = ("dollhouse_visits", "chip_hired", "chip_ended", "chip_early", "chip_episodes", "captives_chipped",
+               "trafficking", "bd_made", "bd_wholesale", "bd_viewed", "bd_exported", "bd_export_paid", "recorded",
+               "black_made", "black_sold", "black_revenue", "patrol_sweeps")
+CHIP_SNAP = ("dollhouses", "chip_contracts", "chipped_living", "bd_studios", "recorders")
 
 
 def jobs2(rows, events, out):
@@ -989,6 +994,13 @@ def jobs2(rows, events, out):
         J["vice_share_of_gang_income"] = t["pimp_cut"] / gi if gi else 0
         J["sweeps_a_day"] = t["solicitation"] / days
         J["solicit_arrests_a_day"] = t["solicit_arrests"] / days
+    if "dollhouses" in rows[0]:
+        J["chip_totals"] = {k: sum(col(rows, k)) for k in CHIP_TOTALS}
+        J["chip_mean"] = {k: mean(col(rows, k)) for k in CHIP_SNAP}
+        t = J["chip_totals"]
+        legal = t["bd_viewed"] + t["bd_exported"]
+        J["bd_legal_per_black"] = legal / t["black_sold"] if t["black_sold"] else float("inf")
+        J["bd_export_paid_a_day"] = t["bd_export_paid"] / days
     if events:
         kinds = ("PowerOut", "PowerBack", "BuildDone", "Pilfered", "PitchOpened", "PitchClosed", "PitchSwept",
                  "DawnPick", "TinkerBotched", "CrateLanded", "CrateSeized", "LicenceSold", "Murder")
@@ -1204,6 +1216,10 @@ def fmt(o):
             L.append("vice and fashion, daily mean: " + f(w["vice_mean"]) + f"; tips / vice revenue "
                      f"{w['tips_share_of_vice']:.1%}; pimps' cut / gang income {w['vice_share_of_gang_income']:.2%}; "
                      f"Solicitation reports a day {w['sweeps_a_day']:.2f}, arrests a day {w['solicit_arrests_a_day']:.2f}")
+        if "chip_totals" in w:
+            L.append("chip and braindance, run totals: " + f(w["chip_totals"]))
+            L.append("chip and braindance, daily mean: " + f(w["chip_mean"]) + f"; BD units legal / black "
+                     f"{w['bd_legal_per_black']:.1f}; the World's BD book a day {w['bd_export_paid_a_day']:.1f} coins")
         if "events" in w:
             L.append("events: " + f(w["events"]) + f"; foreman named {w['foreman_named']}; Hqs built {w['hq_built']}")
     L.append("-- flags --")

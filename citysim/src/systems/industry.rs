@@ -112,6 +112,11 @@ pub struct Jobs2State {
     pub vice: crate::systems::vice::ViceState,
     #[serde(skip_serializing_if = "crate::systems::fashion::FashionState::is_default")]
     pub fashion: crate::systems::fashion::FashionState,
+    // --- Phase 5, the chip and braindance (`systems::dollhouse`, `systems::braindance`).
+    #[serde(skip_serializing_if = "crate::systems::dollhouse::ChipState::is_default")]
+    pub chip: crate::systems::dollhouse::ChipState,
+    #[serde(skip_serializing_if = "crate::systems::braindance::BdState::is_default")]
+    pub bd: crate::systems::braindance::BdState,
 }
 
 fn is_zero_u32(v: &u32) -> bool {

@@ -722,7 +722,7 @@ pub fn rescue_win(world: &mut World, captive: EntityId, crew: &[EntityId]) {
 // ---------------------------------------------------------------------------
 
 /// A live Abduct the buyer placed.
-fn abducting(world: &World, buyer: EntityId) -> bool {
+pub(crate) fn abducting(world: &World, buyer: EntityId) -> bool {
     world.by_party.get(&buyer).is_some_and(|l| {
         l.iter().any(|id| world.contracts.get(id).is_some_and(|c| c.is_live() && c.kind == ContractKind::Abduct))
     })
@@ -826,6 +826,35 @@ pub fn gang_hostages(world: &mut World) {
             }
         }
     }
+}
+
+/// Jobs & lives phase 5 (§ 5.2): a gang's Dollhouse front orders its
+/// strongest free member to abduct `victim`, held at `at` for a ransom put
+/// to the victim's kin (the `gang_hostages` shape). False when no order is
+/// posted (the quota, no member, already abducting).
+pub fn front_abduct(world: &mut World, g: EntityId, victim: EntityId, at: EntityId) -> bool {
+    if !on(world) || !quota_ok(world) || abducting(world, g) || is_captive(world, victim) {
+        return false;
+    }
+    let Some(order) = world.comp::<crate::components::Gang>(g).map(|x| x.order) else { return false };
+    let Some(member) = order_taker(world, g, victim) else { return false };
+    let demand = Demand::Coins { amount: world.config.hostage.ransom, weekly: false };
+    let hold = Hold { at, demand: Some(demand), over: None };
+    let p = crate::contract::Posting {
+        buyer: Some(g),
+        agent: contracts::head_of(world, g),
+        kind: ContractKind::Abduct,
+        target: Target::Agent(victim),
+        broker: None,
+        deadline_days: world.config.contracts.deadline_days.get(ContractKind::Abduct),
+        origin: Origin::GangOrder(order),
+        price: None,
+    };
+    let Some(id) = contracts::post_order(world, p, PostExtra::default(), member) else { return false };
+    if let Some(c) = world.contracts.get_mut(&id) {
+        c.hold = Some(hold);
+    }
+    true
 }
 
 /// A gang's member for an order on `target`: free, not on a run or a

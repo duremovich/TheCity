@@ -225,10 +225,16 @@ pub enum BuildingKind {
     /// The tailor's and barber's venue (a `Venue`; Mid/Spire): clothing and
     /// grooming, the `status` need's satisfier.
     Boutique,
+    // --- Jobs & lives phase 5 (§ 5.2, § 5.3), only with `[vice] chip` or
+    // `[vice] bd` on.
+    /// A Vice venue on the high rung, staffed under chip contracts (a `Venue`; Mid/Spire).
+    Dollhouse,
+    /// A studio whose staff make Braindance units (a workplace; Mid).
+    BdStudio,
 }
 
 impl BuildingKind {
-    pub const ALL: [BuildingKind; 36] = [
+    pub const ALL: [BuildingKind; 38] = [
         BuildingKind::Home,
         BuildingKind::Farm,
         BuildingKind::Market,
@@ -265,12 +271,14 @@ impl BuildingKind {
         BuildingKind::StripClub,
         BuildingKind::Brothel,
         BuildingKind::Boutique,
+        BuildingKind::Dollhouse,
+        BuildingKind::BdStudio,
     ];
 
     /// Jobs & lives phase 1: the kinds that stand only with `[jobs2] enabled`
     /// (phase 3's Gunsmith only with `[weapons]` on too, phase 4's venues
     /// only with `[vice]` or `[fashion]`).
-    pub const JOBS2: [BuildingKind; 9] = [
+    pub const JOBS2: [BuildingKind; 11] = [
         BuildingKind::PackingPlant,
         BuildingKind::FreightYard,
         BuildingKind::UtilityPlant,
@@ -280,12 +288,15 @@ impl BuildingKind {
         BuildingKind::StripClub,
         BuildingKind::Brothel,
         BuildingKind::Boutique,
+        BuildingKind::Dollhouse,
+        BuildingKind::BdStudio,
     ];
 
     /// Jobs & lives phase 4: every venue kind, L2's six and phase 4's three
     /// (a loop over it meets no building of the new kinds with their
-    /// switches off). The CSV's per-kind columns keep `LEISURE`.
-    pub const LEISURE_ALL: [BuildingKind; 9] = [
+    /// switches off). The CSV's per-kind columns keep `LEISURE`. Phase 5
+    /// appends the Dollhouse.
+    pub const LEISURE_ALL: [BuildingKind; 10] = [
         BuildingKind::Club,
         BuildingKind::Arcade,
         BuildingKind::NoodleBar,
@@ -295,6 +306,7 @@ impl BuildingKind {
         BuildingKind::StripClub,
         BuildingKind::Brothel,
         BuildingKind::Boutique,
+        BuildingKind::Dollhouse,
     ];
 
     /// L2 (plan L1): the six leisure kinds (a `Venue` each; the Fab has none).
@@ -351,6 +363,8 @@ impl BuildingKind {
             "StripClub" => BuildingKind::StripClub,
             "Brothel" => BuildingKind::Brothel,
             "Boutique" => BuildingKind::Boutique,
+            "Dollhouse" => BuildingKind::Dollhouse,
+            "BdStudio" => BuildingKind::BdStudio,
             _ => return None,
         })
     }
@@ -394,6 +408,8 @@ impl BuildingKind {
             BuildingKind::StripClub => "Strip Club",
             BuildingKind::Brothel => "Brothel",
             BuildingKind::Boutique => "Boutique",
+            BuildingKind::Dollhouse => "Dollhouse",
+            BuildingKind::BdStudio => "BD Studio",
         }
     }
 
@@ -444,6 +460,9 @@ impl BuildingKind {
             BuildingKind::StripClub => '<',
             BuildingKind::Brothel => '>',
             BuildingKind::Boutique => '=',
+            // Jobs & lives phase 5.
+            BuildingKind::Dollhouse => '~',
+            BuildingKind::BdStudio => '#',
         }
     }
 }
@@ -760,6 +779,9 @@ pub enum Crime {
     /// `street_legal` lever is off, filed at a sweep. Petty (a night in the
     /// cells), just above Fare Evasion.
     Solicitation,
+    /// Jobs & lives phase 5 (§ 5.2, D16): a captive fitted with a behaviour
+    /// chip at a gang's holding, filed on its members; just above Abduction.
+    Trafficking,
 }
 
 impl Crime {
@@ -785,6 +807,7 @@ impl Crime {
             Crime::UnlicensedArms => "Unlicensed Arms",
             Crime::Smuggling => "Smuggling",
             Crime::Solicitation => "Solicitation",
+            Crime::Trafficking => "Trafficking",
         }
     }
 
@@ -821,8 +844,11 @@ impl Crime {
             Crime::Assault => 14,
             Crime::Manslaughter => 15,
             Crime::Abduction => 16,
-            Crime::Conspiracy => 17,
-            Crime::Murder => 18,
+            // Jobs & lives phase 5 (§ 5.2): just above Abduction; everything
+            // above moves up one.
+            Crime::Trafficking => 17,
+            Crime::Conspiracy => 18,
+            Crime::Murder => 19,
         }
     }
 }
@@ -3879,10 +3905,13 @@ pub enum Slot {
     Nerves,
     Eyes,
     Skin,
+    /// Jobs & lives phase 5 (§ 5.2, D8): the behaviour chip's slot: its
+    /// load only (`[vice] chip_load`), never sold at a Clinic's counter.
+    Behaviour,
 }
 
 impl Slot {
-    pub const ALL: [Slot; 5] = [Slot::Arms, Slot::Legs, Slot::Nerves, Slot::Eyes, Slot::Skin];
+    pub const ALL: [Slot; 6] = [Slot::Arms, Slot::Legs, Slot::Nerves, Slot::Eyes, Slot::Skin, Slot::Behaviour];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -3891,6 +3920,7 @@ impl Slot {
             Slot::Nerves => "Nerves",
             Slot::Eyes => "Eyes",
             Slot::Skin => "Skin",
+            Slot::Behaviour => "Behaviour",
         }
     }
 }
@@ -3922,6 +3952,9 @@ pub enum AssetKind {
     /// store; the best one carried is worn (`Appearance.dress` reads its
     /// tier and condition), the rest kept at home.
     Clothing,
+    /// Jobs & lives phase 5 (§ 5.3): a recorder carried by a gang member;
+    /// a gang-mate's fight in its sight is a recorded deed.
+    Recorder,
 }
 
 /// The lever and CSV grouping of an `AssetKind` (implants by class, not slot).
@@ -3944,10 +3977,12 @@ pub enum AssetClass {
     Weapon,
     /// Jobs & lives phase 4.
     Clothing,
+    /// Jobs & lives phase 5.
+    Recorder,
 }
 
 impl AssetClass {
-    pub const ALL: [AssetClass; 12] = [
+    pub const ALL: [AssetClass; 13] = [
         AssetClass::Motorcycle,
         AssetClass::Car,
         AssetClass::Truck,
@@ -3960,6 +3995,7 @@ impl AssetClass {
         AssetClass::Camera,
         AssetClass::Weapon,
         AssetClass::Clothing,
+        AssetClass::Recorder,
     ];
 
     /// Position in `ALL` (indexes `Levers::asset_tax`).
@@ -3983,6 +4019,7 @@ impl AssetKind {
             AssetKind::Camera => AssetClass::Camera,
             AssetKind::Weapon => AssetClass::Weapon,
             AssetKind::Clothing => AssetClass::Clothing,
+            AssetKind::Recorder => AssetClass::Recorder,
         }
     }
 
@@ -4017,6 +4054,7 @@ impl AssetKind {
             AssetKind::Implant(Slot::Nerves) => "Nerves implant",
             AssetKind::Implant(Slot::Eyes) => "Eyes implant",
             AssetKind::Implant(Slot::Skin) => "Skin implant",
+            AssetKind::Implant(Slot::Behaviour) => "Behaviour chip",
             AssetKind::Robot => "Security robot",
             AssetKind::Pack => "Pack",
             AssetKind::Bridge => "Bridge",
@@ -4024,6 +4062,7 @@ impl AssetKind {
             AssetKind::Camera => "Camera",
             AssetKind::Weapon => "Weapon",
             AssetKind::Clothing => "Clothing",
+            AssetKind::Recorder => "Recorder",
         }
     }
 }
@@ -4047,6 +4086,16 @@ pub enum ProvKind {
     Seized,
     /// A god's grant.
     Granted,
+}
+
+/// Jobs & lives phase 5 (§ 5.2, D9): the trait an agent keeps after its
+/// behaviour chip came out (like `CampRaised`): the holder, the days the
+/// chip was in, and whether it was a captive's.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Chipped {
+    pub holder: Option<EntityId>,
+    pub days: u32,
+    pub captive: bool,
 }
 
 /// Jobs & lives phase 3: an item's provenance (its last change of hands).

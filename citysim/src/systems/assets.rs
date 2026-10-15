@@ -548,7 +548,12 @@ pub fn compute_kit(world: &World, agent: EntityId) -> Kit {
         }
         let t = x.tier.max(1);
         k.chrome = true;
-        k.load += cfg.sanity_cost.get(usize::from(t - 1)).copied().unwrap_or(0.0);
+        // Jobs & lives phase 5 (§ 5.2): the behaviour chip's load is its own.
+        k.load += if slot == Slot::Behaviour {
+            world.config.vice.chip_load
+        } else {
+            cfg.sanity_cost.get(usize::from(t - 1)).copied().unwrap_or(0.0)
+        };
         k.chrome_value += x.value;
         if matches!(slot, Slot::Arms | Slot::Eyes | Slot::Skin) {
             k.visible = k.visible.saturating_add(t);
@@ -574,6 +579,8 @@ pub fn compute_kit(world: &World, agent: EntityId) -> Kit {
                 k.stealth += cfg.eyes_stealth * tf;
             }
             Slot::Skin => k.armour = k.armour.max(cfg.skin_armour * tf),
+            // Its load only.
+            Slot::Behaviour => {}
         }
     }
     // M14 V36: the deck carried (lowest id, condition > 0) at its effective tier.

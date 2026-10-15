@@ -161,7 +161,15 @@ use crate::world::World;
 /// three `[buildings.*]` rows, the `clothing` entries of the per-kind
 /// tables, the trade rows' `vice`/`fashion`/`tipped`/`min_dress` keys and the
 /// `Jobs2Cols` vice and fashion columns (serde defaults).
-pub const SAVE_VERSION: u8 = 31;
+/// 32: Jobs & lives phase 5, the chip and braindance (§ 5.2, § 5.3): the
+/// appended `BuildingKind::{Dollhouse, BdStudio}`, `Slot::Behaviour`,
+/// `AssetKind::Recorder`, `AssetClass::Recorder` (a thirteenth `asset_tax`
+/// rate, read padded), `Crime::Trafficking`; the `Chipped` store,
+/// `Jobs2State.{chip, bd}`, the `[vice]` phase-5 keys, the two
+/// `[buildings.*]` rows, the `recorder` entries of the per-kind tables, the
+/// trade rows' `chip`/`bd` keys and the `Jobs2Cols` phase-5 columns (serde
+/// defaults).
+pub const SAVE_VERSION: u8 = 32;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

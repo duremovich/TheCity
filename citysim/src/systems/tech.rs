@@ -107,6 +107,8 @@ pub fn track_of(kind: AssetKind) -> Track {
         AssetKind::Weapon => Track::Industry,
         // Jobs & lives phase 4: a Boutique's clothing.
         AssetKind::Clothing => Track::Industry,
+        // Jobs & lives phase 5: bought abroad, never sold in the city.
+        AssetKind::Recorder => Track::Deck,
     }
 }
 
