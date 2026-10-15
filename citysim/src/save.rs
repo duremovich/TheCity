@@ -169,7 +169,14 @@ use crate::world::World;
 /// `[buildings.*]` rows, the `recorder` entries of the per-kind tables, the
 /// trade rows' `chip`/`bd` keys and the `Jobs2Cols` phase-5 columns (serde
 /// defaults).
-pub const SAVE_VERSION: u8 = 32;
+/// 33: Jobs & lives phase 6, the gray market and faith (§ 7, § 8): the
+/// appended `BuildingKind::BlackClinic`, `Crime::{Forgery, BlackMarket}`
+/// (the severities above them move up), `Creed::Config`,
+/// `GrudgeCause::Apostasy`; `Levers.faith`, `Jobs2State.{gray, faith}`,
+/// `[gray]`, `[faith]`, `[buildings.black_clinic]`, the `recorder`-style
+/// trade keys `gray`/`struck_off` and the `Jobs2Cols` phase-6 columns
+/// (serde defaults).
+pub const SAVE_VERSION: u8 = 33;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

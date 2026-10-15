@@ -45,7 +45,9 @@ pub fn deed_of_crime(crime: Crime) -> Option<Deed> {
         | Crime::UnlicensedArms
         | Crime::Smuggling
         | Crime::Solicitation
-        | Crime::Trafficking => None,
+        | Crime::Trafficking
+        | Crime::Forgery
+        | Crime::BlackMarket => None,
     }
 }
 

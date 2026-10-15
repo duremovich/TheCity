@@ -117,6 +117,11 @@ pub struct Jobs2State {
     pub chip: crate::systems::dollhouse::ChipState,
     #[serde(skip_serializing_if = "crate::systems::braindance::BdState::is_default")]
     pub bd: crate::systems::braindance::BdState,
+    // --- Phase 6, the gray market and faith (`systems::gray`, `systems::faith`).
+    #[serde(skip_serializing_if = "crate::systems::gray::GrayState::is_default")]
+    pub gray: crate::systems::gray::GrayState,
+    #[serde(skip_serializing_if = "crate::systems::faith::FaithState::is_default")]
+    pub faith: crate::systems::faith::FaithState,
 }
 
 fn is_zero_u32(v: &u32) -> bool {

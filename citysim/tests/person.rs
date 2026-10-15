@@ -1891,6 +1891,9 @@ fn probe_widow_commissions_a_hit_at_the_fixer() {
 /// at 22:00 on day 2.
 fn suspect(known: bool) -> (World, EntityId, EntityId) {
     let mut w = world();
+    // Jobs & lives phase 6: the wanted suspect would buy papers at midnight
+    // (`gray::papers_daily`) out of the coins this probe gives for the Beat.
+    w.config.gray.enabled = false;
     w.run_ticks(2 * TICKS_PER_DAY + 22 * TICKS_PER_HOUR);
     let civ = civilians(&w);
     let s = civ

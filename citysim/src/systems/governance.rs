@@ -212,7 +212,14 @@ fn keep_up(world: &mut World, corp: EntityId) {
 pub fn pref(world: &World, m: EntityId, cand: EntityId) -> f32 {
     let aff = if m == cand { 1.0 } else { world.edge(m, cand).map_or(0.0, |e| e.affinity) };
     let r = reputation::rep(world, cand);
-    0.4 * aff + 0.3 * r.standing + 0.3 * (r.honour - 0.5) * 2.0
+    let v = 0.4 * aff + 0.3 * r.standing + 0.3 * (r.honour - 0.5) * 2.0;
+    // Jobs & lives phase 6 (§ 8): the faith's board lean (a hook, 0 by default).
+    let lean = crate::systems::faith::board_lean(world, m, cand);
+    if lean != 0.0 {
+        v + lean
+    } else {
+        v
+    }
 }
 
 /// The candidates: the living chair plus the members with `greed ×

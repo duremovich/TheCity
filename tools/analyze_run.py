@@ -932,6 +932,12 @@ CHIP_TOTALS = ("dollhouse_visits", "chip_hired", "chip_ended", "chip_early", "ch
                "trafficking", "bd_made", "bd_wholesale", "bd_viewed", "bd_exported", "bd_export_paid", "recorded",
                "black_made", "black_sold", "black_revenue", "patrol_sweeps")
 CHIP_SNAP = ("dollhouses", "chip_contracts", "chipped_living", "bd_studios", "recorders")
+# Phase 6, the gray market and faith (§ 7, § 8).
+GRAY_TOTALS = ("fake_sold", "papers_bribed", "exposures", "organs_made", "organs_rotted", "organs_to_clinics",
+               "organs_used", "organs_exported", "organs_export_paid", "organs_seized", "scav_kills", "bm_reports",
+               "struck_off", "tithes", "conversions", "preach_attend", "apostates")
+GRAY_SNAP = ("papers_held", "fake_ids", "organ_stock", "scav_gangs", "black_clinics", "followers", "followers_c1",
+             "followers_c2", "followers_c3", "followers_c4", "cult_members", "apostates_hunted", "church_purse")
 
 
 def jobs2(rows, events, out):
@@ -1001,6 +1007,13 @@ def jobs2(rows, events, out):
         legal = t["bd_viewed"] + t["bd_exported"]
         J["bd_legal_per_black"] = legal / t["black_sold"] if t["black_sold"] else float("inf")
         J["bd_export_paid_a_day"] = t["bd_export_paid"] / days
+    if "papers_held" in rows[0]:
+        J["gray_totals"] = {k: sum(col(rows, k)) for k in GRAY_TOTALS}
+        J["gray_mean"] = {k: mean(col(rows, k)) for k in GRAY_SNAP}
+        t = J["gray_totals"]
+        wages = sum(col(rows, "flow_wages")) if "flow_wages" in rows[0] else 0
+        J["tithes_per_wages"] = t["tithes"] / wages if wages else 0
+        J["organs_paid_a_day"] = t["organs_export_paid"] / days
     if events:
         kinds = ("PowerOut", "PowerBack", "BuildDone", "Pilfered", "PitchOpened", "PitchClosed", "PitchSwept",
                  "DawnPick", "TinkerBotched", "CrateLanded", "CrateSeized", "LicenceSold", "Murder")
@@ -1220,6 +1233,10 @@ def fmt(o):
             L.append("chip and braindance, run totals: " + f(w["chip_totals"]))
             L.append("chip and braindance, daily mean: " + f(w["chip_mean"]) + f"; BD units legal / black "
                      f"{w['bd_legal_per_black']:.1f}; the World's BD book a day {w['bd_export_paid_a_day']:.1f} coins")
+        if "gray_totals" in w:
+            L.append("gray market and faith, run totals: " + f(w["gray_totals"]))
+            L.append("gray market and faith, daily mean: " + f(w["gray_mean"]) + f"; tithes / wages "
+                     f"{w['tithes_per_wages']:.2%}; the World's Organs book a day {w['organs_paid_a_day']:.1f} coins")
         if "events" in w:
             L.append("events: " + f(w["events"]) + f"; foreman named {w['foreman_named']}; Hqs built {w['hq_built']}")
     L.append("-- flags --")

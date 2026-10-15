@@ -781,6 +781,8 @@ fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, ro
         .filter(|&id| crate::systems::fashion::dress_ok(world, id, role))
         // Jobs & lives phase 5: a `chip` post is a contract's, never a hire's.
         .filter(|_| crate::systems::dollhouse::hire_ok(world, role))
+        // Jobs & lives phase 6: the struck-off at a black clinic only.
+        .filter(|&id| crate::systems::gray::hire_ok(world, id, role))
         .map(|id| {
             // M14 V16: a Lab hires the best hacker (ties lower id),
             // so Labs collect the city's runners.
@@ -1011,6 +1013,7 @@ impl HirePool {
                 && (role != Role::Guard || world.comp::<Personality>(id).is_some_and(|p| p.lawfulness >= 0.4))
                 && crate::systems::fashion::dress_ok(world, id, role)
                 && crate::systems::dollhouse::hire_ok(world, role)
+                && crate::systems::gray::hire_ok(world, id, role)
         };
         if skill_ranked(role) {
             return self

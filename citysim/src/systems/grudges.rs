@@ -162,6 +162,7 @@ fn cause_label(c: GrudgeCause) -> &'static str {
         GrudgeCause::ChildTaken => "a child taken",
         GrudgeCause::Succession => "the war for the gang",
         GrudgeCause::Abroad => "a job abroad",
+        GrudgeCause::Apostasy => "a creed left",
     }
 }
 

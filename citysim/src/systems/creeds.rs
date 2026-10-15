@@ -26,6 +26,15 @@ pub fn is_purist(world: &World, gang: EntityId) -> bool {
     creed_of(world, gang) == Some(Creed::Purist)
 }
 
+/// Jobs & lives phase 6 (§ 8): a cult's `[faith] creeds` row (none with
+/// `[faith]` off: no gang holds a `Creed::Config` then).
+fn cult_row(world: &World, gang: EntityId) -> Option<&crate::config::CreedCfg> {
+    match creed_of(world, gang)? {
+        Creed::Config(i) => world.config.faith.creeds.get(usize::from(i)),
+        Creed::Purist => None,
+    }
+}
+
 /// `Kit.visible` (0 without a Kit).
 fn visible(world: &World, id: EntityId) -> u8 {
     world.comp::<Kit>(id).map_or(0, |k| k.visible)
@@ -39,6 +48,9 @@ pub fn chromed(world: &World, id: EntityId) -> bool {
 /// W31: does `gang` tolerate `id`? Every gang does, a Purist gang only
 /// those within `creed_tolerance`.
 pub fn tolerated(world: &World, gang: EntityId, id: EntityId) -> bool {
+    if let Some(row) = cult_row(world, gang) {
+        return visible(world, id) <= row.tolerance;
+    }
     !is_purist(world, gang) || !chromed(world, id)
 }
 
@@ -47,7 +59,11 @@ pub fn tolerated(world: &World, gang: EntityId, id: EntityId) -> bool {
 /// edge (a creed spreads through people).
 pub fn edge_recruits(world: &World, gang: EntityId, id: EntityId, member: EntityId) -> bool {
     use crate::components::RelKind;
-    !is_purist(world, gang)
+    let edges = match cult_row(world, gang) {
+        Some(row) => row.recruit_edges,
+        None => is_purist(world, gang),
+    };
+    !edges
         || world
             .edge(id, member)
             .is_some_and(|e| matches!(e.kind, RelKind::Friend | RelKind::Family | RelKind::Parent | RelKind::Spouse))
@@ -57,6 +73,9 @@ pub fn edge_recruits(world: &World, gang: EntityId, id: EntityId, member: Entity
 /// Hideout's nearness? Any gang: yes; a Purist gang only while it has fewer
 /// than `[creeds] founders` members (the Chapel's founders).
 pub fn open_to_strangers(world: &World, gang: EntityId) -> bool {
+    if let Some(row) = cult_row(world, gang) {
+        return !row.recruit_edges || world.comp::<Gang>(gang).is_some_and(|g| g.members.len() < row.founders);
+    }
     !is_purist(world, gang) || world.comp::<Gang>(gang).is_some_and(|g| g.members.len() < world.config.creeds.founders)
 }
 
@@ -87,7 +106,27 @@ pub fn seed_unplugged(world: &mut World) -> Option<EntityId> {
 
 /// One `seed_unplugged` chapel.
 fn seed_chapel(world: &mut World, copy: usize, copies: usize) -> Option<EntityId> {
+    let cfg = world.config.creeds.clone();
+    let name = if copy == 0 { cfg.purist_name.clone() } else { format!("{} {}", cfg.purist_name, copy + 1) };
     let seat = crate::systems::districts::Seat::new(crate::components::Zone::Sump, 0.5);
+    seed_chapel_as(world, seat, name, Creed::Purist, cfg.purist_treasury, "Chapel", copy, copies)
+}
+
+/// Jobs & lives phase 6 (§ 8): a chapel for a creed's gang: the derelict
+/// Block nearest the seat district's centroid (else its nearest vacant Lot,
+/// built as a Hideout) becomes the Hideout of a new memberless gang `name`
+/// with `creed` and `treasury`, labelled `label`. No RNG.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn seed_chapel_as(
+    world: &mut World,
+    seat: crate::systems::districts::Seat,
+    name: String,
+    creed: Creed,
+    treasury: i64,
+    label: &str,
+    copy: usize,
+    copies: usize,
+) -> Option<EntityId> {
     let d = crate::systems::districts::seat_district(world, seat, copy, copies)?;
     let centroid = world.district(d).centroid;
     let derelict = world
@@ -99,12 +138,10 @@ fn seed_chapel(world: &mut World, copy: usize, copies: usize) -> Option<EntityId
         .map(|(door, h)| (door.manhattan(centroid), h))
         .min()
         .map(|(_, h)| h);
-    let cfg = world.config.creeds.clone();
-    let name = if copy == 0 { cfg.purist_name.clone() } else { format!("{} {}", cfg.purist_name, copy + 1) };
     let chapel = match derelict {
         Some(b) => {
             let gang = world.spawn();
-            world.insert(gang, Gang::new(name, b, cfg.purist_treasury));
+            world.insert(gang, Gang::new(name, b, treasury));
             crate::systems::gang::convert_to_hideout(world, gang, b);
             (gang, b)
         }
@@ -120,16 +157,16 @@ fn seed_chapel(world: &mut World, copy: usize, copies: usize) -> Option<EntityId
                 .map(|(_, l)| l)?;
             let b = crate::systems::founding::build_on_lot(world, lot, BuildingKind::Hideout, None).ok()?;
             let gang = world.spawn();
-            world.insert(gang, Gang::new(name, b, cfg.purist_treasury));
+            world.insert(gang, Gang::new(name, b, treasury));
             (gang, b)
         }
     };
     let (gang, b) = chapel;
     if let Some(g) = world.comp_mut::<Gang>(gang) {
-        g.creed = Some(Creed::Purist);
+        g.creed = Some(creed);
     }
     if let Some(bd) = world.comp_mut::<Building>(b) {
-        bd.label = Some("Chapel".to_string());
+        bd.label = Some(label.to_string());
     }
     // As every seeded Hideout (`ownership::seed`): it belongs to its gang.
     crate::systems::ownership::transfer_building(world, b, Some(gang));
@@ -150,7 +187,9 @@ fn expel(world: &mut World, id: EntityId, gang: EntityId) {
 /// member now above tolerance is expelled.
 pub fn on_install(world: &mut World, id: EntityId) {
     let Some(gang) = world.gang_of(id) else { return };
-    if is_purist(world, gang) && chromed(world, id) {
+    // Jobs & lives phase 6: a cult casts out on its row's tolerance too.
+    let cult_out = cult_row(world, gang).is_some_and(|r| visible(world, id) > r.tolerance);
+    if (is_purist(world, gang) && chromed(world, id)) || cult_out {
         expel(world, id, gang);
     }
 }

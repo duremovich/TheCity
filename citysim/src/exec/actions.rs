@@ -1203,7 +1203,12 @@ pub fn on_complete(
             if !crate::systems::chrome::strip(world, id, c) {
                 return StepResult::Failed(FailReason::StockGone);
             }
-            if crate::systems::chrome::may_rip(world, id) && !crate::systems::chrome::installed(world, c).is_empty() {
+            // Jobs & lives phase 6 (§ 7): a typed gang's ripper takes the
+            // organs of a body with no chrome too (nothing off).
+            let organs = crate::systems::gray::wants_organs(world, id, c);
+            if crate::systems::chrome::may_rip(world, id)
+                && (!crate::systems::chrome::installed(world, c).is_empty() || organs)
+            {
                 if let Some(b) = world.comp_mut::<Brain>(id) {
                     let at = usize::from(b.plan_step) + 1;
                     if let Some(plan) = b.plan.as_mut() {

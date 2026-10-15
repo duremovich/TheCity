@@ -129,6 +129,8 @@ pub fn snapshot(world: &mut World) {
     crate::systems::fashion::snapshot(world);
     crate::systems::dollhouse::snapshot(world);
     crate::systems::braindance::snapshot(world);
+    crate::systems::gray::snapshot(world);
+    crate::systems::faith::snapshot(world);
     // Jobs v2 (P5a): the civic headcounts the budget (or a god) set.
     world.stats.current.jobs.guard_count = world.levers.guard_count;
     world.stats.current.jobs.sanitation_count = world.levers.sanitation_count;

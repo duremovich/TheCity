@@ -670,11 +670,15 @@ pub fn rip_for(world: &mut World, agent: EntityId, body: EntityId, gang: Option<
             b.cuffed_by = None;
             b.abducted_by = None;
         }
-        let p = f64::from(world.config.chrome.p_rip_kill.clamp(0.0, 1.0));
+        // Jobs & lives phase 6: a typed gang's rip kills on its row's
+        // `kill_p` (the M13 chance otherwise).
+        let kill = crate::systems::gray::kill_p(world, gang).unwrap_or(world.config.chrome.p_rip_kill);
+        let p = f64::from(kill.clamp(0.0, 1.0));
         if world.rng.world().random_bool(p) {
             let tile = world.comp::<Position>(body).map_or_else(Default::default, |p| p.tile);
             world.kill_by(body, crate::components::DeathCause::Violence, Some(agent));
             crate::systems::law::raise_crime_on(world, agent, None, Some(body), crate::components::Crime::Murder, tile);
+            crate::systems::gray::note_kill(world, gang);
         } else {
             if let Some(b) = world.comp_mut::<Body>(body) {
                 b.sanity = 0.1;
@@ -688,6 +692,9 @@ pub fn rip_for(world: &mut World, agent: EntityId, body: EntityId, gang: Option<
             b.carrying_corpse = None;
         }
     }
+    // Jobs & lives phase 6 (§ 7): a body no longer living yields its organs
+    // to the gang (once; nothing off).
+    crate::systems::gray::take_organs(world, gang, body);
     n
 }
 
@@ -726,13 +733,18 @@ pub fn harvest_target(world: &World, gang: EntityId) -> Option<(EntityId, i64)> 
             db.sightings.iter().filter(|s| !s.relayed).map(|s| s.who).filter(|&w| world.gang_of(w).is_none()).collect()
         })
         .unwrap_or_default();
+    // Jobs & lives phase 6 (§ 7): a gang type with `organ_targets` values
+    // anyone on its ground by chrome plus organs.
+    let organs =
+        if crate::systems::gray::organ_targets(world, gang) { crate::systems::gray::organ_value(world) } else { 0 };
     // scan-ok: per gang rescore (daily, and on shocks)
     for id in world.with::<Kit>() {
         let Some(k) = world.comp::<Kit>(id) else { continue };
         let seen = !sighted.is_empty() && sighted.contains(&id);
-        if (k.visible < min && !seen) || k.chrome_value <= 0 {
+        if organs == 0 && ((k.visible < min && !seen) || k.chrome_value <= 0) {
             continue;
         }
+        let value = k.chrome_value + organs;
         if !crate::systems::law::living(world, id)
             || world.gang_of(id) == Some(gang)
             || world.has::<crate::components::Sentence>(id)
@@ -753,7 +765,7 @@ pub fn harvest_target(world: &World, gang: EntityId) -> Option<(EntityId, i64)> 
         if !seen && !home.is_some_and(in_ground) && !tile.is_some_and(in_ground) {
             continue;
         }
-        let key = (k.chrome_value, std::cmp::Reverse(id));
+        let key = (value, std::cmp::Reverse(id));
         if best.is_none_or(|b| key > b) {
             best = Some(key);
         }
@@ -878,6 +890,12 @@ pub fn abduct_offscreen(world: &mut World, id: EntityId, src: Option<&crate::led
     world.kill_by(id, crate::components::DeathCause::Violence, None);
     world.stats.current.deaths_violence_offscreen += 1;
     world.stats.current.abductions += 1;
+    // Jobs & lives phase 6 (§ 7): the Harvest cell's gang takes the organs
+    // (a typed gang's kill counted; nothing off).
+    if let Some(g) = src.and_then(|s| s.faction).filter(|&f| world.has::<Gang>(f)) {
+        crate::systems::gray::take_organs(world, Some(g), id);
+        crate::systems::gray::note_kill(world, Some(g));
+    }
     if let Some(c) = world.comp_mut::<Corpse>(id) {
         c.stripped = true;
     }

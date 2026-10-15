@@ -210,6 +210,12 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
                 }
                 staff(ui, app, world, id, "Staff");
             }
+            // Jobs & lives phase 6 (section 7): a black clinic's organs.
+            BuildingKind::BlackClinic => {
+                let units = world.stock(id, citysim::Good::Organs);
+                ui.label(format!("Organs held {units}"));
+                staff(ui, app, world, id, "Staff");
+            }
             // Jobs & lives phase 5 (section 5.3): a studio's units.
             BuildingKind::BdStudio => {
                 let units = world.stock(id, citysim::Good::Braindance);

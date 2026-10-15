@@ -843,6 +843,8 @@ pub fn collect_wage_scaled(world: &mut World, agent: EntityId, scale: f32) -> i6
         }
     }
     if paid > 0 {
+        // Jobs & lives phase 6 (§ 8): a follower's tithe (nothing off).
+        crate::systems::faith::tithe(world, agent, paid);
         ownership::pay_rent_from_income(world, agent);
     }
     maybe_quit(world, agent);

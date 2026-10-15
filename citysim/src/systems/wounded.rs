@@ -502,6 +502,8 @@ pub fn on_stabilise(world: &mut World, id: EntityId, target: Option<EntityId>) -
     if let Some(b) = world.comp_mut::<Brain>(w) {
         b.cuffed_by = Some(w);
     }
+    // Jobs & lives phase 6 (§ 7): a unit off the Clinic's shelf (nothing off).
+    crate::systems::gray::on_stabilise(world, clinic);
     let row = &mut world.stats.current.wounded;
     row.stabilised += 1;
     match how {

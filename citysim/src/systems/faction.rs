@@ -773,12 +773,18 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
     };
     let cfg = world.config.gangs.clone();
     let mut scores = score_orders(&inputs, &cfg);
+    // Jobs & lives phase 6: a gang type's Harvest flat, a cult's violence
+    // bias (nothing off).
+    crate::systems::gray::tilt_orders(world, gang, &mut scores);
+    crate::systems::faith::tilt_orders(world, gang, &mut scores);
     // M16b phase 4: a distracted gang tilts to LieLow.
     crate::systems::attention::tilt(world, Some(gang), &mut scores, |s| s.order == Order::LieLow, |s| &mut s.score);
     // M15 W32: would the winner differ with the fear term neutral?
     if inputs.fear.is_some() {
         let neutral = OrderInputs { fear: Some(0.5), ..inputs.clone() };
         let mut alt = score_orders(&neutral, &cfg);
+        crate::systems::gray::tilt_orders(world, gang, &mut alt);
+        crate::systems::faith::tilt_orders(world, gang, &mut alt);
         // Review finding 7: the same attention tilt on both sides.
         crate::systems::attention::tilt(world, Some(gang), &mut alt, |s| s.order == Order::LieLow, |s| &mut s.score);
         if alt.first().map(|s| s.order) != scores.first().map(|s| s.order) {

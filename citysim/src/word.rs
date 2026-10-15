@@ -371,6 +371,8 @@ pub enum GrudgeCause {
     Succession,
     /// M17 phase 5: a cast member abroad who met the holder's crew and came after them.
     Abroad,
+    /// Jobs & lives phase 6 (§ 8): a member who left the holder's cult.
+    Apostasy,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -565,12 +567,16 @@ pub struct FeedState {
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Creed {
     Purist,
+    /// Jobs & lives phase 6 (§ 8, D14): a `[faith] creeds` row by index
+    /// (its name lives in the row, never in code).
+    Config(u8),
 }
 
 impl Creed {
     pub fn label(self) -> &'static str {
         match self {
             Creed::Purist => "Purist",
+            Creed::Config(_) => "Creed",
         }
     }
 }

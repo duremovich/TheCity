@@ -15,9 +15,12 @@ fn shipped() -> World {
     let mut c = Config::load();
     c.jobs2.street = false;
     c.weapons.enabled = false;
-    // Phase 4: nor the vice and fashion (the same butterfly).
+    // Phase 4: nor the vice and fashion (the same butterfly); phase 6: nor
+    // the gray market and faith (it fails with both on, passes with either).
     c.vice.enabled = false;
     c.fashion.enabled = false;
+    c.gray.enabled = false;
+    c.faith.enabled = false;
     let w = World::new(42, c);
     assert!(citysim::systems::econ::wages_on(&w) && !policy::net_enacted(&w), "the shipped city: no net");
     w

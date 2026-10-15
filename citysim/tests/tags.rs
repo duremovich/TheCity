@@ -25,10 +25,13 @@ fn world() -> World {
     // Jobs & lives phase 2: the city as written, without the street (its
     // pitches and day posts move this seed's patrol day); phase 4: nor the
     // vice and fashion (the same butterfly: the Patrol's fight went the
-    // other way).
+    // other way); phase 6: nor the gray market and faith (the same
+    // butterfly: it fails with both on, passes with either).
     c.jobs2.street = false;
     c.vice.enabled = false;
     c.fashion.enabled = false;
+    c.gray.enabled = false;
+    c.faith.enabled = false;
     World::new(42, c)
 }
 

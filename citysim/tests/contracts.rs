@@ -1077,9 +1077,10 @@ fn test_conspiracy_ranks_below_murder() {
     // M16b inserted Fraud above Theft and Blackmail above Shakedown: two more.
     // Jobs & lives phase 3 inserted the three arms crimes above Dealing: three more;
     // phase 4 Solicitation just above Fare Evasion: one more; phase 5
-    // Trafficking just above Abduction: one more.
-    assert_eq!(Crime::Murder.severity(), 19);
-    assert_eq!(Crime::Conspiracy.severity(), 18);
+    // Trafficking just above Abduction: one more; phase 6 Forgery above
+    // Fraud and BlackMarket above Dealing: two more.
+    assert_eq!(Crime::Murder.severity(), 21);
+    assert_eq!(Crime::Conspiracy.severity(), 20);
     // Murder stays the top of every crime.
     let all = [
         Crime::Theft,

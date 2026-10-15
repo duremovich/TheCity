@@ -565,6 +565,9 @@ fn test_gang_squat_holds_derelict() {
 #[test]
 fn test_dreg_share_on_hand_built_world() {
     let mut w = city();
+    // Jobs & lives phase 6: a cult's chapel takes the hand-built derelict at
+    // the first midnight.
+    w.config.faith.enabled = false;
     let hotel = make_hotel(&mut w, None);
     let b = derelict_in(&mut w, 1, 0);
     let civ: Vec<EntityId> = civilians(&w).into_iter().filter(|&a| !w.has::<Job>(a)).collect();

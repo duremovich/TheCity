@@ -423,7 +423,9 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         Flow::Arms => row.jobs2.get_or_insert_with(Default::default).flow_arms += coins,
         // Jobs & lives phase 4: the tips' column.
         Flow::Tip => row.jobs2.get_or_insert_with(Default::default).tips += coins,
-        Flow::CabFare | Flow::StreetCut | Flow::Gray | Flow::Tithe => row.flow_other += coins,
+        // Jobs & lives phase 6: the tithes' column.
+        Flow::Tithe => row.jobs2.get_or_insert_with(Default::default).tithes += coins,
+        Flow::CabFare | Flow::StreetCut | Flow::Gray => row.flow_other += coins,
     }
 }
 
@@ -862,6 +864,26 @@ pub fn charity_in(world: &mut World, from: Option<EntityId>, mission: EntityId, 
     ledger(world, Flow::Donate, moved);
     shadow_flow(world, from, Some(mission), moved, Flow::Donate, false);
     world.purse_add(from, -moved);
+    if let Some(c) = world.comp_mut::<Building>(mission).and_then(|b| b.charity.as_mut()) {
+        c.purse += moved;
+    }
+    moved
+}
+
+/// Jobs & lives phase 6 (§ 8): a follower's tithe into a church's purse
+/// (`Flow::Tithe`, untaxed; at most the follower's coins). Returns the
+/// coins moved.
+pub fn tithe_in(world: &mut World, from: EntityId, mission: EntityId, amount: i64) -> i64 {
+    if amount <= 0 || world.comp::<Building>(mission).is_none_or(|b| b.charity.is_none()) {
+        return 0;
+    }
+    let moved = amount.min(world.purse(Some(from)).max(0));
+    if moved <= 0 {
+        return 0;
+    }
+    ledger(world, Flow::Tithe, moved);
+    shadow_flow(world, Some(from), Some(mission), moved, Flow::Tithe, false);
+    world.purse_add(Some(from), -moved);
     if let Some(c) = world.comp_mut::<Building>(mission).and_then(|b| b.charity.as_mut()) {
         c.purse += moved;
     }

@@ -280,6 +280,8 @@ pub fn leave(world: &mut World, id: EntityId, reason: &str) {
     world.push_event(EventKind::GangLeave, &[id, gm.gang], format!("{name} left {gname} ({reason})"));
     // M13 fix round: the gang's bike stays with the gang.
     crate::systems::vehicles::return_gang_vehicles(world, id, gm.gang);
+    // Jobs & lives phase 6 (§ 8): a cult's apostate (nothing off).
+    crate::systems::faith::on_leave(world, id, gm.gang, reason);
     recompute_leader(world, gm.gang);
 }
 
@@ -1325,6 +1327,11 @@ pub fn desist(world: &mut World) {
             if kept.contains(&m) || dealers.contains(&m) {
                 p *= cfg.desist_invested;
             }
+            // Jobs & lives phase 6 (§ 8): a cult holds its members (1 off).
+            let hold = crate::systems::faith::desist_mult(world, gang);
+            if hold != 1.0 {
+                p *= hold;
+            }
             let h = crate::rng::splitmix64(seed ^ 0x6465_7369_7374 ^ u64::from(m.index) ^ today.rotate_left(32));
             let u = (h >> 11) as f32 / (1u64 << 53) as f32;
             if u < p {
@@ -1438,8 +1445,9 @@ fn daily_economy(world: &mut World) {
         crate::systems::vehicles::gang_bikes(world, gang);
         // M15 W31: a Purist gang buys no chrome and no decks.
         let purist = crate::systems::creeds::is_purist(world, gang);
-        // M13 D44 (phase 3): then an Arms implant for the strongest member.
-        if !purist {
+        // M13 D44 (phase 3): then an Arms implant for the strongest member
+        // (Jobs & lives phase 6: not by a cult that tolerates no chrome).
+        if !purist && !crate::systems::faith::no_chrome(world, gang) {
             crate::systems::chrome::gang_arms(world, gang);
         }
         // M14 V30: then a deck for the best hacker.

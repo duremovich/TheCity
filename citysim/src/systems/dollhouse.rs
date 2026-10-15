@@ -187,7 +187,12 @@ fn pay_fee(world: &mut World, holder: Option<EntityId>, clinic: EntityId) {
 /// nearest `at` (the holder pays the fee and keeps the implant). `None`
 /// with no Clinic.
 fn install_chip(world: &mut World, id: EntityId, holder: Option<EntityId>, at: EntityId) -> Option<EntityId> {
-    let clinic = nearest_clinic(world, at)?;
+    // Jobs & lives phase 6 (§ 7): a gang holder's own BlackClinic first (the
+    // black install; nothing with `[gray]` off).
+    let black = holder
+        .filter(|&h| world.has::<Gang>(h) && crate::systems::gray::on(world))
+        .and_then(|h| crate::systems::gray::black_clinic_of(world, h));
+    let clinic = black.or_else(|| nearest_clinic(world, at))?;
     pay_fee(world, holder, clinic);
     let kind = AssetKind::Implant(Slot::Behaviour);
     let list = crate::systems::assets::list_price(world, kind, 1).unwrap_or(0);

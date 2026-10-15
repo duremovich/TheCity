@@ -167,6 +167,8 @@ pub fn build_on_lot(
             // Jobs & lives phase 5 (§ 5.2, § 5.3).
             | BuildingKind::Dollhouse
             | BuildingKind::BdStudio
+            // Jobs & lives phase 6 (§ 7).
+            | BuildingKind::BlackClinic
     ) {
         return Err(format!("cannot build a {} on a Lot", kind.label()));
     }

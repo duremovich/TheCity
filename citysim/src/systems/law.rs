@@ -82,6 +82,9 @@ pub fn crime_salience(crime: Crime) -> f32 {
         Crime::Solicitation => 0.1,
         // Jobs & lives phase 5.
         Crime::Trafficking => 0.9,
+        // Jobs & lives phase 6.
+        Crime::Forgery => 0.4,
+        Crime::BlackMarket => 0.5,
     }
 }
 
@@ -189,7 +192,10 @@ pub fn raise_crime_except(
         // Jobs & lives phase 4: filed at a sweep.
         | Crime::Solicitation
         // Jobs & lives phase 5: filed at the holding, never raised on the street.
-        | Crime::Trafficking => {}
+        | Crime::Trafficking
+        // Jobs & lives phase 6: filed at an arrest or a raid.
+        | Crime::Forgery
+        | Crime::BlackMarket => {}
         Crime::Abduction => crate::systems::litter::deposit_near(world, tile, actor_building, 12, 1),
     }
 
@@ -299,7 +305,9 @@ pub fn raise_crime_except(
             | Crime::ArmsDealing
             | Crime::UnlicensedArms
             | Crime::Smuggling
-            | Crime::Solicitation => MemoryKind::WasRobbed,
+            | Crime::Solicitation
+            | Crime::Forgery
+            | Crime::BlackMarket => MemoryKind::WasRobbed,
         };
         world.remember(v, kind, Some(actor), 0.6, -0.6, false);
         crate::systems::social::robbed_by(world, v, actor);
@@ -561,6 +569,9 @@ pub fn sentence_ticks(world: &World, crime: Crime) -> Tick {
         Crime::Abduction => ext.abduction,
         // Jobs & lives phase 5: Abduction's term.
         Crime::Trafficking => ext.abduction,
+        // Jobs & lives phase 6: Fraud's and Dealing's terms.
+        Crime::Forgery => ext.fraud,
+        Crime::BlackMarket => ext.dealing,
         Crime::Dealing => ext.dealing,
         // M14 V18.
         // V42 `SetHackSentence` replaces the base.
@@ -1081,6 +1092,8 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
     }
 
     let until = world.tick + sentence_ticks(world, crime);
+    // Jobs & lives phase 6 (§ 7): fake papers exposed (nothing off).
+    crate::systems::gray::on_arrest(world, suspect);
     sentence(world, suspect, crime, until, jail);
     resolve_reports(world, suspect);
     world.stats.current.arrests += 1;
@@ -1715,6 +1728,11 @@ fn sightings_with(world: &mut World, grid_pairs: usize) {
             None => guards.iter().any(sees),
         };
         if !seen {
+            continue;
+        }
+        // Jobs & lives phase 6 (§ 7): papers bought while wanted pass the
+        // hour's sighting on `id_w × tier` (nothing off: the map is empty).
+        if !world.jobs2.gray.papers.is_empty() && crate::systems::gray::passes_sighting(world, s) {
             continue;
         }
         world.set_last_seen(s, (tile, tick));

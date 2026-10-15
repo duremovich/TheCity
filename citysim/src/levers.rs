@@ -751,6 +751,28 @@ pub struct Levers {
     /// from `[vice]` (the utopia/dystopia game moves them).
     #[serde(default, skip_serializing_if = "ViceLevers::is_default")]
     pub vice: ViceLevers,
+    /// Jobs & lives phase 6 (§ 8): the faith's influence slots (M18's life
+    /// paths move them; every reader returns 0 at the default).
+    #[serde(default, skip_serializing_if = "FaithLevers::is_default")]
+    pub faith: FaithLevers,
+}
+
+/// Jobs & lives phase 6 (§ 8, the takeover hooks): a board member's lean
+/// toward a candidate of its creed (`faith::board_lean`), the law's lean
+/// by the established creed's share of the guard (`faith::posture_lean`),
+/// and the established creed (a row index). All off by default.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FaithLevers {
+    pub board_lean: f32,
+    pub posture_lean: f32,
+    pub established: Option<u8>,
+}
+
+impl FaithLevers {
+    pub fn is_default(&self) -> bool {
+        *self == FaithLevers::default()
+    }
 }
 
 /// Jobs & lives phase 4 (D7, Dylan's answer 2): brothels licensed and
@@ -892,6 +914,7 @@ impl Levers {
             school_meals: policy.school_meals,
             reserve_release: policy.reserve_release,
             vice: ViceLevers::from_config(cfg),
+            faith: FaithLevers::default(),
         }
     }
 }

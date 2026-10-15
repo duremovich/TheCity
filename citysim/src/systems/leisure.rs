@@ -2026,7 +2026,8 @@ pub fn stat_leaders(world: &mut World) {
 /// of the members by `id.index % 100`, a busiest spot in a held district.
 pub fn preacher(world: &World, id: EntityId) -> bool {
     let Some(gang) = world.gang_of(id) else { return false };
-    crate::systems::creeds::is_purist(world, gang)
+    // Jobs & lives phase 6: a cult's members preach too.
+    (crate::systems::creeds::is_purist(world, gang) || crate::systems::faith::cult_preacher(world, gang))
         && world.comp::<Gang>(gang).is_some_and(|g| g.order == crate::components::Order::Expand)
         && u64::from(id.index % 100) < (world.config.leisure.preach_share * 100.0) as u64
         && world.comp::<Brain>(id).is_none_or(|b| b.gang_task_day != Some(world.day()))
@@ -2108,6 +2109,8 @@ fn preach_done(world: &mut World, id: EntityId) {
         e.last_interaction = tick;
     }
     world.stats.current.living.preached += 1;
+    // Jobs & lives phase 6: a cult's success converts the listener.
+    crate::systems::faith::on_preached(world, gang, t);
     let text = format!("{} preached to {}", world.name_of(id), world.name_of(t));
     world.push_event(EventKind::Preached, &[id, t], text);
 }

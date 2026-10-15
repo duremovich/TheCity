@@ -1908,6 +1908,15 @@ floors_seed = 1
 floors_max = 2
 niche = "Vice"
 
+[buildings.black_clinic]
+capacity = 8
+stock_cap = 40
+staff = 0
+found_cost = 500
+value = 500
+floors_seed = 1
+floors_max = 1
+
 [buildings.bd_studio]
 capacity = 10
 stock_cap = 60
@@ -2829,6 +2838,44 @@ jobs2 = true
 vice = true
 bd = true
 
+# Jobs & lives phase 6 (§ 7): the forger (a Fixer's second post), the black clinic's struck-off doc and broker.
+[[trades]]
+id = "forger"
+label = "Forger"
+workplace = ["Fixer"]
+staff_per_floor = 1
+wage = 5
+shift = "day"
+skill = "knowledge"
+model = "service"
+jobs2 = true
+gray = true
+
+[[trades]]
+id = "black_doc"
+label = "Back-Room Doc"
+workplace = ["BlackClinic"]
+staff_per_floor = 2
+wage = 6
+shift = "day"
+skill = "knowledge"
+model = "service"
+jobs2 = true
+gray = true
+struck_off = true
+
+[[trades]]
+id = "organ_broker"
+label = "Broker"
+workplace = ["BlackClinic"]
+staff_per_floor = 1
+wage = 5
+shift = "day"
+skill = "persuasion"
+model = "service"
+jobs2 = true
+gray = true
+
 [[trades]]
 id = "street_worker"
 label = "Street Worker"
@@ -3470,3 +3517,75 @@ clothing_per_1000 = 200.0          # clothing items alive at most, per 1,000 res
 spire_dress_mult = 1.5             # a dress-0 carrier in the Spire is noticed x this
 p_mug_clothes = 0.3                # a fight's winner (no guard) takes the loser's worn item (the petty cap)
 clothes_reserve_meals = 10         # a Boutique sale leaves this many meals' coins beyond the evening's reserve
+
+# ---------------------------------------------------------------------------
+# Jobs & lives phase 6, the gray market (docs/JOBS_AND_LIVES.md § 7; Dylan's answers 1 and 3): papers and forgers,
+# black clinics and struck-off docs, organs (Good::Organs; the World's book is [world_market] organs, capped),
+# customs, and the gang types as data. Under [jobs2] enabled (`CITYSIM_GRAY_OFF=1`). Placeholders.
+[gray]
+enabled = true
+id_price = [40, 120]               # fake papers by tier at a forger (a Fixer's second post)
+id_bribe = 60                      # real papers from a Civic Clerk under ...
+clerk_lawful = 0.35                # ... this lawfulness (Flow::Bribe)
+id_w = 0.15                        # a wanted holder passes a guard's sighting for the hour on this x tier
+p_expose = 0.3                     # fake papers exposed at an arrest (Forgery on the holder and the forger)
+fixer_cut = 0.2                    # the Fixer's owner's share of a forger's sale
+organs_per_body = 2                # units a body ripped by a gang yields (once)
+organ_rot = 0.25                   # of a stock lost a day (rounded up)
+clinic_organs = 3                  # a licensed Clinic's shelf, bought from a gang at ...
+organ_price = 30                   # ... this a unit (Flow::Gray)
+p_organ_needed = 0.5               # a stabilisation draws a unit off the shelf
+p_customs = 0.1                    # a gang's day of organs to the World seized (Smuggling on its leader)
+black_clinic_spare = 200           # a gang builds a black clinic with its found cost and this to spare
+p_bm_raid = 0.2                    # a black clinic in a Sweep or Crackdown district found a day (BlackMarket) ...
+bm_close_days = 3                  # ... and shut this long
+p_struck_off = 0.002               # a licensed Ripperdoc struck off a day x (1 - lawfulness)
+
+# Dylan's answer 1: the gang types as data (a pure hash of the gang's id by share). The scavs' row.
+[[gray.gang_types]]
+id = "scav"
+share = 0.35
+harvest_flat = 0.3                 # added to the Harvest order's score
+kill_p = 0.8                       # its rip's kill chance (the M13 chance is [chrome] p_rip_kill)
+organ_targets = true               # its Harvest target: anyone on its ground, valued by chrome plus organs
+
+# ---------------------------------------------------------------------------
+# Jobs & lives phase 6, faith (docs/JOBS_AND_LIVES.md § 8; Dylan's answer 6): creeds as data (no creed name in
+# code), churches (a Mission with a creed), cults (a gang with a creed), the Preach, conversion, the spread along
+# social edges, tithes, apostasy. Under [jobs2] enabled (`CITYSIM_FAITH_OFF=1`). The M15 Purists and The Unplugged
+# are [creeds] and stay as they are. Placeholders; the names are placeholders too.
+[faith]
+enabled = true
+p_attend = 0.3                     # a drawn resident of a church's district attends its daily Preach
+attend_belonging = 0.5             # drawn: a follower, one under this belonging, or one grieving ...
+grief_days = 7                     # ... within this many days
+attend_gain = 0.2                  # belonging an attendance gives
+convert_belonging = 0.4            # a non-follower under this (or grieving) converts on the row's p_convert
+spread_affinity = 0.3              # a follower's Friend/Family/Spouse/Parent edge at this affinity converts on p_spread a day
+
+[[faith.creeds]]
+id = "open_circuit"
+label = "Church of the Open Circuit"
+church = true
+zone = "Sump"
+share = 0.3
+tolerance = 3
+tithe_frac = 0.1
+p_convert = 0.05
+p_spread = 0.0005
+
+[[faith.creeds]]
+id = "drowned_choir"
+label = "The Drowned Choir"
+cult = true
+zone = "Sump"
+share = 0.8
+tolerance = 0
+tithe_frac = 0.5
+recruit_edges = true
+founders = 3
+apostasy_w = 0.8                   # a leaver's grudge from the leader (hunt_min 0.75: hunted)
+violence_bias = 0.1
+desist_mult = 0.25                 # a member's walk-away chance x this (the cult holds its own)
+p_convert = 0.1
+p_spread = 0.001

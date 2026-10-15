@@ -43,6 +43,7 @@ pub fn trade_live(world: &World, row: &crate::config::TradeCfg) -> bool {
         && (!row.fashion || crate::systems::fashion::on(world))
         && (!row.chip || crate::systems::dollhouse::on(world))
         && (!row.bd || crate::systems::braindance::on(world))
+        && (!row.gray || crate::systems::gray::on(world))
 }
 
 /// Is `b` a standing-or-not building owned by a corp?
@@ -252,6 +253,7 @@ pub fn pick_graded(world: &World, employer: EntityId, role: Role) -> Option<Enti
             || crate::systems::life::quit_blocks(world, id, employer)
             || !crate::systems::fashion::dress_ok(world, id, role)
             || !crate::systems::dollhouse::hire_ok(world, role)
+            || !crate::systems::gray::hire_ok(world, id, role)
         {
             continue;
         }

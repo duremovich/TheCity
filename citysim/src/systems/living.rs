@@ -81,6 +81,10 @@ pub fn run(world: &mut World) {
     // (nothing with `[vice] chip` / `bd` off).
     crate::systems::dollhouse::daily(world);
     crate::systems::braindance::daily(world);
+    // Jobs & lives phase 6: the gray market's and the faith's day (nothing
+    // with `[gray]` / `[faith]` off).
+    crate::systems::gray::daily(world);
+    crate::systems::faith::daily(world);
     // L2 phase 2: the spots, the wealth decile, the venues' hand-over.
     crate::systems::leisure::daily(world);
     // The Real economy E27, E34, E37, E39, E40, E42: the kitchens' day, the

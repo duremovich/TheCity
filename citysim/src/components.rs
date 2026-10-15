@@ -231,10 +231,14 @@ pub enum BuildingKind {
     Dollhouse,
     /// A studio whose staff make Braindance units (a workplace; Mid).
     BdStudio,
+    // --- Jobs & lives phase 6 (§ 7), only with `[gray] enabled` on.
+    /// A gang's unlicensed clinic: its stock holds the organs, its staff
+    /// are struck-off docs and brokers (a workplace).
+    BlackClinic,
 }
 
 impl BuildingKind {
-    pub const ALL: [BuildingKind; 38] = [
+    pub const ALL: [BuildingKind; 39] = [
         BuildingKind::Home,
         BuildingKind::Farm,
         BuildingKind::Market,
@@ -273,12 +277,13 @@ impl BuildingKind {
         BuildingKind::Boutique,
         BuildingKind::Dollhouse,
         BuildingKind::BdStudio,
+        BuildingKind::BlackClinic,
     ];
 
     /// Jobs & lives phase 1: the kinds that stand only with `[jobs2] enabled`
     /// (phase 3's Gunsmith only with `[weapons]` on too, phase 4's venues
     /// only with `[vice]` or `[fashion]`).
-    pub const JOBS2: [BuildingKind; 11] = [
+    pub const JOBS2: [BuildingKind; 12] = [
         BuildingKind::PackingPlant,
         BuildingKind::FreightYard,
         BuildingKind::UtilityPlant,
@@ -290,6 +295,7 @@ impl BuildingKind {
         BuildingKind::Boutique,
         BuildingKind::Dollhouse,
         BuildingKind::BdStudio,
+        BuildingKind::BlackClinic,
     ];
 
     /// Jobs & lives phase 4: every venue kind, L2's six and phase 4's three
@@ -365,6 +371,7 @@ impl BuildingKind {
             "Boutique" => BuildingKind::Boutique,
             "Dollhouse" => BuildingKind::Dollhouse,
             "BdStudio" => BuildingKind::BdStudio,
+            "BlackClinic" => BuildingKind::BlackClinic,
             _ => return None,
         })
     }
@@ -410,6 +417,7 @@ impl BuildingKind {
             BuildingKind::Boutique => "Boutique",
             BuildingKind::Dollhouse => "Dollhouse",
             BuildingKind::BdStudio => "BD Studio",
+            BuildingKind::BlackClinic => "Back Room",
         }
     }
 
@@ -463,6 +471,8 @@ impl BuildingKind {
             // Jobs & lives phase 5.
             BuildingKind::Dollhouse => '~',
             BuildingKind::BdStudio => '#',
+            // Jobs & lives phase 6.
+            BuildingKind::BlackClinic => '@',
         }
     }
 }
@@ -782,6 +792,12 @@ pub enum Crime {
     /// Jobs & lives phase 5 (§ 5.2, D16): a captive fitted with a behaviour
     /// chip at a gang's holding, filed on its members; just above Abduction.
     Trafficking,
+    /// Jobs & lives phase 6 (§ 7, D16): fake papers exposed at an arrest,
+    /// filed on the holder and the forger; just above Fraud.
+    Forgery,
+    /// Jobs & lives phase 6 (§ 7, D16): a black clinic found by the law,
+    /// filed on its staff; just above Dealing.
+    BlackMarket,
 }
 
 impl Crime {
@@ -808,6 +824,8 @@ impl Crime {
             Crime::Smuggling => "Smuggling",
             Crime::Solicitation => "Solicitation",
             Crime::Trafficking => "Trafficking",
+            Crime::Forgery => "Forgery",
+            Crime::BlackMarket => "Black Market",
         }
     }
 
@@ -830,25 +848,29 @@ impl Crime {
             // M16b: Fraud just above Theft, Blackmail just above Shakedown;
             // everything above each moves up (the order is all that is read).
             Crime::Fraud => 4,
-            Crime::Intrusion => 5,
-            Crime::GrandTheft => 6,
-            Crime::DataTheft => 7,
-            Crime::Dealing => 8,
+            // Jobs & lives phase 6 (§ 7): Forgery just above Fraud,
+            // BlackMarket just above Dealing; everything above moves up.
+            Crime::Forgery => 5,
+            Crime::Intrusion => 6,
+            Crime::GrandTheft => 7,
+            Crime::DataTheft => 8,
+            Crime::Dealing => 9,
+            Crime::BlackMarket => 10,
             // Jobs & lives phase 3 (§ 4): the arms crimes between Dealing
             // and Shakedown; everything above moves up three.
-            Crime::UnlicensedArms => 9,
-            Crime::ArmsDealing => 10,
-            Crime::Smuggling => 11,
-            Crime::Extortion => 12,
-            Crime::Blackmail => 13,
-            Crime::Assault => 14,
-            Crime::Manslaughter => 15,
-            Crime::Abduction => 16,
+            Crime::UnlicensedArms => 11,
+            Crime::ArmsDealing => 12,
+            Crime::Smuggling => 13,
+            Crime::Extortion => 14,
+            Crime::Blackmail => 15,
+            Crime::Assault => 16,
+            Crime::Manslaughter => 17,
+            Crime::Abduction => 18,
             // Jobs & lives phase 5 (§ 5.2): just above Abduction; everything
             // above moves up one.
-            Crime::Trafficking => 17,
-            Crime::Conspiracy => 18,
-            Crime::Murder => 19,
+            Crime::Trafficking => 19,
+            Crime::Conspiracy => 20,
+            Crime::Murder => 21,
         }
     }
 }

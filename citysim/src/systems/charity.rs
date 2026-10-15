@@ -180,6 +180,14 @@ fn site_for(world: &World, d: usize, refit: bool) -> Option<(EntityId, bool)> {
     None
 }
 
+/// Jobs & lives phase 6 (§ 8): a Mission in district `d` (its vacant Lot
+/// nearest the centroid, else a derelict refitted, else any district's),
+/// deeded to `owner` (a church: the city's).
+pub(crate) fn open_mission_in(world: &mut World, d: usize, owner: Option<EntityId>) -> Option<EntityId> {
+    let (site, on_lot) = site_for(world, d, true)?;
+    open_mission(world, site, on_lot, owner)
+}
+
 /// A Mission stands on `site` (a Lot or a derelict), deeded to the city.
 fn open_mission(world: &mut World, site: EntityId, on_lot: bool, owner: Option<EntityId>) -> Option<EntityId> {
     let made = if on_lot {

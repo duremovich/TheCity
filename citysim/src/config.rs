@@ -274,6 +274,193 @@ pub struct Config {
     /// `status` need, under the master switch (`CITYSIM_FASHION_OFF=1`).
     #[serde(default)]
     pub fashion: FashionCfg,
+    /// Jobs & lives phase 6 (§ 7): papers and forgers, black clinics,
+    /// organs, the gang types (`CITYSIM_GRAY_OFF=1`).
+    #[serde(default)]
+    pub gray: GrayCfg,
+    /// Jobs & lives phase 6 (§ 8): creeds as data, churches, cults, tithes
+    /// (`CITYSIM_FAITH_OFF=1`).
+    #[serde(default)]
+    pub faith: FaithCfg,
+}
+
+/// Jobs & lives phase 6 `[gray]` (docs/JOBS_AND_LIVES.md § 7): papers,
+/// forgers and a corruptible Clerk, black clinics and struck-off docs,
+/// organs as a good (rotting, sold to Clinics and the World's capped book),
+/// customs on the organs' export, and the gang types as data. A board
+/// game's counters: tiers, units, rolls and coins. Live only under
+/// `[jobs2] enabled`. Every number is a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GrayCfg {
+    pub enabled: bool,
+    /// Fake papers by tier (1, 2) at a forger; a Clerk under `clerk_lawful`
+    /// sells real ones for `id_bribe` (`Flow::Bribe`).
+    pub id_price: [i64; 2],
+    pub id_bribe: i64,
+    pub clerk_lawful: f32,
+    /// A wanted holder passes a guard's sighting for the hour on
+    /// `id_w × tier` (papers bought while wanted).
+    pub id_w: f32,
+    /// At an arrest fake papers are exposed on this chance (`Forgery`).
+    pub p_expose: f32,
+    /// The Fixer's owner's share of a forger's sale.
+    pub fixer_cut: f32,
+    /// Organs a body yields to the gang that rips it, the share lost a day,
+    /// a Clinic's shelf (bought from a gang at `organ_price`), a
+    /// stabilisation's draw on it, and customs on the World's book.
+    pub organs_per_body: u32,
+    pub organ_rot: f32,
+    pub clinic_organs: u32,
+    pub organ_price: i64,
+    pub p_organ_needed: f32,
+    pub p_customs: f32,
+    /// A gang builds a BlackClinic with its found cost and this to spare.
+    pub black_clinic_spare: i64,
+    /// A BlackClinic in a district the law sweeps or cracks down on its
+    /// gang is found on this chance a day (`BlackMarket`, shut this long).
+    pub p_bm_raid: f32,
+    pub bm_close_days: u64,
+    /// A licensed Ripperdoc is struck off on this × (1 − lawfulness) a day.
+    pub p_struck_off: f32,
+    /// The gang types (D-scavs): rows by share of the gangs (a pure hash).
+    pub gang_types: Vec<GangTypeCfg>,
+}
+
+/// A gang type row (Dylan's answer 1): its share of the gangs, the flat it
+/// adds to the Harvest order, its rip's kill chance and whether its Harvest
+/// target counts organs (anyone in its ground).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GangTypeCfg {
+    pub id: String,
+    pub share: f32,
+    pub harvest_flat: f32,
+    pub kill_p: f32,
+    pub organ_targets: bool,
+}
+
+impl Default for GangTypeCfg {
+    fn default() -> Self {
+        GangTypeCfg { id: String::new(), share: 0.0, harvest_flat: 0.0, kill_p: 0.5, organ_targets: false }
+    }
+}
+
+impl Default for GrayCfg {
+    fn default() -> Self {
+        GrayCfg {
+            enabled: false,
+            id_price: [40, 120],
+            id_bribe: 60,
+            clerk_lawful: 0.35,
+            id_w: 0.15,
+            p_expose: 0.3,
+            fixer_cut: 0.2,
+            organs_per_body: 2,
+            organ_rot: 0.25,
+            clinic_organs: 3,
+            organ_price: 30,
+            p_organ_needed: 0.5,
+            p_customs: 0.1,
+            black_clinic_spare: 200,
+            p_bm_raid: 0.2,
+            bm_close_days: 3,
+            p_struck_off: 0.002,
+            gang_types: Vec::new(),
+        }
+    }
+}
+
+/// Jobs & lives phase 6 `[faith]` (docs/JOBS_AND_LIVES.md § 8; Dylan's
+/// answer 6): creeds as data (`creeds` rows; no creed name in code), the
+/// churches (a Mission with a creed), the cults (a gang with a creed), the
+/// daily Preach, conversion, the followers' spread along social edges,
+/// tithes, and apostasy hunted through the grudges. Live only under
+/// `[jobs2] enabled`. Every number is a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FaithCfg {
+    pub enabled: bool,
+    pub creeds: Vec<CreedCfg>,
+    /// The daily Preach: a district resident attends on `p_attend` (a
+    /// follower, or one under `attend_belonging` or grieving within
+    /// `grief_days`), gaining `attend_gain` belonging; a non-follower
+    /// attendee under `convert_belonging` or grieving converts on the row's
+    /// `p_convert`.
+    pub p_attend: f32,
+    pub attend_belonging: f32,
+    pub attend_gain: f32,
+    pub convert_belonging: f32,
+    pub grief_days: u64,
+    /// A follower's Friend, Family or Spouse converts on the row's
+    /// `p_spread` a day (the creed spreads through people).
+    pub spread_affinity: f32,
+}
+
+impl Default for FaithCfg {
+    fn default() -> Self {
+        FaithCfg {
+            enabled: false,
+            creeds: Vec::new(),
+            p_attend: 0.3,
+            attend_belonging: 0.5,
+            attend_gain: 0.2,
+            convert_belonging: 0.4,
+            grief_days: 7,
+            spread_affinity: 0.3,
+        }
+    }
+}
+
+/// One `[[faith.creeds]]` row (D14): a church (a Mission with a creed) or a
+/// cult (a gang with a creed), seeded per copy in its zone's district at
+/// `share` of the way along it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CreedCfg {
+    pub id: String,
+    pub label: String,
+    pub church: bool,
+    pub cult: bool,
+    pub zone: crate::components::Zone,
+    pub share: f32,
+    /// Chrome tolerated (`Kit.visible`), as the Purists'.
+    pub tolerance: u8,
+    /// Of each wage, into the church's purse or the cult's treasury (`Flow::Tithe`).
+    pub tithe_frac: f32,
+    /// A cult recruits only along a social edge to a member (past `founders`).
+    pub recruit_edges: bool,
+    pub founders: usize,
+    /// A leaver's grudge from the leader (0: none); `hunt` reads it at `hunt_min`.
+    pub apostasy_w: f32,
+    /// The flat a cult adds to its Contest and Raid orders.
+    pub violence_bias: f32,
+    /// A cult member's daily walk-away chance × this (`gang::desist`).
+    pub desist_mult: f32,
+    pub p_convert: f32,
+    pub p_spread: f32,
+}
+
+impl Default for CreedCfg {
+    fn default() -> Self {
+        CreedCfg {
+            id: String::new(),
+            label: String::new(),
+            church: false,
+            cult: false,
+            zone: crate::components::Zone::Sump,
+            share: 0.5,
+            tolerance: 0,
+            tithe_frac: 0.1,
+            recruit_edges: true,
+            founders: 3,
+            apostasy_w: 0.0,
+            violence_bias: 0.0,
+            desist_mult: 1.0,
+            p_convert: 0.1,
+            p_spread: 0.01,
+        }
+    }
 }
 
 /// Jobs & lives `[jobs2]` (docs/JOBS_AND_LIVES.md §§ 1-2): the master
@@ -1761,6 +1948,12 @@ pub struct TradeCfg {
     /// Jobs & lives phase 5: the row exists only with `[vice] bd` on.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub bd: bool,
+    /// Jobs & lives phase 6: the row exists only with `[gray]` on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub gray: bool,
+    /// Jobs & lives phase 6: hired only from the struck-off (`[gray]` on).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub struck_off: bool,
     /// Jobs & lives phase 4: the row's on-duty staff take a visit's tip
     /// (`[vice] tip_share`) at a Vice venue or the Lounge.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -2069,6 +2262,19 @@ impl BuildingCfg {
             ..BuildingCfg::BASE
         }
     }
+    /// Jobs & lives phase 6 (§ 7): a gang's BlackClinic (organs in stock).
+    pub fn black_clinic() -> BuildingCfg {
+        BuildingCfg {
+            capacity: 8,
+            stock_cap: 40,
+            staff: 0,
+            found_cost: Some(500),
+            value: Some(500),
+            floors_seed: Some(1),
+            floors_max: Some(1),
+            ..BuildingCfg::BASE
+        }
+    }
     /// Jobs & lives phase 5 (§ 5.3): a BdStudio (its staff make units).
     pub fn bd_studio() -> BuildingCfg {
         BuildingCfg {
@@ -2262,6 +2468,9 @@ pub struct BuildingsCfg {
     pub dollhouse: BuildingCfg,
     #[serde(default = "BuildingCfg::bd_studio")]
     pub bd_studio: BuildingCfg,
+    /// Jobs & lives phase 6: none stands with `[gray]` off.
+    #[serde(default = "BuildingCfg::black_clinic")]
+    pub black_clinic: BuildingCfg,
 }
 
 impl BuildingsCfg {
@@ -2305,6 +2514,7 @@ impl BuildingsCfg {
             BuildingKind::Boutique => &self.boutique,
             BuildingKind::Dollhouse => &self.dollhouse,
             BuildingKind::BdStudio => &self.bd_studio,
+            BuildingKind::BlackClinic => &self.black_clinic,
         }
     }
 }
@@ -7071,6 +7281,13 @@ impl Config {
         }
         if std::env::var("CITYSIM_FASHION_OFF").is_ok_and(|v| v == "1") {
             cfg.fashion.enabled = false;
+        }
+        // Jobs & lives phase 6: the gray market's and the faith's.
+        if std::env::var("CITYSIM_GRAY_OFF").is_ok_and(|v| v == "1") {
+            cfg.gray.enabled = false;
+        }
+        if std::env::var("CITYSIM_FAITH_OFF").is_ok_and(|v| v == "1") {
+            cfg.faith.enabled = false;
         }
         // Jobs & lives phase 5: the chip's, the BD's and the patrol sweep's.
         if std::env::var("CITYSIM_CHIP_OFF").is_ok_and(|v| v == "1") {
