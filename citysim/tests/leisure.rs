@@ -207,10 +207,51 @@ fn test_unwind_skips_paid_rungs_when_broke() {
 }
 
 /// L17: the Statistical evening pays a venue, raises fun, adds a visit.
+/// Jobs & lives phase 7b: the table's `p_venue` (a kind's Full visits per
+/// adult-day, shared over the adults eligible for it) decides who goes, so
+/// one agent's evening is a roll; here every kind's rate is 1 a day, past
+/// any one adult's share, so an eligible agent goes. The best-rung path (a
+/// table without `p_venue`) is `test_stat_daily_best_rung_without_rates`.
 #[test]
 fn test_stat_daily_pays_venue_and_raises_fun() {
     let mut w = World::new(42, Config::load().dole_city());
-    let a = civilian(&w, &[]);
+    if let Some(t) = w.stat_table.as_mut() {
+        let rates =
+            t.p_venue.as_ref().expect("the shipped table learns p_venue").keys().map(|k| (k.clone(), 1.0)).collect();
+        t.p_venue = Some(rates);
+    }
+    stat_evening_pays(w, &[]);
+}
+
+/// L17 without `p_venue` (a table from before Jobs & lives phase 7b): every
+/// fun-starved Statistical adult takes the best rung.
+#[test]
+fn test_stat_daily_best_rung_without_rates() {
+    let mut w = World::new(42, Config::load().dole_city());
+    if let Some(t) = w.stat_table.as_mut() {
+        t.p_venue = None;
+    }
+    // A Club, Arcade or Den in reach (a Bar's or a NoodleBar's walk-weighted
+    // gain is under an hour's HangOut, the free rung).
+    stat_evening_pays(w, &[BuildingKind::Club, BuildingKind::Arcade, BuildingKind::Den]);
+}
+
+fn stat_evening_pays(mut w: World, kinds: &[BuildingKind]) {
+    // Phase 7b: at the evening's hour (the nearest venue in reach may be
+    // shut at midnight), a civilian with a venue within the walk cap of its
+    // day (the first civilian's Home reaches none since the evening mirrors
+    // the Full ladder's cap).
+    w.run_ticks(1259);
+    let mut skip = Vec::new();
+    let a = loop {
+        let a = civilian(&w, &skip);
+        let mut probe = w.clone();
+        set_coins(&mut probe, a, 200);
+        if leisure::evening_kinds(&probe, a).iter().any(|k| kinds.is_empty() || kinds.contains(k)) {
+            break a;
+        }
+        skip.push(a);
+    };
     lod::set_lod(&mut w, a, Lod::Statistical);
     assert_eq!(w.comp::<Brain>(a).map(|b| b.lod), Some(Lod::Statistical));
     w.comp_mut::<Needs>(a).expect("needs").fun = 0.1;
@@ -360,6 +401,8 @@ fn test_fun_decays_at_every_tier_equally() {
         cfg.lod.force = Some(force);
         // Jobs and room P3: no trades (their hires shrink the jobless pool compared here).
         cfg.trades.clear();
+        // Jobs & lives phase 7: nor the life stages (the seeded kin move a tier's day).
+        cfg.ages.enabled = false;
         cfg.reset_trade_cache();
         cfg.leisure.gain = citysim::config::FunGainCfg {
             club: 0.0,

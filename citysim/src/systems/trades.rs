@@ -204,15 +204,26 @@ pub fn accrue(world: &mut World, worker: EntityId, b: EntityId, ticks: u64) {
     if job_row(world, worker).is_none_or(|r| r.model != TradeModel::Produce && r.model != TradeModel::Day) {
         return;
     }
+    // Jobs & lives phase 7: the Farm and Fab arms scale their own ticks.
+    let scaled = |world: &World| crate::systems::ages::scale_ticks(world, worker, ticks);
     match world.comp::<Building>(b).map(|bd| bd.kind) {
         Some(BuildingKind::Farm) => crate::systems::economy::accrue_farm_work(world, worker, b, ticks),
         Some(BuildingKind::Fab) => crate::systems::jobs::accrue_fab_work(world, worker, b, ticks),
         // Jobs & lives phase 1 (§ 2): the Packers.
-        Some(BuildingKind::PackingPlant) => crate::systems::industry::accrue_packing(world, worker, b, ticks),
+        Some(BuildingKind::PackingPlant) => {
+            let t = scaled(world);
+            crate::systems::industry::accrue_packing(world, worker, b, t)
+        }
         // Jobs & lives phase 3 (section 4): the gunsmiths.
-        Some(BuildingKind::Gunsmith) => crate::systems::weapons::accrue_gunsmith(world, worker, b, ticks),
+        Some(BuildingKind::Gunsmith) => {
+            let t = scaled(world);
+            crate::systems::weapons::accrue_gunsmith(world, worker, b, t)
+        }
         // Jobs & lives phase 5 (§ 5.3): the studio's units.
-        Some(BuildingKind::BdStudio) => crate::systems::braindance::accrue_studio(world, worker, b, ticks),
+        Some(BuildingKind::BdStudio) => {
+            let t = scaled(world);
+            crate::systems::braindance::accrue_studio(world, worker, b, t)
+        }
         _ => {}
     }
 }

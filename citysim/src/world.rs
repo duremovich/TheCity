@@ -248,6 +248,23 @@ pub struct StatTable {
     /// jumped and reported at `p_dodge_caught`. A table without it: none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub p_errand_ride: Option<[f32; STAT_ROWS]>,
+    /// Jobs & lives (spec R5, the gate's one regen): of the Full city's
+    /// pitch-hours due (a Pitch in its hours, its owner free and well), the
+    /// share the owner was at the spot. A Statistical owner works the hour on
+    /// it (`streetwork::working`, a pure hash of the owner and the hour). A
+    /// table without it: every hour due (the phase-2 rule).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p_pitch: Option<f32>,
+    /// Jobs & lives phase 7b (the parity mirror of paid leisure): per venue
+    /// kind (`leisure::venue_key`), the Full tier's paid visits of the kind
+    /// per agent-day eligible for it at the evening (`leisure::evening_kinds`:
+    /// a venue of the kind open, affordable and within the walk cap of the
+    /// agent's day; may pass 1: a Full visit of the kind at an hour the
+    /// evening's purse no longer affords). The Statistical evening takes
+    /// each eligible kind on it (`leisure::stat_daily`: its whole part in
+    /// visits, the rest a chance). A table without it: the best rung.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p_venue: Option<BTreeMap<String, f32>>,
     pub rows: Vec<StatRow>,
 }
 
@@ -1719,6 +1736,7 @@ impl World {
         crate::prof::timed!("new::fashion::seed", systems::fashion::seed(&mut w));
         crate::prof::timed!("new::dollhouse::seed", systems::dollhouse::seed(&mut w));
         crate::prof::timed!("new::braindance::seed", systems::braindance::seed(&mut w));
+        crate::prof::timed!("new::ages::seed", systems::ages::seed(&mut w));
         // Jobs and room J15: the trade places of every standing building the
         // map and the seeding passes put up (no RNG).
         crate::prof::timed!("new::trades::seed", systems::trades::seed(&mut w));
@@ -1876,7 +1894,12 @@ impl World {
             };
             let first = first[rng.random_range(0..first.len())].clone();
             let last = names.last[rng.random_range(0..names.last.len())].clone();
-            let years: f32 = rng.random_range(wc.age_min_years..wc.age_max_years);
+            // Jobs & lives phase 7 (Dylan's answer 5): the seeded ages to
+            // `[ages] seed_max_years` under the switch.
+            let max =
+                if systems::ages::on_cfg(&self.config) { self.config.ages.seed_max_years } else { wc.age_max_years };
+            let rng = self.rng.world();
+            let years: f32 = rng.random_range(wc.age_min_years..max);
             let age_days = (years * DAYS_PER_YEAR as f32) as u32;
             let born_tick = -(i64::from(age_days) * TICKS_PER_DAY as i64);
             let coins = rng.random_range(wc.initial_coins_min..=wc.initial_coins_max);

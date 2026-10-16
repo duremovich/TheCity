@@ -492,6 +492,7 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
                 crate::systems::ownership::pay(world, Some(id), owner, 2, crate::systems::ownership::Flow::Drink);
             if let Some(b) = bar {
                 crate::systems::ownership::credit(world, b, paid);
+                crate::systems::leisure::note_paid(world, b, paid);
             }
         }
         _ => {}
@@ -1514,7 +1515,12 @@ fn beg(world: &mut World, id: EntityId) -> StepResult {
             continue;
         }
         let roll: f32 = world.rng.world().random();
-        let odds = (0.3 + sociability * 0.4) * if edge.is_none() { 0.5 } else { 1.0 };
+        let mut odds = (0.3 + sociability * 0.4) * if edge.is_none() { 0.5 } else { 1.0 };
+        // Jobs & lives phase 7 (§ 6.3): the maimed's bowl (1 off).
+        let m = crate::systems::ages::beg_mult(world, id);
+        if m != 1.0 {
+            odds *= m;
+        }
         if roll < odds {
             let bonus: f32 = world.rng.world().random();
             let coins = 1 + i64::from(bonus < 0.5);

@@ -1954,9 +1954,17 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
         p_dodge_caught: None,
         p_commute_ride: None,
         p_errand_ride: None,
+        p_pitch: None,
+        p_venue: None,
         pantry_per_resident: None,
         rows: Vec::new(),
     };
+    // Jobs & lives phase 7b: the adult-days (read at the evening's tick)
+    // and the Full tier's paid visits per venue kind (`p_venue`).
+    let mut adult_days = 0u64;
+    let mut venue_paid: BTreeMap<String, u64> = BTreeMap::new();
+    // Jobs & lives (R5): the Full pitch-hours due and those worked (`p_pitch`).
+    let (mut pitch_due, mut pitch_worked) = (0u64, 0u64);
     let mut counts = [[0u64; 5]; STAT_ROWS];
     let mut extra = [[0u64; 5]; STAT_ROWS];
     let mut denom = [0u64; STAT_ROWS];
@@ -2090,6 +2098,15 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
             }
             let night = world.phase() == citysim::DayPhase::Night;
             let just = world.tick - 1;
+            // Jobs & lives phase 7b: the evening's eligible agents (the
+            // Statistical evening's tick, `leisure::stat_daily`).
+            if just % TICKS_PER_DAY == 1260 {
+                for id in world.citizens() {
+                    if world.has::<Brain>(id) && citysim::systems::demography::is_adult(&world, id) {
+                        adult_days += 1;
+                    }
+                }
+            }
             // P5f: the shift minutes and those at the work (`p_attend`).
             {
                 let tod = world.tick_of_day();
@@ -2265,6 +2282,15 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
             }
             cursor = world.next_event_id;
             if world.tick.is_multiple_of(citysim::TICKS_PER_HOUR) {
+                // Jobs & lives (R5): the hour's pitches due and worked.
+                for p in world.jobs2.pitches.values() {
+                    if citysim::systems::streetwork::due(&world, p) {
+                        pitch_due += 1;
+                        if citysim::systems::streetwork::working(&world, p) {
+                            pitch_worked += 1;
+                        }
+                    }
+                }
                 // Close the hour: first-hand robberies, then every agent of the
                 // hour (the dead included) into its row.
                 for (&id, t) in hour.iter_mut() {
@@ -2407,6 +2433,9 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                     }
                 }
             }
+        }
+        for (k, v) in &world.probe.venue_paid {
+            *venue_paid.entry(k.clone()).or_default() += v.0;
         }
     }
     // The five independent rolls are pooled over the two hunger buckets of a
@@ -2586,6 +2615,9 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
         p_commute_ride,
         p_errand_ride,
         p_dodge_caught: (dodges > 0).then(|| (dodges_caught as f64 / dodges as f64).min(1.0) as f32),
+        p_pitch: (pitch_due > 0).then(|| (pitch_worked as f64 / pitch_due as f64).min(1.0) as f32),
+        p_venue: (adult_days > 0)
+            .then(|| venue_paid.iter().map(|(k, &n)| (k.clone(), (n as f64 / adult_days as f64) as f32)).collect()),
         pantry_per_resident: (pantry_days > 0).then(|| (pantry_sum / pantry_days as f64) as f32),
         ..header
     };

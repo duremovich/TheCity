@@ -564,6 +564,11 @@ fn test_episode_near_on_duty_guard_ended_by_law() {
     place(&mut w, guard, TilePos { x: 102, y: 100 });
     place(&mut w, who, TilePos { x: 100, y: 100 });
     w.comp_mut::<Skills>(guard).expect("skills").fighting = 1.0;
+    // Jobs & lives phase 7b (the regenerated stat table): the premise is a
+    // guard who wins the fight; under the new table's city the berserker
+    // (a free adult of fighting 0.35) downed the guard in the first quarter
+    // hour and the guard bled out. The berserker is an unskilled one.
+    w.comp_mut::<Skills>(who).expect("skills").fighting = 0.0;
     // Both on screen for the episode (the LOD budget may demote a body; an
     // episode off screen is the ledger's, not the law's).
     for id in [guard, who] {

@@ -620,6 +620,30 @@ pub struct Jobs2Cols {
     pub apostates: u32,
     pub apostates_hunted: u32,
     pub church_purse: i64,
+    /// Phase 7, life stages (§ 6): children by routine (Play, School,
+    /// Chores, Street, Camp), child-days and school days, the fees, the
+    /// street children taken to a camp, begged and stolen; Schools standing;
+    /// elders (from `frail_from_years`), employed, taken in by kin today, on
+    /// a Mission cot; the maimed living, maimed today, prosthetics fitted.
+    pub ch_play: u32,
+    pub ch_school: u32,
+    pub ch_chores: u32,
+    pub ch_street: u32,
+    pub ch_camp: u32,
+    pub child_days: u32,
+    pub school_days: u32,
+    pub school_fees: i64,
+    pub street_takes: u32,
+    pub child_begged: i64,
+    pub child_thefts: u32,
+    pub schools: u32,
+    pub elders: u32,
+    pub elders_employed: u32,
+    pub elders_taken_in: u32,
+    pub elders_on_cots: u32,
+    pub maimed: u32,
+    pub maimed_new: u32,
+    pub prosthetics: u32,
 }
 
 impl Jobs2Cols {
@@ -791,6 +815,25 @@ impl Jobs2Cols {
             "apostates",
             "apostates_hunted",
             "church_purse",
+            "ch_play",
+            "ch_school",
+            "ch_chores",
+            "ch_street",
+            "ch_camp",
+            "child_days",
+            "school_days",
+            "school_fees",
+            "street_takes",
+            "child_begged",
+            "child_thefts",
+            "schools",
+            "elders",
+            "elders_employed",
+            "elders_taken_in",
+            "elders_on_cots",
+            "maimed",
+            "maimed_new",
+            "prosthetics",
         ]
         .join(",")
     }
@@ -963,6 +1006,25 @@ impl Jobs2Cols {
             self.apostates.to_string(),
             self.apostates_hunted.to_string(),
             self.church_purse.to_string(),
+            self.ch_play.to_string(),
+            self.ch_school.to_string(),
+            self.ch_chores.to_string(),
+            self.ch_street.to_string(),
+            self.ch_camp.to_string(),
+            self.child_days.to_string(),
+            self.school_days.to_string(),
+            self.school_fees.to_string(),
+            self.street_takes.to_string(),
+            self.child_begged.to_string(),
+            self.child_thefts.to_string(),
+            self.schools.to_string(),
+            self.elders.to_string(),
+            self.elders_employed.to_string(),
+            self.elders_taken_in.to_string(),
+            self.elders_on_cots.to_string(),
+            self.maimed.to_string(),
+            self.maimed_new.to_string(),
+            self.prosthetics.to_string(),
         ]
         .join(",")
     }

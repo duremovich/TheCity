@@ -67,7 +67,9 @@ fn test_spawn_300_with_jobs() {
         let wallet = w.comp::<Wallet>(id).expect("wallet");
         assert!((10..=40).contains(&wallet.coins));
         let ident = w.comp::<Identity>(id).expect("identity");
-        assert!((18..=60).contains(&ident.age_years()), "age {}", ident.age_years());
+        // Jobs & lives phase 7 (Dylan's answer 5): to `[ages] seed_max_years` under the switch.
+        let max = if citysim::systems::ages::on(&w) { w.config.ages.seed_max_years as u32 } else { 60 };
+        assert!((18..=max).contains(&ident.age_years()), "age {}", ident.age_years());
         assert!(ident.born_tick < 0);
     }
     // every job has an employer of the right kind

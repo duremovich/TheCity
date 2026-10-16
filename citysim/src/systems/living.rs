@@ -85,6 +85,9 @@ pub fn run(world: &mut World) {
     // with `[gray]` / `[faith]` off).
     crate::systems::gray::daily(world);
     crate::systems::faith::daily(world);
+    // Jobs & lives phase 7: the children's routines, the kin, the
+    // prosthetics (nothing with `[ages]` off).
+    crate::systems::ages::daily(world);
     // L2 phase 2: the spots, the wealth decile, the venues' hand-over.
     crate::systems::leisure::daily(world);
     // The Real economy E27, E34, E37, E39, E40, E42: the kitchens' day, the

@@ -77,7 +77,7 @@ fn ageing(world: &mut World) {
 
 /// A child comes of age: Brain, Needs and job eligibility, at Coarse LOD.
 pub fn mature(world: &mut World, id: EntityId) {
-    world.remove::<Child>(id);
+    let childhood = world.remove::<Child>(id);
     let initial = world.config.world.needs_initial.clone();
     world.insert(
         id,
@@ -98,6 +98,10 @@ pub fn mature(world: &mut World, id: EntityId) {
     world.insert(id, Inventory { food: 0, stolen_food: 0, stims: 0, parts: 0, synth: 0 });
     world.insert(id, Brain { lod: Lod::Coarse, ..Brain::default() });
     // The Real economy E41: a camp's child is released at its door.
+    // Jobs & lives phase 7 (§ 6.1): the childhood's mark (nothing off).
+    if let Some(c) = childhood {
+        crate::systems::ages::on_mature(world, id, &c);
+    }
     if crate::systems::camp::on_mature(world, id) {
         return;
     }
@@ -294,7 +298,7 @@ pub fn spawn_child(world: &mut World, mother: EntityId, father: EntityId, home: 
     crate::systems::moves::give_social(world, id, social);
     world.insert(id, Wallet { coins: 0 });
     world.insert(id, Household::new(Some(home)));
-    world.insert(id, Child { hunger_days: 0 });
+    world.insert(id, Child { hunger_days: 0, ..Child::default() });
     crate::systems::classpay::on_birth(world, id, mother, father, home);
     // M13 D4: the parents' mean from the child's keyed stream.
     let body = crate::systems::assets::child_body(world, id, mother, father);
@@ -1726,7 +1730,7 @@ fn spawn_migrant_child(world: &mut World, mother: EntityId, father: EntityId, ho
     crate::systems::moves::give_social(world, id, social);
     world.insert(id, Wallet { coins: 0 });
     world.insert(id, Household::new(Some(home)));
-    world.insert(id, Child { hunger_days: 0 });
+    world.insert(id, Child { hunger_days: 0, ..Child::default() });
     crate::systems::classpay::on_birth(world, id, mother, father, home);
     let body = crate::systems::assets::child_body(world, id, mother, father);
     crate::systems::assets::give_body(world, id, body);

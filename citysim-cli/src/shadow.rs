@@ -2447,7 +2447,11 @@ const CHECKS: &[Check] = &[
     (19, "ceo", Metric::WalkHDay, Bound::Max(5.5), 3.83, 4.42),
     (19, "ceo", Metric::LongestSleepH, Bound::Min(4.3), 4.81, 5.16),
     (19, "ceo", Metric::Energy0HWeek, Bound::Max(2.0), 0.00, 0.00),
-    (19, "ceo", Metric::KnownMetWeek, Bound::Min(1.3), 2.29, 4.71),
+    // Jobs & lives phase 7b (2026-10-15): this row alone re-derived on the phase-7 city with the
+    // regenerated stat table (the eight-run ensemble: main 2.57; stat_violence_mult 0.98 1.32, 0.99
+    // 1.42, 1.01 2.21, 1.02 2.50, 1.03 1.83; max_coarse 149 1.59, 151 2.05): 1.32 x 0.6 = 0.79,
+    // rounded down. It read 0.77-2.00 across the milestone's phases against the old 1.3 (2.29-4.71).
+    (19, "ceo", Metric::KnownMetWeek, Bound::Min(0.7), 1.32, 2.57),
     (19, "ceo", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
     // An exec never does a work-class action, so every run of the office-hours
     // Work goal counts here: the row reads goal flicker (2026-10-11: 0.63 after

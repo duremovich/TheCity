@@ -40,19 +40,52 @@ fn world() -> World {
 /// shared through a save.
 fn gang_world() -> World {
     static SAVE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    let text = SAVE.get_or_init(|| {
+    gang_world_in(&SAVE, false)
+}
+
+/// [`gang_world`] with the pre-mirror off-screen evening throughout (a
+/// stat table without `p_venue`, the best-rung path).
+fn gang_world_pre_mirror() -> World {
+    static SAVE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    gang_world_in(&SAVE, true)
+}
+
+fn no_venue_rates(w: &mut World) {
+    if let Some(t) = w.stat_table.as_mut() {
+        t.p_venue = None;
+    }
+}
+
+fn gang_world_in(save: &std::sync::OnceLock<String>, pre_mirror: bool) -> World {
+    let text = save.get_or_init(|| {
         let mut w = world();
+        if pre_mirror {
+            no_venue_rates(&mut w);
+        }
+        // Jobs & lives phase 7b (the regenerated stat table): the premise is
+        // a city of established gangs: two led gangs of two or more, one
+        // holding three Homes or more in a district (under the new table the
+        // first day with two led gangs and one Home held came on day 6, a
+        // one-member rival and a single Home that flipped within two days).
         for _ in 0..40 {
             w.run_ticks(TICKS_PER_DAY);
-            let led = w.gangs().into_iter().filter(|&g| w.comp::<Gang>(g).is_some_and(|x| x.leader.is_some())).count();
-            let held = w.gangs().into_iter().any(|g| !gang::held_districts(&w, g).is_empty());
+            let led = w
+                .gangs()
+                .into_iter()
+                .filter(|&g| w.comp::<Gang>(g).is_some_and(|x| x.leader.is_some() && x.members.len() >= 2))
+                .count();
+            let held = w.gangs().into_iter().any(|g| gang::held_districts(&w, g).iter().any(|&(_, n)| n >= 3));
             if led >= 2 && held {
                 break;
             }
         }
         citysim::save::to_ron(&w)
     });
-    citysim::save::from_ron(text).expect("loads")
+    let mut w = citysim::save::from_ron(text).expect("loads");
+    if pre_mirror {
+        no_venue_rates(&mut w);
+    }
+    w
 }
 
 fn adults(w: &World) -> Vec<EntityId> {
@@ -207,8 +240,12 @@ fn racket(w: &mut World) -> (EntityId, EntityId, EntityId, EntityId) {
             });
             let Some(b) = found else { continue };
             let owner = strangers(w, 1)[0];
+            // Jobs & lives phase 7b (the regenerated stat table): the deed
+            // through `transfer_building`; a bare `owner` write skipped the
+            // books, and by the next week the building had no owner (payer
+            // None) and the hold read Broken before the district was lost.
+            citysim::systems::ownership::transfer_building(w, b, Some(owner));
             if let Some(bd) = w.comp_mut::<Building>(b) {
-                bd.owner = Some(owner);
                 bd.secured_by = None;
                 bd.revenue = std::iter::repeat_n(100, 7).collect();
             }
@@ -224,7 +261,8 @@ fn racket(w: &mut World) -> (EntityId, EntityId, EntityId, EntityId) {
 /// gang no longer holds the district.
 #[test]
 fn test_protection_pays_weekly_and_stops_when_district_lost() {
-    let mut w = gang_world();
+    // Jobs & lives phase 7b: the pre-mirror off-screen evening (no `p_venue`): the learned Bar visits fed the leader's black-BD dealing and its arrest, not this test's protection.
+    let mut w = gang_world_pre_mirror();
     let (g, leader, b, owner) = racket(&mut w);
     set_coins(&mut w, owner, 10_000);
     let before = identity(&w);

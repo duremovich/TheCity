@@ -235,10 +235,13 @@ pub enum BuildingKind {
     /// A gang's unlicensed clinic: its stock holds the organs, its staff
     /// are struck-off docs and brokers (a workplace).
     BlackClinic,
+    // --- Jobs & lives phase 7 (§ 6.1), only with `[ages] enabled` on.
+    /// A School on fees (its teachers; Mid and up).
+    School,
 }
 
 impl BuildingKind {
-    pub const ALL: [BuildingKind; 39] = [
+    pub const ALL: [BuildingKind; 40] = [
         BuildingKind::Home,
         BuildingKind::Farm,
         BuildingKind::Market,
@@ -278,12 +281,13 @@ impl BuildingKind {
         BuildingKind::Dollhouse,
         BuildingKind::BdStudio,
         BuildingKind::BlackClinic,
+        BuildingKind::School,
     ];
 
     /// Jobs & lives phase 1: the kinds that stand only with `[jobs2] enabled`
     /// (phase 3's Gunsmith only with `[weapons]` on too, phase 4's venues
     /// only with `[vice]` or `[fashion]`).
-    pub const JOBS2: [BuildingKind; 12] = [
+    pub const JOBS2: [BuildingKind; 13] = [
         BuildingKind::PackingPlant,
         BuildingKind::FreightYard,
         BuildingKind::UtilityPlant,
@@ -296,6 +300,7 @@ impl BuildingKind {
         BuildingKind::Dollhouse,
         BuildingKind::BdStudio,
         BuildingKind::BlackClinic,
+        BuildingKind::School,
     ];
 
     /// Jobs & lives phase 4: every venue kind, L2's six and phase 4's three
@@ -372,6 +377,7 @@ impl BuildingKind {
             "Dollhouse" => BuildingKind::Dollhouse,
             "BdStudio" => BuildingKind::BdStudio,
             "BlackClinic" => BuildingKind::BlackClinic,
+            "School" => BuildingKind::School,
             _ => return None,
         })
     }
@@ -418,6 +424,7 @@ impl BuildingKind {
             BuildingKind::Dollhouse => "Dollhouse",
             BuildingKind::BdStudio => "BD Studio",
             BuildingKind::BlackClinic => "Back Room",
+            BuildingKind::School => "School",
         }
     }
 
@@ -473,6 +480,8 @@ impl BuildingKind {
             BuildingKind::BdStudio => '#',
             // Jobs & lives phase 6.
             BuildingKind::BlackClinic => '@',
+            // Jobs & lives phase 7.
+            BuildingKind::School => '?',
         }
     }
 }
@@ -1874,6 +1883,37 @@ pub struct Identity {
 pub struct Child {
     /// Consecutive days the pantry could not feed them; three kills.
     pub hunger_days: u8,
+    /// Jobs & lives phase 7 (§ 6.1, D11): today's routine (`Play` and not
+    /// written with `[ages]` off).
+    #[serde(default, skip_serializing_if = "Routine::is_play")]
+    pub routine: Routine,
+    /// School days attended; Street days running.
+    #[serde(default, skip_serializing_if = "is_zero_u16_child")]
+    pub edu_days: u16,
+    #[serde(default, skip_serializing_if = "is_zero_u16_child")]
+    pub street_days: u16,
+}
+
+fn is_zero_u16_child(v: &u16) -> bool {
+    *v == 0
+}
+
+/// Jobs & lives phase 7 (§ 6.1, D11): a child's day, chosen at midnight
+/// from the household's state.
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Serialize, Deserialize)]
+pub enum Routine {
+    #[default]
+    Play,
+    School,
+    Chores,
+    Street,
+    Camp,
+}
+
+impl Routine {
+    pub fn is_play(&self) -> bool {
+        *self == Routine::Play
+    }
 }
 
 impl Identity {

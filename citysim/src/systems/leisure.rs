@@ -360,6 +360,7 @@ pub(crate) fn pay_venue(world: &mut World, from: EntityId, b: EntityId, amount: 
         return 0;
     }
     ownership::credit(world, b, paid);
+    note_paid(world, b, paid);
     let tax = world.levers.leisure_tax;
     if tax > 0.0 && owner.is_some() {
         let extra = (tax * paid as f32).round() as i64;
@@ -367,6 +368,17 @@ pub(crate) fn pay_venue(world: &mut World, from: EntityId, b: EntityId, amount: 
     }
     book_take(world, b, paid, flow == Flow::Gamble);
     paid
+}
+
+/// A paid visit of `paid` coins at `b`, by its kind (`CoinProbe::venue_paid`).
+pub(crate) fn note_paid(world: &mut World, b: EntityId, paid: i64) {
+    if paid <= 0 {
+        return;
+    }
+    let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) else { return };
+    let e = world.probe.venue_paid.entry(format!("{kind:?}")).or_default();
+    e.0 += 1;
+    e.1 += paid;
 }
 
 /// Undo `pay_venue`'s `SetLeisureTax` surcharge on `paid` (plan L37): the
@@ -446,6 +458,10 @@ fn bet_window(world: &World) -> bool {
 fn play_table(world: &mut World, id: EntityId, b: EntityId, stake: i64, u: f32) -> i64 {
     let p_win = 0.5 - world.config.leisure.house_edge;
     if u < p_win {
+        // Phase 7b's probe: a won round is a visit too (no coins in).
+        if let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) {
+            world.probe.venue_paid.entry(format!("{kind:?}")).or_default().0 += 1;
+        }
         house_pays(world, b, id, stake, 2 * stake)
     } else {
         -pay_venue(world, id, b, stake, Flow::Gamble)
@@ -545,13 +561,42 @@ const LADDER: [BuildingKind; 11] = [
     BuildingKind::Dollhouse,
 ];
 
+/// Where a paid visit starts from: a Full agent where it stands (`At`), or
+/// a Statistical worker's day (`Day`): the Manhattan rectangle its Home's
+/// door and its workplace's door span, every shortest walk between the two
+/// inside it (Jobs & lives phase 7b: the Full tier's paid visits start at
+/// home, at work or on the street between, 73 % of a worker's within the
+/// walk cap of that rectangle on the calibration city).
+#[derive(Clone, Copy, Debug)]
+enum Origin {
+    At(TilePos),
+    Day(TilePos, TilePos),
+}
+
+impl Origin {
+    /// The origin's tile nearest `t` (the rectangle's clamp).
+    fn near(self, t: TilePos) -> TilePos {
+        match self {
+            Origin::At(p) => p,
+            Origin::Day(a, b) => {
+                TilePos { x: t.x.clamp(a.x.min(b.x), a.x.max(b.x)), y: t.y.clamp(a.y.min(b.y), a.y.max(b.y)) }
+            }
+        }
+    }
+
+    /// Manhattan tiles from the origin to `t`.
+    fn dist(self, t: TilePos) -> u32 {
+        self.near(t).manhattan(t)
+    }
+}
+
 /// The nearest open venue of `kind` `id` may enter from `from` (door
 /// Manhattan, ties the lower id), restricted to `district` when given.
 fn nearest_venue(
     world: &World,
     id: EntityId,
     kind: BuildingKind,
-    from: TilePos,
+    from: Origin,
     district: Option<DistrictId>,
 ) -> Option<(u32, EntityId)> {
     // Scale S4 perf: the distances first, then the tests nearest first
@@ -560,7 +605,7 @@ fn nearest_venue(
     let mut near: Vec<(u32, EntityId)> = world
         .buildings_of_kind(kind)
         .iter()
-        .filter_map(|&b| world.comp::<Building>(b).map(|bd| (bd.door.manhattan(from), b)))
+        .filter_map(|&b| world.comp::<Building>(b).map(|bd| (from.dist(bd.door), b)))
         .collect();
     near.sort_unstable();
     near.into_iter().find(|&(_, b)| {
@@ -574,13 +619,15 @@ fn nearest_venue(
 }
 
 /// The paid rungs open to `id` from `from` with `purse` to spend. Day gaps
-/// 2 (2026-10-11): with `reach`, a venue whose walk (`exec::timed_walk`)
-/// is longer is off the ladder (the Full agent's pick; the Statistical
-/// evening walks nowhere and passes `None`).
+/// 2 (2026-10-11): with `reach`, a venue whose walk (`exec::timed_walk`,
+/// from the origin's nearest tile) is longer is off the ladder (the Full
+/// agent's pick; since Jobs & lives phase 7b the Statistical evening's
+/// too, from its day). With `district`, its venue of a kind in reach first,
+/// else the nearest of the kind anywhere.
 fn paid_candidates(
     world: &World,
     id: EntityId,
-    from: TilePos,
+    from: Origin,
     purse: i64,
     district: Option<DistrictId>,
     reach: Option<u64>,
@@ -599,15 +646,17 @@ fn paid_candidates(
         if kind == BuildingKind::NoodleBar && !hungry {
             continue;
         }
+        let in_reach = |&(_, b): &(u32, EntityId)| {
+            reach.is_none_or(|r| {
+                world
+                    .comp::<Building>(b)
+                    .is_some_and(|bd| crate::exec::timed_walk(world, id, from.near(bd.door), bd.door) <= r)
+            })
+        };
         let pick = nearest_venue(world, id, kind, from, district)
+            .filter(in_reach)
             .or_else(|| district.and_then(|_| nearest_venue(world, id, kind, from, None)));
-        let Some((tiles, b)) = pick else { continue };
-        if let Some(r) = reach {
-            let door = world.comp::<Building>(b).map_or(from, |bd| bd.door);
-            if crate::exec::timed_walk(world, id, from, door) > r {
-                continue;
-            }
-        }
+        let Some((tiles, b)) = pick.filter(in_reach) else { continue };
         let price = price_of(world, b);
         // The rung's affordability (spec § 2's brake): at most half the purse above
         // the reserve goes on one evening.
@@ -677,7 +726,7 @@ pub fn choice(world: &World, id: EntityId, scored: bool) -> Option<UnwindPick> {
     let from = origin(world, id)?;
     let purse = spendable(world, id);
     let reach = world.config.leisure.venue_walk_cap_ticks;
-    let mut cands = paid_candidates(world, id, from, purse, None, Some(reach));
+    let mut cands = paid_candidates(world, id, Origin::At(from), purse, None, Some(reach));
     // Spec § 2 (stat_daily's rule, kept on screen for parity): a hungry
     // agent's evening is the NoodleBar's meal when one is in reach.
     if let Some(c) = cands.iter().find(|c| c.act == ActionKind::EatOut) {
@@ -1250,6 +1299,13 @@ pub fn on_abort(world: &mut World, id: EntityId, kind: ActionKind) {
             ownership::refund(world, id, owner, paid, Flow::Leisure);
             ownership::credit(world, b, -paid);
             book_take(world, b, -paid, false);
+            if paid > 0 {
+                if let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) {
+                    let e = world.probe.venue_paid.entry(format!("{kind:?}")).or_default();
+                    e.0 = e.0.saturating_sub(1);
+                    e.1 -= paid;
+                }
+            }
             // Review fix: the `SetLeisureTax` surcharge comes back too.
             refund_surcharge(world, owner, paid);
             if units > 0 {
@@ -1541,31 +1597,119 @@ pub fn bouts(world: &mut World) {
 // The Statistical evening (plan L17)
 // ---------------------------------------------------------------------------
 
-/// Plan L17, 21:00: every Statistical adult below `fun_satisfied`,
-/// ascending, takes the rung `choice` would (from its Home's door, its
-/// Home's district first): pays as on screen, gains the rung's fun, adds a
-/// visit; a table game's draw on `WordNs::Leisure` keyed `(day, id)`; the
-/// free rung adds `free_stat`.
+/// Jobs & lives phase 7b: the paid rungs open to `id` on its evening, one
+/// venue per kind: from its day (its Home's door, or for a worker the
+/// rectangle to its workplace's door; its Home's district first), a venue
+/// within the Full ladder's `venue_walk_cap_ticks` of it, affordable from
+/// the spendable purse (`stat_daily`'s, and `calibrate`'s eligibility for
+/// `StatTable::p_venue`). Uncapped, the off-screen evening reached the
+/// city's few vice venues from any district (Lounge visits 6.6x, StripClub
+/// 2.6x the Full tier's on the calibration city), drained the purse, and
+/// the food bought after it was synth.
+fn evening_cands(world: &World, id: EntityId) -> Vec<Cand> {
+    let Some((day_from, district)) = evening_day(world, id) else { return Vec::new() };
+    let reach = Some(world.config.leisure.venue_walk_cap_ticks);
+    paid_candidates(world, id, day_from, spendable(world, id), Some(district), reach)
+}
+
+/// The agent's day (`evening_cands`): its Home's door (else its tile), or
+/// for a worker the rectangle to its workplace's door; and the Home's
+/// district.
+fn evening_day(world: &World, id: EntityId) -> Option<(Origin, DistrictId)> {
+    let home = world.comp::<Household>(id).and_then(|h| h.home);
+    let from = home
+        .and_then(|h| world.comp::<Building>(h))
+        .map(|b| world.outside_door(b))
+        .or_else(|| world.comp::<Position>(id).map(|p| p.tile))?;
+    let work = world
+        .comp::<crate::components::Job>(id)
+        .and_then(|j| j.employer)
+        .and_then(|e| world.comp::<Building>(e))
+        .map(|bd| world.outside_door(bd));
+    Some((work.map_or(Origin::At(from), |w| Origin::Day(from, w)), world.district_of(from)))
+}
+
+/// Jobs & lives phase 7b: the venues of `id`'s evening for `p_venue`, one
+/// per kind of the ladder: the nearest standing venue of the kind to its
+/// day (its Home's district first) within the Full ladder's walk cap, the
+/// high rung only for those who reach it. Where the agent lives and works
+/// alone (no hour's state: the door, the room, the purse, the hunger), so
+/// the eligible agent-days the rate divides by are the same city's on both
+/// tiers; the Full visits it counts read the hour's state on screen.
+fn evening_venues(world: &World, id: EntityId) -> Vec<(BuildingKind, EntityId)> {
+    let purse = spendable(world, id);
+    if purse < 1 {
+        return Vec::new();
+    }
+    let Some((day_from, district)) = evening_day(world, id) else { return Vec::new() };
+    let cap = world.config.leisure.venue_walk_cap_ticks;
+    let high = high_ok(world, id);
+    let mut out = Vec::new();
+    for kind in LADDER {
+        let mut near: Vec<(bool, u32, EntityId)> = world
+            .buildings_of_kind(kind)
+            .iter()
+            .filter(|&&b| {
+                standing(world, b)
+                    && (kind == BuildingKind::Bar || world.comp::<Building>(b).is_some_and(|bd| bd.venue.is_some()))
+            })
+            .filter_map(|&b| {
+                let bd = world.comp::<Building>(b)?;
+                let walk = crate::exec::timed_walk(world, id, day_from.near(bd.door), bd.door);
+                (walk <= cap).then(|| (world.district_of_building(b) != district, day_from.dist(bd.door), b))
+            })
+            .collect();
+        near.sort_unstable();
+        let Some(&(_, _, b)) = near.first() else { continue };
+        let price = price_of(world, b);
+        if (!high && rung_of(world, b, price) == Rung::High) || (kind != BuildingKind::Bar && 2 * price > purse) {
+            continue;
+        }
+        out.push((kind, b));
+    }
+    out
+}
+
+/// The venue kinds of [`evening_venues`] (`calibrate`'s eligible agent-days
+/// per kind).
+pub fn evening_kinds(world: &World, id: EntityId) -> Vec<BuildingKind> {
+    evening_venues(world, id).into_iter().map(|(k, _)| k).collect()
+}
+
+/// The `StatTable::p_venue` key of a venue kind.
+pub fn venue_key(kind: BuildingKind) -> String {
+    format!("{kind:?}")
+}
+
+const PURPOSE_STAT_VENUE: u64 = 0x4c45_0017;
+
+/// Plan L17, 21:00: the Statistical evening. With the table's `p_venue`
+/// (Jobs & lives phase 7b), every Statistical adult takes each paid rung of
+/// [`evening_cands`] on the kind's learned rate `p` (the Full tier's paid
+/// visits of the kind per eligible agent-day): `floor(p)` visits and one
+/// more on the fraction (a pure hash of the agent, the day and the kind),
+/// while the purse affords them; an adult below
+/// `fun_satisfied` who took none has the free rung (`free_stat`). Without
+/// it, every adult below `fun_satisfied`, ascending, takes the best rung
+/// `choice` would, the free one when no paid rung outscores an hour's
+/// HangOut. A visit pays as on screen, gains the rung's fun and adds a
+/// visit; a table game's draw on `WordNs::Leisure` keyed `(day, id)`.
 pub fn stat_daily(world: &mut World) {
     let day = world.day();
     let ids: Vec<EntityId> = world.tier(Lod::Statistical).to_vec();
+    let g = world.config.leisure.gain.clone();
+    if let Some(pv) = world.stat_table.as_ref().and_then(|t| t.p_venue.clone()) {
+        stat_learned_evening(world, &ids, &pv);
+        return;
+    }
     for id in ids {
         if unwind_satisfied(world, id) {
             continue;
         }
-        let home = world.comp::<Household>(id).and_then(|h| h.home);
-        let from = home
-            .and_then(|h| world.comp::<Building>(h))
-            .map(|b| world.outside_door(b))
-            .or_else(|| world.comp::<Position>(id).map(|p| p.tile));
-        let Some(from) = from else { continue };
-        let district = Some(world.district_of(from));
-        let purse = spendable(world, id);
-        let cands = paid_candidates(world, id, from, purse, district, None);
+        let cands = evening_cands(world, id);
         let pick = cands.iter().find(|c| c.act == ActionKind::EatOut).cloned().or_else(|| {
             cands.iter().max_by(|a, b| a.score.total_cmp(&b.score).then_with(|| b.venue.cmp(&a.venue))).cloned()
         });
-        let g = world.config.leisure.gain.clone();
         // The free rung's on-screen score (an hour's HangOut, no walk).
         let free_score = g.hangout_hour * world.config.leisure.hangout_ticks as f32 / TICKS_PER_HOUR as f32;
         let Some(c) = pick.filter(|c| c.score > free_score) else {
@@ -1574,75 +1718,171 @@ pub fn stat_daily(world: &mut World) {
         };
         let Some(b) = c.venue else { continue };
         let mut rng = world.rng.word(WordNs::Leisure, day, u64::from(id.index));
-        // Phase 5: the gate's probe (not a CSV column): the evening's gross
-        // spend, entries, meals, drinks and stakes.
-        let mut gross = 0i64;
-        match c.act {
-            ActionKind::Drink => {
-                let owner = world.owner_of(b);
-                let paid = ownership::pay(world, Some(id), owner, 2, Flow::Drink);
-                ownership::credit(world, b, paid);
-                gross += paid;
-                add_fun(world, id, gain_at(world, b));
-                add_belonging(world, id, 0.15);
-                world.remember(id, MemoryKind::Socialised, None, 0.2, 0.3, false);
-                // Jobs & lives phase 5 (§ 5.3): a black unit from the Bar's dealer (nothing off).
-                crate::systems::braindance::bar_visit(world, id, b, false);
-            }
-            ActionKind::Gamble => {
-                let stake = stake_of(world, purse);
-                let u: f32 = rng.random();
-                play_table(world, id, b, stake, u);
-                gross += stake;
-                add_fun(world, id, gain_at(world, b));
-                crate::systems::jobs::note_visit(world, b);
-            }
-            ActionKind::EatOut => {
-                // Review fix: the shelf first (emptied earlier in this pass,
-                // there is no meal: no pay, no fun, no visit), then the pay.
-                if world.comp::<Building>(b).is_none_or(|bd| bd.stock_food == 0) {
-                    continue;
-                }
-                let price = price_of(world, b);
-                let paid = pay_venue(world, id, b, price, Flow::Leisure);
-                if paid <= 0 {
-                    continue;
-                }
-                gross += paid;
-                world.take_stock(b, crate::components::Good::Food, 1);
-                let cfg = world.config.needs.clone();
-                if let Some(n) = world.comp_mut::<Needs>(id) {
-                    crate::needs::eat(n, &cfg);
-                }
-                add_fun(world, id, gain_at(world, b));
-                crate::systems::jobs::note_visit(world, b);
-            }
-            _ => {
-                let price = price_of(world, b);
-                gross += pay_venue(world, id, b, price, Flow::Leisure);
-                add_fun(world, id, gain_at(world, b));
-                add_belonging(world, id, belonging_at(world, b));
-                // A FightPit evening off screen bets as a table (the
-                // Leisure stream), when brave enough and in funds.
-                if kind_of(world, b) == Some(BuildingKind::FightPit) && !world.levers.ban_gambling {
-                    let brave = world
-                        .comp::<Personality>(id)
-                        .is_some_and(|p| p.courage >= world.config.leisure.gamble_rung_courage);
-                    let left = spendable(world, id);
-                    if brave && left >= 1 {
-                        let stake = stake_of(world, left);
-                        let u: f32 = rng.random();
-                        play_table(world, id, b, stake, u);
-                        gross += stake;
-                    }
-                }
-                world.remember(id, MemoryKind::Enjoyed, None, 0.2, 0.3, false);
-                crate::systems::jobs::note_visit(world, b);
-                phase4_visit(world, id, b);
+        stat_visit(world, id, b, c.act, None, &mut rng);
+    }
+}
+
+/// An adult's evening: its purse and its venues (`stat_learned_evening`).
+type EveningPlan = (EntityId, i64, Vec<(BuildingKind, EntityId)>);
+
+/// Jobs & lives phase 7b: the learned evening (`StatTable::p_venue`, the
+/// Full tier's paid visits of each kind per adult-day). The tier's adults
+/// and each one's evening venues (`evening_venues`, read before anyone
+/// pays) are counted; the kind's visits due are its rate times the adults,
+/// shared over the adults eligible for it: each takes `r = rate x adults /
+/// eligible` visits (`floor(r)` and one more on the fraction, a pure hash
+/// of the agent, the day and the kind), in a keyed order, while the
+/// evening's purse affords the rung. So the tier pays the kinds as often as
+/// the Full tier does, at the venues its people live and work by. An adult
+/// below `fun_satisfied` who took none has the free rung.
+fn stat_learned_evening(world: &mut World, ids: &[EntityId], pv: &std::collections::BTreeMap<String, f32>) {
+    let day = world.day();
+    let free = world.config.leisure.gain.free_stat;
+    let plan: Vec<EveningPlan> = ids
+        .iter()
+        .copied()
+        .filter(|&id| crate::systems::demography::is_adult(world, id))
+        .map(|id| (id, spendable(world, id), evening_venues(world, id)))
+        .collect();
+    let adults = plan.len() as f32;
+    let mut eligible = [0u32; LADDER.len()];
+    for (_, _, venues) in &plan {
+        for &(k, _) in venues {
+            if let Some(i) = LADDER.iter().position(|&x| x == k) {
+                eligible[i] += 1;
             }
         }
-        world.stats.current.living.stat_spend += gross;
     }
+    for (id, evening, mut venues) in plan {
+        // In a keyed order (the ladder's order priced the dear rungs out
+        // of a purse the cheap ones had spent).
+        venues.sort_by_key(|&(k, _)| {
+            let k = LADDER.iter().position(|&x| x == k).unwrap_or(0) as u64;
+            splitmix64(world.seed() ^ PURPOSE_STAT_VENUE ^ (u64::from(id.index) << 20) ^ (day << 4) ^ k)
+        });
+        let mut rng = world.rng.word(WordNs::Leisure, day, u64::from(id.index));
+        let mut went = false;
+        for (kind, b) in venues {
+            let i = LADDER.iter().position(|&k| k == kind).unwrap_or(0);
+            let rate = pv.get(&venue_key(kind)).copied().unwrap_or(0.0).max(0.0);
+            let r = rate * adults / eligible[i].max(1) as f32;
+            let u = crate::systems::econ::hash_unit(
+                world.seed(),
+                PURPOSE_STAT_VENUE,
+                u64::from(id.index),
+                day * 16 + i as u64,
+            );
+            let n = r.floor() as u32 + u32::from(u < r.fract());
+            for _ in 0..n {
+                if !stat_visit(world, id, b, act_of(kind), Some(evening), &mut rng) {
+                    break;
+                }
+                went = true;
+            }
+        }
+        if !went && !unwind_satisfied(world, id) {
+            add_fun(world, id, free);
+        }
+    }
+}
+
+/// One off-screen paid visit of `id` at `b` (`stat_daily`): false when
+/// nothing was paid (an emptied shelf, an empty purse). The rung must be
+/// affordable from `evening` (the learned path: the purse the evening
+/// opened with, as `evening_venues` read it; each rolled visit is one the
+/// Full tier makes on its own hour's purse, not one the evening's earlier
+/// visits priced out), else from the purse now; the coins come out of the
+/// purse now.
+fn stat_visit(
+    world: &mut World,
+    id: EntityId,
+    b: EntityId,
+    act: ActionKind,
+    evening: Option<i64>,
+    rng: &mut impl Rng,
+) -> bool {
+    let now = spendable(world, id);
+    let purse = evening.unwrap_or(now);
+    let price = price_of(world, b);
+    if now < 1 || (act != ActionKind::Drink && 2 * price > purse) {
+        return false;
+    }
+    // Phase 5: the gate's probe (not a CSV column): the evening's gross
+    // spend, entries, meals, drinks and stakes.
+    let mut gross = 0i64;
+    match act {
+        ActionKind::Drink => {
+            let owner = world.owner_of(b);
+            let paid = ownership::pay(world, Some(id), owner, 2, Flow::Drink);
+            ownership::credit(world, b, paid);
+            note_paid(world, b, paid);
+            gross += paid;
+            add_fun(world, id, gain_at(world, b));
+            add_belonging(world, id, 0.15);
+            world.remember(id, MemoryKind::Socialised, None, 0.2, 0.3, false);
+            // Jobs & lives phase 5 (§ 5.3): a black unit from the Bar's dealer (nothing off).
+            crate::systems::braindance::bar_visit(world, id, b, false);
+        }
+        ActionKind::Gamble => {
+            // The stake from the purse now, as a Full round's.
+            let stake = stake_of(world, now);
+            let u: f32 = rng.random();
+            play_table(world, id, b, stake, u);
+            gross += stake;
+            add_fun(world, id, gain_at(world, b));
+            crate::systems::jobs::note_visit(world, b);
+        }
+        ActionKind::EatOut => {
+            // Review fix: the shelf first (emptied earlier in this pass,
+            // there is no meal: no pay, no fun, no visit), then the pay.
+            if world.comp::<Building>(b).is_none_or(|bd| bd.stock_food == 0) {
+                return false;
+            }
+            let paid = pay_venue(world, id, b, price, Flow::Leisure);
+            if paid <= 0 {
+                return false;
+            }
+            gross += paid;
+            world.take_stock(b, crate::components::Good::Food, 1);
+            let cfg = world.config.needs.clone();
+            if let Some(n) = world.comp_mut::<Needs>(id) {
+                crate::needs::eat(n, &cfg);
+            }
+            // Jobs & lives phase 7b: the meal as on screen (`on_complete`'s
+            // EatOut): the venue's scraps, a real meal, the day's mark.
+            crate::systems::bins::venue_meal(world, b);
+            crate::systems::health::ate(world, id, crate::components::MealKind::Real);
+            world.mark_day(id, crate::components::trace_flags::ATE);
+            add_fun(world, id, gain_at(world, b));
+            crate::systems::jobs::note_visit(world, b);
+        }
+        _ => {
+            gross += pay_venue(world, id, b, price, Flow::Leisure);
+            add_fun(world, id, gain_at(world, b));
+            add_belonging(world, id, belonging_at(world, b));
+            // A FightPit evening off screen bets as a table (the
+            // Leisure stream), when brave enough and in funds. Not on the
+            // learned path (phase 7b: the Full tier bet at a pit once in
+            // three calibration cities against 1,320 pit visits).
+            if evening.is_none() && kind_of(world, b) == Some(BuildingKind::FightPit) && !world.levers.ban_gambling {
+                let brave = world
+                    .comp::<Personality>(id)
+                    .is_some_and(|p| p.courage >= world.config.leisure.gamble_rung_courage);
+                let left = spendable(world, id);
+                if brave && left >= 1 {
+                    let stake = stake_of(world, left);
+                    let u: f32 = rng.random();
+                    play_table(world, id, b, stake, u);
+                    gross += stake;
+                }
+            }
+            world.remember(id, MemoryKind::Enjoyed, None, 0.2, 0.3, false);
+            crate::systems::jobs::note_visit(world, b);
+            phase4_visit(world, id, b);
+        }
+    }
+    world.stats.current.living.stat_spend += gross;
+    gross > 0
 }
 
 // ---------------------------------------------------------------------------

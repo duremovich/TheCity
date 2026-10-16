@@ -1908,6 +1908,15 @@ floors_seed = 1
 floors_max = 2
 niche = "Vice"
 
+[buildings.school]
+capacity = 40
+stock_cap = 0
+staff = 0
+found_cost = 600
+value = 600
+floors_seed = 1
+floors_max = 2
+
 [buildings.black_clinic]
 capacity = 8
 stock_cap = 40
@@ -2839,6 +2848,20 @@ vice = true
 bd = true
 
 # Jobs & lives phase 6 (§ 7): the forger (a Fixer's second post), the black clinic's struck-off doc and broker.
+# Jobs & lives phase 7 (§ 6.1): the School's teachers.
+[[trades]]
+id = "teacher"
+label = "Teacher"
+workplace = ["School"]
+staff_per_floor = 2
+wage = 6
+shift = "day"
+skill = "knowledge"
+model = "service"
+grade = 1
+jobs2 = true
+ages = true
+
 [[trades]]
 id = "forger"
 label = "Forger"
@@ -3589,3 +3612,28 @@ violence_bias = 0.1
 desist_mult = 0.25                 # a member's walk-away chance x this (the cult holds its own)
 p_convert = 0.1
 p_spread = 0.001
+
+# ---------------------------------------------------------------------------
+# Jobs & lives phase 7, life stages (docs/JOBS_AND_LIVES.md § 6; D11-D13; Dylan's answers 4 and 5): children's
+# routines and the School (fees only: the public_school lever is off), the elderly (no pension), the maimed.
+# Under [jobs2] enabled (`CITYSIM_AGES_OFF=1`). Placeholders.
+[ages]
+enabled = true
+seed_max_years = 75.0              # the seeded ages run to this (Dylan's answer 5; [world] age_max_years off)
+schools = 2                        # seeded per copy (Mid and up, the city's deed)
+school_reach = 60                  # a School within this many tiles of the child's Home ...
+school_fee = 2                     # ... at this a school day, paid by the household (Flow::Contract)
+edu_gain = 0.003                   # education a school day, added at 18
+child_beg_coins = 1                # a street child's day: a gift from a resident of its district ...
+child_theft_p = 0.02               # ... and a resident's coins (up to 3) on this chance
+street_take_days = 14              # days on the street before the camp takes the child
+frail_from_years = 60              # from here work output falls ...
+frail_slope = 0.03                 # ... this a year over
+elder_fire_mult = 0.6              # an elder is let go at this of [sickness] sick_fire_days
+kin_take_in_p = 0.3                # a jobless elder moves in with an adult child (room permitting) on this a day
+kin_from_years = 45                # at seed an adult this old has a grown child (a Parent edge, 20-35 years younger) ...
+seed_kin_p = 0.6                   # ... on this chance (the seeded city has no grown children otherwise)
+p_maimed = 0.25                    # a stabilised survivor left maimed (legs or arms)
+p_press_maim = 0.0005              # a packer's shift-hour at the press
+maimed_work = 0.2                  # a level's work output lost
+maimed_beg_mult = 1.5              # a maimed beggar's odds x this

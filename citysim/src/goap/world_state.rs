@@ -192,6 +192,7 @@ impl LocationKey {
             BuildingKind::Dollhouse | BuildingKind::BdStudio => LocationKey::Workplace,
             // Jobs & lives phase 6.
             BuildingKind::BlackClinic => LocationKey::Workplace,
+            BuildingKind::School => LocationKey::Workplace,
             // M16b phase 2: a Private Prison has no staff role.
             BuildingKind::Prison => LocationKey::Street,
         }

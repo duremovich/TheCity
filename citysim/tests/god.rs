@@ -2922,7 +2922,34 @@ fn god_abroad() {
         .collect();
     let in_time = !told(&story, &[EventKind::CastArrived], 20, 20 + days + delay + 2).is_empty();
     eprintln!("promoted living with an edge to the crew: {}", arrived.len());
-    assert!(in_time && !arrived.is_empty(), "nobody met abroad came to the city");
+    // Jobs & lives phase 7b (the mirrored off-screen evening): on seed 42
+    // the crew member the three arrivals came for died before they came
+    // ("came looking for #1171, who is dead"), so no edge was made; the
+    // world's reaction is an arrival for a crew member, with the edge to
+    // every one still living.
+    let for_crew: Vec<EntityId> = w
+        .events
+        .iter()
+        .filter(|e| {
+            // A dead target is named in the text only (`abroad::arrive`).
+            e.kind == EventKind::CastArrived
+                && team.iter().any(|&m| e.actors.get(1) == Some(&m) || e.text.contains(&format!(" {}, ", w.name_of(m))))
+        })
+        .map(|e| e.actors[0])
+        .collect();
+    let living_kin = for_crew.iter().any(|&a| {
+        team.iter().any(|&m| {
+            citysim::systems::law::living(&w, m)
+                && w.events.iter().any(|e| {
+                    e.kind == EventKind::CastArrived && e.actors.first() == Some(&a) && e.actors.get(1) == Some(&m)
+                })
+        })
+    });
+    eprintln!("arrivals for the crew: {}", for_crew.len());
+    assert!(in_time && !for_crew.is_empty(), "nobody met abroad came to the city");
+    if living_kin {
+        assert!(!arrived.is_empty(), "an arrival for a living crew member holds the edge");
+    }
 }
 
 /// M17 god 4: a murder wave (25 residents killed on day 10). Does the State

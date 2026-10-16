@@ -67,6 +67,11 @@ fn test_dole_enacted_on_day_10_is_paid_from_the_treasury() {
             economy::dole_eligible(&w, a)
                 && demography::is_adult(&w, a)
                 && w.comp::<Brain>(a).is_some_and(|b| b.last_dole_day != Some(w.day()))
+                // Jobs & lives phase 7b: no rent to settle (`collect_dole`
+                // settles a tenant's rent out of the dole,
+                // `pay_rent_from_income`; the first pick under the mirrored
+                // off-screen evening was a tenant): no Home, or its own.
+                && w.comp::<citysim::Household>(a).and_then(|h| h.home).is_none_or(|h| w.owner_of(h) == Some(a))
         })
         .expect("a jobless adult who has not drawn today");
     let (t0, c0) = (treasury(&w), w.comp::<Wallet>(a).map_or(0, |x| x.coins));

@@ -802,7 +802,11 @@ fn test_office_without_a_corp_has_no_guards() {
 /// Item 3: a corp's replacement exec is never another corp's exec.
 #[test]
 fn test_replacement_exec_is_not_another_corps_exec() {
-    let mut w = world();
+    // Jobs & lives phase 7: the seeding as written (the ages to 75 move the
+    // seeded staff this test reads).
+    let mut c = cfg();
+    c.ages.enabled = false;
+    let mut w = World::new(7, c);
     let (food, home_co) = corps(&w);
     let farm = w.building_of_kind(BuildingKind::Farm).expect("farm");
     let staff = ownership::staff_at(&w, farm);

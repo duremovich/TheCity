@@ -328,6 +328,8 @@ fn daily_spoilage(world: &mut World) {
 /// Farm yield for `ticks` of work by `farmer` at `farm`: whole units move into
 /// the farm's stock, the remainder stays in `production_accum`.
 pub fn accrue_farm_work(world: &mut World, farmer: EntityId, farm: EntityId, ticks: u64) {
+    // Jobs & lives phase 7 (§ 6.2, § 6.3): frailty and the maimed (unchanged off).
+    let ticks = crate::systems::ages::scale_ticks(world, farmer, ticks);
     let cfg = &world.config.economy;
     let farming = world.comp::<Skills>(farmer).map_or(0.0, |s| s.farming);
     let mult = cfg.season_mult[world.season().index()];

@@ -282,6 +282,84 @@ pub struct Config {
     /// (`CITYSIM_FAITH_OFF=1`).
     #[serde(default)]
     pub faith: FaithCfg,
+    /// Jobs & lives phase 7 (§ 6): children's routines and the School, the
+    /// elderly, disability (`CITYSIM_AGES_OFF=1`).
+    #[serde(default)]
+    pub ages: AgesCfg,
+}
+
+/// Jobs & lives phase 7 `[ages]` (docs/JOBS_AND_LIVES.md § 6; D11-D13;
+/// Dylan's answers 4 and 5): a child's daily routine (School on fees,
+/// Chores at a parent's Pitch, Play, Street, Camp), the School, the
+/// elderly's frailty and the kin who take them in, the seeded ages to
+/// `seed_max_years`, and the maimed (a level and a slot; a prosthetic
+/// clears it). Live only under `[jobs2] enabled`. Placeholders.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AgesCfg {
+    pub enabled: bool,
+    /// The seeded population's oldest age (sim years; `[world]
+    /// age_max_years` with the switch off).
+    pub seed_max_years: f32,
+    /// Schools seeded (Mid and up, on the city's deed) per copy; a School
+    /// within `school_reach` tiles of the child's Home, its fee a school day
+    /// paid by the household (`Flow::Contract`; the Treasury's with the
+    /// `public_school` lever); `edu_gain` of education a school day at 18.
+    pub schools: u32,
+    pub school_reach: u32,
+    pub school_fee: i64,
+    pub edu_gain: f32,
+    /// A Street child begs `child_beg_coins` a day from a resident of its
+    /// district (a gift), steals on `child_theft_p` (a resident's coins),
+    /// and is taken to a camp after `street_take_days` on the street.
+    pub child_beg_coins: i64,
+    pub child_theft_p: f32,
+    pub street_take_days: u16,
+    /// The elderly: from `frail_from_years` work output × (1 − `frail_slope`
+    /// × the years over); the sick-day firing at `elder_fire_mult` of
+    /// `[sickness] sick_fire_days`; a jobless elder with an adult child
+    /// housed elsewhere moves in on `kin_take_in_p` a day.
+    pub frail_from_years: u32,
+    pub frail_slope: f32,
+    pub elder_fire_mult: f32,
+    pub kin_take_in_p: f32,
+    /// At seed a seeded adult of `kin_from_years` or more has a grown child
+    /// (a Parent edge to an adult 20-35 years younger) on `seed_kin_p`.
+    pub kin_from_years: u32,
+    pub seed_kin_p: f32,
+    /// Disability: a stabilised survivor maimed on `p_maimed`; a packer's
+    /// shift-hour on `p_press_maim`; a level's work output × (1 −
+    /// `maimed_work`); a beggar's odds × `maimed_beg_mult`.
+    pub p_maimed: f32,
+    pub p_press_maim: f32,
+    pub maimed_work: f32,
+    pub maimed_beg_mult: f32,
+}
+
+impl Default for AgesCfg {
+    fn default() -> Self {
+        AgesCfg {
+            enabled: false,
+            seed_max_years: 75.0,
+            schools: 2,
+            school_reach: 60,
+            school_fee: 2,
+            edu_gain: 0.003,
+            child_beg_coins: 1,
+            child_theft_p: 0.02,
+            street_take_days: 14,
+            frail_from_years: 60,
+            frail_slope: 0.03,
+            elder_fire_mult: 0.6,
+            kin_take_in_p: 0.3,
+            kin_from_years: 45,
+            seed_kin_p: 0.6,
+            p_maimed: 0.25,
+            p_press_maim: 0.0005,
+            maimed_work: 0.2,
+            maimed_beg_mult: 1.5,
+        }
+    }
 }
 
 /// Jobs & lives phase 6 `[gray]` (docs/JOBS_AND_LIVES.md § 7): papers,
@@ -1954,6 +2032,9 @@ pub struct TradeCfg {
     /// Jobs & lives phase 6: hired only from the struck-off (`[gray]` on).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub struck_off: bool,
+    /// Jobs & lives phase 7: the row exists only with `[ages]` on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ages: bool,
     /// Jobs & lives phase 4: the row's on-duty staff take a visit's tip
     /// (`[vice] tip_share`) at a Vice venue or the Lounge.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -2262,6 +2343,19 @@ impl BuildingCfg {
             ..BuildingCfg::BASE
         }
     }
+    /// Jobs & lives phase 7 (§ 6.1): a School (its teachers).
+    pub fn school() -> BuildingCfg {
+        BuildingCfg {
+            capacity: 40,
+            stock_cap: 0,
+            staff: 0,
+            found_cost: Some(600),
+            value: Some(600),
+            floors_seed: Some(1),
+            floors_max: Some(2),
+            ..BuildingCfg::BASE
+        }
+    }
     /// Jobs & lives phase 6 (§ 7): a gang's BlackClinic (organs in stock).
     pub fn black_clinic() -> BuildingCfg {
         BuildingCfg {
@@ -2471,6 +2565,9 @@ pub struct BuildingsCfg {
     /// Jobs & lives phase 6: none stands with `[gray]` off.
     #[serde(default = "BuildingCfg::black_clinic")]
     pub black_clinic: BuildingCfg,
+    /// Jobs & lives phase 7: none stands with `[ages]` off.
+    #[serde(default = "BuildingCfg::school")]
+    pub school: BuildingCfg,
 }
 
 impl BuildingsCfg {
@@ -2515,6 +2612,7 @@ impl BuildingsCfg {
             BuildingKind::Dollhouse => &self.dollhouse,
             BuildingKind::BdStudio => &self.bd_studio,
             BuildingKind::BlackClinic => &self.black_clinic,
+            BuildingKind::School => &self.school,
         }
     }
 }
@@ -7281,6 +7379,10 @@ impl Config {
         }
         if std::env::var("CITYSIM_FASHION_OFF").is_ok_and(|v| v == "1") {
             cfg.fashion.enabled = false;
+        }
+        // Jobs & lives phase 7: the life stages'.
+        if std::env::var("CITYSIM_AGES_OFF").is_ok_and(|v| v == "1") {
+            cfg.ages.enabled = false;
         }
         // Jobs & lives phase 6: the gray market's and the faith's.
         if std::env::var("CITYSIM_GRAY_OFF").is_ok_and(|v| v == "1") {

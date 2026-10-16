@@ -938,6 +938,11 @@ GRAY_TOTALS = ("fake_sold", "papers_bribed", "exposures", "organs_made", "organs
                "struck_off", "tithes", "conversions", "preach_attend", "apostates")
 GRAY_SNAP = ("papers_held", "fake_ids", "organ_stock", "scav_gangs", "black_clinics", "followers", "followers_c1",
              "followers_c2", "followers_c3", "followers_c4", "cult_members", "apostates_hunted", "church_purse")
+# Phase 7, life stages (§ 6).
+AGES_TOTALS = ("child_days", "school_days", "school_fees", "street_takes", "child_begged", "child_thefts",
+               "elders_taken_in", "maimed_new", "prosthetics")
+AGES_SNAP = ("ch_play", "ch_school", "ch_chores", "ch_street", "ch_camp", "schools", "elders", "elders_employed",
+             "elders_on_cots", "maimed")
 
 
 def jobs2(rows, events, out):
@@ -1014,6 +1019,11 @@ def jobs2(rows, events, out):
         wages = sum(col(rows, "flow_wages")) if "flow_wages" in rows[0] else 0
         J["tithes_per_wages"] = t["tithes"] / wages if wages else 0
         J["organs_paid_a_day"] = t["organs_export_paid"] / days
+    if "ch_play" in rows[0]:
+        J["ages_totals"] = {k: sum(col(rows, k)) for k in AGES_TOTALS}
+        J["ages_mean"] = {k: mean(col(rows, k)) for k in AGES_SNAP}
+        t = J["ages_totals"]
+        J["school_share"] = t["school_days"] / t["child_days"] if t["child_days"] else 0
     if events:
         kinds = ("PowerOut", "PowerBack", "BuildDone", "Pilfered", "PitchOpened", "PitchClosed", "PitchSwept",
                  "DawnPick", "TinkerBotched", "CrateLanded", "CrateSeized", "LicenceSold", "Murder")
@@ -1237,6 +1247,10 @@ def fmt(o):
             L.append("gray market and faith, run totals: " + f(w["gray_totals"]))
             L.append("gray market and faith, daily mean: " + f(w["gray_mean"]) + f"; tithes / wages "
                      f"{w['tithes_per_wages']:.2%}; the World's Organs book a day {w['organs_paid_a_day']:.1f} coins")
+        if "ages_totals" in w:
+            L.append("life stages, run totals: " + f(w["ages_totals"]))
+            L.append("life stages, daily mean: " + f(w["ages_mean"]) + f"; school days / child-days "
+                     f"{w['school_share']:.1%}")
         if "events" in w:
             L.append("events: " + f(w["events"]) + f"; foreman named {w['foreman_named']}; Hqs built {w['hq_built']}")
     L.append("-- flags --")

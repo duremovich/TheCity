@@ -155,6 +155,7 @@ pub fn daily(world: &mut World) {
         }
         let employed = world.comp::<Job>(id).is_some() && !world.has::<Sentence>(id);
         let age = age_years(world, id);
+        let fire_at = crate::systems::ages::fire_days(world, id, cfg.sick_fire_days);
         let Some(h) = health_mut(world, id) else { continue };
         let t = std::mem::take(&mut h.today);
         let synthy = f32::from(t.synth) + f32::from(t.alms);
@@ -216,7 +217,8 @@ pub fn daily(world: &mut World) {
         if h.sick_today {
             sick += 1;
         }
-        if employed && h.sick_today && sick_n >= cfg.sick_fire_days {
+        // Jobs & lives phase 7 (§ 6.2): an elder's days at `elder_fire_mult`.
+        if employed && h.sick_today && sick_n >= fire_at {
             h.sick_days = 0;
             fire.push(id);
         }
@@ -587,6 +589,8 @@ pub fn oncology(world: &mut World, id: EntityId, clinic: EntityId) -> bool {
             &[id, clinic],
             format!("{who} bought a remission of a vat-cancer at {at}"),
         );
+        // Jobs & lives phase 7 (§ 6.3): a remission leaves a level (no slot).
+        crate::systems::ages::maim(world, id, None, "a cancer in remission");
     }
     true
 }

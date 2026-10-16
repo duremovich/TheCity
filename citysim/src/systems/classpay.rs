@@ -44,6 +44,7 @@ pub fn trade_live(world: &World, row: &crate::config::TradeCfg) -> bool {
         && (!row.chip || crate::systems::dollhouse::on(world))
         && (!row.bd || crate::systems::braindance::on(world))
         && (!row.gray || crate::systems::gray::on(world))
+        && (!row.ages || crate::systems::ages::on(world))
 }
 
 /// Is `b` a standing-or-not building owned by a corp?

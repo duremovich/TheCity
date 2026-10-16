@@ -224,7 +224,10 @@ fn test_tag_record_plants_for_the_buyer() {
 
 /// Spec § 3 (the Purist Patrol): a Purist gang's member on the street in a
 /// held district scans the adults around; a chromed one the scanner wins
-/// against loses its tags and is attacked (an Assault or a Murder).
+/// against is attacked (an Assault or a Murder) and swept for tags. The
+/// sweep of an equal-tier tag is a keyed contest at 0.5 (Jobs & lives phase
+/// 7b: this seed's one roll flipped with the table; the burn is
+/// `test_equal_tier_sweep_burns_half`'s).
 #[test]
 fn test_patrol_scans_and_attacks_the_chromed() {
     let mut w = gang_world();
@@ -265,8 +268,30 @@ fn test_patrol_scans_and_attacks_the_chromed() {
     assert_eq!(hit, Some(a), "the chromed adult was found");
     assert!(has_event(&w, EventKind::PatrolScan, m));
     assert!(has_event(&w, EventKind::Assault, a) || has_event(&w, EventKind::Murder, a));
-    assert!(tags::tags_on(&w, a).is_empty(), "its tag burned");
     assert!(w.stats.current.gov.patrols >= 1);
+}
+
+/// The Patrol's sweep (`tags::sweep` at tier 1) burns an equal-tier tag on
+/// the contest's 0.5 (`security::contest`, keyed on the tag and the tick):
+/// 400 tags, one sweep each, between 40 % and 60 % burned (± 4 sd), each
+/// burn a `TagFound`.
+#[test]
+fn test_equal_tier_sweep_burns_half() {
+    let mut w = world();
+    let a = strangers(&w, 1)[0];
+    let owner = w.corps()[0];
+    let (mut burned, n) = (0u32, 400u32);
+    let found0 = w.events.iter().filter(|e| e.kind == EventKind::TagFound).count();
+    for _ in 0..n {
+        tags::god_tag(&mut w, a, owner, 1).expect("a tag");
+        burned += tags::sweep(&mut w, a, 1, owner);
+        w.tags.retain(|t| t.on != a);
+        w.tick += 1;
+    }
+    let rate = f64::from(burned) / f64::from(n);
+    assert!((0.4..=0.6).contains(&rate), "burned {burned} of {n}");
+    let found = w.events.iter().filter(|e| e.kind == EventKind::TagFound).count() - found0;
+    assert_eq!(found, burned as usize, "a TagFound per burn");
 }
 
 /// The addendum: the pool and the floor.

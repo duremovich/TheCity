@@ -18,6 +18,7 @@
 #![deny(clippy::unwrap_used)]
 
 pub mod abroad;
+pub mod ages;
 pub mod ambient;
 pub mod assets;
 pub mod attention;

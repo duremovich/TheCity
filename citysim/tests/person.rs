@@ -1686,6 +1686,23 @@ fn probe_refused_at_a_full_market_eats_elsewhere() {
                 ate_at = Some(w.tick);
             }
         });
+        // Jobs & lives phase 7b (the regenerated stat table): a pick that
+        // slept first was refused at the window's very end (seed 42's 1572:
+        // GoTo(Home), Sleep, GoTo(Market) refused); the premise is a meal
+        // within the hours after the refusal, so the window runs on 6 h past
+        // the first refusal.
+        let first_refusal = w
+            .debug_events
+            .iter()
+            .find(|e| e.actors.first() == Some(&a) && e.text.contains("GoTo(Market): BuildingFull"))
+            .map(|e| e.tick);
+        if let (None, Some(t)) = (ate_at, first_refusal) {
+            run_to(&mut w, a, t + 6 * TICKS_PER_HOUR, |w| {
+                if ate_at.is_none() && is_eat(step(w, a)) {
+                    ate_at = Some(w.tick);
+                }
+            });
+        }
         let ate = ate_at.is_some();
         // The refusals before the first meal (a second try hours after it,
         // the Market still shut, is a new errand, not the loop).

@@ -509,9 +509,8 @@ fn mechanisms() -> Vec<Mechanism> {
         ("an NPC founding", m("NPC founding")),        // [9, 12, 8]
         ("a hostile takeover", m("hostile takeover")), // [9, 10, 9]
         ("a Strike", k(EventKind::Strike)),            // [10, 9, 9]
-        // M12 districts.
-        ("a gang Split", k(EventKind::Split)), // [1, 1, 1]; 5 of 6
-        ("a Squat", k(EventKind::Squatted)),   // [93, 82, 94]
+        // M12 districts. (A gang Split: demoted, `printed_mechanisms`.)
+        ("a Squat", k(EventKind::Squatted)), // [93, 82, 94]
         // M13 assets.
         ("a Crash", k(EventKind::Crash)),              // [4, 3, 3]
         ("a chrome Install", k(EventKind::Installed)), // [252, 176, 263]
@@ -652,6 +651,15 @@ fn printed_mechanisms() -> Vec<Mechanism> {
         ("a Riot", k(EventKind::Riot)),
         ("a gang front", m("gang front")),
         ("a Jailbreak", k(EventKind::Jailbreak)),
+        // M12's gang Split, demoted (Jobs & lives phase 7b, 2026-10-15): on
+        // the Jobs & lives city it is rare, Splits over 42-47 x 120 days
+        // [0, 0, 1, 1, 0, 0] on ee86297 (2 of 6) and [0, 0, 0, 0, 0, 0] on
+        // phase 7 (core_sanity's 42-44: [0, 0, 1] with `[ages]` off, [0, 0, 0]
+        // on and under three butterflies). `factions.rs::
+        // test_decapitation_splits_with_strong_lieutenant_and_two_districts`
+        // carries it (a decapitation splits; one held district and a district
+        // with no Hideout site do not).
+        ("a gang Split", k(EventKind::Split)),
         // M9's day in Crackdown, demoted (the Hit market P2, 2026-10-11): on
         // the flipped city it is rare, days held over 42-47 x 120 days [4, 9,
         // 0, 1, 0, 0] with the market off (main) and [0, 0, 0, 4, 6, 0] with

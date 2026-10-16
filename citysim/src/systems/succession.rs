@@ -328,5 +328,16 @@ fn end(world: &mut World, gang: EntityId, winner: EntityId, loser: EntityId, fat
         }
     }
     gang::recompute_leader(world, gang);
+    // Jobs & lives phase 7b (a latent M17 bug the regenerated table's city
+    // exposed): this recompute runs without the fallen claimant, so a loser
+    // jailed while it still held the chair was made the gang's jailed boss;
+    // a claimant who lost the war from a cell is nobody's boss.
+    if fate == Fate::Jailed {
+        if let Some(g) = world.comp_mut::<Gang>(gang) {
+            if g.boss == Some(loser) {
+                g.boss = None;
+            }
+        }
+    }
     world.push_event(EventKind::CivilWarEnded, &[winner, loser, gang], text);
 }

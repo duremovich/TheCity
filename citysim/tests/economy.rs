@@ -43,6 +43,8 @@ fn test_price_rises_when_stock_falls() {
 #[test]
 fn test_farmer_produces_food() {
     let mut w = world(42);
+    // Jobs & lives phase 7: the raw output, without the elders' frailty.
+    w.config.ages.enabled = false;
     w.config.lod.force = Some(citysim::Lod::Full); // an arbitrary agent must be simulated in full
     w.config.economy.haul_min_stock = u32::MAX; // no hauling: measure raw farm output
     let farmers: Vec<_> =

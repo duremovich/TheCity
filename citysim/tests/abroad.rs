@@ -211,7 +211,17 @@ fn test_promotion_past_the_thresholds_arrives_with_the_edge() {
     let e = w.events.iter().find(|e| e.kind == EventKind::CastArrived).expect("an enemy arrived");
     let a = e.actors[0];
     assert!(w.edge(a, leader).is_some_and(|e| e.kind == RelKind::Enemy));
-    assert!(citysim::systems::grudges::grudge_on(&w, a, leader).is_some());
+    // Jobs & lives phase 7b: one of the six arrivals killed the leader 70
+    // ticks after they came (seed 42 under the mirrored off-screen evening),
+    // and a target's death settles the grudges on it: the arrival swore the
+    // grudge (an Abroad entry on the leader), standing while the leader lives.
+    let sworn = w
+        .comp::<citysim::word::Grudges>(a)
+        .is_some_and(|g| g.list.iter().any(|x| x.target == leader && x.cause == citysim::word::GrudgeCause::Abroad));
+    assert!(sworn, "the arrival swore a grudge on the leader");
+    if citysim::systems::law::living(&w, leader) {
+        assert!(citysim::systems::grudges::grudge_on(&w, a, leader).is_some());
+    }
     // Inside the thresholds, or the roll at 0: nobody.
     let (w, _, _) = run(2.0, -2.0, 1.0);
     assert_eq!(count(&w, EventKind::CastArrived), 0);

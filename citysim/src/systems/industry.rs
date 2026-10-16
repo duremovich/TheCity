@@ -122,6 +122,9 @@ pub struct Jobs2State {
     pub gray: crate::systems::gray::GrayState,
     #[serde(skip_serializing_if = "crate::systems::faith::FaithState::is_default")]
     pub faith: crate::systems::faith::FaithState,
+    // --- Phase 7, life stages (`systems::ages`).
+    #[serde(skip_serializing_if = "crate::systems::ages::AgesState::is_default")]
+    pub ages: crate::systems::ages::AgesState,
 }
 
 fn is_zero_u32(v: &u32) -> bool {
@@ -406,6 +409,8 @@ pub fn accrue_packing(world: &mut World, worker: EntityId, b: EntityId, ticks: u
     let cfg = &world.config.jobs2;
     let (rate, ratio) = (cfg.pack_rate, cfg.pack_ratio.max(0.0));
     let farming = world.comp::<Skills>(worker).map_or(0.0, |s| s.farming);
+    // Jobs & lives phase 7 (§ 6.3): the press (nothing off).
+    crate::systems::ages::press(world, worker, ticks);
     let units = rate * (0.5 + farming) * ticks as f32 / TICKS_PER_HOUR as f32;
     let whole = {
         let Some(bd) = world.comp_mut::<Building>(b) else { return };

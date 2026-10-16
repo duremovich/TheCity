@@ -18,6 +18,8 @@ fn on_world() -> World {
     c.jobs2.street = false;
     c.weapons.enabled = false;
     c.vice.bd = false;
+    // Phase 7: nor the Schools (a School takes a Lot too).
+    c.ages.enabled = false;
     World::new(42, c)
 }
 

@@ -33,6 +33,8 @@ fn table(f: impl Fn(&mut StatRow)) -> StatTable {
         p_dodge_caught: None,
         p_commute_ride: None,
         p_errand_ride: None,
+        p_pitch: None,
+        p_venue: None,
         pantry_per_resident: None,
         rows,
     }

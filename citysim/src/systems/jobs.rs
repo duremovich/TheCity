@@ -410,6 +410,8 @@ pub(crate) fn deficit(world: &World, b: EntityId, role: Role, full: usize) -> us
 /// fab_skill_slope × farming) × comp_mult` Parts per worker-hour into
 /// `production_accum`; whole Parts into the Fab's stock (capped).
 pub fn accrue_fab_work(world: &mut World, worker: EntityId, fab: EntityId, ticks: u64) {
+    // Jobs & lives phase 7 (§ 6.2, § 6.3): frailty and the maimed (unchanged off).
+    let ticks = crate::systems::ages::scale_ticks(world, worker, ticks);
     let cfg = &world.config.jobs;
     let farming = world.comp::<Skills>(worker).map_or(0.0, |s| s.farming);
     let mut per_hour = cfg.fab_yield * (cfg.fab_skill_floor + cfg.fab_skill_slope * farming);

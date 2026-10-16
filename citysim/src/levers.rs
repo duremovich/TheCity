@@ -755,6 +755,10 @@ pub struct Levers {
     /// paths move them; every reader returns 0 at the default).
     #[serde(default, skip_serializing_if = "FaithLevers::is_default")]
     pub faith: FaithLevers,
+    /// Jobs & lives phase 7 (§ 6.1, Dylan's answer 4): the Treasury pays the
+    /// School fees (off by default: fees only).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub public_school: bool,
 }
 
 /// Jobs & lives phase 6 (§ 8, the takeover hooks): a board member's lean
@@ -915,6 +919,7 @@ impl Levers {
             reserve_release: policy.reserve_release,
             vice: ViceLevers::from_config(cfg),
             faith: FaithLevers::default(),
+            public_school: false,
         }
     }
 }

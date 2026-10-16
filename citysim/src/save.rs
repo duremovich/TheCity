@@ -176,7 +176,12 @@ use crate::world::World;
 /// `[gray]`, `[faith]`, `[buildings.black_clinic]`, the `recorder`-style
 /// trade keys `gray`/`struck_off` and the `Jobs2Cols` phase-6 columns
 /// (serde defaults).
-pub const SAVE_VERSION: u8 = 33;
+/// 34: Jobs & lives phase 7, life stages (§ 6): the appended
+/// `BuildingKind::School`, `Child.{routine, edu_days, street_days}`
+/// (written only when set), `Routine`, `Levers.public_school`,
+/// `Jobs2State.ages`, `[ages]`, `[buildings.school]`, the trade rows' `ages`
+/// key and the `Jobs2Cols` phase-7 columns (serde defaults).
+pub const SAVE_VERSION: u8 = 34;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

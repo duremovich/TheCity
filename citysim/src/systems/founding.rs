@@ -169,6 +169,8 @@ pub fn build_on_lot(
             | BuildingKind::BdStudio
             // Jobs & lives phase 6 (§ 7).
             | BuildingKind::BlackClinic
+            // Jobs & lives phase 7 (§ 6.1).
+            | BuildingKind::School
     ) {
         return Err(format!("cannot build a {} on a Lot", kind.label()));
     }
@@ -395,6 +397,8 @@ pub fn tier_ok(kind: BuildingKind, tier: u8) -> bool {
         // Jobs & lives phase 5: a Dollhouse off the Sump, a BdStudio in the Mid.
         BuildingKind::Dollhouse => tier >= 1,
         BuildingKind::BdStudio => tier == 1,
+        // Jobs & lives phase 7: a School off the Sump.
+        BuildingKind::School => tier >= 1,
         _ => true,
     }
 }

@@ -62,6 +62,7 @@ const PURPOSE_STREET: u64 = 0x5713_00F1;
 const PURPOSE_CAB: u64 = 0x5713_0004;
 const PURPOSE_TINKER: u64 = 0x5713_0005;
 const PURPOSE_SWEEP: u64 = 0x5713_0006;
+const PURPOSE_STAT_PITCH: u64 = 0x5713_0007;
 
 /// The street's sub-switch (`[jobs2] street`, under the master switch).
 pub fn on(world: &World) -> bool {
@@ -132,14 +133,24 @@ fn in_hours(world: &World, p: &Pitch) -> bool {
     crate::systems::trades::shifts_for(world, row, p.owner).iter().any(|&(s, e)| tod >= s && tod < e)
 }
 
+/// A pitch-hour due: in its hours, the owner free and well (`calibrate`'s
+/// `p_pitch` denominator).
+pub fn due(world: &World, p: &Pitch) -> bool {
+    in_hours(world, p) && !world.has::<Sentence>(p.owner) && !crate::systems::health::sick(world, p.owner)
+}
+
 /// Is the owner at his Pitch now (in its hours, free, well; a body within
-/// `pitch_reach` of the spot, off screen counted there)?
+/// `pitch_reach` of the spot; off screen on the table's `p_pitch` for the
+/// hour, every hour with a table without it)?
 pub fn working(world: &World, p: &Pitch) -> bool {
-    if !in_hours(world, p) || world.has::<Sentence>(p.owner) || crate::systems::health::sick(world, p.owner) {
+    if !due(world, p) {
         return false;
     }
     match world.comp::<Brain>(p.owner) {
-        Some(b) if b.lod == Lod::Statistical => true,
+        Some(b) if b.lod == Lod::Statistical => world.stat_table.as_ref().and_then(|t| t.p_pitch).is_none_or(|q| {
+            let hour = world.tick / crate::time::TICKS_PER_HOUR;
+            crate::systems::econ::hash_unit(world.seed(), PURPOSE_STAT_PITCH, u64::from(p.owner.index), hour) < q
+        }),
         Some(_) => world
             .comp::<Position>(p.owner)
             .is_some_and(|pos| pos.building.is_none() && pos.tile.manhattan(p.spot) <= world.config.jobs2.pitch_reach),

@@ -625,6 +625,11 @@ pub fn rip(world: &mut World, agent: EntityId, body: EntityId) -> usize {
 /// take to the gang that bought it).
 pub fn rip_for(world: &mut World, agent: EntityId, body: EntityId, gang: Option<EntityId>) -> usize {
     let implants = installed(world, body);
+    // Jobs & lives phase 7 (§ 6.3): the first ripped slot (a survivor's maim).
+    let ripped_slot = implants.first().and_then(|&a| match world.comp::<Asset>(a).map(|x| x.kind) {
+        Some(AssetKind::Implant(s)) => Some(s),
+        _ => None,
+    });
     let hideout = gang.and_then(|g| world.hideout_of(g));
     let per = world.config.assets.parts_per.implant;
     // M15 W31: a Purist destroys what it rips: Parts to the Recycler.
@@ -685,6 +690,9 @@ pub fn rip_for(world: &mut World, agent: EntityId, body: EntityId, gang: Option<
             }
             world.remember(body, MemoryKind::Abducted, Some(agent), 1.0, -1.0, false);
             world.leave_building(body);
+            if let Some(s) = ripped_slot {
+                crate::systems::ages::maim(world, body, Some(s), "a ripped slot");
+            }
         }
     } else if world.comp::<Brain>(agent).and_then(|b| b.carrying_corpse) == Some(body) {
         // A body dragged home is put down at the Hideout.

@@ -195,6 +195,10 @@ pub struct CoinProbe {
     pub loot_lost: i64,
     /// Coins a god command minted or burned (`FundGang`, `SetTreasury`, …).
     pub god_coins: i64,
+    /// Jobs & lives phase 7b: paid venue visits and their coins by venue
+    /// kind (`leisure::pay_venue`, a Bar's drink), the parity test's mirror
+    /// row. Diagnostic only.
+    pub venue_paid: std::collections::BTreeMap<String, (u64, i64)>,
 }
 
 // ---------------------------------------------------------------------------

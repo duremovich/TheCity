@@ -179,6 +179,8 @@ fn rise(world: &mut World, id: EntityId) {
     }
     world.stats.current.wounded.recovered += 1;
     world.push_event(EventKind::Recovered, &[id], format!("{} is back on their feet", world.name_of(id)));
+    // Jobs & lives phase 7 (§ 6.3): healed badly on `p_maimed` (nothing off).
+    crate::systems::ages::on_rise(world, id);
 }
 
 // ---------------------------------------------------------------------------
