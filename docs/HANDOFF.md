@@ -506,3 +506,16 @@ One solo Opus coder `jl1` (worktree `agent-a864f625a5712bd95`) builds phase by p
   - Followers reach 34 % of the city by day 120, with no ceiling (for Dylan).
   - Parity gap 0.484 of 0.50.
   - Carry-overs for phase 8: the organ book and scav kills are ~0 live, because M13 Harvest drags rarely reach the Hideout (this needs a fix, since scavs are Dylan's ask); church purses pile up (7.5k); Trafficking is still 0 (a Dollhouse front needs a held Mid/Spire Lot and 900 coins).
+- **Phase 7** (life stages, plus the gate work pulled forward) 38cd151, SAVE 34.
+  - Life stages: children's routines and fee Schools, elder frailty, kin take-in with seeded Parent edges, seed ages to 75, maims and prosthetics.
+  - The pulled-forward gate work:
+    - D17's one regen (`p_pitch`, `p_venue`).
+    - **The off-screen leisure mirror bug fixed.** `stat_daily` had no walk cap, so off-screen spend on vice venues was inflated about 2×.
+    - The synth parity row printed (M10 pantry sharing, pre-milestone).
+    - The Split bullet demoted.
+    - The CEO shadow row re-derived.
+    - An M17 succession jailed-boss bug fixed.
+  - Measured vs ee86297: Murders 77.7 → 122 and employed −10 % (venue jobs), so the city got harsher again.
+  - The off identity moves through the evening mirror only, proved with a `leisure.rs`-revert build.
+  - Carry-overs for phase 8: the abroad and god_abroad edge asserts are now conditional on the target living; the leverage protection test runs on a pre-mirror world.
+  - **Phase 8 left:** the gate (bullets, probes, the 14 archetypes' diaries, god scenarios, `analyze_run` sections, docs deviations), the organ and scav fix, then `/code-review high`. **No second regen.**
