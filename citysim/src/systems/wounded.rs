@@ -238,6 +238,17 @@ fn tick_down(world: &mut World) {
             .filter(|&c| c != id)
             .is_some_and(|c| law::living(world, c) && world.comp::<Brain>(c).is_some_and(|b| b.escorting == Some(id)));
         if !carried && cuff != Some(id) {
+            // Jobs & lives phase 8: a downed agent let go (its carrier's plan
+            // aborted, `abort_plan` freeing its escort) may have thought and
+            // planned in between; it lies where it is with no plan (seed 42
+            // day 74: a downed guard boarded the El and stayed aboard past
+            // its arrival, cuffed).
+            if world
+                .comp::<Brain>(id)
+                .is_some_and(|b| b.plan.is_some() || !matches!(b.exec, crate::exec::ExecState::Idle))
+            {
+                world.abort_plan(id);
+            }
             if let Some(b) = world.comp_mut::<Brain>(id) {
                 b.cuffed_by = Some(id);
             }

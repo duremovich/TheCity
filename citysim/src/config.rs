@@ -392,6 +392,10 @@ pub struct GrayCfg {
     pub clinic_organs: u32,
     pub organ_price: i64,
     pub p_organ_needed: f32,
+    /// Jobs & lives phase 8 (the scavs): an abductor dragging its take home
+    /// scores its GangWork this (and the plan's hysteresis), as a hunter its
+    /// Hunt (`[hunt] hold_score`), so only an emergency drops the drag.
+    pub drag_hold_score: f32,
     pub p_customs: f32,
     /// A gang builds a BlackClinic with its found cost and this to spare.
     pub black_clinic_spare: i64,
@@ -439,6 +443,7 @@ impl Default for GrayCfg {
             clinic_organs: 3,
             organ_price: 30,
             p_organ_needed: 0.5,
+            drag_hold_score: 0.75,
             p_customs: 0.1,
             black_clinic_spare: 200,
             p_bm_raid: 0.2,

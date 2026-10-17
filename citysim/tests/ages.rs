@@ -170,3 +170,39 @@ fn test_seeded_ages_off_and_save() {
     let back = citysim::save::from_ron(&text).expect("load");
     assert_eq!(citysim::save::to_ron(&back), text, "byte-identical round trip");
 }
+
+/// Phase 8 (§ 12): a homeless household's child is on the Street routine,
+/// and after `street_take_days` of it the camp takes the child.
+#[test]
+fn test_street_child_taken_after_the_days() {
+    let mut w = on_world();
+    let home = w
+        .buildings_of_kind(BuildingKind::Home)
+        .iter()
+        .copied()
+        .find(|&h| w.comp::<citysim::Building>(h).is_some_and(|b| !b.derelict))
+        .expect("a Home");
+    let pool = idle(&w);
+    let (mother, father) = (pool[0], pool[1]);
+    for p in [mother, father] {
+        w.set_home(p, Some(home));
+    }
+    let kid = citysim::systems::demography::spawn_child(&mut w, mother, father, home);
+    for p in [mother, father, kid] {
+        w.set_home(p, None);
+    }
+    let days = w.config.ages.street_take_days;
+    for _ in 0..days.saturating_sub(1) {
+        ages::daily(&mut w);
+        w.tick += TICKS_PER_DAY;
+    }
+    assert_eq!(w.comp::<citysim::Child>(kid).map(|c| c.routine), Some(citysim::components::Routine::Street));
+    assert!(w.stats.current.jobs2.as_ref().is_none_or(|j| j.street_takes == 0), "not before the days");
+    ages::daily(&mut w);
+    let camp = w.comp::<Household>(kid).and_then(|h| h.home);
+    assert!(
+        camp.and_then(|c| w.comp::<citysim::Building>(c)).is_some_and(|b| b.kind == BuildingKind::Camp),
+        "the camp took the child"
+    );
+    assert!(w.stats.current.jobs2.as_ref().is_some_and(|j| j.street_takes == 1));
+}

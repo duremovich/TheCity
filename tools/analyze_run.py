@@ -1024,6 +1024,28 @@ def jobs2(rows, events, out):
         J["ages_mean"] = {k: mean(col(rows, k)) for k in AGES_SNAP}
         t = J["ages_totals"]
         J["school_share"] = t["school_days"] / t["child_days"] if t["child_days"] else 0
+    # Phase 8's gate: the § 12 bands not printed by a phase (numbers only).
+    G = {}
+    if "children_taken" in rows[0]:
+        G["camp_intakes"] = sum(col(rows, "children_taken"))
+    if "vice_totals" in J and "street_totals" in J and "gang_income" in rows[0]:
+        gi = sum(col(rows, "gang_income"))
+        G["vice_and_street_cut_share_of_gang_income"] = \
+            (J["vice_totals"]["pimp_cut"] + J["street_totals"]["street_cut"]) / gi if gi else 0
+    books_in = {k: sum(col(rows, k)) for k in ("rations_paid", "bd_export_paid", "organs_export_paid") if k in rows[0]}
+    books_out = {k: sum(col(rows, k)) for k in ("power_fuel", "flow_arms", "flow_import_out") if k in rows[0]}
+    G["world_books_in"] = books_in
+    G["world_out"] = books_out
+    if "scav_kills" in rows[0]:
+        kills = sum(col(rows, "scav_kills"))
+        G["scav_kills_a_day"] = kills / days
+        G["abductions_a_day"] = sum(col(rows, "abductions")) / days if "abductions" in rows[0] else 0
+        G["organs_per_scav_kill"] = sum(col(rows, "organs_made")) / kills if kills else 0
+        made = sum(col(rows, "organs_made"))
+        G["organs_rotted_share"] = sum(col(rows, "organs_rotted")) / made if made else 0
+    if "ticks_per_sec" in rows[0]:
+        G["ticks_per_sec_mean"] = mean(col(rows, "ticks_per_sec"))
+    J["gate"] = G
     if events:
         kinds = ("PowerOut", "PowerBack", "BuildDone", "Pilfered", "PitchOpened", "PitchClosed", "PitchSwept",
                  "DawnPick", "TinkerBotched", "CrateLanded", "CrateSeized", "LicenceSold", "Murder")
@@ -1251,6 +1273,12 @@ def fmt(o):
             L.append("life stages, run totals: " + f(w["ages_totals"]))
             L.append("life stages, daily mean: " + f(w["ages_mean"]) + f"; school days / child-days "
                      f"{w['school_share']:.1%}")
+        if "gate" in w:
+            g = w["gate"]
+            L.append("phase 8 bands: " + ", ".join(
+                f"{k} {v:.3g}" for k, v in g.items() if isinstance(v, (int, float))))
+            L.append("the World's books in (run totals): " + f(g.get("world_books_in", {})) + "; out: "
+                     + f(g.get("world_out", {})) + " (the sub-switch A/Bs of J24/J25 are run pairs, not one run)")
         if "events" in w:
             L.append("events: " + f(w["events"]) + f"; foreman named {w['foreman_named']}; Hqs built {w['hq_built']}")
     L.append("-- flags --")

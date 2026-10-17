@@ -41,7 +41,9 @@ pub struct ShadowArgs {
     /// Comma-separated archetypes: gang_member, gang_leader, ripperdoc, homeless, ceo, exec, guard,
     /// worker, runner, purist, reporter, child, dealer, cook, club_staff, fighter, fabber, sweeper,
     /// worker_friday, super, bouncer, dancer, night_shift, orderly, camp_warden, fixer, gun, sick,
-    /// buyer (a child is unpinnable: no Brain).
+    /// buyer, and (Jobs & lives, diaries only) joytoy, street_worker, pimp, vendor, day_labourer,
+    /// cabbie, courier, office_worker, arms_dealer, forger, elder, loader, builder, foreman, madam,
+    /// companion, black_doc, cultist, teacher, scav (a child is unpinnable: no Brain).
     #[arg(long)]
     pub pick: Option<String>,
     /// Shadow this entity index (repeatable).
@@ -68,7 +70,7 @@ pub struct ShadowArgs {
     pub assert: bool,
 }
 
-const ARCHETYPES: [&str; 29] = [
+const ARCHETYPES: [&str; 49] = [
     "gang_member",
     "gang_leader",
     "ripperdoc",
@@ -107,6 +109,29 @@ const ARCHETYPES: [&str; 29] = [
     // agent of an organic Hit or Beat live or posted in the 7 days before today. Diaries only
     // (no `CHECKS` rows: the tier is recalibrated separately).
     "buyer",
+    // Jobs & lives phase 8 (docs/JOBS_AND_LIVES.md § 12): the milestone's lives. Diaries only (no
+    // `CHECKS` rows until the eight-run calibration ensemble). A trade by its `[[trades]]` key
+    // (posts and pitches); the rest by state.
+    "joytoy",
+    "street_worker",
+    "pimp",
+    "vendor",
+    "day_labourer",
+    "cabbie",
+    "courier",
+    "office_worker",
+    "arms_dealer",
+    "forger",
+    "elder",
+    "loader",
+    "builder",
+    "foreman",
+    "madam",
+    "companion",
+    "black_doc",
+    "cultist",
+    "teacher",
+    "scav",
 ];
 
 /// Activity classes of the time-use table, in print order.
@@ -212,6 +237,63 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
             let roles: Vec<Role> = world.config.trade_role(arch).into_iter().collect();
             by_role(&roles)
         }
+        // Jobs & lives phase 8: a trade's post holders, and (for a pitch trade) the agents
+        // working its pitch; the joytoy is the chip trade's.
+        "street_worker" | "vendor" | "day_labourer" | "courier" | "office_worker" | "forger" | "loader" | "builder"
+        | "madam" | "companion" | "black_doc" | "teacher" | "cabbie" | "joytoy" => {
+            let key = match arch {
+                "cabbie" => "cab_driver",
+                "joytoy" => "chip_host",
+                k => k,
+            };
+            let Some(role) = world.config.trade_role(key) else { return Ok(Vec::new()) };
+            let mut v = by_role(&[role]);
+            if let Role::Trade(t) = role {
+                v.extend(world.jobs2.pitches.iter().filter(|(_, p)| p.trade == t).map(|(&a, _)| a));
+            }
+            v.into_iter().filter(|&a| adult_alive(world, a)).collect()
+        }
+        "pimp" => world.jobs2.vice.pimps.values().copied().filter(|&a| adult_alive(world, a)).collect(),
+        "foreman" => {
+            let Some(role) = world.config.trade_role("builder") else { return Ok(Vec::new()) };
+            let yards: BTreeSet<EntityId> =
+                by_role(&[role]).into_iter().filter_map(|a| world.comp::<Job>(a).and_then(|j| j.employer)).collect();
+            yards.into_iter().filter_map(|y| citysim::systems::industry::foreman(world, y, None)).collect()
+        }
+        // A gang dealer whose gang keeps weapons in its Hideout (the dealer over goods).
+        "arms_dealer" => {
+            let mut dealers: BTreeSet<EntityId> = world.dealers.values().flatten().copied().collect();
+            dealers.extend(world.deal_log.values().map(|&(a, _)| a));
+            adults()
+                .filter(|a| dealers.contains(a))
+                .filter(|&a| {
+                    world
+                        .gang_of(a)
+                        .and_then(|g| world.hideout_of(g))
+                        .is_some_and(|h| !citysim::systems::weapons::stock_at(world, h).is_empty())
+                })
+                .collect()
+        }
+        "elder" => {
+            let from = world.config.ages.frail_from_years;
+            adults().filter(|&a| world.comp::<Identity>(a).is_some_and(|i| i.age_years() >= from)).collect()
+        }
+        // A member of a gang under a `[faith]` cult row.
+        "cultist" => adults()
+            .filter(|&a| {
+                world.gang_of(a).and_then(|g| world.comp::<Gang>(g)).and_then(|g| g.creed).is_some_and(|c| match c {
+                    citysim::word::Creed::Config(i) => {
+                        world.config.faith.creeds.get(usize::from(i)).is_some_and(|r| r.cult)
+                    }
+                    citysim::word::Creed::Purist => false,
+                })
+            })
+            .collect(),
+        // A member of a gang typed with organ targets (the scavs).
+        "scav" => adults()
+            .filter(|&a| world.has::<GangMember>(a))
+            .filter(|&a| world.gang_of(a).is_some_and(|g| citysim::systems::gray::organ_targets(world, g)))
+            .collect(),
         // V2: the diary should start on the weekday before `[leisure] collect_weekday` (Friday on
         // the shipped config: weekday 5 of `day % 7`, the last workday before the rest day 6).
         "worker_friday" => adults()

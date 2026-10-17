@@ -3558,6 +3558,7 @@ organ_rot = 0.25                   # of a stock lost a day (rounded up)
 clinic_organs = 3                  # a licensed Clinic's shelf, bought from a gang at ...
 organ_price = 30                   # ... this a unit (Flow::Gray)
 p_organ_needed = 0.5               # a stabilisation draws a unit off the shelf
+drag_hold_score = 0.75             # phase 8: an abductor's GangWork while dragging its take home scores this (plus the plan's hysteresis): only an emergency (starving, a fight) drops the drag
 p_customs = 0.1                    # a gang's day of organs to the World seized (Smuggling on its leader)
 black_clinic_spare = 200           # a gang builds a black clinic with its found cost and this to spare
 p_bm_raid = 0.2                    # a black clinic in a Sweep or Crackdown district found a day (BlackMarket) ...
@@ -3568,7 +3569,7 @@ p_struck_off = 0.002               # a licensed Ripperdoc struck off a day x (1 
 [[gray.gang_types]]
 id = "scav"
 share = 0.35
-harvest_flat = 0.3                 # added to the Harvest order's score
+harvest_flat = 0.5                 # added to the Harvest order's score (phase 8: 0.3 -> 0.5)
 kill_p = 0.8                       # its rip's kill chance (the M13 chance is [chrome] p_rip_kill)
 organ_targets = true               # its Harvest target: anyone on its ground, valued by chrome plus organs
 

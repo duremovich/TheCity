@@ -158,7 +158,20 @@ fn assign_types(world: &mut World) {
 /// The order brain's tilt: a gang type's `harvest_flat` on its Harvest row
 /// (re-sorted as `attention::tilt`; nothing off or untyped).
 pub fn tilt_orders(world: &World, gang: EntityId, scores: &mut Vec<crate::components::OrderScore>) {
-    let Some(flat) = gang_type(world, gang).map(|r| r.harvest_flat).filter(|&f| f != 0.0) else { return };
+    let Some(row) = gang_type(world, gang) else { return };
+    // Jobs & lives phase 8: an organ-hunting row reads the World's organ
+    // book: its flat scales with the book's appetite (0.5-2; 1 at rest), so
+    // a boom sends the scavs out (the M13 Harvest score itself reads no
+    // price).
+    let book = if row.organ_targets {
+        crate::systems::world_market::appetite(world, ExportGood::Organs).clamp(0.5, 2.0)
+    } else {
+        1.0
+    };
+    let flat = row.harvest_flat * book;
+    if flat == 0.0 {
+        return;
+    }
     let mut keyed: Vec<(f32, crate::components::OrderScore)> = scores
         .drain(..)
         .map(|mut s| {
@@ -556,8 +569,11 @@ pub fn daily(world: &mut World) {
     strike_off(world);
     build_clinics(world);
     raids(world);
-    rot(world);
+    // Jobs & lives phase 8: the day's units to market, then the rot (rot
+    // first took a fresh pair's unit before any buyer saw it: 80 of 82
+    // units rotted on the 6-seed mean, 2 exported).
     sell_organs(world);
+    rot(world);
     let alive: Vec<EntityId> = world.jobs2.gray.ripped.iter().copied().filter(|&b| world.is_alive(b)).collect();
     world.jobs2.gray.ripped = alive.into_iter().collect();
     let held: Vec<EntityId> =

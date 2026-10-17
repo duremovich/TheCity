@@ -638,7 +638,7 @@ pub fn vendetta_building(world: &World, gang: EntityId, v: EntityId) -> Option<E
 }
 
 /// M13 D36: [`cover_of`]'s rule for a district by tile (the Harvest target's).
-fn tile_cover(world: &World, gang: EntityId, tile: crate::components::TilePos) -> f32 {
+pub(crate) fn tile_cover(world: &World, gang: EntityId, tile: crate::components::TilePos) -> f32 {
     use crate::components::Stance;
     if !world.config.law.district_beats {
         return 0.0;

@@ -424,3 +424,58 @@ the employed share (J24) and the homeless share (J25) by phase; the J24/J25 effe
    - Build the growth and money in phase 6, and keep the takeover levers as hooks for M18 (the life-path playtests, addendum 14).
 7. **Soylent, chop shops, Power and Water** go to a later goods milestone.
 8. **One stat-table regen at the gate**, checked against Murders.
+
+
+---
+
+## Implemented: deviations (phases 1-8, 2026-10-13 → 2026-10-16)
+
+Each phase is one commit on main, off-identical with its switch off (42-44 x 30, byte for byte) and measured on 42-47 x 120 at 2k against the phase before it. The numbers are reports, never gates.
+
+### Per phase
+
+| # | commit | SAVE | J24 | J25 | Murders | other measured |
+|---|---|---|---|---|---|---|
+| 1 industry, civic, the Hq, the foreman | 0c4c252 | 28 | .653 → .797 | .145 → .076 | 98.5 → 80.0 | coins +48 % → +62 % / 60 d (the Rations book); 20k 221 vs 231 tps |
+| 2 the street | a9f835c | 29 | .797 → .799 | .076 flat | 80.0 → 106.7 | 3-5 pitches, ~2 coins a pitch-day; 350-808 day posts filled a run |
+| 3 weapons and owned items | 3274a04 | 30 | .799 → .807 | .076 → .073 | 106.7 → 89.8 | armed fights 26.9 % (mostly police); Stackwell dies on 3 of 6 seeds |
+| 4 vice venues, the street, fashion | 00a76d8 | 31 | .807 → .821 | .073 → .061 | 89.8 → 74.8 | sweeps 0 a day; status means Dreg > Corp |
+| 5 the dollhouse, braindance, sweeps | 230b28c | 32 | .821 → .815 | .061 → .069 | 74.8 → 68.3 | 73 chip contracts over 6 seeds; BD book ~100 a day; Solicitation 0.056 a day |
+| 6 the gray market and faith | 8bfa57d | 33 | .815 → .821 | .069 → .064 | 68.3 → 77.7 | followers 34 % by day 120; tithes 1.1 % of wages; organs and scav kills ~0 |
+| 7 life stages, the gate regen, the leisure mirror | 38cd151 | 34 | .821 → .780 | .064 → .079 | 77.7 → 122.0 | the regen alone 108.3; the mirror +13 %; off-screen leisure spend about halved; employed -10 % |
+| 8 the gate (the scavs) | (this) | 34 | .780 → .817 | .079 → .066 | 122.0 → 188.7 | scav kills 0 → 41 a seed, abductions 1 → 66, organs made 18 → 86 (exported 8, 74 rotted); population -105; core_year's population 1924 → 1474; 20k Murders 120 → 289 |
+
+### Deviations from the spec, by phase
+
+- **Phase 1.** `District.dark` read through `powered()`; `Flow::CabFare` added; `KindCfg` is `BuildingCfg` with optional columns; `Niche::Vice` kept out of `Niche::ALL` until phase 4; exports never wait on Loaders (the fee leaks to the World instead); the Hq's office cap is `admin_share` x 7 days of revenue; `core.rs`'s starvation bound floored at one death in the 5-day last window. **Not done:** the El slow-down on outages.
+- **Phase 2.** The corner walk only after a dawn with posts (`corner_reach` 40, eat before the queue): the all-Full city walked broke bodies 100 tiles to be turned away and flipped parity. A broke corp's plant dark five days is nationalised (unit-tested, never fired in the runs).
+- **Phase 3.** Items on the M13 asset store (`is_item`, `prov`) rather than a new store; guards draw from Precinct and Office stock; the stims dealer also sells arms. **Deferred:** Statistical carry and sightings, the off-screen ledger's arms term, the law brain's arms pressure, Gunsmith growth.
+- **Phase 4.** Clothing as an owned item on the phase-3 store (Dylan's answer 1); fashion items, the dress gate and Boutiques need `[assets]` on (the calibration city runs with it off: the parity fix, no tolerance change); Boutiques on roster row 5.
+- **Phase 5.** Chip offers go to jobless debtors only (the core_sanity fix by mechanism); the black BD price at 2.0x wholesale with a certain buy (black sales were 0); patrol sweeps on street pitches in Patrol and Crackdown districts (`[vice] patrol_sweep`), the phase-4 carry-over.
+- **Phase 6.** Faith seeded lazily at the first midnight (seeding at tick 0 broke the structure tests); gang types assigned in formation order by share (a hash gave 0 scavs); `id_w` halved (papers kept the wanted free too long); an expelled member is not an apostate.
+- **Phase 7.** Children counted with `is_alive` and no corpse (`law::living` needs a Brain); kin take-in through seeded Parent edges for adults 45 and over (accepted); cult `desist_mult` 0.25. **The gate work pulled forward (7b):** D17's one regen with the Statistical pitch hour (`p_pitch`) and per-kind venue rates (`p_venue`); the off-screen leisure mirror (the evening's walk cap from the home-work rectangle, learned per-kind visits shared over the eligible, the off-screen NoodleBar meal counted); the parity test's synth row printed as a FINDING (M10's pantry sharing, 5.28 at 05b7c15) and venue visits and coins asserted; the gang Split demoted; the CEO shadow row re-derived; an M17 succession bug fixed (a claimant jailed while holding the chair became the jailed boss). The off cities move through the evening mirror only (a `leisure.rs`-revert build is byte-identical).
+- **Phase 8 (the gate).**
+  - **The scavs, fixed at the mechanism.** Harvest never won an order: an organ-hunting gang ranked its prey by value alone, and the best-valued stood under the Law's cover (0.95), so the Harvest score's `1 - target cover` term held it near its flat. Now (`chrome::harvest_target`) a scav ranks prey by value past the cover where it stands; `[[gray.gang_types]] harvest_flat` 0.3 → 0.5 (this milestone's knob); the scav tilt scales with the World's organ appetite (0.5-2). Then the drags: an abductor's Eat, Unwind or Sleep dropped the drag (`abort_plan` frees the abductee) and the next member re-abducted the same victim (one victim 22 times in 60 days); and an Abduct step begun before another member's won completed after it and took the victim from the first. Fixed: the abductor holds GangWork at `[gray] drag_hold_score` 0.75 plus hysteresis while dragging (as a hunter holds its Hunt; an emergency still wins), and `chrome::abduct_within` refuses a victim in another's hands. The organ market sells before the midnight rot (rot first took a fresh pair's unit before any buyer saw it).
+  - **A downed agent let go is re-cuffed with no plan** (`wounded::tick_down`): a carrier's aborted plan freed a downed guard for a tick, he planned, boarded the El and stayed aboard past arrival (the core_sanity `ride past arrival` mark, once on seed 42 under the scavs' trajectory).
+  - `core_sanity` gains the § 12 bullets that fire on 3 or more of 6 seeds (40, every one 6 of 6 but an organ exported, 3 of 6) and prints the 13 that fire on 2 or fewer as FINDINGs, each with its unit test; M17's OutsidersArrived bullet, [0, 0, 0, 3, 6, 6] on this city, is demoted the same way (new: `gray_faith.rs::test_organs_sold_then_exported`, `test_stabilise_draws_a_clinic_organ`, `test_struck_off_leaves_the_post`; `ages.rs::test_street_child_taken_after_the_days`; `scavs.rs` for the three scav mechanisms).
+  - Person probes: the seven probes pinned off in phases 1, 2 and 4 (four on their own configs, three on phase 4's `world_p3`) are un-pinned (their premises hold on the Jobs & lives city); the JOBS_V2 laid-off probe is un-ignored (5 posts open at the search); the robbed-resident weapon probe is added and ignored as a gap (the want forms, the Shop offer stays on chrome). The rest of § 12's probes are carried by the phases' own tests (the vendor pitch, the corner, the cab, the chip debtor, the fake ID, the widow, the fired elder, the child's chores and School); the dancer's StripClub founding has no probe (open).
+  - God scenarios v12 (`docs/GOD_SCENARIOS_V12.md`): the ten of § 12 at 60 days against the control; all ten react. Three levers have no god command (`public_school`, a chip offer, a creed's tithe).
+  - Shadow V3 (`docs/SHADOW_V3.md`, `docs/shadow_v3/`): 20 new archetypes picked, 38 diaries, no bounds.
+  - `tools/analyze_run.py`: the § 12 bands not printed by a phase (camp intakes, the vice and street cut's share of gang income, the World's books in and out, scav kills, abductions, organs a kill and rotted, ticks/s).
+  - No second stat-table regen (the scav and organ changes are Full and Statistical alike in their world rules; `calibrate` runs gangless and reproduces).
+
+### Carry-overs still open
+
+- **The El slow-down on outages** (phase 1): not built; and outages do not land in practice (the midnight search refills a plant's posts overnight: `god_power_cut`).
+- **Statistical-tier weapons** (phase 3): no off-screen carry, sightings or arms term.
+- **The status-mean inversion** (phase 4): the class status means run Dreg > Corp.
+- **Trafficking at 0** (phase 5): no gang holds a Dollhouse front (it needs a held Mid/Spire Lot and 900 coins); captive chipping is unit-tested only.
+- **The conditional abroad asserts** (phase 7b): `abroad.rs` and `god_abroad` assert the edge only while its target lives (phase 8 also re-seats `abroad.rs` on a living arrival).
+- **Faith growth uncapped** (phase 6): followers reach about a third of the city by day 120, with no ceiling (for Dylan).
+- **Church purses pile up** (phase 6): 7.5k in a church's charity purse with nothing to spend it on.
+- **The synth FINDING** (phase 7b): the off-screen synth share runs 5-6 points over the Full tier's through M10's pantry sharing (intentional, reversible).
+- **No black clinic is ever built** (phase 6): a gang needs a held district's vacant Lot and 200 coins over the found cost; the black doc and the BlackMarket raid never appear.
+- **Organs rot** (phase 8): 93 % of the units made rot on seed 42 (2 a body, a quarter a day); exports and Clinic use stay small; the book is capped and supply-bound.
+- **The robbed do not arm** (phase 8's ignored probe).
+- **The street trade is thin** (phases 2 and 4): about one street pitch open, no pimp's cut, so the vice levers barely show (`god_vice_legal`).
+- **Murders**: 98.5 at 05b7c15 → 122.0 at phase 7 → 188.7 at phase 8 (the scavs' 41 kills a seed and the grudges they leave); core_year's year-end population 1,474; printed, for the calibration milestone.

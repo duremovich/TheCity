@@ -208,7 +208,15 @@ fn test_promotion_past_the_thresholds_arrives_with_the_edge() {
     assert!(arrived.iter().all(|e| names.contains(&w.name_of(e.actors[0]))), "the stored names: {names:?}");
     // Every disposition an Enemy: the arrival holds a grudge.
     let (w, leader, _) = run(2.0, 1.0, 1.0);
-    let e = w.events.iter().find(|e| e.kind == EventKind::CastArrived).expect("an enemy arrived");
+    // Jobs & lives phase 8: an arrival still living (a dead one's grudges
+    // and edges go with its components; on seed 42 the first of six bled
+    // out after the fight with the leader).
+    let e = w
+        .events
+        .iter()
+        .filter(|e| e.kind == EventKind::CastArrived)
+        .find(|e| citysim::systems::law::living(&w, e.actors[0]))
+        .expect("an enemy arrived and lives");
     let a = e.actors[0];
     assert!(w.edge(a, leader).is_some_and(|e| e.kind == RelKind::Enemy));
     // Jobs & lives phase 7b: one of the six arrivals killed the leader 70

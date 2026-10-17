@@ -3040,3 +3040,402 @@ fn god_kill_militech() {
     assert!(dead(&w), "Militech International survived the runs and the embargo");
     assert!(!dead(&wc), "the control's Militech International died");
 }
+
+// ---------------------------------------------------------------------------
+// v12 (Jobs & lives phase 8, docs/JOBS_AND_LIVES.md § 12; docs/GOD_SCENARIOS_V12.md):
+// one scenario per reaction class, 60 days on the v8 harness against its
+// control. The levers without a god command are set on the world directly
+// (named in each scenario and listed as gaps).
+// ---------------------------------------------------------------------------
+
+/// The milestone's daily columns (zero with `[jobs2]` off).
+fn j2(d: &V8Day, f: fn(&citysim::stats::Jobs2Cols) -> f64) -> f64 {
+    d.row.jobs2.as_ref().map_or(0.0, f)
+}
+
+fn v12_rows() -> Vec<V8Series> {
+    vec![
+        ("employed (mean)", Box::new(|d: &V8Day| f64::from(d.row.employed))),
+        ("population (mean)", Box::new(|d: &V8Day| f64::from(d.row.population))),
+        ("immigrants", Box::new(|d: &V8Day| f64::from(d.row.immigrants))),
+        ("violent deaths", Box::new(|d: &V8Day| f64::from(d.row.deaths_violence))),
+        ("day posts filled", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.day_posts_filled)))),
+        ("corner queue (mean)", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.corner_queue)))),
+        ("pitches (mean)", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.pitches)))),
+        ("dark districts (mean)", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.dark_districts)))),
+        ("outages", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.outages)))),
+        ("armed fights", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.armed_fights)))),
+        ("armed deaths", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.armed_deaths)))),
+        ("street pitches (mean)", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.street_pitches)))),
+        ("swept", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.swept)))),
+        ("Solicitation arrests", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.solicit_arrests)))),
+        ("pimp cut", Box::new(|d: &V8Day| j2(d, |j| j.pimp_cut as f64))),
+        ("chip hired", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.chip_hired)))),
+        ("chipped living (mean)", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.chipped_living)))),
+        ("chip episodes", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.chip_episodes)))),
+        ("Trafficking", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.trafficking)))),
+        ("organs made", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.organs_made)))),
+        ("organs exported", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.organs_exported)))),
+        ("scav kills", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.scav_kills)))),
+        ("abductions", Box::new(|d: &V8Day| f64::from(d.row.abductions))),
+        ("black clinics (mean)", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.black_clinics)))),
+        ("cult members (mean)", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.cult_members)))),
+        ("apostates", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.apostates)))),
+        ("apostates hunted", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.apostates_hunted)))),
+        ("tithes", Box::new(|d: &V8Day| j2(d, |j| j.tithes as f64))),
+        ("school days", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.school_days)))),
+        ("school fees", Box::new(|d: &V8Day| j2(d, |j| j.school_fees as f64))),
+        ("children taken", Box::new(|d: &V8Day| f64::from(d.row.econ.children_taken))),
+        ("elders employed (mean)", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.elders_employed)))),
+        ("elders taken in", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.elders_taken_in)))),
+        ("Rations made", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.rations_made)))),
+    ]
+}
+
+fn v12_sum(r: &V8Run, from: u64, to: u64, f: fn(&citysim::stats::Jobs2Cols) -> f64) -> f64 {
+    r.sum(from, to, &|d: &V8Day| j2(d, f))
+}
+
+/// v12 god 1 (JOBS_V2's): 200 employed residents killed on day 45. Do
+/// offers arrive, is employment back near the control's by day 60, does the
+/// corner fill?
+#[test]
+#[ignore]
+fn god_kill_workers() {
+    let r = run_v8("god_kill_workers", |w, day, watched| {
+        if day != 45 {
+            return;
+        }
+        let mut staff: Vec<EntityId> = w
+            .citizens()
+            .into_iter()
+            .filter(|&a| w.has::<citysim::Job>(a) && citysim::systems::law::living(w, a))
+            .collect();
+        staff.sort_unstable();
+        let step = (staff.len() / 200).max(1);
+        let picked: Vec<EntityId> = staff.into_iter().step_by(step).take(200).collect();
+        eprintln!("day 45: {} employed killed", picked.len());
+        for a in picked {
+            w.push_command(PlayerCommand::KillAgent(a));
+        }
+        watched.clear();
+    });
+    r.print_v8(&[(30, 45), (45, 50), (50, 60)], v12_rows());
+    let c = v8_control();
+    let emp = |x: &V8Run, d: usize| f64::from(x.days[d].row.employed);
+    eprintln!(
+        "employed day 46 {:.0}, day 59 {:.0} (control {:.0}): {:.0} % of the control",
+        emp(&r, 46),
+        emp(&r, 59),
+        emp(c, 59),
+        100.0 * emp(&r, 59) / emp(c, 59).max(1.0)
+    );
+    assert!(r.failed.is_empty(), "failed: {:?}", r.failed);
+    assert!(r.applied() >= 150, "the kills applied ({})", r.applied());
+    assert!(emp(&r, 59) >= 0.9 * emp(c, 59), "employment not back to 90 % of the control's by day 60");
+}
+
+/// v12 god 2: every UtilityPlant's staff jailed 10 days on day 30. Do the
+/// districts go dark, and does the city notice?
+#[test]
+#[ignore]
+fn god_power_cut() {
+    let mut restaffed = 0usize;
+    let r = run_v8("god_power_cut", |w, day, watched| {
+        if day == 31 {
+            restaffed = w
+                .buildings_of_kind(citysim::BuildingKind::UtilityPlant)
+                .iter()
+                .map(|&p| w.staff_of(p).iter().filter(|&&a| !w.has::<citysim::Sentence>(a)).count())
+                .sum();
+        }
+        if day != 30 {
+            return;
+        }
+        let plants: Vec<EntityId> = w.buildings_of_kind(citysim::BuildingKind::UtilityPlant).to_vec();
+        let staff: Vec<EntityId> = plants.iter().flat_map(|&p| w.staff_of(p).to_vec()).collect();
+        eprintln!("day 30: {} UtilityPlant staff jailed 10 days ({} plants)", staff.len(), plants.len());
+        for a in staff {
+            watched.push(a);
+            w.push_command(PlayerCommand::JailAgent { who: a, days: 10 });
+        }
+    });
+    r.print_v8(&[(20, 30), (30, 40), (40, 60)], v12_rows());
+    assert!(r.failed.is_empty(), "failed: {:?}", r.failed);
+    assert!(r.applied() >= 1, "the jailings applied");
+    let dark = v12_sum(&r, 30, 41, |j| f64::from(j.dark_districts)) + v12_sum(&r, 30, 41, |j| f64::from(j.outages));
+    eprintln!("dark district-days and outages 30-40: {dark:.0}; free plant staff at day 31's start: {restaffed}");
+    // Reacted: the districts went dark, or the plant was staffed again the
+    // next day (the midnight job search refills the posts).
+    assert!(dark > 0.0 || restaffed > 0, "no district went dark and nobody took the posts");
+}
+
+/// v12 god 3: a crate of 200 tier-3 weapons to the weakest gang on day 20.
+/// Do its fights turn armed, do the Murders rise, does the Law answer?
+#[test]
+#[ignore]
+fn god_flood_guns() {
+    let r = run_v8("god_flood_guns", |w, day, watched| {
+        if day != 20 {
+            return;
+        }
+        let g = w
+            .gangs()
+            .into_iter()
+            .filter(|&g| w.hideout_of(g).is_some())
+            .min_by_key(|&g| (w.comp::<Gang>(g).map_or(0, |x| x.members.len()), g));
+        let Some(g) = g else {
+            eprintln!("day 20: no gang with a Hideout");
+            return;
+        };
+        eprintln!("day 20: 200 tier-3 weapons to {}", w.owner_label(Some(g)));
+        watched.push(g);
+        w.push_command(PlayerCommand::FloodGuns { gang: g, n: 200, tier: 3 });
+    });
+    r.print_v8(&[(10, 20), (20, 40), (40, 60)], v12_rows());
+    let c = v8_control();
+    let armed = |x: &V8Run| v12_sum(x, 20, 60, |j| f64::from(j.armed_fights));
+    let issued = |x: &V8Run| v12_sum(x, 20, 60, |j| f64::from(j.issued));
+    eprintln!(
+        "armed fights 20-60: {:.0} (control {:.0}); armoury issues {:.0} ({:.0})",
+        armed(&r),
+        armed(c),
+        issued(&r),
+        issued(c)
+    );
+    eprintln!("law posture: {}", r.orders(18, |d| format!("{:?}", d.posture)));
+    eprintln!("control:     {}", c.orders(18, |d| format!("{:?}", d.posture)));
+    assert!(r.failed.is_empty(), "failed: {:?}", r.failed);
+    assert_eq!(r.applied(), 1, "the crate landed");
+    // Reacted: the crate reached the gang's hands (the musters' issues);
+    // whether the fights turned armed is judged in the doc.
+    assert!(issued(&r) > issued(c), "the crate was never issued");
+}
+
+/// v12 god 4: street work legal and brothels licensed on day 10 (the utopia
+/// lever; the spec's day 20 comes after seed 42's sweeps, which fall in days
+/// 10-20). Do the sweeps stop, the pitches rise, the pimps' cut fall?
+#[test]
+#[ignore]
+fn god_vice_legal() {
+    let r = run_v8("god_vice_legal", |w, day, _| {
+        if day == 10 {
+            w.push_command(PlayerCommand::SetStreetLegal(true));
+            w.push_command(PlayerCommand::SetBrothelsLicensed(true));
+        }
+    });
+    r.print_v8(&[(0, 10), (10, 30), (30, 60)], v12_rows());
+    let c = v8_control();
+    let swept = |x: &V8Run| v12_sum(x, 11, 60, |j| f64::from(j.swept));
+    eprintln!("swept 11-60: {:.0} (control {:.0})", swept(&r), swept(c));
+    assert!(r.failed.is_empty(), "failed: {:?}", r.failed);
+    assert_eq!(r.applied(), 2, "both levers applied");
+    assert!(swept(c) > 0.0, "the control swept nobody (the scenario tests nothing)");
+    assert!(swept(&r) < swept(c), "the sweeps did not stop");
+}
+
+/// v12 god 5: every debtor offered the chip on day 20 (each Dollhouse's
+/// places opened to the whole pool, its holder funded for the fees; no god
+/// command). Chipped count, episodes, Rescues, Trafficking?
+#[test]
+#[ignore]
+fn god_chip_everyone_in_debt() {
+    let r = run_v8("god_chip_everyone_in_debt", |w, day, _| {
+        if day != 20 {
+            return;
+        }
+        let Some(citysim::Role::Trade(t)) = citysim::systems::dollhouse::chip_role(w) else {
+            eprintln!("day 20: no chip trade");
+            return;
+        };
+        let debtors = w
+            .citizens()
+            .into_iter()
+            .filter(|&a| !w.has::<citysim::Job>(a) && citysim::systems::dollhouse::takes_offer(w, a))
+            .count();
+        if let Some(row) = w.config.trades.get_mut(t.index()) {
+            row.staff_per_floor = 255;
+        }
+        for b in w.buildings_of_kind(citysim::BuildingKind::Dollhouse).to_vec() {
+            if let Some(o) = w.owner_of(b) {
+                if w.has::<citysim::Corp>(o) {
+                    w.push_command(PlayerCommand::FundCorp { corp: o, amount: 20_000 });
+                } else if w.has::<Gang>(o) {
+                    w.push_command(PlayerCommand::FundGang { gang: o, amount: 20_000 });
+                }
+            }
+        }
+        eprintln!("day 20: {debtors} jobless debtors in the pool");
+    });
+    r.print_v8(&[(10, 20), (20, 40), (40, 60)], v12_rows());
+    let c = v8_control();
+    let hired = |x: &V8Run| v12_sum(x, 20, 60, |j| f64::from(j.chip_hired));
+    eprintln!("chip hired 20-60: {:.0} (control {:.0})", hired(&r), hired(c));
+    assert!(r.failed.is_empty(), "failed: {:?}", r.failed);
+    assert!(hired(&r) > hired(c), "no more were chipped than in the control");
+}
+
+/// v12 god 6: the World's appetite for organs x 5 on day 20. Do Harvest
+/// orders and abductions rise, do black clinics open?
+#[test]
+#[ignore]
+fn god_organ_boom() {
+    let r = run_v8("god_organ_boom", |w, day, _| {
+        if day == 20 {
+            w.push_command(PlayerCommand::SetAppetite { good: citysim::outside::ExportGood::Organs, mult: Some(5.0) });
+        }
+    });
+    r.print_v8(&[(10, 20), (20, 40), (40, 60)], v12_rows());
+    let c = v8_control();
+    let exported = |x: &V8Run| v12_sum(x, 20, 60, |j| f64::from(j.organs_exported));
+    let harvest = |x: &V8Run| x.days.iter().skip(20).filter(|d| d.gangs.values().any(|o| *o == Order::Harvest)).count();
+    let taken = |x: &V8Run| {
+        x.sum(20, 60, &|d: &V8Day| f64::from(d.row.abductions)) + v12_sum(x, 20, 60, |j| f64::from(j.scav_kills))
+    };
+    eprintln!(
+        "organs exported 20-60 {:.0} (control {:.0}); days with a gang on Harvest {} (control {}); abductions and scav kills {:.0} ({:.0})",
+        exported(&r),
+        exported(c),
+        harvest(&r),
+        harvest(c),
+        taken(&r),
+        taken(c)
+    );
+    assert!(r.failed.is_empty(), "failed: {:?}", r.failed);
+    assert_eq!(r.applied(), 1, "the appetite applied");
+    assert!(harvest(&r) > harvest(c) || taken(&r) > taken(c), "the scavs did not answer the boom");
+}
+
+/// v12 god 7: on day 10 the largest creedless Sump gang turns cult (the
+/// `[faith]` cult row, its tithe raised to 1.0) under a charismatic leader.
+/// Members, apostates, Hunts; do the Purists react?
+#[test]
+#[ignore]
+fn god_cult_in_sump() {
+    let r = run_v8("god_cult_in_sump", |w, day, watched| {
+        if day != 10 {
+            return;
+        }
+        let Some(row) = w.config.faith.creeds.iter().position(|c| c.cult) else {
+            eprintln!("day 10: no cult row");
+            return;
+        };
+        w.config.faith.creeds[row].tithe_frac = 1.0;
+        let sump = |w: &World, g: EntityId| {
+            w.hideout_of(g)
+                .and_then(|h| w.comp::<citysim::Building>(h))
+                .is_some_and(|b| w.map.zone(b.door) == citysim::Zone::Sump)
+        };
+        let g = w
+            .gangs()
+            .into_iter()
+            .filter(|&g| sump(w, g) && w.comp::<Gang>(g).is_some_and(|x| x.creed.is_none()))
+            .max_by_key(|&g| (w.comp::<Gang>(g).map_or(0, |x| x.members.len()), std::cmp::Reverse(g)));
+        let Some(g) = g else {
+            eprintln!("day 10: no creedless Sump gang");
+            return;
+        };
+        if let Some(l) = w.comp::<Gang>(g).and_then(|x| x.leader) {
+            if let Some(s) = w.comp_mut::<citysim::components::Skills>(l) {
+                s.persuasion = 1.0;
+            }
+            watched.push(l);
+        }
+        eprintln!("day 10: {} turns cult (tithe 1.0)", w.owner_label(Some(g)));
+        watched.push(g);
+        w.push_command(PlayerCommand::SetCreed { gang: g, creed: Some(citysim::word::Creed::Config(row as u8)) });
+    });
+    r.print_v8(&[(0, 10), (10, 30), (30, 60)], v12_rows());
+    assert!(r.failed.is_empty(), "failed: {:?}", r.failed);
+    assert_eq!(r.applied(), 1, "the creed applied");
+    let members = r.days[59].row.jobs2.as_ref().map_or(0, |j| j.cult_members);
+    eprintln!("cult members day 59: {members}");
+    assert!(members > 0, "no cult stands on day 59");
+}
+
+/// v12 god 8: the `public_school` lever on day 10 (no god command: set on
+/// the levers). Camp intakes fall, education rises, the Treasury pays?
+#[test]
+#[ignore]
+fn god_school_free() {
+    let mut held = false;
+    let r = run_v8("god_school_free", |w, day, _| {
+        if day == 10 {
+            w.levers.public_school = true;
+        }
+        if day == 59 {
+            held = w.levers.public_school;
+        }
+    });
+    r.print_v8(&[(0, 10), (10, 30), (30, 60)], v12_rows());
+    let c = v8_control();
+    let days = |x: &V8Run| v12_sum(x, 10, 60, |j| f64::from(j.school_days));
+    let fees = |x: &V8Run| v12_sum(x, 10, 60, |j| j.school_fees as f64);
+    eprintln!("school days 10-60: {:.0} (control {:.0}); fees {:.0} ({:.0})", days(&r), days(c), fees(&r), fees(c));
+    assert!(r.failed.is_empty(), "failed: {:?}", r.failed);
+    assert!(held, "the lever did not hold");
+    // Reacted: the households' fees stop (the city pays) or more children
+    // go; few live within `school_reach` of a School (docs/GOD_SCENARIOS_V12.md).
+    assert!(days(&r) > days(c) || fees(&r) < fees(c), "no more school days and the fees did not fall");
+}
+
+/// v12 god 9: every adult under 35 killed on day 30. Do the elders work on,
+/// kin take in, the corner empty; does the city's output fall and not
+/// collapse?
+#[test]
+#[ignore]
+fn god_kill_the_young() {
+    let r = run_v8("god_kill_the_young", |w, day, watched| {
+        if day != 30 {
+            return;
+        }
+        let young: Vec<EntityId> = w
+            .citizens()
+            .into_iter()
+            .filter(|&a| citysim::systems::demography::is_adult(w, a) && citysim::systems::law::living(w, a))
+            .filter(|&a| w.comp::<citysim::Identity>(a).is_some_and(|i| i.age_years() < 35))
+            .collect();
+        eprintln!("day 30: {} adults under 35 killed", young.len());
+        for a in young {
+            w.push_command(PlayerCommand::KillAgent(a));
+        }
+        watched.clear();
+    });
+    r.print_v8(&[(20, 30), (30, 40), (40, 60)], v12_rows());
+    let pop = |d: usize| r.days[d].row.population;
+    let emp = |d: usize| r.days[d].row.employed;
+    eprintln!(
+        "population day 29 {} day 31 {} day 59 {}; employed {} {} {}",
+        pop(29),
+        pop(31),
+        pop(59),
+        emp(29),
+        emp(31),
+        emp(59)
+    );
+    assert!(r.failed.is_empty(), "failed: {:?}", r.failed);
+    assert!(r.applied() >= 100, "the kills applied ({})", r.applied());
+    assert!(pop(59) > 0 && emp(59) > 0, "the city collapsed");
+    let share = |d: usize| f64::from(emp(d)) / f64::from(pop(d).max(1));
+    assert!(share(59) > share(29), "the survivors did not take up the posts");
+}
+
+/// v12 god 10 (JOBS_V2's): the outside wage at half its level on day 1.
+/// Does immigration rise?
+#[test]
+#[ignore]
+fn god_outside_boom() {
+    let r = run_v8("god_outside_boom", |w, day, _| {
+        if day == 1 {
+            let wage = w.econ.outside_wage_pin.unwrap_or(1.0);
+            w.push_command(PlayerCommand::SetOutsideWage(wage * 0.5));
+        }
+    });
+    r.print_v8(&[(0, 30), (30, 60)], v12_rows());
+    let c = v8_control();
+    let im = |x: &V8Run| x.sum(1, 60, &|d: &V8Day| f64::from(d.row.immigrants));
+    eprintln!("immigrants 1-60: {:.0} (control {:.0})", im(&r), im(c));
+    assert!(r.failed.is_empty(), "failed: {:?}", r.failed);
+    assert_eq!(r.applied(), 1, "the wage applied");
+    assert!(im(&r) > im(c), "immigration did not rise");
+}

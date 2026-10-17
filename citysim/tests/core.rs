@@ -322,6 +322,70 @@ fn run_city(seed: u64, days: u64, cfg: Config) -> SeedRun {
         *r.marks.entry("scan").or_insert(0) += gv.scans;
         *r.marks.entry("Patrol scan").or_insert(0) += gv.patrols;
         *r.marks.entry("faction distracted").or_insert(0) += u32::from(gv.distracted > 0);
+        // Jobs & lives (phase 8, § 12): the milestone's mechanisms (no row
+        // with `[jobs2]` off). A flow counts its days with a payment; a
+        // trade model its days with a post filled.
+        if let Some(j) = row.jobs2.as_ref() {
+            let pos = |v: i64| u32::from(v > 0);
+            for (k, v) in [
+                ("handling post", u32::from(j.emp_handling > 0)),
+                ("contract post", u32::from(j.emp_contract > 0)),
+                ("civic post", u32::from(j.emp_civic > 0)),
+                ("resale post", u32::from(j.emp_resale > 0)),
+                ("day post", u32::from(j.emp_day > 0)),
+                ("Rations sold", j.rations_sold),
+                ("handling fee", pos(j.flow_handling)),
+                ("power payment", pos(j.flow_power)),
+                ("build paid", pos(j.flow_build)),
+                ("Jailer on shift", u32::from(j.jailers > 0)),
+                ("licence sold", j.licences_sold),
+                ("Pitch opened", j.pitch_opened),
+                ("vendor sale", j.vendor_meals),
+                ("day post filled", j.day_posts_filled),
+                ("cab fare", j.cab_trips),
+                ("parcel delivered", j.parcels),
+                ("street cut", pos(j.street_cut)),
+                ("weapon made", j.weapons_made),
+                ("armed fight", j.armed_fights),
+                ("armoury issue", j.issued),
+                ("arms report", j.ua_reports),
+                ("crate landed", j.crates_landed),
+                ("tip", pos(j.tips)),
+                ("StripClub visit", j.strip_visits),
+                ("Brothel visit", j.brothel_visits),
+                ("companion visit", j.companion_visits),
+                ("Solicitation sweep", j.swept),
+                ("Boutique visit", j.boutique_visits),
+                ("chip hired", j.chip_hired),
+                ("chip ended", j.chip_ended),
+                ("BD made", j.bd_made),
+                ("BD wholesale", j.bd_wholesale),
+                ("tithe", pos(j.tithes)),
+                ("Preach attended", j.preach_attend),
+                ("conversion", j.conversions),
+                ("fake ID sold", j.fake_sold),
+                ("organ made", j.organs_made),
+                ("scav kill", j.scav_kills),
+                ("School day", j.school_days),
+                ("street child's coin", pos(j.child_begged)),
+                ("elder taken in", j.elders_taken_in),
+                ("maimed", j.maimed_new),
+                ("organ exported", j.organs_exported),
+                ("organ used", j.organs_used),
+                ("captive chipped", j.captives_chipped),
+                ("Trafficking", j.trafficking),
+                ("street child taken", j.street_takes),
+                ("struck off", j.struck_off),
+                ("BlackMarket report", j.bm_reports),
+                ("black clinic", u32::from(j.black_clinics > 0)),
+                ("pickpocket", j.pickpockets),
+                ("tinker repair", j.tinker_repairs),
+                ("rickshaw trip", j.rickshaw_trips),
+                ("outage", j.outages),
+            ] {
+                *r.marks.entry(k).or_insert(0) += v;
+            }
+        }
         // A broken-system signal: alertness ÷ pool under the floor (the
         // ratio is never under `alert_floor` while the pool is at most 1).
         let floor = w.config.attention.alert_floor;
@@ -598,8 +662,7 @@ fn mechanisms() -> Vec<Mechanism> {
         // FoundBranch, a refound, a tour's end and a settling are unit-tested in
         // `bodies.rs` (0-3 of 6 seeds); a ParentFounded (one a seed) and an
         // Abandoned (5 of 6) are printed.
-        ("an OutsidersArrived", k(EventKind::OutsidersArrived)), // [9, 6, 6]; 45-47 [9, 6, 6]
-        ("a StateGrant", k(EventKind::StateGrant)),              // [17, 27, 19]; 45-47 [17, 19, 16]
+        ("a StateGrant", k(EventKind::StateGrant)), // [17, 27, 19]; 45-47 [17, 19, 16]
         // M17 phase 4b (seeds 42-47 x 120 days): the succession. A Succession
         // (an acting leader or a promotion) fires on every seed; a CivilWar
         // (3 of 6) and the brothers, now a sack-gutting roll (1 of 6; phase 3
@@ -685,15 +748,19 @@ fn printed_mechanisms() -> Vec<Mechanism> {
         ("a coerced job done", m("coerced job done")), // [2, 0, 0, 0, 0, 0]
         // M17 phase 3 (seeds 42-47 x 120 days): printed, unit-tested in `bodies.rs`.
         ("a ParentFounded", k(EventKind::ParentFounded)), // [1, 1, 1, 1, 1, 1]
-        ("an Abandoned", k(EventKind::Abandoned)),        // [1, 1, 0, 2, 2, 1]
-        ("a BranchRetook", k(EventKind::BranchRetook)),   // [0, 0, 0, 0, 0, 0]
+        // Demoted at Jobs & lives phase 8's gate: [0, 0, 0, 3, 6, 6] over 42-47
+        // (the scavs' trajectory; [3, 3, 3, 0, 6, 6] on 4a9df24), 0 on every
+        // core seed; `bodies.rs::test_reinforce_caps_jobs_and_cohort` carries it.
+        ("an OutsidersArrived", k(EventKind::OutsidersArrived)),
+        ("an Abandoned", k(EventKind::Abandoned)),      // [1, 1, 0, 2, 2, 1]
+        ("a BranchRetook", k(EventKind::BranchRetook)), // [0, 0, 0, 0, 0, 0]
         ("a BuyBackOffered", k(EventKind::BuyBackOffered)), // [0, 0, 0, 0, 0, 0]
         ("a GangRefounded", k(EventKind::GangRefounded)), // [0, 0, 0, 0, 0, 0]
-        ("an OutsiderLeft", k(EventKind::OutsiderLeft)),  // [0, 0, 0, 3, 4, 1]
+        ("an OutsiderLeft", k(EventKind::OutsiderLeft)), // [0, 0, 0, 3, 4, 1]
         ("an UplinkBreached", k(EventKind::UplinkBreached)), // [0, 0, 0, 0, 0, 0]
         ("a CampaignPosted", k(EventKind::CampaignPosted)), // [0, 0, 0, 0, 0, 0]
-        ("a ParentDied", k(EventKind::ParentDied)),       // [0, 0, 0, 0, 0, 0]
-        ("a ScripWiped", k(EventKind::ScripWiped)),       // [0, 0, 0, 0, 0, 0]
+        ("a ParentDied", k(EventKind::ParentDied)),     // [0, 0, 0, 0, 0, 0]
+        ("a ScripWiped", k(EventKind::ScripWiped)),     // [0, 0, 0, 0, 0, 0]
         // M16b phase 2 (seeds 42-47 x 120 days): rare, unit-tested in `captives.rs`.
         ("a hostage taken", m("hostage taken")),             // [0, 1, 1, 1, 0, 0]
         ("a Rescue posted", m("Rescue posted")),             // [0, 0, 0, 0, 0, 0]
@@ -711,6 +778,106 @@ fn printed_mechanisms() -> Vec<Mechanism> {
     ]
 }
 
+/// Jobs & lives (docs/JOBS_AND_LIVES.md § 12, phase 8): the candidates that
+/// fired on 3 or more of 6 seeds (42-47 x 120 days on the phase-8 tree;
+/// every one on 6 of 6 but an organ exported, 3 of 6). The rest are
+/// printed in `jobs2_printed` and unit-tested.
+fn jobs2_mechanisms() -> Vec<Mechanism> {
+    let m = |mark: &'static str| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.mark(mark)) };
+    [
+        // Phase 1: a post of the new trade models held at the day's close
+        // (a day post ends with its shift and reads 0 at the close: "day post
+        // filled" below carries it; a resale post is printed), the
+        // industries' flows.
+        "handling post",
+        "contract post",
+        "civic post",
+        "Rations sold",
+        "handling fee",
+        "power payment",
+        "build paid",
+        "Jailer on shift",
+        "licence sold",
+        // Phase 2: the street.
+        "Pitch opened",
+        "vendor sale",
+        "day post filled",
+        "cab fare",
+        "parcel delivered",
+        "street cut",
+        // Phase 3: weapons.
+        "weapon made",
+        "armed fight",
+        "armoury issue",
+        "arms report",
+        "crate landed",
+        // Phase 4: vice and fashion.
+        "tip",
+        "StripClub visit",
+        "Brothel visit",
+        "companion visit",
+        "Solicitation sweep",
+        "Boutique visit",
+        // Phase 5: the dollhouse and braindance.
+        "chip hired",
+        "chip ended",
+        "BD made",
+        "BD wholesale",
+        // Phase 6: the gray market and faith; phase 8: the scavs.
+        "tithe",
+        "Preach attended",
+        "conversion",
+        "fake ID sold",
+        "organ made",
+        "organ exported", // [27, 11, 8, 0, 0, 0]: 3 of 6
+        "scav kill",
+        // Phase 7: life stages.
+        "School day",
+        "elder taken in",
+        "maimed",
+    ]
+    .into_iter()
+    .map(|k| (k, m(k)))
+    .collect()
+}
+
+/// Jobs & lives (phase 8): the § 12 candidates on 2 or fewer of 6 seeds
+/// (42-47 x 120 days), printed. Each is unit-tested: an organ used
+/// (`gray_faith.rs::test_stabilise_draws_a_clinic_organ`; the export
+/// bullet's mechanism is `test_organs_sold_then_exported`), a resale post
+/// (`industry.rs::test_resale_buy_and_sell_balance`; 0 of 6, main too), a
+/// street child's coin (the Street routine of
+/// `ages.rs::test_street_child_taken_after_the_days`), a captive chipped and its
+/// Trafficking (`chip.rs::test_captive_chipped_is_trafficking`), a street
+/// child taken (`ages.rs::test_street_child_taken_after_the_days`), a
+/// Ripperdoc struck off (`gray_faith.rs::test_struck_off_leaves_the_post`),
+/// a pickpocket (`arms.rs::test_pickpocket_lifts_a_carried_item`), a tinker
+/// and a rickshaw (`streetwork.rs::test_tinker_fixes_cheap_or_wrecks`,
+/// `test_stat_cab_rickshaw_first_then_cab`), an outage
+/// (`industry.rs::test_outage_darkens_districts_and_comes_back`). A black
+/// clinic and its BlackMarket reports: 0 of 6 (no gang builds one; open).
+fn jobs2_printed() -> Vec<Mechanism> {
+    let m = |mark: &'static str| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.mark(mark)) };
+    [
+        "resale post",         // [0, 0, 0, 0, 0, 0]
+        "street child's coin", // [0, 0, 14, 7, 0, 0]
+        "organ used",          // [0, 1, 1, 0, 0, 0]
+        "captive chipped",     // [0, 0, 0, 0, 0, 0]
+        "Trafficking",         // [0, 0, 0, 0, 0, 0]
+        "street child taken",  // [0, 0, 0, 0, 0, 0]
+        "struck off",          // [0, 1, 0, 0, 0, 1]
+        "BlackMarket report",  // [0, 0, 0, 0, 0, 0]
+        "black clinic",        // [0, 0, 0, 0, 0, 0]
+        "pickpocket",          // [0, 0, 0, 0, 0, 0]
+        "tinker repair",       // [0, 0, 0, 0, 0, 0]
+        "rickshaw trip",       // [0, 0, 0, 0, 0, 0]
+        "outage",              // [0, 0, 0, 0, 0, 0]
+    ]
+    .into_iter()
+    .map(|k| (k, m(k)))
+    .collect()
+}
+
 /// Every mechanism's count per seed, then the bullets: one line each.
 /// Transit (docs/TRANSIT.md § 7): judged with the El on.
 fn transit_mechanisms() -> Vec<Mechanism> {
@@ -719,11 +886,19 @@ fn transit_mechanisms() -> Vec<Mechanism> {
 }
 
 fn judge_mechanisms(runs: &[SeedRun], failures: &mut Vec<String>) {
-    for (name, f) in printed_mechanisms() {
+    let jobs2 = runs.first().is_some_and(|r| r.mark("Jailer on shift") > 0 || r.mark("handling fee") > 0);
+    let mut printed = printed_mechanisms();
+    if jobs2 {
+        printed.extend(jobs2_printed());
+    }
+    for (name, f) in printed {
         let per: Vec<u32> = runs.iter().map(&f).collect();
         eprintln!("FINDING mechanism {name} (printed, unit-tested): per seed {per:?}");
     }
     let mut all = mechanisms();
+    if jobs2 {
+        all.extend(jobs2_mechanisms());
+    }
     if runs.first().is_some_and(|r| r.sickness) {
         all.extend(sickness_mechanisms());
     }

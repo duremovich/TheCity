@@ -184,3 +184,72 @@ fn test_off_and_save_round_trip() {
     let back = citysim::save::from_ron(&text).expect("load");
     assert_eq!(citysim::save::to_ron(&back), text, "byte-identical round trip");
 }
+
+/// Phase 8 (§ 12): a gang's units go to the Clinics' shelves first, then
+/// the World's book (capped: no more than the day's cap crosses), before
+/// the midnight rot.
+#[test]
+fn test_organs_sold_then_exported() {
+    let mut w = on_world();
+    for _ in 0..30 {
+        if !w.gangs().is_empty() {
+            break;
+        }
+        w.run_ticks(TICKS_PER_DAY);
+    }
+    w.config.gray.p_customs = 0.0;
+    let g = w.gangs()[0];
+    let h = w.hideout_of(g).expect("hideout");
+    // Every Clinic's shelf already full: the units go to the World.
+    let full = w.config.gray.clinic_organs;
+    for c in w.buildings_of_kind(BuildingKind::Clinic).to_vec() {
+        let have = w.stock(c, Good::Organs);
+        w.add_stock(c, Good::Organs, full.saturating_sub(have));
+    }
+    w.add_stock(h, Good::Organs, 500);
+    let have = w.stock(h, Good::Organs);
+    let cap = citysim::systems::world_market::cap_today(&w, citysim::outside::ExportGood::Organs);
+    let row0 = w.stats.current.jobs2.as_ref().map_or(0, |j| j.organs_exported);
+    gray::daily(&mut w);
+    let sold = w.stats.current.jobs2.as_ref().map_or(0, |j| j.organs_exported) - row0;
+    assert!(sold > 0, "exported");
+    assert!(sold <= cap, "the book capped: {sold} against a day's cap of {cap}");
+    assert!(w.stock(h, Good::Organs) < have - sold, "and the rest rotted after the sale");
+}
+
+/// Phase 8 (§ 12): a stabilisation at a Clinic draws a unit off its shelf
+/// on `p_organ_needed`; an empty shelf draws nothing.
+#[test]
+fn test_stabilise_draws_a_clinic_organ() {
+    let mut w = on_world();
+    w.config.gray.p_organ_needed = 1.0;
+    let c = w.buildings_of_kind(BuildingKind::Clinic)[0];
+    let have = w.stock(c, Good::Organs);
+    w.take_stock(c, Good::Organs, have);
+    gray::on_stabilise(&mut w, c);
+    assert_eq!(w.stock(c, Good::Organs), 0, "nothing to draw");
+    w.add_stock(c, Good::Organs, 2);
+    gray::on_stabilise(&mut w, c);
+    assert_eq!(w.stock(c, Good::Organs), 1, "a unit used");
+    assert_eq!(w.stats.current.jobs2.as_ref().map_or(0, |j| j.organs_used), 1);
+}
+
+/// Phase 8 (§ 12): a licensed Ripperdoc struck off (`p_struck_off` at 1)
+/// leaves the post, and the licensed Clinics no longer hire him.
+#[test]
+fn test_struck_off_leaves_the_post() {
+    let mut w = on_world();
+    w.config.gray.p_struck_off = 1.0;
+    let doc = w
+        .citizens()
+        .into_iter()
+        .find(|&a| {
+            w.comp::<Job>(a).is_some_and(|j| j.role == citysim::Role::Ripperdoc)
+                && w.comp::<citysim::Personality>(a).is_some_and(|p| p.lawfulness < 1.0)
+        })
+        .expect("a Ripperdoc");
+    gray::daily(&mut w);
+    assert!(w.comp::<Job>(doc).is_none(), "off the post");
+    assert!(!gray::hire_ok(&w, doc, citysim::Role::Ripperdoc), "and not hired again");
+    assert!(w.stats.current.jobs2.as_ref().is_some_and(|j| j.struck_off >= 1));
+}

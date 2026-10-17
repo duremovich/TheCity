@@ -731,7 +731,7 @@ pub fn harvest_target(world: &World, gang: EntityId) -> Option<(EntityId, i64)> 
     let min = world.config.chrome.harvest_min_visible;
     let ground = harvest_ground(world, gang);
     let in_ground = |t: crate::components::TilePos| ground.get(world.district_of(t).index()).copied().unwrap_or(false);
-    let mut best: Option<(i64, std::cmp::Reverse<EntityId>)> = None;
+    let mut best: Option<(i64, std::cmp::Reverse<EntityId>, i64)> = None;
     // M14 V30: freelance runners the gang's database sighted are candidates
     // wherever they are and whatever shows.
     let sighted: Vec<EntityId> = world
@@ -773,12 +773,24 @@ pub fn harvest_target(world: &World, gang: EntityId) -> Option<(EntityId, i64)> 
         if !seen && !home.is_some_and(in_ground) && !tile.is_some_and(in_ground) {
             continue;
         }
-        let key = (value, std::cmp::Reverse(id));
-        if best.is_none_or(|b| key > b) {
+        // Jobs & lives phase 8 (the scavs): a gang hunting organs ranks its
+        // prey by the value it can take, the value past the Law's cover
+        // where the prey stands (`faction::tile_cover`, the Harvest score's
+        // `1 - target cover`): the street's poor, not the Spire's guarded
+        // rich (on seed 42 both scav gangs' targets stood at cover 0.95 and
+        // Harvest never won an order in 120 days).
+        let rank = if organs > 0 {
+            let cover = tile.map_or(1.0, |t| crate::systems::faction::tile_cover(world, gang, t));
+            (value as f32 * (1.0 - cover)).round() as i64
+        } else {
+            value
+        };
+        let key = (rank, std::cmp::Reverse(id), value);
+        if best.is_none_or(|b| (key.0, key.1) > (b.0, b.1)) {
             best = Some(key);
         }
     }
-    best.map(|(v, std::cmp::Reverse(id))| (id, v))
+    best.map(|(_, std::cmp::Reverse(id), v)| (id, v))
 }
 
 /// The gang's cached Harvest target, still a valid one.
@@ -803,6 +815,15 @@ pub fn abduct(world: &mut World, agent: EntityId, victim: EntityId) -> bool {
 /// abductor closes in from its stake-out, as an `Attack` does).
 pub fn abduct_within(world: &mut World, agent: EntityId, victim: EntityId, reach: u32) -> bool {
     if !crate::systems::law::living(world, victim) || !crate::systems::law::near(world, agent, victim, reach) {
+        return false;
+    }
+    // Jobs & lives phase 8 (the scavs): a victim already in someone's
+    // hands is not taken again (the Abduct step's start checks it, but a
+    // second abductor's step begun before the first won completed after
+    // and took the victim from the first, whose Rip then failed).
+    if crate::systems::gray::on(world)
+        && world.comp::<Brain>(victim).and_then(|b| b.cuffed_by).is_some_and(|c| c != agent)
+    {
         return false;
     }
     let bonus: f32 = world

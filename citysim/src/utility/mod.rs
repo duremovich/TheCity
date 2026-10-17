@@ -178,6 +178,21 @@ pub fn think_with_offer(
             }
             continue;
         }
+        // Jobs & lives phase 8 (the scavs): an abductor dragging its take
+        // home holds its GangWork at `drag_hold_score`, as a hunter holds its
+        // Hunt, satisfied or not (the day's task done): a meal, an evening's
+        // Unwind or a night's sleep dropped the drag (`abort_plan` lets the
+        // abductee go) and the next member took the same victim (seed 42:
+        // one victim abducted 22 times in 60 days, two rips).
+        if goal == GoalKind::GangWork
+            && crate::systems::gray::on(world)
+            && crate::systems::chrome::dragging(world, id).is_some()
+        {
+            let hold = world.config.gray.drag_hold_score + if current == Some(goal) { hysteresis } else { 0.0 };
+            let considerations = vec![Consideration::raw("dragging its take", 1.0, 1.0)];
+            scored.push(GoalScore { goal, raw: 1.0, score: hold, considerations });
+            continue;
+        }
         if goals::already_satisfied(world, id, goal, has_spouse) {
             continue;
         }

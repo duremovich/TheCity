@@ -17,16 +17,6 @@ fn world() -> World {
     World::new(42, Config::load())
 }
 
-/// Jobs & lives phase 4: the city without the vice and fashion, for the
-/// probes their joint butterfly moved (each switch alone passes; the agents
-/// picked are no vice or fashion party). Re-read at the phase-8 gate.
-fn world_p3() -> World {
-    let mut cfg = Config::load();
-    cfg.vice.enabled = false;
-    cfg.fashion.enabled = false;
-    World::new(42, cfg)
-}
-
 fn pin(w: &mut World, id: EntityId) {
     w.comp_mut::<Brain>(id).expect("brain").pinned = true;
 }
@@ -130,9 +120,9 @@ fn probe_hungry_worker_eats_from_the_wage_before_rent() {
 /// Across town at 20:00, tired, with a spouse: a person goes home to sleep.
 #[test]
 fn probe_married_adult_across_town_comes_home_at_night() {
-    // Jobs & lives phase 4 (`world_p3`): with both on, the butterfly's pick
-    // stopped for a Bar's drink on the way and was still walking home at 03:00.
-    let mut w = world_p3();
+    // Jobs & lives phase 8's gate: the phase-4 pin (vice and fashion off) is
+    // gone; the pick comes home on the Jobs & lives city.
+    let mut w = world();
     w.run_ticks(TICKS_PER_DAY + 20 * TICKS_PER_HOUR);
     let a = w
         .citizens()
@@ -308,11 +298,11 @@ fn probe_guard_eats_on_a_long_shift() {
 /// Jobs and room P1 (spec § 7, plan P1 step 5): a Vat Tech laid off at
 /// midnight in the wages + no-net city, with at least three posts open
 /// city-wide, holds a Job again within 14 days (the rehire bonus and the
-/// skill key put the laid-off hand back to work). Still ignored after the
-/// flip: on the flipped seed-42 city its stimulus (three posts open
-/// city-wide) does not hold (2 open), so it measures nothing.
+/// skill key put the laid-off hand back to work). Ignored after the flip
+/// (its stimulus, three posts open city-wide, did not hold: 2 open);
+/// un-ignored at Jobs & lives phase 8's gate (5 open at the search on the
+/// Jobs & lives city; hired the same night).
 #[test]
-#[ignore]
 fn probe_laid_off_farm_worker_finds_work_within_14_days() {
     let cfg = Config::load();
     let mut w = World::new(42, cfg);
@@ -722,7 +712,7 @@ fn jobless_civilians(w: &World) -> Vec<EntityId> {
 /// exhausted one with 60 coins sleeping 8 h to hunger 0.
 #[test]
 fn probe_starving_eats_before_spending_or_sleeping() {
-    let mut w = world_p3();
+    let mut w = world();
     w.run_ticks(2 * TICKS_PER_DAY + 18 * TICKS_PER_HOUR);
     let picks: Vec<EntityId> = civilians(&w).into_iter().step_by(37).take(30).collect();
     let mut bad = Vec::new();
@@ -915,10 +905,8 @@ fn probe_far_worker_with_one_rent_moves_near_work() {
     // `commute_cost` rides and no single farmer reads far (the El case is
     // `probe_el_*` and `tests/transit.rs`).
     cfg.transit.enabled = false;
-    // Jobs & lives phase 1: with the industries on, seed 42 has no single
-    // far Farmer either (the premise, not the move, is lost; phase 8's gate
-    // re-reads the probes).
-    cfg.jobs2.enabled = false;
+    // Jobs & lives phase 8's gate: the pin to the pre-milestone city is gone
+    // (the industries on, seed 42 has its single far Farmer again).
     let mut w = World::new(42, cfg);
     w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
     // Every commute measure through `life::commute_cost` (travel ticks).
@@ -1433,12 +1421,9 @@ fn probe_sweeper_stays_near_its_beat() {
 /// wall (21 x rent) kept such workers on the street beside empty beds.
 #[test]
 fn probe_evicted_worker_rehouses_on_the_first_rent() {
-    let mut cfg = Config::load();
-    // Jobs & lives phase 2: with the street on, the evicted Farmer (589)
-    // joins Ninefold, runs it while its leader sits and is jailed himself:
-    // the premise (an employed Farmer) is lost to the butterfly. Re-read at
-    // phase 8's gate.
-    cfg.jobs2.street = false;
+    // Jobs & lives phase 8's gate: the pin to the street-off city is gone
+    // (on the Jobs & lives city the evicted Farmer keeps the job).
+    let cfg = Config::load();
     let mut w = World::new(42, cfg);
     w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
     let a = civilians(&w)
@@ -1485,10 +1470,8 @@ fn probe_trade_respects_rent_and_the_evictor() {
     // `commute_cost` rides and no single farmer reads far (the El case is
     // `probe_el_*` and `tests/transit.rs`).
     cfg.transit.enabled = false;
-    // Jobs & lives phase 1: with the industries on, seed 42 has no single
-    // far Farmer either (the premise, not the move, is lost; phase 8's gate
-    // re-reads the probes).
-    cfg.jobs2.enabled = false;
+    // Jobs & lives phase 8's gate: the pin to the pre-milestone city is gone
+    // (the industries on, seed 42 has its single far Farmer again).
     let mut w = World::new(42, cfg);
     w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
     let cap = w.config.life.commute_move_ticks;
@@ -1659,7 +1642,7 @@ fn probe_worker_makes_one_grocery_run_to_the_nearest_detour_market() {
 /// at home).
 #[test]
 fn probe_refused_at_a_full_market_eats_elsewhere() {
-    let mut w = world_p3();
+    let mut w = world();
     w.run_ticks(2 * TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
     let picks: Vec<EntityId> = civilians(&w)
         .into_iter()
@@ -1805,13 +1788,9 @@ fn bought_by(w: &World, buyer: EntityId) -> Vec<citysim::contract::Contract> {
 fn widow(strong: bool) -> (World, EntityId, EntityId) {
     use citysim::systems::grudges;
     use citysim::word::GrudgeCause;
-    // Jobs & lives phase 1: the pick is the first married civilian near a
-    // Fixer; with the industries on it is another woman (602, a Farmer, not
-    // 612, a Cook) who hunts the killer herself in the same 7 days, the
-    // premise lost to a pick change. The probe keeps its pre-milestone city
-    // until phase 8's gate re-reads the probes (docs/JOBS_AND_LIVES.md § 11).
-    let mut c = Config::load();
-    c.jobs2.enabled = false;
+    // Jobs & lives phase 8's gate: the pin to the pre-milestone city is gone
+    // (on the Jobs & lives city the pick commissions the Hit again).
+    let c = Config::load();
     let mut w = World::new(42, c);
     // Day 10: the Fixers' books have filled (on day 2 too few regulars
     // would take a Hit at any price, and it priced at the old quote).
@@ -2163,4 +2142,62 @@ fn probe_el_worker_whose_line_is_cut_walks_next_day() {
     let (rode, _, arrived) = watch_commute(&mut w, a, employer, day * TICKS_PER_DAY + 12 * TICKS_PER_HOUR, |_| {});
     assert!(!rode, "rode a cut line");
     assert!(arrived.is_some(), "walked to work");
+}
+
+// ---------------------------------------------------------------------------
+// Jobs & lives phase 8 (§ 12's probes not carried by a phase's own tests)
+// ---------------------------------------------------------------------------
+
+/// § 12: a resident robbed last night buys a weapon within 3 days (from a
+/// dealer, or at a Gunsmith with a licence); the same resident never robbed
+/// buys none. The pick is a lawful civilian with no pitch (a street worker's
+/// pitch is a reason by itself, `weapons::has_reason`), no weapon and no
+/// want of one before the robbery.
+///
+/// Ignored (a gap, phase 8): the robbery forms the want (`weapons::wants`
+/// true the next midnight for the picks still holding the coins) but `assets::shop_choice`
+/// offers the same Chrome tier it offered before the robbery (the weapon's
+/// `1 - lawfulness` consideration loses to chrome's courage and load for a
+/// lawful buyer), and the Shop goal at ~0.3 rarely wins: 0 of 10 armed in 3
+/// days, robbed or not. The fix is a fresh reason weighing the weapon offer
+/// (docs/SHADOW_V3.md, docs/GOD_SCENARIOS_V12.md).
+#[test]
+#[ignore]
+fn probe_robbed_resident_buys_a_weapon_within_3_days() {
+    use citysim::systems::weapons;
+    let mut w = world();
+    w.run_ticks(2 * TICKS_PER_DAY + 1);
+    let lawless = w.config.weapons.want_lawless;
+    let pick = civilians(&w)
+        .into_iter()
+        .filter(|&a| home(&w, a).is_some() && !w.jobs2.pitches.contains_key(&a))
+        .filter(|&a| w.comp::<citysim::Personality>(a).is_some_and(|p| p.lawfulness >= lawless + 0.1))
+        .filter(|&a| weapons::tier(&w, a) == 0 && !weapons::wants(&w, a))
+        .take(10)
+        .collect::<Vec<_>>();
+    assert!(!pick.is_empty(), "a lawful unarmed civilian");
+    let mut bought = (0, 0);
+    for &a in &pick {
+        for robbed in [true, false] {
+            let mut w = w.clone();
+            w.comp_mut::<Wallet>(a).expect("wallet").coins = 400;
+            if robbed {
+                let thief = civilians(&w).into_iter().find(|&t| t != a).expect("a thief");
+                w.remember(a, citysim::MemoryKind::WasRobbed, Some(thief), 0.7, -0.7, false);
+            }
+            pin(&mut w, a);
+            let end = w.tick + 3 * TICKS_PER_DAY;
+            run_to(&mut w, a, end, |_| {});
+            if weapons::tier(&w, a) > 0 {
+                if robbed {
+                    bought.0 += 1;
+                } else {
+                    bought.1 += 1;
+                }
+            }
+        }
+    }
+    eprintln!("robbed: {} of {} armed in 3 days; never robbed: {}", bought.0, pick.len(), bought.1);
+    assert!(bought.0 > 0, "the robbed buy a weapon");
+    assert!(bought.0 > bought.1, "more than the never robbed ({} against {})", bought.0, bought.1);
 }
