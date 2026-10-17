@@ -558,3 +558,14 @@ One solo Opus coder `jl1` (worktree `agent-a864f625a5712bd95`) builds phase by p
 - the robbed don't arm;
 - the thin street;
 - the conditional abroad asserts.
+
+## Session log (the thirteenth session, 2026-10-17 → ): the NPC shadowing session
+
+- **The shadowing session done**, ce5afe6: `docs/SHADOW_V4.md` and seven critiques in `docs/shadow_v4/`. 48 archetypes × 2 picks × 7 days on three windows (2k seed 43 d26, 2k seed 44 d90, 20k seed 42 d20), 258 diaries.
+  - Tool fixes: `--population N` (3053c7b); the pins grow `[lod] max_full` (afb4b4c; the first 2k runs had ~60 % of picks silently Coarse); the LOD note says sentencing only when jailed (bbc1a47).
+  - Verdict: alive where gangs, debt, the law or the hit market touch a life; every trade is a counter with no counterpart.
+  - 23 bugs and 12 features ranked.
+- **Dylan's calls (2026-10-17):** one solo sweep of all 23 bugs, then `/code-review high`. Before M18 come features 1-6: work has a counterpart, evenings and households, ages and leaders lead, and 20k scale. Spec them as one milestone, review it with Dylan, then build.
+- **In flight:**
+  - `v4fix`, the solo bug coder in a worktree. It commits per batch; the orchestrator merges.
+  - `v4spec`, writing `docs/LIVES_AT_WORK.md`.
