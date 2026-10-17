@@ -853,21 +853,25 @@ impl Crime {
             // Jobs & lives phase 4 (§ 5.1): just above Fare Evasion;
             // everything above moves up one.
             Crime::Solicitation => 2,
-            Crime::Theft => 3,
+            // Jobs & lives phase 3 (§ 4), ranked petty at the phase-8 review:
+            // sentenced as Vagrancy, so above Theft it shortened every
+            // worse crime's term it outranked (and fined a suspect in a full
+            // Jail); everything from Theft to BlackMarket moves up one.
+            Crime::UnlicensedArms => 3,
+            Crime::Theft => 4,
             // M16b: Fraud just above Theft, Blackmail just above Shakedown;
             // everything above each moves up (the order is all that is read).
-            Crime::Fraud => 4,
+            Crime::Fraud => 5,
             // Jobs & lives phase 6 (§ 7): Forgery just above Fraud,
             // BlackMarket just above Dealing; everything above moves up.
-            Crime::Forgery => 5,
-            Crime::Intrusion => 6,
-            Crime::GrandTheft => 7,
-            Crime::DataTheft => 8,
-            Crime::Dealing => 9,
-            Crime::BlackMarket => 10,
-            // Jobs & lives phase 3 (§ 4): the arms crimes between Dealing
-            // and Shakedown; everything above moves up three.
-            Crime::UnlicensedArms => 11,
+            Crime::Forgery => 6,
+            Crime::Intrusion => 7,
+            Crime::GrandTheft => 8,
+            Crime::DataTheft => 9,
+            Crime::Dealing => 10,
+            Crime::BlackMarket => 11,
+            // Jobs & lives phase 3 (§ 4): the other arms crimes between
+            // Dealing and Shakedown.
             Crime::ArmsDealing => 12,
             Crime::Smuggling => 13,
             Crime::Extortion => 14,

@@ -1631,11 +1631,9 @@ fn evening_day(world: &World, id: EntityId) -> Option<(Origin, DistrictId)> {
 
 /// Jobs & lives phase 7b: the venues of `id`'s evening for `p_venue`, one
 /// per kind of the ladder: the nearest standing venue of the kind to its
-/// day (its Home's district first) within the Full ladder's walk cap, the
-/// high rung only for those who reach it. Where the agent lives and works
-/// alone (no hour's state: the door, the room, the purse, the hunger), so
-/// the eligible agent-days the rate divides by are the same city's on both
-/// tiers; the Full visits it counts read the hour's state on screen.
+/// day (its Home's district first) within the Full ladder's walk cap that
+/// is open, lets the agent in (the door policy, the room, a Den's table) and
+/// is affordable, the high rung only for those who reach it.
 fn evening_venues(world: &World, id: EntityId) -> Vec<(BuildingKind, EntityId)> {
     let purse = spendable(world, id);
     if purse < 1 {
@@ -1652,6 +1650,13 @@ fn evening_venues(world: &World, id: EntityId) -> Vec<(BuildingKind, EntityId)> 
             .filter(|&&b| {
                 standing(world, b)
                     && (kind == BuildingKind::Bar || world.comp::<Building>(b).is_some_and(|bd| bd.venue.is_some()))
+                    // Phase-8 review: the Full ladder's gates (a closed,
+                    // swept, dark, raided, unstaffed or unbuilt venue takes
+                    // nobody; the door policy; the room; a shut table).
+                    && open(world, b)
+                    && door_ok(world, id, b)
+                    && has_room(world, id, b)
+                    && (kind != BuildingKind::Den || table_open(world, b))
             })
             .filter_map(|&b| {
                 let bd = world.comp::<Building>(b)?;

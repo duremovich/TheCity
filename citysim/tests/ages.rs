@@ -206,3 +206,17 @@ fn test_street_child_taken_after_the_days() {
     );
     assert!(w.stats.current.jobs2.as_ref().is_some_and(|j| j.street_takes == 1));
 }
+
+/// Phase-8 review finding 8: a behaviour chip ripped out is a maim with no
+/// slot, and no prosthetic is a behaviour chip (on d2eea01 the maim kept
+/// `Slot::Behaviour` and the midnight bought one as a "prosthetic").
+#[test]
+fn test_no_behaviour_slot_maim_or_prosthetic() {
+    let mut w = on_world();
+    let a = idle(&w)[0];
+    ages::maim(&mut w, a, Some(citysim::components::Slot::Behaviour), "a ripped chip");
+    assert_eq!(w.jobs2.ages.maimed.get(&a).map(|m| m.1), Some(None), "maimed, no limb slot");
+    coins(&mut w, a, 5_000);
+    ages::daily(&mut w);
+    assert!(w.jobs2.ages.maimed.contains_key(&a), "no prosthetic bought for no limb");
+}

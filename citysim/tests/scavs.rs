@@ -101,6 +101,8 @@ fn test_drag_holds_gangwork() {
     let g = w.gangs().into_iter().find(|&g| w.comp::<Gang>(g).is_some_and(|x| x.members.len() >= 3)).expect("a gang");
     let m = w.comp::<Gang>(g).expect("gang").members[0];
     let v = outsiders(&w)[0];
+    // Rested (an exhausted member's Sleep is an emergency too).
+    w.comp_mut::<Needs>(m).expect("needs").energy = 1.0;
     w.comp_mut::<Needs>(m).expect("needs").hunger = 0.4;
     let free = citysim::utility::think(&w, m).map(|(goal, _)| goal);
     assert_ne!(free, Some(GoalKind::GangWork), "no one in tow: another goal wins ({free:?})");
@@ -142,4 +144,52 @@ fn test_abduct_refuses_a_victim_in_other_hands() {
     }
     assert!(!chrome::abduct_within(&mut w, second, v, 1), "in the first's hands");
     assert_eq!(w.comp::<Brain>(v).and_then(|b| b.abducted_by), Some(first));
+}
+
+/// Phase-8 review finding 9: the abduction-race guard holds with `[gray]`
+/// off too (it is general abduction code; on d2eea01 it ran only under the
+/// gray market and the second abductor took the victim).
+#[test]
+fn test_abduct_guard_with_gray_off() {
+    let mut c = Config::load();
+    c.gray.enabled = false;
+    let mut w = World::new(42, c);
+    for _ in 0..30 {
+        if w.gangs().iter().any(|&g| w.comp::<Gang>(g).is_some_and(|x| x.members.len() >= 3)) {
+            break;
+        }
+        w.run_ticks(TICKS_PER_DAY);
+    }
+    assert!(!gray::on(&w));
+    let g = w.gangs().into_iter().find(|&g| w.comp::<Gang>(g).is_some_and(|x| x.members.len() >= 3)).expect("a gang");
+    let members = w.comp::<Gang>(g).expect("gang").members.clone();
+    let (first, second) = (members[0], members[1]);
+    let v = outsiders(&w)[0];
+    let t = w.comp::<Position>(v).expect("pos").tile;
+    for a in [first, second] {
+        w.remove_from_building(a);
+        if let Some(p) = w.comp_mut::<Position>(a) {
+            p.tile = t;
+            p.building = None;
+        }
+    }
+    w.remove_from_building(v);
+    if let Some(b) = w.comp_mut::<Brain>(v) {
+        b.cuffed_by = Some(first);
+        b.abducted_by = Some(first);
+    }
+    assert!(citysim::systems::law::near(&w, second, v, 1), "within reach");
+    // The second would win the fight: the guard, not the dice, refuses.
+    if let Some(sk) = w.comp_mut::<citysim::components::Skills>(second) {
+        sk.fighting = 1.0;
+    }
+    if let Some(sk) = w.comp_mut::<citysim::components::Skills>(v) {
+        sk.fighting = 0.0;
+    }
+    for _ in 0..20 {
+        assert!(!chrome::abduct_within(&mut w, second, v, 1), "in the first's hands");
+        assert_eq!(w.comp::<Brain>(v).and_then(|b| b.abducted_by), Some(first));
+        assert!(citysim::systems::law::living(&w, v), "untouched");
+        w.tick += 1;
+    }
 }

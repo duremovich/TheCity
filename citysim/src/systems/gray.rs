@@ -266,9 +266,11 @@ fn forger_near(world: &World, from: crate::components::TilePos) -> Option<(Entit
 fn clerk_on_take(world: &World) -> Option<EntityId> {
     let role = world.config.trade_role("civic_clerk")?;
     let max = world.config.gray.clerk_lawful;
+    // Phase-8 review: the role index, not a scan of the city.
     world
-        .citizens()
-        .into_iter()
+        .workers(role)
+        .iter()
+        .copied()
         .filter(|&a| world.comp::<Job>(a).is_some_and(|j| j.role == role))
         .filter(|&a| !world.has::<Sentence>(a) && world.comp::<Personality>(a).is_some_and(|p| p.lawfulness < max))
         .min()
@@ -469,8 +471,11 @@ pub fn hire_ok(world: &World, id: EntityId, role: Role) -> bool {
 fn strike_off(world: &mut World) {
     let p = world.config.gray.p_struck_off;
     let day = world.day();
-    let docs: Vec<EntityId> = world
-        .citizens()
+    // Phase-8 review: the role index, not a scan of the city (ascending, as
+    // the citizens were).
+    let mut pool: Vec<EntityId> = world.workers(Role::Ripperdoc).to_vec();
+    pool.sort_unstable();
+    let docs: Vec<EntityId> = pool
         .into_iter()
         .filter(|&a| world.comp::<Job>(a).is_some_and(|j| j.role == Role::Ripperdoc))
         .filter(|&a| {

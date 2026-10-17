@@ -313,7 +313,11 @@ fn close_contracts(world: &mut World) {
         };
         if lost || gone {
             end(world, id, "cut short");
-        } else if now >= c.until {
+        } else if now >= c.until && !c.captive {
+            // Phase-8 review: a captive's chip stays in while it is held (its
+            // end is the hold's end, `gone` above); ending it at `chip_days`
+            // re-chipped the same captive in this midnight pass, the fee,
+            // the Trafficking report and the sanity cut repeating.
             end(world, id, "served");
         }
     }

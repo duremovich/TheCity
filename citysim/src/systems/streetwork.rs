@@ -868,6 +868,12 @@ pub fn tinker_repair(world: &mut World, asset: EntityId, owner: EntityId, from: 
             &[tinker, owner],
             format!("{who} botched a street repair on {whose}'s vehicle (wrecked)"),
         );
+        // Phase-8 review: the vehicle is wrecked as any wreck is (its Parts,
+        // the event, the despawn); setting its condition to 0 left a zombie
+        // vehicle no repair pass touches again.
+        if world.has::<crate::components::Asset>(asset) {
+            crate::systems::assets::wreck(world, asset, "a botched street repair");
+        }
     }
     Some(!botched)
 }

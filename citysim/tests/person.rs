@@ -1795,28 +1795,49 @@ fn widow(strong: bool) -> (World, EntityId, EntityId) {
     // Day 10: the Fixers' books have filled (on day 2 too few regulars
     // would take a Hit at any price, and it priced at the old quote).
     w.run_ticks(10 * TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
-    let civ = civilians(&w);
-    let her = civ
-        .iter()
-        .copied()
-        .find(|&a| {
-            w.spouses.get(&a).is_some_and(|s| civ.contains(s))
-                && contracts::nearest_fixer(&w, a).is_some()
-                && w.comp::<Job>(a).is_none_or(|j| j.role != Role::Guard)
-        })
-        .expect("a married civilian near a Fixer");
-    let husband = w.spouses[&her];
+    // The phase-8 review's re-seat: the premise is a widow who can pay the
+    // deposit with her 40 coins and her brother's share, so her Fixer's book
+    // must price the Hit at the market (`ask_rank` regulars free to ask; a
+    // thinner book quotes the old price, out of her reach). On the review's
+    // city (exposed papers sentenced as Forgery) no Fixer's book did on day
+    // 10, so the first day from 10 on (by 20) where one does is used.
+    let pick = |w: &World| -> Option<(Vec<EntityId>, EntityId, EntityId, EntityId)> {
+        let civ = civilians(w);
+        let near = |w: &World, x: EntityId, y: EntityId| w.edge(x, y).is_some();
+        // A loner: the stranger with the fewest defenders about him (a Hit
+        // on a man with friends at his side prices at the old quote, H1).
+        let sdef = |w: &World, x: EntityId| citysim::systems::missions::defender_strength(w, &Target::Agent(x));
+        let budget = 40 + (200.0 * w.config.hitmarket.kin_share).floor() as i64;
+        let found = civ
+            .iter()
+            .copied()
+            .filter(|&a| {
+                w.spouses.get(&a).is_some_and(|s| civ.contains(s))
+                    && contracts::nearest_fixer(w, a).is_some()
+                    && w.comp::<Job>(a).is_none_or(|j| j.role != Role::Guard)
+            })
+            .find_map(|a| {
+                let husband = w.spouses[&a];
+                let killer = civ
+                    .iter()
+                    .copied()
+                    .filter(|&x| x != a && x != husband && !near(w, a, x) && !near(w, husband, x))
+                    .take(200)
+                    .min_by(|&x, &y| sdef(w, x).total_cmp(&sdef(w, y)).then(x.cmp(&y)))?;
+                let fixer = contracts::nearest_fixer(w, a);
+                let price =
+                    contracts::organic_price(w, ContractKind::Hit, &Target::Agent(killer), Some(a), Some(a), fixer);
+                (citysim::systems::hitmarket::deposit_of(w, price) <= budget).then_some((a, husband, killer))
+            })?;
+        Some((civ, found.0, found.1, found.2))
+    };
+    let mut got = pick(&w);
+    while got.is_none() && w.day() < 20 {
+        w.run_ticks(TICKS_PER_DAY);
+        got = pick(&w);
+    }
+    let (civ, her, husband, killer) = got.expect("a married civilian near a Fixer who can pay a Hit");
     let near = |w: &World, x: EntityId, y: EntityId| w.edge(x, y).is_some();
-    // A loner: the stranger with the fewest defenders about him (a Hit on
-    // a man with friends at his side prices at the old quote, H1).
-    let sdef = |w: &World, x: EntityId| citysim::systems::missions::defender_strength(w, &Target::Agent(x));
-    let killer = civ
-        .iter()
-        .copied()
-        .filter(|&x| x != her && x != husband && !near(&w, her, x) && !near(&w, husband, x))
-        .take(200)
-        .min_by(|&a, &b| sdef(&w, a).total_cmp(&sdef(&w, b)).then(a.cmp(&b)))
-        .expect("a stranger");
     let brother = civ
         .iter()
         .copied()
@@ -1876,7 +1897,13 @@ fn probe_widow_commissions_a_hit_at_the_fixer() {
     // Control.
     let (mut w, her, killer) = widow(true);
     let (mut hunted, end) = (false, w.tick + 7 * TICKS_PER_DAY);
-    run_to(&mut w, her, end, |w| hunted |= w.hunts.get(&her).is_some_and(|h| h.target == killer));
+    // Watched while she lives (the review's re-seat: on its city the strong
+    // widow hunts him and later dies in a fight inside the week).
+    while w.tick < end && w.has::<Brain>(her) {
+        pin(&mut w, her);
+        w.run_ticks(1);
+        hunted |= w.hunts.get(&her).is_some_and(|h| h.target == killer);
+    }
     eprintln!("strong widow {}: hunted {hunted}, records {}", her.index, bought_by(&w, her).len());
     assert!(hunted, "the control: a strong, brave widow hunts him herself");
     assert!(bought_by(&w, her).is_empty(), "the strong widow paid instead");

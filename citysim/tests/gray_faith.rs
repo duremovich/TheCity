@@ -253,3 +253,21 @@ fn test_struck_off_leaves_the_post() {
     assert!(!gray::hire_ok(&w, doc, citysim::Role::Ripperdoc), "and not hired again");
     assert!(w.stats.current.jobs2.as_ref().is_some_and(|j| j.struck_off >= 1));
 }
+
+/// Phase-8 review finding 5: papers exposed at an arrest file a Forgery
+/// that counts like any open report: a holder arrested on a Vagrancy alone
+/// serves the Forgery's term (on d2eea01 the Forgery was filed after the
+/// sentence's crime was picked and resolved with it).
+#[test]
+fn test_exposed_papers_set_the_sentence() {
+    let mut w = on_world();
+    w.config.gray.p_expose = 1.0;
+    let a = idle(&w)[0];
+    let guard = w.guards()[0];
+    w.jobs2.gray.papers.insert(a, gray::Papers { tier: 1, fake: true, forger: None });
+    citysim::systems::law::file_report(&mut w, citysim::Crime::Vagrancy, a, None);
+    citysim::systems::law::jail_suspect(&mut w, guard, a);
+    let s = w.comp::<citysim::Sentence>(a).expect("sentenced");
+    assert_eq!(s.crime, citysim::Crime::Forgery, "the exposed papers set the term");
+    assert!(!w.jobs2.gray.papers.contains_key(&a), "the papers are void");
+}

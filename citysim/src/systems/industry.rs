@@ -771,9 +771,11 @@ pub fn civic_allocate(world: &mut World, left: i64) {
     for i in 0..3 {
         let w = wage_of(world, kinds[i]);
         let n = if w == i64::MAX { 0 } else { (left / w).min(wants[i]).clamp(0, i64::from(u16::MAX)) };
-        left -= n * if w == i64::MAX { 0 } else { w };
         let cur = world.jobs2.civic[i];
-        world.jobs2.civic[i] = crate::systems::treasury::paced(cur, n as u16, pace);
+        let kept = crate::systems::treasury::paced(cur, n as u16, pace);
+        world.jobs2.civic[i] = kept;
+        // Phase-8 review: the posts kept (paced) are what this kind costs.
+        left = (left - i64::from(kept) * if w == i64::MAX { 0 } else { w }).max(0);
     }
 }
 

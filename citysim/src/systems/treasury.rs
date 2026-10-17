@@ -197,8 +197,13 @@ pub fn civic_daily(world: &mut World) {
     world.levers.sanitation_count = paced(world.levers.sanitation_count, sweepers, pace);
     // Jobs & lives phase 1 (§ 2): what police and Sanitation left funds the
     // Jailers, the Clerks and the Depot Hands, in that order (nothing off).
+    // Phase-8 review: what they leave is the target less the posts on the
+    // payroll (the paced headcounts), not the target headcounts: while the
+    // police fall `civic_pace` a day the posts still standing are paid.
     let gw = world.config.economy.wage(Role::Guard).max(1);
-    let left = target - i64::from(guards) * gw - i64::from(sweepers) * sweeper_wage(world);
+    let left = target
+        - i64::from(world.levers.guard_count) * gw
+        - i64::from(world.levers.sanitation_count) * sweeper_wage(world);
     crate::systems::industry::civic_allocate(world, left);
 }
 

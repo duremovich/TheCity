@@ -303,10 +303,11 @@ pub fn board_lean(world: &World, m: EntityId, cand: EntityId) -> f32 {
 pub fn posture_lean(world: &World) -> f32 {
     let lean = world.levers.faith.posture_lean;
     let Some(i) = world.levers.faith.established.filter(|_| lean != 0.0 && on(world)) else { return 0.0 };
+    // Phase-8 review: the role index, not a scan of the city.
     let guards = world
-        .citizens()
-        .into_iter()
-        .filter(|&a| world.comp::<Job>(a).is_some_and(|j| j.role == crate::components::Role::Guard))
+        .workers(crate::components::Role::Guard)
+        .iter()
+        .filter(|&&a| world.comp::<Job>(a).is_some_and(|j| j.role == crate::components::Role::Guard))
         .count();
     if guards == 0 {
         return 0.0;

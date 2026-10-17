@@ -987,6 +987,10 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
     if world.has::<Sentence>(suspect) {
         return;
     }
+    // Jobs & lives phase 6 (§ 7): fake papers exposed (nothing off). Before
+    // the sentence's crime is picked (phase-8 review): the Forgery is an
+    // open report like any other and sets the term when it is the worst.
+    crate::systems::gray::on_arrest(world, suspect);
     // The most severe open crime sets the sentence; the rest are covered by it.
     let Some(report) = world
         .crime_reports()
@@ -1092,8 +1096,6 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
     }
 
     let until = world.tick + sentence_ticks(world, crime);
-    // Jobs & lives phase 6 (§ 7): fake papers exposed (nothing off).
-    crate::systems::gray::on_arrest(world, suspect);
     sentence(world, suspect, crime, until, jail);
     resolve_reports(world, suspect);
     world.stats.current.arrests += 1;

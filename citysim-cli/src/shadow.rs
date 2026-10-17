@@ -2656,7 +2656,11 @@ const CHECKS: &[Check] = &[
     (90, "gang_leader", Metric::KnownMetWeek, Bound::Min(0.1), 0.25, 6.38),
     (90, "gang_leader", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
     (90, "gang_leader", Metric::CommuteAbortsDay, Bound::Max(0.18), 0.00, 0.13),
-    (90, "gang_leader", Metric::PaidOfWorked, Bound::Min(0.78), 0.88, 0.88),
+    // Jobs & lives phase-8 review (2026-10-17): this row alone re-derived on the review's city with
+    // the eight-run ensemble (main 0.77; stat_violence_mult 0.98 1.00, 0.99 1.00, 1.01 0.74, 1.02
+    // 0.85, 1.03 SKIP (16 shifts); max_coarse 149 0.96, 151 0.97; read on 7 of 8): 0.74 - 0.1 =
+    // 0.64. The misses were leaders on side jobs at an owner short of coins (unpaid, then a quit).
+    (90, "gang_leader", Metric::PaidOfWorked, Bound::Min(0.64), 0.74, 1.00),
     (90, "gang_leader", Metric::WagedWorkdays, Bound::Min(0.59), 0.69, 0.97),
     (90, "gang_member", Metric::WalkHDay, Bound::Max(7.8), 5.35, 6.70),
     (90, "gang_member", Metric::LongestSleepH, Bound::Min(5.2), 5.78, 6.09),

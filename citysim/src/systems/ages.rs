@@ -145,6 +145,9 @@ pub fn maim(world: &mut World, id: EntityId, slot: Option<Slot>, why: &str) {
     if !on(world) || !crate::systems::law::living(world, id) {
         return;
     }
+    // Phase-8 review: a behaviour chip ripped out is no limb lost (its
+    // "prosthetic" was a behaviour chip): a maim with no slot.
+    let slot = slot.filter(|&s| s != Slot::Behaviour);
     let e = world.jobs2.ages.maimed.entry(id).or_insert((0, slot));
     e.0 = (e.0 + 1).min(3);
     if e.1.is_none() {
@@ -182,8 +185,13 @@ pub fn press(world: &mut World, worker: EntityId, ticks: u64) {
 /// Midnight: a maimed agent with a slot and the coins buys a T1 prosthetic
 /// in it at the nearest Clinic (`chrome::buy_install`): the level clears.
 fn prosthetics(world: &mut World) {
-    let list: Vec<(EntityId, Slot)> =
-        world.jobs2.ages.maimed.iter().filter_map(|(&a, &(_, s))| s.map(|s| (a, s))).collect();
+    let list: Vec<(EntityId, Slot)> = world
+        .jobs2
+        .ages
+        .maimed
+        .iter()
+        .filter_map(|(&a, &(_, s))| s.filter(|&s| s != Slot::Behaviour).map(|s| (a, s)))
+        .collect();
     for (a, slot) in list {
         if !crate::systems::law::living(world, a) || world.has::<Sentence>(a) {
             continue;

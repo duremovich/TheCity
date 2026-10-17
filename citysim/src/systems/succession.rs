@@ -327,17 +327,9 @@ fn end(world: &mut World, gang: EntityId, winner: EntityId, loser: EntityId, fat
             crate::systems::demography::start_emigrating(world, loser, &format!("lost the war for {gname}"));
         }
     }
-    gang::recompute_leader(world, gang);
-    // Jobs & lives phase 7b (a latent M17 bug the regenerated table's city
-    // exposed): this recompute runs without the fallen claimant, so a loser
-    // jailed while it still held the chair was made the gang's jailed boss;
-    // a claimant who lost the war from a cell is nobody's boss.
-    if fate == Fate::Jailed {
-        if let Some(g) = world.comp_mut::<Gang>(gang) {
-            if g.boss == Some(loser) {
-                g.boss = None;
-            }
-        }
-    }
+    // Jobs & lives phase 7b (a latent M17 bug): a plain recompute here made
+    // a loser jailed while it still held the chair the gang's jailed boss;
+    // the war's recompute knows the claimant lost it (no boss, no split).
+    gang::recompute_leader_after_war(world, gang);
     world.push_event(EventKind::CivilWarEnded, &[winner, loser, gang], text);
 }

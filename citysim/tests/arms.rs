@@ -376,3 +376,21 @@ fn test_save_round_trip_keeps_the_store() {
     assert_eq!(x.kind, AssetKind::Weapon);
     assert!(x.prov.is_some());
 }
+
+/// Phase-8 review finding 1: an unlicensed weapon is petty. With a Theft
+/// open too, the Theft sets the sentence (on d2eea01 the weapon outranked
+/// it and the suspect served Vagrancy's night).
+#[test]
+fn test_unlicensed_arms_does_not_shorten_a_worse_sentence() {
+    let mut w = on_world();
+    let pool = civilians(&w);
+    let (guard, a) = (w.guards()[0], pool[0]);
+    assert!(citysim::Crime::UnlicensedArms < citysim::Crime::Theft, "petty");
+    law::file_report(&mut w, citysim::Crime::Theft, a, None);
+    law::file_report(&mut w, citysim::Crime::UnlicensedArms, a, None);
+    let now = w.tick;
+    law::jail_suspect(&mut w, guard, a);
+    let s = w.comp::<citysim::Sentence>(a).expect("sentenced");
+    assert_eq!(s.crime, citysim::Crime::Theft, "the worse crime sets the term");
+    assert_eq!(s.until_tick - now, law::sentence_ticks(&w, citysim::Crime::Theft));
+}

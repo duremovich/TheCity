@@ -72,6 +72,11 @@ pub struct BdState {
     /// The Recorders alive (rebuilt at midnight; a lookup index).
     #[serde(skip_serializing_if = "BTreeSet::is_empty")]
     pub recorders: BTreeSet<EntityId>,
+    /// Phase-8 review: agent -> the day of its black-unit roll (one roll an
+    /// agent-day on both tiers; a Full drinker rolled at every drink).
+    /// Kept to today at midnight.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub rolled: BTreeMap<EntityId, u64>,
 }
 
 impl BdState {
@@ -200,6 +205,7 @@ fn export(world: &mut World, studios: &[EntityId]) {
 // ---------------------------------------------------------------------------
 
 fn recorder_cap(world: &World) -> usize {
+    // scan-ok: daily (the Recorder cap at midnight), the head count only
     let pop = world.citizens().len() as f32;
     (world.config.vice.recorders_per_1000 * pop / 1000.0).floor() as usize
 }
@@ -239,8 +245,13 @@ pub fn after_fight(world: &mut World, winner: EntityId) {
 /// carrier buys a Recorder abroad (under the cap) for its member of lowest
 /// fighting (free, ties the lower id); the recorded deeds become black units.
 fn recorders_daily(world: &mut World) {
-    let all: Vec<EntityId> =
-        world.entities().filter(|&a| world.comp::<Asset>(a).is_some_and(|x| x.kind == AssetKind::Recorder)).collect();
+    // Phase-8 review: the asset store's index and the Recorder index, not a
+    // scan of every entity (ascending, as the scan was).
+    let mut all: Vec<EntityId> = crate::systems::assets::all_assets(world);
+    all.extend(world.jobs2.bd.recorders.iter().copied());
+    all.sort_unstable();
+    all.dedup();
+    all.retain(|&a| world.comp::<Asset>(a).is_some_and(|x| x.kind == AssetKind::Recorder));
     // A Recorder on a body no longer living (or set down) is gone with it.
     let mut index: BTreeSet<EntityId> = BTreeSet::new();
     for a in all {
@@ -334,7 +345,13 @@ pub fn bar_visit(world: &mut World, id: EntityId, bar: EntityId, present: bool) 
     if dealer == id || world.gang_of(id) == Some(gang) {
         return;
     }
-    if hash(world, PURPOSE_BLACK, key(id), world.day()) >= world.config.vice.p_black_buy {
+    // One roll an agent-day (the hash is keyed on the day; a Full drinker's
+    // second drink read the same draw and bought again).
+    let day = world.day();
+    if world.jobs2.bd.rolled.insert(id, day) == Some(day) {
+        return;
+    }
+    if hash(world, PURPOSE_BLACK, key(id), day) >= world.config.vice.p_black_buy {
         return;
     }
     let cfg = &world.config.vice;
@@ -377,6 +394,8 @@ pub fn daily(world: &mut World) {
         return;
     }
     let _t = crate::prof::scope!("braindance::daily");
+    let today = world.day();
+    world.jobs2.bd.rolled.retain(|_, d| *d == today);
     let s = studios(world);
     wholesale(world, &s);
     export(world, &s);

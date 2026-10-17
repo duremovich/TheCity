@@ -72,7 +72,16 @@ const FILES: &[&str] = &[
     "systems/governance.rs",
     "systems/tags.rs",
     "systems/attention.rs",
+    // Jobs & lives phase-8 review: the daily passes that scanned the city
+    // for a role or an asset kind read the indices (`workers`, the asset
+    // store) instead; `.entities()` is checked here too (`ENTITY_FILES`).
+    "systems/gray.rs",
+    "systems/faith.rs",
+    "systems/braindance.rs",
 ];
+
+/// Files where a scan of every entity (`.entities()`) also needs a marker.
+const ENTITY_FILES: &[&str] = &["systems/gray.rs", "systems/faith.rs", "systems/braindance.rs"];
 
 #[test]
 fn test_no_unmarked_citizen_scans_in_per_tick_systems() {
@@ -83,7 +92,8 @@ fn test_no_unmarked_citizen_scans_in_per_tick_systems() {
         let lines: Vec<&str> = text.lines().collect();
         for (i, line) in lines.iter().enumerate() {
             let code = line.split("//").next().unwrap_or("");
-            if !(code.contains(".citizens()") || code.contains("with::<Brain>()")) {
+            let entity_scan = ENTITY_FILES.contains(file) && code.contains(".entities()");
+            if !(code.contains(".citizens()") || code.contains("with::<Brain>()") || entity_scan) {
                 continue;
             }
             let marked = line.contains("scan-ok:") || (i > 0 && lines[i - 1].contains("scan-ok:"));
@@ -97,4 +107,44 @@ fn test_no_unmarked_citizen_scans_in_per_tick_systems() {
         "unmarked per-tick scans (use world.bodies()/guards()/workers() or mark scan-ok):\n{}",
         bad.join("\n")
     );
+}
+
+/// Phase-8 review: every hashed roll's purpose constant (`const PURPOSE_*:
+/// u64`) across `src/` is unique, so two systems never read the same draw
+/// (on d2eea01 `fashion::PURPOSE_MUG` and `faith::PURPOSE_ATTEND` were both
+/// 0x4641_0001).
+#[test]
+fn test_hash_purposes_are_unique() {
+    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for e in std::fs::read_dir(dir).expect("src") {
+            let p = e.expect("entry").path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push(p);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut files);
+    files.sort();
+    let mut seen: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    let mut dup = Vec::new();
+    for f in files {
+        let text = std::fs::read_to_string(&f).expect("read");
+        for line in text.lines() {
+            let l = line.trim();
+            let Some(rest) = l.strip_prefix("const PURPOSE_").or_else(|| l.strip_prefix("pub const PURPOSE_")) else {
+                continue;
+            };
+            let Some((name, value)) = rest.split_once(": u64 = ") else { continue };
+            let value = value.trim_end_matches(';').replace('_', "").to_lowercase();
+            let here =
+                format!("{}::PURPOSE_{name}", f.file_name().map_or(String::new(), |n| n.to_string_lossy().into()));
+            if let Some(prev) = seen.insert(value.clone(), here.clone()) {
+                dup.push(format!("{value}: {prev} and {here}"));
+            }
+        }
+    }
+    assert!(dup.is_empty(), "shared hash purposes: {dup:?}");
 }

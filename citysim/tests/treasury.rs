@@ -256,3 +256,39 @@ fn test_scaled_no_net_city_keeps_its_police_and_beats() {
     }
     assert_eq!(back.law().map(|l| l.beats.clone()), w.law().map(|l| l.beats.clone()), "the load runs on alike");
 }
+
+/// Phase-8 review finding 7: the civic three are funded from what the
+/// police and sweepers on the payroll (their paced headcounts) leave of the
+/// target. With the police falling at the pace from over the ceiling and a
+/// target past the target headcounts, d2eea01 funded the civic three from
+/// the target headcounts' remainder (coins the paced payroll already spent).
+#[test]
+fn test_civic_three_funded_from_what_the_payroll_leaves() {
+    let mut w = city();
+    let cfg = w.config.treasury.clone();
+    set_treasury(&mut w, (cfg.band[0] + cfg.band[1]) / 2);
+    let cap = treasury::police_ceiling(&w);
+    let gw = w.config.economy.wage(Role::Guard);
+    let sw = treasury::sweeper_wage(&w);
+    // A target of the ceiling's police, the full Sanitation and 30 guards' wages over.
+    let want = cap * gw + i64::from(cfg.sanitation_max) * sw + 30 * gw;
+    let receipts = (want as f64 / f64::from(cfg.civic_share)).ceil() as i64;
+    set_receipts(&mut w, receipts, 14);
+    w.levers.guard_count = (cap + 100) as u16;
+    w.levers.sanitation_count = cfg.sanitation_max;
+    w.jobs2.civic = [0, 0, 0];
+    let target = treasury::civic_target(&w);
+    treasury::civic_daily(&mut w);
+    let civic_wage = |kind: citysim::BuildingKind| {
+        w.config
+            .trades
+            .iter()
+            .find(|r| r.model == citysim::config::TradeModel::Civic && r.workplace.contains(&kind))
+            .map_or(0, |r| r.wage)
+    };
+    let kinds = [citysim::BuildingKind::Jail, citysim::BuildingKind::Hall, citysim::BuildingKind::Warehouse];
+    let civic: i64 = (0..3).map(|i| i64::from(w.jobs2.civic[i]) * civic_wage(kinds[i])).sum();
+    let paid = i64::from(w.levers.guard_count) * gw + i64::from(w.levers.sanitation_count) * sw;
+    assert!(i64::from(w.levers.guard_count) > cap, "the police still falling at the pace");
+    assert!(civic <= (target - paid).max(0), "civic {civic} funded past what the payroll {paid} leaves of {target}");
+}

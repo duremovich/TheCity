@@ -326,6 +326,17 @@ fn recompute_leader_after(world: &mut World, gang: EntityId, fallen: Option<Enti
     // M17 phase 4b: a claimant killed or jailed loses the civil war at once;
     // the winner is crowned and no new succession follows.
     let war_lost = fallen.is_some_and(|f| crate::systems::succession::claimant_fell(world, gang, f));
+    recompute_leader_inner(world, gang, fallen, war_lost);
+}
+
+/// [`recompute_leader`] at a civil war's end (`succession::end`): the war is
+/// lost by the claimant, so the loser is nobody's jailed boss and no split
+/// check follows (phase-8 review: the old after-the-fact boss patch).
+pub fn recompute_leader_after_war(world: &mut World, gang: EntityId) {
+    recompute_leader_inner(world, gang, None, true);
+}
+
+fn recompute_leader_inner(world: &mut World, gang: EntityId, fallen: Option<EntityId>, war_lost: bool) {
     let Some(g) = world.comp::<Gang>(gang) else { return };
     let (members, old, crowned) = (g.members.clone(), g.leader, g.crowned);
     let ranking = leader_ranking(world, gang);

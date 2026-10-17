@@ -635,3 +635,33 @@ fn test_socialise_evening_follows_the_agents_own_shift() {
     w.tick = 2 * TICKS_PER_DAY + 2 * 60;
     assert_eq!(socialise_phase(&w, a), Some(0.4), "a day worker's 02:00");
 }
+
+/// Phase-8 review finding 2: the learned off-screen evening reads the Full
+/// ladder's gates: with every venue shut (`closed_until`), nobody's evening
+/// has a paid rung (on d2eea01 the closed venues still took visits).
+#[test]
+fn test_learned_evening_skips_closed_venues() {
+    let mut w = World::new(42, Config::load().dole_city());
+    w.run_ticks(1259);
+    let mut skip = Vec::new();
+    let a = loop {
+        let a = civilian(&w, &skip);
+        let mut probe = w.clone();
+        set_coins(&mut probe, a, 200);
+        if !leisure::evening_kinds(&probe, a).is_empty() {
+            break a;
+        }
+        skip.push(a);
+    };
+    set_coins(&mut w, a, 200);
+    let until = w.tick + TICKS_PER_DAY;
+    for k in BuildingKind::LEISURE.iter().copied().chain([BuildingKind::Bar]) {
+        for b in w.buildings_of_kind(k).to_vec() {
+            if let Some(bd) = w.comp_mut::<Building>(b) {
+                bd.closed_until = Some(until);
+            }
+        }
+    }
+    let left = leisure::evening_kinds(&w, a);
+    assert!(left.is_empty(), "a shut venue on the evening: {left:?}");
+}

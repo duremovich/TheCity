@@ -626,8 +626,9 @@ pub fn rip(world: &mut World, agent: EntityId, body: EntityId) -> usize {
 pub fn rip_for(world: &mut World, agent: EntityId, body: EntityId, gang: Option<EntityId>) -> usize {
     let implants = installed(world, body);
     // Jobs & lives phase 7 (§ 6.3): the first ripped slot (a survivor's maim).
-    let ripped_slot = implants.first().and_then(|&a| match world.comp::<Asset>(a).map(|x| x.kind) {
-        Some(AssetKind::Implant(s)) => Some(s),
+    // Phase-8 review: a limb's slot (a behaviour chip is no limb).
+    let ripped_slot = implants.iter().find_map(|&a| match world.comp::<Asset>(a).map(|x| x.kind) {
+        Some(AssetKind::Implant(s)) if s != Slot::Behaviour => Some(s),
         _ => None,
     });
     let hideout = gang.and_then(|g| world.hideout_of(g));
@@ -817,13 +818,12 @@ pub fn abduct_within(world: &mut World, agent: EntityId, victim: EntityId, reach
     if !crate::systems::law::living(world, victim) || !crate::systems::law::near(world, agent, victim, reach) {
         return false;
     }
-    // Jobs & lives phase 8 (the scavs): a victim already in someone's
+    // Jobs & lives phase 8 (the scavs; un-gated at the phase-8 review, a
+    // bug in the general abduction code): a victim already in someone's
     // hands is not taken again (the Abduct step's start checks it, but a
     // second abductor's step begun before the first won completed after
     // and took the victim from the first, whose Rip then failed).
-    if crate::systems::gray::on(world)
-        && world.comp::<Brain>(victim).and_then(|b| b.cuffed_by).is_some_and(|c| c != agent)
-    {
+    if world.comp::<Brain>(victim).and_then(|b| b.cuffed_by).is_some_and(|c| c != agent) {
         return false;
     }
     let bonus: f32 = world

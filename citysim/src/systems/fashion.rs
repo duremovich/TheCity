@@ -41,7 +41,8 @@ use crate::systems::assets;
 use crate::systems::ownership::{self, Flow};
 use crate::world::World;
 
-const PURPOSE_MUG: u64 = 0x4641_0001;
+// Phase-8 review: its own purpose (it shared 0x4641_0001 with faith's attend).
+const PURPOSE_MUG: u64 = 0x4653_0001;
 
 /// Phase 4's fashion is live: `[jobs2] enabled` and `[fashion] enabled`.
 pub fn on(world: &World) -> bool {

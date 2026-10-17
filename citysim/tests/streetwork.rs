@@ -341,6 +341,36 @@ fn test_tinker_fixes_cheap_or_wrecks() {
     }
 }
 
+/// Phase-8 review finding 4: a botched street repair wrecks the vehicle
+/// (gone from the world and the vehicle index, its Parts left); on d2eea01
+/// it stayed a zombie at condition 0.
+#[test]
+fn test_botched_repair_wrecks_the_vehicle() {
+    let mut w = world_with(|c| c.jobs2.tinker_fail_p = 1.0);
+    let tinker = jobless(&w)[0];
+    let mut p = vendor_pitch(&mut w, tinker);
+    p.trade = trade(&w, "tinker").trade().expect("trade");
+    w.jobs2.pitches.insert(tinker, p.clone());
+    w.comp_mut::<Brain>(tinker).expect("brain").lod = citysim::Lod::Statistical;
+    run_to_tod(&mut w, 10 * TICKS_PER_HOUR);
+    let owner = jobless(&w)[1];
+    set_coins(&mut w, owner, 500);
+    let v = citysim::systems::assets::spawn_asset(
+        &mut w,
+        citysim::AssetKind::Motorcycle,
+        1,
+        Some(owner),
+        citysim::AssetLoc::Carried(owner),
+        60,
+    );
+    assert!(w.has::<citysim::components::Asset>(v));
+    let r = streetwork::tinker_repair(&mut w, v, owner, p.spot, 100);
+    assert_eq!(r, Some(false), "botched");
+    assert!(!w.has::<citysim::components::Asset>(v), "the vehicle is wrecked, not left at condition 0");
+    assert!(!w.vehicles.contains(&v));
+    assert_eq!(count(&w, EventKind::Wrecked), 1);
+}
+
 /// § 3 (`GoalKind::Pitch`): a body with a Pitch walks to it in its hours
 /// and stands it (`Vend`).
 #[test]

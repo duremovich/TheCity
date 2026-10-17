@@ -187,6 +187,14 @@ fn test_captive_chipped_is_trafficking() {
     assert!(c.captive);
     assert!(dollhouse::under_chip(&w, victim), "under the chip for the whole hold");
     assert_eq!(filed(&w), 1, "Trafficking filed on the member");
+    // Phase-8 review finding 3: past `chip_days` a held captive keeps the
+    // same chip (on d2eea01 the contract ended and the same midnight
+    // re-chipped it: a new contract, a second Trafficking report).
+    w.tick = c.until + 1;
+    dollhouse::daily(&mut w);
+    let again = w.jobs2.chip.contracts.get(&victim).cloned().expect("still chipped while held");
+    assert_eq!(again.since, c.since, "the same contract");
+    assert_eq!(filed(&w), 1, "no second Trafficking report");
     // The hold over: the chip comes out, the trait stays.
     captives::release(&mut w, victim, captives::Freed::Expired);
     dollhouse::daily(&mut w);
@@ -274,4 +282,27 @@ fn test_patrol_sweeps_a_street_pitch() {
     assert!(citysim::systems::vice::sweep_street(&mut w, &p), "swept on patrol");
     let filed = w.crime_reports().iter().filter(|r| r.suspect == o && r.crime == Crime::Solicitation).count();
     assert_eq!(filed, 1, "Solicitation filed");
+}
+
+/// Phase-8 review finding 6: a drinker rolls for a black unit once an
+/// agent-day, however many drinks (on d2eea01 every Full drink read the
+/// same day's draw and bought again).
+#[test]
+fn test_black_unit_once_an_agent_day() {
+    let mut w = on_world();
+    w.config.vice.p_black_buy = 1.0;
+    let g = with_gang(&mut w, 1);
+    let dealer = w.comp::<citysim::Gang>(g).map(|x| x.members[0]).expect("member");
+    let bar = w.buildings_of_kind(BuildingKind::Bar)[0];
+    w.enter_building(dealer, bar);
+    w.dealers.insert(bar, vec![dealer]);
+    w.jobs2.bd.black.insert(g, 5);
+    let a = idle(&w)[0];
+    set_coins(&mut w, a, 500);
+    let sold = |w: &World| w.stats.current.jobs2.as_ref().map_or(0, |j| j.black_sold);
+    braindance::bar_visit(&mut w, a, bar, true);
+    assert_eq!(sold(&w), 1, "the first drink's roll buys");
+    braindance::bar_visit(&mut w, a, bar, true);
+    braindance::bar_visit(&mut w, a, bar, true);
+    assert_eq!(sold(&w), 1, "one roll a day");
 }
