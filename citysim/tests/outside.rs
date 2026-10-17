@@ -94,16 +94,17 @@ fn test_demand_linear_until_the_cap() {
     // Jobs & lives phase 7b: the visit cap below the uncapped demand (the
     // off-screen evening's paid visits mirror the Full tier's rates since,
     // and day 0's visits per resident fell: the 2.0-flat city's uncapped
-    // visits due are 3, under the old cap of 4).
+    // visits due are 3, under the old cap of 4; Shadow V4 batch 1, no
+    // leisure in a day worker's small hours: 2, under a cap of 1).
     let mut w3 = ambient_world(42, 2.0, |c| {
         c.outside.ambient.food_cap = 10;
-        c.outside.ambient.visit_cap = 2;
+        c.outside.ambient.visit_cap = 1;
         c.outside.ambient.sd = 0.0;
     });
     w3.run_ticks(TICKS_PER_DAY + 9 * HOUR);
-    assert!(v2 > 2, "the cap is under the uncapped demand ({v2})");
+    assert!(v2 > 1, "the cap is under the uncapped demand ({v2})");
     assert_eq!(due_food(&w3), 10, "the cap binds");
-    assert_eq!(due_visits(&w3), 2, "the cap binds");
+    assert_eq!(due_visits(&w3), 1, "the cap binds");
 }
 
 /// A standing Market with a sales history, its owner.

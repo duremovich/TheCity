@@ -544,6 +544,16 @@ pub fn is_located_suspect(world: &World, s: EntityId) -> bool {
 }
 
 /// Sentence length in ticks for a crime at the current lever.
+/// The fine settling a fineable report: Vagrancy's, the dodger's (Transit
+/// T10), else `fine_mult` meals.
+fn fine_for(world: &World, crime: Crime) -> i64 {
+    match crime {
+        Crime::Vagrancy => world.config.law.vagrancy_fine,
+        Crime::FareEvasion => world.config.transit.dodge_fine,
+        _ => world.config.crime.fine_mult * world.mean_price(),
+    }
+}
+
 pub fn sentence_ticks(world: &World, crime: Crime) -> Tick {
     // M12 D15: a night in the cells, whatever the sentence lever.
     // Transit T10: fare evasion too. Jobs & lives phase 3 (§ 4): an
@@ -1007,17 +1017,16 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
     let capacity = usize::from(world.config.buildings.jail.capacity);
     let jailed = world.with::<Sentence>().len();
 
-    if jailed >= capacity {
+    // Shadow V4 bug 4: a petty offence (a night in the cells) is fined
+    // whenever the suspect can pay, not only when the Precinct is full (fare
+    // evasion was the city's top sentence, served from a desk or a bar).
+    let full = jailed >= capacity;
+    let petty = matches!(crime, Crime::Vagrancy | Crime::FareEvasion | Crime::UnlicensedArms | Crime::Solicitation);
+    let can_pay = world.comp::<crate::components::Wallet>(suspect).is_some_and(|w| w.coins >= fine_for(world, crime));
+    if full || (petty && can_pay) {
         match crime {
             Crime::Theft | Crime::Vagrancy | Crime::FareEvasion | Crime::UnlicensedArms | Crime::Solicitation => {
-                let fine = if crime == Crime::Vagrancy {
-                    world.config.law.vagrancy_fine
-                } else if crime == Crime::FareEvasion {
-                    // Transit T10: the dodger's fine.
-                    world.config.transit.dodge_fine
-                } else {
-                    world.config.crime.fine_mult * world.mean_price()
-                };
+                let fine = fine_for(world, crime);
                 let coins = world.comp::<crate::components::Wallet>(suspect).map_or(0, |w| w.coins);
                 // M12 review: a Vagrancy report is settled as `street::vagrancy_hit`'s
                 // fine is: where the vagrant was swept, on the ledger, in the log.
@@ -1045,7 +1054,7 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
                     world.push_event(
                         EventKind::Sentence,
                         &[suspect],
-                        format!("{name} fined {fine} coins (Precinct full)"),
+                        format!("{name} fined {fine} coins{}", if full { " (Precinct full)" } else { "" }),
                     );
                     if let Some(place) = swept {
                         crate::systems::street::note_vagrancy(world, place);

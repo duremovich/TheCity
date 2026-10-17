@@ -1502,6 +1502,17 @@ scavenge_coins = 1                  # a coin for an hour of scrap (only while br
 # 0.5, 921 at 0.15, 1,388 at 0); at 0.15 it is a last resort, not a living (seeds 42-44 with
 # price_base 4: thefts 9.2-14.6k at 0.15, 10.7-13.4k at 0.3, riots 4-6 vs 2-5).
 scavenge_p = 0.15
+# Shadow V4 bug 1: with the dole at 0 the jobless kept Earn only below one meal, so holding a meal's
+# coins they idled 46-65 h a week; they now beg and scrap below this many meals.
+earn_meals_no_net = 3
+# Shadow V4 bug 2: a 90-min Rest's +0.1 energy outran the decay (0.0625), so a Rest loop never slept;
+# Rest restores only up to here.
+rest_energy_cap = 0.6
+# Shadow V4 bug 3: a grudge fight weighs the law and the odds: Fight x (1 - fight_lawful_damp x
+# lawfulness) x (fight_odds_floor + the fighter's share of the two strengths, frailty and maims in).
+# A lawful (0.71), timid reporter assaulted a 1 c robber before three neighbours and served 10 days.
+fight_lawful_damp = 0.6
+fight_odds_floor = 0.5
 scavenge_dry_max = 3                # L2 (L29, [lod] budget): three dry hours in a row ...
 scavenge_cool_hours = 4             # ... cool Earn for four
 escort_van_ticks = 60

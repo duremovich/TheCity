@@ -7,7 +7,11 @@ use citysim::{Config, EventKind, Lod, Wallet, World, TICKS_PER_DAY};
 
 /// G3 (`hf_buy_not_steal`), coordinator call: in an all-Full city with no
 /// dole (so some are broke), food thieves are the ones who cannot buy a
-/// meal; nobody holding a meal's coins steals food, and the broke still do.
+/// meal; nobody holding a meal's coins steals food while the Market has
+/// stock for them, and the broke still do. (G3 is a cost, not a ban: with
+/// every unit on the shelf reserved at the morning rush the theft is the
+/// only meal; Shadow V4's batch 1 moved the city onto five such thefts at
+/// Block#24, each with `PlanCtx::market_free` false.)
 #[test]
 fn test_g3_only_the_broke_steal_food() {
     let mut cfg = Config::load().dole_city().v1_profile();
@@ -29,7 +33,9 @@ fn test_g3_only_the_broke_steal_food() {
         for (a, text) in fresh {
             let coins = w.comp::<Wallet>(a).map_or(0, |x| x.coins);
             if coins >= life::meal_price(&w, a) {
-                able.push((a.index, coins, text));
+                if citysim::goap::actions::PlanCtx::build(&w, a, None).market_free {
+                    able.push((a.index, coins, text));
+                }
             } else {
                 broke += 1;
             }

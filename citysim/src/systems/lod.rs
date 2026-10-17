@@ -1676,8 +1676,9 @@ fn stat_earn(world: &mut World, id: EntityId, row: usize) {
     // all-Full: 0.196 scavenges an hour at 0 coins, 0.012 at 1, under 0.01
     // above); the savings-line gate spread the broke's rate over everyone
     // under seven meals, so the broke off screen stayed broke (half the
-    // off-screen homeless broke against a tenth Full).
-    if !crate::systems::life::broke(world, id) {
+    // off-screen homeless broke against a tenth Full). Shadow V4 bug 1:
+    // with no dole, under `earn_meals_no_net` meals (`life::earn_short`).
+    if !crate::systems::life::earn_short(world, id) {
         return;
     }
     let u: f32 = world.rng.agent(id).random();

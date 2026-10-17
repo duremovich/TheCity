@@ -127,30 +127,8 @@ pub fn bind_target(world: &World, id: EntityId, goal: GoalKind) -> Option<Entity
         // M12 D31/D39: a riot's target, a corp building, the Jail or the rival Hideout.
         GoalKind::Raid => crate::systems::raid::target_building(world, id),
         // Fight binds the hostile within 4, or the revenge subject.
-        GoalKind::Fight => {
-            let tile = world.comp::<Position>(id)?.tile;
-            let two_days = world.tick.saturating_sub(2 * crate::time::TICKS_PER_DAY);
-            let mem = world.comp::<crate::components::Memory>(id);
-            let fought = |o: EntityId| {
-                mem.is_some_and(|m| {
-                    m.entries.iter().any(|e| {
-                        e.kind == crate::components::MemoryKind::Fought && e.subject == Some(o) && e.tick >= two_days
-                    })
-                })
-            };
-            let robbed_by = |o: EntityId| {
-                mem.is_some_and(|m| {
-                    m.entries.iter().any(|e| e.kind == crate::components::MemoryKind::WasRobbed && e.subject == Some(o))
-                })
-            };
-            world
-                .enemies_of(id)
-                .filter(|&o| world.has::<Brain>(o) && crate::systems::law::near(world, id, o, 4) && !fought(o))
-                .filter(|&o| crate::utility::goals::wronged_by(world, id, o))
-                .min_by_key(|&o| {
-                    (!robbed_by(o), world.comp::<Position>(o).map_or(u32::MAX, |p| p.tile.manhattan(tile)), o.index)
-                })
-        }
+        // (Shadow V4 bug 3: the scoring's own pick, never a downed body.)
+        GoalKind::Fight => crate::utility::goals::fight_target(world, id),
         // Bury binds the nearest unburied corpse the agent knows of (SawCorpse),
         // skipping corpses someone else has reserved.
         GoalKind::Bury => {

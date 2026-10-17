@@ -319,6 +319,27 @@ fn hollow(w: &World) -> EntityId {
     f.parent.as_ref().expect("p").branches[0]
 }
 
+/// `city()` run on until The Hollow has a leader and `brothers_gutted_below`
+/// members (Shadow V4 batch 1: on the moved city its roster was empty on
+/// day 4; the brothers' tests need a gang to lose).
+fn hollow_city() -> World {
+    let mut w = city();
+    let g = hollow(&w);
+    let want = w.config.outside.parents.brothers_gutted_below;
+    for _ in 0..30 {
+        if w.comp::<Gang>(g).is_some_and(|x| x.leader.is_some() && x.members.len() >= want) {
+            break;
+        }
+        w.run_ticks(TICKS_PER_DAY);
+    }
+    w
+}
+
+/// BrothersArrived since `t` (`hollow_city`'s run-on may have had some).
+fn brothers_since(w: &World, t: u64) -> usize {
+    w.events.iter().filter(|e| e.kind == EventKind::BrothersArrived && e.tick >= t).count()
+}
+
 fn cool_hollow(w: &mut World) {
     for f in w.outside.factions.iter_mut().filter(|f| f.name == "Hollow Brothers") {
         f.parent.as_mut().expect("p").last_brothers = None;
@@ -327,14 +348,15 @@ fn cool_hollow(w: &mut World) {
 
 #[test]
 fn test_a_decapitation_sends_no_brothers() {
-    let mut w = city();
+    let mut w = hollow_city();
     let g = hollow(&w);
     cool_hollow(&mut w);
     let leader = w.comp::<Gang>(g).and_then(|x| x.leader).expect("a leader");
+    let t0 = w.tick;
     w.kill_by(leader, DeathCause::Violence, None);
     let delay = u64::from(w.config.outside.parents.brother_delay_days);
     w.run_ticks((delay + 2) * TICKS_PER_DAY);
-    assert_eq!(count(&w, EventKind::BrothersArrived), 0, "the gang settles its own succession");
+    assert_eq!(brothers_since(&w, t0), 0, "the gang settles its own succession");
 }
 
 /// A sack that leaves a syndicate's gang under `brothers_gutted_below`
@@ -346,7 +368,7 @@ fn test_brothers_after_a_gutting_sack() {
         let until = w.tick + w.config.gangs.sacked_days * TICKS_PER_DAY;
         w.comp_mut::<Gang>(g).expect("gang").sacked_until = Some(until);
     };
-    let mut w = city();
+    let mut w = hollow_city();
     let delay = u64::from(w.config.outside.parents.brother_delay_days);
     w.config.outside.parents.brothers_p = 1.0;
     let g = hollow(&w);
@@ -359,20 +381,21 @@ fn test_brothers_after_a_gutting_sack() {
     assert!(gang::fit_headcount(&w, g) < w.config.outside.parents.brothers_gutted_below);
     let mut big = w.clone();
     let mut off = w.clone();
+    let t0 = w.tick;
     // Gutted, the roll certain: brothers.
     sacked(&mut w, g);
     w.run_ticks((delay + 2) * TICKS_PER_DAY);
-    assert!(count(&w, EventKind::BrothersArrived) >= 1, "brothers for the gutted gang");
+    assert!(brothers_since(&w, t0) >= 1, "brothers for the gutted gang");
     // The roll off: none.
     off.config.outside.parents.brothers_p = 0.0;
     sacked(&mut off, g);
     off.run_ticks((delay + 2) * TICKS_PER_DAY);
-    assert_eq!(count(&off, EventKind::BrothersArrived), 0, "the roll said no");
+    assert_eq!(brothers_since(&off, t0), 0, "the roll said no");
     // Not gutted: none.
     big.config.outside.parents.brothers_gutted_below = 1;
     sacked(&mut big, g);
     big.run_ticks((delay + 2) * TICKS_PER_DAY);
-    assert_eq!(count(&big, EventKind::BrothersArrived), 0, "a gang with its people needs no brothers");
+    assert_eq!(brothers_since(&big, t0), 0, "a gang with its people needs no brothers");
 }
 
 #[test]

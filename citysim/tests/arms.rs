@@ -161,6 +161,7 @@ fn city_with_a_gang() -> (World, EntityId) {
 fn test_seized_crate_lands_in_the_precinct() {
     let (mut w, gang) = city_with_a_gang();
     w.config.weapons.p_seize = 1.0;
+    w.config.weapons.bribe_mult = 1.0;
     w.comp_mut::<Gang>(gang).expect("gang").treasury = 1000;
     w.jobs2.arms.last_crate.clear();
     let pre = w.building_of_kind(BuildingKind::Jail).expect("a Precinct");

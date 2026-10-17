@@ -6565,6 +6565,16 @@ pub struct LifeCfg {
     /// found on `scavenge_p` of hours.
     pub scavenge_coins: i64,
     pub scavenge_p: f32,
+    /// Shadow V4 bug 1: with no dole, a jobless adult keeps Earn (Beg,
+    /// Scavenge) below this many meals' coins, not only below one.
+    pub earn_meals_no_net: i64,
+    /// Shadow V4 bug 2: Rest restores energy only up to here (Sleep is the
+    /// full restore).
+    pub rest_energy_cap: f32,
+    /// Shadow V4 bug 3: Fight's "lawless" consideration, `1 − this ×
+    /// lawfulness`, and its "odds" one, `this + the agent's strength share`.
+    pub fight_lawful_damp: f32,
+    pub fight_odds_floor: f32,
     /// An escort's walk to the Precinct is a van ride of at most this long.
     pub escort_van_ticks: u64,
     /// L2 (L29, `[lod] budget`): after this many dry Scavenge hours in a row
@@ -6789,6 +6799,10 @@ impl Default for LifeCfg {
             exec_shift: (540, 1020),
             scavenge_coins: 1,
             scavenge_p: 0.15,
+            earn_meals_no_net: 3,
+            rest_energy_cap: 0.6,
+            fight_lawful_damp: 0.6,
+            fight_odds_floor: 0.5,
             escort_van_ticks: 60,
             scavenge_dry_max: 3,
             scavenge_cool_hours: 4,

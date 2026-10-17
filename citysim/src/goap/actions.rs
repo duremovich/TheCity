@@ -1145,7 +1145,7 @@ impl PlanCtx {
             away_hotel: away_hotel.is_some(),
             rough_ok,
             refuge: refuge.map(|(k, _)| k),
-            poor: wants(&[GoalKind::Earn]) && crate::systems::life::broke(world, agent),
+            poor: wants(&[GoalKind::Earn]) && crate::systems::life::earn_short(world, agent),
             beg_spot: wants(&[GoalKind::Earn]) && crate::systems::fixes::at_spot_with_company(world, agent),
             dist,
         };

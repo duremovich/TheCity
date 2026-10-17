@@ -570,12 +570,13 @@ fn test_no_net_statistical_scavenge_is_paid_from_the_till() {
 }
 
 /// Parity (the bin meals red): the off-screen income path has the Full
-/// Scavenge's and Beg's gate, `life::broke` (the planner's `ctx.poor`), not
-/// the Earn goal's savings line: a Full jobless adult with a meal's coins
-/// (and, homeless, a Hotel night's) neither scavenges nor begs (seed 2000,
+/// Scavenge's and Beg's gate (the planner's `ctx.poor`), not the Earn
+/// goal's savings line: a Full jobless adult with a meal's coins (and,
+/// homeless, a Hotel night's) neither scavenged nor begged (seed 2000,
 /// all-Full: 0.196 scavenges per hour at 0 coins, 0.012 at 1, under 0.01
 /// above), so off screen it does not either; a coin short of the line, it
-/// does.
+/// does. Shadow V4 bug 1: the gate is `life::earn_short` (with no dole, under
+/// `[life] earn_meals_no_net` meals' coins too), the line its edge.
 #[test]
 fn test_statistical_scavenge_only_when_broke() {
     use citysim::Wallet;
@@ -584,11 +585,12 @@ fn test_statistical_scavenge_only_when_broke() {
         w.config.life.scavenge_p = 1.0;
         w.econ.recycler_till = 1_000_000;
         w.comp_mut::<Needs>(id).expect("needs").hunger = 1.0;
-        let line = citysim::systems::life::meal_price(&w, id) + w.config.street.night_price;
         let price = w.local(id, citysim::BuildingKind::Market).map_or(1, |m| w.price_for(m, id));
+        let line = (citysim::systems::life::meal_price(&w, id) + w.config.street.night_price)
+            .max(w.config.life.earn_meals_no_net * price);
         assert!(line < citysim::goap::world_state::SAVINGS_DAYS * price, "below the savings line either way");
         w.comp_mut::<Wallet>(id).expect("wallet").coins = if short { line - 1 } else { line };
-        assert_eq!(citysim::systems::life::broke(&w, id), short);
+        assert_eq!(citysim::systems::life::earn_short(&w, id), short);
         if let Some(t) = w.stat_table.as_mut() {
             t.p_scavenge = Some([1.0; citysim::STAT_ROWS]);
         }

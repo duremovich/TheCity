@@ -44,6 +44,17 @@ fn recruiting(world: &World, g: &Gang) -> bool {
 /// lawfulness < 0.3`) or bootstrap (empty gang, WasArrested memory) recruit
 /// joins the gang whose Hideout is nearest their Home (ties: lower index).
 pub fn recruit_gang(world: &World, id: EntityId) -> Option<EntityId> {
+    // Shadow V4 bug 5: never a corp's exec (the corp scan only once a gang
+    // would take the agent: this runs per think).
+    let gang = recruit_gang_any(world, id)?;
+    let exec = world
+        .corp_slice()
+        .iter()
+        .any(|&c| world.comp::<crate::components::Corp>(c).is_some_and(|cc| cc.exec == Some(id)));
+    (!exec).then_some(gang)
+}
+
+fn recruit_gang_any(world: &World, id: EntityId) -> Option<EntityId> {
     if world.has::<GangMember>(id) {
         return None;
     }

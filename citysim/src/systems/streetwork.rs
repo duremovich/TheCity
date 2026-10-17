@@ -204,7 +204,9 @@ fn idle_days(world: &mut World) {
     let adults: Vec<EntityId> = world.citizens().into_iter().filter(|&a| world.has::<Brain>(a)).collect();
     let mut keep = std::collections::BTreeSet::new();
     for a in adults {
-        if !free_adult(world, a) || world.has::<Job>(a) {
+        // Shadow V4 bug 5: an exec draws a salary and is not idle (a
+        // 68-year-old exec opened a solicitation pitch).
+        if !free_adult(world, a) || world.has::<Job>(a) || crate::systems::founding::is_exec(world, a) {
             continue;
         }
         keep.insert(a);

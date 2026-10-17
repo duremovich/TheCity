@@ -2039,7 +2039,7 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
             let adult = citysim::systems::demography::is_adult(world, id);
             // Parity (the bin meals red): the Full Scavenge's and Beg's gate
             // (`life::broke`, the planner's `ctx.poor`), as `lod::stat_earn` reads it.
-            let earn = adult && !world.has::<citysim::Job>(id) && citysim::systems::life::broke(world, id);
+            let earn = adult && !world.has::<citysim::Job>(id) && citysim::systems::life::earn_short(world, id);
             let broke = adult
                 && world.comp::<citysim::Wallet>(id).map_or(0, |w| w.coins)
                     < citysim::systems::life::meal_price(world, id);

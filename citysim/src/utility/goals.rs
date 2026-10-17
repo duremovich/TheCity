@@ -126,6 +126,11 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
         }
         GoalKind::Flee => needs.is_some_and(|n| n.safety >= SAFE),
         GoalKind::Earn => {
+            // Shadow V4 bug 5: an exec draws a salary and steals no vehicle
+            // (a 10 c day read as poverty and fell through to StealVehicle).
+            if !world.has::<Job>(id) && crate::systems::life::exec_corp(world, id).is_some() {
+                return true;
+            }
             let price = world.local(id, BuildingKind::Market).map_or(i64::MAX, |m| world.price_for(m, id));
             // Hunger as sickness § 3: a diagnosed patient saves for the treatment too.
             let line = SAVINGS_DAYS.saturating_mul(price).max(crate::systems::health::treatment_savings(world, id));
@@ -142,10 +147,11 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
                 Some(j) => !j.on_shift(world.tick_of_day()) && !crate::systems::life::broke(world, id),
                 // L1: an exec draws a salary; the rest wait for the dole to
                 // accrue (one Hall visit pays up to a week), and the broke
-                // keep Earn alive (Beg, Scavenge).
+                // (with no dole, the short: Shadow V4 bug 1) keep Earn alive
+                // (Beg, Scavenge).
                 None => {
                     crate::systems::life::exec_corp(world, id).is_some()
-                        || (!crate::systems::life::broke(world, id)
+                        || (!crate::systems::life::earn_short(world, id)
                             && (!crate::systems::life::dole_trip_due(world, id)
                                 || world.treasury().is_some_and(|t| t.coins < 0)
                                 || world.levers.dole_per_day == 0))
@@ -501,7 +507,15 @@ pub fn considerations(
             if lost_recently {
                 return None;
             }
-            let fresh_enemy = fresh_hostile_near(world, id, 4);
+            // Shadow V4 bug 3: nobody wakes from their bed to settle a grudge.
+            let asleep = world.comp::<Brain>(id).is_some_and(|b| {
+                matches!(b.exec, crate::exec::ExecState::Use { kind: crate::goap::ActionKind::Sleep, .. })
+            });
+            if asleep {
+                return None;
+            }
+            let target = fight_target(world, id);
+            let fresh_enemy = target.is_some();
             let robbed_by_enemy = mem.is_some_and(|m| {
                 m.entries.iter().any(|e| {
                     e.kind == MemoryKind::WasRobbed
@@ -510,8 +524,10 @@ pub fn considerations(
                         })
                 })
             });
+            // Shadow V4 bug 3: the robbed's bonus by courage (a flat +0.2 sent
+            // the timid after a 1 c robber over ReportCrime).
             if robbed_by_enemy {
-                flat += 0.2;
+                flat += 0.2 * p.courage;
             }
             // M15 W26: a refused shakedown's backlash, while the actor is near.
             if let Some((actor, bonus, _)) = world.comp::<crate::components::Brain>(id).and_then(|b| b.fight_bonus) {
@@ -521,11 +537,18 @@ pub fn considerations(
                     flat += bonus;
                 }
             }
+            // Shadow V4 bug 3: the law and the odds weigh in (a lawful, timid
+            // reporter assaulted a 1 c robber before three neighbours; old
+            // workers picked fights with the young).
+            let lc = &world.config.life;
+            let odds = target.map_or(0.5, |t| fight_odds(world, id, t));
             vec![
                 Consideration::new("enemy near", can(fresh_enemy), GATE),
                 Consideration::new("courage", p.courage, IDENTITY),
                 Consideration::new("fighting", s.fighting, Curve::Linear { m: 0.5, b: 0.5 }),
                 Consideration::new("U(safety)", urgency(n.safety), Curve::Linear { m: 0.5, b: 0.5 }),
+                Consideration::new("lawless", p.lawfulness, Curve::Linear { m: -lc.fight_lawful_damp, b: 1.0 }),
+                Consideration::new("odds", odds, Curve::Linear { m: 1.0, b: lc.fight_odds_floor }),
             ]
         }
         GoalKind::ReportCrime => {
@@ -997,14 +1020,53 @@ pub fn wronged_by(world: &World, id: EntityId, other: EntityId) -> bool {
 /// An enemy within `r` tiles who wronged this agent and was not fought in
 /// the last two days.
 pub fn fresh_hostile_near(world: &World, id: EntityId, r: u32) -> bool {
+    fight_target_within(world, id, r).is_some()
+}
+
+/// Fight's target (the plan binds it): the hostile within 4 tiles, a robber
+/// first, then the nearest.
+pub fn fight_target(world: &World, id: EntityId) -> Option<EntityId> {
+    fight_target_within(world, id, 4)
+}
+
+/// An enemy within `r` tiles who wronged this agent, was not fought in the
+/// last two days and (Shadow V4 bug 3) is not lying downed: a robber first,
+/// then the nearest (ties the lower id).
+fn fight_target_within(world: &World, id: EntityId, r: u32) -> Option<EntityId> {
+    let tile = world.comp::<crate::components::Position>(id)?.tile;
     let two_days = world.tick.saturating_sub(2 * time::TICKS_PER_DAY);
     let mem = world.comp::<Memory>(id);
-    world.enemies_of(id).any(|o| {
-        world.has::<Brain>(o)
-            && crate::systems::law::near(world, id, o, r)
-            && wronged_by(world, id, o)
-            && !mem.is_some_and(|m| {
-                m.entries.iter().any(|e| e.kind == MemoryKind::Fought && e.subject == Some(o) && e.tick >= two_days)
-            })
-    })
+    let fought = |o: EntityId| {
+        mem.is_some_and(|m| {
+            m.entries.iter().any(|e| e.kind == MemoryKind::Fought && e.subject == Some(o) && e.tick >= two_days)
+        })
+    };
+    let robbed_by = |o: EntityId| {
+        mem.is_some_and(|m| m.entries.iter().any(|e| e.kind == MemoryKind::WasRobbed && e.subject == Some(o)))
+    };
+    world
+        .enemies_of(id)
+        .filter(|&o| {
+            world.has::<Brain>(o)
+                && crate::systems::law::near(world, id, o, r)
+                && !crate::systems::wounded::is_down(world, o)
+                && !fought(o)
+                && wronged_by(world, id, o)
+        })
+        .min_by_key(|&o| {
+            (
+                !robbed_by(o),
+                world.comp::<crate::components::Position>(o).map_or(u32::MAX, |p| p.tile.manhattan(tile)),
+                o.index,
+            )
+        })
+}
+
+/// Shadow V4 bug 3: the agent's share of the two sides' strength
+/// (`raid::strength` times the frailty and maims of `ages::work_mult`).
+pub fn fight_odds(world: &World, id: EntityId, other: EntityId) -> f32 {
+    let s =
+        |a: EntityId| crate::systems::raid::strength(world, a).max(0.01) * crate::systems::ages::work_mult(world, a);
+    let (me, them) = (s(id), s(other));
+    me / (me + them).max(0.01)
 }

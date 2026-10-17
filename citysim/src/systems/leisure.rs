@@ -1057,7 +1057,13 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
     let pick = choice(world, id, false)?;
     let cs = vec![
         Consideration::new("U(fun)", urgency(n.fun), Curve::Logistic { k: 8.0, mid: 0.5 }),
-        Consideration::new("off hours", can(off_hours(world, id)), gate_or(0.3)),
+        // Shadow V4 bug 2: a day worker's small hours are not off hours (as
+        // Socialise's phase gate): woken at 23:30, it stood on a corner at 03:00.
+        Consideration::new(
+            "off hours",
+            can(off_hours(world, id) && !crate::exec::routine::day_worker_night(world, id)),
+            gate_or(0.3),
+        ),
         Consideration::raw("rung", pick.score, (0.5 + pick.score).min(1.0)),
         // Deviation (measured): food before fun. Without it a hungry body
         // took the evening at a spot or a venue over its meal (fun decay off:

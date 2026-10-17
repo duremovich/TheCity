@@ -265,6 +265,12 @@ fn test_protection_pays_weekly_and_stops_when_district_lost() {
     let mut w = gang_world_pre_mirror();
     let (g, leader, b, owner) = racket(&mut w);
     set_coins(&mut w, owner, 10_000);
+    // Shadow V4 batch 1: on the moved city the owner spent the 10,000 on a
+    // founding and incorporated, so the Hotel changed hands (payer) and the
+    // hold broke; she has just founded (the cooldown), and this is the
+    // payment's test.
+    let today = w.day();
+    w.comp_mut::<citysim::Brain>(owner).expect("brain").last_found_day = Some(today);
     let before = identity(&w);
     let weekly = w.config.leverage.protection_weekly;
     let treasury = w.purse(Some(g));
@@ -283,7 +289,17 @@ fn test_protection_pays_weekly_and_stops_when_district_lost() {
     assert_eq!(w.coercions[&id].paid, 1, "the first week at once");
     for _ in 0..2 {
         w.coercions.get_mut(&id).unwrap().next_due = w.tick;
-        to_midnight(&mut w);
+        // Shadow V4 batch 1: the heavied leader is the block's bruiser, and
+        // on the moved city a robot jailed him for a shakedown the next day
+        // (a Sentence breaks the hold). This test is the weekly payment, not
+        // his record: he walks free.
+        let left = TICKS_PER_DAY - w.tick % TICKS_PER_DAY;
+        for _ in 0..=left {
+            w.run_ticks(1);
+            if w.has::<citysim::Sentence>(leader) {
+                citysim::systems::law::release(&mut w, leader, false);
+            }
+        }
     }
     let c = &w.coercions[&id];
     assert_eq!(c.status, CoercionStatus::Active);
