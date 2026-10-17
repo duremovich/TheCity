@@ -569,3 +569,22 @@ One solo Opus coder `jl1` (worktree `agent-a864f625a5712bd95`) builds phase by p
 - **In flight:**
   - `v4fix`, the solo bug coder in a worktree. It commits per batch; the orchestrator merges.
   - `v4spec`, writing `docs/LIVES_AT_WORK.md`.
+- **The Lives at work spec** is in `docs/LIVES_AT_WORK.md` (86132d7). Dylan's answers to questions 1-4 and 6 are recorded (1710c46). Questions 5, 7 and 8 stand at the spec's recommendations unless he overrides them before phase 7.
+- **The process review** is in `docs/PROCESS_REVIEW.md`, Dylan's ask at the session end. It covers:
+  - a repo CLAUDE.md;
+  - HANDOFF split into a Now page plus history;
+  - ARCHITECTURE.md;
+  - an OPEN.md ledger;
+  - memory pruning;
+  - a SessionStart hook and a fmt pre-commit hook, plus clean-up.
+
+## Next session (written 2026-10-17, end of the thirteenth session)
+
+1. **The V4 bug sweep (`v4fix`).**
+   - Worktree `.claude/worktrees/agent-a38316910b9881caa`, branch `worktree-agent-a38316910b9881caa`, based on ce5afe6.
+   - At the session end it had no commit yet and about 22 changed files.
+   - If the agent is unreachable after a restart, resume it by its agent id (a38316910b9881caa) with SendMessage. Or commit its tree as WIP on its branch and hand it to a fresh coder with the same brief: SHADOW_V4's 23 bugs, test-first, batches, then the gates and re-shadow.
+   - The orchestrator merges, then runs `/code-review high`.
+2. **The process review** (`docs/PROCESS_REVIEW.md`), as its own fresh session, after the sweep merges.
+3. **Lives at work.** Phase 0 starts on the main that holds the V4 fixes. One solo coder, per the SOP.
+4. **M18.**
