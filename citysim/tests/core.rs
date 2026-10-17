@@ -626,7 +626,7 @@ fn mechanisms() -> Vec<Mechanism> {
         ("a report withdrawn under a threat", m("report withdrawn under a threat")), // [42, 33, 45]; 45-47 [36, 34, 47]
         ("a coerced job", m("coerced job")),         // [14, 7, 7]; 45-47 [5, 9, 3]
         ("a fake job", m("fake job")),               // [1, 4, 3]; 45-47 [1, 2, 10]
-        ("a Parley", m("Parley")),                   // [1, 1, 2]; 45-47 [1, 1, 3] (3-6 of 6 over three runs)
+        // A Parley: demoted to `printed_mechanisms` (Shadow V4 batch 2).
         // M16b phase 2, captives and the new kinds (seeds 42-47 x 120 days; 5-6 of 6). Fired on 3
         // or fewer, so printed below and unit-tested in `captives.rs`: a hostage taken (and its
         // ransom, test_ransom_paid_frees_the_captive), a Rescue and an Escort posted (0 of 6:
@@ -723,6 +723,15 @@ fn printed_mechanisms() -> Vec<Mechanism> {
         // carries it (a decapitation splits; one held district and a district
         // with no Hideout site do not).
         ("a gang Split", k(EventKind::Split)),
+        // M16b phase 1's Parley (a peace bought), demoted (Shadow V4 batch
+        // 2, 2026-10-17): successes over 42-47 x 120 days [1, 2, 2, 0, 0, 1]
+        // on ce5afe6 (attempts 5-10 a seed), [0, 0, 0, 1, 0, 0] on the
+        // batch-2 tree, and 0-4 a seed under one-key butterflies of it
+        // (`leader_min_days` 0: [0, 0, 0], `hire_knowledge_floor` 0: [4, 1,
+        // 0]): a weekly roll between two gangs a strength ratio apart flips
+        // with the trajectory. `leverage.rs::test_parley_makes_peace_for_tribute`
+        // and `test_parley_refused_declares_the_feud` carry it.
+        ("a Parley", m("Parley")),
         // M9's day in Crackdown, demoted (the Hit market P2, 2026-10-11): on
         // the flipped city it is rare, days held over 42-47 x 120 days [4, 9,
         // 0, 1, 0, 0] with the market off (main) and [0, 0, 0, 4, 6, 0] with

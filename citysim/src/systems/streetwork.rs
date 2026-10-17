@@ -343,23 +343,39 @@ fn openings(world: &mut World) {
             continue;
         }
         let skills = world.comp::<Skills>(a).cloned();
+        // Shadow V4 bug 6: an elder (past `[ages] frail_from_years`) vends;
+        // the rickshaw and the street are not his rows (3 of 4 street
+        // workers were 64-68).
+        let elder = crate::systems::ages::on(world)
+            && world.comp::<crate::components::Identity>(a).map_or(0, |i| i.age_years())
+                >= world.config.ages.frail_from_years;
         let kind = match skills {
             Some(s) if s.knowledge >= cfg.tinker_skill => PitchKind::Tinker,
-            Some(s) if s.fighting >= cfg.rickshaw_skill => PitchKind::Rickshaw,
+            Some(s) if s.fighting >= cfg.rickshaw_skill && !elder => PitchKind::Rickshaw,
             _ => PitchKind::Vendor,
         };
         // Jobs & lives phase 4 (§ 5.1): with `[vice]` on, a lawless opener
         // works a street pitch on `p_street` (a pure hash of the day).
-        let street = crate::systems::vice::on(world)
+        let street = !elder
+            && crate::systems::vice::on(world)
             && world.comp::<Personality>(a).is_some_and(|p| p.lawfulness < world.config.vice.street_lawful)
             && hash(world, PURPOSE_STREET, u64::from(a.index), today) < world.config.vice.p_street;
         let kind = if street && pitch_row(world, PitchKind::Street).is_some() { PitchKind::Street } else { kind };
         let Some(trade) = pitch_row(world, kind).or_else(|| pitch_row(world, PitchKind::Vendor)) else { continue };
         let used: Vec<TilePos> = world.jobs2.pitches.values().map(|p| p.spot).collect();
+        // Shadow V4 bug 6: the free spot nearest the opener's home (the
+        // district's first free one had vendors walking 47-168 min a way).
+        let from = crate::systems::contracts::home_door(world, a)
+            .or_else(|| world.comp::<crate::components::Position>(a).map(|p| p.tile));
         let spot = world
             .spots
             .get(d.index())
-            .and_then(|s| s.iter().map(|x| x.tile).find(|t| !used.contains(t)))
+            .and_then(|s| {
+                s.iter()
+                    .map(|x| x.tile)
+                    .filter(|t| !used.contains(t))
+                    .min_by_key(|t| (from.map_or(0, |f| f.manhattan(*t)), t.x, t.y))
+            })
             .or_else(|| world.districts.get(d.index()).map(|x| x.centroid));
         let Some(spot) = spot else { continue };
         let p = Pitch {

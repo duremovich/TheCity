@@ -99,8 +99,14 @@ pub fn decide(world: &mut World, gang: EntityId, fallen: EntityId) -> bool {
         return false;
     }
     let gname = g.name.clone();
-    // A Vagrancy night is no interregnum: the boss is back by morning.
-    if world.comp::<Sentence>(fallen).is_some_and(|s| s.crime == Crime::Vagrancy) {
+    // A Vagrancy night is no interregnum: the boss is back by morning; nor
+    // (Shadow V4 bug 8) any term of a day or less (a fare's night handed a
+    // gang to its deputy).
+    let now = world.tick;
+    if world
+        .comp::<Sentence>(fallen)
+        .is_some_and(|s| s.crime == Crime::Vagrancy || s.until_tick <= now + crate::time::TICKS_PER_DAY)
+    {
         return false;
     }
     let dead = !crate::systems::law::living(world, fallen);

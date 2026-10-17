@@ -307,7 +307,8 @@ pub fn leader_ranking(world: &World, gang: EntityId) -> Vec<EntityId> {
 pub fn leader_scores(world: &World, gang: EntityId) -> Vec<(EntityId, f32)> {
     let Some(g) = world.comp::<Gang>(gang) else { return Vec::new() };
     let tick = world.tick;
-    let mut ranked: Vec<(EntityId, f32)> = g
+    let min_days = world.config.gangs.leader_min_days as f32;
+    let mut ranked: Vec<(EntityId, f32, bool)> = g
         .members
         .iter()
         .copied()
@@ -317,11 +318,14 @@ pub fn leader_scores(world: &World, gang: EntityId) -> Vec<(EntityId, f32)> {
             let days = world
                 .comp::<GangMember>(m)
                 .map_or(0.0, |g| tick.saturating_sub(g.joined_tick) as f32 / TICKS_PER_DAY as f32);
-            (m, loyalty + days / 100.0)
+            (m, loyalty + days / 100.0, days >= min_days)
         })
         .collect();
-    ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
-    ranked
+    // Shadow V4 bug 8: a member of `[gangs] leader_min_days` or more ranks
+    // above a newer one (a clinic owner led the Choir 3 days after joining
+    // on loyalty alone).
+    ranked.sort_by(|a, b| b.2.cmp(&a.2).then(b.1.total_cmp(&a.1)).then(a.0.cmp(&b.0)));
+    ranked.into_iter().map(|(m, s, _)| (m, s)).collect()
 }
 
 /// `leader = argmax(loyalty + days_in_gang / 100)` over members with a Brain
@@ -839,6 +843,19 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
                 .copied()
                 .filter(|&o| o != actor && world.has::<Wallet>(o))
                 .filter(|&o| mates.is_none() || world.gang_of(o) != mates)
+                // Shadow V4 bug 9: nor a Friend or kin of the actor (the
+                // extorter squeezed his new Friend with the rest).
+                .filter(|&o| {
+                    world.edge(actor, o).is_none_or(|e| {
+                        !matches!(
+                            e.kind,
+                            crate::components::RelKind::Friend
+                                | crate::components::RelKind::Family
+                                | crate::components::RelKind::Spouse
+                                | crate::components::RelKind::Parent
+                        )
+                    })
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -850,6 +867,7 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
     let total: i64 = occupants.iter().map(|&o| world.comp::<Wallet>(o).map_or(0, |w| w.coins.max(0))).sum();
     let take = amount.min(total);
     let mut taken = 0;
+    let held: Vec<i64> = occupants.iter().map(|&o| world.comp::<Wallet>(o).map_or(0, |w| w.coins)).collect();
     for &o in &occupants {
         let coins = world.comp::<Wallet>(o).map_or(0, |w| w.coins.max(0));
         let share = if total > 0 { (take * coins) / total } else { 0 };
@@ -857,8 +875,6 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
             w.coins -= share;
         }
         taken += share;
-        world.remember(o, MemoryKind::WasRobbed, Some(actor), 0.7, -0.7, false);
-        social::robbed_by(world, o, actor);
     }
     // The rounding remainder comes a coin at a time from whoever still has one.
     let mut guard = 0;
@@ -877,6 +893,14 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
     }
     if let Some(w) = world.comp_mut::<Wallet>(actor) {
         w.coins += taken;
+    }
+    // Shadow V4 bug 9: the robbed are those who paid (9 of 17 shakedowns
+    // took 0 coins and still made Enemies, memories and claims).
+    for (i, &o) in occupants.iter().enumerate() {
+        if world.comp::<Wallet>(o).is_some_and(|w| w.coins < held[i]) {
+            world.remember(o, MemoryKind::WasRobbed, Some(actor), 0.7, -0.7, false);
+            social::robbed_by(world, o, actor);
+        }
     }
     let today = world.day();
     if let Some(b) = world.comp_mut::<Brain>(actor) {
@@ -898,15 +922,19 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
             x.shakedowns.push_back((now, g));
         }
     }
-    let suffix = claim(world, actor, home).unwrap_or_default();
+    // Shadow V4 bug 9 (and 4): an empty-handed shakedown advances no claim
+    // and is no crime to file (a 0-coin shakedown drew 6 days).
+    let suffix = if taken > 0 { claim(world, actor, home).unwrap_or_default() } else { String::new() };
     let name = world.name_of(actor);
     world.push_event(
         EventKind::Extortion,
         &[actor, home],
         format!("{name} extorted {taken} coins from Block#{}{suffix}", home.index),
     );
-    let tile = world.comp::<Position>(actor).map_or(TilePos::default(), |p| p.tile);
-    law::raise_crime(world, actor, None, crate::components::Crime::Extortion, tile);
+    if taken > 0 {
+        let tile = world.comp::<Position>(actor).map_or(TilePos::default(), |p| p.tile);
+        law::raise_crime(world, actor, None, crate::components::Crime::Extortion, tile);
+    }
     crate::systems::fviolence::note_act(world, actor, crate::ledger::ActKind::Extort);
     taken
 }

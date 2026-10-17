@@ -282,6 +282,9 @@ fn test_abduct_plan_and_hand_over() {
         hold,
     )
     .expect("posted");
+    // Shadow V4 batch 2: on the moved city the buyer's keyed renege roll
+    // came up; this test is the hand-over, so the buyer pays.
+    w.contracts.get_mut(&id).expect("record").renege = false;
     contracts::god_take(&mut w, id, taker).expect("taken");
     assert_eq!(w.contracts[&id].render, citysim::contract::Render::Live, "an Abduct is never ledger");
     let plan = contracts::plan(&mut w, taker).expect("a plan");

@@ -273,7 +273,7 @@ fn test_protection_pays_weekly_and_stops_when_district_lost() {
     w.comp_mut::<citysim::Brain>(owner).expect("brain").last_found_day = Some(today);
     let before = identity(&w);
     let weekly = w.config.leverage.protection_weekly;
-    let treasury = w.purse(Some(g));
+    let day0 = w.day();
     let id = leverage::force(
         &mut w,
         Some(g),
@@ -304,7 +304,13 @@ fn test_protection_pays_weekly_and_stops_when_district_lost() {
     let c = &w.coercions[&id];
     assert_eq!(c.status, CoercionStatus::Active);
     assert!(c.paid >= 3, "paid {} weeks", c.paid);
-    assert!(w.purse(Some(g)) >= treasury, "the gang took it");
+    // Shadow V4 batch 2: the payments booked as protection (the gang's purse
+    // against its opening read the gang's own spending too, which on the
+    // moved city outran three weeks of protection).
+    let booked: i64 =
+        w.stats.history.iter().filter(|r| r.day >= day0).map(|r| r.leverage.protection_coins).sum::<i64>()
+            + w.stats.current.leverage.protection_coins;
+    assert!(booked >= 3 * weekly, "the gang took it ({booked})");
     assert_eq!(identity(&w), before, "no coin made or lost");
     // The gang loses the district.
     let d = w.district_of_building(b);

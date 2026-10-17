@@ -274,3 +274,317 @@ fn test_bug5_fallback_exec_leaves_the_post() {
     let e = w.comp::<citysim::Corp>(corp).and_then(|cc| cc.exec).expect("a new exec");
     assert!(!w.has::<Job>(e), "the new exec left the post");
 }
+
+/// Bug 6 (the pitch): an elder opener with a rickshaw-puller's arms vends
+/// (3 of 4 street workers were 64-68), at the free spot of his district
+/// nearest his home (the first free one meant 47-168 min walks).
+#[test]
+fn test_bug6_elder_opens_a_vendor_pitch_at_the_nearest_spot() {
+    use citysim::systems::streetwork;
+    let mut c = Config::load();
+    c.jobs2.p_pitch_open = 1.0;
+    c.jobs2.pitch_after_days = 0;
+    c.jobs2.pitches_per_district = 50;
+    let mut w = World::new(42, c);
+    // The HangOut spots (the pitches' sites) are laid out in the first day.
+    w.run_ticks(citysim::TICKS_PER_DAY);
+    let idle = jobless_housed(&w);
+    // No other opener (housed or not) holds the stake.
+    for a in w.citizens() {
+        if w.has::<citysim::Wallet>(a) && !w.has::<Job>(a) {
+            set_coins(&mut w, a, 0);
+        }
+    }
+    // One whose home district has spots (two or more free).
+    let used: Vec<citysim::TilePos> = w.jobs2.pitches.values().map(|p| p.spot).collect();
+    let a = *idle
+        .iter()
+        .find(|&&x| {
+            citysim::systems::contracts::home_door(&w, x).is_some_and(|h| {
+                w.spots
+                    .get(w.district_of(h).index())
+                    .is_some_and(|s| s.iter().filter(|t| !used.contains(&t.tile)).count() >= 2)
+            })
+        })
+        .expect("an opener with spots at home");
+    set_coins(&mut w, a, 50);
+    w.comp_mut::<citysim::Skills>(a).expect("skills").fighting = 0.95;
+    w.comp_mut::<citysim::Skills>(a).expect("skills").knowledge = 0.0;
+    let elder = (w.config.ages.frail_from_years + 6) * citysim::time::DAYS_PER_YEAR as u32;
+    w.comp_mut::<citysim::Identity>(a).expect("id").age_days = elder;
+    let home = citysim::systems::contracts::home_door(&w, a).expect("a home");
+    let d = w.district_of(home);
+    let nearest = w.spots[d.index()]
+        .iter()
+        .map(|x| x.tile)
+        .filter(|t| !used.contains(t))
+        .map(|t| t.manhattan(home))
+        .min()
+        .expect("a free spot");
+    streetwork::daily(&mut w);
+    let p = w.jobs2.pitches.get(&a).expect("the elder opened a pitch");
+    let kind = w.config.trade(p.trade).and_then(streetwork::pitch_kind);
+    assert_eq!(kind, Some(streetwork::PitchKind::Vendor), "an elder vends");
+    assert_eq!(p.spot.manhattan(home), nearest, "the free spot nearest home");
+}
+
+/// Bug 6 (the hire): a knowledge row hires no one under
+/// `hire_knowledge_floor`; a "no need of the wage" quit blocks every
+/// employer, not only the one left.
+#[test]
+fn test_bug6_knowledge_floor_and_secure_quit_block_every_hire() {
+    let mut w = world();
+    let a = *jobless_housed(&w).first().expect("an adult");
+    let role = w.config.trade_role("accountant").expect("the accountant row");
+    w.comp_mut::<citysim::Skills>(a).expect("skills").knowledge = 0.0;
+    assert!(!citysim::systems::trades::skill_ok(&w, a, role), "knowledge 0.00 keeps no books");
+    w.comp_mut::<citysim::Skills>(a).expect("skills").knowledge = 0.5;
+    assert!(citysim::systems::trades::skill_ok(&w, a, role));
+    assert!(citysim::systems::trades::skill_ok(&w, a, citysim::Role::Farmer), "no floor on an unskilled row");
+    let (e1, e2) = {
+        let farms = w.buildings_of_kind(citysim::BuildingKind::Farm);
+        (farms[0], farms[1])
+    };
+    life::note_quit(&mut w, a, Some(e1));
+    assert!(life::quit_blocks(&w, a, e1) && !life::quit_blocks(&w, a, e2), "a quit blocks its employer");
+    life::note_secure_quit(&mut w, a);
+    assert!(life::quit_blocks(&w, a, e1) && life::quit_blocks(&w, a, e2), "a secure quit blocks every employer");
+}
+
+/// Bug 7: a Club's dancers are tipped (the Club fell through `on_visit`),
+/// and the tips go round the tipped staff on duty, not all to the lowest id.
+#[test]
+fn test_bug7_club_dancers_tipped_in_turn() {
+    use citysim::systems::{lod, vice};
+    let mut w = world();
+    let tipped = |w: &World, s: EntityId| {
+        w.comp::<Job>(s).is_some_and(|j| citysim::systems::trades::row_of(w, j.role).is_some_and(|r| r.tipped))
+    };
+    // A Club with two or more tipped staff sharing a shift.
+    let (club, staff, tod) = w
+        .buildings_of_kind(citysim::BuildingKind::Club)
+        .iter()
+        .copied()
+        .find_map(|b| {
+            let s: Vec<EntityId> = w.staff_of(b).iter().copied().filter(|&s| tipped(&w, s)).collect();
+            let start = s.first().and_then(|&x| w.comp::<Job>(x)).and_then(|j| j.shifts.first().map(|x| x.0))?;
+            let on: Vec<EntityId> =
+                s.into_iter().filter(|&x| w.comp::<Job>(x).is_some_and(|j| j.on_shift(start))).collect();
+            (on.len() >= 2).then_some((b, on, start))
+        })
+        .expect("a Club with two tipped staff on one shift");
+    w.tick = 3 * citysim::TICKS_PER_DAY + u64::from(tod);
+    for &s in &staff {
+        lod::set_lod(&mut w, s, citysim::Lod::Statistical);
+    }
+    let visitors: Vec<EntityId> = adults(&w).into_iter().filter(|a| !staff.contains(a)).take(12).collect();
+    let before: Vec<i64> = staff.iter().map(|&s| w.comp::<citysim::Wallet>(s).expect("w").coins).collect();
+    for &v in &visitors {
+        set_coins(&mut w, v, 100);
+        vice::on_visit(&mut w, v, club, 10);
+    }
+    let gained =
+        staff.iter().zip(&before).filter(|&(&s, &b)| w.comp::<citysim::Wallet>(s).expect("w").coins > b).count();
+    assert!(gained >= 2, "the tips went round the dancers on duty ({gained} of {})", staff.len());
+}
+
+/// Bug 8: a gang's lead goes to a member of `leader_min_days` before a
+/// newer, more loyal one; a night's term (a fare) hands nobody the gang.
+#[test]
+fn test_bug8_leader_by_tenure_and_no_succession_for_a_night() {
+    use citysim::systems::{gang, succession};
+    let mut w = world();
+    // The seed's gangs start empty and recruit through the first days.
+    w.run_ticks(12 * citysim::TICKS_PER_DAY);
+    let g = w
+        .gangs()
+        .into_iter()
+        .find(|&g| w.comp::<citysim::Gang>(g).is_some_and(|x| x.leader.is_some() && x.members.len() >= 3))
+        .expect("a gang with a leader");
+    let members = w.comp::<citysim::Gang>(g).expect("g").members.clone();
+    let (vet, new) = (members[0], members[1]);
+    w.tick += 40 * citysim::TICKS_PER_DAY;
+    let now = w.tick;
+    w.comp_mut::<citysim::GangMember>(vet).expect("gm").joined_tick = now - 30 * citysim::TICKS_PER_DAY;
+    w.comp_mut::<citysim::GangMember>(new).expect("gm").joined_tick = now - 2 * citysim::TICKS_PER_DAY;
+    w.comp_mut::<citysim::Personality>(vet).expect("p").loyalty = 0.1;
+    w.comp_mut::<citysim::Personality>(new).expect("p").loyalty = 1.0;
+    let scores = gang::leader_scores(&w, g);
+    let rank = |a: EntityId| scores.iter().position(|x| x.0 == a).expect("ranked");
+    assert!(rank(vet) < rank(new), "a month in outranks two days of loyalty");
+    // The leader jailed for a fare's night: no Succession.
+    let leader = w.comp::<citysim::Gang>(g).and_then(|x| x.leader).expect("leader");
+    w.insert(leader, citysim::Sentence { until_tick: now + 600, crime: citysim::Crime::FareEvasion });
+    let before = w.events.iter().filter(|e| e.kind == citysim::EventKind::Succession).count();
+    assert!(!succession::decide(&mut w, g, leader));
+    let after = w.events.iter().filter(|e| e.kind == citysim::EventKind::Succession).count();
+    assert_eq!(before, after, "a night in the cells is no interregnum");
+}
+
+fn v1_world(seed: u64) -> World {
+    World::new(seed, Config::load().dole_city().v1_profile())
+}
+
+/// Bug 9 (shakedowns): a Home whose occupants hold nothing gives nothing,
+/// and the empty-handed shakedown makes no Enemy, no WasRobbed memory, no
+/// claim and no Shakedown report; the extorter's Friend at home is not
+/// squeezed with the rest.
+#[test]
+fn test_bug9_empty_shakedown_leaves_no_mark_and_spares_a_friend() {
+    use citysim::systems::gang;
+    let mut w = v1_world(45);
+    (w.config.moves.p_min, w.config.moves.p_max) = (1.0, 1.0);
+    let g0 = w.gangs()[0];
+    let a = w.citizens().into_iter().find(|&id| !w.has::<Job>(id) && w.has::<Brain>(id)).expect("a");
+    gang::enlist(&mut w, a, g0);
+    let own = w.comp::<citysim::Household>(a).and_then(|h| h.home);
+    let home = w
+        .buildings_of_kind(citysim::BuildingKind::Home)
+        .iter()
+        .copied()
+        .find(|&h| Some(h) != own && w.comp::<citysim::Building>(h).is_some_and(|b| b.occupants.len() >= 2))
+        .expect("an occupied home");
+    let occ: Vec<EntityId> = w.comp::<citysim::Building>(home).expect("b").occupants.to_vec();
+    for &o in &occ {
+        set_coins(&mut w, o, 0);
+    }
+    assert_eq!(gang::extort(&mut w, a, home), 0);
+    for &o in &occ {
+        assert!(w.edge(a, o).is_none_or(|e| e.kind != citysim::RelKind::Enemy), "no Enemy for nothing taken");
+        let robbed = w.comp::<citysim::Memory>(o).is_some_and(|m| {
+            m.entries.iter().any(|e| e.kind == citysim::MemoryKind::WasRobbed && e.subject == Some(a))
+        });
+        assert!(!robbed, "no WasRobbed for nothing taken");
+    }
+    assert!(w.comp::<citysim::Building>(home).expect("b").claim.is_none(), "no claim");
+    assert!(!w.crime_reports().iter().any(|r| r.suspect == a), "no Shakedown filed");
+    // A Friend at home keeps his coins; a stranger pays.
+    let (friend, stranger) = (occ[0], occ[1]);
+    set_coins(&mut w, friend, 50);
+    set_coins(&mut w, stranger, 50);
+    {
+        let e = w.edge_entry(a, friend);
+        e.kind = citysim::RelKind::Friend;
+        e.affinity = 0.8;
+    }
+    assert!(gang::extort(&mut w, a, home) > 0);
+    assert_eq!(w.comp::<citysim::Wallet>(friend).expect("w").coins, 50, "the Friend is spared");
+    assert!(w.comp::<citysim::Wallet>(stranger).expect("w").coins < 50, "the stranger pays");
+}
+
+/// Bug 9 (raids): one raider at the rival's door when the wait is over
+/// calls the raid off (1 against 6 after an 8-h march); three go in.
+#[test]
+fn test_bug9_lone_raider_calls_the_raid_off() {
+    use citysim::systems::{gang, raid};
+    let mut w = v1_world(49);
+    w.config.crime.fight_death_p = 0.0;
+    // The shipped floor (the v1 city keeps M11's gang keys, 0).
+    w.config.gangs.raid_min_members = Config::load().gangs.raid_min_members;
+    assert_eq!(w.config.gangs.raid_min_members, 3);
+    let g0 = w.gangs()[0];
+    let crew: Vec<EntityId> =
+        w.citizens().into_iter().filter(|&id| !w.has::<Job>(id) && w.has::<Brain>(id)).take(3).collect();
+    for &m in &crew {
+        gang::enlist(&mut w, m, g0);
+    }
+    let mut full = w.clone();
+    let stage = |w: &mut World, id: EntityId, tile: citysim::TilePos| {
+        w.abort_plan(id);
+        w.leave_building(id);
+        let p = w.comp_mut::<citysim::Position>(id).expect("pos");
+        p.tile = tile;
+        p.building = None;
+        w.comp_mut::<Brain>(id).expect("b").current_goal = Some(GoalKind::Raid);
+    };
+    let door = raid::rival_hideout_tile(&w, crew[0]).expect("a rival door");
+    stage(&mut w, crew[0], door);
+    let now = w.tick;
+    w.comp_mut::<citysim::Gang>(g0).expect("g").raid_at = Some(now);
+    assert_eq!(raid::resolve(&mut w, crew[0]), None, "one raider goes home");
+    assert!(w.comp::<citysim::Gang>(g0).expect("g").raid_at.is_none(), "the raid is off");
+    assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::Raid && e.text.contains("called off")));
+    for &m in &crew {
+        stage(&mut full, m, door);
+    }
+    full.comp_mut::<citysim::Gang>(g0).expect("g").raid_at = Some(now);
+    assert!(raid::resolve(&mut full, crew[0]).is_some(), "three go in");
+}
+
+/// Bug 10 (the edges): a lost scuffle for the cuffs is an arrest, not an
+/// assault, in the suspect's memory; a chat with someone now an Enemy does
+/// not complete; nobody strips the body of a spouse's parent.
+#[test]
+fn test_bug10_edges_read_what_just_happened() {
+    use citysim::systems::{chrome, law};
+    let mut w = world();
+    w.config.crime.fight_death_p = 0.0;
+    let guard = w.guards()[0];
+    let pool: Vec<EntityId> = adults(&w).into_iter().filter(|&x| !law::is_guard(&w, x)).collect();
+    // The scuffle: a brave, weak suspect against a strong guard, until he loses one.
+    let s = pool[0];
+    w.comp_mut::<citysim::Skills>(guard).expect("s").fighting = 1.0;
+    w.comp_mut::<citysim::Skills>(s).expect("s").fighting = 0.0;
+    let mut lost = false;
+    for _ in 0..20 {
+        beside(&mut w, guard, s);
+        w.comp_mut::<citysim::Personality>(s).expect("p").courage = 0.9;
+        law::file_report(&mut w, citysim::Crime::Theft, s, None);
+        let n0 = w.comp::<citysim::Memory>(s).map_or(0, |m| m.entries.len());
+        law::arrest(&mut w, guard, s);
+        let m = w.comp::<citysim::Memory>(s).expect("mem");
+        let fresh: Vec<_> = m.entries.iter().skip(n0.min(m.entries.len())).collect();
+        if fresh.iter().any(|e| e.kind == citysim::MemoryKind::Won) {
+            continue;
+        }
+        assert!(
+            !fresh.iter().any(|e| e.kind == citysim::MemoryKind::Lost && e.subject == Some(guard)),
+            "a lost scuffle with the law is no assault"
+        );
+        lost = fresh.iter().any(|e| e.kind == citysim::MemoryKind::WasArrested && e.subject == Some(guard));
+        break;
+    }
+    assert!(lost, "the suspect lost a scuffle and remembers an arrest");
+    // The chat with a new Enemy.
+    let (a, b) = (pool[1], pool[2]);
+    beside(&mut w, a, b);
+    w.edge_entry(a, b).kind = citysim::RelKind::Enemy;
+    let now = w.tick;
+    let out = citysim::exec::actions::on_complete(&mut w, a, citysim::goap::ActionKind::Chat, Some(b), now, now);
+    assert!(matches!(out, citysim::exec::StepResult::Failed(_)), "no chat with an Enemy");
+    // The in-law's body.
+    let (x, sp) = w
+        .citizens()
+        .into_iter()
+        .find_map(|x| w.spouse_of(x).filter(|_| !law::is_guard(&w, x)).map(|sp| (x, sp)))
+        .expect("a married pair");
+    let dad = pool.iter().copied().find(|&d| d != x && d != sp && w.edge(x, d).is_none()).expect("a third");
+    w.edge_entry(sp, dad).kind = citysim::RelKind::Parent;
+    w.kill_by(dad, citysim::DeathCause::Violence, None);
+    assert!(w.has::<citysim::Corpse>(dad), "a body");
+    assert!(!chrome::may_loot(&w, x, dad), "the spouse's father is kin");
+}
+
+/// Bug 10 (the cells): two Enemies jailed together stay Enemies (the
+/// drift took -1.00 to -0.10 in 13 h).
+#[test]
+fn test_bug10_jail_warms_no_enemy() {
+    use citysim::systems::law;
+    let mut w = world();
+    let guard = w.guards()[0];
+    let pool: Vec<EntityId> = adults(&w).into_iter().filter(|&x| !law::is_guard(&w, x)).collect();
+    let (a, b) = (pool[0], pool[1]);
+    for x in [a, b] {
+        law::file_report(&mut w, citysim::Crime::Assault, x, None);
+        law::jail_suspect(&mut w, guard, x);
+        assert!(w.has::<citysim::Sentence>(x));
+    }
+    {
+        let e = w.edge_entry(a, b);
+        e.kind = citysim::RelKind::Enemy;
+        e.affinity = -1.0;
+    }
+    w.run_ticks(13 * citysim::TICKS_PER_HOUR);
+    let e = w.edge(a, b).expect("edge");
+    assert!(e.affinity <= -0.95, "a cell warms no Enemy ({})", e.affinity);
+}

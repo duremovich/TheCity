@@ -604,6 +604,11 @@ fn colocation(world: &mut World) {
             let cowork = world.comp::<Job>(a).is_some_and(|j| j.employer == Some(building))
                 && world.comp::<Job>(b).is_some_and(|j| j.employer == Some(building));
             if jail {
+                // Shadow V4 bug 10: a shared cell warms no Enemy or Rival (a
+                // pair went from -1.00 to -0.10 in 13 h).
+                if world.edge(a, b).is_some_and(|e| matches!(e.kind, RelKind::Enemy | RelKind::Rival)) {
+                    continue;
+                }
                 let step = world.config.social.affinity_per_hour * similarity_mult(world, a, b);
                 let hours = JAIL_DRIFT_HOURS as f32;
                 // L2 shadow fixes item 10: a guard and a prisoner warm to

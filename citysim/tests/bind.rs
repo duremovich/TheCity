@@ -609,3 +609,17 @@ fn test_stat_meet_and_home_chat_rolls() {
         "no housemate edge drifted"
     );
 }
+
+/// Shadow V4 bug 10: an agent at Full is never a candidate for an
+/// off-screen deed (his whereabouts are simulated; one was bound to a man
+/// asleep across town).
+#[test]
+fn test_full_agent_is_never_a_candidate() {
+    let mut w = traced_world(307);
+    let victim = w.tier(Lod::Statistical)[0];
+    let id = manual_hole(&mut w, victim, HoleKind::Assaulted, 300);
+    let hole = w.holes[&id].clone();
+    let (c, _) = *bind::candidates(&w, &hole).first().expect("a candidate");
+    lod::set_lod(&mut w, c, Lod::Full);
+    assert!(bind::candidates(&w, &hole).iter().all(|&(x, _)| x != c), "a Full agent was not there");
+}

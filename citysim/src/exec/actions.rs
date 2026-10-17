@@ -954,6 +954,11 @@ pub fn on_complete(
             {
                 return StepResult::Failed(FailReason::PartnerLeft);
             }
+            // Shadow V4 bug 10: no chat ends warmly with someone who became
+            // an Enemy mid-chat (the partner robbed the agent, then chatted).
+            if world.edge(id, partner).is_some_and(|e| e.kind == crate::components::RelKind::Enemy) {
+                return StepResult::Failed(FailReason::PartnerLeft);
+            }
             let gain = world.config.needs.chat_belonging;
             let halved = world.comp::<crate::components::Mood>(id).is_some_and(|m| m.value < -0.3);
             for who in [id, partner] {

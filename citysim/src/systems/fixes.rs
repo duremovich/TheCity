@@ -401,6 +401,7 @@ pub fn daily(world: &mut World) {
     for id in quits {
         world.abort_plan(id);
         crate::systems::economy::quit_job(world, id, "no need of the wage");
+        crate::systems::life::note_secure_quit(world, id);
     }
     for id in out {
         // The job stays (a vacancy for someone who turns up), as a quit's.

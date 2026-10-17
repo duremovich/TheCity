@@ -1315,7 +1315,21 @@ pub fn exec_shift_over(world: &World) -> bool {
 
 /// Days a quitter is not rehired by the employer it left.
 pub fn quit_blocks(world: &World, a: EntityId, employer: EntityId) -> bool {
-    world.comp::<Brain>(a).and_then(|b| b.quit_from).is_some_and(|(e, until)| e == employer && world.tick < until)
+    // Shadow V4 bug 6: `EntityId::NONE` blocks every employer (a secure quit).
+    world
+        .comp::<Brain>(a)
+        .and_then(|b| b.quit_from)
+        .is_some_and(|(e, until)| (e == employer || e == EntityId::NONE) && world.tick < until)
+}
+
+/// Shadow V4 bug 6: a "no need of the wage" quit keeps the quitter out of
+/// every hire for `quit_rehire_days` (another employer rehired him the
+/// same midnight).
+pub fn note_secure_quit(world: &mut World, a: EntityId) {
+    let until = world.tick + world.config.life.quit_rehire_days * TICKS_PER_DAY;
+    if let Some(b) = world.comp_mut::<Brain>(a) {
+        b.quit_from = Some((EntityId::NONE, until));
+    }
 }
 
 /// Record a quit (`quit_rehire_days` before that employer hires them again).

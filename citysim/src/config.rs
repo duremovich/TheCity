@@ -630,6 +630,8 @@ pub struct Jobs2Cfg {
     pub pitches_per_district: u16,
     /// Coins a jobless adult holds to open a Pitch ...
     pub pitch_stake: i64,
+    /// Shadow V4 bug 6: a knowledge row's hire has at least this knowledge.
+    pub hire_knowledge_floor: f32,
     /// ... after this many days without a post ...
     pub pitch_after_days: u32,
     /// ... on this chance a day (a pure hash of the day and the agent).
@@ -744,6 +746,7 @@ impl Default for Jobs2Cfg {
             street: false,
             pitches_per_district: 4,
             pitch_stake: 20,
+            hire_knowledge_floor: 0.05,
             pitch_after_days: 5,
             p_pitch_open: 0.05,
             pitch_fail_days: 4,
@@ -2969,6 +2972,10 @@ pub struct GangsCfg {
     /// M12 D40: an emptied gang re-forms only after this many days (0 = at once) ...
     #[serde(default)]
     pub reform_days: u64,
+    /// Shadow V4 bug 8: a member this many days in the gang outranks a newer
+    /// one for the lead (0 = loyalty and tenure alone).
+    #[serde(default)]
+    pub leader_min_days: u32,
     /// ... and only while its Hideout's district coverage is below this.
     #[serde(default = "GangsCfg::default_reform_max_coverage")]
     pub reform_max_coverage: f32,

@@ -139,6 +139,12 @@ fn candidates_in(world: &World, hole: &Hole, pool: &[(EntityId, DayTrace)]) -> V
         if !t.has(trace_flags::ALIVE) || t.has(trace_flags::JAILED) {
             continue;
         }
+        // Shadow V4 bug 10: a Full agent's whereabouts are simulated: an
+        // off-screen deed is never his (one was bound to a man asleep across
+        // town).
+        if world.comp::<crate::components::Brain>(id).is_some_and(|b| b.lod == crate::components::Lod::Full) {
+            continue;
+        }
         let Some(p) = world.comp::<Personality>(id) else { continue };
         let l = f64::from(p.lawfulness);
         let g = t.has(trace_flags::GANG);

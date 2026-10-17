@@ -874,6 +874,18 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
             FightMods::default()
         };
         let (winner, loser, died) = resolve_fight_mods(world, guard, suspect, mods);
+        // Shadow V4 bug 10: a suspect who lost the scuffle for the cuffs was
+        // arrested, not assaulted (the Lost memory gossiped "Assaulted by
+        // <guard>" and fed dread and grudges).
+        if !died && loser == suspect {
+            if let Some(m) = world.comp_mut::<crate::components::Memory>(suspect) {
+                if let Some(e) =
+                    m.entries.iter_mut().rev().find(|e| e.kind == MemoryKind::Lost && e.subject == Some(guard))
+                {
+                    e.kind = MemoryKind::WasArrested;
+                }
+            }
+        }
         if died {
             if loser == suspect {
                 // The suspect died resisting: nothing left to prosecute.
