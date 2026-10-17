@@ -523,14 +523,18 @@ pub fn arrest_kill_mult(world: &World, suspect: EntityId) -> f32 {
 // Strip, Rip, Loot (D35)
 // ---------------------------------------------------------------------------
 
-/// Kin, spouse, or a fellow member of the dead: never loots it.
+/// Kin, spouse, the spouse's kin (Shadow V4 bug 10: a woman stripped her
+/// father-in-law's body before her wife buried him), or a fellow member of
+/// the dead: never loots it.
 fn close_to(world: &World, agent: EntityId, dead: EntityId) -> bool {
     use crate::components::RelKind;
-    let kin =
-        world.edge(agent, dead).is_some_and(|e| matches!(e.kind, RelKind::Family | RelKind::Spouse | RelKind::Parent));
+    let kin_of = |a: EntityId| {
+        world.edge(a, dead).is_some_and(|e| matches!(e.kind, RelKind::Family | RelKind::Spouse | RelKind::Parent))
+    };
     let gang = world.gang_of(agent);
     let member = gang.is_some_and(|g| world.comp::<Gang>(g).is_some_and(|x| x.members.binary_search(&dead).is_ok()));
-    kin || member || world.spouse_of(agent) == Some(dead)
+    let spouse = world.spouse_of(agent);
+    kin_of(agent) || member || spouse == Some(dead) || spouse.is_some_and(kin_of)
 }
 
 /// May `agent` strip corpse `c`: unsettled, unstripped, unburied, not kin,

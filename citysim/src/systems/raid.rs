@@ -334,6 +334,27 @@ pub fn resolve(world: &mut World, actor: EntityId) -> Option<Outcome> {
         // M16a (plan C23): the mission's brawl.
         Expedition::Mission(_) => return crate::systems::missions::brawl(world, actor),
     };
+    // Shadow V4 bug 9: a crew under `raid_min_members` at the door once the
+    // wait is over calls the raid off (lone raids, 1 against 6, after an
+    // 8-h march).
+    let min = world.config.gangs.raid_min_members;
+    if min > 0 && world.comp::<Gang>(gid).is_some_and(|g| g.raid_at.is_some()) {
+        let door = gang_target(world, gid).and_then(|b| world.comp::<Building>(b)).map(|b| b.door);
+        let present = door.map_or(0, |d| raiders_at(world, gid, actor, d).len());
+        if present < min {
+            let gname = world.comp::<Gang>(gid).map_or_else(String::new, |g| g.name.clone());
+            if let Some(g) = world.comp_mut::<Gang>(gid) {
+                g.raid_at = None;
+            }
+            world.push_event(
+                EventKind::Raid,
+                &[gid],
+                format!("{gname}'s raid called off: {present} at the door, too few to go in"),
+            );
+            faction::rethink(world, gid);
+            return None;
+        }
+    }
     // M12 D38: count an expedition that reached a door under full cover.
     if let Some(order) = world.comp::<Gang>(gid).filter(|g| g.raid_at.is_some()).map(|g| g.order) {
         if order.is_raid() && faction::target_cover(world, gid, order) >= 1.0 {

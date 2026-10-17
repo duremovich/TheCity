@@ -783,6 +783,8 @@ fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, ro
         .filter(|&id| role != Role::Guard || world.comp::<Personality>(id).is_some_and(|p| p.lawfulness >= 0.4))
         // Jobs & lives phase 4 (§ 9): a row's `min_dress` (fashion on).
         .filter(|&id| crate::systems::fashion::dress_ok(world, id, role))
+        // Shadow V4 bug 6: a knowledge row's floor.
+        .filter(|&id| crate::systems::trades::skill_ok(world, id, role))
         // Jobs & lives phase 5: a `chip` post is a contract's, never a hire's.
         .filter(|_| crate::systems::dollhouse::hire_ok(world, role))
         // Jobs & lives phase 6: the struck-off at a black clinic only.
@@ -1016,6 +1018,7 @@ impl HirePool {
                 && !crate::systems::life::quit_blocks(world, id, employer)
                 && (role != Role::Guard || world.comp::<Personality>(id).is_some_and(|p| p.lawfulness >= 0.4))
                 && crate::systems::fashion::dress_ok(world, id, role)
+                && crate::systems::trades::skill_ok(world, id, role)
                 && crate::systems::dollhouse::hire_ok(world, role)
                 && crate::systems::gray::hire_ok(world, id, role)
         };

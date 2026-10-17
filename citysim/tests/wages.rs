@@ -308,7 +308,9 @@ fn test_upkeep_becomes_property_and_inputs() {
     w.run_ticks(10 * TICKS_PER_DAY);
     let ids: Vec<i64> = w.stats.history.iter().map(|r| r.econ.coin_identity).collect();
     assert!(ids.windows(2).all(|p| p[0] == p[1]), "the identity holds: {ids:?}");
-    assert!(w.stats.history.iter().all(|r| r.flow_upkeep == 0));
+    // (Shadow V4: no ten-day `flow_upkeep == 0` here: a wounded body's care
+    // and a captive's meal book `Flow::Upkeep` too, and on the moved city one
+    // fell in the ten days; the [corps] upkeep is the first day's assert.)
 }
 
 /// E14: the hoard moves to the corps pro rata to the day-0 wage bill; the

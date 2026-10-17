@@ -44,6 +44,17 @@ fn recruiting(world: &World, g: &Gang) -> bool {
 /// lawfulness < 0.3`) or bootstrap (empty gang, WasArrested memory) recruit
 /// joins the gang whose Hideout is nearest their Home (ties: lower index).
 pub fn recruit_gang(world: &World, id: EntityId) -> Option<EntityId> {
+    // Shadow V4 bug 5: never a corp's exec (the corp scan only once a gang
+    // would take the agent: this runs per think).
+    let gang = recruit_gang_any(world, id)?;
+    let exec = world
+        .corp_slice()
+        .iter()
+        .any(|&c| world.comp::<crate::components::Corp>(c).is_some_and(|cc| cc.exec == Some(id)));
+    (!exec).then_some(gang)
+}
+
+fn recruit_gang_any(world: &World, id: EntityId) -> Option<EntityId> {
     if world.has::<GangMember>(id) {
         return None;
     }
@@ -211,11 +222,20 @@ pub fn holes_up_at(world: &World, id: EntityId) -> Option<EntityId> {
     let gang = world.gang_of(id)?;
     let g = world.comp::<Gang>(gang)?;
     let homeless = world.comp::<Household>(id).is_none_or(|h| h.home.is_none());
-    if g.is_sacked(world.tick) || !(g.order == Order::LieLow || homeless || on_watch(world, id)) {
+    let watch = on_watch(world, id);
+    if g.is_sacked(world.tick) || !(g.order == Order::LieLow || homeless || watch) {
         return None;
     }
     let b = world.comp::<Building>(g.hideout)?;
-    (!b.is_full() || b.occupants.contains(&id)).then_some(g.hideout)
+    // Shadow V4 bug 11: lying low or homeless, not a bed past `[gangs]
+    // hole_up_max_tiles` (a sweeper walked 901 min to his Hideout bed at
+    // 20k; the watch is already stood from within a walk, `on_watch`).
+    let max = world.config.gangs.hole_up_max_tiles;
+    let far = max > 0
+        && !watch
+        && !b.occupants.contains(&id)
+        && world.comp::<crate::components::Position>(id).is_some_and(|p| p.tile.manhattan(b.door) > max);
+    (!far && (!b.is_full() || b.occupants.contains(&id))).then_some(g.hideout)
 }
 
 /// JoinGang at the Hideout: join the gang `recruit_gang` names.
@@ -296,7 +316,8 @@ pub fn leader_ranking(world: &World, gang: EntityId) -> Vec<EntityId> {
 pub fn leader_scores(world: &World, gang: EntityId) -> Vec<(EntityId, f32)> {
     let Some(g) = world.comp::<Gang>(gang) else { return Vec::new() };
     let tick = world.tick;
-    let mut ranked: Vec<(EntityId, f32)> = g
+    let min_days = world.config.gangs.leader_min_days as f32;
+    let mut ranked: Vec<(EntityId, f32, bool)> = g
         .members
         .iter()
         .copied()
@@ -306,11 +327,14 @@ pub fn leader_scores(world: &World, gang: EntityId) -> Vec<(EntityId, f32)> {
             let days = world
                 .comp::<GangMember>(m)
                 .map_or(0.0, |g| tick.saturating_sub(g.joined_tick) as f32 / TICKS_PER_DAY as f32);
-            (m, loyalty + days / 100.0)
+            (m, loyalty + days / 100.0, days >= min_days)
         })
         .collect();
-    ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
-    ranked
+    // Shadow V4 bug 8: a member of `[gangs] leader_min_days` or more ranks
+    // above a newer one (a clinic owner led the Choir 3 days after joining
+    // on loyalty alone).
+    ranked.sort_by(|a, b| b.2.cmp(&a.2).then(b.1.total_cmp(&a.1)).then(a.0.cmp(&b.0)));
+    ranked.into_iter().map(|(m, s, _)| (m, s)).collect()
 }
 
 /// `leader = argmax(loyalty + days_in_gang / 100)` over members with a Brain
@@ -828,6 +852,19 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
                 .copied()
                 .filter(|&o| o != actor && world.has::<Wallet>(o))
                 .filter(|&o| mates.is_none() || world.gang_of(o) != mates)
+                // Shadow V4 bug 9: nor a Friend or kin of the actor (the
+                // extorter squeezed his new Friend with the rest).
+                .filter(|&o| {
+                    world.edge(actor, o).is_none_or(|e| {
+                        !matches!(
+                            e.kind,
+                            crate::components::RelKind::Friend
+                                | crate::components::RelKind::Family
+                                | crate::components::RelKind::Spouse
+                                | crate::components::RelKind::Parent
+                        )
+                    })
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -839,6 +876,7 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
     let total: i64 = occupants.iter().map(|&o| world.comp::<Wallet>(o).map_or(0, |w| w.coins.max(0))).sum();
     let take = amount.min(total);
     let mut taken = 0;
+    let held: Vec<i64> = occupants.iter().map(|&o| world.comp::<Wallet>(o).map_or(0, |w| w.coins)).collect();
     for &o in &occupants {
         let coins = world.comp::<Wallet>(o).map_or(0, |w| w.coins.max(0));
         let share = if total > 0 { (take * coins) / total } else { 0 };
@@ -846,8 +884,6 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
             w.coins -= share;
         }
         taken += share;
-        world.remember(o, MemoryKind::WasRobbed, Some(actor), 0.7, -0.7, false);
-        social::robbed_by(world, o, actor);
     }
     // The rounding remainder comes a coin at a time from whoever still has one.
     let mut guard = 0;
@@ -866,6 +902,14 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
     }
     if let Some(w) = world.comp_mut::<Wallet>(actor) {
         w.coins += taken;
+    }
+    // Shadow V4 bug 9: the robbed are those who paid (9 of 17 shakedowns
+    // took 0 coins and still made Enemies, memories and claims).
+    for (i, &o) in occupants.iter().enumerate() {
+        if world.comp::<Wallet>(o).is_some_and(|w| w.coins < held[i]) {
+            world.remember(o, MemoryKind::WasRobbed, Some(actor), 0.7, -0.7, false);
+            social::robbed_by(world, o, actor);
+        }
     }
     let today = world.day();
     if let Some(b) = world.comp_mut::<Brain>(actor) {
@@ -887,15 +931,19 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
             x.shakedowns.push_back((now, g));
         }
     }
-    let suffix = claim(world, actor, home).unwrap_or_default();
+    // Shadow V4 bug 9 (and 4): an empty-handed shakedown advances no claim
+    // and is no crime to file (a 0-coin shakedown drew 6 days).
+    let suffix = if taken > 0 { claim(world, actor, home).unwrap_or_default() } else { String::new() };
     let name = world.name_of(actor);
     world.push_event(
         EventKind::Extortion,
         &[actor, home],
         format!("{name} extorted {taken} coins from Block#{}{suffix}", home.index),
     );
-    let tile = world.comp::<Position>(actor).map_or(TilePos::default(), |p| p.tile);
-    law::raise_crime(world, actor, None, crate::components::Crime::Extortion, tile);
+    if taken > 0 {
+        let tile = world.comp::<Position>(actor).map_or(TilePos::default(), |p| p.tile);
+        law::raise_crime(world, actor, None, crate::components::Crime::Extortion, tile);
+    }
     crate::systems::fviolence::note_act(world, actor, crate::ledger::ActKind::Extort);
     taken
 }
@@ -1384,13 +1432,17 @@ fn daily_economy(world: &mut World) {
                 let coins = world.comp::<Wallet>(r).map_or(0, |w| w.coins);
                 let pay = owed.min(coins.max(0));
                 if pay > 0 {
-                    if let Some(w) = world.comp_mut::<Wallet>(r) {
-                        w.coins -= pay;
-                    }
-                    owed -= pay;
+                    // Shadow V4 bug 14: on the books (`Flow::Coerced`, a
+                    // tribute under the gang's hold), not a bare wallet write.
+                    owed -= crate::systems::ownership::pay(
+                        world,
+                        Some(r),
+                        Some(gang),
+                        pay,
+                        crate::systems::ownership::Flow::Coerced,
+                    );
                 }
             }
-            world.gang_credit(gang, 2 - owed);
             // L2 L20: the week's tribute, for the leader's Collect.
             crate::systems::leisure::note_tribute(world, gang, 2 - owed);
         }
@@ -1409,12 +1461,16 @@ fn daily_economy(world: &mut World) {
                 if !world.comp::<Gang>(gang).is_some_and(|g| g.treasury - set_aside >= stipend) {
                     break;
                 }
-                if let Some(g) = world.comp_mut::<Gang>(gang) {
-                    g.treasury -= stipend;
-                }
-                if let Some(w) = world.comp_mut::<Wallet>(m) {
-                    w.coins += stipend;
-                }
+                // Shadow V4 bug 14: the stipend on the books (`Flow::Tribute`,
+                // the gang's pay to its members; it was a bare wallet write
+                // and the diaries read it as a "daily pass").
+                crate::systems::ownership::pay(
+                    world,
+                    Some(gang),
+                    Some(m),
+                    stipend,
+                    crate::systems::ownership::Flow::Tribute,
+                );
                 note_paid(world, m);
             }
         }

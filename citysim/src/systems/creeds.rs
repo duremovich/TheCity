@@ -45,6 +45,20 @@ pub fn chromed(world: &World, id: EntityId) -> bool {
     visible(world, id) > world.config.creeds.creed_tolerance
 }
 
+/// Shadow V4 bug 13: the visible chrome tiers `id` may still take and keep
+/// its creed gang (a Purist's `creed_tolerance`, a cult row's `tolerance`,
+/// less what shows); `None` outside a creed gang (Purists and cultists were
+/// sold the chrome that expelled them the same minute).
+pub fn visible_room(world: &World, id: EntityId) -> Option<u8> {
+    let gang = world.gang_of(id)?;
+    let tolerance = match cult_row(world, gang) {
+        Some(row) => row.tolerance,
+        None if is_purist(world, gang) => world.config.creeds.creed_tolerance,
+        None => return None,
+    };
+    Some(tolerance.saturating_sub(visible(world, id)))
+}
+
 /// W31: does `gang` tolerate `id`? Every gang does, a Purist gang only
 /// those within `creed_tolerance`.
 pub fn tolerated(world: &World, gang: EntityId, id: EntityId) -> bool {

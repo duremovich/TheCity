@@ -75,7 +75,20 @@ fn gang_world_in(save: &std::sync::OnceLock<String>, pre_mirror: bool) -> World 
                 .filter(|&g| w.comp::<Gang>(g).is_some_and(|x| x.leader.is_some() && x.members.len() >= 2))
                 .count();
             let held = w.gangs().into_iter().any(|g| gang::held_districts(&w, g).iter().any(|&(_, n)| n >= 3));
-            if led >= 2 && held {
+            // Shadow V4 batch 3: and a led gang holding a district with a
+            // business to protect (`racket`'s premise; the moved city's
+            // first such day came later than its first held district).
+            let business = w.gangs().into_iter().any(|g| {
+                w.comp::<Gang>(g).is_some_and(|x| x.leader.is_some())
+                    && gang::held_districts(&w, g).into_iter().any(|(d, _)| {
+                        leverage::PROTECTED.iter().flat_map(|&k| w.buildings_of_kind(k).to_vec()).any(|b| {
+                            w.district_of_building(b) == d
+                                && w.comp::<Building>(b)
+                                    .is_some_and(|bd| !bd.derelict && !bd.demolished && bd.venue.is_none())
+                        })
+                    })
+            });
+            if led >= 2 && held && business {
                 break;
             }
         }
@@ -265,9 +278,15 @@ fn test_protection_pays_weekly_and_stops_when_district_lost() {
     let mut w = gang_world_pre_mirror();
     let (g, leader, b, owner) = racket(&mut w);
     set_coins(&mut w, owner, 10_000);
+    // Shadow V4 batch 1: on the moved city the owner spent the 10,000 on a
+    // founding and incorporated, so the Hotel changed hands (payer) and the
+    // hold broke; she has just founded (the cooldown), and this is the
+    // payment's test.
+    let today = w.day();
+    w.comp_mut::<citysim::Brain>(owner).expect("brain").last_found_day = Some(today);
     let before = identity(&w);
     let weekly = w.config.leverage.protection_weekly;
-    let treasury = w.purse(Some(g));
+    let day0 = w.day();
     let id = leverage::force(
         &mut w,
         Some(g),
@@ -283,12 +302,28 @@ fn test_protection_pays_weekly_and_stops_when_district_lost() {
     assert_eq!(w.coercions[&id].paid, 1, "the first week at once");
     for _ in 0..2 {
         w.coercions.get_mut(&id).unwrap().next_due = w.tick;
-        to_midnight(&mut w);
+        // Shadow V4 batch 1: the heavied leader is the block's bruiser, and
+        // on the moved city a robot jailed him for a shakedown the next day
+        // (a Sentence breaks the hold). This test is the weekly payment, not
+        // his record: he walks free.
+        let left = TICKS_PER_DAY - w.tick % TICKS_PER_DAY;
+        for _ in 0..=left {
+            w.run_ticks(1);
+            if w.has::<citysim::Sentence>(leader) {
+                citysim::systems::law::release(&mut w, leader, false);
+            }
+        }
     }
     let c = &w.coercions[&id];
     assert_eq!(c.status, CoercionStatus::Active);
     assert!(c.paid >= 3, "paid {} weeks", c.paid);
-    assert!(w.purse(Some(g)) >= treasury, "the gang took it");
+    // Shadow V4 batch 2: the payments booked as protection (the gang's purse
+    // against its opening read the gang's own spending too, which on the
+    // moved city outran three weeks of protection).
+    let booked: i64 =
+        w.stats.history.iter().filter(|r| r.day >= day0).map(|r| r.leverage.protection_coins).sum::<i64>()
+            + w.stats.current.leverage.protection_coins;
+    assert!(booked >= 3 * weekly, "the gang took it ({booked})");
     assert_eq!(identity(&w), before, "no coin made or lost");
     // The gang loses the district.
     let d = w.district_of_building(b);
@@ -314,6 +349,11 @@ fn test_protection_never_on_own_front() {
     let mut w = gang_world();
     let (g, _, b, _) = racket(&mut w);
     let d = w.district_of_building(b);
+    // Shadow V4: the racket's business the district's best (on the moved
+    // city another business there out-earned its staged 100 a day).
+    if let Some(bd) = w.comp_mut::<Building>(b) {
+        bd.revenue = std::iter::repeat_n(100_000, 7).collect();
+    }
     assert_eq!(leverage::protection_target(&w, g, d), Some(b));
     if let Some(bd) = w.comp_mut::<Building>(b) {
         bd.owner = Some(g);

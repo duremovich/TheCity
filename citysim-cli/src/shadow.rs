@@ -189,8 +189,13 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
                 .collect()
         }
         "homeless" => adults().filter(|&a| world.comp::<Household>(a).is_some_and(|h| h.home.is_none())).collect(),
+        // Shadow V4 bug 23: a cancer past stage 0 (it took one at 0.00).
         "sick" => adults()
-            .filter(|&a| world.comp::<citysim::Health>(a).is_some_and(|h| h.malnutrition >= 0.5 || h.cancer.is_some()))
+            .filter(|&a| {
+                world
+                    .comp::<citysim::Health>(a)
+                    .is_some_and(|h| h.malnutrition >= 0.5 || h.cancer.as_ref().is_some_and(|c| c.stage > 0.0))
+            })
             .collect(),
         "ceo" => {
             let mut corps: Vec<(i64, EntityId, EntityId)> = world
@@ -253,11 +258,51 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
             let Some(role) = world.config.trade_role(key) else { return Ok(Vec::new()) };
             let mut v = by_role(&[role]);
             if let Role::Trade(t) = role {
-                v.extend(world.jobs2.pitches.iter().filter(|(_, p)| p.trade == t).map(|(&a, _)| a));
+                // Shadow V4 bug 23: a pitch open (not closed that midnight) and
+                // its owner free and postless (a closed pitch was picked).
+                let now = world.tick;
+                v.extend(
+                    world
+                        .jobs2
+                        .pitches
+                        .iter()
+                        .filter(|(_, p)| p.trade == t && p.closed_until.is_none_or(|c| c <= now))
+                        .map(|(&a, _)| a)
+                        .filter(|&a| !world.has::<Job>(a) && !world.has::<citysim::Sentence>(a)),
+                );
+            }
+            // Shadow V4 bug 23: at 00:00 no day post is held; the day
+            // labourers are those hired off the corner in the last 7 days.
+            if arch == "day_labourer" {
+                let from = world.tick.saturating_sub(7 * TICKS_PER_DAY);
+                let label = world.config.trade(match role {
+                    Role::Trade(t) => t,
+                    _ => return Ok(Vec::new()),
+                });
+                let label = label.map(|r| format!("hired as {}", r.label)).unwrap_or_default();
+                v.extend(
+                    world
+                        .events
+                        .iter()
+                        .rev()
+                        .take_while(|e| e.tick >= from)
+                        .filter(|e| e.kind == EventKind::Hire && !label.is_empty() && e.text.contains(&label))
+                        .filter_map(|e| e.actors.first().copied()),
+                );
+                v.sort_unstable();
+                v.dedup();
             }
             v.into_iter().filter(|&a| adult_alive(world, a)).collect()
         }
-        "pimp" => world.jobs2.vice.pimps.values().copied().filter(|&a| adult_alive(world, a)).collect(),
+        // Shadow V4 bug 23: a free pimp (a jailed one spent the week inside).
+        "pimp" => world
+            .jobs2
+            .vice
+            .pimps
+            .values()
+            .copied()
+            .filter(|&a| adult_alive(world, a) && !world.has::<citysim::Sentence>(a))
+            .collect(),
         "foreman" => {
             let Some(role) = world.config.trade_role("builder") else { return Ok(Vec::new()) };
             let yards: BTreeSet<EntityId> =
@@ -270,12 +315,9 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
             dealers.extend(world.deal_log.values().map(|&(a, _)| a));
             adults()
                 .filter(|a| dealers.contains(a))
-                .filter(|&a| {
-                    world
-                        .gang_of(a)
-                        .and_then(|g| world.hideout_of(g))
-                        .is_some_and(|h| !citysim::systems::weapons::stock_at(world, h).is_empty())
-                })
+                // Shadow V4 bug 23: a surplus to sell (the armoury's target
+                // kept back), not any stock.
+                .filter(|&a| world.gang_of(a).is_some_and(|g| citysim::systems::weapons::has_surplus(world, g)))
                 .collect()
         }
         "elder" => {
@@ -1095,6 +1137,10 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
         t.log(e.tick, "plan", format!("{label}: {}", e.text));
     }
     let mut flow_ctx: Vec<String> = Vec::new();
+    // Shadow V4 bug 23: the tick's largest Flow on this agent (the money
+    // section buckets by it; the running step read midnight sales as the
+    // daily pass and a mid-shift purchase as a wage).
+    let mut tick_flow: Option<(i64, citysim::systems::ownership::Flow)> = None;
     for n in notes {
         match n {
             ShadowNote::Move { tick, m, out } if m.actor == id || m.target == id => {
@@ -1160,6 +1206,9 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                 e.0 += out;
                 e.1 += inn;
                 e.2 += 1;
+                if tick_flow.is_none_or(|(c, _)| *coins > c) {
+                    tick_flow = Some((*coins, *flow));
+                }
                 use citysim::systems::ownership::Flow as F;
                 if *to == Some(id) && !*refund && matches!(flow, F::Wage | F::ExecWage) && *coins > 0 {
                     t.wages.push(*tick);
@@ -1172,7 +1221,7 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                     t.log(
                         *tick,
                         "tribute",
-                        format!("TRIBUTE received +{coins}c from {who} (the weekly Collect pay-out)"),
+                        format!("TRIBUTE received +{coins}c from {who} (the daily stipend or the weekly Collect)"),
                     );
                 }
                 let sign = if inn > 0 { "+" } else { "-" };
@@ -1461,6 +1510,9 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                 } else {
                     kind
                 };
+                // Shadow V4 bug 23: a Flow on the books names the money.
+                let kind: String = tick_flow.map_or_else(|| kind.to_string(), |(_, f)| format!("{f:?}"));
+                let kind = kind.as_str();
                 let owner = bld.and_then(|b| owner_name(world, b));
                 let cp = owner.map_or(String::new(), |o| format!("; place owner {o}"));
                 let ev =
@@ -2555,7 +2607,10 @@ const CHECKS: &[Check] = &[
     // regenerated stat table (the eight-run ensemble: main 2.57; stat_violence_mult 0.98 1.32, 0.99
     // 1.42, 1.01 2.21, 1.02 2.50, 1.03 1.83; max_coarse 149 1.59, 151 2.05): 1.32 x 0.6 = 0.79,
     // rounded down. It read 0.77-2.00 across the milestone's phases against the old 1.3 (2.29-4.71).
-    (19, "ceo", Metric::KnownMetWeek, Bound::Min(0.7), 1.32, 2.57),
+    // Shadow V4 (2026-10-17, bug 5's known reason): the CEO holds office at its Hq every workday
+    // (the office was the nearest Vat Farm or none, and the exec's day leaked into the street):
+    // 0.55 pooled (0.12 / 0.89 / 1.22 by seed), the range widened by it, 0.55 x 0.6 rounded down.
+    (19, "ceo", Metric::KnownMetWeek, Bound::Min(0.3), 0.55, 2.57),
     (19, "ceo", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
     // An exec never does a work-class action, so every run of the office-hours
     // Work goal counts here: the row reads goal flicker (2026-10-11: 0.63 after
@@ -2563,7 +2618,9 @@ const CHECKS: &[Check] = &[
     // the office gate's estimate: with it read against the deadline (review
     // item 6) the row reads 0.58, and 0.57 with that change alone undone;
     // 0.52-0.63 over the round's tables, so the 0.62 bound would flip on noise.
-    (19, "ceo", Metric::CommuteAbortsDay, Bound::Max(0.75), 0.52, 0.63),
+    // Shadow V4 (2026-10-17, bug 5's known reason): an office day at the Hq every workday, so
+    // more office runs: 0.84 pooled (0.73 / 0.86 / 0.76), the range widened by it, + 0.05.
+    (19, "ceo", Metric::CommuteAbortsDay, Bound::Max(0.89), 0.52, 0.84),
     (19, "club_staff", Metric::WalkHDay, Bound::Max(5.6), 3.95, 4.53),
     (19, "club_staff", Metric::LongestSleepH, Bound::Min(4.0), 4.54, 4.76),
     (19, "club_staff", Metric::Energy0HWeek, Bound::Max(2.0), 0.00, 0.00),
@@ -2628,7 +2685,11 @@ const CHECKS: &[Check] = &[
     // brothers' larger gangs (the shipped city read 0.64 / 0.61, 0.91 / 0.92 with the brothers off);
     // with the brothers a rare sack-gutting event the shipped city reads 0.84 / 0.80.
     (19, "homeless", Metric::PaidOfWorked, Bound::Min(0.7), 0.80, 0.94),
-    (19, "homeless", Metric::WagedWorkdays, Bound::Min(0.68), 0.78, 0.88),
+    // Shadow V4 (2026-10-17, the regenerated stat table): 0.59 pooled (0.44 / 0.75 / 0.62), the
+    // off-screen run to day 19 housing more of the poor (11 homeless picks on seed 42, 16 before)
+    // and one of the few left a new Bartender at a Bar that paid him nothing (city wages paid on
+    // 42-47 x 120 rose 1-7 % over ce5afe6): the range widened by it, - 0.1.
+    (19, "homeless", Metric::WagedWorkdays, Bound::Min(0.49), 0.59, 0.88),
     (19, "reporter", Metric::WalkHDay, Bound::Max(5.9), 4.03, 4.85),
     (19, "reporter", Metric::LongestSleepH, Bound::Min(4.4), 4.90, 5.27),
     (19, "reporter", Metric::Energy0HWeek, Bound::Max(2.1), 0.00, 0.01),
@@ -2956,6 +3017,53 @@ mod tests {
         let r = behaviour(None).expect("the behaviour windows run");
         eprint!("{}", r.text);
         assert!(r.failures.is_empty(), "behaviour tier failures: {:?}", r.failures);
+    }
+
+    /// Shadow V4 bug 23: the picks name the trade's people: a cancer past
+    /// stage 0, a free pimp, an open pitch's postless owner.
+    #[test]
+    fn test_picks_skip_stage_zero_jailed_pimp_and_closed_pitch() {
+        let mut world = World::new(42, Config::load());
+        let free: Vec<EntityId> = world
+            .citizens()
+            .into_iter()
+            .filter(|&a| adult_alive(&world, a) && !world.has::<Job>(a) && !world.has::<citysim::Sentence>(a))
+            .collect();
+        let (s0, s1, pimp, vend) = (free[0], free[1], free[2], free[3]);
+        for (a, stage) in [(s0, 0.0), (s1, 0.3)] {
+            if !world.has::<citysim::Health>(a) {
+                world.insert(a, citysim::Health::default());
+            }
+            let h = world.comp_mut::<citysim::Health>(a).expect("health");
+            h.malnutrition = 0.0;
+            h.cancer = Some(citysim::components::Cancer { stage, since: 0, diagnosed: false });
+        }
+        let sick = candidates(&world, "sick").expect("sick");
+        assert!(!sick.contains(&s0) && sick.contains(&s1), "a stage-0 cancer is no sick pick");
+        world.jobs2.vice.pimps.insert(0, pimp);
+        let until = world.tick + TICKS_PER_DAY;
+        world.insert(pimp, citysim::Sentence { until_tick: until, crime: citysim::Crime::Assault });
+        assert!(!candidates(&world, "pimp").expect("pimp").contains(&pimp), "a jailed pimp");
+        let Role::Trade(t) = world.config.trade_role("vendor").expect("the vendor row") else { panic!("a trade") };
+        let spot = world.comp::<citysim::Position>(vend).expect("pos").tile;
+        let p = citysim::components::Pitch {
+            spot,
+            district: world.district_of(spot),
+            trade: t,
+            owner: vend,
+            since: 0,
+            take_today: 0,
+            take_week: 0,
+            cut_to: None,
+            stock: 0,
+            closed_until: Some(until),
+            dry_days: 0,
+            jobs_today: 0,
+        };
+        world.jobs2.pitches.insert(vend, p);
+        assert!(!candidates(&world, "vendor").expect("vendor").contains(&vend), "a pitch closed tonight");
+        world.jobs2.pitches.get_mut(&vend).expect("pitch").closed_until = None;
+        assert!(candidates(&world, "vendor").expect("vendor").contains(&vend), "open, it is picked");
     }
 
     #[test]

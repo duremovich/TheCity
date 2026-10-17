@@ -194,7 +194,17 @@ pub fn commuting(world: &World, id: EntityId, job: &Job) -> bool {
 pub fn emergency(world: &World, id: EntityId, winner: GoalKind) -> bool {
     match winner {
         GoalKind::Flee | GoalKind::Fight | GoalKind::Arrest => true,
-        GoalKind::Eat => world.comp::<Needs>(id).is_some_and(|n| n.hunger < world.config.life.starving_hunger),
+        // Shadow V4 bug 19: or, at a work step, hungry past
+        // `shift_hunger_break` with a meal in reach (the meal break; the
+        // commute's latch holds: a meal on the way is no break).
+        GoalKind::Eat => world.comp::<Needs>(id).is_some_and(|n| {
+            n.hunger < world.config.life.starving_hunger
+                || (n.hunger < world.config.life.shift_hunger_break
+                    && world
+                        .comp::<Brain>(id)
+                        .is_some_and(|b| matches!(&b.exec, ExecState::Use { kind, .. } if kind.is_work()))
+                    && crate::utility::goals::eat_obtainable(world, id))
+        }),
         _ => false,
     }
 }
@@ -401,6 +411,7 @@ pub fn daily(world: &mut World) {
     for id in quits {
         world.abort_plan(id);
         crate::systems::economy::quit_job(world, id, "no need of the wage");
+        crate::systems::life::note_secure_quit(world, id);
     }
     for id in out {
         // The job stays (a vacancy for someone who turns up), as a quit's.

@@ -142,7 +142,11 @@ fn a_gang(w: &mut World) -> (EntityId, EntityId, EntityId) {
 fn test_hold_feeds_and_releases() {
     let mut w = gang_world();
     let (g, l, h) = a_gang(&mut w);
-    let [v, kin] = strangers(&w, 2)[..] else { unreachable!() };
+    // Shadow V4 batch 3: the premise's jobless stranger (on the moved city
+    // the first stranger held a post, and the employer answered).
+    let pool = strangers(&w, 12);
+    let v = *pool.iter().find(|&&x| !w.has::<citysim::Job>(x)).expect("a jobless stranger");
+    let kin = *pool.iter().find(|&&x| x != v).expect("a kin");
     w.edge_entry(v, kin).kind = RelKind::Family;
     let before = identity(&w);
     let demand = Demand::Coins { amount: 200, weekly: false };
@@ -282,6 +286,14 @@ fn test_abduct_plan_and_hand_over() {
         hold,
     )
     .expect("posted");
+    // Shadow V4 batch 2: on the moved city the buyer's keyed renege roll
+    // came up; this test is the hand-over, so the buyer pays.
+    w.contracts.get_mut(&id).expect("record").renege = false;
+    // Shadow V4 batch 4: room for the run (on the moved city the city's
+    // live runs filled the room, `max_missions` or the bodies' quota, and the
+    // record stayed queued with no run to plan from).
+    w.config.missions.max_missions = 1_000;
+    w.config.lod.contract_quota = 10_000;
     contracts::god_take(&mut w, id, taker).expect("taken");
     assert_eq!(w.contracts[&id].render, citysim::contract::Render::Live, "an Abduct is never ledger");
     let plan = contracts::plan(&mut w, taker).expect("a plan");

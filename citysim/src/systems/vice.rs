@@ -125,16 +125,32 @@ pub fn score_mult(world: &World, id: EntityId, kind: BuildingKind) -> f32 {
 /// The tipped worker on duty at `b` (the lowest id): a `tipped` row's
 /// staff on shift now, inside it (a Statistical one counts as there), not held.
 pub fn tipped_on_duty(world: &World, b: EntityId) -> Option<EntityId> {
+    tipped_for(world, b, EntityId::NONE)
+}
+
+/// Shadow V4 bug 7: the tipped worker on duty a visit's tip goes to, turn
+/// about by the visitor and the hour (every tip went to the lowest id on
+/// duty: 56 c against 0 c on the same shifts).
+fn tipped_for(world: &World, b: EntityId, visitor: EntityId) -> Option<EntityId> {
     let tod = world.tick_of_day();
-    world.staff_of(b).iter().copied().find(|&s| {
-        world
-            .comp::<Job>(s)
-            .is_some_and(|j| j.on_shift(tod) && crate::systems::trades::row_of(world, j.role).is_some_and(|r| r.tipped))
-            && !world.has::<Sentence>(s)
-            && world.comp::<Brain>(s).is_some_and(|br| {
-                br.lod == Lod::Statistical || world.comp::<Position>(s).is_some_and(|p| p.building == Some(b))
-            })
-    })
+    let on_duty: Vec<EntityId> = world
+        .staff_of(b)
+        .iter()
+        .copied()
+        .filter(|&s| {
+            world.comp::<Job>(s).is_some_and(|j| {
+                j.on_shift(tod) && crate::systems::trades::row_of(world, j.role).is_some_and(|r| r.tipped)
+            }) && !world.has::<Sentence>(s)
+                && world.comp::<Brain>(s).is_some_and(|br| {
+                    br.lod == Lod::Statistical || world.comp::<Position>(s).is_some_and(|p| p.building == Some(b))
+                })
+        })
+        .collect();
+    if on_duty.is_empty() {
+        return None;
+    }
+    let turn = u64::from(visitor.index) + world.tick / crate::time::TICKS_PER_HOUR;
+    Some(on_duty[(turn % on_duty.len() as u64) as usize])
 }
 
 fn add_intimacy(world: &mut World, id: EntityId, gain: f32) {
@@ -152,7 +168,7 @@ pub fn on_visit(world: &mut World, visitor: EntityId, b: EntityId, price: i64) {
         return;
     }
     let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) else { return };
-    let worker = tipped_on_duty(world, b);
+    let worker = tipped_for(world, b, visitor);
     match kind {
         BuildingKind::StripClub => {
             let row = ownership::jobs2_row(world);
@@ -171,6 +187,8 @@ pub fn on_visit(world: &mut World, visitor: EntityId, b: EntityId, price: i64) {
             ownership::jobs2_row(world).companion_visits += 1;
             add_intimacy(world, visitor, world.config.vice.intimacy_gain);
         }
+        // Shadow V4 bug 7: a Club's dancer is tipped too (it fell through).
+        BuildingKind::Club if worker.is_some() => {}
         _ => return,
     }
     let Some(w) = worker.filter(|&w| w != visitor) else { return };

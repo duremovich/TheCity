@@ -134,23 +134,32 @@ fn test_extort_moves_coins_and_adds_memory() {
         .find(|&h| Some(h) != actor_home && w.comp::<citysim::Building>(h).is_some_and(|b| b.occupants.len() >= 2))
         .expect("an occupied home");
     let victims: Vec<_> = w.comp::<citysim::Building>(home).expect("b").occupants.clone();
-    let before: i64 = victims.iter().map(|&v| w.comp::<Wallet>(v).map_or(0, |x| x.coins)).sum();
+    let held: Vec<i64> = victims.iter().map(|&v| w.comp::<Wallet>(v).map_or(0, |x| x.coins)).collect();
+    let before: i64 = held.iter().sum();
     let actor_before = w.comp::<Wallet>(actor).expect("w").coins;
     let taken = gang::extort(&mut w, actor, home);
     assert_eq!(taken, 5);
     let after: i64 = victims.iter().map(|&v| w.comp::<Wallet>(v).map_or(0, |x| x.coins)).sum();
     assert_eq!(before - after, 5);
     assert_eq!(w.comp::<Wallet>(actor).expect("w").coins, actor_before + 5);
-    for v in victims {
+    // Shadow V4 bug 9: the robbed are the occupants who paid (a zero share
+    // is no robbery: no memory, no Enemy).
+    let mut paid = 0;
+    for (i, v) in victims.into_iter().enumerate() {
         let robbed = w
             .comp::<Memory>(v)
             .expect("mem")
             .entries
             .iter()
             .any(|m| m.kind == MemoryKind::WasRobbed && m.subject == Some(actor));
-        assert!(robbed, "victim lacks WasRobbed");
-        assert_eq!(w.edge(v, actor).expect("edge").kind, RelKind::Enemy);
+        let lost = w.comp::<Wallet>(v).map_or(0, |x| x.coins) < held[i];
+        assert_eq!(robbed, lost, "WasRobbed for a payer only");
+        if lost {
+            paid += 1;
+            assert_eq!(w.edge(v, actor).expect("edge").kind, RelKind::Enemy);
+        }
     }
+    assert!(paid >= 1, "someone paid");
     assert_eq!(w.comp::<citysim::Building>(home).expect("b").claim, Some(citysim::Claim { gang: g0, count: 1 }));
 }
 

@@ -139,6 +139,12 @@ fn candidates_in(world: &World, hole: &Hole, pool: &[(EntityId, DayTrace)]) -> V
         if !t.has(trace_flags::ALIVE) || t.has(trace_flags::JAILED) {
             continue;
         }
+        // Shadow V4 bug 10: a Full agent's whereabouts are simulated: an
+        // off-screen deed is never his (one was bound to a man asleep across
+        // town).
+        if world.comp::<crate::components::Brain>(id).is_some_and(|b| b.lod == crate::components::Lod::Full) {
+            continue;
+        }
         let Some(p) = world.comp::<Personality>(id) else { continue };
         let l = f64::from(p.lawfulness);
         let g = t.has(trace_flags::GANG);
@@ -161,6 +167,13 @@ fn candidates_in(world: &World, hole: &Hole, pool: &[(EntityId, DayTrace)]) -> V
             w *= cfg.other_zone_weight;
         } else if t.district != hole.district || hole.district.is_unset() {
             w *= cfg.same_zone_weight;
+        }
+        // Shadow V4 bug 3's mirror: a Full fight carries `1 − [life]
+        // fight_lawful_damp × lawfulness`, so an off-screen beating or killing
+        // weighs its candidates by it too.
+        if matches!(hole.kind, HoleKind::Assaulted | HoleKind::Killed) {
+            let damp = f64::from(world.config.life.fight_lawful_damp);
+            w *= (1.0 - damp * l).max(0.0);
         }
         // M13 D37: the chromed are the likelier culprits of a beating or a
         // killing (a branch: a bare candidate's weight is untouched).

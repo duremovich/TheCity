@@ -955,7 +955,11 @@ fn test_lone_child_on_a_synth_pantry_builds_malnutrition() {
         h.malnutrition = 0.0;
     }
     for _ in 0..12 {
-        if let Some(b) = w.comp_mut::<Building>(home) {
+        // Shadow V4 batch 1: the child's Home as it is that day (on the
+        // moved city the household relocated on day 5 and the child ate
+        // from a real-food pantry the test never touched).
+        let at = w.comp::<citysim::Household>(child).and_then(|h| h.home).unwrap_or(home);
+        if let Some(b) = w.comp_mut::<Building>(at) {
             b.stock_food = 30;
             b.synth_food = 30;
         }

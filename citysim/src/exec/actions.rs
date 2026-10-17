@@ -729,8 +729,12 @@ pub fn on_complete(
             StepResult::Done
         }
         ActionKind::Rest => {
+            // Shadow V4 bug 2: a doze restores up to `[life] rest_energy_cap`,
+            // never past it (+0.1 a 90-min Rest outran the decay: a woman
+            // looped Rest for four days at 0.85-0.97 and never slept).
+            let cap = world.config.life.rest_energy_cap;
             if let Some(n) = world.comp_mut::<Needs>(id) {
-                n.energy = (n.energy + 0.1).min(1.0);
+                n.energy = n.energy.max((n.energy + 0.1).min(cap));
             }
             StepResult::Done
         }
@@ -948,6 +952,11 @@ pub fn on_complete(
                 && world.comp::<Position>(id).and_then(|p| p.building)
                     != world.comp::<Position>(partner).and_then(|p| p.building)
             {
+                return StepResult::Failed(FailReason::PartnerLeft);
+            }
+            // Shadow V4 bug 10: no chat ends warmly with someone who became
+            // an Enemy mid-chat (the partner robbed the agent, then chatted).
+            if world.edge(id, partner).is_some_and(|e| e.kind == crate::components::RelKind::Enemy) {
                 return StepResult::Failed(FailReason::PartnerLeft);
             }
             let gain = world.config.needs.chat_belonging;

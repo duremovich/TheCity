@@ -148,7 +148,14 @@ pub fn make_enemy(world: &mut World, a: EntityId, b: EntityId, d_affinity: f32) 
         e.affinity = e.affinity.min(c);
     }
     e.trust = 0.0;
-    e.kind = RelKind::Enemy;
+    // Shadow V4 (found under batch 3's save round trip): a spouse wronged
+    // stays a spouse at the hostile affinity. Overwriting the Spouse edge
+    // left `World::spouses` holding the pair in the running world while a
+    // load's `rebuild_indices` dropped it (no Spouse edge): a save then
+    // diverged (a Statistical night's "beside a spouse" intimacy).
+    if e.kind != RelKind::Spouse {
+        e.kind = RelKind::Enemy;
+    }
     e.last_interaction = tick;
     reindex_kind(world, a, b);
 }
@@ -604,6 +611,11 @@ fn colocation(world: &mut World) {
             let cowork = world.comp::<Job>(a).is_some_and(|j| j.employer == Some(building))
                 && world.comp::<Job>(b).is_some_and(|j| j.employer == Some(building));
             if jail {
+                // Shadow V4 bug 10: a shared cell warms no Enemy or Rival (a
+                // pair went from -1.00 to -0.10 in 13 h).
+                if world.edge(a, b).is_some_and(|e| matches!(e.kind, RelKind::Enemy | RelKind::Rival)) {
+                    continue;
+                }
                 let step = world.config.social.affinity_per_hour * similarity_mult(world, a, b);
                 let hours = JAIL_DRIFT_HOURS as f32;
                 // L2 shadow fixes item 10: a guard and a prisoner warm to

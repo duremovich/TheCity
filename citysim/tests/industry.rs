@@ -271,8 +271,13 @@ fn test_builders_round_keeps_to_sites_in_reach() {
     let yard = first(&w, BuildingKind::ConstructionYard);
     let corp = w.corps()[0];
     let door = |w: &World, b: EntityId| w.comp::<Building>(b).map(|bd| bd.door).expect("door");
-    let reach = w.config.jobs2.site_reach;
     let lots = citysim::systems::founding::vacant_lots(&w);
+    // Shadow V4 batch 2: the housing pre-roll on the moved city founded on
+    // every Lot within the shipped reach; the reach is the nearest vacant
+    // Lot's distance when that is further (the rule under test is the reach).
+    let nearest = lots.iter().map(|&l| door(&w, l).manhattan(door(&w, yard))).min().expect("a vacant Lot");
+    w.config.jobs2.site_reach = w.config.jobs2.site_reach.max(nearest);
+    let reach = w.config.jobs2.site_reach;
     let near =
         lots.iter().copied().find(|&l| door(&w, l).manhattan(door(&w, yard)) <= reach).expect("a Lot near the Yard");
     let far = lots.iter().copied().find(|&l| door(&w, l).manhattan(door(&w, yard)) > reach).expect("a Lot far off");

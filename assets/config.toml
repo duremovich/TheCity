@@ -271,6 +271,7 @@ breakout_max_freed = 3
 muster_near_tiles = 180
 empty_claims_days = 3              # an empty gang loses its claims after this many days
 reform_days = 14                   # an emptied gang re-forms no sooner ...
+leader_min_days = 7                # Shadow V4 bug 8: a member this many days in outranks a newer one for the lead (a clinic owner led the Choir 3 days after joining)
 reform_max_coverage = 1.2          # ... and only while its Hideout's district coverage is below this
 split_strength_ratio = 0.8
 split_loyalty = 0.66               # M12 phase 5: 0.6 -> 0.66 (mean gang loyalty sits at 0.61-0.71 at a decapitation; at 0.6 seeds 42-44 never split with the phase 5 stat table)
@@ -293,6 +294,7 @@ corp_raid_break = 0.5
 # Phase 4 (plan addition): Raid and Retaliate need 3 fit members. Early gangs of 4-10 and fresh
 # splinters raided with 1-2 at the door (seed 43: 9 of 17 expeditions); a raid is a crew's job.
 raid_min_members = 3
+hole_up_max_tiles = 60             # Shadow V4 bug 11: no Hideout bed further than this from the member (a 901-min walk at 20k)
 # L2 (plan L23): the Statistical GangWork day's priors per member-day (placeholders), shrunk toward
 # the ledger's on-screen acts with stat_prior_days member-days of weight.
 stat_extort_prior = 0.02
@@ -428,6 +430,7 @@ plan_max_expansions = 200
 plan_max_len = 6
 plan_timeout_ticks = 900
 plan_expansion_budget_per_tick = 600
+plan_age_promote_ticks = 45         # Shadow V4 bug 20: a plan request this old goes first (at 20k low-urgency goals starved 1-6 h, re-queued after each stale drop)
 path_budget_per_tick = 20
 mood_w_need = 0.7
 mood_w_memory = 0.3
@@ -651,6 +654,7 @@ shop_price_tiles = 12              # D15: one coin of price is worth 12 tiles of
 grow_cooldown_days = 7             # D23
 secure_per_day = 2                 # D24
 private_pursuit_radius = 16        # D18
+private_beat_tiles = 40            # Shadow V4 bug 11: a private guard's warrants lie this near its office or a client (it chased the city's)
 found_cooldown_days = 10           # D26
 residents_per_bar = 300            # D25
 residents_per_hotel = 800          # M12 D20: Register's Hotel target = population ÷ this
@@ -1346,6 +1350,7 @@ founders = 3
 # beating heard of or lost (a lost fight's own view weighs 0.5 x 0.6 = 0.30 < 0.35). Formed on seeds 42/43/44: 20,728 / 19,185 / 18,125 -> 5,236 / 5,183 / 5,939;
 # Murders 61 / 49 / 59 -> 47 / 44 / 46 against 41 / 48 / 47 with the word off.
 grudge_min = 0.35
+marked_safety_drop = 0.4           # Shadow V4 bug 15: word of a Hit on oneself takes this off the safety need (and holds whatever its weight)
 grudge_decay = 0.01
 beat_settle = 0.5
 inherit_min = 0.4
@@ -1441,6 +1446,7 @@ reach_base = 0.2
 reach_per_reporter = 0.15
 story_reach = 0.8
 stories_per_day = 3
+outlets_per_deed = 2               # Shadow V4 bug 21: an organic deed runs in at most this many Feeds (one 20k assault ran in 11 numbered corp outlets)
 ad_rate = 3
 # Phase 4: 120 -> 60 and 60 -> 30: Nutrix planted ~40 times a run and paid ~4,600 at 120.
 plant_price = 60
@@ -1502,6 +1508,17 @@ scavenge_coins = 1                  # a coin for an hour of scrap (only while br
 # 0.5, 921 at 0.15, 1,388 at 0); at 0.15 it is a last resort, not a living (seeds 42-44 with
 # price_base 4: thefts 9.2-14.6k at 0.15, 10.7-13.4k at 0.3, riots 4-6 vs 2-5).
 scavenge_p = 0.15
+# Shadow V4 bug 1: with the dole at 0 the jobless kept Earn only below one meal, so holding a meal's
+# coins they idled 46-65 h a week; they now beg and scrap below this many meals.
+earn_meals_no_net = 3
+# Shadow V4 bug 2: a 90-min Rest's +0.1 energy outran the decay (0.0625), so a Rest loop never slept;
+# Rest restores only up to here.
+rest_energy_cap = 0.6
+# Shadow V4 bug 3: a grudge fight weighs the law and the odds: Fight x (1 - fight_lawful_damp x
+# lawfulness) x (fight_odds_floor + the fighter's share of the two strengths, frailty and maims in).
+# A lawful (0.71), timid reporter assaulted a 1 c robber before three neighbours and served 10 days.
+fight_lawful_damp = 0.6
+fight_odds_floor = 0.5
 scavenge_dry_max = 3                # L2 (L29, [lod] budget): three dry hours in a row ...
 scavenge_cool_hours = 4             # ... cool Earn for four
 escort_van_ticks = 60
@@ -1509,6 +1526,7 @@ escort_van_ticks = 60
 # re-shadow. Always on since 2026-10-09 (the switches retired; docs/TESTING.md).
 shift_pro_rata = 0.5                # ... and a cut shift pays pro rata from half of it
 starving_hunger = 0.1               # the starvation that breaks a commitment
+shift_hunger_break = 0.12           # Shadow V4 bug 19: under this, with a meal in reach, a worker breaks the shift to eat (Work x 0.3) (a sweeper worked a shift at 0.11 with 15 c, 26 h after his last meal)
 sleep_wake_energy = 0.99            # ... and runs to here (it ended at 0.9: 1-6 min Sleeps all night)
 rough_sleep_on = true               # workplace room: a housed worker asleep rough near work sleeps on to here or the shift (it woke at 02:00 at the 8 h cap and walked 4.5 h home)
 idle_sleep_energy = 0.9             # Idle plans Sleep only below this (0.7 left nights to 90-min Rests)
@@ -3374,6 +3392,7 @@ admin_share = 0.05                 # an office costs at most this share of its c
 street = true
 pitches_per_district = 4           # open Pitches a district holds at most, per 2,000 residents
 pitch_stake = 20                   # coins a jobless adult holds to open one ...
+hire_knowledge_floor = 0.05        # Shadow V4 bug 6: a knowledge row (teacher, clerk, doc) hires no one under this (a 0.00 Dreg taught)
 pitch_after_days = 5               # ... after this many days without a post ...
 p_pitch_open = 0.05                # ... on this chance a day
 pitch_fail_days = 4                # a Pitch with no take for this many days closes

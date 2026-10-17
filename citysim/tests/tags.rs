@@ -190,6 +190,11 @@ fn test_tag_record_plants_for_the_buyer() {
     let corp = w.corps()[0];
     w.comp_mut::<Corp>(corp).unwrap().treasury = 100_000;
     let [t, taker] = strangers(&w, 2)[..] else { unreachable!() };
+    // Shadow V4 bug 15: the ledger's plant is an off-screen party's (a
+    // shown one runs live: `test_tag_live_for_a_shown_taker`).
+    for x in [t, taker] {
+        citysim::systems::lod::set_lod(&mut w, x, citysim::Lod::Statistical);
+    }
     if let Some(s) = w.comp_mut::<Skills>(taker) {
         s.stealth = 1.0;
     }
@@ -378,4 +383,54 @@ fn test_tilt_moves_only_a_distracted_brain() {
     }
     attention::tilt(&w, Some(corp), &mut v, |s| s.0 == 2, |s| &mut s.1);
     assert_eq!(v[0].0, 2, "the retreat order leads: {v:?}");
+}
+
+/// Shadow V4 bug 15: a Tag whose taker is shown (Full) runs live (a pinned
+/// gun was paid for a plant made off-screen while he rested): the plan
+/// stakes the mark out and the plant is made at contact. Off screen it is
+/// the ledger's.
+#[test]
+fn test_tag_live_for_a_shown_taker() {
+    let mut w = world();
+    let corp = w.corps()[0];
+    w.comp_mut::<Corp>(corp).unwrap().treasury = 100_000;
+    let [t, taker] = strangers(&w, 2)[..] else { unreachable!() };
+    if let Some(s) = w.comp_mut::<Skills>(taker) {
+        s.stealth = 1.0;
+    }
+    let p = Posting {
+        buyer: Some(corp),
+        agent: None,
+        kind: ContractKind::Tag,
+        target: Target::Agent(t),
+        broker: None,
+        deadline_days: 7,
+        origin: Origin::God,
+        price: None,
+    };
+    citysim::systems::lod::set_lod(&mut w, taker, citysim::Lod::Statistical);
+    citysim::systems::lod::set_lod(&mut w, t, citysim::Lod::Statistical);
+    let id = contracts::post(&mut w, p).expect("posted");
+    w.config.contracts.max_attempts = 200;
+    contracts::god_take(&mut w, id, taker).expect("taken");
+    assert_eq!(contracts::render_for(&w, id), citysim::contract::Render::Ledger, "off screen: the ledger");
+    citysim::systems::lod::set_lod(&mut w, taker, citysim::Lod::Full);
+    assert_eq!(contracts::render_for(&w, id), citysim::contract::Render::Live, "shown: live");
+    let plan = contracts::plan(&mut w, taker).expect("a plan");
+    assert!(plan.steps.iter().any(|s| s.action == citysim::ActionKind::StakeOut), "a stake-out");
+    let mut ok = false;
+    for _ in 0..100 {
+        if w.contracts[&id].status == ContractStatus::Open {
+            contracts::god_take(&mut w, id, taker).expect("taken");
+            contracts::plan(&mut w, taker).expect("a plan");
+        }
+        contracts::on_contact(&mut w, taker);
+        if w.contracts[&id].status == ContractStatus::Fulfilled {
+            ok = true;
+            break;
+        }
+        w.tick += 1;
+    }
+    assert!(ok, "planted at contact");
+    assert!(w.tags.iter().any(|x| x.on == t && x.owner == corp));
 }

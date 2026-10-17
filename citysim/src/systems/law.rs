@@ -456,6 +456,29 @@ pub fn is_city_guard(world: &World, guard: EntityId) -> bool {
     world.comp::<Job>(guard).is_some_and(|j| j.role == Role::Guard && !job_is_private_guard(world, j))
 }
 
+/// Shadow V4 bug 11: a private guard polices his corp's beat: a suspect
+/// last seen within `[corps] private_beat_tiles` of his office or one of its
+/// clients, or in his own sight (`private_pursuit_radius`; the corp guards
+/// chased warrants city-wide). A city guard's beat is the city.
+pub fn on_beat(world: &World, guard: EntityId, s: EntityId) -> bool {
+    if !is_private_guard(world, guard) {
+        return true;
+    }
+    let Some(&(seen, _)) = world.last_seen().get(&s) else { return false };
+    let here = world.comp::<Position>(guard).map(|p| p.tile);
+    if here.is_some_and(|t| t.manhattan(seen) <= world.config.corps.private_pursuit_radius) {
+        return true;
+    }
+    let max = world.config.corps.private_beat_tiles;
+    let Some(office) = world.comp::<Job>(guard).and_then(|j| j.employer) else { return false };
+    let near = |b: EntityId| world.comp::<Building>(b).is_some_and(|bd| bd.door.manhattan(seen) <= max);
+    if near(office) {
+        return true;
+    }
+    let Some(corp) = world.corp_of_building(office) else { return false };
+    world.comp::<crate::components::Corp>(corp).is_some_and(|c| c.contracts.iter().any(|&(b, _)| near(b)))
+}
+
 /// `claimed`: the suspects other guards already chase (L1), built once per
 /// scoring call by `claim_set`, on its first read, with the pursuer's
 /// `pursuit_radius_for`. `seen`: `s`'s `World::last_seen` entry.
@@ -544,6 +567,16 @@ pub fn is_located_suspect(world: &World, s: EntityId) -> bool {
 }
 
 /// Sentence length in ticks for a crime at the current lever.
+/// The fine settling a fineable report: Vagrancy's, the dodger's (Transit
+/// T10), else `fine_mult` meals.
+fn fine_for(world: &World, crime: Crime) -> i64 {
+    match crime {
+        Crime::Vagrancy => world.config.law.vagrancy_fine,
+        Crime::FareEvasion => world.config.transit.dodge_fine,
+        _ => world.config.crime.fine_mult * world.mean_price(),
+    }
+}
+
 pub fn sentence_ticks(world: &World, crime: Crime) -> Tick {
     // M12 D15: a night in the cells, whatever the sentence lever.
     // Transit T10: fare evasion too. Jobs & lives phase 3 (§ 4): an
@@ -864,6 +897,18 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
             FightMods::default()
         };
         let (winner, loser, died) = resolve_fight_mods(world, guard, suspect, mods);
+        // Shadow V4 bug 10: a suspect who lost the scuffle for the cuffs was
+        // arrested, not assaulted (the Lost memory gossiped "Assaulted by
+        // <guard>" and fed dread and grudges).
+        if !died && loser == suspect {
+            if let Some(m) = world.comp_mut::<crate::components::Memory>(suspect) {
+                if let Some(e) =
+                    m.entries.iter_mut().rev().find(|e| e.kind == MemoryKind::Lost && e.subject == Some(guard))
+                {
+                    e.kind = MemoryKind::WasArrested;
+                }
+            }
+        }
         if died {
             if loser == suspect {
                 // The suspect died resisting: nothing left to prosecute.
@@ -1007,17 +1052,16 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
     let capacity = usize::from(world.config.buildings.jail.capacity);
     let jailed = world.with::<Sentence>().len();
 
-    if jailed >= capacity {
+    // Shadow V4 bug 4: a petty offence (a night in the cells) is fined
+    // whenever the suspect can pay, not only when the Precinct is full (fare
+    // evasion was the city's top sentence, served from a desk or a bar).
+    let full = jailed >= capacity;
+    let petty = matches!(crime, Crime::Vagrancy | Crime::FareEvasion | Crime::UnlicensedArms | Crime::Solicitation);
+    let can_pay = world.comp::<crate::components::Wallet>(suspect).is_some_and(|w| w.coins >= fine_for(world, crime));
+    if full || (petty && can_pay) {
         match crime {
             Crime::Theft | Crime::Vagrancy | Crime::FareEvasion | Crime::UnlicensedArms | Crime::Solicitation => {
-                let fine = if crime == Crime::Vagrancy {
-                    world.config.law.vagrancy_fine
-                } else if crime == Crime::FareEvasion {
-                    // Transit T10: the dodger's fine.
-                    world.config.transit.dodge_fine
-                } else {
-                    world.config.crime.fine_mult * world.mean_price()
-                };
+                let fine = fine_for(world, crime);
                 let coins = world.comp::<crate::components::Wallet>(suspect).map_or(0, |w| w.coins);
                 // M12 review: a Vagrancy report is settled as `street::vagrancy_hit`'s
                 // fine is: where the vagrant was swept, on the ledger, in the log.
@@ -1045,7 +1089,7 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
                     world.push_event(
                         EventKind::Sentence,
                         &[suspect],
-                        format!("{name} fined {fine} coins (Precinct full)"),
+                        format!("{name} fined {fine} coins{}", if full { " (Precinct full)" } else { "" }),
                     );
                     if let Some(place) = swept {
                         crate::systems::street::note_vagrancy(world, place);
@@ -2240,9 +2284,9 @@ pub fn cracking_down_on(world: &World, gang: EntityId) -> bool {
 }
 
 /// M11 D18: a private guard walks up to five of its corp's contracted
-/// clients (all of them, nearest its office first, when there are five or
-/// fewer; else five drawn with the world stream as the city's beat is), or
-/// with no clients its corp's own buildings nearest its Security Office.
+/// clients, nearest its office first (Shadow V4 bug 11: five drawn
+/// city-wide when it had more), or with no clients its corp's own
+/// buildings nearest its Security Office.
 /// `None` for a city guard, and for a guard whose Office no corp owns (none
 /// should exist: `corps::move_building` lays them off when it changes hands).
 fn private_patrol_route(world: &mut World, guard: EntityId) -> Option<Vec<EntityId>> {
@@ -2258,10 +2302,8 @@ fn private_patrol_route(world: &mut World, guard: EntityId) -> Option<Vec<Entity
         .map(|c| c.contracts.iter().map(|&(b, _)| b).collect())
         .unwrap_or_default();
     let clients: Vec<EntityId> = clients.into_iter().filter(|&b| usable(world, b).is_some()).collect();
-    if clients.len() > 5 {
-        let picks = (0..5).map(|_| clients[world.rng.world().random_range(0..clients.len())]).collect();
-        return Some(picks);
-    }
+    // Shadow V4 bug 11: the five clients nearest the office, not five drawn
+    // city-wide (a 382-min first leg, 88 h of travel a week at 20k).
     let pool: Vec<EntityId> = if clients.is_empty() {
         world.comp::<crate::components::Corp>(corp).map(|c| c.buildings.clone()).unwrap_or_default()
     } else {

@@ -19,6 +19,18 @@ pub fn row_of(world: &World, role: Role) -> Option<&TradeCfg> {
     role.trade().and_then(|t| world.config.trade(t))
 }
 
+/// Shadow V4 bug 6: a hire for a knowledge row (teacher, clerk, doc) has
+/// at least `[jobs2] hire_knowledge_floor` knowledge (a homeless Dreg of
+/// knowledge 0.00 was hired as a Teacher).
+pub fn skill_ok(world: &World, id: EntityId, role: Role) -> bool {
+    row_of(world, role).is_none_or(|r| {
+        r.skill != crate::config::TradeSkill::Knowledge
+            || world
+                .comp::<crate::components::Skills>(id)
+                .is_some_and(|s| s.knowledge >= world.config.jobs2.hire_knowledge_floor)
+    })
+}
+
 /// `id`'s trade row, if it holds a trade's Job.
 pub(crate) fn job_row(world: &World, id: EntityId) -> Option<&TradeCfg> {
     world.comp::<Job>(id).and_then(|j| row_of(world, j.role))

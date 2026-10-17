@@ -222,6 +222,14 @@ pub fn work_night_pressure(world: &World, id: EntityId) -> f32 {
     (1.0 - b as f32 / ramp).clamp(0.0, 1.0)
 }
 
+/// Shadow V4 bug 2: the small hours (the Night phase, 00:00-06:00) of a job
+/// holder none of whose shifts runs in them: a day worker's night, for
+/// sleep, not a corner or a grocery run.
+pub fn day_worker_night(world: &World, id: EntityId) -> bool {
+    world.phase() == crate::time::DayPhase::Night
+        && world.comp::<Job>(id).is_some_and(|j| j.shifts.iter().all(|&(s, _)| s >= 360))
+}
+
 /// P5j: past bedtime on a work night (Unwind and the grocery run weigh less).
 pub fn past_bedtime(world: &World, id: EntityId) -> bool {
     ticks_to_bedtime(world, id).is_some_and(|b| b <= 0)
@@ -325,7 +333,8 @@ pub fn grocery_plan(world: &World, id: EntityId) -> Option<Plan> {
     }
     let job = world.comp::<Job>(id)?;
     job.employer?;
-    if job.on_shift(world.tick_of_day()) {
+    // Shadow V4 bug 2: no run out of bed in a day worker's small hours.
+    if job.on_shift(world.tick_of_day()) || day_worker_night(world, id) {
         return None;
     }
     // The cheap shortfall test before any walk estimate.

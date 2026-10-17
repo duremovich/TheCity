@@ -1184,8 +1184,10 @@ pub fn render_for(world: &World, id: ContractId) -> Render {
     if matches!(c.kind, ContractKind::Persuade | ContractKind::Deliver | ContractKind::Spin | ContractKind::Steal) {
         return Render::Ledger;
     }
-    // Phase 4: a Tag's plant and a Vote's Intimidate likewise.
-    if matches!(c.kind, ContractKind::Tag | ContractKind::Vote) {
+    // Phase 4: a Vote's Intimidate likewise; a Tag too, unless its party is
+    // shown (Shadow V4 bug 15: a pinned gun was paid 261 c for a plant made
+    // while he rested; shown, he stakes the mark out and plants at contact).
+    if c.kind == ContractKind::Vote || (c.kind == ContractKind::Tag && !party_shown(world, c)) {
         return Render::Ledger;
     }
     // M17 phase 3: a Retake is one strike draw at the building.
@@ -2425,6 +2427,12 @@ fn pay_sighting(
     if Some(writer) == c.buyer || Some(writer) == c.agent || writer == who {
         return false;
     }
+    // Shadow V4 bug 15: a taken Locate is its taker's job: only the taker's
+    // and the crew's sightings pay (others' filled the cap and refunded the
+    // price while the taker staked out three days for nothing).
+    if c.status == ContractStatus::Taken && c.taker.is_some() && c.taker != Some(writer) && !c.crew.contains(&writer) {
+        return false;
+    }
     let s = crate::virt::Sighting { who, tile, tick: now, confidence: 1.0, relayed: true };
     let owner = c.buyer.unwrap_or(EntityId::NONE);
     crate::systems::gossip::relay_sighting(world, owner, s);
@@ -2477,6 +2485,11 @@ pub fn on_sighting(world: &mut World, observer: EntityId, who: EntityId, tile: T
 pub fn on_contact(world: &mut World, taker: EntityId) {
     let Some(r) = world.contract_runs.get(&taker).cloned() else { return };
     let Some(c) = world.contracts.get(&r.contract) else { return };
+    // Shadow V4 bug 15: a live Tag's plant is made at contact.
+    if c.kind == ContractKind::Tag && c.status == ContractStatus::Taken {
+        crate::systems::tags::resolve_plant(world, r.contract, taker);
+        return;
+    }
     if c.kind != ContractKind::Locate || c.status != ContractStatus::Taken {
         return;
     }

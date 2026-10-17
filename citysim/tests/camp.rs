@@ -227,12 +227,18 @@ fn test_camp_feeds_from_owner_purchase_and_city_camp_from_treasury() {
     let lot = founding::nearest_lot(&w, door).expect("a Lot");
     let corp_camp = founding::build_on_lot(&mut w, lot, BuildingKind::Camp, Some(corp)).expect("built");
     assert!(w.comp::<Building>(corp_camp).is_some_and(|b| b.camp.is_some()));
-    let t0 = w.purse(Some(corp));
     run_days_starving(&mut w, 2, Some(h));
     let at = home_of(&w, c).expect("a camp");
     assert!(at == corp_camp || at == city, "taken to a camp");
     let day_food = w.stats.history.back().map(|r| r.econ.flow_camp_food).unwrap_or(0);
     let _ = day_food;
+    // Shadow V4: the corp's purse as the premise has it at the feeding
+    // night (on the moved city the corp had spent the 5,000 by day 3 and
+    // its camp bought nothing: the child starved there).
+    if let Some(cc) = w.comp_mut::<citysim::Corp>(corp) {
+        cc.treasury = cc.treasury.max(5_000);
+    }
+    let t0 = w.purse(Some(corp));
     run_days_starving(&mut w, 1, Some(h));
     assert_eq!(hunger_days(&w, c), 0, "fed");
     if at == corp_camp {

@@ -244,6 +244,21 @@ pub fn broke(world: &World, id: EntityId) -> bool {
     coins(world, id) < need || crate::systems::health::saving_short(world, id)
 }
 
+/// The jobless poor's Earn (Beg, Scavenge): broke, or (Shadow V4 bug 1)
+/// with no dole a jobless non-exec adult under `[life] earn_meals_no_net`
+/// meals' coins at the local Market's price (Earn's savings line's; one
+/// meal's coins stopped the hustle: 46-65 idle hours a week).
+pub fn earn_short(world: &World, id: EntityId) -> bool {
+    if broke(world, id) {
+        return true;
+    }
+    if world.levers.dole_per_day > 0 || world.has::<Job>(id) || exec_corp(world, id).is_some() {
+        return false;
+    }
+    let price = world.local(id, BuildingKind::Market).map_or(3, |m| world.price_for(m, id)).max(1);
+    coins(world, id) < world.config.life.earn_meals_no_net.saturating_mul(price)
+}
+
 // ---------------------------------------------------------------------------
 // The law
 // ---------------------------------------------------------------------------
@@ -1143,11 +1158,15 @@ pub fn pick_exec(world: &World, candidates: impl Iterator<Item = EntityId>) -> O
         .map(|(_, a)| a)
 }
 
-/// The corp's HQ for its exec's office hours: the corp's working building
-/// (no Home, no Lot) nearest the exec's Home, ties to the most senior kind
-/// and then the lower id.
+/// The corp's HQ for its exec's office hours: the corp's most senior
+/// working building (its Hq first), the nearest the exec's Home of that
+/// kind, then the lower id; a corp with none of the ranked kinds (a housing
+/// corp) gives a desk at any building it holds (Shadow V4 bug 5: distance
+/// came first and there was no Hq in the ranking, so CEOs held office at
+/// Vat Farms and Arasaka's head moved to the Sump).
 pub fn hq_of(world: &World, corp: EntityId, exec: EntityId) -> Option<EntityId> {
-    const RANK: [BuildingKind; 10] = [
+    const RANK: [BuildingKind; 11] = [
+        BuildingKind::Hq,
         BuildingKind::Lab,
         BuildingKind::SecurityOffice,
         BuildingKind::Feed,
@@ -1166,8 +1185,8 @@ pub fn hq_of(world: &World, corp: EntityId, exec: EntityId) -> Option<EntityId> 
         .copied()
         .filter_map(|b| {
             let bd = world.comp::<Building>(b).filter(|bd| !bd.demolished && !bd.derelict)?;
-            let rank = RANK.iter().position(|&k| k == bd.kind)?;
-            Some((from.map_or(0, |f| f.manhattan(bd.door)), rank, b))
+            let rank = RANK.iter().position(|&k| k == bd.kind).unwrap_or(RANK.len());
+            Some((rank, from.map_or(0, |f| f.manhattan(bd.door)), b))
         })
         .min()
         .map(|(_, _, b)| b)
@@ -1296,7 +1315,21 @@ pub fn exec_shift_over(world: &World) -> bool {
 
 /// Days a quitter is not rehired by the employer it left.
 pub fn quit_blocks(world: &World, a: EntityId, employer: EntityId) -> bool {
-    world.comp::<Brain>(a).and_then(|b| b.quit_from).is_some_and(|(e, until)| e == employer && world.tick < until)
+    // Shadow V4 bug 6: `EntityId::NONE` blocks every employer (a secure quit).
+    world
+        .comp::<Brain>(a)
+        .and_then(|b| b.quit_from)
+        .is_some_and(|(e, until)| (e == employer || e == EntityId::NONE) && world.tick < until)
+}
+
+/// Shadow V4 bug 6: a "no need of the wage" quit keeps the quitter out of
+/// every hire for `quit_rehire_days` (another employer rehired him the
+/// same midnight).
+pub fn note_secure_quit(world: &mut World, a: EntityId) {
+    let until = world.tick + world.config.life.quit_rehire_days * TICKS_PER_DAY;
+    if let Some(b) = world.comp_mut::<Brain>(a) {
+        b.quit_from = Some((EntityId::NONE, until));
+    }
 }
 
 /// Record a quit (`quit_rehire_days` before that employer hires them again).

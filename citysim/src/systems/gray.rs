@@ -137,6 +137,12 @@ fn assign_types(world: &mut World) {
         if world.jobs2.gray.types.contains_key(&g) {
             continue;
         }
+        // Shadow V4 bug 13: a creed gang (Purist or cult) takes no gray type
+        // (a cult typed as scavs harvested the chrome it forbids).
+        if crate::systems::creeds::creed_of(world, g).is_some() {
+            world.jobs2.gray.types.insert(g, u8::MAX);
+            continue;
+        }
         let n = world.jobs2.gray.typed_seen as f32;
         let mut pick = u8::MAX;
         for (i, row) in world.config.gray.gang_types.iter().enumerate() {

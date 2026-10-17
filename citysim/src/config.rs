@@ -630,6 +630,8 @@ pub struct Jobs2Cfg {
     pub pitches_per_district: u16,
     /// Coins a jobless adult holds to open a Pitch ...
     pub pitch_stake: i64,
+    /// Shadow V4 bug 6: a knowledge row's hire has at least this knowledge.
+    pub hire_knowledge_floor: f32,
     /// ... after this many days without a post ...
     pub pitch_after_days: u32,
     /// ... on this chance a day (a pure hash of the day and the agent).
@@ -744,6 +746,7 @@ impl Default for Jobs2Cfg {
             street: false,
             pitches_per_district: 4,
             pitch_stake: 20,
+            hire_knowledge_floor: 0.05,
             pitch_after_days: 5,
             p_pitch_open: 0.05,
             pitch_fail_days: 4,
@@ -2969,6 +2972,10 @@ pub struct GangsCfg {
     /// M12 D40: an emptied gang re-forms only after this many days (0 = at once) ...
     #[serde(default)]
     pub reform_days: u64,
+    /// Shadow V4 bug 8: a member this many days in the gang outranks a newer
+    /// one for the lead (0 = loyalty and tenure alone).
+    #[serde(default)]
+    pub leader_min_days: u32,
     /// ... and only while its Hideout's district coverage is below this.
     #[serde(default = "GangsCfg::default_reform_max_coverage")]
     pub reform_max_coverage: f32,
@@ -3006,6 +3013,10 @@ pub struct GangsCfg {
     /// for the door); 0 = any (M11).
     #[serde(default)]
     pub raid_min_members: usize,
+    /// Shadow V4 bug 11: no Hideout bed further than this many tiles from
+    /// the member (0 = any distance).
+    #[serde(default)]
+    pub hole_up_max_tiles: u32,
     /// L2 (L23): the Statistical GangWork day's priors per member-day and
     /// the member-days of evidence they are worth (ledger maths).
     #[serde(default = "GangsCfg::default_stat_extort_prior")]
@@ -3471,6 +3482,11 @@ pub struct BrainCfg {
     pub plan_timeout_ticks: u64,
     /// A search past this many expansions in one tick resumes next tick.
     pub plan_expansion_budget_per_tick: usize,
+    /// Shadow V4 bug 20: a queue entry this old is served before the more
+    /// urgent ones (oldest first), so it is planned before it goes stale
+    /// (0 = urgency alone).
+    #[serde(default)]
+    pub plan_age_promote_ticks: u64,
     pub path_budget_per_tick: usize,
     pub mood_w_need: f32,
     pub mood_w_memory: f32,
@@ -4065,6 +4081,10 @@ pub struct CorpsCfg {
     pub grow_cooldown_days: u64,
     pub secure_per_day: usize,
     pub private_pursuit_radius: u32,
+    /// Shadow V4 bug 11: a private guard's warrants lie within this many
+    /// tiles of its office or a client of its corp.
+    #[serde(default)]
+    pub private_beat_tiles: u32,
     pub found_cooldown_days: u64,
     pub residents_per_bar: u32,
     /// M12 D20: `Register`'s target count of Hotels is `population ÷ this`.
@@ -4281,6 +4301,7 @@ impl CorpsCfg {
             grow_cooldown_days: 7,
             secure_per_day: 2,
             private_pursuit_radius: 16,
+            private_beat_tiles: 40,
             found_cooldown_days: 10,
             residents_per_bar: 300,
             residents_per_hotel: 800,
@@ -6237,6 +6258,9 @@ impl Default for RelWeights {
 #[serde(default)]
 pub struct GrudgesCfg {
     pub grudge_min: f32,
+    /// Shadow V4 bug 15: the safety a holder loses on hearing of a Hit on
+    /// himself.
+    pub marked_safety_drop: f32,
     pub grudge_decay: f32,
     pub beat_settle: f32,
     pub inherit_min: f32,
@@ -6257,6 +6281,7 @@ impl Default for GrudgesCfg {
     fn default() -> Self {
         GrudgesCfg {
             grudge_min: 0.15,
+            marked_safety_drop: 0.4,
             grudge_decay: 0.01,
             beat_settle: 0.5,
             inherit_min: 0.4,
@@ -6449,6 +6474,9 @@ pub struct NewsCfg {
     pub reach_per_reporter: f32,
     pub story_reach: f32,
     pub stories_per_day: u8,
+    /// Shadow V4 bug 21: an organic deed runs in at most this many Feeds
+    /// within `RECENT_DAYS` (0 = any number).
+    pub outlets_per_deed: u8,
     pub ad_rate: i64,
     pub plant_price: i64,
     pub bury_price: i64,
@@ -6473,6 +6501,7 @@ impl Default for NewsCfg {
             reach_per_reporter: 0.15,
             story_reach: 0.8,
             stories_per_day: 3,
+            outlets_per_deed: 2,
             ad_rate: 3,
             plant_price: 120,
             bury_price: 60,
@@ -6565,6 +6594,16 @@ pub struct LifeCfg {
     /// found on `scavenge_p` of hours.
     pub scavenge_coins: i64,
     pub scavenge_p: f32,
+    /// Shadow V4 bug 1: with no dole, a jobless adult keeps Earn (Beg,
+    /// Scavenge) below this many meals' coins, not only below one.
+    pub earn_meals_no_net: i64,
+    /// Shadow V4 bug 2: Rest restores energy only up to here (Sleep is the
+    /// full restore).
+    pub rest_energy_cap: f32,
+    /// Shadow V4 bug 3: Fight's "lawless" consideration, `1 − this ×
+    /// lawfulness`, and its "odds" one, `this + the agent's strength share`.
+    pub fight_lawful_damp: f32,
+    pub fight_odds_floor: f32,
     /// An escort's walk to the Precinct is a van ride of at most this long.
     pub escort_van_ticks: u64,
     /// L2 (L29, `[lod] budget`): after this many dry Scavenge hours in a row
@@ -6574,6 +6613,9 @@ pub struct LifeCfg {
     /// ... and a shift cut short pays pro rata from this share of it.
     pub shift_pro_rata: f32,
     pub starving_hunger: f32,
+    /// Shadow V4 bug 19: under this hunger, with a meal in reach, Eat breaks
+    /// a shift (a meal break), and Work weighs 0.3 under it.
+    pub shift_hunger_break: f32,
     pub sleep_wake_energy: f32,
     /// Workplace room (2026-10-11): a housed agent sleeping rough (out of
     /// doors, its bed past `rough_min_tiles`) sleeps on past
@@ -6789,11 +6831,16 @@ impl Default for LifeCfg {
             exec_shift: (540, 1020),
             scavenge_coins: 1,
             scavenge_p: 0.15,
+            earn_meals_no_net: 3,
+            rest_energy_cap: 0.6,
+            fight_lawful_damp: 0.6,
+            fight_odds_floor: 0.5,
             escort_van_ticks: 60,
             scavenge_dry_max: 3,
             scavenge_cool_hours: 4,
             shift_pro_rata: 0.5,
             starving_hunger: 0.1,
+            shift_hunger_break: 0.12,
             sleep_wake_energy: 0.99,
             rough_sleep_on: false,
             idle_sleep_energy: 0.9,

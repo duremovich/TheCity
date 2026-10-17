@@ -79,7 +79,9 @@ fn test_organs_once_and_rot() {
     assert!(w.stock(h, Good::Organs) < before + n, "rotted");
 }
 
-/// The gang types by share: with one row of share 1, every gang is typed.
+/// The gang types by share: with one row of share 1, every gang is typed
+/// but a creed gang (Shadow V4 bug 13: a cult typed as scavs harvested the
+/// chrome it forbids).
 #[test]
 fn test_gang_types_by_share() {
     let mut c = Config::load();
@@ -94,7 +96,8 @@ fn test_gang_types_by_share() {
     }
     gray::daily(&mut w);
     for g in w.gangs() {
-        assert!(gray::gang_type(&w, g).is_some(), "typed");
+        let creed = citysim::systems::creeds::creed_of(&w, g).is_some();
+        assert_eq!(gray::gang_type(&w, g).is_some(), !creed, "typed, a creed gang not");
     }
 }
 
