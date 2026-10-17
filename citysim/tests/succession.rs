@@ -439,3 +439,31 @@ fn test_a_jailed_leader_leaves_an_acting_leader() {
     let ev = w.events.iter().find(|e| e.kind == EventKind::Succession).expect("a Succession event");
     assert!(ev.text.contains("sits inside"), "{}", ev.text);
 }
+
+/// Review 2 (Shadow V4 bug 8's tenure ranking): the runner-up is read from
+/// the heir's own tenure class. A newcomer of higher loyalty ranks below a
+/// veteran heir; read as the runner-up it stood "ahead by -0.2" within
+/// `war_margin` and started a civil war against the untenured.
+#[test]
+fn test_newcomer_is_no_runner_up_to_a_veteran_heir() {
+    let mut w = city();
+    let g = biggest(&w);
+    let (old, heir, ch) = stage(&mut w, g, 0.3);
+    // Tenure: the old leader and the heir joined on day 0, the rest now.
+    w.config.gangs.leader_min_days = 3;
+    for m in [old, heir] {
+        w.comp_mut::<GangMember>(m).expect("gm").joined_tick = 0;
+    }
+    w.comp_mut::<Personality>(heir).expect("p").loyalty = 0.5;
+    w.comp_mut::<Personality>(ch).expect("p").loyalty = 1.0;
+    gang::recompute_leader(&mut w, g);
+    assert_eq!(w.comp::<Gang>(g).expect("gang").leader, Some(old));
+    let ranking = gang::leader_ranking(&w, g);
+    assert_eq!(&ranking[..2], &[old, heir], "the veterans first");
+    decapitate(&mut w, g, old);
+    let x = w.comp::<Gang>(g).expect("gang");
+    assert_eq!(x.leader, Some(heir), "the veteran takes over");
+    assert!(x.war.is_none(), "no war against an untenured newcomer");
+    let ev = w.events.iter().rev().find(|e| e.kind == EventKind::Succession).expect("a Succession event");
+    assert!(!ev.text.contains("by -"), "no negative lead: {}", ev.text);
+}

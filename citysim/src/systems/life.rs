@@ -1160,8 +1160,9 @@ pub fn pick_exec(world: &World, candidates: impl Iterator<Item = EntityId>) -> O
 
 /// The corp's HQ for its exec's office hours: the corp's most senior
 /// working building (its Hq first), the nearest the exec's Home of that
-/// kind, then the lower id; a corp with none of the ranked kinds (a housing
-/// corp) gives a desk at any building it holds (Shadow V4 bug 5: distance
+/// kind, then the lower id; a corp with none of the ranked kinds gives a
+/// desk at any other working building it holds, never a Home or a Lot
+/// (Shadow V4 review 7; bug 5: distance
 /// came first and there was no Hq in the ranking, so CEOs held office at
 /// Vat Farms and Arasaka's head moved to the Sump).
 pub fn hq_of(world: &World, corp: EntityId, exec: EntityId) -> Option<EntityId> {
@@ -1184,7 +1185,9 @@ pub fn hq_of(world: &World, corp: EntityId, exec: EntityId) -> Option<EntityId> 
         .iter()
         .copied()
         .filter_map(|b| {
-            let bd = world.comp::<Building>(b).filter(|bd| !bd.demolished && !bd.derelict)?;
+            let bd = world.comp::<Building>(b).filter(|bd| {
+                !bd.demolished && !bd.derelict && !matches!(bd.kind, BuildingKind::Home | BuildingKind::Lot)
+            })?;
             let rank = RANK.iter().position(|&k| k == bd.kind).unwrap_or(RANK.len());
             Some((rank, from.map_or(0, |f| f.manhattan(bd.door)), b))
         })
@@ -1194,7 +1197,7 @@ pub fn hq_of(world: &World, corp: EntityId, exec: EntityId) -> Option<EntityId> 
 
 /// The corp `id` is the exec of.
 pub fn exec_corp(world: &World, id: EntityId) -> Option<EntityId> {
-    world.corps().into_iter().find(|&c| world.comp::<Corp>(c).is_some_and(|cc| cc.exec == Some(id)))
+    world.corp_slice().iter().copied().find(|&c| world.comp::<Corp>(c).is_some_and(|cc| cc.exec == Some(id)))
 }
 
 /// An exec's office day to keep: on, an exec of a corp with an HQ, not

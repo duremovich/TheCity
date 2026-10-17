@@ -208,6 +208,41 @@ fn test_bug4_petty_offence_fined_when_the_suspect_can_pay() {
     law::file_report(&mut w, citysim::Crime::FareEvasion, b, None);
     law::jail_suspect(&mut w, guard, b);
     assert!(w.has::<citysim::Sentence>(b), "cannot pay: the night in the cells");
+    // Review 5: a fine skips the cell only; the arrest is still an arrest
+    // (the sweep's counter, the Arrested rumour, the law's log).
+    let c = pool[2];
+    set_coins(&mut w, c, 10_000);
+    let solicit = |w: &World| w.stats.current.jobs2.as_ref().map_or(0, |j| j.solicit_arrests);
+    let before = solicit(&w);
+    law::file_report(&mut w, citysim::Crime::Solicitation, c, None);
+    law::jail_suspect(&mut w, guard, c);
+    assert!(!w.has::<citysim::Sentence>(c), "fined, not jailed");
+    assert_eq!(solicit(&w), before + 1, "a Solicitation arrest counted");
+    assert!(w.arrest_log.iter().any(|&(_, x)| x == c), "on the law's record");
+}
+
+/// Review 7: a corp's Homes and Lots are no office (the unranked fallback
+/// let a housing corp's exec keep office hours in a flat or on a vacant
+/// lot); any other building it holds is a desk.
+#[test]
+fn test_review7_no_office_in_a_home_or_a_lot() {
+    let mut w = world();
+    let c =
+        w.corps().into_iter().find(|&c| w.comp::<citysim::Corp>(c).is_some_and(|x| x.exec.is_some())).expect("corp");
+    let exec = w.comp::<citysim::Corp>(c).and_then(|x| x.exec).expect("exec");
+    let of = |w: &World, k: citysim::BuildingKind| {
+        w.buildings_of_kind(k)
+            .iter()
+            .copied()
+            .find(|&b| w.comp::<citysim::Building>(b).is_some_and(|bd| !bd.demolished && !bd.derelict))
+    };
+    let home = of(&w, citysim::BuildingKind::Home).expect("a Home");
+    let lot = of(&w, citysim::BuildingKind::Lot).expect("a Lot");
+    w.comp_mut::<citysim::Corp>(c).expect("corp").buildings = vec![home, lot];
+    assert_eq!(life::hq_of(&w, c, exec), None, "no office in a Home or a Lot");
+    let club = of(&w, citysim::BuildingKind::Club).expect("a Club");
+    w.comp_mut::<citysim::Corp>(c).expect("corp").buildings = vec![home, lot, club];
+    assert_eq!(life::hq_of(&w, c, exec), Some(club), "a desk at its Club");
 }
 
 /// Bug 5 (the office): a corp with an Hq holds office there, wherever the
@@ -399,9 +434,19 @@ fn test_bug8_leader_by_tenure_and_no_succession_for_a_night() {
     let g = w
         .gangs()
         .into_iter()
-        .find(|&g| w.comp::<citysim::Gang>(g).is_some_and(|x| x.leader.is_some() && x.members.len() >= 3))
+        .find(|&g| w.comp::<citysim::Gang>(g).is_some_and(|x| x.leader.is_some() && x.members.len() >= 4))
         .expect("a gang with a leader");
-    let members = w.comp::<citysim::Gang>(g).expect("g").members.clone();
+    // Two free members besides the leader (the ranking's own pool; Review:
+    // on the moved city members[0] was the leader).
+    let leader = w.comp::<citysim::Gang>(g).and_then(|x| x.leader);
+    let members: Vec<EntityId> = w
+        .comp::<citysim::Gang>(g)
+        .expect("g")
+        .members
+        .iter()
+        .copied()
+        .filter(|&m| Some(m) != leader && !w.has::<citysim::Sentence>(m))
+        .collect();
     let (vet, new) = (members[0], members[1]);
     w.tick += 40 * citysim::TICKS_PER_DAY;
     let now = w.tick;
@@ -519,6 +564,9 @@ fn test_bug10_edges_read_what_just_happened() {
     use citysim::systems::{chrome, law};
     let mut w = world();
     w.config.crime.fight_death_p = 0.0;
+    // Review 4: a beating's own grudge (0.5 x 0.6) sits under the shipped
+    // `grudge_min`; lowered here so a Lost read first would leave one.
+    w.config.grudges.grudge_min = 0.1;
     let guard = w.guards()[0];
     let pool: Vec<EntityId> = adults(&w).into_iter().filter(|&x| !law::is_guard(&w, x)).collect();
     // The scuffle: a brave, weak suspect against a strong guard, until he loses one.
@@ -542,6 +590,17 @@ fn test_bug10_edges_read_what_just_happened() {
             "a lost scuffle with the law is no assault"
         );
         lost = fresh.iter().any(|e| e.kind == citysim::MemoryKind::WasArrested && e.subject == Some(guard));
+        // Review 4: remembered as an arrest from the start, so no Assaulted
+        // grudge on the guard was taken up from a Lost first.
+        assert!(
+            w.comp::<citysim::word::Grudges>(s)
+                .is_none_or(|g| !g.list.iter().any(|x| x.target == guard && x.settled.is_none())),
+            "no grudge on the arresting guard"
+        );
+        assert!(
+            w.edge(s, guard).is_none_or(|e| e.kind != citysim::RelKind::Enemy),
+            "no Enemy edge on the arresting guard"
+        );
         break;
     }
     assert!(lost, "the suspect lost a scuffle and remembers an arrest");
@@ -897,6 +956,17 @@ fn test_bug19_hungry_worker_takes_a_meal_break() {
     w.comp_mut::<citysim::Needs>(a).expect("n").hunger = 0.6;
     assert!(!fixes::emergency(&w, a, GoalKind::Eat), "fed, the shift holds");
     assert!(work_fed(&w).is_none(), "no hunger term when fed");
+    // Review 6: broke, an empty pantry, no meal in reach: nothing to break
+    // for, so the shift holds at full weight.
+    w.comp_mut::<citysim::Needs>(a).expect("n").hunger = 0.11;
+    set_coins(&mut w, a, 0);
+    w.comp_mut::<citysim::Inventory>(a).expect("inv").food = 0;
+    w.comp_mut::<citysim::Personality>(a).expect("p").lawfulness = 0.9;
+    let home = w.comp::<citysim::Household>(a).and_then(|h| h.home).expect("a home");
+    w.comp_mut::<citysim::Building>(home).expect("b").stock_food = 0;
+    assert!(!citysim::utility::goals::eat_obtainable(&w, a), "premise: no meal in reach");
+    assert!(!fixes::emergency(&w, a, GoalKind::Eat), "no meal break with no meal");
+    assert!(work_fed(&w).is_none(), "no hunger term with no meal in reach");
 }
 
 /// Bug 20: a plan request waiting `plan_age_promote_ticks` is served before
@@ -917,11 +987,69 @@ fn test_bug20_old_plan_request_goes_first() {
     let now = w.tick;
     let promote = w.config.brain.plan_age_promote_ticks;
     assert!(promote > 0);
+    // Queued `promote` ticks ago (through `enqueue`, so both queue indices
+    // hold it: review 8).
+    w.tick = now - promote;
     citysim::systems::plan::enqueue(&mut w, old, 0.1);
-    let key = *w.plan_queue.keys().find(|&&(_, x)| x == old).expect("queued");
-    w.plan_queue.insert(key, now - promote);
+    w.tick = now;
     citysim::systems::plan::enqueue(&mut w, fresh, 0.9);
     citysim::systems::plan::run(&mut w);
     assert!(!w.plan_queue.keys().any(|&(_, x)| x == old), "the old request was served");
     assert!(w.plan_queue.keys().any(|&(_, x)| x == fresh), "the fresh one waits its turn");
+    // Review 8: the age index is rebuilt on load.
+    let back = citysim::save::from_ron(&citysim::save::to_ron(&w)).expect("loads");
+    assert!(!back.plan_queue_age.is_empty());
+    assert_eq!(back.plan_queue_age, w.plan_queue.iter().map(|(&(u, id), &t)| (t, u, id)).collect());
+}
+
+/// Review 1 (bug 11 through the real path): a corp guard standing beside a
+/// located warrant far from its office and every client neither weighs it
+/// (the Arrest goal's "warrant located" gate) nor binds it (the plan); at
+/// its office it does both. A city guard takes it anywhere.
+#[test]
+fn test_review1_corp_guard_binds_only_warrants_on_its_beat() {
+    use citysim::systems::{law, plan};
+    use citysim::utility::goals;
+    let mut w = world();
+    let pg = w.guards().iter().copied().find(|&g| law::is_private_guard(&w, g)).expect("a private guard");
+    let cg = w.guards().iter().copied().find(|&g| law::is_city_guard(&w, g)).expect("a city guard");
+    let office = w.comp::<Job>(pg).and_then(|j| j.employer).expect("office");
+    let door = w.comp::<citysim::Building>(office).expect("b").door;
+    let corp = w.corp_of_building(office).expect("corp");
+    let until = w.tick + 100 * citysim::TICKS_PER_DAY;
+    w.comp_mut::<citysim::Corp>(corp).expect("corp").contracts = vec![(office, until)];
+    let far = w
+        .buildings_of_kind(citysim::BuildingKind::Home)
+        .iter()
+        .map(|&h| w.comp::<citysim::Building>(h).expect("b").door)
+        .max_by_key(|t| t.manhattan(door))
+        .expect("a far tile");
+    assert!(far.manhattan(door) > w.config.corps.private_beat_tiles);
+    let s = adults(&w).into_iter().find(|&x| !law::is_guard(&w, x) && x != pg && x != cg).expect("a suspect");
+    law::file_report(&mut w, citysim::Crime::Assault, s, Some(cg));
+    assert!(law::wanted(&w, s));
+    let place = |w: &mut World, a: EntityId, t: citysim::TilePos| {
+        w.leave_building(a);
+        if let Some(p) = w.comp_mut::<citysim::Position>(a) {
+            p.tile = t;
+            p.building = None;
+        }
+    };
+    let located_gate = |w: &World, g: EntityId| {
+        goals::considerations(w, g, GoalKind::Arrest, false)
+            .and_then(|(cs, _)| cs.into_iter().find(|c| c.name == "warrant located"))
+            .map(|c| c.input)
+    };
+    for t in [far, door] {
+        for a in [pg, cg, s] {
+            place(&mut w, a, t);
+        }
+        let now = w.tick;
+        w.set_last_seen(s, (t, now));
+        let on = t == door;
+        let bound = plan::bind_target(&w, pg, GoalKind::Arrest);
+        assert_eq!(bound == Some(s), on, "the corp guard binds the warrant only on its beat (at the office: {on})");
+        assert_eq!(located_gate(&w, pg) == Some(1.0), on, "the corp guard weighs it only on its beat");
+        assert_eq!(plan::bind_target(&w, cg, GoalKind::Arrest), Some(s), "the city guard's beat is the city");
+    }
 }

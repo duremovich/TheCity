@@ -1322,6 +1322,7 @@ pub fn on_complete(
                 kill_mult: crate::systems::chrome::attack_kill_mult(world, id),
                 a_bonus: 0.0,
                 kill_p: crate::systems::hunt::strike_kill_p(world, id, victim),
+                ..Default::default()
             };
             let (winner, loser, died) = crate::systems::law::resolve_fight_mods(world, id, victim, mods);
             // The attacker's crime: Murder only when the victim died. An attacker

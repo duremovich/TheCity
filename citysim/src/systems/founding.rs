@@ -608,7 +608,7 @@ pub fn choose_kind_full(
 
 /// The executive of some corp (they grow through the corp, not by founding).
 pub fn is_exec(world: &World, agent: EntityId) -> bool {
-    world.corps().into_iter().any(|c| world.comp::<Corp>(c).is_some_and(|cc| cc.exec == Some(agent)))
+    crate::systems::life::exec_corp(world, agent).is_some()
 }
 
 /// D26: may `agent` take up the Found goal now? An adult with a Brain, not a

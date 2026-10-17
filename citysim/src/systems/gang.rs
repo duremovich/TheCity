@@ -47,11 +47,7 @@ pub fn recruit_gang(world: &World, id: EntityId) -> Option<EntityId> {
     // Shadow V4 bug 5: never a corp's exec (the corp scan only once a gang
     // would take the agent: this runs per think).
     let gang = recruit_gang_any(world, id)?;
-    let exec = world
-        .corp_slice()
-        .iter()
-        .any(|&c| world.comp::<crate::components::Corp>(c).is_some_and(|cc| cc.exec == Some(id)));
-    (!exec).then_some(gang)
+    (!crate::systems::founding::is_exec(world, id)).then_some(gang)
 }
 
 fn recruit_gang_any(world: &World, id: EntityId) -> Option<EntityId> {
@@ -312,11 +308,20 @@ pub fn leader_ranking(world: &World, gang: EntityId) -> Vec<EntityId> {
     leader_scores(world, gang).into_iter().map(|(m, _)| m).collect()
 }
 
+/// A member's days in the gang.
+fn gang_days(world: &World, m: EntityId) -> f32 {
+    world.comp::<GangMember>(m).map_or(0.0, |g| world.tick.saturating_sub(g.joined_tick) as f32 / TICKS_PER_DAY as f32)
+}
+
+/// Shadow V4 bug 8: a member of `[gangs] leader_min_days` or more (the
+/// leader ranking's first tenure class).
+pub fn leader_veteran(world: &World, m: EntityId) -> bool {
+    gang_days(world, m) >= world.config.gangs.leader_min_days as f32
+}
+
 /// [`leader_ranking`] with each member's score, best first.
 pub fn leader_scores(world: &World, gang: EntityId) -> Vec<(EntityId, f32)> {
     let Some(g) = world.comp::<Gang>(gang) else { return Vec::new() };
-    let tick = world.tick;
-    let min_days = world.config.gangs.leader_min_days as f32;
     let mut ranked: Vec<(EntityId, f32, bool)> = g
         .members
         .iter()
@@ -324,10 +329,7 @@ pub fn leader_scores(world: &World, gang: EntityId) -> Vec<(EntityId, f32)> {
         .filter(|&m| world.has::<Brain>(m) && !world.has::<Sentence>(m))
         .map(|m| {
             let loyalty = world.comp::<Personality>(m).map_or(0.0, |p| p.loyalty);
-            let days = world
-                .comp::<GangMember>(m)
-                .map_or(0.0, |g| tick.saturating_sub(g.joined_tick) as f32 / TICKS_PER_DAY as f32);
-            (m, loyalty + days / 100.0, days >= min_days)
+            (m, loyalty + gang_days(world, m) / 100.0, leader_veteran(world, m))
         })
         .collect();
     // Shadow V4 bug 8: a member of `[gangs] leader_min_days` or more ranks

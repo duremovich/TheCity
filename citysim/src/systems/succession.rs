@@ -112,7 +112,14 @@ pub fn decide(world: &mut World, gang: EntityId, fallen: EntityId) -> bool {
     let dead = !crate::systems::law::living(world, fallen);
     let scores = gang::leader_scores(world, gang);
     let heir_score = scores.iter().find(|x| x.0 == heir).map_or(0.0, |x| x.1);
-    let rival = scores.iter().find(|x| x.0 != heir).map(|&(c, s)| (c, heir_score - s));
+    // The runner-up from the heir's own tenure class (Shadow V4 review: a
+    // newcomer ranks below a veteran heir on tenure, not on score; read as
+    // the runner-up it stood ahead by a negative gap and started a war).
+    let veteran = gang::leader_veteran(world, heir);
+    let rival = scores
+        .iter()
+        .find(|x| x.0 != heir && gang::leader_veteran(world, x.0) == veteran)
+        .map(|&(c, s)| (c, heir_score - s));
     if let Some((challenger, gap)) = rival.filter(|_| dead) {
         if scores.len() >= cfg.war_min_members
             && gap < cfg.war_margin

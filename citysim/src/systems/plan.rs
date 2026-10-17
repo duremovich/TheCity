@@ -25,22 +25,15 @@ pub fn run(world: &mut World) {
     let promote = world.config.brain.plan_age_promote_ticks;
     while planned < max_plans && expansions < max_expansions {
         // Shadow V4 bug 20: an entry `plan_age_promote_ticks` old goes first
-        // (the oldest; ties the queue order), else the most urgent.
-        let aged = (promote > 0)
-            .then(|| {
-                world
-                    .plan_queue
-                    .iter()
-                    .filter(|&(_, &t)| tick.saturating_sub(t) >= promote)
-                    .min_by_key(|&(k, &t)| (t, *k))
-                    .map(|(&k, &t)| (k, t))
-            })
-            .flatten();
+        // (the oldest; ties the queue order), else the most urgent. Review
+        // 8: read off `plan_queue_age`, skipping the entries removed since.
+        let aged = oldest_aged(world, tick, promote);
         let Some(((urgency, id), enqueued)) = aged.or_else(|| world.plan_queue.iter().next().map(|(&k, &t)| (k, t)))
         else {
             break;
         };
         world.plan_queue.remove(&(urgency, id));
+        world.plan_queue_age.remove(&(enqueued, urgency, id));
         if let Some(b) = world.comp_mut::<Brain>(id) {
             b.plan_queued = false;
         }
@@ -56,6 +49,22 @@ pub fn run(world: &mut World) {
     }
 }
 
+/// Shadow V4 bug 20 (review 8): the oldest `plan_queue` entry at least
+/// `promote` ticks old, read off `plan_queue_age` (the entries removed since
+/// are dropped from its front on the way).
+fn oldest_aged(world: &mut World, tick: Tick, promote: Tick) -> Option<((Urgency, EntityId), Tick)> {
+    if promote == 0 {
+        return None;
+    }
+    loop {
+        let &(t, u, who) = world.plan_queue_age.first()?;
+        if world.plan_queue.get(&(u, who)) == Some(&t) {
+            return (tick.saturating_sub(t) >= promote).then_some(((u, who), t));
+        }
+        world.plan_queue_age.pop_first();
+    }
+}
+
 /// Queue an agent for planning. No-op if already queued.
 pub fn enqueue(world: &mut World, id: EntityId, urgency: f32) {
     let tick = world.tick;
@@ -64,7 +73,9 @@ pub fn enqueue(world: &mut World, id: EntityId, urgency: f32) {
         return;
     }
     b.plan_queued = true;
-    world.plan_queue.insert((Urgency(ordered_float::OrderedFloat(urgency)), id), tick);
+    let u = Urgency(ordered_float::OrderedFloat(urgency));
+    world.plan_queue.insert((u, id), tick);
+    world.plan_queue_age.insert((tick, u, id));
 }
 
 /// Bind `Plan.target` for a goal (spec › Target binding).

@@ -360,9 +360,11 @@ pub fn considerations(
                 Consideration::new("paid", can(job.days_unpaid < 7), GATE),
             ];
             // Shadow V4 bug 19: a worker hungry past `shift_hunger_break`
-            // takes a meal break (only then: a term at 1 would move every
-            // Work score through the compensation).
-            if n.hunger < world.config.life.shift_hunger_break {
+            // with a meal in reach takes a meal break (only then: a term at
+            // 1 would move every Work score through the compensation; review
+            // 6: with no meal to break for, as `fixes::emergency`, the
+            // shift holds at full weight).
+            if n.hunger < world.config.life.shift_hunger_break && eat_obtainable(world, id) {
                 cs.push(Consideration::raw("fed", n.hunger, 0.3));
             }
             cs
@@ -660,12 +662,9 @@ pub fn considerations(
             } else if let Some(s) = chasing {
                 dist(s)
             } else {
-                // Shadow V4 bug 11: a corp guard's warrants on its beat only.
-                crate::systems::law::located_suspects(world, Some(by))
-                    .into_iter()
-                    .filter(|&s| crate::systems::law::on_beat(world, id, s))
-                    .filter_map(dist)
-                    .min()
+                // Shadow V4 bug 11: a corp guard's warrants on its beat only
+                // (`law::located_suspects` reads `on_beat`).
+                crate::systems::law::located_suspects(world, Some(by)).into_iter().filter_map(dist).min()
             };
             // L2 shadow fixes item 10: the shift is a workday's.
             let working =

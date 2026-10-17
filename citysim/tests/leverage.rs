@@ -531,6 +531,10 @@ fn test_parley_makes_peace_for_tribute() {
     w.comp_mut::<Gang>(g).unwrap().treasury = 1000;
     citysim::systems::grudges::declare(&mut w, g, r, 0.8);
     let regard = w.regard.get(&(g, r)).map_or(0.0, |x| x.value);
+    // Shadow V4 review: the rival leader receives him (on the moved city
+    // its standing over his, and its taste for his look, refused the
+    // meeting: `moves::meeting_refused`, the gate the parley does not test).
+    w.config.taste.meet_gap = f32::MAX;
     assert!(until_ok(&mut w, |w| leverage::try_parley(w, g, r)), "the parley landed");
     assert!(!w.vendettas.iter().any(|v| (v.a == g && v.b == r) || (v.a == r && v.b == g)), "the feud closed");
     let c = w.coercions.values().find(|c| c.why == CoercionWhy::Parley).expect("a tribute");

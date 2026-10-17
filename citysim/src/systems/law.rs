@@ -458,17 +458,19 @@ pub fn is_city_guard(world: &World, guard: EntityId) -> bool {
 
 /// Shadow V4 bug 11: a private guard polices his corp's beat: a suspect
 /// last seen within `[corps] private_beat_tiles` of his office or one of its
-/// clients, or in his own sight (`private_pursuit_radius`; the corp guards
-/// chased warrants city-wide). A city guard's beat is the city.
+/// clients (the corp guards chased warrants city-wide). A city guard's beat
+/// is the city. Applied in `chaseable`, so every pursuer path (the Arrest
+/// goal, its plan's bind, `any_located_suspect`) reads it.
 pub fn on_beat(world: &World, guard: EntityId, s: EntityId) -> bool {
     if !is_private_guard(world, guard) {
         return true;
     }
     let Some(&(seen, _)) = world.last_seen().get(&s) else { return false };
-    let here = world.comp::<Position>(guard).map(|p| p.tile);
-    if here.is_some_and(|t| t.manhattan(seen) <= world.config.corps.private_pursuit_radius) {
-        return true;
-    }
+    on_beat_at(world, guard, seen)
+}
+
+/// `on_beat` for a private guard and a sighting tile.
+fn on_beat_at(world: &World, guard: EntityId, seen: TilePos) -> bool {
     let max = world.config.corps.private_beat_tiles;
     let Some(office) = world.comp::<Job>(guard).and_then(|j| j.employer) else { return false };
     let near = |b: EntityId| world.comp::<Building>(b).is_some_and(|bd| bd.door.manhattan(seen) <= max);
@@ -492,6 +494,8 @@ fn chaseable(world: &World, s: EntityId, seen: (TilePos, Tick), by: Option<Pursu
             && !claimed.contains(s)
             // M16a (plan C31): never the buyer of a guard on the take.
             && !crate::systems::contracts::on_take_of(world, p.guard, s)
+            // Shadow V4 bug 11: a corp guard's warrants on its beat only.
+            && (!claimed.private || on_beat_at(world, p.guard, seen.0))
     };
     // The cheap reach test first (the same conjunction, reordered).
     by.is_none_or(near) && located(world, s)
@@ -505,6 +509,8 @@ struct Claims<'a> {
     guard: Option<EntityId>,
     /// The pursuer's `pursuit_radius_for` (0 for the whole city: unread).
     radius: u32,
+    /// The pursuer is a private (corp) guard: `on_beat` applies.
+    private: bool,
     set: std::cell::OnceCell<BTreeSet<EntityId>>,
 }
 
@@ -519,7 +525,8 @@ impl Claims<'_> {
 
 fn claim_set(world: &World, by: Option<Pursuer>) -> Claims<'_> {
     let radius = by.map_or(0, |p| pursuit_radius_for(world, p.guard));
-    Claims { world, guard: by.map(|p| p.guard), radius, set: std::cell::OnceCell::new() }
+    let private = by.is_some_and(|p| is_private_guard(world, p.guard));
+    Claims { world, guard: by.map(|p| p.guard), radius, private, set: std::cell::OnceCell::new() }
 }
 
 /// Scale S1: the open-warrant suspects `located` can pass for `by`,
@@ -566,7 +573,6 @@ pub fn is_located_suspect(world: &World, s: EntityId) -> bool {
     wanted(world, s) && located(world, s)
 }
 
-/// Sentence length in ticks for a crime at the current lever.
 /// The fine settling a fineable report: Vagrancy's, the dodger's (Transit
 /// T10), else `fine_mult` meals.
 fn fine_for(world: &World, crime: Crime) -> i64 {
@@ -577,15 +583,17 @@ fn fine_for(world: &World, crime: Crime) -> i64 {
     }
 }
 
+/// A petty offence: a night in the cells (M12 D15: Vagrancy; Transit T10:
+/// fare evasion; Jobs & lives phase 3, § 4: an unlicensed weapon; phase 4:
+/// Solicitation), fined whenever the suspect can pay (Shadow V4 bug 4).
+pub fn is_petty(crime: Crime) -> bool {
+    matches!(crime, Crime::Vagrancy | Crime::FareEvasion | Crime::UnlicensedArms | Crime::Solicitation)
+}
+
+/// Sentence length in ticks for a crime at the current lever.
 pub fn sentence_ticks(world: &World, crime: Crime) -> Tick {
     // M12 D15: a night in the cells, whatever the sentence lever.
-    // Transit T10: fare evasion too. Jobs & lives phase 3 (§ 4): an
-    // unlicensed weapon as the worst open report too.
-    if crime == Crime::Vagrancy
-        || crime == Crime::FareEvasion
-        || crime == Crime::UnlicensedArms
-        || crime == Crime::Solicitation
-    {
+    if is_petty(crime) {
         return world.config.law.vagrancy_sentence_ticks.max(1);
     }
     // M16a (plan C29): Conspiracy is `accessory_mult` (or the lever's) of Murder's.
@@ -661,11 +669,15 @@ pub struct FightMods {
     pub kill_mult: f32,
     pub a_bonus: f32,
     pub kill_p: Option<f32>,
+    /// Shadow V4 review 4: `a` is a guard taking `b` in (`arrest`): a `b`
+    /// who loses remembers `WasArrested`, not `Lost` (no Assaulted deed, so
+    /// no grudge or Enemy edge on the guard from `grudges::on_learn`).
+    pub arrest: bool,
 }
 
 impl Default for FightMods {
     fn default() -> Self {
-        FightMods { kill_mult: 1.0, a_bonus: 0.0, kill_p: None }
+        FightMods { kill_mult: 1.0, a_bonus: 0.0, kill_p: None, arrest: false }
     }
 }
 
@@ -677,7 +689,7 @@ pub fn resolve_fight(world: &mut World, a: EntityId, b: EntityId) -> (EntityId, 
 
 /// M12 D32: [`resolve_fight`] with the death chance × `kill_mult` (a Crush).
 pub fn resolve_fight_with(world: &mut World, a: EntityId, b: EntityId, kill_mult: f32) -> (EntityId, EntityId, bool) {
-    resolve_fight_mods(world, a, b, FightMods { kill_mult, a_bonus: 0.0, kill_p: None })
+    resolve_fight_mods(world, a, b, FightMods { kill_mult, ..FightMods::default() })
 }
 
 /// M13 D31: the fight with its mods and the Kit terms. Only when either
@@ -725,7 +737,9 @@ fn fight_inner(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> 
     world.remember(a, MemoryKind::Fought, Some(b), 0.7, -0.5, false);
     world.remember(b, MemoryKind::Fought, Some(a), 0.7, -0.5, false);
     world.remember(winner, MemoryKind::Won, Some(loser), 0.6, 0.4, false);
-    world.remember(loser, MemoryKind::Lost, Some(winner), 0.6, -0.6, false);
+    // Shadow V4 review 4: taken in by the law, the loser was arrested.
+    let lost = if mods.arrest && loser == b { MemoryKind::WasArrested } else { MemoryKind::Lost };
+    world.remember(loser, lost, Some(winner), 0.6, -0.6, false);
     if let Some(p) = world.comp_mut::<Personality>(winner) {
         p.drift(Drift::WonFight);
     }
@@ -887,28 +901,19 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
         let mods = if berserk {
             FightMods {
                 kill_mult: crate::systems::chrome::arrest_kill_mult(world, suspect),
-                a_bonus: 0.0,
-                kill_p: None,
+                arrest: true,
+                ..FightMods::default()
             }
         } else if crate::systems::weapons::tier(world, suspect) > 0 {
             // Jobs & lives phase 3 (section 4): an armed suspect is fought harder.
-            FightMods { kill_mult: world.config.weapons.armed_arrest_mult, a_bonus: 0.0, kill_p: None }
+            FightMods { kill_mult: world.config.weapons.armed_arrest_mult, arrest: true, ..FightMods::default() }
         } else {
-            FightMods::default()
+            FightMods { arrest: true, ..FightMods::default() }
         };
+        // Shadow V4 bug 10: a suspect who loses the scuffle for the cuffs is
+        // arrested, not assaulted (`FightMods::arrest`: a Lost memory
+        // gossiped "Assaulted by <guard>" and fed dread and grudges).
         let (winner, loser, died) = resolve_fight_mods(world, guard, suspect, mods);
-        // Shadow V4 bug 10: a suspect who lost the scuffle for the cuffs was
-        // arrested, not assaulted (the Lost memory gossiped "Assaulted by
-        // <guard>" and fed dread and grudges).
-        if !died && loser == suspect {
-            if let Some(m) = world.comp_mut::<crate::components::Memory>(suspect) {
-                if let Some(e) =
-                    m.entries.iter_mut().rev().find(|e| e.kind == MemoryKind::Lost && e.subject == Some(guard))
-                {
-                    e.kind = MemoryKind::WasArrested;
-                }
-            }
-        }
         if died {
             if loser == suspect {
                 // The suspect died resisting: nothing left to prosecute.
@@ -1056,11 +1061,11 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
     // whenever the suspect can pay, not only when the Precinct is full (fare
     // evasion was the city's top sentence, served from a desk or a bar).
     let full = jailed >= capacity;
-    let petty = matches!(crime, Crime::Vagrancy | Crime::FareEvasion | Crime::UnlicensedArms | Crime::Solicitation);
+    let petty = is_petty(crime);
     let can_pay = world.comp::<crate::components::Wallet>(suspect).is_some_and(|w| w.coins >= fine_for(world, crime));
     if full || (petty && can_pay) {
         match crime {
-            Crime::Theft | Crime::Vagrancy | Crime::FareEvasion | Crime::UnlicensedArms | Crime::Solicitation => {
+            c if c == Crime::Theft || is_petty(c) => {
                 let fine = fine_for(world, crime);
                 let coins = world.comp::<crate::components::Wallet>(suspect).map_or(0, |w| w.coins);
                 // M12 review: a Vagrancy report is settled as `street::vagrancy_hit`'s
@@ -1097,6 +1102,10 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
                         world.push_event(EventKind::Vagrancy, &[suspect], text);
                     }
                     world.stats.current.arrests += 1;
+                    // Shadow V4 review 5: the fine spares the cell, not the
+                    // arrest (the take, the interrogation, the rumour, the
+                    // sweep's counter, the law's log).
+                    booked(world, guard, suspect, crime, jail);
                     release_at_jail_door(world, suspect, "fined");
                 } else {
                     if let Some(p) = world.comp_mut::<Personality>(suspect) {
@@ -1143,6 +1152,12 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
     sentence(world, suspect, crime, until, jail);
     resolve_reports(world, suspect);
     world.stats.current.arrests += 1;
+    booked(world, guard, suspect, crime, jail);
+}
+
+/// An arrest's record, jailed or fined: the sweep's counter, the take and
+/// the interrogation, the rumour and the law's log.
+fn booked(world: &mut World, guard: EntityId, suspect: EntityId, crime: Crime, jail: EntityId) {
     // Jobs & lives phase 4: the sweeps' arrests.
     if crime == Crime::Solicitation {
         crate::systems::ownership::jobs2_row(world).solicit_arrests += 1;

@@ -655,6 +655,13 @@ pub struct World {
     pub next_event_id: u64,
     /// Value = enqueue tick.
     pub plan_queue: BTreeMap<(Urgency, EntityId), Tick>,
+    /// Shadow V4 review 8: `plan_queue` by enqueue tick, for bug 20's aging
+    /// (`plan::run` read the oldest by scanning the queue on every pop). An
+    /// entry is live while `plan_queue` holds its key at its tick; removals
+    /// elsewhere (`retain`) leave it to be skipped. Not saved: rebuilt on
+    /// load (`rebuild_indices`).
+    #[serde(skip)]
+    pub plan_queue_age: BTreeSet<(Tick, Urgency, EntityId)>,
     /// Hunger as sickness P5h (a printed finding): queue entries dropped
     /// stale (`plan::PLAN_QUEUE_MAX_AGE`), counted since world creation.
     #[serde(default, skip_serializing_if = "is_zero_u64")]
@@ -1533,6 +1540,7 @@ impl World {
             debug_events: VecDeque::new(),
             next_event_id: 0,
             plan_queue: BTreeMap::new(),
+            plan_queue_age: BTreeSet::new(),
             plan_stale_drops: 0,
             reservations: BTreeMap::new(),
             res_by_building: BTreeMap::new(),
@@ -3458,6 +3466,7 @@ impl World {
     /// Rebuild `neighbours`, `spouses` and `enemies` from `edges` (after a
     /// load; the indices are not saved).
     pub fn rebuild_indices(&mut self) {
+        self.plan_queue_age = self.plan_queue.iter().map(|(&(u, id), &t)| (t, u, id)).collect();
         // Hunger as sickness § 4: the stocked bins.
         let bins: BTreeSet<EntityId> = self
             .with::<Building>()

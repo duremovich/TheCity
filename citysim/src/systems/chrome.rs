@@ -841,7 +841,7 @@ pub fn abduct_within(world: &mut World, agent: EntityId, victim: EntityId, reach
         })
         .map(|m| crate::systems::law::fighting(world, m))
         .sum();
-    let mods = crate::systems::law::FightMods { kill_mult: 1.0, a_bonus: bonus, kill_p: None };
+    let mods = crate::systems::law::FightMods { a_bonus: bonus, ..Default::default() };
     let (winner, _, died) = crate::systems::law::resolve_fight_mods(world, agent, victim, mods);
     let tile = world.comp::<Position>(agent).map_or_else(Default::default, |p| p.tile);
     if crate::systems::law::living(world, agent) {

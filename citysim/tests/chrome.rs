@@ -154,7 +154,7 @@ fn test_arms_raise_p_win_and_skin_lowers_death() {
             w.comp_mut::<Skills>(y).expect("skills").fighting = 0.0;
         }
         // kill_mult so that a bare loser always dies: p × (1 + 0) × m = 1.
-        let mods = law::FightMods { kill_mult: 1.0 / p, a_bonus: 0.0, kill_p: None };
+        let mods = law::FightMods { kill_mult: 1.0 / p, ..Default::default() };
         let (_, loser, died) = law::resolve_fight_mods(&mut w, x, v, mods);
         if loser == v {
             losses += 1;
@@ -555,6 +555,9 @@ fn test_episode_near_on_duty_guard_ended_by_law() {
             w.has::<Brain>(g)
                 && law::living(&w, g)
                 && !w.has::<citysim::Sentence>(g)
+                // Shadow V4 review 1: a city guard (a corp guard polices its
+                // beat only, and the staged corner may be off it).
+                && law::is_city_guard(&w, g)
                 && w.comp::<Job>(g).is_some_and(|j| {
                     j.on_shift(tod) && citysim::exec::routine::workday_of(&w, g, j, j.shift_key_at(w.tick))
                 })
@@ -564,6 +567,9 @@ fn test_episode_near_on_duty_guard_ended_by_law() {
     place(&mut w, guard, TilePos { x: 102, y: 100 });
     place(&mut w, who, TilePos { x: 100, y: 100 });
     w.comp_mut::<Skills>(guard).expect("skills").fighting = 1.0;
+    // Shadow V4 review 1: a brave guard (the city guard picked on the moved
+    // city scored Arrest under its Work at courage 0.13).
+    w.comp_mut::<citysim::components::Personality>(guard).expect("p").courage = 1.0;
     // Jobs & lives phase 7b (the regenerated stat table): the premise is a
     // guard who wins the fight; under the new table's city the berserker
     // (a free adult of fighting 0.35) downed the guard in the first quarter
