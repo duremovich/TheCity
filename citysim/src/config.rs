@@ -3482,6 +3482,11 @@ pub struct BrainCfg {
     pub plan_timeout_ticks: u64,
     /// A search past this many expansions in one tick resumes next tick.
     pub plan_expansion_budget_per_tick: usize,
+    /// Shadow V4 bug 20: a queue entry this old is served before the more
+    /// urgent ones (oldest first), so it is planned before it goes stale
+    /// (0 = urgency alone).
+    #[serde(default)]
+    pub plan_age_promote_ticks: u64,
     pub path_budget_per_tick: usize,
     pub mood_w_need: f32,
     pub mood_w_memory: f32,
@@ -6469,6 +6474,9 @@ pub struct NewsCfg {
     pub reach_per_reporter: f32,
     pub story_reach: f32,
     pub stories_per_day: u8,
+    /// Shadow V4 bug 21: an organic deed runs in at most this many Feeds
+    /// within `RECENT_DAYS` (0 = any number).
+    pub outlets_per_deed: u8,
     pub ad_rate: i64,
     pub plant_price: i64,
     pub bury_price: i64,
@@ -6493,6 +6501,7 @@ impl Default for NewsCfg {
             reach_per_reporter: 0.15,
             story_reach: 0.8,
             stories_per_day: 3,
+            outlets_per_deed: 2,
             ad_rate: 3,
             plant_price: 120,
             bury_price: 60,
@@ -6604,6 +6613,9 @@ pub struct LifeCfg {
     /// ... and a shift cut short pays pro rata from this share of it.
     pub shift_pro_rata: f32,
     pub starving_hunger: f32,
+    /// Shadow V4 bug 19: under this hunger, with a meal in reach, Eat breaks
+    /// a shift (a meal break), and Work weighs 0.3 under it.
+    pub shift_hunger_break: f32,
     pub sleep_wake_energy: f32,
     /// Workplace room (2026-10-11): a housed agent sleeping rough (out of
     /// doors, its bed past `rough_min_tiles`) sleeps on past
@@ -6828,6 +6840,7 @@ impl Default for LifeCfg {
             scavenge_cool_hours: 4,
             shift_pro_rata: 0.5,
             starving_hunger: 0.1,
+            shift_hunger_break: 0.12,
             sleep_wake_energy: 0.99,
             rough_sleep_on: false,
             idle_sleep_energy: 0.9,

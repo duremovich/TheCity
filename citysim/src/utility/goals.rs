@@ -341,7 +341,7 @@ pub fn considerations(
             if world.has::<Sentence>(id) {
                 return None;
             }
-            vec![
+            let mut cs = vec![
                 // Hunger as sickness § 2: a sick day is no shift.
                 Consideration::new(
                     "in shift",
@@ -358,7 +358,14 @@ pub fn considerations(
                     Curve::Logistic { k: 8.0, mid: 0.5 },
                 ),
                 Consideration::new("paid", can(job.days_unpaid < 7), GATE),
-            ]
+            ];
+            // Shadow V4 bug 19: a worker hungry past `shift_hunger_break`
+            // takes a meal break (only then: a term at 1 would move every
+            // Work score through the compensation).
+            if n.hunger < world.config.life.shift_hunger_break {
+                cs.push(Consideration::raw("fed", n.hunger, 0.3));
+            }
+            cs
         }
         GoalKind::Earn => {
             let n = needs?;

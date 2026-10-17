@@ -194,7 +194,12 @@ pub fn commuting(world: &World, id: EntityId, job: &Job) -> bool {
 pub fn emergency(world: &World, id: EntityId, winner: GoalKind) -> bool {
     match winner {
         GoalKind::Flee | GoalKind::Fight | GoalKind::Arrest => true,
-        GoalKind::Eat => world.comp::<Needs>(id).is_some_and(|n| n.hunger < world.config.life.starving_hunger),
+        // Shadow V4 bug 19: or hungry past `shift_hunger_break` with a meal
+        // in reach (the meal break).
+        GoalKind::Eat => world.comp::<Needs>(id).is_some_and(|n| {
+            n.hunger < world.config.life.starving_hunger
+                || (n.hunger < world.config.life.shift_hunger_break && crate::utility::goals::eat_obtainable(world, id))
+        }),
         _ => false,
     }
 }

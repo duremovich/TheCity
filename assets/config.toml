@@ -430,6 +430,7 @@ plan_max_expansions = 200
 plan_max_len = 6
 plan_timeout_ticks = 900
 plan_expansion_budget_per_tick = 600
+plan_age_promote_ticks = 45         # Shadow V4 bug 20: a plan request this old goes first (at 20k low-urgency goals starved 1-6 h, re-queued after each stale drop)
 path_budget_per_tick = 20
 mood_w_need = 0.7
 mood_w_memory = 0.3
@@ -1445,6 +1446,7 @@ reach_base = 0.2
 reach_per_reporter = 0.15
 story_reach = 0.8
 stories_per_day = 3
+outlets_per_deed = 2               # Shadow V4 bug 21: an organic deed runs in at most this many Feeds (one 20k assault ran in 11 numbered corp outlets)
 ad_rate = 3
 # Phase 4: 120 -> 60 and 60 -> 30: Nutrix planted ~40 times a run and paid ~4,600 at 120.
 plant_price = 60
@@ -1524,6 +1526,7 @@ escort_van_ticks = 60
 # re-shadow. Always on since 2026-10-09 (the switches retired; docs/TESTING.md).
 shift_pro_rata = 0.5                # ... and a cut shift pays pro rata from half of it
 starving_hunger = 0.1               # the starvation that breaks a commitment
+shift_hunger_break = 0.12           # Shadow V4 bug 19: under this, with a meal in reach, a worker breaks the shift to eat (Work x 0.3) (a sweeper worked a shift at 0.11 with 15 c, 26 h after his last meal)
 sleep_wake_energy = 0.99            # ... and runs to here (it ended at 0.9: 1-6 min Sleeps all night)
 rough_sleep_on = true               # workplace room: a housed worker asleep rough near work sleeps on to here or the shift (it woke at 02:00 at the 8 h cap and walked 4.5 h home)
 idle_sleep_energy = 0.9             # Idle plans Sleep only below this (0.7 left nights to 90-min Rests)

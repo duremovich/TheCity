@@ -573,6 +573,12 @@ fn armoury_target(world: &World, gang: EntityId) -> usize {
     (n * world.config.weapons.armoury_per_member).ceil() as usize
 }
 
+/// Is there an armoury surplus for `gang`'s dealer to sell (the shadow
+/// tool's arms-dealer pick)?
+pub fn has_surplus(world: &World, gang: EntityId) -> bool {
+    !surplus(world, gang).is_empty()
+}
+
 /// The armoury's weapons beyond its target (the dealer's to sell), the
 /// cheapest first.
 fn surplus(world: &World, gang: EntityId) -> Vec<EntityId> {

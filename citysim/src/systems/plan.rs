@@ -22,8 +22,24 @@ pub fn run(world: &mut World) {
     let mut planned = 0usize;
     let mut expansions = 0usize;
 
+    let promote = world.config.brain.plan_age_promote_ticks;
     while planned < max_plans && expansions < max_expansions {
-        let Some((&(urgency, id), &enqueued)) = world.plan_queue.iter().next() else { break };
+        // Shadow V4 bug 20: an entry `plan_age_promote_ticks` old goes first
+        // (the oldest; ties the queue order), else the most urgent.
+        let aged = (promote > 0)
+            .then(|| {
+                world
+                    .plan_queue
+                    .iter()
+                    .filter(|&(_, &t)| tick.saturating_sub(t) >= promote)
+                    .min_by_key(|&(k, &t)| (t, *k))
+                    .map(|(&k, &t)| (k, t))
+            })
+            .flatten();
+        let Some(((urgency, id), enqueued)) = aged.or_else(|| world.plan_queue.iter().next().map(|(&k, &t)| (k, t)))
+        else {
+            break;
+        };
         world.plan_queue.remove(&(urgency, id));
         if let Some(b) = world.comp_mut::<Brain>(id) {
             b.plan_queued = false;

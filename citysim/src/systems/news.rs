@@ -317,6 +317,21 @@ fn ran_recently(world: &World, feed: EntityId, deed: Deed, actor: EntityId, obje
         .any(|s| s.feed == feed && s.deed == deed && s.deed_actor() == actor && s.object == object)
 }
 
+/// Shadow V4 bug 21: the Feeds that ran this deed (by its own actor, any
+/// slant) within `RECENT_DAYS`.
+fn outlets_running(world: &World, deed: Deed, actor: EntityId, object: Option<EntityId>) -> u8 {
+    let horizon = world.tick.saturating_sub(RECENT_DAYS * TICKS_PER_DAY);
+    let feeds: std::collections::BTreeSet<EntityId> = world
+        .stories
+        .iter()
+        .rev()
+        .take_while(|s| s.tick >= horizon)
+        .filter(|s| s.deed == deed && s.deed_actor() == actor && s.object == object)
+        .map(|s| s.feed)
+        .collect();
+    feeds.len().min(u8::MAX as usize) as u8
+}
+
 /// Is `id` the faction `f` or one of its people (a gang's member, a corp's
 /// exec or staff, a city guard or the captain for the Law)?
 fn about(world: &World, id: EntityId, f: EntityId) -> bool {
@@ -688,6 +703,10 @@ fn run_stories(world: &mut World, plants: Vec<Plant>) {
                     continue;
                 }
                 if ran_recently(world, feed, e.deed, actor, e.object) {
+                    continue;
+                }
+                // Shadow V4 bug 21: a deed other Feeds already ran enough.
+                if cfg.outlets_per_deed > 0 && outlets_running(world, e.deed, actor, e.object) >= cfg.outlets_per_deed {
                     continue;
                 }
                 let score = newsworthiness(world, e, now);

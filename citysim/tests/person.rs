@@ -1887,7 +1887,22 @@ fn widow(strong: bool) -> (World, EntityId, EntityId) {
     grudges::add(&mut w, her, killer, GrudgeCause::KilledKin(husband), 0.95, 0);
     grudges::add(&mut w, brother, killer, GrudgeCause::KilledKin(husband), 0.6, 0);
     w.comp_mut::<Wallet>(her).expect("wallet").coins = 40;
-    w.comp_mut::<Wallet>(brother).expect("wallet").coins = 200;
+    // Shadow V4 batch 4: the premise is a widow who can pay with her
+    // brother's share. The market price moves day to day (on the moved city
+    // the pick's killer read 323-559 over the week, a 162-280 deposit
+    // against 40 and half of 200), so the brother holds twice what the
+    // price after the killing needs.
+    let price = contracts::organic_price(
+        &w,
+        ContractKind::Hit,
+        &Target::Agent(killer),
+        Some(her),
+        Some(her),
+        contracts::nearest_fixer(&w, her),
+    );
+    let need = citysim::systems::hitmarket::deposit_of(&w, 2 * price) - 40;
+    let share = w.config.hitmarket.kin_share.max(0.01);
+    w.comp_mut::<Wallet>(brother).expect("wallet").coins = 200.max((need as f32 / share).ceil() as i64 + 2);
     pin(&mut w, her);
     (w, her, killer)
 }

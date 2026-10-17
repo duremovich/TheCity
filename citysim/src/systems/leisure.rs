@@ -608,8 +608,13 @@ fn nearest_venue(
         .filter_map(|&b| world.comp::<Building>(b).map(|bd| (from.dist(bd.door), b)))
         .collect();
     near.sort_unstable();
+    // Shadow V4 bug 18: not the agent's own workplace (staff spent their
+    // evening at their own Brothel or pit, then waited up to 10 h there for
+    // the shift).
+    let own = world.comp::<crate::components::Job>(id).and_then(|j| j.employer);
     near.into_iter().find(|&(_, b)| {
-        standing(world, b)
+        Some(b) != own
+            && standing(world, b)
             && (kind == BuildingKind::Bar || world.comp::<Building>(b).is_some_and(|bd| bd.venue.is_some()))
             && district.is_none_or(|d| world.district_of_building(b) == d)
             && open(world, b)
@@ -1518,8 +1523,10 @@ pub fn rebuild_hangouts(world: &mut World) {
 
 /// Plan L18 (deviation: the bout is resolved here with `resolve_fight`'s
 /// `p_win` and no death, its draw on `WordNs::Bout`; `resolve_fight` rolls
-/// on the world stream, L31). At `bout_hour` each open FightPit pairs its two
-/// fittest Fighters on shift (ties the lower id): the loser loses 0.3
+/// on the world stream, L31). At `bout_hour` each open FightPit pairs the
+/// two Fighters on shift longest since their last bout (Shadow V4 bug 17:
+/// the two fittest fought six nights running while the rest sat; ties the
+/// fitter, then the lower id): the loser loses 0.3
 /// energy and safety and remembers `Lost`; tonight's bets settle (a bettor
 /// on the winner's side is paid twice the stake by the house); the sides
 /// are drawn on the same stream per bettor by courage. A pit without two
@@ -1541,14 +1548,20 @@ pub fn bouts(world: &mut World) {
                     b.lod == Lod::Statistical || world.comp::<Position>(f).is_some_and(|p| p.building == Some(pit))
                 })
         };
-        let mut fighters: Vec<(f32, EntityId)> = ownership::staff_at(world, pit)
+        let last_bout = |f: EntityId| {
+            world
+                .comp::<crate::components::Memory>(f)
+                .and_then(|m| m.entries.iter().filter(|e| e.kind == MemoryKind::Bout).map(|e| e.tick).max())
+                .unwrap_or(0)
+        };
+        let mut fighters: Vec<(f32, EntityId, u64)> = ownership::staff_at(world, pit)
             .into_iter()
             .filter(|&f| world.comp::<Job>(f).is_some_and(|j| j.role == Role::Fighter && j.on_shift(tod)))
             .filter(|&f| crate::systems::law::living(world, f) && !world.has::<Sentence>(f))
             .filter(|&f| present(f))
-            .map(|f| (crate::systems::law::fighting(world, f), f))
+            .map(|f| (crate::systems::law::fighting(world, f), f, last_bout(f)))
             .collect();
-        fighters.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+        fighters.sort_by(|a, b| a.2.cmp(&b.2).then(b.0.total_cmp(&a.0)).then(a.1.cmp(&b.1)));
         if fighters.len() < 2 || !open(world, pit) || !standing(world, pit) {
             let owner = world.owner_of(pit);
             for (who, stake, _) in bets {

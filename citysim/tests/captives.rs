@@ -289,6 +289,11 @@ fn test_abduct_plan_and_hand_over() {
     // Shadow V4 batch 2: on the moved city the buyer's keyed renege roll
     // came up; this test is the hand-over, so the buyer pays.
     w.contracts.get_mut(&id).expect("record").renege = false;
+    // Shadow V4 batch 4: room for the run (on the moved city the city's
+    // live runs filled the room, `max_missions` or the bodies' quota, and the
+    // record stayed queued with no run to plan from).
+    w.config.missions.max_missions = 1_000;
+    w.config.lod.contract_quota = 10_000;
     contracts::god_take(&mut w, id, taker).expect("taken");
     assert_eq!(w.contracts[&id].render, citysim::contract::Render::Live, "an Abduct is never ledger");
     let plan = contracts::plan(&mut w, taker).expect("a plan");

@@ -815,3 +815,109 @@ fn test_wronged_spouse_index_survives_a_load() {
     assert_eq!(back.spouse_of(a), Some(s), "and in the loaded one");
     assert!(w.edge(a, s).is_some_and(|e| e.affinity < 0.0), "the wrong is felt");
 }
+
+/// Bug 17: a pit's bouts go round its fighters (longest since the last
+/// bout first), not the same two fittest every night.
+#[test]
+fn test_bug17_bouts_go_round_the_fighters() {
+    use citysim::systems::{demography, leisure, lod};
+    let mut w = world();
+    let pit = w.buildings_of_kind(citysim::BuildingKind::FightPit)[0];
+    // The pit's own Fighters off the card; three of ours on it, all day.
+    for f in w.staff_of(pit).to_vec() {
+        if let Some(j) = w.comp_mut::<Job>(f) {
+            j.shifts = vec![];
+        }
+    }
+    let crew: Vec<EntityId> = jobless_housed(&w).into_iter().take(3).collect();
+    for (i, &f) in crew.iter().enumerate() {
+        demography::hire(&mut w, f, pit, citysim::Role::Fighter);
+        w.comp_mut::<Job>(f).expect("job").shifts = vec![(0, 1440)];
+        w.comp_mut::<citysim::Skills>(f).expect("s").fighting = [0.9, 0.8, 0.1][i];
+        lod::set_lod(&mut w, f, citysim::Lod::Statistical);
+    }
+    let mut fought = std::collections::BTreeSet::new();
+    for d in 1..=7 {
+        w.tick = d * citysim::TICKS_PER_DAY + 22 * 60;
+        let before = w.events.len();
+        leisure::bouts(&mut w);
+        for e in w.events.iter().skip(before).filter(|e| e.kind == citysim::EventKind::Bout) {
+            fought.extend(e.actors.iter().take(2).copied());
+        }
+    }
+    assert!(fought.contains(&crew[2]), "the weakest fighter gets a bout in a week");
+}
+
+/// Bug 18: a venue's staff do not take their leisure at their own venue
+/// (then wait there up to 10 h for the shift).
+#[test]
+fn test_bug18_no_leisure_at_ones_own_venue() {
+    use citysim::systems::leisure;
+    let mut w = world();
+    let mut checked = 0;
+    for kind in [citysim::BuildingKind::Brothel, citysim::BuildingKind::FightPit, citysim::BuildingKind::Lounge] {
+        for &b in w.buildings_of_kind(kind).to_vec().iter() {
+            let Some(&s) = w.staff_of(b).first() else { continue };
+            w.leave_building(s);
+            w.enter_building(s, b);
+            set_coins(&mut w, s, 2000);
+            if let Some(n) = w.comp_mut::<citysim::Needs>(s) {
+                n.fun = 0.05;
+                n.hunger = 1.0;
+            }
+            let pick = leisure::choice(&w, s, false);
+            assert!(pick.is_none_or(|p| p.venue != Some(b)), "{kind:?} staff unwinds at its own venue");
+            checked += 1;
+        }
+    }
+    assert!(checked > 0, "a venue with staff");
+}
+
+/// Bug 19: a worker hungry past `shift_hunger_break` with a meal's coins
+/// breaks the shift to eat (Eat overrides the shift's commitment, and Work
+/// weighs the hunger); fed, the shift holds.
+#[test]
+fn test_bug19_hungry_worker_takes_a_meal_break() {
+    use citysim::systems::fixes;
+    let mut w = world();
+    let a = day_workers(&w)[0];
+    set_coins(&mut w, a, 15);
+    let work_fed = |w: &World| {
+        citysim::utility::goals::considerations(w, a, GoalKind::Work, false)
+            .and_then(|(cs, _)| cs.into_iter().find(|c| c.name == "fed"))
+            .map(|c| c.output)
+    };
+    w.comp_mut::<citysim::Needs>(a).expect("n").hunger = 0.11;
+    assert!(fixes::emergency(&w, a, GoalKind::Eat), "a meal break at 0.11 with coins");
+    assert!(work_fed(&w).is_some_and(|x| x < 0.5), "Work weighs the hunger");
+    w.comp_mut::<citysim::Needs>(a).expect("n").hunger = 0.6;
+    assert!(!fixes::emergency(&w, a, GoalKind::Eat), "fed, the shift holds");
+    assert!(work_fed(&w).is_none(), "no hunger term when fed");
+}
+
+/// Bug 20: a plan request waiting `plan_age_promote_ticks` is served before
+/// a fresher, more urgent one (low-urgency goals starved 1-6 h at 20k).
+#[test]
+fn test_bug20_old_plan_request_goes_first() {
+    let mut w = world();
+    w.config.brain.plan_budget_per_tick = 1;
+    let ad = adults(&w);
+    let (old, fresh) = (ad[0], ad[1]);
+    for a in [old, fresh] {
+        w.abort_plan(a);
+        let b = w.comp_mut::<Brain>(a).expect("brain");
+        b.current_goal = Some(GoalKind::Idle);
+        b.plan = None;
+    }
+    w.tick += 1000;
+    let now = w.tick;
+    let promote = w.config.brain.plan_age_promote_ticks;
+    assert!(promote > 0);
+    citysim::systems::plan::enqueue(&mut w, old, 0.1);
+    let key = *w.plan_queue.keys().find(|&&(_, x)| x == old).expect("queued");
+    w.plan_queue.insert(key, now - promote);
+    citysim::systems::plan::enqueue(&mut w, fresh, 0.9);
+    citysim::systems::plan::run(&mut w);
+    assert!(!w.plan_queue.keys().any(|&(_, x)| x == old), "the old request was served");
+    assert!(w.plan_queue.keys().any(|&(_, x)| x == fresh), "the fresh one waits its turn");
+}

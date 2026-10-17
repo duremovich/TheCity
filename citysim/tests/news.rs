@@ -385,3 +385,27 @@ fn test_plants_respect_burials_and_censorship() {
     news::daily(&mut w);
     assert!(w.stories.iter().any(|s| s.paid_by == Some(nutrix)), "the plant runs once lifted");
 }
+
+/// Shadow V4 bug 21: one deed runs in at most `outlets_per_deed` Feeds (a
+/// 20k assault ran in 11 numbered corp outlets). The city's two Feeds,
+/// the cap at 1: the killing runs once; uncapped, in both.
+#[test]
+fn test_one_deed_in_at_most_outlets_per_deed_feeds() {
+    let run = |cap: u8| {
+        let mut w = World::new(42, Config::load().dole_city());
+        clear_pools(&mut w);
+        w.config.news.outlets_per_deed = cap;
+        let ads = plain_adults(&w);
+        let (a, b) = (ads[0], ads[1]);
+        let now = w.tick;
+        for d in 0..w.districts.len() {
+            citysim::systems::gossip::post(&mut w, DistrictId(d as u8), entry(Deed::Killed, a, Some(b), now, d as u8));
+        }
+        news::daily(&mut w);
+        let feeds: std::collections::BTreeSet<EntityId> =
+            w.stories.iter().filter(|s| s.deed == Deed::Killed && s.object == Some(b)).map(|s| s.feed).collect();
+        feeds.len()
+    };
+    assert!(run(0) >= 2, "the control: both Feeds run it uncapped");
+    assert_eq!(run(1), 1, "capped at one outlet");
+}
