@@ -1254,8 +1254,10 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                 // later). Statistical is the held tier: a pinned prisoner must never reach it.
                 let warn = if t.pinned && b.lod == Lod::Statistical {
                     " **PIN BROKEN: a pinned pick became Statistical (held)**"
-                } else if t.pinned && b.lod != Lod::Full {
+                } else if t.pinned && b.lod != Lod::Full && jailed {
                     " (sentencing sets Coarse until the next hourly assignment re-pins it)"
+                } else if t.pinned && b.lod != Lod::Full {
+                    " **PIN NOT HONOURED: Coarse with no sentence**"
                 } else {
                     ""
                 };
