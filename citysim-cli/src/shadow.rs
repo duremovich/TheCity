@@ -2607,7 +2607,10 @@ const CHECKS: &[Check] = &[
     // regenerated stat table (the eight-run ensemble: main 2.57; stat_violence_mult 0.98 1.32, 0.99
     // 1.42, 1.01 2.21, 1.02 2.50, 1.03 1.83; max_coarse 149 1.59, 151 2.05): 1.32 x 0.6 = 0.79,
     // rounded down. It read 0.77-2.00 across the milestone's phases against the old 1.3 (2.29-4.71).
-    (19, "ceo", Metric::KnownMetWeek, Bound::Min(0.7), 1.32, 2.57),
+    // Shadow V4 (2026-10-17, bug 5's known reason): the CEO holds office at its Hq every workday
+    // (the office was the nearest Vat Farm or none, and the exec's day leaked into the street):
+    // 0.55 pooled (0.12 / 0.89 / 1.22 by seed), the range widened by it, 0.55 x 0.6 rounded down.
+    (19, "ceo", Metric::KnownMetWeek, Bound::Min(0.3), 0.55, 2.57),
     (19, "ceo", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
     // An exec never does a work-class action, so every run of the office-hours
     // Work goal counts here: the row reads goal flicker (2026-10-11: 0.63 after
@@ -2615,7 +2618,9 @@ const CHECKS: &[Check] = &[
     // the office gate's estimate: with it read against the deadline (review
     // item 6) the row reads 0.58, and 0.57 with that change alone undone;
     // 0.52-0.63 over the round's tables, so the 0.62 bound would flip on noise.
-    (19, "ceo", Metric::CommuteAbortsDay, Bound::Max(0.75), 0.52, 0.63),
+    // Shadow V4 (2026-10-17, bug 5's known reason): an office day at the Hq every workday, so
+    // more office runs: 0.84 pooled (0.73 / 0.86 / 0.76), the range widened by it, + 0.05.
+    (19, "ceo", Metric::CommuteAbortsDay, Bound::Max(0.89), 0.52, 0.84),
     (19, "club_staff", Metric::WalkHDay, Bound::Max(5.6), 3.95, 4.53),
     (19, "club_staff", Metric::LongestSleepH, Bound::Min(4.0), 4.54, 4.76),
     (19, "club_staff", Metric::Energy0HWeek, Bound::Max(2.0), 0.00, 0.00),

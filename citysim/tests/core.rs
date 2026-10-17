@@ -693,7 +693,7 @@ fn mechanisms() -> Vec<Mechanism> {
         ("a day with scrip paid", m("scrip paid")),
         ("a day with scrip converted", m("scrip converted")),
         ("a DataShipped", k(EventKind::DataShipped)), // [1, 29, 13]; 45-47 [15, 2, 4]
-        ("a Sanctioned", k(EventKind::Sanctioned)),   // [1, 2, 3]; 45-47 [2, 3, 3]
+                                                      // A Sanctioned: printed (Shadow V4; see printed_mechanisms).
     ]
 }
 
@@ -749,6 +749,16 @@ fn printed_mechanisms() -> Vec<Mechanism> {
         // install by another path, a god SetCreed). `moves.rs::
         // test_purist_expels_chromed_member` carries it.
         ("a Purist expulsion", k(EventKind::Expelled)),
+        // M17 phase 4's Sanctioned, demoted (Shadow V4, 2026-10-17):
+        // `sanctions_new` over 42-47 x 120 [4, 3, 4, 3, 1, 4] on ce5afe6,
+        // [0, 0, 2, 1, 0, 1] after V4 batch 3, [0, 0, 0, 0, 1, 0] on the
+        // final tree. The State sanctions a megacorp only in a hot city
+        // (`mandate_heat`), and the sweep's city runs cooler (assaults a day
+        // on 42-44 13.4 / 11.7 / 13.5 on ce5afe6, 9.3 / 7.6 / 8.1 after
+        // batch 3: fights in proportion, no 0-coin shakedown feuds).
+        // `weapons.rs::test_sanction_cuts_and_costs_its_sanctioner` and
+        // `m17_review.rs::test_a_won_convoy_is_no_state_sanction` carry it.
+        ("a Sanctioned", k(EventKind::Sanctioned)),
         // M16b phase 1's Parley (a peace bought), demoted (Shadow V4 batch
         // 2, 2026-10-17): successes over 42-47 x 120 days [1, 2, 2, 0, 0, 1]
         // on ce5afe6, [4, 1, 2, 0, 0, 0] after V4 batch 1, [0, 0, 0, 1, 0,

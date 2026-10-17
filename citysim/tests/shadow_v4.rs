@@ -888,7 +888,11 @@ fn test_bug19_hungry_worker_takes_a_meal_break() {
             .map(|c| c.output)
     };
     w.comp_mut::<citysim::Needs>(a).expect("n").hunger = 0.11;
-    assert!(fixes::emergency(&w, a, GoalKind::Eat), "a meal break at 0.11 with coins");
+    assert!(!fixes::emergency(&w, a, GoalKind::Eat), "on the way to work, the commute's latch holds");
+    let now = w.tick;
+    w.comp_mut::<Brain>(a).expect("brain").exec =
+        citysim::exec::ExecState::Use { kind: citysim::goap::ActionKind::ClerkWork, until: now + 60, started: now };
+    assert!(fixes::emergency(&w, a, GoalKind::Eat), "a meal break at 0.11 with coins, at work");
     assert!(work_fed(&w).is_some_and(|x| x < 0.5), "Work weighs the hunger");
     w.comp_mut::<citysim::Needs>(a).expect("n").hunger = 0.6;
     assert!(!fixes::emergency(&w, a, GoalKind::Eat), "fed, the shift holds");
