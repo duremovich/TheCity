@@ -638,16 +638,29 @@ fn test_beating_candidates_carry_the_lawful_damp() {
     assert!(((r1 / r0) - law(0.5)).abs() < 1e-9, "a robbery: the power alone");
 }
 
-/// Shadow V4 bug 10: an agent at Full is never a candidate for an
-/// off-screen deed (his whereabouts are simulated; one was bound to a man
-/// asleep across town).
+/// Shadow V4 bug 10: an agent at Full on the deed's day is never a
+/// candidate for an off-screen deed (his whereabouts were simulated; one was
+/// bound to a man asleep across town). Review 3: read on the deed day's
+/// trace (`trace_flags::FULL`), not the tier at bind time: binds are
+/// deferred (midnight, a promotion's queue), and an agent Statistical that
+/// day and promoted since is still a candidate.
 #[test]
 fn test_full_agent_is_never_a_candidate() {
     let mut w = traced_world(307);
     let victim = w.tier(Lod::Statistical)[0];
     let id = manual_hole(&mut w, victim, HoleKind::Assaulted, 300);
     let hole = w.holes[&id].clone();
-    let (c, _) = *bind::candidates(&w, &hole).first().expect("a candidate");
+    let cands = bind::candidates(&w, &hole);
+    let (c, _) = *cands.first().expect("a candidate");
+    let (d, _) = *cands.get(1).expect("a second candidate");
+    // Promoted after the deed's day: still a candidate.
     lod::set_lod(&mut w, c, Lod::Full);
-    assert!(bind::candidates(&w, &hole).iter().all(|&(x, _)| x != c), "a Full agent was not there");
+    assert!(bind::candidates(&w, &hole).iter().any(|&(x, _)| x == c), "Statistical on the deed's day");
+    // Full on the deed's day: never.
+    set_trace_flag(&mut w, d, 0, citysim::components::trace_flags::FULL);
+    assert!(bind::candidates(&w, &hole).iter().all(|&(x, _)| x != d), "a Full agent was not there");
+    // The bit survives the save's packing.
+    let t = *w.comp::<Trace>(d).expect("trace").days.back().expect("a day");
+    let packed: u32 = t.into();
+    assert_eq!(citysim::components::DayTrace::from(packed), t);
 }

@@ -67,11 +67,16 @@ pub fn run(world: &mut World) {
             let checked = world.check_indices();
             debug_assert!(checked.is_ok(), "{checked:?}");
         }
-        // The trace's STATISTICAL_ALL_DAY: a body at any assignment today.
+        // The trace's STATISTICAL_ALL_DAY: a body at any assignment today;
+        // and (Shadow V4 review 3) its FULL: at Full at any.
         let today = world.day();
         for id in world.bodies() {
-            if let Some(b) = world.comp_mut::<Brain>(id) {
+            let full = world.comp_mut::<Brain>(id).is_some_and(|b| {
                 b.body_day = Some(today);
+                b.lod == Lod::Full
+            });
+            if full {
+                world.mark_day(id, crate::components::trace_flags::FULL);
             }
         }
     }

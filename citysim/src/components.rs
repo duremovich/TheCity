@@ -3319,11 +3319,14 @@ pub mod trace_flags {
     pub const HOTEL: u16 = 1 << 8;
     /// M12 phase 3: slept in a squat.
     pub const SQUAT: u16 = 1 << 9;
+    /// Shadow V4 review 3: at Full at an hourly assignment that day (the
+    /// binder never draws such an agent for the day's off-screen deeds).
+    pub const FULL: u16 = 1 << 10;
 }
 
 /// One day of an adult's life, packed into a u32 for the save (M12 D4):
 /// zone (3 bits) | flags 0-7 (8) << 3 | hunger band (2) << 11 | mood band (2) << 13
-/// | district bits 0-3 (4) << 15 | has-district (1) << 19 | flags 8-9 (2) << 20 | district bit 4 (1) << 22 (Scale S2: a district under 16 packs as before).
+/// | district bits 0-3 (4) << 15 | has-district (1) << 19 | flags 8-9 (2) << 20 | district bit 4 (1) << 22 (Scale S2: a district under 16 packs as before) | flag 10 (1) << 23 (Shadow V4 review 3: FULL; an older save reads it clear).
 /// A pre-M12 value has bit 19 clear and decodes `district = UNSET`.
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(from = "u32", into = "u32")]
@@ -3385,7 +3388,7 @@ impl From<u32> for DayTrace {
         DayTrace {
             zone: Zone::ALL[z.min(Zone::ALL.len() - 1)],
             district,
-            flags: ((v >> 3) & 0xff) as u16 | (((v >> 20) & 0b11) as u16) << 8,
+            flags: ((v >> 3) & 0xff) as u16 | (((v >> 20) & 0b11) as u16) << 8 | (((v >> 23) & 1) as u16) << 10,
             hunger: ((v >> 11) & 0b11) as u8,
             mood: ((v >> 13) & 0b11) as u8,
         }
@@ -3405,6 +3408,7 @@ impl From<DayTrace> for u32 {
             | u32::from(t.mood & 0b11) << 13
             | district
             | u32::from((t.flags >> 8) & 0b11) << 20
+            | u32::from((t.flags >> 10) & 1) << 23
     }
 }
 

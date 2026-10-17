@@ -141,8 +141,9 @@ fn candidates_in(world: &World, hole: &Hole, pool: &[(EntityId, DayTrace)]) -> V
         }
         // Shadow V4 bug 10: a Full agent's whereabouts are simulated: an
         // off-screen deed is never his (one was bound to a man asleep across
-        // town).
-        if world.comp::<crate::components::Brain>(id).is_some_and(|b| b.lod == crate::components::Lod::Full) {
+        // town). Read on the deed day's trace (review 3: binds are deferred,
+        // and the tier now is not the tier then).
+        if t.has(trace_flags::FULL) {
             continue;
         }
         let Some(p) = world.comp::<Personality>(id) else { continue };
