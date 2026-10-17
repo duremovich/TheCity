@@ -79,3 +79,70 @@ Each names the likely cause the critics found; a fix needs a failing test first.
 10. **Sickness and age change behaviour** (street, gangs). Seeking care, sick days, age and illness in a fight's strength; elders taken in or visited.
 11. **Aftermath** (crime, care). A witnessed manslaughter reported; a parent's answer to a taken child.
 12. **The chip's cost shown** (vice): the debt behind the contract, no re-hire the night of a breakdown.
+
+## The sweep (merged 2026-10-17)
+
+`v4fix` ran the sweep, one solo coder working test-first, from ce5afe6 to 4f5b88e. It merged as 2712b4a.
+- **Fixed:** 21 of the 23 bugs. The tests are in `citysim/tests/shadow_v4.rs`.
+- **Skipped:** bug 16. Gang treasuries block the arms trade and the black clinic, so the fix is a feature (credit, a back-room pitch), not a cut in costs.
+- **Partly fixed:** bug 22, the rest of which goes to LIVES_AT_WORK D11.
+- **Found along the way:** a save-determinism bug. A wronged spouse's edge turned Enemy while `World::spouses` kept the pair, so a loaded game diverged 98 ticks later. The test is `test_wronged_spouse_index_survives_a_load`.
+
+**Before and after** (core_sanity events and the CLI, 120 days):
+
+| Measure | ce5afe6 | 4f5b88e |
+|---|---|---|
+| Murders, seeds 42/43/44 | 287 / 263 / 256 (806) | 113 / 91 / 177 (381) |
+| Violent deaths, seeds 42-47 | 1,984 | 770 |
+| Population at day 120 | 1,688 / 1,721 / 1,715 | 1,904 / 1,943 / 1,820 |
+| Employed at day 120 | 1,526 / 1,595 / 1,545 | 1,745 / 1,709 / 1,701 |
+| Starvation | 0 / 0 / 1 | 0 / 0 / 0 |
+| Gang-vs-gang feud days, 42-44 | 267 / 317 / 204 | 231 / 106 / 18 (noisy) |
+
+- The fixes alone cut Murders by about 47%: 78e1902, the tree before the stat-table regen, read 148 / 166 / 110.
+- The regen adds per-seed noise.
+- The city is about half as murderous. Under the brutality-via-pressure rule, the tone comes back through pressure, not by reverting fixes. That is Dylan's call.
+
+**Bullets demoted to printed FINDINGs.** The bugs were feeding their counts, and each is still unit-tested:
+
+| Bullet | ce5afe6, seeds 42-47 | Now |
+|---|---|---|
+| Parley successes | [1,2,2,0,0,1] (37 attempts) | 42-44 [0,1,0]; 9 attempts after batch 2 |
+| Purist expulsions | [21,15,12,24,21,12] | 42-44 [0,0,0] |
+| Organs exported | [6,0,9,8,0,0] | 42-44 [0,0,0] |
+| Sanctioned | [4,3,4,3,1,4] | 42-44 [0,0,0] |
+
+Parley lost its input, not its mechanism. Gang-days with a stronger rival gang in a vendetta went from 92 to 0, because one-sided fights and empty shakedowns no longer breed feuds.
+
+**Law probe** (`citysim/tests/law_probe.rs`, `#[ignore]`d). A witnessed act counts as sentenced if a Report follows within 1 day and a sentence within 3:
+
+| City | ce5afe6 | after batches 1-4 |
+|---|---|---|
+| 2k overall | 0.70 / 0.73 / 0.70 | 0.71 / 0.75 / 0.71 |
+| 20k overall | 0.46 | 0.64 |
+| 20k Coarse | 0.36 (0.24 reported) | 0.56 (0.44 reported) |
+| 20k Full / Stat | 0.70 / 0.78 | 0.73 / 0.83 |
+
+The probe ruled out Precinct capacity (no one went unpunished for a full jail) and the plan queue. What is left is guard throughput through one Precinct at 20k.
+
+On 2k seed 43, days 20-40, the sentence mix changed:
+- **ce5afe6:** 516 fare nights, 130 Theft, 61 Assault.
+- **Now:** 330 fines, 240 fare nights (those who cannot pay), 82 Theft, 53 Assault, 53 Shakedown.
+
+**The re-shadow** (`target/shadow_v4_after/`, the same picks) reads:
+- **Day-worker leisure steps, 00:00-06:00:** 638 → 126. The 126 left are picks with no day shift.
+- **Small-hours grocery runs:** 87 → 0.
+- **Fines:** 6 → 107.
+- **CEO meetings at the HQ:** 0 → 30, against 6 elsewhere.
+- **Dancer tips:** 0 → 60.
+- **Idle hours a week, jobless street picks:** 29.4 → 24.0.
+
+**Left open:**
+1. **LOD parity, actor share by lawfulness.**
+   - law0: Full 0.915, Stat 0.746. law1: Full 0.068, Stat 0.202.
+   - Bug 3's binder mirror is in, but it moves the shares by only about 0.015.
+   - The likely fix is to have `calibrate` learn the binder's per-lawfulness weights. `[bind] lawfulness_power` is not retuned.
+2. **Bug 16:** credit or a back-room pitch.
+3. **Bug 22's rest:** D11, district Stations.
+4. **Shakedown terms scaled by the take:** needs a save field.
+5. **Gang feuds and Parley need a real feed:** rival-turf shakedowns, raids that land.

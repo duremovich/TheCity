@@ -580,11 +580,7 @@ One solo Opus coder `jl1` (worktree `agent-a864f625a5712bd95`) builds phase by p
 
 ## Next session (written 2026-10-17, end of the thirteenth session)
 
-1. **The V4 bug sweep (`v4fix`).**
-   - Worktree `.claude/worktrees/agent-a38316910b9881caa`, branch `worktree-agent-a38316910b9881caa`, based on ce5afe6.
-   - At the session end it had no commit yet and about 22 changed files.
-   - If the agent is unreachable after a restart, resume it by its agent id (a38316910b9881caa) with SendMessage. Or commit its tree as WIP on its branch and hand it to a fresh coder with the same brief: SHADOW_V4's 23 bugs, test-first, batches, then the gates and re-shadow.
-   - The orchestrator merges, then runs `/code-review high`.
+1. **The V4 bug sweep: merged 2026-10-17 as 2712b4a.** The outcome, the before/after table, the demoted bullets, the law probe and the open items are in `docs/SHADOW_V4.md` § The sweep. `/code-review high` runs on the merge. The city is now about half as murderous (Murders 806 → 381 on 42-44). **Dylan's call:** bring the harshness back through pressure (a short "real pressure" pass: jobs, rent, prices, rival-turf shakedowns, organ and arms feeds), or leave it.
 2. **The process review** (`docs/PROCESS_REVIEW.md`), as its own fresh session, after the sweep merges.
 3. **Lives at work.** Phase 0 starts on the main that holds the V4 fixes. One solo coder, per the SOP.
 4. **M18.**
