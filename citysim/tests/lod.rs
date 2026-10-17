@@ -593,6 +593,8 @@ fn test_statistical_scavenge_only_when_broke() {
         assert_eq!(citysim::systems::life::earn_short(&w, id), short);
         if let Some(t) = w.stat_table.as_mut() {
             t.p_scavenge = Some([1.0; citysim::STAT_ROWS]);
+            // The near-broke's own rate (Shadow V4 bug 1's table field).
+            t.p_scavenge_short = Some([1.0; citysim::STAT_ROWS]);
         }
         let till = w.econ.recycler_till;
         stat_hour(&mut w);

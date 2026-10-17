@@ -168,6 +168,13 @@ pub struct StatTable {
     /// As `p_scavenge`, for the hours the Full agent begs (`lod::stat_beg`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub p_beg: Option<[f32; STAT_ROWS]>,
+    /// Shadow V4 bug 1: `p_scavenge` and `p_beg` over the hours of a jobless
+    /// adult short (`life::earn_short`) but not broke: the near-broke's own
+    /// hustle (one rate over both spread the broke's off screen).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p_scavenge_short: Option<[f32; STAT_ROWS]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p_beg_short: Option<[f32; STAT_ROWS]>,
     /// The no-net need theft (flip readiness, read only with
     /// `econ::wages_on` (P10)): the chance a hungry adult (below `hunger_edge`) who
     /// cannot buy a meal steals one in the hour, per lawfulness bucket.

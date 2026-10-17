@@ -1888,6 +1888,9 @@ struct HourTally {
     /// (`life::broke`) at the hour's start (`p_scavenge`'s and `p_beg`'s
     /// hours), and the Scavenges and Begs it began this hour.
     earn: bool,
+    /// Shadow V4 bug 1: short (`life::earn_short`) but not broke: the
+    /// `p_scavenge_short` / `p_beg_short` hours.
+    short: bool,
     scav: u16,
     beg: u16,
     /// An adult below the meal price at the hour's start who was hungry
@@ -1945,6 +1948,8 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
         p_theft_caught: None,
         p_scavenge: None,
         p_beg: None,
+        p_scavenge_short: None,
+        p_beg_short: None,
         p_desperate: None,
         p_steal_broke: None,
         p_dive: None,
@@ -1984,6 +1989,7 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     // learned in every city (the dole city's off-screen broke scavenge, beg
     // and go hungry as its Full ones do).
     let (mut scav, mut beg, mut scav_denom) = ([0u64; STAT_ROWS], [0u64; STAT_ROWS], [0u64; STAT_ROWS]);
+    let (mut scav_s, mut beg_s, mut short_denom) = ([0u64; STAT_ROWS], [0u64; STAT_ROWS], [0u64; STAT_ROWS]);
     let (mut dive, mut dive_denom) = ([0u64; STAT_ROWS], [0u64; STAT_ROWS]);
     // Parity (the law1 actor share): thefts (not `p_desperate`'s) by a thief
     // broke at the hour's start, and the broke agent-hours (`p_steal_broke`).
@@ -2039,7 +2045,9 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
             let adult = citysim::systems::demography::is_adult(world, id);
             // Parity (the bin meals red): the Full Scavenge's and Beg's gate
             // (`life::broke`, the planner's `ctx.poor`), as `lod::stat_earn` reads it.
-            let earn = adult && !world.has::<citysim::Job>(id) && citysim::systems::life::earn_short(world, id);
+            let earn = adult && !world.has::<citysim::Job>(id) && citysim::systems::life::broke(world, id);
+            let short =
+                adult && !world.has::<citysim::Job>(id) && !earn && citysim::systems::life::earn_short(world, id);
             let broke = adult
                 && world.comp::<citysim::Wallet>(id).map_or(0, |w| w.coins)
                     < citysim::systems::life::meal_price(world, id);
@@ -2057,6 +2065,7 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                     courting,
                     features,
                     earn,
+                    short,
                     broke,
                     dive_ok,
                     ride_ok,
@@ -2173,7 +2182,7 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                         t.extra[1] += 1;
                     }
                 }
-                if t.earn {
+                if t.earn || t.short {
                     match brain.exec {
                         citysim::ExecState::Use { kind: citysim::ActionKind::Scavenge, started, .. }
                             if started == just =>
@@ -2350,6 +2359,11 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                         beg[t.row] += u64::from(t.beg.min(1));
                         scav_denom[t.row] += 1;
                     }
+                    if t.short {
+                        scav_s[t.row] += u64::from(t.scav.min(1));
+                        beg_s[t.row] += u64::from(t.beg.min(1));
+                        short_denom[t.row] += 1;
+                    }
                     if t.broke {
                         steal_broke[t.row] += u64::from(t.extra[0].min(1));
                         broke_denom[t.row] += 1;
@@ -2512,6 +2526,9 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     eprintln!("scavenge {scav:?} beg {beg:?} of {scav_denom:?} earning hours");
     let p_scavenge = Some(std::array::from_fn(|i| rate(scav[i], scav_denom[i])));
     let p_beg = Some(std::array::from_fn(|i| rate(beg[i], scav_denom[i])));
+    eprintln!("short: scavenge {scav_s:?} beg {beg_s:?} of {short_denom:?} hours");
+    let p_scavenge_short = Some(std::array::from_fn(|i| rate(scav_s[i], short_denom[i])));
+    let p_beg_short = Some(std::array::from_fn(|i| rate(beg_s[i], short_denom[i])));
     // Parity (the law1 actor share): `p_steal_broke`, pooled over the two
     // hunger buckets as the rows' `p_steal`; a pair under 200 broke hours
     // takes the mean over all rows.
@@ -2606,6 +2623,8 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
         p_theft_caught,
         p_scavenge,
         p_beg,
+        p_scavenge_short,
+        p_beg_short,
         p_desperate,
         p_steal_broke,
         p_dive,

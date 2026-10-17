@@ -168,6 +168,13 @@ fn candidates_in(world: &World, hole: &Hole, pool: &[(EntityId, DayTrace)]) -> V
         } else if t.district != hole.district || hole.district.is_unset() {
             w *= cfg.same_zone_weight;
         }
+        // Shadow V4 bug 3's mirror: a Full fight carries `1 − [life]
+        // fight_lawful_damp × lawfulness`, so an off-screen beating or killing
+        // weighs its candidates by it too.
+        if matches!(hole.kind, HoleKind::Assaulted | HoleKind::Killed) {
+            let damp = f64::from(world.config.life.fight_lawful_damp);
+            w *= (1.0 - damp * l).max(0.0);
+        }
         // M13 D37: the chromed are the likelier culprits of a beating or a
         // killing (a branch: a bare candidate's weight is untouched).
         if matches!(hole.kind, HoleKind::Assaulted | HoleKind::Killed) {

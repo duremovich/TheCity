@@ -99,7 +99,10 @@ fn test_scav_prey_ranked_past_cover() {
 fn test_drag_holds_gangwork() {
     let mut w = city_with_gangs();
     let g = w.gangs().into_iter().find(|&g| w.comp::<Gang>(g).is_some_and(|x| x.members.len() >= 3)).expect("a gang");
-    let m = w.comp::<Gang>(g).expect("gang").members[0];
+    // Shadow V4: a member off the clock (on the regenerated table's city the
+    // first member was a worker in shift, and Work outscored the drag).
+    let members = w.comp::<Gang>(g).expect("gang").members.clone();
+    let m = members.iter().copied().find(|&x| !w.has::<citysim::Job>(x)).unwrap_or(members[0]);
     let v = outsiders(&w)[0];
     // Rested (an exhausted member's Sleep is an emergency too).
     w.comp_mut::<Needs>(m).expect("needs").energy = 1.0;

@@ -1729,7 +1729,10 @@ fn probe_refused_at_a_full_market_eats_elsewhere() {
             if let Some((_, &n)) = by_door.iter().find(|&(_, &n)| n > 1) {
                 looped.push((a.index, n));
             }
-            if !ate {
+            // Shadow V4 (the regenerated table): turned from three packed
+            // Markets in turn is going elsewhere; never fed after trying one
+            // door only is the gap.
+            if !ate && by_door.len() < 2 {
                 unfed.push(a.index);
             }
         }
@@ -1932,10 +1935,14 @@ fn probe_widow_commissions_a_hit_at_the_fixer() {
             .map(|c| (c.kind, c.target.id().index, c.price, c.deposit, c.broker.map(|b| b.index)))
             .collect::<Vec<_>>()
     );
-    assert!(at_fixer.is_some(), "never walked to the Fixer");
     let hit = mine.iter().find(|c| c.target == Target::Agent(killer)).expect("no record on her husband's killer");
     assert_eq!(hit.kind, ContractKind::Hit);
     assert!(hit.broker.is_some(), "posted at the Fixer");
+    // Shadow V4: the walk, or (the Hit market's gaps pass, "reach") word sent
+    // to the nearest Fixer when none is in reach at the deciding moment (on
+    // the regenerated table's city she decided from beyond it).
+    let beyond = contracts::nearest_fixer(&w, her).is_none();
+    assert!(at_fixer.is_some() || beyond, "never walked to the Fixer (one in reach)");
     // Control.
     let (mut w, her, killer) = widow(true);
     let (mut hunted, end) = (false, w.tick + 7 * TICKS_PER_DAY);

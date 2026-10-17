@@ -24,6 +24,8 @@ fn table(f: impl Fn(&mut StatRow)) -> StatTable {
         p_theft_caught: None,
         p_scavenge: None,
         p_beg: None,
+        p_scavenge_short: None,
+        p_beg_short: None,
         p_desperate: None,
         p_steal_broke: None,
         p_dive: None,
@@ -204,7 +206,10 @@ fn test_enemy_in_zone_gets_documented_weight() {
     } else {
         1.0
     };
-    let expected = (1.0 - l).powf(cfg.lawfulness_power) * e * s * z * g;
+    // Shadow V4 bug 3's mirror: a beating's candidate carries the Full
+    // fight's lawful damp too.
+    let damp = 1.0 - f64::from(w.config.life.fight_lawful_damp) * l;
+    let expected = (1.0 - l).powf(cfg.lawfulness_power) * e * s * z * g * damp;
     assert!((w_after - expected).abs() < 1e-9, "{w_after} vs {expected}");
     // Every other candidate is unchanged.
     for (&(c0, x0), &(c1, x1)) in before.iter().zip(&after) {
@@ -608,6 +613,29 @@ fn test_stat_meet_and_home_chat_rolls() {
         w.edges.iter().any(|(&(a, b), e)| home(a).is_some() && home(a) == home(b) && e.affinity > 0.0),
         "no housemate edge drifted"
     );
+}
+
+/// Shadow V4 bug 3's mirror: an off-screen beating's candidate weight
+/// carries the Full fight's `1 − fight_lawful_damp × lawfulness` (a robbery's
+/// does not): the same candidate made lawful loses exactly that factor.
+#[test]
+fn test_beating_candidates_carry_the_lawful_damp() {
+    let mut w = traced_world(308);
+    let victim = w.tier(Lod::Statistical)[0];
+    let beat = manual_hole(&mut w, victim, HoleKind::Assaulted, 300);
+    let rob = manual_hole(&mut w, victim, HoleKind::Robbed, 301);
+    let (hb, hr) = (w.holes[&beat].clone(), w.holes[&rob].clone());
+    let (c, _) = *bind::candidates(&w, &hb).first().expect("a candidate");
+    let weight = |w: &World, h: &Hole| bind::candidates(w, h).into_iter().find(|&(x, _)| x == c).map(|(_, x)| x);
+    let damp = f64::from(w.config.life.fight_lawful_damp);
+    let set = |w: &mut World, l: f32| w.comp_mut::<Personality>(c).expect("p").lawfulness = l;
+    set(&mut w, 0.0);
+    let (b0, r0) = (weight(&w, &hb).expect("in"), weight(&w, &hr).expect("in"));
+    set(&mut w, 0.5);
+    let (b1, r1) = (weight(&w, &hb).expect("in"), weight(&w, &hr).expect("in"));
+    let law = |l: f64| (1.0 - l).powf(w.config.bind.lawfulness_power);
+    assert!(((b1 / b0) - law(0.5) * (1.0 - damp * 0.5)).abs() < 1e-9, "a beating: the power and the damp");
+    assert!(((r1 / r0) - law(0.5)).abs() < 1e-9, "a robbery: the power alone");
 }
 
 /// Shadow V4 bug 10: an agent at Full is never a candidate for an

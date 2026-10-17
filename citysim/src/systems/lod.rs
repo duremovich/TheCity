@@ -1661,9 +1661,15 @@ fn stat_row_index(world: &World, id: EntityId) -> Option<usize> {
 /// from the Recycler's till: `jobs::scavenge_find`) and begs on its row's
 /// `p_beg` (`stat_beg`), one draw on the agent's stream.
 fn stat_earn(world: &mut World, id: EntityId, row: usize) {
-    let Some((p_scav, p_beg)) =
-        world.stat_table.as_ref().map(|t| (t.p_scavenge.map_or(0.0, |p| p[row]), t.p_beg.map_or(0.0, |p| p[row])))
-    else {
+    // Shadow V4 bug 1: the near-broke (short, not broke) on their own rates.
+    let broke = crate::systems::life::broke(world, id);
+    let Some((p_scav, p_beg)) = world.stat_table.as_ref().map(|t| {
+        if broke {
+            (t.p_scavenge.map_or(0.0, |p| p[row]), t.p_beg.map_or(0.0, |p| p[row]))
+        } else {
+            (t.p_scavenge_short.map_or(0.0, |p| p[row]), t.p_beg_short.map_or(0.0, |p| p[row]))
+        }
+    }) else {
         return;
     };
     if p_scav + p_beg <= 0.0 || !crate::systems::demography::is_adult(world, id) {
@@ -1677,8 +1683,10 @@ fn stat_earn(world: &mut World, id: EntityId, row: usize) {
     // above); the savings-line gate spread the broke's rate over everyone
     // under seven meals, so the broke off screen stayed broke (half the
     // off-screen homeless broke against a tenth Full). Shadow V4 bug 1:
-    // with no dole, under `earn_meals_no_net` meals (`life::earn_short`).
-    if !crate::systems::life::earn_short(world, id) {
+    // with no dole the Full jobless under `earn_meals_no_net` meals earn on
+    // (`life::earn_short`), at the near-broke's own learned rates (one rate
+    // over the wider gate is the same spread).
+    if !broke && !crate::systems::life::earn_short(world, id) {
         return;
     }
     let u: f32 = world.rng.agent(id).random();
