@@ -2833,7 +2833,7 @@ fn god_decapitate_close_succession() {
         // chair passed by promotion. Free jobless adults join to the floor
         // (the leader killed below is not counted at the decision: one over).
         let floor = w.config.outside.succession.war_min_members + 1;
-        let mut free = citysim::systems::gang::leader_ranking(w, g).len();
+        let free = citysim::systems::gang::leader_ranking(w, g).len();
         let recruits: Vec<EntityId> = w
             .citizens()
             .into_iter()
@@ -2845,12 +2845,8 @@ fn god_decapitate_close_succession() {
                     && !w.has::<citysim::Job>(a)
             })
             .collect();
-        for r in recruits {
-            if free >= floor {
-                break;
-            }
+        for r in recruits.into_iter().take(floor.saturating_sub(free)) {
             citysim::systems::gang::enlist(w, r, g);
-            free += 1;
         }
         let ranking = citysim::systems::gang::leader_ranking(w, g);
         let (Some(&l), Some(&a), Some(&b)) = (ranking.first(), ranking.get(1), ranking.get(2)) else {
