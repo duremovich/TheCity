@@ -68,6 +68,10 @@ pub struct ShadowArgs {
     /// `--out` keeps the diaries (5 per archetype and seed).
     #[arg(long)]
     pub assert: bool,
+    /// Shadow in a generated city of this many residents (`core_20k`'s recipe: `gen:<N>`,
+    /// `Config::scaled_to(N)`, 50 Ambient flats a slot) instead of the shipped 2,000 city.
+    #[arg(long, value_name = "N")]
+    pub population: Option<u32>,
 }
 
 const ARCHETYPES: [&str; 49] = [
@@ -2024,7 +2028,7 @@ pub fn shadow(args: ShadowArgs) -> Result<(), String> {
     if !args.list && args.out.is_none() {
         return Err("--out <dir> is required (or use --list or --assert)".into());
     }
-    let mut world = start_world(args.seed, args.start_day);
+    let mut world = start_world(args.seed, args.start_day, args.population);
 
     if args.list {
         println!("seed {} day {}: candidates per archetype", args.seed, args.start_day);
@@ -2070,8 +2074,17 @@ pub fn shadow(args: ShadowArgs) -> Result<(), String> {
 }
 
 /// The world of `seed` run normally to the start of `start_day`.
-fn start_world(seed: u64, start_day: u64) -> World {
-    let mut world = World::new(seed, Config::load());
+fn start_world(seed: u64, start_day: u64, population: Option<u32>) -> World {
+    let config = match population {
+        Some(n) => {
+            let mut c = Config::load().scaled_to(n);
+            c.world.map = format!("gen:{n}");
+            c.ambient.flats_per_slot = 50.0;
+            c
+        }
+        None => Config::load(),
+    };
+    let mut world = World::new(seed, config);
     let start_tick = start_day * TICKS_PER_DAY;
     while world.tick < start_tick {
         citysim::tick(&mut world);
@@ -2707,7 +2720,7 @@ fn sample(world: &World, seed: u64, arch: &str) -> Result<Vec<EntityId>, String>
 /// first `BEHAVIOUR_COUNT` of a sample write their diaries under
 /// `out/d<day>` (seed 42) or `out/s<seed>_d<day>`.
 fn behaviour_window(seed: u64, day: u64, list: &'static str, out: Option<&std::path::Path>) -> Vec<SampleRun> {
-    let world = start_world(seed, day);
+    let world = start_world(seed, day, None);
     let jobs: Vec<(&str, Result<Vec<EntityId>, String>)> =
         list.split(',').map(|arch| (arch, sample(&world, seed, arch))).collect();
     std::thread::scope(|s| {
@@ -2885,6 +2898,7 @@ mod tests {
             list: false,
             no_pin: false,
             assert: false,
+            population: None,
         };
         shadow(args).expect("shadow runs");
         let md = std::fs::read_dir(&dir)
