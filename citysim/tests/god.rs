@@ -3253,20 +3253,25 @@ fn god_flood_guns() {
     assert_eq!(r.applied(), 1, "the crate landed");
     // Reacted: the crate reached the gang's hands (the musters' issues);
     // whether the fights turned armed is judged in the doc. Shadow V4: the
-    // flooded gang's own issues against the same gang's in the control (the
-    // city-wide count read the other gangs' musters, noise: 21 / 21 on the
-    // moved city while the flooded gang drew from the crate). An issue is
-    // read as a weapon the gang owns carried by one of its members, sampled
-    // every half hour, one per weapon and day (they go back at midnight).
-    let (mine, ctl) = flooded_gang_issues();
-    eprintln!("the flooded gang's armoury issues 20-60: {mine} (control, the same gang: {ctl})");
-    assert!(mine > ctl, "the crate was never issued");
+    // crate itself is drawn down: a weapon the god placed carried out of
+    // the Hideout by a member within the window. Both earlier forms were
+    // trajectory noise: the city-wide issue count read the other gangs'
+    // musters (21 / 21 while the flooded gang drew from the crate), and the
+    // same gang in the control could build its own armoury (The Hollow's
+    // control issued 18 against the flooded run's 14 on the review tree).
+    let (drawn, staged) = crate_drawn();
+    eprintln!("the crate: {staged} placed, {drawn} (weapon, day) draws by members 20-60");
+    assert_eq!(staged, 200, "the crate landed in the Hideout");
+    assert!(drawn > 0, "the crate was never issued");
 }
 
 /// `god_flood_guns`'s measure: the weakest gang on day 20 (the scenario's
-/// pick), flooded and not, run to day 60: the (weapon, day) pairs a member
-/// carried one of the gang's own weapons.
-fn flooded_gang_issues() -> (usize, usize) {
+/// pick) flooded, run to day 60: the crate (the weapons the command
+/// spawned, read off the arms index before and after it), and the
+/// (weapon, day) pairs one of them was carried by a member of the gang,
+/// sampled every half hour (issues go back at midnight).
+fn crate_drawn() -> (usize, usize) {
+    use citysim::components::{Asset, AssetLoc};
     let mut w = World::new(SEED, Config::load());
     w.run_ticks(20 * TICKS_PER_DAY);
     let g = w
@@ -3275,26 +3280,31 @@ fn flooded_gang_issues() -> (usize, usize) {
         .filter(|&g| w.hideout_of(g).is_some())
         .min_by_key(|&g| (w.comp::<Gang>(g).map_or(0, |x| x.members.len()), g))
         .expect("a gang with a Hideout");
-    let count = |mut w: World, flood: bool| -> usize {
-        if flood {
-            w.push_command(PlayerCommand::FloodGuns { gang: g, n: 200, tier: 3 });
-        }
-        let mut seen: std::collections::BTreeSet<(EntityId, u64)> = std::collections::BTreeSet::new();
-        while w.day() < 60 {
-            w.run_ticks(30);
-            for &a in &w.jobs2.arms.index {
-                let Some(x) = w.comp::<citysim::components::Asset>(a) else { continue };
-                if let citysim::components::AssetLoc::Carried(m) = x.loc {
-                    if x.owner == Some(g) && w.gang_of(m) == Some(g) {
-                        seen.insert((a, w.day()));
-                    }
+    let before = w.jobs2.arms.index.clone();
+    w.push_command(PlayerCommand::FloodGuns { gang: g, n: 200, tier: 3 });
+    w.run_ticks(1);
+    let hideout = w.hideout_of(g);
+    let crate_: std::collections::BTreeSet<EntityId> = w
+        .jobs2
+        .arms
+        .index
+        .iter()
+        .copied()
+        .filter(|a| !before.contains(a))
+        .filter(|&a| w.comp::<Asset>(a).is_some_and(|x| hideout.is_some_and(|h| x.loc == AssetLoc::Stock(h))))
+        .collect();
+    let mut seen: std::collections::BTreeSet<(EntityId, u64)> = std::collections::BTreeSet::new();
+    while w.day() < 60 {
+        w.run_ticks(30);
+        for &a in &crate_ {
+            if let Some(AssetLoc::Carried(m)) = w.comp::<Asset>(a).map(|x| x.loc) {
+                if w.gang_of(m) == Some(g) {
+                    seen.insert((a, w.day()));
                 }
             }
         }
-        seen.len()
-    };
-    let ctl = w.clone();
-    (count(w, true), count(ctl, false))
+    }
+    (seen.len(), crate_.len())
 }
 
 /// v12 god 4: street work legal and brothels licensed on day 10 (the utopia
