@@ -192,7 +192,17 @@ pub fn on_learn(world: &mut World, holder: EntityId, r: &DeedRef, conf: f32, hop
     }
     let Some((rel_w, rel)) = relation(world, holder, r.object) else { return };
     let w = sev * rel_w * conf.clamp(0.0, 1.0);
-    if w < world.config.grudges.grudge_min {
+    // Shadow V4 bug 15: word of a hit on oneself is never too faint to
+    // hold (0.7 x 0.6 x 0.6 = 0.25 sat under `grudge_min`), and it frightens
+    // (`[grudges] marked_safety_drop` off the safety need: Flee).
+    let marked = r.deed == Deed::Hired && r.object == Some(holder);
+    if marked {
+        let drop = world.config.grudges.marked_safety_drop;
+        if let Some(n) = world.comp_mut::<crate::components::Needs>(holder) {
+            n.safety = (n.safety - drop).max(0.0);
+        }
+    }
+    if w < world.config.grudges.grudge_min && !marked {
         return;
     }
     let chain = chain_of(world, r.object);

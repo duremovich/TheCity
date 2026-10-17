@@ -222,11 +222,20 @@ pub fn holes_up_at(world: &World, id: EntityId) -> Option<EntityId> {
     let gang = world.gang_of(id)?;
     let g = world.comp::<Gang>(gang)?;
     let homeless = world.comp::<Household>(id).is_none_or(|h| h.home.is_none());
-    if g.is_sacked(world.tick) || !(g.order == Order::LieLow || homeless || on_watch(world, id)) {
+    let watch = on_watch(world, id);
+    if g.is_sacked(world.tick) || !(g.order == Order::LieLow || homeless || watch) {
         return None;
     }
     let b = world.comp::<Building>(g.hideout)?;
-    (!b.is_full() || b.occupants.contains(&id)).then_some(g.hideout)
+    // Shadow V4 bug 11: lying low or homeless, not a bed past `[gangs]
+    // hole_up_max_tiles` (a sweeper walked 901 min to his Hideout bed at
+    // 20k; the watch is already stood from within a walk, `on_watch`).
+    let max = world.config.gangs.hole_up_max_tiles;
+    let far = max > 0
+        && !watch
+        && !b.occupants.contains(&id)
+        && world.comp::<crate::components::Position>(id).is_some_and(|p| p.tile.manhattan(b.door) > max);
+    (!far && (!b.is_full() || b.occupants.contains(&id))).then_some(g.hideout)
 }
 
 /// JoinGang at the Hideout: join the gang `recruit_gang` names.
@@ -1423,13 +1432,17 @@ fn daily_economy(world: &mut World) {
                 let coins = world.comp::<Wallet>(r).map_or(0, |w| w.coins);
                 let pay = owed.min(coins.max(0));
                 if pay > 0 {
-                    if let Some(w) = world.comp_mut::<Wallet>(r) {
-                        w.coins -= pay;
-                    }
-                    owed -= pay;
+                    // Shadow V4 bug 14: on the books (`Flow::Coerced`, a
+                    // tribute under the gang's hold), not a bare wallet write.
+                    owed -= crate::systems::ownership::pay(
+                        world,
+                        Some(r),
+                        Some(gang),
+                        pay,
+                        crate::systems::ownership::Flow::Coerced,
+                    );
                 }
             }
-            world.gang_credit(gang, 2 - owed);
             // L2 L20: the week's tribute, for the leader's Collect.
             crate::systems::leisure::note_tribute(world, gang, 2 - owed);
         }
@@ -1448,12 +1461,16 @@ fn daily_economy(world: &mut World) {
                 if !world.comp::<Gang>(gang).is_some_and(|g| g.treasury - set_aside >= stipend) {
                     break;
                 }
-                if let Some(g) = world.comp_mut::<Gang>(gang) {
-                    g.treasury -= stipend;
-                }
-                if let Some(w) = world.comp_mut::<Wallet>(m) {
-                    w.coins += stipend;
-                }
+                // Shadow V4 bug 14: the stipend on the books (`Flow::Tribute`,
+                // the gang's pay to its members; it was a bare wallet write
+                // and the diaries read it as a "daily pass").
+                crate::systems::ownership::pay(
+                    world,
+                    Some(gang),
+                    Some(m),
+                    stipend,
+                    crate::systems::ownership::Flow::Tribute,
+                );
                 note_paid(world, m);
             }
         }

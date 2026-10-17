@@ -142,7 +142,11 @@ fn a_gang(w: &mut World) -> (EntityId, EntityId, EntityId) {
 fn test_hold_feeds_and_releases() {
     let mut w = gang_world();
     let (g, l, h) = a_gang(&mut w);
-    let [v, kin] = strangers(&w, 2)[..] else { unreachable!() };
+    // Shadow V4 batch 3: the premise's jobless stranger (on the moved city
+    // the first stranger held a post, and the employer answered).
+    let pool = strangers(&w, 12);
+    let v = *pool.iter().find(|&&x| !w.has::<citysim::Job>(x)).expect("a jobless stranger");
+    let kin = *pool.iter().find(|&&x| x != v).expect("a kin");
     w.edge_entry(v, kin).kind = RelKind::Family;
     let before = identity(&w);
     let demand = Demand::Coins { amount: 200, weekly: false };

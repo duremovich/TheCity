@@ -619,7 +619,17 @@ impl WorldState {
             }
             Some(b) => match world.comp::<Building>(b) {
                 Some(bd) if bd.kind == BuildingKind::Home => LocationKey::Street, // someone else's home
-                Some(bd) => LocationKey::of_building(bd.kind),
+                // Shadow V4 bug 12: someone else's workplace is no Workplace
+                // of the agent's (a courier on a round inside a Club planned
+                // ClerkWork there, failed it twice and lost the shift).
+                Some(bd) => match LocationKey::of_building(bd.kind) {
+                    LocationKey::Workplace
+                        if world.comp::<crate::components::Job>(agent).and_then(|j| j.employer) != Some(b) =>
+                    {
+                        LocationKey::Street
+                    }
+                    k => k,
+                },
                 None => LocationKey::Street,
             },
             None if raid_tile.is_some() && raid_tile == pos.map(|p| p.tile) => LocationKey::RaidTarget,

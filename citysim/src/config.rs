@@ -3013,6 +3013,10 @@ pub struct GangsCfg {
     /// for the door); 0 = any (M11).
     #[serde(default)]
     pub raid_min_members: usize,
+    /// Shadow V4 bug 11: no Hideout bed further than this many tiles from
+    /// the member (0 = any distance).
+    #[serde(default)]
+    pub hole_up_max_tiles: u32,
     /// L2 (L23): the Statistical GangWork day's priors per member-day and
     /// the member-days of evidence they are worth (ledger maths).
     #[serde(default = "GangsCfg::default_stat_extort_prior")]
@@ -4072,6 +4076,10 @@ pub struct CorpsCfg {
     pub grow_cooldown_days: u64,
     pub secure_per_day: usize,
     pub private_pursuit_radius: u32,
+    /// Shadow V4 bug 11: a private guard's warrants lie within this many
+    /// tiles of its office or a client of its corp.
+    #[serde(default)]
+    pub private_beat_tiles: u32,
     pub found_cooldown_days: u64,
     pub residents_per_bar: u32,
     /// M12 D20: `Register`'s target count of Hotels is `population ÷ this`.
@@ -4288,6 +4296,7 @@ impl CorpsCfg {
             grow_cooldown_days: 7,
             secure_per_day: 2,
             private_pursuit_radius: 16,
+            private_beat_tiles: 40,
             found_cooldown_days: 10,
             residents_per_bar: 300,
             residents_per_hotel: 800,
@@ -6244,6 +6253,9 @@ impl Default for RelWeights {
 #[serde(default)]
 pub struct GrudgesCfg {
     pub grudge_min: f32,
+    /// Shadow V4 bug 15: the safety a holder loses on hearing of a Hit on
+    /// himself.
+    pub marked_safety_drop: f32,
     pub grudge_decay: f32,
     pub beat_settle: f32,
     pub inherit_min: f32,
@@ -6264,6 +6276,7 @@ impl Default for GrudgesCfg {
     fn default() -> Self {
         GrudgesCfg {
             grudge_min: 0.15,
+            marked_safety_drop: 0.4,
             grudge_decay: 0.01,
             beat_settle: 0.5,
             inherit_min: 0.4,

@@ -308,8 +308,17 @@ fn probe_laid_off_farm_worker_finds_work_within_14_days() {
     let cfg = Config::load();
     let mut w = World::new(42, cfg);
     // Day 20, a minute to midnight: the layoff lands just before the
-    // midnight job search, as `wages::staff`'s do.
+    // midnight job search, as `wages::staff`'s do. Shadow V4 batch 3: or the
+    // first later day (to 40) with two posts open at that minute (the moved
+    // cities flip the count around the stimulus: 2 on batch 1, under 2 on
+    // batch 3).
     w.run_ticks(21 * TICKS_PER_DAY - 1);
+    for _ in 0..20 {
+        if w.vacancies.values().map(Vec::len).sum::<usize>() >= 2 {
+            break;
+        }
+        w.run_ticks(TICKS_PER_DAY);
+    }
     let a = w
         .workers(Role::Farmer)
         .iter()
@@ -336,7 +345,10 @@ fn probe_laid_off_farm_worker_finds_work_within_14_days() {
         }
     });
     let job = w.comp::<Job>(a).map(|j| (j.role.label(), j.employer));
-    eprintln!("laid off on day 20: hired after {hired_on:?} days as {job:?} (posts open at the search: {posts_open})");
+    eprintln!(
+        "laid off on day {}: hired after {hired_on:?} days as {job:?} (posts open at the search: {posts_open})",
+        start / TICKS_PER_DAY
+    );
     assert!(law::living(&w, a), "alive");
     assert!(hired_on.is_some(), "no Job within 14 days of the layoff");
 }

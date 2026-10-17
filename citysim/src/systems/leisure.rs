@@ -2275,11 +2275,15 @@ pub fn stat_leaders(world: &mut World) {
 
 /// Plan L20: a Purist gang's preacher today: under Expand, `preach_share`
 /// of the members by `id.index % 100`, a busiest spot in a held district.
+/// Jobs & lives phase 6: a cult's members preach too, under any order but a
+/// raid (Shadow V4 bug 13: under Expand only, the Choir at LieLow, Squat or
+/// Harvest never preached).
 pub fn preacher(world: &World, id: EntityId) -> bool {
     let Some(gang) = world.gang_of(id) else { return false };
-    // Jobs & lives phase 6: a cult's members preach too.
-    (crate::systems::creeds::is_purist(world, gang) || crate::systems::faith::cult_preacher(world, gang))
-        && world.comp::<Gang>(gang).is_some_and(|g| g.order == crate::components::Order::Expand)
+    let order = world.comp::<Gang>(gang).map(|g| g.order);
+    let purist = crate::systems::creeds::is_purist(world, gang) && order == Some(crate::components::Order::Expand);
+    let cult = crate::systems::faith::cult_preacher(world, gang) && order.is_some_and(|o| !o.is_raid());
+    (purist || cult)
         && u64::from(id.index % 100) < (world.config.leisure.preach_share * 100.0) as u64
         && world.comp::<Brain>(id).is_none_or(|b| b.gang_task_day != Some(world.day()))
 }

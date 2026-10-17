@@ -588,3 +588,230 @@ fn test_bug10_jail_warms_no_enemy() {
     let e = w.edge(a, b).expect("edge");
     assert!(e.affinity <= -0.95, "a cell warms no Enemy ({})", e.affinity);
 }
+
+/// Bug 11: a corp guard polices its beat (a warrant near its office or a
+/// client, not the city's), walks the five clients nearest its office, and
+/// a gang member far from the Hideout sleeps elsewhere.
+#[test]
+fn test_bug11_corp_guard_beat_and_near_hideout() {
+    use citysim::systems::{gang, law};
+    let mut w = world();
+    let pg = w.guards().iter().copied().find(|&g| law::is_private_guard(&w, g)).expect("a private guard");
+    let cg = w.guards().iter().copied().find(|&g| law::is_city_guard(&w, g)).expect("a city guard");
+    let office = w.comp::<Job>(pg).and_then(|j| j.employer).expect("office");
+    let door = w.comp::<citysim::Building>(office).expect("b").door;
+    let corp = w.corp_of_building(office).expect("corp");
+    let s = adults(&w).into_iter().find(|&x| !law::is_guard(&w, x)).expect("a suspect");
+    // Clients: every Home of the city, so more than five, at all distances.
+    let homes: Vec<EntityId> = w.buildings_of_kind(citysim::BuildingKind::Home).to_vec();
+    let until = w.tick + 100 * citysim::TICKS_PER_DAY;
+    w.comp_mut::<citysim::Corp>(corp).expect("corp").contracts = homes.iter().map(|&h| (h, until)).collect();
+    let far = homes
+        .iter()
+        .copied()
+        .max_by_key(|&h| w.comp::<citysim::Building>(h).expect("b").door.manhattan(door))
+        .expect("a far Home");
+    // A warrant far from every client: off the beat; at the office: on it.
+    w.comp_mut::<citysim::Corp>(corp).expect("corp").contracts = vec![(office, until)];
+    let far_tile = w.comp::<citysim::Building>(far).expect("b").door;
+    let now = w.tick;
+    w.set_last_seen(s, (far_tile, now));
+    assert!(!law::on_beat(&w, pg, s), "a warrant across the city is not the corp's");
+    assert!(law::on_beat(&w, cg, s), "the city guard's beat is the city");
+    w.set_last_seen(s, (door, now));
+    assert!(law::on_beat(&w, pg, s));
+    // The route: the five clients nearest the office.
+    w.comp_mut::<citysim::Corp>(corp).expect("corp").contracts = homes.iter().map(|&h| (h, until)).collect();
+    let route = law::new_patrol_route(&mut w, pg);
+    let mut by_dist: Vec<(u32, EntityId)> =
+        homes.iter().map(|&h| (w.comp::<citysim::Building>(h).expect("b").door.manhattan(door), h)).collect();
+    by_dist.sort();
+    let nearest: Vec<EntityId> = by_dist.iter().take(5).map(|&(_, h)| h).collect();
+    assert_eq!(route, nearest, "the five clients nearest the office");
+    // The Hideout bed: a homeless member beside it holes up; far off, not.
+    let g = w.gangs()[0];
+    let m = jobless_housed(&w)[0];
+    gang::enlist(&mut w, m, g);
+    w.comp_mut::<citysim::Household>(m).expect("hh").home = None;
+    let hideout = w.hideout_of(g).expect("hideout");
+    let hdoor = w.comp::<citysim::Building>(hideout).expect("b").door;
+    w.leave_building(m);
+    w.comp_mut::<citysim::Position>(m).expect("pos").tile = hdoor;
+    assert_eq!(gang::holes_up_at(&w, m), Some(hideout));
+    let far_from_hideout = homes
+        .iter()
+        .map(|&h| w.comp::<citysim::Building>(h).expect("b").door)
+        .max_by_key(|t| t.manhattan(hdoor))
+        .expect("a far tile");
+    assert!(far_from_hideout.manhattan(hdoor) > w.config.gangs.hole_up_max_tiles);
+    w.comp_mut::<citysim::Position>(m).expect("pos").tile = far_from_hideout;
+    assert_eq!(gang::holes_up_at(&w, m), None, "no bed hours away");
+}
+
+/// Bug 12: a worker inside someone else's workplace (a courier's round
+/// through a Club) is not at its Workplace (ClerkWork was planned there
+/// and failed twice); inside its own, it is.
+#[test]
+fn test_bug12_another_workplace_is_not_mine() {
+    use citysim::goap::world_state::{LocationKey, WorldState};
+    let mut w = world();
+    let workplace = |w: &World, b: EntityId| {
+        w.comp::<citysim::Building>(b).is_some_and(|bd| {
+            LocationKey::of_building(bd.kind) == LocationKey::Workplace && bd.kind != citysim::BuildingKind::Home
+        })
+    };
+    let a = day_workers(&w)
+        .into_iter()
+        .find(|&a| w.comp::<Job>(a).and_then(|j| j.employer).is_some_and(|e| workplace(&w, e)))
+        .expect("a worker at a Workplace kind");
+    let own = w.comp::<Job>(a).and_then(|j| j.employer).expect("employer");
+    let other =
+        w.buildings_of_kind(citysim::BuildingKind::Club).iter().copied().find(|&b| b != own).expect("a Club not his");
+    w.leave_building(a);
+    w.enter_building(a, other);
+    assert_ne!(WorldState::observe(&w, a, None).at, LocationKey::Workplace, "a Club on the round is not his post");
+    w.leave_building(a);
+    w.enter_building(a, own);
+    assert_eq!(WorldState::observe(&w, a, None).at, LocationKey::Workplace);
+}
+
+/// Bug 13: a Purist member is not sold the chrome that would expel him
+/// (a member of a creedless gang in the same state is); a cult preaches
+/// under an order other than Expand; a creed gang takes no gray type.
+#[test]
+fn test_bug13_creeds_bind() {
+    use citysim::systems::{assets, creeds, gang, leisure};
+    let mut w = world();
+    let gangs = w.gangs();
+    let (pg, plain) = (gangs[0], gangs[1]);
+    w.comp_mut::<citysim::Gang>(pg).expect("g").creed = Some(citysim::word::Creed::Purist);
+    w.comp_mut::<citysim::Gang>(plain).expect("g").creed = None;
+    let pool = jobless_housed(&w);
+    let (a, b) = (pool[0], pool[1]);
+    gang::enlist(&mut w, a, pg);
+    gang::enlist(&mut w, b, plain);
+    for x in [a, b] {
+        set_coins(&mut w, x, 5000);
+        w.comp_mut::<citysim::Needs>(x).expect("n").wealth = 1.0;
+        w.comp_mut::<citysim::Skills>(x).expect("s").hacking = 0.0;
+    }
+    assert_eq!(creeds::visible_room(&w, a), Some(w.config.creeds.creed_tolerance));
+    assert_eq!(creeds::visible_room(&w, b), None);
+    let chrome = |w: &World, x: EntityId| {
+        assets::shop_choice(w, x, false).is_some_and(|o| o.category == assets::ShopCategory::Chrome)
+    };
+    assert!(chrome(&w, b), "the control: a creedless member is sold chrome");
+    assert!(!chrome(&w, a), "a Purist is not sold the chrome that expels him");
+    // The cult's sermon under LieLow (a Purist's waits for Expand).
+    let cult = w.config.faith.creeds.iter().position(|_| true).expect("a cult row") as u8;
+    w.comp_mut::<citysim::Gang>(plain).expect("g").creed = Some(citysim::word::Creed::Config(cult));
+    w.comp_mut::<citysim::Gang>(plain).expect("g").order = citysim::Order::LieLow;
+    let share = (w.config.leisure.preach_share * 100.0) as u32;
+    let preacher = w
+        .citizens()
+        .into_iter()
+        .find(|&x| {
+            x.index % 100 < share && !w.has::<citysim::GangMember>(x) && citysim::systems::demography::is_adult(&w, x)
+        })
+        .expect("a preacher-to-be");
+    gang::enlist(&mut w, preacher, plain);
+    assert!(leisure::preacher(&w, preacher), "a cult preaches at LieLow");
+    // The gray types are dealt at midnight: none for a creed gang.
+    w.jobs2.gray.types.clear();
+    w.run_ticks(citysim::TICKS_PER_DAY);
+    for g in [pg, plain] {
+        if creeds::creed_of(&w, g).is_some() {
+            assert!(citysim::systems::gray::gang_type(&w, g).is_none(), "a creed gang is no scav crew");
+        }
+    }
+}
+
+/// Bug 14: the gang's daily stipend is on the books (`Flow::Tribute`), not
+/// a bare wallet write the diaries read as a "daily pass".
+#[test]
+fn test_bug14_stipend_is_a_flow() {
+    use citysim::systems::gang;
+    let mut w = world();
+    let g = w.gangs()[0];
+    let pool = jobless_housed(&w);
+    for &m in &pool[..3] {
+        gang::enlist(&mut w, m, g);
+    }
+    {
+        let x = w.comp_mut::<citysim::Gang>(g).expect("g");
+        x.treasury = 1000;
+        x.tribute_week = 0;
+    }
+    let left = citysim::TICKS_PER_DAY - w.tick % citysim::TICKS_PER_DAY;
+    w.run_ticks(left + 1);
+    let row = w.stats.history.back().expect("a day row").clone();
+    let day_flows = row.living.flow_tribute + w.stats.current.living.flow_tribute;
+    let stipend = w.config.social.gang_stipend;
+    assert!(day_flows >= 3 * stipend, "the stipends ({stipend} x 3) on the books: {day_flows}");
+}
+
+/// Bug 15 (the locate): once a Locate is taken, a stranger's sighting no
+/// longer pays (the crowd filled the cap and the taker who staked out three
+/// days got 0 c); the taker's (`on_contact`, the ledger's report) still do.
+#[test]
+fn test_bug15_taken_locate_pays_the_taker_only() {
+    use citysim::contract::{ContractKind, ContractStatus, Origin, Posting, Target};
+    use citysim::systems::contracts;
+    let mut w = world();
+    w.config.bounty.min_gap_hours = 0;
+    let corp = w.corps()[0];
+    w.comp_mut::<citysim::Corp>(corp).expect("corp").treasury = 100_000;
+    let pool: Vec<EntityId> = adults(&w).into_iter().filter(|&x| !citysim::systems::law::is_guard(&w, x)).collect();
+    let (t, taker, crowd) = (pool[0], pool[1], pool[2]);
+    let p = Posting {
+        buyer: Some(corp),
+        agent: None,
+        kind: ContractKind::Locate,
+        target: Target::Agent(t),
+        broker: None,
+        deadline_days: 7,
+        origin: Origin::God,
+        price: None,
+    };
+    let id = contracts::post(&mut w, p).expect("posted");
+    let tile = w.comp::<citysim::Position>(t).expect("pos").tile;
+    let paid = |w: &World| w.contracts[&id].paid_sightings;
+    assert!(contracts::sees(&w, crowd, id), "the crowd sees the open record");
+    contracts::on_sighting(&mut w, crowd, t, tile);
+    assert_eq!(paid(&w), 1, "the control: an open Locate pays the crowd");
+    contracts::god_take(&mut w, id, taker).expect("taken");
+    assert_eq!(w.contracts[&id].status, ContractStatus::Taken);
+    w.tick += 1;
+    contracts::on_sighting(&mut w, crowd, t, tile);
+    assert_eq!(paid(&w), 1, "a taken Locate pays no stranger");
+}
+
+/// Bug 15 (the marked man): word of a Hit on oneself, however faint, is a
+/// grudge on the buyer and a fright (it weighed 0.25 under `grudge_min`).
+#[test]
+fn test_bug15_marked_man_reacts() {
+    let mut w = world();
+    let ad = adults(&w);
+    let (holder, buyer) = (ad[0], ad[1]);
+    w.comp_mut::<citysim::Needs>(holder).expect("n").safety = 1.0;
+    let r = citysim::word::DeedRef { deed: citysim::word::Deed::Hired, actor: Some(buyer), object: Some(holder) };
+    citysim::systems::grudges::on_learn(&mut w, holder, &r, 0.3, 2);
+    let held = w.comp::<citysim::word::Grudges>(holder).is_some_and(|g| g.list.iter().any(|x| x.target == buyer));
+    assert!(held, "a grudge on the man who paid for the hit");
+    let safety = w.comp::<citysim::Needs>(holder).expect("n").safety;
+    assert!(safety <= 1.0 - w.config.grudges.marked_safety_drop + 1e-6, "afraid ({safety})");
+}
+
+/// Found under batch 3 (a save that diverged): a spouse turned on stays a
+/// spouse in the edge as in `World::spouses`, so a loaded world rebuilds
+/// the same marriage the running one holds.
+#[test]
+fn test_wronged_spouse_index_survives_a_load() {
+    let mut w = world();
+    let (a, s) = w.citizens().into_iter().find_map(|x| w.spouse_of(x).map(|s| (x, s))).expect("a married pair");
+    citysim::systems::social::robbed_by(&mut w, a, s);
+    assert_eq!(w.spouse_of(a), Some(s), "still married in the running world");
+    let back = citysim::save::from_ron(&citysim::save::to_ron(&w)).expect("loads");
+    assert_eq!(back.spouse_of(a), Some(s), "and in the loaded one");
+    assert!(w.edge(a, s).is_some_and(|e| e.affinity < 0.0), "the wrong is felt");
+}

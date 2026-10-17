@@ -294,6 +294,7 @@ corp_raid_break = 0.5
 # Phase 4 (plan addition): Raid and Retaliate need 3 fit members. Early gangs of 4-10 and fresh
 # splinters raided with 1-2 at the door (seed 43: 9 of 17 expeditions); a raid is a crew's job.
 raid_min_members = 3
+hole_up_max_tiles = 60             # Shadow V4 bug 11: no Hideout bed further than this from the member (a 901-min walk at 20k)
 # L2 (plan L23): the Statistical GangWork day's priors per member-day (placeholders), shrunk toward
 # the ledger's on-screen acts with stat_prior_days member-days of weight.
 stat_extort_prior = 0.02
@@ -652,6 +653,7 @@ shop_price_tiles = 12              # D15: one coin of price is worth 12 tiles of
 grow_cooldown_days = 7             # D23
 secure_per_day = 2                 # D24
 private_pursuit_radius = 16        # D18
+private_beat_tiles = 40            # Shadow V4 bug 11: a private guard's warrants lie this near its office or a client (it chased the city's)
 found_cooldown_days = 10           # D26
 residents_per_bar = 300            # D25
 residents_per_hotel = 800          # M12 D20: Register's Hotel target = population ÷ this
@@ -1347,6 +1349,7 @@ founders = 3
 # beating heard of or lost (a lost fight's own view weighs 0.5 x 0.6 = 0.30 < 0.35). Formed on seeds 42/43/44: 20,728 / 19,185 / 18,125 -> 5,236 / 5,183 / 5,939;
 # Murders 61 / 49 / 59 -> 47 / 44 / 46 against 41 / 48 / 47 with the word off.
 grudge_min = 0.35
+marked_safety_drop = 0.4           # Shadow V4 bug 15: word of a Hit on oneself takes this off the safety need (and holds whatever its weight)
 grudge_decay = 0.01
 beat_settle = 0.5
 inherit_min = 0.4

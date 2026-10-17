@@ -75,7 +75,20 @@ fn gang_world_in(save: &std::sync::OnceLock<String>, pre_mirror: bool) -> World 
                 .filter(|&g| w.comp::<Gang>(g).is_some_and(|x| x.leader.is_some() && x.members.len() >= 2))
                 .count();
             let held = w.gangs().into_iter().any(|g| gang::held_districts(&w, g).iter().any(|&(_, n)| n >= 3));
-            if led >= 2 && held {
+            // Shadow V4 batch 3: and a led gang holding a district with a
+            // business to protect (`racket`'s premise; the moved city's
+            // first such day came later than its first held district).
+            let business = w.gangs().into_iter().any(|g| {
+                w.comp::<Gang>(g).is_some_and(|x| x.leader.is_some())
+                    && gang::held_districts(&w, g).into_iter().any(|(d, _)| {
+                        leverage::PROTECTED.iter().flat_map(|&k| w.buildings_of_kind(k).to_vec()).any(|b| {
+                            w.district_of_building(b) == d
+                                && w.comp::<Building>(b)
+                                    .is_some_and(|bd| !bd.derelict && !bd.demolished && bd.venue.is_none())
+                        })
+                    })
+            });
+            if led >= 2 && held && business {
                 break;
             }
         }

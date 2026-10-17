@@ -244,6 +244,25 @@ fn run_city(seed: u64, days: u64, cfg: Config) -> SeedRun {
         day_mark("scrip paid", row.outside.as_ref().is_some_and(|o| o.scrip_paid > 0));
         day_mark("scrip converted", row.outside.as_ref().is_some_and(|o| o.scrip_converted > 0));
         *r.marks.entry("Dealing report").or_insert(0) += row.dealing_reports;
+        // Shadow V4 (the feud drought behind the demoted Parley): gang-days
+        // with an open vendetta against another gang.
+        let gang_feuds = w
+            .gangs()
+            .into_iter()
+            .filter(|&g| {
+                w.vendettas.iter().any(|v| {
+                    let other = if v.a == g {
+                        Some(v.b)
+                    } else if v.b == g {
+                        Some(v.a)
+                    } else {
+                        None
+                    };
+                    other.is_some_and(|o| w.has::<citysim::Gang>(o))
+                })
+            })
+            .count() as u32;
+        *r.marks.entry("gang feud gang-day").or_insert(0) += gang_feuds;
         // Transit: a ride (any tier) and a fare paid to the city.
         let t = &row.transit;
         *r.marks.entry("El ride").or_insert(0) += t.rides_full + t.rides_coarse + t.rides_stat;
@@ -584,10 +603,10 @@ fn mechanisms() -> Vec<Mechanism> {
         ("a Data sale", k(EventKind::DataSold)),      // [8, 1, 0]; 5 of 6
         ("a Flatline", k(EventKind::Flatlined)),      // [3, 2, 3]
         // M15 the word and the blood.
-        ("a Feed Story", k(EventKind::Story)),          // [810, 790, 789]
-        ("a Hunt", k(EventKind::HuntStarted)),          // [94, 63, 66]
-        ("a Vendetta", k(EventKind::Vendetta)),         // [7, 7, 6]
-        ("a Purist expulsion", k(EventKind::Expelled)), // [0, 4, 5]; 5 of 6
+        ("a Feed Story", k(EventKind::Story)),  // [810, 790, 789]
+        ("a Hunt", k(EventKind::HuntStarted)),  // [94, 63, 66]
+        ("a Vendetta", k(EventKind::Vendetta)), // [7, 7, 6]
+        // A Purist expulsion: printed (Shadow V4 batch 3; see printed_mechanisms).
         // L2 the living city, the Real economy.
         ("a World export", k(EventKind::Exported)),      // [294, 328, 319]
         ("a Collect", k(EventKind::Collected)),          // [57, 57, 58]
@@ -723,14 +742,27 @@ fn printed_mechanisms() -> Vec<Mechanism> {
         // carries it (a decapitation splits; one held district and a district
         // with no Hideout site do not).
         ("a gang Split", k(EventKind::Split)),
+        // M15's Purist expulsion, demoted (Shadow V4 batch 3): `expelled`
+        // over 42-47 x 120 [21, 15, 12, 24, 21, 12] on ce5afe6, nearly all
+        // members sold the chrome their creed forbids (bug 13); with the
+        // sale capped at the creed's tolerance [0, 0, 1, 0, 0, 0] (an
+        // install by another path, a god SetCreed). `moves.rs::
+        // test_purist_expels_chromed_member` carries it.
+        ("a Purist expulsion", k(EventKind::Expelled)),
         // M16b phase 1's Parley (a peace bought), demoted (Shadow V4 batch
         // 2, 2026-10-17): successes over 42-47 x 120 days [1, 2, 2, 0, 0, 1]
-        // on ce5afe6 (attempts 5-10 a seed), [0, 0, 0, 1, 0, 0] on the
-        // batch-2 tree, and 0-4 a seed under one-key butterflies of it
-        // (`leader_min_days` 0: [0, 0, 0], `hire_knowledge_floor` 0: [4, 1,
-        // 0]): a weekly roll between two gangs a strength ratio apart flips
-        // with the trajectory. `leverage.rs::test_parley_makes_peace_for_tribute`
-        // and `test_parley_refused_declares_the_feud` carry it.
+        // on ce5afe6, [4, 1, 2, 0, 0, 0] after V4 batch 1, [0, 0, 0, 1, 0,
+        // 0] after batch 2, 0-4 a seed under one-key butterflies of it.
+        // Attempts (parleys + parley_fails) [5, 10, 4, 5, 6, 7] on ce5afe6,
+        // [6, 5, 3, 2, 0, 4] after batch 1, [0, 1, 4, 4, 0, 0] after batch 2
+        // (with bug 9's shakedown rule undone [5, 1, 2] on 42-44, with it and
+        // the raid call-off undone [2, 3, 4]). The weekly pass runs (leaders
+        // free); what thinned is its input, gang-against-gang vendettas (a
+        // seed-42 probe: on ce5afe6 92 gang-days with a stronger rival gang
+        // in feud, here 0, the gangs' open feuds being with corps), fed on
+        // ce5afe6 by the fights and 0-coin shakedown grudges bugs 3 and 9
+        // took out. `leverage.rs::test_parley_makes_peace_for_tribute` and
+        // `test_parley_refused_declares_the_feud` carry it.
         ("a Parley", m("Parley")),
         // M9's day in Crackdown, demoted (the Hit market P2, 2026-10-11): on
         // the flipped city it is rare, days held over 42-47 x 120 days [4, 9,
@@ -838,7 +870,7 @@ fn jobs2_mechanisms() -> Vec<Mechanism> {
         "conversion",
         "fake ID sold",
         "organ made",
-        "organ exported", // [27, 11, 8, 0, 0, 0]: 3 of 6
+        // "organ exported": printed (Shadow V4 batch 3; see jobs2_printed).
         "scav kill",
         // Phase 7: life stages.
         "School day",
@@ -871,16 +903,21 @@ fn jobs2_printed() -> Vec<Mechanism> {
         "resale post",         // [0, 0, 0, 0, 0, 0]
         "street child's coin", // [0, 0, 14, 7, 0, 0]
         "organ used",          // [0, 1, 1, 0, 0, 0]
-        "captive chipped",     // [0, 0, 0, 0, 0, 0]
-        "Trafficking",         // [0, 0, 0, 0, 0, 0]
-        "street child taken",  // [0, 0, 0, 0, 0, 0]
-        "struck off",          // [0, 1, 0, 0, 0, 1]
-        "BlackMarket report",  // [0, 0, 0, 0, 0, 0]
-        "black clinic",        // [0, 0, 0, 0, 0, 0]
-        "pickpocket",          // [0, 0, 0, 0, 0, 0]
-        "tinker repair",       // [0, 0, 0, 0, 0, 0]
-        "rickshaw trip",       // [0, 0, 0, 0, 0, 0]
-        "outage",              // [0, 0, 0, 0, 0, 0]
+        // Shadow V4 batch 3: organs_exported over 42-47 x 120 [6, 0, 9, 8,
+        // 0, 0] on ce5afe6 (3 of 6), [0, 0, 0, 7, 0, 0] with bug 13 (a
+        // creed gang takes no scav type: the cults typed as scavs did much
+        // of the hunting). `gray_faith.rs::test_organs_sold_then_exported`.
+        "organ exported",
+        "captive chipped",    // [0, 0, 0, 0, 0, 0]
+        "Trafficking",        // [0, 0, 0, 0, 0, 0]
+        "street child taken", // [0, 0, 0, 0, 0, 0]
+        "struck off",         // [0, 1, 0, 0, 0, 1]
+        "BlackMarket report", // [0, 0, 0, 0, 0, 0]
+        "black clinic",       // [0, 0, 0, 0, 0, 0]
+        "pickpocket",         // [0, 0, 0, 0, 0, 0]
+        "tinker repair",      // [0, 0, 0, 0, 0, 0]
+        "rickshaw trip",      // [0, 0, 0, 0, 0, 0]
+        "outage",             // [0, 0, 0, 0, 0, 0]
     ]
     .into_iter()
     .map(|k| (k, m(k)))
@@ -904,6 +941,11 @@ fn judge_mechanisms(runs: &[SeedRun], failures: &mut Vec<String>) {
         let per: Vec<u32> = runs.iter().map(&f).collect();
         eprintln!("FINDING mechanism {name} (printed, unit-tested): per seed {per:?}");
     }
+    // Shadow V4 batch 3 (coordinator, 2026-10-17): the gang-vs-gang feuds
+    // that feed the Parley (and a gang war's story), never asserted:
+    // [267, 317, 204] on ce5afe6.
+    let feuds: Vec<u32> = runs.iter().map(|r| r.mark("gang feud gang-day")).collect();
+    eprintln!("FINDING gang-days with an open gang-vs-gang vendetta: per seed {feuds:?}");
     let mut all = mechanisms();
     if jobs2 {
         all.extend(jobs2_mechanisms());

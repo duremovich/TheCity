@@ -456,6 +456,29 @@ pub fn is_city_guard(world: &World, guard: EntityId) -> bool {
     world.comp::<Job>(guard).is_some_and(|j| j.role == Role::Guard && !job_is_private_guard(world, j))
 }
 
+/// Shadow V4 bug 11: a private guard polices his corp's beat: a suspect
+/// last seen within `[corps] private_beat_tiles` of his office or one of its
+/// clients, or in his own sight (`private_pursuit_radius`; the corp guards
+/// chased warrants city-wide). A city guard's beat is the city.
+pub fn on_beat(world: &World, guard: EntityId, s: EntityId) -> bool {
+    if !is_private_guard(world, guard) {
+        return true;
+    }
+    let Some(&(seen, _)) = world.last_seen().get(&s) else { return false };
+    let here = world.comp::<Position>(guard).map(|p| p.tile);
+    if here.is_some_and(|t| t.manhattan(seen) <= world.config.corps.private_pursuit_radius) {
+        return true;
+    }
+    let max = world.config.corps.private_beat_tiles;
+    let Some(office) = world.comp::<Job>(guard).and_then(|j| j.employer) else { return false };
+    let near = |b: EntityId| world.comp::<Building>(b).is_some_and(|bd| bd.door.manhattan(seen) <= max);
+    if near(office) {
+        return true;
+    }
+    let Some(corp) = world.corp_of_building(office) else { return false };
+    world.comp::<crate::components::Corp>(corp).is_some_and(|c| c.contracts.iter().any(|&(b, _)| near(b)))
+}
+
 /// `claimed`: the suspects other guards already chase (L1), built once per
 /// scoring call by `claim_set`, on its first read, with the pursuer's
 /// `pursuit_radius_for`. `seen`: `s`'s `World::last_seen` entry.
@@ -2261,9 +2284,9 @@ pub fn cracking_down_on(world: &World, gang: EntityId) -> bool {
 }
 
 /// M11 D18: a private guard walks up to five of its corp's contracted
-/// clients (all of them, nearest its office first, when there are five or
-/// fewer; else five drawn with the world stream as the city's beat is), or
-/// with no clients its corp's own buildings nearest its Security Office.
+/// clients, nearest its office first (Shadow V4 bug 11: five drawn
+/// city-wide when it had more), or with no clients its corp's own
+/// buildings nearest its Security Office.
 /// `None` for a city guard, and for a guard whose Office no corp owns (none
 /// should exist: `corps::move_building` lays them off when it changes hands).
 fn private_patrol_route(world: &mut World, guard: EntityId) -> Option<Vec<EntityId>> {
@@ -2279,10 +2302,8 @@ fn private_patrol_route(world: &mut World, guard: EntityId) -> Option<Vec<Entity
         .map(|c| c.contracts.iter().map(|&(b, _)| b).collect())
         .unwrap_or_default();
     let clients: Vec<EntityId> = clients.into_iter().filter(|&b| usable(world, b).is_some()).collect();
-    if clients.len() > 5 {
-        let picks = (0..5).map(|_| clients[world.rng.world().random_range(0..clients.len())]).collect();
-        return Some(picks);
-    }
+    // Shadow V4 bug 11: the five clients nearest the office, not five drawn
+    // city-wide (a 382-min first leg, 88 h of travel a week at 20k).
     let pool: Vec<EntityId> = if clients.is_empty() {
         world.comp::<crate::components::Corp>(corp).map(|c| c.buildings.clone()).unwrap_or_default()
     } else {

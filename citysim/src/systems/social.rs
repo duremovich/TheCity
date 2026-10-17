@@ -148,7 +148,14 @@ pub fn make_enemy(world: &mut World, a: EntityId, b: EntityId, d_affinity: f32) 
         e.affinity = e.affinity.min(c);
     }
     e.trust = 0.0;
-    e.kind = RelKind::Enemy;
+    // Shadow V4 (found under batch 3's save round trip): a spouse wronged
+    // stays a spouse at the hostile affinity. Overwriting the Spouse edge
+    // left `World::spouses` holding the pair in the running world while a
+    // load's `rebuild_indices` dropped it (no Spouse edge): a save then
+    // diverged (a Statistical night's "beside a spouse" intimacy).
+    if e.kind != RelKind::Spouse {
+        e.kind = RelKind::Enemy;
+    }
     e.last_interaction = tick;
     reindex_kind(world, a, b);
 }

@@ -653,7 +653,12 @@ pub fn considerations(
             } else if let Some(s) = chasing {
                 dist(s)
             } else {
-                crate::systems::law::located_suspects(world, Some(by)).into_iter().filter_map(dist).min()
+                // Shadow V4 bug 11: a corp guard's warrants on its beat only.
+                crate::systems::law::located_suspects(world, Some(by))
+                    .into_iter()
+                    .filter(|&s| crate::systems::law::on_beat(world, id, s))
+                    .filter_map(dist)
+                    .min()
             };
             // L2 shadow fixes item 10: the shift is a workday's.
             let working =

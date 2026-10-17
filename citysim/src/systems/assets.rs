@@ -2075,8 +2075,14 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
     // Phase 3 (D43): the first empty slot of the agent's list, while a T1
     // is within reach at the cheapest Clinic (a used one may be cheaper).
     let chrome_slot = chrome_slot(world, id);
-    // Violence fix 3: the dearest tier the agent's humanity still takes.
-    let max_tier = chrome_max_tier(world, id);
+    // Violence fix 3: the dearest tier the agent's humanity still takes;
+    // Shadow V4 bug 13: a creed gang's member no tier past what it allows
+    // on a slot that shows.
+    let shows = chrome_slot.is_some_and(|s| matches!(s, Slot::Arms | Slot::Eyes | Slot::Skin));
+    let max_tier = match crate::systems::creeds::visible_room(world, id) {
+        Some(room) if shows => chrome_max_tier(world, id).min(room),
+        _ => chrome_max_tier(world, id),
+    };
     let want_chrome = max_tier >= 1
         && chrome_slot.is_some_and(|s| {
             lowest(BuildingKind::Clinic)
