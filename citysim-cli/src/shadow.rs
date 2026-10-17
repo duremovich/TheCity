@@ -2061,6 +2061,13 @@ pub fn shadow(args: ShadowArgs) -> Result<(), String> {
     }
     let dir = args.out.clone().unwrap_or_default();
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    // V4: the pins sit inside `[lod] max_full`, so more picks than the cap
+    // left the overflow at Coarse all week; the cap grows by the pick count,
+    // keeping its slots for the rest of the city. Not in `behaviour`, whose
+    // bounds were measured under the shipped cap.
+    if !args.no_pin {
+        world.config.lod.max_full += picked.len();
+    }
     let mut tracks = follow(&mut world, &picked, args.days, !args.no_pin, true);
     let end = world.tick;
     let mut total = 0u64;
