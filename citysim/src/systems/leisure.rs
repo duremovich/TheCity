@@ -1053,6 +1053,13 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
     if unwind_satisfied(world, id) {
         return None;
     }
+    // Shadow V4 bug 2: no leisure in a day worker's small hours (woken at
+    // 23:30, it stood on a corner at 03:00; a soft 0.3 gate still beat Idle
+    // with nothing else awake: the re-shadow read 606 such HangOuts against
+    // 638): the night is Idle's, and Idle at Home at night is bed.
+    if crate::exec::routine::day_worker_night(world, id) {
+        return None;
+    }
     let n = world.comp::<Needs>(id)?;
     // Hunger fix item 5 (P5f): a worker on shift stays at work (day gaps
     // 1: a shift being worked; a rest day's shift hours are free).
@@ -1062,13 +1069,7 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
     let pick = choice(world, id, false)?;
     let cs = vec![
         Consideration::new("U(fun)", urgency(n.fun), Curve::Logistic { k: 8.0, mid: 0.5 }),
-        // Shadow V4 bug 2: a day worker's small hours are not off hours (as
-        // Socialise's phase gate): woken at 23:30, it stood on a corner at 03:00.
-        Consideration::new(
-            "off hours",
-            can(off_hours(world, id) && !crate::exec::routine::day_worker_night(world, id)),
-            gate_or(0.3),
-        ),
+        Consideration::new("off hours", can(off_hours(world, id)), gate_or(0.3)),
         Consideration::raw("rung", pick.score, (0.5 + pick.score).min(1.0)),
         // Deviation (measured): food before fun. Without it a hungry body
         // took the evening at a spot or a venue over its meal (fun decay off:

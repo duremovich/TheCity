@@ -349,6 +349,11 @@ fn test_protection_never_on_own_front() {
     let mut w = gang_world();
     let (g, _, b, _) = racket(&mut w);
     let d = w.district_of_building(b);
+    // Shadow V4: the racket's business the district's best (on the moved
+    // city another business there out-earned its staged 100 a day).
+    if let Some(bd) = w.comp_mut::<Building>(b) {
+        bd.revenue = std::iter::repeat_n(100_000, 7).collect();
+    }
     assert_eq!(leverage::protection_target(&w, g, d), Some(b));
     if let Some(bd) = w.comp_mut::<Building>(b) {
         bd.owner = Some(g);

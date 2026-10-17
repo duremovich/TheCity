@@ -1556,14 +1556,23 @@ fn probe_worker_makes_one_grocery_run_to_the_nearest_detour_market() {
         let e = w.comp::<Job>(a).and_then(|j| j.employer).and_then(|e| w.comp::<Building>(e)).map(|b| b.door);
         h.zip(e).map_or(0, |(h, e)| h.manhattan(e))
     };
-    // Off shift at home at 19:00, a crowded Home a walk of an hour or two from work.
-    let a = day_workers(&w)
-        .into_iter()
-        .filter(|&a| building(&w, a) == home(&w, a) && (20..=90).contains(&dist(&w, a)))
-        .max_by_key(|&a| {
-            (home(&w, a).map_or(0, |h| w.residents_of(h).len().min(3)), dist(&w, a), std::cmp::Reverse(a.index))
-        })
-        .expect("a day worker at home at 19:00");
+    // Off shift at home at 19:00, a crowded Home a walk of an hour or two from
+    // work (Shadow V4: or the first evening hour to 22:00 one is home: on the
+    // moved city none was at 19:00).
+    let pick = |w: &World| {
+        day_workers(w)
+            .into_iter()
+            .filter(|&a| building(w, a) == home(w, a) && (20..=90).contains(&dist(w, a)))
+            .max_by_key(|&a| {
+                (home(w, a).map_or(0, |h| w.residents_of(h).len().min(3)), dist(w, a), std::cmp::Reverse(a.index))
+            })
+    };
+    let mut found = pick(&w);
+    while found.is_none() && w.tick_of_day() < 22 * 60 {
+        w.run_ticks(TICKS_PER_HOUR);
+        found = pick(&w);
+    }
+    let a = found.expect("a day worker at home in the evening");
     pin(&mut w, a);
     let h = home(&w, a).expect("a home");
     let residents = w.residents_of(h).len();

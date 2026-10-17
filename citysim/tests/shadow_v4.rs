@@ -93,7 +93,7 @@ fn test_bug2_day_worker_night_is_not_off_hours() {
         }
         w.tick = day + 3 * 60;
         assert!(citysim::exec::routine::day_worker_night(&w, a));
-        assert_eq!(off(&w, a), Some(0.0), "03:00 is no day worker's leisure hour");
+        assert_eq!(off(&w, a), None, "03:00 is no day worker's leisure hour");
         checked += 1;
         if checked == 5 {
             break;
