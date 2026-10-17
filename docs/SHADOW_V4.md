@@ -146,3 +146,20 @@ On 2k seed 43, days 20-40, the sentence mix changed:
 3. **Bug 22's rest:** D11, district Stations.
 4. **Shakedown terms scaled by the take:** needs a save field.
 5. **Gang feuds and Parley need a real feed:** rival-turf shakedowns, raids that land.
+
+**The review round** (`/code-review high` on ce5afe6..2712b4a, 10 findings, all real). The fixes are 15eb256, b68b5b4, 0fb3b6a and 1552009, with tests:
+- **Bug 11's beat check was a no-op.** It now lives in `law::chaseable`, on the real pursuit path.
+- **The succession gap could go negative.** The runner-up now comes from the heir's own tenure class.
+- **The binder judged the wrong day.** It now excludes an agent who was Full on the deed day (`trace_flags::FULL`), not one Full at bind time.
+- **The arrest scuffle left grudges.** It is now remembered as WasArrested up front, so no grudge and no Enemy edge.
+- **Fines skipped the booking.** A fined arrest still interrogates, settles contracts, spreads the rumour and counts (`law::booked`).
+- **Work's hunger term ignored reach.** It now needs a meal in reach.
+- **An office could be a Home or a Lot.** It no longer can.
+- **The plan-queue aging scan was O(n).** `World::plan_queue_age` now indexes it.
+- **Cleanups:** `law::is_petty`, and one exec helper.
+
+`god_flood_guns` now asserts the scenario's mechanism: the god-placed crate is drawn down (7 crate weapons carried, strict > 0). Both earlier forms of the assert depended on the trajectory.
+
+After the round, Murders on 42-44 read 94 / 61 / 112 (267), and core_20k reads 89; the two moved opposite ways, which looks like noise. The merge set is green on main at 1552009. LOD parity law0/law1 is still open: Full 0.930 vs Stat 0.757.
+
+The re-shadow diaries are in the `v4fix` worktree's `target/shadow_v4_after/`. The process review removes that worktree, so copy them out first if they are wanted.
