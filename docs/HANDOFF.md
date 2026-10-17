@@ -588,3 +588,5 @@ One solo Opus coder `jl1` (worktree `agent-a864f625a5712bd95`) builds phase by p
 2. **The process review** (`docs/PROCESS_REVIEW.md`), as its own fresh session, after the sweep merges.
 3. **Lives at work.** Phase 0 starts on the main that holds the V4 fixes. One solo coder, per the SOP.
 4. **M18.**
+
+**Open call for Dylan (raised by the sweep, 2026-10-17): gang wars cool into nothing.** The V4 fixes cut most of the false enmity behind gang feuds: bug 3's one-sided fights and bug 9's empty shakedowns. On seed 42, gang-days where a gang faced a stronger gang in a vendetta went from 92 to 0. Gangs' open vendettas are now nearly all with corps. Parley attempts over 42-47 × 120 days fell from 37 to 9, so `core_sanity`'s Parley bullet became a printed FINDING (c2f4e60). A new printed FINDING counts the gang-vs-gang vendetta gang-days. The fix is a feature, not an un-fix: rival-turf shakedowns, or raids on a rival's ground that land. It needs a home, either in Lives at work or before M18.
