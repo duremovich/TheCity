@@ -3252,8 +3252,49 @@ fn god_flood_guns() {
     assert!(r.failed.is_empty(), "failed: {:?}", r.failed);
     assert_eq!(r.applied(), 1, "the crate landed");
     // Reacted: the crate reached the gang's hands (the musters' issues);
-    // whether the fights turned armed is judged in the doc.
-    assert!(issued(&r) > issued(c), "the crate was never issued");
+    // whether the fights turned armed is judged in the doc. Shadow V4: the
+    // flooded gang's own issues against the same gang's in the control (the
+    // city-wide count read the other gangs' musters, noise: 21 / 21 on the
+    // moved city while the flooded gang drew from the crate). An issue is
+    // read as a weapon the gang owns carried by one of its members, sampled
+    // every half hour, one per weapon and day (they go back at midnight).
+    let (mine, ctl) = flooded_gang_issues();
+    eprintln!("the flooded gang's armoury issues 20-60: {mine} (control, the same gang: {ctl})");
+    assert!(mine > ctl, "the crate was never issued");
+}
+
+/// `god_flood_guns`'s measure: the weakest gang on day 20 (the scenario's
+/// pick), flooded and not, run to day 60: the (weapon, day) pairs a member
+/// carried one of the gang's own weapons.
+fn flooded_gang_issues() -> (usize, usize) {
+    let mut w = World::new(SEED, Config::load());
+    w.run_ticks(20 * TICKS_PER_DAY);
+    let g = w
+        .gangs()
+        .into_iter()
+        .filter(|&g| w.hideout_of(g).is_some())
+        .min_by_key(|&g| (w.comp::<Gang>(g).map_or(0, |x| x.members.len()), g))
+        .expect("a gang with a Hideout");
+    let count = |mut w: World, flood: bool| -> usize {
+        if flood {
+            w.push_command(PlayerCommand::FloodGuns { gang: g, n: 200, tier: 3 });
+        }
+        let mut seen: std::collections::BTreeSet<(EntityId, u64)> = std::collections::BTreeSet::new();
+        while w.day() < 60 {
+            w.run_ticks(30);
+            for &a in &w.jobs2.arms.index {
+                let Some(x) = w.comp::<citysim::components::Asset>(a) else { continue };
+                if let citysim::components::AssetLoc::Carried(m) = x.loc {
+                    if x.owner == Some(g) && w.gang_of(m) == Some(g) {
+                        seen.insert((a, w.day()));
+                    }
+                }
+            }
+        }
+        seen.len()
+    };
+    let ctl = w.clone();
+    (count(w, true), count(ctl, false))
 }
 
 /// v12 god 4: street work legal and brothels licensed on day 10 (the utopia
