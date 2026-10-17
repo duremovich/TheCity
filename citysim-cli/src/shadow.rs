@@ -2610,7 +2610,10 @@ const CHECKS: &[Check] = &[
     // Shadow V4 (2026-10-17, bug 5's known reason): the CEO holds office at its Hq every workday
     // (the office was the nearest Vat Farm or none, and the exec's day leaked into the street):
     // 0.55 pooled (0.12 / 0.89 / 1.22 by seed), the range widened by it, 0.55 x 0.6 rounded down.
-    (19, "ceo", Metric::KnownMetWeek, Bound::Min(0.3), 0.55, 2.57),
+    // Shadow V4 review 7 (2026-10-17, its known reason): no office in a corp's Home or Lot (bug 5's
+    // unranked fallback had seated housing corps' execs among their tenants): 0.22 pooled (0.00 /
+    // 0.89 / 0.12 by seed) against 0.59 with the fallback on the same tree, 0.22 x 0.6 rounded down.
+    (19, "ceo", Metric::KnownMetWeek, Bound::Min(0.13), 0.22, 2.57),
     (19, "ceo", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
     // An exec never does a work-class action, so every run of the office-hours
     // Work goal counts here: the row reads goal flicker (2026-10-11: 0.63 after
