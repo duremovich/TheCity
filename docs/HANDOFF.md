@@ -590,3 +590,9 @@ One solo Opus coder `jl1` (worktree `agent-a864f625a5712bd95`) builds phase by p
 4. **M18.**
 
 **Open call for Dylan (raised by the sweep, 2026-10-17): gang wars cool into nothing.** The V4 fixes cut most of the false enmity behind gang feuds: bug 3's one-sided fights and bug 9's empty shakedowns. On seed 42, gang-days where a gang faced a stronger gang in a vendetta went from 92 to 0. Gangs' open vendettas are now nearly all with corps. Parley attempts over 42-47 × 120 days fell from 37 to 9, so `core_sanity`'s Parley bullet became a printed FINDING (c2f4e60). A new printed FINDING counts the gang-vs-gang vendetta gang-days. The fix is a feature, not an un-fix: rival-turf shakedowns, or raids on a rival's ground that land. It needs a home, either in Lives at work or before M18.
+
+**More of the sweep's bill (batch 3, 00a42b8).** These were bug-fed, so they are now printed FINDINGs; each is a feature to restore, not a knob to turn:
+- **Purist expulsions** on 42-47 went from [21,15,12,24,21,12] to [0,0,1,0,0,0]. Every one came from members sold forbidden chrome (the creeds bug).
+- **Organs exported** went from [6,0,9,8,0,0] to [0,0,0,7,0,0]. Cults mistyped as scavs did most of the hunting.
+- **Gang-vs-gang feud days** on 42-44 went from [267,317,204] to [196,0,58].
+- **Bug 16** (the arms trade and black clinics, blocked by gang treasuries) was skipped as a feature: credit, or a back-room pitch.
