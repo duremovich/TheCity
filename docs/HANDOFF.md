@@ -519,3 +519,37 @@ One solo Opus coder `jl1` (worktree `agent-a864f625a5712bd95`) builds phase by p
   - The off identity moves through the evening mirror only, proved with a `leisure.rs`-revert build.
   - Carry-overs for phase 8: the abroad and god_abroad edge asserts are now conditional on the target living; the leverage protection test runs on a pre-mirror world.
   - **Phase 8 left:** the gate (bullets, probes, the 14 archetypes' diaries, god scenarios, `analyze_run` sections, docs deviations), the organ and scav fix, then `/code-review high`. **No second regen.**
+- **Phase 8** (the gate, live scavs) d2eea01.
+  - Harvest prey is ranked past the Law's cover; the drag holds GangWork; the abduction-race guard.
+  - Scav kills 0 → 41 a seed.
+  - 40 core_sanity bullets.
+  - God scenarios v12: `docs/GOD_SCENARIOS_V12.md`.
+  - Shadow V3 diaries: `docs/SHADOW_V3.md` and `docs/shadow_v3/`.
+  - "Implemented: deviations" in `docs/JOBS_AND_LIVES.md`.
+- **The `/code-review high` fixes** (10 of 10) are 2cdde71. Trio 1,243/0/67, and every gate is green.
+- **Jobs & lives closed (2026-10-17), main 2cdde71.**
+
+## Next session (written 2026-10-17)
+
+1. **The NPC shadowing session**, dedicated: many archetypes at 2k and 20k, diaries critiqued as real lives, and a gaps doc.
+   - Start from `docs/SHADOW_V3.md` (20 archetypes, 38 diaries, 11 ranked gaps) and `docs/GOD_SCENARIOS_V12.md`'s gaps.
+   - Then fix the gaps.
+2. **M18**, the player character. Don't start it before 1.
+
+**Open for Dylan:**
+- **The city is now harsh and shrinking.** Murders go 98.5 (pre-milestone) → about 236 a seed over 120 days. `core_year` ends at about 1,500-1,600 people.
+  - The drivers: live scavs, and the leisure mirror fix that shrank the inflated venue economy.
+  - The levers: `[gray]` gang-type share 0.35, `harvest_flat` 0.5.
+- **The synth parity row is a printed finding now.** It's M10's pantry sharing, pre-milestone. It's reversible: carried leftovers plus a dive-rate mirror.
+- **Faith growth is uncapped** (followers reach 34 % by day 120), and church purses pile up.
+
+**Open carry-overs**, listed in `docs/JOBS_AND_LIVES.md` § "Implemented: deviations":
+- the El slow-down on outages;
+- Statistical-tier weapons;
+- the status inversion;
+- Trafficking at 0 (no gang builds a Dollhouse front);
+- no black clinics;
+- organs rot;
+- the robbed don't arm;
+- the thin street;
+- the conditional abroad asserts.
