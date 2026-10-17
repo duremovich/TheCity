@@ -540,8 +540,13 @@ One solo Opus coder `jl1` (worktree `agent-a864f625a5712bd95`) builds phase by p
 - **The city is now harsh and shrinking.** Murders go 98.5 (pre-milestone) → about 236 a seed over 120 days. `core_year` ends at about 1,500-1,600 people.
   - The drivers: live scavs, and the leisure mirror fix that shrank the inflated venue economy.
   - The levers: `[gray]` gang-type share 0.35, `harvest_flat` 0.5.
+  - **Dylan, 2026-10-17: leave it for now, tune later.**
 - **The synth parity row is a printed finding now.** It's M10's pantry sharing, pre-milestone. It's reversible: carried leftovers plus a dive-rate mirror.
 - **Faith growth is uncapped** (followers reach 34 % by day 120), and church purses pile up.
+  - **Dylan, 2026-10-17: no hard cap.** Get to an equilibrium through interactions instead, in a future session. His questions to design from:
+    - Do churches need a predator?
+    - Do gangs target rich churches to rob them?
+    - Does a raid on a church cause disillusionment and loss of faith?
 
 **Open carry-overs**, listed in `docs/JOBS_AND_LIVES.md` § "Implemented: deviations":
 - the El slow-down on outages;
