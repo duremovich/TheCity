@@ -377,4 +377,13 @@ Asserts catch broken; behaviour judges alive; numbers are reports.
 
 ## Dylan's answers
 
-(Pending.)
+2026-10-17:
+
+1. **Money:** re-route only, plus the three named flows (the madam's cut, the pimp's keep, the Camp buy-out).
+2. **Retirement:** both: on savings or kin, and a frailty exit; no pension.
+3. **Age bands:** a hard gate on new hires, never a firing.
+4. **The taken child:** visit, buy-out, and a rare break-out for the lawless only; neglect printed only.
+6. **Leaders:** never on the march or a shakedown above `delegate_min_fit`, always at a defence or a parley; 20 % off the top for the leader, 10 % for the lieutenants, printed.
+
+Not yet asked: questions 5 (stations), 7 (Spire homes at 20k) and 8 (one regen at the gate). The recommendations stand as defaults unless Dylan overrides them before phase 7 and the gate.
+
