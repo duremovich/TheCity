@@ -3015,7 +3015,7 @@ mod tests {
     /// archetype in its own clone: ~1-1.5 min release, ~3 GB):`cargo test --release -p citysim-cli -- --ignored behaviour`,
     /// or `citysim-cli shadow --assert`.
     #[test]
-    #[ignore]
+    #[ignore = "tier: merge"]
     fn test_behaviour_tier() {
         let r = behaviour(None).expect("the behaviour windows run");
         eprint!("{}", r.text);

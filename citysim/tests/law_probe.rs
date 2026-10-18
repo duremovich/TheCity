@@ -113,7 +113,7 @@ fn probe(label: &str, mut w: World, days: u64) {
 }
 
 #[test]
-#[ignore]
+#[ignore = "tier: diag"]
 fn law_probe_2k() {
     let seed: u64 = std::env::var("PROBE_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(42);
     let mut w = World::new(seed, Config::load());
@@ -122,7 +122,7 @@ fn law_probe_2k() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "tier: diag"]
 fn law_probe_20k() {
     let mut c = Config::load().scaled_to(20_000);
     c.world.map = "gen:20000".into();

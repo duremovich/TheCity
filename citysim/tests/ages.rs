@@ -6,6 +6,8 @@
 //! clears it; the seeded ages run to 75 under the switch. Each test is the
 //! shipped seed-42 city and one mechanism, driven directly.
 
+mod common;
+
 use citysim::components::{Pitch, RelKind};
 use citysim::systems::ages;
 use citysim::{Brain, BuildingKind, Config, EntityId, Household, Identity, Job, Wallet, World, TICKS_PER_DAY};

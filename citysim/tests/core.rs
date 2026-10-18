@@ -597,10 +597,8 @@ fn mechanisms() -> Vec<Mechanism> {
         // M13 assets.
         ("a Crash", k(EventKind::Crash)),              // [4, 3, 3]
         ("a chrome Install", k(EventKind::Installed)), // [252, 176, 263]
-        ("a Dealing report", m("Dealing report")),     // [197, 238, 222]
         // M14 the Virt plane.
         ("a run (JackedIn)", k(EventKind::JackedIn)), // [133, 70, 61]
-        ("a Data sale", k(EventKind::DataSold)),      // [8, 1, 0]; 5 of 6
         ("a Flatline", k(EventKind::Flatlined)),      // [3, 2, 3]
         // M15 the word and the blood.
         ("a Feed Story", k(EventKind::Story)),  // [810, 790, 789]
@@ -614,7 +612,6 @@ fn mechanisms() -> Vec<Mechanism> {
         ("a Mission meal", k(EventKind::MissionServed)), // [166, 250, 146]
         // M16a phase 3 (seeds 42-47 at phase 3, 120 days: each on 6 of 6).
         ("a BountyPaid", k(EventKind::BountyPaid)), // [729, 744, 731]; 45-47 [642, 725, 654]
-        ("a city guard on the take", k(EventKind::GuardTaken)), // [23, 8, 37]; 45-47 [22, 27, 26]
         // M16a phase 5 (5.1 a; seeds 42-47 on ba516f2, 120 days). Fired on 6 of 6: a Guard and a
         // Locate fulfilled, a Fixer in business (days), a Reneged. On 0 of 6, so unit tests in
         // a seeded world instead (docs/TESTING.md): a Hit fulfilled (contracts.rs
@@ -626,7 +623,6 @@ fn mechanisms() -> Vec<Mechanism> {
         // (test_npc_registers_a_fixer); a Fixer run to SellData on 2 of 6 ([1, 0, 4, 0, 0, 0]:
         // test_fixer_run_order_runs_to_selldata_with_cut).
         ("a Guard fulfilled", m("Guard fulfilled")), // [11, 4, 12]; 45-47 [16, 11, 8]
-        ("a Locate fulfilled", m("Locate fulfilled")), // [167, 166, 155]; 45-47 [145, 137, 133]
         ("a Fixer in business", m("Fixer in business")), // [111, 107, 112] days; 45-47 [106, 111, 109]
         ("a Reneged", k(EventKind::Reneged)),
         // Transit (docs/TRANSIT.md § 7), with the El on: rides [..] and fare
@@ -642,9 +638,6 @@ fn mechanisms() -> Vec<Mechanism> {
         ("a protection paid", m("protection paid")), // [37, 6, 4]; 45-47 [10, 19, 20]
         ("a blackmail made", m("blackmail made")),   // [16, 24, 19]; 45-47 [15, 12, 23]
         ("a debt called in", m("debt called")),      // [39, 88, 53]; 45-47 [60, 56, 61]
-        ("a report withdrawn under a threat", m("report withdrawn under a threat")), // [42, 33, 45]; 45-47 [36, 34, 47]
-        ("a coerced job", m("coerced job")),         // [14, 7, 7]; 45-47 [5, 9, 3]
-        ("a fake job", m("fake job")),               // [1, 4, 3]; 45-47 [1, 2, 10]
         // A Parley: demoted to `printed_mechanisms` (Shadow V4 batch 2).
         // M16b phase 2, captives and the new kinds (seeds 42-47 x 120 days; 5-6 of 6). Fired on 3
         // or fewer, so printed below and unit-tested in `captives.rs`: a hostage taken (and its
@@ -653,30 +646,18 @@ fn mechanisms() -> Vec<Mechanism> {
         // test_escort_kept_is_fulfilled), a Deliver fulfilled (test_deliver_posted_for_a_corpse_and_
         // buried), a fabrication planted and exposed (test_fabricated_spin_and_exposure).
         ("an Abduct posted", m("Abduct posted")), // [8, 8, 5]; 45-47 [2, 3, 1]
-        ("a Steal fulfilled", m("Steal fulfilled")), // [10, 8, 5]; 45-47 [21, 9, 28]
-        ("a heist run", m("heist run")),          // [14, 10, 21]; 45-47 [15, 0, 23]
-        ("a Spin posted", m("Spin posted")),      // [1, 6, 3]; 45-47 [6, 4, 4]
         // M16b phase 3, the wounded (seeds 42-47 x 120 days; each on 6 of 6). Fewer, so printed
         // below and unit-tested in `wounded.rs`: a rescue by a gang-mate (1 of 6;
         // test_abandon_gang_leaves_its_own carries the Loyal/Abandon rule), a Trauma call (2 of
         // 6) and a TraumaSave (0 of 6: test_trauma_call_and_save).
-        ("a downed agent", m("downed")),          // [71, 65, 63]; 45-47 [73, 72, 44]
-        ("a bleed-out", m("bled out")),           // [48, 48, 47]; 45-47 [44, 51, 30]
-        ("a stabilisation", m("stabilised")),     // [3, 4, 5]; 45-47 [15, 8, 3]
-        ("a rescue by kin", m("rescued by kin")), // [2, 1, 3]; 45-47 [10, 3, 3]
-        ("a downed agent finished off", m("finished off")), // [9, 5, 3]; 45-47 [9, 5, 3]
+        ("a downed agent", m("downed")), // [71, 65, 63]; 45-47 [73, 72, 44]
         ("a Trauma subscription", m("Trauma subscription")), // [27, 15, 22]; 45-47 [34, 16, 19]
         // M16b phase 4 (seeds 42-47 x 120 days): boards, tags, attention.
-        ("a board vote", m("board vote")),       // [4, 5, 4]; 45-47 [4, 4, 4]
-        ("a campaign move", m("campaign move")), // [0, 3, 1]; 45-47 [4, 3, 0]
-        ("a VoteSwung", m("VoteSwung")),         // [0, 1, 1]; 45-47 [4, 3, 0]
-        ("a tag planted", m("tag planted")),     // [85, 109, 98]; 45-47 [61, 66, 84]
-        ("a tag found", m("tag found")),         // [5, 8, 7]; 45-47 [7, 0, 6]
-        ("a scan", m("scan")),                   // [200, 239, 182]; 45-47 [216, 191, 245]
-        ("a day a faction is distracted", m("faction distracted")), // [116, 114, 105]; 45-47 [115, 117, 113]
+        ("a board vote", m("board vote")),   // [4, 5, 4]; 45-47 [4, 4, 4]
+        ("a tag planted", m("tag planted")), // [85, 109, 98]; 45-47 [61, 66, 84]
+        ("a scan", m("scan")),               // [200, 239, 182]; 45-47 [216, 191, 245]
         // M17 phase 2 (seeds 42-47 x 120 days): the parents.
         ("a day with a remittance home", m("remittance")), // [87, 87, 81]; 45-47 [85, 93, 87]
-        ("a Subsidised", k(EventKind::Subsidised)),        // [30, 47, 32]; 45-47 [41, 96, 41]
         // M17 phase 3 (seeds 42-47 x 120 days): bodies. A Retake, a buy-back, a
         // FoundBranch, a refound, a tour's end and a settling are unit-tested in
         // `bodies.rs` (0-3 of 6 seeds); a ParentFounded (one a seed) and an
@@ -691,9 +672,7 @@ fn mechanisms() -> Vec<Mechanism> {
         // M17 phase 4 (seeds 42-47 x 120 days): an uplink run, a Campaign and a
         // parent's death fired on 0 of 6 (`weapons.rs`, `god_kill_militech`).
         ("a day with scrip paid", m("scrip paid")),
-        ("a day with scrip converted", m("scrip converted")),
-        ("a DataShipped", k(EventKind::DataShipped)), // [1, 29, 13]; 45-47 [15, 2, 4]
-                                                      // A Sanctioned: printed (Shadow V4; see printed_mechanisms).
+        // A Sanctioned: printed (Shadow V4; see printed_mechanisms).
     ]
 }
 
@@ -707,9 +686,7 @@ fn sickness_mechanisms() -> Vec<Mechanism> {
     vec![
         ("a synth meal", m("synth meal")),
         ("a bin meal", m("bin meal")),
-        ("a bin shakedown", m("bin shakedown")),
         ("a malnourished agent", m("malnourished agent")),
-        ("a sick day", m("a sick day")),
     ]
 }
 
@@ -826,6 +803,32 @@ fn printed_mechanisms() -> Vec<Mechanism> {
         // M16b phase 4 (seeds 42-47 x 120 days): rare, unit-tested in `tags.rs`
         // and `governance.rs`.
         ("a Patrol scan", m("Patrol scan")), // [0, 0, 0, 0, 0, 0]
+        // Demoted 2026-10-18 (the process review: at most 60 asserted bullets, one per subsystem;
+        // each keeps an asserted sibling in the same subsystem and its unit test named above).
+        ("a report withdrawn under a threat", m("report withdrawn under a threat")), // [42, 33, 45]; 45-47 [36, 34, 47]
+        ("a coerced job", m("coerced job")),                                         // [14, 7, 7]; 45-47 [5, 9, 3]
+        ("a fake job", m("fake job")),                                               // [1, 4, 3]; 45-47 [1, 2, 10]
+        ("a heist run", m("heist run")),                                             // [14, 10, 21]; 45-47 [15, 0, 23]
+        ("a Spin posted", m("Spin posted")),                                         // [1, 6, 3]; 45-47 [6, 4, 4]
+        ("a bleed-out", m("bled out")),                                              // [48, 48, 47]; 45-47 [44, 51, 30]
+        ("a stabilisation", m("stabilised")),                                        // [3, 4, 5]; 45-47 [15, 8, 3]
+        ("a rescue by kin", m("rescued by kin")),                                    // [2, 1, 3]; 45-47 [10, 3, 3]
+        ("a downed agent finished off", m("finished off")),                          // [9, 5, 3]; 45-47 [9, 5, 3]
+        ("a campaign move", m("campaign move")),                                     // [0, 3, 1]; 45-47 [4, 3, 0]
+        ("a VoteSwung", m("VoteSwung")),                                             // [0, 1, 1]; 45-47 [4, 3, 0]
+        ("a tag found", m("tag found")),                                             // [5, 8, 7]; 45-47 [7, 0, 6]
+        ("a day a faction is distracted", m("faction distracted")), // [116, 114, 105]; 45-47 [115, 117, 113]
+        ("a Subsidised", k(EventKind::Subsidised)),                 // [30, 47, 32]; 45-47 [41, 96, 41]
+        ("a day with scrip converted", m("scrip converted")),
+        ("a DataShipped", k(EventKind::DataShipped)), // [1, 29, 13]; 45-47 [15, 2, 4]
+        ("a Locate fulfilled", m("Locate fulfilled")), // [167, 166, 155]; 45-47 [145, 137, 133]
+        ("a city guard on the take", k(EventKind::GuardTaken)), // [23, 8, 37]; 45-47 [22, 27, 26]
+        ("a Steal fulfilled", m("Steal fulfilled")),  // [10, 8, 5]; 45-47 [21, 9, 28]
+        ("a Data sale", k(EventKind::DataSold)),      // [8, 1, 0]; 5 of 6
+        ("a Dealing report", m("Dealing report")),    // [197, 238, 222]
+        // Hunger as sickness, demoted the same day (a synth meal, a bin meal and a malnourished agent stay).
+        ("a bin shakedown", m("bin shakedown")),
+        ("a sick day", m("a sick day")),
     ]
 }
 
@@ -840,51 +843,27 @@ fn jobs2_mechanisms() -> Vec<Mechanism> {
         // (a day post ends with its shift and reads 0 at the close: "day post
         // filled" below carries it; a resale post is printed), the
         // industries' flows.
-        "handling post",
-        "contract post",
         "civic post",
         "Rations sold",
         "handling fee",
-        "power payment",
-        "build paid",
         "Jailer on shift",
-        "licence sold",
         // Phase 2: the street.
         "Pitch opened",
-        "vendor sale",
         "day post filled",
-        "cab fare",
-        "parcel delivered",
-        "street cut",
         // Phase 3: weapons.
         "weapon made",
         "armed fight",
-        "armoury issue",
-        "arms report",
-        "crate landed",
         // Phase 4: vice and fashion.
         "tip",
-        "StripClub visit",
-        "Brothel visit",
         "companion visit",
-        "Solicitation sweep",
-        "Boutique visit",
         // Phase 5: the dollhouse and braindance.
         "chip hired",
-        "chip ended",
-        "BD made",
-        "BD wholesale",
         // Phase 6: the gray market and faith; phase 8: the scavs.
         "tithe",
-        "Preach attended",
         "conversion",
-        "fake ID sold",
-        "organ made",
         // "organ exported": printed (Shadow V4 batch 3; see jobs2_printed).
-        "scav kill",
         // Phase 7: life stages.
         "School day",
-        "elder taken in",
         "maimed",
     ]
     .into_iter()
@@ -928,6 +907,31 @@ fn jobs2_printed() -> Vec<Mechanism> {
         "tinker repair",      // [0, 0, 0, 0, 0, 0]
         "rickshaw trip",      // [0, 0, 0, 0, 0, 0]
         "outage",             // [0, 0, 0, 0, 0, 0]
+        // Demoted 2026-10-18 (the 60-bullet cap): one bullet per phase subsystem stays asserted above.
+        "handling post",
+        "contract post",
+        "power payment",
+        "build paid",
+        "licence sold",
+        "vendor sale",
+        "cab fare",
+        "parcel delivered",
+        "street cut",
+        "armoury issue",
+        "arms report",
+        "crate landed",
+        "StripClub visit",
+        "Brothel visit",
+        "Solicitation sweep",
+        "Boutique visit",
+        "chip ended",
+        "BD made",
+        "BD wholesale",
+        "Preach attended",
+        "fake ID sold",
+        "organ made",
+        "scav kill",
+        "elder taken in",
     ]
     .into_iter()
     .map(|k| (k, m(k)))
@@ -1034,7 +1038,7 @@ fn core_sanity() {
 /// window (the 5-day tail judged as its own window). `#[ignore]`: ~90 s;
 /// run alone: `cargo test --release -p citysim --test core -- --ignored core_year`.
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn core_year() {
     const DAYS: u64 = 365;
     let r = run_seed(42, DAYS);
@@ -1077,7 +1081,7 @@ fn core_year() {
 /// `#[ignore]`: run it alone on a quiet box (no other builds or sims):
 /// `cargo test --release -p citysim --test core -- --ignored core_throughput`.
 #[test]
-#[ignore]
+#[ignore = "tier: diag"]
 fn core_throughput() {
     let r = run_seed(42, 30);
     eprintln!("ticks/s seed 42, 30 days alone: {:.0} (floor {TPS_FLOOR:.0})", r.tps);
@@ -1110,7 +1114,7 @@ const EMPLOYED_FLOOR_20K: f64 = 0.40;
 /// `FINDING` lines, never asserted. `#[ignore]`; run alone:
 /// `cargo test --release -p citysim --test core -- --ignored core_20k --nocapture`.
 #[test]
-#[ignore]
+#[ignore = "tier: milestone"]
 fn core_20k() {
     const DAYS: u64 = 30;
     let cfg = || {

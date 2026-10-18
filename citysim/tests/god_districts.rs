@@ -493,7 +493,7 @@ impl Run {
 
 /// No shock.
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_districts_control() {
     control().print(None, &[SUMP_WEST, MID_EAST]);
 }
@@ -501,7 +501,7 @@ fn god_districts_control() {
 /// Force a riot in Sump West. Does the law respond (Cordon, Disperse,
 /// Crush)? Do the corps shock? Does control change?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_riot_sump_west() {
     // Seed 42's Sump West riots on its own on the shock's midnight (the
     // control's natural riot is the god riot, one tick apart), so the shared
@@ -518,7 +518,7 @@ fn god_riot_sump_west() {
 /// City rent 10 on Sump Blocks: evict the Sump's city tenants. Dregs,
 /// squats, riots, emigration?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_evict_sump_rent_10() {
     let r = run("god_evict_sump_rent_10", |w| {
         let [_, mid, spire] = w.levers.city_rent;

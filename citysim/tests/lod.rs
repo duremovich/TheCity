@@ -141,7 +141,7 @@ fn test_statistical_hourly_decay_equals_60_ticks() {
 /// printed as FINDINGs. Run with `--ignored` (nightly, docs/TESTING.md:
 /// the one parity test kept).
 #[test]
-#[ignore]
+#[ignore = "tier: milestone"]
 fn test_full_vs_statistical_within_15pct() {
     use citysim::systems::bind;
     use citysim::{EventKind, Personality};

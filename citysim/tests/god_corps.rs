@@ -570,7 +570,7 @@ fn describe(w: &World, c: EntityId) -> String {
 
 /// No shock.
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_corps_control() {
     control().print(None);
 }
@@ -578,7 +578,7 @@ fn god_corps_control() {
 /// Kill the largest Food corp's exec. A new exec? A different personality,
 /// different orders? Does the corp read the loss as a shock?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_kill_exec() {
     let slot = std::cell::Cell::new(0);
     let r = run("god_kill_exec", |w| {
@@ -607,7 +607,7 @@ fn god_kill_exec() {
 
 /// Every corp's treasury to 0 on the same day.
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_wipe_corps() {
     let r = run("god_wipe_corps", |w| {
         w.push_command(PlayerCommand::WipeTreasuries);

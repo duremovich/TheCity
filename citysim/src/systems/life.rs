@@ -1413,7 +1413,7 @@ mod tests {
     /// daily limit) eager and lazy on clones of the same world, three times
     /// each: wall time and the same answer. Prints.
     #[test]
-    #[ignore]
+    #[ignore = "tier: diag"]
     fn measure_relocation_lazy_vs_eager() {
         let days: u64 = std::env::var("CITYSIM_RELOC_DAYS").ok().and_then(|v| v.parse().ok()).unwrap_or(5);
         let mut c = crate::config::Config::load().scaled_to(20_000);

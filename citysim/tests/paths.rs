@@ -357,7 +357,7 @@ fn road_tile(map: &Map, rng: &mut rand_chacha::ChaCha8Rng) -> TilePos {
 /// Measurement (S3a's threshold): a flow field's build against an A*
 /// query, by map size, on the street grid. Prints; asserts nothing.
 #[test]
-#[ignore]
+#[ignore = "tier: diag"]
 fn measure_flow_field_vs_big_path() {
     for (w, h) in [(256, 192), (500, 400), (700, 500), (1000, 1000), (1500, 1000), (3000, 1875)] {
         let map = grid_map(w, h);

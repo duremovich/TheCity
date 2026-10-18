@@ -156,7 +156,7 @@ fn run_seed(seed: u64, days: u64) -> Vec<Snap> {
 }
 
 #[test]
-#[ignore]
+#[ignore = "tier: diag"]
 fn class_table() {
     let days: u64 = std::env::var("CLASSPAY_DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(120);
     let handles: Vec<_> =
@@ -739,7 +739,7 @@ fn test_status_sink_spends_the_excess_into_owners() {
 /// days on `CITYSIM_ASSETS`, the Treasury's inflows and outflows by flow per
 /// window (from `World::probe`), and the residual no flow explains.
 #[test]
-#[ignore]
+#[ignore = "tier: diag"]
 fn treasury_census() {
     let days: u64 = std::env::var("CLASSPAY_DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(365);
     let mut w = World::new(42, Config::load().dole_city());
@@ -774,7 +774,7 @@ fn treasury_census() {
 /// vacancy stood unfilled, or payroll under target), the steps down, the
 /// payroll-weighted `wage_rev`, the open vacancies and the jobless adults.
 #[test]
-#[ignore]
+#[ignore = "tier: diag"]
 fn wage_rule_census() {
     let days: u64 = std::env::var("CLASSPAY_DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(365);
     let mut w = World::new(42, Config::load().dole_city());

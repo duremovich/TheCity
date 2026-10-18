@@ -24,7 +24,7 @@ use citysim::{Config, Corp, Crime, EntityId, EventKind, Gang, Wallet, World, TIC
 /// went, the Bankrupt/BrokenUp lines naming it), its execs' deaths, what it
 /// paid for organic records, and its treasury every 15 days.
 #[test]
-#[ignore]
+#[ignore = "tier: diag"]
 fn corp_fates() {
     let runs: Vec<(u64, bool)> = vec![(42, true), (42, false), (43, true), (43, false)];
     let out: Vec<String> = std::thread::scope(|s| {
@@ -137,7 +137,7 @@ fn corp_fates() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "tier: diag"]
 fn exec_protection() {
     let mut w = World::new(42, Config::load());
     w.run_ticks(30 * TICKS_PER_DAY);
@@ -180,7 +180,7 @@ struct Seen {
 }
 
 #[test]
-#[ignore]
+#[ignore = "tier: diag"]
 fn hit_market_report() {
     let seeds = [42u64, 43, 44, 45, 46, 47];
     let lines: Vec<String> = std::thread::scope(|s| {
@@ -342,7 +342,7 @@ fn pct(v: &[i64], p: f64) -> i64 {
 }
 
 #[test]
-#[ignore]
+#[ignore = "tier: diag"]
 fn hit_probe() {
     let seeds = [42u64, 43, 44];
     std::thread::scope(|s| {
@@ -699,7 +699,7 @@ fn ab_run(seed: u64, on: bool) -> AbRun {
 /// days 30/60/120, charges and their delay, and the `HitCols` sums.
 /// `HM_STORIES=<file>` writes the market-on story lines there.
 #[test]
-#[ignore]
+#[ignore = "tier: diag"]
 fn hm_ab_report() {
     let seeds = [42u64, 43, 44, 45, 46, 47];
     let runs: Vec<(u64, bool)> = seeds.iter().flat_map(|&s| [(s, true), (s, false)]).collect();
@@ -755,7 +755,7 @@ fn hm_ab_report() {
 /// price and its `accept_score`. Prints the log of each record that ends
 /// Expired.
 #[test]
-#[ignore]
+#[ignore = "tier: diag"]
 fn why_expired() {
     use citysim::systems::demography;
     use citysim::RelKind;
@@ -910,7 +910,7 @@ fn why_expired() {
 /// `HM_FROM` day): the taker's goal and step, its run's phase and intel,
 /// both tiers and the distance to the target.
 #[test]
-#[ignore]
+#[ignore = "tier: diag"]
 fn trace_record() {
     let env = |k: &str, d: u64| std::env::var(k).ok().and_then(|s| s.parse().ok()).unwrap_or(d);
     let (seed, rid, from) = (env("HM_SEED", 44), env("HM_RECORD", 55), env("HM_FROM", 29));

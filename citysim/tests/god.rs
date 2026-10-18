@@ -449,7 +449,7 @@ fn pin(p: Posture) -> impl FnOnce(&mut World) {
 
 /// No shock: the baseline world, for comparison with every scenario.
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_control() {
     control().print(None);
 }
@@ -465,7 +465,7 @@ fn leader(w: &World, i: usize) -> Option<EntityId> {
 /// Kill gang 0's leader. Does the gang recompute a leader, Retaliate against
 /// the rival (wrongly), LieLow, lose members?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_decapitate_gang() {
     let r = run("god_decapitate_gang", |w| {
         let g = w.comp::<Gang>(gang(w, 0)).expect("gang 0");
@@ -520,7 +520,7 @@ fn god_decapitate_gang() {
 /// Kill every member of gang 0. Does the rival take the city? Does crime fall
 /// or rise? Does the empty gang re-form (the JoinGang bootstrap)?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_kill_gang() {
     let r = run("god_kill_gang", |w| {
         let g = gang(w, 0);
@@ -532,7 +532,7 @@ fn god_kill_gang() {
 /// Pin Crackdown. Does the target gang bribe, LieLow, break out, collapse?
 /// Does the other gang profit?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_crackdown_forever() {
     // A pin is only a shock when the captain would not have chosen it: an
     // unpinned control was already in Crackdown on most days (M10 phase 5c).
@@ -545,7 +545,7 @@ fn god_crackdown_forever() {
 
 /// Set the Treasury to -50,000: the dole stops and the guards go unpaid.
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_bankrupt_city() {
     let r = run("god_bankrupt_city", |w| w.push_command(PlayerCommand::SetTreasury(-50_000)));
     r.assert_reacted();
@@ -555,7 +555,7 @@ fn god_bankrupt_city() {
 /// with 100,000, kill gang 1's leader, fire the guards; report gang 0's share
 /// of the Homes per day (not asserted).
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_city_takeover_by_force() {
     let r = run("god_city_takeover_by_force", |w| {
         let (g0, l1) = (gang(w, 0), leader(w, 1));
@@ -647,7 +647,7 @@ impl Run {
 /// Every adult gets Arms and Nerves T2. Does the episode rate rise, does
 /// the captain's posture move, do the Clinics sell Therapy?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_chrome_everyone_2() {
     let r = run("god_chrome_everyone_2", |w| w.push_command(PlayerCommand::ChromeEveryone { tier: 2 }));
     r.report_m13(control());
@@ -914,7 +914,7 @@ impl V5Run {
 /// Chrome 3 and Industry 3, do its Clinics' tier-2/3 installs stop, does a
 /// rival take `Research`?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_wipe_zetatech_day_20() {
     const DAY: u64 = 20;
     let r = run_v5("god_wipe_zetatech_day_20", |w, day, hour| {
@@ -1220,7 +1220,7 @@ fn best_fighter(w: &World, g: EntityId, not: &[EntityId]) -> Option<EntityId> {
 /// killed by the rival's best fighter. Do they hunt, does a vendetta open between the gangs, does the
 /// law's Crackdown move to the avenger's gang?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_kill_friend_of_leaders_day_10() {
     const DAY: u64 = 10;
     let mut names: Vec<String> = Vec::new();
@@ -1495,7 +1495,7 @@ impl V7Run {
 /// (`export=on`, `export_price=food:30`, `parts:180`, `data:400`): do the
 /// Food and Tech corps Grow?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_export_10x() {
     use citysim::outside::ExportGood;
     let r = run_v7("god_export_10x", |w, day, _| {
@@ -1753,7 +1753,7 @@ impl V8Run {
 /// every corp's exec. Who takes them, does a squad strike in the Spire or
 /// sell out, does a corp's Lobby turn on anyone?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_hit_each_exec_day_10() {
     let r = run_v8("god_hit_each_exec_day_10", |w, day, watched| {
         if day == 10 {
@@ -1790,7 +1790,7 @@ fn god_hit_each_exec_day_10() {
 /// posts a brokered Hit on The Hollow's leader. Where does he live and who
 /// holds that district; does Ninefold, if it holds it, sell him out?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_hit_hollow_leader_from_arasaka() {
     let r = run_v8("god_hit_hollow_leader_from_arasaka", |w, day, watched| {
         if day == 45 {
@@ -1842,7 +1842,7 @@ fn god_hit_hollow_leader_from_arasaka() {
 /// office's heat floored at 0.5, no new office registers). Do the Fixers
 /// bribe, close, or stop opening?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_fixer_licence_off() {
     let r = run_v8("god_fixer_licence_off", |w, day, watched| {
         if day == 20 {
@@ -1879,7 +1879,7 @@ fn god_fixer_licence_off() {
 /// leader. Does the bounty find him (sightings paid, an arrest), does his
 /// gang Retaliate?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_law_locate_on_gang_leader() {
     let r = run_v8("god_law_locate_on_gang_leader", |w, day, watched| {
         if day == 45 {
@@ -1910,7 +1910,7 @@ fn god_law_locate_on_gang_leader() {
 /// free-food floor must answer: the starving go to the bins (and the
 /// Missions) and starvation stays near the control's. 60 days, seed 42.
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_famine_synth() {
     fn city() -> World {
         World::new(42, Config::load())
@@ -2108,7 +2108,7 @@ fn watch_houses(w: &World, fathers: &[Father], h: &mut [House]) {
 /// posts a Hit within 30 days (`docs/HIT_MARKET.md` § 9). The control runs
 /// the same city from day 10 unshocked, the same houses watched. Seed 42.
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_kill_ten_fathers_day_10() {
     const DAY: u64 = 10;
     const END: u64 = DAY + 30;
@@ -2246,7 +2246,7 @@ fn god_kill_ten_fathers_day_10() {
 /// days 10-20 have longer commutes (`life::commute_cost`) and the city's
 /// fares fall; after it reopens, rides on it resume.
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_line_cut() {
     use citysim::systems::{life, transit};
     use citysim::{Building, Household, Job, TICKS_PER_HOUR};
@@ -2359,7 +2359,7 @@ fn story_has(r: &V8Run, kind: EventKind) -> usize {
 /// captain's Spouse into its Hideout and demands its boss (or another of
 /// its convicts) let out. Does the law comply, Crush, or post a Rescue?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_hostage_captain_spouse_release() {
     let r = run_v8("god_hostage_captain_spouse_release", |w, day, watched| {
         if day != 20 {
@@ -2444,7 +2444,7 @@ fn god_hostage_captain_spouse_release() {
 /// the cheapest Trauma crew, then every adult is chromed to tier 3. Do the
 /// Trauma crews keep up with the episodes and the fights?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_subscribe_and_chrome_everyone_3() {
     let r = run_v8("god_subscribe_and_chrome_everyone_3", |w, day, watched| {
         if day != 5 {
@@ -2492,7 +2492,7 @@ fn god_subscribe_and_chrome_everyone_3() {
 /// god calls the vote. Does the chair fall, and does the brain's order
 /// change with the board's Personality?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_call_vote_habitat_after_coerce() {
     use citysim::systems::governance;
     let r = run_v8("god_call_vote_habitat_after_coerce", |w, day, watched| {
@@ -2558,7 +2558,7 @@ fn god_call_vote_habitat_after_coerce() {
 /// two strongest gangs. Do they fight it out, or does one Parley (a
 /// tribute for peace)?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_parley_strongest_gangs_in_vendetta() {
     let r = run_v8("god_parley_strongest_gangs_in_vendetta", |w, day, watched| {
         if day != 20 {
@@ -2656,7 +2656,7 @@ fn run_ambient(boom: bool) -> (Vec<AmbientDay>, usize) {
 /// lever applied and that the book bought more than the control's; the
 /// rest (vacancies, employed, foundings, prices, coins) is printed.
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_ambient_boom() {
     let (r, c) = std::thread::scope(|s| {
         let a = s.spawn(|| run_ambient(true));
@@ -2732,7 +2732,7 @@ fn told(story: &[(u64, EventKind, String)], kinds: &[EventKind], from: u64, to: 
 /// raider, a new branch) within 30 days? Printed: whether a branch owns a
 /// building again.
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_raze_arasaka() {
     let (w, story) = run_outside(45, |w, day| {
         if day == 10 {
@@ -2782,7 +2782,7 @@ fn god_raze_arasaka() {
 /// inside the gang within two days (a promotion, a civil war, or the end of
 /// one); the brothers are a rare sack-gutting event now and are printed.
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_decapitate_twice() {
     let leader = |w: &World| {
         w.gangs()
@@ -2820,7 +2820,7 @@ fn god_decapitate_twice() {
 /// and settle it, with a winner in the chair and the loser dead, fled or
 /// at the head of a splinter, within `war_days`?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_decapitate_close_succession() {
     let hollow = |w: &World| w.gangs().into_iter().find(|&g| w.comp::<Gang>(g).is_some_and(|x| x.name == "The Hollow"));
     let (w, story) = run_outside(60, |w, day| {
@@ -2902,7 +2902,7 @@ fn god_decapitate_close_succession() {
 /// abroad arrive in the city with an edge to its leader (its first member alive on the way back) within
 /// `promote_delay_days`?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_abroad() {
     let mut team: Vec<EntityId> = Vec::new();
     let (w, story) = run_outside(60, |w, day| {
@@ -2999,7 +2999,7 @@ fn god_abroad() {
 /// M17 god 4: a murder wave (25 residents killed on day 10). Does the State
 /// fund guards (a StateGrant) within 14 days, and withdraw once it calms?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_murder_wave() {
     let (w, story) = run_outside(60, |w, day| {
         if day == 10 {
@@ -3029,7 +3029,7 @@ fn god_murder_wave() {
 /// branch bankrupt, its scrip wiped)? The control, the same city with no
 /// runs and no embargo, keeps it alive.
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_kill_militech() {
     use citysim::virt::Purpose;
     let shock = |hit: bool| {
@@ -3144,7 +3144,7 @@ fn v12_sum(r: &V8Run, from: u64, to: u64, f: fn(&citysim::stats::Jobs2Cols) -> f
 /// offers arrive, is employment back near the control's by day 60, does the
 /// corner fill?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_kill_workers() {
     let r = run_v8("god_kill_workers", |w, day, watched| {
         if day != 45 {
@@ -3182,7 +3182,7 @@ fn god_kill_workers() {
 /// v12 god 2: every UtilityPlant's staff jailed 10 days on day 30. Do the
 /// districts go dark, and does the city notice?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_power_cut() {
     let mut restaffed = 0usize;
     let r = run_v8("god_power_cut", |w, day, watched| {
@@ -3217,7 +3217,7 @@ fn god_power_cut() {
 /// v12 god 3: a crate of 200 tier-3 weapons to the weakest gang on day 20.
 /// Do its fights turn armed, do the Murders rise, does the Law answer?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_flood_guns() {
     let r = run_v8("god_flood_guns", |w, day, watched| {
         if day != 20 {
@@ -3311,7 +3311,7 @@ fn crate_drawn() -> (usize, usize) {
 /// lever; the spec's day 20 comes after seed 42's sweeps, which fall in days
 /// 10-20). Do the sweeps stop, the pitches rise, the pimps' cut fall?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_vice_legal() {
     let r = run_v8("god_vice_legal", |w, day, _| {
         if day == 10 {
@@ -3333,7 +3333,7 @@ fn god_vice_legal() {
 /// places opened to the whole pool, its holder funded for the fees; no god
 /// command). Chipped count, episodes, Rescues, Trafficking?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_chip_everyone_in_debt() {
     let r = run_v8("god_chip_everyone_in_debt", |w, day, _| {
         if day != 20 {
@@ -3373,7 +3373,7 @@ fn god_chip_everyone_in_debt() {
 /// v12 god 6: the World's appetite for organs x 5 on day 20. Do Harvest
 /// orders and abductions rise, do black clinics open?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_organ_boom() {
     let r = run_v8("god_organ_boom", |w, day, _| {
         if day == 20 {
@@ -3405,7 +3405,7 @@ fn god_organ_boom() {
 /// `[faith]` cult row, its tithe raised to 1.0) under a charismatic leader.
 /// Members, apostates, Hunts; do the Purists react?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_cult_in_sump() {
     let r = run_v8("god_cult_in_sump", |w, day, watched| {
         if day != 10 {
@@ -3451,7 +3451,7 @@ fn god_cult_in_sump() {
 /// v12 god 8: the `public_school` lever on day 10 (no god command: set on
 /// the levers). Camp intakes fall, education rises, the Treasury pays?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_school_free() {
     let mut held = false;
     let r = run_v8("god_school_free", |w, day, _| {
@@ -3478,7 +3478,7 @@ fn god_school_free() {
 /// kin take in, the corner empty; does the city's output fall and not
 /// collapse?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_kill_the_young() {
     let r = run_v8("god_kill_the_young", |w, day, watched| {
         if day != 30 {
@@ -3518,7 +3518,7 @@ fn god_kill_the_young() {
 /// v12 god 10 (JOBS_V2's): the outside wage at half its level on day 1.
 /// Does immigration rise?
 #[test]
-#[ignore]
+#[ignore = "tier: merge"]
 fn god_outside_boom() {
     let r = run_v8("god_outside_boom", |w, day, _| {
         if day == 1 {

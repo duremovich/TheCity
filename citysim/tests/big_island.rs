@@ -167,7 +167,7 @@ fn peak_mb() -> f64 {
 }
 
 #[test]
-#[ignore]
+#[ignore = "tier: diag"]
 fn bench_big_island_paths() {
     let pop = env("CITYSIM_BENCH_POP", 6_000) as u32;
     let days = env("CITYSIM_BENCH_DAYS", 3);

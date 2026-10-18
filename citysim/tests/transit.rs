@@ -1006,7 +1006,7 @@ fn off_city_hash(ron: &str) -> String {
 /// against another main, set `CITYSIM_MAIN_SAVE` to that main's
 /// `42-1441.ron` (same command) and run it: the file is hashed the same way.
 #[test]
-#[ignore]
+#[ignore = "tier: diag"]
 fn test_switched_off_city_matches_main() {
     let mut cfg = Config::load();
     cfg.transit.enabled = false;
@@ -1099,7 +1099,7 @@ fn measure(on: bool, full: bool, days: u64) -> String {
 /// `--ignored --nocapture`; `TRANSIT_DAYS` (default 10), `TRANSIT_FULL=1`
 /// for the all-Full city.
 #[test]
-#[ignore]
+#[ignore = "tier: diag"]
 fn measure_transit_on_vs_off() {
     let days = std::env::var("TRANSIT_DAYS").ok().and_then(|d| d.parse().ok()).unwrap_or(10);
     let full = std::env::var("TRANSIT_FULL").is_ok_and(|v| v == "1");
@@ -1271,7 +1271,7 @@ fn measure_tail(seed: u64, on: bool, days: u64) -> String {
 /// and commute ticks by mode. Printed findings; run alone with
 /// `--ignored --nocapture`.
 #[test]
-#[ignore]
+#[ignore = "tier: diag"]
 fn measure_transit_tail() {
     let days = std::env::var("TRANSIT_DAYS").ok().and_then(|d| d.parse().ok()).unwrap_or(120);
     let seeds: Vec<u64> = std::env::var("TRANSIT_SEEDS")
@@ -1342,7 +1342,7 @@ fn measure_crews(name: &str, seed: u64, cap: u16, credit: f32, days: u64) -> Str
 /// `EL_DAYS` (default 120), in threads. Printed findings; run alone with
 /// `--ignored --nocapture`.
 #[test]
-#[ignore]
+#[ignore = "tier: diag"]
 fn measure_el_crews() {
     let days = std::env::var("EL_DAYS").ok().and_then(|d| d.parse().ok()).unwrap_or(120);
     let seeds: Vec<u64> = std::env::var("EL_SEEDS")

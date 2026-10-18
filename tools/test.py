@@ -37,7 +37,7 @@ BUDGETS = {"change": 180, "merge": 480, "milestone": 1200}
 
 # Caps checked by `lint` (docs/TESTING.md § caps).
 CAP_GOD_SCENARIOS = 20      # excluding the *_control tests
-CAP_ASSERTED_BULLETS = 60   # mechanisms() + jobs2_mechanisms() + transit_mechanisms()
+CAP_ASSERTED_BULLETS = 60   # mechanisms() + sickness_mechanisms() + jobs2_mechanisms() + transit_mechanisms()
 WARN_FILE_LINES = 1500
 PASS_NAMED = re.compile(r"(_review|_fixes|shadow_v\d|_probe)\.rs$")
 
@@ -205,7 +205,7 @@ def scan_bullets():
     transit_mechanisms(), string literals in jobs2_mechanisms()."""
     src = (ROOT / "citysim" / "tests" / "core.rs").read_text(encoding="utf-8", errors="replace")
     counts = {}
-    for fn in ("mechanisms", "jobs2_mechanisms", "transit_mechanisms"):
+    for fn in ("mechanisms", "sickness_mechanisms", "jobs2_mechanisms", "transit_mechanisms"):
         m = re.search(rf"\nfn {fn}\(\) -> Vec<Mechanism> \{{(.*?)\n\}}", src, re.S)
         body = m.group(1) if m else ""
         tuples = len(re.findall(r'\(\s*"[^"]+",\s*[km]\(', body))
