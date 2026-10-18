@@ -539,6 +539,7 @@ fn test_fabricated_spin_and_exposure() {
     assert!(w.contracts.values().any(|c| c.kind == ContractKind::Spin && c.status == ContractStatus::Fulfilled));
     let actor = captives::fabricate_target(&w, corp).unwrap();
     w.stories.push_back(citysim::word::Story {
+        byline: None,
         id: 77,
         feed,
         deed: Deed::Betrayed,

@@ -960,6 +960,7 @@ fn test_news_day_conserves_coins() {
         paid_by: None,
         fabricated: false,
         exposed: false,
+        byline: None,
     });
     w.config.news.spin_min = 0.0;
     let before = ownership::total_coins(&w);

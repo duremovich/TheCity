@@ -755,6 +755,35 @@ pub struct Jobs2Cols {
     pub dealer_regulars: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub lookout_halved: u32,
+    // Lives at work phase 5 (§ 2.4, § 2.2's civic clerk): the tower's counters.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub meetings_held: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub meeting_attendees: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub decisions: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub beat_stops: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub interviews: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub bylines: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub byline_promotions: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub walk_ins_served: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub walk_ins_waited: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub walk_ins_dropped: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub contract_encounters: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub fixer_collections: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub licences_named: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub bribes_named: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -1003,6 +1032,20 @@ impl Jobs2Cols {
                 "corner_deals",
                 "dealer_regulars",
                 "lookout_halved",
+                "meetings_held",
+                "meeting_attendees",
+                "decisions",
+                "beat_stops",
+                "interviews",
+                "bylines",
+                "byline_promotions",
+                "walk_ins_served",
+                "walk_ins_waited",
+                "walk_ins_dropped",
+                "contract_encounters",
+                "fixer_collections",
+                "licences_named",
+                "bribes_named",
             ]
             .into_iter()
             .map(str::to_string),
@@ -1245,6 +1288,20 @@ impl Jobs2Cols {
             self.corner_deals.to_string(),
             self.dealer_regulars.to_string(),
             self.lookout_halved.to_string(),
+            self.meetings_held.to_string(),
+            self.meeting_attendees.to_string(),
+            self.decisions.to_string(),
+            self.beat_stops.to_string(),
+            self.interviews.to_string(),
+            self.bylines.to_string(),
+            self.byline_promotions.to_string(),
+            self.walk_ins_served.to_string(),
+            self.walk_ins_waited.to_string(),
+            self.walk_ins_dropped.to_string(),
+            self.contract_encounters.to_string(),
+            self.fixer_collections.to_string(),
+            self.licences_named.to_string(),
+            self.bribes_named.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

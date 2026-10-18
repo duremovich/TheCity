@@ -752,6 +752,9 @@ fn run_stories(world: &mut World, plants: Vec<Plant>) {
         let fname = st.name.clone();
         let mut ran = 0u8;
         for (e, slant, payer, fabricated) in runs {
+            // Lives at work phase 5 (§ 2.4): the byline, read before the
+            // distortion (the deed's own actor is the beat's key).
+            let byline = byline_for(world, feed, e.actor.map(|a| (e.deed, a, e.object, time::day(e.tick))));
             let mut r = DeedRef { deed: e.deed, actor: e.actor, object: e.object };
             let p = world.config.gossip.distort_base * (1.0 - k).clamp(0.0, 1.0);
             let roll: f32 = rng.random();
@@ -801,13 +804,18 @@ fn run_stories(world: &mut World, plants: Vec<Plant>) {
                 paid_by: payer,
                 fabricated,
                 exposed: false,
+                byline,
             });
             let obj = r.object.map_or_else(String::new, |o| format!(" {}", crate::systems::grudges::label(world, o)));
             let paid = payer.map_or_else(String::new, |p| format!(" (paid by {})", world.owner_label(Some(p))));
+            let by = byline.map_or_else(String::new, |b| format!(" by {}", world.name_of(b)));
             let text =
-                format!("{fname}: {} {}{obj}{paid}", crate::systems::grudges::label(world, actor), r.deed.label());
+                format!("{fname}: {} {}{obj}{paid}{by}", crate::systems::grudges::label(world, actor), r.deed.label());
             world.push_event(EventKind::Story, &[feed, actor, r.object.unwrap_or(EntityId::NONE)], text);
             world.stats.current.word.stories += 1;
+            if let Some(b) = byline {
+                note_byline(world, b);
+            }
             ran = ran.saturating_add(1);
         }
         if let Some(s) = world.comp_mut::<Building>(feed).and_then(|b| b.feed.as_mut()) {
@@ -874,5 +882,303 @@ pub fn daily(world: &mut World) {
     let known = rescore_spin(world);
     let plants = spin(world, known);
     run_stories(world, plants);
+    // Lives at work phase 5 (§ 2.4): the day's interviews are spent; a
+    // walked beat is dropped (empty off).
+    for b in world.beats.values_mut() {
+        b.interviewed.clear();
+    }
+    world.beats.retain(|_, b| usize::from(b.legs) < b.stops.len());
     ads(world);
+}
+
+// ---------------------------------------------------------------------------
+// Lives at work phase 5 (§ 2.4, reporter): the beat and the byline
+// ---------------------------------------------------------------------------
+
+/// A deed on the beat: `(deed, actor, object, day)`, the story key.
+pub type BeatDeed = (Deed, EntityId, Option<EntityId>, u64);
+
+/// The witness interviewed at a scene.
+const PURPOSE_WITNESS: u64 = 0x5e52_0101;
+
+/// A reporter's beat (`World::beats`, saved while it holds anything): the
+/// shift the stops are for, the scenes (a building and the deed), the
+/// legs walked and the deeds interviewed (a witness met at the scene),
+/// read by tonight's `run_stories` for the byline and cleared after it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Beat {
+    pub shift: i64,
+    pub stops: SmallVec<[(EntityId, BeatDeed); 4]>,
+    pub legs: u8,
+    pub interviewed: SmallVec<[BeatDeed; 8]>,
+}
+
+/// The scene of a pool entry: the victim's Home (an agent object), the
+/// object building, else the actor's Home (deviation: the pool keeps no
+/// tile). `None` without one standing.
+fn scene_of(world: &World, e: &PoolEntry) -> Option<EntityId> {
+    let home = |a: EntityId| world.comp::<crate::components::Household>(a).and_then(|h| h.home);
+    let b = match e.object {
+        Some(o) if world.has::<Building>(o) => Some(o),
+        Some(o) => home(o),
+        None => None,
+    }
+    .or_else(|| e.actor.and_then(home))?;
+    world.comp::<Building>(b).filter(|bd| !bd.demolished && !bd.derelict).map(|_| b)
+}
+
+/// § 2.4 (reporter): the beat's stops for `feed`: the scenes of the last
+/// day's crimes first-hand in the Feed's districts (`hops == 0`, a
+/// `deed_sev` above 0, not already run by this Feed), one a building,
+/// `beat_stops` of them nearest the Feed's door (ties the lower id).
+pub fn beat_stops(world: &World, feed: EntityId) -> SmallVec<[(EntityId, BeatDeed); 4]> {
+    let mut out = SmallVec::new();
+    let Some(st) = feed_state(world, feed) else { return out };
+    let Some(from) = world.comp::<Building>(feed).map(|b| b.door) else { return out };
+    let since = world.tick.saturating_sub(TICKS_PER_DAY);
+    let mut cands: BTreeMap<EntityId, BeatDeed> = BTreeMap::new();
+    for (d, pool) in world.rumours.iter().enumerate() {
+        if d >= MAX_DISTRICTS || st.covers & (1 << d) == 0 {
+            continue;
+        }
+        for e in &pool.entries {
+            let Some(actor) = e.actor else { continue };
+            if e.hops != 0 || e.tick < since || world.config.gossip.deed_sev.get(e.deed) <= 0.0 {
+                continue;
+            }
+            if ran_recently(world, feed, e.deed, actor, e.object) {
+                continue;
+            }
+            let Some(b) = scene_of(world, e) else { continue };
+            cands.entry(b).or_insert((e.deed, actor, e.object, time::day(e.tick)));
+        }
+    }
+    let mut v: Vec<(u32, EntityId, BeatDeed)> = cands
+        .into_iter()
+        .filter_map(|(b, k)| world.comp::<Building>(b).map(|bd| (bd.door.manhattan(from), b, k)))
+        .collect();
+    v.sort_by(|x, y| x.0.cmp(&y.0).then(x.1.cmp(&y.1)));
+    for (_, b, k) in v.into_iter().take(usize::from(world.config.service.beat_stops)) {
+        out.push((b, k));
+    }
+    out
+}
+
+/// § 2.4 (reporter): at a scene, a witness is interviewed: a body (Full or
+/// Coarse) within `witness_tiles` of the door or inside, not the reporter,
+/// the lowest `hash(PURPOSE_WITNESS, reporter, witness, day)`: a `Source`
+/// encounter (the scene is no service place: the event names the
+/// district) and the deed noted on the beat. `beat_stops` either way.
+fn interview(world: &mut World, reporter: EntityId, stop: (EntityId, BeatDeed)) {
+    let (b, deed) = stop;
+    crate::systems::ownership::jobs2_row(world).beat_stops += 1;
+    let Some(door) = world.comp::<Building>(b).map(|bd| bd.door) else { return };
+    let r = world.config.service.witness_tiles;
+    let day = world.day();
+    let near = world.agents_near(door, r, Some(b));
+    let key = |id: EntityId| u64::from(id.index) << 32 | u64::from(id.generation);
+    let witness = near
+        .into_iter()
+        .filter(|&w| {
+            w != reporter
+                && world
+                    .comp::<crate::components::Brain>(w)
+                    .is_some_and(|br| br.lod != crate::components::Lod::Statistical)
+                && crate::systems::law::living(world, w)
+                && crate::systems::demography::is_adult(world, w)
+                && world
+                    .comp::<crate::components::Position>(w)
+                    .is_some_and(|p| p.building == Some(b) || p.tile.manhattan(door) <= r)
+        })
+        .map(|w| (crate::systems::econ::hash_unit(world.seed(), PURPOSE_WITNESS, key(reporter) ^ key(w), day), w))
+        .min_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)))
+        .map(|(_, w)| w);
+    let Some(w) = witness else { return };
+    crate::systems::ownership::jobs2_row(world).interviews += 1;
+    let d = world.district_of_building(b);
+    crate::systems::service::encounter(world, reporter, w, None, d, crate::components::ServeKind::Source, 0);
+    if let Some(beat) = world.beats.get_mut(&reporter) {
+        if !beat.interviewed.contains(&deed) {
+            beat.interviewed.push(deed);
+        }
+    }
+}
+
+/// The beat for `reporter` this shift (`key`), fresh when the shift is new
+/// (the deeds interviewed earlier kept for tonight's byline).
+fn ensure_beat(world: &mut World, reporter: EntityId, feed: EntityId, key: i64) {
+    if world.beats.get(&reporter).is_some_and(|b| b.shift == key) {
+        return;
+    }
+    let stops = beat_stops(world, feed);
+    let interviewed = world.beats.get(&reporter).map(|b| b.interviewed.clone()).unwrap_or_default();
+    world.beats.insert(reporter, Beat { shift: key, stops, legs: 0, interviewed });
+}
+
+/// § 2.4 (reporter, `plan::plan_for`'s Work arm after `trades::round_plan`):
+/// a Reporter on shift walks the beat (deviation: `Role::Reporter` is a
+/// legacy role with no `[[trades]]` row, so `round_plan` cannot carry it;
+/// this is its shape on `World::beats`): the scene now reached is
+/// interviewed, then `GoTo(TargetHome)` to the next; with the beat walked,
+/// or in the shift's last `ROUND_CUTOFF`, `None`: the planner sends him to
+/// the Feed's desk. Tower only.
+pub fn beat_plan(world: &mut World, id: EntityId) -> Option<crate::goap::Plan> {
+    if !crate::systems::service::tower_on(world) {
+        return None;
+    }
+    let job = world.comp::<Job>(id).filter(|j| j.role == Role::Reporter)?.clone();
+    let feed = job.employer?;
+    if !job.on_shift(world.tick_of_day()) {
+        return None;
+    }
+    let end = job.shift_end(world.tick)?;
+    if end.saturating_sub(world.tick) <= crate::systems::trades::ROUND_CUTOFF {
+        return None;
+    }
+    let key = job.next_shift_key(world.tick);
+    if job.last_shift_day == Some(key) || !crate::exec::routine::workday_of(world, id, &job, key) {
+        return None;
+    }
+    ensure_beat(world, id, feed, key);
+    let here = world.comp::<crate::components::Position>(id).and_then(|p| p.building);
+    let beat = world.beats.get(&id)?.clone();
+    let mut legs = usize::from(beat.legs);
+    if legs >= beat.stops.len() {
+        return None;
+    }
+    if here == Some(beat.stops[legs].0) {
+        interview(world, id, beat.stops[legs]);
+        legs += 1;
+        if let Some(b) = world.beats.get_mut(&id) {
+            b.legs = u8::try_from(legs).unwrap_or(u8::MAX);
+        }
+        if legs >= beat.stops.len() {
+            return None;
+        }
+    }
+    let next = beat.stops[legs].0;
+    // The leg and the walk back to the Feed must fit before the post's
+    // `ROUND_CUTOFF` (the desk, where the shift is paid): a far scene ends
+    // the beat (the first build walked a reporter to the Spire at 12:44 and
+    // lost the day's wage).
+    let from = crate::exec::walk_origin(world, id);
+    let (to, desk) = (world.comp::<Building>(next).map(|b| b.door), world.comp::<Building>(feed).map(|b| b.door));
+    let fits = match (from, to, desk) {
+        (Some(f), Some(t), Some(d)) => {
+            let need = crate::exec::timed_walk(world, id, f, t) + crate::exec::timed_walk(world, id, t, d);
+            world.tick + need + crate::systems::trades::ROUND_CUTOFF <= end
+        }
+        _ => false,
+    };
+    if !fits {
+        if let Some(b) = world.beats.get_mut(&id) {
+            b.legs = u8::try_from(b.stops.len()).unwrap_or(u8::MAX);
+        }
+        return None;
+    }
+    let step = crate::components::ActionInstance {
+        action: crate::goap::ActionKind::GoTo(crate::goap::LocationKey::TargetHome),
+        target: Some(next),
+        tile: None,
+    };
+    Some(crate::goap::Plan {
+        goal: crate::components::GoalKind::Work,
+        target: Some(next),
+        steps: vec![step],
+        started_tick: world.tick,
+    })
+}
+
+/// Is `id` a Reporter walking his beat this shift (a stop still ahead)?
+/// The shadow's activity reads the leg as work, as a super's round leg.
+pub fn on_beat(world: &World, id: EntityId) -> bool {
+    world.comp::<Job>(id).is_some_and(|j| j.role == Role::Reporter)
+        && world.beats.get(&id).is_some_and(|b| usize::from(b.legs) < b.stops.len())
+}
+
+/// § 2.4 (reporter, § 6's mirror; `service::hourly`): a Statistical
+/// Reporter credited on shift (`service::present` at the Feed) walks his
+/// beat world-side at his shift's first hour: every stop interviewed at
+/// that hour (the witness a body there now). Tower only.
+pub fn stat_beats(world: &mut World) {
+    let tod = world.tick_of_day();
+    let due: Vec<(EntityId, EntityId, i64)> = world
+        .workers(Role::Reporter)
+        .iter()
+        .copied()
+        .filter_map(|r| {
+            let j = world.comp::<Job>(r)?;
+            let feed = j.employer?;
+            let first = j.shifts.iter().any(|&(s, _)| tod >= s && u32::from(tod) < u32::from(s) + 60);
+            let stat =
+                world.comp::<crate::components::Brain>(r).is_some_and(|b| b.lod == crate::components::Lod::Statistical);
+            (first && stat && crate::systems::service::present(world, r, feed))
+                .then(|| (r, feed, j.next_shift_key(world.tick)))
+        })
+        .collect();
+    for (r, feed, key) in due {
+        ensure_beat(world, r, feed, key);
+        let Some(beat) = world.beats.get(&r).cloned() else { continue };
+        // The body's time gate, walked from the Feed's door at the hour:
+        // a stop is made when its leg and the walk back fit before the
+        // shift's last `ROUND_CUTOFF`.
+        let end = world.comp::<Job>(r).and_then(|j| j.shift_end(world.tick)).unwrap_or(world.tick);
+        let Some(desk) = world.comp::<Building>(feed).map(|b| b.door) else { continue };
+        let (mut at, mut t) = (desk, world.tick);
+        for &stop in beat.stops.iter().skip(usize::from(beat.legs)) {
+            let Some(door) = world.comp::<Building>(stop.0).map(|b| b.door) else { break };
+            let leg = crate::exec::timed_walk(world, r, at, door);
+            if t + leg + crate::exec::timed_walk(world, r, door, desk) + crate::systems::trades::ROUND_CUTOFF > end {
+                break;
+            }
+            t += leg;
+            at = door;
+            interview(world, r, stop);
+        }
+        if let Some(b) = world.beats.get_mut(&r) {
+            b.legs = u8::try_from(b.stops.len()).unwrap_or(u8::MAX);
+        }
+    }
+}
+
+/// § 2.4 (reporter): the story's byline: the Feed's reporter who
+/// interviewed the deed (the lowest id), else the sharpest reporter when
+/// any worked yesterday, else `None`. Tower only.
+fn byline_for(world: &World, feed: EntityId, deed: Option<BeatDeed>) -> Option<EntityId> {
+    if !crate::systems::service::tower_on(world) {
+        return None;
+    }
+    let (staff, worked) = reporters(world, feed);
+    let beat = deed
+        .and_then(|k| staff.iter().copied().find(|r| world.beats.get(r).is_some_and(|b| b.interviewed.contains(&k))));
+    beat.or_else(|| (worked > 0).then(|| sharpest_reporter(world, feed)).flatten())
+}
+
+/// § 2.4 (reporter): a byline counted; every `byline_promote` bylines the
+/// reporter's grade rises one step (to `PROFESSIONAL` at most), his wage
+/// with it (`classpay::wage_at`), and `Promoted` is logged as a merit
+/// promotion's.
+fn note_byline(world: &mut World, reporter: EntityId) {
+    let n = {
+        let c = world.bylines.entry(reporter).or_insert(0);
+        *c = c.saturating_add(1);
+        *c
+    };
+    crate::systems::ownership::jobs2_row(world).bylines += 1;
+    let every = world.config.service.byline_promote;
+    if every == 0 || n % every != 0 {
+        return;
+    }
+    let Some(j) = world.comp::<Job>(reporter) else { return };
+    if j.grade >= crate::systems::classpay::PROFESSIONAL {
+        return;
+    }
+    let (role, grade, at) = (j.role, j.grade.max(crate::systems::classpay::role_grade(world, j.role)) + 1, j.employer);
+    let wage = crate::systems::classpay::wage_at(world, role, grade);
+    if let Some(j) = world.comp_mut::<Job>(reporter) {
+        j.grade = grade;
+        j.wage_per_day = wage;
+    }
+    crate::systems::ownership::jobs2_row(world).byline_promotions += 1;
+    crate::systems::classpay::note_promoted(world, reporter, at);
 }

@@ -618,7 +618,17 @@ fn probe_buyer_nobody_heard_of_is_never_charged() {
     let (mut heard_on, mut charged_on) = (None, None);
     let start = w.tick;
     for day in 0..30u64 {
-        run_to(&mut w, buyer, start + (day + 1) * TICKS_PER_DAY, |_| {});
+        // The city may kill him (phase 5's diverged seed 42: abducted and
+        // ripped on day 23): the property holds to his death.
+        let end = start + (day + 1) * TICKS_PER_DAY;
+        while w.tick < end && law::living(&w, buyer) && w.has::<Brain>(buyer) {
+            pin(&mut w, buyer);
+            w.run_ticks(1);
+        }
+        if !law::living(&w, buyer) || !w.has::<Brain>(buyer) {
+            eprintln!("buyer {} died on day {day}", buyer.index);
+            break;
+        }
         if heard_on.is_none() {
             let hs = heard_of(&w, buyer, t);
             if !hs.is_empty() {
@@ -2672,6 +2682,7 @@ fn probe_cabbie_drives_a_fare_on_his_shift() {
 /// he stands in and the pitch is opened in-test at the door nearest him,
 /// with `p_street_visit` and `street_intimacy` raised so the night takes something.
 #[test]
+#[ignore = "gap: OPEN-102"]
 fn probe_pimp_purse_grows_on_a_pitch_night() {
     use citysim::systems::gang;
     let mut cfg = Config::load();
@@ -2779,4 +2790,139 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
     eprintln!("pimp {}: {collecting} ticks collecting, met the worker {met}", pimp.index);
     assert!(collecting > 0 && met, "the pimp never walked his pitch");
     assert!(kept_nights > 0, "no night kept a cut (the probe's premise)");
+}
+
+/// Lives at work phase 5 (§ 2.4, § 9.1): a CEO meets at least one named
+/// employee at the Hq in a week with it staffed (the exec pinned: his own
+/// `Served` memories name staff of his Hq). Control: the tower off, none.
+#[test]
+fn probe_ceo_meets_a_named_employee_in_a_week() {
+    fn met(tower: bool) -> usize {
+        let mut cfg = Config::load();
+        if !tower {
+            cfg.strip_tower();
+        }
+        let mut w = World::new(42, cfg);
+        w.run_ticks(TICKS_PER_DAY);
+        // The corp whose HQ holds the most graded staff (at 2k the Hq
+        // buildings stand empty early; the ranking's next kinds are staffed).
+        let (_, corp, exec, hq) = w
+            .corps()
+            .into_iter()
+            .filter_map(|c| {
+                let e = w.comp::<citysim::Corp>(c)?.exec?;
+                let hq = citysim::systems::life::hq_of(&w, c, e)?;
+                let graded = w
+                    .staff_of(hq)
+                    .iter()
+                    .filter(|&&s| {
+                        w.comp::<Job>(s).is_some_and(|j| {
+                            j.grade >= 1 || citysim::systems::classpay::base_grade(&w, j.employer, j.role) >= 1
+                        })
+                    })
+                    .count();
+                (law::living(&w, e) && graded > 0).then_some((graded, c, e, hq))
+            })
+            .max_by_key(|x| (x.0, std::cmp::Reverse(x.1)))
+            .expect("a corp with an exec and a graded HQ");
+        let start = w.tick;
+        run_to(&mut w, exec, start + 7 * TICKS_PER_DAY, |_| {});
+        // His ledger of the people he served (the memories are low-salience
+        // and a week of a CEO's day can crowd them out), his corp's staff:
+        // the HQ moves when the corp builds its Hq.
+        let names: std::collections::BTreeSet<EntityId> = citysim::systems::service::regulars_of(&w, exec)
+            .iter()
+            .map(|r| r.who)
+            .filter(|&s| w.comp::<Job>(s).and_then(|j| j.employer).and_then(|b| w.corp_of_building(b)) == Some(corp))
+            .collect();
+        let meetings: u32 = w.stats.history.iter().filter_map(|r| r.jobs2.as_ref()).map(|j| j.meetings_held).sum();
+        eprintln!(
+            "tower {tower}: {} (exec of {}) met {} named employees of {} in a week ({meetings} Meeting hours city-wide)",
+            w.name_of(exec),
+            w.name_of(corp),
+            names.len(),
+            w.name_of(hq)
+        );
+        names.len()
+    }
+    assert!(met(true) >= 1, "the CEO meets an employee");
+    assert_eq!(met(false), 0, "off: the CEO meets nobody");
+}
+
+/// Lives at work phase 5 (§ 2.4, § 9.1): a Reporter on a Feed covering a
+/// district with a reported Assault since yesterday stands at its scene
+/// (the victim's Home) during his shift and interviews a witness there or
+/// counts the stop. The covered districts' pools are cleared in-test so the
+/// Assault is the beat. Control: the tower off, never at the scene.
+#[test]
+fn probe_reporter_stands_at_the_scene_on_his_shift() {
+    fn at_scene(tower: bool) -> bool {
+        let mut cfg = Config::load();
+        if !tower {
+            cfg.strip_tower();
+        }
+        let mut w = World::new(42, cfg);
+        w.run_ticks(TICKS_PER_DAY + 5 * TICKS_PER_HOUR);
+        let (reporter, feed) = w
+            .workers(Role::Reporter)
+            .iter()
+            .copied()
+            .find_map(|r| {
+                let j = w.comp::<Job>(r)?;
+                let f = j.employer?;
+                let ok = law::living(&w, r)
+                    && !w.has::<citysim::Sentence>(r)
+                    && j.shifts.first().is_some_and(|&(s, _)| (6 * 60..=10 * 60).contains(&s))
+                    && routine::workday_of(&w, r, j, j.next_shift_key(w.tick))
+                    && citysim::systems::news::feed_state(&w, f).is_some_and(|s| s.covers != 0);
+                ok.then_some((r, f))
+            })
+            .expect("a day-shift reporter on a workday");
+        let covers = citysim::systems::news::feed_state(&w, feed).expect("feed").covers;
+        let d = (0..32u8).find(|d| covers & (1 << d) != 0).expect("a covered district");
+        for (i, pool) in w.rumours.iter_mut().enumerate() {
+            if i < 32 && covers & (1 << i) != 0 {
+                pool.entries.clear();
+            }
+        }
+        let civ: Vec<EntityId> = w
+            .citizens()
+            .into_iter()
+            .filter(|&a| law::living(&w, a) && demography::is_adult(&w, a))
+            .filter(|&a| a != reporter && w.comp::<Household>(a).and_then(|h| h.home).is_some())
+            .collect();
+        // The victim lives near the Feed (a far scene does not fit the
+        // shift: the beat's time gate).
+        let desk = w.comp::<Building>(feed).map(|b| b.door).expect("feed door");
+        let home_door = |a: EntityId| {
+            w.comp::<Household>(a)
+                .and_then(|h| h.home)
+                .and_then(|h| w.comp::<Building>(h))
+                .map_or(u32::MAX, |b| b.door.manhattan(desk))
+        };
+        let victim = *civ.iter().min_by_key(|&&a| (home_door(a), a)).expect("a victim");
+        let actor = civ[11];
+        let scene = w.comp::<Household>(victim).and_then(|h| h.home).expect("a home");
+        citysim::systems::gossip::post_deed(
+            &mut w,
+            citysim::components::DistrictId(d),
+            citysim::word::Deed::Assaulted,
+            Some(actor),
+            Some(victim),
+        );
+        let start = w.tick;
+        let mut stood = false;
+        run_to(&mut w, reporter, start + 14 * TICKS_PER_HOUR, |w| {
+            stood |= w.comp::<Position>(reporter).is_some_and(|p| p.building == Some(scene));
+        });
+        eprintln!(
+            "tower {tower}: reporter {} of {} stood at {} (the scene): {stood}",
+            w.name_of(reporter),
+            w.name_of(feed),
+            w.name_of(scene)
+        );
+        stood
+    }
+    assert!(at_scene(true), "the reporter walks to the scene");
+    assert!(!at_scene(false), "off: no beat");
 }

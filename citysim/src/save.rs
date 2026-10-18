@@ -209,7 +209,13 @@ use crate::world::World;
 /// 39 (Lives at work phase 4b, § 2.3): `jobs2.vice.pimp_seen`,
 /// `World.corner_dealers` and `World.corner_log` (each written while it
 /// holds anything; empty off). An off save is byte-identical to version 38's.
-pub const SAVE_VERSION: u8 = 39;
+/// 40 (Lives at work phase 5, § 2.4): `Story.byline`, `Deed::Decided`,
+/// `VisitWhy::{Papers, Collect}`, `World.{meeting_tables, beats, bylines,
+/// walk_ins}` (each written while it holds anything), the `[service]` tower
+/// keys, the `[[serves]]` tower rows and the `decided` deed keys (written
+/// only on) and the `Jobs2Cols` phase-5 columns (serde defaults). An off
+/// save is byte-identical to version 39's.
+pub const SAVE_VERSION: u8 = 40;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

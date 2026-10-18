@@ -415,7 +415,10 @@ pub struct ServiceCfg {
     /// (`CITYSIM_LIVES_STREET_OFF=1`; `CITYSIM_STREET_OFF` is Jobs & lives
     /// phase 2's `[jobs2] street` switch, the pitches and rounds themselves).
     pub street: bool,
-    /// Phase 5: the tower and the brokers (reserved, unread).
+    /// Phase 5 (§ 2.4, § 2.2's civic clerk, § 3.6's `Decided`): the
+    /// exec's Meeting and decision, the reporter's beat and byline, the
+    /// Fixer's walk-in and contract encounters, the owner's collection, the
+    /// clerk named (`CITYSIM_TOWER_OFF=1`).
     pub tower: bool,
     /// § 2.1: the madam's share of each tip at her Brothel (worker -> madam).
     pub madam_cut: f32,
@@ -490,6 +493,31 @@ pub struct ServiceCfg {
     /// day/night pair is on duty at neither). Empty: the `split` rule.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cab_shifts: Vec<(u16, u16)>,
+    // --- Phase 5 (the tower), each left out of a save at its default
+    // (`ServiceCfg::strip_tower`).
+    /// § 2.4 (exec): the graded staff present at the Hq an exec meets in a
+    /// Meeting hour, at most.
+    #[serde(skip_serializing_if = "is_zero_u8_cfg")]
+    pub meeting_attendees: u8,
+    /// § 2.4 (exec): the two best corp orders within this of each other are
+    /// the exec's call (the picked one gains it).
+    #[serde(skip_serializing_if = "is_zero_f32_cfg")]
+    pub decision_margin: f32,
+    /// § 2.4 (exec): the orders a brave exec leans to ...
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub expansive: Vec<crate::components::CorpOrder>,
+    /// ... and those a loyal one leans to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub defensive: Vec<crate::components::CorpOrder>,
+    /// § 2.4 (reporter): the scenes of yesterday's deeds a reporter walks a shift.
+    #[serde(skip_serializing_if = "is_zero_u8_cfg")]
+    pub beat_stops: u8,
+    /// § 2.4 (reporter): every this many bylines the reporter's grade rises one step.
+    #[serde(skip_serializing_if = "is_zero_u16_cfg")]
+    pub byline_promote: u16,
+    /// § 2.4 (reporter): a witness is a body within this many tiles of the scene.
+    #[serde(skip_serializing_if = "is_zero_u32_cfg")]
+    pub witness_tiles: u32,
 }
 
 fn is_zero_u32_cfg(v: &u32) -> bool {
@@ -534,6 +562,13 @@ impl Default for ServiceCfg {
             p_short_report: 0.0,
             witness_lookout_mult: 0.0,
             cab_shifts: Vec::new(),
+            meeting_attendees: 0,
+            decision_margin: 0.0,
+            expansive: Vec::new(),
+            defensive: Vec::new(),
+            beat_stops: 0,
+            byline_promote: 0,
+            witness_tiles: 0,
         }
     }
 }
@@ -571,6 +606,20 @@ impl ServiceCfg {
         self.p_short_report = d.p_short_report;
         self.witness_lookout_mult = d.witness_lookout_mult;
         self.cab_shifts = d.cab_shifts;
+    }
+
+    /// Lives at work phase 5: the tower switch off and its keys at their
+    /// defaults (the off switches; nothing reads them off).
+    pub fn strip_tower(&mut self) {
+        let d = ServiceCfg::default();
+        self.tower = false;
+        self.meeting_attendees = d.meeting_attendees;
+        self.decision_margin = d.decision_margin;
+        self.expansive = d.expansive;
+        self.defensive = d.defensive;
+        self.beat_stops = d.beat_stops;
+        self.byline_promote = d.byline_promote;
+        self.witness_tiles = d.witness_tiles;
     }
 }
 
@@ -621,6 +670,11 @@ pub struct ServesCfg {
     /// `[service] street` and stripped off (`Config::strip_street`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub street: bool,
+    /// Lives at work phase 5: a tower row (the exec, the reporter, the
+    /// Fixer's staff, the forger, the civic clerk), live only with `[service]
+    /// tower` and stripped off (`Config::strip_tower`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub tower: bool,
 }
 
 impl Default for ServesCfg {
@@ -638,6 +692,7 @@ impl Default for ServesCfg {
             event_on: Vec::new(),
             civic: false,
             street: false,
+            tower: false,
         }
     }
 }
@@ -2017,7 +2072,8 @@ impl Config {
             let legacy = Role::ALL.iter().any(|r| format!("{r:?}") == s.key);
             // Lives at work phase 4: the pimp and the dealer hold no trade
             // row (gang posts named by `vice::name_pimps` and `stims::is_dealer`).
-            let gang_post = s.key == "pimp" || s.key == "dealer";
+            // Lives at work phase 5: nor the exec (no Job: `Corp.exec`).
+            let gang_post = s.key == "pimp" || s.key == "dealer" || s.key == "exec";
             if !trade && !legacy && !gang_post {
                 out.push(format!("[[serves]] key {:?} is neither a trade id nor a Role", s.key));
             }
@@ -6383,6 +6439,10 @@ pub struct DeedTable {
     pub laid_off: f32,
     #[serde(skip_serializing_if = "is_zero_f32_deed")]
     pub born: f32,
+    /// Lives at work phase 5 (§ 3.6): the exec's decision (left out of a
+    /// save at 0; zeroed by the tower's off switches).
+    #[serde(skip_serializing_if = "is_zero_f32_deed")]
+    pub decided: f32,
 }
 
 fn is_zero_f32_deed(v: &f32) -> bool {
@@ -6424,6 +6484,7 @@ impl DeedTable {
             Deed::Employed => self.employed,
             Deed::LaidOff => self.laid_off,
             Deed::Born => self.born,
+            Deed::Decided => self.decided,
         }
     }
 
@@ -6454,6 +6515,7 @@ impl DeedTable {
             employed: 0.0,
             laid_off: 0.0,
             born: 0.0,
+            decided: 0.0,
         }
     }
 }
@@ -7815,6 +7877,17 @@ impl Config {
         self.stims.deal_corner = false;
     }
 
+    /// Lives at work phase 5: the tower switch off, its `[service]` keys at
+    /// their defaults, the tower `[[serves]]` rows gone and the `decided`
+    /// deed keys at 0 (the off switches; nothing reads them off).
+    pub fn strip_tower(&mut self) {
+        self.service.strip_tower();
+        self.serves.retain(|r| !r.tower);
+        self.gossip.reach0.decided = 0.0;
+        self.gossip.deed_sal.decided = 0.0;
+        self.gossip.deed_sev.decided = 0.0;
+    }
+
     /// Lives at work phase 2: the phase's deed keys at 0 in every deed table
     /// (the off switches; the deeds are never posted off).
     pub fn without_household_deeds(&mut self) {
@@ -7905,6 +7978,7 @@ impl Config {
             cfg.without_household_deeds();
             cfg.strip_civic();
             cfg.strip_street();
+            cfg.strip_tower();
         }
         // Lives at work phase 3 (§ 2.2, § 3.5): the civic switch's A/B and
         // identity device; and a config with `[service] civic = false` by
@@ -7924,6 +7998,14 @@ impl Config {
         }
         if !cfg.service.street {
             cfg.strip_street();
+        }
+        // Lives at work phase 5 (§ 2.4): the tower switch's A/B and identity
+        // device, the same shape.
+        if std::env::var("CITYSIM_TOWER_OFF").is_ok_and(|v| v == "1") {
+            cfg.service.tower = false;
+        }
+        if !cfg.service.tower {
+            cfg.strip_tower();
         }
         // Lives at work phase 2 (§ 3): the household's A/B and identity device
         // (the section and the phase's deed keys cleared, so the off save

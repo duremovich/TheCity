@@ -299,7 +299,13 @@ fn papers_daily(world: &mut World) {
         return;
     }
     let clerk = clerk_on_take(world);
+    // Lives at work phase 5 (§ 2.4): the forger's papers are a walk-in at
+    // the Fixer's open hours (`service::queue_walk_in`), paid at midnight.
+    let tower = crate::systems::service::tower_on(world);
     for s in wanted {
+        if tower && crate::systems::service::walk_in_pending(world, s) {
+            continue;
+        }
         let coins = world.purse(Some(s));
         let Some(from) = world.comp::<crate::components::Position>(s).map(|p| p.tile) else { continue };
         let forger = forger_near(world, from);
@@ -313,13 +319,21 @@ fn papers_daily(world: &mut World) {
                 ownership::pay(world, Some(s), Some(f), price - cut, Flow::Gray);
                 let owner = world.owner_of(b);
                 ownership::pay(world, Some(s), owner, cut, Flow::Gray);
-                world.jobs2.gray.papers.insert(s, Papers { tier: t, fake: true, forger: Some(f) });
                 ownership::jobs2_row(world).fake_sold += 1;
+                // Lives at work phase 5 (§ 2.4): the order is paid now; the
+                // papers are picked up in the Fixer's open hours.
+                if tower {
+                    crate::systems::service::queue_walk_in(world, s, b, f, t);
+                    continue;
+                }
+                world.jobs2.gray.papers.insert(s, Papers { tier: t, fake: true, forger: Some(f) });
             }
             (_, Some(c)) => {
                 ownership::pay(world, Some(s), Some(c), cfg.id_bribe, Flow::Bribe);
                 world.jobs2.gray.papers.insert(s, Papers { tier: 1, fake: false, forger: None });
                 ownership::jobs2_row(world).papers_bribed += 1;
+                // Lives at work phase 5 (§ 2.2): the clerk on the take named.
+                crate::systems::service::bribe_taken(world, c, s, cfg.id_bribe);
             }
             _ => {}
         }

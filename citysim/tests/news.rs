@@ -185,6 +185,7 @@ fn test_spin_buries_own_story_for_bury_days() {
         paid_by: None,
         fabricated: false,
         exposed: false,
+        byline: None,
     });
     w.next_story_id = 1;
     w.config.news.spin_min = 0.0;
