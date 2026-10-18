@@ -1,0 +1,129 @@
+# Open items
+
+The one ledger. Nothing is open anywhere else: a spec's "Implemented: deviations" tags its open items with an id from here, HANDOFF points here, a probe that exposes a gap is `#[ignore = "gap: OPEN-nnn"]`. Seeded 2026-10-18 (the process review) from SHADOW_V4, GOD_SCENARIOS_V12, every spec's deviations, the old HANDOFF's carry-overs and the ignored probes; `python tools/test.py lint` checks the ids and statuses.
+
+**Columns.** `id` (`OPEN-nnn`, never reused) | `item` (one line) | `origin` (doc § or sha) | `kind` (bug, feature, calibration, decision, probe) | `owner` (a milestone, or unowned) | `status` (`open`, `owned`, `closed <sha>`). Add rows at the end with the next id; close a row by writing `closed <sha>`, never by deleting it. Closed rows from before a milestone's close may be moved to the "Closed" table at the bottom at `/close-milestone`.
+
+| id | item | origin | kind | owner | status |
+|---|---|---|---|---|---|
+| OPEN-001 | Jobless poor stop earning once they hold one meal's coins (`goals.rs::already_satisfied` Earn arm, dole 0) | SHADOW_V4 bug 1 | bug | unowned | closed 2712b4a |
+| OPEN-002 | Night isn't the night: leisure has no Night gate, small-hours grocery runs, Rest loops without Sleep | SHADOW_V4 bug 2 | bug | unowned | closed 2712b4a |
+| OPEN-003 | Fight goal has no proportion (lawfulness, witness, stake, age, odds); downed men finished; retaliation filed as Assault | SHADOW_V4 bug 3 | bug | unowned | closed 2712b4a |
+| OPEN-004 | Sentence mix: fare evasion the top sentence, fines only when the Precinct is full | SHADOW_V4 bug 4 | bug | unowned | closed 2712b4a |
+| OPEN-005 | Shakedown sentence not scaled by the take (a 0-coin shakedown gets 6 days); needs a save field | SHADOW_V4 bug 4, § The sweep "Left open" 4 | bug | unowned | open |
+| OPEN-006 | Execs live street lives: `hq_of` ignores the Hq, execs recruited to street work and gangs, exec keeps her Guard post | SHADOW_V4 bug 5 | bug | unowned | closed 2712b4a |
+| OPEN-007 | Wrong person in the post: pitch openings to any adult, far pitch spot, no skill floor, same-midnight rehire after quitting | SHADOW_V4 bug 6 | bug | unowned | closed 2712b4a |
+| OPEN-008 | Tips go to the lowest-id worker; Clubs fall through `vice.rs::on_visit`, dancers never tipped | SHADOW_V4 bug 7 | bug | unowned | closed 2712b4a |
+| OPEN-009 | Gang leadership by loyalty not tenure; succession handed over for a 1-day fare sentence | SHADOW_V4 bug 8 | bug | unowned | closed 2712b4a |
+| OPEN-010 | Lone raids after `wait_for_crew` gives up; 0-coin shakedowns make Enemies; extortion hits the extorter's Friend | SHADOW_V4 bug 9 | bug | unowned | closed 2712b4a |
+| OPEN-011 | Social edges ignore what just happened (jail warms Enemies, arrest scuffle gossiped as Assault, Chat after a robbery, off-screen binds, spouse's kin stripped) | SHADOW_V4 bug 10 | bug | unowned | closed 2712b4a |
+| OPEN-012 | Corp guards police the whole city (no beat gate, 5 clients sampled city-wide); `holes_up_at` sends members to a Hideout bed at any distance | SHADOW_V4 bug 11 | bug | unowned | closed 2712b4a |
+| OPEN-013 | A courier inside a Club/Noodle Bar/Security Office reads it as its Workplace and loses the shift (PreconditionLost) | SHADOW_V4 bug 12 | bug | unowned | closed 2712b4a |
+| OPEN-014 | Creeds don't bind: chrome sold to Purists/cultists, cults typed as scavs, cults never preach | SHADOW_V4 bug 13; history/SHADOW_V3 gaps 7, 9 | bug | unowned | closed 2712b4a |
+| OPEN-015 | Gang stipend and territory tribute are wallet writes with no `Flow` (Collect reads 0) | SHADOW_V4 bug 14; history/SHADOW_V3 gap 6 | bug | unowned | closed 2712b4a |
+| OPEN-016 | Contracts: Tag always rendered as Ledger, locate leftover refunded to the buyer, marked man never reacts, 2-min StakeOut loops | SHADOW_V4 bug 15 | bug | unowned | closed 2712b4a |
+| OPEN-017 | Arms trade and black clinic can't start: armoury surplus never forms on 0-180 c treasuries, `build_clinics` needs 700 c; fix is a feature (credit or a back-room pitch); the black doc and BlackMarket raid never appear | SHADOW_V4 bug 16, § The sweep "Left open" 2; GOD_SCENARIOS_V12 gaps 5, 8; JOBS_AND_LIVES carry-over "no black clinic"; LIVES_AT_WORK § 2.5 (not picked) | feature | unowned | open |
+| OPEN-018 | Bouts: the same two fighters every night, bets pay 0 | SHADOW_V4 bug 17 | bug | unowned | closed 2712b4a |
+| OPEN-019 | Venue staff take leisure at their own workplace, then wait up to 10 h for the shift | SHADOW_V4 bug 18 | bug | unowned | closed 2712b4a |
+| OPEN-020 | Work has no hunger term (a sweeper works at hunger 0.11 holding 15 c) | SHADOW_V4 bug 19 | bug | unowned | closed 2712b4a |
+| OPEN-021 | At 20k low-urgency goals starve in the plan queue 1-6 h (`plan.rs::enqueue` has no aging) | SHADOW_V4 bug 20 | bug | unowned | closed 2712b4a |
+| OPEN-022 | One 20k assault published by 11 outlets (numbered corp clones) | SHADOW_V4 bug 21 | bug | unowned | closed 2712b4a |
+| OPEN-023 | 20k turns witnessed crimes into sentences at a lower rate (law probe 0.64 vs 2k 0.71; Coarse 0.56); what is left is guard throughput through one Precinct: D11 district Stations, § 5.1 probe | SHADOW_V4 bug 22, § The sweep "Left open" 3; LIVES_AT_WORK D11 | bug | Lives at work | owned |
+| OPEN-024 | Shadow tool picks: day labourer at 00:00, cancer at stage 0, closed vendor pitch, jailed pimp, arms dealer by stock; `flow_kind` buckets by running action | SHADOW_V4 bug 23 | bug | unowned | closed 2712b4a |
+| OPEN-025 | Save determinism: a wronged spouse's Enemy edge left the pair in `World::spouses`, a loaded game diverged 98 ticks later | SHADOW_V4 § The sweep "Found along the way" | bug | unowned | closed 2712b4a |
+| OPEN-026 | Work has a counterpart: patients, pupils, fares, crates, clients, doors, tenants, inmates, a madam's/pimp's cut, a dealer's corner and regulars, a CEO's meeting, a reporter's beat, a fixer's broker | SHADOW_V4 feature 1; history/SHADOW_V3 gaps 2, 5 | feature | Lives at work | owned |
+| OPEN-027 | The evening and the rest day: home, spouse, kids, a friend's place; leave an empty spot after an hour (120/369 HangOuts empty at 2k) | SHADOW_V4 feature 2; history/SHADOW_V3 gap 1 | feature | Lives at work | owned |
+| OPEN-028 | Households live together: 14/17 married picks never meet their spouse in 7 days; new mothers on corners; shared business; a taken child leaves only a grudge | SHADOW_V4 feature 3 | feature | Lives at work | owned |
+| OPEN-029 | Ages and professions: retirement/frailty exit, age bands per trade, pre-day-0 tenure, Profession survives a layoff, foreman by experience | SHADOW_V4 feature 4; history/SHADOW_V3 gap 4 | feature | Lives at work | owned |
+| OPEN-030 | Leaders lead: lieutenants take risky orders, the leader's cut off the top (7/8 leaders jailed, downed or dead in a week) | SHADOW_V4 feature 5 | feature | Lives at work | owned |
+| OPEN-031 | The city's scale at 20k: district Precincts and beats near home, the super's near round, Spire homes for 20k CEOs | SHADOW_V4 feature 6; history/SHADOW_V3 gap 3 | feature | Lives at work | owned |
+| OPEN-032 | Wealth has a body: the Flyer flown, an escort after a hit, no night walks through the Sump, bail and a lawyer, an acting exec; retinue travel | SHADOW_V4 feature 7; LIFE_L2 deferred table (retinue travel past M18) | feature | unowned | open |
+| OPEN-033 | Gossip beyond crime: wages, layoffs, weddings, births (Lives at work § 3.6 builds only the minimum: Hired/LaidOff, Wed/Born, Decided) | SHADOW_V4 feature 8; LIVES_AT_WORK § 3.6 | feature | unowned | open |
+| OPEN-034 | Owners run what they own: an owner-operator path, owner pay from profit | SHADOW_V4 feature 9; LIVES_AT_WORK § 2.5 (not picked) | feature | unowned | open |
+| OPEN-035 | Sickness and age change behaviour: seeking care, sick days, age/illness in fight strength; elders taken in or visited (kin take-in falls to 0 when the children die; no friend or Mission takes an elder) | SHADOW_V4 feature 10; history/SHADOW_V3 gap 10; GOD_SCENARIOS_V12 gap 9 (scenario gap 12) | feature | unowned | open |
+| OPEN-036 | Aftermath: a witnessed manslaughter reported; a parent's answer to a taken child | SHADOW_V4 feature 11 | feature | unowned | open |
+| OPEN-037 | The chip's cost shown: the debt behind the contract, no re-hire the night of a breakdown | SHADOW_V4 feature 12; history/SHADOW_V3 gap 8; LIVES_AT_WORK § 2.1 (out of scope) | feature | unowned | open |
+| OPEN-038 | LOD parity, actor share by lawfulness: law0 Full 0.930 vs Stat 0.757, law1 Full 0.068 vs Stat 0.202; likely fix is `calibrate` learning the binder's per-lawfulness weights | SHADOW_V4 § The sweep "Left open" 1 and the review round; HUNGER_SICKNESS § Open items (law1 actor share) | bug | unowned | open |
+| OPEN-039 | Gang wars cool into nothing: gang-vs-gang vendetta gang-days 92 → 0 on seed 42, Parleys 37 → 9 (now a FINDING), feud days 42-44 [231,106,18]; needs a real feed (rival-turf shakedowns, raids that land): home it in Lives at work or before M18 | SHADOW_V4 § The sweep "Left open" 5; HANDOFF § Open calls; history/SESSIONS "Open call ... gang wars cool" and "batch 3" (feud days) | decision | unowned | open |
+| OPEN-040 | Purist expulsions 0 on 42-44 since the creeds fix (every one was forbidden chrome sold); restore with a real feed, not a knob | SHADOW_V4 § The sweep demoted bullets; history/SESSIONS "batch 3"; HANDOFF § Open calls | feature | unowned | open |
+| OPEN-041 | Sanctioned bullet 0 on 42-44 after the sweep (was [4,3,4,3,1,4]); find what fed it and give it a real feed | SHADOW_V4 § The sweep demoted bullets | probe | unowned | open |
+| OPEN-042 | Missing god commands: `SetPublicSchool`, a chip offer to a named pool, a creed row's tithe (direct world edits stand in) | GOD_SCENARIOS_V12 gap 1 | feature | unowned | open |
+| OPEN-043 | Vacancies refill overnight: a plant outage, strike or massacre never reaches the corner, the El or the lights; the corner empties after a shock instead of filling | GOD_SCENARIOS_V12 gap 2 (scenario gaps 1, 2); JOBS_AND_LIVES carry-over (outages don't land) | feature | unowned | open |
+| OPEN-044 | The El slow-down on outages is not built | JOBS_AND_LIVES phase 1 "Not done" and carry-over; history/SESSIONS carry-overs | feature | unowned | open |
+| OPEN-045 | Weapons sit in the armoury until a muster: a flooded gang fights its street fights bare for weeks | GOD_SCENARIOS_V12 gap 8 (scenario gap 3) | feature | unowned | open |
+| OPEN-046 | The street trade is thin: ~1 street pitch open, no pimp's cut, no pitch in a Sweep district, so the vice levers barely show | GOD_SCENARIOS_V12 gap 3 (scenario gap 4); JOBS_AND_LIVES carry-over "the street trade is thin"; history/SESSIONS carry-overs | calibration | unowned | open |
+| OPEN-047 | The organ book is supply-bound and rots (2 a body, a quarter a day, 93 % rot on seed 42): a boom moves the price only; organs exported 0 on 42-44 since the cult-typing fix | GOD_SCENARIOS_V12 gap 4 (scenario gap 7); JOBS_AND_LIVES carry-over "organs rot"; SHADOW_V4 demoted bullets; history/SESSIONS "batch 3"; HANDOFF § Open calls | feature | unowned | open |
+| OPEN-048 | Trafficking at 0: no gang holds a Dollhouse front (needs a held Mid/Spire Lot and 900 c); captive chipping is unit-tested only | GOD_SCENARIOS_V12 gap 5 (scenario gap 6); JOBS_AND_LIVES carry-over; history/SESSIONS carry-overs | feature | unowned | open |
+| OPEN-049 | No Rescue of the chipped: no kin term reads `Chipped` | GOD_SCENARIOS_V12 gap 5 (scenario gap 5) | feature | unowned | open |
+| OPEN-050 | Schools out of reach: two Schools in Mid and up, `school_reach` 60 tiles; free school reaches the same handful, Sump children never | GOD_SCENARIOS_V12 gap 6 (scenario gap 11) | feature | unowned | open |
+| OPEN-051 | The Purists ignore a rival creed in the Sump: no order, Patrol scan or vendetta (the tilt reads chrome only) | GOD_SCENARIOS_V12 gap 7 (scenario gap 9) | feature | unowned | open |
+| OPEN-052 | A high-tithe cult's broke members are not housed at the chapel | GOD_SCENARIOS_V12 gap 7 (scenario gap 10) | feature | unowned | open |
+| OPEN-053 | Statistical-tier weapons: no off-screen carry or sightings, no off-screen ledger arms term, no law-brain arms pressure, no Gunsmith growth | JOBS_AND_LIVES phase 3 "Deferred" and carry-over; history/SESSIONS carry-overs | feature | unowned | open |
+| OPEN-054 | Status-mean inversion: class status means run Dreg > Corp | JOBS_AND_LIVES phase 4 and carry-over; history/SESSIONS carry-overs | calibration | unowned | open |
+| OPEN-055 | The robbed don't arm: `probe_robbed_resident_buys_a_weapon_within_3_days` (person.rs, `#[ignore]`): the want forms but `shop_choice` keeps offering chrome, 0 of 10 armed | JOBS_AND_LIVES phase 8 and carry-over; history/SHADOW_V3 gap 11; SHADOW_V4 V3-gaps row 11 | probe | unowned | open |
+| OPEN-056 | Conditional abroad asserts: `abroad.rs` and `god_abroad` assert the edge only while its target lives | JOBS_AND_LIVES phase 7b and carry-over | probe | unowned | open |
+| OPEN-057 | Faith equilibrium: followers reach 34 % by day 120, uncapped by decision; design it through interactions (church predators, gangs robbing rich churches, disillusion after a raid) | JOBS_AND_LIVES carry-over; history/SESSIONS "Open for Dylan"; HANDOFF § Open calls; CLAUDE.md standing decision 2026-10-17 | feature | unowned | open |
+| OPEN-058 | Church purses pile up (7.5k in a charity purse, nothing to spend it on) | JOBS_AND_LIVES carry-over | feature | unowned | open |
+| OPEN-059 | Synth parity row is a printed FINDING (off-screen synth share 5-6 pts over Full, M10 pantry sharing): keep, or restore with carried leftovers plus a dive-rate mirror | JOBS_AND_LIVES phase 7b and carry-over; history/SESSIONS "Open for Dylan"; HANDOFF § Open calls | decision | unowned | open |
+| OPEN-060 | The dancer's StripClub founding has no person probe | JOBS_AND_LIVES phase 8 (probes) | probe | unowned | open |
+| OPEN-061 | Nothing founds Dollhouses or BD studios; the black BD market is thin (~25 units) | history/SESSIONS (J&L phase 5 carry-overs) | feature | unowned | open |
+| OPEN-062 | The harsh city: Murders halved after V4 (806 → 381, then 267 after the review round); which pressure features bring it back (jobs, rent, prices, rival-turf shakedowns, organ and arms feeds) and when; standing answer: leave it for now | SHADOW_V4 § The sweep; history/SESSIONS "Next session (2026-10-17)"; HANDOFF § Open calls; CLAUDE.md standing decision 2026-10-17 | decision | unowned | open |
+| OPEN-063 | Scrip memories (`ScripDiscount`) and the wipe's Betrayed grudges not built | M17_OUTSIDE phase 4 "Not built" | feature | unowned | open |
+| OPEN-064 | `ActionKind::ConvertScrip` (walk to a Fixer) not built, the daily pass stands; `ForceReinforce`'s `coins` not built | M17_OUTSIDE phase 5 "Not built" | feature | unowned | open |
+| OPEN-065 | Outside panel sparkline and click-through, map overlay arrival markers not built | M17_OUTSIDE phase 5 "Not built" | feature | M18 | open |
+| OPEN-066 | Abroad contracts 0 in runs (band 1-6): a Campaign needs a disliked rival | M17_OUTSIDE calibration findings | calibration | unowned | open |
+| OPEN-067 | Parent subsidies 20-35 a seed (band 1-8) and State guards 9.1-10.4 mean (band 0-8), both over | M17_OUTSIDE calibration findings | calibration | unowned | open |
+| OPEN-068 | Parent lifetime under `god_kill_militech` 33 days (band 60-110) | M17_OUTSIDE calibration findings | calibration | unowned | open |
+| OPEN-069 | Ambient economy: Ambient rent to city landlords and Ambient consumption at city Markets not built (M17 "Open for Dylan" 3: not in M17, revisit at calibration) | M17_OUTSIDE § Open for Dylan 3; SCALE_20K S5 "Not built" | decision | unowned | open |
+| OPEN-070 | Should the 2k testing city get Ambient flats? Coordinator default "no" (2026-10-12), flagged to Dylan, never confirmed | M17_OUTSIDE § Open for Dylan 1 | decision | unowned | open |
+| OPEN-071 | A rival corp backing a board challenger is not built | M16_CONTRACTS M16b deviations (the campaign's records) | feature | unowned | open |
+| OPEN-072 | No `CarryCorpse` plan; a Trauma call is one crew guard carrying, not a `trauma_crew` mission | M16_CONTRACTS M16b deviations | feature | unowned | open |
+| OPEN-073 | The wounded mostly bleed out: saved 5-19 % (band 30-70); Trauma subscribers 0.5-0.8 % (band 2-8 %), an exec's luxury | M16_CONTRACTS M16b calibration findings; history/GOD_SCENARIOS_V11 | calibration | unowned | open |
+| OPEN-074 | Leverage reads low: active coercions 2-6 on day 120 (band 10-60), hostages 0-1 (band 1-6), 1 Abduct in 10 reaches the hand-over | M16_CONTRACTS M16b calibration findings | calibration | unowned | open |
+| OPEN-075 | One Fixer on every seed: no NPC founds a second (`fixer_ok` thresholds plus 400 c found cost, read not fixed); the book is thin early | HIT_MARKET § Gaps pass ("Why no NPC founds a second Fixer") and phase 4 gaps | calibration | unowned | open |
+| OPEN-076 | The Debt Hit/Beat row never fires: no edge debt reaches `debt_min` 15 (largest 5-11) | HIT_MARKET § Gaps pass ("Why Debt never fires") | calibration | unowned | open |
+| OPEN-077 | Execs are cheap: a rival exec's market price is 20-60 c, the same as a nobody's (the risk estimate sees few defenders); keep, or treat execs as hard targets | HIT_MARKET deviations ("Finding for Dylan: execs are cheap") | decision | unowned | open |
+| OPEN-078 | Shift attendance ~52 % of shift time on the all-Full city: late arrivals after Sleep/Idle/Earn/Eat, Eat on shift with nothing carried; a later planner pass | HUNGER_SICKNESS § Open items | calibration | unowned | open |
+| OPEN-079 | Workplace canteens (company store: employer sets the price, keeps the till) filed, not built | HUNGER_SICKNESS § Open items | feature | unowned | open |
+| OPEN-080 | El fare inspectors (fare dodging is a petty crime record; inspectors "later") | TRANSIT decisions 4 | feature | unowned | open |
+| OPEN-081 | El stations are street stops with no buildings (door, Security profile, concourse shops) until the Interiors milestone | TRANSIT decisions 5, Q8 | feature | unowned | open |
+| OPEN-082 | A line cut mid-ride doesn't stop the ride | TRANSIT status, deviation 10 | bug | unowned | open |
+| OPEN-083 | A corp school or scholarships (a faster, rarer ladder than night school) | CLASS_PAY § Open items | feature | unowned | open |
+| OPEN-084 | Civic grades (sergeants, Treasury clerks) once the Treasury can carry them | CLASS_PAY § Open items | feature | unowned | open |
+| OPEN-085 | Labour wages lag the no-classpay city at a year (Sump 7.3 vs 11.1 before P3b2; P3b2 capped the premium at half the payout, labour-grade wage still 8.5 vs 11.1 at day 364) | CLASS_PAY § Open items, § P3b2 | calibration | unowned | open |
+| OPEN-086 | Dematerialise: fold a long-idle Statistical agent back into its Ambient flat (the simulated tier only grows) | SCALE_20K S5 "Not built"; history/SESSIONS (Dylan agreed: later) | feature | unowned | open |
+| OPEN-087 | Children in Ambient households not modelled | SCALE_20K S5 "Not built"; history/SESSIONS (Dylan agreed: later) | feature | unowned | open |
+| OPEN-088 | At 20k immigration never runs (J19 pull 0, the expected wage under the outside wage; no J20 offer stands) and the binding constraint is jobs; re-measure on main | SCALE_20K S5 status | probe | unowned | open |
+| OPEN-089 | `deal_log` keeps only the latest dealer per venue: a second dealer at the same bar rolls desistance without the brake | LIFE_L2 deviations ("The dealer brake undercounts"); `systems/gang.rs:1312` | bug | unowned | open |
+| OPEN-090 | DataWiped never fires organically: gangs sell every Data unit at midnight (`gang_data_keep` 0) before orders are written, so a wipe run finds the Hideout store empty | M14_VIRT § Open (phase 5) | calibration | unowned | open |
+| OPEN-091 | The tax band reads only the Treasury balance: with the dole enacted it cut the rate 0.05 → 0.02 while paying ~700-850 a day | P10_POLICY § Found, not fixed | bug | unowned | open |
+| OPEN-092 | Power and Water as goods (the `power` input is coins to the World, a stand-in for a generator) | ECONOMY_V2 § 6 "Waits for later" | feature | unowned | open |
+| OPEN-093 | `python tools/test.py change` measured 264 s summed (budget 3 min, over) | HANDOFF § Main | bug | before M18 | open |
+
+## Not included (judged fixed, superseded or too vague at the seeding)
+
+- **SHADOW_V4 "the 2 skipped bugs".** The sweep skipped one (bug 16, OPEN-017) and partly fixed one (bug 22, OPEN-023, owned by Lives at work D11). The other 21 are `closed 2712b4a`. Bug 4's leftover (Shakedown scaled by the take) has its own row, OPEN-005.
+- **Review-round fixes on 2712b4a** (bug 11's beat check, the negative succession gap, the binder's day, the arrest-scuffle grudge, booking on fines, hunger reach, office in a Home, the O(n) aging scan). These were fixed in 15eb256, b68b5b4, 0fb3b6a and 1552009, all part of V4's own rows.
+- **history/SHADOW_V3 gaps 1-11.** Each one maps onto a V4 bug or feature row and is cited there (gap 6 → OPEN-015, gap 7/9 → OPEN-014, gap 11 → OPEN-055, and so on).
+- **JOBS_AND_LIVES "Murders 98.5 → 188.7".** V4 superseded it. The question now is OPEN-062.
+- **JOBS_AND_LIVES phase 1 "exports never wait on Loaders".** Lives at work § 2.3 covers it (the loader's crates, OPEN-026).
+- **The `test_switched_off_city_matches_main` probe (transit.rs) is obsolete, not a gap.** It pins the transit-off city's day-1 save hash to `d771073`, the main from before transit. Every milestone since has moved the off city: J&L, V4 and the rest. The `[transit] enabled` switch still exists (`Config::dole_city()` turns it off; so does `CITYSIM_TRANSIT=0`). Still, "off equals pre-transit main" can't hold any more. Retire it in the retirement pass.
+- **Print-only ignored diagnostics.** No rows for hit_probe.rs (`corp_fates`, `exec_protection`, `hit_market_report`, `hit_probe`, `hm_ab_report`, `why_expired`, `trace_record`), law_probe.rs (`law_probe_2k`, `law_probe_20k`) or transit.rs (`measure_transit_on_vs_off`, `measure_transit_tail`, `measure_el_crews`).
+- **M16a's gap probe "a buyer tells his own Hit to guards".** It is no longer ignored: `probe_buyer_keeps_his_own_hit_quiet` runs in person.rs.
+- **HUNGER_SICKNESS bin-meals parity and the 2026-10-11 parity reds** (arrests, commute rides). 71a9a4d fixed these on the Statistical side (`p_steal_broke`, stat_earn, `p_errand_ride`, `p_commute_ride`), and parity has been green since. lod.rs keeps only the synth row as a FINDING.
+- **HUNGER_SICKNESS marriage parity (0.86 vs 0.32).** It isn't a FINDING in lod.rs today, so I assume it passes. Worth a check.
+- **HUNGER_SICKNESS homeless employed.** Item 13 fixed it (d30/d60 98/138 → 12/19, history/SESSIONS).
+- **HUNGER_SICKNESS default-city starvation table.** It records the cost of a rollback, not an open item.
+- **P10 synth reservation counts meals as units; civic cuts lay off works hires first.** 71a9a4d fixed both.
+- **CLASS_PAY "Corp HQs".** The J&L Hq built it. **"The Treasury hoard grows"** was answered by the surplus credit (TRANSIT 2026-10-12). **"The stat table must learn `p_attend` for the new roles"** was covered by the regens since then (D17 regen and V4's 0b02364).
+- **ECONOMY_V2 phases 3a and 4.** Hunger as sickness, P10 and the flip superseded them; no safety net is shipped. **Per-good food variety** became quality on one Food good (HUNGER_SICKNESS decision).
+- **LIFE_L2 deferred table.** Parley, Patrol, the Fixer runner, guard corruption and child routines all landed in M16a/M16b/J&L. Only retinue travel is left, folded into OPEN-032. **L2 calibration findings** (wages over the dole, the fviolence priors, IceRaised, the Spearman) are dole-city readings that the Real economy, the flip and later regens made stale.
+- **M14 IceRaised ≥ 10, the ICE Spearman, the robot turned or camera blinded.** These are dole-city era printed findings, and their mechanisms are unit-tested. I judged them stale. DataWiped is kept (OPEN-090) because `gang_data_keep` is still 0 in config.rs.
+- **M15 deviations.** No open item is listed; they are calibration history.
+- **M16 § "Follow-ups in M17_OUTSIDE.md"** (stale wording in the M17 doc). This is a doc chore, not a sim item. Same for M16a C42, "the M14 stream for a mission deferred": a UI nicety, too vague.
+- **M16a "no natural Hit or Beat fulfilled".** The Hit market superseded it (Hits fulfilled 6 of 6 after the gaps pass; still a printed finding by the rare-bullet rule).
+- **HIT_MARKET phase 4 gaps** (reach premium, lawful buyers wait, the Fixer's owner talks, the instant grudge, the buyer's gossip, takers who can't close). The gaps pass and its fix round fixed them (15aee9a and after). Decision 7's floor saw no change, which is not an item.
+- **M17 extraction question.** Settled at 0.3/0.3 (2026-10-13, CLAUDE.md). **Ambient hire_far** is settled off, Dylan agreed (history/SESSIONS).
+- **SCALE_20K Manhattan vs real walk** (p90 1.03-1.05). Measured and small. **Name-agnostic seeding on the import** is assumed done in S4/the graphics import. **50k** is a stretch, not an item.
+- **TRANSIT night service and the fare.** Decided (no service 01:00-05:00, flat 1 coin).
+- **The V4 re-shadow diaries in the `v4fix` worktree's `target/shadow_v4_after/`.** A housekeeping step for the process review (copy them out before the worktree goes), not a ledger row.

@@ -2247,7 +2247,7 @@ fn probe_el_worker_whose_line_is_cut_walks_next_day() {
 /// days, robbed or not. The fix is a fresh reason weighing the weapon offer
 /// (docs/history/SHADOW_V3.md, docs/GOD_SCENARIOS_V12.md).
 #[test]
-#[ignore]
+#[ignore = "gap: OPEN-055"]
 fn probe_robbed_resident_buys_a_weapon_within_3_days() {
     use citysim::systems::weapons;
     let mut w = world();
