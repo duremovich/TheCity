@@ -1,0 +1,38 @@
+# Lives at work, phase 8: the gate
+
+Same solo coder, same branch. Phase 7 merged. First: `git merge --ff-only main` and confirm `git log --oneline -1` shows the sha the orchestrator named in the message. Re-read `docs/LIVES_AT_WORK.md` §§ 0 (D14), 6, 9 (row 8), 9.1 (every phase's bullets), 10 (Acceptance), 11, 12 (Q8: one regen, Murders checked, keep main's table if it drifts past the noise) and the whole of your § 14; `docs/TESTING.md` (the tiers, budgets and caps: god ≤ 20, asserted bullets ≤ 60, every `#[ignore]` reasoned); `docs/SHADOW_V4.md` (the diary recipe and the bounds). Phase 8 closes the milestone's gates; it adds no mechanism. Report: `scratchpad/phase8_report.md`, written as you go. One squashed commit on your branch (two if the regen is kept: the regen's table change in its own commit so it can be reverted alone, the gate's tests and docs in the other). `/code-review high` is the orchestrator's, after the merge.
+
+## The one regen (D14, Q8)
+
+1. **Before** the regen, on your tree with every `[lives]` switch on: 42-47 × 120 `run --report --events` (the "before" set), keep the CSVs.
+2. Regenerate the Statistical table once: `cargo run --release -p citysim-cli -- calibrate` (`citysim-cli/src/main.rs:1928`; `--out assets/stat_table.toml`; read its header for the recipe: the seeds, the days, `--straight-lines`). The keys the milestone moved: `p_chat_home`, `p_chat`, `p_social` (the home evening), `p_theft_caught` (the stations). Diff the table (`git diff assets/stat_table.toml`): every key that moved, old → new, in the report; a key that moved for no mechanism of this milestone is a finding, not a fix.
+3. **After**: the same 42-47 × 120 set on the regenerated tree. **The Murders check**: per seed and the mean, before vs after, against the noise band main's own seeds show (the phases' reports have main at 74-196 per seed, mean 105-116: the seed spread is the noise). Keep the regen if the mean moves inside that spread; **revert to main's table** (keep the before-tree) if it drifts past it, and write why (Q8). Either way the parity test (`tests/lod.rs::test_full_vs_statistical_within_15pct`, milestone tier) runs once on the final tree and every row is pasted: the rows that were red "until the regen" (hunger-days, paid venue visits and coins, phase 2) should return inside the band with a kept regen; `law0`/`law1` were red on main (SHADOW_V4 "Left open" 1) and stay printed.
+
+## The bullets (`core_sanity`, the 60/60 cap)
+
+Every phase printed its § 9.1 bullets with the 42-44 × 120 counts (phase 1: ten; phase 2: eight; phase 3: six; phases 4-7: theirs). § 10: **the candidates that fire on 3 or more of 6 seeds are asserted**; the rest stay printed. The cap is 60 asserted bullets and it is full. The rule (TESTING.md): a new assert retires an old one. Rank the milestone's candidates by what they would catch (a mechanism that never fires is the assert's job; a count is a finding) and propose, in the report, which existing asserted bullets they replace (the ones whose mechanism a unit test now carries, or that assert a count, are the first to go). **Do not change the cap**; write the swap list for the orchestrator's veto before you apply it, in the report's first section, and apply it in the commit (the orchestrator reverts a line, not a phase). `python tools/test.py lint` must read `asserted bullets 60/60`.
+
+## The unit tests, probes, gods (§ 10)
+
+- Probes: every phase's are in; add § 10's "a regular": a Full agent who visits the same Bar three evenings is an Acquaintance of its bartender (control: three different Bars, no edge).
+- God scenarios (§ 10 names five: `god_kill_all_teachers`, `god_child_camp_sweep`, `god_decapitate_lieutenants`, `god_cut_the_precinct` (20k), `god_retire_everyone_over_55`): the god cap is 20 and it is full (17 in `tests/god.rs` + `god_corps` + `god_districts`). **Ruling**: write the five as god scenarios in the god tier's shape (60 days against the control, the reaction asserted as a broken-system signal, the counts printed), and propose five existing god scenarios to retire, preferring those whose reaction a unit test already carries (OPEN-096..099 list four retired reactions with no unit test: do not retire more of that kind without writing the unit test first). The swap list goes in the report's first section for the orchestrator's veto; apply it in the commit. `god_cut_the_precinct` needs the 20k city: if its runtime breaks the merge tier's budget, mark it `tier: milestone` with the reason and say so.
+- Caps after your commit: `lint` 0 problems; every new `#[ignore]` reasoned (`tier:` or `gap: OPEN-nnn`).
+
+## Shadow V5 (§ 10)
+
+The milestone's diary read, V4's recipe (`docs/SHADOW_V4.md` § the recipe): 2k day 26 and day 90, 20k day 20; every archetype re-read (`shadow --pick` over the 48 archetypes, `--lives --assert` for the bounds). Write `docs/SHADOW_V5.md`: per archetype, what changed since V4 (the counterpart met, the evening, the household, the civic rounds, the street, the tower, the ages, the leaders, the stations), with one diary excerpt each where the milestone shows and the bugs you read (numbered, the V4 form); the bounds' `known/wk`, `walk_h/d`, `work_h/d` re-calibrated on the eight-run ensemble **only if the rows move for the milestone's reasons** (say which and why). The `shadow --lives` 2k and 20k tables, main (phase 0's § 13 baselines) vs the final tree, are the milestone's closing device table: put it in § 13 as the last row set.
+
+## `tools/analyze_run.py` (§ 10's printed bands)
+
+A "Lives" section from the `Jobs2Cols` columns the phases added (encounters by kind per staffed shift; regulars made; the home share of HangOuts; spouse evenings a week; empty HangOuts; visits by purpose; buy-outs and break-outs; ages by trade; retirements and frailty exits; foreman's mean age and experience; leaders' and lieutenants' jail-days; the leader's cut; arrests per witnessed crime by escort distance; guards' travel hours; execs by home tier; ticks/s at 2k and 20k). Printed bands, never asserted; the V4/jobs2 section's shape (`jobs2(rows, events, out)` at `tools/analyze_run.py:948`). Run it on the after set and paste the section.
+
+## Docs and the close
+
+- `docs/LIVES_AT_WORK.md`: § 14 "Implemented: deviations" complete for every phase with an `OPEN-nnn` tag on each deviation that stays open (the orchestrator assigns the ids: list the deviations that need one in the report and leave `OPEN-???` placeholders); § 13 the final device tables; § 5.1's table re-read; a short § 15 "Gate" with the regen decision, the bullet and god swaps, the parity rows and the Murders table.
+- `docs/ARCHITECTURE.md` §§ 2, 5, 6, 7 read once through for the milestone (every new system, switch and config section present); `docs/TESTING.md` the tiers' wall times after your runs.
+- The switches retire when the phase lands (doctrine 6): **not in this phase**; list every `CITYSIM_*_OFF` the milestone added for `OPEN-094`'s row (the orchestrator closes them at the milestone close or opens the row).
+- Footers verbatim: `test.py change`, `test.py merge`, `test.py milestone` (the parity test and `core_20k`: budget 20 min), `lint`, and `test.py report` (the close-of-milestone table) on the final tree. The milestone tier is the gate's own device: a RED row that is a known mirror gap is demoted with its reason (rule 2), a RED row that is new is diagnosed (30 min cap) and reported.
+
+## Hand back
+
+The sha, the footers, the regen decision with the Murders table, the swap lists (bullets, gods) as applied, the OPEN placeholders, the Shadow V5 bug list, and the worktree ready for the orchestrator's `/merge-set`, merge, `/code-review high` and `/close-milestone`.
