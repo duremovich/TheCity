@@ -37,7 +37,7 @@ BUDGETS = {"change": 240, "merge": 480, "milestone": 1200}
 
 # Caps checked by `lint` (docs/TESTING.md § caps).
 CAP_GOD_SCENARIOS = 20      # excluding the *_control tests
-CAP_ASSERTED_BULLETS = 60   # mechanisms() + sickness_mechanisms() + jobs2_mechanisms() + transit_mechanisms()
+CAP_ASSERTED_BULLETS = 60   # asserted exactly by core.rs::asserted_bullets_within_cap; the lint count is a report
 WARN_FILE_LINES = 1500
 PASS_NAMED = re.compile(r"(_review|_fixes|shadow_v\d|_probe)\.rs$")
 
@@ -46,7 +46,7 @@ TIERS = {
     "change": [
         ("fmt", CARGO + ["fmt", "--all", "--", "--check"]),
         ("clippy", CARGO + ["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"]),
-        ("tests", CARGO + ["test", "--workspace", "--release"]),
+        ("tests", CARGO + ["test", "--workspace", "--release", "--", "--nocapture"]),
     ],
     # The ignored tiers run the test binaries the `--no-run` build left in
     # target/release/deps directly: `cargo test -p <one package>` resolves
@@ -137,6 +137,9 @@ def run_step(name, cmd, log_path, only=None):
         proc.wait()
     secs = time.time() - start
     ok = proc.returncode == 0
+    if name not in ("fmt", "clippy") and sum(r["passed"] + r["failed"] for r in rows) == 0:
+        ok = False
+        print(f"    {name}: ran no test (a renamed filter, or a stale binary under --no-build): RED")
     if name in ("fmt", "clippy"):
         print(f"  {secs:6.1f}s  {name:<24} {'ok' if ok else 'FAILED'}")
         if not ok:
@@ -147,7 +150,14 @@ def run_step(name, cmd, log_path, only=None):
 def cmd_tier(tier, args):
     steps = TIERS[tier]
     if args.only:
-        steps = [s for s in steps if s[0] == "tests" or s[0] == args.only] or steps
+        names = [s[0] for s in steps]
+        if tier == "change":
+            steps = [s for s in steps if s[0] == "tests"]
+        elif args.only in names:
+            steps = [s for s in steps if s[0] == args.only]
+        else:
+            print(f"--only {args.only!r} names no {tier} step; the steps are: {', '.join(names)}")
+            return 2
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     out = LOGS / f"{tier}-{stamp}"
     out.mkdir(parents=True, exist_ok=True)
@@ -172,7 +182,7 @@ def cmd_tier(tier, args):
             results.append({"step": name, "ok": False, "secs": 0.0, "binaries": [], "log": ""})
             continue
         if name == "tests" and args.only:
-            cmd = CARGO + ["test", "--workspace", "--release", "--test", args.only]
+            cmd = CARGO + ["test", "--workspace", "--release", "--test", args.only, "--", "--nocapture"]
         print(f"- {name}")
         results.append(run_step(name, cmd, out / f"{i}-{name}.log"))
     wall = time.time() - start
@@ -195,10 +205,22 @@ def test_files():
     yield ROOT / "citysim-cli" / "src" / "shadow.rs"
 
 
+def ignore_scan_files():
+    """Every Rust file that may hold a test: the tests dirs and the crates' src."""
+    seen = set()
+    for f in test_files():
+        seen.add(f)
+        yield f
+    for crate in ("citysim", "citysim-cli", "citysim-app"):
+        for f in sorted((ROOT / crate / "src").rglob("*.rs")):
+            if f not in seen:
+                yield f
+
+
 def scan_ignores():
     """Every #[ignore] attribute: (file, line, fn name, reason or None)."""
     found = []
-    for f in test_files():
+    for f in ignore_scan_files():
         lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
         for i, line in enumerate(lines):
             m = IGNORE_ATTR.match(line)
@@ -358,9 +380,9 @@ def cmd_report(args):
     print(f"- `fn world()` copies outside tests/common: {helper_copies('world')}; `fn adults()`: {helper_copies('adults')}")
     if args.since:
         d = subprocess.run(["git", "diff", "--shortstat", args.since, "--", "citysim/tests", "citysim-cli/tests"],
-                           cwd=ROOT, capture_output=True, text=True).stdout.strip()
+                           cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout.strip()
         added = subprocess.run(["git", "diff", "--name-status", "--diff-filter=A", args.since, "--", "citysim/tests", "citysim-cli/tests"],
-                               cwd=ROOT, capture_output=True, text=True).stdout.split()
+                               cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace").stdout.split()
         new_files = [a for a in added if a.endswith(".rs")]
         print(f"- since {args.since}: {d or 'no test changes'}; new test files: {', '.join(Path(p).name for p in new_files) or 'none'}")
     over = []
@@ -383,8 +405,9 @@ def cmd_diag(args):
             print(f"no diag test named {name}; `test.py diag` lists them")
             return 1
         f = hits[0][0]
-        pkg = "citysim-cli" if "citysim-cli" in f.parts else "citysim"
-        cmd = CARGO + ["test", "--release", "-p", pkg] + (["--test", f.stem] if f.parent.name == "tests" else []) + ["--", "--ignored", name, "--nocapture"]
+        pkg = next((c for c in ("citysim-cli", "citysim-app", "citysim") if c in f.parts), "citysim")
+        target = ["--test", f.stem] if f.parent.name == "tests" else (["--lib"] if pkg == "citysim" else [])
+        cmd = CARGO + ["test", "--release", "-p", pkg] + target + ["--", "--ignored", name, "--nocapture"]
         print(" ".join(cmd))
         return subprocess.call(cmd, cwd=ROOT)
     for f, ln, name in diag:

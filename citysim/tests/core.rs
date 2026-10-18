@@ -945,6 +945,16 @@ fn transit_mechanisms() -> Vec<Mechanism> {
     vec![("an El ride", m("El ride")), ("a fare paid to the city", m("El fare"))]
 }
 
+/// The cap on asserted bullets (docs/TESTING.md, "The caps", 2026-10-18): one
+/// per subsystem, at most 60 over the four asserted lists; a new bullet
+/// replaces one or names the milestone that earns a row. `tools/test.py
+/// lint` prints the count; this test is what holds it.
+#[test]
+fn asserted_bullets_within_cap() {
+    let n = mechanisms().len() + sickness_mechanisms().len() + jobs2_mechanisms().len() + transit_mechanisms().len();
+    assert!(n <= 60, "asserted mechanism bullets {n} > 60: replace one or demote to printed_mechanisms");
+}
+
 fn judge_mechanisms(runs: &[SeedRun], failures: &mut Vec<String>) {
     let jobs2 = runs.first().is_some_and(|r| r.mark("Jailer on shift") > 0 || r.mark("handling fee") > 0);
     let mut printed = printed_mechanisms();

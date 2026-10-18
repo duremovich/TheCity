@@ -1365,3 +1365,47 @@ fn test_missing_staff_per_line_is_uncapped() {
     assert_eq!(cfg.staff_per_line, u16::MAX, "an old config keeps its crews");
     assert_eq!(citysim::Config::load().transit.staff_per_line, 4, "the shipped city caps them");
 }
+
+// The off-switch device, kept as a diag (the process review, 2026-10-18): its pinned
+// hash is the pre-transit main and will not match; set CITYSIM_MAIN_SAVE to another
+// main's `42-1441.ron` to compare the switched-off city against it.
+/// See `test_switched_off_city_matches_main`.
+const MAIN_OFF_HASH: &str = "3229f4eae7b9bba85b0a92e1e83cff02882bf2f7db25c982b4340ec1048073c1";
+
+/// A save hashed with `ticks_per_sec` (the runner's wall clock) zeroed.
+fn off_city_hash(ron: &str) -> String {
+    let mut out = String::with_capacity(ron.len());
+    let mut rest = ron;
+    while let Some(i) = rest.find("ticks_per_sec:") {
+        out.push_str(&rest[..i]);
+        out.push_str("ticks_per_sec:0.0");
+        rest = &rest[i + "ticks_per_sec:".len()..];
+        let end = rest.find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-')).unwrap_or(rest.len());
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    blake3::hash(out.as_bytes()).to_hex().to_string()
+}
+
+/// The off city is byte-identical to main before transit (`d771073`): the
+/// save after one day, hashed with the wall clock masked. Main's hash was
+/// pinned from `citysim-cli run --days 2 --seed 42 --save-at 1441` built at
+/// `d771073`. Ignored: any behaviour change on main moves the pin. To check
+/// against another main, set `CITYSIM_MAIN_SAVE` to that main's
+/// `42-1441.ron` (same command) and run it: the file is hashed the same way.
+#[test]
+#[ignore = "tier: diag"]
+fn test_switched_off_city_matches_main() {
+    let mut cfg = Config::load();
+    cfg.transit.enabled = false;
+    let mut w = World::new(42, cfg);
+    w.run_ticks(TICKS_PER_DAY + 1);
+    let hash = off_city_hash(&citysim::save::to_ron(&w));
+    println!("off-city hash {hash}");
+    let want = match std::env::var("CITYSIM_MAIN_SAVE") {
+        Ok(path) => off_city_hash(&std::fs::read_to_string(path).expect("main's save")),
+        Err(_) => MAIN_OFF_HASH.to_string(),
+    };
+    println!("main's hash   {want}");
+    assert_eq!(hash, want);
+}
