@@ -48,16 +48,43 @@ TIERS = {
         ("clippy", CARGO + ["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"]),
         ("tests", CARGO + ["test", "--workspace", "--release"]),
     ],
+    # The ignored tiers run the test binaries the `--no-run` build left in
+    # target/release/deps directly: `cargo test -p <one package>` resolves
+    # features for that package alone and rebuilt citysim in release (2m22s)
+    # before every step on 2026-10-18. ("step", "<binary stem>", [test args]).
     "merge": [
-        ("core_year", CARGO + ["test", "--release", "-p", "citysim", "--test", "core", "--", "--ignored", "core_year", "--nocapture"]),
-        ("behaviour", CARGO + ["test", "--release", "-p", "citysim-cli", "--", "--ignored", "behaviour", "--nocapture"]),
-        ("god", CARGO + ["test", "--release", "-p", "citysim", "--test", "god", "--test", "god_corps", "--test", "god_districts", "--", "--ignored", "--nocapture"]),
+        ("core_year", "core", ["--ignored", "core_year", "--nocapture"]),
+        ("behaviour", "citysim_cli", ["--ignored", "behaviour", "--nocapture"]),
+        ("god", "god", ["--ignored", "--nocapture"]),
+        ("god_corps", "god_corps", ["--ignored", "--nocapture"]),
+        ("god_districts", "god_districts", ["--ignored", "--nocapture"]),
     ],
     "milestone": [
-        ("parity", CARGO + ["test", "--release", "-p", "citysim", "--test", "lod", "--", "--ignored", "test_full_vs_statistical_within_15pct", "--nocapture"]),
-        ("core_20k", CARGO + ["test", "--release", "-p", "citysim", "--test", "core", "--", "--ignored", "core_20k", "--nocapture"]),
+        ("parity", "lod", ["--ignored", "test_full_vs_statistical_within_15pct", "--nocapture"]),
+        ("core_20k", "core", ["--ignored", "core_20k", "--nocapture"]),
     ],
 }
+
+
+def built_binary(stem):
+    """The newest test executable for a binary stem under target/release/deps."""
+    deps = ROOT / "target" / "release" / "deps"
+    cands = [p for p in deps.glob(f"{stem}-*") if p.suffix in (".exe", "") and p.is_file() and not p.name.endswith((".d", ".pdb"))]
+    cands = [p for p in cands if re.fullmatch(rf"{stem}-[0-9a-f]{{8,}}(\.exe)?", p.name)]
+    if not cands:
+        return None
+    return max(cands, key=lambda p: p.stat().st_mtime)
+
+
+def step_command(step):
+    """A tier step is either (name, argv) or (name, binary stem, test args)."""
+    if len(step) == 2:
+        return step[0], list(step[1])
+    name, stem, args = step
+    exe = built_binary(stem)
+    if exe is None:
+        return name, None
+    return name, [str(exe), *args]
 
 RUNNING = re.compile(r"Running (?:tests[\\/]|unittests )?(\S+?)(?: \(|\s)")
 BINARY = re.compile(r"deps[\\/]([A-Za-z0-9_]+?)-[0-9a-f]{8,}(?:\.exe)?\)")
@@ -79,10 +106,8 @@ def fmt_secs(s):
 
 def run_step(name, cmd, log_path, only=None):
     """Run one cargo command, log every line, print the few that matter."""
-    if only:
-        cmd = cmd + ["--test", only] if "--test" not in cmd else cmd
     start = time.time()
-    binary, bin_start = None, start
+    binary, bin_start = (None if cmd[0] == "cargo" else name), start
     rows = []
     with open(log_path, "w", encoding="utf-8") as log:
         log.write(" ".join(cmd) + "\n\n")
@@ -122,7 +147,7 @@ def run_step(name, cmd, log_path, only=None):
 def cmd_tier(tier, args):
     steps = TIERS[tier]
     if args.only:
-        steps = [(n, c) for n, c in steps if n == "tests" or n == args.only] or steps
+        steps = [s for s in steps if s[0] == "tests" or s[0] == args.only] or steps
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     out = LOGS / f"{tier}-{stamp}"
     out.mkdir(parents=True, exist_ok=True)
@@ -140,7 +165,12 @@ def cmd_tier(tier, args):
     print(f"[{tier}] {len(steps)} step(s), serial; logs in {out.relative_to(ROOT)}")
     start = time.time()
     results = []
-    for i, (name, cmd) in enumerate(steps, 1):
+    for i, step in enumerate(steps, 1):
+        name, cmd = step_command(step)
+        if cmd is None:
+            print(f"- {name}: no built test binary for `{step[1]}` under target/release/deps (run without --no-build)")
+            results.append({"step": name, "ok": False, "secs": 0.0, "binaries": [], "log": ""})
+            continue
         if name == "tests" and args.only:
             cmd = CARGO + ["test", "--workspace", "--release", "--test", args.only]
         print(f"- {name}")

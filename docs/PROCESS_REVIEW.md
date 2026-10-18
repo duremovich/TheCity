@@ -211,7 +211,7 @@ A breach is printed loudly in the footer (never a fail: Dylan's no-fine-tuning r
 | task | commit | check |
 |---|---|---|
 | 0 hygiene | (no files) | 10 worktrees and 10 branches removed, 49 GB back; 10 idle agents shut down; renormalize a no-op |
-| 1 CLAUDE.md + rules | `86a9134` | 97 lines. A fresh agent answered the three questions from it correctly, **but the file did not auto-load for it**: its worktree was cut at session start, before CLAUDE.md was committed. Confirm the auto-load in the next session's first subagent; until then briefs say "read CLAUDE.md" |
+| 1 CLAUDE.md + rules | `86a9134` | 68 lines. A fresh agent answered the three questions from it correctly, **but the file did not auto-load for it**: its worktree was cut at session start, before CLAUDE.md was committed. Confirm the auto-load in the next session's first subagent; until then briefs say "read CLAUDE.md" |
 | 2 test.py + TESTING.md | `acb4e07` | `change` on main: GREEN, 62 lines printed, 4m43s (tests 272 s, fmt+clippy 10 s) |
 | 3 HANDOFF split, docs/README, history | `d592194` | HANDOFF 38 lines; no old path left outside `docs/history/` |
 | 4 OPEN.md | `0894be0` | 93 rows; lint green on ids and the one `gap:` |
@@ -219,7 +219,11 @@ A breach is printed loudly in the footer (never a fail: Dylan's no-fine-tuning r
 | 6 memory | `1be056e` | 47 → 12 files; MEMORY.md 11 lines |
 | 7 hooks + skills | `fcabc67` | SessionStart prints ≤ 28 lines; the pre-commit ran on its own commit |
 | 8a ignore reasons, the 60-bullet cap, tests/common | `a5f2d18` | 68 reasons; `core_sanity` green with 60 PASS lines |
-| 8b the fold and the speed-ups, 8c the god cut 41 → 20 | two coders in worktrees | merge tier on main after the merge |
+| 8b the fold and the speed-ups | `16117f2` (fold-coder `c1e56fe`) | the 60 tests of the five pass-named files placed by system (29 → 16 files, 12 → 3, 7 → 3, 11 → 4, 1 → 1), names and assertions unchanged, counts 534 → 533 (the obsolete transit identity probe deleted); `wounded` 32 s → 3 s and `wages` 31 s → 17 s by a shared `OnceLock` base world; `tests/common` grew the filters the moved tests shared |
+| 8c the god cut | `d81675b` (god-coder `7bbd819`) | 41 → 20, one per reaction class; the god suite 130 s → 98 s; each retired scenario's reaction named with its carrying unit test in `GOD_SCENARIOS_V12.md` § Retired; the four with none are `OPEN-096..099` |
+| close | this commit | lint 0 problems on main (god 20/20, bullets 60/60, 46 ignores all reasoned, no pass-named file, LF everywhere); `test.py change` GREEN 4m11s / 4 min and `merge` GREEN 4m29s / 8 min on main (after fixing the runner, which had re-entered cargo per step and rebuilt citysim before every ignored-tier step: 9m10s on the first run); `/code-review high` on `e9bac83..HEAD` |
+
+Lessons the session itself produced (in the orchestration memory too): a one-off prune does not hold, budgets and caps checked by a lint do; agents' hand-backs can arrive hours late in a batch, so briefs name a report file; Python on Windows writes CRLF unless told not to; and the V4 after-diaries went with a worktree whose doc said "copy them out first" (`OPEN-095`, regenerable): the close checklist now says to read a worktree's notes before removing it.
 
 **The change budget moved 3 → 4 min** (`tools/test.py`, this session): the 3 was written before the measurement; 1,280 tests at ~0.2 s each, binaries serial, cannot fit 3 minutes on this box without retiring unit tests, which the plan does not do. `OPEN-093` stays open for the gap that remains after the `wounded`/`wages` speed-ups.
 
