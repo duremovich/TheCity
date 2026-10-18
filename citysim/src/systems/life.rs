@@ -1,4 +1,4 @@
-//! Life pass L1 (docs/SHADOW_V1.md): the helpers the goals, the planner
+//! Life pass L1 (docs/history/SHADOW_V1.md): the helpers the goals, the planner
 //! and the executor share to make a day less of a walk. Every caller reads
 //! `on` first: with `[life] enabled = false` nothing here runs.
 

@@ -296,7 +296,7 @@ One line each; the phase commits carry the numbers.
 - **The Fixer's book is thin early** (the phase 2 item): confirmed in the god scenario, a widow 2 coins short of a 38-coin Hit's deposit on day 10, the killer jailed by the time she could pay.
 - **Decision 7's floor** stays 50 at the shipped median wage (6-9): no change read in any diary (every price met was 22-67 for a soft target).
 
-**God v9 (`god_kill_ten_fathers_day_10`, `docs/GOD_SCENARIOS_V9.md`)**: 1 of 10 widows placed a Hit (26 coins, fulfilled the same day), control 0; 2 hunted the killer themselves, 3 killers were jailed by the law, 4 widows held a 0.85 grudge on a free killer for 30 days and could not buy (off the Fixer's reach, a Hit on him priced at the quote, 465-1,029). Passes; thin.
+**God v9 (`god_kill_ten_fathers_day_10`, `docs/history/GOD_SCENARIOS_V9.md`)**: 1 of 10 widows placed a Hit (26 coins, fulfilled the same day), control 0; 2 hunted the killer themselves, 3 killers were jailed by the law, 4 widows held a 0.85 grudge on a free killer for 30 days and could not buy (off the Fixer's reach, a Hit on him priced at the quote, 465-1,029). Passes; thin.
 
 ### Review fixes (`/code-review high 8270896..HEAD`)
 

@@ -1,4 +1,4 @@
-# stat_mlp: learned Statistical policy (docs/EXPERIMENT_LEARNED_STAT_POLICY.md), hidden 32, trained on calibrate seeds [1000, 1001, 1002, 1003, 1004]
+# stat_mlp: learned Statistical policy (docs/history/EXPERIMENT_LEARNED_STAT_POLICY.md), hidden 32, trained on calibrate seeds [1000, 1001, 1002, 1003, 1004]
 version = 1
 
 [outcome]

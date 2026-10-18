@@ -2245,7 +2245,7 @@ fn probe_el_worker_whose_line_is_cut_walks_next_day() {
 /// `1 - lawfulness` consideration loses to chrome's courage and load for a
 /// lawful buyer), and the Shop goal at ~0.3 rarely wins: 0 of 10 armed in 3
 /// days, robbed or not. The fix is a fresh reason weighing the weapon offer
-/// (docs/SHADOW_V3.md, docs/GOD_SCENARIOS_V12.md).
+/// (docs/history/SHADOW_V3.md, docs/GOD_SCENARIOS_V12.md).
 #[test]
 #[ignore]
 fn probe_robbed_resident_buys_a_weapon_within_3_days() {

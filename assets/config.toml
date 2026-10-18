@@ -1461,7 +1461,7 @@ residents_per_feed = 1000           # plan key (W36): Register's per-capita Feed
 # corp-wide slot from Research, M14's Research-built Lab); a corp spins while its Spin score >= spin_min.
 spin_min = 0.2
 
-# Life pass L1 (docs/SHADOW_V1.md): the shadowed residents' days were walks, broken sleep and idling.
+# Life pass L1 (docs/history/SHADOW_V1.md): the shadowed residents' days were walks, broken sleep and idling.
 [life]
 travel_half_ticks = 120.0           # a discretionary goal's score halves at a 2 h walk
 travel_min = 0.15
@@ -1522,7 +1522,7 @@ fight_odds_floor = 0.5
 scavenge_dry_max = 3                # L2 (L29, [lod] budget): three dry hours in a row ...
 scavenge_cool_hours = 4             # ... cool Earn for four
 escort_van_ticks = 60
-# L2 shadow fixes (docs/SHADOW_V2.md "L2 shadow fixes (what landed)"): the 21 [bug] items of the V2
+# L2 shadow fixes (docs/history/SHADOW_V2.md "L2 shadow fixes (what landed)"): the 21 [bug] items of the V2
 # re-shadow. Always on since 2026-10-09 (the switches retired; docs/TESTING.md).
 shift_pro_rata = 0.5                # ... and a cut shift pays pro rata from half of it
 starving_hunger = 0.1               # the starvation that breaks a commitment

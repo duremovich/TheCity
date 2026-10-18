@@ -247,7 +247,7 @@ enum Lever {
     SeizeGang(usize),
     /// M11: `breakup=<corp slot>` (the seeding row, 0-based).
     BreakUp(u8),
-    // M11 god levers, a corp by its seeding slot (docs/GOD_SCENARIOS_V2.md).
+    // M11 god levers, a corp by its seeding slot (docs/history/GOD_SCENARIOS_V2.md).
     FundCorp(u8, i64),
     BankruptCorp(u8),
     SeizeCorp(u8, SeizeTo),

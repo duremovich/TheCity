@@ -169,7 +169,7 @@ The single `calibrate` and the judge-by numbers. **This phase does not flip the 
    - Add `starve_h/wk`, `synth%` and `dive/wk` to `shadow.rs`'s metrics (printed first).
    - Re-calibrate the bounds by TESTING.md's eight-run rule on the default config.
    - Bound `starve_h/wk` for the homeless, worker and gang_member archetypes, as a cushion above the ensemble's max.
-4. **One god scenario**: `god_famine_synth` in `god.rs`. On day 45 the Warehouse and every Market shelf are emptied, against its control. Asserted: starvation stays under the control's + 5, and dive meals rise. Write-up in `docs/GOD_SCENARIOS_V9.md`.
+4. **One god scenario**: `god_famine_synth` in `god.rs`. On day 45 the Warehouse and every Market shelf are emptied, against its control. Asserted: starvation stays under the control's + 5, and dive meals rise. Write-up in `docs/history/GOD_SCENARIOS_V9.md`.
 5. **Docs**: the spec's "Implemented: deviations"; TESTING.md (the new bullets, metrics and god scenario); HANDOFF session log; memory `thecity-hunger-as-sickness.md` (state).
 
 **The judge-by runs** (all on the flipped config `$F`, plus the same on the "sickness only" config for the dole city):

@@ -1,4 +1,4 @@
-//! L2 shadow fixes (docs/SHADOW_V2.md, "L2 shadow fixes (what landed)"):
+//! L2 shadow fixes (docs/history/SHADOW_V2.md, "L2 shadow fixes (what landed)"):
 //! the helpers the 21 `[bug]` items of the V2 re-shadow share (and item 22,
 //! the gravedigger's burial shift, added 2026-10-08 with addendum 17), always
 //! on since the switches retired (2026-10-09); and the violence fixes, behind

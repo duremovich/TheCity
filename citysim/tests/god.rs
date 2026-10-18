@@ -7,7 +7,7 @@
 //! Assertions say only that the world *reacted* within 7 days of the shock:
 //! an order or posture changed, or a daily count's 7-day mean moved by more
 //! than twice the baseline's (days 30-45) standard deviation. What it did is
-//! printed, and written up in docs/GOD_SCENARIOS_V1.md.
+//! printed, and written up in docs/history/GOD_SCENARIOS_V1.md.
 
 use std::sync::OnceLock;
 
@@ -69,7 +69,7 @@ struct Day {
     jailed: u32,
     city_treasury: i64,
     homes: usize,
-    /// M13 (docs/GOD_SCENARIOS_V4.md): printed by `print_m13`, never in
+    /// M13 (docs/history/GOD_SCENARIOS_V4.md): printed by `print_m13`, never in
     /// `series`, so the v1 scenarios' reaction checks are unchanged.
     m13: M13Day,
 }
@@ -576,7 +576,7 @@ fn god_city_takeover_by_force() {
 }
 
 // ---------------------------------------------------------------------------
-// M13 god scenarios (docs/GOD_SCENARIOS_V4.md, plan 5.4): findings printed
+// M13 god scenarios (docs/history/GOD_SCENARIOS_V4.md, plan 5.4): findings printed
 // against the control, never asserted; a failure to react goes into the
 // docs' Gaps list.
 // ---------------------------------------------------------------------------
@@ -654,7 +654,7 @@ fn god_chrome_everyone_2() {
 }
 
 // ---------------------------------------------------------------------------
-// M14 god scenarios (docs/GOD_SCENARIOS_V5.md, plan 5.2): the Virt plane.
+// M14 god scenarios (docs/history/GOD_SCENARIOS_V5.md, plan 5.2): the Virt plane.
 // Seed 42, 60 days, each against its own unshocked control (`v5_control`).
 // Findings are printed; a world that fails to react goes into V5's gaps
 // list, not an assert. Each scenario asserts only that its god command
@@ -958,7 +958,7 @@ fn god_wipe_zetatech_day_20() {
 }
 
 // ---------------------------------------------------------------------------
-// M15 god scenarios (docs/GOD_SCENARIOS_V6.md, plan 5.2): the word and the
+// M15 god scenarios (docs/history/GOD_SCENARIOS_V6.md, plan 5.2): the word and the
 // blood. Seed 42, 60 days, each against its own unshocked control
 // (`v6_control`). Findings are printed; a world that fails to react goes into
 // V6's gaps list, not an assert. Each scenario asserts only that its god
@@ -1317,7 +1317,7 @@ fn god_kill_friend_of_leaders_day_10() {
 
 // ---------------------------------------------------------------------------
 // God scenarios v7: the living city (Life pass L2 phase 5, docs/LIFE_L2.md
-// § 5, docs/GOD_SCENARIOS_V7.md). Every wage, bet, killing and arrest is a
+// § 5, docs/history/GOD_SCENARIOS_V7.md). Every wage, bet, killing and arrest is a
 // seeded dice roll over structs; the tests assert only that the commands
 // applied and print what the city did.
 // ---------------------------------------------------------------------------
@@ -1551,7 +1551,7 @@ fn god_export_10x() {
 
 // ---------------------------------------------------------------------------
 // God scenarios v8: the contract board (M16a phase 5, docs/M16_CONTRACTS.md,
-// docs/GOD_SCENARIOS_V8.md). A contract is a record with a price on a struct,
+// docs/history/GOD_SCENARIOS_V8.md). A contract is a record with a price on a struct,
 // matched by a score and resolved by one seeded roll (or a ledger draw)
 // between fictional agents. The tests assert only that the god commands
 // applied; what the city did is printed, and a city that did not react is a
@@ -1904,7 +1904,7 @@ fn god_law_locate_on_gang_leader() {
     assert!(r.applied() >= 1 && r.failed.is_empty(), "the Locate was not posted: {:?}", r.failed);
 }
 
-/// Hunger as sickness (docs/GOD_SCENARIOS_V9.md): from day 45 the Warehouse
+/// Hunger as sickness (docs/history/GOD_SCENARIOS_V9.md): from day 45 the Warehouse
 /// and every Market shelf are emptied each morning for 15 days in a city
 /// with `[sickness]` on. The
 /// free-food floor must answer: the starving go to the bins (and the
@@ -1964,7 +1964,7 @@ fn god_famine_synth() {
 
 // ---------------------------------------------------------------------------
 // God scenario v9: the Hit market (docs/HIT_MARKET.md § 9,
-// docs/GOD_SCENARIOS_V9.md). Every killing here is a record on a struct
+// docs/history/GOD_SCENARIOS_V9.md). Every killing here is a record on a struct
 // between fictional agents; every Hit a record with a price, matched by a
 // score and resolved by a seeded roll.
 // ---------------------------------------------------------------------------
@@ -2238,7 +2238,7 @@ fn god_kill_ten_fathers_day_10() {
 }
 
 // ---------------------------------------------------------------------------
-// Transit (docs/TRANSIT.md § 7, docs/GOD_SCENARIOS_V10.md): cut the Vat Line
+// Transit (docs/TRANSIT.md § 7, docs/history/GOD_SCENARIOS_V10.md): cut the Vat Line
 // for 10 days at day 20 of a 45-day run with the El on.
 // ---------------------------------------------------------------------------
 
@@ -2320,7 +2320,7 @@ fn god_line_cut() {
 }
 
 // ---------------------------------------------------------------------------
-// M16b god scenarios (docs/GOD_SCENARIOS_V11.md): leverage, hostages, the
+// M16b god scenarios (docs/history/GOD_SCENARIOS_V11.md): leverage, hostages, the
 // wounded and boards, on the v8 harness (seed 42, 60 days, the unshocked
 // v8 control). Every hold, wound, vote and feud here is a record between
 // fictional agents and a seeded dice roll. Each asserts that the commands

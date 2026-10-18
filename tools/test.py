@@ -95,6 +95,9 @@ def run_step(name, cmd, log_path, only=None):
             if m and "Running" in line:
                 binary, bin_start = m.group(1), time.time()
                 continue
+            if line.startswith("   Doc-tests "):
+                binary, bin_start = "doctests " + line.split()[-1], time.time()
+                continue
             r = RESULT.search(line)
             if r:
                 status, passed, failed, ignored = r.groups()

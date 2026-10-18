@@ -2277,7 +2277,7 @@ fn follow(world: &mut World, picked: &[(String, EntityId)], days: u64, pin: bool
 /// The behaviour tier's windows: 7 days from day 19 (a Friday, so
 /// `worker_friday` starts on its Friday) with every archetype, and from day
 /// 90 (the gangs full) with the gang archetypes: the V2 shadow pass's
-/// pinned windows (docs/SHADOW_V2.md), on each of `BEHAVIOUR_SEEDS`.
+/// pinned windows (docs/history/SHADOW_V2.md), on each of `BEHAVIOUR_SEEDS`.
 ///
 /// Each archetype is measured in its own clone of the window's world, with
 /// up to `BEHAVIOUR_SAMPLE` of its free candidates pinned (every one in a

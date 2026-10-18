@@ -129,7 +129,7 @@ pub struct Config {
     /// M15 § 7 Feeds and stories (phase 4).
     #[serde(default)]
     pub news: NewsCfg,
-    /// Life pass L1 (docs/SHADOW_V1.md): travel, sleep, stale targets, the
+    /// Life pass L1 (docs/history/SHADOW_V1.md): travel, sleep, stale targets, the
     /// poor's fallback, witness and edge spam, order dwell; the L2 shadow
     /// fixes' keys; the violence fixes (`violence_fixes`, in flight).
     #[serde(default)]
@@ -3557,7 +3557,7 @@ pub struct LodCfg {
     pub stat_violence_mult: f32,
     /// Experiment: the Statistical tier's policy, `"table"` (the calibrated
     /// 24-row table) or `"mlp"` (`assets/stat_mlp.toml`; see
-    /// `docs/EXPERIMENT_LEARNED_STAT_POLICY.md`).
+    /// `docs/history/EXPERIMENT_LEARNED_STAT_POLICY.md`).
     #[serde(default = "default_stat_policy")]
     pub policy: String,
     /// M13 D46: a Statistical kitted agent's `p_robbed × (1 + flash_w × Kit.flash)`.
@@ -6516,7 +6516,7 @@ impl Default for NewsCfg {
     }
 }
 
-/// Life pass L1 (docs/SHADOW_V1.md "Plan"): the cross-cutting causes that
+/// Life pass L1 (docs/history/SHADOW_V1.md "Plan"): the cross-cutting causes that
 /// made every shadowed resident's day a walk. `enabled = false` is the
 /// master switch: every L1 branch reads it, so off is the ab79188 city.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

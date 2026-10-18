@@ -1,4 +1,4 @@
-//! The Statistical tier's policy (experiment, `docs/EXPERIMENT_LEARNED_STAT_POLICY.md`):
+//! The Statistical tier's policy (experiment, `docs/history/EXPERIMENT_LEARNED_STAT_POLICY.md`):
 //! what turns an agent's state at the start of its hour into the hour's
 //! probabilities (a `StatRow`). Two impls behind `[lod] policy`:
 //!

@@ -1,5 +1,5 @@
 //! God scenarios v2: corps, classes, the economy (docs/VISION.md, "How we
-//! test: god scenarios"; written up in docs/GOD_SCENARIOS_V2.md). The v1
+//! test: god scenarios"; written up in docs/history/GOD_SCENARIOS_V2.md). The v1
 //! pattern (tests/god.rs): seed 42, default config, baseline days 30-45, a
 //! shock at the start of day 45, observed to day 60 against an unshocked
 //! control. Every test is `#[ignore]`: run

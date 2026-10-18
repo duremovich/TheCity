@@ -1,6 +1,6 @@
 # Shadow V4: the gangs
 
-Archetypes: gang member, gang leader, purist, cultist, scav, dealer, runner. The 2k findings come only from the Full-LOD regenerations, `k2_s43_d26_full` (12 picks, no runner) and `k2_s44_d90_full` (14 picks). The 20k findings come from `k20_s42_d20` (14 picks), which was unaffected. Citations take the form `run/file dN HH:MM`. Read against `docs/SHADOW_V3.md` and `docs/shadow_v3/{street_and_the_old,gray_and_faith}.md`.
+Archetypes: gang member, gang leader, purist, cultist, scav, dealer, runner. The 2k findings come only from the Full-LOD regenerations, `k2_s43_d26_full` (12 picks, no runner) and `k2_s44_d90_full` (14 picks). The 20k findings come from `k20_s42_d20` (14 picks), which was unaffected. Citations take the form `run/file dN HH:MM`. Read against `docs/history/SHADOW_V3.md` and `docs/history/shadow_v3/{street_and_the_old,gray_and_faith}.md`.
 
 Not flagged, because they are standing decisions: the harsh and shrinking city, no safety net, uncapped faith, placeholder names. Also not flagged: wounded in care who go unfed when nobody can pay. That is by design (`wounded.rs::care_daily`).
 

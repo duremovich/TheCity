@@ -1,5 +1,5 @@
 //! God scenarios v3: districts, the street, riots (docs/VISION.md, "How we
-//! test: god scenarios"; written up in docs/GOD_SCENARIOS_V3.md). The v1/v2
+//! test: god scenarios"; written up in docs/history/GOD_SCENARIOS_V3.md). The v1/v2
 //! pattern (tests/god.rs, tests/god_corps.rs): seed 42, default config,
 //! baseline days 30-45, a shock at the start of day 45, observed to day 60
 //! against an unshocked control. Every test is `#[ignore]`: run

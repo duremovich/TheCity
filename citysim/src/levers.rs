@@ -101,7 +101,7 @@ pub enum PlayerCommand {
     NoCityEvictions(bool),
     /// Split a corp's monopoly niche in two (D31); refused without one.
     BreakUp(EntityId),
-    // --- M11 god commands (docs/GOD_SCENARIOS_V2.md): corps, out of the rules.
+    // --- M11 god commands (docs/history/GOD_SCENARIOS_V2.md): corps, out of the rules.
     /// Add coins to a corp's treasury, out of thin air.
     FundCorp {
         corp: EntityId,
@@ -156,7 +156,7 @@ pub enum PlayerCommand {
     },
     /// Pin the law's riot response, or (`None`) hand it back to the captain.
     SetRiotResponse(Option<crate::components::RiotResponse>),
-    // --- M12 god commands (docs/GOD_SCENARIOS_V3.md): districts, out of the rules.
+    // --- M12 god commands (docs/history/GOD_SCENARIOS_V3.md): districts, out of the rules.
     /// A riot in the district at the next muster hour, unrest, streak,
     /// cooldown and caps ignored (one eligible rioter is enough).
     Riot(crate::components::DistrictId),
@@ -198,7 +198,7 @@ pub enum PlayerCommand {
     },
     /// M13 D12/D48: whether the city impounds vehicles with unpaid upkeep.
     SetImpound(bool),
-    // --- M13 god commands (plan D48, docs/GOD_SCENARIOS_V4.md).
+    // --- M13 god commands (plan D48, docs/history/GOD_SCENARIOS_V4.md).
     /// Every living adult gets Arms and Nerves implants of `tier` (a slot
     /// already filled is kept), free and without import.
     ChromeEveryone {
@@ -2159,7 +2159,7 @@ impl World {
         }
     }
 
-    /// The M13 god commands on assets (plan D48, docs/GOD_SCENARIOS_V4.md).
+    /// The M13 god commands on assets (plan D48, docs/history/GOD_SCENARIOS_V4.md).
     fn cmd_god_assets(&mut self, cmd: &PlayerCommand) -> Result<(Vec<EntityId>, String), String> {
         use crate::components::{Asset, AssetKind, AssetLoc, Controller, Good, Slot};
         use crate::systems::{assets, demography, law, stims};
@@ -2253,7 +2253,7 @@ impl World {
         }
     }
 
-    /// The M12 god commands on districts (docs/GOD_SCENARIOS_V3.md, plan D42).
+    /// The M12 god commands on districts (docs/history/GOD_SCENARIOS_V3.md, plan D42).
     fn cmd_god_district(&mut self, cmd: &PlayerCommand) -> Result<(Vec<EntityId>, String), String> {
         use crate::systems::{gang, litter, ownership, riot, street};
         let check_district = |w: &World, d: crate::components::DistrictId, what: &str| {
@@ -2348,7 +2348,7 @@ impl World {
         }
     }
 
-    /// The M11 god commands on corps (docs/GOD_SCENARIOS_V2.md).
+    /// The M11 god commands on corps (docs/history/GOD_SCENARIOS_V2.md).
     fn cmd_god_corp(&mut self, cmd: &PlayerCommand) -> Result<(Vec<EntityId>, String), String> {
         use crate::systems::{classes, corps, ownership};
         let corp_name = |w: &World, c: EntityId| w.comp::<Corp>(c).map(|c| c.name.clone()).ok_or("no such corp");

@@ -1452,7 +1452,7 @@ fn test_fixer_licence_off_floors_heat_and_blocks_register() {
 
 /// M16a phase 5 (5.1 a): an NPC founds a Fixer's office through `Register`
 /// (0 of seeds 42-47 in 120 days: `choose_kind`'s ratio puts the second
-/// office behind the under-supplied kinds, docs/GOD_SCENARIOS_V8.md). A
+/// office behind the under-supplied kinds, docs/history/GOD_SCENARIOS_V8.md). A
 /// lawless talker with the coins, the per-capita room for more offices:
 /// `register` builds a Fixer, owned by the founder, with an open book.
 #[test]
