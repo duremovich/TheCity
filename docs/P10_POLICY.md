@@ -1,6 +1,6 @@
 # P10: the switches retired, the safety net as policy
 
-Companion to `ECONOMY_V2.md` (wages from revenue, no dole), `JOBS_V2.md`, `HUNGER_SICKNESS.md`, `TESTING.md` and the memories `thecity-utopia-dystopia-game` and `thecity-no-safety-net`. Dylan (2026-10-10): the brutal no-net city is the **starting state, not a law**; a player strong enough to win a seat should be able to enact a safety net if the city can fund it, and the corps should push back. So P10 retires the flip's config switches and keeps every safety-net mechanism behind **saved policy levers** the city government enacts and funds from the Treasury.
+Companion to `ECONOMY_V2.md` (wages from revenue, no dole), `JOBS_V2.md`, `HUNGER_SICKNESS.md`, `TESTING.md` and `VISION.md` § The dystopia as a contest. Dylan (2026-10-10): the brutal no-net city is the **starting state, not a law**; a player strong enough to win a seat should be able to enact a safety net if the city can fund it, and the corps should push back. So P10 retires the flip's config switches and keeps every safety-net mechanism behind **saved policy levers** the city government enacts and funds from the Treasury.
 
 ## Decisions (overturnable)
 

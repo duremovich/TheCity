@@ -46,6 +46,6 @@ python tools/compare_runs.py a.csv b.csv
   plants seized), the Pitches open by kind, the take a Pitch-day, the cut's share of the take and the fill rate.
 - `compare_runs.py`: per-column means of two reports with the relative difference, for A/B
   comparisons across seeds or commits.
-- `train_stat_policy.py` (numpy; the learned-policy experiment, `docs/EXPERIMENT_LEARNED_STAT_POLICY.md`):
+- `train_stat_policy.py` (numpy; the learned-policy experiment, `docs/history/EXPERIMENT_LEARNED_STAT_POLICY.md`):
   fits the 24-row table, a coarse extended table and 2-layer MLPs on `calibrate --rows-csv` agent-hours,
   prints losses, calibration and held-out regimes, and exports `stat_mlp.toml`.

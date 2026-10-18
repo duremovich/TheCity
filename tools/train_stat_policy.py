@@ -360,7 +360,7 @@ def main():
             net.W1[:, mlp.unseen[net.inputs]] = 0.0
         results[f"{'c' if hidden == 32 else 'd'} mlp{hidden}"] = (mlp.full_predict(), mlp.n_params())
         if EXPORT and hidden == int(ARGS[ARGS.index("--hidden") + 1] if "--hidden" in ARGS else 32):
-            text = "# stat_mlp: learned Statistical policy (docs/EXPERIMENT_LEARNED_STAT_POLICY.md), " \
+            text = "# stat_mlp: learned Statistical policy (docs/history/EXPERIMENT_LEARNED_STAT_POLICY.md), " \
                    f"hidden {hidden}, trained on calibrate seeds {SEEDS_TRAIN}\nversion = 1\n\n"
             text += toml_net("outcome", mlp.export_net(mlp.out)) + "\n" + toml_net("rolls", mlp.export_net(mlp.rolls))
             with open(EXPORT, "w", newline="\n") as f:
