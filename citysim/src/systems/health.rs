@@ -592,6 +592,8 @@ pub fn oncology(world: &mut World, id: EntityId, clinic: EntityId) -> bool {
         // Jobs & lives phase 7 (§ 6.3): a remission leaves a level (no slot).
         crate::systems::ages::maim(world, id, None, "a cancer in remission");
     }
+    // Lives at work phase 1 (§ 2.2): the treatment is the doctor's encounter.
+    crate::systems::service::arrive(world, id, clinic, crate::components::ServeKind::Patient, price);
     true
 }
 

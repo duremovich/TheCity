@@ -743,6 +743,11 @@ pub fn on_complete(
                 n.belonging = (n.belonging + 0.15).min(1.0);
             }
             world.remember(id, MemoryKind::Socialised, None, 0.2, 0.3, false);
+            // Lives at work phase 1 (§ 2.1): the drink is the bartender's
+            // encounter (no coins: a drink never tipped, and tips nobody).
+            if let Some(bar) = world.comp::<Position>(id).and_then(|p| p.building) {
+                crate::systems::service::arrive(world, id, bar, crate::components::ServeKind::Visit, 0);
+            }
             // M15 W7: the rumour mill, one exchange each way with a co-drinker.
             crate::systems::gossip::drink(world, id);
             // L2 L14: a drink's fun; a Club's or Den's visit.
@@ -1343,6 +1348,9 @@ pub fn on_complete(
             );
             if crate::systems::law::living(world, id) {
                 crate::systems::law::raise_crime_on(world, id, (!murder).then_some(victim), Some(victim), crime, tile);
+                // Lives at work phase 1 (§ 2.1): an Assault inside a kept
+                // venue may end with the attacker thrown out by the bouncer.
+                crate::systems::service::maybe_eject(world, id);
             }
             // M15 W22: the Hunt's strike (after the crime: street silence reads the Hunt).
             crate::systems::hunt::on_strike(world, id, victim, winner, died);
@@ -1645,6 +1653,9 @@ fn report_crime(world: &mut World, id: EntityId) -> StepResult {
 /// A guard's wages are owed by the shift clock instead
 /// (`law::credit_guard_shifts`), whichever plan the guard ends the shift on.
 pub fn end_shift(world: &mut World, id: EntityId) {
+    // Lives at work phase 1 (§ 2.1): the shift-end rule shared with the
+    // Statistical tier (the cook's staff meal, the staffed-shift count).
+    crate::systems::service::shift_end(world, id);
     let tick = world.tick;
     let mut owed = false;
     if let Some(j) = world.comp_mut::<Job>(id) {

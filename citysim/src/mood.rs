@@ -1,7 +1,7 @@
 //! Mood: a slow blend of need satisfaction and recent memories, computed
 //! once per hour for every agent.
 
-use crate::components::{Memory, Mood, Needs, Personality};
+use crate::components::{Memory, MemoryKind, Mood, Needs, Personality};
 use crate::entity::EntityId;
 use crate::time::{Tick, TICKS_PER_DAY, TICKS_PER_HOUR};
 use crate::world::World;
@@ -25,6 +25,8 @@ pub fn memory_term(m: &Memory, now: Tick) -> f32 {
         .iter()
         .map(|e| (e, now.saturating_sub(e.tick) as f32 / TICKS_PER_DAY as f32))
         .filter(|(_, age)| *age <= 7.0)
+        // Lives at work D5: a `Served` memory has mood weight 0 (parity-neutral).
+        .filter(|(e, _)| e.kind != MemoryKind::Served)
         .map(|(e, age)| e.valence * e.salience * 0.5f32.powf(age / 3.0))
         .sum();
     sum.clamp(-1.0, 1.0)

@@ -1003,6 +1003,73 @@ pub enum MemoryKind {
     /// M16b phase 4: a tag found on this agent by a scanner (subject the
     /// head of the tag's owner). Not a deed.
     Tagged,
+    /// Lives at work phase 1 (D5): served, or served by, the subject at a
+    /// counter (`systems::service`). Mood weight 0 (`mood::memory_term`
+    /// skips it); not a deed. Bodies only: a Statistical agent keeps none.
+    Served,
+}
+
+/// Lives at work phase 1 (docs/LIVES_AT_WORK.md § 1.1): what a service
+/// encounter serves; a `[[serves]]` row names one per trade. Appended.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ServeKind {
+    Visit,
+    Patient,
+    Pupil,
+    Inmate,
+    Tenant,
+    Fare,
+    Parcel,
+    Crate,
+    Client,
+    Door,
+    Staff,
+    Buyer,
+    Attendee,
+    Source,
+    Broker,
+}
+
+impl ServeKind {
+    pub const ALL: [ServeKind; 15] = [
+        ServeKind::Visit,
+        ServeKind::Patient,
+        ServeKind::Pupil,
+        ServeKind::Inmate,
+        ServeKind::Tenant,
+        ServeKind::Fare,
+        ServeKind::Parcel,
+        ServeKind::Crate,
+        ServeKind::Client,
+        ServeKind::Door,
+        ServeKind::Staff,
+        ServeKind::Buyer,
+        ServeKind::Attendee,
+        ServeKind::Source,
+        ServeKind::Broker,
+    ];
+
+    /// The CSV column suffix (`served_<label>`).
+    pub fn label(self) -> &'static str {
+        match self {
+            ServeKind::Visit => "visit",
+            ServeKind::Patient => "patient",
+            ServeKind::Pupil => "pupil",
+            ServeKind::Inmate => "inmate",
+            ServeKind::Tenant => "tenant",
+            ServeKind::Fare => "fare",
+            ServeKind::Parcel => "parcel",
+            ServeKind::Crate => "crate",
+            ServeKind::Client => "client",
+            ServeKind::Door => "door",
+            ServeKind::Staff => "staff",
+            ServeKind::Buyer => "buyer",
+            ServeKind::Attendee => "attendee",
+            ServeKind::Source => "source",
+            ServeKind::Broker => "broker",
+        }
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]

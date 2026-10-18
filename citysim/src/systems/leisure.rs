@@ -1371,11 +1371,17 @@ pub fn on_complete(world: &mut World, id: EntityId, kind: ActionKind, target: Op
             world.remember(id, MemoryKind::Enjoyed, None, 0.2, 0.3, false);
             crate::systems::jobs::note_visit(world, b);
             phase4_visit(world, id, b);
+            // Lives at work phase 1 (§ 2.1): the visit queues at the venue's counter.
+            let price = price_of(world, b);
+            crate::systems::service::arrive(world, id, b, crate::components::ServeKind::Visit, price);
         }
         ActionKind::EatOut => {
             let (units, _) = world.pending_purchase.remove(&id).unwrap_or((0, 0));
             let Some(b) = target else { return };
             if units > 0 {
+                // Lives at work phase 1 (§ 2.1): the meal is the cook's.
+                let price = price_of(world, b);
+                crate::systems::service::arrive(world, id, b, crate::components::ServeKind::Visit, price);
                 crate::systems::bins::venue_meal(world, b);
                 let cfg = world.config.needs.clone();
                 if let Some(n) = world.comp_mut::<Needs>(id) {
@@ -1395,6 +1401,8 @@ pub fn on_complete(world: &mut World, id: EntityId, kind: ActionKind, target: Op
                 add_fun(world, id, gain_at(world, b));
                 world.remember(id, MemoryKind::Enjoyed, None, 0.2, 0.3, false);
                 crate::systems::jobs::note_visit(world, b);
+                // Lives at work phase 1 (§ 2.1): the table game names its croupier.
+                crate::systems::service::arrive(world, id, b, crate::components::ServeKind::Visit, 0);
             }
         }
         ActionKind::HangOut => hangout_done(world, id, started),
@@ -1597,6 +1605,8 @@ pub fn bouts(world: &mut World) {
         }
         let mut paid_out = 0;
         for (who, stake, _) in bets {
+            // Lives at work phase 1 (§ 2.1): the bettors are the bout's served.
+            crate::systems::service::arrive(world, who, pit, crate::components::ServeKind::Attendee, stake);
             let courage = world.comp::<Personality>(who).map_or(0.5, |p| p.courage);
             let backs_a = rng.random::<f32>() < 0.3 + 0.4 * courage;
             if backs_a == a_wins && world.has::<Wallet>(who) {
@@ -1907,6 +1917,11 @@ fn stat_visit(
         }
     }
     world.stats.current.living.stat_spend += gross;
+    // Lives at work phase 1 (§ 2.1): the off-screen visit queues at the
+    // same counter a body's does (the mirror by construction).
+    if gross > 0 {
+        crate::systems::service::arrive(world, id, b, crate::components::ServeKind::Visit, gross);
+    }
     gross > 0
 }
 

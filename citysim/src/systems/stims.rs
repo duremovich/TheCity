@@ -504,6 +504,8 @@ pub fn detox(world: &mut World, agent: EntityId, clinic: EntityId) -> bool {
     world.stats.current.detoxes += 1;
     let (who, at) = (world.name_of(agent), world.name_of(clinic));
     world.push_event(EventKind::Treated, &[agent, clinic], format!("{who} took Detox at {at}"));
+    // Lives at work phase 1 (§ 2.2): the detox is the doctor's (or orderly's) encounter.
+    crate::systems::service::arrive(world, agent, clinic, crate::components::ServeKind::Patient, price);
     true
 }
 

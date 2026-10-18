@@ -49,6 +49,10 @@
 //!   encounter itself visible). It does bump the venue's
 //!   `Venue.visits_today`, so a third column reads that tally over the
 //!   shift's hours (leisure venues only) and the share with any of the three.
+//!   Phase 1's encounter is the fourth signal: `met` is the share of shifts
+//!   in which the pick gained a `Served` memory, `enc/shift` the mean count
+//!   (phase 0 read 0 for both; a Statistical pick keeps no such memory, but
+//!   the picks are pinned Full).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -713,6 +717,9 @@ struct ShiftObs {
     /// (leisure venues only; a Statistical visit shows here and nowhere else).
     venue_visits: u32,
     last_visits: Option<u16>,
+    /// Lives at work phase 1: `Served` memories the agent gained during the
+    /// shift (the encounter itself, visible to neither body nor event).
+    encounters: u32,
 }
 
 /// Lives at work phase 0: two agents outdoors this close (Manhattan tiles)
@@ -1141,7 +1148,7 @@ fn plan_line(world: &World, b: &Brain) -> Option<String> {
     ))
 }
 
-fn mem_text(world: &World, e: &MemoryEntry) -> String {
+fn mem_text(world: &World, holder: EntityId, e: &MemoryEntry) -> String {
     let who = e.subject.map(|s| nm(world, s));
     match (e.kind, e.deed) {
         (MemoryKind::Rumour, Some(d)) => format!(
@@ -1157,6 +1164,25 @@ fn mem_text(world: &World, e: &MemoryEntry) -> String {
             who.unwrap_or_else(|| "?".into()),
             e.at.map_or(String::new(), |a| format!(" at {}", nm(world, a)))
         ),
+        // Lives at work phase 1: the encounter, either side; "a regular" when
+        // the holder's ledger (a server's) or the other's (a served's server)
+        // holds the pair at two or more visits.
+        (MemoryKind::Served, _) => {
+            let regular = e.subject.is_some_and(|o| {
+                let twice = |server: EntityId, guest: EntityId| {
+                    citysim::systems::service::regulars_of(world, server)
+                        .iter()
+                        .any(|r| r.who == guest && r.visits >= 2)
+                };
+                twice(holder, o) || twice(o, holder)
+            });
+            format!(
+                "served {}{} (valence {:+.2})",
+                who.unwrap_or_else(|| "someone".into()),
+                if regular { ", a regular" } else { "" },
+                e.valence
+            )
+        }
         _ => format!(
             "memory {:?}{} (salience {:.2}, valence {:+.2}{}{})",
             e.kind,
@@ -1702,6 +1728,12 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
         for (e, heard) in m.entries.iter().map(|e| (e, false)).chain(m.heard.iter().map(|e| (e, true))) {
             let key = (e.tick, e.kind, e.subject, heard);
             if t.mem_seen.insert(key) && !prime {
+                // Lives at work phase 1: an encounter on shift (the fourth Served-able signal).
+                if e.kind == MemoryKind::Served && !heard {
+                    if let Some(s) = t.shift.as_mut() {
+                        s.encounters += 1;
+                    }
+                }
                 if let Some(s) = e.subject {
                     if matches!(
                         e.kind,
@@ -1715,7 +1747,7 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                         t.contact(world, s);
                     }
                 }
-                let text = mem_text(world, e);
+                let text = mem_text(world, id, e);
                 // Rumours heard already appear as gossip lines when told in person.
                 let old = if now.saturating_sub(e.tick) > 60 {
                     format!(" [deed from {}]", clock(e.tick))
@@ -1841,6 +1873,7 @@ fn behaviour_minute(world: &World, t: &mut Track, now: Tick, act: &'static str) 
                 source_events: 0,
                 venue_visits: 0,
                 last_visits: None,
+                encounters: 0,
             });
             s.len += 1;
             s.work += u32::from(act == "work");
@@ -2541,6 +2574,9 @@ struct Agg {
     shift_samples: u64,
     nonstaff: u64,
     venue_visits: u64,
+    /// Phase 1: shifts with an encounter, and the encounters.
+    shifts_met: u32,
+    encounters: u64,
     source_kinds: BTreeMap<String, u32>,
 }
 
@@ -2602,6 +2638,8 @@ impl Agg {
             self.shift_samples += u64::from(s.samples);
             self.nonstaff += u64::from(s.nonstaff);
             self.venue_visits += u64::from(s.venue_visits);
+            self.shifts_met += u32::from(s.encounters > 0);
+            self.encounters += u64::from(s.encounters);
         }
         for (k, n) in &t.source_kinds {
             *self.source_kinds.entry(k.clone()).or_insert(0) += n;
@@ -2626,6 +2664,8 @@ impl Agg {
         self.shift_samples += o.shift_samples;
         self.nonstaff += o.nonstaff;
         self.venue_visits += o.venue_visits;
+        self.shifts_met += o.shifts_met;
+        self.encounters += o.encounters;
         for (k, n) in &o.source_kinds {
             *self.source_kinds.entry(k.clone()).or_insert(0) += n;
         }
@@ -3253,7 +3293,7 @@ fn lives_line(text: &mut String, city: &str, label: &str, a: &Agg) {
         text,
         "PROBE lives {city} {label}: n {} agent-days {days:.1} | idle_h/d {:.2} | married {} never_named {} never_coloc {} \
          named/wk {:.2} coloc_h/wk {:.2} (stat-spouse {:.2}) | hang/wk {:.2} empty {:.2} ({}/{}) | shifts {} servedable \
-         {:.2} any {:.2} bodies/h {:.2} venue_visits/shift {:.2} | kinds: {}",
+         {:.2} any {:.2} bodies/h {:.2} venue_visits/shift {:.2} met {:.2} enc/shift {:.2} | kinds: {}",
         a.agents,
         per_day(a.idle_min as f64 / 60.0),
         a.married,
@@ -3271,6 +3311,8 @@ fn lives_line(text: &mut String, city: &str, label: &str, a: &Agg) {
         share(a.servedable_any, a.served_shifts),
         if a.shift_samples > 0 { a.nonstaff as f64 / a.shift_samples as f64 } else { 0.0 },
         if a.served_shifts > 0 { a.venue_visits as f64 / f64::from(a.served_shifts) } else { 0.0 },
+        share(a.shifts_met, a.served_shifts),
+        if a.served_shifts > 0 { a.encounters as f64 / f64::from(a.served_shifts) } else { 0.0 },
         if kinds.is_empty() { "none".to_string() } else { kinds.join(", ") }
     );
 }

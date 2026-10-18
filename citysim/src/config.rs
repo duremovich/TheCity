@@ -286,6 +286,136 @@ pub struct Config {
     /// elderly, disability (`CITYSIM_AGES_OFF=1`).
     #[serde(default)]
     pub ages: AgesCfg,
+    /// Lives at work (docs/LIVES_AT_WORK.md D13): the milestone's master
+    /// switch (`CITYSIM_LIVES_OFF=1` turns it off and clears `[service]`
+    /// and `[[serves]]`, so an off save is byte-identical to main's).
+    #[serde(default, skip_serializing_if = "LivesCfg::is_off")]
+    pub lives: LivesCfg,
+    /// Lives at work phase 1 (§ 1, § 2): the service encounter's switches
+    /// and numbers. Not written into a save at its defaults.
+    #[serde(default, skip_serializing_if = "ServiceCfg::is_default")]
+    pub service: ServiceCfg,
+    /// Lives at work phase 1 (§ 1.1): the `[[serves]]` rows, one per
+    /// serving trade (a trade id or a legacy `Role` name as the key).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub serves: Vec<ServesCfg>,
+}
+
+/// Lives at work `[lives]` (docs/LIVES_AT_WORK.md D13): the master switch.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LivesCfg {
+    /// Off (the default when the table is absent): nothing of the milestone runs.
+    pub enabled: bool,
+}
+
+impl LivesCfg {
+    /// Not written into a save while off.
+    pub fn is_off(&self) -> bool {
+        !self.enabled
+    }
+}
+
+/// Lives at work phase 1 `[service]` (docs/LIVES_AT_WORK.md § 1, § 2.1):
+/// the encounter's sub-switches (one per phase; `civic`, `street` and
+/// `tower` are the later phases') and numbers. Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ServiceCfg {
+    /// Phase 1: venues, vice and the Clinic.
+    pub venues: bool,
+    /// Phase 3: the civic counterparts and the round (reserved, unread).
+    pub civic: bool,
+    /// Phase 4: the street and freight (reserved, unread).
+    pub street: bool,
+    /// Phase 5: the tower and the brokers (reserved, unread).
+    pub tower: bool,
+    /// § 2.1: the madam's share of each tip at her Brothel (worker -> madam).
+    pub madam_cut: f32,
+    /// § 2.1: an Assault inside a kept venue is an ejection on this × (the
+    /// bouncer's fighting − the attacker's), the attacker put at the door.
+    pub p_eject: f32,
+    /// § 2.1: a Cook takes one meal from the NoodleBar's stock at shift end
+    /// (every tier).
+    pub staff_meal: bool,
+    /// D5: a `Served` memory's salience (its mood weight is 0 regardless).
+    pub served_salience: f32,
+}
+
+impl Default for ServiceCfg {
+    fn default() -> Self {
+        ServiceCfg {
+            venues: false,
+            civic: false,
+            street: false,
+            tower: false,
+            madam_cut: 0.3,
+            p_eject: 0.5,
+            staff_meal: true,
+            served_salience: 0.15,
+        }
+    }
+}
+
+impl ServiceCfg {
+    /// Not written into a save at its defaults (every switch off).
+    pub fn is_default(&self) -> bool {
+        *self == ServiceCfg::default()
+    }
+}
+
+/// Lives at work phase 1: an encounter's outcome a `[[serves]]` row's
+/// `event_on` may name (§ 1.4: events only for the notable).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ServeOutcome {
+    Done,
+    Refused,
+    Ejected,
+    Regular,
+}
+
+/// Lives at work phase 1 (docs/LIVES_AT_WORK.md § 1.1): one `[[serves]]`
+/// row. `key` is a `[[trades]]` id or a legacy `Role` name (resolved like
+/// the names `Config::unresolved_names` checks).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ServesCfg {
+    pub key: String,
+    /// What the trade serves (its queue's source: § 2).
+    pub kind: crate::components::ServeKind,
+    /// Encounters one server takes an hour.
+    pub per_hour: u8,
+    /// The encounter's share of the hour, minutes (the diary's reading).
+    pub minutes: u8,
+    /// The `Skills` field a meeting trains, by this much.
+    pub skill: TradeSkill,
+    pub skill_gain: f32,
+    /// A served becomes a regular (an Acquaintance edge, `regulars_made`)
+    /// at this many encounters within `regular_days` (0: never).
+    pub regular_after: u8,
+    pub regular_days: u8,
+    /// The `Served` memory's valence.
+    pub valence: f32,
+    /// The outcomes that print an `EventKind::Served`.
+    pub event_on: Vec<ServeOutcome>,
+}
+
+impl Default for ServesCfg {
+    fn default() -> Self {
+        ServesCfg {
+            key: String::new(),
+            kind: crate::components::ServeKind::Visit,
+            per_hour: 6,
+            minutes: 10,
+            skill: TradeSkill::None,
+            skill_gain: 0.0,
+            regular_after: 0,
+            regular_days: 14,
+            valence: 0.1,
+            event_on: Vec::new(),
+        }
+    }
 }
 
 /// Jobs & lives phase 7 `[ages]` (docs/JOBS_AND_LIVES.md § 6; D11-D13;
@@ -1656,6 +1786,14 @@ impl Config {
         let rows = rows.chain(self.corps.seed_feeds.iter().map(|s| ("seed_feeds", s.row)));
         for (key, r) in rows.filter(|&(_, r)| r >= n) {
             out.push(format!("[corps] {key} names row {r} of {n}"));
+        }
+        // Lives at work phase 1: a `[[serves]]` key is a trade id or a legacy role's name.
+        for s in &self.serves {
+            let trade = self.trades.iter().any(|t| t.id == s.key);
+            let legacy = Role::ALL.iter().any(|r| format!("{r:?}") == s.key);
+            if !trade && !legacy {
+                out.push(format!("[[serves]] key {:?} is neither a trade id nor a Role", s.key));
+            }
         }
         out
     }
@@ -7452,6 +7590,14 @@ impl Config {
         }
         if std::env::var("CITYSIM_PATROL_SWEEP_OFF").is_ok_and(|v| v == "1") {
             cfg.vice.patrol_sweep = false;
+        }
+        // Lives at work (D13): the master switch's A/B and identity device.
+        // The sections are cleared too, so the off save holds no `[lives]`,
+        // `[service]` or `[[serves]]` and matches main byte for byte.
+        if std::env::var("CITYSIM_LIVES_OFF").is_ok_and(|v| v == "1") {
+            cfg.lives = LivesCfg::default();
+            cfg.service = ServiceCfg::default();
+            cfg.serves.clear();
         }
         cfg.districts.row_count();
         // Transit (docs/TRANSIT.md D12): `CITYSIM_TRANSIT=1` (or `0`)

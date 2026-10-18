@@ -152,6 +152,10 @@ fn installed_now(world: &mut World, agent: EntityId, clinic: Option<EntityId>, i
     };
     let actors: Vec<EntityId> = [Some(agent), clinic, Some(implant)].into_iter().flatten().collect();
     world.push_event(EventKind::Installed, &actors, text);
+    // Lives at work phase 1 (§ 2.2): the install is the doctor's encounter.
+    if let Some(c) = clinic {
+        crate::systems::service::arrive(world, agent, c, crate::components::ServeKind::Patient, 0);
+    }
     // M15 W31: a Purist member now above tolerance is cast out.
     crate::systems::creeds::on_install(world, agent);
 }
@@ -245,6 +249,8 @@ pub fn therapy(world: &mut World, agent: EntityId, clinic: EntityId) -> bool {
     world.stats.current.treatments += 1;
     let (who, at) = (world.name_of(agent), world.name_of(clinic));
     world.push_event(EventKind::Treated, &[agent, clinic], format!("{who} took Therapy at {at}"));
+    // Lives at work phase 1 (§ 2.2): the therapy is the doctor's encounter.
+    crate::systems::service::arrive(world, agent, clinic, crate::components::ServeKind::Patient, price);
     true
 }
 

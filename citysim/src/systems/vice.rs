@@ -191,6 +191,11 @@ pub fn on_visit(world: &mut World, visitor: EntityId, b: EntityId, price: i64) {
         BuildingKind::Club if worker.is_some() => {}
         _ => return,
     }
+    // Lives at work phase 1 (§ 2.1): the tip goes to the server the
+    // encounter names (`service::serve`), not the turn-about worker.
+    if crate::systems::service::on(world) {
+        return;
+    }
     let Some(w) = worker.filter(|&w| w != visitor) else { return };
     let tip = ((price as f32 * world.config.vice.tip_share).round() as i64).max(1);
     ownership::pay(world, Some(visitor), Some(w), tip, Flow::Tip);

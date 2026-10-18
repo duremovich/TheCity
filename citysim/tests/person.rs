@@ -1446,8 +1446,13 @@ fn probe_evicted_worker_rehouses_on_the_first_rent() {
                 && home(&w, a).is_some()
                 && w.comp::<Job>(a).is_some_and(|j| j.role == Role::Farmer)
                 && demography::children_of_agent(&w, a).is_empty()
+                // Lives at work phase 1: a lawful pick. The first single Farmer
+                // (lawfulness 0.3) was recruited by a gang eleven hours after the
+                // eviction on the phase 1 city and left the job: the probe is
+                // about the deposit wall, not the gangs.
+                && w.comp::<citysim::Personality>(a).is_some_and(|p| p.lawfulness >= 0.6)
         })
-        .expect("a single Farmer with a Home");
+        .expect("a single lawful Farmer with a Home");
     citysim::systems::ownership::evict(&mut w, a, "arrears");
     if let Some(h) = w.comp_mut::<Household>(a) {
         h.arrears = 0;

@@ -81,6 +81,7 @@ pub mod reputation;
 pub mod riot;
 pub mod robots;
 pub mod security;
+pub mod service;
 pub mod social;
 pub mod stat_policy;
 pub mod stats;

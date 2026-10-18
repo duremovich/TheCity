@@ -1044,6 +1044,17 @@ pub struct World {
     /// in `rebuild_indices` from the bodies' running steps.
     #[serde(skip)]
     pub hangouts: BTreeMap<TilePos, SmallVec<[EntityId; 8]>>,
+    /// Lives at work phase 1 (§ 1.1): each server's room this hour (the
+    /// encounters taken against its row's `per_hour`), written by
+    /// `service::arrive`, pruned by `service::hourly`. Not saved (a
+    /// derived, hour-bounded tally; a resumed save re-fills it).
+    #[serde(skip)]
+    pub service_room: BTreeMap<EntityId, crate::systems::service::Room>,
+    /// Lives at work phase 1 (§ 1.1): each server's regulars (at most
+    /// `service::REGULARS_CAP`; the oldest falls off). Empty off, so the
+    /// off save is byte-identical.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub regulars: BTreeMap<EntityId, SmallVec<[crate::systems::service::Regular; 8]>>,
     /// L2 L15: the HangOut spots per district (`leisure::spots`, midnight).
     /// Saved (deviation: the plan's `serde(skip)` would rebuild them on load
     /// from a later state than the midnight's).
@@ -1648,6 +1659,8 @@ impl World {
             venues_due: false,
             unwind: BTreeMap::new(),
             hangouts: BTreeMap::new(),
+            service_room: BTreeMap::new(),
+            regulars: BTreeMap::new(),
             spots: Vec::new(),
             last_met: BTreeMap::new(),
             told: BTreeMap::new(),
