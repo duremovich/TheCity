@@ -24,7 +24,7 @@ god 20/20 · asserted bullets 60/60 (40 + 3 + 15 + 2) · 93 test files, 55,580 l
 
 ## In flight
 
-Nothing. No agents, no worktrees, no branches but main.
+**Lives at work** (`docs/LIVES_AT_WORK.md`), fifteenth session, 2026-10-18. Phase 0 merged (`c8d71b5`): the law probe answers § 5.1 (the arrest share falls with the walk to the Precinct at both scales, so phase 7 builds Stations) and `shadow --lives` holds the baselines (§ 13). **Phase 1 (the encounter, venues and the Clinic) is being built** by the solo coder `phase0-coder` in `.claude/worktrees/agent-aeb9f5f4cf9b9e4ee` (branch `worktree-agent-aeb9f5f4cf9b9e4ee`, base `e5525ee`); its brief is the orchestrator's scratchpad `phase1_brief.md`, its report `phase1_report.md`. The orchestrator runs `/merge-set` on the exact tree, merges, then sends the phase 2 brief to the same coder.
 
 ## Next, in order
 
