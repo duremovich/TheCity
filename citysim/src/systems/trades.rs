@@ -204,6 +204,15 @@ pub fn shifts_for(world: &World, row: &TradeCfg, id: EntityId) -> Vec<(u16, u16)
         TradeShift::Day => wc.shift_day.clone(),
         TradeShift::Evening => world.config.leisure.evening_shift.clone(),
         TradeShift::Night => wc.shift_night.clone(),
+        // Lives at work phase 4 (§ 2.3): a fare trade's rush shifts.
+        TradeShift::Split
+            if row.duty == TradeDuty::Fare
+                && !world.config.service.cab_shifts.is_empty()
+                && crate::systems::service::street_on(world) =>
+        {
+            let s = &world.config.service.cab_shifts;
+            vec![s[id.index as usize % s.len()]]
+        }
         TradeShift::Split if id.index.is_multiple_of(2) => wc.shift_night.clone(),
         TradeShift::Split => wc.shift_day.clone(),
     }
@@ -338,7 +347,19 @@ fn new_round(world: &World, id: EntityId, post: EntityId, row: &TradeCfg, shift_
         by_home.sort_unstable();
         by_home.into_iter().take(stops).map(|(_, x)| x).collect()
     } else {
-        let start = (shift_key.max(0) as usize).wrapping_mul(stops) % blocks.len();
+        // Lives at work phase 4 (§ 2.3): a Yard's couriers split the day's
+        // recipients (each starts `stops` further on by his rank among them).
+        let rank = if freight && crate::systems::service::street_on(world) {
+            world
+                .staff_of(post)
+                .iter()
+                .filter(|&&s| job_row(world, s).is_some_and(|r| r.duty == TradeDuty::Round))
+                .position(|&s| s == id)
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        let start = (shift_key.max(0) as usize).wrapping_add(rank).wrapping_mul(stops) % blocks.len();
         (0..stops).map(|i| blocks[(start + i) % blocks.len()]).collect()
     };
     let mut from = door(post);
@@ -415,6 +436,8 @@ pub fn round_plan(world: &mut World, id: EntityId) -> Option<Plan> {
     if here == Some(route[legs]) {
         // Lives at work phase 3 (§ 2.2): the stop's tenants are served.
         crate::systems::service::super_stop(world, id, route[legs]);
+        // Lives at work phase 4 (§ 2.3): the courier's parcels for this stop.
+        crate::systems::streetwork::courier_stop(world, id, route[legs]);
         legs += 1;
         if let Some(b) = world.comp_mut::<Brain>(id) {
             b.patrol_legs = u8::try_from(legs).unwrap_or(u8::MAX);

@@ -428,6 +428,12 @@ fn run_city(seed: u64, days: u64, cfg: Config) -> SeedRun {
                 ("arrears notice", j.notices),
                 ("parent's Camp visit", j.camp_visits),
                 ("neglecting parent-day", j.camp_neglect),
+                // Lives at work phase 4a (docs/LIVES_AT_WORK.md § 9.1).
+                ("cab fare by a named driver", j.cab_rides_driven),
+                ("parcel to a named recipient", j.parcels_delivered),
+                ("lift", j.lifts),
+                ("pilfer report", j.pilfer_reports),
+                ("street client near", j.street_clients_near),
             ] {
                 *r.marks.entry(k).or_insert(0) += v;
             }
@@ -989,6 +995,13 @@ fn jobs2_printed() -> Vec<Mechanism> {
         "arrears notice",        // [1331, 1228, 1295]
         "parent's Camp visit",   // [123, 97, 90]
         "neglecting parent-day", // [190, 202, 215]
+        // Lives at work phase 4a (§ 9.1, printed until the gate; `tests/street.rs` and the
+        // cabbie probe in `tests/person.rs` carry each).
+        "cab fare by a named driver", // [0, 0, 0]: unpinned drivers are Statistical (the off-screen cab); the probe drives
+        "parcel to a named recipient", // [3917, 3432, 3858]
+        "lift",                       // [46445, 66874, 58385]
+        "pilfer report",              // [28, 32, 21]
+        "street client near",         // [6, 0, 15]
     ]
     .into_iter()
     .map(|k| (k, m(k)))

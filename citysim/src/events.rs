@@ -440,10 +440,13 @@ pub enum EventKind {
     CampBreakout,
     /// `[super, tenant, block]`: a super served an arrears notice at the door.
     Notice,
+    // --- Lives at work phase 4 (docs/LIVES_AT_WORK.md § 2.3).
+    /// `[rider, driver, garage]`: a cab fare dodged (the rider rode short).
+    FareShort,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 219] = [
+    pub const ALL: [EventKind; 220] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -663,6 +666,7 @@ impl EventKind {
         EventKind::CampBuyout,
         EventKind::CampBreakout,
         EventKind::Notice,
+        EventKind::FareShort,
     ];
 }
 

@@ -1497,7 +1497,8 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
     // Lives at work phase 3 (§ 6, the super's door rent): a Statistical
     // round worker credited for the shift walks its round world-side at the
     // shift's first hour: the same stop list, the same encounters.
-    if crate::systems::service::civic_on(world)
+    // Lives at work phase 4 (§ 2.3): the courier's parcels the same way.
+    if (crate::systems::service::civic_on(world) || crate::systems::service::street_on(world))
         && crate::systems::trades::on_round(world, id)
         && attend.is_none_or(|p| shift_attended(world, id, &job, p))
     {
@@ -1506,6 +1507,7 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
         if first {
             for b in crate::systems::trades::round_for(world, id, key) {
                 crate::systems::service::super_stop(world, id, b);
+                crate::systems::streetwork::courier_stop(world, id, b);
             }
         }
     }

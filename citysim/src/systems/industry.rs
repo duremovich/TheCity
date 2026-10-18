@@ -52,6 +52,8 @@ use crate::world::World;
 
 /// The hash purposes of this module's rolls (`systems::econ::hash_unit`).
 const PURPOSE_PILFER: u64 = 0x10B2_0001;
+/// Lives at work phase 4 (§ 2.3): the owner's report of a short count.
+const PURPOSE_SHORT: u64 = 0x10B2_0002;
 
 /// The milestone's master switch (`[jobs2] enabled`, `CITYSIM_JOBS2_OFF=1`).
 pub fn on(world: &World) -> bool {
@@ -125,6 +127,19 @@ pub struct Jobs2State {
     // --- Phase 7, life stages (`systems::ages`).
     #[serde(skip_serializing_if = "crate::systems::ages::AgesState::is_default")]
     pub ages: crate::systems::ages::AgesState,
+    // --- Lives at work phase 4, the street (`systems::streetwork`).
+    /// The cab rides booked today and not yet driven (a driver's body walks
+    /// them; cleared at midnight).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cab_rides: Vec<crate::systems::streetwork::CabRide>,
+    /// The commuters whose cab roll ran today (one roll a day a rider, as
+    /// the Statistical tier's; cleared at midnight).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub cab_rolled: std::collections::BTreeSet<EntityId>,
+    /// The day's parcels, from the sender to a named recipient, until
+    /// delivered or returned (cleared at midnight).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parcels: Vec<crate::systems::streetwork::Parcel>,
 }
 
 fn is_zero_u32(v: &u32) -> bool {
@@ -1181,8 +1196,28 @@ fn pilfer(world: &mut World) {
             ownership::jobs2_row(world).pilfered += 1;
             let (who, what) = (world.name_of(l), world.name_of(plant));
             world.push_event(EventKind::Pilfered, &[l, plant], format!("{who} walked a Ration out of {what}"));
+            // Lives at work phase 4 (§ 2.3, loader): the owner finds the
+            // count short and reports the Theft on `p_short_report`.
+            if crate::systems::service::street_on(world)
+                && crate::systems::econ::hash_unit(seed, PURPOSE_SHORT, day, u64::from(l.index))
+                    < world.config.service.p_short_report
+            {
+                ownership::jobs2_row(world).pilfer_reports += 1;
+                crate::systems::law::file_report(world, crate::components::Crime::Theft, l, None);
+            }
         }
     }
+}
+
+/// Lives at work phase 4 (§ 2.3, loader): a loader's lifts at `yard` this
+/// shift: the units the Yard handled in the day to now (today's and the
+/// share of yesterday's for the hours not yet past: a night shift's last
+/// hour is 05:00) over its handling staff on shift now (one at least).
+pub fn shift_lifts(world: &World, yard: EntityId) -> u32 {
+    let (today, yesterday) = world.jobs2.yard_units.get(&yard).copied().unwrap_or((0, 0));
+    let left = TICKS_PER_DAY - Tick::from(world.tick_of_day());
+    let units = u64::from(today) + u64::from(yesterday) * left / TICKS_PER_DAY;
+    (units / (on_duty(world, yard, TradeModel::Handling) as u64).max(1)) as u32
 }
 
 /// Midnight (from `living::run`, after the World's book refills): the

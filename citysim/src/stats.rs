@@ -722,6 +722,39 @@ pub struct Jobs2Cols {
     pub flow_buyout: i64,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub taught_days: u32,
+    /// Lives at work phase 4 (docs/LIVES_AT_WORK.md § 2.3): cab rides a
+    /// driver's body drove and rides the Garage's off-screen cab took (no
+    /// driver's body within `cab_wait_ticks`), fares dodged, parcels
+    /// delivered and returned, the loaders' lifts, the owners' pilfer
+    /// reports, clients found as bodies near the pitch, the pimps'
+    /// collections and the coins passed up, corner deals, dealers' regulars
+    /// made, Dealing witness rolls a lookout halved.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub cab_rides_driven: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub cab_rides_unmanned: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub fares_short: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub parcels_delivered: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub parcels_returned: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub lifts: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub pilfer_reports: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub street_clients_near: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub pimp_collections: u32,
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub pimp_pass_up: i64,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub corner_deals: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub dealer_regulars: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub lookout_halved: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -957,6 +990,19 @@ impl Jobs2Cols {
                 "tied_housed",
                 "flow_buyout",
                 "taught_days",
+                "cab_rides_driven",
+                "cab_rides_unmanned",
+                "fares_short",
+                "parcels_delivered",
+                "parcels_returned",
+                "lifts",
+                "pilfer_reports",
+                "street_clients_near",
+                "pimp_collections",
+                "pimp_pass_up",
+                "corner_deals",
+                "dealer_regulars",
+                "lookout_halved",
             ]
             .into_iter()
             .map(str::to_string),
@@ -1186,6 +1232,19 @@ impl Jobs2Cols {
             self.tied_housed.to_string(),
             self.flow_buyout.to_string(),
             self.taught_days.to_string(),
+            self.cab_rides_driven.to_string(),
+            self.cab_rides_unmanned.to_string(),
+            self.fares_short.to_string(),
+            self.parcels_delivered.to_string(),
+            self.parcels_returned.to_string(),
+            self.lifts.to_string(),
+            self.pilfer_reports.to_string(),
+            self.street_clients_near.to_string(),
+            self.pimp_collections.to_string(),
+            self.pimp_pass_up.to_string(),
+            self.corner_deals.to_string(),
+            self.dealer_regulars.to_string(),
+            self.lookout_halved.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

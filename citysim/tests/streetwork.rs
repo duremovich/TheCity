@@ -300,18 +300,21 @@ fn test_stat_cab_rickshaw_first_then_cab() {
     w.comp_mut::<Brain>(puller).expect("brain").lod = citysim::Lod::Statistical;
     w.jobs2.pitches.insert(puller, p);
     run_to_tod(&mut w, 540);
-    let before = w.purse(Some(puller));
+    // Lives at work phase 4a: the city's Full commuters ride too (the same
+    // roll at `p_cab` 1): read the deltas.
+    let (before, r0) = (w.purse(Some(puller)), j2(&w).rickshaw_trips);
     assert!(streetwork::stat_cab(&mut w, worker, &job), "no ride");
     assert!(w.purse(Some(puller)) > before, "the rickshaw took no fare");
-    assert_eq!(j2(&w).rickshaw_trips, 1);
+    assert_eq!(j2(&w).rickshaw_trips - r0, 1);
     // No rickshaw: a cab at a Garage with drivers.
     w.jobs2.pitches.clear();
     let g = w.buildings_of_kind(BuildingKind::Garage)[0];
     let driver = jobless(&w)[0];
     let cab = trade(&w, "cab_driver");
     citysim::systems::demography::hire(&mut w, driver, g, cab);
+    let c0 = j2(&w).cab_trips;
     assert!(streetwork::stat_cab(&mut w, worker, &job), "no cab");
-    assert_eq!(j2(&w).cab_trips, 1);
+    assert_eq!(j2(&w).cab_trips - c0, 1);
 }
 
 /// § 3 (tinkers): an agent's vehicle near a working tinker is fixed at the
