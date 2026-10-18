@@ -148,6 +148,24 @@ pub fn raise_crime_except(
     tile: TilePos,
     except: Option<EntityId>,
 ) {
+    raise_crime_mult(world, actor, victim, object, crime, tile, except, 1.0);
+}
+
+/// `raise_crime_except` with each witness's notice probability multiplied
+/// by `witness_mult` (Lives at work phase 4b, § 2.3: a dealer's lookout,
+/// `witness_lookout_mult`; 1.0 everywhere else). The rolls are drawn as
+/// before, one a witness.
+#[allow(clippy::too_many_arguments)]
+pub fn raise_crime_mult(
+    world: &mut World,
+    actor: EntityId,
+    victim: Option<EntityId>,
+    object: Option<EntityId>,
+    crime: Crime,
+    tile: TilePos,
+    except: Option<EntityId>,
+    witness_mult: f32,
+) {
     // L2 phase 4 (plan L25): the ledger's on-screen victims.
     if let Some(v) = victim {
         let kind = match crime {
@@ -246,6 +264,9 @@ pub fn raise_crime_except(
         let mut p = notice_probability(&cfg, stealth, guard);
         if guard && law_mult != 1.0 {
             p = (p * law_mult).clamp(0.0, 1.0);
+        }
+        if witness_mult != 1.0 {
+            p *= witness_mult;
         }
         let roll: f32 = world.rng.world().random();
         if roll >= p {

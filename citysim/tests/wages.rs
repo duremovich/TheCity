@@ -1035,8 +1035,12 @@ fn test_emigrate_cost_keeps_the_identity() {
         let emigrants: i64 = w.stats.history.iter().map(|r| i64::from(r.emigrants)).sum();
         (ids, emigrants)
     };
-    let (free_ids, free) = run(0);
-    let (gated_ids, gated) = run(20);
+    // The two cities side by side (the change tier's slowest wages test).
+    let ((free_ids, free), (gated_ids, gated)) = std::thread::scope(|s| {
+        let free = s.spawn(|| run(0));
+        let gated = s.spawn(|| run(20));
+        (free.join().expect("the free city"), gated.join().expect("the gated city"))
+    });
     assert!(free_ids.windows(2).all(|p| p[0] == p[1]), "free: the identity holds: {free_ids:?}");
     assert!(gated_ids.windows(2).all(|p| p[0] == p[1]), "gated: the identity holds: {gated_ids:?}");
     eprintln!("emigrants in {DAYS} days: free {free}, gated {gated}");

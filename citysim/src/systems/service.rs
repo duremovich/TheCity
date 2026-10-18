@@ -523,6 +523,39 @@ pub fn encounter(
     coins: i64,
 ) {
     let Some(row) = row_of_agent(world, server).cloned() else { return };
+    encounter_row(world, row, server, served, place, district, kind, coins);
+}
+
+/// Lives at work phase 4b (§ 2.3): the encounter of a gang post with no
+/// trade row, read by its `[[serves]]` key (`"pimp"`, `"dealer"`): a gang
+/// member holding a Job meets his collection or his buyer as the post, not
+/// as his trade. Nothing when the key has no row.
+#[allow(clippy::too_many_arguments)]
+pub fn encounter_post(
+    world: &mut World,
+    post: &str,
+    server: EntityId,
+    served: EntityId,
+    place: Option<EntityId>,
+    district: crate::components::DistrictId,
+    kind: ServeKind,
+    coins: i64,
+) {
+    let Some(row) = world.config.serves.iter().find(|r| r.key == post).cloned() else { return };
+    encounter_row(world, row, server, served, place, district, kind, coins);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn encounter_row(
+    world: &mut World,
+    row: ServesCfg,
+    server: EntityId,
+    served: EntityId,
+    place: Option<EntityId>,
+    district: crate::components::DistrictId,
+    kind: ServeKind,
+    coins: i64,
+) {
     let kind_label = kind.label();
     let place_kind = place.and_then(|b| world.comp::<Building>(b)).map(|b| b.kind);
     // 1. The arm: the counters and the re-routed coins.

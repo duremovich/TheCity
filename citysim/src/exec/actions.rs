@@ -105,7 +105,8 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::Enjoy => 90,
         ActionKind::Gamble | ActionKind::EatOut | ActionKind::Preach => 30,
         ActionKind::HangOut => world.config.leisure.hangout_ticks,
-        ActionKind::Collect => 10,
+        // Lives at work phase 4b (§ 2.3): a pimp's collection is the hour at the pitch.
+        ActionKind::Collect => crate::systems::vice::collect_ticks(world, id).unwrap_or(10),
         // M16a (plan C10, C15).
         ActionKind::Network => 30,
         // The Hit market (H9).
@@ -287,10 +288,13 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
                 && hideout.is_some_and(|h| world.stock(h, crate::components::Good::Stims) > 0)
         }
         // M13 D38: inside the bound deal Bar with doses to sell.
+        // Lives at work phase 4b (§ 2.3): no target, the dealer's corner.
+        ActionKind::Deal if target.is_none() => crate::systems::stims::corner_deal_ok(world, id),
         ActionKind::Deal => {
             let here = world.comp::<Position>(id).and_then(|p| p.building);
             here.is_some() && here == target && !closed_here() && inv.is_some_and(|i| i.stims > 0)
         }
+        ActionKind::BuyStims if target.is_none() => crate::systems::stims::corner_buy_ok(world, id),
         // M13 D38/D40: inside the bound source while it sells, with the coins for a dose.
         ActionKind::BuyStims => {
             let here = world.comp::<Position>(id).and_then(|p| p.building);
@@ -471,11 +475,10 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
             }
         }
         // M13 D38: the dealer is registered at the Bar for the shift.
-        ActionKind::Deal => {
-            if let Some(bar) = target {
-                crate::systems::stims::start_deal(world, id, bar);
-            }
-        }
+        ActionKind::Deal => match target {
+            Some(bar) => crate::systems::stims::start_deal(world, id, bar),
+            None => crate::systems::stims::start_corner(world, id),
+        },
         k if k.is_leisure_step() => crate::systems::leisure::on_start(world, id, k, target),
         // M16a (plan C32): the guard is on post.
         ActionKind::Guard => crate::systems::contracts::on_guard_start(world, id, target),
@@ -1192,6 +1195,8 @@ pub fn on_complete(
             let here = world.comp::<Position>(id).and_then(|p| p.building);
             match here {
                 Some(b) if crate::systems::stims::buy_stims(world, id, b) > 0 => StepResult::Done,
+                // Lives at work phase 4b (§ 2.3): on the corner the plan named.
+                None if target.is_none() && crate::systems::stims::buy_at_corner(world, id) > 0 => StepResult::Done,
                 _ => StepResult::Failed(FailReason::StockGone),
             }
         }

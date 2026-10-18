@@ -153,10 +153,18 @@ pub fn stat_gang_day(world: &mut World, id: EntityId) {
     let caught_u: f64 = rng.random();
     let crime = match kind {
         ActKind::Deal => {
-            let Some(bar) = crate::systems::stims::deal_bar(world, gang) else { return };
             // The shift's doses sell through the Statistical buyers' pass
-            // (`stims::stat_addicts` reads `deal_log`).
-            world.deal_log.insert(bar, (id, today));
+            // (`stims::stat_addicts` reads `deal_log`; Lives at work phase
+            // 4b, a corner's in `corner_log`).
+            match crate::systems::stims::deal_site(world, gang) {
+                Some(crate::systems::stims::DealSite::Venue(bar)) => {
+                    world.deal_log.insert(bar, (id, today));
+                }
+                Some(crate::systems::stims::DealSite::Corner(t)) => {
+                    world.corner_log.insert(t, (id, today));
+                }
+                None => return,
+            }
             if let Some(b) = world.comp_mut::<Brain>(id) {
                 b.gang_task_day = Some(today);
             }

@@ -17,12 +17,14 @@
 
 use rand::Rng;
 
+use crate::components::{ActionInstance, GoalKind};
 use crate::components::{
-    Body, Brain, Building, BuildingKind, Crime, DeathCause, Gang, Good, Inventory, Lod, Market, Needs, Personality,
-    Position, Sentence, Wallet,
+    Body, Brain, Building, BuildingKind, Crime, DeathCause, DistrictId, Gang, Good, Inventory, Lod, Market, Needs,
+    Personality, Position, Sentence, TilePos, Wallet,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
+use crate::goap::{ActionKind, LocationKey, Plan};
 use crate::systems::assets;
 use crate::systems::ownership::{self, Flow, OwnerKind};
 use crate::time::{TICKS_PER_DAY, TICKS_PER_HOUR};
@@ -201,11 +203,7 @@ pub fn is_dealer(world: &World, member: EntityId) -> bool {
 /// D38: the Bar whose door is nearest the centroid of the gang's most-held
 /// district (ties the lower id; no Homes held: its Hideout's district).
 pub fn deal_bar(world: &World, gang: EntityId) -> Option<EntityId> {
-    let held = crate::systems::gang::held_districts(world, gang);
-    let d = match held.iter().max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0))) {
-        Some(&(d, _)) => d,
-        None => world.district_of_building(world.hideout_of(gang)?),
-    };
+    let d = deal_district(world, gang)?;
     // L2 L20: with leisure on, the gang's open front (or a Club there) first.
     if let Some(b) = crate::systems::leisure::deal_venue(world, gang, d) {
         return Some(b);
@@ -219,6 +217,59 @@ pub fn deal_bar(world: &World, gang: EntityId) -> Option<EntityId> {
         .filter_map(|b| world.comp::<Building>(b).map(|bd| (bd.door.manhattan(centroid), b)))
         .min()
         .map(|(_, b)| b)
+}
+
+/// D38: the gang's most-held district (ties the lower id; no Homes held:
+/// its Hideout's district).
+fn deal_district(world: &World, gang: EntityId) -> Option<DistrictId> {
+    let held = crate::systems::gang::held_districts(world, gang);
+    match held.iter().max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0))) {
+        Some(&(d, _)) => Some(d),
+        None => Some(world.district_of_building(world.hideout_of(gang)?)),
+    }
+}
+
+/// Lives at work phase 4b (§ 2.3): the dealer's corner is live: `[stims]
+/// deal_corner` under the street switch.
+pub fn corner_on(world: &World) -> bool {
+    on(world) && world.config.stims.deal_corner && crate::systems::service::street_on(world)
+}
+
+/// Lives at work phase 4b (§ 2.3): the gang's corner, the HangOut spot
+/// (`World::spots`, no Hideout door) of its deal district nearest the
+/// district's centroid (ties the lower tile). One a gang.
+pub fn deal_corner(world: &World, gang: EntityId) -> Option<TilePos> {
+    let d = deal_district(world, gang)?;
+    let centroid = world.district(d).centroid;
+    world
+        .spots
+        .get(d.index())?
+        .iter()
+        .filter(|s| !matches!(s.kind, crate::living::SpotKind::Hideout(_)))
+        .map(|s| (s.tile.manhattan(centroid), s.tile))
+        .min()
+        .map(|(_, t)| t)
+}
+
+/// Where a gang deals today: its venue (`leisure::deal_venue`) or, with
+/// none and the corner on, its corner; else the nearest Bar (`deal_bar`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DealSite {
+    Venue(EntityId),
+    Corner(TilePos),
+}
+
+/// The gang's `DealSite` (the corner replaces "the nearest Bar" fallback).
+pub fn deal_site(world: &World, gang: EntityId) -> Option<DealSite> {
+    if corner_on(world) {
+        let d = deal_district(world, gang)?;
+        if crate::systems::leisure::deal_venue(world, gang, d).is_none() {
+            if let Some(t) = deal_corner(world, gang) {
+                return Some(DealSite::Corner(t));
+            }
+        }
+    }
+    deal_bar(world, gang).map(DealSite::Venue)
 }
 
 /// D38, for `gang::gang_work_target`: the deal Bar when this member deals
@@ -235,6 +286,30 @@ pub fn dealer_target(world: &World, agent: EntityId) -> Option<EntityId> {
 
 /// `dealer_target` at any hour: the deal Bar when this member deals today.
 pub fn deals_today(world: &World, agent: EntityId) -> Option<EntityId> {
+    match site_today(world, agent)? {
+        DealSite::Venue(b) => Some(b),
+        DealSite::Corner(_) => None,
+    }
+}
+
+/// Lives at work phase 4b (§ 2.3): `deals_today`'s corner (any hour).
+pub fn corner_today(world: &World, agent: EntityId) -> Option<TilePos> {
+    match site_today(world, agent)? {
+        DealSite::Corner(t) => Some(t),
+        DealSite::Venue(_) => None,
+    }
+}
+
+/// `corner_today` in the deal hours (`gang::gang_work_target`'s corner).
+pub fn corner_target(world: &World, agent: EntityId) -> Option<TilePos> {
+    if !crate::systems::fixes::deal_hours(world) {
+        return None;
+    }
+    corner_today(world, agent)
+}
+
+/// Where `agent` deals today (any hour): `deals_today` and `corner_today` in one.
+pub fn site_today(world: &World, agent: EntityId) -> Option<DealSite> {
     if !on(world) || crate::systems::gang::following_order(world, agent).is_none() || !is_dealer(world, agent) {
         return None;
     }
@@ -244,7 +319,143 @@ pub fn deals_today(world: &World, agent: EntityId) -> Option<EntityId> {
     if stock < world.config.stims.deal_batch && !carrying {
         return None;
     }
-    deal_bar(world, gang)
+    deal_site(world, gang)
+}
+
+/// GangWork's scripted plan for a corner dealer's body (`plan::plan_for`):
+/// `[GoTo(Hideout) -> PickUp]` unless he holds doses, then `GoTo(Spot)`
+/// (the corner) and `Deal` (no target: the corner). `None` for any other.
+pub fn corner_plan(world: &mut World, id: EntityId) -> Option<Plan> {
+    let t = corner_target(world, id)?;
+    if world.comp::<Brain>(id).is_some_and(|b| b.gang_task_day == Some(world.day())) {
+        return None;
+    }
+    let step = |action, target| ActionInstance { action, target, tile: None };
+    let mut steps = Vec::with_capacity(4);
+    if world.comp::<Inventory>(id).is_none_or(|i| i.stims == 0) {
+        let hideout = world.gang_of(id).and_then(|g| world.hideout_of(g))?;
+        steps.push(step(ActionKind::GoTo(LocationKey::Seller), Some(hideout)));
+        steps.push(step(ActionKind::PickUp, None));
+    }
+    steps.push(step(ActionKind::GoTo(LocationKey::Spot), None));
+    steps.push(step(ActionKind::Deal, None));
+    world.unwind.insert(
+        id,
+        crate::living::UnwindPick {
+            rung: crate::living::Rung::Free,
+            act: ActionKind::Deal,
+            venue: None,
+            spot: Some(t),
+            score: 0.0,
+        },
+    );
+    Some(Plan { goal: GoalKind::GangWork, target: None, steps, started_tick: world.tick })
+}
+
+/// Within `pitch_reach` of `t`, out on the street.
+fn at_tile(world: &World, id: EntityId, t: TilePos) -> bool {
+    world
+        .comp::<Position>(id)
+        .is_some_and(|p| p.building.is_none() && p.tile.manhattan(t) <= world.config.jobs2.pitch_reach)
+}
+
+/// A corner `Deal` may start: his corner today, standing on it, doses held.
+pub fn corner_deal_ok(world: &World, id: EntityId) -> bool {
+    corner_today(world, id).is_some_and(|t| at_tile(world, id, t))
+        && world.comp::<Inventory>(id).is_some_and(|i| i.stims > 0)
+}
+
+/// A corner `Deal` starts: the dealer stands the corner (and is logged for
+/// the Statistical pass).
+pub fn start_corner(world: &mut World, dealer: EntityId) {
+    let Some(t) = corner_today(world, dealer) else { return };
+    let list = world.corner_dealers.entry(t).or_default();
+    if let Err(i) = list.binary_search(&dealer) {
+        list.insert(i, dealer);
+    }
+    let day = world.day();
+    world.corner_log.insert(t, (dealer, day));
+}
+
+/// The dealer standing corner `t` with doses for `buyer` (alive, on it):
+/// one the buyer knows first (an edge: a regular buys before a stranger),
+/// then the lowest id.
+pub fn corner_dealer(world: &World, t: TilePos, buyer: EntityId) -> Option<EntityId> {
+    let list = world.corner_dealers.get(&t)?;
+    let ok = |d: EntityId| {
+        d != buyer
+            && crate::systems::law::living(world, d)
+            && world.comp::<Inventory>(d).is_some_and(|i| i.stims > 0)
+            && at_tile(world, d, t)
+    };
+    let known = list.iter().copied().find(|&d| ok(d) && world.edge(buyer, d).is_some());
+    known.or_else(|| list.iter().copied().find(|&d| ok(d)))
+}
+
+/// Lives at work phase 4b (§ 2.3): the nearest corner with a dealer for
+/// `agent` (Manhattan from where he stands, ties the lower tile).
+pub fn corner_source(world: &World, agent: EntityId) -> Option<TilePos> {
+    if world.corner_dealers.is_empty() {
+        return None;
+    }
+    let from = world.comp::<Position>(agent)?.tile;
+    world
+        .corner_dealers
+        .keys()
+        .copied()
+        .filter(|&t| corner_dealer(world, t, agent).is_some())
+        .map(|t| (t.manhattan(from), t))
+        .min()
+        .map(|(_, t)| t)
+}
+
+/// GetHigh's scripted plan when the nearer source is a corner: `GoTo(Spot)`,
+/// `BuyStims` (no target: the corner), `UseStim`. `None` with a dose in
+/// hand, no corner, or a Bar or legal Market as near (the planner's).
+pub fn corner_buy_plan(world: &mut World, id: EntityId) -> Option<Plan> {
+    if world.comp::<Inventory>(id).is_some_and(|i| i.stims > 0) {
+        return None;
+    }
+    let t = corner_source(world, id)?;
+    let from = world.comp::<Position>(id)?.tile;
+    let bar = stim_source(world, id).and_then(|b| world.comp::<Building>(b)).map(|b| b.door.manhattan(from));
+    if bar.is_some_and(|d| d <= t.manhattan(from)) {
+        return None;
+    }
+    world.unwind.insert(
+        id,
+        crate::living::UnwindPick {
+            rung: crate::living::Rung::Free,
+            act: ActionKind::BuyStims,
+            venue: None,
+            spot: Some(t),
+            score: 0.0,
+        },
+    );
+    let step = |action| ActionInstance { action, target: None, tile: None };
+    let steps = vec![step(ActionKind::GoTo(LocationKey::Spot)), step(ActionKind::BuyStims), step(ActionKind::UseStim)];
+    Some(Plan { goal: GoalKind::GetHigh, target: None, steps, started_tick: world.tick })
+}
+
+/// The corner a buyer's running `BuyStims` was planned for.
+fn buy_corner(world: &World, id: EntityId) -> Option<TilePos> {
+    world.unwind.get(&id).filter(|p| p.act == ActionKind::BuyStims).and_then(|p| p.spot)
+}
+
+/// A corner `BuyStims` may start: on the planned corner, a dealer there
+/// with doses, the coins for one.
+pub fn corner_buy_ok(world: &World, id: EntityId) -> bool {
+    let Some(t) = buy_corner(world, id) else { return false };
+    let Some(d) = corner_dealer(world, t, id).filter(|_| at_tile(world, id, t)) else { return false };
+    let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins);
+    world.gang_of(d).is_some_and(|g| coins >= dose_price(world, g))
+}
+
+/// A corner `BuyStims` ends: the sale (`sell`). Returns the doses bought.
+pub fn buy_at_corner(world: &mut World, buyer: EntityId) -> u32 {
+    let Some(t) = buy_corner(world, buyer) else { return 0 };
+    let Some(dealer) = corner_dealer(world, t, buyer) else { return 0 };
+    sell(world, buyer, dealer, None, t)
 }
 
 /// `PickUp` at the Hideout: `deal_batch` doses into the inventory, as many
@@ -276,6 +487,12 @@ pub fn start_deal(world: &mut World, dealer: EntityId, bar: EntityId) {
 
 /// `Deal` ends (completion, abort, death, arrest): unregistered everywhere.
 pub fn end_deal(world: &mut World, dealer: EntityId) {
+    if !world.corner_dealers.is_empty() {
+        for list in world.corner_dealers.values_mut() {
+            list.retain(|&d| d != dealer);
+        }
+        world.corner_dealers.retain(|_, l| !l.is_empty());
+    }
     if world.dealers.is_empty() {
         return;
     }
@@ -374,6 +591,19 @@ pub fn wants_high(world: &World, agent: EntityId) -> bool {
     }
     let coins = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);
     stim_source(world, agent).and_then(|b| source_price(world, b)).is_some_and(|p| coins >= p)
+        // Lives at work phase 4b (§ 2.3): a corner's dealer.
+        || corner_source(world, agent)
+            .and_then(|t| corner_dealer(world, t, agent))
+            .and_then(|d| world.gang_of(d))
+            .is_some_and(|g| coins >= dose_price(world, g))
+}
+
+/// GetHigh's walk (`utility::goals`): to the nearest Bar or Market source,
+/// else to the nearest corner. `None` with neither.
+pub fn source_tiles(world: &World, agent: EntityId) -> Option<u32> {
+    stim_source(world, agent)
+        .and_then(|b| crate::systems::life::tiles_to(world, agent, b))
+        .or_else(|| corner_source(world, agent).and_then(|t| crate::systems::life::tiles_to_tile(world, agent, t)))
 }
 
 /// `BuyStims` at `source` (D38/D40): `min(2, afford, capacity room, stock)`
@@ -385,31 +615,11 @@ pub fn buy_stims(world: &mut World, buyer: EntityId, source: EntityId) -> u32 {
     let coins = world.comp::<Wallet>(buyer).map_or(0, |w| w.coins).max(0);
     let room =
         world.comp::<Inventory>(buyer).map_or(0, |i| assets::capacity(world, buyer).saturating_sub(assets::load(i)));
-    if let Some(dealer) = bar_dealer(world, source).filter(|&d| d != buyer) {
-        let Some(gang) = world.gang_of(dealer) else { return 0 };
-        let price = dose_price(world, gang);
-        let have = world.comp::<Inventory>(dealer).map_or(0, |i| u32::from(i.stims));
-        let afford = u32::try_from(coins / price).unwrap_or(u32::MAX);
-        let units = 2u32.min(afford).min(room).min(have);
-        if units == 0 {
-            return 0;
-        }
-        if let Some(i) = world.comp_mut::<Inventory>(dealer) {
-            i.stims -= units as u16;
-        }
-        if let Some(i) = world.comp_mut::<Inventory>(buyer) {
-            i.stims = i.stims.saturating_add(units as u16);
-        }
-        let n = i64::from(units);
-        ownership::pay(world, Some(buyer), Some(gang), n * price, Flow::Stims);
-        ownership::pay(world, Some(gang), Some(dealer), n * world.config.stims.dealer_cut, Flow::Stims);
-        world.stats.current.stims_dealt += units;
+    // Lives at work phase 4b (§ 2.3): a regular buys from the dealer he knows.
+    let known = if crate::systems::service::street_on(world) { bar_dealer_known(world, source, buyer) } else { None };
+    if let Some(dealer) = known.or_else(|| bar_dealer(world, source)).filter(|&d| d != buyer) {
         let tile = world.comp::<Position>(dealer).map_or_else(Default::default, |p| p.tile);
-        // L2 shadow fixes item 16: the buyer is no witness (each sale made
-        // the customer, often a Friend, a Dealing witness: 1.00 to 0.80).
-        let except = Some(buyer);
-        crate::systems::law::raise_crime_except(world, dealer, None, None, Crime::Dealing, tile, except);
-        return units;
+        return sell(world, buyer, dealer, Some(source), tile);
     }
     if !legal_market(world, source) {
         return 0;
@@ -431,6 +641,90 @@ pub fn buy_stims(world: &mut World, buyer: EntityId, source: EntityId) -> u32 {
         m.stim_sales_today += units;
     }
     units
+}
+
+/// A dealer at `bar` (as `bar_dealer`) the buyer has an edge with.
+fn bar_dealer_known(world: &World, bar: EntityId, buyer: EntityId) -> Option<EntityId> {
+    world.dealers.get(&bar)?.iter().copied().find(|&d| {
+        d != buyer
+            && world.edge(buyer, d).is_some()
+            && crate::systems::law::living(world, d)
+            && world.comp::<Inventory>(d).is_some_and(|i| i.stims > 0)
+            && world.comp::<Position>(d).is_some_and(|p| p.building == Some(bar))
+    })
+}
+
+/// A dealer's sale to a Full buyer at a Bar (`place`) or on a corner (none):
+/// `min(2, afford, capacity room, his doses)` at `dose_price` each to the
+/// gang (`Flow::Stims`), the dealer's cut back to him, one `Dealing` raised
+/// against him with the buyer no witness. Lives at work phase 4b (§ 2.3):
+/// the `Buyer` encounter (`"dealer"`'s row; a regular, `dealer_regulars`)
+/// and the lookout's `witness_lookout_mult` on the witness roll.
+fn sell(world: &mut World, buyer: EntityId, dealer: EntityId, place: Option<EntityId>, tile: TilePos) -> u32 {
+    let coins = world.comp::<Wallet>(buyer).map_or(0, |w| w.coins).max(0);
+    let room =
+        world.comp::<Inventory>(buyer).map_or(0, |i| assets::capacity(world, buyer).saturating_sub(assets::load(i)));
+    let Some(gang) = world.gang_of(dealer) else { return 0 };
+    let price = dose_price(world, gang);
+    let have = world.comp::<Inventory>(dealer).map_or(0, |i| u32::from(i.stims));
+    let afford = u32::try_from(coins / price).unwrap_or(u32::MAX);
+    let units = 2u32.min(afford).min(room).min(have);
+    if units == 0 {
+        return 0;
+    }
+    if let Some(i) = world.comp_mut::<Inventory>(dealer) {
+        i.stims -= units as u16;
+    }
+    if let Some(i) = world.comp_mut::<Inventory>(buyer) {
+        i.stims = i.stims.saturating_add(units as u16);
+    }
+    let n = i64::from(units);
+    let paid = ownership::pay(world, Some(buyer), Some(gang), n * price, Flow::Stims);
+    ownership::pay(world, Some(gang), Some(dealer), n * world.config.stims.dealer_cut, Flow::Stims);
+    world.stats.current.stims_dealt += units;
+    let mut mult = 1.0;
+    if crate::systems::service::street_on(world) {
+        if place.is_none() {
+            ownership::jobs2_row(world).corner_deals += units;
+        }
+        if lookout_present(world, dealer, place, tile) {
+            mult = world.config.service.witness_lookout_mult;
+            ownership::jobs2_row(world).lookout_halved += 1;
+        }
+        buyer_met(world, dealer, buyer, place, tile, paid);
+    }
+    // L2 shadow fixes item 16: the buyer is no witness (each sale made
+    // the customer, often a Friend, a Dealing witness: 1.00 to 0.80).
+    let except = Some(buyer);
+    crate::systems::law::raise_crime_mult(world, dealer, None, None, Crime::Dealing, tile, except, mult);
+    units
+}
+
+/// The sale's `Buyer` encounter (both tiers): a buyer the dealer already
+/// knows is a regular's buy (`dealer_regulars`).
+fn buyer_met(world: &mut World, dealer: EntityId, buyer: EntityId, place: Option<EntityId>, tile: TilePos, coins: i64) {
+    if world.edge(dealer, buyer).is_some() {
+        ownership::jobs2_row(world).dealer_regulars += 1;
+    }
+    let d = place.map_or_else(|| world.district_of(tile), |b| world.district_of_building(b));
+    let kind = crate::components::ServeKind::Buyer;
+    crate::systems::service::encounter_post(world, "dealer", dealer, buyer, place, d, kind, coins);
+}
+
+/// Lives at work phase 4b (§ 2.3): a lookout, another member of the
+/// dealer's gang in the Bar with him or out within `pitch_reach` of his
+/// corner (a body: a Statistical member has no tile).
+pub fn lookout_present(world: &World, dealer: EntityId, place: Option<EntityId>, tile: TilePos) -> bool {
+    let Some(g) = world.gang_of(dealer).and_then(|g| world.comp::<Gang>(g)) else { return false };
+    g.members.iter().copied().any(|m| {
+        m != dealer
+            && crate::systems::law::living(world, m)
+            && world.comp::<Brain>(m).is_some_and(|b| b.lod != Lod::Statistical)
+            && match place {
+                Some(b) => world.comp::<Position>(m).is_some_and(|p| p.building == Some(b)),
+                None => at_tile(world, m, tile),
+            }
+    })
 }
 
 /// D38: an arrest confiscates the suspect's doses (destroyed); legal
@@ -551,25 +845,9 @@ fn stat_addicts(world: &mut World) {
     if due.is_empty() {
         return;
     }
-    // Yesterday's (and today's) dealers: `(bar door, bar, dealer, gang)`.
-    let dealers: Vec<(crate::components::TilePos, EntityId, EntityId, EntityId)> = world
-        .deal_log
-        .iter()
-        .filter(|(_, &(_, day))| day + 1 >= today)
-        .filter_map(|(&bar, &(dealer, _))| {
-            let gang = world.gang_of(dealer)?;
-            let door = world.comp::<Building>(bar)?.door;
-            Some((door, bar, dealer, gang))
-        })
-        .collect();
+    let dealers = stat_dealers(world, today);
     for id in due {
-        let from = world
-            .comp::<crate::components::Household>(id)
-            .and_then(|h| h.home)
-            .and_then(|h| world.comp::<Building>(h))
-            .map(|b| b.door)
-            .or_else(|| world.comp::<Position>(id).map(|p| p.tile));
-        let Some(from) = from else { continue };
+        let Some(from) = stat_from(world, id) else { continue };
         for _ in 0..cfg.uses_per_day {
             if !stat_buy(world, id, from, &dealers) {
                 break;
@@ -596,22 +874,70 @@ fn stat_addicts(world: &mut World) {
     }
 }
 
+/// `stat_addicts`' dealers: `(the Bar's door or the corner, the Bar, the
+/// dealer, his gang)`.
+type StatDealer = (TilePos, Option<EntityId>, EntityId, EntityId);
+
+/// Yesterday's (and today's) dealers: `(bar door, bar, dealer, gang)`;
+/// Lives at work phase 4b, the corners' (`(corner, none, dealer, gang)`).
+fn stat_dealers(world: &World, today: u64) -> Vec<StatDealer> {
+    let mut dealers: Vec<StatDealer> = world
+        .deal_log
+        .iter()
+        .filter(|(_, &(_, day))| day + 1 >= today)
+        .filter_map(|(&bar, &(dealer, _))| {
+            let gang = world.gang_of(dealer)?;
+            let door = world.comp::<Building>(bar)?.door;
+            Some((door, Some(bar), dealer, gang))
+        })
+        .collect();
+    if corner_on(world) {
+        dealers.extend(
+            world
+                .corner_log
+                .iter()
+                .filter(|(_, &(_, day))| day + 1 >= today)
+                .filter_map(|(&t, &(dealer, _))| Some((t, None, dealer, world.gang_of(dealer)?))),
+        );
+    }
+    dealers
+}
+
+/// A Statistical buyer's origin: his Home's door, else where he is.
+fn stat_from(world: &World, id: EntityId) -> Option<TilePos> {
+    world
+        .comp::<crate::components::Household>(id)
+        .and_then(|h| h.home)
+        .and_then(|h| world.comp::<Building>(h))
+        .map(|b| b.door)
+        .or_else(|| world.comp::<Position>(id).map(|p| p.tile))
+}
+
+/// One off-screen dose bought by `id` as `stat_addicts` buys it (the
+/// tests' entry to `stat_buy`; not used).
+pub fn stat_buy_one(world: &mut World, id: EntityId) -> bool {
+    let dealers = stat_dealers(world, world.day());
+    let Some(from) = stat_from(world, id) else { return false };
+    stat_buy(world, id, from, &dealers)
+}
+
 /// One off-screen dose bought: from the dealer Bar nearest `from` whose
 /// gang's Hideout holds stock, else a legal Market. False when none is
-/// within means.
-fn stat_buy(
-    world: &mut World,
-    id: EntityId,
-    from: crate::components::TilePos,
-    dealers: &[(crate::components::TilePos, EntityId, EntityId, EntityId)],
-) -> bool {
+/// within means. Lives at work phase 4b (§ 2.3): a corner's dealer too, and
+/// a dealer the buyer knows (an edge) before the nearest; the `Buyer`
+/// encounter.
+fn stat_buy(world: &mut World, id: EntityId, from: TilePos, dealers: &[StatDealer]) -> bool {
     let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins).max(0);
+    let street = crate::systems::service::street_on(world);
     let pick = dealers
         .iter()
         .filter(|&&(_, _, _, g)| world.hideout_of(g).is_some_and(|h| world.stock(h, Good::Stims) > 0))
-        .map(|&(door, bar, dealer, gang)| (door.manhattan(from), bar, dealer, gang))
+        .map(|&(door, bar, dealer, gang)| {
+            let stranger = street && world.edge(id, dealer).is_none();
+            (stranger, door.manhattan(from), bar, dealer, gang, door)
+        })
         .min();
-    if let Some((_, _, dealer, gang)) = pick {
+    if let Some((_, _, bar, dealer, gang, door)) = pick {
         let price = dose_price(world, gang);
         if coins < price {
             return false;
@@ -623,6 +949,12 @@ fn stat_buy(
             ownership::pay(world, Some(gang), Some(dealer), world.config.stims.dealer_cut, Flow::Stims);
         }
         world.stats.current.stims_dealt += 1;
+        if street {
+            if bar.is_none() {
+                ownership::jobs2_row(world).corner_deals += 1;
+            }
+            buyer_met(world, dealer, id, bar, door, price);
+        }
         return true;
     }
     if !world.levers.stims_legal {

@@ -169,7 +169,9 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
         GoalKind::Court => has_spouse,
         GoalKind::GangWork => {
             !world.has::<crate::components::GangMember>(id)
-                || world.comp::<Brain>(id).is_some_and(|b| b.gang_task_day == Some(world.day()))
+                || (world.comp::<Brain>(id).is_some_and(|b| b.gang_task_day == Some(world.day()))
+                    // Lives at work phase 4b (§ 2.3): a pimp's round runs every pitch hour.
+                    && crate::systems::vice::pimp_target(world, id).is_none())
         }
         // A guard never scores JoinGang (`considerations` says None): skip the scan.
         GoalKind::JoinGang => {
@@ -704,6 +706,16 @@ pub fn considerations(
             world.comp::<crate::components::GangMember>(id)?;
             let n = needs?;
             let p = pers?;
+            // Lives at work phase 4b (§ 2.3): a pimp's round in pitch hours
+            // is his shift (scored as the exec's office hours).
+            if crate::systems::vice::pimp_target(world, id).is_some() {
+                let cs = vec![
+                    Consideration::new("pitch hours", 1.0, GATE),
+                    Consideration::new("energy", n.energy, Curve::Linear { m: 0.6, b: 0.4 }),
+                    Consideration::new("loyalty", p.loyalty, Curve::Linear { m: 0.3, b: 0.7 }),
+                ];
+                return Some((cs, 0.0));
+            }
             let in_shift = world.comp::<Job>(id).is_some_and(|j| j.on_shift(tod));
             // The order tilts the day: a loyal member following orders scores
             // 1.0 here, a freelancer 1 - order_weight. Hunger and fear still win.
@@ -897,13 +909,7 @@ pub fn considerations(
             }
             // L1: a dose in hand is free; a dealer across town is a walk.
             let held = world.comp::<Inventory>(id).is_some_and(|i| i.stims > 0);
-            let tiles = if held {
-                0
-            } else {
-                crate::systems::stims::stim_source(world, id)
-                    .and_then(|b| crate::systems::life::tiles_to(world, id, b))
-                    .unwrap_or(0)
-            };
+            let tiles = if held { 0 } else { crate::systems::stims::source_tiles(world, id).unwrap_or(0) };
             let t = crate::systems::life::travel(world, tiles);
             // The walk weighs on the flat too: it alone beat Idle, so
             // every idle hour with coins went to a dealer across town.

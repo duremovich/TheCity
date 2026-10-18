@@ -166,6 +166,9 @@ fn test_full_vs_statistical_within_15pct() {
         // Lives at work phase 4a (§ 6): cab and rickshaw rides (paid or
         // dodged) and the commutes (the cab rides per commuter-day by tier).
         cab: [f64; 2],
+        // Lives at work phase 4b (§ 6): doses dealt (a Full buyer's at a Bar
+        // or a corner, a Statistical addict's `stat_buy`) and the adult-days.
+        stims: [f64; 2],
     }
     // The paid-leisure mirror (Jobs & lives phase 7b): the venue kinds of
     // the calibration city's ladder.
@@ -330,6 +333,7 @@ fn test_full_vs_statistical_within_15pct() {
                 };
                 [j(|c| c.cab_trips + c.rickshaw_trips + c.fares_short), t(|c| c.commutes) + t(|c| c.stat_commutes)]
             },
+            stims: [w.stats.history.iter().map(|r| f64::from(r.stims_dealt)).sum::<f64>(), adult_days as f64],
         }
     }
     // Six cities per tier, pooled: one 30-day city's theft rate varies by a
@@ -349,7 +353,8 @@ fn test_full_vs_statistical_within_15pct() {
         let encounters = std::array::from_fn(|j| runs.iter().map(|r| r.encounters[j]).sum::<f64>());
         let door = std::array::from_fn(|j| runs.iter().map(|r| r.door[j]).sum::<f64>());
         let cab = std::array::from_fn(|j| runs.iter().map(|r| r.cab[j]).sum::<f64>());
-        Run { rates, actors: counts.map(|c| c / total), venues, paid, encounters, door, cab }
+        let stims = std::array::from_fn(|j| runs.iter().map(|r| r.stims[j]).sum::<f64>());
+        Run { rates, actors: counts.map(|c| c / total), venues, paid, encounters, door, cab, stims }
     };
     let full = pooled(Lod::Full);
     let stat = pooled(Lod::Statistical);
@@ -460,6 +465,16 @@ fn test_full_vs_statistical_within_15pct() {
             per(&stat),
             full.cab[0],
             stat.cab[0]
+        );
+        // Lives at work phase 4b (§ 6): stims dealt per 100 adult-days by
+        // tier (the corner's buy is world-side for the Statistical; printed).
+        let per = |r: &Run| if r.stims[1] > 0.0 { 100.0 * r.stims[0] / r.stims[1] } else { 0.0 };
+        eprintln!(
+            "FINDING stims dealt/100 adult-days  Full {:7.3}  Statistical {:7.3}  ({:.0} / {:.0} doses)",
+            per(&full),
+            per(&stat),
+            full.stims[0],
+            stat.stims[0]
         );
     }
     assert!(failures.is_empty(), "{failures:?}");

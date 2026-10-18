@@ -2533,6 +2533,9 @@ fn probe_parent_with_the_fee_buys_the_child_out_within_fourteen_days() {
     for _ in 0..14 {
         let eve = (c.tick / TICKS_PER_DAY + 1) * TICKS_PER_DAY - 1;
         run_to(&mut c, q, eve, |_| {});
+        // The premise kept: the mother stays jobless (on the phase 4b city
+        // she was hired a Sweeper, her days the beat, and never reached the Camp).
+        c.remove::<Job>(q);
         let w = c.comp_mut::<Wallet>(q).expect("wallet");
         w.coins = w.coins.min(10);
         c.comp_mut::<Building>(h2).expect("home").stock_food = 0;
@@ -2658,4 +2661,122 @@ fn probe_cabbie_drives_a_fare_on_his_shift() {
     let (booked0, _) = fares(0.0);
     assert!(driven >= 1, "the cabbie drove no fare in his shift");
     assert_eq!(booked0, 0, "no ride at p_cab 0");
+}
+
+/// Lives at work phase 4b (docs/LIVES_AT_WORK.md § 2.3, § 9.1): a pinned
+/// pimp walks his district's street pitch in its hours (a `Collect` at it,
+/// the worker in his ledger) and his purse grows when the night closes: the
+/// street cut lands in it and he passes `pimp_pass_up` of it to his gang.
+/// Street pitches and held Homes are rare at 2k (seed 42's first pimp is
+/// named on day 70), so on day 12 his gang is given a Home of the district
+/// he stands in and the pitch is opened in-test at the door nearest him,
+/// with `p_street_visit` and `street_intimacy` raised so the night takes something.
+#[test]
+fn probe_pimp_purse_grows_on_a_pitch_night() {
+    use citysim::systems::gang;
+    let mut cfg = Config::load();
+    cfg.vice.p_street_visit = 1.0;
+    cfg.vice.street_intimacy = 1.0;
+    let mut w = World::new(42, cfg);
+    let start = 12 * TICKS_PER_DAY + 17 * TICKS_PER_HOUR;
+    w.run_ticks(start);
+    // The gang with the most loyal members; its pimp, `name_pimps`' first pick.
+    let follows = |w: &World, g: EntityId| {
+        w.comp::<citysim::Gang>(g)
+            .map_or(0, |x| x.members.iter().filter(|&&m| gang::following_order(w, m).is_some()).count())
+    };
+    let g = w.gangs().into_iter().max_by_key(|&g| (follows(&w, g), g)).expect("a gang");
+    let pimp = w
+        .comp::<citysim::Gang>(g)
+        .and_then(|x| {
+            x.members.iter().copied().find(|&m| {
+                law::living(&w, m)
+                    && !w.has::<citysim::Sentence>(m)
+                    && gang::following_order(&w, m).is_some()
+                    && !citysim::systems::stims::is_dealer(&w, m)
+                    && !w.has::<Job>(m)
+            })
+        })
+        .expect("a loyal non-dealer with no day job");
+    // His district: the gang holds a Home there (seed 42's hold none on day 12).
+    let at = w.comp::<Position>(pimp).expect("pos").tile;
+    let d = w.district_of(at);
+    let doors: Vec<(u32, EntityId, citysim::components::TilePos)> = w
+        .districts
+        .get(d.index())
+        .map(|x| {
+            x.buildings
+                .iter()
+                .filter_map(|&b| w.comp::<Building>(b).map(|bd| (bd.door.manhattan(at), b, bd.door)))
+                .collect()
+        })
+        .unwrap_or_default();
+    let home = doors
+        .iter()
+        .find(|&&(_, b, _)| w.comp::<Building>(b).is_some_and(|bd| bd.kind == citysim::BuildingKind::Home))
+        .map(|&(_, b, _)| b)
+        .expect("a Home in his district");
+    {
+        let t = &mut w.comp_mut::<citysim::Gang>(g).expect("gang").territory;
+        if let Err(i) = t.binary_search(&home) {
+            t.insert(i, home);
+        }
+    }
+    let o = w
+        .citizens()
+        .into_iter()
+        .find(|&a| {
+            demography::is_adult(&w, a)
+                && w.gang_of(a).is_none()
+                && !w.has::<Job>(a)
+                && !w.has::<citysim::Sentence>(a)
+                && law::living(&w, a)
+        })
+        .expect("a street worker");
+    let spot = doors.iter().min().map(|&(_, _, t)| t).expect("a door in the district");
+    let trade = w.config.trade_role("street_worker").and_then(|r| r.trade()).expect("the street row");
+    let p = citysim::components::Pitch {
+        spot,
+        district: d,
+        trade,
+        owner: o,
+        since: w.tick,
+        take_today: 0,
+        take_week: 0,
+        cut_to: None,
+        stock: 0,
+        closed_until: None,
+        dry_days: 0,
+        jobs_today: 0,
+    };
+    w.jobs2.pitches.insert(o, p);
+    w.jobs2.vice.pimps.insert(d.index() as u16, pimp);
+    pin(&mut w, pimp);
+    let (cut, up) = (w.config.vice.pimp_cut, w.config.service.pimp_pass_up);
+    let mut collecting = 0u32;
+    let mut kept_nights = 0u32;
+    // Two nights (a Statistical worker works the hours his `p_pitch` names).
+    for midnight in [13 * TICKS_PER_DAY, 14 * TICKS_PER_DAY] {
+        run_to(&mut w, pimp, midnight - 1, |w| {
+            if step(w, pimp) == Some(ActionKind::Collect) {
+                collecting += 1;
+            }
+        });
+        let take = w.jobs2.pitches.get(&o).map_or(0, |p| p.take_today);
+        let before = coins(&w, pimp);
+        run_to(&mut w, pimp, midnight + 1, |_| {});
+        let after = coins(&w, pimp);
+        // His cut less what he passes up (a gang pay-out at midnight only adds).
+        let paid = (take as f32 * cut).round() as i64;
+        let kept = paid - (paid as f32 * up).round() as i64;
+        eprintln!("pimp {}: the night took {take}, his cut {paid} keeps {kept}; purse {before} -> {after}", pimp.index);
+        if take > 0 {
+            assert!(after - before >= kept, "the night's cut never reached his purse");
+            kept_nights += u32::from(kept > 0);
+        }
+    }
+    let met = citysim::systems::service::regulars_of(&w, pimp).iter().any(|r| r.who == o);
+    eprintln!("pimp {}: {collecting} ticks collecting, met the worker {met}", pimp.index);
+    assert!(collecting > 0 && met, "the pimp never walked his pitch");
+    assert!(kept_nights > 0, "no night kept a cut (the probe's premise)");
 }

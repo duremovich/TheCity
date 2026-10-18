@@ -1322,6 +1322,10 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         }
         ActionKind::Preach => world.comp::<Position>(id).is_some_and(|p| p.building.is_none()),
         ActionKind::Collect => {
+            // Lives at work phase 4b (§ 2.3): a pimp's collection at a pitch.
+            if let Some(ok) = crate::systems::vice::collect_can_start(world, id, target) {
+                return ok;
+            }
             let Some(gang) = world.gang_of(id) else { return false };
             world.comp::<Gang>(gang).is_some_and(|g| g.leader == Some(id)) && inside.is_some() && inside == target
         }
@@ -1510,7 +1514,10 @@ pub fn on_complete(world: &mut World, id: EntityId, kind: ActionKind, target: Op
             preach_done(world, id);
             leave_spot(world, id);
         }
-        ActionKind::Collect => collect_step(world, id, target),
+        // Lives at work phase 4b (§ 2.3): a pimp's collection, else the leader's.
+        ActionKind::Collect if !crate::systems::vice::pimp_collect(world, id, target) => {
+            collect_step(world, id, target)
+        }
         _ => {}
     }
 }
@@ -2602,15 +2609,17 @@ pub fn daily(world: &mut World) {
         world.with::<Wallet>().iter().filter_map(|&a| world.comp::<Wallet>(a)).map(|w| w.coins).collect();
     purses.sort_unstable();
     world.wealth_p90 = purses.get(purses.len() * 9 / 10).copied().unwrap_or(0).max(1);
+    let corner = crate::systems::stims::corner_on(world);
     let keep: Vec<EntityId> = world
         .unwind
         .keys()
         .copied()
         .filter(|&id| {
-            world
-                .comp::<Brain>(id)
-                .and_then(|b| b.plan_goal())
-                .is_some_and(|g| matches!(g, GoalKind::Unwind | GoalKind::Socialise | GoalKind::GangWork))
+            world.comp::<Brain>(id).and_then(|b| b.plan_goal()).is_some_and(|g| {
+                matches!(g, GoalKind::Unwind | GoalKind::Socialise | GoalKind::GangWork)
+                        // Lives at work phase 4b: a corner buyer's pick.
+                        || (g == GoalKind::GetHigh && corner)
+            })
         })
         .collect();
     world.unwind.retain(|id, _| keep.contains(id));

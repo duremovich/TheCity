@@ -298,15 +298,21 @@ fn close_the_day(world: &mut World) {
         // gang `pimp_cut` instead.
         let pimp = crate::systems::vice::street_cut(world, &p);
         let (gang, frac) = match pimp {
-            Some((g, f)) => (Some(g), f),
+            Some(c) => (Some(c.gang), c.frac),
             None => (gang, cfg.cut_frac),
         };
         if let Some(g) = gang.filter(|_| p.take_today > 0) {
             let cut = (p.take_today as f32 * frac).round() as i64;
-            let paid = ownership::pay(world, Some(o), Some(g), cut, Flow::StreetCut);
+            // Lives at work phase 4b (§ 2.3): the cut lands in the pimp's
+            // purse; he passes `pimp_pass_up` of it to the gang.
+            let to = pimp.and_then(|c| c.pimp).unwrap_or(g);
+            let paid = ownership::pay(world, Some(o), Some(to), cut, Flow::StreetCut);
             ownership::jobs2_row(world).street_cut += paid;
             if pimp.is_some() {
                 ownership::jobs2_row(world).pimp_cut += paid;
+            }
+            if to != g {
+                crate::systems::vice::pass_up(world, to, g, paid);
             }
             cut_to = Some(g);
         }
@@ -567,6 +573,10 @@ pub fn stat_vendor_meal(world: &mut World, id: EntityId, market: EntityId) -> bo
     let row = ownership::jobs2_row(world);
     row.vendor_meals += 1;
     row.vendor_take += paid;
+    // Lives at work phase 4b (§ 2.3): the vendor's regulars (the stall is a tile).
+    if crate::systems::service::street_on(world) {
+        crate::systems::service::encounter(world, v, id, None, d, crate::components::ServeKind::Buyer, paid);
+    }
     true
 }
 
@@ -1314,6 +1324,13 @@ pub fn tinker_repair(world: &mut World, asset: EntityId, owner: EntityId, from: 
     let row = ownership::jobs2_row(world);
     row.tinker_repairs += 1;
     row.tinker_take += paid;
+    // Lives at work phase 4b (§ 2.3): the tinker's regulars (the pitch is a tile).
+    if crate::systems::service::street_on(world) && world.has::<crate::components::Brain>(owner) {
+        if let Some(d) = world.jobs2.pitches.get(&tinker).map(|p| p.district) {
+            let kind = crate::components::ServeKind::Buyer;
+            crate::systems::service::encounter(world, tinker, owner, None, d, kind, paid);
+        }
+    }
     let botched = hash(world, PURPOSE_TINKER, u64::from(asset.index), world.day()) < cfg.tinker_fail_p;
     if botched {
         ownership::jobs2_row(world).tinker_botched += 1;

@@ -246,3 +246,131 @@ fn test_legal_stims_sold_at_market() {
     assert_eq!(w.crime_reports().len(), report_count);
     assert_eq!(w.stats.current.stims_dealt, 0, "not a dealer's sale");
 }
+
+/// Lives at work phase 4b (docs/LIVES_AT_WORK.md § 2.3, the dealer): the
+/// corner's sale, the regulars, `stat_buy`'s known dealer, the lookout.
+mod lives_dealer {
+    use super::*;
+    use citysim::systems::{lod, service, social};
+    use citysim::{Lod, ServeKind};
+
+    fn jobs2(w: &World) -> citysim::stats::Jobs2Cols {
+        w.stats.current.jobs2.clone().unwrap_or_default()
+    }
+
+    /// `a` out on the street at `t`, a body.
+    fn stand(w: &mut World, a: EntityId, t: citysim::components::TilePos) {
+        lod::set_lod(w, a, Lod::Full);
+        w.leave_building(a);
+        w.comp_mut::<Position>(a).expect("pos").tile = t;
+    }
+
+    /// § 2.3: a dealer on his corner sells to a body there (`corner_buy_plan`
+    /// walks him to it); the third buy makes the buyer a regular (an edge,
+    /// the ledger's visits), and a fourth is a regular's buy
+    /// (`dealer_regulars`). Off-screen, `stat_buy` takes the dealer the
+    /// buyer knows before a nearer stranger, and the encounter names him.
+    #[test]
+    fn test_dealers_third_buyer_is_a_regular_and_stat_buy_picks_the_known_dealer() {
+        let mut w = city();
+        assert!(stims::corner_on(&w), "the shipped config has the corner on");
+        let people = free(&w);
+        let dealer = people[0];
+        let buyer = people[1..].iter().copied().find(|&b| w.edge(dealer, b).is_none()).expect("a stranger");
+        gang_of(&mut w, &[dealer]);
+        let t = w.comp::<Building>(a_bar(&w)).expect("bar").door;
+        stand(&mut w, dealer, t);
+        stand(&mut w, buyer, t);
+        set_stims(&mut w, dealer, 20);
+        w.corner_dealers.insert(t, vec![dealer]);
+        for k in 1..=4u32 {
+            set_stims(&mut w, buyer, 0);
+            set_coins(&mut w, buyer, 100);
+            let plan = stims::corner_buy_plan(&mut w, buyer).expect("the corner is the source");
+            assert_eq!(plan.steps.len(), 3);
+            assert!(stims::corner_buy_ok(&w, buyer), "on the corner with the coins");
+            assert_eq!(stims::buy_at_corner(&mut w, buyer), 2, "two doses, buy {k}");
+            let known = w.edge(dealer, buyer).is_some();
+            assert_eq!(known, k >= 3, "a regular after the third buy (buy {k})");
+        }
+        let j = jobs2(&w);
+        assert_eq!(j.corner_deals, 8, "four corner sales of two");
+        assert_eq!(j.dealer_regulars, 1, "the fourth was a regular's");
+        assert_eq!(j.served[ServeKind::Buyer as usize], 4);
+        let visits = service::regulars_of(&w, dealer).iter().find(|r| r.who == buyer).map(|r| r.visits);
+        assert_eq!(visits, Some(4));
+
+        // Off-screen: the known dealer (the far Bar) before the stranger (the near one).
+        let s = people[1..]
+            .iter()
+            .copied()
+            .find(|&a| a != buyer && w.comp::<citysim::Household>(a).and_then(|h| h.home).is_some())
+            .expect("a housed buyer");
+        let n = people.len();
+        let (d1, d2) = (people[n - 1], people[n - 2]);
+        let g = w.gang_of(dealer).expect("gang");
+        gang::enlist(&mut w, d1, g);
+        gang::enlist(&mut w, d2, g);
+        let home = w.comp::<citysim::Household>(s).and_then(|h| h.home).expect("home");
+        let from = w.comp::<Building>(home).expect("b").door;
+        let mut bars: Vec<(u32, EntityId)> = w
+            .buildings_of_kind(BuildingKind::Bar)
+            .iter()
+            .copied()
+            .filter(|&b| w.comp::<Building>(b).is_some_and(|bd| !bd.demolished))
+            .map(|b| (w.comp::<Building>(b).expect("b").door.manhattan(from), b))
+            .collect();
+        bars.sort();
+        let (near, far) = (bars[0].1, bars[bars.len() - 1].1);
+        assert!(bars[0].0 < bars[bars.len() - 1].0);
+        let today = w.day();
+        w.deal_log.insert(near, (d1, today));
+        w.deal_log.insert(far, (d2, today));
+        let h = w.hideout_of(g).expect("hideout");
+        w.add_stock(h, Good::Stims, 10);
+        set_coins(&mut w, s, 100);
+        social::first_meeting(&mut w, s, d2, 0.3);
+        assert!(w.edge(s, d1).is_none(), "the near dealer is a stranger");
+        assert!(stims::stat_buy_one(&mut w, s), "a dose bought");
+        assert!(service::regulars_of(&w, d2).iter().any(|r| r.who == s), "from the dealer he knows");
+        assert!(service::regulars_of(&w, d1).iter().all(|r| r.who != s));
+    }
+
+    /// § 2.3: a lookout (another member of the dealer's gang in the Bar, a
+    /// body) multiplies the Dealing witness roll by `witness_lookout_mult`
+    /// (0.5 shipped; 0 here, so the certain witness of
+    /// `test_witnessed_deal_reported_and_arrest_confiscates` sees nothing);
+    /// without one the guard reports the sale.
+    #[test]
+    fn test_lookout_halves_the_dealing_witness_term() {
+        fn sale(lookout: bool) -> (bool, u32) {
+            let mut w = city();
+            assert_eq!(w.config.service.witness_lookout_mult, 0.5, "the shipped term halves");
+            w.config.service.witness_lookout_mult = 0.0;
+            w.config.crime.witness_base = 1.0;
+            let people = free(&w);
+            let (dealer, buyer, look) = (people[0], people[1], people[2]);
+            let g = gang_of(&mut w, &[dealer]);
+            let bar = a_bar(&w);
+            let guard = w.guards()[0];
+            put_in(&mut w, dealer, bar);
+            put_in(&mut w, buyer, bar);
+            put_in(&mut w, guard, bar);
+            if lookout {
+                gang::enlist(&mut w, look, g);
+                lod::set_lod(&mut w, look, Lod::Full);
+                put_in(&mut w, look, bar);
+            }
+            w.comp_mut::<Skills>(dealer).expect("skills").stealth = 0.0;
+            set_stims(&mut w, dealer, 10);
+            set_coins(&mut w, buyer, 100);
+            stims::start_deal(&mut w, dealer, bar);
+            assert_eq!(stims::lookout_present(&w, dealer, Some(bar), Default::default()), lookout);
+            assert_eq!(stims::buy_stims(&mut w, buyer, bar), 2);
+            let reported = w.crime_reports().iter().any(|r| r.suspect == dealer && r.crime == Crime::Dealing);
+            (reported, jobs2(&w).lookout_halved)
+        }
+        assert_eq!(sale(false), (true, 0), "no lookout: the guard reports the sale");
+        assert_eq!(sale(true), (false, 1), "a lookout: the witness term is multiplied out");
+    }
+}
