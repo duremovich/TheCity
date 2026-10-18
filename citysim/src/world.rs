@@ -1060,6 +1060,12 @@ pub struct World {
     /// a Statistical one credited at the hour). Empty off.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub visits: BTreeMap<EntityId, crate::systems::household::PendingVisit>,
+    /// Lives at work phase 3 (§ 2.2, super): the tenants served notice today
+    /// (`(tenant, day)`), one notice a tenant a day; cleared at midnight
+    /// (`service::hourly`). Saved while it holds anything (a resumed save
+    /// serves the same notices), empty off.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub notices_today: BTreeSet<(EntityId, u64)>,
     /// L2 L15: the HangOut spots per district (`leisure::spots`, midnight).
     /// Saved (deviation: the plan's `serde(skip)` would rebuild them on load
     /// from a later state than the midnight's).
@@ -1667,6 +1673,7 @@ impl World {
             service_room: BTreeMap::new(),
             regulars: BTreeMap::new(),
             visits: BTreeMap::new(),
+            notices_today: BTreeSet::new(),
             spots: Vec::new(),
             last_met: BTreeMap::new(),
             told: BTreeMap::new(),

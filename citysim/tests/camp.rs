@@ -398,7 +398,13 @@ fn test_unfed_camp_is_scandal_then_closed_and_children_moved() {
 /// loyalty; `CampRaised` logged with a Life row.
 #[test]
 fn test_release_at_adulthood_with_camp_raised() {
-    let mut w = world();
+    // Lives at work phase 3: with the civic switch on, a parent's weekly
+    // answer (a break-out or a buy-out, § 3.5) can take the child home in
+    // the four days before adulthood; this pins the city the coming-of-age
+    // release was written for.
+    let mut cfg = config();
+    cfg.strip_civic();
+    let mut w = World::new(42, cfg);
     let (_, c) = family_home(&mut w);
     let parents = camp::parents_of(&w, c);
     let city = city_camp(&w);

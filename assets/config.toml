@@ -2455,6 +2455,8 @@ skill = "persuasion"
 model = "overhead"
 duty = "round"
 round_stops = 6
+round_near = true                  # Lives at work phase 3 (§ 2.2): the stops nearest the super's Home (V4: 63-79 h of travel a week)
+tied_housing = true                # Lives at work phase 3 (§ 2.2): housed rent-free in the landlord's Block, moved in at midnight (V4: Bex evicted from her own building)
 
 [[trades]]
 id = "night_stocker"
@@ -3669,13 +3671,20 @@ enabled = true
 # reserved and unread. Placeholders.
 [service]
 venues = true
-civic = false
+civic = true                       # phase 3 (§ 2.2, § 3.5): teacher, camp warden, jailer, super; the near round, tied housing, the parent's answer (CITYSIM_CIVIC_OFF=1)
 street = false
 tower = false
 madam_cut = 0.3                    # § 2.1: the madam's share of each tip at her Brothel, worker -> madam (Flow::MadamCut)
 p_eject = 0.5                      # § 2.1: an Assault inside a kept venue is an ejection on this x (bouncer fighting - attacker fighting)
 staff_meal = true                  # § 2.1: a Cook takes one meal from the NoodleBar's stock at shift end (every tier; V4: a cook steals food)
 served_salience = 0.15             # D5: a Served memory's salience (its mood weight is 0 whatever the valence)
+p_camp_beating = 0.02              # phase 3 § 2.2 (warden): a Camp child-day's chance of a beating (a ChildTaken-class grief, 0.5/-0.6, to each parent)
+p_camp_escape = 0.004              # phase 3 § 2.2 (warden): a Camp child-day's chance of an escape (home to a parent's Home with room, else the street)
+buyout_fee = 60                    # phase 3 § 3.5: the buy-out's fee to the Camp's owner (Flow::Buyout; Dylan's answer 1)
+buyout_food_days = 7               # phase 3 § 3.5: the Home's pantry must hold this many days of the child's food (CHILD_FOOD_PER_DAY) too
+breakout_crew = 3                  # phase 3 § 3.5: a gang member breaks out with this many of his gang alive and free (the lawless alone otherwise)
+neglect_days = 14                  # phase 3 § 3.5: a parent of a Camp child unmet for this long is counted neglecting (printed only, Q4)
+teacher_floor = 0.5                # phase 3 § 2.2 (teacher): a taught School day adds floor + (1 - floor) x knowledge to Child.edu_taught
 
 # Lives at work phase 1 (docs/LIVES_AT_WORK.md § 1.1, § 2.1, § 2.2): the [[serves]] rows, one per serving trade.
 # `key` is a [[trades]] id or a legacy Role name (Config::unresolved_names checks it); `kind` names the queue's
@@ -3838,6 +3847,53 @@ skill = "knowledge"
 skill_gain = 0.0005
 regular_after = 0
 valence = 0.0
+
+# Lives at work phase 3 (§ 2.2): the civic rows (`civic = true`: live with [service] civic, stripped off). No regulars
+# among children or prisoners (no edge table on a child); the super's tenants are adults but a Notice is the event.
+[[serves]]
+key = "teacher"                    # the roster: every child whose routine is School here, once a day (Pupil); the day's edu_taught
+kind = "pupil"
+per_hour = 30                      # at least the School's roster an hour
+minutes = 2
+skill = "knowledge"
+skill_gain = 0.0005
+regular_after = 0
+valence = 0.1
+civic = true
+
+[[serves]]
+key = "camp_warden"                # the headcount: the Camp's children at the shift's first hour (Inmate; pooled with the Jail's in served_inmate)
+kind = "inmate"
+per_hour = 30
+minutes = 2
+skill = "fighting"
+skill_gain = 0.0
+regular_after = 0
+valence = -0.1
+civic = true
+
+[[serves]]
+key = "jailer"                     # the midnight meal and count of the held (Inmate; the night shift holds at midnight)
+kind = "inmate"
+per_hour = 30
+minutes = 2
+skill = "fighting"
+skill_gain = 0.0
+regular_after = 0
+valence = -0.1
+civic = true
+
+[[serves]]
+key = "super"                      # each stop's adult tenants (Tenant): a Notice in arrears, the door rent when the purse holds it
+kind = "tenant"
+per_hour = 20
+minutes = 3
+skill = "persuasion"
+skill_gain = 0.0005
+regular_after = 0
+valence = 0.0
+event_on = ["notice"]
+civic = true
 
 # Lives at work phase 2 (docs/LIVES_AT_WORK.md § 3): the evening and the household, read by systems/household.rs
 # (and leisure.rs for the home spot). Under [lives] enabled (`CITYSIM_HOUSEHOLD_OFF=1`). Placeholders.

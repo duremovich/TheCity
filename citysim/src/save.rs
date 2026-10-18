@@ -194,7 +194,13 @@ use crate::world::World;
 /// newborn_carer}`, `World.visits` (each written only when set),
 /// `[household]` (written only on) and the `Jobs2Cols` phase-2 columns
 /// (serde defaults). An off save is byte-identical to version 35's.
-pub const SAVE_VERSION: u8 = 36;
+/// 37 (Lives at work phase 3, docs/LIVES_AT_WORK.md § 2.2, § 3.5):
+/// `Child.edu_taught`, `PendingVisit.why`'s `Camp` arm, `World.notices_today`
+/// (the day's notices, written while it holds anything), the `[service]`
+/// civic keys and `[[serves]]` civic rows (written only on), the trade
+/// rows' `round_near`/`tied_housing` and the `Jobs2Cols` phase-3 columns
+/// (serde defaults). An off save is byte-identical to version 36's.
+pub const SAVE_VERSION: u8 = 37;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

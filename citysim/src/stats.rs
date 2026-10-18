@@ -691,6 +691,37 @@ pub struct Jobs2Cols {
     pub elder_visits: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub carers: u32,
+    /// Lives at work phase 3 (docs/LIVES_AT_WORK.md § 2.2, § 3.5): the
+    /// Camp's beatings, escapes, headcounts, the parents' visits, buy-outs
+    /// and break-outs, the neglecting parents (a daily tally), the super's
+    /// notices, door rent (coins), stops and tied move-ins, the buy-out
+    /// coins (`Flow::Buyout`) and the School days taught.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub camp_beatings: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub camp_escapes: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub camp_headcounts: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub camp_visits: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub camp_buyouts: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub camp_breakouts: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub camp_neglect: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub notices: u32,
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub door_rent: i64,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub super_stops: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub tied_housed: u32,
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub flow_buyout: i64,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub taught_days: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -913,6 +944,19 @@ impl Jobs2Cols {
                 "kin_visits",
                 "elder_visits",
                 "carers",
+                "camp_beatings",
+                "camp_escapes",
+                "camp_headcounts",
+                "camp_visits",
+                "camp_buyouts",
+                "camp_breakouts",
+                "camp_neglect",
+                "notices",
+                "door_rent",
+                "super_stops",
+                "tied_housed",
+                "flow_buyout",
+                "taught_days",
             ]
             .into_iter()
             .map(str::to_string),
@@ -1129,6 +1173,19 @@ impl Jobs2Cols {
             self.kin_visits.to_string(),
             self.elder_visits.to_string(),
             self.carers.to_string(),
+            self.camp_beatings.to_string(),
+            self.camp_escapes.to_string(),
+            self.camp_headcounts.to_string(),
+            self.camp_visits.to_string(),
+            self.camp_buyouts.to_string(),
+            self.camp_breakouts.to_string(),
+            self.camp_neglect.to_string(),
+            self.notices.to_string(),
+            self.door_rent.to_string(),
+            self.super_stops.to_string(),
+            self.tied_housed.to_string(),
+            self.flow_buyout.to_string(),
+            self.taught_days.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

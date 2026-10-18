@@ -431,10 +431,19 @@ pub enum EventKind {
     // --- Lives at work phase 2 (docs/LIVES_AT_WORK.md § 3.5).
     /// `[visitor, kin, place?]`: a visit made to a hurt kin or an elder parent.
     Visited,
+    // --- Lives at work phase 3 (docs/LIVES_AT_WORK.md § 2.2, § 3.5).
+    /// `[child, camp, home?]`: a Camp child slipped out (`p_camp_escape`).
+    CampEscape,
+    /// `[parent, child, camp]`: a parent bought a child out of a Camp.
+    CampBuyout,
+    /// `[parent, child, camp]`: a parent (and his crew) broke a child out of a Camp.
+    CampBreakout,
+    /// `[super, tenant, block]`: a super served an arrears notice at the door.
+    Notice,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 215] = [
+    pub const ALL: [EventKind; 219] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -650,6 +659,10 @@ impl EventKind {
         EventKind::LicenceSold,
         EventKind::Served,
         EventKind::Visited,
+        EventKind::CampEscape,
+        EventKind::CampBuyout,
+        EventKind::CampBreakout,
+        EventKind::Notice,
     ];
 }
 

@@ -391,7 +391,11 @@ pub fn on_mature(world: &mut World, id: EntityId, c: &Child) {
     if !on(world) {
         return;
     }
-    let gain = world.config.ages.edu_gain * f32::from(c.edu_days);
+    // Lives at work phase 3 (§ 2.2, teacher): under `[service] civic` the
+    // education is the days taught (a School day with no teacher on duty
+    // teaches nothing); off, the midnight attendance count as before.
+    let days = if crate::systems::service::civic_on(world) { c.edu_taught } else { f32::from(c.edu_days) };
+    let gain = world.config.ages.edu_gain * days;
     if gain > 0.0 {
         if let Some(s) = world.comp_mut::<crate::components::Schooling>(id) {
             s.education = (s.education + gain).min(1.0);

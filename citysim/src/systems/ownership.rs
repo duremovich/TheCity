@@ -297,6 +297,10 @@ pub enum Flow {
     /// § 4 (phase 3): a dealer's weapon sale, buyer -> the gang, and the
     /// dealer's cut (untaxed, `Flow::Stims`'s shape).
     Arms,
+    /// Lives at work phase 3 (§ 3.5): a parent's buy-out of a Camp child,
+    /// parent -> the Camp's owner (untaxed; `flow_other` plus
+    /// `Jobs2Cols.flow_buyout`, the `Fine` shape).
+    Buyout,
 }
 
 impl Flow {
@@ -430,6 +434,11 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         Flow::Tithe => row.jobs2.get_or_insert_with(Default::default).tithes += coins,
         // Lives at work phase 1: the madam's cut.
         Flow::MadamCut => row.jobs2.get_or_insert_with(Default::default).flow_madam_cut += coins,
+        // Lives at work phase 3: the Camp buy-out (the `Fine` shape).
+        Flow::Buyout => {
+            row.flow_other += coins;
+            row.jobs2.get_or_insert_with(Default::default).flow_buyout += coins;
+        }
         Flow::CabFare | Flow::StreetCut | Flow::Gray => row.flow_other += coins,
     }
 }
@@ -1499,6 +1508,7 @@ pub fn run(world: &mut World) {
         evictions(world);
         // Lives at work phase 2 (§ 3.4): the spouse's Home is tried first.
         crate::systems::household::reunite(world);
+        crate::systems::household::tied_housing(world);
         rehouse(world);
     }
     // Phase 5: the books close before the upkeep lump (`Corp.closing`).
@@ -1525,9 +1535,18 @@ pub fn run(world: &mut World) {
 fn collect_rent(world: &mut World, rents: &[(EntityId, i64)]) {
     for &(home, rent) in rents {
         let owner = world.owner_of(home);
-        if rent <= 0 || owner.is_some_and(|o| world.residents_of(home).contains(&o)) {
-            let free: Vec<EntityId> =
-                world.residents_of(home).iter().copied().filter(|&a| rent <= 0 || Some(a) == owner).collect();
+        // Lives at work phase 3 (§ 2.2, tied housing): a resident whose
+        // tied trade's employer belongs to this Home's owner is freed as the
+        // owner living in their own Home is.
+        let tied: Vec<EntityId> =
+            world.residents_of(home).iter().copied().filter(|&a| tied_here(world, a, home)).collect();
+        if rent <= 0 || owner.is_some_and(|o| world.residents_of(home).contains(&o)) || !tied.is_empty() {
+            let free: Vec<EntityId> = world
+                .residents_of(home)
+                .iter()
+                .copied()
+                .filter(|&a| rent <= 0 || Some(a) == owner || tied.contains(&a))
+                .collect();
             for a in free {
                 if let Some(h) = world.comp_mut::<Household>(a) {
                     h.rent_due = 0.0;
@@ -1544,7 +1563,7 @@ fn collect_rent(world: &mut World, rents: &[(EntityId, i64)]) {
             .residents_of(home)
             .iter()
             .copied()
-            .filter(|&a| Some(a) != owner)
+            .filter(|&a| Some(a) != owner && !tied.contains(&a))
             .filter(|&a| world.has::<Brain>(a) && crate::systems::demography::is_adult(world, a))
             .collect();
         if adults.is_empty() {
@@ -1560,10 +1579,23 @@ fn collect_rent(world: &mut World, rents: &[(EntityId, i64)]) {
     }
 }
 
+/// Lives at work phase 3 (§ 2.2, tied housing): is `a` a tied trade's
+/// worker (`[[trades]] tied_housing`) housed in a Home of his employer's
+/// owner? Rent-free there (`collect_rent`, `settle_rent`). Civic only.
+pub fn tied_here(world: &World, a: EntityId, home: EntityId) -> bool {
+    if !crate::systems::service::civic_on(world) {
+        return false;
+    }
+    let Some(job) = world.comp::<Job>(a) else { return false };
+    let tied = crate::systems::trades::row_of(world, job.role).is_some_and(|r| r.tied_housing);
+    let employer_owner = job.employer.and_then(|e| world.owner_of(e));
+    tied && employer_owner.is_some() && employer_owner == world.owner_of(home)
+}
+
 /// Pay the whole coins of rent due from the wallet. At midnight
 /// (`midnight`), a short payment is a day of arrears (`RentShort` on the
 /// first); a full one clears them.
-fn settle_rent(world: &mut World, a: EntityId, home: EntityId, midnight: bool) {
+pub(crate) fn settle_rent(world: &mut World, a: EntityId, home: EntityId, midnight: bool) {
     let Some(due) = world.comp::<Household>(a).map(|h| h.rent_due.floor() as i64) else { return };
     if due < 1 {
         // Not a whole coin owed: not in arrears.
@@ -1574,8 +1606,9 @@ fn settle_rent(world: &mut World, a: EntityId, home: EntityId, midnight: bool) {
         }
         return;
     }
-    // An owner housed in their own Home (an heir, a founder) owes nobody.
-    if world.owner_of(home) == Some(a) {
+    // An owner housed in their own Home (an heir, a founder) owes nobody;
+    // nor does a tied worker in his employer's owner's Block (phase 3).
+    if world.owner_of(home) == Some(a) || tied_here(world, a, home) {
         if let Some(h) = world.comp_mut::<Household>(a) {
             h.rent_due = 0.0;
             h.arrears = 0;

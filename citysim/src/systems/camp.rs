@@ -30,6 +30,23 @@ pub enum ReleaseWhy {
     Adult,
     /// M16b's Rescue (the hook): out of the list, nothing else.
     Rescue,
+    /// Lives at work phase 3 (§ 2.2): slipped out (`p_camp_escape`).
+    Escaped,
+    /// Lives at work phase 3 (§ 3.5): bought or broken out by a parent.
+    BoughtOut,
+}
+
+/// Lives at work phase 3: a Camp child-day's beating roll.
+const PURPOSE_BEATING: u64 = 0x4341_0001;
+/// Lives at work phase 3: a Camp child-day's escape roll.
+const PURPOSE_ESCAPE: u64 = 0x4341_0002;
+
+fn hash(world: &World, purpose: u64, a: u64, b: u64) -> f32 {
+    crate::systems::econ::hash_unit(world.seed(), purpose, a, b)
+}
+
+fn key(id: EntityId) -> u64 {
+    u64::from(id.index) << 32 | u64::from(id.generation)
 }
 
 // ---------------------------------------------------------------------------
@@ -420,6 +437,70 @@ pub fn daily(world: &mut World) {
     }
     let housed: u32 = standing_camps(world).iter().map(|&c| children_of(world, c).len() as u32).sum();
     world.stats.current.econ.camp_children = housed;
+    if crate::systems::service::civic_on(world) {
+        warden_rolls(world);
+    }
+}
+
+/// Lives at work phase 3 (§ 2.2, camp warden; civic only, midnight): a
+/// child-day's beating on `p_camp_beating` (a `ChildTaken`-class grief,
+/// 0.5/−0.6, to each living parent; the take's own is 0.9/−0.9) and an
+/// escape on `p_camp_escape` (`release(Escaped)`, then the first living
+/// parent's Home with room, else the street as `release` leaves it).
+/// Hashed on (child, day): no world-stream draw.
+fn warden_rolls(world: &mut World) {
+    let cfg = world.config.service.clone();
+    let day = world.day();
+    let kids: Vec<(EntityId, EntityId)> = standing_camps(world)
+        .into_iter()
+        .flat_map(|c| children_of(world, c).iter().map(move |&k| (k, c)).collect::<Vec<_>>())
+        .collect();
+    for (k, camp) in kids {
+        if !world.is_alive(k) || world.has::<crate::components::Corpse>(k) {
+            continue;
+        }
+        if hash(world, PURPOSE_BEATING, key(k), day) < cfg.p_camp_beating {
+            for p in parents_of(world, k) {
+                world.remember(p, MemoryKind::ChildTaken, Some(k), 0.5, -0.6, false);
+            }
+            ownership::jobs2_row(world).camp_beatings += 1;
+        }
+        if hash(world, PURPOSE_ESCAPE, key(k), day) < cfg.p_camp_escape {
+            release(world, k, ReleaseWhy::Escaped);
+            let home = parents_of(world, k).into_iter().find_map(|p| send_home(world, k, p));
+            let (name, what) = (world.name_of(k), world.name_of(camp));
+            let to = home.map_or_else(|| "the street".to_string(), |h| world.name_of(h));
+            let mut actors = vec![k, camp];
+            actors.extend(home);
+            world.push_event(EventKind::CampEscape, &actors, format!("{name} slipped out of {what} to {to}"));
+            ownership::jobs2_row(world).camp_escapes += 1;
+        }
+    }
+}
+
+/// Lives at work phase 3: a released child goes home to `parent`'s Home
+/// when it stands: its Household and its body there. `None` with no such
+/// Home (the street, as `release` leaves it). Deviation from the brief's
+/// "with room": a child is its parents' dependant and never counted against
+/// the flat's capacity (`demography::spawn_child` houses a newborn the same
+/// way; most pairs live in a flat of two, so a room check sent every
+/// returning child to the street).
+pub fn send_home(world: &mut World, child: EntityId, parent: EntityId) -> Option<EntityId> {
+    let h = world.comp::<Household>(parent).and_then(|x| x.home)?;
+    let bd = world.comp::<Building>(h)?;
+    if bd.demolished || bd.derelict {
+        return None;
+    }
+    let d = bd.door;
+    let tick = world.tick;
+    world.set_home(child, Some(h));
+    world.remove_from_building(child);
+    if let Some(p) = world.comp_mut::<Position>(child) {
+        p.tile = d;
+        p.building = Some(h);
+        p.entered = tick;
+    }
+    Some(h)
 }
 
 fn reopen(world: &mut World, camp: EntityId, now: u64) {

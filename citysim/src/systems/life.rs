@@ -794,6 +794,13 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool) {
             continue;
         }
         let Some(home) = home_of(world, a) else { continue };
+        // Lives at work phase 3 (§ 2.2, tied housing): a household housed
+        // rent-free by a tied worker's landlord stays (the first build moved
+        // the super's spouse nearer her work every midnight, the super with
+        // her, and `tied_housing` moved them back: 50 moves in 120 days).
+        if world.residents_of(home).iter().any(|&r| crate::systems::ownership::tied_here(world, r, home)) {
+            continue;
+        }
         let Some(work) =
             (if fix { work_tile(world, a, employer) } else { world.comp::<Building>(employer).map(|b| b.door) })
         else {

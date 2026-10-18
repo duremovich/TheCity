@@ -1907,8 +1907,15 @@ fn jail_upkeep(world: &mut World) {
     let price = world.mean_price();
     let market = jail_market(world);
     let cfg = world.config.needs.clone();
+    // Lives at work phase 3 (§ 2.2, jailer): the meal and the count are the
+    // jailer's: a fed prisoner is an `Inmate` encounter (civic only).
+    let jail = world.building_of_kind(BuildingKind::Jail).filter(|_| crate::systems::service::civic_on(world));
     for who in world.with::<Sentence>() {
-        jail_meal(world, who, market, price, &cfg);
+        if jail_meal(world, who, market, price, &cfg) {
+            if let Some(j) = jail {
+                crate::systems::service::arrive(world, who, j, crate::components::ServeKind::Inmate, 0);
+            }
+        }
         if let Some(n) = world.comp_mut::<Needs>(who) {
             n.energy = 1.0;
         }

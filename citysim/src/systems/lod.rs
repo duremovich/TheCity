@@ -1494,6 +1494,21 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
             crate::systems::trades::accrue(world, id, b, u64::from(TICKS_PER_HOUR as u32));
         }
     }
+    // Lives at work phase 3 (§ 6, the super's door rent): a Statistical
+    // round worker credited for the shift walks its round world-side at the
+    // shift's first hour: the same stop list, the same encounters.
+    if crate::systems::service::civic_on(world)
+        && crate::systems::trades::on_round(world, id)
+        && attend.is_none_or(|p| shift_attended(world, id, &job, p))
+    {
+        let tod = world.tick_of_day();
+        let first = job.shifts.iter().any(|&(start, _)| tod >= start && u32::from(tod) < u32::from(start) + 60);
+        if first {
+            for b in crate::systems::trades::round_for(world, id, key) {
+                crate::systems::service::super_stop(world, id, b);
+            }
+        }
+    }
     // An hour of co-work drifts each pair of co-workers as `social`'s
     // co-location does for bodies (bodies never see a Statistical agent in
     // their building). Each Statistical pair once an hour: the lower id drives.

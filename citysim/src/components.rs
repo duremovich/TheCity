@@ -1966,10 +1966,19 @@ pub struct Child {
     pub edu_days: u16,
     #[serde(default, skip_serializing_if = "is_zero_u16_child")]
     pub street_days: u16,
+    /// Lives at work phase 3 (§ 2.2, teacher): the School days taught, each
+    /// `teacher_floor + (1 − teacher_floor) × the teacher's knowledge`; the
+    /// education at maturity under `[service] civic` (`edu_days` off).
+    #[serde(default, skip_serializing_if = "is_zero_f32_child")]
+    pub edu_taught: f32,
 }
 
 fn is_zero_u16_child(v: &u16) -> bool {
     *v == 0
+}
+
+fn is_zero_f32_child(v: &f32) -> bool {
+    *v == 0.0
 }
 
 /// Jobs & lives phase 7 (§ 6.1, D11): a child's day, chosen at midnight

@@ -405,7 +405,9 @@ impl LivesCfg {
 pub struct ServiceCfg {
     /// Phase 1: venues, vice and the Clinic.
     pub venues: bool,
-    /// Phase 3: the civic counterparts and the round (reserved, unread).
+    /// Phase 3 (§ 2.2, § 3.5): the civic counterparts (teacher, camp
+    /// warden, jailer, super), the near round, tied housing and the parent's
+    /// answer to a taken child (`CITYSIM_CIVIC_OFF=1`).
     pub civic: bool,
     /// Phase 4: the street and freight (reserved, unread).
     pub street: bool,
@@ -421,6 +423,47 @@ pub struct ServiceCfg {
     pub staff_meal: bool,
     /// D5: a `Served` memory's salience (its mood weight is 0 regardless).
     pub served_salience: f32,
+    // --- Phase 3 (civic), each left out of a save at its default so the
+    // off save is byte-identical (`ServiceCfg::strip_civic`).
+    /// § 2.2 (warden): a Camp child-day's chance of a beating (a
+    /// `ChildTaken`-class grief to its parents).
+    #[serde(skip_serializing_if = "is_zero_f32_cfg")]
+    pub p_camp_beating: f32,
+    /// § 2.2 (warden): a Camp child-day's chance of an escape (the child
+    /// back to a parent's Home with room, else the street).
+    #[serde(skip_serializing_if = "is_zero_f32_cfg")]
+    pub p_camp_escape: f32,
+    /// § 3.5: the buy-out's fee to the Camp's owner (`Flow::Buyout`).
+    #[serde(skip_serializing_if = "is_zero_i64_cfg")]
+    pub buyout_fee: i64,
+    /// § 3.5: the Home's pantry must hold this many days of the child's
+    /// food (`demography::CHILD_FOOD_PER_DAY`) for the buy-out.
+    #[serde(skip_serializing_if = "is_zero_f32_cfg")]
+    pub buyout_food_days: f32,
+    /// § 3.5: a gang member's break-out needs this many of his gang alive
+    /// and free.
+    #[serde(skip_serializing_if = "is_zero_u8_cfg")]
+    pub breakout_crew: u8,
+    /// § 3.5: a parent of a Camp child with no `last_met` with it in this
+    /// many days is counted neglecting (printed, never a camp-take term).
+    #[serde(skip_serializing_if = "is_zero_u16_cfg")]
+    pub neglect_days: u16,
+    /// § 2.2 (teacher): a taught School day adds `teacher_floor + (1 −
+    /// teacher_floor) × knowledge` to `Child.edu_taught`.
+    #[serde(skip_serializing_if = "is_zero_f32_cfg")]
+    pub teacher_floor: f32,
+}
+
+fn is_zero_f32_cfg(v: &f32) -> bool {
+    *v == 0.0
+}
+
+fn is_zero_i64_cfg(v: &i64) -> bool {
+    *v == 0
+}
+
+fn is_zero_u16_cfg(v: &u16) -> bool {
+    *v == 0
 }
 
 impl Default for ServiceCfg {
@@ -434,6 +477,13 @@ impl Default for ServiceCfg {
             p_eject: 0.5,
             staff_meal: true,
             served_salience: 0.15,
+            p_camp_beating: 0.0,
+            p_camp_escape: 0.0,
+            buyout_fee: 0,
+            buyout_food_days: 0.0,
+            breakout_crew: 0,
+            neglect_days: 0,
+            teacher_floor: 0.0,
         }
     }
 }
@@ -442,6 +492,20 @@ impl ServiceCfg {
     /// Not written into a save at its defaults (every switch off).
     pub fn is_default(&self) -> bool {
         *self == ServiceCfg::default()
+    }
+
+    /// Lives at work phase 3: the civic switch off and its keys at their
+    /// defaults (the off switches; nothing reads them off).
+    pub fn strip_civic(&mut self) {
+        let d = ServiceCfg::default();
+        self.civic = false;
+        self.p_camp_beating = d.p_camp_beating;
+        self.p_camp_escape = d.p_camp_escape;
+        self.buyout_fee = d.buyout_fee;
+        self.buyout_food_days = d.buyout_food_days;
+        self.breakout_crew = d.breakout_crew;
+        self.neglect_days = d.neglect_days;
+        self.teacher_floor = d.teacher_floor;
     }
 }
 
@@ -454,6 +518,8 @@ pub enum ServeOutcome {
     Refused,
     Ejected,
     Regular,
+    /// Lives at work phase 3 (§ 2.2, super): a tenant in arrears served notice.
+    Notice,
 }
 
 /// Lives at work phase 1 (docs/LIVES_AT_WORK.md § 1.1): one `[[serves]]`
@@ -480,6 +546,11 @@ pub struct ServesCfg {
     pub valence: f32,
     /// The outcomes that print an `EventKind::Served`.
     pub event_on: Vec<ServeOutcome>,
+    /// Lives at work phase 3: a civic row (teacher, camp warden, jailer,
+    /// super), live only with `[service] civic` and stripped from the
+    /// config off (`Config::strip_civic`), so the off save matches main.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub civic: bool,
 }
 
 impl Default for ServesCfg {
@@ -495,6 +566,7 @@ impl Default for ServesCfg {
             regular_days: 14,
             valence: 0.1,
             event_on: Vec::new(),
+            civic: false,
         }
     }
 }
@@ -2270,6 +2342,17 @@ pub struct TradeCfg {
     /// `[fashion]` on; 0 none).
     #[serde(default, skip_serializing_if = "is_zero_u8_cfg")]
     pub min_dress: u8,
+    /// Lives at work phase 3 (§ 2.2, the super): a `round` duty's stops are
+    /// the `round_stops` Blocks of the pool nearest the worker's Home (ties
+    /// by id), not the id-ordered rotation. Read with `[service] civic`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub round_near: bool,
+    /// Lives at work phase 3 (§ 2.2, the super): the worker and his
+    /// household are housed rent-free in a Block of his employer's owner
+    /// (`ownership::collect_rent`; the midnight move-in
+    /// `household::tied_housing`). Read with `[service] civic`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub tied_housing: bool,
 }
 
 fn is_zero_u8_cfg(v: &u8) -> bool {
@@ -7629,6 +7712,19 @@ impl Config {
         Config::load_from(&dir)
     }
 
+    /// Lives at work phase 3: the civic switch off, its `[service]` keys at
+    /// their defaults, the civic `[[serves]]` rows gone and the trade rows'
+    /// `round_near`/`tied_housing` cleared (the off switches; nothing reads
+    /// them off).
+    pub fn strip_civic(&mut self) {
+        self.service.strip_civic();
+        self.serves.retain(|r| !r.civic);
+        for t in &mut self.trades {
+            t.round_near = false;
+            t.tied_housing = false;
+        }
+    }
+
     /// Lives at work phase 2: the phase's deed keys at 0 in every deed table
     /// (the off switches; the deeds are never posted off).
     pub fn without_household_deeds(&mut self) {
@@ -7717,6 +7813,17 @@ impl Config {
             cfg.serves.clear();
             cfg.household = HouseholdCfg::default();
             cfg.without_household_deeds();
+            cfg.strip_civic();
+        }
+        // Lives at work phase 3 (§ 2.2, § 3.5): the civic switch's A/B and
+        // identity device; and a config with `[service] civic = false` by
+        // any path drops the civic rows and keys, so the off save matches
+        // main byte for byte.
+        if std::env::var("CITYSIM_CIVIC_OFF").is_ok_and(|v| v == "1") {
+            cfg.service.civic = false;
+        }
+        if !cfg.service.civic {
+            cfg.strip_civic();
         }
         // Lives at work phase 2 (§ 3): the household's A/B and identity device
         // (the section and the phase's deed keys cleared, so the off save

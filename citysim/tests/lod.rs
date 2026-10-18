@@ -160,6 +160,9 @@ fn test_full_vs_statistical_within_15pct() {
         // shifts of serving rows (world-side by construction; the row is
         // encounters per staffed shift, pooled over the seeds).
         encounters: [f64; 2],
+        // Lives at work phase 3 (§ 6): the super's door rent and all rent
+        // paid (the door rent share by tier, printed).
+        door: [f64; 2],
     }
     // The paid-leisure mirror (Jobs & lives phase 7b): the venue kinds of
     // the calibration city's ladder.
@@ -311,6 +314,10 @@ fn test_full_vs_statistical_within_15pct() {
                 };
                 [j(|c| c.served_total()), j(|c| c.serve_shifts)]
             },
+            door: [
+                w.stats.history.iter().map(|r| r.jobs2.as_ref().map_or(0.0, |j| j.door_rent as f64)).sum::<f64>(),
+                w.stats.history.iter().map(|r| r.rent_paid as f64).sum::<f64>(),
+            ],
         }
     }
     // Six cities per tier, pooled: one 30-day city's theft rate varies by a
@@ -328,7 +335,8 @@ fn test_full_vs_statistical_within_15pct() {
             std::array::from_fn(|k| std::array::from_fn(|j| runs.iter().map(|r| r.venues[k][j]).sum::<f64>() / n));
         let paid = std::array::from_fn(|j| runs.iter().map(|r| r.paid[j]).sum::<f64>() / n);
         let encounters = std::array::from_fn(|j| runs.iter().map(|r| r.encounters[j]).sum::<f64>());
-        Run { rates, actors: counts.map(|c| c / total), venues, paid, encounters }
+        let door = std::array::from_fn(|j| runs.iter().map(|r| r.door[j]).sum::<f64>());
+        Run { rates, actors: counts.map(|c| c / total), venues, paid, encounters, door }
     };
     let full = pooled(Lod::Full);
     let stat = pooled(Lod::Statistical);
@@ -418,6 +426,16 @@ fn test_full_vs_statistical_within_15pct() {
             "FINDING encounters/shift  Full {f:7.3}  Statistical {s:7.3}  ({} / {} shifts; the Full server must be \
              inside, the Statistical one is credited by the clock)",
             full.encounters[1], stat.encounters[1]
+        );
+        // Lives at work phase 3 (§ 6): the super's door rent as a share of
+        // all rent paid, by tier (the same settle moved earlier; printed).
+        let share = |r: &Run| if r.door[1] > 0.0 { r.door[0] / r.door[1] } else { 0.0 };
+        eprintln!(
+            "FINDING door rent share  Full {:7.3}  Statistical {:7.3}  ({:.0} / {:.0} of rent paid)",
+            share(&full),
+            share(&stat),
+            full.door[0],
+            stat.door[0]
         );
     }
     assert!(failures.is_empty(), "{failures:?}");
