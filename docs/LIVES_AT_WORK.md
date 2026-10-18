@@ -194,6 +194,25 @@ A Full visitor walks the scripted plan (`GoTo(place) → Wait(visit_ticks) → h
 
 Phase 0 builds `law_probe` (*new*, `citysim-cli`, printed, never asserted): per witnessed crime, the report and the arrest, by the suspect's district's walk to the Precinct, by tier, at 2k (42-44 × 60) and 20k (42 × 30). V4 measured reports 0.18 vs 0.32-0.40 a diary and arrests 0.30 vs ~0.6 at the same witness rate. If the arrest share falls with the escort distance, § 5.2 is the fix; if it is flat, the cause is elsewhere (a per-capita cap, `crackdown_reports_per_1000`, the plan queue: V4 bug 20) and phase 7 builds § 5.2 for the guards' travel alone and files the rest.
 
+*Implemented* (phase 0, 2026-10-18): the probe is `citysim/tests/law_probe.rs` (`law_probe_2k`, `law_probe_20k`, `tier: diag`), not a `citysim-cli` subcommand, because the V4 sweep had already put it there; `python tools/test.py diag --only law_probe_2k`. The distance is Manhattan tiles from the district's centroid (its mean street tile; districts have no Hall) to the Jail's door; the suspect's district is its `Position` up to an hour after the act; the bands are quartiles of the districts' distances (the 2k map's 8 districts fall 3/2/2/1).
+
+**Measured, phase 0 (2026-10-18, main `23a161d` plus the phase 0 probes).** Share of witnessed acts arrested within 3 days (reported within 1 day in brackets), by the suspect's district's walk to the Precinct; the tier rows where the band has ≥ 20 acts of the tier.
+
+| city | band (tiles to the Precinct; districts) | acts | arrested (reported) | Coarse | Full | Statistical |
+|---|---|---|---|---|---|---|
+| 2k, 42-44 × 60 d pooled | 1: 2-45 (3) | 2,609 | 0.82 (0.69) | 0.80 | 0.85 | 0.91 |
+| | 2: 108-122 (2) | 705 | 0.68 (0.54) | 0.68 | 0.69 | — |
+| | 3: 126-144 (2) | 1,245 | 0.63 (0.29) | 0.64 | 0.55 | 0.77 |
+| | 4: 189 (1) | 405 | 0.50 (0.28) | 0.47 | 0.72 | — |
+| | all | 4,964 | 0.73 (0.53); per seed 0.71 / 0.69 / 0.78 | 0.71 | 0.77 | 0.84 |
+| 20k, 42 × 30 d | 1: 2-128 (7) | 3,328 | 0.83 (0.76) | 0.81 | 0.89 | 0.82 |
+| | 2: 144-324 (7) | 1,564 | 0.70 (0.52) | 0.67 | 0.78 | 0.75 |
+| | 3: 376-520 (6) | 1,017 | 0.43 (0.29) | 0.41 | 0.58 | 0.64 |
+| | 4: 572-692 (6) | 1,310 | 0.37 (0.21) | 0.35 | 0.48 | 0.67 |
+| | all | 7,219 | 0.66 (0.54) | 0.61 | 0.84 | 0.78 |
+
+Reading: **the arrest share falls with the distance** at both scales, 0.82 → 0.50 over 2-189 tiles at 2k and 0.83 → 0.37 over 2-692 tiles at 20k, and the fall is in the Coarse tier (0.81 → 0.35 at 20k) more than in Full (0.89 → 0.48, few acts) or Statistical (flat ~0.7-0.8: no escort). The report share falls with it (0.76 → 0.21 at 20k), so the witnesses' walk is part of it, not the escort alone. No decision here; phase 7 reads this. The 20k Precinct went full 34 times in 30 days (`UNPUNISHED`); 2k never. Per-district rows: `law_probe_20k`'s output (`target/test-logs/`).
+
 ### 5.2 Stations
 
 - **Data.** `BuildingKind::Station` (*new*, appended; city-owned, Civic niche off; `[buildings.station]` capacity `station_cells` (6, per capita through `fit_to_map`), on a district's Civic or Mid Lot). `[law] stations = true`, `station_min_tiles` (a district whose Hall-to-Precinct walk is under it gets none: the 2k map gets 0-1, the 20k island ~6-8, measured at seed), `transfer_hour` (04:00), `station_desk_share` (0.25).
@@ -277,7 +296,7 @@ Each phase is one commit, merged by the orchestrator; each runs the trio, `core_
 
 | # | phase | builds | switch (off = byte-identical) | why here |
 |---|---|---|---|---|
-| 0 | **Baselines** | `law_probe` (§ 5.1); a `lives_probe` printing, per archetype, idle hours, spouse meetings a week, empty HangOuts, `Served`-able shifts (shifts with a source event at the place) | none (tools only) | measure first: the money-circuit lesson; bug 22's probe |
+| 0 | **Baselines** | `law_probe` (§ 5.1); a `lives_probe` printing, per archetype, idle hours, spouse meetings a week, empty HangOuts, `Served`-able shifts (shifts with a source event at the place). *Implemented* (2026-10-18): `law_probe` is `citysim/tests/law_probe.rs` (a diag-tier test, not a `citysim-cli` subcommand: it already existed there), `lives_probe` is `citysim-cli shadow --lives` (§ 13) | none (tools only) | measure first: the money-circuit lesson; bug 22's probe |
 | 1 | **The encounter, venues and the Clinic** | § 1 whole; § 2.1; § 2.2's ripperdoc and orderly; SAVE 35 | `[lives] enabled`, `[service] venues` | every source already exists as a visit or a sale: the smallest change that puts a person across every counter the critics named first |
 | 2 | **The evening and the household** | § 3.1-3.4, § 3.5's kin and elder visits, § 3.6's `Hired`/`LaidOff`/`Wed`/`Born` deeds | `[household] enabled` | small, high-value, and independent of the counterparts |
 | 3 | **Civic counterparts and the round** | § 2.2's teacher, warden, jailer, super (tenants, near round, tied housing); § 3.5's parent's answer | `[service] civic` | the camp answer needs the warden's encounter |
@@ -387,3 +406,104 @@ Asserts catch broken; behaviour judges alive; numbers are reports.
 
 Not yet asked: questions 5 (stations), 7 (Spire homes at 20k) and 8 (one regen at the gate). The recommendations stand as defaults unless Dylan overrides them before phase 7 and the gate.
 
+---
+
+## 13. Phase 0 baselines
+
+Measured 2026-10-18 on main `23a161d` plus the phase 0 probes, before any phase 1-7 change, with `citysim-cli shadow --lives` (the `--assert` recipe over all 48 pinnable archetypes: day 19, 7 days, seeds 42-44 pooled, up to 30 free agents per archetype and seed, each archetype in its own clone) and `shadow --lives --population 20000` (seed 42, day 20, 7 days, 228 picks of 48 archetypes pinned together in one world, 5 each: V4's 20k recipe). Printed, never asserted; rows with ≥ 5 agents and the pooled `all` (an agent picked for two archetypes counts in both; `ceo` and `exec` are the same 27 people at 2k). The columns: idle-class hours an agent-day; married picks (a spouse at the window's start), of them those that never *named* the spouse (no social move with, no HangOut beside) and never *co-located* with it awake (an hourly sample: same building, or both outdoors within 2 tiles, neither asleep); named hours a married-agent-week; co-located hours a married-agent-week (in brackets the share of those hours whose spouse was Statistical, standing where its demotion left it); HangOuts a week and the share with nobody else at the spot; whole free workday shifts at a building, the share *Served-able* (a non-staff body inside the workplace at an hourly sample, or a source event there: `AssetBought`, `Installed`, `Treated`, `Rescued`, `Cured`, `LicenceSold`, `Gambled`, `Bout`, `MissionServed`, `Donated`, `TraumaSave`), the share with any signal (the venue's `visits_today` tally added, the one place a Statistical visit shows), and the mean non-staff bodies per shift hour (the guard's are the Jail's inmates, the CEO's the Hq's meeting crowd; a Statistical visitor moves no body and writes no event, so a counter trade's 0.00 is a floor, not the truth; phase 1 makes the encounter itself visible).
+
+**Beside V4** (`SHADOW_V4.md`, 258 diaries read by hand): V4 read 120 of 369 HangOuts empty (33 %); the probe reads 29 % at 2k (7,591 of 26,630) and 47 % at 20k (1,766 of 3,719). V4 read 14 of 17 married picks never meeting the spouse in a week; the probe reads 997 of 1,427 never naming the spouse at 2k (70 %) and 148 of 159 at 20k (93 %), but only 460 of 1,427 (32 %) and 70 of 159 (44 %) never co-located awake: couples share a roof for hours and do nothing together there, which is § 3's home-spot gap exactly. V4 read "almost every shift with nobody on the other side of the counter"; the probe reads 28 % of 8,426 whole shifts Served-able at 2k (32 % with the venue tally) and 33 % of 906 at 20k, and by trade: cooks, teachers, couriers, loaders, sweepers, builders, reporters 0.00-0.06; night porters 0.80 (hotel guests), bouncers 0.76, club staff 0.51, dancers 0.50 (bets and bouts), orderlies 0.43 and ripperdocs 0.44 (installs and treatments), guards 0.68 (inmates); the lives probe's 3.9 idle hours a day sits where V4 read 24-29 idle hours a week on the jobless street picks (`day_labourer` 6.2, `homeless` 5.7, `companion` 8.6 here).
+
+### 2k, seeds 42-44 pooled, day 19, 7 days
+
+| archetype | n | idle h/d | married | never named | never co-located | named/wk | co-located h/wk (Stat spouse) | HangOuts/wk | empty | shifts | Served-able | any signal | bodies/h |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `bouncer` | 50 | 4.50 | 42 | 19 | 4 | 4.05 | 31.93 (0.02) | 19.26 | 0.32 (307/963) | 233 | 0.76 | 1.00 | 0.51 |
+| `builder` | 90 | 3.26 | 89 | 45 | 13 | 1.79 | 38.44 (0.02) | 13.37 | 0.07 (82/1194) | 524 | 0.00 | 0.00 | 0.00 |
+| `cabbie` | 17 | 2.71 | 9 | 7 | 4 | 0.67 | 18.67 (0.14) | 18.88 | 0.46 (147/321) | 98 | 0.19 | 0.19 | 0.01 |
+| `camp_warden` | 6 | 3.75 | 5 | 1 | 0 | 3.20 | 53.60 (0.01) | 11.17 | 0.19 (13/67) | 35 | 0.06 | 0.06 | 0.01 |
+| `ceo` | 27 | 5.60 | 14 | 14 | 6 | 0.00 | 1.14 (0.94) | 1.33 | 0.72 (26/36) | 6 | 1.00 | 1.00 | 42.98 |
+| `club_staff` | 90 | 4.13 | 82 | 60 | 19 | 1.89 | 18.87 (0.06) | 17.49 | 0.25 (385/1562) | 432 | 0.51 | 0.77 | 0.51 |
+| `companion` | 6 | 8.57 | 4 | 4 | 1 | 0.00 | 39.25 (0.02) | 4.50 | 0.52 (14/27) | 30 | 0.00 | 0.80 | 0.00 |
+| `cook` | 90 | 3.54 | 77 | 40 | 9 | 4.62 | 38.46 (0.04) | 18.56 | 0.23 (387/1664) | 505 | 0.04 | 0.04 | 0.01 |
+| `courier` | 36 | 3.60 | 34 | 2 | 0 | 2.76 | 59.03 (0.00) | 11.06 | 0.11 (44/398) | 216 | 0.06 | 0.06 | 0.01 |
+| `cultist` | 19 | 3.37 | 13 | 10 | 6 | 0.47 | 16.21 (0.01) | 16.73 | 0.33 (104/316) | 43 | 0.67 | 0.67 | 0.29 |
+| `dancer` | 43 | 5.14 | 40 | 19 | 5 | 4.93 | 35.08 (0.03) | 16.16 | 0.29 (201/695) | 204 | 0.50 | 1.00 | 0.40 |
+| `day_labourer` | 53 | 6.21 | 35 | 29 | 21 | 0.31 | 8.83 (0.30) | 19.19 | 0.35 (361/1017) | 70 | 0.33 | 0.33 | 0.31 |
+| `elder` | 90 | 4.14 | 68 | 61 | 21 | 0.25 | 9.85 (0.35) | 16.42 | 0.38 (560/1478) | 362 | 0.20 | 0.21 | 1.81 |
+| `exec` | 27 | 5.60 | 14 | 14 | 6 | 0.00 | 1.14 (0.94) | 1.33 | 0.72 (26/36) | 6 | 1.00 | 1.00 | 42.98 |
+| `fabber` | 90 | 3.23 | 85 | 57 | 19 | 1.60 | 30.28 (0.02) | 11.02 | 0.29 (284/984) | 513 | 0.15 | 0.15 | 0.02 |
+| `fighter` | 24 | 4.68 | 22 | 10 | 3 | 5.13 | 29.97 (0.04) | 22.56 | 0.33 (173/520) | 115 | 1.00 | 1.00 | 0.08 |
+| `gang_leader` | 12 | 2.61 | 7 | 7 | 5 | 0.00 | 2.00 (0.57) | 10.17 | 0.54 (66/122) | 41 | 0.41 | 0.44 | 0.25 |
+| `gang_member` | 74 | 3.95 | 51 | 44 | 21 | 0.20 | 15.89 (0.03) | 16.92 | 0.42 (512/1224) | 140 | 0.37 | 0.40 | 0.25 |
+| `guard` | 90 | 3.91 | 54 | 37 | 22 | 0.93 | 5.62 (0.02) | 14.69 | 0.29 (385/1312) | 536 | 0.68 | 0.68 | 16.13 |
+| `gun` | 56 | 3.44 | 36 | 31 | 21 | 0.17 | 2.34 (0.45) | 12.13 | 0.28 (191/677) | 168 | 0.26 | 0.26 | 2.15 |
+| `homeless` | 54 | 5.74 | 22 | 8 | 7 | 1.64 | 11.27 (0.02) | 18.94 | 0.36 (367/1023) | 50 | 0.38 | 0.38 | 0.40 |
+| `joytoy` | 9 | 5.84 | 7 | 5 | 5 | 0.29 | 10.29 (0.00) | 15.11 | 0.54 (73/136) | 45 | 0.00 | 0.00 | 0.00 |
+| `loader` | 52 | 2.99 | 51 | 23 | 5 | 2.25 | 45.86 (0.01) | 16.27 | 0.17 (143/846) | 311 | 0.06 | 0.06 | 0.01 |
+| `night_shift` | 90 | 2.82 | 84 | 25 | 12 | 7.12 | 46.42 (0.01) | 23.20 | 0.07 (150/2088) | 517 | 0.80 | 0.80 | 0.53 |
+| `office_worker` | 90 | 4.21 | 83 | 78 | 35 | 0.24 | 29.08 (0.01) | 4.91 | 0.24 (105/442) | 531 | 0.07 | 0.07 | 0.02 |
+| `orderly` | 24 | 4.13 | 15 | 8 | 1 | 1.80 | 29.20 (0.04) | 14.75 | 0.32 (115/354) | 127 | 0.43 | 0.43 | 0.12 |
+| `purist` | 23 | 3.91 | 19 | 18 | 13 | 0.21 | 4.05 (0.10) | 12.26 | 0.46 (130/282) | 67 | 0.31 | 0.34 | 0.24 |
+| `reporter` | 12 | 4.23 | 10 | 6 | 2 | 6.10 | 33.70 (0.03) | 20.25 | 0.15 (36/243) | 71 | 0.00 | 0.00 | 0.00 |
+| `ripperdoc` | 25 | 3.97 | 19 | 16 | 9 | 0.79 | 21.00 (0.03) | 8.36 | 0.42 (87/209) | 123 | 0.44 | 0.44 | 0.19 |
+| `scav` | 15 | 3.74 | 8 | 6 | 3 | 0.75 | 5.25 (0.29) | 19.27 | 0.50 (144/289) | 10 | 0.60 | 0.60 | 0.71 |
+| `sick` | 31 | 3.55 | 20 | 17 | 9 | 0.30 | 6.70 (0.86) | 18.35 | 0.48 (273/569) | 100 | 0.22 | 0.22 | 2.80 |
+| `super` | 89 | 3.35 | 46 | 45 | 15 | 0.26 | 2.39 (0.85) | 18.05 | 0.28 (454/1595) | 519 | 0.19 | 0.19 | 0.14 |
+| `sweeper` | 90 | 2.97 | 79 | 66 | 57 | 0.54 | 8.05 (0.02) | 9.62 | 0.25 (215/866) | 522 | 0.00 | 0.00 | 0.00 |
+| `teacher` | 12 | 3.61 | 9 | 4 | 1 | 3.00 | 33.89 (0.02) | 11.08 | 0.17 (23/133) | 72 | 0.00 | 0.00 | 0.00 |
+| `vendor` | 14 | 2.32 | 5 | 5 | 3 | 0.00 | 3.20 (1.00) | 18.86 | 0.56 (147/264) | 4 | 0.25 | 0.25 | 0.22 |
+| `worker` | 90 | 3.01 | 75 | 73 | 37 | 0.17 | 2.32 (0.41) | 13.41 | 0.38 (460/1207) | 511 | 0.18 | 0.18 | 0.09 |
+| `worker_friday` | 90 | 3.92 | 81 | 72 | 33 | 0.43 | 8.28 (0.20) | 14.40 | 0.27 (355/1296) | 497 | 0.29 | 0.35 | 0.62 |
+| `all` | 1821 | 3.86 | 1427 | 997 | 460 | 1.78 | 22.06 (0.05) | 14.68 | 0.29 (7591/26630) | 8426 | 0.28 | 0.32 | 1.43 |
+
+### 20k, seed 42, day 20, 7 days (5 picks an archetype in one world)
+
+| archetype | n | idle h/d | married | never named | never co-located | named/wk | co-located h/wk (Stat spouse) | HangOuts/wk | empty | shifts | Served-able | any signal | bodies/h |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `arms_dealer` | 5 | 2.56 | 4 | 4 | 2 | 0.00 | 2.50 (1.00) | 15.00 | 0.44 (33/75) | 9 | 0.67 | 0.67 | 127.80 |
+| `bouncer` | 5 | 3.11 | 5 | 5 | 0 | 0.00 | 25.60 (0.05) | 27.60 | 0.59 (82/138) | 20 | 0.90 | 1.00 | 0.35 |
+| `builder` | 5 | 4.20 | 5 | 5 | 4 | 0.00 | 0.40 (1.00) | 22.80 | 0.44 (50/114) | 20 | 0.05 | 0.05 | 0.02 |
+| `buyer` | 5 | 4.20 | 1 | 1 | 1 | 0.00 | 0.00 (0.00) | 5.60 | 0.36 (10/28) | 2 | 0.50 | 0.50 | 0.00 |
+| `cabbie` | 5 | 4.10 | 3 | 2 | 2 | 0.33 | 1.33 (0.00) | 15.00 | 0.44 (33/75) | 27 | 0.11 | 0.11 | 0.04 |
+| `ceo` | 5 | 5.33 | 2 | 2 | 1 | 0.00 | 0.50 (1.00) | 1.60 | 0.25 (2/8) | 6 | 1.00 | 1.00 | 323.06 |
+| `club_staff` | 5 | 4.67 | 5 | 5 | 1 | 0.00 | 5.00 (0.32) | 27.60 | 0.45 (62/138) | 25 | 0.80 | 0.88 | 1.48 |
+| `companion` | 5 | 4.96 | 2 | 2 | 0 | 0.00 | 2.00 (1.00) | 25.20 | 0.66 (83/126) | 25 | 0.16 | 0.52 | 0.05 |
+| `cook` | 5 | 2.01 | 4 | 4 | 3 | 0.00 | 0.50 (1.00) | 30.40 | 0.66 (101/152) | 26 | 0.00 | 0.00 | 0.00 |
+| `courier` | 5 | 1.98 | 5 | 5 | 2 | 0.00 | 1.80 (1.00) | 15.00 | 0.23 (17/75) | 30 | 0.00 | 0.00 | 0.00 |
+| `cultist` | 5 | 2.22 | 4 | 3 | 1 | 0.65 | 28.25 (0.00) | 16.67 | 0.63 (43/68) | 18 | 0.61 | 0.61 | 0.25 |
+| `dancer` | 5 | 4.71 | 5 | 5 | 1 | 0.00 | 18.00 (0.03) | 21.00 | 0.52 (55/105) | 23 | 0.65 | 1.00 | 1.83 |
+| `day_labourer` | 5 | 8.63 | 4 | 4 | 0 | 0.00 | 14.00 (1.00) | 21.60 | 0.54 (58/108) | 2 | 0.00 | 0.00 | 0.00 |
+| `dealer` | 5 | 3.92 | 4 | 4 | 2 | 0.00 | 0.50 (1.00) | 9.20 | 0.67 (31/46) | 7 | 0.29 | 0.29 | 0.27 |
+| `elder` | 5 | 4.09 | 2 | 2 | 0 | 0.00 | 2.50 (1.00) | 25.40 | 0.53 (67/127) | 12 | 0.00 | 0.00 | 0.00 |
+| `exec` | 5 | 7.86 | 1 | 1 | 1 | 0.00 | 0.00 (0.00) | 8.60 | 0.56 (24/43) | 0 | 0.00 | 0.00 | 0.00 |
+| `fabber` | 5 | 3.52 | 5 | 5 | 1 | 0.00 | 2.60 (0.46) | 13.00 | 0.57 (37/65) | 26 | 0.19 | 0.19 | 0.04 |
+| `fighter` | 5 | 6.15 | 3 | 2 | 1 | 2.33 | 13.33 (0.05) | 5.80 | 0.17 (5/29) | 21 | 1.00 | 1.00 | 1.82 |
+| `fixer` | 5 | 2.59 | 4 | 4 | 3 | 0.00 | 0.50 (1.00) | 13.00 | 0.45 (29/65) | 28 | 0.39 | 0.39 | 0.10 |
+| `foreman` | 5 | 2.54 | 5 | 5 | 3 | 0.00 | 0.80 (1.00) | 14.80 | 0.34 (25/74) | 30 | 0.03 | 0.03 | 0.00 |
+| `forger` | 5 | 3.92 | 2 | 2 | 1 | 0.00 | 0.50 (1.00) | 4.40 | 0.36 (8/22) | 30 | 0.03 | 0.03 | 0.01 |
+| `gang_leader` | 5 | 0.88 | 5 | 4 | 0 | 0.40 | 6.20 (0.48) | 12.00 | 0.67 (40/60) | 9 | 0.33 | 0.33 | 0.60 |
+| `gang_member` | 5 | 5.45 | 3 | 2 | 1 | 2.33 | 10.67 (0.06) | 12.60 | 0.25 (16/63) | 15 | 0.07 | 0.07 | 0.01 |
+| `guard` | 5 | 3.97 | 3 | 3 | 3 | 0.00 | 0.00 (0.00) | 9.40 | 0.04 (2/47) | 29 | 1.00 | 1.00 | 325.75 |
+| `gun` | 5 | 6.22 | 4 | 4 | 3 | 0.00 | 2.25 (1.00) | 18.80 | 0.43 (40/94) | 14 | 0.07 | 0.07 | 0.02 |
+| `homeless` | 5 | 7.47 | 1 | 1 | 0 | 0.00 | 7.00 (1.00) | 17.80 | 0.42 (37/89) | 0 | 0.00 | 0.00 | 0.00 |
+| `joytoy` | 5 | 4.29 | 5 | 3 | 2 | 0.80 | 6.80 (0.09) | 26.40 | 0.42 (55/132) | 25 | 0.00 | 0.00 | 0.00 |
+| `loader` | 5 | 2.53 | 4 | 2 | 2 | 6.50 | 36.00 (0.00) | 14.00 | 0.21 (15/70) | 30 | 0.00 | 0.00 | 0.00 |
+| `madam` | 5 | 2.44 | 1 | 1 | 0 | 0.00 | 72.00 (0.00) | 15.00 | 0.63 (47/75) | 22 | 0.14 | 0.68 | 0.45 |
+| `night_shift` | 5 | 2.36 | 5 | 5 | 4 | 0.00 | 0.60 (1.00) | 34.40 | 0.62 (107/172) | 30 | 0.70 | 0.70 | 0.47 |
+| `office_worker` | 5 | 2.48 | 3 | 3 | 1 | 0.00 | 2.00 (1.00) | 18.00 | 0.66 (59/90) | 30 | 0.30 | 0.30 | 0.30 |
+| `orderly` | 5 | 2.65 | 3 | 3 | 2 | 0.00 | 1.00 (1.00) | 17.20 | 0.29 (25/86) | 30 | 0.47 | 0.47 | 0.02 |
+| `purist` | 5 | 5.71 | 4 | 4 | 3 | 0.00 | 0.25 (0.00) | 18.00 | 0.56 (50/90) | 6 | 0.00 | 0.00 | 0.00 |
+| `reporter` | 5 | 3.25 | 5 | 4 | 2 | 0.40 | 2.60 (0.38) | 22.80 | 0.39 (44/114) | 30 | 0.20 | 0.20 | 0.20 |
+| `ripperdoc` | 5 | 3.72 | 5 | 5 | 2 | 0.00 | 1.60 (1.00) | 5.00 | 0.28 (7/25) | 30 | 0.33 | 0.33 | 0.25 |
+| `runner` | 5 | 6.11 | 1 | 1 | 0 | 0.00 | 51.00 (0.00) | 7.54 | 0.24 (8/33) | 19 | 0.53 | 0.53 | 130.03 |
+| `scav` | 5 | 3.59 | 2 | 2 | 1 | 0.00 | 5.00 (0.00) | 10.80 | 0.13 (7/54) | 17 | 0.35 | 0.35 | 114.71 |
+| `sick` | 5 | 3.77 | 4 | 4 | 1 | 0.00 | 9.25 (1.00) | 18.40 | 0.52 (48/92) | 18 | 0.61 | 0.61 | 0.41 |
+| `street_worker` | 5 | 6.20 | 3 | 3 | 0 | 0.00 | 22.33 (1.00) | 28.60 | 0.57 (82/143) | 0 | 0.00 | 0.00 | 0.00 |
+| `super` | 5 | 3.06 | 2 | 2 | 0 | 0.00 | 3.00 (1.00) | 20.40 | 0.31 (32/102) | 30 | 0.37 | 0.37 | 0.19 |
+| `sweeper` | 5 | 1.65 | 4 | 4 | 4 | 0.00 | 0.00 (0.00) | 7.40 | 0.19 (7/37) | 30 | 0.83 | 0.83 | 0.20 |
+| `teacher` | 5 | 3.16 | 4 | 3 | 1 | 0.75 | 19.25 (0.05) | 14.80 | 0.55 (41/74) | 30 | 0.00 | 0.00 | 0.00 |
+| `vendor` | 5 | 2.37 | 2 | 2 | 1 | 0.00 | 3.50 (1.00) | 24.60 | 0.67 (83/123) | 3 | 0.00 | 0.00 | 0.00 |
+| `worker` | 5 | 2.20 | 4 | 4 | 1 | 0.00 | 2.25 (1.00) | 15.20 | 0.32 (24/76) | 28 | 0.11 | 0.11 | 0.04 |
+| `worker_friday` | 5 | 2.18 | 4 | 4 | 4 | 0.00 | 0.00 (0.00) | 13.80 | 0.33 (23/69) | 26 | 0.54 | 0.54 | 0.21 |
+| `all` | 228 | 3.88 | 159 | 148 | 70 | 0.34 | 7.05 (0.28) | 16.42 | 0.47 (1766/3719) | 906 | 0.33 | 0.37 | 19.71 |

@@ -342,8 +342,10 @@ The config is part of the saved `World`: a save resumes under the config it was 
 - `shadow` (`shadow.rs`): pins chosen agents Full and writes per-agent diaries (`.md` and `.jsonl`). `--pick
   <archetypes>` or `--agent INDEX`, `--count`, `--start-day`, `--days`, `--out DIR`, `--list` (candidates per
   archetype), `--no-pin` (watch the Statistical stretches), `--population N` (a generated city), `--assert` (the
-  behaviour tier: fixed windows, judged against `CHECKS`, non-zero exit on failure). Draws no RNG; its only sim hook
-  is `World::shadow_notes`.
+  behaviour tier: fixed windows, judged against `CHECKS`, non-zero exit on failure), `--lives` (the Lives at work
+  phase 0 baseline: the same windows over every archetype, printing idle hours, spouse meetings, empty HangOuts and
+  Served-able shifts per archetype; with `--population N` one window of the generated city). Draws no RNG; its only
+  sim hook is `World::shadow_notes`.
 - `gen-map --residents N --out FILE`, `import-graphics --src DIR --out FILE` (`docs/IMPORT_GRAPHICS.md`).
 
 Output analysis: `python tools/analyze_run.py run.csv events.tsv`.
