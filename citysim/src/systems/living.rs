@@ -23,6 +23,8 @@ pub fn run(world: &mut World) {
     crate::systems::weapons::hourly(world);
     // Jobs & lives phase 4: the street's night (nothing with `[vice]` off).
     crate::systems::vice::hourly(world);
+    // Lives at work phase 1 (§ 1.2): the service encounter's hourly pass.
+    crate::prof::timed!("service", crate::systems::service::hourly(world));
     // Jobs & lives phase 5: an episode under a chip ends the contract
     // (nothing with `[vice] chip` off).
     crate::systems::dollhouse::hourly(world);

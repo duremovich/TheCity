@@ -71,7 +71,9 @@ fn test_seeded_venues_niche_and_levers() {
 
 #[test]
 fn test_tip_is_customer_to_worker_and_untaxed() {
-    let mut w = world();
+    // Lives at work phase 1: with the encounter on, `service::serve` pays the
+    // tip (tests/service.rs); this pins the city the rule was written for.
+    let mut w = common::world_with(|c| c.lives.enabled = false);
     let b = w.buildings_of_kind(BuildingKind::Brothel)[0];
     // An evening tick, a tipped worker of the Brothel on duty off screen.
     w.tick = 20 * 60;
@@ -158,7 +160,9 @@ fn test_pimp_present_zeroes_the_assault_roll() {
 /// and the tips go round the tipped staff on duty, not all to the lowest id.
 #[test]
 fn test_bug7_club_dancers_tipped_in_turn() {
-    let mut w = world();
+    // Lives at work phase 1: the encounter's hash does the turn-about on the
+    // phase 1 city (`tests/service.rs::test_club_tips_go_round_the_dancers`).
+    let mut w = common::world_with(|c| c.lives.enabled = false);
     let tipped = |w: &World, s: EntityId| {
         w.comp::<Job>(s).is_some_and(|j| citysim::systems::trades::row_of(w, j.role).is_some_and(|r| r.tipped))
     };

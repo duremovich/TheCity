@@ -181,7 +181,13 @@ use crate::world::World;
 /// (written only when set), `Routine`, `Levers.public_school`,
 /// `Jobs2State.ages`, `[ages]`, `[buildings.school]`, the trade rows' `ages`
 /// key and the `Jobs2Cols` phase-7 columns (serde defaults).
-pub const SAVE_VERSION: u8 = 34;
+/// 35: Lives at work phase 1, the service encounter (docs/LIVES_AT_WORK.md
+/// § 1): the appended `MemoryKind::Served`, `EventKind::Served`,
+/// `Flow::MadamCut`, `ServeKind`; `World.regulars` (written only when
+/// non-empty), `[lives]`, `[service]`, `[[serves]]` (written only on) and
+/// the `Jobs2Cols` phase-1 columns (serde defaults). An off save is
+/// byte-identical to version 34's.
+pub const SAVE_VERSION: u8 = 35;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

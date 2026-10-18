@@ -644,9 +644,43 @@ pub struct Jobs2Cols {
     pub maimed: u32,
     pub maimed_new: u32,
     pub prosthetics: u32,
+    /// Lives at work phase 1 (docs/LIVES_AT_WORK.md § 1; deviation: the
+    /// spec's `stats.current.jobs` home is this group): encounters served
+    /// today by `ServeKind` (`ServeKind::ALL` order), the hour's unserved,
+    /// staffed shifts of a serving row ended (the parity denominator), the
+    /// cook's meals served and staff meals taken, regulars made, door
+    /// refusals, ejections, and the madam's cut (`Flow::MadamCut`).
+    /// (Left out of a save at zero, so an off save is byte-identical.)
+    #[serde(skip_serializing_if = "served_is_zero")]
+    pub served: [u32; 15],
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub served_waited: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub serve_shifts: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub cooked: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub staff_meals: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub regulars_made: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub door_refusals: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub ejections: u32,
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub flow_madam_cut: i64,
+}
+
+fn served_is_zero(v: &[u32; 15]) -> bool {
+    v.iter().all(|&n| n == 0)
 }
 
 impl Jobs2Cols {
+    /// Lives at work phase 1: every encounter served today.
+    pub fn served_total(&self) -> u32 {
+        self.served.iter().sum()
+    }
+
     /// The header's names, comma-separated, in column order.
     pub fn header() -> String {
         [
@@ -835,6 +869,24 @@ impl Jobs2Cols {
             "maimed_new",
             "prosthetics",
         ]
+        .into_iter()
+        .map(str::to_string)
+        .chain(crate::components::ServeKind::ALL.iter().map(|k| format!("served_{}", k.label())))
+        .chain(
+            [
+                "served_waited",
+                "serve_shifts",
+                "cooked",
+                "staff_meals",
+                "regulars_made",
+                "door_refusals",
+                "ejections",
+                "flow_madam_cut",
+            ]
+            .into_iter()
+            .map(str::to_string),
+        )
+        .collect::<Vec<String>>()
         .join(",")
     }
 
@@ -1026,6 +1078,19 @@ impl Jobs2Cols {
             self.maimed_new.to_string(),
             self.prosthetics.to_string(),
         ]
+        .into_iter()
+        .chain(self.served.iter().map(u32::to_string))
+        .chain([
+            self.served_waited.to_string(),
+            self.serve_shifts.to_string(),
+            self.cooked.to_string(),
+            self.staff_meals.to_string(),
+            self.regulars_made.to_string(),
+            self.door_refusals.to_string(),
+            self.ejections.to_string(),
+            self.flow_madam_cut.to_string(),
+        ])
+        .collect::<Vec<String>>()
         .join(",")
     }
 }

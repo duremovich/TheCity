@@ -507,3 +507,48 @@ Measured 2026-10-18 on main `23a161d` plus the phase 0 probes, before any phase 
 | `worker` | 5 | 2.20 | 4 | 4 | 1 | 0.00 | 2.25 (1.00) | 15.20 | 0.32 (24/76) | 28 | 0.11 | 0.11 | 0.04 |
 | `worker_friday` | 5 | 2.18 | 4 | 4 | 4 | 0.00 | 0.00 (0.00) | 13.80 | 0.33 (23/69) | 26 | 0.54 | 0.54 | 0.21 |
 | `all` | 228 | 3.88 | 159 | 148 | 70 | 0.34 | 7.05 (0.28) | 16.42 | 0.47 (1766/3719) | 906 | 0.33 | 0.37 | 19.71 |
+
+---
+
+## 14. Implemented: deviations
+
+### Phase 1 (2026-10-18): the encounter, venues and the Clinic
+
+Built as § 1, § 2.1 and § 2.2's ripperdoc and orderly, under `[lives] enabled` (master, `CITYSIM_LIVES_OFF=1`) and `[service] venues`; `systems/service.rs`; SAVE_VERSION 35. Deviations from the spec text:
+
+- **The CSV home.** The counters live in `Jobs2Cols` (`served_<kind>` for every `ServeKind`, `served_waited`, `serve_shifts`, `cooked`, `staff_meals`, `regulars_made`, `door_refusals`, `ejections`, `flow_madam_cut`), not `stats.current.jobs`: the Jobs & lives columns are that group.
+- **The encounter resolves at the arrival's minute**, not at an hourly drain of a queue. `World::queues` is replaced by `World::service_room` (unsaved): each server's encounters taken this hour against its row's `per_hour`; `arrive` picks, among the servers on duty with room, the lowest `hash(PURPOSE_SERVE, place, served, hour)` (D6) and serves at once, FIFO by arrival; nobody on duty or every counter full is the "waited" outcome (`served_waited`, no event, no memory). Why: the first build drained hourly and lost 62 % of visits as waited, half of them at shift boundaries (a 17:40 drink read at 18:00 against a 09-18 bartender) and the Statistical evening's one-hour batch (21:00), and with them 63 % of the tips (D4: the city's money circuit is not this milestone's subject). Presence is now read when the visitor is there, as `tipped_for` read it. `service::hourly` only prunes the room ledger and queues the madam's `Staff` encounters.
+- **The tip** is paid in `service::serve` to the server named when its trade row is `tipped` (dancer, companion, brothel worker); when the hash named an untipped server (a Club's Host, a StripClub's barkeep), the tip goes to the tipped worker on duty the hash names (`PURPOSE_TIP`, room not counted): the Host serves the visit, the dancer is tipped, and the flow main paid is re-routed, not removed (D4). The first build paid the tip only to the encounter's server and lost 62 % of the tips (a Club's 10 Hosts against 3 dancers). A visit at an hour with nobody tipped on duty pays no tip, as `tipped_for` paid none; a rest day or a Statistical no-show (`present`) now withholds it where `tipped_for` did not. **The madam's cut** is `round(0.3 × tip)`: at the 2k Brothel's 1-coin tips it rounds to 0, so `flow_madam_cut` reads 0 over 42-47 × 120 days (the mechanism is unit-tested at a 20-coin price); a Spire brothel's 2-coin tip is the first that pays her. Printed, open for the gate.
+- **Who is behind the counter.** `tests/service.rs::service_probe` (diag) prints per venue kind the share of building-hours with a server on duty and why not: the Bar's Bartender and the Arcade's Attendant hold `[world] shift_day` (09-18) while the drinking and the Statistical evening are 18-24 (`demography::hire` gives the evening shift to Hosts, Fighters, Croupiers and Concierges only), and Clubs trade by day with evening Hosts. Not phase 1's to move (a shift change moves wages, leisure and the table); printed, open for the gate.
+- **The madam's `Staff` encounter** fires at the first hour of each worker's shift (the hourly pass has no shift-start hook and both shifts end together), not "every shift" at its end. The madam is not yet named in the house's `Hire`/`Layoff` text (`industry::foreman_note` reads the industries' foreman; the Brothel is a venue): left to phase 6's foreman work.
+- **`stabilise_no_orderly_mult` is not built**: `wounded::on_stabilise` has no save roll to multiply (a carried-in body is always stabilised at the Clinic); the orderly is the triage by presence only (the `Patient` queue, a memory, the regulars). The key is not in config (nothing would read it).
+- **The regular's first-meeting affinity** is a hashed `0.1 + 0.3 × u` (`PURPOSE_REGULAR`), not `colocation`'s `first_affinity_with` (which draws the world stream).
+- **The door refusal** is read at the exec's failed start of an `Enjoy`/`EatOut`/`Gamble` inside the venue against `door_ok` (a pure read), not inside `door_ok` itself (which the venue scorer also calls). The scorer already filters by `door_ok`, so refusals are rare (a state change between the pick and the arrival).
+- **The ejection** runs after the fight resolves (the Assault is raised first): the attacker's plan is aborted and the attacker put at the door; the fight is not interrupted mid-way.
+- **The chip host's encounter** runs and writes the guest's memory; the host's is dropped by `World::remember` (D5, as designed).
+- **A Clinic's over-the-counter sale** (`assets::buy_noted` at a Clinic, a non-implant) queues a `Patient`; an implant's install queues once, in `chrome::installed_now` (the gang's install included).
+- **The parity row** (`tests/lod.rs`): encounters per staffed shift of a serving row, pooled over the six seeds, is a **printed FINDING, not the assert § 6 planned**: it read Full 0.707 against Statistical 0.877 (27,684 / 26,694 staffed shifts; 24 % apart). The pass is world-side, but § 1.2's presence rule is not symmetric: a Full server must be inside the building, so its meal, walk or late commute loses the hour's arrivals, where a Statistical server is credited by `lod::shift_attended`. Demoted with the reason (CLAUDE.md rule 2), not widened; the gate decides whether a Full server on shift is credited while momentarily out (which would make the row assertable). The test's `actor share law0/law1` rows were already failing on main (SHADOW_V4 "Left open" 1).
+
+The Statistical mirror of each mechanism is § 6's row, unchanged: the hooks fire from `stat_visit`, `stat_shop` (through `assets::buy`), the Statistical detox/treat paths and `lod::stat_work`'s shift end as from the bodies' paths; a Statistical server is counted present on `lod::shift_attended`.
+
+**Measured, phase 1 against main `e5525ee`** (42-47 × 120 days, means a day from day 30; 20k seed 42 × 30 days from day 5; the phase 1 report has the per-seed totals):
+
+| | main 2k | phase 1 2k | 20k main | 20k phase 1 |
+|---|---|---|---|---|
+| encounters served a day (`served_*`) | — | 126 visits, 6.3 patients, 4.2 staff, 0 attendees | — | 1,190 / 43 / 51 / 0 |
+| waited (nobody on duty, or every counter full) | — | 214 | — | 2,140 |
+| staffed shifts of a serving row | — | 183 | — | 1,570 |
+| regulars made | — | 0.87 | — | 43 |
+| staff meals (cooks) | — | 39 | — | 340 |
+| door refusals / ejections | — | 0.013 / 0.004 | — | 0.16 / 0 |
+| madam's cut | — | 0 (rounds to 0 at a 1-coin tip) | — | 0 |
+| tips | 104 | 89 (−15 %: `present` withholds a rest day's and a no-show's tip; `tipped_for` did not) | 874 | 781 (−11 %) |
+| strip / brothel / companion visits | 8.7 / 16.1 / 3.4 | 8.6 / 16.3 / 3.2 | 105 / 106 / 25 | 110 / 113 / 25 |
+| Murders (120 d, per seed 42-47) | 94, 61, 112, 59, 111, 28 (mean 78) | 85, 89, 197, 148, 19, 94 (mean 105) | — | — |
+| deaths by violence a day | 1.14 | 1.45 | 5.5 | 4.1 |
+| J24 employed share / J25 homeless share (seed 42) | 0.770 / 0.020 | 0.764 / 0.023 | — | — |
+| thefts / arrests a day | 2.86 / 25.0 | 2.72 / 24.0 | 39.4 / 125 | 37.6 / 119 |
+| ticks/s, alternating A/B, seed 42 × 30 d, 3 rounds each | 4,735 / 5,008 / 5,300 | 6,383 / 4,358 / 6,301 (no regression; the batch runs' −24 % was six runs in parallel) | 223 | 225 |
+| save size, 30 d seed 42 (`--save-at 43200`, no report) | 12,557,114 B | 12,398,418 B on (the `regulars` ledger is 8 entries a server; the rest is the city's own drift); off 12,557,114 B, the version token aside | | |
+
+Readings. The Murders swing both ways by seed (46: 111 → 19; 44: 112 → 197) with the mean up a third: the encounter's edges (a regular is an Acquaintance, every repeat visit `interacted`) and the re-routed tips move a chaotic city's trajectory; no mechanism of the phase raises violence directly; printed, not retuned (the harsh-city decision stands). 63 % of arrivals wait because nobody is on duty: the Bar's Bartender and the Arcade's Attendant hold the day shift (09-18) while the drinking and the Statistical evening are 18-24, the NoodleBar's Cook likewise (`cooked` 0.2 a day against 2-3 meals out), and Clubs trade by day with evening Hosts (`service_probe`); the gate decides whether the venue shifts move. No bout has a bettor, so the fighter's `Attendee` row never fires; the madam's cut rounds to 0 at the 2k Brothel's 1-coin tips. The lives probe's new column (`met`: shifts with an encounter) reads 0.40 for club staff, 0.61 dancers, 0.86 companions, 0.73 madams, 0.22 orderlies, 0.14 ripperdocs, 0.01 cooks, 0 bouncers and fighters (`shadow --lives`, 2k, day 19).

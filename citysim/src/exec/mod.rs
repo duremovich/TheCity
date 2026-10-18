@@ -803,6 +803,17 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                 let ctx = step_ctx(world, id, kind);
                 let ws = crate::goap::WorldState::observe(world, id, ctx.target);
                 if !kind.preconditions(&ws, &ctx) || !actions::can_start(world, id, kind, step.target) {
+                    // Lives at work phase 1 (§ 2.1): a venue step failing to
+                    // start inside its venue against the door policy is a
+                    // refusal at the door (the bouncer's encounter).
+                    if matches!(kind, ActionKind::Enjoy | ActionKind::EatOut | ActionKind::Gamble) {
+                        let here = world.comp::<Position>(id).and_then(|p| p.building);
+                        if let Some(b) = step.target.filter(|&b| here == Some(b)) {
+                            if !crate::systems::leisure::door_ok(world, id, b) {
+                                crate::systems::service::refused(world, id, b);
+                            }
+                        }
+                    }
                     return StepResult::Failed(FailReason::PreconditionLost);
                 }
             }

@@ -58,7 +58,7 @@ read it before moving one.
 | 20 | `systems::social::run` | per tick colocation; daily: `social::daily` |
 | 21 | `systems::gang::run` | per tick per gang; daily: `succession::daily`, the faction brain |
 | 22 | `systems::corp_brain::run` | daily: rescoring, `corps::daily`; on shocks |
-| 23 | `systems::living::run` | hourly: `leisure`, `charity`, `industry`, `streetwork`, `weapons`, `vice`, `dollhouse`; daily: the L2 passes (`jobs`, `budget`, `world_market`, …) |
+| 23 | `systems::living::run` | hourly: `leisure`, `charity`, `industry`, `streetwork`, `weapons`, `vice`, `service::hourly` (the encounter pass), `dollhouse`; daily: the L2 passes (`jobs`, `budget`, `world_market`, …) |
 | 24 | `systems::outside::run` | hourly: ambient sales; daily: `parents::daily`, `abroad::daily` |
 | 25 | `systems::contracts::run` | hourly; at `[fixers] match_hour`: `match_day`; daily: expiries |
 | 26-27 | `systems::leverage::run`, `systems::captives::run` | daily; 23:59 snapshot |
@@ -196,7 +196,7 @@ Each file's `//!` header names its spec section.
 | `ambient.rs` | the Ambient tier (section 4) | `founding.rs` | building on a Lot, incorporation | `reputation.rs` | reputation rebuilt at midnight from what is known |
 | `assets.rs` | owned things: upkeep, finance, repossession, wear, loot, inheritance; the derived `Kit` | `fviolence.rs` | the order-rates ledger of faction violence (feeds the Statistical tier) | `riot.rs` | district riots |
 | `life.rs` | L1 helpers that make a day less of a walk | `gang.rs` | recruitment, ranks, extortion, loot, fencing, the gang economy | `robots.rs` | security robots |
-| `attention.rs` | each faction's attention pool | `gossip.rs` | deeds travelling into `Memory.heard`, district pools | `security.rs` | the one tier contest (`p = clamp(0.5 + contest_step × …)`) |
+| `attention.rs` | each faction's attention pool | `gossip.rs` | deeds travelling into `Memory.heard`, district pools | `security.rs` | the one tier contest (`p = clamp(0.5 + contest_step × …)`); `service.rs` | the service encounter: queues, the hourly pass, regulars, the door, the staff meal (`[lives]`, `[service]`, `[[serves]]`) |
 | `bind.rs` | holes and the binder (section 10) | `governance.rs` | corp boards, votes, campaigns | `social.rs` | edges by colocation, drift, promotion, pruning |
 | `bins.rs` | bins behind Markets and Homes, the dive (`[sickness]`) | `gray.rs` | the gray market, black clinics (`[gray]`) | `stat_policy.rs` | the Statistical policy (table or MLP) |
 | `braindance.rs` | braindance studios and recorders (`[vice] bd`) | `grudges.rs` | grudges, inheritance, vendettas, guarding the body | `stats.rs` | the end-of-day snapshot and `Trace` |
@@ -260,6 +260,7 @@ Outside `systems/`: `needs.rs`, `mood.rs`, `personality.rs` (agent internals), `
 | `[vehicles]` | `systems/vehicles.rs` | `[hostage]` | `systems/captives.rs` | `[gray]`, `[[gray.gang_types]]` | `systems/gray.rs` |
 | `[shop]` | `systems/assets.rs`, `vehicles.rs` | `[wounded]`, `[trauma]` | `systems/wounded.rs` | `[faith]`, `[[faith.creeds]]` | `systems/faith.rs`, `creeds.rs` |
 | `[stims]` | `systems/stims.rs` | `[governance]` | `systems/governance.rs` | `[ages]` | `systems/ages.rs` |
+| `[lives]` | `systems/service.rs` (`service::on`, the milestone's master switch) | `[service]` | `systems/service.rs` | `[[serves]]` | `systems/service.rs` (`row_for`; keys checked by `Config::unresolved_names`) |
 
 The config is part of the saved `World`: a save resumes under the config it was written with, not the current
 `config.toml`. Rules for adding keys: `.claude/rules/config.md`.

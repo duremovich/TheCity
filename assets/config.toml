@@ -3657,3 +3657,184 @@ p_maimed = 0.25                    # a stabilised survivor left maimed (legs or 
 p_press_maim = 0.0005              # a packer's shift-hour at the press
 maimed_work = 0.2                  # a level's work output lost
 maimed_beg_mult = 1.5              # a maimed beggar's odds x this
+
+# ---------------------------------------------------------------------------
+# Lives at work (docs/LIVES_AT_WORK.md D13): the milestone's master switch (`CITYSIM_LIVES_OFF=1`, which also
+# clears [service] and [[serves]] so an off save is byte-identical to main's). Read by systems/service.rs.
+[lives]
+enabled = true
+
+# Lives at work phase 1 (docs/LIVES_AT_WORK.md § 1, § 2.1): the service encounter's switches and numbers, read by
+# systems/service.rs. `venues` is phase 1's (venues, vice, the Clinic); civic, street and tower are phases 3-5's,
+# reserved and unread. Placeholders.
+[service]
+venues = true
+civic = false
+street = false
+tower = false
+madam_cut = 0.3                    # § 2.1: the madam's share of each tip at her Brothel, worker -> madam (Flow::MadamCut)
+p_eject = 0.5                      # § 2.1: an Assault inside a kept venue is an ejection on this x (bouncer fighting - attacker fighting)
+staff_meal = true                  # § 2.1: a Cook takes one meal from the NoodleBar's stock at shift end (every tier; V4: a cook steals food)
+served_salience = 0.15             # D5: a Served memory's salience (its mood weight is 0 whatever the valence)
+
+# Lives at work phase 1 (docs/LIVES_AT_WORK.md § 1.1, § 2.1, § 2.2): the [[serves]] rows, one per serving trade.
+# `key` is a [[trades]] id or a legacy Role name (Config::unresolved_names checks it); `kind` names the queue's
+# source (§ 2); `per_hour` the encounters one server takes an hour; `minutes` the diary's share of the hour;
+# `skill`/`skill_gain` what a meeting trains; `regular_after` encounters within `regular_days` make a regular (an
+# Acquaintance edge; 0 never); `valence` the Served memory's; `event_on` the outcomes that print an event (§ 1.4:
+# refusal, ejection, a companion's new regular; `done` would print every encounter and is for a diagnosis only).
+[[serves]]
+key = "Bartender"                  # a Bar's Drink (exec Drink, stat_visit)
+kind = "visit"
+per_hour = 12
+minutes = 5
+skill = "persuasion"
+skill_gain = 0.0005
+regular_after = 5
+regular_days = 14
+valence = 0.1
+
+[[serves]]
+key = "barkeep"                    # a StripClub's or Brothel's bar (the visits are the tipped rows'; no source yet)
+kind = "visit"
+per_hour = 12
+minutes = 5
+skill = "persuasion"
+skill_gain = 0.0005
+regular_after = 5
+regular_days = 14
+valence = 0.1
+
+[[serves]]
+key = "Host"                       # a Club's visit (Enjoy); the dancers share the Club's queue
+kind = "visit"
+per_hour = 8
+minutes = 8
+skill = "persuasion"
+skill_gain = 0.0005
+regular_after = 4
+regular_days = 14
+valence = 0.1
+
+[[serves]]
+key = "Attendant"                  # an Arcade's visit
+kind = "visit"
+per_hour = 8
+minutes = 8
+regular_after = 4
+regular_days = 14
+valence = 0.1
+
+[[serves]]
+key = "Croupier"                   # a Den's table game (Gamble)
+kind = "visit"
+per_hour = 6
+minutes = 10
+skill = "persuasion"
+skill_gain = 0.0005
+regular_after = 4
+regular_days = 14
+valence = 0.0
+
+[[serves]]
+key = "Cook"                       # a NoodleBar's meal (EatOut, stat_visit); the staff meal is [service] staff_meal
+kind = "visit"
+per_hour = 10
+minutes = 6
+regular_after = 5
+regular_days = 14
+valence = 0.1
+
+[[serves]]
+key = "dancer"                     # a StripClub's or Club's visit; tipped (the tip to the dancer the hash names)
+kind = "visit"
+per_hour = 6
+minutes = 10
+skill = "persuasion"
+skill_gain = 0.001
+regular_after = 3
+regular_days = 14
+valence = 0.1
+
+[[serves]]
+key = "companion"                  # a Lounge visit; tipped; a regular after 3 is the M16b leverage hook (an event)
+kind = "visit"
+per_hour = 3
+minutes = 20
+skill = "persuasion"
+skill_gain = 0.001
+regular_after = 3
+regular_days = 14
+valence = 0.1
+event_on = ["regular"]
+
+[[serves]]
+key = "brothel_worker"             # a Brothel visit; tipped; the madam takes madam_cut of the tip
+kind = "visit"
+per_hour = 3
+minutes = 20
+skill = "persuasion"
+skill_gain = 0.001
+regular_after = 3
+regular_days = 14
+valence = 0.0
+event_on = ["regular"]
+
+[[serves]]
+key = "chip_host"                  # a Dollhouse visit; the memory is never written under the chip (D9's gap shows)
+kind = "visit"
+per_hour = 3
+minutes = 20
+regular_after = 0
+valence = 0.0
+
+[[serves]]
+key = "bouncer"                    # the door: a refusal (Refused) and an ejection (Ejected), both events
+kind = "door"
+per_hour = 20
+minutes = 3
+skill = "fighting"
+skill_gain = 0.0005
+regular_after = 0
+valence = -0.1
+event_on = ["refused", "ejected"]
+
+[[serves]]
+key = "madam"                      # every shift of her Brothel's workers (Staff): the house's foreman
+kind = "staff"
+per_hour = 8
+minutes = 5
+skill = "persuasion"
+skill_gain = 0.0005
+regular_after = 0
+valence = 0.0
+
+[[serves]]
+key = "Fighter"                    # a bout's bettors (Attendee)
+kind = "attendee"
+per_hour = 30
+minutes = 2
+regular_after = 4
+regular_days = 14
+valence = 0.1
+
+[[serves]]
+key = "Ripperdoc"                  # a Clinic sale, install, therapy, detox, oncology, stabilisation (Patient)
+kind = "patient"
+per_hour = 4
+minutes = 15
+skill = "knowledge"
+skill_gain = 0.001
+regular_after = 3
+regular_days = 30
+valence = 0.0
+
+[[serves]]
+key = "orderly"                    # the triage: the same Clinic queue (a stabilisation, a detox)
+kind = "patient"
+per_hour = 6
+minutes = 10
+skill = "knowledge"
+skill_gain = 0.0005
+regular_after = 0
+valence = 0.0

@@ -1785,6 +1785,14 @@ pub fn buy_noted(
         text.push_str(n);
     }
     world.push_event(EventKind::AssetBought, &[buyer, seller, a], text);
+    // Lives at work phase 1 (§ 2.2): a Clinic's over-the-counter sale is
+    // the doctor's encounter (an implant's install queues in
+    // `chrome::installed_now`, once).
+    if !matches!(kind, AssetKind::Implant(_))
+        && world.comp::<Building>(seller).is_some_and(|bd| bd.kind == BuildingKind::Clinic)
+    {
+        crate::systems::service::arrive(world, buyer, seller, crate::components::ServeKind::Patient, price);
+    }
     Ok(a)
 }
 

@@ -156,6 +156,10 @@ fn test_full_vs_statistical_within_15pct() {
         venues: [[f64; 2]; VENUE_KINDS.len()],
         // All paid venue visits and their coins per 100 adult-days.
         paid: [f64; 2],
+        // Lives at work phase 1 (§ 6): service encounters and the staffed
+        // shifts of serving rows (world-side by construction; the row is
+        // encounters per staffed shift, pooled over the seeds).
+        encounters: [f64; 2],
     }
     // The paid-leisure mirror (Jobs & lives phase 7b): the venue kinds of
     // the calibration city's ladder.
@@ -301,6 +305,12 @@ fn test_full_vs_statistical_within_15pct() {
                 let ad = adult_days.max(1) as f64 / 100.0;
                 [n as f64 / ad, c as f64 / ad]
             },
+            encounters: {
+                let j = |f: fn(&citysim::stats::Jobs2Cols) -> u32| {
+                    w.stats.history.iter().map(|r| r.jobs2.as_ref().map_or(0.0, |j| f64::from(f(j)))).sum::<f64>()
+                };
+                [j(|c| c.served_total()), j(|c| c.serve_shifts)]
+            },
         }
     }
     // Six cities per tier, pooled: one 30-day city's theft rate varies by a
@@ -317,7 +327,8 @@ fn test_full_vs_statistical_within_15pct() {
         let venues =
             std::array::from_fn(|k| std::array::from_fn(|j| runs.iter().map(|r| r.venues[k][j]).sum::<f64>() / n));
         let paid = std::array::from_fn(|j| runs.iter().map(|r| r.paid[j]).sum::<f64>() / n);
-        Run { rates, actors: counts.map(|c| c / total), venues, paid }
+        let encounters = std::array::from_fn(|j| runs.iter().map(|r| r.encounters[j]).sum::<f64>());
+        Run { rates, actors: counts.map(|c| c / total), venues, paid, encounters }
     };
     let full = pooled(Lod::Full);
     let stat = pooled(Lod::Statistical);
@@ -390,6 +401,24 @@ fn test_full_vs_statistical_within_15pct() {
         if (f - s).abs() > tolerance {
             failures.push(format!("actor share law{b}: Full {f:.3} vs Statistical {s:.3}"));
         }
+    }
+    // Lives at work phase 1 (§ 6): encounters per staffed shift of a
+    // serving row, pooled over the seeds. The pass is world-side, but the
+    // presence rule is not symmetric: a Full server must be inside the
+    // building (a meal, a walk or a late commute loses the hour's
+    // arrivals) where a Statistical one is credited by the clock
+    // (`lod::shift_attended`). Read 0.707 Full against 0.877 Statistical on
+    // the phase 1 tree (24 % apart): a printed FINDING, not an assert, with
+    // the reason (CLAUDE.md rule 2; the gate decides whether a Full server
+    // on shift is credited while momentarily out). Zeros with the encounter off.
+    {
+        let per_shift = |r: &Run| if r.encounters[1] > 0.0 { r.encounters[0] / r.encounters[1] } else { 0.0 };
+        let (f, s) = (per_shift(&full), per_shift(&stat));
+        eprintln!(
+            "FINDING encounters/shift  Full {f:7.3}  Statistical {s:7.3}  ({} / {} shifts; the Full server must be \
+             inside, the Statistical one is credited by the clock)",
+            full.encounters[1], stat.encounters[1]
+        );
     }
     assert!(failures.is_empty(), "{failures:?}");
 }

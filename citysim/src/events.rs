@@ -423,10 +423,15 @@ pub enum EventKind {
     CrateSeized,
     /// The Civic Clerk sold a weapons licence.
     LicenceSold,
+    // --- Lives at work phase 1 (docs/LIVES_AT_WORK.md § 1.4).
+    /// `[server, served, place]`: a service encounter's notable outcome (a
+    /// door refusal, an ejection, a new regular), only for the outcomes a
+    /// `[[serves]]` row's `event_on` names.
+    Served,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 213] = [
+    pub const ALL: [EventKind; 214] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -640,6 +645,7 @@ impl EventKind {
         EventKind::CrateLanded,
         EventKind::CrateSeized,
         EventKind::LicenceSold,
+        EventKind::Served,
     ];
 }
 

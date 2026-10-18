@@ -401,6 +401,17 @@ fn run_city(seed: u64, days: u64, cfg: Config) -> SeedRun {
                 ("tinker repair", j.tinker_repairs),
                 ("rickshaw trip", j.rickshaw_trips),
                 ("outage", j.outages),
+                // Lives at work phase 1 (docs/LIVES_AT_WORK.md § 9.1).
+                ("Served visit", j.served[0]),
+                ("Served patient", j.served[1]),
+                ("Served staff", j.served[10]),
+                ("Served attendee", j.served[12]),
+                ("regular made", j.regulars_made),
+                ("door refusal", j.door_refusals),
+                ("ejection", j.ejections),
+                ("staff meal", j.staff_meals),
+                ("madam's cut", pos(j.flow_madam_cut)),
+                ("meal cooked", j.cooked),
             ] {
                 *r.marks.entry(k).or_insert(0) += v;
             }
@@ -932,6 +943,18 @@ fn jobs2_printed() -> Vec<Mechanism> {
         "organ made",
         "scav kill",
         "elder taken in",
+        // Lives at work phase 1 (§ 9.1, printed until the gate promotes them;
+        // 42-44 x 120 on the phase 1 tree, `tests/service.rs` carries each).
+        "Served visit",    // [15090, 16381, 15339]
+        "Served patient",  // [771, 546, 717]
+        "Served staff",    // [462, 455, 496]
+        "Served attendee", // [0, 0, 0]: no bout had a bettor (bets paid 0 at every Bout)
+        "regular made",    // [169, 151, 189]
+        "door refusal",    // [0, 0, 1]: the venue scorer already filters by door_ok
+        "ejection",        // [0, 1, 1]: an Assault inside a kept venue is rare
+        "staff meal",      // [4827, 4918, 4563]
+        "madam's cut",     // [0, 0, 0]: round(0.3 x a 1-coin tip) = 0 at the 2k Brothel
+        "meal cooked",     // [21, 17, 19]: the cooks hold [world] shift_day, the NoodleBar's evening is unserved
     ]
     .into_iter()
     .map(|k| (k, m(k)))

@@ -1519,6 +1519,8 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
     }
     let shift_ends_soon = job.shift_end(tick).is_some_and(|end| end <= tick + TICKS_PER_HOUR);
     if shift_ends_soon && job.last_shift_day != Some(key) {
+        // Lives at work phase 1 (§ 2.1): the shift-end rule as a body's `end_shift`.
+        crate::systems::service::shift_end(world, id);
         if let Some(j) = world.comp_mut::<Job>(id) {
             j.last_shift_day = Some(key);
             j.days_unpaid = j.days_unpaid.saturating_add(1);

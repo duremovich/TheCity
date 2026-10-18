@@ -291,6 +291,9 @@ pub enum Flow {
     Gray,
     /// § 8: a follower's tithe into a church's purse (untaxed).
     Tithe,
+    /// Lives at work phase 1 (§ 2.1): the madam's cut of a tip at her
+    /// house, worker -> madam (untaxed; `Jobs2Cols.flow_madam_cut`).
+    MadamCut,
     /// § 4 (phase 3): a dealer's weapon sale, buyer -> the gang, and the
     /// dealer's cut (untaxed, `Flow::Stims`'s shape).
     Arms,
@@ -425,6 +428,8 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         Flow::Tip => row.jobs2.get_or_insert_with(Default::default).tips += coins,
         // Jobs & lives phase 6: the tithes' column.
         Flow::Tithe => row.jobs2.get_or_insert_with(Default::default).tithes += coins,
+        // Lives at work phase 1: the madam's cut.
+        Flow::MadamCut => row.jobs2.get_or_insert_with(Default::default).flow_madam_cut += coins,
         Flow::CabFare | Flow::StreetCut | Flow::Gray => row.flow_other += coins,
     }
 }

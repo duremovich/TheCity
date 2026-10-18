@@ -517,6 +517,9 @@ pub fn on_stabilise(world: &mut World, id: EntityId, target: Option<EntityId>) -
     }
     // Jobs & lives phase 6 (§ 7): a unit off the Clinic's shelf (nothing off).
     crate::systems::gray::on_stabilise(world, clinic);
+    // Lives at work phase 1 (§ 2.2): the downed is the doctor's and the
+    // orderly's patient (the triage).
+    crate::systems::service::arrive(world, w, clinic, crate::components::ServeKind::Patient, price);
     let row = &mut world.stats.current.wounded;
     row.stabilised += 1;
     match how {
