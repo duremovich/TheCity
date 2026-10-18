@@ -642,12 +642,25 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
     // L2 shadow fixes item 16: a dealer off its busy hours has no GangWork
     // (it fell through to the order's shakedowns and fights: Murders on
     // 42-47 rose 215 -> 364 with the hours gate alone).
+    // Lives at work phase 4b (§ 2.3): a corner dealer as a Bar's; the corner
+    // is a tile, so his target is himself (no walk scored; `stims::corner_plan`
+    // walks him to it).
+    let site = crate::systems::stims::site_today(world, id);
     if !crate::systems::fixes::deal_hours(world) {
-        if crate::systems::stims::deals_today(world, id).is_some() {
+        if site.is_some() {
             return None;
         }
-    } else if let Some(bar) = crate::systems::stims::dealer_target(world, id) {
-        return Some((bar, following_order(world, id)));
+    } else {
+        match site {
+            Some(crate::systems::stims::DealSite::Venue(bar)) => return Some((bar, following_order(world, id))),
+            Some(crate::systems::stims::DealSite::Corner(_)) => return Some((id, following_order(world, id))),
+            None => {}
+        }
+    }
+    // Lives at work phase 4b (§ 2.3): a pimp's body in pitch hours walks
+    // his round (`vice::pimp_plan`).
+    if let Some(worker) = crate::systems::vice::pimp_target(world, id) {
+        return Some((worker, following_order(world, id)));
     }
     let hideout_door = world.comp::<Building>(g.hideout).map_or(actor_tile, |b| b.door);
     // The order decides the origin and the filter before any Home is read:

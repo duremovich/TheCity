@@ -40,7 +40,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::components::{
     Brain, Building, BuildingKind, Corp, DistrictId, Gang, Job, Kit, Lod, MemoryKind, Needs, Niche, Pitch, Position,
-    Sentence, Stance, Wallet,
+    Sentence, Stance, TilePos, Wallet,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -78,6 +78,12 @@ pub struct ViceState {
     /// `Solicitation` reports filed today (R3's cap).
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub solicit_today: u32,
+    /// Lives at work phase 4b (§ 2.3): district index -> the last day its
+    /// pimp was present at one of its pitches (a body within `pimp_tiles`, a
+    /// Statistical one credited); `name_pimps` drops him `pimp_absent_days`
+    /// on. Written only with `[service] street` on.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub pimp_seen: BTreeMap<u16, u64>,
 }
 
 fn is_zero_u32(v: &u32) -> bool {
@@ -215,12 +221,175 @@ fn pimp_of(world: &World, d: DistrictId) -> Option<EntityId> {
 
 /// `streetwork::close_the_day`: a street pitch under a pimp pays his gang
 /// `pimp_cut` of its day instead of the holding gang's `cut_frac`.
-pub fn street_cut(world: &World, p: &Pitch) -> Option<(EntityId, f32)> {
+///
+/// Lives at work phase 4b (§ 2.3): with `[service] street` on, the cut is
+/// the pimp's (`StreetCut::pimp`): `close_the_day` pays him and he passes
+/// `pimp_pass_up` of it to the gang the same tick (`pass_up`).
+pub fn street_cut(world: &World, p: &Pitch) -> Option<StreetCut> {
     if !on(world) || !is_street_pitch(world, p) {
         return None;
     }
     let pimp = pimp_of(world, p.district)?;
-    Some((world.gang_of(pimp)?, world.config.vice.pimp_cut))
+    let gang = world.gang_of(pimp)?;
+    let to_pimp = crate::systems::service::street_on(world);
+    Some(StreetCut { gang, pimp: to_pimp.then_some(pimp), frac: world.config.vice.pimp_cut })
+}
+
+/// `street_cut`'s answer: the gang, the pimp when the cut is his (the
+/// street switch on), the share of the pitch's day.
+#[derive(Clone, Copy, Debug)]
+pub struct StreetCut {
+    pub gang: EntityId,
+    pub pimp: Option<EntityId>,
+    pub frac: f32,
+}
+
+/// Lives at work phase 4b (§ 2.3): the pimp, paid his cut of a street
+/// pitch's day, passes `pimp_pass_up` of it to his gang (`Flow::StreetCut`,
+/// the same tick). Returns the coins passed up.
+pub fn pass_up(world: &mut World, pimp: EntityId, gang: EntityId, paid: i64) -> i64 {
+    let up = (paid as f32 * world.config.service.pimp_pass_up).round() as i64;
+    if up <= 0 {
+        return 0;
+    }
+    let passed = ownership::pay(world, Some(pimp), Some(gang), up, Flow::StreetCut);
+    ownership::jobs2_row(world).pimp_pass_up += passed;
+    passed
+}
+
+/// Lives at work phase 4b (§ 2.3): the pimp of district `d` is present at
+/// the pitch on `spot` now: his body (Full or Coarse) out within
+/// `pimp_tiles` of it, or, a Statistical pimp (no Job, so no
+/// `shift_attended`: the deviation), credited while he follows his gang's
+/// order (`gang::following_order`). A presence marks `pimp_seen`.
+pub fn pimp_present(world: &mut World, d: DistrictId, spot: TilePos) -> bool {
+    let Some(pimp) = pimp_of(world, d) else { return false };
+    let here = match world.comp::<Brain>(pimp).map(|b| b.lod) {
+        Some(Lod::Statistical) => crate::systems::gang::following_order(world, pimp).is_some(),
+        Some(_) => world
+            .comp::<Position>(pimp)
+            .is_some_and(|p| p.building.is_none() && p.tile.manhattan(spot) <= world.config.service.pimp_tiles),
+        None => false,
+    };
+    if here {
+        let today = world.day();
+        world.jobs2.vice.pimp_seen.insert(d.index() as u16, today);
+    }
+    here
+}
+
+/// The district a named pimp works (his `pimps` entry), if `id` is one.
+pub fn pimp_district(world: &World, id: EntityId) -> Option<DistrictId> {
+    let d = world.jobs2.vice.pimps.iter().find(|&(_, &p)| p == id).map(|(&d, _)| d)?;
+    world.districts.get(usize::from(d)).map(|x| x.id)
+}
+
+/// Lives at work phase 4b (§ 2.3): the street worker whose pitch is the
+/// pimp's turn this hour: his district's street pitches in their hours, by
+/// owner, the hour's index of them (the round, in turn). `None` off, for a
+/// non-pimp, out of the pitch hours.
+pub fn round_pitch(world: &World, id: EntityId) -> Option<EntityId> {
+    if !on(world) || !crate::systems::service::street_on(world) {
+        return None;
+    }
+    let d = pimp_district(world, id)?;
+    pimp_of(world, d).filter(|&p| p == id)?;
+    let due: Vec<EntityId> = world
+        .jobs2
+        .pitches
+        .values()
+        .filter(|p| p.district == d && is_street_pitch(world, p) && crate::systems::streetwork::due(world, p))
+        .map(|p| p.owner)
+        .collect();
+    if due.is_empty() {
+        return None;
+    }
+    let hour = (world.tick / TICKS_PER_HOUR) as usize;
+    Some(due[hour % due.len()])
+}
+
+/// `gang::gang_work_target` for a pimp's body: the worker of his round's
+/// pitch this hour (the GangWork goal's target; the plan is `pimp_plan`).
+pub fn pimp_target(world: &World, id: EntityId) -> Option<EntityId> {
+    if world.comp::<Brain>(id).is_none_or(|b| b.lod == Lod::Statistical) {
+        return None;
+    }
+    round_pitch(world, id)
+}
+
+/// GangWork's scripted plan for a pimp's body in pitch hours: `GoTo(Spot)`
+/// (the round's pitch) then `Collect` (an hour at it, `collect_ticks`).
+pub fn pimp_plan(world: &mut World, id: EntityId) -> Option<crate::goap::Plan> {
+    use crate::components::{ActionInstance, GoalKind};
+    use crate::goap::{ActionKind, LocationKey, Plan};
+    let worker = pimp_target(world, id)?;
+    let spot = world.jobs2.pitches.get(&worker)?.spot;
+    world.unwind.insert(
+        id,
+        crate::living::UnwindPick {
+            rung: crate::living::Rung::Free,
+            act: ActionKind::Collect,
+            venue: None,
+            spot: Some(spot),
+            score: 0.0,
+        },
+    );
+    let step = |action, target| ActionInstance { action, target, tile: None };
+    let steps = vec![step(ActionKind::GoTo(LocationKey::Spot), None), step(ActionKind::Collect, Some(worker))];
+    Some(Plan { goal: GoalKind::GangWork, target: Some(worker), steps, started_tick: world.tick })
+}
+
+/// A pimp's `Collect` at `worker`'s pitch (`leisure::can_start`): `Some`
+/// when this is the pimp's collection (his district's street pitch as the
+/// target), then whether he stands out within `pimp_tiles` of it.
+pub fn collect_can_start(world: &World, id: EntityId, target: Option<EntityId>) -> Option<bool> {
+    let worker = target?;
+    let p = world.jobs2.pitches.get(&worker)?;
+    if !is_street_pitch(world, p) || pimp_district(world, id) != Some(p.district) {
+        return None;
+    }
+    let r = world.config.service.pimp_tiles;
+    Some(world.comp::<Position>(id).is_some_and(|x| x.building.is_none() && x.tile.manhattan(p.spot) <= r))
+}
+
+/// The pimp's `Collect` runs the hour at the pitch (presence is what
+/// protects it); `None` for any other Collect (and off).
+pub fn collect_ticks(world: &World, id: EntityId) -> Option<crate::time::Tick> {
+    if !crate::systems::service::street_on(world) {
+        return None;
+    }
+    pimp_district(world, id).map(|_| TICKS_PER_HOUR)
+}
+
+/// A pimp's `Collect` ends (`leisure::on_complete`): the collection, a
+/// `Staff` encounter with the worker (`"pimp"`'s row), `pimp_collections`.
+/// `false` when it was not the pimp's (the leader's Collect runs on).
+pub fn pimp_collect(world: &mut World, id: EntityId, target: Option<EntityId>) -> bool {
+    let Some(worker) = target else { return false };
+    let Some(p) = world.jobs2.pitches.get(&worker).cloned() else { return false };
+    if !is_street_pitch(world, &p) || pimp_district(world, id) != Some(p.district) {
+        return false;
+    }
+    collection(world, id, worker, p.district);
+    true
+}
+
+fn collection(world: &mut World, pimp: EntityId, worker: EntityId, d: DistrictId) {
+    ownership::jobs2_row(world).pimp_collections += 1;
+    let kind = crate::components::ServeKind::Staff;
+    crate::systems::service::encounter_post(world, "pimp", pimp, worker, None, d, kind, 0);
+}
+
+/// A Statistical pimp credited present collects at the pitch whose turn
+/// the hour is (`round_pitch`), as a body's `Collect` would.
+fn stat_collection(world: &mut World, p: &Pitch) {
+    let Some(pimp) = pimp_of(world, p.district) else { return };
+    if world.comp::<Brain>(pimp).is_none_or(|b| b.lod != Lod::Statistical) {
+        return;
+    }
+    if round_pitch(world, pimp) == Some(p.owner) {
+        collection(world, pimp, p.owner, p.district);
+    }
 }
 
 /// A Pitch of a `vice` row (the street worker's).
@@ -303,7 +472,18 @@ fn street_hour(world: &mut World) {
                 }
             }
         }
-        let protected = pimp_of(world, p.district).is_some() || world.comp::<Kit>(o).is_some_and(|k| k.weapon > 0);
+        // Lives at work phase 4b (§ 2.3): the pimp's presence, not his
+        // freedom; a Statistical pimp's round is credited here.
+        let pimp = if street {
+            let here = pimp_present(world, p.district, p.spot);
+            if here {
+                stat_collection(world, &p);
+            }
+            here
+        } else {
+            pimp_of(world, p.district).is_some()
+        };
+        let protected = pimp || world.comp::<Kit>(o).is_some_and(|k| k.weapon > 0);
         if protected {
             continue;
         }
@@ -439,6 +619,10 @@ pub fn daily(world: &mut World) {
 /// is free and a member, else its loyal member of lowest id who deals no
 /// Stims; none for a district no gang has a foot in.
 fn name_pimps(world: &mut World) {
+    let street = crate::systems::service::street_on(world);
+    let today = world.day();
+    let absent_days = u64::from(world.config.service.pimp_absent_days.max(1));
+    let mut seen: BTreeMap<u16, u64> = BTreeMap::new();
     let mut want: BTreeMap<u16, EntityId> = BTreeMap::new();
     let mut held: BTreeMap<DistrictId, (usize, std::cmp::Reverse<EntityId>)> = BTreeMap::new();
     for g in world.gangs() {
@@ -462,24 +646,40 @@ fn name_pimps(world: &mut World) {
             continue;
         }
         let k = d.index() as u16;
-        let sitting = world.jobs2.vice.pimps.get(&k).copied().filter(|&p| {
-            world.gang_of(p) == Some(g) && crate::systems::law::living(world, p) && !world.has::<Sentence>(p)
+        let sitting_any = world.jobs2.vice.pimps.get(&k).copied();
+        // Lives at work phase 4b (§ 2.3): absent from every pitch of his
+        // `pimp_absent_days`, the sitting pimp loses the district.
+        let absent = street
+            && sitting_any.is_some()
+            && world.jobs2.vice.pimp_seen.get(&k).is_some_and(|&s| today.saturating_sub(s) >= absent_days);
+        let sitting = sitting_any.filter(|&p| {
+            !absent && world.gang_of(p) == Some(g) && crate::systems::law::living(world, p) && !world.has::<Sentence>(p)
         });
+        let fit = |m: EntityId| {
+            crate::systems::law::living(world, m)
+                && !world.has::<Sentence>(m)
+                && crate::systems::gang::following_order(world, m).is_some()
+                && !crate::systems::stims::is_dealer(world, m)
+                && !(absent && sitting_any == Some(m))
+        };
         let pick = sitting.or_else(|| {
-            world.comp::<Gang>(g).and_then(|x| {
-                x.members.iter().copied().find(|&m| {
-                    crate::systems::law::living(world, m)
-                        && !world.has::<Sentence>(m)
-                        && crate::systems::gang::following_order(world, m).is_some()
-                        && !crate::systems::stims::is_dealer(world, m)
-                })
-            })
+            let members = &world.comp::<Gang>(g)?.members;
+            // Lives at work phase 4b (§ 2.3): the round is a night's work, so
+            // a member with no Job first (a day job's sleeper is no pimp).
+            let free = if street { members.iter().copied().find(|&m| fit(m) && !world.has::<Job>(m)) } else { None };
+            free.or_else(|| members.iter().copied().find(|&m| fit(m)))
         });
         if let Some(p) = pick {
             want.insert(k, p);
+            // A newly named pimp's days of grace start today.
+            if street {
+                let last = world.jobs2.vice.pimp_seen.get(&k).copied().filter(|_| sitting == Some(p));
+                seen.insert(k, last.unwrap_or(today));
+            }
         }
     }
     world.jobs2.vice.pimps = want;
+    world.jobs2.vice.pimp_seen = seen;
 }
 
 /// D7: an unlicensed Brothel closes a day in a Sweep or a Crackdown

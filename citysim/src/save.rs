@@ -202,11 +202,14 @@ use crate::world::World;
 /// (serde defaults). An off save is byte-identical to version 36's.
 /// 38 (Lives at work phase 4, docs/LIVES_AT_WORK.md § 2.3): the pending cab
 /// rides, parcels and the day's cab rolls on `Jobs2State` (written while
-/// they hold anything), `World.corner_dealers`, the `[service]` street keys
-/// and `[[serves]]` street rows (written only on), `[stims] deal_corner`
-/// and the `Jobs2Cols` phase-4 columns (serde defaults). An off save is
+/// they hold anything), the `[service]` street keys and `[[serves]]`
+/// street rows (written only on), `[stims] deal_corner` and the
+/// `Jobs2Cols` phase-4 columns (serde defaults). An off save is
 /// byte-identical to version 37's.
-pub const SAVE_VERSION: u8 = 38;
+/// 39 (Lives at work phase 4b, § 2.3): `jobs2.vice.pimp_seen`,
+/// `World.corner_dealers` and `World.corner_log` (each written while it
+/// holds anything; empty off). An off save is byte-identical to version 38's.
+pub const SAVE_VERSION: u8 = 39;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

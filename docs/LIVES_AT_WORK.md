@@ -535,6 +535,20 @@ Main `1300584` against the phase 4a tree, `shadow --lives` 2k, seeds 42-44 poole
 
 The cabbie's idle hours are his stand-by at the rank read as work only while `standing_by` holds (a Rest in the shift's post hours or off the rank reads idle); his Served-able fell with the rush shifts (06-16, 16-24: fewer bodies in the Garage). The vendor, homeless and day-labourer rows are not 4a's (the vendor's regulars are 4b's); their moves are the city's.
 
+### 2k after phase 4b: the gang rows (the phase 4b tree, 2026-10-18; `tools/phase_measure.py`)
+
+Main `4da38cb` against the phase 4b tree, `shadow --lives` 2k, seeds 42-44 pooled, day 19, 7 days:
+
+| archetype | n | idle h/d | shifts | Served-able | met | enc/shift |
+|---|---|---|---|---|---|---|
+| `gang_member` main / 4b | 72 / 78 | 3.31 / 3.58 | 219 / 256 | 0.59 / 0.56 | 0.33 / 0.32 | 1.24 / 1.12 |
+| `vendor` main / 4b | 16 / 17 | 2.73 / 2.91 | 4 / 4 | 1.00 / 0.50 | 0.25 / 0.00 | 0.50 / 0.00 |
+| `cabbie` main / 4b | 18 / 22 | 3.52 / 4.45 | 91 / 114 | 0.11 / 0.04 | 0.14 / 0.12 | 0.14 / 0.12 |
+| `homeless` main / 4b | 34 / 23 | 5.58 / 4.74 | 30 / 48 | 0.57 / 0.35 | 0.13 / 0.12 | 0.17 / 0.12 |
+| `all` main / 4b | 1852 / 1855 | 4.08 / 4.15 | 8639 / 8937 | 0.30 / 0.29 | 0.38 / 0.38 | 2.26 / 2.14 |
+
+**The day-19 window barely reads 4b; `met` did not move.** The 2k city's first doses fall on days 13-22 and its first pimp on days 32-36 (4b; street pitches are 0-2 at a time), so the window holds a few dealers selling 5-23 doses a seed and no pimp: the `gang_member` row's 72-78 bodies are mostly not dealers, and its move is the city's. 4b reads in the 120-day counters instead (42-44 mean, main → 4b): corner deals 0 → 1,218, dealer's regulars 0 → 703, lookouts 0 → 262, pimp collections 0 → 17, stims dealt 1,087 → 1,277, Dealing reports 169 → 94. A day-90 diary (`shadow --pick dealer --start-day 90`, seed 42): a Club dealer's two shifts, then "served Cato Dunmore, a regular" among five buyers at midnight. The vendor rows are 4 shifts: noise.
+
 ### 20k, seed 42, day 20, 7 days (5 picks an archetype in one world)
 
 | archetype | n | idle h/d | married | never named | never co-located | named/wk | co-located h/wk (Stat spouse) | HangOuts/wk | empty | shifts | Served-able | any signal | bodies/h |
@@ -766,3 +780,35 @@ Measured (`tools/phase_measure.py`, phase 4a against main `1300584`'s binary, 2k
 **Open:** phase 2's `probe_new_parent_is_home_at_night` is `#[ignore = "gap: OPEN-100"]`: in the 4a city the carer missed an evening meal (a diverged Market's stock), went to bed hungry with an empty pantry and walked to a Market at 02:00 (4 of 8 night hours home); the § 3.4 damping does not hold a hungry carer's Eat. Not a 4a mechanism (the coins and states match the off city until her 18:53 purchase on day 4); a behaviour fix for § 3.4's owner.
 
 Left for 4b: the pimp's round and presence, the dealer's corner and regulars, the lookout, and the vendor/rickshaw/tinker regulars (§ 2.3's last three rows); the `[service]` keys `pimp_tiles`, `pimp_pass_up`, `pimp_absent_days`, `witness_lookout_mult` and `[stims] deal_corner` are in the toml, unread.
+
+### Phase 4b (2026-10-18): the pimp, the dealer, the street trades' regulars
+
+Built as § 2.3's last three rows under 4a's `[service] street` (`CITYSIM_LIVES_STREET_OFF=1`) and `[stims] deal_corner` (stripped with the street switch); SAVE_VERSION 39 (`jobs2.vice.pimp_seen`, `World.corner_dealers`, `World.corner_log`, each skip-empty; 4a's version-38 note named `corner_dealers` before it existed and is corrected). Deviations from the spec text and from `phase4b_brief.md`:
+
+- **The pimp's presence, a Statistical pimp credited on his order.** `vice::street_hour`'s `protected` reads `pimp_present`: a Full or Coarse pimp out within `pimp_tiles` of the pitch's spot, or a Statistical one while `gang::following_order` holds (he holds no Job, so § 6's `shift_attended` cannot apply). A presence marks `pimp_seen[district] = today`; `name_pimps` drops a sitting pimp unseen for `pimp_absent_days` and names another (a new pimp's grace starts the day he is named). Off, `protected` is `pimp_of(d).is_some()` as before. The asymmetry is the deviation: a Statistical pimp is present every pitch hour his gang has an order, a body only where he walks.
+- **The round is a scripted GangWork plan, scored as a shift.** `gang::gang_work_target` returns, for a pimp's body in pitch hours, the worker of the pitch whose turn the hour is (`vice::round_pitch`: his district's street pitches in their hours by owner, `hour % n`); `plan::plan_for`'s scripted GangWork arm builds `vice::pimp_plan`: `GoTo(Spot)` (the pitch, an `UnwindPick` spot) then `Collect` on the worker, an hour long (`collect_ticks`). Its completion is the collection: a `Staff` encounter through `service::encounter_post(.., "pimp", ..)` (the gang post's row; a pimp with a Job meets his workers as the pimp) and `pimp_collections`. The GangWork goal is not satisfied by the day's earlier gang task while the round is due, and in pitch hours it is scored as the exec's office hours (a gate, energy, loyalty): with the stock considerations a pimp with a day job slept through every pitch hour. **`name_pimps` prefers a member with no Job** under the switch (a day worker's night is sleep). A Statistical pimp credited present collects at the hour's pitch in `street_hour` (`stat_collection`).
+- **The cut is the pimp's.** `vice::street_cut` returns a `StreetCut { gang, pimp, frac }`; under the switch `close_the_day` pays the `pimp_cut` share to the pimp (`Flow::StreetCut`) and `vice::pass_up` moves `pimp_pass_up` of what landed to his gang the same tick (`pimp_pass_up` counts the coins). Off, the gang is paid as before.
+- **The corner replaces "the nearest Bar".** `stims::deal_site(gang)`: the venue (`leisure::deal_venue`) when the gang has one, else (`corner_on`) the corner `deal_corner` (the `World::spots` spot of its deal district, no Hideout door, nearest the centroid), else `deal_bar` as before. `deals_today` keeps the Bar; `corner_today`/`site_today` the corner. The corner is a tile, so `gang_work_target` returns the dealer himself as the target (no walk scored) and `plan_for` builds `stims::corner_plan` (`[GoTo(Hideout) → PickUp] → GoTo(Spot) → Deal` with no target; a corner dealer's GangWork never reaches the planner). The corner `Deal` registers him in `World.corner_dealers` and `corner_log` (the Statistical buyers' log); `end_deal` clears both maps' entries. A Statistical dealer's day (`fviolence::stat_gang_day`) logs his corner as it logged the Bar.
+- **The corner's buyer is a scripted GetHigh.** `stims::corner_buy_plan` (`GoTo(Spot) → BuyStims → UseStim`, no target) when no dose is in hand and the nearest corner with a dealer for him is nearer than the nearest Bar or legal Market source (else the planner's chain, unchanged); `wants_high` and GetHigh's walk (`source_tiles`) read the corner too. Its sale and a Bar's are one `stims::sell`.
+- **The regulars.** `sell` and `stat_buy` meet the buyer through `encounter_post(.., "dealer", ..)` (`Buyer`, `regular_after` 3: the third buy makes an edge); a buy from a dealer the buyer already knows counts `dealer_regulars`. A regular buys before a stranger: at a Bar the dealer he knows first (`bar_dealer_known`), on a corner the same (`corner_dealer`), and `stat_buy`'s pick sorts strangers after the known dealers, then by distance as before.
+- **The lookout.** `law::raise_crime_mult` is `raise_crime_except` with each witness's notice probability multiplied (1.0 everywhere else; the rolls drawn as before). A sale with another member of the dealer's gang (a body) in the Bar or within `pitch_reach` of the corner multiplies by `witness_lookout_mult` (`lookout_halved`). A Statistical sale raises no witness roll (its Dealing is the gang-day roll), so no mirror.
+- **The vendor and the tinker** meet their buyers through `encounter` (their pitch's trade row): `stat_vendor_meal` (the only vendor sale: a Full body buys no stall meal, the Vend step is the stall's hour) and `tinker_repair` (an agent owner only). The rickshaw's ride was 4a's (`ride_encounter`).
+- **One gang-post row lookup.** `service::encounter_post` reads a row by key; `encounter` is unchanged for a trade's server.
+
+The Statistical mirror (§ 6): the pimp's presence credited on his order (above) and his collection at the hour's pitch; the corner's buy world-side (`stat_buy` reads `corner_log` beside `deal_log`, the known dealer first, the same `Buyer` encounter); the lookout has none (no witness roll off-screen); the vendor's and tinker's regulars are the Statistical sales. `tests/lod.rs` prints stims dealt per 100 adult-days by tier. No stat-table regen (D14).
+- **The corner's steps skip the planner's symbols.** `exec::start_step` re-observes a GOAP step's preconditions (`Deal` needs `at(Seller)`, `BuyStims` `at(StimSource)`); a corner is no planner location, so a target-less `Deal` or `BuyStims` checks its own start condition alone (the first measure dealt 2 doses in 120 days where main dealt 1,087: every corner `Deal` failed to start).
+- **The off identity under a shared switch.** `CITYSIM_LIVES_STREET_OFF=1` is 4a's switch too, so `tools/phase_measure.py`'s off run (the candidate off against main on) differs by all of 4a. The identity is main and 4b **both** off: seeds 42-44 × 30, events (but the save's path line), report CSV and the save (version masked) IDENTICAL.
+
+Measured (`tools/phase_measure.py`, phase 4b against main `4da38cb`'s binary, 2k seeds 42-44 × 120 d, mean of the three):
+
+| | main | phase 4b |
+|---|---|---|
+| Murders | 81 (30, 88, 126) | 83 (91, 80, 77): seed 42's 30 → 91 and seed 44's 126 → 77, the `fviolence` storms 4a's fix round diagnosed; the mean holds |
+| J24 employed / J25 homeless / arrests | 0.751 / 0.021 / 2,623 | 0.768 / 0.019 / 2,514 |
+| stims dealt / Dealing reports | 1,087 / 169 | 1,277 / 94 (the lookout's halved witness, 262 sales; a corner has fewer eyes than a Bar) |
+| corner deals / dealer's regulars | — | 1,218 / 703 (every 2k gang lacks a venue: all deal at corners) |
+| street visits / assaults / take / pimp's cut | 20 / 1.3 / 102 / 5.7 | 16 / 0.3 / 80 / 11 |
+| pimp collections / passed up | — | 17 / 6 coins (pimps from days 32-36; 19, 0, 33 by seed) |
+| vendor meals / tinker repairs | 931 / 0 | 1,106 / 0 (the tinker repairs nothing at 2k on either side) |
+
+**Left:** a Full vendor sells no stall meal (the regulars are the Statistical sales'); the tinker's encounter is wired but never fires at 2k; `tests/lod.rs`'s stims row is printed at the milestone tier, not run here.

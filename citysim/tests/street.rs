@@ -1029,10 +1029,17 @@ mod lives_street {
                 (0, 0, 0, 0, 0)
             );
             assert_eq!((j.served[ServeKind::Fare as usize], j.served[ServeKind::Parcel as usize]), (0, 0));
+            // Phase 4b: the pimp's round and cut, the corner, the regulars, the lookout.
+            assert_eq!(
+                (j.pimp_collections, j.pimp_pass_up, j.corner_deals, j.dealer_regulars, j.lookout_halved),
+                (0, 0, 0, 0, 0)
+            );
         }
         assert!(off.jobs2.cab_rides.is_empty() && off.jobs2.cab_rolled.is_empty() && off.jobs2.parcels.is_empty());
+        assert!(off.jobs2.vice.pimp_seen.is_empty() && off.corner_dealers.is_empty() && off.corner_log.is_empty());
         let ron = citysim::save::to_ron(&off);
         assert!(!ron.contains("cab_wait_ticks") && !ron.contains("cab_rides:") && !ron.contains("deal_corner"));
+        assert!(!ron.contains("pimp_seen") && !ron.contains("corner_dealers") && !ron.contains("corner_log"));
         let _ = streetwork::on(&off);
     }
 
@@ -1193,8 +1200,30 @@ mod lives_street {
     /// visit and assault rolls certain, and a lawless Full client on its
     /// tile, every other body near it wanting nothing. (world, worker, client)
     fn street_night(on: bool) -> (World, EntityId, EntityId) {
-        let mut w = if on { common::world() } else { common::world_with(|c| c.strip_street()) };
-        w.run_ticks(TICKS_PER_DAY + 1);
+        let (mut w, o, c) = street_setup(on);
+        citysim::systems::vice::hourly(&mut w);
+        (w, o, c)
+    }
+
+    /// The shipped city at day 1's first tick, built once (the street
+    /// night's base; each test clones it).
+    static NIGHT: std::sync::OnceLock<World> = std::sync::OnceLock::new();
+
+    /// `street_night` before the hour's pass.
+    fn street_setup(on: bool) -> (World, EntityId, EntityId) {
+        let mut w = if on {
+            NIGHT
+                .get_or_init(|| {
+                    let mut w = common::world();
+                    w.run_ticks(TICKS_PER_DAY + 1);
+                    w
+                })
+                .clone()
+        } else {
+            let mut w = common::world_with(|c| c.strip_street());
+            w.run_ticks(TICKS_PER_DAY + 1);
+            w
+        };
         w.config.vice.p_street_visit = 10.0;
         w.config.vice.p_assault_street = 10.0;
         w.jobs2.vice.pimps.clear();
@@ -1242,8 +1271,54 @@ mod lives_street {
         }
         w.tick = TICKS_PER_DAY + 2 * 60;
         assert!(sw::working(&w, &p));
-        citysim::systems::vice::hourly(&mut w);
         (w, o, c)
+    }
+
+    /// The street night with a free pimp of the pitch's district, a body
+    /// standing `near` the pitch (on its spot) or across town: the hour's
+    /// assaults. (world, pimp, assaults)
+    fn pimp_night(near: bool) -> (World, EntityId, u32) {
+        let (mut w, o, c) = street_setup(true);
+        let p = w.jobs2.pitches.get(&o).cloned().expect("the pitch");
+        let pimp = w
+            .gangs()
+            .into_iter()
+            .flat_map(|g| w.comp::<citysim::Gang>(g).map(|x| x.members.clone()).unwrap_or_default())
+            .find(|&m| m != o && m != c && citysim::systems::law::living(&w, m) && !w.has::<citysim::Sentence>(m))
+            .expect("a gang member");
+        w.jobs2.vice.pimps.insert(p.district.index() as u16, pimp);
+        citysim::systems::lod::set_lod(&mut w, pimp, Lod::Full);
+        w.leave_building(pimp);
+        let r = w.config.service.pimp_tiles;
+        let far = w
+            .buildings_of_kind(BuildingKind::Home)
+            .iter()
+            .filter_map(|&b| w.comp::<Building>(b).map(|x| x.door))
+            .find(|d| d.manhattan(p.spot) > 4 * r)
+            .expect("a door across town");
+        w.comp_mut::<Position>(pimp).expect("pos").tile = if near { p.spot } else { far };
+        if let Some(n) = w.comp_mut::<citysim::Needs>(pimp) {
+            n.intimacy = 1.0;
+        }
+        let before = jobs2(&w).street_assaults;
+        citysim::systems::vice::hourly(&mut w);
+        let n = jobs2(&w).street_assaults - before;
+        (w, pimp, n)
+    }
+
+    /// § 2.3 (pimp): the street assault reads the pimp's presence, not his
+    /// freedom: a free pimp across town leaves the pitch unprotected (the
+    /// lawless client robs), one within `pimp_tiles` protects it and is
+    /// marked seen (`pimp_seen`, what `name_pimps` drops the absent by).
+    #[test]
+    fn test_street_assault_reads_the_pimps_presence_not_his_freedom() {
+        let (w, _, far) = pimp_night(false);
+        assert_eq!(far, 1, "a free pimp across town: unprotected");
+        assert!(w.jobs2.vice.pimp_seen.is_empty(), "never seen at his pitch");
+        let (w, pimp, near) = pimp_night(true);
+        assert_eq!(near, 0, "a pimp within pimp_tiles: protected");
+        let d = citysim::systems::vice::pimp_district(&w, pimp).expect("his district");
+        assert_eq!(w.jobs2.vice.pimp_seen.get(&(d.index() as u16)), Some(&w.day()), "seen today");
     }
 
     /// § 2.3 (street worker): the night's client is a body out near the

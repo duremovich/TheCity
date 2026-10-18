@@ -569,6 +569,15 @@ pub struct World {
     /// (the Statistical addict pass buys from yesterday's dealers).
     #[serde(default)]
     pub deal_log: BTreeMap<EntityId, (EntityId, u64)>,
+    /// Lives at work phase 4b (§ 2.3): corner -> the dealers standing it (a
+    /// corner `Deal` in progress), ascending; `stims::deal_corner`. Written
+    /// only with `[stims] deal_corner` on.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub corner_dealers: BTreeMap<TilePos, Vec<EntityId>>,
+    /// Lives at work phase 4b: corner -> its last dealer and the day (the
+    /// Statistical buyers' pass reads it beside `deal_log`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub corner_log: BTreeMap<TilePos, (EntityId, u64)>,
     /// M13 D42: robot -> the Security corp that sold it (a robot in service
     /// counts in its seller's Security share as a contract does).
     #[serde(default)]
@@ -1542,6 +1551,8 @@ impl World {
             commute_log: None,
             dealers: BTreeMap::new(),
             deal_log: BTreeMap::new(),
+            corner_dealers: BTreeMap::new(),
+            corner_log: BTreeMap::new(),
             robot_sellers: BTreeMap::new(),
             edges: crate::edge_map::EdgeMap::new(),
             crime_reports: Vec::new(),

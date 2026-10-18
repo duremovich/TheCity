@@ -818,9 +818,16 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                 }
             } else {
                 // Replan trigger (b): re-observe; a false precondition fails the step.
-                let ctx = step_ctx(world, id, kind);
-                let ws = crate::goap::WorldState::observe(world, id, ctx.target);
-                if !kind.preconditions(&ws, &ctx) || !actions::can_start(world, id, kind, step.target) {
+                // Lives at work phase 4b (§ 2.3): a corner's `Deal` or
+                // `BuyStims` (no target: a tile, no planner location) checks
+                // its own start condition only.
+                let corner = step.target.is_none() && matches!(kind, ActionKind::Deal | ActionKind::BuyStims);
+                let symbols = corner || {
+                    let ctx = step_ctx(world, id, kind);
+                    let ws = crate::goap::WorldState::observe(world, id, ctx.target);
+                    kind.preconditions(&ws, &ctx)
+                };
+                if !symbols || !actions::can_start(world, id, kind, step.target) {
                     // Lives at work phase 1 (§ 2.1): a venue step failing to
                     // start inside its venue against the door policy is a
                     // refusal at the door (the bouncer's encounter).

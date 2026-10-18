@@ -141,6 +141,11 @@ fn test_pimp_present_zeroes_the_assault_roll() {
             let m = idle(&w)[3];
             citysim::systems::gang::enlist(&mut w, m, g);
             w.jobs2.vice.pimps.insert(p.district.index() as u16, m);
+            // Lives at work phase 4b (§ 2.3): protection is his presence, a
+            // body within `pimp_tiles` (`street.rs` holds the far pimp's case).
+            lod::set_lod(&mut w, m, Lod::Full);
+            w.leave_building(m);
+            w.comp_mut::<citysim::Position>(m).expect("pos").tile = p.spot;
         }
         // A night hour (the street worker's shift).
         w.tick = citysim::TICKS_PER_DAY + 2 * 60;

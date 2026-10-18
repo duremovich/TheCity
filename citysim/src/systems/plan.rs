@@ -245,9 +245,19 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
     }
     let scripted = match goal {
         GoalKind::Socialise => crate::systems::leisure::hangout_plan(world, id),
-        GoalKind::GangWork => crate::systems::leisure::preach_plan(world, id),
+        // Lives at work phase 4b (§ 2.3): the pimp's round, the corner's
+        // dealer and its buyer (a corner is a tile: no planner location).
+        GoalKind::GangWork => crate::systems::leisure::preach_plan(world, id)
+            .or_else(|| crate::systems::vice::pimp_plan(world, id))
+            .or_else(|| crate::systems::stims::corner_plan(world, id)),
+        GoalKind::GetHigh => crate::systems::stims::corner_buy_plan(world, id),
         _ => None,
     };
+    if scripted.is_none() && goal == GoalKind::GangWork && crate::systems::stims::corner_target(world, id).is_some() {
+        // A corner dealer's GangWork targets himself: never the planner's.
+        world.cool_goal(id, goal);
+        return 0;
+    }
     if let Some(plan) = scripted {
         let n = plan.steps.len();
         install(world, id, plan);
