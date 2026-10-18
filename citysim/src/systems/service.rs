@@ -47,7 +47,9 @@
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
-use crate::components::{Brain, Building, BuildingKind, Job, Lod, MemoryKind, Position, Role, Sentence, ServeKind};
+use crate::components::{
+    Brain, Building, BuildingKind, Child, Corpse, Household, Job, Lod, MemoryKind, Position, Role, Sentence, ServeKind,
+};
 use crate::config::{ServeOutcome, ServesCfg, TradeSkill};
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -93,11 +95,20 @@ pub enum Outcome {
     Refused,
     Ejected,
     Regular,
+    /// Lives at work phase 3 (§ 2.2, super): a tenant in arrears served notice.
+    Notice,
 }
 
 /// Phase 1 is live: `[jobs2] enabled`, `[lives] enabled` and `[service] venues`.
 pub fn on(world: &World) -> bool {
     crate::systems::industry::on(world) && world.config.lives.enabled && world.config.service.venues
+}
+
+/// Lives at work phase 3 is live: the encounter on and `[service] civic`
+/// (`CITYSIM_CIVIC_OFF=1`): the civic counterparts, the near round, tied
+/// housing and the parent's answer to a taken child.
+pub fn civic_on(world: &World) -> bool {
+    on(world) && world.config.service.civic
 }
 
 fn hash(world: &World, purpose: u64, a: u64, b: u64) -> f32 {
@@ -228,6 +239,169 @@ pub fn hourly(world: &mut World) {
     let hour = world.tick / TICKS_PER_HOUR;
     world.service_room.retain(|_, r| r.hour == hour);
     staff_hour(world);
+    if world.tick_of_day() == 0 {
+        world.notices_today.clear();
+    }
+    if civic_on(world) {
+        civic_hour(world);
+    }
+}
+
+/// Does `s`'s job start a shift this hour (the roster's and the headcount's
+/// hour, as the madam's `staff_hour`)?
+fn first_hour(world: &World, s: EntityId) -> bool {
+    let tod = world.tick_of_day();
+    world
+        .comp::<Job>(s)
+        .is_some_and(|j| j.shifts.iter().any(|&(start, _)| tod >= start && u32::from(tod) < u32::from(start) + 60))
+}
+
+/// Lives at work phase 3 (§ 2.2, teacher and camp warden): at the first
+/// hour of a server's shift, the School's roster (every child whose place
+/// today is this School, `ages::place_of`, one pass over the children) and
+/// the Camp's headcount (its children), one `Pupil`/`Inmate` encounter a
+/// child. Children have no `Brain`: no memory on their side, the ledger
+/// names them. Civic only.
+fn civic_hour(world: &mut World) {
+    let schools: Vec<EntityId> = world
+        .buildings_of_kind(BuildingKind::School)
+        .iter()
+        .copied()
+        .filter(|&s| servers(world, s, ServeKind::Pupil).iter().any(|&(t, _)| first_hour(world, t)))
+        .collect();
+    if !schools.is_empty() {
+        let mut roster: std::collections::BTreeMap<EntityId, Vec<EntityId>> = std::collections::BTreeMap::new();
+        // scan-ok: once a day per School shift: the children
+        for k in world.with::<Child>() {
+            if !world.is_alive(k) || world.has::<Corpse>(k) {
+                continue;
+            }
+            if let Some(crate::systems::ages::Place::School(s)) = crate::systems::ages::place_of(world, k) {
+                if schools.contains(&s) {
+                    roster.entry(s).or_default().push(k);
+                }
+            }
+        }
+        for (s, kids) in roster {
+            for k in kids {
+                arrive(world, k, s, ServeKind::Pupil, 0);
+            }
+        }
+    }
+    for camp in crate::systems::camp::standing_camps(world) {
+        if !servers(world, camp, ServeKind::Inmate).iter().any(|&(t, _)| first_hour(world, t)) {
+            continue;
+        }
+        let kids: Vec<EntityId> = crate::systems::camp::children_of(world, camp).to_vec();
+        if kids.is_empty() {
+            continue;
+        }
+        ownership::jobs2_row(world).camp_headcounts += 1;
+        for k in kids {
+            arrive(world, k, camp, ServeKind::Inmate, 0);
+        }
+    }
+}
+
+/// § 2.2 (teacher): a taught School day: `teacher_floor + (1 −
+/// teacher_floor) × the teacher's knowledge` onto `Child.edu_taught`
+/// (`ages::on_mature` reads it under civic), and the parents who are bodies
+/// at home meet the teacher at the door (a first meeting at a hashed
+/// `0.1 + 0.3u`, `interacted` after; a `Served` memory each side; no walk).
+fn taught(world: &mut World, teacher: EntityId, child: EntityId, school: EntityId, valence: f32) {
+    let floor = world.config.service.teacher_floor;
+    let know = world.comp::<crate::components::Skills>(teacher).map_or(0.0, |s| s.knowledge);
+    if let Some(c) = world.comp_mut::<Child>(child) {
+        c.edu_taught += floor + (1.0 - floor) * know;
+    }
+    ownership::jobs2_row(world).taught_days += 1;
+    let Some(home) = world.comp::<Household>(child).and_then(|h| h.home) else { return };
+    let salience = world.config.service.served_salience;
+    for p in crate::systems::camp::parents_of(world, child) {
+        let at_home = world.comp::<Position>(p).is_some_and(|x| x.building == Some(home))
+            && world.comp::<Brain>(p).is_some_and(|b| b.lod != Lod::Statistical);
+        if !at_home || p == teacher {
+            continue;
+        }
+        if world.edge(p, teacher).is_some() {
+            crate::systems::social::interacted(world, p, teacher);
+        } else {
+            let u = hash(world, PURPOSE_REGULAR, key(teacher), key(p));
+            crate::systems::social::first_meeting(world, p, teacher, 0.1 + 0.3 * u);
+        }
+        world.remember(p, MemoryKind::Served, Some(teacher), salience, valence, false);
+        world.remember(teacher, MemoryKind::Served, Some(p), salience, valence, false);
+        let _ = school;
+    }
+}
+
+/// § 2.2 (super): the stop's encounter with a tenant: in arrears, a
+/// `Notice` (once a tenant a day; a `Served` memory at −0.3; the event
+/// when the row names it); a whole coin of rent due and the purse holding
+/// it, the rent settled at the door (`ownership::settle_rent`, no arrears
+/// clock: the midnight settle moved earlier, the same `Flow::Rent`).
+fn tenant(world: &mut World, server: EntityId, tenant: EntityId, block: EntityId) -> Outcome {
+    let Some((arrears, due)) = world.comp::<Household>(tenant).map(|h| (h.arrears, h.rent_due.floor() as i64)) else {
+        return Outcome::Done;
+    };
+    let day = world.day();
+    let mut outcome = Outcome::Done;
+    if arrears > 0 && world.notices_today.insert((tenant, day)) {
+        outcome = Outcome::Notice;
+        let salience = world.config.service.served_salience;
+        world.remember(tenant, MemoryKind::Served, Some(server), salience, -0.3, false);
+        ownership::jobs2_row(world).notices += 1;
+    }
+    if due >= 1 && world.purse(Some(tenant)) >= due {
+        let before = world.comp::<Household>(tenant).map_or(0.0, |h| h.rent_due);
+        ownership::settle_rent(world, tenant, block, false);
+        let after = world.comp::<Household>(tenant).map_or(0.0, |h| h.rent_due);
+        let paid = (before - after).round() as i64;
+        if paid > 0 {
+            ownership::jobs2_row(world).door_rent += paid;
+        }
+    }
+    outcome
+}
+
+/// § 2.2 (super): the round's arrival at a Block (`trades::round_plan` for
+/// a body, `lod::stat_work` for a Statistical super at the shift's first
+/// hour): every adult resident but the super is served `Tenant` by the
+/// super himself (his row's queue is the round, not his post). Civic only.
+pub fn super_stop(world: &mut World, id: EntityId, block: EntityId) {
+    if !civic_on(world) || !row_of_agent(world, id).is_some_and(|r| r.kind == ServeKind::Tenant) {
+        return;
+    }
+    ownership::jobs2_row(world).super_stops += 1;
+    let tenants: Vec<EntityId> = world
+        .residents_of(block)
+        .iter()
+        .copied()
+        .filter(|&t| {
+            t != id
+                && world.has::<Brain>(t)
+                && crate::systems::demography::is_adult(world, t)
+                && crate::systems::law::living(world, t)
+        })
+        .collect();
+    for t in tenants {
+        serve(world, id, t, block, ServeKind::Tenant, 0);
+    }
+}
+
+/// § 2.2 (jailer): a breakout past the jailers on duty: a `Served` memory
+/// at −0.3 each (subject none), the first named in the `Jailbreak` text
+/// (`raid::breach`). Civic only.
+pub fn jailers_passed(world: &mut World, jail: EntityId) -> Option<EntityId> {
+    if !civic_on(world) {
+        return None;
+    }
+    let on_duty = servers_on_duty(world, jail, ServeKind::Inmate);
+    let salience = world.config.service.served_salience;
+    for &j in &on_duty {
+        world.remember(j, MemoryKind::Served, None, salience, -0.3, false);
+    }
+    on_duty.first().copied()
 }
 
 /// § 2.1 (madam): at the first hour of a worker's shift at a place with a
@@ -316,6 +490,13 @@ pub fn serve(world: &mut World, server: EntityId, served: EntityId, place: Entit
             }
         }
     }
+    // Lives at work phase 3 (§ 2.2): the civic arms.
+    let mut outcome = Outcome::Done;
+    match kind {
+        ServeKind::Pupil => taught(world, server, served, place, row.valence),
+        ServeKind::Tenant => outcome = tenant(world, server, served, place),
+        _ => {}
+    }
     // 2. Memories, bodies only (`remember` drops a Statistical agent's and a chip's).
     world.remember(server, MemoryKind::Served, Some(served), salience, row.valence, false);
     world.remember(served, MemoryKind::Served, Some(server), salience, row.valence, false);
@@ -324,14 +505,17 @@ pub fn serve(world: &mut World, server: EntityId, served: EntityId, place: Entit
     // 4. The skill.
     train(world, server, row.skill, row.skill_gain);
     // 5. The event.
-    let outcome = if regular { Outcome::Regular } else { Outcome::Done };
+    if regular {
+        outcome = Outcome::Regular;
+    }
     if row.event_on.contains(&outcome.cfg()) {
         let (who, whom, at) = (world.name_of(server), world.name_of(served), world.name_of(place));
-        let text = match outcome {
-            Outcome::Regular => format!("{whom} is now a regular of {who} at {at}"),
-            _ => format!("{who} served {whom} ({kind_label}) at {at}"),
+        let (kind, text) = match outcome {
+            Outcome::Regular => (EventKind::Served, format!("{whom} is now a regular of {who} at {at}")),
+            Outcome::Notice => (EventKind::Notice, format!("{who} served notice on {whom} at {at}")),
+            _ => (EventKind::Served, format!("{who} served {whom} ({kind_label}) at {at}")),
         };
-        world.push_event(EventKind::Served, &[server, served, place], text);
+        world.push_event(kind, &[server, served, place], text);
     }
 }
 
@@ -380,6 +564,7 @@ impl Outcome {
             Outcome::Refused => ServeOutcome::Refused,
             Outcome::Ejected => ServeOutcome::Ejected,
             Outcome::Regular => ServeOutcome::Regular,
+            Outcome::Notice => ServeOutcome::Notice,
         }
     }
 }

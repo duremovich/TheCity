@@ -6,7 +6,9 @@
 //! any staff (`economy::collect_wage`), so every wage comes out of the
 //! owner's purse, which its building's revenue fills: no new money.
 
-use crate::components::{ActionInstance, Brain, Building, BuildingKind, Corp, GoalKind, Job, Position, Role, Sentence};
+use crate::components::{
+    ActionInstance, Brain, Building, BuildingKind, Corp, GoalKind, Household, Job, Position, Role, Sentence,
+};
 use crate::config::{TradeCfg, TradeDuty, TradeModel};
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -296,7 +298,7 @@ pub fn at_post(world: &World, agent: EntityId, b: EntityId) -> bool {
 /// from the id-ordered list at `shift_key × round_stops` (so the round
 /// turns through all of them over the days), walked nearest-first from
 /// the post's door.
-fn new_round(world: &World, post: EntityId, row: &TradeCfg, shift_key: i64) -> Vec<EntityId> {
+fn new_round(world: &World, id: EntityId, post: EntityId, row: &TradeCfg, shift_key: i64) -> Vec<EntityId> {
     // Jobs & lives phase 1 (§ 2): a Builder's round walks his Yard's open
     // sites (any district, any owner), the same shape.
     let yard = world.comp::<Building>(post).is_some_and(|bd| bd.kind == BuildingKind::ConstructionYard);
@@ -321,9 +323,24 @@ fn new_round(world: &World, post: EntityId, row: &TradeCfg, shift_key: i64) -> V
     if stops == 0 {
         return Vec::new();
     }
-    let start = (shift_key.max(0) as usize).wrapping_mul(stops) % blocks.len();
-    let mut left: Vec<EntityId> = (0..stops).map(|i| blocks[(start + i) % blocks.len()]).collect();
     let door = |x: EntityId| world.comp::<Building>(x).map(|bd| bd.door).unwrap_or_default();
+    // Lives at work phase 3 (§ 2.2, `round_near`): the stops nearest the
+    // worker's Home door (the post's when homeless), ties by id, instead of
+    // the id-ordered rotation; the nearest-first walk after it unchanged.
+    let near = crate::systems::service::civic_on(world) && row.round_near && !yard && !freight;
+    let mut left: Vec<EntityId> = if near {
+        let from = world
+            .comp::<Household>(id)
+            .and_then(|h| h.home)
+            .filter(|&h| world.has::<Building>(h))
+            .map_or_else(|| door(post), door);
+        let mut by_home: Vec<(u32, EntityId)> = blocks.iter().map(|&x| (door(x).manhattan(from), x)).collect();
+        by_home.sort_unstable();
+        by_home.into_iter().take(stops).map(|(_, x)| x).collect()
+    } else {
+        let start = (shift_key.max(0) as usize).wrapping_mul(stops) % blocks.len();
+        (0..stops).map(|i| blocks[(start + i) % blocks.len()]).collect()
+    };
     let mut from = door(post);
     let mut route = Vec::with_capacity(stops);
     while !left.is_empty() {
@@ -338,6 +355,20 @@ fn new_round(world: &World, post: EntityId, row: &TradeCfg, shift_key: i64) -> V
 /// J14 review: the end of a Super's shift kept for the walk back to the
 /// post and the shift's close there (two hours: a district's round).
 pub const ROUND_CUTOFF: u64 = 2 * crate::time::TICKS_PER_HOUR;
+
+/// Lives at work phase 3: does `id` hold a `round` duty (the shadow tool
+/// reads a round leg as work; the Statistical super's stops)?
+pub fn on_round(world: &World, id: EntityId) -> bool {
+    job_row(world, id).is_some_and(|r| r.duty == TradeDuty::Round)
+}
+
+/// Lives at work phase 3 (§ 6, the Statistical super): the round `id`
+/// would walk on the shift `shift_key` (the same list a body gets).
+pub fn round_for(world: &World, id: EntityId, shift_key: i64) -> Vec<EntityId> {
+    let Some(job) = world.comp::<Job>(id) else { return Vec::new() };
+    let (Some(row), Some(post)) = (row_of(world, job.role), job.employer) else { return Vec::new() };
+    new_round(world, id, post, row, shift_key)
+}
 
 /// J14, the Work goal's bypass (`plan::plan_for`, after the commute): a
 /// Super on his shift walks his round one door at a time: each call marks
@@ -370,7 +401,7 @@ pub fn round_plan(world: &mut World, id: EntityId) -> Option<Plan> {
     }
     let fresh = world.comp::<Brain>(id).is_none_or(|b| b.patrol_shift_key != Some(key));
     if fresh {
-        let route = new_round(world, post, &row, key);
+        let route = new_round(world, id, post, &row, key);
         let b = world.comp_mut::<Brain>(id)?;
         b.patrol_route = route;
         b.patrol_legs = 0;
@@ -382,6 +413,8 @@ pub fn round_plan(world: &mut World, id: EntityId) -> Option<Plan> {
         return None;
     }
     if here == Some(route[legs]) {
+        // Lives at work phase 3 (§ 2.2): the stop's tenants are served.
+        crate::systems::service::super_stop(world, id, route[legs]);
         legs += 1;
         if let Some(b) = world.comp_mut::<Brain>(id) {
             b.patrol_legs = u8::try_from(legs).unwrap_or(u8::MAX);

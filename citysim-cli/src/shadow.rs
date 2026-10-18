@@ -858,6 +858,10 @@ fn activity(world: &World, id: EntityId) -> &'static str {
         return "crime";
     }
     if matches!(b.exec, ExecState::Goto { .. } | ExecState::GotoTimed { .. } | ExecState::Fly { .. }) {
+        // Lives at work phase 3 (§ 2.2): a round leg on shift is the work.
+        if b.plan_goal() == Some(GoalKind::Work) && citysim::systems::trades::on_round(world, id) {
+            return "work";
+        }
         return "travel";
     }
     let Some(step) = b.plan.as_ref().and_then(|_| b.current_step()) else { return "idle" };

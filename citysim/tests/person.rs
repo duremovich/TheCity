@@ -929,6 +929,10 @@ fn probe_far_worker_with_one_rent_moves_near_work() {
     // `commute_cost` rides and no single farmer reads far (the El case is
     // `probe_el_*` and `tests/transit.rs`).
     cfg.transit.enabled = false;
+    // Lives at work phase 3: the civic switch moves the seeded households
+    // (tied supers housed by their landlords on day 0) and the far Farmer's
+    // trade partner with them; this pins the city the probe was written for.
+    cfg.strip_civic();
     // Jobs & lives phase 8's gate: the pin to the pre-milestone city is gone
     // (the industries on, seed 42 has its single far Farmer again).
     let mut w = World::new(42, cfg);
@@ -1571,7 +1575,11 @@ fn probe_trade_respects_rent_and_the_evictor() {
 #[test]
 fn probe_worker_makes_one_grocery_run_to_the_nearest_detour_market() {
     use citysim::BuildingKind;
-    let mut w = world();
+    // Lives at work phase 3: on the civic city the pick makes two grocery
+    // runs in the window; this pins the city the probe was written for.
+    let mut cfg = Config::load();
+    cfg.strip_civic();
+    let mut w = World::new(42, cfg);
     w.run_ticks(2 * TICKS_PER_DAY + 19 * TICKS_PER_HOUR);
     let dist = |w: &World, a: EntityId| {
         let h = home(w, a).and_then(|h| w.comp::<Building>(h)).map(|b| b.door);
@@ -2317,26 +2325,33 @@ fn probe_robbed_resident_buys_a_weapon_within_3_days() {
 /// A married, housed, free civilian with a day job (09-18) whose spouse
 /// shares the Home and has a Brain.
 fn married_day_worker(w: &World) -> Option<(EntityId, EntityId, EntityId)> {
-    w.citizens().into_iter().find_map(|a| {
-        let s = w.spouse_of(a)?;
-        let h = home(w, a)?;
-        let ok = law::living(w, a)
-            && demography::is_adult(w, a)
-            && w.gang_of(a).is_none()
-            && !w.has::<citysim::Sentence>(a)
-            && w.has::<Brain>(s)
-            && !w.has::<citysim::Sentence>(s)
-            && home(w, s) == Some(h)
-            && w.comp::<Job>(a).is_some_and(|j| {
-                !matches!(j.role, Role::Guard | Role::Sanitation)
+    married_day_workers(w).into_iter().next()
+}
+
+fn married_day_workers(w: &World) -> Vec<(EntityId, EntityId, EntityId)> {
+    w.citizens()
+        .into_iter()
+        .filter_map(|a| {
+            let s = w.spouse_of(a)?;
+            let h = home(w, a)?;
+            let ok = law::living(w, a)
+                && demography::is_adult(w, a)
+                && w.gang_of(a).is_none()
+                && !w.has::<citysim::Sentence>(a)
+                && w.has::<Brain>(s)
+                && !w.has::<citysim::Sentence>(s)
+                && home(w, s) == Some(h)
+                && w.comp::<Job>(a).is_some_and(|j| {
+                    !matches!(j.role, Role::Guard | Role::Sanitation)
                     && j.shifts == vec![(540, 1080)]
                     // A workplace near the Home: the evening's walk home is a corner's walk.
                     && j.employer.and_then(|e| w.comp::<Building>(e)).zip(w.comp::<Building>(h)).is_some_and(
                         |(e, hb)| e.door.manhattan(hb.door) <= w.config.life.spot_walk_cap_tiles,
                     )
-            });
-        ok.then_some((a, s, h))
-    })
+                });
+            ok.then_some((a, s, h))
+        })
+        .collect()
 }
 
 /// § 3.1 (the phase's acceptance): married, off shift at 19:00 with the
@@ -2344,7 +2359,13 @@ fn married_day_worker(w: &World) -> Option<(EntityId, EntityId, EntityId)> {
 /// HangOut inside the Home, the spouse its partner).
 #[test]
 fn probe_married_pick_is_home_by_nine_with_the_spouse() {
-    let mut w = world();
+    // Lives at work phase 3: the civic switch moves the seeded households
+    // (tied supers housed by their landlords on day 0), and the pick on the
+    // moved city is a Wanderer at 21:00; this pins the city the phase 2
+    // probe was written for.
+    let mut cfg = Config::load();
+    cfg.strip_civic();
+    let mut w = World::new(42, cfg);
     w.run_ticks(TICKS_PER_DAY + 19 * TICKS_PER_HOUR);
     let (a, s, h) = married_day_worker(&w).expect("a married day worker");
     pin(&mut w, a);
@@ -2408,4 +2429,172 @@ fn probe_new_parent_is_home_at_night() {
     eprintln!("new parent {}: home {at_home} of {samples} night hours (the other parent {other_home})", s.index);
     assert!(samples >= 8);
     assert!(at_home * 10 >= samples * 8, "the carer is home {at_home} of {samples} night hours");
+}
+
+// ---------------------------------------------------------------------------
+// Lives at work phase 3 (docs/LIVES_AT_WORK.md § 9.1): the civic probes.
+// ---------------------------------------------------------------------------
+
+/// Day 2, 10:00 of the shipped city.
+fn world_at_day2() -> World {
+    let mut w = world();
+    w.run_ticks(2 * TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
+    w
+}
+
+/// The `skip`-th married day worker's child taken into a Camp (the pair
+/// housed, both with a Brain, the mother jobless so a body is home).
+fn taken_child_nth(w: &mut World, skip: usize) -> (EntityId, EntityId, EntityId, EntityId) {
+    let (a, s, h) = married_day_workers(w).into_iter().nth(skip).expect("a married day worker");
+    w.remove::<Job>(s);
+    let child = citysim::systems::demography::spawn_child(w, s, a, h);
+    let camp = citysim::systems::camp::take(w, child).expect("a standing Camp takes the child");
+    (s, child, h, camp)
+}
+
+/// A married pair's child taken into a Camp on day 2 (the first pair).
+fn taken_child(w: &mut World) -> (EntityId, EntityId, EntityId, EntityId) {
+    taken_child_nth(w, 0)
+}
+
+/// § 3.5 (the phase's acceptance): a parent with 80 coins and a stocked
+/// pantry whose child was taken buys it out within 14 days: the child's
+/// Household is the parent's Home again and the parent paid the fee
+/// (control: 10 coins and an empty pantry, the child stays and the parent
+/// visits, read from its own `last_met`).
+#[test]
+fn probe_parent_with_the_fee_buys_the_child_out_within_fourteen_days() {
+    let base = world_at_day2();
+    // The harsh city: a pick abducted, harvested and killed on day 13 (seed
+    // 42's first pair on the civic city) is tried again with the next pair.
+    let mut tried = 0;
+    // (the world, the parent, the child, the Camp, the tick the child came home)
+    let mut run: Option<(World, EntityId, EntityId, EntityId, Option<u64>)> = None;
+    for skip in 0..4 {
+        let mut w = base.clone();
+        let (p, child, h, camp) = taken_child_nth(&mut w, skip);
+        let mut bought = None;
+        tried += 1;
+        pin(&mut w, p);
+        // The household holds 80 coins and a stocked pantry at each midnight's
+        // roll (the city takes 30 of 80 in a day of rent and food, so a purse
+        // set once reads 50 at the roll): topped up at each eve, 14 of them.
+        let mut gone = false;
+        for _ in 0..14 {
+            let eve = (w.tick / TICKS_PER_DAY + 1) * TICKS_PER_DAY - 1;
+            while w.tick < eve {
+                if !law::living(&w, p) {
+                    gone = true;
+                    break;
+                }
+                pin(&mut w, p);
+                w.run_ticks(1);
+                // Home: the child's Household is its parent's Home (the family
+                // may have moved in the fortnight), not the Camp.
+                if bought.is_none() && home(&w, child).is_some_and(|b| b != camp && Some(b) == home(&w, p)) {
+                    bought = Some(w.tick);
+                }
+            }
+            if gone {
+                break;
+            }
+            if bought.is_none() {
+                // The rent due at midnight is paid before the roll reads the
+                // purse (a jobless parent's arrears take most of a purse).
+                let due = w.comp::<Household>(p).map_or(0.0, |x| x.rent_due).ceil() as i64;
+                w.comp_mut::<Wallet>(p).expect("wallet").coins = 80 + due;
+                w.comp_mut::<Building>(h).expect("home").stock_food = 60;
+            }
+            w.run_ticks(1);
+        }
+        if !gone {
+            run = Some((w, p, child, camp, bought));
+            break;
+        }
+        eprintln!("pair {skip}: parent {} died before the fortnight ran; the next pair", p.index);
+    }
+    let (w, p, _child, camp, bought) =
+        run.unwrap_or_else(|| panic!("no parent of the first {tried} pairs lived the fortnight"));
+    let fee = w.config.service.buyout_fee;
+    let paid = w.events.iter().any(|e| e.kind == EventKind::CampBuyout && e.actors.contains(&p));
+    eprintln!(
+        "parent {}: child home at {:?}; CampBuyout {paid}; coins 80 -> {} (fee {fee}); camp {}",
+        p.index,
+        bought.map(|t| t / TICKS_PER_DAY),
+        coins(&w, p),
+        camp.index
+    );
+    assert!(bought.is_some() && paid, "the child was not bought out within 14 days");
+    // Control: a broke parent visits.
+    let mut c = world_at_day2();
+    let (q, child2, h2, camp2) = taken_child(&mut c);
+    pin(&mut c, q);
+    for _ in 0..14 {
+        let eve = (c.tick / TICKS_PER_DAY + 1) * TICKS_PER_DAY - 1;
+        run_to(&mut c, q, eve, |_| {});
+        let w = c.comp_mut::<Wallet>(q).expect("wallet");
+        w.coins = w.coins.min(10);
+        c.comp_mut::<Building>(h2).expect("home").stock_food = 0;
+        let next = c.tick + 1;
+        run_to(&mut c, q, next, |_| {});
+    }
+    let met = c.last_met.get(&(q.min(child2), q.max(child2))).copied();
+    let visited = c.events.iter().any(|e| e.kind == EventKind::Visited && e.actors.contains(&q));
+    eprintln!(
+        "control {}: child's home {:?} (camp {}); last_met day {met:?}; Visited {visited}",
+        q.index,
+        home(&c, child2).map(|b| b.index),
+        camp2.index
+    );
+    assert_ne!(home(&c, child2), Some(h2), "the broke parent did not buy out");
+    assert!(met.is_some(), "the broke parent visited within 14 days");
+}
+
+/// § 2.2 (the phase's acceptance): a super walks fewer than 4 hours of his
+/// shift (the near round and tied housing; V4 read 63-79 h of travel a
+/// week), the walking read from his own exec state on the day-22 shift;
+/// the control is the civic-off city's round, printed.
+#[test]
+fn probe_super_walks_under_four_hours_a_shift() {
+    fn walked(mut w: World, label: &str) -> (u64, u64) {
+        w.run_ticks(22 * TICKS_PER_DAY + 8 * TICKS_PER_HOUR);
+        let role = w.config.trade_role("super").expect("the super trade");
+        let s = w
+            .citizens()
+            .into_iter()
+            .find(|&a| {
+                w.comp::<Job>(a).is_some_and(|j| j.role == role && j.employer.is_some())
+                    && law::living(&w, a)
+                    && !w.has::<citysim::Sentence>(a)
+                    && w.comp::<Job>(a)
+                        .is_some_and(|j| routine::workday_of(&w, a, j, j.shift_key_at(w.tick + 2 * TICKS_PER_HOUR)))
+            })
+            .expect("a super on a workday");
+        pin(&mut w, s);
+        let (mut walking, mut on_shift) = (0u64, 0u64);
+        run_to(&mut w, s, 22 * TICKS_PER_DAY + 19 * TICKS_PER_HOUR, |w| {
+            let tod = w.tick_of_day();
+            if (540..1080).contains(&tod) {
+                on_shift += 1;
+                if w.comp::<Brain>(s).is_some_and(|b| {
+                    matches!(b.exec, ExecState::Goto { .. } | ExecState::GotoTimed { .. } | ExecState::Fly { .. })
+                }) {
+                    walking += 1;
+                }
+            }
+        });
+        let tied = home(&w, s).and_then(|h| w.owner_of(h))
+            == w.comp::<Job>(s).and_then(|j| j.employer).and_then(|e| w.owner_of(e));
+        eprintln!(
+            "{label}: super {} walked {walking} of {on_shift} shift minutes (housed by the landlord: {tied})",
+            s.index
+        );
+        (walking, on_shift)
+    }
+    let (on, _) = walked(world(), "civic on");
+    let mut cfg = Config::load();
+    cfg.strip_civic();
+    let (off, _) = walked(World::new(42, cfg), "civic off (control)");
+    eprintln!("super's walking a shift: on {on} min, off {off} min");
+    assert!(on < 4 * 60, "the super walked {on} minutes of the shift");
 }

@@ -42,13 +42,13 @@
 use serde::{Deserialize, Serialize};
 
 use crate::components::{
-    ActionInstance, Brain, Building, BuildingKind, Child, GoalKind, Household, Identity, Job, Lod, MemoryKind,
-    Position, RelKind, Routine, Sentence, TilePos,
+    ActionInstance, Brain, Building, BuildingKind, Child, Corpse, Crime, GoalKind, Household, Identity, Job, Lod,
+    MemoryKind, Personality, Position, RelKind, Routine, Sentence, ServeKind, TilePos,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
 use crate::goap::{ActionKind, LocationKey, Plan};
-use crate::systems::ownership;
+use crate::systems::ownership::{self, Flow};
 use crate::time::{Tick, DAYS_PER_YEAR, TICKS_PER_DAY, TICKS_PER_HOUR};
 use crate::utility::curves::{can, Curve, GATE};
 use crate::utility::Consideration;
@@ -59,6 +59,21 @@ use crate::world::World;
 const PURPOSE_CARER: u64 = 0x4855_0001;
 /// The visit's hour of the day.
 const PURPOSE_VISIT_HOUR: u64 = 0x4855_0002;
+/// Lives at work phase 3 (§ 3.5): the day of the week a parent answers for
+/// a Camp child, on (parent, week).
+const PURPOSE_ANSWER: u64 = 0x4855_0003;
+
+/// Lives at work phase 3 (§ 3.5): a parent's answer to a taken child, chosen
+/// at midnight from the household's state (`answer_of`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CampAnswer {
+    /// The weekly visit: an encounter with the warden, a `last_met`.
+    Visit,
+    /// The fee to the Camp's owner (`Flow::Buyout`) and the child home.
+    BuyOut,
+    /// A contest at the Camp door against the wardens present.
+    BreakOut,
+}
 
 /// Why a visit is due (`World::visits`).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,6 +82,8 @@ pub enum VisitWhy {
     Hurt,
     /// An elder parent not met for `elder_visit_days`.
     Elder,
+    /// Lives at work phase 3 (§ 3.5): a child in a Camp: the parent's answer.
+    Camp(CampAnswer),
 }
 
 /// A visit due today (`World::visits`, saved while pending; cleared at midnight).
@@ -569,6 +586,9 @@ pub fn visits_due(world: &mut World) {
     let frail = u32::try_from(u64::from(world.config.ages.frail_from_years) * DAYS_PER_YEAR).unwrap_or(u32::MAX);
     let elder_days = u64::from(world.config.household.elder_visit_days);
     let mut due: Vec<(EntityId, PendingVisit)> = Vec::new();
+    // Lives at work phase 3 (§ 3.5): the parents' answers to their Camp
+    // children due today (and the neglect tally).
+    let camp_due = camp_answers_due(world);
     // scan-ok: daily: the visits due
     for id in world.citizens() {
         if !world.has::<Brain>(id)
@@ -611,6 +631,11 @@ pub fn visits_due(world: &mut World) {
                 }
             }
         }
+        if pick.is_none() {
+            if let Some(&(child, answer)) = camp_due.get(&id) {
+                pick = Some((child, VisitWhy::Camp(answer)));
+            }
+        }
         if let Some((kin, why)) = pick {
             let cfg = &world.config.household;
             let span = u32::from(cfg.visit_hour_to.saturating_sub(cfg.visit_hour_from)).max(1);
@@ -632,6 +657,306 @@ fn pair(a: EntityId, b: EntityId) -> (EntityId, EntityId) {
     }
 }
 
+/// Is the visit's kin still there to see: a Brain alive for a kin or an
+/// elder; for a Camp child (no Brain), alive, no corpse, housed in a Camp.
+fn kin_there(world: &World, v: PendingVisit) -> bool {
+    match v.why {
+        VisitWhy::Camp(_) => camp_of(world, v.kin).is_some(),
+        _ => world.has::<Brain>(v.kin) && crate::systems::law::living(world, v.kin),
+    }
+}
+
+/// The Camp `child` is housed in, if any.
+fn camp_of(world: &World, child: EntityId) -> Option<EntityId> {
+    if !world.is_alive(child) || world.has::<Corpse>(child) {
+        return None;
+    }
+    world
+        .comp::<Household>(child)
+        .and_then(|h| h.home)
+        .filter(|&h| world.comp::<Building>(h).is_some_and(|b| b.kind == BuildingKind::Camp))
+}
+
+// ---------------------------------------------------------------------------
+// § 3.5 (phase 3): the parent's answer to a taken child
+// ---------------------------------------------------------------------------
+
+/// Midnight (civic only): the parents' answers due today, once a week a
+/// parent (the day of the week hashed on (parent, week), `PURPOSE_ANSWER`),
+/// for each standing Camp's children; a parent with two taken children
+/// answers for the lower id. The neglect tally beside it: a parent of a
+/// Camp child with no `last_met` with it in `neglect_days`, counted a day
+/// (printed, never a camp-take term: Dylan's answer 4).
+fn camp_answers_due(world: &mut World) -> std::collections::BTreeMap<EntityId, (EntityId, CampAnswer)> {
+    let mut due = std::collections::BTreeMap::new();
+    if !crate::systems::service::civic_on(world) {
+        return due;
+    }
+    let cfg = world.config.service.clone();
+    let day = world.day();
+    let week = day / 7;
+    let mut neglect = 0u32;
+    for camp in crate::systems::camp::standing_camps(world) {
+        let kids: Vec<EntityId> = crate::systems::camp::children_of(world, camp).to_vec();
+        for k in kids {
+            for p in crate::systems::camp::parents_of(world, k) {
+                if !world.has::<Brain>(p)
+                    || world.has::<Sentence>(p)
+                    || !crate::systems::demography::is_adult(world, p)
+                    || world.comp::<Brain>(p).is_some_and(|b| b.emigrating)
+                {
+                    continue;
+                }
+                let met = world.last_met.get(&pair(p, k)).copied();
+                if met.is_none_or(|d| day.saturating_sub(d) >= u64::from(cfg.neglect_days)) {
+                    neglect += 1;
+                }
+                let u = hash(world, PURPOSE_ANSWER, key(p), week);
+                let on_day = week * 7 + ((u * 7.0) as u64).min(6);
+                if on_day != day || due.contains_key(&p) {
+                    continue;
+                }
+                let answer = answer_of(world, p, &cfg);
+                due.insert(p, (k, answer));
+            }
+        }
+    }
+    if neglect > 0 {
+        ownership::jobs2_row(world).camp_neglect += neglect;
+    }
+    due
+}
+
+/// § 3.5: buy out when the purse holds `buyout_fee` and the Home's pantry
+/// `buyout_food_days` of the child's food; else break out when lawless and
+/// brave (lawfulness < 0.3, courage ≥ 0.6) or a gang member with
+/// `breakout_crew` of his gang alive and free; else visit.
+fn answer_of(world: &World, p: EntityId, cfg: &crate::config::ServiceCfg) -> CampAnswer {
+    let purse = world.purse(Some(p));
+    let pantry = home_of(world, p).and_then(|h| world.comp::<Building>(h)).map_or(0.0, |b| b.stock_food as f32);
+    if purse >= cfg.buyout_fee && pantry >= cfg.buyout_food_days * crate::systems::demography::CHILD_FOOD_PER_DAY {
+        return CampAnswer::BuyOut;
+    }
+    let lawless = world.comp::<Personality>(p).is_some_and(|x| x.lawfulness < 0.3 && x.courage >= 0.6);
+    let crew = world.gang_of(p).is_some_and(|g| crew_of(world, g, p).len() >= usize::from(cfg.breakout_crew));
+    if lawless || crew {
+        CampAnswer::BreakOut
+    } else {
+        CampAnswer::Visit
+    }
+}
+
+/// The free, living members of gang `g` but `p`, ascending.
+fn crew_of(world: &World, g: EntityId, p: EntityId) -> Vec<EntityId> {
+    world
+        .comp::<crate::components::Gang>(g)
+        .map(|x| x.members.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|&m| m != p && !world.has::<Sentence>(m) && crate::systems::law::living(world, m))
+        .collect()
+}
+
+/// The answer made at the Camp (a body's walk done, or a Statistical
+/// parent's hour): the visit, the buy-out or the break-out. The `last_met`
+/// and the belonging are the visit's in every arm (the parent was there).
+fn camp_answer(world: &mut World, id: EntityId, child: EntityId, answer: CampAnswer, walked: bool) {
+    let today = world.day();
+    world.last_met.insert(pair(id, child), today);
+    let gain = world.config.household.visit_belonging;
+    if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
+        n.belonging = (n.belonging + gain).min(1.0);
+    }
+    let Some(camp) = camp_of(world, child) else { return };
+    match answer {
+        CampAnswer::Visit => camp_visit(world, id, child, camp),
+        CampAnswer::BuyOut => {
+            let fee = world.config.service.buyout_fee;
+            let owner = world.owner_of(camp);
+            let paid = ownership::pay(world, Some(id), owner, fee, Flow::Buyout);
+            if paid >= fee {
+                child_home(
+                    world,
+                    id,
+                    child,
+                    camp,
+                    EventKind::CampBuyout,
+                    &format!("bought {{child}} out of {{camp}} for {fee}"),
+                );
+                ownership::jobs2_row(world).camp_buyouts += 1;
+            } else {
+                // The purse moved since midnight: the coins back, a visit instead.
+                if paid > 0 {
+                    ownership::refund(world, id, owner, paid, Flow::Buyout);
+                }
+                camp_visit(world, id, child, camp);
+            }
+        }
+        CampAnswer::BreakOut => breakout(world, id, child, camp, walked),
+    }
+}
+
+/// § 3.5 (visit): a `Served` memory with the warden on duty, if any (the
+/// visit is not queued at his counter: his row serves children), the
+/// counter, the event.
+fn camp_visit(world: &mut World, id: EntityId, child: EntityId, camp: EntityId) {
+    let salience = world.config.service.served_salience;
+    if let Some(&w) = crate::systems::service::servers_on_duty(world, camp, ServeKind::Inmate).first() {
+        world.remember(id, MemoryKind::Served, Some(w), salience, -0.1, false);
+        world.remember(w, MemoryKind::Served, Some(id), salience, 0.0, false);
+    }
+    ownership::jobs2_row(world).camp_visits += 1;
+    let text =
+        format!("{} visited {} at {} (a Camp child)", world.name_of(id), world.name_of(child), world.name_of(camp));
+    world.push_event(EventKind::Visited, &[id, child, camp], text);
+}
+
+/// The child out of the Camp and home (`camp::release`, then the parent's
+/// Home with room, else the street as `release` leaves it), the event.
+fn child_home(world: &mut World, id: EntityId, child: EntityId, camp: EntityId, kind: EventKind, what: &str) {
+    crate::systems::camp::release(world, child, crate::systems::camp::ReleaseWhy::BoughtOut);
+    let home = crate::systems::camp::send_home(world, child, id);
+    let (name, cn, camp_name) = (world.name_of(id), world.name_of(child), world.name_of(camp));
+    let to = home.map_or_else(|| "the street".to_string(), |h| world.name_of(h));
+    let text = format!("{name} {}, to {to}", what.replace("{child}", &cn).replace("{camp}", &camp_name));
+    world.push_event(kind, &[id, child, camp], text);
+}
+
+/// § 3.5 (break-out): the parent and his gang's free members at the door
+/// (a body's within `raid_gather_radius`; a Statistical parent's the first
+/// `breakout_crew`) against the wardens present and the Camp's robots,
+/// `raid::fight_out`. Won: the child home and an `Abduction` raised on the
+/// parent at the door; lost: the strongest warden standing arrests a body
+/// (`law::arrest` takes any arrester adjacent), else the Abduction is
+/// filed with the parent as suspect and the warrant runs (deviation: a
+/// Statistical parent has no body at the door).
+fn breakout(world: &mut World, id: EntityId, child: EntityId, camp: EntityId, walked: bool) {
+    let Some(door) = world.comp::<Building>(camp).map(|b| b.door) else { return };
+    let cfg = world.config.service.clone();
+    let radius = world.config.gangs.raid_gather_radius;
+    let mut raiders = vec![id];
+    if let Some(g) = world.gang_of(id) {
+        let crew = crew_of(world, g, id);
+        let cap = usize::from(cfg.breakout_crew);
+        if walked {
+            raiders.extend(crew.into_iter().filter(|&m| {
+                world.comp::<Position>(m).is_some_and(|p| crate::systems::law::chebyshev(p.tile, door) <= radius)
+            }));
+        } else {
+            raiders.extend(crew.into_iter().take(cap));
+        }
+    }
+    crate::systems::raid::by_strength(world, &mut raiders);
+    let mut defenders = crate::systems::service::servers_on_duty(world, camp, ServeKind::Inmate);
+    crate::systems::raid::robots_first(world, camp, &mut defenders);
+    let witness = defenders.first().copied();
+    let _tally = crate::systems::raid::fight_out(world, &mut raiders, &mut defenders, door, "the Camp", 1.0, None);
+    if defenders.is_empty() {
+        child_home(world, id, child, camp, EventKind::CampBreakout, "broke {child} out of {camp}");
+        if crate::systems::law::living(world, id) {
+            crate::systems::law::raise_crime_on(world, id, None, Some(child), Crime::Abduction, door);
+            crate::systems::law::file_report(world, Crime::Abduction, id, witness);
+        }
+        ownership::jobs2_row(world).camp_breakouts += 1;
+        return;
+    }
+    if !crate::systems::law::living(world, id) {
+        return;
+    }
+    let cuffed =
+        walked && defenders.iter().any(|&w| world.has::<Brain>(w) && crate::systems::law::arrest(world, w, id));
+    if !cuffed {
+        crate::systems::law::file_report(world, Crime::Abduction, id, defenders.first().copied());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// § 2.2 (phase 3): tied housing
+// ---------------------------------------------------------------------------
+
+/// Midnight (`ownership::run`, after `reunite`, before `rehouse`; civic
+/// only): a tied trade's worker (`[[trades]] tied_housing`) whose Home's
+/// owner is not his employer's owner moves, with his co-resident spouse and
+/// children, into the standing Block of that owner in the post's district
+/// nearest the post with room for them all (never evicting: room or
+/// nothing); `Housed` as `rehouse` posts it. Rent-free there
+/// (`ownership::tied_here`).
+pub fn tied_housing(world: &mut World) {
+    if !crate::systems::service::civic_on(world) {
+        return;
+    }
+    // scan-ok: daily: the tied trades' workers
+    let workers: Vec<(EntityId, EntityId)> = world
+        .citizens()
+        .into_iter()
+        .filter_map(|a| {
+            let j = world.comp::<Job>(a)?;
+            let row = crate::systems::trades::row_of(world, j.role)?;
+            row.tied_housing.then_some((a, j.employer?))
+        })
+        .collect();
+    for (a, post) in workers {
+        if !world.has::<Brain>(a)
+            || world.has::<Sentence>(a)
+            || !crate::systems::law::living(world, a)
+            || world.comp::<Brain>(a).is_some_and(|b| b.emigrating)
+        {
+            continue;
+        }
+        let Some(owner) = world.owner_of(post) else { continue };
+        let home = home_of(world, a);
+        if home.is_some_and(|h| world.owner_of(h) == Some(owner)) {
+            continue;
+        }
+        // A household already housed by a co-resident's landlord stays: two
+        // supers of two landlords married each other and the first build
+        // moved the couple between the two landlords' Blocks every midnight.
+        if home.is_some_and(|h| world.residents_of(h).iter().any(|&r| r != a && ownership::tied_here(world, r, h))) {
+            continue;
+        }
+        let mut movers = vec![a];
+        if let Some(h) = home {
+            for &r in world.residents_of(h) {
+                if r != a && (world.spouse_of(a) == Some(r) || crate::systems::demography::is_child_of(world, r, a)) {
+                    movers.push(r);
+                }
+            }
+        }
+        let d = world.district_of_building(post);
+        let Some(from) = world.comp::<Building>(post).map(|b| b.door) else { continue };
+        let pick = world
+            .buildings_of_kind(BuildingKind::Home)
+            .iter()
+            .copied()
+            .filter(|&b| world.owner_of(b) == Some(owner) && world.district_of_building(b) == d)
+            .filter(|&b| {
+                world.comp::<Building>(b).is_some_and(|bd| {
+                    !bd.demolished
+                        && !bd.derelict
+                        && world.residents_of(b).len() + movers.len() <= usize::from(bd.capacity)
+                })
+            })
+            .min_by_key(|&b| (world.comp::<Building>(b).map_or(u32::MAX, |bd| bd.door.manhattan(from)), b));
+        let Some(to) = pick else { continue };
+        for &m in &movers {
+            world.set_home(m, Some(to));
+            if let Some(h) = world.comp_mut::<Household>(m) {
+                h.rent_due = 0.0;
+                h.arrears = 0;
+            }
+        }
+        let (name, place) = (world.name_of(a), world.name_of(to));
+        let with = movers.len() - 1;
+        world.push_event(
+            EventKind::Housed,
+            &[a, to],
+            format!("{name} moved into {place}, the landlord's Block, as its super (with {with} of the household)"),
+        );
+        world.stats.current.housed += 1;
+        ownership::jobs2_row(world).tied_housed += 1;
+    }
+}
+
 /// The visit `id` owes today, once its hour has come.
 pub fn visit_now(world: &World, id: EntityId) -> Option<PendingVisit> {
     let v = *world.visits.get(&id)?;
@@ -645,12 +970,13 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
         return None;
     }
     let v = visit_now(world, id)?;
-    if !world.has::<Brain>(v.kin) || !crate::systems::law::living(world, v.kin) {
+    if !kin_there(world, v) {
         return None;
     }
     let urgency = match v.why {
         VisitWhy::Hurt => 1.0,
         VisitWhy::Elder => 0.6,
+        VisitWhy::Camp(_) => 0.8,
     };
     let cs = vec![
         Consideration::new("a visit due", can(true), GATE),
@@ -686,6 +1012,12 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind) -> bool {
 /// The credit a visit gives both sides: `interacted`, `last_met`, the
 /// visitor's belonging (`visit_belonging`), the counter, an event.
 fn credit(world: &mut World, id: EntityId, v: PendingVisit, walked: bool) {
+    // Lives at work phase 3 (§ 3.5): a Camp child has no edge table and no
+    // Brain: its arm writes the `last_met` and the belonging itself.
+    if let VisitWhy::Camp(answer) = v.why {
+        camp_answer(world, id, v.kin, answer, walked);
+        return;
+    }
     crate::systems::social::interacted(world, id, v.kin);
     let today = world.day();
     world.last_met.insert(pair(id, v.kin), today);
@@ -697,6 +1029,7 @@ fn credit(world: &mut World, id: EntityId, v: PendingVisit, walked: bool) {
     match v.why {
         VisitWhy::Hurt => row.kin_visits += 1,
         VisitWhy::Elder => row.elder_visits += 1,
+        VisitWhy::Camp(_) => {}
     }
     let place = world.comp::<Position>(v.kin).and_then(|p| p.building);
     let at = place.map_or_else(|| "where they were".to_string(), |b| world.name_of(b));
@@ -707,6 +1040,7 @@ fn credit(world: &mut World, id: EntityId, v: PendingVisit, walked: bool) {
         match (v.why, walked) {
             (VisitWhy::Hurt, _) => " (hurt)",
             (VisitWhy::Elder, _) => " (an elder parent)",
+            (VisitWhy::Camp(_), _) => " (a Camp child)",
         }
     );
     let actors: Vec<EntityId> = [Some(id), Some(v.kin), place].into_iter().flatten().collect();
@@ -734,7 +1068,7 @@ pub fn hourly(world: &mut World) {
         .map(|(&id, &v)| (id, v))
         .collect();
     for (id, v) in stat {
-        if world.has::<Brain>(v.kin) && crate::systems::law::living(world, v.kin) {
+        if kin_there(world, v) {
             credit(world, id, v, false);
         }
         world.visits.remove(&id);

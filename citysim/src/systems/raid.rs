@@ -655,6 +655,9 @@ pub fn breach(world: &mut World, actor: EntityId) -> Option<Outcome> {
     let mut raiders = raiders_at(world, gid, actor, door);
     let mut defenders = jail_defenders(world, jail, door);
     robots_first(world, jail, &mut defenders);
+    // Lives at work phase 3 (§ 2.2): the jailers on duty are named on the
+    // breakout (a Served memory each; the first in the event's text).
+    let past = crate::systems::service::jailers_passed(world, jail).map(|j| format!(", past {}", world.name_of(j)));
     let (n_raiders, n_defenders) = (raiders.len(), defenders.len());
     crate::systems::gossip::post_raid(world, Some(gid), Some(jail), door);
     let tally = fight_out(world, &mut raiders, &mut defenders, door, "the Precinct", 1.0, None);
@@ -690,7 +693,12 @@ pub fn breach(world: &mut World, actor: EntityId) -> Option<Outcome> {
             world.push_event(
                 EventKind::Jailbreak,
                 &actors,
-                format!("{gname} broke {} out of the Precinct: {}", freed.len(), names.join(", ")),
+                format!(
+                    "{gname} broke {} out of the Precinct{}: {}",
+                    freed.len(),
+                    past.as_deref().unwrap_or(""),
+                    names.join(", ")
+                ),
             );
         }
         _ => gang::push_shock(world, gid, Shock::BreakoutFailed),

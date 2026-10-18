@@ -2552,13 +2552,8 @@ fn god_flood_guns() {
         if day != 20 {
             return;
         }
-        let g = w
-            .gangs()
-            .into_iter()
-            .filter(|&g| w.hideout_of(g).is_some())
-            .min_by_key(|&g| (w.comp::<Gang>(g).map_or(0, |x| x.members.len()), g));
-        let Some(g) = g else {
-            eprintln!("day 20: no gang with a Hideout");
+        let Some(g) = flood_pick(w) else {
+            eprintln!("day 20: no gang with a Hideout and a crew to march");
             return;
         };
         eprintln!("day 20: 200 tier-3 weapons to {}", w.owner_label(Some(g)));
@@ -2594,6 +2589,30 @@ fn god_flood_guns() {
     assert!(drawn > 0, "the crate was never issued");
 }
 
+/// `god_flood_guns`'s pick: the weakest gang with a Hideout on day 20 that
+/// has a crew to march: `raid_min_members` free members (living, not held)
+/// besides a leader who stays back (D10). Lives at work phase 3: tied
+/// housing moves the seeded households on day 0 and the city's gangs with
+/// them; on that city the weakest gang had three members, fewer than a
+/// muster needs, and the crate was never drawn (the lawful-Farmer shape: the
+/// pick's precondition, never the bound).
+fn flood_pick(w: &World) -> Option<EntityId> {
+    let need = w.config.gangs.raid_min_members + 1;
+    w.gangs()
+        .into_iter()
+        .filter(|&g| w.hideout_of(g).is_some())
+        .filter(|&g| {
+            w.comp::<Gang>(g).is_some_and(|x| {
+                x.members
+                    .iter()
+                    .filter(|&&m| citysim::systems::law::living(w, m) && !w.has::<citysim::Sentence>(m))
+                    .count()
+                    >= need
+            })
+        })
+        .min_by_key(|&g| (w.comp::<Gang>(g).map_or(0, |x| x.members.len()), g))
+}
+
 /// `god_flood_guns`'s measure: the weakest gang on day 20 (the scenario's
 /// pick) flooded, run to day 60: the crate (the weapons the command
 /// spawned, read off the arms index before and after it), and the
@@ -2603,12 +2622,7 @@ fn crate_drawn() -> (usize, usize) {
     use citysim::components::{Asset, AssetLoc};
     let mut w = World::new(SEED, Config::load());
     w.run_ticks(20 * TICKS_PER_DAY);
-    let g = w
-        .gangs()
-        .into_iter()
-        .filter(|&g| w.hideout_of(g).is_some())
-        .min_by_key(|&g| (w.comp::<Gang>(g).map_or(0, |x| x.members.len()), g))
-        .expect("a gang with a Hideout");
+    let g = flood_pick(&w).expect("a gang with a Hideout and a crew to march");
     let before = w.jobs2.arms.index.clone();
     w.push_command(PlayerCommand::FloodGuns { gang: g, n: 200, tier: 3 });
     w.run_ticks(1);

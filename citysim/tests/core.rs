@@ -421,6 +421,13 @@ fn run_city(seed: u64, days: u64, cfg: Config) -> SeedRun {
                 ("Visit to a hurt kin", j.kin_visits),
                 ("Visit to an elder parent", j.elder_visits),
                 ("newborn's carer", j.carers),
+                // Lives at work phase 3 (docs/LIVES_AT_WORK.md § 9.1).
+                ("School day taught", j.taught_days),
+                ("Camp headcount", j.camp_headcounts),
+                ("super's door payment", pos(j.door_rent)),
+                ("arrears notice", j.notices),
+                ("parent's Camp visit", j.camp_visits),
+                ("neglecting parent-day", j.camp_neglect),
             ] {
                 *r.marks.entry(k).or_insert(0) += v;
             }
@@ -974,6 +981,14 @@ fn jobs2_printed() -> Vec<Mechanism> {
         "Visit to a hurt kin",           // [727, 659, 698]
         "Visit to an elder parent",      // [3796, 4223, 3663]
         "newborn's carer",               // [27, 31, 29]
+        // Lives at work phase 3 (§ 9.1, printed until the gate; `run --report` 42-44 x 120 on the
+        // phase 3 tree, `tests/civic.rs` carries each; the Camp's are rare at 2k, few children).
+        "School day taught",     // [31, 272, 46]
+        "Camp headcount",        // [85, 92, 88]
+        "super's door payment",  // [103, 103, 103] days with one
+        "arrears notice",        // [1331, 1228, 1295]
+        "parent's Camp visit",   // [123, 97, 90]
+        "neglecting parent-day", // [190, 202, 215]
     ]
     .into_iter()
     .map(|k| (k, m(k)))
