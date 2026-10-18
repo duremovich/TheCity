@@ -15,7 +15,7 @@ Every tier was green on `2712b4a`; `python tools/test.py change` measured 264 s 
 
 ## In flight
 
-- This session: process review tasks 3-8 (`docs/PROCESS_REVIEW.md` § 3). Each task commits on main. No worktrees; no coder agents.
+- This session: process review tasks 0-8a are on main (`docs/PROCESS_REVIEW.md` § 6). Two coders in worktrees finish task 8: `fold-coder` (the five pass-named test files folded into system files, `wounded.rs`/`wages.rs` sharing a base world) and `god-coder` (the god set 41 → 20). The orchestrator merges each after `test.py merge` on its tree, then runs `/code-review high` on the session.
 
 ## Next, in order
 

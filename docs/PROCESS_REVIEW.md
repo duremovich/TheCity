@@ -111,7 +111,7 @@ Rules (load only when the matching file is touched):
 
 ### 2. `tools/test.py` and a short TESTING.md (the test process, § 4)
 
-- `tools/test.py` (stdlib): `change | merge | milestone | diag | lint | report`. Runs the tier's `cargo` commands **one at a time**, writes each binary's full output to `target/test-logs/<tier>-<timestamp>/<binary>.log`, prints to the terminal only: per binary one line (name, pass/fail/ignored counts, seconds), every `FAIL`/`panicked` line with its test name, every `FINDING` line, and a footer with the tier's wall time against its budget. Flags: `--no-build`, `--only <name>`, `--sample k/n` for the per-change tier (a deterministic k-of-n sample of the binaries by name hash, Carlini's device, for a quick look mid-work). `lint` is § 4's checks; `report` is § 4's close-of-milestone table.
+- `tools/test.py` (stdlib): `change | merge | milestone | diag | lint | report`. Runs the tier's `cargo` commands **one at a time**, writes each binary's full output to `target/test-logs/<tier>-<timestamp>/<binary>.log`, prints to the terminal only: per binary one line (name, pass/fail/ignored counts, seconds), every `FAIL`/`panicked` line with its test name, every `FINDING` line, and a footer with the tier's wall time against its budget. Flags: `--no-build`, `--only <name>` (one binary while iterating). `lint` is § 4's checks; `report` is § 4's close-of-milestone table. (Carlini's deterministic sample mode was considered and dropped: at ~4 minutes the fast tier does not need it.)
 - `docs/TESTING.md` rewritten to ~150 lines: the doctrine in three lines, the tier table (what, where, asserts, measured wall, budget), the caps (§ 4), the three rules for adding a test, and pointers to the test files' own doc comments for the per-seed history (move the mechanism-bullet history into `core.rs`'s comments and the behaviour calibration history into `shadow.rs`'s; the retired-switches section goes to `docs/history/`).
 - A `cargo nextest` profile for the per-change tier is **optional later**: it gives per-test timing, `slow-timeout` and `default-filter`, but it is one more install and it breaks the `OnceLock` controls, so it can only ever be the fast tier's runner.
 
@@ -206,6 +206,23 @@ A breach is printed loudly in the footer (never a fail: Dylan's no-fine-tuning r
 3. **OPEN.md: a markdown table + lint.**
 4. **Worktrees: delete all 11**, `agent-abdc8…` included (its work is on main as `ad1c496`); shut down the idle `v4-*` and `v4spec` teammates.
 
-## 6. Out of scope
+## 6. Status (2026-10-18, the fourteenth session)
+
+| task | commit | check |
+|---|---|---|
+| 0 hygiene | (no files) | 10 worktrees and 10 branches removed, 49 GB back; 10 idle agents shut down; renormalize a no-op |
+| 1 CLAUDE.md + rules | `86a9134` | 97 lines. A fresh agent answered the three questions from it correctly, **but the file did not auto-load for it**: its worktree was cut at session start, before CLAUDE.md was committed. Confirm the auto-load in the next session's first subagent; until then briefs say "read CLAUDE.md" |
+| 2 test.py + TESTING.md | `acb4e07` | `change` on main: GREEN, 62 lines printed, 4m43s (tests 272 s, fmt+clippy 10 s) |
+| 3 HANDOFF split, docs/README, history | `d592194` | HANDOFF 38 lines; no old path left outside `docs/history/` |
+| 4 OPEN.md | `0894be0` | 93 rows; lint green on ids and the one `gap:` |
+| 5 ARCHITECTURE.md | `64235d8` | five lookups verified; `[db]`, `[export]` readers still marked unverified |
+| 6 memory | `1be056e` | 47 → 12 files; MEMORY.md 11 lines |
+| 7 hooks + skills | `fcabc67` | SessionStart prints ≤ 28 lines; the pre-commit ran on its own commit |
+| 8a ignore reasons, the 60-bullet cap, tests/common | `a5f2d18` | 68 reasons; `core_sanity` green with 60 PASS lines |
+| 8b the fold and the speed-ups, 8c the god cut 41 → 20 | two coders in worktrees | merge tier on main after the merge |
+
+**The change budget moved 3 → 4 min** (`tools/test.py`, this session): the 3 was written before the measurement; 1,280 tests at ~0.2 s each, binaries serial, cannot fit 3 minutes on this box without retiring unit tests, which the plan does not do. `OPEN-093` stays open for the gap that remains after the `wounded`/`wages` speed-ups.
+
+## 7. Out of scope
 
 Sim code, the Lives at work build (`docs/LIVES_AT_WORK.md`), M18. A nextest migration of the fast tier is a later, optional task.

@@ -16,7 +16,7 @@ A Rust city simulator: ~2,000 (or 20,000) residents in a cyberpunk corporate dys
 Tests run through one script; each tier is minutes, so pick the tier, never run the ignored set blind.
 
 ```
-python tools/test.py change      # fmt, clippy, every non-ignored test   (~4 min; budget 3)
+python tools/test.py change      # fmt, clippy, every non-ignored test   (~4.5 min; budget 4)
 python tools/test.py merge       # + the year, the behaviour tier, the god scenarios, serial (budget 8)
 python tools/test.py milestone   # + Full-vs-Statistical parity, the 20k profile (budget 20)
 python tools/test.py lint        # ignore reasons, caps, OPEN.md ids
@@ -58,7 +58,9 @@ Install the commit hook once: `git config core.hooksPath tools/hooks` (fmt check
 - Cap a test diagnosis at ~30 minutes, then report it as open with what you tried.
 - A tool asserts its own preconditions: a `--count` past the candidates or a `--start-day` past the run is an error, not a silent cap.
 - When your work merges: delete your worktree's `target/` (each is 5-13 GB), and expect to be shut down.
-- Subagents do not see the orchestrator's memory; everything they need is in this file and the docs above.
+- Subagents do not see the orchestrator's memory; everything they need is in this file and the docs above. A worktree cut before this file was committed will not show it: briefs say "read CLAUDE.md first".
+- A script that rewrites files on Windows writes LF (`newline="\n"` in Python); `git ls-files --eol | grep w/crlf` stays empty.
+- An agent's final reply can be lost; have it also write its report to a file and name the path in the brief.
 - Commits end with the session's attribution lines (the harness supplies them).
 
 ## Closing a milestone
