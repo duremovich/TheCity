@@ -1476,6 +1476,11 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                     t.hang_others.extend(list.iter().copied().filter(|&o| o != id));
                 }
             }
+            // Lives at work phase 2 (§ 3.1): a HangOut inside a Home keeps the
+            // household present as its company (the registry holds hangers only).
+            if let Some(h) = citysim::systems::household::hanging_at_home(world, id) {
+                t.hang_others.extend(citysim::systems::household::residents_inside(world, h, id));
+            }
         }
         // Goal choice.
         if b.current_goal != t.last_goal {

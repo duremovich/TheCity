@@ -818,10 +818,12 @@ pub fn newest_hire(world: &World, corp: EntityId) -> Option<(EntityId, EntityId)
             let kind = world.comp::<Building>(b)?.kind;
             // Class pay: a professional or management post goes last.
             let exposed = !crate::systems::classpay::protected(world, a);
-            (!(spare_farms && kind == BuildingKind::Farm)).then_some((exposed, j.hired_tick, a, b))
+            // Lives at work phase 2 (§ 3.4): the owner's household after every non-member.
+            let outsider = !crate::systems::household::is_member_of_owner(world, a, b);
+            (!(spare_farms && kind == BuildingKind::Farm)).then_some((exposed, outsider, j.hired_tick, a, b))
         })
         .max()
-        .map(|(_, _, a, b)| (a, b))
+        .map(|(_, _, _, a, b)| (a, b))
 }
 
 /// E18: lay the newest hire off (`LaidOff`, "laid off: revenue"; no vacancy).
@@ -887,7 +889,14 @@ fn past_cap_pass(world: &mut World, corp: EntityId, order: f32, lay_off_one: boo
             if laid || !lay_off_one || hires.len() <= cap {
                 continue;
             }
-            let Some(&(_, who)) = hires.last() else { continue };
+            // Lives at work phase 2 (§ 3.4): the owner's household goes after
+            // every non-member (the newest non-member first, as before).
+            let pick = hires
+                .iter()
+                .rev()
+                .find(|&&(_, who)| !crate::systems::household::is_member_of_owner(world, who, b))
+                .or(hires.last());
+            let Some(&(_, who)) = pick else { continue };
             let (name, cname) = (world.name_of(who), world.owner_label(Some(corp)));
             let foreman = crate::systems::industry::foreman_note(world, b, who, "told");
             let text = format!(

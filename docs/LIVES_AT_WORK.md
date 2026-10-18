@@ -457,6 +457,51 @@ Measured 2026-10-18 on main `23a161d` plus the phase 0 probes, before any phase 
 | `worker_friday` | 90 | 3.92 | 81 | 72 | 33 | 0.43 | 8.28 (0.20) | 14.40 | 0.27 (355/1296) | 497 | 0.29 | 0.35 | 0.62 |
 | `all` | 1821 | 3.86 | 1427 | 997 | 460 | 1.78 | 22.06 (0.05) | 14.68 | 0.29 (7591/26630) | 8426 | 0.28 | 0.32 | 1.43 |
 
+### 2k after phase 2 (the phase 2 tree, 2026-10-18; the same recipe)
+
+Lives at work phases 1 and 2 on, the own Home gated on company (the fix round). Main `70e9589` read on the same day (phase 1 on, phase 2 off) is the "main" column of § 14's phase 2 table and reads, pooled: idle 4.05, married 1,489, never named 1,016, never co-located 473, named/wk 1.87, co-located 22.94 (0.06), HangOuts/wk 14.32, empty 0.27 (7,591/26,630). A home HangOut's company is the household present (bodies), so `empty` counts an empty flat as an empty spot.
+
+| archetype | n | idle h/d | married | never named | never co-located | named/wk | co-located h/wk (Stat spouse) | HangOuts/wk | empty | shifts | Served-able | any signal | bodies/h |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `bouncer` | 53 | 5.34 | 43 | 18 | 3 | 7.38 | 35.60 (0.01) | 18.41 | 0.21 (206/965) | 243 | 0.71 | 0.98 | 0.47 |
+| `builder` | 90 | 3.66 | 89 | 51 | 12 | 2.48 | 41.90 (0.02) | 13.78 | 0.08 (99/1240) | 538 | 0.00 | 0.00 | 0.00 |
+| `cabbie` | 17 | 3.04 | 9 | 5 | 5 | 2.89 | 19.22 (0.00) | 15.12 | 0.44 (114/257) | 100 | 0.26 | 0.26 | 0.02 |
+| `camp_warden` | 6 | 4.23 | 5 | 1 | 0 | 6.20 | 61.20 (0.01) | 13.33 | 0.36 (29/80) | 35 | 0.03 | 0.03 | 0.00 |
+| `ceo` | 28 | 6.17 | 13 | 13 | 5 | 0.00 | 1.31 (0.94) | 3.39 | 0.35 (33/95) | 4 | 1.00 | 1.00 | 31.28 |
+| `club_staff` | 90 | 4.62 | 82 | 47 | 12 | 6.18 | 30.82 (0.04) | 19.42 | 0.19 (332/1748) | 446 | 0.59 | 0.80 | 0.66 |
+| `companion` | 6 | 8.86 | 4 | 2 | 1 | 7.25 | 39.25 (0.01) | 8.33 | 0.12 (6/50) | 30 | 0.07 | 1.00 | 0.01 |
+| `cook` | 90 | 4.21 | 82 | 46 | 18 | 6.66 | 39.33 (0.02) | 19.08 | 0.18 (317/1717) | 523 | 0.04 | 0.04 | 0.01 |
+| `courier` | 36 | 4.23 | 32 | 10 | 0 | 3.22 | 64.19 (0.00) | 15.44 | 0.09 (49/556) | 216 | 0.06 | 0.06 | 0.01 |
+| `cultist` | 54 | 3.63 | 51 | 19 | 10 | 3.62 | 26.58 (0.00) | 14.91 | 0.14 (106/773) | 160 | 0.78 | 0.79 | 0.63 |
+| `dancer` | 45 | 5.59 | 43 | 25 | 9 | 5.40 | 34.12 (0.03) | 16.49 | 0.23 (174/742) | 210 | 0.44 | 1.00 | 0.39 |
+| `day_labourer` | 56 | 5.80 | 36 | 26 | 21 | 2.67 | 11.44 (0.27) | 18.45 | 0.29 (304/1033) | 122 | 0.11 | 0.11 | 0.08 |
+| `elder` | 90 | 4.38 | 71 | 64 | 32 | 1.11 | 8.16 (0.58) | 17.52 | 0.41 (638/1563) | 356 | 0.21 | 0.22 | 1.19 |
+| `exec` | 28 | 6.17 | 13 | 13 | 5 | 0.00 | 1.31 (0.94) | 3.39 | 0.35 (33/95) | 4 | 1.00 | 1.00 | 31.28 |
+| `fabber` | 90 | 3.49 | 83 | 51 | 25 | 3.88 | 29.18 (0.02) | 14.78 | 0.18 (242/1330) | 531 | 0.09 | 0.09 | 0.01 |
+| `fighter` | 24 | 4.64 | 19 | 4 | 0 | 6.54 | 38.83 (0.03) | 15.91 | 0.30 (115/381) | 110 | 0.99 | 0.99 | 0.14 |
+| `gang_leader` | 12 | 3.12 | 10 | 7 | 6 | 2.20 | 4.20 (0.00) | 11.58 | 0.35 (49/139) | 40 | 0.50 | 0.50 | 0.29 |
+| `gang_member` | 87 | 3.74 | 76 | 33 | 25 | 4.22 | 21.78 (0.00) | 15.05 | 0.20 (254/1295) | 273 | 0.73 | 0.73 | 0.58 |
+| `guard` | 90 | 4.10 | 70 | 51 | 29 | 1.50 | 5.20 (0.04) | 13.82 | 0.27 (328/1233) | 534 | 0.72 | 0.72 | 19.61 |
+| `gun` | 74 | 3.85 | 56 | 41 | 20 | 2.11 | 8.36 (0.15) | 12.11 | 0.32 (290/896) | 286 | 0.22 | 0.25 | 0.97 |
+| `homeless` | 43 | 5.23 | 14 | 10 | 7 | 0.36 | 2.00 (0.36) | 16.93 | 0.40 (292/728) | 61 | 0.44 | 0.44 | 0.33 |
+| `joytoy` | 9 | 6.26 | 6 | 4 | 4 | 10.10 | 38.46 (0.00) | 22.58 | 0.07 (12/184) | 39 | 0.05 | 0.05 | 0.01 |
+| `loader` | 55 | 3.30 | 54 | 19 | 7 | 5.02 | 48.31 (0.01) | 16.24 | 0.12 (109/893) | 324 | 0.06 | 0.06 | 0.01 |
+| `night_shift` | 90 | 3.11 | 86 | 32 | 18 | 7.71 | 41.01 (0.01) | 22.99 | 0.09 (194/2054) | 520 | 0.85 | 0.85 | 0.52 |
+| `office_worker` | 90 | 3.80 | 77 | 53 | 31 | 3.77 | 18.65 (0.02) | 15.32 | 0.15 (203/1379) | 525 | 0.30 | 0.30 | 0.10 |
+| `orderly` | 20 | 3.69 | 16 | 7 | 4 | 6.94 | 28.00 (0.03) | 16.20 | 0.28 (90/324) | 113 | 0.54 | 0.54 | 0.17 |
+| `purist` | 16 | 3.54 | 15 | 7 | 4 | 5.00 | 12.07 (0.01) | 13.38 | 0.08 (17/214) | 59 | 0.69 | 0.69 | 0.62 |
+| `reporter` | 12 | 4.67 | 10 | 6 | 1 | 6.50 | 33.90 (0.04) | 20.50 | 0.18 (44/246) | 68 | 0.04 | 0.04 | 0.00 |
+| `ripperdoc` | 16 | 4.22 | 14 | 7 | 1 | 2.44 | 27.52 (0.05) | 8.60 | 0.29 (38/130) | 87 | 0.39 | 0.39 | 0.23 |
+| `scav` | 25 | 4.54 | 16 | 9 | 5 | 5.19 | 21.44 (0.03) | 18.24 | 0.36 (166/456) | 59 | 0.64 | 0.64 | 0.45 |
+| `sick` | 35 | 3.93 | 25 | 22 | 11 | 0.92 | 10.24 (0.64) | 15.83 | 0.44 (243/554) | 107 | 0.36 | 0.36 | 2.44 |
+| `super` | 90 | 3.67 | 50 | 48 | 17 | 0.36 | 2.90 (0.76) | 16.99 | 0.29 (444/1529) | 523 | 0.22 | 0.22 | 0.20 |
+| `sweeper` | 90 | 3.31 | 83 | 64 | 53 | 1.52 | 15.34 (0.00) | 10.78 | 0.24 (232/970) | 532 | 0.11 | 0.11 | 0.02 |
+| `teacher` | 12 | 4.26 | 10 | 5 | 1 | 4.10 | 40.20 (0.02) | 9.25 | 0.20 (22/111) | 68 | 0.00 | 0.00 | 0.00 |
+| `vendor` | 25 | 3.14 | 12 | 9 | 3 | 3.58 | 15.00 (0.53) | 13.92 | 0.33 (116/348) | 16 | 0.44 | 0.44 | 0.26 |
+| `worker` | 90 | 3.59 | 79 | 76 | 36 | 0.27 | 4.37 (0.26) | 14.31 | 0.38 (488/1286) | 515 | 0.16 | 0.16 | 0.84 |
+| `worker_friday` | 90 | 4.40 | 78 | 58 | 37 | 2.14 | 15.11 (0.04) | 13.87 | 0.28 (343/1236) | 480 | 0.28 | 0.41 | 0.16 |
+| `all` | 1896 | 4.12 | 1547 | 973 | 483 | 3.55 | 23.80 (0.04) | 15.38 | 0.24 (6831/29029) | 8933 | 0.33 | 0.37 | 1.57 |
+
 ### 20k, seed 42, day 20, 7 days (5 picks an archetype in one world)
 
 | archetype | n | idle h/d | married | never named | never co-located | named/wk | co-located h/wk (Stat spouse) | HangOuts/wk | empty | shifts | Served-able | any signal | bodies/h |
@@ -552,3 +597,51 @@ The Statistical mirror of each mechanism is § 6's row, unchanged: the hooks fir
 | save size, 30 d seed 42 (`--save-at 43200`, no report) | 12,557,114 B | 12,398,418 B on (the `regulars` ledger is 8 entries a server; the rest is the city's own drift); off 12,557,114 B, the version token aside | | |
 
 Readings. The Murders swing both ways by seed (46: 111 → 19; 44: 112 → 197) with the mean up a third: the encounter's edges (a regular is an Acquaintance, every repeat visit `interacted`) and the re-routed tips move a chaotic city's trajectory; no mechanism of the phase raises violence directly; printed, not retuned (the harsh-city decision stands). 63 % of arrivals wait because nobody is on duty: the Bar's Bartender and the Arcade's Attendant hold the day shift (09-18) while the drinking and the Statistical evening are 18-24, the NoodleBar's Cook likewise (`cooked` 0.2 a day against 2-3 meals out), and Clubs trade by day with evening Hosts (`service_probe`); the gate decides whether the venue shifts move. No bout has a bettor, so the fighter's `Attendee` row never fires; the madam's cut rounds to 0 at the 2k Brothel's 1-coin tips. The lives probe's new column (`met`: shifts with an encounter) reads 0.40 for club staff, 0.61 dancers, 0.86 companions, 0.73 madams, 0.22 orderlies, 0.14 ripperdocs, 0.01 cooks, 0 bouncers and fighters (`shadow --lives`, 2k, day 19).
+
+### Phase 2 (2026-10-18): the evening and the household
+
+Built as § 3.1-3.4, § 3.5's kin and elder visits and § 3.6's work and household deeds, under `[household] enabled` (`CITYSIM_HOUSEHOLD_OFF=1`, under the `[lives]` master); `systems/household.rs`; SAVE_VERSION 36. Deviations from the spec text:
+
+- **The deed names.** `Deed::Married` already existed (posted by `social::marry`), so "Wed" is done; `Deed::Hired` is M16a's contract record, so the work deeds are `Deed::Employed` (posted in `demography::hire`) and `Deed::LaidOff` (in `economy::dismiss_as` for a `LaidOff` event); `Deed::Born` is posted by `household::on_birth` (actor the mother, object the child). Their `reach0`/`deed_sal` rows are 0.2-0.3 and `deed_sev` 0 (no grudge); the three keys are left out of a save at 0 and zeroed by the off switches so the off save is byte-identical.
+- **The home spot** (`SpotKind::Home(b)`) is added per agent in `leisure::spots_near`, never in `World::spots`; the agent's own Home is offered at any distance (the travel term weighs the walk; a Home past `spot_walk_cap_tiles` was never offered in the first build, so a worker far from home never saw it) **and only with company to be had there** (`household::company_due`: a household body inside or a child at home, or a resident whose habit within the hour is the Home; the first measured build offered the own Home unconditionally and 140 of its 180 home HangOuts a day were 21-minute checks of an empty flat, 06:22 before the shift, a planner gap fixed before the gate's regen rather than learned into the table), a friend's within the cap under the same rule. The HangOut's plan walks to the Home (`GoTo(Home)`, or `GoTo(TargetHome)` for a friend's) and runs inside it; `UnwindPick.venue` marks a home HangOut; `can_start(HangOut)` allows it inside that Home. `hangout_done`'s company inside is the household present (bodies), not the street registry; the lives probe (`shadow --lives`) reads that company too.
+- **No `home_from` key exists**; the spec's "past 18:00 the travel term makes the Home near" is left to the travel term, as the brief asked.
+- **After an empty leave, company only.** § 3.3's "the next pick runs at once" re-planned a lonely corner at once: the first build doubled the city's HangOuts (355 → 775 a day) with three in four left empty, and the lives probe read the empty share 0.27 → 0.73 (nobody waited, so nobody met). Now, for `empty_memory_hours` after leaving a spot empty, `best_spot` offers only spots with company now (a body hanging out there, a resident inside the Home) and, with none, no HangOut (`household::company_only`, `company_at`); the empty-spot memory's penalty stands beside it.
+- **Throughput**: the household's business is read as one set a midnight pass (`household::business_holders`, one building scan) for the hiring pool, not a building scan per candidate (the first build halved the 20k ticks/s); friends' Homes are offered only to the scored pick (`best_spot_kind`), since each reads a contact's 14-day habit.
+- **Reunite** moves the unhoused spouse in when the housed one's Home has room, at midnight before `ownership`'s `rehouse`; with no room nothing is queued (`rehouse` has no queue; it already moves a homeless pair together).
+- **The carer's damping** multiplies the scored goals after `score_goal` (every goal but Work, Sleep, Eat, Flee, `night_from`..`night_to`), not the considerations; the carer's away spots are × `newborn_away_mult` in `best_spot`. The newborn's keep goes on the Home's `child_food_debt` at midnight (the child's own draw).
+- **The household's business**: `business_of` scans the buildings at midnight (no owner index exists; scan-ok); the owner's household takes the business's open post first in `job_search_pass_with` (before the graded or pooled pick); an adult whose household business took coins in the last `abandon_days` is out of the labour pool (`HirePool::pick`, `pick_candidate`); the layoff order (`past_cap_pass`, `newest_hire`) puts the owner's household after every non-member. "The same tick" of the heir is read as "while the business takes".
+- **Visits** (`GoalKind::Visit`, appended; `World::visits` the day's pending visits): the trigger memories are the visitor's own `SawCrime` (Assault, the kin the object) and heard `Assaulted`/`Arrested` rumours about the kin in the last day, plus `World::wounded` for the downed; the walk is `GoTo(Victim)` (the kin's building: the Clinic's ward, the Home, the Precinct) and the visiting hour is a `Rest` there (no `Wait` action exists), its completion read in `actions::on_complete`'s `Rest` arm by the plan's goal; the hour of the day is hashed in `[visit_hour_from, visit_hour_to)`; a Statistical visitor is credited at that hour. An `EventKind::Visited` (appended) marks each visit. The Camp answer is phase 3's.
+- **The CSV home** is `Jobs2Cols` again (`home_hangouts`, `friend_hangouts`, `home_with_spouse`, `empty_leaves`, `home_empty_leaves`, `reunited`, `kin_visits`, `elder_visits`, `carers`).
+- **The spot tests** live in `tests/household.rs` with the rest of the phase (not `tests/leisure.rs`); the two probes in `tests/person.rs`.
+
+The Statistical mirror (§ 6): reunite, the newborn flags and `visits_due` are midnight rules for every tier; a Statistical visitor is credited at the hour; the home evening moves the Full tier's chat and social rates, learned at the gate's one regen (D14, no regen here).
+
+Measured (phase 2 against main `70e9589`, the same binary recipe as phase 1's table; `scratchpad/p2/phase2_report.md` has the per-seed rows and the first build's numbers). The first measured build offered the own Home unconditionally and read never-named 1,016 → 988, empty 0.27 → 0.30, idle 4.05 → 4.54 and 140 of its 180 home HangOuts a day left empty: the fix round below ("company to be had") is the tree that ships.
+
+| | 2k main | 2k phase 2 | 20k main | 20k phase 2 (first build) |
+|---|---|---|---|---|
+| HangOuts a day | 355 | 361 (+1.5 %) | 3,190 | 3,430 (+8 %) |
+| of them at a Home / at a friend's / at home with the spouse | — | 124 / 44 / 25 | — | 1,920 / 371 / 548 |
+| HangOut company (mean others at the spot) | 1.10 | 1.27 | 1.12 | 2.27 |
+| empty spots left early a day, of them the own Home | — | 127, of them 22.6 (18 % of the home HangOuts) | — | 1,010 / — |
+| couples reunited (over the run) | — | 98 (42-47) | — | 42 |
+| kin visits / elder visits a day | — | 7.3 / 30.7 | — | 6.1 / 370 |
+| newborns' carers (over the run) | — | 178 (42-47) | — | 77 |
+| births a day | 0.224 | 0.254 | — | — |
+| homeless a day | 39.1 | 41.0 (+5 %) | 320 | 309 |
+| evictions / thefts / arrests a day | 2.38 / 2.72 / 24.0 | 2.64 / 2.84 / 24.4 | — / 37.6 / 119 | — |
+| Murders (120 d, per seed 42-47) | 85, 89, 197, 148, 19, 94 (mean 105) | 74, 115, 132, 132, 29, 196 (mean 113) | — | — |
+| deaths by violence a day | 1.45 | 1.60 | 4.12 | 3.84 |
+| J24 employed share / J25 homeless share (seed 42) | 0.764 / 0.023 | 0.759 / 0.025 | — | — |
+| tips a day | 88.7 | 87.5 | — | — |
+| ticks/s, alternating A/B, seed 42 × 30 d, 6 rounds each (first build) | 6,373 / 6,182 / 6,287 / 6,312 / 6,587 / 6,252 | 5,663 / 5,948 / 6,238 / 5,970 / 5,372 / 5,242 (−9 % on the means; the phase 2 binary with the household *off* read 6,338 / 5,706 / 5,133 in the same rounds, so the box drifted −19 % under the same binary and config: the A/B is noise-bound; see the profile) | 251 (10 d) | 239 (−5 %) |
+| `--features prof`, seed 42 days 10-30, household on against off on the phase 2 binary (mean of 2; first build) | 5.05 s | 5.20 s (+2.9 %: `tick::exec` +0.14 s, the HangOut's household scan and the extra HangOuts; `household` midnight 0.049 s over 20 days; `tick::living` +0.04 s, `household::hourly`); the fix adds one habit read per bodied resident at the pick | | |
+| save size, 30 d seed 42 (`--save-at 43200`, no report) | 12,398,418 B | 12,777,695 B on (+3 %: `visits`, `empty_spots`, the newborn flags and the city's own drift); off 12,398,418 B, one byte (the version) aside | | |
+
+The lives probe (`shadow --lives`, 2k, seeds 42-44 pooled, day 19, 7 days; main → first build → the fix): all picks idle 4.05 → 4.54 → 4.12 h/d; never named the spouse 1,016 → 988 → 973 (of 1,489 / 1,489 / 1,547 married), never co-located awake 473 → 477 → 483; named 1.87 → 3.34 → 3.55 h a married-agent-week; co-located 22.9 → 23.6 → 23.8 h/wk; HangOuts 14.3 → 16.2 → 15.4 a week, empty 0.27 → 0.30 → **0.24** (6,831/29,029). By archetype (main → fix): office workers 5.0 → 15.3 HangOuts a week, empty 0.23 → 0.15, named 0.30 → 3.77; fabbers named 0.81 → 3.88, empty 0.33 → 0.18; cooks empty 0.22 → 0.18, named 5.27 → 6.66; gang members empty 0.37 → 0.20 and named 1.17 → 4.22; guards named 0.37 → 1.50, co-located 2.4 → 5.2 h; elders idle 4.60 → 4.38, named 0.07 → 1.11; workers named 0.09 → 0.27 but empty 0.30 → 0.38 (the day worker's spouse is out when the evening pick lands; the 21-minute checks that remain are theirs). The after-rows are § 13's second 2k table.
+
+Readings. The device moved where the spec aimed it once the own Home was gated on company: the spouse is *named* twice as often a week, the lonely-corner share fell below main's (0.27 → 0.24) with the "company only" window and the gated Home together, and the idle hours came back to main's. The never-co-located count did not move: a couple's hours under one roof were already there (the probe counts them awake in the same building), and the home spot gives them something to do in them. What is left at home: 22.6 empty leaves a day at 2k against 124 home HangOuts (the eight fix-round diaries: 5 empty of 29 at a Home, 35 of 73 on the street), the misses of the "due within the hour" clause — `hunt::habit` says "home" from 20:00 for anyone who slept at home 7 of 14 nights, so at 19:00 on day 19 it read 317 bodied residents due home and 39 were inside an hour later (the first fix build counted a Statistical resident's habit too: 1,702 "due", 35 inside; a Statistical `Position` is a demotion snapshot and never arrives). Whether a Statistical spouse counts as home by the clock is the mirror question for the gate (§ 6): with it, the Full tier's home evening would see the 95 % of households whose other members are Statistical. Murders swing by seed both ways again (47: 94 → 196; 44: 197 → 132), mean +8 %, printed. Homeless (+5 %) and evictions (+11 %) are a late-run drift: by 30-day window the fix/main ratio of evictions reads 1.01, 1.11, 1.02, 1.24 and of homeless 0.96, 0.97, 0.97, 1.28 while rent paid, wages, employment and prices hold (0.98-1.00); the first mover is hotel nights (×0.77 from day 0: an evening at home is not an evening at a hotel), then wallets (×0.90 at days 60-90, ×0.85 at 90-120) beside deaths by violence ×1.39 in the same window; no mechanism of the phase touches rent; printed, not retuned.
+
+Test changes (each pins the city a pre-phase rule was written for, as phase 1's vice tests did): `tests/leisure.rs::test_unwind_skips_paid_rungs_when_broke` lets a Free pick carry a Home as its venue (never a paid one); `tests/person.rs::probe_night_porter_on_shift_at_two_is_paid_by_eight`, `probe_worker_sleeps_the_night_before_a_shift` and `probe_gun_never_takes_a_hit_on_kin` run with `household.enabled = false` (with it on, the day-2 city picks another porter, one founding a business at the Hall at midnight and walking home before the shift; one farmer of twenty spends the evening at a far Braindance Parlour, walks five hours home and naps at 08:23; the gun probe's married civilian is killed on day 3 before the hit resolves: no night touches a household mechanism; traced in the phase 2 report); `tests/succession.rs::test_bug8_leader_by_tenure_and_no_succession_for_a_night` likewise (on the household's day-12 city no gang of four has a leader and two free members for its pick); `tests/utility.rs` counts 32 goals; the cli header gains 9 columns.
+
+Parity (`tests/lod.rs::test_full_vs_statistical_within_15pct`, milestone tier, run once on the first build, 234 s, no fix): `paid venue visits Full 12.475 Statistical 16.391 (tolerance 1.87)`, `paid venue coins 54.724 / 72.461 (8.21)` and `hunger-days 1.269 / 1.779 (0.50)` are out, where phase 1's run had them in: the Full tier now spends evenings at home and eats there, while the Statistical table still carries main's venue and meal rates; this is § 6's stated mirror gap, learned at the gate's one regen (D14), so the rows stand RED until it. `actor share law0 0.899 / 0.729` and `law1 0.087 / 0.219` fail as on main; `encounters/shift 0.541 / 0.887` is phase 1's printed FINDING; thefts, arrests, assaults, violent deaths, marriages, bin meals, malnutrition, the rides and law2 pass.

@@ -776,6 +776,7 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                         | crate::components::GoalKind::Commission
                         | crate::components::GoalKind::Rescue
                         | crate::components::GoalKind::Pitch
+                        | crate::components::GoalKind::Visit
                 )
             });
             if scripted {
@@ -784,6 +785,9 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                 let ok = if goal == Some(crate::components::GoalKind::Pitch) {
                     // Jobs & lives phase 2: the street's own steps.
                     crate::systems::streetwork::can_start(world, id, kind)
+                } else if goal == Some(crate::components::GoalKind::Visit) {
+                    // Lives at work phase 2 (§ 3.5): the visit's own steps.
+                    crate::systems::household::can_start(world, id, kind)
                 } else if goal == Some(crate::components::GoalKind::Rescue) {
                     // M16b phase 3: the Rescue's own steps.
                     crate::systems::wounded::can_start(world, id, kind, step.target)

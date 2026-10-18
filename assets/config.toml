@@ -1285,13 +1285,13 @@ rumour_cap_statistical = 3
 relay_conf = 0.8
 # M15 phase 5: repaid 0.1 -> 0.3. A Security contract kept a week is now told as Repaid (the seller), so
 # honour moves on kept contracts; at 0.1 the pool entry fell under reach_min before anyone heard it.
-reach0 = { killed = 1.0, assaulted = 0.5, robbed = 0.3, extorted = 0.2, stripped = 0.5, arrested = 0.6, married = 0.3, evicted = 0.4, struck = 0.8, raided = 0.9, founded = 0.4, avenged = 1.0, betrayed = 0.6, repaid = 0.3, poached = 0.3, hired = 0.3, gave = 0.2, blackmailed = 0.2, rescued = 0.5 }  # M16a C21: hired; Real economy E29: gave; M16b: blackmailed
-deed_sal = { killed = 0.9, assaulted = 0.6, robbed = 0.5, extorted = 0.4, stripped = 0.6, arrested = 0.5, married = 0.3, evicted = 0.5, struck = 0.6, raided = 0.8, founded = 0.4, avenged = 0.9, betrayed = 0.7, repaid = 0.3, poached = 0.4, hired = 0.7, gave = 0.3, blackmailed = 0.5, rescued = 0.6 }  # M16a C21: hired; Real economy E29: gave; M16b: blackmailed
+reach0 = { killed = 1.0, assaulted = 0.5, robbed = 0.3, extorted = 0.2, stripped = 0.5, arrested = 0.6, married = 0.3, evicted = 0.4, struck = 0.8, raided = 0.9, founded = 0.4, avenged = 1.0, betrayed = 0.6, repaid = 0.3, poached = 0.3, hired = 0.3, gave = 0.2, blackmailed = 0.2, rescued = 0.5, employed = 0.2, laid_off = 0.3, born = 0.3 }  # M16a C21: hired; Real economy E29: gave; M16b: blackmailed; Lives at work phase 2: employed, laid_off, born
+deed_sal = { killed = 0.9, assaulted = 0.6, robbed = 0.5, extorted = 0.4, stripped = 0.6, arrested = 0.5, married = 0.3, evicted = 0.5, struck = 0.6, raided = 0.8, founded = 0.4, avenged = 0.9, betrayed = 0.7, repaid = 0.3, poached = 0.4, hired = 0.7, gave = 0.3, blackmailed = 0.5, rescued = 0.6, employed = 0.2, laid_off = 0.3, born = 0.3 }  # M16a C21: hired; Real economy E29: gave; M16b: blackmailed
 # M15 phase 5: robbed 0.3 -> 0.6 (with [grudges] grudge_min 0.35 and rel_w.own 0.6): a robbery of a
 # dole wallet forms the victim's grudge (0.36), a beating no longer does (0.30). Grudges formed on
 # seed 42: 20,728 (16,851 from beatings, 30,870 grudge hits from friends hearing of one) -> 5,236
 # (seeds 42/43/44: 20,728 / 19,185 / 18,125 -> 5,236 / 5,183 / 5,939; robberies ~55 %).
-deed_sev = { killed = 1.0, assaulted = 0.5, robbed = 0.6, extorted = 0.2, stripped = 0.6, arrested = 0.0, married = 0.0, evicted = 0.3, struck = 0.0, raided = 0.6, founded = 0.0, avenged = 0.8, betrayed = 0.6, repaid = 0.0, poached = 0.1, hired = 0.7, blackmailed = 0.4 }  # M16a C21: hired; M16b: blackmailed
+deed_sev = { killed = 1.0, assaulted = 0.5, robbed = 0.6, extorted = 0.2, stripped = 0.6, arrested = 0.0, married = 0.0, evicted = 0.3, struck = 0.0, raided = 0.6, founded = 0.0, avenged = 0.8, betrayed = 0.6, repaid = 0.0, poached = 0.1, hired = 0.7, blackmailed = 0.4, employed = 0.0, laid_off = 0.0, born = 0.0 }  # M16a C21: hired; M16b: blackmailed
 # W9 (phase 3): the legacy second-hand copies in Memory.entries retire (social::gossip still draws);
 # the word's exchange nudges an existing edge to the actor instead.
 kin_cap = 12                       # W10: kin captured at death
@@ -3838,3 +3838,27 @@ skill = "knowledge"
 skill_gain = 0.0005
 regular_after = 0
 valence = 0.0
+
+# Lives at work phase 2 (docs/LIVES_AT_WORK.md § 3): the evening and the household, read by systems/household.rs
+# (and leisure.rs for the home spot). Under [lives] enabled (`CITYSIM_HOUSEHOLD_OFF=1`). Placeholders.
+[household]
+enabled = true
+home_w = 0.5                       # § 3.1: a Home spot's score per household member home now ...
+child_w = 0.3                      # ... and per child at home (routine not Camp/Street)
+visit_hosts = 3                    # § 3.2: Friend/Family contacts' Homes offered as spots when the host is due home
+home_dice = false                  # § 3.1: street dice between two bored co-hangers at home (off)
+empty_leave_ticks = 20             # § 3.3: a HangOut alone this long ends early with the lone fun ...
+empty_penalty = 0.3                # ... and the spot scores x this ...
+empty_memory_hours = 6             # ... for this long (Brain.empty_spots)
+newborn_days = 30                  # § 3.4: a Birth sets Household.newborn_until on both parents
+newborn_away_mult = 0.3            # § 3.4: the carer's away spots and night goals (not Work, Sleep, Eat, Flee) x this
+newborn_energy_mult = 1.15         # § 3.4: both parents' energy decay x this
+newborn_cost_per_day = 0.5         # § 3.4: Food a day from the Home's pantry (on the child food debt, as a child's)
+night_from = 21                    # § 3.4: the carer's night, hours of the day [from, to) ...
+night_to = 6
+abandon_days = 7                   # § 3.4: a household business with no take this long frees its heir for an outside post
+elder_visit_days = 7               # § 3.5: an elder parent (over [ages] frail_from_years) unmet this long is visited
+visit_hour_from = 10               # § 3.5: the visit's hour of the day, hashed in [from, to)
+visit_hour_to = 20
+visit_flat = 0.2                   # § 3.5: the Visit goal's flat bonus (a hurt kin's reason 1.0, an elder's 0.6)
+visit_belonging = 0.2              # § 3.5: the visitor's belonging gain (both tiers)

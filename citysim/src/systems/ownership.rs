@@ -1497,6 +1497,8 @@ pub fn run(world: &mut World) {
     collect_rent(world, &rents);
     if rents.iter().any(|&(_, r)| r > 0) {
         evictions(world);
+        // Lives at work phase 2 (§ 3.4): the spouse's Home is tried first.
+        crate::systems::household::reunite(world);
         rehouse(world);
     }
     // Phase 5: the books close before the upkeep lump (`Corp.closing`).

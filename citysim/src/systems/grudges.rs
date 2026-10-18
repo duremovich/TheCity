@@ -91,9 +91,16 @@ fn cause_of(deed: Deed, rel: Rel, object: Option<EntityId>) -> GrudgeCause {
         Deed::Betrayed | Deed::Poached => GrudgeCause::Betrayed,
         // M16a (plan C21): the buyer behind a contract record on the object.
         Deed::Hired => GrudgeCause::Hired,
-        Deed::Arrested | Deed::Married | Deed::Struck | Deed::Founded | Deed::Repaid | Deed::Gave | Deed::Rescued => {
-            GrudgeCause::Assaulted
-        }
+        Deed::Arrested
+        | Deed::Married
+        | Deed::Struck
+        | Deed::Founded
+        | Deed::Repaid
+        | Deed::Gave
+        | Deed::Rescued
+        | Deed::Employed
+        | Deed::LaidOff
+        | Deed::Born => GrudgeCause::Assaulted,
     }
 }
 

@@ -1055,6 +1055,11 @@ pub struct World {
     /// off save is byte-identical.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub regulars: BTreeMap<EntityId, SmallVec<[crate::systems::service::Regular; 8]>>,
+    /// Lives at work phase 2 (§ 3.5): the visits due today, by visitor
+    /// (`household::visits_due` at midnight; a Full visitor's `Visit` goal,
+    /// a Statistical one credited at the hour). Empty off.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub visits: BTreeMap<EntityId, crate::systems::household::PendingVisit>,
     /// L2 L15: the HangOut spots per district (`leisure::spots`, midnight).
     /// Saved (deviation: the plan's `serde(skip)` would rebuild them on load
     /// from a later state than the midnight's).
@@ -1661,6 +1666,7 @@ impl World {
             hangouts: BTreeMap::new(),
             service_room: BTreeMap::new(),
             regulars: BTreeMap::new(),
+            visits: BTreeMap::new(),
             spots: Vec::new(),
             last_met: BTreeMap::new(),
             told: BTreeMap::new(),

@@ -669,6 +669,28 @@ pub struct Jobs2Cols {
     pub ejections: u32,
     #[serde(skip_serializing_if = "is_zero_i64")]
     pub flow_madam_cut: i64,
+    /// Lives at work phase 2 (docs/LIVES_AT_WORK.md § 3): HangOuts at one's
+    /// own Home and at a friend's, those at home with the spouse as partner,
+    /// spots left early for want of company, spouses reunited at midnight,
+    /// visits made to hurt kin and to elder parents, newborns' carers named.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub home_hangouts: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub friend_hangouts: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub home_with_spouse: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub empty_leaves: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub home_empty_leaves: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub reunited: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub kin_visits: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub elder_visits: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub carers: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -882,6 +904,15 @@ impl Jobs2Cols {
                 "door_refusals",
                 "ejections",
                 "flow_madam_cut",
+                "home_hangouts",
+                "friend_hangouts",
+                "home_with_spouse",
+                "empty_leaves",
+                "home_empty_leaves",
+                "reunited",
+                "kin_visits",
+                "elder_visits",
+                "carers",
             ]
             .into_iter()
             .map(str::to_string),
@@ -1089,6 +1120,15 @@ impl Jobs2Cols {
             self.door_refusals.to_string(),
             self.ejections.to_string(),
             self.flow_madam_cut.to_string(),
+            self.home_hangouts.to_string(),
+            self.friend_hangouts.to_string(),
+            self.home_with_spouse.to_string(),
+            self.empty_leaves.to_string(),
+            self.home_empty_leaves.to_string(),
+            self.reunited.to_string(),
+            self.kin_visits.to_string(),
+            self.elder_visits.to_string(),
+            self.carers.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

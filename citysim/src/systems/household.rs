@@ -1,0 +1,747 @@
+//! Lives at work phase 2 (docs/LIVES_AT_WORK.md § 3): the evening and the
+//! household. Under `[household] enabled` (under the `[lives]` master;
+//! `CITYSIM_HOUSEHOLD_OFF=1`): off, every entry point is a no-op, no spot
+//! is added, no state is written and the save is byte-identical to main.
+//!
+//! - **Home as a spot** (§ 3.1, § 3.2; `leisure::spots_near`): the agent's
+//!   own Home and up to `visit_hosts` Friend/Family contacts' Homes whose
+//!   host is due home are HangOut spots; `best_spot` adds `home_w` per
+//!   household member home now and `child_w` per child at home
+//!   ([`home_term`]); the HangOut runs inside and its partner is the
+//!   resident present of highest affinity ([`home_partner`]).
+//! - **Leaving an empty spot** (§ 3.3): a HangOut alone after
+//!   `empty_leave_ticks` ends early ([`empty_leave`]); the tile goes into
+//!   `Brain.empty_spots` and scores × `empty_penalty` for
+//!   `empty_memory_hours` ([`empty_mult`]).
+//! - **The household** (§ 3.4): [`reunite`] at midnight (before
+//!   `ownership`'s re-housing) moves an unhoused spouse in where there is
+//!   room; [`on_birth`] sets `Household.newborn_until` on both parents and
+//!   picks the carer, whose away spots and night goals score ×
+//!   `newborn_away_mult` ([`damped`], [`away_mult`]) while both parents'
+//!   energy decays × `newborn_energy_mult` ([`energy_mult`]) and the Home
+//!   feeds the newborn through the pantry ([`daily`]); the household's
+//!   business ([`business_of`]) is offered to its jobless adults first
+//!   ([`owner_operator`]), its heir waits for it ([`waits_for_business`])
+//!   and its members are laid off last ([`is_member_of_owner`]).
+//! - **Visits** (§ 3.5): [`visits_due`] at midnight posts at most one
+//!   `GoalKind::Visit` a day an agent (a kin or spouse downed, assaulted or
+//!   arrested in the last day; an elder parent not met for
+//!   `elder_visit_days`), `World::visits`; a Full visitor walks the scripted
+//!   plan `GoTo(the kin's building) → Rest` ([`plan`]) and is credited at
+//!   its end ([`visit_done`]); a Statistical one is credited at the visit's
+//!   hour ([`hourly`]). The Camp answer is phase 3's.
+//! - **Deeds** (§ 3.6): `Deed::Employed`, `Deed::LaidOff` and `Deed::Born`
+//!   posted where the events are (`demography::hire`, `economy::dismiss_as`,
+//!   [`on_birth`]); `Deed::Married` already existed.
+//!
+//! The Statistical mirror (§ 6): reunite, the newborn flags and the visits
+//! are midnight and hourly rules for every tier; the home evening moves the
+//! Full tier's chat and social rates, learned at the gate's one regen (D14).
+//! No world-stream draw: the carer's tie and the visit's hour are hashed.
+
+use serde::{Deserialize, Serialize};
+
+use crate::components::{
+    ActionInstance, Brain, Building, BuildingKind, Child, GoalKind, Household, Identity, Job, Lod, MemoryKind,
+    Position, RelKind, Routine, Sentence, TilePos,
+};
+use crate::entity::EntityId;
+use crate::events::EventKind;
+use crate::goap::{ActionKind, LocationKey, Plan};
+use crate::systems::ownership;
+use crate::time::{Tick, DAYS_PER_YEAR, TICKS_PER_DAY, TICKS_PER_HOUR};
+use crate::utility::curves::{can, Curve, GATE};
+use crate::utility::Consideration;
+use crate::word::Deed;
+use crate::world::World;
+
+/// The carer's tie (both parents employed at the same wage).
+const PURPOSE_CARER: u64 = 0x4855_0001;
+/// The visit's hour of the day.
+const PURPOSE_VISIT_HOUR: u64 = 0x4855_0002;
+
+/// Why a visit is due (`World::visits`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VisitWhy {
+    /// A kin or spouse downed, assaulted or arrested in the last day.
+    Hurt,
+    /// An elder parent not met for `elder_visit_days`.
+    Elder,
+}
+
+/// A visit due today (`World::visits`, saved while pending; cleared at midnight).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingVisit {
+    /// Who is visited (the walk goes to its building).
+    pub kin: EntityId,
+    pub why: VisitWhy,
+    /// The hour of the day the visit is made (a Statistical visitor is
+    /// credited then; a Full one scores the goal from then).
+    pub hour: u8,
+}
+
+/// Phase 2 is live: `[jobs2] enabled`, `[lives] enabled` and `[household] enabled`.
+pub fn on(world: &World) -> bool {
+    crate::systems::industry::on(world) && world.config.lives.enabled && world.config.household.enabled
+}
+
+fn hash(world: &World, purpose: u64, a: u64, b: u64) -> f32 {
+    crate::systems::econ::hash_unit(world.seed(), purpose, a, b)
+}
+
+fn key(id: EntityId) -> u64 {
+    u64::from(id.index) << 32 | u64::from(id.generation)
+}
+
+fn home_of(world: &World, id: EntityId) -> Option<EntityId> {
+    world.comp::<Household>(id).and_then(|h| h.home)
+}
+
+fn is_home(world: &World, b: EntityId) -> bool {
+    world.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Home)
+}
+
+/// Bodies of `home`'s household inside it now, `except` left out.
+pub fn residents_inside(world: &World, home: EntityId, except: EntityId) -> Vec<EntityId> {
+    inside(world, home, except).collect()
+}
+
+/// Whether any body of `home`'s household but `except` is inside it now
+/// (the per-tick question of `empty_leave`, no Vec).
+pub fn any_inside(world: &World, home: EntityId, except: EntityId) -> bool {
+    inside(world, home, except).next().is_some()
+}
+
+fn inside(world: &World, home: EntityId, except: EntityId) -> impl Iterator<Item = EntityId> + '_ {
+    world
+        .residents_of(home)
+        .iter()
+        .copied()
+        .filter(move |&r| r != except && world.comp::<Position>(r).is_some_and(|p| p.building == Some(home)))
+}
+
+// ---------------------------------------------------------------------------
+// § 3.1, § 3.2: the home spot
+// ---------------------------------------------------------------------------
+
+/// The Homes `id` may hang out in: its own, when there is company to be had
+/// there (`company_due`), at any distance; and (`with_friends`) up to
+/// `visit_hosts` Friend/Family (never Rival/Enemy) contacts' Homes whose
+/// host's habit at `now + 60` is that Home, within `cap` tiles of `from`.
+/// Returns `(home, is_own)`. The friends' read the contacts' habits (14 days
+/// of Trace each), so only the scored pick asks for them. Nothing off.
+pub fn home_spots(world: &World, id: EntityId, from: TilePos, cap: u32, with_friends: bool) -> Vec<(EntityId, bool)> {
+    if !on(world) {
+        return Vec::new();
+    }
+    let mut out: Vec<(EntityId, bool)> = Vec::new();
+    let door = |h: EntityId| world.comp::<Building>(h).filter(|b| !b.demolished).map(|b| world.outside_door(b));
+    // The own Home at any distance (the travel term weighs the walk; the
+    // agent goes home in the end), only with company to be had: a single
+    // resident with nobody due keeps the corner and the bar.
+    if let Some(h) = home_of(world, id) {
+        if door(h).is_some() && company_due(world, id, h) {
+            out.push((h, true));
+        }
+    }
+    let max = usize::from(world.config.household.visit_hosts);
+    if max == 0 || !with_friends {
+        return out;
+    }
+    let now = world.tick;
+    let mut hosts: Vec<(f32, EntityId, EntityId)> = world
+        .neighbours(id)
+        .filter(|&c| world.has::<Brain>(c) && !world.has::<Sentence>(c))
+        .filter_map(|c| {
+            let e = world.edge(id, c)?;
+            if !matches!(e.kind, RelKind::Friend | RelKind::Family) || e.affinity <= 0.0 {
+                return None;
+            }
+            let h = home_of(world, c)?;
+            if out.iter().any(|&(o, _)| o == h) {
+                return None;
+            }
+            let due_home = crate::systems::hunt::habit(world, c, now + TICKS_PER_HOUR).building == Some(h);
+            (due_home && door(h).is_some_and(|d| d.manhattan(from) <= cap)).then_some((e.affinity, c, h))
+        })
+        .collect();
+    hosts.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+    for (_, _, h) in hosts.into_iter().take(max) {
+        if !out.iter().any(|&(o, _)| o == h) {
+            out.push((h, false));
+        }
+    }
+    out
+}
+
+/// § 3.1: whether `home` holds company for `id` now or within the hour: a
+/// household body inside or a child at home (`home_term` > 0), or another
+/// resident with a moving body (Full or Coarse) whose habit at `now + 60` is
+/// the Home (the spouse due back). A Statistical resident is left out of the
+/// "due" clause: its `Position` is a demotion snapshot, so a habit that says
+/// "home at 20:00" never puts a body inside (measured: 1,700 of 1,750 adults
+/// "due" at 19:00 on day 19, 35 with a body inside an hour later). Whether a
+/// Statistical spouse counts as home by the clock is the mirror question for
+/// the gate. The same rule the friends' Homes follow; the own Home is never
+/// offered empty.
+pub fn company_due(world: &World, id: EntityId, home: EntityId) -> bool {
+    if home_term(world, id, home) > 0.0 {
+        return true;
+    }
+    let at = world.tick + TICKS_PER_HOUR;
+    world.residents_of(home).iter().any(|&r| {
+        r != id
+            && world.comp::<Brain>(r).is_some_and(|b| b.lod != Lod::Statistical)
+            && crate::systems::hunt::habit(world, r, at).building == Some(home)
+    })
+}
+
+/// § 3.1's household term for a Home spot: `home_w` per household member
+/// home now (bodies inside, the agent aside) plus `child_w` per child at
+/// home (routine not `Camp`/`Street`).
+pub fn home_term(world: &World, id: EntityId, home: EntityId) -> f32 {
+    let cfg = &world.config.household;
+    let mut adults = 0u32;
+    let mut children = 0u32;
+    for r in residents_inside(world, home, id) {
+        match world.comp::<Child>(r) {
+            Some(c) => children += u32::from(!matches!(c.routine, Routine::Camp | Routine::Street)),
+            None => adults += 1,
+        }
+    }
+    cfg.home_w * adults as f32 + cfg.child_w * children as f32
+}
+
+/// § 3.1: the HangOut partner inside `home`: the resident present of
+/// highest affinity (ties the lower id), bodies only.
+pub fn home_partner(world: &World, id: EntityId, home: EntityId) -> Option<EntityId> {
+    residents_inside(world, home, id)
+        .into_iter()
+        .filter(|&r| world.has::<Brain>(r))
+        .map(|r| (world.edge(id, r).map_or(f32::NEG_INFINITY, |e| e.affinity), r))
+        .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)))
+        .map(|(_, r)| r)
+}
+
+/// Is `id`'s running HangOut inside a Home (`UnwindPick.venue` the home)?
+pub fn hanging_at_home(world: &World, id: EntityId) -> Option<EntityId> {
+    let here = world.comp::<Position>(id).and_then(|p| p.building)?;
+    let venue = world.unwind.get(&id).and_then(|p| p.venue)?;
+    (venue == here && is_home(world, here)).then_some(here)
+}
+
+// ---------------------------------------------------------------------------
+// § 3.3: leaving an empty spot
+// ---------------------------------------------------------------------------
+
+/// § 3.3: a HangOut `started` at `started` with nobody else there after
+/// `empty_leave_ticks` ends early (the caller returns `Done`). Nothing off.
+pub fn empty_leave(world: &World, id: EntityId, started: Tick) -> bool {
+    if !on(world) || world.tick.saturating_sub(started) < Tick::from(world.config.household.empty_leave_ticks) {
+        return false;
+    }
+    match hanging_at_home(world, id) {
+        Some(h) => !any_inside(world, h, id),
+        None => world
+            .comp::<Position>(id)
+            .and_then(|p| world.hangouts.get(&p.tile))
+            .is_none_or(|v| !v.iter().any(|&o| o != id)),
+    }
+}
+
+/// § 3.3: `id` left `tile` empty now: remembered for `empty_memory_hours`
+/// (the oldest of four falls off); counted.
+pub fn remember_empty(world: &mut World, id: EntityId, tile: TilePos) {
+    if !on(world) {
+        return;
+    }
+    let now = world.tick;
+    if let Some(b) = world.comp_mut::<Brain>(id) {
+        if b.empty_spots.len() >= b.empty_spots.inline_size() {
+            b.empty_spots.remove(0);
+        }
+        b.empty_spots.push((tile, now));
+    }
+    ownership::jobs2_row(world).empty_leaves += 1;
+}
+
+/// § 3.3: having left a spot empty within `empty_memory_hours`, `id` goes
+/// only where there is company now (a body at the spot, a resident inside
+/// the Home); the first build re-planned a lonely corner at once and the
+/// city's HangOuts doubled with three in four left empty (the lives probe
+/// read 0.27 -> 0.73): nobody waited, so nobody met.
+pub fn company_only(world: &World, id: EntityId) -> bool {
+    if !on(world) {
+        return false;
+    }
+    let window = Tick::from(world.config.household.empty_memory_hours) * TICKS_PER_HOUR;
+    let now = world.tick;
+    world.comp::<Brain>(id).is_some_and(|b| b.empty_spots.iter().any(|&(_, at)| now.saturating_sub(at) < window))
+}
+
+/// § 3.3: is there company at `tile` now (a body hanging out there), or
+/// inside `home` (a resident)?
+pub fn company_at(world: &World, id: EntityId, tile: TilePos, home: Option<EntityId>) -> bool {
+    match home {
+        Some(h) => any_inside(world, h, id),
+        None => world.hangouts.get(&tile).is_some_and(|v| v.iter().any(|&o| o != id)),
+    }
+}
+
+/// § 3.3: the factor a remembered empty spot's score takes (1 otherwise).
+pub fn empty_mult(world: &World, id: EntityId, tile: TilePos) -> f32 {
+    if !on(world) {
+        return 1.0;
+    }
+    let cfg = &world.config.household;
+    let window = Tick::from(cfg.empty_memory_hours) * TICKS_PER_HOUR;
+    let now = world.tick;
+    let remembered = world
+        .comp::<Brain>(id)
+        .is_some_and(|b| b.empty_spots.iter().any(|&(t, at)| t == tile && now.saturating_sub(at) < window));
+    if remembered {
+        cfg.empty_penalty
+    } else {
+        1.0
+    }
+}
+
+// ---------------------------------------------------------------------------
+// § 3.4: the household
+// ---------------------------------------------------------------------------
+
+/// Midnight, before `ownership`'s re-housing: a married pair living apart
+/// (one housed, the other with no Home) moves the unhoused spouse into the
+/// housed one's Home when it has room; with no room the pair waits for
+/// `rehouse` (deviation: no queue exists; `rehouse` already moves a
+/// homeless pair together). Nothing off.
+pub fn reunite(world: &mut World) {
+    if !on(world) {
+        return;
+    }
+    let pairs: Vec<(EntityId, EntityId)> = world.spouses.iter().filter(|(a, b)| a < b).map(|(&a, &b)| (a, b)).collect();
+    for (a, b) in pairs {
+        let (housed, out) = match (home_of(world, a), home_of(world, b)) {
+            (Some(h), None) => (h, b),
+            (None, Some(h)) => (h, a),
+            _ => continue,
+        };
+        if !world.has::<Brain>(out)
+            || world.has::<Sentence>(out)
+            || world.comp::<Brain>(out).is_some_and(|br| br.emigrating)
+            || !crate::systems::law::living(world, out)
+        {
+            continue;
+        }
+        let room = world.comp::<Building>(housed).is_some_and(|bd| {
+            !bd.demolished && !bd.derelict && world.residents_of(housed).len() < usize::from(bd.capacity)
+        });
+        if !room {
+            continue;
+        }
+        world.set_home(out, Some(housed));
+        let (name, place) = (world.name_of(out), world.name_of(housed));
+        let spouse = world.name_of(if out == a { b } else { a });
+        world.push_event(EventKind::Housed, &[out, housed], format!("{name} moved into {place} with {spouse}"));
+        world.stats.current.housed += 1;
+        ownership::jobs2_row(world).reunited += 1;
+    }
+}
+
+/// A Birth (`demography::spawn_child`): both parents hold the newborn for
+/// `newborn_days`; the carer is the parent without a Job, else the lower
+/// wage, else the mother (a hashed tie); the `Born` deed is talked about
+/// in the home's district. Nothing off.
+pub fn on_birth(world: &mut World, child: EntityId, mother: EntityId, father: EntityId) {
+    if !on(world) {
+        return;
+    }
+    let until = world.tick + Tick::from(world.config.household.newborn_days) * TICKS_PER_DAY;
+    let wage = |w: &World, p: EntityId| w.comp::<Job>(p).map(|j| j.wage_per_day);
+    let carer = match (wage(world, mother), wage(world, father)) {
+        (None, _) => mother,
+        (Some(_), None) => father,
+        (Some(m), Some(f)) if m < f => mother,
+        (Some(m), Some(f)) if f < m => father,
+        _ => {
+            if hash(world, PURPOSE_CARER, key(mother), key(father)) < 0.5 {
+                mother
+            } else {
+                father
+            }
+        }
+    };
+    for p in [mother, father] {
+        if let Some(h) = world.comp_mut::<Household>(p) {
+            h.newborn_until = Some(until);
+            h.newborn_carer = p == carer;
+        }
+    }
+    ownership::jobs2_row(world).carers += 1;
+    let d = crate::systems::gossip::talk_district(world, mother);
+    crate::systems::gossip::post_deed(world, d, Deed::Born, Some(mother), Some(child));
+}
+
+/// A parent holding a newborn now.
+pub fn new_parent(world: &World, id: EntityId) -> bool {
+    on(world) && world.comp::<Household>(id).and_then(|h| h.newborn_until).is_some_and(|t| t > world.tick)
+}
+
+/// The newborn's carer now.
+pub fn carer(world: &World, id: EntityId) -> bool {
+    new_parent(world, id) && world.comp::<Household>(id).is_some_and(|h| h.newborn_carer)
+}
+
+/// § 3.4: a new parent's energy decays × `newborn_energy_mult` (`None` otherwise).
+pub fn energy_mult(world: &World, id: EntityId) -> Option<f32> {
+    new_parent(world, id).then_some(world.config.household.newborn_energy_mult)
+}
+
+/// Is it the night (`night_from`..`night_to` hours of the day)?
+fn night(world: &World) -> bool {
+    let h = u8::try_from(world.tick_of_day() / TICKS_PER_HOUR as u16).unwrap_or(0);
+    let cfg = &world.config.household;
+    if cfg.night_from <= cfg.night_to {
+        h >= cfg.night_from && h < cfg.night_to
+    } else {
+        h >= cfg.night_from || h < cfg.night_to
+    }
+}
+
+/// § 3.4: the carer's night goals (any but Work, Sleep, Eat and Flee
+/// between `night_from` and `night_to`) score × `newborn_away_mult`.
+pub fn damped(world: &World, id: EntityId, goal: GoalKind) -> bool {
+    !matches!(goal, GoalKind::Work | GoalKind::Sleep | GoalKind::Eat | GoalKind::Flee)
+        && night(world)
+        && carer(world, id)
+}
+
+/// § 3.4: the carer's away spots (a spot not its Home) score × this (1 otherwise).
+pub fn away_mult(world: &World, id: EntityId, own_home: bool) -> f32 {
+    if !own_home && carer(world, id) {
+        world.config.household.newborn_away_mult
+    } else {
+        1.0
+    }
+}
+
+/// § 3.4: the household's business: a standing building owned by `id` or
+/// its spouse (a daily read; scan-ok: the midnight job search).
+pub fn business_of(world: &World, id: EntityId) -> Option<EntityId> {
+    if !on(world) {
+        return None;
+    }
+    let spouse = world.spouse_of(id);
+    world.with::<Building>().into_iter().find(|&b| {
+        world.comp::<Building>(b).is_some_and(|bd| {
+            !bd.demolished
+                && !bd.derelict
+                && bd.kind != BuildingKind::Home
+                && (bd.owner == Some(id) || (spouse.is_some() && bd.owner == spouse))
+        })
+    })
+}
+
+/// § 3.4: has `b` taken coins within `abandon_days` (today, or the last days)?
+fn business_live(world: &World, b: EntityId) -> bool {
+    let days = usize::from(world.config.household.abandon_days);
+    world
+        .comp::<Building>(b)
+        .is_some_and(|bd| bd.revenue_today > 0 || bd.revenue.iter().rev().take(days).any(|&r| r > 0))
+}
+
+/// § 3.4: `id` waits for its household's business: the business has had a
+/// take within `abandon_days` (so a job search offers it no outside post).
+pub fn waits_for_business(world: &World, id: EntityId) -> bool {
+    business_of(world, id).is_some_and(|b| business_live(world, b))
+}
+
+/// § 3.4 (`demography::job_search`): every adult who waits for a live
+/// household business, in one pass over the buildings (the hiring pool
+/// reads this set, not a scan per candidate). Empty off.
+pub fn business_holders(world: &World) -> std::collections::BTreeSet<EntityId> {
+    let mut out = std::collections::BTreeSet::new();
+    if !on(world) {
+        return out;
+    }
+    for b in world.with::<Building>() {
+        let Some(bd) = world.comp::<Building>(b) else { continue };
+        if bd.demolished || bd.derelict || bd.kind == BuildingKind::Home {
+            continue;
+        }
+        let Some(owner) = bd.owner.filter(|&o| world.has::<Brain>(o)) else { continue };
+        if !business_live(world, b) {
+            continue;
+        }
+        out.insert(owner);
+        if let Some(sp) = world.spouse_of(owner) {
+            out.insert(sp);
+        }
+    }
+    out
+}
+
+/// § 3.4 (`demography::job_search`): the jobless adults of an owner's
+/// household take the business's open posts first. Returns the hires made
+/// (each vacancy closed by the caller). Nothing off.
+pub fn owner_operator(world: &World, employer: EntityId, role: crate::components::Role) -> Option<EntityId> {
+    if !on(world) {
+        return None;
+    }
+    let owner = world.comp::<Building>(employer).and_then(|bd| bd.owner).filter(|&o| world.has::<Brain>(o))?;
+    let _ = role;
+    let members: Vec<EntityId> = std::iter::once(owner).chain(world.spouse_of(owner)).collect();
+    members.into_iter().find(|&m| {
+        crate::systems::law::living(world, m)
+            && crate::systems::demography::is_adult(world, m)
+            && !world.has::<Job>(m)
+            && !world.has::<Sentence>(m)
+            && crate::systems::life::exec_corp(world, m).is_none()
+            && world.comp::<Brain>(m).is_some_and(|b| !b.emigrating)
+    })
+}
+
+/// § 3.4 (`wages`'s layoff order): is `who` of the household (the agent or
+/// its spouse) that owns `b`?
+pub fn is_member_of_owner(world: &World, who: EntityId, b: EntityId) -> bool {
+    if !on(world) {
+        return false;
+    }
+    let Some(owner) = world.comp::<Building>(b).and_then(|bd| bd.owner).filter(|&o| world.has::<Brain>(o)) else {
+        return false;
+    };
+    who == owner || world.spouse_of(owner) == Some(who)
+}
+
+/// Midnight (from `living::run`): the visits due today, and the newborns'
+/// keep through the pantry (`newborn_cost_per_day` on the Home's child
+/// food debt, once a Home). Nothing off.
+pub fn daily(world: &mut World) {
+    if !on(world) {
+        return;
+    }
+    let cost = world.config.household.newborn_cost_per_day;
+    let now = world.tick;
+    let homes: std::collections::BTreeSet<EntityId> = world
+        .spouses
+        .keys()
+        .copied()
+        .filter(|&p| world.comp::<Household>(p).and_then(|h| h.newborn_until).is_some_and(|t| t > now))
+        .filter_map(|p| home_of(world, p))
+        .collect();
+    for h in homes {
+        if let Some(b) = world.comp_mut::<Building>(h) {
+            b.child_food_debt += cost;
+        }
+    }
+    visits_due(world);
+}
+
+// ---------------------------------------------------------------------------
+// § 3.5: visits with a purpose
+// ---------------------------------------------------------------------------
+
+/// The kin of `id`: its spouse and its Family/Parent edges.
+fn kin_of(world: &World, id: EntityId) -> Vec<(EntityId, RelKind)> {
+    world
+        .neighbours(id)
+        .filter_map(|c| {
+            let e = world.edge(id, c)?;
+            matches!(e.kind, RelKind::Spouse | RelKind::Family | RelKind::Parent).then_some((c, e.kind))
+        })
+        .collect()
+}
+
+/// Midnight: at most one visit a day an adult. A kin or spouse downed
+/// (`World::wounded`), assaulted or arrested in the last day (the visitor's
+/// own first-hand `SawCrime` with the kin as object, or a heard
+/// `Assaulted`/`Arrested` rumour about it), else an elder parent (over
+/// `[ages] frail_from_years`) not met for `elder_visit_days`. World-side:
+/// O(adults × kin). Nothing off.
+pub fn visits_due(world: &mut World) {
+    world.visits.clear();
+    if !on(world) {
+        return;
+    }
+    let now = world.tick;
+    let day = world.day();
+    let since = now.saturating_sub(TICKS_PER_DAY);
+    let frail = u32::try_from(u64::from(world.config.ages.frail_from_years) * DAYS_PER_YEAR).unwrap_or(u32::MAX);
+    let elder_days = u64::from(world.config.household.elder_visit_days);
+    let mut due: Vec<(EntityId, PendingVisit)> = Vec::new();
+    // scan-ok: daily: the visits due
+    for id in world.citizens() {
+        if !world.has::<Brain>(id)
+            || world.has::<Sentence>(id)
+            || !crate::systems::demography::is_adult(world, id)
+            || !crate::systems::law::living(world, id)
+            || world.comp::<Brain>(id).is_some_and(|b| b.emigrating)
+        {
+            continue;
+        }
+        let mut pick: Option<(EntityId, VisitWhy)> = None;
+        for (k, rel) in kin_of(world, id) {
+            if !world.has::<Brain>(k) || !crate::systems::law::living(world, k) || k == id {
+                continue;
+            }
+            let downed = world.wounded.get(&k).is_some_and(|r| r.since >= since || r.rise_at.is_some_and(|t| t > now));
+            let hurt = downed
+                || world.comp::<crate::components::Memory>(id).is_some_and(|m| {
+                    m.entries.iter().any(|e| {
+                        e.tick >= since
+                            && e.kind == MemoryKind::SawCrime
+                            && e.object == Some(k)
+                            && e.crime == Some(crate::components::Crime::Assault)
+                    }) || m.heard.iter().any(|e| {
+                        e.tick >= since
+                            && e.object == Some(k)
+                            && matches!(e.deed, Some(Deed::Assaulted | Deed::Arrested))
+                    })
+                });
+            if hurt {
+                pick = Some((k, VisitWhy::Hurt));
+                break;
+            }
+            if rel == RelKind::Parent && pick.is_none() {
+                let elder = world.comp::<Identity>(k).is_some_and(|i| i.age_days >= frail)
+                    && crate::systems::demography::is_child_of(world, id, k);
+                let unmet = world.last_met.get(&pair(id, k)).is_none_or(|&d| day.saturating_sub(d) >= elder_days);
+                if elder && unmet {
+                    pick = Some((k, VisitWhy::Elder));
+                }
+            }
+        }
+        if let Some((kin, why)) = pick {
+            let cfg = &world.config.household;
+            let span = u32::from(cfg.visit_hour_to.saturating_sub(cfg.visit_hour_from)).max(1);
+            let u = hash(world, PURPOSE_VISIT_HOUR, key(id), day);
+            let hour = cfg.visit_hour_from + ((u * span as f32) as u8).min(span as u8 - 1);
+            due.push((id, PendingVisit { kin, why, hour }));
+        }
+    }
+    for (id, v) in due {
+        world.visits.insert(id, v);
+    }
+}
+
+fn pair(a: EntityId, b: EntityId) -> (EntityId, EntityId) {
+    if a <= b {
+        (a, b)
+    } else {
+        (b, a)
+    }
+}
+
+/// The visit `id` owes today, once its hour has come.
+pub fn visit_now(world: &World, id: EntityId) -> Option<PendingVisit> {
+    let v = *world.visits.get(&id)?;
+    (u16::from(v.hour) * TICKS_PER_HOUR as u16 <= world.tick_of_day()).then_some(v)
+}
+
+/// The Visit goal's considerations: a visit due and its hour come, a kin
+/// still there to see; the flat `visit_flat`.
+pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>, f32)> {
+    if !on(world) {
+        return None;
+    }
+    let v = visit_now(world, id)?;
+    if !world.has::<Brain>(v.kin) || !crate::systems::law::living(world, v.kin) {
+        return None;
+    }
+    let urgency = match v.why {
+        VisitWhy::Hurt => 1.0,
+        VisitWhy::Elder => 0.6,
+    };
+    let cs = vec![
+        Consideration::new("a visit due", can(true), GATE),
+        Consideration::new("the reason", urgency, Curve::Linear { m: 0.5, b: 0.5 }),
+    ];
+    Some((cs, world.config.household.visit_flat))
+}
+
+/// The Visit's scripted plan: `GoTo(the kin's building) → Rest` (the
+/// visiting hour is a Rest at the place: the Clinic's ward, the Home's
+/// room, the Precinct's hall), the kin the plan's target.
+pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
+    let v = visit_now(world, id)?;
+    world.comp::<Position>(v.kin).and_then(|p| p.building)?;
+    let step = |action, target| ActionInstance { action, target, tile: None };
+    let steps = vec![step(ActionKind::GoTo(LocationKey::Victim), Some(v.kin)), step(ActionKind::Rest, None)];
+    Some(Plan { goal: GoalKind::Visit, target: Some(v.kin), steps, started_tick: world.tick })
+}
+
+/// The Visit's own start checks: the walk as any walk; the Rest only at
+/// the kin's building.
+pub fn can_start(world: &World, id: EntityId, kind: ActionKind) -> bool {
+    match kind {
+        ActionKind::Rest => {
+            let kin = world.comp::<Brain>(id).and_then(|b| b.plan.as_ref()).and_then(|p| p.target);
+            let here = world.comp::<Position>(id).and_then(|p| p.building);
+            here.is_some() && kin.and_then(|k| world.comp::<Position>(k)).is_some_and(|p| p.building == here)
+        }
+        _ => crate::exec::actions::can_start(world, id, kind, None),
+    }
+}
+
+/// The credit a visit gives both sides: `interacted`, `last_met`, the
+/// visitor's belonging (`visit_belonging`), the counter, an event.
+fn credit(world: &mut World, id: EntityId, v: PendingVisit, walked: bool) {
+    crate::systems::social::interacted(world, id, v.kin);
+    let today = world.day();
+    world.last_met.insert(pair(id, v.kin), today);
+    let gain = world.config.household.visit_belonging;
+    if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
+        n.belonging = (n.belonging + gain).min(1.0);
+    }
+    let row = ownership::jobs2_row(world);
+    match v.why {
+        VisitWhy::Hurt => row.kin_visits += 1,
+        VisitWhy::Elder => row.elder_visits += 1,
+    }
+    let place = world.comp::<Position>(v.kin).and_then(|p| p.building);
+    let at = place.map_or_else(|| "where they were".to_string(), |b| world.name_of(b));
+    let text = format!(
+        "{} visited {} at {at}{}",
+        world.name_of(id),
+        world.name_of(v.kin),
+        match (v.why, walked) {
+            (VisitWhy::Hurt, _) => " (hurt)",
+            (VisitWhy::Elder, _) => " (an elder parent)",
+        }
+    );
+    let actors: Vec<EntityId> = [Some(id), Some(v.kin), place].into_iter().flatten().collect();
+    world.push_event(EventKind::Visited, &actors, text);
+}
+
+/// A Full visitor's plan ended at the kin's side (the Rest done): the credit.
+pub fn visit_done(world: &mut World, id: EntityId) {
+    let Some(v) = world.visits.remove(&id) else { return };
+    credit(world, id, v, true);
+}
+
+/// Hourly (from `living::run`): a Statistical visitor is credited at its
+/// visit's hour, as a body's walk would be. Nothing off.
+pub fn hourly(world: &mut World) {
+    if !on(world) || !world.tick.is_multiple_of(TICKS_PER_HOUR) || world.visits.is_empty() {
+        return;
+    }
+    let hour = u8::try_from(world.tick_of_day() / TICKS_PER_HOUR as u16).unwrap_or(0);
+    let stat: Vec<(EntityId, PendingVisit)> = world
+        .visits
+        .iter()
+        .filter(|(_, v)| v.hour == hour)
+        .filter(|(&id, _)| world.comp::<Brain>(id).is_some_and(|b| b.lod == crate::components::Lod::Statistical))
+        .map(|(&id, &v)| (id, v))
+        .collect();
+    for (id, v) in stat {
+        if world.has::<Brain>(v.kin) && crate::systems::law::living(world, v.kin) {
+            credit(world, id, v, false);
+        }
+        world.visits.remove(&id);
+    }
+}
+
+/// The lives probe's and inspector's reading of a Home spot (for the diary).
+pub fn home_label(world: &World, home: EntityId, own: bool) -> String {
+    format!("{}{}", world.name_of(home), if own { " (home)" } else { " (a friend's place)" })
+}

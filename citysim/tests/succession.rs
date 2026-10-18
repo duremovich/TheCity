@@ -479,7 +479,10 @@ fn test_newcomer_is_no_runner_up_to_a_veteran_heir() {
 /// newer, more loyal one; a night's term (a fare) hands nobody the gang.
 #[test]
 fn test_bug8_leader_by_tenure_and_no_succession_for_a_night() {
-    let mut w = common::world();
+    // Lives at work phase 2: on the household's day-12 city no gang of four
+    // has a leader and two free members; this pins the city the pick was
+    // written for.
+    let mut w = common::world_with(|c| c.household.enabled = false);
     // The seed's gangs start empty and recruit through the first days.
     w.run_ticks(12 * TICKS_PER_DAY);
     let g = w
