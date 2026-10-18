@@ -5,6 +5,7 @@
 //!                    [--agent INDEX]... [--count K] --out DIR
 //! citysim-cli shadow --seed S --start-day D --list
 //! citysim-cli shadow --assert [--out DIR]
+//! citysim-cli shadow --lives [--population 20000] [--out DIR]
 //! ```
 //!
 //! An observation tool. The world runs normally to `--start-day`; the chosen
@@ -12,6 +13,42 @@
 //! tick their state is diffed to write a diary (`<archetype>_<index>.md` and
 //! `.jsonl`). The only sim hook is `World::shadow_notes` (social moves and
 //! gossip tellings), a no-op unless turned on here. Nothing here draws RNG.
+//!
+//! `--lives` is the Lives at work phase 0 baseline (docs/LIVES_AT_WORK.md
+//! § 9 row 0, § 13): the `--assert` recipe (day 19, 7 days, seeds 42-44
+//! pooled, up to `BEHAVIOUR_SAMPLE` free agents per archetype and seed, each
+//! archetype in its own clone) over every pinnable archetype, printing one
+//! `PROBE lives <city> <archetype>:` line per archetype and an `all` row:
+//! idle hours a day; spouse meetings a week, two ways; HangOuts and the
+//! empty ones; `Served`-able shifts. With `--population N` it is instead
+//! one window of the generated city (seed 42, day 20, 7 days; V4's 20k
+//! recipe), every archetype pinned together in one world, `LIVES_COUNT_BIG`
+//! each (a 20k world is too large to clone per archetype). Never asserted.
+//!
+//! The lives signals, and what a Statistical agent looks like to them:
+//! - *spouse named*: a social move (`ShadowNote::Move`) between the pick and
+//!   its spouse, or a HangOut of the pick with the spouse at the spot
+//!   (`world.hangouts`): what the V4 critics read in the diaries. A
+//!   Statistical spouse makes no moves and stands at no spot: invisible.
+//! - *spouse co-located*: an hourly sample where the pick and the spouse are
+//!   in the same building, or both outdoors within `COLOC_TILES`, and
+//!   neither is at a sleep-class step. A Statistical spouse's `Position` is
+//!   where its demotion snapped it (`lod::snap_to_phase_door`: home at night,
+//!   the workplace by day) and it has no step, so it counts as awake there;
+//!   the share of co-located hours with a Statistical spouse is printed.
+//! - *empty HangOut*: a HangOut step closed with nobody else at the tile in
+//!   `world.hangouts` (bodies only; a Statistical agent is never at a spot).
+//! - *Served-able shift*: a whole, free workday shift of a pick with a `Job`
+//!   at a building, with either (1) a non-staff body inside the workplace
+//!   (`Building.occupants` minus `World::staff_of`) at any hourly sample of
+//!   the shift, or (2) an event of a `SERVED_SOURCE_KINDS` kind during the
+//!   shift naming the workplace or an actor standing inside it. A
+//!   Statistical visitor (`leisure::stat_visit`, `lod::stat_eat`, the
+//!   Statistical shop) moves no `Position` and pushes no event: it is
+//!   invisible to both, a known limit of this baseline (phase 1 makes the
+//!   encounter itself visible). It does bump the venue's
+//!   `Venue.visits_today`, so a third column reads that tally over the
+//!   shift's hours (leisure venues only) and the share with any of the three.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -68,6 +105,11 @@ pub struct ShadowArgs {
     /// `--out` keeps the diaries (5 per archetype and seed).
     #[arg(long)]
     pub assert: bool,
+    /// Lives at work phase 0: the `--assert` windows over every pinnable archetype, printing
+    /// `PROBE lives` lines (idle hours, spouse meetings, empty HangOuts, Served-able shifts);
+    /// with `--population N`, one window of the generated city instead (seed 42, day 20).
+    #[arg(long)]
+    pub lives: bool,
     /// Shadow in a generated city of this many residents (`core_20k`'s recipe: `gen:<N>`,
     /// `Config::scaled_to(N)`, 50 Ambient flats a slot) instead of the shipped 2,000 city.
     #[arg(long, value_name = "N")]
@@ -628,6 +670,21 @@ struct Track {
     /// Bouts naming the agent, and those with the agent inside the pit.
     bouts: u32,
     bouts_present: u32,
+    // Lives at work phase 0 (`--lives`; the module header names the signals).
+    /// The spouse at the window's start (`World::spouse_of`); a marriage or a
+    /// death inside the window does not move it.
+    spouse: Option<EntityId>,
+    /// Hours (tick / 60) in which a social move or a HangOut named the spouse.
+    spouse_named_hours: BTreeSet<Tick>,
+    /// Hourly samples with the spouse alive; of those co-located and both awake;
+    /// of those with the spouse Statistical (its position a demotion snapshot).
+    spouse_samples: u32,
+    spouse_coloc: u32,
+    spouse_coloc_stat: u32,
+    /// HangOuts closed with nobody else at the tile.
+    hang_empty: u32,
+    /// `SERVED_SOURCE_KINDS` events seen at the workplace during a shift, by kind.
+    source_kinds: BTreeMap<String, u32>,
 }
 
 /// One shift of the agent's job, as observed.
@@ -643,7 +700,43 @@ struct ShiftObs {
     whole: bool,
     /// Never jailed during the shift.
     free: bool,
+    // Lives at work phase 0: who was on the other side of the counter.
+    /// The job's building at the shift's first minute.
+    employer: Option<EntityId>,
+    /// Hourly samples during the shift, and the non-staff bodies inside the
+    /// workplace summed over them.
+    samples: u32,
+    nonstaff: u32,
+    /// `SERVED_SOURCE_KINDS` events at the workplace during the shift.
+    source_events: u32,
+    /// The workplace's `Venue.visits_today` rise over the shift's hours
+    /// (leisure venues only; a Statistical visit shows here and nowhere else).
+    venue_visits: u32,
+    last_visits: Option<u16>,
 }
+
+/// Lives at work phase 0: two agents outdoors this close (Manhattan tiles)
+/// at an hourly sample are co-located, as two inside one building are.
+const COLOC_TILES: u32 = 2;
+
+/// Lives at work phase 0: the event kinds that are a service encounter's
+/// source today (docs/LIVES_AT_WORK.md § 1.2's list, as far as the city
+/// writes an event for it: a sale, an install, a treatment, a stabilise, a
+/// cure, a licence, a table or a bout, a Mission's day, a gift). No event
+/// exists for a visit's completion, a tip, a cab fare or a detox.
+const SERVED_SOURCE_KINDS: &[EventKind] = &[
+    EventKind::AssetBought,
+    EventKind::Installed,
+    EventKind::Treated,
+    EventKind::Rescued,
+    EventKind::Cured,
+    EventKind::LicenceSold,
+    EventKind::Gambled,
+    EventKind::Bout,
+    EventKind::MissionServed,
+    EventKind::Donated,
+    EventKind::TraumaSave,
+];
 
 impl Track {
     fn new(id: EntityId, arch: &str, name: String, start: Tick) -> Track {
@@ -720,6 +813,13 @@ impl Track {
             commute_aborts: 0,
             bouts: 0,
             bouts_present: 0,
+            spouse: None,
+            spouse_named_hours: BTreeSet::new(),
+            spouse_samples: 0,
+            spouse_coloc: 0,
+            spouse_coloc_stat: 0,
+            hang_empty: 0,
+            source_kinds: BTreeMap::new(),
         }
     }
 
@@ -1146,6 +1246,9 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
             ShadowNote::Move { tick, m, out } if m.actor == id || m.target == id => {
                 let other = if m.actor == id { m.target } else { m.actor };
                 t.contact(world, other);
+                if t.spouse == Some(other) {
+                    t.spouse_named_hours.insert(*tick / TICKS_PER_HOUR);
+                }
                 let dir = if m.actor == id { "to" } else { "from" };
                 t.log(
                     *tick,
@@ -1288,6 +1391,7 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
     *t.day_places.entry(here.clone()).or_insert(0) += 1;
     *t.total_places.entry(here.clone()).or_insert(0) += 1;
     behaviour_minute(world, t, now, act);
+    lives_minute(world, t, now, act, events);
 
     if let Some(b) = world.comp::<Brain>(id) {
         if !t.pinned_lod_noted && b.lod == Lod::Full {
@@ -1731,6 +1835,12 @@ fn behaviour_minute(world: &World, t: &mut Track, now: Tick, act: &'static str) 
                 workday: citysim::exec::routine::workday_of(world, id, j, j.shift_key_at(now)),
                 whole: j.shifts.iter().any(|&(s, _)| s == tod),
                 free: true,
+                employer: j.employer,
+                samples: 0,
+                nonstaff: 0,
+                source_events: 0,
+                venue_visits: 0,
+                last_visits: None,
             });
             s.len += 1;
             s.work += u32::from(act == "work");
@@ -1762,6 +1872,64 @@ fn end_sleep_block(t: &mut Track, now: Tick) {
     }
 }
 
+/// Lives at work phase 0 (`--lives`): the spouse and the counter, read once
+/// an hour (plus the tick's events at the workplace). Reads only; no RNG.
+/// Runs after `behaviour_minute`, so `t.shift` is this minute's.
+fn lives_minute(world: &World, t: &mut Track, now: Tick, act: &'static str, events: &[&Event]) {
+    let id = t.id;
+    // The tick's source events at the workplace (every tick: an event is one minute).
+    if let Some(s) = t.shift.as_mut() {
+        if let Some(wp) = s.employer {
+            for e in events.iter().filter(|e| SERVED_SOURCE_KINDS.contains(&e.kind)) {
+                let at_work = e.actors.contains(&wp)
+                    || e.actors.iter().any(|&a| {
+                        a != id && a != EntityId::NONE && world.comp::<Position>(a).and_then(|p| p.building) == Some(wp)
+                    });
+                if at_work {
+                    s.source_events += 1;
+                    *t.source_kinds.entry(format!("{:?}", e.kind)).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+    if !now.is_multiple_of(TICKS_PER_HOUR) {
+        return;
+    }
+    // The counter: non-staff bodies inside the workplace, and the venue's visit tally.
+    if let Some(s) = t.shift.as_mut() {
+        if let Some(bd) = s.employer.and_then(|wp| world.comp::<Building>(wp)) {
+            let staff = world.staff_of(s.employer.unwrap_or(EntityId::NONE));
+            s.samples += 1;
+            s.nonstaff += bd.occupants.iter().filter(|&&o| o != id && staff.binary_search(&o).is_err()).count() as u32;
+            if let Some(v) = bd.venue.as_ref() {
+                // `visits_today` resets at midnight: a fall is a new day's count.
+                let cur = v.visits_today;
+                if let Some(prev) = s.last_visits {
+                    s.venue_visits += u32::from(if cur >= prev { cur - prev } else { cur });
+                }
+                s.last_visits = Some(cur);
+            }
+        }
+    }
+    // The spouse: co-located and both awake.
+    let Some(sp) = t.spouse else { return };
+    if !world.has::<Brain>(sp) || world.has::<Corpse>(sp) {
+        return;
+    }
+    t.spouse_samples += 1;
+    let (Some(a), Some(b)) = (world.comp::<Position>(id), world.comp::<Position>(sp)) else { return };
+    let together = match (a.building, b.building) {
+        (Some(x), Some(y)) => x == y,
+        (None, None) => a.tile.manhattan(b.tile) <= COLOC_TILES,
+        _ => false,
+    };
+    let sp_act = activity(world, sp);
+    if together && act != "sleep" && sp_act != "sleep" {
+        t.spouse_coloc += 1;
+        t.spouse_coloc_stat += u32::from(sp_act == "stat");
+    }
+}
+
 /// Log up to three lines, then one line counting the rest (a gang-wide feud
 /// adjustment touches dozens of edges in one minute).
 fn log_grouped(t: &mut Track, now: Tick, cat: &'static str, msgs: Vec<String>, noun: &str) {
@@ -1783,6 +1951,10 @@ fn close_action(world: &World, t: &mut Track, now: Tick, status: &str) {
         // V2: who was at the spot, the known contacts named.
         let others: Vec<EntityId> = std::mem::take(&mut t.hang_others).into_iter().collect();
         t.hangouts += 1;
+        t.hang_empty += u32::from(others.is_empty());
+        if t.spouse.is_some_and(|s| others.contains(&s)) {
+            t.spouse_named_hours.insert(o.start / TICKS_PER_HOUR);
+        }
         let mut parts: Vec<String> = Vec::new();
         let mut known = 0;
         let mut strangers = 0;
@@ -2079,6 +2251,10 @@ pub fn shadow(args: ShadowArgs) -> Result<(), String> {
             Err(format!("behaviour tier: {} failure(s): {:?}", report.failures.len(), report.failures))
         };
     }
+    if args.lives {
+        print!("{}", lives(args.out.as_deref(), args.population)?);
+        return Ok(());
+    }
     if !args.list && args.out.is_none() {
         return Err("--out <dir> is required (or use --list or --assert)".into());
     }
@@ -2230,6 +2406,7 @@ fn follow(world: &mut World, picked: &[(String, EntityId)], days: u64, pin: bool
         let name = world.comp::<Identity>(*id).map_or("?".into(), |i| i.name.clone());
         let mut t = Track::new(*id, arch, name, start_tick);
         t.pinned = pin;
+        t.spouse = world.spouse_of(*id);
         t.header = header(world, &t);
         t.last_place = place(world, *id);
         if verbose {
@@ -2342,10 +2519,34 @@ struct Agg {
     commute_aborts: u32,
     bouts: u32,
     bouts_present: u32,
+    // Lives at work phase 0 (`--lives`): read by `lives_report` only.
+    idle_min: u64,
+    /// Married picks (a spouse at the window's start), their alive minutes,
+    /// and those that never met the spouse by each signal.
+    married: u32,
+    married_min: u64,
+    never_named: u32,
+    never_coloc: u32,
+    spouse_named_hours: u32,
+    spouse_samples: u32,
+    spouse_coloc: u32,
+    spouse_coloc_stat: u32,
+    hang_empty: u32,
+    /// Whole free workday shifts at a building; Served-able by a body or an
+    /// event; by any of the three signals; the hourly samples and the
+    /// non-staff bodies summed; the venue tally; the source events by kind.
+    served_shifts: u32,
+    servedable: u32,
+    servedable_any: u32,
+    shift_samples: u64,
+    nonstaff: u64,
+    venue_visits: u64,
+    source_kinds: BTreeMap<String, u32>,
 }
 
 impl Agg {
     fn add(&mut self, t: &Track) {
+        self.add_lives(t);
         self.agents += 1;
         self.alive_min += u64::from(t.alive_min);
         self.travel_min += u64::from(t.total_use.get("travel").copied().unwrap_or(0));
@@ -2379,8 +2580,55 @@ impl Agg {
         self.bouts_present += t.bouts_present;
     }
 
+    /// Lives at work phase 0: the `--lives` tallies of one agent.
+    fn add_lives(&mut self, t: &Track) {
+        self.idle_min += u64::from(t.total_use.get("idle").copied().unwrap_or(0));
+        if t.spouse.is_some() {
+            self.married += 1;
+            self.married_min += u64::from(t.alive_min);
+            self.never_named += u32::from(t.spouse_named_hours.is_empty());
+            self.never_coloc += u32::from(t.spouse_coloc == 0);
+            self.spouse_named_hours += t.spouse_named_hours.len() as u32;
+            self.spouse_samples += t.spouse_samples;
+            self.spouse_coloc += t.spouse_coloc;
+            self.spouse_coloc_stat += t.spouse_coloc_stat;
+        }
+        self.hang_empty += t.hang_empty;
+        for s in t.shifts.iter().filter(|s| s.whole && s.workday && s.free && s.employer.is_some()) {
+            let served = s.nonstaff > 0 || s.source_events > 0;
+            self.served_shifts += 1;
+            self.servedable += u32::from(served);
+            self.servedable_any += u32::from(served || s.venue_visits > 0);
+            self.shift_samples += u64::from(s.samples);
+            self.nonstaff += u64::from(s.nonstaff);
+            self.venue_visits += u64::from(s.venue_visits);
+        }
+        for (k, n) in &t.source_kinds {
+            *self.source_kinds.entry(k.clone()).or_insert(0) += n;
+        }
+    }
+
     /// Pool another agent's sums into these.
     fn merge(&mut self, o: &Agg) {
+        self.idle_min += o.idle_min;
+        self.married += o.married;
+        self.married_min += o.married_min;
+        self.never_named += o.never_named;
+        self.never_coloc += o.never_coloc;
+        self.spouse_named_hours += o.spouse_named_hours;
+        self.spouse_samples += o.spouse_samples;
+        self.spouse_coloc += o.spouse_coloc;
+        self.spouse_coloc_stat += o.spouse_coloc_stat;
+        self.hang_empty += o.hang_empty;
+        self.served_shifts += o.served_shifts;
+        self.servedable += o.servedable;
+        self.servedable_any += o.servedable_any;
+        self.shift_samples += o.shift_samples;
+        self.nonstaff += o.nonstaff;
+        self.venue_visits += o.venue_visits;
+        for (k, n) in &o.source_kinds {
+            *self.source_kinds.entry(k.clone()).or_insert(0) += n;
+        }
         self.agents += o.agents;
         self.alive_min += o.alive_min;
         self.travel_min += o.travel_min;
@@ -2793,9 +3041,15 @@ fn sample(world: &World, seed: u64, arch: &str) -> Result<Vec<EntityId>, String>
 /// first `BEHAVIOUR_COUNT` of a sample write their diaries under
 /// `out/d<day>` (seed 42) or `out/s<seed>_d<day>`.
 fn behaviour_window(seed: u64, day: u64, list: &'static str, out: Option<&std::path::Path>) -> Vec<SampleRun> {
+    let archs: Vec<&str> = list.split(',').collect();
+    window_runs(seed, day, &archs, out)
+}
+
+/// `behaviour_window`'s body over an archetype list (shared with `--lives`).
+fn window_runs(seed: u64, day: u64, archs: &[&str], out: Option<&std::path::Path>) -> Vec<SampleRun> {
     let world = start_world(seed, day, None);
     let jobs: Vec<(&str, Result<Vec<EntityId>, String>)> =
-        list.split(',').map(|arch| (arch, sample(&world, seed, arch))).collect();
+        archs.iter().map(|&arch| (arch, sample(&world, seed, arch))).collect();
     std::thread::scope(|s| {
         let hs: Vec<_> = jobs
             .into_iter()
@@ -2901,6 +3155,126 @@ pub fn behaviour(out: Option<&std::path::Path>) -> Result<BehaviourReport, Strin
     Ok(BehaviourReport { text, failures })
 }
 
+// ---------------------------------------------------------------------------
+// Lives at work phase 0 (`shadow --lives`; docs/LIVES_AT_WORK.md § 9 row 0)
+// ---------------------------------------------------------------------------
+
+/// The generated city's window (V4's 20k recipe: `--seed 42 --start-day 20
+/// --days 7`): every archetype pinned together in one world, this many each.
+const LIVES_BIG_SEED: u64 = 42;
+const LIVES_BIG_DAY: u64 = 20;
+const LIVES_COUNT_BIG: usize = 5;
+
+/// The lives baseline: the 2k windows (`--assert`'s first window over every
+/// pinnable archetype, the seeds pooled) or, with `population`, one window of
+/// the generated city. Returns the `PROBE lives` lines.
+pub fn lives(out: Option<&std::path::Path>, population: Option<u32>) -> Result<String, String> {
+    let archs: Vec<&str> = ARCHETYPES.iter().copied().filter(|&a| a != "child").collect();
+    let mut rows: BTreeMap<String, Row> = BTreeMap::new();
+    let (city, window) = match population {
+        Some(n) => {
+            let mut world = start_world(LIVES_BIG_SEED, LIVES_BIG_DAY, Some(n));
+            let list = archs.join(",");
+            let picked = pick(&world, LIVES_BIG_SEED, LIVES_BIG_DAY, Some(&list), LIVES_COUNT_BIG, &[]);
+            if picked.is_empty() {
+                return Err("lives: no candidates in the generated city".into());
+            }
+            // As `shadow --pick`: the pins sit inside `[lod] max_full`, grown by the pick count.
+            world.config.lod.max_full += picked.len();
+            let mut tracks = follow(&mut world, &picked, BEHAVIOUR_DAYS, true, false);
+            if let Some(dir) = out {
+                let dir = dir.join(format!("lives_{n}_d{LIVES_BIG_DAY}"));
+                std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+                let end = world.tick;
+                for t in &mut tracks {
+                    write_diary(&world, t, &dir, end)?;
+                }
+            }
+            for t in &tracks {
+                rows.entry(t.arch.clone()).or_default().add(t);
+            }
+            (
+                format!("{}k", n / 1000),
+                format!(
+                    "seed {LIVES_BIG_SEED}, day {LIVES_BIG_DAY}, {BEHAVIOUR_DAYS} days, {} picks of {} archetypes pinned \
+                     together in one world (up to {LIVES_COUNT_BIG} each)",
+                    picked.len(),
+                    archs.len()
+                ),
+            )
+        }
+        None => {
+            let day = BEHAVIOUR_WINDOWS[0].0;
+            // One seed at a time: a clone of the city per archetype is ~48 worlds.
+            for &seed in &BEHAVIOUR_SEEDS {
+                for r in window_runs(seed, day, &archs, out) {
+                    if let (_, _, arch, Some(row)) = r? {
+                        rows.entry(arch).or_default().extend(&row);
+                    }
+                }
+            }
+            (
+                "2k".to_string(),
+                format!(
+                    "seeds {BEHAVIOUR_SEEDS:?} pooled, day {day}, {BEHAVIOUR_DAYS} days, up to {BEHAVIOUR_SAMPLE} free \
+                     agents per archetype and seed, each archetype in its own clone (pinned at Full)"
+                ),
+            )
+        }
+    };
+    let mut text = String::new();
+    let _ = writeln!(
+        text,
+        "PROBE lives {city}: {window}; rates per agent-day or agent-week pooled over the row's agents; a spouse row \
+         reads the married picks only; shifts are whole free workday shifts at a building; rows under \
+         {BEHAVIOUR_MIN_AGENTS} agents are one person's week; `all` pools the rows (an agent picked for two \
+         archetypes counts in both)"
+    );
+    let mut all = Row::default();
+    for (arch, row) in &rows {
+        all.extend(row);
+        lives_line(&mut text, &city, arch, &row.pooled);
+    }
+    lives_line(&mut text, &city, "all", &all.pooled);
+    Ok(text)
+}
+
+/// One `PROBE lives` row: the archetype's pooled numbers.
+fn lives_line(text: &mut String, city: &str, label: &str, a: &Agg) {
+    let days = a.agent_days();
+    let per_day = |n: f64| if days > 0.0 { n / days } else { 0.0 };
+    let share = |n: u32, d: u32| if d > 0 { f64::from(n) / f64::from(d) } else { 0.0 };
+    let married_days = a.married_min as f64 / TICKS_PER_DAY as f64;
+    let per_married_week = |n: f64| if married_days > 0.0 { n / married_days * 7.0 } else { 0.0 };
+    let mut kinds: Vec<(&String, &u32)> = a.source_kinds.iter().collect();
+    kinds.sort_by(|x, y| y.1.cmp(x.1).then(x.0.cmp(y.0)));
+    let kinds: Vec<String> = kinds.iter().take(3).map(|(k, n)| format!("{k} {n}")).collect();
+    let _ = writeln!(
+        text,
+        "PROBE lives {city} {label}: n {} agent-days {days:.1} | idle_h/d {:.2} | married {} never_named {} never_coloc {} \
+         named/wk {:.2} coloc_h/wk {:.2} (stat-spouse {:.2}) | hang/wk {:.2} empty {:.2} ({}/{}) | shifts {} servedable \
+         {:.2} any {:.2} bodies/h {:.2} venue_visits/shift {:.2} | kinds: {}",
+        a.agents,
+        per_day(a.idle_min as f64 / 60.0),
+        a.married,
+        a.never_named,
+        a.never_coloc,
+        per_married_week(f64::from(a.spouse_named_hours)),
+        per_married_week(f64::from(a.spouse_coloc)),
+        share(a.spouse_coloc_stat, a.spouse_coloc),
+        per_day(f64::from(a.hangouts)) * 7.0,
+        share(a.hang_empty, a.hangouts),
+        a.hang_empty,
+        a.hangouts,
+        a.served_shifts,
+        share(a.servedable, a.served_shifts),
+        share(a.servedable_any, a.served_shifts),
+        if a.shift_samples > 0 { a.nonstaff as f64 / a.shift_samples as f64 } else { 0.0 },
+        if a.served_shifts > 0 { a.venue_visits as f64 / f64::from(a.served_shifts) } else { 0.0 },
+        if kinds.is_empty() { "none".to_string() } else { kinds.join(", ") }
+    );
+}
+
 /// One printed row of the behaviour table (every value, the floors aside).
 fn row_line(text: &mut String, day: u64, label: &str, a: &Row) {
     let _ = write!(text, "d{day:<3} {label:<14} {:>2}", a.agents.len());
@@ -2971,6 +3345,7 @@ mod tests {
             list: false,
             no_pin: false,
             assert: false,
+            lives: false,
             population: None,
         };
         shadow(args).expect("shadow runs");
