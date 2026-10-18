@@ -6,17 +6,12 @@
 //! seeded venues and levers. Each test is the shipped seed-42 city and one
 //! mechanism, driven by calling the system directly.
 
+mod common;
+
 use citysim::components::{Lod, Needs, Pitch, Stance};
 use citysim::systems::{lod, vice};
 use citysim::{Brain, BuildingKind, Config, Crime, EntityId, Job, Niche, Role, Wallet, World};
-
-fn on_world() -> World {
-    World::new(42, Config::load())
-}
-
-fn coins(w: &World, a: EntityId) -> i64 {
-    w.comp::<Wallet>(a).map_or(0, |x| x.coins)
-}
+use common::{coins, free_adults, set_coins, world};
 
 /// Free jobless adults (ascending).
 fn idle(w: &World) -> Vec<EntityId> {
@@ -56,7 +51,7 @@ fn street_pitch(w: &mut World, owner: EntityId) -> Pitch {
 
 #[test]
 fn test_seeded_venues_niche_and_levers() {
-    let w = on_world();
+    let w = world();
     assert!(!w.buildings_of_kind(BuildingKind::StripClub).is_empty(), "a StripClub is seeded");
     assert!(!w.buildings_of_kind(BuildingKind::Brothel).is_empty(), "a Brothel is seeded");
     let b = w.buildings_of_kind(BuildingKind::Brothel)[0];
@@ -76,7 +71,7 @@ fn test_seeded_venues_niche_and_levers() {
 
 #[test]
 fn test_tip_is_customer_to_worker_and_untaxed() {
-    let mut w = on_world();
+    let mut w = world();
     let b = w.buildings_of_kind(BuildingKind::Brothel)[0];
     // An evening tick, a tipped worker of the Brothel on duty off screen.
     w.tick = 20 * 60;
@@ -108,7 +103,7 @@ fn test_tip_is_customer_to_worker_and_untaxed() {
 
 #[test]
 fn test_street_sweep_in_a_sweep_district_only() {
-    let mut w = on_world();
+    let mut w = world();
     w.config.vice.p_street_sweep = 1.0;
     let o = idle(&w)[1];
     let p = street_pitch(&mut w, o);
@@ -128,7 +123,7 @@ fn test_street_sweep_in_a_sweep_district_only() {
 #[test]
 fn test_pimp_present_zeroes_the_assault_roll() {
     let run = |pimp: bool| -> u32 {
-        let mut w = on_world();
+        let mut w = world();
         // A day run: the districts' residents are binned at the midnight pass.
         w.run_ticks(citysim::TICKS_PER_DAY + 1);
         w.config.vice.p_assault_street = 10.0;
@@ -153,4 +148,44 @@ fn test_pimp_present_zeroes_the_assault_roll() {
     };
     assert_eq!(run(true), 0, "a pimp's protection");
     assert_eq!(run(false), 1, "unprotected, the roll lands");
+}
+
+// ---------------------------------------------------------------------------
+// Shadow V4 bug 7 (docs/SHADOW_V4.md): a Club's dancers tipped in turn.
+// ---------------------------------------------------------------------------
+
+/// Bug 7: a Club's dancers are tipped (the Club fell through `on_visit`),
+/// and the tips go round the tipped staff on duty, not all to the lowest id.
+#[test]
+fn test_bug7_club_dancers_tipped_in_turn() {
+    let mut w = world();
+    let tipped = |w: &World, s: EntityId| {
+        w.comp::<Job>(s).is_some_and(|j| citysim::systems::trades::row_of(w, j.role).is_some_and(|r| r.tipped))
+    };
+    // A Club with two or more tipped staff sharing a shift.
+    let (club, staff, tod) = w
+        .buildings_of_kind(BuildingKind::Club)
+        .iter()
+        .copied()
+        .find_map(|b| {
+            let s: Vec<EntityId> = w.staff_of(b).iter().copied().filter(|&s| tipped(&w, s)).collect();
+            let start = s.first().and_then(|&x| w.comp::<Job>(x)).and_then(|j| j.shifts.first().map(|x| x.0))?;
+            let on: Vec<EntityId> =
+                s.into_iter().filter(|&x| w.comp::<Job>(x).is_some_and(|j| j.on_shift(start))).collect();
+            (on.len() >= 2).then_some((b, on, start))
+        })
+        .expect("a Club with two tipped staff on one shift");
+    w.tick = 3 * citysim::TICKS_PER_DAY + u64::from(tod);
+    for &s in &staff {
+        lod::set_lod(&mut w, s, Lod::Statistical);
+    }
+    let visitors: Vec<EntityId> = free_adults(&w).into_iter().filter(|a| !staff.contains(a)).take(12).collect();
+    let before: Vec<i64> = staff.iter().map(|&s| w.comp::<citysim::Wallet>(s).expect("w").coins).collect();
+    for &v in &visitors {
+        set_coins(&mut w, v, 100);
+        vice::on_visit(&mut w, v, club, 10);
+    }
+    let gained =
+        staff.iter().zip(&before).filter(|&(&s, &b)| w.comp::<citysim::Wallet>(s).expect("w").coins > b).count();
+    assert!(gained >= 2, "the tips went round the dancers on duty ({gained} of {})", staff.len());
 }

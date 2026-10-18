@@ -4,21 +4,16 @@
 //! `law::resolve_fight` resolves a brawl. Gangs and corps now issue those
 //! attempts as orders from their utility brains, as they issue raids.
 
+mod common;
+
 use citysim::systems::virt::LossRolls;
-use citysim::systems::{assets, demography, faction, law, lod, raid, robots, virt};
+use citysim::systems::{assets, corps, demography, faction, law, lod, raid, robots, tech, virt};
 use citysim::virt::{HackEffect, NodeId, Purpose, RunMode, RunOrder, RunOutcome, RunWhy, Track};
 use citysim::{
     AssetKind, AssetLoc, Brain, Building, BuildingKind, Config, Corp, Crime, EntityId, Gang, GangMember, Kit, Lod,
-    Order, Personality, Role, Shock, Skills, World,
+    Order, Personality, Role, Shock, Skills, World, TICKS_PER_DAY, TICKS_PER_HOUR,
 };
-
-fn world() -> World {
-    World::new(42, Config::load().dole_city())
-}
-
-fn corp_named(w: &World, name: &str) -> EntityId {
-    w.corps().into_iter().find(|&c| w.comp::<Corp>(c).is_some_and(|cc| cc.name == name)).expect("seeded corp")
-}
+use common::{corp_named, dole_world};
 
 fn lab_of(w: &World, corp: EntityId, focus: Track) -> EntityId {
     w.buildings_of_kind(BuildingKind::Lab)
@@ -137,7 +132,7 @@ fn test_gang_virtraid_scores_and_orders_runners() {
 /// door_hours`.
 #[test]
 fn test_raid_prelude_opens_door_in_window() {
-    let mut w = world();
+    let mut w = dole_world();
     let gang = w.gang_list()[0];
     let (b, corp) = corp_building(&w, BuildingKind::Farm);
     let n = virt::node_of_building(&w, b).expect("node");
@@ -193,7 +188,7 @@ fn test_raid_prelude_opens_door_in_window() {
 /// = 1.25 > 1.075), and the brawl keeps defenders.
 #[test]
 fn test_door_open_strips_at_most_half_the_defence() {
-    let w = world();
+    let w = dole_world();
     let ids = w.citizens();
     let (robot, g1, g2, staff) = (ids[0], ids[1], ids[2], ids[3]);
     let total = 0.75 + 0.5 + 0.6 + 0.3;
@@ -210,7 +205,7 @@ fn test_door_open_strips_at_most_half_the_defence() {
 /// building and is no longer the owner's defender.
 #[test]
 fn test_turned_robot_fights_for_patron() {
-    let mut w = world();
+    let mut w = dole_world();
     let gang = w.gang_list()[0];
     let (b, corp) = corp_building(&w, BuildingKind::Farm);
     let via = adult(&mut w, &[]);
@@ -236,7 +231,7 @@ fn test_turned_robot_fights_for_patron() {
 #[test]
 fn test_god_door_run_on_robot_building_turns_the_robot() {
     use citysim::PlayerCommand;
-    let mut w = world();
+    let mut w = dole_world();
     let (b, corp) = corp_building(&w, BuildingKind::Farm);
     let via = adult(&mut w, &[]);
     let robot = post(&mut w, via, AssetKind::Robot, 2, corp, b);
@@ -264,7 +259,7 @@ fn test_god_door_run_on_robot_building_turns_the_robot() {
 /// under DoorOpen the camera still contests.
 #[test]
 fn test_blind_skips_camera_and_camera_writes_sighting() {
-    let mut w = world();
+    let mut w = dole_world();
     let (b, corp) = corp_building(&w, BuildingKind::Market);
     let via = adult(&mut w, &[]);
     post(&mut w, via, AssetKind::Camera, 3, corp, b);
@@ -368,7 +363,7 @@ fn test_hunker_lowers_excess_ice() {
 
 /// A day on: the Labs have hired their Researchers.
 fn hired_world() -> World {
-    let mut w = world();
+    let mut w = dole_world();
     w.run_ticks(1440);
     w
 }
@@ -431,7 +426,7 @@ fn test_stat_pass_promotes_runner_to_coarse() {
 /// `Shock::Hacked { by: Some(gang) }`, a grudge, and the VirtRaid input.
 #[test]
 fn test_hacked_shock_targets_runners_gang() {
-    let mut w = world();
+    let mut w = dole_world();
     let (ga, gb) = (w.gang_list()[0], w.gang_list()[1]);
     let hideout = w.hideout_of(gb).expect("hideout");
     let n = virt::node_of_building(&w, hideout).expect("node");
@@ -472,7 +467,7 @@ fn test_hacked_shock_targets_runners_gang() {
 /// second); a Retaliate on a grudge that names nobody fights the rival.
 #[test]
 fn test_retaliate_targets_the_traced_runners_gang() {
-    let mut w = world();
+    let mut w = dole_world();
     w.config.gangs.order_flat.retaliate = 10.0;
     let (ga, gb) = (w.gang_list()[0], w.gang_list()[1]);
     let third_base = w.buildings_of_kind(BuildingKind::Home)[0];
@@ -539,7 +534,7 @@ fn test_retaliate_targets_the_traced_runners_gang() {
 /// the purse and keep the fleet reserve (`treasury_ref / 4`) after paying.
 #[test]
 fn test_secure_affords_keeps_the_fleet_reserve() {
-    let mut w = world();
+    let mut w = dole_world();
     let z = corp_named(&w, "Zetatech");
     {
         let c = w.comp_mut::<Corp>(z).expect("z");
@@ -557,7 +552,7 @@ fn test_secure_affords_keeps_the_fleet_reserve() {
 /// every Garage sells, so the nearest is picked.
 #[test]
 fn test_garage_selling_skips_garages_that_cannot_sell() {
-    let mut w = world();
+    let mut w = dole_world();
     // Zetatech's Garages lose the truck tier (Industry 1); another corp keeps
     // Industry 2, so the street (an NPC Garage) still sells trucks.
     let z = corp_named(&w, "Zetatech");
@@ -582,7 +577,7 @@ fn test_garage_selling_skips_garages_that_cannot_sell() {
 /// value only (a posted asset adds nothing); a Lab's is its store.
 #[test]
 fn test_value_at_risk_ignores_posted_assets() {
-    let mut w = world();
+    let mut w = dole_world();
     let (farm, corp) = corp_building(&w, BuildingKind::Farm);
     let n = virt::node_of_building(&w, farm).expect("node");
     let before = virt::value_at_risk(&w, n);
@@ -602,7 +597,7 @@ fn test_value_at_risk_ignores_posted_assets() {
 /// portal (no contest) and clears the flag when the raid is over.
 #[test]
 fn test_stream_flag_set_on_departure() {
-    let mut w = world();
+    let mut w = dole_world();
     let gang = w.gang_list()[0];
     let hideout = w.hideout_of(gang).expect("hideout");
     let m = gang_runner(&mut w, gang, 2, 0.9);
@@ -630,7 +625,7 @@ fn test_stream_flag_set_on_departure() {
 #[test]
 fn test_god_virt_commands_act() {
     use citysim::PlayerCommand;
-    let mut w = world();
+    let mut w = dole_world();
     let lab = lab_of(&w, corp_named(&w, "Zetatech"), Track::Chrome);
     let n = virt::node_of_building(&w, lab).expect("node");
     let a = adult(&mut w, &[]);
@@ -663,4 +658,171 @@ fn test_god_virt_commands_act() {
     w.push_command(PlayerCommand::Fry(b));
     w.apply_commands();
     assert!(w.events.iter().any(|e| e.text.contains("God: Fry: not jacked in")));
+}
+
+// ---------------------------------------------------------------------------
+// M14 review (`/code-review high 6c04ece..16b9efe`), findings 2, 5, 10 and
+// 16: a pending order kept, `Gang.stream_by` cleared, the VirtRaid fleet
+// deck, a hack grudge bringing the wipe.
+// ---------------------------------------------------------------------------
+
+fn order(w: &mut World, a: EntityId, chair: EntityId, target: NodeId, purpose: Purpose, why: RunWhy) {
+    let now = w.tick;
+    w.run_orders.insert(
+        a,
+        RunOrder {
+            patron: None,
+            purpose,
+            target,
+            chair,
+            not_before: now,
+            expires: now + TICKS_PER_DAY,
+            why,
+            mode: RunMode::Quiet,
+        },
+    );
+}
+
+/// Review 2: an agent holding a Prelude order not yet due (so not a
+/// standing order) gets no freelance run: `hack_plan` leaves the order.
+#[test]
+fn test_hack_plan_keeps_a_pending_order() {
+    let mut w = dole_world();
+    for g in w.gang_list().to_vec() {
+        if let Some(n) = w.hideout_of(g).and_then(|h| virt::node_of_building(&w, h)) {
+            w.virt.node_mut(n).expect("node").store.units[0] = 200;
+        }
+    }
+    let a = adult(&mut w, &[]);
+    arm(&mut w, a, 2, 0.9);
+    assert!(virt::best_target(&w, a, None).is_some(), "a freelance run is on offer");
+    let lab = lab_of(&w, corp_named(&w, "Militech"), Track::Deck);
+    let n = virt::node_of_building(&w, lab).expect("node");
+    let now = w.tick;
+    let pending = RunOrder {
+        patron: None,
+        purpose: Purpose::Door,
+        target: n,
+        chair: w.buildings_of_kind(BuildingKind::Bar)[0],
+        not_before: now + 10 * TICKS_PER_HOUR,
+        expires: now + TICKS_PER_DAY,
+        why: RunWhy::Prelude,
+        mode: RunMode::Quiet,
+    };
+    w.run_orders.insert(a, pending.clone());
+    assert!(virt::standing_order(&w, a).is_none(), "not due yet");
+    let _ = virt::hack_plan(&mut w, a);
+    assert_eq!(w.run_orders.get(&a), Some(&pending), "the pending order stands");
+    // A stale freelance order is still replaced.
+    let mut stale = pending.clone();
+    stale.why = RunWhy::Freelance;
+    w.run_orders.insert(a, stale.clone());
+    assert!(virt::hack_plan(&mut w, a).is_some());
+    let got = w.run_orders.get(&a).expect("order");
+    assert_eq!(got.why, RunWhy::Freelance);
+    assert_ne!(got, &stale, "a fresh freelance order");
+}
+
+/// Review 5: an Overwatch run that ends any way (here a dump) clears its
+/// gang's `stream_by`, and so does an Overwatch order that lapses untaken.
+#[test]
+fn test_stream_by_cleared_on_dump_and_expiry() {
+    let mut w = dole_world();
+    let gang = w.gang_list()[0];
+    let hideout = w.hideout_of(gang).expect("hideout");
+    let node = virt::node_of_building(&w, hideout).expect("node");
+    let a = adult(&mut w, &[]);
+    citysim::systems::gang::enlist(&mut w, a, gang);
+    arm(&mut w, a, 1, 0.5);
+    seat(&mut w, a, hideout);
+    order(&mut w, a, hideout, node, Purpose::Overwatch(gang), RunWhy::Overwatch);
+    w.comp_mut::<Gang>(gang).expect("gang").stream_by = Some(a);
+    virt::start_run(&mut w, a).expect("run");
+    virt::dump(&mut w, a, "test");
+    assert_eq!(w.comp::<Gang>(gang).and_then(|g| g.stream_by), None, "dumped");
+    // An order never taken up, lapsing at midnight.
+    let b = adult(&mut w, &[a]);
+    citysim::systems::gang::enlist(&mut w, b, gang);
+    let now = w.tick;
+    order(&mut w, b, hideout, node, Purpose::Overwatch(gang), RunWhy::Overwatch);
+    w.run_orders.get_mut(&b).expect("order").expires = now + 5;
+    w.comp_mut::<Gang>(gang).expect("gang").stream_by = Some(b);
+    w.tick = (now / TICKS_PER_DAY + 1) * TICKS_PER_DAY;
+    tech::run(&mut w);
+    assert!(!w.run_orders.contains_key(&b));
+    assert_eq!(w.comp::<Gang>(gang).and_then(|g| g.stream_by), None, "lapsed");
+}
+
+/// Review 10: when only a tier below `RAID_DECK_TIER` fits above the fleet
+/// reserve, `corp_virt_raid` buys nothing and gives no order.
+#[test]
+fn test_corp_virt_raid_buys_no_lower_tier_deck() {
+    let mut w = dole_world();
+    // Arasaka's Deck Lab, staffed by one Researcher, against Militech's
+    // Deck Lab holding Data (the rival `corp_run` reads).
+    let arasaka = corp_named(&w, "Arasaka");
+    let lab = lab_of(&w, arasaka, Track::Deck);
+    for c in w.corps() {
+        if let Some(cc) = w.comp_mut::<Corp>(c) {
+            cc.tech.focus = Track::Deck;
+        }
+    }
+    let r = adult(&mut w, &[]);
+    demography::hire(&mut w, r, lab, Role::Researcher);
+    let run = virt::corp_run(&w, arasaka).expect("a corp run");
+    assert!(run.deck.is_none(), "no fleet deck at the Lab yet");
+    // The purse: the reserve plus the cheapest tier-1 deck, short of any tier 2.
+    let from = w.comp::<Building>(lab).expect("lab").door;
+    let (_, _, p1) = virt::deck_offer(&w, from, i64::MAX / 4, 1).expect("a tier-1 deck on sale");
+    let (_, t2, p2) = virt::deck_offer(&w, from, i64::MAX / 4, 2).expect("a deck on sale");
+    assert!(t2 == 2 && p2 > p1, "tier 2 dearer: {p1} vs {p2}");
+    let reserve = corps::fleet_reserve(&w, arasaka);
+    w.comp_mut::<Corp>(arasaka).expect("corp").treasury = reserve + p1;
+    assert_eq!(virt::deck_offer(&w, from, p1, 2).map(|(_, t, _)| t), Some(1), "only tier 1 fits");
+    let decks = virt::decks_owned(&w);
+    virt::corp_virt_raid(&mut w, arasaka);
+    assert_eq!(virt::decks_owned(&w), decks, "no deck bought");
+    assert!(!w.run_orders.contains_key(&run.runner), "no order");
+}
+
+/// Review 16: a gang whose node traced a rival gang's runner (`hacked_by`)
+/// and whose best runner can reach the rival's Hideout store holds a
+/// grudge: VirtRaid's flat gains `order_flat.virt_grudge`, and under the
+/// order the wipe goes out first, ahead of a richer steal.
+#[test]
+fn test_hack_grudge_lifts_virtraid_and_orders_the_wipe_first() {
+    use citysim::systems::faction::OrderInputs;
+    let mut w = dole_world();
+    let gangs = w.gang_list().to_vec();
+    let (gang, rival) = (gangs[0], gangs[1]);
+    let rival_node = w.hideout_of(rival).and_then(|h| virt::node_of_building(&w, h)).expect("rival node");
+    w.virt.node_mut(rival_node).expect("node").store.units = [0, 40, 0];
+    // A richer steal elsewhere: Zetatech's Chrome Lab with 600 units.
+    let lab = lab_of(&w, corp_named(&w, "Zetatech"), Track::Chrome);
+    let lab_node = virt::node_of_building(&w, lab).expect("node");
+    w.virt.node_mut(lab_node).expect("node").store.units = [600, 0, 0];
+    let r = adult(&mut w, &[]);
+    citysim::systems::gang::enlist(&mut w, r, gang);
+    arm(&mut w, r, 2, 0.6);
+    virt::bump_epoch(&mut w);
+    assert!(!virt::gang_virt_inputs(&w, gang, None).grudge, "no grudge yet");
+    let now = w.tick;
+    w.comp_mut::<Gang>(gang).expect("gang").hacked_by = Some((rival, now));
+    let i = faction::gather_inputs(&w, gang).expect("inputs");
+    assert!(i.hacked && i.virt_grudge, "{i:?}");
+    let cfg = w.config.gangs.clone();
+    let score = |i: &OrderInputs| {
+        faction::score_orders(i, &cfg)
+            .into_iter()
+            .find(|s| s.order == Order::VirtRaid)
+            .map(|s| s.score)
+            .expect("VirtRaid scored")
+    };
+    let calm = OrderInputs { virt_grudge: false, ..i.clone() };
+    let lift = score(&i) - score(&calm);
+    assert!(lift > 0.0 && (lift - cfg.order_flat.virt_grudge).abs() < 1e-6, "lift {lift}");
+    w.comp_mut::<Gang>(gang).expect("gang").order = Order::VirtRaid;
+    virt::gang_daily(&mut w, gang);
+    let o = w.run_orders.get(&r).expect("an order");
+    assert_eq!((o.purpose, o.target), (Purpose::Data { wipe: true }, rival_node), "the wipe first");
 }

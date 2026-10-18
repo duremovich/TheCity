@@ -3,13 +3,16 @@
 //! HangOut's spot scoring, the Statistical evening, fronts and the leader's
 //! Collect, and the keyed streams.
 
+mod common;
+
 use citysim::exec::actions;
 use citysim::goap::ActionKind;
 use citysim::systems::{demography, leisure, lod, ownership};
 use citysim::{
     Brain, Building, BuildingKind, Config, EntityId, Gang, Household, Job, Lod, Needs, Personality, Position, Role,
-    Wallet, World, TICKS_PER_DAY,
+    World, TICKS_PER_DAY,
 };
+use common::{coins, day_workers, jobless_housed, set_coins};
 use rand::Rng;
 
 fn standing(w: &World, kind: BuildingKind) -> Vec<EntityId> {
@@ -34,14 +37,6 @@ fn civilian(w: &World, skip: &[EntityId]) -> EntityId {
                 && citysim::systems::classes::class_of(w, a) == citysim::Class::Street
         })
         .expect("a civilian")
-}
-
-fn set_coins(w: &mut World, id: EntityId, c: i64) {
-    w.comp_mut::<Wallet>(id).expect("wallet").coins = c;
-}
-
-fn coins(w: &World, id: EntityId) -> i64 {
-    w.comp::<Wallet>(id).map_or(0, |x| x.coins)
 }
 
 /// § 1: an Enjoy charges the venue's price at start; coins are conserved
@@ -664,4 +659,116 @@ fn test_learned_evening_skips_closed_venues() {
     }
     let left = leisure::evening_kinds(&w, a);
     assert!(left.is_empty(), "a shut venue on the evening: {left:?}");
+}
+
+// ---------------------------------------------------------------------------
+// Shadow V4 bugs 2, 17 and 18 (docs/SHADOW_V4.md): a day worker's night, the
+// doze's cap, the pit's card going round, no leisure at one's own venue.
+// ---------------------------------------------------------------------------
+
+/// Bug 2 (Unwind): at 03:00 a day worker's leisure is not "off hours" (it
+/// is at 20:00): woken at 23:30 it stood on a corner in the small hours.
+#[test]
+fn test_bug2_day_worker_night_is_not_off_hours() {
+    let mut w = common::world();
+    let day = 3 * TICKS_PER_DAY;
+    let off = |w: &World, a: EntityId| {
+        leisure::considerations(w, a)
+            .and_then(|(cs, _)| cs.into_iter().find(|c| c.name == "off hours"))
+            .map(|c| c.input)
+    };
+    w.tick = day + 20 * 60;
+    let mut checked = 0;
+    for a in day_workers(&w) {
+        if let Some(n) = w.comp_mut::<Needs>(a) {
+            n.fun = 0.1;
+            n.hunger = 1.0;
+            n.energy = 1.0;
+        }
+        w.tick = day + 20 * 60;
+        if off(&w, a) != Some(1.0) {
+            continue;
+        }
+        w.tick = day + 3 * 60;
+        assert!(citysim::exec::routine::day_worker_night(&w, a));
+        assert_eq!(off(&w, a), None, "03:00 is no day worker's leisure hour");
+        checked += 1;
+        if checked == 5 {
+            break;
+        }
+    }
+    assert!(checked > 0, "a day worker with a pick at 20:00");
+}
+
+/// Bug 2 (Rest): a doze restores energy only up to `rest_energy_cap`
+/// (+0.1 a Rest outran the decay, so a Rest loop never slept).
+#[test]
+fn test_bug2_rest_restores_only_to_the_cap() {
+    let mut w = common::world();
+    let a = *day_workers(&w).first().expect("an agent");
+    let cap = w.config.life.rest_energy_cap;
+    let rest = |w: &mut World, e: f32| {
+        w.comp_mut::<Needs>(a).expect("needs").energy = e;
+        let now = w.tick;
+        actions::on_complete(w, a, ActionKind::Rest, None, now, now);
+        w.comp::<Needs>(a).expect("needs").energy
+    };
+    assert!((rest(&mut w, 0.85) - 0.85).abs() < 1e-6, "no gain above the cap");
+    assert!((rest(&mut w, 0.3) - 0.4).abs() < 1e-6, "the tired still doze");
+    assert!((rest(&mut w, cap - 0.05) - cap).abs() < 1e-6, "up to the cap");
+}
+
+/// Bug 17: a pit's bouts go round its fighters (longest since the last
+/// bout first), not the same two fittest every night.
+#[test]
+fn test_bug17_bouts_go_round_the_fighters() {
+    let mut w = common::world();
+    let pit = w.buildings_of_kind(BuildingKind::FightPit)[0];
+    // The pit's own Fighters off the card; three of ours on it, all day.
+    for f in w.staff_of(pit).to_vec() {
+        if let Some(j) = w.comp_mut::<Job>(f) {
+            j.shifts = vec![];
+        }
+    }
+    let crew: Vec<EntityId> = jobless_housed(&w).into_iter().take(3).collect();
+    for (i, &f) in crew.iter().enumerate() {
+        demography::hire(&mut w, f, pit, Role::Fighter);
+        w.comp_mut::<Job>(f).expect("job").shifts = vec![(0, 1440)];
+        w.comp_mut::<citysim::Skills>(f).expect("s").fighting = [0.9, 0.8, 0.1][i];
+        lod::set_lod(&mut w, f, Lod::Statistical);
+    }
+    let mut fought = std::collections::BTreeSet::new();
+    for d in 1..=7 {
+        w.tick = d * TICKS_PER_DAY + 22 * 60;
+        let before = w.events.len();
+        leisure::bouts(&mut w);
+        for e in w.events.iter().skip(before).filter(|e| e.kind == citysim::EventKind::Bout) {
+            fought.extend(e.actors.iter().take(2).copied());
+        }
+    }
+    assert!(fought.contains(&crew[2]), "the weakest fighter gets a bout in a week");
+}
+
+/// Bug 18: a venue's staff do not take their leisure at their own venue
+/// (then wait there up to 10 h for the shift).
+#[test]
+fn test_bug18_no_leisure_at_ones_own_venue() {
+    let mut w = common::world();
+    let mut checked = 0;
+    for kind in [BuildingKind::Brothel, BuildingKind::FightPit, BuildingKind::Lounge] {
+        for &b in w.buildings_of_kind(kind).to_vec().iter() {
+            let Some(&s) = w.staff_of(b).first() else { continue };
+            w.leave_building(s);
+            w.enter_building(s, b);
+            set_coins(&mut w, s, 2000);
+            if let Some(n) = w.comp_mut::<Needs>(s) {
+                n.fun = 0.05;
+                n.hunger = 1.0;
+            }
+            let pick = leisure::choice(&w, s, false);
+            assert!(pick.is_none_or(|p| p.venue != Some(b)), "{kind:?} staff unwinds at its own venue");
+            checked += 1;
+        }
+    }
+    assert!(checked > 0, "a venue with staff");
 }

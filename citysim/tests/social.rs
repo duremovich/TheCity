@@ -1,5 +1,7 @@
 //! M5: social graph, gangs, gossip.
 
+mod common;
+
 use citysim::systems::{gang, law, social};
 use citysim::{
     Brain, BuildingKind, Config, Crime, Gang, GangMember, Memory, MemoryKind, Needs, Personality, RelKind, Wallet,
@@ -223,4 +225,22 @@ fn test_indices_rebuilt_on_load() {
     assert_eq!(loaded.spouses, w.spouses);
     assert_eq!(loaded.enemies, w.enemies);
     assert!(!loaded.spouses.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Shadow V4 batch 3 (docs/SHADOW_V4.md): a wronged spouse survives a load.
+// ---------------------------------------------------------------------------
+
+/// Found under batch 3 (a save that diverged): a spouse turned on stays a
+/// spouse in the edge as in `World::spouses`, so a loaded world rebuilds
+/// the same marriage the running one holds.
+#[test]
+fn test_wronged_spouse_index_survives_a_load() {
+    let mut w = common::world();
+    let (a, s) = w.citizens().into_iter().find_map(|x| w.spouse_of(x).map(|s| (x, s))).expect("a married pair");
+    social::robbed_by(&mut w, a, s);
+    assert_eq!(w.spouse_of(a), Some(s), "still married in the running world");
+    let back = citysim::save::from_ron(&citysim::save::to_ron(&w)).expect("loads");
+    assert_eq!(back.spouse_of(a), Some(s), "and in the loaded one");
+    assert!(w.edge(a, s).is_some_and(|e| e.affinity < 0.0), "the wrong is felt");
 }

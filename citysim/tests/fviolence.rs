@@ -5,19 +5,18 @@
 //! its members (or nobody). Everything here is counters, seeded dice rolls
 //! and hole records between fictional agents of a simulated city.
 
+mod common;
+
 use citysim::ledger::{ActiveSource, VictimClass, ViolenceSource};
-use citysim::systems::{bind, demography, fviolence, law, lod};
+use citysim::systems::{bind, demography, fixes, fviolence, law, lod};
 use citysim::{
     ActionInstance, ActionKind, Bound, Brain, Config, DeathCause, DistrictId, EntityId, Gang, GoalKind, Hole, HoleKind,
     Household, Lod, Order, Personality, Plan, PlayerCommand, Position, World, TICKS_PER_HOUR,
 };
+use common::civilians;
 
 fn world(seed: u64) -> World {
     World::new(seed, Config::load().dole_city().scaled_to(300))
-}
-
-fn adults(w: &World) -> Vec<EntityId> {
-    w.citizens().into_iter().filter(|&a| law::living(w, a) && demography::is_adult(w, a)).collect()
 }
 
 /// The first gang, eight civilians enlisted in it, and one of them.
@@ -29,14 +28,6 @@ fn gang_and_member(w: &mut World) -> (EntityId, EntityId) {
     }
     let m = w.comp::<Gang>(g).and_then(|x| x.members.first().copied()).expect("a member");
     (g, m)
-}
-
-/// A free civilian adult (no gang, no guard's job), not `but`.
-fn civilians(w: &World) -> Vec<EntityId> {
-    adults(w)
-        .into_iter()
-        .filter(|&a| w.gang_of(a).is_none() && !law::is_guard(w, a) && !w.has::<citysim::Sentence>(a))
-        .collect()
 }
 
 fn killed_total(w: &World) -> u32 {
@@ -400,4 +391,218 @@ fn test_yesterdays_pass_hole_does_not_shield_today() {
     let robbed: Vec<EntityId> =
         w.holes.values().filter(|h| h.source.is_some() && h.victim == first[0]).map(|h| h.victim).collect();
     assert_eq!(robbed.len(), 2, "the first victim, lowest id, is robbed again the next midnight");
+}
+
+// ---------------------------------------------------------------------------
+// The V3 violence fixes (2026-10-09, `[life] violence_fixes`): the ledger's
+// Street class, and short sources rolled for their live hours.
+// ---------------------------------------------------------------------------
+
+/// `world(seed)` with the fixes asserted on (the shipped config).
+fn fixes_world(seed: u64) -> World {
+    let w = world(seed);
+    assert!(fixes::violence_on(&w), "[life] violence_fixes on in the shipped config");
+    w
+}
+
+fn housed(w: &World, a: EntityId) -> bool {
+    w.comp::<Household>(a).is_some_and(|h| h.home.is_some())
+}
+
+fn unhome(w: &mut World, a: EntityId) {
+    w.comp_mut::<Household>(a).expect("household").home = None;
+}
+
+#[test]
+fn test_street_class_is_the_homeless_civilian_only_with_the_fix() {
+    let mut w = fixes_world(42);
+    let civ: Vec<EntityId> = civilians(&w).into_iter().filter(|&a| housed(&w, a)).collect();
+    let (a, b) = (civ[0], civ[1]);
+    assert_eq!(fviolence::victim_class(&w, a), VictimClass::Civilian, "housed: Civilian");
+    unhome(&mut w, b);
+    assert_eq!(fviolence::victim_class(&w, b), VictimClass::Street, "no Home: Street");
+    // A homeless gang member stays a Member.
+    let g = w.gangs()[0];
+    citysim::systems::gang::enlist(&mut w, b, g);
+    assert_eq!(fviolence::victim_class(&w, b), VictimClass::Member);
+    // Fix off: the homeless are Civilians again (the 644eb10 ledger).
+    let c = civ[2];
+    unhome(&mut w, c);
+    w.config.life.violence_fixes = false;
+    assert_eq!(fviolence::victim_class(&w, c), VictimClass::Civilian);
+    w.config.life.violence_fixes = true;
+    w.config.life.vf_street_class = false;
+    assert_eq!(fviolence::victim_class(&w, c), VictimClass::Civilian, "the sub-switch alone");
+}
+
+#[test]
+fn test_evictee_killing_is_learned_as_street_not_civilian() {
+    let mut w = fixes_world(42);
+    w.run_ticks(TICKS_PER_HOUR + 1);
+    let g = w.gangs()[0];
+    let recruits: Vec<EntityId> = civilians(&w).into_iter().rev().take(8).collect();
+    for &m in &recruits {
+        citysim::systems::gang::enlist(&mut w, m, g);
+    }
+    let m = w.comp::<Gang>(g).and_then(|x| x.members.first().copied()).expect("a member");
+    w.comp_mut::<Gang>(g).expect("gang").order = Order::Contest;
+    if let Some(p) = w.comp_mut::<Personality>(m) {
+        p.loyalty = 1.0;
+    }
+    let now = w.tick;
+    let br = w.comp_mut::<Brain>(m).expect("brain");
+    br.plan = Some(Plan {
+        goal: GoalKind::GangWork,
+        target: None,
+        steps: vec![ActionInstance { action: ActionKind::Extort, target: None, tile: None }],
+        started_tick: now,
+    });
+    br.plan_step = 0;
+    let v = civilians(&w).into_iter().find(|&a| housed(&w, a)).expect("a civilian");
+    unhome(&mut w, v);
+    for a in [m, v] {
+        lod::set_lod(&mut w, a, Lod::Coarse);
+    }
+    let d = w.district_of(w.comp::<Position>(v).expect("pos").tile);
+    w.kill_by(v, DeathCause::Violence, Some(m));
+    let key = |c| (ViolenceSource::Order(Order::Contest), d, c);
+    let street = w.order_rates.cells.get(&key(VictimClass::Street)).map(|c| c.victims_today[0]);
+    let civ = w.order_rates.cells.get(&key(VictimClass::Civilian)).map_or(0, |c| c.victims_today[0]);
+    assert_eq!(street, Some(1), "the evictee's death is the Street cell's");
+    assert_eq!(civ, 0, "and never the housed civilians'");
+    // The parity tallies still count it as a civilian victim.
+    assert_eq!(w.fv_tally.body_civ_victims, 1);
+}
+
+#[test]
+fn test_street_prior_is_the_civilian_prior_times_the_mult() {
+    let mut w = fixes_world(43);
+    w.order_rates.cells.clear();
+    w.config.fviolence.fv_mult = 1.0;
+    w.config.life.vf_street_prior_mult = 3.0;
+    let s = ViolenceSource::Order(Order::Contest);
+    let civ = fviolence::cell_rates(&w, s, DistrictId(2), VictimClass::Civilian);
+    let street = fviolence::cell_rates(&w, s, DistrictId(2), VictimClass::Street);
+    for k in 0..4 {
+        assert!((street[k] - 3.0 * civ[k]).abs() < 1e-7, "kind {k}: {} vs 3 x {}", street[k], civ[k]);
+    }
+    assert!(street[0] > 0.0);
+}
+
+#[test]
+fn test_street_rates_are_not_applied_to_the_housed() {
+    let run = |fix: bool| {
+        let mut w = fixes_world(44);
+        w.run_ticks(TICKS_PER_HOUR + 1);
+        let g = w.gangs()[0];
+        let d = stat_district(&w);
+        w.push_command(PlayerCommand::FactionStrike { gang: g, district: d, days: 3 });
+        w.run_ticks(1);
+        w.config.life.violence_fixes = fix;
+        // No prior: only what the ledger learned acts.
+        w.config.fviolence.prior.order = [0.0; 4];
+        w.config.fviolence.fv_mult = 1.0;
+        w.config.fviolence.day_cap.killed = 10_000;
+        // The ledger learned a deadly street: the evictees' cell (Street with
+        // the fix, Civilian without) full of killings.
+        let class = if fix { VictimClass::Street } else { VictimClass::Civilian };
+        let cell = w.order_rates.cell_mut((ViolenceSource::Order(Order::Contest), d, class));
+        cell.victims_today = [500, 0, 0, 0];
+        cell.exposure_today = 24 * 500;
+        cell.roll(14);
+        fviolence::daily(&mut w);
+        // The hole keeps the victim's Home at the killing (the dead are unlinked).
+        let killed: Vec<bool> = w
+            .holes
+            .values()
+            .filter(|h| h.kind == HoleKind::Killed && h.source.is_some())
+            .map(|h| h.home.is_some())
+            .collect();
+        (killed.len(), killed.iter().filter(|&&h| h).count())
+    };
+    let (off_all, off_housed) = run(false);
+    assert!(off_housed > 10, "without the fix the evictees' rate kills the housed ({off_housed} of {off_all})");
+    let (_, on_housed) = run(true);
+    assert_eq!(on_housed, 0, "with the fix no housed civilian reads the Street cell");
+}
+
+#[test]
+fn test_live_share_is_hours_over_24() {
+    let s = ActiveSource {
+        source: ViolenceSource::Riot,
+        district: DistrictId(1),
+        faction: None,
+        riot: Some(7),
+        episode: None,
+    };
+    let other = ActiveSource { riot: Some(8), ..s };
+    assert!((fviolence::live_share(&[(s, 6)], &s) - 0.25).abs() < 1e-7);
+    assert!((fviolence::live_share(&[(s, 6)], &other) - 1.0 / 24.0).abs() < 1e-7, "untallied: one hour");
+    assert!((fviolence::live_share(&[(s, 30)], &s) - 1.0).abs() < 1e-7, "at most a day");
+}
+
+/// A riot live at `hours` hourly tallies in the biggest Statistical
+/// district, a Killed riot prior of 0.9 and no cap: the Statistical
+/// adults the midnight pass kills.
+fn riot_kills(fix: bool, hours: u32) -> (u32, u32) {
+    use citysim::{Riot, RiotResponse, RiotTarget};
+    let mut w = fixes_world(48);
+    w.config.life.violence_fixes = fix;
+    w.run_ticks(citysim::TICKS_PER_DAY + 6 * TICKS_PER_HOUR);
+    let d = stat_district(&w);
+    let rioters: Vec<EntityId> = civilians(&w)
+        .into_iter()
+        .filter(|&a| w.comp::<Brain>(a).is_some_and(|b| b.lod != Lod::Statistical))
+        .take(10)
+        .collect();
+    let jail = w.buildings_of_kind(citysim::BuildingKind::Jail)[0];
+    w.riots.push(Riot {
+        id: 91,
+        district: d,
+        target: jail,
+        kind: RiotTarget::Precinct,
+        muster: jail,
+        muster_at: w.tick,
+        rioters: rioters.clone(),
+        response: RiotResponse::Contain,
+        started: w.tick,
+        departed: None,
+    });
+    for &r in &rioters {
+        w.rioter_of.insert(r, 91);
+    }
+    for _ in 0..hours {
+        fviolence::tally_exposure(&mut w);
+    }
+    let tallied = w.fv_tally.source_hours.iter().find(|(s, _)| s.riot == Some(91)).map_or(0, |&(_, h)| h);
+    w.riots.clear();
+    for r in &rioters {
+        w.rioter_of.remove(r);
+    }
+    w.config.fviolence.prior = Default::default();
+    w.config.fviolence.prior.order = [0.0; 4];
+    w.config.fviolence.prior.vendetta = [0.0; 4];
+    w.config.fviolence.prior.episode = [0.0; 4];
+    w.config.fviolence.prior.riot = [0.9, 0.0, 0.0, 0.0];
+    w.config.fviolence.prior_weight = 1e6;
+    w.config.fviolence.fv_mult = 1.0;
+    w.config.fviolence.class_mult = citysim::config::FvClassCfg::default();
+    w.config.fviolence.day_cap.killed = 10_000;
+    fviolence::daily(&mut w);
+    assert!(w.fv_tally.source_hours.is_empty(), "the day's hours are cleared");
+    (w.stats.current.living.fv_killed, tallied)
+}
+
+#[test]
+fn test_short_riot_rolls_its_hours_not_a_day() {
+    let (off, off_hours) = riot_kills(false, 6);
+    assert_eq!(off_hours, 0, "the fix off tallies no hours");
+    let (on6, on_hours) = riot_kills(true, 6);
+    assert_eq!(on_hours, 6, "six hourly tallies");
+    let (on24, _) = riot_kills(true, 24);
+    assert!(off > 15, "a full day's 0.9 kills many ({off})");
+    // A 24-hour riot is the old full day (same rolls).
+    assert_eq!(on24, off, "a day-long riot rolls as before");
+    // A 6-hour riot: a quarter of the rate (0.225 vs 0.9): well under half.
+    assert!(on6 * 2 < off && on6 > 0, "six hours {on6} vs a day {off}");
 }

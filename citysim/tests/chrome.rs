@@ -3,6 +3,8 @@
 //! Therapy, Strip, Rip, the Harvest order, the Abducted hole and the
 //! Statistical multipliers.
 
+mod common;
+
 use rand::Rng;
 
 use citysim::systems::faction::{self, OrderInputs};
@@ -12,6 +14,7 @@ use citysim::{
     Asset, AssetKind, AssetLoc, Body, Brain, BuildingKind, Config, Corp, DeathCause, EntityId, EventKind, Gang, Job,
     Kit, Lod, Memory, MemoryKind, Order, Personality, Position, Role, ShopPick, Skills, Slot, TilePos, Wallet, World,
 };
+use common::{civilians, coins, set_coins};
 
 /// Living adults with a Brain and a Wallet, ascending.
 fn adults(w: &World) -> Vec<EntityId> {
@@ -23,14 +26,6 @@ fn adults(w: &World) -> Vec<EntityId> {
 
 fn small() -> World {
     World::new(42, Config::load().dole_city().scaled_to(300))
-}
-
-fn coins(w: &World, a: EntityId) -> i64 {
-    w.comp::<Wallet>(a).map_or(0, |x| x.coins)
-}
-
-fn set_coins(w: &mut World, a: EntityId, c: i64) {
-    w.comp_mut::<Wallet>(a).expect("wallet").coins = c;
 }
 
 fn asset(w: &World, a: EntityId) -> &Asset {
@@ -606,4 +601,103 @@ fn test_episode_near_on_duty_guard_ended_by_law() {
                 && e.actors.get(1) == Some(&guard)
         });
     assert!(by_law || died_on_guard, "ended by the law (cuffed or killed), not spent");
+}
+
+// ---------------------------------------------------------------------------
+// The V3 violence fixes (2026-10-09, `[life] violence_fixes`), fix 3: the
+// chrome humanity cap.
+// ---------------------------------------------------------------------------
+
+fn housed(w: &World, a: EntityId) -> bool {
+    w.comp::<citysim::Household>(a).is_some_and(|h| h.home.is_some())
+}
+
+fn grant(w: &mut World, a: EntityId, slot: Slot, tier: u8) {
+    assets::grant(w, a, AssetKind::Implant(slot), tier).expect("chrome");
+}
+
+#[test]
+fn test_chrome_max_tier_keeps_target_sanity_over_psycho() {
+    let mut w = small();
+    assert!((w.config.chrome.psycho - 0.8).abs() < 1e-6, "the shipped psycho line");
+    let civ: Vec<EntityId> = civilians(&w).into_iter().filter(|&a| !w.has::<Job>(a)).collect();
+    let (a, b, c) = (civ[0], civ[1], civ[2]);
+    assert_eq!(assets::chrome_max_tier(&w, a), 2, "a bare body: T2 (0.15) fits under 0.2, T3 (0.25) does not");
+    grant(&mut w, b, Slot::Legs, 1);
+    assert_eq!(assets::chrome_max_tier(&w, b), 1, "after a T1 (0.08): another T1 only");
+    grant(&mut w, b, Slot::Eyes, 1);
+    assert!((w.comp::<Kit>(b).expect("kit").load - 0.16).abs() < 1e-6);
+    assert_eq!(assets::chrome_max_tier(&w, b), 0, "two T1s: the third would cross 0.8");
+    grant(&mut w, c, Slot::Legs, 2);
+    assert_eq!(assets::chrome_max_tier(&w, c), 0, "a T2 (0.15): nothing more");
+    // A gang member is not capped.
+    let g = w.gangs()[0];
+    gang::enlist(&mut w, b, g);
+    assert_eq!(assets::chrome_max_tier(&w, b), 3, "a gang member buys past the line");
+    // Fix off: no cap.
+    w.config.life.violence_fixes = false;
+    assert_eq!(assets::chrome_max_tier(&w, c), 3);
+}
+
+#[test]
+fn test_courage_alone_no_longer_unlocks_the_fighter_list() {
+    let mut w = small();
+    let civ: Vec<EntityId> = civilians(&w).into_iter().filter(|&a| !w.has::<Job>(a)).collect();
+    let a = civ[0];
+    w.comp_mut::<Personality>(a).expect("personality").courage = 0.95;
+    assert_eq!(assets::chrome_slot(&w, a), Some(Slot::Legs), "a brave civilian: the civilian list");
+    w.config.life.violence_fixes = false;
+    assert_eq!(assets::chrome_slot(&w, a), Some(Slot::Arms), "fix off: courage unlocked the five slots");
+    w.config.life.violence_fixes = true;
+    // A pit Fighter (by role) gets the five-slot list.
+    let worker = common::adults(&w)
+        .into_iter()
+        .find(|&x| w.comp::<Job>(x).is_some_and(|j| j.role != Role::Guard) && w.gang_of(x).is_none())
+        .expect("a worker");
+    w.comp_mut::<Personality>(worker).expect("personality").courage = 0.1;
+    w.comp_mut::<Job>(worker).expect("job").role = Role::Fighter;
+    assert_eq!(assets::chrome_slot(&w, worker), Some(Slot::Arms), "a Fighter: the fighter list");
+    assert_eq!(assets::chrome_max_tier(&w, worker), 3, "and no cap");
+}
+
+#[test]
+fn test_capped_civilian_gets_no_chrome_offer() {
+    let offers = |fix: bool| {
+        let mut w = small();
+        w.config.life.violence_fixes = fix;
+        w.tick = 600;
+        let civ: Vec<EntityId> = civilians(&w)
+            .into_iter()
+            .filter(|&a| {
+                w.comp::<Job>(a).is_some_and(|j| j.role != Role::Fighter)
+                    && housed(&w, a)
+                    && w.comp::<Brain>(a).is_some()
+            })
+            .take(40)
+            .collect();
+        let mut chrome = 0;
+        for a in civ {
+            // A T2 Legs (load 0.15), a car and money: the Eyes would be the next buy.
+            grant(&mut w, a, Slot::Legs, 2);
+            assets::grant(&mut w, a, AssetKind::Car, 1).expect("car");
+            w.comp_mut::<Wallet>(a).expect("wallet").coins = 100_000;
+            // A wage that carries the upkeep (the burden room).
+            w.comp_mut::<Job>(a).expect("job").wage_per_day = 1_000;
+            // Timid: the civilian list either way (the cap alone is tested).
+            w.comp_mut::<Personality>(a).expect("personality").courage = 0.3;
+            if let Some(n) = w.comp_mut::<citysim::Needs>(a) {
+                n.wealth = 0.0;
+            }
+            if let Some(o) = assets::shop_choice(&w, a, false) {
+                if o.category == assets::ShopCategory::Chrome {
+                    assert_eq!(o.pick.kind, AssetKind::Implant(Slot::Eyes));
+                    chrome += 1;
+                }
+            }
+        }
+        chrome
+    };
+    let off = offers(false);
+    assert!(off > 0, "fix off: a T2 civilian still buys Eyes");
+    assert_eq!(offers(true), 0, "fix on: a T2 civilian is at the line");
 }

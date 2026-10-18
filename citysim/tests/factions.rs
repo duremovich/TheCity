@@ -1,11 +1,14 @@
 //! M8: factions. The brain's orders, claims and flips, the raid resolver.
 
+mod common;
+
 use citysim::systems::faction::{self, OrderInputs};
 use citysim::systems::gang;
 use citysim::{
     ActionKind, Brain, Building, BuildingKind, Claim, Config, EntityId, EventKind, Gang, LocationKey, Needs, Order,
     Personality, Shock, World,
 };
+use common::{jobless_housed, set_coins};
 
 fn world(seed: u64) -> World {
     World::new(seed, Config::load().dole_city().v1_profile())
@@ -1330,4 +1333,108 @@ fn test_order_job_holds_until_settled_and_members_follow_expand() {
     assert!(!w.missions.contains_key(&id) && crew.iter().all(|m| !w.mission_of.contains_key(m)));
     gang::run(&mut w);
     assert_ne!(w.comp::<Gang>(g0).map(|g| g.order), Some(Order::Job), "rescored once the job settled");
+}
+
+// ---------------------------------------------------------------------------
+// Shadow V4 bugs 9 and 14 (docs/SHADOW_V4.md): the empty shakedown, the lone
+// raider, the stipend on the books.
+// ---------------------------------------------------------------------------
+
+/// Bug 9 (shakedowns): a Home whose occupants hold nothing gives nothing,
+/// and the empty-handed shakedown makes no Enemy, no WasRobbed memory, no
+/// claim and no Shakedown report; the extorter's Friend at home is not
+/// squeezed with the rest.
+#[test]
+fn test_bug9_empty_shakedown_leaves_no_mark_and_spares_a_friend() {
+    let mut w = world(45);
+    (w.config.moves.p_min, w.config.moves.p_max) = (1.0, 1.0);
+    let g0 = w.gangs()[0];
+    let a = w.citizens().into_iter().find(|&id| !w.has::<citysim::Job>(id) && w.has::<Brain>(id)).expect("a");
+    gang::enlist(&mut w, a, g0);
+    let own = w.comp::<citysim::Household>(a).and_then(|h| h.home);
+    let home = w
+        .buildings_of_kind(BuildingKind::Home)
+        .iter()
+        .copied()
+        .find(|&h| Some(h) != own && w.comp::<Building>(h).is_some_and(|b| b.occupants.len() >= 2))
+        .expect("an occupied home");
+    let occ: Vec<EntityId> = w.comp::<Building>(home).expect("b").occupants.to_vec();
+    for &o in &occ {
+        set_coins(&mut w, o, 0);
+    }
+    assert_eq!(gang::extort(&mut w, a, home), 0);
+    for &o in &occ {
+        assert!(w.edge(a, o).is_none_or(|e| e.kind != citysim::RelKind::Enemy), "no Enemy for nothing taken");
+        let robbed = w.comp::<citysim::Memory>(o).is_some_and(|m| {
+            m.entries.iter().any(|e| e.kind == citysim::MemoryKind::WasRobbed && e.subject == Some(a))
+        });
+        assert!(!robbed, "no WasRobbed for nothing taken");
+    }
+    assert!(w.comp::<Building>(home).expect("b").claim.is_none(), "no claim");
+    assert!(!w.crime_reports().iter().any(|r| r.suspect == a), "no Shakedown filed");
+    // A Friend at home keeps his coins; a stranger pays.
+    let (friend, stranger) = (occ[0], occ[1]);
+    set_coins(&mut w, friend, 50);
+    set_coins(&mut w, stranger, 50);
+    {
+        let e = w.edge_entry(a, friend);
+        e.kind = citysim::RelKind::Friend;
+        e.affinity = 0.8;
+    }
+    assert!(gang::extort(&mut w, a, home) > 0);
+    assert_eq!(w.comp::<citysim::Wallet>(friend).expect("w").coins, 50, "the Friend is spared");
+    assert!(w.comp::<citysim::Wallet>(stranger).expect("w").coins < 50, "the stranger pays");
+}
+
+/// Bug 9 (raids): one raider at the rival's door when the wait is over
+/// calls the raid off (1 against 6 after an 8-h march); three go in.
+#[test]
+fn test_bug9_lone_raider_calls_the_raid_off() {
+    let mut w = world(49);
+    w.config.crime.fight_death_p = 0.0;
+    // The shipped floor (the v1 city keeps M11's gang keys, 0).
+    w.config.gangs.raid_min_members = Config::load().gangs.raid_min_members;
+    assert_eq!(w.config.gangs.raid_min_members, 3);
+    let g0 = w.gangs()[0];
+    let crew: Vec<EntityId> =
+        w.citizens().into_iter().filter(|&id| !w.has::<citysim::Job>(id) && w.has::<Brain>(id)).take(3).collect();
+    for &m in &crew {
+        gang::enlist(&mut w, m, g0);
+    }
+    let mut full = w.clone();
+    let door = raid::rival_hideout_tile(&w, crew[0]).expect("a rival door");
+    stage_raider(&mut w, crew[0], door);
+    let now = w.tick;
+    w.comp_mut::<Gang>(g0).expect("g").raid_at = Some(now);
+    assert_eq!(raid::resolve(&mut w, crew[0]), None, "one raider goes home");
+    assert!(w.comp::<Gang>(g0).expect("g").raid_at.is_none(), "the raid is off");
+    assert!(w.events.iter().any(|e| e.kind == EventKind::Raid && e.text.contains("called off")));
+    for &m in &crew {
+        stage_raider(&mut full, m, door);
+    }
+    full.comp_mut::<Gang>(g0).expect("g").raid_at = Some(now);
+    assert!(raid::resolve(&mut full, crew[0]).is_some(), "three go in");
+}
+
+/// Bug 14: the gang's daily stipend is on the books (`Flow::Tribute`), not
+/// a bare wallet write the diaries read as a "daily pass".
+#[test]
+fn test_bug14_stipend_is_a_flow() {
+    let mut w = common::world();
+    let g = w.gangs()[0];
+    let pool = jobless_housed(&w);
+    for &m in &pool[..3] {
+        gang::enlist(&mut w, m, g);
+    }
+    {
+        let x = w.comp_mut::<Gang>(g).expect("g");
+        x.treasury = 1000;
+        x.tribute_week = 0;
+    }
+    let left = citysim::TICKS_PER_DAY - w.tick % citysim::TICKS_PER_DAY;
+    w.run_ticks(left + 1);
+    let row = w.stats.history.back().expect("a day row").clone();
+    let day_flows = row.living.flow_tribute + w.stats.current.living.flow_tribute;
+    let stipend = w.config.social.gang_stipend;
+    assert!(day_flows >= 3 * stipend, "the stipends ({stipend} x 3) on the books: {day_flows}");
 }

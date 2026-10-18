@@ -6,9 +6,12 @@
 //! and one mechanism, called directly with its chance forced where it is a
 //! roll (most fire rarely).
 
+mod common;
+
 use citysim::components::{Controller, Pitch, Stance};
 use citysim::systems::{econ, industry, streetwork};
 use citysim::{Brain, BuildingKind, Config, EntityId, EventKind, GoalKind, Job, Role, World, TICKS_PER_HOUR};
+use common::{jobless_housed, set_coins};
 
 fn world_with(f: impl FnOnce(&mut Config)) -> World {
     let mut c = Config::load();
@@ -46,10 +49,6 @@ fn jobless(w: &World) -> Vec<EntityId> {
                 && w.comp::<Brain>(a).is_some_and(|b| !b.emigrating)
         })
         .collect()
-}
-
-fn set_coins(w: &mut World, a: EntityId, c: i64) {
-    w.comp_mut::<citysim::Wallet>(a).expect("wallet").coins = c;
 }
 
 /// A vendor's Pitch for `a` at its home district's first spot (by hand).
@@ -443,4 +442,60 @@ fn test_save_round_trip_with_the_street() {
     w.run_ticks(3 * TICKS_PER_HOUR);
     back.run_ticks(3 * TICKS_PER_HOUR);
     assert_eq!(citysim::save::to_ron(&back), citysim::save::to_ron(&w));
+}
+
+// ---------------------------------------------------------------------------
+// Shadow V4 bug 6 (docs/SHADOW_V4.md): the elder's pitch at the nearest spot.
+// ---------------------------------------------------------------------------
+
+/// Bug 6 (the pitch): an elder opener with a rickshaw-puller's arms vends
+/// (3 of 4 street workers were 64-68), at the free spot of his district
+/// nearest his home (the first free one meant 47-168 min walks).
+#[test]
+fn test_bug6_elder_opens_a_vendor_pitch_at_the_nearest_spot() {
+    let mut w = world_with(|c| {
+        c.jobs2.p_pitch_open = 1.0;
+        c.jobs2.pitch_after_days = 0;
+        c.jobs2.pitches_per_district = 50;
+    });
+    // The HangOut spots (the pitches' sites) are laid out in the first day.
+    w.run_ticks(citysim::TICKS_PER_DAY);
+    let idle = jobless_housed(&w);
+    // No other opener (housed or not) holds the stake.
+    for a in w.citizens() {
+        if w.has::<citysim::Wallet>(a) && !w.has::<Job>(a) {
+            set_coins(&mut w, a, 0);
+        }
+    }
+    // One whose home district has spots (two or more free).
+    let used: Vec<citysim::TilePos> = w.jobs2.pitches.values().map(|p| p.spot).collect();
+    let a = *idle
+        .iter()
+        .find(|&&x| {
+            citysim::systems::contracts::home_door(&w, x).is_some_and(|h| {
+                w.spots
+                    .get(w.district_of(h).index())
+                    .is_some_and(|s| s.iter().filter(|t| !used.contains(&t.tile)).count() >= 2)
+            })
+        })
+        .expect("an opener with spots at home");
+    set_coins(&mut w, a, 50);
+    w.comp_mut::<citysim::Skills>(a).expect("skills").fighting = 0.95;
+    w.comp_mut::<citysim::Skills>(a).expect("skills").knowledge = 0.0;
+    let elder = (w.config.ages.frail_from_years + 6) * citysim::time::DAYS_PER_YEAR as u32;
+    w.comp_mut::<citysim::Identity>(a).expect("id").age_days = elder;
+    let home = citysim::systems::contracts::home_door(&w, a).expect("a home");
+    let d = w.district_of(home);
+    let nearest = w.spots[d.index()]
+        .iter()
+        .map(|x| x.tile)
+        .filter(|t| !used.contains(t))
+        .map(|t| t.manhattan(home))
+        .min()
+        .expect("a free spot");
+    streetwork::daily(&mut w);
+    let p = w.jobs2.pitches.get(&a).expect("the elder opened a pitch");
+    let kind = w.config.trade(p.trade).and_then(streetwork::pitch_kind);
+    assert_eq!(kind, Some(streetwork::PitchKind::Vendor), "an elder vends");
+    assert_eq!(p.spot.manhattan(home), nearest, "the free spot nearest home");
 }

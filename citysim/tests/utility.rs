@@ -1,10 +1,15 @@
 //! M2: response curves, goal selection, think scheduling, mood.
 
+mod common;
+
+use citysim::systems::life;
 use citysim::utility::curves::Curve;
 use citysim::utility::{self, compensate, goals, score_goal, Consideration};
 use citysim::{
-    Brain, Config, GoalKind, Job, Mood, Needs, Personality, Role, Wallet, World, TICKS_PER_DAY, TICKS_PER_HOUR,
+    Brain, Config, EntityId, GoalKind, Job, Mood, Needs, Personality, Role, Wallet, World, TICKS_PER_DAY,
+    TICKS_PER_HOUR,
 };
+use common::{beside, day_workers, free_adults, jobless_housed, set_coins};
 
 fn world(seed: u64) -> World {
     World::new(seed, Config::load().dole_city().v1_profile())
@@ -235,4 +240,118 @@ fn test_mood_in_range() {
     }
     let moved = w.citizens().into_iter().filter(|&id| w.comp::<Mood>(id).is_some_and(|m| m.value != 0.0)).count();
     assert!(moved > 250, "moods should move: {moved} of 300");
+}
+
+// ---------------------------------------------------------------------------
+// Shadow V4 bugs 1, 3 and 19 (docs/SHADOW_V4.md): Earn with a meal's coins,
+// the Fight goal's weights, the hungry worker's meal break.
+// ---------------------------------------------------------------------------
+
+/// Bug 1: with no dole, a jobless adult holding one meal's coins (not
+/// broke) still has Earn to plan (Beg, Scavenge); at `earn_meals_no_net`
+/// meals it is done; with a dole the old line (broke) stands.
+#[test]
+fn test_bug1_jobless_with_a_meal_still_earns_without_the_dole() {
+    let mut w = common::world();
+    w.levers.dole_per_day = 0;
+    let a = *jobless_housed(&w).first().expect("a jobless housed adult");
+    // The local Market's price (Earn's savings line's), at least a meal.
+    let m = w.local(a, citysim::BuildingKind::Market).expect("a market");
+    let price = w.price_for(m, a).max(life::meal_price(&w, a));
+    set_coins(&mut w, a, price + 1);
+    assert!(!life::broke(&w, a), "a meal's coins is not broke");
+    assert!(life::earn_short(&w, a));
+    assert!(!goals::already_satisfied(&w, a, GoalKind::Earn, false), "Earn is plannable with one meal's coins");
+    let line = w.config.life.earn_meals_no_net * price;
+    set_coins(&mut w, a, line);
+    assert!(!life::earn_short(&w, a), "days of food in hand: done");
+    // With a dole the short line is the broke line.
+    w.levers.dole_per_day = 3;
+    set_coins(&mut w, a, price + 1);
+    assert!(!life::earn_short(&w, a));
+}
+
+fn fight_score(w: &World, a: EntityId) -> Option<f32> {
+    goals::considerations(w, a, GoalKind::Fight, false)
+        .and_then(|(cs, flat)| score_goal(GoalKind::Fight, cs, None, 0.0, flat))
+        .map(|s| s.score)
+}
+
+/// Bug 3: a lawful, timid, unskilled victim of a robbery (Agathe: Fight
+/// 0.43 against ReportCrime 0.39) no longer goes for the robber; a lawless,
+/// brave, strong one still does; nobody fights a downed man or wakes to
+/// settle a grudge.
+#[test]
+fn test_bug3_fight_weighs_the_law_the_odds_and_the_body() {
+    let mut w = common::world();
+    let ad = free_adults(&w);
+    let (v, r) = (ad[0], ad[1]);
+    beside(&mut w, v, r);
+    {
+        let e = w.edge_entry(v, r);
+        e.kind = citysim::RelKind::Enemy;
+        e.affinity = -1.0;
+    }
+    w.remember(v, citysim::MemoryKind::WasRobbed, Some(r), 0.8, -0.8, false);
+    let set = |w: &mut World, courage: f32, lawfulness: f32, fighting: f32| {
+        let p = w.comp_mut::<Personality>(v).expect("pers");
+        p.courage = courage;
+        p.lawfulness = lawfulness;
+        w.comp_mut::<citysim::Skills>(v).expect("skills").fighting = fighting;
+        w.comp_mut::<Needs>(v).expect("needs").safety = 0.3;
+    };
+    w.comp_mut::<citysim::Skills>(r).expect("skills").fighting = 0.4;
+    set(&mut w, 0.25, 0.71, 0.15);
+    let timid = fight_score(&w, v).expect("Fight scored");
+    assert!(timid < 0.39, "the lawful, timid victim reports rather than fights: {timid}");
+    set(&mut w, 0.9, 0.1, 0.8);
+    let brave = fight_score(&w, v).expect("Fight scored");
+    assert!(brave > 0.39, "the lawless, brave, strong victim still fights: {brave}");
+    // Asleep: no Fight.
+    let now = w.tick;
+    w.comp_mut::<Brain>(v).expect("brain").exec =
+        citysim::exec::ExecState::Use { kind: citysim::goap::ActionKind::Sleep, until: now + 300, started: now };
+    assert_eq!(fight_score(&w, v), None, "nobody wakes to settle a grudge");
+    w.comp_mut::<Brain>(v).expect("brain").exec = citysim::exec::ExecState::Idle;
+    // Downed: no target.
+    assert_eq!(goals::fight_target(&w, v), Some(r));
+    citysim::systems::wounded::down(&mut w, r, None);
+    assert_eq!(goals::fight_target(&w, v), None, "a downed man is not fought");
+}
+
+/// Bug 19: a worker hungry past `shift_hunger_break` with a meal's coins
+/// breaks the shift to eat (Eat overrides the shift's commitment, and Work
+/// weighs the hunger); fed, the shift holds.
+#[test]
+fn test_bug19_hungry_worker_takes_a_meal_break() {
+    use citysim::systems::fixes;
+    let mut w = common::world();
+    let a = day_workers(&w)[0];
+    set_coins(&mut w, a, 15);
+    let work_fed = |w: &World| {
+        goals::considerations(w, a, GoalKind::Work, false)
+            .and_then(|(cs, _)| cs.into_iter().find(|c| c.name == "fed"))
+            .map(|c| c.output)
+    };
+    w.comp_mut::<Needs>(a).expect("n").hunger = 0.11;
+    assert!(!fixes::emergency(&w, a, GoalKind::Eat), "on the way to work, the commute's latch holds");
+    let now = w.tick;
+    w.comp_mut::<Brain>(a).expect("brain").exec =
+        citysim::exec::ExecState::Use { kind: citysim::goap::ActionKind::ClerkWork, until: now + 60, started: now };
+    assert!(fixes::emergency(&w, a, GoalKind::Eat), "a meal break at 0.11 with coins, at work");
+    assert!(work_fed(&w).is_some_and(|x| x < 0.5), "Work weighs the hunger");
+    w.comp_mut::<Needs>(a).expect("n").hunger = 0.6;
+    assert!(!fixes::emergency(&w, a, GoalKind::Eat), "fed, the shift holds");
+    assert!(work_fed(&w).is_none(), "no hunger term when fed");
+    // Review 6: broke, an empty pantry, no meal in reach: nothing to break
+    // for, so the shift holds at full weight.
+    w.comp_mut::<Needs>(a).expect("n").hunger = 0.11;
+    set_coins(&mut w, a, 0);
+    w.comp_mut::<citysim::Inventory>(a).expect("inv").food = 0;
+    w.comp_mut::<Personality>(a).expect("p").lawfulness = 0.9;
+    let home = w.comp::<citysim::Household>(a).and_then(|h| h.home).expect("a home");
+    w.comp_mut::<citysim::Building>(home).expect("b").stock_food = 0;
+    assert!(!goals::eat_obtainable(&w, a), "premise: no meal in reach");
+    assert!(!fixes::emergency(&w, a, GoalKind::Eat), "no meal break with no meal");
+    assert!(work_fed(&w).is_none(), "no hunger term with no meal in reach");
 }

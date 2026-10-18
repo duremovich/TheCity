@@ -3,14 +3,17 @@
 //! tests use the v1 city with three corps, or a small v2 city where Lots and
 //! Security Offices are needed.
 
+mod common;
+
 use std::collections::BTreeMap;
 
 use citysim::systems::corp_brain::{self, CorpInputs, NicheInputs};
-use citysim::systems::{corps, faction, gang, law, law_brain, ownership};
+use citysim::systems::{corps, faction, gang, law, law_brain, life, ownership};
 use citysim::{
     Brain, Building, BuildingKind, Config, Corp, CorpLoss, CorpOrder, CorpShock, Crime, EntityId, EventKind, Gang, Job,
     Market, Niche, Personality, Position, Role, Sentence, Wallet, World, TICKS_PER_DAY,
 };
+use common::{corp_named, jobless_housed, set_coins};
 
 // ---------------------------------------------------------------------------
 // Scoring
@@ -196,10 +199,6 @@ fn v2_world(seed: u64) -> World {
     let mut c = Config::load().dole_city().scaled_to(400);
     c.jobs2.enabled = false;
     World::new(seed, c)
-}
-
-fn corp_named(w: &World, name: &str) -> EntityId {
-    w.corps().into_iter().find(|&c| w.comp::<Corp>(c).is_some_and(|cc| cc.name == name)).expect("corp")
 }
 
 fn count(w: &World, kind: EventKind) -> usize {
@@ -1112,4 +1111,82 @@ fn test_corp_order_dwell_holds_against_a_small_margin() {
     let m = corp_brain::shock_margin(&w, food);
     assert_eq!(m, corp_brain::SHOCK_HYSTERESIS);
     assert_eq!(corp_brain::choose(&close, standing, m), Some((CorpOrder::Research, Niche::Food)));
+}
+
+// ---------------------------------------------------------------------------
+// Shadow V4 bug 5 and review 7 (docs/SHADOW_V4.md): the exec's office, the
+// exec kept off the street; M14 review 12: the fleet reserve.
+// ---------------------------------------------------------------------------
+
+/// Review 7: a corp's Homes and Lots are no office (the unranked fallback
+/// let a housing corp's exec keep office hours in a flat or on a vacant
+/// lot); any other building it holds is a desk.
+#[test]
+fn test_review7_no_office_in_a_home_or_a_lot() {
+    let mut w = common::world();
+    let c = w.corps().into_iter().find(|&c| w.comp::<Corp>(c).is_some_and(|x| x.exec.is_some())).expect("corp");
+    let exec = w.comp::<Corp>(c).and_then(|x| x.exec).expect("exec");
+    let of = |w: &World, k: BuildingKind| {
+        w.buildings_of_kind(k)
+            .iter()
+            .copied()
+            .find(|&b| w.comp::<Building>(b).is_some_and(|bd| !bd.demolished && !bd.derelict))
+    };
+    let home = of(&w, BuildingKind::Home).expect("a Home");
+    let lot = of(&w, BuildingKind::Lot).expect("a Lot");
+    w.comp_mut::<Corp>(c).expect("corp").buildings = vec![home, lot];
+    assert_eq!(life::hq_of(&w, c, exec), None, "no office in a Home or a Lot");
+    let club = of(&w, BuildingKind::Club).expect("a Club");
+    w.comp_mut::<Corp>(c).expect("corp").buildings = vec![home, lot, club];
+    assert_eq!(life::hq_of(&w, c, exec), Some(club), "a desk at its Club");
+}
+
+/// Bug 5 (the office): a corp with an Hq holds office there, wherever the
+/// exec lives (distance sorted first and the Hq was not ranked: CEOs held
+/// office at Vat Farms).
+#[test]
+fn test_bug5_exec_office_is_the_hq() {
+    let w = common::world();
+    let mut checked = 0;
+    for c in w.corps() {
+        let Some(cc) = w.comp::<Corp>(c) else { continue };
+        let Some(exec) = cc.exec else { continue };
+        let hq =
+            cc.buildings.iter().copied().find(|&b| w.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Hq));
+        let Some(hq) = hq else { continue };
+        assert_eq!(life::hq_of(&w, c, exec), Some(hq), "corp {c:?} holds office at its Hq");
+        checked += 1;
+    }
+    assert!(checked > 0, "a corp with an Hq");
+}
+
+/// Bug 5 (street life): an exec is never recruited by a gang and has no
+/// Earn to plan (no vehicle theft on a salary), though a desperate
+/// non-exec in the same state is recruited.
+#[test]
+fn test_bug5_exec_kept_out_of_street_earn_and_gangs() {
+    use citysim::utility::goals::already_satisfied;
+    let mut w = common::world();
+    let corp = w.corps().into_iter().find(|&c| w.comp::<Corp>(c).is_some_and(|cc| cc.exec.is_some()));
+    let exec = w.comp::<Corp>(corp.expect("a corp")).and_then(|cc| cc.exec).expect("an exec");
+    let other = *jobless_housed(&w).first().expect("a jobless adult");
+    for a in [exec, other] {
+        w.comp_mut::<citysim::Needs>(a).expect("needs").hunger = 0.05;
+        w.comp_mut::<Personality>(a).expect("pers").lawfulness = 0.05;
+        set_coins(&mut w, a, 0);
+    }
+    assert!(gang::recruit_gang(&w, other).is_some(), "the control: a desperate jobless adult is taken");
+    assert_eq!(gang::recruit_gang(&w, exec), None, "an exec joins no gang");
+    assert!(already_satisfied(&w, exec, citysim::GoalKind::Earn, false), "an exec has no street Earn");
+}
+
+/// M14 review 12: the fleet reserve is `treasury_ref / 4`.
+#[test]
+fn test_fleet_reserve_helper() {
+    let w = common::dole_world();
+    for c in w.corps() {
+        let r = w.comp::<Corp>(c).expect("corp").treasury_ref / 4;
+        assert_eq!(corps::fleet_reserve(&w, c), r);
+    }
+    assert_eq!(corps::fleet_reserve(&w, EntityId::NONE), 0);
 }

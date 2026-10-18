@@ -6,6 +6,8 @@
 //! loser dies, flees the city, or leads a splinter (D36). A syndicate's
 //! brothers come only to a gang gutted by a sack (a rare roll) or by god.
 
+mod common;
+
 use citysim::components::{Brain, Building, Claim, GangMember, Personality, Skills};
 use citysim::systems::{gang, succession};
 use citysim::word::{GrudgeCause, Grudges};
@@ -466,4 +468,73 @@ fn test_newcomer_is_no_runner_up_to_a_veteran_heir() {
     assert!(x.war.is_none(), "no war against an untenured newcomer");
     let ev = w.events.iter().rev().find(|e| e.kind == EventKind::Succession).expect("a Succession event");
     assert!(!ev.text.contains("by -"), "no negative lead: {}", ev.text);
+}
+
+// ---------------------------------------------------------------------------
+// Shadow V4 bug 8 (docs/SHADOW_V4.md): the lead by tenure, no succession for
+// a night; M17 review 4: the crown through a night in the cells.
+// ---------------------------------------------------------------------------
+
+/// Bug 8: a gang's lead goes to a member of `leader_min_days` before a
+/// newer, more loyal one; a night's term (a fare) hands nobody the gang.
+#[test]
+fn test_bug8_leader_by_tenure_and_no_succession_for_a_night() {
+    let mut w = common::world();
+    // The seed's gangs start empty and recruit through the first days.
+    w.run_ticks(12 * TICKS_PER_DAY);
+    let g = w
+        .gangs()
+        .into_iter()
+        .find(|&g| w.comp::<Gang>(g).is_some_and(|x| x.leader.is_some() && x.members.len() >= 4))
+        .expect("a gang with a leader");
+    // Two free members besides the leader (the ranking's own pool; Review:
+    // on the moved city members[0] was the leader).
+    let leader = w.comp::<Gang>(g).and_then(|x| x.leader);
+    let members: Vec<EntityId> = w
+        .comp::<Gang>(g)
+        .expect("g")
+        .members
+        .iter()
+        .copied()
+        .filter(|&m| Some(m) != leader && !w.has::<citysim::Sentence>(m))
+        .collect();
+    let (vet, new) = (members[0], members[1]);
+    w.tick += 40 * TICKS_PER_DAY;
+    let now = w.tick;
+    w.comp_mut::<GangMember>(vet).expect("gm").joined_tick = now - 30 * TICKS_PER_DAY;
+    w.comp_mut::<GangMember>(new).expect("gm").joined_tick = now - 2 * TICKS_PER_DAY;
+    w.comp_mut::<Personality>(vet).expect("p").loyalty = 0.1;
+    w.comp_mut::<Personality>(new).expect("p").loyalty = 1.0;
+    let scores = gang::leader_scores(&w, g);
+    let rank = |a: EntityId| scores.iter().position(|x| x.0 == a).expect("ranked");
+    assert!(rank(vet) < rank(new), "a month in outranks two days of loyalty");
+    // The leader jailed for a fare's night: no Succession.
+    let leader = w.comp::<Gang>(g).and_then(|x| x.leader).expect("leader");
+    w.insert(leader, citysim::Sentence { until_tick: now + 600, crime: citysim::Crime::FareEvasion });
+    let before = w.events.iter().filter(|e| e.kind == EventKind::Succession).count();
+    assert!(!succession::decide(&mut w, g, leader));
+    let after = w.events.iter().filter(|e| e.kind == EventKind::Succession).count();
+    assert_eq!(before, after, "a night in the cells is no interregnum");
+}
+
+/// M17 review 4: the crowned keeps the crown through a night in the cells.
+#[test]
+fn test_the_crown_outlasts_a_night_in_the_cells() {
+    let mut w = common::world_at(4 * TICKS_PER_DAY + 30);
+    let g = w.gangs().into_iter().max_by_key(|&g| gang::fit_headcount(&w, g)).expect("a gang");
+    for a in common::free_crew(&mut w, 4, 0.5) {
+        gang::enlist(&mut w, a, g);
+    }
+    let ranking = gang::leader_ranking(&w, g);
+    let (king, rival) = (ranking[1], ranking[0]);
+    w.comp_mut::<Gang>(g).expect("gang").crowned = Some(king);
+    gang::recompute_leader(&mut w, g);
+    assert_eq!(w.comp::<Gang>(g).and_then(|x| x.leader), Some(king), "the crown over the ranking");
+    let jail = w.building_of_kind(citysim::BuildingKind::Jail).expect("a Jail");
+    let until = w.tick + 600;
+    citysim::systems::law::sentence(&mut w, king, citysim::Crime::Vagrancy, until, jail);
+    assert_eq!(w.comp::<Gang>(g).and_then(|x| x.crowned), Some(king), "still crowned inside");
+    w.remove::<citysim::Sentence>(king);
+    gang::on_member_released(&mut w, king);
+    assert_eq!(w.comp::<Gang>(g).and_then(|x| x.leader), Some(king), "back in the chair, not {rival:?}");
 }

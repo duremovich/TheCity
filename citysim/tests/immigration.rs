@@ -9,6 +9,7 @@
 use std::collections::VecDeque;
 
 use citysim::econ::MigrantDay;
+use citysim::systems::econ::identity;
 use citysim::systems::{demography, econ};
 use citysim::time::DAYS_PER_YEAR;
 use citysim::{
@@ -271,4 +272,41 @@ fn test_migrants_keep_the_coin_identity() {
     let start = econ::identity(&w);
     w.run_ticks(8 * TICKS_PER_DAY);
     assert_eq!(econ::identity(&w), start);
+}
+
+// ---------------------------------------------------------------------------
+// The V3 violence fixes (2026-10-09, `[life] violence_fixes`), fix 5: an
+// immigrant arrives with a seeded adult's savings.
+// ---------------------------------------------------------------------------
+
+/// Spawn immigrants until one lands in a Home of `tier` (or homeless with
+/// `None`): its coins, and the coin identity before and after.
+fn immigrant_coins(fix: bool, tier: Option<u8>) -> Option<(i64, i64, i64)> {
+    let mut w = World::new(42, Config::load().dole_city().scaled_to(300));
+    w.config.life.violence_fixes = fix;
+    for _ in 0..200 {
+        let before = identity(&w);
+        let id = demography::spawn_immigrant(&mut w);
+        let after = identity(&w);
+        let t = w.comp::<Household>(id).and_then(|h| h.home).and_then(|h| w.comp::<Building>(h)).map(|b| b.tier.min(2));
+        if t == tier {
+            return Some((w.comp::<Wallet>(id).expect("wallet").coins, before, after));
+        }
+    }
+    None
+}
+
+#[test]
+fn test_immigrant_arrives_with_a_seeded_adults_savings() {
+    // [world] initial_coins 10..=40 (mean 25) x coins_by_tier [0.5, 1, 3].
+    let mut seen = 0;
+    for (tier, want) in [(Some(0u8), 15i64), (Some(1), 25), (Some(2), 75)] {
+        let Some((coins, before, after)) = immigrant_coins(true, tier) else { continue };
+        seen += 1;
+        assert_eq!(coins, want, "tier {tier:?}: a seeded adult's savings (Sump keeps the 15)");
+        assert_eq!(before, after, "the savings cross in from the World: the identity holds");
+        let (off, _, _) = immigrant_coins(false, tier).expect("the same arrival with the fix off");
+        assert_eq!(off, 15, "fix off: the flat 15");
+    }
+    assert!(seen >= 2, "immigrants housed in at least two tiers");
 }

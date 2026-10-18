@@ -9,16 +9,23 @@
 //! and a seeded dice roll. With `CITYSIM_WOUNDED_OFF=1` the mechanism tests
 //! fail (the switch gates every entry point).
 
+mod common;
+
+use std::sync::OnceLock;
+
 use citysim::contract::{ContractKind, ContractStatus};
 use citysim::systems::econ::identity;
 use citysim::systems::{demography, law, wounded};
 use citysim::{
-    ActionKind, Brain, BuildingKind, Config, EntityId, EventKind, GangMember, Job, Personality, Position, RelKind,
-    Role, World, TICKS_PER_DAY,
+    ActionKind, Brain, BuildingKind, EntityId, EventKind, GangMember, Job, Personality, Position, RelKind, Role, World,
+    TICKS_PER_DAY,
 };
 
+/// The shipped seed-42 city, built once; every test starts from a clone.
+static BASE: OnceLock<World> = OnceLock::new();
+
 fn world() -> World {
-    World::new(42, Config::load())
+    BASE.get_or_init(common::world).clone()
 }
 
 fn strangers(w: &World, n: usize) -> Vec<EntityId> {
@@ -57,10 +64,6 @@ fn has_event(w: &World, kind: EventKind, who: EntityId) -> bool {
     w.events.iter().any(|e| e.kind == kind && e.actors.contains(&who))
 }
 
-fn clone(w: &World) -> World {
-    citysim::save::from_ron(&citysim::save::to_ron(w)).expect("round trip")
-}
-
 /// Spec § 11: deaths with `wound_share > 0` never exceed deaths with it 0
 /// for the same seed, over the fight path: the same fights in two copies
 /// of the city, the death roll the same, the wound only ever replacing it.
@@ -70,8 +73,8 @@ fn test_wounds_never_add_deaths() {
     let [a, b] = strangers(&base, 2)[..] else { unreachable!() };
     let (mut d0, mut d6, mut wounds) = (0, 0, 0);
     for t in 0..200u64 {
-        let mut w0 = clone(&base);
-        let mut w6 = clone(&base);
+        let mut w0 = base.clone();
+        let mut w6 = base.clone();
         w0.config.wounded.wound_share = 0.0;
         w6.config.wounded.wound_share = 0.6;
         for w in [&mut w0, &mut w6] {

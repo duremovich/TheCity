@@ -6,22 +6,17 @@
 //! fictional agents: a struct with a price, matched by a score, resolved
 //! by one seeded dice roll; escrow is coins held on a record.
 
+mod common;
+
 use citysim::contract::{Broker, ContractKind, ContractStatus, Origin, Posting, Render, Target};
 use citysim::systems::econ::identity;
-use citysim::systems::{bind, contracts, demography, fviolence, grudges, hunt, law, lod, missions, ownership};
+use citysim::systems::{bind, contracts, fviolence, grudges, hunt, law, lod, missions, ownership};
 use citysim::word::{Deed, GrudgeCause, Grudges, HuntWhy, Reputation};
 use citysim::{
     ActionKind, BuildingKind, Config, DeathCause, EntityId, GangMember, Job, Lod, MemoryKind, Personality, Position,
     RelKind, Role, Skills, World, TICKS_PER_DAY, TICKS_PER_HOUR,
 };
-
-fn world() -> World {
-    World::new(42, Config::load().dole_city())
-}
-
-fn adults(w: &World) -> Vec<EntityId> {
-    w.citizens().into_iter().filter(|&id| law::living(w, id) && demography::is_adult(w, id)).collect()
-}
+use common::{adults, dole_world};
 
 /// `n` free adults with no edge between any two, no gang, no guard's job.
 fn strangers(w: &World, n: usize) -> Vec<EntityId> {
@@ -101,7 +96,7 @@ fn posting(buyer: EntityId, kind: ContractKind, target: EntityId, broker: Option
 
 #[test]
 fn test_brokered_post_escrows_and_identity_holds() {
-    let mut w = world();
+    let mut w = dole_world();
     let [buyer, t] = strangers(&w, 2)[..] else { unreachable!() };
     worked_target(&mut w, t);
     set_coins(&mut w, buyer, 1000);
@@ -125,7 +120,7 @@ fn test_brokered_post_escrows_and_identity_holds() {
 
 #[test]
 fn test_fulfilled_pays_taker_and_fixer_at_cut() {
-    let mut w = world();
+    let mut w = dole_world();
     let [buyer, t, taker] = strangers(&w, 3)[..] else { unreachable!() };
     worked_target(&mut w, t);
     gun(&mut w, taker);
@@ -153,7 +148,7 @@ fn test_fulfilled_pays_taker_and_fixer_at_cut() {
 
 #[test]
 fn test_expired_and_failed_refund() {
-    let mut w = world();
+    let mut w = dole_world();
     let [buyer, t, a, b] = strangers(&w, 4)[..] else { unreachable!() };
     gun(&mut w, a);
     gun(&mut w, b);
@@ -184,7 +179,7 @@ fn test_expired_and_failed_refund() {
 
 #[test]
 fn test_direct_renege_posts_betrayed_and_grudge() {
-    let mut w = world();
+    let mut w = dole_world();
     let [buyer, t, taker] = strangers(&w, 3)[..] else { unreachable!() };
     gun(&mut w, taker);
     set_coins(&mut w, buyer, 1000);
@@ -211,7 +206,7 @@ fn test_direct_renege_posts_betrayed_and_grudge() {
 
 #[test]
 fn test_short_buyer_is_reneged() {
-    let mut w = world();
+    let mut w = dole_world();
     let [buyer, t, taker] = strangers(&w, 3)[..] else { unreachable!() };
     gun(&mut w, taker);
     set_coins(&mut w, buyer, 1000);
@@ -231,7 +226,7 @@ fn test_short_buyer_is_reneged() {
 
 #[test]
 fn test_visible_hides_brokered_from_non_regular_shows_direct_to_friend() {
-    let mut w = world();
+    let mut w = dole_world();
     let [buyer, t, friend, other] = strangers(&w, 4)[..] else { unreachable!() };
     set_coins(&mut w, buyer, 5000);
     let f = fixer(&w);
@@ -255,7 +250,7 @@ fn test_visible_hides_brokered_from_non_regular_shows_direct_to_friend() {
 
 #[test]
 fn test_matching_never_offers_hit_to_target_kin() {
-    let mut w = world();
+    let mut w = dole_world();
     let [buyer, t, spouse, kin, friend] = strangers(&w, 5)[..] else { unreachable!() };
     set_coins(&mut w, buyer, 5000);
     w.set_spouse(t, spouse);
@@ -281,7 +276,7 @@ fn test_matching_never_offers_hit_to_target_kin() {
 #[test]
 fn test_matching_is_deterministic() {
     let pick = |rev: bool| {
-        let mut w = world();
+        let mut w = dole_world();
         let ids = strangers(&w, 12);
         let (buyer, t, cands) = (ids[0], ids[1], ids[2..].to_vec());
         set_coins(&mut w, buyer, 5000);
@@ -311,7 +306,7 @@ fn test_matching_is_deterministic() {
 
 #[test]
 fn test_accept_score_same_at_every_tier() {
-    let mut w = world();
+    let mut w = dole_world();
     let [buyer, t, g] = strangers(&w, 3)[..] else { unreachable!() };
     set_coins(&mut w, buyer, 5000);
     let f = fixer(&w);
@@ -351,7 +346,7 @@ fn weak_holder(w: &mut World, weight: f32, coins_: i64) -> (EntityId, EntityId) 
 #[test]
 fn test_hunt_hires_below_hire_gap() {
     for (weight, kind) in [(0.9, ContractKind::Hit), (0.8, ContractKind::Beat)] {
-        let mut w = world();
+        let mut w = dole_world();
         let (h, t) = weak_holder(&mut w, weight, 5000);
         assert!(hunt::might_gap(&w, h, t) < w.config.contracts.hire_gap, "too weak to win");
         assert!(!hunt::adopt(&mut w, h, HuntWhy::Goal), "no Hunt: a hire");
@@ -364,7 +359,7 @@ fn test_hunt_hires_below_hire_gap() {
 
 #[test]
 fn test_hire_pass_posts_for_statistical_holder_without_promotion() {
-    let mut w = world();
+    let mut w = dole_world();
     let (h, t) = weak_holder(&mut w, 0.9, 5000);
     lod::set_lod(&mut w, h, Lod::Statistical);
     let mut posted = false;
@@ -402,7 +397,7 @@ fn ledger_hit(w: &mut World) -> (EntityId, EntityId, citysim::contract::Contract
 
 #[test]
 fn test_ledger_hit_prebound_hole_binds_taker_same_witness_after_save_load() {
-    let mut w = world();
+    let mut w = dole_world();
     let (t, taker, id) = ledger_hit(&mut w);
     assert_eq!(w.contracts[&id].status, ContractStatus::Fulfilled);
     assert!(w.has::<citysim::Corpse>(t), "the target is dead");
@@ -430,7 +425,7 @@ fn test_prebound_witness_offset_matches_ordinary_hole() {
     // is that actor (an agent is its own faction; `p_unknown` 0) read the
     // witness roll at the same offset.
     let run = |contract: bool| {
-        let mut w = world();
+        let mut w = dole_world();
         w.config.bind.p_unknown = 0.0;
         w.config.bind.p_witness = 1.0;
         let [v, actor] = strangers(&w, 2)[..] else { unreachable!() };
@@ -483,7 +478,7 @@ fn test_prebound_witness_offset_matches_ordinary_hole() {
 
 #[test]
 fn test_ledger_kill_names_nobody_before_bind() {
-    let mut w = world();
+    let mut w = dole_world();
     w.config.missions.strike_k = 100.0;
     let [buyer, t, taker, spouse] = strangers(&w, 4)[..] else { unreachable!() };
     w.set_spouse(t, spouse);
@@ -504,7 +499,7 @@ fn test_ledger_kill_names_nobody_before_bind() {
 
 #[test]
 fn test_contract_killing_not_in_order_rates() {
-    let mut w = world();
+    let mut w = dole_world();
     let gangs = w.gang_list().to_vec();
     let (ga, gb) = (gangs[0], gangs[1]);
     let free = strangers(&w, 3);
@@ -524,7 +519,7 @@ fn test_contract_killing_not_in_order_rates() {
 
 #[test]
 fn test_target_killed_elsewhere_cancels_and_refunds() {
-    let mut w = world();
+    let mut w = dole_world();
     let [buyer, t, taker, other] = strangers(&w, 4)[..] else { unreachable!() };
     gun(&mut w, taker);
     set_coins(&mut w, buyer, 3000);
@@ -540,7 +535,7 @@ fn test_target_killed_elsewhere_cancels_and_refunds() {
 
 #[test]
 fn test_locate_pays_at_most_once_per_gap_and_caps() {
-    let mut w = world();
+    let mut w = dole_world();
     let [buyer, t, eye] = strangers(&w, 3)[..] else { unreachable!() };
     set_coins(&mut w, buyer, 5000);
     set_coins(&mut w, eye, 0);
@@ -573,7 +568,7 @@ fn test_locate_pays_at_most_once_per_gap_and_caps() {
 
 #[test]
 fn test_guard_intercepts_attack_on_client() {
-    let mut w = world();
+    let mut w = dole_world();
     let [client, g, attacker] = strangers(&w, 3)[..] else { unreachable!() };
     gun(&mut w, g);
     if let Some(s) = w.comp_mut::<Skills>(attacker) {
@@ -623,7 +618,7 @@ fn test_guard_intercepts_attack_on_client() {
 fn test_fixer_seeded_in_mid_east_and_sump_central_or_logged() {
     // C9 deviation: one seeded Fixer (Mid East); Sump Central's Lot is left
     // for M12 and the per-capita rule founds the second.
-    let w = world();
+    let w = dole_world();
     let fixers = w.buildings_of_kind(BuildingKind::Fixer).to_vec();
     assert_eq!(fixers.len(), 1, "one seeded Fixer (log: {:?})", w.contract_log);
     let names: Vec<String> = fixers.iter().map(|&f| w.district_name(w.district_of_building(f)).to_string()).collect();
@@ -661,7 +656,7 @@ fn test_fixer_seeded_in_mid_east_and_sump_central_or_logged() {
 /// one is refused (it would sit Taken with no plan and no ledger row).
 #[test]
 fn test_building_target_only_for_guard() {
-    let mut w = world();
+    let mut w = dole_world();
     let [buyer] = strangers(&w, 1)[..] else { unreachable!() };
     set_coins(&mut w, buyer, 5000);
     let b = w.buildings_of_kind(BuildingKind::Bar)[0];
@@ -679,7 +674,7 @@ fn test_building_target_only_for_guard() {
 /// `by_party` (the index matches a rebuild from the records).
 #[test]
 fn test_failed_attempt_unindexes_departing_taker() {
-    let mut w = world();
+    let mut w = dole_world();
     let [buyer, t, a] = strangers(&w, 3)[..] else { unreachable!() };
     gun(&mut w, a);
     set_coins(&mut w, buyer, 5000);
@@ -700,7 +695,7 @@ fn test_failed_attempt_unindexes_departing_taker() {
 fn test_strike_estimate_worked_numbers() {
     // The plan's Strike table, quote row: the median gun (0.625) against a
     // lone target (0.5): p_win 0.679.
-    let mut w = world();
+    let mut w = dole_world();
     let [t] = strangers(&w, 1)[..] else { unreachable!() };
     worked_target(&mut w, t);
     let p = missions::estimate(&w, &[missions::MEDIAN], &Target::Agent(t));
@@ -715,7 +710,7 @@ fn test_strike_estimate_worked_numbers() {
 /// the documented outside sources, immigrants and emigrants, do not move.)
 #[test]
 fn test_conservation_over_every_phase_one_flow() {
-    let mut w = world();
+    let mut w = dole_world();
     let ids = strangers(&w, 9);
     for &a in &ids {
         set_coins(&mut w, a, 3000);
@@ -884,7 +879,7 @@ fn conspiracy_on(w: &World, who: EntityId) -> bool {
 
 #[test]
 fn test_hired_reaches_target_kin_and_forms_hired_grudge_on_buyer() {
-    let mut w = world();
+    let mut w = dole_world();
     let [buyer, t, taker, kin] = strangers(&w, 4)[..] else { unreachable!() };
     w.edge_entry(t, kin).kind = RelKind::Family;
     w.edge_entry(kin, t).kind = RelKind::Family;
@@ -914,7 +909,7 @@ fn test_hired_reaches_target_kin_and_forms_hired_grudge_on_buyer() {
 
 #[test]
 fn test_fixer_talks_hired_only_to_regulars() {
-    let mut w = world();
+    let mut w = dole_world();
     w.config.law.fixer_talk = 1.0;
     let [buyer, t, regular, other] = strangers(&w, 4)[..] else { unreachable!() };
     set_coins(&mut w, buyer, 5000);
@@ -946,7 +941,7 @@ fn test_fixer_talks_hired_only_to_regulars() {
 
 #[test]
 fn test_interrogation_names_buyer_then_conspiracy_filed() {
-    let mut w = world();
+    let mut w = dole_world();
     // Forced success: the move's probability pinned to 1.
     w.config.moves.p_max = 1.0;
     w.config.law.interrogate_bias = 50.0;
@@ -986,7 +981,7 @@ fn test_interrogation_names_buyer_then_conspiracy_filed() {
 
 #[test]
 fn test_unknown_buyer_never_charged() {
-    let mut w = world();
+    let mut w = dole_world();
     let [buyer, t, taker, witness] = strangers(&w, 4)[..] else { unreachable!() };
     let id = fulfilled_hit(&mut w, buyer, t, taker);
     // A witness of the strike who knows nothing of the buyer.
@@ -1022,7 +1017,7 @@ fn test_unknown_buyer_never_charged() {
 /// guard holding the captain's name.
 #[test]
 fn test_law_death_squad_never_charged() {
-    let mut w = world();
+    let mut w = dole_world();
     w.config.moves.p_max = 1.0;
     let captain = citysim::systems::law_brain::recompute_captain(&mut w).expect("a captain");
     let [t, taker] = strangers(&w, 2)[..] else { unreachable!() };
@@ -1058,7 +1053,7 @@ fn test_law_death_squad_never_charged() {
 
 #[test]
 fn test_conspiracy_sentence_is_mult_of_murder() {
-    let mut w = world();
+    let mut w = dole_world();
     let murder = law::sentence_ticks(&w, citysim::Crime::Murder);
     let mult = w.config.law.accessory_mult;
     let want = ((murder as f32 * mult).ceil() as u64).max(TICKS_PER_DAY);
@@ -1100,7 +1095,7 @@ fn test_conspiracy_ranks_below_murder() {
 
 #[test]
 fn test_fixer_closes_at_warrant_heat_and_refunds_open_book() {
-    let mut w = world();
+    let mut w = dole_world();
     let [buyer, t] = strangers(&w, 2)[..] else { unreachable!() };
     set_coins(&mut w, buyer, 2000);
     let f = fixer(&w);
@@ -1129,7 +1124,7 @@ fn test_fixer_closes_at_warrant_heat_and_refunds_open_book() {
 
 #[test]
 fn test_fixer_bribe_lowers_heat_payer_owner() {
-    let mut w = world();
+    let mut w = dole_world();
     let f = fixer(&w);
     let owner = w.owner_of(f).expect("an owner");
     let captain = citysim::systems::law_brain::recompute_captain(&mut w).expect("a captain");
@@ -1161,7 +1156,7 @@ fn test_fixer_bribe_lowers_heat_payer_owner() {
 
 #[test]
 fn test_guard_on_take_skips_buyer_in_chase_and_report() {
-    let mut w = world();
+    let mut w = dole_world();
     w.config.crime.witness_base = 1.0;
     w.config.crime.witness_guard_bonus = 1.0;
     let [buyer, victim] = strangers(&w, 2)[..] else { unreachable!() };
@@ -1210,7 +1205,7 @@ fn test_guard_on_take_skips_buyer_in_chase_and_report() {
 
 #[test]
 fn test_security_corp_guard_converts_to_m11_contract_and_refunds_less_cut() {
-    let mut w = world();
+    let mut w = dole_world();
     // A building of a corp with no Security niche, unsecured.
     let (corp, b) = w
         .corps()
@@ -1260,7 +1255,7 @@ fn test_security_corp_guard_converts_to_m11_contract_and_refunds_less_cut() {
 
 #[test]
 fn test_public_locate_paid_by_treasury_sets_last_seen() {
-    let mut w = world();
+    let mut w = dole_world();
     let [s, observer] = strangers(&w, 2)[..] else { unreachable!() };
     // A wanted suspect, unseen for law_bounty_days: the law posts.
     citysim::systems::law_brain::recompute_captain(&mut w).expect("a captain");
@@ -1318,7 +1313,7 @@ fn test_gang_retaliate_posts_hit_on_rival_leader_when_weak() {
         }
         (a, b)
     };
-    let mut w = world();
+    let mut w = dole_world();
     let (a, b) = setup(&mut w, 1, 6);
     let rival_leader = w.comp::<citysim::Gang>(b).and_then(|g| g.leader).expect("a rival leader");
     contracts::post_gang_hit(&mut w, a, citysim::Order::Retaliate);
@@ -1332,7 +1327,7 @@ fn test_gang_retaliate_posts_hit_on_rival_leader_when_weak() {
     assert_eq!(c.origin, Origin::GangOrder(citysim::Order::Retaliate));
     assert_eq!(c.agent, w.comp::<citysim::Gang>(a).and_then(|g| g.leader), "placed by the leader");
     // A gang as strong as its rival raids alone.
-    let mut w2 = world();
+    let mut w2 = dole_world();
     let (a2, _) = setup(&mut w2, 6, 6);
     contracts::post_gang_hit(&mut w2, a2, citysim::Order::Retaliate);
     assert!(!w2.contracts.values().any(|c| c.buyer == Some(a2)), "own >= hire_ratio x rival: the raid alone");
@@ -1341,7 +1336,7 @@ fn test_gang_retaliate_posts_hit_on_rival_leader_when_weak() {
 #[test]
 fn test_fixer_run_order_runs_to_selldata_with_cut() {
     use citysim::virt::{RunOutcome, RunWhy};
-    let mut w = world();
+    let mut w = dole_world();
     // Every node open: the run the scorer picks gets through.
     let nodes: Vec<citysim::virt::NodeId> = (0..w.virt.nodes.len()).map(|i| citysim::virt::NodeId(i as u16)).collect();
     for n in nodes {
@@ -1418,7 +1413,7 @@ fn test_fixer_run_order_runs_to_selldata_with_cut() {
 /// gate); on again, the floor lifts.
 #[test]
 fn test_fixer_licence_off_floors_heat_and_blocks_register() {
-    let mut w = world();
+    let mut w = dole_world();
     // Room for another office under the per-capita rule.
     w.config.fixers.fixers_per_pop = 100;
     let f = fixer(&w);
@@ -1457,7 +1452,7 @@ fn test_fixer_licence_off_floors_heat_and_blocks_register() {
 /// `register` builds a Fixer, owned by the founder, with an open book.
 #[test]
 fn test_npc_registers_a_fixer() {
-    let mut w = world();
+    let mut w = dole_world();
     // Room under the per-capita rule, and the Fixer the least supplied kind.
     w.config.fixers.fixers_per_pop = 10;
     let founder = strangers(&w, 1)[0];
@@ -1492,7 +1487,7 @@ fn test_npc_registers_a_fixer() {
 /// saw it and holds the deed does charge (the control).
 #[test]
 fn test_squad_crew_witness_never_charges_its_buyer() {
-    let mut w = world();
+    let mut w = dole_world();
     let [buyer, t, taker, mate, outsider] = strangers(&w, 5)[..] else { unreachable!() };
     gun(&mut w, taker);
     gun(&mut w, mate);
@@ -1555,7 +1550,7 @@ fn ledger_locate(w: &mut World) -> (EntityId, EntityId, citysim::contract::Contr
 /// direct buyer who cannot pay the first sighting reneges.
 #[test]
 fn test_ledger_locate_settles_and_frees_the_tracker() {
-    let mut w = world();
+    let mut w = dole_world();
     let (_, tracker, id) = ledger_locate(&mut w);
     let before = coins(&w, tracker);
     contracts::resolve_ledger(&mut w, id);
@@ -1572,7 +1567,7 @@ fn test_ledger_locate_settles_and_frees_the_tracker() {
     assert!(contracts::eligible(&w, &w.contracts[&id2], tracker), "free for the next record");
 
     // A broke direct buyer: nothing paid, reneged (not left Taken).
-    let mut w = world();
+    let mut w = dole_world();
     let (buyer, _, id) = ledger_locate(&mut w);
     set_coins(&mut w, buyer, 0);
     contracts::resolve_ledger(&mut w, id);
@@ -1585,7 +1580,7 @@ fn test_ledger_locate_settles_and_frees_the_tracker() {
 /// looked at again later (back in `ledger_due`), not dropped from the index.
 #[test]
 fn test_ledger_record_with_busy_taker_is_rescheduled() {
-    let mut w = world();
+    let mut w = dole_world();
     w.config.missions.strike_k = 100.0;
     let [buyer, t, taker] = strangers(&w, 3)[..] else { unreachable!() };
     gun(&mut w, taker);
@@ -1641,7 +1636,7 @@ fn test_contract_cleared_once_inside_interrogate_days() {
         law::release(w, taker, false);
     };
     // Outside a 10-day window: never counted, however often re-arrested.
-    let mut w = world();
+    let mut w = dole_world();
     w.config.law.interrogate_days = 10;
     let [buyer, t, taker] = strangers(&w, 3)[..] else { unreachable!() };
     fulfilled_hit(&mut w, buyer, t, taker);
@@ -1652,7 +1647,7 @@ fn test_contract_cleared_once_inside_interrogate_days() {
     arrest(&mut w, guard, taker);
     assert_eq!(w.stats.current.contract.contract_cleared, 0, "outside the window");
     // Inside it: once, on the first arrest.
-    let mut w = world();
+    let mut w = dole_world();
     w.config.law.interrogate_days = 10;
     let [buyer, t, taker] = strangers(&w, 3)[..] else { unreachable!() };
     let id = fulfilled_hit(&mut w, buyer, t, taker);
@@ -1669,7 +1664,7 @@ fn test_contract_cleared_once_inside_interrogate_days() {
 /// again the day it reopens.
 #[test]
 fn test_busted_fixer_not_busted_again_on_reopening() {
-    let mut w = world();
+    let mut w = dole_world();
     let f = fixer(&w);
     if let Some(k) = w.comp_mut::<Broker>(f) {
         k.heat = 0.95;
@@ -1713,4 +1708,42 @@ fn test_an_away_target_is_neither_posted_nor_struck() {
     contracts::resolve_ledger(&mut w, id);
     assert!(law::living(&w, t), "struck while abroad");
     assert_eq!(w.contracts[&id].status, ContractStatus::Taken, "the record waits");
+}
+
+// ---------------------------------------------------------------------------
+// Shadow V4 bug 15 (docs/SHADOW_V4.md): a taken Locate pays the taker only.
+// ---------------------------------------------------------------------------
+
+/// Bug 15 (the locate): once a Locate is taken, a stranger's sighting no
+/// longer pays (the crowd filled the cap and the taker who staked out three
+/// days got 0 c); the taker's (`on_contact`, the ledger's report) still do.
+#[test]
+fn test_bug15_taken_locate_pays_the_taker_only() {
+    let mut w = common::world();
+    w.config.bounty.min_gap_hours = 0;
+    let corp = w.corps()[0];
+    w.comp_mut::<citysim::Corp>(corp).expect("corp").treasury = 100_000;
+    let pool: Vec<EntityId> = common::free_adults(&w).into_iter().filter(|&x| !law::is_guard(&w, x)).collect();
+    let (t, taker, crowd) = (pool[0], pool[1], pool[2]);
+    let p = Posting {
+        buyer: Some(corp),
+        agent: None,
+        kind: ContractKind::Locate,
+        target: Target::Agent(t),
+        broker: None,
+        deadline_days: 7,
+        origin: Origin::God,
+        price: None,
+    };
+    let id = contracts::post(&mut w, p).expect("posted");
+    let tile = w.comp::<citysim::Position>(t).expect("pos").tile;
+    let paid = |w: &World| w.contracts[&id].paid_sightings;
+    assert!(contracts::sees(&w, crowd, id), "the crowd sees the open record");
+    contracts::on_sighting(&mut w, crowd, t, tile);
+    assert_eq!(paid(&w), 1, "the control: an open Locate pays the crowd");
+    contracts::god_take(&mut w, id, taker).expect("taken");
+    assert_eq!(w.contracts[&id].status, ContractStatus::Taken);
+    w.tick += 1;
+    contracts::on_sighting(&mut w, crowd, t, tile);
+    assert_eq!(paid(&w), 1, "a taken Locate pays no stranger");
 }
