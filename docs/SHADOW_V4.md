@@ -162,4 +162,4 @@ On 2k seed 43, days 20-40, the sentence mix changed:
 
 After the round, Murders on 42-44 read 94 / 61 / 112 (267), and core_20k reads 89; the two moved opposite ways, which looks like noise. The merge set is green on main at 1552009. LOD parity law0/law1 is still open: Full 0.930 vs Stat 0.757.
 
-The re-shadow diaries are in the `v4fix` worktree's `target/shadow_v4_after/`. The process review removes that worktree, so copy them out first if they are wanted.
+The re-shadow diaries were in the `v4fix` worktree's `target/shadow_v4_after/` and went with the worktree on 2026-10-18 (the process review removed it before copying them out; `OPEN-095`). They are deterministic: regenerate them on `2712b4a` with `citysim-cli shadow` and the same picks if a before/after read is wanted.

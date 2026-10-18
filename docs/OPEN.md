@@ -99,7 +99,7 @@ The one ledger. Nothing is open anywhere else: a spec's "Implemented: deviations
 | OPEN-091 | The tax band reads only the Treasury balance: with the dole enacted it cut the rate 0.05 → 0.02 while paying ~700-850 a day | P10_POLICY § Found, not fixed | bug | unowned | open |
 | OPEN-092 | Power and Water as goods (the `power` input is coins to the World, a stand-in for a generator) | ECONOMY_V2 § 6 "Waits for later" | feature | unowned | open |
 | OPEN-093 | `python tools/test.py change` over budget: 272 s of tests against 4 min (the budget moved 3 → 4 on 2026-10-18); `wounded`, `wages`, `person` are the heavy binaries | PROCESS_REVIEW § 6 | bug | before M18 | open |
-| OPEN-094 | 21 `CITYSIM_*_OFF` env switches still read in `Config::load_from` (ARCHITECTURE § 12 item 10); the doctrine retires a switch when its phase lands: audit, delete the dead ones and their off branches | ARCHITECTURE.md; CLAUDE.md doctrine 6 | feature | before M18 | open |
+| OPEN-094 | 19 `CITYSIM_*_OFF` env switches still read in `Config::load_from` (ARCHITECTURE § 12 item 10); the doctrine retires a switch when its phase lands: audit, delete the dead ones and their off branches | ARCHITECTURE.md; CLAUDE.md doctrine 6 | feature | before M18 | open |
 | OPEN-095 | The V4 re-shadow diaries (`target/shadow_v4_after/` in the `v4fix` worktree) went with the worktree on 2026-10-18; regenerate on `2712b4a` with `citysim-cli shadow` if a before/after read is wanted (deterministic) | SHADOW_V4 § The sweep | probe | unowned | open |
 
 ## Not included (judged fixed, superseded or too vague at the seeding)
