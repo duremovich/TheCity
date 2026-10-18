@@ -248,6 +248,7 @@ def parse_lives(path: Path):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base", default="main", help="base commit (default main); resolved to a sha")
+    ap.add_argument("--off-base", help="base for the off identity when it differs from --base (a switch spanning sub-phases, e.g. phase 4b against main before 4a); default --base")
     ap.add_argument("--off", action="append", default=[], metavar="VAR",
                     help="env var set to 1 for the off identity (repeatable); required unless --skip off")
     ap.add_argument("--arch", default="", help="comma list of shadow --lives archetypes to show")
@@ -293,6 +294,9 @@ def main():
 
     # Builds: the base (cached) and the candidate, the candidate's binary copied so a rebuild mid-run can't swap it.
     bsrc, bexe = base_tree(sha, broot)
+    osha = git("rev-parse", "--verify", f"{a.off_base}^{{commit}}") if a.off_base else sha
+    oroot = common / "target" / "measure" / f"base-{osha[:12]}"
+    osrc, oexe = base_tree(osha, oroot) if osha != sha else (bsrc, bexe)
     if a.no_build:
         cexe_built = repo / "target" / "release" / f"citysim-cli{EXE}"
         if not cexe_built.exists():
@@ -312,7 +316,7 @@ def main():
             jobs["lives cand"] = pool.submit(run_lives, cexe, repo, out / "lives.txt")
         if "off" not in skip:
             for s in off_seeds:
-                jobs[f"off base {s}"] = pool.submit(run_city, bexe, bsrc, s, a.off_days, broot / f"off_{s}x{a.off_days}", None, True)
+                jobs[f"off base {s}"] = pool.submit(run_city, oexe, osrc, s, a.off_days, oroot / f"off_{s}x{a.off_days}", None, True)
                 jobs[f"off cand {s}"] = pool.submit(run_city, cexe, repo, s, a.off_days, out / f"off_{s}x{a.off_days}", off_env, True)
         if "counters" not in skip:
             for s in seeds:
@@ -328,10 +332,10 @@ def main():
     status = 0
 
     if "off" not in skip:
-        md += [f"## Off identity ({', '.join(a.off)}=1; seeds {a.off_seeds} x {a.off_days} d)", ""]
+        md += [f"## Off identity ({', '.join(a.off)}=1 against {osha[:8]}; seeds {a.off_seeds} x {a.off_days} d)", ""]
         all_ok = True
         for s in off_seeds:
-            ok, lines = off_compare(broot / f"off_{s}x{a.off_days}", out / f"off_{s}x{a.off_days}")
+            ok, lines = off_compare(oroot / f"off_{s}x{a.off_days}", out / f"off_{s}x{a.off_days}")
             all_ok &= ok
             md += [f"- seed {s}: **{'IDENTICAL' if ok else 'DIFFER'}**"] + [f"  - {l}" for l in lines]
         md += ["", f"OFF IDENTITY: {'IDENTICAL' if all_ok else 'DIFFER'}", ""]
