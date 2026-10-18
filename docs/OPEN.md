@@ -38,7 +38,7 @@ The one ledger. Nothing is open anywhere else: a spec's "Implemented: deviations
 | OPEN-030 | Leaders lead: lieutenants take risky orders, the leader's cut off the top (7/8 leaders jailed, downed or dead in a week) | SHADOW_V4 feature 5 | feature | Lives at work | owned |
 | OPEN-031 | The city's scale at 20k: district Precincts and beats near home, the super's near round, Spire homes for 20k CEOs | SHADOW_V4 feature 6; history/SHADOW_V3 gap 3 | feature | Lives at work | owned |
 | OPEN-032 | Wealth has a body: the Flyer flown, an escort after a hit, no night walks through the Sump, bail and a lawyer, an acting exec; retinue travel | SHADOW_V4 feature 7; LIFE_L2 deferred table (retinue travel past M18) | feature | unowned | open |
-| OPEN-033 | Gossip beyond crime: wages, layoffs, weddings, births (Lives at work § 3.6 builds only the minimum: Hired/LaidOff, Wed/Born, Decided) | SHADOW_V4 feature 8; LIVES_AT_WORK § 3.6 | feature | unowned | open |
+| OPEN-033 | Gossip beyond crime: wages, layoffs, weddings, births (Lives at work § 3.6 builds only the minimum: Hired/LaidOff, Wed/Born, Decided) | SHADOW_V4 feature 8; LIVES_AT_WORK § 3.6 | feature | Lives at work (the § 3.6 minimum; the rest unowned) | owned |
 | OPEN-034 | Owners run what they own: an owner-operator path, owner pay from profit | SHADOW_V4 feature 9; LIVES_AT_WORK § 2.5 (not picked) | feature | unowned | open |
 | OPEN-035 | Sickness and age change behaviour: seeking care, sick days, age/illness in fight strength; elders taken in or visited (kin take-in falls to 0 when the children die; no friend or Mission takes an elder) | SHADOW_V4 feature 10; history/SHADOW_V3 gap 10; GOD_SCENARIOS_V12 gap 9 (scenario gap 12) | feature | unowned | open |
 | OPEN-036 | Aftermath: a witnessed manslaughter reported; a parent's answer to a taken child | SHADOW_V4 feature 11 | feature | unowned | open |
@@ -51,7 +51,7 @@ The one ledger. Nothing is open anywhere else: a spec's "Implemented: deviations
 | OPEN-043 | Vacancies refill overnight: a plant outage, strike or massacre never reaches the corner, the El or the lights; the corner empties after a shock instead of filling | GOD_SCENARIOS_V12 gap 2 (scenario gaps 1, 2); JOBS_AND_LIVES carry-over (outages don't land) | feature | unowned | open |
 | OPEN-044 | The El slow-down on outages is not built | JOBS_AND_LIVES phase 1 "Not done" and carry-over; history/SESSIONS carry-overs | feature | unowned | open |
 | OPEN-045 | Weapons sit in the armoury until a muster: a flooded gang fights its street fights bare for weeks | GOD_SCENARIOS_V12 gap 8 (scenario gap 3) | feature | unowned | open |
-| OPEN-046 | The street trade is thin: ~1 street pitch open, no pimp's cut, no pitch in a Sweep district, so the vice levers barely show | GOD_SCENARIOS_V12 gap 3 (scenario gap 4); JOBS_AND_LIVES carry-over "the street trade is thin"; history/SESSIONS carry-overs | calibration | unowned | open |
+| OPEN-046 | The street trade is thin: ~1 street pitch open, no pimp's cut, no pitch in a Sweep district, so the vice levers barely show | GOD_SCENARIOS_V12 gap 3 (scenario gap 4); JOBS_AND_LIVES carry-over "the street trade is thin"; history/SESSIONS carry-overs | calibration | Lives at work (the pimp's cut and the client; the rest unowned) | owned |
 | OPEN-047 | The organ book is supply-bound and rots (2 a body, a quarter a day, 93 % rot on seed 42): a boom moves the price only; organs exported 0 on 42-44 since the cult-typing fix | GOD_SCENARIOS_V12 gap 4 (scenario gap 7); JOBS_AND_LIVES carry-over "organs rot"; SHADOW_V4 demoted bullets; history/SESSIONS "batch 3"; HANDOFF § Open calls | feature | unowned | open |
 | OPEN-048 | Trafficking at 0: no gang holds a Dollhouse front (needs a held Mid/Spire Lot and 900 c); captive chipping is unit-tested only | GOD_SCENARIOS_V12 gap 5 (scenario gap 6); JOBS_AND_LIVES carry-over; history/SESSIONS carry-overs | feature | unowned | open |
 | OPEN-049 | No Rescue of the chipped: no kin term reads `Chipped` | GOD_SCENARIOS_V12 gap 5 (scenario gap 5) | feature | unowned | open |
@@ -98,7 +98,9 @@ The one ledger. Nothing is open anywhere else: a spec's "Implemented: deviations
 | OPEN-090 | DataWiped never fires organically: gangs sell every Data unit at midnight (`gang_data_keep` 0) before orders are written, so a wipe run finds the Hideout store empty | M14_VIRT § Open (phase 5) | calibration | unowned | open |
 | OPEN-091 | The tax band reads only the Treasury balance: with the dole enacted it cut the rate 0.05 → 0.02 while paying ~700-850 a day | P10_POLICY § Found, not fixed | bug | unowned | open |
 | OPEN-092 | Power and Water as goods (the `power` input is coins to the World, a stand-in for a generator) | ECONOMY_V2 § 6 "Waits for later" | feature | unowned | open |
-| OPEN-093 | `python tools/test.py change` measured 264 s summed (budget 3 min, over) | HANDOFF § Main | bug | before M18 | open |
+| OPEN-093 | `python tools/test.py change` over budget: 272 s of tests against 4 min (the budget moved 3 → 4 on 2026-10-18); `wounded`, `wages`, `person` are the heavy binaries | PROCESS_REVIEW § 6 | bug | before M18 | open |
+| OPEN-094 | 21 `CITYSIM_*_OFF` env switches still read in `Config::load_from` (ARCHITECTURE § 12 item 10); the doctrine retires a switch when its phase lands: audit, delete the dead ones and their off branches | ARCHITECTURE.md; CLAUDE.md doctrine 6 | feature | before M18 | open |
+| OPEN-095 | The V4 re-shadow diaries (`target/shadow_v4_after/` in the `v4fix` worktree) went with the worktree on 2026-10-18; regenerate on `2712b4a` with `citysim-cli shadow` if a before/after read is wanted (deterministic) | SHADOW_V4 § The sweep | probe | unowned | open |
 
 ## Not included (judged fixed, superseded or too vague at the seeding)
 

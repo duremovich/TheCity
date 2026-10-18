@@ -60,7 +60,7 @@ Install the commit hook once: `git config core.hooksPath tools/hooks` (fmt check
 - When your work merges: delete your worktree's `target/` (each is 5-13 GB), and expect to be shut down.
 - Subagents do not see the orchestrator's memory; everything they need is in this file and the docs above. A worktree cut before this file was committed will not show it: briefs say "read CLAUDE.md first".
 - A script that rewrites files on Windows writes LF (`newline="\n"` in Python); `git ls-files --eol | grep w/crlf` stays empty.
-- An agent's final reply can be lost; have it also write its report to a file and name the path in the brief.
+- An agent's final reply can arrive hours late in a batch; have it also write its report to a scratchpad file and name the path in the brief.
 - Commits end with the session's attribution lines (the harness supplies them).
 
 ## Closing a milestone
