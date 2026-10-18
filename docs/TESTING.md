@@ -15,7 +15,7 @@ One command each (`python tools/test.py <tier>`); each runs its cargo steps one 
 | tier | command | what | asserts | budget | measured 2026-10-18 |
 |---|---|---|---|---|---|
 | **change** (every change) | `test.py change` | `cargo fmt --check`, `clippy -D warnings`, every non-ignored test: ~1,280 unit and integration tests in `citysim/tests/*.rs`, `citysim-cli`, plus `core_sanity` | each mechanism does what it says; `core_sanity`: seeds 42-44 x 120 days, the coin identity and `escrow_leak` daily, the collapse bounds, the mechanism-existence bullets, ticks/s printed | 3 min | ~4.4 min: `core` 41 s, `wounded` 26 s, `person` 25 s, `wages` 15 s, 80 binaries under 3 s |
-| **merge** (before a merge to main, on the exact tree) | `test.py merge` | `core_year` (seed 42 x 365, the bounds per 30-day window); the behaviour tier (`shadow --assert`: 135 per-archetype bounds on seeds 42-44, calibrated on the noise); the god scenarios (seed 42, 60 days, each against its control) | the city holds a year; people still act like people; the world reacts to a shock | 8 min | year ~100 s, behaviour ~80 s (~3 GB), god ~55 s at 13 scenarios (41 now) |
+| **merge** (before a merge to main, on the exact tree) | `test.py merge` | `core_year` (seed 42 x 365, the bounds per 30-day window); the behaviour tier (`shadow --assert`: 135 per-archetype bounds on seeds 42-44, calibrated on the noise); the god scenarios (seed 42, 60 days, each against its control) | the city holds a year; people still act like people; the world reacts to a shock | 8 min | year ~100 s, behaviour ~80 s (~3 GB), god ~100 s at 20 scenarios (measured 2026-10-18: `god` 61 s, `god_corps` 18 s, `god_districts` 19 s, the three binaries in series, 108 s wall with an incremental build; the 41 took ~130 s) |
 | **milestone** (at a close, or nightly) | `test.py milestone` | Full-vs-Statistical parity (`lod.rs`, the 2,000 city, rates within 15 %); `core_20k` (the 20,000 city, the bounds per capita, determinism of two runs) | the Statistical tier mirrors Full; the big city holds | 20 min | parity ~3.5 min, 20k ~5 min |
 | **diag** (on demand) | `test.py diag --only NAME` | print-only probes (`hit_probe`, `law_probe`, `class_table`, the censuses, `measure_*`) | nothing | — | listed by `test.py diag` |
 
@@ -41,32 +41,32 @@ Plus the human judge at every milestone: a shadow pass (`citysim-cli shadow --as
 
 **A person probe** (`person.rs`): the shipped seed-42 city, one agent pinned at Full, one stimulus through its components, `run_to`, and an assert on what a person would do, read from the agent's own state. A probe that exposes a gap is `#[ignore = "gap: OPEN-nnn"]`; the fix is a behaviour change, not a test change.
 
-**A god scenario** (`god.rs`, `god_corps.rs`, `god_districts.rs`): seed 42, 60 days, the shock at day 10-45, against the shared `OnceLock` control; assert the command applied and one named reaction, print the rest. Name its reaction class. The classes (2026-10-18; the retirement pass settles the final list):
+**A god scenario** (`god.rs`, `god_corps.rs`, `god_districts.rs`): seed 42, 60 days, the shock at day 10-45, against the shared `OnceLock` control; assert the command applied and one named reaction, print the rest. Name its reaction class. The classes (settled 2026-10-18 by the retirement pass, 41 → 20; a new scenario replaces its class's row or names the new class):
 
 | class | scenario |
 |---|---|
-| gang succession | `god_decapitate_gang` (`god_decapitate_twice`, `god_decapitate_close_succession` since M17 4b) |
+| gang succession | `god_decapitate_gang` |
+| a gang's civil war | `god_decapitate_close_succession` |
 | a gang wiped | `god_kill_gang` |
 | unlimited resources | `god_city_takeover_by_force` |
-| the city's money | `god_bankrupt_city` |
-| the law pinned | `god_crackdown_forever` |
-| chrome and violence | `god_chrome_everyone_2` (`god_subscribe_and_chrome_everyone_3`) |
+| chrome and violence | `god_chrome_everyone_2` |
 | the Virt plane and the tech tree | `god_wipe_zetatech_day_20` |
-| grudges, Hunts, vendettas | `god_kill_friend_of_leaders_day_10` (`god_parley_strongest_gangs_in_vendetta`) |
-| the outside world's demand | `god_export_10x` (`god_ambient_boom`, `god_outside_boom`) |
+| grudges, Hunts, vendettas | `god_kill_friend_of_leaders_day_10` |
+| the outside world's demand | `god_export_10x` |
 | corp succession | `god_kill_exec` |
-| the corps' money | `god_wipe_corps` (`god_kill_militech`, `god_raze_arasaka`) |
+| the corps' money | `god_wipe_corps` |
 | a district riot | `god_riot_sump_west` |
 | housing | `god_evict_sump_rent_10` |
-| the hit market | `god_kill_ten_fathers_day_10` (`god_hit_each_exec_day_10`, `god_hit_hollow_leader_from_arasaka`) |
+| the hit market | `god_kill_ten_fathers_day_10` |
 | famine | `god_famine_synth` |
 | transit | `god_line_cut` |
-| the board's levers | `god_fixer_licence_off`, `god_law_locate_on_gang_leader`, `god_call_vote_habitat_after_coerce` (command-applied asserts) |
+| the board's levers | `god_call_vote_habitat_after_coerce` |
 | captives | `god_hostage_captain_spouse_release` |
-| the State | `god_murder_wave`, `god_abroad` |
-| Jobs & lives (phase 8) | `god_kill_workers`, `god_power_cut`, `god_flood_guns`, `god_vice_legal`, `god_chip_everyone_in_debt`, `god_organ_boom`, `god_cult_in_sump`, `god_school_free`, `god_kill_the_young` |
+| the State | `god_murder_wave` |
+| power and the utilities | `god_power_cut` |
+| weapons on the street | `god_flood_guns` |
 
-Write-ups: `docs/GOD_SCENARIOS_V12.md` (live), V1-V11 in `docs/history/`.
+Controls: `god_control`, `god_corps_control`, `god_districts_control`. Write-ups: `docs/GOD_SCENARIOS_V12.md` (live; its "Retired 2026-10-18" section lists the 21 cut with the unit test that carries each), V1-V11 in `docs/history/`.
 
 **The behaviour tier** (`citysim-cli/src/shadow.rs`, `CHECKS`): each row's bound sits a cushion outside the range the row read on main and seven config butterflies (`[lod] stat_violence_mult` 0.98-1.03, `max_coarse` 149/151, via `CITYSIM_ASSETS`). Cushions: walking + max(1 h, 15 %), the longest nightly block − 0.5 h, energy 0 + 2 h a week, known contacts met x 0.6, commute aborts + 0.05 a day, paid of worked and waged workdays − 0.1, the reporter's work hours x 0.5; refunds ≤ 1 a week and the fighter in the pit ≥ 3 of 4 bouts are absolute. **When it fails**: read the row's per-seed lines, then the diaries (`--out`). Re-calibrate only when the city changed for a wanted reason: eight runs (main and the seven butterflies, ~1.5 min each), each row's lowest and highest pooled value plus the cushions, old and new ranges in the commit message. One row that moved for a known reason is widened from one run. A stat-table regeneration should pass without one; that is the point.
 
