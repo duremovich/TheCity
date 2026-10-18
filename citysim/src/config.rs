@@ -409,7 +409,11 @@ pub struct ServiceCfg {
     /// warden, jailer, super), the near round, tied housing and the parent's
     /// answer to a taken child (`CITYSIM_CIVIC_OFF=1`).
     pub civic: bool,
-    /// Phase 4: the street and freight (reserved, unread).
+    /// Phase 4 (§ 2.3): the street and freight: the cab roll shared by both
+    /// tiers and the driver's body, the parcel, the lift, the client, the
+    /// pimp's round, the dealer's corner and regulars
+    /// (`CITYSIM_LIVES_STREET_OFF=1`; `CITYSIM_STREET_OFF` is Jobs & lives
+    /// phase 2's `[jobs2] street` switch, the pitches and rounds themselves).
     pub street: bool,
     /// Phase 5: the tower and the brokers (reserved, unread).
     pub tower: bool,
@@ -452,6 +456,44 @@ pub struct ServiceCfg {
     /// teacher_floor) × knowledge` to `Child.edu_taught`.
     #[serde(skip_serializing_if = "is_zero_f32_cfg")]
     pub teacher_floor: f32,
+    // --- Phase 4 (the street), each left out of a save at its default
+    // (`ServiceCfg::strip_street`).
+    /// § 2.3 (cab): a rider waits this long at the door for a driver's body;
+    /// farther, the Garage's off-screen cab takes the ride (the leg timed).
+    #[serde(skip_serializing_if = "is_zero_u32_cfg")]
+    pub cab_wait_ticks: u32,
+    /// § 2.3 (street worker): a client is a body out walking within this
+    /// many tiles of the pitch before the district's hashed draw.
+    #[serde(skip_serializing_if = "is_zero_u32_cfg")]
+    pub client_tiles: u32,
+    /// § 2.3 (pimp): a pitch is protected by a pimp's body within this many
+    /// tiles (a Statistical pimp credited by the clock in pitch hours).
+    #[serde(skip_serializing_if = "is_zero_u32_cfg")]
+    pub pimp_tiles: u32,
+    /// § 2.3 (pimp): the share of his cut the pimp passes up to the gang.
+    #[serde(skip_serializing_if = "is_zero_f32_cfg")]
+    pub pimp_pass_up: f32,
+    /// § 2.3 (pimp): a pimp absent from every pitch of his for this many
+    /// days loses the district (`name_pimps`).
+    #[serde(skip_serializing_if = "is_zero_u16_cfg")]
+    pub pimp_absent_days: u16,
+    /// § 2.3 (loader): after a pilfer, the owner reports a Theft on this
+    /// chance (a hash of the loader and the day).
+    #[serde(skip_serializing_if = "is_zero_f32_cfg")]
+    pub p_short_report: f32,
+    /// § 2.3 (dealer): a lookout at the corner or in the Bar multiplies the
+    /// Dealing witness roll by this.
+    #[serde(skip_serializing_if = "is_zero_f32_cfg")]
+    pub witness_lookout_mult: f32,
+    /// § 2.3 (cab): a `split` fare-duty trade's shifts under the street
+    /// switch, one a driver in turn by id (the commute hours: the `split`
+    /// day/night pair is on duty at neither). Empty: the `split` rule.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cab_shifts: Vec<(u16, u16)>,
+}
+
+fn is_zero_u32_cfg(v: &u32) -> bool {
+    *v == 0
 }
 
 fn is_zero_f32_cfg(v: &f32) -> bool {
@@ -484,6 +526,14 @@ impl Default for ServiceCfg {
             breakout_crew: 0,
             neglect_days: 0,
             teacher_floor: 0.0,
+            cab_wait_ticks: 0,
+            client_tiles: 0,
+            pimp_tiles: 0,
+            pimp_pass_up: 0.0,
+            pimp_absent_days: 0,
+            p_short_report: 0.0,
+            witness_lookout_mult: 0.0,
+            cab_shifts: Vec::new(),
         }
     }
 }
@@ -506,6 +556,21 @@ impl ServiceCfg {
         self.breakout_crew = d.breakout_crew;
         self.neglect_days = d.neglect_days;
         self.teacher_floor = d.teacher_floor;
+    }
+
+    /// Lives at work phase 4: the street switch off and its keys at their
+    /// defaults (the off switches; nothing reads them off).
+    pub fn strip_street(&mut self) {
+        let d = ServiceCfg::default();
+        self.street = false;
+        self.cab_wait_ticks = d.cab_wait_ticks;
+        self.client_tiles = d.client_tiles;
+        self.pimp_tiles = d.pimp_tiles;
+        self.pimp_pass_up = d.pimp_pass_up;
+        self.pimp_absent_days = d.pimp_absent_days;
+        self.p_short_report = d.p_short_report;
+        self.witness_lookout_mult = d.witness_lookout_mult;
+        self.cab_shifts = d.cab_shifts;
     }
 }
 
@@ -551,6 +616,11 @@ pub struct ServesCfg {
     /// config off (`Config::strip_civic`), so the off save matches main.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub civic: bool,
+    /// Lives at work phase 4: a street row (cab driver, courier, loader,
+    /// street worker, pimp, dealer, vendor, rickshaw, tinker), live only with
+    /// `[service] street` and stripped off (`Config::strip_street`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub street: bool,
 }
 
 impl Default for ServesCfg {
@@ -567,6 +637,7 @@ impl Default for ServesCfg {
             valence: 0.1,
             event_on: Vec::new(),
             civic: false,
+            street: false,
         }
     }
 }
@@ -1944,7 +2015,10 @@ impl Config {
         for s in &self.serves {
             let trade = self.trades.iter().any(|t| t.id == s.key);
             let legacy = Role::ALL.iter().any(|r| format!("{r:?}") == s.key);
-            if !trade && !legacy {
+            // Lives at work phase 4: the pimp and the dealer hold no trade
+            // row (gang posts named by `vice::name_pimps` and `stims::is_dealer`).
+            let gang_post = s.key == "pimp" || s.key == "dealer";
+            if !trade && !legacy && !gang_post {
                 out.push(format!("[[serves]] key {:?} is neither a trade id nor a Role", s.key));
             }
         }
@@ -5609,6 +5683,12 @@ pub struct StimsCfg {
     pub p_stat_detox: f32,
     /// The GetHigh goal's flat.
     pub get_high_flat: f32,
+    /// Lives at work phase 4 (§ 2.3): a dealer stands a corner (a HangOut
+    /// spot of the gang's most-held district) when the gang has no venue,
+    /// instead of the nearest Bar. Read with `[service] street`; off in a
+    /// save at false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub deal_corner: bool,
 }
 
 impl Default for StimsCfg {
@@ -5645,6 +5725,7 @@ impl StimsCfg {
             detox_price: 80,
             detox_mult: 0.3,
             p_stat_detox: 0.05,
+            deal_corner: false,
             get_high_flat: 0.0,
         }
     }
@@ -7725,6 +7806,15 @@ impl Config {
         }
     }
 
+    /// Lives at work phase 4: the street switch off, its `[service]` keys at
+    /// their defaults, the street `[[serves]]` rows gone and `[stims]
+    /// deal_corner` off (the off switches; nothing reads them off).
+    pub fn strip_street(&mut self) {
+        self.service.strip_street();
+        self.serves.retain(|r| !r.street);
+        self.stims.deal_corner = false;
+    }
+
     /// Lives at work phase 2: the phase's deed keys at 0 in every deed table
     /// (the off switches; the deeds are never posted off).
     pub fn without_household_deeds(&mut self) {
@@ -7814,6 +7904,7 @@ impl Config {
             cfg.household = HouseholdCfg::default();
             cfg.without_household_deeds();
             cfg.strip_civic();
+            cfg.strip_street();
         }
         // Lives at work phase 3 (§ 2.2, § 3.5): the civic switch's A/B and
         // identity device; and a config with `[service] civic = false` by
@@ -7824,6 +7915,15 @@ impl Config {
         }
         if !cfg.service.civic {
             cfg.strip_civic();
+        }
+        // Lives at work phase 4 (§ 2.3): the street switch's A/B and identity
+        // device, the same shape (`CITYSIM_STREET_OFF` is taken: Jobs & lives
+        // phase 2's `[jobs2] street`, above).
+        if std::env::var("CITYSIM_LIVES_STREET_OFF").is_ok_and(|v| v == "1") {
+            cfg.service.street = false;
+        }
+        if !cfg.service.street {
+            cfg.strip_street();
         }
         // Lives at work phase 2 (§ 3): the household's A/B and identity device
         // (the section and the phase's deed keys cleared, so the off save

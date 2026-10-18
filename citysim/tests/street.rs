@@ -814,3 +814,455 @@ fn test_vagrancy_counts_rollable_sleepers_and_homeless_district_coverage() {
     w.districts[i].homes = homes;
     assert!((street::vagrancy_p(&w, d) - 0.2).abs() < 1e-6);
 }
+
+mod common;
+
+/// Lives at work phase 4 (docs/LIVES_AT_WORK.md § 2.3, § 9.1): the street
+/// and freight. Unit tests in the shipped seed-42 city with the
+/// preconditions set by hand; each failed on the base `1f37f78` (no
+/// `[service] street`). The probes are in `tests/person.rs`.
+mod lives_street {
+
+    use super::common::{self, coins, set_coins};
+    use citysim::components::{Brain, Building, BuildingKind, Job, Lod, Position, ServeKind};
+    use citysim::exec::ExecState;
+    use citysim::exec::GotoTarget;
+    use citysim::goap::LocationKey;
+    use citysim::systems::streetwork::{self, RideBy};
+    use citysim::systems::{service, streetwork as sw};
+    use citysim::{Config, EntityId, EventKind, World, TICKS_PER_DAY, TICKS_PER_HOUR};
+
+    /// Day 2, 08:00: the trades hired, the commutes about to start.
+    const DAY2_EIGHT: u64 = 2 * TICKS_PER_DAY + 8 * TICKS_PER_HOUR;
+
+    fn city_with(edit: impl FnOnce(&mut Config)) -> World {
+        let mut w = common::world_with(edit);
+        assert!(service::street_on(&w), "the shipped config has the street switch on");
+        w.run_ticks(DAY2_EIGHT);
+        w
+    }
+
+    fn jobs2(w: &World) -> citysim::stats::Jobs2Cols {
+        w.stats.current.jobs2.clone().unwrap_or_default()
+    }
+
+    /// The first Garage with a cab driver and that driver.
+    fn garage_and_driver(w: &World) -> (EntityId, EntityId) {
+        let role = w.config.trade_role("cab_driver").expect("the cab_driver trade");
+        for &g in w.buildings_of_kind(BuildingKind::Garage) {
+            if let Some(&d) = w.staff_of(g).iter().find(|&&s| w.comp::<Job>(s).is_some_and(|j| j.role == role)) {
+                return (g, d);
+            }
+        }
+        panic!("no Garage with a cab driver on day 2");
+    }
+
+    /// A housed day worker who lives `cab_min_tiles` or more from work (the
+    /// roll's premise), with the fare and the reserve, not a driver.
+    fn far_commuter(w: &World, min: u32) -> Option<EntityId> {
+        w.citizens().into_iter().find(|&a| {
+            let Some(j) = w.comp::<Job>(a) else { return false };
+            let Some(e) = j.employer else { return false };
+            let home = w.comp::<citysim::Household>(a).and_then(|h| h.home);
+            let (Some(hd), Some(wd)) =
+                (home.and_then(|h| w.comp::<Building>(h)).map(|b| b.door), w.comp::<Building>(e).map(|b| b.door))
+            else {
+                return false;
+            };
+            hd.manhattan(wd) >= min
+                && j.shifts == vec![(540, 1080)]
+                && w.has::<Brain>(a)
+                && !w.has::<citysim::Sentence>(a)
+                && w.gang_of(a).is_none()
+                && !citysim::systems::trades::row_of(w, j.role)
+                    .is_some_and(|r| r.duty == citysim::config::TradeDuty::Fare)
+        })
+    }
+
+    /// § 2.3 (cab): a Full commuter rolls the same hash and gets the same pick
+    /// as a Statistical one: `cab_roll` is tier-blind, so the same agent on the
+    /// same day reads the same `Ride` whatever its `Lod`; `stat_cab` is that
+    /// roll plus `pay_ride`.
+    #[test]
+    fn test_full_commuter_rolls_the_same_cab_as_a_statistical_one() {
+        let mut w = city_with(|c| c.jobs2.p_cab = 1.0);
+        let min = w.config.jobs2.cab_min_tiles;
+        let a = far_commuter(&w, min).expect("a far commuter");
+        set_coins(&mut w, a, 500);
+        let job = w.comp::<Job>(a).cloned().expect("job");
+        w.comp_mut::<Brain>(a).expect("brain").lod = Lod::Full;
+        let full = sw::cab_roll(&w, a, &job).expect("a ride at p_cab = 1");
+        w.comp_mut::<Brain>(a).expect("brain").lod = Lod::Statistical;
+        let stat = sw::cab_roll(&w, a, &job).expect("a ride at p_cab = 1");
+        assert_eq!(full, stat, "one roll for both tiers");
+        assert!(full.fare >= w.config.jobs2.fare_base);
+        // The Statistical path is the roll plus the payment: the same coins move.
+        let (before, j0) = (coins(&w, a), jobs2(&w));
+        let paid = sw::pay_ride(&mut w, a, &stat);
+        assert_eq!(paid, stat.fare);
+        assert_eq!(coins(&w, a), before - stat.fare);
+        let j = jobs2(&w);
+        match stat.by {
+            RideBy::Cab(_) => {
+                assert_eq!((j.cab_trips - j0.cab_trips, j.cab_fares - j0.cab_fares), (1, stat.fare))
+            }
+            RideBy::Rickshaw(_) => {
+                assert_eq!((j.rickshaw_trips - j0.rickshaw_trips, j.rickshaw_fares - j0.rickshaw_fares), (1, stat.fare))
+            }
+        }
+        // `p_cab = 0`: no roll for either tier.
+        let w0 = city_with(|c| c.jobs2.p_cab = 0.0);
+        let b = far_commuter(&w0, min).expect("a far commuter");
+        assert!(sw::cab_roll(&w0, b, &w0.comp::<Job>(b).cloned().expect("job")).is_none());
+    }
+
+    /// § 2.3 (cab, the driver's body): a Full commuter's GoTo to work at
+    /// `p_cab = 1` is a cab: the fare paid, the leg timed, and with a driver's
+    /// body on duty within `cab_wait_ticks` a `CabRide` the driver's `fare_plan`
+    /// drives (the pick-up a `Fare` encounter); the Garage's off-screen cab
+    /// takes it otherwise (`cab_rides_unmanned`). One roll a day a rider.
+    #[test]
+    fn test_full_commuters_cab_is_timed_and_a_driver_drives_it() {
+        let mut w = city_with(|c| {
+            c.jobs2.p_cab = 1.0;
+            c.service.cab_wait_ticks = 100_000;
+        });
+        let min = w.config.jobs2.cab_min_tiles;
+        let (garage, driver) = garage_and_driver(&w);
+        // The rider: a far commuter of a Garage's catchment (any: the Garage
+        // nearest home is picked, the one with drivers and rides left).
+        let a = far_commuter(&w, min).expect("a far commuter");
+        set_coins(&mut w, a, 500);
+        w.comp_mut::<Brain>(a).expect("brain").lod = Lod::Full;
+        // A lawful rider pays (the El's fare rule: a lawless one dodges).
+        w.comp_mut::<citysim::Personality>(a).expect("personality").lawfulness = 0.9;
+        // The driver on duty all day, a Full body at his Garage.
+        if let Some(j) = w.comp_mut::<Job>(driver) {
+            j.shifts = vec![(1, 1440)];
+        }
+        w.comp_mut::<Brain>(driver).expect("brain").lod = Lod::Full;
+        w.enter_building(driver, garage);
+        // Every other cab driver off duty, so the pick is this one.
+        let role = w.config.trade_role("cab_driver").expect("trade");
+        for d in w.citizens() {
+            if d != driver && w.comp::<Job>(d).is_some_and(|j| j.role == role) {
+                if let Some(j) = w.comp_mut::<Job>(d) {
+                    j.shifts = vec![(0, 1)];
+                }
+            }
+        }
+        let work = w.comp::<Job>(a).and_then(|j| j.employer).expect("work");
+        let door = w.comp::<Building>(work).expect("work").door;
+        let target = GotoTarget { dest: LocationKey::Workplace, tile: door, building: Some(work) };
+        let before = coins(&w, a);
+        // The city's own Full riders rode today already: read the deltas.
+        let j0 = jobs2(&w);
+        let state = sw::full_cab(&mut w, a, &target).expect("a cab at p_cab = 1");
+        let ExecState::GotoTimed { arrive_tick, .. } = state else { panic!("a timed leg, not {state:?}") };
+        assert!(arrive_tick > w.tick, "the ride takes time");
+        assert!(coins(&w, a) < before, "the fare paid");
+        let j = jobs2(&w);
+        let rides = |j: &citysim::stats::Jobs2Cols| j.cab_rides_driven + j.cab_rides_unmanned + j.rickshaw_trips;
+        assert_eq!(rides(&j) - rides(&j0), 1, "one ride");
+        assert_eq!(j.fares_short, j0.fares_short, "a lawful rider pays");
+        if j.cab_rides_driven > j0.cab_rides_driven {
+            assert!(sw::on_fare(&w, driver), "the driver holds the ride");
+            assert_eq!(
+                sw::fare_tile(&w, driver),
+                Some(w.comp::<Position>(a).expect("pos").tile).or(sw::fare_tile(&w, driver))
+            );
+            assert!(
+                j.served[ServeKind::Fare as usize] > j0.served[ServeKind::Fare as usize],
+                "the pick-up is a Fare encounter"
+            );
+            assert!(service::regulars_of(&w, driver).iter().any(|r| r.who == a), "the driver's ledger names the rider");
+            // The driver's plan: a leg to the rider's door, then to the work door.
+            let p = sw::fare_plan(&mut w, driver).expect("a fare plan");
+            assert_eq!(p.steps.len(), 1);
+            let from = sw::fare_tile(&w, driver).expect("the leg's tile");
+            // Stand him at the rider's door: the next leg is the work door.
+            w.leave_building(driver);
+            w.comp_mut::<Position>(driver).expect("pos").tile = from;
+            sw::fare_plan(&mut w, driver).expect("the second leg");
+            assert_eq!(sw::fare_tile(&w, driver), Some(door));
+            w.comp_mut::<Position>(driver).expect("pos").tile = door;
+            // The ride done: he stands by at the Garage (a GoTo back, a Rest).
+            let back = sw::fare_plan(&mut w, driver).expect("the stand-by");
+            assert!(!sw::on_fare(&w, driver));
+            assert_eq!(back.steps[0].target, Some(garage));
+            assert!(sw::standing_by(&w, driver));
+        }
+        // One roll a day a rider.
+        assert!(sw::full_cab(&mut w, a, &target).is_none(), "no second roll today");
+        // A rider the El's fare rule says dodges rides short.
+        let mut w2 = city_with(|c| {
+            c.jobs2.p_cab = 1.0;
+            c.transit.dodge_always = 1.0;
+        });
+        let b = far_commuter(&w2, min).expect("a far commuter");
+        set_coins(&mut w2, b, 500);
+        w2.comp_mut::<Brain>(b).expect("brain").lod = Lod::Full;
+        let work2 = w2.comp::<Job>(b).and_then(|j| j.employer).expect("work");
+        let door2 = w2.comp::<Building>(work2).expect("work").door;
+        let t2 = GotoTarget { dest: LocationKey::Workplace, tile: door2, building: Some(work2) };
+        let (before, short0) = (coins(&w2, b), jobs2(&w2).fares_short);
+        sw::full_cab(&mut w2, b, &t2).expect("a cab");
+        assert_eq!(coins(&w2, b), before, "a dodged fare moves no coins");
+        assert_eq!(jobs2(&w2).fares_short, short0 + 1);
+        assert!(w2.events.iter().any(|e| e.kind == EventKind::FareShort && e.actors[0] == b));
+    }
+
+    /// The off city (`[service] street = false`): no street row, no street key,
+    /// no counter written in three days; the cab roll still runs for the
+    /// Statistical tier as before (Jobs & lives phase 2's `cab_trips`).
+    #[test]
+    fn test_off_city_writes_nothing() {
+        let mut off = common::world_with(|c| c.strip_street());
+        assert!(!service::street_on(&off));
+        assert!(off.config.serves.iter().all(|r| !r.street) && off.config.service.cab_wait_ticks == 0);
+        assert!(!off.config.stims.deal_corner);
+        off.run_ticks(3 * TICKS_PER_DAY);
+        for r in &off.stats.history {
+            let j = r.jobs2.clone().unwrap_or_default();
+            assert_eq!(
+                (j.cab_rides_driven, j.cab_rides_unmanned, j.fares_short, j.parcels_delivered, j.lifts),
+                (0, 0, 0, 0, 0)
+            );
+            assert_eq!((j.served[ServeKind::Fare as usize], j.served[ServeKind::Parcel as usize]), (0, 0));
+        }
+        assert!(off.jobs2.cab_rides.is_empty() && off.jobs2.cab_rolled.is_empty() && off.jobs2.parcels.is_empty());
+        let ron = citysim::save::to_ron(&off);
+        assert!(!ron.contains("cab_wait_ticks") && !ron.contains("cab_rides:") && !ron.contains("deal_corner"));
+        let _ = streetwork::on(&off);
+    }
+
+    /// A Freight Yard's courier (a `round` duty at the Yard).
+    fn yard_and_courier(w: &World) -> (EntityId, EntityId) {
+        for &y in w.buildings_of_kind(BuildingKind::FreightYard) {
+            let c = w.staff_of(y).iter().copied().find(|&s| citysim::systems::trades::on_round(w, s));
+            if let Some(c) = c {
+                return (y, c);
+            }
+        }
+        panic!("no Freight Yard with a courier on day 2");
+    }
+
+    /// A building other than `not` with a staff member made present: a Full
+    /// body inside on an all-day shift (the first for which `present` holds).
+    fn staffed_with_present(w: &mut World, not: EntityId) -> (EntityId, EntityId) {
+        let cands: Vec<(EntityId, EntityId)> = w
+            .citizens()
+            .into_iter()
+            .filter_map(|s| Some((w.comp::<Job>(s)?.employer?, s)))
+            .filter(|&(b, s)| {
+                b != not
+                    && w.has::<Brain>(s)
+                    && !w.has::<citysim::Sentence>(s)
+                    && w.comp::<Building>(b).is_some_and(|x| x.kind != BuildingKind::FreightYard)
+            })
+            .collect();
+        for (b, s) in cands {
+            if let Some(j) = w.comp_mut::<Job>(s) {
+                j.shifts = vec![(1, 1440)];
+            }
+            citysim::systems::lod::set_lod(w, s, Lod::Full);
+            w.enter_building(s, b);
+            if service::present(w, s, b) {
+                return (b, s);
+            }
+        }
+        panic!("no staff member could be made present");
+    }
+
+    /// § 2.3 (courier): a parcel is handed to its recipient present at the
+    /// stop (a `Parcel` encounter naming him); with nobody present it stays,
+    /// and at the courier's shift end it goes back to the Yard.
+    #[test]
+    fn test_parcel_delivered_to_a_present_recipient_and_returned_otherwise() {
+        let mut w = city_with(|_| {});
+        let (yard, courier) = yard_and_courier(&w);
+        w.jobs2.parcels.clear();
+        let (b, r) = staffed_with_present(&mut w, yard);
+        let day = w.day();
+        let parcel = |to: EntityId, at: EntityId| sw::Parcel { from: yard, to, at, yard, fee: 0, day };
+        w.jobs2.parcels.push(parcel(r, b));
+        let j0 = jobs2(&w);
+        sw::courier_stop(&mut w, courier, b);
+        let j = jobs2(&w);
+        assert_eq!(j.parcels_delivered - j0.parcels_delivered, 1, "delivered");
+        assert!(w.jobs2.parcels.is_empty());
+        assert!(j.served[ServeKind::Parcel as usize] > j0.served[ServeKind::Parcel as usize], "a Parcel encounter");
+        assert!(service::regulars_of(&w, courier).iter().any(|x| x.who == r), "the courier's ledger names him");
+        // Nobody present at the stop: every staff member a Full body outside.
+        let staff = w.staff_of(b).to_vec();
+        for &s in &staff {
+            citysim::systems::lod::set_lod(&mut w, s, Lod::Full);
+            w.leave_building(s);
+        }
+        assert!(staff.iter().all(|&s| !service::present(&w, s, b)));
+        w.jobs2.parcels.push(parcel(r, b));
+        sw::courier_stop(&mut w, courier, b);
+        assert_eq!(w.jobs2.parcels.len(), 1, "no one to sign: the parcel stays");
+        assert_eq!(jobs2(&w).parcels_delivered, j.parcels_delivered);
+        // The shift's end: the stop was on his round, so it goes back.
+        w.jobs2.parcel_stops.insert(yard, vec![b]);
+        sw::parcels_back(&mut w, courier);
+        assert!(w.jobs2.parcels.is_empty(), "returned");
+        assert_eq!(jobs2(&w).parcels_returned - j0.parcels_returned, 1);
+    }
+
+    /// The loaders' pilfer through the first night's end (06:00 on day 3),
+    /// with `p_pilfer` 1: (pilfered, pilfer_reports, Theft reports on a
+    /// pilferer).
+    fn pilfer_night(p_short: f32) -> (u32, u32, usize) {
+        let mut w = city_with(|c| {
+            c.jobs2.p_pilfer = 1.0;
+            c.service.p_short_report = p_short;
+        });
+        w.run_ticks(23 * TICKS_PER_HOUR);
+        let sum = |f: fn(&citysim::stats::Jobs2Cols) -> u32| -> u32 {
+            w.stats.history.iter().chain(std::iter::once(&w.stats.current)).map(|r| r.jobs2.as_ref().map_or(0, f)).sum()
+        };
+        let thieves: Vec<EntityId> =
+            w.events.iter().filter(|e| e.kind == EventKind::Pilfered).map(|e| e.actors[0]).collect();
+        let reports = w
+            .events
+            .iter()
+            .filter(|e| e.kind == EventKind::Report && thieves.contains(&e.actors[0]) && e.text.contains("Theft"))
+            .count();
+        (sum(|j| j.pilfered), sum(|j| j.pilfer_reports), reports)
+    }
+
+    /// § 2.3 (loader): a pilfered unit files a Theft report against the
+    /// loader when the owner's hashed roll hits (`p_short_report` 1: every
+    /// one), and never at `p_short_report` 0.
+    #[test]
+    fn test_pilfered_unit_files_a_theft_report_on_the_hashed_hit_and_never_at_zero() {
+        let (pilfered, filed, reports) = pilfer_night(1.0);
+        assert!(pilfered > 0, "a pilfer at p_pilfer 1");
+        assert_eq!(filed, pilfered, "every pilfer reported at 1");
+        assert!(reports > 0, "a Theft report names a pilferer");
+        let (pilfered, filed, reports) = pilfer_night(0.0);
+        assert!(pilfered > 0);
+        assert_eq!((filed, reports), (0, 0), "never at 0");
+    }
+
+    /// § 2.3 (loader): the shift's lifts are the loader's at its last hour
+    /// (`service::hourly`, both tiers through `present`): `lifts` and
+    /// `served[Crate]` by the Yard's units over its loaders on shift, one
+    /// `Served` memory with no subject; none an hour earlier.
+    #[test]
+    fn test_loader_lifts_the_yards_units_at_the_shifts_last_hour() {
+        let mut w = city_with(|_| {});
+        let crate_row = |w: &World, s: EntityId| {
+            w.comp::<Job>(s).and_then(|j| service::row_for(w, j.role)).is_some_and(|r| r.kind == ServeKind::Crate)
+        };
+        let (yard, loader) = w
+            .buildings_of_kind(BuildingKind::FreightYard)
+            .iter()
+            .find_map(|&y| w.staff_of(y).iter().copied().find(|&s| crate_row(&w, s)).map(|s| (y, s)))
+            .expect("a loader");
+        // Day 2, 08:00: his shift runs to 10:00, then to 09:00.
+        if let Some(j) = w.comp_mut::<Job>(loader) {
+            j.shifts = vec![(60, 600)];
+        }
+        citysim::systems::lod::set_lod(&mut w, loader, Lod::Full);
+        w.enter_building(loader, yard);
+        assert!(service::present(&w, loader, yard));
+        w.jobs2.yard_units.insert(yard, (40, 0));
+        let n = citysim::systems::industry::shift_lifts(&w, yard);
+        assert!(n >= 1);
+        let served = |w: &World| {
+            let m = w.comp::<citysim::components::Memory>(loader).expect("memory");
+            m.entries.iter().any(|e| e.kind == citysim::components::MemoryKind::Served && e.subject.is_none())
+        };
+        let j0 = jobs2(&w);
+        service::hourly(&mut w);
+        assert!(!served(&w), "not before the shift's last hour");
+        if let Some(j) = w.comp_mut::<Job>(loader) {
+            j.shifts = vec![(60, 540)];
+        }
+        service::hourly(&mut w);
+        let j = jobs2(&w);
+        assert!(j.lifts - j0.lifts >= n, "his lifts counted");
+        assert!(j.served[ServeKind::Crate as usize] - j0.served[ServeKind::Crate as usize] >= n);
+        assert!(served(&w), "the lift's memory, no subject");
+    }
+
+    /// The street test's night: a working street pitch with no pimp, the
+    /// visit and assault rolls certain, and a lawless Full client on its
+    /// tile, every other body near it wanting nothing. (world, worker, client)
+    fn street_night(on: bool) -> (World, EntityId, EntityId) {
+        let mut w = if on { common::world() } else { common::world_with(|c| c.strip_street()) };
+        w.run_ticks(TICKS_PER_DAY + 1);
+        w.config.vice.p_street_visit = 10.0;
+        w.config.vice.p_assault_street = 10.0;
+        w.jobs2.vice.pimps.clear();
+        let idle: Vec<EntityId> = w
+            .citizens()
+            .into_iter()
+            .filter(|&a| {
+                w.has::<Brain>(a)
+                    && citysim::systems::demography::is_adult(&w, a)
+                    && w.gang_of(a).is_none()
+                    && !w.has::<Job>(a)
+                    && !w.has::<citysim::Sentence>(a)
+            })
+            .collect();
+        let (o, c) = (idle[2], idle[3]);
+        citysim::systems::lod::set_lod(&mut w, o, Lod::Statistical);
+        let trade = w.config.trade_role("street_worker").and_then(|r| r.trade()).expect("the street row");
+        let spot = w.comp::<Position>(o).expect("pos").tile;
+        let p = citysim::components::Pitch {
+            spot,
+            district: w.district_of(spot),
+            trade,
+            owner: o,
+            since: w.tick,
+            take_today: 0,
+            take_week: 0,
+            cut_to: None,
+            stock: 0,
+            closed_until: None,
+            dry_days: 0,
+            jobs_today: 0,
+        };
+        w.jobs2.pitches.insert(o, p.clone());
+        citysim::systems::lod::set_lod(&mut w, c, Lod::Full);
+        w.leave_building(c);
+        w.comp_mut::<Position>(c).expect("pos").tile = spot;
+        set_coins(&mut w, c, 200);
+        w.comp_mut::<citysim::Personality>(c).expect("personality").lawfulness = 0.1;
+        let r = w.config.service.client_tiles.max(12);
+        for a in w.agents_near(spot, r, None) {
+            if let Some(n) = w.comp_mut::<citysim::Needs>(a) {
+                n.intimacy = if a == c { 0.0 } else { 1.0 };
+                n.hunger = 1.0;
+            }
+        }
+        w.tick = TICKS_PER_DAY + 2 * 60;
+        assert!(sw::working(&w, &p));
+        citysim::systems::vice::hourly(&mut w);
+        (w, o, c)
+    }
+
+    /// § 2.3 (street worker): the night's client is a body out near the
+    /// pitch before the district's hashed draw: the encounter names him (the
+    /// worker's ledger), and a lawless client is the one who robs on the
+    /// assault roll. Off, no client near is read.
+    #[test]
+    fn test_street_client_is_a_body_near_the_pitch_and_a_lawless_one_robs() {
+        let (w, o, c) = street_night(true);
+        let j = jobs2(&w);
+        assert_eq!(j.street_clients_near, 1, "the body near the pitch");
+        assert_eq!(j.served[ServeKind::Client as usize], 1, "a Client encounter");
+        assert!(service::regulars_of(&w, o).iter().any(|x| x.who == c), "the worker's ledger names the client");
+        assert!(
+            w.events.iter().any(|e| e.kind == EventKind::Assault && e.actors[0] == c && e.actors[1] == o),
+            "the lawless client robs"
+        );
+        let (w, _, _) = street_night(false);
+        let j = jobs2(&w);
+        assert_eq!((j.street_clients_near, j.served[ServeKind::Client as usize]), (0, 0));
+    }
+}

@@ -163,6 +163,9 @@ fn test_full_vs_statistical_within_15pct() {
         // Lives at work phase 3 (§ 6): the super's door rent and all rent
         // paid (the door rent share by tier, printed).
         door: [f64; 2],
+        // Lives at work phase 4a (§ 6): cab and rickshaw rides (paid or
+        // dodged) and the commutes (the cab rides per commuter-day by tier).
+        cab: [f64; 2],
     }
     // The paid-leisure mirror (Jobs & lives phase 7b): the venue kinds of
     // the calibration city's ladder.
@@ -318,6 +321,15 @@ fn test_full_vs_statistical_within_15pct() {
                 w.stats.history.iter().map(|r| r.jobs2.as_ref().map_or(0.0, |j| j.door_rent as f64)).sum::<f64>(),
                 w.stats.history.iter().map(|r| r.rent_paid as f64).sum::<f64>(),
             ],
+            cab: {
+                let j = |f: fn(&citysim::stats::Jobs2Cols) -> u32| {
+                    w.stats.history.iter().map(|r| r.jobs2.as_ref().map_or(0.0, |j| f64::from(f(j)))).sum::<f64>()
+                };
+                let t = |f: fn(&citysim::stats::TransitCols) -> u32| {
+                    w.stats.history.iter().map(|r| f64::from(f(&r.transit))).sum::<f64>()
+                };
+                [j(|c| c.cab_trips + c.rickshaw_trips + c.fares_short), t(|c| c.commutes) + t(|c| c.stat_commutes)]
+            },
         }
     }
     // Six cities per tier, pooled: one 30-day city's theft rate varies by a
@@ -336,7 +348,8 @@ fn test_full_vs_statistical_within_15pct() {
         let paid = std::array::from_fn(|j| runs.iter().map(|r| r.paid[j]).sum::<f64>() / n);
         let encounters = std::array::from_fn(|j| runs.iter().map(|r| r.encounters[j]).sum::<f64>());
         let door = std::array::from_fn(|j| runs.iter().map(|r| r.door[j]).sum::<f64>());
-        Run { rates, actors: counts.map(|c| c / total), venues, paid, encounters, door }
+        let cab = std::array::from_fn(|j| runs.iter().map(|r| r.cab[j]).sum::<f64>());
+        Run { rates, actors: counts.map(|c| c / total), venues, paid, encounters, door, cab }
     };
     let full = pooled(Lod::Full);
     let stat = pooled(Lod::Statistical);
@@ -436,6 +449,17 @@ fn test_full_vs_statistical_within_15pct() {
             share(&stat),
             full.door[0],
             stat.door[0]
+        );
+        // Lives at work phase 4a (§ 6): cab rides per commuter-day by tier
+        // (one roll, `cab_roll`, for both; a Full lawless rider may dodge,
+        // counted, where `stat_cab` always pays; printed).
+        let per = |r: &Run| if r.cab[1] > 0.0 { 100.0 * r.cab[0] / r.cab[1] } else { 0.0 };
+        eprintln!(
+            "FINDING cab rides/100 commutes  Full {:7.3}  Statistical {:7.3}  ({:.0} / {:.0} rides)",
+            per(&full),
+            per(&stat),
+            full.cab[0],
+            stat.cab[0]
         );
     }
     assert!(failures.is_empty(), "{failures:?}");

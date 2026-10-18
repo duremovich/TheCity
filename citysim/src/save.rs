@@ -200,7 +200,13 @@ use crate::world::World;
 /// civic keys and `[[serves]]` civic rows (written only on), the trade
 /// rows' `round_near`/`tied_housing` and the `Jobs2Cols` phase-3 columns
 /// (serde defaults). An off save is byte-identical to version 36's.
-pub const SAVE_VERSION: u8 = 37;
+/// 38 (Lives at work phase 4, docs/LIVES_AT_WORK.md § 2.3): the pending cab
+/// rides, parcels and the day's cab rolls on `Jobs2State` (written while
+/// they hold anything), `World.corner_dealers`, the `[service]` street keys
+/// and `[[serves]]` street rows (written only on), `[stims] deal_corner`
+/// and the `Jobs2Cols` phase-4 columns (serde defaults). An off save is
+/// byte-identical to version 37's.
+pub const SAVE_VERSION: u8 = 38;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

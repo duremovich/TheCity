@@ -578,9 +578,13 @@ pub fn finishes_early(world: &World, id: EntityId, kind: ActionKind, started: Ti
                     && world.tick.saturating_sub(started) >= world.config.life.sleep_min_ticks)
         }
         ActionKind::Meeting => crate::systems::life::exec_shift_over(world),
+        // Lives at work phase 4 (§ 2.3): a cab driver standing by at the
+        // Garage rests on until a ride is his (false off: the old rule).
         ActionKind::Rest => {
             crate::exec::routine::must_leave_for_work(world, id)
-                || world.comp::<Job>(id).is_some_and(|j| can_work_now(world, id, j))
+                || (world.comp::<Job>(id).is_some_and(|j| can_work_now(world, id, j))
+                    && !crate::systems::streetwork::standing_by(world, id))
+                || crate::systems::streetwork::on_fare(world, id)
         }
         // Waiting at the workplace for the shift: start the moment it begins.
         ActionKind::Wander => world.comp::<Job>(id).is_some_and(|j| can_work_now(world, id, j)),

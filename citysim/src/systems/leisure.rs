@@ -1270,6 +1270,10 @@ pub fn spot_of(world: &World, id: EntityId) -> Option<TilePos> {
     if world.comp::<crate::components::Brain>(id).and_then(|b| b.plan_goal()) == Some(GoalKind::Pitch) {
         return crate::systems::streetwork::street_tile(world, id);
     }
+    // Lives at work phase 4: a cab driver's leg (the rider's door, the work door).
+    if let Some(t) = crate::systems::streetwork::fare_tile(world, id) {
+        return Some(t);
+    }
     world.unwind.get(&id).and_then(|p| p.spot)
 }
 

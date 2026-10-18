@@ -1062,6 +1062,7 @@ uses_per_day = 2
 detox_price = 80
 detox_mult = 0.3
 p_stat_detox = 0.05
+deal_corner = true                 # Lives at work phase 4 (§ 2.3): a dealer stands a corner (a HangOut spot of the held district) when the gang has no venue
 # Phase 4 calibration: the plan's 0.0 left a non-addict's GetHigh at ~0.006 (craving 0 reads 0.04 on
 # Logistic{8,0.4}), far under Idle's 0.05, so nobody took a first dose and seed 42 dealt 0 in 120 days;
 # at 0.06 an idle body with the coins and a dealer on shift tries one (dealt 1,614, hooked 1.4 % on day 120).
@@ -3672,7 +3673,7 @@ enabled = true
 [service]
 venues = true
 civic = true                       # phase 3 (§ 2.2, § 3.5): teacher, camp warden, jailer, super; the near round, tied housing, the parent's answer (CITYSIM_CIVIC_OFF=1)
-street = false
+street = true                      # phase 4 (§ 2.3): the cab roll and the driver's body, the parcel, the lift, the client, the pimp's round, the dealer's corner (CITYSIM_LIVES_STREET_OFF=1; CITYSIM_STREET_OFF is [jobs2] street's)
 tower = false
 madam_cut = 0.3                    # § 2.1: the madam's share of each tip at her Brothel, worker -> madam (Flow::MadamCut)
 p_eject = 0.5                      # § 2.1: an Assault inside a kept venue is an ejection on this x (bouncer fighting - attacker fighting)
@@ -3685,6 +3686,14 @@ buyout_food_days = 7               # phase 3 § 3.5: the Home's pantry must hold
 breakout_crew = 3                  # phase 3 § 3.5: a gang member breaks out with this many of his gang alive and free (the lawless alone otherwise)
 neglect_days = 14                  # phase 3 § 3.5: a parent of a Camp child unmet for this long is counted neglecting (printed only, Q4)
 teacher_floor = 0.5                # phase 3 § 2.2 (teacher): a taught School day adds floor + (1 - floor) x knowledge to Child.edu_taught
+cab_wait_ticks = 30                # phase 4 § 2.3 (cab): a rider waits this long at the door for a driver's body; farther, the Garage's off-screen cab (the leg timed)
+cab_shifts = [[360, 960], [960, 1440]]  # phase 4 § 2.3 (cab): a `split` fare trade's shift under the street switch, one a driver in turn by id (06-16, 16-24: the commutes; `split`'s day/night pair is on duty at neither)
+client_tiles = 12                  # phase 4 § 2.3 (street worker): a client is a body out walking within this many tiles of the pitch, before the district's hashed draw
+pimp_tiles = 12                    # phase 4 § 2.3 (pimp): a pitch is protected by a pimp's body within this many tiles (a Statistical pimp credited by the clock)
+pimp_pass_up = 0.5                 # phase 4 § 2.3 (pimp): the share of his cut the pimp passes up to the gang the same tick
+pimp_absent_days = 3               # phase 4 § 2.3 (pimp): absent from every pitch of his this many days, he loses the district (name_pimps)
+p_short_report = 0.5               # phase 4 § 2.3 (loader): after a pilfer, the owner reports a Theft on this chance (a hash of the loader and the day)
+witness_lookout_mult = 0.5         # phase 4 § 2.3 (dealer): a lookout at the corner or in the Bar multiplies the Dealing witness roll by this
 
 # Lives at work phase 1 (docs/LIVES_AT_WORK.md § 1.1, § 2.1, § 2.2): the [[serves]] rows, one per serving trade.
 # `key` is a [[trades]] id or a legacy Role name (Config::unresolved_names checks it); `kind` names the queue's
@@ -3894,6 +3903,113 @@ regular_after = 0
 valence = 0.0
 event_on = ["notice"]
 civic = true
+
+# Lives at work phase 4 (§ 2.3): the street rows (`street = true`: live with [service] street, stripped off). `pimp` and
+# `dealer` are gang posts without a trade row (Config::unresolved_names accepts the two).
+[[serves]]
+key = "cab_driver"                 # a booked ride, at the pick-up (Fare); the Garage is the place
+kind = "fare"
+per_hour = 4
+minutes = 15
+skill = "knowledge"
+skill_gain = 0.0005
+regular_after = 4
+regular_days = 14
+valence = 0.1
+street = true
+
+[[serves]]
+key = "courier"                    # a parcel handed to a staff member of the recipient building (Parcel)
+kind = "parcel"
+per_hour = 6
+minutes = 5
+skill = "none"
+regular_after = 4
+regular_days = 14
+valence = 0.1
+street = true
+
+[[serves]]
+key = "loader"                     # the shift's lifts (Crate; no served person: the memory names the owner)
+kind = "crate"
+per_hour = 60
+minutes = 1
+skill = "fighting"
+skill_gain = 0.0
+regular_after = 0
+valence = 0.0
+street = true
+
+[[serves]]
+key = "street_worker"              # a client at the pitch (Client); the pitch is a tile, the district names the place
+kind = "client"
+per_hour = 3
+minutes = 20
+skill = "persuasion"
+skill_gain = 0.0005
+regular_after = 3
+regular_days = 14
+valence = 0.0
+street = true
+
+[[serves]]
+key = "pimp"                       # each working street pitch of his district on his round (Staff): the collection
+kind = "staff"
+per_hour = 6
+minutes = 10
+skill = "persuasion"
+skill_gain = 0.0
+regular_after = 0
+valence = -0.1
+street = true
+
+[[serves]]
+key = "dealer"                     # a buyer at the corner or the Bar (Buyer); a regular buys before a stranger
+kind = "buyer"
+per_hour = 10
+minutes = 5
+skill = "persuasion"
+skill_gain = 0.0005
+regular_after = 3
+regular_days = 14
+valence = 0.1
+street = true
+
+[[serves]]
+key = "vendor"                     # a meal sold at the stall (Buyer)
+kind = "buyer"
+per_hour = 12
+minutes = 5
+skill = "persuasion"
+skill_gain = 0.0005
+regular_after = 3
+regular_days = 14
+valence = 0.1
+street = true
+
+[[serves]]
+key = "rickshaw"                   # a ride pulled (Fare)
+kind = "fare"
+per_hour = 4
+minutes = 15
+skill = "fighting"
+skill_gain = 0.0
+regular_after = 3
+regular_days = 14
+valence = 0.1
+street = true
+
+[[serves]]
+key = "tinker"                     # a repair at the pitch (Buyer)
+kind = "buyer"
+per_hour = 3
+minutes = 20
+skill = "knowledge"
+skill_gain = 0.0005
+regular_after = 3
+regular_days = 14
+valence = 0.1
+street = true
 
 # Lives at work phase 2 (docs/LIVES_AT_WORK.md § 3): the evening and the household, read by systems/household.rs
 # (and leisure.rs for the home spot). Under [lives] enabled (`CITYSIM_HOUSEHOLD_OFF=1`). Placeholders.

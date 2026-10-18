@@ -105,6 +105,7 @@ The one ledger. Nothing is open anywhere else: a spec's "Implemented: deviations
 | OPEN-097 | The organ appetite → Harvest link has no unit test (the supply side has `scavs.rs`, `gray_faith.rs`); `god_organ_boom` carried it | GOD_SCENARIOS_V12 § Retired; OPEN-047 | probe | unowned | open |
 | OPEN-098 | A free School has no god command and no unit test (`god_school_free` edited the world directly; V12 gaps 1, 6) | GOD_SCENARIOS_V12 § Retired; OPEN-042, OPEN-050 | probe | unowned | open |
 | OPEN-099 | Killing the young: "no collapse, employed share rises" has no unit test (`ages.rs` covers elders taken in only); `god_kill_the_young` carried it | GOD_SCENARIOS_V12 § Retired | probe | unowned | open |
+| OPEN-100 | A newborn's carer leaves the Home at night to eat: `probe_new_parent_is_home_at_night` (person.rs, `#[ignore]`) read 4 of 8 night hours on the phase 4a tree. The carer missed an 18:53 meal (her Market's stock in the diverged city), went to bed at hunger 0.6 with an empty pantry and 18 coins, and at 02:00 walked three hours to a Market: the § 3.4 night damping does not hold a hungry carer's Eat. Passes on main by that margin (off identity holds) | LIVES_AT_WORK § 3.4, § 14 phase 4a | probe | unowned | open |
 
 ## Not included (judged fixed, superseded or too vague at the seeding)
 

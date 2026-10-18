@@ -54,6 +54,7 @@ use crate::time::{Tick, TICKS_PER_DAY, TICKS_PER_HOUR};
 use crate::utility::curves::{can, urgency, Curve, GATE, IDENTITY};
 use crate::utility::Consideration;
 use crate::world::World;
+use serde::{Deserialize, Serialize};
 
 const PURPOSE_OPEN: u64 = 0x5713_0001;
 const PURPOSE_PICK: u64 = 0x5713_0002;
@@ -63,6 +64,58 @@ const PURPOSE_CAB: u64 = 0x5713_0004;
 const PURPOSE_TINKER: u64 = 0x5713_0005;
 const PURPOSE_SWEEP: u64 = 0x5713_0006;
 const PURPOSE_STAT_PITCH: u64 = 0x5713_0007;
+/// Lives at work phase 4 (§ 2.3): the driver a booked ride goes to (D6).
+const PURPOSE_FARE: u64 = 0x5713_0008;
+/// Lives at work phase 4 (§ 2.3): a parcel's sender, recipient building and
+/// recipient (one draw each, keyed by the yard, the day and the parcel).
+const PURPOSE_PARCEL: u64 = 0x5713_0009;
+
+/// Lives at work phase 4 (§ 2.3): who takes a booked ride.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RideBy {
+    /// A working rickshaw Pitch of the rider's home district (its owner).
+    Rickshaw(EntityId),
+    /// The Garage nearest home with drivers and rides left.
+    Cab(EntityId),
+}
+
+/// Lives at work phase 4 (§ 2.3): the cab roll's outcome, one source for
+/// both tiers (`cab_roll`; the coins move in `pay_ride`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Ride {
+    pub from: TilePos,
+    pub to: TilePos,
+    pub fare: i64,
+    pub by: RideBy,
+}
+
+/// Lives at work phase 4 (§ 2.3): a booked ride a driver's body drives
+/// (`Jobs2State.cab_rides`, saved while pending, cleared at midnight):
+/// stage 0 to the rider's door, 1 to the rider's work door, then the Garage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CabRide {
+    pub rider: EntityId,
+    pub from: TilePos,
+    pub to: TilePos,
+    pub driver: EntityId,
+    pub fare: i64,
+    pub tick: Tick,
+    pub stage: u8,
+}
+
+/// Lives at work phase 4 (§ 2.3): a parcel, a named item (not an asset):
+/// from the sender building to `to`, a staff member of `at`, a recipient
+/// building of the same corp, through a Yard (`Jobs2State.parcels`, saved
+/// while pending, cleared at midnight).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Parcel {
+    pub from: EntityId,
+    pub to: EntityId,
+    pub at: EntityId,
+    pub yard: EntityId,
+    pub fee: i64,
+    pub day: u64,
+}
 
 /// The street's sub-switch (`[jobs2] street`, under the master switch).
 pub fn on(world: &World) -> bool {
@@ -183,6 +236,15 @@ fn coins(world: &World, id: EntityId) -> i64 {
 /// cut, sweep and day roll, the closings, the openings, the couriers'
 /// parcels and the cabs' new day.
 pub fn daily(world: &mut World) {
+    // Lives at work phase 4 (§ 2.3): yesterday's rides, rolls and parcels
+    // are done (empty off: nothing moves).
+    world.jobs2.cab_rides.clear();
+    world.jobs2.cab_rolled.clear();
+    // A parcel no courier's round reached went back to the Yard.
+    let left = std::mem::take(&mut world.jobs2.parcels).len() as u32;
+    if left > 0 {
+        ownership::jobs2_row(world).parcels_returned += left;
+    }
     if !on(world) || world.tick_of_day() != 0 {
         return;
     }
@@ -736,11 +798,104 @@ fn parcels(world: &mut World) {
         row.parcel_fees += paid;
         let ydoor = world.comp::<Building>(y).map(|b| b.door).unwrap_or_default();
         let near: Vec<EntityId> = standing
-            .into_iter()
+            .iter()
+            .copied()
             .filter(|&b| world.comp::<Building>(b).is_some_and(|x| x.door.manhattan(ydoor) <= cfg.site_reach))
             .take(6)
             .collect();
-        world.jobs2.parcel_stops.entry(y).or_default().extend(near);
+        // Lives at work phase 4 (§ 2.3): the parcels are named, and the
+        // round's stops are their recipients' buildings (with staff to sign).
+        let stops =
+            if crate::systems::service::street_on(world) { name_parcels(world, y, &standing, &near, n) } else { near };
+        world.jobs2.parcel_stops.entry(y).or_default().extend(stops);
+    }
+}
+
+/// Lives at work phase 4 (§ 2.3): `n` parcels of one corp through `yard`:
+/// each from a sender among `standing` (hashed) to a staff member (hashed)
+/// of a recipient among `near` with staff, not the sender (hashed). Returns
+/// the recipient buildings (the couriers' stops); none with no recipient.
+fn name_parcels(world: &mut World, yard: EntityId, standing: &[EntityId], near: &[EntityId], n: u32) -> Vec<EntityId> {
+    let (day, fee) = (world.day(), world.config.jobs2.parcel_fee);
+    let to_staff: Vec<EntityId> = near.iter().copied().filter(|&b| !world.staff_of(b).is_empty()).collect();
+    let mut stops = Vec::new();
+    for k in 0..u64::from(n) {
+        let pick = |w: &World, salt: u64, len: usize| {
+            let u = hash(w, PURPOSE_PARCEL, u64::from(yard.index) << 20 | day, k * 4 + salt);
+            ((u * len as f32) as usize).min(len - 1)
+        };
+        let from = standing[pick(world, 0, standing.len())];
+        let at: Vec<EntityId> = to_staff.iter().copied().filter(|&b| b != from).collect();
+        if at.is_empty() {
+            continue;
+        }
+        let at = at[pick(world, 1, at.len())];
+        let staff = world.staff_of(at).to_vec();
+        let to = staff[pick(world, 2, staff.len())];
+        world.jobs2.parcels.push(Parcel { from, to, at, yard, fee, day });
+        stops.push(at);
+    }
+    stops
+}
+
+/// Lives at work phase 4 (§ 2.3, the courier's stop): a courier of `yard`
+/// at `b` (a body standing in it on his round, `trades::round_plan`; a
+/// Statistical courier credited at his shift's first hour, `lod::stat_work`)
+/// hands each of the yard's parcels for `b` to its recipient when present
+/// (`service::present`), else to a present staff member (hashed, D6): a
+/// `Parcel` encounter; with nobody present it stays for the shift's end.
+pub fn courier_stop(world: &mut World, courier: EntityId, b: EntityId) {
+    if !crate::systems::service::street_on(world) {
+        return;
+    }
+    let Some(yard) = world.comp::<Job>(courier).and_then(|j| j.employer) else { return };
+    let mine: Vec<usize> = (0..world.jobs2.parcels.len())
+        .filter(|&i| world.jobs2.parcels[i].yard == yard && world.jobs2.parcels[i].at == b)
+        .collect();
+    let mut done = Vec::new();
+    for i in mine {
+        let p = world.jobs2.parcels[i];
+        let hand = if crate::systems::service::present(world, p.to, b) {
+            Some(p.to)
+        } else {
+            let hour = world.tick / TICKS_PER_HOUR;
+            world
+                .staff_of(b)
+                .iter()
+                .copied()
+                .filter(|&s| s != courier && crate::systems::service::present(world, s, b))
+                .map(|s| (hash(world, PURPOSE_PARCEL, u64::from(p.to.index) ^ hour, u64::from(s.index)).to_bits(), s))
+                .min()
+                .map(|(_, s)| s)
+        };
+        let Some(r) = hand else { continue };
+        crate::systems::service::serve(world, courier, r, b, crate::components::ServeKind::Parcel, 0);
+        ownership::jobs2_row(world).parcels_delivered += 1;
+        done.push(i);
+    }
+    for i in done.into_iter().rev() {
+        world.jobs2.parcels.remove(i);
+    }
+}
+
+/// Lives at work phase 4 (§ 2.3): a courier's shift end (`service::
+/// shift_end`, both tiers): the yard's parcels still pending at the stops of
+/// his round go back to the Yard (`parcels_returned`).
+pub fn parcels_back(world: &mut World, courier: EntityId) {
+    if !crate::systems::service::street_on(world) || world.jobs2.parcels.is_empty() {
+        return;
+    }
+    let Some(job) = world.comp::<Job>(courier) else { return };
+    let Some(yard) = job.employer else { return };
+    if !crate::systems::trades::on_round(world, courier) {
+        return;
+    }
+    let route = crate::systems::trades::round_for(world, courier, job.shift_key_at(world.tick));
+    let before = world.jobs2.parcels.len();
+    world.jobs2.parcels.retain(|p| p.yard != yard || !route.contains(&p.at));
+    let back = (before - world.jobs2.parcels.len()) as u32;
+    if back > 0 {
+        ownership::jobs2_row(world).parcels_returned += back;
     }
 }
 
@@ -786,15 +941,39 @@ pub fn stat_cab(world: &mut World, id: EntityId, job: &Job) -> bool {
     if !first {
         return false;
     }
-    let cfg = world.config.jobs2.clone();
-    if hash(world, PURPOSE_CAB, u64::from(id.index), world.day()) >= cfg.p_cab {
-        return false;
+    let Some(ride) = cab_roll(world, id, job) else { return false };
+    pay_ride(world, id, &ride);
+    // Lives at work phase 4 (§ 2.3, D3): the ride booked to a driver's
+    // body (the same rule as a Full rider's) and its encounter. Nothing off.
+    let driver = match ride.by {
+        RideBy::Cab(g) => book_cab(world, id, g, ride.from, &ride).map(|(s, _)| s),
+        RideBy::Rickshaw(_) => None,
+    };
+    let d = world.district_of(ride.from);
+    ride_encounter(world, id, driver, &ride, d);
+    true
+}
+
+/// Lives at work phase 4 (§ 2.3): the cab roll, one source for both tiers
+/// (a Full commuter rolls the same hash and gets the same pick as a
+/// Statistical one; the coins move in `pay_ride`). The roll `stat_cab`
+/// made inline until phase 4, unchanged: `p_cab` on a hash of the agent
+/// and the day, `cab_min_tiles`, the fare, a working rickshaw of the home
+/// district with rides left first (its fare, or no ride when the purse is
+/// short), else the Garage nearest home with drivers and rides left.
+pub fn cab_roll(world: &World, id: EntityId, job: &Job) -> Option<Ride> {
+    if !on(world) {
+        return None;
     }
-    let Some(work) = job.employer.and_then(|e| world.comp::<Building>(e)).map(|b| b.door) else { return false };
-    let Some(home) = crate::systems::contracts::home_door(world, id) else { return false };
+    let cfg = &world.config.jobs2;
+    if hash(world, PURPOSE_CAB, u64::from(id.index), world.day()) >= cfg.p_cab {
+        return None;
+    }
+    let work = job.employer.and_then(|e| world.comp::<Building>(e)).map(|b| b.door)?;
+    let home = crate::systems::contracts::home_door(world, id)?;
     let tiles = home.manhattan(work);
     if tiles < cfg.cab_min_tiles {
-        return false;
+        return None;
     }
     let fare = cfg.fare_base + (tiles as f32 * cfg.fare_per_tile).round() as i64;
     let purse = coins(world, id);
@@ -810,20 +989,12 @@ pub fn stat_cab(world: &mut World, id: EntityId, job: &Job) -> bool {
     if let Some(r) = rickshaw {
         let f = ((fare as f32 * cfg.rickshaw_mult).round() as i64).max(1);
         if purse < f + cfg.cab_reserve {
-            return false;
+            return None;
         }
-        let paid = ownership::pay(world, Some(id), Some(r), f, Flow::CabFare);
-        if let Some(p) = world.jobs2.pitches.get_mut(&r) {
-            p.jobs_today = p.jobs_today.saturating_add(1);
-            p.take_today += paid;
-        }
-        let row = ownership::jobs2_row(world);
-        row.rickshaw_trips += 1;
-        row.rickshaw_fares += paid;
-        return true;
+        return Some(Ride { from: home, to: work, fare: f, by: RideBy::Rickshaw(r) });
     }
     if purse < fare + cfg.cab_reserve {
-        return false;
+        return None;
     }
     let garage = world
         .buildings_of_kind(BuildingKind::Garage)
@@ -831,16 +1002,282 @@ pub fn stat_cab(world: &mut World, id: EntityId, job: &Job) -> bool {
         .copied()
         .filter(|&g| crate::systems::industry::open(world, g))
         .filter(|&g| world.jobs2.cab_trips.get(&g).copied().unwrap_or(0) < drivers(world, g) * cfg.rides_per_driver)
-        .min_by_key(|&g| (world.comp::<Building>(g).map_or(u32::MAX, |b| b.door.manhattan(home)), g));
-    let Some(g) = garage else { return false };
-    let owner = world.owner_of(g);
-    let paid = ownership::pay(world, Some(id), owner, fare, Flow::CabFare);
-    ownership::credit(world, g, paid);
-    *world.jobs2.cab_trips.entry(g).or_default() += 1;
-    let row = ownership::jobs2_row(world);
-    row.cab_trips += 1;
-    row.cab_fares += paid;
-    true
+        .min_by_key(|&g| (world.comp::<Building>(g).map_or(u32::MAX, |b| b.door.manhattan(home)), g))?;
+    Some(Ride { from: home, to: work, fare, by: RideBy::Cab(garage) })
+}
+
+/// Lives at work phase 4 (§ 2.3): the ride's coins and counters (the
+/// rickshaw's or the Garage's `Flow::CabFare`, the pitch's or the Garage's
+/// rides today). Returns the coins paid.
+pub fn pay_ride(world: &mut World, id: EntityId, ride: &Ride) -> i64 {
+    match ride.by {
+        RideBy::Rickshaw(r) => {
+            let paid = ownership::pay(world, Some(id), Some(r), ride.fare, Flow::CabFare);
+            if let Some(p) = world.jobs2.pitches.get_mut(&r) {
+                p.jobs_today = p.jobs_today.saturating_add(1);
+                p.take_today += paid;
+            }
+            let row = ownership::jobs2_row(world);
+            row.rickshaw_trips += 1;
+            row.rickshaw_fares += paid;
+            paid
+        }
+        RideBy::Cab(g) => {
+            let owner = world.owner_of(g);
+            let paid = ownership::pay(world, Some(id), owner, ride.fare, Flow::CabFare);
+            ownership::credit(world, g, paid);
+            *world.jobs2.cab_trips.entry(g).or_default() += 1;
+            let row = ownership::jobs2_row(world);
+            row.cab_trips += 1;
+            row.cab_fares += paid;
+            paid
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Lives at work phase 4 (§ 2.3): the Full commuter's cab and the driver's body
+// ---------------------------------------------------------------------------
+
+/// The ticks a cab takes from `from` to `to`: the walk's ticks × the Car's
+/// `timed_mult` (`[vehicles] mult`), at least one.
+fn cab_ticks(world: &World, from: TilePos, to: TilePos) -> Tick {
+    let base = Tick::from(from.manhattan(to)) * world.config.exec.move_ticks_full;
+    let m = crate::systems::vehicles::timed_mult_of(world, crate::components::AssetKind::Car);
+    ((base as f32 * m).round() as Tick).max(1)
+}
+
+/// The on-duty cab drivers of `garage` with a body (Full or Coarse) and no
+/// ride pending, with the ticks each needs to reach `at`.
+fn drivers_free(world: &World, garage: EntityId, at: TilePos) -> Vec<(EntityId, Tick)> {
+    world
+        .staff_of(garage)
+        .iter()
+        .copied()
+        .filter(|&s| {
+            standing_by(world, s)
+                && !world.has::<Sentence>(s)
+                && crate::systems::law::living(world, s)
+                && world.comp::<Brain>(s).is_some_and(|b| b.lod != Lod::Statistical)
+        })
+        .filter_map(|s| {
+            let from = crate::exec::walk_origin(world, s)?;
+            Some((s, cab_ticks(world, from, at)))
+        })
+        .collect()
+}
+
+/// `exec::start_step`, a Full or Coarse commuter's `GoTo` to its workplace
+/// (before the vehicle, the El and the walk): the cab roll shared with the
+/// Statistical tier, once a day a rider (`Jobs2State.cab_rolled`). A ride
+/// rolled: the fare paid (`pay_ride`; a rider `transit::pays_or_dodges`
+/// says dodges rides `Short`: no coins, a `FareShort` event, the driver's
+/// grudge), the rider's leg timed at the cab's speed, and the Garage's
+/// on-duty driver with a body who can reach the rider within
+/// `cab_wait_ticks` and the lowest hash (D6) takes the ride: a `CabRide`
+/// his body drives (`fare_plan`), the `Fare` encounter at the pick-up.
+/// With no such driver the Garage's off-screen cab takes it (deviation:
+/// the rider never waits, the shift matters more than the ride). Nothing
+/// off.
+pub fn full_cab(world: &mut World, id: EntityId, target: &crate::exec::GotoTarget) -> Option<crate::exec::ExecState> {
+    if !crate::systems::service::street_on(world) {
+        return None;
+    }
+    let job = world.comp::<Job>(id)?.clone();
+    if target.building.is_none() || target.building != job.employer || world.jobs2.cab_rolled.contains(&id) {
+        return None;
+    }
+    world.jobs2.cab_rolled.insert(id);
+    let ride = cab_roll(world, id, &job)?;
+    let here = crate::exec::walk_origin(world, id)?;
+    let now = world.tick;
+    // `pays_or_dodges` is `Some(dodge)`: `Some(true)` rides without paying.
+    let dodges = crate::systems::transit::pays_or_dodges(world, id) == Some(true);
+    let mut arrive = now + cab_ticks(world, here, ride.to);
+    let driver = match ride.by {
+        RideBy::Cab(garage) => book_cab(world, id, garage, here, &ride),
+        RideBy::Rickshaw(_) => None,
+    };
+    if let Some((_, eta)) = driver {
+        arrive += eta;
+    }
+    if dodges {
+        ownership::jobs2_row(world).fares_short += 1;
+        let (who, at) = (world.name_of(id), world.district_name(world.district_of(here)).to_string());
+        match (driver, ride.by) {
+            (Some((s, _)), RideBy::Cab(g)) => {
+                crate::systems::grudges::add(world, s, id, crate::word::GrudgeCause::Robbed, 0.4, 0);
+                let text =
+                    format!("{who} rode {}'s cab from {at} and skipped the {} fare", world.name_of(s), ride.fare);
+                world.push_event(EventKind::FareShort, &[id, s, g], text);
+            }
+            (_, RideBy::Cab(g)) => {
+                let text = format!("{who} skipped a {} cab fare from {at}", ride.fare);
+                world.push_event(EventKind::FareShort, &[id, g], text);
+            }
+            (_, RideBy::Rickshaw(r)) => {
+                let text = format!("{who} skipped {}'s {} rickshaw fare from {at}", world.name_of(r), ride.fare);
+                world.push_event(EventKind::FareShort, &[id, r], text);
+            }
+        }
+    } else {
+        pay_ride(world, id, &ride);
+    }
+    let d = world.district_of(here);
+    ride_encounter(world, id, driver.map(|(s, _)| s), &ride, d);
+    Some(crate::exec::ExecState::GotoTimed { target: target.clone(), arrive_tick: arrive, blocked_since: None })
+}
+
+/// Lives at work phase 4 (§ 2.3, D3, D6): a cab ride from `garage` booked
+/// to a driver's body: the standing-by driver who can reach `from` within
+/// `cab_wait_ticks` at cab speed with the lowest `hash(PURPOSE_FARE, rider,
+/// driver)` takes a `CabRide` (`cab_rides_driven`); none, the Garage's
+/// off-screen cab (`cab_rides_unmanned`). Both tiers' riders (`full_cab`,
+/// `stat_cab`): the ride is world-side, the driver's body animates it.
+/// Returns the driver and his ticks to the pick-up. Nothing off.
+fn book_cab(
+    world: &mut World,
+    rider: EntityId,
+    garage: EntityId,
+    from: TilePos,
+    ride: &Ride,
+) -> Option<(EntityId, Tick)> {
+    if !crate::systems::service::street_on(world) {
+        return None;
+    }
+    let wait = Tick::from(world.config.service.cab_wait_ticks);
+    let driver = drivers_free(world, garage, from)
+        .into_iter()
+        .filter(|&(_, eta)| eta <= wait)
+        .map(|(s, eta)| (hash(world, PURPOSE_FARE, u64::from(rider.index), u64::from(s.index)).to_bits(), s, eta))
+        .min()
+        .map(|(_, s, eta)| (s, eta));
+    match driver {
+        Some((s, _)) => {
+            let (to, fare, tick) = (ride.to, ride.fare, world.tick);
+            world.jobs2.cab_rides.push(CabRide { rider, from, to, driver: s, fare, tick, stage: 0 });
+            ownership::jobs2_row(world).cab_rides_driven += 1;
+        }
+        None => ownership::jobs2_row(world).cab_rides_unmanned += 1,
+    }
+    driver
+}
+
+/// Lives at work phase 4 (§ 2.3): the ride's `Fare` encounter at the
+/// pick-up: the booked driver's at the Garage, the rickshaw puller's in the
+/// rider's district (his pitch is a tile); an unmanned cab, none. Nothing off.
+fn ride_encounter(world: &mut World, rider: EntityId, driver: Option<EntityId>, ride: &Ride, d: DistrictId) {
+    if !crate::systems::service::street_on(world) {
+        return;
+    }
+    let kind = crate::components::ServeKind::Fare;
+    match (driver, ride.by) {
+        (Some(s), RideBy::Cab(g)) => crate::systems::service::serve(world, s, rider, g, kind, 0),
+        (_, RideBy::Rickshaw(r)) => crate::systems::service::encounter(world, r, rider, None, d, kind, 0),
+        _ => {}
+    }
+}
+
+/// The ride `id` drives now, if any (the first pending with him as driver).
+fn ride_of(world: &World, id: EntityId) -> Option<usize> {
+    world.jobs2.cab_rides.iter().position(|r| r.driver == id)
+}
+
+/// Lives at work phase 4: is `id` a cab driver with a ride pending (the
+/// shadow tool's and `leisure::spot_of`'s question)?
+pub fn on_fare(world: &World, id: EntityId) -> bool {
+    crate::systems::service::street_on(world) && ride_of(world, id).is_some()
+}
+
+/// The tile of the driver's current leg: the rider's door, then the work door.
+pub fn fare_tile(world: &World, id: EntityId) -> Option<TilePos> {
+    let r = world.jobs2.cab_rides.get(ride_of(world, id)?)?;
+    Some(if r.stage == 0 { r.from } else { r.to })
+}
+
+/// `exec::start_step`: a driver's leg is a drive, timed at the cab's speed.
+pub fn fare_leg(world: &World, id: EntityId, target: &crate::exec::GotoTarget) -> Option<crate::exec::ExecState> {
+    if !on_fare(world, id) {
+        return None;
+    }
+    let here = crate::exec::walk_origin(world, id)?;
+    let arrive_tick = world.tick + cab_ticks(world, here, target.tile);
+    Some(crate::exec::ExecState::GotoTimed { target: target.clone(), arrive_tick, blocked_since: None })
+}
+
+/// `plan::plan_for`'s Work arm (after the round): a cab driver on shift
+/// with a ride pending drives it, one leg a plan: `GoTo(Spot)` to the
+/// rider's door (stage 0), then to the rider's work door (stage 1); the
+/// legs read the driver's position as `round_plan` reads a stop. With no
+/// ride he stands by at the Garage (`GoTo(Workplace) → Rest`, the Rest
+/// ending when a ride is his: `exec::actions`), and the shift's last
+/// `ROUND_CUTOFF` is the post's (the work step and the wage, as the
+/// round's). No work `ActionKind` is cut short (§ 1.3). The M13 trip roll
+/// (crashes) is skipped: the Garage posts no vehicle asset for the cab
+/// (deviation, § 14).
+pub fn fare_plan(world: &mut World, id: EntityId) -> Option<Plan> {
+    if !crate::systems::service::street_on(world) {
+        return None;
+    }
+    let job = world.comp::<Job>(id)?;
+    if !fare_duty(world, job) || !job.on_shift(world.tick_of_day()) {
+        return None;
+    }
+    let garage = job.employer?;
+    if let Some(i) = ride_of(world, id) {
+        let here = world.comp::<Position>(id).filter(|p| p.building.is_none()).map(|p| p.tile);
+        let r = world.jobs2.cab_rides[i];
+        let done = if r.stage == 0 && here == Some(r.from) {
+            world.jobs2.cab_rides[i].stage = 1;
+            false
+        } else {
+            r.stage >= 1 && here == Some(r.to)
+        };
+        if !done {
+            let step = ActionInstance { action: ActionKind::GoTo(LocationKey::Spot), target: None, tile: None };
+            return Some(Plan {
+                goal: GoalKind::Work,
+                target: Some(garage),
+                steps: vec![step],
+                started_tick: world.tick,
+            });
+        }
+        world.jobs2.cab_rides.remove(i);
+    }
+    if !standing_by(world, id) {
+        return None;
+    }
+    let steps = vec![
+        ActionInstance { action: ActionKind::GoTo(LocationKey::Workplace), target: Some(garage), tile: None },
+        ActionInstance { action: ActionKind::Rest, target: None, tile: None },
+    ];
+    Some(Plan { goal: GoalKind::Work, target: Some(garage), steps, started_tick: world.tick })
+}
+
+/// A `fare` duty trade's job (the cab driver).
+fn fare_duty(world: &World, job: &Job) -> bool {
+    crate::systems::trades::row_of(world, job.role).is_some_and(|r| r.duty == TradeDuty::Fare)
+}
+
+/// Lives at work phase 4 (§ 2.3): is `id` a cab driver standing by for a
+/// ride: on his shift's workday, before its last `ROUND_CUTOFF`, the shift
+/// not closed, no ride pending (`exec::actions`' Rest runs on while true;
+/// `drivers_free` reads it)? False off.
+pub fn standing_by(world: &World, id: EntityId) -> bool {
+    if !crate::systems::service::street_on(world) {
+        return false;
+    }
+    let Some(job) = world.comp::<Job>(id) else { return false };
+    if !fare_duty(world, job) || !job.on_shift(world.tick_of_day()) {
+        return false;
+    }
+    let key = job.shift_key_at(world.tick);
+    job.last_shift_day != Some(key)
+        && crate::exec::routine::workday_of(world, id, job, key)
+        && job
+            .shift_end(world.tick)
+            .is_some_and(|e| e.saturating_sub(world.tick) > crate::systems::trades::ROUND_CUTOFF)
+        && ride_of(world, id).is_none()
 }
 
 // ---------------------------------------------------------------------------

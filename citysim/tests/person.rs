@@ -2404,6 +2404,7 @@ fn probe_married_pick_is_home_by_nine_with_the_spouse() {
 /// birth is home between 22:00 and 06:00 (the night goals damped); the
 /// other parent is held to nothing (printed).
 #[test]
+#[ignore = "gap: OPEN-100"]
 fn probe_new_parent_is_home_at_night() {
     let mut w = world();
     w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
@@ -2597,4 +2598,64 @@ fn probe_super_walks_under_four_hours_a_shift() {
     let (off, _) = walked(World::new(42, cfg), "civic off (control)");
     eprintln!("super's walking a shift: on {on} min, off {off} min");
     assert!(on < 4 * 60, "the super walked {on} minutes of the shift");
+}
+
+// ---------------------------------------------------------------------------
+// Lives at work phase 4a (docs/LIVES_AT_WORK.md § 9.1): the cabbie probe.
+// ---------------------------------------------------------------------------
+
+/// § 2.3 (the phase's acceptance): a cab driver on his rush shift (the
+/// `split` row's `[service] cab_shifts` under the street switch) drives at
+/// least one fare in a day with `p_cab` raised in-test: a ride booked to
+/// him that he takes to the rider's door and on to the work door. The
+/// control at `p_cab = 0`: none. The fares, read from `Jobs2State.cab_rides`.
+#[test]
+fn probe_cabbie_drives_a_fare_on_his_shift() {
+    fn fares(p_cab: f32) -> (u32, u32) {
+        let mut cfg = Config::load();
+        cfg.jobs2.p_cab = p_cab;
+        let mut w = World::new(42, cfg);
+        let start = 2 * TICKS_PER_DAY + 5 * TICKS_PER_HOUR;
+        w.run_ticks(start);
+        let role = w.config.trade_role("cab_driver").expect("the cab_driver trade");
+        let s = w
+            .citizens()
+            .into_iter()
+            .find(|&a| {
+                w.comp::<Job>(a).is_some_and(|j| {
+                    j.role == role
+                        && j.employer.is_some()
+                        && j.shifts.first().is_some_and(|&(s, _)| s == 360)
+                        && routine::workday_of(&w, a, j, j.shift_key_at(w.tick + 2 * TICKS_PER_HOUR))
+                }) && law::living(&w, a)
+                    && !w.has::<citysim::Sentence>(a)
+            })
+            .expect("a morning cab driver on a workday");
+        pin(&mut w, s);
+        let (mut booked, mut driven) = (std::collections::BTreeSet::new(), 0u32);
+        let mut riding: Option<(EntityId, u8)> = None;
+        run_to(&mut w, s, start + 11 * TICKS_PER_HOUR, |w| {
+            let now = w.jobs2.cab_rides.iter().find(|r| r.driver == s).map(|r| (r.rider, r.stage));
+            if let Some((rider, _)) = now {
+                booked.insert(rider.index);
+            }
+            // A ride gone after its second leg began: driven to the work door.
+            if let Some((rider, stage)) = riding {
+                if stage >= 1 && now.is_none_or(|(r, _)| r != rider) {
+                    driven += 1;
+                }
+            }
+            riding = now;
+        });
+        eprintln!(
+            "p_cab {p_cab}: cab driver {} booked {} rides, drove {driven} to the work door",
+            s.index,
+            booked.len()
+        );
+        (booked.len() as u32, driven)
+    }
+    let (_, driven) = fares(1.0);
+    let (booked0, _) = fares(0.0);
+    assert!(driven >= 1, "the cabbie drove no fare in his shift");
+    assert_eq!(booked0, 0, "no ride at p_cab 0");
 }

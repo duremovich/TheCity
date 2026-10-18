@@ -52,6 +52,8 @@ const PURPOSE_VISIT: u64 = 0x5649_0001;
 const PURPOSE_PAYER: u64 = 0x5649_0002;
 const PURPOSE_ASSAULT: u64 = 0x5649_0003;
 const PURPOSE_SWEEP: u64 = 0x5649_0004;
+/// Lives at work phase 4 (§ 2.3): the client among the bodies near a pitch.
+const PURPOSE_CLIENT: u64 = 0x5649_0005;
 
 /// Phase 4's vice is live: `[jobs2] enabled` and `[vice] enabled`.
 pub fn on(world: &World) -> bool {
@@ -275,8 +277,15 @@ fn street_hour(world: &mut World) {
         if !is_street_pitch(world, &p) || !crate::systems::streetwork::working(world, &p) {
             continue;
         }
+        let street = crate::systems::service::street_on(world);
+        let mut client = None;
         if hash(world, PURPOSE_VISIT, key(o), hour) < cfg.p_street_visit {
-            if let Some(payer) = street_payer(world, &p, hour) {
+            // Lives at work phase 4 (§ 2.3): a body near the pitch first.
+            let near = if street { client_near(world, &p, hour) } else { None };
+            if near.is_some() {
+                ownership::jobs2_row(world).street_clients_near += 1;
+            }
+            if let Some(payer) = near.or_else(|| street_payer(world, &p, hour)) {
                 let paid = ownership::pay(world, Some(payer), Some(o), cfg.street_price, Flow::Leisure);
                 if paid > 0 {
                     add_intimacy(world, payer, cfg.intimacy_gain);
@@ -286,6 +295,11 @@ fn street_hour(world: &mut World) {
                     let row = ownership::jobs2_row(world);
                     row.street_visits += 1;
                     row.street_take += paid;
+                    if street {
+                        client = Some(payer);
+                        let kind = crate::components::ServeKind::Client;
+                        crate::systems::service::encounter(world, o, payer, None, p.district, kind, 0);
+                    }
                 }
             }
         }
@@ -295,9 +309,33 @@ fn street_hour(world: &mut World) {
         }
         let fear = world.districts.get(p.district.index()).map_or(0.0, |d| d.fear);
         if hash(world, PURPOSE_ASSAULT, key(o), hour) < cfg.p_assault_street * (0.5 + fear) {
-            street_assault(world, o, &p, hour);
+            street_assault(world, o, &p, hour, client);
         }
     }
+}
+
+/// Lives at work phase 4 (§ 2.3, the client): a body out near the pitch
+/// (within `client_tiles` of its spot, Full or Coarse, in no building):
+/// an adult, free, not the worker, with the visit's wants and twice the
+/// price (`street_payer`'s rule), the lowest hash of the hour (D6).
+fn client_near(world: &mut World, p: &Pitch, hour: u64) -> Option<EntityId> {
+    let r = world.config.service.client_tiles;
+    let near = world.agents_near(p.spot, r, None);
+    let cfg = &world.config.vice;
+    near.into_iter()
+        .filter(|&id| {
+            id != p.owner
+                && world.comp::<Brain>(id).is_some_and(|b| b.lod != Lod::Statistical)
+                && world.comp::<Position>(id).is_some_and(|x| x.building.is_none())
+                && crate::systems::demography::is_adult(world, id)
+                && !world.has::<Sentence>(id)
+                && crate::systems::law::living(world, id)
+                && world.comp::<Needs>(id).is_some_and(|n| n.intimacy < cfg.street_intimacy && n.hunger >= 0.5)
+                && world.comp::<Wallet>(id).is_some_and(|w| w.coins >= 2 * cfg.street_price)
+        })
+        .map(|id| (hash(world, PURPOSE_CLIENT, key(p.owner) ^ key(id), hour).to_bits(), id))
+        .min()
+        .map(|(_, id)| id)
 }
 
 /// A resident adult of the pitch's district (three draws by a hash) with
@@ -325,19 +363,30 @@ fn street_payer(world: &World, p: &Pitch, hour: u64) -> Option<EntityId> {
 /// An unprotected street pitch's assault: a lawless resident of the
 /// district (the first by a hash, else none) takes the night's coins in
 /// the worker's wallet; the worker's memories and safety.
-fn street_assault(world: &mut World, o: EntityId, p: &Pitch, hour: u64) {
-    let Some(res) = world.districts.get(p.district.index()).map(|d| d.residents.clone()) else { return };
-    if res.is_empty() {
-        return;
-    }
-    let u = hash(world, PURPOSE_PAYER, key(o), hour * 4 + 3);
-    let start = ((u * res.len() as f32) as usize).min(res.len() - 1);
-    let actor = (0..res.len()).map(|k| res[(start + k) % res.len()]).find(|&a| {
-        a != o
-            && crate::systems::demography::is_adult(world, a)
-            && !world.has::<Sentence>(a)
-            && world.comp::<crate::components::Personality>(a).is_some_and(|x| x.lawfulness < 0.3)
-    });
+///
+/// Lives at work phase 4 (§ 2.3): the hour's `client`, when lawless, is the
+/// actor (the robbery is one of the client's outcomes); else the hashed pick.
+fn street_assault(world: &mut World, o: EntityId, p: &Pitch, hour: u64, client: Option<EntityId>) {
+    let lawless =
+        |w: &World, a: EntityId| w.comp::<crate::components::Personality>(a).is_some_and(|x| x.lawfulness < 0.3);
+    let by_client = client.filter(|&c| lawless(world, c) && !world.has::<Sentence>(c));
+    let actor = match by_client {
+        Some(c) => Some(c),
+        None => {
+            let Some(res) = world.districts.get(p.district.index()).map(|d| d.residents.clone()) else { return };
+            if res.is_empty() {
+                return;
+            }
+            let u = hash(world, PURPOSE_PAYER, key(o), hour * 4 + 3);
+            let start = ((u * res.len() as f32) as usize).min(res.len() - 1);
+            (0..res.len()).map(|k| res[(start + k) % res.len()]).find(|&a| {
+                a != o
+                    && crate::systems::demography::is_adult(world, a)
+                    && !world.has::<Sentence>(a)
+                    && lawless(world, a)
+            })
+        }
+    };
     let Some(a) = actor else { return };
     let take = p.take_today.min(world.comp::<Wallet>(o).map_or(0, |w| w.coins.max(0)));
     if take > 0 {

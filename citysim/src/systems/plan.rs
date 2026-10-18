@@ -191,8 +191,10 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
         GoalKind::Idle => routine::idle_plan(world, id),
         // L1: an exec's office hours (no Job, so no commute plan).
         // Jobs and room J14: a Super on shift walks his round door to door.
+        // Lives at work phase 4: a cab driver on shift drives a booked ride.
         GoalKind::Work => routine::commute_plan(world, id)
             .or_else(|| crate::systems::trades::round_plan(world, id))
+            .or_else(|| crate::systems::streetwork::fare_plan(world, id))
             .or_else(|| crate::systems::life::exec_plan(world, id)),
         // M12 phase 4: the expedition chain, built directly.
         GoalKind::Raid => routine::raid_plan(world, id),

@@ -111,6 +111,15 @@ pub fn civic_on(world: &World) -> bool {
     on(world) && world.config.service.civic
 }
 
+/// Lives at work phase 4 is live: the encounter on, `[jobs2] street` (the
+/// pitches and the rounds exist) and `[service] street`
+/// (`CITYSIM_STREET_OFF=1`): the cab roll shared by both tiers and the
+/// driver's body, the parcel, the lift, the client, the pimp's round, the
+/// dealer's corner and regulars.
+pub fn street_on(world: &World) -> bool {
+    on(world) && crate::systems::streetwork::on(world) && world.config.service.street
+}
+
 fn hash(world: &World, purpose: u64, a: u64, b: u64) -> f32 {
     crate::systems::econ::hash_unit(world.seed(), purpose, a, b)
 }
@@ -141,7 +150,17 @@ fn row_tipped(world: &World, key: &str) -> bool {
 
 /// The row of `id`'s job, if it serves.
 fn row_of_agent(world: &World, id: EntityId) -> Option<&ServesCfg> {
-    row_for(world, world.comp::<Job>(id)?.role)
+    match world.comp::<Job>(id) {
+        Some(j) => row_for(world, j.role),
+        // Lives at work phase 4 (§ 2.3): a Pitch owner (the street worker,
+        // the rickshaw puller) holds no Job: the row of his pitch's trade.
+        None if street_on(world) => {
+            let t = world.jobs2.pitches.get(&id)?.trade;
+            let key = &world.config.trade(t)?.id;
+            world.config.serves.iter().find(|r| &r.key == key)
+        }
+        None => None,
+    }
 }
 
 /// The tipped worker on duty at `place` a visit's tip goes to when the
@@ -244,6 +263,33 @@ pub fn hourly(world: &mut World) {
     }
     if civic_on(world) {
         civic_hour(world);
+    }
+    if street_on(world) {
+        lift_hour(world);
+    }
+}
+
+/// Lives at work phase 4 (§ 2.3, loader): at the last hour of a loader's
+/// shift, each loader present at his Yard (a body inside, a Statistical one
+/// credited by the clock: § 1.2) lifts the shift's crates (`lift`). One
+/// world-side pass for both tiers.
+fn lift_hour(world: &mut World) {
+    let now = world.tick;
+    let mut due = Vec::new();
+    for &y in world.buildings_of_kind(BuildingKind::FreightYard) {
+        for &s in world.staff_of(y) {
+            let last = world
+                .comp::<Job>(s)
+                .and_then(|j| j.shift_end(now))
+                .is_some_and(|e| e > now && e - now <= TICKS_PER_HOUR);
+            if last && row_of_agent(world, s).is_some_and(|r| r.kind == ServeKind::Crate) && present(world, s, y) {
+                due.push((y, s));
+            }
+        }
+    }
+    for (y, s) in due {
+        let n = crate::systems::industry::shift_lifts(world, y);
+        lift(world, s, y, n);
     }
 }
 
@@ -456,11 +502,29 @@ fn train(world: &mut World, server: EntityId, skill: TradeSkill, gain: f32) {
     *slot = (*slot + gain).min(1.0);
 }
 
-/// One encounter (§ 1.2's five steps). Returns whether a regular was made.
+/// One encounter (§ 1.2's five steps) at a place.
 pub fn serve(world: &mut World, server: EntityId, served: EntityId, place: EntityId, kind: ServeKind, coins: i64) {
+    let d = world.district_of_building(place);
+    encounter(world, server, served, Some(place), d, kind, coins);
+}
+
+/// Lives at work phase 4 (§ 2.3): the encounter, at a place or (a street
+/// pitch, a corner, a rickshaw's stand: a tile, not a Building) in a
+/// district alone; the event names the district when there is no place.
+/// `serve` is the placed form. A server with no trade row (the pimp, the
+/// dealer) is read by its gang post's row (`row_of_agent`).
+pub fn encounter(
+    world: &mut World,
+    server: EntityId,
+    served: EntityId,
+    place: Option<EntityId>,
+    district: crate::components::DistrictId,
+    kind: ServeKind,
+    coins: i64,
+) {
     let Some(row) = row_of_agent(world, server).cloned() else { return };
     let kind_label = kind.label();
-    let place_kind = world.comp::<Building>(place).map(|b| b.kind);
+    let place_kind = place.and_then(|b| world.comp::<Building>(b)).map(|b| b.kind);
     // 1. The arm: the counters and the re-routed coins.
     {
         let r = ownership::jobs2_row(world);
@@ -473,13 +537,14 @@ pub fn serve(world: &mut World, server: EntityId, served: EntityId, place: Entit
     // The tip (§ 2.1): to the server when its trade row is tipped, else to
     // the tipped worker on duty the hash names (a Club's Host serves the
     // visit, the dancer is tipped: the flow main paid, re-routed, D4).
-    let tipped = if row_tipped(world, &row.key) { Some(server) } else { tipped_pick(world, place, served) };
+    let tipped =
+        if row_tipped(world, &row.key) { Some(server) } else { place.and_then(|b| tipped_pick(world, b, served)) };
     if kind == ServeKind::Visit && coins > 0 {
         if let Some(t) = tipped.filter(|&t| t != served) {
             let tip = ((coins as f32 * world.config.vice.tip_share).round() as i64).max(1);
             let paid = ownership::pay(world, Some(served), Some(t), tip, Flow::Tip);
             // § 2.1: the madam's cut of a tip at her house.
-            if paid > 0 && place_kind == Some(BuildingKind::Brothel) {
+            if let (true, Some(BuildingKind::Brothel), Some(place)) = (paid > 0, place_kind, place) {
                 let madam = servers(world, place, ServeKind::Staff).first().map(|&(m, _)| m);
                 if let Some(m) = madam.filter(|&m| m != t) {
                     let cut = (paid as f32 * world.config.service.madam_cut).round() as i64;
@@ -492,9 +557,9 @@ pub fn serve(world: &mut World, server: EntityId, served: EntityId, place: Entit
     }
     // Lives at work phase 3 (§ 2.2): the civic arms.
     let mut outcome = Outcome::Done;
-    match kind {
-        ServeKind::Pupil => taught(world, server, served, place, row.valence),
-        ServeKind::Tenant => outcome = tenant(world, server, served, place),
+    match (kind, place) {
+        (ServeKind::Pupil, Some(p)) => taught(world, server, served, p, row.valence),
+        (ServeKind::Tenant, Some(p)) => outcome = tenant(world, server, served, p),
         _ => {}
     }
     // 2. Memories, bodies only (`remember` drops a Statistical agent's and a chip's).
@@ -509,13 +574,18 @@ pub fn serve(world: &mut World, server: EntityId, served: EntityId, place: Entit
         outcome = Outcome::Regular;
     }
     if row.event_on.contains(&outcome.cfg()) {
-        let (who, whom, at) = (world.name_of(server), world.name_of(served), world.name_of(place));
+        let (who, whom) = (world.name_of(server), world.name_of(served));
+        let at = match place {
+            Some(p) => world.name_of(p),
+            None => format!("a street in {}", world.district_name(district)),
+        };
         let (kind, text) = match outcome {
             Outcome::Regular => (EventKind::Served, format!("{whom} is now a regular of {who} at {at}")),
             Outcome::Notice => (EventKind::Notice, format!("{who} served notice on {whom} at {at}")),
             _ => (EventKind::Served, format!("{who} served {whom} ({kind_label}) at {at}")),
         };
-        world.push_event(kind, &[server, served, place], text);
+        let actors: Vec<EntityId> = [Some(server), Some(served), place].into_iter().flatten().collect();
+        world.push_event(kind, &actors, text);
     }
 }
 
@@ -647,6 +717,11 @@ pub fn shift_end(world: &mut World, id: EntityId) {
     if row_for(world, j.role).is_some() {
         ownership::jobs2_row(world).serve_shifts += 1;
     }
+    // Lives at work phase 4 (§ 2.3): the courier's undelivered parcels back
+    // to the Yard (the loader's lifts are `lift_hour`'s).
+    if street_on(world) {
+        crate::systems::streetwork::parcels_back(world, id);
+    }
     if !world.config.service.staff_meal || j.role != Role::Cook {
         return;
     }
@@ -665,6 +740,25 @@ pub fn shift_end(world: &mut World, id: EntityId) {
     crate::systems::health::ate(world, id, crate::components::MealKind::Real);
     world.mark_day(id, crate::components::trace_flags::ATE);
     ownership::jobs2_row(world).staff_meals += 1;
+}
+
+/// Lives at work phase 4 (§ 2.3, loader; `lift_hour`): the shift's `n`
+/// lifts at `yard` are the loader's (`Crate`, no served person: `arrive` cannot place
+/// one): `served[Crate]` and `lifts` by `n`, one `Served` memory with no
+/// subject (the diary's "loaded crates for <owner>"), the skill. Street only.
+pub fn lift(world: &mut World, loader: EntityId, yard: EntityId, n: u32) {
+    if !street_on(world) || n == 0 || !world.has::<Building>(yard) {
+        return;
+    }
+    let Some(row) = row_of_agent(world, loader).cloned() else { return };
+    {
+        let r = ownership::jobs2_row(world);
+        r.served[ServeKind::Crate as usize] += n;
+        r.lifts += n;
+    }
+    let salience = world.config.service.served_salience;
+    world.remember(loader, MemoryKind::Served, None, salience, row.valence, false);
+    train(world, loader, row.skill, row.skill_gain * n as f32);
 }
 
 /// The regulars kept for `server` (the inspector, the diary).

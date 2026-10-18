@@ -869,6 +869,10 @@ fn activity(world: &World, id: EntityId) -> &'static str {
     match step.action {
         A::Sleep | A::CheckIn => "sleep",
         A::Rest if b.plan_goal() == Some(GoalKind::Sleep) => "sleep",
+        // Lives at work phase 4 (§ 2.3): a cab driver standing by at the Garage.
+        A::Rest if b.plan_goal() == Some(GoalKind::Work) && citysim::systems::streetwork::standing_by(world, id) => {
+            "work"
+        }
         A::Rest => "idle",
         A::FarmWork
         | A::HaulToMarket
@@ -1171,6 +1175,17 @@ fn mem_text(world: &World, holder: EntityId, e: &MemoryEntry) -> String {
         // Lives at work phase 1: the encounter, either side; "a regular" when
         // the holder's ledger (a server's) or the other's (a served's server)
         // holds the pair at two or more visits.
+        // Lives at work phase 4 (§ 2.3): a loader's lifts name no person.
+        (MemoryKind::Served, _)
+            if e.subject.is_none()
+                && world
+                    .comp::<citysim::Job>(holder)
+                    .and_then(|j| citysim::systems::service::row_for(world, j.role))
+                    .is_some_and(|r| r.kind == citysim::components::ServeKind::Crate) =>
+        {
+            let yard = world.comp::<citysim::Job>(holder).and_then(|j| j.employer);
+            format!("loaded the shift's crates for {}", world.owner_label(yard.and_then(|y| world.owner_of(y))))
+        }
         (MemoryKind::Served, _) => {
             let regular = e.subject.is_some_and(|o| {
                 let twice = |server: EntityId, guest: EntityId| {
