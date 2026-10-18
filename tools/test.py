@@ -1,0 +1,381 @@
+#!/usr/bin/env python3
+"""The test tiers, their budgets, the caps and the close report (docs/TESTING.md).
+
+    python tools/test.py change      fmt, clippy, every non-ignored test
+    python tools/test.py merge       the year, the behaviour tier, the god scenarios (serial)
+    python tools/test.py milestone   Full-vs-Statistical parity, the 20k profile
+    python tools/test.py diag        list the diag-tier tests; --only NAME runs one
+    python tools/test.py lint        ignore reasons, caps, OPEN.md ids
+    python tools/test.py report      the close-of-milestone table [--since SHA]
+
+Each tier runs its cargo commands one at a time, writes every byte to
+target/test-logs/<tier>-<stamp>/<n>-<name>.log and prints only: one line per
+test binary, every FAIL / panicked / FINDING line, and the wall time against
+the tier's budget. A budget breach is loud, never a failure (the box is noisy):
+the phase that breached pays it back before it closes.
+
+Stdlib only. Run from the repo root.
+"""
+
+import argparse
+import datetime as dt
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+LOGS = ROOT / "target" / "test-logs"
+OPEN_MD = ROOT / "docs" / "OPEN.md"
+
+# Budgets in seconds (wall, after compile, the tier alone on this box). Change
+# only with a line in the commit message.
+BUDGETS = {"change": 180, "merge": 480, "milestone": 1200}
+
+# Caps checked by `lint` (docs/TESTING.md § caps).
+CAP_GOD_SCENARIOS = 20      # excluding the *_control tests
+CAP_ASSERTED_BULLETS = 60   # mechanisms() + jobs2_mechanisms() + transit_mechanisms()
+WARN_FILE_LINES = 1500
+PASS_NAMED = re.compile(r"(_review|_fixes|shadow_v\d|_probe)\.rs$")
+
+CARGO = ["cargo"]
+TIERS = {
+    "change": [
+        ("fmt", CARGO + ["fmt", "--all", "--", "--check"]),
+        ("clippy", CARGO + ["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"]),
+        ("tests", CARGO + ["test", "--workspace", "--release"]),
+    ],
+    "merge": [
+        ("core_year", CARGO + ["test", "--release", "-p", "citysim", "--test", "core", "--", "--ignored", "core_year", "--nocapture"]),
+        ("behaviour", CARGO + ["test", "--release", "-p", "citysim-cli", "--", "--ignored", "behaviour", "--nocapture"]),
+        ("god", CARGO + ["test", "--release", "-p", "citysim", "--test", "god", "--test", "god_corps", "--test", "god_districts", "--", "--ignored", "--nocapture"]),
+    ],
+    "milestone": [
+        ("parity", CARGO + ["test", "--release", "-p", "citysim", "--test", "lod", "--", "--ignored", "test_full_vs_statistical_within_15pct", "--nocapture"]),
+        ("core_20k", CARGO + ["test", "--release", "-p", "citysim", "--test", "core", "--", "--ignored", "core_20k", "--nocapture"]),
+    ],
+}
+
+RUNNING = re.compile(r"Running (?:tests[\\/]|unittests )?(\S+?)(?: \(|\s)")
+BINARY = re.compile(r"deps[\\/]([A-Za-z0-9_]+?)-[0-9a-f]{8,}(?:\.exe)?\)")
+RESULT = re.compile(r"test result: (\w+)\. (\d+) passed; (\d+) failed; (\d+) ignored")
+NOISY = re.compile(r"^(test \S+ \.\.\. ok|running \d+ tests?|\s*Compiling|\s*Finished|\s*Blocking)")
+LOUD = re.compile(r"FAILED|panicked at|FINDING|^error(\[|:)|BUDGET|assertion")
+IGNORE_ATTR = re.compile(r'^\s*#\[ignore(?:\s*=\s*"([^"]*)")?\]')
+IGNORE_REASON = re.compile(r"^(tier: (merge|milestone|diag)|gap: OPEN-\d{3})(\b|$)")
+TEST_ATTR = re.compile(r"^\s*#\[test\]")
+FN_NAME = re.compile(r"^\s*(?:pub\s+)?fn\s+([A-Za-z0-9_]+)")
+OPEN_ROW = re.compile(r"^\|\s*(OPEN-\d{3})\s*\|(.*)\|\s*$")
+OPEN_STATUSES = {"open", "owned", "closed"}
+
+
+def fmt_secs(s):
+    s = int(round(s))
+    return f"{s // 60}m{s % 60:02d}s" if s >= 60 else f"{s}s"
+
+
+def run_step(name, cmd, log_path, only=None):
+    """Run one cargo command, log every line, print the few that matter."""
+    if only:
+        cmd = cmd + ["--test", only] if "--test" not in cmd else cmd
+    start = time.time()
+    binary, bin_start = None, start
+    rows = []
+    with open(log_path, "w", encoding="utf-8") as log:
+        log.write(" ".join(cmd) + "\n\n")
+        proc = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, encoding="utf-8", errors="replace", bufsize=1)
+        for line in proc.stdout:
+            log.write(line)
+            line = line.rstrip("\n")
+            m = BINARY.search(line)
+            if m and "Running" in line:
+                binary, bin_start = m.group(1), time.time()
+                continue
+            r = RESULT.search(line)
+            if r:
+                status, passed, failed, ignored = r.groups()
+                secs = time.time() - bin_start
+                label = binary or name
+                print(f"  {secs:6.1f}s  {label:<24} {status:<6} {passed:>4} passed {failed:>3} failed {ignored:>3} ignored")
+                rows.append({"binary": label, "status": status, "passed": int(passed), "failed": int(failed),
+                             "ignored": int(ignored), "secs": round(secs, 1)})
+                continue
+            if LOUD.search(line) and not NOISY.match(line):
+                print("    " + line[:200])
+        proc.wait()
+    secs = time.time() - start
+    ok = proc.returncode == 0
+    if name in ("fmt", "clippy"):
+        print(f"  {secs:6.1f}s  {name:<24} {'ok' if ok else 'FAILED'}")
+        if not ok:
+            print(f"    see {log_path.relative_to(ROOT)}")
+    return {"step": name, "ok": ok, "secs": round(secs, 1), "binaries": rows, "log": str(log_path.relative_to(ROOT))}
+
+
+def cmd_tier(tier, args):
+    steps = TIERS[tier]
+    if args.only:
+        steps = [(n, c) for n, c in steps if n == "tests" or n == args.only] or steps
+    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    out = LOGS / f"{tier}-{stamp}"
+    out.mkdir(parents=True, exist_ok=True)
+    if not args.no_build:
+        print(f"[{tier}] building (release, all targets)...")
+        b = subprocess.run(CARGO + ["test", "--workspace", "--release", "--no-run"], cwd=ROOT,
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        (out / "0-build.log").write_text(b.stdout + b.stderr, encoding="utf-8")
+        if b.returncode != 0:
+            print("  build FAILED; see", (out / "0-build.log").relative_to(ROOT))
+            for l in (b.stdout + b.stderr).splitlines():
+                if l.startswith("error"):
+                    print("    " + l[:200])
+            return 1
+    print(f"[{tier}] {len(steps)} step(s), serial; logs in {out.relative_to(ROOT)}")
+    start = time.time()
+    results = []
+    for i, (name, cmd) in enumerate(steps, 1):
+        if name == "tests" and args.only:
+            cmd = CARGO + ["test", "--workspace", "--release", "--test", args.only]
+        print(f"- {name}")
+        results.append(run_step(name, cmd, out / f"{i}-{name}.log"))
+    wall = time.time() - start
+    budget = BUDGETS[tier]
+    failed = [r for r in results if not r["ok"]]
+    verdict = "GREEN" if not failed else "RED (" + ", ".join(r["step"] for r in failed) + ")"
+    budget_line = (f"BUDGET OK {fmt_secs(wall)} of {fmt_secs(budget)}" if wall <= budget
+                   else f"BUDGET BREACHED {fmt_secs(wall)} of {fmt_secs(budget)}: the phase that breached pays it back before it closes")
+    print(f"[{tier}] {verdict}; {budget_line}")
+    (out / "summary.json").write_text(json.dumps({"tier": tier, "stamp": stamp, "wall": round(wall, 1), "budget": budget,
+                                                  "green": not failed, "steps": results}, indent=1), encoding="utf-8")
+    return 0 if not failed else 1
+
+
+# --- the source scans -------------------------------------------------------
+
+def test_files():
+    for d in (ROOT / "citysim" / "tests", ROOT / "citysim-cli" / "tests"):
+        yield from sorted(d.glob("*.rs"))
+    yield ROOT / "citysim-cli" / "src" / "shadow.rs"
+
+
+def scan_ignores():
+    """Every #[ignore] attribute: (file, line, fn name, reason or None)."""
+    found = []
+    for f in test_files():
+        lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
+        for i, line in enumerate(lines):
+            m = IGNORE_ATTR.match(line)
+            if not m:
+                continue
+            name = None
+            for j in range(i + 1, min(i + 6, len(lines))):
+                n = FN_NAME.match(lines[j])
+                if n:
+                    name = n.group(1)
+                    break
+            found.append((f, i + 1, name, m.group(1)))
+    return found
+
+
+def scan_god():
+    """God scenario test fns, excluding the *_control ones."""
+    names = []
+    for f in (ROOT / "citysim" / "tests").glob("god*.rs"):
+        lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
+        for i, line in enumerate(lines):
+            if TEST_ATTR.match(line):
+                for j in range(i + 1, min(i + 6, len(lines))):
+                    n = FN_NAME.match(lines[j])
+                    if n:
+                        if n.group(1).startswith("god_") and not n.group(1).endswith("_control"):
+                            names.append(n.group(1))
+                        break
+    return names
+
+
+def scan_bullets():
+    """Asserted mechanism entries in core.rs: tuples in mechanisms() and
+    transit_mechanisms(), string literals in jobs2_mechanisms()."""
+    src = (ROOT / "citysim" / "tests" / "core.rs").read_text(encoding="utf-8", errors="replace")
+    counts = {}
+    for fn in ("mechanisms", "jobs2_mechanisms", "transit_mechanisms"):
+        m = re.search(rf"\nfn {fn}\(\) -> Vec<Mechanism> \{{(.*?)\n\}}", src, re.S)
+        body = m.group(1) if m else ""
+        tuples = len(re.findall(r'\(\s*"[^"]+",\s*[km]\(', body))
+        literals = len(re.findall(r'^\s*"[^"]+",\s*$', body, re.M))
+        counts[fn] = tuples if tuples else literals
+    return counts
+
+
+def scan_open():
+    """OPEN.md rows: id -> status. None when the ledger does not exist yet."""
+    if not OPEN_MD.exists():
+        return None
+    rows = {}
+    dupes = []
+    for line in OPEN_MD.read_text(encoding="utf-8", errors="replace").splitlines():
+        m = OPEN_ROW.match(line)
+        if not m:
+            continue
+        oid, rest = m.group(1), [c.strip() for c in m.group(2).split("|")]
+        status = rest[-1].split()[0].lower() if rest and rest[-1] else ""
+        if oid in rows:
+            dupes.append(oid)
+        rows[oid] = status
+    return rows, dupes
+
+
+def helper_copies(name="world"):
+    n = 0
+    for f in test_files():
+        if "common" in f.parts:
+            continue
+        n += len(re.findall(rf"^fn {name}\(", f.read_text(encoding="utf-8", errors="replace"), re.M))
+    return n
+
+
+def cmd_lint(args):
+    problems, warnings = [], []
+    open_rows = scan_open()
+    for f, ln, name, reason in scan_ignores():
+        where = f"{f.relative_to(ROOT)}:{ln} {name or '?'}"
+        if reason is None:
+            problems.append(f"ignore without a reason: {where}")
+        elif not IGNORE_REASON.match(reason):
+            problems.append(f"ignore reason not 'tier: merge|milestone|diag' or 'gap: OPEN-nnn': {where} ({reason!r})")
+        elif reason.startswith("gap:"):
+            oid = reason.split()[1]
+            if open_rows is None:
+                warnings.append(f"no docs/OPEN.md yet to check {oid}: {where}")
+            elif open_rows[0].get(oid) not in ("open", "owned"):
+                problems.append(f"gap {oid} is not an open row in docs/OPEN.md: {where}")
+    god = scan_god()
+    if len(god) > CAP_GOD_SCENARIOS:
+        problems.append(f"god scenarios {len(god)} > cap {CAP_GOD_SCENARIOS} (one per reaction class, docs/TESTING.md)")
+    bullets = scan_bullets()
+    total = sum(bullets.values())
+    if total > CAP_ASSERTED_BULLETS:
+        problems.append(f"asserted core_sanity bullets {total} > cap {CAP_ASSERTED_BULLETS} {bullets}")
+    for f in test_files():
+        n = len(f.read_text(encoding="utf-8", errors="replace").splitlines())
+        if n > WARN_FILE_LINES:
+            warnings.append(f"{f.relative_to(ROOT)} is {n} lines (> {WARN_FILE_LINES}): split by system")
+        if PASS_NAMED.search(f.name):
+            text = f.read_text(encoding="utf-8", errors="replace")
+            live = len(re.findall(r"^\s*#\[test\]\s*$", text, re.M)) - len(re.findall(r'#\[ignore = "tier: diag"\]', text))
+            if live > 0:
+                problems.append(f"{f.relative_to(ROOT)} is named after a pass, not a system, and holds {live} gate test(s): fold them")
+    if open_rows is not None:
+        rows, dupes = open_rows
+        for d in dupes:
+            problems.append(f"duplicate id in docs/OPEN.md: {d}")
+        for oid, st in rows.items():
+            if st not in OPEN_STATUSES:
+                problems.append(f"bad status {st!r} on {oid} in docs/OPEN.md (open|owned|closed <sha>)")
+    for w in warnings:
+        print("WARN", w)
+    for p in problems:
+        print("FAIL", p)
+    print(f"lint: {len(problems)} problem(s), {len(warnings)} warning(s); god {len(god)}/{CAP_GOD_SCENARIOS}, "
+          f"asserted bullets {total}/{CAP_ASSERTED_BULLETS}, ignores {len(scan_ignores())}")
+    return 1 if problems else 0
+
+
+def last_summary(tier):
+    runs = sorted(LOGS.glob(f"{tier}-*/summary.json")) if LOGS.exists() else []
+    if not runs:
+        return None
+    return json.loads(runs[-1].read_text(encoding="utf-8"))
+
+
+def cmd_report(args):
+    print("## test.py report", dt.date.today().isoformat())
+    print()
+    print("| tier | last run | wall | budget | |")
+    print("|---|---|---|---|---|")
+    for tier in TIERS:
+        s = last_summary(tier)
+        if s is None:
+            print(f"| {tier} | never | | {fmt_secs(BUDGETS[tier])} | run it |")
+            continue
+        flag = "ok" if s["wall"] <= s["budget"] else "**BREACHED**"
+        print(f"| {tier} | {s['stamp']} {'green' if s['green'] else 'RED'} | {fmt_secs(s['wall'])} | {fmt_secs(s['budget'])} | {flag} |")
+    god = scan_god()
+    bullets = scan_bullets()
+    ig = scan_ignores()
+    by_tier = {}
+    for _, _, _, reason in ig:
+        key = (reason or "no reason").split(" ")[0].rstrip(":") if reason else "no reason"
+        if reason and reason.startswith("gap:"):
+            key = "gap"
+        elif reason and reason.startswith("tier:"):
+            key = reason.split()[1]
+        by_tier[key] = by_tier.get(key, 0) + 1
+    files = list(test_files())
+    lines = sum(len(f.read_text(encoding="utf-8", errors="replace").splitlines()) for f in files)
+    print()
+    print(f"- god scenarios: {len(god)} of cap {CAP_GOD_SCENARIOS}")
+    print(f"- asserted core_sanity bullets: {sum(bullets.values())} of cap {CAP_ASSERTED_BULLETS} {bullets}")
+    print(f"- ignored tests: {len(ig)} {dict(sorted(by_tier.items()))}")
+    print(f"- test files: {len(files)}, {lines} lines")
+    print(f"- `fn world()` copies outside tests/common: {helper_copies('world')}; `fn adults()`: {helper_copies('adults')}")
+    if args.since:
+        d = subprocess.run(["git", "diff", "--shortstat", args.since, "--", "citysim/tests", "citysim-cli/tests"],
+                           cwd=ROOT, capture_output=True, text=True).stdout.strip()
+        added = subprocess.run(["git", "diff", "--name-status", "--diff-filter=A", args.since, "--", "citysim/tests", "citysim-cli/tests"],
+                               cwd=ROOT, capture_output=True, text=True).stdout.split()
+        new_files = [a for a in added if a.endswith(".rs")]
+        print(f"- since {args.since}: {d or 'no test changes'}; new test files: {', '.join(Path(p).name for p in new_files) or 'none'}")
+    over = []
+    if len(god) > CAP_GOD_SCENARIOS:
+        over.append("god")
+    if sum(bullets.values()) > CAP_ASSERTED_BULLETS:
+        over.append("bullets")
+    print()
+    print("Every cap over → a row in docs/OPEN.md owned by the next milestone before the close is accepted."
+          if over else "Every cap met.")
+    return 0
+
+
+def cmd_diag(args):
+    diag = [(f, ln, name) for f, ln, name, reason in scan_ignores() if reason and reason.startswith("tier: diag")]
+    if args.only:
+        name = args.only
+        hits = [x for x in diag if x[2] == name]
+        if not hits:
+            print(f"no diag test named {name}; `test.py diag` lists them")
+            return 1
+        f = hits[0][0]
+        pkg = "citysim-cli" if "citysim-cli" in f.parts else "citysim"
+        cmd = CARGO + ["test", "--release", "-p", pkg] + (["--test", f.stem] if f.parent.name == "tests" else []) + ["--", "--ignored", name, "--nocapture"]
+        print(" ".join(cmd))
+        return subprocess.call(cmd, cwd=ROOT)
+    for f, ln, name in diag:
+        print(f"{name:<48} {f.relative_to(ROOT)}:{ln}")
+    print(f"{len(diag)} diag-tier test(s); run one with --only NAME")
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("tier", choices=list(TIERS) + ["diag", "lint", "report"])
+    ap.add_argument("--only", help="one test binary (change) or step (merge/milestone) or diag test name")
+    ap.add_argument("--no-build", action="store_true", help="skip the --no-run build step")
+    ap.add_argument("--since", help="report: a base sha for the test-growth lines")
+    args = ap.parse_args()
+    os.chdir(ROOT)
+    if args.tier == "lint":
+        return cmd_lint(args)
+    if args.tier == "report":
+        return cmd_report(args)
+    if args.tier == "diag":
+        return cmd_diag(args)
+    return cmd_tier(args.tier, args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
