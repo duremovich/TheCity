@@ -586,6 +586,8 @@ pub fn finishes_early(world: &World, id: EntityId, kind: ActionKind, started: Ti
         ActionKind::Wander => world.comp::<Job>(id).is_some_and(|j| can_work_now(world, id, j)),
         // The order changed: the muster breaks up (on_complete then fails the step).
         ActionKind::Muster => crate::systems::raid::raid_done(world, id),
+        // Lives at work phase 2 (§ 3.3): nobody came: leave early (false off).
+        ActionKind::HangOut => crate::systems::household::empty_leave(world, id, started),
         // M15 W22: the target came into reach; W35: the body is gone or buried.
         ActionKind::StakeOut => {
             let guard = world
@@ -733,6 +735,10 @@ pub fn on_complete(
             // never past it (+0.1 a 90-min Rest outran the decay: a woman
             // looped Rest for four days at 0.85-0.97 and never slept).
             let cap = world.config.life.rest_energy_cap;
+            // Lives at work phase 2 (§ 3.5): a Visit's hour at the kin's side.
+            if world.comp::<Brain>(id).and_then(|b| b.plan_goal()) == Some(crate::components::GoalKind::Visit) {
+                crate::systems::household::visit_done(world, id);
+            }
             if let Some(n) = world.comp_mut::<Needs>(id) {
                 n.energy = n.energy.max((n.energy + 0.1).min(cap));
             }

@@ -51,5 +51,7 @@ pub fn goal_state(goal: GoalKind) -> Option<GoalState> {
         GoalKind::Commission | GoalKind::Rescue => return None,
         // Jobs & lives phase 2: scripted (`streetwork::plan`).
         GoalKind::Pitch => return None,
+        // Lives at work phase 2 (§ 3.5): scripted (`household::plan`).
+        GoalKind::Visit => return None,
     })
 }

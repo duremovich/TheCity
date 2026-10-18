@@ -191,7 +191,10 @@ fn test_unwind_skips_paid_rungs_when_broke() {
     set_coins(&mut w, a, 0);
     let pick = leisure::choice(&w, a, true).expect("a free rung");
     assert_eq!(pick.rung, citysim::living::Rung::Free, "{pick:?}");
-    assert!(pick.venue.is_none());
+    // Lives at work phase 2: a Free pick may carry a Home as its venue (the
+    // home spot, § 3.1), never a paid venue.
+    let home = pick.venue.and_then(|v| w.comp::<Building>(v).map(|b| b.kind));
+    assert!(home.is_none_or(|k| k == BuildingKind::Home), "{pick:?}");
     set_coins(&mut w, a, 300);
     // Day gaps 2: a venue in reach (here, at the Arcade's door).
     let arcade = standing(&w, BuildingKind::Arcade)[0];

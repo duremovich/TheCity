@@ -48,10 +48,17 @@ pub enum Deed {
     Blackmailed,
     /// M16b phase 2: `actor` (a crew member) freed `object` from its holder.
     Rescued,
+    /// Lives at work phase 2 (§ 3.6): `actor` was taken on at `object` (a
+    /// workplace). Deviation: `Hired` is M16a's contract record.
+    Employed,
+    /// Lives at work phase 2 (§ 3.6): `actor` was laid off from `object`.
+    LaidOff,
+    /// Lives at work phase 2 (§ 3.6): `actor` (the mother) bore `object`.
+    Born,
 }
 
 impl Deed {
-    pub const ALL: [Deed; 19] = [
+    pub const ALL: [Deed; 22] = [
         Deed::Killed,
         Deed::Assaulted,
         Deed::Robbed,
@@ -71,6 +78,9 @@ impl Deed {
         Deed::Gave,
         Deed::Blackmailed,
         Deed::Rescued,
+        Deed::Employed,
+        Deed::LaidOff,
+        Deed::Born,
     ];
 
     /// Position in [`Deed::ALL`].
@@ -100,6 +110,9 @@ impl Deed {
             Deed::Gave => "gave",
             Deed::Blackmailed => "blackmailed",
             Deed::Rescued => "rescued",
+            Deed::Employed => "employed",
+            Deed::LaidOff => "laid_off",
+            Deed::Born => "born",
         }
     }
 

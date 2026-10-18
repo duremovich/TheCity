@@ -201,6 +201,16 @@ pub fn think_with_offer(
             scored.push(s);
         }
     }
+    // Lives at work phase 2 (§ 3.4): the newborn's carer's night goals score
+    // × `newborn_away_mult` (nothing off).
+    if crate::systems::household::carer(world, id) {
+        let m = world.config.household.newborn_away_mult;
+        for s in &mut scored {
+            if crate::systems::household::damped(world, id, s.goal) {
+                s.score *= m;
+            }
+        }
+    }
     // Highest score wins; ties break by table order (stable sort).
     scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
     let winner = scored.first()?.goal;
@@ -223,6 +233,7 @@ const GOAL_PROF_NAMES: [&str; goals::GOAL_ORDER.len()] = [
     "goal::Hunt",
     "goal::Contract",
     "goal::Rescue",
+    "goal::Visit",
     "goal::Commission",
     "goal::ReportCrime",
     "goal::Patrol",

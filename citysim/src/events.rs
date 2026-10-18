@@ -428,10 +428,13 @@ pub enum EventKind {
     /// door refusal, an ejection, a new regular), only for the outcomes a
     /// `[[serves]]` row's `event_on` names.
     Served,
+    // --- Lives at work phase 2 (docs/LIVES_AT_WORK.md § 3.5).
+    /// `[visitor, kin, place?]`: a visit made to a hurt kin or an elder parent.
+    Visited,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 214] = [
+    pub const ALL: [EventKind; 215] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -646,6 +649,7 @@ impl EventKind {
         EventKind::CrateSeized,
         EventKind::LicenceSold,
         EventKind::Served,
+        EventKind::Visited,
     ];
 }
 

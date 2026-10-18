@@ -299,6 +299,87 @@ pub struct Config {
     /// serving trade (a trade id or a legacy `Role` name as the key).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub serves: Vec<ServesCfg>,
+    /// Lives at work phase 2 (§ 3): the evening and the household, under the
+    /// `[lives]` master (`CITYSIM_HOUSEHOLD_OFF=1`). Not written into a save
+    /// at its defaults (the off save is byte-identical).
+    #[serde(default, skip_serializing_if = "HouseholdCfg::is_default")]
+    pub household: HouseholdCfg,
+}
+
+/// Lives at work phase 2 `[household]` (docs/LIVES_AT_WORK.md § 3): the
+/// home spot, the empty-spot leave, the household's rules and the visits.
+/// Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HouseholdCfg {
+    pub enabled: bool,
+    /// § 3.1: a Home spot's score per household member home now, and per
+    /// child at home.
+    pub home_w: f32,
+    pub child_w: f32,
+    /// § 3.2: Friend/Family contacts' Homes offered as spots, at most.
+    pub visit_hosts: u8,
+    /// § 3.1: street dice between two bored co-hangers at home (off: none).
+    pub home_dice: bool,
+    /// § 3.3: a HangOut alone this long ends early; the spot scores ×
+    /// `empty_penalty` for `empty_memory_hours`.
+    pub empty_leave_ticks: u16,
+    pub empty_penalty: f32,
+    pub empty_memory_hours: u8,
+    /// § 3.4: the newborn's days; the carer's away spots and night goals ×
+    /// this; both parents' energy decay × this; the Home's pantry draw a
+    /// day (Food, on the child food debt).
+    pub newborn_days: u16,
+    pub newborn_away_mult: f32,
+    pub newborn_energy_mult: f32,
+    pub newborn_cost_per_day: f32,
+    /// § 3.4: the carer's night, hours of the day `[from, to)` (wrapping).
+    pub night_from: u8,
+    pub night_to: u8,
+    /// § 3.4: a household business with no take for this many days is
+    /// abandoned (its heir takes an outside post).
+    pub abandon_days: u8,
+    /// § 3.5: an elder parent unmet this long is visited; the visit's hour
+    /// of the day `[from, to)`; the goal's flat bonus; the visitor's belonging.
+    pub elder_visit_days: u8,
+    pub visit_hour_from: u8,
+    pub visit_hour_to: u8,
+    pub visit_flat: f32,
+    pub visit_belonging: f32,
+}
+
+impl Default for HouseholdCfg {
+    fn default() -> Self {
+        HouseholdCfg {
+            enabled: false,
+            home_w: 0.5,
+            child_w: 0.3,
+            visit_hosts: 3,
+            home_dice: false,
+            empty_leave_ticks: 20,
+            empty_penalty: 0.3,
+            empty_memory_hours: 6,
+            newborn_days: 30,
+            newborn_away_mult: 0.3,
+            newborn_energy_mult: 1.15,
+            newborn_cost_per_day: 0.5,
+            night_from: 21,
+            night_to: 6,
+            abandon_days: 7,
+            elder_visit_days: 7,
+            visit_hour_from: 10,
+            visit_hour_to: 20,
+            visit_flat: 0.2,
+            visit_belonging: 0.2,
+        }
+    }
+}
+
+impl HouseholdCfg {
+    /// Not written into a save at its defaults (off).
+    pub fn is_default(&self) -> bool {
+        *self == HouseholdCfg::default()
+    }
 }
 
 /// Lives at work `[lives]` (docs/LIVES_AT_WORK.md D13): the master switch.
@@ -6129,6 +6210,28 @@ pub struct DeedTable {
     pub blackmailed: f32,
     /// M16b phase 2: the `Rescued` deed (a missing key reads 0).
     pub rescued: f32,
+    /// Lives at work phase 2 (§ 3.6): the work and household deeds (a
+    /// missing key reads 0; left out of a save at 0, and zeroed by the off
+    /// switches, so an off save is byte-identical).
+    #[serde(skip_serializing_if = "is_zero_f32_deed")]
+    pub employed: f32,
+    #[serde(skip_serializing_if = "is_zero_f32_deed")]
+    pub laid_off: f32,
+    #[serde(skip_serializing_if = "is_zero_f32_deed")]
+    pub born: f32,
+}
+
+fn is_zero_f32_deed(v: &f32) -> bool {
+    *v == 0.0
+}
+
+impl DeedTable {
+    /// Lives at work phase 2: the phase's keys at 0 (the off switches).
+    pub fn without_household_deeds(&mut self) {
+        self.employed = 0.0;
+        self.laid_off = 0.0;
+        self.born = 0.0;
+    }
 }
 
 impl DeedTable {
@@ -6154,6 +6257,9 @@ impl DeedTable {
             Deed::Gave => self.gave,
             Deed::Blackmailed => self.blackmailed,
             Deed::Rescued => self.rescued,
+            Deed::Employed => self.employed,
+            Deed::LaidOff => self.laid_off,
+            Deed::Born => self.born,
         }
     }
 
@@ -6181,6 +6287,9 @@ impl DeedTable {
             gave,
             blackmailed: 0.0,
             rescued: 0.0,
+            employed: 0.0,
+            laid_off: 0.0,
+            born: 0.0,
         }
     }
 }
@@ -7520,6 +7629,14 @@ impl Config {
         Config::load_from(&dir)
     }
 
+    /// Lives at work phase 2: the phase's deed keys at 0 in every deed table
+    /// (the off switches; the deeds are never posted off).
+    pub fn without_household_deeds(&mut self) {
+        self.gossip.reach0.without_household_deeds();
+        self.gossip.deed_sal.without_household_deeds();
+        self.gossip.deed_sev.without_household_deeds();
+    }
+
     pub fn load_from(assets_dir: &Path) -> Config {
         let path = assets_dir.join("config.toml");
         let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
@@ -7598,6 +7715,15 @@ impl Config {
             cfg.lives = LivesCfg::default();
             cfg.service = ServiceCfg::default();
             cfg.serves.clear();
+            cfg.household = HouseholdCfg::default();
+            cfg.without_household_deeds();
+        }
+        // Lives at work phase 2 (§ 3): the household's A/B and identity device
+        // (the section and the phase's deed keys cleared, so the off save
+        // matches main byte for byte).
+        if std::env::var("CITYSIM_HOUSEHOLD_OFF").is_ok_and(|v| v == "1") {
+            cfg.household = HouseholdCfg::default();
+            cfg.without_household_deeds();
         }
         cfg.districts.row_count();
         // Transit (docs/TRANSIT.md D12): `CITYSIM_TRANSIT=1` (or `0`)

@@ -893,6 +893,11 @@ pub fn dismiss_as(
     let mut actors = vec![agent];
     actors.extend(building);
     world.push_event(kind, &actors, text);
+    // Lives at work phase 2 (§ 3.6): the layoff is talked about (nothing off).
+    if kind == EventKind::LaidOff && crate::systems::household::on(world) {
+        let d = crate::systems::gossip::talk_district(world, agent);
+        crate::systems::gossip::post_deed(world, d, crate::word::Deed::LaidOff, Some(agent), building);
+    }
     Some(job)
 }
 

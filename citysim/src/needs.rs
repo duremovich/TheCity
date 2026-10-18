@@ -119,6 +119,12 @@ pub fn run(world: &mut World) {
         let energy_mult = if assets { crate::systems::stims::energy_mult(world, id) } else { None };
         // Hunger as sickness § 2: the body's energy debuff (None stays None off).
         let energy_mult = crate::systems::health::energy_mult(world, id, energy_mult);
+        // Lives at work phase 2 (§ 3.4): a new parent's nights (None stays None off).
+        let energy_mult = match (energy_mult, crate::systems::household::energy_mult(world, id)) {
+            (m, None) => m,
+            (None, Some(n)) => Some(n),
+            (Some(m), Some(n)) => Some(m * n),
+        };
         let sleeping = matches!(brain.exec, ExecState::Use { kind: ActionKind::Sleep, .. });
         let sleeping_outside = sleeping && world.comp::<Position>(id).is_some_and(|p| p.building.is_none());
         let farm_working = matches!(brain.exec, ExecState::Use { kind: ActionKind::FarmWork, .. });

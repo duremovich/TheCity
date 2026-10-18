@@ -176,9 +176,12 @@ bit per flag from `FLAG_BASE`; at most `MAX_FLAGS` flags). The destructuring is 
 field fails to compile until it is packed. `citysim/tests/planner_key.rs` proves the packing injective and the plans
 identical to an unpacked reference search.
 
-**Registering a new goal**: a `GoalKind` variant (`components.rs`) → its slot in `GOAL_ORDER` → its arm in
-`utility::goals::considerations` (and `already_satisfied` if needed) → its target in `goap::goal_state` (or a scripted
-plan in `plan.rs` / `exec/routine.rs`).
+**Registering a new goal**: a `GoalKind` variant (`components.rs`) → its slot in `GOAL_ORDER` (and the matching
+`GOAL_PROF_NAMES` entry in `utility/mod.rs`) → its arm in `utility::goals::considerations` (and `already_satisfied` if
+needed) → its target in `goap::goal_state` (or a scripted plan in `plan.rs` / `exec/routine.rs`). A scripted goal is
+listed in three places: `goap::goal_state` (`return None`), `plan::plan_for`'s bypass (its `plan` fn) and
+`exec::start_step`'s `scripted` match (its own `can_start`); `GoalKind::Visit` (`systems/household.rs`) is the smallest
+example: `GoTo(Victim) → Rest`, with the completion read in `actions::on_complete`'s `Rest` arm by the plan's goal.
 
 **Registering a new action**: an `ActionKind` variant (`goap/actions.rs`; enum order is the tie-break) → `PLANNABLE`
 if the planner may pick it → its arms in `allowed`, `preconditions`, `feasible`, `apply`, `cost`, `instance` (`impl
@@ -196,7 +199,7 @@ Each file's `//!` header names its spec section.
 | `ambient.rs` | the Ambient tier (section 4) | `founding.rs` | building on a Lot, incorporation | `reputation.rs` | reputation rebuilt at midnight from what is known |
 | `assets.rs` | owned things: upkeep, finance, repossession, wear, loot, inheritance; the derived `Kit` | `fviolence.rs` | the order-rates ledger of faction violence (feeds the Statistical tier) | `riot.rs` | district riots |
 | `life.rs` | L1 helpers that make a day less of a walk | `gang.rs` | recruitment, ranks, extortion, loot, fencing, the gang economy | `robots.rs` | security robots |
-| `attention.rs` | each faction's attention pool | `gossip.rs` | deeds travelling into `Memory.heard`, district pools | `security.rs` | the one tier contest (`p = clamp(0.5 + contest_step × …)`); `service.rs` | the service encounter: queues, the hourly pass, regulars, the door, the staff meal (`[lives]`, `[service]`, `[[serves]]`) |
+| `attention.rs` | each faction's attention pool | `gossip.rs` | deeds travelling into `Memory.heard`, district pools | `security.rs` | the one tier contest (`p = clamp(0.5 + contest_step × …)`); `service.rs` | the service encounter: queues, the hourly pass, regulars, the door, the staff meal (`[lives]`, `[service]`, `[[serves]]`); `household.rs` | the home spot, the empty-spot leave, reunite, newborns, the household's business, visits (`[household]`) |
 | `bind.rs` | holes and the binder (section 10) | `governance.rs` | corp boards, votes, campaigns | `social.rs` | edges by colocation, drift, promotion, pruning |
 | `bins.rs` | bins behind Markets and Homes, the dive (`[sickness]`) | `gray.rs` | the gray market, black clinics (`[gray]`) | `stat_policy.rs` | the Statistical policy (table or MLP) |
 | `braindance.rs` | braindance studios and recorders (`[vice] bd`) | `grudges.rs` | grudges, inheritance, vendettas, guarding the body | `stats.rs` | the end-of-day snapshot and `Trace` |
@@ -261,6 +264,7 @@ Outside `systems/`: `needs.rs`, `mood.rs`, `personality.rs` (agent internals), `
 | `[shop]` | `systems/assets.rs`, `vehicles.rs` | `[wounded]`, `[trauma]` | `systems/wounded.rs` | `[faith]`, `[[faith.creeds]]` | `systems/faith.rs`, `creeds.rs` |
 | `[stims]` | `systems/stims.rs` | `[governance]` | `systems/governance.rs` | `[ages]` | `systems/ages.rs` |
 | `[lives]` | `systems/service.rs` (`service::on`, the milestone's master switch) | `[service]` | `systems/service.rs` | `[[serves]]` | `systems/service.rs` (`row_for`; keys checked by `Config::unresolved_names`) |
+| `[household]` | `systems/household.rs`, `leisure.rs` (the home spot), `utility/mod.rs` (the carer's damping), `needs.rs` (the parents' energy) | | | | |
 
 The config is part of the saved `World`: a save resumes under the config it was written with, not the current
 `config.toml`. Rules for adding keys: `.claude/rules/config.md`.

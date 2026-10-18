@@ -336,6 +336,8 @@ pub fn spawn_child(world: &mut World, mother: EntityId, father: EntityId, home: 
     let (nm, nf) = (world.name_of(mother), world.name_of(father));
     let name = world.name_of(id);
     world.push_event(EventKind::Birth, &[id, mother, father], format!("{name} born to {nm} and {nf}"));
+    // Lives at work phase 2 (§ 3.4, § 3.6): the parents hold the newborn; the Born deed.
+    crate::systems::household::on_birth(world, id, mother, father);
     id
 }
 
@@ -694,6 +696,8 @@ fn job_search_pass_with(world: &mut World, vacancies: &[(EntityId, Vec<Role>)], 
     use crate::systems::classpay;
     // Scale S1: the labour pool, built on the pass's first ungraded pick.
     let mut pool: Option<HirePool> = None;
+    // Lives at work phase 2 (§ 3.4): the heirs waiting for a household business (one pass).
+    let holders = crate::systems::household::business_holders(world);
     for (employer, roles) in vacancies {
         let employer = *employer;
         let Some(workplace_door) = world.comp::<Building>(employer).filter(|b| !b.demolished).map(|b| b.door) else {
@@ -705,7 +709,12 @@ fn job_search_pass_with(world: &mut World, vacancies: &[(EntityId, Vec<Role>)], 
             if pass.is_some_and(|p| p != graded) {
                 continue;
             }
-            let pick = if graded {
+            // Lives at work phase 2 (§ 3.4): the owner's household takes its
+            // business's open post first (None off, or nobody jobless there).
+            let household = crate::systems::household::owner_operator(world, employer, role);
+            let pick = if let Some(m) = household {
+                Some(m)
+            } else if graded {
                 // P3: a premium the corp cannot fund is not hired.
                 if !classpay::premium_funded(world, employer, role) {
                     continue;
@@ -716,7 +725,7 @@ fn job_search_pass_with(world: &mut World, vacancies: &[(EntityId, Vec<Role>)], 
                     let pool = pool.get_or_insert_with(|| HirePool::new(world));
                     crate::prof::timed!("job::pick_candidate", pool.pick(world, employer, workplace_door, role))
                 } else {
-                    pick_candidate(world, employer, workplace_door, role)
+                    pick_candidate(world, employer, workplace_door, role, &holders)
                 }
             };
             let Some(id) = pick else { continue };
@@ -758,7 +767,13 @@ fn job_search_pass_with(world: &mut World, vacancies: &[(EntityId, Vec<Role>)], 
 /// (`camp_band + 512` for the 1024 on a map past 1,024 Manhattan tiles)
 /// (the role's `competence::role_skill`; the bonus for an adult laid off
 /// from the same role in the last 30 days).
-fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, role: Role) -> Option<EntityId> {
+fn pick_candidate(
+    world: &World,
+    employer: EntityId,
+    workplace_door: TilePos,
+    role: Role,
+    holders: &std::collections::BTreeSet<EntityId>,
+) -> Option<EntityId> {
     // L2 shadow fixes item 13: a corp's exec is not in the labour pool
     // (Zetatech's exec was hired as a Militech Fab Tech and laid off).
     let execs = crate::systems::classes::exec_set(world);
@@ -777,6 +792,7 @@ fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, ro
         .filter(|&id| world.comp::<Brain>(id).is_some_and(|b| !b.emigrating))
         // L1: not the worker who just quit this employer (rehired at midnight, daily).
         .filter(|&id| !crate::systems::life::quit_blocks(world, id, employer))
+        .filter(|&id| !holders.contains(&id))
         .filter(|&id| !world.has::<Job>(id) && !world.has::<Sentence>(id))
         .filter(|&id| is_adult(world, id))
         .filter(|id| !execs.contains(id))
@@ -986,6 +1002,8 @@ struct HirePool {
     froms: Vec<TilePos>,
     /// Hired this pass.
     hired: std::collections::BTreeSet<EntityId>,
+    /// Lives at work phase 2 (§ 3.4): the heirs waiting for a household business.
+    holders: std::collections::BTreeSet<EntityId>,
     groups: std::collections::BTreeMap<Role, HireGroups>,
     /// `(workplace door, near cap)` -> `froms` by `hire_base`, ascending.
     bases: std::collections::BTreeMap<(TilePos, Option<u64>), HireBases>,
@@ -1006,6 +1024,7 @@ impl HirePool {
             camp,
             froms: froms.into_iter().collect(),
             hired: std::collections::BTreeSet::new(),
+            holders: crate::systems::household::business_holders(world),
             groups: std::collections::BTreeMap::new(),
             bases: std::collections::BTreeMap::new(),
         }
@@ -1016,6 +1035,8 @@ impl HirePool {
         let free = |hired: &std::collections::BTreeSet<EntityId>, id: EntityId| {
             !hired.contains(&id)
                 && !crate::systems::life::quit_blocks(world, id, employer)
+                // Lives at work phase 2 (§ 3.4): an heir waits for the household's business.
+                && !self.holders.contains(&id)
                 && (role != Role::Guard || world.comp::<Personality>(id).is_some_and(|p| p.lawfulness >= 0.4))
                 && crate::systems::fashion::dress_ok(world, id, role)
                 && crate::systems::trades::skill_ok(world, id, role)
@@ -1097,7 +1118,9 @@ impl HirePool {
 /// (poaching compares a rival's worker with this one).
 pub fn hire_candidate(world: &World, employer: EntityId, role: Role) -> Option<EntityId> {
     let door = world.comp::<Building>(employer).filter(|b| !b.demolished).map(|b| b.door)?;
-    pick_candidate(world, employer, door, role)
+    // Lives at work phase 2 (§ 3.4): the heirs waiting for a household business (one pass a call).
+    let holders = crate::systems::household::business_holders(world);
+    pick_candidate(world, employer, door, role, &holders)
 }
 
 pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
@@ -1150,6 +1173,11 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
     // Jobs & lives phase 1 (§ 2): the foreman named (nothing off).
     let foreman = crate::systems::industry::foreman_note(world, employer, id, "picked");
     world.push_event(EventKind::Hire, &[id, employer], format!("{name} hired as {}{foreman}", role.label()));
+    // Lives at work phase 2 (§ 3.6): the work deed (nothing off).
+    if crate::systems::household::on(world) {
+        let d = crate::systems::gossip::talk_district(world, id);
+        crate::systems::gossip::post_deed(world, d, crate::word::Deed::Employed, Some(id), Some(employer));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1916,7 +1944,8 @@ mod tests {
         note_laid_off(&mut w, near, Role::Farmer);
         let camp = w.spawn();
         w.insert(far, crate::econ::CampRaised { camp, owner: None, days: 30, fed_share: 1.0 });
-        assert_eq!(pick_candidate(&w, farm, door, Role::Farmer), Some(far), "pick_candidate");
+        let holders = std::collections::BTreeSet::new();
+        assert_eq!(pick_candidate(&w, farm, door, Role::Farmer, &holders), Some(far), "pick_candidate");
         let mut pool = HirePool::new(&w);
         assert_eq!(pool.pick(&w, farm, door, Role::Farmer), Some(far), "the pooled pass");
     }

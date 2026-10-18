@@ -742,15 +742,27 @@ pub fn choice(world: &World, id: EntityId, scored: bool) -> Option<UnwindPick> {
         let score = g.watch * travel(world, t.manhattan(from));
         cands.push(Cand { rung: Rung::Free, act: ActionKind::HangOut, venue: None, spot: Some(t), score });
     }
-    let spot = if scored { best_spot(world, id, from) } else { nearest_spot(world, id, from) };
-    if let Some((t, social)) = spot {
+    // Lives at work phase 2 (§ 3.1): a Home spot carries its Home as the
+    // pick's venue (the HangOut runs inside it).
+    let spot = if scored {
+        best_spot_kind(world, id, from).map(|(s, social)| {
+            let home = match s.kind {
+                SpotKind::Home(h) => Some(h),
+                _ => None,
+            };
+            (s.tile, social, home)
+        })
+    } else {
+        nearest_spot(world, id, from).map(|(t, social)| (t, social, None))
+    };
+    if let Some((t, social, home)) = spot {
         let hours = world.config.leisure.hangout_ticks as f32 / TICKS_PER_HOUR as f32;
         // L2 shadow fixes item 5: a lone hour is not a full hour's fun (11
         // of 15 HangOuts were "nobody there"); company scales it up.
         let lone = world.config.life.spot_lone_fun;
         let company = lone + (1.0 - lone) * social.clamp(0.0, 1.0);
         let score = (g.hangout_hour * hours * company + 0.1 * social.min(1.0)) * travel(world, t.manhattan(from));
-        cands.push(Cand { rung: Rung::Free, act: ActionKind::HangOut, venue: None, spot: Some(t), score });
+        cands.push(Cand { rung: Rung::Free, act: ActionKind::HangOut, venue: home, spot: Some(t), score });
     }
     let best = cands.iter().max_by(|a, b| {
         a.score.total_cmp(&b.score).then_with(|| b.venue.cmp(&a.venue)).then_with(|| b.spot.cmp(&a.spot))
@@ -846,8 +858,13 @@ fn spot_ok(world: &World, id: EntityId, s: &Spot) -> bool {
     }
 }
 
-/// The spots of `id`'s district (its tile's), and of its Home's.
+/// The spots of `id`'s district (its tile's), and of its Home's; its own
+/// Home (Lives at work phase 2) and, for the scored pick, its friends'.
 fn spots_near(world: &World, id: EntityId, from: TilePos) -> Vec<Spot> {
+    spots_near_with(world, id, from, false)
+}
+
+fn spots_near_with(world: &World, id: EntityId, from: TilePos, with_friends: bool) -> Vec<Spot> {
     let mut ds: SmallVec<[DistrictId; 2]> = SmallVec::new();
     ds.push(world.district_of(from));
     if let Some(d) = world.comp::<Household>(id).and_then(|h| h.home).map(|h| world.district_of_building(h)) {
@@ -859,6 +876,17 @@ fn spots_near(world: &World, id: EntityId, from: TilePos) -> Vec<Spot> {
     for d in ds {
         if let Some(v) = world.spots.get(d.index()) {
             out.extend(v.iter().copied().filter(|s| spot_ok(world, id, s)));
+        }
+    }
+    // Lives at work phase 2 (§ 3.1, § 3.2): the agent's own Home and the
+    // Homes of friends due home, within the walk cap (nothing off).
+    let cap = world.config.life.spot_walk_cap_tiles;
+    for (h, _) in crate::systems::household::home_spots(world, id, from, cap, with_friends) {
+        if let Some(bd) = world.comp::<Building>(h) {
+            let tile = world.outside_door(bd);
+            if !out.iter().any(|s| s.tile == tile) {
+                out.push(Spot { tile, kind: SpotKind::Home(h) });
+            }
         }
     }
     out
@@ -907,7 +935,12 @@ fn pair(a: EntityId, b: EntityId) -> (EntityId, EntityId) {
 /// term `kin_w × min(7, days since they met) × P`, a Call's `call_w` on the
 /// own Hideout's spot, times the walk; ties the nearer, then the lower tile.
 pub fn best_spot(world: &World, id: EntityId, from: TilePos) -> Option<(TilePos, f32)> {
-    let mut spots = spots_near(world, id, from);
+    best_spot_kind(world, id, from).map(|(s, social)| (s.tile, social))
+}
+
+/// [`best_spot`] with the spot's kind (a Home spot's HangOut runs inside it).
+pub fn best_spot_kind(world: &World, id: EntityId, from: TilePos) -> Option<(Spot, f32)> {
+    let mut spots = spots_near_with(world, id, from, true);
     if spots.is_empty() {
         return None;
     }
@@ -915,7 +948,27 @@ pub fn best_spot(world: &World, id: EntityId, from: TilePos) -> Option<(TilePos,
     // the walk (195 min at midnight to an empty corner): within the cap,
     // else the nearest alone.
     let cap = world.config.life.spot_walk_cap_tiles;
-    let near: Vec<Spot> = spots.iter().copied().filter(|s| s.tile.manhattan(from) <= cap).collect();
+    // Lives at work phase 2 (§ 3.3): after an empty leave, only spots with
+    // company now (none: no HangOut).
+    if crate::systems::household::company_only(world, id) {
+        spots.retain(|s| {
+            let home = match s.kind {
+                SpotKind::Home(h) => Some(h),
+                _ => None,
+            };
+            crate::systems::household::company_at(world, id, s.tile, home)
+        });
+        if spots.is_empty() {
+            return None;
+        }
+    }
+    // Lives at work phase 2 (§ 3.1): the own Home is never past the cap.
+    let own = home_of(world, id);
+    let near: Vec<Spot> = spots
+        .iter()
+        .copied()
+        .filter(|s| s.tile.manhattan(from) <= cap || matches!(s.kind, SpotKind::Home(h) if Some(h) == own))
+        .collect();
     spots = if near.is_empty() {
         spots.iter().copied().min_by_key(|s| (s.tile.manhattan(from), s.tile)).into_iter().collect()
     } else {
@@ -972,11 +1025,24 @@ pub fn best_spot(world: &World, id: EntityId, from: TilePos) -> Option<(TilePos,
             let others = present.map_or(0, |v| v.iter().filter(|&&o| o != id).count());
             social += (0.1 * others as f32).min(0.5);
             social -= cfg_life_penalty(world) * crate::systems::fixes::enemies_near(&enemies, s.tile) as f32;
+            // Lives at work phase 2 (§ 3.1, § 3.3, § 3.4): the household term
+            // of a Home spot, the empty-spot memory, the carer's away mult
+            // (each 1 or 0 off).
+            let own_home = matches!(s.kind, SpotKind::Home(h) if Some(h) == home_of(world, id));
+            if let SpotKind::Home(h) = s.kind {
+                social += crate::systems::household::home_term(world, id, h);
+            }
+            let mult = crate::systems::household::empty_mult(world, id, s.tile)
+                * crate::systems::household::away_mult(world, id, own_home);
             let d = s.tile.manhattan(from);
-            ((0.5 + social).max(0.0) * travel(world, d), d, s.tile, social)
+            ((0.5 + social).max(0.0) * travel(world, d) * mult, d, *s, social)
         })
-        .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)).then(b.2.cmp(&a.2)))
-        .map(|(_, _, t, social)| (t, social))
+        .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)).then(b.2.tile.cmp(&a.2.tile)))
+        .map(|(_, _, s, social)| (s, social))
+}
+
+fn home_of(world: &World, id: EntityId) -> Option<EntityId> {
+    world.comp::<Household>(id).and_then(|h| h.home)
 }
 
 // ---------------------------------------------------------------------------
@@ -1093,6 +1159,16 @@ fn step(action: ActionKind, target: Option<EntityId>) -> ActionInstance {
 fn steps_for(world: &World, id: EntityId, pick: &UnwindPick) -> Vec<ActionInstance> {
     let mut steps = Vec::new();
     match (pick.venue, pick.spot) {
+        // Lives at work phase 2 (§ 3.1): a HangOut at a Home (one's own, or
+        // a friend's) walks to the Home and runs inside it.
+        (Some(h), Some(_)) if pick.act == ActionKind::HangOut => {
+            if Some(h) == home_of(world, id) {
+                steps.push(step(ActionKind::GoTo(LocationKey::Home), None));
+            } else {
+                steps.push(step(ActionKind::GoTo(LocationKey::TargetHome), Some(h)));
+            }
+            steps.push(step(ActionKind::HangOut, None));
+        }
         (Some(v), _) => {
             steps.push(step(ActionKind::GoTo(LocationKey::Seller), Some(v)));
             let kind = kind_of(world, v);
@@ -1132,10 +1208,12 @@ pub fn unwind_plan(world: &mut World, id: EntityId) -> Option<Plan> {
         return None;
     }
     let target = pick.venue;
+    // Lives at work phase 2 (§ 3.1): a Home has no seats to hold.
+    let at_home = pick.act == ActionKind::HangOut;
     world.unwind.insert(id, pick);
     // Plan L30: with the LOD budget on, a Seat at the venue is held from the
     // plan to the arrival (`unwind_plan` installs without `reserve_for`).
-    if let Some(v) = target {
+    if let Some(v) = target.filter(|_| !at_home) {
         let expires = world.tick + world.config.exec.reservation_ttl;
         world.reserve(id, crate::exec::ReservationKind::Seat { building: v }, expires);
     }
@@ -1150,16 +1228,29 @@ pub fn hangout_plan(world: &mut World, id: EntityId) -> Option<Plan> {
         return None;
     }
     let from = origin(world, id)?;
-    let (tile, social) = best_spot(world, id, from)?;
+    let (spot, social) = best_spot_kind(world, id, from)?;
+    let tile = spot.tile;
     let spot_score = (0.5 + social) * travel(world, tile.manhattan(from));
     let bar = world.local(id, BuildingKind::Bar).and_then(|b| crate::systems::life::tiles_to(world, id, b));
     let bar_score = bar.map_or(0.0, |t| travel(world, t));
     if coins(world, id) >= 2 && spot_score < bar_score {
         return None;
     }
+    // Lives at work phase 2 (§ 3.1): a Home spot's HangOut runs inside the
+    // Home (the pick's `venue`); the walk is to the Home itself.
+    let home = match spot.kind {
+        SpotKind::Home(h) => Some(h),
+        _ => None,
+    };
     let pick =
-        UnwindPick { rung: Rung::Free, act: ActionKind::HangOut, venue: None, spot: Some(tile), score: spot_score };
-    let steps = vec![step(ActionKind::GoTo(LocationKey::Spot), None), step(ActionKind::HangOut, None)];
+        UnwindPick { rung: Rung::Free, act: ActionKind::HangOut, venue: home, spot: Some(tile), score: spot_score };
+    let steps = match home {
+        Some(h) if Some(h) == home_of(world, id) => {
+            vec![step(ActionKind::GoTo(LocationKey::Home), None), step(ActionKind::HangOut, None)]
+        }
+        Some(h) => vec![step(ActionKind::GoTo(LocationKey::TargetHome), Some(h)), step(ActionKind::HangOut, None)],
+        None => vec![step(ActionKind::GoTo(LocationKey::Spot), None), step(ActionKind::HangOut, None)],
+    };
     world.unwind.insert(id, pick);
     Some(Plan { goal: GoalKind::Socialise, target: None, steps, started_tick: world.tick })
 }
@@ -1220,7 +1311,12 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
             };
             at_venue(b) && ok_kind && coins(world, id) >= 1
         }
-        ActionKind::HangOut | ActionKind::Preach => world.comp::<Position>(id).is_some_and(|p| p.building.is_none()),
+        // Lives at work phase 2 (§ 3.1): a HangOut runs inside the Home it was picked for.
+        ActionKind::HangOut => {
+            world.comp::<Position>(id).is_some_and(|p| p.building.is_none())
+                || crate::systems::household::hanging_at_home(world, id).is_some()
+        }
+        ActionKind::Preach => world.comp::<Position>(id).is_some_and(|p| p.building.is_none()),
         ActionKind::Collect => {
             let Some(gang) = world.gang_of(id) else { return false };
             world.comp::<Gang>(gang).is_some_and(|g| g.leader == Some(id)) && inside.is_some() && inside == target
@@ -1441,15 +1537,43 @@ fn phase4_visit(world: &mut World, id: EntityId, b: EntityId) {
 fn hangout_done(world: &mut World, id: EntityId, started: Tick) {
     let tile = world.comp::<Position>(id).map(|p| p.tile);
     let hours = world.tick.saturating_sub(started) as f32 / TICKS_PER_HOUR as f32;
-    let others: Vec<EntityId> = tile
-        .and_then(|t| world.hangouts.get(&t))
-        .map(|v| v.iter().copied().filter(|&o| o != id && world.has::<Brain>(o)).collect())
-        .unwrap_or_default();
+    // Lives at work phase 2 (§ 3.1): inside a Home the company is the
+    // household present, not the street registry.
+    let at_home = crate::systems::household::hanging_at_home(world, id);
+    let others: Vec<EntityId> = match at_home {
+        Some(h) => crate::systems::household::residents_inside(world, h, id)
+            .into_iter()
+            .filter(|&o| world.has::<Brain>(o))
+            .collect(),
+        None => tile
+            .and_then(|t| world.hangouts.get(&t))
+            .map(|v| v.iter().copied().filter(|&o| o != id && world.has::<Brain>(o)).collect())
+            .unwrap_or_default(),
+    };
     let mut gain = world.config.leisure.gain.hangout_hour * hours.max(0.5);
     // L2 shadow fixes item 5: an hour alone on the corner is `spot_lone_fun`
     // of one in company.
     if others.is_empty() {
         gain *= world.config.life.spot_lone_fun;
+        // Lives at work phase 2 (§ 3.3): a spot left early is remembered empty.
+        if world.tick.saturating_sub(started) < world.config.leisure.hangout_ticks {
+            if let Some(t) = tile {
+                crate::systems::household::remember_empty(world, id, t);
+            }
+            // The own Home left empty is counted apart (the fix round's device).
+            if at_home.is_some_and(|h| Some(h) == home_of(world, id)) {
+                ownership::jobs2_row(world).home_empty_leaves += 1;
+            }
+        }
+    }
+    if let Some(h) = at_home {
+        let own = Some(h) == home_of(world, id);
+        let row = ownership::jobs2_row(world);
+        if own {
+            row.home_hangouts += 1;
+        } else {
+            row.friend_hangouts += 1;
+        }
     }
     add_fun(world, id, gain);
     let chat = world.config.needs.chat_belonging;
@@ -1487,6 +1611,16 @@ fn hangout_done(world: &mut World, id: EntityId, started: Tick) {
     if world.edge(id, p).is_some_and(|e| matches!(e.kind, RelKind::Spouse | RelKind::Family | RelKind::Parent)) {
         let today = world.day();
         world.last_met.insert(pair(id, p), today);
+    }
+    // Lives at work phase 2 (§ 3.1): an evening at home with the spouse is
+    // counted; street dice indoors only under `home_dice`.
+    if at_home.is_some() {
+        if world.spouse_of(id) == Some(p) {
+            ownership::jobs2_row(world).home_with_spouse += 1;
+        }
+        if !world.config.household.home_dice {
+            return;
+        }
     }
     street_dice(world, id, p);
 }

@@ -25,6 +25,8 @@ pub fn run(world: &mut World) {
     crate::systems::vice::hourly(world);
     // Lives at work phase 1 (§ 1.2): the service encounter's hourly pass.
     crate::prof::timed!("service", crate::systems::service::hourly(world));
+    // Lives at work phase 2 (§ 3.5): a Statistical visitor credited at its hour.
+    crate::systems::household::hourly(world);
     // Jobs & lives phase 5: an episode under a chip ends the contract
     // (nothing with `[vice] chip` off).
     crate::systems::dollhouse::hourly(world);
@@ -74,6 +76,8 @@ pub fn run(world: &mut World) {
     // before the street's day closes (nothing with `[vice]` off).
     crate::systems::vice::daily(world);
     crate::systems::streetwork::daily(world);
+    // Lives at work phase 2 (§ 3.4, § 3.5): the newborns' keep and the visits due.
+    crate::prof::timed!("household", crate::systems::household::daily(world));
     // Jobs & lives phase 3: the armouries, the fence, the carry roll, the
     // wants and licences, the guards' stock (nothing with `[weapons]` off).
     crate::systems::weapons::daily(world);

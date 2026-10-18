@@ -89,6 +89,11 @@ pub enum SpotKind {
     /// Jobs & lives phase 2 (§ 3): the labour corner outside a Yard (kept in
     /// `Jobs2State`, not in the HangOut lists: nobody idles at a dawn pick).
     LabourCorner(EntityId),
+    /// Lives at work phase 2 (§ 3.1, § 3.2): a Home's evening, inside it
+    /// (the agent's own, or a Friend's or kin's whose host is due home); the
+    /// spot's tile is the Home's outside door. Per agent, never in
+    /// `World::spots`.
+    Home(EntityId),
 }
 
 /// L2 L15: a HangOut spot (`World::spots`, per district, rebuilt daily).

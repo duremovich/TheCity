@@ -1132,6 +1132,9 @@ pub enum GoalKind {
     /// labour corner before the dawn pick (a scripted plan;
     /// `systems::streetwork`).
     Pitch,
+    /// Lives at work phase 2 (§ 3.5): a visit to a hurt kin or an elder
+    /// parent (a scripted plan; `systems::household`).
+    Visit,
 }
 
 /// Jobs & lives phase 2 (§ 1, D3): a venue without a building (a vendor's
@@ -2203,6 +2206,13 @@ impl Job {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Household {
     pub home: Option<EntityId>,
+    /// Lives at work phase 2 (§ 3.4): a parent holds a newborn until this
+    /// tick; `newborn_carer` names the parent whose nights and away spots are
+    /// damped. Not written while unset (the off save).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub newborn_until: Option<Tick>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub newborn_carer: bool,
     /// M11 D6: this adult's share of the Home's rent, accrued daily; the
     /// integer part is due at midnight.
     #[serde(default)]
@@ -2236,6 +2246,8 @@ impl Household {
     pub fn new(home: Option<EntityId>) -> Household {
         Household {
             home,
+            newborn_until: None,
+            newborn_carer: false,
             rent_due: 0.0,
             arrears: 0,
             evicted_by: None,
@@ -2393,6 +2405,11 @@ pub struct Brain {
     /// pick avoids it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avoid_spot: Option<(TilePos, Tick)>,
+    /// Lives at work phase 2 (§ 3.3): spots left empty (the tile and the
+    /// tick), the last four; `best_spot` scores them × `empty_penalty` for
+    /// `empty_memory_hours`. Not written while empty (the off save).
+    #[serde(default, skip_serializing_if = "smallvec::SmallVec::is_empty")]
+    pub empty_spots: smallvec::SmallVec<[(TilePos, Tick); 4]>,
     /// Workplace room: the building that last refused this agent at a full
     /// door, and when (`World::local` passes it over for `[exec]
     /// refused_ticks`).
@@ -2452,6 +2469,7 @@ impl Default for Brain {
             gang_paid_day: None,
             lod_since: 0,
             avoid_spot: None,
+            empty_spots: smallvec::SmallVec::new(),
             refused: None,
         }
     }

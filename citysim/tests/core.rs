@@ -412,6 +412,15 @@ fn run_city(seed: u64, days: u64, cfg: Config) -> SeedRun {
                 ("staff meal", j.staff_meals),
                 ("madam's cut", pos(j.flow_madam_cut)),
                 ("meal cooked", j.cooked),
+                // Lives at work phase 2 (docs/LIVES_AT_WORK.md § 9.1).
+                ("HangOut at home with a spouse", j.home_with_spouse),
+                ("HangOut at home", j.home_hangouts),
+                ("friend's place", j.friend_hangouts),
+                ("empty spot left early", j.empty_leaves),
+                ("reunited couple", j.reunited),
+                ("Visit to a hurt kin", j.kin_visits),
+                ("Visit to an elder parent", j.elder_visits),
+                ("newborn's carer", j.carers),
             ] {
                 *r.marks.entry(k).or_insert(0) += v;
             }
@@ -955,6 +964,16 @@ fn jobs2_printed() -> Vec<Mechanism> {
         "staff meal",      // [4827, 4918, 4563]
         "madam's cut",     // [0, 0, 0]: round(0.3 x a 1-coin tip) = 0 at the 2k Brothel
         "meal cooked",     // [21, 17, 19]: the cooks hold [world] shift_day, the NoodleBar's evening is unserved
+        // Lives at work phase 2 (§ 9.1, printed until the gate; `run --report` 42-44 x 120 on the
+        // phase 2 tree, `tests/household.rs` carries each).
+        "HangOut at home with a spouse", // [4227, 4068, 4447]
+        "HangOut at home",               // [17740, 16499, 17957]
+        "friend's place",                // [5029, 3567, 4178]
+        "empty spot left early",         // [15517, 14109, 14426]
+        "reunited couple",               // [21, 16, 19]
+        "Visit to a hurt kin",           // [727, 659, 698]
+        "Visit to an elder parent",      // [3796, 4223, 3663]
+        "newborn's carer",               // [27, 31, 29]
     ]
     .into_iter()
     .map(|k| (k, m(k)))
