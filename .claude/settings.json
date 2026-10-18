@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          { "type": "command", "command": "python tools/hooks/session_start.py", "timeout": 10 }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          { "type": "command", "command": "python tools/hooks/session_start.py --brief", "timeout": 10 }
+        ]
+      }
+    ]
+  }
+}

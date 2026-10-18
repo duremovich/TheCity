@@ -1,0 +1,9 @@
+#!/bin/sh
+# Pre-commit: formatting only. Clippy and the tests are the per-change loop
+# (python tools/test.py change), too slow for a hook.
+# Install once: git config core.hooksPath tools/hooks
+if ! cargo fmt --all -- --check >/dev/null 2>&1; then
+  echo "pre-commit: cargo fmt --all -- --check failed; run cargo fmt --all and re-stage." >&2
+  exit 1
+fi
+exit 0
