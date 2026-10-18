@@ -2,21 +2,20 @@
 //! synth and real meals on the one `Good::Food`, the malnutrition and
 //! toxicity meters, the debuffs and sick days, the slower starvation.
 
+mod common;
+
 use citysim::systems::diet::{self, Quality};
-use citysim::systems::{charity, demography, economy, health, law};
+use citysim::systems::{charity, demography, economy, health, law, life};
 use citysim::utility::goals;
 use citysim::{
     Brain, Building, BuildingKind, Config, EntityId, GoalKind, Health, Inventory, Job, Lod, Market, MealKind, Needs,
     Wallet, World, TICKS_PER_DAY, TICKS_PER_HOUR,
 };
+use common::dole_world;
 
 /// The dole city (`Config::dole_city`); hunger as sickness is always on (P10).
 fn sick_cfg() -> Config {
     Config::load().dole_city()
-}
-
-fn world_on() -> World {
-    World::new(42, sick_cfg())
 }
 
 /// Run on a day at a time (to day 30) until a gang has members: the day-5
@@ -57,7 +56,7 @@ fn health(w: &World, id: EntityId) -> Health {
 /// unit, a fourth opens the next; the meals join the carried synth subset.
 #[test]
 fn test_synth_meal_costs_a_third_and_drains_a_third() {
-    let mut w = world_on();
+    let mut w = dole_world();
     let m = market(&w);
     set_price(&mut w, m, 4);
     w.comp_mut::<Building>(m).expect("market").stock_food = 10;
@@ -86,7 +85,7 @@ fn test_synth_meal_costs_a_third_and_drains_a_third() {
 /// malnourished agent with two meals' coins).
 #[test]
 fn test_real_bought_above_the_floor() {
-    let mut w = world_on();
+    let mut w = dole_world();
     let a = adults(&w)[0];
     let reserve = w.config.sickness.real_meal_reserve;
     w.comp_mut::<Wallet>(a).expect("wallet").coins = reserve * 4;
@@ -108,7 +107,7 @@ fn test_real_bought_above_the_floor() {
 /// § 1 (H5): a Mission serves `synth_stretch` synth meals out of one unit.
 #[test]
 fn test_mission_serves_three_synth_meals_per_unit() {
-    let mut w = world_on();
+    let mut w = dole_world();
     let m = *w.buildings_of_kind(BuildingKind::Mission).first().expect("a Mission");
     w.comp_mut::<Building>(m).expect("mission").stock_food = 1;
     let eaters: Vec<EntityId> = adults(&w).into_iter().take(4).collect();
@@ -126,7 +125,7 @@ fn test_mission_serves_three_synth_meals_per_unit() {
 /// § 2: the daily update's arithmetic from the tally.
 #[test]
 fn test_meters_daily_from_the_tally() {
-    let mut w = world_on();
+    let mut w = dole_world();
     let cfg = w.config.sickness.clone();
     let a = adults(&w)[0];
     let b = adults(&w)[1];
@@ -151,7 +150,7 @@ fn test_meters_daily_from_the_tally() {
 /// `synth_malnut_cap`; hunger and bin scraps push past it.
 #[test]
 fn test_synth_diet_levels_off_at_the_cap() {
-    let mut w = world_on();
+    let mut w = dole_world();
     let cap = w.config.sickness.synth_malnut_cap;
     let (a, b, c) = (adults(&w)[0], adults(&w)[1], adults(&w)[2]);
     let tally = |synth, dive, hungry| citysim::MealTally { real: 0, synth, dive, alms: 0, hungry_hours: hungry };
@@ -180,7 +179,7 @@ fn test_synth_diet_levels_off_at_the_cap() {
 /// § 2: the debuffs read through `health::effects`.
 #[test]
 fn test_effects_reach_energy_work_mood_fertility() {
-    let mut w = world_on();
+    let mut w = dole_world();
     let a = adults(&w)[0];
     w.insert(a, Health::default());
     assert_eq!(health::effects(&w, a), health::Effects::NONE, "a clean body");
@@ -200,7 +199,7 @@ fn test_effects_reach_energy_work_mood_fertility() {
 /// gated, and a Statistical farmer on shift adds no work.
 #[test]
 fn test_sick_day_skips_the_shift_on_both_tiers() {
-    let mut w = world_on();
+    let mut w = dole_world();
     w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
     let farmer = adults(&w)
         .into_iter()
@@ -257,7 +256,7 @@ fn test_five_sick_days_in_fourteen_cost_the_job() {
 /// § 2: the Full and Statistical tiers tally a meal the same way.
 #[test]
 fn test_statistical_tally_matches_full() {
-    let mut w = world_on();
+    let mut w = dole_world();
     let a = adults(&w)[0];
     // Full: eat a carried synth meal.
     {
@@ -305,7 +304,7 @@ fn test_real_first_and_synth_keeps() {
 /// hunger 0, not three days.
 #[test]
 fn test_starvation_takes_seven_days_with_sickness() {
-    let mut w = world_on();
+    let mut w = dole_world();
     let a = adults(&w)[0];
     let tick = w.tick + 10 * TICKS_PER_DAY;
     w.tick = tick;
@@ -324,7 +323,7 @@ fn test_starvation_takes_seven_days_with_sickness() {
 /// § 10: a mid-run save with the meters carries them.
 #[test]
 fn test_save_round_trip_with_health() {
-    let mut w = world_on();
+    let mut w = dole_world();
     w.run_ticks(2 * TICKS_PER_DAY + 3 * TICKS_PER_HOUR);
     let a = adults(&w)[0];
     w.insert(a, Health { malnutrition: 0.4, toxicity: 0.3, sick_days: 0b101, ..Health::default() });
@@ -348,7 +347,7 @@ fn bin_of(w: &World, b: EntityId) -> u16 {
 /// then the bin rots by `bin_rot`; the midnight pass does both.
 #[test]
 fn test_market_bin_fills_from_spoilage_and_rots() {
-    let mut w = world_on();
+    let mut w = dole_world();
     let m = market(&w);
     citysim::systems::bins::spoiled(&mut w, m, 10);
     assert_eq!(bin_of(&w, m), 20, "10 units, 2 meals a unit");
@@ -358,7 +357,7 @@ fn test_market_bin_fills_from_spoilage_and_rots() {
     citysim::systems::bins::rot(&mut w);
     assert_eq!(bin_of(&w, m), 20, "half rots");
     // The midnight pass: a stocked shelf spoils into the bin.
-    let mut v = world_on();
+    let mut v = dole_world();
     let m = market(&v);
     v.comp_mut::<Building>(m).expect("market").stock_food = 1500;
     v.run_ticks(TICKS_PER_DAY - v.tick_of_day() as u64);
@@ -368,7 +367,7 @@ fn test_market_bin_fills_from_spoilage_and_rots() {
 /// A Home's pantry spoilage fills its own bin (household waste).
 #[test]
 fn test_home_bin_from_pantry_spoilage() {
-    let mut w = world_on();
+    let mut w = dole_world();
     let h = *w.buildings_of_kind(BuildingKind::Home).first().expect("a Home");
     w.comp_mut::<Building>(h).expect("home").stock_food = 40;
     w.run_ticks(TICKS_PER_DAY - w.tick_of_day() as u64);
@@ -379,7 +378,7 @@ fn test_home_bin_from_pantry_spoilage() {
 /// tiles off dives and eats within six hours (a person probe).
 #[test]
 fn probe_broke_with_no_mission_dives() {
-    let mut w = world_on();
+    let mut w = dole_world();
     w.run_ticks(2 * TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
     for m in w.buildings_of_kind(BuildingKind::Mission).to_vec() {
         w.comp_mut::<Building>(m).expect("mission").stock_food = 0;
@@ -426,7 +425,7 @@ fn probe_broke_with_no_mission_dives() {
 #[test]
 fn test_regular_wins_or_loses_by_intimidate() {
     use citysim::systems::bins::{contest, Contest};
-    let w = world_on();
+    let w = dole_world();
     let m = market(&w);
     let day = w.day();
     let people = adults(&w);
@@ -499,7 +498,7 @@ fn test_gang_turf_shakes_down_a_non_member() {
 /// nor startable.
 #[test]
 fn test_one_diver_per_bin() {
-    let mut w = world_on();
+    let mut w = dole_world();
     let m = market(&w);
     w.comp_mut::<Building>(m).expect("market").bin = 10;
     w.bins.insert(m);
@@ -537,7 +536,7 @@ fn diagnosed(stage: f32) -> Health {
 /// meal a day, the sim's day of food) near 0.8, real food toward 0.
 #[test]
 fn test_toxicity_converges_to_the_diets_steady_level() {
-    let mut w = world_on();
+    let mut w = dole_world();
     let cfg = w.config.sickness.clone();
     let (a, b) = (adults(&w)[0], adults(&w)[1]);
     let tally = |real, synth| citysim::MealTally { real, synth, dive: 0, alms: 0, hungry_hours: 0 };
@@ -572,7 +571,7 @@ fn test_cancer_hazard_zero_at_zero_and_rising() {
     assert!(health::hazard(&cfg, 0.4, 40.0) < health::hazard(&cfg, 0.8, 40.0), "rising with toxicity");
     assert!(health::hazard(&cfg, 0.4, 35.0) < health::hazard(&cfg, 0.4, 60.0), "rising with age");
     assert_eq!(health::hazard(&cfg, 0.4, 20.0), health::hazard(&cfg, 0.4, 25.0), "flat under cancer_age_from");
-    let mut w = world_on();
+    let mut w = dole_world();
     let people: Vec<EntityId> = adults(&w).into_iter().take(400).collect();
     let (hot, clean): (Vec<EntityId>, Vec<EntityId>) = people.iter().partition(|a| a.index % 2 == 0);
     for _ in 0..60 {
@@ -599,7 +598,7 @@ fn test_cancer_hazard_zero_at_zero_and_rising() {
 /// malnutrition; the young sit below the old.
 #[test]
 fn test_seeded_history_is_deterministic_and_ordered_by_class() {
-    let (w1, w2) = (world_on(), world_on());
+    let (w1, w2) = (dole_world(), dole_world());
     let tox = |w: &World, a: EntityId| health(w, a).toxicity;
     for a in adults(&w1) {
         assert_eq!(tox(&w1, a), tox(&w2, a), "deterministic");
@@ -643,7 +642,7 @@ fn test_seeded_history_is_deterministic_and_ordered_by_class() {
 /// event and the memory) at `cancer_symptom`, and kills at 1.0 as Disease.
 #[test]
 fn test_cancer_course_diagnosis_and_death() {
-    let mut w = world_on();
+    let mut w = dole_world();
     let (a, b) = (adults(&w)[0], adults(&w)[1]);
     let symptom = w.config.sickness.cancer_symptom;
     let growth = w.config.sickness.cancer_growth;
@@ -672,7 +671,7 @@ fn test_cancer_course_diagnosis_and_death() {
 /// coin is made or lost.
 #[test]
 fn test_treatment_cures_below_cure_stage_and_remits_above() {
-    let mut w = world_on();
+    let mut w = dole_world();
     let c = clinic(&w);
     let price = w.config.sickness.cancer_treat_price;
     let (a, b) = (adults(&w)[0], adults(&w)[1]);
@@ -696,7 +695,7 @@ fn test_treatment_cures_below_cure_stage_and_remits_above() {
 /// Decision 3: the wallet first, then the spouse and kin, then the gang.
 #[test]
 fn test_pool_pays_wallet_then_kin_then_gang() {
-    let mut w = world_on();
+    let mut w = dole_world();
     w.run_ticks(5 * TICKS_PER_DAY);
     run_until_gang(&mut w);
     let price = w.config.sickness.cancer_treat_price;
@@ -728,7 +727,7 @@ fn test_pool_pays_wallet_then_kin_then_gang() {
 /// treated within two days (a person probe).
 #[test]
 fn probe_diagnosed_patient_with_coins_seeks_the_clinic() {
-    let mut w = world_on();
+    let mut w = dole_world();
     w.run_ticks(2 * TICKS_PER_DAY + 9 * TICKS_PER_HOUR);
     let price = w.config.sickness.cancer_treat_price;
     let picks: Vec<EntityId> = adults(&w).into_iter().take(5).collect();
@@ -769,7 +768,7 @@ fn test_stat_patient_treats_on_p_stat_treat() {
 /// Earn is not satisfied at a few days' meals.
 #[test]
 fn test_saving_for_treatment_raises_earn() {
-    let mut w = world_on();
+    let mut w = dole_world();
     let a = adults(&w).into_iter().find(|&a| w.comp::<Job>(a).is_none()).expect("a jobless adult");
     w.comp_mut::<Wallet>(a).expect("wallet").coins = 60;
     assert!(goals::already_satisfied(&w, a, GoalKind::Earn, false), "60 coins is savings enough");
@@ -780,7 +779,7 @@ fn test_saving_for_treatment_raises_earn() {
 /// Decision 6: a child carries malnutrition, never a cancer.
 #[test]
 fn test_children_roll_no_cancer() {
-    let mut w = world_on();
+    let mut w = dole_world();
     w.run_ticks(TICKS_PER_DAY);
     let Some(k) = w.citizens().into_iter().find(|&c| w.has::<citysim::Child>(c)) else {
         eprintln!("no child at day 1 on seed 42: nothing to check");
@@ -798,7 +797,7 @@ fn test_children_roll_no_cancer() {
 /// pantry's spoilage carries its fraction until a unit spoils into the bin.
 #[test]
 fn test_bins_fill_from_sales_meals_and_carried_spoilage() {
-    let mut w = world_on();
+    let mut w = dole_world();
     let m = market(&w);
     citysim::systems::bins::market_sale(&mut w, m, 10);
     assert_eq!(bin_of(&w, m), (10.0 * w.config.sickness.market_waste).floor() as u16);
@@ -810,7 +809,7 @@ fn test_bins_fill_from_sales_meals_and_carried_spoilage() {
     }
     // A 4-unit pantry (5 % a day, 7.5 % in the Sump) spoils a unit within
     // a fortnight with the carry, never without it.
-    let mut v = world_on();
+    let mut v = dole_world();
     let h = *v.buildings_of_kind(BuildingKind::Home).first().expect("a Home");
     let mut spoiled = false;
     for _ in 0..14 {
@@ -938,7 +937,7 @@ fn test_full_hotel_adds_a_floor_of_beds() {
 /// every other day, so it never did).
 #[test]
 fn test_lone_child_on_a_synth_pantry_builds_malnutrition() {
-    let mut w = world_on();
+    let mut w = dole_world();
     // The seed has no children: one born to two adults of a Home (alone there).
     let home = w
         .buildings_of_kind(BuildingKind::Home)
@@ -974,7 +973,7 @@ fn test_lone_child_on_a_synth_pantry_builds_malnutrition() {
 /// 0.5 left it standing for ever) and an odd bin loses the larger half.
 #[test]
 fn test_bin_rot_rounds_up() {
-    let mut w = world_on();
+    let mut w = dole_world();
     let m = market(&w);
     citysim::systems::bins::add(&mut w, m, 1);
     assert_eq!(bin_of(&w, m), 1);
@@ -1065,7 +1064,7 @@ fn test_gang_squat_targets_skip_shanties() {
 /// once the pool covers it.
 #[test]
 fn test_treatment_savings_zero_when_the_pool_covers_it() {
-    let mut w = world_on();
+    let mut w = dole_world();
     let a = adults(&w)[0];
     w.insert(a, diagnosed(0.3));
     let price = health::treat_price(&w);
@@ -1079,4 +1078,51 @@ fn test_treatment_savings_zero_when_the_pool_covers_it() {
     w.comp_mut::<Wallet>(a).expect("wallet").coins = price + 10;
     assert!(!health::saving_short(&w, a));
     assert_eq!(health::treatment_savings(&w, a), 0, "the pool covers it: nothing to save");
+}
+
+// ---------------------------------------------------------------------------
+// Hunger as sickness P1 (docs/HUNGER_SICKNESS.md § 6), the hunger fixes'
+// city-level behaviour (the person probes in `person.rs` are the single
+// agents).
+// ---------------------------------------------------------------------------
+
+/// G3 (`hf_buy_not_steal`), coordinator call: in an all-Full city with no
+/// dole (so some are broke), food thieves are the ones who cannot buy a
+/// meal; nobody holding a meal's coins steals food while the Market has
+/// stock for them, and the broke still do. (G3 is a cost, not a ban: with
+/// every unit on the shelf reserved at the morning rush the theft is the
+/// only meal; Shadow V4's batch 1 moved the city onto five such thefts at
+/// Block#24, each with `PlanCtx::market_free` false.)
+#[test]
+fn test_g3_only_the_broke_steal_food() {
+    let mut cfg = Config::load().dole_city().v1_profile();
+    cfg.lod.force = Some(Lod::Full);
+    let mut w = World::new(408, cfg);
+    w.levers.dole_per_day = 0;
+    let mut cursor = w.events.back().map_or(0, |e| e.id + 1);
+    let (mut broke, mut able) = (0u32, Vec::new());
+    let end = w.tick + 20 * TICKS_PER_DAY;
+    while w.tick < end {
+        w.run_ticks(1);
+        let fresh: Vec<(EntityId, String)> = w
+            .events
+            .iter()
+            .filter(|e| e.id >= cursor && e.kind == citysim::EventKind::Theft && e.text.contains("food"))
+            .filter_map(|e| e.actors.first().map(|&a| (a, e.text.clone())))
+            .collect();
+        cursor = w.events.back().map_or(cursor, |e| e.id + 1);
+        for (a, text) in fresh {
+            let coins = w.comp::<Wallet>(a).map_or(0, |x| x.coins);
+            if coins >= life::meal_price(&w, a) {
+                if citysim::goap::actions::PlanCtx::build(&w, a, None).market_free {
+                    able.push((a.index, coins, text));
+                }
+            } else {
+                broke += 1;
+            }
+        }
+    }
+    eprintln!("food thefts by the broke {broke}, by agents holding a meal's coins {}: {able:?}", able.len());
+    assert!(broke > 0, "nobody broke stole food in 20 days without a dole");
+    assert!(able.is_empty(), "thieves holding a meal's coins: {able:?}");
 }

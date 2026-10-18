@@ -3,22 +3,18 @@
 //! seeded dice contest (deck tier plus skill against the node's ICE tier),
 //! resolved as `law::resolve_fight` resolves a brawl.
 
+mod common;
+
 use citysim::systems::virt::{LossRolls, Odds};
-use citysim::systems::{assets, law, lod, security, vehicles, virt};
+use citysim::systems::{assets, law, lod, security, tech, vehicles, virt};
 use citysim::virt::{NodeId, NodeKind, Purpose, RunMode, RunOrder, RunOutcome, RunPhase, RunWhy, Track};
 use citysim::{
-    AssetKind, Body, Brain, Building, BuildingKind, Config, Corp, Corpse, Crime, DeathCause, EntityId, EventKind,
-    ExecState, Gang, GangMember, Kit, Lod, Shock, Skills, World,
+    ActionInstance, ActionKind, AssetKind, Body, Brain, Building, BuildingKind, Config, Corp, Corpse, Crime,
+    DeathCause, EntityId, EventKind, ExecState, Gang, GangMember, GoalKind, Kit, Lod, Plan, Shock, Skills, World,
+    TICKS_PER_DAY, TICKS_PER_HOUR,
 };
+use common::{corp_named, dole_world};
 use rand::Rng;
-
-fn world() -> World {
-    World::new(42, Config::load().dole_city())
-}
-
-fn corp_named(w: &World, name: &str) -> EntityId {
-    w.corps().into_iter().find(|&c| w.comp::<Corp>(c).is_some_and(|cc| cc.name == name)).expect("seeded corp")
-}
 
 fn lab_of(w: &World, corp: EntityId, focus: Track) -> EntityId {
     w.buildings_of_kind(BuildingKind::Lab)
@@ -103,7 +99,7 @@ fn events(w: &World, kind: EventKind, who: EntityId) -> usize {
 /// Plan 2.8: the Contest table, to 1e-6 (and one row read off a real route).
 #[test]
 fn test_contest_table() {
-    let w = world();
+    let w = dole_world();
     let step = w.config.chrome.contest_step;
     let cfg = &w.config.ice;
     let fry = |ice: u8, gap: f32| (cfg.fry_base[usize::from(ice)] * (1.0 + cfg.fry_gap * gap.max(0.0))).min(1.0);
@@ -151,7 +147,7 @@ fn test_contest_table() {
 /// V3/V6: a tier-1 tree from Public 0 never reaches a Ledger (Trunks are tier 2).
 #[test]
 fn test_tier1_route_never_uses_trunk() {
-    let w = world();
+    let w = dole_world();
     let tree = virt::routes_from(&w, NodeId(0), 1, 1.5, None);
     let mut ledgers = 0;
     for (i, n) in w.virt.nodes.iter().enumerate().filter(|(_, n)| n.alive) {
@@ -178,7 +174,7 @@ fn test_tier1_route_never_uses_trunk() {
 /// V7: a corp's weakest building is its treasury's front door.
 #[test]
 fn test_ledger_route_enters_through_weakest_building() {
-    let mut w = world();
+    let mut w = dole_world();
     let corp = corp_named(&w, "Zetatech");
     let mine: Vec<NodeId> = w
         .virt
@@ -211,7 +207,7 @@ fn test_ledger_route_enters_through_weakest_building() {
 /// V7: a target at ICE 0 rolls nothing: the run succeeds with no contest.
 #[test]
 fn test_unguarded_nodes_roll_nothing() {
-    let mut w = world();
+    let mut w = dole_world();
     // A tier-1 deck's quiet take, read from the config (the store holds more).
     let take = (w.config.data.steal_units[0] as f32 * w.config.hack.quiet_take).round() as u32;
     assert!(take > 0 && take <= 100);
@@ -244,7 +240,7 @@ fn test_unguarded_nodes_roll_nothing() {
 /// costs one more.
 #[test]
 fn test_route_cache_one_search_per_scorer() {
-    let mut w = world();
+    let mut w = dole_world();
     for g in w.gang_list().to_vec() {
         if let Some(n) = w.hideout_of(g).and_then(|h| virt::node_of_building(&w, h)) {
             w.virt.node_mut(n).expect("node").store.units[0] = 50;
@@ -272,7 +268,7 @@ fn test_route_cache_one_search_per_scorer() {
 /// the same contests.
 #[test]
 fn test_run_pops_only_when_due_and_is_deterministic() {
-    let mut w = world();
+    let mut w = dole_world();
     let a = runner(&mut w, &[]);
     arm(&mut w, a, 2, 0.5);
     let lab = lab_of(&w, corp_named(&w, "Militech"), Track::Deck);
@@ -298,7 +294,7 @@ fn test_run_pops_only_when_due_and_is_deterministic() {
 /// V9: a run never draws on the world stream.
 #[test]
 fn test_run_rolls_do_not_touch_world_stream() {
-    let mut w = world();
+    let mut w = dole_world();
     let a = runner(&mut w, &[]);
     arm(&mut w, a, 2, 0.5);
     let lab = lab_of(&w, corp_named(&w, "Militech"), Track::Deck);
@@ -318,7 +314,7 @@ fn test_run_rolls_do_not_touch_world_stream() {
 /// V13: a jacked-in body is never Statistical.
 #[test]
 fn test_jacked_in_body_never_statistical() {
-    let mut w = world();
+    let mut w = dole_world();
     let a = runner(&mut w, &[]);
     arm(&mut w, a, 2, 0.5);
     let lab = lab_of(&w, corp_named(&w, "Militech"), Track::Deck);
@@ -370,7 +366,7 @@ fn test_flatline_at_tier3_gap() {
 /// V14: reflex saves fries (1,000 seeded contests at reflex 0.2 and 0.6).
 #[test]
 fn test_reflex_saves_fry() {
-    let mut w = world();
+    let mut w = dole_world();
     let a = runner(&mut w, &[]);
     arm(&mut w, a, 2, 0.5);
     let lab = lab_of(&w, corp_named(&w, "Militech"), Track::Deck);
@@ -397,7 +393,7 @@ fn test_reflex_saves_fry() {
 /// a guard beside the dazed runner arrests it uncontested at the chair.
 #[test]
 fn test_corp_trace_files_report_sets_last_seen_and_arrest_at_chair() {
-    let mut w = world();
+    let mut w = dole_world();
     let lab = lab_of(&w, corp_named(&w, "Militech"), Track::Deck);
     let n = virt::node_of_building(&w, lab).expect("node");
     let lab_door = w.comp::<Building>(lab).expect("lab").door;
@@ -437,7 +433,7 @@ fn test_corp_trace_files_report_sets_last_seen_and_arrest_at_chair() {
 /// for a freelancer.
 #[test]
 fn test_gang_trace_pushes_hacked_shock() {
-    let mut w = world();
+    let mut w = dole_world();
     let gang = w.gang_list()[0];
     let hideout = w.hideout_of(gang).expect("hideout");
     let n = virt::node_of_building(&w, hideout).expect("node");
@@ -461,7 +457,7 @@ fn test_gang_trace_pushes_hacked_shock() {
 /// V14: a loss at Extract returns the payload (Captured).
 #[test]
 fn test_extract_loss_returns_payload() {
-    let mut w = world();
+    let mut w = dole_world();
     let lab = lab_of(&w, corp_named(&w, "Zetatech"), Track::Chrome);
     let n = virt::node_of_building(&w, lab).expect("node");
     set_ice(&mut w, n, 0);
@@ -493,7 +489,7 @@ fn test_extract_loss_returns_payload() {
 /// V12: an attack on the seated body dumps the run (sanity − dump_sanity).
 #[test]
 fn test_attack_dumps_run() {
-    let mut w = world();
+    let mut w = dole_world();
     let a = runner(&mut w, &[]);
     arm(&mut w, a, 2, 0.5);
     let lab = lab_of(&w, corp_named(&w, "Militech"), Track::Deck);
@@ -522,7 +518,7 @@ fn test_attack_dumps_run() {
 fn test_contest_draw_order_pinned() {
     let mut checked = 0;
     for (k, ice) in [(0u64, 3u8), (1, 3), (2, 2), (3, 3), (4, 2), (5, 3)] {
-        let mut w = world();
+        let mut w = dole_world();
         w.tick += k * 7;
         let a = runner(&mut w, &[]);
         arm(&mut w, a, 1, 0.3);
@@ -558,4 +554,262 @@ fn test_contest_draw_order_pinned() {
         }
     }
     assert!(checked >= 3, "{checked} lost first contests checked");
+}
+
+// ---------------------------------------------------------------------------
+// M14 review (`/code-review high 6c04ece..16b9efe`), findings 1, 3, 6, 7, 8
+// and 9: the route cache and save/load, the chair, an empty or undeliverable
+// steal, the trace's hops, a JackIn without its order.
+// ---------------------------------------------------------------------------
+
+/// A seated run for `a` from the first Bar onto Militech's Deck Lab.
+fn seated_run(w: &mut World, a: EntityId) -> u64 {
+    let lab = lab_of(w, corp_named(w, "Militech"), Track::Deck);
+    let n = virt::node_of_building(w, lab).expect("node");
+    let bar = first_bar(w);
+    seat(w, a, bar);
+    order(w, a, bar, n, Purpose::Data { wipe: false }, RunWhy::God);
+    let id = virt::start_run(w, a).expect("run");
+    let now = w.tick;
+    w.comp_mut::<Brain>(a).expect("brain").exec = ExecState::JackedIn { run: id, since: now };
+    id
+}
+
+/// Review 1: a tree built while a node's alarm stands is not reused after
+/// the alarm lapses mid-hour (no write marks the lapse); the cached tree
+/// equals a fresh search on a clone (whose cache is empty) at every tick.
+#[test]
+fn test_route_cache_drops_trees_at_alarm_expiry() {
+    let mut w = dole_world();
+    w.tick = 10 * TICKS_PER_HOUR + 7;
+    let a = runner(&mut w, &[]);
+    arm(&mut w, a, 2, 0.5);
+    let lab = lab_of(&w, corp_named(&w, "Militech"), Track::Deck);
+    let n = virt::node_of_building(&w, lab).expect("node");
+    set_ice(&mut w, n, 1);
+    let bar = first_bar(&w);
+    let from = virt::portal(&w, bar, a, None);
+    let expiry = w.tick + 20;
+    assert!(!expiry.is_multiple_of(TICKS_PER_HOUR), "mid-hour");
+    w.virt.node_mut(n).expect("node").alarm_until = Some(expiry);
+    virt::bump_epoch(&mut w);
+    let att = virt::odds_of(&w, a, 2, None, RunMode::Quiet).att;
+    let with_alarm = virt::routes_from(&w, from, 2, att, None);
+    let fresh = |w: &World| virt::routes_from(&w.clone(), from, 2, att, None);
+    assert_eq!(*with_alarm, *fresh(&w));
+    w.tick = expiry - 1;
+    assert_eq!(*virt::routes_from(&w, from, 2, att, None), *with_alarm, "still standing: a cache hit");
+    w.tick = expiry;
+    let after = virt::routes_from(&w, from, 2, att, None);
+    assert_eq!(*after, *fresh(&w), "the lapse drops the tree");
+    assert!(after.dist[n.index()] < with_alarm.dist[n.index()], "the alarm's +1 is gone");
+}
+
+/// Review 1: a save taken mid-hour after an alarm lapsed loads and runs on
+/// exactly as the uninterrupted world, whose cache held trees built while
+/// the alarms stood: every tree both read after the save is the same, so
+/// are the runs they plan, and so is the world a day on.
+#[test]
+fn test_save_mid_hour_after_alarm_expiry_matches_uninterrupted_run() {
+    let mut w = dole_world();
+    w.run_ticks(2 * TICKS_PER_DAY + 9 * TICKS_PER_HOUR + 5);
+    // Thirty freelancers with decks of tiers 1-2 and hacking 0.3-0.97, so
+    // the Hack goal reads the trees.
+    let mut armed = Vec::new();
+    for _ in 0..30 {
+        let a = runner(&mut w, &armed);
+        let i = armed.len();
+        arm(&mut w, a, 1 + (i % 2) as u8, 0.3 + 0.67 * (i as f32 / 29.0));
+        armed.push(a);
+    }
+    // Alarms lapsing mid-hour on every other district's Public node (an
+    // alarm makes an unguarded node contested).
+    let expiry = w.tick + 2;
+    let alarmed: Vec<NodeId> = (0..w.virt.nodes.len())
+        .map(|i| NodeId(i as u16))
+        .filter(|&n| matches!(w.virt.node(n).map(|x| x.kind), Some(NodeKind::Public(d)) if d.0 % 2 == 0))
+        .collect();
+    assert!(!alarmed.is_empty());
+    for &n in &alarmed {
+        w.virt.node_mut(n).expect("node").alarm_until = Some(expiry);
+    }
+    virt::bump_epoch(&mut w);
+    // Warm the cache with trees built while the alarms stand.
+    for &a in &armed {
+        let _ = virt::hack_choice(&w, a);
+    }
+    w.run_ticks(3);
+    assert!(w.tick > expiry && !w.tick.is_multiple_of(TICKS_PER_HOUR), "mid-hour, after the lapse");
+    let mut loaded = citysim::save::from_ron(&citysim::save::to_ron(&w)).expect("load");
+    // The trees each freelancer's think reads are the same in both worlds.
+    for &a in &armed {
+        let Some(chair) = virt::chair_for(&w, a, None) else { continue };
+        let deck = w.comp::<Kit>(a).map_or(0, |k| k.deck_tier);
+        let att = virt::odds_of(&w, a, deck, None, virt::mode_of(&w, a)).att;
+        let x = virt::routes_from(&w, chair.node, deck, att, None);
+        let y = virt::routes_from(&loaded, chair.node, deck, att, None);
+        assert_eq!(*x, *y, "a stale tree after the save");
+    }
+    // Both worlds plan their freelancers' runs at once (the Hack goal's
+    // bind), then run on for a day.
+    for world in [&mut w, &mut loaded] {
+        for &a in &armed {
+            let _ = virt::hack_plan(world, a);
+        }
+    }
+    assert_eq!(w.run_orders, loaded.run_orders, "the same runs planned");
+    w.run_ticks(TICKS_PER_DAY);
+    loaded.run_ticks(TICKS_PER_DAY);
+    let a = blake3::hash(citysim::save::to_ron(&w).as_bytes());
+    let b = blake3::hash(citysim::save::to_ron(&loaded).as_bytes());
+    assert_eq!(a, b, "the continued runs diverged");
+}
+
+/// Review 3: a sacked Hideout puts everyone inside out at the door
+/// (`stand_at_door`); a runner seated there is dumped (V12), as is anyone
+/// taken off a building's list while on a run.
+#[test]
+fn test_put_out_of_the_chair_dumps_the_run() {
+    let mut w = dole_world();
+    let gang = w.gang_list()[0];
+    let hideout = w.hideout_of(gang).expect("hideout");
+    let a = runner(&mut w, &[]);
+    citysim::systems::gang::enlist(&mut w, a, gang);
+    arm(&mut w, a, 2, 0.5);
+    let lab = lab_of(&w, corp_named(&w, "Militech"), Track::Deck);
+    let n = virt::node_of_building(&w, lab).expect("node");
+    seat(&mut w, a, hideout);
+    order(&mut w, a, hideout, n, Purpose::Data { wipe: false }, RunWhy::God);
+    let id = virt::start_run(&mut w, a).expect("run");
+    let now = w.tick;
+    w.comp_mut::<Brain>(a).expect("brain").exec = ExecState::JackedIn { run: id, since: now };
+    // What `raid::resolve`'s Sacked arm does to everyone inside.
+    w.stand_at_door(a, hideout);
+    assert!(!w.runs.contains_key(&id) && !w.runner_of.contains_key(&a), "out of the chair");
+    assert_eq!(last_outcome(&w), Some(RunOutcome::Dumped));
+    assert_eq!(events(&w, EventKind::Dumpshock, a), 1);
+    // Nobody on a run: a no-op.
+    let b = runner(&mut w, &[a]);
+    let before = w.events.len();
+    w.stand_at_door(b, hideout);
+    assert_eq!(w.events.len(), before);
+}
+
+/// A won-every-contest Data run onto Militech's Deck Lab at ICE 0 for `a`
+/// with `patron`; returns the Lab's node.
+fn open_steal(w: &mut World, a: EntityId, patron: Option<EntityId>) -> NodeId {
+    let lab = lab_of(w, corp_named(w, "Militech"), Track::Deck);
+    let n = virt::node_of_building(w, lab).expect("node");
+    set_ice(w, n, 0);
+    let bar = first_bar(w);
+    seat(w, a, bar);
+    order(w, a, bar, n, Purpose::Data { wipe: false }, RunWhy::God);
+    w.run_orders.get_mut(&a).expect("order").patron = patron;
+    virt::start_run(w, a).expect("run");
+    n
+}
+
+/// Review 6: a steal that lifts 0 units (the store was empty at Act) robs
+/// nobody: no `DataStolen`, no Virt loss on the corp (so no hardening).
+#[test]
+fn test_empty_steal_is_no_robbery() {
+    let mut w = dole_world();
+    let a = runner(&mut w, &[]);
+    arm(&mut w, a, 2, 0.5);
+    let n = open_steal(&mut w, a, None);
+    w.virt.node_mut(n).expect("node").store.units = [0; 3];
+    let militech = corp_named(&w, "Militech");
+    let losses = w.comp::<Corp>(militech).map(|c| c.virt_losses.len());
+    finish(&mut w);
+    assert_eq!(last_outcome(&w), Some(RunOutcome::Success));
+    assert_eq!(w.events.iter().filter(|e| e.kind == EventKind::DataStolen).count(), 0);
+    assert_eq!(w.comp::<Corp>(militech).map(|c| c.virt_losses.len()), losses, "no Virt loss");
+    assert_eq!(w.stats.current.virt.data_stolen, 0);
+}
+
+/// Review 9: a steal whose patron has nowhere to keep Data (a gang with no
+/// Hideout node) puts the payload back and ends `Bounced`: no `runs_ok`, no
+/// success drift.
+#[test]
+fn test_undeliverable_steal_is_not_a_success() {
+    let mut w = dole_world();
+    let a = runner(&mut w, &[]);
+    arm(&mut w, a, 2, 0.5);
+    // A corp patron with no Lab: `deliver` finds nowhere to put the payload.
+    let patron = w.corps().into_iter().find(|&c| tech::labs_of(&w, c).is_empty()).expect("a corp without a Lab");
+    let n = open_steal(&mut w, a, Some(patron));
+    let store = w.virt.node(n).expect("node").store.clone();
+    let hacking = w.comp::<Skills>(a).expect("skills").hacking;
+    finish(&mut w);
+    assert_eq!(last_outcome(&w), Some(RunOutcome::Bounced));
+    assert_eq!(w.stats.current.virt.runs_ok, 0);
+    assert_eq!(w.virt.node(n).expect("node").store, store, "the payload went back");
+    let drift = w.config.decks.hack_drift;
+    let now = w.comp::<Skills>(a).expect("skills").hacking;
+    assert!((now - (hacking + drift)).abs() < 1e-6, "one drift, not two: {hacking} -> {now}");
+}
+
+/// Review 7: the trace's confidence decays with the hops from the portal
+/// to the node that traced, not with the whole route.
+#[test]
+fn test_trace_decay_counts_hops_to_the_tracing_node() {
+    let mut w = dole_world();
+    let a = runner(&mut w, &[]);
+    arm(&mut w, a, 2, 0.5);
+    let id = seated_run(&mut w, a);
+    let mut r = w.runs[&id].clone();
+    // The Lab one hop from the portal on a four-node route: the whole
+    // route would read three hops.
+    let (p, n) = (r.portal, r.target);
+    r.route.clear();
+    r.route.extend([p, n, p, p]);
+    virt::trace(&mut w, &r, n);
+    let owner = virt::owner_of(&w, n).unwrap_or(EntityId::NONE);
+    let s = w.db.get(&owner).and_then(|d| d.sightings.back()).copied().expect("named");
+    let want = 1.0 - w.config.ice.trace_decay_per_hop;
+    assert!((s.confidence - want).abs() < 1e-6, "one hop: {} vs {want}", s.confidence);
+}
+
+/// Review 8: a `JackIn` waiting on an order not yet due fails when the
+/// order vanishes; the post-run daze wait still completes the step.
+#[test]
+fn test_jackin_wait_fails_when_the_order_is_gone() {
+    let mut w = dole_world();
+    let a = runner(&mut w, &[]);
+    arm(&mut w, a, 2, 0.5);
+    let bar = first_bar(&w);
+    let lab = lab_of(&w, corp_named(&w, "Militech"), Track::Deck);
+    let n = virt::node_of_building(&w, lab).expect("node");
+    seat(&mut w, a, bar);
+    order(&mut w, a, bar, n, Purpose::Data { wipe: false }, RunWhy::God);
+    let now = w.tick;
+    w.run_orders.get_mut(&a).expect("order").not_before = now + 30;
+    let step = ActionInstance { action: ActionKind::JackIn, target: Some(bar), tile: None };
+    let plan = Plan { goal: GoalKind::Hack, target: Some(bar), steps: vec![step], started_tick: now };
+    let set_plan = |w: &mut World, exec: ExecState| {
+        let b = w.comp_mut::<Brain>(a).expect("brain");
+        b.plan = Some(plan.clone());
+        b.plan_step = 0;
+        b.exec = exec;
+    };
+    set_plan(&mut w, ExecState::Idle);
+    citysim::exec::run(&mut w);
+    assert!(matches!(w.comp::<Brain>(a).map(|b| &b.exec), Some(ExecState::Wait { .. })), "waits for not_before");
+    w.run_orders.remove(&a);
+    w.tick += 1;
+    citysim::exec::run(&mut w);
+    assert!(w.comp::<Brain>(a).is_some_and(|b| b.plan.is_none()), "the plan failed");
+    let aborted = |w: &World, t: u64| {
+        w.debug_events.iter().any(|e| e.kind == EventKind::PlanAborted && e.actors.contains(&a) && e.tick == t)
+    };
+    assert!(aborted(&w, w.tick), "PlanAborted");
+    // The daze after a run: the wait ends at `dazed_until` and the step is done.
+    let until = w.tick + 5;
+    set_plan(&mut w, ExecState::Wait { until });
+    w.comp_mut::<Brain>(a).expect("brain").dazed_until = Some(until);
+    w.tick = until;
+    citysim::exec::run(&mut w);
+    let b = w.comp::<Brain>(a).expect("brain");
+    assert!(b.plan.is_none() || b.plan_step == 1, "the daze completes the step");
+    assert!(!aborted(&w, until), "no abort at the end of the daze");
 }

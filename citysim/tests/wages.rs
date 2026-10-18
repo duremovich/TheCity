@@ -5,6 +5,7 @@
 //! refit on World demand, the revenue window's exclusions, and the off path.
 
 use std::collections::VecDeque;
+use std::sync::OnceLock;
 
 use citysim::components::{AssetKind, AssetLoc, Good};
 use citysim::outside::{ExportGood, WORLD_ACCOUNT};
@@ -50,8 +51,11 @@ fn config() -> Config {
     cfg
 }
 
+/// The phase-2 city, built once; every `city()` is a clone of it.
+static BASE: OnceLock<World> = OnceLock::new();
+
 fn city() -> World {
-    city_with(config())
+    BASE.get_or_init(|| city_with(config())).clone()
 }
 
 fn city_with(cfg: Config) -> World {
@@ -562,6 +566,15 @@ fn round_city(f: impl FnOnce(&mut Config)) -> World {
     w
 }
 
+/// `round_city` with no key turned on, built once and cloned per test (a
+/// key edited before the seed may move the seeding, so the edited cities
+/// are built fresh).
+static ROUND_BASE: OnceLock<World> = OnceLock::new();
+
+fn round_base() -> World {
+    ROUND_BASE.get_or_init(|| round_city(|_| {})).clone()
+}
+
 /// Staffing from revenue: under its margin a corp posts past `full_staff`
 /// up to `ceil(full_staff × staff_ceiling_mult)` while `hire_below × P* −
 /// P` covers the marginal hire; with the room short of a wage it stops at
@@ -658,7 +671,7 @@ fn test_capital_above_the_band_raises_the_payroll_target() {
     }
     assert!(w.comp::<Corp>(corp).map_or(1.0, |c| c.wage_rev) > wr0, "wages rise on the payout");
     // Off (0 days): phase 2's target.
-    let mut w = round_city(|_| {});
+    let mut w = round_base();
     let corp = corp_named(&w, "Nutrix");
     pin_windows(&mut w, corp, 200, 100);
     assert_eq!(wages::capital_payout(&w, corp, 200.0, 100.0), 0.0);
@@ -717,7 +730,7 @@ fn test_overflow_buys_only_from_a_positive_treasury() {
 fn test_asset_import_budget_refuses_past_the_day_cap() {
     use citysim::systems::assets;
     use citysim::ShopPick;
-    let mut w = round_city(|_| {});
+    let mut w = round_base();
     let g = w
         .buildings_of_kind(BuildingKind::Garage)
         .iter()
@@ -774,7 +787,7 @@ fn test_asset_import_budget_refuses_past_the_day_cap() {
 fn test_asset_import_over_the_cap_sells_once_a_day() {
     use citysim::systems::assets;
     use citysim::ShopPick;
-    let mut w = round_city(|_| {});
+    let mut w = round_base();
     let g = w
         .buildings_of_kind(BuildingKind::Garage)
         .iter()

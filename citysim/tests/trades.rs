@@ -3,8 +3,11 @@
 //! and their places with floors, a trade's shift, the Super's round, a save
 //! round trip with a trade, and an unknown trade key failing the load.
 
-use citysim::systems::{demography, jobs, law, ownership};
+mod common;
+
+use citysim::systems::{demography, jobs, law, life, ownership};
 use citysim::{BuildingKind, Config, EntityId, EventKind, Job, Role, World, TICKS_PER_DAY, TICKS_PER_HOUR};
+use common::jobless_housed;
 
 fn world() -> World {
     // Jobs & lives phase 2: P3's roles as written (the street's day post
@@ -301,4 +304,31 @@ fn test_offer_migrant_takes_a_trade_post() {
     assert!(s >= floor - 1e-6, "persuasion {s} floored at {floor}");
     assert!(!w.vacancies.get(&hotel).is_some_and(|v| v.contains(&porter)), "the post closed");
     w.check_indices().expect("indices");
+}
+
+// ---------------------------------------------------------------------------
+// Shadow V4 bug 6 (docs/SHADOW_V4.md): the knowledge floor, the secure quit.
+// ---------------------------------------------------------------------------
+
+/// Bug 6 (the hire): a knowledge row hires no one under
+/// `hire_knowledge_floor`; a "no need of the wage" quit blocks every
+/// employer, not only the one left.
+#[test]
+fn test_bug6_knowledge_floor_and_secure_quit_block_every_hire() {
+    let mut w = common::world();
+    let a = *jobless_housed(&w).first().expect("an adult");
+    let role = w.config.trade_role("accountant").expect("the accountant row");
+    w.comp_mut::<citysim::Skills>(a).expect("skills").knowledge = 0.0;
+    assert!(!citysim::systems::trades::skill_ok(&w, a, role), "knowledge 0.00 keeps no books");
+    w.comp_mut::<citysim::Skills>(a).expect("skills").knowledge = 0.5;
+    assert!(citysim::systems::trades::skill_ok(&w, a, role));
+    assert!(citysim::systems::trades::skill_ok(&w, a, Role::Farmer), "no floor on an unskilled row");
+    let (e1, e2) = {
+        let farms = w.buildings_of_kind(BuildingKind::Farm);
+        (farms[0], farms[1])
+    };
+    life::note_quit(&mut w, a, Some(e1));
+    assert!(life::quit_blocks(&w, a, e1) && !life::quit_blocks(&w, a, e2), "a quit blocks its employer");
+    life::note_secure_quit(&mut w, a);
+    assert!(life::quit_blocks(&w, a, e1) && life::quit_blocks(&w, a, e2), "a secure quit blocks every employer");
 }

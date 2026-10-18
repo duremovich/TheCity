@@ -5,16 +5,15 @@
 //! failure flags); Hold and Subsidise; `Embargo` and `SetTariff`; the
 //! pre-M17 save migration. Every crossing keeps the coin identity.
 
+mod common;
+
 use citysim::outside::{OutsideKind, OutsideOrder};
-use citysim::systems::{econ, outside};
+use citysim::systems::{econ, outside, parents};
 use citysim::{save, Config, Corp, EntityId, EventKind, Gang, PlayerCommand, World, TICKS_PER_DAY};
+use common::corp_named;
 
 fn account(w: &World, name: &str) -> citysim::outside::OutsideFaction {
     w.outside.factions.iter().find(|f| f.name == name).cloned().unwrap_or_else(|| panic!("no account {name}"))
-}
-
-fn corp_named(w: &World, name: &str) -> EntityId {
-    w.corps().into_iter().find(|&c| w.comp::<Corp>(c).is_some_and(|x| x.name == name)).expect("corp")
 }
 
 #[test]
@@ -267,4 +266,61 @@ fn test_gang_tribute_is_weekly() {
     assert_eq!(w.comp::<Gang>(gang).map(|g| g.treasury), Some(1000), "10 % of 1,000 above the floor");
     assert_eq!(account(&w, "Hollow Brothers").treasury - p0, 100);
     assert_eq!(econ::identity(&w), base, "a crossing, no coin made or lost");
+}
+
+// ---------------------------------------------------------------------------
+// M17 review (33fa3da..a8880e9), findings 5, 10 and the extra: every spend a
+// parent makes is booked; a new branch's numeral counts on; a post that
+// fails gives its funding back. The shipped city on day 4.
+// ---------------------------------------------------------------------------
+
+/// Review 5: what a Reinforce costs abroad and funds in the city is booked
+/// as the parent's spend.
+#[test]
+fn test_every_spend_is_booked() {
+    let mut w = common::world_at(4 * TICKS_PER_DAY + 30);
+    let on = account(&w, "Arasaka Global").id;
+    let spent = |w: &World| w.outside.faction(on).and_then(|f| f.parent.as_ref()).map_or(0, |p| p.ledger.spent_today);
+    let s0 = spent(&w);
+    parents::force_reinforce(&mut w, on, 1).expect("one body");
+    let cfg = w.config.outside.parents.clone();
+    assert_eq!(spent(&w) - s0, cfg.body_cost + cfg.body_fund, "the body abroad and its wages in the branch");
+}
+
+/// Review 10: a branch founded after a dead one is "II", the next "III",
+/// whatever lives under the brand.
+#[test]
+fn test_founded_branches_count_on() {
+    let mut w = common::world_at(4 * TICKS_PER_DAY + 30);
+    let parent = account(&w, "Militech International").id;
+    let militech = corp_named(&w, "Militech");
+    citysim::systems::corps::bankrupt(&mut w, militech);
+    let first = parents::found_branch(&mut w, parent).expect("a branch");
+    assert_eq!(w.comp::<Corp>(first).map(|c| c.name.clone()), Some("Militech II".into()));
+    citysim::systems::corps::bankrupt(&mut w, first);
+    let second = parents::found_branch(&mut w, parent).expect("another");
+    assert_eq!(w.comp::<Corp>(second).map(|c| c.name.clone()), Some("Militech III".into()));
+}
+
+/// Review extra: a forced Retake whose post fails gives the funding back.
+#[test]
+fn test_a_failed_retake_post_gives_the_funding_back() {
+    let mut w = common::world_at(4 * TICKS_PER_DAY + 30);
+    let parent = account(&w, "Arasaka Global").id;
+    let branch = corp_named(&w, "Arasaka");
+    parents::note_losses(&mut w, parent);
+    let b = w.comp::<Corp>(branch).expect("corp").buildings[0];
+    let g = w.gangs()[0];
+    citysim::systems::corps::move_building(&mut w, b, Some(g));
+    parents::note_losses(&mut w, parent);
+    for _ in 0..w.config.outside.parents.refusals_to_force {
+        parents::retake_step(&mut w, parent);
+    }
+    // The board is full: the post fails.
+    w.config.contracts.max_open = 0;
+    let (branch0, parent0) = (w.purse(Some(branch)), w.outside.faction(parent).expect("p").treasury);
+    parents::retake_step(&mut w, parent);
+    assert!(!w.contracts.values().any(|c| c.kind == citysim::contract::ContractKind::Retake), "no Retake posted");
+    assert_eq!(w.purse(Some(branch)), branch0, "the branch keeps nothing it was sent for it");
+    assert_eq!(w.outside.faction(parent).expect("p").treasury, parent0, "the parent has its coins back");
 }

@@ -1,11 +1,14 @@
 //! M3: the planner, plan queue, cooldowns and reservations.
 
+mod common;
+
 use citysim::goap::planner::{self, Limits};
 use citysim::systems::plan;
 use citysim::{
-    ActionKind, Brain, Building, BuildingKind, Config, GoalKind, Inventory, Job, Key, LocationKey, Needs, Personality,
-    PlanCtx, Position, Skills, StealSource, TilePos, Wallet, World, WorldState,
+    ActionKind, Brain, Building, BuildingKind, Config, EntityId, GoalKind, Inventory, Job, Key, LocationKey, Needs,
+    Personality, PlanCtx, Position, Skills, StealSource, TilePos, Wallet, World, WorldState,
 };
+use common::{day_workers, free_adults};
 
 fn world(seed: u64) -> World {
     World::new(seed, Config::load().dole_city().v1_profile())
@@ -344,4 +347,67 @@ fn test_beg_does_not_promise_a_meal_at_price_three() {
     let ctx = PlanCtx::build(&w, id, None);
     let after = ActionKind::Beg.apply(&ws, &ctx);
     assert!(after.has_coins);
+}
+
+// ---------------------------------------------------------------------------
+// Shadow V4 bugs 12 and 20 (docs/SHADOW_V4.md): another's workplace is not
+// mine; an old plan request goes first.
+// ---------------------------------------------------------------------------
+
+/// Bug 12: a worker inside someone else's workplace (a courier's round
+/// through a Club) is not at its Workplace (ClerkWork was planned there
+/// and failed twice); inside its own, it is.
+#[test]
+fn test_bug12_another_workplace_is_not_mine() {
+    let mut w = common::world();
+    let workplace = |w: &World, b: EntityId| {
+        w.comp::<Building>(b).is_some_and(|bd| {
+            LocationKey::of_building(bd.kind) == LocationKey::Workplace && bd.kind != BuildingKind::Home
+        })
+    };
+    let a = day_workers(&w)
+        .into_iter()
+        .find(|&a| w.comp::<Job>(a).and_then(|j| j.employer).is_some_and(|e| workplace(&w, e)))
+        .expect("a worker at a Workplace kind");
+    let own = w.comp::<Job>(a).and_then(|j| j.employer).expect("employer");
+    let other = w.buildings_of_kind(BuildingKind::Club).iter().copied().find(|&b| b != own).expect("a Club not his");
+    w.leave_building(a);
+    w.enter_building(a, other);
+    assert_ne!(WorldState::observe(&w, a, None).at, LocationKey::Workplace, "a Club on the round is not his post");
+    w.leave_building(a);
+    w.enter_building(a, own);
+    assert_eq!(WorldState::observe(&w, a, None).at, LocationKey::Workplace);
+}
+
+/// Bug 20: a plan request waiting `plan_age_promote_ticks` is served before
+/// a fresher, more urgent one (low-urgency goals starved 1-6 h at 20k).
+#[test]
+fn test_bug20_old_plan_request_goes_first() {
+    let mut w = common::world();
+    w.config.brain.plan_budget_per_tick = 1;
+    let ad = free_adults(&w);
+    let (old, fresh) = (ad[0], ad[1]);
+    for a in [old, fresh] {
+        w.abort_plan(a);
+        let b = w.comp_mut::<Brain>(a).expect("brain");
+        b.current_goal = Some(GoalKind::Idle);
+        b.plan = None;
+    }
+    w.tick += 1000;
+    let now = w.tick;
+    let promote = w.config.brain.plan_age_promote_ticks;
+    assert!(promote > 0);
+    // Queued `promote` ticks ago (through `enqueue`, so both queue indices
+    // hold it: review 8).
+    w.tick = now - promote;
+    plan::enqueue(&mut w, old, 0.1);
+    w.tick = now;
+    plan::enqueue(&mut w, fresh, 0.9);
+    plan::run(&mut w);
+    assert!(!w.plan_queue.keys().any(|&(_, x)| x == old), "the old request was served");
+    assert!(w.plan_queue.keys().any(|&(_, x)| x == fresh), "the fresh one waits its turn");
+    // Review 8: the age index is rebuilt on load.
+    let back = citysim::save::from_ron(&citysim::save::to_ron(&w)).expect("loads");
+    assert!(!back.plan_queue_age.is_empty());
+    assert_eq!(back.plan_queue_age, w.plan_queue.iter().map(|(&(u, id), &t)| (t, u, id)).collect());
 }

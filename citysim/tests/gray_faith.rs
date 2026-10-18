@@ -6,14 +6,13 @@
 //! Preach, converts at the row's rate and tithes at her next wage. Each
 //! test is the shipped seed-42 city and one mechanism, driven directly.
 
+mod common;
+
 use citysim::systems::{faith, gray};
 use citysim::{
     Brain, BuildingKind, Config, EntityId, Gang, Good, Job, MemoryKind, World, TICKS_PER_DAY, TICKS_PER_HOUR,
 };
-
-fn on_world() -> World {
-    World::new(42, Config::load())
-}
+use common::{jobless_housed, set_coins, world};
 
 /// Free jobless adults outside any gang (ascending).
 fn idle(w: &World) -> Vec<EntityId> {
@@ -33,7 +32,7 @@ fn idle(w: &World) -> Vec<EntityId> {
 /// some hours; without, on none (pooled over 20 hours of the roll).
 #[test]
 fn test_papers_pass_the_sighting_more_often() {
-    let mut w = on_world();
+    let mut w = world();
     let a = idle(&w)[0];
     let count = |w: &mut World| {
         let mut n = 0;
@@ -54,7 +53,7 @@ fn test_papers_pass_the_sighting_more_often() {
 /// A body ripped by a gang yields `organs_per_body` once; the stock rots.
 #[test]
 fn test_organs_once_and_rot() {
-    let mut w = on_world();
+    let mut w = world();
     for _ in 0..30 {
         if !w.gangs().is_empty() {
             break;
@@ -105,7 +104,7 @@ fn test_gang_types_by_share() {
 /// cast out does not.
 #[test]
 fn test_apostasy_grudge() {
-    let mut w = on_world();
+    let mut w = world();
     // The rows' churches and chapels stand from the first midnight.
     w.run_ticks(TICKS_PER_DAY + 1);
     let cult = w.gangs().into_iter().find(|&g| faith::cult_creed(&w, g).is_some()).expect("a seeded cult");
@@ -181,7 +180,7 @@ fn test_off_and_save_round_trip() {
     assert!(w.jobs2.gray.is_default() && w.jobs2.faith.is_default());
     assert!(w.gangs().into_iter().all(|g| faith::cult_creed(&w, g).is_none()));
     assert!(w.buildings_of_kind(BuildingKind::BlackClinic).is_empty());
-    let mut w = on_world();
+    let mut w = world();
     w.run_ticks(2 * TICKS_PER_DAY);
     let text = citysim::save::to_ron(&w);
     let back = citysim::save::from_ron(&text).expect("load");
@@ -193,7 +192,7 @@ fn test_off_and_save_round_trip() {
 /// the midnight rot.
 #[test]
 fn test_organs_sold_then_exported() {
-    let mut w = on_world();
+    let mut w = world();
     for _ in 0..30 {
         if !w.gangs().is_empty() {
             break;
@@ -224,7 +223,7 @@ fn test_organs_sold_then_exported() {
 /// on `p_organ_needed`; an empty shelf draws nothing.
 #[test]
 fn test_stabilise_draws_a_clinic_organ() {
-    let mut w = on_world();
+    let mut w = world();
     w.config.gray.p_organ_needed = 1.0;
     let c = w.buildings_of_kind(BuildingKind::Clinic)[0];
     let have = w.stock(c, Good::Organs);
@@ -241,7 +240,7 @@ fn test_stabilise_draws_a_clinic_organ() {
 /// leaves the post, and the licensed Clinics no longer hire him.
 #[test]
 fn test_struck_off_leaves_the_post() {
-    let mut w = on_world();
+    let mut w = world();
     w.config.gray.p_struck_off = 1.0;
     let doc = w
         .citizens()
@@ -263,7 +262,7 @@ fn test_struck_off_leaves_the_post() {
 /// sentence's crime was picked and resolved with it).
 #[test]
 fn test_exposed_papers_set_the_sentence() {
-    let mut w = on_world();
+    let mut w = world();
     w.config.gray.p_expose = 1.0;
     let a = idle(&w)[0];
     let guard = w.guards()[0];
@@ -273,4 +272,59 @@ fn test_exposed_papers_set_the_sentence() {
     let s = w.comp::<citysim::Sentence>(a).expect("sentenced");
     assert_eq!(s.crime, citysim::Crime::Forgery, "the exposed papers set the term");
     assert!(!w.jobs2.gray.papers.contains_key(&a), "the papers are void");
+}
+
+// ---------------------------------------------------------------------------
+// Shadow V4 bug 13 (docs/SHADOW_V4.md): creeds bind.
+// ---------------------------------------------------------------------------
+
+/// Bug 13: a Purist member is not sold the chrome that would expel him
+/// (a member of a creedless gang in the same state is); a cult preaches
+/// under an order other than Expand; a creed gang takes no gray type.
+#[test]
+fn test_bug13_creeds_bind() {
+    use citysim::systems::{assets, creeds, gang, leisure};
+    let mut w = world();
+    let gangs = w.gangs();
+    let (pg, plain) = (gangs[0], gangs[1]);
+    w.comp_mut::<Gang>(pg).expect("g").creed = Some(citysim::word::Creed::Purist);
+    w.comp_mut::<Gang>(plain).expect("g").creed = None;
+    let pool = jobless_housed(&w);
+    let (a, b) = (pool[0], pool[1]);
+    gang::enlist(&mut w, a, pg);
+    gang::enlist(&mut w, b, plain);
+    for x in [a, b] {
+        set_coins(&mut w, x, 5000);
+        w.comp_mut::<citysim::Needs>(x).expect("n").wealth = 1.0;
+        w.comp_mut::<citysim::Skills>(x).expect("s").hacking = 0.0;
+    }
+    assert_eq!(creeds::visible_room(&w, a), Some(w.config.creeds.creed_tolerance));
+    assert_eq!(creeds::visible_room(&w, b), None);
+    let chrome = |w: &World, x: EntityId| {
+        assets::shop_choice(w, x, false).is_some_and(|o| o.category == assets::ShopCategory::Chrome)
+    };
+    assert!(chrome(&w, b), "the control: a creedless member is sold chrome");
+    assert!(!chrome(&w, a), "a Purist is not sold the chrome that expels him");
+    // The cult's sermon under LieLow (a Purist's waits for Expand).
+    let cult = w.config.faith.creeds.iter().position(|_| true).expect("a cult row") as u8;
+    w.comp_mut::<Gang>(plain).expect("g").creed = Some(citysim::word::Creed::Config(cult));
+    w.comp_mut::<Gang>(plain).expect("g").order = citysim::Order::LieLow;
+    let share = (w.config.leisure.preach_share * 100.0) as u32;
+    let preacher = w
+        .citizens()
+        .into_iter()
+        .find(|&x| {
+            x.index % 100 < share && !w.has::<citysim::GangMember>(x) && citysim::systems::demography::is_adult(&w, x)
+        })
+        .expect("a preacher-to-be");
+    gang::enlist(&mut w, preacher, plain);
+    assert!(leisure::preacher(&w, preacher), "a cult preaches at LieLow");
+    // The gray types are dealt at midnight: none for a creed gang.
+    w.jobs2.gray.types.clear();
+    w.run_ticks(TICKS_PER_DAY);
+    for g in [pg, plain] {
+        if creeds::creed_of(&w, g).is_some() {
+            assert!(gray::gang_type(&w, g).is_none(), "a creed gang is no scav crew");
+        }
+    }
 }

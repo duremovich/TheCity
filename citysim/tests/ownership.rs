@@ -1,12 +1,15 @@
 //! M11 phase 2: owners, purses, rent and eviction (docs/M11_OWNERSHIP.md § 3-4,
 //! § 8, § 11; plan phase 2 tests).
 
+mod common;
+
 use citysim::systems::{economy, ownership};
 use citysim::{
     ActionKind, Brain, Building, BuildingKind, Config, Corp, EntityId, EventKind, GoalKind, Household, Job, LifeKind,
     LocationKey, Lod, Market, PlanCtx, PlayerCommand, Position, Posture, Role, TilePos, Wallet, World, WorldState,
     TICKS_PER_DAY,
 };
+use common::{civilians, coins, set_coins};
 
 /// The v1 city with two corps: FoodCo (both Farms, the Market and, by
 /// seeding rule 5, the Bar) and HomeCo (30 Blocks); rent [1, 2, 4].
@@ -36,14 +39,6 @@ fn corps(w: &World) -> (EntityId, EntityId) {
 
 fn treasury(w: &World) -> i64 {
     w.purse(None)
-}
-
-fn coins(w: &World, a: EntityId) -> i64 {
-    w.comp::<Wallet>(a).map_or(0, |w| w.coins)
-}
-
-fn set_coins(w: &mut World, a: EntityId, c: i64) {
-    w.comp_mut::<Wallet>(a).expect("wallet").coins = c;
 }
 
 /// An unemployed adult with a Brain, not the excluded ones.
@@ -973,4 +968,67 @@ fn test_news_day_conserves_coins() {
     assert!(word.flow_ads > 0 && word.flow_plant > 0, "ads {} plant {}", word.flow_ads, word.flow_plant);
     assert!(word.planted >= 1 && word.buried >= 1, "planted {} buried {}", word.planted, word.buried);
     assert_eq!(ownership::total_coins(&w), before, "wallets + gangs + corps + Treasury unchanged");
+}
+
+// ---------------------------------------------------------------------------
+// Shadow V4 bug 5 (docs/SHADOW_V4.md): the fallback exec leaves the post.
+// ---------------------------------------------------------------------------
+
+/// Bug 5 (promotion): a corp with no management or professionals to promote
+/// takes its fallback exec off the old post (she kept her Guard post).
+#[test]
+fn test_bug5_fallback_exec_leaves_the_post() {
+    let mut w = common::world();
+    let corp = w
+        .corps()
+        .into_iter()
+        .find(|&c| !ownership::employees_of(&w, c).is_empty() && w.comp::<Corp>(c).is_some_and(|cc| cc.exec.is_some()))
+        .expect("a corp with staff");
+    for a in ownership::employees_of(&w, corp) {
+        w.comp_mut::<Job>(a).expect("job").grade = 0;
+    }
+    w.comp_mut::<Corp>(corp).expect("corp").exec = None;
+    w.tick = TICKS_PER_DAY;
+    ownership::run(&mut w);
+    let e = w.comp::<Corp>(corp).and_then(|cc| cc.exec).expect("a new exec");
+    assert!(!w.has::<Job>(e), "the new exec left the post");
+}
+
+// ---------------------------------------------------------------------------
+// The V3 violence fixes (2026-10-09, `[life] violence_fixes`), fix 4: rent
+// from income leaves a meal.
+// ---------------------------------------------------------------------------
+
+/// A housed civilian (not its own landlord) owing 7 whole coins with 7 (its
+/// wage) in its purse and `arrears` days short: (coins after, rent_due
+/// after, the meal's price).
+fn rent_from_wage(fix: bool, arrears: u8) -> (i64, f32, i64) {
+    let mut w = World::new(42, Config::load().dole_city().scaled_to(300));
+    w.config.life.violence_fixes = fix;
+    w.config.rent.pay_from_income = true;
+    let a = civilians(&w)
+        .into_iter()
+        .find(|&a| w.comp::<Household>(a).and_then(|h| h.home).is_some_and(|h| w.owner_of(h) != Some(a)))
+        .expect("a tenant");
+    let h = w.comp_mut::<Household>(a).expect("household");
+    h.rent_due = 7.0;
+    h.arrears = arrears;
+    w.comp_mut::<Wallet>(a).expect("wallet").coins = 7;
+    ownership::pay_rent_from_income(&mut w, a);
+    let coins = w.comp::<Wallet>(a).expect("wallet").coins;
+    (coins, w.comp::<Household>(a).expect("household").rent_due, w.mean_price())
+}
+
+#[test]
+fn test_rent_from_wage_leaves_a_meal_in_arrears() {
+    let (coins, due, meal) = rent_from_wage(true, 1);
+    assert!((1..7).contains(&meal), "a meal costs less than the wage ({meal})");
+    assert_eq!(coins, meal, "a meal's worth stays in the purse");
+    assert!((due - meal as f32).abs() < 1e-6, "the rest paid: {due} owed");
+    // No arrears: the whole due is paid, as before.
+    let (coins, due, _) = rent_from_wage(true, 0);
+    assert_eq!((coins, due), (0, 0.0));
+    // The switch off: the wage goes to the arrears whole (644eb10).
+    let (coins, due, _) = rent_from_wage(false, 1);
+    assert_eq!((coins, due), (0, 0.0));
 }

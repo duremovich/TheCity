@@ -6,10 +6,12 @@
 //! promotes only past the thresholds; a promoted NPC arrives with its
 //! stored name and its edge. Every crossing keeps the coin identity.
 
+mod common;
+
 use citysim::components::{Brain, Lod, Skills};
 use citysim::outside::OutsideAsset;
-use citysim::systems::{abroad, econ, lod, parents};
-use citysim::{Config, Corp, EntityId, EventKind, PlayerCommand, RelKind, World, TICKS_PER_DAY};
+use citysim::systems::{abroad, econ, gang, lod, parents};
+use citysim::{Config, Corp, EntityId, EventKind, Gang, PlayerCommand, RelKind, World, TICKS_PER_DAY};
 
 fn account(w: &World, name: &str) -> u32 {
     w.outside.factions.iter().find(|f| f.name == name).map(|f| f.id).unwrap_or_else(|| panic!("no account {name}"))
@@ -316,4 +318,92 @@ fn test_god_found_parent() {
     assert_eq!(w.outside.factions.len(), n + 1);
     assert!(w.comp::<Corp>(corp).and_then(|c| c.parent).is_some());
     assert!(parents::god_found_parent(&mut w, corp).is_err(), "a branch already");
+}
+
+// ---------------------------------------------------------------------------
+// M17 review (33fa3da..a8880e9), findings 1, 2 and 6: a won convoy is no
+// State sanction; a death abroad is quiet yet opens the succession; a data
+// centre is no netrun. The shipped city on day 4.
+// ---------------------------------------------------------------------------
+
+/// Settle every mission now (the settling alone).
+fn settle(w: &mut World) {
+    let now = w.tick;
+    for m in &mut w.outside.abroad {
+        m.back_at = now;
+    }
+    abroad::daily(w);
+}
+
+/// Review 1: a won convoy's sanction is the crew's, not the State's.
+#[test]
+fn test_a_won_convoy_is_no_state_sanction() {
+    let mut w = common::world_at(4 * TICKS_PER_DAY + 30);
+    w.config.outside.abroad.death_p = 0.0;
+    let on = account(&w, "Arasaka Global");
+    let crew = common::free_crew(&mut w, 6, 1.0);
+    god(&mut w, PlayerCommand::PostAbroad { buyer: None, on, asset: OutsideAsset::Convoy, crew });
+    settle(&mut w);
+    let ev = w.events.iter().find(|e| e.kind == EventKind::Sanctioned).expect("the convoy's sanction");
+    assert!(!ev.text.contains("State"), "{}", ev.text);
+    assert!(parents::sanction_cut(&w, on) > 0.0, "the cut still bites");
+}
+
+/// Review 2: a death abroad is no Murder, no violent death in the city's
+/// count, no litter and no killing in the word; a gang leader's death
+/// abroad still opens the succession.
+#[test]
+fn test_a_death_abroad_is_quiet_but_opens_the_succession() {
+    let mut w = common::world_at(4 * TICKS_PER_DAY + 30);
+    w.config.outside.abroad.death_p = 1.0;
+    let on = account(&w, "Arasaka Global");
+    let g = w.gangs().into_iter().max_by_key(|&g| gang::fit_headcount(&w, g)).expect("a gang");
+    for a in common::free_crew(&mut w, 4, 0.5) {
+        gang::enlist(&mut w, a, g);
+    }
+    let leader = w.comp::<Gang>(g).and_then(|x| x.leader).expect("a leader");
+    w.vacate_job(leader);
+    let mut crew = vec![leader];
+    crew.extend(common::free_crew(&mut w, 3, 0.0));
+    for &a in &crew {
+        w.comp_mut::<Skills>(a).expect("skills").fighting = 0.0;
+    }
+    god(&mut w, PlayerCommand::PostAbroad { buyer: None, on, asset: OutsideAsset::Depot, crew: crew.clone() });
+    assert!(abroad::is_away(&w, leader), "the leader went");
+    let violent0 = w.stats.current.deaths_violence;
+    settle(&mut w);
+    let dead: Vec<EntityId> = crew.iter().copied().filter(|&a| !citysim::systems::law::living(&w, a)).collect();
+    assert!(dead.contains(&leader), "a hopeless job: the leader died abroad");
+    assert_eq!(w.stats.current.deaths_violence, violent0, "no violent death in the city's count");
+    for &a in &dead {
+        let life = w.life.get(a.index as usize).and_then(|l| l.as_ref()).expect("a life");
+        assert!(
+            !life.events.iter().any(|e| e.kind == citysim::components::LifeKind::Killed),
+            "no killing on the record"
+        );
+        assert!(
+            w.comp::<citysim::Corpse>(a).is_some_and(|c| c.cause != citysim::DeathCause::Violence),
+            "no violent cause"
+        );
+    }
+    w.run_ticks(1);
+    assert!(w.events.iter().any(|e| e.kind == EventKind::Succession || e.kind == EventKind::CivilWar), "succession");
+}
+
+/// Review 6: a won data centre is no netrun (no UplinkBreached, no run
+/// counted); a payload with nowhere to go cuts no edge.
+#[test]
+fn test_a_data_centre_is_no_netrun() {
+    let mut w = common::world_at(4 * TICKS_PER_DAY + 30);
+    w.config.outside.abroad.death_p = 0.0;
+    let on = account(&w, "Arasaka Global");
+    let crew = common::free_crew(&mut w, 6, 1.0);
+    let edge0 = w.outside.faction(on).and_then(|f| f.parent.as_ref()).map_or(0.0, |p| p.edge);
+    god(&mut w, PlayerCommand::PostAbroad { buyer: None, on, asset: OutsideAsset::DataCentre, crew });
+    settle(&mut w);
+    assert!(!w.events.iter().any(|e| e.kind == EventKind::UplinkBreached), "no fake netrun");
+    assert_eq!(w.outside.today.uplink_runs, 0);
+    assert_eq!(w.outside.today.uplink_breached, 0);
+    let edge = w.outside.faction(on).and_then(|f| f.parent.as_ref()).map_or(0.0, |p| p.edge);
+    assert_eq!(edge, edge0, "no buyer's Lab: the Data stayed abroad, the edge too");
 }

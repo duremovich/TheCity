@@ -1,12 +1,15 @@
 //! M9: the law as a faction. The captain, the posture brain, the duty split,
 //! crackdown loops, the player's pin.
 
+mod common;
+
 use citysim::systems::law_brain::{self, PostureInputs};
 use citysim::systems::{gang, law};
 use citysim::{
-    Building, BuildingKind, Config, Crime, EntityId, EventKind, Gang, LawShock, Personality, PlayerCommand, Posture,
-    World, TICKS_PER_DAY,
+    Building, BuildingKind, Config, Crime, EntityId, EventKind, Gang, GoalKind, Job, LawShock, Personality,
+    PlayerCommand, Posture, World, TICKS_PER_DAY,
 };
+use common::{free_adults, jobless_housed};
 
 fn world(seed: u64) -> World {
     World::new(seed, Config::load().dole_city().v1_profile())
@@ -395,4 +398,118 @@ fn test_vagrancy_report_is_not_gang_business() {
     assert_eq!(w.law().expect("law").report_log.len(), before, "sleeping rough is not gang business");
     law::file_report(&mut w, Crime::Theft, m, None);
     assert_eq!(w.law().expect("law").report_log.len(), before + 1);
+}
+
+// ---------------------------------------------------------------------------
+// Shadow V4 bug 11 and review 1 (docs/SHADOW_V4.md): a corp guard's beat.
+// ---------------------------------------------------------------------------
+
+/// Bug 11: a corp guard polices its beat (a warrant near its office or a
+/// client, not the city's), walks the five clients nearest its office, and
+/// a gang member far from the Hideout sleeps elsewhere.
+#[test]
+fn test_bug11_corp_guard_beat_and_near_hideout() {
+    let mut w = common::world();
+    let pg = w.guards().iter().copied().find(|&g| law::is_private_guard(&w, g)).expect("a private guard");
+    let cg = w.guards().iter().copied().find(|&g| law::is_city_guard(&w, g)).expect("a city guard");
+    let office = w.comp::<Job>(pg).and_then(|j| j.employer).expect("office");
+    let door = w.comp::<Building>(office).expect("b").door;
+    let corp = w.corp_of_building(office).expect("corp");
+    let s = free_adults(&w).into_iter().find(|&x| !law::is_guard(&w, x)).expect("a suspect");
+    // Clients: every Home of the city, so more than five, at all distances.
+    let homes: Vec<EntityId> = w.buildings_of_kind(BuildingKind::Home).to_vec();
+    let until = w.tick + 100 * TICKS_PER_DAY;
+    w.comp_mut::<citysim::Corp>(corp).expect("corp").contracts = homes.iter().map(|&h| (h, until)).collect();
+    let far = homes
+        .iter()
+        .copied()
+        .max_by_key(|&h| w.comp::<Building>(h).expect("b").door.manhattan(door))
+        .expect("a far Home");
+    // A warrant far from every client: off the beat; at the office: on it.
+    w.comp_mut::<citysim::Corp>(corp).expect("corp").contracts = vec![(office, until)];
+    let far_tile = w.comp::<Building>(far).expect("b").door;
+    let now = w.tick;
+    w.set_last_seen(s, (far_tile, now));
+    assert!(!law::on_beat(&w, pg, s), "a warrant across the city is not the corp's");
+    assert!(law::on_beat(&w, cg, s), "the city guard's beat is the city");
+    w.set_last_seen(s, (door, now));
+    assert!(law::on_beat(&w, pg, s));
+    // The route: the five clients nearest the office.
+    w.comp_mut::<citysim::Corp>(corp).expect("corp").contracts = homes.iter().map(|&h| (h, until)).collect();
+    let route = law::new_patrol_route(&mut w, pg);
+    let mut by_dist: Vec<(u32, EntityId)> =
+        homes.iter().map(|&h| (w.comp::<Building>(h).expect("b").door.manhattan(door), h)).collect();
+    by_dist.sort();
+    let nearest: Vec<EntityId> = by_dist.iter().take(5).map(|&(_, h)| h).collect();
+    assert_eq!(route, nearest, "the five clients nearest the office");
+    // The Hideout bed: a homeless member beside it holes up; far off, not.
+    let g = w.gangs()[0];
+    let m = jobless_housed(&w)[0];
+    gang::enlist(&mut w, m, g);
+    w.comp_mut::<citysim::Household>(m).expect("hh").home = None;
+    let hideout = w.hideout_of(g).expect("hideout");
+    let hdoor = w.comp::<Building>(hideout).expect("b").door;
+    w.leave_building(m);
+    w.comp_mut::<citysim::Position>(m).expect("pos").tile = hdoor;
+    assert_eq!(gang::holes_up_at(&w, m), Some(hideout));
+    let far_from_hideout = homes
+        .iter()
+        .map(|&h| w.comp::<Building>(h).expect("b").door)
+        .max_by_key(|t| t.manhattan(hdoor))
+        .expect("a far tile");
+    assert!(far_from_hideout.manhattan(hdoor) > w.config.gangs.hole_up_max_tiles);
+    w.comp_mut::<citysim::Position>(m).expect("pos").tile = far_from_hideout;
+    assert_eq!(gang::holes_up_at(&w, m), None, "no bed hours away");
+}
+
+/// Review 1 (bug 11 through the real path): a corp guard standing beside a
+/// located warrant far from its office and every client neither weighs it
+/// (the Arrest goal's "warrant located" gate) nor binds it (the plan); at
+/// its office it does both. A city guard takes it anywhere.
+#[test]
+fn test_review1_corp_guard_binds_only_warrants_on_its_beat() {
+    use citysim::systems::plan;
+    use citysim::utility::goals;
+    let mut w = common::world();
+    let pg = w.guards().iter().copied().find(|&g| law::is_private_guard(&w, g)).expect("a private guard");
+    let cg = w.guards().iter().copied().find(|&g| law::is_city_guard(&w, g)).expect("a city guard");
+    let office = w.comp::<Job>(pg).and_then(|j| j.employer).expect("office");
+    let door = w.comp::<Building>(office).expect("b").door;
+    let corp = w.corp_of_building(office).expect("corp");
+    let until = w.tick + 100 * TICKS_PER_DAY;
+    w.comp_mut::<citysim::Corp>(corp).expect("corp").contracts = vec![(office, until)];
+    let far = w
+        .buildings_of_kind(BuildingKind::Home)
+        .iter()
+        .map(|&h| w.comp::<Building>(h).expect("b").door)
+        .max_by_key(|t| t.manhattan(door))
+        .expect("a far tile");
+    assert!(far.manhattan(door) > w.config.corps.private_beat_tiles);
+    let s = free_adults(&w).into_iter().find(|&x| !law::is_guard(&w, x) && x != pg && x != cg).expect("a suspect");
+    law::file_report(&mut w, Crime::Assault, s, Some(cg));
+    assert!(law::wanted(&w, s));
+    let place = |w: &mut World, a: EntityId, t: citysim::TilePos| {
+        w.leave_building(a);
+        if let Some(p) = w.comp_mut::<citysim::Position>(a) {
+            p.tile = t;
+            p.building = None;
+        }
+    };
+    let located_gate = |w: &World, g: EntityId| {
+        goals::considerations(w, g, GoalKind::Arrest, false)
+            .and_then(|(cs, _)| cs.into_iter().find(|c| c.name == "warrant located"))
+            .map(|c| c.input)
+    };
+    for t in [far, door] {
+        for a in [pg, cg, s] {
+            place(&mut w, a, t);
+        }
+        let now = w.tick;
+        w.set_last_seen(s, (t, now));
+        let on = t == door;
+        let bound = plan::bind_target(&w, pg, GoalKind::Arrest);
+        assert_eq!(bound == Some(s), on, "the corp guard binds the warrant only on its beat (at the office: {on})");
+        assert_eq!(located_gate(&w, pg) == Some(1.0), on, "the corp guard weighs it only on its beat");
+        assert_eq!(plan::bind_target(&w, cg, GoalKind::Arrest), Some(s), "the city guard's beat is the city");
+    }
 }

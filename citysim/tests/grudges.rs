@@ -5,13 +5,16 @@
 //! game state between fictional agents: a utility score, a scripted plan
 //! of abstract actions and one seeded dice roll.
 
-use citysim::systems::{demography, faction, grudges, hunt, law, memory, raid};
+mod common;
+
+use citysim::systems::{faction, grudges, hunt, law, memory, raid};
 use citysim::word::{Deed, GrudgeCause, Grudges, HuntPhase, HuntWhy, IntelSource, Reputation};
 use citysim::{
     ActionKind, Brain, BuildingKind, Config, Corp, DeathCause, EntityId, ExecState, GoalKind, Identity, Job, Lod,
     MemoryEntry, MemoryKind, Order, Plan, PlayerCommand, Position, RelKind, Skills, Trace, World, TICKS_PER_DAY,
     TICKS_PER_HOUR,
 };
+use common::adults;
 
 /// The first gang, with six jobless adults enlisted (the first leads).
 fn led_gang(w: &mut World) -> EntityId {
@@ -23,10 +26,6 @@ fn led_gang(w: &mut World) -> EntityId {
     }
     assert!(w.comp::<citysim::Gang>(g).and_then(|x| x.leader).is_some(), "a leader");
     g
-}
-
-fn adults(w: &World) -> Vec<EntityId> {
-    w.citizens().into_iter().filter(|&id| law::living(w, id) && demography::is_adult(w, id)).collect()
 }
 
 fn grudge(w: &World, holder: EntityId, target: EntityId) -> Option<citysim::word::Grudge> {
@@ -451,4 +450,24 @@ fn test_noticing_victim_holds_one_grudge_per_deed() {
     assert!(saw, "the victim noticed its own robbery");
     let g = grudge(&w, victim, thief).expect("a grudge on the thief");
     assert!((g.weight - 0.36).abs() < 1e-5, "one deed, one grudge: {}", g.weight);
+}
+
+// ---------------------------------------------------------------------------
+// Shadow V4 bug 15 (docs/SHADOW_V4.md): the marked man reacts.
+// ---------------------------------------------------------------------------
+
+/// Bug 15 (the marked man): word of a Hit on oneself, however faint, is a
+/// grudge on the buyer and a fright (it weighed 0.25 under `grudge_min`).
+#[test]
+fn test_bug15_marked_man_reacts() {
+    let mut w = common::world();
+    let ad = common::free_adults(&w);
+    let (holder, buyer) = (ad[0], ad[1]);
+    w.comp_mut::<citysim::Needs>(holder).expect("n").safety = 1.0;
+    let r = citysim::word::DeedRef { deed: Deed::Hired, actor: Some(buyer), object: Some(holder) };
+    grudges::on_learn(&mut w, holder, &r, 0.3, 2);
+    let held = w.comp::<Grudges>(holder).is_some_and(|g| g.list.iter().any(|x| x.target == buyer));
+    assert!(held, "a grudge on the man who paid for the hit");
+    let safety = w.comp::<citysim::Needs>(holder).expect("n").safety;
+    assert!(safety <= 1.0 - w.config.grudges.marked_safety_drop + 1e-6, "afraid ({safety})");
 }

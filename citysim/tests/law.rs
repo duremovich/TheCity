@@ -1,10 +1,13 @@
 //! M4: memory, witnesses, law, jail.
 
+mod common;
+
 use citysim::systems::{law, memory};
 use citysim::{
     Brain, Building, BuildingKind, Config, Crime, Inventory, Job, Memory, MemoryEntry, MemoryKind, Needs, Personality,
     PlayerCommand, Position, Role, Sentence, Skills, Wallet, World, TICKS_PER_DAY,
 };
+use common::{beside, free_adults, set_coins};
 
 fn world(seed: u64) -> World {
     World::new(seed, Config::load().dole_city().v1_profile())
@@ -363,4 +366,133 @@ fn test_guard_on_duty_at_shift_end_is_owed_the_day() {
     w.comp_mut::<Job>(third).expect("job").duty_ticks = 0;
     law::run(&mut w);
     assert!(coins(&w, third) > before, "owed and paid");
+}
+
+// ---------------------------------------------------------------------------
+// Shadow V4 bugs 4 and 10 (docs/SHADOW_V4.md): fines for the petty who can
+// pay, the arrest read as an arrest, the cells warming no Enemy.
+// ---------------------------------------------------------------------------
+
+/// Bug 4: a fare dodger who can pay is fined at the Precinct, not jailed,
+/// with room in the cells; one who cannot pay serves the night.
+#[test]
+fn test_bug4_petty_offence_fined_when_the_suspect_can_pay() {
+    let mut w = common::world();
+    let guard = w.guards()[0];
+    let pool: Vec<citysim::EntityId> = free_adults(&w).into_iter().filter(|&x| !law::is_guard(&w, x)).collect();
+    let (a, b) = (pool[0], pool[1]);
+    let jailed = w.with::<citysim::Sentence>().len();
+    assert!(jailed < usize::from(w.config.buildings.jail.capacity), "room in the cells");
+    let fine = w.config.transit.dodge_fine;
+    set_coins(&mut w, a, fine + 5);
+    law::file_report(&mut w, citysim::Crime::FareEvasion, a, None);
+    law::jail_suspect(&mut w, guard, a);
+    assert!(!w.has::<citysim::Sentence>(a), "fined, not jailed");
+    assert_eq!(w.comp::<citysim::Wallet>(a).expect("w").coins, 5, "the fine paid");
+    set_coins(&mut w, b, 0);
+    law::file_report(&mut w, citysim::Crime::FareEvasion, b, None);
+    law::jail_suspect(&mut w, guard, b);
+    assert!(w.has::<citysim::Sentence>(b), "cannot pay: the night in the cells");
+    // Review 5: a fine skips the cell only; the arrest is still an arrest
+    // (the sweep's counter, the Arrested rumour, the law's log).
+    let c = pool[2];
+    set_coins(&mut w, c, 10_000);
+    let solicit = |w: &World| w.stats.current.jobs2.as_ref().map_or(0, |j| j.solicit_arrests);
+    let before = solicit(&w);
+    law::file_report(&mut w, citysim::Crime::Solicitation, c, None);
+    law::jail_suspect(&mut w, guard, c);
+    assert!(!w.has::<citysim::Sentence>(c), "fined, not jailed");
+    assert_eq!(solicit(&w), before + 1, "a Solicitation arrest counted");
+    assert!(w.arrest_log.iter().any(|&(_, x)| x == c), "on the law's record");
+}
+
+/// Bug 10 (the edges): a lost scuffle for the cuffs is an arrest, not an
+/// assault, in the suspect's memory; a chat with someone now an Enemy does
+/// not complete; nobody strips the body of a spouse's parent.
+#[test]
+fn test_bug10_edges_read_what_just_happened() {
+    use citysim::systems::chrome;
+    let mut w = common::world();
+    w.config.crime.fight_death_p = 0.0;
+    // Review 4: a beating's own grudge (0.5 x 0.6) sits under the shipped
+    // `grudge_min`; lowered here so a Lost read first would leave one.
+    w.config.grudges.grudge_min = 0.1;
+    let guard = w.guards()[0];
+    let pool: Vec<citysim::EntityId> = free_adults(&w).into_iter().filter(|&x| !law::is_guard(&w, x)).collect();
+    // The scuffle: a brave, weak suspect against a strong guard, until he loses one.
+    let s = pool[0];
+    w.comp_mut::<citysim::Skills>(guard).expect("s").fighting = 1.0;
+    w.comp_mut::<citysim::Skills>(s).expect("s").fighting = 0.0;
+    let mut lost = false;
+    for _ in 0..20 {
+        beside(&mut w, guard, s);
+        w.comp_mut::<citysim::Personality>(s).expect("p").courage = 0.9;
+        law::file_report(&mut w, citysim::Crime::Theft, s, None);
+        let n0 = w.comp::<citysim::Memory>(s).map_or(0, |m| m.entries.len());
+        law::arrest(&mut w, guard, s);
+        let m = w.comp::<citysim::Memory>(s).expect("mem");
+        let fresh: Vec<_> = m.entries.iter().skip(n0.min(m.entries.len())).collect();
+        if fresh.iter().any(|e| e.kind == citysim::MemoryKind::Won) {
+            continue;
+        }
+        assert!(
+            !fresh.iter().any(|e| e.kind == citysim::MemoryKind::Lost && e.subject == Some(guard)),
+            "a lost scuffle with the law is no assault"
+        );
+        lost = fresh.iter().any(|e| e.kind == citysim::MemoryKind::WasArrested && e.subject == Some(guard));
+        // Review 4: remembered as an arrest from the start, so no Assaulted
+        // grudge on the guard was taken up from a Lost first.
+        assert!(
+            w.comp::<citysim::word::Grudges>(s)
+                .is_none_or(|g| !g.list.iter().any(|x| x.target == guard && x.settled.is_none())),
+            "no grudge on the arresting guard"
+        );
+        assert!(
+            w.edge(s, guard).is_none_or(|e| e.kind != citysim::RelKind::Enemy),
+            "no Enemy edge on the arresting guard"
+        );
+        break;
+    }
+    assert!(lost, "the suspect lost a scuffle and remembers an arrest");
+    // The chat with a new Enemy.
+    let (a, b) = (pool[1], pool[2]);
+    beside(&mut w, a, b);
+    w.edge_entry(a, b).kind = citysim::RelKind::Enemy;
+    let now = w.tick;
+    let out = citysim::exec::actions::on_complete(&mut w, a, citysim::goap::ActionKind::Chat, Some(b), now, now);
+    assert!(matches!(out, citysim::exec::StepResult::Failed(_)), "no chat with an Enemy");
+    // The in-law's body.
+    let (x, sp) = w
+        .citizens()
+        .into_iter()
+        .find_map(|x| w.spouse_of(x).filter(|_| !law::is_guard(&w, x)).map(|sp| (x, sp)))
+        .expect("a married pair");
+    let dad = pool.iter().copied().find(|&d| d != x && d != sp && w.edge(x, d).is_none()).expect("a third");
+    w.edge_entry(sp, dad).kind = citysim::RelKind::Parent;
+    w.kill_by(dad, citysim::DeathCause::Violence, None);
+    assert!(w.has::<citysim::Corpse>(dad), "a body");
+    assert!(!chrome::may_loot(&w, x, dad), "the spouse's father is kin");
+}
+
+/// Bug 10 (the cells): two Enemies jailed together stay Enemies (the
+/// drift took -1.00 to -0.10 in 13 h).
+#[test]
+fn test_bug10_jail_warms_no_enemy() {
+    let mut w = common::world();
+    let guard = w.guards()[0];
+    let pool: Vec<citysim::EntityId> = free_adults(&w).into_iter().filter(|&x| !law::is_guard(&w, x)).collect();
+    let (a, b) = (pool[0], pool[1]);
+    for x in [a, b] {
+        law::file_report(&mut w, citysim::Crime::Assault, x, None);
+        law::jail_suspect(&mut w, guard, x);
+        assert!(w.has::<citysim::Sentence>(x));
+    }
+    {
+        let e = w.edge_entry(a, b);
+        e.kind = citysim::RelKind::Enemy;
+        e.affinity = -1.0;
+    }
+    w.run_ticks(13 * citysim::TICKS_PER_HOUR);
+    let e = w.edge(a, b).expect("edge");
+    assert!(e.affinity <= -0.95, "a cell warms no Enemy ({})", e.affinity);
 }
