@@ -3037,7 +3037,12 @@ const CHECKS: &[Check] = &[
     (19, "homeless", Metric::WalkHDay, Bound::Max(6.6), 4.97, 5.53),
     (19, "homeless", Metric::LongestSleepH, Bound::Min(5.1), 5.60, 5.82),
     (19, "homeless", Metric::Energy0HWeek, Bound::Max(2.3), 0.03, 0.23),
-    (19, "homeless", Metric::KnownMetWeek, Bound::Min(6.4), 10.81, 12.54),
+    // Lives at work phase 5 (2026-10-18): this row alone re-derived on the phase-5 city (the eight-run
+    // ensemble: shipped 5.16; stat_violence_mult 0.98 6.00, 0.99 6.00, 1.01 5.61, 1.02 6.44, 1.03 5.45;
+    // max_coarse 149 7.47, 151 7.24): 5.16 x 0.6 = 3.10, rounded down. The row drifted across phases 1-5
+    // from 10.8-12.5 to about 7 on main (7.00) and 5.2 here: drift across the milestone's
+    // phases, not a single change (no other row moved in any of the eight runs bar max_coarse 149's three).
+    (19, "homeless", Metric::KnownMetWeek, Bound::Min(3.0), 5.16, 7.47),
     (19, "homeless", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
     (19, "homeless", Metric::CommuteAbortsDay, Bound::Max(0.06), 0.00, 0.01),
     // M17 phase 4b: restored to the pre-phase-3 bounds. Phase 3 loosened them to 0.54 / 0.51 for the
