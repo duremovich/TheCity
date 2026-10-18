@@ -84,6 +84,19 @@ pub enum VisitWhy {
     Elder,
     /// Lives at work phase 3 (§ 3.5): a child in a Camp: the parent's answer.
     Camp(CampAnswer),
+    /// Lives at work phase 5 (§ 2.4): a walk-in paper buyer to the Fixer
+    /// (`kin` is the Fixer building; `service::walk_ins_daily`).
+    Papers,
+    /// Lives at work phase 5 (§ 2.4, § 3.4's owner-operator): a Fixer's owner
+    /// without a post collects the week's cut in person (`kin` is the Fixer).
+    Collect,
+}
+
+impl VisitWhy {
+    /// Phase 5's visits go to a building, not to a person.
+    pub fn to_building(self) -> bool {
+        matches!(self, VisitWhy::Papers | VisitWhy::Collect)
+    }
 }
 
 /// A visit due today (`World::visits`, saved while pending; cleared at midnight).
@@ -662,6 +675,9 @@ fn pair(a: EntityId, b: EntityId) -> (EntityId, EntityId) {
 fn kin_there(world: &World, v: PendingVisit) -> bool {
     match v.why {
         VisitWhy::Camp(_) => camp_of(world, v.kin).is_some(),
+        VisitWhy::Papers | VisitWhy::Collect => {
+            world.comp::<Building>(v.kin).is_some_and(|b| !b.demolished && !b.derelict)
+        }
         _ => world.has::<Brain>(v.kin) && crate::systems::law::living(world, v.kin),
     }
 }
@@ -977,6 +993,8 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
         VisitWhy::Hurt => 1.0,
         VisitWhy::Elder => 0.6,
         VisitWhy::Camp(_) => 0.8,
+        VisitWhy::Papers => 0.9,
+        VisitWhy::Collect => 0.5,
     };
     let cs = vec![
         Consideration::new("a visit due", can(true), GATE),
@@ -990,8 +1008,18 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
 /// room, the Precinct's hall), the kin the plan's target.
 pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
     let v = visit_now(world, id)?;
-    world.comp::<Position>(v.kin).and_then(|p| p.building)?;
     let step = |action, target| ActionInstance { action, target, tile: None };
+    // Lives at work phase 5 (§ 2.4): the Fixer's walk-in and the owner's
+    // collection walk to a building (the exec's office walk's shape).
+    if v.why.to_building() {
+        if world.comp::<Position>(id).and_then(|p| p.building) == Some(v.kin) {
+            let steps = vec![step(ActionKind::Rest, None)];
+            return Some(Plan { goal: GoalKind::Visit, target: Some(v.kin), steps, started_tick: world.tick });
+        }
+        let steps = vec![step(ActionKind::GoTo(LocationKey::Seller), Some(v.kin)), step(ActionKind::Rest, None)];
+        return Some(Plan { goal: GoalKind::Visit, target: Some(v.kin), steps, started_tick: world.tick });
+    }
+    world.comp::<Position>(v.kin).and_then(|p| p.building)?;
     let steps = vec![step(ActionKind::GoTo(LocationKey::Victim), Some(v.kin)), step(ActionKind::Rest, None)];
     Some(Plan { goal: GoalKind::Visit, target: Some(v.kin), steps, started_tick: world.tick })
 }
@@ -1003,6 +1031,10 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind) -> bool {
         ActionKind::Rest => {
             let kin = world.comp::<Brain>(id).and_then(|b| b.plan.as_ref()).and_then(|p| p.target);
             let here = world.comp::<Position>(id).and_then(|p| p.building);
+            // Lives at work phase 5: a building visit rests inside it.
+            if kin.is_some_and(|k| world.has::<Building>(k)) {
+                return here.is_some() && here == kin;
+            }
             here.is_some() && kin.and_then(|k| world.comp::<Position>(k)).is_some_and(|p| p.building == here)
         }
         _ => crate::exec::actions::can_start(world, id, kind, None),
@@ -1018,6 +1050,12 @@ fn credit(world: &mut World, id: EntityId, v: PendingVisit, walked: bool) {
         camp_answer(world, id, v.kin, answer, walked);
         return;
     }
+    // Lives at work phase 5 (§ 2.4): the walk-in's sale, the owner's collection.
+    match v.why {
+        VisitWhy::Papers => return crate::systems::service::walk_in_arrived(world, id, v.kin),
+        VisitWhy::Collect => return crate::systems::service::collected(world, id, v.kin),
+        _ => {}
+    }
     crate::systems::social::interacted(world, id, v.kin);
     let today = world.day();
     world.last_met.insert(pair(id, v.kin), today);
@@ -1029,7 +1067,7 @@ fn credit(world: &mut World, id: EntityId, v: PendingVisit, walked: bool) {
     match v.why {
         VisitWhy::Hurt => row.kin_visits += 1,
         VisitWhy::Elder => row.elder_visits += 1,
-        VisitWhy::Camp(_) => {}
+        VisitWhy::Camp(_) | VisitWhy::Papers | VisitWhy::Collect => {}
     }
     let place = world.comp::<Position>(v.kin).and_then(|p| p.building);
     let at = place.map_or_else(|| "where they were".to_string(), |b| world.name_of(b));
@@ -1041,6 +1079,7 @@ fn credit(world: &mut World, id: EntityId, v: PendingVisit, walked: bool) {
             (VisitWhy::Hurt, _) => " (hurt)",
             (VisitWhy::Elder, _) => " (an elder parent)",
             (VisitWhy::Camp(_), _) => " (a Camp child)",
+            (VisitWhy::Papers | VisitWhy::Collect, _) => "",
         }
     );
     let actors: Vec<EntityId> = [Some(id), Some(v.kin), place].into_iter().flatten().collect();

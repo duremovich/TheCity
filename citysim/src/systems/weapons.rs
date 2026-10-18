@@ -1416,8 +1416,15 @@ fn wants_and_licences(world: &mut World) {
         }
         world.jobs2.arms.licences.insert(id);
         ownership::jobs2_row(world).licences_sold += 1;
-        let text = format!("{} bought a weapons licence for {}", world.name_of(id), cfg.licence_fee);
-        world.push_event(EventKind::LicenceSold, &[id], text);
+        // Lives at work phase 5 (§ 2.2, civic clerk): the clerk named.
+        let clerk = crate::systems::service::licence_clerk(world, id);
+        let from = clerk.map(|(c, _)| format!(" from {}", world.name_of(c))).unwrap_or_default();
+        let text = format!("{} bought a weapons licence for {}{from}", world.name_of(id), cfg.licence_fee);
+        let actors: Vec<EntityId> = std::iter::once(id).chain(clerk.map(|(c, _)| c)).collect();
+        world.push_event(EventKind::LicenceSold, &actors, text);
+        if let Some((c, hall)) = clerk {
+            crate::systems::service::licence_sold(world, c, hall, id, cfg.licence_fee);
+        }
     }
 }
 

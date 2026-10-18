@@ -1286,8 +1286,8 @@ rumour_cap_statistical = 3
 relay_conf = 0.8
 # M15 phase 5: repaid 0.1 -> 0.3. A Security contract kept a week is now told as Repaid (the seller), so
 # honour moves on kept contracts; at 0.1 the pool entry fell under reach_min before anyone heard it.
-reach0 = { killed = 1.0, assaulted = 0.5, robbed = 0.3, extorted = 0.2, stripped = 0.5, arrested = 0.6, married = 0.3, evicted = 0.4, struck = 0.8, raided = 0.9, founded = 0.4, avenged = 1.0, betrayed = 0.6, repaid = 0.3, poached = 0.3, hired = 0.3, gave = 0.2, blackmailed = 0.2, rescued = 0.5, employed = 0.2, laid_off = 0.3, born = 0.3 }  # M16a C21: hired; Real economy E29: gave; M16b: blackmailed; Lives at work phase 2: employed, laid_off, born
-deed_sal = { killed = 0.9, assaulted = 0.6, robbed = 0.5, extorted = 0.4, stripped = 0.6, arrested = 0.5, married = 0.3, evicted = 0.5, struck = 0.6, raided = 0.8, founded = 0.4, avenged = 0.9, betrayed = 0.7, repaid = 0.3, poached = 0.4, hired = 0.7, gave = 0.3, blackmailed = 0.5, rescued = 0.6, employed = 0.2, laid_off = 0.3, born = 0.3 }  # M16a C21: hired; Real economy E29: gave; M16b: blackmailed
+reach0 = { killed = 1.0, assaulted = 0.5, robbed = 0.3, extorted = 0.2, stripped = 0.5, arrested = 0.6, married = 0.3, evicted = 0.4, struck = 0.8, raided = 0.9, founded = 0.4, avenged = 1.0, betrayed = 0.6, repaid = 0.3, poached = 0.3, hired = 0.3, gave = 0.2, blackmailed = 0.2, rescued = 0.5, employed = 0.2, laid_off = 0.3, born = 0.3, decided = 0.3 }  # M16a C21: hired; Real economy E29: gave; M16b: blackmailed; Lives at work phase 2: employed, laid_off, born; phase 5: decided
+deed_sal = { killed = 0.9, assaulted = 0.6, robbed = 0.5, extorted = 0.4, stripped = 0.6, arrested = 0.5, married = 0.3, evicted = 0.5, struck = 0.6, raided = 0.8, founded = 0.4, avenged = 0.9, betrayed = 0.7, repaid = 0.3, poached = 0.4, hired = 0.7, gave = 0.3, blackmailed = 0.5, rescued = 0.6, employed = 0.2, laid_off = 0.3, born = 0.3, decided = 0.3 }  # M16a C21: hired; Real economy E29: gave; M16b: blackmailed
 # M15 phase 5: robbed 0.3 -> 0.6 (with [grudges] grudge_min 0.35 and rel_w.own 0.6): a robbery of a
 # dole wallet forms the victim's grudge (0.36), a beating no longer does (0.30). Grudges formed on
 # seed 42: 20,728 (16,851 from beatings, 30,870 grudge hits from friends hearing of one) -> 5,236
@@ -3674,7 +3674,7 @@ enabled = true
 venues = true
 civic = true                       # phase 3 (§ 2.2, § 3.5): teacher, camp warden, jailer, super; the near round, tied housing, the parent's answer (CITYSIM_CIVIC_OFF=1)
 street = true                      # phase 4 (§ 2.3): the cab roll and the driver's body, the parcel, the lift, the client, the pimp's round, the dealer's corner (CITYSIM_LIVES_STREET_OFF=1; CITYSIM_STREET_OFF is [jobs2] street's)
-tower = false
+tower = true                       # phase 5 (§ 2.4, § 2.2's civic clerk, § 3.6's decided): the exec's Meeting and decision, the reporter's beat and byline, the Fixer's walk-in and contract encounters, the owner's collection, the clerk named (CITYSIM_TOWER_OFF=1)
 madam_cut = 0.3                    # § 2.1: the madam's share of each tip at her Brothel, worker -> madam (Flow::MadamCut)
 p_eject = 0.5                      # § 2.1: an Assault inside a kept venue is an ejection on this x (bouncer fighting - attacker fighting)
 staff_meal = true                  # § 2.1: a Cook takes one meal from the NoodleBar's stock at shift end (every tier; V4: a cook steals food)
@@ -3694,6 +3694,13 @@ pimp_pass_up = 0.5                 # phase 4 § 2.3 (pimp): the share of his cut
 pimp_absent_days = 3               # phase 4 § 2.3 (pimp): absent from every pitch of his this many days, he loses the district (name_pimps)
 p_short_report = 0.5               # phase 4 § 2.3 (loader): after a pilfer, the owner reports a Theft on this chance (a hash of the loader and the day)
 witness_lookout_mult = 0.5         # phase 4 § 2.3 (dealer): a lookout at the corner or in the Bar multiplies the Dealing witness roll by this
+meeting_attendees = 6              # phase 5 § 2.4 (exec): a Meeting hour meets at most this many of the corp's graded staff present at the Hq (lowest hash)
+decision_margin = 0.05             # phase 5 § 2.4 (exec): the two best corp orders within this are the exec's call; the picked one gains this
+expansive = ["Grow", "Acquire", "Research", "Lobby"]   # phase 5 § 2.4 (exec): the orders courage leans to ...
+defensive = ["Hunker", "Secure", "Squeeze"]            # ... and loyalty: p(expansive) = 0.5 + 0.5 x (courage - loyalty), hashed
+beat_stops = 4                     # phase 5 § 2.4 (reporter): the scenes of yesterday's crimes in the Feed's districts walked a shift, nearest the Feed first
+byline_promote = 10                # phase 5 § 2.4 (reporter): every this many bylines the reporter's class-pay grade rises one step
+witness_tiles = 3                  # phase 5 § 2.4 (reporter): a witness interviewed at a scene is a body within this many tiles of its door
 
 # Lives at work phase 1 (docs/LIVES_AT_WORK.md § 1.1, § 2.1, § 2.2): the [[serves]] rows, one per serving trade.
 # `key` is a [[trades]] id or a legacy Role name (Config::unresolved_names checks it); `kind` names the queue's
@@ -4010,6 +4017,68 @@ regular_after = 3
 regular_days = 14
 valence = 0.1
 street = true
+
+# Lives at work phase 5 (docs/LIVES_AT_WORK.md § 2.4, § 2.2's civic clerk): the tower rows (`tower = true`: live only
+# with [service] tower, stripped off). `exec` is no Role and no trade (an exec holds no Job: `Corp.exec`), accepted by
+# Config::unresolved_names as the pimp's and dealer's posts; `Reporter` and `Fixer` are legacy roles.
+[[serves]]
+key = "exec"                       # the corp's graded staff present at the Hq in a Meeting hour (Attendee), both ways
+kind = "attendee"
+per_hour = 6
+minutes = 10
+skill = "persuasion"
+skill_gain = 0.0005
+regular_after = 5
+regular_days = 14
+valence = 0.1
+tower = true
+
+[[serves]]
+key = "Reporter"                   # a witness interviewed at a scene on the beat (Source)
+kind = "source"
+per_hour = 4
+minutes = 15
+skill = "knowledge"
+skill_gain = 0.0005
+regular_after = 3
+regular_days = 14
+valence = 0.0
+tower = true
+
+[[serves]]
+key = "Fixer"                      # a walk-in paper buyer, a contract's poster or taker at the Fixer (Client); the owner without a post on this row too
+kind = "client"
+per_hour = 6
+minutes = 10
+skill = "persuasion"
+skill_gain = 0.0005
+regular_after = 3
+regular_days = 14
+valence = 0.0
+tower = true
+
+[[serves]]
+key = "forger"                     # a walk-in paper buyer at the Fixer (Client)
+kind = "client"
+per_hour = 4
+minutes = 15
+skill = "knowledge"
+skill_gain = 0.0005
+regular_after = 3
+regular_days = 30
+valence = 0.0
+tower = true
+
+[[serves]]
+key = "civic_clerk"                # a licence sold at the Hall, a papers bribe taken (Client; the clerk named)
+kind = "client"
+per_hour = 6
+minutes = 10
+skill = "knowledge"
+skill_gain = 0.0
+regular_after = 0
+valence = 0.0
+tower = true
 
 # Lives at work phase 2 (docs/LIVES_AT_WORK.md § 3): the evening and the household, read by systems/household.rs
 # (and leisure.rs for the home spot). Under [lives] enabled (`CITYSIM_HOUSEHOLD_OFF=1`). Placeholders.

@@ -833,7 +833,13 @@ pub fn rescore(world: &mut World, corp: EntityId, hysteresis: f32, why: &str) {
     else {
         return;
     };
+    // Lives at work phase 5 (§ 2.4): the two best within `decision_margin`
+    // are the exec's call (`service::decide`, a hash of his traits); he
+    // decided when the call changed the outcome.
+    let untilted = crate::systems::service::tower_on(world).then(|| choose(&scores, (current, cur_niche), hysteresis));
+    let exec = crate::systems::service::decide(world, corp, &mut scores);
     let next = choose(&scores, (current, cur_niche), hysteresis);
+    let decided_by = exec.filter(|_| untilted.is_some_and(|u| u != next));
     let best = scores.first().map_or(0.0, |s| s.score);
     let cur = current_score(&scores, (current, cur_niche));
     let now = world.tick;
@@ -844,7 +850,17 @@ pub fn rescore(world: &mut World, corp: EntityId, hysteresis: f32, why: &str) {
     if c.pinned_until.is_some_and(|t| now < t) {
         return;
     }
-    let Some((order, niche)) = next else { return };
+    let Some((order, niche)) = next else {
+        // The exec's call kept the standing order the scores would have left.
+        if let Some(exec) = decided_by {
+            let keep = match cur_niche {
+                Some(n) => format!("keep {current} in {n}"),
+                None => format!("keep {current}"),
+            };
+            crate::systems::service::decided(world, corp, exec, keep);
+        }
+        return;
+    };
     if current == CorpOrder::Squeeze {
         c.wage_mult = 1.0;
         c.evict_days_override = None;
@@ -863,11 +879,17 @@ pub fn rescore(world: &mut World, corp: EntityId, hysteresis: f32, why: &str) {
         Some(n) => format!("{current} in {n}"),
         None => current.to_string(),
     };
+    // Lives at work phase 5: the exec's call is his (the order's actors).
+    let by = decided_by.map_or_else(String::new, |e| format!(", decided by {}", world.name_of(e)));
+    let actors: Vec<EntityId> = std::iter::once(corp).chain(decided_by).collect();
     world.push_event(
         EventKind::CorpOrder,
-        &[corp],
-        format!("{name}: {old} -> {order} in {niche} ({why}, {best:.2} vs {cur:.2})"),
+        &actors,
+        format!("{name}: {old} -> {order} in {niche} ({why}, {best:.2} vs {cur:.2}{by})"),
     );
+    if let Some(exec) = decided_by {
+        crate::systems::service::decided(world, corp, exec, format!("{order} in {niche}"));
+    }
     // Lobby is one payment: it is made when the order is taken (a shock
     // rescore at noon would otherwise lapse at midnight before it acted).
     if order == CorpOrder::Lobby && why != "daily" {

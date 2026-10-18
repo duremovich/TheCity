@@ -90,6 +90,9 @@ pub fn run(world: &mut World) {
     // Jobs & lives phase 6: the gray market's and the faith's day (nothing
     // with `[gray]` / `[faith]` off).
     crate::systems::gray::daily(world);
+    // Lives at work phase 5 (§ 2.4): the walk-ins' walks, the Fixer owners'
+    // weekly collections (nothing with `[service] tower` off).
+    crate::systems::service::tower_daily(world);
     crate::systems::faith::daily(world);
     // Jobs & lives phase 7: the children's routines, the kin, the
     // prosthetics (nothing with `[ages]` off).

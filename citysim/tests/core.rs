@@ -438,6 +438,11 @@ fn run_city(seed: u64, days: u64, cfg: Config) -> SeedRun {
                 ("pimp's collection", j.pimp_collections),
                 ("dealer's regular", j.dealer_regulars),
                 ("corner deal", j.corner_deals),
+                // Lives at work phase 5 (§ 9.1).
+                ("Meeting with attendees", j.meetings_held),
+                ("exec's decision", j.decisions),
+                ("byline story", j.bylines),
+                ("walk-in paper sale", j.walk_ins_served),
             ] {
                 *r.marks.entry(k).or_insert(0) += v;
             }
@@ -1011,6 +1016,12 @@ fn jobs2_printed() -> Vec<Mechanism> {
         "pimp's collection", // [19, 0, 33]: street pitches are few at 2k (a pimp from day ~70)
         "dealer's regular",  // [519, 761, 830]
         "corner deal",       // [912, 1389, 1353]
+        // Lives at work phase 5 (§ 9.1, printed until the gate; `tests/tower.rs` and the CEO
+        // and reporter probes in `tests/person.rs` carry each).
+        "Meeting with attendees", // [4582, 4986, 5869] Meeting hours with an attendee
+        "exec's decision",        // [38, 19, 32]
+        "byline story",           // [895, 919, 968]
+        "walk-in paper sale",     // [79, 34, 54] pickups (the order is paid at midnight)
     ]
     .into_iter()
     .map(|k| (k, m(k)))

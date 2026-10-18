@@ -618,7 +618,17 @@ fn probe_buyer_nobody_heard_of_is_never_charged() {
     let (mut heard_on, mut charged_on) = (None, None);
     let start = w.tick;
     for day in 0..30u64 {
-        run_to(&mut w, buyer, start + (day + 1) * TICKS_PER_DAY, |_| {});
+        // The city may kill him (phase 5's diverged seed 42: abducted and
+        // ripped on day 23): the property holds to his death.
+        let end = start + (day + 1) * TICKS_PER_DAY;
+        while w.tick < end && law::living(&w, buyer) && w.has::<Brain>(buyer) {
+            pin(&mut w, buyer);
+            w.run_ticks(1);
+        }
+        if !law::living(&w, buyer) || !w.has::<Brain>(buyer) {
+            eprintln!("buyer {} died on day {day}", buyer.index);
+            break;
+        }
         if heard_on.is_none() {
             let hs = heard_of(&w, buyer, t);
             if !hs.is_empty() {
@@ -2755,16 +2765,52 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
     let (cut, up) = (w.config.vice.pimp_cut, w.config.service.pimp_pass_up);
     let mut collecting = 0u32;
     let mut kept_nights = 0u32;
+    // The subject's gang is held to GangWork (Expand) through the window: a diverged
+    // seed (the tower on) can have it muster a Raid on a pitch night, and the probe is
+    // about the pimp's round, not about what a raid order does to a night.
+    // He is also set down at his pitch when his round sets out (an Eat or an Unwind
+    // before the hours can leave him a walk longer than the hours).
+    let mut stood = 0u64;
+    let mut calm = |w: &mut World, to: u64, each: &mut dyn FnMut(&World)| {
+        while w.tick < to {
+            if let Some(gg) = w.comp_mut::<citysim::Gang>(g) {
+                gg.order = citysim::components::Order::Expand;
+            }
+            let day = w.tick / TICKS_PER_DAY;
+            let goes = w.comp::<Brain>(pimp).is_some_and(|b| {
+                b.current_goal == Some(citysim::components::GoalKind::GangWork)
+                    && matches!(step(w, pimp), Some(ActionKind::GoTo(citysim::goap::LocationKey::Spot)))
+                    && w.tick % TICKS_PER_DAY >= 20 * TICKS_PER_HOUR
+            });
+            if goes && stood != day + 1 {
+                stood = day + 1;
+                if let Some(pp) = w.comp_mut::<Position>(pimp) {
+                    pp.tile = spot;
+                    pp.building = None;
+                }
+                // The step walks a fresh path from where he stands.
+                if let Some(b) = w.comp_mut::<Brain>(pimp) {
+                    b.exec = citysim::exec::ExecState::Idle;
+                }
+            }
+            run_to(w, pimp, w.tick + 1, |w| each(w));
+        }
+    };
     // Two nights (a Statistical worker works the hours his `p_pitch` names).
     for midnight in [13 * TICKS_PER_DAY, 14 * TICKS_PER_DAY] {
-        run_to(&mut w, pimp, midnight - 1, |w| {
+        calm(&mut w, midnight - 1, &mut |w| {
             if step(w, pimp) == Some(ActionKind::Collect) {
                 collecting += 1;
             }
         });
         let take = w.jobs2.pitches.get(&o).map_or(0, |p| p.take_today);
+        // His rent is paid ahead (a credit the midnight accrual does not clear): the
+        // probe reads the cut, not the landlord's coin.
+        if let Some(h) = w.comp_mut::<citysim::components::Household>(pimp) {
+            h.rent_due = -10.0;
+        }
         let before = coins(&w, pimp);
-        run_to(&mut w, pimp, midnight + 1, |_| {});
+        calm(&mut w, midnight + 1, &mut |_| {});
         let after = coins(&w, pimp);
         // His cut less what he passes up (a gang pay-out at midnight only adds).
         let paid = (take as f32 * cut).round() as i64;
@@ -2779,4 +2825,139 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
     eprintln!("pimp {}: {collecting} ticks collecting, met the worker {met}", pimp.index);
     assert!(collecting > 0 && met, "the pimp never walked his pitch");
     assert!(kept_nights > 0, "no night kept a cut (the probe's premise)");
+}
+
+/// Lives at work phase 5 (§ 2.4, § 9.1): a CEO meets at least one named
+/// employee at the Hq in a week with it staffed (the exec pinned: his own
+/// `Served` memories name staff of his Hq). Control: the tower off, none.
+#[test]
+fn probe_ceo_meets_a_named_employee_in_a_week() {
+    fn met(tower: bool) -> usize {
+        let mut cfg = Config::load();
+        if !tower {
+            cfg.strip_tower();
+        }
+        let mut w = World::new(42, cfg);
+        w.run_ticks(TICKS_PER_DAY);
+        // The corp whose HQ holds the most graded staff (at 2k the Hq
+        // buildings stand empty early; the ranking's next kinds are staffed).
+        let (_, corp, exec, hq) = w
+            .corps()
+            .into_iter()
+            .filter_map(|c| {
+                let e = w.comp::<citysim::Corp>(c)?.exec?;
+                let hq = citysim::systems::life::hq_of(&w, c, e)?;
+                let graded = w
+                    .staff_of(hq)
+                    .iter()
+                    .filter(|&&s| {
+                        w.comp::<Job>(s).is_some_and(|j| {
+                            j.grade >= 1 || citysim::systems::classpay::base_grade(&w, j.employer, j.role) >= 1
+                        })
+                    })
+                    .count();
+                (law::living(&w, e) && graded > 0).then_some((graded, c, e, hq))
+            })
+            .max_by_key(|x| (x.0, std::cmp::Reverse(x.1)))
+            .expect("a corp with an exec and a graded HQ");
+        let start = w.tick;
+        run_to(&mut w, exec, start + 7 * TICKS_PER_DAY, |_| {});
+        // His ledger of the people he served (the memories are low-salience
+        // and a week of a CEO's day can crowd them out), his corp's staff:
+        // the HQ moves when the corp builds its Hq.
+        let names: std::collections::BTreeSet<EntityId> = citysim::systems::service::regulars_of(&w, exec)
+            .iter()
+            .map(|r| r.who)
+            .filter(|&s| w.comp::<Job>(s).and_then(|j| j.employer).and_then(|b| w.corp_of_building(b)) == Some(corp))
+            .collect();
+        let meetings: u32 = w.stats.history.iter().filter_map(|r| r.jobs2.as_ref()).map(|j| j.meetings_held).sum();
+        eprintln!(
+            "tower {tower}: {} (exec of {}) met {} named employees of {} in a week ({meetings} Meeting hours city-wide)",
+            w.name_of(exec),
+            w.name_of(corp),
+            names.len(),
+            w.name_of(hq)
+        );
+        names.len()
+    }
+    assert!(met(true) >= 1, "the CEO meets an employee");
+    assert_eq!(met(false), 0, "off: the CEO meets nobody");
+}
+
+/// Lives at work phase 5 (§ 2.4, § 9.1): a Reporter on a Feed covering a
+/// district with a reported Assault since yesterday stands at its scene
+/// (the victim's Home) during his shift and interviews a witness there or
+/// counts the stop. The covered districts' pools are cleared in-test so the
+/// Assault is the beat. Control: the tower off, never at the scene.
+#[test]
+fn probe_reporter_stands_at_the_scene_on_his_shift() {
+    fn at_scene(tower: bool) -> bool {
+        let mut cfg = Config::load();
+        if !tower {
+            cfg.strip_tower();
+        }
+        let mut w = World::new(42, cfg);
+        w.run_ticks(TICKS_PER_DAY + 5 * TICKS_PER_HOUR);
+        let (reporter, feed) = w
+            .workers(Role::Reporter)
+            .iter()
+            .copied()
+            .find_map(|r| {
+                let j = w.comp::<Job>(r)?;
+                let f = j.employer?;
+                let ok = law::living(&w, r)
+                    && !w.has::<citysim::Sentence>(r)
+                    && j.shifts.first().is_some_and(|&(s, _)| (6 * 60..=10 * 60).contains(&s))
+                    && routine::workday_of(&w, r, j, j.next_shift_key(w.tick))
+                    && citysim::systems::news::feed_state(&w, f).is_some_and(|s| s.covers != 0);
+                ok.then_some((r, f))
+            })
+            .expect("a day-shift reporter on a workday");
+        let covers = citysim::systems::news::feed_state(&w, feed).expect("feed").covers;
+        let d = (0..32u8).find(|d| covers & (1 << d) != 0).expect("a covered district");
+        for (i, pool) in w.rumours.iter_mut().enumerate() {
+            if i < 32 && covers & (1 << i) != 0 {
+                pool.entries.clear();
+            }
+        }
+        let civ: Vec<EntityId> = w
+            .citizens()
+            .into_iter()
+            .filter(|&a| law::living(&w, a) && demography::is_adult(&w, a))
+            .filter(|&a| a != reporter && w.comp::<Household>(a).and_then(|h| h.home).is_some())
+            .collect();
+        // The victim lives near the Feed (a far scene does not fit the
+        // shift: the beat's time gate).
+        let desk = w.comp::<Building>(feed).map(|b| b.door).expect("feed door");
+        let home_door = |a: EntityId| {
+            w.comp::<Household>(a)
+                .and_then(|h| h.home)
+                .and_then(|h| w.comp::<Building>(h))
+                .map_or(u32::MAX, |b| b.door.manhattan(desk))
+        };
+        let victim = *civ.iter().min_by_key(|&&a| (home_door(a), a)).expect("a victim");
+        let actor = civ[11];
+        let scene = w.comp::<Household>(victim).and_then(|h| h.home).expect("a home");
+        citysim::systems::gossip::post_deed(
+            &mut w,
+            citysim::components::DistrictId(d),
+            citysim::word::Deed::Assaulted,
+            Some(actor),
+            Some(victim),
+        );
+        let start = w.tick;
+        let mut stood = false;
+        run_to(&mut w, reporter, start + 14 * TICKS_PER_HOUR, |w| {
+            stood |= w.comp::<Position>(reporter).is_some_and(|p| p.building == Some(scene));
+        });
+        eprintln!(
+            "tower {tower}: reporter {} of {} stood at {} (the scene): {stood}",
+            w.name_of(reporter),
+            w.name_of(feed),
+            w.name_of(scene)
+        );
+        stood
+    }
+    assert!(at_scene(true), "the reporter walks to the scene");
+    assert!(!at_scene(false), "off: no beat");
 }

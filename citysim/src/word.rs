@@ -55,10 +55,13 @@ pub enum Deed {
     LaidOff,
     /// Lives at work phase 2 (§ 3.6): `actor` (the mother) bore `object`.
     Born,
+    /// Lives at work phase 5 (§ 3.6, § 2.4): `actor` (an exec) decided
+    /// `object`'s (the corp's) order at the table.
+    Decided,
 }
 
 impl Deed {
-    pub const ALL: [Deed; 22] = [
+    pub const ALL: [Deed; 23] = [
         Deed::Killed,
         Deed::Assaulted,
         Deed::Robbed,
@@ -81,6 +84,7 @@ impl Deed {
         Deed::Employed,
         Deed::LaidOff,
         Deed::Born,
+        Deed::Decided,
     ];
 
     /// Position in [`Deed::ALL`].
@@ -113,6 +117,7 @@ impl Deed {
             Deed::Employed => "employed",
             Deed::LaidOff => "laid_off",
             Deed::Born => "born",
+            Deed::Decided => "decided",
         }
     }
 
@@ -552,6 +557,11 @@ pub struct Story {
     /// M16b phase 2: a fabrication found out.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub exposed: bool,
+    /// Lives at work phase 5 (§ 2.4): the reporter whose story it is (the
+    /// one who interviewed the deed's witness, else the Feed's sharpest
+    /// when a reporter worked). `None` off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub byline: Option<EntityId>,
 }
 
 impl Story {

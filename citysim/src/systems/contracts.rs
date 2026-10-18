@@ -689,6 +689,11 @@ pub fn post_with(world: &mut World, p: Posting, extra: PostExtra) -> Result<Cont
     let actors = [p.agent.unwrap_or(EntityId::NONE), p.target.id(), p.broker.unwrap_or(EntityId::NONE)];
     world.push_event(EventKind::ContractPosted, &actors, text.clone());
     log(world, id, text);
+    // Lives at work phase 5 (§ 2.4): a brokered post is the placing
+    // agent's encounter with the fixer on duty.
+    if let (Some(a), Some(b)) = (p.agent, p.broker) {
+        crate::systems::service::contract_party(world, a, b);
+    }
     Ok(id)
 }
 
@@ -1464,6 +1469,11 @@ pub fn accept(world: &mut World, id: ContractId, taker: EntityId, crew: &[Entity
     );
     world.push_event(EventKind::ContractTaken, &[taker, target], text.clone());
     log(world, id, text);
+    // Lives at work phase 5 (§ 2.4): a brokered take is the taker's
+    // encounter with the fixer on duty.
+    if let Some(b) = world.contracts.get(&id).and_then(|c| c.broker) {
+        crate::systems::service::contract_party(world, taker, b);
+    }
     true
 }
 

@@ -169,6 +169,9 @@ fn test_full_vs_statistical_within_15pct() {
         // Lives at work phase 4b (§ 6): doses dealt (a Full buyer's at a Bar
         // or a corner, a Statistical addict's `stat_buy`) and the adult-days.
         stims: [f64; 2],
+        // Lives at work phase 5 (§ 6): papers sold (the walk-in's forger and
+        // the clerk's bribe) and the adult-days.
+        papers: [f64; 2],
     }
     // The paid-leisure mirror (Jobs & lives phase 7b): the venue kinds of
     // the calibration city's ladder.
@@ -334,6 +337,14 @@ fn test_full_vs_statistical_within_15pct() {
                 [j(|c| c.cab_trips + c.rickshaw_trips + c.fares_short), t(|c| c.commutes) + t(|c| c.stat_commutes)]
             },
             stims: [w.stats.history.iter().map(|r| f64::from(r.stims_dealt)).sum::<f64>(), adult_days as f64],
+            papers: [
+                w.stats
+                    .history
+                    .iter()
+                    .map(|r| r.jobs2.as_ref().map_or(0.0, |j| f64::from(j.fake_sold + j.papers_bribed)))
+                    .sum::<f64>(),
+                adult_days as f64,
+            ],
         }
     }
     // Six cities per tier, pooled: one 30-day city's theft rate varies by a
@@ -354,7 +365,8 @@ fn test_full_vs_statistical_within_15pct() {
         let door = std::array::from_fn(|j| runs.iter().map(|r| r.door[j]).sum::<f64>());
         let cab = std::array::from_fn(|j| runs.iter().map(|r| r.cab[j]).sum::<f64>());
         let stims = std::array::from_fn(|j| runs.iter().map(|r| r.stims[j]).sum::<f64>());
-        Run { rates, actors: counts.map(|c| c / total), venues, paid, encounters, door, cab, stims }
+        let papers = std::array::from_fn(|j| runs.iter().map(|r| r.papers[j]).sum::<f64>());
+        Run { rates, actors: counts.map(|c| c / total), venues, paid, encounters, door, cab, stims, papers }
     };
     let full = pooled(Lod::Full);
     let stat = pooled(Lod::Statistical);
@@ -475,6 +487,17 @@ fn test_full_vs_statistical_within_15pct() {
             per(&stat),
             full.stims[0],
             stat.stims[0]
+        );
+        // Lives at work phase 5 (§ 6): papers sold per 1,000 adult-days by
+        // tier (the walk-in queue is world-side; a Full buyer walks in, a
+        // Statistical one is credited at the hour; printed).
+        let per = |r: &Run| if r.papers[1] > 0.0 { 1000.0 * r.papers[0] / r.papers[1] } else { 0.0 };
+        eprintln!(
+            "FINDING papers sold/1000 adult-days  Full {:7.3}  Statistical {:7.3}  ({:.0} / {:.0} sold)",
+            per(&full),
+            per(&stat),
+            full.papers[0],
+            stat.papers[0]
         );
     }
     assert!(failures.is_empty(), "{failures:?}");

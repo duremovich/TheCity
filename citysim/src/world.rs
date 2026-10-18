@@ -1075,6 +1075,25 @@ pub struct World {
     /// serves the same notices), empty off.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub notices_today: BTreeSet<(EntityId, u64)>,
+    /// Lives at work phase 5 (§ 2.4, exec): each corp's last Meeting table
+    /// (the attendees of its exec's last Meeting hour; the decision names
+    /// them). Saved while it holds anything (deviation: the brief's unsaved
+    /// map would name nobody after a resume); empty off.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub meeting_tables: BTreeMap<EntityId, SmallVec<[EntityId; 6]>>,
+    /// Lives at work phase 5 (§ 2.4, reporter): each reporter's beat this
+    /// shift (`news::beat_plan`): the scenes and the deeds interviewed.
+    /// Saved while it holds anything; empty off.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub beats: BTreeMap<EntityId, crate::systems::news::Beat>,
+    /// Lives at work phase 5 (§ 2.4, reporter): bylines a reporter has had.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub bylines: BTreeMap<EntityId, u16>,
+    /// Lives at work phase 5 (§ 2.4, fixer): the paper buyers queued at
+    /// midnight for a Fixer's open hours (`gray::papers_daily`), served by
+    /// `service::hourly` or at a body's arrival. Saved while pending; empty off.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub walk_ins: Vec<crate::systems::service::WalkIn>,
     /// L2 L15: the HangOut spots per district (`leisure::spots`, midnight).
     /// Saved (deviation: the plan's `serde(skip)` would rebuild them on load
     /// from a later state than the midnight's).
@@ -1685,6 +1704,10 @@ impl World {
             regulars: BTreeMap::new(),
             visits: BTreeMap::new(),
             notices_today: BTreeSet::new(),
+            meeting_tables: BTreeMap::new(),
+            beats: BTreeMap::new(),
+            bylines: BTreeMap::new(),
+            walk_ins: Vec::new(),
             spots: Vec::new(),
             last_met: BTreeMap::new(),
             told: BTreeMap::new(),

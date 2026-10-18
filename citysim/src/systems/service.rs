@@ -67,6 +67,14 @@ const PURPOSE_EJECT: u64 = 0x5e52_0003;
 const PURPOSE_DOOR: u64 = 0x5e52_0004;
 /// The tipped worker a visit's tip goes to when the server is not tipped.
 const PURPOSE_TIP: u64 = 0x5e52_0005;
+/// Lives at work phase 5: the attendees of a Meeting hour (§ 2.4).
+const PURPOSE_TABLE: u64 = 0x5e52_0006;
+/// Lives at work phase 5: the exec's call between the two best orders.
+const PURPOSE_DECIDE: u64 = 0x5e52_0007;
+/// Lives at work phase 5: the Fixer's server a walk-in or a contract party goes to.
+const PURPOSE_FIXER: u64 = 0x5e52_0008;
+/// Lives at work phase 5: the clerk a licence is sold by.
+const PURPOSE_CLERK: u64 = 0x5e52_0009;
 
 /// The regulars a server keeps (§ 1.1: the oldest falls off).
 pub const REGULARS_CAP: usize = 8;
@@ -118,6 +126,14 @@ pub fn civic_on(world: &World) -> bool {
 /// dealer's corner and regulars.
 pub fn street_on(world: &World) -> bool {
     on(world) && crate::systems::streetwork::on(world) && world.config.service.street
+}
+
+/// Lives at work phase 5 is live: the encounter on and `[service] tower`
+/// (`CITYSIM_TOWER_OFF=1`): the exec's Meeting and decision, the reporter's
+/// beat and byline, the Fixer's walk-in and contract encounters, the
+/// owner's weekly collection, the civic clerk named.
+pub fn tower_on(world: &World) -> bool {
+    on(world) && world.config.service.tower
 }
 
 fn hash(world: &World, purpose: u64, a: u64, b: u64) -> f32 {
@@ -266,6 +282,11 @@ pub fn hourly(world: &mut World) {
     }
     if street_on(world) {
         lift_hour(world);
+    }
+    if tower_on(world) {
+        meeting_hour(world);
+        walk_in_hour(world);
+        crate::systems::news::stat_beats(world);
     }
 }
 
@@ -797,4 +818,486 @@ pub fn lift(world: &mut World, loader: EntityId, yard: EntityId, n: u32) {
 /// The regulars kept for `server` (the inspector, the diary).
 pub fn regulars_of(world: &World, server: EntityId) -> &[Regular] {
     world.regulars.get(&server).map_or(&[], SmallVec::as_slice)
+}
+
+// ---------------------------------------------------------------------------
+// Lives at work phase 5 (§ 2.4, § 2.2's civic clerk): the tower and the brokers
+// ---------------------------------------------------------------------------
+
+/// A paper buyer queued at midnight for a Fixer's open hours
+/// (`World::walk_ins`, saved while pending): the forger the midnight pass
+/// named (paid as `gray::papers_daily` paid him), the tier and the day queued.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WalkIn {
+    pub buyer: EntityId,
+    pub fixer: EntityId,
+    pub forger: EntityId,
+    pub tier: u8,
+    pub day: u64,
+}
+
+/// Is `id` a graded member of staff (its post graded, or its base grade)?
+fn graded(world: &World, id: EntityId) -> bool {
+    world
+        .comp::<Job>(id)
+        .is_some_and(|j| j.grade >= 1 || crate::systems::classpay::base_grade(world, j.employer, j.role) >= 1)
+}
+
+/// § 6: the exec at the table: alive and free; a body inside the Hq, a
+/// Statistical exec credited in the office hours (the caller's clock).
+fn exec_present(world: &World, exec: EntityId, hq: EntityId) -> bool {
+    if !crate::systems::law::living(world, exec) || world.has::<Sentence>(exec) || world.has::<Job>(exec) {
+        return false;
+    }
+    match world.comp::<Brain>(exec).map(|b| b.lod) {
+        Some(Lod::Statistical) => true,
+        Some(_) => world.comp::<Position>(exec).is_some_and(|p| p.building == Some(hq)),
+        None => false,
+    }
+}
+
+/// § 2.4 (exec): each hour of the office shift on a workday, each corp's
+/// exec at its Hq (`life::hq_of`) meets up to `meeting_attendees` of the
+/// graded staff present there (the lowest `hash(PURPOSE_TABLE, exec,
+/// staff, hour)`): an `Attendee` encounter through the `exec` row, both
+/// ways. The table is kept for the decision (`World::meeting_tables`).
+fn meeting_hour(world: &mut World) {
+    let tod = world.tick_of_day();
+    let (s, e) = world.config.life.exec_shift;
+    if tod < s || tod >= e || !crate::exec::routine::is_workday(world.day() as i64) {
+        return;
+    }
+    let hour = world.tick / TICKS_PER_HOUR;
+    let cap = usize::from(world.config.service.meeting_attendees);
+    for corp in world.corps() {
+        let Some(exec) = world.comp::<crate::components::Corp>(corp).and_then(|c| c.exec) else { continue };
+        let Some(hq) = crate::systems::life::hq_of(world, corp, exec) else { continue };
+        if !exec_present(world, exec, hq) {
+            continue;
+        }
+        let mut staff: Vec<(f32, EntityId)> = world
+            .staff_of(hq)
+            .iter()
+            .copied()
+            .filter(|&a| a != exec && graded(world, a) && present(world, a, hq))
+            .map(|a| (hash(world, PURPOSE_TABLE, key(exec) ^ key(a), hour), a))
+            .collect();
+        staff.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)));
+        staff.truncate(cap);
+        if staff.is_empty() {
+            continue;
+        }
+        {
+            let r = ownership::jobs2_row(world);
+            r.meetings_held += 1;
+            r.meeting_attendees += staff.len() as u32;
+        }
+        let d = world.district_of_building(hq);
+        for &(_, a) in &staff {
+            encounter_post(world, "exec", exec, a, Some(hq), d, ServeKind::Attendee, 0);
+        }
+        world.meeting_tables.insert(corp, staff.into_iter().map(|(_, a)| a).collect());
+    }
+}
+
+/// § 2.4 (exec), from `corp_brain::rescore` after `attention::tilt`: when
+/// the two best orders lie within `decision_margin` and one is expansive,
+/// the other defensive, the corp's exec (alive and free) picks: the
+/// expansive on `hash(PURPOSE_DECIDE, exec, day) < 0.5 + 0.5 × (courage −
+/// loyalty)`, else the defensive; the picked one gains the margin and the
+/// scores are re-sorted (stable, best first). A hash of the exec's traits,
+/// the same in any tier (§ 6). Returns the exec when he made the call.
+pub fn decide(world: &World, corp: EntityId, scores: &mut [crate::components::CorpOrderScore]) -> Option<EntityId> {
+    if !tower_on(world) || scores.len() < 2 {
+        return None;
+    }
+    let cfg = &world.config.service;
+    let margin = cfg.decision_margin;
+    if margin <= 0.0 || scores[0].score - scores[1].score > margin {
+        return None;
+    }
+    let class = |o: crate::components::CorpOrder| {
+        if cfg.expansive.contains(&o) {
+            Some(true)
+        } else if cfg.defensive.contains(&o) {
+            Some(false)
+        } else {
+            None
+        }
+    };
+    let (exp, def) = match (class(scores[0].order), class(scores[1].order)) {
+        (Some(true), Some(false)) => (0, 1),
+        (Some(false), Some(true)) => (1, 0),
+        _ => return None,
+    };
+    let exec = world.comp::<crate::components::Corp>(corp).and_then(|c| c.exec)?;
+    if !crate::systems::law::living(world, exec) || world.has::<Sentence>(exec) {
+        return None;
+    }
+    let p = world
+        .comp::<crate::components::Personality>(exec)
+        .map_or(0.5, |t| (0.5 + 0.5 * (t.courage - t.loyalty)).clamp(0.0, 1.0));
+    let pick = if hash(world, PURPOSE_DECIDE, key(exec), world.day()) < p { exp } else { def };
+    scores[pick].score += margin;
+    scores.sort_by(|a, b| b.score.total_cmp(&a.score));
+    Some(exec)
+}
+
+/// § 2.4 (exec): the call changed the corp's outcome: `decisions`, an
+/// `EventKind::Served` naming the table (the corp's last Meeting), each
+/// attendee's `Served` memory of the exec and the `Decided` deed posted
+/// (§ 3.6: the attendees' gossip).
+pub fn decided(world: &mut World, corp: EntityId, exec: EntityId, what: String) {
+    ownership::jobs2_row(world).decisions += 1;
+    let table: Vec<EntityId> = world
+        .meeting_tables
+        .get(&corp)
+        .map(|t| t.iter().copied().filter(|&a| crate::systems::law::living(world, a)).collect())
+        .unwrap_or_default();
+    let names: Vec<String> = table.iter().map(|&a| world.name_of(a)).collect();
+    let at = if names.is_empty() { "nobody".to_string() } else { names.join(", ") };
+    let corp_name = world.comp::<crate::components::Corp>(corp).map_or_else(|| world.name_of(corp), |c| c.name.clone());
+    let text = format!("{} decided {corp_name} would {what}; at the table: {at}", world.name_of(exec));
+    let mut actors = vec![exec, corp];
+    actors.extend(table.iter().copied());
+    world.push_event(EventKind::Served, &actors, text);
+    let salience = world.config.service.served_salience;
+    for &a in &table {
+        world.remember(a, MemoryKind::Served, Some(exec), salience, 0.0, false);
+    }
+    let d = crate::systems::life::hq_of(world, corp, exec).map(|h| world.district_of_building(h)).unwrap_or_default();
+    crate::systems::gossip::post_deed(world, d, crate::word::Deed::Decided, Some(exec), Some(corp));
+}
+
+/// The Fixer's open hours now: a member of its staff on shift this hour on
+/// a workday (the forger's and the Fixer's day shift).
+fn fixer_open_now(world: &World, fixer: EntityId) -> bool {
+    let tod = world.tick_of_day();
+    world.staff_of(fixer).iter().any(|&s| {
+        world.comp::<Job>(s).is_some_and(|j| {
+            j.on_shift(tod) && crate::exec::routine::workday_of(world, s, j, j.shift_key_at(world.tick))
+        })
+    })
+}
+
+/// § 2.4 (fixer): the owner on duty without a post: alive, free, holding
+/// no Job; a body inside his Fixer, a Statistical owner credited in its
+/// open hours (deviation, as the pimp's: § 6's `shift_attended` needs a Job).
+fn owner_present(world: &World, fixer: EntityId) -> Option<EntityId> {
+    let o = world.owner_of(fixer)?;
+    if !world.has::<Brain>(o)
+        || world.has::<Job>(o)
+        || world.has::<Sentence>(o)
+        || !crate::systems::law::living(world, o)
+    {
+        return None;
+    }
+    let here = match world.comp::<Brain>(o).map(|b| b.lod) {
+        Some(Lod::Statistical) => fixer_open_now(world, fixer),
+        _ => world.comp::<Position>(o).is_some_and(|p| p.building == Some(fixer)),
+    };
+    here.then_some(o)
+}
+
+/// § 2.4 (fixer): who serves `served` at `fixer` now: the on-duty `Client`
+/// servers (the Fixer's staff, the forger) with room this hour by the
+/// lowest `hash(PURPOSE_FIXER, …)` (D6), else the owner present. `None`:
+/// nobody on duty.
+fn fixer_server(world: &World, fixer: EntityId, served: EntityId) -> Option<EntityId> {
+    let hour = world.tick / TICKS_PER_HOUR;
+    servers(world, fixer, ServeKind::Client)
+        .into_iter()
+        .filter(|&(s, cap)| s != served && world.service_room.get(&s).is_none_or(|r| r.hour != hour || r.taken < cap))
+        .map(|(s, _)| (hash(world, PURPOSE_FIXER, key(fixer) ^ key(served), hour ^ key(s)), s))
+        .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+        .map(|(_, s)| s)
+        .or_else(|| owner_present(world, fixer).filter(|&o| o != served))
+}
+
+/// The fixer a party off the hours is credited to (§ 2.4: "credited
+/// world-side at that hour"; the posts come at midnight and the takes at
+/// the match hour, outside the day shift): the Fixer's `Client` staff
+/// alive and free by the lowest `hash(PURPOSE_FIXER, …)`, else the owner
+/// alive and free.
+fn fixer_book(world: &World, fixer: EntityId, party: EntityId) -> Option<EntityId> {
+    let hour = world.tick / TICKS_PER_HOUR;
+    let free = |s: EntityId| s != party && crate::systems::law::living(world, s) && !world.has::<Sentence>(s);
+    world
+        .staff_of(fixer)
+        .iter()
+        .copied()
+        .filter(|&s| free(s) && row_of_agent(world, s).is_some_and(|r| r.kind == ServeKind::Client))
+        .map(|s| (hash(world, PURPOSE_FIXER, key(fixer) ^ key(party), hour ^ key(s)), s))
+        .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+        .map(|(_, s)| s)
+        .or_else(|| world.owner_of(fixer).filter(|&o| world.has::<Brain>(o) && free(o)))
+}
+
+/// The `Client` encounter at the Fixer: a staff server through his row
+/// (the room counted), the owner through the `Fixer` row.
+fn fixer_meet(world: &mut World, server: EntityId, served: EntityId, fixer: EntityId, coins: i64) {
+    let d = world.district_of_building(fixer);
+    let staff = world.comp::<Job>(server).is_some_and(|j| j.employer == Some(fixer));
+    if staff {
+        let hour = world.tick / TICKS_PER_HOUR;
+        let r = world.service_room.entry(server).or_default();
+        if r.hour != hour {
+            *r = Room { hour, taken: 0 };
+        }
+        r.taken += 1;
+        encounter(world, server, served, Some(fixer), d, ServeKind::Client, coins);
+    } else {
+        encounter_post(world, "Fixer", server, served, Some(fixer), d, ServeKind::Client, coins);
+    }
+}
+
+/// § 2.4 (fixer, `contracts::post_with` and `accept`): a brokered post or
+/// take is a `Client` encounter with the fixer on duty (`contract_encounters`):
+/// a body inside the Fixer meets him there, a party elsewhere (an order, a
+/// coerced post, a Statistical take) is credited world-side at the hour, to
+/// the fixer on duty or, off the open hours (the corps post at midnight,
+/// the takes come at the match hour), to the Fixer's book ([`fixer_book`]).
+/// Tower only.
+pub fn contract_party(world: &mut World, party: EntityId, fixer: EntityId) {
+    if !tower_on(world) || party == EntityId::NONE || !world.has::<Brain>(party) {
+        return;
+    }
+    let Some(server) = fixer_server(world, fixer, party).or_else(|| fixer_book(world, fixer, party)) else { return };
+    ownership::jobs2_row(world).contract_encounters += 1;
+    fixer_meet(world, server, party, fixer, 0);
+}
+
+/// Is the walk-in's buyer walking to the Fixer (a body with the `Papers`
+/// visit pending)? Its sale is made at the arrival ([`walk_in_arrived`]).
+fn walking_in(world: &World, w: &WalkIn) -> bool {
+    world.comp::<Brain>(w.buyer).is_some_and(|b| b.lod != Lod::Statistical)
+        && world
+            .visits
+            .get(&w.buyer)
+            .is_some_and(|v| v.kin == w.fixer && v.why == crate::systems::household::VisitWhy::Papers)
+}
+
+/// The walk-in's pickup, if a server is on duty: the order was paid at
+/// midnight (`gray::papers_daily`: the coins and `fake_sold` as main's, so
+/// the money circuit moves at main's tick); now `Papers` are inserted (their
+/// protection starts here), an encounter with the server and a `Served`
+/// event. `Some(true)` handed over, `Some(false)` nobody on duty (it
+/// waits), `None` the pickup is off (the buyer gone, jailed or papered, the
+/// Fixer gone: `walk_ins_dropped`; the forger keeps the coins).
+fn walk_in_sale(world: &mut World, w: WalkIn) -> Option<bool> {
+    if !crate::systems::law::living(world, w.buyer)
+        || world.has::<Sentence>(w.buyer)
+        || world.jobs2.gray.papers.contains_key(&w.buyer)
+        || world.comp::<Building>(w.fixer).is_none_or(|b| b.demolished || b.derelict)
+    {
+        ownership::jobs2_row(world).walk_ins_dropped += 1;
+        return None;
+    }
+    let Some(server) = fixer_server(world, w.fixer, w.buyer) else { return Some(false) };
+    let tier = w.tier.max(1);
+    let price = world.config.gray.id_price[usize::from(tier - 1)];
+    let forger = if crate::systems::law::living(world, w.forger) { w.forger } else { server };
+    world.jobs2.gray.papers.insert(w.buyer, crate::systems::gray::Papers { tier, fake: true, forger: Some(forger) });
+    ownership::jobs2_row(world).walk_ins_served += 1;
+    fixer_meet(world, server, w.buyer, w.fixer, price);
+    let text =
+        format!("{} handed {} papers at {}", world.name_of(server), world.name_of(w.buyer), world.name_of(w.fixer));
+    world.push_event(EventKind::Served, &[server, w.buyer, w.fixer], text);
+    Some(true)
+}
+
+/// § 2.4 (fixer): each hour, the walk-ins not walking are served by the
+/// Fixer's server on duty (a Statistical buyer credited at the hour a
+/// body's walk would land in: the Fixer's open hours); unserved, they wait.
+fn walk_in_hour(world: &mut World) {
+    if world.walk_ins.is_empty() {
+        return;
+    }
+    let pending = std::mem::take(&mut world.walk_ins);
+    let mut keep = Vec::with_capacity(pending.len());
+    for w in pending {
+        if walking_in(world, &w) {
+            keep.push(w);
+            continue;
+        }
+        if walk_in_sale(world, w) == Some(false) {
+            keep.push(w);
+        }
+    }
+    keep.append(&mut world.walk_ins);
+    world.walk_ins = keep;
+}
+
+/// § 2.4 (fixer, `household::credit`): the walking buyer is at the Fixer:
+/// the sale now, if a server is on duty (else the walk-in waits for the
+/// hour's pass, the walk spent).
+pub fn walk_in_arrived(world: &mut World, buyer: EntityId, fixer: EntityId) {
+    let Some(w) = world.walk_ins.iter().copied().find(|w| w.buyer == buyer && w.fixer == fixer) else { return };
+    if walk_in_sale(world, w) != Some(false) {
+        world.walk_ins.retain(|x| x.buyer != buyer);
+    }
+}
+
+/// § 2.4 (fixer, `gray::papers_daily` at midnight, the order paid): queue
+/// `buyer` for the pickup in `fixer`'s open hours (once: a buyer already
+/// queued keeps his place).
+pub fn queue_walk_in(world: &mut World, buyer: EntityId, fixer: EntityId, forger: EntityId, tier: u8) {
+    if world.walk_ins.iter().any(|w| w.buyer == buyer) {
+        return;
+    }
+    let day = world.day();
+    world.walk_ins.push(WalkIn { buyer, fixer, forger, tier, day });
+}
+
+/// Is `buyer` queued for a walk-in?
+pub fn walk_in_pending(world: &World, buyer: EntityId) -> bool {
+    world.walk_ins.iter().any(|w| w.buyer == buyer)
+}
+
+/// Midnight (`gray::papers_daily`, after the queue): the walk-ins pending
+/// from an earlier day are counted waited; each body queued is given
+/// today's walk (a `Visit` with `VisitWhy::Papers` at the Fixer's first
+/// shift hour) when the household pass is on and no other visit is due.
+pub fn walk_ins_daily(world: &mut World) {
+    let day = world.day();
+    let waited = world.walk_ins.iter().filter(|w| w.day < day).count() as u32;
+    ownership::jobs2_row(world).walk_ins_waited += waited;
+    if !crate::systems::household::on(world) {
+        return;
+    }
+    let due: Vec<WalkIn> = world.walk_ins.clone();
+    for w in due {
+        if world.comp::<Brain>(w.buyer).is_none_or(|b| b.lod == Lod::Statistical) || world.visits.contains_key(&w.buyer)
+        {
+            continue;
+        }
+        let Some(hour) = fixer_first_hour(world, w.fixer) else { continue };
+        let v = crate::systems::household::PendingVisit {
+            kin: w.fixer,
+            why: crate::systems::household::VisitWhy::Papers,
+            hour,
+        };
+        world.visits.insert(w.buyer, v);
+    }
+}
+
+/// The first hour of `fixer`'s staff's earliest shift (its open hours' start).
+pub fn fixer_first_hour(world: &World, fixer: EntityId) -> Option<u8> {
+    world
+        .staff_of(fixer)
+        .iter()
+        .filter_map(|&s| world.comp::<Job>(s))
+        .flat_map(|j| j.shifts.iter().map(|&(a, _)| a))
+        .min()
+        .map(|m| u8::try_from(u64::from(m) / TICKS_PER_HOUR).unwrap_or(0))
+}
+
+/// § 2.4 (fixer, `household::credit`): the owner collected the week's cut
+/// at his Fixer in person (`fixer_collections`): a `Client` encounter with
+/// each member of staff present (the `Fixer` row), an event.
+pub fn collected(world: &mut World, owner: EntityId, fixer: EntityId) {
+    ownership::jobs2_row(world).fixer_collections += 1;
+    let staff: Vec<EntityId> =
+        world.staff_of(fixer).iter().copied().filter(|&s| s != owner && present(world, s, fixer)).collect();
+    let d = world.district_of_building(fixer);
+    for &s in &staff {
+        encounter_post(world, "Fixer", owner, s, Some(fixer), d, ServeKind::Client, 0);
+    }
+    let text = format!("{} collected the week's cut at {} in person", world.name_of(owner), world.name_of(fixer));
+    world.push_event(EventKind::Served, &[owner, fixer], text);
+}
+
+/// § 2.2 (civic clerk, `weapons::daily`'s licence sale): the clerk the
+/// licence is sold by: among the civic clerks on the books at a standing
+/// Hall, alive and free, the lowest `hash(PURPOSE_CLERK, buyer, day)`. The
+/// sale runs at midnight, when no clerk is on shift: deviation, the desk is
+/// named, not the hour's presence. `None` off or with no clerk.
+pub fn licence_clerk(world: &World, buyer: EntityId) -> Option<(EntityId, EntityId)> {
+    if !tower_on(world) {
+        return None;
+    }
+    let role = world.config.trade_role("civic_clerk")?;
+    let day = world.day();
+    world
+        .buildings_of_kind(BuildingKind::Hall)
+        .iter()
+        .copied()
+        .filter(|&h| world.comp::<Building>(h).is_some_and(|b| !b.demolished))
+        .flat_map(|h| world.staff_of(h).iter().map(move |&c| (c, h)))
+        .filter(|&(c, _)| {
+            world.comp::<Job>(c).is_some_and(|j| j.role == role)
+                && crate::systems::law::living(world, c)
+                && !world.has::<Sentence>(c)
+        })
+        .map(|(c, h)| (hash(world, PURPOSE_CLERK, key(buyer) ^ key(c), day), c, h))
+        .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+        .map(|(_, c, h)| (c, h))
+}
+
+/// § 2.2 (civic clerk): the licence sold by `clerk` at `hall` to `buyer`
+/// (`licences_named`): a `Client` encounter (the fee) through the clerk's row.
+pub fn licence_sold(world: &mut World, clerk: EntityId, hall: EntityId, buyer: EntityId, fee: i64) {
+    ownership::jobs2_row(world).licences_named += 1;
+    serve(world, clerk, buyer, hall, ServeKind::Client, fee);
+}
+
+/// § 2.2 (civic clerk, `gray::papers_daily`'s bribe): the clerk on the take
+/// is named: a `Client` encounter (the bribe; the clerk's `Served` memory is
+/// the on-the-take record), `bribes_named`. Tower only.
+pub fn bribe_taken(world: &mut World, clerk: EntityId, buyer: EntityId, bribe: i64) {
+    if !tower_on(world) {
+        return;
+    }
+    ownership::jobs2_row(world).bribes_named += 1;
+    let place = world.comp::<Job>(clerk).and_then(|j| j.employer);
+    let d = place.map(|p| world.district_of_building(p)).unwrap_or_default();
+    encounter(world, clerk, buyer, place, d, ServeKind::Client, bribe);
+}
+
+/// Lives at work phase 5: the weekday a Fixer's owner collects in person.
+const PURPOSE_COLLECT: u64 = 0x5e52_000a;
+
+/// Midnight (`living::run`, after `gray::daily`): the tower's day: the
+/// walk-ins' walks and waits ([`walk_ins_daily`]) and the owners' weekly
+/// collections: a Fixer's owner who holds no Job and is not inside it,
+/// alive, free and adult, visits it on a hashed weekday (`hash(
+/// PURPOSE_COLLECT, owner, week)`) at its first shift hour (a `Visit` with
+/// `VisitWhy::Collect`; a Statistical owner credited at the hour by
+/// `household::hourly`), unless another visit is due. Nothing off.
+pub fn tower_daily(world: &mut World) {
+    if !tower_on(world) {
+        return;
+    }
+    walk_ins_daily(world);
+    if !crate::systems::household::on(world) {
+        return;
+    }
+    let day = world.day();
+    let week = day / 7;
+    let fixers: Vec<EntityId> = world.buildings_of_kind(BuildingKind::Fixer).to_vec();
+    for f in fixers {
+        if world.comp::<Building>(f).is_none_or(|b| b.demolished || b.derelict) {
+            continue;
+        }
+        let Some(o) = world.owner_of(f) else { continue };
+        if !world.has::<Brain>(o)
+            || world.has::<Job>(o)
+            || world.has::<Sentence>(o)
+            || !crate::systems::law::living(world, o)
+            || !crate::systems::demography::is_adult(world, o)
+            || world.comp::<Brain>(o).is_some_and(|b| b.emigrating)
+            || world.visits.contains_key(&o)
+            || world.comp::<Position>(o).is_some_and(|p| p.building == Some(f))
+        {
+            continue;
+        }
+        let u = hash(world, PURPOSE_COLLECT, key(o) ^ key(f), week);
+        if week * 7 + ((u * 7.0) as u64).min(6) != day {
+            continue;
+        }
+        let Some(hour) = fixer_first_hour(world, f) else { continue };
+        let v =
+            crate::systems::household::PendingVisit { kin: f, why: crate::systems::household::VisitWhy::Collect, hour };
+        world.visits.insert(o, v);
+    }
 }

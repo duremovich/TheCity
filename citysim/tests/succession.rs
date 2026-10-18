@@ -481,8 +481,12 @@ fn test_newcomer_is_no_runner_up_to_a_veteran_heir() {
 fn test_bug8_leader_by_tenure_and_no_succession_for_a_night() {
     // Lives at work phase 2: on the household's day-12 city no gang of four
     // has a leader and two free members; this pins the city the pick was
-    // written for.
-    let mut w = common::world_with(|c| c.household.enabled = false);
+    // written for (phase 5's tower moves it again: the beat's time gate
+    // left no gang of four with a leader on day 12; pinned off likewise).
+    let mut w = common::world_with(|c| {
+        c.household.enabled = false;
+        c.strip_tower();
+    });
     // The seed's gangs start empty and recruit through the first days.
     w.run_ticks(12 * TICKS_PER_DAY);
     let g = w
