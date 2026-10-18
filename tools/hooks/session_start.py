@@ -30,7 +30,7 @@ def now_block(brief):
         if line.startswith("## "):
             section = line[3:].strip().lower()
             continue
-        if section is None and line.strip():
+        if section is None and line.strip() and not line.startswith("# "):
             out.append(line.strip()[:160])        # the header: last rewrite date
             continue
         if brief:
@@ -55,6 +55,10 @@ def stale_worktrees():
 
 
 def main():
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")  # Windows consoles default to cp1252
+    except Exception:
+        pass
     brief = "--brief" in sys.argv
     try:
         payload = json.load(sys.stdin) if not sys.stdin.isatty() else {}
