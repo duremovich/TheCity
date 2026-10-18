@@ -2682,7 +2682,6 @@ fn probe_cabbie_drives_a_fare_on_his_shift() {
 /// he stands in and the pitch is opened in-test at the door nearest him,
 /// with `p_street_visit` and `street_intimacy` raised so the night takes something.
 #[test]
-#[ignore = "gap: OPEN-102"]
 fn probe_pimp_purse_grows_on_a_pitch_night() {
     use citysim::systems::gang;
     let mut cfg = Config::load();
@@ -2766,16 +2765,52 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
     let (cut, up) = (w.config.vice.pimp_cut, w.config.service.pimp_pass_up);
     let mut collecting = 0u32;
     let mut kept_nights = 0u32;
+    // The subject's gang is held to GangWork (Expand) through the window: a diverged
+    // seed (the tower on) can have it muster a Raid on a pitch night, and the probe is
+    // about the pimp's round, not about what a raid order does to a night.
+    // He is also set down at his pitch when his round sets out (an Eat or an Unwind
+    // before the hours can leave him a walk longer than the hours).
+    let mut stood = 0u64;
+    let mut calm = |w: &mut World, to: u64, each: &mut dyn FnMut(&World)| {
+        while w.tick < to {
+            if let Some(gg) = w.comp_mut::<citysim::Gang>(g) {
+                gg.order = citysim::components::Order::Expand;
+            }
+            let day = w.tick / TICKS_PER_DAY;
+            let goes = w.comp::<Brain>(pimp).is_some_and(|b| {
+                b.current_goal == Some(citysim::components::GoalKind::GangWork)
+                    && matches!(step(w, pimp), Some(ActionKind::GoTo(citysim::goap::LocationKey::Spot)))
+                    && w.tick % TICKS_PER_DAY >= 20 * TICKS_PER_HOUR
+            });
+            if goes && stood != day + 1 {
+                stood = day + 1;
+                if let Some(pp) = w.comp_mut::<Position>(pimp) {
+                    pp.tile = spot;
+                    pp.building = None;
+                }
+                // The step walks a fresh path from where he stands.
+                if let Some(b) = w.comp_mut::<Brain>(pimp) {
+                    b.exec = citysim::exec::ExecState::Idle;
+                }
+            }
+            run_to(w, pimp, w.tick + 1, |w| each(w));
+        }
+    };
     // Two nights (a Statistical worker works the hours his `p_pitch` names).
     for midnight in [13 * TICKS_PER_DAY, 14 * TICKS_PER_DAY] {
-        run_to(&mut w, pimp, midnight - 1, |w| {
+        calm(&mut w, midnight - 1, &mut |w| {
             if step(w, pimp) == Some(ActionKind::Collect) {
                 collecting += 1;
             }
         });
         let take = w.jobs2.pitches.get(&o).map_or(0, |p| p.take_today);
+        // His rent is paid ahead (a credit the midnight accrual does not clear): the
+        // probe reads the cut, not the landlord's coin.
+        if let Some(h) = w.comp_mut::<citysim::components::Household>(pimp) {
+            h.rent_due = -10.0;
+        }
         let before = coins(&w, pimp);
-        run_to(&mut w, pimp, midnight + 1, |_| {});
+        calm(&mut w, midnight + 1, &mut |_| {});
         let after = coins(&w, pimp);
         // His cut less what he passes up (a gang pay-out at midnight only adds).
         let paid = (take as f32 * cut).round() as i64;
