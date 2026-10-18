@@ -101,6 +101,10 @@ The one ledger. Nothing is open anywhere else: a spec's "Implemented: deviations
 | OPEN-093 | `python tools/test.py change` over budget: 272 s of tests against 4 min (the budget moved 3 → 4 on 2026-10-18); `wounded`, `wages`, `person` are the heavy binaries | PROCESS_REVIEW § 6 | bug | before M18 | open |
 | OPEN-094 | 19 `CITYSIM_*_OFF` env switches still read in `Config::load_from` (ARCHITECTURE § 12 item 10); the doctrine retires a switch when its phase lands: audit, delete the dead ones and their off branches | ARCHITECTURE.md; CLAUDE.md doctrine 6 | feature | before M18 | open |
 | OPEN-095 | The V4 re-shadow diaries (`target/shadow_v4_after/` in the `v4fix` worktree) went with the worktree on 2026-10-18; regenerate on `2712b4a` with `citysim-cli shadow` if a before/after read is wanted (deterministic) | SHADOW_V4 § The sweep | probe | unowned | open |
+| OPEN-096 | A massacre of 200 workers leaves employment within 10 % of the control by day 59: the overnight refill (V12 gap 2) means the shock never reaches the corner; no unit test carries the reaction `god_kill_workers` asserted | GOD_SCENARIOS_V12 § Retired; OPEN-043 | probe | unowned | open |
+| OPEN-097 | The organ appetite → Harvest link has no unit test (the supply side has `scavs.rs`, `gray_faith.rs`); `god_organ_boom` carried it | GOD_SCENARIOS_V12 § Retired; OPEN-047 | probe | unowned | open |
+| OPEN-098 | A free School has no god command and no unit test (`god_school_free` edited the world directly; V12 gaps 1, 6) | GOD_SCENARIOS_V12 § Retired; OPEN-042, OPEN-050 | probe | unowned | open |
+| OPEN-099 | Killing the young: "no collapse, employed share rises" has no unit test (`ages.rs` covers elders taken in only); `god_kill_the_young` carried it | GOD_SCENARIOS_V12 § Retired | probe | unowned | open |
 
 ## Not included (judged fixed, superseded or too vague at the seeding)
 
