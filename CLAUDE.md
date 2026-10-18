@@ -63,6 +63,15 @@ Install the commit hook once: `git config core.hooksPath tools/hooks` (fmt check
 - An agent's final reply can arrive hours late in a batch; have it also write its report to a scratchpad file and name the path in the brief.
 - Commits end with the session's attribution lines (the harness supplies them).
 
+**Token rules** (decided 2026-10-18 after the fifteenth session: one coder across phases 0-4 read 640M tokens at a 520k median context; cost is turns × context, 97 % cache reads, so the levers are turns and context, then the model):
+
+- **One fresh agent per phase**, spawned as Opus 5.5 (`model: "opus"`), ~300 turns; reviewers and fix rounds Sonnet 5.5. Never carry a coder into the next phase.
+- **Per phase, measure only:** the phase's device rows, the 42-44 × 120 counters against the base binary, and the off identity on seed 42. The full set (42-47, 20k, alternating A/B, the profile, `shadow --lives`, diaries) runs once, at the gate.
+- **`test.py change` once at the end of the phase**; during it, only the phase's own tests by name. The merge tier is the orchestrator's `/merge-set` on the exact tree; the milestone tier is the close.
+- **Logs stay on disk.** `run --report > run.csv` then `analyze_run.py`; `tail`/`grep` a log, never `cat` one. A log read is paid again on every later turn.
+- **The orchestrator waits** for the hand-back, reads the report file, merges. No polling, no re-reading the coder's logs, no re-running its sims, no anchor-verification greps for a brief.
+- **The session closes with `python tools/session_cost.py`** and a cost line per phase in HANDOFF.
+
 ## Closing a milestone
 
 Run `/close-milestone`: HANDOFF Now rewritten, OPEN.md rows added or closed, deviations written into the spec with `OPEN-nnn` tags, `test.py report` run and every cap restored, agents shut down, worktrees removed, memory pointer updated.

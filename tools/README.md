@@ -49,3 +49,4 @@ python tools/compare_runs.py a.csv b.csv
 - `train_stat_policy.py` (numpy; the learned-policy experiment, `docs/history/EXPERIMENT_LEARNED_STAT_POLICY.md`):
   fits the 24-row table, a coarse extended table and 2-layer MLPs on `calibrate --rows-csv` agent-hours,
   prints losses, calibration and held-out regimes, and exports `stat_mlp.toml`.
+- `session_cost.py`: the token cost of a Claude Code session per agent from the transcripts under `~/.claude/projects/` (turns, median and p90 context, cache writes and reads, output, an API-rate dollar equivalent, and what the shell calls did: sim runs, test-tier runs, `cargo test` calls, log reads). `--last N`, `--session PREFIX`, `--dir PATH`. Run at every session close (CLAUDE.md Token rules).
