@@ -211,7 +211,7 @@ A breach is printed loudly in the footer (never a fail: Dylan's no-fine-tuning r
 | task | commit | check |
 |---|---|---|
 | 0 hygiene | (no files) | 10 worktrees and 10 branches removed, 49 GB back; 10 idle agents shut down; renormalize a no-op |
-| 1 CLAUDE.md + rules | `86a9134` | 68 lines. A fresh agent answered the three questions from it correctly, **but the file did not auto-load for it**: its worktree was cut at session start, before CLAUDE.md was committed. Confirm the auto-load in the next session's first subagent; until then briefs say "read CLAUDE.md" |
+| 1 CLAUDE.md + rules | `86a9134` | 68 lines. A fresh agent answered the three questions from it correctly, **but the file did not auto-load for it**: its worktree was cut at session start, before CLAUDE.md was committed. **Confirmed 2026-10-18 (the fifteenth session's first subagent, the Lives at work phase 0 coder):** a worktree cut at a HEAD holding CLAUDE.md gets it, the rules and the memory index before its first file read. Briefs no longer say "read CLAUDE.md" |
 | 2 test.py + TESTING.md | `acb4e07` | `change` on main: GREEN, 62 lines printed, 4m43s (tests 272 s, fmt+clippy 10 s) |
 | 3 HANDOFF split, docs/README, history | `d592194` | HANDOFF 38 lines; no old path left outside `docs/history/` |
 | 4 OPEN.md | `0894be0` | 93 rows; lint green on ids and the one `gap:` |
