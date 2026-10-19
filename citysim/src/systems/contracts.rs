@@ -84,9 +84,12 @@ fn parties(c: &Contract) -> SmallVec<[EntityId; 8]> {
 fn index_parties(world: &mut World, id: ContractId) {
     let Some(c) = world.contracts.get(&id) else { return };
     for p in parties(c) {
+        // OPEN-112: kept ascending, as the load's rebuild (over the
+        // records in id order) builds it: a party joining a record later
+        // must not reorder what a live world and a loaded one walk.
         let list = world.by_party.entry(p).or_default();
-        if !list.contains(&id) {
-            list.push(id);
+        if let Err(i) = list.binary_search(&id) {
+            list.insert(i, id);
         }
     }
 }
@@ -3519,32 +3522,51 @@ fn buyer_member(world: &World, c: &Contract, id: EntityId) -> bool {
 }
 
 /// C31: is `guard` on the take for `suspect` (the suspect, or a member of a
-/// gang buyer)?
+/// gang buyer)? OPEN-112: whether the taker is a city guard and the record
+/// corruption are read now, not at the last reindex (a guard who lost the
+/// job between two reindexes stayed on the take in a live world and not in
+/// a loaded one).
 pub fn on_take_of(world: &World, guard: EntityId, suspect: EntityId) -> bool {
     if world.on_take.is_empty() {
         return false;
     }
-    world.on_take.get(&guard).is_some_and(|l| {
-        l.iter()
-            .any(|&b| b == suspect || (world.has::<crate::components::Gang>(b) && world.gang_of(suspect) == Some(b)))
-    })
+    take_buyers(world, guard)
+        .any(|b| b == suspect || (world.has::<crate::components::Gang>(b) && world.gang_of(suspect) == Some(b)))
 }
 
-/// C31: `World::on_take` from the Taken corruption records held by city
-/// guards (after a load, and whenever a Guard record changes hands).
+/// C31: the buyers (and placing agents) `guard` is on the take for: its
+/// Taken corruption records while it is a city guard.
+pub fn take_buyers(world: &World, guard: EntityId) -> impl Iterator<Item = EntityId> + '_ {
+    let on = crate::systems::law::is_city_guard(world, guard);
+    world
+        .on_take
+        .get(&guard)
+        .into_iter()
+        .flatten()
+        .filter(move |_| on)
+        .filter_map(|id| world.contracts.get(id))
+        .filter(move |c| c.status == ContractStatus::Taken && c.taker == Some(guard) && is_corruption(world, c))
+        .flat_map(|c| [c.buyer, c.agent].into_iter().flatten())
+}
+
+/// C31: the city guards on the take now (the daily row).
+pub fn guards_on_take(world: &World) -> usize {
+    world.on_take.keys().filter(|&&g| take_buyers(world, g).next().is_some()).count()
+}
+
+/// C31: `World::on_take`, the Taken Guard records without a broker by
+/// taker (after a load, and whenever a Guard record changes hands). The
+/// filters that read the world (a city guard, a corruption record) apply
+/// at the read ([`on_take_of`]), so the index is a function of the saved
+/// records alone (OPEN-112).
 pub fn reindex_take(world: &mut World) {
-    let mut take: std::collections::BTreeMap<EntityId, SmallVec<[EntityId; 2]>> = std::collections::BTreeMap::new();
+    let mut take: std::collections::BTreeMap<EntityId, SmallVec<[ContractId; 2]>> = std::collections::BTreeMap::new();
     for c in world.contracts.values() {
-        if c.status != ContractStatus::Taken || !is_corruption(world, c) {
+        if c.status != ContractStatus::Taken || c.kind != ContractKind::Guard || c.broker.is_some() {
             continue;
         }
-        let Some(g) = c.taker.filter(|&t| crate::systems::law::is_city_guard(world, t)) else { continue };
-        let list = take.entry(g).or_default();
-        for b in [c.buyer, c.agent].into_iter().flatten() {
-            if !list.contains(&b) {
-                list.push(b);
-            }
-        }
+        let Some(g) = c.taker else { continue };
+        take.entry(g).or_default().push(c.id);
     }
     world.on_take = take;
 }
@@ -4140,6 +4162,7 @@ pub fn snapshot(world: &mut World) {
             income[i] = k.income_today;
         }
     }
+    let on_take = guards_on_take(world) as u32;
     let row = &mut world.stats.current.contract;
     row.contracts_open = open;
     row.regulars = regulars;
@@ -4148,7 +4171,7 @@ pub fn snapshot(world: &mut World) {
     row.escrow_held = held;
     row.escrow_leak = escrow - held;
     row.escrow_stuck = stuck;
-    row.guards_on_take = world.on_take.len() as u32;
+    row.guards_on_take = on_take;
     row.f_heat = heat;
     row.f_income = income;
 }

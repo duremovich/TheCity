@@ -29,6 +29,16 @@ fn dir_byte(from: TilePos, to: TilePos) -> u8 {
     DIRS.iter().position(|&x| x == d).map_or(0, |i| i as u8 + 1)
 }
 
+/// The cost of entering `t` as [`FlowField::build`] reads it (rubble is a
+/// wall while it lies there).
+fn enter_cost(map: &Map, t: TilePos) -> f32 {
+    if map.blocked.contains(&t) {
+        f32::INFINITY
+    } else {
+        map.tile_at(t).move_cost()
+    }
+}
+
 /// Per tile: the direction toward the door. Index is `y * w + x`.
 #[derive(Clone, Debug, Default)]
 pub struct FlowField {
@@ -162,6 +172,65 @@ impl FlowField {
             let from = TilePos { x: x as u16, y: y as u16 };
             !sealed(from) && self.step(from) == Some(t)
         })
+    }
+
+    /// The cost [`FlowField::build`] gives `p` on `map`, or `None` where the
+    /// field never reached it. The build sets a tile's cost to its
+    /// successor's plus the successor's entry cost, so summing the entries
+    /// back along the descent from the door repeats its float additions
+    /// exactly. Valid for tiles whose descent `map` has not changed.
+    fn build_cost(&self, map: &Map, p: TilePos) -> Option<f32> {
+        if self.door == Some(p) {
+            return Some(0.0);
+        }
+        let path = self.descend(p);
+        if path.last() != self.door.as_ref() {
+            return None;
+        }
+        // cost(t_k) = cost(t_k+1) + enter(t_k+1), from the door (cost 0) back to `p`.
+        Some(path.iter().rev().fold(0.0f32, |c, &t| c + enter_cost(map, t)))
+    }
+
+    /// OPEN-112: a building went up on a Lot (`rect`, its door `door`; the
+    /// map already walled) and this field was kept (no tile outside the
+    /// rect steps into its walls or interior): rewrite the rect's bytes to
+    /// what [`FlowField::build`] gives on the new map. The walls get none;
+    /// the interior is reached only through `door`, so its bytes come from
+    /// the same Dijkstra (the same `(cost, x, y)` pop order and strict
+    /// relax) seeded at the door's cost, which the descent repeats exactly.
+    pub fn reseal(&mut self, map: &Map, rect: crate::components::Rect, door: TilePos) {
+        let inside = |t: TilePos| rect.contains(t) && t != door;
+        for y in rect.y..rect.y + rect.h {
+            for x in rect.x..rect.x + rect.w {
+                let t = TilePos { x, y };
+                if inside(t) {
+                    let i = self.idx(t);
+                    self.next[i] = 0;
+                }
+            }
+        }
+        let Some(c_door) = self.build_cost(map, door) else { return };
+        let mut cost: BTreeMap<TilePos, f32> = BTreeMap::new();
+        let mut open = CostQueue::new();
+        open.push(key(c_door, door));
+        while let Some(k) = open.pop() {
+            let (c, cur) = unkey(k);
+            if cur != door && cost.get(&cur).is_some_and(|&x| c > x) {
+                continue;
+            }
+            let nc = c + enter_cost(map, cur);
+            for nb in map.neighbours4(cur) {
+                if !inside(nb) || !enter_cost(map, nb).is_finite() {
+                    continue;
+                }
+                if cost.get(&nb).is_none_or(|&x| nc < x) {
+                    cost.insert(nb, nc);
+                    let i = self.idx(nb);
+                    self.next[i] = dir_byte(nb, cur);
+                    open.push(key(nc, nb));
+                }
+            }
+        }
     }
 
     /// Full descent from `p` to the door, excluding `p`, including the door.
@@ -325,6 +394,11 @@ impl FlowCache {
         self.fields.len()
     }
 
+    /// The cached fields by building (OPEN-112's test: each equals a rebuild).
+    pub fn fields(&self) -> impl Iterator<Item = (EntityId, &FlowField)> + '_ {
+        self.fields.iter().map(|(&b, (f, _))| (b, f))
+    }
+
     pub fn is_empty(&self) -> bool {
         self.fields.is_empty()
     }
@@ -338,17 +412,31 @@ impl FlowCache {
         self.labels = OnceLock::new();
     }
 
-    /// A building went up on a Lot: `sealed` is its new walls plus its
-    /// interior (reachable only through its door now). Drop only the fields
-    /// in which a tile outside `sealed` steps into it. In every other field
-    /// the sealed tiles were dead ends of the Dijkstra tree for every tile a
-    /// mover can stand on (movers leave a building through its door before
-    /// stepping, and nobody stands on a wall), so those tiles' directions
-    /// are byte-identical to a rebuild on the new map: keeping the field
-    /// changes nothing and spares the rebuilds.
-    pub fn invalidate_sealed(&mut self, tiles: &[TilePos], sealed: &dyn Fn(TilePos) -> bool) {
+    /// A building went up on a Lot (`rect`, its door `door`, the map already
+    /// walled): `sealed` is its new walls plus its interior (reachable only
+    /// through its door now). Drop only the fields in which a tile outside
+    /// `sealed` steps into it. In every other field the sealed tiles were
+    /// dead ends of the Dijkstra tree, so every tile outside them keeps its
+    /// cost and its direction byte on the new map, and only the rect's own
+    /// bytes are stale: [`FlowField::reseal`] rewrites them to a rebuild's,
+    /// so a kept field is byte-identical to a rebuild and spares it.
+    /// OPEN-112: before the reseal the rect kept the open Lot's bytes, and a
+    /// body standing in it (a stored path walked through the new walls)
+    /// stepped by them while a loaded world, building afresh, stepped by the
+    /// rebuild's: a save did not resume byte for byte.
+    pub fn invalidate_sealed(
+        &mut self,
+        map: &Map,
+        rect: crate::components::Rect,
+        door: TilePos,
+        tiles: &[TilePos],
+        sealed: &dyn Fn(TilePos) -> bool,
+    ) {
         self.labels = OnceLock::new();
         self.fields.retain(|_, (f, _)| !tiles.iter().any(|&t| f.entered_from_outside(t, sealed)));
+        for (f, _) in self.fields.values_mut() {
+            f.reseal(map, rect, door);
+        }
     }
 
     /// The cached field for `b`, stamped as just used.

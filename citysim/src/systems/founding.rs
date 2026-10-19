@@ -235,7 +235,9 @@ pub fn convert(world: &mut World, b: EntityId, kind: BuildingKind, owner: Option
             bd.empty_since = None;
         }
     }
-    let Some((rect, old, floors)) = world.comp::<Building>(b).map(|bd| (bd.rect, bd.kind, bd.floors.max(1))) else {
+    let Some((rect, door, old, floors)) =
+        world.comp::<Building>(b).map(|bd| (bd.rect, bd.door, bd.kind, bd.floors.max(1)))
+    else {
         return;
     };
     let cfg = world.config.buildings.for_kind(kind).clone();
@@ -298,7 +300,7 @@ pub fn convert(world: &mut World, b: EntityId, kind: BuildingKind, owner: Option
     // Real economy E26, E37: a Mission opens with its purse, a Camp with its state.
     crate::systems::charity::on_convert(world, b, kind);
     crate::systems::camp::on_convert(world, b, kind);
-    world.invalidate_flow_fields_for_lot(rect);
+    world.invalidate_flow_fields_for_lot(rect, door);
     // M12 D1: a new Block joins its district's `homes`.
     crate::systems::districts::rebuild(world);
 }

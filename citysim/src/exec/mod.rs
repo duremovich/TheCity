@@ -1453,15 +1453,17 @@ impl World {
         self.landmark_base = self.flow_fields.stale_base(&self.map).map(bigpath::BaseTiles);
     }
 
-    /// A building went up on a Lot (`rect`): drop the cached fields whose
-    /// paths from outside cross its new walls or its interior.
-    pub fn invalidate_flow_fields_for_lot(&mut self, rect: crate::components::Rect) {
+    /// A building went up on a Lot (`rect`, its door `door`): drop the
+    /// cached fields whose paths from outside cross its new walls or its
+    /// interior, and reseal the rest (OPEN-112: each kept field is then
+    /// byte-identical to a rebuild).
+    pub fn invalidate_flow_fields_for_lot(&mut self, rect: crate::components::Rect, door: TilePos) {
         let tiles: Vec<TilePos> = (rect.y..rect.y + rect.h)
             .flat_map(|y| (rect.x..rect.x + rect.w).map(move |x| TilePos { x, y }))
             .filter(|&t| self.map.tile_at(t) != crate::components::TileKind::Door)
             .collect();
         let sealed = |t: TilePos| rect.contains(t) && self.map.tile_at(t) != crate::components::TileKind::Door;
-        self.flow_fields.invalidate_sealed(&tiles, &sealed);
+        self.flow_fields.invalidate_sealed(&self.map, rect, door, &tiles, &sealed);
         self.flow_fields.keep_landmarks_if(&self.map);
         self.note_landmark_base();
     }

@@ -862,7 +862,7 @@ fn contracts_section(ui: &mut Ui, app: &mut App, world: &World) {
     ui.label(format!(
         "Bounties paid today {} · guards on the take {} · escrow {}¢",
         today.bounties_paid,
-        world.on_take.len(),
+        citysim::systems::contracts::guards_on_take(world),
         world.escrow_held
     ));
     for &f in world.buildings_of_kind(BuildingKind::Fixer) {

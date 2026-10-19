@@ -298,13 +298,13 @@ fn contracts(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
     use citysim::contract::Broker;
     let ids = world.by_party.get(&id).map(|v| v.to_vec()).unwrap_or_default();
     let run = world.contract_runs.get(&id);
-    let take = world.on_take.get(&id);
+    let take: Vec<EntityId> = citysim::systems::contracts::take_buyers(world, id).collect();
     let fixers: Vec<(EntityId, u64)> = world
         .buildings_of_kind(citysim::BuildingKind::Fixer)
         .iter()
         .filter_map(|&f| world.comp::<Broker>(f).and_then(|k| k.regulars.get(&id).map(|&t| (f, t))))
         .collect();
-    if ids.is_empty() && run.is_none() && take.is_none() && fixers.is_empty() {
+    if ids.is_empty() && run.is_none() && take.is_empty() && fixers.is_empty() {
         return;
     }
     section(ui, "Contracts", |ui| {
@@ -341,8 +341,8 @@ fn contracts(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
                 if r.deceived { " · deceived" } else { "" }
             ));
         }
-        if let Some(buyers) = take {
-            let names: Vec<String> = buyers.iter().map(|&b| world.owner_label(Some(b))).collect();
+        if !take.is_empty() {
+            let names: Vec<String> = take.iter().map(|&b| world.owner_label(Some(b))).collect();
             ui.colored_label(RED, format!("On the take for {}", names.join(", ")));
         }
         for (f, t) in fixers {
