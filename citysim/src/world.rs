@@ -2198,6 +2198,9 @@ impl World {
                 let id = pool[i];
                 let shifts = if role == Role::Guard && id.index % 2 == 0 {
                     wc.shift_night.clone()
+                } else if let Some(s) = systems::service::venue_shift(&self.config, role) {
+                    // OPEN-111: a venue's legacy staff work its trade hours.
+                    s
                 } else {
                     wc.shift_day.clone()
                 };

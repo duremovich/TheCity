@@ -979,6 +979,9 @@ fn probe_far_worker_with_one_rent_moves_near_work() {
     // Lives at work phase 6: the careers' seeded jobs move the far Farmer
     // and his partner too (no pair on the careers city); pinned off as well.
     cfg.strip_careers();
+    // OPEN-111: the venues' evening staff move the seeded city's picks (no
+    // single far Farmer with a partner); pinned to the day shift.
+    cfg.service.evening_staff.clear();
     // Jobs & lives phase 8's gate: the pin to the pre-milestone city is gone
     // (the industries on, seed 42 has its single far Farmer again).
     let mut w = World::new(42, cfg);
@@ -2797,18 +2800,45 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
             .map_or(0, |x| x.members.iter().filter(|&&m| gang::following_order(w, m).is_some()).count())
     };
     let g = w.gangs().into_iter().max_by_key(|&g| (follows(&w, g), g)).expect("a gang");
+    // The probe's own subject, so no change in the city's history reaches him: the
+    // first free adult with a Home is stripped of any Job, sentence, contract run or
+    // pending goal, made a loyal member of the gang, and kept below the gun gate (a
+    // Fixer's board matches on a skill of `gun_skill_min`), so no contract is offered.
     let pimp = w
-        .comp::<citysim::Gang>(g)
-        .and_then(|x| {
-            x.members.iter().copied().find(|&m| {
-                law::living(&w, m)
-                    && !w.has::<citysim::Sentence>(m)
-                    && gang::following_order(&w, m).is_some()
-                    && !citysim::systems::stims::is_dealer(&w, m)
-                    && !w.has::<Job>(m)
-            })
+        .citizens()
+        .into_iter()
+        .find(|&a| {
+            law::living(&w, a)
+                && demography::is_adult(&w, a)
+                && w.gang_of(a).is_none()
+                && !law::is_guard(&w, a)
+                && !w.has::<citysim::Sentence>(a)
+                && w.comp::<Brain>(a).is_some()
+                && w.comp::<citysim::components::Household>(a).is_some()
         })
-        .expect("a loyal non-dealer with no day job");
+        .expect("a free adult with a Home");
+    w.vacate_job(pimp);
+    w.contract_runs.remove(&pimp);
+    w.mission_of.remove(&pimp);
+    if let Some(p) = w.comp_mut::<citysim::Personality>(pimp) {
+        p.loyalty = 1.0;
+    }
+    if let Some(s) = w.comp_mut::<citysim::Skills>(pimp) {
+        s.fighting = 0.0;
+        s.stealth = 0.0;
+        s.hacking = 0.0;
+        s.persuasion = 0.0;
+        s.intimidation = 0.0;
+    }
+    if let Some(b) = w.comp_mut::<Brain>(pimp) {
+        b.current_goal = None;
+        b.plan = None;
+        b.plan_step = 0;
+        b.exec = citysim::exec::ExecState::Idle;
+    }
+    gang::enlist(&mut w, pimp, g);
+    w.comp_mut::<citysim::Gang>(g).expect("gang").order = citysim::components::Order::Expand;
+    assert!(gang::following_order(&w, pimp).is_some(), "the subject follows the held order");
     // His district: the gang holds a Home there (seed 42's hold none on day 12).
     let at = w.comp::<Position>(pimp).expect("pos").tile;
     let d = w.district_of(at);
@@ -3170,7 +3200,10 @@ fn probe_sixty_four_with_savings_retires() {
 /// walk and the `Enjoy` that `leisure::unwind_plan` installs, set again
 /// until he has been served that day; everything else is his own). With
 /// `same`, one Bar; else three different Bars. Returns the Bar staff who
-/// served him by day, and those of them he now knows as Acquaintances.
+/// served him by day, and the regulars made: a server he now knows as an
+/// Acquaintance, whose ledger holds him `regular_after` times or more, and
+/// whom he did not know the evening of that last encounter began (the edge
+/// is the ledger's, not an earlier meeting's).
 fn bar_regular(same: bool, hour: u64) -> (Vec<(u64, EntityId)>, Vec<EntityId>) {
     use citysim::components::ActionInstance;
     use citysim::systems::service;
@@ -3199,9 +3232,12 @@ fn bar_regular(same: bool, hour: u64) -> (Vec<(u64, EntityId)>, Vec<EntityId>) {
             .collect()
     };
     let mut served_by: Vec<(u64, EntityId)> = Vec::new();
+    // (day, server) -> he knew the server as the evening began.
+    let mut knew_before: Vec<(u64, EntityId, bool)> = Vec::new();
     for d in 1..=3u64 {
         let bar = if same { bars[0] } else { bars[(d - 1) as usize] };
         run_to(&mut w, a, d * TICKS_PER_DAY + hour * TICKS_PER_HOUR, |_| {});
+        knew_before.extend(w.staff_of(bar).iter().map(|&s| (d, s, w.edge(a, s).is_some())));
         w.comp_mut::<Wallet>(a).expect("wallet").coins = 200;
         if let Some(n) = w.comp_mut::<Needs>(a) {
             n.fun = 0.0;
@@ -3242,31 +3278,36 @@ fn bar_regular(same: bool, hour: u64) -> (Vec<(u64, EntityId)>, Vec<EntityId>) {
         );
         served_by.extend(by.into_iter().map(|s| (d, s)));
     }
-    let known: Vec<EntityId> = served_by
-        .iter()
-        .map(|&(_, s)| s)
-        .filter(|&s| w.edge(a, s).is_some_and(|e| e.kind == RelKind::Acquaintance))
-        .collect();
+    let after = service::row_for(&w, Role::Bartender).map_or(u8::MAX, |r| r.regular_after);
+    let mut known: Vec<EntityId> = Vec::new();
+    for &(d, s) in &served_by {
+        let visits = service::regulars_of(&w, s).iter().find(|r| r.who == a).map_or(0, |r| r.visits);
+        let edge = w.edge(a, s).map(|e| e.kind);
+        let knew = knew_before.iter().any(|&(kd, ks, k)| kd == d && ks == s && k);
+        eprintln!("  day {d} {}: edge now {edge:?}, knew at dusk {knew}, ledger visits {visits}", w.name_of(s));
+        let last = served_by.iter().filter(|&&(_, x)| x == s).all(|&(dd, _)| dd <= d);
+        if last && edge == Some(RelKind::Acquaintance) && visits >= after && !knew {
+            known.push(s);
+        }
+    }
     (served_by, known)
 }
 
-/// Lives at work § 10 ("a regular"), in the Bar's served hours (its
-/// bartenders hold `[world] shift_day`, 09-18; the evening drink is
-/// unserved): a Full agent who drinks at the same Bar three days running
-/// is an Acquaintance of the bartender who served him (`[service]
-/// regular_after` 3 within `regular_days`). Control: three different Bars,
-/// a day each: served each day, no edge. The gap (OPEN-111): the server is
-/// a fresh hash each hour among those on duty (D6) and the ledger is the
-/// server's, so with five bartenders on the day shift the three drinks go
-/// to three bartenders (seed 42: Cipher Reyes, Quill Varley, Leopold
-/// Adeyemi) and no regular forms.
+/// Lives at work § 10 ("a regular"): a Full agent who drinks at the same
+/// Bar three evenings running (from 19:00; its bartenders work `[leisure]
+/// evening_shift` under `[service] evening_staff`) is an Acquaintance of
+/// the bartender who served him (the Bartender row's `regular_after`
+/// within `regular_days`). Control: three different Bars, an evening each:
+/// served each evening, no edge. OPEN-111 (closed): the server was a fresh
+/// hash each hour among those on duty, so the three drinks went to three
+/// bartenders, and the bartenders held the day shift; now the pick is
+/// stable per pair and the shift is the trade's.
 #[test]
-#[ignore = "gap: OPEN-111"]
 fn probe_regular_at_one_bar_meets_its_bartender() {
-    let (served, known) = bar_regular(true, 10);
+    let (served, known) = bar_regular(true, 19);
     assert!(served.len() >= 3, "served on each of the three days ({served:?})");
     assert!(!known.is_empty(), "three days at one Bar: an Acquaintance of its bartender");
-    let (served, known) = bar_regular(false, 10);
+    let (served, known) = bar_regular(false, 19);
     assert!(served.len() >= 3, "control: served at each Bar ({served:?})");
     assert!(known.is_empty(), "control: a day at each of three Bars makes no regular");
 }

@@ -229,7 +229,10 @@ use crate::world::World;
 /// `[buildings.station]`, `[life] exec_home_tier`/`exec_home_spare` (written
 /// only on) and the `Jobs2Cols` phase-7 columns (serde defaults). An off
 /// save is byte-identical to version 41's.
-pub const SAVE_VERSION: u8 = 42;
+/// 43 (OPEN-111): `[service] evening_staff` (written only on; the venue
+/// staff's shift is the `Job::shifts` already saved). An off save is
+/// byte-identical to version 42's.
+pub const SAVE_VERSION: u8 = 43;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

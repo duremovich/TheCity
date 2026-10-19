@@ -367,7 +367,7 @@ Asserts catch broken; behaviour judges alive; numbers are reports.
 - **`core_20k`**: the station bullets; ticks/s printed against 140.
 - **Person probes** (`tests/person.rs`): § 9.1's; plus "a regular": a Full agent who visits the same Bar three evenings is an Acquaintance of its bartender (control: three different Bars).
 - **God scenarios** (60 days against the control, one per reaction class):
-  - `god_kill_all_teachers` (day 20): `edu_gain` stops, the School posts refill.
+  - `god_kill_all_teachers` (day 20): `edu_gain` stops, the School posts refill (asserted; taught days a FINDING, 2k has ~1 marginal pupil).
   - `god_child_camp_sweep` (every Street child taken on day 10): visits, buy-outs, a break-out; grudges against the Law.
   - `god_decapitate_lieutenants` (every rank 1 killed on day 30): the leaders lead raids again until new lieutenants rise.
   - `god_cut_the_precinct` (the Precinct's guards jailed 10 days, day 20, 20k): the Stations hold and transfer; arrests fall less than in a no-station control.
@@ -981,6 +981,19 @@ Measured: the 20k rows above and § 5.1's re-read; 20k seed 42 × 30 (`run --pop
 
 **Left:** the 42-47 gate runs, A/B ticks/s, the save size and the § 9.1 diaries are the gate's; `god_cut_the_precinct` is not written (the gate's); the `p_theft_caught` regen (D14).
 
+### OPEN-111 fix round (2026-10-19): the regular
+
+The § 10 regular probe failed for two reasons (phase 8b): the server was a fresh hash each hour, and the Bar's staff worked the day while the bar traded in the evening. Both fixed as mechanisms under `[service] venues` (off: byte-identical to main's off city on seed 42 × 30); SAVE_VERSION 43. Deviations:
+
+- **D6, the stable server.** `service::arrive` picks the lowest `hash(PURPOSE_SERVE, place ^ served, server)` among the servers on duty with room. The hour is gone from the key, so a patron gets the same server whenever that server is on duty, and repeat visits build up on one ledger. It is still never the lowest id. `tipped_pick` keeps its hourly hash (a tip is coins, not a ledger).
+- **The venue shift.** `[service] evening_staff` (`Bartender`, `Attendant`, `Cook`) hires those legacy roles onto `[leisure] evening_shift` (18-24), in the seeding (`World::new`), in `demography::hire` and in `wages::site_shifts` (`service::venue_shift`). Phase 1's "Who is behind the counter" is the reason: NoodleBar meals out land in the evening too (`cooked` 16 → 777 per seed × 120 d). The Statistical mirror is unchanged: a Statistical server is credited by `lod::shift_attended` on the same `Job::shifts`.
+- **The Bartender row's `regular_after` 5 → 3.** § 10's "a regular" is three evenings at one Bar. Phase 1's pick of 5 contradicted the spec's own acceptance; with a stable server, three drinks made a ledger of 3 and no edge.
+- **The probe** drinks at 19:00 (the trade's hours). It counts a regular as an Acquaintance whose ledger holds him `regular_after` times and whom he did not know when that evening began. In the control (three Bars), the day-2 bartender became an Acquaintance after one visit through an ordinary meeting at the Bar, not through the ledger. The probe prints this case.
+
+Measured (42-44 × 120, main 30d485d → fix, means): served visits 13,142 → 21,577; waited 22,535 → 14,081 (the share of arrivals finding nobody on duty, or a full counter, 0.63 → 0.39 of visits); regulars made 261 → 1,016; tips 8,620 → 8,549; Murders 124 → 120; J25 0.009 → 0.013. Device (`shadow --lives` d19): dancer `met` 0.61 → 0.74, madam 0.45 → 0.64, club staff 0.67 → 0.69, **cook 0.47 → 0.11**. Most of a day cook's encounters were parcels handed to the NoodleBar's staff (a day courier's `Parcel`), and those now go to the day staff. The evening cook's own service is mostly Statistical diners at 21:00 (`cooked`). Behaviour tier: `d19 gang_member KnownMetWeek` 5.35 against its 5.5 bound (main 6.42; the pick moved 64 → 58 agents, 30 → 9 on seed 42). With `Cook` left on the day shift, that row read 7.58, but `d90 homeless CommuteAbortsDay` read 0.20 against 0.07 (main 0.01). Neither variant was retuned.
+
+Tests. The evening staff are set at seed, so seed 42's picks move from day 0. Three tests are pinned to the day shift (`evening_staff` cleared), each a pick change: `arms.rs` has no gang of three with a Hideout by day 12; `chrome.rs`'s near-guard episode ran past its hours; `person.rs`'s far Farmer has no partner. `exec.rs`'s occupancy check now exempts a child born at Home, which `demography::birth` keeps out of the occupant list (seed 11 now has a birth in its two days). **`person.rs::probe_pimp_purse_grows_on_a_pitch_night` fails** and is neither loosened nor pinned. Unpinned, the pick fails ("a loyal non-dealer with no day job"). Pinned to the day shift, pimp 744 is picked, takes a Fixer contract at 17:00 and is jailed at the first midnight (the stable server alone moves the city), so the second night's cut never reaches his purse. Main passes.
+
 ---
 
 ## 15. Gate
@@ -1075,7 +1088,7 @@ Throughput, alternating, one process at a time, 2k seed 42 × 30, three rounds: 
 
 | scenario (class) | the shock | asserted | read |
 |---|---|---|---|
-| `god_kill_all_teachers` (the School) | the 4 teachers killed, day 20 | a School day taught again on days 21-59 | taught day 20: 0; days 21-29: 7 (control 7), 30-59: 7 (33); taught again on day 21 |
+| `god_kill_all_teachers` (the School) | the 4 teachers killed, day 20 | every post held again by day 30, a teacher on a School-day shift (taught days are a FINDING) | taught day 20: 0; days 21-29: 7 (control 7), 30-59: 7 (33); taught again on day 21 |
 | `god_child_camp_sweep` (the Camp) | every Street child to the Camp on day 10 (`camp::take`; none on the street, so the poorest households' children) | visits, buy-outs and break-outs on days 11-59 over the control's | 2 children taken; the parents' answer 11 (control 4) |
 | `god_decapitate_lieutenants` (a gang's ladder) | every rank 1 killed, day 30 | a lieutenant again on a day 31-59 | 11 killed; lieutenants again on day 31 (the ranking re-runs at the death) |
 | `god_retire_everyone_over_55` (the ages) | `[careers] retire_from_years` 55, `retire_days` 0 for day 10's midnight | a Hire at a retiree's employer on days 11-20 | 322 workers of 55+ at 79 employers; 323 retired; 182 Hires there; foremen moved 60 of 79; elders taken in days 10-19: 69 (control 41) |
