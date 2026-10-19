@@ -2645,8 +2645,10 @@ fn broke_parent_visits(mut c: World) -> (bool, bool) {
         // The premise kept: the mother stays jobless (on the phase 4b city
         // she was hired a Sweeper, her days the beat, and never reached the Camp).
         c.remove::<Job>(q);
-        let w = c.comp_mut::<Wallet>(q).expect("wallet");
-        w.coins = w.coins.min(10);
+        // 10 coins at each eve, the premise (`min(10)` let a purse spent to
+        // 0 stay at 0: the 8c fix round's city had her walk 250 tiles to the
+        // Camp, unable to pay the fare, and sleep on the way).
+        c.comp_mut::<Wallet>(q).expect("wallet").coins = 10;
         c.comp_mut::<Building>(h2).expect("home").stock_food = 0;
         let next = c.tick + 1;
         run_to(&mut c, q, next, |_| {});
@@ -2799,7 +2801,24 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
         w.comp::<citysim::Gang>(g)
             .map_or(0, |x| x.members.iter().filter(|&&m| gang::following_order(w, m).is_some()).count())
     };
-    let g = w.gangs().into_iter().max_by_key(|&g| (follows(&w, g), g)).expect("a gang");
+    // A gang led by a living veteran member (`leader_veteran`: a recruit
+    // of loyalty 1.0 outranks a newer leader), and a subject who is no
+    // gang's recorded leader (the 8c fix round's seed-42 city: the most
+    // loyal gang's leader was new, so the enlisted subject took the chair
+    // and, a delegating leader, followed no street order).
+    let led = |w: &World, g: EntityId| {
+        w.comp::<citysim::Gang>(g)
+            .and_then(|x| x.leader)
+            .is_some_and(|l| law::living(w, l) && w.gang_of(l) == Some(g) && gang::leader_veteran(w, l))
+    };
+    let leaders: Vec<EntityId> =
+        w.gangs().into_iter().filter_map(|g| w.comp::<citysim::Gang>(g).and_then(|x| x.leader)).collect();
+    let g = w
+        .gangs()
+        .into_iter()
+        .filter(|&g| led(&w, g))
+        .max_by_key(|&g| (follows(&w, g), g))
+        .expect("a gang with a living leader");
     // The probe's own subject, so no change in the city's history reaches him: the
     // first free adult with a Home is stripped of any Job, sentence, contract run or
     // pending goal, made a loyal member of the gang, and kept below the gun gate (a
@@ -2811,6 +2830,7 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
             law::living(&w, a)
                 && demography::is_adult(&w, a)
                 && w.gang_of(a).is_none()
+                && !leaders.contains(&a)
                 && !law::is_guard(&w, a)
                 && !w.has::<citysim::Sentence>(a)
                 && w.comp::<Brain>(a).is_some()
@@ -3163,6 +3183,14 @@ fn probe_sixty_four_with_savings_retires() {
         .filter(|&a| w.has::<Job>(a) && w.has::<Brain>(a) && w.gang_of(a).is_none() && w.spouse_of(a).is_none())
         .filter(|&a| demography::children_of_agent(&w, a).is_empty() && !w.has::<citysim::Sentence>(a))
         .filter(|&a| w.comp::<Identity>(a).is_some_and(|i| (40..60).contains(&i.age_years())))
+        // Single for the week: nobody he could marry now (the 8c fix round's
+        // seed-42 pick married on the first evening and quit "no need of the
+        // wage", which a married man does before the retirement roll).
+        .filter(|&a| {
+            let s = &w.config.social;
+            w.neighbours(a)
+                .all(|b| w.edge(a, b).is_none_or(|e| e.affinity < s.propose_affinity || e.trust < s.propose_trust))
+        })
         .find(|&a| w.comp::<Job>(a).is_some_and(|j| j.employer.is_some() && j.until.is_none()))
         .expect("a single worker in his forties or fifties");
     let cost = 60 * (w.mean_price() * 2 + home(&w, a).map_or(0, |h| citysim::systems::ownership::rent_for(&w, h)));
