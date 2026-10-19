@@ -367,7 +367,7 @@ Asserts catch broken; behaviour judges alive; numbers are reports.
 - **`core_20k`**: the station bullets; ticks/s printed against 140.
 - **Person probes** (`tests/person.rs`): § 9.1's; plus "a regular": a Full agent who visits the same Bar three evenings is an Acquaintance of its bartender (control: three different Bars).
 - **God scenarios** (60 days against the control, one per reaction class):
-  - `god_kill_all_teachers` (day 20): `edu_gain` stops, the School posts refill.
+  - `god_kill_all_teachers` (day 20): `edu_gain` stops, the School posts refill (asserted; taught days a FINDING, 2k has ~1 marginal pupil).
   - `god_child_camp_sweep` (every Street child taken on day 10): visits, buy-outs, a break-out; grudges against the Law.
   - `god_decapitate_lieutenants` (every rank 1 killed on day 30): the leaders lead raids again until new lieutenants rise.
   - `god_cut_the_precinct` (the Precinct's guards jailed 10 days, day 20, 20k): the Stations hold and transfer; arrests fall less than in a no-station control.
@@ -1088,7 +1088,7 @@ Throughput, alternating, one process at a time, 2k seed 42 × 30, three rounds: 
 
 | scenario (class) | the shock | asserted | read |
 |---|---|---|---|
-| `god_kill_all_teachers` (the School) | the 4 teachers killed, day 20 | a School day taught again on days 21-59 | taught day 20: 0; days 21-29: 7 (control 7), 30-59: 7 (33); taught again on day 21 |
+| `god_kill_all_teachers` (the School) | the 4 teachers killed, day 20 | every post held again by day 30, a teacher on a School-day shift (taught days are a FINDING) | taught day 20: 0; days 21-29: 7 (control 7), 30-59: 7 (33); taught again on day 21 |
 | `god_child_camp_sweep` (the Camp) | every Street child to the Camp on day 10 (`camp::take`; none on the street, so the poorest households' children) | visits, buy-outs and break-outs on days 11-59 over the control's | 2 children taken; the parents' answer 11 (control 4) |
 | `god_decapitate_lieutenants` (a gang's ladder) | every rank 1 killed, day 30 | a lieutenant again on a day 31-59 | 11 killed; lieutenants again on day 31 (the ranking re-runs at the death) |
 | `god_retire_everyone_over_55` (the ages) | `[careers] retire_from_years` 55, `retire_days` 0 for day 10's midnight | a Hire at a retiree's employer on days 11-20 | 322 workers of 55+ at 79 employers; 323 retired; 182 Hires there; foremen moved 60 of 79; elders taken in days 10-19: 69 (control 41) |

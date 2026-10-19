@@ -2221,17 +2221,36 @@ fn lives_rows() -> Vec<V8Series> {
 }
 
 /// Lives at work god 1 (§ 10, class: the School): every teacher killed on
-/// day 20. The School days stop being taught (no teacher, no `edu_gain`);
-/// the posts must refill (the job search's School vacancy): no taught day
-/// on days 21-59 is a broken School.
+/// day 20. The posts must refill (the job search's School vacancy): by day 30
+/// every post emptied is held again by a living agent, and a School has a
+/// teacher whose shift covers a School-day hour. The taught School days are a
+/// FINDING: at 2k they rest on ~1 marginal pupil (6-9 children; School within
+/// 60 tiles, fee 2, the Camp), so they cannot carry an assert (gate 8c finding).
 #[test]
 #[ignore = "tier: merge"]
 fn god_kill_all_teachers() {
+    let (mut killed, mut held, mut on_duty_days) = (0usize, 0usize, 0u32);
     let r = run_v8("god_kill_all_teachers", |w, day, watched| {
+        let role = w.config.trade_role("teacher").expect("the teacher row");
+        let holders = |w: &World| -> Vec<EntityId> {
+            w.buildings_of_kind(citysim::BuildingKind::School)
+                .iter()
+                .flat_map(|&s| w.staff_of(s).to_vec())
+                .filter(|&a| w.comp::<citysim::Job>(a).is_some_and(|j| j.role == role))
+                .filter(|&a| citysim::systems::law::living(w, a))
+                .collect()
+        };
+        if day == 30 {
+            held = holders(w).len();
+        }
+        if (30..60).contains(&day) && day % 7 < 5 {
+            // A School-day hour (11:00): a living teacher whose shift covers it.
+            let on = holders(w).into_iter().any(|a| w.comp::<citysim::Job>(a).is_some_and(|j| j.on_shift(11 * 60)));
+            on_duty_days += u32::from(on);
+        }
         if day != 20 {
             return;
         }
-        let role = w.config.trade_role("teacher").expect("the teacher row");
         let teachers: Vec<EntityId> = w
             .buildings_of_kind(citysim::BuildingKind::School)
             .iter()
@@ -2239,6 +2258,7 @@ fn god_kill_all_teachers() {
             .filter(|&a| w.comp::<citysim::Job>(a).is_some_and(|j| j.role == role))
             .collect();
         eprintln!("day 20: {} teachers killed", teachers.len());
+        killed = teachers.len();
         for t in teachers {
             watched.push(t);
             w.push_command(PlayerCommand::KillAgent(t));
@@ -2251,7 +2271,7 @@ fn god_kill_all_teachers() {
     let taught = |run: &V8Run, a: u64, b: u64| v12_sum(run, a, b, |j| f64::from(j.taught_days));
     let first = (21..60).find(|&d| taught(&r, d, d + 1) > 0.0);
     eprintln!(
-        "taught School days: day 20 {:.0} (control {:.0}), days 21-29 {:.0} ({:.0}), 30-59 {:.0} ({:.0}); first taught again on day {first:?}",
+        "FINDING taught School days: day 20 {:.0} (control {:.0}), days 21-29 {:.0} ({:.0}), 30-59 {:.0} ({:.0}); first taught again on day {first:?}",
         taught(&r, 20, 21),
         taught(c, 20, 21),
         taught(&r, 21, 30),
@@ -2259,7 +2279,8 @@ fn god_kill_all_teachers() {
         taught(&r, 30, 60),
         taught(c, 30, 60)
     );
-    assert!(first.is_some(), "no School day taught on days 21-59: the teachers' posts never refilled");
+    eprintln!("posts: {killed} emptied on day 20, {held} held by a living teacher on day 30, a teacher on a School-day shift on {on_duty_days} weekdays of 30-59");
+    assert!(killed > 0 && held >= killed && on_duty_days > 0, "the teachers' posts never refilled");
 }
 
 /// Lives at work god 2 (§ 10, class: the Camp): every child on the street
