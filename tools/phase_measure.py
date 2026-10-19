@@ -33,6 +33,7 @@ Stdlib only.
 import argparse
 import concurrent.futures as cf
 import csv
+import hashlib
 import io
 import json
 import os
@@ -83,20 +84,47 @@ def build(src: Path, target: Path, logfile: Path) -> Path:
 
 
 def base_tree(sha: str, root: Path) -> tuple[Path, Path]:
-    """Main's source at `sha` (git archive) and its binary, built once and cached."""
+    """Main's source at `sha` (git archive) and its binary, cached by sha.
+
+    Every call re-syncs the source to the archive (a file whose bytes differ is rewritten, so its mtime moves
+    and cargo rebuilds it: an agent that edited the cached source and reverted it leaves no stale binary),
+    runs `cargo build` (a no-op when up to date) and stamps the binary's hash: when the hash changes, every
+    cached base run under `root` is dropped (2026-10-19: a cache built from an edited source read DIFFER
+    against a fresh build of the same sha)."""
     src, target = root / "src", root / "target"
-    if not (src / "Cargo.toml").exists():
-        log(f"extracting {sha[:8]} into {src}")
-        src.mkdir(parents=True, exist_ok=True)
-        tar = subprocess.run(["git", "archive", "--format=tar", sha], capture_output=True)
-        if tar.returncode != 0:
-            die(f"git archive {sha}: {tar.stderr.decode(errors='replace')}")
-        with tarfile.open(fileobj=io.BytesIO(tar.stdout)) as t:
-            t.extractall(src)
+    tar = subprocess.run(["git", "archive", "--format=tar", sha], capture_output=True)
+    if tar.returncode != 0:
+        die(f"git archive {sha}: {tar.stderr.decode(errors='replace')}")
+    rewritten = 0
+    with tarfile.open(fileobj=io.BytesIO(tar.stdout)) as t:
+        for m in t.getmembers():
+            dest = src / m.name
+            if m.isdir():
+                dest.mkdir(parents=True, exist_ok=True)
+                continue
+            if not m.isfile():
+                continue
+            data = t.extractfile(m).read()
+            if dest.exists() and dest.read_bytes() == data:
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(data)
+            rewritten += 1
+    if rewritten:
+        log(f"base {sha[:8]}: {rewritten} source file(s) written from the archive")
     exe = target / "release" / f"citysim-cli{EXE}"
     if not exe.exists():
         log(f"building base {sha[:8]} (first time for this sha; minutes)")
-        build(src, target, root / "cargo.log")
+    exe = build(src, target, root / "cargo.log")
+    digest = hashlib.sha1(exe.read_bytes()).hexdigest()
+    stamp = root / "exe.sha1"
+    if not stamp.exists() or stamp.read_text().strip() != digest:
+        stale = [d for d in root.iterdir() if d.name.startswith(("off_", "offoff_", "run_")) or d.name.startswith("lives")]
+        if stale and stamp.exists():
+            log(f"base {sha[:8]}: binary changed, dropping {len(stale)} cached run(s)")
+        for d in stale:
+            shutil.rmtree(d) if d.is_dir() else d.unlink()
+        stamp.write_text(digest)
     return src, exe
 
 
@@ -248,6 +276,7 @@ def parse_lives(path: Path):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base", default="main", help="base commit (default main); resolved to a sha")
+    ap.add_argument("--base-off", action="store_true", help="run the base with the --off variables set too: for a fix to a switch that already exists on the base (off vs off); default: the base runs as shipped (the phase that adds the switch)")
     ap.add_argument("--off-base", help="base for the off identity when it differs from --base (a switch spanning sub-phases, e.g. phase 4b against main before 4a); default --base")
     ap.add_argument("--off", action="append", default=[], metavar="VAR",
                     help="env var set to 1 for the off identity (repeatable); required unless --skip off")
@@ -316,7 +345,7 @@ def main():
             jobs["lives cand"] = pool.submit(run_lives, cexe, repo, out / "lives.txt")
         if "off" not in skip:
             for s in off_seeds:
-                jobs[f"off base {s}"] = pool.submit(run_city, oexe, osrc, s, a.off_days, oroot / f"off_{s}x{a.off_days}", None, True)
+                jobs[f"off base {s}"] = pool.submit(run_city, oexe, osrc, s, a.off_days, oroot / (f"offoff_{s}x{a.off_days}" if a.base_off else f"off_{s}x{a.off_days}"), off_env if a.base_off else None, True)
                 jobs[f"off cand {s}"] = pool.submit(run_city, cexe, repo, s, a.off_days, out / f"off_{s}x{a.off_days}", off_env, True)
         if "counters" not in skip:
             for s in seeds:
@@ -332,10 +361,10 @@ def main():
     status = 0
 
     if "off" not in skip:
-        md += [f"## Off identity ({', '.join(a.off)}=1 against {osha[:8]}; seeds {a.off_seeds} x {a.off_days} d)", ""]
+        md += [f"## Off identity ({', '.join(a.off)}=1 against {osha[:8]}{' with the same switches off' if a.base_off else ''}; seeds {a.off_seeds} x {a.off_days} d)", ""]
         all_ok = True
         for s in off_seeds:
-            ok, lines = off_compare(oroot / f"off_{s}x{a.off_days}", out / f"off_{s}x{a.off_days}")
+            ok, lines = off_compare(oroot / (f"offoff_{s}x{a.off_days}" if a.base_off else f"off_{s}x{a.off_days}"), out / f"off_{s}x{a.off_days}")
             all_ok &= ok
             md += [f"- seed {s}: **{'IDENTICAL' if ok else 'DIFFER'}**"] + [f"  - {l}" for l in lines]
         md += ["", f"OFF IDENTITY: {'IDENTICAL' if all_ok else 'DIFFER'}", ""]
