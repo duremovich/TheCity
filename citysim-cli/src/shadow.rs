@@ -3050,7 +3050,12 @@ const CHECKS: &[Check] = &[
     (19, "gang_member", Metric::WalkHDay, Bound::Max(7.1), 5.55, 6.04),
     (19, "gang_member", Metric::LongestSleepH, Bound::Min(4.4), 4.90, 5.35),
     (19, "gang_member", Metric::Energy0HWeek, Bound::Max(2.1), 0.00, 0.03),
-    (19, "gang_member", Metric::KnownMetWeek, Bound::Min(5.5), 9.24, 12.99),
+    // OPEN-111 (2026-10-19): this row re-derived on the fix tree (the eight-run ensemble: shipped 5.35, pick 58;
+    // stat_violence_mult 0.98 4.23 (57), 0.99 4.23 (57), 1.01 7.07 (71), 1.02 7.07 (71), 1.03 6.64 (75);
+    // max_coarse 149 7.34 (80), 151 6.45 (85)): 4.23 x 0.6 = 2.54, rounded down. Cause: the venues' evening staff
+    // and the stable server move who is free on d19 (pick sizes 57-85, seed 42's 22 -> 9), a thin pick moved by
+    // the milestone's design (OPEN-109; Dylan's 2026-10-19 rule: re-derive social-contact rows the milestone moved).
+    (19, "gang_member", Metric::KnownMetWeek, Bound::Min(2.5), 4.23, 7.34),
     (19, "gang_member", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
     (19, "gang_member", Metric::CommuteAbortsDay, Bound::Max(0.05), 0.00, 0.00),
     (19, "guard", Metric::WalkHDay, Bound::Max(11.4), 9.43, 9.89),
