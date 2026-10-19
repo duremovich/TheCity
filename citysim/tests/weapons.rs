@@ -201,18 +201,22 @@ fn test_parent_dies_at_death_days_and_takes_its_branches() {
 }
 
 /// A failing parent with its reserves above its `treasury_ref` is not called in.
+/// (`death_days` 7 instead of 21 so the run is 20 days, not 40: the test
+/// needs a failing streak past `death_days`, not the shipped length.)
 #[test]
 fn test_rich_failing_parent_lives() {
     let mut c = Config::load();
     c.outside.parents.factions[1].income = 0;
+    c.outside.parents.death_days = 7;
     let mut w = World::new(42, c);
     let id = account(&w, "Militech International").id;
     if let Some(f) = w.outside.faction_mut(id) {
         f.treasury_ref = 1;
     }
-    w.run_ticks(40 * TICKS_PER_DAY);
+    w.run_ticks(20 * TICKS_PER_DAY);
     let f = account(&w, "Militech International");
-    assert!(f.parent.as_ref().expect("p").failing_since.is_some(), "failing");
+    let since = f.parent.as_ref().expect("p").failing_since.expect("failing");
+    assert!(w.tick - since >= 7 * TICKS_PER_DAY, "failing past death_days ({} ticks)", w.tick - since);
     assert!(!f.dead, "its reserves hold");
 }
 

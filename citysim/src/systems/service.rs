@@ -79,9 +79,9 @@ const PURPOSE_CLERK: u64 = 0x5e52_0009;
 /// The regulars a server keeps (§ 1.1: the oldest falls off).
 pub const REGULARS_CAP: usize = 8;
 
-/// A server's room this hour (`World::service_room`, not saved): the hour
-/// and the encounters taken in it (`per_hour` is the cap).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// A server's room this hour (`World::service_room`, saved since OPEN-113):
+/// the hour and the encounters taken in it (`per_hour` is the cap).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Room {
     pub hour: Tick,
     pub taken: u8,
