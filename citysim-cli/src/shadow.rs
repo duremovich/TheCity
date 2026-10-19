@@ -707,6 +707,9 @@ struct ShiftObs {
     // Lives at work phase 0: who was on the other side of the counter.
     /// The job's building at the shift's first minute.
     employer: Option<EntityId>,
+    /// The agent owns the employer building: an owner-operator's post, which pays no wage by design
+    /// (an owner pays the staff, not themselves), so the wage metrics skip it.
+    own_post: bool,
     /// Hourly samples during the shift, and the non-staff bodies inside the
     /// workplace summed over them.
     samples: u32,
@@ -1904,6 +1907,7 @@ fn behaviour_minute(world: &World, t: &mut Track, now: Tick, act: &'static str) 
                 whole: j.shifts.iter().any(|&(s, _)| s == tod),
                 free: true,
                 employer: j.employer,
+                own_post: j.employer.is_some_and(|e| world.owner_of(e) == Some(id)),
                 samples: 0,
                 nonstaff: 0,
                 source_events: 0,
@@ -1928,6 +1932,7 @@ fn behaviour_minute(world: &World, t: &mut Track, now: Tick, act: &'static str) 
                 whole: tod == os,
                 free: true,
                 employer: citysim::systems::life::hq_of(world, corp, id),
+                own_post: false,
                 samples: 0,
                 nonstaff: 0,
                 source_events: 0,
@@ -2661,7 +2666,7 @@ impl Agg {
             *e = (*e).max(len);
         }
         self.nights.extend(by_night.values());
-        for s in t.shifts.iter().filter(|s| s.whole && s.workday && s.free && !s.office) {
+        for s in t.shifts.iter().filter(|s| s.whole && s.workday && s.free && !s.office && !s.own_post) {
             let worked = s.work * 2 >= s.len;
             let paid = t.wages.iter().any(|&w| w >= s.start && w <= s.end + 2 * TICKS_PER_HOUR);
             self.shifts += 1;
