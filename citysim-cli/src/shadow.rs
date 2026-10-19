@@ -3154,7 +3154,13 @@ const CHECKS: &[Check] = &[
     // regen (OPEN-103, closed by the street-life feature row).
     (90, "homeless", Metric::KnownMetWeek, Bound::Min(1.7), 2.91, 5.06),
     (90, "homeless", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
-    (90, "homeless", Metric::CommuteAbortsDay, Bound::Max(0.07), 0.00, 0.02),
+    // Lives at work gate 8d (2026-10-19): re-derived on the gate city (the eight-run ensemble on the 8d
+    // fix round's stat table: shipped 0.07; stat_violence_mult 0.98 0.04, 0.99 0.04, 1.01 0.04, 1.02
+    // 0.03, 1.03 0.04; max_coarse 149 0.08, 151 0.04): 0.08 + 0.05 = 0.13. The milestone moved it off the
+    // old 0.00-0.02 before the regen (8c main 0.06, the 8d tree 0.04 on the old table); not the deposit
+    // (`move_in_rent_days` 0 reads 0.09). The highs are one seed's commuters (seed 44: 0.24, 0.20 of
+    // 16-19 picks; the seeds read 0.00-0.24 over the ensemble).
+    (90, "homeless", Metric::CommuteAbortsDay, Bound::Max(0.13), 0.03, 0.08),
     (90, "homeless", Metric::PaidOfWorked, Bound::Min(0.68), 0.78, 0.92),
     (90, "homeless", Metric::WagedWorkdays, Bound::Min(0.43), 0.53, 0.69),
     (90, "purist", Metric::WalkHDay, Bound::Max(7.1), 4.39, 6.08),
