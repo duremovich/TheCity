@@ -3029,7 +3029,12 @@ const CHECKS: &[Check] = &[
     (19, "fighter", Metric::WalkHDay, Bound::Max(6.9), 4.77, 5.84),
     (19, "fighter", Metric::LongestSleepH, Bound::Min(4.5), 5.02, 5.34),
     (19, "fighter", Metric::Energy0HWeek, Bound::Max(2.2), 0.01, 0.12),
-    (19, "fighter", Metric::KnownMetWeek, Bound::Min(2.8), 4.70, 8.63),
+    // Lives at work gate (2026-10-19): this row re-derived on the gate city (the eight-run ensemble:
+    // shipped 2.55; stat_violence_mult 0.98 2.95, 0.99 2.60, 1.01 3.05, 1.02 3.05, 1.03 3.00; max_coarse
+    // 149 3.00, 151 2.70): 2.55 x 0.6 = 1.53, rounded down. Cause: phase 2's own-Home HangOut moved free
+    // time indoors with flatmates (5.55 -> 3.46 at phase 2) and the 8a regen echoes it (OPEN-103, closed
+    // by the street-life feature row).
+    (19, "fighter", Metric::KnownMetWeek, Bound::Min(1.5), 2.55, 3.05),
     (19, "fighter", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
     (19, "fighter", Metric::CommuteAbortsDay, Bound::Max(0.06), 0.00, 0.01),
     (19, "fighter", Metric::PaidOfWorked, Bound::Min(0.9), 1.00, 1.00),
@@ -3138,7 +3143,11 @@ const CHECKS: &[Check] = &[
     (90, "homeless", Metric::WalkHDay, Bound::Max(6.1), 4.37, 5.01),
     (90, "homeless", Metric::LongestSleepH, Bound::Min(5.6), 6.15, 6.52),
     (90, "homeless", Metric::Energy0HWeek, Bound::Max(3.8), 1.23, 1.79),
-    (90, "homeless", Metric::KnownMetWeek, Bound::Min(3.9), 6.62, 8.12),
+    // Lives at work gate (2026-10-19): this row re-derived on the gate city (the eight-run ensemble:
+    // shipped 3.73; stat_violence_mult 0.98 3.74, 0.99 4.48, 1.01 4.84, 1.02 4.16, 1.03 2.91; max_coarse
+    // 149 4.13, 151 5.06): 2.91 x 0.6 = 1.75, rounded down. Cause: phase 2's own-Home HangOut and the 8a
+    // regen (OPEN-103, closed by the street-life feature row).
+    (90, "homeless", Metric::KnownMetWeek, Bound::Min(1.7), 2.91, 5.06),
     (90, "homeless", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
     (90, "homeless", Metric::CommuteAbortsDay, Bound::Max(0.07), 0.00, 0.02),
     (90, "homeless", Metric::PaidOfWorked, Bound::Min(0.68), 0.78, 0.92),
