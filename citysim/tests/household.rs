@@ -402,3 +402,29 @@ fn test_a_homeless_worker_pays_the_first_rent_before_moving_in() {
     let due = w.comp::<Household>(a).map(|h| h.rent_due).expect("household");
     assert!((due + (days * rent) as f32).abs() < 1e-3, "held as prepaid rent ({due})");
 }
+
+/// Review fix 1: the owner-operator hire passes the same gate as every
+/// other hire: a retired owner (or one who just quit the business) is not
+/// rehired into his own business's open post. Failed on the base `f795548`
+/// (the retired owner was rehired every midnight).
+#[test]
+fn test_owner_operator_respects_the_hiring_gate() {
+    let mut w = city();
+    let (a, s, _) = married_pair(&w);
+    let bar = w.buildings_of_kind(BuildingKind::Bar)[0];
+    {
+        let b = w.comp_mut::<Building>(bar).expect("bar");
+        b.owner = Some(a);
+        b.revenue_today = 5;
+    }
+    w.remove::<citysim::Job>(a);
+    w.remove::<citysim::Job>(s);
+    // The spouse is busy elsewhere: only the owner is a candidate.
+    w.comp_mut::<Brain>(s).expect("brain").emigrating = true;
+    assert_eq!(household::owner_operator(&w, bar, citysim::Role::Bartender), Some(a), "the jobless owner first");
+    w.insert(a, citysim::components::Retired { since: 0 });
+    assert_eq!(household::owner_operator(&w, bar, citysim::Role::Bartender), None, "a retired owner is not rehired");
+    w.remove::<citysim::components::Retired>(a);
+    citysim::systems::life::note_quit(&mut w, a, Some(bar));
+    assert_eq!(household::owner_operator(&w, bar, citysim::Role::Bartender), None, "nor one who just quit it");
+}

@@ -519,7 +519,10 @@ pub fn owner_operator(world: &World, employer: EntityId, role: crate::components
         return None;
     }
     let owner = world.comp::<Building>(employer).and_then(|bd| bd.owner).filter(|&o| world.has::<Brain>(o))?;
-    let _ = role;
+    // Review fix 1: the same gate as every other hire (`demography::pick_candidate`):
+    // the role's age band, the retired and the frail-exited (`careers::admits`),
+    // and a quitter's rehire block (`life::quit_blocks`).
+    let band = crate::systems::careers::hire_band(world, role);
     let members: Vec<EntityId> = std::iter::once(owner).chain(world.spouse_of(owner)).collect();
     members.into_iter().find(|&m| {
         crate::systems::law::living(world, m)
@@ -528,6 +531,9 @@ pub fn owner_operator(world: &World, employer: EntityId, role: crate::components
             && !world.has::<Sentence>(m)
             && crate::systems::life::exec_corp(world, m).is_none()
             && world.comp::<Brain>(m).is_some_and(|b| !b.emigrating)
+            && !crate::systems::life::quit_blocks(world, m, employer)
+            && crate::systems::careers::admits(world, m, band)
+            && crate::systems::dollhouse::hire_ok(world, role)
     })
 }
 
