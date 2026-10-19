@@ -195,6 +195,9 @@ impl LocationKey {
             BuildingKind::School => LocationKey::Workplace,
             // M16b phase 2: a Private Prison has no staff role.
             BuildingKind::Prison => LocationKey::Street,
+            // Lives at work phase 7: someone else's Station (its own guards
+            // are at their post: `observe`'s Station arm).
+            BuildingKind::Station => LocationKey::Street,
         }
     }
 }
@@ -615,6 +618,21 @@ impl WorldState {
                     LocationKey::Workplace
                 } else {
                     LocationKey::Hotel
+                }
+            }
+            // Lives at work phase 7 (§ 5.2): a Station's guard is at his post
+            // (the Jail key) inside his own Station, and not at it inside the
+            // Precinct or another Station.
+            Some(b)
+                if world
+                    .comp::<Building>(b)
+                    .is_some_and(|bd| matches!(bd.kind, BuildingKind::Jail | BuildingKind::Station))
+                    && crate::systems::law::station_post(world, agent).is_some() =>
+            {
+                if crate::systems::law::station_post(world, agent) == Some(b) {
+                    LocationKey::Jail
+                } else {
+                    LocationKey::Street
                 }
             }
             Some(b) => match world.comp::<Building>(b) {

@@ -812,6 +812,30 @@ pub struct Jobs2Cols {
     pub leader_cut_coins: i64,
     #[serde(skip_serializing_if = "is_zero_i64")]
     pub lieutenant_cut_coins: i64,
+    // Lives at work phase 7 (§ 5.2, § 5.3): `stations` and `execs`,
+    // `execs_spire` are the day's counts (Stations standing; corp execs, and
+    // those housed at `exec_home_tier` or better); the rest are the day's
+    // bookings at a Station (fines and nights served there among them), the
+    // van's transfers, the arrests whose nearest Station was full (the
+    // escort sent on) and the bookings with the Precinct full.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub stations: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub station_bookings: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub station_fines: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub station_nights: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub transfers: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub stations_full: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub precinct_full: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub execs: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub execs_spire: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -1086,6 +1110,15 @@ impl Jobs2Cols {
                 "lieutenant_raids",
                 "leader_cut_coins",
                 "lieutenant_cut_coins",
+                "stations",
+                "station_bookings",
+                "station_fines",
+                "station_nights",
+                "transfers",
+                "stations_full",
+                "precinct_full",
+                "execs",
+                "execs_spire",
             ]
             .into_iter()
             .map(str::to_string),
@@ -1354,6 +1387,15 @@ impl Jobs2Cols {
             self.lieutenant_raids.to_string(),
             self.leader_cut_coins.to_string(),
             self.lieutenant_cut_coins.to_string(),
+            self.stations.to_string(),
+            self.station_bookings.to_string(),
+            self.station_fines.to_string(),
+            self.station_nights.to_string(),
+            self.transfers.to_string(),
+            self.stations_full.to_string(),
+            self.precinct_full.to_string(),
+            self.execs.to_string(),
+            self.execs_spire.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

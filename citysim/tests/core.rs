@@ -1327,6 +1327,30 @@ fn core_20k() {
         r.corps_alive,
         r.corps_seeded,
     );
+    // Lives at work phase 7 (§ 9.1): the Stations' bullets (the 2k map has
+    // none; the 20k island is their city).
+    let j = |f: fn(&citysim::stats::Jobs2Cols) -> u32| r.sum(0, DAYS, |x| x.jobs2.as_ref().map_or(0, f)) as u64;
+    let (bookings, fines, nights, transfers, sent_on, full) = (
+        j(|c| c.station_bookings),
+        j(|c| c.station_fines),
+        j(|c| c.station_nights),
+        j(|c| c.transfers),
+        j(|c| c.stations_full),
+        j(|c| c.precinct_full),
+    );
+    let stations = r.rows.last().and_then(|x| x.jobs2.as_ref()).map_or(0, |c| c.stations);
+    let (execs, spire) = r.rows.last().and_then(|x| x.jobs2.as_ref()).map_or((0, 0), |c| (c.execs, c.execs_spire));
+    eprintln!(
+        "FINDING stations {stations}: bookings {bookings} (fines {fines}, nights {nights}), transfers {transfers}, escorts sent on {sent_on}, Precinct full {full}; execs in the Spire {spire}/{execs} on day {DAYS}"
+    );
+    if Config::load().law.stations {
+        if bookings == 0 {
+            failures.push("no Station booking in 30 days at 20k".into());
+        }
+        if transfers == 0 {
+            failures.push("no transfer at transfer_hour in 30 days at 20k".into());
+        }
+    }
     eprintln!("ticks/s {:.0} (two runs in parallel; floor {TPS_FLOOR_20K:.0}, printed)", r.tps);
     for f in &failures {
         eprintln!("FAIL {f}");

@@ -1822,6 +1822,10 @@ impl World {
         crate::prof::timed!("new::dollhouse::seed", systems::dollhouse::seed(&mut w));
         crate::prof::timed!("new::braindance::seed", systems::braindance::seed(&mut w));
         crate::prof::timed!("new::ages::seed", systems::ages::seed(&mut w));
+        // Lives at work phase 7 (§ 5.2): the district Stations on the Lots
+        // left and the seeded guards posted (no RNG; nothing with `[law]
+        // stations` off).
+        crate::prof::timed!("new::stations::seed", systems::stations::seed(&mut w));
         // Jobs and room J15: the trade places of every standing building the
         // map and the seeding passes put up (no RNG).
         crate::prof::timed!("new::trades::seed", systems::trades::seed(&mut w));

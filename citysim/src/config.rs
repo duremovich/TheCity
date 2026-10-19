@@ -2873,6 +2873,10 @@ impl BuildingCfg {
         }
     }
     /// Jobs & lives phase 7 (§ 6.1): a School (its teachers).
+    /// Lives at work phase 7: the Station's row with `[buildings.station]`
+    /// absent (stations off: none stands).
+    pub const STATION_OFF: BuildingCfg = BuildingCfg { capacity: 0, stock_cap: 0, staff: 0, ..BuildingCfg::BASE };
+
     pub fn school() -> BuildingCfg {
         BuildingCfg {
             capacity: 40,
@@ -3097,6 +3101,11 @@ pub struct BuildingsCfg {
     /// Jobs & lives phase 7: none stands with `[ages]` off.
     #[serde(default = "BuildingCfg::school")]
     pub school: BuildingCfg,
+    /// Lives at work phase 7 (§ 5.2): the Station's seats (its guards and
+    /// its held; the cells are `[law] station_cells`). Absent (and not
+    /// written) with `[law] stations` off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub station: Option<BuildingCfg>,
 }
 
 impl BuildingsCfg {
@@ -3142,6 +3151,7 @@ impl BuildingsCfg {
             BuildingKind::BdStudio => &self.bd_studio,
             BuildingKind::BlackClinic => &self.black_clinic,
             BuildingKind::School => &self.school,
+            BuildingKind::Station => self.station.as_ref().unwrap_or(&BuildingCfg::STATION_OFF),
         }
     }
 }
@@ -3809,6 +3819,28 @@ pub struct LawCfg {
     /// C30, C31: a Fixer owner at this heat bribes and may buy a guard.
     #[serde(default = "LawCfg::d_corrupt_heat")]
     pub corrupt_heat: f32,
+    // --- Lives at work phase 7 (§ 5.2): district stations, under the
+    // `[lives]` master (`CITYSIM_STATIONS_OFF=1`). Off, every key below is
+    // 0 and none is written into a save (`LawCfg::strip_stations`).
+    /// Seed a Station in the districts far from the Precinct; guards post
+    /// there and the escort books at the nearest with a free cell.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stations: bool,
+    /// A district gets a Station only when its Lot's door is at least this
+    /// many tiles (Manhattan) from the Precinct's door and from every
+    /// Station already placed.
+    #[serde(default, skip_serializing_if = "is_zero_u32_cfg")]
+    pub station_min_tiles: u32,
+    /// A Station's cells: the held it books before an escort is sent on.
+    #[serde(default, skip_serializing_if = "is_zero_u32_cfg")]
+    pub station_cells: u32,
+    /// The van's hour, in ticks of the day: every held body whose sentence
+    /// runs past the next van goes to the Precinct.
+    #[serde(default, skip_serializing_if = "is_zero_u16_cfg")]
+    pub transfer_hour: u16,
+    /// The share of a Station's guards on its desk a shift (the rest patrol).
+    #[serde(default, skip_serializing_if = "is_zero_f32_cfg")]
+    pub station_desk_share: f32,
 }
 
 impl LawCfg {
@@ -3870,6 +3902,15 @@ fn default_pursuit_radius() -> u32 {
 }
 
 impl LawCfg {
+    /// Lives at work phase 7 (§ 5.2): the stations' keys off (0, not written).
+    pub fn strip_stations(&mut self) {
+        self.stations = false;
+        self.station_min_tiles = 0;
+        self.station_cells = 0;
+        self.transfer_hour = 0;
+        self.station_desk_share = 0.0;
+    }
+
     /// The `[law]` block of `assets/config.toml`, for saves written before it existed.
     pub fn from_assets() -> LawCfg {
         let dir = Config::find_assets_dir()
@@ -7383,6 +7424,16 @@ pub struct LifeCfg {
     pub beg_dry_max: u8,
     /// ... for this many hours.
     pub beg_cool_hours: u64,
+    /// Lives at work phase 7 (§ 5.3), under the `[lives]` master
+    /// (`CITYSIM_SPIRE_HOMES_OFF=1`; 0 is off and not written): a corp
+    /// exec's Home is of this tier or better (2: the Spire) when one has
+    /// room, at seed, daily, and on relocation; no one is evicted for it.
+    #[serde(skip_serializing_if = "is_zero_u8_cfg")]
+    pub exec_home_tier: u8,
+    /// § 5.3: the Spire's Homes are checked at seed against `execs ×
+    /// exec_home_spare` beds and the result printed (never an eviction).
+    #[serde(skip_serializing_if = "is_zero_f32_cfg")]
+    pub exec_home_spare: f32,
 }
 
 impl Default for LifeCfg {
@@ -7490,6 +7541,8 @@ impl Default for LifeCfg {
             steal_can_buy: 12.0,
             beg_dry_max: 3,
             beg_cool_hours: 1,
+            exec_home_tier: 0,
+            exec_home_spare: 0.0,
         }
     }
 }
@@ -8019,6 +8072,13 @@ impl Config {
         }
     }
 
+    /// Lives at work phase 7 (§ 5.2): the stations off, `[law]`'s station
+    /// keys 0 and `[buildings.station]` absent (none written into a save).
+    pub fn strip_stations(&mut self) {
+        self.law.strip_stations();
+        self.buildings.station = None;
+    }
+
     /// Lives at work phase 2: the phase's deed keys at 0 in every deed table
     /// (the off switches; the deeds are never posted off).
     pub fn without_household_deeds(&mut self) {
@@ -8112,6 +8172,8 @@ impl Config {
             cfg.strip_tower();
             cfg.strip_careers();
             cfg.gangs.strip_lieutenants();
+            cfg.strip_stations();
+            cfg.life.exec_home_tier = 0;
         }
         // Lives at work phase 3 (§ 2.2, § 3.5): the civic switch's A/B and
         // identity device; and a config with `[service] civic = false` by
@@ -8154,6 +8216,21 @@ impl Config {
         }
         if !cfg.gangs.lieutenants {
             cfg.gangs.strip_lieutenants();
+        }
+        // Lives at work phase 7 (§ 5.2, § 5.3): the stations' and the Spire
+        // homes' switches, the same shape (a config with either off by any
+        // path writes none of its keys).
+        if std::env::var("CITYSIM_STATIONS_OFF").is_ok_and(|v| v == "1") {
+            cfg.law.stations = false;
+        }
+        if !cfg.law.stations {
+            cfg.strip_stations();
+        }
+        if std::env::var("CITYSIM_SPIRE_HOMES_OFF").is_ok_and(|v| v == "1") {
+            cfg.life.exec_home_tier = 0;
+        }
+        if cfg.life.exec_home_tier == 0 {
+            cfg.life.exec_home_spare = 0.0;
         }
         // Lives at work phase 2 (§ 3): the household's A/B and identity device
         // (the section and the phase's deed keys cleared, so the off save

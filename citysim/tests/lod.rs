@@ -175,6 +175,9 @@ fn test_full_vs_statistical_within_15pct() {
         // Lives at work phase 6 (§ 6): retirements, lieutenant-led raids
         // and the adult-days (both per 1,000 adult-days by tier, printed).
         careers: [f64; 3],
+        // Lives at work phase 7 (§ 6): bookings at a Station and arrests
+        // (the 2k city has no Station on the shipped map; printed).
+        stations: [f64; 2],
     }
     // The paid-leisure mirror (Jobs & lives phase 7b): the venue kinds of
     // the calibration city's ladder.
@@ -357,6 +360,14 @@ fn test_full_vs_statistical_within_15pct() {
                     .sum::<f64>(),
                 adult_days as f64,
             ],
+            stations: [
+                w.stats
+                    .history
+                    .iter()
+                    .map(|r| r.jobs2.as_ref().map_or(0.0, |j| f64::from(j.station_bookings)))
+                    .sum::<f64>(),
+                w.stats.history.iter().map(|r| f64::from(r.arrests)).sum::<f64>(),
+            ],
         }
     }
     // Six cities per tier, pooled: one 30-day city's theft rate varies by a
@@ -379,7 +390,20 @@ fn test_full_vs_statistical_within_15pct() {
         let stims = std::array::from_fn(|j| runs.iter().map(|r| r.stims[j]).sum::<f64>());
         let papers = std::array::from_fn(|j| runs.iter().map(|r| r.papers[j]).sum::<f64>());
         let careers = std::array::from_fn(|j| runs.iter().map(|r| r.careers[j]).sum::<f64>());
-        Run { rates, actors: counts.map(|c| c / total), venues, paid, encounters, door, cab, stims, papers, careers }
+        let stations = std::array::from_fn(|j| runs.iter().map(|r| r.stations[j]).sum::<f64>());
+        Run {
+            rates,
+            actors: counts.map(|c| c / total),
+            venues,
+            paid,
+            encounters,
+            door,
+            cab,
+            stims,
+            papers,
+            careers,
+            stations,
+        }
     };
     let full = pooled(Lod::Full);
     let stat = pooled(Lod::Statistical);
@@ -529,6 +553,17 @@ fn test_full_vs_statistical_within_15pct() {
             per(&stat, 1),
             full.careers[1],
             stat.careers[1]
+        );
+        // Lives at work phase 7 (§ 6): bookings at a Station per arrest by
+        // tier (the escort walks to the nearest; the Statistical arrest is
+        // `p_theft_caught`, re-learned at the gate's regen; printed).
+        let per = |r: &Run| if r.stations[1] > 0.0 { r.stations[0] / r.stations[1] } else { 0.0 };
+        eprintln!(
+            "FINDING Station bookings per arrest  Full {:5.3}  Statistical {:5.3}  ({:.0} / {:.0} arrests)",
+            per(&full),
+            per(&stat),
+            full.stations[1],
+            stat.stations[1]
         );
     }
     assert!(failures.is_empty(), "{failures:?}");

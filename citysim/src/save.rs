@@ -222,7 +222,14 @@ use crate::world::World;
 /// `min_age`/`max_age` and the `[gangs]` lieutenants' keys (written only on)
 /// and the `Jobs2Cols` phase-6 columns (serde defaults). An off save is
 /// byte-identical to version 40's.
-pub const SAVE_VERSION: u8 = 41;
+/// 42 (Lives at work phase 7, § 5.2, § 5.3): `BuildingKind::Station` (a
+/// Station's held are sentenced bodies inside it, so the cells and the
+/// van's list are read off `Position` and the `Sentence`: no new store),
+/// `EventKind::Transferred`, the `[law]` stations' keys,
+/// `[buildings.station]`, `[life] exec_home_tier`/`exec_home_spare` (written
+/// only on) and the `Jobs2Cols` phase-7 columns (serde defaults). An off
+/// save is byte-identical to version 41's.
+pub const SAVE_VERSION: u8 = 42;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

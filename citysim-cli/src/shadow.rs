@@ -678,6 +678,9 @@ struct Track {
     /// The spouse at the window's start (`World::spouse_of`); a marriage or a
     /// death inside the window does not move it.
     spouse: Option<EntityId>,
+    /// Lives at work phase 7 (§ 5.3): the Home's tier at the last minute
+    /// alive (`None` homeless).
+    home_tier: Option<u8>,
     /// Hours (tick / 60) in which a social move or a HangOut named the spouse.
     spouse_named_hours: BTreeSet<Tick>,
     /// Hourly samples with the spouse alive; of those co-located and both awake;
@@ -828,6 +831,7 @@ impl Track {
             bouts: 0,
             bouts_present: 0,
             spouse: None,
+            home_tier: None,
             spouse_named_hours: BTreeSet::new(),
             spouse_samples: 0,
             spouse_coloc: 0,
@@ -1872,6 +1876,11 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
 fn behaviour_minute(world: &World, t: &mut Track, now: Tick, act: &'static str) {
     let id = t.id;
     t.alive_min += 1;
+    t.home_tier = world
+        .comp::<citysim::components::Household>(id)
+        .and_then(|h| h.home)
+        .and_then(|h| world.comp::<citysim::Building>(h))
+        .map(|b| b.tier);
     if act == "work" {
         t.work_min += 1;
     }
@@ -2644,6 +2653,10 @@ struct Agg {
     shifts_met: u32,
     encounters: u64,
     source_kinds: BTreeMap<String, u32>,
+    /// Phase 7 (§ 5.3): picks housed at the window's end, and of them in the
+    /// Spire (tier 2).
+    housed: u32,
+    spire: u32,
 }
 
 impl Agg {
@@ -2696,6 +2709,8 @@ impl Agg {
             self.spouse_coloc_stat += t.spouse_coloc_stat;
         }
         self.hang_empty += t.hang_empty;
+        self.housed += u32::from(t.home_tier.is_some());
+        self.spire += u32::from(t.home_tier.is_some_and(|x| x >= 2));
         for s in t.shifts.iter().filter(|s| s.whole && s.workday && s.free && s.employer.is_some()) {
             let served = s.nonstaff > 0 || s.source_events > 0;
             self.served_shifts += 1;
@@ -2715,6 +2730,8 @@ impl Agg {
     /// Pool another agent's sums into these.
     fn merge(&mut self, o: &Agg) {
         self.idle_min += o.idle_min;
+        self.housed += o.housed;
+        self.spire += o.spire;
         self.married += o.married;
         self.married_min += o.married_min;
         self.never_named += o.never_named;
@@ -3369,7 +3386,7 @@ fn lives_line(text: &mut String, city: &str, label: &str, a: &Agg) {
         text,
         "PROBE lives {city} {label}: n {} agent-days {days:.1} | idle_h/d {:.2} | married {} never_named {} never_coloc {} \
          named/wk {:.2} coloc_h/wk {:.2} (stat-spouse {:.2}) | hang/wk {:.2} empty {:.2} ({}/{}) | shifts {} servedable \
-         {:.2} any {:.2} bodies/h {:.2} venue_visits/shift {:.2} met {:.2} enc/shift {:.2} | kinds: {}",
+         {:.2} any {:.2} bodies/h {:.2} venue_visits/shift {:.2} met {:.2} enc/shift {:.2} | travel_h/wk {:.2}          spire {}/{} | kinds: {}",
         a.agents,
         per_day(a.idle_min as f64 / 60.0),
         a.married,
@@ -3389,6 +3406,9 @@ fn lives_line(text: &mut String, city: &str, label: &str, a: &Agg) {
         if a.served_shifts > 0 { a.venue_visits as f64 / f64::from(a.served_shifts) } else { 0.0 },
         share(a.shifts_met, a.served_shifts),
         if a.served_shifts > 0 { a.encounters as f64 / f64::from(a.served_shifts) } else { 0.0 },
+        per_day(a.travel_min as f64 / 60.0) * 7.0,
+        a.spire,
+        a.housed,
         if kinds.is_empty() { "none".to_string() } else { kinds.join(", ") }
     );
 }

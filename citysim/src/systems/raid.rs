@@ -694,6 +694,12 @@ pub fn breach(world: &mut World, actor: EntityId) -> Option<Outcome> {
             .map(|g| g.members.clone())
             .unwrap_or_default()
             .into_iter()
+            // Lives at work phase 7 (§ 5.2): a member in a Station's cells is
+            // not in the Precinct (the van brings him by 04:00).
+            .filter(|&m| {
+                world.buildings_of_kind(BuildingKind::Station).is_empty()
+                    || world.comp::<crate::components::Position>(m).and_then(|p| p.building) == Some(jail)
+            })
             .filter_map(|m| world.comp::<Sentence>(m).map(|s| (Some(m) != boss, s.until_tick.saturating_sub(now), m)))
             .collect();
         // The boss first (false sorts first), then the longest remaining sentence.

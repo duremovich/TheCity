@@ -1194,7 +1194,10 @@ impl World {
             // M10: several of each; the agent's own (D21).
             LocationKey::Market => target.or_else(|| self.local(agent, K::Market)),
             LocationKey::Bar => target.or_else(|| self.local(agent, K::Bar)),
-            LocationKey::Jail => target.or_else(|| self.building_of_kind(K::Jail)),
+            // Lives at work phase 7 (§ 5.2): an escort's cells (the nearest
+            // of the Precinct and the Stations with a free cell), a Station
+            // guard's post; else the Precinct.
+            LocationKey::Jail => target.or_else(|| crate::systems::law::jail_for(self, agent)),
             LocationKey::Cemetery => target.or_else(|| self.building_of_kind(K::Cemetery)),
             LocationKey::Hall => target.or_else(|| self.building_of_kind(K::Hall)),
             LocationKey::Hideout => target.or_else(|| crate::systems::gang::hideout_for(self, agent)),
@@ -1331,8 +1334,10 @@ impl World {
     /// Guards enter the Jail whatever its occupancy: the prisoner cap is the
     /// law system's rule (fines and early releases), not the door's.
     pub fn capacity_exempt(&self, agent: EntityId, b: EntityId) -> bool {
-        let guard_at_jail = self.comp::<Building>(b).is_some_and(|bd| bd.kind == crate::components::BuildingKind::Jail)
-            && crate::systems::law::is_guard(self, agent);
+        // Lives at work phase 7: and at a Station (its desk and its cells).
+        let guard_at_jail = self.comp::<Building>(b).is_some_and(|bd| {
+            matches!(bd.kind, crate::components::BuildingKind::Jail | crate::components::BuildingKind::Station)
+        }) && crate::systems::law::is_guard(self, agent);
         // Residents always get into their own Home (births may exceed the cap).
         let own_home = self.comp::<Household>(agent).and_then(|h| h.home) == Some(b);
         // M12: a booked guest gets into their Hotel, a squatter into the

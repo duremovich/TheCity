@@ -171,6 +171,8 @@ pub fn build_on_lot(
             | BuildingKind::BlackClinic
             // Jobs & lives phase 7 (§ 6.1).
             | BuildingKind::School
+            // Lives at work phase 7 (§ 5.2): the city's Stations.
+            | BuildingKind::Station
     ) {
         return Err(format!("cannot build a {} on a Lot", kind.label()));
     }
