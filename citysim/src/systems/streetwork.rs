@@ -1105,10 +1105,12 @@ pub fn full_cab(world: &mut World, id: EntityId, target: &crate::exec::GotoTarge
     if !crate::systems::service::street_on(world) {
         return None;
     }
-    let job = world.comp::<Job>(id)?.clone();
+    // Review fix 10: the cheap checks on a borrow; the Job cloned only for the roll.
+    let job = world.comp::<Job>(id)?;
     if target.building.is_none() || target.building != job.employer || world.jobs2.cab_rolled.contains(&id) {
         return None;
     }
+    let job = job.clone();
     world.jobs2.cab_rolled.insert(id);
     let ride = cab_roll(world, id, &job)?;
     let here = crate::exec::walk_origin(world, id)?;
@@ -1170,6 +1172,14 @@ pub fn exec_ride(world: &mut World, id: EntityId, target: &crate::exec::GotoTarg
     }
     let tier = crate::systems::life::exec_home_tier(world);
     if tier == 0 || world.has::<Job>(id) || world.jobs2.cab_rolled.contains(&id) {
+        return None;
+    }
+    // Review fix 10: a GoTo to a corp's building whose exec he is, before the
+    // scan of every corp (`Corp.buildings` and `Building.owner` agree:
+    // `ownership::transfer_building`).
+    let to = target.building?;
+    let owner = world.corp_of_building(to)?;
+    if world.comp::<Corp>(owner).and_then(|c| c.exec) != Some(id) {
         return None;
     }
     let corp = crate::systems::life::exec_corp(world, id)?;
