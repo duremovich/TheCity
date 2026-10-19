@@ -2016,15 +2016,14 @@ fn widow(strong: bool) -> (World, EntityId, EntityId) {
     // brother's share. The market price moves day to day (on the moved city
     // the pick's killer read 323-559 over the week, a 162-280 deposit
     // against 40 and half of 200), so the brother holds twice what the
-    // price after the killing needs.
-    let price = contracts::organic_price(
-        &w,
-        ContractKind::Hit,
-        &Target::Agent(killer),
-        Some(her),
-        Some(her),
-        contracts::nearest_fixer(&w, her),
-    );
+    // price after the killing needs. Gate 8d (OPEN-133): staged against the
+    // Fixer's own quote too, the price a thin book falls back to (on the
+    // deposit's city her book thinned by the midnight she decided: the Hit
+    // priced 87 at the pick and 801 at the decision, her want unaffordable,
+    // and she hunted him herself).
+    let fixer = contracts::nearest_fixer(&w, her);
+    let price = contracts::organic_price(&w, ContractKind::Hit, &Target::Agent(killer), Some(her), Some(her), fixer)
+        .max(contracts::quote(&w, ContractKind::Hit, &Target::Agent(killer), fixer));
     let need = citysim::systems::hitmarket::deposit_of(&w, 2 * price) - 40;
     let share = w.config.hitmarket.kin_share.max(0.01);
     w.comp_mut::<Wallet>(brother).expect("wallet").coins = 200.max((need as f32 / share).ceil() as i64 + 2);
