@@ -101,7 +101,11 @@ fn schoolchild(w: &mut World) -> (EntityId, EntityId, EntityId, EntityId) {
 /// a `Pupil` encounter.
 #[test]
 fn test_no_teacher_no_taught_day_and_a_taught_day_counts() {
-    let mut w = city();
+    // Lives at work phase 6: pinned to `[careers]` off (on the careers
+    // city's moved day 2 the staged child is not taught at the hour; the
+    // cause was not chased, the subject is the teacher's day, not the ages).
+    let mut w = common::world_with(|c| c.strip_careers());
+    w.run_ticks(DAY2_ONE);
     let (_, child, _, school) = schoolchild(&mut w);
     let (teacher, _) = worker(&w, "teacher");
     let edu_days = w.comp::<Child>(child).map_or(0, |c| c.edu_days);

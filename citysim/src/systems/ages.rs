@@ -83,7 +83,7 @@ impl AgesState {
     }
 }
 
-fn years(world: &World, id: EntityId) -> u32 {
+pub fn years(world: &World, id: EntityId) -> u32 {
     world.comp::<Identity>(id).map_or(0, |i| i.age_years())
 }
 
@@ -428,32 +428,55 @@ fn kin(world: &mut World) {
         .filter(|&a| !world.has::<Job>(a) && !world.has::<Sentence>(a) && world.gang_of(a).is_none())
         .collect();
     for e in elders {
-        let home = world.comp::<Household>(e).and_then(|h| h.home);
-        let kids: Vec<EntityId> = crate::systems::demography::children_of_agent(world, e)
-            .into_iter()
-            .filter(|&c| crate::systems::demography::is_adult(world, c) && crate::systems::law::living(world, c))
-            .collect();
-        // Already under a grown child's roof: stays.
-        if home.is_some() && kids.iter().any(|&c| world.comp::<Household>(c).and_then(|h| h.home) == home) {
-            continue;
-        }
-        let target = kids.iter().copied().filter_map(|c| world.comp::<Household>(c).and_then(|h| h.home)).find(|&h| {
-            Some(h) != home
-                && world.comp::<Building>(h).is_some_and(|b| {
-                    b.kind == BuildingKind::Home
-                        && !b.demolished
-                        && world.residents_of(h).len() < usize::from(b.capacity.max(1))
-                })
-        });
-        let Some(h) = target else { continue };
+        let Some(h) = kin_home(world, e) else { continue };
         if hash(world, PURPOSE_KIN, key(e), day) >= cfg.kin_take_in_p {
             continue;
         }
-        world.set_home(e, Some(h));
-        ownership::jobs2_row(world).elders_taken_in += 1;
-        let text = format!("{} moved in with family at {}", world.name_of(e), world.name_of(h));
-        world.push_event(EventKind::Housed, &[e, h], text);
+        move_in(world, e, h);
     }
+}
+
+/// [`kin`]'s target for `e`: the Home (with room) of an adult living child
+/// of `e`'s housed elsewhere (the child of the lowest id); `None` while `e`
+/// is already under a grown child's roof. Lives at work phase 6 (§ 4.4):
+/// the retirement to kin reads it too.
+pub fn kin_home(world: &World, e: EntityId) -> Option<EntityId> {
+    let home = world.comp::<Household>(e).and_then(|h| h.home);
+    let kids: Vec<EntityId> = crate::systems::demography::children_of_agent(world, e)
+        .into_iter()
+        .filter(|&c| crate::systems::demography::is_adult(world, c) && crate::systems::law::living(world, c))
+        .collect();
+    // Already under a grown child's roof: stays.
+    if home.is_some() && kids.iter().any(|&c| world.comp::<Household>(c).and_then(|h| h.home) == home) {
+        return None;
+    }
+    kids.iter().copied().filter_map(|c| world.comp::<Household>(c).and_then(|h| h.home)).find(|&h| {
+        Some(h) != home
+            && world.comp::<Building>(h).is_some_and(|b| {
+                b.kind == BuildingKind::Home
+                    && !b.demolished
+                    && world.residents_of(h).len() < usize::from(b.capacity.max(1))
+            })
+    })
+}
+
+/// `e` lives under an adult living child's roof (Lives at work phase 6,
+/// § 4.4: a retired elder kept by kin is not sent back to work).
+pub fn with_kin(world: &World, e: EntityId) -> bool {
+    let Some(home) = world.comp::<Household>(e).and_then(|h| h.home) else { return false };
+    crate::systems::demography::children_of_agent(world, e).into_iter().any(|c| {
+        crate::systems::demography::is_adult(world, c)
+            && crate::systems::law::living(world, c)
+            && world.comp::<Household>(c).and_then(|h| h.home) == Some(home)
+    })
+}
+
+/// [`kin`]'s take-in: `e` moves into `h` (a `Housed` event, `elders_taken_in`).
+pub fn move_in(world: &mut World, e: EntityId, h: EntityId) {
+    world.set_home(e, Some(h));
+    ownership::jobs2_row(world).elders_taken_in += 1;
+    let text = format!("{} moved in with family at {}", world.name_of(e), world.name_of(h));
+    world.push_event(EventKind::Housed, &[e, h], text);
 }
 
 // ---------------------------------------------------------------------------

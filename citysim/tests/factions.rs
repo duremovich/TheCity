@@ -1315,7 +1315,10 @@ fn test_order_job_holds_until_settled_and_members_follow_expand() {
     assert!(w.missions.contains_key(&id), "the crew marches as a mission");
     let crew = w.contracts[&id].crew.clone();
     assert!(!crew.is_empty() && crew.len() <= usize::from(w.config.fixers.crew_max));
-    let outside = recruits.iter().copied().find(|m| !crew.contains(m)).expect("a member outside the crew");
+    // Lives at work phase 6 (§ 4.5): not the leader (he delegates the street orders).
+    let leader = w.comp::<Gang>(g0).and_then(|g| g.leader);
+    let outside =
+        recruits.iter().copied().find(|m| !crew.contains(m) && Some(*m) != leader).expect("a member outside the crew");
     assert_eq!(gang::following_order(&w, outside), Some(Order::Expand), "outside the crew: Expand");
     // The daily rescore holds it (no dwell, no hysteresis can move it).
     let h = w.config.gangs.hysteresis;

@@ -443,6 +443,12 @@ fn run_city(seed: u64, days: u64, cfg: Config) -> SeedRun {
                 ("exec's decision", j.decisions),
                 ("byline story", j.bylines),
                 ("walk-in paper sale", j.walk_ins_served),
+                // Lives at work phase 6 (§ 9.1).
+                ("retirement", j.retirements),
+                ("frailty exit", j.frail_exits),
+                ("foreman's own Hire", j.foreman_hires),
+                ("lieutenant-led raid", j.lieutenant_raids),
+                ("leader's cut", pos(j.leader_cut_coins)),
             ] {
                 *r.marks.entry(k).or_insert(0) += v;
             }
@@ -1022,6 +1028,13 @@ fn jobs2_printed() -> Vec<Mechanism> {
         "exec's decision",        // [38, 19, 32]
         "byline story",           // [895, 919, 968]
         "walk-in paper sale",     // [79, 34, 54] pickups (the order is paid at midnight)
+        // Lives at work phase 6 (§ 9.1, printed until the gate; `tests/careers.rs` and the
+        // loader and retirement probes in `tests/person.rs` carry each).
+        "retirement",          // [279, 279, 315]
+        "frailty exit",        // [51, 34, 61]
+        "foreman's own Hire",  // [3408, 2861, 2930]
+        "lieutenant-led raid", // [8, 1, 5]: rare at 2k (a raid a week a city)
+        "leader's cut",        // [14, 10, 11] days with one
     ]
     .into_iter()
     .map(|k| (k, m(k)))

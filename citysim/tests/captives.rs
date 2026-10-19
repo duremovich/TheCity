@@ -32,6 +32,10 @@ fn world() -> World {
     // Jobs & lives phase 1: and without the industries (they take the Lots
     // and the jobs that set this city's gangs and businesses).
     c.jobs2.enabled = false;
+    // Lives at work phase 6: nor the careers and lieutenants (their seeded
+    // jobs and ranks move the gangs this file's scenes are cut from).
+    c.strip_careers();
+    c.gangs.strip_lieutenants();
     World::new(42, c)
 }
 

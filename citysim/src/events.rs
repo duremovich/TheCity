@@ -443,10 +443,13 @@ pub enum EventKind {
     // --- Lives at work phase 4 (docs/LIVES_AT_WORK.md § 2.3).
     /// `[rider, driver, garage]`: a cab fare dodged (the rider rode short).
     FareShort,
+    // --- Lives at work phase 6 (docs/LIVES_AT_WORK.md § 4.4).
+    /// `[worker, employer]`: a worker retired (on savings or to kin).
+    Retired,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 220] = [
+    pub const ALL: [EventKind; 221] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -667,6 +670,7 @@ impl EventKind {
         EventKind::CampBreakout,
         EventKind::Notice,
         EventKind::FareShort,
+        EventKind::Retired,
     ];
 }
 

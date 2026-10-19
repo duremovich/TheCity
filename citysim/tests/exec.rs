@@ -152,7 +152,12 @@ fn test_lod_assigns_fifty_full() {
 
 #[test]
 fn test_night_guard_works_both_halves_of_the_shift() {
-    let mut w = world(8);
+    // Lives at work phase 6: pinned to `[careers]` off (its seeded jobs move
+    // which night guard the scene picks and his evening; the subject is the
+    // night shift's two halves).
+    let mut cfg = Config::load().dole_city().v1_profile();
+    cfg.strip_careers();
+    let mut w = World::new(8, cfg);
     let guard = w
         .citizens()
         .into_iter()

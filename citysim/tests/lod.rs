@@ -172,6 +172,9 @@ fn test_full_vs_statistical_within_15pct() {
         // Lives at work phase 5 (§ 6): papers sold (the walk-in's forger and
         // the clerk's bribe) and the adult-days.
         papers: [f64; 2],
+        // Lives at work phase 6 (§ 6): retirements, lieutenant-led raids
+        // and the adult-days (both per 1,000 adult-days by tier, printed).
+        careers: [f64; 3],
     }
     // The paid-leisure mirror (Jobs & lives phase 7b): the venue kinds of
     // the calibration city's ladder.
@@ -345,6 +348,15 @@ fn test_full_vs_statistical_within_15pct() {
                     .sum::<f64>(),
                 adult_days as f64,
             ],
+            careers: [
+                w.stats.history.iter().map(|r| r.jobs2.as_ref().map_or(0.0, |j| f64::from(j.retirements))).sum::<f64>(),
+                w.stats
+                    .history
+                    .iter()
+                    .map(|r| r.jobs2.as_ref().map_or(0.0, |j| f64::from(j.lieutenant_raids)))
+                    .sum::<f64>(),
+                adult_days as f64,
+            ],
         }
     }
     // Six cities per tier, pooled: one 30-day city's theft rate varies by a
@@ -366,7 +378,8 @@ fn test_full_vs_statistical_within_15pct() {
         let cab = std::array::from_fn(|j| runs.iter().map(|r| r.cab[j]).sum::<f64>());
         let stims = std::array::from_fn(|j| runs.iter().map(|r| r.stims[j]).sum::<f64>());
         let papers = std::array::from_fn(|j| runs.iter().map(|r| r.papers[j]).sum::<f64>());
-        Run { rates, actors: counts.map(|c| c / total), venues, paid, encounters, door, cab, stims, papers }
+        let careers = std::array::from_fn(|j| runs.iter().map(|r| r.careers[j]).sum::<f64>());
+        Run { rates, actors: counts.map(|c| c / total), venues, paid, encounters, door, cab, stims, papers, careers }
     };
     let full = pooled(Lod::Full);
     let stat = pooled(Lod::Statistical);
@@ -498,6 +511,24 @@ fn test_full_vs_statistical_within_15pct() {
             per(&stat),
             full.papers[0],
             stat.papers[0]
+        );
+        // Lives at work phase 6 (§ 6): retirements and lieutenant-led raids
+        // per 1,000 adult-days by tier (midnight and the raid's resolution
+        // are world-side; printed).
+        let per = |r: &Run, i: usize| if r.careers[2] > 0.0 { 1000.0 * r.careers[i] / r.careers[2] } else { 0.0 };
+        eprintln!(
+            "FINDING retirements/1000 adult-days  Full {:7.3}  Statistical {:7.3}  ({:.0} / {:.0})",
+            per(&full, 0),
+            per(&stat, 0),
+            full.careers[0],
+            stat.careers[0]
+        );
+        eprintln!(
+            "FINDING lieutenant raids/1000 adult-days  Full {:7.3}  Statistical {:7.3}  ({:.0} / {:.0})",
+            per(&full, 1),
+            per(&stat, 1),
+            full.careers[1],
+            stat.careers[1]
         );
     }
     assert!(failures.is_empty(), "{failures:?}");

@@ -415,6 +415,9 @@ fn test_graded_vacancy_goes_to_merit_and_tenure_moves_up() {
         .into_iter()
         .filter(|&a| {
             demography::is_adult(&w, a) && !w.has::<Job>(a) && w.comp::<Brain>(a).is_some_and(|b| !b.emigrating)
+                // Lives at work phase 6: one the post's gate admits (not
+                // retired, not too frail).
+                && citysim::systems::careers::age_ok(&w, a, manager)
         })
         .take(2)
         .collect();

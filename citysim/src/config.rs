@@ -304,6 +304,79 @@ pub struct Config {
     /// at its defaults (the off save is byte-identical).
     #[serde(default, skip_serializing_if = "HouseholdCfg::is_default")]
     pub household: HouseholdCfg,
+    /// Lives at work phase 6 (§ 4.1-4.4): age bands, seniority and the
+    /// foreman, the profession, retirement and the frailty exit, under the
+    /// `[lives]` master (`CITYSIM_CAREERS_OFF=1`). Not written into a save
+    /// at its defaults (the off save is byte-identical).
+    #[serde(default, skip_serializing_if = "CareersCfg::is_default")]
+    pub careers: CareersCfg,
+    /// Lives at work phase 6 (§ 4.1): the legacy `Role`s' age bands,
+    /// `[roles.<Name>]` (the `Role`'s name; `Config::unresolved_names`
+    /// checks it). Read with `[careers] enabled`; empty (not written) off.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub roles: std::collections::BTreeMap<String, RoleCfg>,
+}
+
+/// Lives at work phase 6 `[careers]` (docs/LIVES_AT_WORK.md § 4.1-4.4).
+/// Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CareersCfg {
+    pub enabled: bool,
+    /// § 4.2: a seeded Job's seniority is `min(years over the row's
+    /// min_age, this) × DAYS_PER_YEAR × u` days.
+    pub seniority_cap_years: u32,
+    /// § 4.2: the foreman is the most experienced worker this old or older.
+    pub foreman_min_age: u32,
+    /// § 4.2: the foreman's wage multiplier.
+    pub foreman_premium: f32,
+    /// § 4.3: shifts worked in a trade before it is the profession.
+    pub profession_min_days: u32,
+    /// § 4.3: a candidate holding the vacancy's profession ranks this many
+    /// tiles nearer (the hiring key's offset, capped with skill and the
+    /// rehire bonus at 512).
+    pub profession_w: u32,
+    /// § 4.4: a worker this old retires on savings or kin ...
+    pub retire_from_years: u32,
+    /// ... when the household's coins cover this many days of its costs.
+    pub retire_days: u32,
+    /// § 4.4: a worker whose `ages::work_mult` falls under this is let go.
+    pub frail_exit_mult: f32,
+    /// § 4.4: a retired agent under this many coins is retired no more.
+    pub unretire_coins: i64,
+}
+
+impl Default for CareersCfg {
+    fn default() -> Self {
+        CareersCfg {
+            enabled: false,
+            seniority_cap_years: 30,
+            foreman_min_age: 30,
+            foreman_premium: 1.25,
+            profession_min_days: 14,
+            profession_w: 400,
+            retire_from_years: 62,
+            retire_days: 60,
+            frail_exit_mult: 0.6,
+            unretire_coins: 20,
+        }
+    }
+}
+
+impl CareersCfg {
+    /// Not written into a save at its defaults (off).
+    pub fn is_default(&self) -> bool {
+        *self == CareersCfg::default()
+    }
+}
+
+/// Lives at work phase 6 `[roles.<Name>]` (§ 4.1): a legacy role's age band
+/// in years (0 none).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RoleCfg {
+    pub min_age: u32,
+    pub max_age: u32,
 }
 
 /// Lives at work phase 2 `[household]` (docs/LIVES_AT_WORK.md § 3): the
@@ -2078,6 +2151,12 @@ impl Config {
                 out.push(format!("[[serves]] key {:?} is neither a trade id nor a Role", s.key));
             }
         }
+        // Lives at work phase 6 (§ 4.1): a `[roles.<Name>]` key is a legacy role's name.
+        for k in self.roles.keys() {
+            if !Role::ALL.iter().any(|r| format!("{r:?}") == *k) {
+                out.push(format!("[roles] key {k:?} is not a Role"));
+            }
+        }
         out
     }
 }
@@ -2483,6 +2562,16 @@ pub struct TradeCfg {
     /// `household::tied_housing`). Read with `[service] civic`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub tied_housing: bool,
+    /// Lives at work phase 6 (§ 4.1): the row's hiring age band in years
+    /// (0 none). Read with `[careers] enabled`; 0 (not written) off.
+    #[serde(default, skip_serializing_if = "is_zero_u32_cfg")]
+    pub min_age: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32_cfg")]
+    pub max_age: u32,
+}
+
+fn is_zero_usize_cfg(v: &usize) -> bool {
+    *v == 0
 }
 
 fn is_zero_u8_cfg(v: &u8) -> bool {
@@ -3459,6 +3548,26 @@ pub struct GangsCfg {
     pub stat_deal_prior: f32,
     #[serde(default = "GangsCfg::default_stat_prior_days")]
     pub stat_prior_days: f32,
+    /// Lives at work phase 6 (§ 4.5): lieutenants, delegation, the cut and
+    /// the ladder, under the `[lives]` master (`CITYSIM_LIEUTENANTS_OFF=1`).
+    /// Off, every key below is 0 and none is written into a save.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub lieutenants: bool,
+    /// Rank 1 to the top `1 + members / lieutenant_per` after the leader.
+    #[serde(default, skip_serializing_if = "is_zero_usize_cfg")]
+    pub lieutenant_per: usize,
+    /// The leader delegates the march and the shakedowns while the gang
+    /// has this many fit members.
+    #[serde(default, skip_serializing_if = "is_zero_usize_cfg")]
+    pub delegate_min_fit: usize,
+    /// The payout's cut off the top: the leader's, and the lieutenants' shared.
+    #[serde(default, skip_serializing_if = "is_zero_f32_cfg")]
+    pub leader_cut: f32,
+    #[serde(default, skip_serializing_if = "is_zero_f32_cfg")]
+    pub lieutenant_cut: f32,
+    /// The leader score's weight per raid won as its leader.
+    #[serde(default, skip_serializing_if = "is_zero_f32_cfg")]
+    pub raid_w: f32,
 }
 
 impl GangsCfg {
@@ -3515,6 +3624,16 @@ impl GangsCfg {
         self.split_base = 0.0;
         self.corp_raid_cap = 0;
         self.raid_min_members = 0;
+    }
+
+    /// Lives at work phase 6 (§ 4.5): the lieutenants' keys off (0, not written).
+    pub fn strip_lieutenants(&mut self) {
+        self.lieutenants = false;
+        self.lieutenant_per = 0;
+        self.delegate_min_fit = 0;
+        self.leader_cut = 0.0;
+        self.lieutenant_cut = 0.0;
+        self.raid_w = 0.0;
     }
 
     /// The `[gangs]` block of `assets/config.toml`, for saves written before it existed.
@@ -7888,6 +8007,18 @@ impl Config {
         self.gossip.deed_sev.decided = 0.0;
     }
 
+    /// Lives at work phase 6 (§ 4.1-4.4): the careers switch off, `[careers]`
+    /// at its defaults, the trade rows' bands 0 and `[roles]` empty (none
+    /// written into a save).
+    pub fn strip_careers(&mut self) {
+        self.careers = CareersCfg::default();
+        self.roles.clear();
+        for t in &mut self.trades {
+            t.min_age = 0;
+            t.max_age = 0;
+        }
+    }
+
     /// Lives at work phase 2: the phase's deed keys at 0 in every deed table
     /// (the off switches; the deeds are never posted off).
     pub fn without_household_deeds(&mut self) {
@@ -7979,6 +8110,8 @@ impl Config {
             cfg.strip_civic();
             cfg.strip_street();
             cfg.strip_tower();
+            cfg.strip_careers();
+            cfg.gangs.strip_lieutenants();
         }
         // Lives at work phase 3 (§ 2.2, § 3.5): the civic switch's A/B and
         // identity device; and a config with `[service] civic = false` by
@@ -8006,6 +8139,21 @@ impl Config {
         }
         if !cfg.service.tower {
             cfg.strip_tower();
+        }
+        // Lives at work phase 6 (§ 4): the careers' and the lieutenants'
+        // switches, the same shape (a config with either off by any path
+        // writes none of its keys).
+        if std::env::var("CITYSIM_CAREERS_OFF").is_ok_and(|v| v == "1") {
+            cfg.careers.enabled = false;
+        }
+        if !cfg.careers.enabled {
+            cfg.strip_careers();
+        }
+        if std::env::var("CITYSIM_LIEUTENANTS_OFF").is_ok_and(|v| v == "1") {
+            cfg.gangs.lieutenants = false;
+        }
+        if !cfg.gangs.lieutenants {
+            cfg.gangs.strip_lieutenants();
         }
         // Lives at work phase 2 (§ 3): the household's A/B and identity device
         // (the section and the phase's deed keys cleared, so the off save

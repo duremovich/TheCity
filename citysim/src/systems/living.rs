@@ -97,6 +97,10 @@ pub fn run(world: &mut World) {
     // Jobs & lives phase 7: the children's routines, the kin, the
     // prosthetics (nothing with `[ages]` off).
     crate::systems::ages::daily(world);
+    // Lives at work phase 6 (§ 4): retirements, frailty exits, the foremen,
+    // the gangs' lieutenants (nothing with `[careers]` / `[gangs]
+    // lieutenants` off).
+    crate::systems::careers::daily(world);
     // L2 phase 2: the spots, the wealth decile, the venues' hand-over.
     crate::systems::leisure::daily(world);
     // The Real economy E27, E34, E37, E39, E40, E42: the kitchens' day, the

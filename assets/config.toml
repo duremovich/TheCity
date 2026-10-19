@@ -301,6 +301,15 @@ stat_extort_prior = 0.02
 stat_claim_prior = 0.02
 stat_deal_prior = 0.01
 stat_prior_days = 30.0
+# Lives at work phase 6 (docs/LIVES_AT_WORK.md § 4.5): leaders lead, read by systems/careers.rs and gang.rs, under
+# [lives] enabled (`CITYSIM_LIEUTENANTS_OFF=1`: every key below 0 and unwritten). Placeholders.
+lieutenants = true
+lieutenant_per = 8                 # rank 1 to the top 1 + members / this after the leader (leader_scores)
+delegate_min_fit = 5               # with this many fit members the leader neither marches nor shakes down (Expand, Squat,
+                                   # Harvest, VirtRaid, the raids); he keeps Lead (collect, call), parleys and defends
+leader_cut = 0.2                   # the payout's pool: this to the leader off the top ...
+lieutenant_cut = 0.1               # ... and this shared by the lieutenants, before the equal shares
+raid_w = 0.05                      # leader_scores + raids won as the raid's leader x this (the ladder)
 
 # Flat terms on each order's score (product of considerations + flat). Retaliate's 0.6 lets a
 # grudge beat Expand for any leader with greed < 1; LieLow's 0.15 keeps it always available;
@@ -2482,6 +2491,8 @@ model = "service"
 [[trades]]
 id = "bouncer"
 label = "Bouncer"
+min_age = 18                     # Lives at work phase 6 (§ 4.1): the hiring age band ([careers]; 0 none)
+max_age = 60
 workplace = ["Club", "Den", "FightPit", "StripClub"]
 staff_per_floor = 2
 wage = 6
@@ -2492,6 +2503,8 @@ model = "service"
 [[trades]]
 id = "dancer"
 label = "Dancer"
+min_age = 18                     # Lives at work phase 6 (§ 4.1): the hiring age band ([careers]; 0 none)
+max_age = 45
 workplace = ["Club", "StripClub"]
 staff_per_floor = 3
 wage = 6
@@ -2513,6 +2526,8 @@ model = "service"
 [[trades]]
 id = "camp_warden"
 label = "Camp Warden"
+min_age = 25                     # Lives at work phase 6 (§ 4.1): the hiring age band ([careers]; 0 none)
+max_age = 65
 workplace = ["Camp"]
 staff_per_floor = 2
 wage = 5
@@ -2584,6 +2599,8 @@ corp_only = true
 [[trades]]
 id = "packer"
 label = "Packer"
+min_age = 18                     # Lives at work phase 6 (§ 4.1): the hiring age band ([careers]; 0 none)
+max_age = 60
 workplace = ["PackingPlant"]
 staff_per_floor = 8
 wage = 6
@@ -2595,6 +2612,8 @@ jobs2 = true
 [[trades]]
 id = "loader"
 label = "Loader"
+min_age = 18                     # Lives at work phase 6 (§ 4.1): the hiring age band ([careers]; 0 none)
+max_age = 60
 workplace = ["FreightYard"]
 staff_per_floor = 14
 wage = 6
@@ -2628,6 +2647,8 @@ jobs2 = true
 [[trades]]
 id = "builder"
 label = "Builder"
+min_age = 18                     # Lives at work phase 6 (§ 4.1): the hiring age band ([careers]; 0 none)
+max_age = 60
 workplace = ["ConstructionYard"]
 staff_per_floor = 12
 wage = 6
@@ -2761,6 +2782,8 @@ street = true
 [[trades]]
 id = "day_labourer"
 label = "Day Labourer"
+min_age = 18                     # Lives at work phase 6 (§ 4.1): the hiring age band ([careers]; 0 none)
+max_age = 60
 workplace = ["ConstructionYard", "FreightYard", "Farm"]
 staff_per_floor = 0
 wage = 5
@@ -2815,6 +2838,8 @@ vice = true
 [[trades]]
 id = "companion"
 label = "Companion"
+min_age = 18                     # Lives at work phase 6 (§ 4.1): the hiring age band ([careers]; 0 none)
+max_age = 45
 workplace = ["Lounge"]
 staff_per_floor = 2
 wage = 5
@@ -2830,6 +2855,8 @@ min_dress = 2
 [[trades]]
 id = "chip_host"
 label = "Contract Host"
+min_age = 18                     # Lives at work phase 6 (§ 4.1): the hiring age band ([careers]; 0 none)
+max_age = 45
 workplace = ["Dollhouse"]
 staff_per_floor = 3
 wage = 6
@@ -2873,6 +2900,7 @@ bd = true
 [[trades]]
 id = "teacher"
 label = "Teacher"
+min_age = 25                     # Lives at work phase 6 (§ 4.1): the hiring age band ([careers]; 0 none)
 workplace = ["School"]
 staff_per_floor = 2
 wage = 6
@@ -2923,6 +2951,8 @@ gray = true
 [[trades]]
 id = "street_worker"
 label = "Street Worker"
+min_age = 18                     # Lives at work phase 6 (§ 4.1): the hiring age band ([careers]; 0 none)
+max_age = 50
 workplace = []
 staff_per_floor = 0
 wage = 0
@@ -4103,3 +4133,34 @@ visit_hour_from = 10               # § 3.5: the visit's hour of the day, hashed
 visit_hour_to = 20
 visit_flat = 0.2                   # § 3.5: the Visit goal's flat bonus (a hurt kin's reason 1.0, an elder's 0.6)
 visit_belonging = 0.2              # § 3.5: the visitor's belonging gain (both tiers)
+
+# Lives at work phase 6 (docs/LIVES_AT_WORK.md § 4.1-4.4): ages, careers and the foreman, read by systems/careers.rs,
+# under [lives] enabled (`CITYSIM_CAREERS_OFF=1`: [careers] and [roles] unwritten, the trade rows' bands 0). The
+# trade rows' bands are their min_age / max_age keys; the legacy roles' are the [roles.<Name>] tables below.
+# Placeholders.
+[careers]
+enabled = true
+seniority_cap_years = 30           # § 4.2: a seeded Job's seniority, min(years over the row's min_age (18 none), this)
+                                   # x DAYS_PER_YEAR x hash(PURPOSE_TENURE, id) days; 0 for a hire after day 0
+foreman_min_age = 30               # § 4.2: the foreman is the most experienced worker (ties the row's skill, the lower id) this old
+foreman_premium = 1.25             # § 4.2: the foreman's wage x this (Job.foreman, set at midnight)
+profession_min_days = 14           # § 4.3: shifts in a trade before it is the profession (a new trade replaces it at this)
+profession_w = 400                 # § 4.3: a holder of the vacancy's profession ranks this many tiles nearer (the offset,
+                                   # capped with skill and the rehire bonus at 512); the knowledge floor admits him
+retire_from_years = 62             # § 4.4: a worker this old retires (midnight) when an adult child takes him in, or when ...
+retire_days = 60                   # ... the household's coins >= this x its daily costs (the mean price x 2 meals x
+                                   # residents + the Home's rent a day)
+frail_exit_mult = 0.6              # § 4.4: a worker whose [ages] work_mult falls under this is let go "too frail"
+unretire_coins = 20                # § 4.4: a retired agent under this many coins is retired no more (the street ladder)
+
+# § 4.1: the legacy roles' hiring age bands (min_age / max_age in years, 0 none).
+[roles.Guard]
+min_age = 18
+max_age = 60
+
+[roles.Fighter]
+min_age = 18
+max_age = 60
+
+[roles.Ripperdoc]
+min_age = 25

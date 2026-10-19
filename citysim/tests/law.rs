@@ -34,7 +34,12 @@ fn test_witness_notice_formula() {
 /// a day.
 #[test]
 fn test_theft_witnessed_by_guard_leads_to_jail_within_1_day() {
-    let mut w = world(21);
+    // Lives at work phase 6: pinned to `[careers]` off (the careers city's
+    // seeded guards and the midnight's retirements move the scene; the
+    // subject is the guard's report and arrest).
+    let mut cfg = Config::load().dole_city().v1_profile();
+    cfg.strip_careers();
+    let mut w = World::new(21, cfg);
     w.config.lod.force = Some(citysim::Lod::Full); // an arbitrary agent must be simulated in full
                                                    // A certain roll for the guard: `witness_base` 0.6 + the guard's bonus
                                                    // at 0.4 (0.3 shipped: 0.9 was a lucky draw), the law's competence

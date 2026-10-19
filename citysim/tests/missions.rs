@@ -546,7 +546,12 @@ fn test_squad_mission_marches_and_brawls() {
     // its muster at 22:00, the strike, the march and the brawl at the
     // target's door; the record settles or fails an attempt, and the
     // mission is over by the end of the march window.
-    let mut w = world();
+    // Lives at work phase 6: pinned to `[careers]` off (its seeded jobs and
+    // the leader's delegation move the squad's scene).
+    let mut cfg = Config::load().dole_city();
+    cfg.strip_careers();
+    cfg.gangs.strip_lieutenants();
+    let mut w = World::new(42, cfg);
     let g = w.gang_list()[0];
     let members = ready_gang(&mut w, g, 4);
     let [buyer, t] = strangers(&w, 2)[..] else { unreachable!() };

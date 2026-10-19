@@ -2391,6 +2391,44 @@ pub fn payout(world: &mut World, gang: EntityId, leader: Option<EntityId>) -> u3
     members.extend(rest);
     let mut paid_members = 0u32;
     let mut paid_total = 0i64;
+    // Lives at work phase 6 (§ 4.5): the cut off the top, the leader's
+    // `leader_cut` and the lieutenants' `lieutenant_cut` shared, before the
+    // equal shares (none off).
+    let mut pool = pool;
+    let mut cut_note = String::new();
+    if pool > 0 && crate::systems::careers::lieutenants_on(world) {
+        let lts: Vec<EntityId> = members
+            .iter()
+            .copied()
+            .filter(|&m| world.comp::<crate::components::GangMember>(m).is_some_and(|x| x.rank == 1))
+            .collect();
+        let boss = world.comp::<Gang>(gang).and_then(|g| g.leader).filter(|l| members.contains(l));
+        let base = pool;
+        let (mut to_leader, mut to_lts) = (0i64, 0i64);
+        if let Some(l) = boss {
+            let c = (world.config.gangs.leader_cut * base as f32).floor() as i64;
+            to_leader = ownership::pay(world, Some(gang), Some(l), c.min(pool), Flow::Tribute);
+            pool -= to_leader;
+        }
+        if !lts.is_empty() {
+            let c = ((world.config.gangs.lieutenant_cut * base as f32).floor() as i64).min(pool);
+            let (share, extra) = (c / lts.len() as i64, c % lts.len() as i64);
+            for (i, &m) in lts.iter().enumerate() {
+                let amount = share + i64::from((i as i64) < extra);
+                if amount > 0 {
+                    to_lts += ownership::pay(world, Some(gang), Some(m), amount, Flow::Tribute);
+                }
+            }
+            pool -= to_lts;
+        }
+        if to_leader > 0 || to_lts > 0 {
+            let row = ownership::jobs2_row(world);
+            row.leader_cut_coins += to_leader;
+            row.lieutenant_cut_coins += to_lts;
+            let who = boss.map_or_else(|| "the leader".to_string(), |l| world.name_of(l));
+            cut_note = format!("; off the top {to_leader} to {who}, {to_lts} to {} lieutenants", lts.len());
+        }
+    }
     if pool > 0 && !members.is_empty() {
         let n = members.len() as i64;
         let share = pool / n;
@@ -2420,7 +2458,7 @@ pub fn payout(world: &mut World, gang: EntityId, leader: Option<EntityId>) -> u3
     world.stats.current.living.collected += paid_members;
     let who = leader.map_or_else(|| "the leader".to_string(), |l| world.name_of(l));
     let text = format!(
-        "{who} collected for {}: {paid_total} to {paid_members} members (the week's tribute and take {week})",
+        "{who} collected for {}: {paid_total} to {paid_members} members (the week's tribute and take {week}{cut_note})",
         world.owner_label(Some(gang))
     );
     let mut actors: Vec<EntityId> = leader.into_iter().collect();

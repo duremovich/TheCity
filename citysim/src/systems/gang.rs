@@ -245,7 +245,7 @@ pub fn join(world: &mut World, id: EntityId) -> bool {
 /// check: `join` does that; tests call this directly.
 pub fn enlist(world: &mut World, id: EntityId, gang: EntityId) {
     let tick = world.tick;
-    world.insert(id, GangMember { gang, rank: 0, joined_tick: tick });
+    world.insert(id, GangMember { gang, rank: 0, joined_tick: tick, raids_led: 0, raids_won: 0 });
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         if let Err(i) = g.members.binary_search(&id) {
             g.members.insert(i, id);
@@ -322,6 +322,9 @@ pub fn leader_veteran(world: &World, m: EntityId) -> bool {
 /// [`leader_ranking`] with each member's score, best first.
 pub fn leader_scores(world: &World, gang: EntityId) -> Vec<(EntityId, f32)> {
     let Some(g) = world.comp::<Gang>(gang) else { return Vec::new() };
+    // Lives at work phase 6 (§ 4.5, the ladder): + raids won as the head × `raid_w`.
+    let ladder = crate::systems::careers::lieutenants_on(world);
+    let raid_w = world.config.gangs.raid_w;
     let mut ranked: Vec<(EntityId, f32, bool)> = g
         .members
         .iter()
@@ -329,7 +332,11 @@ pub fn leader_scores(world: &World, gang: EntityId) -> Vec<(EntityId, f32)> {
         .filter(|&m| world.has::<Brain>(m) && !world.has::<Sentence>(m))
         .map(|m| {
             let loyalty = world.comp::<Personality>(m).map_or(0.0, |p| p.loyalty);
-            (m, loyalty + gang_days(world, m) / 100.0, leader_veteran(world, m))
+            let mut score = loyalty + gang_days(world, m) / 100.0;
+            if ladder {
+                score += raid_w * f32::from(world.comp::<GangMember>(m).map_or(0, |x| x.raids_won));
+            }
+            (m, score, leader_veteran(world, m))
         })
         .collect();
     // Shadow V4 bug 8: a member of `[gangs] leader_min_days` or more ranks
@@ -372,9 +379,23 @@ fn recompute_leader_inner(world: &mut World, gang: EntityId, fallen: Option<Enti
     let kept = crowned.filter(|&c| crate::systems::law::living(world, c) && world.gang_of(c) == Some(gang));
     let crowned = kept.filter(|c| ranking.contains(c));
     let leader = crowned.or_else(|| ranking.first().copied());
+    // Lives at work phase 6 (§ 4.5): rank 1 to the top `1 + members /
+    // lieutenant_per` of the ranking after the leader (none off).
+    let lieutenants: Vec<EntityId> = if crate::systems::careers::lieutenants_on(world) {
+        let n = crate::systems::careers::lieutenant_count(world, members.len());
+        ranking.iter().copied().filter(|&m| Some(m) != leader).take(n).collect()
+    } else {
+        Vec::new()
+    };
     for &m in &members {
         if let Some(gm) = world.comp_mut::<GangMember>(m) {
-            gm.rank = if Some(m) == leader { 2 } else { 0 };
+            gm.rank = if Some(m) == leader {
+                2
+            } else if lieutenants.contains(&m) {
+                1
+            } else {
+                0
+            };
         }
     }
     // A leader who lost the post to a Sentence is the boss until they are out.
@@ -511,7 +532,18 @@ pub fn following_order(world: &World, id: EntityId) -> Option<Order> {
     // M16a (plan C26, phase 2): under Job the members outside the crew keep
     // Expand's GangWork (the crew marches under the Contract goal).
     if g.order == Order::Job {
+        // Lives at work phase 6 (§ 4.5): not a delegating leader.
+        if crate::systems::careers::delegating(world, id) {
+            return None;
+        }
         return Some(Order::Expand);
+    }
+    // Lives at work phase 6 (§ 4.5): a delegating leader works none of the
+    // street orders (Contest's defence and the Lead goal stay his).
+    if matches!(g.order, Order::Expand | Order::Squat | Order::Harvest | Order::VirtRaid)
+        && crate::systems::careers::delegating(world, id)
+    {
+        return None;
     }
     // M14 V30: under VirtRaid the members not running keep GangWork.
     matches!(g.order, Order::Expand | Order::Contest | Order::Squat | Order::Harvest | Order::VirtRaid)
@@ -668,6 +700,11 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
     let theirs: Option<&[EntityId]>;
     let (from, order) = match following_order(world, id) {
         None if world.comp::<Personality>(id).map_or(0.0, |p| p.loyalty) < world.config.gangs.freelance_loyalty => {
+            // Lives at work phase 6 (§ 4.5): a delegating leader does not
+            // shake down for himself either.
+            if crate::systems::careers::delegating(world, id) {
+                return None;
+            }
             theirs = None;
             (actor_tile, None)
         }
@@ -971,6 +1008,10 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
 /// not derelict, no guard within `sight_day_crime` (a Purist gang's
 /// chromed Homes first).
 pub fn stat_extort_target(world: &World, id: EntityId, o: Order) -> Option<EntityId> {
+    // Lives at work phase 6 (§ 4.5): `following_order`'s rule off screen.
+    if crate::systems::careers::delegating(world, id) {
+        return None;
+    }
     let gang = world.gang_of(id)?;
     let g = world.comp::<Gang>(gang)?;
     let own_home = world.comp::<Household>(id).and_then(|h| h.home);

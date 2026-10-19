@@ -1699,6 +1699,8 @@ pub fn reconcile_guards(world: &mut World) {
             .into_iter()
             .filter(|&id| world.has::<Brain>(id) && !world.has::<Job>(id) && !world.has::<Sentence>(id))
             .filter(|&id| crate::systems::demography::is_adult(world, id))
+            // Lives at work phase 6 (§ 4.1, § 4.4): the Guard's band, the retired.
+            .filter(|&id| crate::systems::careers::age_ok(world, id, Role::Guard))
             .filter_map(|id| world.comp::<Personality>(id).map(|p| (ordered_float::OrderedFloat(p.lawfulness), id)))
             .filter(|&(l, _)| l.0 >= 0.4)
             .collect();

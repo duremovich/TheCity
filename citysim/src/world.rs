@@ -901,6 +901,12 @@ pub struct World {
     /// chip came out (only with `[vice] chip` on; an empty store is not written).
     #[serde(default, skip_serializing_if = "all_none")]
     pub chipped: Vec<Option<crate::components::Chipped>>,
+    /// Lives at work phase 6 (§ 4.3, § 4.4): the profession and the retired
+    /// mark (only with `[careers]` on; empty stores are not written).
+    #[serde(default, skip_serializing_if = "all_none")]
+    pub profession: Vec<Option<crate::components::Profession>>,
+    #[serde(default, skip_serializing_if = "all_none")]
+    pub retired: Vec<Option<crate::components::Retired>>,
     /// Hunger as sickness § 4: buildings whose bin holds scraps (rebuilt on load).
     #[serde(skip)]
     pub bins: BTreeSet<EntityId>,
@@ -1333,6 +1339,8 @@ components! {
     health: crate::components::Health,
     schooling: crate::components::Schooling,
     chipped: crate::components::Chipped,
+    profession: crate::components::Profession,
+    retired: crate::components::Retired,
 }
 
 /// Scale S1: a memo cell on the world: skipped by serde and empty in a
@@ -1662,6 +1670,8 @@ impl World {
             health: Vec::new(),
             schooling: Vec::new(),
             chipped: Vec::new(),
+            profession: Vec::new(),
+            retired: Vec::new(),
             bins: BTreeSet::new(),
             rumours: Vec::new(),
             regard: BTreeMap::new(),
@@ -1852,6 +1862,9 @@ impl World {
         // M17 phase 2: the parents' accounts, minted (no RNG; nothing with
         // `[outside]` off).
         crate::prof::timed!("new::outside::seed_parents", systems::outside::seed_parents(&mut w));
+        // Lives at work phase 6 (§ 4.2, § 4.3): the seeded Jobs' seniority
+        // and professions (a hash, no RNG; nothing with `[careers]` off).
+        crate::prof::timed!("new::careers::seed", systems::careers::seed(&mut w));
         w
     }
 
@@ -2137,14 +2150,24 @@ impl World {
         for role in Role::ALL {
             let count = wc.jobs.count(role) as usize;
             let workplaces = role.workplace().and_then(|k| self.buildings_by_kind.get(&k)).cloned().unwrap_or_default();
+            // Lives at work phase 6 (§ 4.1): with careers on, a resident
+            // outside the role's age band is passed over (seeded into
+            // another row, or none); off, every door's first untaken.
+            let band = systems::careers::on_cfg(&self.config)
+                .then(|| systems::careers::band_cfg(&self.config, role))
+                .filter(|&b| b != (0, 0));
+            let fits = |w: &World, i: usize| {
+                band.is_none_or(|b| systems::careers::fits(w.comp::<Identity>(pool[i]).map_or(0, |x| x.age_years()), b))
+            };
             for k in 0..count {
                 let employer = workplaces.get(k % workplaces.len().max(1)).copied();
                 let work_door = employer.and_then(|e| self.comp::<Building>(e)).map(|b| b.door);
                 // `(distance, i, door)`: a resident with a home door and a
                 // workplace door is nearer than `u32::MAX`; else the lowest `i`.
-                let mut pick: Option<(u32, usize, Option<TilePos>)> = doorless.front().map(|&i| (u32::MAX, i, None));
+                let first = |list: &std::collections::VecDeque<usize>| list.iter().copied().find(|&i| fits(self, i));
+                let mut pick: Option<(u32, usize, Option<TilePos>)> = first(&doorless).map(|i| (u32::MAX, i, None));
                 for (&door, list) in &by_door {
-                    let Some(&i) = list.front() else { continue };
+                    let Some(i) = first(list) else { continue };
                     let d = work_door.map_or(u32::MAX, |w| door.manhattan(w));
                     if pick.is_none_or(|(pd, pi, _)| (d, i) < (pd, pi)) {
                         pick = Some((d, i, Some(door)));
@@ -2154,13 +2177,17 @@ impl World {
                 match door {
                     Some(door) => {
                         let list = by_door.get_mut(&door).expect("the picked door");
-                        list.pop_front();
+                        if let Some(at) = list.iter().position(|&x| x == i) {
+                            list.remove(at);
+                        }
                         if list.is_empty() {
                             by_door.remove(&door);
                         }
                     }
                     None => {
-                        doorless.pop_front();
+                        if let Some(at) = doorless.iter().position(|&x| x == i) {
+                            doorless.remove(at);
+                        }
                     }
                 }
                 let id = pool[i];
@@ -2189,6 +2216,8 @@ impl World {
                         duty_fixed: None,
                         grade: 0,
                         until: None,
+                        seniority_days: 0,
+                        foreman: false,
                     },
                 );
             }
@@ -3510,6 +3539,8 @@ impl World {
         self.health.resize_with(n.max(self.health.len()), || None);
         self.schooling.resize_with(n.max(self.schooling.len()), || None);
         self.chipped.resize_with(n.max(self.chipped.len()), || None);
+        self.profession.resize_with(n.max(self.profession.len()), || None);
+        self.retired.resize_with(n.max(self.retired.len()), || None);
         self.trace.resize_with(n.max(self.trace.len()), || None);
         self.life.resize_with(n.max(self.life.len()), || None);
         self.corp.resize_with(n.max(self.corp.len()), || None);

@@ -215,7 +215,14 @@ use crate::world::World;
 /// keys, the `[[serves]]` tower rows and the `decided` deed keys (written
 /// only on) and the `Jobs2Cols` phase-5 columns (serde defaults). An off
 /// save is byte-identical to version 39's.
-pub const SAVE_VERSION: u8 = 40;
+/// 41 (Lives at work phase 6, § 4): `Job.{seniority_days, foreman}`,
+/// `GangMember.{raids_led, raids_won}` (each written while non-zero), the
+/// `Profession` and `Retired` stores (written while they hold anything),
+/// `EventKind::Retired`, `[careers]`, `[roles]`, the trade rows'
+/// `min_age`/`max_age` and the `[gangs]` lieutenants' keys (written only on)
+/// and the `Jobs2Cols` phase-6 columns (serde defaults). An off save is
+/// byte-identical to version 40's.
+pub const SAVE_VERSION: u8 = 41;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

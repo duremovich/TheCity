@@ -402,7 +402,9 @@ pub fn mean_wage_rev(world: &World) -> f32 {
 pub fn gross_wage(world: &World, job: &Job) -> i64 {
     let payer = job.employer.and_then(|e| world.owner_of(e));
     let corp = payer.and_then(|p| world.comp::<Corp>(p));
-    let mult = corp.map_or(1.0, |c| c.wage_mult * c.wage_rev) * job.premium;
+    let mult = corp.map_or(1.0, |c| c.wage_mult * c.wage_rev)
+        * job.premium
+        * crate::systems::careers::foreman_mult(world, job);
     if mult == 1.0 {
         job.wage_per_day
     } else {
@@ -820,7 +822,8 @@ pub fn newest_hire(world: &World, corp: EntityId) -> Option<(EntityId, EntityId)
             let exposed = !crate::systems::classpay::protected(world, a);
             // Lives at work phase 2 (§ 3.4): the owner's household after every non-member.
             let outsider = !crate::systems::household::is_member_of_owner(world, a, b);
-            (!(spare_farms && kind == BuildingKind::Farm)).then_some((exposed, outsider, j.hired_tick, a, b))
+            // Lives at work phase 6 (§ 4.2): newest by experience (`hired_tick` with no seniority).
+            (!(spare_farms && kind == BuildingKind::Farm)).then_some((exposed, outsider, j.start_key(), a, b))
         })
         .max()
         .map(|(_, _, _, a, b)| (a, b))
@@ -834,7 +837,8 @@ fn lay_off(world: &mut World, corp: EntityId) -> bool {
     // Jobs & lives phase 1 (§ 2): the foreman named (nothing off).
     let foreman = crate::systems::industry::foreman_note(world, b, who, "told");
     let text = format!("{name} laid off as {what} by {cname} (laid off: revenue){foreman}");
-    crate::systems::economy::dismiss_as(world, who, Some(b), text, EventKind::LaidOff);
+    let by = crate::systems::careers::foreman_actor(world, b, who);
+    crate::systems::economy::dismiss_by(world, who, Some(b), text, EventKind::LaidOff, by);
     world.stats.current.econ.laid_off += 1;
     true
 }
@@ -891,19 +895,28 @@ fn past_cap_pass(world: &mut World, corp: EntityId, order: f32, lay_off_one: boo
             }
             // Lives at work phase 2 (§ 3.4): the owner's household goes after
             // every non-member (the newest non-member first, as before).
-            let pick = hires
-                .iter()
-                .rev()
-                .find(|&&(_, who)| !crate::systems::household::is_member_of_owner(world, who, b))
-                .or(hires.last());
-            let Some(&(_, who)) = pick else { continue };
+            // Lives at work phase 6 (§ 4.2): newest by experience (the
+            // latest `start_key`, ties the higher id: the newest hire with
+            // no seniority, as before).
+            let newest = |keep: &dyn Fn(EntityId) -> bool| {
+                hires
+                    .iter()
+                    .filter(|&&(_, who)| keep(who))
+                    .filter_map(|&(_, who)| world.comp::<Job>(who).map(|j| (j.start_key(), who)))
+                    .max()
+                    .map(|(_, who)| who)
+            };
+            let pick = newest(&|who| !crate::systems::household::is_member_of_owner(world, who, b))
+                .or_else(|| newest(&|_| true));
+            let Some(who) = pick else { continue };
             let (name, cname) = (world.name_of(who), world.owner_label(Some(corp)));
             let foreman = crate::systems::industry::foreman_note(world, b, who, "told");
             let text = format!(
                 "{name} laid off as {} by {cname} (laid off: revenue, a shift past full staff){foreman}",
                 role.label()
             );
-            crate::systems::economy::dismiss_as(world, who, Some(b), text, EventKind::LaidOff);
+            let by = crate::systems::careers::foreman_actor(world, b, who);
+            crate::systems::economy::dismiss_by(world, who, Some(b), text, EventKind::LaidOff, by);
             world.stats.current.econ.laid_off += 1;
             shed += 1;
             laid = true;

@@ -1671,6 +1671,8 @@ pub fn end_shift(world: &mut World, id: EntityId) {
     // Lives at work phase 1 (§ 2.1): the shift-end rule shared with the
     // Statistical tier (the cook's staff meal, the staffed-shift count).
     crate::systems::service::shift_end(world, id);
+    // Lives at work phase 6 (§ 4.3): the profession's day (both tiers).
+    crate::systems::careers::shift_end(world, id);
     let tick = world.tick;
     let mut owed = false;
     if let Some(j) = world.comp_mut::<Job>(id) {

@@ -124,7 +124,12 @@ fn test_arms_raise_p_win_and_skin_lowers_death() {
 
     // Death share: the loser's death chance is 1 for a bare body, so a Skin
     // T2 loser's share is its (1 − armour) = 0.7.
-    let mut w = World::new(43, Config::load().dole_city());
+    // Lives at work phase 6: pinned to `[careers]` off (its seeded jobs move
+    // the jobless pool this test fights from: 498 losses of the 500 needed
+    // on the careers city; the subject is the fight's armour, not the ages).
+    let mut cfg = Config::load().dole_city();
+    cfg.strip_careers();
+    let mut w = World::new(43, cfg);
     // M16b phase 3: the death roll alone (no wound replaces it).
     w.config.wounded.wound_share = 0.0;
     let pool = free(&w);
