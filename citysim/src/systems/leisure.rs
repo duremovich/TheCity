@@ -1294,8 +1294,11 @@ pub fn spot_of(world: &World, id: EntityId) -> Option<TilePos> {
         return crate::systems::streetwork::street_tile(world, id);
     }
     // Lives at work phase 4: a cab driver's leg (the rider's door, the work door).
-    if let Some(t) = crate::systems::streetwork::fare_tile(world, id) {
-        return Some(t);
+    // Review fix 2: only in the Work plan (another goal's plan reads its own spot).
+    if crate::systems::streetwork::driving(world, id) {
+        if let Some(t) = crate::systems::streetwork::fare_tile(world, id) {
+            return Some(t);
+        }
     }
     world.unwind.get(&id).and_then(|p| p.spot)
 }

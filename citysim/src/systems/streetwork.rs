@@ -476,7 +476,13 @@ fn openings(world: &mut World) {
 /// Hourly (from `living::run`): the vendors' morning stock, the day posts
 /// ended, and at `corner_hour` the dawn pick.
 pub fn hourly(world: &mut World) {
-    if !on(world) || !world.tick.is_multiple_of(TICKS_PER_HOUR) {
+    if !world.tick.is_multiple_of(TICKS_PER_HOUR) {
+        return;
+    }
+    if crate::systems::service::street_on(world) {
+        drop_stale_rides(world);
+    }
+    if !on(world) {
         return;
     }
     restock(world);
@@ -1265,9 +1271,42 @@ fn ride_encounter(world: &mut World, rider: EntityId, driver: Option<EntityId>, 
     }
 }
 
-/// The ride `id` drives now, if any (the first pending with him as driver).
+/// The ride `id` drives now, if any (the first pending with him as
+/// driver, while he can still drive it: [`can_drive`]).
 fn ride_of(world: &World, id: EntityId) -> Option<usize> {
+    if !can_drive(world, id) {
+        return None;
+    }
     world.jobs2.cab_rides.iter().position(|r| r.driver == id)
+}
+
+/// Review fix 2: `id` can still drive a booked ride: alive, free, a cab
+/// driver's Job (a `fare` duty) on its shift. A ride whose driver cannot is
+/// not his ([`ride_of`]) and the hour drops it ([`drop_stale_rides`]); the
+/// rider's leg was timed at the booking, so he arrives all the same (the
+/// off-screen cab's ride).
+fn can_drive(world: &World, id: EntityId) -> bool {
+    crate::systems::law::living(world, id)
+        && !world.has::<Sentence>(id)
+        && world.comp::<Job>(id).is_some_and(|j| fare_duty(world, j) && j.on_shift(world.tick_of_day()))
+}
+
+/// Review fix 2 (`hourly`): drop the booked rides whose driver can no
+/// longer drive them (the shift over, the post lost, jailed or dead).
+fn drop_stale_rides(world: &mut World) {
+    if world.jobs2.cab_rides.is_empty() {
+        return;
+    }
+    let keep: Vec<bool> = world.jobs2.cab_rides.iter().map(|r| can_drive(world, r.driver)).collect();
+    let mut k = keep.into_iter();
+    world.jobs2.cab_rides.retain(|_| k.next().unwrap_or(true));
+}
+
+/// `leisure::spot_of` and the stand-by Rest (`exec::actions`): `id` is on a
+/// fare in his Work plan (a ride of his pending and the plan the fare's;
+/// another goal's plan that pre-empted it reads its own spot).
+pub fn driving(world: &World, id: EntityId) -> bool {
+    world.comp::<Brain>(id).and_then(|b| b.plan_goal()) == Some(GoalKind::Work) && on_fare(world, id)
 }
 
 /// Lives at work phase 4: is `id` a cab driver with a ride pending (the
