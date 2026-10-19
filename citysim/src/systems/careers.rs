@@ -258,7 +258,9 @@ pub fn shift_end(world: &mut World, id: EntityId) {
         world.insert(id, Profession { trade: role, days: 1, last_day: day, next: None });
         return;
     };
-    if p.last_day == day && p.days > 0 && day > 0 {
+    // Review fix 11: one day a day, day 0 included (a seeded profession's
+    // `last_day` 0 counts its seeded tenure as day 0's).
+    if p.last_day == day && p.days > 0 {
         return;
     }
     p.last_day = day;
@@ -342,9 +344,13 @@ fn retire(world: &mut World) {
         .collect();
     for a in workers {
         // The kin take-in first (the `[ages]` rule and odds), then savings.
+        // Review fix 4: a co-resident spouse moves with him, so the child's
+        // Home needs room for both; room for one only, no retirement to kin.
+        let spouse = co_resident_spouse(world, a);
         let kin = ages_on
             .then(|| crate::systems::ages::kin_home(world, a))
             .flatten()
+            .filter(|&h| spouse.is_none() || room_for(world, h, 2))
             .filter(|_| crate::systems::econ::hash_unit(world.seed(), PURPOSE_RETIRE_KIN, key(a), day) < kin_p);
         let (coins, cost) = household_cover(world, a);
         let saved = coins >= i64::from(cfg.retire_days) * cost;
@@ -365,8 +371,27 @@ fn retire(world: &mut World) {
         ownership::jobs2_row(world).retirements += 1;
         if let Some(h) = kin {
             crate::systems::ages::move_in(world, a, h);
+            if let Some(sp) = spouse {
+                crate::systems::ages::move_in_with(world, sp, h);
+            }
         }
     }
+}
+
+/// Review fix 4: `a`'s living spouse when the two share a Home.
+fn co_resident_spouse(world: &World, a: EntityId) -> Option<EntityId> {
+    let home = world.comp::<crate::components::Household>(a).and_then(|h| h.home)?;
+    world.spouse_of(a).filter(|&s| {
+        crate::systems::law::living(world, s)
+            && world.comp::<crate::components::Household>(s).and_then(|h| h.home) == Some(home)
+    })
+}
+
+/// Review fix 4: the Home `h` has room for `n` more residents.
+fn room_for(world: &World, h: EntityId, n: usize) -> bool {
+    world
+        .comp::<crate::components::Building>(h)
+        .is_some_and(|b| world.residents_of(h).len() + n <= usize::from(b.capacity.max(1)))
 }
 
 fn frail_exits(world: &mut World) {

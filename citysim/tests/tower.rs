@@ -293,3 +293,29 @@ fn test_off_city_writes_nothing_in_three_days() {
     on.strip_tower();
     assert!(!on.serves.iter().any(|r| r.tower));
 }
+
+/// Review fix 7: a contract party off the Fixer's hours is credited to a
+/// server on the Fixer's book with room left this hour (`per_hour`); a
+/// server past his cap is not booked again (the owner, else nobody), and
+/// the room never overflows. Failed on the base `f795548` (the full
+/// server's `taken` went past the cap).
+#[test]
+fn test_the_fixers_book_respects_the_hours_cap() {
+    let mut w = common::world();
+    assert!(service::tower_on(&w));
+    let (fixer, forger) = fixer_and_forger(&w);
+    // Midnight of day 1: off the Fixer's hours (the corps' posts).
+    w.tick = TICKS_PER_DAY;
+    let hour = w.tick / TICKS_PER_HOUR;
+    let staff: Vec<EntityId> = w.staff_of(fixer).to_vec();
+    assert!(staff.contains(&forger));
+    for &s in &staff {
+        w.service_room.insert(s, service::Room { hour, taken: 200 });
+    }
+    let party = common::free_adults(&w).into_iter().find(|a| !staff.contains(a)).expect("a party");
+    service::contract_party(&mut w, party, fixer);
+    for &s in &staff {
+        let taken = w.service_room.get(&s).map_or(0, |r| r.taken);
+        assert!(taken <= 200, "a full server is not booked past his cap ({taken})");
+    }
+}

@@ -1416,4 +1416,43 @@ mod lives_street {
         w.config.service.exec_ride = false;
         assert!(sw::exec_ride(&mut w, e, &target).is_none(), "off, no ride");
     }
+
+    /// Review fix 2: a booked `CabRide` belongs to a driver who can still
+    /// drive it. Off his shift the ride is not his (`on_fare` false, no
+    /// fare tile for `leisure::spot_of`) and the hour drops it; on shift
+    /// with another goal's plan, `spot_of` is that goal's spot, not the
+    /// fare's. Failed on the base `f795548` (the ride stuck to him till
+    /// midnight).
+    #[test]
+    fn test_a_stale_cab_ride_is_dropped() {
+        let mut w = city_with(|_| {});
+        let (_, driver) = garage_and_driver(&w);
+        let rider = w.citizens().into_iter().find(|&a| a != driver).expect("a rider");
+        let (from, to) = (citysim::TilePos { x: 3, y: 3 }, citysim::TilePos { x: 5, y: 5 });
+        let ride = sw::CabRide { rider, from, to, driver, fare: 4, tick: w.tick, stage: 0 };
+        // On shift all day: the ride is his, and the Work plan's spot is the fare.
+        if let Some(j) = w.comp_mut::<Job>(driver) {
+            j.shifts = vec![(1, 1440)];
+        }
+        w.jobs2.cab_rides.push(ride);
+        assert!(sw::on_fare(&w, driver));
+        assert_eq!(sw::fare_tile(&w, driver), Some(from));
+        // Another goal's plan: its spot, not the fare's.
+        w.comp_mut::<Brain>(driver).expect("brain").plan = Some(citysim::goap::Plan {
+            goal: citysim::components::GoalKind::Socialise,
+            target: None,
+            steps: vec![],
+            started_tick: w.tick,
+        });
+        assert_ne!(citysim::systems::leisure::spot_of(&w, driver), Some(from), "a pre-empted plan is not the fare's");
+        // The shift over: not his ride, and the hour drops it.
+        if let Some(j) = w.comp_mut::<Job>(driver) {
+            j.shifts = vec![(0, 1)];
+        }
+        assert!(!sw::on_fare(&w, driver), "off shift, the ride is not his");
+        assert_eq!(sw::fare_tile(&w, driver), None);
+        assert!(w.tick.is_multiple_of(TICKS_PER_HOUR));
+        sw::hourly(&mut w);
+        assert!(w.jobs2.cab_rides.iter().all(|r| r.driver != driver), "the hour drops the stale ride");
+    }
 }

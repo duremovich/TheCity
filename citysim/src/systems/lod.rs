@@ -1528,7 +1528,7 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
         && attend.is_none_or(|p| shift_attended(world, id, &job, p))
     {
         let tod = world.tick_of_day();
-        let first = job.shifts.iter().any(|&(start, _)| tod >= start && u32::from(tod) < u32::from(start) + 60);
+        let first = job.first_hour(tod);
         if first {
             for b in crate::systems::trades::round_for(world, id, key) {
                 crate::systems::service::super_stop(world, id, b);

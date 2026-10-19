@@ -352,12 +352,10 @@ fn lift_hour(world: &mut World) {
 }
 
 /// Does `s`'s job start a shift this hour (the roster's and the headcount's
-/// hour, as the madam's `staff_hour`)?
+/// hour, as the madam's `staff_hour`; `Job::first_hour`)?
 fn first_hour(world: &World, s: EntityId) -> bool {
     let tod = world.tick_of_day();
-    world
-        .comp::<Job>(s)
-        .is_some_and(|j| j.shifts.iter().any(|&(start, _)| tod >= start && u32::from(tod) < u32::from(start) + 60))
+    world.comp::<Job>(s).is_some_and(|j| j.first_hour(tod))
 }
 
 /// Lives at work phase 3 (§ 2.2, teacher and camp warden): at the first
@@ -412,7 +410,7 @@ fn civic_hour(world: &mut World) {
 /// (`ages::on_mature` reads it under civic), and the parents who are bodies
 /// at home meet the teacher at the door (a first meeting at a hashed
 /// `0.1 + 0.3u`, `interacted` after; a `Served` memory each side; no walk).
-fn taught(world: &mut World, teacher: EntityId, child: EntityId, school: EntityId, valence: f32) {
+fn taught(world: &mut World, teacher: EntityId, child: EntityId, valence: f32) {
     let floor = world.config.service.teacher_floor;
     let know = world.comp::<crate::components::Skills>(teacher).map_or(0.0, |s| s.knowledge);
     if let Some(c) = world.comp_mut::<Child>(child) {
@@ -435,7 +433,6 @@ fn taught(world: &mut World, teacher: EntityId, child: EntityId, school: EntityI
         }
         world.remember(p, MemoryKind::Served, Some(teacher), salience, valence, false);
         world.remember(teacher, MemoryKind::Served, Some(p), salience, valence, false);
-        let _ = school;
     }
 }
 
@@ -453,7 +450,8 @@ fn tenant(world: &mut World, server: EntityId, tenant: EntityId, block: EntityId
     if arrears > 0 && world.notices_today.insert((tenant, day)) {
         outcome = Outcome::Notice;
         let salience = world.config.service.served_salience;
-        world.remember(tenant, MemoryKind::Served, Some(server), salience, -0.3, false);
+        let v = world.config.service.tune.notice;
+        world.remember(tenant, MemoryKind::Served, Some(server), salience, v, false);
         ownership::jobs2_row(world).notices += 1;
     }
     if due >= 1 && world.purse(Some(tenant)) >= due {
@@ -502,8 +500,9 @@ pub fn jailers_passed(world: &mut World, jail: EntityId) -> Option<EntityId> {
     }
     let on_duty = servers_on_duty(world, jail, ServeKind::Inmate);
     let salience = world.config.service.served_salience;
+    let v = world.config.service.tune.jailbreak;
     for &j in &on_duty {
-        world.remember(j, MemoryKind::Served, None, salience, -0.3, false);
+        world.remember(j, MemoryKind::Served, None, salience, v, false);
     }
     on_duty.first().copied()
 }
@@ -531,9 +530,7 @@ fn staff_hour(world: &mut World) {
             .copied()
             .filter(|&s| {
                 row_of_agent(world, s).is_some_and(|r| r.kind != ServeKind::Staff)
-                    && world.comp::<Job>(s).is_some_and(|j| {
-                        j.shifts.iter().any(|&(start, _)| tod >= start && u32::from(tod) < u32::from(start) + 60)
-                    })
+                    && world.comp::<Job>(s).is_some_and(|j| j.first_hour(tod))
                     && present(world, s, place)
             })
             .collect();
@@ -647,7 +644,7 @@ fn encounter_row(
     // Lives at work phase 3 (§ 2.2): the civic arms.
     let mut outcome = Outcome::Done;
     match (kind, place) {
-        (ServeKind::Pupil, Some(p)) => taught(world, server, served, p, row.valence),
+        (ServeKind::Pupil, Some(_)) => taught(world, server, served, row.valence),
         (ServeKind::Tenant, Some(p)) => outcome = tenant(world, server, served, p),
         _ => {}
     }
@@ -749,8 +746,9 @@ pub fn refused(world: &mut World, id: EntityId, b: EntityId) {
     let bouncer = staff[((u * staff.len() as f32) as usize).min(staff.len() - 1)];
     let Some(row) = row_of_agent(world, bouncer).cloned() else { return };
     let salience = world.config.service.served_salience;
-    world.remember(bouncer, MemoryKind::Served, Some(id), salience, -0.1, false);
-    world.remember(id, MemoryKind::Served, Some(bouncer), salience, -0.3, false);
+    let (vb, vr) = (world.config.service.tune.refused_bouncer, world.config.service.tune.refused);
+    world.remember(bouncer, MemoryKind::Served, Some(id), salience, vb, false);
+    world.remember(id, MemoryKind::Served, Some(bouncer), salience, vr, false);
     if row.event_on.contains(&ServeOutcome::Refused) {
         let text =
             format!("{} turned {} away at the door of {}", world.name_of(bouncer), world.name_of(id), world.name_of(b));
@@ -784,8 +782,9 @@ pub fn maybe_eject(world: &mut World, attacker: EntityId) -> bool {
     world.leave_building(attacker);
     ownership::jobs2_row(world).ejections += 1;
     let salience = world.config.service.served_salience;
-    world.remember(bouncer, MemoryKind::Served, Some(attacker), salience, -0.1, false);
-    world.remember(attacker, MemoryKind::Served, Some(bouncer), salience, -0.4, false);
+    let (vb, va) = (world.config.service.tune.eject_bouncer, world.config.service.tune.ejected);
+    world.remember(bouncer, MemoryKind::Served, Some(attacker), salience, vb, false);
+    world.remember(attacker, MemoryKind::Served, Some(bouncer), salience, va, false);
     let names_it = row_of_agent(world, bouncer).is_some_and(|r| r.event_on.contains(&ServeOutcome::Ejected));
     if names_it {
         let text = format!("{} threw {} out of {}", world.name_of(bouncer), world.name_of(attacker), world.name_of(b));
@@ -1082,19 +1081,30 @@ fn fixer_server(world: &World, fixer: EntityId, served: EntityId) -> Option<Enti
 /// world-side at that hour"; the posts come at midnight and the takes at
 /// the match hour, outside the day shift): the Fixer's `Client` staff
 /// alive and free by the lowest `hash(PURPOSE_FIXER, …)`, else the owner
-/// alive and free.
+/// alive and free. Review fix 7: a staff server with room left this hour
+/// (his row's `per_hour`, as the on-duty pick reads it); all full, the
+/// owner (whose post has no room ledger), else nobody (the contract
+/// stands, the encounter is not credited).
 fn fixer_book(world: &World, fixer: EntityId, party: EntityId) -> Option<EntityId> {
     let hour = world.tick / TICKS_PER_HOUR;
     let free = |s: EntityId| s != party && crate::systems::law::living(world, s) && !world.has::<Sentence>(s);
+    let room = |s: EntityId, cap: u8| world.service_room.get(&s).is_none_or(|r| r.hour != hour || r.taken < cap);
     world
         .staff_of(fixer)
         .iter()
         .copied()
-        .filter(|&s| free(s) && row_of_agent(world, s).is_some_and(|r| r.kind == ServeKind::Client))
+        .filter(|&s| {
+            free(s) && row_of_agent(world, s).is_some_and(|r| r.kind == ServeKind::Client && room(s, r.per_hour))
+        })
         .map(|s| (hash(world, PURPOSE_FIXER, key(fixer) ^ key(party), hour ^ key(s)), s))
         .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
         .map(|(_, s)| s)
-        .or_else(|| world.owner_of(fixer).filter(|&o| world.has::<Brain>(o) && free(o)))
+        // The owner on his own post here is one of the staff above (full).
+        .or_else(|| {
+            world.owner_of(fixer).filter(|&o| {
+                world.has::<Brain>(o) && free(o) && world.comp::<Job>(o).is_none_or(|j| j.employer != Some(fixer))
+            })
+        })
 }
 
 /// The `Client` encounter at the Fixer: a staff server through his row
@@ -1108,7 +1118,8 @@ fn fixer_meet(world: &mut World, server: EntityId, served: EntityId, fixer: Enti
         if r.hour != hour {
             *r = Room { hour, taken: 0 };
         }
-        r.taken += 1;
+        // Both pickers leave room under the cap; saturating, never wrapping.
+        r.taken = r.taken.saturating_add(1);
         encounter(world, server, served, Some(fixer), d, ServeKind::Client, coins);
     } else {
         encounter_post(world, "Fixer", server, served, Some(fixer), d, ServeKind::Client, coins);

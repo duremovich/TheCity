@@ -3764,6 +3764,23 @@ witness_tiles = 3                  # phase 5 § 2.4 (reporter): a witness interv
 move_in_rent_days = 7              # 8d (OPEN-126, Shadow V5 bug 17; Dylan 2026-10-19 "deposit first"): a homeless worker (the hunger fix's first-rent rule) moves into a Home only holding this many days of its rent, paid up front to the owner (Flow::Rent; prepaid rent), so a hired homeless worker sleeps rough and saves from wages. A week, as [rent]'s M11 week up front; the jobless keep rehouse_coins_mult. 0: housed on one day's rent, nothing paid
 exec_ride = true                   # 8d (OPEN-129; Dylan 2026-10-19 "lives in the Spire and rides in"): a corp exec homed at [life] exec_home_tier whose Hq stands in another district is driven to work, timed at the Car's speed: a corp road vehicle if the corp owns one, else the nearest Garage's off-screen cab, the fare ([jobs2] fare_base + fare_per_tile) paid by the corp
 
+# Review fix 8 (doctrine 3): the numbers the service systems read beside their rows; each a Served memory's
+# valence unless named otherwise. Not written into a save at these values.
+[service.tune]
+refused_bouncer = -0.1             # § 2.1 (bouncer): a refusal at the door, the bouncer's side ...
+refused = -0.3                     # ... and the refused's
+eject_bouncer = -0.1               # § 2.1 (bouncer): an ejection, the bouncer's side ...
+ejected = -0.4                     # ... and the attacker's
+notice = -0.3                      # § 2.2 (super): the tenant in arrears served a notice
+jailbreak = -0.3                   # § 2.2 (jailer): each jailer on duty when the Jail is broken
+camp_beating_salience = 0.5        # § 2.2 (warden): a Camp beating's ChildTaken grief to each parent, salience ...
+camp_beating_valence = -0.6        # ... and valence
+fare_dodge_grudge = 0.4            # § 2.3 (cab): the driver's Robbed grudge on a rider who skipped his fare
+breakout_lawfulness = 0.3          # § 3.5: a parent breaks his child out of a Camp alone under this lawfulness ...
+breakout_courage = 0.6             # ... with at least this courage
+pimp_energy = [0.6, 0.4]           # § 2.3 (pimp): the round's GangWork Linear (m, b) on energy ...
+pimp_loyalty = [0.3, 0.7]          # ... and on loyalty
+
 # Lives at work phase 1 (docs/LIVES_AT_WORK.md § 1.1, § 2.1, § 2.2): the [[serves]] rows, one per serving trade.
 # `key` is a [[trades]] id or a legacy Role name (Config::unresolved_names checks it); `kind` names the queue's
 # source (§ 2); `per_hour` the encounters one server takes an hour; `minutes` the diary's share of the hour;
@@ -4165,6 +4182,16 @@ visit_hour_from = 10               # § 3.5: the visit's hour of the day, hashed
 visit_hour_to = 20
 visit_flat = 0.2                   # § 3.5: the Visit goal's flat bonus (a hurt kin's reason 1.0, an elder's 0.6)
 visit_belonging = 0.2              # § 3.5: the visitor's belonging gain (both tiers)
+
+# § 3.5 (review fix 8): the Visit goal's "the reason" by purpose, through Linear { m: curve[0], b: curve[1] }.
+# Not written into a save at these values.
+[household.visit_urgency]
+hurt = 1.0                         # a kin downed, assaulted or arrested
+elder = 0.6                        # an elder parent unmet for elder_visit_days
+camp = 0.8                         # a child taken to a Camp (the parent's answer, phase 3)
+papers = 0.9                       # the Fixer's walk-in pickup (phase 5)
+collect = 0.5                      # the Fixer owner's weekly collection (phase 5)
+curve = [0.5, 0.5]
 
 # Lives at work phase 6 (docs/LIVES_AT_WORK.md § 4.1-4.4): ages, careers and the foreman, read by systems/careers.rs,
 # under [lives] enabled (`CITYSIM_CAREERS_OFF=1`: [careers] and [roles] unwritten, the trade rows' bands 0). The

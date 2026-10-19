@@ -419,6 +419,41 @@ pub struct HouseholdCfg {
     pub visit_hour_to: u8,
     pub visit_flat: f32,
     pub visit_belonging: f32,
+    /// § 3.5 (review fix 8, doctrine 3): the Visit goal's reason by purpose
+    /// and its curve. Left out of a save at its defaults (the shipped values).
+    #[serde(default, skip_serializing_if = "VisitUrgencyCfg::is_default")]
+    pub visit_urgency: VisitUrgencyCfg,
+}
+
+/// `[household.visit_urgency]`: the Visit goal's "the reason" consideration,
+/// by the visit's purpose, through `Linear { m: curve.0, b: curve.1 }`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VisitUrgencyCfg {
+    /// A kin downed, assaulted or arrested.
+    pub hurt: f32,
+    /// An elder parent unmet for `elder_visit_days`.
+    pub elder: f32,
+    /// A child taken to a Camp (the parent's answer).
+    pub camp: f32,
+    /// The Fixer's walk-in pickup (phase 5).
+    pub papers: f32,
+    /// The Fixer owner's weekly collection (phase 5).
+    pub collect: f32,
+    /// The curve's `(m, b)`.
+    pub curve: (f32, f32),
+}
+
+impl Default for VisitUrgencyCfg {
+    fn default() -> Self {
+        VisitUrgencyCfg { hurt: 1.0, elder: 0.6, camp: 0.8, papers: 0.9, collect: 0.5, curve: (0.5, 0.5) }
+    }
+}
+
+impl VisitUrgencyCfg {
+    pub fn is_default(&self) -> bool {
+        *self == VisitUrgencyCfg::default()
+    }
 }
 
 impl Default for HouseholdCfg {
@@ -444,6 +479,7 @@ impl Default for HouseholdCfg {
             visit_hour_to: 20,
             visit_flat: 0.2,
             visit_belonging: 0.2,
+            visit_urgency: VisitUrgencyCfg::default(),
         }
     }
 }
@@ -614,6 +650,66 @@ pub struct ServiceCfg {
     /// the corp (`streetwork::exec_ride`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub exec_ride: bool,
+    /// Review fix 8 (doctrine 3): the phase's memory valences, griefs, the
+    /// fare dodger's grudge, the break-out's thresholds and the pimp's round
+    /// curves. Left out of a save at its defaults (the shipped values).
+    #[serde(default, skip_serializing_if = "ServeTuneCfg::is_default")]
+    pub tune: ServeTuneCfg,
+}
+
+/// `[service.tune]`: the numbers the service systems read beside their
+/// rows (each a `Served` memory's valence unless named otherwise).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ServeTuneCfg {
+    /// § 2.1 (bouncer): a refusal at the door, the bouncer's side and the refused's.
+    pub refused_bouncer: f32,
+    pub refused: f32,
+    /// § 2.1 (bouncer): an ejection, the bouncer's side and the attacker's.
+    pub eject_bouncer: f32,
+    pub ejected: f32,
+    /// § 2.2 (super): the tenant in arrears served a notice.
+    pub notice: f32,
+    /// § 2.2 (jailer): each jailer on duty when the Jail is broken.
+    pub jailbreak: f32,
+    /// § 2.2 (warden): a Camp beating's `ChildTaken` grief to each parent, salience and valence.
+    pub camp_beating_salience: f32,
+    pub camp_beating_valence: f32,
+    /// § 2.3 (cab): the driver's `Robbed` grudge on a rider who skipped his fare.
+    pub fare_dodge_grudge: f32,
+    /// § 3.5: a parent breaks his child out of a Camp alone when lawfulness
+    /// is under `breakout_lawfulness` and courage at least `breakout_courage`.
+    pub breakout_lawfulness: f32,
+    pub breakout_courage: f32,
+    /// § 2.3 (pimp): the round's GangWork curves `(m, b)` on energy and loyalty.
+    pub pimp_energy: (f32, f32),
+    pub pimp_loyalty: (f32, f32),
+}
+
+impl Default for ServeTuneCfg {
+    fn default() -> Self {
+        ServeTuneCfg {
+            refused_bouncer: -0.1,
+            refused: -0.3,
+            eject_bouncer: -0.1,
+            ejected: -0.4,
+            notice: -0.3,
+            jailbreak: -0.3,
+            camp_beating_salience: 0.5,
+            camp_beating_valence: -0.6,
+            fare_dodge_grudge: 0.4,
+            breakout_lawfulness: 0.3,
+            breakout_courage: 0.6,
+            pimp_energy: (0.6, 0.4),
+            pimp_loyalty: (0.3, 0.7),
+        }
+    }
+}
+
+impl ServeTuneCfg {
+    pub fn is_default(&self) -> bool {
+        *self == ServeTuneCfg::default()
+    }
 }
 
 fn is_zero_u32_cfg(v: &u32) -> bool {
@@ -668,6 +764,7 @@ impl Default for ServiceCfg {
             witness_tiles: 0,
             move_in_rent_days: 0,
             exec_ride: false,
+            tune: ServeTuneCfg::default(),
         }
     }
 }

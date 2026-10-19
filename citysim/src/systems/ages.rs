@@ -479,6 +479,15 @@ pub fn move_in(world: &mut World, e: EntityId, h: EntityId) {
     world.push_event(EventKind::Housed, &[e, h], text);
 }
 
+/// Review fix 4 (`careers::retire`): the retiree's co-resident spouse moves
+/// into the same Home with him (a `Housed` event; not an elder's take-in,
+/// so `elders_taken_in` counts the retiree only).
+pub fn move_in_with(world: &mut World, e: EntityId, h: EntityId) {
+    world.set_home(e, Some(h));
+    let text = format!("{} moved in with family at {}", world.name_of(e), world.name_of(h));
+    world.push_event(EventKind::Housed, &[e, h], text);
+}
+
 // ---------------------------------------------------------------------------
 // The passes
 // ---------------------------------------------------------------------------

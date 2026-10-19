@@ -607,3 +607,43 @@ fn service_probe() {
         j[0], j[1], j[2], j[3], j[4]
     );
 }
+
+/// Review fix 3: the first hour of a shift is the shift's first hour, not
+/// the 00:00 continuation of a wrapped night shift (`Job::first_hour`, one
+/// helper for the madam's headcount, the School roster, the Statistical
+/// round and the reporter's beat). A 21:00-06:00 Brothel worker is counted
+/// in at 21:00 and not again at 00:00. Failed on the base `f795548` (a
+/// second `Staff` encounter at midnight).
+#[test]
+fn test_a_wrapped_night_shift_has_one_first_hour() {
+    let mut w = city();
+    let worker_role = w.config.trade_role("brothel_worker").expect("brothel_worker");
+    let madam_role = w.config.trade_role("madam").expect("madam");
+    let (house, workers) = staffed(&w, BuildingKind::Brothel, worker_role, 1);
+    let worker = workers[0];
+    let madam = w
+        .staff_of(house)
+        .iter()
+        .copied()
+        .find(|&s| w.comp::<Job>(s).is_some_and(|j| j.role == madam_role))
+        .expect("a madam at the house");
+    let night = vec![(21 * 60, 1440), (0, 6 * 60)];
+    for s in [worker, madam] {
+        if let Some(j) = w.comp_mut::<Job>(s) {
+            j.shifts = night.clone();
+            j.employer = Some(house);
+        }
+        w.comp_mut::<Brain>(s).expect("brain").lod = Lod::Full;
+        w.enter_building(s, house);
+    }
+    let count =
+        |w: &World| served_count(w, ServeKind::Staff) + w.stats.current.jobs2.as_ref().map_or(0, |j| j.served_waited);
+    for (tick, first) in [(TICKS_PER_DAY + 21 * TICKS_PER_HOUR, true), (2 * TICKS_PER_DAY, false)] {
+        w.tick = tick;
+        assert!(service::present(&w, worker, house), "on duty at {tick}");
+        assert_eq!(w.comp::<Job>(worker).expect("job").first_hour(w.tick_of_day()), first);
+        let before = count(&w);
+        service::hourly(&mut w);
+        assert_eq!(count(&w) > before, first, "the headcount at {tick} (first hour {first})");
+    }
+}

@@ -1109,7 +1109,7 @@ pub fn stat_beats(world: &mut World) {
         .filter_map(|r| {
             let j = world.comp::<Job>(r)?;
             let feed = j.employer?;
-            let first = j.shifts.iter().any(|&(s, _)| tod >= s && u32::from(tod) < u32::from(s) + 60);
+            let first = j.first_hour(tod);
             let stat =
                 world.comp::<crate::components::Brain>(r).is_some_and(|b| b.lod == crate::components::Lod::Statistical);
             (first && stat && crate::systems::service::present(world, r, feed))

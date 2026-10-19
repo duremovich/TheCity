@@ -20,8 +20,8 @@
 //!   `newborn_away_mult` ([`damped`], [`away_mult`]) while both parents'
 //!   energy decays × `newborn_energy_mult` ([`energy_mult`]) and the Home
 //!   feeds the newborn through the pantry ([`daily`]); the household's
-//!   business ([`business_of`]) is offered to its jobless adults first
-//!   ([`owner_operator`]), its heir waits for it ([`waits_for_business`])
+//!   business (a building the agent or the spouse owns) is offered to its jobless adults first
+//!   ([`owner_operator`]), its heir waits for it ([`business_holders`])
 //!   and its members are laid off last ([`is_member_of_owner`]).
 //! - **Visits** (§ 3.5): [`visits_due`] at midnight posts at most one
 //!   `GoalKind::Visit` a day an agent (a kin or spouse downed, assaulted or
@@ -455,35 +455,12 @@ pub fn away_mult(world: &World, id: EntityId, own_home: bool) -> f32 {
     }
 }
 
-/// § 3.4: the household's business: a standing building owned by `id` or
-/// its spouse (a daily read; scan-ok: the midnight job search).
-pub fn business_of(world: &World, id: EntityId) -> Option<EntityId> {
-    if !on(world) {
-        return None;
-    }
-    let spouse = world.spouse_of(id);
-    world.with::<Building>().into_iter().find(|&b| {
-        world.comp::<Building>(b).is_some_and(|bd| {
-            !bd.demolished
-                && !bd.derelict
-                && bd.kind != BuildingKind::Home
-                && (bd.owner == Some(id) || (spouse.is_some() && bd.owner == spouse))
-        })
-    })
-}
-
 /// § 3.4: has `b` taken coins within `abandon_days` (today, or the last days)?
 fn business_live(world: &World, b: EntityId) -> bool {
     let days = usize::from(world.config.household.abandon_days);
     world
         .comp::<Building>(b)
         .is_some_and(|bd| bd.revenue_today > 0 || bd.revenue.iter().rev().take(days).any(|&r| r > 0))
-}
-
-/// § 3.4: `id` waits for its household's business: the business has had a
-/// take within `abandon_days` (so a job search offers it no outside post).
-pub fn waits_for_business(world: &World, id: EntityId) -> bool {
-    business_of(world, id).is_some_and(|b| business_live(world, b))
 }
 
 /// § 3.4 (`demography::job_search`): every adult who waits for a live
@@ -519,7 +496,10 @@ pub fn owner_operator(world: &World, employer: EntityId, role: crate::components
         return None;
     }
     let owner = world.comp::<Building>(employer).and_then(|bd| bd.owner).filter(|&o| world.has::<Brain>(o))?;
-    let _ = role;
+    // Review fix 1: the same gate as every other hire (`demography::pick_candidate`):
+    // the role's age band, the retired and the frail-exited (`careers::admits`),
+    // and a quitter's rehire block (`life::quit_blocks`).
+    let band = crate::systems::careers::hire_band(world, role);
     let members: Vec<EntityId> = std::iter::once(owner).chain(world.spouse_of(owner)).collect();
     members.into_iter().find(|&m| {
         crate::systems::law::living(world, m)
@@ -528,6 +508,9 @@ pub fn owner_operator(world: &World, employer: EntityId, role: crate::components
             && !world.has::<Sentence>(m)
             && crate::systems::life::exec_corp(world, m).is_none()
             && world.comp::<Brain>(m).is_some_and(|b| !b.emigrating)
+            && !crate::systems::life::quit_blocks(world, m, employer)
+            && crate::systems::careers::admits(world, m, band)
+            && crate::systems::dollhouse::hire_ok(world, role)
     })
 }
 
@@ -552,10 +535,11 @@ pub fn daily(world: &mut World) {
     }
     let cost = world.config.household.newborn_cost_per_day;
     let now = world.tick;
+    // Review fix 11: every parent holding a newborn (a widowed or unmarried
+    // one too), not only the `spouses` map's; the set keeps one charge a Home.
     let homes: std::collections::BTreeSet<EntityId> = world
-        .spouses
-        .keys()
-        .copied()
+        .with::<Household>()
+        .into_iter()
         .filter(|&p| world.comp::<Household>(p).and_then(|h| h.newborn_until).is_some_and(|t| t > now))
         .filter_map(|p| home_of(world, p))
         .collect();
@@ -745,7 +729,8 @@ fn camp_answers_due(world: &mut World) -> std::collections::BTreeMap<EntityId, (
 
 /// § 3.5: buy out when the purse holds `buyout_fee` and the Home's pantry
 /// `buyout_food_days` of the child's food; else break out when lawless and
-/// brave (lawfulness < 0.3, courage ≥ 0.6) or a gang member with
+/// brave (lawfulness < `breakout_lawfulness`, courage ≥ `breakout_courage`,
+/// `[service.tune]`) or a gang member with
 /// `breakout_crew` of his gang alive and free; else visit.
 fn answer_of(world: &World, p: EntityId, cfg: &crate::config::ServiceCfg) -> CampAnswer {
     let purse = world.purse(Some(p));
@@ -753,7 +738,10 @@ fn answer_of(world: &World, p: EntityId, cfg: &crate::config::ServiceCfg) -> Cam
     if purse >= cfg.buyout_fee && pantry >= cfg.buyout_food_days * crate::systems::demography::CHILD_FOOD_PER_DAY {
         return CampAnswer::BuyOut;
     }
-    let lawless = world.comp::<Personality>(p).is_some_and(|x| x.lawfulness < 0.3 && x.courage >= 0.6);
+    let t = &cfg.tune;
+    let lawless = world
+        .comp::<Personality>(p)
+        .is_some_and(|x| x.lawfulness < t.breakout_lawfulness && x.courage >= t.breakout_courage);
     let crew = world.gang_of(p).is_some_and(|g| crew_of(world, g, p).len() >= usize::from(cfg.breakout_crew));
     if lawless || crew {
         CampAnswer::BreakOut
@@ -1004,16 +992,17 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
     }
     let on_shift =
         world.comp::<crate::components::Job>(id).is_some_and(|j| crate::utility::goals::shift_reachable(world, id, j));
+    let u = &world.config.household.visit_urgency;
     let urgency = match v.why {
-        VisitWhy::Hurt => 1.0,
-        VisitWhy::Elder => 0.6,
-        VisitWhy::Camp(_) => 0.8,
-        VisitWhy::Papers => 0.9,
-        VisitWhy::Collect => 0.5,
+        VisitWhy::Hurt => u.hurt,
+        VisitWhy::Elder => u.elder,
+        VisitWhy::Camp(_) => u.camp,
+        VisitWhy::Papers => u.papers,
+        VisitWhy::Collect => u.collect,
     };
     let cs = vec![
         Consideration::new("a visit due", can(true), GATE),
-        Consideration::new("the reason", urgency, Curve::Linear { m: 0.5, b: 0.5 }),
+        Consideration::new("the reason", urgency, Curve::Linear { m: u.curve.0, b: u.curve.1 }),
         Consideration::new("not on shift", can(!on_shift), GATE),
     ];
     Some((cs, world.config.household.visit_flat))

@@ -185,9 +185,9 @@ fn test_heir_with_a_household_business_keeps_it() {
         b.owner = Some(a);
         b.revenue_today = 5;
     }
-    assert_eq!(household::business_of(&w, a), Some(bar));
-    assert_eq!(household::business_of(&w, s), Some(bar), "the spouse's too");
-    assert!(household::waits_for_business(&w, s));
+    let holders = household::business_holders(&w);
+    assert!(holders.contains(&a), "the owner waits for it");
+    assert!(holders.contains(&s), "the spouse too");
     w.remove::<citysim::Job>(s);
     assert_eq!(household::owner_operator(&w, bar, citysim::Role::Bartender), Some(s), "the household first");
     assert!(household::is_member_of_owner(&w, s, bar) && !household::is_member_of_owner(&w, w.citizens()[0], bar));
@@ -201,7 +201,7 @@ fn test_heir_with_a_household_business_keeps_it() {
             b.revenue.push_back(0);
         }
     }
-    assert!(!household::waits_for_business(&w, s));
+    assert!(!household::business_holders(&w).contains(&s));
 }
 
 /// § 3.5: a kin assaulted in the last day (a heard rumour) makes a visit
@@ -401,4 +401,84 @@ fn test_a_homeless_worker_pays_the_first_rent_before_moving_in() {
     assert_eq!(common::coins(&w, a), rich - days * rent, "the first rent paid up front");
     let due = w.comp::<Household>(a).map(|h| h.rent_due).expect("household");
     assert!((due + (days * rent) as f32).abs() < 1e-3, "held as prepaid rent ({due})");
+}
+
+/// Review fix 1: the owner-operator hire passes the same gate as every
+/// other hire: a retired owner (or one who just quit the business) is not
+/// rehired into his own business's open post. Failed on the base `f795548`
+/// (the retired owner was rehired every midnight).
+#[test]
+fn test_owner_operator_respects_the_hiring_gate() {
+    let mut w = city();
+    let (a, s, _) = married_pair(&w);
+    let bar = w.buildings_of_kind(BuildingKind::Bar)[0];
+    {
+        let b = w.comp_mut::<Building>(bar).expect("bar");
+        b.owner = Some(a);
+        b.revenue_today = 5;
+    }
+    w.remove::<citysim::Job>(a);
+    w.remove::<citysim::Job>(s);
+    // The spouse is busy elsewhere: only the owner is a candidate.
+    w.comp_mut::<Brain>(s).expect("brain").emigrating = true;
+    assert_eq!(household::owner_operator(&w, bar, citysim::Role::Bartender), Some(a), "the jobless owner first");
+    w.insert(a, citysim::components::Retired { since: 0 });
+    assert_eq!(household::owner_operator(&w, bar, citysim::Role::Bartender), None, "a retired owner is not rehired");
+    w.remove::<citysim::components::Retired>(a);
+    citysim::systems::life::note_quit(&mut w, a, Some(bar));
+    assert_eq!(household::owner_operator(&w, bar, citysim::Role::Bartender), None, "nor one who just quit it");
+}
+
+/// Review fix 6: a HangOut left empty in a Home remembers the Home's spot
+/// tile (its outside door, the tile `SpotKind::Home` is scored by), so
+/// `empty_mult` penalises that Home next time. Failed on the base
+/// `f795548` (the interior tile was stored and never matched a Home spot).
+#[test]
+fn test_an_empty_home_hangout_is_remembered_at_the_spot() {
+    let mut w = city();
+    let alone = common::free_adults(&w)
+        .into_iter()
+        .find(|&a| home(&w, a).is_some_and(|h| w.residents_of(h).len() == 1))
+        .expect("an adult living alone");
+    let h = home(&w, alone).expect("home");
+    let door = w.comp::<Building>(h).map(|b| w.outside_door(b)).expect("door");
+    w.unwind.insert(
+        alone,
+        citysim::living::UnwindPick {
+            rung: citysim::living::Rung::Free,
+            act: citysim::goap::ActionKind::HangOut,
+            venue: Some(h),
+            spot: Some(door),
+            score: 0.0,
+        },
+    );
+    w.enter_building(alone, h);
+    assert_eq!(household::hanging_at_home(&w, alone), Some(h));
+    assert_eq!(household::empty_mult(&w, alone, door), 1.0);
+    let started = w.tick - 1;
+    leisure::on_complete(&mut w, alone, citysim::goap::ActionKind::HangOut, None, started);
+    assert_eq!(
+        household::empty_mult(&w, alone, door),
+        w.config.household.empty_penalty,
+        "the Home's spot tile is remembered empty"
+    );
+}
+
+/// Review fix 11: a newborn's keep is charged to the Home of any parent
+/// holding it, married or not (a widowed parent's Home too). Failed on the
+/// base `f795548` (only the `spouses` map was read: no keep without a living spouse).
+#[test]
+fn test_a_widowed_parents_newborn_is_kept_too() {
+    let mut w = city();
+    let a = common::free_adults(&w)
+        .into_iter()
+        .find(|&a| w.spouse_of(a).is_none() && home(&w, a).is_some())
+        .expect("an unmarried housed adult");
+    let h = home(&w, a).expect("home");
+    let until = w.tick + 5 * TICKS_PER_DAY;
+    w.comp_mut::<Household>(a).expect("household").newborn_until = Some(until);
+    let before = w.comp::<Building>(h).expect("home").child_food_debt;
+    household::daily(&mut w);
+    let after = w.comp::<Building>(h).expect("home").child_food_debt;
+    assert_eq!(after, before + w.config.household.newborn_cost_per_day, "the keep charged without a spouse");
 }

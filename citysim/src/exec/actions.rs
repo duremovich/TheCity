@@ -587,7 +587,7 @@ pub fn finishes_early(world: &World, id: EntityId, kind: ActionKind, started: Ti
             crate::exec::routine::must_leave_for_work(world, id)
                 || (world.comp::<Job>(id).is_some_and(|j| can_work_now(world, id, j))
                     && !crate::systems::streetwork::standing_by(world, id))
-                || crate::systems::streetwork::on_fare(world, id)
+                || crate::systems::streetwork::driving(world, id)
         }
         // Waiting at the workplace for the shift: start the moment it begins.
         ActionKind::Wander => world.comp::<Job>(id).is_some_and(|j| can_work_now(world, id, j)),

@@ -373,7 +373,7 @@ pub fn clash(world: &mut World, actor: EntityId) -> Option<Outcome> {
         // Assault with nobody to bump: released unpunished.
         let until = now + law::sentence_ticks(world, Crime::Assault);
         let capacity = usize::from(world.config.buildings.jail.capacity);
-        let mut free_cells = capacity.saturating_sub(crate::systems::stations::precinct_held(world));
+        let mut free_cells = capacity.saturating_sub(crate::systems::stations::precinct_bound(world));
         for r in tally.losers.iter().copied() {
             if !law::living(world, r) || world.has::<Sentence>(r) {
                 continue;

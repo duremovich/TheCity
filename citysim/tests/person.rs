@@ -2810,14 +2810,21 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
             .and_then(|x| x.leader)
             .is_some_and(|l| law::living(w, l) && w.gang_of(l) == Some(g) && gang::leader_veteran(w, l))
     };
+    // The review fix round's city (f795548 + fixes 1-11: a retiree's spouse
+    // moves with him from day 0) has no gang led by a veteran at 17:00 on
+    // day 12: the probe waits for the first evening that has one (by day 20).
+    let pick = |w: &World| w.gangs().into_iter().filter(|&g| led(w, g)).max_by_key(|&g| (follows(w, g), g));
+    let mut g = pick(&w);
+    for _ in 0..8 {
+        if g.is_some() {
+            break;
+        }
+        w.run_ticks(TICKS_PER_DAY);
+        g = pick(&w);
+    }
+    let g = g.expect("a gang with a living leader");
     let leaders: Vec<EntityId> =
         w.gangs().into_iter().filter_map(|g| w.comp::<citysim::Gang>(g).and_then(|x| x.leader)).collect();
-    let g = w
-        .gangs()
-        .into_iter()
-        .filter(|&g| led(&w, g))
-        .max_by_key(|&g| (follows(&w, g), g))
-        .expect("a gang with a living leader");
     // The probe's own subject, so no change in the city's history reaches him: the
     // first free adult with a Home is stripped of any Job, sentence, contract run or
     // pending goal, made a loyal member of the gang, and kept below the gun gate (a

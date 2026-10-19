@@ -999,7 +999,7 @@ fn vagrancy_hit(world: &mut World, a: EntityId, tile: TilePos, d: DistrictId) {
     }
     if is_statistical(world, a) {
         let Some(jail) = world.building_of_kind(BuildingKind::Jail) else { return };
-        if crate::systems::stations::precinct_held(world) >= capacity {
+        if crate::systems::stations::precinct_bound(world) >= capacity {
             return;
         }
         let until = world.tick + crate::systems::law::sentence_ticks(world, Crime::Vagrancy);
