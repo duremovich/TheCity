@@ -1595,7 +1595,13 @@ fn hangout_done(world: &mut World, id: EntityId, started: Tick) {
         gain *= world.config.life.spot_lone_fun;
         // Lives at work phase 2 (§ 3.3): a spot left early is remembered empty.
         if world.tick.saturating_sub(started) < world.config.leisure.hangout_ticks {
-            if let Some(t) = tile {
+            // Review fix 6: a Home's spot is keyed by its outside door (the
+            // tile `SpotKind::Home` is scored by), not the interior tile.
+            let spot = match at_home {
+                Some(h) => world.comp::<Building>(h).map(|b| world.outside_door(b)),
+                None => tile,
+            };
+            if let Some(t) = spot {
                 crate::systems::household::remember_empty(world, id, t);
             }
             // The own Home left empty is counted apart (the fix round's device).

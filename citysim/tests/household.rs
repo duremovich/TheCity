@@ -428,3 +428,38 @@ fn test_owner_operator_respects_the_hiring_gate() {
     citysim::systems::life::note_quit(&mut w, a, Some(bar));
     assert_eq!(household::owner_operator(&w, bar, citysim::Role::Bartender), None, "nor one who just quit it");
 }
+
+/// Review fix 6: a HangOut left empty in a Home remembers the Home's spot
+/// tile (its outside door, the tile `SpotKind::Home` is scored by), so
+/// `empty_mult` penalises that Home next time. Failed on the base
+/// `f795548` (the interior tile was stored and never matched a Home spot).
+#[test]
+fn test_an_empty_home_hangout_is_remembered_at_the_spot() {
+    let mut w = city();
+    let alone = common::free_adults(&w)
+        .into_iter()
+        .find(|&a| home(&w, a).is_some_and(|h| w.residents_of(h).len() == 1))
+        .expect("an adult living alone");
+    let h = home(&w, alone).expect("home");
+    let door = w.comp::<Building>(h).map(|b| w.outside_door(b)).expect("door");
+    w.unwind.insert(
+        alone,
+        citysim::living::UnwindPick {
+            rung: citysim::living::Rung::Free,
+            act: citysim::goap::ActionKind::HangOut,
+            venue: Some(h),
+            spot: Some(door),
+            score: 0.0,
+        },
+    );
+    w.enter_building(alone, h);
+    assert_eq!(household::hanging_at_home(&w, alone), Some(h));
+    assert_eq!(household::empty_mult(&w, alone, door), 1.0);
+    let started = w.tick - 1;
+    leisure::on_complete(&mut w, alone, citysim::goap::ActionKind::HangOut, None, started);
+    assert_eq!(
+        household::empty_mult(&w, alone, door),
+        w.config.household.empty_penalty,
+        "the Home's spot tile is remembered empty"
+    );
+}
