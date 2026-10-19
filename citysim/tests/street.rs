@@ -1345,4 +1345,75 @@ mod lives_street {
         let j = jobs2(&w);
         assert_eq!((j.street_clients_near, j.served[ServeKind::Client as usize]), (0, 0));
     }
+
+    /// 8d (OPEN-129): an exec housed in the Spire whose Hq stands in
+    /// another district is driven to work: the leg timed at the Car's
+    /// speed, the corp's own road vehicle or the Garage's off-screen cab on
+    /// the corp's purse, once a day; off (`exec_ride` false), he walks.
+    fn exec_far_from_hq(w: &mut World) -> (EntityId, EntityId, EntityId) {
+        let tier = citysim::systems::life::exec_home_tier(w);
+        assert!(tier > 0, "the shipped config houses execs in the Spire");
+        for c in w.corps() {
+            let Some(e) = w.comp::<citysim::Corp>(c).and_then(|cc| cc.exec) else { continue };
+            if w.has::<Job>(e) || w.has::<citysim::Sentence>(e) {
+                continue;
+            }
+            let Some(hq) = citysim::systems::life::hq_of(w, c, e) else { continue };
+            let d = w.district_of_building(hq);
+            let spire = w.buildings_of_kind(BuildingKind::Home).iter().copied().find(|&h| {
+                w.comp::<Building>(h).is_some_and(|b| {
+                    b.tier >= tier && !b.demolished && !b.derelict && usize::from(b.capacity) > w.residents_of(h).len()
+                }) && w.district_of_building(h) != d
+            });
+            let Some(home) = spire else { continue };
+            w.set_home(e, Some(home));
+            // `hq_of` ranks by the distance from home: read it again.
+            let hq = citysim::systems::life::hq_of(w, c, e).expect("an Hq");
+            if w.district_of_building(hq) == w.district_of_building(home) {
+                continue;
+            }
+            return (e, c, hq);
+        }
+        panic!("an exec with a Spire Home outside his Hq's district");
+    }
+
+    #[test]
+    fn test_the_exec_rides_in_from_the_spire() {
+        let mut w = city_with(|_| {});
+        assert!(w.config.service.exec_ride, "the shipped config drives the execs");
+        let (e, corp, hq) = exec_far_from_hq(&mut w);
+        let home = citysim::systems::missions::home_of(&w, e).expect("home");
+        let hd = w.comp::<Building>(home).expect("home").door;
+        w.leave_building(e);
+        if let Some(p) = w.comp_mut::<Position>(e) {
+            p.tile = hd;
+            p.building = None;
+        }
+        w.jobs2.cab_rolled.clear();
+        let door = w.comp::<Building>(hq).expect("hq").door;
+        let target = GotoTarget { dest: LocationKey::Workplace, tile: door, building: Some(hq) };
+        if let Some(c) = w.comp_mut::<citysim::Corp>(corp) {
+            c.treasury = c.treasury.max(10_000);
+        }
+        let purse = w.purse(Some(corp));
+        let j0 = jobs2(&w);
+        let state = sw::exec_ride(&mut w, e, &target).expect("the exec rides in");
+        let ExecState::GotoTimed { arrive_tick, .. } = state else { panic!("a timed leg, not {state:?}") };
+        let walk = u64::from(hd.manhattan(door)) * w.config.exec.move_ticks_full;
+        assert!(arrive_tick > w.tick, "the ride takes time");
+        assert!(arrive_tick - w.tick < walk, "faster than the walk ({} against {walk})", arrive_tick - w.tick);
+        let j = jobs2(&w);
+        assert_eq!(j.exec_rides, j0.exec_rides + 1, "one ride counted");
+        if j.exec_rides_corp == j0.exec_rides_corp {
+            assert!(w.purse(Some(corp)) < purse, "the corp paid the cab");
+            assert_eq!(j.cab_rides_unmanned, j0.cab_rides_unmanned + 1, "the Garage's off-screen cab");
+        } else {
+            assert_eq!(w.purse(Some(corp)), purse, "the corp's own vehicle: no fare");
+        }
+        assert!(sw::exec_ride(&mut w, e, &target).is_none(), "once a day");
+        // Off: he walks.
+        w.jobs2.cab_rolled.clear();
+        w.config.service.exec_ride = false;
+        assert!(sw::exec_ride(&mut w, e, &target).is_none(), "off, no ride");
+    }
 }

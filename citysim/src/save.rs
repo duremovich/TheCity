@@ -235,7 +235,11 @@ use crate::world::World;
 /// 44 (OPEN-113): `World.service_room`, each server's encounters this hour
 /// (written only when non-empty, so an off save, and an on save taken at an
 /// hour's first tick before any arrival, is byte-identical to version 43's).
-pub const SAVE_VERSION: u8 = 44;
+/// 45 (gate 8d): `Job.shift_tips` (written while non-zero), `[service]
+/// move_in_rent_days` and `exec_ride` (written only on) and the `Jobs2Cols`
+/// columns `exec_rides`, `exec_rides_corp` (serde defaults). An off save is
+/// byte-identical to version 44's.
+pub const SAVE_VERSION: u8 = 45;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

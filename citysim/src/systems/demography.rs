@@ -1213,6 +1213,7 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
             until: None,
             seniority_days: 0,
             foreman: false,
+            shift_tips: 0,
         },
     );
     world.abort_plan(id);

@@ -493,7 +493,7 @@ pub struct ServiceCfg {
     /// Fixer's walk-in and contract encounters, the owner's collection, the
     /// clerk named (`CITYSIM_TOWER_OFF=1`).
     pub tower: bool,
-    /// § 2.1: the madam's share of each tip at her Brothel (worker -> madam).
+    /// § 2.1: the madam's share of her worker's tips at her Brothel (worker -> madam), of the shift's total at shift end (8d, OPEN-123).
     pub madam_cut: f32,
     /// § 2.1: an Assault inside a kept venue is an ejection on this × (the
     /// bouncer's fighting − the attacker's), the attacker put at the door.
@@ -599,6 +599,21 @@ pub struct ServiceCfg {
     /// § 2.4 (reporter): a witness is a body within this many tiles of the scene.
     #[serde(skip_serializing_if = "is_zero_u32_cfg")]
     pub witness_tiles: u32,
+    // --- 8d (the gate's last rows), each left out of a save at its default.
+    /// 8d (OPEN-126, Shadow V5 bug 17): a homeless worker moving into a
+    /// Home (`ownership::rehouse`, the hunger fix's first-rent rule) must
+    /// hold this many days of its rent and pays them up front to its owner
+    /// (`Flow::Rent`), held as prepaid rent; the jobless keep
+    /// `rehouse_coins_mult`. 0: the old rule (one day's rent, nothing paid).
+    #[serde(skip_serializing_if = "is_zero_u16_cfg")]
+    pub move_in_rent_days: u16,
+    /// 8d (OPEN-129): a corp exec homed at `[life] exec_home_tier` (the
+    /// Spire) whose Hq stands in another district is driven to work: the
+    /// leg timed at the Car's speed, in a corp vehicle when the corp owns a
+    /// road one, else the nearest Garage's off-screen cab, its fare paid by
+    /// the corp (`streetwork::exec_ride`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub exec_ride: bool,
 }
 
 fn is_zero_u32_cfg(v: &u32) -> bool {
@@ -651,6 +666,8 @@ impl Default for ServiceCfg {
             beat_stops: 0,
             byline_promote: 0,
             witness_tiles: 0,
+            move_in_rent_days: 0,
+            exec_ride: false,
         }
     }
 }

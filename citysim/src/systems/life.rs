@@ -926,7 +926,7 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool) {
                     world.set_home(r, Some(home));
                     for m in [a, r] {
                         if let Some(h) = world.comp_mut::<Household>(m) {
-                            h.rent_due = 0.0;
+                            h.rent_due = h.rent_due.min(0.0);
                         }
                     }
                     world.push_event(
@@ -949,8 +949,11 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool) {
         let place = world.name_of(to);
         for m in std::iter::once(a).chain(spouse) {
             world.set_home(m, Some(to));
+            // 8d (OPEN-126): what is owed is forgiven, a move-in's prepaid
+            // rent (below 0) moves with the mover (it was wiped when the
+            // same midnight's relocation followed the deposit).
             if let Some(h) = world.comp_mut::<Household>(m) {
-                h.rent_due = 0.0;
+                h.rent_due = h.rent_due.min(0.0);
             }
             let name = world.name_of(m);
             world.push_event(EventKind::Housed, &[m, to], format!("{name} moved nearer work, into {place}"));

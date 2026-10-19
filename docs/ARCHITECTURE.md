@@ -278,6 +278,11 @@ Lives at work's off switches (env vars read in `Config::load_from`, each clearin
 `CITYSIM_CAREERS_OFF` (`[careers]`), `CITYSIM_LIEUTENANTS_OFF` (`[gangs] lieutenants`), `CITYSIM_STATIONS_OFF` (`[law] stations`),
 `CITYSIM_SPIRE_HOMES_OFF` (`[life] exec_home_tier`).
 
+Gate 8d's keys, under the master: `[service] madam_cut` now settles on the shift's tips at the worker's shift end
+(`service::shift_end` → `madam_settles`, `Job.shift_tips`); `[service] move_in_rent_days` → `ownership.rs` (`rehouse`,
+`move_in_deposit`: the first rent up front, prepaid); `[service] exec_ride` → `streetwork.rs` (`exec_ride`, called from
+`exec::start_step`'s GoTo beside `full_cab`; needs `street_on` and `[life] exec_home_tier`).
+
 The config is part of the saved `World`: a save resumes under the config it was written with, not the current
 `config.toml`. Rules for adding keys: `.claude/rules/config.md`.
 

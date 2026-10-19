@@ -634,14 +634,12 @@ fn encounter_row(
         if let Some(t) = tipped.filter(|&t| t != served) {
             let tip = ((coins as f32 * world.config.vice.tip_share).round() as i64).max(1);
             let paid = ownership::pay(world, Some(served), Some(t), tip, Flow::Tip);
-            // § 2.1: the madam's cut of a tip at her house.
+            // § 2.1, 8d (OPEN-123): a tip at her own house is noted on the
+            // worker's shift; the madam's cut of the total settles once at
+            // `shift_end` (per tip, 0.3 of a 1 c tip rounded to nothing).
             if let (true, Some(BuildingKind::Brothel), Some(place)) = (paid > 0, place_kind, place) {
-                let madam = servers(world, place, ServeKind::Staff).first().map(|&(m, _)| m);
-                if let Some(m) = madam.filter(|&m| m != t) {
-                    let cut = (paid as f32 * world.config.service.madam_cut).round() as i64;
-                    if cut > 0 {
-                        ownership::pay(world, Some(t), Some(m), cut, Flow::MadamCut);
-                    }
+                if let Some(j) = world.comp_mut::<Job>(t).filter(|j| j.employer == Some(place)) {
+                    j.shift_tips += paid;
                 }
             }
         }
@@ -808,6 +806,9 @@ pub fn shift_end(world: &mut World, id: EntityId) {
     if row_for(world, j.role).is_some() {
         ownership::jobs2_row(world).serve_shifts += 1;
     }
+    if j.shift_tips > 0 {
+        madam_settles(world, id, &j);
+    }
     // Lives at work phase 4 (§ 2.3): the courier's undelivered parcels back
     // to the Yard (the loader's lifts are `lift_hour`'s).
     if street_on(world) {
@@ -831,6 +832,32 @@ pub fn shift_end(world: &mut World, id: EntityId) {
     crate::systems::health::ate(world, id, crate::components::MealKind::Real);
     world.mark_day(id, crate::components::trace_flags::ATE);
     ownership::jobs2_row(world).staff_meals += 1;
+}
+
+/// 8d (OPEN-123, § 2.1): the madam's cut settles at the worker's shift end,
+/// `[service] madam_cut` of the shift's tips at the house, rounded once, to
+/// the house's madam on duty (none on duty, or the worker herself: no cut).
+/// The tally clears either way. Both tiers: a Statistical worker's tips are
+/// paid by the same `encounter_row` and her shift ends in `lod::stat_work`.
+fn madam_settles(world: &mut World, id: EntityId, j: &Job) {
+    if let Some(job) = world.comp_mut::<Job>(id) {
+        job.shift_tips = 0;
+    }
+    let Some(place) = j.employer else { return };
+    // The house's madam on duty, else any madam it employs (the cut is the
+    // house's take; her shift can end before her worker's).
+    let madam = servers(world, place, ServeKind::Staff).first().map(|&(m, _)| m).or_else(|| {
+        world
+            .staff_of(place)
+            .iter()
+            .copied()
+            .find(|&s| row_of_agent(world, s).is_some_and(|r| r.kind == ServeKind::Staff))
+    });
+    let Some(m) = madam.filter(|&m| m != id) else { return };
+    let cut = (j.shift_tips as f32 * world.config.service.madam_cut).round() as i64;
+    if cut > 0 {
+        ownership::pay(world, Some(id), Some(m), cut, Flow::MadamCut);
+    }
 }
 
 /// Lives at work phase 4 (§ 2.3, loader; `lift_hour`): the shift's `n`

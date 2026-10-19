@@ -2227,6 +2227,7 @@ impl World {
                         until: None,
                         seniority_days: 0,
                         foreman: false,
+                        shift_tips: 0,
                     },
                 );
             }
