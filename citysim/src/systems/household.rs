@@ -558,10 +558,11 @@ pub fn daily(world: &mut World) {
     }
     let cost = world.config.household.newborn_cost_per_day;
     let now = world.tick;
+    // Review fix 11: every parent holding a newborn (a widowed or unmarried
+    // one too), not only the `spouses` map's; the set keeps one charge a Home.
     let homes: std::collections::BTreeSet<EntityId> = world
-        .spouses
-        .keys()
-        .copied()
+        .with::<Household>()
+        .into_iter()
         .filter(|&p| world.comp::<Household>(p).and_then(|h| h.newborn_until).is_some_and(|t| t > now))
         .filter_map(|p| home_of(world, p))
         .collect();

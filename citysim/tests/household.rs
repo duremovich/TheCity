@@ -463,3 +463,22 @@ fn test_an_empty_home_hangout_is_remembered_at_the_spot() {
         "the Home's spot tile is remembered empty"
     );
 }
+
+/// Review fix 11: a newborn's keep is charged to the Home of any parent
+/// holding it, married or not (a widowed parent's Home too). Failed on the
+/// base `f795548` (only the `spouses` map was read: no keep without a living spouse).
+#[test]
+fn test_a_widowed_parents_newborn_is_kept_too() {
+    let mut w = city();
+    let a = common::free_adults(&w)
+        .into_iter()
+        .find(|&a| w.spouse_of(a).is_none() && home(&w, a).is_some())
+        .expect("an unmarried housed adult");
+    let h = home(&w, a).expect("home");
+    let until = w.tick + 5 * TICKS_PER_DAY;
+    w.comp_mut::<Household>(a).expect("household").newborn_until = Some(until);
+    let before = w.comp::<Building>(h).expect("home").child_food_debt;
+    household::daily(&mut w);
+    let after = w.comp::<Building>(h).expect("home").child_food_debt;
+    assert_eq!(after, before + w.config.household.newborn_cost_per_day, "the keep charged without a spouse");
+}

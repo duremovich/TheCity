@@ -429,3 +429,17 @@ fn test_retiring_to_kin_moves_the_couple() {
     assert_eq!(home(&w, a), Some(kid_home), "the retiree moved in with the child");
     assert_eq!(home(&w, s), Some(kid_home), "and the spouse with him");
 }
+
+/// Review fix 11: one profession day a day, day 0 included: two shift ends
+/// on day 0 (a split shift) count one day. Failed on the base `f795548`
+/// (day 0 counted every shift end).
+#[test]
+fn test_day_zero_counts_one_profession_day() {
+    let mut w = common::world();
+    assert_eq!(w.day(), 0);
+    let id = w.citizens().into_iter().find(|&a| w.has::<Job>(a)).expect("a worker");
+    w.remove::<Profession>(id);
+    careers::shift_end(&mut w, id);
+    careers::shift_end(&mut w, id);
+    assert_eq!(w.comp::<Profession>(id).map(|p| p.days), Some(1), "one day on day 0");
+}

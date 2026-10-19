@@ -258,7 +258,9 @@ pub fn shift_end(world: &mut World, id: EntityId) {
         world.insert(id, Profession { trade: role, days: 1, last_day: day, next: None });
         return;
     };
-    if p.last_day == day && p.days > 0 && day > 0 {
+    // Review fix 11: one day a day, day 0 included (a seeded profession's
+    // `last_day` 0 counts its seeded tenure as day 0's).
+    if p.last_day == day && p.days > 0 {
         return;
     }
     p.last_day = day;
