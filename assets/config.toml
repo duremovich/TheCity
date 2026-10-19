@@ -3734,7 +3734,7 @@ venues = true
 civic = true                       # phase 3 (§ 2.2, § 3.5): teacher, camp warden, jailer, super; the near round, tied housing, the parent's answer (CITYSIM_CIVIC_OFF=1)
 street = true                      # phase 4 (§ 2.3): the cab roll and the driver's body, the parcel, the lift, the client, the pimp's round, the dealer's corner (CITYSIM_LIVES_STREET_OFF=1; CITYSIM_STREET_OFF is [jobs2] street's)
 tower = true                       # phase 5 (§ 2.4, § 2.2's civic clerk, § 3.6's decided): the exec's Meeting and decision, the reporter's beat and byline, the Fixer's walk-in and contract encounters, the owner's collection, the clerk named (CITYSIM_TOWER_OFF=1)
-madam_cut = 0.3                    # § 2.1: the madam's share of each tip at her Brothel, worker -> madam (Flow::MadamCut)
+madam_cut = 0.3                    # § 2.1: the madam's share of her worker's tips at the Brothel, worker -> madam (Flow::MadamCut); 8d: of the shift's total, settled once at shift end
 evening_staff = ["Bartender", "Attendant", "Cook"]   # OPEN-111, Shadow V5 bug 1: the legacy venue roles cover the trade's hours, split at each venue between [world] shift_day and [leisure] evening_shift (the thinner first, the evening on a tie)
 p_eject = 0.5                      # § 2.1: an Assault inside a kept venue is an ejection on this x (bouncer fighting - attacker fighting)
 staff_meal = true                  # § 2.1: a Cook takes one meal from the NoodleBar's stock at shift end (every tier; V4: a cook steals food)
@@ -3761,6 +3761,8 @@ defensive = ["Hunker", "Secure", "Squeeze"]            # ... and loyalty: p(expa
 beat_stops = 4                     # phase 5 § 2.4 (reporter): the scenes of yesterday's crimes in the Feed's districts walked a shift, nearest the Feed first
 byline_promote = 10                # phase 5 § 2.4 (reporter): every this many bylines the reporter's class-pay grade rises one step
 witness_tiles = 3                  # phase 5 § 2.4 (reporter): a witness interviewed at a scene is a body within this many tiles of its door
+move_in_rent_days = 7              # 8d (OPEN-126, Shadow V5 bug 17; Dylan 2026-10-19 "deposit first"): a homeless worker (the hunger fix's first-rent rule) moves into a Home only holding this many days of its rent, paid up front to the owner (Flow::Rent; prepaid rent), so a hired homeless worker sleeps rough and saves from wages. A week, as [rent]'s M11 week up front; the jobless keep rehouse_coins_mult. 0: housed on one day's rent, nothing paid
+exec_ride = true                   # 8d (OPEN-129; Dylan 2026-10-19 "lives in the Spire and rides in"): a corp exec homed at [life] exec_home_tier whose Hq stands in another district is driven to work, timed at the Car's speed: a corp road vehicle if the corp owns one, else the nearest Garage's off-screen cab, the fare ([jobs2] fare_base + fare_per_tile) paid by the corp
 
 # Lives at work phase 1 (docs/LIVES_AT_WORK.md § 1.1, § 2.1, § 2.2): the [[serves]] rows, one per serving trade.
 # `key` is a [[trades]] id or a legacy Role name (Config::unresolved_names checks it); `kind` names the queue's

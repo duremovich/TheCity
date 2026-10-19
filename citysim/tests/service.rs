@@ -234,7 +234,8 @@ fn test_a_regular_is_made_at_regular_after() {
 }
 
 /// § 2.1: the tip goes to the server the encounter named (a tipped row),
-/// and the madam takes `madam_cut` of it at her Brothel.
+/// and the madam takes `madam_cut` of it at her Brothel, at the worker's
+/// shift end (8d, OPEN-123).
 #[test]
 fn test_tip_to_the_server_and_the_madams_cut() {
     let mut w = city();
@@ -260,9 +261,56 @@ fn test_tip_to_the_server_and_the_madams_cut() {
     assert!(tip > 0 && cut > 0, "tip {tip} cut {cut}");
     service::serve(&mut w, worker, g, house, ServeKind::Visit, price);
     assert_eq!(common::coins(&w, g), 100 - tip, "the guest tipped");
+    assert_eq!(common::coins(&w, worker), wk0 + tip, "the cut waits for the shift's end");
+    service::shift_end(&mut w, worker);
     assert_eq!(common::coins(&w, worker), wk0 + tip - cut, "the worker keeps the tip less the cut");
     assert_eq!(common::coins(&w, madam), md0 + cut, "the madam's cut");
     assert_eq!(w.stats.current.jobs2.as_ref().map_or(0, |j| j.flow_madam_cut), cut);
+    assert_eq!(w.comp::<Job>(worker).map(|j| j.shift_tips), Some(0), "the tally clears");
+}
+
+/// 8d (OPEN-123): small tips add up over the shift; the madam's cut is
+/// `madam_cut` of the shift's total, taken once at the shift's end (per
+/// tip, 0.3 of a 1 c tip rounded to 0 and the madam never saw a coin).
+#[test]
+fn test_madams_cut_settles_on_the_shifts_tips() {
+    let mut w = city();
+    let worker_role = w.config.trade_role("brothel_worker").expect("brothel_worker");
+    let madam_role = w.config.trade_role("madam").expect("madam");
+    let (house, workers) = staffed(&w, BuildingKind::Brothel, worker_role, 1);
+    let worker = workers[0];
+    on_duty(&mut w, worker, house);
+    let madam = w
+        .staff_of(house)
+        .iter()
+        .copied()
+        .find(|&s| w.comp::<Job>(s).is_some_and(|j| j.role == madam_role))
+        .expect("a madam at the house");
+    on_duty(&mut w, madam, house);
+    // A price whose tip is 1 c: per tip the cut rounds to nothing.
+    let price = 1;
+    let tip = ((price as f32 * w.config.vice.tip_share).round() as i64).max(1);
+    assert_eq!(tip, 1);
+    assert_eq!((tip as f32 * w.config.service.madam_cut).round() as i64, 0, "per tip, nothing");
+    let gs = guests(&w, house, 4);
+    for &g in &gs {
+        common::set_coins(&mut w, g, 50);
+    }
+    let (wk0, md0) = (common::coins(&w, worker), common::coins(&w, madam));
+    for &g in &gs {
+        service::serve(&mut w, worker, g, house, ServeKind::Visit, price);
+    }
+    let total = tip * gs.len() as i64;
+    assert_eq!(common::coins(&w, worker), wk0 + total);
+    service::shift_end(&mut w, worker);
+    let cut = (total as f32 * w.config.service.madam_cut).round() as i64;
+    assert!(cut > 0, "the shift's tips carry a cut ({total} -> {cut})");
+    assert_eq!(common::coins(&w, madam), md0 + cut, "the madam's cut, once at the shift's end");
+    assert_eq!(common::coins(&w, worker), wk0 + total - cut);
+    assert_eq!(w.stats.current.jobs2.as_ref().map_or(0, |j| j.flow_madam_cut), cut);
+    // The tally cleared: a second shift end takes nothing more.
+    service::shift_end(&mut w, worker);
+    assert_eq!(common::coins(&w, madam), md0 + cut);
 }
 
 /// § 2.1 (cook): the shift-end rule takes one staff meal from the

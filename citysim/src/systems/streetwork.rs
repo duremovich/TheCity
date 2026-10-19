@@ -1144,6 +1144,77 @@ pub fn full_cab(world: &mut World, id: EntityId, target: &crate::exec::GotoTarge
     Some(crate::exec::ExecState::GotoTimed { target: target.clone(), arrive_tick: arrive, blocked_since: None })
 }
 
+/// 8d (OPEN-129, Dylan 2026-10-19): `exec::start_step`, an exec's `GoTo`
+/// to his corp's Hq (`life::hq_of`), before the vehicle, the El and the
+/// walk. With `[service] exec_ride`, the street on and the exec housed at
+/// `[life] exec_home_tier` or better (the Spire) in a district other than
+/// the Hq's: the leg is timed at the Car's speed (`cab_ticks`, 4a's cab
+/// leg). The corp's own road vehicle drives him when it owns one (no fare;
+/// deviation: the vehicle's asset is not moved, as the off-screen cab's
+/// is not), else the Garage nearest his Home with rides left sends its
+/// off-screen cab and the corp pays the fare (`Flow::CabFare`, the
+/// Garage's `cab_trips`). No Garage, or a corp short of the fare: he
+/// walks. Once a day (`cab_rolled`). Both tiers: a Statistical exec's
+/// office trip is the same `GoTo` (timed), so the mirror is the rule
+/// itself. Nothing off.
+pub fn exec_ride(world: &mut World, id: EntityId, target: &crate::exec::GotoTarget) -> Option<crate::exec::ExecState> {
+    if !crate::systems::service::street_on(world) || !world.config.service.exec_ride {
+        return None;
+    }
+    let tier = crate::systems::life::exec_home_tier(world);
+    if tier == 0 || world.has::<Job>(id) || world.jobs2.cab_rolled.contains(&id) {
+        return None;
+    }
+    let corp = crate::systems::life::exec_corp(world, id)?;
+    let hq = crate::systems::life::hq_of(world, corp, id)?;
+    if target.building != Some(hq) {
+        return None;
+    }
+    let home = crate::systems::missions::home_of(world, id)?;
+    let hb = world.comp::<Building>(home)?;
+    if hb.tier < tier || world.district_of_building(home) == world.district_of_building(hq) {
+        return None;
+    }
+    let home_door = hb.door;
+    let here = crate::exec::walk_origin(world, id)?;
+    world.jobs2.cab_rolled.insert(id);
+    let road = |x: &crate::components::Asset| {
+        x.kind.is_road_vehicle() && x.kind != crate::components::AssetKind::Truck && x.condition > 0 && !x.stolen
+    };
+    let corp_car = crate::systems::assets::assets_of(world, Some(corp))
+        .iter()
+        .any(|&v| world.comp::<crate::components::Asset>(v).is_some_and(road));
+    if !corp_car {
+        let cfg = &world.config.jobs2;
+        let fare = cfg.fare_base + (here.manhattan(target.tile) as f32 * cfg.fare_per_tile).round() as i64;
+        let garage = world
+            .buildings_of_kind(BuildingKind::Garage)
+            .iter()
+            .copied()
+            .filter(|&g| crate::systems::industry::open(world, g))
+            .filter(|&g| world.jobs2.cab_trips.get(&g).copied().unwrap_or(0) < drivers(world, g) * cfg.rides_per_driver)
+            .min_by_key(|&g| (world.comp::<Building>(g).map_or(u32::MAX, |b| b.door.manhattan(home_door)), g))?;
+        if world.purse(Some(corp)) < fare {
+            return None;
+        }
+        let owner = world.owner_of(garage);
+        let paid = ownership::pay(world, Some(corp), owner, fare, Flow::CabFare);
+        ownership::credit(world, garage, paid);
+        *world.jobs2.cab_trips.entry(garage).or_default() += 1;
+        let row = ownership::jobs2_row(world);
+        row.cab_trips += 1;
+        row.cab_fares += paid;
+        row.cab_rides_unmanned += 1;
+    }
+    let row = ownership::jobs2_row(world);
+    row.exec_rides += 1;
+    if corp_car {
+        row.exec_rides_corp += 1;
+    }
+    let arrive = world.tick + cab_ticks(world, here, target.tile);
+    Some(crate::exec::ExecState::GotoTimed { target: target.clone(), arrive_tick: arrive, blocked_since: None })
+}
+
 /// Lives at work phase 4 (§ 2.3, D3, D6): a cab ride from `garage` booked
 /// to a driver's body: the standing-by driver who can reach `from` within
 /// `cab_wait_ticks` at cab speed with the lowest `hash(PURPOSE_FARE, rider,

@@ -2157,6 +2157,12 @@ pub struct Job {
     /// midnight, `careers::daily`): the wage × `[careers] foreman_premium`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub foreman: bool,
+    /// Lives at work 8d (OPEN-123, § 2.1): the coins tipped to a Brothel
+    /// worker at her house this shift; `service::shift_end` takes the
+    /// madam's `[service] madam_cut` of the total once and clears it (both
+    /// tiers). Not written at 0.
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub shift_tips: i64,
 }
 
 impl Job {

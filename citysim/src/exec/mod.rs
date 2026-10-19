@@ -715,7 +715,8 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
             // Statistical tier), the leg timed at the cab's speed.
             if matches!(step.action, ActionKind::GoTo(_)) {
                 let street = crate::systems::streetwork::fare_leg(world, id, &target)
-                    .or_else(|| crate::systems::streetwork::full_cab(world, id, &target));
+                    .or_else(|| crate::systems::streetwork::full_cab(world, id, &target))
+                    .or_else(|| crate::systems::streetwork::exec_ride(world, id, &target));
                 if let Some(state) = street {
                     commute_started(world, id, &target);
                     if let Some(b) = world.comp_mut::<Brain>(id) {

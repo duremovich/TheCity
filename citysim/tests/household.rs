@@ -360,3 +360,45 @@ fn test_on_city_lives_at_home_within_two_days() {
     assert!(j.1 > 0, "empty spots left early: {j:?}");
     assert!(j.2 > 0, "elder visits on the seeded city: {j:?}");
 }
+
+/// 8d (OPEN-126, Shadow V5 bug 17, "deposit first"): a homeless worker is
+/// housed only once his purse holds `[service] move_in_rent_days` of the
+/// Home's rent, which is paid to its owner up front and held as prepaid rent
+/// (on the base, a worker moved in on one day's rent, nothing paid, the
+/// night after a foreman hired him).
+#[test]
+fn test_a_homeless_worker_pays_the_first_rent_before_moving_in() {
+    let mut w = common::world();
+    let days = i64::from(w.config.service.move_in_rent_days);
+    assert!(days > 1, "the shipped config takes more than a day up front");
+    let a = common::day_workers(&w)
+        .into_iter()
+        .find(|&a| {
+            w.spouse_of(a).is_none()
+                && citysim::systems::demography::children_of_agent(&w, a).is_empty()
+                && w.comp::<Brain>(a).is_some_and(|b| !b.emigrating)
+        })
+        .expect("an unmarried, childless day worker");
+    w.set_home(a, None);
+    // Midnight of day 1: re-housing runs.
+    w.tick = TICKS_PER_DAY;
+    let cheapest = w
+        .buildings_of_kind(BuildingKind::Home)
+        .iter()
+        .map(|&h| citysim::systems::ownership::rent_for(&w, h))
+        .filter(|&r| r > 0)
+        .min()
+        .expect("a Home with rent");
+    common::set_coins(&mut w, a, days * cheapest - 1);
+    citysim::systems::ownership::run(&mut w);
+    assert_eq!(home(&w, a), None, "short of the first rent up front: sleeps rough");
+    let rich = 1000;
+    common::set_coins(&mut w, a, rich);
+    w.tick += TICKS_PER_DAY;
+    citysim::systems::ownership::run(&mut w);
+    let h = home(&w, a).expect("housed once he can pay");
+    let rent = citysim::systems::ownership::rent_for(&w, h);
+    assert_eq!(common::coins(&w, a), rich - days * rent, "the first rent paid up front");
+    let due = w.comp::<Household>(a).map(|h| h.rent_due).expect("household");
+    assert!((due + (days * rent) as f32).abs() < 1e-3, "held as prepaid rent ({due})");
+}

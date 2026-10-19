@@ -1804,10 +1804,35 @@ pub fn evict(world: &mut World, agent: EntityId, reason: &str) {
     crate::systems::litter::deposit(world, outside, 24, 1);
 }
 
+/// 8d (OPEN-126, Shadow V5 bug 17): the mover pays `days` of the Home's
+/// rent up front to its owner (`Flow::Rent`, credited as `settle_rent`
+/// credits a payment) and holds it as prepaid rent (`rent_due` below 0, so
+/// the first nights accrue against it). No coin made or lost.
+fn move_in_deposit(world: &mut World, a: EntityId, home: EntityId, days: i64) {
+    let due = days * rent_for(world, home);
+    if due <= 0 {
+        return;
+    }
+    let owner = world.owner_of(home);
+    let paid = if owner == Some(a) { 0 } else { pay(world, Some(a), owner, due, Flow::Rent) };
+    if paid <= 0 {
+        return;
+    }
+    credit(world, home, paid);
+    world.stats.current.rent_paid += paid;
+    let today = world.day();
+    if let Some(h) = world.comp_mut::<Household>(a) {
+        h.rent_due -= paid as f32;
+        h.note_rent_paid(today, paid);
+    }
+}
+
 /// Homeless adults move in where they can pay `rehouse_coins_mult × rent`,
 /// nearest door first, with a homeless spouse and their homeless children.
 fn rehouse(world: &mut World) {
     let mult = world.config.rent.rehouse_coins_mult;
+    let deposit_days =
+        if crate::systems::service::on(world) { i64::from(world.config.service.move_in_rent_days) } else { 0 };
     let refuse = world.config.rent.refuse_days * TICKS_PER_DAY;
     let wait = world.config.rent.rehouse_wait_days * TICKS_PER_DAY;
     let tick = world.tick;
@@ -1859,11 +1884,12 @@ fn rehouse(world: &mut World) {
         let need = 1 + usize::from(spouse.is_some()) + kids.len();
         let coins = world.comp::<Wallet>(a).map_or(0, |w| w.coins);
         // Hunger fix item 13: a worker pays the first rent, not the deposit.
-        let mult = if crate::systems::fixes::rehouse_employed(world) && world.has::<crate::components::Job>(a) {
-            1
-        } else {
-            mult
-        };
+        let worker = crate::systems::fixes::rehouse_employed(world) && world.has::<crate::components::Job>(a);
+        // 8d (OPEN-126): that first rent is `move_in_rent_days` of rent, paid
+        // up front (below), so the worker's purse must hold it; the jobless
+        // keep the deposit rule (`rehouse_coins_mult` held, nothing paid).
+        let deposit_days = if worker { deposit_days } else { 0 };
+        let mult = if worker { deposit_days.max(1) } else { mult };
         let refused_by = world.comp::<Household>(a).and_then(|h| h.evicted_by).filter(|&(_, t)| tick < t + refuse);
         let from = world.comp::<Position>(a).map_or_else(Default::default, |p| p.tile);
         let pick = homes
@@ -1876,6 +1902,9 @@ fn rehouse(world: &mut World) {
             .map(|&(h, d, _, _)| (d.manhattan(from), h))
             .min();
         let Some((_, home)) = pick else { continue };
+        if deposit_days > 0 {
+            move_in_deposit(world, a, home, deposit_days);
+        }
         let movers: Vec<EntityId> = std::iter::once(a).chain(spouse).collect();
         let place = world.name_of(home);
         let label = world.owner_label(world.owner_of(home));

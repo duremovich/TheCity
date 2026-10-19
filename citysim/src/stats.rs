@@ -836,6 +836,13 @@ pub struct Jobs2Cols {
     pub execs: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub execs_spire: u32,
+    // 8d (OPEN-129): the execs driven from the Spire to an Hq in another
+    // district, and of those the rides in the corp's own vehicle (the rest
+    // the Garage's off-screen cab, the fare paid by the corp).
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub exec_rides: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub exec_rides_corp: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -1119,6 +1126,8 @@ impl Jobs2Cols {
                 "precinct_full",
                 "execs",
                 "execs_spire",
+                "exec_rides",
+                "exec_rides_corp",
             ]
             .into_iter()
             .map(str::to_string),
@@ -1396,6 +1405,8 @@ impl Jobs2Cols {
             self.precinct_full.to_string(),
             self.execs.to_string(),
             self.execs_spire.to_string(),
+            self.exec_rides.to_string(),
+            self.exec_rides_corp.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")
