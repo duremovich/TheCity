@@ -544,7 +544,11 @@ fn test_stat_multipliers_only_for_kitted() {
 /// for an episode) is cuffed or killed by `law` before the episode runs out.
 #[test]
 fn test_episode_near_on_duty_guard_ended_by_law() {
-    let mut w = World::new(42, Config::load().dole_city().scaled_to(300));
+    let mut cfg = Config::load().dole_city().scaled_to(300);
+    // OPEN-111: the venues' evening staff move the 300-city's picks (the
+    // episode outlived its hours); pinned to the day shift.
+    cfg.service.evening_staff.clear();
+    let mut w = World::new(42, cfg);
     w.run_ticks(600);
     let tod = w.tick_of_day();
     let guard = w

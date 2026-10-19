@@ -130,9 +130,16 @@ fn test_building_capacity_is_respected() {
         }
     }
     // and nobody claims to be inside a building that does not list them
+    // (but a child born at Home, which is in it and not an occupant by
+    // `demography::birth`'s rule: a birth may exceed the capacity)
     for id in w.citizens() {
         let p = w.comp::<Position>(id).expect("pos");
         if let Some(b) = p.building {
+            if w.has::<citysim::Child>(id)
+                && w.comp::<Building>(b).is_some_and(|x| x.kind == citysim::BuildingKind::Home)
+            {
+                continue;
+            }
             assert!(w.comp::<Building>(b).expect("b").occupants.contains(&id));
         }
     }

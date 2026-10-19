@@ -981,6 +981,17 @@ Measured: the 20k rows above and § 5.1's re-read; 20k seed 42 × 30 (`run --pop
 
 **Left:** the 42-47 gate runs, A/B ticks/s, the save size and the § 9.1 diaries are the gate's; `god_cut_the_precinct` is not written (the gate's); the `p_theft_caught` regen (D14).
 
+### OPEN-111 fix round (2026-10-19): the regular
+
+The § 10 regular probe failed for two reasons (phase 8b): the server was a fresh hash each hour, and the Bar's staff worked the day while the bar traded in the evening. Both fixed as mechanisms under `[service] venues` (off: byte-identical to main's off city on seed 42 × 30); SAVE_VERSION 43. Deviations:
+
+- **D6, the stable server.** `service::arrive` picks the lowest `hash(PURPOSE_SERVE, place ^ served, server)` among the servers on duty with room. The hour is gone from the key, so a patron gets the same server whenever that server is on duty, and repeat visits build up on one ledger. It is still never the lowest id. `tipped_pick` keeps its hourly hash (a tip is coins, not a ledger).
+- **The venue shift.** `[service] evening_staff` (`Bartender`, `Attendant`, `Cook`) hires those legacy roles onto `[leisure] evening_shift` (18-24), in the seeding (`World::new`), in `demography::hire` and in `wages::site_shifts` (`service::venue_shift`). Phase 1's "Who is behind the counter" is the reason: NoodleBar meals out land in the evening too (`cooked` 16 → 777 per seed × 120 d). The Statistical mirror is unchanged: a Statistical server is credited by `lod::shift_attended` on the same `Job::shifts`.
+- **The Bartender row's `regular_after` 5 → 3.** § 10's "a regular" is three evenings at one Bar. Phase 1's pick of 5 contradicted the spec's own acceptance; with a stable server, three drinks made a ledger of 3 and no edge.
+- **The probe** drinks at 19:00 (the trade's hours). It counts a regular as an Acquaintance whose ledger holds him `regular_after` times and whom he did not know when that evening began. In the control (three Bars), the day-2 bartender became an Acquaintance after one visit through an ordinary meeting at the Bar, not through the ledger. The probe prints this case.
+
+Measured (42-44 × 120, main 30d485d → fix, means): served visits 13,142 → 21,577; waited 22,535 → 14,081 (the share of arrivals finding nobody on duty, or a full counter, 0.63 → 0.39 of visits); regulars made 261 → 1,016; tips 8,620 → 8,549; Murders 124 → 120; J25 0.009 → 0.013. Device (`shadow --lives` d19): dancer `met` 0.61 → 0.74, madam 0.45 → 0.64, club staff 0.67 → 0.69, **cook 0.47 → 0.11**. Most of a day cook's encounters were parcels handed to the NoodleBar's staff (a day courier's `Parcel`), and those now go to the day staff. The evening cook's own service is mostly Statistical diners at 21:00 (`cooked`). Behaviour tier: `d19 gang_member KnownMetWeek` 5.35 against its 5.5 bound (main 6.42; the pick moved 64 → 58 agents, 30 → 9 on seed 42). With `Cook` left on the day shift, that row read 7.58, but `d90 homeless CommuteAbortsDay` read 0.20 against 0.07 (main 0.01). Neither variant was retuned.
+
 ---
 
 ## 15. Gate

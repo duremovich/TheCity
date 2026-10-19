@@ -229,7 +229,7 @@ use crate::world::World;
 /// `[buildings.station]`, `[life] exec_home_tier`/`exec_home_spare` (written
 /// only on) and the `Jobs2Cols` phase-7 columns (serde defaults). An off
 /// save is byte-identical to version 41's.
-/// 43 (OPEN-111): `[service] evening_roles` (written only on; the venue
+/// 43 (OPEN-111): `[service] evening_staff` (written only on; the venue
 /// staff's shift is the `Job::shifts` already saved). An off save is
 /// byte-identical to version 42's.
 pub const SAVE_VERSION: u8 = 43;

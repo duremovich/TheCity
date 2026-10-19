@@ -113,12 +113,12 @@ pub fn on(world: &World) -> bool {
 }
 
 /// OPEN-111: the shift a legacy venue `role` is hired onto when `[service]
-/// venues` is on and the role is in `[service] evening_roles`: `[leisure]
+/// venues` is on and the role is in `[service] evening_staff`: `[leisure]
 /// evening_shift`, the hours the venue trades (seeding and
 /// `demography::hire` alike; a Statistical server is credited by the same
 /// `Job::shifts`, so the mirror follows). `None`: the role's shift as before.
 pub fn venue_shift(cfg: &crate::config::Config, role: Role) -> Option<Vec<(u16, u16)>> {
-    (cfg.jobs2.enabled && cfg.lives.enabled && cfg.service.venues && cfg.service.evening_roles.contains(&role))
+    (cfg.jobs2.enabled && cfg.lives.enabled && cfg.service.venues && cfg.service.evening_staff.contains(&role))
         .then(|| cfg.leisure.evening_shift.clone())
 }
 

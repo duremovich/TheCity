@@ -979,6 +979,9 @@ fn probe_far_worker_with_one_rent_moves_near_work() {
     // Lives at work phase 6: the careers' seeded jobs move the far Farmer
     // and his partner too (no pair on the careers city); pinned off as well.
     cfg.strip_careers();
+    // OPEN-111: the venues' evening staff move the seeded city's picks (no
+    // single far Farmer with a partner); pinned to the day shift.
+    cfg.service.evening_staff.clear();
     // Jobs & lives phase 8's gate: the pin to the pre-milestone city is gone
     // (the industries on, seed 42 has its single far Farmer again).
     let mut w = World::new(42, cfg);
@@ -3265,7 +3268,7 @@ fn bar_regular(same: bool, hour: u64) -> (Vec<(u64, EntityId)>, Vec<EntityId>) {
 
 /// Lives at work § 10 ("a regular"): a Full agent who drinks at the same
 /// Bar three evenings running (from 19:00; its bartenders work `[leisure]
-/// evening_shift` under `[service] evening_roles`) is an Acquaintance of
+/// evening_shift` under `[service] evening_staff`) is an Acquaintance of
 /// the bartender who served him (the Bartender row's `regular_after`
 /// within `regular_days`). Control: three different Bars, an evening each:
 /// served each evening, no edge. OPEN-111 (closed): the server was a fresh

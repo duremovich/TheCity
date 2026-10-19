@@ -572,7 +572,7 @@ pub struct ServiceCfg {
     /// Statistical evening are 18-24). Read under `[service] venues`
     /// (`service::venue_shift`); empty, every legacy role's shift as before.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub evening_roles: Vec<crate::components::Role>,
+    pub evening_staff: Vec<crate::components::Role>,
     // --- Phase 5 (the tower), each left out of a save at its default
     // (`ServiceCfg::strip_tower`).
     /// § 2.4 (exec): the graded staff present at the Hq an exec meets in a
@@ -642,7 +642,7 @@ impl Default for ServiceCfg {
             p_short_report: 0.0,
             witness_lookout_mult: 0.0,
             cab_shifts: Vec::new(),
-            evening_roles: Vec::new(),
+            evening_staff: Vec::new(),
             meeting_attendees: 0,
             decision_margin: 0.0,
             expansive: Vec::new(),

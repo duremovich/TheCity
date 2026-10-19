@@ -17,7 +17,11 @@ use citysim::{
 };
 
 fn on_world() -> World {
-    World::new(42, Config::load())
+    let mut cfg = Config::load();
+    // OPEN-111: the venues' evening staff move seed 42's gangs (no gang of
+    // three with a Hideout by day 12); pinned to the day shift.
+    cfg.service.evening_staff.clear();
+    World::new(42, cfg)
 }
 
 /// Free adults with a Brain and a Wallet, no job, no gang (ascending).
