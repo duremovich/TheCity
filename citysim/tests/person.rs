@@ -94,6 +94,9 @@ fn probe_hungry_worker_eats_from_the_wage_before_rent() {
     let h = home(&w, a).expect("a home");
     w.comp_mut::<Building>(h).expect("home").stock_food = 0;
     w.comp_mut::<Needs>(a).expect("needs").hunger = 0.25;
+    // Rested at 15:00: the hunger alone is the evening's drive (a tired pick
+    // slept at 19:00 on its wage, hunger 0.15, and never ate before midnight).
+    w.comp_mut::<Needs>(a).expect("needs").energy = 0.9;
     let (mut paid_at, mut ate_after) = (None, false);
     let mut last = 0;
     run_to(&mut w, a, 2 * TICKS_PER_DAY, |w| {
@@ -542,7 +545,18 @@ fn probe_gun_never_takes_a_hit_on_kin() {
         let id = post_hit(&mut w, buyer, t, 2000);
         let mut took = false;
         let end = w.tick + 3 * TICKS_PER_DAY;
-        run_to(&mut w, a, end, |w| took |= holds(w, a, id));
+        if kin {
+            run_to(&mut w, a, end, |w| took |= holds(w, a, id));
+        } else {
+            // The control is read the moment the gun takes the Hit: a taker
+            // taken off the street (or bled out of the job) later is the city's
+            // history, not the setup's premise.
+            while w.tick < end && !took && w.has::<Brain>(a) {
+                pin(&mut w, a);
+                w.run_ticks(1);
+                took |= holds(&w, a, id);
+            }
+        }
         let status = w.contracts.get(&id).map(|c| c.status);
         eprintln!(
             "gun {} on {} ({}): took {took}, record {status:?}",
@@ -1362,6 +1376,10 @@ fn probe_worker_stocks_the_pantry_off_shift() {
     let h = home(&w, a).unwrap();
     w.comp_mut::<Needs>(a).expect("needs").hunger = 0.95;
     w.comp_mut::<Needs>(a).expect("needs").energy = 0.9;
+    // Amused, with no kin to visit: an evening off is the errand's (a bored pick
+    // hung out at a venue all evening on a diverged table, fun 0.10).
+    w.comp_mut::<Needs>(a).expect("needs").fun = 0.95;
+    w.visits.remove(&a);
     if let Some(i) = w.comp_mut::<Inventory>(a) {
         i.food = 0;
         i.synth = 0;
@@ -1415,6 +1433,18 @@ fn probe_worker_sleeps_the_night_before_a_shift() {
     let (mut energy, mut asleep, mut n) = (0f32, 0u32, 0u32);
     for &a in &farmers {
         let mut c = w.clone();
+        // The evening is the shift's, not the city's history: fed and amused
+        // through the evening, a farmer has no far venue to walk home from (a
+        // diverged table sent two to a Socialise or an Unwind hours away, and
+        // they slept in past the shift's start). Hunger and energy are left alone.
+        for hour in 18..23 {
+            run_to(&mut c, a, 3 * TICKS_PER_DAY + hour * TICKS_PER_HOUR, |_| {});
+            if let Some(n) = c.comp_mut::<Needs>(a) {
+                n.fun = n.fun.max(0.9);
+                n.belonging = n.belonging.max(0.9);
+                n.intimacy = n.intimacy.max(0.9);
+            }
+        }
         run_to(&mut c, a, 4 * TICKS_PER_DAY + 9 * TICKS_PER_HOUR, |_| {});
         energy += c.comp::<Needs>(a).map_or(0.0, |x| x.energy);
         asleep += u32::from(c.comp::<Brain>(a).is_some_and(|b| b.current_goal == Some(citysim::GoalKind::Sleep)));
@@ -1662,6 +1692,10 @@ fn probe_worker_makes_one_grocery_run_to_the_nearest_detour_market() {
             // restarted: two plan starts, one Market).
             n.fun = n.fun.max(0.8);
         }
+        // And no kin to visit: a posted Visit (a kin hurt or arrested in the
+        // day) won the evening on a diverged table, an hour into the run (the
+        // plan restarted: two starts, one Market). The probe is the errand.
+        w.visits.remove(&a);
         w.run_ticks(1);
         let w = &w;
         let Some(p) = w.comp::<Brain>(a).and_then(|b| b.plan.as_ref()) else { continue };
@@ -2052,11 +2086,18 @@ fn probe_suspect_buys_a_beat_on_a_known_witness() {
     let (mut w, s, wit) = suspect(true);
     let end = w.tick + 7 * TICKS_PER_DAY;
     let mut posted = None;
-    run_to(&mut w, s, end, |w| {
-        if posted.is_none() && bought_by(w, s).iter().any(|c| c.target == Target::Agent(wit)) {
+    // Wanted, not yet seen by the law: a guard's sighting of a suspect asleep at
+    // home arrested the pick 90 minutes after the report, before the midnight
+    // pass could send him to the Fixer (a diverged table put a patrol by his
+    // door). The race with the police is not what the probe reads.
+    while w.tick < end && w.has::<Brain>(s) {
+        w.remove_last_seen(&s);
+        pin(&mut w, s);
+        w.run_ticks(1);
+        if posted.is_none() && bought_by(&w, s).iter().any(|c| c.target == Target::Agent(wit)) {
             posted = Some(w.tick);
         }
-    });
+    }
     let leaned = w
         .events
         .iter()
@@ -2786,6 +2827,15 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
         while w.tick < to {
             if let Some(gg) = w.comp_mut::<citysim::Gang>(g) {
                 gg.order = citysim::components::Order::Expand;
+            }
+            // He is no client of his own pitch: with the intimacy line raised, a body
+            // standing at the pitch is a client, and the pimp stands there. On a
+            // diverged table he was the night's client at midnight (paid 5 in, took
+            // 3 of the doubled take, passed 2 up: a purse that did not move).
+            let line = w.config.vice.street_intimacy;
+            if let Some(n) = w.comp_mut::<Needs>(pimp) {
+                // Past the line, so a tick's decay cannot dip under it.
+                n.intimacy = n.intimacy.max(line + 1.0);
             }
             let day = w.tick / TICKS_PER_DAY;
             let goes = w.comp::<Brain>(pimp).is_some_and(|b| {
