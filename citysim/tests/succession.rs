@@ -15,6 +15,12 @@ use citysim::{Config, DeathCause, EntityId, EventKind, Gang, PlayerCommand, RelK
 
 /// The seed-42 city on day 4.
 fn city() -> World {
+    // Built once per test process and cloned (the change tier's budget, 2026-10-19).
+    static CITY: std::sync::OnceLock<World> = std::sync::OnceLock::new();
+    CITY.get_or_init(build_city).clone()
+}
+
+fn build_city() -> World {
     // Jobs & lives phase 1: the M17 city as written (the industries move
     // which gang is at war on day 4).
     let mut c = Config::load();
@@ -329,6 +335,12 @@ fn hollow(w: &World) -> EntityId {
 /// members (Shadow V4 batch 1: on the moved city its roster was empty on
 /// day 4; the brothers' tests need a gang to lose).
 fn hollow_city() -> World {
+    // Built once per test process and cloned (the change tier's budget, 2026-10-19).
+    static HOLLOW: std::sync::OnceLock<World> = std::sync::OnceLock::new();
+    HOLLOW.get_or_init(build_hollow_city).clone()
+}
+
+fn build_hollow_city() -> World {
     let mut w = city();
     let g = hollow(&w);
     let want = w.config.outside.parents.brothers_gutted_below;
@@ -388,20 +400,24 @@ fn test_brothers_after_a_gutting_sack() {
     let mut big = w.clone();
     let mut off = w.clone();
     let t0 = w.tick;
-    // Gutted, the roll certain: brothers.
-    sacked(&mut w, g);
-    w.run_ticks((delay + 2) * TICKS_PER_DAY);
-    assert!(brothers_since(&w, t0) >= 1, "brothers for the gutted gang");
-    // The roll off: none.
+    // Gutted, the roll certain; the roll off; not gutted. The three cities
+    // side by side (the change tier's budget, 2026-10-19).
     off.config.outside.parents.brothers_p = 0.0;
-    sacked(&mut off, g);
-    off.run_ticks((delay + 2) * TICKS_PER_DAY);
-    assert_eq!(brothers_since(&off, t0), 0, "the roll said no");
-    // Not gutted: none.
     big.config.outside.parents.brothers_gutted_below = 1;
-    sacked(&mut big, g);
-    big.run_ticks((delay + 2) * TICKS_PER_DAY);
-    assert_eq!(brothers_since(&big, t0), 0, "a gang with its people needs no brothers");
+    let [gutted, rolled_off, whole] = std::thread::scope(|s| {
+        [w, off, big]
+            .map(|mut x| {
+                s.spawn(move || {
+                    sacked(&mut x, g);
+                    x.run_ticks((delay + 2) * TICKS_PER_DAY);
+                    brothers_since(&x, t0)
+                })
+            })
+            .map(|h| h.join().expect("a sacked city"))
+    });
+    assert!(gutted >= 1, "brothers for the gutted gang");
+    assert_eq!(rolled_off, 0, "the roll said no");
+    assert_eq!(whole, 0, "a gang with its people needs no brothers");
 }
 
 #[test]

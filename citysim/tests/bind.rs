@@ -485,8 +485,12 @@ fn test_life_same_richness_full_vs_statistical() {
         }
         (seen, best)
     };
-    let (full, full_best) = kinds(Lod::Full);
-    let (stat, stat_best) = kinds(Lod::Statistical);
+    // The two cities side by side (the change tier's budget, 2026-10-19).
+    let ((full, full_best), (stat, stat_best)) = std::thread::scope(|s| {
+        let full = s.spawn(|| kinds(Lod::Full));
+        let stat = s.spawn(|| kinds(Lod::Statistical));
+        (full.join().expect("the Full city"), stat.join().expect("the Statistical city"))
+    });
     eprintln!("full {full:?} (best agent {full_best})\nstat {stat:?} (best agent {stat_best})");
     assert!(full.len() >= 3 && stat.len() >= 3, "too few kinds: full {full:?}, stat {stat:?}");
     assert!(full_best >= 3 && stat_best >= 3);

@@ -12,11 +12,11 @@
 
 One command each (`python tools/test.py <tier>`); each runs its cargo steps one at a time, logs everything under `target/test-logs/`, and prints one line per binary, the FAIL and FINDING lines, and the wall time against the budget.
 
-| tier | command | what | asserts | budget | measured 2026-10-18 |
+| tier | command | what | asserts | budget | measured 2026-10-18 (2026-10-19) |
 |---|---|---|---|---|---|
-| **change** (every change) | `test.py change` | `cargo fmt --check`, `clippy -D warnings`, every non-ignored test: ~1,280 unit and integration tests in `citysim/tests/*.rs`, `citysim-cli`, plus `core_sanity` | each mechanism does what it says; `core_sanity`: seeds 42-44 x 120 days, the coin identity and `escrow_leak` daily, the collapse bounds, the mechanism-existence bullets, ticks/s printed | 4 min (3 until 2026-10-18: set before the measurement) | 4m43s: tests 272 s (`core` 40 s, `wounded` 28 s, `wages` 18 s, `person` 12 s, 80 binaries under 3 s), fmt + clippy 10 s |
-| **merge** (before a merge to main, on the exact tree) | `test.py merge` | `core_year` (seed 42 x 365, the bounds per 30-day window); the behaviour tier (`shadow --assert`: 135 per-archetype bounds on seeds 42-44, calibrated on the noise); the god scenarios (seed 42, 60 days, each against its control) | the city holds a year; people still act like people; the world reacts to a shock | 8 min | year ~100 s, behaviour ~80 s (~3 GB), god ~100 s at 20 scenarios (measured 2026-10-18: `god` 61 s, `god_corps` 18 s, `god_districts` 19 s, the three binaries in series, 108 s wall with an incremental build; the 41 took ~130 s) |
-| **milestone** (at a close, or nightly) | `test.py milestone` | Full-vs-Statistical parity (`lod.rs`, the 2,000 city, rates within 15 %); `core_20k` (the 20,000 city, the bounds per capita, determinism of two runs) | the Statistical tier mirrors Full; the big city holds | 20 min | parity ~3.5 min, 20k ~5 min |
+| **change** (every change) | `test.py change` | `cargo fmt --check`, `clippy -D warnings`, every non-ignored test: ~1,280 unit and integration tests in `citysim/tests/*.rs`, `citysim-cli`, plus `core_sanity` | each mechanism does what it says; `core_sanity`: seeds 42-44 x 120 days, the coin identity and `escrow_leak` daily, the collapse bounds, the mechanism-existence bullets, ticks/s printed | 4 min (3 until 2026-10-18: set before the measurement) | 4m43s: tests 272 s (`core` 40 s, `wounded` 28 s, `wages` 18 s, `person` 12 s, 80 binaries under 3 s), fmt + clippy 10 s. (2026-10-19, the Lives at work gate: 3m29s with clippy warm; `core` 40-45 s, `person` 14 s, `weapons` 10 s, `wages` 9.5 s, `bodies` 7 s, `ambient` 7 s, `leverage` 6.5 s; paid back from 4m25s by threading tests' independent cities, one built base world a binary (`OnceLock`), no empty doctest pass) |
+| **merge** (before a merge to main, on the exact tree) | `test.py merge` | `core_year` (seed 42 x 365, the bounds per 30-day window); the behaviour tier (`shadow --assert`: 135 per-archetype bounds on seeds 42-44, calibrated on the noise); the god scenarios (seed 42, 60 days, each against its control) | the city holds a year; people still act like people; the world reacts to a shock | 8 min | year ~100 s, behaviour ~80 s (~3 GB), god ~100 s at 20 scenarios (measured 2026-10-18: `god` 61 s, `god_corps` 18 s, `god_districts` 19 s, the three binaries in series, 108 s wall with an incremental build; the 41 took ~130 s). (2026-10-19: 4m16s; year 115 s, behaviour 58 s, `god` 49 s at 15, `god_corps` 17 s, `god_districts` 17 s) |
+| **milestone** (at a close, or nightly) | `test.py milestone` | Full-vs-Statistical parity (`lod.rs`, the 2,000 city, rates within 15 %); `core_20k` (the 20,000 city, the bounds per capita, determinism of two runs); `god_cut_the_precinct` (`god_20k.rs`: two 20k cities, 40 days) | the Statistical tier mirrors Full; the big city holds | 20 min | parity ~3.5 min, 20k ~5 min (2026-10-19: `god_20k` 392 s, two 20k cities x 40 days; the tier read 7m51s before it) |
 | **diag** (on demand) | `test.py diag --only NAME` | print-only probes (`hit_probe`, `law_probe`, `class_table`, the censuses, `measure_*`); the lives baseline is `citysim-cli shadow --lives [--population 20000]` | nothing | — | listed by `test.py diag` |
 
 Plus the human judge at every milestone: a shadow pass (`citysim-cli shadow --assert --out shadow_out`, critics read one diary per archetype, `docs/SHADOW_V4.md` is the pattern). The bounds catch regressions between reads; the read is the verdict on "alive".
@@ -46,7 +46,7 @@ Plus the human judge at every milestone: a shadow pass (`citysim-cli shadow --as
 | class | scenario |
 |---|---|
 | gang succession | `god_decapitate_gang` |
-| a gang's civil war | `god_decapitate_close_succession` |
+| a gang's ladder (2026-10-19; was a gang's civil war, `god_decapitate_close_succession`) | `god_decapitate_lieutenants` |
 | a gang wiped | `god_kill_gang` |
 | unlimited resources | `god_city_takeover_by_force` |
 | chrome and violence | `god_chrome_everyone_2` |
@@ -60,13 +60,13 @@ Plus the human judge at every milestone: a shadow pass (`citysim-cli shadow --as
 | the hit market | `god_kill_ten_fathers_day_10` |
 | famine | `god_famine_synth` |
 | transit | `god_line_cut` |
-| the board's levers | `god_call_vote_habitat_after_coerce` |
-| captives | `god_hostage_captain_spouse_release` |
+| the School (2026-10-19; was the board's levers, `god_call_vote_habitat_after_coerce`) | `god_kill_all_teachers` |
+| the Camp (2026-10-19; was captives, `god_hostage_captain_spouse_release`) | `god_child_camp_sweep` |
 | the State | `god_murder_wave` |
-| power and the utilities | `god_power_cut` |
-| weapons on the street | `god_flood_guns` |
+| the law's reach, 20k (2026-10-19; was power and the utilities, `god_power_cut`) | `god_cut_the_precinct` (`god_20k.rs`, milestone tier) |
+| the ages (2026-10-19; was weapons on the street, `god_flood_guns`) | `god_retire_everyone_over_55` |
 
-Controls: `god_control`, `god_corps_control`, `god_districts_control`. Write-ups: `docs/GOD_SCENARIOS_V12.md` (live; its "Retired 2026-10-18" section lists the 21 cut with the unit test that carries each), V1-V11 in `docs/history/`.
+Controls: `god_control`, `god_corps_control`, `god_districts_control` (`god_cut_the_precinct` carries its own no-station city). Write-ups: `docs/GOD_SCENARIOS_V12.md` (live; its "Retired 2026-10-18" section lists the 21 cut with the unit test that carries each, "Retired 2026-10-19" the five the Lives at work gate swapped), V1-V11 in `docs/history/`.
 
 **The behaviour tier** (`citysim-cli/src/shadow.rs`, `CHECKS`): each row's bound sits a cushion outside the range the row read on main and seven config butterflies (`[lod] stat_violence_mult` 0.98-1.03, `max_coarse` 149/151, via `CITYSIM_ASSETS`). Cushions: walking + max(1 h, 15 %), the longest nightly block − 0.5 h, energy 0 + 2 h a week, known contacts met x 0.6, commute aborts + 0.05 a day, paid of worked and waged workdays − 0.1, the reporter's work hours x 0.5; refunds ≤ 1 a week and the fighter in the pit ≥ 3 of 4 bouts are absolute. **When it fails**: read the row's per-seed lines, then the diaries (`--out`). Re-calibrate only when the city changed for a wanted reason: eight runs (main and the seven butterflies, ~1.5 min each), each row's lowest and highest pooled value plus the cushions, old and new ranges in the commit message. One row that moved for a known reason is widened from one run. A stat-table regeneration should pass without one; that is the point.
 

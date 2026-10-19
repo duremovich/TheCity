@@ -288,6 +288,7 @@ def analyze(rows, events, jail_cap=None):
     transit(rows, out)
     outside(rows, out)
     jobs2(rows, events, out)
+    lives(rows, events, out)
     out["flags"] = flags
     return out
 
@@ -1055,6 +1056,88 @@ def jobs2(rows, events, out):
     out["jobs2"] = J
 
 
+SERVE_KINDS = ["visit", "patient", "pupil", "inmate", "tenant", "fare", "parcel", "crate", "client", "door",
+               "staff", "buyer", "attendee", "source", "broker"]
+
+
+def lives(rows, events, out):
+    """Lives at work (docs/LIVES_AT_WORK.md § 10's printed bands, the gate): the encounter by kind per staffed
+    shift, regulars, the evening (the home and friend's shares of HangOuts, spouse evenings, empty spots), visits
+    by purpose, the Camp's buy-outs and break-outs, the careers (retirements, frailty exits, the foreman's hires),
+    the leaders (lieutenants, delegation, the cut), the Stations and the execs' homes, ticks/s. Skipped without
+    the `served_visit` column (`[lives]` off). Numbers only, never flags. The bands with no column are printed
+    by `citysim-cli shadow --lives` (ages by trade, the foreman's age and experience, leaders' jail-days, guards'
+    travel) and `law_probe_20k` (arrests per witnessed crime by escort distance)."""
+    if not rows or "served_visit" not in rows[0]:
+        return
+    days = len(rows)
+    tot = lambda k: sum(col(rows, k)) if k in rows[0] else 0
+    L = {"days": days}
+    shifts = tot("serve_shifts")
+    L["served_per_staffed_shift"] = {k: tot(f"served_{k}") / shifts if shifts else 0 for k in SERVE_KINDS}
+    served = sum(tot(f"served_{k}") for k in SERVE_KINDS)
+    L["served_a_day"] = served / days
+    L["waited_share"] = tot("served_waited") / (served + tot("served_waited")) if served else 0
+    L["regulars_made_a_day"] = tot("regulars_made") / days
+    L["staff_meals_a_day"] = tot("staff_meals") / days
+    L["door"] = {"refusals": tot("door_refusals"), "ejections": tot("ejections"), "madam_cut": tot("flow_madam_cut")}
+    hang = tot("hangouts")
+    L["home_share_of_hangouts"] = tot("home_hangouts") / hang if hang else 0
+    L["friend_share_of_hangouts"] = tot("friend_hangouts") / hang if hang else 0
+    L["spouse_share_of_home_hangouts"] = tot("home_with_spouse") / tot("home_hangouts") if tot("home_hangouts") else 0
+    adults = [num(r.get("class_corp", 0)) + num(r.get("class_street", 0)) + num(r.get("class_dreg", 0)) for r in rows]
+    a = mean(adults)
+    L["spouse_evenings_a_week_per_1000_adults"] = 7000 * tot("home_with_spouse") / days / a if a else 0
+    L["empty_spots_left_a_day"] = tot("empty_leaves") / days
+    L["empty_share_of_hangouts"] = tot("empty_leaves") / hang if hang else 0
+    L["home_empty_leaves_a_day"] = tot("home_empty_leaves") / days
+    L["visits_by_purpose"] = {"hurt kin": tot("kin_visits"), "elder parent": tot("elder_visits"),
+                              "Camp child": tot("camp_visits")}
+    L["camp"] = {k: tot(c) for k, c in (("taken", "children_taken"), ("headcounts", "camp_headcounts"),
+                                        ("buy-outs", "camp_buyouts"), ("break-outs", "camp_breakouts"),
+                                        ("escapes", "camp_escapes"), ("beatings", "camp_beatings"),
+                                        ("neglect parent-days", "camp_neglect"), ("buy-out coins", "flow_buyout"))}
+    L["civic"] = {k: tot(c) for k, c in (("taught days", "taught_days"), ("notices", "notices"),
+                                         ("door rent", "door_rent"), ("super stops", "super_stops"),
+                                         ("tied move-ins", "tied_housed"))}
+    L["street"] = {k: tot(c) for k, c in (("cab rides driven", "cab_rides_driven"),
+                                          ("cab rides unmanned", "cab_rides_unmanned"), ("fares short", "fares_short"),
+                                          ("parcels delivered", "parcels_delivered"),
+                                          ("parcels returned", "parcels_returned"), ("lifts", "lifts"),
+                                          ("pilfer reports", "pilfer_reports"),
+                                          ("clients near", "street_clients_near"),
+                                          ("pimp collections", "pimp_collections"), ("pimp pass-up", "pimp_pass_up"),
+                                          ("corner deals", "corner_deals"), ("dealer regulars", "dealer_regulars"))}
+    L["tower"] = {k: tot(c) for k, c in (("Meeting hours", "meetings_held"), ("attendees", "meeting_attendees"),
+                                         ("decisions", "decisions"), ("bylines", "bylines"),
+                                         ("interviews", "interviews"), ("walk-ins served", "walk_ins_served"),
+                                         ("walk-ins dropped", "walk_ins_dropped"))}
+    L["careers"] = {k: tot(c) for k, c in (("retirements", "retirements"), ("frailty exits", "frail_exits"),
+                                           ("unretired", "unretired"), ("band refusals", "band_refusals"),
+                                           ("foreman's hires", "foreman_hires"),
+                                           ("profession rehires", "profession_rehires"),
+                                           ("foremen's premium", "foremen_premium"))}
+    lts = col(rows, "lieutenants")
+    L["leaders"] = {"lieutenants (mean)": mean(lts) if lts else 0, "delegated orders": tot("delegated_orders"),
+                    "lieutenant-led raids": tot("lieutenant_raids"), "leader's cut": tot("leader_cut_coins"),
+                    "lieutenants' cut": tot("lieutenant_cut_coins")}
+    last = rows[-1]
+    L["stations"] = {"Stations": num(last.get("stations", 0)), "bookings": tot("station_bookings"),
+                     "fines": tot("station_fines"), "nights": tot("station_nights"), "transfers": tot("transfers"),
+                     "sent on (full)": tot("stations_full"), "Precinct full": tot("precinct_full")}
+    execs = num(last.get("execs", 0))
+    L["execs_home"] = {"execs": execs, "at exec_home_tier or better": num(last.get("execs_spire", 0)),
+                       "share": num(last.get("execs_spire", 0)) / execs if execs else 0}
+    if "arrests" in rows[0]:
+        L["arrests_a_day"] = tot("arrests") / days
+    if "ticks_per_sec" in rows[0]:
+        L["ticks_per_sec_mean"] = mean(col(rows, "ticks_per_sec"))
+    if events:
+        L["events"] = {k: sum(1 for _, kind, _ in events if kind == k)
+                       for k in ("Served", "Notice", "Retired", "Visited", "Hire")}
+    out["lives"] = L
+
+
 def fmt(o):
     f = lambda d: ", ".join(f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}" for k, v in d.items())
     e = o["economy"]
@@ -1281,6 +1364,31 @@ def fmt(o):
                      + f(g.get("world_out", {})) + " (the sub-switch A/Bs of J24/J25 are run pairs, not one run)")
         if "events" in w:
             L.append("events: " + f(w["events"]) + f"; foreman named {w['foreman_named']}; Hqs built {w['hq_built']}")
+    if "lives" in o:
+        w = o["lives"]
+        L.append("-- Lives at work (docs/LIVES_AT_WORK.md section 10: printed bands, never asserted) --")
+        L.append("encounters per staffed shift: " + f({k: v for k, v in w["served_per_staffed_shift"].items() if v}))
+        L.append(f"encounters a day {w['served_a_day']:.0f}; waited share {w['waited_share']:.1%}; regulars made a day "
+                 f"{w['regulars_made_a_day']:.2f}; staff meals a day {w['staff_meals_a_day']:.1f}; the door: "
+                 + f(w["door"]))
+        L.append(f"the evening: home share of HangOuts {w['home_share_of_hangouts']:.1%}, friend's place "
+                 f"{w['friend_share_of_hangouts']:.1%}, with the spouse of the home ones "
+                 f"{w['spouse_share_of_home_hangouts']:.1%}; spouse evenings a week per 1,000 adults "
+                 f"{w['spouse_evenings_a_week_per_1000_adults']:.0f}; empty spots left a day "
+                 f"{w['empty_spots_left_a_day']:.0f} ({w['empty_share_of_hangouts']:.1%} of HangOuts; at a Home "
+                 f"{w['home_empty_leaves_a_day']:.1f})")
+        L.append("visits by purpose (run): " + f(w["visits_by_purpose"]) + "; the Camp: " + f(w["camp"]))
+        L.append("civic (run): " + f(w["civic"]))
+        L.append("the street (run): " + f(w["street"]))
+        L.append("the tower (run): " + f(w["tower"]))
+        L.append("careers (run): " + f(w["careers"]))
+        L.append("leaders: " + f(w["leaders"]))
+        L.append("Stations (run): " + f(w["stations"]) + "; execs' homes, last day: " + f(w["execs_home"]))
+        L.append(f"arrests a day {w.get('arrests_a_day', 0):.1f}; ticks/s mean {w.get('ticks_per_sec_mean', 0):.0f}"
+                 + ("; events: " + f(w["events"]) if "events" in w else ""))
+        L.append("not columns: ages by trade, the foreman's age and experience, leaders' and lieutenants' jail-days, "
+                 "guards' travel hours (`citysim-cli shadow --lives`, 2k and --population 20000); arrests per "
+                 "witnessed crime by escort distance (`law_probe_20k`)")
     L.append("-- flags --")
     L += [f"  {x}" for x in o["flags"]] or ["  none"]
     return "\n".join(L)

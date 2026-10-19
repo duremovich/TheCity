@@ -1471,7 +1471,8 @@ mod tests {
     /// shipped city and the generated 4,000 city.
     #[test]
     fn test_lazy_relocation_matches_the_eager_walk() {
-        for map in ["", "gen:4000"] {
+        // The two maps side by side (the change tier's budget, 2026-10-19).
+        let one = |map: &str| {
             let mut c = crate::config::Config::load();
             if !map.is_empty() {
                 c = c.scaled_to(4_000);
@@ -1489,7 +1490,13 @@ mod tests {
             println!("{map:?}: {moved} Housed events");
             assert!(moved >= 10, "the test moves people ({map:?}: {moved})");
             assert!(crate::save::to_ron(&a) == crate::save::to_ron(&b), "lazy == eager on {map:?}");
-        }
+        };
+        std::thread::scope(|s| {
+            let hs = ["", "gen:4000"].map(|map| s.spawn(move || one(map)));
+            for h in hs {
+                h.join().expect("a relocation city");
+            }
+        });
     }
 
     /// Review finding 9, the measurement: the generated 20,000 city on day

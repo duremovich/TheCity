@@ -106,9 +106,12 @@ fn test_draw_is_stable_across_save_load_and_rerun() {
     let mut twin = w.clone();
     let mut loaded = citysim::save::from_ron(&citysim::save::to_ron(&w)).expect("loads");
     let d = u64::from(w.config.outside.abroad.abroad_days) + 1;
-    for x in [&mut w, &mut twin, &mut loaded] {
-        days(x, d);
-    }
+    // The three side by side (the change tier's budget, 2026-10-19).
+    std::thread::scope(|s| {
+        for x in [&mut w, &mut twin, &mut loaded] {
+            s.spawn(move || days(x, d));
+        }
+    });
     let said = |x: &World| {
         x.events.iter().filter(|e| e.kind == EventKind::AbroadResolved).map(|e| e.text.clone()).collect::<Vec<_>>()
     };
@@ -195,8 +198,14 @@ fn test_promotion_past_the_thresholds_arrives_with_the_edge() {
         days(&mut w, 3);
         (w, team[0], names)
     };
+    // The four cities side by side (the change tier's budget, 2026-10-19).
+    let [friendly, hostile, inside, no_roll] = std::thread::scope(|s| {
+        [(-1.0, -2.0, 1.0), (2.0, 1.0, 1.0), (2.0, -2.0, 1.0), (-1.0, -2.0, 0.0)]
+            .map(|(f, e, p)| s.spawn(move || run(f, e, p)))
+            .map(|h| h.join().expect("a promotion run"))
+    });
     // Every disposition past the Friend threshold, the roll certain.
-    let (w, leader, names) = run(-1.0, -2.0, 1.0);
+    let (w, leader, names) = friendly;
     let arrived: Vec<_> = w.events.iter().filter(|e| e.kind == EventKind::CastArrived).collect();
     assert!(!arrived.is_empty(), "a promoted NPC arrived");
     let max = w.config.outside.abroad.promoted_max as usize;
@@ -209,7 +218,7 @@ fn test_promotion_past_the_thresholds_arrives_with_the_edge() {
     assert!(!names.is_empty());
     assert!(arrived.iter().all(|e| names.contains(&w.name_of(e.actors[0]))), "the stored names: {names:?}");
     // Every disposition an Enemy: the arrival holds a grudge.
-    let (w, leader, _) = run(2.0, 1.0, 1.0);
+    let (w, leader, _) = hostile;
     // Jobs & lives phase 8: an arrival still living (a dead one's grudges
     // and edges go with its components; on seed 42 the first of six bled
     // out after the fight with the leader).
@@ -233,9 +242,9 @@ fn test_promotion_past_the_thresholds_arrives_with_the_edge() {
         assert!(citysim::systems::grudges::grudge_on(&w, a, leader).is_some());
     }
     // Inside the thresholds, or the roll at 0: nobody.
-    let (w, _, _) = run(2.0, -2.0, 1.0);
+    let (w, _, _) = inside;
     assert_eq!(count(&w, EventKind::CastArrived), 0);
-    let (w, _, _) = run(-1.0, -2.0, 0.0);
+    let (w, _, _) = no_roll;
     assert_eq!(count(&w, EventKind::CastArrived), 0);
 }
 

@@ -175,3 +175,17 @@ Dylan's decision: one scenario per reaction class, at most 20 plus the three con
 | `god_kill_the_young` | Jobs & lives: ages | population and employment above zero on day 59, and the employed share of the population higher than on day 29, after every adult under 35 killed on day 30 | none for the asserted reaction; `ages.rs::test_fired_elder_moves_in_with_his_daughter` covers the elders taken in (printed, not asserted) |
 
 Also removed with them: `patrol_control` and `pin` (the Patrol-pinned control, used only by `god_crackdown_forever`), `gang_named`, the `AmbientDay` / `run_ambient` harness, and the v8 harness's `bounties` and `fixers` readings (read only by the retired board scenarios). The `OnceLock` controls `v5_control`, `v6_control` and `v8_control` keep callers and stay.
+
+## Retired 2026-10-19 (the Lives at work gate, phase 8b)
+
+The milestone's five scenarios (`docs/LIVES_AT_WORK.md` § 10) took five places: `god_kill_all_teachers`, `god_child_camp_sweep`, `god_decapitate_lieutenants`, `god_retire_everyone_over_55` (`god.rs`, the merge tier) and `god_cut_the_precinct` (`god_20k.rs`, the milestone tier: two 20k cities). The five retired were chosen among those whose asserted reaction a unit test carries (none of the OPEN-096..099 kind); `docs/LIVES_AT_WORK.md` § 15 has the readings.
+
+| scenario | class | reaction asserted | carrying unit test |
+|---|---|---|---|
+| `god_decapitate_close_succession` | a gang's civil war | a CivilWar naming The Hollow, sides taken, the war ended within `war_days` | `succession.rs::test_close_succession_is_a_civil_war` (and `test_a_claimant_killed_loses_the_war`, `test_a_jailed_claimant_loses_the_war`) |
+| `god_hostage_captain_spouse_release` | captives | the hostage taken; the world answered (freed, a Rescue, the convict out) | `captives.rs::test_ransom_paid_frees_the_captive`, `test_holderless_god_hostage_never_rolls_or_kills`; `governance.rs::test_release_demand_and_the_captain` |
+| `god_call_vote_habitat_after_coerce` | the board's levers | a vote held; a vote swung or a chair fallen | `governance.rs::test_pinned_member_swings_the_vote`, `test_vote_coercion_breaks_with_the_board`, `test_chair_voted_out_is_the_new_exec` |
+| `god_power_cut` | power and the utilities | a district dark, or the plant's posts taken the next day | `industry.rs::test_outage_darkens_districts_and_comes_back` |
+| `god_flood_guns` | weapons on the street | the crate drawn by a member | `arms.rs::test_landed_crate_fills_the_armoury_and_the_muster_draws_it` |
+
+Also removed with them: `v11_rows`, `story_has`, `v12_rows` (the new `lives_rows` reads the milestone's columns), `flood_pick`, `crate_drawn`, the v8 harness's `posture` reading and `orders`.

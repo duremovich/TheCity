@@ -4,16 +4,17 @@
 //! set is capped at 20 scenarios plus the three controls, one per reaction
 //! class (docs/TESTING.md, the god class table; the retirement pass of
 //! 2026-10-18 cut 41 to 20, the retired ones listed in
-//! docs/GOD_SCENARIOS_V12.md). This file holds 16 of them and `god_control`:
+//! docs/GOD_SCENARIOS_V12.md; the Lives at work gate swapped five on
+//! 2026-10-19). This file holds 15 of them and `god_control`:
 //! `god_decapitate_gang`, `god_kill_gang`, `god_city_takeover_by_force`,
 //! `god_chrome_everyone_2`, `god_wipe_zetatech_day_20`,
 //! `god_kill_friend_of_leaders_day_10`, `god_export_10x`, `god_famine_synth`,
-//! `god_kill_ten_fathers_day_10`, `god_line_cut`,
-//! `god_hostage_captain_spouse_release`, `god_call_vote_habitat_after_coerce`,
-//! `god_decapitate_close_succession`, `god_murder_wave`, `god_power_cut`,
-//! `god_flood_guns`; `god_corps.rs` holds `god_kill_exec` and
-//! `god_wipe_corps`, `god_districts.rs` `god_riot_sump_west` and
-//! `god_evict_sump_rent_10`. Run
+//! `god_kill_ten_fathers_day_10`, `god_line_cut`, `god_murder_wave`,
+//! `god_kill_all_teachers`, `god_child_camp_sweep`,
+//! `god_decapitate_lieutenants`, `god_retire_everyone_over_55`;
+//! `god_corps.rs` holds `god_kill_exec` and `god_wipe_corps`,
+//! `god_districts.rs` `god_riot_sump_west` and `god_evict_sump_rent_10`,
+//! `god_20k.rs` `god_cut_the_precinct` (the 20k city, the milestone tier). Run
 //! `cargo test --release -p citysim --test god -- --ignored --nocapture`.
 //!
 //! Assertions say only that the world *reacted* within 7 days of the shock:
@@ -1548,8 +1549,6 @@ struct V8Day {
     /// The watched agents still living, and jailed.
     alive: usize,
     jailed: usize,
-    /// M16b: the law's posture at the day's end.
-    posture: Option<Posture>,
 }
 
 struct V8Run {
@@ -1602,7 +1601,6 @@ fn run_v8(name: &'static str, mut daily: impl FnMut(&mut World, u64, &mut Vec<En
             fixers_open: contracts::open_fixers(&w).len(),
             alive: watched.iter().filter(|&&a| citysim::systems::law::living(&w, a)).count(),
             jailed: watched.iter().filter(|&&a| w.has::<citysim::Sentence>(a)).count(),
-            posture: w.law().map(|l| l.posture),
         };
         for g in w.gangs() {
             if let Some(gg) = w.comp::<Gang>(g) {
@@ -1687,19 +1685,6 @@ impl V8Run {
             outln!(o, "failed god commands: {:?}", self.failed);
         }
         eprint!("{o}");
-    }
-
-    /// The day-by-day order of `who` (a gang or a corp) from `from`, as runs.
-    fn orders(&self, from: u64, f: impl Fn(&V8Day) -> String) -> String {
-        let mut runs: Vec<(String, u64, u64)> = Vec::new();
-        for (i, d) in self.days.iter().enumerate().skip(from as usize) {
-            let v = f(d);
-            match runs.last_mut() {
-                Some((x, _, end)) if *x == v => *end = i as u64,
-                _ => runs.push((v, i as u64, i as u64)),
-            }
-        }
-        runs.iter().map(|(v, a, b)| format!("{v} {a}-{b}")).collect::<Vec<_>>().join(", ")
     }
 
     fn applied(&self) -> usize {
@@ -2123,201 +2108,12 @@ fn god_line_cut() {
 }
 
 // ---------------------------------------------------------------------------
-// M16b god scenarios (docs/history/GOD_SCENARIOS_V11.md): hostages and boards,
-// on the v8 harness (seed 42, 60 days, the unshocked v8 control); the
-// Trauma and Parley scenarios were retired on 2026-10-18 (`wounded.rs`,
-// `leverage.rs` carry them). Every hold and vote here is a record between
-// fictional agents and a seeded dice roll. Each asserts that the commands
-// applied and that the world reacted; how is printed for the gaps list.
-// ---------------------------------------------------------------------------
-
-/// The M16b columns beside the board's.
-fn v11_rows() -> Vec<V8Series> {
-    vec![
-        ("coercions active (mean)", Box::new(|d: &V8Day| f64::from(d.row.leverage.coercions_active))),
-        ("hostages taken", Box::new(|d: &V8Day| f64::from(d.row.captive.hostages_taken))),
-        ("hostages freed", Box::new(|d: &V8Day| f64::from(d.row.captive.hostages_freed))),
-        ("captives held (mean)", Box::new(|d: &V8Day| f64::from(d.row.captive.captives_held))),
-        ("Rescue posted", Box::new(|d: &V8Day| f64::from(d.row.captive.k_posted[1]))),
-        ("downed", Box::new(|d: &V8Day| f64::from(d.row.wounded.downed))),
-        ("bled out", Box::new(|d: &V8Day| f64::from(d.row.wounded.bled_out))),
-        ("stabilised", Box::new(|d: &V8Day| f64::from(d.row.wounded.stabilised))),
-        ("Trauma calls", Box::new(|d: &V8Day| f64::from(d.row.wounded.trauma_calls))),
-        ("Trauma saves", Box::new(|d: &V8Day| f64::from(d.row.wounded.trauma_saves))),
-        ("Trauma subscribers (mean)", Box::new(|d: &V8Day| f64::from(d.row.wounded.trauma_subs))),
-        ("board votes", Box::new(|d: &V8Day| f64::from(d.row.gov.votes))),
-        ("votes swung", Box::new(|d: &V8Day| f64::from(d.row.gov.votes_swung))),
-        ("chairs fallen", Box::new(|d: &V8Day| f64::from(d.row.gov.chairs_fallen))),
-        ("Parleys", Box::new(|d: &V8Day| f64::from(d.row.leverage.parleys))),
-        ("tribute active (mean)", Box::new(|d: &V8Day| f64::from(d.row.leverage.tribute_active))),
-        ("factions distracted (mean)", Box::new(|d: &V8Day| f64::from(d.row.gov.distracted))),
-        ("law alertness x100 (mean)", Box::new(|d: &V8Day| f64::from(d.row.gov.alert_law) * 100.0)),
-    ]
-}
-
-fn story_has(r: &V8Run, kind: EventKind) -> usize {
-    r.story.iter().filter(|(_, k, _)| *k == kind).count()
-}
-
-/// M16b god 1 (spec § 11): on day 10 the strongest gang takes the
-/// captain's Spouse into its Hideout and demands its boss (or another of
-/// its convicts) let out. Does the law comply, Crush, or post a Rescue?
-#[test]
-#[ignore = "tier: merge"]
-fn god_hostage_captain_spouse_release() {
-    let r = run_v8("god_hostage_captain_spouse_release", |w, day, watched| {
-        if day != 20 {
-            return;
-        }
-        citysim::systems::law_brain::recompute_captain(w);
-        let Some(captain) = w.law().and_then(|l| l.captain) else {
-            eprintln!("day 20: no captain");
-            return;
-        };
-        let g = w
-            .gangs()
-            .into_iter()
-            .filter(|&g| w.hideout_of(g).is_some())
-            .max_by_key(|&g| (w.comp::<Gang>(g).map_or(0, |x| x.members.len()), std::cmp::Reverse(g)))
-            .expect("a gang with a Hideout");
-        let h = w.hideout_of(g).unwrap();
-        // The spouse, else the captain's closest living tie.
-        let victim = w.spouse_of(captain).filter(|&s| citysim::systems::law::living(w, s)).or_else(|| {
-            w.citizens()
-                .into_iter()
-                .filter(|&a| a != captain && citysim::systems::law::living(w, a))
-                .filter(|&a| w.edge(captain, a).is_some())
-                .max_by(|&a, &b| {
-                    let f = |x: EntityId| w.edge(captain, x).map_or(0.0, |e| e.affinity);
-                    f(a).total_cmp(&f(b)).then(b.cmp(&a))
-                })
-        });
-        let Some(victim) = victim else {
-            eprintln!("day 20: the captain has nobody");
-            return;
-        };
-        // The gang's jailed boss, else any of its convicts, else any convict.
-        let members = w.comp::<Gang>(g).map(|x| x.members.clone()).unwrap_or_default();
-        let jailed: Vec<EntityId> = w.with::<citysim::Sentence>();
-        let convict = jailed.iter().copied().find(|&a| members.contains(&a)).or_else(|| jailed.first().copied());
-        let Some(convict) = convict else {
-            eprintln!("day 20: nobody in the Jail");
-            return;
-        };
-        eprintln!(
-            "day 20: {} holds {} (captain {}'s {}) at {}, demanding {} let out (competence {:.2}, captain lawfulness {:.2})",
-            w.owner_label(Some(g)),
-            w.name_of(victim),
-            w.name_of(captain),
-            if w.spouse_of(captain) == Some(victim) { "spouse" } else { "closest tie" },
-            w.name_of(h),
-            w.name_of(convict),
-            w.law().map_or(0.0, |l| l.competence),
-            w.comp::<citysim::Personality>(captain).map_or(0.0, |p| p.lawfulness)
-        );
-        watched.extend([victim, captain, convict, g]);
-        w.push_command(PlayerCommand::Hostage {
-            captive: victim,
-            holder: Some(g),
-            at: h,
-            demand: Some(citysim::contract::Demand::Release(convict)),
-        });
-    });
-    let mut extra = v11_rows();
-    extra.push(("watched jailed (mean)", Box::new(|d: &V8Day| d.jailed as f64)));
-    r.print_v8(&[(20, 30), (30, 60)], extra);
-    let c = v8_control();
-    eprintln!("law posture: {}", r.orders(18, |d| format!("{:?}", d.posture)));
-    eprintln!("control:     {}", c.orders(18, |d| format!("{:?}", d.posture)));
-    assert!(r.failed.is_empty(), "failed: {:?}", r.failed);
-    assert_eq!(r.applied(), 1, "the Hostage applied");
-    // Reacted: the hold ran its course (freed, killed or still held with a
-    // daily roll), or the law answered (a Rescue, the convict out, the
-    // posture moved).
-    let taken = r.sum(20, 21, &|d| f64::from(d.row.captive.hostages_taken));
-    let answered = story_has(&r, EventKind::HostageFreed)
-        + story_has(&r, EventKind::HostageKilled)
-        + story_has(&r, EventKind::ContractPosted)
-        + story_has(&r, EventKind::Release)
-        + story_has(&r, EventKind::CoercionBroken);
-    assert!(taken >= 1.0, "the hostage was not taken");
-    assert!(answered >= 1, "the world did not react to the hold");
-}
-
-/// M16b god 3 (spec § 11): on day 10 the Habitat board's member of the
-/// highest standing (not the chair) coerces two others to vote for it, and
-/// god calls the vote. Does the chair fall, and does the brain's order
-/// change with the board's Personality?
-#[test]
-#[ignore = "tier: merge"]
-fn god_call_vote_habitat_after_coerce() {
-    use citysim::systems::governance;
-    let r = run_v8("god_call_vote_habitat_after_coerce", |w, day, watched| {
-        if day != 10 {
-            return;
-        }
-        let Some(c) = w.corps_of_template("Habitat").first().copied() else { return };
-        let Some((members, chair)) = governance::board_of(w, c) else {
-            eprintln!("day 10: Habitat has no board");
-            return;
-        };
-        let mut others: Vec<EntityId> = members.iter().copied().filter(|&m| Some(m) != chair).collect();
-        // Shadow V4: the challenger runs (a standing candidate, `governance::
-        // candidates`): a pinned vote counts only for a candidate, and on
-        // the moved city the board's top standing was no candidate (greed x
-        // standing under `ambition_min`), so its two coerced votes were void.
-        let cands = governance::candidates(w, c);
-        others.sort_by(|&a, &b| {
-            let s = |x: EntityId| citysim::systems::reputation::rep(w, x).standing;
-            cands.contains(&b).cmp(&cands.contains(&a)).then(s(b).total_cmp(&s(a))).then(a.cmp(&b))
-        });
-        let [challenger, a, b, ..] = others[..] else {
-            eprintln!("day 10: a board of {}", members.len());
-            return;
-        };
-        let p = |w: &World| governance::personality(w, c).map(|p| (p.greed, p.lawfulness, p.courage));
-        eprintln!(
-            "day 10: {} coerces {} and {} to vote for it on Habitat's board (chair {}); board (greed, lawful, courage) {:?}",
-            w.name_of(challenger),
-            w.name_of(a),
-            w.name_of(b),
-            chair.map_or("none".into(), |x| w.name_of(x)),
-            p(w)
-        );
-        watched.extend([c, challenger, a, b]);
-        watched.extend(chair);
-        for over in [a, b] {
-            w.push_command(PlayerCommand::Coerce {
-                agent: challenger,
-                over,
-                leverage: citysim::contract::Leverage::Threat,
-                demand: citysim::contract::Demand::Vote { corp: c, for_: challenger },
-            });
-        }
-        w.push_command(PlayerCommand::CallVote(c));
-    });
-    r.print_v8(&[(10, 11), (11, 60)], v11_rows());
-    let c = v8_control();
-    eprintln!("Habitat:         {}", r.orders(5, |d| format!("{:?}", d.corps.get("Habitat"))));
-    eprintln!("Habitat control: {}", c.orders(5, |d| format!("{:?}", d.corps.get("Habitat"))));
-    assert!(r.failed.is_empty(), "failed: {:?}", r.failed);
-    assert_eq!(r.applied(), 3, "two Coerces and the CallVote applied");
-    let held = story_has(&r, EventKind::VoteHeld);
-    let swung = story_has(&r, EventKind::VoteSwung);
-    eprintln!("VoteHeld {held}, VoteSwung {swung}");
-    assert!(held >= 1, "no vote was held");
-    // Reacted: the pinned members swung, or the chair fell.
-    let fallen = r.sum(10, 11, &|d| f64::from(d.row.gov.chairs_fallen));
-    assert!(swung >= 1 || fallen >= 1.0, "the coerced votes changed nothing");
-}
-
-// ---------------------------------------------------------------------------
 // M17 (docs/M17_OUTSIDE.md): the outside world. Each runs the shipped city
 // with a shock and asserts the world reacted; what it did is printed. Kept:
-// the close succession (phase 4b) and the murder wave (phase 3, the State);
-// the razing, the double decapitation, the job abroad and the Militech kill
-// were retired on 2026-10-18 (`bodies.rs`, `succession.rs`, `abroad.rs`,
-// `weapons.rs` carry them).
+// the murder wave (phase 3, the State); the razing, the double decapitation,
+// the job abroad and the Militech kill were retired on 2026-10-18
+// (`bodies.rs`, `succession.rs`, `abroad.rs`, `weapons.rs` carry them), the
+// close succession on 2026-10-19 (`succession.rs::test_close_succession_is_a_civil_war`).
 // ---------------------------------------------------------------------------
 
 /// Run the shipped seed-42 city `days` days, `shock` at each day's start;
@@ -2342,88 +2138,6 @@ fn told(story: &[(u64, EventKind, String)], kinds: &[EventKind], from: u64, to: 
         .filter(|(d, k, _)| kinds.contains(k) && (from..to).contains(d))
         .map(|(d, k, t)| format!("day {d} {k:?}: {t}"))
         .collect()
-}
-
-/// M17 god 3b (phase 4b): The Hollow's leader killed on day 20 with two
-/// near-equal lieutenants (their days in the gang the leader's, their
-/// loyalty 0.001 and 0.006 under it: a gap inside `war_margin`). Does the
-/// gang fall into a civil war (sides taken, the claimants at each other)
-/// and settle it, with a winner in the chair and the loser dead, fled or
-/// at the head of a splinter, within `war_days`?
-#[test]
-#[ignore = "tier: merge"]
-fn god_decapitate_close_succession() {
-    let hollow = |w: &World| w.gangs().into_iter().find(|&g| w.comp::<Gang>(g).is_some_and(|x| x.name == "The Hollow"));
-    let (w, story) = run_outside(60, |w, day| {
-        if day != 20 {
-            return;
-        }
-        let Some(g) = hollow(w) else { return };
-        // Shadow V4: the scenario's gang can hold a civil war (`war_min_members`
-        // free members): on the moved city The Hollow had 4 on day 20 and the
-        // chair passed by promotion. Free jobless adults join to the floor
-        // (the leader killed below is not counted at the decision: one over).
-        let floor = w.config.outside.succession.war_min_members + 1;
-        let free = citysim::systems::gang::leader_ranking(w, g).len();
-        let recruits: Vec<EntityId> = w
-            .citizens()
-            .into_iter()
-            .filter(|&a| {
-                citysim::systems::demography::is_adult(w, a)
-                    && citysim::systems::law::living(w, a)
-                    && w.gang_of(a).is_none()
-                    && !w.has::<citysim::Sentence>(a)
-                    && !w.has::<citysim::Job>(a)
-            })
-            .collect();
-        for r in recruits.into_iter().take(floor.saturating_sub(free)) {
-            citysim::systems::gang::enlist(w, r, g);
-        }
-        let ranking = citysim::systems::gang::leader_ranking(w, g);
-        let (Some(&l), Some(&a), Some(&b)) = (ranking.first(), ranking.get(1), ranking.get(2)) else {
-            eprintln!("day 20: The Hollow has fewer than three free members");
-            return;
-        };
-        let joined = w.comp::<citysim::components::GangMember>(l).map_or(0, |m| m.joined_tick);
-        if w.comp::<citysim::components::Personality>(l).is_some_and(|p| p.loyalty < 0.01) {
-            w.comp_mut::<citysim::components::Personality>(l).expect("p").loyalty = 1.0;
-        }
-        let loyalty = w.comp::<citysim::components::Personality>(l).map_or(1.0, |p| p.loyalty);
-        for (m, under) in [(a, 0.001), (b, 0.006)] {
-            w.comp_mut::<citysim::components::GangMember>(m).expect("gm").joined_tick = joined;
-            w.comp_mut::<citysim::components::Personality>(m).expect("p").loyalty = loyalty - under;
-        }
-        eprintln!(
-            "day 20: The Hollow ({} free members); killing {}, lieutenants {} and {}",
-            ranking.len(),
-            w.name_of(l),
-            w.name_of(a),
-            w.name_of(b)
-        );
-        w.push_command(PlayerCommand::KillAgent(l));
-    });
-    let days = u64::from(w.config.outside.succession.war_days);
-    let war = told(&story, &[EventKind::CivilWar], 20, 22);
-    let sides = told(&story, &[EventKind::TookSides], 20, 22).into_iter().filter(|l| l.contains("The Hollow")).count();
-    let hunts = told(&story, &[EventKind::HuntStarted, EventKind::ContractPosted], 20, 22);
-    let ended = told(&story, &[EventKind::CivilWarEnded], 20, 20 + days + 2);
-    for l in war.iter().chain(&ended) {
-        eprintln!("{l}");
-    }
-    eprintln!("TookSides {sides}; Hunts or contracts on days 20-21: {}", hunts.len());
-    for l in told(&story, &[EventKind::Split, EventKind::Murder, EventKind::Emigration], 20, 20 + days + 2)
-        .into_iter()
-        .filter(|l| ended.iter().any(|e| e.split_whitespace().nth(3).is_some_and(|n| l.contains(n))))
-    {
-        eprintln!("  {l}");
-    }
-    if let Some(g) = hollow(&w) {
-        let x = w.comp::<Gang>(g).expect("gang");
-        eprintln!("day 60: The Hollow led by {:?}, {} members", x.leader.map(|l| w.name_of(l)), x.members.len());
-    }
-    assert!(war.iter().any(|l| l.contains("The Hollow")), "no civil war after a close succession");
-    assert!(sides > 0, "nobody took sides");
-    assert!(ended.iter().any(|l| l.contains("The Hollow")), "the war was not settled within war_days");
 }
 
 /// M17 god 4: a murder wave (25 residents killed on day 10). Does the State
@@ -2455,9 +2169,9 @@ fn god_murder_wave() {
 
 // ---------------------------------------------------------------------------
 // v12 (Jobs & lives phase 8, docs/JOBS_AND_LIVES.md § 12; docs/GOD_SCENARIOS_V12.md):
-// 60 days on the v8 harness against its control. Two of the ten stand (the
-// power cut and the gun flood); the other eight were retired on 2026-10-18
-// (the write-up lists each with its carrying unit test).
+// the harness's columns, read by the Lives at work scenarios below. Of the ten,
+// eight were retired on 2026-10-18 and the power cut and the gun flood on
+// 2026-10-19 (the write-up lists each with its carrying unit test).
 // ---------------------------------------------------------------------------
 
 /// The milestone's daily columns (zero with `[jobs2]` off).
@@ -2465,187 +2179,234 @@ fn j2(d: &V8Day, f: fn(&citysim::stats::Jobs2Cols) -> f64) -> f64 {
     d.row.jobs2.as_ref().map_or(0.0, f)
 }
 
-fn v12_rows() -> Vec<V8Series> {
-    vec![
-        ("employed (mean)", Box::new(|d: &V8Day| f64::from(d.row.employed))),
-        ("population (mean)", Box::new(|d: &V8Day| f64::from(d.row.population))),
-        ("immigrants", Box::new(|d: &V8Day| f64::from(d.row.immigrants))),
-        ("violent deaths", Box::new(|d: &V8Day| f64::from(d.row.deaths_violence))),
-        ("day posts filled", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.day_posts_filled)))),
-        ("corner queue (mean)", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.corner_queue)))),
-        ("pitches (mean)", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.pitches)))),
-        ("dark districts (mean)", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.dark_districts)))),
-        ("outages", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.outages)))),
-        ("armed fights", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.armed_fights)))),
-        ("armed deaths", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.armed_deaths)))),
-        ("street pitches (mean)", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.street_pitches)))),
-        ("swept", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.swept)))),
-        ("Solicitation arrests", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.solicit_arrests)))),
-        ("pimp cut", Box::new(|d: &V8Day| j2(d, |j| j.pimp_cut as f64))),
-        ("chip hired", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.chip_hired)))),
-        ("chipped living (mean)", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.chipped_living)))),
-        ("chip episodes", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.chip_episodes)))),
-        ("Trafficking", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.trafficking)))),
-        ("organs made", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.organs_made)))),
-        ("organs exported", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.organs_exported)))),
-        ("scav kills", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.scav_kills)))),
-        ("abductions", Box::new(|d: &V8Day| f64::from(d.row.abductions))),
-        ("black clinics (mean)", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.black_clinics)))),
-        ("cult members (mean)", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.cult_members)))),
-        ("apostates", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.apostates)))),
-        ("apostates hunted", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.apostates_hunted)))),
-        ("tithes", Box::new(|d: &V8Day| j2(d, |j| j.tithes as f64))),
-        ("school days", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.school_days)))),
-        ("school fees", Box::new(|d: &V8Day| j2(d, |j| j.school_fees as f64))),
-        ("children taken", Box::new(|d: &V8Day| f64::from(d.row.econ.children_taken))),
-        ("elders employed (mean)", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.elders_employed)))),
-        ("elders taken in", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.elders_taken_in)))),
-        ("Rations made", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.rations_made)))),
-    ]
-}
-
 fn v12_sum(r: &V8Run, from: u64, to: u64, f: fn(&citysim::stats::Jobs2Cols) -> f64) -> f64 {
     r.sum(from, to, &|d: &V8Day| j2(d, f))
 }
 
-/// v12 god 2: every UtilityPlant's staff jailed 10 days on day 30. Do the
-/// districts go dark, and does the city notice?
-#[test]
-#[ignore = "tier: merge"]
-fn god_power_cut() {
-    let mut restaffed = 0usize;
-    let r = run_v8("god_power_cut", |w, day, watched| {
-        if day == 31 {
-            restaffed = w
-                .buildings_of_kind(citysim::BuildingKind::UtilityPlant)
-                .iter()
-                .map(|&p| w.staff_of(p).iter().filter(|&&a| !w.has::<citysim::Sentence>(a)).count())
-                .sum();
-        }
-        if day != 30 {
-            return;
-        }
-        let plants: Vec<EntityId> = w.buildings_of_kind(citysim::BuildingKind::UtilityPlant).to_vec();
-        let staff: Vec<EntityId> = plants.iter().flat_map(|&p| w.staff_of(p).to_vec()).collect();
-        eprintln!("day 30: {} UtilityPlant staff jailed 10 days ({} plants)", staff.len(), plants.len());
-        for a in staff {
-            watched.push(a);
-            w.push_command(PlayerCommand::JailAgent { who: a, days: 10 });
-        }
-    });
-    r.print_v8(&[(20, 30), (30, 40), (40, 60)], v12_rows());
-    assert!(r.failed.is_empty(), "failed: {:?}", r.failed);
-    assert!(r.applied() >= 1, "the jailings applied");
-    let dark = v12_sum(&r, 30, 41, |j| f64::from(j.dark_districts)) + v12_sum(&r, 30, 41, |j| f64::from(j.outages));
-    eprintln!("dark district-days and outages 30-40: {dark:.0}; free plant staff at day 31's start: {restaffed}");
-    // Reacted: the districts went dark, or the plant was staffed again the
-    // next day (the midnight job search refills the posts).
-    assert!(dark > 0.0 || restaffed > 0, "no district went dark and nobody took the posts");
+// ---------------------------------------------------------------------------
+// Lives at work (docs/LIVES_AT_WORK.md § 10; the gate, phase 8b, 2026-10-19):
+// 60 days on the v8 harness against its control. Each asserts one reaction
+// as a broken-system signal and prints the rest. They replaced five
+// scenarios whose reaction a unit test carries (docs/GOD_SCENARIOS_V12.md,
+// "Retired 2026-10-19"); `god_cut_the_precinct` (the 20k city) is in
+// `god_20k.rs`, the milestone tier.
+// ---------------------------------------------------------------------------
+
+/// The milestone's daily columns beside the board's.
+fn lives_rows() -> Vec<V8Series> {
+    vec![
+        ("employed (mean)", Box::new(|d: &V8Day| f64::from(d.row.employed))),
+        ("population (mean)", Box::new(|d: &V8Day| f64::from(d.row.population))),
+        ("school days", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.school_days)))),
+        ("School days taught", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.taught_days)))),
+        ("children taken", Box::new(|d: &V8Day| f64::from(d.row.econ.children_taken))),
+        ("Camp headcounts", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.camp_headcounts)))),
+        ("Camp visits", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.camp_visits)))),
+        ("Camp buy-outs", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.camp_buyouts)))),
+        ("Camp break-outs", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.camp_breakouts)))),
+        ("Camp escapes", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.camp_escapes)))),
+        ("neglecting parent-days", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.camp_neglect)))),
+        ("lieutenants (mean)", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.lieutenants)))),
+        ("delegated orders", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.delegated_orders)))),
+        ("lieutenant-led raids", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.lieutenant_raids)))),
+        ("leader's cut", Box::new(|d: &V8Day| j2(d, |j| j.leader_cut_coins as f64))),
+        ("retirements", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.retirements)))),
+        ("unretired", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.unretired)))),
+        ("frailty exits", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.frail_exits)))),
+        ("foreman's hires", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.foreman_hires)))),
+        ("profession rehires", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.profession_rehires)))),
+        ("elders taken in", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.elders_taken_in)))),
+        ("elders employed (mean)", Box::new(|d: &V8Day| j2(d, |j| f64::from(j.elders_employed)))),
+    ]
 }
 
-/// v12 god 3: a crate of 200 tier-3 weapons to the weakest gang on day 20.
-/// Do its fights turn armed, do the Murders rise, does the Law answer?
+/// Lives at work god 1 (§ 10, class: the School): every teacher killed on
+/// day 20. The School days stop being taught (no teacher, no `edu_gain`);
+/// the posts must refill (the job search's School vacancy): no taught day
+/// on days 21-59 is a broken School.
 #[test]
 #[ignore = "tier: merge"]
-fn god_flood_guns() {
-    let r = run_v8("god_flood_guns", |w, day, watched| {
+fn god_kill_all_teachers() {
+    let r = run_v8("god_kill_all_teachers", |w, day, watched| {
         if day != 20 {
             return;
         }
-        let Some(g) = flood_pick(w) else {
-            eprintln!("day 20: no gang with a Hideout and a crew to march");
-            return;
-        };
-        eprintln!("day 20: 200 tier-3 weapons to {}", w.owner_label(Some(g)));
-        watched.push(g);
-        w.push_command(PlayerCommand::FloodGuns { gang: g, n: 200, tier: 3 });
+        let role = w.config.trade_role("teacher").expect("the teacher row");
+        let teachers: Vec<EntityId> = w
+            .buildings_of_kind(citysim::BuildingKind::School)
+            .iter()
+            .flat_map(|&s| w.staff_of(s).to_vec())
+            .filter(|&a| w.comp::<citysim::Job>(a).is_some_and(|j| j.role == role))
+            .collect();
+        eprintln!("day 20: {} teachers killed", teachers.len());
+        for t in teachers {
+            watched.push(t);
+            w.push_command(PlayerCommand::KillAgent(t));
+        }
     });
-    r.print_v8(&[(10, 20), (20, 40), (40, 60)], v12_rows());
-    let c = v8_control();
-    let armed = |x: &V8Run| v12_sum(x, 20, 60, |j| f64::from(j.armed_fights));
-    let issued = |x: &V8Run| v12_sum(x, 20, 60, |j| f64::from(j.issued));
-    eprintln!(
-        "armed fights 20-60: {:.0} (control {:.0}); armoury issues {:.0} ({:.0})",
-        armed(&r),
-        armed(c),
-        issued(&r),
-        issued(c)
-    );
-    eprintln!("law posture: {}", r.orders(18, |d| format!("{:?}", d.posture)));
-    eprintln!("control:     {}", c.orders(18, |d| format!("{:?}", d.posture)));
+    r.print_v8(&[(10, 20), (20, 21), (21, 30), (30, 60)], lives_rows());
     assert!(r.failed.is_empty(), "failed: {:?}", r.failed);
-    assert_eq!(r.applied(), 1, "the crate landed");
-    // Reacted: the crate reached the gang's hands (the musters' issues);
-    // whether the fights turned armed is judged in the doc. Shadow V4: the
-    // crate itself is drawn down: a weapon the god placed carried out of
-    // the Hideout by a member within the window. Both earlier forms were
-    // trajectory noise: the city-wide issue count read the other gangs'
-    // musters (21 / 21 while the flooded gang drew from the crate), and the
-    // same gang in the control could build its own armoury (The Hollow's
-    // control issued 18 against the flooded run's 14 on the review tree).
-    let (drawn, staged) = crate_drawn();
-    eprintln!("the crate: {staged} placed, {drawn} (weapon, day) draws by members 20-60");
-    assert_eq!(staged, 200, "the crate landed in the Hideout");
-    assert!(drawn > 0, "the crate was never issued");
+    assert!(r.applied() >= 1, "the killings applied");
+    let c = v8_control();
+    let taught = |run: &V8Run, a: u64, b: u64| v12_sum(run, a, b, |j| f64::from(j.taught_days));
+    let first = (21..60).find(|&d| taught(&r, d, d + 1) > 0.0);
+    eprintln!(
+        "taught School days: day 20 {:.0} (control {:.0}), days 21-29 {:.0} ({:.0}), 30-59 {:.0} ({:.0}); first taught again on day {first:?}",
+        taught(&r, 20, 21),
+        taught(c, 20, 21),
+        taught(&r, 21, 30),
+        taught(c, 21, 30),
+        taught(&r, 30, 60),
+        taught(c, 30, 60)
+    );
+    assert!(first.is_some(), "no School day taught on days 21-59: the teachers' posts never refilled");
 }
 
-/// `god_flood_guns`'s pick: the weakest gang with a Hideout on day 20 that
-/// has a crew to march: `raid_min_members` free members (living, not held)
-/// besides a leader who stays back (D10). Lives at work phase 3: tied
-/// housing moves the seeded households on day 0 and the city's gangs with
-/// them; on that city the weakest gang had three members, fewer than a
-/// muster needs, and the crate was never drawn (the lawful-Farmer shape: the
-/// pick's precondition, never the bound).
-fn flood_pick(w: &World) -> Option<EntityId> {
-    let need = w.config.gangs.raid_min_members + 1;
-    w.gangs()
-        .into_iter()
-        .filter(|&g| w.hideout_of(g).is_some())
-        .filter(|&g| {
-            w.comp::<Gang>(g).is_some_and(|x| {
-                x.members
-                    .iter()
-                    .filter(|&&m| citysim::systems::law::living(w, m) && !w.has::<citysim::Sentence>(m))
-                    .count()
-                    >= need
-            })
-        })
-        .min_by_key(|&g| (w.comp::<Gang>(g).map_or(0, |x| x.members.len()), g))
-}
-
-/// `god_flood_guns`'s measure: the weakest gang on day 20 (the scenario's
-/// pick) flooded, run to day 60: the crate (the weapons the command
-/// spawned, read off the arms index before and after it), and the
-/// (weapon, day) pairs one of them was carried by a member of the gang,
-/// sampled every half hour (issues go back at midnight).
-fn crate_drawn() -> (usize, usize) {
-    use citysim::components::{Asset, AssetLoc};
-    let mut w = World::new(SEED, Config::load());
-    w.run_ticks(20 * TICKS_PER_DAY);
-    let g = flood_pick(&w).expect("a gang with a Hideout and a crew to march");
-    let before = w.jobs2.arms.index.clone();
-    w.push_command(PlayerCommand::FloodGuns { gang: g, n: 200, tier: 3 });
-    w.run_ticks(1);
-    let hideout = w.hideout_of(g);
-    let crate_: std::collections::BTreeSet<EntityId> = w
-        .jobs2
-        .arms
-        .index
-        .iter()
-        .copied()
-        .filter(|a| !before.contains(a))
-        .filter(|&a| w.comp::<Asset>(a).is_some_and(|x| hideout.is_some_and(|h| x.loc == AssetLoc::Stock(h))))
-        .collect();
-    let mut seen: std::collections::BTreeSet<(EntityId, u64)> = std::collections::BTreeSet::new();
-    while w.day() < 60 {
-        w.run_ticks(30);
-        for &a in &crate_ {
-            if let Some(AssetLoc::Carried(m)) = w.comp::<Asset>(a).map(|x| x.loc) {
-                if w.gang_of(m) == Some(g) {
-                    seen.insert((a, w.day()));
-                }
+/// Lives at work god 2 (§ 10, class: the Camp): every child on the street
+/// on day 10 (its routine's place, `ages::Place::Street`; with fewer than
+/// ten there, the poorest households' children too) taken to the Camp
+/// (`camp::take`, the service's own take: the grudge on the Law, the
+/// bulletin). The parents must answer: visits, buy-outs and break-outs on
+/// days 11-59 above the control's.
+#[test]
+#[ignore = "tier: merge"]
+fn god_child_camp_sweep() {
+    use citysim::systems::{ages, camp};
+    let mut taken = 0usize;
+    let r = run_v8("god_child_camp_sweep", |w, day, watched| {
+        if day != 10 {
+            return;
+        }
+        let kids: Vec<EntityId> = w.with::<citysim::components::Child>();
+        let in_camp = |w: &World, k: EntityId| {
+            w.comp::<citysim::Household>(k)
+                .and_then(|h| h.home)
+                .and_then(|h| w.comp::<citysim::Building>(h))
+                .is_some_and(|b| b.kind == citysim::BuildingKind::Camp)
+        };
+        let mut sweep: Vec<EntityId> = kids
+            .iter()
+            .copied()
+            .filter(|&k| !in_camp(w, k) && matches!(ages::place_of(w, k), Some(ages::Place::Street)))
+            .collect();
+        let street = sweep.len();
+        if sweep.len() < 10 {
+            let mut poor: Vec<(i64, EntityId)> = kids
+                .iter()
+                .copied()
+                .filter(|&k| !in_camp(w, k) && !sweep.contains(&k))
+                .map(|k| (camp::parents_of(w, k).iter().map(|&p| w.purse(Some(p))).sum::<i64>(), k))
+                .collect();
+            poor.sort_unstable();
+            sweep.extend(poor.into_iter().take(10 - sweep.len()).map(|(_, k)| k));
+        }
+        for k in sweep {
+            if camp::take(w, k).is_some() {
+                taken += 1;
+                watched.push(k);
+                watched.extend(camp::parents_of(w, k));
             }
         }
-    }
-    (seen.len(), crate_.len())
+        eprintln!("day 10: {taken} children taken ({street} on the street, {} children in the city)", kids.len());
+    });
+    r.print_v8(&[(0, 10), (10, 30), (30, 60)], lives_rows());
+    assert!(r.failed.is_empty(), "failed: {:?}", r.failed);
+    assert!(taken >= 1, "no child taken");
+    let c = v8_control();
+    let answered = |run: &V8Run| {
+        v12_sum(run, 11, 60, |j| f64::from(j.camp_visits))
+            + v12_sum(run, 11, 60, |j| f64::from(j.camp_buyouts))
+            + v12_sum(run, 11, 60, |j| f64::from(j.camp_breakouts))
+    };
+    let (a, b) = (answered(&r), answered(c));
+    eprintln!("the parents' answer days 11-59 (visits + buy-outs + break-outs): {a:.0} (control {b:.0})");
+    assert!(a > b, "the parents of the taken did not answer: {a:.0} against the control's {b:.0}");
+}
+
+/// Lives at work god 3 (§ 10, class: a gang's ladder): every lieutenant
+/// (rank 1) killed on day 30. The leaders lead the raids again; the ranking
+/// must raise new lieutenants (rank 1 on a later day): a gang with members
+/// and no lieutenant to day 59 is a broken ladder.
+#[test]
+#[ignore = "tier: merge"]
+fn god_decapitate_lieutenants() {
+    let mut killed = 0usize;
+    let r = run_v8("god_decapitate_lieutenants", |w, day, watched| {
+        if day != 30 {
+            return;
+        }
+        for g in w.gangs() {
+            let members = w.comp::<Gang>(g).map(|x| x.members.clone()).unwrap_or_default();
+            for m in members {
+                if w.comp::<citysim::GangMember>(m).is_some_and(|x| x.rank == 1) {
+                    killed += 1;
+                    watched.push(m);
+                    w.push_command(PlayerCommand::KillAgent(m));
+                }
+            }
+            watched.push(g);
+        }
+        eprintln!("day 30: {killed} lieutenants killed");
+    });
+    r.print_v8(&[(20, 30), (30, 31), (31, 40), (40, 60)], lives_rows());
+    assert!(r.failed.is_empty(), "failed: {:?}", r.failed);
+    assert!(killed >= 1 && r.applied() >= 1, "no lieutenant to kill on day 30 ({killed})");
+    let risen = (31..60).find(|&d| r.days[d as usize].row.jobs2.as_ref().is_some_and(|j| j.lieutenants > 0));
+    eprintln!("lieutenants again on day {risen:?}");
+    assert!(risen.is_some(), "no lieutenant rose in 29 days after the decapitation");
+}
+
+/// Lives at work god 4 (§ 10, class: the ages): every worker of 55 or more
+/// retired on day 10 (the midnight's own retirement, `[careers]
+/// retire_from_years` 55 and `retire_days` 0 for that one night). The
+/// trades must refill: a Hire at a retiree's employer on days 11-20.
+/// The foremen's posts that moved and the kin take-ins are printed.
+#[test]
+#[ignore = "tier: merge"]
+fn god_retire_everyone_over_55() {
+    use citysim::systems::careers;
+    let mut employers: Vec<EntityId> = Vec::new();
+    let mut foremen: Vec<(EntityId, Option<EntityId>)> = Vec::new();
+    let mut moved = 0usize;
+    let saved = Config::load().careers;
+    let r = run_v8("god_retire_everyone_over_55", |w, day, watched| {
+        if day == 10 {
+            for a in w.citizens() {
+                let old = citysim::systems::ages::years(w, a) >= 55;
+                if let Some(e) = w.comp::<citysim::Job>(a).and_then(|j| j.employer).filter(|_| old) {
+                    watched.push(a);
+                    if !employers.contains(&e) {
+                        employers.push(e);
+                    }
+                }
+            }
+            employers.sort_unstable();
+            foremen = employers.iter().map(|&e| (e, careers::foreman(w, e, None))).collect();
+            eprintln!("day 10: {} workers of 55 or more at {} employers", watched.len(), employers.len());
+            watched.extend(employers.iter().copied());
+            w.config.careers.retire_from_years = 55;
+            w.config.careers.retire_days = 0;
+        }
+        if day == 11 {
+            w.config.careers = saved.clone();
+        }
+        if day == 20 {
+            moved = foremen.iter().filter(|&&(e, f)| careers::foreman(w, e, None) != f).count();
+        }
+    });
+    r.print_v8(&[(0, 10), (10, 11), (11, 20), (20, 60)], lives_rows());
+    assert!(r.failed.is_empty(), "failed: {:?}", r.failed);
+    let retired = r.story.iter().filter(|(d, k, _)| *d == 10 && *k == EventKind::Retired).count();
+    let refill =
+        r.story.iter().filter(|(d, k, t)| (11..21).contains(d) && *k == EventKind::Hire && !t.is_empty()).count();
+    let c = v8_control();
+    let taken_in = |run: &V8Run| v12_sum(run, 10, 20, |j| f64::from(j.elders_taken_in));
+    eprintln!(
+        "retired on day 10: {retired}; Hires at their employers days 11-20: {refill}; foremen moved by day 20: {moved} of {}; elders taken in days 10-19: {:.0} (control {:.0})",
+        foremen.len(),
+        taken_in(&r),
+        taken_in(c)
+    );
+    assert!(retired >= 1, "nobody retired on day 10");
+    assert!(refill >= 1, "no Hire at a retiree's employer in the ten days after: the trades did not refill");
 }
