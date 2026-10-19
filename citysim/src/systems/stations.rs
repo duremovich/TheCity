@@ -81,6 +81,26 @@ pub fn precinct_held(world: &World) -> usize {
         .count()
 }
 
+/// Review fix 5: the Precinct's room as every booking reads it: its
+/// prisoners ([`precinct_held`]) and the Stations' held whose term runs
+/// past the next van (the van's own rule: they are the Precinct's by
+/// morning). With no Station standing, `precinct_held`.
+pub fn precinct_bound(world: &World) -> usize {
+    let st = world.buildings_of_kind(BuildingKind::Station);
+    if st.is_empty() {
+        return world.sentenced().len();
+    }
+    let van = next_van(world) + TICKS_PER_DAY;
+    world
+        .sentenced()
+        .iter()
+        .filter(|&&p| {
+            let at_station = world.comp::<Position>(p).and_then(|pos| pos.building).is_some_and(|b| st.contains(&b));
+            !at_station || world.comp::<Sentence>(p).is_some_and(|s| s.until_tick > van)
+        })
+        .count()
+}
+
 /// A Station with a free cell.
 pub fn has_cell(world: &World, s: EntityId) -> bool {
     held_at(world, s) < world.config.law.station_cells as usize
@@ -336,6 +356,10 @@ pub fn van(world: &mut World) {
     }
     let Some(precinct) = world.building_of_kind(BuildingKind::Jail) else { return };
     let now = world.tick;
+    // Review fix 5: the van fills the Precinct to its capacity; the rest
+    // wait in the Station's cells for the next van.
+    let capacity = usize::from(world.config.buildings.jail.capacity);
+    let mut room = capacity.saturating_sub(precinct_held(world));
     let due: Vec<(EntityId, EntityId)> = world
         .sentenced()
         .iter()
@@ -346,6 +370,10 @@ pub fn van(world: &mut World) {
         })
         .collect();
     for (p, s) in due {
+        if room == 0 {
+            break;
+        }
+        room -= 1;
         world.remove_from_building(p);
         world.enter_building(p, precinct);
         let text = format!(

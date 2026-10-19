@@ -378,3 +378,76 @@ fn diag_spire_homes_20k() {
         }
     }
 }
+
+/// Fill `s`'s cells with `n` free adults on a ten-day Theft (each bound for
+/// the Precinct by the van).
+fn fill_cells(w: &mut World, s: EntityId, n: usize) {
+    let until = w.tick + 10 * TICKS_PER_DAY;
+    let fill: Vec<EntityId> =
+        common::free_adults(w).into_iter().filter(|&a| !w.has::<Job>(a) && !w.has::<Sentence>(a)).take(n).collect();
+    assert_eq!(fill.len(), n);
+    for a in fill {
+        law::sentence(w, a, Crime::Theft, until, s);
+    }
+}
+
+/// Escort a fresh thief to `s` (the guard inside with him) and book him.
+fn book_at(w: &mut World, s: EntityId) -> EntityId {
+    let tile = door(w, s);
+    let (guard, thief) = guard_and_thief(w, tile);
+    assert!(law::arrest(w, guard, thief), "the cuffs hold");
+    w.enter_building(guard, s);
+    law::follow_guard(w, guard);
+    law::jail_suspect(w, guard, thief);
+    thief
+}
+
+/// Review fix 5: the booking re-checks the Station's cells (they filled
+/// while the escort walked): a full Station books to the Precinct, never
+/// past `station_cells`. Failed on the base `f795548`.
+#[test]
+fn test_a_full_station_never_books_past_its_cells() {
+    let mut w = station_world();
+    let s = far_station(&w);
+    let cells = w.config.law.station_cells as usize;
+    fill_cells(&mut w, s, cells);
+    let thief = book_at(&mut w, s);
+    assert!(w.has::<Sentence>(thief), "sentenced");
+    assert!(stations::held_at(&w, s) <= cells, "never past the cells: {}", stations::held_at(&w, s));
+    let jail = w.building_of_kind(BuildingKind::Jail).expect("the Precinct");
+    assert_eq!(w.comp::<Position>(thief).and_then(|p| p.building), Some(jail), "booked to the Precinct");
+}
+
+/// Review fix 5: the Station's prisoners bound for the Precinct (a term
+/// past the next van) count against its room: with the Precinct's free
+/// cells all spoken for by them, a broke thief booked at another Station
+/// is released (`Precinct full, cannot pay`); the van never moves the
+/// Precinct past its capacity. Failed on the base `f795548` (sentenced, and
+/// the van overfilled the Precinct).
+#[test]
+fn test_station_prisoners_bound_for_the_precinct_count_and_the_van_respects_it() {
+    let mut w = station_world();
+    let mut st = stations::stations(&w);
+    st.sort();
+    let (s, s2) = (st[0], st[1]);
+    let cells = w.config.law.station_cells as usize;
+    fill_cells(&mut w, s, cells);
+    let held = stations::precinct_held(&w);
+    w.config.buildings.jail.capacity = u16::try_from(held + cells).expect("capacity");
+    let thief = book_at(&mut w, s2);
+    assert!(!w.has::<Sentence>(thief), "the Precinct is full: the broke thief is released");
+    assert!(w.events.iter().any(|e| e.kind == EventKind::Unpunished && e.actors.first() == Some(&thief)));
+    // The van with the Precinct one short of the Station's prisoners.
+    w.config.buildings.jail.capacity = u16::try_from(held + cells - 1).expect("capacity");
+    let van = w.config.law.transfer_hour as u64;
+    let day = w.tick - w.tick % TICKS_PER_DAY;
+    w.tick = day + TICKS_PER_DAY + van;
+    stations::van(&mut w);
+    let cap = usize::from(w.config.buildings.jail.capacity);
+    assert!(
+        stations::precinct_held(&w) <= cap,
+        "the van respects the Precinct: {} > {cap}",
+        stations::precinct_held(&w)
+    );
+    assert_eq!(stations::held_at(&w, s), 1, "the one without a cell waits for the next van");
+}

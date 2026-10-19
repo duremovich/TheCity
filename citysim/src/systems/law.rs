@@ -1088,10 +1088,13 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
     let station = world
         .comp::<Position>(guard)
         .and_then(|p| p.building)
-        .filter(|&b| crate::systems::stations::on(world) && crate::systems::stations::is_station(world, b));
+        .filter(|&b| crate::systems::stations::on(world) && crate::systems::stations::is_station(world, b))
+        // Review fix 5: the cells filled while the escort walked: the Precinct's.
+        .filter(|&b| crate::systems::stations::has_cell(world, b));
     let jail = station.unwrap_or(precinct);
     let capacity = usize::from(world.config.buildings.jail.capacity);
-    let jailed = crate::systems::stations::precinct_held(world);
+    // Review fix 5: the Station's held bound for the Precinct count.
+    let jailed = crate::systems::stations::precinct_bound(world);
 
     // Shadow V4 bug 4: a petty offence (a night in the cells) is fined
     // whenever the suspect can pay, not only when the Precinct is full (fare
@@ -2232,7 +2235,7 @@ pub fn player_arrest(world: &mut World, who: EntityId) -> Result<(), String> {
         return Err("already jailed".into());
     }
     let Some(jail) = world.building_of_kind(BuildingKind::Jail) else { return Err("no Precinct".into()) };
-    if world.with::<Sentence>().len() >= usize::from(world.config.buildings.jail.capacity) {
+    if crate::systems::stations::precinct_bound(world) >= usize::from(world.config.buildings.jail.capacity) {
         return Err("the Precinct is full".into());
     }
     let until = world.tick + sentence_ticks(world, Crime::Theft);
