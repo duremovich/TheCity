@@ -352,12 +352,10 @@ fn lift_hour(world: &mut World) {
 }
 
 /// Does `s`'s job start a shift this hour (the roster's and the headcount's
-/// hour, as the madam's `staff_hour`)?
+/// hour, as the madam's `staff_hour`; `Job::first_hour`)?
 fn first_hour(world: &World, s: EntityId) -> bool {
     let tod = world.tick_of_day();
-    world
-        .comp::<Job>(s)
-        .is_some_and(|j| j.shifts.iter().any(|&(start, _)| tod >= start && u32::from(tod) < u32::from(start) + 60))
+    world.comp::<Job>(s).is_some_and(|j| j.first_hour(tod))
 }
 
 /// Lives at work phase 3 (§ 2.2, teacher and camp warden): at the first
@@ -531,9 +529,7 @@ fn staff_hour(world: &mut World) {
             .copied()
             .filter(|&s| {
                 row_of_agent(world, s).is_some_and(|r| r.kind != ServeKind::Staff)
-                    && world.comp::<Job>(s).is_some_and(|j| {
-                        j.shifts.iter().any(|&(start, _)| tod >= start && u32::from(tod) < u32::from(start) + 60)
-                    })
+                    && world.comp::<Job>(s).is_some_and(|j| j.first_hour(tod))
                     && present(world, s, place)
             })
             .collect();

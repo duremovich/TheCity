@@ -2224,6 +2224,20 @@ impl Job {
         }
     }
 
+    /// Review fix 3: is `tick_of_day` within the first hour of one of the
+    /// Job's shifts? A segment starting at 0 that continues a 1440-ending
+    /// segment (the night guard's 00:00, as [`Job::shift_key_at`] and
+    /// [`Job::shift_end`] read it) is the same shift, not a new one. The
+    /// madam's headcount, the School roster, the Statistical round and the
+    /// reporter's beat read this.
+    pub fn first_hour(&self, tick_of_day: u16) -> bool {
+        let wraps = self.shifts.iter().any(|&(_, e)| e == 1440);
+        let hour = crate::time::TICKS_PER_HOUR as u32;
+        self.shifts
+            .iter()
+            .any(|&(s, _)| !(s == 0 && wraps) && tick_of_day >= s && u32::from(tick_of_day) < u32::from(s) + hour)
+    }
+
     /// Key of the shift in progress, or of the next one to start.
     pub fn next_shift_key(&self, tick: Tick) -> i64 {
         let tod = (tick % 1440) as u16;
