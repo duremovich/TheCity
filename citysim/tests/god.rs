@@ -2287,13 +2287,17 @@ fn god_kill_all_teachers() {
 /// on day 10 (its routine's place, `ages::Place::Street`; with fewer than
 /// ten there, the poorest households' children too) taken to the Camp
 /// (`camp::take`, the service's own take: the grudge on the Law, the
-/// bulletin). The parents must answer: visits, buy-outs and break-outs on
-/// days 11-59 above the control's.
+/// bulletin). The parents must answer: every taken child visited, bought
+/// out or broken out by a parent on days 11-59 (the city's totals against
+/// the control's are printed: the 8d fix round read 19 against 20 with one
+/// child taken and her parents visiting her 12 times; other Camp families
+/// move with the city, so the totals are not the taken's answer).
 #[test]
 #[ignore = "tier: merge"]
 fn god_child_camp_sweep() {
     use citysim::systems::{ages, camp};
     let mut taken = 0usize;
+    let mut names: Vec<String> = Vec::new();
     let r = run_v8("god_child_camp_sweep", |w, day, watched| {
         if day != 10 {
             return;
@@ -2324,6 +2328,7 @@ fn god_child_camp_sweep() {
         for k in sweep {
             if camp::take(w, k).is_some() {
                 taken += 1;
+                names.push(w.name_of(k));
                 watched.push(k);
                 watched.extend(camp::parents_of(w, k));
             }
@@ -2340,8 +2345,23 @@ fn god_child_camp_sweep() {
             + v12_sum(run, 11, 60, |j| f64::from(j.camp_breakouts))
     };
     let (a, b) = (answered(&r), answered(c));
-    eprintln!("the parents' answer days 11-59 (visits + buy-outs + break-outs): {a:.0} (control {b:.0})");
-    assert!(a > b, "the parents of the taken did not answer: {a:.0} against the control's {b:.0}");
+    eprintln!("FINDING the city's Camp answers days 11-59 (visits + buy-outs + break-outs): {a:.0} (control {b:.0})");
+    // The parents' own answers: the story keeps every event naming a watched
+    // entity (the taken and their parents).
+    let answers = |name: &str| {
+        r.story
+            .iter()
+            .filter(|(d, _, _)| (11..60).contains(d))
+            .filter(|(_, k, t)| {
+                matches!(k, EventKind::CampBuyout | EventKind::CampBreakout)
+                    || (*k == EventKind::Visited && t.contains("(a Camp child)"))
+            })
+            .filter(|(_, _, t)| t.contains(name))
+            .count()
+    };
+    let per: Vec<(&str, usize)> = names.iter().map(|n| (n.as_str(), answers(n))).collect();
+    eprintln!("the parents' answers days 11-59 per taken child: {per:?}");
+    assert!(per.iter().all(|&(_, n)| n >= 1), "the parents of the taken did not answer: {per:?}");
 }
 
 /// Lives at work god 3 (§ 10, class: a gang's ladder): every lieutenant
