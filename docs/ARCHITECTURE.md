@@ -272,6 +272,12 @@ Outside `systems/`: `needs.rs`, `mood.rs`, `personality.rs` (agent internals), `
 | `[law] stations` and its keys (`station_min_tiles`, `station_cells`, `transfer_hour`, `station_desk_share`), `[buildings.station]` | `systems/stations.rs`, `law.rs` (`jail_suspect`, `jail_duty_now`, `reconcile_guards`), `law_brain.rs` (`allocate`), `exec/mod.rs` (`resolve_building`, `capacity_exempt`), `goap/world_state.rs` (a Station guard's `at`) | `[life] exec_home_tier`, `exec_home_spare` | `systems/life.rs` (`exec_home_tier`, `spire_homes`, `house_exec`, `relocate`'s exec tier, `spire_supply`) | | |
 | `[service] tower` and its keys (`meeting_attendees`, `decision_margin`, `expansive`, `defensive`, `beat_stops`, `byline_promote`, `witness_tiles`), the `[[serves]]` rows with `tower = true` (`exec`, `Reporter`, `Fixer`, `forger`, `civic_clerk`), `[gossip]` `decided` | `systems/service.rs` (`tower_on`, the Meeting, `decide`, the walk-ins, `contract_party`, `tower_daily`, the clerk), `corp_brain.rs` (`rescore`'s call), `news.rs` (the beat, the byline), `gray.rs` (the queue, the bribe named), `weapons.rs` (the licence's clerk), `contracts.rs` (`post_with`, `accept`), `household.rs` (`VisitWhy::{Papers, Collect}`), `plan.rs` (`beat_plan` in the Work arm) | | | | |
 
+Lives at work's off switches (env vars read in `Config::load_from`, each clearing its section's flags; to retire under
+`OPEN-094`): `CITYSIM_LIVES_OFF` (`[lives]`, the master), `CITYSIM_HOUSEHOLD_OFF` (`[household]`), `CITYSIM_CIVIC_OFF`
+(`[service] civic`), `CITYSIM_LIVES_STREET_OFF` (`[service] street`), `CITYSIM_TOWER_OFF` (`[service] tower`),
+`CITYSIM_CAREERS_OFF` (`[careers]`), `CITYSIM_LIEUTENANTS_OFF` (`[gangs] lieutenants`), `CITYSIM_STATIONS_OFF` (`[law] stations`),
+`CITYSIM_SPIRE_HOMES_OFF` (`[life] exec_home_tier`).
+
 The config is part of the saved `World`: a save resumes under the config it was written with, not the current
 `config.toml`. Rules for adding keys: `.claude/rules/config.md`.
 

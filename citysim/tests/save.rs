@@ -375,3 +375,21 @@ fn diag_live_save_sweep() {
     }
     println!("FINDING seed {seed}: days {from}..{to} each resumed byte for byte");
 }
+
+/// OPEN-113 (doctrine 8): a save taken inside an hour that already has
+/// service encounters keeps each server's room (the encounters taken
+/// against `per_hour`); before SAVE_VERSION 44 the loaded world started the
+/// hour with every room empty and served more than the live one.
+#[test]
+fn test_mid_hour_save_keeps_the_service_rooms() {
+    let mut w = World::new(42, Config::load());
+    w.run_ticks(2 * TICKS_PER_DAY + 20 * 60 + 30);
+    assert!(!w.service_room.is_empty(), "the evening hour has encounters by 20:30");
+    let mut back = save::from_ron(&save::to_ron(&w)).expect("load");
+    assert_eq!(back.service_room, w.service_room, "the rooms survive the save");
+    w.run_ticks(90);
+    back.run_ticks(90);
+    if let Some(d) = first_diff(&save::to_ron(&w), &save::to_ron(&back)) {
+        panic!("a mid-hour save diverged within 90 minutes: {d}");
+    }
+}

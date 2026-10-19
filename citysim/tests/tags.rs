@@ -255,7 +255,26 @@ fn test_patrol_scans_and_attacks_the_chromed() {
     for (i, x) in w.districts.iter_mut().enumerate() {
         x.control = if i == d { Controller::Gang(g) } else { Controller::Contested };
     }
-    let tile = w.spots[d][0].tile;
+    // The spot the patrol picks: the district's most crowded by its own
+    // count (strangers outdoors within `patrol_radius`); the 8c fix round's
+    // venue shifts moved the crowd off the first spot.
+    let r = w.config.tags.patrol_radius;
+    let members = w.comp::<Gang>(g).unwrap().members.clone();
+    let spots: Vec<citysim::components::TilePos> = w.spots[d].iter().map(|s| s.tile).collect();
+    let mut best: Option<(usize, citysim::components::TilePos)> = None;
+    for t in spots {
+        let near = w.agents_near(t, r, None);
+        let n = near
+            .into_iter()
+            .filter(|&x| !members.contains(&x) && contracts::free_adult(&w, x))
+            .filter(|&x| w.comp::<Position>(x).is_some_and(|q| q.building.is_none() && q.tile.manhattan(t) <= r * 2))
+            .count();
+        // The patrol's tie-break: the first spot of the most.
+        if best.is_none_or(|(b, _)| n > b) {
+            best = Some((n, t));
+        }
+    }
+    let tile = best.expect("a spot").1;
     for x in [m, a] {
         w.remove_from_building(x);
         if let Some(p) = w.comp_mut::<Position>(x) {

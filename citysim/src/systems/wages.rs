@@ -582,8 +582,8 @@ fn site_shifts(world: &World, role: Role) -> Option<Vec<(u16, u16)>> {
         Role::Host | Role::Fighter | Role::Croupier | Role::Concierge => {
             Some(world.config.leisure.evening_shift.clone())
         }
-        // OPEN-111: a venue's legacy staff work its trade hours.
-        _ => crate::systems::service::venue_shift(&world.config, role).or_else(|| Some(wc.shift_day.clone())),
+        // OPEN-111, Shadow V5 bug 1: a venue's legacy staff split its day and evening.
+        _ => crate::systems::service::venue_shifts_all(&world.config, role).or_else(|| Some(wc.shift_day.clone())),
     }
 }
 

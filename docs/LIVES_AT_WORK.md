@@ -217,6 +217,7 @@ Phase 0 builds `law_probe` (*new*, `citysim-cli`, printed, never asserted): per 
 |---|---|---|---|---|---|---|---|---|
 | main `1810392` | 8,053 | 0.83 (0.75) | 0.76 (0.50) | 0.56 (0.31) | 0.48 (0.25) | 0.71 (0.54) | 0.68 / 0.77 / 0.86 | 25 |
 | phase 7 (8 Stations) | 7,118 | 0.75 (0.64) | 0.70 (0.46) | 0.74 (0.47) | 0.73 (0.47) | 0.74 (0.55) | 0.72 / 0.77 / 0.81 | 0 |
+| the gate (§ 15, the regen kept) | 6,533 | 0.76 (0.65) | 0.77 (0.57) | 0.79 (0.57) | 0.80 (0.55) | 0.77 (0.60) | | 0 |
 
 The far bands rose to the near ones (0.48 → 0.73 at 572-692 tiles; the report share with them, 0.25 → 0.47): the curve is flat. The near band fell 0.83 → 0.75 (the Precinct's district lost the guards posted to the Stations and the beats dealt near home). The 2k share (phase 0: 0.73; 2k has no Station on the shipped map) is now the 20k one (0.74).
 
@@ -370,7 +371,7 @@ Asserts catch broken; behaviour judges alive; numbers are reports.
   - `god_kill_all_teachers` (day 20): `edu_gain` stops, the School posts refill (asserted; taught days a FINDING, 2k has ~1 marginal pupil).
   - `god_child_camp_sweep` (every Street child taken on day 10): visits, buy-outs, a break-out; grudges against the Law.
   - `god_decapitate_lieutenants` (every rank 1 killed on day 30): the leaders lead raids again until new lieutenants rise.
-  - `god_cut_the_precinct` (the Precinct's guards jailed 10 days, day 20, 20k): the Stations hold and transfer; arrests fall less than in a no-station control.
+  - `god_cut_the_precinct` (the funded force halved 10 days, day 20, 20k; the 8c fix round, from the Precinct's guards jailed, which `reconcile_guards` rehired at midnight): the cut lands, the Stations hold and transfer (asserted); the arrests kept against a no-station control (a FINDING).
   - `god_retire_everyone_over_55` (day 10): the trades refill, the foreman's post moves, kin take-ins rise.
 - **Shadow V5** (the milestone's diary read, 2k day 26 and 90 and 20k day 20, the V4 recipe): every archetype re-read; the bounds' `known/wk`, `walk_h/d` and `work_h/d` re-calibrated on the eight-run ensemble only if the rows move for these reasons.
 - **Printed bands** (`tools/analyze_run.py`, never asserted): encounters by kind per staffed shift; regulars made; the home share of HangOuts and chats; spouse meetings a week; empty HangOuts; visits by purpose; buy-outs and break-outs; ages by trade (the over-60 share in physical rows); retirements and frailty exits; foreman's mean age and experience; leaders' and lieutenants' jail-days; the leader's cut; arrests per witnessed crime by escort distance; guards' travel hours; execs by home tier; ticks/s at 2k and 20k per phase.
@@ -659,6 +660,112 @@ The elders work 266 shifts a week to main's 400 (retired or let go); the leaders
 | `ceo` / `exec` travel h/wk (lives probe) | 27.6 / 51.5 | 32.6 / 35.1 |
 
 ---
+
+### The closing device table (phase 8c, 2026-10-19: the final tree, `e566e29` + OPEN-113)
+
+`shadow --lives` and `shadow --lives --population 20000`, the recipe above, phase 0's rows beside the final tree's. `met` is the share of whole shifts with the counterpart met and `enc/shift` the encounters a shift (phase 1's columns; none at phase 0). An archetype with no phase 0 value had fewer than 5 agents there. `ceo` and `exec` are the same people at 2k.
+
+#### 2k, seeds 42-44 pooled, day 19: phase 0 (`23a161d`) → the final tree
+
+| archetype | n | idle h/d | named/wk | empty | Served-able | met | enc/shift |
+|---|---|---|---|---|---|---|---|
+| `bouncer` | 50 → 51 | 4.50 → 5.52 | 4.05 → 6.82 | 0.32 → 0.20 | 0.76 → 0.75 | 0.00 | 0.00 |
+| `builder` | 90 → 90 | 3.26 → 3.94 | 1.79 → 0.93 | 0.07 → 0.07 | 0.00 → 0.00 | 0.60 | 0.89 |
+| `buyer` | - → 1 | - → 3.86 | - → 0.00 | - → 0.00 | - → 0.00 | 1.00 | 8.00 |
+| `cabbie` | 17 → 16 | 2.71 → 3.58 | 0.67 → 2.38 | 0.46 → 0.27 | 0.19 → 0.19 | 0.16 | 0.22 |
+| `camp_warden` | 6 → 6 | 3.75 → 4.68 | 3.20 → 0.00 | 0.19 → 0.39 | 0.06 → 0.15 | 0.65 | 1.50 |
+| `ceo` | 27 → 31 | 5.60 → 6.59 | 0.00 → 0.05 | 0.72 → 0.48 | 1.00 → 0.14 | 0.84 | 27.04 |
+| `club_staff` | 90 → 90 | 4.13 → 5.30 | 1.89 → 2.94 | 0.25 → 0.24 | 0.51 → 0.56 | 0.69 | 1.71 |
+| `companion` | 6 → 6 | 8.57 → 7.99 | 0.00 → 0.00 | 0.52 → 0.10 | 0.00 → 0.00 | 0.90 | 1.63 |
+| `cook` | 90 → 90 | 3.54 → 5.55 | 4.62 → 4.39 | 0.23 → 0.25 | 0.04 → 0.11 | 0.11 | 0.13 |
+| `courier` | 36 → 36 | 3.60 → 2.93 | 2.76 → 4.54 | 0.11 → 0.14 | 0.06 → 0.16 | 0.43 | 1.00 |
+| `cultist` | 19 → 7 | 3.37 → 3.82 | 0.47 → 0.00 | 0.33 → 0.55 | 0.67 → 0.33 | 0.17 | 0.17 |
+| `dancer` | 43 → 45 | 5.14 → 4.98 | 4.93 → 7.15 | 0.29 → 0.19 | 0.50 → 0.63 | 0.74 | 1.34 |
+| `day_labourer` | 53 → 50 | 6.21 → 5.76 | 0.31 → 1.83 | 0.35 → 0.27 | 0.33 → 0.45 | 0.36 | 1.66 |
+| `elder` | 90 → 90 | 4.14 → 5.29 | 0.25 → 1.02 | 0.38 → 0.37 | 0.20 → 0.17 | 0.31 | 3.02 |
+| `exec` | 27 → 31 | 5.60 → 6.59 | 0.00 → 0.05 | 0.72 → 0.48 | 1.00 → 0.14 | 0.84 | 27.04 |
+| `fabber` | 90 → 90 | 3.23 → 3.55 | 1.60 → 2.14 | 0.29 → 0.19 | 0.15 → 0.22 | 0.19 | 0.23 |
+| `fighter` | 24 → 24 | 4.68 → 6.02 | 5.13 → 8.61 | 0.33 → 0.21 | 1.00 → 0.93 | 0.00 | 0.00 |
+| `fixer` | - → 3 | - → 3.87 | - → 0.00 | - → 0.35 | - → 0.28 | 0.28 | 0.39 |
+| `foreman` | - → 3 | - → 3.56 | - → 0.00 | - → 0.56 | - → 0.00 | 0.67 | 1.00 |
+| `forger` | - → 3 | - → 2.21 | - → 1.80 | - → 0.09 | - → 0.44 | 0.22 | 0.44 |
+| `gang_leader` | 12 → 12 | 2.61 → 2.56 | 0.00 → 0.34 | 0.54 → 0.53 | 0.41 → 0.36 | 0.42 | 1.16 |
+| `gang_member` | 74 → 58 | 3.95 → 3.80 | 0.20 → 0.76 | 0.42 → 0.43 | 0.37 → 0.49 | 0.31 | 1.37 |
+| `guard` | 90 → 90 | 3.91 → 4.34 | 0.93 → 2.77 | 0.29 → 0.30 | 0.68 → 0.67 | 0.18 | 0.22 |
+| `gun` | 56 → 46 | 3.44 → 4.25 | 0.17 → 1.03 | 0.28 → 0.27 | 0.26 → 0.42 | 0.29 | 2.20 |
+| `homeless` | 54 → 23 | 5.74 → 3.92 | 1.64 → 2.77 | 0.36 → 0.42 | 0.38 → 0.22 | 0.19 | 0.59 |
+| `joytoy` | 9 → 8 | 5.84 → 6.65 | 0.29 → 0.00 | 0.54 → 0.20 | 0.00 → 0.11 | 0.00 | 0.00 |
+| `loader` | 52 → 53 | 2.99 → 3.42 | 2.25 → 1.84 | 0.17 → 0.12 | 0.06 → 0.06 | 0.82 | 0.82 |
+| `madam` | - → 3 | - → 4.96 | - → 0.00 | - → 0.33 | - → 0.73 | 0.64 | 3.64 |
+| `night_shift` | 90 → 90 | 2.82 → 3.03 | 7.12 → 6.61 | 0.07 → 0.10 | 0.80 → 0.87 | 0.00 | 0.00 |
+| `office_worker` | 90 → 90 | 4.21 → 4.24 | 0.24 → 4.29 | 0.24 → 0.16 | 0.07 → 0.04 | 0.95 | 4.19 |
+| `orderly` | 24 → 21 | 4.13 → 3.68 | 1.80 → 3.35 | 0.32 → 0.28 | 0.43 → 0.59 | 0.41 | 1.05 |
+| `purist` | 23 → 11 | 3.91 → 4.41 | 0.21 → 0.00 | 0.46 → 0.48 | 0.31 → 0.29 | 0.27 | 0.93 |
+| `reporter` | 12 → 12 | 4.23 → 3.96 | 6.10 → 5.89 | 0.15 → 0.17 | 0.00 → 0.03 | 0.75 | 2.13 |
+| `ripperdoc` | 25 → 20 | 3.97 → 4.18 | 0.79 → 0.20 | 0.42 → 0.45 | 0.44 → 0.59 | 0.60 | 0.96 |
+| `runner` | - → 6 | - → 3.65 | - → 0.60 | - → 0.16 | - → 0.33 | 0.62 | 0.90 |
+| `scav` | 15 → 27 | 3.74 → 3.83 | 0.75 → 1.55 | 0.50 → 0.42 | 0.60 → 0.56 | 0.28 | 0.92 |
+| `sick` | 31 → 29 | 3.55 → 5.34 | 0.30 → 0.95 | 0.48 → 0.41 | 0.22 → 0.33 | 0.31 | 0.62 |
+| `street_worker` | - → 1 | - → 3.84 | - → 0.00 | - → 0.50 | - → 0.00 | 0.00 | 0.00 |
+| `super` | 89 → 90 | 3.35 → 4.57 | 0.26 → 0.61 | 0.28 → 0.34 | 0.19 → 0.26 | 0.96 | 26.24 |
+| `sweeper` | 90 → 90 | 2.97 → 3.03 | 0.54 → 0.59 | 0.25 → 0.23 | 0.00 → 0.22 | 0.35 | 0.54 |
+| `teacher` | 12 → 12 | 3.61 → 4.42 | 3.00 → 3.30 | 0.17 → 0.24 | 0.00 → 0.03 | 0.43 | 0.49 |
+| `vendor` | 14 → 30 | 2.32 → 4.63 | 0.00 → 1.30 | 0.56 → 0.50 | 0.25 → 0.13 | 0.00 | 0.00 |
+| `worker` | 90 → 90 | 3.01 → 4.21 | 0.17 → 0.23 | 0.38 → 0.32 | 0.18 → 0.25 | 0.35 | 1.89 |
+| `worker_friday` | 90 → 90 | 3.92 → 4.60 | 0.43 → 1.31 | 0.27 → 0.25 | 0.29 → 0.44 | 0.36 | 1.00 |
+| `all` | 1821 → 1765 | 3.86 → 4.43 | 1.78 → 2.53 | 0.29 → 0.25 | 0.28 → 0.33 | 0.44 | 3.57 |
+
+#### 20k, seed 42, day 20: phase 0 (`23a161d`) → the final tree
+
+| archetype | n | idle h/d | named/wk | empty | Served-able | met | enc/shift |
+|---|---|---|---|---|---|---|---|
+| `bouncer` | 5 → 5 | 3.11 → 6.35 | 0.00 → 4.00 | 0.59 → 0.26 | 0.90 → 0.62 | 0.00 | 0.00 |
+| `builder` | 5 → 5 | 4.20 → 2.65 | 0.00 → 0.00 | 0.44 → 0.23 | 0.05 → 0.07 | 0.77 | 0.93 |
+| `buyer` | 5 → 5 | 4.20 → 2.26 | 0.00 → 12.75 | 0.36 → 0.17 | 0.50 → 0.00 | 0.00 | 0.00 |
+| `cabbie` | 5 → 5 | 4.10 → 3.18 | 0.33 → 0.33 | 0.44 → 0.31 | 0.11 → 0.16 | 0.04 | 0.04 |
+| `camp_warden` | - → 2 | - → 2.82 | - → 0.00 | - → 0.54 | - → 0.00 | 1.00 | 6.08 |
+| `ceo` | 5 → 5 | 5.33 → 5.45 | 0.00 → 0.00 | 0.25 → 0.85 | 1.00 → 0.03 | 1.00 | 36.97 |
+| `club_staff` | 5 → 5 | 4.67 → 2.81 | 0.00 → 1.40 | 0.45 → 0.32 | 0.80 → 0.55 | 0.60 | 0.95 |
+| `companion` | 5 → 5 | 4.96 → 6.97 | 0.00 → 0.00 | 0.66 → 0.85 | 0.16 → 0.12 | 0.84 | 1.00 |
+| `cook` | 5 → 5 | 2.01 → 4.03 | 0.00 → 0.00 | 0.66 → 0.31 | 0.00 → 0.00 | 0.16 | 0.16 |
+| `courier` | 5 → 5 | 1.98 → 3.91 | 0.00 → 0.00 | 0.23 → 0.16 | 0.00 → 0.03 | 0.40 | 0.40 |
+| `cultist` | 5 → 5 | 2.22 → 2.47 | 0.65 → 1.20 | 0.63 → 0.29 | 0.61 → 0.67 | 0.33 | 0.33 |
+| `dancer` | 5 → 5 | 4.71 → 3.81 | 0.00 → 0.00 | 0.52 → 0.41 | 0.65 → 0.48 | 0.64 | 0.68 |
+| `day_labourer` | 5 → 5 | 8.63 → 4.84 | 0.00 → 0.00 | 0.54 → 0.43 | 0.00 → 0.00 | 0.00 | 0.00 |
+| `dealer` | 5 → 3 | 3.92 → 3.60 | 0.00 → 1.67 | 0.67 → 0.21 | 0.29 → 0.00 | 0.00 | 0.00 |
+| `elder` | 5 → 5 | 4.09 → 3.94 | 0.00 → 0.00 | 0.53 → 0.43 | 0.00 → 0.00 | 0.46 | 0.46 |
+| `exec` | 5 → 5 | 7.86 → 6.94 | 0.00 → 0.00 | 0.56 → 0.61 | 0.00 → 0.04 | 1.00 | 27.50 |
+| `fabber` | 5 → 5 | 3.52 → 4.01 | 0.00 → 0.00 | 0.57 → 0.41 | 0.19 → 0.10 | 0.40 | 0.43 |
+| `fighter` | 5 → 5 | 6.15 → 5.26 | 2.33 → 0.00 | 0.17 → 0.48 | 1.00 → 1.00 | 0.00 | 0.00 |
+| `fixer` | 5 → 5 | 2.59 → 2.08 | 0.00 → 4.75 | 0.45 → 0.37 | 0.39 → 0.25 | 0.15 | 0.15 |
+| `foreman` | 5 → 5 | 2.54 → 3.62 | 0.00 → 0.00 | 0.34 → 0.56 | 0.03 → 0.00 | 0.20 | 0.20 |
+| `forger` | 5 → 5 | 3.92 → 1.11 | 0.00 → 0.00 | 0.36 → 0.40 | 0.03 → 0.38 | 0.38 | 0.38 |
+| `gang_leader` | 5 → 5 | 0.88 → 3.55 | 0.40 → 1.00 | 0.67 → 0.40 | 0.33 → 0.45 | 0.45 | 3.18 |
+| `gang_member` | 5 → 5 | 5.45 → 1.80 | 2.33 → 2.25 | 0.25 → 0.11 | 0.07 → 0.69 | 0.25 | 0.50 |
+| `guard` | 5 → 5 | 3.97 → 2.86 | 0.00 → 0.00 | 0.04 → 0.47 | 1.00 → 0.50 | 0.17 | 0.17 |
+| `gun` | 5 → 5 | 6.22 → 3.65 | 0.00 → 0.00 | 0.43 → 0.38 | 0.07 → 0.27 | 0.18 | 0.32 |
+| `homeless` | 5 → 5 | 7.47 → 2.39 | 0.00 → 1.00 | 0.42 → 0.47 | 0.00 → 0.10 | 0.00 | 0.00 |
+| `joytoy` | 5 → 5 | 4.29 → 2.80 | 0.80 → 0.00 | 0.42 → 0.29 | 0.00 → 0.11 | 0.00 | 0.00 |
+| `loader` | 5 → 5 | 2.53 → 2.15 | 6.50 → 1.00 | 0.21 → 0.61 | 0.00 → 0.03 | 0.70 | 0.70 |
+| `madam` | 5 → 5 | 2.44 → 6.09 | 0.00 → 2.00 | 0.63 → 0.45 | 0.14 → 0.56 | 0.68 | 4.00 |
+| `night_shift` | 5 → 5 | 2.36 → 2.46 | 0.00 → 0.00 | 0.62 → 0.45 | 0.70 → 0.70 | 0.00 | 0.00 |
+| `office_worker` | 5 → 5 | 2.48 → 2.62 | 0.00 → 0.00 | 0.66 → 0.53 | 0.30 → 0.29 | 1.00 | 4.96 |
+| `orderly` | 5 → 5 | 2.65 → 3.54 | 0.00 → 6.50 | 0.29 → 0.34 | 0.47 → 0.43 | 0.46 | 1.07 |
+| `pimp` | - → 2 | - → 2.59 | - → 0.00 | - → 0.70 | - → 0.50 | 1.00 | 1.00 |
+| `purist` | 5 → 5 | 5.71 → 2.50 | 0.00 → 1.20 | 0.56 → 0.34 | 0.00 → 0.38 | 0.00 | 0.00 |
+| `reporter` | 5 → 5 | 3.25 → 3.31 | 0.40 → 0.00 | 0.39 → 0.65 | 0.20 → 0.20 | 0.70 | 2.57 |
+| `ripperdoc` | 5 → 5 | 3.72 → 4.46 | 0.00 → 1.80 | 0.28 → 0.51 | 0.33 → 0.52 | 0.41 | 1.07 |
+| `runner` | 5 → 5 | 6.11 → 5.24 | 0.00 → 0.00 | 0.24 → 0.52 | 0.53 → 0.43 | 0.50 | 6.07 |
+| `scav` | 5 → 5 | 3.59 → 3.98 | 0.00 → 0.00 | 0.13 → 0.36 | 0.35 → 0.25 | 0.75 | 0.90 |
+| `sick` | 5 → 5 | 3.77 → 2.87 | 0.00 → 0.00 | 0.52 → 0.51 | 0.61 → 0.85 | 0.23 | 0.38 |
+| `street_worker` | 5 → 5 | 6.20 → 3.87 | 0.00 → 0.00 | 0.57 → 0.38 | 0.00 → 0.00 | 0.00 | 0.00 |
+| `super` | 5 → 5 | 3.06 → 4.70 | 0.00 → 0.00 | 0.31 → 0.35 | 0.37 → 0.13 | 0.67 | 12.53 |
+| `sweeper` | 5 → 5 | 1.65 → 1.32 | 0.00 → 0.00 | 0.19 → 0.53 | 0.83 → 1.00 | 0.32 | 0.32 |
+| `teacher` | 5 → 5 | 3.16 → 4.81 | 0.75 → 0.00 | 0.55 → 0.63 | 0.00 → 0.00 | 0.60 | 0.67 |
+| `vendor` | 5 → 5 | 2.37 → 2.07 | 0.00 → 0.00 | 0.67 → 0.54 | 0.00 → 0.00 | 0.40 | 0.80 |
+| `worker` | 5 → 5 | 2.20 → 2.27 | 0.00 → 0.00 | 0.32 → 0.46 | 0.11 → 0.30 | 0.65 | 0.78 |
+| `worker_friday` | 5 → 5 | 2.18 → 4.34 | 0.00 → 5.75 | 0.33 → 0.06 | 0.54 → 0.60 | 0.36 | 0.36 |
+| `all` | 228 → 222 | 3.88 → 3.59 | 0.34 → 1.05 | 0.47 → 0.39 | 0.33 → 0.30 | 0.44 | 3.08 |
 
 ## 14. Implemented: deviations
 
@@ -996,6 +1103,25 @@ Tests. The evening staff are set at seed, so seed 42's picks move from day 0. Th
 
 ---
 
+### Open at the close (phase 8c, 2026-10-19)
+
+### The 8c fix round (2026-10-19)
+
+- **The venue shifts (SHADOW_V5 bug 1, `OPEN-114`).** `[service] evening_staff` no longer puts every Bartender, Attendant and Cook on the evening: `service::venue_shift` fills the thinner of `[world] shift_day` and `[leisure] evening_shift` among the role's staff at the venue (the evening on a tie), at seed and at each hire; `wages::site_shifts` counts the role on both. No new number; the Statistical server is credited on the same `Job::shifts`. Seeding moves, so the seed-42 city diverges from tick 0: six seeded probes were restaged to their written premises (the regular, the retiree, the pimp, the Camp control, bug 8's succession, the Purist patrol), no assertion changed.
+- **The Visit (SHADOW_V5 bug 3, `OPEN-116`).** One rule for the score and the plan (`household::visit_place`: a building visit's building, else the building the kin is in); a "not on shift" gate (`shift_reachable`, § 1.3); a visit with nowhere to walk is dropped at its plan, and one that cools is dropped for the day. A Full visitor whose kin is in no building (a Statistical elder at no door) makes no visit; the Statistical visitor's hourly credit is unchanged.
+- **`god_cut_the_precinct`.** The god halves `levers.guard_count` (`SetGuardCount`) for ten days instead of jailing the Precinct's guards; the arrest comparison against the no-station city is a FINDING (§ 10's table).
+- **Parity.** `paid venue visits` stays RED for another cause, the Statistical Lounge (`OPEN-130`).
+
+The deviations above that stay open, each with its row (numbered by the 8c fix round):
+
+- Phase 1: `stabilise_no_orderly_mult` not built (no save roll to multiply); the madam's cut rounds to 0 at 2k (a decision, § 15); the door refusal never fires at 2k (`door_refusals` 0 on seed 42 × 120: the bouncer has no door) `OPEN-121`; the madam's cut `OPEN-123`.
+- Phase 2: the home evening counts bodies only; a Statistical spouse is never home by the clock `OPEN-117` (SHADOW_V5 bug 4).
+- Phase 4a: the rider never waits; a body drives 1 of 92 cab rides `OPEN-115` (SHADOW_V5 bug 2). The carer probe stays `OPEN-100`.
+- Phase 4b: the tinker's encounter never fires at 2k; the pimp's collection is built from the link, not presence `OPEN-120` (with `OPEN-110`).
+- Phase 5: an exec without an Hq meets at any owned building (`OPEN-104`); the papers and the cuts settle at midnight, before the encounter that narrates them `OPEN-119` (SHADOW_V5 bug 6).
+- Phase 6: leaders delegate off screen only; no lieutenant leads a raid in a diary `OPEN-118` (SHADOW_V5 bug 5); the frailty exit near 74 `OPEN-125` (a decision, § 15).
+- The OPEN-111 round: the Bar's day drinkers are unserved since the evening shift `OPEN-114` (SHADOW_V5 bug 1; closed by the 8c fix round, the staff split the day and the evening). The Visit that cannot plan `OPEN-116` (SHADOW_V5 bug 3, closed by the same round). The parity row `paid venue visits` stays RED for another cause `OPEN-130`.
+
 ## 15. Gate
 
 Phase 8 is split in three (`history/lives_at_work/phase8a_brief.md`, 8b, 8c); each adds its part here. Phase 8a (2026-10-19): the numbers, on fd89cca plus the regen.
@@ -1092,7 +1218,7 @@ Throughput, alternating, one process at a time, 2k seed 42 × 30, three rounds: 
 | `god_child_camp_sweep` (the Camp) | every Street child to the Camp on day 10 (`camp::take`; none on the street, so the poorest households' children) | visits, buy-outs and break-outs on days 11-59 over the control's | 2 children taken; the parents' answer 11 (control 4) |
 | `god_decapitate_lieutenants` (a gang's ladder) | every rank 1 killed, day 30 | a lieutenant again on a day 31-59 | 11 killed; lieutenants again on day 31 (the ranking re-runs at the death) |
 | `god_retire_everyone_over_55` (the ages) | `[careers] retire_from_years` 55, `retire_days` 0 for day 10's midnight | a Hire at a retiree's employer on days 11-20 | 322 workers of 55+ at 79 employers; 323 retired; 182 Hires there; foremen moved 60 of 79; elders taken in days 10-19: 69 (control 41) |
-| `god_cut_the_precinct` (the law's reach, 20k; milestone tier, 40 days) | the Precinct's guards jailed 10 days, day 20; the same cut in a no-station city | the Stations book and transfer during the cut, and the arrests over the cut against the ten days before stay higher than without Stations | 208 Precinct guards jailed (230 at Stations): arrests 1,167 → 1,528 (×1.31), bookings 779, transfers 179; no Stations: 398 jailed, 1,189 → 1,427 (×1.20). **Arrests rise in both**: the jailed guards' posts refill at the midnight `reconcile_guards` and the cut never empties the beat (a finding: the shock the spec named does not cut the force) |
+| `god_cut_the_precinct` (the law's reach, 20k; milestone tier, 40 days) | the Precinct's guards jailed 10 days, day 20; the same cut in a no-station city | the cut lands (the city's guards fall to the lever plus the State's), the Stations book and transfer during the cut (asserted); the arrests over the cut against the ten days before, with and without Stations (a FINDING) | **8c fix round** (`SetGuardCount` 400 → 200 on day 20, restored day 30): city guards 435 → 319 with Stations (funded with the State 320), 479 → 318 without; bookings 651, transfers 185 during the cut; arrests kept 1.095 with Stations, 1.102 without (both rise: the arrest count does not track the force at 20k). Before it: 208 Precinct guards jailed (230 at Stations): arrests 1,167 → 1,528 (×1.31), bookings 779, transfers 179; no Stations: 398 jailed, 1,189 → 1,427 (×1.20). **Arrests rise in both**: the jailed guards' posts refill at the midnight `reconcile_guards` and the cut never empties the beat (a finding: the shock the spec named does not cut the force) |
 
 Out: `god_decapitate_close_succession` (`succession.rs::test_close_succession_is_a_civil_war`), `god_hostage_captain_spouse_release` (`captives.rs::test_ransom_paid_frees_the_captive`, `governance.rs::test_release_demand_and_the_captain`), `god_call_vote_habitat_after_coerce` (`governance.rs::test_pinned_member_swings_the_vote`, `test_vote_coercion_breaks_with_the_board`), `god_power_cut` (`industry.rs::test_outage_darkens_districts_and_comes_back`), `god_flood_guns` (`arms.rs::test_landed_crate_fills_the_armoury_and_the_muster_draws_it`).
 
@@ -1101,3 +1227,39 @@ Out: `god_decapitate_close_succession` (`succession.rs::test_close_succession_is
 **`tools/analyze_run.py`'s "Lives at work" section** (printed, never asserted), 42 × 120 on this tree: encounters per staffed shift visit 0.43, patient 0.023, tenant 3.35, crate 1.44, attendee 0.81, parcel 0.088; 1,697 encounters a day, 10.1 % waited; regulars made 2.2 a day; the home share of HangOuts 39.5 %, a friend's place 9.6 %, with the spouse 21.9 % of the home ones; spouse evenings 104 a week per 1,000 adults; empty spots left 114 a day (33.9 % of HangOuts); visits: hurt kin 632, elder parent 3,921, the Camp's child 21; Camp buy-outs 0, break-outs 3; retirements 249, frailty exits 23, unretired 119; lieutenants 11.4 on a mean day, 6 lieutenant-led raids, the leader's cut 392 coins; execs 15, all at `exec_home_tier`; 19.6 arrests a day. The bands without a column (ages by trade, the foreman, leaders' jail-days, guards' travel, arrests by escort distance) are `shadow --lives` and `law_probe_20k`'s.
 
 **The tiers.** `test.py change` 3m29s (GREEN; 4m25s on 464358a, paid back by making slow tests cheaper: the independent cities of a test on threads, one base world a binary built once and cloned, no empty doctest pass; `core` 40 s, `person` 14 s), `test.py merge` 4m16s (GREEN; `god` 49 s at its 15), `god_20k` 392 s in the milestone tier. Found on the way, not diagnosed (an `OPEN` row for the close): `leverage.rs`'s `gang_world` as a clone of the live city instead of a loaded save fails `test_save_mid_coercion_round_trips` (saved mid-coercion and loaded, the city diverges from the clone within a day): some state a save drops steers the sim, so a save of a live world does not resume byte for byte (doctrine 8); the tests pass today because their base is itself a loaded save.
+
+### The read and the close (phase 8c, 2026-10-19)
+
+**Shadow V5** (`SHADOW_V5.md`, `shadow_v5/`): 250 diaries in V4's three windows, read by seven critics; 21 bugs, the top five: the Bar's day drinkers have no bartender since the evening shift (OPEN-111's other half), a body never drives the cab (`cab_rides_driven` 1 of 92 on seed 42 × 120), the Visit goal beats Work and cannot plan (26 of 250 diaries), the home evening sees only bodies (phase 2's mirror question), leaders collect but do not lead. `shadow --assert` 133 PASS, 0 FAIL; no bound re-calibrated (none fails; the rows that moved are listed there with their reasons). The `shadow --lives` closing tables are § 13's last set.
+
+**`OPEN-113`, fixed.** `World.service_room` (each server's encounters this hour) is saved, written only when non-empty: SAVE_VERSION 44. `save.rs::test_mid_hour_save_keeps_the_service_rooms` saves at 20:30 on day 2 with five rooms taken (failed on `e566e29`: the loaded world held none) and runs both 90 minutes byte for byte. An off save, and an on save at an hour's first tick before any arrival, is version 43's byte for byte.
+
+**The change tier.** `test.py change` on this tree, a warm build and a quiet box: 3m44s against 4m00s (GREEN); the 4m20s on main was the box (the first run here read 7m32s with clippy rebuilding beside seven readers). Made cheaper anyway: `weapons.rs::test_rich_failing_parent_lives` runs 20 days instead of 40 with `death_days` 7 (the assert now also checks the failing streak passed `death_days`): `weapons` 10.0 s → 7.1 s. The rest of the top (`core` 42 s: three seeds on threads already; `person` 14 s: seeded probes whose picks a changed setup moves, OPEN-108's lesson; `wages` 10 s: a shared base already) left as they are.
+
+**Every phase's gate items** (settled with the evidence / a bug with its `OPEN-nnn` / a decision for Dylan):
+
+- *The Statistical spouse by the clock (2)*: **bug, OPEN-117** (SHADOW_V5 bug 4). `household::company_due` and `home_term` count bodies only; the lives probe reads 1,083 of 1,475 married picks never naming the spouse (73 %; phase 0 70 %), the Statistical spouse 0.04 of co-located hours at 2k; 49 of 53 married labour picks never name the spouse at a HangOut.
+- *A tied super's notice on her own spouse (3)*: **settled, not seen**. `s44/super_2394` is tied to Block#518 with her spouse there: 6 rounds, 0 notices; no `Notice` targets a spouse in 24 care diaries. The rule (§ 14 phase 3) frees the worker, not the household; no evidence it bites.
+- *Re-taken children (3)*: **settled, too rare to read**: seed 42 × 120, 7 children taken, 2 break-outs, 0 buy-outs, 60 camp visits; no re-take in six warden diaries.
+- *The venue day shifts (1) and the evening shift (OPEN-111)*: **bug, OPEN-114** (fixed by the 8c fix round) (SHADOW_V5 bug 1). Clubs, Lounges and Strip Clubs serve in the evening and make regulars (club staff 8-23 patrons a week, dancers tipped by 10-20 patrons); the Bar's staff now hold only the evening and 73 of 100 Bar visits in the vice diaries are before 18:00, unserved (`s44/cook_1978` at Bar#460, 13:15, three days, no edge). The one bartender read (`s43/sick_2157`) works the evening with no regular that week.
+- *The madam's cut (1)*: **decision for Dylan**: `flow_madam_cut` 0 in 120 days on seed 42 (0.3 of a 1 c Brothel tip rounds to 0); her staff are named at 18:00, no money moves. A floor of 1 c, or named staff without a cut as the design for now?
+- *Body cab drivers only when pinned, cabbie idle (4a)*: **bug, OPEN-115** (SHADOW_V5 bug 2): 0 fares in 6 cabbie diaries, pinned or not; seed 42 × 120: 92 cab trips, 1 driven by a body. The idle hours are settled: the stand-by is Rest at the Garage in 91-minute blocks, counted as work (58-59 h on 4 of 6).
+- *A pimp's night in a later window (4b)*: **settled at 20k** (both pimps collect at night in 61-minute blocks, the cut and the pass-up visible: `k20/pimp_10291 d22 00:00` +2 from Matthias Sato, -1 to The Ash Wolves; 6 c in a week); no pimp in either 2k window (seed 44 d90 had none to pick). The collection on a sleeping worker is SHADOW_V5 bug 7.
+- *Vendor regulars off screen only (4b)*: **settled, refuted as worded**: Full vendors stand a Vend action and named sales arrive in it (26 in `s44/vendor_667`, 27 in `k20/vendor_9892`, 7 of ~190 "a regular").
+- *The tinker silent (4b)*: **settled, unchanged**: no tinker in any diary; the 2k pitch fires no encounter (phase 4b).
+- *`OPEN-103` (5)*: closed by Dylan 2026-10-19 (the design; street life `OPEN-109`). The diary read: the homeless meet 1-7 distinct known faces a week (mean 3.8), a thin but real web; two read as people with no one (`k20/homeless_19696`, `k2a/homeless_1558`, 74). Fighters 0-6 (median 3), with a spouse and friends at +1.00. The per-merge-commit behaviour runs the 8c brief named are moot with the row closed and were not run.
+- *`OPEN-104` the empty own Hq (5)*: **settled for corps with an Hq** (Meetings with ~6 attendees an hour on 5 of 6 CEO picks; no Meeting failed for an empty Hq in 30 corp diaries); **the row stays** for the family: an exec whose corp has no Hq meets at a Bar, a Ripperdoc, a Hotel or a Boutique, or not at all (5 of 12 CEO/exec diaries, SHADOW_V5 bug 8; `life::hq_of`'s fallback).
+- *`OPEN-105` wealth pooling in retirees (6)*: **settled, not the retirees on this tree; close the row.** Seed 42 (43) × 120, every retiree's wallet: the retired hold 5.0 % of the coins on day 10 and 1.6 % (1.3 %) on day 120, a mean of 12 (10) coins; one retiree (none) in the richest tenth on day 120, 0.4 % (0) of its coins. The day-10 cohort (88; 83) spends 1,764 → 962 coins by day 30 and 48 of 88 are still retired on day 120 (the rest unretired under `unretire_coins`); 11 died. The coins re-enter by spending and unretiring; inheritance is small city-wide (42 events, 1,225 coins in 120 days: corpses are looted first). Phase 6's ~400 coins each was before the regen and OPEN-111. What stays: wallets 31,122 → 80,909 from day 30 to 120, the richest tenth 0.44 → 0.56 (gini 0.55 → 0.66): concentration that is not the retirees, a finding for the economy pass, not this milestone.
+- *Guards' travel is the beat (7)*: **settled at 2k, open at 20k** (no 20k city guard was drawn): 2k city guards travel 39-48 h a week (V4 56-62), half of it patrol legs; both 20k guard picks were corp Security Office guards at 85 and 105 h (V4 bug 11's corp patrol radius, SHADOW_V5 bug 11), a decision only if the corp patrol is meant to shrink.
+- *`OPEN-110` a pimp paying his own pitch*: **settled for coins, the row stays for the label**: no pimp-to-worker coin in either pimp diary; the pimp is logged as the worker's served client (SHADOW_V5 bug 7). Close the coin circle as not reproduced on this tree, keep the row for the encounter's direction.
+- *The 2k School (~1 reachable pupil)*: **decision for Dylan**. Seed 42 × 120: 90 pupil-days, 90 taught days for two Schools (under one a day); `s43/teacher_967` meets no pupil all week, `teacher_2035` three families on d28 only; the "served" line is the parent at the door. The 2k city's 6-9 school-age children live far (distance 60), pay a fee of 2, and the Camp takes the street's. Is schooling meant to matter at 2k (ease the distance or the fee, more children), or is the 2k teacher a one-family counter by design?
+- *`god_cut_the_precinct`*: **settled, the god's shock is not a cut; fixed by the 8c fix round** (the god halves `levers.guard_count` for ten days; the cut lands and the Stations book and transfer, asserted; the arrest comparison a FINDING, § 10's table). `PlayerCommand::JailAgent` sentences the guards (`law::sentence`), a sentence ends the post, and the midnight `law::reconcile_guards` hires the funded `levers.guard_count` again from the lawful jobless (phase 7 posts each hire nearest his Home), so the force never thins; the arrests rise with ~208 fresh guards on the beats (likely; not traced). A cut of the force is the lever (`guard_count`); the decision is whether the god should cut that instead (it would no longer test the Stations' hold during a Precinct outage).
+- *Bouts, leaders' fates, raid marchers*: leaders' fates **settled** (1 of 7 long-jailed against V4's 7 of 8); raid marchers and delegation **bug, OPEN-118** (SHADOW_V5 bug 5); bouts **bug, OPEN-122** (bug 10).
+
+**Decisions for Dylan raised in the read** (SHADOW_V5): the madam's cut floor; the 2k School; the frailty exit for 64-73-year-old couriers on 57-62 h a week (`frail_from_years` 60, `frail_slope` 0.03: the exit fires near 74; tighten, or the poor work until they drop); the one-night hire-and-house of the homeless by the foreman's pick; whether the Purist creed covers decks; `god_cut_the_precinct`'s shock.
+
+**The switches the milestone added** (for `OPEN-094`; not retired in this phase): `CITYSIM_LIVES_OFF` (the master, phase 1's venues and the Clinic with it), `CITYSIM_HOUSEHOLD_OFF` (2), `CITYSIM_CIVIC_OFF` (3), `CITYSIM_LIVES_STREET_OFF` (4a and 4b), `CITYSIM_TOWER_OFF` (5), `CITYSIM_CAREERS_OFF`, `CITYSIM_LIEUTENANTS_OFF` (6), `CITYSIM_STATIONS_OFF`, `CITYSIM_SPIRE_HOMES_OFF` (7): nine.
+
+**The final tree's tiers** (`e566e29` + this phase; the on city is main's to the byte: 42-44 × 120 counters identical, `phase_measure.py --skip off,lives`; the off identity against `e566e29` with `CITYSIM_LIVES_OFF` IDENTICAL on seed 42 × 30, `save_version` masked): `test.py change` GREEN 3m36s of 4m00s; `test.py merge` GREEN 4m26s (year 116 s, behaviour 63 s, `god` 50 s, `god_corps` 18 s, `god_districts` 18 s); `test.py milestone` **RED** 13m46s (parity 235 s, `core_20k` 244 s ok, `god_20k` 347 s); `lint` 0 problems, god 20/20, bullets 60/60, 54 ignores. Both RED rows are main's own readings (the on city is identical), new since 8a/8b and moved by the OPEN-111 round that merged after them:
+- **Parity: `paid venue visits` Full 12.33 / Statistical 15.09 (tolerance 1.85), RED** (8a's fixed table: 12.8 / 14.4, in); Bar visits 0.89 / 1.30 per 100 agent-days. Likely SHADOW_V5 bug 1: the Bar's staff hold only the evening since OPEN-111 and the Full day drinker finds nobody behind the counter, while the off-screen visit is credited by the clock; not traced past the per-kind rows. **The 8c fix round** fixed bug 1 (`OPEN-114`) and the row did not move (Full 12.32 / Statistical 15.46): the cause is elsewhere, mostly the Lounge (Statistical 1.16 against Full 0.19 per 100 agent-days, its learned `p_venue` 0.21; 8a read 0.19 / 0.20), outside the learned evening (`OPEN-130`). `law1` 0.131 / 0.211 red as on main (SHADOW_V4 "Left open" 1); `law0` 0.850 / 0.737 now in.
+- **`god_cut_the_precinct` RED (green after the 8c fix round, above)**: "the arrests fell as far with the Stations as without (1.17 against 1.25)" (8b: 1.31 against 1.20). The shock does not cut the force (the jailed guards' posts refill at midnight, above), so the assert compares two rises of the arrest count, one per city, and the order flips with the city; the test is not loosened here. Decision for Dylan (above): cut `levers.guard_count` in the god, or keep the jailing and assert only the Stations' bookings and transfers during the cut.

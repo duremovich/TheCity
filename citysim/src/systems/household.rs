@@ -979,16 +979,31 @@ pub fn visit_now(world: &World, id: EntityId) -> Option<PendingVisit> {
     (u16::from(v.hour) * TICKS_PER_HOUR as u16 <= world.tick_of_day()).then_some(v)
 }
 
+/// Where a Full visitor walks for `v`: the building itself for a building
+/// visit, else the building the kin is in now (a kin on the street, or a
+/// Statistical one with no building, has nowhere to walk to: the plan's own
+/// rule, so the goal never wins a think it cannot plan; Shadow V5 bug 3).
+fn visit_place(world: &World, v: PendingVisit) -> Option<EntityId> {
+    if v.why.to_building() {
+        return Some(v.kin);
+    }
+    world.comp::<Position>(v.kin).and_then(|p| p.building)
+}
+
 /// The Visit goal's considerations: a visit due and its hour come, a kin
-/// still there to see; the flat `visit_flat`.
+/// still there to see and a place to walk to (the plan's rule), and not on
+/// a shift (§ 1.3: no shift is interrupted; Shadow V5 bug 3: the Visit beat
+/// Work at 1.08 and cut the shift); the flat `visit_flat`.
 pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>, f32)> {
     if !on(world) {
         return None;
     }
     let v = visit_now(world, id)?;
-    if !kin_there(world, v) {
+    if !kin_there(world, v) || visit_place(world, v).is_none() {
         return None;
     }
+    let on_shift =
+        world.comp::<crate::components::Job>(id).is_some_and(|j| crate::utility::goals::shift_reachable(world, id, j));
     let urgency = match v.why {
         VisitWhy::Hurt => 1.0,
         VisitWhy::Elder => 0.6,
@@ -999,15 +1014,22 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
     let cs = vec![
         Consideration::new("a visit due", can(true), GATE),
         Consideration::new("the reason", urgency, Curve::Linear { m: 0.5, b: 0.5 }),
+        Consideration::new("not on shift", can(!on_shift), GATE),
     ];
     Some((cs, world.config.household.visit_flat))
 }
 
 /// The Visit's scripted plan: `GoTo(the kin's building) → Rest` (the
 /// visiting hour is a Rest at the place: the Clinic's ward, the Home's
-/// room, the Precinct's hall), the kin the plan's target.
+/// room, the Precinct's hall), the kin the plan's target. A visit due with
+/// nowhere to walk is dropped for the day, not retried at every cooldown
+/// (Shadow V5 bug 3: 312 "could not plan" lines in 26 diaries).
 pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
     let v = visit_now(world, id)?;
+    if visit_place(world, v).is_none() {
+        world.visits.remove(&id);
+        return None;
+    }
     let step = |action, target| ActionInstance { action, target, tile: None };
     // Lives at work phase 5 (§ 2.4): the Fixer's walk-in and the owner's
     // collection walk to a building (the exec's office walk's shape).
@@ -1019,7 +1041,6 @@ pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
         let steps = vec![step(ActionKind::GoTo(LocationKey::Seller), Some(v.kin)), step(ActionKind::Rest, None)];
         return Some(Plan { goal: GoalKind::Visit, target: Some(v.kin), steps, started_tick: world.tick });
     }
-    world.comp::<Position>(v.kin).and_then(|p| p.building)?;
     let steps = vec![step(ActionKind::GoTo(LocationKey::Victim), Some(v.kin)), step(ActionKind::Rest, None)];
     Some(Plan { goal: GoalKind::Visit, target: Some(v.kin), steps, started_tick: world.tick })
 }

@@ -1176,7 +1176,7 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
         shifts = world.config.leisure.evening_shift.clone();
     }
     // OPEN-111: a venue's legacy staff work its trade hours.
-    if let Some(s) = crate::systems::service::venue_shift(&world.config, role) {
+    if let Some(s) = crate::systems::service::venue_shift(world, Some(employer), role) {
         shifts = s;
     }
     // Jobs and room J12: a trade's shift is its row's.

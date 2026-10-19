@@ -1061,9 +1061,10 @@ pub struct World {
     pub hangouts: BTreeMap<TilePos, SmallVec<[EntityId; 8]>>,
     /// Lives at work phase 1 (§ 1.1): each server's room this hour (the
     /// encounters taken against its row's `per_hour`), written by
-    /// `service::arrive`, pruned by `service::hourly`. Not saved (a
-    /// derived, hour-bounded tally; a resumed save re-fills it).
-    #[serde(skip)]
+    /// `service::arrive`, pruned by `service::hourly`. Saved (OPEN-113,
+    /// SAVE_VERSION 44): a save inside an hour keeps the room taken, so a
+    /// mid-hour save resumes byte for byte. Empty off.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub service_room: BTreeMap<EntityId, crate::systems::service::Room>,
     /// Lives at work phase 1 (§ 1.1): each server's regulars (at most
     /// `service::REGULARS_CAP`; the oldest falls off). Empty off, so the
@@ -2198,8 +2199,8 @@ impl World {
                 let id = pool[i];
                 let shifts = if role == Role::Guard && id.index % 2 == 0 {
                     wc.shift_night.clone()
-                } else if let Some(s) = systems::service::venue_shift(&self.config, role) {
-                    // OPEN-111: a venue's legacy staff work its trade hours.
+                } else if let Some(s) = systems::service::venue_shift(self, employer, role) {
+                    // OPEN-111, Shadow V5 bug 1: a venue's legacy staff split its day and evening.
                     s
                 } else {
                     wc.shift_day.clone()

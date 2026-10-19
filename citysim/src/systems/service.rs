@@ -79,9 +79,9 @@ const PURPOSE_CLERK: u64 = 0x5e52_0009;
 /// The regulars a server keeps (§ 1.1: the oldest falls off).
 pub const REGULARS_CAP: usize = 8;
 
-/// A server's room this hour (`World::service_room`, not saved): the hour
-/// and the encounters taken in it (`per_hour` is the cap).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// A server's room this hour (`World::service_room`, saved since OPEN-113):
+/// the hour and the encounters taken in it (`per_hour` is the cap).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Room {
     pub hour: Tick,
     pub taken: u8,
@@ -112,14 +112,38 @@ pub fn on(world: &World) -> bool {
     crate::systems::industry::on(world) && world.config.lives.enabled && world.config.service.venues
 }
 
-/// OPEN-111: the shift a legacy venue `role` is hired onto when `[service]
-/// venues` is on and the role is in `[service] evening_staff`: `[leisure]
-/// evening_shift`, the hours the venue trades (seeding and
-/// `demography::hire` alike; a Statistical server is credited by the same
-/// `Job::shifts`, so the mirror follows). `None`: the role's shift as before.
-pub fn venue_shift(cfg: &crate::config::Config, role: Role) -> Option<Vec<(u16, u16)>> {
+/// OPEN-111, Shadow V5 bug 1: the shift a legacy venue `role` is hired onto
+/// at `employer` when `[service] venues` is on and the role is in `[service]
+/// evening_staff`. A venue trades from the day into the evening (no venue
+/// keeps hours; 73 of 100 Bar visits in V5's diaries came before 18:00), so
+/// its staff of the role split between `[world] shift_day` and `[leisure]
+/// evening_shift`: the thinner of the two among the role's staff there now,
+/// the evening on a tie (a venue of one keeps the evening, the drinking's
+/// peak and the Statistical evening). Seeding and `demography::hire` alike;
+/// a Statistical server is credited by the same `Job::shifts`, so the
+/// mirror follows. `None`: the role's shift as before.
+pub fn venue_shift(world: &World, employer: Option<EntityId>, role: Role) -> Option<Vec<(u16, u16)>> {
+    let cfg = &world.config;
+    if !(cfg.jobs2.enabled && cfg.lives.enabled && cfg.service.venues && cfg.service.evening_staff.contains(&role)) {
+        return None;
+    }
+    let (day, eve) = (&cfg.world.shift_day, &cfg.leisure.evening_shift);
+    let (mut on_day, mut on_eve) = (0usize, 0usize);
+    for &s in employer.map_or(&[][..], |b| world.staff_of(b)) {
+        match world.comp::<Job>(s).filter(|j| j.role == role) {
+            Some(j) if j.shifts == *day => on_day += 1,
+            Some(j) if j.shifts == *eve => on_eve += 1,
+            _ => {}
+        }
+    }
+    Some(if on_day < on_eve { day.clone() } else { eve.clone() })
+}
+
+/// The shifts a `[service] evening_staff` role works at its venues taken
+/// together (`wages::site_shifts`' room count): the day and the evening.
+pub fn venue_shifts_all(cfg: &crate::config::Config, role: Role) -> Option<Vec<(u16, u16)>> {
     (cfg.jobs2.enabled && cfg.lives.enabled && cfg.service.venues && cfg.service.evening_staff.contains(&role))
-        .then(|| cfg.leisure.evening_shift.clone())
+        .then(|| cfg.world.shift_day.iter().chain(cfg.leisure.evening_shift.iter()).copied().collect())
 }
 
 /// Lives at work phase 3 is live: the encounter on and `[service] civic`
