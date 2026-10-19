@@ -2800,18 +2800,45 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
             .map_or(0, |x| x.members.iter().filter(|&&m| gang::following_order(w, m).is_some()).count())
     };
     let g = w.gangs().into_iter().max_by_key(|&g| (follows(&w, g), g)).expect("a gang");
+    // The probe's own subject, so no change in the city's history reaches him: the
+    // first free adult with a Home is stripped of any Job, sentence, contract run or
+    // pending goal, made a loyal member of the gang, and kept below the gun gate (a
+    // Fixer's board matches on a skill of `gun_skill_min`), so no contract is offered.
     let pimp = w
-        .comp::<citysim::Gang>(g)
-        .and_then(|x| {
-            x.members.iter().copied().find(|&m| {
-                law::living(&w, m)
-                    && !w.has::<citysim::Sentence>(m)
-                    && gang::following_order(&w, m).is_some()
-                    && !citysim::systems::stims::is_dealer(&w, m)
-                    && !w.has::<Job>(m)
-            })
+        .citizens()
+        .into_iter()
+        .find(|&a| {
+            law::living(&w, a)
+                && demography::is_adult(&w, a)
+                && w.gang_of(a).is_none()
+                && !law::is_guard(&w, a)
+                && !w.has::<citysim::Sentence>(a)
+                && w.comp::<Brain>(a).is_some()
+                && w.comp::<citysim::components::Household>(a).is_some()
         })
-        .expect("a loyal non-dealer with no day job");
+        .expect("a free adult with a Home");
+    w.vacate_job(pimp);
+    w.contract_runs.remove(&pimp);
+    w.mission_of.remove(&pimp);
+    if let Some(p) = w.comp_mut::<citysim::Personality>(pimp) {
+        p.loyalty = 1.0;
+    }
+    if let Some(s) = w.comp_mut::<citysim::Skills>(pimp) {
+        s.fighting = 0.0;
+        s.stealth = 0.0;
+        s.hacking = 0.0;
+        s.persuasion = 0.0;
+        s.intimidation = 0.0;
+    }
+    if let Some(b) = w.comp_mut::<Brain>(pimp) {
+        b.current_goal = None;
+        b.plan = None;
+        b.plan_step = 0;
+        b.exec = citysim::exec::ExecState::Idle;
+    }
+    gang::enlist(&mut w, pimp, g);
+    w.comp_mut::<citysim::Gang>(g).expect("gang").order = citysim::components::Order::Expand;
+    assert!(gang::following_order(&w, pimp).is_some(), "the subject follows the held order");
     // His district: the gang holds a Home there (seed 42's hold none on day 12).
     let at = w.comp::<Position>(pimp).expect("pos").tile;
     let d = w.district_of(at);
