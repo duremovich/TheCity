@@ -249,6 +249,48 @@ fn test_visit_to_a_hurt_kin_full_and_statistical() {
     assert_eq!(jobs2(&w).kin_visits, 2);
 }
 
+/// Shadow V5 bug 3 (§ 1.3, no shift interrupted): a worker on shift with a
+/// Visit due keeps working (the Visit's "not on shift" gate is 0; off shift
+/// it may win); a Visit whose kin is in no building (nowhere to walk) does
+/// not score and is dropped at its plan, not retried at each cooldown; a
+/// Visit that cools is dropped for the day. Failed on the base: the Visit
+/// scored 1.08 over Work mid-shift and cooled every 2 h, 312 times in V5.
+#[test]
+fn test_a_visit_waits_out_the_shift_and_an_unplannable_one_is_dropped() {
+    let mut w = city();
+    let (a, s, h) = married_pair(&w);
+    // Noon on day 1 (a workday), the visit's hour past.
+    w.tick = TICKS_PER_DAY + 12 * TICKS_PER_HOUR;
+    let due = household::PendingVisit { kin: s, why: household::VisitWhy::Hurt, hour: 10 };
+    w.visits.insert(a, due);
+    w.enter_building(s, h);
+    w.remove::<citysim::Job>(a);
+    let open = |w: &World| household::considerations(w, a).map(|(cs, _)| cs.iter().all(|c| c.output > 0.0));
+    assert_eq!(open(&w), Some(true), "off shift, the kin at home: the Visit may win");
+    // On the day shift, at work: the gate holds it.
+    let market = w.buildings_of_kind(BuildingKind::Market)[0];
+    citysim::systems::demography::hire(&mut w, a, market, citysim::Role::Clerk);
+    let day = w.config.world.shift_day.clone();
+    w.comp_mut::<citysim::Job>(a).expect("hired").shifts = day;
+    w.leave_building(a);
+    w.enter_building(a, market);
+    assert_eq!(open(&w), Some(false), "on shift: the Visit waits for the shift's end");
+    assert_ne!(citysim::utility::think(&w, a).map(|(g, _)| g), Some(GoalKind::Visit), "the shift keeps him");
+    // Off the job, the kin out on the street: nothing to walk to.
+    w.remove::<citysim::Job>(a);
+    w.leave_building(s);
+    assert!(w.comp::<Position>(s).is_some_and(|p| p.building.is_none()));
+    assert!(household::considerations(&w, a).is_none(), "no place to walk: the Visit does not score");
+    assert!(household::plan(&mut w, a).is_none());
+    assert!(!w.visits.contains_key(&a), "dropped at its plan, not retried");
+    // A Visit that cools is dropped for the day.
+    w.visits.insert(a, due);
+    w.enter_building(s, h);
+    assert!(household::plan(&mut w, a).is_some());
+    w.cool_goal(a, GoalKind::Visit);
+    assert!(!w.visits.contains_key(&a), "a cooled Visit is dropped");
+}
+
 /// § 3.5: an elder parent unmet for `elder_visit_days` is visited.
 #[test]
 fn test_visit_to_an_elder_parent() {

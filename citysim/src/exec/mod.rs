@@ -546,6 +546,16 @@ impl World {
             b.cooldowns.insert(goal, until);
             b.last_plan_failure = None;
         }
+        self.drop_cooled_visit(id, goal);
+    }
+
+    /// Shadow V5 bug 3: a Visit that cools (it could not plan, or its plan
+    /// failed twice) is dropped for the day, not re-chosen when the cooldown
+    /// lapses (each win had cut a shift). Nothing for any other goal.
+    fn drop_cooled_visit(&mut self, id: EntityId, goal: crate::components::GoalKind) {
+        if goal == crate::components::GoalKind::Visit {
+            self.visits.remove(&id);
+        }
     }
 
     /// A goal could not be planned or its plan failed: replanned once; a
@@ -562,9 +572,13 @@ impl World {
                     b.cooldowns.insert(goal, tick + cooldown);
                     b.last_plan_failure = None;
                 }
-                _ => b.last_plan_failure = Some((goal, tick)),
+                _ => {
+                    b.last_plan_failure = Some((goal, tick));
+                    return;
+                }
             }
         }
+        self.drop_cooled_visit(id, goal);
     }
 
     /// Drop the current plan: abandon the running step (partial effects per
