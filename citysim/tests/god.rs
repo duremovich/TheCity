@@ -2221,8 +2221,12 @@ fn lives_rows() -> Vec<V8Series> {
 }
 
 /// Lives at work god 1 (§ 10, class: the School): every teacher killed on
-/// day 20. The posts must refill (the job search's School vacancy): by day 30
-/// every post emptied is held again by a living agent, and a School has a
+/// day 20. The posts must refill (the job search's School vacancy): on some
+/// evening of days 21-30 every post emptied is held again by a living agent
+/// (the most held on one evening, so a replacement lost to the city's own
+/// violence the day before a single sample does not read as no refill: the
+/// review fix round's city refilled all 4 on day 20, lost one replacement, a
+/// gang member, in a street fight on day 29 and refilled it on day 30), and a School has a
 /// teacher whose shift covers a School-day hour. The taught School days are a
 /// FINDING: at 2k they rest on ~1 marginal pupil (6-9 children; School within
 /// 60 tiles, fee 2, the Camp), so they cannot carry an assert (gate 8c finding).
@@ -2240,8 +2244,8 @@ fn god_kill_all_teachers() {
                 .filter(|&a| citysim::systems::law::living(w, a))
                 .collect()
         };
-        if day == 30 {
-            held = holders(w).len();
+        if (21..=30).contains(&day) {
+            held = held.max(holders(w).len());
         }
         if (30..60).contains(&day) && day % 7 < 5 {
             // A School-day hour (11:00): a living teacher whose shift covers it.
@@ -2279,7 +2283,7 @@ fn god_kill_all_teachers() {
         taught(&r, 30, 60),
         taught(c, 30, 60)
     );
-    eprintln!("posts: {killed} emptied on day 20, {held} held by a living teacher on day 30, a teacher on a School-day shift on {on_duty_days} weekdays of 30-59");
+    eprintln!("posts: {killed} emptied on day 20, {held} held by living teachers at most on one evening of days 21-30, a teacher on a School-day shift on {on_duty_days} weekdays of 30-59");
     assert!(killed > 0 && held >= killed && on_duty_days > 0, "the teachers' posts never refilled");
 }
 
