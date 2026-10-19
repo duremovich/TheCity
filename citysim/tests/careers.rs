@@ -382,3 +382,50 @@ fn diag_physical_trades_ages() {
         }
     }
 }
+
+/// Review fix 4: a worker who retires to a grown child's Home takes his
+/// co-resident spouse along (the couple moves); with room for one only he
+/// does not retire to kin (the spouse is never left behind). Failed on the
+/// base `f795548` (the retiree moved alone and the spouse stayed for good).
+#[test]
+fn test_retiring_to_kin_moves_the_couple() {
+    let mut w = common::world_with(|c| c.ages.kin_take_in_p = 1.0);
+    let home = |w: &World, id: EntityId| w.comp::<citysim::Household>(id).and_then(|h| h.home);
+    // A worker with a co-resident spouse and a grown child housed elsewhere.
+    let (a, s, kid_home) = w
+        .citizens()
+        .into_iter()
+        .filter(|&a| w.has::<Job>(a) && !w.has::<Sentence>(a))
+        .find_map(|a| {
+            let s = w.spouse_of(a)?;
+            let h = home(&w, a)?;
+            (home(&w, s) == Some(h)).then_some(())?;
+            let kh = demography::children_of_agent(&w, a)
+                .into_iter()
+                .filter(|&c| demography::is_adult(&w, c))
+                .filter_map(|c| home(&w, c))
+                .find(|&kh| kh != h)?;
+            Some((a, s, kh))
+        })
+        .expect("a married worker with a grown child housed elsewhere");
+    let set_room = |w: &mut World, room: usize| {
+        let n = w.residents_of(kid_home).len();
+        if let Some(b) = w.comp_mut::<citysim::Building>(kid_home) {
+            b.kind = citysim::BuildingKind::Home;
+            b.capacity = u16::try_from(n + room).expect("capacity");
+        }
+    };
+    set_age(&mut w, a, 66);
+    // Room for one only: no retirement to kin (he may retire on savings: stay home).
+    let mut one = w.clone();
+    set_room(&mut one, 1);
+    careers::daily(&mut one);
+    assert_ne!(home(&one, a), Some(kid_home), "with room for one, the retiree does not leave his spouse");
+    assert_eq!(home(&one, s), home(&one, a), "the couple stays together");
+    // Room for two: both move in.
+    set_room(&mut w, 2);
+    careers::daily(&mut w);
+    assert!(w.has::<citysim::components::Retired>(a), "retired to family");
+    assert_eq!(home(&w, a), Some(kid_home), "the retiree moved in with the child");
+    assert_eq!(home(&w, s), Some(kid_home), "and the spouse with him");
+}
