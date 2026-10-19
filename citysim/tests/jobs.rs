@@ -381,7 +381,8 @@ fn test_secure_holder_who_skips_shifts_quits() {
         .into_iter()
         .filter(|&a| {
             w.comp::<Job>(a)
-                .is_some_and(|j| j.employer.is_some() && j.role == Role::Bartender && j.shifts == [(540, 1080)])
+                // OPEN-111: a Bartender's one-segment shift (`[service] evening_roles` puts it in the evening).
+                .is_some_and(|j| j.employer.is_some() && j.role == Role::Bartender && j.shifts.len() == 1)
         })
         .take(2)
         .collect();
