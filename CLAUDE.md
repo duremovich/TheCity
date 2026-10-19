@@ -48,6 +48,9 @@ Install the commit hook once: `git config core.hooksPath tools/hooks` (fmt check
 - Faith growth is uncapped; the equilibrium comes from interactions (predators, raids, disillusion), designed later (2026-10-17).
 - Arasaka, Militech and the rest are placeholder names (2026-10-13).
 - The view is isometric; a walking player character comes after v1 (2026-10-08).
+- Old workers keep their posts until the frailty exit (~74): no pension, work till the body quits (2026-10-19).
+- Purists reject implants only; a deck in the hand is a tool (2026-10-19).
+- Lives at work moved free time indoors (the own-Home HangOut); social-contact behaviour rows that the milestone's design moved are re-derived, and street life comes back as a feature (OPEN-109), not a knob (2026-10-19).
 - Ticks/s on this box are unreliable (Blender renders, parallel builds): print, never tune.
 
 ## Agent rules (orchestrated work)
