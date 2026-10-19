@@ -647,6 +647,8 @@ pub fn status_daily(world: &mut World) -> i64 {
             if amount > 0 && crate::systems::leisure::door_ok(world, id, v) {
                 let paid = crate::systems::leisure::pay_venue(world, id, v, amount, ownership::Flow::Leisure);
                 if paid > 0 {
+                    // OPEN-106: world-side, both tiers: out of `p_venue`.
+                    crate::systems::leisure::note_world_side(world, id, v);
                     let fun = crate::systems::leisure::gain_at(world, v);
                     if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
                         n.fun = (n.fun + fun).min(1.0);

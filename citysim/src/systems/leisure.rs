@@ -360,7 +360,7 @@ pub(crate) fn pay_venue(world: &mut World, from: EntityId, b: EntityId, amount: 
         return 0;
     }
     ownership::credit(world, b, paid);
-    note_paid(world, b, paid);
+    note_paid(world, from, b, paid);
     let tax = world.levers.leisure_tax;
     if tax > 0.0 && owner.is_some() {
         let extra = (tax * paid as f32).round() as i64;
@@ -370,8 +370,9 @@ pub(crate) fn pay_venue(world: &mut World, from: EntityId, b: EntityId, amount: 
     paid
 }
 
-/// A paid visit of `paid` coins at `b`, by its kind (`CoinProbe::venue_paid`).
-pub(crate) fn note_paid(world: &mut World, b: EntityId, paid: i64) {
+/// A paid visit of `paid` coins by `payer` at `b`, by its kind
+/// (`CoinProbe::venue_paid`; a body's in `venue_unmirrored` too).
+pub(crate) fn note_paid(world: &mut World, payer: EntityId, b: EntityId, paid: i64) {
     if paid <= 0 {
         return;
     }
@@ -379,6 +380,27 @@ pub(crate) fn note_paid(world: &mut World, b: EntityId, paid: i64) {
     let e = world.probe.venue_paid.entry(format!("{kind:?}")).or_default();
     e.0 += 1;
     e.1 += paid;
+    note_unmirrored(world, payer, kind, 1);
+}
+
+/// OPEN-106: a body's visit (`lod::kept_body`) at a venue of `kind`, `+1`
+/// or `-1` on a refund (`CoinProbe::venue_unmirrored`).
+fn note_unmirrored(world: &mut World, payer: EntityId, kind: BuildingKind, delta: i64) {
+    if crate::systems::lod::kept_body(world, payer) {
+        let e = world.probe.venue_unmirrored.entry(format!("{kind:?}")).or_default();
+        *e = e.saturating_add_signed(delta);
+    }
+}
+
+/// OPEN-106: a world-side pass's paid visit by `payer` at `b`, both tiers
+/// alike (`classpay::status_daily`): out of `calibrate`'s `p_venue` (a
+/// body's is already counted out by `note_paid`).
+pub(crate) fn note_world_side(world: &mut World, payer: EntityId, b: EntityId) {
+    if crate::systems::lod::kept_body(world, payer) {
+        return;
+    }
+    let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) else { return };
+    *world.probe.venue_unmirrored.entry(format!("{kind:?}")).or_default() += 1;
 }
 
 /// Undo `pay_venue`'s `SetLeisureTax` surcharge on `paid` (plan L37): the
@@ -461,6 +483,7 @@ fn play_table(world: &mut World, id: EntityId, b: EntityId, stake: i64, u: f32) 
         // Phase 7b's probe: a won round is a visit too (no coins in).
         if let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) {
             world.probe.venue_paid.entry(format!("{kind:?}")).or_default().0 += 1;
+            note_unmirrored(world, id, kind, 1);
         }
         house_pays(world, b, id, stake, 2 * stake)
     } else {
@@ -1420,6 +1443,7 @@ pub fn on_abort(world: &mut World, id: EntityId, kind: ActionKind) {
                     let e = world.probe.venue_paid.entry(format!("{kind:?}")).or_default();
                     e.0 = e.0.saturating_sub(1);
                     e.1 -= paid;
+                    note_unmirrored(world, id, kind, -1);
                 }
             }
             // Review fix: the `SetLeisureTax` surcharge comes back too.
@@ -1995,7 +2019,7 @@ fn stat_visit(
             let owner = world.owner_of(b);
             let paid = ownership::pay(world, Some(id), owner, 2, Flow::Drink);
             ownership::credit(world, b, paid);
-            note_paid(world, b, paid);
+            note_paid(world, id, b, paid);
             gross += paid;
             add_fun(world, id, gain_at(world, b));
             add_belonging(world, id, 0.15);

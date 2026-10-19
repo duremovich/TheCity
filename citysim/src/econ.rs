@@ -199,6 +199,12 @@ pub struct CoinProbe {
     /// kind (`leisure::pay_venue`, a Bar's drink), the parity test's mirror
     /// row. Diagnostic only.
     pub venue_paid: std::collections::BTreeMap<String, (u64, i64)>,
+    /// Lives at work gate (OPEN-106): the visits of `venue_paid` outside the
+    /// Statistical evening's mirror, by venue kind: a body's (`lod::kept_body`,
+    /// it goes out on screen in either city) and a world-side pass's for
+    /// both tiers alike (`classpay::status_daily`'s night out). `calibrate`
+    /// learns `p_venue` without them. Diagnostic only.
+    pub venue_unmirrored: std::collections::BTreeMap<String, u64>,
 }
 
 // ---------------------------------------------------------------------------

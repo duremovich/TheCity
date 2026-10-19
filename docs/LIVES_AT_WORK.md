@@ -980,3 +980,74 @@ The Statistical mirror (§ 6): the escort walks to the nearest post (bodies); th
 Measured: the 20k rows above and § 5.1's re-read; 20k seed 42 × 30 (`run --population 20000 --scaled --map gen:20000`), main → phase 7: arrests 3,702 → 3,880, thefts 1,084 → 940, deaths by violence 238 → 244, Murders 184 → 189 (a build of the phase without the beats deal read 69, and seed 43 read 63 → 88: main's and the phase's late Sump 2 storms, `fviolence`'s variance), Precinct-full 0 → 0 (the probe's `UNPUNISHED` 25 → 0), Station bookings 2,011 (fines 761, nights 711), transfers 515, escorts sent on 298, execs in the Spire 101/106 on day 30; `core_20k` ticks/s 193 (main) → 196 (back to back), its new bullets 1,929 bookings and 500 transfers. 2k (`tools/phase_measure.py`, no Station): Murders 127 → 136 on 42-44 and 70 → 83 on 45-47 (71 → 121, 103 → 79, 36 → 49: the storm's spread; no phase 7 path touches a kill roll), J24 0.750 → 0.756, arrests 2,563 → 2,614. Off identity: both off IDENTICAL on 2k seed 42 × 30 (events, CSV, save) and on 20k seed 42 × 10 (events, CSV); each alone DIFFERs by construction (stations off leaves the Spire moves; Spire homes off leaves the stations' keys in the save, its events and CSV identical at 2k).
 
 **Left:** the 42-47 gate runs, A/B ticks/s, the save size and the § 9.1 diaries are the gate's; `god_cut_the_precinct` is not written (the gate's); the `p_theft_caught` regen (D14).
+
+---
+
+## 15. Gate
+
+Phase 8 is split in three (`history/lives_at_work/phase8a_brief.md`, 8b, 8c); each adds its part here. Phase 8a (2026-10-19): the numbers, on fd89cca plus the regen.
+
+- OPEN-109 (feature, pressure pass): street life. The own-Home HangOut moved free time indoors, so fighters and the homeless meet fewer known faces; the d19 fighter and d90 homeless `KnownMetWeek` rows were re-derived (bounds 1.5 and 1.7), OPEN-103 closed.
+- OPEN-110 (bug, unowned): a pimp can be a paying client of his own pitch (coins in a circle), found restaging the pimp probe.
+
+### The one regen (D14, Q8): kept
+
+`calibrate` (v2, seeds 1000-1002 × 30 d, 2k, pathed walks) once on the final tree. To split the table's drift, `calibrate` also ran once on the milestone's start (`23a161d`'s binary, from its own source root): main's table → the `23a161d` regen is the drift before the milestone plus the calibration noise; the `23a161d` regen → the kept table is the milestone. Means over the rows (full diff in the phase 8a report):
+
+| key | main's table | `23a161d` regen | kept |
+|---|---|---|---|
+| `p_chat_home` | 0.767 | 0.782 | 0.740 |
+| `p_chat` | 0.00215 | 0.00241 | 0.00184 |
+| `p_social` | 0.00139 | 0.00142 | 0.00100 |
+| `p_theft_caught` | 0.661 | 0.623 | 0.601 |
+| `p_meet` | 0.0502 | 0.0480 | 0.0403 |
+| `p_flirt` | 0.00473 | 0.00463 | 0.00918 |
+| `p_steal` | 4.3e-5 | 5.1e-5 | 3.6e-5 |
+| `p_beg`, `p_beg_short` | 0.066, 0.027 | 0.068, 0.026 | 0.015, 0.005 |
+| `p_scavenge`, `p_meal`, `pantry_per_resident` | 0.223, 0.066, 0.233 | 0.225, 0.065, 0.242 | 0.251, 0.072, 0.277 |
+| `p_venue` Club, Den | 0.036, 0.057 | 0.034, 0.053 | 0.025, 0.037 (0.024, 0.034 after the OPEN-106 fix) |
+| `p_attend` | | | 134 of 147 moved, 5 past 10 %: the super +28-40 % (the round), the Reporter -21 % (the beat) |
+
+The four keys D14 named moved least (`p_chat_home` -5 %, `p_theft_caught` -3.5 %: the 2k calibration city has no Station, so the stations' arrest rate is not in a 2k table). Findings, keys no D14 mechanism names: **`p_beg` -78 %** (the household's take-in and reunite and the super's tied housing cut the homeless, J25 0.022 → 0.014 on 42-47); **`p_flirt` +98 %** (no mechanism flirts; the home evening puts spouses and housemates in one room, the likeliest cause, not proven); `p_steal` -29 %, `p_meet` -16 %, Club and Den -25 to -32 % (the evening at home, phase 1's door).
+
+**The Murders check** (42-47 × 120, fd89cca with main's table → the kept table): 133 → 46, 136 → 144, 140 → 151, 121 → 90, 79 → 61, 49 → 80; mean 110 → 95. The noise is the seed spread (49-140 per seed on the before tree, 28-112 on `23a161d`; the 42-44 and 45-47 means of the one before set are 136 and 83): the mean moves inside it, so the regen is **kept**. With it, thefts 320 → 284, arrests 2,641 → 2,418, last-day wallets 79,731 → 104,122 (the Statistical tier steals and begs less), J24 0.768 → 0.778. At 20k (× 30) the table matters more (most of the city is Statistical): seed 42 Murders 189 → 104 (off-screen violent deaths 183 → 91: the Sump 2 storm not lit), seed 43 54 → 51; thefts -17 % on both seeds.
+
+**The fix round's regen (OPEN-106).** The kept table is regenerated once more, with `calibrate` learning `p_venue` over the adults the Statistical evening holds. The bodies a Statistical city keeps on screen are left out of both the adult-days and the visits: the held, guards, gravediggers and the wanted (`lod::kept_body`, the forced assignment's own predicate). They go out on their own, on top of the evening's rate. On the parity city (2000-2005 × 30) the evening made 3,490 Bar drinks and the Coarse bodies 1,982 more, against the Full city's 2,944. A world-side pass's visit (`status_daily`'s night out) is left out too (`CoinProbe::venue_unmirrored`, write-only). Only `[p_venue]` moved: Bar 0.0103 → 0.0084, Brothel 0.0069 → 0.0056, Club 0.0252 → 0.0238, Den 0.0365 → 0.0341, StripClub 0.0065 → 0.0059, FightPit 0.0091 → 0.0088, Lounge 0.00195 → 0.00206 (fewer adult-days), Arcade and NoodleBar flat. The Murders check against fd89cca's table (42-47 × 120): 133 → 99, 136 → 98, 140 → 174, 121 → 82, 79 → 82, 49 → 34; mean 110 → 95 (the same mean as the first regen; seed 44's 174 sits 34 over the before tree's per-seed top). Arrests 2,641 → 2,370, J24 0.768 → 0.773, J25 0.014 → 0.010, last-day wallets 79,731 → 85,772 (+8 %, against +31 % on the first regen).
+
+The milestone itself (42-47 × 120, `23a161d` → fd89cca, main's table): Murders mean 78 → 110 (94/61/112/59/111/28 → 133/136/140/121/79/49), J24 0.779 → 0.768, J25 0.022 → 0.014, arrests 2,620 → 2,641, last-day wallets 63,465 → 79,731 (OPEN-105's retirees).
+
+### Parity (`lod.rs::test_full_vs_statistical_within_15pct`, the final tree)
+
+Full / Statistical per 100 agent-days, the fixed table (the first regen's in brackets where it differs, main's after it): thefts 0.080 / 0.088 [0.083; 0.117]; **hunger-days 1.238 / 1.294, in** [1.323; 1.745 red]; arrests 0.652 / 0.303; assaults 0.101 / 0.128; violent deaths 0.005 / 0.009; marriages 1.085 / 0.845; bin meals 0.244 / 0.332 [0.341; 0.503]; commute rides 33.9 / 34.2; ride share 35.2 / 36.1; **paid venue visits 12.8 / 14.4, in** (tolerance 1.92) [15.4; 16.8], asserted again; law0 0.906 / 0.714 and law1 0.071 / 0.216 red as on main (SHADOW_V4 "Left open" 1); law2 in. The test fails on law0 and law1 alone.
+
+Printed FINDINGs, each with its mirror gap written in `lod.rs`:
+- **Malnutrition × 100, 12.48 / 9.55** (band 1.87) [9.69; 11.58 in], OPEN-107. The off-screen meal is a pure hash on the phase, hunger band and shift (`p_meal`), with no memory of who went hungry or ate synth yesterday. The hungry and synth days spread over more adults than on screen, where the same poor adults eat synth day after day. The stock is clamped at 0 and capped for a synth diet, so its mean follows the tail. Measured on the parity city: synth-only days 0.265 / 0.29 a day, adults at zero 0.57 / 0.48, at the onset (0.3) 0.065 / 0.026. Main's table passed it only by feeding the tier less, with hunger-days red.
+- **Paid venue coins 56.3 / 65.6** (band 8.45) [69.4; 73.2], OPEN-106's remainder. The Den carries half the gap (14.7 / 10.0 coins on 3.7 / 3.5 visits): a stake is a share of the purse at the table, and the off-screen gambler stakes 4.0 coins a round against 2.9. Not traced further.
+- The per-kind rows: Bar visits 0.82 / 1.34 [1.52] (the Coarse bodies' own drinks, more of them wanted off screen, law1 0.07 / 0.22); Lounge 0.20 / 0.19 [0.47]. The first regen's Lounge excess was the status night out, not the calibration: `status_daily` takes only an owned Lounge, the parity city's Lounge is the city's (no owner) in every Full run, and on 11 Statistical run-days a corp owned it (1,008 one-coin night outs). The calibration city makes none, so the 8a diagnosis (the night out learned into `p_venue`) did not hold.
+- Synth % 32.7 / 38.1, encounters per shift 6.37 / 6.97, the door rent share 0.256 / 0.259, papers 0.23 / 0.15 per 1,000 adult-days, retirements 2.04 / 1.94, Station bookings 0 (2k).
+
+### The off identity, A/B and the save
+
+Seeds 42-44 × 30 (`tools/phase_measure.py`, events, the report's shared columns and the save with `save_version` masked), main's table in place. The switched-off city reads the table too: with the kept table in place the master against `23a161d` differs (seed 42 × 30: 21,744 event lines against 22,546), with main's swapped in it is identical (re-checked on the fix round's code). A sub-switch is measured with every later phase's switches off too, against the sha before its phase (a later phase builds on the earlier one's paths; code-identical cached shas used where `git diff` on the source and assets is empty):
+
+| switches off | against | 42 | 43 | 44 |
+|---|---|---|---|---|
+| `CITYSIM_LIVES_OFF` (master) | `23a161d` (start) | IDENTICAL | IDENTICAL | IDENTICAL |
+| `HOUSEHOLD` + all later | `593e8cf` (phase 1) | IDENTICAL | IDENTICAL | IDENTICAL |
+| `CIVIC` + all later | `596cd8c` (phase 2) | IDENTICAL | IDENTICAL | IDENTICAL |
+| `LIVES_STREET` (4a and 4b) + all later | `c1d2c2a` = `dc91503` (phase 3) | IDENTICAL | IDENTICAL | IDENTICAL |
+| `TOWER` + all later | `d019df2` (phase 4b) | IDENTICAL | IDENTICAL | IDENTICAL |
+| `CAREERS`, `LIEUTENANTS` + phase 7's | `087c01e` = `2c3c902` (phase 5) | IDENTICAL | IDENTICAL | IDENTICAL |
+| `STATIONS`, `SPIRE_HOMES` | `1810392` = `d98bcd3` (phase 6) | IDENTICAL | IDENTICAL | IDENTICAL |
+
+Throughput, alternating, one process at a time, 2k seed 42 × 30, three rounds: `23a161d` 7,713 / 7,737 / 7,666 ticks/s (the report's mean; by wall 7,030 / 7,337 / 7,233), the final tree 7,336 / 7,400 / 7,356 (6,940 / 7,048 / 7,001): **-4.4 %** (by wall -2.8 %), inside § 7's 5 %. The save at 30 d seed 42: 12,557,278 → 13,006,413 B (+3.6 %).
+
+### The 20k close
+
+20k seed 42 × 30 (`run --population 20000 --scaled --map gen:20000`), `23a161d` → the final tree: Murders 198 → 104, arrests 3,350 → 3,366, thefts 1,008 → 786, deaths by violence 251 → 162 (off screen 188 → 91), Station bookings 1,733 (fines 679, nights 596), transfers 440, `stations_full` 198, Precinct full 0, 8 Stations, execs 107 with 102 in the Spire (tier 2); ticks/s (report mean, two 20k at once) 212 → 219. Seed 43: Murders 53 → 51, arrests 3,172 → 3,268, thefts 1,046 → 774, Station bookings 1,657. The same tree with main's table read seed 42 189 Murders and 3,880 arrests (phase 7's numbers exactly), seed 43 54: the Murders drop on seed 42 is the regen not lighting the Sump 2 storm (± 40 % by seed), the thefts drop is the table's `p_steal`.
+
+`law_probe_20k` (seed 42 × 30, the final tree), arrested (reported) by band: 2-128 tiles 0.76 (0.65), 144-324 0.77 (0.57), 376-520 0.79 (0.57), 572-692 0.80 (0.55), all 0.77 (0.60) on 6,533 acts, no `UNPUNISHED` line (phase 7 tree: 0.75, 0.70, 0.74, 0.73, all 0.74 on 7,118; main 0.83 → 0.48): the curve stays flat.
+
+### What the regen costs (for 8b)
+
+`test.py change` on the final tree: fmt, clippy and every binary green but `person`: **7 probes fail with the kept table and pass with main's** (47/47 on fd89cca's table): `probe_hungry_worker_eats_from_the_wage_before_rent` (paid at 18:01, no food before midnight), `probe_gun_never_takes_a_hit_on_kin` (the picked agent bleeds out in a fight on day 3), `probe_worker_makes_one_grocery_run_to_the_nearest_detour_market` (2 runs in the window), `probe_worker_stocks_the_pantry_off_shift` (no grocery run), `probe_suspect_buys_a_beat_on_a_known_witness` (never deals with the witness), `probe_pimp_purse_grows_on_a_pitch_night` (the cut never reaches the purse: OPEN-102's shape), `probe_worker_sleeps_the_night_before_a_shift` (2 of 20 farmers asleep at 09:00). The table feeds the seeded worlds' Statistical ambient, so the regen diverges seed 42 and the probes' picks and their days change; none is diagnosed past that (OPEN-108). The regen is its own commit: reverting it restores the 47.

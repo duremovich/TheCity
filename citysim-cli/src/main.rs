@@ -2110,8 +2110,13 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
             // Jobs & lives phase 7b: the evening's eligible agents (the
             // Statistical evening's tick, `leisure::stat_daily`).
             if just % TICKS_PER_DAY == 1260 {
+                // Lives at work gate (OPEN-106): the adults the Statistical
+                // evening holds, without the bodies (`lod::kept_body`).
                 for id in world.citizens() {
-                    if world.has::<Brain>(id) && citysim::systems::demography::is_adult(&world, id) {
+                    if world.has::<Brain>(id)
+                        && citysim::systems::demography::is_adult(&world, id)
+                        && !citysim::systems::lod::kept_body(&world, id)
+                    {
                         adult_days += 1;
                     }
                 }
@@ -2448,8 +2453,13 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                 }
             }
         }
+        // Lives at work gate (OPEN-106): the evening's own visits, without
+        // the bodies' (they go out on screen in either city, on top of the
+        // rate) and the world-side passes both tiers run (`status_daily`):
+        // `CoinProbe::venue_unmirrored`.
         for (k, v) in &world.probe.venue_paid {
-            *venue_paid.entry(k.clone()).or_default() += v.0;
+            let out = world.probe.venue_unmirrored.get(k).copied().unwrap_or(0);
+            *venue_paid.entry(k.clone()).or_default() += v.0.saturating_sub(out);
         }
     }
     // The five independent rolls are pooled over the two hunger buckets of a
