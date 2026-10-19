@@ -44,6 +44,13 @@ python tools/compare_runs.py a.csv b.csv
   Phase 2 adds the street's lines: run totals (Pitches opened and closed, the gang's cut, sweeps, vendor meals and
   take, day posts offered and filled, the corner's queue, parcels, cab and rickshaw trips and fares, tinker repairs,
   plants seized), the Pitches open by kind, the take a Pitch-day, the cut's share of the take and the fill rate.
+  Lives at work (docs/LIVES_AT_WORK.md § 10) adds a "Lives at work" section (skipped without the `served_visit`
+  column): encounters by kind per staffed shift, the waited share, regulars made, the home and friend's shares of
+  HangOuts, spouse evenings a week per 1,000 adults, empty spots left, visits by purpose, the Camp (buy-outs,
+  break-outs), the civic, street and tower counters, retirements and frailty exits, the leaders' lieutenants and
+  cut, the Stations and the execs' homes, arrests a day and ticks/s. Printed bands, never asserted; the bands with
+  no column are `shadow --lives` (ages by trade, the foreman, leaders' jail-days, guards' travel) and
+  `law_probe_20k` (arrests per witnessed crime by escort distance).
 - `compare_runs.py`: per-column means of two reports with the relative difference, for A/B
   comparisons across seeds or commits.
 - `train_stat_policy.py` (numpy; the learned-policy experiment, `docs/history/EXPERIMENT_LEARNED_STAT_POLICY.md`):

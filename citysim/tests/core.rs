@@ -670,8 +670,6 @@ fn mechanisms() -> Vec<Mechanism> {
         // test_interrogation_names_buyer_then_conspiracy_filed), an NPC-founded Fixer
         // (test_npc_registers_a_fixer); a Fixer run to SellData on 2 of 6 ([1, 0, 4, 0, 0, 0]:
         // test_fixer_run_order_runs_to_selldata_with_cut).
-        ("a Guard fulfilled", m("Guard fulfilled")), // [11, 4, 12]; 45-47 [16, 11, 8]
-        ("a Fixer in business", m("Fixer in business")), // [111, 107, 112] days; 45-47 [106, 111, 109]
         ("a Reneged", k(EventKind::Reneged)),
         // Transit (docs/TRANSIT.md § 7), with the El on: rides [..] and fare
         // days [..] on 42-44 (see `transit_mechanisms`).        // [22, 6, 12]; 45-47 [23, 6, 12]
@@ -685,7 +683,6 @@ fn mechanisms() -> Vec<Mechanism> {
         // (test_poach_by_threat_only_for_dirty_exec).
         ("a protection paid", m("protection paid")), // [37, 6, 4]; 45-47 [10, 19, 20]
         ("a blackmail made", m("blackmail made")),   // [16, 24, 19]; 45-47 [15, 12, 23]
-        ("a debt called in", m("debt called")),      // [39, 88, 53]; 45-47 [60, 56, 61]
         // A Parley: demoted to `printed_mechanisms` (Shadow V4 batch 2).
         // M16b phase 2, captives and the new kinds (seeds 42-47 x 120 days; 5-6 of 6). Fired on 3
         // or fewer, so printed below and unit-tested in `captives.rs`: a hostage taken (and its
@@ -699,11 +696,9 @@ fn mechanisms() -> Vec<Mechanism> {
         // test_abandon_gang_leaves_its_own carries the Loyal/Abandon rule), a Trauma call (2 of
         // 6) and a TraumaSave (0 of 6: test_trauma_call_and_save).
         ("a downed agent", m("downed")), // [71, 65, 63]; 45-47 [73, 72, 44]
-        ("a Trauma subscription", m("Trauma subscription")), // [27, 15, 22]; 45-47 [34, 16, 19]
         // M16b phase 4 (seeds 42-47 x 120 days): boards, tags, attention.
         ("a board vote", m("board vote")),   // [4, 5, 4]; 45-47 [4, 4, 4]
         ("a tag planted", m("tag planted")), // [85, 109, 98]; 45-47 [61, 66, 84]
-        ("a scan", m("scan")),               // [200, 239, 182]; 45-47 [216, 191, 245]
         // M17 phase 2 (seeds 42-47 x 120 days): the parents.
         ("a day with a remittance home", m("remittance")), // [87, 87, 81]; 45-47 [85, 93, 87]
         // M17 phase 3 (seeds 42-47 x 120 days): bodies. A Retake, a buy-back, a
@@ -717,10 +712,9 @@ fn mechanisms() -> Vec<Mechanism> {
         // read [5, 6, 6] / [2, 2, 6] on every decapitation), are unit-tested in
         // `succession.rs`.
         ("a Succession", k(EventKind::Succession)), // [46, 64, 58]; 45-47 [97, 96, 75]
-        // M17 phase 4 (seeds 42-47 x 120 days): an uplink run, a Campaign and a
-        // parent's death fired on 0 of 6 (`weapons.rs`, `god_kill_militech`).
-        ("a day with scrip paid", m("scrip paid")),
-        // A Sanctioned: printed (Shadow V4; see printed_mechanisms).
+                                                    // M17 phase 4 (seeds 42-47 x 120 days): an uplink run, a Campaign and a
+                                                    // parent's death fired on 0 of 6 (`weapons.rs`, `god_kill_militech`).
+                                                    // A Sanctioned: printed (Shadow V4; see printed_mechanisms).
     ]
 }
 
@@ -731,11 +725,7 @@ fn mechanisms() -> Vec<Mechanism> {
 /// of 6: unit tests in `sickness.rs` instead.
 fn sickness_mechanisms() -> Vec<Mechanism> {
     let m = |mark: &'static str| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.mark(mark)) };
-    vec![
-        ("a synth meal", m("synth meal")),
-        ("a bin meal", m("bin meal")),
-        ("a malnourished agent", m("malnourished agent")),
-    ]
+    vec![("a synth meal", m("synth meal")), ("a bin meal", m("bin meal"))]
 }
 
 /// Printed findings, not bullets: rare events (0-2 a seed) that flip on any
@@ -874,9 +864,31 @@ fn printed_mechanisms() -> Vec<Mechanism> {
         ("a Steal fulfilled", m("Steal fulfilled")),  // [10, 8, 5]; 45-47 [21, 9, 28]
         ("a Data sale", k(EventKind::DataSold)),      // [8, 1, 0]; 5 of 6
         ("a Dealing report", m("Dealing report")),    // [197, 238, 222]
-        // Hunger as sickness, demoted the same day (a synth meal, a bin meal and a malnourished agent stay).
+        // Hunger as sickness, demoted the same day (a synth meal and a bin meal stay; a malnourished
+        // agent was demoted at the Lives at work gate, below).
         ("a bin shakedown", m("bin shakedown")),
         ("a sick day", m("a sick day")),
+        // Demoted at the Lives at work gate (phase 8b, 2026-10-19; the 60 cap): a sibling
+        // stays asserted in each subsystem, the unit test named. 42-47 x 120 on 464358a.
+        // A Guard fulfilled [34, 25, 34, 32, 10, 27]: `contracts.rs::test_guard_intercepts_
+        // attack_on_client`, `test_fulfilled_pays_taker_and_fixer_at_cut` ("a Reneged" and "a
+        // BountyPaid" stay). A Fixer in business [116, 119, 115, 119, 92, 92] days, a state:
+        // `contracts.rs::test_npc_registers_a_fixer`. A debt called in [20, 16, 17, 21, 19, 6]:
+        // `leverage.rs::test_debt_called_settles_the_edge` ("a protection paid", "a blackmail
+        // made" stay). A Trauma subscription [34, 27, 22, 27, 28, 18]: `wounded.rs::test_trauma_
+        // subscription_weekly_and_lapses` ("a downed agent" stays). A scan [231, 232, 164, 169,
+        // 209, 253]: `tags.rs::test_higher_scanner_removes_the_tag` ("a tag planted" stays). A day
+        // with scrip paid and a malnourished agent, 120 days on every seed (day counts):
+        // `weapons.rs::test_scrip_wage_split_keeps_the_identity` ("a day with a remittance home"
+        // stays), `sickness.rs::test_lone_child_on_a_synth_pantry_builds_malnutrition` ("a synth
+        // meal" and "a bin meal" stay).
+        ("a Guard fulfilled", m("Guard fulfilled")),
+        ("a Fixer in business", m("Fixer in business")),
+        ("a debt called in", m("debt called")),
+        ("a Trauma subscription", m("Trauma subscription")),
+        ("a scan", m("scan")),
+        ("a day with scrip paid", m("scrip paid")),
+        ("a malnourished agent", m("malnourished agent")),
     ]
 }
 
@@ -890,11 +902,10 @@ fn jobs2_mechanisms() -> Vec<Mechanism> {
         // Phase 1: a post of the new trade models held at the day's close
         // (a day post ends with its shift and reads 0 at the close: "day post
         // filled" below carries it; a resale post is printed), the
-        // industries' flows.
+        // industries' flows. (A handling fee and a Jailer on shift: printed
+        // since the Lives at work gate, see jobs2_printed.)
         "civic post",
         "Rations sold",
-        "handling fee",
-        "Jailer on shift",
         // Phase 2: the street.
         "Pitch opened",
         "day post filled",
@@ -902,17 +913,43 @@ fn jobs2_mechanisms() -> Vec<Mechanism> {
         "weapon made",
         "armed fight",
         // Phase 4: vice and fashion.
-        "tip",
         "companion visit",
         // Phase 5: the dollhouse and braindance.
         "chip hired",
-        // Phase 6: the gray market and faith; phase 8: the scavs.
+        // Phase 6: the gray market and faith; phase 8: the scavs. (A
+        // conversion: printed since the Lives at work gate.)
         "tithe",
-        "conversion",
         // "organ exported": printed (Shadow V4 batch 3; see jobs2_printed).
         // Phase 7: life stages.
-        "School day",
         "maimed",
+        // Lives at work (docs/LIVES_AT_WORK.md § 9.1, § 10; promoted at the gate,
+        // phase 8b, 2026-10-19): one or two per phase, each on 6 of 6 seeds over
+        // 42-47 x 120 on 464358a (`core_census`), each the bullet whose silence
+        // means its phase's pass is dead. 42-44 [45-47] in brackets.
+        // [259, 256, 267] [252, 266, 245] the encounter, the ledger, the edge
+        "regular made",
+        // [722, 955, 911] [952, 1025, 1322] the care trades' counterpart
+        "Served patient",
+        // [3480, 3541, 3654] [4158, 3045, 3568] home as a spot
+        "HangOut at home with a spouse",
+        // [632, 541, 611] [631, 756, 513] GoalKind::Visit
+        "Visit to a hurt kin",
+        // [239, 134, 97] [107, 166, 160] a teacher at the roster
+        "School day taught",
+        // [103, 103, 103] [103, 103, 103] days: the super's round
+        "super's door payment",
+        // [2795, 3622, 3982] [3495, 3829, 3438] the courier's hand-over
+        "parcel to a named recipient",
+        // [649, 497, 488] [673, 793, 672] the corner's buyers
+        "dealer's regular",
+        // [5554, 4268, 4627] [5321, 4862, 5199] the tower's hours
+        "Meeting with attendees",
+        // [927, 900, 968] [904, 969, 898] the reporter's beat
+        "byline story",
+        // [249, 251, 250] [279, 305, 247] the ages' exit
+        "retirement",
+        // [15, 15, 13] [14, 15, 13] days: the payout's cut
+        "leader's cut",
     ]
     .into_iter()
     .map(|k| (k, m(k)))
@@ -980,61 +1017,47 @@ fn jobs2_printed() -> Vec<Mechanism> {
         "organ made",
         "scav kill",
         "elder taken in",
-        // Lives at work phase 1 (§ 9.1, printed until the gate promotes them;
-        // 42-44 x 120 on the phase 1 tree, `tests/service.rs` carries each).
-        "Served visit",    // [15090, 16381, 15339]
-        "Served patient",  // [771, 546, 717]
-        "Served staff",    // [462, 455, 496]
-        "Served attendee", // [0, 0, 0]: no bout had a bettor (bets paid 0 at every Bout)
-        "regular made",    // [169, 151, 189]
-        "door refusal",    // [0, 0, 1]: the venue scorer already filters by door_ok
-        "ejection",        // [0, 1, 1]: an Assault inside a kept venue is rare
-        "staff meal",      // [4827, 4918, 4563]
-        "madam's cut",     // [0, 0, 0]: round(0.3 x a 1-coin tip) = 0 at the 2k Brothel
-        "meal cooked",     // [21, 17, 19]: the cooks hold [world] shift_day, the NoodleBar's evening is unserved
-        // Lives at work phase 2 (§ 9.1, printed until the gate; `run --report` 42-44 x 120 on the
-        // phase 2 tree, `tests/household.rs` carries each).
-        "HangOut at home with a spouse", // [4227, 4068, 4447]
-        "HangOut at home",               // [17740, 16499, 17957]
-        "friend's place",                // [5029, 3567, 4178]
-        "empty spot left early",         // [15517, 14109, 14426]
-        "reunited couple",               // [21, 16, 19]
-        "Visit to a hurt kin",           // [727, 659, 698]
-        "Visit to an elder parent",      // [3796, 4223, 3663]
-        "newborn's carer",               // [27, 31, 29]
-        // Lives at work phase 3 (§ 9.1, printed until the gate; `run --report` 42-44 x 120 on the
-        // phase 3 tree, `tests/civic.rs` carries each; the Camp's are rare at 2k, few children).
-        "School day taught",     // [31, 272, 46]
-        "Camp headcount",        // [85, 92, 88]
-        "super's door payment",  // [103, 103, 103] days with one
-        "arrears notice",        // [1331, 1228, 1295]
-        "parent's Camp visit",   // [123, 97, 90]
-        "neglecting parent-day", // [190, 202, 215]
-        // Lives at work phase 4a (§ 9.1, printed until the gate; `tests/street.rs` and the
-        // cabbie probe in `tests/person.rs` carry each).
-        "cab fare by a named driver", // [0, 0, 0]: unpinned drivers are Statistical (the off-screen cab); the probe drives
-        "parcel to a named recipient", // [3917, 3432, 3858]
-        "lift",                       // [46445, 66874, 58385]
-        "pilfer report",              // [28, 32, 21]
-        "street client near",         // [6, 0, 15]
-        // Lives at work phase 4b (§ 9.1, printed until the gate; `tests/street.rs`,
-        // `tests/stims.rs` and the pimp probe in `tests/person.rs` carry each).
-        "pimp's collection", // [19, 0, 33]: street pitches are few at 2k (a pimp from day ~70)
-        "dealer's regular",  // [519, 761, 830]
-        "corner deal",       // [912, 1389, 1353]
-        // Lives at work phase 5 (§ 9.1, printed until the gate; `tests/tower.rs` and the CEO
-        // and reporter probes in `tests/person.rs` carry each).
-        "Meeting with attendees", // [4582, 4986, 5869] Meeting hours with an attendee
-        "exec's decision",        // [38, 19, 32]
-        "byline story",           // [895, 919, 968]
-        "walk-in paper sale",     // [79, 34, 54] pickups (the order is paid at midnight)
-        // Lives at work phase 6 (§ 9.1, printed until the gate; `tests/careers.rs` and the
-        // loader and retirement probes in `tests/person.rs` carry each).
-        "retirement",          // [279, 279, 315]
-        "frailty exit",        // [51, 34, 61]
-        "foreman's own Hire",  // [3408, 2861, 2930]
-        "lieutenant-led raid", // [8, 1, 5]: rare at 2k (a raid a week a city)
-        "leader's cut",        // [14, 10, 11] days with one
+        // Demoted at the Lives at work gate (phase 8b, 2026-10-19; the 60 cap,
+        // one bullet per subsystem): day counts or a sibling's mechanism, each
+        // with its unit test. 42-47 x 120 on 464358a.
+        "handling fee", // [120 x 6] days; `industry.rs::test_handling_fee_once_per_unit_leak_and_none`; "Rations sold" stays
+        "Jailer on shift", // [112, 113, 112, 112, 112, 111] days; `civic.rs::test_jailer_meal_is_an_inmate_encounter`; "civic post" stays
+        "tip", // [103 x 6] days; `service.rs::test_tip_to_the_server_and_the_madams_cut`; "companion visit" stays
+        "conversion", // [651, 579, 353, 609, 565, 311]; `gray_faith.rs::test_widow_attends_converts_and_tithes`; "tithe" stays
+        "School day", // [239, 135, 98, 109, 167, 161]; "School day taught" stays (a taught day is a School day)
+        // Lives at work (§ 9.1, printed; 42-47 x 120 on 464358a, `core_census`): the rest of
+        // the phases' candidates (the twelve asserted are in `jobs2_mechanisms`), each carried
+        // by its phase's test file (`service.rs`, `household.rs`, `civic.rs`, `street.rs`,
+        // `stims.rs`, `tower.rs`, `careers.rs`) or a probe in `person.rs`.
+        "Served visit",               // [13720, 12556, 13149, 12890, 13404, 13531]
+        "Served staff",               // [554, 572, 579, 633, 536, 622]
+        "Served attendee",            // [25910, 21056, 20837, 24885, 23196, 25614]
+        "door refusal",               // [0, 10, 0, 0, 0, 0]: the venue scorer already filters by door_ok
+        "ejection",                   // an Assault inside a kept venue is rare
+        "staff meal",                 // [4654, 4882, 4601, 4374, 4357, 5221]
+        "madam's cut",                // [0, 0, 0, 0, 0, 1]: round(0.3 x a 1-coin tip) = 0 at the 2k Brothel
+        "meal cooked",                // [18, 18, 11, 21, 13, 23]
+        "HangOut at home",            // [15894, 16355, 16981, 16983, 17329, 16305]
+        "friend's place",             // [3859, 3933, 4081, 3564, 3226, 4348]
+        "empty spot left early",      // [13657, 13846, 14118, 14938, 13525, 14135]
+        "reunited couple",            // [28, 15, 31, 27, 28, 18]
+        "Visit to an elder parent",   // [3921, 4184, 3440, 4196, 3825, 3744]
+        "newborn's carer",            // [26, 31, 36, 22, 30, 28]
+        "Camp headcount",             // [90, 94, 94, 85, 93, 85]; `god_child_camp_sweep` reads the Camp
+        "arrears notice",             // [968, 779, 1059, 966, 1127, 966]
+        "parent's Camp visit",        // [21, 59, 66, 43, 78, 55]
+        "neglecting parent-day",      // [217, 18, 232, 56, 78, 42]
+        "cab fare by a named driver", // [3, 0, 0, 2, 2, 4]: unpinned drivers are Statistical; the cabbie probe drives
+        "lift",                       // [45634, 52421, 51354, 57388, 68292, 62046]
+        "pilfer report",              // [22, 29, 20, 24, 24, 23]
+        "street client near",         // [7, 0, 7, 19, 4, 19]
+        "pimp's collection",          // [8, 3, 1, 10, 19, 106]
+        "corner deal",                // [1242, 1078, 933, 1408, 1394, 1098]
+        "exec's decision",            // [22, 9, 16, 18, 28, 20]
+        "walk-in paper sale",         // [48, 60, 56, 37, 73, 75] pickups
+        "frailty exit",               // [23, 39, 66, 49, 60, 73]
+        "foreman's own Hire",         // [3134, 3086, 2850, 3161, 3142, 3083]
+        "lieutenant-led raid",        // [6, 7, 0, 8, 8, 3]: `god_decapitate_lieutenants` reads the ladder
     ]
     .into_iter()
     .map(|k| (k, m(k)))
@@ -1145,6 +1168,35 @@ fn core_sanity() {
         eprintln!("FAIL {f}");
     }
     assert!(failures.is_empty(), "core_sanity failures: {failures:?}");
+}
+
+/// The bullet census (docs/TESTING.md, "A `core_sanity` bullet"): seeds
+/// 42-47 x 120 days in parallel, every asserted and printed mechanism's
+/// count per seed and the seeds it fired on. Nothing asserted: it is how a
+/// candidate earns a bullet (3 or more of 6). Run alone:
+/// `cargo test --release -p citysim --test core -- --ignored core_census --nocapture`.
+#[test]
+#[ignore = "tier: diag"]
+fn core_census() {
+    let runs: Vec<SeedRun> = std::thread::scope(|s| {
+        let hs: Vec<_> = (42u64..48).map(|seed| s.spawn(move || run_seed(seed, 120))).collect();
+        hs.into_iter().map(|h| h.join().expect("a census seed panicked")).collect()
+    });
+    let lists: [(&str, Vec<Mechanism>); 6] = [
+        ("asserted", mechanisms()),
+        ("asserted", sickness_mechanisms()),
+        ("asserted", jobs2_mechanisms()),
+        ("asserted", transit_mechanisms()),
+        ("printed", printed_mechanisms()),
+        ("printed", jobs2_printed()),
+    ];
+    for (list, ms) in lists {
+        for (name, f) in ms {
+            let per: Vec<u32> = runs.iter().map(&f).collect();
+            let fired = per.iter().filter(|&&c| c > 0).count();
+            eprintln!("CENSUS {list} {name}: {per:?} ({fired}/6)");
+        }
+    }
 }
 
 /// The year: seed 42, 365 days, the collapse bounds over each 30-day

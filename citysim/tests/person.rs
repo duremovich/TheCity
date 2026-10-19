@@ -13,8 +13,11 @@ use citysim::{
     Role, Wallet, World, TICKS_PER_DAY, TICKS_PER_HOUR,
 };
 
+/// The shipped seed-42 city at tick 0: built once per test process and
+/// cloned (the change tier's budget, 2026-10-19: ~40 probes each built it).
 fn world() -> World {
-    World::new(42, Config::load())
+    static BASE: std::sync::OnceLock<World> = std::sync::OnceLock::new();
+    BASE.get_or_init(|| World::new(42, Config::load())).clone()
 }
 
 fn pin(w: &mut World, id: EntityId) {
@@ -308,8 +311,7 @@ fn probe_guard_eats_on_a_long_shift() {
 /// on the moved city, hired the same night; the stimulus is two posts.
 #[test]
 fn probe_laid_off_farm_worker_finds_work_within_14_days() {
-    let cfg = Config::load();
-    let mut w = World::new(42, cfg);
+    let mut w = world();
     // Day 20, a minute to midnight: the layoff lands just before the
     // midnight job search, as `wages::staff`'s do. Shadow V4 batch 3: or the
     // first later day (to 40) with two posts open at that minute (the moved
@@ -577,6 +579,12 @@ fn probe_gun_never_takes_a_hit_on_kin() {
 /// (the stimulus: every other memory of it cleared, the broker's and the
 /// gun's included). Returns the world and (buyer, target, gun).
 fn quiet_buyer() -> (World, EntityId, EntityId, EntityId) {
+    // Built once per test process for its two probes (the change tier's budget, 2026-10-19).
+    static QUIET: std::sync::OnceLock<(World, EntityId, EntityId, EntityId)> = std::sync::OnceLock::new();
+    QUIET.get_or_init(build_quiet_buyer).clone()
+}
+
+fn build_quiet_buyer() -> (World, EntityId, EntityId, EntityId) {
     let mut w = world();
     w.run_ticks(2 * TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
     let civ = civilians(&w);
@@ -763,10 +771,12 @@ fn probe_starving_eats_before_spending_or_sleeping() {
     let mut w = world();
     w.run_ticks(2 * TICKS_PER_DAY + 18 * TICKS_PER_HOUR);
     let picks: Vec<EntityId> = civilians(&w).into_iter().step_by(37).take(30).collect();
-    let mut bad = Vec::new();
-    for &a in &picks {
-        for extra in [-1i64, 60] {
-            let mut w = w.clone();
+    // The sixty runs over six threads (the change tier's budget, 2026-10-19);
+    // each a clone of the same day-2 city, as before.
+    let base = &w;
+    let one = move |a: EntityId, extra: i64| {
+        {
+            let mut w = base.clone();
             pin(&mut w, a);
             let price = citysim::systems::life::meal_price(&w, a);
             set_hungry(&mut w, a, 0.08, (price + extra).max(0));
@@ -807,10 +817,19 @@ fn probe_starving_eats_before_spending_or_sleeping() {
             let rich_unfed = extra > 0 && first_eat.is_none();
             if spent_first || rich_unfed {
                 eprintln!("agent {} {extra:+}: {log:?}", a.index);
-                bad.push((a.index, extra));
+                return Some((a.index, extra));
             }
         }
-    }
+        None
+    };
+    let runs: Vec<(EntityId, i64)> = picks.iter().flat_map(|&a| [(a, -1i64), (a, 60)]).collect();
+    let bad: Vec<_> = std::thread::scope(|s| {
+        let hs: Vec<_> = runs
+            .chunks(10)
+            .map(|ch| s.spawn(move || ch.iter().filter_map(|&(a, extra)| one(a, extra)).collect::<Vec<_>>()))
+            .collect();
+        hs.into_iter().flat_map(|h| h.join().expect("a starving run")).collect()
+    });
     assert!(
         bad.is_empty(),
         "{} of {} starving runs spent first or went unfed with coins: {bad:?}",
@@ -1040,8 +1059,7 @@ fn probe_far_worker_with_one_rent_moves_near_work() {
 /// have outweighed the walk.
 #[test]
 fn probe_near_candidate_hired_before_a_far_skilled_one() {
-    let cfg = Config::load();
-    let mut w = World::new(42, cfg);
+    let mut w = world();
     w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
     let farm = *w.buildings_of_kind(citysim::BuildingKind::Farm).first().expect("a Farm");
     let door = w.comp::<Building>(farm).unwrap().door;
@@ -1147,8 +1165,7 @@ fn probe_city_grows_homes_toward_jobs() {
 /// the Farm the new Homes served on day 8, flipped seed 42).
 #[test]
 fn probe_working_couple_moves_near_work() {
-    let cfg = Config::load();
-    let mut w = World::new(42, cfg);
+    let mut w = world();
     w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
     let cap = w.config.life.commute_move_ticks;
     let work_of = |w: &World, a: EntityId| {
@@ -1247,8 +1264,7 @@ fn probe_working_couple_moves_near_work() {
 /// above it pays the build out of its purse.
 #[test]
 fn probe_housing_toward_jobs_is_paid() {
-    let cfg = Config::load();
-    let mut w = World::new(42, cfg);
+    let mut w = world();
     w.run_ticks(TICKS_PER_HOUR);
     let farm = *w.buildings_of_kind(citysim::BuildingKind::Farm).first().expect("a Farm");
     if let Some(cc) = w.comp::<Building>(farm).and_then(|b| b.owner).and_then(|o| w.comp_mut::<citysim::Corp>(o)) {
@@ -1484,8 +1500,12 @@ fn probe_sweeper_stays_near_its_beat() {
             .collect();
         (v.iter().sum::<u64>() as f64 / v.len().max(1) as f64, v.len())
     };
-    let (on, n_on) = beat_walk(true);
-    let (off, n_off) = beat_walk(false);
+    // The two cities side by side (the change tier's budget, 2026-10-19).
+    let ((on, n_on), (off, n_off)) = std::thread::scope(|s| {
+        let on = s.spawn(|| beat_walk(true));
+        let off = s.spawn(|| beat_walk(false));
+        (on.join().expect("the near city"), off.join().expect("the far city"))
+    });
     eprintln!(
         "sweepers' mean Home-to-beat walk on day 15: items 8-10 on {on:.0} ticks ({n_on}), off {off:.0} ({n_off})"
     );
@@ -1500,8 +1520,7 @@ fn probe_sweeper_stays_near_its_beat() {
 fn probe_evicted_worker_rehouses_on_the_first_rent() {
     // Jobs & lives phase 8's gate: the pin to the street-off city is gone
     // (on the Jobs & lives city the evicted Farmer keeps the job).
-    let cfg = Config::load();
-    let mut w = World::new(42, cfg);
+    let mut w = world();
     w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
     let a = civilians(&w)
         .into_iter()
@@ -1896,20 +1915,14 @@ fn bought_by(w: &World, buyer: EntityId) -> Vec<citysim::contract::Contract> {
     w.contracts.values().filter(|c| c.buyer == Some(buyer) && !c.motive.is_none()).cloned().collect()
 }
 
-/// A married civilian with a Fixer in reach of home, her husband killed by
-/// a stranger (day 10, 12:00); her grudge on the killer is lethal, and her
-/// brother (a Family edge, loyal, lawless) shares it. She holds 40 coins,
-/// he 200 (with 40 each no want formed in 7 days: the price moved 42-73
-/// while both wallets ran down). The killer is the stranger with the
-/// fewest defenders about him. `strong`: she is the stronger and the
-/// braver; else the killer is. Returns the world, the widow and the killer.
-fn widow(strong: bool) -> (World, EntityId, EntityId) {
-    use citysim::systems::grudges;
-    use citysim::word::GrudgeCause;
+/// `widow`'s city to the pick: (the world, the civilians, the widow, her
+/// husband, his killer).
+type WidowPick = (World, Vec<EntityId>, EntityId, EntityId, EntityId);
+
+fn widow_pick() -> WidowPick {
     // Jobs & lives phase 8's gate: the pin to the pre-milestone city is gone
     // (on the Jobs & lives city the pick commissions the Hit again).
-    let c = Config::load();
-    let mut w = World::new(42, c);
+    let mut w = world();
     // Day 10: the Fixers' books have filled (on day 2 too few regulars
     // would take a Hit at any price, and it priced at the old quote).
     w.run_ticks(10 * TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
@@ -1955,6 +1968,24 @@ fn widow(strong: bool) -> (World, EntityId, EntityId) {
         got = pick(&w);
     }
     let (civ, her, husband, killer) = got.expect("a married civilian near a Fixer who can pay a Hit");
+    (w, civ, her, husband, killer)
+}
+
+/// A married civilian with a Fixer in reach of home, her husband killed by
+/// a stranger (day 10, 12:00); her grudge on the killer is lethal, and her
+/// brother (a Family edge, loyal, lawless) shares it. She holds 40 coins,
+/// he 200 (with 40 each no want formed in 7 days: the price moved 42-73
+/// while both wallets ran down). The killer is the stranger with the
+/// fewest defenders about him. `strong`: she is the stronger and the
+/// braver; else the killer is. Returns the world, the widow and the killer.
+fn widow(strong: bool) -> (World, EntityId, EntityId) {
+    use citysim::systems::grudges;
+    use citysim::word::GrudgeCause;
+    // The city to the pick, built once per test process for both widows
+    // (the change tier's budget, 2026-10-19).
+    static PICKED: std::sync::OnceLock<WidowPick> = std::sync::OnceLock::new();
+    let (w, civ, her, husband, killer) = PICKED.get_or_init(widow_pick).clone();
+    let mut w = w;
     let near = |w: &World, x: EntityId, y: EntityId| w.edge(x, y).is_some();
     let brother = civ
         .iter()
@@ -2528,6 +2559,12 @@ fn taken_child(w: &mut World) -> (EntityId, EntityId, EntityId, EntityId) {
 #[test]
 fn probe_parent_with_the_fee_buys_the_child_out_within_fourteen_days() {
     let base = world_at_day2();
+    // Control: a broke parent visits (its city on its own thread, the same
+    // day-2 world: the change tier's budget, 2026-10-19).
+    let control = {
+        let c = base.clone();
+        std::thread::spawn(move || broke_parent_visits(c))
+    };
     // The harsh city: a pick abducted, harvested and killed on day 13 (seed
     // 42's first pair on the civic city) is tried again with the next pair.
     let mut tried = 0;
@@ -2588,8 +2625,15 @@ fn probe_parent_with_the_fee_buys_the_child_out_within_fourteen_days() {
         camp.index
     );
     assert!(bought.is_some() && paid, "the child was not bought out within 14 days");
-    // Control: a broke parent visits.
-    let mut c = world_at_day2();
+    let (stayed, met) = control.join().expect("the control's city");
+    assert!(stayed, "the broke parent did not buy out");
+    assert!(met, "the broke parent visited within 14 days");
+}
+
+/// `probe_parent_with_the_fee_buys_the_child_out_within_fourteen_days`'s
+/// control, on its own thread: a broke parent (10 coins, an empty pantry)
+/// whose child was taken on day 2 visits. (Did the child stay, did he meet it.)
+fn broke_parent_visits(mut c: World) -> (bool, bool) {
     let (q, child2, h2, camp2) = taken_child(&mut c);
     pin(&mut c, q);
     for _ in 0..14 {
@@ -2612,8 +2656,7 @@ fn probe_parent_with_the_fee_buys_the_child_out_within_fourteen_days() {
         home(&c, child2).map(|b| b.index),
         camp2.index
     );
-    assert_ne!(home(&c, child2), Some(h2), "the broke parent did not buy out");
-    assert!(met.is_some(), "the broke parent visited within 14 days");
+    (home(&c, child2) != Some(h2), met.is_some())
 }
 
 /// § 2.2 (the phase's acceptance): a super walks fewer than 4 hours of his
@@ -2657,10 +2700,16 @@ fn probe_super_walks_under_four_hours_a_shift() {
         );
         (walking, on_shift)
     }
-    let (on, _) = walked(world(), "civic on");
-    let mut cfg = Config::load();
-    cfg.strip_civic();
-    let (off, _) = walked(World::new(42, cfg), "civic off (control)");
+    // The two cities side by side (the change tier's budget, 2026-10-19).
+    let ((on, _), (off, _)) = std::thread::scope(|sc| {
+        let on = sc.spawn(|| walked(world(), "civic on"));
+        let off = sc.spawn(|| {
+            let mut cfg = Config::load();
+            cfg.strip_civic();
+            walked(World::new(42, cfg), "civic off (control)")
+        });
+        (on.join().expect("the civic city"), off.join().expect("the control"))
+    });
     eprintln!("super's walking a shift: on {on} min, off {off} min");
     assert!(on < 4 * 60, "the super walked {on} minutes of the shift");
 }
@@ -3114,4 +3163,110 @@ fn probe_sixty_four_with_savings_retires() {
             assert!(w.has::<Job>(a) && !retired, "control: works on");
         }
     }
+}
+
+/// Lives at work § 10 ("a regular"): one drink a day at a Bar near his
+/// Home, three days running, from `hour` (the stimulus: the purse, the want, and the
+/// walk and the `Enjoy` that `leisure::unwind_plan` installs, set again
+/// until he has been served that day; everything else is his own). With
+/// `same`, one Bar; else three different Bars. Returns the Bar staff who
+/// served him by day, and those of them he now knows as Acquaintances.
+fn bar_regular(same: bool, hour: u64) -> (Vec<(u64, EntityId)>, Vec<EntityId>) {
+    use citysim::components::ActionInstance;
+    use citysim::systems::service;
+    let mut w = world();
+    w.run_ticks(TICKS_PER_DAY);
+    let mut bars: Vec<EntityId> = w.buildings_of_kind(citysim::BuildingKind::Bar).to_vec();
+    assert!(bars.len() >= 3, "three Bars at seed ({})", bars.len());
+    let staff: Vec<EntityId> = bars.iter().flat_map(|&b| w.staff_of(b).to_vec()).collect();
+    let a = w
+        .citizens()
+        .into_iter()
+        .filter(|&a| law::living(&w, a) && demography::is_adult(&w, a) && w.has::<Brain>(a))
+        .filter(|&a| !w.has::<Job>(a) && w.gang_of(a).is_none() && !w.has::<citysim::Sentence>(a))
+        .filter(|&a| home(&w, a).is_some() && !staff.contains(&a))
+        .find(|&a| staff.iter().all(|&s| w.edge(a, s).is_none()))
+        .expect("a jobless housed adult who knows no bar staff");
+    // The nearest Bars to his Home first (a walk, not a trek).
+    let door = |b: EntityId| w.comp::<Building>(b).map(|x| x.door).expect("a door");
+    let at = door(home(&w, a).expect("home"));
+    bars.sort_by_key(|&b| (door(b).manhattan(at), b));
+    let served_today = |w: &World, bar: EntityId, d: u64| -> Vec<EntityId> {
+        w.staff_of(bar)
+            .iter()
+            .copied()
+            .filter(|&s| service::regulars_of(w, s).iter().any(|r| r.who == a && u64::from(r.last_day) == d))
+            .collect()
+    };
+    let mut served_by: Vec<(u64, EntityId)> = Vec::new();
+    for d in 1..=3u64 {
+        let bar = if same { bars[0] } else { bars[(d - 1) as usize] };
+        run_to(&mut w, a, d * TICKS_PER_DAY + hour * TICKS_PER_HOUR, |_| {});
+        w.comp_mut::<Wallet>(a).expect("wallet").coins = 200;
+        if let Some(n) = w.comp_mut::<Needs>(a) {
+            n.fun = 0.0;
+            n.hunger = 1.0;
+            n.energy = 1.0;
+        }
+        let end = w.tick + 6 * TICKS_PER_HOUR;
+        while w.tick < end && served_today(&w, bar, d).is_empty() {
+            let now = w.tick;
+            let b = w.comp_mut::<Brain>(a).expect("brain");
+            if b.plan.as_ref().is_none_or(|p| p.target != Some(bar)) {
+                b.plan = Some(citysim::Plan {
+                    goal: citysim::GoalKind::Unwind,
+                    target: Some(bar),
+                    steps: vec![
+                        ActionInstance {
+                            action: ActionKind::GoTo(citysim::LocationKey::Seller),
+                            target: Some(bar),
+                            tile: None,
+                        },
+                        ActionInstance { action: ActionKind::Enjoy, target: Some(bar), tile: None },
+                    ],
+                    started_tick: now,
+                });
+                b.plan_step = 0;
+                b.exec = citysim::exec::ExecState::Idle;
+            }
+            run_to(&mut w, a, now + 1, |_| {});
+        }
+        let by = served_today(&w, bar, d);
+        eprintln!(
+            "{} day {d} from {hour}:00: {} at {} served by {:?} (servers on duty {})",
+            if same { "one Bar" } else { "three Bars" },
+            w.name_of(a),
+            w.name_of(bar),
+            by.iter().map(|&s| w.name_of(s)).collect::<Vec<_>>(),
+            service::servers_on_duty(&w, bar, citysim::components::ServeKind::Visit).len()
+        );
+        served_by.extend(by.into_iter().map(|s| (d, s)));
+    }
+    let known: Vec<EntityId> = served_by
+        .iter()
+        .map(|&(_, s)| s)
+        .filter(|&s| w.edge(a, s).is_some_and(|e| e.kind == RelKind::Acquaintance))
+        .collect();
+    (served_by, known)
+}
+
+/// Lives at work § 10 ("a regular"), in the Bar's served hours (its
+/// bartenders hold `[world] shift_day`, 09-18; the evening drink is
+/// unserved): a Full agent who drinks at the same Bar three days running
+/// is an Acquaintance of the bartender who served him (`[service]
+/// regular_after` 3 within `regular_days`). Control: three different Bars,
+/// a day each: served each day, no edge. The gap (OPEN-111): the server is
+/// a fresh hash each hour among those on duty (D6) and the ledger is the
+/// server's, so with five bartenders on the day shift the three drinks go
+/// to three bartenders (seed 42: Cipher Reyes, Quill Varley, Leopold
+/// Adeyemi) and no regular forms.
+#[test]
+#[ignore = "gap: OPEN-111"]
+fn probe_regular_at_one_bar_meets_its_bartender() {
+    let (served, known) = bar_regular(true, 10);
+    assert!(served.len() >= 3, "served on each of the three days ({served:?})");
+    assert!(!known.is_empty(), "three days at one Bar: an Acquaintance of its bartender");
+    let (served, known) = bar_regular(false, 10);
+    assert!(served.len() >= 3, "control: served at each Bar ({served:?})");
+    assert!(known.is_empty(), "control: a day at each of three Bars makes no regular");
 }

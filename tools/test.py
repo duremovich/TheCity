@@ -62,6 +62,7 @@ TIERS = {
     "milestone": [
         ("parity", "lod", ["--ignored", "test_full_vs_statistical_within_15pct", "--nocapture"]),
         ("core_20k", "core", ["--ignored", "core_20k", "--nocapture"]),
+        ("god_20k", "god_20k", ["--ignored", "--nocapture"]),
     ],
 }
 

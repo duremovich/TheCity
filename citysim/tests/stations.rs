@@ -266,7 +266,8 @@ fn test_off_cities_write_nothing() {
             c.life.exec_home_spare = 0.0;
         },
     ];
-    for (k, edit) in edits.into_iter().enumerate() {
+    // The three cities side by side (the change tier's budget, 2026-10-19).
+    let case = |k: usize, edit: fn(&mut Config)| {
         let mut w = common::world_with(|c| {
             c.law.station_min_tiles = 1;
             edit(c);
@@ -294,7 +295,13 @@ fn test_off_cities_write_nothing() {
         if sp {
             assert!(!text.contains("exec_home"), "case {k}");
         }
-    }
+    };
+    std::thread::scope(|s| {
+        let hs: Vec<_> = edits.into_iter().enumerate().map(|(k, edit)| s.spawn(move || case(k, edit))).collect();
+        for h in hs {
+            h.join().expect("an off city");
+        }
+    });
     let on = ron::to_string(&Config::load()).expect("config");
     assert!(on.contains("station_cells") && on.contains("exec_home_tier"), "the on config holds them");
 }

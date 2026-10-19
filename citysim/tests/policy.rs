@@ -98,16 +98,30 @@ fn test_dole_lapses_when_the_treasury_runs_dry() {
         w.push_command(PlayerCommand::SetSafetyNet(true));
         w.apply_commands();
     }
-    let mut lapse_day = None;
-    for day in 0..lapse + 3 {
-        dry.push_command(PlayerCommand::SetTreasury(-50_000));
-        control.push_command(PlayerCommand::SetTreasury(1_000_000));
-        dry.run_ticks(TICKS_PER_DAY);
-        control.run_ticks(TICKS_PER_DAY);
-        if lapse_day.is_none() && lapsed(&dry) > 0 {
-            lapse_day = Some(day);
-        }
-    }
+    // The dry city and the control side by side (the change tier's budget,
+    // 2026-10-19); each its own daily Treasury pin, as before.
+    let (dry, control, lapse_day) = std::thread::scope(|s| {
+        let d = s.spawn(move || {
+            let mut lapse_day = None;
+            for day in 0..lapse + 3 {
+                dry.push_command(PlayerCommand::SetTreasury(-50_000));
+                dry.run_ticks(TICKS_PER_DAY);
+                if lapse_day.is_none() && lapsed(&dry) > 0 {
+                    lapse_day = Some(day);
+                }
+            }
+            (dry, lapse_day)
+        });
+        let c = s.spawn(move || {
+            for _ in 0..lapse + 3 {
+                control.push_command(PlayerCommand::SetTreasury(1_000_000));
+                control.run_ticks(TICKS_PER_DAY);
+            }
+            control
+        });
+        let (dry, lapse_day) = d.join().expect("the dry city");
+        (dry, c.join().expect("the control"), lapse_day)
+    });
     let day = lapse_day.expect("the net lapsed");
     assert!(day + 1 >= lapse && day < lapse + 1, "after {lapse} dry days (on {day})");
     assert_eq!(lapsed(&dry), 1, "once");

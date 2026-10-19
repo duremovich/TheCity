@@ -274,7 +274,8 @@ fn test_off_cities_write_nothing() {
             c.gangs.strip_lieutenants();
         },
     ];
-    for (k, edit) in edits.into_iter().enumerate() {
+    // The three cities side by side (the change tier's budget, 2026-10-19).
+    let case = |k: usize, edit: fn(&mut Config)| {
         let mut w = common::world_with(edit);
         let (car, lts) = (k != 1, k != 0);
         w.run_ticks(3 * TICKS_PER_DAY);
@@ -315,7 +316,13 @@ fn test_off_cities_write_nothing() {
         if lts {
             assert!(!save.contains("raids_led"), "case {k}");
         }
-    }
+    };
+    std::thread::scope(|s| {
+        let hs: Vec<_> = edits.into_iter().enumerate().map(|(k, edit)| s.spawn(move || case(k, edit))).collect();
+        for h in hs {
+            h.join().expect("an off city");
+        }
+    });
     // The on config holds them.
     let on = Config::load();
     assert!(on.careers.enabled && on.gangs.lieutenants && !on.roles.is_empty());
