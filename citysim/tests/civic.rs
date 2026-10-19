@@ -190,13 +190,17 @@ fn test_tied_super_moves_in_and_pays_no_rent() {
     let mut w = city();
     let (sup, post) = worker(&w, "super");
     let owner = w.owner_of(post).expect("a landlord");
-    // Housed with another landlord (or nowhere).
+    // Housed with another landlord (or nowhere), in a Block that no
+    // co-resident holds tied (that household stays put by design; on the
+    // 8d fix round's stat table the first Block with room housed a super
+    // of its own landlord).
     let other = w
         .buildings_of_kind(BuildingKind::Home)
         .iter()
         .copied()
         .find(|&b| {
             w.owner_of(b) != Some(owner)
+                && !w.residents_of(b).iter().any(|&r| ownership::tied_here(&w, r, b))
                 && w.comp::<Building>(b).is_some_and(|bd| {
                     !bd.demolished && !bd.derelict && w.residents_of(b).len() < usize::from(bd.capacity)
                 })
