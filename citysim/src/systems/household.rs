@@ -20,8 +20,8 @@
 //!   `newborn_away_mult` ([`damped`], [`away_mult`]) while both parents'
 //!   energy decays × `newborn_energy_mult` ([`energy_mult`]) and the Home
 //!   feeds the newborn through the pantry ([`daily`]); the household's
-//!   business ([`business_of`]) is offered to its jobless adults first
-//!   ([`owner_operator`]), its heir waits for it ([`waits_for_business`])
+//!   business (a building the agent or the spouse owns) is offered to its jobless adults first
+//!   ([`owner_operator`]), its heir waits for it ([`business_holders`])
 //!   and its members are laid off last ([`is_member_of_owner`]).
 //! - **Visits** (§ 3.5): [`visits_due`] at midnight posts at most one
 //!   `GoalKind::Visit` a day an agent (a kin or spouse downed, assaulted or
@@ -455,35 +455,12 @@ pub fn away_mult(world: &World, id: EntityId, own_home: bool) -> f32 {
     }
 }
 
-/// § 3.4: the household's business: a standing building owned by `id` or
-/// its spouse (a daily read; scan-ok: the midnight job search).
-pub fn business_of(world: &World, id: EntityId) -> Option<EntityId> {
-    if !on(world) {
-        return None;
-    }
-    let spouse = world.spouse_of(id);
-    world.with::<Building>().into_iter().find(|&b| {
-        world.comp::<Building>(b).is_some_and(|bd| {
-            !bd.demolished
-                && !bd.derelict
-                && bd.kind != BuildingKind::Home
-                && (bd.owner == Some(id) || (spouse.is_some() && bd.owner == spouse))
-        })
-    })
-}
-
 /// § 3.4: has `b` taken coins within `abandon_days` (today, or the last days)?
 fn business_live(world: &World, b: EntityId) -> bool {
     let days = usize::from(world.config.household.abandon_days);
     world
         .comp::<Building>(b)
         .is_some_and(|bd| bd.revenue_today > 0 || bd.revenue.iter().rev().take(days).any(|&r| r > 0))
-}
-
-/// § 3.4: `id` waits for its household's business: the business has had a
-/// take within `abandon_days` (so a job search offers it no outside post).
-pub fn waits_for_business(world: &World, id: EntityId) -> bool {
-    business_of(world, id).is_some_and(|b| business_live(world, b))
 }
 
 /// § 3.4 (`demography::job_search`): every adult who waits for a live

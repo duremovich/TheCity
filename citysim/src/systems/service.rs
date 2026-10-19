@@ -410,7 +410,7 @@ fn civic_hour(world: &mut World) {
 /// (`ages::on_mature` reads it under civic), and the parents who are bodies
 /// at home meet the teacher at the door (a first meeting at a hashed
 /// `0.1 + 0.3u`, `interacted` after; a `Served` memory each side; no walk).
-fn taught(world: &mut World, teacher: EntityId, child: EntityId, school: EntityId, valence: f32) {
+fn taught(world: &mut World, teacher: EntityId, child: EntityId, valence: f32) {
     let floor = world.config.service.teacher_floor;
     let know = world.comp::<crate::components::Skills>(teacher).map_or(0.0, |s| s.knowledge);
     if let Some(c) = world.comp_mut::<Child>(child) {
@@ -433,7 +433,6 @@ fn taught(world: &mut World, teacher: EntityId, child: EntityId, school: EntityI
         }
         world.remember(p, MemoryKind::Served, Some(teacher), salience, valence, false);
         world.remember(teacher, MemoryKind::Served, Some(p), salience, valence, false);
-        let _ = school;
     }
 }
 
@@ -645,7 +644,7 @@ fn encounter_row(
     // Lives at work phase 3 (§ 2.2): the civic arms.
     let mut outcome = Outcome::Done;
     match (kind, place) {
-        (ServeKind::Pupil, Some(p)) => taught(world, server, served, p, row.valence),
+        (ServeKind::Pupil, Some(_)) => taught(world, server, served, row.valence),
         (ServeKind::Tenant, Some(p)) => outcome = tenant(world, server, served, p),
         _ => {}
     }

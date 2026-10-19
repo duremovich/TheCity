@@ -913,8 +913,9 @@ fn stat_from(world: &World, id: EntityId) -> Option<TilePos> {
         .or_else(|| world.comp::<Position>(id).map(|p| p.tile))
 }
 
-/// One off-screen dose bought by `id` as `stat_addicts` buys it (the
-/// tests' entry to `stat_buy`; not used).
+/// One off-screen dose bought by `id` as `stat_addicts` buys it: the
+/// tests' entry to `stat_buy` (`tests/stims.rs`'s known-dealer test); the
+/// sim calls `stat_buy` from `stat_addicts`.
 pub fn stat_buy_one(world: &mut World, id: EntityId) -> bool {
     let dealers = stat_dealers(world, world.day());
     let Some(from) = stat_from(world, id) else { return false };

@@ -185,9 +185,9 @@ fn test_heir_with_a_household_business_keeps_it() {
         b.owner = Some(a);
         b.revenue_today = 5;
     }
-    assert_eq!(household::business_of(&w, a), Some(bar));
-    assert_eq!(household::business_of(&w, s), Some(bar), "the spouse's too");
-    assert!(household::waits_for_business(&w, s));
+    let holders = household::business_holders(&w);
+    assert!(holders.contains(&a), "the owner waits for it");
+    assert!(holders.contains(&s), "the spouse too");
     w.remove::<citysim::Job>(s);
     assert_eq!(household::owner_operator(&w, bar, citysim::Role::Bartender), Some(s), "the household first");
     assert!(household::is_member_of_owner(&w, s, bar) && !household::is_member_of_owner(&w, w.citizens()[0], bar));
@@ -201,7 +201,7 @@ fn test_heir_with_a_household_business_keeps_it() {
             b.revenue.push_back(0);
         }
     }
-    assert!(!household::waits_for_business(&w, s));
+    assert!(!household::business_holders(&w).contains(&s));
 }
 
 /// § 3.5: a kin assaulted in the last day (a heard rumour) makes a visit
