@@ -402,6 +402,61 @@ fn test_on_city_serves_within_a_day() {
     assert!(w.citizens().into_iter().any(|id| !served_memories(&w, id).is_empty()));
 }
 
+/// Shadow V5 bug 1: a venue's `[service] evening_staff` cover its trade,
+/// day and evening. At seed every venue with two or more staff of such a
+/// role has one on `[world] shift_day` and one on `[leisure]
+/// evening_shift`; a hire fills the thinner of the two (the evening on a
+/// tie). Failed on the base (OPEN-111 put every one on the evening).
+#[test]
+fn test_venue_staff_cover_the_day_and_the_evening() {
+    let mut w = common::world();
+    let (day, eve) = (w.config.world.shift_day.clone(), w.config.leisure.evening_shift.clone());
+    let roles = w.config.service.evening_staff.clone();
+    assert!(!roles.is_empty(), "the shipped config names venue staff");
+    let shifts_of = |w: &World, b: EntityId, role: Role| -> Vec<Vec<(u16, u16)>> {
+        w.staff_of(b)
+            .iter()
+            .filter_map(|&s| w.comp::<Job>(s).filter(|j| j.role == role).map(|j| j.shifts.clone()))
+            .collect()
+    };
+    let mut venues = 0;
+    let mut places: Vec<(EntityId, Role)> = w
+        .citizens()
+        .into_iter()
+        .filter_map(|a| w.comp::<Job>(a).and_then(|j| j.employer.map(|e| (e, j.role))))
+        .filter(|(_, r)| roles.contains(r))
+        .collect();
+    places.sort_unstable();
+    places.dedup();
+    for (b, role) in places {
+        let s = shifts_of(&w, b, role);
+        if s.len() < 2 {
+            continue;
+        }
+        venues += 1;
+        assert!(s.contains(&day) && s.contains(&eve), "{} {role:?}: {s:?}", w.name_of(b));
+        let (nd, ne) = (s.iter().filter(|x| **x == day).count(), s.iter().filter(|x| **x == eve).count());
+        assert!(nd.abs_diff(ne) <= 1, "{} {role:?}: day {nd} evening {ne}", w.name_of(b));
+    }
+    assert!(venues > 0, "a venue with two staff of a venue role");
+    // A hire fills the thinner shift: a Bar's next two Bartenders land one on each.
+    let (bar, _) = staffed(&w, BuildingKind::Bar, Role::Bartender, 1);
+    let jobless: Vec<EntityId> = w
+        .citizens()
+        .into_iter()
+        .filter(|&a| !w.has::<Job>(a) && citysim::systems::demography::is_adult(&w, a))
+        .take(2)
+        .collect();
+    assert_eq!(jobless.len(), 2, "two jobless adults");
+    let before = shifts_of(&w, bar, Role::Bartender);
+    for a in jobless {
+        citysim::systems::demography::hire(&mut w, a, bar, Role::Bartender);
+    }
+    let after = shifts_of(&w, bar, Role::Bartender);
+    let (nd, ne) = (after.iter().filter(|x| **x == day).count(), after.iter().filter(|x| **x == eve).count());
+    assert!(nd >= 1 && ne >= 1 && nd.abs_diff(ne) <= 1, "before {before:?} after {after:?}");
+}
+
 /// Print-only: who is behind the counter. Ten days of the shipped city,
 /// read at the top of each hour: per venue kind, the share of
 /// building-hours with a server on duty for its kind of encounter, the

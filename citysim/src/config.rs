@@ -566,10 +566,11 @@ pub struct ServiceCfg {
     /// day/night pair is on duty at neither). Empty: the `split` rule.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cab_shifts: Vec<(u16, u16)>,
-    /// OPEN-111 (§ 14 phase 1, "Who is behind the counter"): the legacy
-    /// venue roles whose staff work the venue's trade hours, `[leisure]
-    /// evening_shift`, instead of `[world] shift_day` (the drinking and the
-    /// Statistical evening are 18-24). Read under `[service] venues`
+    /// OPEN-111 (§ 14 phase 1, "Who is behind the counter"), Shadow V5 bug
+    /// 1: the legacy venue roles whose staff cover the venue's trade hours,
+    /// split at each venue between `[world] shift_day` and `[leisure]
+    /// evening_shift` (the thinner first, the evening on a tie), instead of
+    /// all on `[world] shift_day`. Read under `[service] venues`
     /// (`service::venue_shift`); empty, every legacy role's shift as before.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evening_staff: Vec<crate::components::Role>,

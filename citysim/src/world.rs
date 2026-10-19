@@ -2199,8 +2199,8 @@ impl World {
                 let id = pool[i];
                 let shifts = if role == Role::Guard && id.index % 2 == 0 {
                     wc.shift_night.clone()
-                } else if let Some(s) = systems::service::venue_shift(&self.config, role) {
-                    // OPEN-111: a venue's legacy staff work its trade hours.
+                } else if let Some(s) = systems::service::venue_shift(self, employer, role) {
+                    // OPEN-111, Shadow V5 bug 1: a venue's legacy staff split its day and evening.
                     s
                 } else {
                     wc.shift_day.clone()

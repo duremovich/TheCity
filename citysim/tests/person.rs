@@ -3237,6 +3237,15 @@ fn bar_regular(same: bool, hour: u64) -> (Vec<(u64, EntityId)>, Vec<EntityId>) {
     for d in 1..=3u64 {
         let bar = if same { bars[0] } else { bars[(d - 1) as usize] };
         run_to(&mut w, a, d * TICKS_PER_DAY + hour * TICKS_PER_HOUR, |_| {});
+        // At the Bar's door at the hour: the probe reads the ledger, not the
+        // trip (the seed-42 pick after Shadow V5 bug 1's venue shifts rode
+        // 170 ticks to the one Bar, re-booked whenever his own Unwind, past
+        // `[leisure] venue_walk_cap_ticks`, cooled and dropped the plan, and
+        // walked 5 h to the control's second Bar).
+        let bar_door = w.comp::<Building>(bar).map(|x| x.door).expect("a door");
+        w.leave_building(a);
+        w.abort_plan(a);
+        w.comp_mut::<citysim::components::Position>(a).expect("pos").tile = bar_door;
         knew_before.extend(w.staff_of(bar).iter().map(|&s| (d, s, w.edge(a, s).is_some())));
         w.comp_mut::<Wallet>(a).expect("wallet").coins = 200;
         if let Some(n) = w.comp_mut::<Needs>(a) {
@@ -3294,8 +3303,9 @@ fn bar_regular(same: bool, hour: u64) -> (Vec<(u64, EntityId)>, Vec<EntityId>) {
 }
 
 /// Lives at work § 10 ("a regular"): a Full agent who drinks at the same
-/// Bar three evenings running (from 19:00; its bartenders work `[leisure]
-/// evening_shift` under `[service] evening_staff`) is an Acquaintance of
+/// Bar three evenings running (from 19:00, at its door; its bartenders
+/// split the day and `[leisure] evening_shift` under `[service]
+/// evening_staff`) is an Acquaintance of
 /// the bartender who served him (the Bartender row's `regular_after`
 /// within `regular_days`). Control: three different Bars, an evening each:
 /// served each evening, no edge. OPEN-111 (closed): the server was a fresh
