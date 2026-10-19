@@ -1078,19 +1078,30 @@ fn fixer_server(world: &World, fixer: EntityId, served: EntityId) -> Option<Enti
 /// world-side at that hour"; the posts come at midnight and the takes at
 /// the match hour, outside the day shift): the Fixer's `Client` staff
 /// alive and free by the lowest `hash(PURPOSE_FIXER, …)`, else the owner
-/// alive and free.
+/// alive and free. Review fix 7: a staff server with room left this hour
+/// (his row's `per_hour`, as the on-duty pick reads it); all full, the
+/// owner (whose post has no room ledger), else nobody (the contract
+/// stands, the encounter is not credited).
 fn fixer_book(world: &World, fixer: EntityId, party: EntityId) -> Option<EntityId> {
     let hour = world.tick / TICKS_PER_HOUR;
     let free = |s: EntityId| s != party && crate::systems::law::living(world, s) && !world.has::<Sentence>(s);
+    let room = |s: EntityId, cap: u8| world.service_room.get(&s).is_none_or(|r| r.hour != hour || r.taken < cap);
     world
         .staff_of(fixer)
         .iter()
         .copied()
-        .filter(|&s| free(s) && row_of_agent(world, s).is_some_and(|r| r.kind == ServeKind::Client))
+        .filter(|&s| {
+            free(s) && row_of_agent(world, s).is_some_and(|r| r.kind == ServeKind::Client && room(s, r.per_hour))
+        })
         .map(|s| (hash(world, PURPOSE_FIXER, key(fixer) ^ key(party), hour ^ key(s)), s))
         .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
         .map(|(_, s)| s)
-        .or_else(|| world.owner_of(fixer).filter(|&o| world.has::<Brain>(o) && free(o)))
+        // The owner on his own post here is one of the staff above (full).
+        .or_else(|| {
+            world.owner_of(fixer).filter(|&o| {
+                world.has::<Brain>(o) && free(o) && world.comp::<Job>(o).is_none_or(|j| j.employer != Some(fixer))
+            })
+        })
 }
 
 /// The `Client` encounter at the Fixer: a staff server through his row
@@ -1104,7 +1115,8 @@ fn fixer_meet(world: &mut World, server: EntityId, served: EntityId, fixer: Enti
         if r.hour != hour {
             *r = Room { hour, taken: 0 };
         }
-        r.taken += 1;
+        // Both pickers leave room under the cap; saturating, never wrapping.
+        r.taken = r.taken.saturating_add(1);
         encounter(world, server, served, Some(fixer), d, ServeKind::Client, coins);
     } else {
         encounter_post(world, "Fixer", server, served, Some(fixer), d, ServeKind::Client, coins);
