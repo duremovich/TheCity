@@ -19,6 +19,10 @@ fn city() -> World {
     // which gang is at war on day 4).
     let mut c = Config::load();
     c.jobs2.enabled = false;
+    // Lives at work phase 6: nor the careers and lieutenants (their ranks and
+    // seeded jobs move the Hollow's succession after a decapitation).
+    c.strip_careers();
+    c.gangs.strip_lieutenants();
     let mut w = World::new(42, c);
     w.config.crime.fight_death_p = 0.0;
     w.run_ticks(4 * TICKS_PER_DAY + 30);

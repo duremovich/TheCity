@@ -157,6 +157,9 @@ fn test_civic_cut_spares_public_works_hires() {
     // hire went to jail in the butterfly it makes); phase 4: nor the vice
     // and fashion (a works hire lost his post in theirs).
     cfg.jobs2.street = false;
+    // Lives at work phase 6: nor the careers (two works hires lost their
+    // posts in its city: its midnight retires and lets go the old).
+    cfg.strip_careers();
     cfg.vice.enabled = false;
     cfg.fashion.enabled = false;
     let mut w = World::new(42, cfg);

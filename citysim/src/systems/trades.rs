@@ -30,6 +30,9 @@ pub fn skill_ok(world: &World, id: EntityId, role: Role) -> bool {
             || world
                 .comp::<crate::components::Skills>(id)
                 .is_some_and(|s| s.knowledge >= world.config.jobs2.hire_knowledge_floor)
+            // Lives at work phase 6 (§ 4.3): the trade's profession stands in
+            // for the test.
+            || crate::systems::careers::holds(world, id, role)
     })
 }
 

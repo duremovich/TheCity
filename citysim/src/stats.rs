@@ -784,6 +784,34 @@ pub struct Jobs2Cols {
     pub licences_named: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub bribes_named: u32,
+    // Lives at work phase 6 (§ 4): careers and leaders. `lieutenants` is the
+    // day's rank-1 headcount (its mean is the column's mean); `delegated_orders`
+    // the leader-days delegated at midnight; the coins are the foremen's
+    // premium paid and the payouts' cuts.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub band_refusals: u32,
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub foremen_premium: i64,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub profession_rehires: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub foreman_hires: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub retirements: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub frail_exits: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub unretired: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub lieutenants: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub delegated_orders: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub lieutenant_raids: u32,
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub leader_cut_coins: i64,
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub lieutenant_cut_coins: i64,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -1046,6 +1074,18 @@ impl Jobs2Cols {
                 "fixer_collections",
                 "licences_named",
                 "bribes_named",
+                "band_refusals",
+                "foremen_premium",
+                "profession_rehires",
+                "foreman_hires",
+                "retirements",
+                "frail_exits",
+                "unretired",
+                "lieutenants",
+                "delegated_orders",
+                "lieutenant_raids",
+                "leader_cut_coins",
+                "lieutenant_cut_coins",
             ]
             .into_iter()
             .map(str::to_string),
@@ -1302,6 +1342,18 @@ impl Jobs2Cols {
             self.fixer_collections.to_string(),
             self.licences_named.to_string(),
             self.bribes_named.to_string(),
+            self.band_refusals.to_string(),
+            self.foremen_premium.to_string(),
+            self.profession_rehires.to_string(),
+            self.foreman_hires.to_string(),
+            self.retirements.to_string(),
+            self.frail_exits.to_string(),
+            self.unretired.to_string(),
+            self.lieutenants.to_string(),
+            self.delegated_orders.to_string(),
+            self.lieutenant_raids.to_string(),
+            self.leader_cut_coins.to_string(),
+            self.lieutenant_cut_coins.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

@@ -32,6 +32,10 @@ fn world() -> World {
     c.fashion.enabled = false;
     c.gray.enabled = false;
     c.faith.enabled = false;
+    // Lives at work phase 6: nor the careers and lieutenants (the same
+    // butterfly: the scanned chromed adult moved).
+    c.strip_careers();
+    c.gangs.strip_lieutenants();
     World::new(42, c)
 }
 

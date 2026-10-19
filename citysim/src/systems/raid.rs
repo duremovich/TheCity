@@ -99,7 +99,12 @@ pub fn raid_pending(world: &World, agent: EntityId) -> bool {
                     .run_orders
                     .get(&agent)
                     .is_some_and(|o| matches!(o.why, crate::virt::RunWhy::Prelude | crate::virt::RunWhy::Overwatch));
-            !seated && g.order.is_raid() && g.raid_at.is_some_and(|t| t <= world.tick + window)
+            // Lives at work phase 6 (§ 4.5): a delegating leader stays home
+            // (the march is his lieutenants').
+            !seated
+                && g.order.is_raid()
+                && g.raid_at.is_some_and(|t| t <= world.tick + window)
+                && !crate::systems::careers::delegating(world, agent)
         }
         // M16a (plan C22): the Raid goal never adopts a mission (its crew
         // marches under `GoalKind::Contract`).
@@ -361,13 +366,30 @@ pub fn resolve(world: &mut World, actor: EntityId) -> Option<Outcome> {
             world.stats.current.raids_into_cover += 1;
         }
     }
-    if own_gang(world, actor).is_some_and(|g| g.order.target_is_jail()) {
-        breach(world, actor)
-    } else if corp_target(world, gid).is_some() {
-        corp_brawl(world, actor)
+    // Lives at work phase 6 (§ 4.5): the raid is resolved in its head's name
+    // (the leader at the door, else the best lieutenant there; the actor
+    // off), and the head's ladder counts it.
+    let raiding = world.comp::<Gang>(gid).is_some_and(|g| g.raid_at.is_some());
+    let head = if raiding && crate::systems::careers::lieutenants_on(world) {
+        let door = gang_target(world, gid).and_then(|b| world.comp::<Building>(b)).map(|b| b.door);
+        let present = door.map_or_else(Vec::new, |d| raiders_at(world, gid, actor, d));
+        crate::systems::careers::raid_head(world, gid, actor, &present)
     } else {
-        brawl(world, actor)
+        actor
+    };
+    let outcome = if own_gang(world, head).is_some_and(|g| g.order.target_is_jail()) {
+        breach(world, head)
+    } else if corp_target(world, gid).is_some() {
+        corp_brawl(world, head)
+    } else {
+        brawl(world, head)
+    };
+    if raiding {
+        if let Some(o) = outcome {
+            crate::systems::careers::credit_raid(world, head, matches!(o, Outcome::Won | Outcome::Sacked));
+        }
     }
+    outcome
 }
 
 /// Phase 4 (raids ≥ 3 at the door): the first marcher at the door holds

@@ -370,7 +370,7 @@ fn test_distortion_never_at_knowledge_one() {
     let gang = w.gang_list()[0];
     let ads = adults(&w);
     let (member, speaker) = (ads[0], ads[1]);
-    w.insert(member, citysim::GangMember { gang, rank: 0, joined_tick: 0 });
+    w.insert(member, citysim::GangMember { gang, rank: 0, joined_tick: 0, raids_led: 0, raids_won: 0 });
     let mut swaps = [0u32; 2];
     for (k, knowledge) in [1.0f32, 0.0].into_iter().enumerate() {
         for i in 0..2000u64 {

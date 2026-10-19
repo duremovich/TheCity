@@ -775,6 +775,8 @@ pub fn collect_wage_scaled(world: &mut World, agent: EntityId, scale: f32) -> i6
             c.wage_mult
         }
     }) * job.premium
+        // Lives at work phase 6 (§ 4.2): the foreman's premium (1 off).
+        * crate::systems::careers::foreman_mult(world, &job)
         * scale;
     let per_day = if mult == 1.0 { job.wage_per_day } else { (job.wage_per_day as f32 * mult).round() as i64 };
     let due = per_day * i64::from(job.days_unpaid);
@@ -797,6 +799,14 @@ pub fn collect_wage_scaled(world: &mut World, agent: EntityId, scale: f32) -> i6
     };
     let paid = gross - tax;
     ownership::pay(world, payer, Some(agent), paid, Flow::Wage);
+    // Lives at work phase 6 (§ 4.2): the premium's share of the gross.
+    if job.foreman && gross > 0 {
+        let p = world.config.careers.foreman_premium.max(1.0);
+        let extra = gross - (gross as f32 / p).round() as i64;
+        if extra > 0 {
+            ownership::jobs2_row(world).foremen_premium += extra;
+        }
+    }
     // Real economy phase 2 (plan E16): the gross is the corp's payroll.
     // Class pay P3: a graded wage's premium over the labour rate is not the
     // labour pool's: it is noted apart (paid out of capital and profit).
@@ -886,12 +896,26 @@ pub fn dismiss_as(
     text: String,
     kind: EventKind,
 ) -> Option<Job> {
+    dismiss_by(world, agent, building, text, kind, None)
+}
+
+/// [`dismiss_as`] with the foreman who told him (Lives at work phase 6,
+/// § 4.2: an actor of the event, so his diary holds it; `None` off).
+pub fn dismiss_by(
+    world: &mut World,
+    agent: EntityId,
+    building: Option<EntityId>,
+    text: String,
+    kind: EventKind,
+    foreman: Option<EntityId>,
+) -> Option<Job> {
     world.abort_plan(agent);
     let job = world.remove::<Job>(agent)?;
     // Jobs and room J4: the rehire bonus remembers the role (wages on).
     crate::systems::demography::note_laid_off(world, agent, job.role);
     let mut actors = vec![agent];
     actors.extend(building);
+    actors.extend(foreman);
     world.push_event(kind, &actors, text);
     // Lives at work phase 2 (§ 3.6): the layoff is talked about (nothing off).
     if kind == EventKind::LaidOff && crate::systems::household::on(world) {

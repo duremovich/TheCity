@@ -103,7 +103,7 @@ fn test_join_gang_requires_contact_or_desperation() {
     let (recruit, member) = two_civilians(&w);
     let gang_id = w.gangs()[0];
     // one member so the empty-gang bootstrap is off
-    w.insert(member, GangMember { gang: gang_id, rank: 0, joined_tick: 0 });
+    w.insert(member, GangMember { gang: gang_id, rank: 0, joined_tick: 0, raids_led: 0, raids_won: 0 });
     w.comp_mut::<Gang>(gang_id).expect("gang").members = vec![member];
     w.comp_mut::<Personality>(recruit).expect("p").lawfulness = 0.2;
     w.comp_mut::<Needs>(recruit).expect("n").hunger = 0.9;

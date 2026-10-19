@@ -712,11 +712,17 @@ fn dawn_pick(world: &mut World) {
         let Some(door) = world.comp::<Building>(b).map(|x| x.door) else { continue };
         let Some(i) = corner_near(&corners, door, u32::MAX) else { continue };
         let foreman = crate::systems::industry::foreman(world, b, None);
-        let best = queues[i].iter().copied().filter(|&a| !world.has::<Job>(a)).max_by(|&x, &y| {
-            let known = |a: EntityId| foreman.is_some_and(|f| world.edge(a, f).is_some());
-            let f = |a: EntityId| world.comp::<Skills>(a).map_or(0.0, |s| s.fighting);
-            known(x).cmp(&known(y)).then(f(x).total_cmp(&f(y))).then(y.cmp(&x))
-        });
+        // Lives at work phase 6 (§ 4.1): the corner's band (every one off).
+        let band = crate::systems::careers::hire_band(world, role);
+        let best = queues[i]
+            .iter()
+            .copied()
+            .filter(|&a| !world.has::<Job>(a) && crate::systems::careers::admits(world, a, band))
+            .max_by(|&x, &y| {
+                let known = |a: EntityId| foreman.is_some_and(|f| world.edge(a, f).is_some());
+                let f = |a: EntityId| world.comp::<Skills>(a).map_or(0.0, |s| s.fighting);
+                known(x).cmp(&known(y)).then(f(x).total_cmp(&f(y))).then(y.cmp(&x))
+            });
         let Some(a) = best else { continue };
         queues[i].retain(|&x| x != a);
         crate::systems::demography::hire(world, a, b, role);

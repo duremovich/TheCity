@@ -243,6 +243,10 @@ pub fn clerks_on_books(world: &World) -> usize {
 /// `hired_tick`, ties lower id), `exclude` left out (a hire or a layoff
 /// being named). `None` for a building with no other staff.
 pub fn foreman(world: &World, b: EntityId, exclude: Option<EntityId>) -> Option<EntityId> {
+    // Lives at work phase 6 (§ 4.2): the most experienced, aged `foreman_min_age`.
+    if crate::systems::careers::on(world) {
+        return crate::systems::careers::foreman(world, b, exclude);
+    }
     world
         .staff_of(b)
         .iter()

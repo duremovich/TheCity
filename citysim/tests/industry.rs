@@ -20,6 +20,9 @@ fn on_world() -> World {
     c.vice.bd = false;
     // Phase 7: nor the Schools (a School takes a Lot too).
     c.ages.enabled = false;
+    // Lives at work phase 6: nor the careers (the foreman is the
+    // longest-serving off; `tests/careers.rs` tests the experienced one).
+    c.strip_careers();
     World::new(42, c)
 }
 
@@ -385,6 +388,9 @@ fn test_day_post_ends_at_its_until() {
     row.duty = citysim::config::TradeDuty::Corner;
     c.trades.push(row);
     c.reset_trade_cache();
+    // Lives at work phase 6: careers off (the first midnight retires or lets
+    // go "too frail" the elder `jobless` picks, before his post's `until`).
+    c.strip_careers();
     let mut w = World::new(42, c);
     let role = trade(&w, "day_hand");
     let yard = first(&w, BuildingKind::ConstructionYard);

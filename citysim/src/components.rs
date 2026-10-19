@@ -2138,6 +2138,24 @@ pub struct Job {
     /// at this tick (`trades::end_day_posts`); `None` for a standing post.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub until: Option<Tick>,
+    /// Lives at work phase 6 (§ 4.2): the seeded seniority in days (0 for
+    /// any hire after day 0, and with `[careers]` off; not written at 0).
+    /// Experience is this plus the days since `hired_tick`.
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub seniority_days: u16,
+    /// Lives at work phase 6 (§ 4.2): the building's foreman (set at
+    /// midnight, `careers::daily`): the wage × `[careers] foreman_premium`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub foreman: bool,
+}
+
+impl Job {
+    /// Lives at work phase 6 (§ 4.2): the tick experience counts from
+    /// (`hired_tick` less the seniority; `hired_tick` itself with none):
+    /// the earlier, the more experienced.
+    pub fn start_key(&self) -> i64 {
+        self.hired_tick as i64 - i64::from(self.seniority_days) * crate::time::TICKS_PER_DAY as i64
+    }
 }
 
 fn is_zero_grade(v: &u8) -> bool {
@@ -2756,6 +2774,12 @@ pub struct GangMember {
     pub rank: u8,
     #[serde(default)]
     pub joined_tick: Tick,
+    /// Lives at work phase 6 (§ 4.5, the ladder): raids led (the highest
+    /// rank at the door) and won (`[gangs] lieutenants`; not written at 0).
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub raids_led: u16,
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub raids_won: u16,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -4260,6 +4284,28 @@ pub struct Chipped {
     pub holder: Option<EntityId>,
     pub days: u32,
     pub captive: bool,
+}
+
+/// Lives at work phase 6 (§ 4.3): the trade an agent knows, written at
+/// each worked shift: `days` worked in `trade` (the profession once at
+/// `[careers] profession_min_days`), and a different role's run `next`
+/// that replaces it on reaching the same. Survives a layoff, a term and a move.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Profession {
+    pub trade: Role,
+    pub days: u32,
+    /// The day of the last shift counted (one a day).
+    pub last_day: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next: Option<(Role, u16)>,
+}
+
+/// Lives at work phase 6 (§ 4.4; the spec's `Trait::Retired`: no `Trait`
+/// enum exists): a retired agent, out of the hiring pool until his coins
+/// fall under `[careers] unretire_coins`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Retired {
+    pub since: Tick,
 }
 
 /// Jobs & lives phase 3: an item's provenance (its last change of hands).

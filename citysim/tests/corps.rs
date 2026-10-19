@@ -532,6 +532,9 @@ fn test_squeeze_entry_cuts_food_wages_and_housing_eviction_days() {
 /// A private guard on a 24-hour shift, its corp with a contract on a Market.
 fn private_guard_scene() -> (World, EntityId, EntityId, EntityId) {
     let mut c = Config::load().dole_city().scaled_to(400);
+    // Lives at work phase 6: careers off (its seeded jobs move the scene's
+    // first jobless civilian; the subject is the private guard's arrest).
+    c.strip_careers();
     c.law.pursuit_radius = 0; // the city's guards chase nobody
     let mut w = World::new(11, c);
     w.run_ticks(2);

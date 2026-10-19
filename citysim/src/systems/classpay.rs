@@ -245,6 +245,7 @@ pub fn pick_graded(world: &World, employer: EntityId, role: Role) -> Option<Enti
     let seeding = world.tick == 0;
     let promote = u64::from(world.config.classpay.promote_days);
     let execs = crate::systems::classes::exec_set(world);
+    let band = crate::systems::careers::hire_band(world, role);
     let mut best: Option<(f32, EntityId)> = None;
     for id in world.citizens() {
         if !crate::systems::demography::is_adult(world, id)
@@ -255,6 +256,8 @@ pub fn pick_graded(world: &World, employer: EntityId, role: Role) -> Option<Enti
             || !crate::systems::fashion::dress_ok(world, id, role)
             || !crate::systems::dollhouse::hire_ok(world, role)
             || !crate::systems::gray::hire_ok(world, id, role)
+            // Lives at work phase 6 (§ 4.1, § 4.4): the age band, the retired.
+            || !crate::systems::careers::admits(world, id, band)
         {
             continue;
         }

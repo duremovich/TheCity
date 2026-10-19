@@ -943,6 +943,9 @@ fn probe_far_worker_with_one_rent_moves_near_work() {
     // (tied supers housed by their landlords on day 0) and the far Farmer's
     // trade partner with them; this pins the city the probe was written for.
     cfg.strip_civic();
+    // Lives at work phase 6: the careers' seeded jobs move the far Farmer
+    // and his partner too (no pair on the careers city); pinned off as well.
+    cfg.strip_careers();
     // Jobs & lives phase 8's gate: the pin to the pre-milestone city is gone
     // (the industries on, seed 42 has its single far Farmer again).
     let mut w = World::new(42, cfg);
@@ -1587,8 +1590,10 @@ fn probe_worker_makes_one_grocery_run_to_the_nearest_detour_market() {
     use citysim::BuildingKind;
     // Lives at work phase 3: on the civic city the pick makes two grocery
     // runs in the window; this pins the city the probe was written for.
+    // Lives at work phase 6: so does the careers city (two runs); pinned off.
     let mut cfg = Config::load();
     cfg.strip_civic();
+    cfg.strip_careers();
     let mut w = World::new(42, cfg);
     w.run_ticks(2 * TICKS_PER_DAY + 19 * TICKS_PER_HOUR);
     let dist = |w: &World, a: EntityId| {
@@ -2092,6 +2097,9 @@ use citysim::systems::transit;
 fn el_commuter() -> (World, EntityId, EntityId, u64) {
     let mut cfg = Config::load();
     cfg.transit.enabled = true;
+    // Lives at work phase 6: careers off (on its city the cut-line commuter
+    // does not reach work by noon; the subject is the El, not the ages).
+    cfg.strip_careers();
     let mut w = World::new(42, cfg);
     w.run_ticks(TICKS_PER_DAY + 5 * TICKS_PER_HOUR);
     let t = TICKS_PER_DAY + 7 * TICKS_PER_HOUR;
@@ -2372,9 +2380,12 @@ fn probe_married_pick_is_home_by_nine_with_the_spouse() {
     // Lives at work phase 3: the civic switch moves the seeded households
     // (tied supers housed by their landlords on day 0), and the pick on the
     // moved city is a Wanderer at 21:00; this pins the city the phase 2
-    // probe was written for.
+    // probe was written for. Lives at work phase 6: the careers city's pick
+    // is a Wanderer at 21:00 again (its seeded jobs move the evening);
+    // pinned off as well.
     let mut cfg = Config::load();
     cfg.strip_civic();
+    cfg.strip_careers();
     let mut w = World::new(42, cfg);
     w.run_ticks(TICKS_PER_DAY + 19 * TICKS_PER_HOUR);
     let (a, s, h) = married_day_worker(&w).expect("a married day worker");
@@ -2960,4 +2971,97 @@ fn probe_reporter_stands_at_the_scene_on_his_shift() {
     }
     assert!(at_scene(true), "the reporter walks to the scene");
     assert!(!at_scene(false), "off: no beat");
+}
+
+/// Lives at work phase 6 (§ 4.3, § 9.1): a loader laid off a minute before
+/// midnight with the loading trade as his profession, a loader's post open
+/// at his Yard, and a jobless stranger moved in under his roof (the same
+/// door, so the same distance; the layoff's rehire bonus cleared so the
+/// profession is the only edge): the midnight search hires the loader back.
+/// Control: the profession on the stranger instead, the stranger is hired.
+#[test]
+fn probe_laid_off_loader_with_a_profession_is_rehired_first() {
+    use citysim::components::{BuildingKind, Profession};
+    let mut w = world();
+    w.run_ticks(5 * TICKS_PER_DAY - 1);
+    let role = w.config.trade_role("loader").expect("the loader row");
+    let yard = w.buildings_of_kind(BuildingKind::FreightYard)[0];
+    let a = w
+        .staff_of(yard)
+        .iter()
+        .copied()
+        .find(|&s| w.comp::<Job>(s).is_some_and(|j| j.role == role) && w.gang_of(s).is_none() && home(&w, s).is_some())
+        .expect("a housed loader");
+    citysim::systems::economy::dismiss_as(&mut w, a, Some(yard), "laid off (probe)".into(), EventKind::LaidOff);
+    w.laid_off.remove(&a);
+    w.vacancies.entry(yard).or_default().push(role);
+    let stranger = w
+        .citizens()
+        .into_iter()
+        .filter(|&s| s != a && w.has::<Brain>(s) && !w.has::<Job>(s) && !w.has::<citysim::Sentence>(s))
+        .filter(|&s| w.gang_of(s).is_none() && citysim::systems::careers::age_ok(&w, s, role))
+        .find(|&s| demography::is_adult(&w, s) && !w.laid_off.contains_key(&s))
+        .expect("a jobless stranger");
+    let h = home(&w, a);
+    w.set_home(stranger, h);
+    for loader_holds in [true, false] {
+        let mut w = w.clone();
+        let (holder, other) = if loader_holds { (a, stranger) } else { (stranger, a) };
+        w.insert(holder, Profession { trade: role, days: 60, last_day: 0, next: None });
+        w.remove::<Profession>(other);
+        pin(&mut w, a);
+        let start = w.tick;
+        run_to(&mut w, a, start + 2 * TICKS_PER_HOUR, |_| {});
+        let job = |id: EntityId| w.comp::<Job>(id).map(|j| (j.role, j.employer));
+        eprintln!("the loader holds {loader_holds}: loader {:?}, stranger {:?}", job(a), job(stranger));
+        assert_eq!(job(holder), Some((role, Some(yard))), "the profession's holder is hired at the Yard");
+        assert_ne!(job(other), Some((role, Some(yard))), "the other is not");
+    }
+}
+
+/// Lives at work phase 6 (§ 4.4, § 9.1): a 64-year-old worker with 600
+/// coins (unmarried, no grown child) retires within a week: no Job, the
+/// `Retired` mark, a `Retired` event. Control: the same man with 20 coins
+/// works on.
+#[test]
+fn probe_sixty_four_with_savings_retires() {
+    use citysim::components::{Identity, Retired};
+    let mut w = world();
+    w.run_ticks(2 * TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
+    let a = w
+        .citizens()
+        .into_iter()
+        .filter(|&a| w.has::<Job>(a) && w.has::<Brain>(a) && w.gang_of(a).is_none() && w.spouse_of(a).is_none())
+        .filter(|&a| demography::children_of_agent(&w, a).is_empty() && !w.has::<citysim::Sentence>(a))
+        .filter(|&a| w.comp::<Identity>(a).is_some_and(|i| (40..60).contains(&i.age_years())))
+        .find(|&a| w.comp::<Job>(a).is_some_and(|j| j.employer.is_some() && j.until.is_none()))
+        .expect("a single worker in his forties or fifties");
+    let cost = 60 * (w.mean_price() * 2 + home(&w, a).map_or(0, |h| citysim::systems::ownership::rent_for(&w, h)));
+    for savings in [600i64, 20] {
+        let mut w = w.clone();
+        w.comp_mut::<Identity>(a).unwrap().age_days = 64 * citysim::time::DAYS_PER_YEAR as u32 + 10;
+        w.comp_mut::<Wallet>(a).unwrap().coins = savings;
+        pin(&mut w, a);
+        let start = w.tick;
+        // Read at the tick the mark lands (a retired man's week may hold a
+        // wedding and a clinic bought on the savings, then a post again).
+        let mut at_retiring = None;
+        run_to(&mut w, a, start + 7 * TICKS_PER_DAY, |w| {
+            if at_retiring.is_none() && w.has::<Retired>(a) {
+                at_retiring = Some(w.has::<Job>(a));
+            }
+        });
+        let retired = w.events.iter().any(|e| e.kind == EventKind::Retired && e.actors[0] == a);
+        eprintln!(
+            "savings {savings} (60 days' costs {cost}): job {:?}, retired {retired}, coins {}",
+            w.comp::<Job>(a).map(|j| j.role.label()),
+            coins(&w, a)
+        );
+        if savings == 600 {
+            assert!(cost <= 600, "the stimulus covers 60 days ({cost})");
+            assert!(retired && at_retiring == Some(false), "retired within a week, the Job quit ({at_retiring:?})");
+        } else {
+            assert!(w.has::<Job>(a) && !retired, "control: works on");
+        }
+    }
 }

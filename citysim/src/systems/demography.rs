@@ -625,6 +625,10 @@ pub fn laid_off_from(world: &World, id: EntityId, role: Role) -> bool {
     world.laid_off.get(&id).is_some_and(|&(r, t)| r == role && t + REHIRE_DAYS * TICKS_PER_DAY > world.tick)
 }
 
+fn ownership_row(world: &mut World) -> &mut crate::stats::Jobs2Cols {
+    crate::systems::ownership::jobs2_row(world)
+}
+
 /// Daily, for each vacancy in BTreeMap order: the nearest unemployed adult
 /// (home door to workplace door, ties by id) is hired.
 pub(crate) fn job_search(world: &mut World) {
@@ -728,6 +732,9 @@ fn job_search_pass_with(world: &mut World, vacancies: &[(EntityId, Vec<Role>)], 
                     pick_candidate(world, employer, workplace_door, role, &holders)
                 }
             };
+            if let Some(n) = pool.as_mut().map(|p| std::mem::take(&mut p.refused)).filter(|&n| n > 0) {
+                ownership_row(world).band_refusals += n;
+            }
             let Some(id) = pick else { continue };
             // Scale S5 (`[ambient] hire_far`): an Ambient household within
             // the commute cap before a simulated adult beyond it.
@@ -786,6 +793,7 @@ fn pick_candidate(
     let sweeper_post = role == Role::Sanitation && crate::systems::jobs::sweep_on(world);
     let near_cap =
         (crate::systems::fixes::hire_near(world) && !sweeper_post).then_some(world.config.life.commute_hire_ticks);
+    let band = crate::systems::careers::hire_band(world, role);
     world
         .citizens()
         .into_iter()
@@ -805,6 +813,8 @@ fn pick_candidate(
         .filter(|_| crate::systems::dollhouse::hire_ok(world, role))
         // Jobs & lives phase 6: the struck-off at a black clinic only.
         .filter(|&id| crate::systems::gray::hire_ok(world, id, role))
+        // Lives at work phase 6 (§ 4.1, § 4.4): the age band, the retired.
+        .filter(|&id| crate::systems::careers::admits(world, id, band))
         .map(|id| {
             // M14 V16: a Lab hires the best hacker (ties lower id),
             // so Labs collect the city's runners.
@@ -852,7 +862,8 @@ fn pick_candidate(
                 0.0
             };
             let off = (skill_w * 100.0 * skill).round() as u32
-                + if rehire > 0 && laid_off_from(world, id, role) { rehire } else { 0 };
+                + if rehire > 0 && laid_off_from(world, id, role) { rehire } else { 0 }
+                + profession_bonus(world, id, role);
             // Transit phase 2 (plan § 6): with the El on, the distance is the
             // commute (`life::commute_cost`, the ride when it wins) in walking
             // tiles, so a Sump resident by a stop ranks as near the Vats.
@@ -945,8 +956,19 @@ fn hire_offset(world: &World, id: EntityId, role: Role, skill_w: f32, rehire: u3
         0.0
     };
     let off = (skill_w * 100.0 * skill).round() as u32
-        + if rehire > 0 && laid_off_from(world, id, role) { rehire } else { 0 };
+        + if rehire > 0 && laid_off_from(world, id, role) { rehire } else { 0 }
+        + profession_bonus(world, id, role);
     off.min(512)
+}
+
+/// Lives at work phase 6 (§ 4.3): a holder of the vacancy's profession
+/// ranks `[careers] profession_w` tiles nearer (0 off).
+fn profession_bonus(world: &World, id: EntityId, role: Role) -> u32 {
+    if crate::systems::careers::holds(world, id, role) {
+        world.config.careers.profession_w
+    } else {
+        0
+    }
 }
 
 /// The Real economy E41's band (review finding 8): every regular hiring key
@@ -1004,6 +1026,9 @@ struct HirePool {
     hired: std::collections::BTreeSet<EntityId>,
     /// Lives at work phase 2 (§ 3.4): the heirs waiting for a household business.
     holders: std::collections::BTreeSet<EntityId>,
+    /// Lives at work phase 6 (§ 4.1): candidates passed over for age this
+    /// pass (each time a pick reads one: `band_refusals`).
+    refused: u32,
     groups: std::collections::BTreeMap<Role, HireGroups>,
     /// `(workplace door, near cap)` -> `froms` by `hire_base`, ascending.
     bases: std::collections::BTreeMap<(TilePos, Option<u64>), HireBases>,
@@ -1025,6 +1050,7 @@ impl HirePool {
             froms: froms.into_iter().collect(),
             hired: std::collections::BTreeSet::new(),
             holders: crate::systems::household::business_holders(world),
+            refused: 0,
             groups: std::collections::BTreeMap::new(),
             bases: std::collections::BTreeMap::new(),
         }
@@ -1043,15 +1069,28 @@ impl HirePool {
                 && crate::systems::dollhouse::hire_ok(world, role)
                 && crate::systems::gray::hire_ok(world, id, role)
         };
+        // Lives at work phase 6 (§ 4.1, § 4.4): the age band and the retired
+        // (every candidate admitted off); an age refusal is counted.
+        let band = crate::systems::careers::hire_band(world, role);
+        let mut refused = 0u32;
+        let mut gate = |id: EntityId| match crate::systems::careers::refusal(world, id, band) {
+            None => true,
+            Some(age) => {
+                refused += u32::from(age);
+                false
+            }
+        };
         if skill_ranked(role) {
-            return self
+            let pick = self
                 .members
                 .iter()
                 .copied()
-                .filter(|&id| free(&self.hired, id))
+                .filter(|&id| free(&self.hired, id) && gate(id))
                 .map(|id| (skill_key(world, id, role), id))
                 .min()
                 .map(|(_, id)| id);
+            self.refused += refused;
+            return pick;
         }
         let (skill_w, rehire) = if crate::systems::wages::on(world) {
             (world.config.economy2.skill_w.max(0.0), world.config.economy2.rehire_bonus)
@@ -1065,7 +1104,7 @@ impl HirePool {
         // The Real economy E41: the `CampRaised` applicants' halved distance.
         if matches!(role, Role::Farmer | Role::Fabber) {
             for &id in &self.camp {
-                if crate::systems::camp::applicant_first(world, id, role) && free(&self.hired, id) {
+                if crate::systems::camp::applicant_first(world, id, role) && free(&self.hired, id) && gate(id) {
                     let k = (hire_from(world, id).manhattan(workplace_door) / 2, id);
                     if best.is_none_or(|b| k < b) {
                         best = Some(k);
@@ -1103,13 +1142,14 @@ impl HirePool {
             let Some(list) = groups.get_mut(&from) else { continue };
             // The hired leave a group for good; the quit-blocked only for this employer.
             list.retain(|&(_, id)| !self.hired.contains(&id));
-            if let Some(&(rank, id)) = list.iter().find(|&&(_, id)| free(&self.hired, id)) {
+            if let Some(&(rank, id)) = list.iter().find(|&&(_, id)| free(&self.hired, id) && gate(id)) {
                 let k = (base - 512 + rank, id);
                 if best.is_none_or(|b| k < b) {
                     best = Some(k);
                 }
             }
         }
+        self.refused += refused;
         best.map(|(_, id)| id)
     }
 }
@@ -1164,6 +1204,8 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
             duty_fixed: None,
             grade,
             until: None,
+            seniority_days: 0,
+            foreman: false,
         },
     );
     world.abort_plan(id);
@@ -1172,7 +1214,17 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
     let name = world.name_of(id);
     // Jobs & lives phase 1 (§ 2): the foreman named (nothing off).
     let foreman = crate::systems::industry::foreman_note(world, employer, id, "picked");
-    world.push_event(EventKind::Hire, &[id, employer], format!("{name} hired as {}{foreman}", role.label()));
+    // Lives at work phase 6 (§ 4.2, § 4.3): the foreman is an actor (his
+    // diary holds the hire); a holder of the trade counted.
+    let mut actors = vec![id, employer];
+    if let Some(f) = crate::systems::careers::foreman_actor(world, employer, id) {
+        actors.push(f);
+        ownership_row(world).foreman_hires += 1;
+    }
+    if crate::systems::careers::holds(world, id, role) {
+        ownership_row(world).profession_rehires += 1;
+    }
+    world.push_event(EventKind::Hire, &actors, format!("{name} hired as {}{foreman}", role.label()));
     // Lives at work phase 2 (§ 3.6): the work deed (nothing off).
     if crate::systems::household::on(world) {
         let d = crate::systems::gossip::talk_district(world, id);
@@ -1901,6 +1953,16 @@ mod tests {
         }
         let hired = |x: &World| x.vacancies.values().map(Vec::len).sum::<usize>();
         assert!(hired(&a) < open, "nobody was hired: the test exercises nothing");
+        // Lives at work phase 6: `band_refusals` counts the candidates a
+        // pooled pick reads and refuses for age (the full walk's
+        // `pick_candidate` is a `&World` read and counts none): the count is
+        // the pool's walk, not the hire, so the day's count is cleared on
+        // both sides before the compare.
+        for x in [&mut a, &mut b] {
+            if let Some(j) = x.stats.current.jobs2.as_mut() {
+                j.band_refusals = 0;
+            }
+        }
         assert_eq!(crate::save::to_ron(&a), crate::save::to_ron(&b));
     }
 

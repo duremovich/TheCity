@@ -1214,7 +1214,12 @@ mod lives_street {
         let mut w = if on {
             NIGHT
                 .get_or_init(|| {
-                    let mut w = common::world();
+                    // Lives at work phase 6: careers and lieutenants off (the
+                    // pimp's night needs a free gang member on day 1).
+                    let mut w = common::world_with(|c| {
+                        c.strip_careers();
+                        c.gangs.strip_lieutenants();
+                    });
                     w.run_ticks(TICKS_PER_DAY + 1);
                     w
                 })

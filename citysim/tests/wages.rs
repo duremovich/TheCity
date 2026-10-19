@@ -210,7 +210,9 @@ fn test_hiring_posts_below_and_lays_off_above_at_floor() {
             let b = w.comp::<Job>(a).and_then(|j| j.employer).expect("employer");
             !(spare_farms && w.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Farm))
         })
-        .max_by_key(|&a| (w.comp::<Job>(a).map_or(0, |j| j.hired_tick), a))
+        // Lives at work phase 6 (§ 4.2): newest by experience (`hired_tick`
+        // less the seeded seniority; `hired_tick` with careers off).
+        .max_by_key(|&a| (w.comp::<Job>(a).map_or(i64::MIN, |j| j.start_key()), a))
         .expect("a candidate");
     pin_windows(&mut w, corp, 100, 1000);
     wages::staff(&mut w);

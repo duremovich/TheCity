@@ -686,6 +686,8 @@ pub fn reconcile_sanitation(world: &mut World) {
             .filter(|&id| world.comp::<Brain>(id).is_some_and(|b| !b.emigrating))
             .filter(|&id| crate::systems::demography::is_adult(world, id))
             .filter(|&id| !crate::systems::founding::is_exec(world, id))
+            // Lives at work phase 6 (§ 4.1, § 4.4): the band, the retired.
+            .filter(|&id| crate::systems::careers::age_ok(world, id, Role::Sanitation))
             .map(|id| (world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins), id))
             .collect();
         candidates.sort_unstable();
