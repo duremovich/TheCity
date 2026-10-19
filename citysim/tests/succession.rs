@@ -509,10 +509,16 @@ fn test_bug8_leader_by_tenure_and_no_succession_for_a_night() {
     });
     // The seed's gangs start empty and recruit through the first days.
     w.run_ticks(12 * TICKS_PER_DAY);
+    // A gang with a leader and two free members besides (the 8c fix round's
+    // venue shifts moved the city: the first gang of four had one).
+    let free = |w: &World, g: EntityId| {
+        w.comp::<Gang>(g)
+            .map_or(0, |x| x.members.iter().filter(|&&m| Some(m) != x.leader && !w.has::<citysim::Sentence>(m)).count())
+    };
     let g = w
         .gangs()
         .into_iter()
-        .find(|&g| w.comp::<Gang>(g).is_some_and(|x| x.leader.is_some() && x.members.len() >= 4))
+        .find(|&g| w.comp::<Gang>(g).is_some_and(|x| x.leader.is_some() && x.members.len() >= 4) && free(&w, g) >= 2)
         .expect("a gang with a leader");
     // Two free members besides the leader (the ranking's own pool; Review:
     // on the moved city members[0] was the leader).
