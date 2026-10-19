@@ -1105,6 +1105,13 @@ Tests. The evening staff are set at seed, so seed 42's picks move from day 0. Th
 
 ### Open at the close (phase 8c, 2026-10-19)
 
+### The 8c fix round (2026-10-19)
+
+- **The venue shifts (SHADOW_V5 bug 1, `OPEN-114`).** `[service] evening_staff` no longer puts every Bartender, Attendant and Cook on the evening: `service::venue_shift` fills the thinner of `[world] shift_day` and `[leisure] evening_shift` among the role's staff at the venue (the evening on a tie), at seed and at each hire; `wages::site_shifts` counts the role on both. No new number; the Statistical server is credited on the same `Job::shifts`. Seeding moves, so the seed-42 city diverges from tick 0: six seeded probes were restaged to their written premises (the regular, the retiree, the pimp, the Camp control, bug 8's succession, the Purist patrol), no assertion changed.
+- **The Visit (SHADOW_V5 bug 3, `OPEN-116`).** One rule for the score and the plan (`household::visit_place`: a building visit's building, else the building the kin is in); a "not on shift" gate (`shift_reachable`, § 1.3); a visit with nowhere to walk is dropped at its plan, and one that cools is dropped for the day. A Full visitor whose kin is in no building (a Statistical elder at no door) makes no visit; the Statistical visitor's hourly credit is unchanged.
+- **`god_cut_the_precinct`.** The god halves `levers.guard_count` (`SetGuardCount`) for ten days instead of jailing the Precinct's guards; the arrest comparison against the no-station city is a FINDING (§ 10's table).
+- **Parity.** `paid venue visits` stays RED for another cause, the Statistical Lounge (`OPEN-130`).
+
 The deviations above that stay open, each with its row (numbered by the 8c fix round):
 
 - Phase 1: `stabilise_no_orderly_mult` not built (no save roll to multiply); the madam's cut rounds to 0 at 2k (a decision, § 15); the door refusal never fires at 2k (`door_refusals` 0 on seed 42 × 120: the bouncer has no door) `OPEN-121`; the madam's cut `OPEN-123`.
