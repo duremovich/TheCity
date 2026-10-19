@@ -1128,7 +1128,8 @@ pub fn full_cab(world: &mut World, id: EntityId, target: &crate::exec::GotoTarge
         let (who, at) = (world.name_of(id), world.district_name(world.district_of(here)).to_string());
         match (driver, ride.by) {
             (Some((s, _)), RideBy::Cab(g)) => {
-                crate::systems::grudges::add(world, s, id, crate::word::GrudgeCause::Robbed, 0.4, 0);
+                let w = world.config.service.tune.fare_dodge_grudge;
+                crate::systems::grudges::add(world, s, id, crate::word::GrudgeCause::Robbed, w, 0);
                 let text =
                     format!("{who} rode {}'s cab from {at} and skipped the {} fare", world.name_of(s), ride.fare);
                 world.push_event(EventKind::FareShort, &[id, s, g], text);

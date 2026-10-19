@@ -709,10 +709,15 @@ pub fn considerations(
             // Lives at work phase 4b (§ 2.3): a pimp's round in pitch hours
             // is his shift (scored as the exec's office hours).
             if crate::systems::vice::pimp_target(world, id).is_some() {
+                let t = &world.config.service.tune;
                 let cs = vec![
                     Consideration::new("pitch hours", 1.0, GATE),
-                    Consideration::new("energy", n.energy, Curve::Linear { m: 0.6, b: 0.4 }),
-                    Consideration::new("loyalty", p.loyalty, Curve::Linear { m: 0.3, b: 0.7 }),
+                    Consideration::new("energy", n.energy, Curve::Linear { m: t.pimp_energy.0, b: t.pimp_energy.1 }),
+                    Consideration::new(
+                        "loyalty",
+                        p.loyalty,
+                        Curve::Linear { m: t.pimp_loyalty.0, b: t.pimp_loyalty.1 },
+                    ),
                 ];
                 return Some((cs, 0.0));
             }

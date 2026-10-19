@@ -751,7 +751,8 @@ fn camp_answers_due(world: &mut World) -> std::collections::BTreeMap<EntityId, (
 
 /// § 3.5: buy out when the purse holds `buyout_fee` and the Home's pantry
 /// `buyout_food_days` of the child's food; else break out when lawless and
-/// brave (lawfulness < 0.3, courage ≥ 0.6) or a gang member with
+/// brave (lawfulness < `breakout_lawfulness`, courage ≥ `breakout_courage`,
+/// `[service.tune]`) or a gang member with
 /// `breakout_crew` of his gang alive and free; else visit.
 fn answer_of(world: &World, p: EntityId, cfg: &crate::config::ServiceCfg) -> CampAnswer {
     let purse = world.purse(Some(p));
@@ -759,7 +760,10 @@ fn answer_of(world: &World, p: EntityId, cfg: &crate::config::ServiceCfg) -> Cam
     if purse >= cfg.buyout_fee && pantry >= cfg.buyout_food_days * crate::systems::demography::CHILD_FOOD_PER_DAY {
         return CampAnswer::BuyOut;
     }
-    let lawless = world.comp::<Personality>(p).is_some_and(|x| x.lawfulness < 0.3 && x.courage >= 0.6);
+    let t = &cfg.tune;
+    let lawless = world
+        .comp::<Personality>(p)
+        .is_some_and(|x| x.lawfulness < t.breakout_lawfulness && x.courage >= t.breakout_courage);
     let crew = world.gang_of(p).is_some_and(|g| crew_of(world, g, p).len() >= usize::from(cfg.breakout_crew));
     if lawless || crew {
         CampAnswer::BreakOut
@@ -1010,16 +1014,17 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
     }
     let on_shift =
         world.comp::<crate::components::Job>(id).is_some_and(|j| crate::utility::goals::shift_reachable(world, id, j));
+    let u = &world.config.household.visit_urgency;
     let urgency = match v.why {
-        VisitWhy::Hurt => 1.0,
-        VisitWhy::Elder => 0.6,
-        VisitWhy::Camp(_) => 0.8,
-        VisitWhy::Papers => 0.9,
-        VisitWhy::Collect => 0.5,
+        VisitWhy::Hurt => u.hurt,
+        VisitWhy::Elder => u.elder,
+        VisitWhy::Camp(_) => u.camp,
+        VisitWhy::Papers => u.papers,
+        VisitWhy::Collect => u.collect,
     };
     let cs = vec![
         Consideration::new("a visit due", can(true), GATE),
-        Consideration::new("the reason", urgency, Curve::Linear { m: 0.5, b: 0.5 }),
+        Consideration::new("the reason", urgency, Curve::Linear { m: u.curve.0, b: u.curve.1 }),
         Consideration::new("not on shift", can(!on_shift), GATE),
     ];
     Some((cs, world.config.household.visit_flat))

@@ -461,7 +461,15 @@ fn warden_rolls(world: &mut World) {
         }
         if hash(world, PURPOSE_BEATING, key(k), day) < cfg.p_camp_beating {
             for p in parents_of(world, k) {
-                world.remember(p, MemoryKind::ChildTaken, Some(k), 0.5, -0.6, false);
+                let t = &cfg.tune;
+                world.remember(
+                    p,
+                    MemoryKind::ChildTaken,
+                    Some(k),
+                    t.camp_beating_salience,
+                    t.camp_beating_valence,
+                    false,
+                );
             }
             ownership::jobs2_row(world).camp_beatings += 1;
         }

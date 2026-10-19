@@ -451,7 +451,8 @@ fn tenant(world: &mut World, server: EntityId, tenant: EntityId, block: EntityId
     if arrears > 0 && world.notices_today.insert((tenant, day)) {
         outcome = Outcome::Notice;
         let salience = world.config.service.served_salience;
-        world.remember(tenant, MemoryKind::Served, Some(server), salience, -0.3, false);
+        let v = world.config.service.tune.notice;
+        world.remember(tenant, MemoryKind::Served, Some(server), salience, v, false);
         ownership::jobs2_row(world).notices += 1;
     }
     if due >= 1 && world.purse(Some(tenant)) >= due {
@@ -500,8 +501,9 @@ pub fn jailers_passed(world: &mut World, jail: EntityId) -> Option<EntityId> {
     }
     let on_duty = servers_on_duty(world, jail, ServeKind::Inmate);
     let salience = world.config.service.served_salience;
+    let v = world.config.service.tune.jailbreak;
     for &j in &on_duty {
-        world.remember(j, MemoryKind::Served, None, salience, -0.3, false);
+        world.remember(j, MemoryKind::Served, None, salience, v, false);
     }
     on_duty.first().copied()
 }
@@ -745,8 +747,9 @@ pub fn refused(world: &mut World, id: EntityId, b: EntityId) {
     let bouncer = staff[((u * staff.len() as f32) as usize).min(staff.len() - 1)];
     let Some(row) = row_of_agent(world, bouncer).cloned() else { return };
     let salience = world.config.service.served_salience;
-    world.remember(bouncer, MemoryKind::Served, Some(id), salience, -0.1, false);
-    world.remember(id, MemoryKind::Served, Some(bouncer), salience, -0.3, false);
+    let (vb, vr) = (world.config.service.tune.refused_bouncer, world.config.service.tune.refused);
+    world.remember(bouncer, MemoryKind::Served, Some(id), salience, vb, false);
+    world.remember(id, MemoryKind::Served, Some(bouncer), salience, vr, false);
     if row.event_on.contains(&ServeOutcome::Refused) {
         let text =
             format!("{} turned {} away at the door of {}", world.name_of(bouncer), world.name_of(id), world.name_of(b));
@@ -780,8 +783,9 @@ pub fn maybe_eject(world: &mut World, attacker: EntityId) -> bool {
     world.leave_building(attacker);
     ownership::jobs2_row(world).ejections += 1;
     let salience = world.config.service.served_salience;
-    world.remember(bouncer, MemoryKind::Served, Some(attacker), salience, -0.1, false);
-    world.remember(attacker, MemoryKind::Served, Some(bouncer), salience, -0.4, false);
+    let (vb, va) = (world.config.service.tune.eject_bouncer, world.config.service.tune.ejected);
+    world.remember(bouncer, MemoryKind::Served, Some(attacker), salience, vb, false);
+    world.remember(attacker, MemoryKind::Served, Some(bouncer), salience, va, false);
     let names_it = row_of_agent(world, bouncer).is_some_and(|r| r.event_on.contains(&ServeOutcome::Ejected));
     if names_it {
         let text = format!("{} threw {} out of {}", world.name_of(bouncer), world.name_of(attacker), world.name_of(b));
