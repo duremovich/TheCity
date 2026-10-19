@@ -263,3 +263,115 @@ fn test_save_round_trips_layoff_notes_and_rebuilds_the_employer_index() {
     assert_eq!(back.employers, w.employers, "the employer index rebuilt");
     assert_eq!(save::to_ron(&back), text);
 }
+
+/// The first byte two saves differ at, with the text around it.
+fn first_diff(a: &str, b: &str) -> Option<String> {
+    let i = a
+        .bytes()
+        .zip(b.bytes())
+        .position(|(x, y)| x != y)
+        .or_else(|| (a.len() != b.len()).then(|| a.len().min(b.len())))?;
+    let lo = i.saturating_sub(300);
+    Some(format!(
+        "at byte {i}\n--- live: {}\n+++ load: {}",
+        &a[lo..(i + 100).min(a.len())],
+        &b[lo..(i + 100).min(b.len())]
+    ))
+}
+
+/// OPEN-112 (doctrine 8): a live world (generated, never loaded) run
+/// `days`, saved and loaded, runs on a day byte for byte with itself.
+fn live_save_resumes(c: Config, days: u64) -> World {
+    let mut w = World::new(42, c);
+    w.run_ticks(days * TICKS_PER_DAY);
+    let mut back = save::from_ron(&save::to_ron(&w)).expect("load");
+    w.run_ticks(TICKS_PER_DAY);
+    back.run_ticks(TICKS_PER_DAY);
+    if let Some(d) = first_diff(&save::to_ron(&w), &save::to_ron(&back)) {
+        panic!("a live world saved on day {days} diverged from itself within the day: {d}");
+    }
+    w
+}
+
+/// OPEN-112: the leverage tests' city (no outside, no industries): on day
+/// 23 a body walking through a Farm raised on a Lot stepped by the open
+/// Lot's flow-field bytes in the live world and by a rebuild's in the
+/// loaded one. Every cached field now equals a rebuild on the map.
+#[test]
+fn test_live_save_resumes_after_lots_are_built() {
+    let mut c = Config::load();
+    c.outside.enabled = false;
+    c.jobs2.enabled = false;
+    let w = live_save_resumes(c, 23);
+    let mut n = 0;
+    for (b, f) in w.flow_fields.fields() {
+        let door = w.comp::<citysim::Building>(b).map(|x| x.door);
+        assert_eq!(f.door, door, "{b:?}'s field is for its door");
+        let fresh = citysim::exec::flowfield::FlowField::build(&w.map, door.unwrap());
+        assert!(fresh.next == f.next, "{b:?}'s cached field differs from a rebuild");
+        n += 1;
+    }
+    assert!(n > 0, "fields cached");
+}
+
+/// OPEN-112: the shipped city: on day 7 the live world's `on_take` (built
+/// when a record changed hands, filtered then by who was a city guard and
+/// which records were corruption) still held a guard the loaded world's
+/// rebuild dropped; the filters now apply at the read.
+#[test]
+fn test_live_save_resumes_with_guards_on_the_take() {
+    live_save_resumes(Config::load(), 7);
+}
+
+/// OPEN-112: a death drops the dead from the live enemies index (the Enemy
+/// edge stays); the load's rebuild did not, so `enemies_of` (the
+/// Revenge rumour's swap, the threat reads) saw a dead enemy only after a
+/// load. The rebuild now keeps the living, as the spouses.
+#[test]
+fn test_enemies_index_after_a_death_matches_a_load() {
+    use citysim::systems::social;
+    let mut w = World::new(42, Config::load().dole_city().scaled_to(300));
+    w.run_ticks(600);
+    let ads: Vec<EntityId> = w.citizens().into_iter().take(3).collect();
+    let (a, b, c) = (ads[0], ads[1], ads[2]);
+    for (x, y) in [(a, b), (a, c)] {
+        w.edge_entry(x, y).affinity = -0.9;
+        w.edge_entry(x, y).kind = RelKind::Enemy;
+        social::reindex_kind(&mut w, x, y);
+    }
+    w.kill(b, citysim::DeathCause::Violence);
+    assert_eq!(w.enemies_of(a).collect::<Vec<_>>(), vec![c], "the dead dropped live");
+    let back = save::from_ron(&save::to_ron(&w)).expect("load");
+    assert_eq!(back.enemies, w.enemies, "the rebuilt index matches the live one");
+}
+
+/// OPEN-112's sweep (diag): a live world saved at each day start in
+/// `[O112_FROM, O112_TO)` (default 1..60, seed `O112_SEED`, default 42;
+/// `O112_LEV` for the leverage tests' city), loaded, and both run the day;
+/// prints the first day the two differ, with the bytes around it.
+/// Seeds 42-44 x 120 days and seed 42 at 700 ticks past each day start
+/// resumed byte for byte after OPEN-112's fix.
+#[test]
+#[ignore = "tier: diag"]
+fn diag_live_save_sweep() {
+    let env = |k: &str, d: u64| std::env::var(k).ok().and_then(|s| s.parse().ok()).unwrap_or(d);
+    let (from, to, seed) = (env("O112_FROM", 1), env("O112_TO", 60), env("O112_SEED", 42));
+    let mut c = Config::load();
+    if std::env::var("O112_LEV").is_ok() {
+        c.outside.enabled = false;
+        c.jobs2.enabled = false;
+    }
+    let mut w = World::new(seed, c);
+    // `O112_OFF`: the saves that many ticks past each day start.
+    w.run_ticks(from * TICKS_PER_DAY + env("O112_OFF", 0));
+    for d in from..to {
+        let mut back = save::from_ron(&save::to_ron(&w)).expect("load");
+        w.run_ticks(TICKS_PER_DAY);
+        back.run_ticks(TICKS_PER_DAY);
+        if let Some(x) = first_diff(&save::to_ron(&w), &save::to_ron(&back)) {
+            println!("FINDING seed {seed}: a save on day {d} diverged within the day: {x}");
+            return;
+        }
+    }
+    println!("FINDING seed {seed}: days {from}..{to} each resumed byte for byte");
+}

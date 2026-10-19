@@ -37,17 +37,19 @@ fn world() -> World {
 
 /// The seed-42 city once its gangs hold Homes and have leaders (two or
 /// more led gangs, one holding a district with a business), run once and
-/// shared through a save.
+/// shared as a clone of the live world (OPEN-112: a save of it resumes
+/// byte for byte, so `test_save_mid_coercion_round_trips` saves a live
+/// world, not one already loaded).
 fn gang_world() -> World {
-    static SAVE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    gang_world_in(&SAVE, false)
+    static CITY: std::sync::OnceLock<World> = std::sync::OnceLock::new();
+    gang_world_in(&CITY, false)
 }
 
 /// [`gang_world`] with the pre-mirror off-screen evening throughout (a
 /// stat table without `p_venue`, the best-rung path).
 fn gang_world_pre_mirror() -> World {
-    static SAVE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    gang_world_in(&SAVE, true)
+    static CITY: std::sync::OnceLock<World> = std::sync::OnceLock::new();
+    gang_world_in(&CITY, true)
 }
 
 fn no_venue_rates(w: &mut World) {
@@ -56,8 +58,8 @@ fn no_venue_rates(w: &mut World) {
     }
 }
 
-fn gang_world_in(save: &std::sync::OnceLock<String>, pre_mirror: bool) -> World {
-    let text = save.get_or_init(|| {
+fn gang_world_in(cell: &std::sync::OnceLock<World>, pre_mirror: bool) -> World {
+    let base = cell.get_or_init(|| {
         let mut w = world();
         if pre_mirror {
             no_venue_rates(&mut w);
@@ -92,9 +94,9 @@ fn gang_world_in(save: &std::sync::OnceLock<String>, pre_mirror: bool) -> World 
                 break;
             }
         }
-        citysim::save::to_ron(&w)
+        w
     });
-    let mut w = citysim::save::from_ron(text).expect("loads");
+    let mut w = base.clone();
     if pre_mirror {
         no_venue_rates(&mut w);
     }

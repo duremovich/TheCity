@@ -1215,9 +1215,10 @@ pub struct World {
     /// C27: Open or Taken Locate records by target.
     #[serde(skip)]
     pub locate_targets: BTreeMap<EntityId, SmallVec<[crate::contract::ContractId; 2]>>,
-    /// C31 (phase 3): a city guard on the take -> its buyers.
+    /// C31 (phase 3): a taker -> its Taken Guard records without a broker
+    /// (`contracts::on_take_of` reads which make it a city guard on the take).
     #[serde(skip)]
-    pub on_take: BTreeMap<EntityId, SmallVec<[EntityId; 2]>>,
+    pub on_take: BTreeMap<EntityId, SmallVec<[crate::contract::ContractId; 2]>>,
     /// C32: client (agent or building) -> the agents standing a Guard post on it now.
     #[serde(skip)]
     pub contract_guards: BTreeMap<EntityId, SmallVec<[EntityId; 2]>>,
@@ -3586,7 +3587,9 @@ impl World {
                     self.spouses.insert(a, b);
                     self.spouses.insert(b, a);
                 }
-                RelKind::Enemy => {
+                // OPEN-112: as the spouses, the living only (`social::unlink`
+                // drops the dead from the live index; the edge stays).
+                RelKind::Enemy if living(self, a) && living(self, b) => {
                     self.enemies.entry(a).or_default().insert(b);
                     self.enemies.entry(b).or_default().insert(a);
                 }
