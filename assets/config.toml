@@ -3735,6 +3735,7 @@ civic = true                       # phase 3 (§ 2.2, § 3.5): teacher, camp war
 street = true                      # phase 4 (§ 2.3): the cab roll and the driver's body, the parcel, the lift, the client, the pimp's round, the dealer's corner (CITYSIM_LIVES_STREET_OFF=1; CITYSIM_STREET_OFF is [jobs2] street's)
 tower = true                       # phase 5 (§ 2.4, § 2.2's civic clerk, § 3.6's decided): the exec's Meeting and decision, the reporter's beat and byline, the Fixer's walk-in and contract encounters, the owner's collection, the clerk named (CITYSIM_TOWER_OFF=1)
 madam_cut = 0.3                    # § 2.1: the madam's share of each tip at her Brothel, worker -> madam (Flow::MadamCut)
+evening_roles = ["Bartender", "Attendant", "Cook"]   # OPEN-111: the legacy venue roles hired onto [leisure] evening_shift (18-24, the trade's hours: the drinking and the Statistical evening), not [world] shift_day
 p_eject = 0.5                      # § 2.1: an Assault inside a kept venue is an ejection on this x (bouncer fighting - attacker fighting)
 staff_meal = true                  # § 2.1: a Cook takes one meal from the NoodleBar's stock at shift end (every tier; V4: a cook steals food)
 served_salience = 0.15             # D5: a Served memory's salience (its mood weight is 0 whatever the valence)
@@ -3774,7 +3775,7 @@ per_hour = 12
 minutes = 5
 skill = "persuasion"
 skill_gain = 0.0005
-regular_after = 5
+regular_after = 3                  # OPEN-111: § 10's "a regular" is three evenings at one Bar (was 5, the phase 1 pick)
 regular_days = 14
 valence = 0.1
 

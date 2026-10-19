@@ -14,7 +14,7 @@
 //! visitor is there, so a shift boundary or the Statistical evening's
 //! one-hour batch loses no tip): the served goes to the on-duty server with
 //! room left this hour (its `[[serves]]` row's `per_hour`, the ledger
-//! `World::service_room`) whose `hash(PURPOSE_SERVE, place, served, hour)`
+//! `World::service_room`) whose `hash(PURPOSE_SERVE, place, served, server)`
 //! is lowest (D6: never the lowest id), FIFO by arrival; with nobody on duty
 //! or every counter full the arrival is the "waited" outcome, counted.
 //! [`hourly`] (from `living::run` after `vice::hourly`) prunes the room
@@ -110,6 +110,16 @@ pub enum Outcome {
 /// Phase 1 is live: `[jobs2] enabled`, `[lives] enabled` and `[service] venues`.
 pub fn on(world: &World) -> bool {
     crate::systems::industry::on(world) && world.config.lives.enabled && world.config.service.venues
+}
+
+/// OPEN-111: the shift a legacy venue `role` is hired onto when `[service]
+/// venues` is on and the role is in `[service] evening_roles`: `[leisure]
+/// evening_shift`, the hours the venue trades (seeding and
+/// `demography::hire` alike; a Statistical server is credited by the same
+/// `Job::shifts`, so the mirror follows). `None`: the role's shift as before.
+pub fn venue_shift(cfg: &crate::config::Config, role: Role) -> Option<Vec<(u16, u16)>> {
+    (cfg.jobs2.enabled && cfg.lives.enabled && cfg.service.venues && cfg.service.evening_roles.contains(&role))
+        .then(|| cfg.leisure.evening_shift.clone())
 }
 
 /// Lives at work phase 3 is live: the encounter on and `[service] civic`
@@ -246,10 +256,13 @@ pub fn arrive(world: &mut World, served: EntityId, place: EntityId, kind: ServeK
         return;
     }
     let hour = world.tick / TICKS_PER_HOUR;
+    // OPEN-111: the hash is the pair's, not the hour's, so a patron gets
+    // the same server whenever that server is on duty with room (a regular
+    // accumulates on one ledger); still never the lowest id (D6).
     let pick = servers(world, place, kind)
         .into_iter()
         .filter(|&(s, cap)| world.service_room.get(&s).is_none_or(|r| r.hour != hour || r.taken < cap))
-        .map(|(s, _)| (hash(world, PURPOSE_SERVE, key(place) ^ key(served), hour ^ key(s)), s))
+        .map(|(s, _)| (hash(world, PURPOSE_SERVE, key(place) ^ key(served), key(s)), s))
         .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
     match pick {
         Some((_, server)) => {

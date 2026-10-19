@@ -1175,6 +1175,10 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
     if matches!(role, Role::Host | Role::Fighter | Role::Croupier | Role::Concierge) {
         shifts = world.config.leisure.evening_shift.clone();
     }
+    // OPEN-111: a venue's legacy staff work its trade hours.
+    if let Some(s) = crate::systems::service::venue_shift(&world.config, role) {
+        shifts = s;
+    }
     // Jobs and room J12: a trade's shift is its row's.
     if let Some(row) = crate::systems::trades::row_of(world, role) {
         shifts = crate::systems::trades::shifts_for(world, row, id);

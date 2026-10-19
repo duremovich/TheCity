@@ -3170,7 +3170,10 @@ fn probe_sixty_four_with_savings_retires() {
 /// walk and the `Enjoy` that `leisure::unwind_plan` installs, set again
 /// until he has been served that day; everything else is his own). With
 /// `same`, one Bar; else three different Bars. Returns the Bar staff who
-/// served him by day, and those of them he now knows as Acquaintances.
+/// served him by day, and the regulars made: a server he now knows as an
+/// Acquaintance, whose ledger holds him `regular_after` times or more, and
+/// whom he did not know the evening of that last encounter began (the edge
+/// is the ledger's, not an earlier meeting's).
 fn bar_regular(same: bool, hour: u64) -> (Vec<(u64, EntityId)>, Vec<EntityId>) {
     use citysim::components::ActionInstance;
     use citysim::systems::service;
@@ -3199,9 +3202,12 @@ fn bar_regular(same: bool, hour: u64) -> (Vec<(u64, EntityId)>, Vec<EntityId>) {
             .collect()
     };
     let mut served_by: Vec<(u64, EntityId)> = Vec::new();
+    // (day, server) -> he knew the server as the evening began.
+    let mut knew_before: Vec<(u64, EntityId, bool)> = Vec::new();
     for d in 1..=3u64 {
         let bar = if same { bars[0] } else { bars[(d - 1) as usize] };
         run_to(&mut w, a, d * TICKS_PER_DAY + hour * TICKS_PER_HOUR, |_| {});
+        knew_before.extend(w.staff_of(bar).iter().map(|&s| (d, s, w.edge(a, s).is_some())));
         w.comp_mut::<Wallet>(a).expect("wallet").coins = 200;
         if let Some(n) = w.comp_mut::<Needs>(a) {
             n.fun = 0.0;
@@ -3242,31 +3248,36 @@ fn bar_regular(same: bool, hour: u64) -> (Vec<(u64, EntityId)>, Vec<EntityId>) {
         );
         served_by.extend(by.into_iter().map(|s| (d, s)));
     }
-    let known: Vec<EntityId> = served_by
-        .iter()
-        .map(|&(_, s)| s)
-        .filter(|&s| w.edge(a, s).is_some_and(|e| e.kind == RelKind::Acquaintance))
-        .collect();
+    let after = service::row_for(&w, Role::Bartender).map_or(u8::MAX, |r| r.regular_after);
+    let mut known: Vec<EntityId> = Vec::new();
+    for &(d, s) in &served_by {
+        let visits = service::regulars_of(&w, s).iter().find(|r| r.who == a).map_or(0, |r| r.visits);
+        let edge = w.edge(a, s).map(|e| e.kind);
+        let knew = knew_before.iter().any(|&(kd, ks, k)| kd == d && ks == s && k);
+        eprintln!("  day {d} {}: edge now {edge:?}, knew at dusk {knew}, ledger visits {visits}", w.name_of(s));
+        let last = served_by.iter().filter(|&&(_, x)| x == s).all(|&(dd, _)| dd <= d);
+        if last && edge == Some(RelKind::Acquaintance) && visits >= after && !knew {
+            known.push(s);
+        }
+    }
     (served_by, known)
 }
 
-/// Lives at work § 10 ("a regular"), in the Bar's served hours (its
-/// bartenders hold `[world] shift_day`, 09-18; the evening drink is
-/// unserved): a Full agent who drinks at the same Bar three days running
-/// is an Acquaintance of the bartender who served him (`[service]
-/// regular_after` 3 within `regular_days`). Control: three different Bars,
-/// a day each: served each day, no edge. The gap (OPEN-111): the server is
-/// a fresh hash each hour among those on duty (D6) and the ledger is the
-/// server's, so with five bartenders on the day shift the three drinks go
-/// to three bartenders (seed 42: Cipher Reyes, Quill Varley, Leopold
-/// Adeyemi) and no regular forms.
+/// Lives at work § 10 ("a regular"): a Full agent who drinks at the same
+/// Bar three evenings running (from 19:00; its bartenders work `[leisure]
+/// evening_shift` under `[service] evening_roles`) is an Acquaintance of
+/// the bartender who served him (the Bartender row's `regular_after`
+/// within `regular_days`). Control: three different Bars, an evening each:
+/// served each evening, no edge. OPEN-111 (closed): the server was a fresh
+/// hash each hour among those on duty, so the three drinks went to three
+/// bartenders, and the bartenders held the day shift; now the pick is
+/// stable per pair and the shift is the trade's.
 #[test]
-#[ignore = "gap: OPEN-111"]
 fn probe_regular_at_one_bar_meets_its_bartender() {
-    let (served, known) = bar_regular(true, 10);
+    let (served, known) = bar_regular(true, 19);
     assert!(served.len() >= 3, "served on each of the three days ({served:?})");
     assert!(!known.is_empty(), "three days at one Bar: an Acquaintance of its bartender");
-    let (served, known) = bar_regular(false, 10);
+    let (served, known) = bar_regular(false, 19);
     assert!(served.len() >= 3, "control: served at each Bar ({served:?})");
     assert!(known.is_empty(), "control: a day at each of three Bars makes no regular");
 }

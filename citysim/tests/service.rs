@@ -422,10 +422,20 @@ fn service_probe() {
         .map(|&k| (k, ServeKind::Visit))
         .chain([(BuildingKind::Bar, ServeKind::Visit), (BuildingKind::Clinic, ServeKind::Patient)])
         .collect();
+    // OPEN-111: the arrivals served and waited by hour of day (the deltas of
+    // the day's running counters, read at the top of each hour).
+    let mut by_hour = [(0u32, 0u32); 24];
+    let mut last = (0u32, 0u32);
     for _ in 0..10 * TICKS_PER_DAY {
         if w.tick.is_multiple_of(TICKS_PER_HOUR) {
             let tod = w.tick_of_day();
             let hour = tod / 60;
+            let now = w.stats.current.jobs2.as_ref().map_or((0, 0), |j| (j.served_total(), j.served_waited));
+            let prev = if now.0 < last.0 || now.1 < last.1 { (0, 0) } else { last };
+            let h = usize::from((hour + 23) % 24);
+            by_hour[h].0 += now.0 - prev.0;
+            by_hour[h].1 += now.1 - prev.1;
+            last = now;
             for &(bk, sk) in &kinds {
                 for &b in w.buildings_of_kind(bk) {
                     let kind = format!("{bk:?}");
@@ -477,6 +487,8 @@ fn service_probe() {
     for (k, n) in &why {
         eprintln!("PROBE service why {k}: {n}");
     }
+    let hours: Vec<String> = by_hour.iter().enumerate().map(|(h, &(sv, wt))| format!("{h}:{sv}/{wt}")).collect();
+    eprintln!("PROBE service served/waited by hour {}", hours.join(" "));
     let j = w.stats.history.iter().fold([0u32; 5], |mut a, r| {
         if let Some(j) = &r.jobs2 {
             a[0] += j.served_total();
