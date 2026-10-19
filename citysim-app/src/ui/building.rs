@@ -212,6 +212,12 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
             }
             // Jobs & lives phase 7 (section 6.1): a School's staff.
             BuildingKind::School => staff(ui, app, world, id, "Teachers"),
+            // Lives at work phase 7 (section 5.2): a Station's cells and its guards.
+            BuildingKind::Station => {
+                let held = citysim::systems::stations::held_at(world, id);
+                ui.label(format!("held {held} of {} cells", world.config.law.station_cells));
+                staff(ui, app, world, id, "Guards");
+            }
             // Jobs & lives phase 6 (section 7): a black clinic's organs.
             BuildingKind::BlackClinic => {
                 let units = world.stock(id, citysim::Good::Organs);

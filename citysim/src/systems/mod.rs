@@ -86,6 +86,7 @@ pub mod security;
 pub mod service;
 pub mod social;
 pub mod stat_policy;
+pub mod stations;
 pub mod stats;
 pub mod stims;
 pub mod street;

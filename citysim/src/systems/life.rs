@@ -862,7 +862,13 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool) {
         let purse = coins(world, a);
         let evicted_by = world.comp::<Household>(a).and_then(|h| h.evicted_by).map(|(o, _)| o);
         // Class pay: a graded post holder or an exec keeps its tier.
-        let min_tier = crate::systems::classpay::min_home_tier(world, a, home);
+        let mut min_tier = crate::systems::classpay::min_home_tier(world, a, home);
+        // Lives at work phase 7 (§ 5.3): an exec, or an exec's spouse (who
+        // moves the exec along), only to `exec_home_tier` or better (the
+        // first build moved 20k execs out of the Spire as a mover's spouse).
+        if execs.contains_key(&a) || spouse.is_some_and(|s| execs.contains_key(&s)) {
+            min_tier = min_tier.max(exec_home_tier(world));
+        }
         if !lazy {
             memo.fill(world, work, &cost);
             if let Some(sw) = spouse_work {
@@ -1106,8 +1112,11 @@ fn swap_partner(
             if !ok || coins(world, r) < home_rent {
                 continue;
             }
-            // The partner's tier floor and evictor, as its own pick's.
-            if crate::systems::classpay::min_home_tier(world, r, h) > home_tier
+            // The partner's tier floor and evictor, as its own pick's (Lives
+            // at work phase 7: an exec's floor is `exec_home_tier`).
+            let exec_floor =
+                if exec_home_tier(world) > 0 && exec_corp(world, r).is_some() { exec_home_tier(world) } else { 0 };
+            if crate::systems::classpay::min_home_tier(world, r, h).max(exec_floor) > home_tier
                 || world.comp::<Household>(r).and_then(|x| x.evicted_by).is_some_and(|(o, _)| o == home_owner)
             {
                 continue;
@@ -1244,11 +1253,79 @@ pub fn exec_day_pending(world: &World, id: EntityId) -> Option<EntityId> {
     crate::systems::transit::trip_due(world, id, door, until, 30).then_some(hq)
 }
 
+/// Lives at work phase 7 (§ 5.3): the Home tier a corp exec lives at or
+/// above (`[life] exec_home_tier`); 0 off.
+pub fn exec_home_tier(world: &World) -> u8 {
+    if world.config.lives.enabled {
+        world.config.life.exec_home_tier
+    } else {
+        0
+    }
+}
+
+/// Lives at work phase 7 (§ 5.3), daily before the relocation: every corp
+/// exec housed under `exec_home_tier` moves up when a Home there has room
+/// ([`house_exec`]); nobody is evicted for it. An exec under a grown child's
+/// roof stays (`ages::with_kin`: the first build moved an elder exec up
+/// each midnight and the kin take-in moved her back the next). A no-op off.
+pub fn spire_homes(world: &mut World) {
+    if exec_home_tier(world) == 0 {
+        return;
+    }
+    for e in crate::systems::classes::exec_set(world) {
+        if crate::systems::law::living(world, e)
+            && !world.has::<Sentence>(e)
+            && !crate::systems::ages::with_kin(world, e)
+        {
+            house_exec(world, e);
+        }
+    }
+}
+
+/// Lives at work phase 7 (§ 5.3): the execs, those housed at
+/// `exec_home_tier` or better, the beds of that tier, those free, and the
+/// beds wanted (`execs × exec_home_spare`, rounded up). Printed at seed
+/// (the 20k Spire's supply), never acted on.
+pub fn spire_supply(world: &World) -> (usize, usize, usize, usize, usize) {
+    let tier = exec_home_tier(world).max(1);
+    let execs = crate::systems::classes::exec_set(world);
+    let housed = execs
+        .iter()
+        .filter(|&&e| home_of(world, e).and_then(|h| world.comp::<Building>(h)).is_some_and(|b| b.tier >= tier))
+        .count();
+    let (mut beds, mut free) = (0usize, 0usize);
+    for &h in world.buildings_of_kind(BuildingKind::Home) {
+        if let Some(b) = world.comp::<Building>(h).filter(|b| b.tier >= tier && !b.demolished && !b.derelict) {
+            beds += usize::from(b.capacity);
+            free += usize::from(b.capacity).saturating_sub(world.residents_of(h).len());
+        }
+    }
+    let want = (execs.len() as f32 * world.config.life.exec_home_spare).ceil() as usize;
+    (execs.len(), housed, beds, free, want)
+}
+
+/// The day's end: the corp execs and those housed at `exec_home_tier` or
+/// better (`execs`, `execs_spire`). A no-op off.
+pub fn snapshot(world: &mut World) {
+    if exec_home_tier(world) == 0 {
+        return;
+    }
+    let (execs, housed, ..) = spire_supply(world);
+    let row = crate::systems::ownership::jobs2_row(world);
+    row.execs = execs as u32;
+    row.execs_spire = housed as u32;
+}
+
 /// Move an exec (with a spouse and children sharing the Home) into a free
-/// Spire Home (tier 2) when they live lower down and one has room.
+/// Spire Home (tier 2; Lives at work phase 7: `exec_home_tier` when on)
+/// when they live lower down and one has room.
 pub fn house_exec(world: &mut World, exec: EntityId) {
     let Some(home) = home_of(world, exec) else { return };
-    if world.comp::<Building>(home).is_some_and(|b| b.tier >= 2) {
+    let tier = match exec_home_tier(world) {
+        0 => 2,
+        t => t,
+    };
+    if world.comp::<Building>(home).is_some_and(|b| b.tier >= tier) {
         return;
     }
     let spouse = world.spouse_of(exec).filter(|&s| home_of(world, s) == Some(home) && world.has::<Brain>(s));
@@ -1263,7 +1340,7 @@ pub fn house_exec(world: &mut World, exec: EntityId) {
         .copied()
         .filter(|&h| {
             world.comp::<Building>(h).is_some_and(|b| {
-                b.tier >= 2
+                b.tier >= tier
                     && !b.demolished
                     && !b.derelict
                     && world.residents_of(h).len() + need <= usize::from(b.capacity)

@@ -131,7 +131,7 @@ pub fn sense(world: &mut World, actor: EntityId, crime: Crime, b: EntityId) -> S
     }
     let Some(jail) = world.building_of_kind(BuildingKind::Jail) else { return Sensed::Unseen };
     if world.has::<crate::components::Sentence>(actor)
-        || world.sentenced().len() >= usize::from(world.config.buildings.jail.capacity)
+        || crate::systems::stations::precinct_held(world) >= usize::from(world.config.buildings.jail.capacity)
     {
         return Sensed::Unseen;
     }

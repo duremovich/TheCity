@@ -238,10 +238,15 @@ pub enum BuildingKind {
     // --- Jobs & lives phase 7 (§ 6.1), only with `[ages] enabled` on.
     /// A School on fees (its teachers; Mid and up).
     School,
+    // --- Lives at work phase 7 (§ 5.2), only with `[law] stations` on.
+    /// A district's police station: a booking desk and a few cells, the
+    /// city's; its guards muster there and the night van takes the held
+    /// to the Precinct (the Jail).
+    Station,
 }
 
 impl BuildingKind {
-    pub const ALL: [BuildingKind; 40] = [
+    pub const ALL: [BuildingKind; 41] = [
         BuildingKind::Home,
         BuildingKind::Farm,
         BuildingKind::Market,
@@ -282,6 +287,7 @@ impl BuildingKind {
         BuildingKind::BdStudio,
         BuildingKind::BlackClinic,
         BuildingKind::School,
+        BuildingKind::Station,
     ];
 
     /// Jobs & lives phase 1: the kinds that stand only with `[jobs2] enabled`
@@ -378,6 +384,7 @@ impl BuildingKind {
             "BdStudio" => BuildingKind::BdStudio,
             "BlackClinic" => BuildingKind::BlackClinic,
             "School" => BuildingKind::School,
+            "Station" => BuildingKind::Station,
             _ => return None,
         })
     }
@@ -425,6 +432,7 @@ impl BuildingKind {
             BuildingKind::BdStudio => "BD Studio",
             BuildingKind::BlackClinic => "Back Room",
             BuildingKind::School => "School",
+            BuildingKind::Station => "Station",
         }
     }
 
@@ -482,6 +490,8 @@ impl BuildingKind {
             BuildingKind::BlackClinic => '@',
             // Jobs & lives phase 7.
             BuildingKind::School => '?',
+            // Lives at work phase 7.
+            BuildingKind::Station => '|',
         }
     }
 }

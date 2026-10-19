@@ -446,10 +446,14 @@ pub enum EventKind {
     // --- Lives at work phase 6 (docs/LIVES_AT_WORK.md § 4.4).
     /// `[worker, employer]`: a worker retired (on savings or to kin).
     Retired,
+    // --- Lives at work phase 7 (docs/LIVES_AT_WORK.md § 5.2).
+    /// `[prisoner, station, precinct]`: the night van took a held body from
+    /// a Station's cells to the Precinct.
+    Transferred,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 221] = [
+    pub const ALL: [EventKind; 222] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -671,6 +675,7 @@ impl EventKind {
         EventKind::Notice,
         EventKind::FareShort,
         EventKind::Retired,
+        EventKind::Transferred,
     ];
 }
 

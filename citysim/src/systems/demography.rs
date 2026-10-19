@@ -49,6 +49,9 @@ pub fn run(world: &mut World) {
     // Hunger fix item 10 (P5h): the city grows Homes toward unmet demand,
     // then relocation fills them.
     crate::prof::timed!("demo::life::grow_housing", crate::systems::life::grow_housing(world));
+    // Lives at work phase 7 (§ 5.3): an exec housed low moves up when the
+    // Spire has room, before the relocation reads his Home.
+    crate::prof::timed!("demo::life::spire_homes", crate::systems::life::spire_homes(world));
     // L1: a long commute moves nearer work (a few households a night).
     crate::prof::timed!("demo::life::relocate", crate::systems::life::relocate(world));
     crate::prof::timed!("demo::emigration", emigration(world));

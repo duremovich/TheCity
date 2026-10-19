@@ -17,6 +17,10 @@ use crate::world::World;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Chebyshev distance between two tiles.
+/// Lives at work phase 7 (§ 5.2): the `Jail` key's building and a Station
+/// guard's post (`systems::stations`).
+pub use crate::systems::stations::{jail_for, station_post};
+
 pub fn chebyshev(a: TilePos, b: TilePos) -> u32 {
     let dx = (i32::from(a.x) - i32::from(b.x)).unsigned_abs();
     let dy = (i32::from(a.y) - i32::from(b.y)).unsigned_abs();
@@ -987,6 +991,8 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
     if let Some(b) = world.comp_mut::<Brain>(guard) {
         b.escorting = Some(suspect);
     }
+    // Lives at work phase 7 (§ 5.2): the nearest Station full: sent on.
+    crate::systems::stations::on_arrest(world, guard);
     world.push_event(
         EventKind::Arrest,
         &[guard, suspect],
@@ -1074,14 +1080,26 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
         return;
     };
     let crime = report.crime;
-    let Some(jail) = world.building_of_kind(BuildingKind::Jail) else { return };
+    let Some(precinct) = world.building_of_kind(BuildingKind::Jail) else { return };
+    // Lives at work phase 7 (§ 5.2): an escort that ended in a Station books
+    // there (its cells: a fine or a night served there, anything longer to
+    // the Precinct by the van). The Precinct's room still decides a full
+    // house: a Station's held go there by morning.
+    let station = world
+        .comp::<Position>(guard)
+        .and_then(|p| p.building)
+        .filter(|&b| crate::systems::stations::on(world) && crate::systems::stations::is_station(world, b));
+    let jail = station.unwrap_or(precinct);
     let capacity = usize::from(world.config.buildings.jail.capacity);
-    let jailed = world.with::<Sentence>().len();
+    let jailed = crate::systems::stations::precinct_held(world);
 
     // Shadow V4 bug 4: a petty offence (a night in the cells) is fined
     // whenever the suspect can pay, not only when the Precinct is full (fare
     // evasion was the city's top sentence, served from a desk or a bar).
     let full = jailed >= capacity;
+    if full && crate::systems::stations::on(world) {
+        crate::systems::ownership::jobs2_row(world).precinct_full += 1;
+    }
     let petty = is_petty(crime);
     let can_pay = world.comp::<crate::components::Wallet>(suspect).is_some_and(|w| w.coins >= fine_for(world, crime));
     if full || (petty && can_pay) {
@@ -1123,6 +1141,11 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
                         world.push_event(EventKind::Vagrancy, &[suspect], text);
                     }
                     world.stats.current.arrests += 1;
+                    if station.is_some() {
+                        let row = crate::systems::ownership::jobs2_row(world);
+                        row.station_bookings += 1;
+                        row.station_fines += 1;
+                    }
                     // Shadow V4 review 5: the fine spares the cell, not the
                     // arrest (the take, the interrogation, the rumour, the
                     // sweep's counter, the law's log).
@@ -1173,6 +1196,15 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
     sentence(world, suspect, crime, until, jail);
     resolve_reports(world, suspect);
     world.stats.current.arrests += 1;
+    if station.is_some() {
+        // A sentence that ends before the next van is served in the cells.
+        let van = crate::systems::stations::next_van(world);
+        let row = crate::systems::ownership::jobs2_row(world);
+        row.station_bookings += 1;
+        if until <= van + TICKS_PER_DAY {
+            row.station_nights += 1;
+        }
+    }
     booked(world, guard, suspect, crime, jail);
 }
 
@@ -1429,6 +1461,16 @@ pub fn release(world: &mut World, who: EntityId, full: bool) {
     if crate::systems::lod::is_held(world, who) {
         crate::systems::lod::set_lod(world, who, crate::components::Lod::Coarse);
     }
+    // Lives at work phase 7: a night served in a Station's cells ends there.
+    let from = if world
+        .comp::<Position>(who)
+        .and_then(|p| p.building)
+        .is_some_and(|b| crate::systems::stations::is_station(world, b))
+    {
+        BuildingKind::Station.label()
+    } else {
+        "Precinct"
+    };
     let Some(_) = world.remove::<Sentence>(who) else { return };
     world.leave_building(who);
     world.remember(who, MemoryKind::WasArrested, None, 0.7, -0.5, false);
@@ -1442,7 +1484,7 @@ pub fn release(world: &mut World, who: EntityId, full: bool) {
         }
     }
     let name = world.name_of(who);
-    world.push_event(EventKind::Release, &[who], format!("{name} released from the Precinct"));
+    world.push_event(EventKind::Release, &[who], format!("{name} released from the {from}"));
     crate::systems::gang::on_member_released(world, who);
 }
 
@@ -1510,18 +1552,30 @@ fn jail_duty_now(world: &World, guard: EntityId, shift_key: i64) -> bool {
     if !is_city_guard(world, guard) {
         return false;
     }
-    let modulus: i64 = match world.law().map_or((Posture::Patrol, None), |l| (l.posture, l.target)) {
+    let mut modulus: i64 = match world.law().map_or((Posture::Patrol, None), |l| (l.posture, l.target)) {
         (Posture::Garrison, _) => return true,
         (Posture::Crackdown, Some(_)) => 3,
         _ => 2,
     };
+    // Lives at work phase 7 (§ 5.2): with Stations standing, each post's
+    // roster is its own (a Station's desk is `station_desk_share` of its
+    // guards a shift; the Precinct's guards rank among themselves).
+    let post = crate::systems::stations::station_post(world, guard);
+    let stations = !world.buildings_of_kind(BuildingKind::Station).is_empty();
+    if post.is_some() {
+        let share = world.config.law.station_desk_share.max(f32::EPSILON);
+        modulus = ((1.0 / share).round() as i64).max(1);
+    }
+    let same_post = |g: EntityId| {
+        is_city_guard(world, g) && (!stations || crate::systems::stations::station_post(world, g) == post)
+    };
     let all = world.guards();
-    let rank = all.iter().take_while(|&&g| g.index < guard.index).filter(|&&g| is_city_guard(world, g)).count() as i64;
+    let rank = all.iter().take_while(|&&g| g.index < guard.index).filter(|&&g| same_post(g)).count() as i64;
     let slot = shift_key.rem_euclid(modulus);
     if rank % modulus == slot {
         return true;
     }
-    rank == 0 && (all.iter().filter(|&&g| is_city_guard(world, g)).count() as i64) <= slot
+    rank == 0 && (all.iter().filter(|&&g| same_post(g)).count() as i64) <= slot
 }
 
 /// Per tick: guards perceive wanted suspects; escorted suspects follow.
@@ -1536,6 +1590,8 @@ pub fn run(world: &mut World) {
     // line: riots on 42-47 read 0.17 a seed against 2.67 with the budget off).
     if world.tick.is_multiple_of(crate::time::TICKS_PER_HOUR) {
         crate::prof::timed!("law::held_hourly", held_hourly(world));
+        // Lives at work phase 7 (§ 5.2): the van, at `transfer_hour`.
+        crate::prof::timed!("law::stations::van", crate::systems::stations::van(world));
     }
     if world.tick_of_day() == 0 {
         crate::prof::timed!("law::expire_warrants", expire_warrants(world));
@@ -1692,6 +1748,9 @@ pub fn reconcile_guards(world: &mut World) {
     // M11 D18: the city's payroll only; private guards are the corps'.
     let guards: Vec<EntityId> = crate::systems::law_brain::guards(world);
     let Some(jail) = world.building_of_kind(BuildingKind::Jail) else { return };
+    // Lives at work phase 7 (§ 5.2): with Stations, each hire's post is the
+    // nearest his Home of the Stations under their share and the Precinct.
+    let mut posts = if guards.len() < want { crate::systems::stations::Posts::new(world, want) } else { None };
     if guards.len() < want {
         let mut candidates: Vec<(ordered_float::OrderedFloat<f32>, EntityId)> = world
             // scan-ok: daily: reconcile_guards
@@ -1706,14 +1765,22 @@ pub fn reconcile_guards(world: &mut World) {
             .collect();
         candidates.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
         for (_, id) in candidates.into_iter().take((want - guards.len()).min(world.config.per_capita_count(5))) {
-            crate::systems::demography::hire(world, id, jail, Role::Guard);
-            // A dead guard's vacancy is this hire, not a second one.
-            if let Some(v) = world.vacancies.get_mut(&jail) {
-                if let Some(i) = v.iter().position(|&r| r == Role::Guard) {
-                    v.remove(i);
-                }
-                if v.is_empty() {
-                    world.vacancies.remove(&jail);
+            let post = posts.as_mut().and_then(|p| p.pick(world, id)).unwrap_or(jail);
+            crate::systems::demography::hire(world, id, post, Role::Guard);
+            // A dead guard's vacancy is this hire, not a second one (at the
+            // post, else at any other city post).
+            let at = std::iter::once(post)
+                .chain(std::iter::once(jail))
+                .chain(crate::systems::stations::stations(world))
+                .find(|b| world.vacancies.get(b).is_some_and(|v| v.contains(&Role::Guard)));
+            if let Some(at) = at {
+                if let Some(v) = world.vacancies.get_mut(&at) {
+                    if let Some(i) = v.iter().position(|&r| r == Role::Guard) {
+                        v.remove(i);
+                    }
+                    if v.is_empty() {
+                        world.vacancies.remove(&at);
+                    }
                 }
             }
         }
@@ -1935,7 +2002,13 @@ fn jail_upkeep(world: &mut World) {
     let jail = world.building_of_kind(BuildingKind::Jail).filter(|_| crate::systems::service::civic_on(world));
     for who in world.with::<Sentence>() {
         if jail_meal(world, who, market, price, &cfg) {
-            if let Some(j) = jail {
+            // Lives at work phase 7: a Station's held are fed, but the
+            // Precinct's jailer serves only the Precinct's.
+            let in_station = world
+                .comp::<Position>(who)
+                .and_then(|p| p.building)
+                .is_some_and(|b| crate::systems::stations::is_station(world, b));
+            if let Some(j) = jail.filter(|_| !in_station) {
                 crate::systems::service::arrive(world, who, j, crate::components::ServeKind::Inmate, 0);
             }
         }

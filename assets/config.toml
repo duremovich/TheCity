@@ -391,6 +391,21 @@ sweep_mult = 3.0
 curfew_mult = 2.0
 vagrancy_fine = 3
 vagrancy_sentence_ticks = 600      # one night
+# Lives at work phase 7 (docs/LIVES_AT_WORK.md § 5.2; placeholders), under the [lives] master
+# (CITYSIM_STATIONS_OFF=1): a Station (a desk and a few cells, the city's) on a Lot of each district
+# whose door is station_min_tiles (Manhattan) or more from the Precinct's door and from every
+# Station already placed (farthest districts first; the 2k map: 0-1, the 20k island: printed at
+# seed). A city guard is posted to the post nearest his Home among the Stations under their share
+# (guard_count x residents nearest them / residents) and the Precinct; station_desk_share of a
+# Station's guards hold its desk a shift, the rest patrol its districts first. The escort books at
+# the nearest of the Precinct and the Stations with a free cell (station_cells); at transfer_hour
+# (ticks of the day: 240 = 04:00) the van takes every held body whose sentence runs past the next
+# van to the Precinct, bodiless. A fine or a night's sentence is served at the Station.
+stations = true
+station_min_tiles = 240
+station_cells = 6
+transfer_hour = 240
+station_desk_share = 0.25
 
 [law.stance_flat]
 patrol = 0.2
@@ -1634,6 +1649,13 @@ hungry_reach_mult = 2.0             # 2: a starving agent walks this much furthe
 steal_can_buy = 12.0                # 3
 beg_dry_max = 3                     # 4: dry Begs in a row that cool Earn ...
 beg_cool_hours = 1                  # ... for this many hours
+# Lives at work phase 7 (docs/LIVES_AT_WORK.md § 5.3; placeholders), under the [lives] master
+# (CITYSIM_SPIRE_HOMES_OFF=1, or 0 here): a corp exec's Home is of exec_home_tier or better (2: the
+# Spire) when one has room: at seed and on promotion (`life::house_exec`), daily for an exec
+# housed lower (the same move), and the "nearer work" relocation looks only at Homes of that tier.
+# No eviction. The Spire's beds are checked at seed against execs x exec_home_spare (printed).
+exec_home_tier = 2
+exec_home_spare = 1.5
 
 # ---------------------------------------------------------------------------
 # Life pass L2: the living city (docs/LIFE_L2.md; plan ~/.claude/plans/life-l2.md). Every key is a
@@ -1944,6 +1966,13 @@ found_cost = 600
 value = 600
 floors_seed = 1
 floors_max = 2
+
+# Lives at work phase 7 (§ 5.2): a Station's seats, its guards and its held (the cells are [law]
+# station_cells); the city's, never founded or sold. Absent with [law] stations off.
+[buildings.station]
+capacity = 16
+stock_cap = 0
+staff = 0
 
 [buildings.black_clinic]
 capacity = 8

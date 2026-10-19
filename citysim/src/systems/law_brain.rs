@@ -516,10 +516,17 @@ pub fn allocate(world: &mut World) {
     let w: Vec<f32> = weights.iter().map(|(x, _)| *x).collect();
     let counts = crate::util::largest_remainder(patrol.len() as u32, &w);
     let mut beats = BTreeMap::new();
-    let mut it = patrol.into_iter();
-    for (i, &c) in counts.iter().enumerate() {
-        for g in it.by_ref().take(usize::from(c)) {
+    // Lives at work phase 7 (§ 5.2): a Station's guards to its districts first.
+    if let Some(deal) = crate::systems::stations::deal_beats(world, &patrol, &counts) {
+        for (g, i) in deal {
             beats.insert(g, DistrictId(i as u8));
+        }
+    } else {
+        let mut it = patrol.into_iter();
+        for (i, &c) in counts.iter().enumerate() {
+            for g in it.by_ref().take(usize::from(c)) {
+                beats.insert(g, DistrictId(i as u8));
+            }
         }
     }
     for (i, (d, (_, terms))) in world.districts.iter_mut().zip(weights).enumerate() {

@@ -132,6 +132,9 @@ pub fn snapshot(world: &mut World) {
     crate::systems::gray::snapshot(world);
     crate::systems::faith::snapshot(world);
     crate::systems::ages::snapshot(world);
+    // Lives at work phase 7: the Stations and the execs' homes.
+    crate::systems::stations::snapshot(world);
+    crate::systems::life::snapshot(world);
     // Jobs v2 (P5a): the civic headcounts the budget (or a god) set.
     world.stats.current.jobs.guard_count = world.levers.guard_count;
     world.stats.current.jobs.sanitation_count = world.levers.sanitation_count;
