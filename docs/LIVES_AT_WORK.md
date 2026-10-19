@@ -987,6 +987,9 @@ Measured: the 20k rows above and § 5.1's re-read; 20k seed 42 × 30 (`run --pop
 
 Phase 8 is split in three (`history/lives_at_work/phase8a_brief.md`, 8b, 8c); each adds its part here. Phase 8a (2026-10-19): the numbers, on fd89cca plus the regen.
 
+- OPEN-109 (feature, pressure pass): street life. The own-Home HangOut moved free time indoors, so fighters and the homeless meet fewer known faces; the d19 fighter and d90 homeless `KnownMetWeek` rows were re-derived (bounds 1.5 and 1.7), OPEN-103 closed.
+- OPEN-110 (bug, unowned): a pimp can be a paying client of his own pitch (coins in a circle), found restaging the pimp probe.
+
 ### The one regen (D14, Q8): kept
 
 `calibrate` (v2, seeds 1000-1002 × 30 d, 2k, pathed walks) once on the final tree. To split the table's drift, `calibrate` also ran once on the milestone's start (`23a161d`'s binary, from its own source root): main's table → the `23a161d` regen is the drift before the milestone plus the calibration noise; the `23a161d` regen → the kept table is the milestone. Means over the rows (full diff in the phase 8a report):
