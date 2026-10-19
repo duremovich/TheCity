@@ -82,7 +82,8 @@ fn test_cli_report_csv_header() {
     // and patrol-sweep columns; phase 6: 30 gray-market and faith columns; phase 7: 19 life-stage
     // columns. Lives at work phase 1: the 23 encounter columns (15 served_<kind> and 8 counters); phase 2: 9
     // household columns; phase 3: 13 civic columns; phase 4: 13 street columns; phase 5: 14 tower columns;
-    // phase 6: 12 careers and leaders columns; phase 7: 9 stations and Spire columns.
+    // phase 6: 12 careers and leaders columns; phase 7: 9 stations and Spire columns; gate 8d: `exec_rides`,
+    // `exec_rides_corp`.
     assert_eq!(
         row.split(',').count(),
         81 + 8 * 6
@@ -126,6 +127,7 @@ fn test_cli_report_csv_header() {
             + 14
             + 12
             + 9
+            + 2
     );
     assert!(lines.next().is_none());
 }
