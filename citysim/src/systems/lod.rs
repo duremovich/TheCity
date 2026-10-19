@@ -94,9 +94,11 @@ fn assign_hour(world: &mut World) {
         // its off-screen thieves can still be arrested.
         // scan-ok: hourly: forced tiers
         for id in world.citizens() {
-            let Some(b) = world.comp::<Brain>(id) else { continue };
-            let held = world.has::<Sentence>(id) || b.emigrating || b.cuffed_by.is_some();
-            let body = forced == Lod::Statistical && (body_role(world, id) || crate::systems::law::wanted(world, id));
+            if !world.has::<Brain>(id) {
+                continue;
+            }
+            let held = held_body(world, id);
+            let body = forced == Lod::Statistical && stat_body(world, id);
             let lod = if crate::systems::abroad::is_away(world, id) {
                 Lod::Statistical
             } else if held || body {
@@ -109,6 +111,29 @@ fn assign_hour(world: &mut World) {
     } else {
         assign(world);
     }
+}
+
+/// A prisoner, an emigrant or a cuffed agent: never Statistical in a
+/// forced city (`assign_hour`).
+fn held_body(world: &World, id: EntityId) -> bool {
+    world.has::<Sentence>(id) || world.comp::<Brain>(id).is_some_and(|b| b.emigrating || b.cuffed_by.is_some())
+}
+
+/// The bodies a forced Statistical city keeps (`assign_hour`): a guard or
+/// gravedigger and the wanted.
+fn stat_body(world: &World, id: EntityId) -> bool {
+    body_role(world, id) || crate::systems::law::wanted(world, id)
+}
+
+/// Lives at work gate (OPEN-106): an agent the Statistical tier never
+/// holds, whatever the city's tiers: held, a guard or gravedigger, or
+/// wanted (the forced Statistical city's Coarse bodies, `assign_hour`).
+/// `calibrate` learns the Statistical evening's `p_venue` without them:
+/// the evening pays the rate to the tier's adults while these bodies go out
+/// on their own on screen, so a mean that held them counted their visits
+/// twice off screen (the parity city's Bar 1.52 vs Full 0.82).
+pub fn kept_body(world: &World, id: EntityId) -> bool {
+    held_body(world, id) || stat_body(world, id)
 }
 
 /// A guard or gravedigger: a job the hourly table cannot do, so it always

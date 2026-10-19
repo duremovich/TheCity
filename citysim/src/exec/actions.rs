@@ -495,7 +495,7 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
                 crate::systems::ownership::pay(world, Some(id), owner, 2, crate::systems::ownership::Flow::Drink);
             if let Some(b) = bar {
                 crate::systems::ownership::credit(world, b, paid);
-                crate::systems::leisure::note_paid(world, b, paid);
+                crate::systems::leisure::note_paid(world, id, b, paid);
             }
         }
         _ => {}
