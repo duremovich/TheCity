@@ -267,7 +267,13 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
                     } else {
                         crate::systems::assets::seller_open(world, b)
                     }
-            }) && world.comp::<Brain>(id).is_some_and(|b| b.shop_pick.is_some())
+            }) && world.comp::<Brain>(id).and_then(|b| b.shop_pick.as_ref()).is_some_and(|p| {
+                // OPEN-142: the sale is checked before the wait (an implant's
+                // is 140 min on the table), not only at its end.
+                weapon
+                    || world.config.preview_off.implant_fix
+                    || target.is_some_and(|t| crate::systems::assets::sale_ok(world, id, t, p))
+            })
         }
         // M13 D34: inside an open Clinic (the Install with the gang's
         // implant reserved; Uninstall with chrome in).
