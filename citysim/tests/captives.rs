@@ -329,14 +329,26 @@ fn test_weak_gang_under_retaliate_takes_a_hostage() {
         w.gangs().into_iter().filter(|&x| w.comp::<Gang>(x).is_some_and(|y| y.leader.is_some())).collect();
     // The rival the bigger gang (the weaker side's ratio under `hire_ratio`).
     let r = *gs.iter().max_by_key(|&&x| (w.comp::<Gang>(x).unwrap().members.len(), std::cmp::Reverse(x))).unwrap();
-    let g = *gs.iter().find(|&&x| x != r).unwrap();
+    // A member free to take the order (the order taker's own filter: not
+    // on a contract run, a mission or holding a taken job), which the
+    // evolved city may leave busy in one gang and not another.
+    let ready = |w: &World, m: EntityId| {
+        contracts::free_adult(w, m)
+            && !contracts::holds_taken(w, m)
+            && !w.contract_runs.contains_key(&m)
+            && !w.mission_of.contains_key(&m)
+    };
+    let g = *gs
+        .iter()
+        .find(|&&x| x != r && w.comp::<Gang>(x).unwrap().members.iter().any(|&m| ready(&w, m)))
+        .expect("a smaller gang with a free member");
     assert!(w.comp::<Gang>(r).unwrap().members.len() >= 2, "a rival of two or more");
     w.comp_mut::<Gang>(g).unwrap().order = citysim::Order::Retaliate;
     w.comp_mut::<Gang>(g).unwrap().retaliate_on = Some(r);
     w.comp_mut::<Gang>(g).unwrap().treasury = 5_000;
-    // Make g the weaker: trim its roster to one.
+    // Make g the weaker: trim its roster to that one member.
     let keep: Vec<EntityId> =
-        w.comp::<Gang>(g).unwrap().members.iter().copied().filter(|&m| contracts::free_adult(&w, m)).take(1).collect();
+        w.comp::<Gang>(g).unwrap().members.iter().copied().filter(|&m| ready(&w, m)).take(1).collect();
     w.comp_mut::<Gang>(g).unwrap().members = keep;
     let rl = w.comp::<Gang>(r).unwrap().leader.unwrap();
     let [s] = strangers(&w, 1)[..] else { unreachable!() };
