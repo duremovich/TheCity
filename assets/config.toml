@@ -1575,7 +1575,6 @@ hack_gap_wealth = 0.9               # 18: a run past the flatline gap only this 
 # The violence fixes (2026-10-09, the wages-on diagnosis): three missing mechanisms that inflated
 # off-screen killings and chrome episodes (worst with [economy2] wages on, present in the base city).
 # Master switch (in flight; off is the 644eb10 city byte for byte).
-# `CITYSIM_VFIX_OFF=1,3` leaves single items off (a bisection device).
 violence_fixes = true
 vf_street_class = true              # 1: the ledger's Street class (no Home): evictees' rates stay theirs
 # Street's prior: the civilian prior x 3, every kind. A housed civilian is indoors (bed ~8 h, a shift
@@ -1592,7 +1591,7 @@ vf_rent_meal = true                 # 4: rent from income leaves an agent in arr
 vf_arrival = true
 # Hunger as sickness P1 (docs/HUNGER_SICKNESS.md § 6; plan docs/plans/hunger-sickness.md): the Full planner's
 # hunger gaps the recalibration diaries found, each reproduced by a person probe that failed on d771073.
-# Master switch (off is the d771073 city byte for byte); `CITYSIM_HFIX_OFF=1,3` leaves single items off.
+# Master switch (off is the d771073 city byte for byte).
 hunger_fixes = true
 hf_food_first = true                # 1: starving with a meal in reach: eat before paid leisure, a bed, a dose, a sleep
 hf_mission = true                   # 2: Eat's can-obtain gate opens on a stocked Mission in reach
@@ -2082,7 +2081,7 @@ min_gap_hours = 6
 # The Hit market (docs/HIT_MARKET.md, plan ~/.claude/plans/hit-market.md): Hits and Beats priced at what
 # the guns ask, paid from the buyer's means and kin, half down on credit. Every value a placeholder.
 [hitmarket]
-enabled = true                       # H20: the switch in flight (CITYSIM_HITMARKET_OFF=1 for A/B runs)
+enabled = true                       # H20: the switch (off: M16a's hire and brain postings)
 ask_rank = 2                         # H1: the 2nd-cheapest candidate's ask sets the price
 price_floor = { hit = 20, beat = 8 } # H1, Dylan's decision 1
 wage_floor_min = 50                  # decision 7: a gun's week wage floor max(50, 0.5 x 7 x median wage)
@@ -2122,7 +2121,7 @@ queue_hours = 24                     # a taken organic Hit/Beat queued this long
 # M16b leverage (docs/M16_CONTRACTS.md § 4, phase 1): coercions are records on a struct and one seeded
 # Intimidate roll (moves::resolve_with) between fictional agents. Every value a placeholder.
 [leverage]
-enabled = true                       # the switch in flight (CITYSIM_LEVERAGE_OFF=1: the A/B and identity device)
+enabled = true                       # the switch (off: M16a's city)
 max_coercions = 128                  # standing coercions at once (per capita, up only)
 lev_bias = { threat = 0.0, secret = 0.3, debt = 0.2, hostage = 0.5 }
 demand_w = 1.0                       # demand_cost = demand_w x value / max(purse + 7 x wage, 1)
@@ -2155,7 +2154,7 @@ expose_p = 0.05
 # M16b phase 2 (docs/M16_CONTRACTS.md § 4): captives (records on a struct: a held agent is cuffed to a
 # building and fed by its holder), the Private Prison, the new contract kinds. Every value a placeholder.
 [hostage]
-enabled = true                       # the switch in flight (CITYSIM_HOSTAGE_OFF=1: the A/B and identity device)
+enabled = true                       # the switch (off: the M16b phase-1 city)
 hostage_days = 7
 hostage_food = 3
 p_hostage_kill = 0.3
@@ -2171,7 +2170,7 @@ abduct_share = 0.3                   # spec [contracts] abduct_share: a Harvest'
 # M16b phase 3 (docs/M16_CONTRACTS.md § 5): the wounded. A wound is a record on a struct: the fight's loser
 # down and bleeding on a timer, carried to a Clinic and stabilised, or dead. Every value a placeholder.
 [wounded]
-enabled = true                       # the switch in flight (CITYSIM_WOUNDED_OFF=1: the A/B and identity device)
+enabled = true                       # the switch (off: the M16b phase-2 city)
 wound_share = 0.6                    # a fight's death becomes a wound with wound_share x (1 - armour)
 bleed_hours = 3
 stabilise_price = 80
@@ -2195,7 +2194,7 @@ trauma_stat_save = 0.5
 # M16b phase 4 (docs/M16_CONTRACTS.md § 6, § 3, the attention addendum): boards and votes, tags and scanners,
 # attention. A vote is a tally over a record; a tag a record writing sightings; attention a number. Placeholders.
 [governance]
-enabled = true                       # the switch in flight (CITYSIM_PHASE4_OFF=1 turns boards, tags and attention off)
+enabled = true                       # the switch (off: no boards; [tags] and [attention] have their own)
 boards = ["Habitat", "Nutrix"]       # roster names: every copy ("Nutrix 2") has a board too
 board_size = 5
 vote_days = 45
@@ -3135,7 +3134,7 @@ status_split = [0.5, 0.25, 0.25]       # night out, fashion, chrome
 premium_payout_share = 0.5
 
 [transit]
-# docs/TRANSIT.md (the El). On by default since phase 3 (CITYSIM_TRANSIT=0 turns it off for A/B runs).
+# docs/TRANSIT.md (the El). On by default since phase 3.
 # City-owned (Dylan 2026-10-10): fares go to the Treasury, which pays the power to the World and the El's
 # maintenance crews (Sanitation posts, `TransitState.staff`, capped by staff_per_line) out of them. Placeholders unless a comment says measured.
 enabled = true
@@ -3212,7 +3211,7 @@ hire_far = false                    # also prefer an Ambient household near work
 edges_max = 96                      # a materialised adult's contacts (copied from a donor), at most
 
 # M17 (docs/M17_OUTSIDE.md, "Revised 2026-10-12"): the outside world. `enabled` is the switch in flight
-# (`CITYSIM_OUTSIDE_OFF=1`); the World market is the Real economy's and stays on either way.
+# (`enabled = false`); the World market is the Real economy's and stays on either way.
 [outside]
 enabled = true
 
@@ -3413,7 +3412,7 @@ trace_conf = 0.8
 
 # ---------------------------------------------------------------------------
 # Jobs & lives (docs/JOBS_AND_LIVES.md; Dylan's answers of 2026-10-13 bind). The milestone's master switch,
-# in flight: off (CITYSIM_JOBS2_OFF=1), no new kind seeds, no new trade row posts, no new book or flow, and
+# off (`enabled = false`): no new kind seeds, no new trade row posts, no new book or flow, and
 # the city is byte-identical to main (events and the shared CSV columns). Phase 1 (§ 2): the industries, the
 # civic three, the Hq, the foreman. Every number is a placeholder.
 [jobs2]
@@ -3502,7 +3501,7 @@ seize_after_days = 5               # a corp's Utility Plant dark on this many da
 # Jobs & lives phase 3, weapons (docs/JOBS_AND_LIVES.md § 4; Dylan's answer 1: the generic owned-item store). A game
 # abstraction: a weapon is an owned item (an `Asset`: tier 1-3, condition, provenance), carried, kept at home or
 # stocked; a fight is the seeded roll of `law::fight_inner` with one more term from the tiers. Under [jobs2]
-# enabled (`CITYSIM_WEAPONS_OFF=1` turns it off). Prices are [assets] price.weapon. Placeholders; `weapon_w` is
+# enabled. Prices are [assets] price.weapon. Placeholders; `weapon_w` is
 # the lever on lethality, and no earlier knob moves.
 [weapons]
 enabled = true
@@ -3549,8 +3548,8 @@ fence_frac = 0.4                   # the fence pays this of an item's value (int
 
 # ---------------------------------------------------------------------------
 # Jobs & lives phase 4, vice (docs/JOBS_AND_LIVES.md § 5.1): an economic and legal simulation of venues and labour
-# (venues, shifts, visits, prices, tips, cuts, licences, sweeps, fines). Under [jobs2] enabled (`CITYSIM_VICE_OFF=1`
-# turns it off). Placeholders, on the brutal side (R8: the income small, taxed by cuts and fines).
+# (venues, shifts, visits, prices, tips, cuts, licences, sweeps, fines). Under [jobs2] enabled.
+# Placeholders, on the brutal side (R8: the income small, taxed by cuts and fines).
 [vice]
 enabled = true
 corp_rows = [5]                    # [corps] rows given the Vice niche and the seeded venues (Kessler at the time of writing)
@@ -3578,7 +3577,7 @@ street_legal = false
 dollhouse_contracts = true         # phase 5: a corp's chip contract is legal (Dylan's answer 2)
 captive_chip_trafficking = true    # phase 5: a captive chipped at a gang's holding is Trafficking
 # Jobs & lives phase 5 (docs/JOBS_AND_LIVES.md § 5.2, § 5.3): numbers only. Sub-switches under `enabled`
-# (`CITYSIM_CHIP_OFF=1`, `CITYSIM_BD_OFF=1`, `CITYSIM_PATROL_SWEEP_OFF=1`). Placeholders.
+# (`chip`, `bd`, `patrol_sweep`). Placeholders.
 chip = true                        # § 5.2: the Dollhouse and the chip contract (needs [assets] enabled)
 bd = true                          # § 5.3: BD studios, units, the Recorder and black units
 patrol_sweep = true                # phase 4's carry-over: a street pitch in a patrolled district (guards out) ...
@@ -3604,8 +3603,8 @@ recorders_per_1000 = 2.0           # Recorders alive at most, per 1,000 resident
 
 # ---------------------------------------------------------------------------
 # Jobs & lives phase 4, fashion (docs/JOBS_AND_LIVES.md § 9; Dylan's answer 1): clothing items on the owned-item
-# store, the Boutique, the status need and the dress readers. Under [jobs2] enabled (`CITYSIM_FASHION_OFF=1` turns
-# it off). Clothing prices are [assets] price.clothing. Placeholders.
+# store, the Boutique, the status need and the dress readers. Under [jobs2] enabled.
+# Clothing prices are [assets] price.clothing. Placeholders.
 [fashion]
 enabled = true
 boutique_rows = [5]                # [corps] rows given a Boutique per copy (Kessler at the time of writing; not a board corp)
@@ -3625,7 +3624,7 @@ clothes_reserve_meals = 10         # a Boutique sale leaves this many meals' coi
 # ---------------------------------------------------------------------------
 # Jobs & lives phase 6, the gray market (docs/JOBS_AND_LIVES.md § 7; Dylan's answers 1 and 3): papers and forgers,
 # black clinics and struck-off docs, organs (Good::Organs; the World's book is [world_market] organs, capped),
-# customs, and the gang types as data. Under [jobs2] enabled (`CITYSIM_GRAY_OFF=1`). Placeholders.
+# customs, and the gang types as data. Under [jobs2] enabled. Placeholders.
 [gray]
 enabled = true
 id_price = [40, 120]               # fake papers by tier at a forger (a Fixer's second post)
@@ -3657,7 +3656,7 @@ organ_targets = true               # its Harvest target: anyone on its ground, v
 # ---------------------------------------------------------------------------
 # Jobs & lives phase 6, faith (docs/JOBS_AND_LIVES.md § 8; Dylan's answer 6): creeds as data (no creed name in
 # code), churches (a Mission with a creed), cults (a gang with a creed), the Preach, conversion, the spread along
-# social edges, tithes, apostasy. Under [jobs2] enabled (`CITYSIM_FAITH_OFF=1`). The M15 Purists and The Unplugged
+# social edges, tithes, apostasy. Under [jobs2] enabled. The M15 Purists and The Unplugged
 # are [creeds] and stay as they are. Placeholders; the names are placeholders too.
 [faith]
 enabled = true
@@ -3698,7 +3697,7 @@ p_spread = 0.001
 # ---------------------------------------------------------------------------
 # Jobs & lives phase 7, life stages (docs/JOBS_AND_LIVES.md § 6; D11-D13; Dylan's answers 4 and 5): children's
 # routines and the School (fees only: the public_school lever is off), the elderly (no pension), the maimed.
-# Under [jobs2] enabled (`CITYSIM_AGES_OFF=1`). Placeholders.
+# Under [jobs2] enabled. Placeholders.
 [ages]
 enabled = true
 seed_max_years = 75.0              # the seeded ages run to this (Dylan's answer 5; [world] age_max_years off)
@@ -3732,7 +3731,7 @@ enabled = true
 [service]
 venues = true
 civic = true                       # phase 3 (§ 2.2, § 3.5): teacher, camp warden, jailer, super; the near round, tied housing, the parent's answer ([service] civic = false)
-street = true                      # phase 4 (§ 2.3): the cab roll and the driver's body, the parcel, the lift, the client, the pimp's round, the dealer's corner ([service] street = false; CITYSIM_STREET_OFF is [jobs2] street's)
+street = true                      # phase 4 (§ 2.3): the cab roll and the driver's body, the parcel, the lift, the client, the pimp's round, the dealer's corner ([service] street = false; not [jobs2] street)
 tower = true                       # phase 5 (§ 2.4, § 2.2's civic clerk, § 3.6's decided): the exec's Meeting and decision, the reporter's beat and byline, the Fixer's walk-in and contract encounters, the owner's collection, the clerk named ([service] tower = false)
 madam_cut = 0.3                    # § 2.1: the madam's share of her worker's tips at the Brothel, worker -> madam (Flow::MadamCut); 8d: of the shift's total, settled once at shift end
 evening_staff = ["Bartender", "Attendant", "Cook"]   # OPEN-111, Shadow V5 bug 1: the legacy venue roles cover the trade's hours, split at each venue between [world] shift_day and [leisure] evening_shift (the thinner first, the evening on a tie)

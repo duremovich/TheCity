@@ -7,7 +7,7 @@
 //! job, fraud (the renege's filing, the fake job), the Court suitor's
 //! `Persuade`, the coin identity and a save mid-coercion. Every coercion
 //! here is game state between fictional agents: a record on a struct and a
-//! seeded dice roll. With `CITYSIM_LEVERAGE_OFF=1` every mechanism test
+//! seeded dice roll. With `[leverage] enabled = false` every mechanism test
 //! fails (the failing-first device: the switch gates every entry point).
 
 use citysim::contract::{

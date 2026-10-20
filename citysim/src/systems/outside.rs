@@ -52,7 +52,7 @@ pub fn ensure_world_account(world: &mut World, treasury_ref: i64) {
 /// `econ::hash_normal` purpose of the Ambient appetite walk.
 const PURPOSE_AMBIENT_APPETITE: u64 = 0x0E17_0001;
 
-/// `[outside] enabled` (`CITYSIM_OUTSIDE_OFF=1` turns it off).
+/// `[outside] enabled`.
 pub fn on(world: &World) -> bool {
     world.config.outside.enabled
 }

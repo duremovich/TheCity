@@ -6,7 +6,7 @@
 //! Abandon gang leaves its own, the Trauma subscription (weekly, lapsing),
 //! its call and save, the Statistical split, and a save mid-wound. Every
 //! wound here is game state between fictional agents: a record on a struct
-//! and a seeded dice roll. With `CITYSIM_WOUNDED_OFF=1` the mechanism tests
+//! and a seeded dice roll. With `[wounded] enabled = false` the mechanism tests
 //! fail (the switch gates every entry point).
 
 mod common;

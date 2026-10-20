@@ -13,7 +13,7 @@
 //! paid weekly (`Flow::Trauma`). Off screen the hourly table's killing is
 //! split by the same share (`stat_kill_p`).
 //!
-//! `[wounded] enabled = false` (`CITYSIM_WOUNDED_OFF=1`) is the phase-2
+//! `[wounded] enabled = false` is the phase-2
 //! city: no draw is made, nobody goes down. Rolls are keyed on
 //! `ContractNs::Leverage` with the spec's purpose bytes (17 the wound, 20
 //! the subscription).

@@ -259,31 +259,30 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "OutsideCfg::is_default")]
     pub outside: OutsideCfg,
     /// Jobs & lives (docs/JOBS_AND_LIVES.md § 1): the milestone's master
-    /// switch and phase 1's keys (`CITYSIM_JOBS2_OFF=1` turns it off).
+    /// switch and phase 1's keys.
     #[serde(default)]
     pub jobs2: Jobs2Cfg,
     /// Jobs & lives phase 3 (§ 4): weapons as owned items, under the
-    /// master switch (`CITYSIM_WEAPONS_OFF=1` turns it off).
+    /// master switch.
     #[serde(default)]
     pub weapons: WeaponsCfg,
     /// Jobs & lives phase 4 (§ 5.1): the Vice venues, the street pitch and
-    /// its levers, under the master switch (`CITYSIM_VICE_OFF=1`).
+    /// its levers, under the master switch.
     #[serde(default)]
     pub vice: ViceCfg,
     /// Jobs & lives phase 4 (§ 9): clothing items, Boutiques and the
-    /// `status` need, under the master switch (`CITYSIM_FASHION_OFF=1`).
+    /// `status` need, under the master switch.
     #[serde(default)]
     pub fashion: FashionCfg,
     /// Jobs & lives phase 6 (§ 7): papers and forgers, black clinics,
-    /// organs, the gang types (`CITYSIM_GRAY_OFF=1`).
+    /// organs, the gang types.
     #[serde(default)]
     pub gray: GrayCfg,
-    /// Jobs & lives phase 6 (§ 8): creeds as data, churches, cults, tithes
-    /// (`CITYSIM_FAITH_OFF=1`).
+    /// Jobs & lives phase 6 (§ 8): creeds as data, churches, cults, tithes.
     #[serde(default)]
     pub faith: FaithCfg,
     /// Jobs & lives phase 7 (§ 6): children's routines and the School, the
-    /// elderly, disability (`CITYSIM_AGES_OFF=1`).
+    /// elderly, disability.
     #[serde(default)]
     pub ages: AgesCfg,
     /// Lives at work (docs/LIVES_AT_WORK.md D13): the milestone's master
@@ -521,8 +520,8 @@ pub struct ServiceCfg {
     /// Phase 4 (§ 2.3): the street and freight: the cab roll shared by both
     /// tiers and the driver's body, the parcel, the lift, the client, the
     /// pimp's round, the dealer's corner and regulars
-    /// (`[service] street = false`; `CITYSIM_STREET_OFF` is Jobs & lives
-    /// phase 2's `[jobs2] street` switch, the pitches and rounds themselves).
+    /// (`[service] street = false`; not Jobs & lives phase 2's `[jobs2]
+    /// street` switch, the pitches and rounds themselves).
     pub street: bool,
     /// Phase 5 (§ 2.4, § 2.2's civic clerk, § 3.6's `Decided`): the
     /// exec's Meeting and decision, the reporter's beat and byline, the
@@ -1610,8 +1609,7 @@ pub struct ViceCfg {
     pub dollhouse_contracts: bool,
     pub captive_chip_trafficking: bool,
     // --- Jobs & lives phase 5 (§ 5.2, § 5.3). Sub-switches under
-    // `enabled` (`CITYSIM_CHIP_OFF=1`, `CITYSIM_BD_OFF=1`,
-    // `CITYSIM_PATROL_SWEEP_OFF=1`), each byte-identical off.
+    // `enabled` (`chip`, `bd`, `patrol_sweep`), each byte-identical off.
     /// The chip contract and the Dollhouse (§ 5.2).
     pub chip: bool,
     /// The BD studios, the Braindance units and the Recorder (§ 5.3).
@@ -1771,8 +1769,7 @@ impl Default for FashionCfg {
     }
 }
 
-/// M17 `[outside]`: the switch in flight (`CITYSIM_OUTSIDE_OFF=1` turns it
-/// off) and its sub-tables. The World market is the Real economy's and is
+/// M17 `[outside]`: the switch and its sub-tables. The World market is the Real economy's and is
 /// not under it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -7415,8 +7412,7 @@ pub struct LifeCfg {
     /// The violence fixes (2026-10-09, the wages-on diagnosis): three
     /// missing mechanisms that inflated off-screen killings and chrome
     /// episodes. Master switch (in flight); off is the 644eb10 city byte for
-    /// byte. The sub-switches are read only with it on;
-    /// `CITYSIM_VFIX_OFF=1,3` leaves single items off.
+    /// byte. The sub-switches are read only with it on.
     pub violence_fixes: bool,
     /// Item 1: the ledger's `VictimClass::Street` (no Home): what evictees
     /// suffer on screen is learned and applied to the homeless only, not
@@ -7441,7 +7437,7 @@ pub struct LifeCfg {
     /// Hunger as sickness P1 (docs/HUNGER_SICKNESS.md § 6): the Full
     /// planner's hunger gaps the recalibration diaries found. Master switch
     /// (off is the d771073 city byte for byte); the sub-switches are read
-    /// only with it on; `CITYSIM_HFIX_OFF=1,3` leaves single items off.
+    /// only with it on.
     pub hunger_fixes: bool,
     /// G1: starving with a meal in reach, eat before any paid leisure, a
     /// bed, a dose or a purchase, and before an exhausted or night sleep.
@@ -8215,72 +8211,9 @@ impl Config {
         let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
         let mut cfg: Config = toml::from_str(&text).unwrap_or_else(|e| panic!("bad config {}: {e}", path.display()));
         cfg.assets_dir = assets_dir.to_path_buf();
-        // The Hit market H20: the A/B device.
-        if std::env::var("CITYSIM_HITMARKET_OFF").is_ok_and(|v| v == "1") {
-            cfg.hitmarket.enabled = false;
-        }
-        // M16b phase 1: the leverage A/B and identity device.
-        if std::env::var("CITYSIM_LEVERAGE_OFF").is_ok_and(|v| v == "1") {
-            cfg.leverage.enabled = false;
-        }
-        // M16b phase 2: the captives' A/B and identity device.
-        if std::env::var("CITYSIM_HOSTAGE_OFF").is_ok_and(|v| v == "1") {
-            cfg.hostage.enabled = false;
-        }
-        // M16b phase 3: the wounded's A/B and identity device.
-        if std::env::var("CITYSIM_WOUNDED_OFF").is_ok_and(|v| v == "1") {
-            cfg.wounded.enabled = false;
-        }
-        // M16b phase 4: boards, tags and attention's A/B and identity device.
-        if std::env::var("CITYSIM_PHASE4_OFF").is_ok_and(|v| v == "1") {
-            cfg.governance.enabled = false;
-            cfg.tags.enabled = false;
-            cfg.attention.enabled = false;
-        }
-        // M17: the outside world's A/B and identity device.
-        if std::env::var("CITYSIM_OUTSIDE_OFF").is_ok_and(|v| v == "1") {
-            cfg.outside.enabled = false;
-        }
-        // Jobs & lives (§ 1): the master switch's A/B and identity device.
-        if std::env::var("CITYSIM_JOBS2_OFF").is_ok_and(|v| v == "1") {
-            cfg.jobs2.enabled = false;
-        }
-        // Jobs & lives phase 2: the street's A/B and identity device.
-        if std::env::var("CITYSIM_STREET_OFF").is_ok_and(|v| v == "1") {
-            cfg.jobs2.street = false;
-        }
-        // Jobs & lives phase 3: the weapons' A/B and identity device.
-        if std::env::var("CITYSIM_WEAPONS_OFF").is_ok_and(|v| v == "1") {
-            cfg.weapons.enabled = false;
-        }
-        // Jobs & lives phase 4: the vice's and the fashion's A/B and identity devices.
-        if std::env::var("CITYSIM_VICE_OFF").is_ok_and(|v| v == "1") {
-            cfg.vice.enabled = false;
-        }
-        if std::env::var("CITYSIM_FASHION_OFF").is_ok_and(|v| v == "1") {
-            cfg.fashion.enabled = false;
-        }
-        // Jobs & lives phase 7: the life stages'.
-        if std::env::var("CITYSIM_AGES_OFF").is_ok_and(|v| v == "1") {
-            cfg.ages.enabled = false;
-        }
-        // Jobs & lives phase 6: the gray market's and the faith's.
-        if std::env::var("CITYSIM_GRAY_OFF").is_ok_and(|v| v == "1") {
-            cfg.gray.enabled = false;
-        }
-        if std::env::var("CITYSIM_FAITH_OFF").is_ok_and(|v| v == "1") {
-            cfg.faith.enabled = false;
-        }
-        // Jobs & lives phase 5: the chip's, the BD's and the patrol sweep's.
-        if std::env::var("CITYSIM_CHIP_OFF").is_ok_and(|v| v == "1") {
-            cfg.vice.chip = false;
-        }
-        if std::env::var("CITYSIM_BD_OFF").is_ok_and(|v| v == "1") {
-            cfg.vice.bd = false;
-        }
-        if std::env::var("CITYSIM_PATROL_SWEEP_OFF").is_ok_and(|v| v == "1") {
-            cfg.vice.patrol_sweep = false;
-        }
+        // The earlier milestones' `CITYSIM_*_OFF` env switches retired in
+        // the pre-view pass (OPEN-094); every section's config path stays
+        // (`[hitmarket] enabled`, `[jobs2] enabled`, `[vice] chip` and the rest).
         // Lives at work (D13): a config with `[lives] enabled = false` by any
         // path clears the milestone's sections, so the off save holds no
         // `[lives]`, `[service]` or `[[serves]]`. The milestone's env
@@ -8326,13 +8259,6 @@ impl Config {
             cfg.without_household_deeds();
         }
         cfg.districts.row_count();
-        // Transit (docs/TRANSIT.md D12): `CITYSIM_TRANSIT=1` (or `0`)
-        // overrides `[transit] enabled` for A/B runs.
-        match std::env::var("CITYSIM_TRANSIT").as_deref() {
-            Ok("1") | Ok("on") => cfg.transit.enabled = true,
-            Ok("0") | Ok("off") => cfg.transit.enabled = false,
-            _ => {}
-        }
         cfg
     }
 
@@ -9266,7 +9192,7 @@ impl Default for BountyCfg {
 #[serde(default)]
 pub struct HitMarketCfg {
     /// H20: the switch in flight (off: M16a's hire and brain postings at
-    /// `quote`). `CITYSIM_HITMARKET_OFF=1` turns it off at load.
+    /// `quote`).
     pub enabled: bool,
     /// H1: the price is the ask of the `ask_rank`-th cheapest candidate.
     pub ask_rank: usize,
@@ -10259,7 +10185,7 @@ impl LevBiasCfg {
 #[serde(default)]
 pub struct LeverageCfg {
     /// The switch in flight (the A/B and identity device; off: M16a's
-    /// city, the shakedown M15's roll). `CITYSIM_LEVERAGE_OFF=1` at load.
+    /// city, the shakedown M15's roll).
     pub enabled: bool,
     /// Standing coercions at once (per capita, up only).
     pub max_coercions: usize,
@@ -10349,7 +10275,7 @@ impl Default for LeverageCfg {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct HostageCfg {
-    /// The switch in flight (off: the phase-1 city). `CITYSIM_HOSTAGE_OFF=1`.
+    /// The switch in flight (off: the phase-1 city).
     pub enabled: bool,
     pub hostage_days: u32,
     /// Coins a day the holder pays for a captive's meal.
@@ -10398,7 +10324,7 @@ impl Default for HostageCfg {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WoundedCfg {
-    /// The switch in flight (off: the phase-2 city). `CITYSIM_WOUNDED_OFF=1`.
+    /// The switch in flight (off: the phase-2 city).
     pub enabled: bool,
     /// A fight's death becomes a wound with `wound_share × (1 − armour)`.
     pub wound_share: f32,
@@ -10470,7 +10396,7 @@ impl Default for TraumaCfg {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GovernanceCfg {
-    /// The switch in flight (`CITYSIM_PHASE4_OFF=1` turns phase 4 off).
+    /// The phase 4 switch (off: no boards, tags or attention).
     pub enabled: bool,
     /// The roster names whose corps (and their copies) have boards.
     pub boards: Vec<String>,

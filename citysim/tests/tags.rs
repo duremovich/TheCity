@@ -6,7 +6,7 @@
 //! attack; attention's pool and floor, a riot or a raid lowering its
 //! target's alertness below its pool, the brains' tilt, and off reading
 //! 1.0. Every tag and threat here is game state between fictional agents: a
-//! record on a struct and a seeded dice roll. With `CITYSIM_PHASE4_OFF=1`
+//! record on a struct and a seeded dice roll. With `[tags] enabled = false`
 //! the mechanism tests fail (the switch gates every entry point).
 
 use citysim::contract::{ContractKind, ContractStatus, Origin, Posting, Target, ThreatKind};

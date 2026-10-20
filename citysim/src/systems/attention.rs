@@ -13,7 +13,7 @@
 //! undistracted faction rolls as before. Recomputed hourly, the pool at
 //! midnight; O(factions + threats).
 //!
-//! `[attention] enabled = false` (`CITYSIM_PHASE4_OFF=1`): no entry is
+//! `[attention] enabled = false`: no entry is
 //! kept and every read is 1.0 (the phase-3 city).
 
 use std::collections::BTreeMap;

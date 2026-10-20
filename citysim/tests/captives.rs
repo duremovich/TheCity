@@ -8,7 +8,7 @@
 //! Deliver (posted for an unburied corpse, carried and buried), a
 //! fabricated Spin and its exposure, and a save mid-hold. Every captive,
 //! ransom and story here is game state between fictional agents: a record
-//! on a struct and a seeded dice roll. With `CITYSIM_HOSTAGE_OFF=1` the
+//! on a struct and a seeded dice roll. With `[hostage] enabled = false` the
 //! mechanism tests fail (the switch gates every entry point).
 
 use citysim::contract::{
