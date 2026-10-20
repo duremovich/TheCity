@@ -15,6 +15,10 @@ pub struct Config {
     /// Not saved: a loaded world re-resolves it on this machine.
     #[serde(skip, default = "Config::assets_dir_or_empty")]
     pub assets_dir: PathBuf,
+    /// The pre-view pass phase 0's switches in flight (docs/PREVIEW_PASS.md
+    /// § 3; doctrine 6): env only, never saved, retired when the phase lands.
+    #[serde(skip)]
+    pub preview_off: PreviewOff,
     pub world: WorldCfg,
     pub buildings: BuildingsCfg,
     pub needs: NeedsCfg,
@@ -4181,6 +4185,18 @@ fn default_p_spouse() -> f64 {
     0.2
 }
 
+/// The pre-view pass phase 0's off switches (`Config::preview_off`; true is
+/// off, the base city).
+#[derive(Clone, Debug, Default)]
+pub struct PreviewOff {
+    /// OPEN-138 off (`CITYSIM_IDLE_FIX_OFF=1`): a goal whose state already
+    /// holds installs an empty plan again (the silent idle freeze).
+    pub idle_fix: bool,
+    /// OPEN-142 off (`CITYSIM_IMPLANT_FIX_OFF=1`): an implant sale is checked
+    /// only after the install's wait, and a lost sale is retried at once.
+    pub implant_fix: bool,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BrainCfg {
     pub memory_cap: usize,
@@ -8211,6 +8227,9 @@ impl Config {
         let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
         let mut cfg: Config = toml::from_str(&text).unwrap_or_else(|e| panic!("bad config {}: {e}", path.display()));
         cfg.assets_dir = assets_dir.to_path_buf();
+        // The pre-view pass phase 0's switches in flight.
+        cfg.preview_off.idle_fix = std::env::var("CITYSIM_IDLE_FIX_OFF").is_ok_and(|v| v == "1");
+        cfg.preview_off.implant_fix = std::env::var("CITYSIM_IMPLANT_FIX_OFF").is_ok_and(|v| v == "1");
         // The earlier milestones' `CITYSIM_*_OFF` env switches retired in
         // the pre-view pass (OPEN-094); every section's config path stays
         // (`[hitmarket] enabled`, `[jobs2] enabled`, `[vice] chip` and the rest).

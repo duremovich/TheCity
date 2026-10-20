@@ -505,6 +505,14 @@ fn claim_chain(ctx: &PlanCtx, ws: &WorldState) -> Option<Vec<ActionKind>> {
 }
 
 fn install(world: &mut World, id: EntityId, plan: Plan) {
+    // OPEN-138: a goal whose state already holds (an Earn with 7 meals of
+    // savings) has nothing to plan. Its empty plan finished at once with no
+    // cooldown and the goal won every think again: hours of standing still.
+    // It cools like an unplannable goal, and the body backs off to the next.
+    if plan.steps.is_empty() && plan.goal != GoalKind::Idle && !world.config.preview_off.idle_fix {
+        world.cool_goal(id, plan.goal);
+        return;
+    }
     if let Some(b) = world.comp_mut::<Brain>(id) {
         b.plan = Some(plan);
         b.plan_step = 0;

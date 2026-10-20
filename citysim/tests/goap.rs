@@ -411,3 +411,31 @@ fn test_bug20_old_plan_request_goes_first() {
     assert!(!back.plan_queue_age.is_empty());
     assert_eq!(back.plan_queue_age, w.plan_queue.iter().map(|(&(u, id), &t)| (t, u, id)).collect());
 }
+
+/// OPEN-138 (the silent idle freeze): an Earn won by a body whose goal state
+/// already holds (savings of 7 meals) planned to an empty plan, which finished
+/// at once without a cooldown, so Earn won every think again: 12-40 h of
+/// nothing. A goal with nothing to plan cools like an unplannable one.
+#[test]
+fn test_satisfied_goal_cools_not_an_empty_plan() {
+    let mut w = common::world();
+    w.run_ticks(300);
+    let id = free_adults(&w)
+        .into_iter()
+        .find(|&a| !w.has::<Job>(a) && w.comp::<Brain>(a).is_some_and(|b| b.lod != citysim::Lod::Statistical))
+        .expect("a jobless adult on screen");
+    w.comp_mut::<Wallet>(id).expect("wallet").coins = 500;
+    assert!(WorldState::observe(&w, id, None).has_savings, "the goal state already holds");
+    w.abort_plan(id);
+    if let Some(b) = w.comp_mut::<Brain>(id) {
+        b.current_goal = Some(GoalKind::Earn);
+        b.cooldowns.clear();
+    }
+    let now = w.tick;
+    plan::plan_for(&mut w, id, GoalKind::Earn);
+    let b = w.comp::<Brain>(id).expect("brain");
+    assert!(b.plan.is_none(), "no empty plan installed: {:?}", b.plan);
+    assert_eq!(b.cooldowns.get(&GoalKind::Earn), Some(&(now + w.config.brain.goal_cooldown_ticks)), "Earn cooled");
+    let (winner, _) = citysim::utility::think(&w, id).expect("think");
+    assert_ne!(winner, GoalKind::Earn, "the body backs off to another goal");
+}
