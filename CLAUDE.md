@@ -52,6 +52,9 @@ Install the commit hook once: `git config core.hooksPath tools/hooks` (fmt check
 - Purists reject implants only; a deck in the hand is a tool (2026-10-19).
 - Lives at work moved free time indoors (the own-Home HangOut); social-contact behaviour rows that the milestone's design moved are re-derived, and street life comes back as a feature (OPEN-109), not a knob (2026-10-19).
 - **The game city is 20k; the 2k city is a test fixture only** (2026-10-19). 2k keeps the change and merge tiers fast; calibration, shadow reads, acceptance and "does this feel right" are judged at 20k (on the imported island once it holds 20k; Shadow V6 probes it). A phase's report carries 20k seed 42 × 30 counters beside the 2k ones; nobody tunes 2k to feel good (`OPEN-136`).
+- **M18 waits for the 3D view and a solid sim** (2026-10-20): the order is the pre-view fix pass (Shadow V6), the island holding 20k, the view milestone, then M18 rewritten against the 3D client. Getting the full city to feel natural and alive comes first.
+- **Nothing in camera range is Statistical** (2026-10-20): Statistical LOD exists only off camera; everyone the camera (later the player) can see is Full (`OPEN-149`).
+- **The player never starts on day 0** (2026-10-20): the world is pre-run or, preferred, built from a starting-condition seed that prepopulates it, for control over the city you get (`OPEN-150`).
 - Ticks/s on this box are unreliable (Blender renders, parallel builds): print, never tune.
 
 ## Agent rules (orchestrated work)
