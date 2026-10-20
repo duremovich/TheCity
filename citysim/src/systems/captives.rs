@@ -11,7 +11,7 @@
 //! Intimidate roll a day; every coin moves through `ownership` inside the
 //! coin identity; meals come off a Market's shelf.
 //!
-//! `[hostage] enabled = false` (`CITYSIM_HOSTAGE_OFF=1`) is the phase-1
+//! `[hostage] enabled = false` is the phase-1
 //! city: nothing here posts, holds or rolls. Rolls are keyed on
 //! `ContractNs::Leverage` with this module's purpose bytes (`Purpose`).
 

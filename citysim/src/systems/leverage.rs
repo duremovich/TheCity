@@ -12,7 +12,7 @@
 //! same roll), protection, threats (a coerced job, Silence, poaching by
 //! threat), Debt, Parley, blackmail with secret tallies and lapsing, fraud
 //! (the renege's filing, the fake job) and the Court suitor's `Persuade`.
-//! `[leverage] enabled = false` (`CITYSIM_LEVERAGE_OFF=1`) is M16a's city.
+//! `[leverage] enabled = false` is M16a's city.
 //!
 //! Rolls: the move's own `WordNs::Move` draw; every other draw is keyed on
 //! `ContractNs::Leverage` with a purpose byte (`Purpose`), never the world

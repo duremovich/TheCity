@@ -1652,15 +1652,26 @@ pub fn buy(world: &mut World, buyer: EntityId, seller: EntityId, pick: &ShopPick
     buy_noted(world, buyer, seller, pick, None)
 }
 
-/// [`buy`] with a note appended to the `AssetBought` text ("for Vat Farm#12").
-pub fn buy_noted(
-    world: &mut World,
-    buyer: EntityId,
-    seller: EntityId,
-    pick: &ShopPick,
-    note: Option<&str>,
-) -> Result<EntityId, String> {
-    let cfg = world.config.assets.clone();
+/// What a sale would cost, read without moving a coin ([`quote`]).
+struct Quote {
+    used: Option<(EntityId, i64, u8, AssetKind, u8)>,
+    kind: AssetKind,
+    tier: u8,
+    list: i64,
+    price: i64,
+    financed: bool,
+    down: i64,
+    /// A new asset's parts taken from the seller's stock and its import.
+    parts: u32,
+    import: i64,
+    /// The seller's owner, a Corp under the day's import cap, fronts `import`.
+    capped: bool,
+}
+
+/// The refusals of [`buy_noted`], in its order, read only: the sale
+/// `buyer` would make for `pick` at `seller`, or why there is none.
+fn quote(world: &World, buyer: EntityId, seller: EntityId, pick: &ShopPick) -> Result<Quote, String> {
+    let cfg = &world.config.assets;
     if !world.has::<Building>(seller) {
         return Err("no such seller".into());
     }
@@ -1694,6 +1705,7 @@ pub fn buy_noted(
     if coins < down || matches!(ownership::owner_kind(world, Some(buyer)), OwnerKind::City) {
         return Err(format!("{} cannot afford {price}", world.owner_label(Some(buyer))));
     }
+    let mut q = Quote { used, kind, tier, list, price, financed, down, parts: 0, import: 0, capped: false };
     // D30: the import, new assets only, paid first by the seller's owner.
     if used.is_none() {
         let half = *cfg.parts_per.get(kind) / 2;
@@ -1722,13 +1734,45 @@ pub fn buy_noted(
         }
         if import > 0 && !business && crate::systems::wages::on(world) {
             let cap = world.config.economy2.asset_import_per_day;
-            if let Some(c) = seller_owner.and_then(|o| world.comp_mut::<crate::components::Corp>(o)) {
+            if let Some(c) = seller_owner.and_then(|o| world.comp::<crate::components::Corp>(o)) {
                 // Flip readiness: the day's first import goes through
                 // whatever its size (a T1 car's 480 against a 300 cap never
                 // sold); the cap refuses the ones after it.
                 if cap > 0 && c.import_today > 0 && c.import_today + import > cap {
                     return Err(format!("{} has spent today's import budget", c.name));
                 }
+                q.capped = true;
+            }
+        }
+        q.parts = parts;
+        q.import = import;
+    }
+    Ok(q)
+}
+
+/// OPEN-142: would `buyer`'s sale of `pick` at `seller` go through now?
+/// Read before an implant's install wait (and at plan time), so a refused
+/// sale (the day's import budget spent, the buyer short) fails at once
+/// instead of after 140 minutes on the table.
+pub fn sale_ok(world: &World, buyer: EntityId, seller: EntityId, pick: &ShopPick) -> bool {
+    quote(world, buyer, seller, pick).is_ok()
+}
+
+/// [`buy`] with a note appended to the `AssetBought` text ("for Vat Farm#12").
+pub fn buy_noted(
+    world: &mut World,
+    buyer: EntityId,
+    seller: EntityId,
+    pick: &ShopPick,
+    note: Option<&str>,
+) -> Result<EntityId, String> {
+    let cfg = world.config.assets.clone();
+    let Quote { used, kind, tier, list, price, financed, down, parts, import, capped } =
+        quote(world, buyer, seller, pick)?;
+    let seller_owner = world.owner_of(seller);
+    if used.is_none() {
+        if capped {
+            if let Some(c) = seller_owner.and_then(|o| world.comp_mut::<crate::components::Corp>(o)) {
                 c.import_today += import;
             }
         }

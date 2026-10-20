@@ -354,7 +354,18 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
     let offer = if goal == GoalKind::Shop {
         let cached = world.shop_offers.remove(&id).filter(|(t, _)| *t == tick).map(|(_, o)| o);
         let offer = cached.unwrap_or_else(|| crate::systems::assets::shop_choice(world, id, true));
-        if offer.is_none() {
+        // OPEN-142: a sale the seller would refuse (the day's import budget
+        // spent, the buyer short) cools the pick here, before the walk and
+        // the install's wait; it was retried at once after each 140-min
+        // failure. The gang's install and a weapon are judged by their own steps.
+        let refused = offer.as_ref().is_some_and(|o| {
+            !world.config.preview_off.implant_fix
+                && o.category != crate::systems::assets::ShopCategory::Install
+                && o.pick.kind != crate::components::AssetKind::Weapon
+                && !o.pick.upgrade
+                && !crate::systems::assets::sale_ok(world, id, o.seller, &o.pick)
+        });
+        if offer.is_none() || refused {
             world.cool_goal(id, goal);
             return 0;
         }
@@ -505,6 +516,14 @@ fn claim_chain(ctx: &PlanCtx, ws: &WorldState) -> Option<Vec<ActionKind>> {
 }
 
 fn install(world: &mut World, id: EntityId, plan: Plan) {
+    // OPEN-138: a goal whose state already holds (an Earn with 7 meals of
+    // savings) has nothing to plan. Its empty plan finished at once with no
+    // cooldown and the goal won every think again: hours of standing still.
+    // It cools like an unplannable goal, and the body backs off to the next.
+    if plan.steps.is_empty() && plan.goal != GoalKind::Idle && !world.config.preview_off.idle_fix {
+        world.cool_goal(id, plan.goal);
+        return;
+    }
     if let Some(b) = world.comp_mut::<Brain>(id) {
         b.plan = Some(plan);
         b.plan_step = 0;

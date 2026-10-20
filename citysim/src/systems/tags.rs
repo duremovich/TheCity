@@ -20,7 +20,7 @@
 //! with the spec's purpose bytes (18 the plant, 19 the scan; 23 the
 //! Patrol's evening, 24 its contest).
 //!
-//! `[tags] enabled = false` (`CITYSIM_PHASE4_OFF=1`): no tag, no scan, no
+//! `[tags] enabled = false`: no tag, no scan, no
 //! Patrol (the phase-3 city).
 
 use rand::Rng;

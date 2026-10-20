@@ -154,8 +154,7 @@ pub fn civic_on(world: &World) -> bool {
 }
 
 /// Lives at work phase 4 is live: the encounter on, `[jobs2] street` (the
-/// pitches and the rounds exist) and `[service] street`
-/// (`CITYSIM_STREET_OFF=1`): the cab roll shared by both tiers and the
+/// pitches and the rounds exist) and `[service] street`: the cab roll shared by both tiers and the
 /// driver's body, the parcel, the lift, the client, the pimp's round, the
 /// dealer's corner and regulars.
 pub fn street_on(world: &World) -> bool {

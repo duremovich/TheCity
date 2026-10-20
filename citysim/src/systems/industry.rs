@@ -1,6 +1,6 @@
 //! Jobs & lives phase 1 (docs/JOBS_AND_LIVES.md §§ 1-2; JOBS_V2 P4, P5b,
 //! P8 and the foreman): the industries, the civic three and the Hq, behind
-//! the milestone's master switch `[jobs2] enabled` (`CITYSIM_JOBS2_OFF=1`).
+//! the milestone's master switch `[jobs2] enabled`.
 //!
 //! - **Packing** (`produce`): a Farm's haul toward the World stops first at
 //!   a Packing Plant (its owner's free, another's at wholesale); Packers on
@@ -55,7 +55,7 @@ const PURPOSE_PILFER: u64 = 0x10B2_0001;
 /// Lives at work phase 4 (§ 2.3): the owner's report of a short count.
 const PURPOSE_SHORT: u64 = 0x10B2_0002;
 
-/// The milestone's master switch (`[jobs2] enabled`, `CITYSIM_JOBS2_OFF=1`).
+/// The milestone's master switch (`[jobs2] enabled`).
 pub fn on(world: &World) -> bool {
     world.config.jobs2.enabled
 }

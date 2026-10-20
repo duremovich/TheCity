@@ -710,3 +710,54 @@ fn test_capped_civilian_gets_no_chrome_offer() {
     assert!(off > 0, "fix off: a T2 civilian still buys Eyes");
     assert_eq!(offers(true), 0, "fix on: a T2 civilian is at the line");
 }
+
+/// OPEN-142 (the implant buy loop): a sale the seller would refuse (here
+/// the day's import budget spent) used to plan, walk and sit 140 min on the
+/// table before failing `PreconditionLost`, then retry at once. The sale is
+/// now checked at plan time (the Shop cools, nothing planned) and again
+/// when the step starts (it fails at once, not after the wait).
+#[test]
+fn test_refused_sale_cools_before_the_wait() {
+    let mut w = common::world();
+    w.run_ticks(12 * 60);
+    w.config.economy2.asset_import_per_day = 1;
+    for c in w.corps() {
+        w.comp_mut::<Corp>(c).expect("corp").import_today = 1_000_000;
+    }
+    let found = civilians(&w).into_iter().find_map(|a| {
+        set_coins(&mut w, a, 5_000);
+        let o = assets::shop_choice(&w, a, true)?;
+        (o.category != assets::ShopCategory::Install && o.pick.used.is_none() && o.pick.kind != AssetKind::Weapon)
+            .then_some((a, o))
+    });
+    let (buyer, offer) = found.expect("a buyer with a new-asset offer");
+    assert!(!assets::sale_ok(&w, buyer, offer.seller, &offer.pick), "the import budget refuses it");
+    if let Some(b) = w.comp_mut::<Brain>(buyer) {
+        b.cooldowns.clear();
+        b.current_goal = Some(citysim::GoalKind::Shop);
+    }
+    let now = w.tick;
+    citysim::systems::plan::plan_for(&mut w, buyer, citysim::GoalKind::Shop);
+    let b = w.comp::<Brain>(buyer).expect("brain");
+    assert!(b.plan.is_none(), "no trip to a refused sale: {:?}", b.plan);
+    assert_eq!(b.cooldowns.get(&citysim::GoalKind::Shop), Some(&(now + w.config.brain.goal_cooldown_ticks)));
+    // The step: planned with the check off (the base, which installs the
+    // trip and the pick), then the buyer set down inside the seller: with
+    // the check on, the BuyAsset cannot start (no 140 min on the table).
+    w.config.preview_off.implant_fix = true;
+    if let Some(b) = w.comp_mut::<Brain>(buyer) {
+        b.cooldowns.clear();
+    }
+    citysim::systems::plan::plan_for(&mut w, buyer, citysim::GoalKind::Shop);
+    assert!(
+        w.comp::<Brain>(buyer).is_some_and(|b| b.plan.is_some() && b.shop_pick.is_some()),
+        "the base plans the trip"
+    );
+    w.leave_building(buyer);
+    w.enter_building(buyer, offer.seller);
+    let starts =
+        |w: &World| citysim::exec::actions::can_start(w, buyer, citysim::ActionKind::BuyAsset, Some(offer.seller));
+    assert!(starts(&w), "check off: the step starts (and waits 140 min before the sale fails)");
+    w.config.preview_off.implant_fix = false;
+    assert!(!starts(&w), "check on: a refused sale does not start");
+}

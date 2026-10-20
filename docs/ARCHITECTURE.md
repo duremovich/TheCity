@@ -275,6 +275,11 @@ Outside `systems/`: `needs.rs`, `mood.rs`, `personality.rs` (agent internals), `
 Lives at work's off switches are config only since the close (`OPEN-094`: the nine env switches retired): `[lives] enabled`
 (the master; off clears every section below), `[household] enabled`, `[service] civic`, `street`, `tower`, `[careers] enabled`,
 `[gangs] lieutenants`, `[law] stations`, `[life] exec_home_tier` (0 is off); each off by any path writes none of its keys.
+The earlier milestones' env switches retired in the pre-view pass (`OPEN-094`, phase 0): `CITYSIM_HITMARKET_OFF`,
+`LEVERAGE`, `HOSTAGE`, `WOUNDED`, `PHASE4`, `OUTSIDE`, `JOBS2`, `STREET`, `WEAPONS`, `VICE`, `FASHION`, `AGES`, `GRAY`,
+`FAITH`, `CHIP`, `BD`, `PATROL_SWEEP`, the `CITYSIM_VFIX_OFF`/`CITYSIM_HFIX_OFF` item masks and `CITYSIM_TRANSIT`. Each
+section's config path stays (`[hitmarket] enabled`, `[jobs2] enabled`, `[vice] chip`, the `vf_*`/`hf_*` items,
+`[transit] enabled` and the rest). `Config::load_from` reads only the switches of the phases in flight.
 
 Gate 8d's keys, under the master: `[service] madam_cut` now settles on the shift's tips at the worker's shift end
 (`service::shift_end` → `madam_settles`, `Job.shift_tips`); `[service] move_in_rent_days` → `ownership.rs` (`rehouse`,
@@ -394,7 +399,8 @@ Checklist (the doctrine is in `CLAUDE.md`; test rules in `docs/TESTING.md` and `
    system, assert the effect, ideally against a control. Helpers live in `citysim/tests/common/mod.rs` (`mod common;` at the top of the test file): `world`, `dole_world`, `world_with`, `run_days`, `adults`, `coins`, `set_coins`, `corp_named`.
 10. **The off switch** while the phase is in flight (a config `enabled` flag and/or a `CITYSIM_<NAME>_OFF=1` env var
     read in `Config::load_from`); off must be byte-identical to main on seeds 42-44 x 30 days. Retire it when the
-    phase lands.
+    phase lands: delete the env read, keep the config path. No retired milestone's env switch is read today
+    (`OPEN-094`, closed in the pre-view pass phase 0); the in-flight ones are the live phases' own.
 11. **The spec**: write any deviation into the milestone spec (with an `OPEN-nnn` tag if it leaves work open), and
     state the Statistical mirror in the commit.
 

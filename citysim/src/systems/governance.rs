@@ -15,7 +15,7 @@
 //! the closest margin, one a day. A board corp's brain reads the members'
 //! mean Personality (the chair counted twice).
 //!
-//! `[governance] enabled = false` (`CITYSIM_PHASE4_OFF=1`): no board is
+//! `[governance] enabled = false`: no board is
 //! seated, and every corp is a dictatorship as in phase 3.
 
 use crate::components::{Corp, Governance, Personality};

@@ -8,7 +8,7 @@
 //! demand against a weak and a lawful captain, and the god `Wound`,
 //! `Subscribe`, `TagAgent`, `Coerce`, `CallVote` and `ExposeSecret`. Every
 //! board, vote and hold here is game state between fictional agents: a
-//! record on a struct and a seeded dice roll. With `CITYSIM_PHASE4_OFF=1`
+//! record on a struct and a seeded dice roll. With `[governance] enabled = false`
 //! the mechanism tests fail (the switch gates every entry point).
 
 use citysim::contract::{

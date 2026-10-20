@@ -21,96 +21,69 @@ pub fn violence_on(world: &World) -> bool {
     world.config.life.violence_fixes
 }
 
-/// Diagnostics: violence-fix items to leave off, from `CITYSIM_VFIX_OFF`
-/// (a comma list of item numbers), read once.
-fn vfix_off_mask() -> u32 {
-    static MASK: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
-    *MASK.get_or_init(|| {
-        std::env::var("CITYSIM_VFIX_OFF")
-            .ok()
-            .map(|v| v.split(',').filter_map(|x| x.trim().parse::<u32>().ok()).fold(0, |m, n| m | (1 << n.min(31))))
-            .unwrap_or(0)
-    })
-}
-
-/// Is violence-fix item `n` on?
-pub fn vfix_item(world: &World, n: u32) -> bool {
-    violence_on(world) && vfix_off_mask() & (1 << n.min(31)) == 0
-}
-
 // ---------------------------------------------------------------------------
 // The hunger fixes (hunger as sickness P1, docs/HUNGER_SICKNESS.md § 6)
 // ---------------------------------------------------------------------------
 
-/// Diagnostics: hunger-fix items to leave off, from `CITYSIM_HFIX_OFF`.
-fn hfix_off_mask() -> u32 {
-    static MASK: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
-    *MASK.get_or_init(|| {
-        std::env::var("CITYSIM_HFIX_OFF")
-            .ok()
-            .map(|v| v.split(',').filter_map(|x| x.trim().parse::<u32>().ok()).fold(0, |m, n| m | (1 << n.min(31))))
-            .unwrap_or(0)
-    })
-}
-
-/// Is hunger-fix item `n` on (`[life] hunger_fixes` and not masked)?
-fn hfix_item(world: &World, n: u32) -> bool {
-    world.config.life.hunger_fixes && hfix_off_mask() & (1 << n.min(31)) == 0
+/// Are the hunger fixes on (`[life] hunger_fixes`)? Each item's own
+/// `hf_*` key is its switch.
+fn hunger_on(world: &World) -> bool {
+    world.config.life.hunger_fixes
 }
 
 /// G1: eat first while starving.
 pub fn food_first(world: &World) -> bool {
-    hfix_item(world, 1) && world.config.life.hf_food_first
+    hunger_on(world) && world.config.life.hf_food_first
 }
 
 /// G2: the Mission opens Eat's can-obtain gate.
 pub fn mission_gate(world: &World) -> bool {
-    hfix_item(world, 2) && world.config.life.hf_mission
+    hunger_on(world) && world.config.life.hf_mission
 }
 
 /// G3: no food theft while a meal is affordable (a cost, not a ban).
 pub fn buy_not_steal(world: &World) -> bool {
-    hfix_item(world, 3) && world.config.life.hf_buy_not_steal
+    hunger_on(world) && world.config.life.hf_buy_not_steal
 }
 
 /// G4: a Beg with no giver is a dry hour.
 pub fn beg_retry(world: &World) -> bool {
-    hfix_item(world, 4) && world.config.life.hf_beg_retry
+    hunger_on(world) && world.config.life.hf_beg_retry
 }
 
 /// P5g (item 8): relocation workers can afford.
 pub fn relocate_fix(world: &World) -> bool {
-    hfix_item(world, 8) && world.config.life.hf_relocate
+    hunger_on(world) && world.config.life.hf_relocate
 }
 
 /// P5g (item 9): the hiring cap and the seeded staff housed near work.
 pub fn hire_near(world: &World) -> bool {
-    hfix_item(world, 9) && world.config.life.hf_hire_near
+    hunger_on(world) && world.config.life.hf_hire_near
 }
 
 /// Item 13: a worker re-houses on the first rent (no-net city only).
 pub fn rehouse_employed(world: &World) -> bool {
-    hfix_item(world, 13) && world.config.life.hf_rehouse_employed && crate::systems::econ::wages_on(world)
+    hunger_on(world) && world.config.life.hf_rehouse_employed && crate::systems::econ::wages_on(world)
 }
 
 /// P5j (item 12): work-night sleep.
 pub fn work_night(world: &World) -> bool {
-    hfix_item(world, 12) && world.config.life.hf_work_night
+    hunger_on(world) && world.config.life.hf_work_night
 }
 
 /// P5i (item 11): meals around the shift.
 pub fn shift_meals(world: &World) -> bool {
-    hfix_item(world, 11) && world.config.life.hf_shift_meals
+    hunger_on(world) && world.config.life.hf_shift_meals
 }
 
 /// P5h (item 10): Homes built toward jobs.
 pub fn grow_housing(world: &World) -> bool {
-    hfix_item(world, 10) && world.config.life.hf_grow_housing
+    hunger_on(world) && world.config.life.hf_grow_housing
 }
 
 /// P5f (item 5): no Unwind on shift.
 pub fn shift_first(world: &World) -> bool {
-    hfix_item(world, 5) && world.config.life.hf_shift_first
+    hunger_on(world) && world.config.life.hf_shift_first
 }
 
 /// G1: starving (`hunger < starving_hunger`): the optional and paid goals
@@ -137,27 +110,27 @@ pub fn free_meal_first(world: &World, id: EntityId) -> bool {
 
 /// Violence fix 1: the ledger's `VictimClass::Street`.
 pub fn street_class(world: &World) -> bool {
-    vfix_item(world, 1) && world.config.life.vf_street_class
+    violence_on(world) && world.config.life.vf_street_class
 }
 
 /// Violence fix 2: short sources (riots, episodes) roll for their live hours.
 pub fn short_sources(world: &World) -> bool {
-    vfix_item(world, 2) && world.config.life.vf_short_sources
+    violence_on(world) && world.config.life.vf_short_sources
 }
 
 /// Violence fix 3: the chrome humanity cap and the fighter list by role.
 pub fn chrome_cap(world: &World) -> bool {
-    vfix_item(world, 3) && world.config.life.vf_chrome_cap
+    violence_on(world) && world.config.life.vf_chrome_cap
 }
 
 /// Violence fix 5: an immigrant arrives with a seeded adult's savings.
 pub fn arrival(world: &World) -> bool {
-    vfix_item(world, 5) && world.config.life.vf_arrival
+    violence_on(world) && world.config.life.vf_arrival
 }
 
 /// Violence fix 4: rent from income leaves an agent in arrears a meal.
 pub fn rent_meal(world: &World) -> bool {
-    vfix_item(world, 4) && world.config.life.vf_rent_meal
+    violence_on(world) && world.config.life.vf_rent_meal
 }
 
 // ---------------------------------------------------------------------------
