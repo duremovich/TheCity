@@ -136,8 +136,26 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
             let price = world.local(id, BuildingKind::Market).map_or(i64::MAX, |m| world.price_for(m, id));
             // Hunger as sickness § 3: a diagnosed patient saves for the treatment too.
             let line = SAVINGS_DAYS.saturating_mul(price).max(crate::systems::health::treatment_savings(world, id));
-            if world.comp::<Wallet>(id).is_some_and(|w| w.coins >= line) {
+            let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins);
+            if world.has::<Wallet>(id) && coins >= line {
                 return true;
+            }
+            // OPEN-138: the planner's own savings line (`WorldState::
+            // has_savings`, the price the agent pays at that Market,
+            // `diet::price_at`) holds too: Earn has nothing to plan, so it
+            // is no candidate (it won over Eat and planned empty, the idle
+            // freeze; `plan::install` cools any empty plan as the net).
+            if !world.config.preview_off.idle_fix {
+                let paid = world
+                    .local(id, BuildingKind::Market)
+                    .map_or(1, |m| crate::systems::diet::price_at(world, id, m))
+                    .max(1);
+                if world.has::<Wallet>(id)
+                    && coins >= SAVINGS_DAYS.saturating_mul(paid)
+                    && coins >= crate::systems::health::treatment_savings(world, id)
+                {
+                    return true;
+                }
             }
             // Nothing to plan: an unemployed agent whose dole is taken or
             // suspended (Beg yields coins, never savings), or an employed one
