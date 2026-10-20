@@ -2,8 +2,9 @@
 //!
 //! ```text
 //! citysim-cli shadow --seed S --days N [--start-day D] [--pick a,b,..]
-//!                    [--agent INDEX]... [--count K] --out DIR
-//! citysim-cli shadow --seed S --start-day D --list
+//!                    [--agent INDEX]... [--count K] [--population N]
+//!                    [--map FILE] --out DIR
+//! citysim-cli shadow --seed S --start-day D [--population N] [--map FILE] --list
 //! citysim-cli shadow --assert [--out DIR]
 //! citysim-cli shadow --lives [--population 20000] [--out DIR]
 //! ```
@@ -53,6 +54,22 @@
 //!   in which the pick gained a `Served` memory, `enc/shift` the mean count
 //!   (phase 0 read 0 for both; a Statistical pick keeps no such memory, but
 //!   the picks are pinned Full).
+//!
+//! Shadow V6 (docs/plans/shadow_v6.md, phase 0): the camera lens. Each
+//! diary opens with a camera block, and a window writes `camera.tsv` (one
+//! row per pick and day): the minutes by place (Home, work, another
+//! building, the street, a vehicle, held, Statistical, Coarse); plans
+//! started and aborted (by the `PlanAborted` reason); jumps (a tile change
+//! larger than the walk/ride allowance accrued in travel states since the
+//! last change, plus `CAM_JUMP_SLACK`); the longest unchanged stretch (tile,
+//! building, step and exec state), overall and awake; and settlements (a
+//! flow note or a `Served` memory naming a person) with the counterpart not
+//! co-located, Statistical, or the pick asleep. V5 bug 20's labels: a
+//! `Served` line names its kind and side (read from the regulars ledger and
+//! the pair's `[[serves]]` rows; the memory itself carries neither), a
+//! courier's parcels are logged as handed over, the Camp's headcount is
+//! never "a regular", the school fee is `SchoolFee` (not `Contract`), and
+//! the Meeting is its own time-use class. Still read-only, still no RNG.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -118,6 +135,10 @@ pub struct ShadowArgs {
     /// `Config::scaled_to(N)`, 50 Ambient flats a slot) instead of the shipped 2,000 city.
     #[arg(long, value_name = "N")]
     pub population: Option<u32>,
+    /// Shadow V6: a map file overriding `[world] map`, as `run --map` (with `--population`, the
+    /// scaled config on this map instead of the generated one). Not read by `--assert`/`--lives`.
+    #[arg(long, value_name = "FILE")]
+    pub map: Option<PathBuf>,
 }
 
 const ARCHETYPES: [&str; 49] = [
@@ -185,8 +206,9 @@ const ARCHETYPES: [&str; 49] = [
 ];
 
 /// Activity classes of the time-use table, in print order.
-const CLASSES: [&str; 11] =
-    ["sleep", "work", "eat", "social", "leisure", "travel", "crime", "idle", "jail", "stat", "other"];
+/// Shadow V6 (V5 bug 20): the Meeting is its own class (it read as `other`).
+const CLASSES: [&str; 12] =
+    ["sleep", "work", "eat", "social", "leisure", "travel", "crime", "idle", "jail", "stat", "meeting", "other"];
 
 // ---------------------------------------------------------------------------
 // Candidates
@@ -692,6 +714,8 @@ struct Track {
     hang_empty: u32,
     /// `SERVED_SOURCE_KINDS` events seen at the workplace during a shift, by kind.
     source_kinds: BTreeMap<String, u32>,
+    /// Shadow V6: the camera lens.
+    cam: Cam,
 }
 
 /// One shift of the agent's job, as observed.
@@ -735,6 +759,70 @@ struct ShiftObs {
 /// Lives at work phase 0: two agents outdoors this close (Manhattan tiles)
 /// at an hourly sample are co-located, as two inside one building are.
 const COLOC_TILES: u32 = 2;
+
+/// Shadow V6: the camera's places, in print order (`cam_place`).
+const CAM_PLACES: [&str; 8] = ["home", "work", "building", "street", "vehicle", "held", "stat", "coarse"];
+const CAM_HOME: usize = 0;
+const CAM_WORK: usize = 1;
+const CAM_BUILDING: usize = 2;
+const CAM_STREET: usize = 3;
+const CAM_VEHICLE: usize = 4;
+const CAM_HELD: usize = 5;
+const CAM_STAT: usize = 6;
+const CAM_COARSE: usize = 7;
+/// Shadow V6: tiles a position may change by beyond the travel allowance
+/// before it is a jump (stepping out of a door, entering a building rect).
+const CAM_JUMP_SLACK: f32 = 2.0;
+
+/// Shadow V6: one day of the camera block.
+#[derive(Default, Clone)]
+struct CamDay {
+    place_min: [u32; 8],
+    plans: u32,
+    aborts: BTreeMap<String, u32>,
+    jumps: u32,
+    /// Jumps with the pick Full and free at both ends (a body teleporting).
+    jumps_body: u32,
+    max_jump: u32,
+    first_jump: Option<Tick>,
+    /// The longest unchanged stretch begun this day: minutes, start, class, place.
+    still: Option<(u32, Tick, &'static str, String)>,
+    /// The same, among stretches that are not sleep.
+    still_awake: Option<(u32, Tick, &'static str, String)>,
+    /// Flow notes and `Served` memories naming a person.
+    settles: u32,
+    /// Of those, with the counterpart a body elsewhere.
+    settles_apart: u32,
+    /// With the counterpart Statistical (off screen).
+    settles_stat: u32,
+    /// With the pick asleep.
+    settles_asleep: u32,
+}
+
+/// The key of an unchanged stretch: tile, building, step, exec state.
+type StillKey = (citysim::TilePos, Option<EntityId>, Option<ActionKind>, u8);
+
+/// Shadow V6: the camera's running state.
+#[derive(Default)]
+struct Cam {
+    days: BTreeMap<u64, CamDay>,
+    /// The position at the last tile change, its tick, and its place text.
+    anchor: Option<(citysim::TilePos, Tick, String)>,
+    /// Tiles of travel allowance accrued since the anchor.
+    allow: f32,
+    /// The allowance a tick in the current exec state accrues.
+    speed: f32,
+    prev_lod: Option<Lod>,
+    prev_held: bool,
+    /// The unchanged stretch under way: its key, start, class and place.
+    still_key: Option<StillKey>,
+    still_start: Tick,
+    still_act: &'static str,
+    still_place: String,
+    /// A courier's yard's pending parcels at the last tick (V5 bug 20).
+    parcels: Vec<citysim::systems::streetwork::Parcel>,
+    parcels_handed: u32,
+}
 
 /// Lives at work phase 0: the event kinds that are a service encounter's
 /// source today (docs/LIVES_AT_WORK.md § 1.2's list, as far as the city
@@ -838,6 +926,7 @@ impl Track {
             spouse_coloc_stat: 0,
             hang_empty: 0,
             source_kinds: BTreeMap::new(),
+            cam: Cam::default(),
         }
     }
 
@@ -930,6 +1019,7 @@ fn activity(world: &World, id: EntityId) -> &'static str {
         | A::StakeOut => "crime",
         A::Wander | A::Beg | A::CollectDole => "idle",
         A::GoTo(_) => "travel",
+        A::Meeting => "meeting",
         _ => "other",
     }
 }
@@ -1200,22 +1290,8 @@ fn mem_text(world: &World, holder: EntityId, e: &MemoryEntry) -> String {
             let yard = world.comp::<citysim::Job>(holder).and_then(|j| j.employer);
             format!("loaded the shift's crates for {}", world.owner_label(yard.and_then(|y| world.owner_of(y))))
         }
-        (MemoryKind::Served, _) => {
-            let regular = e.subject.is_some_and(|o| {
-                let twice = |server: EntityId, guest: EntityId| {
-                    citysim::systems::service::regulars_of(world, server)
-                        .iter()
-                        .any(|r| r.who == guest && r.visits >= 2)
-                };
-                twice(holder, o) || twice(o, holder)
-            });
-            format!(
-                "served {}{} (valence {:+.2})",
-                who.unwrap_or_else(|| "someone".into()),
-                if regular { ", a regular" } else { "" },
-                e.valence
-            )
-        }
+        // Shadow V6 (V5 bug 20): the kind and the side.
+        (MemoryKind::Served, _) => served_text(world, holder, e),
         _ => format!(
             "memory {:?}{} (salience {:.2}, valence {:+.2}{}{})",
             e.kind,
@@ -1259,6 +1335,8 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
     // Events naming the agent (story ring by id cursor).
     let action_now: Option<ActionKind> = world.comp::<Brain>(id).and_then(|b| b.current_step().map(|s| s.action));
     let prev_action = std::mem::replace(&mut t.last_action, action_now);
+    // Shadow V6: a courier's parcels handed over (before the round's event).
+    cam_parcels(world, t, now);
     let mut event_ctx: Vec<String> = Vec::new();
     for e in events {
         if !e.actors.contains(&id) {
@@ -1275,6 +1353,15 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
         }
         event_ctx.push(format!("{:?} \"{}\"", e.kind, e.text));
         t.log(e.tick, "event", text);
+        // Shadow V6 (V5 bug 20): the courier's round is the parcel round.
+        if e.kind == EventKind::SuperRound && e.actors.first() == Some(&id) && is_courier(world, id) {
+            let line = format!(
+                "the round was the courier's parcel round: {} parcel(s) handed over in the window so far, {} of the yard's still pending",
+                t.cam.parcels_handed,
+                t.cam.parcels.len()
+            );
+            t.log(e.tick, "parcel", line);
+        }
         if matches!(e.kind, EventKind::Death) && e.actors.first() == Some(&id) && t.died.is_none() {
             t.died = Some(e.tick);
         }
@@ -1294,12 +1381,13 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
         // "A -> B": interrupted; "A failed at X: reason".
         let label = if e.text.contains(" failed at ") { "PLAN FAILED" } else { "plan interrupted" };
         t.log(e.tick, "plan", format!("{label}: {}", e.text));
+        *t.cam.days.entry(e.tick / TICKS_PER_DAY).or_default().aborts.entry(abort_reason(&e.text)).or_insert(0) += 1;
     }
     let mut flow_ctx: Vec<String> = Vec::new();
     // Shadow V4 bug 23: the tick's largest Flow on this agent (the money
     // section buckets by it; the running step read midnight sales as the
     // daily pass and a mid-shift purchase as a wage).
-    let mut tick_flow: Option<(i64, citysim::systems::ownership::Flow)> = None;
+    let mut tick_flow: Option<(i64, String)> = None;
     for n in notes {
         match n {
             ShadowNote::Move { tick, m, out } if m.actor == id || m.target == id => {
@@ -1364,12 +1452,17 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                 let who = other.map_or("the City".to_string(), |o| nm(world, o));
                 // A refund is already oriented owner -> agent: the agent's `in`.
                 let (out, inn) = if *from == Some(id) { (*coins, 0) } else { (0, *coins) };
-                let e = t.flow_kinds.entry(format!("{flow:?}")).or_insert((0, 0, 0));
+                let label = flow_label(world, *flow, *from, *to, *coins);
+                let e = t.flow_kinds.entry(label.clone()).or_insert((0, 0, 0));
                 e.0 += out;
                 e.1 += inn;
                 e.2 += 1;
-                if tick_flow.is_none_or(|(c, _)| *coins > c) {
-                    tick_flow = Some((*coins, *flow));
+                if tick_flow.as_ref().is_none_or(|(c, _)| *coins > *c) {
+                    tick_flow = Some((*coins, label.clone()));
+                }
+                if let Some(o) = other {
+                    let dir = if *from == Some(id) { "to" } else { "from" };
+                    cam_settle(world, t, *tick, o, &format!("{label} {coins}c {dir}"));
                 }
                 use citysim::systems::ownership::Flow as F;
                 if *to == Some(id) && !*refund && matches!(flow, F::Wage | F::ExecWage) && *coins > 0 {
@@ -1388,7 +1481,7 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                 }
                 let sign = if inn > 0 { "+" } else { "-" };
                 flow_ctx.push(format!(
-                    "{flow:?} {sign}{}{} {} {who}",
+                    "{label} {sign}{}{} {} {who}",
                     coins,
                     if *refund { " (refund)" } else { "" },
                     if sign == "+" { "from" } else { "to" }
@@ -1451,6 +1544,7 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
     *t.total_places.entry(here.clone()).or_insert(0) += 1;
     behaviour_minute(world, t, now, act);
     lives_minute(world, t, now, act, events);
+    cam_minute(world, t, now, act, &here);
 
     if let Some(b) = world.comp::<Brain>(id) {
         if !t.pinned_lod_noted && b.lod == Lod::Full {
@@ -1545,6 +1639,9 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
         // Plans.
         let ps = b.plan.as_ref().map(|p| p.started_tick);
         if ps != t.plan_started {
+            if ps.is_some() {
+                t.cam.days.entry(day).or_default().plans += 1;
+            }
             if let Some(line) = plan_line(world, b) {
                 t.log(now, "plan", format!("PLAN {line}"));
             }
@@ -1679,7 +1776,7 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                     kind
                 };
                 // Shadow V4 bug 23: a Flow on the books names the money.
-                let kind: String = tick_flow.map_or_else(|| kind.to_string(), |(_, f)| format!("{f:?}"));
+                let kind: String = tick_flow.as_ref().map_or_else(|| kind.to_string(), |(_, f)| f.clone());
                 let kind = kind.as_str();
                 let owner = bld.and_then(|b| owner_name(world, b));
                 let cp = owner.map_or(String::new(), |o| format!("; place owner {o}"));
@@ -1786,6 +1883,12 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                     }
                 }
                 let text = mem_text(world, id, e);
+                // Shadow V6: an encounter with the counterpart elsewhere.
+                if e.kind == MemoryKind::Served && !heard {
+                    if let Some(s) = e.subject {
+                        cam_settle(world, t, now, s, &format!("memory: {text}"));
+                    }
+                }
                 // Rumours heard already appear as gossip lines when told in person.
                 let old = if now.saturating_sub(e.tick) > 60 {
                     format!(" [deed from {}]", clock(e.tick))
@@ -2128,6 +2231,522 @@ fn flush_day(t: &mut Track, now: Tick) {
 }
 
 // ---------------------------------------------------------------------------
+// Shadow V6: the camera lens and V5 bug 20's labels
+// ---------------------------------------------------------------------------
+
+/// The camera's place of `id` this minute (an index into `CAM_PLACES`):
+/// held (a sentence), Statistical, Coarse, a vehicle (the El or a flyer,
+/// boarding included, or a walk with a vehicle under the agent), then by
+/// the building: Home, work (the employer, an exec's Hq, or a work-class or
+/// Meeting step anywhere), another building, else the street.
+fn cam_place(world: &World, id: EntityId, act: &str) -> usize {
+    if world.has::<Sentence>(id) {
+        return CAM_HELD;
+    }
+    if let Some(b) = world.comp::<Brain>(id) {
+        match b.lod {
+            Lod::Statistical => return CAM_STAT,
+            Lod::Coarse => return CAM_COARSE,
+            Lod::Full => {}
+        }
+        let driving = world.comp::<Kit>(id).is_some_and(|k| k.driving.is_some());
+        match b.exec {
+            ExecState::Fly { .. } | ExecState::Ride { .. } => return CAM_VEHICLE,
+            ExecState::Goto { .. } if driving => return CAM_VEHICLE,
+            _ => {}
+        }
+    }
+    let Some(bl) = world.comp::<Position>(id).and_then(|p| p.building) else { return CAM_STREET };
+    if world.comp::<Household>(id).and_then(|h| h.home) == Some(bl) {
+        return CAM_HOME;
+    }
+    let employer = world.comp::<Job>(id).and_then(|j| j.employer).or_else(|| {
+        citysim::systems::life::exec_corp(world, id).and_then(|c| citysim::systems::life::hq_of(world, c, id))
+    });
+    if employer == Some(bl) || act == "work" || act == "meeting" {
+        CAM_WORK
+    } else {
+        CAM_BUILDING
+    }
+}
+
+/// The exec state as a small code (part of an unchanged stretch's key).
+fn exec_code(e: &ExecState) -> u8 {
+    match e {
+        ExecState::Idle => 0,
+        ExecState::Goto { .. } => 1,
+        ExecState::GotoTimed { .. } => 2,
+        ExecState::Use { .. } => 3,
+        ExecState::Wait { .. } => 4,
+        ExecState::Fly { .. } => 5,
+        ExecState::Ride { .. } => 6,
+        ExecState::JackedIn { .. } => 7,
+    }
+}
+
+fn exec_name(e: &ExecState) -> &'static str {
+    match e {
+        ExecState::Idle => "Idle",
+        ExecState::Goto { .. } => "Goto",
+        ExecState::GotoTimed { .. } => "GotoTimed (Coarse walk)",
+        ExecState::Use { .. } => "Use",
+        ExecState::Wait { .. } => "Wait",
+        ExecState::Fly { .. } => "Fly",
+        ExecState::Ride { .. } => "Ride (the El)",
+        ExecState::JackedIn { .. } => "JackedIn",
+    }
+}
+
+/// Chebyshev tiles a tick in this exec state may cover: a walk 1 (a
+/// walker's step is 8 or fewer quarter ticks), a drive `[vehicles]
+/// max_steps_per_tick`, a flyer `1 / flyer_ticks_per_tile`, the El `1 /
+/// ride_ticks_per_tile` (the track is no shorter than the Chebyshev
+/// distance), a Coarse timed walk 1 (generous: it is timed at 1.5 walk
+/// ticks a Manhattan tile); anything else 0.
+fn exec_speed(world: &World, id: EntityId, e: &ExecState) -> f32 {
+    match e {
+        ExecState::Goto { .. } if world.comp::<Kit>(id).is_some_and(|k| k.driving.is_some()) => {
+            f32::from(world.config.vehicles.max_steps_per_tick.max(1))
+        }
+        ExecState::Goto { .. } | ExecState::GotoTimed { .. } => 1.0,
+        ExecState::Fly { .. } => 1.0 / world.config.vehicles.flyer_ticks_per_tile.max(0.01),
+        ExecState::Ride { .. } => 1.0 / world.config.transit.ride_ticks_per_tile.max(0.01),
+        _ => 0.0,
+    }
+}
+
+fn chebyshev(a: citysim::TilePos, b: citysim::TilePos) -> u32 {
+    u32::from(a.x.abs_diff(b.x)).max(u32::from(a.y.abs_diff(b.y)))
+}
+
+/// Two agents in one building, or both outdoors within `COLOC_TILES`.
+fn colocated(world: &World, a: EntityId, b: EntityId) -> bool {
+    let (Some(x), Some(y)) = (world.comp::<Position>(a), world.comp::<Position>(b)) else { return false };
+    match (x.building, y.building) {
+        (Some(p), Some(q)) => p == q,
+        (None, None) => x.tile.manhattan(y.tile) <= COLOC_TILES,
+        _ => false,
+    }
+}
+
+/// The camera's minute: the place, the jump check, the unchanged stretch.
+/// Reads only; no RNG.
+fn cam_minute(world: &World, t: &mut Track, now: Tick, act: &'static str, here: &str) {
+    let id = t.id;
+    let place = cam_place(world, id, act);
+    t.cam.days.entry(now / TICKS_PER_DAY).or_default().place_min[place] += 1;
+    let Some(pos) = world.comp::<Position>(id).cloned() else { return };
+    let brain = world.comp::<Brain>(id);
+    let lod = brain.map(|b| b.lod);
+    let held = world.has::<Sentence>(id);
+    // The jump: the allowance accrued in the state the tick ran under. Inside
+    // a building the body is at its door (the camera draws the building; a
+    // step in through the door lands on an interior tile).
+    let at = pos.building.and_then(|b| world.comp::<Building>(b)).map_or(pos.tile, |b| b.door);
+    t.cam.allow += t.cam.speed;
+    let mut jump_line: Option<String> = None;
+    match t.cam.anchor.clone() {
+        None => t.cam.anchor = Some((at, now, here.to_string())),
+        Some((tile, since, from)) if tile != at => {
+            let dist = chebyshev(tile, at);
+            if dist as f32 > t.cam.allow + CAM_JUMP_SLACK {
+                let body = t.cam.prev_lod == Some(Lod::Full) && lod == Some(Lod::Full) && !t.cam.prev_held && !held;
+                let d = t.cam.days.entry(now / TICKS_PER_DAY).or_default();
+                d.jumps += 1;
+                d.jumps_body += u32::from(body);
+                d.max_jump = d.max_jump.max(dist);
+                d.first_jump.get_or_insert(now);
+                let lods = match (t.cam.prev_lod, lod) {
+                    (Some(a), Some(b)) if a != b => format!("LOD {a:?} -> {b:?}"),
+                    (_, Some(b)) => format!("LOD {b:?}"),
+                    _ => "no LOD".into(),
+                };
+                let jail = match (t.cam.prev_held, held) {
+                    (false, true) => ", sentenced",
+                    (true, false) => ", released",
+                    (true, true) => ", held",
+                    _ => "",
+                };
+                let step = brain.and_then(|b| b.current_step()).map_or("no step".into(), |s| format!("{:?}", s.action));
+                jump_line = Some(format!(
+                    "JUMP{} {dist} tiles in {} min (allowance {:.0}): {from} -> {here}; {lods}{jail}; exec {}, {step}",
+                    if body { " (a Full body)" } else { "" },
+                    now.saturating_sub(since),
+                    t.cam.allow + CAM_JUMP_SLACK,
+                    brain.map_or("none", |b| exec_name(&b.exec)),
+                ));
+            }
+            t.cam.anchor = Some((at, now, here.to_string()));
+            t.cam.allow = 0.0;
+        }
+        Some(_) => {}
+    }
+    t.cam.speed = brain.map_or(0.0, |b| exec_speed(world, id, &b.exec));
+    t.cam.prev_lod = lod;
+    t.cam.prev_held = held;
+    if let Some(l) = jump_line {
+        t.log(now, "camera", l);
+    }
+    // The unchanged stretch.
+    let key: StillKey = (
+        pos.tile,
+        pos.building,
+        brain.and_then(|b| b.current_step().map(|s| s.action)),
+        brain.map_or(u8::MAX, |b| exec_code(&b.exec)),
+    );
+    if t.cam.still_key != Some(key) {
+        close_still(t, now);
+        t.cam.still_key = Some(key);
+        t.cam.still_start = now;
+        t.cam.still_act = act;
+        t.cam.still_place = here.to_string();
+    }
+}
+
+/// Close the unchanged stretch under way at `now` (its minutes credit the
+/// day it began).
+fn close_still(t: &mut Track, now: Tick) {
+    if t.cam.still_key.take().is_none() {
+        return;
+    }
+    let len = u32::try_from(now.saturating_sub(t.cam.still_start)).unwrap_or(u32::MAX);
+    let rec = (len, t.cam.still_start, t.cam.still_act, t.cam.still_place.clone());
+    let awake = t.cam.still_act != "sleep";
+    let d = t.cam.days.entry(t.cam.still_start / TICKS_PER_DAY).or_default();
+    if d.still.as_ref().is_none_or(|s| len > s.0) {
+        d.still = Some(rec.clone());
+    }
+    if awake && d.still_awake.as_ref().is_none_or(|s| len > s.0) {
+        d.still_awake = Some(rec);
+    }
+}
+
+/// A settlement naming a person (a flow note or a `Served` memory): counted,
+/// and logged when the counterpart is not a body beside the pick, or the
+/// pick is asleep (V5 bugs 6 and 7: the encounter narrates a settlement the
+/// body was not present for).
+fn cam_settle(world: &World, t: &mut Track, now: Tick, other: EntityId, what: &str) {
+    if other == t.id || other == EntityId::NONE || !world.has::<Identity>(other) {
+        return;
+    }
+    let asleep = activity(world, t.id) == "sleep";
+    let stat = world.comp::<Brain>(other).is_some_and(|b| b.lod == Lod::Statistical);
+    let apart = !stat && !colocated(world, t.id, other);
+    let d = t.cam.days.entry(now / TICKS_PER_DAY).or_default();
+    d.settles += 1;
+    d.settles_apart += u32::from(apart);
+    d.settles_stat += u32::from(stat);
+    d.settles_asleep += u32::from(asleep);
+    if apart || stat || asleep {
+        let where_ = if stat {
+            "Statistical (off screen)".to_string()
+        } else if apart {
+            format!("at {}", place(world, other))
+        } else {
+            "beside me".to_string()
+        };
+        let me = if asleep { format!("; I am asleep at {}", place(world, t.id)) } else { String::new() };
+        t.log(now, "camera", format!("SETTLED APART: {what}; {} {where_}{me}", nm(world, other)));
+    }
+}
+
+/// A `PlanAborted` text's reason: the `FailReason` of a failed step, else
+/// how the plan ended (an interrupt, unplannable, a LOD demotion).
+fn abort_reason(text: &str) -> String {
+    if let Some(i) = text.find(" failed at ") {
+        if let Some(j) = text[i..].find(": ") {
+            let r: String = text[i + j + 2..].chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
+            if !r.is_empty() {
+                return r;
+            }
+        }
+        return "Failed".into();
+    }
+    if text.contains("unplannable") {
+        "Unplannable".into()
+    } else if text.contains("LodDemotion") {
+        "LodDemotion".into()
+    } else if text.contains(" -> ") {
+        "Interrupted".into()
+    } else {
+        "Other".into()
+    }
+}
+
+/// A flow's name in the diary: the sim's `Flow`, but the school fee (a
+/// `Flow::Contract` of `[ages] school_fee` from a person to a School's
+/// owner or the city) is `SchoolFee` (V5 bug 20).
+fn flow_label(
+    world: &World,
+    flow: citysim::systems::ownership::Flow,
+    from: Option<EntityId>,
+    to: Option<EntityId>,
+    coins: i64,
+) -> String {
+    use citysim::systems::ownership::Flow as F;
+    let school_owner =
+        |o: Option<EntityId>| world.buildings_of_kind(BuildingKind::School).iter().any(|&b| world.owner_of(b) == o);
+    if flow == F::Contract
+        && coins == world.config.ages.school_fee
+        && from.is_some_and(|f| world.has::<Identity>(f))
+        && school_owner(to)
+    {
+        return "SchoolFee".into();
+    }
+    format!("{flow:?}")
+}
+
+/// The `[[serves]]` row `id` serves by, as `service::row_of_agent` (private
+/// there) reads it: the Job's row, else a postless pitch owner's trade row;
+/// a gang post (the pimp, the dealer) by its key when neither.
+fn serve_row(world: &World, id: EntityId) -> Option<&citysim::config::ServesCfg> {
+    let by_key = |k: &str| world.config.serves.iter().find(|r| r.key == k);
+    let row = match world.comp::<Job>(id) {
+        Some(j) => citysim::systems::service::row_for(world, j.role),
+        None => world.jobs2.pitches.get(&id).and_then(|p| world.config.trade(p.trade)).and_then(|t| by_key(&t.id)),
+    };
+    row.or_else(|| {
+        if citysim::systems::life::exec_corp(world, id).is_some() {
+            by_key("exec")
+        } else if world.jobs2.vice.pimps.values().any(|&p| p == id) {
+            by_key("pimp")
+        } else if world.dealers.values().flatten().any(|&d| d == id) {
+            by_key("dealer")
+        } else {
+            None
+        }
+    })
+}
+
+/// V5 bug 20: a `Served` memory as its kind and side. The memory carries
+/// neither, so the server is read from the regulars ledger (the encounter
+/// stamps the server's row for the served today), the pimp from his
+/// district's street pitch, else from the pair's rows (the door, the
+/// Camp's or Jail's count, a corp's table: the encounters with no ledger;
+/// a super's stop, whose Block can overflow the ledger's cap in one tick).
+/// The Camp's and the Jail's count is never "a regular".
+fn served_text(world: &World, holder: EntityId, e: &MemoryEntry) -> String {
+    use citysim::components::ServeKind as K;
+    let Some(o) = e.subject else { return format!("served someone unnamed (valence {:+.2})", e.valence) };
+    let today = u16::try_from(world.day()).unwrap_or(u16::MAX);
+    let fresh = |server: EntityId, guest: EntityId| {
+        citysim::systems::service::regulars_of(world, server).iter().any(|r| r.who == guest && r.last_day == today)
+    };
+    let is_pimp = |p: EntityId| world.jobs2.vice.pimps.values().any(|&x| x == p);
+    let pitch = |w: EntityId| world.jobs2.pitches.contains_key(&w);
+    let is_exec =
+        |x: EntityId| world.corps().into_iter().any(|c| world.comp::<Corp>(c).and_then(|k| k.exec) == Some(x));
+    let row_kind = |x: EntityId| serve_row(world, x).map(|r| (r.kind, r.key.clone()));
+    let unled = |x: EntityId| row_kind(x).is_some_and(|(k, _)| matches!(k, K::Door | K::Inmate | K::Tenant));
+    // (the server, the row's kind and key)
+    let side: Option<(EntityId, K, String)> = if is_pimp(holder) && pitch(o) {
+        Some((holder, K::Staff, "pimp".into()))
+    } else if is_pimp(o) && pitch(holder) {
+        Some((o, K::Staff, "pimp".into()))
+    } else if fresh(holder, o) {
+        row_kind(holder).map(|(k, key)| (holder, k, key))
+    } else if fresh(o, holder) {
+        row_kind(o).map(|(k, key)| (o, k, key))
+    } else if is_exec(o) {
+        Some((o, K::Attendee, "exec".into()))
+    } else if unled(o) {
+        row_kind(o).map(|(k, key)| (o, k, key))
+    } else if unled(holder) {
+        row_kind(holder).map(|(k, key)| (holder, k, key))
+    } else {
+        match (row_kind(holder), row_kind(o)) {
+            (Some((k, key)), None) => Some((holder, k, key)),
+            (None, Some((k, key))) => Some((o, k, key)),
+            _ => None,
+        }
+    };
+    let who = nm(world, o);
+    let Some((server, kind, key)) = side else {
+        let rk = |x: EntityId| serve_row(world, x).map_or("none".to_string(), |r| r.key.clone());
+        return format!(
+            "served-pair with {who} (kind and side unknown: my row {}, theirs {}) (valence {:+.2})",
+            rk(holder),
+            rk(o),
+            e.valence
+        );
+    };
+    let mine = server == holder;
+    let text = match (kind, mine) {
+        (K::Visit, true) => format!("served {who} (a customer, at the {key}'s counter)"),
+        (K::Visit, false) => format!("was served by {who} (as a customer; {who} the {key})"),
+        (K::Patient, true) => format!("treated {who} (a patient)"),
+        (K::Patient, false) => format!("was treated by {who} (as a patient; the {key})"),
+        (K::Pupil, true) => format!("met {who} at the door (a pupil's parent)"),
+        (K::Pupil, false) => format!("met {who} at the door (my child's teacher)"),
+        (K::Inmate, true) if key == "camp_warden" => format!("counted {who} (the Camp's headcount)"),
+        (K::Inmate, true) => format!("fed and counted {who} (an inmate)"),
+        (K::Inmate, false) if pitch(holder) || world.has::<Sentence>(holder) => {
+            format!("was counted by {who} (as an inmate; the {key})")
+        }
+        (K::Inmate, false) => format!("visited the Camp or the cells, {who} on duty (the {key})"),
+        (K::Tenant, true) => format!("called on {who} (a tenant, on the round)"),
+        (K::Tenant, false) => format!("was called on by {who} (as a tenant; my super)"),
+        (K::Fare, true) => format!("took {who} as a fare (the {key})"),
+        (K::Fare, false) => format!("rode with {who} (as a fare; the {key})"),
+        (K::Parcel, true) => format!("handed a parcel to {who} (the recipient)"),
+        (K::Parcel, false) => format!("took a parcel from {who} (the courier)"),
+        (K::Client, true) => format!("served {who} (a client, the {key})"),
+        (K::Client, false) => format!("was served by {who} (as a client; the {key})"),
+        (K::Door, true) => format!("kept the door on {who} (a patron)"),
+        (K::Door, false) => format!("met {who} at the door (the bouncer)"),
+        (K::Staff, true) if key == "pimp" => format!("collected from {who} (my street worker)"),
+        (K::Staff, false) if key == "pimp" => format!("was collected by {who} (my pimp)"),
+        (K::Staff, true) => format!("oversaw {who} (a co-worker, the house's staff)"),
+        (K::Staff, false) => format!("was overseen by {who} (a co-worker, the {key})"),
+        (K::Buyer, true) => format!("sold to {who} (a buyer, the {key})"),
+        (K::Buyer, false) => format!("bought from {who} (as a buyer; the {key})"),
+        (K::Attendee, true) if key == "exec" => format!("met {who} at the table (an attendee)"),
+        (K::Attendee, false) if key == "exec" => format!("sat at {who}'s table (a Meeting)"),
+        (K::Attendee, true) => format!("fought before {who} (a bettor)"),
+        (K::Attendee, false) => format!("watched {who} fight (as a bettor)"),
+        (K::Source, true) => format!("interviewed {who} (a source)"),
+        (K::Source, false) => format!("was interviewed by {who} (as a source; the reporter)"),
+        (K::Crate, _) => format!("loaded crates with {who}"),
+        (K::Broker, true) => format!("brokered for {who}"),
+        (K::Broker, false) => format!("was brokered by {who}"),
+    };
+    let regular = kind != K::Inmate
+        && citysim::systems::service::regulars_of(world, server)
+            .iter()
+            .any(|r| r.who == if mine { o } else { holder } && r.visits >= 2);
+    format!("{text}{} (valence {:+.2})", if regular { ", a regular" } else { "" }, e.valence)
+}
+
+/// A courier pick's parcels handed over this tick: those of the yard gone
+/// from the pending list while the pick stands in their stop (V5 bug 20).
+fn is_courier(world: &World, id: EntityId) -> bool {
+    world
+        .comp::<Job>(id)
+        .and_then(|j| citysim::systems::service::row_for(world, j.role))
+        .is_some_and(|r| r.kind == citysim::components::ServeKind::Parcel)
+}
+
+fn cam_parcels(world: &World, t: &mut Track, now: Tick) {
+    let id = t.id;
+    let job = world.comp::<Job>(id);
+    if !is_courier(world, id) {
+        t.cam.parcels.clear();
+        return;
+    }
+    let yard = job.and_then(|j| j.employer);
+    let cur: Vec<citysim::systems::streetwork::Parcel> =
+        world.jobs2.parcels.iter().copied().filter(|p| Some(p.yard) == yard).collect();
+    let here = world.comp::<Position>(id).and_then(|p| p.building);
+    let handed: Vec<citysim::systems::streetwork::Parcel> =
+        t.cam.parcels.iter().copied().filter(|p| !cur.contains(p) && here == Some(p.at)).collect();
+    for p in handed {
+        t.cam.parcels_handed += 1;
+        let line = format!(
+            "PARCEL handed over at {}: from {} for {} (fee {})",
+            place_of_building(world, p.at),
+            nm(world, p.from),
+            nm(world, p.to),
+            money(p.fee)
+        );
+        t.log(now, "parcel", line);
+    }
+    t.cam.parcels = cur;
+}
+
+fn hours(m: u32) -> String {
+    format!("{:.1}", f64::from(m) / 60.0)
+}
+
+/// The diary's camera block (Shadow V6), after the header.
+fn camera_block(t: &Track) -> String {
+    let mut md = String::new();
+    let _ = writeln!(md, "## Camera (Shadow V6)\n");
+    let _ = writeln!(
+        md,
+        "Hours by place; plans started and aborted; jumps (a tile change beyond the walk/ride allowance; body: Full and \
+         free at both ends) and the largest; the longest unchanged stretch (tile, building, step, exec) begun that day, \
+         all and awake; settlements naming a person (a flow or a Served memory: apart = the counterpart a body \
+         elsewhere, stat = Statistical, asleep = the pick asleep).\n"
+    );
+    let _ = writeln!(
+        md,
+        "| day | {} | plans | aborts | jumps (body) | max jump | still | awake still | settles (apart/stat/asleep) |",
+        CAM_PLACES.join(" | ")
+    );
+    let _ = writeln!(md, "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+    let mut notes: Vec<String> = Vec::new();
+    for (day, d) in &t.cam.days {
+        let _ = write!(md, "| d{day} |");
+        for m in d.place_min {
+            let _ = write!(md, " {} |", hours(m));
+        }
+        let aborts: u32 = d.aborts.values().sum();
+        let still = d.still.as_ref().map_or("-".into(), |s| format!("{}m {}", s.0, s.2));
+        let awake = d.still_awake.as_ref().map_or("-".into(), |s| format!("{}m {}", s.0, s.2));
+        let _ = writeln!(
+            md,
+            " {} | {aborts} | {} ({}) | {} | {still} | {awake} | {} ({}/{}/{}) |",
+            d.plans, d.jumps, d.jumps_body, d.max_jump, d.settles, d.settles_apart, d.settles_stat, d.settles_asleep
+        );
+        let reasons: Vec<String> = d.aborts.iter().map(|(k, n)| format!("{k} {n}")).collect();
+        let mut n = format!("d{day}: aborts {}", if reasons.is_empty() { "none".into() } else { reasons.join(", ") });
+        if let Some(s) = &d.still_awake {
+            let _ = write!(n, "; awake still from {} at {}", clock(s.1), s.3);
+        }
+        if let Some(j) = d.first_jump {
+            let _ = write!(n, "; first jump {}", clock(j));
+        }
+        notes.push(n);
+    }
+    let _ = writeln!(md);
+    for n in notes {
+        let _ = writeln!(md, "- {n}");
+    }
+    if t.cam.parcels_handed > 0 {
+        let _ = writeln!(md, "- parcels handed over in the window: {}", t.cam.parcels_handed);
+    }
+    let _ = writeln!(md);
+    md
+}
+
+/// `camera.tsv`'s header (one row per pick and day).
+const CAMERA_TSV_HEADER: &str = "arch\tindex\tname\tday\thome_h\twork_h\tbuilding_h\tstreet_h\tvehicle_h\theld_h\tstat_h\t\
+coarse_h\tplans\taborts\taborts_by_reason\tjumps\tjumps_body\tmax_jump\tfirst_jump\tstill_min\tstill_start\tstill_class\t\
+awake_still_min\tawake_still_start\tawake_still_class\tawake_still_place\tsettles\tsettles_apart\tsettles_stat\t\
+settles_asleep";
+
+fn camera_rows(t: &Track, out: &mut String) {
+    for (day, d) in &t.cam.days {
+        let _ = write!(out, "{}\t{}\t{}\t{day}", t.arch, t.id.index, t.name);
+        for m in d.place_min {
+            let _ = write!(out, "\t{}", hours(m));
+        }
+        let reasons: Vec<String> = d.aborts.iter().map(|(k, n)| format!("{k}:{n}")).collect();
+        let st = |s: &Option<(u32, Tick, &'static str, String)>| {
+            s.as_ref().map_or("0\t-\t-".to_string(), |s| format!("{}\t{}\t{}", s.0, clock(s.1), s.2))
+        };
+        let awake_place = d.still_awake.as_ref().map_or("-".to_string(), |s| s.3.replace('\t', " "));
+        let _ = writeln!(
+            out,
+            "\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{awake_place}\t{}\t{}\t{}\t{}",
+            d.plans,
+            d.aborts.values().sum::<u32>(),
+            if reasons.is_empty() { "-".into() } else { reasons.join(",") },
+            d.jumps,
+            d.jumps_body,
+            d.max_jump,
+            d.first_jump.map_or("-".into(), clock),
+            st(&d.still),
+            st(&d.still_awake),
+            d.settles,
+            d.settles_apart,
+            d.settles_stat,
+            d.settles_asleep
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Output
 // ---------------------------------------------------------------------------
 
@@ -2202,6 +2821,8 @@ fn write_diary(world: &World, t: &mut Track, dir: &std::path::Path, end: Tick) -
     t.entries.sort_by_key(|e| (e.tick, e.seq));
     let stem = format!("{}_{}", t.arch, t.id.index);
     let mut md = t.header.clone();
+    md.push('\n');
+    md.push_str(&camera_block(t));
     let mut jl = String::new();
     let mut day_open: Option<u64> = None;
     // Summary lines print last in their day.
@@ -2366,7 +2987,7 @@ pub fn shadow(args: ShadowArgs) -> Result<(), String> {
     if !args.list && args.out.is_none() {
         return Err("--out <dir> is required (or use --list or --assert)".into());
     }
-    let mut world = start_world(args.seed, args.start_day, args.population);
+    let mut world = start_world(args.seed, args.start_day, args.population, args.map.as_deref())?;
 
     if args.list {
         println!("seed {} day {}: candidates per archetype", args.seed, args.start_day);
@@ -2409,18 +3030,29 @@ pub fn shadow(args: ShadowArgs) -> Result<(), String> {
     let mut tracks = follow(&mut world, &picked, args.days, !args.no_pin, true);
     let end = world.tick;
     let mut total = 0u64;
+    let mut tsv = format!("{CAMERA_TSV_HEADER}\n");
     for t in &mut tracks {
         let (md, jl) = write_diary(&world, t, &dir, end)?;
         total += md + jl;
+        camera_rows(t, &mut tsv);
         println!("{}_{}: {} ({} KB md, {} KB jsonl)", t.arch, t.id.index, t.name, md / 1024, jl / 1024);
     }
+    let tp = dir.join("camera.tsv");
+    std::fs::write(&tp, &tsv).map_err(|e| format!("{}: {e}", tp.display()))?;
     println!("wrote {} diaries to {} ({} KB)", tracks.len(), dir.display(), total / 1024);
     Ok(())
 }
 
-/// The world of `seed` run normally to the start of `start_day`.
-fn start_world(seed: u64, start_day: u64, population: Option<u32>) -> World {
-    let config = match population {
+/// The world of `seed` run normally to the start of `start_day`. Shadow V6:
+/// `map` overrides `[world] map` as `run --map` does (with `population`,
+/// the scaled config on that map instead of the generated one).
+fn start_world(
+    seed: u64,
+    start_day: u64,
+    population: Option<u32>,
+    map: Option<&std::path::Path>,
+) -> Result<World, String> {
+    let mut config = match population {
         Some(n) => {
             let mut c = Config::load().scaled_to(n);
             c.world.map = format!("gen:{n}");
@@ -2429,12 +3061,15 @@ fn start_world(seed: u64, start_day: u64, population: Option<u32>) -> World {
         }
         None => Config::load(),
     };
+    if let Some(m) = map {
+        config.world.map = crate::map_path(m)?;
+    }
     let mut world = World::new(seed, config);
     let start_tick = start_day * TICKS_PER_DAY;
     while world.tick < start_tick {
         citysim::tick(&mut world);
     }
-    world
+    Ok(world)
 }
 
 /// The picks: `count` per archetype of the comma-separated `list` (free
@@ -2551,6 +3186,7 @@ fn follow(world: &mut World, picked: &[(String, EntityId)], days: u64, pin: bool
         close_action(world, t, end, "run ended");
         flush_day(t, end);
         end_sleep_block(t, end);
+        close_still(t, end);
     }
     tracks
 }
@@ -3200,7 +3836,7 @@ fn behaviour_window(seed: u64, day: u64, list: &'static str, out: Option<&std::p
 
 /// `behaviour_window`'s body over an archetype list (shared with `--lives`).
 fn window_runs(seed: u64, day: u64, archs: &[&str], out: Option<&std::path::Path>) -> Vec<SampleRun> {
-    let world = start_world(seed, day, None);
+    let world = start_world(seed, day, None, None).expect("the shipped map");
     let jobs: Vec<(&str, Result<Vec<EntityId>, String>)> =
         archs.iter().map(|&arch| (arch, sample(&world, seed, arch))).collect();
     std::thread::scope(|s| {
@@ -3326,7 +3962,7 @@ pub fn lives(out: Option<&std::path::Path>, population: Option<u32>) -> Result<S
     let mut rows: BTreeMap<String, Row> = BTreeMap::new();
     let (city, window) = match population {
         Some(n) => {
-            let mut world = start_world(LIVES_BIG_SEED, LIVES_BIG_DAY, Some(n));
+            let mut world = start_world(LIVES_BIG_SEED, LIVES_BIG_DAY, Some(n), None)?;
             let list = archs.join(",");
             let picked = pick(&world, LIVES_BIG_SEED, LIVES_BIG_DAY, Some(&list), LIVES_COUNT_BIG, &[]);
             if picked.is_empty() {
@@ -3505,6 +4141,7 @@ mod tests {
             assert: false,
             lives: false,
             population: None,
+            map: None,
         };
         shadow(args).expect("shadow runs");
         let md = std::fs::read_dir(&dir)
@@ -3537,10 +4174,33 @@ mod tests {
             "### Top contacts",
             "### Money",
             "### Notable events",
+            // Shadow V6: the camera block.
+            "## Camera (Shadow V6)",
+            "| d0 |",
+            "| d1 |",
         ] {
             assert!(text.contains(needle), "diary lacks {needle:?}");
         }
+        // Shadow V6: the window's camera.tsv, a row per pick and day.
+        let tsv = std::fs::read_to_string(dir.join("camera.tsv")).expect("camera.tsv");
+        let rows: Vec<&str> = tsv.lines().collect();
+        assert_eq!(rows.first().copied(), Some(CAMERA_TSV_HEADER));
+        assert_eq!(rows.len(), 3, "a header and two days: {tsv}");
+        let cols = CAMERA_TSV_HEADER.split('\t').count();
+        assert!(rows.iter().all(|r| r.split('\t').count() == cols), "ragged camera.tsv: {tsv}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Shadow V6: the `PlanAborted` reasons, as `exec`, `plan`, `think` and
+    /// `lod` write them.
+    #[test]
+    fn test_abort_reasons() {
+        assert_eq!(abort_reason("Some(Work) failed at GoTo(TargetHome): Timeout"), "Timeout");
+        assert_eq!(abort_reason("Some(Sleep) failed at Sleep: BuildingFull (bed: Home)"), "BuildingFull");
+        assert_eq!(abort_reason("Work unplannable (no feasible action)"), "Unplannable");
+        assert_eq!(abort_reason("Visit unplannable: NoPlan"), "Unplannable");
+        assert_eq!(abort_reason("Work LodDemotion"), "LodDemotion");
+        assert_eq!(abort_reason("Work -> Eat"), "Interrupted");
     }
 
     /// The behaviour tier (docs/TESTING.md): the archetypes' diary metrics
