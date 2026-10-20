@@ -257,6 +257,37 @@ fn test_old_map_save_shape_loads() {
     assert_eq!(back.zone(TilePos::new(2, 0)), citysim::Zone::Mid);
 }
 
+/// Track B (OPEN-136): the island for 20,000 (`assets/maps/isle_m_k2.txt`,
+/// 4 m tiles, `--downsample 2 --residents 20000`; docs/IMPORT_GRAPHICS.md).
+/// The broken-system signals: fewer household slots than 20,000 residents
+/// need (the k = 4 snapshot for 5,000 left ~8,000 homeless at 20k), no Spire
+/// Lot (the megacorps' Hqs never stand), a district of households without
+/// a Market, a door off the street network.
+#[test]
+fn test_graphics_import_20k_holds_20k() {
+    let cfg = Config::load();
+    let m = Map::load(&cfg.asset("maps/isle_m_k2.txt"));
+    assert_eq!((m.w(), m.h()), (1500, 938));
+    assert_eq!(m.districts.len(), 7);
+    let homes = || m.buildings.iter().filter(|b| b.kind == BuildingKind::Home);
+    let slots: usize = homes().map(|b| usize::from(b.floors.max(1))).sum();
+    assert!(slots * 5 >= 20_000, "{slots} household slots for 20,000 residents");
+    let spire_lots =
+        m.buildings.iter().filter(|b| b.kind == BuildingKind::Lot && m.zone(b.door) == citysim::Zone::Spire).count();
+    assert!(spire_lots >= 20, "{spire_lots} Spire Lots for 20 seeded Hqs");
+    for d in homes().filter_map(|b| m.district_at(b.door)).collect::<std::collections::BTreeSet<_>>() {
+        assert!(
+            m.buildings.iter().any(|b| b.kind == BuildingKind::Market && m.district_at(b.door) == Some(d)),
+            "district {d} has Homes and no Market"
+        );
+    }
+    for k in [BuildingKind::Jail, BuildingKind::Hall, BuildingKind::Warehouse, BuildingKind::Cemetery] {
+        assert_eq!(m.count_kind(k), 1, "{k:?}");
+    }
+    assert_eq!(m.count_kind(BuildingKind::Farm), 120);
+    assert_eq!(unreachable_doors(&m), 0, "every door on one street network");
+}
+
 /// The committed TheCityGraphics import (`assets/maps/isle_m_k4.txt`: the
 /// whole island at 8 m tiles, `citysim-cli import-graphics --downsample 4`;
 /// docs/IMPORT_GRAPHICS.md). Tests never read the graphics repo: this
