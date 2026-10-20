@@ -149,15 +149,29 @@ fn test_winner_takes_the_losers_weapon() {
 /// The seed city run until a gang has members.
 fn city_with_a_gang() -> (World, EntityId) {
     let mut w = on_world();
-    for _ in 0..12 * citysim::TICKS_PER_DAY {
-        w.tick();
+    // Day by day until a gang qualifies (when one forms is city history).
+    let qualifies =
+        |w: &World, g: EntityId| w.comp::<Gang>(g).is_some_and(|x| x.members.len() >= 3) && w.hideout_of(g).is_some();
+    let mut day = 0;
+    while day < 60 && !w.gangs().into_iter().any(|g| qualifies(&w, g)) {
+        for _ in 0..citysim::TICKS_PER_DAY {
+            w.tick();
+        }
+        day += 1;
     }
     let gang = w
         .gangs()
         .into_iter()
-        .filter(|&g| w.comp::<Gang>(g).is_some_and(|x| x.members.len() >= 3) && w.hideout_of(g).is_some())
+        .filter(|&g| qualifies(&w, g))
         .max_by_key(|&g| w.comp::<Gang>(g).map_or(0, |x| x.members.len()))
-        .expect("a gang with members by day 12");
+        .expect("a gang with members within 60 days");
+    // Pin the precondition: the gang's armoury is under target (whether its
+    // own history already filled it is incidental), so it ships a crate.
+    let h = w.hideout_of(gang).expect("hideout");
+    let target = (w.comp::<Gang>(gang).map_or(0, |g| g.members.len()) as f32 * w.config.weapons.armoury_per_member)
+        .ceil() as u32;
+    let have = weapons::stock_at(&w, h).len() as u32;
+    w.config.weapons.deal_float = w.config.weapons.deal_float.max((have + 1).saturating_sub(target).max(6));
     (w, gang)
 }
 
