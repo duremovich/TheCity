@@ -7569,6 +7569,14 @@ pub struct LifeCfg {
     /// exec_home_spare` beds and the result printed (never an eviction).
     #[serde(skip_serializing_if = "is_zero_f32_cfg")]
     pub exec_home_spare: f32,
+    /// The pre-view pass phase 1 (OPEN-140, docs/PREVIEW_PASS.md § 2):
+    /// the housing churn fixed: one `Housed` writer per body per midnight,
+    /// "moved nearer work" only for an employed mover whose own leg
+    /// shrinks, a body moved in walks to its new Home before it idles or
+    /// sleeps elsewhere, and a housed sleeper's "Hotel" is a Hotel. The
+    /// switch in flight (`CITYSIM_HOUSING_FIX_OFF=1`; off is not written).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub housing_fix: bool,
 }
 
 impl Default for LifeCfg {
@@ -7678,6 +7686,7 @@ impl Default for LifeCfg {
             beg_cool_hours: 1,
             exec_home_tier: 0,
             exec_home_spare: 0.0,
+            housing_fix: false,
         }
     }
 }
@@ -8233,6 +8242,10 @@ impl Config {
         // The earlier milestones' `CITYSIM_*_OFF` env switches retired in
         // the pre-view pass (OPEN-094); every section's config path stays
         // (`[hitmarket] enabled`, `[jobs2] enabled`, `[vice] chip` and the rest).
+        // The pre-view pass phase 1 (OPEN-140): the housing fix's A/B and identity device.
+        if std::env::var("CITYSIM_HOUSING_FIX_OFF").is_ok_and(|v| v == "1") {
+            cfg.life.housing_fix = false;
+        }
         // Lives at work (D13): a config with `[lives] enabled = false` by any
         // path clears the milestone's sections, so the off save holds no
         // `[lives]`, `[service]` or `[[serves]]`. The milestone's env

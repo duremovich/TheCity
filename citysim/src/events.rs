@@ -699,6 +699,10 @@ impl World {
         self.next_event_id += 1;
         let event = Event { id, tick: self.tick, kind, actors: SmallVec::from_slice(actors), text: text.into() };
         record_life(self, &event);
+        // OPEN-140: a move's body, for the midnight's one writer and the walk home.
+        if kind == EventKind::Housed {
+            crate::systems::life::on_housed(self, actors.first().copied(), actors.get(1).copied());
+        }
         self.events.push_back(event);
         id
     }

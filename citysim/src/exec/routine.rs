@@ -524,7 +524,8 @@ pub fn idle_plan(world: &World, id: EntityId) -> Option<Plan> {
 fn idle_near(world: &World, id: EntityId, home: Option<EntityId>) -> Option<Plan> {
     use crate::systems::life;
     let home_t = home.and_then(|h| life::tiles_to(world, id, h))?;
-    if home_t <= world.config.life.idle_far_tiles {
+    // OPEN-140: a body moved in walks to its new Home (`idle_plan`'s GoTo).
+    if home_t <= world.config.life.idle_far_tiles || life::moving_in(world, id).is_some() {
         return None;
     }
     let margin = world.config.life.bed_margin_tiles;

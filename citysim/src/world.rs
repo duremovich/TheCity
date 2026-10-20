@@ -1066,6 +1066,18 @@ pub struct World {
     /// mid-hour save resumes byte for byte. Empty off.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub service_room: BTreeMap<EntityId, crate::systems::service::Room>,
+    /// The pre-view pass phase 1 (OPEN-140, `[life] housing_fix`): the
+    /// bodies a `Housed` line named at this tick (the midnight's first
+    /// move wins; `life::housed_now`). Not saved: only the tick that wrote
+    /// it reads it.
+    #[serde(skip)]
+    pub housed_now: (Tick, BTreeSet<EntityId>),
+    /// OPEN-140: a body moved into a new Home -> that Home, until it first
+    /// walks in (`enter_building`): it idles and sleeps there, not where
+    /// the move found it (`life::moving_in`). Saved (SAVE_VERSION 46);
+    /// empty off.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub moving_in: BTreeMap<EntityId, EntityId>,
     /// Lives at work phase 1 (§ 1.1): each server's regulars (at most
     /// `service::REGULARS_CAP`; the oldest falls off). Empty off, so the
     /// off save is byte-identical.
@@ -1713,6 +1725,8 @@ impl World {
             unwind: BTreeMap::new(),
             hangouts: BTreeMap::new(),
             service_room: BTreeMap::new(),
+            housed_now: (0, BTreeSet::new()),
+            moving_in: BTreeMap::new(),
             regulars: BTreeMap::new(),
             visits: BTreeMap::new(),
             notices_today: BTreeSet::new(),
@@ -1871,6 +1885,8 @@ impl World {
         // Lives at work phase 6 (§ 4.2, § 4.3): the seeded Jobs' seniority
         // and professions (a hash, no RNG; nothing with `[careers]` off).
         crate::prof::timed!("new::careers::seed", systems::careers::seed(&mut w));
+        // OPEN-140: the seed city's housing is not the first midnight's move.
+        w.housed_now.1.clear();
         w
     }
 
@@ -2368,6 +2384,10 @@ impl World {
             }
             h.home = home;
             self.index_household(id);
+        }
+        // OPEN-140: a walk home to a Home no longer his ends.
+        if self.moving_in.get(&id).is_some_and(|&h| Some(h) != home) {
+            self.moving_in.remove(&id);
         }
         // Fix pass (phase 3 review): any path to a Home (re-housing, a
         // marriage, a god command) ends a squat and tonight's Hotel booking;
@@ -3515,6 +3535,7 @@ impl World {
         // M12 D27/D20: a squatter's slot and a guest's bed are freed.
         self.remove::<Squatter>(id);
         self.hotel_beds.remove(&id);
+        self.moving_in.remove(&id);
         self.sweep_beats.remove(&id);
         crate::systems::bind::drop_victim_holes(self, id);
         self.drop_reports_of(id);
@@ -3803,6 +3824,7 @@ impl World {
         self.remove::<Child>(id);
         self.remove::<Squatter>(id);
         self.hotel_beds.remove(&id);
+        self.moving_in.remove(&id);
         self.sweep_beats.remove(&id);
         self.release_all(id);
         self.pending_purchase.remove(&id);
