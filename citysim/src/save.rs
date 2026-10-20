@@ -239,7 +239,11 @@ use crate::world::World;
 /// move_in_rent_days` and `exec_ride` (written only on) and the `Jobs2Cols`
 /// columns `exec_rides`, `exec_rides_corp` (serde defaults). An off save is
 /// byte-identical to version 44's.
-pub const SAVE_VERSION: u8 = 45;
+/// 46 (the pre-view pass phase 1, OPEN-140): `[life] housing_fix` (written
+/// only on) and `World.moving_in`, the bodies moved into a Home they have
+/// not walked into yet (written only when non-empty). An off save is
+/// byte-identical to version 45's.
+pub const SAVE_VERSION: u8 = 46;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

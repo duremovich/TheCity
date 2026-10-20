@@ -343,10 +343,23 @@ fn retire(world: &mut World) {
         .filter(|&a| world.has::<Job>(a) && !world.has::<Sentence>(a) && years(world, a) >= cfg.retire_from_years)
         .collect();
     for a in workers {
+        // OPEN-140: one move a body a midnight: a worker the midnight housed
+        // (tied housing, a reunion, his spouse's retirement to kin) retires
+        // another night (a couple both retiring moved in with two children
+        // in the same minute).
+        if crate::systems::life::housed_now(world, a) {
+            continue;
+        }
         // The kin take-in first (the `[ages]` rule and odds), then savings.
         // Review fix 4: a co-resident spouse moves with him, so the child's
         // Home needs room for both; room for one only, no retirement to kin.
         let spouse = co_resident_spouse(world, a);
+        // OPEN-140: nor while the spouse who would move along was housed
+        // tonight (a super tied into the landlord's Block, then moved in with
+        // family as the retiree's spouse in the same minute).
+        if spouse.is_some_and(|s| crate::systems::life::housed_now(world, s)) {
+            continue;
+        }
         let kin = ages_on
             .then(|| crate::systems::ages::kin_home(world, a))
             .flatten()

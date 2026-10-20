@@ -1244,6 +1244,20 @@ impl World {
                 })
                 .or_else(|| self.wage_desk(agent)),
             // M12 D21: the booked Hotel, else the one the agent can reach and pay.
+            // OPEN-140: a housed sleeper's Hotel is the planner's
+            // (`life::away_hotel`: a Hotel nearer than Home), never the
+            // homeless's nearest cot or a bed out of the planner's reach
+            // ("Hotel" resolved to a Soup Kitchen, or to none: NoSuchPlace).
+            LocationKey::Hotel
+                if crate::systems::life::housing_fix(self)
+                    && self.comp::<crate::components::Household>(agent).is_some_and(|h| h.home.is_some()) =>
+            {
+                target
+                    .filter(|&t| {
+                        crate::systems::street::is_hotel(self, t) && !crate::systems::charity::is_cot_house(self, t)
+                    })
+                    .or_else(|| crate::systems::life::away_hotel(self, agent))
+            }
             LocationKey::Hotel => target
                 .filter(|&t| crate::systems::street::is_hotel(self, t))
                 .or_else(|| crate::systems::street::hotel_for(self, agent)),
@@ -1407,6 +1421,10 @@ impl World {
             p.tile = slot;
             p.building = Some(b);
             p.entered = tick;
+        }
+        // OPEN-140: home at last.
+        if self.moving_in.get(&agent) == Some(&b) {
+            self.moving_in.remove(&agent);
         }
     }
 

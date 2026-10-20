@@ -418,8 +418,11 @@ fn probe_night_porter_on_shift_at_two_is_paid_by_eight() {
     cfg.household.enabled = false;
     let mut w = World::new(42, cfg);
     let porter_role = w.config.trade_role("night_porter").expect("the night_porter trade is configured");
-    // Day 2, 00:00: the first midnight's job search hired the porters.
-    w.run_ticks(2 * TICKS_PER_DAY);
+    // Day 1, 16:00: the first midnight's job search hired the porters; she is
+    // followed from before the shift (the pre-view pass phase 1's city picks
+    // a porter who, unpinned, is off shift at midnight and, promoted then,
+    // sleeps at home: the promotion's placement, OPEN-149, not the shift).
+    w.run_ticks(TICKS_PER_DAY + 16 * TICKS_PER_HOUR);
     let p = w
         .workers(porter_role)
         .iter()
@@ -2919,6 +2922,7 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
     w.jobs2.pitches.insert(o, p);
     w.jobs2.vice.pimps.insert(d.index() as u16, pimp);
     pin(&mut w, pimp);
+    let his_home = w.comp::<citysim::components::Household>(pimp).and_then(|h| h.home);
     let (cut, up) = (w.config.vice.pimp_cut, w.config.service.pimp_pass_up);
     let mut collecting = 0u32;
     let mut kept_nights = 0u32;
@@ -2960,6 +2964,14 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
                 }
             }
             run_to(w, pimp, w.tick + 1, |w| each(w));
+            // He stays out of the labour market and in his Home (the pre-view
+            // pass phase 1's city: a foreman's midnight pick hired him as an
+            // Office Worker on day 13, OPEN-143's draw, and housed him nearer
+            // that work).
+            if w.has::<Job>(pimp) {
+                w.vacate_job(pimp);
+                w.set_home(pimp, his_home);
+            }
         }
     };
     // Two nights (a Statistical worker works the hours his `p_pitch` names).

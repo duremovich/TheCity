@@ -1656,6 +1656,12 @@ beg_cool_hours = 1                  # ... for this many hours
 # No eviction. The Spire's beds are checked at seed against execs x exec_home_spare (printed).
 exec_home_tier = 2
 exec_home_spare = 1.5
+# The pre-view pass phase 1 (docs/PREVIEW_PASS.md § 2, OPEN-140; the switch in flight,
+# CITYSIM_HOUSING_FIX_OFF=1): one Housed writer per body per midnight (the first move wins; the kin take-in,
+# the Spire and the "nearer work" relocation skip a body already housed that midnight), "moved nearer work" only
+# for an employed mover whose own commute shrinks (a spouse "moved with" him), a body moved in walks to its new
+# Home before it idles or sleeps elsewhere, and a housed sleeper's "Hotel" resolves to a Hotel (never a Mission cot).
+housing_fix = true
 
 # ---------------------------------------------------------------------------
 # Life pass L2: the living city (docs/LIFE_L2.md; plan ~/.claude/plans/life-l2.md). Every key is a
