@@ -32,7 +32,7 @@ One line per live document: what it is and when to read it. Everything supersede
 
 ## The judges
 
-- `SHADOW_V5.md` and `shadow_v5/`: the latest shadow pass (Lives at work gate, 250 diaries; 21 bugs). `SHADOW_V4.md` and `shadow_v4/`: the one before (23 bugs, 12 features; § The sweep has the fixes). The pattern for the next one.
+- `SHADOW_V6.md` and `shadow_v6/`: the latest shadow pass (the pre-view read at 20k: lives, the camera, the first week, the island probe; 298 diaries; `OPEN-137..150`). `SHADOW_V5.md` and `shadow_v5/`: the one before (Lives at work gate, 250 diaries; 21 bugs). `SHADOW_V4.md` and `shadow_v4/`: the one before (23 bugs, 12 features; § The sweep has the fixes). The pattern for the next one.
 - `GOD_SCENARIOS_V12.md`: the live god-scenario write-up and its gaps.
 
 ## history/

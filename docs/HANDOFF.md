@@ -43,13 +43,15 @@ Nothing. Every agent of the milestone is shut down, every worktree is removed an
 
 ## Next, in order
 
-1. **M18, the player character** (`docs/M18_PLAYER.md`). Read the spec against Lives at work first: the cab never driven by a body (`OPEN-115`), leaders who don't lead (`OPEN-118`, `OPEN-128`) and the settlement timing (`OPEN-119`) are what a followed character sees first.
-2. **`OPEN-094`**: retire the earlier milestones' ten env switches before M18's first phase (`FAITH`, `CHIP`, `BD`, `PATROL_SWEEP`, `STREET` and the rest in `Config::load_from`).
-3. **Street life** (`OPEN-109`) and the Lives at work bug rows (`OPEN-100..134`, kind bug): pick the ones M18's view exposes.
+Shadow V6 (2026-10-20, `docs/SHADOW_V6.md`, critiques in `docs/shadow_v6/`) read the closed tree at 20k as the pre-view assessment. Dylan 2026-10-19: the game city is 20k and 2k is a test fixture (CLAUDE.md). **Proposed, not yet decided by Dylan:** the 3D view goes before the player character, and TheCityGraphics stays a separate repo until then (its Bevy client joins the workspace outside `default-members` when the view milestone starts; the assets stay out).
+
+1. **The pre-view fix pass**: SHADOW_V6 § Before the camera rows 1-7 (`OPEN-137` the statue shift, `OPEN-138` the idle freeze, `OPEN-119`/`120`/`145` settlement by presence, `OPEN-139` the 20k legs, `OPEN-140` housing churn, `OPEN-141` parcels, `OPEN-142` the implant loop), with `OPEN-115`/`118`/`121`. Spec it as a milestone first.
+2. **The island holds 20k** (`OPEN-136`): a finer import or more flats a lot; then move `core_20k`/`god_20k` to it.
+3. **The view milestone** ("the city on screen": the Bevy client reads the sim, follow-cam on an NPC, no input), specced with `OPEN-149` (Statistical bodies on screen, the arrest jump) and `OPEN-150` (the cold start). Then M18 rewritten against that client; `OPEN-094` before its first phase.
 
 ## Open calls for Dylan
 
-Rows of kind `decision` in `docs/OPEN.md`: new, **`OPEN-135`** (the city seeds no children: 3 by day 10 on seed 42, so the School and the Camp read on a handful; seed households with children?). Standing: the harsh city and a pressure pass (`OPEN-062`), gang wars cooling (`OPEN-039`), faith equilibrium (`OPEN-057`), synth parity (`OPEN-059`), execs are cheap (`OPEN-077`), Ambient rent and the 2k flats (`OPEN-069`, `OPEN-070`).
+Rows of kind `decision` in `docs/OPEN.md`: new, **`OPEN-149`** (how the view draws Statistical bodies), **`OPEN-150`** (the cold start: pre-roll, seed gangs, or both), **`OPEN-135`** (the city seeds no children: 3 by day 10 on seed 42, so the School and the Camp read on a handful; seed households with children?). Standing: the harsh city and a pressure pass (`OPEN-062`), gang wars cooling (`OPEN-039`), faith equilibrium (`OPEN-057`), synth parity (`OPEN-059`), execs are cheap (`OPEN-077`), Ambient rent and the 2k flats (`OPEN-069`, `OPEN-070`).
 
 ## Standing decisions
 
