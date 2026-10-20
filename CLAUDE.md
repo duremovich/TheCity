@@ -51,6 +51,7 @@ Install the commit hook once: `git config core.hooksPath tools/hooks` (fmt check
 - Old workers keep their posts until the frailty exit (~74): no pension, work till the body quits (2026-10-19).
 - Purists reject implants only; a deck in the hand is a tool (2026-10-19).
 - Lives at work moved free time indoors (the own-Home HangOut); social-contact behaviour rows that the milestone's design moved are re-derived, and street life comes back as a feature (OPEN-109), not a knob (2026-10-19).
+- **The game city is 20k; the 2k city is a test fixture only** (2026-10-19). 2k keeps the change and merge tiers fast; calibration, shadow reads, acceptance and "does this feel right" are judged at 20k (on the imported island once it holds 20k; Shadow V6 probes it). A phase's report carries 20k seed 42 × 30 counters beside the 2k ones; nobody tunes 2k to feel good (`OPEN-136`).
 - Ticks/s on this box are unreliable (Blender renders, parallel builds): print, never tune.
 
 ## Agent rules (orchestrated work)
