@@ -52,6 +52,16 @@ the same way the Statistical super's stops work today (`trades::round_for`).
 | parcels | 141 | falls out of `haul` for the courier: a parcel is a load with an address; a round with zero parcels does not run | `streetwork::courier_stop` |
 | implant loop | 142 | `BuyAsset` validates the sale before the 140-min wait; a failed precondition cools the pick | `exec/actions.rs:67`, `chrome.rs::buy_install` |
 
+**Housing churn as built (phase 1, `[life] housing_fix`).** The first `Housed` line of a midnight wins: the kin
+take-in, the retirement to kin, the Spire (`house_exec`) and the "nearer work" relocation skip a body (or a spouse
+who would move along) already housed at that tick (`World.housed_now`, not saved); the kin take-in skips corp execs,
+and the relocation skips an elder under a grown child's roof. The relocation moves a worker only when his own commute
+shrinks by the margin, and a spouse who comes along "moved with" him. A body moved into a Home it is not standing in
+is `World.moving_in` until it walks in: `idle_near` sends it home and `away_hotel` gives it no Hotel. A housed
+sleeper's `GoTo(Hotel)` resolves to `life::away_hotel` (the planner's Hotel), never a Mission cot (the homeless's
+bed, by design E27). **Statistical mirror:** none needed: the midnight passes are tier-agnostic, and `moving_in` and
+the Hotel resolution steer Full and Coarse plans only (a Statistical body is off camera and has no plan).
+
 **The dead trades.** The cab (`OPEN-115`) is the `fares` shape plus the 20k legs creating demand. The bouncer
 (`OPEN-121`) is the `counter` shape on the door tile, where `door_refusals` can finally fire. The leaders
 (`OPEN-118`/`OPEN-128`, Dylan 2026-10-19: hold court and keep the delegation) get a `round` over the gang's
