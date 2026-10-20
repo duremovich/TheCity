@@ -111,6 +111,59 @@ const GEN_MIX: [(BuildingKind, f64); 7] = [
     (BuildingKind::Lot, 80.0),
 ];
 
+/// Track B (OPEN-136): the generator's 80 Lots per 1,000 by zone
+/// (`mapgen`'s borough: the Spire's 10 + 10, the Mid's and the Civic row's 66,
+/// the Sump's 16 + 8, the Vats' 50 per 2,000; `gen:20000` measures Spire
+/// 200, Mid 638 + Civic 22, Sump 240, Vats 500), dealt zone by zone in this
+/// order before the rest of the Lots go anywhere.
+const GEN_LOTS_BY_ZONE: &[(&[Zone], f64)] =
+    &[(&[Zone::Spire], 10.0), (&[Zone::Mid, Zone::Civic], 33.0), (&[Zone::Sump], 12.0), (&[Zone::Vats], 25.0)];
+
+/// `n` dealt over the keys by their weights (largest remainder, ties the
+/// lower key); an even deal when every weight is 0. Keys with no share are
+/// left out.
+fn largest_remainder(weights: &BTreeMap<usize, u64>, n: usize) -> Vec<(usize, usize)> {
+    let total: u64 = weights.values().sum();
+    let len = weights.len() as u64;
+    if len == 0 {
+        return Vec::new();
+    }
+    let n64 = n as u64;
+    let mut out: Vec<(usize, usize, u64)> = weights
+        .iter()
+        .enumerate()
+        .map(|(j, (&k, &w))| match ((n64 * w).checked_div(total), (n64 * w).checked_rem(total)) {
+            (Some(q), Some(r)) => (k, q as usize, r),
+            _ => (k, (n64 / len + u64::from((j as u64) < n64 % len)) as usize, 0),
+        })
+        .collect();
+    let dealt: usize = out.iter().map(|o| o.1).sum();
+    let mut order: Vec<usize> = (0..out.len()).collect();
+    order.sort_by_key(|&j| (std::cmp::Reverse(out[j].2), out[j].0));
+    for &j in order.iter().take(n.saturating_sub(dealt)) {
+        out[j].1 += 1;
+    }
+    out.into_iter().filter(|o| o.1 > 0).map(|o| (o.0, o.1)).collect()
+}
+
+/// Make `n` of the free cuts passing `ok` a `want`, the fewest flats first
+/// (ties by position); returns how many it made.
+fn fewest_flats(
+    kind: &mut [Option<BuildingKind>],
+    segs: &[Seg],
+    want: BuildingKind,
+    n: usize,
+    ok: &dyn Fn(usize) -> bool,
+) -> usize {
+    let mut c: Vec<usize> = (0..segs.len()).filter(|&i| kind[i].is_none() && ok(i)).collect();
+    c.sort_by_key(|&i| (segs[i].flats, segs[i].rect.y, segs[i].rect.x));
+    let m = n.min(c.len());
+    for &i in &c[..m] {
+        kind[i] = Some(want);
+    }
+    m
+}
+
 impl Report {
     /// Kind counts per 1,000 residents beside the generator's, one line each.
     pub fn mix_lines(&self) -> Vec<String> {
@@ -1571,7 +1624,55 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
         let alley = |i: usize| shop_house(i) && segs[i].workshop;
         let shopfront = |i: usize| shop_house(i) && !segs[i].workshop;
         pick(&mut kind, &mut rep, K::Hideout, target(1.0), &[Z::Sump], &[&alley, &shop_house, &any], false);
-        pick(&mut kind, &mut rep, K::Market, target(1.5), &[Z::Sump, Z::Mid], &[&shopfront, &commercial, &any], false);
+        // Track B (OPEN-136): the Markets go where the households live, as the
+        // generator puts a borough's food beside its homes: one a district
+        // first, the rest by the district's household slots (largest
+        // remainder; a cut's slots are its flats' share of the households, at
+        // least one, as dealt below); within a district shop fronts,
+        // commercial cuts, shop-houses, then the cuts with the fewest flats.
+        // What a district cannot place goes by the S3c rule.
+        let n_markets = target(1.5);
+        let lives = |i: usize| {
+            kind[i].is_none()
+                && segs[i].use_.is_some_and(|u| matches!(u, Use::Residential | Use::ShopHouse | Use::Commercial))
+        };
+        let all_flats: u64 = (0..segs.len()).filter(|&i| lives(i)).map(|i| u64::from(segs[i].flats)).sum();
+        let want_hh = u64::from(args.residents.div_ceil(RESIDENTS_PER_SLOT));
+        let mut slots_of_d: BTreeMap<usize, u64> = BTreeMap::new();
+        for i in (0..segs.len()).filter(|&i| lives(i)) {
+            let slots = (want_hh * u64::from(segs[i].flats)).checked_div(all_flats).unwrap_or(0).max(1);
+            *slots_of_d.entry(segs[i].district).or_default() += slots;
+        }
+        // One a district first (when there are enough), the rest by share.
+        let one_each = n_markets >= slots_of_d.len();
+        let rest_n = if one_each { n_markets - slots_of_d.len() } else { n_markets };
+        let mut deal: BTreeMap<usize, usize> = slots_of_d.keys().map(|&d| (d, usize::from(one_each))).collect();
+        for (d, n) in largest_remainder(&slots_of_d, rest_n) {
+            *deal.entry(d).or_default() += n;
+        }
+        let mark = rep.shortfall.len();
+        for (d, n) in deal.into_iter().filter(|&(_, n)| n > 0) {
+            let in_d = |i: usize| segs[i].district == d;
+            let (sf, cm, sh) = (
+                |i: usize| in_d(i) && shopfront(i),
+                |i: usize| in_d(i) && commercial(i),
+                |i: usize| in_d(i) && shop_house(i),
+            );
+            pick(&mut kind, &mut rep, K::Market, n, &[], &[&sf, &cm, &sh], false);
+            let have = (0..segs.len()).filter(|&i| in_d(i) && kind[i] == Some(K::Market)).count();
+            fewest_flats(&mut kind, segs, K::Market, n.saturating_sub(have), &|i| in_d(i) && segs[i].flats > 0);
+        }
+        rep.shortfall.truncate(mark);
+        let have_markets = kind.iter().filter(|x| **x == Some(K::Market)).count();
+        pick(
+            &mut kind,
+            &mut rep,
+            K::Market,
+            n_markets.saturating_sub(have_markets),
+            &[Z::Sump, Z::Mid],
+            &[&shopfront, &commercial, &any],
+            false,
+        );
         pick(&mut kind, &mut rep, K::Bar, target(1.5), &[Z::Mid, Z::Sump], &[&commercial, &shopfront, &any], false);
         // Lots: the leftover industrial, civic and vacant cuts, then (to the
         // mix's count) commercial cuts without flats, commercial, shop-houses.
@@ -1599,9 +1700,42 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                 have_lots + want
             ));
         }
-        if n_lots > 0 {
-            let no_flats = |i: usize| commercial(i) && segs[i].flats == 0;
-            pick(&mut kind, &mut rep, K::Lot, n_lots, &[], &[&no_flats, &commercial, &shop_house], false);
+        let no_flats = |i: usize| commercial(i) && segs[i].flats == 0;
+        // Track B (OPEN-136): first each zone's share of the generator's Lots
+        // (`GEN_LOTS_BY_ZONE`, less the leftovers already there), so the
+        // Spire has the Lots its Hqs and Lounges need (`founding::tier_ok`)
+        // and the Mid its Gunsmiths and Schools: in the zone commercial cuts
+        // without flats, commercial, shop-houses, then the cuts with the
+        // fewest flats (the households follow the flats, so a small tower
+        // gives up its slot, not its people). The rest as before, anywhere.
+        let mut budget = n_lots;
+        let mark = rep.shortfall.len();
+        for &(zs, per) in GEN_LOTS_BY_ZONE {
+            let in_z = |i: usize| zs.contains(&zone(i));
+            let have = (0..segs.len()).filter(|&i| in_z(i) && kind[i] == Some(K::Lot)).count();
+            // No per-zone 80-to-200 room: capped so, the k = 2 Spire held 88
+            // Lots, the seeded industries spilled onto them from the short
+            // Vats and `grow_hq` never fired (20 Hqs at d29 against the
+            // generator city's 49; docs/IMPORT_GRAPHICS.md, Track B).
+            let n = target(per).saturating_sub(have).min(budget);
+            let (nf, cm, sh) = (
+                |i: usize| in_z(i) && no_flats(i),
+                |i: usize| in_z(i) && commercial(i),
+                |i: usize| in_z(i) && shop_house(i),
+            );
+            let before = kind.iter().filter(|x| **x == Some(K::Lot)).count();
+            pick(&mut kind, &mut rep, K::Lot, n, &[], &[&nf, &cm, &sh], false);
+            let got = kind.iter().filter(|x| **x == Some(K::Lot)).count() - before;
+            let homes = |i: usize| {
+                in_z(i)
+                    && segs[i].use_.is_some_and(|u| matches!(u, Use::Residential | Use::ShopHouse | Use::Commercial))
+            };
+            let more = fewest_flats(&mut kind, segs, K::Lot, n - got, &homes);
+            budget -= got + more;
+        }
+        rep.shortfall.truncate(mark);
+        if budget > 0 {
+            pick(&mut kind, &mut rep, K::Lot, budget, &[], &[&no_flats, &commercial, &shop_house], false);
         }
     }
     // The rest: Blocks where people live, open Lots elsewhere (S3b: in the
@@ -2046,6 +2180,32 @@ mod tests {
         write_sim(&d, SIM_SCHEMA, Some("l3"));
         let err = build(&args(&d)).expect_err("a lot without use");
         assert!(err.contains("sim/lots_sim.json lots.l3: missing field \"use\""), "{err}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Track B (OPEN-136): the tiny city's south row (the `l` lots, all
+    /// residential towers) is a Spire district. Before, a Lot only came from
+    /// commercial cuts and shop-houses, so a Spire of towers had none and the
+    /// megacorps' Hqs (`founding::tier_ok`: the Spire only) never stood; now
+    /// the Spire takes its share of the generator's Lots from its smallest
+    /// towers and keeps Homes. A Market stands (one a district when there
+    /// are enough; at 200 residents the mix is one).
+    #[test]
+    fn test_import_deals_lots_and_markets_by_zone() {
+        let d = tmp("zones");
+        write_city(&d, "rect_m");
+        write_sim(&d, SIM_SCHEMA, None);
+        let districts = r#"{"rows":[{"id":"D1","name":"The Sump","zone":"Sump"},{"id":"D2","name":"The Spire","zone":"Spire"}],
+            "superblocks":[{"district":"D1","rect_m":[0,30,80,70]},{"district":"D2","rect_m":[0,0,80,29]}]}"#;
+        std::fs::write(d.join("districts.json"), districts).expect("write");
+        let (text, rep) = build(&ImportArgs { residents: 200, ..args(&d) }).expect("imports");
+        let m = citysim::Map::parse(&text);
+        let spire = |b: &citysim::map::MapBuilding| m.zone(b.door) == Zone::Spire;
+        let count =
+            |k: BuildingKind, inside: bool| m.buildings.iter().filter(|b| b.kind == k && spire(b) == inside).count();
+        assert!(count(BuildingKind::Lot, true) >= 1, "no Spire Lot: {rep:?}");
+        assert!(count(BuildingKind::Home, true) >= 1, "the Spire lost every Home: {rep:?}");
+        assert!(count(BuildingKind::Market, true) + count(BuildingKind::Market, false) >= 1, "{rep:?}");
         let _ = std::fs::remove_dir_all(&d);
     }
 }

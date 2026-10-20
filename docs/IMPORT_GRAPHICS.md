@@ -8,6 +8,7 @@ test time. An adapter writes the sim's own map format once; the committed result
 ```
 citysim-cli import-graphics --src D:/TheCityGraphics/assets/city/isle_m/out --out assets/maps/isle_m_k4.txt \
     --downsample 4 --residents 5000 [--crop x0,y0,x1,y1]
+citysim-cli import-graphics --src D:/TheCityGraphics/assets/city/isle_m/out --out assets/maps/isle_m_k2.txt     --downsample 2 --residents 20000          # the island for 20,000 (Track B, OPEN-136)
 ```
 
 - `--downsample k`: a sim tile is k x k of theirs (k = 1: their 2 m tiles; 4: 8 m tiles).
@@ -32,6 +33,12 @@ report, and a `# inputs:` comment in the map):
 | `sim/lots_sim.json` | per lot: `floors`, `use`, `ground`, `flats`, `shop_units`, `doors_m` (`at`, `out`), `source`, `civic` | `lots.json` floor ranges (a seeded pick) and `bldg/<lot>/sim_layout.toml` |
 | `sim/terrain_sim.json` | the 2 m class grid: `~` sea, `u` urban, `m` mountain | every tile off the blocks and ways is Water |
 | `sim/rail.json` | each line's name, track (`pts`, `u`) and stations (`stops`: `name`, `u`) | `elevated.json` rail elements, named `El <id>` |
+
+**The 20k island (Track B, `OPEN-136`, 2026-10-20)**: `assets/maps/isle_m_k2.txt`, the whole island at k = 2
+(1,500 x 938 tiles, 528 KB, `--residents 20000`, their export as of 2026-10-20: 843,847 flats, 10,020 lots with
+a layout). It houses and employs 20,000 (below, "Track B: the island for 20,000");
+`citysim/tests/mapgen.rs::test_graphics_import_20k_holds_20k` reads it. Nothing runs on it by default yet:
+`core_20k` / `god_20k` stay on `gen:20000` and the 2k fixture on the hand-made map until the follow-up moves them.
 
 **The committed snapshot**: `assets/maps/isle_m_k4.txt` (the whole island at k = 4, 750 x 469 tiles, 213 KB,
 `--residents 5000`, their seed 19 as of 2026-10-12 with the sim export). Until S3c it was imported for 20,000
@@ -108,12 +115,12 @@ stage go to the preferred zones first, then spread by stride over the city (or t
 | `vat_farm` (`works`) | Farm (Vat Farm) | 6 per 1,000, largest first: `vat_farm` cuts with 60 interior tiles, then any industrial, then any cut nobody lives in, then any; the rest Lots |
 | `factory`, `godown` (`works`) | Security Office, then Lot | Security Offices to 1 per 1,000 (factories, then godowns, Vats first); the rest Lots (the industrial plots corps and the seeding passes build on) |
 | `shop_house` (`workshop`) | Hideout, then Block | 1 per 1,000, Sump first |
-| `shop_house` (`shop`) | Street Market, then Block | 1.5 per 1,000, Sump then Mid first |
+| `shop_house` (`shop`) | Street Market, then Block | 1.5 per 1,000; **Track B:** dealt over the districts by their household slots (a cut's flats' share of the households, at least one), one a district first, then within a district shop fronts, commercial cuts, shop-houses, then the cuts with the fewest flats; what a district cannot place goes Sump then Mid first, as before |
 | `commercial` (`shop`) | Bar, then Lot (or Block if it has flats) | 1.5 per 1,000, Mid (the Neon Quarter) then Sump first |
 | `residential` (`lobby`) | Block (Home) | always |
 | `vacant` (`none`) | Lot | always |
 | (any industrial, civic or vacant leftover) | Lot | always |
-| Lots to 80 per 1,000 | Lot | after the leftovers: commercial cuts without flats, commercial, shop-houses, by stride; never past the generator's 80 Lots to 200 Blocks (a coarse import has too few cuts for both; the Blocks come first) |
+| Lots to 80 per 1,000 | Lot | after the leftovers, **Track B:** first each zone's share of the generator's Lots (`GEN_LOTS_BY_ZONE`: Spire 10, Mid + Civic 33, Sump 12, Vats 25 per 1,000, less the leftovers there), in the zone commercial cuts without flats, commercial, shop-houses by stride, then the cuts with the fewest flats; then the rest anywhere as before (commercial cuts without flats, commercial, shop-houses, by stride); never past the generator's 80 Lots to 200 Blocks over the city (a coarse import has too few cuts for both; the Blocks come first) |
 | the rest | Block (Home) | tier by zone: Sump/Vats 0, Mid/Civic 1, Spire 2 |
 
 Every Home carries `flats=` and every building `storeys=`. `shop_units` steers nothing yet (Markets and Bars
@@ -127,6 +134,8 @@ follow `use` and `ground`; ask 3's unit count is in the report).
 | 2 | 20,000 | 1,500 x 938 | 536 KB | 6,104 | 4,280 (6,280) | 120 (71) | 30 / 30 | 20 | 20 | 1,600 | none |
 | 4 | 20,000 | 750 x 469 | 209 KB | 2,788 | 1,869 (4,543) | 68 (16) | 30 / 30 | 20 | 20 | 747 | Farm 68 of 120, Lot 747 of 1,600 |
 | 4 | 5,000 | 750 x 469 | 213 KB | 2,788 | 2,328 (2,388) | 30 (16) | 8 / 8 | 5 | 5 | 400 | none (the committed snapshot) |
+| **2** (2026-10-20 export, Track B rules) | 20,000 | 1,500 x 938 | 528 KB | 6,104 | 4,280 (6,329) | 120 (71) | 30 / 30 | 20 | 20 | 1,600 (Spire 200, Mid 726, Sump 544, Vats 130) | none (`isle_m_k2.txt`) |
+| 4 (2026-10-20 export, Track B rules) | 20,000 | 750 x 469 | 205 KB | 2,788 | 1,869 (4,687) | 68 (16) | 30 / 30 | 20 | 20 | 747 | Farm 68 of 120, Lot 747 of 1,600 |
 
 The mix per 1,000 residents (the report's `mix` lines; the generator's: Blocks 200, Vat Farms 6, Markets 1.5, Bars
 1.5, Hideouts 1, Security Offices 1, Lots 80):
@@ -241,5 +250,58 @@ Walkable hills hardly move the estimate: the built city is a coastal strip whose
 short way, and a Mountain step costs 1.5 so few paths take one (those that do are short cuts across a spur). The
 tail grows (k = 1 max 2.13: a 39-tile pair walking 83 steps, 0.1 % of pairs over 1.5); Manhattan stays the
 commute estimate.
+
+## Track B: the island for 20,000 (`OPEN-136`, 2026-10-20)
+
+**Why the V6 probe failed.** It ran 20k on `isle_m_k4.txt`, which is imported for **5,000** (S3c): 2,388 household
+slots house 11,940 people, so ~8,000 were homeless from d0, and the employers were the 5k mix (30 Farms, 8 Markets).
+Re-imported for 20,000 at k = 4 the slots are enough (4,687) but the cuts are not: Farms 68 of 120, Lots 747 of
+1,600 (8 m tiles are too coarse for both the Blocks and the generator's Lots). k = 2 places the full mix.
+
+**k = 2 is workable**: 1,500 x 938 tiles, a 528 KB snapshot, ~400 MB working set at d19 (the generator city ~390 MB),
+ticks/s within noise of `gen:20000` (below). So the 20k island is k = 2; the importer was not asked for more flats a
+Home (the `ceil(N / 5)` dealing already gives 6,329 slots for 4,000 households).
+
+**Two importer rules (no config, no sim change; the 2k city, `gen:20000` and every test map are byte-identical).**
+The plain k = 2 import still lost to the generator city on jobs and food, for two placement reasons:
+
+- **No Spire Lot.** The Lots came from commercial cuts and shop-houses, and their Spire is all residential towers,
+  so the Spire had 0 Lots: the 20 megacorp Hqs (`founding::tier_ok`: Spire only) were never seeded and `grow_hq`
+  never fired (0 Hqs at d29 against the generator city's 49, `emp_hq` 0 against 411). The Lots are now dealt by
+  zone first, at the generator's shares (`GEN_LOTS_BY_ZONE`), the Spire's from its smallest towers. Cost: the Spire
+  keeps 110 of 312 Homes, 141 household slots of 6,329 (2 %; the generator city 15 %, by flats 5-12 %). A per-zone
+  80-to-200 cap was tried (88 Spire Lots, 222 Homes): the seeded industries, short of Vats Lots, spilled onto the
+  Spire's and `grow_hq` again never fired (20 Hqs at d29), so it is not applied.
+- **No Market where the households are.** Markets went to Sump and Neon shop fronts; D4 Mid-Levels (the Mid holds two
+  thirds of the slots) had none, and 97 of the 147 starving at d29 were there. Markets are now dealt by district by
+  household slots, one a district first.
+
+**30 days at 20,000, seed 42** (`run --seed 42 --population 20000 --scaled --map M --ambient-flats 50 --days 30
+--report --events`, one binary, the runs in parallel on a loaded box; ticks/s print only):
+
+| map | homeless d0 / d10 / d20 / d29 | employed share d0 / d10 / d20 / d29 | starving d29 (sum of `dN_starving`) | malnourished d29 | `sick_days` d29 | population d29 | Murders (30 d) | Hqs d29 | ticks/s mean (min) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `gen:20000` | 761 / 179 / 198 / 286 | 0.530 / 0.590 / 0.626 / 0.655 | 14 | 835 | 35 | 20,066 | 39 | 49 | 208 (164) |
+| **`isle_m_k2`** (committed) | 455 / 32 / 76 / 161 | 0.503 / 0.533 / 0.570 / 0.578 | 29 | 790 | 36 | 20,063 | 23 | 49 | 193 (162) |
+| k = 2, the plain import (before the two rules) | 509 / 25 / 142 / 218 | 0.492 / 0.515 / 0.520 / 0.532 | 147 | 979 | 39 | 19,788 | 185 | 0 | 168 (138) |
+| k = 4 for 20,000 (Track B rules) | 652 / 69 / 83 / 122 | 0.331 / 0.376 / 0.395 / 0.415 | 2 | 811 | 23 | 20,013 | 21 | 14 | 246 (197) |
+| `isle_m_k4` (the 5k snapshot, V6's probe) | 7,823 / 6,350 / 6,133 / 8,032 | 0.221 / 0.264 / 0.273 / 0.286 | 551 | 10,401 | 60 | 19,935 | 21 | - | 217 (132) |
+
+(The k = 4 Track B row is the per-zone-cap variant's import; the final rules move its Homes' slots 4,613 → 4,687
+and nothing else in its kinds.)
+
+What it says:
+
+- **The island houses 20k** better than the generator city (161 homeless at d29 against 286) and feeds it nearly as
+  well (29 starving against 14; malnourished and off sick level). Murders are within the run-to-run spread of a
+  harsh city (23 against 39); the plain import's 185 (116 "assailant unknown" in D1 The Sump) went with the hunger.
+- **Employment trails by 2.7 points at d0 and 7.7 at d29** (11,547 against 13,115). The gap is growth, not the seed:
+  the same seeded buildings stand on both (every `Founded ... (seeded)` kind matches at d0 except Stations, 3
+  against 8: the island has two El lines, the generator city twenty). Behind it: Hires 12,863 against 15,755, Labs
+  31 against 45 (the seeded Labs want Lots by zone, and the island's Civic district has none), `emp_overhead` 1,150-1,430 against 1,624, and a
+  single Vats strip on a map of 2.9x the generator city's tiles, so the farms, yards and plants are one commute away from
+  most homes (the generator puts a Vats strip in every borough). That is the island's shape; no knob was moved.
+- Not measured here: seeds 43-47, 120 days, the off-camera / LOD parity, `shadow --lives`. That is the follow-up's
+  (moving `core_20k` / `god_20k` to the island).
 
 See docs/SCALE_20K.md § S3b for the 20k generated city.
