@@ -1,6 +1,6 @@
 //! Lives at work phase 2 (docs/LIVES_AT_WORK.md § 3): the evening and the
 //! household. Under `[household] enabled` (under the `[lives]` master;
-//! `CITYSIM_HOUSEHOLD_OFF=1`): off, every entry point is a no-op, no spot
+//! `[household] enabled = false`): off, every entry point is a no-op, no spot
 //! is added, no state is written and the save is byte-identical to main.
 //!
 //! - **Home as a spot** (§ 3.1, § 3.2; `leisure::spots_near`): the agent's

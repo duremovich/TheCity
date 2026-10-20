@@ -60,7 +60,7 @@ Install the commit hook once: `git config core.hooksPath tools/hooks` (fmt check
 - Report numbers against the base (the same seeds on main's binary), never alone.
 - Cap a test diagnosis at ~30 minutes, then report it as open with what you tried.
 - A tool asserts its own preconditions: a `--count` past the candidates or a `--start-day` past the run is an error, not a silent cap.
-- When your work merges: delete your worktree's `target/` (each is 5-13 GB), and expect to be shut down.
+- When your work merges: delete your worktree's `target/` (each is 5-13 GB) by its absolute path (`rm -rf D:/TheCity/.claude/worktrees/<wt>/target`; never `cd <wt>; rm -rf target`, which wiped main's `target/` at the Lives at work close when the worktree was gone), and expect to be shut down.
 - Subagents do not see the orchestrator's memory (only its index); everything they need is in this file and the docs above. This file auto-loads for a worktree subagent (confirmed 2026-10-18); a brief need not say "read CLAUDE.md".
 - A script that rewrites files on Windows writes LF (`newline="\n"` in Python); `git ls-files --eol | grep w/crlf` stays empty.
 - An agent's final reply can arrive hours late in a batch; have it also write its report to a scratchpad file and name the path in the brief.

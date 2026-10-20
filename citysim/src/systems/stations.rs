@@ -1,5 +1,5 @@
 //! Lives at work phase 7: district Stations (docs/LIVES_AT_WORK.md § 5.2,
-//! D11). `[law] stations` under the `[lives]` master (`CITYSIM_STATIONS_OFF=1`).
+//! D11). `[law] stations` under the `[lives]` master (`[law] stations = false`).
 //!
 //! A Station is the city's: a booking desk and `station_cells` cells on a
 //! district's Lot ([`seed`]: the farthest districts from the Precinct first,

@@ -110,6 +110,8 @@ def row(name, tok, by_model, ctx, bash, label):
 
 
 def main():
+    # A brief can hold any character; the Windows console is cp1252.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--dir", type=Path, default=None, help="the transcript directory (default: this project's)")
     ap.add_argument("--session", default=None, help="a session id prefix")

@@ -1,7 +1,7 @@
 //! Lives at work phase 1 (docs/LIVES_AT_WORK.md § 1, § 2.1, § 2.2's
 //! ripperdoc and orderly): the **service encounter**, the one mechanism
 //! that puts a person on the other side of every counter. Under `[lives]
-//! enabled` and `[service] venues` (`CITYSIM_LIVES_OFF=1`): off, every
+//! enabled` and `[service] venues` (`[lives] enabled = false`): off, every
 //! entry point is a no-op, no queue fills, no ledger is written and the
 //! save is byte-identical to main.
 //!
@@ -147,7 +147,7 @@ pub fn venue_shifts_all(cfg: &crate::config::Config, role: Role) -> Option<Vec<(
 }
 
 /// Lives at work phase 3 is live: the encounter on and `[service] civic`
-/// (`CITYSIM_CIVIC_OFF=1`): the civic counterparts, the near round, tied
+/// (`[service] civic = false`): the civic counterparts, the near round, tied
 /// housing and the parent's answer to a taken child.
 pub fn civic_on(world: &World) -> bool {
     on(world) && world.config.service.civic
@@ -163,7 +163,7 @@ pub fn street_on(world: &World) -> bool {
 }
 
 /// Lives at work phase 5 is live: the encounter on and `[service] tower`
-/// (`CITYSIM_TOWER_OFF=1`): the exec's Meeting and decision, the reporter's
+/// (`[service] tower = false`): the exec's Meeting and decision, the reporter's
 /// beat and byline, the Fixer's walk-in and contract encounters, the
 /// owner's weekly collection, the civic clerk named.
 pub fn tower_on(world: &World) -> bool {

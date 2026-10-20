@@ -302,7 +302,7 @@ stat_claim_prior = 0.02
 stat_deal_prior = 0.01
 stat_prior_days = 30.0
 # Lives at work phase 6 (docs/LIVES_AT_WORK.md § 4.5): leaders lead, read by systems/careers.rs and gang.rs, under
-# [lives] enabled (`CITYSIM_LIEUTENANTS_OFF=1`: every key below 0 and unwritten). Placeholders.
+# [lives] enabled (`[gangs] lieutenants = false`: every key below 0 and unwritten). Placeholders.
 lieutenants = true
 lieutenant_per = 8                 # rank 1 to the top 1 + members / this after the leader (leader_scores)
 delegate_min_fit = 5               # with this many fit members the leader neither marches nor shakes down (Expand, Squat,
@@ -392,7 +392,7 @@ curfew_mult = 2.0
 vagrancy_fine = 3
 vagrancy_sentence_ticks = 600      # one night
 # Lives at work phase 7 (docs/LIVES_AT_WORK.md § 5.2; placeholders), under the [lives] master
-# (CITYSIM_STATIONS_OFF=1): a Station (a desk and a few cells, the city's) on a Lot of each district
+# ([law] stations = false): a Station (a desk and a few cells, the city's) on a Lot of each district
 # whose door is station_min_tiles (Manhattan) or more from the Precinct's door and from every
 # Station already placed (farthest districts first; the 2k map: 0-1, the 20k island: printed at
 # seed). A city guard is posted to the post nearest his Home among the Stations under their share
@@ -1650,7 +1650,7 @@ steal_can_buy = 12.0                # 3
 beg_dry_max = 3                     # 4: dry Begs in a row that cool Earn ...
 beg_cool_hours = 1                  # ... for this many hours
 # Lives at work phase 7 (docs/LIVES_AT_WORK.md § 5.3; placeholders), under the [lives] master
-# (CITYSIM_SPIRE_HOMES_OFF=1, or 0 here): a corp exec's Home is of exec_home_tier or better (2: the
+# (0 here is off): a corp exec's Home is of exec_home_tier or better (2: the
 # Spire) when one has room: at seed and on promotion (`life::house_exec`), daily for an exec
 # housed lower (the same move), and the "nearer work" relocation looks only at Homes of that tier.
 # No eviction. The Spire's beds are checked at seed against execs x exec_home_spare (printed).
@@ -3721,7 +3721,7 @@ maimed_work = 0.2                  # a level's work output lost
 maimed_beg_mult = 1.5              # a maimed beggar's odds x this
 
 # ---------------------------------------------------------------------------
-# Lives at work (docs/LIVES_AT_WORK.md D13): the milestone's master switch (`CITYSIM_LIVES_OFF=1`, which also
+# Lives at work (docs/LIVES_AT_WORK.md D13): the milestone's master switch (`[lives] enabled = false`, which also
 # clears [service] and [[serves]] so an off save is byte-identical to main's). Read by systems/service.rs.
 [lives]
 enabled = true
@@ -3731,9 +3731,9 @@ enabled = true
 # reserved and unread. Placeholders.
 [service]
 venues = true
-civic = true                       # phase 3 (§ 2.2, § 3.5): teacher, camp warden, jailer, super; the near round, tied housing, the parent's answer (CITYSIM_CIVIC_OFF=1)
-street = true                      # phase 4 (§ 2.3): the cab roll and the driver's body, the parcel, the lift, the client, the pimp's round, the dealer's corner (CITYSIM_LIVES_STREET_OFF=1; CITYSIM_STREET_OFF is [jobs2] street's)
-tower = true                       # phase 5 (§ 2.4, § 2.2's civic clerk, § 3.6's decided): the exec's Meeting and decision, the reporter's beat and byline, the Fixer's walk-in and contract encounters, the owner's collection, the clerk named (CITYSIM_TOWER_OFF=1)
+civic = true                       # phase 3 (§ 2.2, § 3.5): teacher, camp warden, jailer, super; the near round, tied housing, the parent's answer ([service] civic = false)
+street = true                      # phase 4 (§ 2.3): the cab roll and the driver's body, the parcel, the lift, the client, the pimp's round, the dealer's corner ([service] street = false; CITYSIM_STREET_OFF is [jobs2] street's)
+tower = true                       # phase 5 (§ 2.4, § 2.2's civic clerk, § 3.6's decided): the exec's Meeting and decision, the reporter's beat and byline, the Fixer's walk-in and contract encounters, the owner's collection, the clerk named ([service] tower = false)
 madam_cut = 0.3                    # § 2.1: the madam's share of her worker's tips at the Brothel, worker -> madam (Flow::MadamCut); 8d: of the shift's total, settled once at shift end
 evening_staff = ["Bartender", "Attendant", "Cook"]   # OPEN-111, Shadow V5 bug 1: the legacy venue roles cover the trade's hours, split at each venue between [world] shift_day and [leisure] evening_shift (the thinner first, the evening on a tie)
 p_eject = 0.5                      # § 2.1: an Assault inside a kept venue is an ejection on this x (bouncer fighting - attacker fighting)
@@ -4160,7 +4160,7 @@ valence = 0.0
 tower = true
 
 # Lives at work phase 2 (docs/LIVES_AT_WORK.md § 3): the evening and the household, read by systems/household.rs
-# (and leisure.rs for the home spot). Under [lives] enabled (`CITYSIM_HOUSEHOLD_OFF=1`). Placeholders.
+# (and leisure.rs for the home spot). Under [lives] enabled (`[household] enabled = false`). Placeholders.
 [household]
 enabled = true
 home_w = 0.5                       # § 3.1: a Home spot's score per household member home now ...
@@ -4194,7 +4194,7 @@ collect = 0.5                      # the Fixer owner's weekly collection (phase 
 curve = [0.5, 0.5]
 
 # Lives at work phase 6 (docs/LIVES_AT_WORK.md § 4.1-4.4): ages, careers and the foreman, read by systems/careers.rs,
-# under [lives] enabled (`CITYSIM_CAREERS_OFF=1`: [careers] and [roles] unwritten, the trade rows' bands 0). The
+# under [lives] enabled (`[careers] enabled = false`: [careers] and [roles] unwritten, the trade rows' bands 0). The
 # trade rows' bands are their min_age / max_age keys; the legacy roles' are the [roles.<Name>] tables below.
 # Placeholders.
 [careers]

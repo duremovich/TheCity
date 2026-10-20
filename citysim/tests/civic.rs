@@ -462,7 +462,7 @@ fn test_parents_answer_is_chosen_from_the_household() {
 #[test]
 fn test_off_city_writes_nothing() {
     // `Config::load` strips the rows and keys when the switch is off by any
-    // path (the toml, `CITYSIM_CIVIC_OFF=1`); a config edited after the load
+    // path (the toml, `[service] civic = false`); a config edited after the load
     // calls it itself.
     let mut off = common::world_with(|c| c.strip_civic());
     assert!(!service::civic_on(&off));

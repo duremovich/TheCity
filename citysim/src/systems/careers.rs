@@ -2,7 +2,7 @@
 //! § 4; D9, D10; Dylan's answers 2, 3 and 6). Two switches under the
 //! `[lives]` master:
 //!
-//! - **`[careers] enabled`** (`CITYSIM_CAREERS_OFF=1`, § 4.1-4.4). Age bands
+//! - **`[careers] enabled`** (`[careers] enabled = false`, § 4.1-4.4). Age bands
 //!   (`[[trades]] min_age`/`max_age`, `[roles.<Name>]`) are a hard gate on a
 //!   new hire, never a firing ([`admits`], read by every hiring pick and by
 //!   the seeded jobs). A seeded Job carries `seniority_days` ([`seed`]);
@@ -15,7 +15,7 @@
 //!   worker past `retire_from_years` retires to an adult child's Home (the
 //!   `[ages]` kin take-in, first) or on savings; a worker whose
 //!   `ages::work_mult` falls under `frail_exit_mult` is let go "too frail".
-//! - **`[gangs] lieutenants`** (`CITYSIM_LIEUTENANTS_OFF=1`, § 4.5). Rank 1
+//! - **`[gangs] lieutenants`** (`[gangs] lieutenants = false`, § 4.5). Rank 1
 //!   for the lieutenants (`gang::recompute_leader`), the leader's
 //!   delegation ([`delegating`]: `gang::following_order`,
 //!   `stat_extort_target`, `raid::raid_pending`), the raid's head

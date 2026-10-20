@@ -287,7 +287,7 @@ pub struct Config {
     #[serde(default)]
     pub ages: AgesCfg,
     /// Lives at work (docs/LIVES_AT_WORK.md D13): the milestone's master
-    /// switch (`CITYSIM_LIVES_OFF=1` turns it off and clears `[service]`
+    /// switch (`[lives] enabled = false` turns it off and clears `[service]`
     /// and `[[serves]]`, so an off save is byte-identical to main's).
     #[serde(default, skip_serializing_if = "LivesCfg::is_off")]
     pub lives: LivesCfg,
@@ -300,13 +300,13 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub serves: Vec<ServesCfg>,
     /// Lives at work phase 2 (§ 3): the evening and the household, under the
-    /// `[lives]` master (`CITYSIM_HOUSEHOLD_OFF=1`). Not written into a save
+    /// `[lives]` master (`[household] enabled = false`). Not written into a save
     /// at its defaults (the off save is byte-identical).
     #[serde(default, skip_serializing_if = "HouseholdCfg::is_default")]
     pub household: HouseholdCfg,
     /// Lives at work phase 6 (§ 4.1-4.4): age bands, seniority and the
     /// foreman, the profession, retirement and the frailty exit, under the
-    /// `[lives]` master (`CITYSIM_CAREERS_OFF=1`). Not written into a save
+    /// `[lives]` master (`[careers] enabled = false`). Not written into a save
     /// at its defaults (the off save is byte-identical).
     #[serde(default, skip_serializing_if = "CareersCfg::is_default")]
     pub careers: CareersCfg,
@@ -516,18 +516,18 @@ pub struct ServiceCfg {
     pub venues: bool,
     /// Phase 3 (§ 2.2, § 3.5): the civic counterparts (teacher, camp
     /// warden, jailer, super), the near round, tied housing and the parent's
-    /// answer to a taken child (`CITYSIM_CIVIC_OFF=1`).
+    /// answer to a taken child (`[service] civic = false`).
     pub civic: bool,
     /// Phase 4 (§ 2.3): the street and freight: the cab roll shared by both
     /// tiers and the driver's body, the parcel, the lift, the client, the
     /// pimp's round, the dealer's corner and regulars
-    /// (`CITYSIM_LIVES_STREET_OFF=1`; `CITYSIM_STREET_OFF` is Jobs & lives
+    /// (`[service] street = false`; `CITYSIM_STREET_OFF` is Jobs & lives
     /// phase 2's `[jobs2] street` switch, the pitches and rounds themselves).
     pub street: bool,
     /// Phase 5 (§ 2.4, § 2.2's civic clerk, § 3.6's `Decided`): the
     /// exec's Meeting and decision, the reporter's beat and byline, the
     /// Fixer's walk-in and contract encounters, the owner's collection, the
-    /// clerk named (`CITYSIM_TOWER_OFF=1`).
+    /// clerk named (`[service] tower = false`).
     pub tower: bool,
     /// § 2.1: the madam's share of her worker's tips at her Brothel (worker -> madam), of the shift's total at shift end (8d, OPEN-123).
     pub madam_cut: f32,
@@ -3682,7 +3682,7 @@ pub struct GangsCfg {
     #[serde(default = "GangsCfg::default_stat_prior_days")]
     pub stat_prior_days: f32,
     /// Lives at work phase 6 (§ 4.5): lieutenants, delegation, the cut and
-    /// the ladder, under the `[lives]` master (`CITYSIM_LIEUTENANTS_OFF=1`).
+    /// the ladder, under the `[lives]` master (`[gangs] lieutenants = false`).
     /// Off, every key below is 0 and none is written into a save.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub lieutenants: bool,
@@ -3943,7 +3943,7 @@ pub struct LawCfg {
     #[serde(default = "LawCfg::d_corrupt_heat")]
     pub corrupt_heat: f32,
     // --- Lives at work phase 7 (§ 5.2): district stations, under the
-    // `[lives]` master (`CITYSIM_STATIONS_OFF=1`). Off, every key below is
+    // `[lives]` master (`[law] stations = false`). Off, every key below is
     // 0 and none is written into a save (`LawCfg::strip_stations`).
     /// Seed a Station in the districts far from the Precinct; guards post
     /// there and the escort books at the nearest with a free cell.
@@ -7548,7 +7548,7 @@ pub struct LifeCfg {
     /// ... for this many hours.
     pub beg_cool_hours: u64,
     /// Lives at work phase 7 (§ 5.3), under the `[lives]` master
-    /// (`CITYSIM_SPIRE_HOMES_OFF=1`; 0 is off and not written): a corp
+    /// (`[life] exec_home_tier = 0`; 0 is off and not written): a corp
     /// exec's Home is of this tier or better (2: the Spire) when one has
     /// room, at seed, daily, and on relocation; no one is evicted for it.
     #[serde(skip_serializing_if = "is_zero_u8_cfg")]
@@ -8281,11 +8281,11 @@ impl Config {
         if std::env::var("CITYSIM_PATROL_SWEEP_OFF").is_ok_and(|v| v == "1") {
             cfg.vice.patrol_sweep = false;
         }
-        // Lives at work (D13): the master switch's A/B and identity device.
-        // The sections are cleared too, so the off save holds no `[lives]`,
-        // `[service]` or `[[serves]]` and matches main byte for byte.
-        if std::env::var("CITYSIM_LIVES_OFF").is_ok_and(|v| v == "1") {
-            cfg.lives = LivesCfg::default();
+        // Lives at work (D13): a config with `[lives] enabled = false` by any
+        // path clears the milestone's sections, so the off save holds no
+        // `[lives]`, `[service]` or `[[serves]]`. The milestone's env
+        // switches retired at its close (OPEN-094); the config paths stay.
+        if !cfg.lives.enabled {
             cfg.service = ServiceCfg::default();
             cfg.serves.clear();
             cfg.household = HouseholdCfg::default();
@@ -8298,67 +8298,30 @@ impl Config {
             cfg.strip_stations();
             cfg.life.exec_home_tier = 0;
         }
-        // Lives at work phase 3 (§ 2.2, § 3.5): the civic switch's A/B and
-        // identity device; and a config with `[service] civic = false` by
-        // any path drops the civic rows and keys, so the off save matches
-        // main byte for byte.
-        if std::env::var("CITYSIM_CIVIC_OFF").is_ok_and(|v| v == "1") {
-            cfg.service.civic = false;
-        }
+        // A sub-switch off by any path drops its rows and keys, so the off
+        // save writes none of them.
         if !cfg.service.civic {
             cfg.strip_civic();
-        }
-        // Lives at work phase 4 (§ 2.3): the street switch's A/B and identity
-        // device, the same shape (`CITYSIM_STREET_OFF` is taken: Jobs & lives
-        // phase 2's `[jobs2] street`, above).
-        if std::env::var("CITYSIM_LIVES_STREET_OFF").is_ok_and(|v| v == "1") {
-            cfg.service.street = false;
         }
         if !cfg.service.street {
             cfg.strip_street();
         }
-        // Lives at work phase 5 (§ 2.4): the tower switch's A/B and identity
-        // device, the same shape.
-        if std::env::var("CITYSIM_TOWER_OFF").is_ok_and(|v| v == "1") {
-            cfg.service.tower = false;
-        }
         if !cfg.service.tower {
             cfg.strip_tower();
-        }
-        // Lives at work phase 6 (§ 4): the careers' and the lieutenants'
-        // switches, the same shape (a config with either off by any path
-        // writes none of its keys).
-        if std::env::var("CITYSIM_CAREERS_OFF").is_ok_and(|v| v == "1") {
-            cfg.careers.enabled = false;
         }
         if !cfg.careers.enabled {
             cfg.strip_careers();
         }
-        if std::env::var("CITYSIM_LIEUTENANTS_OFF").is_ok_and(|v| v == "1") {
-            cfg.gangs.lieutenants = false;
-        }
         if !cfg.gangs.lieutenants {
             cfg.gangs.strip_lieutenants();
-        }
-        // Lives at work phase 7 (§ 5.2, § 5.3): the stations' and the Spire
-        // homes' switches, the same shape (a config with either off by any
-        // path writes none of its keys).
-        if std::env::var("CITYSIM_STATIONS_OFF").is_ok_and(|v| v == "1") {
-            cfg.law.stations = false;
         }
         if !cfg.law.stations {
             cfg.strip_stations();
         }
-        if std::env::var("CITYSIM_SPIRE_HOMES_OFF").is_ok_and(|v| v == "1") {
-            cfg.life.exec_home_tier = 0;
-        }
         if cfg.life.exec_home_tier == 0 {
             cfg.life.exec_home_spare = 0.0;
         }
-        // Lives at work phase 2 (§ 3): the household's A/B and identity device
-        // (the section and the phase's deed keys cleared, so the off save
-        // matches main byte for byte).
-        if std::env::var("CITYSIM_HOUSEHOLD_OFF").is_ok_and(|v| v == "1") {
+        if !cfg.household.enabled {
             cfg.household = HouseholdCfg::default();
             cfg.without_household_deeds();
         }

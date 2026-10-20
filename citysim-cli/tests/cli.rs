@@ -12,15 +12,7 @@ fn cli() -> Command {
 
 #[test]
 fn test_cli_report_csv_header() {
-    // Lives at work phase 6: careers off for the seeded homeless bound (its
-    // first midnight retires 32 elders to their children's Homes, some the
-    // derelicts' residents: 74 homeless against the 75 floor, 78 off). The
-    // header is the same either way (a column is never switched away).
-    let out = cli()
-        .env("CITYSIM_CAREERS_OFF", "1")
-        .args(["run", "--days", "1", "--seed", "1", "--report"])
-        .output()
-        .expect("run cli");
+    let out = cli().args(["run", "--days", "1", "--seed", "1", "--report"]).output().expect("run cli");
     assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
     let stdout = String::from_utf8(out.stdout).expect("utf8");
     let mut lines = stdout.lines();
@@ -62,7 +54,10 @@ fn test_cli_report_csv_header() {
     // room on its shifts (the x3 ceiling had 44 Vat Techs in a Farm of 16):
     // 863 on seed 1, so 800-1,300.
     assert!((1995..=2000).contains(&n(2)) && (800..=1300).contains(&n(3)), "row: {row}");
-    assert!((derelict_homeless - 5..=120).contains(&n(4)), "row: {row}");
+    // Lives at work phase 6: the first midnight retires 32 elders to their
+    // children's Homes, some the derelicts' residents (74 on seed 1, 78 with
+    // careers off): the floor 5 lower since the switch retired (OPEN-094).
+    assert!((derelict_homeless - 10..=120).contains(&n(4)), "row: {row}");
     // M13 D49: corp slot 9 and the 40 asset columns; M14 V43: the 72 Virt
     // columns; M15 W43: the 68 word columns (30, 4 gangs x 2, 9 corps x 3, 3);
     // L2 (plan L34): the 54 living-city columns; L2 phase 3: the 15 budget columns;
