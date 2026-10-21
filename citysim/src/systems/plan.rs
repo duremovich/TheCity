@@ -197,6 +197,8 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
             // Lives at work phase 5 (§ 2.4): a Reporter on shift walks his beat.
             .or_else(|| crate::systems::news::beat_plan(world, id))
             .or_else(|| crate::systems::streetwork::fare_plan(world, id))
+            // The pre-view pass phase 2 (OPEN-137): a shaped shift's next part.
+            .or_else(|| crate::systems::shift::plan(world, id))
             .or_else(|| crate::systems::life::exec_plan(world, id)),
         // M12 phase 4: the expedition chain, built directly.
         GoalKind::Raid => routine::raid_plan(world, id),

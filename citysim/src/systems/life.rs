@@ -600,7 +600,7 @@ pub fn preroll_housing(world: &mut World) -> (u32, u32) {
             .filter_map(|(&employer, &n)| {
                 let work = world.comp::<Building>(employer)?.door;
                 let free = free_beds_near(world, &homes, work, cap);
-                (n as usize > free).then_some((std::cmp::Reverse(n as usize - free), employer))
+                (n as usize > free).then(|| (std::cmp::Reverse(n as usize - free), employer))
             })
             .collect();
         unmet.sort_unstable();

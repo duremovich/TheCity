@@ -2472,6 +2472,38 @@ pub struct Brain {
     /// refused_ticks`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refused: Option<(EntityId, Tick)>,
+    /// The pre-view pass phase 2 (OPEN-137): this shift's shape state
+    /// (`systems/shift.rs`). Not written while `None` (the off save).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shift: Option<Box<ShiftState>>,
+}
+
+/// The pre-view pass phase 2 (docs/PREVIEW_PASS.md § 1): one shift's
+/// stations, drawn when its first block is planned (`shift::plan`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ShiftState {
+    /// The shift key the state belongs to (`Job::next_shift_key`).
+    pub key: i64,
+    /// The spots inside the workplace, in the order they are worked.
+    pub spots: Vec<TilePos>,
+    /// The current shape plan's blocks in minutes, one per work step in
+    /// plan order; 0 runs to the shift's end (the last block, paid).
+    pub blocks: Vec<u16>,
+    /// `started_tick` of the shape plan `blocks` belongs to.
+    pub plan_tick: Tick,
+    /// 0 the first half, 1 the break planned, 2 the second half.
+    pub stage: u8,
+    /// Blocks drawn so far (the block draw's ordinal; the next spot).
+    pub drawn: u8,
+    /// The tick the first block was planned: the span the output and a
+    /// pro-rata cut are read over (one block's start before).
+    pub from: Tick,
+    /// The longest block worked this shift, in minutes (the device row).
+    pub longest: u16,
+    /// The spot indices worked this shift (a bit each, the device row).
+    pub worked: u8,
+    /// The break was a meal (the device row).
+    pub meal: bool,
 }
 
 fn is_zero_u64(v: &u64) -> bool {
@@ -2528,6 +2560,7 @@ impl Default for Brain {
             avoid_spot: None,
             empty_spots: smallvec::SmallVec::new(),
             refused: None,
+            shift: None,
         }
     }
 }

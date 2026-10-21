@@ -4228,3 +4228,41 @@ max_age = 60
 
 [roles.Ripperdoc]
 min_age = 25
+
+# The pre-view pass phase 2 (docs/PREVIEW_PASS.md § 0 P1, P2, P7, § 1; OPEN-137): the visible shift, read by
+# systems/shift.rs. A shift's shape is its trade row's `duty` (`post` is worked as `trade_post`) or, for a built-in
+# role, its [shift.roles] key (the Role's name; absent: post, the one block at one tile). Phases 3-6 add haul,
+# counter and work round / fare here. Pay and output do not move (P5): the wage is paid as the last block ends, at
+# the post, and the output is the shift's span from its first block. Statistical bodies keep the one block (off
+# camera, OPEN-149). Off (`CITYSIM_STATIONS_OFF=1`): [shift] is dropped at load and every shift is the one block.
+# Placeholders.
+[shift]
+station_block_min = 30             # P2: a stations block's length in minutes, drawn per block (purpose-keyed, per body
+station_block_max = 90             # per shift); a trade row's station_block_min / _max override both
+station_spots_max = 4              # P2: the spots a shift works, 2 to this (at most the workplace's interior tiles),
+                                   # drawn per body per shift from the footprint; under 2 interior tiles: one block
+station_move_max = 3               # P2: the walk across the room between spots, at most this many minutes (the tiles
+                                   # at [exec] move_ticks_full otherwise; a Market's far wall was 16 min at 2 a tile)
+break_min = 30                     # P7: the mid-shift break: hungry (under the planner's HUNGER_SATISFIED 0.6) a meal
+                                   # bought and eaten at the nearest open Market (a packed meal eaten outside the
+                                   # door); fed, this long outside the door
+break_stagger = 60                 # P7: the break starts up to this many minutes either side of mid-shift (drawn per body
+                                   # per shift): a night crew all stepped out at 01:30 together
+break_walk_max = 15                # P7: the meal break's Market at most this many minutes' walk away (one way), else
+                                   # the packed meal or the door
+trade_post = "stations"            # P1: the shape of every `duty = "post"` trade
+
+# P1: the built-in roles' shapes, keyed by the Role's name (absent: post).
+[shift.roles]
+Host = "stations"
+Attendant = "stations"
+Cook = "stations"
+Fighter = "stations"
+Croupier = "stations"
+Concierge = "stations"
+Ripperdoc = "stations"
+Mechanic = "stations"
+Researcher = "stations"
+Reporter = "stations"
+Fixer = "stations"
+Volunteer = "stations"
