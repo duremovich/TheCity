@@ -3215,6 +3215,33 @@ pub struct Gang {
     /// free member (over `leader_ranking`'s top); cleared once not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crowned: Option<EntityId>,
+    // --- The pre-view pass phase 6 (P13-P15): written only with `[leaders]`.
+    /// P15: the order the brain chose, not yet given to a lieutenant in
+    /// person (`systems::leaders`); the members follow `order` till then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_order: Option<PendingOrder>,
+    /// P13: the day the leader's last round was begun.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub round_day: Option<u64>,
+    /// P14: the day the leader last held court.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub court_day: Option<u64>,
+}
+
+/// The pre-view pass phase 6 (P15): an order chosen by the faction brain
+/// (`faction::rescore`) and waiting to be given to a lieutenant in person.
+/// Applied by `faction::apply_order` (the muster timed from then).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PendingOrder {
+    pub order: Order,
+    /// When it was chosen (the wait's cap counts from here).
+    pub decided: Tick,
+    /// M12 D39: the corp building a corp Raid aims at.
+    pub corp_target: Option<EntityId>,
+    /// M14 V34, M15 W18: the faction a Retaliate fights.
+    pub retaliate_on: Option<EntityId>,
+    /// The rescore's note (`daily` or `shock`, the scores).
+    pub why: String,
 }
 
 /// M17 phase 4b: a gang's civil war for the chair after a close succession.
@@ -3274,6 +3301,9 @@ impl Gang {
             tribute_week: 0,
             war: None,
             crowned: None,
+            pending_order: None,
+            round_day: None,
+            court_day: None,
         }
     }
 

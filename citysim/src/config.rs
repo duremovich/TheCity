@@ -334,6 +334,43 @@ pub struct Config {
     /// with `CITYSIM_LEGS_OFF=1`, which also drops the map's `L+` lines.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub legs: Option<LegsCfg>,
+    /// The pre-view pass phase 6 (docs/PREVIEW_PASS.md § 0 P9, P13-P15;
+    /// OPEN-118, OPEN-128): the leader's round, court and orders given in
+    /// person (`systems/leaders.rs`). `None` (not written into a save) with
+    /// `CITYSIM_LEADERS_OFF=1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leaders: Option<LeadersCfg>,
+}
+
+/// The pre-view pass phase 6 `[leaders]` (docs/PREVIEW_PASS.md § 0 P9,
+/// P13-P15). Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LeadersCfg {
+    /// P13: the round starts from this hour and is not begun from `round_last_hour`.
+    pub round_hour: u16,
+    pub round_last_hour: u16,
+    /// P13: stops a round (the owed protections first).
+    pub round_stops_max: u8,
+    /// P13: an off-screen owner is met at his business at this rate.
+    pub owner_stat_p: f32,
+    /// P14: court opens at this hour and runs `court_min` minutes.
+    pub court_hour: u16,
+    pub court_min: u16,
+    /// P14: an off-screen lieutenant attends a court at this rate.
+    pub court_stat_p: f32,
+    /// P14: the leader sets out to be at court by `court_hour`, at most
+    /// this many minutes ahead.
+    pub court_walk_max: u64,
+    /// P15: an order waits for a lieutenant at court this long, then the
+    /// leader walks to one; past `order_wait_ticks + order_word_ticks` it
+    /// goes by word (off screen).
+    pub order_wait_ticks: u64,
+    pub order_word_ticks: u64,
+    /// P15: the order is given in the lieutenant's building or within this
+    /// Chebyshev radius of him.
+    pub order_reach: u32,
+    /// P15: minutes the order takes, given at the lieutenant.
+    pub order_give_min: u16,
 }
 
 /// The pre-view pass phase 5 `[legs]` (docs/PREVIEW_PASS.md § 2 "20k
@@ -4416,6 +4453,10 @@ pub struct PreviewOff {
     /// The pre-view pass phase 4 off (`CITYSIM_PRESENCE_OFF=1`): `[presence]`
     /// dropped at load; encounters settle by link as before.
     pub presence: bool,
+    /// The pre-view pass phase 6 off (`CITYSIM_LEADERS_OFF=1`): `[leaders]`
+    /// dropped at load; protection is collected at midnight and an order is
+    /// in force the moment it is chosen, as before.
+    pub leaders: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -8479,6 +8520,11 @@ impl Config {
         // The pre-view pass phase 5 (OPEN-139, OPEN-115): the 20k legs.
         if std::env::var("CITYSIM_LEGS_OFF").is_ok_and(|v| v == "1") {
             cfg.legs = None;
+        }
+        // The pre-view pass phase 6 (OPEN-118, OPEN-128): the leaders.
+        cfg.preview_off.leaders = std::env::var("CITYSIM_LEADERS_OFF").is_ok_and(|v| v == "1");
+        if cfg.preview_off.leaders {
+            cfg.leaders = None;
         }
         // The earlier milestones' `CITYSIM_*_OFF` env switches retired in
         // the pre-view pass (OPEN-094); every section's config path stays

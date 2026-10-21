@@ -941,6 +941,30 @@ pub struct Jobs2Cols {
     pub fares_no_body: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub fares_too_far: u32,
+    // The pre-view pass phase 6 (P13-P15): a body leader's rounds begun,
+    // their stops reached, the protection weeks collected there in person
+    // and the stops with the owner out (the week stays owed), courts held,
+    // takes handed to the leader at court, and orders given to a
+    // lieutenant at court, at the lieutenant after the wait, and by word
+    // past the cap (off screen).
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub lead_rounds: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub lead_stops: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub lead_collected: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub lead_owner_out: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub courts: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub court_handovers: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub orders_court: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub orders_walked: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub orders_word: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -1263,6 +1287,15 @@ impl Jobs2Cols {
                 "fares_unmanned",
                 "fares_no_body",
                 "fares_too_far",
+                "lead_rounds",
+                "lead_stops",
+                "lead_collected",
+                "lead_owner_out",
+                "courts",
+                "court_handovers",
+                "orders_court",
+                "orders_walked",
+                "orders_word",
             ]
             .into_iter()
             .map(str::to_string),
@@ -1579,6 +1612,15 @@ impl Jobs2Cols {
             self.fares_unmanned.to_string(),
             self.fares_no_body.to_string(),
             self.fares_too_far.to_string(),
+            self.lead_rounds.to_string(),
+            self.lead_stops.to_string(),
+            self.lead_collected.to_string(),
+            self.lead_owner_out.to_string(),
+            self.courts.to_string(),
+            self.court_handovers.to_string(),
+            self.orders_court.to_string(),
+            self.orders_walked.to_string(),
+            self.orders_word.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

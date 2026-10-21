@@ -2490,7 +2490,7 @@ fn lead_started(world: &World, gang: EntityId) -> Option<Tick> {
 /// Plan L20: the leader's Collect is due (the weekday, not done today).
 /// L2 shadow fixes item 15: a round started on the collect day stays due
 /// past midnight until its Collect runs.
-fn collect_due(world: &World, gang: EntityId) -> bool {
+pub(crate) fn collect_due(world: &World, gang: EntityId) -> bool {
     let today = world.day();
     let weekday = world.config.leisure.collect_weekday % 7;
     if let Some(t) = lead_started(world, gang) {
@@ -2505,7 +2505,7 @@ fn collect_due(world: &World, gang: EntityId) -> bool {
 /// Plan L20: a Call is due the evening after an order change. L2 shadow
 /// fixes item 15: it stays due for a Lead plan's life (the leader walked
 /// 330 min to the Hideout and dropped the Lead on the doorstep at night).
-fn call_due(world: &World, gang: EntityId) -> bool {
+pub(crate) fn call_due(world: &World, gang: EntityId) -> bool {
     let Some(g) = world.comp::<Gang>(gang) else { return false };
     let pending = g.order_since > 0
         && g.called_for != Some(g.order_since)
@@ -2518,8 +2518,13 @@ pub fn lead_considerations(world: &World, id: EntityId) -> Option<(Vec<Considera
     if world.has::<Sentence>(id) {
         return None;
     }
+    // The pre-view pass phase 6 (P14): a lieutenant sent for to court.
+    if crate::systems::leaders::attend_due(world, id) {
+        return Some((vec![Consideration::raw("sent for to court", 1.0, 0.6)], 0.0));
+    }
     let gang = is_leader(world, id)?;
-    let due = collect_due(world, gang) || call_due(world, gang);
+    // The pre-view pass phase 6 (P13-P15): the round, court, an order to give.
+    let due = collect_due(world, gang) || call_due(world, gang) || crate::systems::leaders::due(world, gang, id);
     if !due {
         return None;
     }
@@ -2528,14 +2533,27 @@ pub fn lead_considerations(world: &World, id: EntityId) -> Option<(Vec<Considera
 
 /// `already_satisfied(Lead)`.
 pub fn lead_satisfied(world: &World, id: EntityId) -> bool {
-    is_leader(world, id).is_none_or(|g| !collect_due(world, g) && !call_due(world, g))
+    if crate::systems::leaders::attend_due(world, id) {
+        return false;
+    }
+    is_leader(world, id)
+        .is_none_or(|g| !collect_due(world, g) && !call_due(world, g) && !crate::systems::leaders::due(world, g, id))
 }
 
 /// Plan L20: the round: `GoTo(front) → Collect` per front on a collect day,
 /// then `GoTo(Hideout) → Collect` (the pay-out and the Call).
 pub fn lead_plan(world: &mut World, id: EntityId) -> Option<Plan> {
+    // The pre-view pass phase 6 (P14): a lieutenant's walk to court.
+    if crate::systems::leaders::attend_due(world, id) {
+        return crate::systems::leaders::attend_plan(world, id);
+    }
     let gang = is_leader(world, id)?;
     let hideout = world.hideout_of(gang)?;
+    // The pre-view pass phase 6 (P13-P15): an order walked to a lieutenant,
+    // court, or the round, whichever is due (the Collect and Call ride along).
+    if let Some(plan) = crate::systems::leaders::plan(world, id, gang, hideout) {
+        return Some(plan);
+    }
     let mut steps = Vec::new();
     if collect_due(world, gang) {
         for f in fronts_of(world, gang) {
@@ -2555,6 +2573,10 @@ pub fn lead_plan(world: &mut World, id: EntityId) -> Option<Plan> {
 fn collect_step(world: &mut World, id: EntityId, target: Option<EntityId>) {
     let Some(gang) = is_leader(world, id) else { return };
     if target.is_none() || target != world.hideout_of(gang) {
+        // The pre-view pass phase 6 (P13): a round stop collects in person.
+        if let Some(b) = target {
+            crate::systems::leaders::round_stop(world, id, gang, b);
+        }
         return;
     }
     if call_due(world, gang) {

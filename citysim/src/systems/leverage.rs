@@ -341,7 +341,9 @@ pub fn force(
 ) -> CoercionId {
     let id = record(world, holder, agent, over, lev, demand, why, payer, building);
     match demand {
-        Demand::Coins { weekly: true, .. } => pay_week(world, id),
+        Demand::Coins { weekly: true, .. } => {
+            pay_week(world, id);
+        }
         // Review finding 3: a forced one-off sum is paid now (or refused).
         Demand::Coins { amount, weekly: false } => {
             let from = payer.unwrap_or(over);
@@ -537,7 +539,40 @@ fn collect(world: &mut World) {
         .map(|c| c.id)
         .collect();
     for id in due {
+        // The pre-view pass phase 6 (P13): a protection whose gang's leader
+        // has a body is collected on his round, in person; midnight only
+        // ends a hold that is gone.
+        let in_person = world.coercions.get(&id).is_some_and(|c| {
+            c.why == CoercionWhy::Protection && c.holder.is_some_and(|g| crate::systems::leaders::collects(world, g))
+        });
+        if in_person {
+            if broken_week(world, id) {
+                close(world, id, CoercionStatus::Broken, "the hold is gone");
+            }
+            continue;
+        }
         pay_week(world, id);
+    }
+}
+
+/// The pre-view pass phase 6 (P13): one owed protection week collected in
+/// person at the leader's round stop (the owner met there): paid, or
+/// ended as at midnight. The coins paid (0: refused or broken).
+pub fn collect_in_person(world: &mut World, id: CoercionId) -> i64 {
+    pay_week(world, id)
+}
+
+/// A standing coercion whose hold is gone (see [`pay_week`]).
+fn broken_week(world: &World, id: CoercionId) -> bool {
+    let Some(c) = world.coercions.get(&id) else { return false };
+    let gone = |e: EntityId| !law::living(world, e) || world.has::<Sentence>(e);
+    match c.why {
+        CoercionWhy::Protection => !protection_holds(world, c) || gone(c.over) || gone(c.agent),
+        CoercionWhy::Parley => {
+            c.holder.is_none_or(|h| !world.has::<crate::components::Gang>(h))
+                || c.payer.is_none_or(|p| !world.has::<crate::components::Gang>(p))
+        }
+        _ => c.holder.is_none_or(|h| holder_gone(world, h)) || !law::living(world, c.over),
     }
 }
 
@@ -550,31 +585,23 @@ fn holder_gone(world: &World, h: EntityId) -> bool {
     !law::living(world, h)
 }
 
-/// One standing coercion's week: paid, or ended (see [`collect`]).
-fn pay_week(world: &mut World, id: CoercionId) {
+/// One standing coercion's week: paid, or ended (see [`collect`]). The
+/// coins paid.
+fn pay_week(world: &mut World, id: CoercionId) -> i64 {
     let now = world.tick;
-    let Some(c) = world.coercions.get(&id).cloned() else { return };
-    let Demand::Coins { amount, .. } = c.demand else { return };
+    let Some(c) = world.coercions.get(&id).cloned() else { return 0 };
+    let Demand::Coins { amount, .. } = c.demand else { return 0 };
     if !c.is_active() {
-        return;
+        return 0;
     }
-    let gone = |e: EntityId| !law::living(world, e) || world.has::<Sentence>(e);
-    let broken = match c.why {
-        CoercionWhy::Protection => !protection_holds(world, &c) || gone(c.over) || gone(c.agent),
-        CoercionWhy::Parley => {
-            c.holder.is_none_or(|h| !world.has::<crate::components::Gang>(h))
-                || c.payer.is_none_or(|p| !world.has::<crate::components::Gang>(p))
-        }
-        _ => c.holder.is_none_or(|h| holder_gone(world, h)) || !law::living(world, c.over),
-    };
-    if broken {
+    if broken_week(world, id) {
         close(world, id, CoercionStatus::Broken, "the hold is gone");
-        return;
+        return 0;
     }
     let payer = c.payer.unwrap_or(c.over);
     if world.purse(Some(payer)) < amount {
         close(world, id, CoercionStatus::Refused, "would not pay");
-        return;
+        return 0;
     }
     let paid = ownership::pay(world, Some(payer), c.holder, amount, Flow::Coerced);
     if let Some(b) = c.building {
@@ -590,6 +617,7 @@ fn pay_week(world: &mut World, id: CoercionId) {
         row.protection_paid += 1;
         row.protection_coins += paid;
     }
+    paid
 }
 
 // ---------------------------------------------------------------------------
@@ -737,8 +765,11 @@ pub fn try_protection(world: &mut World, gang: EntityId, leader: EntityId, b: En
     world.stats.current.leverage.protection_made += 1;
     let d = world.district_of_building(b);
     crate::systems::gossip::post_deed(world, d, Deed::Extorted, Some(leader), Some(over));
-    // The first week now.
-    collect_one(world, id);
+    // The first week now (the pre-view pass phase 6, P13: a body leader
+    // collects it on his round, in person).
+    if !crate::systems::leaders::collects(world, gang) {
+        collect_one(world, id);
+    }
     true
 }
 

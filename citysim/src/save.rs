@@ -266,7 +266,11 @@ use crate::world::World;
 /// `CabRide.body`, `TransitLineCfg.in_flight` and the `Jobs2Cols` legs
 /// columns (each written only when set; serde defaults). An off save is
 /// byte-identical to version 49's.
-pub const SAVE_VERSION: u8 = 50;
+/// 51: the pre-view pass phase 6 (OPEN-118, OPEN-128): `Config.leaders`,
+/// `Gang.{pending_order, round_day, court_day}`, the `Court` step and the
+/// `Jobs2Cols` leaders columns (each written only when set; serde
+/// defaults). An off save is byte-identical to version 50's.
+pub const SAVE_VERSION: u8 = 51;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

@@ -469,6 +469,9 @@ fn test_hacked_shock_targets_runners_gang() {
 fn test_retaliate_targets_the_traced_runners_gang() {
     let mut w = dole_world();
     w.config.gangs.order_flat.retaliate = 10.0;
+    // The pre-view pass phase 6: the brain's choice, in force at once (the
+    // giving in person is `leaders.rs`'s).
+    w.config.leaders = None;
     let (ga, gb) = (w.gang_list()[0], w.gang_list()[1]);
     let third_base = w.buildings_of_kind(BuildingKind::Home)[0];
     // M15 W31: The Unplugged is seeded too (no territory, never the rival here).

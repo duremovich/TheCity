@@ -150,6 +150,8 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::Break => crate::systems::shift::break_ticks(world, id),
         // The pre-view pass phase 3: a haul trip's unload, `[shift.haul] haul_handle_min`.
         ActionKind::Unload => crate::systems::shift::unload_ticks(world),
+        // The pre-view pass phase 6 (P14, P15): court to its end, or an order given.
+        ActionKind::Court => crate::systems::leaders::court_ticks(world, id),
         _ => 30,
     }
 }
@@ -257,6 +259,8 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         ActionKind::Break => crate::systems::shift::can_break(world, id),
         // The pre-view pass phase 3: inside the trip's destination.
         ActionKind::Unload => target.is_some() && world.comp::<Position>(id).and_then(|p| p.building) == target,
+        // The pre-view pass phase 6: at the Hideout in court hours, or at the lieutenant.
+        ActionKind::Court => crate::systems::leaders::can_court(world, id, target),
         // L1: out on the street; office hours inside the HQ.
         ActionKind::Scavenge => world.comp::<Position>(id).is_some_and(|p| p.building.is_none()),
         ActionKind::Meeting => target.is_some() && world.comp::<Position>(id).and_then(|p| p.building) == target,
@@ -415,6 +419,8 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
 /// Start effects: money moves now so an interruption cannot duplicate it.
 pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Option<EntityId>) {
     match kind {
+        // The pre-view pass phase 6 (P15): the order given as the leader reaches the lieutenant.
+        ActionKind::Court => crate::systems::leaders::court_start(world, id, target),
         // Sleeping at home beside a spouse: intimacy +0.4, at the start so an
         // interrupted night still counts.
         ActionKind::Sleep => {
@@ -953,6 +959,11 @@ pub fn on_complete(
             crate::systems::shift::unloaded(world, id, target);
             StepResult::Done
         }
+        // The pre-view pass phase 6 (P14): a court held is counted.
+        ActionKind::Court => {
+            crate::systems::leaders::court_done(world, id, target);
+            StepResult::Done
+        }
         // L2 L8: Parts into the Fab, then the shift's end.
         ActionKind::FabWork => {
             if let Some(fab) = world.comp::<Job>(id).and_then(|j| j.employer) {
@@ -1108,7 +1119,9 @@ pub fn on_complete(
             StepResult::Done
         }
         ActionKind::SplitLoot => {
-            crate::systems::gang::split_loot(world, id);
+            let share = crate::systems::gang::split_loot(world, id);
+            // The pre-view pass phase 6 (P14): handed to the leader at court.
+            crate::systems::leaders::handed(world, id, share);
             StepResult::Done
         }
         ActionKind::Fence => {

@@ -1330,6 +1330,8 @@ pub fn run(world: &mut World) {
             faction::rethink(world, gang);
         }
     }
+    // The pre-view pass phase 6 (P15): the waiting orders given in person.
+    crate::systems::leaders::run(world);
     if daily {
         daily_economy(world);
         desist(world);
