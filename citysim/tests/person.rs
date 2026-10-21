@@ -2609,6 +2609,11 @@ fn probe_parent_with_the_fee_buys_the_child_out_within_fourteen_days() {
                 let due = w.comp::<Household>(p).map_or(0.0, |x| x.rent_due).ceil() as i64;
                 w.comp_mut::<Wallet>(p).expect("wallet").coins = 80 + due;
                 w.comp_mut::<Building>(h).expect("home").stock_food = 60;
+                // The premise kept: the fee is the child's, not a Shop pick's
+                // (the pre-view phase 2 city's pair spent it on a Legs implant
+                // on day 3 and Therapy after, and never bought out).
+                let cool = w.tick + TICKS_PER_DAY;
+                w.comp_mut::<Brain>(p).expect("brain").cooldowns.insert(citysim::GoalKind::Shop, cool);
             }
             w.run_ticks(1);
         }
@@ -2641,24 +2646,35 @@ fn probe_parent_with_the_fee_buys_the_child_out_within_fourteen_days() {
 fn broke_parent_visits(mut c: World) -> (bool, bool) {
     let (q, child2, h2, camp2) = taken_child(&mut c);
     pin(&mut c, q);
-    for _ in 0..14 {
+    // The harsh city: a parent killed inside the fortnight (the pre-view
+    // phase 2 city's, a brawl at home on day 13) is read as of the death
+    // (the visits made before it count).
+    let mut died = None;
+    'days: for _ in 0..14 {
         let eve = (c.tick / TICKS_PER_DAY + 1) * TICKS_PER_DAY - 1;
-        run_to(&mut c, q, eve, |_| {});
-        // The premise kept: the mother stays jobless (on the phase 4b city
-        // she was hired a Sweeper, her days the beat, and never reached the Camp).
-        c.remove::<Job>(q);
-        // 10 coins at each eve, the premise (`min(10)` let a purse spent to
-        // 0 stay at 0: the 8c fix round's city had her walk 250 tiles to the
-        // Camp, unable to pay the fare, and sleep on the way).
-        c.comp_mut::<Wallet>(q).expect("wallet").coins = 10;
-        c.comp_mut::<Building>(h2).expect("home").stock_food = 0;
-        let next = c.tick + 1;
-        run_to(&mut c, q, next, |_| {});
+        while c.tick <= eve {
+            if !law::living(&c, q) {
+                died = Some(c.tick);
+                break 'days;
+            }
+            if c.tick == eve {
+                // The premise kept: the mother stays jobless (on the phase 4b city
+                // she was hired a Sweeper, her days the beat, and never reached the Camp).
+                c.remove::<Job>(q);
+                // 10 coins at each eve, the premise (`min(10)` let a purse spent to
+                // 0 stay at 0: the 8c fix round's city had her walk 250 tiles to the
+                // Camp, unable to pay the fare, and sleep on the way).
+                c.comp_mut::<Wallet>(q).expect("wallet").coins = 10;
+                c.comp_mut::<Building>(h2).expect("home").stock_food = 0;
+            }
+            pin(&mut c, q);
+            c.run_ticks(1);
+        }
     }
     let met = c.last_met.get(&(q.min(child2), q.max(child2))).copied();
     let visited = c.events.iter().any(|e| e.kind == EventKind::Visited && e.actors.contains(&q));
     eprintln!(
-        "control {}: child's home {:?} (camp {}); last_met day {met:?}; Visited {visited}",
+        "control {}: child's home {:?} (camp {}); last_met day {met:?}; Visited {visited}; died {died:?}",
         q.index,
         home(&c, child2).map(|b| b.index),
         camp2.index

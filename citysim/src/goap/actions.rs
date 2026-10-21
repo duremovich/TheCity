@@ -187,6 +187,10 @@ pub enum ActionKind {
     /// corner before the dawn pick): the Pitch goal's scripted step, never in
     /// `PLANNABLE`, started by `streetwork::can_start`.
     Vend,
+    /// The pre-view pass phase 2 (§ 1 P7): a stations shift's mid-shift
+    /// break, stood outside the workplace's door to `[shift] break_min`
+    /// (a shape plan's scripted step, never in `PLANNABLE`, `systems/shift.rs`).
+    Break,
 }
 
 /// Every action the planner may consider, in tie-break order.
@@ -420,6 +424,7 @@ impl ActionKind {
                 | ActionKind::Oncology
                 | ActionKind::PackMeal
                 | ActionKind::Vend
+                | ActionKind::Break
         )
     }
 
@@ -1292,7 +1297,11 @@ impl ActionKind {
             k if k.is_contract_step() => false,
             // Real economy E27, E28: scripted only.
             k if k.is_charity_step() => false,
-            ActionKind::DumpsterDive | ActionKind::Oncology | ActionKind::PackMeal | ActionKind::Vend => false,
+            ActionKind::DumpsterDive
+            | ActionKind::Oncology
+            | ActionKind::PackMeal
+            | ActionKind::Vend
+            | ActionKind::Break => false,
             _ => true,
         }
     }
@@ -1385,7 +1394,11 @@ impl ActionKind {
             k if k.is_contract_step() => true,
             // Real economy E27, E28: likewise `charity::can_start`.
             k if k.is_charity_step() => true,
-            ActionKind::DumpsterDive | ActionKind::Oncology | ActionKind::PackMeal | ActionKind::Vend => true,
+            ActionKind::DumpsterDive
+            | ActionKind::Oncology
+            | ActionKind::PackMeal
+            | ActionKind::Vend
+            | ActionKind::Break => true,
             ActionKind::Chat => {
                 matches!(ws.at, LocationKey::Market | LocationKey::Bar | LocationKey::Home | LocationKey::Farm)
                     && ctx.partner.is_some()
@@ -1864,7 +1877,8 @@ impl ActionKind {
             | ActionKind::DumpsterDive
             | ActionKind::Oncology
             | ActionKind::PackMeal
-            | ActionKind::Vend => 60.0,
+            | ActionKind::Vend
+            | ActionKind::Break => 60.0,
         };
         c.clamp(0.5, 60.0)
     }

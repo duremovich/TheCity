@@ -243,7 +243,13 @@ use crate::world::World;
 /// only on) and `World.moving_in`, the bodies moved into a Home they have
 /// not walked into yet (written only when non-empty). An off save is
 /// byte-identical to version 45's.
-pub const SAVE_VERSION: u8 = 46;
+/// 47 (the pre-view pass phase 2, OPEN-137): `[shift]` (written only on),
+/// `Brain.shift` (a stations shift's spots and blocks, written only while
+/// set), the trade rows' `station_block_min` / `_max` (written while
+/// non-zero), the `Jobs2Cols` `shift_*` columns (serde defaults) and the
+/// `GoTo(Station)` / `Break` steps. An off save is byte-identical to
+/// version 46's.
+pub const SAVE_VERSION: u8 = 47;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

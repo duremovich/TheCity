@@ -960,8 +960,12 @@ fn activity(world: &World, id: EntityId) -> &'static str {
     if matches!(b.exec, ExecState::Goto { .. } | ExecState::GotoTimed { .. } | ExecState::Fly { .. }) {
         // Lives at work phase 3 (§ 2.2): a round leg on shift is the work.
         // Lives at work phase 5 (§ 2.4): a reporter's beat leg, likewise.
+        // The pre-view pass phase 2 (OPEN-137): a stations shift's walk
+        // across the room between its spots, likewise.
         if b.plan_goal() == Some(GoalKind::Work)
-            && (citysim::systems::trades::on_round(world, id) || citysim::systems::news::on_beat(world, id))
+            && (citysim::systems::trades::on_round(world, id)
+                || citysim::systems::news::on_beat(world, id)
+                || b.current_step().is_some_and(|s| s.action == ActionKind::GoTo(citysim::LocationKey::Station)))
         {
             return "work";
         }

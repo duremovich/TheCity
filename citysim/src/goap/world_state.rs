@@ -108,6 +108,11 @@ pub enum LocationKey {
     /// Hunger as sickness § 4: the street outside the bound building's
     /// door (its bin). Scripted dive plans only, never in `GOTO`.
     Bin,
+    /// The pre-view pass phase 2 (OPEN-137): a stations spot, the step's
+    /// `tile` inside its `target` (the workplace): a walk across the room
+    /// while inside, else the walk to the building. Shape plans only
+    /// (`systems/shift.rs`), never in `GOTO`.
+    Station,
 }
 
 impl LocationKey {

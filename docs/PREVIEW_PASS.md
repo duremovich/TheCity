@@ -41,6 +41,27 @@ and keeps the one-block shift with the same pay. What a shape *produces* (parcel
 refusals, served customers) has a mirror: the shape's expected count per shift, drawn from a purpose-keyed stream,
 the same way the Statistical super's stops work today (`trades::round_for`).
 
+**`stations` as built (phase 2, `systems/shift.rs`, `[shift]`).** The shape is `shift::shape_of`: a `duty = "post"`
+trade is worked as `[shift] trade_post` (`stations`), a built-in role by its `[shift.roles]` key (all twelve
+`stations`; absent is `post`, the one block). `shift::plan` is the Work goal's bypass after the commute, the round,
+the beat and the fare: a shift is three shape plans, the first half's blocks to mid-shift, the break, the second
+half's blocks, each block a `GoTo(Station)` (a new `LocationKey`: the step's `tile` inside its `target`, a walk across
+the room of at most `station_move_max` minutes, the body kept inside) and the role's own work action. The spots
+(2-`station_spots_max` walkable interior tiles; under 2, the one block) and each block's length are keyed draws
+(`SHIFT_KEY`, the body, the shift key, the ordinal). Between the shape plans the shift holds against non-emergency
+goals as its one block did (`fixes::committed`). The break is a new `ActionKind::Break` outside the door (P4: `Rest`
+would lie; it also ends at once off the premises), or, hungry, the packed meal outside the door, else the nearest
+open Market (`BuyFood`, eaten) or NoodleBar (`EatOut`) within `break_walk_max` (at 2k the Markets are 3 and the
+nearest was 104 min away, so the NoodleBar counts as a food venue). Three deviations from P7, each for a measured
+reason: the break starts up to `break_stagger` minutes either side of mid-shift, drawn per body per shift (a night
+crew all stepped out at 01:30 together); it waits a block while a customer is mid-procedure in the workplace (an
+implant on the table); and a Clinic's last doctor on shift inside keeps it through the break (a Clinic sells only
+with its doctor in: taken alone, 2k `AssetBought` fell 14 % and Ripperdocs and Orderlies employed fell). A block before the last closes nothing; the last
+runs to the shift's end and closes it at the post (the wage, `last_shift_day`), a producing trade's output accrued
+over the span from the first block, a pro-rata cut read over the same span. A shape plan's steps check their own start
+(`actions::can_start`): the planner reads a worker inside his own Market as at `Workplace`. **Statistical mirror:**
+none: a Statistical body is off camera (OPEN-149) and has no plan; it keeps the one block and the same pay.
+
 ## 2. The bugs (rows 2-7)
 
 | row | OPEN | the fix | anchor |

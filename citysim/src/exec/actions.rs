@@ -136,8 +136,15 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
             }
         }
         k if k.is_work() => {
-            world.comp::<Job>(id).and_then(|j| j.shift_end(world.tick)).map_or(0, |end| end.saturating_sub(world.tick))
+            let left = world
+                .comp::<Job>(id)
+                .and_then(|j| j.shift_end(world.tick))
+                .map_or(0, |end| end.saturating_sub(world.tick));
+            // The pre-view pass phase 2 (OPEN-137): a stations block.
+            crate::systems::shift::block_ticks(world, id).map_or(left, |b| b.min(left))
         }
+        // The pre-view pass phase 2 (P7): the break, to `[shift] break_min`.
+        ActionKind::Break => crate::systems::shift::break_ticks(world, id),
         _ => 30,
     }
 }
@@ -240,6 +247,8 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
             can_work_now(world, id, job) && crate::exec::routine::work_action(world, job.role) == k
         }
         ActionKind::Wander => true,
+        // The pre-view pass phase 2 (P7): the break is outside the door.
+        ActionKind::Break => crate::systems::shift::can_break(world, id),
         // L1: out on the street; office hours inside the HQ.
         ActionKind::Scavenge => world.comp::<Position>(id).is_some_and(|p| p.building.is_none()),
         ActionKind::Meeting => target.is_some() && world.comp::<Position>(id).and_then(|p| p.building) == target,
@@ -911,15 +920,26 @@ pub fn on_complete(
             StepResult::Done
         }
         ActionKind::GuardJail | ActionKind::ClerkWork | ActionKind::BartendWork | ActionKind::TendGraves => {
-            // Jobs and room J13: a producing trade's shift makes its output.
+            // The pre-view pass phase 2 (OPEN-137, P5): a stations block
+            // before the shift's last closes nothing (the wage and the
+            // output wait for the last, at the post).
+            if crate::systems::shift::block_done(world, id, started) {
+                return StepResult::Done;
+            }
+            // Jobs and room J13: a producing trade's shift makes its output
+            // (over the shift's span from its first block, P5).
             if kind == ActionKind::ClerkWork {
                 if let Some(b) = world.comp::<Job>(id).filter(|j| j.role.is_trade()).and_then(|j| j.employer) {
-                    crate::systems::trades::accrue(world, id, b, now.saturating_sub(started));
+                    let from = crate::systems::shift::span_start(world, id, started);
+                    crate::systems::trades::accrue(world, id, b, now.saturating_sub(from));
                 }
             }
+            crate::systems::shift::shift_closed(world, id);
             end_shift(world, id);
             StepResult::Done
         }
+        // The pre-view pass phase 2 (P7): back to the stations.
+        ActionKind::Break => StepResult::Done,
         // L2 L8: Parts into the Fab, then the shift's end.
         ActionKind::FabWork => {
             if let Some(fab) = world.comp::<Job>(id).and_then(|j| j.employer) {

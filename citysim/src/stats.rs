@@ -843,6 +843,29 @@ pub struct Jobs2Cols {
     pub exec_rides: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub exec_rides_corp: u32,
+    // The pre-view pass phase 2 (OPEN-137, `systems/shift.rs`): the stations
+    // shifts closed today (Full and Coarse), their distinct spots worked
+    // (summed), the breaks planned and the meal breaks of the shifts closed,
+    // the day's longest block in minutes, and the shifts by their longest
+    // block (<= 60, <= 90, <= 180, longer).
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub shift_stations: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub shift_tiles: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub shift_breaks: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub shift_break_meals: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub shift_block_max: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub shift_long_60: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub shift_long_90: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub shift_long_180: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub shift_long_over: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -1128,6 +1151,15 @@ impl Jobs2Cols {
                 "execs_spire",
                 "exec_rides",
                 "exec_rides_corp",
+                "shift_stations",
+                "shift_tiles",
+                "shift_breaks",
+                "shift_break_meals",
+                "shift_block_max",
+                "shift_long_60",
+                "shift_long_90",
+                "shift_long_180",
+                "shift_long_over",
             ]
             .into_iter()
             .map(str::to_string),
@@ -1407,6 +1439,15 @@ impl Jobs2Cols {
             self.execs_spire.to_string(),
             self.exec_rides.to_string(),
             self.exec_rides_corp.to_string(),
+            self.shift_stations.to_string(),
+            self.shift_tiles.to_string(),
+            self.shift_breaks.to_string(),
+            self.shift_break_meals.to_string(),
+            self.shift_block_max.to_string(),
+            self.shift_long_60.to_string(),
+            self.shift_long_90.to_string(),
+            self.shift_long_180.to_string(),
+            self.shift_long_over.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

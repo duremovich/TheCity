@@ -685,6 +685,26 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
             if key == LocationKey::Intel {
                 crate::systems::hunt::on_goto_intel(world, id);
             }
+            // The pre-view pass phase 2 (OPEN-137): a stations spot inside
+            // the workplace is a walk across the room (timed, the tiles at
+            // `move_ticks_full`, at most `[shift] station_move_max`), the
+            // body kept inside.
+            if key == LocationKey::Station {
+                if let (Some(tile), Some(b)) = (step.tile, step.target) {
+                    let inside = world.comp::<Position>(id).filter(|p| p.building == Some(b)).map(|p| p.tile);
+                    if let Some(from) = inside {
+                        if from == tile {
+                            return StepResult::Done;
+                        }
+                        let arrive_tick = tick + crate::systems::shift::move_ticks(world, from, tile);
+                        let target = GotoTarget { dest: key, tile, building: Some(b) };
+                        if let Some(br) = world.comp_mut::<Brain>(id) {
+                            br.exec = ExecState::GotoTimed { target, arrive_tick, blocked_since: None };
+                        }
+                        return StepResult::Running;
+                    }
+                }
+            }
             // Escort's target is the suspect, not the destination.
             let walk_target = if matches!(step.action, ActionKind::GoTo(_)) { step.target } else { None };
             let building = world.resolve_building(id, key, walk_target);
@@ -808,7 +828,15 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                         | crate::components::GoalKind::Visit
                 )
             });
-            if scripted {
+            if goal == Some(crate::components::GoalKind::Work) && crate::systems::shift::scripted(world, id) {
+                // The pre-view pass phase 2 (OPEN-137): a shape plan's steps
+                // check their own start (the planner reads a worker inside
+                // his own Market as at `Workplace`, so a break's `BuyFood`
+                // there failed its symbols).
+                if !actions::can_start(world, id, kind, step.target) {
+                    return StepResult::Failed(FailReason::PreconditionLost);
+                }
+            } else if scripted {
                 // M16a (plan C13): a Contract step's own start check (and
                 // the Hit market's Commission, H9).
                 let ok = if goal == Some(crate::components::GoalKind::Pitch) {
@@ -1169,6 +1197,12 @@ fn arrive(world: &mut World, id: EntityId, target: GotoTarget, blocked_since: Op
     match target.building {
         Some(b) => {
             if world.comp::<Position>(id).is_some_and(|p| p.building == Some(b)) {
+                // The pre-view pass phase 2: across the room to the spot.
+                if target.dest == LocationKey::Station {
+                    if let Some(p) = world.comp_mut::<Position>(id) {
+                        p.tile = target.tile;
+                    }
+                }
                 return StepResult::Done;
             }
             if world.comp::<Building>(b).is_some_and(|bd| bd.is_full()) && !world.capacity_exempt(id, b) {
@@ -1308,6 +1342,8 @@ impl World {
             | LocationKey::Beat
             | LocationKey::Spot
             | LocationKey::Bin => None,
+            // The pre-view pass phase 2: a stations spot's building.
+            LocationKey::Station => target.filter(|&t| self.has::<Building>(t)),
         }
     }
 

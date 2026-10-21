@@ -195,6 +195,11 @@ pub fn committed(world: &World, id: EntityId, brain: &Brain, winner: GoalKind) -
     if brain.current_goal == Some(winner) || emergency(world, id, winner) {
         return false;
     }
+    // The pre-view pass phase 2 (OPEN-137): between a stations shift's
+    // shape plans the shift holds as its one block did.
+    if brain.plan.is_none() && brain.current_goal == Some(GoalKind::Work) && crate::systems::shift::holds(world, id) {
+        return true;
+    }
     let Some(plan) = brain.plan.as_ref() else { return false };
     if let ExecState::Use { kind, .. } = &brain.exec {
         if kind.is_work() && plan.goal == GoalKind::Work {
@@ -243,6 +248,8 @@ pub fn work_aborted(world: &mut World, id: EntityId, kind: ActionKind, started: 
     if job.role == Role::Guard {
         return;
     }
+    // The pre-view pass phase 2 (P5): a stations shift's span from its first block.
+    let started = crate::systems::shift::span_start(world, id, started);
     let key = job.shift_key_at(started);
     if job.last_shift_day == Some(key) {
         return;

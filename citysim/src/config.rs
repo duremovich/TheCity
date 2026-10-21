@@ -318,6 +318,64 @@ pub struct Config {
     /// checks it). Read with `[careers] enabled`; empty (not written) off.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub roles: std::collections::BTreeMap<String, RoleCfg>,
+    /// The pre-view pass phase 2 (docs/PREVIEW_PASS.md § 1, OPEN-137): the
+    /// visible shift's shapes (`systems/shift.rs`). `None` (not written into
+    /// a save) with `CITYSIM_STATIONS_OFF=1`: every shift the one block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shift: Option<ShiftCfg>,
+}
+
+/// The pre-view pass phase 2 (docs/PREVIEW_PASS.md § 0 P1): the shape a
+/// shift is worked in. Phases 3-6 append `haul`, `counter` (and work
+/// `round`/`fare` through `systems/shift.rs`).
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ShiftShape {
+    /// The one work block at the post, the shift's whole length (the old shift).
+    #[default]
+    Post,
+    /// § 1 P2: 2-`station_spots_max` spots inside the workplace, worked in
+    /// `station_block_min`..`station_block_max` minute blocks, one break.
+    /// Saved as `spots` (an off `[law] stations` city's save holds no
+    /// `station`); `stations` in the file.
+    #[serde(rename = "spots", alias = "stations")]
+    Stations,
+}
+
+/// The pre-view pass phase 2 `[shift]` (docs/PREVIEW_PASS.md § 1). Every
+/// value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ShiftCfg {
+    /// P2: a stations block's length in minutes (a trade row may override both).
+    // Saved as `block_min`, `block_max`, `spots_max`, `move_max` (an off
+    // `[law] stations` city's save holds no `station`); the file's names read.
+    #[serde(rename = "block_min", alias = "station_block_min")]
+    pub station_block_min: u16,
+    #[serde(rename = "block_max", alias = "station_block_max")]
+    pub station_block_max: u16,
+    /// P2: the most distinct spots a shift works (at least 2, at most the
+    /// workplace's interior tiles).
+    #[serde(rename = "spots_max", alias = "station_spots_max")]
+    pub station_spots_max: u8,
+    /// P2: the walk across the room between two spots, at most this many
+    /// minutes (the tiles at `[exec] move_ticks_full` otherwise).
+    #[serde(rename = "move_max", alias = "station_move_max")]
+    pub station_move_max: u16,
+    /// P7: the mid-shift break in minutes.
+    pub break_min: u16,
+    /// P7: the break's start, staggered per body per shift by up to this
+    /// many minutes either side of mid-shift.
+    pub break_stagger: u16,
+    /// P7: a hungry worker's meal break walks to a food venue at most this
+    /// many minutes away (one way); farther, the break is outside the door.
+    pub break_walk_max: u16,
+    /// P1: the shape of a trade whose `duty` is `post`.
+    pub trade_post: ShiftShape,
+    /// P1: the built-in roles' shapes, keyed by the `Role`'s name (absent:
+    /// `post`); `[shift.roles]` in the file, `role_shapes` in a save (an off
+    /// `[careers]` city's save holds no `roles:`).
+    #[serde(default, rename = "role_shapes", alias = "roles")]
+    pub roles: std::collections::BTreeMap<String, ShiftShape>,
 }
 
 /// Lives at work phase 6 `[careers]` (docs/LIVES_AT_WORK.md § 4.1-4.4).
@@ -2281,6 +2339,12 @@ impl Config {
                 out.push(format!("[roles] key {k:?} is not a Role"));
             }
         }
+        // The pre-view pass phase 2: a `[shift.roles]` key is a built-in role's name.
+        for k in self.shift.iter().flat_map(|s| s.roles.keys()) {
+            if !Role::ALL.iter().any(|r| format!("{r:?}") == *k) {
+                out.push(format!("[shift.roles] key {k:?} is not a Role"));
+            }
+        }
         out
     }
 }
@@ -2635,6 +2699,12 @@ pub struct TradeCfg {
     /// J14 (a `round` duty): the doors a shift's round visits.
     #[serde(default)]
     pub round_stops: u8,
+    /// The pre-view pass phase 2 (§ 1): this row's stations block in
+    /// minutes (0: `[shift] station_block_min` / `station_block_max`).
+    #[serde(default, skip_serializing_if = "is_zero_u16_cfg")]
+    pub station_block_min: u16,
+    #[serde(default, skip_serializing_if = "is_zero_u16_cfg")]
+    pub station_block_max: u16,
     /// Jobs & lives phase 1 (§ 1): the row exists only with `[jobs2]
     /// enabled` (`classpay::trade_live`); off, it posts nothing anywhere.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -4195,6 +4265,10 @@ pub struct PreviewOff {
     /// OPEN-142 off (`CITYSIM_IMPLANT_FIX_OFF=1`): an implant sale is checked
     /// only after the install's wait, and a lost sale is retried at once.
     pub implant_fix: bool,
+    /// The pre-view pass phase 2, OPEN-137 off (`CITYSIM_STATIONS_OFF=1`):
+    /// `[shift]` is dropped at load (`Config::shift` `None`), every shift
+    /// the one block at one tile.
+    pub stations: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -8239,6 +8313,11 @@ impl Config {
         // The pre-view pass phase 0's switches in flight.
         cfg.preview_off.idle_fix = std::env::var("CITYSIM_IDLE_FIX_OFF").is_ok_and(|v| v == "1");
         cfg.preview_off.implant_fix = std::env::var("CITYSIM_IMPLANT_FIX_OFF").is_ok_and(|v| v == "1");
+        // The pre-view pass phase 2 (OPEN-137): the shift shapes' switch.
+        cfg.preview_off.stations = std::env::var("CITYSIM_STATIONS_OFF").is_ok_and(|v| v == "1");
+        if cfg.preview_off.stations {
+            cfg.shift = None;
+        }
         // The earlier milestones' `CITYSIM_*_OFF` env switches retired in
         // the pre-view pass (OPEN-094); every section's config path stays
         // (`[hitmarket] enabled`, `[jobs2] enabled`, `[vice] chip` and the rest).
