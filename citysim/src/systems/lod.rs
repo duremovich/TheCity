@@ -1529,7 +1529,14 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
     {
         let tod = world.tick_of_day();
         let first = job.first_hour(tod);
-        if first {
+        if first && crate::systems::streetwork::haul_courier(world, id) {
+            // The pre-view pass phase 3 (OPEN-141, the mirror): a haul
+            // courier's own addresses, each handed over on the same presence
+            // rule a body's unload reads (`courier_stop`).
+            for b in crate::systems::streetwork::courier_addresses(world, id) {
+                crate::systems::streetwork::courier_stop(world, id, b);
+            }
+        } else if first {
             for b in crate::systems::trades::round_for(world, id, key) {
                 crate::systems::service::super_stop(world, id, b);
                 crate::systems::streetwork::courier_stop(world, id, b);

@@ -145,6 +145,8 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         }
         // The pre-view pass phase 2 (P7): the break, to `[shift] break_min`.
         ActionKind::Break => crate::systems::shift::break_ticks(world, id),
+        // The pre-view pass phase 3: a haul trip's unload, `[shift.haul] haul_handle_min`.
+        ActionKind::Unload => crate::systems::shift::unload_ticks(world),
         _ => 30,
     }
 }
@@ -249,6 +251,8 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         ActionKind::Wander => true,
         // The pre-view pass phase 2 (P7): the break is outside the door.
         ActionKind::Break => crate::systems::shift::can_break(world, id),
+        // The pre-view pass phase 3: inside the trip's destination.
+        ActionKind::Unload => target.is_some() && world.comp::<Position>(id).and_then(|p| p.building) == target,
         // L1: out on the street; office hours inside the HQ.
         ActionKind::Scavenge => world.comp::<Position>(id).is_some_and(|p| p.building.is_none()),
         ActionKind::Meeting => target.is_some() && world.comp::<Position>(id).and_then(|p| p.building) == target,
@@ -940,6 +944,11 @@ pub fn on_complete(
         }
         // The pre-view pass phase 2 (P7): back to the stations.
         ActionKind::Break => StepResult::Done,
+        // The pre-view pass phase 3: the load set down (a courier's parcels handed over).
+        ActionKind::Unload => {
+            crate::systems::shift::unloaded(world, id, target);
+            StepResult::Done
+        }
         // L2 L8: Parts into the Fab, then the shift's end.
         ActionKind::FabWork => {
             if let Some(fab) = world.comp::<Job>(id).and_then(|j| j.employer) {

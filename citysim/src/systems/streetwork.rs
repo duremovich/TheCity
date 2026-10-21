@@ -758,16 +758,67 @@ fn dawn_pick(world: &mut World) {
 
 /// A Yard's couriers (its `contract` staff on a `round` duty).
 fn couriers(world: &World, yard: EntityId) -> usize {
-    world
-        .staff_of(yard)
-        .iter()
-        .filter(|&&s| {
-            world
-                .comp::<Job>(s)
-                .and_then(|j| crate::systems::trades::row_of(world, j.role))
-                .is_some_and(|r| r.model == TradeModel::Contract && r.duty == TradeDuty::Round)
+    courier_staff(world, yard).count()
+}
+
+fn courier_staff(world: &World, yard: EntityId) -> impl Iterator<Item = EntityId> + '_ {
+    world.staff_of(yard).iter().copied().filter(move |&s| {
+        world
+            .comp::<Job>(s)
+            .and_then(|j| crate::systems::trades::row_of(world, j.role))
+            .is_some_and(|r| r.model == TradeModel::Contract && r.duty == TradeDuty::Round)
+    })
+}
+
+/// The pre-view pass phase 3 (OPEN-141): `courier` works his parcels as
+/// `haul` trips (a Freight Yard's courier whose row's shape is `haul`).
+pub fn haul_courier(world: &World, courier: EntityId) -> bool {
+    let Some(j) = world.comp::<Job>(courier) else { return false };
+    j.employer.and_then(|y| world.comp::<Building>(y)).is_some_and(|b| b.kind == BuildingKind::FreightYard)
+        && crate::systems::trades::on_round(world, courier)
+        && crate::systems::shift::shape_of(world, j.role) == crate::config::ShiftShape::Haul
+}
+
+/// The pre-view pass phase 3 (OPEN-141): a haul courier's addresses: the
+/// distinct buildings his Yard's pending parcels go to, each dealt to one
+/// of the Yard's couriers by a hash of the address (stable as parcels are
+/// handed over; the round's rank rotation wrapped, so a Statistical
+/// colleague's first-hour round took every parcel before a body's first
+/// leg arrived). Ascending; none off.
+pub fn courier_addresses(world: &World, courier: EntityId) -> Vec<EntityId> {
+    let Some(yard) = world.comp::<Job>(courier).and_then(|j| j.employer) else { return Vec::new() };
+    // The couriers working today (a rest day's addresses go to the others).
+    let staff: Vec<EntityId> = courier_staff(world, yard)
+        .filter(|&s| {
+            s == courier
+                || world
+                    .comp::<Job>(s)
+                    .is_some_and(|j| crate::exec::routine::workday_of(world, s, j, j.shift_key_at(world.tick)))
         })
-        .count()
+        .collect();
+    let Some(rank) = staff.iter().position(|&s| s == courier) else { return Vec::new() };
+    let n = staff.len() as u64;
+    let mut v: Vec<EntityId> = world
+        .jobs2
+        .parcels
+        .iter()
+        .filter(|p| p.yard == yard)
+        .map(|p| p.at)
+        .filter(|at| {
+            crate::rng::splitmix64(PURPOSE_PARCEL ^ u64::from(at.index) << 20 ^ u64::from(yard.index)) % n
+                == rank as u64
+        })
+        .collect();
+    v.sort();
+    v.dedup();
+    v
+}
+
+/// The pre-view pass phase 3 (OPEN-141): the parcels pending for `b` from
+/// `courier`'s Yard.
+pub fn parcels_for(world: &World, courier: EntityId, b: EntityId) -> usize {
+    let Some(yard) = world.comp::<Job>(courier).and_then(|j| j.employer) else { return 0 };
+    world.jobs2.parcels.iter().filter(|p| p.yard == yard && p.at == b).count()
 }
 
 /// Midnight: each corp with two or more standing buildings sends
@@ -779,6 +830,19 @@ fn couriers(world: &World, yard: EntityId) -> usize {
 fn parcels(world: &mut World) {
     let cfg = world.config.jobs2.clone();
     world.jobs2.parcel_stops.clear();
+    // The pre-view pass phase 3 (OPEN-141): a parcel left from an earlier
+    // day (its courier off, or its address on no round) goes back to the
+    // Yard at midnight; it lay pending for good before (2k seed 42 x 30:
+    // 4,320 sent, 952 handed over, 172 returned).
+    if crate::systems::shift::haul_on(world) {
+        let today = world.day();
+        let before = world.jobs2.parcels.len();
+        world.jobs2.parcels.retain(|p| p.day >= today);
+        let back = (before - world.jobs2.parcels.len()) as u32;
+        if back > 0 {
+            ownership::jobs2_row(world).parcels_returned += back;
+        }
+    }
     let yards: Vec<EntityId> = world
         .buildings_of_kind(BuildingKind::FreightYard)
         .iter()
@@ -912,7 +976,12 @@ pub fn parcels_back(world: &mut World, courier: EntityId) {
     if !crate::systems::trades::on_round(world, courier) {
         return;
     }
-    let route = crate::systems::trades::round_for(world, courier, job.shift_key_at(world.tick));
+    // The pre-view pass phase 3 (OPEN-141): a haul courier's own addresses.
+    let route = if haul_courier(world, courier) {
+        courier_addresses(world, courier)
+    } else {
+        crate::systems::trades::round_for(world, courier, job.shift_key_at(world.tick))
+    };
     let before = world.jobs2.parcels.len();
     world.jobs2.parcels.retain(|p| p.yard != yard || !route.contains(&p.at));
     let back = (before - world.jobs2.parcels.len()) as u32;

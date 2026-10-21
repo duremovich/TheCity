@@ -1086,7 +1086,13 @@ mod lives_street {
     /// and at the courier's shift end it goes back to the Yard.
     #[test]
     fn test_parcel_delivered_to_a_present_recipient_and_returned_otherwise() {
-        let mut w = city_with(|_| {});
+        // The round courier this test was written for (the pre-view pass
+        // phase 3 works the courier as `haul`: tests/shift.rs).
+        let mut w = city_with(|c| {
+            for t in c.trades.iter_mut().filter(|t| t.id == "courier") {
+                t.shape = None;
+            }
+        });
         let (yard, courier) = yard_and_courier(&w);
         w.jobs2.parcels.clear();
         let (b, r) = staffed_with_present(&mut w, yard);

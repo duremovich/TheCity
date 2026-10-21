@@ -2504,6 +2504,14 @@ pub struct ShiftState {
     pub worked: u8,
     /// The break was a meal (the device row).
     pub meal: bool,
+    /// The pre-view pass phase 3 (`haul`): the shift's destinations, turned
+    /// through trip by trip (empty: the trips run inside the post, from the
+    /// stock tile to `spots[1..]`). Not written while empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dests: Vec<crate::entity::EntityId>,
+    /// The pre-view pass phase 3 (`haul`): trips unloaded this shift.
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub trips: u16,
 }
 
 fn is_zero_u64(v: &u64) -> bool {

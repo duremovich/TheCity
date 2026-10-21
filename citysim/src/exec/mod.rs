@@ -1199,8 +1199,31 @@ fn arrive(world: &mut World, id: EntityId, target: GotoTarget, blocked_since: Op
             if world.comp::<Position>(id).is_some_and(|p| p.building == Some(b)) {
                 // The pre-view pass phase 2: across the room to the spot.
                 if target.dest == LocationKey::Station {
+                    // The pre-view pass phase 3: a spot another occupant
+                    // stands on (the night crew's one stock tile) gives the
+                    // nearest free interior tile (one body a tile).
+                    let mut tile = target.tile;
+                    if crate::systems::shift::haul_on(world) {
+                        if let Some(bd) = world.comp::<Building>(b) {
+                            let taken: Vec<TilePos> = bd
+                                .occupants
+                                .iter()
+                                .filter(|&&o| o != id)
+                                .filter_map(|&o| world.comp::<Position>(o).map(|p| p.tile))
+                                .collect();
+                            if taken.contains(&tile) {
+                                if let Some(t) = bd
+                                    .interior()
+                                    .filter(|t| !taken.contains(t) && world.map.walkable(*t))
+                                    .min_by_key(|&t| (t.manhattan(target.tile), t))
+                                {
+                                    tile = t;
+                                }
+                            }
+                        }
+                    }
                     if let Some(p) = world.comp_mut::<Position>(id) {
-                        p.tile = target.tile;
+                        p.tile = tile;
                     }
                 }
                 return StepResult::Done;

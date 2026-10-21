@@ -62,6 +62,48 @@ over the span from the first block, a pro-rata cut read over the same span. A sh
 (`actions::can_start`): the planner reads a worker inside his own Market as at `Workplace`. **Statistical mirror:**
 none: a Statistical body is off camera (OPEN-149) and has no plan; it keeps the one block and the same pay.
 
+**`haul` and `counter` as built (phase 3, `systems/shift.rs`, `[shift.haul]`, `[shift.counter]`; OPEN-121, 141,
+145).** Deviation from P1's `duty = "haul"`: a trade row names its shape in a new `shape` key and keeps its `duty`
+(the courier's and builder's `round` and the day labourer's `corner` carry their hiring and their Statistical
+path; the off switch clears `shape`, so the off save is main's byte for byte). `haul`: night stocker, loader,
+driver, depot hand, builder (its round of open sites becomes loads carried to them: truer than a door-touch,
+and nothing builds from the round), courier, day labourer. A haul shift is one shape plan per trip: to the post
+if out, `GoTo(Station)` to the stock tile (the interior tile nearest the door), the role's work action for
+`haul_handle_min` (the load; a block, no wage), the carry (`GoTo(TargetHome)` to the destination, or
+`GoTo(Station)` to a drop tile inside the post when it has none), and a new `ActionKind::Unload` there (P4: a work
+block would lie, the body is not at its post) for `haul_handle_min`; the next call walks back. Destinations
+(`haul_dests`): a Construction Yard's open sites, a Freight Yard's, Farm's or Warehouse's nearest staffed
+workplaces (not Homes) within `haul_reach` tiles, `haul_dests_max` of them (deviation: Markets and Warehouses
+only gave the 2k Yard none, its nearest Market is 56 tiles off); a Market's night stocker hauls inside. No trip
+starts that would end (its estimate a quarter over the doors' distance) within `haul_cutoff_min` of the shift's
+end: the rest is one block at the stock tile to the end, which closes and pays the shift as before (P5). The P7
+break applies at mid-shift. The `drive` trades claim the post's fleet truck when one is parked there
+(`vehicles::claim_haul`); otherwise the GoTo takes whatever vehicle it finds. **The courier (OPEN-141).** Root
+cause: the Yard's Statistical couriers walk their rounds world-side at the shift's first hour (`lod::stat_work`),
+and the rank rotation of `new_round` wraps over the Yard's few distinct stops, so they handed over every parcel
+at 09:00 before a body's first leg arrived (36 of 36 Full rounds, 0 handed). Now each address goes to one courier
+(`courier_addresses`, a hash of the address over the Yard's couriers); a parcel is a load carried to it and
+handed over at the `Unload` only to the addressee or a staff member present (P3, `courier_stop`), else it stays
+(`parcels_missed`), is tried once more, and goes back at the shift's end; a courier with none left works the
+Yard's floor (a round with no parcel does not run). A parcel left from an earlier day goes back at midnight (it
+lay pending for good). **`counter`**: bouncer (the door tile: the interior tile nearest the door), barkeep, madam,
+brothel worker (the tile farthest from the door), and the built-in Cook and Bartender (`[shift.counter] roles`).
+It is the stations plan with one spot and each half one block; the break only while another counter body
+covers the post. **Served as they arrive (OPEN-145):** a body's visit was already settled per arrival
+(`service::arrive`); the 21:00 batch was the Statistical evening, served by whoever was on at 21:00, so a day cook
+served no off-screen customer. A Statistical visit to a venue with a counter body (a Full or Coarse counter
+staffer) is now drawn (purpose-keyed: the agent, the venue, the day, the ordinal) into a `counter_settle_window`
+slot of the next 24 hours inside the bodies' shifts (`World.counter_due`, saved) and paid and served then; a
+venue with no counter body keeps the 21:00 evening (the off-screen economy as before). **The door (OPEN-121):**
+the patron's pick read the bouncer's verdict (`door_ok`'s Club heat rule) from across the city, so nobody ever
+reached a door that would refuse him. With `[shift.counter]` on the pick reads `door_seen` (the Club's door open
+unless it turned him away within `[exec] refused_ticks`), and the verdict is made at the door (`door_ok` at the
+venue step's start: `service::refused`, which now sets `Brain.refused`). **Statistical mirror:** the movement none
+(off camera, no plan; one block, same pay). Parcels: the Statistical courier hands over his own addresses at his
+shift's first hour on the same presence rule. Door refusals: the off-screen visit meets the same door at
+`stat_visit` (picked by `door_seen`, refused by `door_ok`). Served customers: the drawn slot above, by
+construction the same `arrive`. Haul loads have no output to mirror (P5).
+
 ## 2. The bugs (rows 2-7)
 
 | row | OPEN | the fix | anchor |

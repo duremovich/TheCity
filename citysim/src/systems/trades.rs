@@ -291,6 +291,10 @@ pub fn capacity_exempt(world: &World, agent: EntityId, b: EntityId) -> bool {
     if j.employer == Some(b) {
         return true;
     }
+    // The pre-view pass phase 3: a haul trip's destination takes its load.
+    if world.comp::<Brain>(agent).and_then(|br| br.shift.as_deref()).is_some_and(|s| s.dests.contains(&b)) {
+        return true;
+    }
     job_row(world, agent).is_some_and(|r| r.duty == TradeDuty::Round)
         && world.comp::<Brain>(agent).is_some_and(|br| br.patrol_route.contains(&b))
 }
@@ -406,6 +410,11 @@ pub fn round_plan(world: &mut World, id: EntityId) -> Option<Plan> {
         let j = world.comp::<Job>(id)?;
         row_of(world, j.role).filter(|r| r.duty == TradeDuty::Round)?;
         if j.employer.is_none() || !j.on_shift(world.tick_of_day()) {
+            return None;
+        }
+        // The pre-view pass phase 3: a round worked as hauls (the courier's
+        // parcels, the builder's loads to his sites) is `shift::plan`'s.
+        if crate::systems::shift::shape_of(world, j.role) == crate::config::ShiftShape::Haul {
             return None;
         }
         // Review fix: the last `ROUND_CUTOFF` of the shift belongs to the

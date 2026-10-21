@@ -56,15 +56,40 @@ pub fn on(world: &World) -> bool {
     world.config.shift.is_some()
 }
 
-/// P1: the shape `role`'s shift is worked in (`post` with `[shift]` off).
+/// The pre-view pass phase 3: `[shift.haul]` is on (not `CITYSIM_HAUL_COUNTER_OFF`).
+pub fn haul_on(world: &World) -> bool {
+    world.config.shift.as_ref().is_some_and(|c| c.haul.is_some())
+}
+
+/// The pre-view pass phase 3: `[shift.counter]` is on (not `CITYSIM_HAUL_COUNTER_OFF`).
+pub fn counter_on(world: &World) -> bool {
+    world.config.shift.as_ref().is_some_and(|c| c.counter.is_some())
+}
+
+/// P1: the shape `role`'s shift is worked in (`post` with `[shift]` off):
+/// a trade row's `shape` (phase 3: `haul`, `counter`, live with their
+/// section), else its duty's (`post` as `trade_post`); a built-in role in
+/// `[shift.counter] roles` the counter, else its `[shift.roles]` key.
 pub fn shape_of(world: &World, role: Role) -> ShiftShape {
     let Some(cfg) = world.config.shift.as_ref() else { return ShiftShape::Post };
+    let live = |s: ShiftShape| match s {
+        ShiftShape::Haul => cfg.haul.is_some(),
+        ShiftShape::Counter => cfg.counter.is_some(),
+        _ => true,
+    };
     match role {
-        Role::Trade(_) => match crate::systems::trades::row_of(world, role).map(|r| r.duty) {
-            Some(TradeDuty::Post) => cfg.trade_post,
+        Role::Trade(_) => match crate::systems::trades::row_of(world, role) {
+            Some(r) if r.shape.is_some_and(live) => r.shape.unwrap_or_default(),
+            Some(r) if r.duty == TradeDuty::Post => cfg.trade_post,
             _ => ShiftShape::Post,
         },
-        r => cfg.roles.get(&format!("{r:?}")).copied().unwrap_or_default(),
+        r => {
+            let name = format!("{r:?}");
+            if cfg.counter.as_ref().is_some_and(|c| c.roles.contains(&name)) {
+                return ShiftShape::Counter;
+            }
+            cfg.roles.get(&name).copied().unwrap_or_default()
+        }
     }
 }
 
@@ -158,12 +183,264 @@ pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
         (shape, post, key, job.shift_end(world.tick)?, segment_start(job, world.tick)?, job.role)
     };
     match shape {
-        ShiftShape::Stations => stations_plan(world, id, post, key, start, end, role),
+        ShiftShape::Stations => stations_plan(world, id, post, key, start, end, role, false),
+        ShiftShape::Counter => stations_plan(world, id, post, key, start, end, role, true),
+        ShiftShape::Haul => haul_plan(world, id, post, key, start, end, role),
         ShiftShape::Post => None,
     }
 }
 
-/// P2, P7: the stations shift's next part (§ 1).
+/// The pre-view pass phase 3 (`counter`): the tile `role` stands at `post`:
+/// a door keeper (a fighting trade: the bouncer) the interior tile nearest
+/// the door, anyone else the one farthest from it (behind the counter);
+/// ties by tile. `None` with no walkable interior tile.
+fn counter_tile(world: &World, post: EntityId, role: Role) -> Option<TilePos> {
+    let bd = world.comp::<Building>(post)?;
+    let door = bd.door;
+    let keeper =
+        crate::systems::trades::row_of(world, role).is_some_and(|r| r.skill == crate::config::TradeSkill::Fighting);
+    let tiles = bd.interior().filter(|&t| world.map.walkable(t));
+    if keeper {
+        tiles.min_by_key(|&t| (t.manhattan(door), t))
+    } else {
+        tiles.max_by_key(|&t| (t.manhattan(door), std::cmp::Reverse(t)))
+    }
+}
+
+/// P7 for the haul and the counter: the break's tick of `id`'s shift `key`
+/// (mid-shift, staggered per body per shift by up to `break_stagger`).
+fn break_mid(world: &World, id: EntityId, key: i64, start: Tick, end: Tick) -> Tick {
+    let stagger = world.config.shift.as_ref().map_or(0, |c| c.break_stagger);
+    let half = end.saturating_sub(start) / 2;
+    let s = i64::from(stagger).min(half as i64 / 2);
+    let jitter = if s > 0 { draw(world, id, key, PURPOSE_BREAK, 0).random_range(-s..=s) } else { 0 };
+    (start + half).saturating_add_signed(jitter)
+}
+
+/// The pre-view pass phase 3 (`haul`): the stock tile (the interior tile
+/// nearest the door, where loads are made up) and the drop tiles of an
+/// in-building trip (up to `station_spots_max - 1` more, keyed per body per
+/// shift): the stock tile first.
+fn haul_spots(world: &World, id: EntityId, post: EntityId, key: i64) -> Vec<TilePos> {
+    let Some(bd) = world.comp::<Building>(post) else { return Vec::new() };
+    let door = bd.door;
+    let mut tiles: Vec<TilePos> = bd.interior().filter(|&t| world.map.walkable(t)).collect();
+    tiles.sort_by_key(|&t| (t.manhattan(door), t));
+    if tiles.is_empty() {
+        return tiles;
+    }
+    let stock = tiles.remove(0);
+    let max = world.config.shift.as_ref().map_or(2, |c| usize::from(c.station_spots_max.max(2))) - 1;
+    let mut r = draw(world, id, key, PURPOSE_SPOTS, 1);
+    let n = max.min(tiles.len());
+    for i in 0..n {
+        let j = r.random_range(i..tiles.len());
+        tiles.swap(i, j);
+    }
+    tiles.truncate(n);
+    let mut out = vec![stock];
+    out.extend(tiles);
+    out
+}
+
+/// The pre-view pass phase 3 (`haul`): the shift's destinations: a
+/// courier's addresses (his share of the Yard's parcels, OPEN-141); a
+/// Construction Yard's open sites in `haul_reach`; a Freight Yard's, a
+/// Farm's or a Warehouse's nearest standing staffed workplaces (not a Home,
+/// not the post) in reach; nearest first, `haul_dests_max` (the courier's all).
+/// None (a Market's night stocker; no parcel; nothing in reach): the trips
+/// run inside the post.
+pub fn haul_dests(world: &World, id: EntityId, post: EntityId) -> Vec<EntityId> {
+    let Some(hc) = world.config.shift.as_ref().and_then(|c| c.haul.as_ref()) else { return Vec::new() };
+    let Some(bd) = world.comp::<Building>(post) else { return Vec::new() };
+    let door = bd.door;
+    if crate::systems::streetwork::haul_courier(world, id) {
+        return crate::systems::streetwork::courier_addresses(world, id);
+    }
+    let cands: Vec<EntityId> = match bd.kind {
+        BuildingKind::ConstructionYard => crate::systems::industry::sites_of(world, post),
+        // The goods go where people work: the staffed workplaces (not Homes)
+        // in reach (2k: the Yard's nearest Market is 56 tiles off).
+        BuildingKind::FreightYard | BuildingKind::Farm | BuildingKind::Warehouse => world
+            .buildings_by_kind
+            .iter()
+            .filter(|(k, _)| **k != BuildingKind::Home)
+            .flat_map(|(_, v)| v.iter().copied())
+            .filter(|&b| b != post && !world.staff_of(b).is_empty())
+            .filter(|&b| world.comp::<Building>(b).is_some_and(|x| !x.demolished && !x.derelict))
+            .collect(),
+        _ => Vec::new(),
+    };
+    let mut near: Vec<(u32, EntityId)> = cands
+        .into_iter()
+        .filter_map(|b| world.comp::<Building>(b).map(|x| (x.door.manhattan(door), b)))
+        .filter(|&(d, _)| d <= hc.haul_reach)
+        .collect();
+    near.sort_unstable();
+    near.into_iter().take(usize::from(hc.haul_dests_max)).map(|(_, b)| b).collect()
+}
+
+/// The pre-view pass phase 3 (`haul`, § 1): the haul shift's next part:
+/// a trip (load at the stock tile, carry, unload, the next call walks
+/// back), the break at mid-shift (P7), or, when no trip fits before
+/// `haul_cutoff_min` of the shift's end (or a courier has no parcel left
+/// to try), the close at the post's stock tile to the shift's end (paid).
+fn haul_plan(
+    world: &mut World,
+    id: EntityId,
+    post: EntityId,
+    key: i64,
+    start: Tick,
+    end: Tick,
+    _role: Role,
+) -> Option<Plan> {
+    let now = world.tick;
+    let (handle, cutoff, break_min) = {
+        let c = world.config.shift.as_ref()?;
+        let h = c.haul.as_ref()?;
+        (Tick::from(h.haul_handle_min.max(1)), Tick::from(h.haul_cutoff_min), Tick::from(c.break_min))
+    };
+    let fresh = world.comp::<Brain>(id)?.shift.as_ref().is_none_or(|s| s.key != key);
+    if fresh {
+        let spots = haul_spots(world, id, post, key);
+        let dests = haul_dests(world, id, post);
+        if spots.is_empty() || (dests.is_empty() && spots.len() < 2) {
+            return None;
+        }
+        let st = ShiftState { key, spots, dests, from: now, ..ShiftState::default() };
+        world.comp_mut::<Brain>(id)?.shift = Some(Box::new(st));
+    }
+    let mid = break_mid(world, id, key, start, end);
+    let stage = world.comp::<Brain>(id)?.shift.as_ref()?.stage;
+    // P7: the break once the first half is worked, if the shift has room.
+    if stage == 0 && !fresh && now >= mid && end.saturating_sub(now) >= break_min + cutoff {
+        let (steps, meal) = break_steps(world, id, post);
+        let s = world.comp_mut::<Brain>(id)?.shift.as_mut()?;
+        s.stage = 1;
+        s.meal = meal;
+        s.blocks.clear();
+        s.plan_tick = now;
+        crate::systems::ownership::jobs2_row(world).shift_breaks += 1;
+        return Some(Plan { goal: GoalKind::Work, target: Some(post), steps, started_tick: now });
+    }
+    // Before the break, the first half; after it (or past mid-shift with
+    // no room for it, or come on after mid-shift), the second.
+    let next_stage = if stage == 0 && now < mid { 0 } else { 2 };
+    let job = world.comp::<Job>(id)?.clone();
+    let pos = world.comp::<Position>(id)?.clone();
+    let post_door = world.comp::<Building>(post)?.door;
+    let inside = pos.building == Some(post);
+    let (spots, dests, drawn) = {
+        let s = world.comp::<Brain>(id)?.shift.as_ref()?;
+        (s.spots.clone(), s.dests.clone(), s.drawn)
+    };
+    let courier = crate::systems::streetwork::haul_courier(world, id);
+    // The trip's destination: the next of the shift's (a courier's next
+    // address with a parcel still pending, each tried twice at most), else
+    // a drop tile inside the post (a courier with his parcels done works
+    // the Yard's floor).
+    let inside_trip = || {
+        (spots.len() >= 2).then(|| {
+            let n = (spots.len() - 1) as u8;
+            (post, spots.get(1 + usize::from(drawn % n)).copied(), drawn.wrapping_add(1))
+        })
+    };
+    let dest: Option<(EntityId, Option<TilePos>, u8)> = if dests.is_empty() {
+        inside_trip()
+    } else if courier {
+        let n = dests.len();
+        (usize::from(drawn)..2 * n)
+            .find(|&k| crate::systems::streetwork::parcels_for(world, id, dests[k % n]) > 0)
+            .map(|k| (dests[k % n], None, u8::try_from(k + 1).unwrap_or(u8::MAX)))
+            .or_else(inside_trip)
+    } else {
+        Some((dests[usize::from(drawn) % dests.len()], None, drawn.wrapping_add(1)))
+    };
+    // The trip's estimate: to the post (when out), the load, the carry out
+    // and back, the unload.
+    let mt = world.config.exec.move_ticks_full.max(1);
+    let back = if inside { 0 } else { crate::systems::fixes::walk_estimate(world, id, post_door) };
+    let trip = dest.map(|(b, _, _)| {
+        let d = world.comp::<Building>(b).map_or(0, |x| Tick::from(x.door.manhattan(post_door)) * mt);
+        // A quarter over: a street walk is longer than the doors' distance.
+        (back + 2 * handle + 2 * d) * 5 / 4
+    });
+    let close = match trip {
+        Some(t) => now + t + cutoff > end,
+        None => true,
+    };
+    let mut steps = Vec::new();
+    if !inside {
+        steps.push(step(ActionKind::GoTo(routine::workplace_key_for(world, id, &job)), Some(post), None));
+    }
+    steps.push(step(ActionKind::GoTo(LocationKey::Station), Some(post), Some(spots[0])));
+    let work = routine::work_action(world, job.role);
+    let mut blocks = Vec::new();
+    let mut new_drawn = drawn;
+    if close {
+        // The rest of the shift at the post (closed and paid at its end).
+        steps.push(step(work, Some(post), None));
+        blocks.push(0);
+    } else if let Some((b, tile, k)) = dest {
+        steps.push(step(work, Some(post), None));
+        blocks.push(u16::try_from(handle).unwrap_or(u16::MAX));
+        if b == post {
+            steps.push(step(ActionKind::GoTo(LocationKey::Station), Some(post), tile));
+        } else {
+            // A driving trade takes the post's fleet truck (the GoTo drives
+            // a vehicle it holds, `vehicles::vehicle_for_trip`).
+            let drives = crate::systems::trades::row_of(world, job.role).is_some_and(|r| {
+                world.config.shift.as_ref().and_then(|c| c.haul.as_ref()).is_some_and(|h| h.drive.contains(&r.id))
+            });
+            if drives && inside && crate::systems::vehicles::fleet_vehicle_at(world, post).is_some() {
+                crate::systems::vehicles::claim_haul(world, id, post);
+            }
+            steps.push(step(ActionKind::GoTo(LocationKey::TargetHome), Some(b), None));
+        }
+        steps.push(step(ActionKind::Unload, Some(b), None));
+        new_drawn = k;
+    }
+    let s = world.comp_mut::<Brain>(id)?.shift.as_mut()?;
+    s.stage = if close { 2 } else { next_stage };
+    s.drawn = new_drawn;
+    s.blocks = blocks;
+    s.plan_tick = now;
+    Some(Plan { goal: GoalKind::Work, target: Some(post), steps, started_tick: now })
+}
+
+/// `exec::actions::duration` of an `Unload`: `[shift.haul] haul_handle_min`.
+pub fn unload_ticks(world: &World) -> Tick {
+    world.config.shift.as_ref().and_then(|c| c.haul.as_ref()).map_or(1, |h| Tick::from(h.haul_handle_min.max(1)))
+}
+
+/// `exec::actions::on_complete` of an `Unload` at `target`: the trip's
+/// device rows; a courier's parcels for the address handed over to whoever
+/// is there to sign (P3, `streetwork::courier_stop`), else they stay
+/// (`parcels_missed`: narrated off screen, back at the shift's end).
+pub fn unloaded(world: &mut World, id: EntityId, target: Option<EntityId>) {
+    let Some(b) = target else { return };
+    let load = world.config.shift.as_ref().and_then(|c| c.haul.as_ref()).map_or(0, |h| u32::from(h.haul_load));
+    let post = world.comp::<Job>(id).and_then(|j| j.employer);
+    if let Some(s) = world.comp_mut::<Brain>(id).and_then(|br| br.shift.as_mut()) {
+        s.trips = s.trips.saturating_add(1);
+    }
+    if crate::systems::streetwork::haul_courier(world, id) && Some(b) != post {
+        let before = crate::systems::streetwork::parcels_for(world, id, b);
+        crate::systems::streetwork::courier_stop(world, id, b);
+        if before > 0 && crate::systems::streetwork::parcels_for(world, id, b) == before {
+            crate::systems::ownership::jobs2_row(world).parcels_missed += 1;
+        }
+    }
+    let row = crate::systems::ownership::jobs2_row(world);
+    row.haul_trips += 1;
+    row.haul_units += load;
+    row.haul_away += u32::from(Some(b) != post);
+}
+
+/// P2, P7: the stations shift's next part (§ 1). The pre-view pass phase 3
+/// (`counter`): one spot, the counter tile (`counter_tile`), each half one
+/// block; the break only while another counter body covers the post.
+#[allow(clippy::too_many_arguments)]
 fn stations_plan(
     world: &mut World,
     id: EntityId,
@@ -172,15 +449,21 @@ fn stations_plan(
     start: Tick,
     end: Tick,
     role: Role,
+    counter: bool,
 ) -> Option<Plan> {
     let now = world.tick;
     let (spots_max, break_min, stagger) =
         world.config.shift.as_ref().map(|c| (c.station_spots_max, c.break_min, c.break_stagger))?;
     let (bmin, bmax) = block_bounds(world, role);
+    let bmax = if counter { Tick::MAX / 4 } else { bmax };
     let fresh = world.comp::<Brain>(id)?.shift.as_ref().is_none_or(|s| s.key != key);
     if fresh {
-        let spots = draw_spots(world, id, post, key, spots_max);
-        if spots.len() < 2 {
+        let spots = if counter {
+            counter_tile(world, post, role).into_iter().collect()
+        } else {
+            draw_spots(world, id, post, key, spots_max)
+        };
+        if spots.len() < if counter { 1 } else { 2 } {
             return None;
         }
         let st = ShiftState { key, spots, from: now, ..ShiftState::default() };
@@ -215,7 +498,7 @@ fn stations_plan(
     // `fixes::staff_present`) is minded: its last doctor on shift inside
     // keeps it through the break (taken alone, 2k AssetBought -14 % and
     // fewer Ripperdocs and Orderlies employed).
-    if next == 1 && !covered(world, id, post) {
+    if next == 1 && !covered(world, id, post, counter) {
         next = 2;
     }
     // P7: a server does not walk out on a customer mid-procedure (an
@@ -295,15 +578,19 @@ fn stations_plan(
 /// P7: `post` stays open while `id` is on the break: it is no seller that
 /// needs its staff inside (`assets::seller_open`'s Clinic rule), or another
 /// of `id`'s role is on shift inside it.
-fn covered(world: &World, id: EntityId, post: EntityId) -> bool {
-    if world.comp::<Building>(post).is_none_or(|b| b.kind != BuildingKind::Clinic) {
+/// The pre-view pass phase 3 (`counter`): a counter is covered by another
+/// counter body of the post (any counter role) on shift inside it.
+fn covered(world: &World, id: EntityId, post: EntityId, counter: bool) -> bool {
+    if !counter && world.comp::<Building>(post).is_none_or(|b| b.kind != BuildingKind::Clinic) {
         return true;
     }
     let tod = world.tick_of_day();
     let Some(role) = world.comp::<Job>(id).map(|j| j.role) else { return false };
     world.staff_of(post).iter().any(|&s| {
         s != id
-            && world.comp::<Job>(s).is_some_and(|j| j.role == role && j.on_shift(tod))
+            && world.comp::<Job>(s).is_some_and(|j| {
+                j.on_shift(tod) && if counter { shape_of(world, j.role) == ShiftShape::Counter } else { j.role == role }
+            })
             && world.comp::<Position>(s).is_some_and(|p| p.building == Some(post))
     })
 }
@@ -490,8 +777,13 @@ pub fn shift_closed(world: &mut World, id: EntityId) {
     else {
         return;
     };
+    let shape = world.comp::<Job>(id).map_or(ShiftShape::Post, |j| shape_of(world, j.role));
     let row = crate::systems::ownership::jobs2_row(world);
-    row.shift_stations += 1;
+    match shape {
+        ShiftShape::Haul => row.haul_shifts += 1,
+        ShiftShape::Counter => row.counter_shifts += 1,
+        _ => row.shift_stations += 1,
+    }
     row.shift_tiles += tiles;
     row.shift_break_meals += u32::from(meal);
     row.shift_block_max = row.shift_block_max.max(u32::from(longest));

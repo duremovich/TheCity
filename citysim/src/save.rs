@@ -249,7 +249,14 @@ use crate::world::World;
 /// non-zero), the `Jobs2Cols` `shift_*` columns (serde defaults) and the
 /// `GoTo(Station)` / `Break` steps. An off save is byte-identical to
 /// version 46's.
-pub const SAVE_VERSION: u8 = 47;
+/// 48 (the pre-view pass phase 3, OPEN-121, OPEN-141, OPEN-145): `[shift.haul]`,
+/// `[shift.counter]` and the trade rows' `shape` (written only on), the
+/// `ShiftShape` `haul` and `counter`, `ShiftState.dests` / `trips` (written
+/// while set), `World.counter_due` (written only when non-empty), the
+/// `Unload` step and the `Jobs2Cols` `haul_*`, `counter_*`, `served_day`,
+/// `served_21h`, `parcels_missed` columns (serde defaults). An off save is
+/// byte-identical to version 47's.
+pub const SAVE_VERSION: u8 = 48;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
