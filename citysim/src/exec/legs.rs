@@ -2,8 +2,10 @@
 //! legs"; OPEN-139): a long walking `GoTo` walks in segments.
 //!
 //! A Full or Coarse `GoTo` that walks (no vehicle, no cab, no El) farther
-//! than `[legs] leg_replan_tiles` walks to a segment end first: the Road
-//! tile nearest the point that far along the straight line to the target.
+//! than `[legs] leg_replan_tiles` walks to a segment end first: a Full
+//! body's is that many steps along its own route (`exec::full_segment`), a
+//! Coarse body's the Road tile nearest the point that far along the
+//! straight line to the target ([`segment_end`]).
 //! There the step re-starts from where the body stands (`exec::start_step`
 //! again: the cab, the El and the next segment re-checked), so a Coarse
 //! body is seen en route a segment at a time instead of frozen at its door

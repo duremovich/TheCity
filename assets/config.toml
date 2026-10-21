@@ -4327,7 +4327,8 @@ leg_replan_tiles = 40              # a Full or Coarse walking GoTo past this (Ma
                                    # move_ticks_full 2) walks in segments of this length; each end re-plans the rest
                                    # (the cab, the El, the next segment): the body is seen en route, never frozen at
                                    # its door for the whole leg (V6 corp 1: a CEO still 724 min at home)
-segment_snap = 6                   # a segment's end snaps to a walkable Road tile within this radius (none: one leg)
+segment_snap = 6                   # a Coarse segment's end snaps to a walkable Road tile within this radius (none: one leg);
+                                   # a Full one ends leg_replan_tiles steps along its own route
 escort_walk_tiles = 40             # P12: an escort walks, at walking speed, up to this; past it the guard calls the van
 van_call_ticks = 15                # P12: the van reaches the arrest this long after the call, then drives guard and
                                    # suspect at the Car's speed ([vehicles] mult)

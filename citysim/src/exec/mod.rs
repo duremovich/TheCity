@@ -1087,15 +1087,53 @@ fn fare_segment(world: &mut World, id: EntityId, target: &GotoTarget) -> Option<
 /// `World::segments` against the plan step. `None`: one leg as before.
 fn segment(world: &mut World, id: EntityId, target: &GotoTarget, lod: Lod) -> Option<ExecState> {
     let from = walk_origin(world, id)?;
-    let end = legs::segment_end(world, from, target.tile)?;
     let key = legs::plan_key(world, id)?;
-    let leg = GotoTarget { dest: LocationKey::Street, tile: end, building: None };
-    let state = match lod {
-        Lod::Full => walking_goto(world, id, leg)?,
-        _ => timed_goto(world, id, leg),
+    let state = if lod == Lod::Full && !world.config.exec.straight_line_paths {
+        full_segment(world, from, target)?
+    } else {
+        let end = legs::segment_end(world, from, target.tile)?;
+        timed_goto(world, id, GotoTarget { dest: LocationKey::Street, tile: end, building: None })
     };
     world.segments.insert(id, key);
     Some(state)
+}
+
+/// A Full walk's segment follows the walk's own route: the tile `[legs]
+/// leg_replan_tiles` steps along the path the one leg would take (the
+/// door's flow field, the big map's A*, a street target's A*), so the body
+/// walks the streets it walked before, re-checking its ride at each end.
+/// The straight line's Road snap took the walker off its route: a guard's
+/// patrol leg left the street its beat passed down, and the thief that
+/// beat sighted was never seen again (`law::test_theft_witnessed…`).
+/// `None`: the route is no longer than a segment, or there is none.
+fn full_segment(world: &mut World, from: TilePos, target: &GotoTarget) -> Option<ExecState> {
+    let len = world.config.legs.as_ref()?.leg_replan_tiles.max(1) as usize;
+    let route: Vec<TilePos> = match target.building {
+        Some(b) if !world.big_paths() => {
+            let door = world.comp::<Building>(b)?.door;
+            let mut route = Vec::with_capacity(len + 1);
+            let mut here = from;
+            while route.len() <= len && here != door {
+                here = world.flow_step(b, here)?;
+                route.push(here);
+            }
+            route
+        }
+        Some(b) => {
+            let door = world.comp::<Building>(b)?.door;
+            world.big_path(from, door)?
+        }
+        None if world.big_paths() => world.big_path(from, target.tile)?,
+        None => pathfind::astar(&world.map, from, target.tile, world.config.exec.astar_max_expansions)?,
+    };
+    if route.len() <= len {
+        return None;
+    }
+    let end = route[len - 1];
+    let mut path = route[..len].to_vec();
+    path.reverse();
+    let leg = GotoTarget { dest: LocationKey::Street, tile: end, building: None };
+    Some(ExecState::Goto { target: leg, path, next_move_tick: world.tick, blocked_since: None, carry_q: 0 })
 }
 
 /// A Coarse Goto: arrive after Manhattan distance × move ticks; M12 D18: ×

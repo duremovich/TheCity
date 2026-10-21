@@ -188,9 +188,13 @@ fare) and 48 % as `NoRoute` (the board and alight shortlists on lines that never
 share no tile, and the access walk to the nearest stop was a median 100 tiles); the fare 3 %. Two lines on a 1,500 x
 938 island, both along the harbour, and nothing up the hill, where the Mid-Levels and the Spire make 70 % of the long
 legs' ends. The fix by cause, each with its Statistical mirror:
-- **Segments** (P10): a Full or Coarse walking `GoTo` past `leg_replan_tiles` walks to a segment end first (the Road
-  tile, else open hill or field, within `segment_snap` of the point that far along the straight line, nearer the target
-  by half a segment), filed in `World::segments` against the plan step; there the step re-starts from where the body
+- **Segments** (P10): a Full or Coarse walking `GoTo` past `leg_replan_tiles` walks to a segment end first, filed in
+  `World::segments` against the plan step. A Full body's end is the tile `leg_replan_tiles` steps along its own route
+  (the door's flow field, the big map's A*, a street target's A*), so it walks the streets the one leg walked (fix
+  round: the straight line's Road snap took a guard's patrol leg off the street its beat passed, the thief it would
+  have sighted was never seen, `law::test_theft_witnessed…` failed). A Coarse body's end (no route: it is timed) is the
+  Road tile, else open hill or field, within `segment_snap` of the point that far along the straight line, nearer the
+  target by half a segment. There the step re-starts from where the body
   stands (`exec::start_step` again: the cab, the El and the next segment re-checked). A Coarse body is seen a segment at
   a time instead of frozen at its door for the whole leg; a cab driver's leg drives in segments at the cab's speed
   (`fare_segment`). Mirror: none (a Statistical body has no movement; `OPEN-149`).
@@ -222,6 +226,11 @@ legs' ends. The fix by cause, each with its Statistical mirror:
   rider pays at his shift's first hour and the ride is booked to a driver's body as before (`stat_cab`); with no body
   free, the Garage's off-screen cab serves both tiers (`fares_unmanned`, `fares_no_body`).
 - **The sweeper** (OPEN-156): the walk back to the Recycler in `jobs::round_ticks` reads the ride (`sweep_by_ride`).
+- **FINDING (fix round, 2k 42-44 x 120 against 97a71dc).** With the straight-line segments the 2k city lost 1.5 pt of
+  employment (J24 0.779 -> 0.764, all three seeds) and 4 % of arrests; with the route-following Full segments J24 is
+  0.779 -> 0.779 and arrests 2,595 -> 2,626. Murders read 105 -> 134 (seed 42 68 -> 132): no single feature off brings
+  them back (each one off, the rest on: 110-156; segments off 110), and the counter's own spread across the three base
+  seeds is 68-161, so it is printed here for the gate's 42-47 set, not tuned.
 
 **The dead trades.** The cab (`OPEN-115`) is the `fares` shape plus the 20k legs creating demand. The bouncer
 (`OPEN-121`) is the `counter` shape on the door tile, where `door_refusals` can finally fire. The leaders
