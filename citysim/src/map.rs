@@ -20,7 +20,8 @@
 //!   `A`-`F` 26-31): the district of every tile, in place of the rows' zone
 //!   and x ranges (an import's districts are not x ranges);
 //! - `L <x>,<y> <x>,<y> [...] <name...>`: an El line (the map's lines
-//!   replace `[[transit.lines]]`).
+//!   replace `[[transit.lines]]`); `L+` the same, a line in flight (the
+//!   pre-view pass phase 5's, dropped with `[legs]` off).
 //!
 //! Scale S3c (the TheCityGraphics sim export), also optional:
 //! - the tile `m`, Mountain: walkable at 1.5 a step, never built on;
@@ -416,7 +417,7 @@ impl MapText {
             grid(&mut out, &mut self.district_grid.iter().map(|&d| district_char(d)));
         }
         for l in &self.lines {
-            out.push('L');
+            out.push_str(if l.in_flight { "L+" } else { "L" });
             for [x, y] in &l.waypoints {
                 out.push_str(&format!(" {x},{y}"));
             }
@@ -484,7 +485,12 @@ impl Map {
         // building-section line (`B`, and since S3b `D`, `L`, `#`, `districts`).
         let section_line = |l: &str| {
             let t = l.trim_start();
-            t.starts_with("B ") || t.starts_with("D ") || t.starts_with("L ") || t.starts_with('#') || t == "districts"
+            t.starts_with("B ")
+                || t.starts_with("D ")
+                || t.starts_with("L ")
+                || t.starts_with("L+ ")
+                || t.starts_with('#')
+                || t == "districts"
         };
         let mut zones = Vec::new();
         if lines.get(at).is_some_and(|l| !l.trim().is_empty() && !section_line(l)) {
@@ -535,7 +541,7 @@ impl Map {
             let parts: Vec<&str> = line.split_whitespace().collect();
             match parts[0] {
                 "D" => map.districts.push(parse_district(&parts, n + 1)),
-                "L" => map.lines.push(parse_line(&parts, n + 1, w, h)),
+                "L" | "L+" => map.lines.push(parse_line(&parts, n + 1, w, h)),
                 _ => {
                     // S3c: `key=value` fields follow the floors field.
                     let keyed = parts.iter().position(|p| p.contains('=')).unwrap_or(parts.len());
@@ -706,7 +712,10 @@ impl Map {
             d.x_to = self.districts.iter().map(|r| r.x_to).collect();
         }
         if !self.lines.is_empty() {
-            cfg.transit.lines = self.lines.clone();
+            // The pre-view pass phase 5: an `L+` line is in flight, dropped
+            // with `[legs]` off (`CITYSIM_LEGS_OFF=1`).
+            let keep = cfg.legs.is_some();
+            cfg.transit.lines = self.lines.iter().filter(|l| keep || !l.in_flight).cloned().collect();
         }
     }
 
@@ -832,7 +841,7 @@ fn parse_line(parts: &[&str], line: usize, w: usize, h: usize) -> TransitLineCfg
     }
     assert!(waypoints.len() >= 2, "line {line}: an `L` line needs at least two waypoints");
     assert!(k < parts.len(), "line {line}: an `L` line needs a name after its waypoints");
-    TransitLineCfg { name: parts[k..].join(" "), waypoints }
+    TransitLineCfg { name: parts[k..].join(" "), waypoints, in_flight: parts[0] == "L+" }
 }
 
 #[cfg(test)]

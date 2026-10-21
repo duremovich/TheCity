@@ -328,6 +328,44 @@ pub struct Config {
     /// `None` (not written into a save) with `CITYSIM_PRESENCE_OFF=1`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub presence: Option<PresenceCfg>,
+    /// The pre-view pass phase 5 (docs/PREVIEW_PASS.md § 0 P10-P12; OPEN-139,
+    /// OPEN-115): the 20k legs (segments, the exec's ride home, the bed by
+    /// ride, the escort van, the fares). `None` (not written into a save)
+    /// with `CITYSIM_LEGS_OFF=1`, which also drops the map's `L+` lines.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legs: Option<LegsCfg>,
+}
+
+/// The pre-view pass phase 5 `[legs]` (docs/PREVIEW_PASS.md § 2 "20k
+/// legs"). Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LegsCfg {
+    /// A Full or Coarse walking `GoTo` farther than this (Manhattan tiles)
+    /// walks in segments of this length, each end re-planning the rest
+    /// (the ride re-checked).
+    pub leg_replan_tiles: u32,
+    /// A segment's end snaps to a walkable Road tile within this radius.
+    pub segment_snap: u32,
+    /// P12: an escort walks (at walking speed) up to this many tiles; past
+    /// it the van.
+    pub escort_walk_tiles: u32,
+    /// P12: the van's arrival at the arrest, in ticks, before the drive.
+    pub van_call_ticks: u32,
+    /// OPEN-140 remainder: an exec driven to his Hq is driven home too.
+    pub exec_ride_home: bool,
+    /// OPEN-140 remainder: the away-from-home bed reads the trip home by
+    /// ride (the El, the exec's car), not the walk.
+    pub bed_by_ride: bool,
+    /// OPEN-156: the sweeper's walk back to the Recycler reads the ride.
+    pub sweep_by_ride: bool,
+    /// The `fares` shape (OPEN-115): a booked cab rider waits at his door
+    /// for a driver's body that can reach him within this (cab speed);
+    /// farther, the Garage's off-screen cab.
+    pub fare_wait_ticks: u32,
+    /// The `fares` shape: a commute of `[jobs2] cab_min_tiles` or more that
+    /// the El does not shorten takes the cab when the purse allows (no
+    /// `p_cab` roll), both tiers (`streetwork::cab_roll`).
+    pub fares_el_missed: bool,
 }
 
 /// The pre-view pass phase 4 `[presence]` (docs/PREVIEW_PASS.md § 0 P3):
@@ -2655,6 +2693,10 @@ pub struct TransitCfg {
 pub struct TransitLineCfg {
     pub name: String,
     pub waypoints: Vec<[u16; 2]>,
+    /// The pre-view pass phase 5: a line in flight (a map's `L+` line),
+    /// dropped with `[legs]` off (`Map::apply_to`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub in_flight: bool,
 }
 
 impl Default for TransitCfg {
@@ -8433,6 +8475,10 @@ impl Config {
         cfg.preview_off.presence = std::env::var("CITYSIM_PRESENCE_OFF").is_ok_and(|v| v == "1");
         if cfg.preview_off.presence {
             cfg.presence = None;
+        }
+        // The pre-view pass phase 5 (OPEN-139, OPEN-115): the 20k legs.
+        if std::env::var("CITYSIM_LEGS_OFF").is_ok_and(|v| v == "1") {
+            cfg.legs = None;
         }
         // The earlier milestones' `CITYSIM_*_OFF` env switches retired in
         // the pre-view pass (OPEN-094); every section's config path stays

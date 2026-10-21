@@ -515,8 +515,16 @@ fn test_poach_by_threat_only_for_dirty_exec() {
 }
 
 fn two_gangs(w: &mut World) -> (EntityId, EntityId) {
-    let gs: Vec<EntityId> =
-        w.gangs().into_iter().filter(|&g| w.comp::<Gang>(g).is_some_and(|x| x.leader.is_some())).collect();
+    // The pre-view pass phase 5: led by a free leader (an escort now takes
+    // its walk or the van's drive, not 60 min at most: the shared city's
+    // first leader was in cuffs on the way to the cells).
+    let gs: Vec<EntityId> = w
+        .gangs()
+        .into_iter()
+        .filter(|&g| {
+            w.comp::<Gang>(g).and_then(|x| x.leader).is_some_and(|l| citysim::systems::contracts::free_adult(w, l))
+        })
+        .collect();
     assert!(gs.len() >= 2, "two led gangs");
     (gs[0], gs[1])
 }

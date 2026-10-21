@@ -2765,6 +2765,11 @@ fn probe_cabbie_drives_a_fare_on_his_shift() {
     fn fares(p_cab: f32) -> (u32, u32) {
         let mut cfg = Config::load();
         cfg.jobs2.p_cab = p_cab;
+        // The pre-view pass phase 5: the roll alone books a ride here (the
+        // El-missed commute's cab is the `fares` shape's own demand).
+        if let Some(l) = cfg.legs.as_mut() {
+            l.fares_el_missed = false;
+        }
         let mut w = World::new(42, cfg);
         let start = 2 * TICKS_PER_DAY + 5 * TICKS_PER_HOUR;
         w.run_ticks(start);

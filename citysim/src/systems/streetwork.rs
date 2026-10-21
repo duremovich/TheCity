@@ -101,6 +101,10 @@ pub struct CabRide {
     pub fare: i64,
     pub tick: Tick,
     pub stage: u8,
+    /// The pre-view pass phase 5 (the `fares` shape): the rider's body waits
+    /// at `from` and rides along (`Jobs2State.passengers`); paid on arrival.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub body: bool,
 }
 
 /// Lives at work phase 4 (§ 2.3): a parcel, a named item (not an asset):
@@ -238,8 +242,10 @@ fn coins(world: &World, id: EntityId) -> i64 {
 pub fn daily(world: &mut World) {
     // Lives at work phase 4 (§ 2.3): yesterday's rides, rolls and parcels
     // are done (empty off: nothing moves).
+    release_all(world);
     world.jobs2.cab_rides.clear();
     world.jobs2.cab_rolled.clear();
+    world.jobs2.exec_home_rolled.clear();
     // A parcel no courier's round reached went back to the Yard.
     let left = std::mem::take(&mut world.jobs2.parcels).len() as u32;
     if left > 0 {
@@ -1062,7 +1068,9 @@ pub fn cab_roll(world: &World, id: EntityId, job: &Job) -> Option<Ride> {
         return None;
     }
     let cfg = &world.config.jobs2;
-    if hash(world, PURPOSE_CAB, u64::from(id.index), world.day()) >= cfg.p_cab {
+    let rolled = hash(world, PURPOSE_CAB, u64::from(id.index), world.day()) < cfg.p_cab;
+    let el_missed = world.config.legs.as_ref().is_some_and(|l| l.fares_el_missed);
+    if !rolled && !el_missed {
         return None;
     }
     let work = job.employer.and_then(|e| world.comp::<Building>(e)).map(|b| b.door)?;
@@ -1070,6 +1078,15 @@ pub fn cab_roll(world: &World, id: EntityId, job: &Job) -> Option<Ride> {
     let tiles = home.manhattan(work);
     if tiles < cfg.cab_min_tiles {
         return None;
+    }
+    // The pre-view pass phase 5 (the `fares` shape): a commute the El does
+    // not shorten (`transit::commute_ticks` is the walk) takes the cab
+    // without the roll, both tiers (the one source).
+    if !rolled {
+        let walk = Tick::from(tiles) * world.config.exec.move_ticks_full;
+        if crate::systems::transit::commute_ticks(world, home, work) < walk {
+            return None;
+        }
     }
     let fare = cfg.fare_base + (tiles as f32 * cfg.fare_per_tile).round() as i64;
     let purse = coins(world, id);
@@ -1137,7 +1154,7 @@ pub fn pay_ride(world: &mut World, id: EntityId, ride: &Ride) -> i64 {
 
 /// The ticks a cab takes from `from` to `to`: the walk's ticks × the Car's
 /// `timed_mult` (`[vehicles] mult`), at least one.
-fn cab_ticks(world: &World, from: TilePos, to: TilePos) -> Tick {
+pub fn cab_ticks(world: &World, from: TilePos, to: TilePos) -> Tick {
     let base = Tick::from(from.manhattan(to)) * world.config.exec.move_ticks_full;
     let m = crate::systems::vehicles::timed_mult_of(world, crate::components::AssetKind::Car);
     ((base as f32 * m).round() as Tick).max(1)
@@ -1199,6 +1216,35 @@ pub fn full_cab(world: &mut World, id: EntityId, target: &crate::exec::GotoTarge
     if let Some((_, eta)) = driver {
         arrive += eta;
     }
+    // The pre-view pass phase 5 (the `fares` shape, OPEN-115): a driver's
+    // body comes for him: he waits at his door and rides along (`carry`),
+    // the fare paid on arrival and the encounter at the pick-up
+    // (`fare_plan`). A dodger's short fare is as before.
+    if let (Some((s, _)), RideBy::Cab(g)) = (driver.filter(|_| fares_on(world)), ride.by) {
+        if let Some(r) = world.jobs2.cab_rides.iter_mut().rev().find(|r| r.rider == id && r.driver == s) {
+            r.body = true;
+            if dodges {
+                r.fare = 0;
+            }
+        }
+        if dodges {
+            ownership::jobs2_row(world).fares_short += 1;
+            let (who, at) = (world.name_of(id), world.district_name(world.district_of(here)).to_string());
+            let w = world.config.service.tune.fare_dodge_grudge;
+            crate::systems::grudges::add(world, s, id, crate::word::GrudgeCause::Robbed, w, 0);
+            let text = format!("{who} rode {}'s cab from {at} and skipped the {} fare", world.name_of(s), ride.fare);
+            world.push_event(EventKind::FareShort, &[id, s, g], text);
+        }
+        world.jobs2.passengers.insert(id, s);
+        return Some(crate::exec::ExecState::GotoTimed {
+            target: target.clone(),
+            arrive_tick: Tick::MAX,
+            blocked_since: None,
+        });
+    }
+    if fares_on(world) {
+        ownership::jobs2_row(world).fares_unmanned += 1;
+    }
     if dodges {
         ownership::jobs2_row(world).fares_short += 1;
         let (who, at) = (world.name_of(id), world.district_name(world.district_of(here)).to_string());
@@ -1245,20 +1291,33 @@ pub fn exec_ride(world: &mut World, id: EntityId, target: &crate::exec::GotoTarg
         return None;
     }
     let tier = crate::systems::life::exec_home_tier(world);
-    if tier == 0 || world.has::<Job>(id) || world.jobs2.cab_rolled.contains(&id) {
+    if tier == 0 || world.has::<Job>(id) {
         return None;
     }
-    // Review fix 10: a GoTo to a corp's building whose exec he is, before the
-    // scan of every corp (`Corp.buildings` and `Building.owner` agree:
-    // `ownership::transfer_building`).
     let to = target.building?;
-    let owner = world.corp_of_building(to)?;
-    if world.comp::<Corp>(owner).and_then(|c| c.exec) != Some(id) {
-        return None;
+    // The pre-view pass phase 5 (OPEN-140's remainder): the ride home, from
+    // anywhere outside the Home's district, once a day (`exec_home_rolled`).
+    let home_ride = world.config.legs.as_ref().is_some_and(|l| l.exec_ride_home)
+        && crate::systems::missions::home_of(world, id) == Some(to);
+    if home_ride {
+        if world.jobs2.exec_home_rolled.contains(&id) {
+            return None;
+        }
+    } else {
+        if world.jobs2.cab_rolled.contains(&id) {
+            return None;
+        }
+        // Review fix 10: a GoTo to a corp's building whose exec he is, before the
+        // scan of every corp (`Corp.buildings` and `Building.owner` agree:
+        // `ownership::transfer_building`).
+        let owner = world.corp_of_building(to)?;
+        if world.comp::<Corp>(owner).and_then(|c| c.exec) != Some(id) {
+            return None;
+        }
     }
     let corp = crate::systems::life::exec_corp(world, id)?;
     let hq = crate::systems::life::hq_of(world, corp, id)?;
-    if target.building != Some(hq) {
+    if !home_ride && target.building != Some(hq) {
         return None;
     }
     let home = crate::systems::missions::home_of(world, id)?;
@@ -1268,7 +1327,14 @@ pub fn exec_ride(world: &mut World, id: EntityId, target: &crate::exec::GotoTarg
     }
     let home_door = hb.door;
     let here = crate::exec::walk_origin(world, id)?;
-    world.jobs2.cab_rolled.insert(id);
+    if home_ride {
+        if world.district_of(here) == world.district_of_building(home) {
+            return None;
+        }
+        world.jobs2.exec_home_rolled.insert(id);
+    } else {
+        world.jobs2.cab_rolled.insert(id);
+    }
     let road = |x: &crate::components::Asset| {
         x.kind.is_road_vehicle() && x.kind != crate::components::AssetKind::Truck && x.condition > 0 && !x.stolen
     };
@@ -1302,8 +1368,41 @@ pub fn exec_ride(world: &mut World, id: EntityId, target: &crate::exec::GotoTarg
     if corp_car {
         row.exec_rides_corp += 1;
     }
+    if home_ride {
+        row.exec_rides_home += 1;
+    }
     let arrive = world.tick + cab_ticks(world, here, target.tile);
     Some(crate::exec::ExecState::GotoTimed { target: target.clone(), arrive_tick: arrive, blocked_since: None })
+}
+
+/// The pre-view pass phase 5 (OPEN-140's remainder): the ticks of the car
+/// ride home `exec_ride` would give `id` from `from` to his Home's `door`
+/// (an exec housed at `exec_home_tier` whose Hq stands in another district,
+/// `from` outside the Home's district), the Car's speed; `None` otherwise or
+/// with `[legs] exec_ride_home` off. Pure (the fare and the Garage are the
+/// ride's, not the bed's).
+pub fn ride_home_ticks(world: &World, id: EntityId, from: TilePos, door: TilePos) -> Option<Tick> {
+    if !crate::systems::service::street_on(world)
+        || !world.config.service.exec_ride
+        || !world.config.legs.as_ref().is_some_and(|l| l.exec_ride_home)
+    {
+        return None;
+    }
+    let tier = crate::systems::life::exec_home_tier(world);
+    if tier == 0 || world.has::<Job>(id) {
+        return None;
+    }
+    let corp = crate::systems::life::exec_corp(world, id)?;
+    let hq = crate::systems::life::hq_of(world, corp, id)?;
+    let home = crate::systems::missions::home_of(world, id)?;
+    let hb = world.comp::<Building>(home)?;
+    if hb.tier < tier
+        || world.district_of_building(home) == world.district_of_building(hq)
+        || world.district_of(from) == world.district_of_building(home)
+    {
+        return None;
+    }
+    Some(cab_ticks(world, from, door))
 }
 
 /// Lives at work phase 4 (§ 2.3, D3, D6): a cab ride from `garage` booked
@@ -1323,8 +1422,21 @@ fn book_cab(
     if !crate::systems::service::street_on(world) {
         return None;
     }
-    let wait = Tick::from(world.config.service.cab_wait_ticks);
-    let driver = drivers_free(world, garage, from)
+    let wait = match world.config.legs.as_ref() {
+        Some(l) => Tick::from(l.fare_wait_ticks),
+        None => Tick::from(world.config.service.cab_wait_ticks),
+    };
+    let free = drivers_free(world, garage, from);
+    // The pre-view pass phase 5 (OPEN-115's diagnosis): why no body drives.
+    if fares_on(world) && !free.iter().any(|&(_, eta)| eta <= wait) {
+        let row = ownership::jobs2_row(world);
+        if free.is_empty() {
+            row.fares_no_body += 1;
+        } else {
+            row.fares_too_far += 1;
+        }
+    }
+    let driver = free
         .into_iter()
         .filter(|&(_, eta)| eta <= wait)
         .map(|(s, eta)| (hash(world, PURPOSE_FARE, u64::from(rider.index), u64::from(s.index)).to_bits(), s, eta))
@@ -1333,7 +1445,7 @@ fn book_cab(
     match driver {
         Some((s, _)) => {
             let (to, fare, tick) = (ride.to, ride.fare, world.tick);
-            world.jobs2.cab_rides.push(CabRide { rider, from, to, driver: s, fare, tick, stage: 0 });
+            world.jobs2.cab_rides.push(CabRide { rider, from, to, driver: s, fare, tick, stage: 0, body: false });
             ownership::jobs2_row(world).cab_rides_driven += 1;
         }
         None => ownership::jobs2_row(world).cab_rides_unmanned += 1,
@@ -1374,6 +1486,9 @@ fn can_drive(world: &World, id: EntityId) -> bool {
     crate::systems::law::living(world, id)
         && !world.has::<Sentence>(id)
         && world.comp::<Job>(id).is_some_and(|j| fare_duty(world, j) && j.on_shift(world.tick_of_day()))
+        // The pre-view pass phase 5: a body drives it (a driver gone off
+        // screen leaves his rider to the off-screen cab).
+        && (!fares_on(world) || world.comp::<Brain>(id).is_some_and(|b| b.lod != Lod::Statistical))
 }
 
 /// Review fix 2 (`hourly`): drop the booked rides whose driver can no
@@ -1383,8 +1498,94 @@ fn drop_stale_rides(world: &mut World) {
         return;
     }
     let keep: Vec<bool> = world.jobs2.cab_rides.iter().map(|r| can_drive(world, r.driver)).collect();
+    let gone: Vec<CabRide> = world.jobs2.cab_rides.iter().zip(&keep).filter(|(_, &k)| !k).map(|(r, _)| *r).collect();
     let mut k = keep.into_iter();
     world.jobs2.cab_rides.retain(|_| k.next().unwrap_or(true));
+    for r in gone {
+        release(world, &r, false);
+    }
+}
+
+/// The pre-view pass phase 5 (the `fares` shape, OPEN-115): `[legs]` on.
+pub fn fares_on(world: &World) -> bool {
+    world.config.legs.is_some()
+}
+
+/// The `fares` shape: a body ride's rider steps off. `arrived`: at the
+/// destination with the driver (the fare paid now, `pay_ride`, and the
+/// rider's leg ends there); else the driver could not finish (his shift
+/// over, jailed, gone off screen, the day's end): the Garage's off-screen
+/// cab takes the rider on from where he stands, timed at the cab's speed,
+/// paid now. No-op for a ride without a body rider.
+fn release(world: &mut World, r: &CabRide, arrived: bool) {
+    if !r.body || world.jobs2.passengers.remove(&r.rider).is_none() {
+        return;
+    }
+    let target = match world.comp::<Brain>(r.rider).map(|b| &b.exec) {
+        Some(crate::exec::ExecState::GotoTimed { target, arrive_tick, .. }) if *arrive_tick == Tick::MAX => {
+            target.clone()
+        }
+        _ => return,
+    };
+    let garage = world.comp::<Job>(r.driver).and_then(|j| j.employer);
+    if r.fare > 0 {
+        if let Some(g) = garage {
+            let ride = Ride { from: r.from, to: r.to, fare: r.fare, by: RideBy::Cab(g) };
+            pay_ride(world, r.rider, &ride);
+        }
+    }
+    let arrive = if arrived {
+        ownership::jobs2_row(world).fares_driven += 1;
+        world.tick
+    } else {
+        ownership::jobs2_row(world).fares_unmanned += 1;
+        let here = crate::exec::walk_origin(world, r.rider).unwrap_or(r.from);
+        world.tick + cab_ticks(world, here, target.tile)
+    };
+    if let Some(b) = world.comp_mut::<Brain>(r.rider) {
+        b.exec = crate::exec::ExecState::GotoTimed { target, arrive_tick: arrive, blocked_since: None };
+    }
+}
+
+/// The `fares` shape: the driver `driver` moved; a rider aboard his ride
+/// (stage 1, picked up) takes his tile, out on the street (`exec::run`
+/// after the driver's step, as an escort's suspect follows the guard).
+pub fn carry(world: &mut World, driver: EntityId) {
+    let Some(r) = world.jobs2.cab_rides.iter().find(|r| r.driver == driver && r.body && r.stage >= 1).copied() else {
+        return;
+    };
+    if world.jobs2.passengers.get(&r.rider) != Some(&driver) {
+        return;
+    }
+    let Some(tile) = world.comp::<Position>(driver).filter(|p| p.building.is_none()).map(|p| p.tile) else { return };
+    if world.comp::<Position>(r.rider).is_some_and(|p| p.building.is_some()) {
+        world.leave_building(r.rider);
+    }
+    if let Some(p) = world.comp_mut::<Position>(r.rider) {
+        p.tile = tile;
+    }
+}
+
+/// The `fares` shape: `rider`'s plan was dropped while he waited or rode:
+/// he leaves the cab where he stands, and the driver's ride is over (no fare).
+pub fn passenger_off(world: &mut World, rider: EntityId) {
+    if world.jobs2.passengers.remove(&rider).is_none() {
+        return;
+    }
+    world.jobs2.cab_rides.retain(|r| !(r.body && r.rider == rider));
+}
+
+/// The `fares` shape: the day's end (`daily`): every rider still waiting or
+/// aboard goes on by the off-screen cab before the day's rides are cleared.
+fn release_all(world: &mut World) {
+    if world.jobs2.passengers.is_empty() {
+        return;
+    }
+    let rides: Vec<CabRide> = world.jobs2.cab_rides.iter().filter(|r| r.body).copied().collect();
+    for r in rides {
+        release(world, &r, false);
+    }
+    world.jobs2.passengers.clear();
 }
 
 /// `leisure::spot_of` and the stand-by Rest (`exec::actions`): `id` is on a
@@ -1440,10 +1641,23 @@ pub fn fare_plan(world: &mut World, id: EntityId) -> Option<Plan> {
         let r = world.jobs2.cab_rides[i];
         let done = if r.stage == 0 && here == Some(r.from) {
             world.jobs2.cab_rides[i].stage = 1;
+            // The pre-view pass phase 5 (the `fares` shape): the pick-up,
+            // both bodies at the door (P3): the encounter now, and he climbs in.
+            if r.body {
+                let d = world.district_of(r.from);
+                let ride = Ride { from: r.from, to: r.to, fare: r.fare, by: RideBy::Cab(garage) };
+                ride_encounter(world, r.rider, Some(id), &ride, d);
+                carry(world, id);
+            }
             false
         } else {
             r.stage >= 1 && here == Some(r.to)
         };
+        if done && r.body {
+            world.jobs2.cab_rides.remove(i);
+            release(world, &r, true);
+            return fare_plan(world, id);
+        }
         if !done {
             let step = ActionInstance { action: ActionKind::GoTo(LocationKey::Spot), target: None, tile: None };
             return Some(Plan {

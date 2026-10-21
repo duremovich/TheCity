@@ -766,9 +766,18 @@ pub fn round_ticks(world: &World, from: TilePos, stops: &[TilePos], door: TilePo
         tiles += at.manhattan(s);
         at = s;
     }
+    let step = world.config.exec.move_ticks_full.max(1) as f64 * f64::from(cfg.sweep_walk_factor);
+    let stops_ticks = stops.len() as u64 * u64::from(cfg.sweep_stop_min);
+    // The pre-view pass phase 5 (OPEN-156, `[legs] sweep_by_ride`): the way
+    // back to the post may ride (the El's `transit::commute_ticks`).
+    if world.config.legs.as_ref().is_some_and(|l| l.sweep_by_ride) {
+        let back_walk = (f64::from(at.manhattan(door)) * step).ceil() as u64;
+        let back = back_walk.min(crate::systems::transit::commute_ticks(world, at, door));
+        return (f64::from(tiles) * step).ceil() as u64 + back + stops_ticks;
+    }
     tiles += at.manhattan(door);
-    let walk = f64::from(tiles) * world.config.exec.move_ticks_full.max(1) as f64 * f64::from(cfg.sweep_walk_factor);
-    walk.ceil() as u64 + stops.len() as u64 * u64::from(cfg.sweep_stop_min)
+    let walk = f64::from(tiles) * step;
+    walk.ceil() as u64 + stops_ticks
 }
 
 /// The stops in district `d`: its street tiles, dirtiest first (ties by a

@@ -180,6 +180,49 @@ pick asleep stays `SETTLED APART`, the bug). Per item, with its Statistical mirr
   hour as before; the clerk's bribe (no Fixer) stays at midnight. Left open: a runner's `FixerCut` on a data sale (`contracts::on_sell_data`) still pays the owner at the
   sale (`OPEN-155`).
 
+**The 20k legs as built (phase 5, `exec/legs.rs`, `[legs]`; OPEN-139, OPEN-115, OPEN-140's remainder, OPEN-156; P10-P12).**
+The diagnosis (20k seed 42 x 30 on `isle_m_k2`, `run --legs`, `exec::leglog`): 62,364 Full or Coarse GoTo legs of
+120 min or more (18,786 of 300 or more); 74 % walked, 26 % rode the El (its access walks long), a few hundred drove or
+were driven. Of the long walks the El refused 49 % as `Slow` (the ride and its access walks save too little for the
+fare) and 48 % as `NoRoute` (the board and alight shortlists on lines that never meet: the Terrace Line and the tram
+share no tile, and the access walk to the nearest stop was a median 100 tiles); the fare 3 %. Two lines on a 1,500 x
+938 island, both along the harbour, and nothing up the hill, where the Mid-Levels and the Spire make 70 % of the long
+legs' ends. The fix by cause, each with its Statistical mirror:
+- **Segments** (P10): a Full or Coarse walking `GoTo` past `leg_replan_tiles` walks to a segment end first (the Road
+  tile, else open hill or field, within `segment_snap` of the point that far along the straight line, nearer the target
+  by half a segment), filed in `World::segments` against the plan step; there the step re-starts from where the body
+  stands (`exec::start_step` again: the cab, the El and the next segment re-checked). A Coarse body is seen a segment at
+  a time instead of frozen at its door for the whole leg; a cab driver's leg drives in segments at the cab's speed
+  (`fare_segment`). Mirror: none (a Statistical body has no movement; `OPEN-149`).
+- **The island's lines** (P11): the importer reads the export's funicular (`elevated.json`, its two ends the stops;
+  the escalator stays unmapped: a walkway at a walk's pace on a flat ground) and the authored lines of `--lines
+  assets/maps/isle_m_k2_lines.txt` (the Mid-Levels Line up from the tram over the Terrace Line to the Spire, the
+  Hillside Line along the Mid-Levels joining the Funicular, the Mid-Levels Line and the Vats Line, and the Vats Line from
+  the tram's east end to the Farms), all written `L+` (in flight: dropped with the switch, so the off island is the
+  base's two lines). The two harbour lines now meet through the hill lines. Mirror: the El is one function for every
+  tier (`transit::commute_ticks`, `stat_commute`).
+- **The exec's ride home** (OPEN-140): `streetwork::exec_ride` drives the exec home as it drives him in (the corp's car
+  or the Garage's off-screen cab on the corp's purse), once a day (`exec_home_rolled`), from outside the Home's
+  district. **The bed by ride**: the away bed (`life::away_hotel`) reads the trip home as `life::home_reach`, the walk
+  or the ride where shorter (the El's `commute_ticks`, the exec's car: `ride_home_ticks`), so a guard whose patrol ends
+  150 tiles out on an El line sleeps at home. Mirror: the rule itself (a Statistical exec's office trip is the same
+  timed GoTo; the midnight passes do not read beds).
+- **Escorts** (P12): an escort walks at walking speed up to `escort_walk_tiles` (a Full guard on foot with the suspect
+  at his side, a Coarse one timed at the walk); past it the van: `van_call_ticks` for it to come, then the drive with
+  both aboard at the Car's speed. The old cap (`[life] escort_van_ticks`, 60) let a 200-tile escort cover the ground in
+  72 min. Mirror: none (an arrest is a body's; a Statistical guard's arrests are the law's off-screen roll).
+- **The `fares` shape** (OPEN-115): a commuter's booked cab with a driver's body free within `fare_wait_ticks` (the
+  old `cab_wait_ticks` 30 is ~34 tiles at the cab's speed) is a body ride: the rider waits at his door
+  (`Jobs2State.passengers`, the exec skips him), the driver drives to him (the pick-up's `Fare` encounter there, both
+  bodies present, P3), carries him at his side (`streetwork::carry`) to the destination, and the fare is paid on
+  arrival (`pay_ride`, rider to the Garage's owner as before). A driver who cannot finish (his shift over, jailed, gone
+  off screen, midnight) leaves the rider to the Garage's off-screen cab, timed from where he stands and paid then. A
+  commute of `cab_min_tiles` or more that the El does not shorten takes the cab without the `p_cab` roll when the purse
+  holds the fare and the reserve (`fares_el_missed`), both tiers (`cab_roll` is the one source). Mirror: the Statistical
+  rider pays at his shift's first hour and the ride is booked to a driver's body as before (`stat_cab`); with no body
+  free, the Garage's off-screen cab serves both tiers (`fares_unmanned`, `fares_no_body`).
+- **The sweeper** (OPEN-156): the walk back to the Recycler in `jobs::round_ticks` reads the ride (`sweep_by_ride`).
+
 **The dead trades.** The cab (`OPEN-115`) is the `fares` shape plus the 20k legs creating demand. The bouncer
 (`OPEN-121`) is the `counter` shape on the door tile, where `door_refusals` can finally fire. The leaders
 (`OPEN-118`/`OPEN-128`, Dylan 2026-10-19: hold court and keep the delegation) get a `round` over the gang's

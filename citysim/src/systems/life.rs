@@ -33,6 +33,25 @@ pub fn tiles_to(world: &World, id: EntityId, b: EntityId) -> Option<u32> {
     Some(origin(world, id)?.manhattan(door))
 }
 
+/// The pre-view pass phase 5 (OPEN-140's remainder, `[legs] bed_by_ride`):
+/// the trip home in walking tiles' worth: the walk, or the ride where it is
+/// shorter (the El's `transit::commute_ticks`, the exec's car home:
+/// `streetwork::ride_home_ticks`), over `[exec] move_ticks_full`. The walk's
+/// tiles exactly with `[legs]` off.
+pub fn home_reach(world: &World, id: EntityId, home: EntityId) -> Option<u32> {
+    let tiles = tiles_to(world, id, home)?;
+    if tiles == 0 || !world.config.legs.as_ref().is_some_and(|l| l.bed_by_ride) {
+        return Some(tiles);
+    }
+    let (from, door) = (origin(world, id)?, world.comp::<Building>(home)?.door);
+    let mut ticks = crate::systems::transit::commute_ticks(world, from, door);
+    if let Some(c) = crate::systems::streetwork::ride_home_ticks(world, id, from, door) {
+        ticks = ticks.min(c);
+    }
+    let step = world.config.exec.move_ticks_full.max(1);
+    Some(u32::try_from(ticks / step).unwrap_or(u32::MAX).min(tiles))
+}
+
 /// Tiles from the agent to a street tile.
 pub fn tiles_to_tile(world: &World, id: EntityId, t: TilePos) -> Option<u32> {
     Some(origin(world, id)?.manhattan(t))
@@ -170,7 +189,7 @@ pub fn away_hotel(world: &World, id: EntityId) -> Option<EntityId> {
     if moving_in(world, id).is_some() {
         return None;
     }
-    let home_t = tiles_to(world, id, home)?;
+    let home_t = home_reach(world, id, home)?;
     let budget = coins(world, id) - world.config.life.hotel_reserve_meals * meal_price(world, id);
     let margin = world.config.life.bed_margin_tiles;
     // Scale S4 perf: the walks first, then the bed tests nearest first

@@ -52,6 +52,11 @@ pub struct ImportArgs {
     /// `x0,y0,x1,y1`.
     #[arg(long)]
     pub crop: Option<String>,
+    /// The pre-view pass phase 5 (P11): authored El lines in this map's tile
+    /// frame, one a row (`x,y x,y [...] name`, `#` comments), written as
+    /// `L+` lines (in flight) after the export's.
+    #[arg(long)]
+    pub lines: Option<PathBuf>,
 }
 
 /// What the import read, wrote and could not map.
@@ -1847,7 +1852,7 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
     let mut unmapped_el: BTreeMap<String, usize> = BTreeMap::new();
     for (i, e) in elements.iter().enumerate() {
         let kd = text(e, "kind", &format!("elevated.json elements[{i}]"))?;
-        if kd != "rail" && kd != "station" {
+        if kd != "rail" && kd != "station" && kd != "funicular" {
             *unmapped_el.entry(kd.to_string()).or_default() += 1;
         }
     }
@@ -1880,7 +1885,7 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                         l.get("headway_s").and_then(Value::as_f64).unwrap_or(0.0),
                         l.get("night_headway_s").and_then(Value::as_f64).unwrap_or(0.0)
                     ));
-                    lines.push(TransitLineCfg { name: name.to_string(), waypoints: wp });
+                    lines.push(TransitLineCfg { name: name.to_string(), waypoints: wp, in_flight: false });
                 }
                 None => rep.warnings.push(format!("{ctx} ({name}): under two track points in the window")),
             }
@@ -1924,9 +1929,31 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                 })
                 .collect();
             match line_waypoints(&f, &pts, &keep) {
-                Some(wp) => lines.push(TransitLineCfg { name: format!("El {id}"), waypoints: wp }),
+                Some(wp) => lines.push(TransitLineCfg { name: format!("El {id}"), waypoints: wp, in_flight: false }),
                 None => rep.warnings.push(format!("{ctx} ({id}): under two track points in the window")),
             }
+        }
+    }
+    // The pre-view pass phase 5 (P11): the lines in flight go after the
+    // export's (the God's line rows keep their numbers).
+    let mut flight: Vec<TransitLineCfg> = Vec::new();
+    // The pre-view pass phase 5 (P11): the funicular (the Peak's tram up the
+    // ridge) is a line between its two stair portals (its ends), in flight
+    // (`L+`) until the phase lands. The escalator stays unmapped: a moving
+    // walkway at a walk's pace on a ground the sim reads as flat.
+    for (i, e) in elements.iter().enumerate() {
+        let ctx = format!("elevated.json elements[{i}]");
+        if text(e, "kind", &ctx)? != "funicular" {
+            continue;
+        }
+        let pts = points(e, "pts", &ctx)?;
+        if pts.len() < 2 {
+            continue;
+        }
+        let keep: BTreeSet<usize> = [0, pts.len() - 1].into_iter().collect();
+        match line_waypoints(&f, &pts, &keep) {
+            Some(wp) => flight.push(TransitLineCfg { name: "Funicular".into(), waypoints: wp, in_flight: true }),
+            None => rep.warnings.push(format!("{ctx} (funicular): under two track points in the window")),
         }
     }
     for (kd, n) in &unmapped_el {
@@ -1968,10 +1995,43 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                     .map(|(su, _)| u.iter().position(|&x| x >= *su).unwrap_or(0).min(half.len() - 1))
                     .collect();
                 match line_waypoints(&f, half, &keep) {
-                    Some(wp) => lines.push(TransitLineCfg { name: format!("Tram {street}"), waypoints: wp }),
+                    Some(wp) => {
+                        lines.push(TransitLineCfg { name: format!("Tram {street}"), waypoints: wp, in_flight: false })
+                    }
                     None => rep.warnings.push(format!("{ctx}: under two tram points in the window")),
                 }
             }
+        }
+    }
+    lines.append(&mut flight);
+    // The pre-view pass phase 5 (P11): the authored lines (`--lines`), each
+    // waypoint inside the map.
+    if let Some(path) = &args.lines {
+        let t = std::fs::read_to_string(path).map_err(|e| format!("--lines {}: {e}", path.display()))?;
+        for (n, row) in t.lines().enumerate() {
+            let row = row.trim();
+            if row.is_empty() || row.starts_with('#') {
+                continue;
+            }
+            let parts: Vec<&str> = row.split_whitespace().collect();
+            let mut wp: Vec<[u16; 2]> = Vec::new();
+            let mut k = 0;
+            while let Some((x, y)) = parts.get(k).and_then(|p| p.split_once(',')) {
+                let (x, y) = (x.parse::<u16>(), y.parse::<u16>());
+                let (Ok(x), Ok(y)) = (x, y) else {
+                    return Err(format!("--lines {} row {}: bad waypoint {}", path.display(), n + 1, parts[k]));
+                };
+                if usize::from(x) >= w || usize::from(y) >= h {
+                    return Err(format!("--lines {} row {}: {x},{y} is off the {w} x {h} map", path.display(), n + 1));
+                }
+                wp.push([x, y]);
+                k += 1;
+            }
+            if wp.len() < 2 || k >= parts.len() {
+                return Err(format!("--lines {} row {}: two waypoints and a name", path.display(), n + 1));
+            }
+            let name = parts[k..].join(" ");
+            lines.push(TransitLineCfg { name, waypoints: wp, in_flight: true });
         }
     }
     rep.lines = lines.iter().map(|l| format!("{} ({} waypoints)", l.name, l.waypoints.len())).collect();
@@ -2054,7 +2114,14 @@ mod tests {
     }
 
     fn args(src: &Path) -> ImportArgs {
-        ImportArgs { src: src.to_path_buf(), out: src.join("out.txt"), downsample: 1, residents: 1_000, crop: None }
+        ImportArgs {
+            src: src.to_path_buf(),
+            out: src.join("out.txt"),
+            downsample: 1,
+            residents: 1_000,
+            crop: None,
+            lines: None,
+        }
     }
 
     /// A tiny city in their format: one Sump superblock, one block with two

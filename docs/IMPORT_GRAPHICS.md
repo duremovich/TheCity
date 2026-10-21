@@ -8,7 +8,7 @@ test time. An adapter writes the sim's own map format once; the committed result
 ```
 citysim-cli import-graphics --src D:/TheCityGraphics/assets/city/isle_m/out --out assets/maps/isle_m_k4.txt \
     --downsample 4 --residents 5000 [--crop x0,y0,x1,y1]
-citysim-cli import-graphics --src D:/TheCityGraphics/assets/city/isle_m/out --out assets/maps/isle_m_k2.txt     --downsample 2 --residents 20000          # the island for 20,000 (Track B, OPEN-136)
+citysim-cli import-graphics --src D:/TheCityGraphics/assets/city/isle_m/out --out assets/maps/isle_m_k2.txt     --downsample 2 --residents 20000 --lines assets/maps/isle_m_k2_lines.txt   # the island for 20,000 (Track B, OPEN-136; the authored El lines, pre-view pass phase 5)
 ```
 
 - `--downsample k`: a sim tile is k x k of theirs (k = 1: their 2 m tiles; 4: 8 m tiles).
@@ -56,7 +56,9 @@ the shipped map and the generator write none of S3c's, so the 2k city is byte-id
   (`Map::apply_to`, at `World::new`);
 - `districts` then `h` rows of ids (`a`-`z` 0-25, `A`-`F` 26-31): every tile's district, in place of the rows'
   zone-and-x-range rule (their districts are unions of superblocks, not x ranges);
-- `L <x>,<y> <x>,<y> ... <name...>`: an El line; the map's lines replace `[[transit.lines]]`;
+- `L <x>,<y> <x>,<y> ... <name...>`: an El line; the map's lines replace `[[transit.lines]]`; `L+` the same, a line
+  in flight (the pre-view pass phase 5's: the funicular and the `--lines` file's authored lines), dropped with
+  `CITYSIM_LEGS_OFF=1`;
 - `# ...` comments in the building section;
 - `B <Kind> <x> <y> <w> <h> <tier> <floors>`: the eighth field (floors) existed since Jobs and room J6. **S3b:** a
   Home of F floors is dealt F households at world creation (5 residents a floor). A Home with no floors field is
@@ -177,7 +179,9 @@ These are listed by the adapter's report too. Suggestions are for Dylan, who may
    costs from `terrain_height.png` and level portals (stairs, lifts) are later work on the sim's side.
 7. **Vehicles.** The expressway, its ramps, `roads.json` nodes/edges and `street/traffic.json` lanes: the sim does
    not simulate vehicles on roads yet (SIM_NOTES: "geometry is the pipeline's, state is the sim's").
-8. ~~Rail service~~: `rail.json` (S3c): the line's name and stations are read; its service (240 s headway, 480 s
+8. ~~Funicular~~ (the pre-view pass phase 5, P11): `elevated.json`'s funicular is an El line between its two ends
+   (`L+`); the escalator is not mapped (a moving walkway at a walk's pace; the ground is flat).
+9. ~~Rail service~~: `rail.json` (S3c): the line's name and stations are read; its service (240 s headway, 480 s
    at night, 05:30-01:00, 14 m/s, 30 s dwell, 4 trains) is not: the sim's `[transit]` headway, dwell and ride
    speed run every line (Dylan: the sim owns its timetable). The tram's 150 s headway and timetable (`tt`) are
    not read either.

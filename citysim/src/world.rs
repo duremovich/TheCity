@@ -597,11 +597,20 @@ pub struct World {
     /// Transit T12: rides in progress, by rider (not saved while empty).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub rides: BTreeMap<EntityId, systems::transit::Ride>,
+    /// The pre-view pass phase 5 (OPEN-139): a walking `GoTo` on a segment,
+    /// by walker: the plan step it belongs to (`exec::legs`; not saved while
+    /// empty).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub segments: BTreeMap<EntityId, (Tick, u8)>,
     /// Measurement only (never saved, read by nothing in the sim): when
     /// `Some`, every commute arrival `(ticks, Manhattan tiles, mode)` with
     /// mode 0 walked, 1 drove, 2 rode.
     #[serde(skip)]
     pub commute_log: Option<Vec<(u32, u32, u8)>>,
+    /// Measurement only (never saved, read by nothing in the sim): the
+    /// pre-view pass phase 5's GoTo leg log (`exec::leglog`, `run --legs`).
+    #[serde(skip)]
+    pub leg_log: Option<crate::exec::leglog::LegLog>,
     // graph + blackboard
     pub edges: crate::edge_map::EdgeMap,
     /// Private so every write goes through `reports_mut`, which drops the
@@ -1607,7 +1616,9 @@ impl World {
             commute_acc: [0; 4],
             transit: Default::default(),
             rides: BTreeMap::new(),
+            segments: BTreeMap::new(),
             commute_log: None,
+            leg_log: None,
             dealers: BTreeMap::new(),
             deal_log: BTreeMap::new(),
             corner_dealers: BTreeMap::new(),

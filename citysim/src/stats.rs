@@ -918,6 +918,29 @@ pub struct Jobs2Cols {
     pub sight_asleep: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub papers_handover: u32,
+    // The pre-view pass phase 5 (OPEN-139, OPEN-115, P12): segment ends
+    // re-planned, escorts walked and driven by the van, the fastest escort
+    // (tiles a minute, x 100), execs driven home, booked fares a driver's body carried to the door and paid
+    // on arrival, fares the Garage's off-screen cab took, and why (no
+    // free driver's body at the Garage, or none within `fare_wait_ticks`).
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub leg_segments: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub escort_walks: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub escort_vans: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub escort_tpm_max: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub exec_rides_home: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub fares_driven: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub fares_unmanned: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub fares_no_body: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub fares_too_far: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -1231,6 +1254,15 @@ impl Jobs2Cols {
                 "cut_at_meet",
                 "sight_asleep",
                 "papers_handover",
+                "leg_segments",
+                "escort_walks",
+                "escort_vans",
+                "escort_tpm_max",
+                "exec_rides_home",
+                "fares_driven",
+                "fares_unmanned",
+                "fares_no_body",
+                "fares_too_far",
             ]
             .into_iter()
             .map(str::to_string),
@@ -1538,6 +1570,15 @@ impl Jobs2Cols {
             self.cut_at_meet.to_string(),
             self.sight_asleep.to_string(),
             self.papers_handover.to_string(),
+            self.leg_segments.to_string(),
+            self.escort_walks.to_string(),
+            self.escort_vans.to_string(),
+            self.escort_tpm_max.to_string(),
+            self.exec_rides_home.to_string(),
+            self.fares_driven.to_string(),
+            self.fares_unmanned.to_string(),
+            self.fares_no_body.to_string(),
+            self.fares_too_far.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

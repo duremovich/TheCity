@@ -11,6 +11,8 @@
 pub mod actions;
 pub mod bigpath;
 pub mod flowfield;
+pub mod leglog;
+pub mod legs;
 pub mod pathfind;
 pub mod reservations;
 pub mod routine;
@@ -131,7 +133,15 @@ pub fn run(world: &mut World) {
         if brain.plan.is_none() {
             continue; // the think system plans
         }
+        // The pre-view pass phase 5 (the `fares` shape): a cab's rider waits
+        // at his door or rides along; the driver's step moves him.
+        if !world.jobs2.passengers.is_empty() && world.jobs2.passengers.contains_key(&id) {
+            continue;
+        }
         step_agent(world, id);
+        if !world.jobs2.passengers.is_empty() {
+            crate::systems::streetwork::carry(world, id);
+        }
         // An escorting guard drags the suspect along; a carried corpse follows.
         if world.comp::<Brain>(id).is_some_and(|b| b.escorting.is_some()) {
             crate::systems::law::follow_guard(world, id);
@@ -341,6 +351,11 @@ fn step_agent(world: &mut World, id: EntityId) {
     match result {
         StepResult::Running => {}
         StepResult::Done => {
+            // The pre-view pass phase 5: a segment's end re-starts the step.
+            if matches!(step.action, ActionKind::GoTo(_)) && !world.segments.is_empty() && legs::segment_done(world, id)
+            {
+                return;
+            }
             // Transit T12: a leg of a ride ended (the board stop, the alight
             // stop), not the GoTo.
             if matches!(step.action, ActionKind::GoTo(_))
@@ -348,6 +363,9 @@ fn step_agent(world: &mut World, id: EntityId) {
                 && crate::systems::transit::leg_done(world, id, lod)
             {
                 return;
+            }
+            if world.leg_log.is_some() && matches!(step.action, ActionKind::GoTo(_) | ActionKind::Escort) {
+                leglog::end(world, id, "done");
             }
             if let Some(b) = world.comp_mut::<Brain>(id) {
                 b.plan_step = b.plan_step.saturating_add(1);
@@ -368,6 +386,9 @@ fn step_agent(world: &mut World, id: EntityId) {
             // L2 (L30): a bed lost at the step sleeps rough where it stands.
             if rough_fallback(world, id, &step, reason) {
                 return;
+            }
+            if world.leg_log.is_some() {
+                leglog::end(world, id, "failed");
             }
             count_abort(world, &step, reason);
             let goal = world.comp::<Brain>(id).and_then(|b| b.plan_goal());
@@ -609,6 +630,13 @@ impl World {
         // M13 D20: a vehicle on the road parks where its driver stands.
         crate::systems::vehicles::end_trip(self, id, false);
         crate::systems::transit::end_ride(self, id);
+        self.segments.remove(&id);
+        if !self.jobs2.passengers.is_empty() {
+            crate::systems::streetwork::passenger_off(self, id);
+        }
+        if self.leg_log.is_some() {
+            leglog::end(self, id, "aborted");
+        }
         self.commute_start.remove(&id);
         if let Some(b) = self.comp_mut::<Brain>(id) {
             b.clear_plan();
@@ -628,6 +656,10 @@ fn commute_started(world: &mut World, id: EntityId, target: &GotoTarget) {
     }
     let employer = world.comp::<crate::components::Job>(id).and_then(|j| j.employer);
     if target.building.is_none() || target.building != employer {
+        return;
+    }
+    // The pre-view pass phase 5: a segment's re-start keeps the commute's start.
+    if legs::on(world) && world.commute_start.contains_key(&id) {
         return;
     }
     let Some(from) = walk_origin(world, id) else { return };
@@ -680,6 +712,11 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
     };
     match walk_key {
         Some(key) => {
+            // The pre-view pass phase 5: a walk (re)starting drops its old
+            // segment (`segment` files the next one).
+            if !world.segments.is_empty() {
+                world.segments.remove(&id);
+            }
             // M15 W22: a hunter setting out to its intel promotes a
             // Statistical target.
             if key == LocationKey::Intel {
@@ -734,10 +771,19 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
             // a commuter's GoTo to work may be a cab (the roll shared with the
             // Statistical tier), the leg timed at the cab's speed.
             if matches!(step.action, ActionKind::GoTo(_)) {
-                let street = crate::systems::streetwork::fare_leg(world, id, &target)
-                    .or_else(|| crate::systems::streetwork::full_cab(world, id, &target))
-                    .or_else(|| crate::systems::streetwork::exec_ride(world, id, &target));
+                let mut mode = "fare_leg";
+                let street = fare_segment(world, id, &target)
+                    .or_else(|| crate::systems::streetwork::fare_leg(world, id, &target))
+                    .or_else(|| {
+                        mode = "cab";
+                        crate::systems::streetwork::full_cab(world, id, &target)
+                    })
+                    .or_else(|| {
+                        mode = "exec_ride";
+                        crate::systems::streetwork::exec_ride(world, id, &target)
+                    });
                 if let Some(state) = street {
+                    leglog::start(world, id, &target, mode);
                     commute_started(world, id, &target);
                     if let Some(b) = world.comp_mut::<Brain>(id) {
                         b.exec = state;
@@ -755,13 +801,20 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
             // L1: an escort is a van ride of at most `escort_van_ticks` (the
             // suspect walked the guard's whole walk in cuffs, hours at a time).
             if step.action == ActionKind::Escort {
-                let mut timed = timed_goto(world, id, target.clone());
-                if let ExecState::GotoTimed { arrive_tick, .. } = &mut timed {
-                    *arrive_tick = (*arrive_tick).min(tick + world.config.life.escort_van_ticks);
-                }
+                let timed = match escort_leg(world, id, &target, lod) {
+                    Some(s) => s,
+                    None => {
+                        let mut timed = timed_goto(world, id, target.clone());
+                        if let ExecState::GotoTimed { arrive_tick, .. } = &mut timed {
+                            *arrive_tick = (*arrive_tick).min(tick + world.config.life.escort_van_ticks);
+                        }
+                        timed
+                    }
+                };
                 if let Some(b) = world.comp_mut::<Brain>(id) {
                     b.exec = timed;
                 }
+                leglog::start(world, id, &target, "escort");
                 return StepResult::Running;
             }
             // Transit T8, T12: on foot, a far GoTo may ride the El (the first
@@ -771,8 +824,28 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                     if let Some(b) = world.comp_mut::<Brain>(id) {
                         b.exec = state;
                     }
+                    leglog::start(world, id, &target, "el");
                     return StepResult::Running;
                 }
+            }
+            // The pre-view pass phase 5 (OPEN-139): a long walk walks in
+            // segments; each end re-starts the step (`exec::legs`).
+            if driving.is_none() && matches!(step.action, ActionKind::GoTo(_)) && legs::on(world) {
+                if let Some(state) = segment(world, id, &target, lod) {
+                    leglog::start(world, id, &target, "walk");
+                    if let Some(b) = world.comp_mut::<Brain>(id) {
+                        b.exec = state;
+                    }
+                    return StepResult::Running;
+                }
+            }
+            if world.leg_log.is_some() {
+                let mode = match driving {
+                    Some(crate::components::AssetKind::Flyer) => "fly",
+                    Some(_) => "drive",
+                    None => "walk",
+                };
+                leglog::start(world, id, &target, mode);
             }
             let state = match (driving, lod) {
                 (Some(crate::components::AssetKind::Flyer), _) => crate::systems::vehicles::fly(world, id, target),
@@ -952,6 +1025,77 @@ pub fn walk_origin(world: &World, id: EntityId) -> Option<TilePos> {
         Some(b) => Some(world.outside_door(b)),
         None => Some(pos.tile),
     }
+}
+
+/// The pre-view pass phase 5 (P12): an escort to the cells walks, at
+/// walking speed (a Full guard on foot with the suspect in tow, a Coarse
+/// one timed at the walk), up to `[legs] escort_walk_tiles`; past it the
+/// guard calls the van: `van_call_ticks` for it to come, then the drive
+/// with both aboard at the Car's speed (`[vehicles] mult`). No escort
+/// covers ground faster than its mode. `None` with `[legs]` off (the old
+/// timed leg capped at `escort_van_ticks`). Statistical mirror: none (an
+/// arrest is made by a body; a Statistical guard's arrests are the law's
+/// off-screen roll, with no leg).
+fn escort_leg(world: &mut World, id: EntityId, target: &GotoTarget, lod: Lod) -> Option<ExecState> {
+    let cfg = world.config.legs.clone()?;
+    let from = walk_origin(world, id)?;
+    let tiles = from.manhattan(target.tile);
+    let (state, ticks) = if tiles <= cfg.escort_walk_tiles {
+        let state = match lod {
+            Lod::Full => {
+                walking_goto(world, id, target.clone()).unwrap_or_else(|| timed_goto(world, id, target.clone()))
+            }
+            _ => timed_goto(world, id, target.clone()),
+        };
+        crate::systems::ownership::jobs2_row(world).escort_walks += 1;
+        (state, timed_walk(world, id, from, target.tile))
+    } else {
+        let m = crate::systems::vehicles::timed_mult_of(world, crate::components::AssetKind::Car);
+        let drive = ((Tick::from(tiles) * world.config.exec.move_ticks_full) as f32 * m).round().max(1.0) as Tick;
+        let ticks = Tick::from(cfg.van_call_ticks) + drive;
+        crate::systems::ownership::jobs2_row(world).escort_vans += 1;
+        (ExecState::GotoTimed { target: target.clone(), arrive_tick: world.tick + ticks, blocked_since: None }, ticks)
+    };
+    let tpm = u32::try_from(u64::from(tiles) * 100 / ticks.max(1)).unwrap_or(u32::MAX);
+    let row = crate::systems::ownership::jobs2_row(world);
+    row.escort_tpm_max = row.escort_tpm_max.max(tpm);
+    Some(state)
+}
+
+/// The pre-view pass phase 5 (the `fares` shape): a cab driver's leg past
+/// `[legs] leg_replan_tiles` drives in segments too, each timed at the
+/// cab's speed (the car seen en route, the rider aboard with it).
+fn fare_segment(world: &mut World, id: EntityId, target: &GotoTarget) -> Option<ExecState> {
+    if !legs::on(world) || !crate::systems::streetwork::on_fare(world, id) {
+        return None;
+    }
+    let from = walk_origin(world, id)?;
+    let end = legs::segment_end(world, from, target.tile)?;
+    let key = legs::plan_key(world, id)?;
+    let arrive_tick = world.tick + crate::systems::streetwork::cab_ticks(world, from, end);
+    world.segments.insert(id, key);
+    Some(ExecState::GotoTimed {
+        target: GotoTarget { dest: LocationKey::Street, tile: end, building: None },
+        arrive_tick,
+        blocked_since: None,
+    })
+}
+
+/// The pre-view pass phase 5 (OPEN-139): a walk past `[legs]
+/// leg_replan_tiles` toward `target` walks to the next segment's end first
+/// (`legs::segment_end`; a Full body on foot, a Coarse one timed), filed in
+/// `World::segments` against the plan step. `None`: one leg as before.
+fn segment(world: &mut World, id: EntityId, target: &GotoTarget, lod: Lod) -> Option<ExecState> {
+    let from = walk_origin(world, id)?;
+    let end = legs::segment_end(world, from, target.tile)?;
+    let key = legs::plan_key(world, id)?;
+    let leg = GotoTarget { dest: LocationKey::Street, tile: end, building: None };
+    let state = match lod {
+        Lod::Full => walking_goto(world, id, leg)?,
+        _ => timed_goto(world, id, leg),
+    };
+    world.segments.insert(id, key);
+    Some(state)
 }
 
 /// A Coarse Goto: arrive after Manhattan distance × move ticks; M12 D18: ×

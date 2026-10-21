@@ -205,7 +205,11 @@ fn test_map_text_round_trips() {
             citysim::map::MapDistrict { name: "South".into(), zone: citysim::Zone::Mid, x_from: 0, x_to: 12 },
         ],
         district_grid: grid,
-        lines: vec![citysim::config::TransitLineCfg { name: "Test Line".into(), waypoints: vec![[0, 4], [11, 4]] }],
+        lines: vec![citysim::config::TransitLineCfg {
+            name: "Test Line".into(),
+            waypoints: vec![[0, 4], [11, 4]],
+            in_flight: false,
+        }],
         comments: vec!["a test".into()],
         extra: vec![citysim::map::BuildingExtra { flats: Some(12), storeys: Some(9) }],
     };

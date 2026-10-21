@@ -4318,3 +4318,26 @@ sweep_walk_factor = 1.5            # P8: a round is planned only when its walk (
                                    # else the stops near the Recycler (in its district, within round_reach_tiles), trimmed
                                    # to fit; none: the shift is swept in the Recycler's yard
 arms_wait_hours = 24               # an off-screen buyer's arms sale waits this long for the dealer's body at the Bar
+
+# The pre-view pass phase 5 (docs/PREVIEW_PASS.md § 0 P10-P12, § 2 "20k legs"; OPEN-139, OPEN-115, OPEN-140's
+# remainder, OPEN-156): the long legs at 20k. Dropped with CITYSIM_LEGS_OFF=1 (which also drops a map's `L+` lines).
+# Placeholders.
+[legs]
+leg_replan_tiles = 40              # a Full or Coarse walking GoTo past this (Manhattan tiles, 80 min at [exec]
+                                   # move_ticks_full 2) walks in segments of this length; each end re-plans the rest
+                                   # (the cab, the El, the next segment): the body is seen en route, never frozen at
+                                   # its door for the whole leg (V6 corp 1: a CEO still 724 min at home)
+segment_snap = 6                   # a segment's end snaps to a walkable Road tile within this radius (none: one leg)
+escort_walk_tiles = 40             # P12: an escort walks, at walking speed, up to this; past it the guard calls the van
+van_call_ticks = 15                # P12: the van reaches the arrest this long after the call, then drives guard and
+                                   # suspect at the Car's speed ([vehicles] mult)
+exec_ride_home = true              # OPEN-140: an exec driven to his Hq ([service] exec_ride) is driven home the same way
+bed_by_ride = true                 # OPEN-140: the away bed ([life] bed_margin_tiles) reads the trip home by ride (the
+                                   # El, the exec's car), not the walk: a guard's patrol ending 150 tiles out sleeps home
+sweep_by_ride = true               # OPEN-156: the sweeper's way back to the Recycler reads the ride, not the walk
+fare_wait_ticks = 60               # the fares shape (OPEN-115): a booked rider waits at his door for a driver's body that
+                                   # reaches him within this at cab speed; farther, the Garage's off-screen cab ([service]
+                                   # cab_wait_ticks 30 is ~34 tiles at cab speed: the 20k island's Garages stand on the
+                                   # harbour, 200+ tiles from the Mid-Levels, so no body ever drove: 0 of 699 at base)
+fares_el_missed = true             # the fares shape: a commute of [jobs2] cab_min_tiles or more the El does not shorten
+                                   # takes the cab when the purse holds the fare and cab_reserve (no p_cab roll), both tiers
