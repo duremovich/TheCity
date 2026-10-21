@@ -3747,7 +3747,13 @@ const CHECKS: &[Check] = &[
     (19, "ripperdoc", Metric::KnownMetWeek, Bound::Min(1.6), 2.78, 9.47),
     (19, "ripperdoc", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
     (19, "ripperdoc", Metric::CommuteAbortsDay, Bound::Max(0.10), 0.00, 0.05),
-    (19, "sweeper", Metric::WalkHDay, Bound::Max(7.0), 5.21, 5.99),
+    // Not judged since the pre-view pass phase 5 (2026-10-21): d19 sweeper WalkHDay (a printed value, no bound).
+    // `[legs] sweep_by_ride` (OPEN-156) reads the way back to the Recycler by the ride, so a shift begun far
+    // from it is no longer the old stand on the beat (`sweep_stands`) but a commute to the Recycler (the round
+    // must end there, P8): 7.60 h/day with it, 6.23 with it off, 6.06 with `CITYSIM_LEGS_OFF`. The extra
+    // travel minutes are the in-shift ones with no round route (the commute to the post, ridden or walked:
+    // 44k -> 93k of +54k over the tier's sweepers; the walk to the first stop +4.6k, the way back +6.7k, the stops +1.2k). Moved for a
+    // known reason, the bullet demoted, the bound not widened (CLAUDE.md doctrine 2).
     (19, "sweeper", Metric::LongestSleepH, Bound::Min(3.5), 4.00, 4.08),
     (19, "sweeper", Metric::Energy0HWeek, Bound::Max(2.0), 0.00, 0.00),
     (19, "sweeper", Metric::KnownMetWeek, Bound::Min(2.2), 3.75, 4.67),
