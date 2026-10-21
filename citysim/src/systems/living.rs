@@ -12,6 +12,8 @@ pub fn run(world: &mut World) {
     crate::systems::leisure::hourly(world);
     // The pre-view pass phase 3 (OPEN-145): the counter's queued visits, each `counter_settle_window`.
     crate::systems::leisure::counter_due(world);
+    // The pre-view pass phase 4 (OPEN-119): the arms sales booked for a meeting.
+    crate::systems::weapons::arms_meetings(world);
     // The Real economy E27: the Statistical kitchen pass at 12:00.
     crate::systems::charity::hourly(world);
     // Jobs & lives phase 1: the Yards' and plants' crews, the outages, the

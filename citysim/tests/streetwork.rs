@@ -72,6 +72,7 @@ fn vendor_pitch(w: &mut World, a: EntityId) -> Pitch {
         closed_until: None,
         dry_days: 0,
         jobs_today: 0,
+        cut_paid: 0,
     };
     w.jobs2.pitches.insert(a, p.clone());
     p

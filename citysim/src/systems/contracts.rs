@@ -2485,6 +2485,12 @@ pub fn on_sighting(world: &mut World, observer: EntityId, who: EntityId, tile: T
         return;
     }
     let Some(ids) = world.locate_targets.get(&who).cloned() else { return };
+    // The pre-view pass phase 4 (P3, OPEN-119): a sighting is sold by an
+    // observer awake (a gang member asleep beside the target sold one).
+    if crate::systems::presence::on(world) && crate::systems::presence::asleep(world, observer) {
+        crate::systems::ownership::jobs2_row(world).sight_asleep += 1;
+        return;
+    }
     for id in ids {
         if sees(world, observer, id) {
             pay_sighting(world, id, observer, who, tile, false);

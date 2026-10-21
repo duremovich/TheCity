@@ -1177,6 +1177,11 @@ pub struct Pitch {
     /// Today's work done (a rickshaw's rides, a tinker's repairs).
     #[serde(default)]
     pub jobs_today: u8,
+    /// The pre-view pass phase 4 (P3, OPEN-119): of `take_today`, the coins
+    /// the pimp's cut was already taken from at a collection in person
+    /// (reset at midnight; written only when non-zero).
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub cut_paid: i64,
 }
 
 /// A gang's standing order, issued by the faction brain (`systems::faction`).
@@ -2381,6 +2386,11 @@ pub struct Brain {
     /// The shift key the patrol route belongs to.
     #[serde(default)]
     pub patrol_shift_key: Option<i64>,
+    /// The pre-view pass phase 4 (P8): a sweeper's round of street stops this
+    /// shift (`jobs::sweep_plan`; its legs are `patrol_legs`, its shift
+    /// `patrol_shift_key`). Written only while set.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sweep_route: Vec<TilePos>,
     /// Gang: the day the extortion task was done, and coins taken today (for SplitLoot).
     #[serde(default)]
     pub gang_task_day: Option<u64>,
@@ -2542,6 +2552,7 @@ impl Default for Brain {
             patrol_route: Vec::new(),
             patrol_legs: 0,
             patrol_shift_key: None,
+            sweep_route: Vec::new(),
             gang_task_day: None,
             loot_today: 0,
             court_candidate: None,

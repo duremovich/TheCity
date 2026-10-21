@@ -125,6 +125,59 @@ sleeper's `GoTo(Hotel)` resolves to `life::away_hotel` (the planner's Hotel), ne
 bed, by design E27). **Statistical mirror:** none needed: the midnight passes are tier-agnostic, and `moving_in` and
 the Hotel resolution steer Full and Coarse plans only (a Statistical body is off camera and has no plan).
 
+**Settlement by presence as built (phase 4, `systems/presence.rs`, `[presence]`; OPEN-119, OPEN-120, OPEN-154,
+P8).** One rule (P3): a Full or Coarse party is present at a place when its body stands in it awake
+(`presence::body_at`, not in a `Sleep`); a Statistical party is drawn present by a purpose-keyed draw consistent
+with its schedule (`presence::stat_home`: not on its attended shift, not 00:00-06:00, then `stat_home_p`). An
+encounter whose counterpart is absent posts nothing in either diary and is counted `presence_missed`; the shadow
+tool's camera narrates an encounter with an off-screen party, the pick awake, as `[off]` (a body elsewhere or the
+pick asleep stays `SETTLED APART`, the bug). Per item, with its Statistical mirror:
+- **The super's stop** (`service::super_stop`): serves only the tenants met at home (a body in the Block awake, a
+  Statistical one on the draw); the rest wait for the next round. Mirror: the Statistical super's first-hour stops
+  (`lod::stat_work`) meet tenants on the same rule, so a Statistical pair meets on the draw.
+- **The round's reach (OPEN-154)**: a round's stops (the super's, the vendor's, the tinker's; `trades::new_round`)
+  lie within `round_reach_tiles` of the post's door, so a near-home round can no longer span the district. Mirror:
+  `round_for` is the same list, the Statistical super is credited it.
+- **The pimp's collect** (`vice::pimp_collect`): needs the worker at his pitch (`streetwork::working`: a body
+  within `pitch_reach` of the spot, a Statistical one on the hour's `p_pitch` draw); else no collection, the next
+  hour's pitch is tried. **StreetCut at the meeting**: with a body on either side the pimp's cut is taken at each
+  collection, `pimp_cut` of the take since the last (`Pitch.cut_paid`), worker to pimp, `pimp_pass_up` of it to the
+  gang (`cut_at_meet`); the day's close takes none (the take nobody collected stays with the worker: a timing and
+  a total shift, P5's identity holds). Mirror: a Statistical-only pair keeps the cut at the day's close
+  (`vice::street_cut_at_close`). **The street worker's client** (`vice::street_payer`): the drawn payer is an
+  off-screen resident only; a body pays only in person (`client_near`).
+- **The sweeper (P8)**: a body sweeper's shift is a `round` (`jobs::sweep_plan`, before the commute in the Work
+  bypass): `sweep_stops` street stops of his beat, dirtiest first (ties by a keyed hash; the seeded set without
+  litter), spaced past two `sweep_radius`, within `round_reach_tiles` of the first, walked nearest-first; at each a
+  `Sweep` of `sweep_stop_min` cleans the tiles within `sweep_radius` (`sweep_per_hour` x the minutes:
+  `sweep_stops`); then the walk to the Recycler (the post) and a `Sweep` there to the shift's end, which closes and
+  pays it. The street credit follows the stops; the midnight ledger skips the body sweeper (a shift swept in the
+  yard credits nothing). Deviations, each measured: (1) the beat is used only when the round and the walks to it
+  and back fit the shift's time left from where he stands (`round_ticks`: the Manhattan tiles x
+  `sweep_walk_factor` 1.5 plus the stops); else the stops are the Recycler's own district's within
+  `round_reach_tiles` of its door, trimmed to fit (2k seed 42: a beat 185 tiles from the Recycler, a 370-minute
+  walk back, closed no shift and paid no wage); (2) a shift begun past a shift's walk from the Recycler is the old
+  stand on the beat, closed and paid there (`sweep_stands`; OPEN-139's legs); (3) the round's steps check their own
+  start (the planner reads the Recycler as no `Beat`). The relocation's work tile is the Recycler's door
+  (`life::work_tile`), not the day's beat. Mirror: the Statistical sweeper keeps the midnight ledger credit
+  (`districts::sanitation`); it has no plan.
+- **The arms sale** (`weapons::book_meeting`, `arms_meetings`): a Statistical buyer's weapon from a Bar whose dealer
+  is a body is booked at midnight (`World.arms_due`, saved) and sold at the first hour the dealer's body is in the
+  Bar (`buy` with the dealer present: the coins, the hand-over, `ArmsDealing` raised at his tile, the witnesses the
+  bodies there), lapsing after `arms_wait_hours` (`arms_missed`). Mirror: a Statistical dealer sells at midnight as
+  before (`arms_midnight`); a Gunsmith's licensed sale is not an encounter with a person and stays.
+- **The Locate sighting** (`contracts::on_sighting`): an observer asleep sells none (`sight_asleep`). Mirror: none
+  needed (a body's sighting only; the off-screen tracker's report is the contract's own resolution).
+- **The papers and the Fixer owner's cut** (`gray::papers_daily`, `service::walk_in_sale`, `collected`): a forger's
+  papers ordered at midnight are paid at the handover in the Fixer's open hours (`papers_handover`; a buyer short
+  then is dropped), the forger's share to him, the owner's `fixer_cut` to the member of staff serving, who holds it
+  (`World.fixer_owed`, saved) until the owner collects in person at the Fixer (`collected`) and hands it over then.
+  A body buyer is handed his papers only inside the Fixer, and a brokered post or take (`service::contract_party`)
+  meets a server on duty with a body party inside; the Fixer's book takes the credit off hours only between two
+  Statistical parties (the 2k camera read a forger asleep at 00:00 "serving" clients across the city). Mirror: a Statistical buyer or party is served at the
+  hour as before; the clerk's bribe (no Fixer) stays at midnight. Left open: a runner's `FixerCut` on a data sale (`contracts::on_sell_data`) still pays the owner at the
+  sale (`OPEN-155`).
+
 **The dead trades.** The cab (`OPEN-115`) is the `fares` shape plus the 20k legs creating demand. The bouncer
 (`OPEN-121`) is the `counter` shape on the door tile, where `door_refusals` can finally fire. The leaders
 (`OPEN-118`/`OPEN-128`, Dylan 2026-10-19: hold court and keep the delegation) get a `round` over the gang's

@@ -139,6 +139,11 @@ fn test_no_teacher_no_taught_day_and_a_taught_day_counts() {
 #[test]
 fn test_super_round_takes_the_nearest_blocks_to_home() {
     let mut w = city();
+    // The near-home rule alone: the round's reach (the pre-view pass phase 4,
+    // OPEN-154; `presence.rs` tests it) left this landlord too few Blocks.
+    if let Some(c) = w.config.presence.as_mut() {
+        c.round_reach_tiles = u32::MAX;
+    }
     let (sup, post) = worker(&w, "super");
     let row = trades::row_of(&w, w.comp::<Job>(sup).expect("job").role).expect("row").clone();
     assert!(row.round_near && row.tied_housing, "the shipped super row carries the phase 3 keys");
@@ -269,6 +274,10 @@ fn test_super_stop_serves_notice_and_takes_the_door_rent() {
         h.rent_due = 3.4;
     }
     set_coins(&mut w, tenant, 10);
+    // The pre-view pass phase 4 (P3): the tenant is at home and awake.
+    citysim::systems::lod::set_lod(&mut w, tenant, citysim::components::Lod::Full);
+    w.enter_building(tenant, stop);
+    w.comp_mut::<Brain>(tenant).expect("brain").exec = citysim::ExecState::Idle;
     let owner_before = w.purse(owner);
     service::super_stop(&mut w, sup, stop);
     let j = jobs2(&w);

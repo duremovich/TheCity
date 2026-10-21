@@ -684,6 +684,72 @@ pub fn offer(
     (p <= coins).then_some((bar, t, p, false))
 }
 
+/// The pre-view pass phase 4 (P3, OPEN-119): an off-screen buyer's sale
+/// from a dealer who is a body, booked at midnight and made when the
+/// dealer's body is at the Bar (`World::arms_due`, saved).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ArmsMeet {
+    pub buyer: EntityId,
+    pub bar: EntityId,
+    pub pick: ShopPick,
+    /// The meeting lapses after this tick (`[presence] arms_wait_hours`).
+    pub until: Tick,
+}
+
+/// The pre-view pass phase 4 (`assets::stat_shop`, midnight): a
+/// Statistical buyer's weapon from a dealer's Bar. With `[presence]` on and
+/// the Bar's dealer a body, the sale is booked for the meeting (`true`);
+/// else (off, a Gunsmith, a Statistical dealer: the mirror) `false`, and
+/// the caller sells off screen now (`arms_midnight` counts the dealer's).
+pub fn book_meeting(world: &mut World, buyer: EntityId, seller: EntityId, pick: &ShopPick) -> bool {
+    let Some(cfg) = world.config.presence.as_ref() else { return false };
+    if world.comp::<Building>(seller).is_none_or(|b| b.kind == BuildingKind::Gunsmith) {
+        return false;
+    }
+    let Some((dealer, _)) = bar_arms_dealer(world, seller, false) else { return false };
+    if !crate::systems::presence::is_body(world, dealer) {
+        ownership::jobs2_row(world).arms_midnight += 1;
+        return false;
+    }
+    let until = world.tick + Tick::from(cfg.arms_wait_hours) * TICKS_PER_HOUR;
+    if !world.arms_due.iter().any(|m| m.buyer == buyer) {
+        world.arms_due.push(ArmsMeet { buyer, bar: seller, pick: pick.clone(), until });
+    }
+    true
+}
+
+/// The pre-view pass phase 4 (P3, OPEN-119), hourly: each booked arms sale
+/// whose dealer's body stands in the Bar now is made there (`buy` with the
+/// dealer present: the coins, the hand-over, `ArmsDealing` raised at his
+/// tile, the witnesses the bodies present); lapsed meetings and buyers gone
+/// are dropped (`arms_missed`), the rest wait.
+pub fn arms_meetings(world: &mut World) {
+    if world.arms_due.is_empty() || !world.tick.is_multiple_of(TICKS_PER_HOUR) {
+        return;
+    }
+    let now = world.tick;
+    let due = std::mem::take(&mut world.arms_due);
+    let mut keep = Vec::with_capacity(due.len());
+    for m in due {
+        let gone = !crate::systems::law::living(world, m.buyer) || world.has::<Sentence>(m.buyer);
+        if gone || now > m.until {
+            ownership::jobs2_row(world).arms_missed += 1;
+            continue;
+        }
+        if bar_arms_dealer(world, m.bar, true).is_none() {
+            keep.push(m);
+            continue;
+        }
+        if buy(world, m.buyer, m.bar, &m.pick, true).is_ok() {
+            ownership::jobs2_row(world).arms_meet += 1;
+        } else {
+            ownership::jobs2_row(world).arms_missed += 1;
+        }
+    }
+    keep.append(&mut world.arms_due);
+    world.arms_due = keep;
+}
+
 /// May `BuyAsset` run for a weapon at `b` now (an open Gunsmith with
 /// stock, or a Bar with an arms dealer)?
 pub fn sale_open(world: &World, b: EntityId) -> bool {

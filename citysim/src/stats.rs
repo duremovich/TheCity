@@ -890,6 +890,34 @@ pub struct Jobs2Cols {
     pub served_day: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub served_21h: u32,
+    // The pre-view pass phase 4 (P3, P8): encounters skipped for an absent
+    // or sleeping counterpart (served or collected later, or off screen),
+    // the sweeper's street stops and rounds walked, the shifts begun too far
+    // from the Recycler to walk one (the old stand on the beat), the dealer's arms sales
+    // made at a meeting with the off-screen buyer, those still booked at
+    // midnight (both Statistical), meetings that lapsed, the street cuts
+    // paid at the pimp's collection, Locate sightings not sold by a sleeper,
+    // and the papers paid at the handover.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub presence_missed: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub sweep_stops: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub sweep_rounds: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub sweep_stands: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub arms_meet: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub arms_midnight: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub arms_missed: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub cut_at_meet: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub sight_asleep: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub papers_handover: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -1193,6 +1221,16 @@ impl Jobs2Cols {
                 "counter_queued",
                 "served_day",
                 "served_21h",
+                "presence_missed",
+                "sweep_stops",
+                "sweep_rounds",
+                "sweep_stands",
+                "arms_meet",
+                "arms_midnight",
+                "arms_missed",
+                "cut_at_meet",
+                "sight_asleep",
+                "papers_handover",
             ]
             .into_iter()
             .map(str::to_string),
@@ -1490,6 +1528,16 @@ impl Jobs2Cols {
             self.counter_queued.to_string(),
             self.served_day.to_string(),
             self.served_21h.to_string(),
+            self.presence_missed.to_string(),
+            self.sweep_stops.to_string(),
+            self.sweep_rounds.to_string(),
+            self.sweep_stands.to_string(),
+            self.arms_meet.to_string(),
+            self.arms_midnight.to_string(),
+            self.arms_missed.to_string(),
+            self.cut_at_meet.to_string(),
+            self.sight_asleep.to_string(),
+            self.papers_handover.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

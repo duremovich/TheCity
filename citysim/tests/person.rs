@@ -1484,7 +1484,10 @@ fn probe_worker_sleeps_the_night_before_a_shift() {
 /// WalkHDay 10.25 against 6.74-7.60, 7.43 with items 8-10 off): a sweeper's
 /// working day is its beat, not the Recycler's door. Housing the staff near
 /// work (world creation's relocation, then the nightly passes) leaves the
-/// sweepers no farther from their beats than without it.
+/// sweepers no farther from their beats than without it. The pre-view pass
+/// phase 4 (P8, Dylan 2026-10-20): a body sweeper's round ends at the
+/// Recycler (the post), the point his relocation anchors to, so with
+/// `[presence]` on the walk read is Home to the Recycler's door.
 #[test]
 fn probe_sweeper_stays_near_its_beat() {
     let beat_walk = |near: bool| -> (f64, usize) {
@@ -1498,8 +1501,13 @@ fn probe_sweeper_stays_near_its_beat() {
             .into_iter()
             .filter(|&a| citysim::systems::jobs::is_sweeper(&w, a))
             .filter_map(|a| {
-                let d = citysim::systems::jobs::beat_of(&w, a)?;
-                let c = w.districts.get(d.index())?.centroid;
+                let c = if w.config.presence.is_some() {
+                    let post = w.comp::<Job>(a)?.employer?;
+                    w.comp::<Building>(post)?.door
+                } else {
+                    let d = citysim::systems::jobs::beat_of(&w, a)?;
+                    w.districts.get(d.index())?.centroid
+                };
                 let hd = home(&w, a).and_then(|h| w.comp::<Building>(h)).map(|b| b.door)?;
                 Some(commute_cost(&w, hd, c))
             })
@@ -1513,7 +1521,7 @@ fn probe_sweeper_stays_near_its_beat() {
         (on.join().expect("the near city"), off.join().expect("the far city"))
     });
     eprintln!(
-        "sweepers' mean Home-to-beat walk on day 15: items 8-10 on {on:.0} ticks ({n_on}), off {off:.0} ({n_off})"
+        "sweepers' mean Home-to-work walk on day 15: items 8-10 on {on:.0} ticks ({n_on}), off {off:.0} ({n_off})"
     );
     assert!(on <= off, "housing near work moved the sweepers away from their beats");
 }
@@ -2588,7 +2596,9 @@ fn probe_parent_with_the_fee_buys_the_child_out_within_fourteen_days() {
         for _ in 0..14 {
             let eve = (w.tick / TICKS_PER_DAY + 1) * TICKS_PER_DAY - 1;
             while w.tick < eve {
-                if !law::living(&w, p) {
+                // ... or jailed (the pre-view pass phase 4's city: the first
+                // pair's mother sentenced on day 7 for the rest of the fortnight).
+                if !law::living(&w, p) || w.has::<citysim::Sentence>(p) {
                     gone = true;
                     break;
                 }
@@ -2621,10 +2631,10 @@ fn probe_parent_with_the_fee_buys_the_child_out_within_fourteen_days() {
             run = Some((w, p, child, camp, bought));
             break;
         }
-        eprintln!("pair {skip}: parent {} died before the fortnight ran; the next pair", p.index);
+        eprintln!("pair {skip}: parent {} died or was jailed before the fortnight ran; the next pair", p.index);
     }
     let (w, p, _child, camp, bought) =
-        run.unwrap_or_else(|| panic!("no parent of the first {tried} pairs lived the fortnight"));
+        run.unwrap_or_else(|| panic!("no parent of the first {tried} pairs lived the fortnight free"));
     let fee = w.config.service.buyout_fee;
     let paid = w.events.iter().any(|e| e.kind == EventKind::CampBuyout && e.actors.contains(&p));
     eprintln!(
@@ -2686,11 +2696,11 @@ fn broke_parent_visits(mut c: World) -> (bool, bool) {
 /// shift (the near round and tied housing; V4 read 63-79 h of travel a
 /// week), the walking read from his own exec state on the day-22 shift;
 /// the control is the civic-off city's round, printed.
-/// Gap since the pre-view pass phase 3 (OPEN-154): its history picks super
-/// 596, whose six nearest-home stops span the district (y 6-70): 514 of
-/// 540 shift minutes walking. The round's reach is phase 4's (round presence).
+/// OPEN-154 (the pre-view pass phase 4): the phase 3 history picked super
+/// 596, whose six nearest-home stops spanned the district (y 6-70): 514 of
+/// 540 shift minutes walking. A round's stops now lie within `[presence]
+/// round_reach_tiles` of the post.
 #[test]
-#[ignore = "gap: OPEN-154"]
 fn probe_super_walks_under_four_hours_a_shift() {
     fn walked(mut w: World, label: &str) -> (u64, u64) {
         w.run_ticks(22 * TICKS_PER_DAY + 8 * TICKS_PER_HOUR);
@@ -2815,9 +2825,6 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
     let mut cfg = Config::load();
     cfg.vice.p_street_visit = 1.0;
     cfg.vice.street_intimacy = 1.0;
-    // Pinned to the shapes before haul and counter (the pre-view pass phase 3
-    // moved the 12-day history: the second night's cut was not his).
-    cfg.drop_haul_counter();
     let mut w = World::new(42, cfg);
     let start = 12 * TICKS_PER_DAY + 17 * TICKS_PER_HOUR;
     w.run_ticks(start);
@@ -2941,8 +2948,18 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
         closed_until: None,
         dry_days: 0,
         jobs_today: 0,
+        cut_paid: 0,
     };
     w.jobs2.pitches.insert(o, p);
+    // The worker off screen, so he works the hours his `p_pitch` names (a
+    // body of the in-test pitch never walks to it: the pre-view pass phase 4
+    // collects only from a worker at his pitch).
+    citysim::systems::lod::set_lod(&mut w, o, citysim::components::Lod::Statistical);
+    // ... and at it every hour of them (the table's `p_pitch`, 0.66, missed
+    // both of seed 42's collections: the probe is the pimp's, not the draw's).
+    if let Some(t) = w.stat_table.as_mut() {
+        t.p_pitch = Some(1.0);
+    }
     w.jobs2.vice.pimps.insert(d.index() as u16, pimp);
     pin(&mut w, pimp);
     let his_home = w.comp::<citysim::components::Household>(pimp).and_then(|h| h.home);
@@ -2997,13 +3014,28 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
             }
         }
     };
+    // The pre-view pass phase 4 (P3, OPEN-119): with `[presence]` on the cut
+    // is taken when he meets the worker at the pitch (`cut_at_meet`), not at
+    // midnight: the purse's moves at those ticks.
+    let presence = w.config.presence.is_some();
+    let met_cut = |w: &World| w.stats.current.jobs2.as_ref().map_or(0, |j| j.cut_at_meet);
+    let mut at_meet = 0i64;
     // Two nights (a Statistical worker works the hours his `p_pitch` names).
     for midnight in [13 * TICKS_PER_DAY, 14 * TICKS_PER_DAY] {
+        let (mut last_coins, mut last_meet) = (coins(&w, pimp), met_cut(&w));
         calm(&mut w, midnight - 1, &mut |w| {
             if step(w, pimp) == Some(ActionKind::Collect) {
                 collecting += 1;
             }
+            let (c, m) = (coins(w, pimp), met_cut(w));
+            if m > last_meet {
+                at_meet += c - last_coins;
+            }
+            (last_coins, last_meet) = (c, m);
         });
+        if presence {
+            continue;
+        }
         let take = w.jobs2.pitches.get(&o).map_or(0, |p| p.take_today);
         // His rent is paid ahead (a credit the midnight accrual does not clear): the
         // probe reads the cut, not the landlord's coin.
@@ -3025,7 +3057,12 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
     let met = citysim::systems::service::regulars_of(&w, pimp).iter().any(|r| r.who == o);
     eprintln!("pimp {}: {collecting} ticks collecting, met the worker {met}", pimp.index);
     assert!(collecting > 0 && met, "the pimp never walked his pitch");
-    assert!(kept_nights > 0, "no night kept a cut (the probe's premise)");
+    if presence {
+        eprintln!("pimp {}: {at_meet} coins kept from the cuts taken at his collections", pimp.index);
+        assert!(at_meet > 0, "no cut reached his purse at a collection");
+    } else {
+        assert!(kept_nights > 0, "no night kept a cut (the probe's premise)");
+    }
 }
 
 /// Lives at work phase 5 (§ 2.4, § 9.1): a CEO meets at least one named

@@ -2302,11 +2302,19 @@ fn god_child_camp_sweep() {
     use citysim::systems::{ages, camp};
     let mut taken = 0usize;
     let mut names: Vec<String> = Vec::new();
+    let mut sweep_day: Option<u64> = None;
     let r = run_v8("god_child_camp_sweep", |w, day, watched| {
-        if day != 10 {
+        // Day 10, or the first day after it with a child in the city: the 2k
+        // world seeds no children, so one exists only when a birth has landed
+        // (births are incidental history, 0-3 by day 10 on seeds 42-44).
+        if day < 10 || sweep_day.is_some() {
             return;
         }
         let kids: Vec<EntityId> = w.with::<citysim::components::Child>();
+        if kids.is_empty() {
+            return;
+        }
+        sweep_day = Some(day);
         let in_camp = |w: &World, k: EntityId| {
             w.comp::<citysim::Household>(k)
                 .and_then(|h| h.home)
@@ -2337,25 +2345,28 @@ fn god_child_camp_sweep() {
                 watched.extend(camp::parents_of(w, k));
             }
         }
-        eprintln!("day 10: {taken} children taken ({street} on the street, {} children in the city)", kids.len());
+        eprintln!("day {day}: {taken} children taken ({street} on the street, {} children in the city)", kids.len());
     });
     r.print_v8(&[(0, 10), (10, 30), (30, 60)], lives_rows());
     assert!(r.failed.is_empty(), "failed: {:?}", r.failed);
-    assert!(taken >= 1, "no child taken");
+    assert!(taken >= 1, "no child taken (first child in the city: day {sweep_day:?})");
+    let from = sweep_day.expect("a sweep day") + 1;
     let c = v8_control();
     let answered = |run: &V8Run| {
-        v12_sum(run, 11, 60, |j| f64::from(j.camp_visits))
-            + v12_sum(run, 11, 60, |j| f64::from(j.camp_buyouts))
-            + v12_sum(run, 11, 60, |j| f64::from(j.camp_breakouts))
+        v12_sum(run, from, 60, |j| f64::from(j.camp_visits))
+            + v12_sum(run, from, 60, |j| f64::from(j.camp_buyouts))
+            + v12_sum(run, from, 60, |j| f64::from(j.camp_breakouts))
     };
     let (a, b) = (answered(&r), answered(c));
-    eprintln!("FINDING the city's Camp answers days 11-59 (visits + buy-outs + break-outs): {a:.0} (control {b:.0})");
+    eprintln!(
+        "FINDING the city's Camp answers days {from}-59 (visits + buy-outs + break-outs): {a:.0} (control {b:.0})"
+    );
     // The parents' own answers: the story keeps every event naming a watched
     // entity (the taken and their parents).
     let answers = |name: &str| {
         r.story
             .iter()
-            .filter(|(d, _, _)| (11..60).contains(d))
+            .filter(|(d, _, _)| (from..60).contains(d))
             .filter(|(_, k, t)| {
                 matches!(k, EventKind::CampBuyout | EventKind::CampBreakout)
                     || (*k == EventKind::Visited && t.contains("(a Camp child)"))
@@ -2364,7 +2375,7 @@ fn god_child_camp_sweep() {
             .count()
     };
     let per: Vec<(&str, usize)> = names.iter().map(|n| (n.as_str(), answers(n))).collect();
-    eprintln!("the parents' answers days 11-59 per taken child: {per:?}");
+    eprintln!("the parents' answers days {from}-59 per taken child: {per:?}");
     assert!(per.iter().all(|&(_, n)| n >= 1), "the parents of the taken did not answer: {per:?}");
 }
 

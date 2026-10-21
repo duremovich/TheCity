@@ -301,7 +301,10 @@ fn close_the_day(world: &mut World) {
             Some(c) => (Some(c.gang), c.frac),
             None => (gang, cfg.cut_frac),
         };
-        if let Some(g) = gang.filter(|_| p.take_today > 0) {
+        // The pre-view pass phase 4 (OPEN-119): a pimp's cut with a body on
+        // either side was taken at his collections in person, not here.
+        let at_close = pimp.is_none_or(|c| crate::systems::vice::street_cut_at_close(world, &p, &c));
+        if let Some(g) = gang.filter(|_| p.take_today > 0 && at_close) {
             let cut = (p.take_today as f32 * frac).round() as i64;
             // Lives at work phase 4b (§ 2.3): the cut lands in the pimp's
             // purse; he passes `pimp_pass_up` of it to the gang.
@@ -345,6 +348,7 @@ fn close_the_day(world: &mut World) {
             x.take_week = x.take_week - x.take_week / 7 + x.take_today;
             x.dry_days = if x.take_today > 0 { 0 } else { x.dry_days.saturating_add(1) };
             x.take_today = 0;
+            x.cut_paid = 0;
             x.jobs_today = 0;
         }
     }
@@ -459,6 +463,7 @@ fn openings(world: &mut World) {
             closed_until: None,
             dry_days: 0,
             jobs_today: 0,
+            cut_paid: 0,
         };
         world.jobs2.pitches.insert(a, p);
         count[d.index()] += 1;

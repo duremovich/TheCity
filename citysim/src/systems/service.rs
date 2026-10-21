@@ -485,7 +485,16 @@ pub fn super_stop(world: &mut World, id: EntityId, block: EntityId) {
                 && crate::systems::law::living(world, t)
         })
         .collect();
+    // The pre-view pass phase 4 (P3, OPEN-120): only a tenant present and
+    // awake is served (a body in the Block, a Statistical one on the home
+    // draw); the rest wait for the next round (`presence_missed`).
+    let presence = crate::systems::presence::on(world);
+    let key = u64::from(id.index);
     for t in tenants {
+        if presence && !crate::systems::presence::met_at_home(world, t, block, key) {
+            crate::systems::presence::missed(world);
+            continue;
+        }
         serve(world, id, t, block, ServeKind::Tenant, 0);
     }
 }
@@ -912,6 +921,10 @@ pub struct WalkIn {
     pub forger: EntityId,
     pub tier: u8,
     pub day: u64,
+    /// The pre-view pass phase 4 (P3, OPEN-119): the order is paid at the
+    /// handover, not at midnight (written only when set).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unpaid: bool,
 }
 
 /// Is `id` a graded member of staff (its post graded, or its base grade)?
@@ -1152,6 +1165,24 @@ pub fn contract_party(world: &mut World, party: EntityId, fixer: EntityId) {
     if !tower_on(world) || party == EntityId::NONE || !world.has::<Brain>(party) {
         return;
     }
+    // The pre-view pass phase 4 (P3): the encounter needs both parties: a
+    // server on duty in the Fixer and a body party inside it (a Statistical
+    // one is credited at the hour); the book credit off the hours only
+    // between two Statistical parties (the mirror), never to a body asleep.
+    if crate::systems::presence::on(world) {
+        let body = |x: EntityId| crate::systems::presence::is_body(world, x);
+        let here = !body(party) || crate::systems::presence::body_at(world, party, fixer);
+        let server = fixer_server(world, fixer, party)
+            .filter(|_| here)
+            .or_else(|| fixer_book(world, fixer, party).filter(|&s| !body(s) && !body(party)));
+        let Some(server) = server else {
+            crate::systems::presence::missed(world);
+            return;
+        };
+        ownership::jobs2_row(world).contract_encounters += 1;
+        fixer_meet(world, server, party, fixer, 0);
+        return;
+    }
     let Some(server) = fixer_server(world, fixer, party).or_else(|| fixer_book(world, fixer, party)) else { return };
     ownership::jobs2_row(world).contract_encounters += 1;
     fixer_meet(world, server, party, fixer, 0);
@@ -1183,10 +1214,36 @@ fn walk_in_sale(world: &mut World, w: WalkIn) -> Option<bool> {
         ownership::jobs2_row(world).walk_ins_dropped += 1;
         return None;
     }
+    // The pre-view pass phase 4 (P3): a body buyer is handed his papers in
+    // the Fixer, not across the city (he waits for his walk).
+    if crate::systems::presence::on(world)
+        && crate::systems::presence::is_body(world, w.buyer)
+        && !crate::systems::presence::body_at(world, w.buyer, w.fixer)
+    {
+        return Some(false);
+    }
     let Some(server) = fixer_server(world, w.fixer, w.buyer) else { return Some(false) };
     let tier = w.tier.max(1);
     let price = world.config.gray.id_price[usize::from(tier - 1)];
     let forger = if crate::systems::law::living(world, w.forger) { w.forger } else { server };
+    // The pre-view pass phase 4 (P3, OPEN-119): paid here, at the handover:
+    // the forger's share to him, the owner's cut to the server, who holds it
+    // for the owner's collection in person (`collected`).
+    if w.unpaid {
+        if world.purse(Some(w.buyer)) < price {
+            ownership::jobs2_row(world).walk_ins_dropped += 1;
+            return None;
+        }
+        let cut = (price as f32 * world.config.gray.fixer_cut).round() as i64;
+        ownership::pay(world, Some(w.buyer), Some(forger), price - cut, Flow::Gray);
+        let held = ownership::pay(world, Some(w.buyer), Some(server), cut, Flow::Gray);
+        if held > 0 {
+            world.fixer_owed.entry(w.fixer).or_default().push((server, held));
+        }
+        let row = ownership::jobs2_row(world);
+        row.fake_sold += 1;
+        row.papers_handover += 1;
+    }
     world.jobs2.gray.papers.insert(w.buyer, crate::systems::gray::Papers { tier, fake: true, forger: Some(forger) });
     ownership::jobs2_row(world).walk_ins_served += 1;
     fixer_meet(world, server, w.buyer, w.fixer, price);
@@ -1236,7 +1293,8 @@ pub fn queue_walk_in(world: &mut World, buyer: EntityId, fixer: EntityId, forger
         return;
     }
     let day = world.day();
-    world.walk_ins.push(WalkIn { buyer, fixer, forger, tier, day });
+    let unpaid = crate::systems::presence::on(world);
+    world.walk_ins.push(WalkIn { buyer, fixer, forger, tier, day, unpaid });
 }
 
 /// Is `buyer` queued for a walk-in?
@@ -1292,6 +1350,21 @@ pub fn collected(world: &mut World, owner: EntityId, fixer: EntityId) {
     let d = world.district_of_building(fixer);
     for &s in &staff {
         encounter_post(world, "Fixer", owner, s, Some(fixer), d, ServeKind::Client, 0);
+    }
+    // The pre-view pass phase 4 (P3, OPEN-119): the cut held by the staff
+    // present is handed to the owner now (the rest waits for them).
+    if let Some(owed) = world.fixer_owed.remove(&fixer) {
+        let mut left = Vec::new();
+        for (holder, coins) in owed {
+            if staff.contains(&holder) {
+                ownership::pay(world, Some(holder), Some(owner), coins, Flow::Gray);
+            } else if crate::systems::law::living(world, holder) {
+                left.push((holder, coins));
+            }
+        }
+        if !left.is_empty() {
+            world.fixer_owed.insert(fixer, left);
+        }
     }
     let text = format!("{} collected the week's cut at {} in person", world.name_of(owner), world.name_of(fixer));
     world.push_event(EventKind::Served, &[owner, fixer], text);

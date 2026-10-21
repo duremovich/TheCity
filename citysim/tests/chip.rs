@@ -270,6 +270,7 @@ fn test_patrol_sweeps_a_street_pitch() {
         closed_until: None,
         dry_days: 0,
         jobs_today: 0,
+        cut_paid: 0,
     };
     let d = p.district.index();
     w.districts[d].stance = Stance::Patrol;
