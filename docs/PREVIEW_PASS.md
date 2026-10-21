@@ -19,6 +19,9 @@ camera, rows 1-7, plus the dead trades. The gate is a Shadow V7 at 20k with the 
 | P10 | The 20k legs: **diagnose first, then the El plus the cab**. The El already rides (`systems/transit.rs`, `transit::choose`); the island has 2 lines to the generator's 20. Phase 5 finds why 300-900 min legs walk, adds island El lines (their transit data or `[[transit.lines]]` rows), routes the trips the El misses to `fares`, and segment-replans what still walks. | Dylan 2026-10-20 |
 | P11 | The island's extra El lines: **import TheCityGraphics' own transit first** (the Tai Ning Road tram, any rail in its export) through the importer, **then fill** with `[[transit.lines]]` rows the phase 5 agent proposes between district cores; every authored line is listed in the phase report for Dylan's veto. | Dylan 2026-10-21 |
 | P12 | Long escorts: **walk at walking speed up to a distance, past it the precinct van** (the transfer van as a vehicle trip with the guard and the suspect aboard). No escort covers ground faster than its mode allows. | Dylan 2026-10-21 |
+| P13 | The leader's `round` **collects protection in person**: its stops replace the off-screen collection, and a stop with the owner out collects nothing that day (P3). The coin flows that move are printed FINDINGs at the gate. | Dylan 2026-10-21 |
+| P14 | **Court at the Hideout** is a gathering: the lieutenants take orders there, and members passing through hand over their take in person. Petitioners (debtors, locals asking favours) wait for the pressure pass. | Dylan 2026-10-21 |
+| P15 | A due order whose lieutenant is not at court **waits for the next court, up to a cap** (config, about a day). Past the cap the leader walks to the lieutenant and gives the order there. Raids may slip; they must not vanish. | Dylan 2026-10-21 |
 
 ## 1. The five shapes (OPEN-137)
 
@@ -250,7 +253,7 @@ dead ones with their off branches, and keep the config paths.
 | 3 | `haul` + `counter` (courier 141, cook 145, bouncer 121, barkeep) | parcels handed; `door_refusals`; day-cook served |
 | 4 | presence settlement (P3: 119, 120, the arms sale, Locate) + `round` presence (super, sweeper, street worker) | served-while-absent = 0; `[off]` narration share |
 | 5 | 20k legs (139) + `fares` (cab 115, rickshaw) | GoTo legs > 120 min at 20k; cab trips driven by a body |
-| 6 | leaders (118, 128) | raids/parleys/court in leader diaries |
+| 6 | leaders (118, 128; P9, P13-P15) | rounds, court and orders given in person in leader diaries; raids per 30 days against the base (they must not fall to 0) |
 | gate | Shadow V7 at 20k (seeds 42-44 × 30, the V6 tool, the seven critics), full measurement set, milestone tier | V6 § Before the camera rows 1-7 read as fixed or demoted with a reason |
 
 Each phase has an off switch while it is in flight (doctrine 6), a failing test first (doctrine 9), and the 20k
@@ -258,4 +261,4 @@ seed 42 × 30 counters beside the 2k ones. Phases 0 and 1 are independent of 2-6
 
 ## 4. Questions for Dylan
 
-All four answered 2026-10-20 (P7-P10).
+All answered: P7-P10 on 2026-10-20, P11-P15 on 2026-10-21.
