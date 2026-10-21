@@ -17,6 +17,8 @@ camera, rows 1-7, plus the dead trades. The gate is a Shadow V7 at 20k with the 
 | P8 | The sweeper is a **`round` over the district's street tiles, ending at the Recycler** (the post), replacing `TendGraves` at the Recycler; the street credit follows the stops walked, not the midnight ledger. | Dylan 2026-10-20 |
 | P9 | Leaders get **the visible half now**: a `round` over the gang's businesses, a court block at the Hideout, orders to a lieutenant given in person (P3). Raid strategy, war cooling (OPEN-039) and inter-gang parleys stay in the pressure pass. | Dylan 2026-10-20 |
 | P10 | The 20k legs: **diagnose first, then the El plus the cab**. The El already rides (`systems/transit.rs`, `transit::choose`); the island has 2 lines to the generator's 20. Phase 5 finds why 300-900 min legs walk, adds island El lines (their transit data or `[[transit.lines]]` rows), routes the trips the El misses to `fares`, and segment-replans what still walks. | Dylan 2026-10-20 |
+| P11 | The island's extra El lines: **import TheCityGraphics' own transit first** (the Tai Ning Road tram, any rail in its export) through the importer, **then fill** with `[[transit.lines]]` rows the phase 5 agent proposes between district cores; every authored line is listed in the phase report for Dylan's veto. | Dylan 2026-10-21 |
+| P12 | Long escorts: **walk at walking speed up to a distance, past it the precinct van** (the transfer van as a vehicle trip with the guard and the suspect aboard). No escort covers ground faster than its mode allows. | Dylan 2026-10-21 |
 
 ## 1. The five shapes (OPEN-137)
 
