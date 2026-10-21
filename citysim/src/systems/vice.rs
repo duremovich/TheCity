@@ -370,6 +370,14 @@ pub fn pimp_collect(world: &mut World, id: EntityId, target: Option<EntityId>) -
     if !is_street_pitch(world, &p) || pimp_district(world, id) != Some(p.district) {
         return false;
     }
+    // The pre-view pass phase 4 (P3, OPEN-120): the collection needs both
+    // bodies: the worker at his pitch (`streetwork::working`: a body within
+    // `pitch_reach` of the spot, a Statistical one on the hour's draw), else
+    // no "collected" line in either diary (the next hour's pitch is tried).
+    if crate::systems::presence::on(world) && !crate::systems::streetwork::working(world, &p) {
+        crate::systems::presence::missed(world);
+        return true;
+    }
     collection(world, id, worker, p.district);
     true
 }
@@ -378,6 +386,50 @@ fn collection(world: &mut World, pimp: EntityId, worker: EntityId, d: DistrictId
     ownership::jobs2_row(world).pimp_collections += 1;
     let kind = crate::components::ServeKind::Staff;
     crate::systems::service::encounter_post(world, "pimp", pimp, worker, None, d, kind, 0);
+    cut_at_meeting(world, pimp, worker);
+}
+
+/// The pre-view pass phase 4 (P3, OPEN-119): with `[presence]` on and a
+/// body on either side, the pimp's cut is taken when he meets the worker:
+/// `pimp_cut` of the take since the last collection (`Pitch.cut_paid`),
+/// worker -> pimp (`Flow::StreetCut`), `pimp_pass_up` of it to the gang.
+/// A Statistical-only pair keeps the day's close (`street_cut_at_close`).
+fn cut_at_meeting(world: &mut World, pimp: EntityId, worker: EntityId) {
+    if !crate::systems::presence::on(world) || !body_pair(world, pimp, worker) {
+        return;
+    }
+    let Some(p) = world.jobs2.pitches.get(&worker).cloned() else { return };
+    let Some(c) = street_cut(world, &p) else { return };
+    let due = p.take_today - p.cut_paid;
+    if due <= 0 {
+        return;
+    }
+    let cut = (due as f32 * c.frac).round() as i64;
+    let to = c.pimp.unwrap_or(c.gang);
+    let paid = ownership::pay(world, Some(worker), Some(to), cut, Flow::StreetCut);
+    if let Some(x) = world.jobs2.pitches.get_mut(&worker) {
+        x.cut_paid = p.take_today;
+        x.cut_to = Some(c.gang);
+    }
+    let row = ownership::jobs2_row(world);
+    row.street_cut += paid;
+    row.pimp_cut += paid;
+    row.cut_at_meet += 1;
+    if to != c.gang {
+        pass_up(world, to, c.gang, paid);
+    }
+}
+
+/// Either side a body (Full or Coarse).
+fn body_pair(world: &World, a: EntityId, b: EntityId) -> bool {
+    crate::systems::presence::is_body(world, a) || crate::systems::presence::is_body(world, b)
+}
+
+/// `streetwork::close_the_day`: does the pimp's cut of this pitch still
+/// settle at the day's close? Off, or a Statistical-only pair (the mirror);
+/// with a body on either side it was taken at the collections.
+pub fn street_cut_at_close(world: &World, p: &Pitch, c: &StreetCut) -> bool {
+    !crate::systems::presence::on(world) || !body_pair(world, c.pimp.unwrap_or(c.gang), p.owner)
 }
 
 /// A Statistical pimp credited present collects at the pitch whose turn
@@ -527,10 +579,14 @@ fn street_payer(world: &World, p: &Pitch, hour: u64) -> Option<EntityId> {
         return None;
     }
     let cfg = &world.config.vice;
+    // The pre-view pass phase 4 (P3): a body pays only in person
+    // (`client_near`); the drawn payer is an off-screen resident.
+    let presence = crate::systems::presence::on(world);
     (0..3u64).find_map(|k| {
         let u = hash(world, PURPOSE_PAYER, key(p.owner), hour * 4 + k);
         let id = res[((u * res.len() as f32) as usize).min(res.len() - 1)];
         (id != p.owner
+            && !(presence && crate::systems::presence::is_body(world, id))
             && crate::systems::demography::is_adult(world, id)
             && !world.has::<Sentence>(id)
             // A hungry body buys food first (no visit under 0.5 hunger).

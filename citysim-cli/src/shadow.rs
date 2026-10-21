@@ -2450,7 +2450,11 @@ fn cam_settle(world: &World, t: &mut Track, now: Tick, other: EntityId, what: &s
             "beside me".to_string()
         };
         let me = if asleep { format!("; I am asleep at {}", place(world, t.id)) } else { String::new() };
-        t.log(now, "camera", format!("SETTLED APART: {what}; {} {where_}{me}", nm(world, other)));
+        // The pre-view pass phase 4 (P3): an encounter with an off-screen
+        // party, the pick awake, is narrated `[off]`; a body elsewhere or the
+        // pick asleep is the bug (SETTLED APART).
+        let tag = if stat && !asleep { "[off]" } else { "SETTLED APART:" };
+        t.log(now, "camera", format!("{tag} {what}; {} {where_}{me}", nm(world, other)));
     }
 }
 
@@ -4259,6 +4263,7 @@ mod tests {
             closed_until: Some(until),
             dry_days: 0,
             jobs_today: 0,
+            cut_paid: 0,
         };
         world.jobs2.pitches.insert(vend, p);
         assert!(!candidates(&world, "vendor").expect("vendor").contains(&vend), "a pitch closed tonight");

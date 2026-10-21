@@ -335,6 +335,20 @@ fn new_round(world: &World, id: EntityId, post: EntityId, row: &TradeCfg, shift_
             .filter(|&x| world.district_of_building(x) == d)
             .collect()
     };
+    // The pre-view pass phase 4 (OPEN-154): a round's stops lie within
+    // `[presence] round_reach_tiles` of the post's door (a super's near
+    // round spanned his district: 514 of 540 minutes walked).
+    let blocks: Vec<EntityId> = match world.config.presence.as_ref() {
+        Some(c) if !yard && !freight => {
+            let at = world.comp::<Building>(post).map(|bd| bd.door).unwrap_or_default();
+            let reach = c.round_reach_tiles;
+            blocks
+                .into_iter()
+                .filter(|&x| world.comp::<Building>(x).is_some_and(|bd| bd.door.manhattan(at) <= reach))
+                .collect()
+        }
+        _ => blocks,
+    };
     let stops = usize::from(row.round_stops).min(blocks.len());
     if stops == 0 {
         return Vec::new();

@@ -4299,3 +4299,22 @@ counter_settle_window = 15         # an off-screen visit to a venue with a count
                                    # staffer) is drawn into a slot of this many minutes inside the body's shift and
                                    # served then (OPEN-145: the 21:00 Statistical evening served only the evening staff)
 roles = ["Cook", "Bartender"]      # the built-in roles that stand the counter (over [shift.roles]; OPEN-145)
+
+# The pre-view pass phase 4 (docs/PREVIEW_PASS.md § 0 P3, P8; systems/presence.rs; OPEN-119, OPEN-120,
+# OPEN-154): an encounter posts when, and only when, both bodies are present, else it waits or is narrated off
+# screen. Dropped with CITYSIM_PRESENCE_OFF=1. Placeholders.
+[presence]
+round_reach_tiles = 20             # OPEN-154: a round's stops at most this many tiles from the post's door (40 min at
+                                   # [exec] move_ticks_full 2; super 596's near-home stops spanned 64 tiles, 514 of 540 min
+                                   # walked)
+stat_home_p = 0.5                  # an off-screen counterpart at home (off shift, not the night 00-06) is met at this
+                                   # rate (purpose-keyed draw)
+sweep_stops = 6                    # P8: the sweeper's street stops a shift, dirtiest first within round_reach_tiles of
+                                   # the first, walked nearest-first, then the Recycler (the post) for the shift's close
+sweep_stop_min = 45                # P8: minutes swept at each stop ([jobs] sweep_per_hour x the minutes cleaned there)
+sweep_radius = 2                   # P8: a stop cleans the street tiles within this Chebyshev radius
+sweep_walk_factor = 1.5            # P8: a round is planned only when its walk (the Manhattan tiles x this, the streets
+                                   # no straight line) and its stops fit the shift's time left from the sweeper's tile;
+                                   # else the stops near the Recycler (in its district, within round_reach_tiles), trimmed
+                                   # to fit; none: the shift is swept in the Recycler's yard
+arms_wait_hours = 24               # an off-screen buyer's arms sale waits this long for the dealer's body at the Bar

@@ -256,7 +256,12 @@ use crate::world::World;
 /// `Unload` step and the `Jobs2Cols` `haul_*`, `counter_*`, `served_day`,
 /// `served_21h`, `parcels_missed` columns (serde defaults). An off save is
 /// byte-identical to version 47's.
-pub const SAVE_VERSION: u8 = 48;
+/// 49 (the pre-view pass phase 4, OPEN-119, OPEN-120, OPEN-154): `[presence]`
+/// (written only on), `Brain.sweep_route`, `Pitch.cut_paid`, `WalkIn.unpaid`,
+/// `World.arms_due` and `World.fixer_owed` (each written only when set or
+/// non-empty) and the `Jobs2Cols` presence columns (serde defaults). An off
+/// save is byte-identical to version 48's.
+pub const SAVE_VERSION: u8 = 49;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

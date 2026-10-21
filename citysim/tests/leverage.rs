@@ -590,7 +590,14 @@ fn test_coerced_job_unpaid_and_complied() {
         )),
         "the threat landed"
     );
-    let (&id, c) = w.contracts.iter().find(|(_, c)| matches!(c.terms, Terms::Coerced(_))).expect("posted");
+    // This post's record (the city's history can hold an earlier coerced job).
+    let (&id, c) = w
+        .contracts
+        .iter()
+        .find(|(_, c)| {
+            matches!(c.terms, Terms::Coerced(_)) && c.kind == ContractKind::Beat && c.target == Target::Agent(t)
+        })
+        .expect("posted");
     // The strongest regular weaker than the head (the fixture's soft gun, or
     // a weaker regular already on the books).
     let taker = c.taker.expect("taken at once");

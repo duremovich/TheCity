@@ -192,7 +192,9 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
         // L1: an exec's office hours (no Job, so no commute plan).
         // Jobs and room J14: a Super on shift walks his round door to door.
         // Lives at work phase 4: a cab driver on shift drives a booked ride.
-        GoalKind::Work => routine::commute_plan(world, id)
+        // The pre-view pass phase 4 (P8): a body sweeper walks his round.
+        GoalKind::Work => crate::systems::jobs::sweep_plan(world, id)
+            .or_else(|| routine::commute_plan(world, id))
             .or_else(|| crate::systems::trades::round_plan(world, id))
             // Lives at work phase 5 (§ 2.4): a Reporter on shift walks his beat.
             .or_else(|| crate::systems::news::beat_plan(world, id))

@@ -2503,6 +2503,11 @@ fn stat_shop(world: &mut World) {
         // Jobs & lives phase 3: a weapon off screen (a Gunsmith's stock, a
         // dealer's surplus).
         if o.category == ShopCategory::Weapon {
+            // The pre-view pass phase 4 (OPEN-119): a dealer who is a body
+            // sells at the meeting, not at midnight.
+            if crate::systems::weapons::book_meeting(world, id, o.seller, &o.pick) {
+                continue;
+            }
             let _ = crate::systems::weapons::buy(world, id, o.seller, &o.pick, false);
             continue;
         }

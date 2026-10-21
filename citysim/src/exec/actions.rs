@@ -140,8 +140,11 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
                 .comp::<Job>(id)
                 .and_then(|j| j.shift_end(world.tick))
                 .map_or(0, |end| end.saturating_sub(world.tick));
-            // The pre-view pass phase 2 (OPEN-137): a stations block.
-            crate::systems::shift::block_ticks(world, id).map_or(left, |b| b.min(left))
+            // The pre-view pass phase 2 (OPEN-137): a stations block; phase 4
+            // (P8): a stop of the sweeper's round.
+            crate::systems::shift::block_ticks(world, id)
+                .or_else(|| crate::systems::jobs::sweep_stop_ticks(world, id))
+                .map_or(left, |b| b.min(left))
         }
         // The pre-view pass phase 2 (P7): the break, to `[shift] break_min`.
         ActionKind::Break => crate::systems::shift::break_ticks(world, id),
@@ -182,8 +185,9 @@ pub fn can_work_now(world: &World, id: EntityId, job: &Job) -> bool {
     job.on_shift(world.tick_of_day())
         && job.last_shift_day != Some(job.shift_key_at(world.tick))
         && if job.role == crate::components::Role::Sanitation && crate::systems::jobs::sweep_on(world) {
-            // L2 L8: a sweeper works out on its beat's streets.
-            crate::systems::jobs::on_beat(world, id)
+            // L2 L8: a sweeper works out on its beat's streets; the pre-view
+            // pass phase 4 (P8): his round closes at the Recycler (the post).
+            crate::systems::jobs::on_beat(world, id) || crate::systems::jobs::on_round(world, id, job)
         } else {
             job.employer.is_some_and(|e| world.comp::<Position>(id).is_some_and(|p| p.building == Some(e)))
         }
@@ -962,6 +966,10 @@ pub fn on_complete(
         }
         // L2 L8: the beat's dirtiest streets cleaned, then the shift's end.
         ActionKind::Sweep => {
+            // The pre-view pass phase 4 (P8): a stop of the round goes on.
+            if crate::systems::jobs::sweep_stop_done(world, id, now.saturating_sub(started)) {
+                return StepResult::Done;
+            }
             crate::systems::jobs::sweep_done(world, id, now.saturating_sub(started));
             end_shift(world, id);
             StepResult::Done

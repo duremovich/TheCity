@@ -323,6 +323,35 @@ pub struct Config {
     /// a save) with `CITYSIM_STATIONS_OFF=1`: every shift the one block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shift: Option<ShiftCfg>,
+    /// The pre-view pass phase 4 (docs/PREVIEW_PASS.md § 0 P3, P8; OPEN-119,
+    /// OPEN-120, OPEN-154): settlement by presence (`systems/presence.rs`).
+    /// `None` (not written into a save) with `CITYSIM_PRESENCE_OFF=1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presence: Option<PresenceCfg>,
+}
+
+/// The pre-view pass phase 4 `[presence]` (docs/PREVIEW_PASS.md § 0 P3):
+/// an encounter posts when, and only when, both bodies are present. Every
+/// value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PresenceCfg {
+    /// OPEN-154: a round's stops at most this many tiles from the post's door.
+    pub round_reach_tiles: u32,
+    /// A Statistical counterpart at home (not on shift, not the night) is
+    /// drawn present at this rate (purpose-keyed).
+    pub stat_home_p: f32,
+    /// P8: the sweeper's round: street stops a shift (dirtiest first, within
+    /// `round_reach_tiles` of the first).
+    pub sweep_stops: u8,
+    /// P8: minutes swept at each stop.
+    pub sweep_stop_min: u16,
+    /// P8: a stop cleans the street tiles within this Chebyshev radius.
+    pub sweep_radius: u8,
+    /// P8: a round's walk is estimated at the stops' Manhattan tiles times
+    /// this (the street grid is no straight line).
+    pub sweep_walk_factor: f32,
+    /// An off-screen arms buyer's meeting waits this many hours for the dealer's body at the Bar.
+    pub arms_wait_hours: u16,
 }
 
 /// The pre-view pass phase 2 (docs/PREVIEW_PASS.md § 0 P1): the shape a
@@ -4342,6 +4371,9 @@ pub struct PreviewOff {
     /// `[shift.counter]` and every row's `shape` `None`; a `counter` role
     /// back on `stations`).
     pub haul_counter: bool,
+    /// The pre-view pass phase 4 off (`CITYSIM_PRESENCE_OFF=1`): `[presence]`
+    /// dropped at load; encounters settle by link as before.
+    pub presence: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -8396,6 +8428,11 @@ impl Config {
         cfg.preview_off.haul_counter = std::env::var("CITYSIM_HAUL_COUNTER_OFF").is_ok_and(|v| v == "1");
         if cfg.preview_off.haul_counter || cfg.shift.is_none() {
             cfg.drop_haul_counter();
+        }
+        // The pre-view pass phase 4 (OPEN-119, OPEN-120, OPEN-154): settlement by presence.
+        cfg.preview_off.presence = std::env::var("CITYSIM_PRESENCE_OFF").is_ok_and(|v| v == "1");
+        if cfg.preview_off.presence {
+            cfg.presence = None;
         }
         // The earlier milestones' `CITYSIM_*_OFF` env switches retired in
         // the pre-view pass (OPEN-094); every section's config path stays

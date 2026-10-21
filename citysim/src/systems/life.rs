@@ -768,7 +768,10 @@ pub(crate) fn pay_housing(world: &mut World, by: Option<EntityId>, cost: i64) ->
 /// desk; the behaviour tier's d19 sweepers walked 10.25 h a day, 7.43 with
 /// items 8-10 off, housed toward the Recycler and away from their beats).
 pub fn work_tile(world: &World, id: EntityId, employer: EntityId) -> Option<TilePos> {
-    if crate::systems::jobs::is_sweeper(world, id) {
+    // The pre-view pass phase 4 (P8): the sweeper's round ends at the
+    // Recycler (the post), the point a relocation anchors to (the beat is
+    // re-dealt nightly: 6-8 of 15 sweeper couples re-housed "nearer work").
+    if crate::systems::jobs::is_sweeper(world, id) && world.config.presence.is_none() {
         if let Some(c) =
             crate::systems::jobs::beat_of(world, id).and_then(|d| world.districts.get(d.index())).map(|x| x.centroid)
         {

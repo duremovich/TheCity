@@ -665,12 +665,257 @@ pub fn on_beat(world: &World, id: EntityId) -> bool {
     let Some(p) = world.comp::<crate::components::Position>(id).filter(|p| p.building.is_none()) else {
         return false;
     };
+    // The pre-view pass phase 4 (P8): on his round, its next stop is the beat.
+    if sweep_round_on(world, id) {
+        if let Some(t) = round_stop(world, id) {
+            return t == p.tile;
+        }
+    }
     beat_of(world, id) == Some(world.district_of(p.tile))
 }
 
-/// L2 L8 (`LocationKey::Beat`): the dirtiest street tile of the sweeper's beat.
+/// L2 L8 (`LocationKey::Beat`): the dirtiest street tile of the sweeper's
+/// beat; the pre-view pass phase 4 (P8): a sweeper on his round, its next stop.
 pub fn beat_tile(world: &World, id: EntityId) -> Option<TilePos> {
+    if let Some(t) = round_stop(world, id) {
+        return Some(t);
+    }
     crate::systems::litter::dirtiest_tile(world, beat_of(world, id)?)
+}
+
+// ---------------------------------------------------------------------------
+// The sweeper's round (the pre-view pass phase 4, P8)
+// ---------------------------------------------------------------------------
+
+/// The keyed purpose of the sweeper's seeded stops (`econ::hash_unit`).
+const PURPOSE_SWEEP_STOP: u64 = 0x5052_0101;
+
+/// P8: the sweeper's round is live: `[presence]` on, Sweep on, `id` a body
+/// sweeper, and this shift not the stand ([`FALLBACK`]).
+pub fn sweep_round_on(world: &World, id: EntityId) -> bool {
+    world.config.presence.is_some()
+        && is_sweeper(world, id)
+        && world.comp::<crate::components::Brain>(id).is_some_and(|b| {
+            b.lod != crate::components::Lod::Statistical
+                && !(b.patrol_legs == FALLBACK
+                    && b.sweep_route.is_empty()
+                    && b.patrol_shift_key.is_some()
+                    && world.comp::<Job>(id).map(|j| j.next_shift_key(world.tick)) == b.patrol_shift_key)
+        })
+}
+
+/// P8 (deviation): `patrol_legs` of a shift begun too far from the Recycler
+/// to reach it within the shift (the 2k beat 185 tiles off, a 20k leg;
+/// OPEN-139): the shift is the old stand on the beat, closed and paid there.
+const FALLBACK: u8 = u8::MAX;
+
+/// P8 (`exec::actions::can_work_now`): a body sweeper on his round stands
+/// on its next stop (out on the street), or in the Recycler (the post).
+pub fn on_round(world: &World, id: EntityId, job: &Job) -> bool {
+    if !sweep_round_on(world, id) {
+        return false;
+    }
+    let Some(p) = world.comp::<crate::components::Position>(id) else { return false };
+    match p.building {
+        Some(b) => job.employer == Some(b),
+        None => round_stop(world, id) == Some(p.tile),
+    }
+}
+
+/// The round's next stop while it is being walked (`None` walked or off).
+fn round_stop(world: &World, id: EntityId) -> Option<TilePos> {
+    world.config.presence.as_ref()?;
+    let b = world.comp::<crate::components::Brain>(id)?;
+    let key = world.comp::<Job>(id)?.next_shift_key(world.tick);
+    if b.patrol_shift_key != Some(key) {
+        return None;
+    }
+    b.sweep_route.get(usize::from(b.patrol_legs)).copied()
+}
+
+/// P8: the stops of `id`'s shift `key`: his beat's (`sweep_route_in`),
+/// when the round and the walks to it and back to the post (the Recycler)
+/// fit the shift's time left from `from`; else the post's own district's,
+/// the stops within `round_reach_tiles` of its door; trimmed from the end
+/// until they fit (none: the shift is swept in the Recycler's yard).
+pub fn sweep_route(world: &World, id: EntityId, key: i64, from: TilePos, left: u64) -> Vec<TilePos> {
+    let Some(post) = world.comp::<Job>(id).and_then(|j| j.employer) else { return Vec::new() };
+    let Some(door) = world.comp::<Building>(post).map(|b| b.door) else { return Vec::new() };
+    let fits = |r: &[TilePos]| round_ticks(world, from, r, door) <= left;
+    if let Some(d) = beat_of(world, id) {
+        let r = sweep_route_in(world, id, key, d, None);
+        if !r.is_empty() && fits(&r) {
+            return r;
+        }
+    }
+    let mut r = sweep_route_in(world, id, key, world.district_of_building(post), Some(door));
+    while !r.is_empty() && !fits(&r) {
+        r.pop();
+    }
+    r
+}
+
+/// The walk of a round (`from`, the stops, the post's door: the tiles at
+/// `move_ticks_full` x `sweep_walk_factor`, the street not being a straight
+/// line) and its stops' minutes, in ticks.
+pub fn round_ticks(world: &World, from: TilePos, stops: &[TilePos], door: TilePos) -> u64 {
+    let Some(cfg) = world.config.presence.as_ref() else { return 0 };
+    let mut tiles = 0u32;
+    let mut at = from;
+    for &s in stops {
+        tiles += at.manhattan(s);
+        at = s;
+    }
+    tiles += at.manhattan(door);
+    let walk = f64::from(tiles) * world.config.exec.move_ticks_full.max(1) as f64 * f64::from(cfg.sweep_walk_factor);
+    walk.ceil() as u64 + stops.len() as u64 * u64::from(cfg.sweep_stop_min)
+}
+
+/// The stops in district `d`: its street tiles, dirtiest first (ties by a
+/// hash of the sweeper, the shift and the tile: with no litter, the seeded
+/// set), within `round_reach_tiles` of `anchor` when given, each further
+/// than two `sweep_radius` from the others, within `round_reach_tiles` of
+/// the first, `sweep_stops` of them, walked nearest-first from the first.
+fn sweep_route_in(
+    world: &World,
+    id: EntityId,
+    key: i64,
+    d: crate::components::DistrictId,
+    anchor: Option<TilePos>,
+) -> Vec<TilePos> {
+    let Some(cfg) = world.config.presence.as_ref() else { return Vec::new() };
+    let Some(d) = world.districts.get(d.index()) else { return Vec::new() };
+    let w = world.map.w();
+    let salt = u64::from(id.index) ^ (key as u64).rotate_left(24);
+    let mut tiles: Vec<(std::cmp::Reverse<u8>, u32, TilePos)> = d
+        .streets
+        .iter()
+        .map(|&i| {
+            let p = TilePos { x: (i as usize % w) as u16, y: (i as usize / w) as u16 };
+            let v = world.litter.get(i as usize).copied().unwrap_or(0);
+            let h = crate::systems::econ::hash_unit(world.seed(), PURPOSE_SWEEP_STOP, salt, u64::from(i));
+            (std::cmp::Reverse(v), h.to_bits(), p)
+        })
+        .filter(|&(_, _, p)| anchor.is_none_or(|a| p.manhattan(a) <= cfg.round_reach_tiles))
+        .collect();
+    tiles.sort_unstable();
+    let Some(&(_, _, first)) = tiles.first() else { return Vec::new() };
+    let gap = u32::from(cfg.sweep_radius) * 2;
+    let cheb = |a: TilePos, b: TilePos| u32::from(a.x.abs_diff(b.x)).max(u32::from(a.y.abs_diff(b.y)));
+    let mut picked: Vec<TilePos> = vec![first];
+    for &(_, _, t) in &tiles[1..] {
+        if picked.len() >= usize::from(cfg.sweep_stops.max(1)) {
+            break;
+        }
+        if t.manhattan(first) <= cfg.round_reach_tiles && picked.iter().all(|&q| cheb(q, t) > gap) {
+            picked.push(t);
+        }
+    }
+    let mut from = first;
+    let mut left: Vec<TilePos> = picked.split_off(1);
+    while !left.is_empty() {
+        let (i, _) = left.iter().enumerate().min_by_key(|&(_, &t)| (t.manhattan(from), t)).expect("non-empty");
+        from = left.remove(i);
+        picked.push(from);
+    }
+    picked
+}
+
+/// P8, the Work goal's bypass (`plan::plan_for`, before the commute): a
+/// body sweeper on his shift walks his round: `GoTo(Beat)` to the next
+/// stop (`beat_tile`) and a `Sweep` of `sweep_stop_min` there; with the
+/// stops walked (or no time left for the next one and the walk back), the
+/// walk to the Recycler (the post) and a `Sweep` there to the shift's end,
+/// which closes and pays it (P5).
+pub fn sweep_plan(world: &mut World, id: EntityId) -> Option<crate::goap::Plan> {
+    use crate::components::{ActionInstance, GoalKind};
+    use crate::goap::{ActionKind, LocationKey, Plan};
+    if !sweep_round_on(world, id) {
+        return None;
+    }
+    let job = world.comp::<Job>(id)?.clone();
+    let post = job.employer?;
+    if !job.on_shift(world.tick_of_day()) {
+        return None;
+    }
+    let key = job.next_shift_key(world.tick);
+    if job.last_shift_day == Some(key) || !crate::exec::routine::workday_of(world, id, &job, key) {
+        return None;
+    }
+    let end = job.shift_end(world.tick)?;
+    let fresh = world.comp::<crate::components::Brain>(id).is_none_or(|b| b.patrol_shift_key != Some(key));
+    if fresh {
+        let from = world.comp::<crate::components::Position>(id)?.tile;
+        let left = end.saturating_sub(world.tick);
+        let route = sweep_route(world, id, key, from, left);
+        let door = world.comp::<Building>(post)?.door;
+        let stand = route.is_empty() && round_ticks(world, from, &[], door) > left;
+        let b = world.comp_mut::<crate::components::Brain>(id)?;
+        b.sweep_route = route;
+        b.patrol_legs = if stand { FALLBACK } else { 0 };
+        b.patrol_shift_key = Some(key);
+        if stand {
+            ownership::jobs2_row(world).sweep_stands += 1;
+            return None;
+        }
+    }
+    let step = |action, target| ActionInstance { action, target, tile: None };
+    let now = world.tick;
+    let plan = |steps| Plan { goal: GoalKind::Work, target: Some(post), steps, started_tick: now };
+    let pos = world.comp::<crate::components::Position>(id)?.clone();
+    let door = world.comp::<Building>(post)?.door;
+    if let Some(stop) = round_stop(world, id) {
+        if end.saturating_sub(now) > round_ticks(world, pos.tile, &[stop], door) {
+            return Some(plan(vec![step(ActionKind::GoTo(LocationKey::Beat), None), step(ActionKind::Sweep, None)]));
+        }
+        if let Some(b) = world.comp_mut::<crate::components::Brain>(id) {
+            b.patrol_legs = u8::try_from(b.sweep_route.len()).unwrap_or(u8::MAX);
+        }
+    }
+    if pos.building == Some(post) {
+        return Some(plan(vec![step(ActionKind::Sweep, None)]));
+    }
+    Some(plan(vec![step(ActionKind::GoTo(LocationKey::TargetHome), Some(post)), step(ActionKind::Sweep, None)]))
+}
+
+/// P8: a sweeper's `Sweep` ends (`exec::actions`): at a stop of his round
+/// (out on the street), the street tiles around it cleaned (`sweep_per_hour`
+/// x the minutes, within `sweep_radius`), the stop walked, and `true` (the
+/// shift goes on); at the post, or off the round, `false` (the shift's close).
+pub fn sweep_stop_done(world: &mut World, id: EntityId, ticks: u64) -> bool {
+    if !sweep_round_on(world, id) {
+        return false;
+    }
+    let Some(stop) = round_stop(world, id) else { return false };
+    if world.comp::<crate::components::Position>(id).is_none_or(|p| p.building.is_some()) {
+        return false;
+    }
+    let r = world.config.presence.as_ref().map_or(0, |c| c.sweep_radius);
+    let hours = ticks as f32 / time::TICKS_PER_HOUR as f32;
+    let units = (world.config.jobs.sweep_per_hour as f32 * hours).round() as u32;
+    crate::systems::litter::clean_around(world, stop, r, units);
+    if !world.jobs_book.swept.contains(&id) {
+        world.jobs_book.swept.push(id);
+    }
+    let walked = world.comp_mut::<crate::components::Brain>(id).map(|b| {
+        b.patrol_legs = b.patrol_legs.saturating_add(1);
+        usize::from(b.patrol_legs) >= b.sweep_route.len()
+    });
+    let row = ownership::jobs2_row(world);
+    row.sweep_stops += 1;
+    if walked == Some(true) {
+        row.sweep_rounds += 1;
+    }
+    true
+}
+
+/// P8: a body sweeper's `Sweep` lasts `sweep_stop_min` at a stop of his round.
+pub fn sweep_stop_ticks(world: &World, id: EntityId) -> Option<u64> {
+    if !sweep_round_on(world, id) || round_stop(world, id).is_none() {
+        return None;
+    }
+    let on_street = world.comp::<crate::components::Position>(id).is_some_and(|p| p.building.is_none());
+    on_street.then(|| world.config.presence.as_ref().map_or(0, |c| u64::from(c.sweep_stop_min)))
 }
 
 /// An L2 kind (a leisure venue or a Fab): its staff work inside it.
@@ -681,6 +926,14 @@ pub fn is_l2_building(world: &World, b: EntityId) -> bool {
 /// Plan L8: an hour-proportional sweep of the beat's dirtiest street tiles
 /// (`sweep_per_hour × hours`), and the D23 credit skip for today.
 pub fn sweep_done(world: &mut World, id: EntityId, ticks: u64) {
+    // The pre-view pass phase 4 (P8): the round's credit followed its stops
+    // (none for a shift swept in the yard: no midnight ledger credit either).
+    if sweep_round_on(world, id) {
+        if !world.jobs_book.swept.contains(&id) {
+            world.jobs_book.swept.push(id);
+        }
+        return;
+    }
     let Some(d) = beat_of(world, id) else { return };
     let hours = ticks as f32 / time::TICKS_PER_HOUR as f32;
     let units = (world.config.jobs.sweep_per_hour as f32 * hours).round() as u32;

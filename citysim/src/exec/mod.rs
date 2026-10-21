@@ -828,7 +828,11 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                         | crate::components::GoalKind::Visit
                 )
             });
-            if goal == Some(crate::components::GoalKind::Work) && crate::systems::shift::scripted(world, id) {
+            // The pre-view pass phase 4 (P8): so does a sweeper's round (its
+            // close is inside the Recycler, which the planner reads as no Beat).
+            if goal == Some(crate::components::GoalKind::Work)
+                && (crate::systems::shift::scripted(world, id) || crate::systems::jobs::sweep_round_on(world, id))
+            {
                 // The pre-view pass phase 2 (OPEN-137): a shape plan's steps
                 // check their own start (the planner reads a worker inside
                 // his own Market as at `Workplace`, so a break's `BuyFood`

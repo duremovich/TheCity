@@ -314,6 +314,12 @@ fn papers_daily(world: &mut World) {
         let bribe = clerk.filter(|_| cfg.id_bribe <= coins);
         match (fake, bribe) {
             (Some((b, f, t)), bribe) if bribe.is_none() || cfg.id_price[usize::from(t - 1)] < cfg.id_bribe => {
+                // The pre-view pass phase 4 (P3, OPEN-119): the order is paid
+                // at the handover (`service::walk_in_sale`), not at midnight.
+                if tower && crate::systems::presence::on(world) {
+                    crate::systems::service::queue_walk_in(world, s, b, f, t);
+                    continue;
+                }
                 let price = cfg.id_price[usize::from(t - 1)];
                 let cut = (price as f32 * cfg.fixer_cut).round() as i64;
                 ownership::pay(world, Some(s), Some(f), price - cut, Flow::Gray);

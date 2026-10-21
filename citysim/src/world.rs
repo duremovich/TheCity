@@ -1072,6 +1072,18 @@ pub struct World {
     /// (SAVE_VERSION 48); written only when non-empty, so an off save holds none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub counter_due: Vec<crate::systems::leisure::CounterVisit>,
+    /// The pre-view pass phase 4 (P3, OPEN-119, `[presence]`): off-screen
+    /// buyers' arms sales booked at midnight with a dealer who is a body,
+    /// made when his body is at the Bar (`weapons::arms_meetings`). Saved
+    /// (SAVE_VERSION 49); written only when non-empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub arms_due: Vec<crate::systems::weapons::ArmsMeet>,
+    /// The pre-view pass phase 4 (P3, OPEN-119): the Fixer owner's cut of
+    /// papers sold at the handover, held by the member of staff who made the
+    /// sale until the owner collects in person (`service::collected`): by
+    /// Fixer, (holder, coins). Saved; written only when non-empty.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub fixer_owed: BTreeMap<EntityId, Vec<(EntityId, i64)>>,
     /// The pre-view pass phase 1 (OPEN-140, `[life] housing_fix`): the
     /// bodies a `Housed` line named at this tick (the midnight's first
     /// move wins; `life::housed_now`). Not saved: only the tick that wrote
@@ -1732,6 +1744,8 @@ impl World {
             hangouts: BTreeMap::new(),
             service_room: BTreeMap::new(),
             counter_due: Vec::new(),
+            arms_due: Vec::new(),
+            fixer_owed: BTreeMap::new(),
             housed_now: (0, BTreeSet::new()),
             moving_in: BTreeMap::new(),
             regulars: BTreeMap::new(),

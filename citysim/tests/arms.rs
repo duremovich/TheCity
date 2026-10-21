@@ -325,6 +325,7 @@ fn test_market_thief_empties_a_stall_in_the_district() {
         closed_until: None,
         dry_days: 0,
         jobs_today: 0,
+        cut_paid: 0,
     };
     w.jobs2.pitches.insert(vendor, pitch);
     w.comp_mut::<Wallet>(vendor).expect("wallet").coins = 50;
