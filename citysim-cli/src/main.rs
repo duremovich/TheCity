@@ -139,6 +139,12 @@ struct RunArgs {
     /// Map file, overriding `[world] map` (ignored with `--load`).
     #[arg(long, value_name = "FILE")]
     map: Option<PathBuf>,
+    /// The pre-view pass phase 5 (measurement): write every Full or Coarse
+    /// GoTo leg of `--legs-min` minutes or more to FILE (TSV, `exec::leglog`).
+    #[arg(long, value_name = "FILE")]
+    legs: Option<PathBuf>,
+    #[arg(long, default_value_t = 120)]
+    legs_min: u64,
     /// Run the 300-resident v1 city (`Config::v1_profile`) instead of the
     /// configured one (ignored with `--load`).
     #[arg(long)]
@@ -1595,6 +1601,9 @@ fn run(args: RunArgs) -> Result<(), String> {
         }
     };
     let _ = args.speed;
+    if args.legs.is_some() {
+        world.leg_log = Some(citysim::exec::leglog::LegLog { min_ticks: args.legs_min, ..Default::default() });
+    }
 
     // Levers are absolute ticks. After a `--load`, anything already in the
     // past is in the save's command log; firing it again would double-apply.
@@ -1654,6 +1663,9 @@ fn run(args: RunArgs) -> Result<(), String> {
                 next_lever += 1;
             }
             citysim::tick(&mut world);
+            if world.leg_log.is_some() && world.tick % TICKS_PER_DAY == 180 {
+                citysim::exec::leglog::night_census(&mut world);
+            }
             if args.events {
                 // The story ring and the plan-abort debug ring, merged by tick.
                 let fresh_of = |ring: &'_ std::collections::VecDeque<citysim::Event>| {
@@ -1691,6 +1703,9 @@ fn run(args: RunArgs) -> Result<(), String> {
         }
     }
     citysim::prof::dump();
+    if let Some(p) = &args.legs {
+        std::fs::write(p, citysim::exec::leglog::tsv(&world)).map_err(|e| format!("--legs {}: {e}", p.display()))?;
+    }
     Ok(())
 }
 

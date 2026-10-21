@@ -1,0 +1,8 @@
+# The pre-view pass phase 5 (P11): authored El lines for isle_m_k2 (tile frame), written as `L+` lines by
+# `citysim-cli import-graphics ... --lines assets/maps/isle_m_k2_lines.txt`. Listed for Dylan's veto in the phase report.
+# Mid-Levels Line: the Tram (Neon Quarter) north across the Terrace Line up the Mid-Levels to the Spire core.
+780,795 780,470 Mid-Levels Line
+# Hillside Line: east-west along the Mid-Levels at y 600, crossing the Funicular, the Mid-Levels Line and the Vats Line.
+561,600 1387,600 Hillside Line
+# Vats Line: the Tram's east end north up the Vats strip to the Farms.
+1387,795 1387,342 Vats Line

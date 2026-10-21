@@ -1109,10 +1109,14 @@ pub fn hourly(world: &mut World) {
         return;
     }
     let hour = u8::try_from(world.tick_of_day() / TICKS_PER_HOUR as u16).unwrap_or(0);
+    let legs_on = crate::exec::legs::on(world);
     let stat: Vec<(EntityId, PendingVisit)> = world
         .visits
         .iter()
-        .filter(|(_, v)| v.hour == hour)
+        // Pre-view pass phase 5 (`[legs]`): a Camp visitor demoted mid-ride, after its
+        // hour, is credited at the next hour (a ridden leg outlasts the hour; the
+        // Camp answer of a Coarse parent was lost to the demotion).
+        .filter(|(_, v)| v.hour == hour || (legs_on && v.hour < hour && matches!(v.why, VisitWhy::Camp(_))))
         .filter(|(&id, _)| world.comp::<Brain>(id).is_some_and(|b| b.lod == crate::components::Lod::Statistical))
         .map(|(&id, &v)| (id, v))
         .collect();

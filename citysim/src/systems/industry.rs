@@ -136,6 +136,15 @@ pub struct Jobs2State {
     /// the Statistical tier's; cleared at midnight).
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub cab_rolled: std::collections::BTreeSet<EntityId>,
+    /// The pre-view pass phase 5 (OPEN-140): the execs driven home today
+    /// (`streetwork::exec_ride`; cleared at midnight).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub exec_home_rolled: std::collections::BTreeSet<EntityId>,
+    /// The pre-view pass phase 5 (the `fares` shape, OPEN-115): a booked
+    /// rider waiting at his door or aboard, by rider: his driver
+    /// (`streetwork::carry`; the exec skips him while here).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub passengers: std::collections::BTreeMap<EntityId, EntityId>,
     /// The day's parcels, from the sender to a named recipient, until
     /// delivered or returned (cleared at midnight).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

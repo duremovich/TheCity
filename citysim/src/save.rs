@@ -261,7 +261,12 @@ use crate::world::World;
 /// `World.arms_due` and `World.fixer_owed` (each written only when set or
 /// non-empty) and the `Jobs2Cols` presence columns (serde defaults). An off
 /// save is byte-identical to version 48's.
-pub const SAVE_VERSION: u8 = 49;
+/// 50: the pre-view pass phase 5 (OPEN-139, OPEN-115): `Config.legs`,
+/// `World.segments`, `Jobs2State.{exec_home_rolled, passengers}`,
+/// `CabRide.body`, `TransitLineCfg.in_flight` and the `Jobs2Cols` legs
+/// columns (each written only when set; serde defaults). An off save is
+/// byte-identical to version 49's.
+pub const SAVE_VERSION: u8 = 50;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

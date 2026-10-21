@@ -1557,6 +1557,11 @@ fn probe_evicted_worker_rehouses_on_the_first_rent() {
     w.comp_mut::<Wallet>(a).expect("wallet").coins = 8;
     let wait = w.config.rent.rehouse_wait_days;
     let end = w.tick + (wait + 3) * TICKS_PER_DAY;
+    // The premise kept: the purse is the first rent's, not a Shop pick's
+    // (the pre-view pass phase 5 fix round's city: the Farmer bought an
+    // asset with his 18 coins on day 8, slept in a Hotel 150 tiles from the
+    // Farm and was never housed).
+    w.comp_mut::<Brain>(a).expect("brain").cooldowns.insert(citysim::GoalKind::Shop, end);
     let mut housed_on = None;
     run_to(&mut w, a, end, |w| {
         if housed_on.is_none() && home(w, a).is_some() {
@@ -2676,6 +2681,11 @@ fn broke_parent_visits(mut c: World) -> (bool, bool) {
                 // Camp, unable to pay the fare, and sleep on the way).
                 c.comp_mut::<Wallet>(q).expect("wallet").coins = 10;
                 c.comp_mut::<Building>(h2).expect("home").stock_food = 0;
+                // The premise kept: a free parent (the pre-view pass phase 5 fix
+                // round's city: she attacked a man she saw run a Shakedown on
+                // day 10 and served 10 days in the cells, the visit unmade).
+                let cool = c.tick + TICKS_PER_DAY;
+                c.comp_mut::<Brain>(q).expect("brain").cooldowns.insert(citysim::GoalKind::Fight, cool);
             }
             pin(&mut c, q);
             c.run_ticks(1);
@@ -2765,6 +2775,11 @@ fn probe_cabbie_drives_a_fare_on_his_shift() {
     fn fares(p_cab: f32) -> (u32, u32) {
         let mut cfg = Config::load();
         cfg.jobs2.p_cab = p_cab;
+        // The pre-view pass phase 5: the roll alone books a ride here (the
+        // El-missed commute's cab is the `fares` shape's own demand).
+        if let Some(l) = cfg.legs.as_mut() {
+            l.fares_el_missed = false;
+        }
         let mut w = World::new(42, cfg);
         let start = 2 * TICKS_PER_DAY + 5 * TICKS_PER_HOUR;
         w.run_ticks(start);

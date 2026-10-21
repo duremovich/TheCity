@@ -923,9 +923,13 @@ mod lives_street {
     /// takes it otherwise (`cab_rides_unmanned`). One roll a day a rider.
     #[test]
     fn test_full_commuters_cab_is_timed_and_a_driver_drives_it() {
+        // The pre-view pass phase 5's `fares` shape (a body ride paid on
+        // arrival) is `test_a_drivers_body_carries_the_rider_and_is_paid`;
+        // here the phase's own wait, the booking's coins as before.
         let mut w = city_with(|c| {
             c.jobs2.p_cab = 1.0;
             c.service.cab_wait_ticks = 100_000;
+            c.legs = None;
         });
         let min = w.config.jobs2.cab_min_tiles;
         let (garage, driver) = garage_and_driver(&w);
@@ -1010,6 +1014,109 @@ mod lives_street {
         assert_eq!(coins(&w2, b), before, "a dodged fare moves no coins");
         assert_eq!(jobs2(&w2).fares_short, short0 + 1);
         assert!(w2.events.iter().any(|e| e.kind == EventKind::FareShort && e.actors[0] == b));
+    }
+
+    /// The pre-view pass phase 5 (the `fares` shape, OPEN-115): a commuter's
+    /// cab with a driver's body on duty within `[legs] fare_wait_ticks`: the
+    /// rider waits at his door (no coins yet), the driver drives to him, picks
+    /// him up (both bodies there: the `Fare` encounter), drives him to work
+    /// with the rider at his side, and the fare is paid on arrival
+    /// (`pay_ride`: rider to the Garage's owner). Fails on the base (the
+    /// fare paid at the booking and the rider's leg timed alone: the driver
+    /// never carried anyone).
+    #[test]
+    fn test_a_drivers_body_carries_the_rider_and_is_paid() {
+        let mut w = city_with(|c| {
+            c.jobs2.p_cab = 1.0;
+            if let Some(l) = c.legs.as_mut() {
+                l.fare_wait_ticks = 100_000;
+            }
+        });
+        assert!(w.config.legs.is_some(), "the shipped config has [legs]");
+        let min = w.config.jobs2.cab_min_tiles;
+        let (garage, driver) = garage_and_driver(&w);
+        let a = far_commuter(&w, min).expect("a far commuter");
+        set_coins(&mut w, a, 500);
+        citysim::systems::lod::set_lod(&mut w, a, Lod::Full);
+        w.comp_mut::<citysim::Personality>(a).expect("personality").lawfulness = 0.9;
+        if let Some(j) = w.comp_mut::<Job>(driver) {
+            j.shifts = vec![(1, 1440)];
+        }
+        citysim::systems::lod::set_lod(&mut w, driver, Lod::Full);
+        w.leave_building(driver);
+        w.enter_building(driver, garage);
+        let role = w.config.trade_role("cab_driver").expect("trade");
+        for d in w.citizens() {
+            if d != driver && w.comp::<Job>(d).is_some_and(|j| j.role == role) {
+                if let Some(j) = w.comp_mut::<Job>(d) {
+                    j.shifts = vec![(0, 1)];
+                }
+            }
+        }
+        w.jobs2.cab_rides.clear();
+        w.jobs2.passengers.clear();
+        let work = w.comp::<Job>(a).and_then(|j| j.employer).expect("work");
+        let door = w.comp::<Building>(work).expect("work").door;
+        let target = GotoTarget { dest: LocationKey::Workplace, tile: door, building: Some(work) };
+        let (before, j0) = (coins(&w, a), jobs2(&w));
+        let owner = w.owner_of(garage);
+        let till = |w: &World| w.purse(owner);
+        let till0 = till(&w);
+        let state = sw::full_cab(&mut w, a, &target).expect("a cab at p_cab = 1");
+        assert_eq!(jobs2(&w).cab_rides_driven, j0.cab_rides_driven + 1, "a driver's body took it");
+        assert_eq!(coins(&w, a), before, "no fare at the booking");
+        assert_eq!(w.jobs2.passengers.get(&a), Some(&driver), "the rider waits for his driver");
+        // The rider's GoTo holds while he waits; the driver's fare plan runs.
+        let tick = w.tick;
+        let b = w.comp_mut::<Brain>(a).expect("brain");
+        b.plan = Some(citysim::goap::Plan {
+            goal: citysim::components::GoalKind::Work,
+            target: Some(work),
+            steps: vec![citysim::components::ActionInstance {
+                action: citysim::goap::ActionKind::GoTo(LocationKey::Workplace),
+                target: Some(work),
+                tile: None,
+            }],
+            started_tick: tick,
+        });
+        b.plan_step = 0;
+        b.exec = state;
+        let mut together = 0;
+        let mut arrived = false;
+        for _ in 0..(2 * TICKS_PER_DAY) {
+            if w.comp::<Brain>(driver).is_some_and(|b| b.plan.is_none()) {
+                let p = sw::fare_plan(&mut w, driver).expect("the driver's plan");
+                let b = w.comp_mut::<Brain>(driver).expect("brain");
+                b.plan = Some(p);
+                b.plan_step = 0;
+                b.exec = ExecState::Idle;
+            }
+            citysim::exec::run(&mut w);
+            w.tick += 1;
+            if w.jobs2.passengers.contains_key(&a) {
+                let (pa, pd) =
+                    (w.comp::<Position>(a).cloned().expect("pos"), w.comp::<Position>(driver).cloned().expect("pos"));
+                if pa.building.is_none() && pd.building.is_none() && pa.tile == pd.tile {
+                    together += 1;
+                }
+                assert_eq!(coins(&w, a), before, "nothing paid before the arrival");
+            }
+            if w.comp::<Position>(a).is_some_and(|p| p.building == Some(work)) {
+                arrived = true;
+                break;
+            }
+        }
+        assert!(arrived, "the rider gets to work");
+        assert!(together > 0, "he rode at the driver's side");
+        let j = jobs2(&w);
+        assert_eq!(j.fares_driven, j0.fares_driven + 1, "a fare driven by a body");
+        assert!(j.served[ServeKind::Fare as usize] > j0.served[ServeKind::Fare as usize], "the pick-up's encounter");
+        let fare = before - coins(&w, a);
+        assert!(fare > 0, "paid on arrival");
+        if owner.is_some() {
+            assert!(till(&w) > till0, "the Garage's owner took the fare");
+        }
+        assert!(!w.jobs2.passengers.contains_key(&a));
     }
 
     /// The off city (`[service] street = false`): no street row, no street key,
@@ -1424,6 +1531,43 @@ mod lives_street {
         assert!(sw::exec_ride(&mut w, e, &target).is_none(), "off, no ride");
     }
 
+    /// The pre-view pass phase 5 (OPEN-140's remainder): the exec driven to
+    /// his Hq is driven home too (once a day, from outside his Home's
+    /// district), and the away bed reads that ride: his Home is nearer by car
+    /// than by foot (`life::home_reach`). Fails on the base (`exec_ride`
+    /// drove him to the Hq only; he walked home 74-760 tiles at 20k).
+    #[test]
+    fn test_the_exec_rides_home() {
+        let mut w = city_with(|_| {});
+        let (e, corp, hq) = exec_far_from_hq(&mut w);
+        let home = citysim::systems::missions::home_of(&w, e).expect("home");
+        let hd = w.comp::<Building>(home).expect("home").door;
+        w.leave_building(e);
+        w.enter_building(e, hq);
+        if let Some(c) = w.comp_mut::<citysim::Corp>(corp) {
+            c.treasury = c.treasury.max(10_000);
+        }
+        w.jobs2.exec_home_rolled.clear();
+        let target = GotoTarget { dest: LocationKey::Home, tile: hd, building: Some(home) };
+        let j0 = jobs2(&w);
+        let walk_tiles = citysim::systems::life::tiles_to(&w, e, home).expect("tiles");
+        let reach = citysim::systems::life::home_reach(&w, e, home).expect("reach");
+        assert!(reach < walk_tiles, "home is nearer by car ({reach} against {walk_tiles} tiles)");
+        let state = sw::exec_ride(&mut w, e, &target).expect("the exec rides home");
+        let ExecState::GotoTimed { arrive_tick, .. } = state else { panic!("a timed leg, not {state:?}") };
+        let walk = u64::from(w.outside_door(w.comp::<Building>(hq).expect("hq")).manhattan(hd))
+            * w.config.exec.move_ticks_full;
+        assert!(arrive_tick > w.tick && arrive_tick - w.tick < walk, "faster than the walk");
+        let j = jobs2(&w);
+        assert_eq!(j.exec_rides_home, j0.exec_rides_home + 1, "one ride home counted");
+        assert!(sw::exec_ride(&mut w, e, &target).is_none(), "once a day");
+        // Off: he walks home.
+        w.jobs2.exec_home_rolled.clear();
+        w.config.legs = None;
+        assert!(sw::exec_ride(&mut w, e, &target).is_none(), "off, no ride home");
+        assert_eq!(citysim::systems::life::home_reach(&w, e, home), Some(walk_tiles), "off, the walk");
+    }
+
     /// Review fix 2: a booked `CabRide` belongs to a driver who can still
     /// drive it. Off his shift the ride is not his (`on_fare` false, no
     /// fare tile for `leisure::spot_of`) and the hour drops it; on shift
@@ -1436,7 +1580,7 @@ mod lives_street {
         let (_, driver) = garage_and_driver(&w);
         let rider = w.citizens().into_iter().find(|&a| a != driver).expect("a rider");
         let (from, to) = (citysim::TilePos { x: 3, y: 3 }, citysim::TilePos { x: 5, y: 5 });
-        let ride = sw::CabRide { rider, from, to, driver, fare: 4, tick: w.tick, stage: 0 };
+        let ride = sw::CabRide { rider, from, to, driver, fare: 4, tick: w.tick, stage: 0, body: false };
         // On shift all day: the ride is his, and the Work plan's spot is the fare.
         if let Some(j) = w.comp_mut::<Job>(driver) {
             j.shifts = vec![(1, 1440)];

@@ -446,6 +446,7 @@ pub fn generate(residents: u32, seed: u64) -> GenMap {
             lines.push(TransitLineCfg {
                 name: label,
                 waypoints: vec![[7, (y0 + ly) as u16], [xe as u16, (y0 + ly) as u16]],
+                in_flight: false,
             });
         }
     }
@@ -454,7 +455,11 @@ pub fn generate(residents: u32, seed: u64) -> GenMap {
         let x0 = bc * BW;
         for (name, lx) in [("Crosstown", 39), ("Vats Spur", 231)] {
             let label = if bcols > 1 { format!("{name} {}", bc + 1) } else { name.to_string() };
-            lines.push(TransitLineCfg { name: label, waypoints: vec![[(x0 + lx) as u16, yn], [(x0 + lx) as u16, ys]] });
+            lines.push(TransitLineCfg {
+                name: label,
+                waypoints: vec![[(x0 + lx) as u16, yn], [(x0 + lx) as u16, ys]],
+                in_flight: false,
+            });
         }
     }
 
