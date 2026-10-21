@@ -515,11 +515,17 @@ fn test_bug8_leader_by_tenure_and_no_succession_for_a_night() {
         w.comp::<Gang>(g)
             .map_or(0, |x| x.members.iter().filter(|&&m| Some(m) != x.leader && !w.has::<citysim::Sentence>(m)).count())
     };
-    let g = w
-        .gangs()
-        .into_iter()
-        .find(|&g| w.comp::<Gang>(g).is_some_and(|x| x.leader.is_some() && x.members.len() >= 4) && free(&w, g) >= 2)
-        .expect("a gang with a leader");
+    let qualifies = |w: &World, g: EntityId| {
+        w.comp::<Gang>(g).is_some_and(|x| x.leader.is_some() && x.members.len() >= 4) && free(w, g) >= 2
+    };
+    // Day by day until one qualifies (when one does is city history: the
+    // pre-view pass phase 3's shapes left none on day 12).
+    let mut day = 12;
+    while day < 40 && !w.gangs().into_iter().any(|g| qualifies(&w, g)) {
+        w.run_ticks(TICKS_PER_DAY);
+        day += 1;
+    }
+    let g = w.gangs().into_iter().find(|&g| qualifies(&w, g)).expect("a gang with a leader");
     // Two free members besides the leader (the ranking's own pool; Review:
     // on the moved city members[0] was the leader).
     let leader = w.comp::<Gang>(g).and_then(|x| x.leader);

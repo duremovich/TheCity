@@ -240,6 +240,11 @@ fn stat_evening_pays(mut w: World, kinds: &[BuildingKind]) {
     // day (the first civilian's Home reaches none since the evening mirrors
     // the Full ladder's cap).
     w.run_ticks(1259);
+    // The 21:00 evening's own visit (the pre-view pass phase 3 draws a visit
+    // to a venue with a counter body into the body's shift: tests/shift.rs).
+    if let Some(s) = w.config.shift.as_mut() {
+        s.counter = None;
+    }
     let mut skip = Vec::new();
     let a = loop {
         let a = civilian(&w, &skip);

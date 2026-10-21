@@ -340,6 +340,49 @@ pub enum ShiftShape {
     /// `station`); `stations` in the file.
     #[serde(rename = "spots", alias = "stations")]
     Stations,
+    /// The pre-view pass phase 3 (§ 1): trips from the workplace's stock
+    /// tile to a destination (a Market, a Warehouse, an open site, a
+    /// parcel's address) and back, `[shift.haul]`; the courier's parcels.
+    Haul,
+    /// The pre-view pass phase 3 (§ 1): the counter or the door tile stood,
+    /// arrivals served as they arrive, `[shift.counter]`.
+    Counter,
+}
+
+/// The pre-view pass phase 3 `[shift.haul]` (docs/PREVIEW_PASS.md § 1).
+/// `None` with `CITYSIM_HAUL_COUNTER_OFF=1`. Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HaulCfg {
+    /// Units a trip carries (the device row; pay and output do not move, P5).
+    pub haul_load: u16,
+    /// No new trip starts within this many minutes (its estimate added) of
+    /// the shift's end: the rest is worked at the post, where it closes.
+    pub haul_cutoff_min: u16,
+    /// The load at the stock tile and the unload at the destination, minutes each.
+    pub haul_handle_min: u16,
+    /// A destination's door at most this many tiles from the post's door.
+    pub haul_reach: u32,
+    /// The most destinations a shift's trips turn through.
+    pub haul_dests_max: u8,
+    /// The trade ids that drive the post's fleet truck when one is parked
+    /// there (`vehicles::claim_haul`); the rest take what the GoTo finds.
+    #[serde(default)]
+    pub drive: Vec<String>,
+}
+
+/// The pre-view pass phase 3 `[shift.counter]` (docs/PREVIEW_PASS.md § 1).
+/// `None` with `CITYSIM_HAUL_COUNTER_OFF=1`. Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CounterCfg {
+    /// An off-screen visit to a venue with a counter body is served in the
+    /// `counter_settle_window`-minute slot it arrives in, through the body's
+    /// shift, not in the 21:00 evening batch.
+    pub counter_settle_window: u16,
+    /// The built-in roles (by the `Role`'s name) that stand the counter,
+    /// over `[shift.roles]` (the Cook, OPEN-145). `counter_staff` in a save
+    /// (an off `[careers]` city's save holds no `roles:`).
+    #[serde(default, rename = "counter_staff", alias = "roles")]
+    pub roles: Vec<String>,
 }
 
 /// The pre-view pass phase 2 `[shift]` (docs/PREVIEW_PASS.md § 1). Every
@@ -376,6 +419,12 @@ pub struct ShiftCfg {
     /// `[careers]` city's save holds no `roles:`).
     #[serde(default, rename = "role_shapes", alias = "roles")]
     pub roles: std::collections::BTreeMap<String, ShiftShape>,
+    /// The pre-view pass phase 3: the `haul` shape's numbers (`None` off).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub haul: Option<HaulCfg>,
+    /// The pre-view pass phase 3: the `counter` shape's numbers (`None` off).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub counter: Option<CounterCfg>,
 }
 
 /// Lives at work phase 6 `[careers]` (docs/LIVES_AT_WORK.md § 4.1-4.4).
@@ -2287,6 +2336,20 @@ impl OutsideCfg {
 }
 
 impl Config {
+    /// The pre-view pass phase 3 off (`CITYSIM_HAUL_COUNTER_OFF=1`, or
+    /// `[shift]` gone): no `haul` or `counter` shape anywhere: `[shift.haul]`
+    /// and `[shift.counter]` (its `roles` with it) dropped, every trade row's
+    /// `shape` cleared: each role back on its `[shift.roles]` shape.
+    pub fn drop_haul_counter(&mut self) {
+        for t in &mut self.trades {
+            t.shape = None;
+        }
+        if let Some(s) = self.shift.as_mut() {
+            s.haul = None;
+            s.counter = None;
+        }
+    }
+
     /// M17 phase 5 (the rename hazard): every corp, gang or Law reference the
     /// config makes by name or row that resolves to no row of `[corps] names`
     /// or `[gangs] names`, as readable lines. The shipped config must give
@@ -2705,6 +2768,11 @@ pub struct TradeCfg {
     pub station_block_min: u16,
     #[serde(default, skip_serializing_if = "is_zero_u16_cfg")]
     pub station_block_max: u16,
+    /// The pre-view pass phase 3 (§ 1): the row's shift shape when it is not
+    /// its `duty`'s (`haul`, `counter`); the duty keeps its hiring and its
+    /// Statistical path. `None` with `CITYSIM_HAUL_COUNTER_OFF=1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape: Option<ShiftShape>,
     /// Jobs & lives phase 1 (§ 1): the row exists only with `[jobs2]
     /// enabled` (`classpay::trade_live`); off, it posts nothing anywhere.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -4269,6 +4337,11 @@ pub struct PreviewOff {
     /// `[shift]` is dropped at load (`Config::shift` `None`), every shift
     /// the one block at one tile.
     pub stations: bool,
+    /// The pre-view pass phase 3 off (`CITYSIM_HAUL_COUNTER_OFF=1`): the
+    /// `haul` and `counter` shapes dropped at load (`[shift.haul]`,
+    /// `[shift.counter]` and every row's `shape` `None`; a `counter` role
+    /// back on `stations`).
+    pub haul_counter: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -8317,6 +8390,12 @@ impl Config {
         cfg.preview_off.stations = std::env::var("CITYSIM_STATIONS_OFF").is_ok_and(|v| v == "1");
         if cfg.preview_off.stations {
             cfg.shift = None;
+        }
+        // The pre-view pass phase 3 (OPEN-121, OPEN-141, OPEN-145): the haul
+        // and counter shapes' switch.
+        cfg.preview_off.haul_counter = std::env::var("CITYSIM_HAUL_COUNTER_OFF").is_ok_and(|v| v == "1");
+        if cfg.preview_off.haul_counter || cfg.shift.is_none() {
+            cfg.drop_haul_counter();
         }
         // The earlier milestones' `CITYSIM_*_OFF` env switches retired in
         // the pre-view pass (OPEN-094); every section's config path stays

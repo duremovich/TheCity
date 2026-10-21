@@ -866,6 +866,30 @@ pub struct Jobs2Cols {
     pub shift_long_180: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub shift_long_over: u32,
+    // The pre-view pass phase 3 (docs/PREVIEW_PASS.md § 1): haul shifts
+    // closed, trips unloaded, units carried (`[shift.haul] haul_load` a
+    // trip), trips to another building than the post, the courier's
+    // unloads with nobody present to sign (the parcel stays), counter
+    // shifts closed, off-screen visits drawn into a counter body's shift,
+    // and the Visit encounters served 06:00-18:00 and in the 21:00 hour.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub haul_shifts: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub haul_trips: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub haul_units: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub haul_away: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub parcels_missed: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub counter_shifts: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub counter_queued: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub served_day: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub served_21h: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -1160,6 +1184,15 @@ impl Jobs2Cols {
                 "shift_long_90",
                 "shift_long_180",
                 "shift_long_over",
+                "haul_shifts",
+                "haul_trips",
+                "haul_units",
+                "haul_away",
+                "parcels_missed",
+                "counter_shifts",
+                "counter_queued",
+                "served_day",
+                "served_21h",
             ]
             .into_iter()
             .map(str::to_string),
@@ -1448,6 +1481,15 @@ impl Jobs2Cols {
             self.shift_long_90.to_string(),
             self.shift_long_180.to_string(),
             self.shift_long_over.to_string(),
+            self.haul_shifts.to_string(),
+            self.haul_trips.to_string(),
+            self.haul_units.to_string(),
+            self.haul_away.to_string(),
+            self.parcels_missed.to_string(),
+            self.counter_shifts.to_string(),
+            self.counter_queued.to_string(),
+            self.served_day.to_string(),
+            self.served_21h.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

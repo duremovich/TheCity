@@ -10,6 +10,8 @@ pub fn run(world: &mut World) {
     // L2 phase 2 (L17, L18, L20): the hourly leisure passes (the bout, the
     // 21:00 Statistical evening, the off-screen leaders, street density).
     crate::systems::leisure::hourly(world);
+    // The pre-view pass phase 3 (OPEN-145): the counter's queued visits, each `counter_settle_window`.
+    crate::systems::leisure::counter_due(world);
     // The Real economy E27: the Statistical kitchen pass at 12:00.
     crate::systems::charity::hourly(world);
     // Jobs & lives phase 1: the Yards' and plants' crews, the outages, the

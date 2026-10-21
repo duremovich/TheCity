@@ -1066,6 +1066,12 @@ pub struct World {
     /// mid-hour save resumes byte for byte. Empty off.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub service_room: BTreeMap<EntityId, crate::systems::service::Room>,
+    /// The pre-view pass phase 3 (OPEN-145, `[shift.counter]`): off-screen
+    /// venue visits drawn at the 21:00 evening into a slot of a counter
+    /// body's shift, paid and served then (`leisure::counter_due`). Saved
+    /// (SAVE_VERSION 48); written only when non-empty, so an off save holds none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub counter_due: Vec<crate::systems::leisure::CounterVisit>,
     /// The pre-view pass phase 1 (OPEN-140, `[life] housing_fix`): the
     /// bodies a `Housed` line named at this tick (the midnight's first
     /// move wins; `life::housed_now`). Not saved: only the tick that wrote
@@ -1725,6 +1731,7 @@ impl World {
             unwind: BTreeMap::new(),
             hangouts: BTreeMap::new(),
             service_room: BTreeMap::new(),
+            counter_due: Vec::new(),
             housed_now: (0, BTreeSet::new()),
             moving_in: BTreeMap::new(),
             regulars: BTreeMap::new(),

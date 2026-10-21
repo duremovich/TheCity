@@ -558,6 +558,14 @@ fn train(world: &mut World, server: EntityId, skill: TradeSkill, gain: f32) {
 
 /// One encounter (§ 1.2's five steps) at a place.
 pub fn serve(world: &mut World, server: EntityId, served: EntityId, place: EntityId, kind: ServeKind, coins: i64) {
+    // The pre-view pass phase 3 (OPEN-145): the device rows, a venue's
+    // customers by day and in the 21:00 hour (the Statistical evening).
+    if kind == ServeKind::Visit && crate::systems::shift::counter_on(world) {
+        let hour = world.tick_of_day() / TICKS_PER_HOUR as u16;
+        let row = ownership::jobs2_row(world);
+        row.served_day += u32::from((6..18).contains(&hour));
+        row.served_21h += u32::from(hour == 21);
+    }
     let d = world.district_of_building(place);
     encounter(world, server, served, Some(place), d, kind, coins);
 }
@@ -737,6 +745,14 @@ pub fn refused(world: &mut World, id: EntityId, b: EntityId) {
         return;
     }
     ownership::jobs2_row(world).door_refusals += 1;
+    // The pre-view pass phase 3 (OPEN-121): turned away, the patron's next
+    // pick passes this door over for `[exec] refused_ticks` (`leisure::door_seen`).
+    if crate::systems::shift::counter_on(world) {
+        let tick = world.tick;
+        if let Some(br) = world.comp_mut::<crate::components::Brain>(id) {
+            br.refused = Some((b, tick));
+        }
+    }
     let staff = door_staff(world, b);
     if staff.is_empty() {
         return;

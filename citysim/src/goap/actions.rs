@@ -191,6 +191,11 @@ pub enum ActionKind {
     /// break, stood outside the workplace's door to `[shift] break_min`
     /// (a shape plan's scripted step, never in `PLANNABLE`, `systems/shift.rs`).
     Break,
+    /// The pre-view pass phase 3 (§ 1, P4): a `haul` trip's load set down at
+    /// its destination (`[shift.haul] haul_handle_min`; a courier's parcels
+    /// handed over there, P3). A work block would lie: the body is not at
+    /// its post. A shape plan's scripted step, never in `PLANNABLE`.
+    Unload,
 }
 
 /// Every action the planner may consider, in tie-break order.
@@ -425,6 +430,7 @@ impl ActionKind {
                 | ActionKind::PackMeal
                 | ActionKind::Vend
                 | ActionKind::Break
+                | ActionKind::Unload
         )
     }
 
@@ -1301,7 +1307,8 @@ impl ActionKind {
             | ActionKind::Oncology
             | ActionKind::PackMeal
             | ActionKind::Vend
-            | ActionKind::Break => false,
+            | ActionKind::Break
+            | ActionKind::Unload => false,
             _ => true,
         }
     }
@@ -1398,7 +1405,8 @@ impl ActionKind {
             | ActionKind::Oncology
             | ActionKind::PackMeal
             | ActionKind::Vend
-            | ActionKind::Break => true,
+            | ActionKind::Break
+            | ActionKind::Unload => true,
             ActionKind::Chat => {
                 matches!(ws.at, LocationKey::Market | LocationKey::Bar | LocationKey::Home | LocationKey::Farm)
                     && ctx.partner.is_some()
@@ -1878,7 +1886,8 @@ impl ActionKind {
             | ActionKind::Oncology
             | ActionKind::PackMeal
             | ActionKind::Vend
-            | ActionKind::Break => 60.0,
+            | ActionKind::Break
+            | ActionKind::Unload => 60.0,
         };
         c.clamp(0.5, 60.0)
     }

@@ -2511,6 +2511,7 @@ wage = 5
 shift = "night"
 skill = "none"
 model = "service"
+shape = "haul"                     # the pre-view pass phase 3: crates from the stock tile to the shelves, inside
 
 [[trades]]
 id = "night_porter"
@@ -2533,6 +2534,7 @@ wage = 6
 shift = "evening"
 skill = "fighting"
 model = "service"
+shape = "counter"                  # the pre-view pass phase 3 (OPEN-121): the door tile stood; refusals at the door
 
 [[trades]]
 id = "dancer"
@@ -2654,6 +2656,7 @@ wage = 6
 shift = "night"
 skill = "fighting"
 model = "handling"
+shape = "haul"                     # the pre-view pass phase 3: crates from the Yard to the workplaces near it
 jobs2 = true
 
 [[trades]]
@@ -2665,6 +2668,7 @@ wage = 6
 shift = "day"
 skill = "none"
 model = "contract"
+shape = "haul"                     # the pre-view pass phase 3: the Yard's truck to the workplaces near it ([shift.haul] drive)
 jobs2 = true
 
 [[trades]]
@@ -2691,6 +2695,7 @@ skill = "farming"
 model = "contract"
 duty = "round"                     # the Yard's open sites, door to door, then the Yard
 round_stops = 2
+shape = "haul"                     # the pre-view pass phase 3: the round becomes loads carried to the open sites
 jobs2 = true
 
 [[trades]]
@@ -2713,6 +2718,7 @@ wage = 5
 shift = "day"
 skill = "none"
 model = "civic"
+shape = "haul"                     # the pre-view pass phase 3: the depot's stock to the workplaces near it
 jobs2 = true
 
 [[trades]]
@@ -2795,6 +2801,7 @@ skill = "none"
 model = "contract"
 duty = "round"
 round_stops = 3
+shape = "haul"                     # the pre-view pass phase 3 (OPEN-141): each parcel a load carried to its address
 jobs2 = true
 street = true
 
@@ -2825,6 +2832,7 @@ shift = "day"
 skill = "fighting"
 model = "day"
 duty = "corner"
+shape = "haul"                     # the pre-view pass phase 3: the day's loads from the hiring Yard or Farm
 jobs2 = true
 street = true
 
@@ -2840,6 +2848,7 @@ wage = 5
 shift = "evening"
 skill = "none"
 model = "service"
+shape = "counter"                  # the pre-view pass phase 3: the bar stood, drinkers served as they come
 jobs2 = true
 vice = true
 
@@ -2852,6 +2861,7 @@ wage = 3
 shift = "evening"
 skill = "persuasion"
 model = "service"
+shape = "counter"                  # the pre-view pass phase 3: the house's counter stood, clients served as they come
 jobs2 = true
 vice = true
 tipped = true
@@ -2865,6 +2875,7 @@ wage = 8
 shift = "evening"
 skill = "persuasion"
 model = "overhead"
+shape = "counter"                  # the pre-view pass phase 3: the house's front stood
 grade = 2
 jobs2 = true
 vice = true
@@ -4250,9 +4261,9 @@ break_stagger = 60                 # P7: the break starts up to this many minute
                                    # per shift): a night crew all stepped out at 01:30 together
 break_walk_max = 15                # P7: the meal break's Market at most this many minutes' walk away (one way), else
                                    # the packed meal or the door
-trade_post = "stations"            # P1: the shape of every `duty = "post"` trade
+trade_post = "stations"            # P1: the shape of every `duty = "post"` trade (a row's `shape` overrides it)
 
-# P1: the built-in roles' shapes, keyed by the Role's name (absent: post).
+# P1: the built-in roles' shapes, keyed by the Role's name (absent: post); [shift.counter] roles overrides.
 [shift.roles]
 Host = "stations"
 Attendant = "stations"
@@ -4266,3 +4277,25 @@ Researcher = "stations"
 Reporter = "stations"
 Fixer = "stations"
 Volunteer = "stations"
+
+# The pre-view pass phase 3 (docs/PREVIEW_PASS.md § 1, systems/shift.rs): the `haul` shape (a trade row's
+# `shape = "haul"`: night stocker, loader, driver, depot hand, builder, courier, day labourer). Dropped with
+# CITYSIM_HAUL_COUNTER_OFF=1. Pay and output do not move (P5): the counts here are what a body is seen doing.
+[shift.haul]
+haul_load = 4                      # units a trip carries (the device row `haul_units`; no stock moves)
+haul_cutoff_min = 60               # no trip starts that would end within this many minutes of the shift's end: the
+                                   # rest is worked at the post, where the shift closes and is paid (the round's
+                                   # ROUND_CUTOFF was two hours for a whole round; a trip is one leg out and back)
+haul_handle_min = 15               # the load at the stock tile and the unload at the destination, minutes each
+haul_reach = 30                    # a destination's door at most this many tiles from the post's door (an hour's walk
+                                   # each way at [exec] move_ticks_full 2); none in reach: the trips run inside the post
+haul_dests_max = 4                 # the most destinations one shift's trips turn through (nearest first)
+drive = ["driver"]                 # these trades take the post's fleet truck when one is parked there
+
+# The pre-view pass phase 3: the `counter` shape (a trade row's `shape = "counter"`: bouncer at the door tile,
+# barkeep, madam, brothel worker; and the roles below). Dropped with CITYSIM_HAUL_COUNTER_OFF=1.
+[shift.counter]
+counter_settle_window = 15         # an off-screen visit to a venue with a counter body (a Full or Coarse counter
+                                   # staffer) is drawn into a slot of this many minutes inside the body's shift and
+                                   # served then (OPEN-145: the 21:00 Statistical evening served only the evening staff)
+roles = ["Cook", "Bartender"]      # the built-in roles that stand the counter (over [shift.roles]; OPEN-145)

@@ -285,6 +285,24 @@ pub fn door_ok(world: &World, id: EntityId, b: EntityId) -> bool {
     }
 }
 
+/// The pre-view pass phase 3 (OPEN-121): the door as a patron choosing a
+/// venue knows it. With `[shift.counter]` on, a Club's door is the
+/// bouncer's call made at the door (`door_ok` there, `service::refused`),
+/// not one the patron reads from across the city: the pick passes the
+/// Club's heat rule and only passes over a venue that turned `id` away
+/// within `[exec] refused_ticks`. Off: `door_ok` (the bouncer's verdict
+/// read at the pick, so the door never refused anyone).
+pub fn door_seen(world: &World, id: EntityId, b: EntityId) -> bool {
+    if !crate::systems::shift::counter_on(world) || kind_of(world, b) != Some(BuildingKind::Club) {
+        return door_ok(world, id, b);
+    }
+    let turned = world
+        .comp::<Brain>(id)
+        .and_then(|br| br.refused)
+        .is_some_and(|(r, t)| r == b && world.tick.saturating_sub(t) < world.config.exec.refused_ticks.max(1));
+    !turned && !crate::systems::industry::closed_site(world, b) && !crate::systems::industry::dark_at(world, b)
+}
+
 /// The venue's price today (`Venue.price`; a Bar's drink is 2).
 pub fn price_of(world: &World, b: EntityId) -> i64 {
     let Some(bd) = world.comp::<Building>(b) else { return 0 };
@@ -641,7 +659,7 @@ fn nearest_venue(
             && (kind == BuildingKind::Bar || world.comp::<Building>(b).is_some_and(|bd| bd.venue.is_some()))
             && district.is_none_or(|d| world.district_of_building(b) == d)
             && open(world, b)
-            && door_ok(world, id, b)
+            && door_seen(world, id, b)
             && has_room(world, id, b)
     })
 }
@@ -1862,7 +1880,7 @@ fn evening_venues(world: &World, id: EntityId) -> Vec<(BuildingKind, EntityId)> 
                     // swept, dark, raided, unstaffed or unbuilt venue takes
                     // nobody; the door policy; the room; a shut table).
                     && open(world, b)
-                    && door_ok(world, id, b)
+                    && door_seen(world, id, b)
                     && has_room(world, id, b)
                     && (kind != BuildingKind::Den || table_open(world, b))
             })
@@ -1930,8 +1948,152 @@ pub fn stat_daily(world: &mut World) {
             continue;
         };
         let Some(b) = c.venue else { continue };
+        if queue_at_counter(world, id, b, c.act, None, 0) {
+            continue;
+        }
         let mut rng = world.rng.word(WordNs::Leisure, day, u64::from(id.index));
         stat_visit(world, id, b, c.act, None, &mut rng);
+    }
+}
+
+/// The pre-view pass phase 3 (OPEN-145): an off-screen visit drawn into a
+/// counter body's shift (`counter_due`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CounterVisit {
+    /// The slot's tick (a multiple of `counter_settle_window` minutes).
+    pub at: Tick,
+    pub who: EntityId,
+    pub venue: EntityId,
+    pub act: ActionKind,
+    /// The evening's purse the visit was rolled on (`stat_visit`'s `evening`).
+    pub evening: Option<i64>,
+    /// The day it was rolled and its ordinal that day (the visit's stream).
+    pub day: u64,
+    pub k: u32,
+}
+
+const PURPOSE_COUNTER: u64 = 0x4c45_0018;
+
+/// The pre-view pass phase 3 (OPEN-145, P3): `b`'s counter bodies, the
+/// staff of a `counter` shape that are bodies (not Statistical), living,
+/// not held: ascending.
+pub fn counter_bodies(world: &World, b: EntityId) -> Vec<EntityId> {
+    world
+        .staff_of(b)
+        .iter()
+        .copied()
+        .filter(|&s| {
+            world
+                .comp::<crate::components::Job>(s)
+                .is_some_and(|j| crate::systems::shift::shape_of(world, j.role) == crate::config::ShiftShape::Counter)
+                && world.comp::<Brain>(s).is_some_and(|br| br.lod != Lod::Statistical)
+                && !world.has::<crate::components::Sentence>(s)
+                && crate::systems::law::living(world, s)
+        })
+        .collect()
+}
+
+/// The pre-view pass phase 3 (OPEN-145): the 21:00 evening's visit `k` of
+/// `id` at `b`, when `b` has a counter body, is drawn (purpose-keyed: the
+/// agent, the venue, the day, `k`) into a `counter_settle_window` slot of
+/// the next 24 hours inside the bodies' shifts and queued (`counter_due`
+/// pays and serves it then, so the day cook has the day's customers and a
+/// barkeep serves them as they come, not in one 21:00 batch). `true` when
+/// queued; with no counter body the visit is the evening's, as before (an
+/// off-screen venue keeps its economy: the mirror).
+fn queue_at_counter(
+    world: &mut World,
+    id: EntityId,
+    b: EntityId,
+    act: ActionKind,
+    evening: Option<i64>,
+    k: u32,
+) -> bool {
+    let Some(window) = world.config.shift.as_ref().and_then(|c| c.counter.as_ref()).map(|c| c.counter_settle_window)
+    else {
+        return false;
+    };
+    let bodies = counter_bodies(world, b);
+    if bodies.is_empty() {
+        return false;
+    }
+    // The union of the bodies' shift minutes over the next 24 hours.
+    let now = world.tick;
+    let day0 = now - now % TICKS_PER_DAY;
+    let mut spans: Vec<(Tick, Tick)> = Vec::new();
+    for &s in &bodies {
+        let Some(j) = world.comp::<crate::components::Job>(s) else { continue };
+        for &(a, e) in &j.shifts {
+            for d in [day0, day0 + TICKS_PER_DAY] {
+                let (lo, hi) = ((d + Tick::from(a)).max(now), (d + Tick::from(e)).min(now + TICKS_PER_DAY));
+                if lo < hi {
+                    spans.push((lo, hi));
+                }
+            }
+        }
+    }
+    spans.sort_unstable();
+    let mut union: Vec<(Tick, Tick)> = Vec::new();
+    for (lo, hi) in spans {
+        match union.last_mut() {
+            Some(last) if lo <= last.1 => last.1 = last.1.max(hi),
+            _ => union.push((lo, hi)),
+        }
+    }
+    let total: Tick = union.iter().map(|&(lo, hi)| hi - lo).sum();
+    if total == 0 {
+        return false;
+    }
+    let day = world.day();
+    let u = crate::systems::econ::hash_unit(
+        world.seed(),
+        PURPOSE_COUNTER,
+        u64::from(id.index) << 24 ^ u64::from(b.index),
+        day * 64 + u64::from(k),
+    );
+    let mut off = ((u * total as f32) as Tick).min(total - 1);
+    let mut at = now;
+    for &(lo, hi) in &union {
+        if off < hi - lo {
+            at = lo + off;
+            break;
+        }
+        off -= hi - lo;
+    }
+    let w = Tick::from(window.max(1));
+    let at = (at - at % w).max(now);
+    world.counter_due.push(CounterVisit { at, who: id, venue: b, act, evening, day, k });
+    crate::systems::ownership::jobs2_row(world).counter_queued += 1;
+    true
+}
+
+/// The pre-view pass phase 3 (OPEN-145): every `counter_settle_window`
+/// minutes, the queued visits due now are made (`stat_visit`: paid, the
+/// fun, the visit, and the encounter at the counter, `service::arrive`,
+/// served by whoever is behind it). A visitor no longer Statistical (a body
+/// now, planning its own evenings) or dead drops its visit.
+pub fn counter_due(world: &mut World) {
+    if world.counter_due.is_empty() {
+        return;
+    }
+    let w = world.config.shift.as_ref().and_then(|c| c.counter.as_ref()).map_or(1, |c| c.counter_settle_window.max(1));
+    if !world.tick.is_multiple_of(Tick::from(w)) {
+        return;
+    }
+    let now = world.tick;
+    let (due, rest): (Vec<CounterVisit>, Vec<CounterVisit>) =
+        std::mem::take(&mut world.counter_due).into_iter().partition(|v| v.at <= now);
+    world.counter_due = rest;
+    for v in due {
+        if world.comp::<Brain>(v.who).is_none_or(|b| b.lod != Lod::Statistical)
+            || !crate::systems::law::living(world, v.who)
+            || !world.has::<Building>(v.venue)
+            || !open(world, v.venue)
+        {
+            continue;
+        }
+        let mut rng = world.rng.word(WordNs::Leisure, v.day, u64::from(v.who.index) ^ (u64::from(v.k) + 1) << 40);
+        stat_visit(world, v.who, v.venue, v.act, v.evening, &mut rng);
     }
 }
 
@@ -1986,7 +2148,13 @@ fn stat_learned_evening(world: &mut World, ids: &[EntityId], pv: &std::collectio
                 day * 16 + i as u64,
             );
             let n = r.floor() as u32 + u32::from(u < r.fract());
-            for _ in 0..n {
+            for k in 0..n {
+                // The pre-view pass phase 3 (OPEN-145): a venue with a
+                // counter body serves the visit in the body's shift.
+                if queue_at_counter(world, id, b, act_of(kind), Some(evening), (i as u32) << 8 | k) {
+                    went = true;
+                    continue;
+                }
                 if !stat_visit(world, id, b, act_of(kind), Some(evening), &mut rng) {
                     break;
                 }
@@ -2018,6 +2186,12 @@ fn stat_visit(
     let purse = evening.unwrap_or(now);
     let price = price_of(world, b);
     if now < 1 || (act != ActionKind::Drink && 2 * price > purse) {
+        return false;
+    }
+    // The pre-view pass phase 3 (OPEN-121, the mirror): the off-screen
+    // visitor meets the same door a body does (`door_seen` picked it).
+    if crate::systems::shift::counter_on(world) && !door_ok(world, id, b) {
+        crate::systems::service::refused(world, id, b);
         return false;
     }
     // Phase 5: the gate's probe (not a CSV column): the evening's gross
