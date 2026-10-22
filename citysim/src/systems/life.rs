@@ -733,6 +733,11 @@ fn build_near(world: &mut World, employer: EntityId, seeded: bool) -> Option<boo
         .buildings_of_kind(BuildingKind::Home)
         .iter()
         .filter_map(|&h| {
+            // The island pass phase 3a (I6): a company block is its staff's
+            // only; another employer's far workers get no storey on it.
+            if !crate::systems::company::open_to_all(world, h) {
+                return None;
+            }
             let b = world.comp::<Building>(h).filter(|b| !b.demolished && !b.derelict && b.floors.max(1) < max)?;
             let d = commute_cost(world, b.door, work);
             (d <= cap).then_some((d, h))

@@ -4362,7 +4362,7 @@ cot_bed_ticks = 60                 # a Mission's cot's offer over a paid Hotel b
                                    # more than this (the base took any cot in reach first: 119 tiles over a Hotel at 5)
 
 # The island pass phase 3a (docs/ISLAND_PASS.md I6; OPEN-163; systems/company.rs): seeded company housing. At world
-# build, after the staffing and before the housing pre-roll, each workplace of these kinds whose far posts outnumber
+# build, after the staffing and the housing pre-roll, each workplace of these kinds whose far posts outnumber
 # the free beds near it gets company blocks (a Home on the nearest vacant Lot, else on a plot of open ground, owned by
 # the workplace's owner), its beds reserved for that workplace's staff. A new hire with a far Home, or a homeless one, moves in at midnight; the rent is
 # docked from the wage; a resident whose job there ended is evicted after grace_days. The island's 120 Farms hold

@@ -6,8 +6,9 @@
 //! only 568 of its 4,332 far commuters have a free bed near work (phase
 //! 1). Farms and industry house their own staff.
 //!
-//! - **Seeded** ([`seed`], world build, after the staffing and before the
-//!   housing pre-roll): each workplace of a `[company_housing] kinds` kind
+//! - **Seeded** ([`seed`], world build, after the staffing and the housing
+//!   pre-roll, whose relocation and job search have settled who lives and
+//!   works where): each workplace of a `[company_housing] kinds` kind
 //!   whose far posts (a holder homeless, or housed past `far_ticks` of
 //!   `distance::travel`) outnumber the free beds within `far_ticks` of its
 //!   door wants `seed_share` of the difference as company beds (most wanted
@@ -127,8 +128,8 @@ fn far_post(world: &World, a: EntityId, wdoor: crate::components::TilePos, far: 
     }
 }
 
-/// World build, after the staffing and before the housing pre-roll (see
-/// the module): the company blocks, and with `fill_at_seed` the far posts'
+/// World build, after the staffing and the housing pre-roll (see the
+/// module): the company blocks, and with `fill_at_seed` the far posts'
 /// holders moved in. Returns `(blocks, beds)`. No RNG, no coin (a seed
 /// building, as the pre-roll's).
 pub fn seed(world: &mut World) -> (u32, u32) {

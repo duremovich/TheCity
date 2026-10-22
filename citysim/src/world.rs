@@ -1907,11 +1907,6 @@ impl World {
         crate::prof::timed!("new::classpay::seed_schooling", systems::classpay::seed_schooling(&mut w));
         crate::prof::timed!("new::wages::seed_staff", systems::wages::seed_staff(&mut w));
         crate::prof::timed!("new::classpay::seed_after_staff", systems::classpay::seed_after_staff(&mut w));
-        // The island pass phase 3a (I6): company blocks beside the
-        // workplaces whose far posts outnumber the beds near them, on the
-        // Lots left or open ground, and their far staff moved in (no RNG,
-        // no coin; nothing with `[company_housing]` off).
-        crate::prof::timed!("new::company::seed", systems::company::seed(&mut w));
         // Hunger fix item 9 (P5g): the seeded staff housed near work where
         // Homes allow (the relocation pass, uncapped; no RNG). The pre-roll
         // (items 8-10, wages and no safety net on): Homes and floors toward
@@ -1920,6 +1915,12 @@ impl World {
         if systems::fixes::hire_near(&w) {
             crate::prof::timed!("new::life::preroll_housing", systems::life::preroll_housing(&mut w));
         }
+        // The island pass phase 3a (I6), after the pre-roll housed whom it
+        // could and its job search settled the posts: company blocks beside
+        // the workplaces whose far posts outnumber the beds near them, on
+        // the Lots left or open ground, and their far staff moved in (no RNG,
+        // no coin; nothing with `[company_housing]` off).
+        crate::prof::timed!("new::company::seed", systems::company::seed(&mut w));
         // Hunger as sickness (after P5): the adults' histories (pure
         // hashes, no stream draw), once they are housed.
         crate::prof::timed!("new::health::seed_history", systems::health::seed_history(&mut w));
