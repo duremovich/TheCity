@@ -593,7 +593,7 @@ pub fn evictions(world: &mut World) {
         let before = world.stats.current.evictions;
         crate::systems::ownership::evict(world, a, &why);
         let n = world.stats.current.evictions.saturating_sub(before);
-        crate::systems::ownership::jobs2_row(world).company_evicted += n as u32;
+        crate::systems::ownership::jobs2_row(world).company_evicted += n;
         // The spouse put out with him is no longer lapsed.
         if let Some(s) = world.spouse_of(a) {
             world.company_lapsed.remove(&s);

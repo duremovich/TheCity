@@ -8846,11 +8846,16 @@ impl Config {
     /// retired with P10). The housing catch-up (`[life]
     /// housing_catchup_days`, 2026-10-11) is off: its housing growth is the
     /// flat P5h rule (the pre-roll reads the market wage law and no net).
+    /// No `[company_housing]` (the island pass phase 3a).
     pub fn dole_city(mut self) -> Config {
         self.policy = PolicyCfg::dole_city();
         // Transit phase 3: the old default had no El.
         self.transit.enabled = false;
         self.life.housing_catchup_days = 0.0;
+        // The island pass phase 3a: no company housing (the old default;
+        // with no El its walked commutes would seed blocks on the Lots the
+        // pinned tests read).
+        self.company_housing = None;
         self
     }
 
