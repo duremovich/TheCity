@@ -361,6 +361,28 @@ pub struct DistanceCfg {
     /// The own Home's offer over a Hideout cot, in travel ticks: the Hideout
     /// is tonight's bed only when nearer by more than this.
     pub home_bed_ticks: u64,
+    /// The island pass phase 2 (OPEN-163, OPEN-171): the free-time spot and
+    /// the Hotel. `None` (not written into a save) with
+    /// `CITYSIM_DISTANCE2_OFF=1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub free: Option<FreeDistanceCfg>,
+}
+
+/// The island pass phase 2 `[distance.free]` (docs/ISLAND_PASS.md I1):
+/// the caps of the free-time spot and the night's bed out (a Hotel or a
+/// Mission's cot). Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FreeDistanceCfg {
+    /// The HangOut spot (a street corner, a Hideout's door, a friend's
+    /// Home): past this from where the body sets out it is dropped, and with
+    /// none within, no spot (the own Home is never past it).
+    pub spot_cap_ticks: u64,
+    /// Tonight's paid or charity bed (`street::hotel_for`): past this from
+    /// where the body sets out it is dropped while one within it is left.
+    pub hotel_cap_ticks: u64,
+    /// A Mission's cot's offer over a paid Hotel bed, in travel ticks (it
+    /// is free): the cot unless a Hotel is nearer by more than this.
+    pub cot_bed_ticks: u64,
 }
 
 /// The pre-view pass phase 6 `[leaders]` (docs/PREVIEW_PASS.md § 0 P9,
@@ -8493,6 +8515,13 @@ impl Config {
         // flight (doctrine 6).
         if std::env::var("CITYSIM_DISTANCE_OFF").is_ok_and(|v| v == "1") {
             cfg.distance = None;
+        }
+        // The island pass phase 2 (OPEN-163, OPEN-171): the free-time and
+        // Hotel picks' switch in flight (doctrine 6).
+        if std::env::var("CITYSIM_DISTANCE2_OFF").is_ok_and(|v| v == "1") {
+            if let Some(d) = cfg.distance.as_mut() {
+                d.free = None;
+            }
         }
         // Lives at work (D13): a config with `[lives] enabled = false` by any
         // path clears the milestone's sections, so the off save holds no

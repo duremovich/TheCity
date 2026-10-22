@@ -123,7 +123,9 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
                 || (!chat_possible
                     && (world.comp::<Wallet>(id).is_some_and(|w| w.coins < 2)
                         || bar_full_for(world, id)
-                        || drank_today(world, id))
+                        || drank_today(world, id)
+                        // The island pass phase 2: the Bar past the spot cap.
+                        || crate::systems::leisure::bar_past_cap(world, id))
                     && !crate::systems::leisure::spot_in_reach(world, id))
         }
         GoalKind::Flee => needs.is_some_and(|n| n.safety >= SAFE),

@@ -564,6 +564,33 @@ fn travel(world: &World, tiles: u32) -> f32 {
     crate::systems::life::travel_factor(world, crate::systems::life::walk_ticks(world, tiles))
 }
 
+/// The island pass phase 2 (`[distance.free]`): a spot's travel estimate
+/// from `from` (`distance::travel`), `None` off.
+fn spot_ticks(world: &World, from: TilePos, tile: TilePos) -> Option<Tick> {
+    crate::systems::distance::free(world).map(|_| crate::systems::distance::travel(world, from, tile))
+}
+
+/// The walk's factor to a spot at `tile`: the travel estimate's with
+/// `[distance.free]` on, else the Manhattan walk's (the base).
+fn spot_travel(world: &World, from: TilePos, tile: TilePos) -> f32 {
+    match spot_ticks(world, from, tile) {
+        Some(t) => crate::systems::life::travel_factor(world, t),
+        None => travel(world, tile.manhattan(from)),
+    }
+}
+
+/// A spot's distance for the cap and the ties: the travel estimate on, the
+/// Manhattan tiles off.
+fn spot_dist(world: &World, from: TilePos, tile: TilePos) -> u64 {
+    spot_ticks(world, from, tile).unwrap_or_else(|| u64::from(tile.manhattan(from)))
+}
+
+/// The spot cap in `spot_dist`'s unit: `spot_cap_ticks` on, else
+/// `[life] spot_walk_cap_tiles`.
+fn spot_cap(world: &World) -> u64 {
+    crate::systems::distance::free(world).map_or(u64::from(world.config.life.spot_walk_cap_tiles), |f| f.spot_cap_ticks)
+}
+
 /// A paid candidate's score: `gain × travel × pride (mid, high) × courage
 /// (FightPit, Den) × (1 − greed × price ÷ purse)`.
 fn paid_score(world: &World, id: EntityId, b: EntityId, rung: Rung, price: i64, purse: i64, tiles: u32) -> f32 {
@@ -802,7 +829,7 @@ pub fn choice(world: &World, id: EntityId, scored: bool) -> Option<UnwindPick> {
         // of 15 HangOuts were "nobody there"); company scales it up.
         let lone = world.config.life.spot_lone_fun;
         let company = lone + (1.0 - lone) * social.clamp(0.0, 1.0);
-        let score = (g.hangout_hour * hours * company + 0.1 * social.min(1.0)) * travel(world, t.manhattan(from));
+        let score = (g.hangout_hour * hours * company + 0.1 * social.min(1.0)) * spot_travel(world, from, t);
         cands.push(Cand { rung: Rung::Free, act: ActionKind::HangOut, venue: home, spot: Some(t), score });
     }
     let best = cands.iter().max_by(|a, b| {
@@ -935,6 +962,19 @@ fn spots_near_with(world: &World, id: EntityId, from: TilePos, with_friends: boo
 
 /// The nearest spot `id` may use (think time), with a 0 social score.
 fn nearest_spot(world: &World, id: EntityId, from: TilePos) -> Option<(TilePos, f32)> {
+    // The island pass phase 2: by the travel estimate, none past the cap
+    // (the own Home's never is).
+    if crate::systems::distance::free(world).is_some() {
+        let cap = spot_cap(world);
+        let own = home_of(world, id);
+        return spots_near(world, id, from)
+            .into_iter()
+            .map(|s| (spot_dist(world, from, s.tile), s))
+            .filter(|(d, s)| *d <= cap || matches!(s.kind, SpotKind::Home(h) if Some(h) == own))
+            .map(|(d, s)| (d, s.tile))
+            .min()
+            .map(|(_, t)| (t, 0.0));
+    }
     spots_near(world, id, from).into_iter().map(|s| (s.tile.manhattan(from), s.tile)).min().map(|(_, t)| (t, 0.0))
 }
 
@@ -988,7 +1028,7 @@ pub fn best_spot_kind(world: &World, id: EntityId, from: TilePos) -> Option<(Spo
     // L2 shadow fixes item 5: a spot past `spot_walk_cap_tiles` is not worth
     // the walk (195 min at midnight to an empty corner): within the cap,
     // else the nearest alone.
-    let cap = world.config.life.spot_walk_cap_tiles;
+    let cap = spot_cap(world);
     // Lives at work phase 2 (§ 3.3): after an empty leave, only spots with
     // company now (none: no HangOut).
     if crate::systems::household::company_only(world, id) {
@@ -1005,15 +1045,21 @@ pub fn best_spot_kind(world: &World, id: EntityId, from: TilePos) -> Option<(Spo
     }
     // Lives at work phase 2 (§ 3.1): the own Home is never past the cap.
     let own = home_of(world, id);
-    let near: Vec<Spot> = spots
+    // The island pass phase 2 (`[distance.free]`): the cap is on the travel
+    // estimate, and with none within there is no spot (an hour's company is
+    // not walked 4 h for; island d30: 2,204 Unwind spot legs of 4 h or more).
+    let dist: Vec<(Spot, u64)> = spots.iter().map(|&s| (s, spot_dist(world, from, s.tile))).collect();
+    let near: Vec<(Spot, u64)> = dist
         .iter()
         .copied()
-        .filter(|s| s.tile.manhattan(from) <= cap || matches!(s.kind, SpotKind::Home(h) if Some(h) == own))
+        .filter(|&(s, d)| d <= cap || matches!(s.kind, SpotKind::Home(h) if Some(h) == own))
         .collect();
-    spots = if near.is_empty() {
-        spots.iter().copied().min_by_key(|s| (s.tile.manhattan(from), s.tile)).into_iter().collect()
-    } else {
+    let spots: Vec<(Spot, u64)> = if !near.is_empty() {
         near
+    } else if crate::systems::distance::free(world).is_some() {
+        return None;
+    } else {
+        dist.iter().copied().min_by_key(|&(s, d)| (d, s.tile)).into_iter().collect()
     };
     let enemies = crate::systems::fixes::enemy_tiles(world, id);
     let now = world.tick;
@@ -1032,7 +1078,7 @@ pub fn best_spot_kind(world: &World, id: EntityId, from: TilePos) -> Option<(Spo
     let cfg = &world.config.leisure;
     spots
         .iter()
-        .map(|s| {
+        .map(|(s, d)| {
             let sd = world.district_of(s.tile);
             let present = world.hangouts.get(&s.tile);
             let mut social = 0.0f32;
@@ -1075,8 +1121,7 @@ pub fn best_spot_kind(world: &World, id: EntityId, from: TilePos) -> Option<(Spo
             }
             let mult = crate::systems::household::empty_mult(world, id, s.tile)
                 * crate::systems::household::away_mult(world, id, own_home);
-            let d = s.tile.manhattan(from);
-            ((0.5 + social).max(0.0) * travel(world, d) * mult, d, *s, social)
+            ((0.5 + social).max(0.0) * spot_travel(world, from, s.tile) * mult, *d, *s, social)
         })
         .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)).then(b.2.tile.cmp(&a.2.tile)))
         .map(|(_, _, s, social)| (s, social))
@@ -1271,7 +1316,7 @@ pub fn hangout_plan(world: &mut World, id: EntityId) -> Option<Plan> {
     let from = origin(world, id)?;
     let (spot, social) = best_spot_kind(world, id, from)?;
     let tile = spot.tile;
-    let spot_score = (0.5 + social) * travel(world, tile.manhattan(from));
+    let spot_score = (0.5 + social) * spot_travel(world, from, tile);
     let bar = world.local(id, BuildingKind::Bar).and_then(|b| crate::systems::life::tiles_to(world, id, b));
     let bar_score = bar.map_or(0.0, |t| travel(world, t));
     if coins(world, id) >= 2 && spot_score < bar_score {
@@ -1300,8 +1345,27 @@ pub fn hangout_plan(world: &mut World, id: EntityId) -> Option<Plan> {
 /// dropped when a spot is within `hangout_reach`.
 pub fn spot_in_reach(world: &World, id: EntityId) -> bool {
     origin(world, id).is_some_and(|from| {
+        // The island pass phase 2: on the travel estimate, within the spot cap.
+        if crate::systems::distance::free(world).is_some() {
+            let cap = spot_cap(world);
+            return spots_near(world, id, from).iter().any(|s| spot_dist(world, from, s.tile) <= cap);
+        }
         spots_near(world, id, from).iter().any(|s| s.tile.manhattan(from) <= world.config.leisure.hangout_reach)
     })
+}
+
+/// The island pass phase 2 (`[distance.free]`): the Bar a Socialise would
+/// walk to (`World::local`) is past `spot_cap_ticks` from where the body
+/// sets out, so no drink is possible for it (the base walked to the nearest
+/// Bar at any distance once no spot was left: 1,809 Socialise Bar legs on
+/// the island at d30, 43 % at 2 h or more). `false` off.
+pub fn bar_past_cap(world: &World, id: EntityId) -> bool {
+    let Some(f) = crate::systems::distance::free(world) else { return false };
+    let Some(from) = origin(world, id) else { return false };
+    world
+        .local(id, BuildingKind::Bar)
+        .and_then(|b| world.comp::<Building>(b))
+        .is_some_and(|bd| crate::systems::distance::travel(world, from, bd.door) > f.spot_cap_ticks)
 }
 
 /// `LocationKey::Spot`: the spot of the agent's pick.

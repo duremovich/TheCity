@@ -113,6 +113,11 @@ pub enum LocationKey {
     /// while inside, else the walk to the building. Shape plans only
     /// (`systems/shift.rs`), never in `GOTO`.
     Station,
+    /// The island pass phase 2 (OPEN-171): a Mission's cot, the homeless's
+    /// bed out when `street::hotel_for` picks one (`[distance.free]` on): a
+    /// cot is walked to as a cot, never as a "Hotel" (it was a Soup Kitchen
+    /// or a Church under a plan named Hotel). Off, the cot stays `Hotel`.
+    Cot,
 }
 
 impl LocationKey {
@@ -621,6 +626,9 @@ impl WorldState {
             Some(b) if crate::systems::charity::is_mission(world, b) => {
                 if world.comp::<crate::components::Job>(agent).and_then(|j| j.employer) == Some(b) {
                     LocationKey::Workplace
+                } else if crate::systems::distance::free(world).is_some() {
+                    // The island pass phase 2 (OPEN-171): at the cot house.
+                    LocationKey::Cot
                 } else {
                     LocationKey::Hotel
                 }

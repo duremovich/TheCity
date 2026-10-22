@@ -1663,6 +1663,7 @@ fn run(args: RunArgs) -> Result<(), String> {
                 next_lever += 1;
             }
             citysim::tick(&mut world);
+            citysim::exec::leglog::leader_tick(&mut world);
             if world.leg_log.is_some() && world.tick % TICKS_PER_DAY == 180 {
                 citysim::exec::leglog::night_census(&mut world);
             }
