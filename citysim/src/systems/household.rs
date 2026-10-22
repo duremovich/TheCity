@@ -933,6 +933,8 @@ pub fn tied_housing(world: &mut World) {
             .iter()
             .copied()
             .filter(|&b| world.owner_of(b) == Some(owner) && world.district_of_building(b) == d)
+            // The island pass phase 3a (I6): a company bed is its staff's only.
+            .filter(|&b| crate::systems::company::open_to_all(world, b))
             .filter(|&b| {
                 world.comp::<Building>(b).is_some_and(|bd| {
                     !bd.demolished

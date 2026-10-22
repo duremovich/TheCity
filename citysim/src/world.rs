@@ -1289,6 +1289,14 @@ pub struct World {
     /// housing demand went unmet (`life::grow_housing`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub housing_demand: BTreeMap<EntityId, u16>,
+    /// The island pass phase 3a (I6, `systems/company.rs`): a company
+    /// block -> the workplace whose staff its beds are reserved for.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub company_homes: BTreeMap<EntityId, EntityId>,
+    /// The island pass phase 3a: a company block's resident whose job at
+    /// its workplace ended -> the tick it ended (evicted `grace_days` on).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub company_lapsed: BTreeMap<EntityId, Tick>,
     /// Scale S5 (docs/SCALE_20K.md § S5): the Ambient tier (empty, and not
     /// saved, on a map without Ambient flats).
     #[serde(default, skip_serializing_if = "crate::ambient::AmbientState::is_empty")]
@@ -1807,6 +1815,8 @@ impl World {
             employer_of: BTreeMap::new(),
             laid_off: BTreeMap::new(),
             housing_demand: BTreeMap::new(),
+            company_homes: BTreeMap::new(),
+            company_lapsed: BTreeMap::new(),
             ambient: Default::default(),
             jobs2: Default::default(),
         };
@@ -1905,6 +1915,12 @@ impl World {
         if systems::fixes::hire_near(&w) {
             crate::prof::timed!("new::life::preroll_housing", systems::life::preroll_housing(&mut w));
         }
+        // The island pass phase 3a (I6), after the pre-roll housed whom it
+        // could and its job search settled the posts: company blocks beside
+        // the workplaces whose far posts outnumber the beds near them, on
+        // the Lots left or open ground, and their far staff moved in (no RNG,
+        // no coin; nothing with `[company_housing]` off).
+        crate::prof::timed!("new::company::seed", systems::company::seed(&mut w));
         // Hunger as sickness (after P5): the adults' histories (pure
         // hashes, no stream draw), once they are housed.
         crate::prof::timed!("new::health::seed_history", systems::health::seed_history(&mut w));

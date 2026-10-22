@@ -341,6 +341,56 @@ pub struct Config {
     /// read no cap.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub distance: Option<DistanceCfg>,
+    /// The island pass phase 3a (docs/ISLAND_PASS.md I6; OPEN-163):
+    /// seeded company housing (`systems/company.rs`). `None` (not written
+    /// into a save) with `CITYSIM_COMPANY_HOUSING_OFF=1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub company_housing: Option<CompanyHousingCfg>,
+}
+
+/// The island pass phase 3a `[company_housing]` (docs/ISLAND_PASS.md I6):
+/// company blocks seeded beside the far-commuting workplaces at world
+/// build, their beds reserved for that workplace's staff, the rent docked
+/// from the wage, the bed lost `grace_days` after the job. Every value a
+/// placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CompanyHousingCfg {
+    /// The workplace kinds that put up company housing.
+    pub kinds: Vec<BuildingKind>,
+    /// A post is far when its holder's Home door (or the holder is
+    /// homeless) is past this travel (`distance::travel`) from the
+    /// workplace door; also the move-in rule for a new hire.
+    pub far_ticks: u64,
+    /// A company block's Lot: its door within this travel of the workplace
+    /// door (the nearest first).
+    pub lot_cap_ticks: u64,
+    /// The share of a workplace's unmet far posts (far posts less the free
+    /// beds within `far_ticks`) seeded as company beds at world build.
+    pub seed_share: f32,
+    /// No block for a workplace whose seeded want is below this many beds.
+    pub min_beds: u32,
+    /// At most this many blocks beside one workplace at world build.
+    pub blocks_max: u32,
+    /// With no vacant Lot within `lot_cap_ticks`, a block goes up on a
+    /// plot of open ground this many tiles wide and high (walls included).
+    pub plot_w: u16,
+    pub plot_h: u16,
+    /// A block's storeys: enough for the beds wanted, at most this (a Lot's
+    /// own storeys at least).
+    pub floors_max: u8,
+    /// A company block's beds per floor (bunks; a plain Home's is
+    /// `[buildings] home.capacity`), capped by the Lot's interior.
+    pub beds_per_floor: u16,
+    /// The company rent: this × `[rent] base[tier]` a day per housed
+    /// worker, docked from the wage at collection.
+    pub rent_mult: f32,
+    /// A resident whose job at the workplace ended keeps the bed this many
+    /// days, then is evicted.
+    pub grace_days: u32,
+    /// World build: the far posts' holders move into the seeded beds
+    /// (the seed city lives where it is housed); off, only the new hires
+    /// and the homeless staff fill them.
+    pub fill_at_seed: bool,
 }
 
 /// The island pass phase 1 `[distance]` (docs/ISLAND_PASS.md I1): each
@@ -8523,6 +8573,11 @@ impl Config {
                 d.free = None;
             }
         }
+        // The island pass phase 3a (OPEN-163, I6): seeded company housing's
+        // switch in flight (doctrine 6).
+        if std::env::var("CITYSIM_COMPANY_HOUSING_OFF").is_ok_and(|v| v == "1") {
+            cfg.company_housing = None;
+        }
         // Lives at work (D13): a config with `[lives] enabled = false` by any
         // path clears the milestone's sections, so the off save holds no
         // `[lives]`, `[service]` or `[[serves]]`. The milestone's env
@@ -8791,11 +8846,16 @@ impl Config {
     /// retired with P10). The housing catch-up (`[life]
     /// housing_catchup_days`, 2026-10-11) is off: its housing growth is the
     /// flat P5h rule (the pre-roll reads the market wage law and no net).
+    /// No `[company_housing]` (the island pass phase 3a).
     pub fn dole_city(mut self) -> Config {
         self.policy = PolicyCfg::dole_city();
         // Transit phase 3: the old default had no El.
         self.transit.enabled = false;
         self.life.housing_catchup_days = 0.0;
+        // The island pass phase 3a: no company housing (the old default;
+        // with no El its walked commutes would seed blocks on the Lots the
+        // pinned tests read).
+        self.company_housing = None;
         self
     }
 

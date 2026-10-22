@@ -1447,6 +1447,10 @@ pub fn rent_for(world: &World, home: EntityId) -> i64 {
     if b.demolished || b.derelict {
         return 0;
     }
+    // The island pass phase 3a (I6): a company bed's rent, per worker.
+    if world.company_homes.contains_key(&home) {
+        return (crate::systems::company::rent_tenths(world, home) + 5) / 10;
+    }
     let tier = usize::from(b.tier.min(2));
     let base = world.config.rent.base[tier];
     let rent = match owner_kind(world, b.owner) {
@@ -1467,6 +1471,10 @@ pub fn rent_for(world: &World, home: EntityId) -> i64 {
 /// 0.9 is 1.8, where `rent_for` rounds both back to 2); otherwise `rent_for`
 /// x 10.
 pub fn rent_tenths_for(world: &World, home: EntityId) -> i64 {
+    // The island pass phase 3a (I6): a company bed's rent, per worker.
+    if world.company_homes.contains_key(&home) {
+        return crate::systems::company::rent_tenths(world, home);
+    }
     let whole = rent_for(world, home) * 10;
     if !world.config.economy.price_tenths {
         return whole;
@@ -1509,6 +1517,10 @@ pub fn run(world: &mut World) {
         // Lives at work phase 2 (§ 3.4): the spouse's Home is tried first.
         crate::systems::household::reunite(world);
         crate::systems::household::tied_housing(world);
+        // The island pass phase 3a (I6): the company beds' grace and
+        // evictions, then the staff who move in, before the city's rehouse.
+        crate::systems::company::evictions(world);
+        crate::systems::company::move_in(world);
         rehouse(world);
     }
     // Phase 5: the books close before the upkeep lump (`Corp.closing`).
@@ -1534,6 +1546,12 @@ pub fn run(world: &mut World) {
 /// never decayed); an owner living in their own Home pays nobody.
 fn collect_rent(world: &mut World, rents: &[(EntityId, i64)]) {
     for &(home, rent) in rents {
+        // The island pass phase 3a (I6): a company block's rent is owed per
+        // worker on the staff (and in the grace), not split per adult.
+        if world.company_homes.contains_key(&home) {
+            collect_company_rent(world, home, rent);
+            continue;
+        }
         let owner = world.owner_of(home);
         // Lives at work phase 3 (§ 2.2, tied housing): a resident whose
         // tied trade's employer belongs to this Home's owner is freed as the
@@ -1575,6 +1593,29 @@ fn collect_rent(world: &mut World, rents: &[(EntityId, i64)]) {
             if let Some(h) = world.comp_mut::<Household>(a) {
                 h.rent_due += share;
             }
+        }
+    }
+}
+
+/// The island pass phase 3a (I6): company block `home`'s rent, `rent`
+/// tenths a day per resident who owes it (`company::payer`); the rest of
+/// the household owes nothing. Settled first as `collect_rent` settles.
+fn collect_company_rent(world: &mut World, home: EntityId, rent: i64) {
+    let residents: Vec<EntityId> = world.residents_of(home).to_vec();
+    for a in residents {
+        if !world.has::<Brain>(a) {
+            continue;
+        }
+        if rent <= 0 || !crate::systems::company::payer(world, a, home) {
+            if let Some(h) = world.comp_mut::<Household>(a) {
+                h.rent_due = 0.0;
+                h.arrears = 0;
+            }
+            continue;
+        }
+        settle_rent(world, a, home, true);
+        if let Some(h) = world.comp_mut::<Household>(a) {
+            h.rent_due += rent as f32 / 10.0;
         }
     }
 }
@@ -1676,7 +1717,9 @@ fn household_rent(world: &World) -> bool {
 /// built over unpaid first days swallowed a new guard's whole wage before
 /// food, and the guard starved housed (seed 43, year 3).
 pub fn pay_rent_from_income(world: &mut World, agent: EntityId) {
-    if !world.config.rent.pay_from_income {
+    // The island pass phase 3a (I6): a company bed's rent is docked from
+    // the wage whatever `pay_from_income` says.
+    if !world.config.rent.pay_from_income && !crate::systems::company::housed(world, agent) {
         return;
     }
     let Some(home) = world.comp::<Household>(agent).and_then(|h| h.home) else { return };
@@ -1862,6 +1905,9 @@ fn rehouse(world: &mut World) {
     let homes: Vec<(EntityId, crate::components::TilePos, Option<EntityId>, usize)> = world
         .buildings_of_kind(BuildingKind::Home)
         .iter()
+        // The island pass phase 3a (I6): a company bed is the staff's
+        // (`company::move_in`), never the city's rehouse.
+        .filter(|&&h| crate::systems::company::open_to_all(world, h))
         .filter_map(|&h| {
             world
                 .comp::<Building>(h)

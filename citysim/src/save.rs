@@ -281,7 +281,12 @@ use crate::world::World;
 /// (`[distance.free]`, written only when set; serde default `None`) and the
 /// appended `LocationKey::Cot` (in a plan step only when on). An off save
 /// is byte-identical to version 53's.
-pub const SAVE_VERSION: u8 = 54;
+/// 55 (the island pass phase 3a, OPEN-163, I6): `Config.company_housing`
+/// (`[company_housing]`, written only when set; serde default `None`),
+/// `World.company_homes` and `World.company_lapsed` (written only when
+/// non-empty) and the `Jobs2Cols` company columns (written only when
+/// non-zero). An off save is byte-identical to version 54's.
+pub const SAVE_VERSION: u8 = 55;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
