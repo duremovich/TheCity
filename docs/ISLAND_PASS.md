@@ -28,6 +28,7 @@ Distance comes before vehicles: with 4-hour commutes every ride is absurd, so ve
 | 2 | Distance in the hangout spot and the Hotel pick; the Hideout/Home sleep ping-pong; "Hotel" resolving to a Soup Kitchen or a Church | 163, 171 |
 | 3a | I6, seeded (merged, 81fac09): company beds beside Farms and industry at world build, filled at seed; the rent docked from the wage; eviction after `grace_days` on losing the job. 52 of 56 blocks fell back to open-ground plots | 163 |
 | 3b | I6, in-building and bought out: the seeded beds move inside the workplace (storeys, basements; the plots retire); a corp whose staff commute far buys a nearby apartment block and converts it, the tenants pushed out over the grace period; a free lot only as the fallback | 163 |
+| 3c | A housing term in mood (`OPEN-177`): tier, crowding (the coffin rack worst) and a company-owned bed, a `mood_bias` like `litter_bias` | 177 |
 | 4 | I2: a commute past a threshold pushes the "moved nearer work" path, then a nearer job when no housing is free; the segmented leg that ends in the wrong district (`exec/legs.rs` `segment_end`) | 164 |
 | 5 | I3 core: a vehicle in motion is an entity advancing along its route, riders aboard it (no parked body, no landing jump); the car and the cab (`systems/vehicles.rs`) | 165 (part) |
 | 6 | I3: the El as trains running the line (`systems/transit.rs`) | 165 |
