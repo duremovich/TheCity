@@ -32,6 +32,10 @@ fn world() -> World {
     // Jobs & lives phase 1: and without the industries (they take the Lots
     // and the jobs that set this city's gangs and businesses).
     c.jobs2.enabled = false;
+    // The pre-view pass phase 6: the protection paid off screen (midnight)
+    // and the orders in force at once, the moves this file tests (the
+    // leader's round and court are `leaders.rs`'s).
+    c.leaders = None;
     World::new(42, c)
 }
 

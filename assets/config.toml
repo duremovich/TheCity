@@ -4342,3 +4342,29 @@ fare_wait_ticks = 60               # the fares shape (OPEN-115): a booked rider 
                                    # harbour, 200+ tiles from the Mid-Levels, so no body ever drove: 0 of 699 at base)
 fares_el_missed = true             # the fares shape: a commute of [jobs2] cab_min_tiles or more the El does not shorten
                                    # takes the cab when the purse holds the fare and cab_reserve (no p_cab roll), both tiers
+
+# The pre-view pass phase 6 (docs/PREVIEW_PASS.md § 0 P9, P13-P15; systems/leaders.rs; OPEN-118, OPEN-128): the
+# leader's visible half, for a leader with a body (Full or Coarse). A Statistical leader keeps the off-screen path
+# (the midnight protection collection, the order in force the moment it is chosen). Dropped with
+# CITYSIM_LEADERS_OFF=1. Placeholders.
+[leaders]
+round_hour = 9                     # P13: the leader's round over the gang's businesses starts from this hour, and is
+round_last_hour = 18               # not begun from this one (court follows): the protected businesses owing a week, then
+                                   # the fronts. Most leaders hold a day job, so the round often comes after the shift
+round_stops_max = 6                # P13: stops a round (the owed protections first), walked nearest-first
+owner_stat_p = 0.5                 # P13: an off-screen owner is met at his business at this rate (purpose-keyed, per
+                                   # stop and day); out, the stop collects nothing that day and the week stays owed
+court_hour = 19                    # P14: court at the Hideout opens at this hour
+court_min = 120                    # P14: the leader holds court this many minutes (members passing through hand over
+                                   # their take to him in person; petitioners wait for the pressure pass)
+court_stat_p = 0.5                 # P14: an off-screen lieutenant attends a court at this rate (purpose-keyed, per court)
+court_walk_max = 240               # P14: the leader sets out by his trip's estimate to be at court by court_hour, at most
+                                   # this many minutes ahead (2k seed 42: a leader 115 min out reached it at 21:08, shut);
+                                   # a walk that runs late, up to this past court's end, still holds order_give_min of it
+order_wait_ticks = 1440            # P15: an order chosen waits for a lieutenant at court this long (about a day); past
+                                   # it the leader walks to a lieutenant and gives it there
+order_word_ticks = 1440            # P15: past order_wait_ticks + this, the order goes by word (off screen): a raid
+                                   # slips, it never vanishes (720 put the cap at night, the lieutenants asleep: 7 of 13
+                                   # orders by word on 2k seed 42 x 30)
+order_reach = 3                    # P15: the order is given in the lieutenant's building or within this Chebyshev radius
+order_give_min = 10                # P15: minutes the order takes, given at the lieutenant

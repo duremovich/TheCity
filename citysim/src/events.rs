@@ -450,10 +450,19 @@ pub enum EventKind {
     /// `[prisoner, station, precinct]`: the night van took a held body from
     /// a Station's cells to the Precinct.
     Transferred,
+    // --- The pre-view pass phase 6 (docs/PREVIEW_PASS.md § 0 P13-P15).
+    /// `[leader, owner, business]`: a week's protection collected in person
+    /// on the leader's round.
+    Protected,
+    /// `[leader, lieutenant, gang]`: an order given in person (at court, or
+    /// at the lieutenant after the wait).
+    OrderGiven,
+    /// `[member, leader, gang]`: a member's take handed to the leader at court.
+    TakeHanded,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 222] = [
+    pub const ALL: [EventKind; 225] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -676,6 +685,9 @@ impl EventKind {
         EventKind::FareShort,
         EventKind::Retired,
         EventKind::Transferred,
+        EventKind::Protected,
+        EventKind::OrderGiven,
+        EventKind::TakeHanded,
     ];
 }
 

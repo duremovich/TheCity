@@ -11,7 +11,11 @@ use citysim::{
 use common::{jobless_housed, set_coins};
 
 fn world(seed: u64) -> World {
-    World::new(seed, Config::load().dole_city().v1_profile())
+    let mut c = Config::load().dole_city().v1_profile();
+    // The pre-view pass phase 6: these are the brain's choices, in force the
+    // moment they are made (the giving in person is `leaders.rs`'s).
+    c.leaders = None;
+    World::new(seed, c)
 }
 
 /// Two jobless adults who are not each other's spouse.

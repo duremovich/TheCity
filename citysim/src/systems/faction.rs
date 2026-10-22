@@ -3,8 +3,8 @@
 //! Orders bias members' goals (`utility::goals`); the brain never acts.
 
 use crate::components::{
-    Building, BuildingKind, Corp, Gang, Household, LawShock, LobbyHold, MemoryKind, Order, OrderScore, Personality,
-    Sentence,
+    Building, BuildingKind, Corp, Gang, Household, LawShock, LobbyHold, MemoryKind, Order, OrderScore, PendingOrder,
+    Personality, Sentence,
 };
 use crate::config::GangsCfg;
 use crate::entity::EntityId;
@@ -722,6 +722,7 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
             if let Some(g) = world.comp_mut::<Gang>(gang) {
                 g.order = Order::Contest;
                 g.raid_at = None;
+                g.pending_order = None;
             }
             return true;
         }
@@ -740,6 +741,7 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
             g.order = Order::Job;
             g.raid_at = None;
             g.raid_target = None;
+            g.pending_order = None;
             if current != Order::Job {
                 g.order_since = now;
             }
@@ -796,7 +798,7 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.harvest_target = harvest;
     }
-    let Some((current, name)) = world.comp::<Gang>(gang).map(|g| (g.order, g.name.clone())) else { return false };
+    let Some(current) = world.comp::<Gang>(gang).map(|g| g.order) else { return false };
     // L1: a shock rescore needs the daily margin too, and an order holds
     // `order_dwell_ticks` unless it went infeasible, the shocks are severe,
     // or the winner is Retaliate or BreakOut (orders flipped 9 times in 6
@@ -819,12 +821,6 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
         g.order_trace = scores;
     }
     let Some(order) = next else { return true };
-    let mut muster = order.is_raid().then(|| next_muster(now, cfg.raid_muster_hour));
-    // L2 shadow fixes item 15: the muster waits for the farthest member's
-    // walk (a Purist walked 291 min to a Muster and missed it by 14).
-    if let Some(m) = muster {
-        muster = Some(m.max(now + crate::systems::fixes::muster_walk(world, gang, m)));
-    }
     // M12 D39: a Raid chosen for the corp prize names the corp building.
     let corp_target = inputs.corp_prize.map(|(b, _)| b).filter(|_| order == Order::Raid && corp_raid_best);
     // M14 V34: a Retaliate chosen on a pending `Shock::Hacked { by }` naming
@@ -843,6 +839,39 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
             }
         }
     }
+    let why = if hysteresis == 0.0 { "shock" } else { "daily" };
+    let chosen = PendingOrder {
+        order,
+        decided: now,
+        corp_target,
+        retaliate_on,
+        why: format!("{why}, {best_score:.2} vs {current_score:.2}"),
+    };
+    // The pre-view pass phase 6 (P15): a body leader with lieutenants gives
+    // the order in person (`systems::leaders`); it is in force from then.
+    if crate::systems::leaders::in_person(world, gang) {
+        crate::systems::leaders::hold(world, gang, chosen);
+        return true;
+    }
+    apply_order(world, gang, chosen, None);
+    true
+}
+
+/// Put a chosen order in force now: the muster timed from now (a raid),
+/// the target, `OrderChanged` (with `note` appended when given), the Raid
+/// prelude and the weak gang's Hit. The pre-view pass phase 6 (P15) calls
+/// it when the order is given in person; otherwise `rescore` at once.
+pub fn apply_order(world: &mut World, gang: EntityId, p: PendingOrder, note: Option<&str>) {
+    let now = world.tick;
+    let Some((current, name)) = world.comp::<Gang>(gang).map(|g| (g.order, g.name.clone())) else { return };
+    let cfg = world.config.gangs.clone();
+    let PendingOrder { order, corp_target, retaliate_on, why, .. } = p;
+    let mut muster = order.is_raid().then(|| next_muster(now, cfg.raid_muster_hour));
+    // L2 shadow fixes item 15: the muster waits for the farthest member's
+    // walk (a Purist walked 291 min to a Muster and missed it by 14).
+    if let Some(m) = muster {
+        muster = Some(m.max(now + crate::systems::fixes::muster_walk(world, gang, m)));
+    }
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.order = order;
         g.order_since = now;
@@ -852,23 +881,22 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
         if order == Order::Retaliate {
             g.retaliate_until = Some(now + cfg.retaliate_days * TICKS_PER_DAY);
         }
+        g.pending_order = None;
     }
     // M14 V32: the Raid prelude, timed off the corp raid's muster.
     if let (Some(t), Some(at)) = (corp_target, muster) {
         crate::systems::virt::raid_prelude(world, gang, t, at);
     }
-    let why = if hysteresis == 0.0 { "shock" } else { "daily" };
-    world.push_event(
-        EventKind::OrderChanged,
-        &[gang],
-        format!("{name}: {current:?} -> {order:?} ({why}, {best_score:.2} vs {current_score:.2})"),
-    );
+    let text = match note {
+        Some(n) => format!("{name}: {current:?} -> {order:?} ({why}; {n})"),
+        None => format!("{name}: {current:?} -> {order:?} ({why})"),
+    };
+    world.push_event(EventKind::OrderChanged, &[gang], text);
     // M16a (plan C33): a weak gang also hires a Hit on the rival's leader
     // (with the Hit market on, `hitmarket::gang_pass` does it daily, H19).
     if matches!(order, Order::Raid | Order::Retaliate) && !world.config.hitmarket.enabled {
         crate::systems::contracts::post_gang_hit(world, gang, order);
     }
-    true
 }
 
 /// M9 bribery. What a bribe costs today: `bribe_base + bribe_per_guard × guards`.

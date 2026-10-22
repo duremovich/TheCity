@@ -196,6 +196,13 @@ pub enum ActionKind {
     /// handed over there, P3). A work block would lie: the body is not at
     /// its post. A shape plan's scripted step, never in `PLANNABLE`.
     Unload,
+    /// The pre-view pass phase 6 (§ 0 P14, P15, P4): the gang leader holds
+    /// court at the Hideout to `[leaders] court_min` (the lieutenants take
+    /// orders, the members hand over their take), or gives a waiting order
+    /// at the lieutenant (`order_give_min`). A Collect would lie: nothing is
+    /// collected. A Lead plan's scripted step (`systems/leaders.rs`), never
+    /// in `PLANNABLE`.
+    Court,
 }
 
 /// Every action the planner may consider, in tie-break order.
@@ -431,6 +438,7 @@ impl ActionKind {
                 | ActionKind::Vend
                 | ActionKind::Break
                 | ActionKind::Unload
+                | ActionKind::Court
         )
     }
 
@@ -1308,7 +1316,8 @@ impl ActionKind {
             | ActionKind::PackMeal
             | ActionKind::Vend
             | ActionKind::Break
-            | ActionKind::Unload => false,
+            | ActionKind::Unload
+            | ActionKind::Court => false,
             _ => true,
         }
     }
@@ -1406,7 +1415,8 @@ impl ActionKind {
             | ActionKind::PackMeal
             | ActionKind::Vend
             | ActionKind::Break
-            | ActionKind::Unload => true,
+            | ActionKind::Unload
+            | ActionKind::Court => true,
             ActionKind::Chat => {
                 matches!(ws.at, LocationKey::Market | LocationKey::Bar | LocationKey::Home | LocationKey::Farm)
                     && ctx.partner.is_some()
@@ -1887,7 +1897,8 @@ impl ActionKind {
             | ActionKind::PackMeal
             | ActionKind::Vend
             | ActionKind::Break
-            | ActionKind::Unload => 60.0,
+            | ActionKind::Unload
+            | ActionKind::Court => 60.0,
         };
         c.clamp(0.5, 60.0)
     }

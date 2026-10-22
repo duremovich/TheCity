@@ -22,6 +22,7 @@ camera, rows 1-7, plus the dead trades. The gate is a Shadow V7 at 20k with the 
 | P13 | The leader's `round` **collects protection in person**: its stops replace the off-screen collection, and a stop with the owner out collects nothing that day (P3). The coin flows that move are printed FINDINGs at the gate. | Dylan 2026-10-21 |
 | P14 | **Court at the Hideout** is a gathering: the lieutenants take orders there, and members passing through hand over their take in person. Petitioners (debtors, locals asking favours) wait for the pressure pass. | Dylan 2026-10-21 |
 | P15 | A due order whose lieutenant is not at court **waits for the next court, up to a cap** (config, about a day). Past the cap the leader walks to the lieutenant and gives the order there. Raids may slip; they must not vanish. | Dylan 2026-10-21 |
+| P16 | At a round stop, **whoever is on shift at the business pays the week from the till; the owner answers only when nobody is on shift.** Statistical staff on shift count as present (being on shift is the presence). | Dylan 2026-10-21 |
 
 ## 1. The five shapes (OPEN-137)
 
@@ -239,6 +240,43 @@ legs' ends. The fix by cause, each with its Statistical mirror:
 (`OPEN-121`) is the `counter` shape on the door tile, where `door_refusals` can finally fire. The leaders
 (`OPEN-118`/`OPEN-128`, Dylan 2026-10-19: hold court and keep the delegation) get a `round` over the gang's
 businesses plus a court block at the Hideout, and the lieutenant's orders are given in person when both are there (P3).
+
+**The leaders as built (phase 6, `systems/leaders.rs`, `[leaders]`; OPEN-118, OPEN-128; P9, P13-P16).** For a
+leader with a body (Full or Coarse, free); off with `CITYSIM_LEADERS_OFF=1`. **The round** (P13): from `round_hour`
+(not begun from `round_last_hour`) the Lead plan walks up to `round_stops_max` of the gang's businesses, nearest-first:
+the protected businesses owing a week (the gang's standing `Protection` coercions due) first, then the gang's fronts.
+At each `Collect` (`round_stop`) every owed week there is collected in person (`leverage::collect_in_person`, the same
+`pay_week`: the coins and the refusal as at midnight) from **whoever is on shift there** (P16: a body inside and awake,
+or a Statistical worker, present without a draw; the coin is `pay_week`'s, the owner's purse, so the ledger holds) and
+only when nobody is on shift from whoever answers for it (`c.over`: the owner, a corp's exec, a rival's leader) when he
+is inside and awake, or, off screen, on a purpose-keyed draw (`owner_stat_p`); nobody there, nothing that day and the
+week stays owed (`lead_owner_out`). Before P16 the owner alone answered: 127 of 160 visits found him out (OPEN-160). The midnight `collect` no longer pays a body leader's gang (it
+still ends a hold that is gone), and a new protection's first week waits for the round. **Court** (P14): the leader
+sets out by his trip's estimate (at most `court_walk_max`) to be at the Hideout by `court_hour` and holds court there
+(a new `ActionKind::Court`, P4: a Collect would lie) to `court_min`. A member at the Hideout during court holding take
+(`loot_today`) hands it over in person (`split_loot`, `TakeHanded`); petitioners wait for the pressure pass.
+**Orders in person** (P15): with a body leader and a free lieutenant, the faction brain's choice is held
+(`Gang.pending_order`, `leaders::hold`; the members keep the old order) and put in force when given
+(`faction::apply_order`: the muster timed from then, `OrderChanged` noting how): at court, to a lieutenant there (a
+body inside, an off-screen one drawn at `court_stat_p`; while an order waits a body lieutenant is sent for to court,
+`attend_due`); past `order_wait_ticks` the leader walks to the nearest lieutenant (`GoTo(Victim)`, an off-screen one at
+his Home on the presence draw) and gives it on arriving beside him (`order_reach`, awake); past `order_word_ticks`
+more it goes by word (`orders_word`). Deviations, each measured: the round window ends at 18:00, not mid-afternoon
+(most leaders hold a day job: 2 rounds in 30 days with 10-16); court sets out by the trip (a leader 115 min out
+reached it at 21:08, shut); the word cap is a day past the wait, not half (720 put it at night with the lieutenants
+asleep: 7 of 13 orders by word on 2k seed 42 x 30). A strike pin or a contract's `Job` drops a waiting order.
+**Statistical mirror:** a Statistical leader keeps the off-screen path unchanged (the protection at midnight, the
+order in force when chosen): he is off camera (OPEN-149) with no body to walk or hold court, and a draw would add a
+stream for a scene nobody sees. A gang whose leader turns Statistical, is jailed, or loses its last lieutenant has its
+waiting order put in force at once (`leaders::run`).
+- **FINDING (2k 42-44 x 120 against 4ce9a88).** Protection weeks paid 36 -> 11 a seed (coins 1,440 -> 440): the
+  owner was out at 42 of 55 stops (P13 as decided: no stop collects from an absent owner; the owed weeks stand,
+  OPEN-160); gang income -17 %. Raids 17 -> 17 (they do not fall); `OrderChanged` 79 -> 61 (an order that waited was
+  rechosen before the giving), `Called` 43 -> 17 (the court is the Call). Orders given a seed: 26 at court, 18 walked,
+  10 by word (OPEN-161). Courts 193, takes handed at court 12. In the lives window leaders' and members' worked shifts
+  45 -> 33 and 271 -> 218 (the round, court and the summons take their hours; J24 0.776 -> 0.778). Murders 114 -> 118.
+  At 20k seed 42 x 30 (switch off -> on): no protection is made in either run, so no round has a stop; courts 42,
+  orders 9 at court, 11 walked, 3 by word; raids 7 -> 8; Murders 345 -> 233 (seed 43: 112 -> 172, a butterfly).
 
 **`OPEN-094`.** Retire the earlier milestones' ten `CITYSIM_*_OFF` switches in phase 0. Audit each one: delete the
 dead ones with their off branches, and keep the config paths.
