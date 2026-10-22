@@ -52,9 +52,9 @@ lines need track there (`OPEN-158`).
    I1, distance counts in every pick (a cost term plus a hard cap per purpose); I2, a far job resolves by moving
    nearer, then by a nearer job; I3, a vehicle in motion is an entity with its own position, and riders are aboard it. The El runs as trains,
      with the van and the flyer. Chases, explosions and carjackings come later, built on this model.
-   Still to spec with Dylan: the dead trades (`OPEN-168`) and the phase split. Phase 0 retires the pre-view
-   switches and `stat_table_base.toml` (`OPEN-174`) and pays back the change budget (`OPEN-175`). The gate is Shadow V8 on the island against
-   `target/shadow_v7/`.
+   I4, the dead trades' bugs land here, their features (bouncer, joytoy, the scav's side) go to the pressure pass;
+   I5, hunger is re-read at V8 first. The phases are `ISLAND_PASS` § Phases (0-7, then the V8 gate on the island
+   against `target/shadow_v7/`).
 2. Then `OPEN-136`'s remainder: the 2k fixture cut from the island, with `core_20k`/`god_20k` on it.
 3. Then the view milestone: the Bevy client, a follow-cam, `OPEN-149`'s ring, and the requirements in `SHADOW_V6`
    § What the view must handle.
@@ -62,7 +62,6 @@ lines need track there (`OPEN-158`).
 
 ## Open calls for Dylan
 
-- The island pass: the dead trades and the phase split (`OPEN-168`, `ISLAND_PASS` § Scope).
 - `OPEN-150`: the starting-condition seed's shape.
 - `OPEN-160` (owed protection piles up), `OPEN-162` (no protection at 20k), `OPEN-157` (Fixer parties at midnight):
   pressure-pass design.
