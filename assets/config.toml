@@ -4361,6 +4361,34 @@ hotel_cap_ticks = 120              # tonight's Hotel bed or Mission cot (homeles
 cot_bed_ticks = 60                 # a Mission's cot's offer over a paid Hotel bed: the cot unless a Hotel is nearer by
                                    # more than this (the base took any cot in reach first: 119 tiles over a Hotel at 5)
 
+# The island pass phase 3a (docs/ISLAND_PASS.md I6; OPEN-163; systems/company.rs): seeded company housing. At world
+# build, after the staffing and before the housing pre-roll, each workplace of these kinds whose far posts outnumber
+# the free beds near it gets company blocks (a Home on the nearest vacant Lot, else on a plot of open ground, owned by
+# the workplace's owner), its beds reserved for that workplace's staff. A new hire with a far Home, or a homeless one, moves in at midnight; the rent is
+# docked from the wage; a resident whose job there ended is evicted after grace_days. The island's 120 Farms hold
+# 3,473 Farmer posts with 2,525 adults within 60 tiles (phase 1). Phase 3b builds more; phase 4 moves the far workers
+# in. CITYSIM_COMPANY_HOUSING_OFF=1 drops the section (the switch in flight). Placeholders.
+[company_housing]
+kinds = ["Farm", "PackingPlant", "FreightYard", "UtilityPlant", "ConstructionYard", "Warehouse"]
+                                   # the workplaces that house their staff: the Farms and the industries
+far_ticks = 120                    # a post is far past this travel (Home door to workplace door; [distance] home_cap)
+lot_cap_ticks = 120                # a block's site (a Lot, else a plot) within this travel of the workplace door, nearest first
+                                   # (60 seeded 22 blocks on the island, 120 seeded 47: the Farm belt is built out)
+seed_share = 1.0                   # the share of the unmet far posts (far posts less the free beds within far_ticks)
+                                   # seeded as company beds; 3b's builds add to it
+min_beds = 6                       # no block for a workplace whose want is below this (a plain Block's floor)
+blocks_max = 4                     # blocks seeded beside one workplace
+plot_w = 8                         # with no vacant Lot in range (the island's Farm belt Lots go to the PackingPlants
+plot_h = 6                         # and the venues first), a block on open ground: this plot, walls included, clear of
+                                   # every building by a tile
+floors_max = 6                     # a block's storeys: enough for the beds wanted, at most this (a Lot's own at least)
+beds_per_floor = 30                # a bunkhouse's beds a floor (a plain Block's is 6), capped by the Lot's interior
+rent_mult = 0.5                    # the company rent a day per housed worker: this x [rent] base[tier], docked from
+                                   # the wage at collection (below market: the corp's gain is the tied worker)
+grace_days = 7                     # a resident whose job there ended keeps the bed this many days, then is evicted
+fill_at_seed = true                # world build: the far posts' holders (longest commute first) wake in the seeded beds,
+                                   # as the pre-roll houses its movers; false: only new hires and the homeless staff
+
 # The pre-view pass phase 6 (docs/PREVIEW_PASS.md § 0 P9, P13-P15; systems/leaders.rs; OPEN-118, OPEN-128): the
 # leader's visible half, for a leader with a body (Full or Coarse). A Statistical leader keeps the off-screen path
 # (the midnight protection collection, the order in force the moment it is chosen). Placeholders.

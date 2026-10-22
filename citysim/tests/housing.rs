@@ -406,6 +406,222 @@ fn test_free_time_spot_and_bed_out_by_distance() {
     assert_eq!(leisure::best_spot(&off, a, from).map(|s| s.0), Some(far), "off (the base): walked to anyway");
 }
 
+/// The island pass phase 3a (ISLAND_PASS I6, OPEN-163): a company block
+/// for the Farm `farm` in the seed-42 city, the plain Home with room
+/// nearest its door, emptied of nobody (its room set to its head count +
+/// `room`). Returns the block.
+fn company_block(w: &mut World, farm: EntityId, room: u16) -> EntityId {
+    let fd = door_of(w, farm);
+    let block = w
+        .buildings_of_kind(BuildingKind::Home)
+        .iter()
+        .copied()
+        .filter(|&h| w.comp::<Building>(h).is_some_and(|b| !b.demolished && !b.derelict))
+        .map(|h| (citysim::systems::distance::travel(w, door_of(w, h), fd), h))
+        .min()
+        .expect("a Home")
+        .1;
+    let n = w.residents_of(block).len() as u16;
+    w.comp_mut::<Building>(block).expect("b").capacity = n + room;
+    w.company_homes.insert(block, farm);
+    block
+}
+
+/// A Farm's worker with no spouse, housed, not an exec: `(worker, farm)`.
+fn farm_worker(w: &World) -> (EntityId, EntityId) {
+    let execs = classes::exec_set(w);
+    common::adults(w)
+        .into_iter()
+        .filter_map(|a| {
+            let e = w.comp::<Job>(a)?.employer?;
+            (w.comp::<Building>(e)?.kind == BuildingKind::Farm).then_some((a, e))
+        })
+        .find(|&(a, _)| {
+            w.spouse_of(a).is_none()
+                && w.gang_of(a).is_none()
+                && !execs.contains(&a)
+                && home_of(w, a).is_some()
+                && w.has::<Brain>(a)
+        })
+        .expect("a Farm worker")
+}
+
+fn midnight(w: &mut World) {
+    w.tick = (w.tick / TICKS_PER_DAY + 1) * TICKS_PER_DAY;
+    citysim::systems::ownership::run(w);
+}
+
+/// The island pass phase 3a (I6): a Farm hand hired today with a Home past
+/// `far_ticks` moves into the Farm's company block at midnight (the base
+/// has no company bed: he stays far). One hired long ago does not (that
+/// move is phase 4's), nor does a far worker of another workplace, and the
+/// city's rehouse never puts a homeless outsider in a company bed.
+#[test]
+fn test_far_hire_takes_a_company_bed_near_the_farm() {
+    let mut w = base();
+    let (a, farm) = farm_worker(&w);
+    let fd = door_of(&w, farm);
+    let block = company_block(&mut w, farm, 2);
+    let far = far_home(&w, a, fd, 1);
+    w.set_home(a, Some(far));
+    let cfg = w.config.company_housing.clone().expect("[company_housing] on");
+    assert!(citysim::systems::distance::travel(&w, door_of(&w, far), fd) > cfg.far_ticks, "his Home is far");
+    let now = w.tick;
+    w.comp_mut::<Job>(a).expect("job").hired_tick = now;
+    let mut on = w.clone();
+    midnight(&mut on);
+    assert_eq!(home_of(&on, a), Some(block), "on: the hire takes the company bed");
+    assert!(
+        on.events
+            .iter()
+            .any(|e| e.kind == EventKind::Housed && e.actors.first() == Some(&a) && e.text.contains("company housing")),
+        "a Housed line naming the company housing"
+    );
+    let mut off = w.clone();
+    off.config.company_housing = None;
+    off.company_homes.clear();
+    midnight(&mut off);
+    assert_eq!(home_of(&off, a), Some(far), "off (the base): no company bed, he stays far");
+    // Hired long ago: phase 4's move, not this one.
+    let mut old = w.clone();
+    old.comp_mut::<Job>(a).expect("job").hired_tick = 0;
+    midnight(&mut old);
+    assert_eq!(home_of(&old, a), Some(far), "a long-held post's far Home stays (phase 4)");
+    // Reserved: a homeless outsider with coins is not rehoused into it.
+    let mut res = w.clone();
+    res.config.rent.rehouse_wait_days = 0;
+    res.company_homes.insert(block, farm);
+    let b = common::adults(&res)
+        .into_iter()
+        .find(|&b| {
+            b != a
+                && res.spouse_of(b).is_none()
+                && !res.has::<Job>(b)
+                && res.has::<Brain>(b)
+                && home_of(&res, b).is_some()
+        })
+        .expect("an outsider");
+    res.comp_mut::<Job>(a).expect("job").hired_tick = 0;
+    res.set_home(b, None);
+    if let Some(h) = res.comp_mut::<Household>(b) {
+        h.homeless_since = None;
+        h.evicted_by = None;
+        h.arrears = 0;
+    }
+    common::set_coins(&mut res, b, 10_000);
+    for h in res.buildings_of_kind(BuildingKind::Home).to_vec() {
+        if h != block {
+            let n = res.residents_of(h).len() as u16;
+            res.comp_mut::<Building>(h).expect("b").capacity = n;
+        }
+    }
+    midnight(&mut res);
+    assert_ne!(home_of(&res, b), Some(block), "a company bed is the staff's only");
+}
+
+/// The island pass phase 3a (I6): a company bed's rent is `rent_mult x
+/// [rent] base[tier]` a day per worker, accrued at midnight (his jobless
+/// spouse owes nothing) and docked from the wage (`pay_rent_from_income`,
+/// even with `[rent] pay_from_income` off) to the block's owner; no coin
+/// made or lost.
+#[test]
+fn test_company_rent_is_docked_from_the_wage_and_conserved() {
+    let mut w = base();
+    let (a, farm) = farm_worker(&w);
+    let block = company_block(&mut w, farm, 2);
+    w.set_home(a, Some(block));
+    let cfg = w.config.company_housing.clone().expect("[company_housing] on");
+    let tier = usize::from(w.comp::<Building>(block).expect("b").tier.min(2));
+    let rate = (cfg.rent_mult * w.config.rent.base[tier] as f32 * 10.0).round() as i64;
+    assert_eq!(citysim::systems::company::rent_tenths(&w, block), rate);
+    if let Some(h) = w.comp_mut::<Household>(a) {
+        h.rent_due = 0.0;
+        h.arrears = 0;
+    }
+    common::set_coins(&mut w, a, 500);
+    midnight(&mut w);
+    let due = w.comp::<Household>(a).expect("h").rent_due;
+    assert!((due - rate as f32 / 10.0).abs() < 1e-3, "accrued {due}, the rate {rate} tenths");
+    // A plain Block's per-adult split would have charged the other residents
+    // (none of them on the owner's staff owes the company rent).
+    let owner = w.owner_of(block);
+    for &r in w.residents_of(block) {
+        let corp_staff =
+            w.comp::<Job>(r).and_then(|j| j.employer).is_some_and(|e| owner.is_some() && w.owner_of(e) == owner);
+        if r != a && !corp_staff {
+            assert_eq!(w.comp::<Household>(r).map(|h| h.rent_due), Some(0.0), "the household's others owe nothing");
+        }
+    }
+    if let Some(h) = w.comp_mut::<Household>(a) {
+        h.rent_due = 3.0;
+    }
+    w.config.rent.pay_from_income = false;
+    let (before, purse, id) = (citysim::systems::econ::identity(&w), w.purse(owner), common::coins(&w, a));
+    citysim::systems::ownership::pay_rent_from_income(&mut w, a);
+    assert_eq!(common::coins(&w, a), id - 3, "three coins docked");
+    assert_eq!(w.purse(owner), purse + 3, "paid to the block's owner");
+    assert_eq!(citysim::systems::econ::identity(&w), before, "no coin made or lost");
+    // Off (the base): a plain Block's rent waits for midnight with the
+    // switch off.
+    let mut off = w.clone();
+    off.config.company_housing = None;
+    off.company_homes.clear();
+    if let Some(h) = off.comp_mut::<Household>(a) {
+        h.rent_due = 3.0;
+    }
+    let c = common::coins(&off, a);
+    citysim::systems::ownership::pay_rent_from_income(&mut off, a);
+    assert_eq!(common::coins(&off, a), c, "off: nothing docked with pay_from_income off");
+}
+
+/// The island pass phase 3a (I6): a company resident who lost the job
+/// keeps the bed `grace_days`, then is evicted (an `Evicted` line naming
+/// the job), not before; one hired back at the workplace inside the grace
+/// stays. Off (the base) no one is put out.
+#[test]
+fn test_company_eviction_after_the_grace_not_before() {
+    let mut w = base();
+    let (a, farm) = farm_worker(&w);
+    let block = company_block(&mut w, farm, 2);
+    w.set_home(a, Some(block));
+    common::set_coins(&mut w, a, 10_000);
+    let grace = w.config.company_housing.as_ref().expect("on").grace_days;
+    let job = w.comp::<Job>(a).cloned().expect("job");
+    citysim::systems::economy::dismiss(&mut w, a, Some(farm), "let go".into());
+    assert!(!w.has::<Job>(a));
+    let mut off = w.clone();
+    off.config.company_housing = None;
+    // The first midnight notes the job gone; `grace_days` more put him out.
+    let mut kept = w.clone();
+    for day in 0..grace {
+        midnight(&mut w);
+        assert_eq!(home_of(&w, a), Some(block), "still housed on grace day {day}");
+        if day == 1 {
+            kept = w.clone();
+        }
+    }
+    midnight(&mut w);
+    assert_eq!(home_of(&w, a), None, "evicted after the grace");
+    assert!(
+        w.events.iter().any(|e| e.kind == EventKind::Evicted
+            && e.actors.first() == Some(&a)
+            && e.text.contains("company housing")),
+        "an Evicted line naming the company housing"
+    );
+    // Hired back inside the grace: he stays.
+    citysim::systems::demography::hire(&mut kept, a, farm, job.role);
+    for _ in 0..=grace {
+        midnight(&mut kept);
+    }
+    assert_eq!(home_of(&kept, a), Some(block), "back on the staff, the bed is his");
+    // Off: no eviction for the lost job.
+    off.company_homes.clear();
+    for _ in 0..=grace {
+        midnight(&mut off);
+    }
+    assert_eq!(home_of(&off, a), Some(block), "off (the base): the Block keeps him");
+}
+
 fn env<T: std::str::FromStr>(k: &str) -> Option<T> {
     std::env::var(k).ok().and_then(|v| v.parse().ok())
 }

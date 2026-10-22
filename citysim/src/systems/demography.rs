@@ -1657,6 +1657,8 @@ pub fn empty_beds(world: &World) -> usize {
     world
         .buildings_of_kind(BuildingKind::Home)
         .iter()
+        // The island pass phase 3a (I6): a company bed is its staff's only.
+        .filter(|&&h| crate::systems::company::open_to_all(world, h))
         .filter_map(|&h| {
             world
                 .comp::<Building>(h)
@@ -1910,6 +1912,8 @@ pub fn emptiest_home_near(world: &World, near: Option<TilePos>, need: usize) -> 
     world
         .buildings_of_kind(BuildingKind::Home)
         .iter()
+        // The island pass phase 3a (I6): a company bed is its staff's only.
+        .filter(|&&h| crate::systems::company::open_to_all(world, h))
         .filter_map(|&h| {
             let b = world.comp::<Building>(h).filter(|b| !b.demolished && !b.derelict)?;
             let n = world.residents_of(h).len();

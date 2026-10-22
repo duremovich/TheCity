@@ -573,6 +573,8 @@ fn housing_homes(world: &World) -> Vec<(TilePos, usize, usize)> {
     world
         .buildings_of_kind(BuildingKind::Home)
         .iter()
+        // The island pass phase 3a (I6): a company bed is its staff's only.
+        .filter(|&&h| crate::systems::company::open_to_all(world, h))
         .filter_map(|&h| {
             let b = world.comp::<Building>(h).filter(|b| !b.demolished && !b.derelict)?;
             Some((b.door, usize::from(b.capacity), world.residents_of(h).len()))
@@ -888,6 +890,11 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool) {
         if world.residents_of(home).iter().any(|&r| crate::systems::ownership::tied_here(world, r, home)) {
             continue;
         }
+        // The island pass phase 3a (I6): a company block's household stays
+        // (housed by the job; its own pass moves it).
+        if !crate::systems::company::open_to_all(world, home) {
+            continue;
+        }
         let Some(work) =
             (if fix { work_tile(world, a, employer) } else { world.comp::<Building>(employer).map(|b| b.door) })
         else {
@@ -903,6 +910,8 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool) {
     let homes: Vec<(EntityId, TilePos, usize)> = world
         .buildings_of_kind(BuildingKind::Home)
         .iter()
+        // The island pass phase 3a (I6): a company bed is its staff's only.
+        .filter(|&&h| crate::systems::company::open_to_all(world, h))
         .filter_map(|&h| {
             world
                 .comp::<Building>(h)
@@ -1457,6 +1466,8 @@ pub fn house_exec(world: &mut World, exec: EntityId) {
                     && !b.demolished
                     && !b.derelict
                     && world.residents_of(h).len() + need <= usize::from(b.capacity)
+                    // The island pass phase 3a (I6): a company bed is its staff's only.
+                    && crate::systems::company::open_to_all(world, h)
             })
         })
         .min_by_key(|&h| (world.residents_of(h).len(), h));

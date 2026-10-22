@@ -599,6 +599,11 @@ pub fn abandon_daily(world: &mut World) {
             if derelict || demolished {
                 continue;
             }
+            // The island pass phase 3a (I6): a company block stands empty
+            // for the staff it waits for; it is not abandoned.
+            if !crate::systems::company::open_to_all(world, h) {
+                continue;
+            }
             let since = {
                 let Some(b) = world.comp_mut::<Building>(h) else { continue };
                 if idle && owner.is_some() {

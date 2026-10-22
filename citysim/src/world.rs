@@ -1289,6 +1289,14 @@ pub struct World {
     /// housing demand went unmet (`life::grow_housing`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub housing_demand: BTreeMap<EntityId, u16>,
+    /// The island pass phase 3a (I6, `systems/company.rs`): a company
+    /// block -> the workplace whose staff its beds are reserved for.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub company_homes: BTreeMap<EntityId, EntityId>,
+    /// The island pass phase 3a: a company block's resident whose job at
+    /// its workplace ended -> the tick it ended (evicted `grace_days` on).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub company_lapsed: BTreeMap<EntityId, Tick>,
     /// Scale S5 (docs/SCALE_20K.md § S5): the Ambient tier (empty, and not
     /// saved, on a map without Ambient flats).
     #[serde(default, skip_serializing_if = "crate::ambient::AmbientState::is_empty")]
@@ -1807,6 +1815,8 @@ impl World {
             employer_of: BTreeMap::new(),
             laid_off: BTreeMap::new(),
             housing_demand: BTreeMap::new(),
+            company_homes: BTreeMap::new(),
+            company_lapsed: BTreeMap::new(),
             ambient: Default::default(),
             jobs2: Default::default(),
         };
@@ -1897,6 +1907,11 @@ impl World {
         crate::prof::timed!("new::classpay::seed_schooling", systems::classpay::seed_schooling(&mut w));
         crate::prof::timed!("new::wages::seed_staff", systems::wages::seed_staff(&mut w));
         crate::prof::timed!("new::classpay::seed_after_staff", systems::classpay::seed_after_staff(&mut w));
+        // The island pass phase 3a (I6): company blocks beside the
+        // workplaces whose far posts outnumber the beds near them, on the
+        // Lots left or open ground, and their far staff moved in (no RNG,
+        // no coin; nothing with `[company_housing]` off).
+        crate::prof::timed!("new::company::seed", systems::company::seed(&mut w));
         // Hunger fix item 9 (P5g): the seeded staff housed near work where
         // Homes allow (the relocation pass, uncapped; no RNG). The pre-roll
         // (items 8-10, wages and no safety net on): Homes and floors toward
