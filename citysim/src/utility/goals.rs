@@ -145,17 +145,15 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
             // `diet::price_at`) holds too: Earn has nothing to plan, so it
             // is no candidate (it won over Eat and planned empty, the idle
             // freeze; `plan::install` cools any empty plan as the net).
-            if !world.config.preview_off.idle_fix {
-                let paid = world
-                    .local(id, BuildingKind::Market)
-                    .map_or(1, |m| crate::systems::diet::price_at(world, id, m))
-                    .max(1);
-                if world.has::<Wallet>(id)
-                    && coins >= SAVINGS_DAYS.saturating_mul(paid)
-                    && coins >= crate::systems::health::treatment_savings(world, id)
-                {
-                    return true;
-                }
+            let paid = world
+                .local(id, BuildingKind::Market)
+                .map_or(1, |m| crate::systems::diet::price_at(world, id, m))
+                .max(1);
+            if world.has::<Wallet>(id)
+                && coins >= SAVINGS_DAYS.saturating_mul(paid)
+                && coins >= crate::systems::health::treatment_savings(world, id)
+            {
+                return true;
             }
             // Nothing to plan: an unemployed agent whose dole is taken or
             // suspended (Beg yields coins, never savings), or an employed one

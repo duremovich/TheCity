@@ -105,16 +105,11 @@ fn home_of(world: &World, id: EntityId) -> Option<EntityId> {
 // The housing churn (the pre-view pass phase 1, OPEN-140)
 // ---------------------------------------------------------------------------
 
-/// `[life] housing_fix`: the switch in flight (`CITYSIM_HOUSING_FIX_OFF=1`).
-pub fn housing_fix(world: &World) -> bool {
-    world.config.life.housing_fix
-}
-
 /// Every `Housed` line (`push_event`): its body is housed at this tick
 /// (`housed_now`), and, when it stands outside the Home named, walks there
-/// before it idles or sleeps elsewhere (`moving_in`). Nothing off.
+/// before it idles or sleeps elsewhere (`moving_in`).
 pub fn on_housed(world: &mut World, who: Option<EntityId>, home: Option<EntityId>) {
-    let Some(who) = who.filter(|_| housing_fix(world)) else { return };
+    let Some(who) = who else { return };
     let tick = world.tick;
     if world.housed_now.0 != tick {
         world.housed_now = (tick, std::collections::BTreeSet::new());
@@ -131,16 +126,13 @@ pub fn on_housed(world: &mut World, who: Option<EntityId>, home: Option<EntityId
 /// relocation leave a body the midnight already moved (the first build of
 /// each moved it and the next undid it in the same minute: Shadow V6 § 5).
 pub fn housed_now(world: &World, id: EntityId) -> bool {
-    housing_fix(world) && world.housed_now.0 == world.tick && world.housed_now.1.contains(&id)
+    world.housed_now.0 == world.tick && world.housed_now.1.contains(&id)
 }
 
 /// The Home `id` was moved into and has not walked into yet (OPEN-140: a
 /// day-0 retiree's `move_in` left the body wandering 9 h in the old
 /// district and sleeping in a Soup Kitchen).
 pub fn moving_in(world: &World, id: EntityId) -> Option<EntityId> {
-    if !housing_fix(world) {
-        return None;
-    }
     world.moving_in.get(&id).copied().filter(|&h| home_of(world, id) == Some(h))
 }
 
@@ -865,7 +857,7 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool) {
         let Some(home) = home_of(world, a) else { continue };
         // OPEN-140: one move a body a midnight; an elder under a grown
         // child's roof stays there (the kin take-in moved him back).
-        if housed_now(world, a) || (housing_fix(world) && crate::systems::ages::with_kin(world, a)) {
+        if housed_now(world, a) || crate::systems::ages::with_kin(world, a) {
             continue;
         }
         // Lives at work phase 3 (§ 2.2, tied housing): a household housed
@@ -957,7 +949,6 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool) {
         // a Home's measure only for the Homes they leave (memoised by work
         // tile and Home), the work leg before the spouse's. The same pick:
         // the filters and the minimum are the eager walk's.
-        let own_leg = housing_fix(world);
         let pick = crate::prof::timed!("reloc::pick", {
             let mut best: Option<(u64, EntityId)> = None;
             for (i, &(h, _, room)) in homes.iter().enumerate() {
@@ -975,7 +966,7 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool) {
                 }
                 // OPEN-140: "nearer work" is nearer the mover's own work
                 // (the pair's sum let his leg grow while hers shrank).
-                if own_leg && dd + margin > d {
+                if dd + margin > d {
                     continue;
                 }
                 let sp = spouse_work.map_or(0, |sw| memo.cost(world, sw, i, &cost));
@@ -1044,7 +1035,7 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool) {
             let name = world.name_of(m);
             // OPEN-140: "nearer work" is the worker's line; a spouse moves
             // with him (a jobless spouse read "moved nearer work").
-            let text = if m != a && housing_fix(world) {
+            let text = if m != a {
                 format!("{name} moved with {mover_name}, into {place}")
             } else {
                 format!("{name} moved nearer work, into {place}")

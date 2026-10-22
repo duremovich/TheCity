@@ -270,7 +270,11 @@ use crate::world::World;
 /// `Gang.{pending_order, round_day, court_day}`, the `Court` step and the
 /// `Jobs2Cols` leaders columns (each written only when set; serde
 /// defaults). An off save is byte-identical to version 50's.
-pub const SAVE_VERSION: u8 = 51;
+/// 52 (the island pass phase 0, OPEN-174): `[life] housing_fix` retired
+/// with its switch (the fix always on; a version-51 save's `housing_fix:
+/// true` is read and ignored). Nothing else moves: a save is version 51's
+/// with that one key gone.
+pub const SAVE_VERSION: u8 = 52;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

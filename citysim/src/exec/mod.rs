@@ -1495,8 +1495,7 @@ impl World {
             // homeless's nearest cot or a bed out of the planner's reach
             // ("Hotel" resolved to a Soup Kitchen, or to none: NoSuchPlace).
             LocationKey::Hotel
-                if crate::systems::life::housing_fix(self)
-                    && self.comp::<crate::components::Household>(agent).is_some_and(|h| h.home.is_some()) =>
+                if self.comp::<crate::components::Household>(agent).is_some_and(|h| h.home.is_some()) =>
             {
                 target
                     .filter(|&t| {

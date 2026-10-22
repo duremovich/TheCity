@@ -1655,12 +1655,6 @@ beg_cool_hours = 1                  # ... for this many hours
 # No eviction. The Spire's beds are checked at seed against execs x exec_home_spare (printed).
 exec_home_tier = 2
 exec_home_spare = 1.5
-# The pre-view pass phase 1 (docs/PREVIEW_PASS.md § 2, OPEN-140; the switch in flight,
-# CITYSIM_HOUSING_FIX_OFF=1): one Housed writer per body per midnight (the first move wins; the kin take-in,
-# the Spire and the "nearer work" relocation skip a body already housed that midnight), "moved nearer work" only
-# for an employed mover whose own commute shrinks (a spouse "moved with" him), a body moved in walks to its new
-# Home before it idles or sleeps elsewhere, and a housed sleeper's "Hotel" resolves to a Hotel (never a Mission cot).
-housing_fix = true
 
 # ---------------------------------------------------------------------------
 # Life pass L2: the living city (docs/LIFE_L2.md; plan ~/.claude/plans/life-l2.md). Every key is a
@@ -4245,7 +4239,7 @@ min_age = 25
 # role, its [shift.roles] key (the Role's name; absent: post, the one block at one tile). Phases 3-6 add haul,
 # counter and work round / fare here. Pay and output do not move (P5): the wage is paid as the last block ends, at
 # the post, and the output is the shift's span from its first block. Statistical bodies keep the one block (off
-# camera, OPEN-149). Off (`CITYSIM_STATIONS_OFF=1`): [shift] is dropped at load and every shift is the one block.
+# camera, OPEN-149). Without [shift] every shift is the one block.
 # Placeholders.
 [shift]
 station_block_min = 30             # P2: a stations block's length in minutes, drawn per block (purpose-keyed, per body
@@ -4279,8 +4273,8 @@ Fixer = "stations"
 Volunteer = "stations"
 
 # The pre-view pass phase 3 (docs/PREVIEW_PASS.md § 1, systems/shift.rs): the `haul` shape (a trade row's
-# `shape = "haul"`: night stocker, loader, driver, depot hand, builder, courier, day labourer). Dropped with
-# CITYSIM_HAUL_COUNTER_OFF=1. Pay and output do not move (P5): the counts here are what a body is seen doing.
+# `shape = "haul"`: night stocker, loader, driver, depot hand, builder, courier, day labourer). Without it
+# the roles keep their [shift.roles] shape. Pay and output do not move (P5): the counts here are what a body is seen doing.
 [shift.haul]
 haul_load = 4                      # units a trip carries (the device row `haul_units`; no stock moves)
 haul_cutoff_min = 60               # no trip starts that would end within this many minutes of the shift's end: the
@@ -4293,7 +4287,7 @@ haul_dests_max = 4                 # the most destinations one shift's trips tur
 drive = ["driver"]                 # these trades take the post's fleet truck when one is parked there
 
 # The pre-view pass phase 3: the `counter` shape (a trade row's `shape = "counter"`: bouncer at the door tile,
-# barkeep, madam, brothel worker; and the roles below). Dropped with CITYSIM_HAUL_COUNTER_OFF=1.
+# barkeep, madam, brothel worker; and the roles below).
 [shift.counter]
 counter_settle_window = 15         # an off-screen visit to a venue with a counter body (a Full or Coarse counter
                                    # staffer) is drawn into a slot of this many minutes inside the body's shift and
@@ -4302,7 +4296,7 @@ roles = ["Cook", "Bartender"]      # the built-in roles that stand the counter (
 
 # The pre-view pass phase 4 (docs/PREVIEW_PASS.md § 0 P3, P8; systems/presence.rs; OPEN-119, OPEN-120,
 # OPEN-154): an encounter posts when, and only when, both bodies are present, else it waits or is narrated off
-# screen. Dropped with CITYSIM_PRESENCE_OFF=1. Placeholders.
+# screen. Without it encounters settle by link. Placeholders.
 [presence]
 round_reach_tiles = 20             # OPEN-154: a round's stops at most this many tiles from the post's door (40 min at
                                    # [exec] move_ticks_full 2; super 596's near-home stops spanned 64 tiles, 514 of 540 min
@@ -4320,7 +4314,7 @@ sweep_walk_factor = 1.5            # P8: a round is planned only when its walk (
 arms_wait_hours = 24               # an off-screen buyer's arms sale waits this long for the dealer's body at the Bar
 
 # The pre-view pass phase 5 (docs/PREVIEW_PASS.md § 0 P10-P12, § 2 "20k legs"; OPEN-139, OPEN-115, OPEN-140's
-# remainder, OPEN-156): the long legs at 20k. Dropped with CITYSIM_LEGS_OFF=1 (which also drops a map's `L+` lines).
+# remainder, OPEN-156): the long legs at 20k. Without it a map's `L+` lines are dropped too.
 # Placeholders.
 [legs]
 leg_replan_tiles = 40              # a Full or Coarse walking GoTo past this (Manhattan tiles, 80 min at [exec]
@@ -4345,8 +4339,7 @@ fares_el_missed = true             # the fares shape: a commute of [jobs2] cab_m
 
 # The pre-view pass phase 6 (docs/PREVIEW_PASS.md § 0 P9, P13-P15; systems/leaders.rs; OPEN-118, OPEN-128): the
 # leader's visible half, for a leader with a body (Full or Coarse). A Statistical leader keeps the off-screen path
-# (the midnight protection collection, the order in force the moment it is chosen). Dropped with
-# CITYSIM_LEADERS_OFF=1. Placeholders.
+# (the midnight protection collection, the order in force the moment it is chosen). Placeholders.
 [leaders]
 round_hour = 9                     # P13: the leader's round over the gang's businesses starts from this hour, and is
 round_last_hour = 18               # not begun from this one (court follows): the protected businesses owing a week, then

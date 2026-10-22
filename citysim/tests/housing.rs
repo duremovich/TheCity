@@ -1,8 +1,8 @@
 //! The housing churn (the pre-view pass phase 1, docs/PREVIEW_PASS.md § 2,
 //! OPEN-140; Shadow V6 § Before the camera row 5). Unit tests in the shipped
-//! seed-42 city with the preconditions set by hand; each runs the same
-//! world with `[life] housing_fix` off (the base `823890d` city) and shows
-//! the bug there. The device rows are `housing_churn_rows` (print only).
+//! seed-42 city with the preconditions set by hand (each showed the bug on
+//! the base `823890d` city; the switch retired at the island pass phase 0,
+//! OPEN-174). The device rows are `housing_churn_rows` (print only).
 mod common;
 
 use citysim::components::{Brain, Building, BuildingKind, Household, Job, Position, Role, TilePos};
@@ -19,11 +19,6 @@ fn base() -> World {
         w
     })
     .clone()
-}
-
-fn off(mut w: World) -> World {
-    w.config.life.housing_fix = false;
-    w
 }
 
 fn home_of(w: &World, a: EntityId) -> Option<EntityId> {
@@ -83,8 +78,8 @@ fn plain_worker(w: &World) -> EntityId {
 
 /// Bug 1 (corp bug 3: `ages.rs:478`, `life.rs:1359` against `life.rs:959`):
 /// a body a midnight move already housed is left by the "nearer work"
-/// relocation: one `Housed` line, the first move kept. Off, the relocation
-/// moves him again in the same minute.
+/// relocation: one `Housed` line, the first move kept (the base moved him
+/// again in the same minute).
 #[test]
 fn test_one_housed_writer_per_midnight() {
     let run = |mut w: World| {
@@ -101,13 +96,11 @@ fn test_one_housed_writer_per_midnight() {
     let (kept, lines) = run(base());
     assert!(kept, "the first move is kept: {lines:?}");
     assert_eq!(lines.len(), 1, "one Housed line: {lines:?}");
-    let (kept, lines) = run(off(base()));
-    assert!(!kept && lines.len() == 2, "off, the relocation undoes the take-in: {lines:?}");
 }
 
 /// Bug 2 (crime bug 3, street bug 4): "moved nearer work" is the employed
 /// mover's line and lands nearer his work; the jobless spouse who comes
-/// along "moved with" him. Off, the spouse's line read "nearer work".
+/// along "moved with" him (the base's spouse line read "nearer work").
 #[test]
 fn test_nearer_work_is_the_workers_line() {
     let run = |mut w: World| {
@@ -143,14 +136,12 @@ fn test_nearer_work_is_the_workers_line() {
     assert!(la.len() == 1 && la[0].contains("nearer work"), "the worker's line: {la:?}");
     assert!(ls.len() == 1 && ls[0].contains("moved with"), "the spouse's line: {ls:?}");
     assert!(after < before, "nearer his work: {before} -> {after} ticks");
-    let (_, _, _, _, ls) = run(off(base()));
-    assert!(ls.iter().any(|l| l.contains("nearer work")), "off, the jobless spouse 'moved nearer work': {ls:?}");
 }
 
 /// Bug 4 (care bug 1): a body moved in walks to its new Home: an idle
 /// adult told at 10:00 that his Home is 60-150 tiles off enters it the
-/// same day. Off, he idles where he stands (`idle_near`: Wander) and
-/// sleeps in whatever bed is nearer.
+/// same day (the base idled where he stood, `idle_near`: Wander, and slept
+/// in whatever bed was nearer).
 #[test]
 fn test_moved_in_body_walks_home() {
     let run = |mut w: World| {
@@ -191,13 +182,12 @@ fn test_moved_in_body_walks_home() {
         entered
     };
     assert!(run(base()), "the body walks into its new Home the same day");
-    assert!(!run(off(base())), "off, the body never goes home that day");
 }
 
 /// Bug 5 (gangs bug 5, street bug 5): a housed sleeper's "Hotel" is a
 /// Hotel (`life::away_hotel`, the planner's), never a Mission's cot (the
-/// homeless's nearest bed, by design E27). Off, a housed body at a cot
-/// house's door resolved "Hotel" to the Soup Kitchen.
+/// homeless's nearest bed, by design E27; the base resolved a housed
+/// body's "Hotel" at a cot house's door to the Soup Kitchen).
 #[test]
 fn test_housed_hotel_is_a_hotel() {
     let run = |mut w: World| {
@@ -225,8 +215,6 @@ fn test_housed_hotel_is_a_hotel() {
     let (kind, same) = run(base());
     assert!(kind.is_none_or(|k| k == BuildingKind::Hotel), "a Hotel or none: {kind:?}");
     assert!(same, "the planner's Hotel");
-    let (kind, _) = run(off(base()));
-    assert_eq!(kind, Some(BuildingKind::Mission), "off, the Soup Kitchen");
 }
 
 fn env<T: std::str::FromStr>(k: &str) -> Option<T> {
