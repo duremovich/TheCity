@@ -1892,16 +1892,28 @@ fn rehouse(world: &mut World) {
         let mult = if worker { deposit_days.max(1) } else { mult };
         let refused_by = world.comp::<Household>(a).and_then(|h| h.evicted_by).filter(|&(_, t)| tick < t + refuse);
         let from = world.comp::<Position>(a).map_or_else(Default::default, |p| p.tile);
-        let pick = homes
-            .iter()
-            .filter(|&&(h, _, owner, cap)| {
-                world.residents_of(h).len() + need <= cap
-                    && coins >= mult * rent_for(world, h)
-                    && refused_by.is_none_or(|(o, _)| o != owner)
-            })
-            .map(|&(h, d, _, _)| (d.manhattan(from), h))
-            .min();
-        let Some((_, home)) = pick else { continue };
+        let open = |&&(h, _, owner, cap): &&(EntityId, crate::components::TilePos, Option<EntityId>, usize)| {
+            world.residents_of(h).len() + need <= cap
+                && coins >= mult * rent_for(world, h)
+                && refused_by.is_none_or(|(o, _)| o != owner)
+        };
+        // The island pass phase 1 (OPEN-163): a worker's bed is scored by
+        // the commute it sets out on (`distance::travel`, Home door to work
+        // door); a Home past `[distance] home_cap_ticks` is dropped while
+        // one within it is left, else the nearest. The jobless (and off):
+        // nearest door to where the body stands.
+        let work = world.config.distance.as_ref().and(crate::systems::distance::work_door(world, a));
+        let pick = match (work, world.config.distance.as_ref()) {
+            (Some(work), Some(cfg)) => crate::systems::distance::pick(
+                homes.iter().filter(open).map(|&(h, d, _, _)| {
+                    let t = crate::systems::distance::travel(world, d, work);
+                    (t, t as i64, h)
+                }),
+                cfg.home_cap_ticks,
+            ),
+            _ => homes.iter().filter(open).map(|&(h, d, _, _)| (d.manhattan(from), h)).min().map(|(_, h)| h),
+        };
+        let Some(home) = pick else { continue };
         if deposit_days > 0 {
             move_in_deposit(world, a, home, deposit_days);
         }

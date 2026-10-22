@@ -4337,6 +4337,19 @@ fare_wait_ticks = 60               # the fares shape (OPEN-115): a booked rider 
 fares_el_missed = true             # the fares shape: a commute of [jobs2] cab_min_tiles or more the El does not shorten
                                    # takes the cab when the purse holds the fare and cab_reserve (no p_cab roll), both tiers
 
+# The island pass phase 1 (docs/ISLAND_PASS.md I1; OPEN-163 part; systems/distance.rs): travel time in the job
+# and bed picks. Each cap is on the travel estimate (`transit::commute_ticks`: the walk at [exec] move_ticks_full,
+# or the El where it wins; ticks are minutes): a candidate past it is dropped while one within it is left, and with
+# none within, the nearest wins. The island put a quarter of its commute legs at 4 h or more (SHADOW_V7 bug 1).
+# CITYSIM_DISTANCE_OFF=1 drops the section (the switch in flight). Placeholders.
+[distance]
+job_cap_ticks = 120                # the job (the job search, the graded pick, the seeded staff, the corner, the chip
+                                   # posts): a candidate's Home door (else tile) to the workplace door; a vacancy whose
+                                   # pick is past it waits for the day's other vacancies first, then takes the nearest
+home_cap_ticks = 120               # the bed a homeless worker moves into: a Home door to the workplace door
+bed_cap_ticks = 120                # tonight's bed (Home or the gang's Hideout), from where the body stands
+home_bed_ticks = 30                # the own Home's offer over a Hideout cot: the Hideout only when nearer by more than this
+
 # The pre-view pass phase 6 (docs/PREVIEW_PASS.md § 0 P9, P13-P15; systems/leaders.rs; OPEN-118, OPEN-128): the
 # leader's visible half, for a leader with a body (Full or Coarse). A Statistical leader keeps the off-screen path
 # (the midnight protection collection, the order in force the moment it is chosen). Placeholders.

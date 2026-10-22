@@ -158,6 +158,27 @@ pub fn hideout_bed(world: &World, id: EntityId) -> Option<EntityId> {
         return None;
     }
     let t = tiles_to(world, id, h)?;
+    // The island pass phase 1 (OPEN-163): the bed is scored by the travel
+    // from here (`distance::travel`; 0 inside), the Home's offer
+    // (`[distance] home_bed_ticks`) off its score; a bed past
+    // `bed_cap_ticks` is dropped while the other is within it, and with
+    // neither within, the nearer (ties the Home). Homeless: the Hideout.
+    if let Some(cfg) = world.config.distance.as_ref() {
+        let Some(home) = home_of(world, id) else { return Some(h) };
+        let here = origin(world, id)?;
+        let at = |b: EntityId| -> Option<Tick> {
+            if world.comp::<Position>(id).and_then(|p| p.building) == Some(b) {
+                return Some(0);
+            }
+            Some(crate::systems::distance::travel(world, here, world.comp::<Building>(b)?.door))
+        };
+        let Some(th) = at(home) else { return Some(h) };
+        let tc = at(h)?;
+        let offer = cfg.home_bed_ticks as i64;
+        // `(travel, score, item)`: the Home is item 0, so it wins a tie.
+        let cands = [(th, th as i64 - offer, 0u8), (tc, tc as i64, 1u8)];
+        return (crate::systems::distance::pick(cands, cfg.bed_cap_ticks) == Some(1)).then_some(h);
+    }
     // L2 shadow fixes item 20: the nearer of Home and the Hideout, no margin
     // (a dealer walked 160 min to sleep at Home past her Hideout).
     match home_of(world, id).and_then(|home| tiles_to(world, id, home)) {

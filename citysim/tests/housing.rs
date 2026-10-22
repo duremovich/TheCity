@@ -217,6 +217,68 @@ fn test_housed_hotel_is_a_hotel() {
     assert!(same, "the planner's Hotel");
 }
 
+/// The island pass phase 1 (OPEN-163, ISLAND_PASS I1): a homeless worker
+/// standing at a far Home's door, with two Homes of equal offer free (that
+/// one and the one nearest his work). Base (and `[distance]` off): the
+/// nearest door to where he stands. On: the one near work (the far one is
+/// past `home_cap_ticks`). The far one alone still takes him (none is left).
+#[test]
+fn test_homeless_worker_moves_in_near_work() {
+    let mut w = base();
+    w.config.rent.rehouse_wait_days = 0;
+    let a = plain_worker(&w);
+    let work = work_door(&w, a).expect("a post");
+    let plain: Vec<EntityId> = w
+        .buildings_of_kind(BuildingKind::Home)
+        .iter()
+        .copied()
+        .filter(|&h| w.comp::<Building>(h).is_some_and(|b| !b.demolished && !b.derelict && b.tier <= 1))
+        .collect();
+    let by = |h: EntityId| (citysim::systems::distance::travel(&w, door_of(&w, h), work), h);
+    let near = plain.iter().map(|&h| by(h)).min().expect("Homes").1;
+    let far = plain.iter().map(|&h| by(h)).max().expect("Homes").1;
+    let (t_near, t_far) = (by(near).0, by(far).0);
+    assert!(t_far > t_near + 2, "{t_near} vs {t_far}");
+    w.config.distance.as_mut().expect("[distance] on").home_cap_ticks = (t_near + t_far) / 2;
+    w.set_home(a, None);
+    if let Some(h) = w.comp_mut::<Household>(a) {
+        h.homeless_since = None;
+        h.evicted_by = None;
+        h.arrears = 0;
+    }
+    w.remove_from_building(a);
+    let stand = door_of(&w, far);
+    if let Some(p) = w.comp_mut::<Position>(a) {
+        p.tile = stand;
+    }
+    common::set_coins(&mut w, a, 10_000);
+    // Every Home full at its own head count but the two (or the far one).
+    let rooms = |w: &mut World, open: &[EntityId]| {
+        for h in w.buildings_of_kind(BuildingKind::Home).to_vec() {
+            let n = w.residents_of(h).len() as u16;
+            w.comp_mut::<Building>(h).expect("b").capacity = n + if open.contains(&h) { 2 } else { 0 };
+        }
+    };
+    let midnight = |mut x: World| {
+        x.tick = (x.tick / TICKS_PER_DAY + 1) * TICKS_PER_DAY;
+        citysim::systems::ownership::run(&mut x);
+        home_of(&x, a)
+    };
+    // The other homeless cannot pay (the two beds are his to take).
+    for b in common::adults(&w) {
+        if b != a && home_of(&w, b).is_none() {
+            common::set_coins(&mut w, b, 0);
+        }
+    }
+    rooms(&mut w, &[near, far]);
+    assert_eq!(midnight(w.clone()), Some(near), "on: the Home near his work");
+    let mut off = w.clone();
+    off.config.distance = None;
+    assert_eq!(midnight(off), Some(far), "off (the base): the nearest door to where he stands");
+    rooms(&mut w, &[far]);
+    assert_eq!(midnight(w), Some(far), "the only Home, past the cap, still takes him");
+}
+
 fn env<T: std::str::FromStr>(k: &str) -> Option<T> {
     std::env::var(k).ok().and_then(|v| v.parse().ok())
 }

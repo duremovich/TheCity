@@ -551,6 +551,9 @@ fn test_squad_mission_marches_and_brawls() {
     let mut cfg = Config::load().dole_city();
     cfg.strip_careers();
     cfg.gangs.strip_lieutenants();
+    // The island pass phase 1: `[distance]` off (its seeded staff and beds
+    // move the squad's scene).
+    cfg.distance = None;
     let mut w = World::new(42, cfg);
     let g = w.gang_list()[0];
     let members = ready_gang(&mut w, g, 4);

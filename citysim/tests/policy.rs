@@ -176,6 +176,9 @@ fn test_civic_cut_spares_public_works_hires() {
     cfg.strip_careers();
     cfg.vice.enabled = false;
     cfg.fashion.enabled = false;
+    // The island pass phase 1: nor the distance picks (a works hire lost
+    // his post in their butterfly).
+    cfg.distance = None;
     let mut w = World::new(42, cfg);
     w.run_ticks(2 * TICKS_PER_DAY);
     w.push_command(PlayerCommand::SetSafetyNet(true));

@@ -731,15 +731,38 @@ fn dawn_pick(world: &mut World) {
         let foreman = crate::systems::industry::foreman(world, b, None);
         // Lives at work phase 6 (§ 4.1): the corner's band (every one off).
         let band = crate::systems::careers::hire_band(world, role);
-        let best = queues[i]
+        let order = |&x: &EntityId, &y: &EntityId| {
+            let known = |a: EntityId| foreman.is_some_and(|f| world.edge(a, f).is_some());
+            let f = |a: EntityId| world.comp::<Skills>(a).map_or(0.0, |s| s.fighting);
+            known(x).cmp(&known(y)).then(f(x).total_cmp(&f(y))).then(y.cmp(&x))
+        };
+        let admitted = queues[i]
             .iter()
             .copied()
-            .filter(|&a| !world.has::<Job>(a) && crate::systems::careers::admits(world, a, band))
-            .max_by(|&x, &y| {
-                let known = |a: EntityId| foreman.is_some_and(|f| world.edge(a, f).is_some());
-                let f = |a: EntityId| world.comp::<Skills>(a).map_or(0.0, |s| s.fighting);
-                known(x).cmp(&known(y)).then(f(x).total_cmp(&f(y))).then(y.cmp(&x))
-            });
+            .filter(|&a| !world.has::<Job>(a) && crate::systems::careers::admits(world, a, band));
+        let best = match world.config.distance.as_ref() {
+            // The island pass phase 1 (OPEN-163): in the foreman's order, a
+            // labourer past `[distance] job_cap_ticks` from the post (from
+            // where he stands, else his Home door) is passed over while one
+            // within it is left, else the nearest.
+            Some(cfg) => {
+                let mut ranked: Vec<EntityId> = admitted.collect();
+                ranked.sort_by(|x, y| order(y, x));
+                crate::systems::distance::pick(
+                    ranked.iter().enumerate().map(|(r, &a)| {
+                        let from = world
+                            .comp::<crate::components::Position>(a)
+                            .map(|p| p.tile)
+                            .or_else(|| crate::systems::distance::set_out(world, a));
+                        let t = from.map_or(Tick::MAX, |t| crate::systems::distance::travel(world, t, door));
+                        (t, r as i64, (r, a))
+                    }),
+                    cfg.job_cap_ticks,
+                )
+                .map(|(_, a)| a)
+            }
+            None => admitted.max_by(order),
+        };
         let Some(a) = best else { continue };
         queues[i].retain(|&x| x != a);
         crate::systems::demography::hire(world, a, b, role);

@@ -536,6 +536,9 @@ fn private_guard_scene() -> (World, EntityId, EntityId, EntityId) {
     // first jobless civilian; the subject is the private guard's arrest).
     c.strip_careers();
     c.law.pursuit_radius = 0; // the city's guards chase nobody
+                              // The island pass phase 1: `[distance]` off (its seeded staff move the
+                              // scene's thief out of the guard's reach).
+    c.distance = None;
     let mut w = World::new(11, c);
     w.run_ticks(2);
     let arasaka = corp_named(&w, "Arasaka");

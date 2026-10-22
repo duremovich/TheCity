@@ -406,6 +406,9 @@ fn set_education(w: &mut World, a: EntityId, origin: u8, education: f32) {
 #[test]
 fn test_graded_vacancy_goes_to_merit_and_tenure_moves_up() {
     let mut w = city_on();
+    // Merit alone: the two candidates are any jobless pair, so the island
+    // pass phase 1's `[distance]` cap (within it before any past it) is off.
+    w.config.distance = None;
     let manager = role(&w, "manager");
     let m = holders(&w, |j| j.role == manager);
     let post = w.comp::<Job>(m[0]).and_then(|j| j.employer).expect("a Manager's workplace");
