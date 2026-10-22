@@ -57,8 +57,8 @@ the shipped map and the generator write none of S3c's, so the 2k city is byte-id
 - `districts` then `h` rows of ids (`a`-`z` 0-25, `A`-`F` 26-31): every tile's district, in place of the rows'
   zone-and-x-range rule (their districts are unions of superblocks, not x ranges);
 - `L <x>,<y> <x>,<y> ... <name...>`: an El line; the map's lines replace `[[transit.lines]]`; `L+` the same, a line
-  in flight (the pre-view pass phase 5's: the funicular and the `--lines` file's authored lines), dropped with
-  `CITYSIM_LEGS_OFF=1`;
+  in flight (the pre-view pass phase 5's: the funicular and the `--lines` file's authored lines), dropped when
+  the config has no `[legs]`;
 - `# ...` comments in the building section;
 - `B <Kind> <x> <y> <w> <h> <tier> <floors>`: the eighth field (floors) existed since Jobs and room J6. **S3b:** a
   Home of F floors is dealt F households at world creation (5 residents a floor). A Home with no floors field is

@@ -8,7 +8,9 @@
     python tools/test.py lint        ignore reasons, caps, OPEN.md ids
     python tools/test.py report      the close-of-milestone table [--since SHA]
 
-Each tier runs its cargo commands one at a time, writes every byte to
+Each tier runs its cargo commands one at a time (the change tier's
+long poles, `core_sanity` first, run in a lane beside the tests step:
+`CHANGE_BESIDE`), writes every byte to
 target/test-logs/<tier>-<stamp>/<n>-<name>.log and prints only: one line per
 test binary, every FAIL / panicked / FINDING line, and the wall time against
 the tier's budget. A budget breach is loud, never a failure (the box is noisy):
@@ -24,6 +26,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -65,6 +68,26 @@ TIERS = {
         ("god_20k", "god_20k", ["--ignored", "--nocapture"]),
     ],
 }
+
+# The change tier's long poles, run in one lane beside the `tests` step
+# (island pass phase 0, OPEN-175): `core_sanity` (three seeds x 120 days on
+# three threads, ~45-55 s) and the single test that sets each slow binary's
+# wall (a seeded world run for weeks, 5-15 s, while the binary's other tests
+# end in a few). The lane (~100 s) ends well inside the tests step, which
+# skips them; every test still runs in this tier. Started with the tests, not
+# before: beside a cold clippy it slowed clippy 38 -> 69 s.
+# ("<binary stem>", "<exact test name>"); the name must be unique across the
+# workspace (it is the `--skip` filter too).
+CHANGE_BESIDE = [
+    ("core", "core_sanity"),
+    ("person", "probe_laid_off_farm_worker_finds_work_within_14_days"),
+    ("person", "probe_buyer_nobody_heard_of_is_never_charged"),
+    ("wages", "test_emigrate_cost_keeps_the_identity"),
+    ("bodies", "test_refound_only_after_refound_days"),
+    ("ambient", "test_materialised_look_like_born_residents"),
+    ("weapons", "test_parent_dies_at_death_days_and_takes_its_branches"),
+    ("save", "test_live_save_resumes_after_lots_are_built"),
+]
 
 
 def built_binary(stem):
@@ -173,9 +196,30 @@ def cmd_tier(tier, args):
                 if l.startswith("error"):
                     print("    " + l[:200])
             return 1
-    print(f"[{tier}] {len(steps)} step(s), serial; logs in {out.relative_to(ROOT)}")
+    beside = CHANGE_BESIDE if tier == "change" and not args.only else []
+    print(f"[{tier}] {len(steps)} step(s), serial" + (f", {len(beside)} beside" if beside else "")
+          + f"; logs in {out.relative_to(ROOT)}")
     start = time.time()
     results = []
+    threads, beside_results = [], []
+
+    def lane():
+        for k, (stem, test) in enumerate(beside, 1):
+            exe = built_binary(stem)
+            if exe is None:
+                print(f"- {test}: no built test binary for `{stem}` under target/release/deps (run without --no-build)")
+                beside_results.append({"step": test, "ok": False, "secs": 0.0, "binaries": [], "log": ""})
+                continue
+            r = run_step(f"{stem}::{test}", [str(exe), test, "--exact", "--nocapture"], out / f"b{k}-{stem}-{test}.log")
+            beside_results.append(r)
+
+    def launch_beside():
+        print(f"- {len(beside)} long pole(s) in a lane beside the tests: " + ", ".join(t for _, t in beside))
+        t = threading.Thread(target=lane)
+        t.start()
+        threads.append(t)
+
+    skips = [a for (_, t) in beside for a in ("--skip", t)]
     for i, step in enumerate(steps, 1):
         name, cmd = step_command(step)
         if cmd is None:
@@ -184,8 +228,14 @@ def cmd_tier(tier, args):
             continue
         if name == "tests" and args.only:
             cmd = CARGO + ["test", "--workspace", "--release", "--test", args.only, "--", "--nocapture"]
+        if name == "tests" and beside:
+            cmd = cmd + skips
+            launch_beside()
         print(f"- {name}")
         results.append(run_step(name, cmd, out / f"{i}-{name}.log"))
+    for t in threads:
+        t.join()
+    results += beside_results
     wall = time.time() - start
     budget = BUDGETS[tier]
     failed = [r for r in results if not r["ok"]]

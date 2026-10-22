@@ -171,8 +171,9 @@ def off_compare(base: Path, cand: Path, save_masks=()):
     one that matches neither save is an error."""
     lines, ok = [], True
     eb, ec = (base / "events.tsv").read_bytes(), (cand / "events.tsv").read_bytes()
-    # The `saved <path>` line names the run's own directory; drop it before comparing.
-    strip = lambda b: b"\n".join(l for l in b.split(b"\n") if not l.startswith(b"saved "))
+    # The `saved <path>` line names the run's own directory; drop it before comparing. It can land glued to
+    # the end of the last event's line (no newline between them), so it is cut wherever it starts.
+    strip = lambda b: re.sub(rb"saved [^\n]*\.ron\r?\n?", b"", b)
     same_ev = strip(eb) == strip(ec)
     ok &= same_ev
     lines.append(f"events {'identical' if same_ev else 'DIFFER'} ({eb.count(b'\n')} lines base, {ec.count(b'\n')} cand)")

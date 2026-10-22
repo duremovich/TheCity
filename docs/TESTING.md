@@ -10,7 +10,7 @@
 
 ## The tiers
 
-One command each (`python tools/test.py <tier>`); each runs its cargo steps one at a time, logs everything under `target/test-logs/`, and prints one line per binary, the FAIL and FINDING lines, and the wall time against the budget.
+One command each (`python tools/test.py <tier>`); each runs its cargo steps one at a time (the change tier runs its long poles, `core_sanity` and the seven slow binaries' longest tests, in one lane beside its tests step: `CHANGE_BESIDE` in `tools/test.py`, since the island pass phase 0), logs everything under `target/test-logs/`, and prints one line per binary, the FAIL and FINDING lines, and the wall time against the budget.
 
 | tier | command | what | asserts | budget | measured 2026-10-18 (2026-10-19) |
 |---|---|---|---|---|---|
