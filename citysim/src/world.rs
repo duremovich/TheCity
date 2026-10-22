@@ -446,7 +446,9 @@ impl StatTable {
 /// false)`; the pre-M10 four-row table `(None, true)` (M10 D28); a v2 table
 /// with the wrong row count, or anything unparsable, panics.
 pub fn load_stat_table(config: &Config) -> (Option<StatTable>, bool) {
-    let path = config.asset("stat_table.toml");
+    // The pre-view pass gate: the pass's regenerated table serves the pass;
+    // any switch off is the base city, with the base table.
+    let path = config.asset(if config.preview_off.any() { "stat_table_base.toml" } else { "stat_table.toml" });
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (None, false),

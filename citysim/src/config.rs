@@ -4457,6 +4457,27 @@ pub struct PreviewOff {
     /// dropped at load; protection is collected at midnight and an order is
     /// in force the moment it is chosen, as before.
     pub leaders: bool,
+    /// The pre-view pass phase 5 off (`CITYSIM_LEGS_OFF=1`; `Config::legs` `None`).
+    pub legs: bool,
+    /// The pre-view pass phase 1 off (`CITYSIM_HOUSING_FIX_OFF=1`).
+    pub housing_fix: bool,
+}
+
+impl PreviewOff {
+    /// Any pass switch is off: the city is the base city, and the Statistical
+    /// table is the base table (`assets/stat_table_base.toml`, the pass gate's
+    /// regen kept apart so the composed off identity holds; retires with the
+    /// switches).
+    pub fn any(&self) -> bool {
+        self.idle_fix
+            || self.implant_fix
+            || self.stations
+            || self.haul_counter
+            || self.presence
+            || self.leaders
+            || self.legs
+            || self.housing_fix
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -8520,6 +8541,7 @@ impl Config {
         // The pre-view pass phase 5 (OPEN-139, OPEN-115): the 20k legs.
         if std::env::var("CITYSIM_LEGS_OFF").is_ok_and(|v| v == "1") {
             cfg.legs = None;
+            cfg.preview_off.legs = true;
         }
         // The pre-view pass phase 6 (OPEN-118, OPEN-128): the leaders.
         cfg.preview_off.leaders = std::env::var("CITYSIM_LEADERS_OFF").is_ok_and(|v| v == "1");
@@ -8532,6 +8554,7 @@ impl Config {
         // The pre-view pass phase 1 (OPEN-140): the housing fix's A/B and identity device.
         if std::env::var("CITYSIM_HOUSING_FIX_OFF").is_ok_and(|v| v == "1") {
             cfg.life.housing_fix = false;
+            cfg.preview_off.housing_fix = true;
         }
         // Lives at work (D13): a config with `[lives] enabled = false` by any
         // path clears the milestone's sections, so the off save holds no
