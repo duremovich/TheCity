@@ -22,6 +22,7 @@ camera, rows 1-7, plus the dead trades. The gate is a Shadow V7 at 20k with the 
 | P13 | The leader's `round` **collects protection in person**: its stops replace the off-screen collection, and a stop with the owner out collects nothing that day (P3). The coin flows that move are printed FINDINGs at the gate. | Dylan 2026-10-21 |
 | P14 | **Court at the Hideout** is a gathering: the lieutenants take orders there, and members passing through hand over their take in person. Petitioners (debtors, locals asking favours) wait for the pressure pass. | Dylan 2026-10-21 |
 | P15 | A due order whose lieutenant is not at court **waits for the next court, up to a cap** (config, about a day). Past the cap the leader walks to the lieutenant and gives the order there. Raids may slip; they must not vanish. | Dylan 2026-10-21 |
+| P16 | At a round stop, **whoever is on shift at the business pays the week from the till; the owner answers only when nobody is on shift.** Statistical staff on shift count as present (being on shift is the presence). | Dylan 2026-10-21 |
 
 ## 1. The five shapes (OPEN-137)
 
@@ -240,14 +241,16 @@ legs' ends. The fix by cause, each with its Statistical mirror:
 (`OPEN-118`/`OPEN-128`, Dylan 2026-10-19: hold court and keep the delegation) get a `round` over the gang's
 businesses plus a court block at the Hideout, and the lieutenant's orders are given in person when both are there (P3).
 
-**The leaders as built (phase 6, `systems/leaders.rs`, `[leaders]`; OPEN-118, OPEN-128; P9, P13-P15).** For a
+**The leaders as built (phase 6, `systems/leaders.rs`, `[leaders]`; OPEN-118, OPEN-128; P9, P13-P16).** For a
 leader with a body (Full or Coarse, free); off with `CITYSIM_LEADERS_OFF=1`. **The round** (P13): from `round_hour`
 (not begun from `round_last_hour`) the Lead plan walks up to `round_stops_max` of the gang's businesses, nearest-first:
 the protected businesses owing a week (the gang's standing `Protection` coercions due) first, then the gang's fronts.
 At each `Collect` (`round_stop`) every owed week there is collected in person (`leverage::collect_in_person`, the same
-`pay_week`: the coins and the refusal as at midnight) from whoever answers for it (`c.over`: the owner, a corp's exec,
-a rival's leader) when he is inside and awake, or, off screen, on a purpose-keyed draw (`owner_stat_p`); out, nothing
-that day and the week stays owed (`lead_owner_out`). The midnight `collect` no longer pays a body leader's gang (it
+`pay_week`: the coins and the refusal as at midnight) from **whoever is on shift there** (P16: a body inside and awake,
+or a Statistical worker, present without a draw; the coin is `pay_week`'s, the owner's purse, so the ledger holds) and
+only when nobody is on shift from whoever answers for it (`c.over`: the owner, a corp's exec, a rival's leader) when he
+is inside and awake, or, off screen, on a purpose-keyed draw (`owner_stat_p`); nobody there, nothing that day and the
+week stays owed (`lead_owner_out`). Before P16 the owner alone answered: 127 of 160 visits found him out (OPEN-160). The midnight `collect` no longer pays a body leader's gang (it
 still ends a hold that is gone), and a new protection's first week waits for the round. **Court** (P14): the leader
 sets out by his trip's estimate (at most `court_walk_max`) to be at the Hideout by `court_hour` and holds court there
 (a new `ActionKind::Court`, P4: a Collect would lie) to `court_min`. A member at the Hideout during court holding take

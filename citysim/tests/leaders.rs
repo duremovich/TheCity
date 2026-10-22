@@ -1,4 +1,4 @@
-//! The pre-view pass phase 6 (docs/PREVIEW_PASS.md § 0 P9, P13-P15; OPEN-118,
+//! The pre-view pass phase 6 (docs/PREVIEW_PASS.md § 0 P9, P13-P16; OPEN-118,
 //! OPEN-128; `systems/leaders.rs`): the leader's visible half. Each test is
 //! a seeded world (the shipped seed-42 city) and one mechanism, with
 //! `[leaders]` on and its control off (the base) where the base differs: a
@@ -116,6 +116,10 @@ fn business(w: &mut World, g: EntityId) -> (EntityId, EntityId) {
     ownership::transfer_building(w, b, Some(owner));
     set_coins(w, owner, 10_000);
     lod::set_lod(w, owner, Lod::Full);
+    // Nobody on shift unless a test puts them there (P16).
+    for s in w.staff_of(b).to_vec() {
+        w.comp_mut::<citysim::components::Job>(s).expect("job").shifts.clear();
+    }
     (b, owner)
 }
 
@@ -279,4 +283,65 @@ fn test_take_handed_to_the_leader_at_court() {
     leaders::handed(&mut w, m, 12);
     assert_eq!(jobs2(&w).court_handovers, 1);
     assert!(w.events.iter().any(|e| e.kind == EventKind::TakeHanded && e.actors.as_slice() == [m, l, g]));
+}
+
+/// P16: at a round stop whoever is on shift and present pays the week from
+/// the till, the owner being away; a Statistical worker on shift counts
+/// present; a clerk asleep or off shift does not (the owner answers then);
+/// the ledger holds.
+#[test]
+fn test_staff_on_shift_pay_the_week_when_the_owner_is_away() {
+    let mut w = city(true);
+    let (g, l, _) = led_gang(&mut w);
+    let (b, owner) = business(&mut w, g);
+    let weekly = w.config.leverage.protection_weekly;
+    let id = leverage::force(
+        &mut w,
+        Some(g),
+        l,
+        owner,
+        Leverage::Threat,
+        Demand::Coins { amount: weekly, weekly: true },
+        CoercionWhy::Protection,
+        Some(owner),
+        Some(b),
+    );
+    let door = w.comp::<citysim::Building>(b).expect("business").door;
+    stand(&mut w, owner, citysim::TilePos { x: door.x, y: door.y.saturating_add(8) });
+    w.enter_building(l, b);
+    let clerk = common::free_adults(&w)
+        .into_iter()
+        .find(|&a| a != owner && a != l && !w.has::<GangMember>(a) && !law::is_guard(&w, a))
+        .expect("a free adult for the till");
+    demography::hire(&mut w, clerk, b, citysim::components::Role::Clerk);
+    let open = |w: &mut World, shifts: Vec<(u16, u16)>| {
+        w.comp_mut::<citysim::components::Job>(clerk).expect("job").shifts = shifts;
+    };
+    let owed_again = |w: &mut World| w.coercions.get_mut(&id).expect("coercion").next_due = w.tick;
+    let before = identity(&w);
+    // On shift but asleep: nobody present, the owner away: nothing.
+    open(&mut w, vec![(0, 1440)]);
+    lod::set_lod(&mut w, clerk, Lod::Full);
+    w.enter_building(clerk, b);
+    w.comp_mut::<Brain>(clerk).expect("brain").exec =
+        ExecState::Use { kind: ActionKind::Sleep, started: w.tick, until: w.tick + 100 };
+    owed_again(&mut w);
+    leaders::round_stop(&mut w, l, g, b);
+    assert_eq!(w.coercions[&id].paid, 1, "a sleeping clerk pays nothing");
+    // Awake behind the counter: the clerk pays the week, the owner away.
+    w.comp_mut::<Brain>(clerk).expect("brain").exec = ExecState::Idle;
+    leaders::round_stop(&mut w, l, g, b);
+    assert_eq!(w.coercions[&id].paid, 2, "the clerk on shift pays from the till");
+    assert_eq!(jobs2(&w).lead_collected, 1);
+    // A Statistical worker on shift is present without a draw.
+    lod::set_lod(&mut w, clerk, Lod::Statistical);
+    owed_again(&mut w);
+    leaders::round_stop(&mut w, l, g, b);
+    assert_eq!(w.coercions[&id].paid, 3, "a Statistical worker on shift counts present");
+    // Off shift: the owner answers as before (away: nothing).
+    open(&mut w, Vec::new());
+    owed_again(&mut w);
+    leaders::round_stop(&mut w, l, g, b);
+    assert_eq!(w.coercions[&id].paid, 3, "nobody on shift and the owner away: nothing");
+    assert_eq!(identity(&w), before, "no coin made or lost");
 }

@@ -13,7 +13,10 @@
 //! stop collects nothing that day and the week stays owed. The midnight
 //! collection (`leverage::collect`) no longer pays a body leader's gang; it
 //! only ends a hold that is gone, and a new protection's first week waits
-//! for the round. The coins and their flow are `pay_week`'s, so the ledger
+//! for the round. P16 (Dylan 2026-10-21): whoever is on shift at the business
+//! and present pays the week from the till (`pay_week`'s purse, the owner's);
+//! a Statistical worker on shift is present; the owner answers only when
+//! nobody is on shift. The coins and their flow are `pay_week`'s, so the ledger
 //! holds (P5); what moves is when and whether a week is met (a FINDING).
 //!
 //! **Court** (P14): from `court_hour` the leader walks to the Hideout and
@@ -311,21 +314,45 @@ fn owner_drawn(world: &World, over: EntityId, b: EntityId) -> bool {
         ) < p
 }
 
-/// P13: the leader's `Collect` at business `b` on his round: every owed
-/// week of the gang's protection on it, collected in person from whoever
-/// answers for it if he is there (else nothing today, the week stays owed).
+/// P16: who is on shift at `b` (living, free, not the leader), by id, with
+/// whether he is present now: a body inside and awake, or a Statistical
+/// worker (being on shift is the presence). `None`: nobody is on shift.
+fn staff_on_shift(world: &World, b: EntityId, leader: EntityId) -> Option<Vec<(EntityId, bool)>> {
+    let tod = world.tick_of_day();
+    let staff: Vec<(EntityId, bool)> = world
+        .staff_of(b)
+        .iter()
+        .copied()
+        .filter(|&s| s != leader && free(world, s))
+        .filter(|&s| {
+            world.comp::<crate::components::Job>(s).is_some_and(|j| {
+                j.on_shift(tod) && crate::exec::routine::workday_of(world, s, j, j.shift_key_at(world.tick))
+            })
+        })
+        .map(|s| (s, !presence::is_body(world, s) || presence::body_at(world, s, b)))
+        .collect();
+    (!staff.is_empty()).then_some(staff)
+}
+
+/// P13, P16: the leader's `Collect` at business `b` on his round: every owed
+/// week of the gang's protection on it, paid from the till by whoever is on
+/// shift there and present; only when nobody is on shift does it fall to
+/// whoever answers for the business (the owner, a corp's exec) if he is
+/// there. Nobody there: nothing today, the week stays owed.
 pub fn round_stop(world: &mut World, leader: EntityId, gang: EntityId, b: EntityId) {
     if body_leader(world, gang) != Some(leader) {
         return;
     }
     ownership::jobs2_row(world).lead_stops += 1;
+    let staff = staff_on_shift(world, b, leader);
     let due: Vec<CoercionId> = owed(world, gang).into_iter().filter(|&(_, x)| x == b).map(|(id, _)| id).collect();
     for id in due {
         let Some(over) = world.coercions.get(&id).map(|c| c.over) else { continue };
-        let met = if presence::is_body(world, over) {
-            presence::body_at(world, over, b)
-        } else {
-            owner_drawn(world, over, b)
+        let clerk = staff.as_ref().and_then(|v| v.iter().find(|x| x.1).map(|x| x.0));
+        let met = match &staff {
+            Some(v) => v.iter().any(|x| x.1),
+            None if presence::is_body(world, over) => presence::body_at(world, over, b),
+            None => owner_drawn(world, over, b),
         };
         if !met {
             ownership::jobs2_row(world).lead_owner_out += 1;
@@ -334,12 +361,20 @@ pub fn round_stop(world: &mut World, leader: EntityId, gang: EntityId, b: Entity
         let paid = crate::systems::leverage::collect_in_person(world, id);
         if paid > 0 {
             ownership::jobs2_row(world).lead_collected += 1;
-            let text = format!(
-                "{} collected {paid} coins of protection from {} at {}",
-                world.name_of(leader),
-                world.name_of(over),
-                world.name_of(b)
-            );
+            let text = match clerk {
+                Some(c) => format!(
+                    "{} collected {paid} coins of protection at {} from the till, {} on shift",
+                    world.name_of(leader),
+                    world.name_of(b),
+                    world.name_of(c)
+                ),
+                None => format!(
+                    "{} collected {paid} coins of protection from {} at {}",
+                    world.name_of(leader),
+                    world.name_of(over),
+                    world.name_of(b)
+                ),
+            };
             world.push_event(EventKind::Protected, &[leader, over, b], text);
         }
     }
