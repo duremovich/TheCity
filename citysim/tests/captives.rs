@@ -36,6 +36,12 @@ fn world() -> World {
     // jobs and ranks move the gangs this file's scenes are cut from).
     c.strip_careers();
     c.gangs.strip_lieutenants();
+    // The island pass phase 2: nor the free-time picks (`[distance.free]`
+    // moved the day-40 city so the seller exec's Spouse is no Abduct
+    // target, NoTarget; re-read when the switch retires).
+    if let Some(d) = c.distance.as_mut() {
+        d.free = None;
+    }
     World::new(42, c)
 }
 
