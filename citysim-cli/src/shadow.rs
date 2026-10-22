@@ -3689,11 +3689,38 @@ enum Bound {
 }
 
 /// One behaviour check: (window start day, archetype, metric, bound, and
-/// the lowest and highest value the row read on the calibration ensemble:
+/// the lowest and highest value the row read on the calibration ensemble (a printed FINDING band, see `COLLAPSE`):
 /// main and seven config butterflies, the noise a city change that is not a
 /// behaviour change makes). Bounds sit a cushion outside that range: they
 /// catch a regression in "acts like a person", they are not targets.
 type Check = (u64, &'static str, Metric, Bound, f64, f64);
+
+/// Doctrine 1 (Dylan, 2026-10-22): the tier asserts broken-system signals, it does not police calibration.
+/// A `CHECKS` row's own bound and range are the calibration band: printed as a `FINDING`, never failing.
+/// Only a metric listed here asserts, against the bound here (where only a broken mechanism lands), and
+/// only when the row's pooled n reaches `BEHAVIOUR_ASSERT_MIN_N`. One line of rationale per kind.
+const COLLAPSE: &[(Metric, Bound)] = &[
+    // Wages: under half of worked shifts (or workdays) paid is a dead pay path, not one broke owner.
+    (Metric::PaidOfWorked, Bound::Min(0.5)),
+    (Metric::WagedWorkdays, Bound::Min(0.5)),
+    // Social: known contacts met at a HangOut near 0 a week is a dead social mechanism.
+    (Metric::KnownMetWeek, Bound::Min(0.05)),
+    // Travel: 20 h or more a day walking is a stuck commute or a lost plan, not a long day.
+    (Metric::WalkHDay, Bound::Max(20.0)),
+    // Body: energy at 0 for most of a 168 h week (> 84 h) is a person who never recovers.
+    (Metric::Energy0HWeek, Bound::Max(84.0)),
+    // Commute: more than one Work goal dropped before any work per agent-day is a broken planner (the CEO's
+    // office-hours goal flickers at 0.5-0.9 by design, so the bound sits above it).
+    (Metric::CommuteAbortsDay, Bound::Max(1.0)),
+    // Core action: the reporter's work hours under half an hour a day, the role's job not happening.
+    (Metric::WorkHDay, Bound::Min(0.5)),
+    // Absolute, as before: a purchase refund is a bug (<= 1 a week); the fighter is in the pit for 3 bouts in 4.
+    (Metric::RefundsWeek, Bound::Max(1.0)),
+    (Metric::BoutsAttended, Bound::Min(0.75)),
+];
+
+/// A row whose pooled n (agents over the seeds) is under this prints and never asserts: one person's week.
+const BEHAVIOUR_ASSERT_MIN_N: usize = 10;
 
 const CHECKS: &[Check] = &[
     // Re-calibrated 2026-10-11 on a6887f1 (after the housing pre-roll near jobs, grocery runs, workplaces capped
@@ -4028,7 +4055,7 @@ pub fn behaviour(out: Option<&std::path::Path>) -> Result<BehaviourReport, Strin
     for ((day, arch, seed), a) in &per_seed {
         row_line(&mut text, *day, &format!("{arch}@{seed}"), a);
     }
-    let mut failures = Vec::new();
+    let (mut failures, mut asserted, mut findings, mut missed) = (Vec::new(), 0usize, 0usize, 0usize);
     for &(day, arch, m, bound, lo, hi) in CHECKS {
         let Some(a) = aggs.get(&(day, arch.to_string())) else {
             let _ = writeln!(text, "SKIP d{day} {arch} {m:?}: no candidate in the window");
@@ -4045,16 +4072,49 @@ pub fn behaviour(out: Option<&std::path::Path>) -> Result<BehaviourReport, Strin
             );
             continue;
         };
-        let (ok, rule) = match bound {
+        let holds = |bd: Bound, v: f64| match bd {
             Bound::Min(b) => (v >= b, format!(">= {b}")),
             Bound::Max(b) => (v <= b, format!("<= {b}")),
         };
-        let line = format!("d{day} {arch} {m:?} {v:.2} {rule} (calibration range {lo:.2}-{hi:.2})");
-        let _ = writeln!(text, "{} {line}", if ok { "PASS" } else { "FAIL" });
-        if !ok {
-            failures.push(line);
+        let n = a.agents.len();
+        let (cal_ok, cal_rule) = holds(bound, v);
+        let cal = format!("calibration {cal_rule} {} (range {lo:.2}-{hi:.2})", if cal_ok { "ok" } else { "MISS" });
+        let collapse = COLLAPSE.iter().find(|(cm, _)| *cm == m).map(|&(_, cb)| cb);
+        match collapse {
+            Some(cb) if n >= BEHAVIOUR_ASSERT_MIN_N => {
+                let (ok, rule) = holds(cb, v);
+                let line = format!("d{day} {arch} {m:?} {v:.2} n {n} collapse {rule}; {cal}");
+                let _ = writeln!(text, "{} {line}", if ok { "PASS" } else { "FAIL" });
+                asserted += 1;
+                if !ok {
+                    failures.push(line);
+                }
+                if !cal_ok {
+                    let _ =
+                        writeln!(text, "FINDING d{day} {arch} {m:?} {v:.2} n {n} (asserted row, collapse ok); {cal}");
+                    missed += 1;
+                }
+            }
+            _ => {
+                let why = if collapse.is_some() {
+                    format!("n under {BEHAVIOUR_ASSERT_MIN_N}, not asserted")
+                } else {
+                    "no collapse rule".to_string()
+                };
+                let _ = writeln!(text, "FINDING d{day} {arch} {m:?} {v:.2} n {n} ({why}); {cal}");
+                findings += 1;
+                if !cal_ok {
+                    missed += 1;
+                }
+            }
         }
     }
+    let _ = writeln!(
+        text,
+        "behaviour tier: {asserted} rows asserted (collapse bounds), {findings} rows printed only as FINDING, {missed} \
+         rows outside their calibration range (FINDING lines), {} failed",
+        failures.len()
+    );
     Ok(BehaviourReport { text, failures })
 }
 
