@@ -274,7 +274,10 @@ use crate::world::World;
 /// with its switch (the fix always on; a version-51 save's `housing_fix:
 /// true` is read and ignored). Nothing else moves: a save is version 51's
 /// with that one key gone.
-pub const SAVE_VERSION: u8 = 52;
+/// 53 (the island pass phase 1, OPEN-163): `Config.distance` (`[distance]`,
+/// written only when set; serde default `None`: a version-52 save resumes
+/// with the picks as they were). An off save is byte-identical to version 52's.
+pub const SAVE_VERSION: u8 = 53;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

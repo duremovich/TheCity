@@ -110,7 +110,11 @@ fn test_seniority_is_seeded_and_experience_orders_the_foreman() {
 /// the pick); the knowledge floor admits a holder.
 #[test]
 fn test_profession_survives_a_layoff_and_ranks_the_rehire() {
-    let mut w = common::world();
+    // The profession's offset alone, in the city without the island pass
+    // phase 1's `[distance]` (its cap ranks a within-cap candidate first
+    // whatever it holds, and the seed-42 city has no other jobless
+    // loader-age adult within the yard's cap).
+    let mut w = common::world_with(|c| c.distance = None);
     let role = loader(&w);
     let yard = w.buildings_of_kind(citysim::components::BuildingKind::FreightYard)[0];
     // A worker laid off: the profession stays.

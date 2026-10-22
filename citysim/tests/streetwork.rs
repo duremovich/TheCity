@@ -221,6 +221,9 @@ fn test_dawn_pick_contacts_first_and_the_day_post_ends() {
     let mut w = world_with(|c| {
         c.jobs2.p_corner = 1.0;
         c.jobs2.corner_stat_reach = 10_000;
+        // The contact's rank alone: the queue spans the map (the reach), so
+        // the island pass phase 1's job cap (a labourer within it first) is off.
+        c.distance = None;
     });
     let yard = w.buildings_of_kind(BuildingKind::ConstructionYard)[0];
     let corp = w.corps()[0];

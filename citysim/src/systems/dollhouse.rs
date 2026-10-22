@@ -399,10 +399,27 @@ fn offer_places(world: &mut World) {
         .map(|id| (std::cmp::Reverse(crate::systems::reputation::appearance_of(world, id).dress), id))
         .collect();
     pool.sort_unstable();
-    let mut next = pool.into_iter().map(|(_, id)| id);
+    let mut left: Vec<EntityId> = pool.into_iter().map(|(_, id)| id).collect();
     for (b, n) in open {
         for _ in 0..n {
-            let Some(id) = next.next() else { return };
+            // The island pass phase 1 (OPEN-163): in the pool's order, a
+            // candidate past `[distance] job_cap_ticks` from the post is
+            // passed over while one within it is left, else the nearest
+            // (off: the pool's first).
+            let door = world.comp::<crate::components::Building>(b).map(|x| x.door);
+            let at = match (world.config.distance.as_ref(), door) {
+                (Some(cfg), Some(door)) => crate::systems::distance::pick(
+                    left.iter().enumerate().map(|(i, &id)| {
+                        let t = crate::systems::distance::set_out(world, id)
+                            .map_or(crate::time::Tick::MAX, |from| crate::systems::distance::travel(world, from, door));
+                        (t, i as i64, i)
+                    }),
+                    cfg.job_cap_ticks,
+                ),
+                _ => (!left.is_empty()).then_some(0),
+            };
+            let Some(at) = at else { return };
+            let id = left.remove(at);
             crate::systems::demography::hire(world, id, b, role);
             let mult = world.config.vice.chip_mult;
             if let Some(j) = world.comp_mut::<Job>(id) {

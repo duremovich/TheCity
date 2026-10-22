@@ -1940,8 +1940,15 @@ type WidowPick = (World, Vec<EntityId>, EntityId, EntityId, EntityId);
 
 fn widow_pick() -> WidowPick {
     // Jobs & lives phase 8's gate: the pin to the pre-milestone city is gone
-    // (on the Jobs & lives city the pick commissions the Hit again).
-    let mut w = world();
+    // (on the Jobs & lives city the pick commissions the Hit again). The
+    // island pass phase 1: pinned to `[distance]` off while its switch is in
+    // flight (its city's widow has no Hit record in the week); re-read when
+    // the switch retires.
+    let mut w = citysim::World::new(42, {
+        let mut c = Config::load();
+        c.distance = None;
+        c
+    });
     // Day 10: the Fixers' books have filled (on day 2 too few regulars
     // would take a Hit at any price, and it priced at the old quote).
     w.run_ticks(10 * TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
@@ -2476,6 +2483,9 @@ fn probe_married_pick_is_home_by_nine_with_the_spouse() {
     let mut cfg = Config::load();
     cfg.strip_civic();
     cfg.strip_careers();
+    // The island pass phase 1: `[distance]` off too (its seeded staff pick
+    // another married day worker).
+    cfg.distance = None;
     let mut w = World::new(42, cfg);
     w.run_ticks(TICKS_PER_DAY + 19 * TICKS_PER_HOUR);
     let (a, s, h) = married_day_worker(&w).expect("a married day worker");
@@ -2749,9 +2759,17 @@ fn probe_super_walks_under_four_hours_a_shift() {
     }
     // The two cities side by side (the change tier's budget, 2026-10-19).
     let ((on, _), (off, _)) = std::thread::scope(|sc| {
-        let on = sc.spawn(|| walked(world(), "civic on"));
+        // The island pass phase 1: pinned to `[distance]` off while its
+        // switch is in flight (its city's super walks 293 min, OPEN-169's
+        // round); re-read when the switch retires.
+        let on = sc.spawn(|| {
+            let mut cfg = Config::load();
+            cfg.distance = None;
+            walked(World::new(42, cfg), "civic on")
+        });
         let off = sc.spawn(|| {
             let mut cfg = Config::load();
+            cfg.distance = None;
             cfg.strip_civic();
             walked(World::new(42, cfg), "civic off (control)")
         });
@@ -2780,6 +2798,9 @@ fn probe_cabbie_drives_a_fare_on_his_shift() {
         if let Some(l) = cfg.legs.as_mut() {
             l.fares_el_missed = false;
         }
+        // The island pass phase 1: `[distance]` off (its seeded staff move
+        // the probe's cabbie and his fares).
+        cfg.distance = None;
         let mut w = World::new(42, cfg);
         let start = 2 * TICKS_PER_DAY + 5 * TICKS_PER_HOUR;
         w.run_ticks(start);

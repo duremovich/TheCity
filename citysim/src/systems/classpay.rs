@@ -15,7 +15,7 @@ use crate::components::{Building, BuildingKind, Corp, Household, Job, Role, Scho
 use crate::entity::EntityId;
 use crate::events::EventKind;
 use crate::systems::ownership;
-use crate::time::TICKS_PER_DAY;
+use crate::time::{Tick, TICKS_PER_DAY};
 use crate::world::World;
 
 /// The pure-hash purposes (no RNG stream is drawn).
@@ -247,6 +247,9 @@ pub fn pick_graded(world: &World, employer: EntityId, role: Role) -> Option<Enti
     let execs = crate::systems::classes::exec_set(world);
     let band = crate::systems::careers::hire_band(world, role);
     let mut best: Option<(f32, EntityId)> = None;
+    let mut nearest: Option<(Tick, EntityId)> = None;
+    let cap = crate::systems::distance::job_cap(world);
+    let door = world.comp::<crate::components::Building>(employer).map(|b| b.door);
     for id in world.citizens() {
         if !crate::systems::demography::is_adult(world, id)
             || execs.contains(&id)
@@ -269,12 +272,26 @@ pub fn pick_graded(world: &World, employer: EntityId, role: Role) -> Option<Enti
                 continue;
             }
         }
+        // The island pass phase 1 (OPEN-163): a candidate past `[distance]
+        // job_cap_ticks` is passed over while one within it is left; with
+        // none within, the nearest (ties lower id). Merit already reads the
+        // commute (`commute_w`).
+        if let (Some(cap), Some(door)) = (cap, door) {
+            let t = crate::systems::distance::set_out(world, id)
+                .map_or(Tick::MAX, |from| crate::systems::distance::travel(world, from, door));
+            if t > cap {
+                if best.is_none() && nearest.is_none_or(|n| (t, id) < n) {
+                    nearest = Some((t, id));
+                }
+                continue;
+            }
+        }
         let m = merit(world, id, employer, role);
         if best.is_none_or(|(bm, bid)| m > bm || (m == bm && id < bid)) {
             best = Some((m, id));
         }
     }
-    best.map(|(_, id)| id)
+    best.map(|(_, id)| id).or(nearest.map(|(_, id)| id))
 }
 
 /// A graded hire who holds a post: it leaves it for the new one (vacated

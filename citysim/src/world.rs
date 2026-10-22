@@ -2201,19 +2201,34 @@ impl World {
                 None => doorless.push_back(i),
             }
         }
-        for role in Role::ALL {
-            let count = wc.jobs.count(role) as usize;
-            let workplaces = role.workplace().and_then(|k| self.buildings_by_kind.get(&k)).cloned().unwrap_or_default();
-            // Lives at work phase 6 (§ 4.1): with careers on, a resident
-            // outside the role's age band is passed over (seeded into
-            // another row, or none); off, every door's first untaken.
-            let band = systems::careers::on_cfg(&self.config)
-                .then(|| systems::careers::band_cfg(&self.config, role))
-                .filter(|&b| b != (0, 0));
-            let fits = |w: &World, i: usize| {
-                band.is_none_or(|b| systems::careers::fits(w.comp::<Identity>(pool[i]).map_or(0, |x| x.age_years()), b))
-            };
-            for k in 0..count {
+        // The island pass phase 1 (OPEN-163): a slot whose pick is past
+        // `[distance] job_cap_ticks` (`distance::travel`) waits until every
+        // other slot has picked, then takes the nearest left (none off: the
+        // base order, role by role).
+        let cap = self.config.distance.as_ref().map(|d| d.job_cap_ticks);
+        let mut slots: Vec<(Role, usize)> =
+            Role::ALL.iter().flat_map(|&role| (0..wc.jobs.count(role) as usize).map(move |k| (role, k))).collect();
+        let mut deferred: Vec<(Role, usize)> = Vec::new();
+        for round in 0..2 {
+            // A role with no candidate left takes no later slot (the base's `break`).
+            let mut stopped: Option<Role> = None;
+            for &(role, k) in &slots {
+                if stopped == Some(role) {
+                    continue;
+                }
+                let workplaces =
+                    role.workplace().and_then(|k| self.buildings_by_kind.get(&k)).cloned().unwrap_or_default();
+                // Lives at work phase 6 (§ 4.1): with careers on, a resident
+                // outside the role's age band is passed over (seeded into
+                // another row, or none); off, every door's first untaken.
+                let band = systems::careers::on_cfg(&self.config)
+                    .then(|| systems::careers::band_cfg(&self.config, role))
+                    .filter(|&b| b != (0, 0));
+                let fits = |w: &World, i: usize| {
+                    band.is_none_or(|b| {
+                        systems::careers::fits(w.comp::<Identity>(pool[i]).map_or(0, |x| x.age_years()), b)
+                    })
+                };
                 let employer = workplaces.get(k % workplaces.len().max(1)).copied();
                 let work_door = employer.and_then(|e| self.comp::<Building>(e)).map(|b| b.door);
                 // `(distance, i, door)`: a resident with a home door and a
@@ -2227,7 +2242,18 @@ impl World {
                         pick = Some((d, i, Some(door)));
                     }
                 }
-                let Some((_, i, door)) = pick else { break };
+                let Some((_, i, door)) = pick else {
+                    stopped = Some(role);
+                    continue;
+                };
+                if round == 0 {
+                    if let (Some(c), Some(d), Some(w)) = (cap, door, work_door) {
+                        if systems::distance::travel(self, d, w) > c {
+                            deferred.push((role, k));
+                            continue;
+                        }
+                    }
+                }
                 match door {
                     Some(door) => {
                         let list = by_door.get_mut(&door).expect("the picked door");
@@ -2279,6 +2305,10 @@ impl World {
                     },
                 );
             }
+            if round == 1 || deferred.is_empty() {
+                break;
+            }
+            slots = std::mem::take(&mut deferred);
         }
     }
 

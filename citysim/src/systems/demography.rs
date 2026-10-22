@@ -700,11 +700,35 @@ fn job_search_pass(world: &mut World, vacancies: &[(EntityId, Vec<Role>)], pass:
 /// [`job_search_pass`]; `pooled` false reads `pick_candidate` for every
 /// ungraded vacancy (the pre-S1 walk, for the tests).
 fn job_search_pass_with(world: &mut World, vacancies: &[(EntityId, Vec<Role>)], pass: Option<bool>, pooled: bool) {
-    use crate::systems::classpay;
     // Scale S1: the labour pool, built on the pass's first ungraded pick.
     let mut pool: Option<HirePool> = None;
     // Lives at work phase 2 (§ 3.4): the heirs waiting for a household business (one pass).
     let holders = crate::systems::household::business_holders(world);
+    // The island pass phase 1 (OPEN-163): a vacancy whose pick is past
+    // `[distance] job_cap_ticks` waits until every other vacancy of the pass
+    // has picked (so a nearer post takes a candidate first), then takes the
+    // nearest left. Empty off: the base walk.
+    let mut deferred: Vec<(EntityId, Vec<Role>)> = Vec::new();
+    let defer = crate::systems::distance::on(world).then_some(&mut deferred);
+    job_search_round(world, vacancies, pass, pooled, &mut pool, &holders, defer);
+    if !deferred.is_empty() {
+        job_search_round(world, &deferred, pass, pooled, &mut pool, &holders, None);
+    }
+}
+
+/// One round of [`job_search_pass_with`]: `defer` (the first round, with
+/// `[distance]` on) collects the vacancies whose pick is past the job's cap
+/// instead of hiring.
+fn job_search_round(
+    world: &mut World,
+    vacancies: &[(EntityId, Vec<Role>)],
+    pass: Option<bool>,
+    pooled: bool,
+    pool: &mut Option<HirePool>,
+    holders: &std::collections::BTreeSet<EntityId>,
+    mut defer: Option<&mut Vec<(EntityId, Vec<Role>)>>,
+) {
+    use crate::systems::classpay;
     for (employer, roles) in vacancies {
         let employer = *employer;
         let Some(workplace_door) = world.comp::<Building>(employer).filter(|b| !b.demolished).map(|b| b.door) else {
@@ -732,13 +756,24 @@ fn job_search_pass_with(world: &mut World, vacancies: &[(EntityId, Vec<Role>)], 
                     let pool = pool.get_or_insert_with(|| HirePool::new(world));
                     crate::prof::timed!("job::pick_candidate", pool.pick(world, employer, workplace_door, role))
                 } else {
-                    pick_candidate(world, employer, workplace_door, role, &holders)
+                    pick_candidate(world, employer, workplace_door, role, holders)
                 }
             };
             if let Some(n) = pool.as_mut().map(|p| std::mem::take(&mut p.refused)).filter(|&n| n > 0) {
                 ownership_row(world).band_refusals += n;
             }
             let Some(id) = pick else { continue };
+            // The island pass phase 1 (OPEN-163): past the job's cap, the
+            // vacancy waits for the second round (the household's own post
+            // excepted).
+            if household.is_none()
+                && crate::systems::distance::past_job_cap(world, hire_from(world, id), workplace_door)
+            {
+                if let Some(d) = defer.as_deref_mut() {
+                    d.push((employer, vec![role]));
+                    continue;
+                }
+            }
             // Scale S5 (`[ambient] hire_far`): an Ambient household within
             // the commute cap before a simulated adult beyond it.
             if !graded && ambient_nearer(world, id, workplace_door) {
@@ -818,29 +853,7 @@ fn pick_candidate(
         .filter(|&id| crate::systems::gray::hire_ok(world, id, role))
         // Lives at work phase 6 (§ 4.1, § 4.4): the age band, the retired.
         .filter(|&id| crate::systems::careers::admits(world, id, band))
-        .map(|id| {
-            // M14 V16: a Lab hires the best hacker (ties lower id),
-            // so Labs collect the city's runners.
-            if role == Role::Researcher {
-                let h = world.comp::<crate::components::Skills>(id).map_or(0.0, |s| s.hacking);
-                return (u32::MAX - (h.clamp(0.0, 1.0) * 1_000_000.0) as u32, id);
-            }
-            // L2 L2: a FightPit hires the best fighter (ties lower id).
-            if role == Role::Fighter {
-                let f = world.comp::<crate::components::Skills>(id).map_or(0.0, |s| s.fighting);
-                return (u32::MAX - (f.clamp(0.0, 1.0) * 1_000_000.0) as u32, id);
-            }
-            // M16a (plan C8): a Fixer's office hires the best talker
-            // (persuasion + knowledge, ties lower id), the Reporter's shape.
-            if role == Role::Fixer {
-                let k = world.comp::<crate::components::Skills>(id).map_or(0.0, |s| s.persuasion + s.knowledge);
-                return (u32::MAX - (k.clamp(0.0, 2.0) * 500_000.0) as u32, id);
-            }
-            // M15 W36: a Feed hires the most knowledgeable (ties lower id).
-            if role == Role::Reporter {
-                let k = world.comp::<crate::components::Skills>(id).map_or(0.0, |s| s.knowledge);
-                return (u32::MAX - (k.clamp(0.0, 1.0) * 1_000_000.0) as u32, id);
-            }
+        .map(|id| -> (u64, EntityId) {
             let from = world
                 .comp::<Household>(id)
                 .and_then(|h| h.home)
@@ -848,11 +861,19 @@ fn pick_candidate(
                 .map(|b| b.door)
                 .or_else(|| world.comp::<Position>(id).map(|p| p.tile))
                 .unwrap_or_default();
+            // M14 V16 / L2 L2 / M16a (plan C8) / M15 W36: a Lab hires the
+            // best hacker, a FightPit the best fighter, a Fixer's office the
+            // best talker, a Feed the most knowledgeable (ties lower id;
+            // `skill_key`). The island pass phase 1 (OPEN-163): those within
+            // `[distance] job_cap_ticks` before any past it (0 off).
+            if skill_ranked(role) {
+                return (skill_far(world, from, workplace_door) | u64::from(skill_key(world, id, role)), id);
+            }
             // The Real economy E41: a `CampRaised` applicant comes first for
             // a Farm or Fab vacancy (the distance key halved past the map).
             let first = crate::systems::camp::applicant_first(world, id, role);
             if first {
-                return (from.manhattan(workplace_door) / 2, id);
+                return (u64::from(from.manhattan(workplace_door) / 2), id);
             }
             // J4: skill and the rehire bonus come off the distance, capped
             // at 512 so the key stays above the `CampRaised` band (a halved
@@ -885,8 +906,8 @@ fn pick_candidate(
                 1024
             } else {
                 0
-            };
-            ((camp_band(world) + 512 + band + d).saturating_sub(off.min(512)), id)
+            } + past_cap_band(world, from, workplace_door);
+            (u64::from((camp_band(world) + 512 + band + d).saturating_sub(off.min(512))), id)
         })
         .min()
         .map(|(_, id)| id)
@@ -998,8 +1019,30 @@ fn hire_base(world: &World, from: TilePos, workplace_door: TilePos, near_cap: Op
         1024
     } else {
         0
-    };
+    } + past_cap_band(world, from, workplace_door);
     camp_band(world) + 512 + band + d
+}
+
+/// The island pass phase 1 (OPEN-163): a candidate past `[distance]
+/// job_cap_ticks` (`distance::travel`) adds [`PAST_CAP_BAND`] to the
+/// hiring key, so every candidate within the cap ranks before any past it
+/// (the offsets come off at most 512, the hire-near band adds 1,024, and a
+/// within-cap distance is far under 512 tiles); with none within, the key's
+/// order decides, the nearest first (0 off).
+fn past_cap_band(world: &World, from: TilePos, workplace_door: TilePos) -> u32 {
+    if crate::systems::distance::past_job_cap(world, from, workplace_door) {
+        PAST_CAP_BAND
+    } else {
+        0
+    }
+}
+
+/// [`past_cap_band`]'s band.
+const PAST_CAP_BAND: u32 = 2048;
+
+/// [`past_cap_band`] for a skill-ranked post: the key's high word.
+fn skill_far(world: &World, from: TilePos, workplace_door: TilePos) -> u64 {
+    u64::from(crate::systems::distance::past_job_cap(world, from, workplace_door)) << 32
 }
 
 /// The groups of one role: home door (else tile) -> `(512 - offset, id)`,
@@ -1089,7 +1132,9 @@ impl HirePool {
                 .iter()
                 .copied()
                 .filter(|&id| free(&self.hired, id) && gate(id))
-                .map(|id| (skill_key(world, id, role), id))
+                .map(|id| {
+                    (skill_far(world, hire_from(world, id), workplace_door) | u64::from(skill_key(world, id, role)), id)
+                })
                 .min()
                 .map(|(_, id)| id);
             self.refused += refused;
@@ -1929,6 +1974,80 @@ pub fn emptiest_home(world: &World) -> Option<EntityId> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The island pass phase 1 (OPEN-163, ISLAND_PASS I1): one jobless adult
+    /// offered two equal posts, the far one first in the pass's order. Base
+    /// (and `[distance]` off): the far post, read first, hires her and the
+    /// near one stays open. On: the far pick waits, the near post hires her.
+    /// Alone, the far post past the cap still hires her (none is left).
+    #[test]
+    fn test_job_search_hires_near_before_far() {
+        let mut w = World::new(42, crate::config::Config::load());
+        w.run_ticks(TICKS_PER_DAY + 7);
+        let role = Role::Cook;
+        let band = crate::systems::careers::hire_band(&w, role);
+        let execs = crate::systems::classes::exec_set(&w);
+        // scan-ok: a unit test, once.
+        let jobless: Vec<EntityId> = w.citizens().into_iter().filter(|&id| pool_member(&w, id, &execs)).collect();
+        let p = *jobless
+            .iter()
+            .find(|&&id| {
+                world_home(&w, id).is_some()
+                    && crate::systems::careers::admits(&w, id, band)
+                    && crate::systems::fashion::dress_ok(&w, id, role)
+            })
+            .expect("a jobless adult for the post");
+        // Everyone else in the pool holds a placeholder post (no employer).
+        let placeholder = w.citizens().into_iter().find_map(|id| w.comp::<Job>(id).cloned()).expect("a worker");
+        for &id in jobless.iter().filter(|&&id| id != p) {
+            let mut j = placeholder.clone();
+            j.employer = None;
+            w.insert(id, j);
+        }
+        let from = world_home(&w, p).expect("her door");
+        // The near and far posts: standing buildings, nearest and farthest by the estimate.
+        let mut doors: Vec<(Tick, EntityId)> = w
+            .buildings_of_kind(BuildingKind::Market)
+            .iter()
+            .chain(w.buildings_of_kind(BuildingKind::NoodleBar))
+            .filter_map(|&b| w.comp::<Building>(b).filter(|x| !x.demolished).map(|x| (b, x.door)))
+            .map(|(b, d)| (crate::systems::distance::travel(&w, from, d), b))
+            .collect();
+        doors.sort();
+        let (t_near, near) = doors[0];
+        let (t_far, far) = *doors.last().expect("posts");
+        assert!(t_far > t_near + 2, "the posts differ in distance: {t_near} vs {t_far}");
+        // The pass reads its list in order: the far post first.
+        let (first, second) = (far, near);
+        w.config.distance.as_mut().expect("[distance] on").job_cap_ticks = (t_far + t_near) / 2;
+        let vac = vec![(first, vec![role]), (second, vec![role])];
+        let run = |mut x: World, vac: &[(EntityId, Vec<Role>)]| {
+            for (e, roles) in vac {
+                x.vacancies.insert(*e, roles.clone());
+            }
+            job_search_pass_with(&mut x, vac, None, true);
+            x.comp::<Job>(p).and_then(|j| j.employer)
+        };
+        assert_eq!(run(w.clone(), &vac), Some(second), "the near post hires her");
+        let mut off = w.clone();
+        off.config.distance = None;
+        assert_eq!(run(off, &vac), Some(first), "off (the base): the far post, read first, hires her");
+        assert_eq!(run(w.clone(), &vac[..1]), Some(first), "the only post, past the cap, still hires her");
+        // The pooled pass and the full walk agree.
+        let mut a = w.clone();
+        let mut b = w.clone();
+        for (e, roles) in &vac {
+            a.vacancies.insert(*e, roles.clone());
+            b.vacancies.insert(*e, roles.clone());
+        }
+        job_search_pass_with(&mut a, &vac, None, true);
+        job_search_pass_with(&mut b, &vac, None, false);
+        assert_eq!(a.comp::<Job>(p).and_then(|j| j.employer), b.comp::<Job>(p).and_then(|j| j.employer));
+    }
+
+    fn world_home(w: &World, id: EntityId) -> Option<TilePos> {
+        w.comp::<Household>(id).and_then(|h| h.home).and_then(|h| w.comp::<Building>(h)).map(|b| b.door)
+    }
 
     /// Scale S1: the pooled pass hires exactly whom `pick_candidate`'s walk
     /// of every citizen hired: the shipped city on day 3 with a fifth of its

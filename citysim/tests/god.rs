@@ -2051,11 +2051,26 @@ fn god_line_cut() {
         let home = w.comp::<Building>(w.comp::<Household>(a)?.home?)?.door;
         Some(life::commute_cost(w, home, work))
     };
+    // Riders already aboard (boarded, awaiting the planned departure) at the
+    // cut: their departure may fall just after it, but they boarded before.
+    let mut aboard_at_cut: std::collections::BTreeSet<EntityId> = std::collections::BTreeSet::new();
     let mut before_ticks: Vec<(EntityId, u64)> = Vec::new();
     let mut during_ticks: Vec<(EntityId, u64)> = Vec::new();
     while w.tick < END * TICKS_PER_DAY {
         let day = w.tick / TICKS_PER_DAY;
         if w.tick == CUT * TICKS_PER_DAY {
+            aboard_at_cut = w
+                .rides
+                .iter()
+                .filter(|(&a, r)| {
+                    r.line == 0
+                        && matches!(
+                            w.comp::<citysim::components::Brain>(a).map(|b| &b.exec),
+                            Some(citysim::exec::ExecState::Ride { .. })
+                        )
+                })
+                .map(|(&a, _)| a)
+                .collect();
             before_ticks = vat_riders.iter().filter_map(|&a| commute(&w, a).map(|c| (a, c))).collect();
             w.push_command(PlayerCommand::CutLine { line: 0, days: DAYS });
         }
@@ -2063,15 +2078,22 @@ fn god_line_cut() {
             during_ticks = before_ticks.iter().filter_map(|&(a, _)| commute(&w, a).map(|c| (a, c))).collect();
         }
         w.run_ticks(TICKS_PER_HOUR);
-        for ride in w.rides.values().filter(|r| r.line == 0) {
+        for (rid, ride) in w.rides.iter().filter(|(_, r)| r.line == 0) {
             match day {
                 10..CUT => {}
                 // Jobs & lives phase 1 (a butterfly found it): a ride that
                 // departed before the cut is still aboard at the first
                 // sample (seed 42 with the industries on: departed 28,790,
                 // cut at 28,800, arrived 28,878); only a boarding after the
-                // cut is a ride on the cut line.
-                d if (CUT..CUT + u64::from(DAYS)).contains(&d) && ride.depart >= CUT * TICKS_PER_DAY => on_cut += 1,
+                // cut is a ride on the cut line. Island pass phase 1 (longer
+                // access walks): a rider already aboard at the cut (departure
+                // 28,805) boarded before it, so the aboard set is excluded.
+                d if (CUT..CUT + u64::from(DAYS)).contains(&d)
+                    && ride.depart >= CUT * TICKS_PER_DAY
+                    && !aboard_at_cut.contains(rid) =>
+                {
+                    on_cut += 1
+                }
                 d if d >= CUT + u64::from(DAYS) => after += 1,
                 _ => {}
             }

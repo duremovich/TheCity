@@ -40,6 +40,7 @@ pub mod corps;
 pub mod creeds;
 pub mod demography;
 pub mod diet;
+pub mod distance;
 pub mod districts;
 pub mod dollhouse;
 pub mod econ;
