@@ -300,3 +300,34 @@ seed 42 × 30 counters beside the 2k ones. Phases 0 and 1 are independent of 2-6
 ## 4. Questions for Dylan
 
 All answered: P7-P10 on 2026-10-20, P11-P15 on 2026-10-21.
+
+## 5. Implemented: deviations (closed 2026-10-22)
+
+Phases 0-6 merged:
+- f14b460, b0245eb, d186412, cf9556f, 24392c0, 129f17f, 0e09dee.
+- The gate is 45aef8c: Shadow V7 plus the parity fix.
+
+SAVE_VERSION 45 → 51. The base is `4fb10b9`. Verdict: **done on the generated city and at 2k, not on the island**
+(`docs/SHADOW_V7.md`). Rows 1, 2, 3, 5 and 7 read as fixed, row 1 for most trades. Row 4 is worse on the island and
+row 6 is still dead there. The island work moved to `docs/ISLAND_PASS.md` (Dylan 2026-10-22).
+
+- **What differs from the spec:**
+  - **The gate ran on the island:** `isle_m_k2`, Track B, with gen as the control. The spec had it on gen.
+  - **Phase 5:** three El lines were authored with no track in TheCityGraphics (`OPEN-158`). Segments follow the walk's
+    own route (76ecba9). The d19 sweeper `WalkHDay` bullet is demoted for P8's Recycler commute.
+  - **Phase 6:**
+    - The round window is 09-18, and the court departure goes by the trip estimate.
+    - The word cap is one day after the wait.
+    - Lieutenants are sent for to court.
+    - P16, staff on shift pay the week, was added after the device read 76 % owner-out stops.
+  - **Parity at the gate:** the Statistical table was regenerated, and the ride-share counter skips a shift re-entry.
+    `assets/stat_table_base.toml` loads while any pass switch is off. Both retire with the switches (`OPEN-174`).
+- **FINDINGs, printed, not tuned.** On the island at 20k, 42-44 × 30 against `4fb10b9`:
+  - Murders 14 → 16, employment 0.578 → 0.585, arrests +34 %, wallets −17 %, parcels −9 %.
+  - `served_tenant` −77 % (`stat_home_p` 0.5 is still a placeholder).
+  - Contract encounters −53 % (`OPEN-157`), Eat→Earn aborts +54 %.
+  - Protection ~2 a seed (`OPEN-162`), orders by word 40 % (`OPEN-161`).
+  - At 2k, 42-47 × 120: Murders 70 → 79, employment flat.
+  - Phase 6 at 2k: protection paid 36 → 25, gang income −20 % (`OPEN-160`).
+  - The regenerated table redraws rare rates, so the next gate re-reads them.
+- **Carried to OPEN:** 143 (grown), 149, 153, 157-175. The island pass owns 163-170, 174 and 175.
