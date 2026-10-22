@@ -277,7 +277,11 @@ use crate::world::World;
 /// 53 (the island pass phase 1, OPEN-163): `Config.distance` (`[distance]`,
 /// written only when set; serde default `None`: a version-52 save resumes
 /// with the picks as they were). An off save is byte-identical to version 52's.
-pub const SAVE_VERSION: u8 = 53;
+/// 54 (the island pass phase 2, OPEN-163, OPEN-171): `DistanceCfg.free`
+/// (`[distance.free]`, written only when set; serde default `None`) and the
+/// appended `LocationKey::Cot` (in a plan step only when on). An off save
+/// is byte-identical to version 53's.
+pub const SAVE_VERSION: u8 = 54;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
