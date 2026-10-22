@@ -3036,7 +3036,10 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
     let met_cut = |w: &World| w.stats.current.jobs2.as_ref().map_or(0, |j| j.cut_at_meet);
     let mut at_meet = 0i64;
     // Two nights (a Statistical worker works the hours his `p_pitch` names).
-    for midnight in [13 * TICKS_PER_DAY, 14 * TICKS_PER_DAY] {
+    // (the nights after the evening the gang was found: day 12's, or a later one
+    // when the city has no veteran-led gang by then).
+    let first = w.tick / TICKS_PER_DAY + 1;
+    for midnight in [first * TICKS_PER_DAY, (first + 1) * TICKS_PER_DAY] {
         let (mut last_coins, mut last_meet) = (coins(&w, pimp), met_cut(&w));
         calm(&mut w, midnight - 1, &mut |w| {
             if step(w, pimp) == Some(ActionKind::Collect) {

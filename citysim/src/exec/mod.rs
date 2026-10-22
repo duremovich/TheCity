@@ -662,6 +662,9 @@ fn commute_started(world: &mut World, id: EntityId, target: &GotoTarget) {
     if legs::on(world) && world.commute_start.contains_key(&id) {
         return;
     }
+    if crate::systems::shift::on(world) && crate::systems::shift::reentering_shift(world, id) {
+        return;
+    }
     let Some(from) = walk_origin(world, id) else { return };
     let tiles = from.manhattan(target.tile);
     if tiles > 0 {

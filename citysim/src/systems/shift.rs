@@ -814,6 +814,16 @@ pub fn holds(world: &World, id: EntityId) -> bool {
     })
 }
 
+/// A walk to the workplace that re-enters a shift already begun (the return
+/// from the mid-shift break or from a haul trip) is no commute: the shape
+/// plan that sent `id` out was planned after the shift's first. The ride
+/// share counts a workday's one set-out, as the Statistical tier's one
+/// workday roll does (parity, the pre-view pass gate).
+pub fn reentering_shift(world: &World, id: EntityId) -> bool {
+    let Some(s) = world.comp::<Brain>(id).and_then(|b| b.shift.as_deref()) else { return false };
+    world.comp::<Job>(id).is_some_and(|j| s.key == j.next_shift_key(world.tick) && s.plan_tick > s.from)
+}
+
 /// `exec::actions::can_start` of a `Break`: off the premises.
 pub fn can_break(world: &World, id: EntityId) -> bool {
     world.comp::<Position>(id).is_some_and(|p| p.building.is_none())

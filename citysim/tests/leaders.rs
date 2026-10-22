@@ -292,6 +292,12 @@ fn test_take_handed_to_the_leader_at_court() {
 #[test]
 fn test_staff_on_shift_pay_the_week_when_the_owner_is_away() {
     let mut w = city(true);
+    // The clerk works a 0-1440 shift and rests one day in seven (the shift key
+    // runs a day behind the clock here): start the probe on a workday, whatever
+    // day the shared city reached (a table or tuning change moves the date).
+    while !citysim::exec::routine::is_workday(w.tick as i64 / TICKS_PER_DAY as i64 - 1) {
+        w.run_ticks(TICKS_PER_DAY);
+    }
     let (g, l, _) = led_gang(&mut w);
     let (b, owner) = business(&mut w, g);
     let weekly = w.config.leverage.protection_weekly;
