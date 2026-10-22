@@ -4089,6 +4089,11 @@ pub fn behaviour(out: Option<&std::path::Path>) -> Result<BehaviourReport, Strin
                 if !ok {
                     failures.push(line);
                 }
+                if !cal_ok {
+                    let _ =
+                        writeln!(text, "FINDING d{day} {arch} {m:?} {v:.2} n {n} (asserted row, collapse ok); {cal}");
+                    missed += 1;
+                }
             }
             _ => {
                 let why = if collapse.is_some() {
@@ -4106,8 +4111,8 @@ pub fn behaviour(out: Option<&std::path::Path>) -> Result<BehaviourReport, Strin
     }
     let _ = writeln!(
         text,
-        "behaviour tier: {asserted} rows asserted (collapse bounds), {findings} printed as FINDING ({missed} outside \
-         their calibration range), {} failed",
+        "behaviour tier: {asserted} rows asserted (collapse bounds), {findings} rows printed only as FINDING, {missed} \
+         rows outside their calibration range (FINDING lines), {} failed",
         failures.len()
     );
     Ok(BehaviourReport { text, failures })
