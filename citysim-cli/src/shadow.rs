@@ -70,6 +70,15 @@
 //! courier's parcels are logged as handed over, the Camp's headcount is
 //! never "a regular", the school fee is `SchoolFee` (not `Contract`), and
 //! the Meeting is its own time-use class. Still read-only, still no RNG.
+//!
+//! Shadow V7 (docs/plans/shadow_v7.md, phase 1), for the pre-view pass's
+//! new actions: `Break`, `Unload` and `Court` are work (they were `other`),
+//! and so is any leg of a shift's shape plan; the escort van, a cab
+//! driver's fare leg and a rider aboard a body cab are a vehicle, their
+//! jump allowance the cab's timed speed (they were a street walk at 1 tile
+//! a tick); `camera.tsv` gains the longest work-class run on one step, the
+//! distinct work tiles and the GoTo steps over 120 min, per day; and
+//! `--lives --population N` reads `--map`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -101,7 +110,8 @@ pub struct ShadowArgs {
     /// worker_friday, super, bouncer, dancer, night_shift, orderly, camp_warden, fixer, gun, sick,
     /// buyer, and (Jobs & lives, diaries only) joytoy, street_worker, pimp, vendor, day_labourer,
     /// cabbie, courier, office_worker, arms_dealer, forger, elder, loader, builder, foreman, madam,
-    /// companion, black_doc, cultist, teacher, scav (a child is unpinnable: no Brain).
+    /// companion, black_doc, cultist, teacher, scav (a child is unpinnable: no Brain). `arch:N`
+    /// picks N of that archetype instead of `--count` (Shadow V7).
     #[arg(long)]
     pub pick: Option<String>,
     /// Shadow this entity index (repeatable).
@@ -136,7 +146,8 @@ pub struct ShadowArgs {
     #[arg(long, value_name = "N")]
     pub population: Option<u32>,
     /// Shadow V6: a map file overriding `[world] map`, as `run --map` (with `--population`, the
-    /// scaled config on this map instead of the generated one). Not read by `--assert`/`--lives`.
+    /// scaled config on this map instead of the generated one). Not read by `--assert`; read by
+    /// `--lives --population N` (Shadow V7: the island's window).
     #[arg(long, value_name = "FILE")]
     pub map: Option<PathBuf>,
 }
@@ -797,7 +808,17 @@ struct CamDay {
     settles_stat: u32,
     /// With the pick asleep.
     settles_asleep: u32,
+    /// Shadow V7 (tool): the longest run of work-class minutes on one plan
+    /// step begun this day (the shift's longest single work action).
+    work_run_max: u32,
+    /// The distinct tiles the pick stood on at work-class minutes this day.
+    work_tiles: BTreeSet<citysim::TilePos>,
+    /// GoTo steps begun this day that ran over `CAM_LONG_GOTO_MIN` minutes.
+    goto_long: u32,
 }
+
+/// Shadow V7: a GoTo step longer than this (minutes) is a long leg (PREVIEW_PASS § 3 phase 5's row).
+const CAM_LONG_GOTO_MIN: u64 = 120;
 
 /// The key of an unchanged stretch: tile, building, step, exec state.
 type StillKey = (citysim::TilePos, Option<EntityId>, Option<ActionKind>, u8);
@@ -822,6 +843,8 @@ struct Cam {
     /// A courier's yard's pending parcels at the last tick (V5 bug 20).
     parcels: Vec<citysim::systems::streetwork::Parcel>,
     parcels_handed: u32,
+    /// Shadow V7: the work-class run under way: its plan step key and start.
+    work_run: Option<((Tick, u8), Tick)>,
 }
 
 /// Lives at work phase 0: the event kinds that are a service encounter's
@@ -965,7 +988,10 @@ fn activity(world: &World, id: EntityId) -> &'static str {
         if b.plan_goal() == Some(GoalKind::Work)
             && (citysim::systems::trades::on_round(world, id)
                 || citysim::systems::news::on_beat(world, id)
-                || b.current_step().is_some_and(|s| s.action == ActionKind::GoTo(citysim::LocationKey::Station)))
+                || b.current_step().is_some_and(|s| s.action == ActionKind::GoTo(citysim::LocationKey::Station))
+                // Shadow V7 (tool): any leg of a shape plan (a haul trip,
+                // the walk out to the break) is on shift too.
+                || citysim::systems::shift::scripted(world, id))
         {
             return "work";
         }
@@ -1001,7 +1027,12 @@ fn activity(world: &World, id: EntityId) -> &'static str {
         | A::Register
         | A::FabWork
         | A::Sweep
-        | A::Collect => "work",
+        | A::Collect
+        // Shadow V7 (tool): the pre-view pass's scripted steps (a stations
+        // shift's break, a haul's unload, the leader's court) were `other`.
+        | A::Break
+        | A::Unload
+        | A::Court => "work",
         A::Enjoy | A::Gamble | A::EatOut | A::HangOut => "leisure",
         A::EatFromInventory | A::EatAtHome | A::BuyFood | A::Forage | A::StoreFood => "eat",
         A::Chat | A::Drink | A::Flirt | A::Propose | A::AskAround | A::Preach => "social",
@@ -2207,6 +2238,9 @@ fn close_action(world: &World, t: &mut Track, now: Tick, status: &str) {
     } else {
         end_place
     };
+    if matches!(o.action, ActionKind::GoTo(_)) && dur > CAM_LONG_GOTO_MIN {
+        t.cam.days.entry(o.start / TICKS_PER_DAY).or_default().goto_long += 1;
+    }
     t.log(o.start, "action", format!("ACTION {:?} @ {loc}, {dur} min ({status}){tgt}", o.action));
 }
 
@@ -2259,6 +2293,9 @@ fn cam_place(world: &World, id: EntityId, act: &str) -> usize {
             ExecState::Goto { .. } if driving => return CAM_VEHICLE,
             _ => {}
         }
+        if pass_vehicle(world, id).is_some() {
+            return CAM_VEHICLE;
+        }
     }
     let Some(bl) = world.comp::<Position>(id).and_then(|p| p.building) else { return CAM_STREET };
     if world.comp::<Household>(id).and_then(|h| h.home) == Some(bl) {
@@ -2308,6 +2345,9 @@ fn exec_name(e: &ExecState) -> &'static str {
 /// distance), a Coarse timed walk 1 (generous: it is timed at 1.5 walk
 /// ticks a Manhattan tile); anything else 0.
 fn exec_speed(world: &World, id: EntityId, e: &ExecState) -> f32 {
+    if let Some(v) = pass_vehicle(world, id) {
+        return v;
+    }
     match e {
         ExecState::Goto { .. } if world.comp::<Kit>(id).is_some_and(|k| k.driving.is_some()) => {
             f32::from(world.config.vehicles.max_steps_per_tick.max(1))
@@ -2317,6 +2357,35 @@ fn exec_speed(world: &World, id: EntityId, e: &ExecState) -> f32 {
         ExecState::Ride { .. } => 1.0 / world.config.transit.ride_ticks_per_tile.max(0.01),
         _ => 0.0,
     }
+}
+
+/// Shadow V7 (tool): the pre-view pass's timed vehicle legs of a Full body,
+/// which V6's lens read as a street walk at 1 tile a tick: the escort van
+/// (an `Escort` step's `GotoTimed`, `exec::escort_leg`; its suspect, cuffed,
+/// rides along), a cab driver's fare leg (`GotoTimed` on a fare,
+/// `exec::fare_segment`) and a rider aboard a body cab (`Jobs2State.
+/// passengers`, the ride under way). Returns the leg's tiles a tick, the
+/// cab's timed speed (`streetwork::cab_ticks`: `move_ticks_full` x the
+/// Car's `timed_mult` a Manhattan tile). `None`: not one of these.
+fn pass_vehicle(world: &World, id: EntityId) -> Option<f32> {
+    let b = world.comp::<Brain>(id)?;
+    let timed = |x: EntityId| {
+        world.comp::<Brain>(x).is_some_and(|bx| matches!(bx.exec, ExecState::GotoTimed { .. }) && bx.lod == Lod::Full)
+    };
+    let van = |x: EntityId| {
+        timed(x)
+            && world.comp::<Brain>(x).and_then(|bx| bx.current_step()).is_some_and(|s| s.action == ActionKind::Escort)
+    };
+    let fare = timed(id) && citysim::systems::streetwork::on_fare(world, id);
+    let aboard = world.jobs2.passengers.get(&id).is_some_and(|&d| {
+        world.jobs2.cab_rides.iter().any(|r| r.body && r.rider == id && r.driver == d && r.stage >= 1)
+    });
+    let cuffed = b.cuffed_by.is_some_and(van);
+    if !(van(id) || fare || aboard || cuffed) {
+        return None;
+    }
+    let m = citysim::systems::vehicles::timed_mult_of(world, citysim::components::AssetKind::Car);
+    Some(1.0 / (world.config.exec.move_ticks_full.max(1) as f32 * m).max(0.01))
 }
 
 fn chebyshev(a: citysim::TilePos, b: citysim::TilePos) -> u32 {
@@ -2341,6 +2410,22 @@ fn cam_minute(world: &World, t: &mut Track, now: Tick, act: &'static str, here: 
     t.cam.days.entry(now / TICKS_PER_DAY).or_default().place_min[place] += 1;
     let Some(pos) = world.comp::<Position>(id).cloned() else { return };
     let brain = world.comp::<Brain>(id);
+    // Shadow V7: the work-class run on one plan step, and the work tiles.
+    let step_key = brain.and_then(|b| b.plan.as_ref().map(|p| (p.started_tick, b.plan_step)));
+    match step_key.filter(|_| act == "work") {
+        Some(k) => {
+            let start = match t.cam.work_run {
+                Some((rk, s)) if rk == k => s,
+                _ => now,
+            };
+            t.cam.work_run = Some((k, start));
+            let len = u32::try_from(now - start + 1).unwrap_or(u32::MAX);
+            let d = t.cam.days.entry(start / TICKS_PER_DAY).or_default();
+            d.work_run_max = d.work_run_max.max(len);
+            t.cam.days.entry(now / TICKS_PER_DAY).or_default().work_tiles.insert(pos.tile);
+        }
+        None => t.cam.work_run = None,
+    }
     let lod = brain.map(|b| b.lod);
     let held = world.has::<Sentence>(id);
     // The jump: the allowance accrued in the state the tick ran under. Inside
@@ -2704,6 +2789,13 @@ fn camera_block(t: &Track) -> String {
         if let Some(j) = d.first_jump {
             let _ = write!(n, "; first jump {}", clock(j));
         }
+        // Shadow V7: the shift's shape and the long legs.
+        if d.work_run_max > 0 {
+            let _ = write!(n, "; longest work action {} min on {} work tile(s)", d.work_run_max, d.work_tiles.len());
+        }
+        if d.goto_long > 0 {
+            let _ = write!(n, "; {} GoTo leg(s) over {CAM_LONG_GOTO_MIN} min", d.goto_long);
+        }
         notes.push(n);
     }
     let _ = writeln!(md);
@@ -2721,7 +2813,7 @@ fn camera_block(t: &Track) -> String {
 const CAMERA_TSV_HEADER: &str = "arch\tindex\tname\tday\thome_h\twork_h\tbuilding_h\tstreet_h\tvehicle_h\theld_h\tstat_h\t\
 coarse_h\tplans\taborts\taborts_by_reason\tjumps\tjumps_body\tmax_jump\tfirst_jump\tstill_min\tstill_start\tstill_class\t\
 awake_still_min\tawake_still_start\tawake_still_class\tawake_still_place\tsettles\tsettles_apart\tsettles_stat\t\
-settles_asleep";
+settles_asleep\twork_longest_min\twork_tiles\tgoto_over_120";
 
 fn camera_rows(t: &Track, out: &mut String) {
     for (day, d) in &t.cam.days {
@@ -2736,7 +2828,7 @@ fn camera_rows(t: &Track, out: &mut String) {
         let awake_place = d.still_awake.as_ref().map_or("-".to_string(), |s| s.3.replace('\t', " "));
         let _ = writeln!(
             out,
-            "\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{awake_place}\t{}\t{}\t{}\t{}",
+            "\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{awake_place}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             d.plans,
             d.aborts.values().sum::<u32>(),
             if reasons.is_empty() { "-".into() } else { reasons.join(",") },
@@ -2749,7 +2841,10 @@ fn camera_rows(t: &Track, out: &mut String) {
             d.settles,
             d.settles_apart,
             d.settles_stat,
-            d.settles_asleep
+            d.settles_asleep,
+            d.work_run_max,
+            d.work_tiles.len(),
+            d.goto_long
         );
     }
 }
@@ -2989,7 +3084,7 @@ pub fn shadow(args: ShadowArgs) -> Result<(), String> {
         };
     }
     if args.lives {
-        print!("{}", lives(args.out.as_deref(), args.population)?);
+        print!("{}", lives(args.out.as_deref(), args.population, args.map.as_deref())?);
         return Ok(());
     }
     if !args.list && args.out.is_none() {
@@ -3094,7 +3189,12 @@ fn pick(
     let mut picked: Vec<(String, EntityId)> = Vec::new();
     let mut taken: BTreeSet<EntityId> = BTreeSet::new();
     if let Some(list) = list {
-        for arch in list.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        for tok in list.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            // Shadow V7 (tool): `arch:N` picks N of this archetype instead of `--count`.
+            let (arch, count) = match tok.split_once(':') {
+                Some((a, n)) => (a, n.parse::<usize>().unwrap_or(count)),
+                None => (tok, count),
+            };
             match candidates(world, arch) {
                 Err(e) => eprintln!("note: {e}"),
                 Ok(c) if c.is_empty() => eprintln!("note: no {arch} candidates on seed {seed} at day {start_day}"),
@@ -3971,12 +4071,17 @@ const LIVES_COUNT_BIG: usize = 5;
 /// The lives baseline: the 2k windows (`--assert`'s first window over every
 /// pinnable archetype, the seeds pooled) or, with `population`, one window of
 /// the generated city. Returns the `PROBE lives` lines.
-pub fn lives(out: Option<&std::path::Path>, population: Option<u32>) -> Result<String, String> {
+pub fn lives(
+    out: Option<&std::path::Path>,
+    population: Option<u32>,
+    map: Option<&std::path::Path>,
+) -> Result<String, String> {
     let archs: Vec<&str> = ARCHETYPES.iter().copied().filter(|&a| a != "child").collect();
     let mut rows: BTreeMap<String, Row> = BTreeMap::new();
     let (city, window) = match population {
         Some(n) => {
-            let mut world = start_world(LIVES_BIG_SEED, LIVES_BIG_DAY, Some(n), None)?;
+            // Shadow V7 (tool): `--map` is read here too (the island at 20k).
+            let mut world = start_world(LIVES_BIG_SEED, LIVES_BIG_DAY, Some(n), map)?;
             let list = archs.join(",");
             let picked = pick(&world, LIVES_BIG_SEED, LIVES_BIG_DAY, Some(&list), LIVES_COUNT_BIG, &[]);
             if picked.is_empty() {
@@ -3996,8 +4101,9 @@ pub fn lives(out: Option<&std::path::Path>, population: Option<u32>) -> Result<S
             for t in &tracks {
                 rows.entry(t.arch.clone()).or_default().add(t);
             }
+            let stem = map.and_then(|m| m.file_stem()).map(|m| format!("@{}", m.to_string_lossy()));
             (
-                format!("{}k", n / 1000),
+                format!("{}k{}", n / 1000, stem.unwrap_or_default()),
                 format!(
                     "seed {LIVES_BIG_SEED}, day {LIVES_BIG_DAY}, {BEHAVIOUR_DAYS} days, {} picks of {} archetypes pinned \
                      together in one world (up to {LIVES_COUNT_BIG} each)",
