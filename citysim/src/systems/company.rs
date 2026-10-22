@@ -27,6 +27,16 @@
 //!   the beds, as the pre-roll houses its movers. The block is a
 //!   `BuildingKind::Home` (the view draws it as a Block); `World.
 //!   company_homes` names its workplace, and a `Founded` line says so.
+//! - **Inside the workplace** (phase 3b, `[company_housing.inside]`, Dylan
+//!   2026-10-22: the city is dense, free Lots are rare): the seeded beds are
+//!   floors of the workplace itself ([`floors_within`]): a Home record with
+//!   the workplace's rect, door and tier, `Building.within` naming it, its
+//!   label the kind's room name (dorm storeys on a vertical farm, coffin
+//!   racks in a plant's basement), sized as above but one set of floors per
+//!   workplace (`beds_per_floor` a floor as its interior allows, at most
+//!   `floors_max`). No tile changes and no Lot or plot is taken; the floors
+//!   change hands with the workplace. `CITYSIM_COMPANY_HOUSING2_OFF=1` keeps
+//!   3a's blocks on a Lot, else a plot.
 //! - **Reserved**: no housing path but [`move_in`] puts anyone in a company
 //!   bed ([`open_to_all`] is the filter the other picks read); the staff's
 //!   household (a spouse, the children, a kin taken in) lives with them.
@@ -174,6 +184,21 @@ pub fn seed(world: &mut World) -> (u32, u32) {
     }
     want.sort_unstable();
     let pantry = world.config.world.home_pantry_initial;
+    if let Some(inside) = cfg.inside.clone() {
+        // Phase 3b: the beds are floors of the workplace itself.
+        let (mut blocks, mut beds) = (0u32, 0u32);
+        for (std::cmp::Reverse(n), w) in want {
+            if let Some(cap) = floors_within(world, &cfg, &inside, w, n, pantry) {
+                blocks += 1;
+                beds += u32::from(cap);
+            }
+        }
+        crate::systems::districts::rebuild(world);
+        if cfg.fill_at_seed {
+            fill(world, true);
+        }
+        return (blocks, beds);
+    }
     let mut occ = Occupancy::new(world);
     let (mut blocks, mut beds) = (0u32, 0u32);
     for (std::cmp::Reverse(mut n), w) in want {
@@ -220,6 +245,97 @@ pub fn seed(world: &mut World) -> (u32, u32) {
         fill(world, true);
     }
     (blocks, beds)
+}
+
+/// Phase 3b: company floors for `want` beds inside workplace `w`: a Home
+/// record sharing `w`'s rect, door and tier, owned by `w`'s owner, with
+/// `beds_per_floor` bunks a floor (`w`'s interior allowing) and the floors
+/// the want asks for, at most `floors_max`; `Building.within` names `w`,
+/// its label the kind's `[company_housing.inside] rooms` name. No tile
+/// changes (no new footprint). Returns the beds (`None`: `w` is gone).
+fn floors_within(
+    world: &mut World,
+    cfg: &crate::config::CompanyHousingCfg,
+    inside: &crate::config::CompanyInsideCfg,
+    w: EntityId,
+    want: u32,
+    pantry: u32,
+) -> Option<u16> {
+    let wb = world.comp::<Building>(w).filter(|b| !b.demolished && !b.derelict)?;
+    let (rect, wdoor, tier, kind) = (wb.rect, wb.door, wb.tier, wb.kind);
+    let owner = world.owner_of(w);
+    let interior = usize::from(rect.w.saturating_sub(2)) * usize::from(rect.h.saturating_sub(2));
+    let per = u16::try_from(interior).unwrap_or(u16::MAX).min(cfg.beds_per_floor).max(1);
+    let floors = u8::try_from(want.div_ceil(u32::from(per))).unwrap_or(u8::MAX).clamp(1, cfg.floors_max.max(1));
+    let cap = u16::try_from(usize::from(per) * usize::from(floors)).unwrap_or(u16::MAX);
+    let (name, _) = inside.room(kind);
+    let home = Building {
+        kind: BuildingKind::Home,
+        production_accum: 0.0,
+        claim: None,
+        child_food_debt: 0.0,
+        rect,
+        door: wdoor,
+        stock_food: pantry,
+        capacity: cap,
+        owner: None,
+        occupants: Vec::new(),
+        demolished: false,
+        tier,
+        rent_per_day: 0,
+        revenue_today: 0,
+        revenue: std::collections::VecDeque::new(),
+        secured_by: None,
+        derelict: false,
+        empty_since: None,
+        closed_until: None,
+        full_capacity: None,
+        stock_goods: [0; 2],
+        asset_sales_today: 0,
+        asset_sales: std::collections::VecDeque::new(),
+        security: Default::default(),
+        focus: None,
+        hacked: None,
+        last_door_open: None,
+        label: Some(name.to_string()),
+        feed: None,
+        venue: None,
+        charity: None,
+        camp: None,
+        input_accum: 0.0,
+        floors,
+        floor_days: 0,
+        synth_food: 0,
+        bin: 0,
+        bin_accum: 0.0,
+        spoil_carry: 0.0,
+        bin_diver: None,
+        bin_regular: None,
+        under_construction_until: None,
+        stock_x: [0; 3],
+        within: Some(w),
+    };
+    let id = world.spawn();
+    world.insert(id, home);
+    let list = world.buildings_by_kind.entry(BuildingKind::Home).or_default();
+    if let Err(i) = list.binary_search(&id) {
+        list.insert(i, id);
+    }
+    crate::systems::ownership::transfer_building(world, id, owner);
+    world.company_homes.insert(id, w);
+    let rent = rent_tenths(world, id) / 10;
+    if let Some(b) = world.comp_mut::<Building>(id) {
+        b.rent_per_day = rent;
+    }
+    let (what, label) = (world.name_of(w), world.owner_label(owner));
+    let mut actors: Vec<EntityId> = owner.into_iter().collect();
+    actors.extend([id, w]);
+    world.push_event(
+        EventKind::Founded,
+        &actors,
+        format!("{what}'s {name} stand as {label}'s company housing for its staff ({cap} beds on {floors} floors)"),
+    );
+    Some(cap)
 }
 
 /// The tiles no new block may take: every building's rect (a ring of one
@@ -535,14 +651,31 @@ pub fn evictions(world: &mut World) {
     for h in gone {
         world.company_homes.remove(&h);
     }
+    // Phase 3b: floors inside a workplace change hands with it (a corp
+    // that buys the Farm buys its dorm storeys).
+    let moved: Vec<(EntityId, Option<EntityId>)> = world
+        .company_homes
+        .iter()
+        .filter(|&(&h, &w)| {
+            world.comp::<Building>(h).is_some_and(|b| b.within == Some(w)) && world.owner_of(h) != world.owner_of(w)
+        })
+        .map(|(&h, &w)| (h, world.owner_of(w)))
+        .collect();
+    for (h, o) in moved {
+        crate::systems::ownership::transfer_building(world, h, o);
+    }
     let tick = world.tick;
     let grace = u64::from(cfg.grace_days) * TICKS_PER_DAY;
     let mut entitled: std::collections::BTreeSet<EntityId> = std::collections::BTreeSet::new();
     let mut due: Vec<(EntityId, EntityId, EntityId)> = Vec::new();
     let mut lapsed_now: Vec<EntityId> = Vec::new();
-    let (mut beds, mut held) = (0u32, 0u32);
+    let (mut beds, mut held, mut inside) = (0u32, 0u32, 0u32);
     for (&h, &w) in &world.company_homes {
-        beds += world.comp::<Building>(h).map_or(0, |b| u32::from(b.capacity));
+        let cap = world.comp::<Building>(h).map_or(0, |b| u32::from(b.capacity));
+        beds += cap;
+        if world.comp::<Building>(h).is_some_and(|b| b.within.is_some()) {
+            inside += cap;
+        }
         let residents = world.residents_of(h);
         held += residents.len() as u32;
         let staffed: Vec<EntityId> = residents.iter().copied().filter(|&r| on_staff(world, r, h)).collect();
@@ -573,6 +706,7 @@ pub fn evictions(world: &mut World) {
         let row = crate::systems::ownership::jobs2_row(world);
         row.company_beds = beds;
         row.company_housed = held;
+        row.company_inside_beds = inside;
     }
     // A noted resident back on the staff (or housed elsewhere) is no longer
     // lapsed.

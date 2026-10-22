@@ -286,7 +286,13 @@ use crate::world::World;
 /// `World.company_homes` and `World.company_lapsed` (written only when
 /// non-empty) and the `Jobs2Cols` company columns (written only when
 /// non-zero). An off save is byte-identical to version 54's.
-pub const SAVE_VERSION: u8 = 55;
+/// 56 (the island pass phase 3b, OPEN-163, I6): `CompanyHousingCfg.inside`
+/// and `.buyout` (`[company_housing.inside]`, `[company_housing.buyout]`,
+/// written only when set; serde default `None`), `Building.within` (written
+/// only when set), `World.company_notice` (written only when non-empty) and
+/// the `Jobs2Cols` 3b company columns (written only when non-zero). An off
+/// save is byte-identical to version 55's.
+pub const SAVE_VERSION: u8 = 56;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

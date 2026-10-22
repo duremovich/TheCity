@@ -976,6 +976,20 @@ pub struct Jobs2Cols {
     pub company_moved_in: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub company_evicted: u32,
+    // The island pass phase 3b (I6): the company beds inside a workplace
+    // (a gauge at the midnight pass), the blocks bought and the fallback
+    // blocks built, the tenants given notice by a buyout and those evicted
+    // at its end (today; `company_evicted` keeps the job lost).
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub company_inside_beds: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub company_buyouts: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub company_built: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub company_notices: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub company_buyout_evicted: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -1311,6 +1325,11 @@ impl Jobs2Cols {
                 "company_housed",
                 "company_moved_in",
                 "company_evicted",
+                "company_inside_beds",
+                "company_buyouts",
+                "company_built",
+                "company_notices",
+                "company_buyout_evicted",
             ]
             .into_iter()
             .map(str::to_string),
@@ -1640,6 +1659,11 @@ impl Jobs2Cols {
             self.company_housed.to_string(),
             self.company_moved_in.to_string(),
             self.company_evicted.to_string(),
+            self.company_inside_beds.to_string(),
+            self.company_buyouts.to_string(),
+            self.company_built.to_string(),
+            self.company_notices.to_string(),
+            self.company_buyout_evicted.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

@@ -4389,6 +4389,24 @@ grace_days = 7                     # a resident whose job there ended keeps the 
 fill_at_seed = true                # world build: the far posts' holders (longest commute first) wake in the seeded beds,
                                    # as the pre-roll houses its movers; false: only new hires and the homeless staff
 
+# The island pass phase 3b (I6, Dylan 2026-10-22; systems/company.rs): the city is dense and free Lots are rare
+# (3a put 52 of its 56 blocks on open-ground plots), so the seeded beds are floors of the workplace building itself, a
+# Home record sharing its rect and door: no new footprint. The beds are sized as 3a's (far posts less the free beds near,
+# beds_per_floor a floor as the workplace's interior allows, at most floors_max floors, one set per workplace). Each kind's
+# floors have a name, so the view draws the building as both workplace and warren. CITYSIM_COMPANY_HOUSING2_OFF=1 drops
+# this table and [company_housing.buyout] (3a's blocks, the switch in flight). Placeholders.
+[company_housing.inside]
+default_name = "Company Floors"    # the floors' name for a kind with no row below
+rooms = [
+    { kind = "Farm", name = "Dorm Storeys", below = false },            # bunk storeys over the vertical farm's racks
+    { kind = "PackingPlant", name = "Coffin Racks", below = true },     # capsule racks in the plant's basement
+    { kind = "FreightYard", name = "Container Bunks", below = false },  # stacked containers over the yard office
+    { kind = "UtilityPlant", name = "Coffin Racks", below = true },     # capsule racks under the turbine hall
+    { kind = "ConstructionYard", name = "Site Barracks", below = false },
+    { kind = "Warehouse", name = "Loft Bunks", below = false },
+]
+
+
 # The pre-view pass phase 6 (docs/PREVIEW_PASS.md § 0 P9, P13-P15; systems/leaders.rs; OPEN-118, OPEN-128): the
 # leader's visible half, for a leader with a body (Full or Coarse). A Statistical leader keeps the off-screen path
 # (the midnight protection collection, the order in force the moment it is chosen). Placeholders.

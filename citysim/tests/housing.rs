@@ -622,6 +622,61 @@ fn test_company_eviction_after_the_grace_not_before() {
     assert_eq!(home_of(&off, a), Some(block), "off (the base): the Block keeps him");
 }
 
+/// The map's tiles, row-major (a building's footprint shows as walls).
+fn tiles(w: &World) -> Vec<citysim::components::TileKind> {
+    let mut v = Vec::with_capacity(w.map.w() * w.map.h());
+    for y in 0..w.map.h() {
+        for x in 0..w.map.w() {
+            v.push(w.map.tile(x, y));
+        }
+    }
+    v
+}
+
+/// The island pass phase 3b (I6, Dylan 2026-10-22): the seeded company
+/// beds are floors inside the workplace: each company Home shares its
+/// workplace's rect and door, `within` names it, its label is the kind's
+/// room name, and no tile or Lot is added (no new footprint). The base (3a,
+/// `[company_housing.inside]` off) puts its blocks on a Lot or a plot.
+#[test]
+fn test_seeded_company_beds_are_floors_inside_the_workplace() {
+    let mut w = base();
+    w.company_homes.clear();
+    w.company_lapsed.clear();
+    // Every housed post is far (0 ticks) and no plain bed is that near: each
+    // staffed workplace of the kinds wants its staff's beds.
+    w.config.company_housing.as_mut().expect("[company_housing] on").far_ticks = 0;
+    let inside = w.config.company_housing.as_ref().and_then(|c| c.inside.clone()).expect("[company_housing.inside] on");
+    let (lots, before) = (w.buildings_of_kind(BuildingKind::Lot).len(), tiles(&w));
+    let mut on = w.clone();
+    let (blocks, beds) = citysim::systems::company::seed(&mut on);
+    assert!(blocks > 0 && beds > 0, "on: company floors seeded ({blocks}, {beds} beds)");
+    for (&h, &wp) in &on.company_homes {
+        let (hb, wb) = (on.comp::<Building>(h).expect("home"), on.comp::<Building>(wp).expect("workplace"));
+        assert_eq!(hb.kind, BuildingKind::Home);
+        assert_eq!(hb.within, Some(wp), "the floors name their workplace");
+        assert_eq!((hb.rect, hb.door), (wb.rect, wb.door), "inside the workplace: its rect and door");
+        assert_eq!(hb.label.as_deref(), Some(inside.room(wb.kind).0), "the kind's room name");
+        assert_eq!(on.owner_of(h), on.owner_of(wp), "the workplace's owner holds them");
+    }
+    assert!(on.company_homes.keys().any(|&h| !on.residents_of(h).is_empty()), "the far staff moved in");
+    assert_eq!(on.buildings_of_kind(BuildingKind::Lot).len(), lots, "no Lot built on or plot spawned");
+    assert!(tiles(&on) == before, "no tile changed: no new footprint");
+    // Off (the base, 3a): blocks of their own beside the workplace.
+    let mut off = w.clone();
+    off.config.company_housing.as_mut().expect("on").inside = None;
+    let (ob, _) = citysim::systems::company::seed(&mut off);
+    assert!(ob > 0, "off: 3a seeds blocks");
+    assert!(
+        off.company_homes.iter().all(|(&h, &wp)| {
+            let hb = off.comp::<Building>(h).expect("home");
+            hb.within.is_none() && hb.rect != off.comp::<Building>(wp).expect("w").rect
+        }),
+        "off: every block stands apart from its workplace"
+    );
+    assert!(tiles(&off) != before, "off: the blocks' walls went up");
+}
+
 fn env<T: std::str::FromStr>(k: &str) -> Option<T> {
     std::env::var(k).ok().and_then(|v| v.parse().ok())
 }

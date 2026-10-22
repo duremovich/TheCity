@@ -2681,6 +2681,7 @@ impl World {
                 bin_regular: None,
                 under_construction_until: None,
                 stock_x: [0; 3],
+                within: None,
             },
         );
         self.buildings_by_kind.entry(BuildingKind::Home).or_default().push(id);
