@@ -2861,6 +2861,10 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
     let mut cfg = Config::load();
     cfg.vice.p_street_visit = 1.0;
     cfg.vice.street_intimacy = 1.0;
+    // Pinned: the island pass phase 2's free-time picks off (`[distance.free]` moved this city's scene; re-read when the switch retires).
+    if let Some(d) = cfg.distance.as_mut() {
+        d.free = None;
+    }
     let mut w = World::new(42, cfg);
     let start = 12 * TICKS_PER_DAY + 17 * TICKS_PER_HOUR;
     w.run_ticks(start);

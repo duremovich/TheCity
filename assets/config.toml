@@ -4350,6 +4350,17 @@ home_cap_ticks = 120               # the bed a homeless worker moves into: a Hom
 bed_cap_ticks = 120                # tonight's bed (Home or the gang's Hideout), from where the body stands
 home_bed_ticks = 30                # the own Home's offer over a Hideout cot: the Hideout only when nearer by more than this
 
+# The island pass phase 2 (docs/ISLAND_PASS.md I1; OPEN-163, OPEN-171): the free-time spot and the night's bed out,
+# on the same travel estimate. CITYSIM_DISTANCE2_OFF=1 drops this table (the switch in flight). Placeholders.
+[distance.free]
+spot_cap_ticks = 60                # the HangOut spot (a corner, the Hideout's door, a friend's Home) from where the body
+                                   # sets out: past it the spot is dropped, and with none within there is no spot (the
+                                   # own Home is never past it): an hour's company is not worth a 4 h walk (island d30: a
+                                   # third of Unwind spot legs ran 2 h or more against a 22-tile Manhattan cap)
+hotel_cap_ticks = 120              # tonight's Hotel bed or Mission cot (homeless) from where the body sets out
+cot_bed_ticks = 60                 # a Mission's cot's offer over a paid Hotel bed: the cot unless a Hotel is nearer by
+                                   # more than this (the base took any cot in reach first: 119 tiles over a Hotel at 5)
+
 # The pre-view pass phase 6 (docs/PREVIEW_PASS.md § 0 P9, P13-P15; systems/leaders.rs; OPEN-118, OPEN-128): the
 # leader's visible half, for a leader with a body (Full or Coarse). A Statistical leader keeps the off-screen path
 # (the midnight protection collection, the order in force the moment it is chosen). Placeholders.

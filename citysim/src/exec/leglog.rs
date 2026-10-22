@@ -49,6 +49,13 @@ pub struct LegLog {
     /// The 03:00 census by day: execs asleep at home, asleep away, awake;
     /// guards the same (`night_census`).
     pub nights: Vec<(u64, [u32; 6])>,
+    /// The island pass phase 2 (the Hideout/Home ping-pong): by (night,
+    /// leader), the ticks asleep, the sleeps begun, the bed switches (a
+    /// sleep begun in another building than the night's last) and the ticks
+    /// a leader with a body; the night runs 18:00 to 18:00 (`leader_tick`).
+    pub leaders: BTreeMap<(u64, EntityId), [u32; 4]>,
+    /// Each leader's last sleep: (night, building, asleep last tick).
+    pub leader_last: BTreeMap<EntityId, (u64, Option<EntityId>, bool)>,
 }
 
 /// Who `id` is, for the table: the trade's key, the built-in role, a corp
@@ -167,6 +174,13 @@ pub fn tsv(world: &World) -> String {
     for (d, r) in &log.nights {
         out.push_str(&format!("#night\t{d}\t{}\t{}\t{}\t{}\t{}\t{}\n", r[0], r[1], r[2], r[3], r[4], r[5]));
     }
+    for (&(n, id), r) in &log.leaders {
+        out.push_str(&format!(
+            "#leader	{n}	{}	{}	{}	{}	{}
+",
+            id.index, r[0], r[1], r[2], r[3]
+        ));
+    }
     for (m, (n, t)) in &log.by_mode {
         out.push_str(&format!("#mode\t{m}\t{n}\t{t}\n"));
     }
@@ -205,5 +219,48 @@ pub fn night_census(world: &mut World) {
     let day = world.tick / crate::time::TICKS_PER_DAY;
     if let Some(log) = world.leg_log.as_mut() {
         log.nights.push((day, row));
+    }
+}
+
+/// Every tick (`run --legs`): each gang leader with a body, asleep or not,
+/// and where; `#leader` rows of the TSV (night, id, minutes asleep, sleeps
+/// begun, bed switches, minutes a leader with a body). Measurement only.
+pub fn leader_tick(world: &mut World) {
+    if world.leg_log.is_none() {
+        return;
+    }
+    let night = (world.tick + 6 * crate::time::TICKS_PER_HOUR) / crate::time::TICKS_PER_DAY;
+    let leaders: Vec<EntityId> = world
+        .gang_list()
+        .iter()
+        .filter_map(|&g| world.comp::<crate::components::Gang>(g).and_then(|x| x.leader))
+        .filter(|&l| crate::systems::presence::is_body(world, l))
+        .collect();
+    let mut seen = Vec::with_capacity(leaders.len());
+    for l in leaders {
+        let asleep = world.comp::<crate::components::Brain>(l).is_some_and(|b| {
+            matches!(b.exec, crate::exec::ExecState::Use { kind: crate::goap::ActionKind::Sleep, .. })
+        });
+        let at = world.comp::<crate::components::Position>(l).and_then(|p| p.building);
+        seen.push((l, asleep, at));
+    }
+    let Some(log) = world.leg_log.as_mut() else { return };
+    for (l, asleep, at) in seen {
+        let row = log.leaders.entry((night, l)).or_default();
+        row[3] += 1;
+        let last = log.leader_last.get(&l).copied();
+        if asleep {
+            row[0] += 1;
+            let was_asleep = last.is_some_and(|(_, _, a)| a);
+            if !was_asleep {
+                row[1] += 1;
+                if last.is_some_and(|(n, b, _)| n == night && b.is_some() && b != at) {
+                    row[2] += 1;
+                }
+            }
+            log.leader_last.insert(l, (night, at, true));
+        } else if let Some((n, b, _)) = last {
+            log.leader_last.insert(l, (n, b, false));
+        }
     }
 }

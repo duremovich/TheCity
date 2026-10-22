@@ -426,7 +426,7 @@ fn step_ctx(world: &World, id: EntityId, kind: ActionKind) -> crate::goap::PlanC
 
 /// A bed's location key (Home, Hideout, Hotel, Squat).
 fn bed_key(key: LocationKey) -> bool {
-    matches!(key, LocationKey::Home | LocationKey::Hideout | LocationKey::Hotel | LocationKey::Squat)
+    matches!(key, LocationKey::Home | LocationKey::Hideout | LocationKey::Hotel | LocationKey::Squat | LocationKey::Cot)
 }
 
 /// L2 (L34): the day's plan failures by the failing step.
@@ -1503,9 +1503,21 @@ impl World {
                     })
                     .or_else(|| crate::systems::life::away_hotel(self, agent))
             }
+            // The island pass phase 2 (OPEN-171): with `[distance.free]` on, a
+            // "Hotel" is a Hotel and a cot is `Cot`; a pick that turned from
+            // one to the other since the plan is no such place (a replan).
+            LocationKey::Hotel if crate::systems::distance::free(self).is_some() => target
+                .filter(|&t| crate::systems::street::is_hotel(self, t) && !crate::systems::charity::is_mission(self, t))
+                .or_else(|| {
+                    crate::systems::street::hotel_for(self, agent)
+                        .filter(|&h| !crate::systems::charity::is_mission(self, h))
+                }),
             LocationKey::Hotel => target
                 .filter(|&t| crate::systems::street::is_hotel(self, t))
                 .or_else(|| crate::systems::street::hotel_for(self, agent)),
+            LocationKey::Cot => target.filter(|&t| crate::systems::charity::is_cot_house(self, t)).or_else(|| {
+                crate::systems::street::hotel_for(self, agent).filter(|&h| crate::systems::charity::is_mission(self, h))
+            }),
             // M12 D27: the agent's squat, else the bound derelict.
             LocationKey::Squat => self
                 .comp::<crate::components::Squatter>(agent)

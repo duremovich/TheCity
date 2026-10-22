@@ -279,6 +279,133 @@ fn test_homeless_worker_moves_in_near_work() {
     assert_eq!(midnight(w), Some(far), "the only Home, past the cap, still takes him");
 }
 
+/// The island pass phase 2 (OPEN-163, OPEN-171; ISLAND_PASS I1), in the
+/// seed-42 city with a homeless adult at hand. The spot: of two corners of
+/// equal offer the near one; a corner past `spot_cap_ticks` alone is no
+/// spot on (the base walked to it: the nearest when none is within). The
+/// bed out: with a Hotel at the door and a cot house farther by more than
+/// `cot_bed_ticks`, "Hotel" is the Hotel (the base took the cot first and
+/// "Hotel" resolved to the Mission); at the cot house's door the cot is
+/// walked to as `Cot`, and "Hotel" never resolves to a Mission.
+#[test]
+fn test_free_time_spot_and_bed_out_by_distance() {
+    use citysim::living::{Spot, SpotKind};
+    use citysim::systems::{distance, leisure, lod, plan, street};
+    let mut w = base();
+    let f = w.config.distance.as_ref().and_then(|d| d.free.clone()).expect("[distance.free] on");
+    let a = common::adults(&w)
+        .into_iter()
+        .find(|&a| w.gang_of(a).is_none() && w.has::<Brain>(a) && !law::is_guard(&w, a) && !w.has::<Job>(a))
+        .expect("a jobless adult");
+    let nbrs: Vec<EntityId> = w.neighbours(a).collect();
+    for c in nbrs {
+        w.edge_entry(a, c).affinity = 0.0;
+    }
+    w.set_home(a, None);
+    w.remove_from_building(a);
+    // The bed out: a Hotel with a door, a cot house in reach but far by travel.
+    let reach = w.config.street.hotel_reach.max(w.config.life.hotel_reach_homeless);
+    let hotels: Vec<EntityId> = w
+        .buildings_of_kind(BuildingKind::Hotel)
+        .iter()
+        .copied()
+        .filter(|&h| street::is_hotel(&w, h) && street::free_beds(&w, h) > 0)
+        .collect();
+    let missions: Vec<EntityId> = w.buildings_of_kind(BuildingKind::Mission).to_vec();
+    let out = |w: &World, b: EntityId| w.outside_door(w.comp::<Building>(b).expect("b"));
+    let (hotel, cot) = hotels
+        .iter()
+        .flat_map(|&h| missions.iter().map(move |&m| (h, m)))
+        .find(|&(h, m)| {
+            let (o, d) = (out(&w, h), door_of(&w, m));
+            o.manhattan(d) <= reach
+                && distance::travel(&w, o, d) > distance::travel(&w, o, door_of(&w, h)) + f.cot_bed_ticks + 10
+        })
+        .expect("a Hotel and a Mission in reach, far by travel");
+    let price = w.config.charity.cot_price;
+    if let Some(c) = w.comp_mut::<Building>(cot).and_then(|b| b.charity.as_mut()) {
+        c.purse = c.purse.max(price * 10);
+    }
+    assert!(citysim::systems::charity::is_cot_house(&w, cot), "a cot house");
+    // Nothing else in reach takes him: the other cot houses shut by purse.
+    for &m in &missions {
+        if m != cot {
+            if let Some(c) = w.comp_mut::<Building>(m).and_then(|b| b.charity.as_mut()) {
+                c.purse = 0;
+            }
+        }
+    }
+    common::set_coins(&mut w, a, 500);
+    let stand = |w: &mut World, t: TilePos| {
+        if let Some(p) = w.comp_mut::<Position>(a) {
+            p.tile = t;
+            p.building = None;
+        }
+    };
+    let at_hotel = out(&w, hotel);
+    stand(&mut w, at_hotel);
+    let mut off = w.clone();
+    off.config.distance.as_mut().expect("[distance]").free = None;
+    let kind = |w: &World, b: Option<EntityId>| b.and_then(|b| w.comp::<Building>(b)).map(|b| b.kind);
+    assert_eq!(street::hotel_for(&w, a), Some(hotel), "on: the Hotel at the door over the far cot");
+    assert_eq!(
+        kind(&w, w.resolve_building(a, LocationKey::Hotel, None)),
+        Some(BuildingKind::Hotel),
+        "a Hotel is a Hotel"
+    );
+    assert_eq!(street::hotel_for(&off, a), Some(cot), "off (the base): any cot in reach first");
+    assert_eq!(
+        kind(&off, off.resolve_building(a, LocationKey::Hotel, None)),
+        Some(BuildingKind::Mission),
+        "off (the base): \"Hotel\" is the Mission (OPEN-171)"
+    );
+    // At the cot house's door: the cot, walked to as a cot.
+    let at_cot = out(&w, cot);
+    stand(&mut w, at_cot);
+    assert_eq!(street::hotel_for(&w, a), Some(cot), "on: the cot at the door");
+    assert_eq!(w.resolve_building(a, LocationKey::Cot, None), Some(cot));
+    assert!(
+        kind(&w, w.resolve_building(a, LocationKey::Hotel, None)) != Some(BuildingKind::Mission),
+        "\"Hotel\" never resolves to a Mission"
+    );
+    let sleep_plan = |w: &mut World| -> Vec<citysim::ActionKind> {
+        lod::set_lod(w, a, citysim::Lod::Full);
+        w.comp_mut::<citysim::Needs>(a).expect("needs").energy = 0.3;
+        w.comp_mut::<Brain>(a).expect("brain").current_goal = Some(citysim::GoalKind::Sleep);
+        plan::plan_for(w, a, citysim::GoalKind::Sleep);
+        w.comp::<Brain>(a).and_then(|b| b.plan.clone()).expect("a plan").steps.iter().map(|s| s.action).collect()
+    };
+    let mut off = w.clone();
+    off.config.distance.as_mut().expect("[distance]").free = None;
+    let steps = sleep_plan(&mut off);
+    assert!(steps.contains(&citysim::ActionKind::GoTo(LocationKey::Hotel)), "off: the cot as \"Hotel\": {steps:?}");
+    let steps = sleep_plan(&mut w);
+    assert!(steps.contains(&citysim::ActionKind::GoTo(LocationKey::Cot)), "the cot's walk: {steps:?}");
+    assert!(!steps.contains(&citysim::ActionKind::GoTo(LocationKey::Hotel)), "no \"Hotel\": {steps:?}");
+    // The spot: two street corners of equal offer, one near, one past the cap.
+    w.comp_mut::<Brain>(a).expect("brain").plan = None;
+    let from = at_hotel;
+    stand(&mut w, from);
+    let streets: Vec<TilePos> = (0..w.map.h() as u16)
+        .flat_map(|y| (0..w.map.w() as u16).map(move |x| TilePos { x, y }))
+        .filter(|&t| w.is_street(t))
+        .collect();
+    let near = *streets.iter().find(|t| (3..=6).contains(&t.manhattan(from))).expect("a near corner");
+    let cap_tiles = w.config.life.spot_walk_cap_tiles;
+    let far = *streets
+        .iter()
+        .find(|&&t| t.manhattan(from) > cap_tiles && distance::travel(&w, from, t) > f.spot_cap_ticks)
+        .expect("a far corner");
+    let both = vec![Spot { tile: far, kind: SpotKind::Barrel }, Spot { tile: near, kind: SpotKind::Barrel }];
+    w.spots = vec![both; w.districts.len()];
+    assert_eq!(leisure::best_spot(&w, a, from).map(|s| s.0), Some(near), "the near corner");
+    w.spots = vec![vec![Spot { tile: far, kind: SpotKind::Barrel }]; w.districts.len()];
+    let mut off = w.clone();
+    off.config.distance.as_mut().expect("[distance]").free = None;
+    assert_eq!(leisure::best_spot(&w, a, from), None, "on: a corner past the cap alone is no spot");
+    assert_eq!(leisure::best_spot(&off, a, from).map(|s| s.0), Some(far), "off (the base): walked to anyway");
+}
+
 fn env<T: std::str::FromStr>(k: &str) -> Option<T> {
     std::env::var(k).ok().and_then(|v| v.parse().ok())
 }

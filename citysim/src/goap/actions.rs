@@ -206,7 +206,7 @@ pub enum ActionKind {
 }
 
 /// Every action the planner may consider, in tie-break order.
-pub const PLANNABLE: [ActionKind; 87] = [
+pub const PLANNABLE: [ActionKind; 88] = [
     ActionKind::GoTo(LocationKey::Home),
     ActionKind::GoTo(LocationKey::Farm),
     ActionKind::GoTo(LocationKey::Market),
@@ -241,6 +241,8 @@ pub const PLANNABLE: [ActionKind; 87] = [
     // M14 V5/V29.
     ActionKind::GoTo(LocationKey::Chair),
     ActionKind::GoTo(LocationKey::DataBuyer),
+    // The island pass phase 2 (OPEN-171): a Mission's cot.
+    ActionKind::GoTo(LocationKey::Cot),
     ActionKind::EatFromInventory,
     ActionKind::EatAtHome,
     ActionKind::BuyFood,
@@ -909,7 +911,11 @@ impl PlanCtx {
                     dist.insert(key, o.manhattan(door));
                 }
             };
-            add(LocationKey::Hotel, hotel);
+            // The island pass phase 2 (OPEN-171): a cot is a `Cot`, a Hotel a
+            // `Hotel` (off, both are `Hotel`).
+            let cot = crate::systems::distance::free(world).is_some()
+                && hotel.is_some_and(|h| crate::systems::charity::is_mission(world, h));
+            add(if cot { LocationKey::Cot } else { LocationKey::Hotel }, hotel);
             add(LocationKey::Squat, squat.or(derelict_target));
             // M13 D29: the bound seller (a Garage, a Market for a pack).
             // M13 D38: a dealer's deal Bar too.
@@ -1353,7 +1359,7 @@ impl ActionKind {
                 (at(LocationKey::Home) && !ctx.holes_up)
                     || (ctx.homeless && !ctx.hotel_available && !ctx.squatter && at(LocationKey::Street))
                     || (ctx.holes_up && at(LocationKey::Hideout))
-                    || (ws.checked_in && at(LocationKey::Hotel))
+                    || (ws.checked_in && (at(LocationKey::Hotel) || at(LocationKey::Cot)))
                     || (ctx.squatter && at(LocationKey::Squat))
                     // L1: the Hideout nearer than Home; lying down where one stands.
                     || (ctx.hideout_bed && at(LocationKey::Hideout))
@@ -1472,7 +1478,9 @@ impl ActionKind {
             ActionKind::CarryCorpse => at(LocationKey::CorpseTile) && ws.known_corpse && !ws.carrying_corpse,
             ActionKind::BuryCorpse => at(LocationKey::Cemetery) && ws.carrying_corpse,
             ActionKind::Register => at(LocationKey::Hall) && !ws.founded && ctx.can_found,
-            ActionKind::CheckIn => at(LocationKey::Hotel) && ctx.hotel_available && !ws.checked_in,
+            ActionKind::CheckIn => {
+                (at(LocationKey::Hotel) || at(LocationKey::Cot)) && ctx.hotel_available && !ws.checked_in
+            }
             ActionKind::Occupy => {
                 (at(LocationKey::Squat) || at(LocationKey::TargetHome))
                     && ctx.squat_ok
@@ -1544,7 +1552,10 @@ impl ActionKind {
             ActionKind::CarryCorpse => ctx.corpse_target,
             ActionKind::BuryCorpse => ctx.corpse_target && ctx.dist.contains_key(&LocationKey::Cemetery),
             ActionKind::Register => ctx.can_found && ctx.dist.contains_key(&LocationKey::Hall),
-            ActionKind::CheckIn => ctx.hotel_available && ctx.dist.contains_key(&LocationKey::Hotel),
+            ActionKind::CheckIn => {
+                ctx.hotel_available
+                    && (ctx.dist.contains_key(&LocationKey::Hotel) || ctx.dist.contains_key(&LocationKey::Cot))
+            }
             ActionKind::Occupy => ctx.squat_ok,
             _ => true,
         }

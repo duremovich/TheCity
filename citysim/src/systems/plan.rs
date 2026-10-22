@@ -603,10 +603,12 @@ fn bed_of(world: &World, id: EntityId, plan: &Plan) -> Option<EntityId> {
     if sleeps && has(ActionKind::GoTo(LocationKey::Hideout)) {
         return world.resolve_building(id, LocationKey::Hideout, None);
     }
-    if has(ActionKind::CheckIn) || (sleeps && has(ActionKind::GoTo(LocationKey::Hotel))) {
-        let target =
-            plan.steps.iter().find(|s| s.action == ActionKind::GoTo(LocationKey::Hotel)).and_then(|s| s.target);
-        return world.resolve_building(id, LocationKey::Hotel, target);
+    // The island pass phase 2 (OPEN-171): a cot's walk is `GoTo(Cot)`.
+    let cot = has(ActionKind::GoTo(LocationKey::Cot));
+    if has(ActionKind::CheckIn) || (sleeps && (cot || has(ActionKind::GoTo(LocationKey::Hotel)))) {
+        let key = if cot { LocationKey::Cot } else { LocationKey::Hotel };
+        let target = plan.steps.iter().find(|s| s.action == ActionKind::GoTo(key)).and_then(|s| s.target);
+        return world.resolve_building(id, key, target);
     }
     None
 }

@@ -66,8 +66,11 @@ fn test_best_spot_is_the_home_when_the_spouse_is_in() {
         p.tile = door;
         p.building = None;
     }
-    let (spot, _) = leisure::best_spot_kind(&off, a, door).expect("a spot");
-    assert!(!matches!(spot.kind, SpotKind::Home(_)), "no Home spot off");
+    // The island pass phase 2: with no corner within `[distance.free]
+    // spot_cap_ticks` of this door there is no spot at all (the base took
+    // the nearest corner at any distance); either way, no Home.
+    let got = leisure::best_spot_kind(&off, a, door);
+    assert!(got.is_none_or(|(spot, _)| !matches!(spot.kind, SpotKind::Home(_))), "no Home spot off");
     assert!(household::home_spots(&off, a, door, 999, true).is_empty());
 }
 

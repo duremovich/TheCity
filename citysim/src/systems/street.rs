@@ -191,6 +191,12 @@ pub fn hotel_for(world: &World, agent: EntityId) -> Option<EntityId> {
     // L1: saving for a bed means walking to one (the two Sump Hotels sat
     // past 48 tiles from most of the street).
     let reach = world.config.street.hotel_reach.max(world.config.life.hotel_reach_homeless);
+    // The island pass phase 2 (`[distance.free]`): the cots and the beds it
+    // can pay for in reach, by `distance::pick` (the travel estimate, the
+    // cot's offer `cot_bed_ticks`, the cap `hotel_cap_ticks`).
+    if let Some(f) = crate::systems::distance::free(world) {
+        return bed_out(world, agent, from, reach, coins, f);
+    }
     // Real economy E27: a Mission's cot (price 0) within reach comes first.
     let cot = nearest_passing(world, BuildingKind::Mission, from, reach, |m| {
         crate::systems::charity::is_cot_house(world, m) && free_beds_for(world, m, agent) > 0
@@ -201,6 +207,46 @@ pub fn hotel_for(world: &World, agent: EntityId) -> Option<EntityId> {
     nearest_passing(world, BuildingKind::Hotel, from, reach, |h| {
         is_hotel(world, h) && hotel_price(world, h) <= coins && free_beds_for(world, h, agent) > 0
     })
+}
+
+/// The island pass phase 2: [`hotel_for`]'s pick with `[distance.free]`
+/// on: each Mission cot and Hotel whose door is within `reach` tiles, by
+/// `distance::pick`'s order (within `hotel_cap_ticks` the least travel
+/// less the offer, a cot's `cot_bed_ticks`, then the lower id; past it the
+/// nearest), the bed tests run in that order until one passes (the bed
+/// count reads every booking): the pick over the passing set.
+fn bed_out(
+    world: &World,
+    agent: EntityId,
+    from: TilePos,
+    reach: u32,
+    coins: i64,
+    f: &crate::config::FreeDistanceCfg,
+) -> Option<EntityId> {
+    let mut within: Vec<(i64, EntityId)> = Vec::new();
+    let mut past: Vec<(Tick, EntityId)> = Vec::new();
+    for kind in [BuildingKind::Mission, BuildingKind::Hotel] {
+        for &b in world.buildings_of_kind(kind) {
+            let Some(d) = door_of(world, b).filter(|d| d.manhattan(from) <= reach) else { continue };
+            let t = crate::systems::distance::travel(world, from, d);
+            let offer = if kind == BuildingKind::Mission { f.cot_bed_ticks as i64 } else { 0 };
+            if t <= f.hotel_cap_ticks {
+                within.push((t as i64 - offer, b));
+            } else {
+                past.push((t, b));
+            }
+        }
+    }
+    within.sort_unstable();
+    past.sort_unstable();
+    let pass = |b: EntityId| {
+        if crate::systems::charity::is_mission(world, b) {
+            crate::systems::charity::is_cot_house(world, b) && free_beds_for(world, b, agent) > 0
+        } else {
+            is_hotel(world, b) && hotel_price(world, b) <= coins && free_beds_for(world, b, agent) > 0
+        }
+    };
+    within.into_iter().map(|(_, b)| b).chain(past.into_iter().map(|(_, b)| b)).find(|&b| pass(b))
 }
 
 /// The building of `kind` with the least `(door distance from from, id)`

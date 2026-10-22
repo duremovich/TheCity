@@ -19,6 +19,21 @@
 //! `life::hideout_bed`, which `plan::bed_of` reserves). The hangout, the
 //! Hotel and the move-nearer pressure are phases 2 and 3.
 //!
+//! Phase 2 (`[distance.free]`, `CITYSIM_DISTANCE2_OFF=1` drops it): the
+//! HangOut spot (`leisure::best_spot_kind`, the think's nearest spot, the
+//! Socialise HangOut) is scored by this travel and dropped past
+//! `spot_cap_ticks`; with none within there is no spot (a discretionary
+//! hour is not walked for: the own Home stays, as it never was capped).
+//! Tonight's bed out for the homeless (`street::hotel_for`) is a
+//! Mission's cot or a Hotel bed by [`pick`] (the cot's offer
+//! `cot_bed_ticks`, the cap `hotel_cap_ticks`), and a cot is walked to as
+//! `LocationKey::Cot`, never as a "Hotel" (OPEN-171).
+//!
+//! Phase 2's Statistical mirror: none needed. A Statistical body takes
+//! no HangOut walk and books no bed by plan (the evening and the night are
+//! the table's, off camera; `leisure::stat_daily` reads the paid venues
+//! only, whose walk cap `[leisure] venue_walk_cap_ticks` is unchanged).
+//!
 //! Statistical mirror: none needed. The job and housing picks are
 //! tier-blind (a Statistical adult is hired and housed by the same code),
 //! so the cap reaches both tiers alike; the Hideout bed is a Full or Coarse
@@ -39,6 +54,12 @@ pub fn on(world: &World) -> bool {
 /// The travel estimate in ticks from `from` to `to` (see the module).
 pub fn travel(world: &World, from: TilePos, to: TilePos) -> Tick {
     crate::systems::transit::commute_ticks(world, from, to)
+}
+
+/// The island pass phase 2's `[distance.free]` (the free-time spot and
+/// the Hotel), `None` off (either switch).
+pub fn free(world: &World) -> Option<&crate::config::FreeDistanceCfg> {
+    world.config.distance.as_ref().and_then(|d| d.free.as_ref())
 }
 
 /// The job's cap, `None` off.
