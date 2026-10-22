@@ -1,8 +1,8 @@
 //! The pre-view pass phase 6 (docs/PREVIEW_PASS.md § 0 P9, P13-P16; OPEN-118,
 //! OPEN-128; `systems/leaders.rs`): the leader's visible half. Each test is
-//! a seeded world (the shipped seed-42 city) and one mechanism, with
-//! `[leaders]` on and its control off (the base) where the base differs: a
-//! body leader's protection is collected on his round, in person, only from
+//! a seeded world (the shipped seed-42 city) and one mechanism (each
+//! failed on the base; the switch retired at the island pass phase 0,
+//! OPEN-174): a body leader's protection is collected on his round, in person, only from
 //! an owner there (the base paid it at midnight); an order chosen waits for
 //! a lieutenant at court, is walked to one past the wait, and goes by word
 //! past the cap (a raid slips, it never vanishes); a Statistical leader's
@@ -20,18 +20,12 @@ use citysim::{TICKS_PER_DAY, TICKS_PER_HOUR};
 use common::set_coins;
 
 /// The shipped seed-42 city on the first day a gang has a free leader and a
-/// second free member, at 10:00 (nobody's court due), run once per switch
-/// and shared as a clone.
-fn city(on: bool) -> World {
-    static ON: std::sync::OnceLock<World> = std::sync::OnceLock::new();
-    static OFF: std::sync::OnceLock<World> = std::sync::OnceLock::new();
-    let cell = if on { &ON } else { &OFF };
-    cell.get_or_init(|| {
-        let mut cfg = Config::load();
-        if !on {
-            cfg.leaders = None;
-        }
-        let mut w = World::new(42, cfg);
+/// second free member, at 10:00 (nobody's court due), run once and shared
+/// as a clone.
+fn city() -> World {
+    static CITY: std::sync::OnceLock<World> = std::sync::OnceLock::new();
+    CITY.get_or_init(|| {
+        let mut w = World::new(42, Config::load());
         w.run_ticks(10 * TICKS_PER_HOUR);
         for _ in 0..30 {
             if led(&w).is_some() {
@@ -128,8 +122,8 @@ fn business(w: &mut World, g: EntityId) -> (EntityId, EntityId) {
 /// business, and the ledger holds.
 #[test]
 fn test_round_collects_protection_in_person_only_from_the_owner_there() {
-    let midnight_paid = |on: bool| -> (World, EntityId, EntityId, EntityId, EntityId, u64) {
-        let mut w = city(on);
+    let midnight_paid = || -> (World, EntityId, EntityId, EntityId, EntityId, u64) {
+        let mut w = city();
         let (g, l, _) = led_gang(&mut w);
         let (b, owner) = business(&mut w, g);
         let weekly = w.config.leverage.protection_weekly;
@@ -151,9 +145,7 @@ fn test_round_collects_protection_in_person_only_from_the_owner_there() {
         w.run_ticks(1);
         (w, g, l, b, owner, id)
     };
-    let (w, _, _, _, _, id) = midnight_paid(false);
-    assert_eq!(w.coercions[&id].paid, 2, "base: the week paid at midnight");
-    let (mut w, g, l, b, owner, id) = midnight_paid(true);
+    let (mut w, g, l, b, owner, id) = midnight_paid();
     assert!(leaders::collects(&w, g), "a body leader collects in person");
     assert_eq!(w.coercions[&id].paid, 1, "on: midnight pays no body leader's protection");
     assert_eq!(w.coercions[&id].status, CoercionStatus::Active, "the week stays owed");
@@ -185,13 +177,10 @@ fn raid_order(decided: u64) -> PendingOrder {
 
 /// P15: an order held for the giving leaves the members on the old one; at
 /// court, with the lieutenant there, it is given in person and in force
-/// (the raid's muster timed from then). Off, nothing is held (the base).
+/// (the raid's muster timed from then; the base held nothing).
 #[test]
 fn test_order_waits_for_a_lieutenant_at_court() {
-    let mut off = city(false);
-    let (g0, _, _) = led_gang(&mut off);
-    assert!(!leaders::in_person(&off, g0), "off: an order is in force the moment it is chosen");
-    let mut w = city(true);
+    let mut w = city();
     let (g, l, lt) = led_gang(&mut w);
     assert!(leaders::in_person(&w, g), "a body leader with a lieutenant gives orders in person");
     let old = w.comp::<Gang>(g).expect("gang").order;
@@ -220,7 +209,7 @@ fn test_order_waits_for_a_lieutenant_at_court() {
 /// beside him; past the cap it goes by word: a raid slips, never vanishes.
 #[test]
 fn test_order_walked_to_the_lieutenant_then_by_word() {
-    let mut w = city(true);
+    let mut w = city();
     let (g, l, lt) = led_gang(&mut w);
     let c = w.config.leaders.clone().expect("[leaders]");
     let hideout = w.hideout_of(g).expect("hideout");
@@ -257,7 +246,7 @@ fn test_order_walked_to_the_lieutenant_then_by_word() {
 /// person; one held for him is put in force at once.
 #[test]
 fn test_statistical_leader_order_in_force_at_once() {
-    let mut w = city(true);
+    let mut w = city();
     let (g, l, _) = led_gang(&mut w);
     let now = w.tick;
     leaders::hold(&mut w, g, raid_order(now));
@@ -271,7 +260,7 @@ fn test_statistical_leader_order_in_force_at_once() {
 /// handed to him in person.
 #[test]
 fn test_take_handed_to_the_leader_at_court() {
-    let mut w = city(true);
+    let mut w = city();
     let (g, l, m) = led_gang(&mut w);
     let hideout = w.hideout_of(g).expect("hideout");
     w.enter_building(m, hideout);
@@ -291,7 +280,7 @@ fn test_take_handed_to_the_leader_at_court() {
 /// the ledger holds.
 #[test]
 fn test_staff_on_shift_pay_the_week_when_the_owner_is_away() {
-    let mut w = city(true);
+    let mut w = city();
     // The clerk works a 0-1440 shift and rests one day in seven (the shift key
     // runs a day behind the clock here): start the probe on a workday, whatever
     // day the shared city reached (a table or tuning change moves the date).

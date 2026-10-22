@@ -1,7 +1,8 @@
 //! The pre-view pass phase 4 (docs/PREVIEW_PASS.md § 0 P3, P8; OPEN-119,
 //! OPEN-120, OPEN-154; `systems/presence.rs`): an encounter posts when, and
 //! only when, both bodies are present. Each test is a seeded world and one
-//! mechanism, with `[presence]` on and its control off (the base): the
+//! mechanism (each failed on the base; the switch retired at the island
+//! pass phase 0, OPEN-174): the
 //! super serves only the tenants there and awake; the pimp collects only
 //! from a worker at his pitch; an off-screen buyer's arms sale is made at
 //! the meeting with the dealer's body, the witnesses the bodies in the Bar;
@@ -16,12 +17,8 @@ use citysim::{
     BuildingKind, Config, EntityId, EventKind, ExecState, Job, Pitch, Role, World, TICKS_PER_DAY, TICKS_PER_HOUR,
 };
 
-fn city(presence: bool) -> World {
-    let mut cfg = Config::load();
-    if !presence {
-        cfg.presence = None;
-    }
-    World::new(42, cfg)
+fn city() -> World {
+    World::new(42, Config::load())
 }
 
 fn jobs2(w: &World) -> citysim::stats::Jobs2Cols {
@@ -45,8 +42,8 @@ fn stand(w: &mut World, who: EntityId, tile: citysim::TilePos) {
 /// served every adult resident wherever he was).
 #[test]
 fn test_super_serves_only_a_tenant_present_and_awake() {
-    let served = |presence: bool| -> (bool, bool, bool) {
-        let mut w = city(presence);
+    let served = || -> (bool, bool, bool) {
+        let mut w = city();
         w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
         let role = w.config.trade_role("super").expect("the super trade");
         let s = w
@@ -79,12 +76,10 @@ fn test_super_serves_only_a_tenant_present_and_awake() {
         let met = |x: EntityId| service::regulars_of(&w, s).iter().any(|r| r.who == x);
         (met(here), met(away), met(sleeper))
     };
-    let (here, away, sleeper) = served(true);
+    let (here, away, sleeper) = served();
     assert!(here, "the tenant at home and awake is served");
     assert!(!away, "the tenant out of the Block is not served");
     assert!(!sleeper, "the tenant asleep is not served");
-    let (_, away_off, sleeper_off) = served(false);
-    assert!(away_off && sleeper_off, "the base served the absent and the sleeping tenant");
 }
 
 /// A street pitch for `owner` at his tile, under pimp `m` (enlisted in the
@@ -130,8 +125,8 @@ fn pimped_pitch(w: &mut World, take: i64) -> (EntityId, EntityId, Pitch) {
 /// worker.
 #[test]
 fn test_pimp_collects_only_from_a_worker_at_his_pitch() {
-    let collect = |presence: bool, at_pitch: bool| -> (u32, u32, i64) {
-        let mut w = city(presence);
+    let collect = |at_pitch: bool| -> (u32, u32, i64) {
+        let mut w = city();
         let (o, m, p) = pimped_pitch(&mut w, 100);
         if at_pitch {
             stand(&mut w, o, p.spot);
@@ -149,13 +144,11 @@ fn test_pimp_collects_only_from_a_worker_at_his_pitch() {
             purse - common::coins(&w, o),
         )
     };
-    let (n, cut, _) = collect(true, false);
+    let (n, cut, _) = collect(false);
     assert_eq!((n, cut), (0, 0), "an absent worker: no collection, no cut");
-    let (n, cut, paid) = collect(true, true);
+    let (n, cut, paid) = collect(true);
     assert_eq!((n, cut), (1, 1), "the worker at his pitch: collected, the cut taken at the meeting");
     assert!(paid > 0, "the cut moved from the worker's purse at the meeting");
-    let (n_off, _, _) = collect(false, false);
-    assert_eq!(n_off, 1, "the base collected from the absent worker");
 }
 
 /// P3, OPEN-119: an off-screen buyer's weapon from a dealer who is a body
@@ -165,8 +158,8 @@ fn test_pimp_collects_only_from_a_worker_at_his_pitch() {
 /// the dealer asleep at home, the Bar's bodies none the wiser.
 #[test]
 fn test_arms_sale_posts_at_the_meeting_with_the_bodies_present() {
-    let sale = |presence: bool| -> (Option<u64>, bool, u64) {
-        let mut w = city(presence);
+    let sale = || -> (Option<u64>, bool, u64) {
+        let mut w = city();
         w.run_ticks(TICKS_PER_DAY + 1);
         w.config.weapons.armoury_per_member = 0.0;
         w.config.crime.witness_base = 1.0;
@@ -213,12 +206,9 @@ fn test_arms_sale_posts_at_the_meeting_with_the_bodies_present() {
             .is_some_and(|m| m.entries.iter().any(|e| e.kind == MemoryKind::SawCrime && e.subject == Some(d)));
         (sold, seen, (booked_at / TICKS_PER_HOUR + 3) * TICKS_PER_HOUR)
     };
-    let (sold, seen, meeting) = sale(true);
+    let (sold, seen, meeting) = sale();
     assert_eq!(sold, Some(meeting), "sold at the meeting hour, with the dealer's body in the Bar");
     assert!(seen, "the body in the Bar witnessed the sale");
-    let (sold_off, seen_off, _) = sale(false);
-    assert!(sold_off.is_some_and(|t| t < meeting), "the base sold at the booking");
-    assert!(!seen_off, "the base's sale had no witness in the Bar");
 }
 
 /// P8: a body sweeper's shift is a round of at least two street stops of
@@ -226,8 +216,8 @@ fn test_arms_sale_posts_at_the_meeting_with_the_bodies_present() {
 /// shift closes. The base swept one stand to the shift's end.
 #[test]
 fn test_sweeper_walks_street_stops_and_ends_at_the_recycler() {
-    let walk = |presence: bool| -> (usize, bool, bool) {
-        let mut w = city(presence);
+    let walk = || -> (usize, bool, bool) {
+        let mut w = city();
         w.run_ticks(TICKS_PER_DAY + 2 * TICKS_PER_HOUR);
         let s = w
             .citizens()
@@ -275,14 +265,11 @@ fn test_sweeper_walks_street_stops_and_ends_at_the_recycler() {
             w.comp::<Job>(s).is_some_and(|j| j.last_shift_day == Some(job.shift_key_at(day0 + u64::from(start))));
         (stops.len(), at_post_end, closed)
     };
-    let (stops, at_post, closed) = walk(true);
+    let (stops, at_post, closed) = walk();
     eprintln!("sweeper: {stops} street stops, at the Recycler at the end {at_post}, closed {closed}");
     assert!(stops >= 2, "the round swept {stops} street stops");
     assert!(at_post, "the shift ends at the Recycler");
     assert!(closed, "the shift closed (the wage) at the post");
-    let (stops_off, at_post_off, _) = walk(false);
-    eprintln!("base: {stops_off} street stops, at the Recycler {at_post_off}");
-    assert!(stops_off <= 1 && !at_post_off, "the base swept one stand on the street");
 }
 
 /// OPEN-154: every round's stops lie within `[presence] round_reach_tiles`
@@ -290,8 +277,8 @@ fn test_sweeper_walks_street_stops_and_ends_at_the_recycler() {
 /// the list a body walks and the Statistical super is credited).
 #[test]
 fn test_round_stays_within_its_reach() {
-    let far = |presence: bool| -> (u32, usize) {
-        let mut w = city(presence);
+    let far = || -> (u32, usize) {
+        let mut w = city();
         w.run_ticks(TICKS_PER_DAY + 8 * TICKS_PER_HOUR);
         let mut worst = 0;
         let mut rounds = 0;
@@ -319,24 +306,21 @@ fn test_round_stays_within_its_reach() {
         (worst, rounds)
     };
     let reach = Config::load().presence.expect("[presence]").round_reach_tiles;
-    let (worst, rounds) = far(true);
+    let (worst, rounds) = far();
     eprintln!("rounds {rounds}: the farthest stop {worst} tiles from its post (reach {reach})");
     assert!(rounds > 0, "some round has stops");
     assert!(worst <= reach, "a stop {worst} tiles from the post");
-    let (worst_off, _) = far(false);
-    eprintln!("base: the farthest stop {worst_off} tiles");
-    assert!(worst_off > reach, "the base's rounds reach past it");
 }
 
 /// The phase's device rows, printed (tier: diag): seed 42 x 15 days with
-/// `[presence]` on and off (the base): each body super's walking minutes a
+/// `[presence]`: each body super's walking minutes a
 /// shift (p50/p90/max), and the sweepers' "nearer work" re-housings (lines
 /// and nights; phase 1 read 6-8 of 15 nights).
 #[test]
 #[ignore = "tier: diag"]
 fn diag_presence_device_rows() {
-    fn rows(presence: bool) -> String {
-        let mut w = city(presence);
+    fn rows() -> String {
+        let mut w = city();
         let role = w.config.trade_role("super").expect("the super trade");
         let mut walk: std::collections::BTreeMap<(EntityId, i64), u32> = Default::default();
         let mut supers: Vec<EntityId> = Vec::new();
@@ -411,11 +395,5 @@ fn diag_presence_device_rows() {
             nights.len()
         )
     }
-    let (on, off) = std::thread::scope(|sc| {
-        let on = sc.spawn(|| rows(true));
-        let off = sc.spawn(|| rows(false));
-        (on.join().expect("on"), off.join().expect("off"))
-    });
-    eprintln!("FINDING presence on: {on}");
-    eprintln!("FINDING presence off: {off}");
+    eprintln!("FINDING presence: {}", rows());
 }

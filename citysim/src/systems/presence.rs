@@ -1,7 +1,7 @@
 //! The pre-view pass phase 4 (docs/PREVIEW_PASS.md § 0 P3, P5, P8; § 2
 //! "settlement by presence"; OPEN-119, OPEN-120, OPEN-154): **an encounter
 //! posts when, and only when, both bodies are present**. Under `[presence]`
-//! (`None` with `CITYSIM_PRESENCE_OFF=1`, every entry point the old path).
+//! (`None`: every entry point the old path).
 //!
 //! A Full or Coarse party is present at a place when its body stands in it
 //! and is awake ([`body_at`]). A Statistical party has no body: it is drawn
@@ -26,7 +26,7 @@ use crate::world::World;
 /// The draw purposes (`econ::hash_unit`, unique to their sites).
 pub const PURPOSE_HOME: u64 = 0x5052_0001;
 
-/// `[presence]` is on (not `CITYSIM_PRESENCE_OFF`).
+/// `[presence]` is on.
 pub fn on(world: &World) -> bool {
     world.config.presence.is_some()
 }

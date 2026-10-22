@@ -15,10 +15,6 @@ pub struct Config {
     /// Not saved: a loaded world re-resolves it on this machine.
     #[serde(skip, default = "Config::assets_dir_or_empty")]
     pub assets_dir: PathBuf,
-    /// The pre-view pass phase 0's switches in flight (docs/PREVIEW_PASS.md
-    /// § 3; doctrine 6): env only, never saved, retired when the phase lands.
-    #[serde(skip)]
-    pub preview_off: PreviewOff,
     pub world: WorldCfg,
     pub buildings: BuildingsCfg,
     pub needs: NeedsCfg,
@@ -320,24 +316,23 @@ pub struct Config {
     pub roles: std::collections::BTreeMap<String, RoleCfg>,
     /// The pre-view pass phase 2 (docs/PREVIEW_PASS.md § 1, OPEN-137): the
     /// visible shift's shapes (`systems/shift.rs`). `None` (not written into
-    /// a save) with `CITYSIM_STATIONS_OFF=1`: every shift the one block.
+    /// a save): every shift the one block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shift: Option<ShiftCfg>,
     /// The pre-view pass phase 4 (docs/PREVIEW_PASS.md § 0 P3, P8; OPEN-119,
     /// OPEN-120, OPEN-154): settlement by presence (`systems/presence.rs`).
-    /// `None` (not written into a save) with `CITYSIM_PRESENCE_OFF=1`.
+    /// `None` (not written into a save): encounters settle by link.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub presence: Option<PresenceCfg>,
     /// The pre-view pass phase 5 (docs/PREVIEW_PASS.md § 0 P10-P12; OPEN-139,
     /// OPEN-115): the 20k legs (segments, the exec's ride home, the bed by
     /// ride, the escort van, the fares). `None` (not written into a save)
-    /// with `CITYSIM_LEGS_OFF=1`, which also drops the map's `L+` lines.
+    /// also drops the map's `L+` lines.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub legs: Option<LegsCfg>,
     /// The pre-view pass phase 6 (docs/PREVIEW_PASS.md § 0 P9, P13-P15;
     /// OPEN-118, OPEN-128): the leader's round, court and orders given in
-    /// person (`systems/leaders.rs`). `None` (not written into a save) with
-    /// `CITYSIM_LEADERS_OFF=1`.
+    /// person (`systems/leaders.rs`). `None` (not written into a save).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub leaders: Option<LeadersCfg>,
 }
@@ -454,7 +449,7 @@ pub enum ShiftShape {
 }
 
 /// The pre-view pass phase 3 `[shift.haul]` (docs/PREVIEW_PASS.md § 1).
-/// `None` with `CITYSIM_HAUL_COUNTER_OFF=1`. Every value a placeholder.
+/// `None` drops the shape. Every value a placeholder.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HaulCfg {
     /// Units a trip carries (the device row; pay and output do not move, P5).
@@ -475,7 +470,7 @@ pub struct HaulCfg {
 }
 
 /// The pre-view pass phase 3 `[shift.counter]` (docs/PREVIEW_PASS.md § 1).
-/// `None` with `CITYSIM_HAUL_COUNTER_OFF=1`. Every value a placeholder.
+/// `None` drops the shape. Every value a placeholder.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CounterCfg {
     /// An off-screen visit to a venue with a counter body is served in the
@@ -2440,8 +2435,7 @@ impl OutsideCfg {
 }
 
 impl Config {
-    /// The pre-view pass phase 3 off (`CITYSIM_HAUL_COUNTER_OFF=1`, or
-    /// `[shift]` gone): no `haul` or `counter` shape anywhere: `[shift.haul]`
+    /// The pre-view pass phase 3's shapes off (`[shift]` gone): no `haul` or `counter` shape anywhere: `[shift.haul]`
     /// and `[shift.counter]` (its `roles` with it) dropped, every trade row's
     /// `shape` cleared: each role back on its `[shift.roles]` shape.
     pub fn drop_haul_counter(&mut self) {
@@ -2878,7 +2872,7 @@ pub struct TradeCfg {
     pub station_block_max: u16,
     /// The pre-view pass phase 3 (§ 1): the row's shift shape when it is not
     /// its `duty`'s (`haul`, `counter`); the duty keeps its hiring and its
-    /// Statistical path. `None` with `CITYSIM_HAUL_COUNTER_OFF=1`.
+    /// Statistical path. `None` drops it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shape: Option<ShiftShape>,
     /// Jobs & lives phase 1 (§ 1): the row exists only with `[jobs2]
@@ -4429,55 +4423,6 @@ fn default_offer_skill() -> f32 {
 }
 fn default_p_spouse() -> f64 {
     0.2
-}
-
-/// The pre-view pass phase 0's off switches (`Config::preview_off`; true is
-/// off, the base city).
-#[derive(Clone, Debug, Default)]
-pub struct PreviewOff {
-    /// OPEN-138 off (`CITYSIM_IDLE_FIX_OFF=1`): a goal whose state already
-    /// holds installs an empty plan again (the silent idle freeze).
-    pub idle_fix: bool,
-    /// OPEN-142 off (`CITYSIM_IMPLANT_FIX_OFF=1`): an implant sale is checked
-    /// only after the install's wait, and a lost sale is retried at once.
-    pub implant_fix: bool,
-    /// The pre-view pass phase 2, OPEN-137 off (`CITYSIM_STATIONS_OFF=1`):
-    /// `[shift]` is dropped at load (`Config::shift` `None`), every shift
-    /// the one block at one tile.
-    pub stations: bool,
-    /// The pre-view pass phase 3 off (`CITYSIM_HAUL_COUNTER_OFF=1`): the
-    /// `haul` and `counter` shapes dropped at load (`[shift.haul]`,
-    /// `[shift.counter]` and every row's `shape` `None`; a `counter` role
-    /// back on `stations`).
-    pub haul_counter: bool,
-    /// The pre-view pass phase 4 off (`CITYSIM_PRESENCE_OFF=1`): `[presence]`
-    /// dropped at load; encounters settle by link as before.
-    pub presence: bool,
-    /// The pre-view pass phase 6 off (`CITYSIM_LEADERS_OFF=1`): `[leaders]`
-    /// dropped at load; protection is collected at midnight and an order is
-    /// in force the moment it is chosen, as before.
-    pub leaders: bool,
-    /// The pre-view pass phase 5 off (`CITYSIM_LEGS_OFF=1`; `Config::legs` `None`).
-    pub legs: bool,
-    /// The pre-view pass phase 1 off (`CITYSIM_HOUSING_FIX_OFF=1`).
-    pub housing_fix: bool,
-}
-
-impl PreviewOff {
-    /// Any pass switch is off: the city is the base city, and the Statistical
-    /// table is the base table (`assets/stat_table_base.toml`, the pass gate's
-    /// regen kept apart so the composed off identity holds; retires with the
-    /// switches).
-    pub fn any(&self) -> bool {
-        self.idle_fix
-            || self.implant_fix
-            || self.stations
-            || self.haul_counter
-            || self.presence
-            || self.leaders
-            || self.legs
-            || self.housing_fix
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -7852,14 +7797,6 @@ pub struct LifeCfg {
     /// exec_home_spare` beds and the result printed (never an eviction).
     #[serde(skip_serializing_if = "is_zero_f32_cfg")]
     pub exec_home_spare: f32,
-    /// The pre-view pass phase 1 (OPEN-140, docs/PREVIEW_PASS.md § 2):
-    /// the housing churn fixed: one `Housed` writer per body per midnight,
-    /// "moved nearer work" only for an employed mover whose own leg
-    /// shrinks, a body moved in walks to its new Home before it idles or
-    /// sleeps elsewhere, and a housed sleeper's "Hotel" is a Hotel. The
-    /// switch in flight (`CITYSIM_HOUSING_FIX_OFF=1`; off is not written).
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub housing_fix: bool,
 }
 
 impl Default for LifeCfg {
@@ -7969,7 +7906,6 @@ impl Default for LifeCfg {
             beg_cool_hours: 1,
             exec_home_tier: 0,
             exec_home_spare: 0.0,
-            housing_fix: false,
         }
     }
 }
@@ -8519,42 +8455,13 @@ impl Config {
         let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
         let mut cfg: Config = toml::from_str(&text).unwrap_or_else(|e| panic!("bad config {}: {e}", path.display()));
         cfg.assets_dir = assets_dir.to_path_buf();
-        // The pre-view pass phase 0's switches in flight.
-        cfg.preview_off.idle_fix = std::env::var("CITYSIM_IDLE_FIX_OFF").is_ok_and(|v| v == "1");
-        cfg.preview_off.implant_fix = std::env::var("CITYSIM_IMPLANT_FIX_OFF").is_ok_and(|v| v == "1");
-        // The pre-view pass phase 2 (OPEN-137): the shift shapes' switch.
-        cfg.preview_off.stations = std::env::var("CITYSIM_STATIONS_OFF").is_ok_and(|v| v == "1");
-        if cfg.preview_off.stations {
-            cfg.shift = None;
-        }
-        // The pre-view pass phase 3 (OPEN-121, OPEN-141, OPEN-145): the haul
-        // and counter shapes' switch.
-        cfg.preview_off.haul_counter = std::env::var("CITYSIM_HAUL_COUNTER_OFF").is_ok_and(|v| v == "1");
-        if cfg.preview_off.haul_counter || cfg.shift.is_none() {
+        // The pre-view pass's env switches retired at the island pass
+        // phase 0 (OPEN-174), as the earlier milestones' did (OPEN-094);
+        // every section's config path stays (`[shift]`, `[presence]`,
+        // `[legs]`, `[leaders]`, `[hitmarket] enabled` and the rest). With
+        // `[shift]` gone, its haul and counter shapes go with it.
+        if cfg.shift.is_none() {
             cfg.drop_haul_counter();
-        }
-        // The pre-view pass phase 4 (OPEN-119, OPEN-120, OPEN-154): settlement by presence.
-        cfg.preview_off.presence = std::env::var("CITYSIM_PRESENCE_OFF").is_ok_and(|v| v == "1");
-        if cfg.preview_off.presence {
-            cfg.presence = None;
-        }
-        // The pre-view pass phase 5 (OPEN-139, OPEN-115): the 20k legs.
-        if std::env::var("CITYSIM_LEGS_OFF").is_ok_and(|v| v == "1") {
-            cfg.legs = None;
-            cfg.preview_off.legs = true;
-        }
-        // The pre-view pass phase 6 (OPEN-118, OPEN-128): the leaders.
-        cfg.preview_off.leaders = std::env::var("CITYSIM_LEADERS_OFF").is_ok_and(|v| v == "1");
-        if cfg.preview_off.leaders {
-            cfg.leaders = None;
-        }
-        // The earlier milestones' `CITYSIM_*_OFF` env switches retired in
-        // the pre-view pass (OPEN-094); every section's config path stays
-        // (`[hitmarket] enabled`, `[jobs2] enabled`, `[vice] chip` and the rest).
-        // The pre-view pass phase 1 (OPEN-140): the housing fix's A/B and identity device.
-        if std::env::var("CITYSIM_HOUSING_FIX_OFF").is_ok_and(|v| v == "1") {
-            cfg.life.housing_fix = false;
-            cfg.preview_off.housing_fix = true;
         }
         // Lives at work (D13): a config with `[lives] enabled = false` by any
         // path clears the milestone's sections, so the off save holds no

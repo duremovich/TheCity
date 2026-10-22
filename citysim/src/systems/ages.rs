@@ -429,10 +429,9 @@ fn kin(world: &mut World) {
         .collect();
     // OPEN-140: a corp exec works (no `Job`, an Hq): the take-in moved him
     // in with family and the relocation moved him back every midnight.
-    let fix = crate::systems::life::housing_fix(world);
-    let execs = if fix { crate::systems::classes::exec_set(world) } else { Default::default() };
+    let execs = crate::systems::classes::exec_set(world);
     for e in elders {
-        if fix && (execs.contains(&e) || crate::systems::life::housed_now(world, e)) {
+        if execs.contains(&e) || crate::systems::life::housed_now(world, e) {
             continue;
         }
         let Some(h) = kin_home(world, e) else { continue };

@@ -446,9 +446,7 @@ impl StatTable {
 /// false)`; the pre-M10 four-row table `(None, true)` (M10 D28); a v2 table
 /// with the wrong row count, or anything unparsable, panics.
 pub fn load_stat_table(config: &Config) -> (Option<StatTable>, bool) {
-    // The pre-view pass gate: the pass's regenerated table serves the pass;
-    // any switch off is the base city, with the base table.
-    let path = config.asset(if config.preview_off.any() { "stat_table_base.toml" } else { "stat_table.toml" });
+    let path = config.asset("stat_table.toml");
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (None, false),
@@ -1095,7 +1093,7 @@ pub struct World {
     /// Fixer, (holder, coins). Saved; written only when non-empty.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub fixer_owed: BTreeMap<EntityId, Vec<(EntityId, i64)>>,
-    /// The pre-view pass phase 1 (OPEN-140, `[life] housing_fix`): the
+    /// The pre-view pass phase 1 (OPEN-140, the housing churn): the
     /// bodies a `Housed` line named at this tick (the midnight's first
     /// move wins; `life::housed_now`). Not saved: only the tick that wrote
     /// it reads it.

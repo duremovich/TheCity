@@ -1,6 +1,6 @@
 //! The pre-view pass phase 6 (docs/PREVIEW_PASS.md § 0 P9, P13-P15;
 //! OPEN-118, OPEN-128): **the leader's visible half**, under `[leaders]`
-//! (`None` with `CITYSIM_LEADERS_OFF=1`, every entry point the old path).
+//! (`None`: every entry point the old path).
 //! It applies to a leader with a body (Full or Coarse, free, alive).
 //!
 //! **The round** (P13): from `round_hour` the leader's Lead plan walks the
@@ -59,7 +59,7 @@ use crate::world::World;
 pub const PURPOSE_OWNER: u64 = 0x4C44_0001;
 pub const PURPOSE_COURT: u64 = 0x4C44_0002;
 
-/// `[leaders]` is on (not `CITYSIM_LEADERS_OFF`).
+/// `[leaders]` is on.
 pub fn on(world: &World) -> bool {
     world.config.leaders.is_some()
 }

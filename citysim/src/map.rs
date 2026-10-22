@@ -713,7 +713,7 @@ impl Map {
         }
         if !self.lines.is_empty() {
             // The pre-view pass phase 5: an `L+` line is in flight, dropped
-            // with `[legs]` off (`CITYSIM_LEGS_OFF=1`).
+            // with `[legs]` absent.
             let keep = cfg.legs.is_some();
             cfg.transit.lines = self.lines.iter().filter(|l| keep || !l.in_flight).cloned().collect();
         }

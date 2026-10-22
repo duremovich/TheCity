@@ -51,17 +51,17 @@ const PURPOSE_SPOTS: u64 = 1;
 const PURPOSE_BLOCK: u64 = 2;
 const PURPOSE_BREAK: u64 = 3;
 
-/// `[shift]` is on (not `CITYSIM_STATIONS_OFF`).
+/// `[shift]` is on.
 pub fn on(world: &World) -> bool {
     world.config.shift.is_some()
 }
 
-/// The pre-view pass phase 3: `[shift.haul]` is on (not `CITYSIM_HAUL_COUNTER_OFF`).
+/// The pre-view pass phase 3: `[shift.haul]` is on.
 pub fn haul_on(world: &World) -> bool {
     world.config.shift.as_ref().is_some_and(|c| c.haul.is_some())
 }
 
-/// The pre-view pass phase 3: `[shift.counter]` is on (not `CITYSIM_HAUL_COUNTER_OFF`).
+/// The pre-view pass phase 3: `[shift.counter]` is on.
 pub fn counter_on(world: &World) -> bool {
     world.config.shift.as_ref().is_some_and(|c| c.counter.is_some())
 }

@@ -3850,7 +3850,7 @@ const CHECKS: &[Check] = &[
     // Not judged since the pre-view pass phase 5 (2026-10-21): d19 sweeper WalkHDay (a printed value, no bound).
     // `[legs] sweep_by_ride` (OPEN-156) reads the way back to the Recycler by the ride, so a shift begun far
     // from it is no longer the old stand on the beat (`sweep_stands`) but a commute to the Recycler (the round
-    // must end there, P8): 7.60 h/day with it, 6.23 with it off, 6.06 with `CITYSIM_LEGS_OFF`. The extra
+    // must end there, P8): 7.60 h/day with it, 6.23 with it off, 6.06 with `[legs]` off. The extra
     // travel minutes are the in-shift ones with no round route (the commute to the post, ridden or walked:
     // 44k -> 93k of +54k over the tier's sweepers; the walk to the first stop +4.6k, the way back +6.7k, the stops +1.2k). Moved for a
     // known reason, the bullet demoted, the bound not widened (CLAUDE.md doctrine 2).

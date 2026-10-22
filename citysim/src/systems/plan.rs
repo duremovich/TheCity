@@ -363,8 +363,7 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
         // the install's wait; it was retried at once after each 140-min
         // failure. The gang's install and a weapon are judged by their own steps.
         let refused = offer.as_ref().is_some_and(|o| {
-            !world.config.preview_off.implant_fix
-                && o.category != crate::systems::assets::ShopCategory::Install
+            o.category != crate::systems::assets::ShopCategory::Install
                 && o.pick.kind != crate::components::AssetKind::Weapon
                 && !o.pick.upgrade
                 && !crate::systems::assets::sale_ok(world, id, o.seller, &o.pick)
@@ -524,7 +523,7 @@ fn install(world: &mut World, id: EntityId, plan: Plan) {
     // savings) has nothing to plan. Its empty plan finished at once with no
     // cooldown and the goal won every think again: hours of standing still.
     // It cools like an unplannable goal, and the body backs off to the next.
-    if plan.steps.is_empty() && plan.goal != GoalKind::Idle && !world.config.preview_off.idle_fix {
+    if plan.steps.is_empty() && plan.goal != GoalKind::Idle {
         world.cool_goal(id, plan.goal);
         return;
     }

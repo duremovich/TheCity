@@ -741,23 +741,15 @@ fn test_refused_sale_cools_before_the_wait() {
     let b = w.comp::<Brain>(buyer).expect("brain");
     assert!(b.plan.is_none(), "no trip to a refused sale: {:?}", b.plan);
     assert_eq!(b.cooldowns.get(&citysim::GoalKind::Shop), Some(&(now + w.config.brain.goal_cooldown_ticks)));
-    // The step: planned with the check off (the base, which installs the
-    // trip and the pick), then the buyer set down inside the seller: with
-    // the check on, the BuyAsset cannot start (no 140 min on the table).
-    w.config.preview_off.implant_fix = true;
+    // The step: the pick held (as a plan made before the budget was spent
+    // would hold it) and the buyer set down inside the seller: the BuyAsset
+    // cannot start (no 140 min on the table).
     if let Some(b) = w.comp_mut::<Brain>(buyer) {
-        b.cooldowns.clear();
+        b.shop_pick = Some(offer.pick.clone());
     }
-    citysim::systems::plan::plan_for(&mut w, buyer, citysim::GoalKind::Shop);
-    assert!(
-        w.comp::<Brain>(buyer).is_some_and(|b| b.plan.is_some() && b.shop_pick.is_some()),
-        "the base plans the trip"
-    );
     w.leave_building(buyer);
     w.enter_building(buyer, offer.seller);
     let starts =
         |w: &World| citysim::exec::actions::can_start(w, buyer, citysim::ActionKind::BuyAsset, Some(offer.seller));
-    assert!(starts(&w), "check off: the step starts (and waits 140 min before the sale fails)");
-    w.config.preview_off.implant_fix = false;
     assert!(!starts(&w), "check on: a refused sale does not start");
 }

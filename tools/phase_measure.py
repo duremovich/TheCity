@@ -166,8 +166,9 @@ def csv_cols(path: Path):
     return rows[0], rows[1:]
 
 
-def off_compare(base: Path, cand: Path):
-    """Returns (identical, lines)."""
+def off_compare(base: Path, cand: Path, save_masks=()):
+    """Returns (identical, lines). Each `save_masks` regex is blanked in both saves (a known format change);
+    one that matches neither save is an error."""
     lines, ok = [], True
     eb, ec = (base / "events.tsv").read_bytes(), (cand / "events.tsv").read_bytes()
     # The `saved <path>` line names the run's own directory; drop it before comparing.
@@ -206,11 +207,19 @@ def off_compare(base: Path, cand: Path):
         # The saved stats history holds each day's wall-clock ticks_per_sec: noise, masked with the version.
         tps = re.compile(rb"ticks_per_sec:\s*[-\d.eE+]+")
         mask = lambda v: tps.sub(b"ticks_per_sec:_", pat.sub(b"save_version:_", v, count=1))
+        masked = []
+        for m in save_masks:
+            rx = re.compile(m.encode())
+            nb, nc = len(rx.findall(vb)), len(rx.findall(vc))
+            if nb + nc == 0:
+                die(f"--save-mask {m!r} matches neither save")
+            vb, vc = rx.sub(b"", vb), rx.sub(b"", vc)
+            masked.append(f"{m!r} x{nb} base, x{nc} cand")
         same = mask(vb) == mask(vc)
         ok &= same
         ver = f"save_version {mb.group(1).decode() if mb else '?'} -> {mc.group(1).decode() if mc else '?'}"
         lines.append(f"save {len(vb):,} B base, {len(vc):,} B cand: {'identical' if same else 'DIFFER'} "
-                     f"({ver} and ticks_per_sec masked)")
+                     f"({ver} and ticks_per_sec masked" + (f"; masked {', '.join(masked)}" if masked else "") + ")")
     return ok, lines
 
 
@@ -280,6 +289,10 @@ def main():
     ap.add_argument("--off-base", help="base for the off identity when it differs from --base (a switch spanning sub-phases, e.g. phase 4b against main before 4a); default --base")
     ap.add_argument("--off", action="append", default=[], metavar="VAR",
                     help="env var set to 1 for the off identity (repeatable); required unless --skip off")
+    ap.add_argument("--identity", action="store_true",
+                    help="the off identity with no variable set: a retirement or refactor that must not move the city (no --off)")
+    ap.add_argument("--save-mask", action="append", default=[], metavar="REGEX",
+                    help="blank this regex in both saves before the identity compare (a known save-format change; repeatable)")
     ap.add_argument("--arch", default="", help="comma list of shadow --lives archetypes to show")
     ap.add_argument("--cols", default="", help="comma list of report columns summed over the run")
     ap.add_argument("--events", default="", help="comma list of event kinds counted")
@@ -297,8 +310,10 @@ def main():
     skip = set(split(a.skip))
     if skip - {"off", "counters", "lives"}:
         die(f"--skip takes off,counters,lives; got {sorted(skip)}")
-    if "off" not in skip and not a.off:
-        die("--off VAR is required for the off identity (or --skip off)")
+    if "off" not in skip and not a.off and not a.identity:
+        die("--off VAR is required for the off identity (or --identity, or --skip off)")
+    if a.identity and a.off:
+        die("--identity runs with no switch; drop --off")
     for v in a.off:
         if not re.fullmatch(r"CITYSIM_[A-Z0-9_]+_OFF", v):
             die(f"--off {v}: expected a CITYSIM_*_OFF variable")
@@ -361,10 +376,10 @@ def main():
     status = 0
 
     if "off" not in skip:
-        md += [f"## Off identity ({', '.join(a.off)}=1 against {osha[:8]}{' with the same switches off' if a.base_off else ''}; seeds {a.off_seeds} x {a.off_days} d)", ""]
+        md += [f"## Off identity ({', '.join(a.off) + '=1' if a.off else 'no switch'} against {osha[:8]}{' with the same switches off' if a.base_off else ''}; seeds {a.off_seeds} x {a.off_days} d)", ""]
         all_ok = True
         for s in off_seeds:
-            ok, lines = off_compare(oroot / (f"offoff_{s}x{a.off_days}" if a.base_off else f"off_{s}x{a.off_days}"), out / f"off_{s}x{a.off_days}")
+            ok, lines = off_compare(oroot / (f"offoff_{s}x{a.off_days}" if a.base_off else f"off_{s}x{a.off_days}"), out / f"off_{s}x{a.off_days}", a.save_mask)
             all_ok &= ok
             md += [f"- seed {s}: **{'IDENTICAL' if ok else 'DIFFER'}**"] + [f"  - {l}" for l in lines]
         md += ["", f"OFF IDENTITY: {'IDENTICAL' if all_ok else 'DIFFER'}", ""]
