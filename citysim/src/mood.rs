@@ -104,6 +104,42 @@ fn litter_bias(world: &World, id: EntityId) -> f32 {
     -world.config.litter.mood * world.district(world.district_of(at)).litter
 }
 
+/// The island pass phase 3c (OPEN-177, `[mood.housing]`): the agent's Home
+/// as a flat bias on the mood target: `tier[tier] − crowd_w × min(excess,
+/// crowd_max) × factor − company`, the excess the residents a floor over
+/// `[buildings] home` capacity less 1 (a plain Block 0, a full bunk floor
+/// 4), the factor `inside_factor` / `below_factor` for company floors in a
+/// workplace (above it / below it: the coffin racks), else 1, `company` for
+/// any company bed. The homeless (and a squat, a derelict) read 0. Full and
+/// Statistical alike: the Home's state, no tier-specific input.
+pub fn housing_bias(world: &World, id: EntityId) -> f32 {
+    let Some(cfg) = world.config.mood.housing.as_ref() else { return 0.0 };
+    let Some(home) = world.comp::<crate::components::Household>(id).and_then(|h| h.home) else { return 0.0 };
+    let Some(b) = world.comp::<crate::components::Building>(home) else { return 0.0 };
+    if b.demolished || b.derelict {
+        return 0.0;
+    }
+    let mut bias = cfg.tier[usize::from(b.tier.min(2))];
+    let per_floor = world.residents_of(home).len() as f32 / f32::from(b.floors.max(1));
+    let plain = f32::from(world.config.buildings.for_kind(crate::components::BuildingKind::Home).capacity.max(1));
+    let excess = (per_floor / plain - 1.0).clamp(0.0, cfg.crowd_max);
+    if excess > 0.0 {
+        let below = b.within.and_then(|w| world.comp::<crate::components::Building>(w)).map(|wb| {
+            world.config.company_housing.as_ref().and_then(|c| c.inside.as_ref()).is_some_and(|i| i.room(wb.kind).1)
+        });
+        let factor = match below {
+            Some(true) => cfg.below_factor,
+            Some(false) => cfg.inside_factor,
+            None => 1.0,
+        };
+        bias -= cfg.crowd_w * excess * factor;
+    }
+    if crate::systems::company::of(world, home).is_some() {
+        bias -= cfg.company;
+    }
+    bias
+}
+
 fn update_agent(world: &mut World, id: EntityId, w_need: f32, w_memory: f32, now: Tick) {
     // The small Mood is copied out instead of cloning Needs and the Memory
     // vector per citizen per hour (perf); the same update, written back.
@@ -129,6 +165,11 @@ fn update_agent(world: &mut World, id: EntityId, w_need: f32, w_memory: f32, now
     let status = crate::systems::fashion::mood_bias(world, id);
     if status != 0.0 {
         bias += status;
+    }
+    // The island pass phase 3c (OPEN-177): the Home (a branch: 0 off).
+    let housing = housing_bias(world, id);
+    if housing != 0.0 {
+        bias += housing;
     }
     // Hunger as sickness § 2: the body's sickness (a branch: 0 off).
     let sick = crate::systems::health::effects(world, id).mood_bias;

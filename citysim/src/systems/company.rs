@@ -76,6 +76,11 @@
 //!   (`ownership::evict`, the spouse and children with him, an `Evicted`
 //!   line naming the job) and goes the homeless and rehouse way.
 //!
+//! - **Closing** (phase 3c, [`evictions`]): floors inside a workplace that
+//!   is gone (demolished or derelict) close with it ([`close_floors`]): the
+//!   residents evicted through `ownership::evict`, the record demolished,
+//!   a `Derelict` line. A block apart stands on as a plain Home.
+//!
 //! Statistical mirror: none needed beyond the shared code. The hire, the
 //! move-in, the rent, the wage it is docked from (`lod`'s Statistical
 //! `collect_wage`) and the eviction are tier-blind, so a Statistical worker
@@ -679,7 +684,12 @@ pub fn evictions(world: &mut World) {
         .map(|(&h, _)| h)
         .collect();
     for h in gone {
-        world.company_homes.remove(&h);
+        let w = world.company_homes.remove(&h);
+        // Phase 3c (the 3b loose end): floors inside a workplace that is
+        // gone go with it; a block apart stands on as a plain Home.
+        if let Some(w) = w.filter(|&w| world.comp::<Building>(h).is_some_and(|b| b.within == Some(w))) {
+            close_floors(world, h, w);
+        }
     }
     // Phase 3b: floors inside a workplace change hands with it (a corp
     // that buys the Farm buys its dorm storeys).
@@ -775,6 +785,65 @@ pub fn evictions(world: &mut World) {
             world.company_notice.remove(&s);
         }
     }
+}
+
+/// Phase 3c (the 3b loose end): company floors `h` inside workplace `w`,
+/// which is gone, close with it: each resident household is evicted the
+/// normal way (`ownership::evict`, an `Evicted` line each, the homeless and
+/// rehouse way), anyone inside is put out at the door, and the record is
+/// demolished (dropped from the Home index; no tiles change: the floors
+/// had no footprint of their own). A `Derelict` line logs it.
+fn close_floors(world: &mut World, h: EntityId, w: EntityId) {
+    let Some(outside) = world.comp::<Building>(h).map(|b| world.outside_door(b)) else { return };
+    let (floors, gone) = (world.name_of(h), world.name_of(w));
+    let owner = world.owner_of(h);
+    let why = format!("{gone} is gone: its company floors closed");
+    let mut put_out = 0usize;
+    // Adults first, lowest id first (`residents_of` is sorted); `evict`
+    // takes the spouse and the children with each.
+    while let Some(a) = world.residents_of(h).iter().copied().find(|&r| !world.has::<Child>(r)) {
+        crate::systems::ownership::evict(world, a, &why);
+        put_out += 1;
+        if world.comp::<Household>(a).and_then(|x| x.home) == Some(h) {
+            world.set_home(a, None); // defensive: never loop on one resident
+        }
+    }
+    // A child left with no adult under this roof, and anyone standing inside.
+    let tick = world.tick;
+    let rest: Vec<EntityId> = world.residents_of(h).to_vec();
+    for r in rest {
+        world.set_home(r, None);
+    }
+    let inside: Vec<EntityId> = world.comp::<Building>(h).map(|b| b.occupants.clone()).unwrap_or_default();
+    for a in inside {
+        if world.has::<Brain>(a) {
+            world.abort_plan(a);
+        }
+        world.remove_from_building(a);
+        if let Some(p) = world.comp_mut::<crate::components::Position>(a) {
+            p.tile = outside;
+            p.building = None;
+            p.entered = tick;
+        }
+    }
+    crate::systems::ownership::transfer_building(world, h, None);
+    if let Some(b) = world.comp_mut::<Building>(h) {
+        b.demolished = true;
+        b.occupants.clear();
+        b.stock_food = 0;
+        b.synth_food = 0;
+        b.rent_per_day = 0;
+    }
+    if let Some(v) = world.buildings_by_kind.get_mut(&BuildingKind::Home) {
+        v.retain(|&x| x != h);
+    }
+    let mut actors = vec![h, w];
+    actors.extend(owner);
+    world.push_event(
+        EventKind::Derelict,
+        &actors,
+        format!("{floors} closed with {gone} ({put_out} households put out; was {}'s)", world.owner_label(owner)),
+    );
 }
 
 /// The free company beds `w`'s blocks and floors hold.

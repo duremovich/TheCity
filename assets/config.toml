@@ -4426,6 +4426,24 @@ reserve = true                     # the corp pays only from what it holds above
 bunks_per_floor = 30               # the converted block's beds a floor, the interior allowing (= beds_per_floor)
 build_fallback = true              # nothing for sale in reach: build on the nearest vacant Lot within cap_ticks
 
+# The island pass phase 3c (OPEN-177, Dylan 2026-10-22; mood.rs housing_bias): a flat bias on the hourly mood target
+# from the agent's Home, as [litter] mood is. A Home's tier reached mood only through the night's sleep safety (+0.1 a
+# tier, often at its cap) and the synth diet; crowding and a company-owned bed registered nothing, so a coffin rack felt
+# like any Home of its tier. Class carries no mood term (it weights status decay and the leisure picks), and status_w
+# reads the status need, not the Home, so nothing here is counted twice; the tier row is kept small for the sleep bonus.
+# The homeless read none: sleeping rough already costs energy and safety. Rent burden is left out (the company rent is
+# below market and docked; a market-rent term is the pressure pass's, OPEN-178). Full and Statistical alike (mood runs
+# for every citizen off the shared Home state). CITYSIM_HOUSING_MOOD_OFF=1 drops it (the switch in flight). Placeholders.
+[mood.housing]
+tier = [-0.02, 0.0, 0.02]          # by the Home's tier, Sump / Mid / Spire (small: the tier's sleep safety is the other
+                                   # half, about +0.03 of target a tier when it is not at its cap)
+crowd_w = 0.02                     # x the residents a floor over [buildings] home capacity (6: a plain Block's beds a
+                                   # floor), less 1: a plain Block reads 0, a full 30-bunk floor 4
+crowd_max = 4.0                    # the excess counted at most (a full bunk floor): -0.08 at factor 1
+inside_factor = 1.25               # company floors inside a workplace, above it (dorm storeys, container bunks): -0.10 full
+below_factor = 1.5                 # ... below it ([company_housing.inside] rooms below: the coffin racks): -0.12 full
+company = 0.04                     # a bed in company housing, the company town's grip (out on the job, out of the bed)
+
 # The pre-view pass phase 6 (docs/PREVIEW_PASS.md § 0 P9, P13-P15; systems/leaders.rs; OPEN-118, OPEN-128): the
 # leader's visible half, for a leader with a body (Full or Coarse). A Statistical leader keeps the off-screen path
 # (the midnight protection collection, the order in force the moment it is chosen). Placeholders.
