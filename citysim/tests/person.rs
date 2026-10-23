@@ -1965,6 +1965,12 @@ fn widow_pick() -> WidowPick {
     let mut w = citysim::World::new(42, {
         let mut c = Config::load();
         c.distance = None;
+        // The island pass phase 6: and to the El's timed ride while the
+        // trains' switch is in flight (with trains her week's Hit record
+        // went missing); re-read when it retires.
+        if let Some(m) = c.motion.as_mut() {
+            m.trains = None;
+        }
         c
     });
     // Day 10: the Fixers' books have filled (on day 2 too few regulars

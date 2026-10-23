@@ -26,6 +26,8 @@ pub struct LegStart {
     pub key_plan: Option<(Tick, u8)>,
     /// Segments (and other re-starts) after the first.
     pub hops: u32,
+    /// An El leg's structural estimate at its start (`transit::commute_ticks`).
+    pub est: Tick,
 }
 
 /// A finished leg at or over `min_ticks`.
@@ -61,6 +63,17 @@ pub struct LegLog {
     pub ride_track: BTreeMap<EntityId, RideSeen>,
     /// By (day, body, mode, Full): [parked, jumped] on a vehicle leg that day.
     pub ride_days: BTreeMap<(u64, EntityId, &'static str, bool), [bool; 2]>,
+    /// The island pass phase 6 (`transit::note_train`): riders left on a
+    /// full train's platform, plans dropped between stops (carried on), riders
+    /// set down by a cut line.
+    pub trains: [u64; 3],
+    /// The island pass phase 6's device: an El rider's ticks this ride on
+    /// the platform (the transfers' too) and aboard (`ride_tick`).
+    pub el_acc: BTreeMap<EntityId, [u32; 2]>,
+    /// Every finished El ride's [platform, aboard] ticks.
+    pub el_trips: Vec<[u32; 2]>,
+    /// Every El leg done: its estimate at the start and its ticks.
+    pub el_fit: Vec<(Tick, Tick)>,
 }
 
 /// `ride_tick`'s last sight of a rider.
@@ -107,6 +120,7 @@ pub fn ride_tick(world: &mut World) {
     let tick = world.tick;
     let day = tick / crate::time::TICKS_PER_DAY;
     let mut seen: Vec<(EntityId, &'static str, bool, TilePos)> = Vec::new();
+    let mut el_seen: Vec<(EntityId, bool)> = Vec::new();
     for (&id, s) in &log.open {
         if !vehicle_mode(s.mode) {
             continue;
@@ -118,6 +132,19 @@ pub fn ride_tick(world: &mut World) {
         use crate::exec::ExecState;
         // The mode this tick: the El's ride, a flight, the vehicle he is
         // aboard (`motion`), else the leg's own.
+        // The El's device (phase 6): aboard a train, or past the departure
+        // without trains, is a ride tick; else the platform (a cut line's
+        // walk is neither).
+        if let ExecState::Ride { depart, .. } = &b.exec {
+            if world.transit.evac.is_empty() || !world.transit.evac.contains_key(&id) {
+                let aboard = if crate::systems::transit::trains_on(world) {
+                    world.aboard.contains_key(&id)
+                } else {
+                    tick >= *depart
+                };
+                el_seen.push((id, aboard));
+            }
+        }
         let mode = match &b.exec {
             ExecState::Ride { .. } => "el",
             ExecState::Fly { .. } => "fly",
@@ -129,7 +156,11 @@ pub fn ride_tick(world: &mut World) {
                         crate::systems::motion::RideKind::Cab if m.driver == Some(id) => "fare_leg",
                         crate::systems::motion::RideKind::Cab => "cab",
                         crate::systems::motion::RideKind::Exec => "exec_ride",
+                        crate::systems::motion::RideKind::Train => "el",
                     },
+                    // The island pass phase 6: the walk to or from the El
+                    // (a Coarse walk is timed) is the walk's, not the El's.
+                    None if s.mode == "el" => "el_walk",
                     None => s.mode,
                 }
             }
@@ -138,12 +169,13 @@ pub fn ride_tick(world: &mut World) {
         let Some(p) = world.comp::<crate::components::Position>(id) else { continue };
         // A body set down on an El stop this tick (`transit::run` alights
         // after the step) is the El's: its jump is the El's (phase 6).
-        let mode =
-            if world.transit.net.stops.contains(&p.tile) && log.ride_track.get(&id).is_some_and(|r| r.tile != p.tile) {
-                "el"
-            } else {
-                mode
-            };
+        let mode = if world.transit.net.stops.contains(&p.tile)
+            && log.ride_track.get(&id).is_some_and(|r| r.tile != p.tile && r.mode == "el")
+        {
+            "el"
+        } else {
+            mode
+        };
         // Inside a building, its door: the step out of (or in to) a deep
         // interior slot is no jump.
         let Some(at) = landed_at(world, id) else { continue };
@@ -159,6 +191,15 @@ pub fn ride_tick(world: &mut World) {
         .map(|(&id, &r)| (id, r, landed_at(world, id)))
         .collect();
     let Some(log) = world.leg_log.as_mut() else { return };
+    for &(id, aboard) in &el_seen {
+        log.el_acc.entry(id).or_default()[usize::from(aboard)] += 1;
+    }
+    let done: Vec<EntityId> = log.el_acc.keys().filter(|id| !el_seen.iter().any(|s| s.0 == **id)).copied().collect();
+    for id in done {
+        if let Some(t) = log.el_acc.remove(&id) {
+            log.el_trips.push(t);
+        }
+    }
     for (id, r, now) in gone {
         if now.is_some_and(|t| t.manhattan(r.tile) > RIDE_JUMP_TILES) {
             log.ride_days.entry((day, id, r.mode, r.full)).or_default()[1] = true;
@@ -174,11 +215,11 @@ pub fn ride_tick(world: &mut World) {
                 RideSeen { last: tick, mode, full, ..r }
             }
             Some(r) if r.last + 1 == tick => {
-                // A jump is the mode it left (a landing), or the El's when
-                // it set him down on its stop.
+                // A jump is the mode it left (a landing: the El's when it
+                // set him down on its stop; phase 6: a timed walk's onto the
+                // platform is the walk's).
                 if r.tile.manhattan(tile) > RIDE_JUMP_TILES {
-                    let m = if mode == "el" { mode } else { r.mode };
-                    log.ride_days.entry((day, id, m, r.full)).or_default()[1] = true;
+                    log.ride_days.entry((day, id, r.mode, r.full)).or_default()[1] = true;
                 }
                 RideSeen { tile, since: tick, last: tick, mode, full }
             }
@@ -241,8 +282,19 @@ pub fn start(world: &mut World, id: EntityId, target: &GotoTarget, mode: &'stati
     let Some(from) = crate::exec::walk_origin(world, id) else { return };
     let lod = world.comp::<crate::components::Brain>(id).map_or(Lod::Full, |b| b.lod);
     let why = if mode == "walk" { why_walk(world, id, from, target.tile, lod) } else { String::new() };
-    let s =
-        LegStart { tick: world.tick, from, to: target.tile, key: target.dest, lod, mode, why, key_plan: key, hops: 0 };
+    let est = if mode == "el" { crate::systems::transit::commute_ticks(world, from, target.tile) } else { 0 };
+    let s = LegStart {
+        tick: world.tick,
+        from,
+        to: target.tile,
+        key: target.dest,
+        lod,
+        mode,
+        why,
+        key_plan: key,
+        hops: 0,
+        est,
+    };
     if let Some(log) = world.leg_log.as_mut() {
         log.open.insert(id, s);
     }
@@ -264,6 +316,9 @@ pub fn end(world: &mut World, id: EntityId, outcome: &'static str) {
     let Some(log) = world.leg_log.as_mut() else { return };
     let Some(s) = log.open.remove(&id) else { return };
     let ticks = tick.saturating_sub(s.tick);
+    if s.mode == "el" && outcome == "done" {
+        log.el_fit.push((s.est, ticks));
+    }
     let e = log.by_mode.entry(s.mode).or_default();
     e.0 += 1;
     e.1 += ticks;
@@ -330,6 +385,47 @@ pub fn tsv(world: &World) -> String {
         let tier = if *full { "full" } else { "coarse" };
         out.push_str(&format!("#ride\t{m}\t{tier}\t{}\t{}\t{}\t{}\n", r[0], r[1], r[2], r[3]));
     }
+    // The island pass phase 6's device: the El rides' platform and aboard
+    // ticks (median, p90), the El legs' estimate against their ticks, the
+    // trains' events, the structural commutes at 240 min or more.
+    let q = |v: &mut Vec<u64>, f: f64| -> u64 {
+        v.sort_unstable();
+        v.get(((v.len() as f64 * f) as usize).min(v.len().saturating_sub(1))).copied().unwrap_or(0)
+    };
+    let mut wait: Vec<u64> = log.el_trips.iter().map(|t| u64::from(t[0])).collect();
+    let mut ride: Vec<u64> = log.el_trips.iter().map(|t| u64::from(t[1])).collect();
+    out.push_str(&format!(
+        "#el\ttrips\t{}\twait_p50\t{}\twait_p90\t{}\tride_p50\t{}\tride_p90\t{}\n",
+        log.el_trips.len(),
+        q(&mut wait, 0.5),
+        q(&mut wait, 0.9),
+        q(&mut ride, 0.5),
+        q(&mut ride, 0.9)
+    ));
+    let n = log.el_fit.len().max(1) as f64;
+    let (est, act): (u64, u64) = log.el_fit.iter().fold((0, 0), |(a, b), &(e, t)| (a + e, b + t));
+    let mut ratio: Vec<u64> = log.el_fit.iter().map(|&(e, t)| t * 100 / e.max(1)).collect();
+    out.push_str(&format!(
+        "#elfit\tlegs\t{}\test_mean\t{:.1}\tticks_mean\t{:.1}\tratio_pct_p50\t{}\tratio_pct_p90\t{}\n",
+        log.el_fit.len(),
+        est as f64 / n,
+        act as f64 / n,
+        q(&mut ratio, 0.5),
+        q(&mut ratio, 0.9)
+    ));
+    out.push_str(&format!(
+        "#trains\tfull_waits\t{}\theld_to_stop\t{}\tcut_set_down\t{}\n",
+        log.trains[0], log.trains[1], log.trains[2]
+    ));
+    let mut far = (0u32, 0u32);
+    for a in world.citizens() {
+        let Some(w) = world.comp::<crate::components::Job>(a).and_then(|j| j.employer) else { continue };
+        let Some(wd) = world.comp::<crate::components::Building>(w).map(|b| b.door) else { continue };
+        let Some(hd) = crate::systems::contracts::home_door(world, a) else { continue };
+        far.0 += 1;
+        far.1 += u32::from(crate::systems::distance::travel(world, hd, wd) >= 240);
+    }
+    out.push_str(&format!("#commute\temployed_housed\t{}\tat_240_plus\t{}\n", far.0, far.1));
     out
 }
 

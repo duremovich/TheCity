@@ -465,10 +465,25 @@ fn leader(w: &World, i: usize) -> Option<EntityId> {
 #[test]
 #[ignore = "tier: merge"]
 fn god_decapitate_gang() {
-    let r = run("god_decapitate_gang", |w| {
-        let g = w.comp::<Gang>(gang(w, 0)).expect("gang 0");
-        let l = g.leader.or(g.boss).expect("gang 0 has a leader or a jailed boss at the shock");
-        eprintln!("killing {} (leader of gang 0)", w.name_of(l));
+    // The target is the first gang whose leader the control keeps through the
+    // whole window: the premise of "differs from the control" is that the
+    // control has no succession of its own on the shock day. On seed 42 gang 0
+    // stopped qualifying once the El ran as trains (its boss is jailed on day
+    // 45 in the control too, same successor), so the gang is chosen, not fixed.
+    let c = control();
+    let (from, to) = (SHOCK_DAY, SHOCK_DAY + 14);
+    let stable = |i: usize| {
+        let at = |day: u64| c.days.iter().find(|d| d.day == day).and_then(|d| d.leaders.get(i).copied().flatten());
+        let l = at(SHOCK_DAY - 1);
+        l.is_some() && c.window(from, to).all(|d| d.leaders.get(i).copied().flatten() == l)
+    };
+    let n = c.days[0].leaders.len();
+    let t = (0..n).find(|&i| stable(i)).expect("a gang whose leader the control keeps through the window");
+    eprintln!("decapitating gang {t} (the first whose control leader is stable over the window)");
+    let r = run("god_decapitate_gang", move |w| {
+        let g = w.comp::<Gang>(gang(w, t)).expect("target gang");
+        let l = g.leader.or(g.boss).expect("the target gang has a leader or a jailed boss at the shock");
+        eprintln!("killing {} (leader of gang {t})", w.name_of(l));
         w.push_command(PlayerCommand::KillAgent(l));
     });
     // M14 phase 2: the deck shop shifts seed 42's gang 0 into a Squat held
@@ -480,24 +495,22 @@ fn god_decapitate_gang() {
     // too, so "no change in the control" is the wrong test), a Split beyond
     // the control's, or a Retaliate or LieLow order the control never had.
     // The order difference and the generic reactions are printed only.
-    let c = control();
     r.print(Some(c));
-    let (from, to) = (SHOCK_DAY, SHOCK_DAY + 14);
-    let before = |run: &Run| run.days.iter().find(|d| d.day == SHOCK_DAY - 1).and_then(|d| d.leaders[0]);
+    let before = |run: &Run| run.days.iter().find(|d| d.day == SHOCK_DAY - 1).and_then(|d| d.leaders[t]);
     let old = before(&r);
     let succession = r
         .window(from, to)
         .zip(c.window(from, to))
-        .find(|(d, x)| d.leaders[0].is_some() && d.leaders[0] != old && d.leaders[0] != x.leaders[0]);
+        .find(|(d, x)| d.leaders[t].is_some() && d.leaders[t] != old && d.leaders[t] != x.leaders[t]);
     let splits = |run: &Run| {
         run.story.iter().filter(|(t, k, _)| *k == EventKind::Split && (from..to).contains(&(t / TICKS_PER_DAY))).count()
     };
-    let shaken = |run: &Run| run.window(from, to).any(|d| matches!(d.orders[0], Order::Retaliate | Order::LieLow));
+    let shaken = |run: &Run| run.window(from, to).any(|d| matches!(d.orders[t], Order::Retaliate | Order::LieLow));
     let mut fired = Vec::new();
     if let Some((d, x)) = succession {
         fired.push(format!(
             "succession on day {}: leader {:?} (before {:?}, control {:?})",
-            d.day, d.leaders[0], old, x.leaders[0]
+            d.day, d.leaders[t], old, x.leaders[t]
         ));
     }
     if splits(&r) > splits(c) {
@@ -507,8 +520,8 @@ fn god_decapitate_gang() {
         fired.push("a Retaliate or LieLow order".to_string());
     }
     let mut seen = Vec::new();
-    if let Some(d) = r.window(from, to).zip(c.window(from, to)).find(|(d, x)| d.orders[0] != x.orders[0]) {
-        seen.push(format!("g0 order on day {}: {:?} (control {:?})", d.0.day, d.0.orders[0], d.1.orders[0]));
+    if let Some(d) = r.window(from, to).zip(c.window(from, to)).find(|(d, x)| d.orders[t] != x.orders[t]) {
+        seen.push(format!("g{t} order on day {}: {:?} (control {:?})", d.0.day, d.0.orders[t], d.1.orders[t]));
     }
     seen.push(format!("generic: {:?}", r.reactions(c, 14)));
     eprintln!("decapitation reactions within 14 days: {fired:?}; also (not asserted): {seen:?}");

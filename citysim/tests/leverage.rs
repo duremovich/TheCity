@@ -27,7 +27,17 @@ use citysim::{
 /// (which gang is the rival, which business is the district's best), and the
 /// parents move that trajectory.
 fn world() -> World {
+    world_trains(true)
+}
+
+/// `world`, the El's trains on or off (`[motion.trains]`).
+fn world_trains(trains: bool) -> World {
     let mut c = Config::load();
+    if !trains {
+        if let Some(m) = c.motion.as_mut() {
+            m.trains = None;
+        }
+    }
     c.outside.enabled = false;
     // Jobs & lives phase 1: and without the industries (they take the Lots
     // and the jobs that set this city's gangs and businesses).
@@ -64,7 +74,10 @@ fn no_venue_rates(w: &mut World) {
 
 fn gang_world_in(cell: &std::sync::OnceLock<World>, pre_mirror: bool) -> World {
     let base = cell.get_or_init(|| {
-        let mut w = world();
+        // The island pass phase 6: the pre-mirror city is pinned on the El's
+        // timed ride while the trains' switch is in flight (with trains its
+        // racket's hold broke in the second week); re-read when it retires.
+        let mut w = world_trains(!pre_mirror);
         if pre_mirror {
             no_venue_rates(&mut w);
         }

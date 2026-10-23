@@ -194,6 +194,9 @@ fn test_order_waits_for_a_lieutenant_at_court() {
     let hideout = w.hideout_of(g).expect("hideout");
     w.enter_building(l, hideout);
     w.enter_building(lt, hideout);
+    // Awake there (the island pass phase 6: the fixture city's day moved,
+    // and seed 42's lieutenant was asleep at the Hideout).
+    w.comp_mut::<Brain>(lt).expect("brain").exec = ExecState::Idle;
     let t = w.tick;
     w.comp_mut::<Brain>(l).expect("brain").exec = ExecState::Use { kind: ActionKind::Court, until: t + 60, started: t };
     leaders::run(&mut w);
@@ -226,6 +229,7 @@ fn test_order_walked_to_the_lieutenant_then_by_word() {
     stand(&mut w, l, citysim::TilePos { x: tile.x, y: tile.y.saturating_add(c.order_reach as u16 + 4) });
     assert!(!leaders::can_court(&w, l, Some(lt)), "too far to give it");
     stand(&mut w, l, citysim::TilePos { x: tile.x.saturating_add(1), y: tile.y });
+    w.comp_mut::<Brain>(lt).expect("brain").exec = ExecState::Idle;
     assert!(leaders::can_court(&w, l, Some(lt)), "beside him");
     leaders::court_start(&mut w, l, Some(lt));
     assert_eq!(w.comp::<Gang>(g).expect("gang").order, Order::Raid, "given where he was");

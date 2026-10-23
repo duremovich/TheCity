@@ -3604,7 +3604,7 @@ impl World {
         // M13 D20: a trip ends first, so the vehicle is parked, not lost.
         systems::vehicles::end_trip(self, id, false);
         systems::transit::end_ride(self, id);
-        systems::motion::alight(self, id);
+        systems::motion::alight_now(self, id);
         // M16a (plan C16): an emigrant's records settle as a death's (a
         // refund lands in the wallet it leaves with).
         systems::contracts::on_death(self, id, None);
@@ -3855,7 +3855,7 @@ impl World {
         // the corpse.
         systems::vehicles::end_trip(self, id, false);
         systems::transit::end_ride(self, id);
-        systems::motion::alight(self, id);
+        systems::motion::alight_now(self, id);
         // M13 D38: a dead dealer deals no more.
         systems::stims::end_deal(self, id);
         // L2 L15 (review fix): nor hangs out at a spot.

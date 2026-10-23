@@ -14,7 +14,16 @@ use std::sync::OnceLock;
 fn base() -> World {
     static BASE: OnceLock<World> = OnceLock::new();
     BASE.get_or_init(|| {
-        let mut w = common::world();
+        // The island pass phase 6: the scenes are pinned on the El's timed
+        // ride (`[motion.trains]` off). With trains the 34-hour city
+        // diverges and the table's transfer edge counts half a headway
+        // more, so the hand-picked far and near Homes land on the other
+        // side of the thresholds these scenes are built on.
+        let mut cfg = Config::load();
+        if let Some(m) = cfg.motion.as_mut() {
+            m.trains = None;
+        }
+        let mut w = World::new(42, cfg);
         w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
         w
     })

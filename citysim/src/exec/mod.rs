@@ -126,6 +126,11 @@ pub fn run(world: &mut World) {
         if brain.lod == Lod::Statistical || world.has::<crate::components::Sentence>(id) || brain.cuffed_by.is_some() {
             continue;
         }
+        // The island pass phase 6: a rider whose plan ended between two
+        // stops rides on to the next one (`motion::alight`); he acts there.
+        if !world.transit.held.is_empty() && world.transit.held.contains(&id) {
+            continue;
+        }
         if brain.emigrating {
             emigrate_step(world, id);
             continue;
@@ -150,6 +155,8 @@ pub fn run(world: &mut World) {
             follow_bearer(world, id, c);
         }
     }
+    // The island pass phase 6: the El's riders board their trains.
+    crate::systems::transit::trains_tick(world);
     // The island pass phase 5 (I3): the vehicles in motion advance, their
     // riders with them.
     crate::systems::motion::advance(world);
