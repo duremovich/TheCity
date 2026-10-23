@@ -263,7 +263,13 @@ pub enum DealSite {
 pub fn deal_site(world: &World, gang: EntityId) -> Option<DealSite> {
     if corner_on(world) {
         let d = deal_district(world, gang)?;
-        if crate::systems::leisure::deal_venue(world, gang, d).is_none() {
+        // The island pass phase 8 (`[island_trades] corner_arms`; OPEN-168):
+        // a gang with an armoury surplus deals from a Bar, where the arms
+        // dealer's counter is (`weapons::bar_arms_dealer`): at the corner no
+        // dealer was ever registered at a Bar, so no arms dealer existed.
+        let arms = world.config.island_trades.as_ref().is_some_and(|c| c.corner_arms)
+            && crate::systems::weapons::has_surplus(world, gang);
+        if !arms && crate::systems::leisure::deal_venue(world, gang, d).is_none() {
             if let Some(t) = deal_corner(world, gang) {
                 return Some(DealSite::Corner(t));
             }

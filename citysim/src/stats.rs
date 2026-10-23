@@ -1004,6 +1004,11 @@ pub struct Jobs2Cols {
     pub pressure_movers: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub pressure_jobs: u32,
+    // The island pass phase 8 (OPEN-168): a Builder's load set down at a far
+    // site of his Yard (`[island_trades] site_day`; the rest of the shift
+    // worked there).
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub site_days: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -1349,6 +1354,7 @@ impl Jobs2Cols {
                 "pressure_company",
                 "pressure_movers",
                 "pressure_jobs",
+                "site_days",
             ]
             .into_iter()
             .map(str::to_string),
@@ -1688,6 +1694,7 @@ impl Jobs2Cols {
             self.pressure_company.to_string(),
             self.pressure_movers.to_string(),
             self.pressure_jobs.to_string(),
+            self.site_days.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

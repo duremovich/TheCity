@@ -168,7 +168,7 @@ fn test_the_plan_timeout_spares_a_leg_in_motion() {
             let door = w.comp::<Building>(far).expect("far").door;
             let target = citysim::exec::GotoTarget { dest: LocationKey::TargetHome, tile: door, building: Some(far) };
             let b = w.comp_mut::<Brain>(who).expect("brain");
-            b.exec = ExecState::GotoTimed { target, arrive_tick: tick + timeout + 30, blocked_since: None };
+            b.exec = ExecState::GotoTimed { target, arrive_tick: tick + timeout + 30, blocked_since: None, walk: None };
         }
         let (legs, arrived, _) = walk_segments(&mut w, who, far, timeout + 2 * TICKS_PER_DAY / 3);
         (arrived, legs.len())
@@ -295,4 +295,179 @@ fn test_in_flight_lines_go_with_legs() {
     map.apply_to(&mut off);
     assert_eq!(off.transit.lines.len(), plain);
     assert!(off.transit.lines.iter().all(|l| !l.in_flight));
+}
+
+// ---------------------------------------------------------------------------
+// The island pass phase 9 (OPEN-181): a Coarse timed walk keeps its body on
+// its way (`exec::walk_place`); a promotion mid-walk sets it down there.
+// ---------------------------------------------------------------------------
+
+/// `len + 1` Road tiles in a straight horizontal run.
+fn road_run(w: &World, len: usize) -> Vec<TilePos> {
+    for y in 0..w.map.h() {
+        let mut run: Vec<TilePos> = Vec::new();
+        for x in 0..w.map.w() {
+            let t = TilePos { x: x as u16, y: y as u16 };
+            if w.map.tile_at(t) == citysim::TileKind::Road {
+                run.push(t);
+                if run.len() > len {
+                    return run;
+                }
+            } else {
+                run.clear();
+            }
+        }
+    }
+    panic!("no straight road of {len} tiles");
+}
+
+/// A Coarse adult who owns no vehicle, on `from` (out of any building),
+/// set out on a timed walk to the street tile `to` (the one-step plan's
+/// GoTo already running, as `start_step` leaves it).
+fn coarse_walker(w: &mut World, nth: usize, from: TilePos, to: TilePos) -> EntityId {
+    let owners: Vec<Option<EntityId>> =
+        w.vehicles.iter().map(|&v| w.comp::<citysim::Asset>(v).and_then(|a| a.owner)).collect();
+    let who = common::adults(w)
+        .into_iter()
+        .filter(|&a| w.gang_of(a).is_none() && !owners.contains(&Some(a)))
+        .nth(nth)
+        .expect("an adult on foot");
+    lod::set_lod(w, who, Lod::Coarse);
+    w.leave_building(who);
+    let p = w.comp_mut::<Position>(who).expect("pos");
+    p.tile = from;
+    p.building = None;
+    let target = citysim::exec::GotoTarget { dest: LocationKey::Street, tile: to, building: None };
+    let exec = citysim::exec::timed_goto(w, who, target);
+    let tick = w.tick;
+    let b = w.comp_mut::<Brain>(who).expect("brain");
+    b.plan = Some(Plan {
+        goal: GoalKind::Idle,
+        target: None,
+        steps: vec![ActionInstance { action: ActionKind::GoTo(LocationKey::Street), target: None, tile: None }],
+        started_tick: tick,
+    });
+    b.plan_step = 0;
+    b.exec = exec;
+    who
+}
+
+fn timed_arrival(w: &World, id: EntityId) -> Option<u64> {
+    match w.comp::<Brain>(id).expect("brain").exec {
+        ExecState::GotoTimed { arrive_tick, .. } => Some(arrive_tick),
+        _ => None,
+    }
+}
+
+/// Where the view draws `id` now.
+fn drawn(w: &World, id: EntityId) -> TilePos {
+    citysim::exec::walk_place(w, id).expect("a place").tile
+}
+
+/// OPEN-181: mid-walk a Coarse body is on its way (a tile of the road it
+/// walks) and moves between two reads, toward the target; it arrives on
+/// the timed walk's tick. Base: it stood on its start tile the whole walk.
+#[test]
+fn test_a_coarse_walk_keeps_its_body_on_its_way() {
+    let mut w = city();
+    let run = road_run(&w, 20);
+    let (from, to) = (run[0], run[20]);
+    let who = coarse_walker(&mut w, 3, from, to);
+    let arrive = timed_arrival(&w, who).expect("a timed walk");
+    assert!(arrive > w.tick + 20, "a walk of some ticks");
+    for _ in 0..(arrive - w.tick) / 3 {
+        exec_tick(&mut w);
+    }
+    let a = drawn(&w, who);
+    assert!(run.contains(&a) && a != from && a != to, "on its way mid-walk: {a:?}");
+    for _ in 0..6 {
+        exec_tick(&mut w);
+    }
+    let b = drawn(&w, who);
+    assert!(run.contains(&b) && b.manhattan(to) < a.manhattan(to), "on along the road: {a:?} then {b:?}");
+    while w.tick <= arrive {
+        exec_tick(&mut w);
+    }
+    assert_eq!(timed_arrival(&w, who), None, "the walk is over on its tick");
+    assert_eq!(w.comp::<Position>(who).expect("pos").tile, to, "at the target");
+}
+
+/// OPEN-181: a Coarse walker promoted to Full mid-walk is set down where his
+/// walk had him, and the Full walk goes on from there: no tick moves the
+/// body more than one tile, and it reaches the target. Base: the promoted
+/// body stood at the walk's start, half the walk behind.
+#[test]
+fn test_a_promotion_mid_walk_has_no_jump() {
+    let mut w = city();
+    let run = road_run(&w, 20);
+    let (from, to) = (run[0], run[20]);
+    let who = coarse_walker(&mut w, 4, from, to);
+    let arrive = timed_arrival(&w, who).expect("a timed walk");
+    for _ in 0..(arrive - w.tick) / 2 {
+        exec_tick(&mut w);
+    }
+    let was = drawn(&w, who);
+    lod::set_lod(&mut w, who, Lod::Full);
+    let p = w.comp::<Position>(who).expect("pos").clone();
+    assert!(p.tile.manhattan(from) >= 6, "set down well on his way: {:?}", p.tile);
+    assert_eq!((p.tile, p.building), (was, None), "set down where the walk had him");
+    assert!(matches!(w.comp::<Brain>(who).expect("brain").exec, ExecState::Goto { .. }), "a Full walk");
+    let mut last = p.tile;
+    for _ in 0..200 {
+        exec_tick(&mut w);
+        let now = w.comp::<Position>(who).expect("pos").tile;
+        assert!(now.manhattan(last) <= 1, "a step, not a jump: {last:?} to {now:?}");
+        last = now;
+        if now == to {
+            break;
+        }
+    }
+    assert_eq!(last, to, "the Full walk reaches the target");
+    // An interrupt (the plan dropped mid-walk) leaves a Coarse body where it
+    // stands on its way, out on the street (`[motion.walks]
+    // settle_interrupt`). Base: back at the walk's start.
+    let who = coarse_walker(&mut w, 7, from, to);
+    let arrive = timed_arrival(&w, who).expect("a timed walk");
+    for _ in 0..(arrive - w.tick) / 2 {
+        exec_tick(&mut w);
+    }
+    let was = drawn(&w, who);
+    w.abort_plan(who);
+    let p = w.comp::<Position>(who).expect("pos").clone();
+    assert!(was.manhattan(from) >= 6 && (p.tile, p.building) == (was, None), "left on his way: {:?}", p.tile);
+}
+
+/// OPEN-181: two Coarse walkers setting out from one tile at one tick for
+/// two places (the two ends of a road) share no tile after their first
+/// steps; a save mid-walk resumes byte for byte. Base: both stood on the
+/// start tile the whole walk (the 78-body stack of `d1_lod_wide.jpg`).
+#[test]
+fn test_coarse_walkers_bound_apart_do_not_stack() {
+    let mut w = city();
+    let run = road_run(&w, 30);
+    let mid = run[15];
+    let a = coarse_walker(&mut w, 5, mid, run[0]);
+    let b = coarse_walker(&mut w, 6, mid, run[30]);
+    let end = timed_arrival(&w, a).expect("a").min(timed_arrival(&w, b).expect("b"));
+    let start = w.tick;
+    let half = start + (end - start) / 2;
+    let mut back: Option<World> = None;
+    while w.tick < end + 2 {
+        exec_tick(&mut w);
+        if let Some(back) = back.as_mut() {
+            exec_tick(back);
+            assert_eq!(drawn(back, a), drawn(&w, a), "the loaded walk at tick {}", w.tick);
+        }
+        if w.tick >= start + 4 && w.tick < end {
+            assert_ne!(drawn(&w, a), drawn(&w, b), "tick {}: two walkers bound apart on one tile", w.tick);
+        }
+        if back.is_none() && w.tick == half {
+            let text = citysim::save::to_ron(&w);
+            let loaded = citysim::save::from_ron(&text).expect("loads");
+            assert_eq!(citysim::save::to_ron(&loaded), text, "the save round-trips");
+            back = Some(loaded);
+        }
+    }
+    let back = back.expect("saved mid-walk");
+    assert_eq!(citysim::save::to_ron(&back), citysim::save::to_ron(&w), "identical after the arrival");
 }

@@ -1604,6 +1604,9 @@ mod lives_street {
     fn test_a_stale_cab_ride_is_dropped() {
         let mut w = city_with(|_| {});
         let (_, driver) = garage_and_driver(&w);
+        // A body drives a fare (`can_drive`); which driver holds one at 08:00
+        // is the LOD budget's (the island pass phase 8's cab quota moved it).
+        citysim::systems::lod::set_lod(&mut w, driver, Lod::Coarse);
         let rider = w.citizens().into_iter().find(|&a| a != driver).expect("a rider");
         let (from, to) = (citysim::TilePos { x: 3, y: 3 }, citysim::TilePos { x: 5, y: 5 });
         let ride = sw::CabRide { rider, from, to, driver, fare: 4, tick: w.tick, stage: 0, body: false };

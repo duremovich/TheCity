@@ -192,6 +192,8 @@ pub fn can_work_now(world: &World, id: EntityId, job: &Job) -> bool {
             crate::systems::jobs::on_beat(world, id) || crate::systems::jobs::on_round(world, id, job)
         } else {
             job.employer.is_some_and(|e| world.comp::<Position>(id).is_some_and(|p| p.building == Some(e)))
+                // The island pass phase 8: a Builder's site day is worked at the site.
+                || crate::systems::shift::on_site(world, id, job)
         }
 }
 

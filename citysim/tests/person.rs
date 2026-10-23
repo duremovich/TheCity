@@ -2931,6 +2931,9 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
     // Pinned: the island pass phase 3c's housing mood term off (the tier row moves this city's day-12 scene: the
     // in-test worker is never met at the pitch; re-read when CITYSIM_HOUSING_MOOD_OFF retires).
     cfg.mood.housing = None;
+    // Pinned: the island pass phase 8's trades off (`[island_trades]` moves this city's day-12 scene, its gangs'
+    // deal sites and its LOD budget: the pimp never reaches the pitch; re-read when CITYSIM_TRADES_OFF retires).
+    cfg.island_trades = None;
     let mut w = World::new(42, cfg);
     let start = 12 * TICKS_PER_DAY + 17 * TICKS_PER_HOUR;
     w.run_ticks(start);
