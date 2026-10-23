@@ -150,6 +150,9 @@ pub fn run(world: &mut World) {
             follow_bearer(world, id, c);
         }
     }
+    // The island pass phase 5 (I3): the vehicles in motion advance, their
+    // riders with them.
+    crate::systems::motion::advance(world);
 }
 
 /// The carried corpse takes its bearer's tile and building.
@@ -299,6 +302,9 @@ fn step_agent(world: &mut World, id: EntityId) {
             if tick < arrive_tick {
                 StepResult::Running
             } else {
+                // The island pass phase 5 (I3): off the vehicle at the
+                // way's end (the door), then in.
+                crate::systems::motion::alight(world, id);
                 arrive(world, id, target, blocked_since)
             }
         }
@@ -308,6 +314,7 @@ fn step_agent(world: &mut World, id: EntityId) {
             if tick < arrive_tick {
                 StepResult::Running
             } else {
+                crate::systems::motion::alight(world, id);
                 arrive(world, id, target, None)
             }
         }
@@ -646,6 +653,8 @@ impl World {
         // M13 D20: a vehicle on the road parks where its driver stands.
         crate::systems::vehicles::end_trip(self, id, false);
         crate::systems::transit::end_ride(self, id);
+        // The island pass phase 5 (I3): off the vehicle where it stands.
+        crate::systems::motion::alight(self, id);
         self.segments.remove(&id);
         if !self.jobs2.passengers.is_empty() {
             crate::systems::streetwork::passenger_off(self, id);
@@ -736,6 +745,11 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
             if !world.segments.is_empty() {
                 world.segments.remove(&id);
             }
+            // The island pass phase 5 (I3): a walk starting aboard a vehicle
+            // (a stale leg) steps off where it stands first.
+            if !world.aboard.is_empty() {
+                crate::systems::motion::alight(world, id);
+            }
             // M15 W22: a hunter setting out to its intel promotes a
             // Statistical target.
             if key == LocationKey::Intel {
@@ -804,6 +818,7 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                 if let Some(state) = street {
                     leglog::start(world, id, &target, mode);
                     commute_started(world, id, &target);
+                    board_street(world, id, &target, &state, mode);
                     if let Some(b) = world.comp_mut::<Brain>(id) {
                         b.exec = state;
                     }
@@ -877,6 +892,9 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                     }
                 },
             };
+            if let Some(kind) = driving {
+                board_trip(world, id, kind, &state);
+            }
             if let Some(b) = world.comp_mut::<Brain>(id) {
                 b.exec = state;
             }
@@ -1081,11 +1099,74 @@ fn escort_leg(world: &mut World, id: EntityId, target: &GotoTarget, lod: Lod) ->
     Some(state)
 }
 
+/// The island pass phase 5 (I3): a street leg (`start_step`) is a vehicle
+/// in motion: the cab (`full_cab`, the Garage's off-screen cab, the rider
+/// aboard), the exec's car (`exec_ride`), a body driver's fare leg (he at
+/// the wheel of the cab his fare is aboard, else a fresh one). A body
+/// fare's rider (`arrive_tick` never: he waits at his door) climbs in at
+/// the pick-up (`streetwork::carry`). Nothing with `[motion]` off.
+fn board_street(world: &mut World, id: EntityId, target: &GotoTarget, state: &ExecState, mode: &'static str) {
+    use crate::systems::motion::{self, RideKind};
+    if !motion::on(world) {
+        return;
+    }
+    let ExecState::GotoTimed { arrive_tick, .. } = *state else { return };
+    if arrive_tick == Tick::MAX {
+        return;
+    }
+    let now = world.tick;
+    let from = walk_origin(world, id).unwrap_or(target.tile);
+    let ride_ticks = crate::systems::streetwork::cab_ticks(world, from, target.tile);
+    let depart = arrive_tick.saturating_sub(ride_ticks).max(now);
+    let car = crate::components::AssetKind::Car;
+    let to = target.tile;
+    match mode {
+        "fare_leg" => {
+            let reuse = crate::systems::streetwork::fare_vehicle(world, id);
+            motion::board_timed(world, id, RideKind::Cab, car, None, reuse, to, now, arrive_tick, true);
+        }
+        "cab" => {
+            motion::board_timed(world, id, RideKind::Cab, car, None, None, to, depart, arrive_tick, false);
+        }
+        _ => {
+            motion::board_timed(world, id, RideKind::Exec, car, None, None, to, depart, arrive_tick, false);
+        }
+    }
+}
+
+/// The island pass phase 5 (I3): a trip's vehicle is in motion: a flyer
+/// flies its straight way over the flight's ticks, a Coarse driver's road
+/// vehicle runs his timed leg along the road, a Full driver steers his.
+/// Nothing with `[motion]` off.
+fn board_trip(world: &mut World, id: EntityId, kind: crate::components::AssetKind, state: &ExecState) {
+    use crate::systems::motion::{self, RideKind};
+    if !motion::on(world) {
+        return;
+    }
+    let Some(v) = world.trips.get(&id).map(|t| t.vehicle) else { return };
+    match state {
+        ExecState::Fly { target, depart, arrive_tick, .. } => {
+            let (to, d, a) = (target.tile, *depart, *arrive_tick);
+            motion::board_timed(world, id, RideKind::Flyer, kind, Some(v), None, to, d, a, true);
+        }
+        ExecState::GotoTimed { target, arrive_tick, .. } => {
+            let (to, d, a) = (target.tile, world.tick, *arrive_tick);
+            motion::board_timed(world, id, RideKind::Car, kind, Some(v), None, to, d, a, true);
+        }
+        ExecState::Goto { .. } => {
+            motion::board_driven(world, id, v, kind);
+        }
+        _ => {}
+    }
+}
+
 /// The pre-view pass phase 5 (the `fares` shape): a cab driver's leg past
 /// `[legs] leg_replan_tiles` drives in segments too, each timed at the
 /// cab's speed (the car seen en route, the rider aboard with it).
 fn fare_segment(world: &mut World, id: EntityId, target: &GotoTarget) -> Option<ExecState> {
-    if !legs::on(world) || !crate::systems::streetwork::on_fare(world, id) {
+    // The island pass phase 5 (I3): with the vehicle in motion the cab is
+    // seen along its whole way; one leg.
+    if !legs::on(world) || crate::systems::motion::on(world) || !crate::systems::streetwork::on_fare(world, id) {
         return None;
     }
     let from = walk_origin(world, id)?;

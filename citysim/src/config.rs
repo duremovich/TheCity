@@ -352,6 +352,13 @@ pub struct Config {
     /// the relocation and the company move-in are the base ones.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commute_pressure: Option<CommutePressureCfg>,
+    /// The island pass phase 5 (docs/ISLAND_PASS.md I3; OPEN-165): a vehicle
+    /// in motion is an entity with its own position, its riders aboard
+    /// (`systems/motion.rs`). `None` (not written into a save) with
+    /// `CITYSIM_VEHICLES_MOVE_OFF=1`: the timed legs as before (the body on
+    /// its boarding tile, then at the door).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion: Option<MotionCfg>,
     /// The island pass phase 3c (OPEN-177): `[mood.*]`, the mood terms read
     /// from config. Empty (not written into a save) with
     /// `CITYSIM_HOUSING_MOOD_OFF=1`.
@@ -485,6 +492,15 @@ impl CompanyInsideCfg {
             .find(|r| r.kind == kind)
             .map_or((self.default_name.as_str(), false), |r| (r.name.as_str(), r.below))
     }
+}
+
+/// The island pass phase 5 `[motion]` (docs/ISLAND_PASS.md I3): a vehicle
+/// in motion advances along its way with its riders aboard.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MotionCfg {
+    /// A timed road vehicle's way follows the road path (the walk's A*);
+    /// false: an L, along x then y (no search).
+    pub road_route: bool,
 }
 
 /// The island pass phase 4 `[commute_pressure]` (docs/ISLAND_PASS.md I2):
@@ -8758,6 +8774,11 @@ impl Config {
             if let Some(l) = cfg.legs.as_mut() {
                 l.timeout_spares_legs = false;
             }
+        }
+        // The island pass phase 5 (OPEN-165, I3): vehicles in motion, the
+        // switch in flight (doctrine 6).
+        if std::env::var("CITYSIM_VEHICLES_MOVE_OFF").is_ok_and(|v| v == "1") {
+            cfg.motion = None;
         }
         // The island pass phase 3c (OPEN-177): the housing mood term's
         // switch in flight (doctrine 6).

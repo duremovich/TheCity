@@ -75,6 +75,7 @@ pub mod living;
 pub mod lod;
 pub mod memory;
 pub mod missions;
+pub mod motion;
 pub mod moves;
 pub mod news;
 pub mod outside;

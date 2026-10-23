@@ -619,7 +619,11 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
         return;
     }
     let exec = brain.exec.clone();
+    // The island pass phase 5 (I3): a rider aboard a timed vehicle stays
+    // aboard a promotion (his leg runs on at Full).
+    let riding = crate::systems::motion::vehicle_of(world, id).is_some();
     let new_exec = match (exec, lod) {
+        (state @ ExecState::GotoTimed { .. }, Lod::Full) if riding => state,
         (ExecState::Goto { target, .. }, Lod::Coarse) => exec::timed_goto(world, id, target),
         (ExecState::GotoTimed { target, .. }, Lod::Full) => match exec::walking_goto(world, id, target) {
             Some(state) => state,
@@ -631,6 +635,10 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
     if let Some(b) = world.comp_mut::<Brain>(id) {
         b.lod = lod;
         b.exec = new_exec;
+    }
+    // A Full driver demoted to Coarse: the vehicle runs his timed leg.
+    if riding && lod == Lod::Coarse {
+        crate::systems::motion::to_timed(world, id);
     }
     world.retier(id);
 }

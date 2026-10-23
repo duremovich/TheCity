@@ -4450,6 +4450,14 @@ cool_days = 30                     # after a move or a job switch, no pressure b
 job_margin_ticks = 40              # a nearer post saves at least this from the Home door (= commute_margin_ticks)
 hire_now = true                    # a hire since the last midnight with a far Home looks at once (3a's far-hire move-in)
 
+# The island pass phase 5 (docs/ISLAND_PASS.md I3, OPEN-165; systems/motion.rs): a vehicle in motion is an entity with
+# its own position, advancing along its way each tick, its riders aboard (the car, the exec's flyer, the cab, the exec's
+# car). The leg's arrival is the timed leg's, so ride times (and the Statistical mirror) are unchanged; the body is seen
+# on the road instead of on its boarding tile. CITYSIM_VEHICLES_MOVE_OFF=1 drops it (the switch in flight).
+[motion]
+road_route = true                  # a timed road vehicle's way follows the road path (the walk's A*); false: an L, along
+                                   # x then y (no search)
+
 # The island pass phase 3c (OPEN-177, Dylan 2026-10-22; mood.rs housing_bias): a flat bias on the hourly mood target
 # from the agent's Home, as [litter] mood is. A Home's tier reached mood only through the night's sleep safety (+0.1 a
 # tier, often at its cap) and the synth diet; crowding and a company-owned bed registered nothing, so a coffin rack felt

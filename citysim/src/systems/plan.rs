@@ -527,6 +527,11 @@ fn install(world: &mut World, id: EntityId, plan: Plan) {
         world.cool_goal(id, plan.goal);
         return;
     }
+    // The island pass phase 5 (I3): a new plan steps off a vehicle where
+    // it stands (a body fare's rider stays: the driver carries him).
+    if !world.aboard.is_empty() && !world.jobs2.passengers.contains_key(&id) {
+        crate::systems::motion::alight(world, id);
+    }
     if let Some(b) = world.comp_mut::<Brain>(id) {
         b.plan = Some(plan);
         b.plan_step = 0;

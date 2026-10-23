@@ -1565,9 +1565,27 @@ fn release(world: &mut World, r: &CabRide, arrived: bool) {
         let here = crate::exec::walk_origin(world, r.rider).unwrap_or(r.from);
         world.tick + cab_ticks(world, here, target.tile)
     };
+    let to = target.tile;
     if let Some(b) = world.comp_mut::<Brain>(r.rider) {
         b.exec = crate::exec::ExecState::GotoTimed { target, arrive_tick: arrive, blocked_since: None };
     }
+    // The island pass phase 5 (I3): the off-screen cab takes him on in the
+    // vehicle he is aboard (else one comes to his door), from where it is.
+    if !arrived && crate::systems::motion::on(world) {
+        use crate::systems::motion::{self, RideKind};
+        let (car, now, reuse) = (crate::components::AssetKind::Car, world.tick, motion::vehicle_of(world, r.rider));
+        motion::board_timed(world, r.rider, RideKind::Cab, car, None, reuse, to, now, arrive, false);
+    }
+}
+
+/// The island pass phase 5 (I3): the cab a body driver's next fare leg
+/// drives: the one he is at the wheel of, else the one his fare is aboard.
+pub fn fare_vehicle(world: &World, driver: EntityId) -> Option<EntityId> {
+    if let Some(v) = crate::systems::motion::vehicle_of(world, driver) {
+        return Some(v);
+    }
+    let r = world.jobs2.cab_rides.iter().find(|r| r.driver == driver && r.body)?;
+    crate::systems::motion::vehicle_of(world, r.rider)
 }
 
 /// The `fares` shape: the driver `driver` moved; a rider aboard his ride
@@ -1578,6 +1596,12 @@ pub fn carry(world: &mut World, driver: EntityId) {
         return;
     };
     if world.jobs2.passengers.get(&r.rider) != Some(&driver) {
+        return;
+    }
+    // The island pass phase 5 (I3): the fare climbs into the cab his driver
+    // is at the wheel of; the vehicle carries him (`motion::advance`).
+    if let Some(v) = crate::systems::motion::vehicle_of(world, driver) {
+        crate::systems::motion::join(world, r.rider, v);
         return;
     }
     let Some(tile) = world.comp::<Position>(driver).filter(|p| p.building.is_none()).map(|p| p.tile) else { return };
