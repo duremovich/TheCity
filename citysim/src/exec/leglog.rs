@@ -78,10 +78,17 @@ pub struct LegLog {
     /// Coarse walker last tick.
     pub walk_track: BTreeMap<EntityId, WalkSeen>,
     /// Each walk's way, by walker (`exec::walk_route`, kept by its depart).
-    pub walk_ways: BTreeMap<EntityId, (Tick, Vec<TilePos>, Tick)>,
+    pub walk_ways: BTreeMap<EntityId, KeptWay>,
     /// The device's sums (`#walk` rows).
     pub walks: WalkSums,
 }
+
+/// A walk's way kept by its walker: (depart, way, arrive).
+pub type KeptWay = (Tick, Vec<TilePos>, Tick);
+
+/// `walk_tick`'s walker now: (id, to, arrive, Position, (depart, arrive)
+/// when the walk has a start).
+type WalkerNow = (EntityId, TilePos, Tick, crate::components::Position, Option<(Tick, Tick)>);
 
 /// `walk_tick`'s last sight of a Coarse walker.
 #[derive(Clone, Copy, Debug)]
@@ -348,7 +355,7 @@ pub fn walk_tick(world: &mut World) {
     }
     // The walkers now: (id, to, arrive, Position, the way to read when on a
     // walk with a start).
-    let mut now: Vec<(EntityId, TilePos, Tick, crate::components::Position, Option<(Tick, Tick)>)> = Vec::new();
+    let mut now: Vec<WalkerNow> = Vec::new();
     for &id in world.tier(Lod::Coarse) {
         let Some(b) = world.comp::<crate::components::Brain>(id) else { continue };
         let ExecState::GotoTimed { target, arrive_tick, walk, .. } = &b.exec else { continue };
@@ -364,7 +371,7 @@ pub fn walk_tick(world: &mut World) {
         .filter(|w| w.4.is_some_and(|(d, _)| log.walk_ways.get(&w.0).is_none_or(|k| k.0 != d)))
         .map(|w| w.0)
         .collect();
-    let fresh: Vec<(EntityId, (Tick, Vec<TilePos>, Tick))> = need
+    let fresh: Vec<(EntityId, KeptWay)> = need
         .into_iter()
         .filter_map(|id| crate::exec::walk_route(world, id).map(|(way, d, a)| (id, (d, way, a))))
         .collect();
