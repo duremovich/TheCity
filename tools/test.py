@@ -49,7 +49,7 @@ TIERS = {
     "change": [
         ("fmt", CARGO + ["fmt", "--all", "--", "--check"]),
         ("clippy", CARGO + ["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"]),
-        ("tests", CARGO + ["test", "--workspace", "--release", "--", "--nocapture"]),
+        ("tests", CARGO + ["test", "--workspace", "--release", "--no-fail-fast", "--", "--nocapture"]),
     ],
     # The ignored tiers run the test binaries the `--no-run` build left in
     # target/release/deps directly: `cargo test -p <one package>` resolves
@@ -227,7 +227,7 @@ def cmd_tier(tier, args):
             results.append({"step": name, "ok": False, "secs": 0.0, "binaries": [], "log": ""})
             continue
         if name == "tests" and args.only:
-            cmd = CARGO + ["test", "--workspace", "--release", "--test", args.only, "--", "--nocapture"]
+            cmd = CARGO + ["test", "--workspace", "--release", "--no-fail-fast", "--test", args.only, "--", "--nocapture"]
         if name == "tests" and beside:
             cmd = cmd + skips
             launch_beside()

@@ -410,6 +410,37 @@ fn test_day_cook_serves_day_customers() {
     lod::set_lod(&mut w, k, Lod::Full);
     // To the end of tomorrow's day shift.
     let end = w.tick - w.tick % TICKS_PER_DAY + TICKS_PER_DAY + u64::from(day[0].1);
+    // The premise by hand: who lives near which bar is the relocation's
+    // (it moves with every phase), so eight off-screen adults with a purse
+    // have a visit queued to his bar across his shift, as the evening's
+    // draw (`leisure::queue_counter`) would leave them.
+    let window = u64::from(
+        w.config.shift.as_ref().and_then(|c| c.counter.as_ref()).map_or(1, |c| c.counter_settle_window.max(1)),
+    );
+    let day0 = w.tick - w.tick % TICKS_PER_DAY + TICKS_PER_DAY;
+    let (lo, hi) = (u64::from(day[0].0), u64::from(day[0].1));
+    let guests: Vec<EntityId> = w
+        .brained()
+        .into_iter()
+        .filter(|&x| w.comp::<Brain>(x).is_some_and(|b| b.lod == Lod::Statistical))
+        .filter(|&x| {
+            law::living(&w, x) && citysim::systems::demography::is_adult(&w, x) && leisure::spendable(&w, x) >= 30
+        })
+        .take(8)
+        .collect();
+    assert!(!guests.is_empty(), "off-screen adults with a purse");
+    for (i, &x) in guests.iter().enumerate() {
+        let at = day0 + lo + (hi - lo) * (i as u64 + 1) / (guests.len() as u64 + 1);
+        w.counter_due.push(leisure::CounterVisit {
+            at: at - at % window,
+            who: x,
+            venue: nb,
+            act: ActionKind::EatOut,
+            evening: None,
+            day: w.day(),
+            k: i as u32,
+        });
+    }
     // The cook's ledger: (customer, visits); a new visit on his shift by an
     // off-screen customer is one the base would have served at 21:00.
     let ledger = |w: &World| {
