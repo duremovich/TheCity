@@ -37,6 +37,23 @@
 //!   `floors_max`). No tile changes and no Lot or plot is taken; the floors
 //!   change hands with the workplace. `CITYSIM_COMPANY_HOUSING2_OFF=1` keeps
 //!   3a's blocks on a Lot, else a plot.
+//! - **Buyouts** (phase 3b, [`buyouts`], `[company_housing.buyout]`, the
+//!   midnight of every `period_days`th day): each corp first moves its far
+//!   staff into the company beds it holds ([`Fill::Far`]: a deviation, the
+//!   housed-far move is otherwise phase 4's, but a bought block nobody
+//!   moves into houses nobody); then its workplace with the most far posts
+//!   over its free company beds (at least `min_want`) buys the nearest plain
+//!   Block within `cap_ticks` (`tier_max` and below), at `price_mult` x its
+//!   value from what it holds above `treasury_ref`, paid to the owner (the
+//!   city when unowned) by `corps::acquire` (`Flow::Sale`, an `Acquired`
+//!   line); a Block it owns already converts at no price. The block gets
+//!   bunks; the staff and their kin stay on the docked rent; every other
+//!   adult tenant gets a `Notice` line and is evicted `grace_days` later
+//!   through `ownership::evict` ("bought out by ...", `World.
+//!   company_notice`), the homeless and rehouse way. Nothing for sale: a
+//!   block on the nearest vacant Lot in reach ([`build_block`],
+//!   `life::pay_housing`). At most `per_corp` a corp a pass. Statistical
+//!   mirror: none needed; the buyout is building-level and tier-blind.
 //! - **Reserved**: no housing path but [`move_in`] puts anyone in a company
 //!   bed ([`open_to_all`] is the filter the other picks read); the staff's
 //!   household (a spouse, the children, a kin taken in) lives with them.
@@ -195,7 +212,7 @@ pub fn seed(world: &mut World) -> (u32, u32) {
         }
         crate::systems::districts::rebuild(world);
         if cfg.fill_at_seed {
-            fill(world, true);
+            fill(world, Fill::Seed);
         }
         return (blocks, beds);
     }
@@ -242,7 +259,7 @@ pub fn seed(world: &mut World) -> (u32, u32) {
         }
     }
     if cfg.fill_at_seed {
-        fill(world, true);
+        fill(world, Fill::Seed);
     }
     (blocks, beds)
 }
@@ -494,14 +511,27 @@ fn plot_clear(world: &World, occ: &Occupancy, x: usize, y: usize, pw: usize, ph:
 /// Midnight, before `ownership::rehouse` (see the module): the staff who
 /// are homeless or were hired today far from work move into a company bed.
 pub fn move_in(world: &mut World) {
-    fill(world, false);
+    fill(world, Fill::Hires);
 }
 
-/// [`move_in`]; `seed` (world build, `fill_at_seed`): every far post's
-/// holder is a candidate, longest commute first, and the movers' bodies
-/// wake in the block (the seed city lives where it is housed).
-fn fill(world: &mut World, seed: bool) {
+/// Who [`fill`] moves into a company bed.
+enum Fill {
+    /// World build (`fill_at_seed`): every far post's holder, longest
+    /// commute first, the bodies waking in the block.
+    Seed,
+    /// Midnight ([`move_in`]): the homeless staff and today's far hires.
+    Hires,
+    /// Phase 3b's buyout pass: these workplaces' far posts' holders (and
+    /// the homeless), longest commute first: the corp moves its far staff
+    /// into the beds it holds before it buys more.
+    Far(Vec<EntityId>),
+}
+
+/// [`move_in`], the seed and the buyout pass (see [`Fill`]).
+fn fill(world: &mut World, mode: Fill) {
     let Some(cfg) = world.config.company_housing.clone() else { return };
+    let seed = matches!(mode, Fill::Seed);
+    let all_far = !matches!(mode, Fill::Hires);
     if world.company_homes.is_empty() {
         return;
     }
@@ -510,7 +540,7 @@ fn fill(world: &mut World, seed: bool) {
     // The workplace -> its standing blocks, ascending.
     let mut blocks: std::collections::BTreeMap<EntityId, Vec<EntityId>> = std::collections::BTreeMap::new();
     for (&h, &w) in &world.company_homes {
-        if standing(world, h) {
+        if standing(world, h) && (!matches!(&mode, Fill::Far(ws) if !ws.contains(&w))) {
             blocks.entry(w).or_default().push(h);
         }
     }
@@ -520,7 +550,7 @@ fn fill(world: &mut World, seed: bool) {
         let Some(wdoor) = door(world, w) else { continue };
         let Some(staff) = staff.get(&w) else { continue };
         let mut staff = staff.clone();
-        if seed {
+        if all_far {
             // Longest commute first (the homeless first of all), ties lower id.
             let key = |a: EntityId| match world.comp::<Household>(a).and_then(|h| h.home).and_then(|h| door(world, h)) {
                 None => Tick::MAX,
@@ -547,7 +577,7 @@ fn fill(world: &mut World, seed: bool) {
             let hired = world.comp::<Job>(a).is_some_and(|j| j.hired_tick >= since && j.hired_tick > 0);
             let take = match home {
                 None => true,
-                Some(_) => (seed || hired) && far_post(world, a, wdoor, cfg.far_ticks),
+                Some(_) => (all_far || hired) && far_post(world, a, wdoor, cfg.far_ticks),
             };
             if !take {
                 continue;
@@ -714,23 +744,313 @@ pub fn evictions(world: &mut World) {
         world.company_lapsed.keys().copied().filter(|&a| entitled.contains(&a) || !housed(world, a)).collect();
     for a in stale {
         world.company_lapsed.remove(&a);
+        world.company_notice.remove(&a);
     }
     for a in lapsed_now {
         world.company_lapsed.insert(a, tick);
     }
     for (a, h, w) in due {
         world.company_lapsed.remove(&a);
+        let notice = world.company_notice.remove(&a);
         if world.comp::<Household>(a).and_then(|x| x.home) != Some(h) {
             continue;
         }
-        let why = format!("the job at {} ended: company housing", world.name_of(w));
+        let why = if notice {
+            format!("bought out by {}: company housing", world.owner_label(world.owner_of(h)))
+        } else {
+            format!("the job at {} ended: company housing", world.name_of(w))
+        };
         let before = world.stats.current.evictions;
         crate::systems::ownership::evict(world, a, &why);
         let n = world.stats.current.evictions.saturating_sub(before);
-        crate::systems::ownership::jobs2_row(world).company_evicted += n;
+        let row = crate::systems::ownership::jobs2_row(world);
+        if notice {
+            row.company_buyout_evicted += n;
+        } else {
+            row.company_evicted += n;
+        }
         // The spouse put out with him is no longer lapsed.
         if let Some(s) = world.spouse_of(a) {
             world.company_lapsed.remove(&s);
+            world.company_notice.remove(&s);
+        }
+    }
+}
+
+/// The free company beds `w`'s blocks and floors hold.
+fn free_beds(world: &World, w: EntityId) -> usize {
+    world
+        .company_homes
+        .iter()
+        .filter(|&(&h, &x)| x == w && standing(world, h))
+        .filter_map(|(&h, _)| {
+            let cap = usize::from(world.comp::<Building>(h)?.capacity);
+            Some(cap.saturating_sub(world.residents_of(h).len()))
+        })
+        .sum()
+}
+
+/// What `corp` may spend on a buyout: its treasury, less `treasury_ref`
+/// with `reserve` (as a bankruptcy buyer).
+fn spendable(world: &World, corp: EntityId, reserve: bool) -> i64 {
+    world.comp::<crate::components::Corp>(corp).map_or(0, |c| c.treasury - if reserve { c.treasury_ref } else { 0 })
+}
+
+/// A block's value with `floors` storeys: `ownership::value(Home)` for the
+/// first, `[floors] floor_cost_frac` of it for each further one.
+fn block_value(world: &World, floors: u8) -> i64 {
+    let v = crate::systems::ownership::value(world, BuildingKind::Home) as f32;
+    let extra = f32::from(floors.max(1) - 1) * world.config.floors.floor_cost_frac;
+    (v * (1.0 + extra)).round() as i64
+}
+
+/// Phase 3b (I6): the plain Block a corp may buy for workplace door
+/// `wdoor`: standing, open to all, not floors inside a workplace, not a
+/// shanty, under construction or of a tier past `tier_max`, its door
+/// within `cap_ticks`; nearest first, ties lower id.
+fn for_sale(
+    world: &World,
+    buy: &crate::config::CompanyBuyoutCfg,
+    wdoor: crate::components::TilePos,
+) -> Option<EntityId> {
+    world
+        .buildings_of_kind(BuildingKind::Home)
+        .iter()
+        .copied()
+        .filter(|&h| open_to_all(world, h) && !crate::systems::street::is_shanty(world, h))
+        .filter_map(|h| {
+            let b = world.comp::<Building>(h)?;
+            if b.demolished
+                || b.derelict
+                || b.within.is_some()
+                || b.under_construction_until.is_some()
+                || b.tier > buy.tier_max
+            {
+                return None;
+            }
+            let t = crate::systems::distance::travel(world, b.door, wdoor);
+            (t <= buy.cap_ticks).then_some((t, h))
+        })
+        .min()
+        .map(|(_, h)| h)
+}
+
+/// The bunks a block converted (or built) for company housing holds:
+/// `bunks_per_floor` a floor, the interior allowing; never fewer than now.
+fn bunks(world: &World, buy: &crate::config::CompanyBuyoutCfg, h: EntityId) -> u16 {
+    let Some(b) = world.comp::<Building>(h) else { return 0 };
+    let interior = usize::from(b.rect.w.saturating_sub(2)) * usize::from(b.rect.h.saturating_sub(2));
+    let per = u16::try_from(interior).unwrap_or(u16::MAX).min(buy.bunks_per_floor).max(1);
+    crate::systems::founding::with_floors(world, BuildingKind::Home, per, b.floors.max(1)).max(b.capacity)
+}
+
+/// Phase 3b (I6): block `h`, now `corp`'s, becomes company housing for
+/// `w`'s staff: bunks, the company rent, and every adult tenant with no one
+/// in the household on the staff given notice (a `Notice` line; evicted
+/// `grace_days` on by [`evictions`], the staff and their kin staying on the
+/// docked rent). Returns the notices given.
+fn convert(world: &mut World, buy: &crate::config::CompanyBuyoutCfg, corp: EntityId, w: EntityId, h: EntityId) -> u32 {
+    let cap = bunks(world, buy, h);
+    if let Some(b) = world.comp_mut::<Building>(h) {
+        b.capacity = cap;
+        b.empty_since = None;
+    }
+    world.company_homes.insert(h, w);
+    let rent = rent_tenths(world, h) / 10;
+    if let Some(b) = world.comp_mut::<Building>(h) {
+        b.rent_per_day = rent;
+    }
+    let grace = world.config.company_housing.as_ref().map_or(0, |c| c.grace_days);
+    let tick = world.tick;
+    let residents = world.residents_of(h).to_vec();
+    let staffed: Vec<EntityId> = residents.iter().copied().filter(|&r| on_staff(world, r, h)).collect();
+    let (label, place, what) = (world.owner_label(Some(corp)), world.name_of(h), world.name_of(w));
+    let mut notices = 0u32;
+    for r in residents {
+        if world.has::<Child>(r) || !world.has::<Brain>(r) {
+            continue;
+        }
+        let kin = staffed.iter().any(|&s| {
+            s == r
+                || world.spouse_of(s) == Some(r)
+                || crate::systems::demography::is_child_of(world, r, s)
+                || crate::systems::demography::is_child_of(world, s, r)
+        });
+        if kin {
+            continue;
+        }
+        world.company_lapsed.insert(r, tick);
+        world.company_notice.insert(r);
+        notices += 1;
+        let name = world.name_of(r);
+        world.push_event(
+            EventKind::Notice,
+            &[corp, r, h],
+            format!(
+                "{name} was given notice at {place}: {label} bought it as company housing for {what}'s staff (out in {grace} days)"
+            ),
+        );
+    }
+    notices
+}
+
+/// Phase 3b (I6): with nothing for sale in reach, a block on the nearest
+/// plain vacant Lot within `cap_ticks` of `wdoor` (ties lower id), the
+/// storeys the want asks for, `corp` paying the build (`life::pay_housing`,
+/// a Grow build's path: a Construction Yard, else the Treasury). `None`: no
+/// Lot in reach, or the corp cannot pay.
+fn build_block(
+    world: &mut World,
+    cfg: &crate::config::CompanyHousingCfg,
+    buy: &crate::config::CompanyBuyoutCfg,
+    corp: EntityId,
+    w: EntityId,
+    want: u32,
+) -> Option<EntityId> {
+    let wdoor = door(world, w)?;
+    let lot = crate::systems::founding::vacant_lots(world)
+        .into_iter()
+        .filter(|&l| !crate::systems::street::is_shanty(world, l))
+        .filter_map(|l| {
+            let t = crate::systems::distance::travel(world, door(world, l)?, wdoor);
+            (t <= buy.cap_ticks).then_some((t, l))
+        })
+        .min()
+        .map(|(_, l)| l)?;
+    let floors = {
+        let b = world.comp::<Building>(lot)?;
+        let per = (usize::from(b.rect.w.saturating_sub(2)) * usize::from(b.rect.h.saturating_sub(2)))
+            .min(usize::from(buy.bunks_per_floor))
+            .max(1) as u32;
+        let own = b.floors.max(1);
+        u8::try_from(want.div_ceil(per)).unwrap_or(u8::MAX).clamp(own, cfg.floors_max.max(own))
+    };
+    let cost = block_value(world, floors);
+    if spendable(world, corp, buy.reserve) < cost {
+        return None;
+    }
+    if let Some(b) = world.comp_mut::<Building>(lot) {
+        b.floors = floors;
+    }
+    crate::systems::life::pay_housing(world, Some(corp), cost);
+    crate::systems::founding::build_on_lot(world, lot, BuildingKind::Home, Some(corp)).ok()?;
+    let cap = bunks(world, buy, lot);
+    let pantry = world.config.world.home_pantry_initial;
+    if let Some(b) = world.comp_mut::<Building>(lot) {
+        b.capacity = cap;
+        b.stock_food = pantry;
+    }
+    world.company_homes.insert(lot, w);
+    let rent = rent_tenths(world, lot) / 10;
+    if let Some(b) = world.comp_mut::<Building>(lot) {
+        b.rent_per_day = rent;
+    }
+    let (place, label, what) = (world.name_of(lot), world.owner_label(Some(corp)), world.name_of(w));
+    world.push_event(
+        EventKind::Founded,
+        &[corp, lot, w],
+        format!("{place} goes up as {label}'s company housing for {what}'s staff ({cap} beds, {cost} paid): nothing near was for sale"),
+    );
+    crate::systems::ownership::jobs2_row(world).company_built += 1;
+    Some(lot)
+}
+
+/// Phase 3b (I6, `[company_housing.buyout]`), the midnight pass on days
+/// divisible by `period_days`, after [`evictions`] and before [`move_in`]:
+/// each corp's workplaces of the kinds first move their far staff into the
+/// company beds they hold ([`Fill::Far`]); then a workplace whose far posts
+/// still outnumber its free company beds by `min_want` buys the nearest
+/// plain Block in reach ([`for_sale`]) at `price_mult` x its value, paid to
+/// the owner (the city when unowned; nothing when the corp owns it) by
+/// `corps::acquire` (`Flow::Sale`, an `Acquired` line), converts it
+/// ([`convert`]: the tenants not on the staff given notice) and moves its
+/// far staff in; with nothing for sale, a block on a Lot ([`build_block`]).
+/// At most `per_corp` a corp a pass, its most-wanting workplace first (ties
+/// lower id); corps ascending. No RNG; no coin made or lost.
+pub fn buyouts(world: &mut World) {
+    let Some(cfg) = world.config.company_housing.clone() else { return };
+    let Some(buy) = cfg.buyout.clone() else { return };
+    if buy.period_days == 0 || !world.day().is_multiple_of(u64::from(buy.period_days)) {
+        return;
+    }
+    let mut by_corp: std::collections::BTreeMap<EntityId, Vec<EntityId>> = std::collections::BTreeMap::new();
+    for &k in &cfg.kinds {
+        for &w in world.buildings_of_kind(k) {
+            if !standing(world, w) {
+                continue;
+            }
+            if let Some(c) = world.owner_of(w).filter(|&o| world.has::<crate::components::Corp>(o)) {
+                by_corp.entry(c).or_default().push(w);
+            }
+        }
+    }
+    let all: Vec<EntityId> = by_corp.values().flatten().copied().collect();
+    fill(world, Fill::Far(all));
+    for (corp, mut ws) in by_corp {
+        ws.sort_unstable();
+        ws.dedup();
+        let staff = crate::systems::ownership::staff_by_building(world, &ws);
+        let mut want: Vec<(std::cmp::Reverse<u32>, EntityId)> = Vec::new();
+        for &w in &ws {
+            let Some(wdoor) = door(world, w) else { continue };
+            let far =
+                staff.get(&w).map_or(0, |s| s.iter().filter(|&&a| far_post(world, a, wdoor, cfg.far_ticks)).count());
+            let n = far.saturating_sub(free_beds(world, w)) as u32;
+            if n >= buy.min_want.max(1) {
+                want.push((std::cmp::Reverse(n), w));
+            }
+        }
+        want.sort_unstable();
+        let mut done = 0u32;
+        for (std::cmp::Reverse(n), w) in want {
+            if done >= buy.per_corp {
+                break;
+            }
+            let Some(wdoor) = door(world, w) else { continue };
+            let what = world.name_of(w);
+            let got = match for_sale(world, &buy, wdoor) {
+                Some(h) => {
+                    let owner = world.owner_of(h);
+                    let floors = world.comp::<Building>(h).map_or(1, |b| b.floors);
+                    let price = (block_value(world, floors) as f32 * buy.price_mult).round() as i64;
+                    if owner == Some(corp) {
+                        let place = world.name_of(h);
+                        let label = world.owner_label(Some(corp));
+                        world.push_event(
+                            EventKind::Founded,
+                            &[corp, h, w],
+                            format!("{label} turns its {place} into company housing for {what}'s staff"),
+                        );
+                        Some(h)
+                    } else if spendable(world, corp, buy.reserve) >= price
+                        && crate::systems::corps::acquire(
+                            world,
+                            corp,
+                            h,
+                            price,
+                            &format!("company housing for {what}'s staff"),
+                        )
+                    {
+                        Some(h)
+                    } else {
+                        None
+                    }
+                }
+                None if buy.build_fallback => build_block(world, &cfg, &buy, corp, w, n),
+                None => None,
+            };
+            let Some(h) = got else { continue };
+            let built = world.comp::<Building>(h).is_some_and(|_| world.company_homes.contains_key(&h));
+            let notices = if built { 0 } else { convert(world, &buy, corp, w, h) };
+            {
+                let row = crate::systems::ownership::jobs2_row(world);
+                row.company_notices += notices;
+                if !built {
+                    row.company_buyouts += 1;
+                }
+            }
+            fill(world, Fill::Far(vec![w]));
+            done += 1;
         }
     }
 }

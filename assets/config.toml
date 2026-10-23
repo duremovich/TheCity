@@ -4406,6 +4406,25 @@ rooms = [
     { kind = "Warehouse", name = "Loft Bunks", below = false },
 ]
 
+# The island pass phase 3b (I6): buyouts. At the midnight pass every period_days, a corp whose workplace (of the kinds
+# above) still has min_want far posts more than free company beds buys the nearest plain Block within cap_ticks of it
+# (tier_max and below, not its own company housing, ties lower id) at price_mult x its value, paid to the owner (the city
+# when unowned) through corps::acquire (Flow::Sale), and converts it: its beds become bunks, its staff tenants stay on the
+# docked company rent, every other tenant gets a Notice and is evicted grace_days later (the company town's leverage).
+# Nothing for sale in reach: a block on the nearest vacant Lot within cap_ticks (build_fallback), paid as a Grow build.
+[company_housing.buyout]
+period_days = 7                    # the buyout pass runs on the midnights of days divisible by this (weekly)
+per_corp = 1                       # buyouts (or fallback builds) a corp makes a pass, its most-wanting workplace first
+min_want = 12                      # a workplace buys when its far posts less its free company beds reach this (two
+                                   # plain Blocks' worth; 3a's min_beds seeds from 6)
+cap_ticks = 120                    # the block's door within this travel of the workplace door (= far_ticks: a bought bed
+                                   # past it would be a far bed)
+tier_max = 1                       # Sump and Mid Blocks only: no corp turns a Spire tower into a bunkhouse
+price_mult = 1.2                   # x the block's value ([corps] found_cost.home a floor, further floors at
+                                   # [floors] floor_cost_frac); 1.2 is [corps] acquire_premium, a hostile buy's
+reserve = true                     # the corp pays only from what it holds above treasury_ref, as a bankruptcy buyer
+bunks_per_floor = 30               # the converted block's beds a floor, the interior allowing (= beds_per_floor)
+build_fallback = true              # nothing for sale in reach: build on the nearest vacant Lot within cap_ticks
 
 # The pre-view pass phase 6 (docs/PREVIEW_PASS.md § 0 P9, P13-P15; systems/leaders.rs; OPEN-118, OPEN-128): the
 # leader's visible half, for a leader with a body (Full or Coarse). A Statistical leader keeps the off-screen path

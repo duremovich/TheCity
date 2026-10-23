@@ -1520,6 +1520,8 @@ pub fn run(world: &mut World) {
         // The island pass phase 3a (I6): the company beds' grace and
         // evictions, then the staff who move in, before the city's rehouse.
         crate::systems::company::evictions(world);
+        // The island pass phase 3b: the weekly buyouts.
+        crate::systems::company::buyouts(world);
         crate::systems::company::move_in(world);
         rehouse(world);
     }
