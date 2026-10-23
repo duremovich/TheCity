@@ -136,6 +136,14 @@ pub fn ride_tick(world: &mut World) {
             _ => continue,
         };
         let Some(p) = world.comp::<crate::components::Position>(id) else { continue };
+        // A body set down on an El stop this tick (`transit::run` alights
+        // after the step) is the El's: its jump is the El's (phase 6).
+        let mode =
+            if world.transit.net.stops.contains(&p.tile) && log.ride_track.get(&id).is_some_and(|r| r.tile != p.tile) {
+                "el"
+            } else {
+                mode
+            };
         seen.push((id, mode, b.lod == Lod::Full, p.tile));
     }
     // The landing: a body watched last tick and off its leg now (a demotion
@@ -163,9 +171,11 @@ pub fn ride_tick(world: &mut World) {
                 RideSeen { last: tick, mode, full, ..r }
             }
             Some(r) if r.last + 1 == tick => {
-                // A jump is the mode it left (the El's alighting, a landing).
+                // A jump is the mode it left (a landing), or the El's when
+                // it set him down on its stop.
                 if r.tile.manhattan(tile) > RIDE_JUMP_TILES {
-                    log.ride_days.entry((day, id, r.mode, r.full)).or_default()[1] = true;
+                    let m = if mode == "el" { mode } else { r.mode };
+                    log.ride_days.entry((day, id, m, r.full)).or_default()[1] = true;
                 }
                 RideSeen { tile, since: tick, last: tick, mode, full }
             }
