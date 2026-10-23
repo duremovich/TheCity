@@ -304,7 +304,13 @@ use crate::world::World;
 /// written only when set; serde default `None`), `World.motions` and
 /// `World.aboard` (written only when non-empty: a save mid-ride resumes the
 /// vehicle and its riders). An off save is byte-identical to version 58's.
-pub const SAVE_VERSION: u8 = 59;
+/// 60 (the island pass phase 6, OPEN-165, I3): `MotionCfg.trains`
+/// (`[motion.trains]`, written only when set), the trains' motions
+/// (`RideKind::Train`, `Route::Line`), `TransitState.trains`, `boarding`,
+/// `held` and `evac`, and `Ride.legs`/`Ride.leg` (each written only when
+/// non-empty): a save mid-ride resumes the train and its riders. An off save
+/// is byte-identical to version 59's.
+pub const SAVE_VERSION: u8 = 60;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
