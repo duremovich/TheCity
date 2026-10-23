@@ -6,7 +6,7 @@ Read on 2026-10-23: main `468c635` (the island pass, phases 0-10) with the V7 to
 Part 2 (seven critics and a synthesis) follows from the critic brief at the end.
 
 V7's diaries are kept in main's `D:/TheCity/target/shadow_v7/`, V8's beside them in `D:/TheCity/target/shadow_v8/`
-(377 MB). Every V7 figure below is re-read from V7's tree with the same script that reads V8's, unless it says "V7 quoted".
+(417 MB). Every V7 figure below is re-read from V7's tree with the same script that reads V8's, unless it says "V7 quoted".
 
 ## Setup
 
@@ -22,8 +22,8 @@ V7's diaries are kept in main's `D:/TheCity/target/shadow_v7/`, V8's beside them
   are the same person in both (the corp critic's `ceo_17908` and `ceo_21278`, the retiree `worker_6720`; the list is
   `overlap.py`'s, § Critic brief). V8 compares archetypes one for one, not people.
 - **Scripts** (in the run tree): `diary_rows.md` (the diary measures, both trees), `counters.md` (the counters and
-  the leg device), `walls.txt`, `ab.txt`. The run and analysis scripts are in the runs report's scratchpad
-  (`lane_a4.sh`, `lane_b.sh`, `v8_diaries.py`, `v8_counters.py`, `ab_v8.py`).
+  the leg device), `walls.txt`, `ab.txt`. The run and analysis scripts are in `shadow_v8/scripts/` (`lane_a4.sh`,
+  `lane_b.sh`, `v8_diaries.py`, `v8_counters.py`, `ab_v8.py`, `overlap.py`, `murders_bisect.sh`).
 
 **Tool changes** (`citysim-cli/src/shadow.rs` only; read-only, no RNG). The island pass put riders aboard vehicles
 in motion (I3), and V7's lens still used the old timed speeds. It read an El train's 7 tiles a minute as a jump
