@@ -34,6 +34,7 @@ Distance comes before vehicles: with 4-hour commutes every ride is absurd, so ve
 | 6 | I3: the El as trains running the line (`systems/transit.rs`) | 165 |
 | 7 | I3: the van: the escort and the prisoner transfer replacing the 04:00 jump (`stations.rs:347`), and the arrest hand-off | 166 |
 | 8 | I4's bugs: the courier/builder `Unload`, island foremen hires and the day labourer, the arms dealer appointment, the cab's body driver at 20k | 168 (part) |
+| 9 | Coarse bodies stacked mid-`GotoTimed` (`OPEN-181`, found by the graphics integration bridge): a timed walk keeps its body on its path, and a promotion mid-route places it there | 181 |
 | gate | Shadow V8 on the island (`isle_m_k2`, 20k, seeds 42-44) against `target/shadow_v7/`, V7's tool, windows and critics | — |
 
 **Re-read at the gate, not fixed here unless V8 says so:** island hunger at d90 (`OPEN-167`, I5); the remaining
