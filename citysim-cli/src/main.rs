@@ -1665,6 +1665,7 @@ fn run(args: RunArgs) -> Result<(), String> {
             citysim::tick(&mut world);
             citysim::exec::leglog::leader_tick(&mut world);
             citysim::exec::leglog::ride_tick(&mut world);
+            citysim::exec::leglog::walk_tick(&mut world);
             if world.leg_log.is_some() && world.tick % TICKS_PER_DAY == 180 {
                 citysim::exec::leglog::night_census(&mut world);
             }

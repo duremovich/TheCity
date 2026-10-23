@@ -74,6 +74,61 @@ pub struct LegLog {
     pub el_trips: Vec<[u32; 2]>,
     /// Every El leg done: its estimate at the start and its ticks.
     pub el_fit: Vec<(Tick, Tick)>,
+    /// The island pass phase 9 (OPEN-181's device, `walk_tick`): each
+    /// Coarse walker last tick.
+    pub walk_track: BTreeMap<EntityId, WalkSeen>,
+    /// Each walk's way, by walker (`exec::walk_route`, kept by its depart).
+    pub walk_ways: BTreeMap<EntityId, KeptWay>,
+    /// The device's sums (`#walk` rows).
+    pub walks: WalkSums,
+}
+
+/// A walk's way kept by its walker: (depart, way, arrive).
+pub type KeptWay = (Tick, Vec<TilePos>, Tick);
+
+/// `walk_tick`'s walker now: (id, to, arrive, Position, (depart, arrive)
+/// when the walk has a start).
+type WalkerNow = (EntityId, TilePos, Tick, crate::components::Position, Option<(Tick, Tick)>);
+
+/// `walk_tick`'s last sight of a Coarse walker.
+#[derive(Clone, Copy, Debug)]
+pub struct WalkSeen {
+    /// The walk: its target tile and arrival.
+    pub to: TilePos,
+    pub arrive: Tick,
+    /// Its `Position` when first seen on it (the base's start).
+    pub start: TilePos,
+    pub first: Tick,
+    /// Where it is drawn (`exec::walk_place`), since when.
+    pub tile: TilePos,
+    pub since: Tick,
+    pub parked: bool,
+}
+
+/// OPEN-181's device sums.
+#[derive(Clone, Debug, Default)]
+pub struct WalkSums {
+    /// Walker-ticks seen on the street, and those sharing a tile with a
+    /// walker bound elsewhere.
+    pub ticks: u64,
+    pub stacked: u64,
+    /// The most walkers bound for at least two places on one tile, its tick
+    /// and tile.
+    pub stack_max: (u32, Tick, TilePos),
+    /// The same, of walkers standing still there `WALK_STILL_TICKS` (the
+    /// parked stack).
+    pub still: u64,
+    pub still_max: (u32, Tick, TilePos),
+    /// Walks seen, and those whose body stood `RIDE_PARKED_TICKS` on one
+    /// tile mid-walk.
+    pub walks: u64,
+    pub parked: u64,
+    /// Promotions to Full mid-walk; of them, a body whose first Full tile is
+    /// more than `RIDE_JUMP_TILES` from where it was drawn, and a body
+    /// restarted at the walk's start past its first tick.
+    pub promoted: u64,
+    pub promo_jumps: u64,
+    pub promo_restart: u64,
 }
 
 /// `ride_tick`'s last sight of a rider.
@@ -92,6 +147,9 @@ pub const RIDE_PARKED_TICKS: Tick = 60;
 /// The device's jump: a body on a vehicle leg moved farther than this in
 /// one tick (a car makes ~1-3 tiles a tick, a flyer ~3-4; measurement only).
 pub const RIDE_JUMP_TILES: u32 = 12;
+/// The walk device's still stack: walkers on one tile this long
+/// (measurement only).
+pub const WALK_STILL_TICKS: Tick = 4;
 
 /// The vehicle legs' modes (`start`'s): the cab, a body driver's fare leg,
 /// the exec's car, the El, a flyer, a drive.
@@ -277,6 +335,139 @@ pub fn ride_tick(world: &mut World) {
     log.ride_track.retain(|_, r| r.last == tick);
 }
 
+/// Every tick (`run --legs`, the island pass phase 9's device, OPEN-181):
+/// each Coarse body on a timed walk on foot (`GotoTimed`, aboard nothing)
+/// is drawn where the view draws it (`exec::walk_place`; the base: its
+/// `Position`, indoors not drawn). Sums: walker-ticks sharing a street tile
+/// with a walker bound elsewhere and the largest such stack; walks parked
+/// `RIDE_PARKED_TICKS` on one tile; promotions to Full mid-walk that jump
+/// or restart at the walk's start. `#walk` rows. Measurement only.
+pub fn walk_tick(world: &mut World) {
+    use crate::exec::ExecState;
+    let Some(log) = world.leg_log.as_ref() else { return };
+    let tick = world.tick;
+    // Promotions: a walker last tick, Full now.
+    let mut promos: Vec<(WalkSeen, Option<TilePos>)> = Vec::new();
+    for (&id, r) in &log.walk_track {
+        if world.comp::<crate::components::Brain>(id).is_some_and(|b| b.lod == Lod::Full) {
+            promos.push((*r, landed_at(world, id)));
+        }
+    }
+    // The walkers now: (id, to, arrive, Position, the way to read when on a
+    // walk with a start).
+    let mut now: Vec<WalkerNow> = Vec::new();
+    for &id in world.tier(Lod::Coarse) {
+        let Some(b) = world.comp::<crate::components::Brain>(id) else { continue };
+        let ExecState::GotoTimed { target, arrive_tick, walk, .. } = &b.exec else { continue };
+        if world.aboard.contains_key(&id) || *arrive_tick == Tick::MAX {
+            continue;
+        }
+        let Some(p) = world.comp::<crate::components::Position>(id) else { continue };
+        now.push((id, target.tile, *arrive_tick, p.clone(), walk.map(|w| (w.depart, *arrive_tick))));
+    }
+    // The ways not yet kept (one road search a walk).
+    let need: Vec<EntityId> = now
+        .iter()
+        .filter(|w| w.4.is_some_and(|(d, _)| log.walk_ways.get(&w.0).is_none_or(|k| k.0 != d)))
+        .map(|w| w.0)
+        .collect();
+    let fresh: Vec<(EntityId, KeptWay)> = need
+        .into_iter()
+        .filter_map(|id| crate::exec::walk_route(world, id).map(|(way, d, a)| (id, (d, way, a))))
+        .collect();
+    let Some(log) = world.leg_log.as_mut() else { return };
+    for (id, k) in fresh {
+        log.walk_ways.insert(id, k);
+    }
+    let s = &mut log.walks;
+    for (r, at) in promos {
+        s.promoted += 1;
+        if at.is_some_and(|t| t.manhattan(r.tile) > RIDE_JUMP_TILES) {
+            s.promo_jumps += 1;
+        }
+        let far = r.start.manhattan(r.to) > 8;
+        let late = (tick - r.first) * 4 >= r.arrive.saturating_sub(r.first);
+        if far && late && at.is_some_and(|t| t.manhattan(r.start) <= 2) {
+            s.promo_restart += 1;
+        }
+    }
+    // Drawn: on the way, else the street tile (indoors is not drawn).
+    let mut drawn: Vec<(EntityId, TilePos, TilePos, Tick, TilePos)> = Vec::new();
+    for (id, to, arrive, p, walk) in now {
+        let tile = match walk.and_then(|_| log.walk_ways.get(&id)) {
+            Some((d, way, a)) => crate::systems::motion::timed_pos(way, *d, *a, tick),
+            None if p.building.is_none() => p.tile,
+            None => {
+                // Indoors: still a walk (parked), not on the street.
+                drawn.push((id, TilePos::new(u16::MAX, u16::MAX), to, arrive, p.tile));
+                continue;
+            }
+        };
+        drawn.push((id, tile, to, arrive, p.tile));
+    }
+    // Stacks: street tiles holding walkers bound for two places or more.
+    // A still stack: its walkers have stood there `WALK_STILL_TICKS` (a
+    // walk at 2 ticks a tile passes a tile in 1-2; a crowd off one door
+    // walks one road together a while).
+    let mut by_tile: BTreeMap<(bool, TilePos), (u32, TilePos, bool)> = BTreeMap::new();
+    for &(id, tile, to, arrive, _) in &drawn {
+        if tile.x == u16::MAX {
+            continue;
+        }
+        let still = log
+            .walk_track
+            .get(&id)
+            .is_some_and(|r| r.to == to && r.arrive == arrive && r.tile == tile && tick - r.since >= WALK_STILL_TICKS);
+        let keys: &[bool] = if still { &[false, true] } else { &[false] };
+        for &k in keys {
+            let e = by_tile.entry((k, tile)).or_insert((0, to, false));
+            e.0 += 1;
+            e.2 |= e.1 != to;
+        }
+    }
+    for (&(still, tile), &(n, _, mixed)) in &by_tile {
+        if !mixed {
+            continue;
+        }
+        if still {
+            s.still += u64::from(n);
+            if n > s.still_max.0 {
+                s.still_max = (n, tick, tile);
+            }
+            continue;
+        }
+        s.stacked += u64::from(n);
+        if n > s.stack_max.0 {
+            s.stack_max = (n, tick, tile);
+        }
+    }
+    s.ticks += drawn.iter().filter(|d| d.1.x != u16::MAX).count() as u64;
+    let mut track: BTreeMap<EntityId, WalkSeen> = BTreeMap::new();
+    for (id, tile, to, arrive, pos) in drawn {
+        let next = match log.walk_track.get(&id) {
+            Some(r) if r.to == to && r.arrive == arrive => {
+                let mut r = *r;
+                if r.tile != tile {
+                    r.tile = tile;
+                    r.since = tick;
+                } else if !r.parked && tick - r.since >= RIDE_PARKED_TICKS {
+                    r.parked = true;
+                    s.parked += 1;
+                }
+                r
+            }
+            _ => {
+                s.walks += 1;
+                WalkSeen { to, arrive, start: pos, first: tick, tile, since: tick, parked: false }
+            }
+        };
+        track.insert(id, next);
+    }
+    log.walk_track = track;
+    let live = &log.walk_track;
+    log.walk_ways.retain(|id, _| live.contains_key(id));
+}
+
 /// Who `id` is, for the table: the trade's key, the built-in role, a corp
 /// exec, or none.
 fn who(world: &World, id: EntityId) -> String {
@@ -431,6 +622,27 @@ pub fn tsv(world: &World) -> String {
         let tier = if *full { "full" } else { "coarse" };
         out.push_str(&format!("#ride\t{m}\t{tier}\t{}\t{}\t{}\t{}\n", r[0], r[1], r[2], r[3]));
     }
+    // The island pass phase 9 (OPEN-181's device): the Coarse walks.
+    let w = &log.walks;
+    out.push_str(&format!(
+        "#walk\tticks\t{}\tstacked\t{}\tstack_max\t{}\tat\t{}\t{},{}\tstill\t{}\tstill_max\t{}\tat\t{}\t{},{}\twalks\t{}\tparked\t{}\tpromoted\t{}\tjumps\t{}\trestarts\t{}\n",
+        w.ticks,
+        w.stacked,
+        w.stack_max.0,
+        w.stack_max.1,
+        w.stack_max.2.x,
+        w.stack_max.2.y,
+        w.still,
+        w.still_max.0,
+        w.still_max.1,
+        w.still_max.2.x,
+        w.still_max.2.y,
+        w.walks,
+        w.parked,
+        w.promoted,
+        w.promo_jumps,
+        w.promo_restart
+    ));
     // The island pass phase 6's device: the El rides' platform and aboard
     // ticks (median, p90), the El legs' estimate against their ticks, the
     // trains' events, the structural commutes at 240 min or more.

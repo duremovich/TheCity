@@ -1365,6 +1365,7 @@ pub fn full_cab(world: &mut World, id: EntityId, target: &crate::exec::GotoTarge
             target: target.clone(),
             arrive_tick: Tick::MAX,
             blocked_since: None,
+            walk: None,
         });
     }
     if fares_on(world) {
@@ -1395,7 +1396,12 @@ pub fn full_cab(world: &mut World, id: EntityId, target: &crate::exec::GotoTarge
     }
     let d = world.district_of(here);
     ride_encounter(world, id, driver.map(|(s, _)| s), &ride, d);
-    Some(crate::exec::ExecState::GotoTimed { target: target.clone(), arrive_tick: arrive, blocked_since: None })
+    Some(crate::exec::ExecState::GotoTimed {
+        target: target.clone(),
+        arrive_tick: arrive,
+        blocked_since: None,
+        walk: None,
+    })
 }
 
 /// 8d (OPEN-129, Dylan 2026-10-19): `exec::start_step`, an exec's `GoTo`
@@ -1497,7 +1503,12 @@ pub fn exec_ride(world: &mut World, id: EntityId, target: &crate::exec::GotoTarg
         row.exec_rides_home += 1;
     }
     let arrive = world.tick + cab_ticks(world, here, target.tile);
-    Some(crate::exec::ExecState::GotoTimed { target: target.clone(), arrive_tick: arrive, blocked_since: None })
+    Some(crate::exec::ExecState::GotoTimed {
+        target: target.clone(),
+        arrive_tick: arrive,
+        blocked_since: None,
+        walk: None,
+    })
 }
 
 /// The pre-view pass phase 5 (OPEN-140's remainder): the ticks of the car
@@ -1669,7 +1680,7 @@ fn release(world: &mut World, r: &CabRide, arrived: bool) {
     };
     let to = target.tile;
     if let Some(b) = world.comp_mut::<Brain>(r.rider) {
-        b.exec = crate::exec::ExecState::GotoTimed { target, arrive_tick: arrive, blocked_since: None };
+        b.exec = crate::exec::ExecState::GotoTimed { target, arrive_tick: arrive, blocked_since: None, walk: None };
     }
     // The island pass phase 5 (I3): the off-screen cab takes him on in the
     // vehicle he is aboard (else one comes to his door), from where it is.
@@ -1763,7 +1774,7 @@ pub fn fare_leg(world: &World, id: EntityId, target: &crate::exec::GotoTarget) -
     }
     let here = crate::exec::walk_origin(world, id)?;
     let arrive_tick = world.tick + cab_ticks(world, here, target.tile);
-    Some(crate::exec::ExecState::GotoTimed { target: target.clone(), arrive_tick, blocked_since: None })
+    Some(crate::exec::ExecState::GotoTimed { target: target.clone(), arrive_tick, blocked_since: None, walk: None })
 }
 
 /// `plan::plan_for`'s Work arm (after the round): a cab driver on shift

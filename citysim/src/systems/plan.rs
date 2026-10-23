@@ -532,6 +532,8 @@ fn install(world: &mut World, id: EntityId, plan: Plan) {
     if !world.aboard.is_empty() && !world.jobs2.passengers.contains_key(&id) {
         crate::systems::motion::alight(world, id);
     }
+    // The island pass phase 9 (OPEN-181): so does a walk cut short.
+    crate::exec::settle_interrupted(world, id);
     if let Some(b) = world.comp_mut::<Brain>(id) {
         b.plan = Some(plan);
         b.plan_step = 0;

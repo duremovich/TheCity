@@ -64,6 +64,12 @@ pub enum ExecState {
         /// When the agent first found the building full on arrival.
         #[serde(default)]
         blocked_since: Option<Tick>,
+        /// The island pass phase 9 (OPEN-181): a timed walk on foot's start
+        /// (`timed_goto`): the body is on its way from `from` to the
+        /// target at `depart..=arrive_tick` (`walk_place`). `None`: no walk
+        /// (a ride, the door queue's retry, `[motion.walks]` off).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        walk: Option<Walk>,
     },
     Use {
         kind: ActionKind,
@@ -98,6 +104,15 @@ pub enum ExecState {
         run: crate::virt::RunId,
         since: Tick,
     },
+}
+
+/// The island pass phase 9 (OPEN-181): where and when a Coarse timed walk
+/// set out (`ExecState::GotoTimed::walk`). The way is a pure function of
+/// `from` and the target (`motion::way`), so it is never stored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Walk {
+    pub from: TilePos,
+    pub depart: Tick,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -191,7 +206,7 @@ fn emigrate_step(world: &mut World, id: EntityId) {
         ExecState::Goto { target, path, next_move_tick, blocked_since, carry_q } => {
             advance_goto(world, id, target, path, next_move_tick, blocked_since, carry_q)
         }
-        ExecState::GotoTimed { target, arrive_tick, blocked_since } => {
+        ExecState::GotoTimed { target, arrive_tick, blocked_since, .. } => {
             if tick < arrive_tick {
                 StepResult::Running
             } else {
@@ -305,7 +320,7 @@ fn step_agent(world: &mut World, id: EntityId) {
         ExecState::Goto { target, path, next_move_tick, blocked_since, carry_q } => {
             advance_goto(world, id, target, path, next_move_tick, blocked_since, carry_q)
         }
-        ExecState::GotoTimed { target, arrive_tick, blocked_since } => {
+        ExecState::GotoTimed { target, arrive_tick, blocked_since, .. } => {
             if tick < arrive_tick {
                 StepResult::Running
             } else {
@@ -662,6 +677,9 @@ impl World {
         crate::systems::transit::end_ride(self, id);
         // The island pass phase 5 (I3): off the vehicle where it stands.
         crate::systems::motion::alight(self, id);
+        // The island pass phase 9 (OPEN-181): a walk cut short leaves the
+        // body where it stands on its way.
+        settle_interrupted(self, id);
         self.segments.remove(&id);
         if !self.jobs2.passengers.is_empty() {
             crate::systems::streetwork::passenger_off(self, id);
@@ -776,7 +794,7 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                         let arrive_tick = tick + crate::systems::shift::move_ticks(world, from, tile);
                         let target = GotoTarget { dest: key, tile, building: Some(b) };
                         if let Some(br) = world.comp_mut::<Brain>(id) {
-                            br.exec = ExecState::GotoTimed { target, arrive_tick, blocked_since: None };
+                            br.exec = ExecState::GotoTimed { target, arrive_tick, blocked_since: None, walk: None };
                         }
                         return StepResult::Running;
                     }
@@ -1115,7 +1133,15 @@ fn escort_leg(world: &mut World, id: EntityId, target: &GotoTarget, lod: Lod) ->
         // the call, and the guard drives it, his suspect aboard.
         let now = world.tick;
         escort_aboard(world, id, crate::systems::motion::RideKind::Van, target.tile, now + call, now + ticks);
-        (ExecState::GotoTimed { target: target.clone(), arrive_tick: world.tick + ticks, blocked_since: None }, ticks)
+        (
+            ExecState::GotoTimed {
+                target: target.clone(),
+                arrive_tick: world.tick + ticks,
+                blocked_since: None,
+                walk: None,
+            },
+            ticks,
+        )
     };
     let tpm = u32::try_from(u64::from(tiles) * 100 / ticks.max(1)).unwrap_or(u32::MAX);
     let row = crate::systems::ownership::jobs2_row(world);
@@ -1233,6 +1259,7 @@ fn fare_segment(world: &mut World, id: EntityId, target: &GotoTarget) -> Option<
         target: GotoTarget { dest: LocationKey::Street, tile: end, building: None },
         arrive_tick,
         blocked_since: None,
+        walk: None,
     })
 }
 
@@ -1297,9 +1324,85 @@ fn full_segment(world: &mut World, from: TilePos, target: &GotoTarget) -> Option
 /// exactly 1.0 the integer formula runs unchanged (a branch, not a multiply).
 pub fn timed_goto(world: &World, id: EntityId, target: GotoTarget) -> ExecState {
     let from = walk_origin(world, id).unwrap_or(target.tile);
-    let walk = timed_walk(world, id, from, target.tile);
-    let arrive_tick = world.tick + walk;
-    ExecState::GotoTimed { target, arrive_tick, blocked_since: None }
+    let ticks = timed_walk(world, id, from, target.tile);
+    let arrive_tick = world.tick + ticks;
+    // The island pass phase 9 (OPEN-181): the walk keeps its start, so its
+    // body has a place on its way at every tick (`walk_place`).
+    let walk = (walks_on(world) && from != target.tile && ticks > 0).then_some(Walk { from, depart: world.tick });
+    ExecState::GotoTimed { target, arrive_tick, blocked_since: None, walk }
+}
+
+/// `[motion.walks]` on (the island pass phase 9).
+pub fn walks_on(world: &World) -> bool {
+    world.config.motion.as_ref().is_some_and(|m| m.walks.is_some())
+}
+
+/// The island pass phase 9 (OPEN-181): a Coarse timed walk on foot in
+/// progress: its way (`way[0]` the start, the last the target's tile, the
+/// door for a building), its start and its arrival. `None`: `id` is on no
+/// such walk (aboard a vehicle, a ride, the door queue, `[motion.walks]`
+/// off). The way costs one road search (the Full walk's A*; an L with
+/// `road_route` false): a reader drawing it every tick keeps it by
+/// `(id, depart)`, as it is fixed for the walk.
+pub fn walk_route(world: &World, id: EntityId) -> Option<(Vec<TilePos>, Tick, Tick)> {
+    let b = world.comp::<Brain>(id)?;
+    let ExecState::GotoTimed { target, arrive_tick, walk: Some(w), .. } = &b.exec else { return None };
+    if crate::systems::motion::vehicle_of(world, id).is_some() {
+        return None;
+    }
+    let road = world.config.motion.as_ref().and_then(|m| m.walks.as_ref()).is_some_and(|w| w.road_route);
+    let way = crate::systems::motion::walk_way(world, w.from, target.tile, road);
+    Some((way, w.depart, *arrive_tick))
+}
+
+/// The island pass phase 9 (OPEN-181): where a body is now, for the view
+/// and the device: a Coarse walker mid-walk is on his way (the point at the
+/// walk's pace, out of the building he left); anyone else is at his
+/// `Position`. The sim's own `Position` of a Coarse walker stays at the
+/// walk's start until he arrives (or a promotion or an interrupt sets him
+/// down on his way, `settle_walk`): nothing is moved per tick.
+pub fn walk_place(world: &World, id: EntityId) -> Option<Position> {
+    if let Some((way, depart, arrive)) = walk_route(world, id) {
+        let tile = crate::systems::motion::timed_pos(&way, depart, arrive, world.tick);
+        return Some(Position { tile, building: None, entered: depart });
+    }
+    world.comp::<Position>(id).cloned()
+}
+
+/// The island pass phase 9 (OPEN-181): a Coarse walker leaves his walk
+/// mid-way (a promotion to Full, an interrupt): his body is set down where
+/// the walk has him now, out of any building, and the walk forgets its
+/// start. A no-op off a walk, on its first tick, and for a cuffed body (the
+/// guard holds him where he stands).
+pub fn settle_walk(world: &mut World, id: EntityId) {
+    let Some(b) = world.comp::<Brain>(id) else { return };
+    let ExecState::GotoTimed { walk: Some(w), arrive_tick, .. } = &b.exec else { return };
+    if world.tick <= w.depart || world.tick >= *arrive_tick || b.cuffed_by.is_some() {
+        return;
+    }
+    let Some((way, depart, arrive)) = walk_route(world, id) else { return };
+    let tile = crate::systems::motion::timed_pos(&way, depart, arrive, world.tick);
+    if world.comp::<Position>(id).is_some_and(|p| p.building.is_some()) {
+        world.remove_from_building(id);
+    }
+    if let Some(p) = world.comp_mut::<Position>(id) {
+        p.tile = tile;
+        p.building = None;
+    }
+    if let Some(b) = world.comp_mut::<Brain>(id) {
+        if let ExecState::GotoTimed { walk, .. } = &mut b.exec {
+            *walk = None;
+        }
+    }
+}
+
+/// `settle_walk` for an interrupt (`abort_plan`, `plan::install`), when
+/// `[motion.walks] settle_interrupt` is on.
+pub fn settle_interrupted(world: &mut World, id: EntityId) {
+    let on = world.config.motion.as_ref().and_then(|m| m.walks.as_ref()).is_some_and(|w| w.settle_interrupt);
+    if on {
+        settle_walk(world, id);
+    }
 }
 
 /// The ticks of a timed walk from `from` to `to` (`timed_goto`'s; the L2
@@ -1576,7 +1679,8 @@ fn arrive(world: &mut World, id: EntityId, target: GotoTarget, blocked_since: Op
                     return StepResult::Failed(FailReason::BuildingFull);
                 }
                 if let Some(brain) = world.comp_mut::<Brain>(id) {
-                    brain.exec = ExecState::GotoTimed { target, arrive_tick: tick + 1, blocked_since: Some(since) };
+                    brain.exec =
+                        ExecState::GotoTimed { target, arrive_tick: tick + 1, blocked_since: Some(since), walk: None };
                 }
                 return StepResult::Running;
             }

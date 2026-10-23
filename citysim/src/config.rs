@@ -519,6 +519,24 @@ pub struct MotionCfg {
     /// and the bodiless 04:00 transfer as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vans: Option<VansCfg>,
+    /// The island pass phase 9 `[motion.walks]` (OPEN-181): a Coarse timed
+    /// walk keeps its body on its way (`exec::walk_place`), and a promotion
+    /// or an interrupt mid-walk sets it down there. `None` (not written into
+    /// a save) with `CITYSIM_COARSE_WALK_OFF=1`: the body stands at the
+    /// walk's start until it arrives, as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub walks: Option<WalksCfg>,
+}
+
+/// `[motion.walks]`: a Coarse body's timed walk on foot.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WalksCfg {
+    /// The walk's way follows the road path (the Full walk's A*); false: an
+    /// L, along x then y (no search).
+    pub road_route: bool,
+    /// A walk cut short (its plan dropped or replaced) leaves the body where
+    /// it stands on its way; false: back at the walk's start.
+    pub settle_interrupt: bool,
 }
 
 /// `[motion.vans]`: the law's vans. The drive is at the Car's speed
@@ -8868,6 +8886,13 @@ impl Config {
         if std::env::var("CITYSIM_VAN_OFF").is_ok_and(|v| v == "1") {
             if let Some(m) = cfg.motion.as_mut() {
                 m.vans = None;
+            }
+        }
+        // The island pass phase 9 (OPEN-181): the Coarse walk on its way,
+        // the switch in flight (doctrine 6).
+        if std::env::var("CITYSIM_COARSE_WALK_OFF").is_ok_and(|v| v == "1") {
+            if let Some(m) = cfg.motion.as_mut() {
+                m.walks = None;
             }
         }
         // The island pass phase 8 (OPEN-168 part, I4): the dead trades'
