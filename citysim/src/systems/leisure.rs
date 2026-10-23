@@ -2975,16 +2975,16 @@ pub fn hourly(world: &mut World) {
     if world.spots.is_empty() {
         spots_daily(world);
     }
-    sample_density(world);
+    crate::prof::timed!("leisure::sample_density", sample_density(world));
     let hour = world.tick_of_day() / TICKS_PER_HOUR as u16;
     if hour == 18 {
-        stat_leaders(world);
+        crate::prof::timed!("leisure::stat_leaders", stat_leaders(world));
     }
     if hour == world.config.leisure.bout_hour {
-        bouts(world);
+        crate::prof::timed!("leisure::bouts", bouts(world));
     }
     if world.tick_of_day() == 1260 {
-        stat_daily(world);
+        crate::prof::timed!("leisure::stat_daily", stat_daily(world));
     }
 }
 

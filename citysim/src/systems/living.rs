@@ -9,31 +9,31 @@ use crate::world::World;
 pub fn run(world: &mut World) {
     // L2 phase 2 (L17, L18, L20): the hourly leisure passes (the bout, the
     // 21:00 Statistical evening, the off-screen leaders, street density).
-    crate::systems::leisure::hourly(world);
+    crate::prof::timed!("living::leisure::hourly", crate::systems::leisure::hourly(world));
     // The pre-view pass phase 3 (OPEN-145): the counter's queued visits, each `counter_settle_window`.
-    crate::systems::leisure::counter_due(world);
+    crate::prof::timed!("living::leisure::counter_due", crate::systems::leisure::counter_due(world));
     // The pre-view pass phase 4 (OPEN-119): the arms sales booked for a meeting.
-    crate::systems::weapons::arms_meetings(world);
+    crate::prof::timed!("living::weapons::arms_meetings", crate::systems::weapons::arms_meetings(world));
     // The Real economy E27: the Statistical kitchen pass at 12:00.
-    crate::systems::charity::hourly(world);
+    crate::prof::timed!("living::charity::hourly", crate::systems::charity::hourly(world));
     // Jobs & lives phase 1: the Yards' and plants' crews, the outages, the
     // sites that stand, the night's pilfer (nothing with `[jobs2]` off).
-    crate::systems::industry::hourly(world);
+    crate::prof::timed!("living::industry::hourly", crate::systems::industry::hourly(world));
     // Jobs & lives phase 2: the vendors' stock, the day posts' end, the
     // dawn pick (nothing with `[jobs2] street` off).
-    crate::systems::streetwork::hourly(world);
+    crate::prof::timed!("living::streetwork::hourly", crate::systems::streetwork::hourly(world));
     // Jobs & lives phase 3: the crates, the carry sightings (nothing with
     // `[weapons]` off).
-    crate::systems::weapons::hourly(world);
+    crate::prof::timed!("living::weapons::hourly", crate::systems::weapons::hourly(world));
     // Jobs & lives phase 4: the street's night (nothing with `[vice]` off).
-    crate::systems::vice::hourly(world);
+    crate::prof::timed!("living::vice::hourly", crate::systems::vice::hourly(world));
     // Lives at work phase 1 (§ 1.2): the service encounter's hourly pass.
     crate::prof::timed!("service", crate::systems::service::hourly(world));
     // Lives at work phase 2 (§ 3.5): a Statistical visitor credited at its hour.
-    crate::systems::household::hourly(world);
+    crate::prof::timed!("living::household::hourly", crate::systems::household::hourly(world));
     // Jobs & lives phase 5: an episode under a chip ends the contract
     // (nothing with `[vice] chip` off).
-    crate::systems::dollhouse::hourly(world);
+    crate::prof::timed!("living::dollhouse::hourly", crate::systems::dollhouse::hourly(world));
     if world.tick_of_day() != 0 {
         return;
     }
