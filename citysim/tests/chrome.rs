@@ -372,6 +372,7 @@ fn test_bound_abducted_hole_hands_implants_to_binders_gang() {
         cfg.fviolence.fv_mult = 1.0;
         cfg.fviolence.class_mult = citysim::config::FvClassCfg::default();
         cfg.fviolence.day_cap.abducted = 1000;
+        cfg.fviolence.hands = Some(citysim::config::FvHandsCfg { prior: [0.0, 0.0, 0.0, 1.0], prior_days: 1e9 });
         let mut w = World::new(42, cfg);
         let people = free(&w);
         let (victim, crew) = (people[0], people[1]);
@@ -385,6 +386,11 @@ fn test_bound_abducted_hole_hands_implants_to_binders_gang() {
         // A day-0 city has no traces yet: the crew's is built live.
         w.insert(crew, citysim::Trace::default());
         w.comp_mut::<Gang>(g).expect("gang").order = Order::Harvest;
+        // The island pass phase 10: the Harvest strikes off screen with an
+        // off-screen hand, so the crew is a loyal Statistical member.
+        lod::set_lod(&mut w, crew, Lod::Statistical);
+        w.comp_mut::<citysim::Brain>(crew).expect("brain").body_day = None;
+        w.comp_mut::<citysim::Personality>(crew).expect("personality").loyalty = 1.0;
         let implants: Vec<EntityId> = [Slot::Arms, Slot::Eyes, Slot::Skin]
             .into_iter()
             .map(|s| assets::grant(&mut w, victim, AssetKind::Implant(s), 1).expect("chrome"))

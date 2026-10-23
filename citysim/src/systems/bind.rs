@@ -277,6 +277,17 @@ fn bind_in(world: &mut World, id: HoleId, pools: &mut DayPools) -> Option<Bound>
             bound = Bound::Actor(f);
         }
         true
+    } else if let Some(hand) = hole.prebound {
+        // The island pass phase 10 (OPEN-185): an off-screen faction hit
+        // was made by its hand. The Unknown roll stands (the city may never
+        // name him); the candidate draw is made and discarded, so the
+        // witness roll reads the offset an ordinary binding reads.
+        let never = rng.random::<f64>() < cfg.p_unknown;
+        let _ = rng.random::<f64>();
+        if !never && prebound_ok(world, hand, day) {
+            bound = Bound::Actor(hand);
+        }
+        true
     } else {
         rng.random::<f64>() < cfg.p_unknown
     };

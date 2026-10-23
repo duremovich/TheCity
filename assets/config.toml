@@ -1388,6 +1388,8 @@ guard_hours = 6
 # M15 phase 5: vendetta_norm 3 -> 10 and vendetta_open 0.5 -> 1.0. Three grudge-weights saturated V
 # for a 40-member gang: 48-58 vendettas opened per run and 25-28 open on day 120 among 12-14 factions
 # (a third of all pairs in blood at once). Now 8 / 8 / 7 opened and 7 / 8 / 7 open on seeds 42-44.
+# The island pass phase 10 (OPEN-185): per 2,000 residents; `Config::scaled_to` scales it up with the city
+# (a faction's members, and the grudges between two factions, grow with it), up only as the other caps.
 vendetta_norm = 10.0
 vendetta_open = 1.0
 declared_days = 30                 # a god DeclareVendetta holds the feud open this long (phase 5)
@@ -1809,6 +1811,18 @@ prior = { order = [0.0003, 0.002, 0.003, 0.0], vendetta = [0.0004, 0.002, 0.0, 0
 # vendettas until seed 44 held 14 of 66 faction pairs open on day 120, over the M15 gate's sanity fifth
 # (6.5: 10/78, 6/55, 11/66; Murders on 42-47 257). Placeholders for the late calibration.
 class_mult = { civilian = [0.11, 0.14, 0.008, 1.0], member = [4.05, 6.5, 0.25, 1.0], watch = [2.15, 6.1, 0.04, 1.0] }
+
+[fviolence.hands]
+# The island pass phase 10 (OPEN-185, `fviolence::daily`): a source strikes off screen only with its
+# off-screen hands. Each order's gang and each vendetta side has a day's budget per kind of its free
+# Statistical members (Statistical now and at no assignment yesterday) x its on-screen hits per
+# member-day; each hit spends one hand and is pre-bound to him (`Hole::prebound`). A riot strikes off
+# screen with its Statistical rioters, an episode while its agent is Statistical, one hit per hand.
+# The rate per member-day: (hits + prior x prior_days) / (member_days + prior_days) over `rate_days`.
+# prior: the on-screen ledger pooled over the 2k city, seeds 42-44 x 120 days (orders and vendettas):
+# K 91 / A 538 / R 6 / Ab 253 hits over 51,180 member-days (Ab: Harvest's, 253 over 17,056 order days).
+prior = [0.0018, 0.0105, 0.00012, 0.0049]   # per member-day [K, A, R, Ab]
+prior_days = 30.0                     # member-days of evidence the prior is worth ([gangs] stat_prior_days' weight)
 
 [buildings.club]
 capacity = 40

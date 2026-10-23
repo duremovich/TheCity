@@ -334,6 +334,7 @@ fn test_unknown_hole_loot_goes_to_treasury() {
         source: None,
         faction: None,
         riot: None,
+        prebound: None,
     };
     let id = bind::open_hole(&mut w, hole);
     assert_eq!(ownership::total_coins(&w), before.0 + loot, "the loot in flight is counted");

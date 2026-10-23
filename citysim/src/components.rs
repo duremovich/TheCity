@@ -3533,6 +3533,12 @@ pub struct Hole {
     /// L2 (L27): a riot hole's riot (the binder draws among its rioters).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub riot: Option<u32>,
+    /// The island pass phase 10 (OPEN-185): the off-screen hand that made a
+    /// faction-violence hole (`fviolence::daily`): the binder binds it as a
+    /// contract record's taker (`bind::prebound_ok`), never a member seen
+    /// on screen elsewhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prebound: Option<EntityId>,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]

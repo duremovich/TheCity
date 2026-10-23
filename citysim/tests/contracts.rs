@@ -462,6 +462,7 @@ fn test_prebound_witness_offset_matches_ordinary_hole() {
             source: Some(source),
             faction: Some(actor),
             riot: None,
+            prebound: None,
         };
         let hid = bind::open_hole(&mut w, hole);
         let bound = bind::bind(&mut w, hid);
