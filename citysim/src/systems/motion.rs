@@ -386,11 +386,14 @@ pub fn to_timed(world: &mut World, driver: EntityId) {
 }
 
 /// A rider's exec is still the leg he boarded for: a timed leg, a walk
-/// (the driver's steering), a flight.
+/// (the driver's steering), a flight. A cuffed or sentenced rider is off
+/// (the guard has him; the cells hold him).
 fn on_leg(world: &World, rider: EntityId) -> bool {
-    world
-        .comp::<Brain>(rider)
-        .is_some_and(|b| matches!(b.exec, ExecState::GotoTimed { .. } | ExecState::Goto { .. } | ExecState::Fly { .. }))
+    world.comp::<Brain>(rider).is_some_and(|b| {
+        b.cuffed_by.is_none()
+            && b.lod != crate::components::Lod::Statistical
+            && matches!(b.exec, ExecState::GotoTimed { .. } | ExecState::Goto { .. } | ExecState::Fly { .. })
+    }) && !world.has::<crate::components::Sentence>(rider)
 }
 
 /// Every tick, after the steps (`exec::run`): each vehicle advances (a

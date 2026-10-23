@@ -86,6 +86,16 @@ fn vehicle_mode(mode: &str) -> bool {
     matches!(mode, "cab" | "fare_leg" | "exec_ride" | "el" | "fly" | "drive")
 }
 
+/// Where a body that left its leg stands: inside a building, its door (the
+/// step in to an interior slot is no jump); else its tile.
+fn landed_at(world: &World, id: EntityId) -> Option<TilePos> {
+    let p = world.comp::<crate::components::Position>(id)?;
+    match p.building.and_then(|b| world.comp::<crate::components::Building>(b)) {
+        Some(b) => Some(b.door),
+        None => Some(p.tile),
+    }
+}
+
 /// Every tick (`run --legs`, the island pass phase 5's device, OPEN-165):
 /// each Full or Coarse body on a vehicle leg (a timed leg, a flight, an El
 /// ride, a drive) is watched; a body-day is "parked" when it sat on one
@@ -106,48 +116,65 @@ pub fn ride_tick(world: &mut World) {
             continue;
         }
         use crate::exec::ExecState;
-        if !matches!(
-            b.exec,
-            ExecState::GotoTimed { .. } | ExecState::Fly { .. } | ExecState::Ride { .. } | ExecState::Goto { .. }
-        ) {
-            continue;
-        }
+        // The mode this tick: the El's ride, a flight, the vehicle he is
+        // aboard (`motion`), else the leg's own.
+        let mode = match &b.exec {
+            ExecState::Ride { .. } => "el",
+            ExecState::Fly { .. } => "fly",
+            ExecState::GotoTimed { .. } | ExecState::Goto { .. } => {
+                match world.aboard.get(&id).and_then(|v| world.motions.get(v)) {
+                    Some(m) => match m.ride {
+                        crate::systems::motion::RideKind::Car => "drive",
+                        crate::systems::motion::RideKind::Flyer => "fly",
+                        crate::systems::motion::RideKind::Cab if m.driver == Some(id) => "fare_leg",
+                        crate::systems::motion::RideKind::Cab => "cab",
+                        crate::systems::motion::RideKind::Exec => "exec_ride",
+                    },
+                    None => s.mode,
+                }
+            }
+            _ => continue,
+        };
         let Some(p) = world.comp::<crate::components::Position>(id) else { continue };
-        seen.push((id, s.mode, b.lod == Lod::Full, p.tile));
+        seen.push((id, mode, b.lod == Lod::Full, p.tile));
     }
-    // The landing: a body watched last tick and off its leg now.
+    // The landing: a body watched last tick and off its leg now (a demotion
+    // to Statistical snaps it off screen: no ride's jump).
     let gone: Vec<(EntityId, RideSeen, Option<TilePos>)> = log
         .ride_track
         .iter()
         .filter(|(id, r)| r.last + 1 == tick && !seen.iter().any(|s| s.0 == **id))
-        .map(|(&id, &r)| (id, r, world.comp::<crate::components::Position>(id).map(|p| p.tile)))
+        .filter(|(id, _)| world.comp::<crate::components::Brain>(**id).is_some_and(|b| b.lod != Lod::Statistical))
+        .map(|(&id, &r)| (id, r, landed_at(world, id)))
         .collect();
     let Some(log) = world.leg_log.as_mut() else { return };
     for (id, r, now) in gone {
         if now.is_some_and(|t| t.manhattan(r.tile) > RIDE_JUMP_TILES) {
             log.ride_days.entry((day, id, r.mode, r.full)).or_default()[1] = true;
         }
-        log.ride_track.remove(&id);
     }
+    log.ride_track.retain(|_, r| r.last + 1 >= tick);
     for (id, mode, full, tile) in seen {
-        let e = log.ride_days.entry((day, id, mode, full)).or_default();
-        let next = match log.ride_track.get(&id) {
+        let next = match log.ride_track.get(&id).copied() {
             Some(r) if r.last + 1 == tick && r.tile == tile => {
                 if tick - r.since >= RIDE_PARKED_TICKS {
-                    e[0] = true;
+                    log.ride_days.entry((day, id, mode, full)).or_default()[0] = true;
                 }
-                RideSeen { last: tick, mode, full, ..*r }
+                RideSeen { last: tick, mode, full, ..r }
             }
             Some(r) if r.last + 1 == tick => {
+                // A jump is the mode it left (the El's alighting, a landing).
                 if r.tile.manhattan(tile) > RIDE_JUMP_TILES {
-                    e[1] = true;
+                    log.ride_days.entry((day, id, r.mode, r.full)).or_default()[1] = true;
                 }
                 RideSeen { tile, since: tick, last: tick, mode, full }
             }
             _ => RideSeen { tile, since: tick, last: tick, mode, full },
         };
+        log.ride_days.entry((day, id, mode, full)).or_default();
         log.ride_track.insert(id, next);
     }
+    log.ride_track.retain(|_, r| r.last == tick);
 }
 
 /// Who `id` is, for the table: the trade's key, the built-in role, a corp
