@@ -96,7 +96,7 @@ pub const RIDE_JUMP_TILES: u32 = 12;
 /// The vehicle legs' modes (`start`'s): the cab, a body driver's fare leg,
 /// the exec's car, the El, a flyer, a drive.
 fn vehicle_mode(mode: &str) -> bool {
-    matches!(mode, "cab" | "fare_leg" | "exec_ride" | "el" | "fly" | "drive")
+    matches!(mode, "cab" | "fare_leg" | "exec_ride" | "el" | "fly" | "drive" | "escort")
 }
 
 /// Where a body that left its leg stands: inside a building, its door (the
@@ -119,7 +119,8 @@ pub fn ride_tick(world: &mut World) {
     let Some(log) = world.leg_log.as_ref() else { return };
     let tick = world.tick;
     let day = tick / crate::time::TICKS_PER_DAY;
-    let mut seen: Vec<(EntityId, &'static str, bool, TilePos)> = Vec::new();
+    // (body, mode, Full, tile, a stand here counts as parked).
+    let mut seen: Vec<(EntityId, &'static str, bool, TilePos, bool)> = Vec::new();
     let mut el_seen: Vec<(EntityId, bool)> = Vec::new();
     for (&id, s) in &log.open {
         if !vehicle_mode(s.mode) {
@@ -157,6 +158,10 @@ pub fn ride_tick(world: &mut World) {
                         crate::systems::motion::RideKind::Cab => "cab",
                         crate::systems::motion::RideKind::Exec => "exec_ride",
                         crate::systems::motion::RideKind::Train => "el",
+                        // The island pass phase 7: the escort's van, the
+                        // escort led on foot.
+                        crate::systems::motion::RideKind::Van => "van",
+                        crate::systems::motion::RideKind::Foot => "escort",
                     },
                     // The island pass phase 6: the walk to or from the El
                     // (a Coarse walk is timed) is the walk's, not the El's.
@@ -179,7 +184,45 @@ pub fn ride_tick(world: &mut World) {
         // Inside a building, its door: the step out of (or in to) a deep
         // interior slot is no jump.
         let Some(at) = landed_at(world, id) else { continue };
-        seen.push((id, mode, b.lod == Lod::Full, at));
+        seen.push((id, mode, b.lod == Lod::Full, at, true));
+        // The island pass phase 7's device: the escorted suspect (the
+        // arrest's hand-off), aboard the van with the guard or led.
+        if s.mode == "escort" {
+            if let Some(sus) = b.escorting {
+                let sb = world.comp::<crate::components::Brain>(sus);
+                if let (Some(sb), Some(at)) = (sb, landed_at(world, sus)) {
+                    if sb.lod != Lod::Statistical && sb.cuffed_by.is_some() {
+                        let mode = match world.aboard.get(&sus).and_then(|v| world.motions.get(v)) {
+                            Some(m) if m.ride == crate::systems::motion::RideKind::Van => "van",
+                            _ => "arrest",
+                        };
+                        seen.push((sus, mode, sb.lod == Lod::Full, at, true));
+                    }
+                }
+            }
+        }
+    }
+    // The island pass phase 7's device: a body held in a Station's cells or
+    // on a transfer van (the 04:00 transfer); a stand in the cells is no
+    // parked ride.
+    for &p in world.sentenced() {
+        if seen.iter().any(|s| s.0 == p) {
+            continue;
+        }
+        let Some(b) = world.comp::<crate::components::Brain>(p) else { continue };
+        if b.lod == Lod::Statistical {
+            continue;
+        }
+        let aboard = world.aboard.get(&p).is_some_and(|v| world.van_runs.contains_key(v));
+        let in_cell = world
+            .comp::<crate::components::Position>(p)
+            .and_then(|pos| pos.building)
+            .is_some_and(|bd| crate::systems::stations::is_station(world, bd));
+        if !aboard && !in_cell {
+            continue;
+        }
+        let Some(at) = landed_at(world, p) else { continue };
+        seen.push((p, "transfer", b.lod == Lod::Full, at, aboard));
     }
     // The landing: a body watched last tick and off its leg now (a demotion
     // to Statistical snaps it off screen: no ride's jump).
@@ -206,8 +249,11 @@ pub fn ride_tick(world: &mut World) {
         }
     }
     log.ride_track.retain(|_, r| r.last + 1 >= tick);
-    for (id, mode, full, tile) in seen {
+    for (id, mode, full, tile, park) in seen {
         let next = match log.ride_track.get(&id).copied() {
+            Some(r) if r.last + 1 == tick && r.tile == tile && !park => {
+                RideSeen { since: tick, last: tick, mode, full, ..r }
+            }
             Some(r) if r.last + 1 == tick && r.tile == tile => {
                 if tick - r.since >= RIDE_PARKED_TICKS {
                     log.ride_days.entry((day, id, mode, full)).or_default()[0] = true;

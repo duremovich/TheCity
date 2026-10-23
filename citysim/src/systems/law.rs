@@ -1031,8 +1031,22 @@ pub fn follow_guard(world: &mut World, guard: EntityId) {
 }
 
 /// Escort arrived at the Jail: sentence the suspect (or fine / release when
-/// the Jail is full), resolve the report, free the guard.
+/// the Jail is full), resolve the report, free the guard. The island pass
+/// phase 7: a Station whose cells filled while the escort drove books him
+/// to the Precinct, and he rides the van on from its door (no write of the
+/// body to the Precinct).
 pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
+    let station = world
+        .comp::<Position>(guard)
+        .and_then(|p| p.building)
+        .filter(|&b| crate::systems::motion::vans_on(world) && crate::systems::stations::is_station(world, b));
+    jail_suspect_at(world, guard, suspect);
+    if let Some(s) = station {
+        crate::systems::stations::send_on(world, s, suspect);
+    }
+}
+
+fn jail_suspect_at(world: &mut World, guard: EntityId, suspect: EntityId) {
     if let Some(b) = world.comp_mut::<Brain>(guard) {
         b.escorting = None;
     }
@@ -1587,6 +1601,8 @@ pub fn run(world: &mut World) {
     crate::prof::timed!("law::tally_watch", tally_watch(world));
     crate::prof::timed!("law::credit_guard_shifts", credit_guard_shifts(world));
     crate::prof::timed!("law::sightings", sightings(world));
+    // The island pass phase 7: the transfer vans at the Precinct.
+    crate::prof::timed!("law::stations::van_tick", crate::systems::stations::van_tick(world));
     // L2 (L21): the held prisoners' needs decay hour by hour, as a body's
     // do through the day (a day's decay at once left them fed and rested
     // all day, and their mood lifted their districts' unrest off the riot

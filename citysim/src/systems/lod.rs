@@ -613,6 +613,9 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
         if !(held_on(world) && world.has::<Sentence>(id)) {
             snap_to_phase_door(world, id, true);
         }
+        // The island pass phase 7: a prisoner on a transfer run gets his
+        // body aboard its van.
+        crate::systems::stations::on_promoted(world, id);
         // A body's memories are never half-filled: its open victim holes bind
         // at the end of this tick's `lod::run`.
         if let Some(hs) = world.holes_by_agent.get(&id) {
@@ -644,6 +647,11 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
     // A Full driver demoted to Coarse: the vehicle runs his timed leg.
     if riding && lod == Lod::Coarse {
         crate::systems::motion::to_timed(world, id);
+    }
+    // The island pass phase 7: a Full guard walking an escort demoted to
+    // Coarse leads the suspect on the timed walk.
+    if !riding && lod == Lod::Coarse {
+        crate::exec::escort_to_timed(world, id);
     }
     world.retier(id);
 }

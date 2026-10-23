@@ -177,8 +177,9 @@ fn test_van_transfers_the_long_sentence() {
     let long_until = w.tick + 4 * TICKS_PER_DAY;
     law::sentence(&mut w, night, Crime::Vagrancy, night_until, s);
     law::sentence(&mut w, long, Crime::Theft, long_until, s);
-    // Past the next van.
-    w.run_ticks(TICKS_PER_DAY);
+    // Past the next van and its drive (the island pass phase 7: the van
+    // rides the road to the Precinct, ~2 h from the far Station here).
+    w.run_ticks(TICKS_PER_DAY + 6 * 60);
     assert_eq!(w.comp::<Sentence>(long).map(|x| x.until_tick), Some(long_until), "the Sentence from booking stands");
     assert_eq!(w.comp::<Position>(long).and_then(|p| p.building), Some(jail), "the van took the long sentence");
     assert!(
@@ -415,6 +416,17 @@ fn test_a_full_station_never_books_past_its_cells() {
     assert!(w.has::<Sentence>(thief), "sentenced");
     assert!(stations::held_at(&w, s) <= cells, "never past the cells: {}", stations::held_at(&w, s));
     let jail = w.building_of_kind(BuildingKind::Jail).expect("the Precinct");
+    // The island pass phase 7: booked to the Precinct, he rides the van on
+    // from the Station's door (no write of the body to the Precinct).
+    let v = motion::vehicle_of(&w, thief).expect("on the van to the Precinct");
+    assert_eq!(w.van_runs.get(&v).map(|r| r.to), Some(jail), "the van runs to the Precinct");
+    assert!(at(&w, thief).manhattan(door(&w, s)) <= 2, "at the Station's door, not the Precinct's");
+    for _ in 0..600 {
+        law_tick(&mut w);
+        if w.comp::<Position>(thief).and_then(|p| p.building) == Some(jail) {
+            break;
+        }
+    }
     assert_eq!(w.comp::<Position>(thief).and_then(|p| p.building), Some(jail), "booked to the Precinct");
 }
 
@@ -450,4 +462,310 @@ fn test_station_prisoners_bound_for_the_precinct_count_and_the_van_respects_it()
         stations::precinct_held(&w)
     );
     assert_eq!(stations::held_at(&w, s), 1, "the one without a cell waits for the next van");
+}
+
+// ---------------------------------------------------------------------------
+// The island pass phase 7 (docs/ISLAND_PASS.md I3, OPEN-166): the van. Each
+// test failed on the base `0a693b2` in behaviour (the escort a statue then a
+// landing in the cells; the 04:00 transfer a write of the body to the
+// Precinct). They name the ride by its Debug label so they build on the base.
+// ---------------------------------------------------------------------------
+
+use citysim::components::{ActionInstance, Brain, Lod, TileKind, TilePos};
+use citysim::goap::{ActionKind, Plan};
+use citysim::systems::{lod, motion};
+
+/// One executor tick (no other system runs).
+fn exec_tick(w: &mut World) {
+    citysim::exec::run(w);
+    w.tick += 1;
+}
+
+/// One executor tick and the law's (the van's arrival), no tier pass.
+fn law_tick(w: &mut World) {
+    citysim::exec::run(w);
+    law::run(w);
+    w.tick += 1;
+}
+
+/// Where a body stands, a building read at its door.
+fn at(w: &World, id: EntityId) -> TilePos {
+    let p = w.comp::<Position>(id).expect("a position");
+    p.building.map_or(p.tile, |b| door(w, b))
+}
+
+fn ride_of(w: &World, id: EntityId) -> Option<String> {
+    motion::vehicle_of(w, id).and_then(|v| w.motions.get(&v)).map(|m| format!("{:?}", m.ride))
+}
+
+/// The lowest Road tile (row, then column) whose Manhattan distance to the
+/// Precinct's door is within `lo..=hi`.
+fn road_from_precinct(w: &World, lo: u32, hi: u32) -> TilePos {
+    let jail = w.building_of_kind(BuildingKind::Jail).expect("the Precinct");
+    let jd = door(w, jail);
+    for y in 0..w.map.h() {
+        for x in 0..w.map.w() {
+            let t = TilePos::new(x as u16, y as u16);
+            let d = t.manhattan(jd);
+            if (lo..=hi).contains(&d) && w.map.tile_at(t) == TileKind::Road {
+                return t;
+            }
+        }
+    }
+    panic!("no Road tile {lo}..={hi} from the Precinct");
+}
+
+/// A guard (at `lod`) and a meek, broke thief cuffed at `tile`, the guard's
+/// plan the Escort.
+fn cuffed_at(w: &mut World, tile: TilePos, lod_of_guard: Lod) -> (EntityId, EntityId) {
+    let (guard, thief) = guard_and_thief(w, tile);
+    lod::set_lod(w, guard, lod_of_guard);
+    assert!(law::arrest(w, guard, thief), "the cuffs hold");
+    let tick = w.tick;
+    let b = w.comp_mut::<Brain>(guard).expect("brain");
+    b.plan = Some(Plan {
+        goal: citysim::GoalKind::Idle,
+        target: Some(thief),
+        steps: vec![ActionInstance { action: ActionKind::Escort, target: Some(thief), tile: None }],
+        started_tick: tick,
+    });
+    b.plan_step = 0;
+    b.exec = citysim::ExecState::Idle;
+    (guard, thief)
+}
+
+/// What an escort did, tick by tick, to the booking.
+struct Escorted {
+    /// The most either body moved in one tick (a building read at its door).
+    step_max: u32,
+    /// The longest the guard stood on one tile.
+    stand_max: u64,
+    /// The suspect was inside the cells before the guard reached the door.
+    early: bool,
+    /// Ticks the suspect was aboard a van, and aboard at the guard's tile.
+    van_ticks: u64,
+    with_guard: bool,
+}
+
+fn escort(w: &mut World, guard: EntityId, thief: EntityId, max: u64) -> Escorted {
+    let jail = w.building_of_kind(BuildingKind::Jail).expect("the Precinct");
+    let jd = door(w, jail);
+    let mut out = Escorted { step_max: 0, stand_max: 0, early: false, van_ticks: 0, with_guard: true };
+    let (mut g0, mut t0) = (at(w, guard), at(w, thief));
+    let mut since = w.tick;
+    for _ in 0..max {
+        exec_tick(w);
+        w.check_indices().expect("the aboard links agree");
+        let (g, t) = (at(w, guard), at(w, thief));
+        out.step_max = out.step_max.max(g.manhattan(g0)).max(t.manhattan(t0));
+        if g != g0 {
+            since = w.tick;
+        }
+        out.stand_max = out.stand_max.max(w.tick - since);
+        if ride_of(w, thief).as_deref() == Some("Van") {
+            out.van_ticks += 1;
+            out.with_guard &= w.comp::<Position>(thief).map(|p| p.tile) == w.comp::<Position>(guard).map(|p| p.tile);
+        }
+        let in_cells = w.comp::<Position>(thief).and_then(|p| p.building) == Some(jail);
+        if in_cells && g0.manhattan(jd) > 4 {
+            out.early = true;
+        }
+        (g0, t0) = (g, t);
+        if w.has::<Sentence>(thief) {
+            return out;
+        }
+    }
+    panic!("the escort never booked him in {max} ticks");
+}
+
+/// I3, the arrest hand-off past `escort_walk_tiles`: the van pulls up, the
+/// guard drives it with the cuffed suspect aboard (his tile the guard's),
+/// and both reach the cells' door on the road: no tick moves either body
+/// more than the van's pace, the guard never stands longer than the van's
+/// call, and the suspect is never written into the cells before the guard
+/// is at the door. A save mid-ride resumes byte for byte. Base: both stood
+/// on the arrest tile for the whole leg, then landed in the Precinct.
+#[test]
+fn test_the_arrest_hand_off_rides_the_van_to_the_cells() {
+    let mut w = common::world();
+    let call = w.config.legs.as_ref().expect("[legs]").van_call_ticks;
+    let tile = road_from_precinct(&w, 100, 140);
+    let (guard, thief) = cuffed_at(&mut w, tile, Lod::Full);
+    exec_tick(&mut w);
+    assert_eq!(ride_of(&w, guard).as_deref(), Some("Van"), "the guard is at the van's wheel");
+    assert_eq!(ride_of(&w, thief).as_deref(), Some("Van"), "the suspect is aboard in cuffs");
+    let v = motion::vehicle_of(&w, guard).expect("the van");
+    assert_eq!(w.motions.get(&v).and_then(|m| m.driver), Some(guard), "he drives");
+    // Mid-ride: the save round-trips and the loaded world runs on the same.
+    for _ in 0..u64::from(call) + 10 {
+        exec_tick(&mut w);
+    }
+    assert_eq!(motion::vehicle_of(&w, thief), Some(v), "still aboard mid-ride");
+    let text = citysim::save::to_ron(&w);
+    let mut back = citysim::save::from_ron(&text).expect("loads");
+    assert_eq!(citysim::save::to_ron(&back), text, "the save round-trips mid-ride");
+    let e = escort(&mut w, guard, thief, 2000);
+    let _ = escort(&mut back, guard, thief, 2000);
+    assert_eq!(citysim::save::to_ron(&back), citysim::save::to_ron(&w), "identical at the booking");
+    assert!(e.van_ticks > 20, "a real drive aboard ({} ticks)", e.van_ticks);
+    assert!(e.with_guard, "aboard, the suspect is where the guard is");
+    assert!(e.step_max <= 4, "no jump: the most a body moved in a tick was {}", e.step_max);
+    assert!(!e.early, "the suspect was never written into the cells ahead of the guard");
+    let jail = w.building_of_kind(BuildingKind::Jail).expect("the Precinct");
+    assert_eq!(w.comp::<Position>(thief).and_then(|p| p.building), Some(jail), "booked at the Precinct");
+    assert!(
+        !w.motions.contains_key(&v) && motion::vehicle_of(&w, thief).is_none(),
+        "the van's motion ended at the cells"
+    );
+    let _ = call;
+}
+
+/// I3, the escort is no statue: a Coarse guard within `escort_walk_tiles`
+/// leads the cuffed suspect along the road at the walk's pace (no stand of
+/// more than a few ticks, no landing). Base: a timed walk, both bodies on
+/// the arrest tile for the whole leg, then in the cells.
+#[test]
+fn test_a_coarse_escort_walks_the_suspect_in() {
+    let mut w = common::world();
+    let walk = w.config.legs.as_ref().expect("[legs]").escort_walk_tiles;
+    let tile = road_from_precinct(&w, walk / 2, walk - 2);
+    let (guard, thief) = cuffed_at(&mut w, tile, Lod::Coarse);
+    exec_tick(&mut w);
+    assert_eq!(ride_of(&w, thief).as_deref(), Some("Foot"), "led on foot");
+    let e = escort(&mut w, guard, thief, 600);
+    assert!(e.stand_max <= 4, "the escort is no statue: the guard stood {} ticks", e.stand_max);
+    assert!(e.step_max <= 2, "no jump: {}", e.step_max);
+    assert!(!e.early, "never written into the cells ahead of the guard");
+}
+
+/// Put the clock at the next van (`transfer_hour`) and send it.
+fn send_the_van(w: &mut World) {
+    let van = w.config.law.transfer_hour as u64;
+    let day = w.tick - w.tick % TICKS_PER_DAY;
+    w.tick = day + TICKS_PER_DAY + van;
+    stations::van(w);
+}
+
+/// Three long-sentenced prisoners in the far Station's cells: a body, a
+/// body demoted mid-ride, and a Statistical one promoted mid-ride.
+fn three_held(w: &mut World) -> (EntityId, [EntityId; 3]) {
+    let s = far_station(w);
+    let until = w.tick + 10 * TICKS_PER_DAY;
+    let picks: Vec<EntityId> =
+        common::free_adults(w).into_iter().filter(|&a| !w.has::<Job>(a) && !w.has::<Sentence>(a)).take(3).collect();
+    for &a in &picks {
+        law::sentence(w, a, Crime::Theft, until, s);
+    }
+    lod::set_lod(w, picks[0], Lod::Coarse);
+    lod::set_lod(w, picks[1], Lod::Full);
+    lod::set_lod(w, picks[2], Lod::Statistical);
+    (s, [picks[0], picks[1], picks[2]])
+}
+
+/// I3, the 04:00 transfer is a van run: the Station's prisoners board its
+/// van at the door and ride the road to the Precinct, the body's position
+/// the van's every tick, no tick moving him more than the van's pace, and
+/// in the Precinct only after the drive. LOD: a demotion mid-ride takes the
+/// body off and the run carries him on bodiless; a Statistical prisoner
+/// promoted mid-ride gets his body aboard; all three are booked in at the
+/// van's arrival (the mirror's duration). Base: all three written to the
+/// Precinct at 04:00.
+#[test]
+fn test_the_transfer_is_a_van_run_with_no_jump() {
+    let mut w = station_world();
+    let jail = w.building_of_kind(BuildingKind::Jail).expect("the Precinct");
+    let (s, [body, demoted, promoted]) = three_held(&mut w);
+    let start_tile = at(&w, body);
+    send_the_van(&mut w);
+    let start = w.tick;
+    assert_eq!(ride_of(&w, body).as_deref(), Some("Van"), "aboard the van");
+    assert_eq!(ride_of(&w, demoted).as_deref(), Some("Van"), "aboard the van");
+    assert_eq!(ride_of(&w, promoted), None, "a Statistical prisoner has no body aboard");
+    for p in [body, demoted, promoted] {
+        let b = w.comp::<Position>(p).and_then(|x| x.building);
+        assert!(b != Some(s) && b != Some(jail), "out of the Station, not yet at the Precinct: {b:?}");
+    }
+    let v = motion::vehicle_of(&w, body).expect("the van");
+    let way_start = w.motions.get(&v).expect("in motion").pos;
+    assert!(way_start.manhattan(start_tile) <= 2, "the van leaves from the Station's door");
+    let jd = door(&w, jail);
+    let mut prev = at(&w, body);
+    let mut step_max = 0u32;
+    let mut aboard_ticks = 0u64;
+    let mut last_aboard = prev;
+    let mut swapped = None;
+    let mut arrived = None;
+    for _ in 0..600 {
+        law_tick(&mut w);
+        w.check_indices().expect("the aboard links agree");
+        let now = at(&w, body);
+        step_max = step_max.max(now.manhattan(prev));
+        prev = now;
+        if let Some(vv) = motion::vehicle_of(&w, body) {
+            assert_eq!(
+                w.comp::<Position>(body).map(|p| p.tile),
+                w.motions.get(&vv).map(|m| m.pos),
+                "at the van's tile"
+            );
+            aboard_ticks += 1;
+            last_aboard = now;
+        }
+        if swapped.is_some_and(|t| w.tick > t) {
+            assert_eq!(ride_of(&w, demoted), None, "demoted: off the van");
+        }
+        if swapped.is_none() && aboard_ticks >= 5 {
+            lod::set_lod(&mut w, demoted, Lod::Statistical);
+            lod::set_lod(&mut w, promoted, Lod::Coarse);
+            swapped = Some(w.tick);
+            assert_eq!(ride_of(&w, promoted).as_deref(), Some("Van"), "promoted: his body is aboard");
+        }
+        let inside = |w: &World, p: EntityId| w.comp::<Position>(p).and_then(|x| x.building) == Some(jail);
+        if inside(&w, body) {
+            for p in [demoted, promoted] {
+                assert!(inside(&w, p), "every prisoner on the run is booked in at the van's arrival");
+            }
+            arrived = Some(w.tick);
+            break;
+        }
+        assert!(!inside(&w, demoted) && !inside(&w, promoted), "nobody on the run arrives ahead of the van");
+    }
+    let arrived = arrived.expect("the van reached the Precinct");
+    assert!(swapped.is_some(), "the tier changes ran mid-ride");
+    let tiles = start_tile.manhattan(jd);
+    assert!(arrived - start >= u64::from(tiles) / 4, "the real drive: {} ticks for {tiles} tiles", arrived - start);
+    assert!(step_max <= 4, "no jump: {step_max} tiles in a tick");
+    assert!(last_aboard.manhattan(jd) <= 4, "set down at the Precinct's door ({last_aboard} vs {jd})");
+    assert!(!w.motions.contains_key(&v) && w.aboard.is_empty(), "the van's run ended");
+    for p in [body, demoted, promoted] {
+        assert!(w.has::<Sentence>(p), "the Sentence stands");
+    }
+}
+
+/// I3: a save taken mid-transfer resumes byte for byte (the van, its run
+/// and its prisoners), and the loaded world books them in as the live one.
+#[test]
+fn test_a_save_mid_transfer_resumes_identically() {
+    let mut w = station_world();
+    let (_, [body, _, _]) = three_held(&mut w);
+    send_the_van(&mut w);
+    for _ in 0..6 {
+        law_tick(&mut w);
+    }
+    assert!(motion::vehicle_of(&w, body).is_some(), "mid-ride");
+    let text = citysim::save::to_ron(&w);
+    let mut back = citysim::save::from_ron(&text).expect("loads");
+    assert_eq!(citysim::save::to_ron(&back), text, "the save round-trips");
+    for _ in 0..300 {
+        law_tick(&mut w);
+        law_tick(&mut back);
+        assert_eq!(
+            back.comp::<Position>(body).map(|p| (p.tile, p.building)),
+            w.comp::<Position>(body).map(|p| (p.tile, p.building)),
+            "tick {}",
+            w.tick
+        );
+    }
+    let jail = w.building_of_kind(BuildingKind::Jail).expect("the Precinct");
+    assert_eq!(w.comp::<Position>(body).and_then(|p| p.building), Some(jail), "booked in");
+    assert_eq!(citysim::save::to_ron(&back), citysim::save::to_ron(&w), "identical after the run");
 }

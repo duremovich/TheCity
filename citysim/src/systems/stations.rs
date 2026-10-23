@@ -22,13 +22,45 @@
 //!
 //! The Statistical tier has no escort: its arrests are `p_theft_caught`,
 //! re-learned at the gate's regen (§ 6, D14). No stream draw anywhere.
+//!
+//! **The van** (the island pass phase 7, I3, OPEN-166; `[motion.vans]`):
+//! the 04:00 transfer is a van run, not a write of the body to the
+//! Precinct. Each Station's due prisoners (the same pick and the same room
+//! rule) board a van at its door, `capacity` a van, and ride the road to
+//! the Precinct's door over the Car's drive time ([`VanRun`],
+//! `motion::spawn_van`, no body at the wheel: the city's driver, off
+//! screen). Full and Coarse prisoners are aboard (`motion`'s cuffed-rider
+//! rule keeps a sentenced rider on a run), their position the van's; at the
+//! arrival ([`van_tick`]) each steps off at the door and is booked into the
+//! Precinct. **Statistical mirror:** a Statistical prisoner rides the same
+//! run bodiless (out of the Station's cells at the departure, into the
+//! Precinct at the van's arrival: the same duration). A promotion mid-ride
+//! puts his body aboard ([`on_promoted`]); a demotion steps him off (the
+//! run carries him on bodiless). The `Transferred` event and `transfers`
+//! are at the departure, as before.
+
+use serde::{Deserialize, Serialize};
 
 use crate::components::TilePos;
-use crate::components::{Building, BuildingKind, Household, Job, Position, Role, Sentence};
+use crate::components::{Brain, Building, BuildingKind, Household, Job, Lod, Position, Role, Sentence};
 use crate::entity::EntityId;
 use crate::events::EventKind;
-use crate::time::TICKS_PER_DAY;
+use crate::time::{Tick, TICKS_PER_DAY};
 use crate::world::World;
+
+/// The island pass phase 7: a prisoner transfer on the road, keyed by its
+/// van (`World::van_runs`; the van's `Motion` is `RideKind::Van`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VanRun {
+    /// The Station it left.
+    pub from: EntityId,
+    /// The Precinct.
+    pub to: EntityId,
+    /// The van's arrival at the Precinct's door.
+    pub arrive: Tick,
+    /// Every prisoner on the run (aboard, or bodiless off screen).
+    pub prisoners: Vec<EntityId>,
+}
 
 /// The switch: `[lives]` on and `[law] stations` on.
 pub fn on(world: &World) -> bool {
@@ -369,13 +401,24 @@ pub fn van(world: &mut World) {
             world.comp::<Position>(p).and_then(|pos| pos.building).filter(|b| st.contains(b)).map(|b| (p, b))
         })
         .collect();
+    let vans = crate::systems::motion::vans_on(world);
+    let mut runs: Vec<(EntityId, Vec<EntityId>)> = Vec::new();
     for (p, s) in due {
         if room == 0 {
             break;
         }
         room -= 1;
-        world.remove_from_building(p);
-        world.enter_building(p, precinct);
+        if vans {
+            // The island pass phase 7: on the Station's van, not written
+            // to the Precinct.
+            match runs.iter_mut().find(|(st, _)| *st == s) {
+                Some((_, ps)) => ps.push(p),
+                None => runs.push((s, vec![p])),
+            }
+        } else {
+            world.remove_from_building(p);
+            world.enter_building(p, precinct);
+        }
         let text = format!(
             "{} taken from the {} in {} to the Precinct",
             world.name_of(p),
@@ -384,6 +427,95 @@ pub fn van(world: &mut World) {
         );
         world.push_event(EventKind::Transferred, &[p, s, precinct], text);
         crate::systems::ownership::jobs2_row(world).transfers += 1;
+    }
+    for (s, ps) in runs {
+        send_vans(world, s, precinct, ps);
+    }
+}
+
+/// The island pass phase 7: the Station `s`'s due prisoners `ps` set out
+/// for the Precinct, `[motion.vans] capacity` a van, in the van's order.
+fn send_vans(world: &mut World, s: EntityId, precinct: EntityId, ps: Vec<EntityId>) {
+    let Some(cap) = world.config.motion.as_ref().and_then(|m| m.vans.as_ref()).map(|v| v.capacity.max(1) as usize)
+    else {
+        return;
+    };
+    let (Some(sb), Some(to)) = (world.comp::<Building>(s), door(world, precinct)) else { return };
+    let from = world.outside_door(sb);
+    let now = world.tick;
+    let road = crate::systems::motion::road_len(world, from, to).max(from.manhattan(to));
+    let arrive = now + crate::systems::vehicles::car_ticks(world, road);
+    for load in ps.chunks(cap) {
+        let v = crate::systems::motion::spawn_van(world, from, to, now, arrive);
+        for &p in load {
+            let body = world.comp::<Brain>(p).is_some_and(|b| b.lod != Lod::Statistical);
+            if body {
+                crate::systems::motion::join(world, p, v);
+            } else {
+                world.leave_building(p);
+            }
+        }
+        let run = VanRun { from: s, to: precinct, arrive, prisoners: load.to_vec() };
+        world.van_runs.insert(v, run);
+    }
+}
+
+/// The island pass phase 7: a suspect escorted to Station `s` and booked to
+/// the Precinct (its cells filled while the escort drove) rides a van on
+/// from the Station's door, his `Sentence` the Precinct's.
+pub fn send_on(world: &mut World, s: EntityId, suspect: EntityId) {
+    let Some(precinct) = world.building_of_kind(BuildingKind::Jail) else { return };
+    let here = world.comp::<Position>(suspect).and_then(|p| p.building);
+    if here != Some(precinct) || !world.has::<Sentence>(suspect) || !world.is_alive(suspect) {
+        return;
+    }
+    let Some(from) = world.comp::<Building>(s).map(|b| world.outside_door(b)) else { return };
+    world.remove_from_building(suspect);
+    if let Some(p) = world.comp_mut::<Position>(suspect) {
+        p.tile = from;
+        p.building = None;
+    }
+    send_vans(world, s, precinct, vec![suspect]);
+}
+
+/// Every tick (`law::run`): a transfer van at the Precinct's door sets its
+/// prisoners down and they are booked in (the Statistical ones with them);
+/// the van's motion ends. A prisoner no longer sentenced (or dead) is off
+/// the run where he is.
+pub fn van_tick(world: &mut World) {
+    if world.van_runs.is_empty() {
+        return;
+    }
+    let now = world.tick;
+    let done: Vec<EntityId> = world.van_runs.iter().filter(|(_, r)| r.arrive <= now).map(|(&v, _)| v).collect();
+    for v in done {
+        let Some(run) = world.van_runs.remove(&v) else { continue };
+        for p in run.prisoners {
+            if crate::systems::motion::vehicle_of(world, p) == Some(v) {
+                crate::systems::motion::alight_now(world, p);
+            }
+            if !world.is_alive(p) || !world.has::<Sentence>(p) {
+                continue;
+            }
+            // Off the run already and inside somewhere else: left there.
+            if world.comp::<Position>(p).is_some_and(|pos| pos.building.is_some()) {
+                continue;
+            }
+            world.enter_building(p, run.to);
+        }
+        crate::systems::motion::finish(world, v);
+    }
+}
+
+/// `lod::set_lod`, a promotion out of the Statistical tier: a prisoner on a
+/// transfer run gets his body aboard its van.
+pub fn on_promoted(world: &mut World, id: EntityId) {
+    if world.van_runs.is_empty() || !world.has::<Sentence>(id) {
+        return;
+    }
+    let Some(v) = world.van_runs.iter().find(|(_, r)| r.prisoners.contains(&id)).map(|(&v, _)| v) else { return };
+    if world.motions.contains_key(&v) && crate::systems::motion::vehicle_of(world, id).is_none() {
+        crate::systems::motion::join(world, id, v);
     }
 }
 

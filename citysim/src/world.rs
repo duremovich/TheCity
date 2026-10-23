@@ -610,6 +610,10 @@ pub struct World {
     /// saved while empty).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub aboard: BTreeMap<EntityId, EntityId>,
+    /// The island pass phase 7 (OPEN-166): the prisoner transfers on the
+    /// road, by van (`stations.rs` § the van; not saved while empty).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub van_runs: BTreeMap<EntityId, systems::stations::VanRun>,
     /// Measurement only (never saved, read by nothing in the sim): when
     /// `Some`, every commute arrival `(ticks, Manhattan tiles, mode)` with
     /// mode 0 walked, 1 drove, 2 rode.
@@ -1644,6 +1648,7 @@ impl World {
             segments: BTreeMap::new(),
             motions: BTreeMap::new(),
             aboard: BTreeMap::new(),
+            van_runs: BTreeMap::new(),
             commute_log: None,
             leg_log: None,
             dealers: BTreeMap::new(),

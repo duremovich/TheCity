@@ -4468,6 +4468,17 @@ road_route = true                  # a timed road vehicle's way follows the road
 capacity = 400                     # riders aboard one train; a full train leaves the rest for the next. Placeholder, set
                                    # high to start (an island peak boarding is ~100 an hour at a stop)
 
+# The island pass phase 7 (docs/ISLAND_PASS.md I3; OPEN-166; systems/stations.rs § the van): the law's vans are vehicles in
+# motion. An escort within [legs] escort_walk_tiles walks (a Full guard steps it, the suspect in tow; a Coarse one leads
+# him along the road at the walk's pace); past it the van pulls up at the arrest's kerb, waits [legs] van_call_ticks, and
+# the guard drives it to the cells with the cuffed suspect aboard, at the Car's speed. At [law] transfer_hour each
+# Station's due prisoners board a van at its door and ride to the Precinct (the drive at the Car's speed, no body set
+# down early): Full and Coarse prisoners aboard, Statistical ones on the same timed run (the mirror). CITYSIM_VAN_OFF=1
+# drops it (the switch in flight).
+[motion.vans]
+capacity = 8                       # prisoners one transfer van carries; more due at a Station send another. Placeholder
+                                   # (a Station holds [law] station_cells 6, so it never binds there)
+
 # The island pass phase 3c (OPEN-177, Dylan 2026-10-22; mood.rs housing_bias): a flat bias on the hourly mood target
 # from the agent's Home, as [litter] mood is. A Home's tier reached mood only through the night's sleep safety (+0.1 a
 # tier, often at its cap) and the synth diet; crowding and a company-owned bed registered nothing, so a coffin rack felt

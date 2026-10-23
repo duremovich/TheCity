@@ -1092,18 +1092,66 @@ fn escort_leg(world: &mut World, id: EntityId, target: &GotoTarget, lod: Lod) ->
             _ => timed_goto(world, id, target.clone()),
         };
         crate::systems::ownership::jobs2_row(world).escort_walks += 1;
+        // The island pass phase 7 (I3): a timed walk leads the suspect
+        // along the road (no statue, no landing).
+        if let ExecState::GotoTimed { arrive_tick, .. } = state {
+            escort_aboard(world, id, crate::systems::motion::RideKind::Foot, target.tile, world.tick, arrive_tick);
+        }
         (state, timed_walk(world, id, from, target.tile))
     } else {
-        let m = crate::systems::vehicles::timed_mult_of(world, crate::components::AssetKind::Car);
-        let drive = ((Tick::from(tiles) * world.config.exec.move_ticks_full) as f32 * m).round().max(1.0) as Tick;
-        let ticks = Tick::from(cfg.van_call_ticks) + drive;
+        // The island pass phase 7: the van drives the road (the island's
+        // bays make it far longer than the Manhattan line), so the drive is
+        // timed over the road's length.
+        let road = if crate::systems::motion::vans_on(world) {
+            crate::systems::motion::road_len(world, from, target.tile)
+        } else {
+            tiles
+        };
+        let drive = crate::systems::vehicles::car_ticks(world, road.max(tiles));
+        let call = Tick::from(cfg.van_call_ticks);
+        let ticks = call + drive;
         crate::systems::ownership::jobs2_row(world).escort_vans += 1;
+        // The island pass phase 7 (I3): the van pulls up at the kerb, waits
+        // the call, and the guard drives it, his suspect aboard.
+        let now = world.tick;
+        escort_aboard(world, id, crate::systems::motion::RideKind::Van, target.tile, now + call, now + ticks);
         (ExecState::GotoTimed { target: target.clone(), arrive_tick: world.tick + ticks, blocked_since: None }, ticks)
     };
     let tpm = u32::try_from(u64::from(tiles) * 100 / ticks.max(1)).unwrap_or(u32::MAX);
     let row = crate::systems::ownership::jobs2_row(world);
     row.escort_tpm_max = row.escort_tpm_max.max(tpm);
     Some(state)
+}
+
+/// The island pass phase 7 (I3, OPEN-166): the escort's van or timed walk
+/// in motion, the guard leading, his cuffed suspect aboard. Nothing with
+/// `[motion.vans]` off.
+fn escort_aboard(
+    world: &mut World,
+    guard: EntityId,
+    ride: crate::systems::motion::RideKind,
+    to: TilePos,
+    depart: Tick,
+    arrive: Tick,
+) {
+    let Some(suspect) = world.comp::<Brain>(guard).and_then(|b| b.escorting) else { return };
+    crate::systems::motion::board_escort(world, guard, suspect, ride, to, depart, arrive);
+}
+
+/// `lod::set_lod`: a Full guard walking an escort demoted to Coarse (the
+/// walk now timed): he leads the suspect along the road on the timed leg.
+pub fn escort_to_timed(world: &mut World, guard: EntityId) {
+    if !crate::systems::motion::vans_on(world) || crate::systems::motion::vehicle_of(world, guard).is_some() {
+        return;
+    }
+    let Some(b) = world.comp::<Brain>(guard) else { return };
+    if b.escorting.is_none() || !b.current_step().is_some_and(|s| s.action == ActionKind::Escort) {
+        return;
+    }
+    let ExecState::GotoTimed { target, arrive_tick, .. } = &b.exec else { return };
+    let (to, arrive) = (target.tile, *arrive_tick);
+    let now = world.tick;
+    escort_aboard(world, guard, crate::systems::motion::RideKind::Foot, to, now, arrive);
 }
 
 /// The island pass phase 5 (I3): a street leg (`start_step`) is a vehicle

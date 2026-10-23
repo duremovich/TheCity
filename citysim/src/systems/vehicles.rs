@@ -158,6 +158,14 @@ pub fn timed_mult_of(world: &World, kind: AssetKind) -> f32 {
     c.road_share * c.mult_of(kind, 0) + (1.0 - c.road_share) * c.mult_of(kind, 1)
 }
 
+/// A drive of `tiles` (Manhattan) at the Car's timed speed: the escort's
+/// van (P12) and the transfer van (the island pass phase 7), at least 1.
+pub fn car_ticks(world: &World, tiles: u32) -> crate::time::Tick {
+    let m = timed_mult_of(world, AssetKind::Car);
+    ((crate::time::Tick::from(tiles) * world.config.exec.move_ticks_full) as f32 * m).round().max(1.0)
+        as crate::time::Tick
+}
+
 /// D22: the flyer takes off from the street outside its building and lands
 /// at the door after `max(1, ceil(chebyshev × flyer_ticks_per_tile))`.
 pub fn fly(world: &mut World, agent: EntityId, target: GotoTarget) -> ExecState {
