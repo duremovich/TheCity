@@ -1638,3 +1638,20 @@ fn test_a_save_mid_train_ride_resumes_identically() {
     }
     assert_eq!(citysim::save::to_ron(&w), citysim::save::to_ron(&back));
 }
+
+/// I3: demoted off screen between two stops, a rider is off the train at
+/// once (no body to carry on), and the train runs on without him.
+#[test]
+fn test_a_demotion_off_screen_takes_the_rider_off_the_train() {
+    let mut w = el_city();
+    let (who, home, farm) = el_farmer(&w);
+    el_set_out(&mut w, who, home, farm, Lod::Full);
+    let v = until_mid_track(&mut w, who);
+    lod::set_lod(&mut w, who, Lod::Statistical);
+    assert_eq!(motion::vehicle_of(&w, who), None, "off the train");
+    assert!(!w.transit.held.contains(&who), "not held to the next stop");
+    assert!(!w.motions[&v].riders.contains(&who));
+    w.check_indices().expect("the aboard links agree");
+    exec_tick(&mut w);
+    assert!(w.motions.contains_key(&v), "the train runs on");
+}

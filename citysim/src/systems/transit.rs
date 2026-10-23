@@ -1762,10 +1762,14 @@ pub fn aboard_at(world: &World, id: EntityId) -> Option<(f32, f32)> {
     if world.tick < *depart || world.tick >= *arrive_tick {
         return None;
     }
-    // The island pass phase 6: aboard a train, the train's tile.
+    // The island pass phase 6: aboard a train, the train's tile (at the
+    // departure tick, before the boarding, the train is at his stop).
     if trains_on(world) {
-        let v = crate::systems::motion::vehicle_of(world, id)?;
-        return world.motions.get(&v).map(|m| (f32::from(m.pos.x), f32::from(m.pos.y)));
+        let p = match crate::systems::motion::vehicle_of(world, id).and_then(|v| world.motions.get(&v)) {
+            Some(m) => m.pos,
+            None => world.comp::<Position>(id)?.tile,
+        };
+        return Some((f32::from(p.x), f32::from(p.y)));
     }
     let net = &world.transit.net;
     let line = net.lines.get(usize::from(ride.line))?;
