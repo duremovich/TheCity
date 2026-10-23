@@ -268,7 +268,10 @@ fn test_a_long_escort_uses_the_van_and_a_short_one_walks() {
     let ExecState::GotoTimed { arrive_tick, target, .. } = w.comp::<Brain>(g).expect("brain").exec.clone() else {
         panic!("a long escort is the van's drive");
     };
-    let tiles = u64::from(far.manhattan(target.tile));
+    // The island pass phase 7: the van drives the road, timed over its
+    // length (never under the Manhattan line).
+    let road = citysim::systems::motion::road_len(&w, far, target.tile);
+    let tiles = u64::from(far.manhattan(target.tile).max(road));
     let m = citysim::systems::vehicles::timed_mult_of(&w, citysim::components::AssetKind::Car);
     let drive = ((tiles * w.config.exec.move_ticks_full) as f32 * m).round() as u64;
     assert_eq!(arrive_tick - (w.tick - 1), u64::from(cfg.van_call_ticks) + drive, "the call, then the Car's speed");

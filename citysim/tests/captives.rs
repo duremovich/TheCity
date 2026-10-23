@@ -42,6 +42,13 @@ fn world() -> World {
     if let Some(d) = c.distance.as_mut() {
         d.free = None;
     }
+    // The island pass phase 7: nor the van while its switch is in flight
+    // (the escorts and transfers riding the road moved the day-40 city so
+    // the weak gang posts no Abduct of the rival leader's Spouse; re-read
+    // when the switch retires).
+    if let Some(m) = c.motion.as_mut() {
+        m.vans = None;
+    }
     World::new(42, c)
 }
 
