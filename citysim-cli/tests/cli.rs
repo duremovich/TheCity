@@ -79,7 +79,8 @@ fn test_cli_report_csv_header() {
     // household columns; phase 3: 13 civic columns; phase 4: 13 street columns; phase 5: 14 tower columns;
     // phase 6: 12 careers and leaders columns; phase 7: 9 stations and Spire columns; gate 8d: `exec_rides`,
     // `exec_rides_corp`; the pre-view pass phase 2: 9 `shift_*` columns; phase 3: 9 haul and counter columns; phase 4: 10 presence columns; phase 5: 9 legs and fares columns;
-    // phase 6: 9 leaders columns; the island pass phase 3a: 4 company housing columns; phase 3b: 5 more.
+    // phase 6: 9 leaders columns; the island pass phase 3a: 4 company housing columns; phase 3b: 5 more;
+    // phase 4: 5 commute pressure columns.
     assert_eq!(
         row.split(',').count(),
         81 + 8 * 6
@@ -130,6 +131,7 @@ fn test_cli_report_csv_header() {
             + 9
             + 9
             + 4
+            + 5
             + 5
     );
     assert!(lines.next().is_none());

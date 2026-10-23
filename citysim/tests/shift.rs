@@ -383,7 +383,15 @@ fn test_courier_hands_a_parcel_to_a_present_addressee_and_not_to_an_absent_one()
 /// day cook served nobody.
 #[test]
 fn test_day_cook_serves_day_customers() {
-    let mut w = world();
+    // The island pass phase 4: on the commute pressure's city seed 42's
+    // first NoodleBar cook serves no off-screen customer on his day (who
+    // lives near which bar moved by day 1); the premise reads the base
+    // relocation's households.
+    let mut w = World::new(42, {
+        let mut c = Config::load();
+        c.commute_pressure = None;
+        c
+    });
     w.run_ticks(TICKS_PER_DAY + 5 * TICKS_PER_HOUR);
     let day = w.config.world.shift_day.clone();
     let (k, nb) =

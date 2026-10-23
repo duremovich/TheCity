@@ -20,6 +20,18 @@ fn world() -> World {
     BASE.get_or_init(|| World::new(42, Config::load())).clone()
 }
 
+/// The island pass phase 4: the shipped city without `[commute_pressure]`
+/// (the base relocation), for the probes pinned to its households.
+fn world_no_pressure() -> World {
+    static BASE: std::sync::OnceLock<World> = std::sync::OnceLock::new();
+    BASE.get_or_init(|| {
+        let mut c = Config::load();
+        c.commute_pressure = None;
+        World::new(42, c)
+    })
+    .clone()
+}
+
 fn pin(w: &mut World, id: EntityId) {
     w.comp_mut::<Brain>(id).expect("brain").pinned = true;
 }
@@ -1025,6 +1037,12 @@ fn probe_far_worker_with_one_rent_moves_near_work() {
     w.comp_mut::<Wallet>(far).expect("wallet").coins = rents.max(1) + 2;
     let before = door_of(&w, far).map(|d| cost(&w, d, work));
     let partner_home = home(&w, partner).expect("partner home");
+    // The island pass phase 4: the farmer's far commute has built its
+    // pressure (tonight is the `move_days`th), so tonight's pass looks.
+    if let Some(c) = w.config.commute_pressure.clone() {
+        let p = citysim::systems::commute::Pressure { days: c.move_days - 1, ..Default::default() };
+        w.commute_pressure.insert(far, p);
+    }
     let end = w.tick + TICKS_PER_DAY + TICKS_PER_HOUR;
     // The partner stays jobless at the midnight pass: its job search runs
     // before relocation, and with open places (workplace room, 2026-10-11:
@@ -2559,7 +2577,10 @@ fn probe_new_parent_is_home_at_night() {
 
 /// Day 2, 10:00 of the shipped city.
 fn world_at_day2() -> World {
-    let mut w = world();
+    // The island pass phase 4: the commute pressure's city moves who lives
+    // where by day 2 (a butterfly: seed 42's first pair never bought out,
+    // with no move of its own); the probes on it read the base relocation.
+    let mut w = world_no_pressure();
     w.run_ticks(2 * TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
     w
 }
@@ -3255,7 +3276,10 @@ fn probe_reporter_stands_at_the_scene_on_his_shift() {
 #[test]
 fn probe_laid_off_loader_with_a_profession_is_rehired_first() {
     use citysim::components::{BuildingKind, Profession};
-    let mut w = world();
+    // The island pass phase 4: on the commute pressure's city a jobless
+    // adult nearer the Yard takes the post (the households sit elsewhere by
+    // day 5); the probe's premise is two candidates at one door.
+    let mut w = world_no_pressure();
     w.run_ticks(5 * TICKS_PER_DAY - 1);
     let role = w.config.trade_role("loader").expect("the loader row");
     let yard = w.buildings_of_kind(BuildingKind::FreightYard)[0];
