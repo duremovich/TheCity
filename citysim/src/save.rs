@@ -324,7 +324,13 @@ use crate::world::World;
 /// `walk` (a Coarse walk's start, written only when set): a save mid-walk
 /// resumes the walk on its way. An off save is byte-identical to version
 /// 62's.
-pub const SAVE_VERSION: u8 = 63;
+/// 64 (the island pass phase 10, OPEN-185): `FviolenceCfg.hands`
+/// (`[fviolence.hands]`, written only when set), `OrderRates.hands` (the
+/// actor side per faction, written only when non-empty), `Hole.prebound`
+/// and the `LivingCols` probe `fv_hands_capped` (each written only when
+/// set): a save resumes the hands' windows and an open hole's hand. An off
+/// save is byte-identical to version 63's.
+pub const SAVE_VERSION: u8 = 64;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

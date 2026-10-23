@@ -8672,6 +8672,28 @@ pub struct FviolenceCfg {
     /// L2 phase 5: a prior per victim class, as a multiplier per kind
     /// (Killed, Assaulted, Robbed, Abducted) on every source's prior.
     pub class_mult: FvClassCfg,
+    /// The island pass phase 10 `[fviolence.hands]` (OPEN-185): a source
+    /// strikes off screen only with its off-screen hands (`fviolence::daily`).
+    /// `None` (not written into a save) with `CITYSIM_VIOLENCE_MIRROR_OFF=1`:
+    /// the victim-side rolls limited only by `day_cap`, as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hands: Option<FvHandsCfg>,
+}
+
+/// `[fviolence.hands]`: the actor side's prior, per member-day of a
+/// faction's members under a source (an order or a vendetta), Killed,
+/// Assaulted, Robbed, Abducted, worth `prior_days` member-days of evidence.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FvHandsCfg {
+    pub prior: [f32; 4],
+    pub prior_days: f32,
+}
+
+impl Default for FvHandsCfg {
+    fn default() -> Self {
+        FvHandsCfg { prior: [0.002, 0.02, 0.005, 0.001], prior_days: 30.0 }
+    }
 }
 
 /// L2 phase 5 (calibration (b)): per `VictimClass`, the per-kind
@@ -8746,6 +8768,7 @@ impl Default for FviolenceCfg {
             day_cap: FvKindsCfg::default(),
             prior: FvPriorCfg::default(),
             class_mult: FvClassCfg::default(),
+            hands: None,
         }
     }
 }
@@ -8894,6 +8917,11 @@ impl Config {
             if let Some(m) = cfg.motion.as_mut() {
                 m.walks = None;
             }
+        }
+        // The island pass phase 10 (OPEN-185): the Statistical violence
+        // mirror limited by its attackers, the switch in flight (doctrine 6).
+        if std::env::var("CITYSIM_VIOLENCE_MIRROR_OFF").is_ok_and(|v| v == "1") {
+            cfg.fviolence.hands = None;
         }
         // The island pass phase 8 (OPEN-168 part, I4): the dead trades'
         // bugs, the switch in flight (doctrine 6).
@@ -9364,6 +9392,14 @@ impl Config {
             robbed: up_u32(fv.robbed),
             abducted: up_u32(fv.abducted),
         };
+        // The island pass phase 10 (OPEN-185): `vendetta_norm` is the
+        // grudge weight one faction's members hold on another's that reads
+        // as a full feud; a faction's members (and so the grudges between
+        // two factions) grow with the city, so the norm is per 2,000
+        // residents (with the phase's `[fviolence.hands]`; absolute before).
+        if self.fviolence.hands.is_some() {
+            self.grudges.vendetta_norm *= up as f32;
+        }
         self.life.relocate_per_day = up_usize(self.life.relocate_per_day);
         // The outside's demand: the World buys per resident (money enters at
         // the 2,000 city's per-capita rate) and its account refills to match.

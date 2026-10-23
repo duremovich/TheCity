@@ -144,6 +144,8 @@ fn test_daily_pass_opens_killed_hole_in_contested_district() {
     w.config.fviolence.fv_mult = 1.0;
     // L2 phase 5: the per-class multipliers off (these priors are the test's own).
     w.config.fviolence.class_mult = citysim::config::FvClassCfg::default();
+    // The victim side alone (the hands' cap has its own tests below).
+    w.config.fviolence.hands = None;
     fviolence::daily(&mut w);
     let holes: Vec<&Hole> = w
         .holes
@@ -189,6 +191,7 @@ fn test_faction_hole_binds_member_or_unknown_never_civilian() {
             source: Some(ViolenceSource::Order(Order::Contest)),
             faction: Some(g),
             riot: None,
+            prebound: None,
         };
         let id = bind::open_hole(&mut w, hole);
         match bind::bind(&mut w, id).expect("open") {
@@ -285,6 +288,8 @@ fn test_harvest_cell_abducts() {
     // L2 phase 5: the per-class multipliers off (these priors are the test's own).
     on.config.fviolence.class_mult = citysim::config::FvClassCfg::default();
     on.config.fviolence.day_cap.abducted = 1000;
+    // The victim side alone (the hands' cap has its own tests below).
+    on.config.fviolence.hands = None;
     fviolence::rebuild_active(&mut on);
     fviolence::daily(&mut on);
     assert!(!law::living(&on, v), "the Harvest cell abducts the visible chrome");
@@ -346,6 +351,9 @@ fn test_riot_gone_by_midnight_still_rolls_and_binds_a_rioter() {
     w.config.fviolence.fv_mult = 1.0;
     // L2 phase 5: the per-class multipliers off (these priors are the test's own).
     w.config.fviolence.class_mult = citysim::config::FvClassCfg::default();
+    // The victim side alone: these rioters are bodies (with the hands a
+    // riot of bodies strikes only on screen, its own test below).
+    w.config.fviolence.hands = None;
     fviolence::daily(&mut w);
     let holes: Vec<u64> = w
         .holes
@@ -382,6 +390,8 @@ fn test_yesterdays_pass_hole_does_not_shield_today() {
     // L2 phase 5: the per-class multipliers off (these priors are the test's own).
     w.config.fviolence.class_mult = citysim::config::FvClassCfg::default();
     w.config.fviolence.day_cap.robbed = 1;
+    // The victim side alone (the hands' cap has its own tests below).
+    w.config.fviolence.hands = None;
     w.tick = (w.tick / citysim::TICKS_PER_DAY + 1) * citysim::TICKS_PER_DAY;
     fviolence::daily(&mut w);
     let first: Vec<EntityId> = w.holes.values().filter(|h| h.source.is_some()).map(|h| h.victim).collect();
@@ -503,6 +513,8 @@ fn test_street_rates_are_not_applied_to_the_housed() {
         w.config.fviolence.prior.order = [0.0; 4];
         w.config.fviolence.fv_mult = 1.0;
         w.config.fviolence.day_cap.killed = 10_000;
+        // The victim side alone (the hands' cap has its own tests below).
+        w.config.fviolence.hands = None;
         // The ledger learned a deadly street: the evictees' cell (Street with
         // the fix, Civilian without) full of killings.
         let class = if fix { VictimClass::Street } else { VictimClass::Civilian };
@@ -588,6 +600,8 @@ fn riot_kills(fix: bool, hours: u32) -> (u32, u32) {
     w.config.fviolence.fv_mult = 1.0;
     w.config.fviolence.class_mult = citysim::config::FvClassCfg::default();
     w.config.fviolence.day_cap.killed = 10_000;
+    // The victim side alone: these rioters are bodies.
+    w.config.fviolence.hands = None;
     fviolence::daily(&mut w);
     assert!(w.fv_tally.source_hours.is_empty(), "the day's hours are cleared");
     (w.stats.current.living.fv_killed, tallied)
@@ -605,4 +619,173 @@ fn test_short_riot_rolls_its_hours_not_a_day() {
     assert_eq!(on24, off, "a day-long riot rolls as before");
     // A 6-hour riot: a quarter of the rate (0.225 vs 0.9): well under half.
     assert!(on6 * 2 < off && on6 > 0, "six hours {on6} vs a day {off}");
+}
+
+// ---------------------------------------------------------------------------
+// The island pass phase 10 (OPEN-185, `[fviolence.hands]`): a source strikes
+// off screen only with its off-screen hands, each hit pre-bound to one.
+// ---------------------------------------------------------------------------
+
+/// `world(44)` an hour in, the first gang enlisting eight civilians, every
+/// member loyal (following the order), struck on the biggest Statistical
+/// district under a pinned Contest with a deadly order prior, no day cap;
+/// the first `stat` members Statistical and off screen since before
+/// yesterday, the rest Coarse bodies. The gang, its Statistical members,
+/// its bodies.
+fn hands_world(stat: usize) -> (World, EntityId, Vec<EntityId>, Vec<EntityId>) {
+    let mut w = world(44);
+    assert!(fviolence::hands_on(&w), "[fviolence.hands] on in the shipped config");
+    w.run_ticks(TICKS_PER_HOUR + 1);
+    let (g, _) = gang_and_member(&mut w);
+    let d = stat_district(&w);
+    w.push_command(PlayerCommand::FactionStrike { gang: g, district: d, days: 3 });
+    w.run_ticks(1);
+    let members = w.comp::<Gang>(g).map(|x| x.members.clone()).expect("gang");
+    assert!(members.len() > stat, "members {}", members.len());
+    let (mut off, mut on) = (Vec::new(), Vec::new());
+    for (i, &m) in members.iter().enumerate() {
+        if let Some(p) = w.comp_mut::<Personality>(m) {
+            p.loyalty = 1.0;
+        }
+        if i < stat {
+            lod::set_lod(&mut w, m, Lod::Statistical);
+            w.comp_mut::<Brain>(m).expect("brain").body_day = None;
+            off.push(m);
+        } else {
+            lod::set_lod(&mut w, m, Lod::Coarse);
+            on.push(m);
+        }
+    }
+    off.sort_unstable();
+    w.config.fviolence.prior.order = [1.0, 0.0, 0.0, 0.0];
+    w.config.fviolence.prior_weight = 1e6;
+    w.config.fviolence.fv_mult = 1.0;
+    w.config.fviolence.class_mult = citysim::config::FvClassCfg::default();
+    w.config.fviolence.day_cap.killed = 10_000;
+    (w, g, off, on)
+}
+
+fn killed_by(w: &World, g: EntityId) -> Vec<&Hole> {
+    w.holes.values().filter(|h| h.kind == HoleKind::Killed && h.faction == Some(g)).collect()
+}
+
+#[test]
+fn test_source_with_no_statistical_members_makes_no_offscreen_hits() {
+    let (mut w, g, _, _) = hands_world(0);
+    fviolence::daily(&mut w);
+    let n = killed_by(&w, g).len();
+    assert_eq!(n, 0, "a gang all on screen kills nobody off screen ({n})");
+    // The same city with the switch off: the victim side alone kills.
+    let (mut off, g, _, _) = hands_world(0);
+    off.config.fviolence.hands = None;
+    fviolence::daily(&mut off);
+    assert!(killed_by(&off, g).len() > 10, "the old mirror: {}", killed_by(&off, g).len());
+}
+
+#[test]
+fn test_offscreen_hits_per_day_at_most_the_attacker_cap() {
+    let (mut w, g, stat, _) = hands_world(4);
+    // Rate 0.5 per member-day exactly (no evidence, the prior's weight
+    // unbounded): 4 free hands x 0.5 = a budget of 2 kills.
+    w.config.fviolence.hands = Some(citysim::config::FvHandsCfg { prior: [0.5, 0.0, 0.0, 0.0], prior_days: 1e9 });
+    assert_eq!(fviolence::hand_rate(&w, (ViolenceSource::Order(Order::Contest), g))[0], 0.5);
+    let all = fviolence::active_now(&w);
+    let pools = fviolence::build_pools(&w, &all);
+    let p = pools.get(&fviolence::PoolKey::Faction(ViolenceSource::Order(Order::Contest), g)).expect("the pool");
+    assert_eq!(p.hands, stat, "the free Statistical members are the hands");
+    assert_eq!(p.budget[0], 2, "4 x 0.5");
+    fviolence::daily(&mut w);
+    assert_eq!(killed_by(&w, g).len(), 2, "the attacker cap, not the victims' roll, sets the kills");
+}
+
+#[test]
+fn test_offscreen_kill_is_bound_to_a_statistical_member_never_an_onscreen_one() {
+    let (mut w, g, stat, bodies) = hands_world(3);
+    w.config.fviolence.hands = Some(citysim::config::FvHandsCfg { prior: [1.0, 0.0, 0.0, 0.0], prior_days: 1e9 });
+    w.config.bind.p_unknown = 0.0;
+    fviolence::daily(&mut w);
+    let holes: Vec<(u64, Option<EntityId>)> = killed_by(&w, g).iter().map(|h| (h.id, h.prebound)).collect();
+    assert_eq!(holes.len(), 3, "one kill per hand");
+    let mut hands: Vec<EntityId> = holes.iter().map(|&(_, h)| h.expect("pre-bound")).collect();
+    hands.sort_unstable();
+    assert_eq!(hands, stat, "each hand strikes once");
+    for (id, hand) in holes {
+        match bind::bind(&mut w, id).expect("open") {
+            Bound::Actor(a) => {
+                assert_eq!(Some(a), hand, "bound to its hand");
+                assert!(!bodies.contains(&a), "never a member on screen");
+            }
+            Bound::Unknown => panic!("a living, free hand binds"),
+        }
+    }
+    assert_eq!(w.stats.current.living.fv_bound_wrong, 0);
+}
+
+#[test]
+fn test_riot_of_bodies_strikes_nobody_off_screen() {
+    use citysim::{Riot, RiotResponse, RiotTarget};
+    let build = |stat: usize| {
+        let mut w = world(48);
+        w.run_ticks(citysim::TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
+        let d = stat_district(&w);
+        let rioters: Vec<EntityId> = civilians(&w)
+            .into_iter()
+            .filter(|&a| w.comp::<Brain>(a).is_some_and(|b| b.lod != Lod::Statistical))
+            .take(10)
+            .collect();
+        for &r in rioters.iter().take(stat) {
+            lod::set_lod(&mut w, r, Lod::Statistical);
+            w.comp_mut::<Brain>(r).expect("brain").body_day = None;
+        }
+        let jail = w.buildings_of_kind(citysim::BuildingKind::Jail)[0];
+        w.riots.push(Riot {
+            id: 93,
+            district: d,
+            target: jail,
+            kind: RiotTarget::Precinct,
+            muster: jail,
+            muster_at: w.tick,
+            rioters: rioters.clone(),
+            response: RiotResponse::Contain,
+            started: w.tick,
+            departed: None,
+        });
+        for &r in &rioters {
+            w.rioter_of.insert(r, 93);
+        }
+        w.config.fviolence.prior = Default::default();
+        w.config.fviolence.prior.order = [0.0; 4];
+        w.config.fviolence.prior.vendetta = [0.0; 4];
+        w.config.fviolence.prior.episode = [0.0; 4];
+        w.config.fviolence.prior.riot = [1.0, 0.0, 0.0, 0.0];
+        w.config.fviolence.prior_weight = 1e6;
+        w.config.fviolence.fv_mult = 1.0;
+        w.config.fviolence.class_mult = citysim::config::FvClassCfg::default();
+        w.config.fviolence.day_cap.killed = 10_000;
+        w.config.life.violence_fixes = false;
+        fviolence::daily(&mut w);
+        let riot: Vec<Option<EntityId>> =
+            w.holes.values().filter(|h| h.source == Some(ViolenceSource::Riot)).map(|h| h.prebound).collect();
+        (riot, rioters)
+    };
+    let (riot, _) = build(0);
+    assert!(riot.is_empty(), "a riot of bodies strikes only on screen ({})", riot.len());
+    let (riot, rioters) = build(2);
+    assert_eq!(riot.len(), 2, "two Statistical rioters, a hit each");
+    assert!(riot.iter().all(|h| h.is_some_and(|a| rioters[..2].contains(&a))), "pre-bound to them");
+}
+
+#[test]
+fn test_vendetta_norm_scales_with_the_city() {
+    let c = Config::load();
+    assert!(c.fviolence.hands.is_some());
+    let n = c.world.population;
+    let norm = c.grudges.vendetta_norm;
+    assert_eq!(c.clone().scaled_to(n).grudges.vendetta_norm, norm, "the 2,000 city keeps its norm");
+    let big = c.clone().scaled_to(n * 10).grudges.vendetta_norm;
+    assert!((big - 10.0 * norm).abs() < 1e-3, "ten times the city, ten times the norm: {big} vs {norm}");
+    assert_eq!(c.clone().scaled_to(n / 10).grudges.vendetta_norm, norm, "up only, as the other caps");
+    let mut off = c.clone();
+    off.fviolence.hands = None;
+    assert_eq!(off.scaled_to(n * 10).grudges.vendetta_norm, norm, "absolute with the switch off");
 }

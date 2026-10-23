@@ -81,6 +81,7 @@ fn manual_hole(w: &mut World, victim: EntityId, kind: HoleKind, tick: Tick) -> H
         source: None,
         faction: None,
         riot: None,
+        prebound: None,
     };
     bind::open_hole(w, hole)
 }

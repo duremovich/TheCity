@@ -72,6 +72,289 @@ pub fn daily_actor(world: &mut World) {
         cell.roll(RATE_DAYS);
     }
     world.order_rates.cells.retain(|_, c| !c.is_empty());
+    hands_daily_actor(world, yesterday);
+}
+
+// ---------------------------------------------------------------------------
+// The island pass phase 10 (OPEN-185): the off-screen hands
+// ---------------------------------------------------------------------------
+
+/// The hands' keyed draws (`SimRng::keyed`: below 2^60, apart from the
+/// other `*_KEY` prefixes).
+pub const HANDS_KEY: u64 = 0xF4A0 << 44;
+
+/// `[fviolence.hands]` is on (off with `CITYSIM_VIOLENCE_MIRROR_OFF=1`).
+pub fn hands_on(world: &World) -> bool {
+    world.config.fviolence.hands.is_some()
+}
+
+/// The order a gang member's acts count under (`source_of`'s): the order
+/// he follows, else his gang's raid order.
+fn hand_order(world: &World, id: EntityId) -> Option<Order> {
+    crate::systems::gang::following_order(world, id).or_else(|| {
+        world
+            .gang_of(id)
+            .and_then(|g| world.comp::<crate::components::Gang>(g))
+            .map(|g| g.order)
+            .filter(|o| o.is_raid())
+    })
+}
+
+/// The hands ledger's source: Job's cell is Expand's (`rebuild_active`).
+fn hand_source(s: ViolenceSource) -> ViolenceSource {
+    match s {
+        ViolenceSource::Order(Order::Job) => ViolenceSource::Order(Order::Expand),
+        s => s,
+    }
+}
+
+/// A free off-screen hand at the midnight pass: Statistical now and at no
+/// assignment yesterday (so nowhere on screen the day the deed is laid to),
+/// living, adult, and not jailed, emigrating or pinned.
+pub fn free_hand(world: &World, id: EntityId) -> bool {
+    let yesterday = world.day().saturating_sub(1);
+    let Some(b) = world.comp::<Brain>(id) else { return false };
+    b.lod == Lod::Statistical
+        && !b.emigrating
+        && !b.pinned
+        && b.body_day.is_none_or(|d| d < yesterday)
+        && world.is_alive(id)
+        && !world.has::<Sentence>(id)
+        && crate::systems::demography::is_adult(world, id)
+}
+
+/// Midnight (from `daily_actor`): yesterday's member-days per `(source,
+/// faction)`: every free gang member that held a body yesterday under its
+/// order (`hand_order`), and every member of a faction in an open vendetta
+/// that did; then the windows roll and empty cells go.
+fn hands_daily_actor(world: &mut World, yesterday: u64) {
+    if !hands_on(world) {
+        return;
+    }
+    let bodied = |w: &World, m: EntityId| {
+        !w.has::<Sentence>(m) && w.comp::<Brain>(m).is_some_and(|b| b.body_day == Some(yesterday))
+    };
+    let mut days: Vec<crate::ledger::HandsKey> = Vec::new();
+    for gang in world.gangs() {
+        let members = world.comp::<crate::components::Gang>(gang).map(|g| g.members.clone()).unwrap_or_default();
+        for m in members {
+            if !bodied(world, m) {
+                continue;
+            }
+            if let Some(o) = hand_order(world, m) {
+                days.push((hand_source(ViolenceSource::Order(o)), gang));
+            }
+        }
+    }
+    let feuding: std::collections::BTreeSet<EntityId> = world.vendettas.iter().flat_map(|v| [v.a, v.b]).collect();
+    if !feuding.is_empty() {
+        for lod in [Lod::Full, Lod::Coarse, Lod::Statistical] {
+            for &m in world.tier(lod) {
+                if !bodied(world, m) {
+                    continue;
+                }
+                for &f in &feuding {
+                    if crate::systems::grudges::member_of(world, m, f) {
+                        days.push((ViolenceSource::Vendetta, f));
+                    }
+                }
+            }
+        }
+    }
+    for key in days {
+        let c = world.order_rates.hands_mut(key);
+        c.member_today = c.member_today.saturating_add(1);
+    }
+    for c in world.order_rates.hands.values_mut() {
+        c.roll(RATE_DAYS);
+    }
+    world.order_rates.hands.retain(|_, c| !c.is_empty());
+}
+
+/// The actor side's rate per member-day of `(source, faction)`, Killed,
+/// Assaulted, Robbed, Abducted: `(Σ hits[k] + prior[k] × prior_days) ÷
+/// (Σ member_days + prior_days)` over the last `rate_days` days (the
+/// victim side's `cell_rates` shape, `act_rate`'s maths). Zeros when off.
+pub fn hand_rate(world: &World, key: crate::ledger::HandsKey) -> [f32; 4] {
+    let Some(h) = world.config.fviolence.hands.as_ref() else { return [0.0; 4] };
+    let days = world.config.fviolence.rate_days;
+    let pd = h.prior_days.max(0.0);
+    let cell = world.order_rates.hands.get(&key);
+    std::array::from_fn(|k| {
+        let (hits, members) = cell.map_or((0, 0), |c| c.sums(k, days));
+        let denom = members as f32 + pd;
+        if denom <= 0.0 {
+            return 0.0;
+        }
+        ((hits as f32 + h.prior[k] * pd) / denom).clamp(0.0, 1.0)
+    })
+}
+
+/// A source's hands: an order's or a vendetta side's faction, a riot.
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum PoolKey {
+    Faction(ViolenceSource, EntityId),
+    Riot(u32),
+}
+
+/// The pool of an active source (an episode's is the agent's own).
+pub fn pool_key(s: &ActiveSource) -> Option<PoolKey> {
+    match s.source {
+        ViolenceSource::Riot => s.riot.map(PoolKey::Riot),
+        src => s.faction.map(|f| PoolKey::Faction(hand_source(src), f)),
+    }
+}
+
+/// One source's off-screen hands today: the free Statistical members (in
+/// ascending id, spent ones dropped as they strike) and the day's budget
+/// of hits per kind.
+#[derive(Clone, Debug, Default)]
+pub struct Pool {
+    pub hands: Vec<EntityId>,
+    pub budget: [u32; 4],
+}
+
+fn key_hash(k: &PoolKey) -> u64 {
+    let (tag, a, b) = match *k {
+        PoolKey::Faction(ViolenceSource::Order(o), f) => (1u64, o as u64, u64::from(f.index)),
+        PoolKey::Faction(ViolenceSource::Vendetta, f) => (2, 0, u64::from(f.index)),
+        PoolKey::Faction(ViolenceSource::Episode, f) => (3, 0, u64::from(f.index)),
+        PoolKey::Faction(_, f) => (4, 0, u64::from(f.index)),
+        PoolKey::Riot(r) => (5, 0, u64::from(r)),
+    };
+    (tag << 56) ^ (a << 40) ^ b
+}
+
+/// A keyed draw of the hands pass: `purpose` (1 a budget's rounding, 2 a
+/// hand's pick) on `(day, a, b)`.
+fn hands_draw(world: &World, purpose: u64, a: u64, b: u64) -> rand_chacha::ChaCha8Rng {
+    let h = crate::rng::splitmix64(
+        (purpose << 58) ^ world.day().rotate_left(44) ^ crate::rng::splitmix64(a) ^ b.rotate_left(20),
+    );
+    world.rng.keyed(HANDS_KEY | (h & ((1 << 44) - 1)))
+}
+
+/// The midnight pass's pools for the sources `all`: an order's hands are
+/// its gang's free members under it, a vendetta side's its faction's free
+/// members, a riot's its free rioters (live, or the roster the tally kept),
+/// an episode's the agent while free. An order's or a vendetta's budget is
+/// `n × hand_rate` per kind, rounded on a keyed draw (unbiased), at most
+/// `n`; a riot's and an episode's is `n` (each hand strikes at most once).
+pub fn build_pools(world: &World, all: &[ActiveSource]) -> std::collections::BTreeMap<PoolKey, Pool> {
+    use std::collections::BTreeMap;
+    let mut pools: BTreeMap<PoolKey, Pool> = BTreeMap::new();
+    for s in all {
+        if let Some(k) = pool_key(s) {
+            pools.entry(k).or_default();
+        }
+    }
+    let feuding: Vec<EntityId> = pools
+        .keys()
+        .filter_map(|k| match *k {
+            PoolKey::Faction(ViolenceSource::Vendetta, f) => Some(f),
+            _ => None,
+        })
+        .collect();
+    let mut feud_hands: BTreeMap<EntityId, Vec<EntityId>> = BTreeMap::new();
+    if !feuding.is_empty() {
+        let mut ids: Vec<EntityId> = world.tier(Lod::Statistical).to_vec();
+        ids.sort_unstable();
+        for id in ids {
+            if !free_hand(world, id) {
+                continue;
+            }
+            for &f in &feuding {
+                if crate::systems::grudges::member_of(world, id, f) {
+                    feud_hands.entry(f).or_default().push(id);
+                }
+            }
+        }
+    }
+    let keys: Vec<PoolKey> = pools.keys().copied().collect();
+    for k in keys {
+        let mut hands: Vec<EntityId> = match k {
+            PoolKey::Faction(ViolenceSource::Order(o), g) => world
+                .comp::<crate::components::Gang>(g)
+                .map(|x| x.members.clone())
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|&m| {
+                    free_hand(world, m)
+                        && hand_order(world, m).map(|x| hand_source(ViolenceSource::Order(x)))
+                            == Some(ViolenceSource::Order(o))
+                })
+                .collect(),
+            PoolKey::Faction(ViolenceSource::Vendetta, f) => feud_hands.get(&f).cloned().unwrap_or_default(),
+            PoolKey::Faction(ViolenceSource::Episode, a) => {
+                if free_hand(world, a) {
+                    vec![a]
+                } else {
+                    Vec::new()
+                }
+            }
+            PoolKey::Faction(_, _) => Vec::new(),
+            PoolKey::Riot(r) => {
+                let live = world.riots.iter().find(|x| x.id == r).map(|x| x.rioters.clone());
+                let roster = || world.fv_tally.riot_rosters.get(&r).map(|(_, m)| m.clone()).unwrap_or_default();
+                live.unwrap_or_else(roster).into_iter().filter(|&m| free_hand(world, m)).collect()
+            }
+        };
+        hands.sort_unstable();
+        hands.dedup();
+        let n = hands.len() as u32;
+        let budget = match k {
+            PoolKey::Faction(src @ (ViolenceSource::Order(_) | ViolenceSource::Vendetta), f) if n > 0 => {
+                let rate = hand_rate(world, (src, f));
+                let mut rng = hands_draw(world, 1, key_hash(&k), 0);
+                std::array::from_fn(|kind| {
+                    let x = f64::from(n) * f64::from(rate[kind]);
+                    let u: f64 = rng.random();
+                    let whole = x.floor();
+                    ((whole as u32) + u32::from(u < x - whole)).min(n)
+                })
+            }
+            _ => [n; 4],
+        };
+        if let Some(p) = pools.get_mut(&k) {
+            *p = Pool { hands, budget };
+        }
+    }
+    pools
+}
+
+/// The pass's hit by source `s` of kind `kind` on `victim`: a hand from its
+/// pool not spent today (a keyed pick), its pool's budget for the kind
+/// taken. `None`: the source has no hand or no budget left (the hit is not
+/// made).
+fn take_hand(
+    world: &World,
+    pools: &mut std::collections::BTreeMap<PoolKey, Pool>,
+    spent: &std::collections::BTreeSet<EntityId>,
+    s: &ActiveSource,
+    kind: usize,
+    victim: EntityId,
+) -> Option<EntityId> {
+    let k = pool_key(s)?;
+    let p = pools.get_mut(&k)?;
+    p.hands.retain(|h| !spent.contains(h));
+    if p.budget[kind] == 0 || p.hands.is_empty() {
+        return None;
+    }
+    let i = hands_draw(world, 2, key_hash(&k), u64::from(victim.index)).random_range(0..p.hands.len());
+    p.budget[kind] -= 1;
+    Some(p.hands.remove(i))
+}
+
+/// Has source `s` a hand and a budget left for any kind (a source with
+/// none is not rolled).
+fn has_hands(
+    pools: &std::collections::BTreeMap<PoolKey, Pool>,
+    spent: &std::collections::BTreeSet<EntityId>,
+    s: &ActiveSource,
+) -> bool {
+    pool_key(s)
+        .and_then(|k| pools.get(&k))
+        .is_some_and(|p| p.budget.iter().any(|&b| b > 0) && p.hands.iter().any(|h| !spent.contains(h)))
 }
 
 /// The prior of an act per member-day (`[gangs] stat_*_prior`).
@@ -316,6 +599,12 @@ pub fn note_victim(world: &mut World, actor: EntityId, victim: EntityId, kind: H
     let d = world.district_of(tile);
     let class = victim_class(world, victim);
     let k = kind_index(kind);
+    // The island pass phase 10: the acting faction's on-screen hit, the
+    // actor side of its hands' rate (orders and vendettas).
+    if let (true, Some(f), ViolenceSource::Order(_) | ViolenceSource::Vendetta) = (hands_on(world), faction, source) {
+        let c = world.order_rates.hands_mut((hand_source(source), f));
+        c.hits_today[k] = c.hits_today[k].saturating_add(1);
+    }
     let cell = world.order_rates.cell_mut((source, d, class));
     cell.victims_today[k] = cell.victims_today[k].saturating_add(1);
     if is_civ(class) && k <= 1 {
@@ -657,6 +946,11 @@ pub fn daily(world: &mut World) {
     let since = world.tick.saturating_sub(crate::time::TICKS_PER_DAY);
     let cap = world.config.fviolence.day_cap;
     let min_visible = world.config.chrome.harvest_min_visible;
+    // The island pass phase 10 (OPEN-185): each source strikes only with
+    // its off-screen hands, one hit per hand a day, within its budget.
+    let hands = hands_on(world);
+    let mut pools = if hands { build_pools(world, &all) } else { Default::default() };
+    let mut spent: std::collections::BTreeSet<EntityId> = std::collections::BTreeSet::new();
     let mut ids: Vec<EntityId> = world.tier(Lod::Statistical).to_vec();
     ids.sort_unstable();
     let mut hits = [0u32; 4];
@@ -683,11 +977,22 @@ pub fn daily(world: &mut World) {
                 None => continue,
             },
         };
-        let srcs: Vec<ActiveSource> = touching(world, &all, d, id).into_iter().copied().collect();
+        let mut srcs: Vec<ActiveSource> = touching(world, &all, d, id).into_iter().copied().collect();
         if srcs.is_empty() {
             continue;
         }
         let class = victim_class(world, id);
+        if hands {
+            // A touched agent-day all the same (the parity tally below);
+            // only the sources with a hand left roll.
+            if is_civ(class) {
+                world.fv_tally.stat_civ_days += 1;
+            }
+            srcs.retain(|s| has_hands(&pools, &spent, s));
+            if srcs.is_empty() {
+                continue;
+            }
+        }
         let rates: Vec<[f32; 4]> = srcs
             .iter()
             .map(|s| {
@@ -703,7 +1008,7 @@ pub fn daily(world: &mut World) {
         let sum = |k: usize| rates.iter().map(|r| r[k]).sum::<f32>();
         let mut rng = world.rng.word(crate::word::WordNs::FViolence, today, u64::from(id.index));
         let u: [f32; 5] = std::array::from_fn(|_| rng.random());
-        if is_civ(class) {
+        if is_civ(class) && !hands {
             world.fv_tally.stat_civ_days += 1;
         }
         let kitted =
@@ -735,13 +1040,32 @@ pub fn daily(world: &mut World) {
             x -= r[kind];
         }
         let src = srcs[pick];
+        // The island pass phase 10: the hit spends one of the source's
+        // free hands, or is not made.
+        let hand = if hands {
+            match take_hand(world, &mut pools, &spent, &src, kind, id) {
+                Some(h) => Some(h),
+                None => {
+                    world.stats.current.living.fv_hands_capped += 1;
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
         let done = if kind == 3 {
             crate::systems::chrome::abduct_offscreen(world, id, Some(&src))
         } else {
             crate::systems::lod::stat_hit(world, id, KINDS[kind], Some(&src))
         };
         if !done {
+            // Rare (a victim with no tile): the hand and the budget are
+            // not given back.
             continue;
+        }
+        if let Some(h) = hand {
+            prebind(world, id, KINDS[kind], h);
+            spent.insert(h);
         }
         hits[kind] += 1;
         let l = &mut world.stats.current.living;
@@ -753,6 +1077,23 @@ pub fn daily(world: &mut World) {
         }
         if is_civ(class) && kind <= 1 {
             world.fv_tally.stat_civ_hits += 1;
+        }
+    }
+}
+
+/// The island pass phase 10: the pass's hole on `victim` (opened this
+/// tick) is pre-bound to the hand that made it (`Hole::prebound`, bound as
+/// a contract record's, `bind::prebound_ok`), and the hand's day is spent
+/// (a gang member's GangWork day, `stat_gang_day`).
+fn prebind(world: &mut World, victim: EntityId, kind: HoleKind, hand: EntityId) {
+    let id = crate::components::hole_id(world.tick, victim, kind);
+    if let Some(h) = world.holes.get_mut(&id) {
+        h.prebound = Some(hand);
+    }
+    let today = world.day();
+    if world.has::<crate::components::GangMember>(hand) {
+        if let Some(b) = world.comp_mut::<Brain>(hand) {
+            b.gang_task_day = Some(today);
         }
     }
 }

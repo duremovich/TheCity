@@ -117,15 +117,75 @@ impl RateCell {
 /// The cell key: source, district, victim class.
 pub type CellKey = (ViolenceSource, DistrictId, VictimClass);
 
+/// The island pass phase 10 (OPEN-185): the actor side per acting faction,
+/// `(source, faction)`: the hits (Killed, Assaulted, Robbed, Abducted) its
+/// on-screen members did under the source (`fviolence::note_victim`) and
+/// its members' days on screen (`fviolence::daily_actor`), the windows the
+/// off-screen hands' rate reads (`fviolence::hand_rate`). Order and
+/// Vendetta sources only (a riot's and an episode's hands are counted, not
+/// rated).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HandsCell {
+    pub hits: [VecDeque<u16>; 4],
+    pub member_days: VecDeque<u16>,
+    pub hits_today: [u16; 4],
+    pub member_today: u16,
+}
+
+impl HandsCell {
+    /// Midnight: push today's counts into the windows, trim to `days`.
+    pub fn roll(&mut self, days: usize) {
+        fn push(w: &mut VecDeque<u16>, v: u16, days: usize) {
+            w.push_back(v);
+            while w.len() > days {
+                w.pop_front();
+            }
+        }
+        for k in 0..4 {
+            push(&mut self.hits[k], self.hits_today[k], days);
+        }
+        push(&mut self.member_days, self.member_today, days);
+        self.hits_today = [0; 4];
+        self.member_today = 0;
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.hits.iter().all(|w| w.iter().all(|&v| v == 0))
+            && self.member_days.iter().all(|&v| v == 0)
+            && self.hits_today == [0; 4]
+            && self.member_today == 0
+    }
+
+    /// The last `days` windows' hits of kind `k`, and their member-days.
+    pub fn sums(&self, k: usize, days: usize) -> (u32, u32) {
+        let h = self.hits[k].iter().rev().take(days).map(|&v| u32::from(v)).sum();
+        let m = self.member_days.iter().rev().take(days).map(|&v| u32::from(v)).sum();
+        (h, m)
+    }
+}
+
+/// `OrderRates::hands`' key: the source (an order or a vendetta) and the
+/// acting faction.
+pub type HandsKey = (ViolenceSource, EntityId);
+
 /// `World::order_rates`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct OrderRates {
     pub cells: BTreeMap<CellKey, RateCell>,
+    /// The island pass phase 10: the actor side per faction (empty, and
+    /// not written into a save, with `CITYSIM_VIOLENCE_MIRROR_OFF=1`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub hands: BTreeMap<HandsKey, HandsCell>,
 }
 
 impl OrderRates {
     pub fn is_empty(&self) -> bool {
-        self.cells.is_empty()
+        self.cells.is_empty() && self.hands.is_empty()
+    }
+
+    pub fn hands_mut(&mut self, key: HandsKey) -> &mut HandsCell {
+        self.hands.entry(key).or_default()
     }
 
     pub fn cell_mut(&mut self, key: CellKey) -> &mut RateCell {

@@ -2080,6 +2080,11 @@ pub struct LivingCols {
     /// Coins the Statistical leisure pass (`leisure::stat_daily`) paid today.
     #[serde(skip_serializing_if = "is_zero_i64")]
     pub stat_spend: i64,
+    /// The island pass phase 10 (not a CSV column): the midnight pass's
+    /// hits not made because their source had no free hand or budget left
+    /// (`fviolence::daily`; 0 with `CITYSIM_VIOLENCE_MIRROR_OFF=1`).
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub fv_hands_capped: u32,
     /// Parts `assets::parts_market` moved today from a Fab, from the Recycler.
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub parts_sold_fab: u32,

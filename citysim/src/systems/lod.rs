@@ -1114,6 +1114,7 @@ pub fn stat_hit(world: &mut World, id: EntityId, kind: HoleKind, src: Option<&cr
         source,
         faction,
         riot,
+        prebound: None,
     };
     match kind {
         HoleKind::Killed => {

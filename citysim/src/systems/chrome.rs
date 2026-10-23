@@ -919,6 +919,7 @@ pub fn abduct_offscreen(world: &mut World, id: EntityId, src: Option<&crate::led
         source: src.map(|s| s.source),
         faction: src.and_then(|s| s.faction),
         riot: src.and_then(|s| s.riot),
+        prebound: None,
     };
     let name = world.name_of(id);
     let ev = world.push_event(
