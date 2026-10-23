@@ -282,6 +282,13 @@ fn test_patrol_scans_and_attacks_the_chromed() {
             p.building = None;
         }
     }
+    // No other chromed adult in the scan's reach: the subject is the one
+    // found, whoever the combined city's crowd happens to carry.
+    for x in w.agents_near(tile, r * 2, None) {
+        if x != a && w.comp::<Kit>(x).is_some_and(|k| k.chrome) {
+            w.comp_mut::<Kit>(x).expect("kit").chrome = false;
+        }
+    }
     w.insert(a, Kit { visible: 0, chrome: true, ..Kit::default() });
     let owner = w.corps()[0];
     tags::god_tag(&mut w, a, owner, 1).unwrap();

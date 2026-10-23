@@ -65,6 +65,15 @@ pub enum RideKind {
     Exec,
     /// The island pass phase 6: an El train (`Route::Line`, persistent).
     Train,
+    /// The island pass phase 7 (OPEN-166): the law's van. An escort's (the
+    /// guard at the wheel, his cuffed suspect aboard) or a transfer's (no
+    /// body at the wheel; the Station's prisoners aboard, `World::van_runs`;
+    /// kept until its arrival, empty too).
+    Van,
+    /// The island pass phase 7: an escort on foot, timed (a Coarse guard
+    /// leading his cuffed suspect along the road at the walk's pace). No
+    /// vehicle: the view draws the two bodies walking.
+    Foot,
 }
 
 /// How a vehicle advances.
@@ -104,6 +113,11 @@ pub struct Motion {
 /// `[motion]` on.
 pub fn on(world: &World) -> bool {
     world.config.motion.is_some()
+}
+
+/// `[motion.vans]` on (the island pass phase 7).
+pub fn vans_on(world: &World) -> bool {
+    world.config.motion.as_ref().is_some_and(|m| m.vans.is_some())
 }
 
 /// The vehicle `rider` is aboard.
@@ -418,7 +432,41 @@ pub fn alight(world: &mut World, rider: EntityId) {
             return;
         }
     }
+    // The island pass phase 7: the guard off his escort's van (or his walk)
+    // takes his prisoner off with him.
+    let mates: Vec<EntityId> = match world.motions.get(&v) {
+        Some(m) if is_escort(world, v, m) && m.driver == Some(rider) => {
+            m.riders.iter().copied().filter(|&r| r != rider).collect()
+        }
+        _ => Vec::new(),
+    };
     alight_now(world, rider);
+    for r in mates {
+        if world.aboard.get(&r) == Some(&v) {
+            alight_now(world, r);
+        }
+    }
+}
+
+/// An escort's van or walk (the island pass phase 7): not a transfer run.
+fn is_escort(world: &World, v: EntityId, m: &Motion) -> bool {
+    matches!(m.ride, RideKind::Van | RideKind::Foot) && !world.van_runs.contains_key(&v)
+}
+
+/// The island pass phase 7: a prisoner stays aboard a van (the cuffed rider
+/// rule; `advance` drops anyone else off his leg): a body, cuffed by a
+/// guard aboard the same vehicle (an escort), or sentenced on a transfer
+/// run. He never acts aboard (`exec::run` skips the cuffed and the
+/// sentenced).
+fn prisoner_aboard(world: &World, v: EntityId, rider: EntityId, run: bool) -> bool {
+    let Some(b) = world.comp::<Brain>(rider) else { return false };
+    if b.lod == crate::components::Lod::Statistical {
+        return false;
+    }
+    if run {
+        return world.has::<crate::components::Sentence>(rider);
+    }
+    b.cuffed_by.is_some_and(|g| world.aboard.get(&g) == Some(&v))
 }
 
 /// `rider` steps off where the vehicle is now, a train between stops too
@@ -462,6 +510,17 @@ fn end(world: &mut World, v: EntityId) {
     if world.motions.get(&v).is_some_and(|m| matches!(m.route, Route::Line { .. })) {
         return;
     }
+    // A transfer van drives on to the Precinct (the island pass phase 7):
+    // its run ends it (`stations::van_tick`).
+    if !world.van_runs.is_empty() && world.van_runs.contains_key(&v) {
+        return;
+    }
+    finish(world, v);
+}
+
+/// The motion is over whatever it is (`end`, and a transfer van at the
+/// Precinct): every rider still linked is off.
+pub fn finish(world: &mut World, v: EntityId) {
     let Some(m) = world.motions.remove(&v) else { return };
     for r in m.riders {
         if world.aboard.get(&r) == Some(&v) {
@@ -540,11 +599,17 @@ pub fn advance(world: &mut World) {
         // A driven vehicle's driver steers it: his walk moves him (out of
         // the building he leaves on his first step), the vehicle follows.
         let steers = matches!(m.route, Route::Driven).then_some(m.driver).flatten();
+        // The island pass phase 7: a van's (or an escort walk's) prisoners
+        // ride on in cuffs or under sentence.
+        let van = matches!(m.ride, RideKind::Van | RideKind::Foot);
+        let run = van && world.van_runs.contains_key(&v);
+        let driver = m.driver;
         let mut off: Vec<EntityId> = Vec::new();
         for &r in &riders {
+            let leg = if van && driver != Some(r) { prisoner_aboard(world, v, r, run) } else { on_leg(world, r) };
             let ok = world.is_alive(r)
                 && world.aboard.get(&r) == Some(&v)
-                && on_leg(world, r)
+                && leg
                 && (steers == Some(r) || world.comp::<Position>(r).is_some_and(|p| p.building.is_none()));
             if !ok {
                 off.push(r);
@@ -624,12 +689,72 @@ fn advance_train(world: &mut World, v: EntityId, line: u8, train: u16) {
     }
 }
 
+/// The island pass phase 7: an escort's leg (`exec::escort_leg`) is a
+/// vehicle in motion: `ride` a `Van` (the guard at the wheel; it stands at
+/// the arrest's kerb until `depart`, the call) or `Foot` (a Coarse guard's
+/// timed walk), from the guard's walk origin to `to` over `depart..=arrive`,
+/// the cuffed `suspect` aboard. `None` with `[motion.vans]` off.
+#[allow(clippy::too_many_arguments)]
+pub fn board_escort(
+    world: &mut World,
+    guard: EntityId,
+    suspect: EntityId,
+    ride: RideKind,
+    to: TilePos,
+    depart: Tick,
+    arrive: Tick,
+) -> Option<EntityId> {
+    if !vans_on(world) {
+        return None;
+    }
+    let kind = if ride == RideKind::Van { AssetKind::Truck } else { AssetKind::Car };
+    let v = board_timed(world, guard, ride, kind, None, None, to, depart, arrive, true)?;
+    join(world, suspect, v);
+    Some(v)
+}
+
+/// The island pass phase 7: a transfer van (`stations::van`) sets out
+/// empty from `from` (a Station's door) along the road to `to` (the
+/// Precinct's) over `depart..=arrive`, no body at the wheel (the city's
+/// driver, off screen). Kept until its run ends it ([`finish`]).
+pub fn spawn_van(world: &mut World, from: TilePos, to: TilePos, depart: Tick, arrive: Tick) -> EntityId {
+    let route = Route::Timed { way: way(world, from, to, false), depart, arrive };
+    let v = world.spawn();
+    let m = Motion {
+        ride: RideKind::Van,
+        kind: AssetKind::Truck,
+        asset: false,
+        driver: None,
+        riders: Vec::new(),
+        pos: from,
+        route,
+    };
+    world.motions.insert(v, m);
+    v
+}
+
+/// The island pass phase 7: the length in tiles of a road vehicle's way
+/// from `from` to `to` (the van's drive is timed over it).
+pub fn road_len(world: &World, from: TilePos, to: TilePos) -> u32 {
+    u32::try_from(way_len(&way(world, from, to, false))).unwrap_or(u32::MAX)
+}
+
+/// The way's tile of a vehicle in motion now (`None`: not in motion).
+pub fn pos_of(world: &World, v: EntityId) -> Option<TilePos> {
+    pos_now(world, v)
+}
+
 /// `World::check_indices`: every aboard link names a vehicle in motion that
 /// lists the rider, and every listed rider links back.
 pub fn check(world: &World) -> Result<(), String> {
     for (&r, &v) in &world.aboard {
         if !world.motions.get(&v).is_some_and(|m| m.riders.contains(&r)) {
             return Err(format!("rider {r} aboard {v}, which does not carry him"));
+        }
+    }
+    for v in world.van_runs.keys() {
+        if !world.motions.get(v).is_some_and(|m| m.ride == RideKind::Van) {
+            return Err(format!("transfer run {v} has no van in motion"));
         }
     }
     for (&v, m) in &world.motions {

@@ -506,6 +506,22 @@ pub struct MotionCfg {
     /// into a save) with `CITYSIM_TRAINS_OFF=1`: the timed ride as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trains: Option<TrainsCfg>,
+    /// The island pass phase 7 `[motion.vans]` (OPEN-166): the escort and
+    /// the prisoner transfer ride a van (`stations.rs` § the van). `None`
+    /// (not written into a save) with `CITYSIM_VAN_OFF=1`: the timed escort
+    /// and the bodiless 04:00 transfer as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vans: Option<VansCfg>,
+}
+
+/// `[motion.vans]`: the law's vans. The drive is at the Car's speed
+/// (`[vehicles] mult`); the escort's walk-or-van distance and the van's call
+/// are `[legs]`'s.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VansCfg {
+    /// Prisoners one transfer van carries; a Station holding more due sends
+    /// another van.
+    pub capacity: u32,
 }
 
 /// `[motion.trains]`: the El's trains. The headway, the dwell, the speed and
@@ -8800,6 +8816,13 @@ impl Config {
         if std::env::var("CITYSIM_TRAINS_OFF").is_ok_and(|v| v == "1") {
             if let Some(m) = cfg.motion.as_mut() {
                 m.trains = None;
+            }
+        }
+        // The island pass phase 7 (OPEN-166, I3): the van, the switch in
+        // flight (doctrine 6).
+        if std::env::var("CITYSIM_VAN_OFF").is_ok_and(|v| v == "1") {
+            if let Some(m) = cfg.motion.as_mut() {
+                m.vans = None;
             }
         }
         // The island pass phase 3c (OPEN-177): the housing mood term's
