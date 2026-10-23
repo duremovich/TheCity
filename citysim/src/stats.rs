@@ -990,6 +990,20 @@ pub struct Jobs2Cols {
     pub company_notices: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub company_buyout_evicted: u32,
+    // The island pass phase 4 (I2): the workers under commute pressure (a
+    // gauge at the midnight pass), and today's households moved nearer work
+    // by it (those into a company bed among them), the people they held,
+    // and the workers who took a nearer post instead.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub pressure_far: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub pressure_moved: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub pressure_company: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub pressure_movers: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub pressure_jobs: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -1330,6 +1344,11 @@ impl Jobs2Cols {
                 "company_built",
                 "company_notices",
                 "company_buyout_evicted",
+                "pressure_far",
+                "pressure_moved",
+                "pressure_company",
+                "pressure_movers",
+                "pressure_jobs",
             ]
             .into_iter()
             .map(str::to_string),
@@ -1664,6 +1683,11 @@ impl Jobs2Cols {
             self.company_built.to_string(),
             self.company_notices.to_string(),
             self.company_buyout_evicted.to_string(),
+            self.pressure_far.to_string(),
+            self.pressure_moved.to_string(),
+            self.pressure_company.to_string(),
+            self.pressure_movers.to_string(),
+            self.pressure_jobs.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

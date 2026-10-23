@@ -62,8 +62,11 @@
 //!   midnight with a Home past `far_ticks`, move in with a co-resident
 //!   spouse and children, the nearest block with room for them all (a
 //!   spouse on another staff only when the block is no farther from that
-//!   work than the Home; else the household stays). The commute-pressure move for the staff already
-//!   housed far is phase 4 (I2).
+//!   work than the Home; else the household stays). Phase 4 (I2,
+//!   `systems/commute.rs`): with `[commute_pressure]` on, the far hires and
+//!   the far staff already housed (the buyouts' [`Fill::Far`]) move on the
+//!   commute pressure's one path (`life::relocate`, whose pick holds the
+//!   corp's company beds); this fill then takes only the homeless staff.
 //! - **Rent** (`ownership::collect_rent`): each resident on the staff (and
 //!   each in the grace) owes `rent_mult x [rent] base[tier]` a day to the
 //!   block's owner; the household's others owe nothing. It is settled from
@@ -537,6 +540,7 @@ fn fill(world: &mut World, mode: Fill) {
     let Some(cfg) = world.config.company_housing.clone() else { return };
     let seed = matches!(mode, Fill::Seed);
     let all_far = !matches!(mode, Fill::Hires);
+    let pressure = !seed && crate::systems::commute::on(world);
     if world.company_homes.is_empty() {
         return;
     }
@@ -580,8 +584,11 @@ fn fill(world: &mut World, mode: Fill) {
                 continue;
             }
             let hired = world.comp::<Job>(a).is_some_and(|j| j.hired_tick >= since && j.hired_tick > 0);
+            // The island pass phase 4: the housed far staff and the far
+            // hires move on the commute pressure's path (`life::relocate`).
             let take = match home {
                 None => true,
+                Some(_) if pressure => false,
                 Some(_) => (all_far || hired) && far_post(world, a, wdoor, cfg.far_ticks),
             };
             if !take {
@@ -1054,7 +1061,12 @@ pub fn buyouts(world: &mut World) {
         }
     }
     let all: Vec<EntityId> = by_corp.values().flatten().copied().collect();
-    fill(world, Fill::Far(all));
+    // The island pass phase 4: with the commute pressure on, the far staff
+    // move on its path (`life::relocate`, later this midnight).
+    let pressure = crate::systems::commute::on(world);
+    if !pressure {
+        fill(world, Fill::Far(all));
+    }
     for (corp, mut ws) in by_corp {
         ws.sort_unstable();
         ws.dedup();
@@ -1118,7 +1130,9 @@ pub fn buyouts(world: &mut World) {
                     row.company_buyouts += 1;
                 }
             }
-            fill(world, Fill::Far(vec![w]));
+            if !pressure {
+                fill(world, Fill::Far(vec![w]));
+            }
             done += 1;
         }
     }

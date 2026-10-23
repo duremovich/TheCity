@@ -33,6 +33,7 @@ pub mod charity;
 pub mod chrome;
 pub mod classes;
 pub mod classpay;
+pub mod commute;
 pub mod company;
 pub mod competence;
 pub mod contracts;

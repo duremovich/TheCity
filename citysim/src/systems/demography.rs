@@ -679,7 +679,7 @@ fn ambient_pass(world: &mut World) {
 }
 
 /// A hire's place out of `world.vacancies` (and its works roster entry).
-fn close_vacancy(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
+pub(crate) fn close_vacancy(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
     crate::systems::budget::note_hire(world, id, employer, role);
     if let Some(v) = world.vacancies.get_mut(&employer) {
         if let Some(i) = v.iter().position(|&r| r == role) {

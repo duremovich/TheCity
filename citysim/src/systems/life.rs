@@ -835,7 +835,7 @@ pub fn relocate(world: &mut World) {
     } else {
         world.config.life.relocate_per_day
     };
-    relocate_up_to(world, limit);
+    relocate_up_to_with(world, limit, true, true);
 }
 
 /// `relocate` with a mover limit (world creation: uncapped). Hunger fix item
@@ -845,13 +845,22 @@ pub fn relocate(world: &mut World) {
 /// `rehouse_coins_mult` deposit), saving `commute_margin_ticks`. Off, the
 /// L1 rule in tiles (`commute_cap_tiles`, `bed_margin_tiles`).
 pub fn relocate_up_to(world: &mut World, limit: usize) {
-    relocate_up_to_with(world, limit, true);
+    relocate_up_to_with(world, limit, true, false);
 }
 
 /// [`relocate_up_to`]; `lazy` false fills every Home's measure to a work
 /// tile before the pick's filters (the pre-review walk, for the tests).
-fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool) {
+/// `daily` (the midnight pass, not world creation): with `[commute_pressure]`
+/// on, the island pass phase 4's rule (`systems/commute.rs`): a mover is a
+/// worker whose far commute has built `move_days` of pressure (or a far hire
+/// since the last midnight); the destination is a Home within `[distance]
+/// home_cap_ticks` of work or a company bed of his corp; a household with
+/// a School near moves only near one; with none found, past `job_days`, a
+/// nearer post.
+fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool, daily: bool) {
     let fix = crate::systems::fixes::relocate_fix(world);
+    let pressure = daily && crate::systems::commute::on(world);
+    let mut read: std::collections::BTreeSet<EntityId> = std::collections::BTreeSet::new();
     // The measure: travel ticks with the fix, the L1 tiles without.
     let cost = |w: &World, a: TilePos, b: TilePos| -> u64 {
         if fix {
@@ -864,6 +873,8 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool) {
         if fix { world.config.life.commute_move_ticks } else { u64::from(world.config.life.commute_cap_tiles) };
     let margin: u64 =
         if fix { world.config.life.commute_margin_ticks } else { u64::from(world.config.life.bed_margin_tiles) };
+    // The island pass phase 4: the destination's cap.
+    let dest_cap = if pressure { crate::systems::commute::home_cap(world) } else { cap };
     let mult = if fix { 1 } else { world.config.rent.rehouse_coins_mult };
     let mut movers: Vec<(std::cmp::Reverse<u64>, EntityId, EntityId, TilePos)> = Vec::new();
     // scan-ok: daily: the relocation pass
@@ -896,8 +907,9 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool) {
             continue;
         }
         // The island pass phase 3a (I6): a company block's household stays
-        // (housed by the job; its own pass moves it).
-        if !crate::systems::company::open_to_all(world, home) {
+        // (housed by the job; its own pass moves it). Phase 4: this is that
+        // pass, and the household is read as any other.
+        if !pressure && !crate::systems::company::open_to_all(world, home) {
             continue;
         }
         let Some(work) =
@@ -907,11 +919,33 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool) {
         };
         let Some(hd) = world.comp::<Building>(home).map(|b| b.door) else { continue };
         let d = cost(world, hd, work);
-        if d > cap {
+        if pressure {
+            // The island pass phase 4: the day's pressure decides.
+            read.insert(a);
+            if crate::systems::commute::note(world, a, d) {
+                movers.push((std::cmp::Reverse(d), a, home, work));
+            }
+        } else if d > cap {
             movers.push((std::cmp::Reverse(d), a, home, work));
         }
     }
     movers.sort_unstable();
+    // The island pass phase 4: the company beds standing (the pick takes
+    // those of the mover's corp, `commute::company_for`).
+    let company: Vec<(EntityId, TilePos, usize)> = if pressure {
+        world
+            .company_homes
+            .keys()
+            .filter_map(|&h| {
+                world
+                    .comp::<Building>(h)
+                    .filter(|b| !b.demolished && !b.derelict)
+                    .map(|b| (h, b.door, usize::from(b.capacity)))
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let homes: Vec<(EntityId, TilePos, usize)> = world
         .buildings_of_kind(BuildingKind::Home)
         .iter()
@@ -984,9 +1018,11 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool) {
         // a Home's measure only for the Homes they leave (memoised by work
         // tile and Home), the work leg before the spouse's. The same pick:
         // the filters and the minimum are the eager walk's.
+        // The island pass phase 4: the children keep a School in reach.
+        let school = |to: TilePos| !pressure || kids.is_empty() || crate::systems::commute::school_kept(world, hd, to);
         let pick = crate::prof::timed!("reloc::pick", {
             let mut best: Option<(u64, EntityId)> = None;
-            for (i, &(h, _, room)) in homes.iter().enumerate() {
+            for (i, &(h, hdoor, room)) in homes.iter().enumerate() {
                 let open = h != home
                     && (min_tier == 0 || world.comp::<Building>(h).is_some_and(|b| b.tier >= min_tier))
                     && world.residents_of(h).len() + need <= room
@@ -996,7 +1032,7 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool) {
                     continue;
                 }
                 let dd = memo.cost(world, work, i, &cost);
-                if (fix && dd > cap) || dd + margin > d_pair {
+                if (fix && dd > dest_cap) || dd + margin > d_pair {
                     continue;
                 }
                 // OPEN-140: "nearer work" is nearer the mover's own work
@@ -1006,6 +1042,28 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool) {
                 }
                 let sp = spouse_work.map_or(0, |sw| memo.cost(world, sw, i, &cost));
                 if dd + sp + margin > d_pair {
+                    continue;
+                }
+                if !school(hdoor) {
+                    continue;
+                }
+                if best.is_none_or(|b| (dd + sp, h) < b) {
+                    best = Some((dd + sp, h));
+                }
+            }
+            // The island pass phase 4: the mover's corp's company beds, on
+            // the same rules (no first rent: it is docked from the wage).
+            for &(h, hdoor, room) in &company {
+                if h == home
+                    || !crate::systems::commute::company_for(world, a, h)
+                    || world.residents_of(h).len() + need > room
+                    || (min_tier != 0 && world.comp::<Building>(h).is_none_or(|b| b.tier < min_tier))
+                {
+                    continue;
+                }
+                let dd = cost(world, hdoor, work);
+                let sp = spouse_work.map_or(0, |sw| cost(world, hdoor, sw));
+                if dd > dest_cap || dd + margin > d || dd + sp + margin > d_pair || !school(hdoor) {
                     continue;
                 }
                 if best.is_none_or(|b| (dd + sp, h) < b) {
@@ -1051,12 +1109,36 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool) {
                         format!("{rn} traded Homes with {an}, into {from_name}"),
                     );
                     moved += 1;
+                    if pressure {
+                        crate::systems::commute::moved(world, a);
+                        let row = crate::systems::ownership::jobs2_row(world);
+                        row.pressure_moved += 1;
+                        row.pressure_movers += 1;
+                    }
+                } else if pressure {
+                    let before = world.comp::<Job>(a).and_then(|j| j.employer);
+                    crate::systems::commute::found_nothing(world, a, hd, d);
+                    if world.comp::<Job>(a).and_then(|j| j.employer) != before {
+                        moved += 1;
+                    }
                 }
                 continue;
             }
             None => None,
         };
-        let Some((_, to)) = pick else { continue };
+        let Some((_, to)) = pick else {
+            // The island pass phase 4: nothing found; past `job_days`, a
+            // nearer post.
+            if pressure {
+                let before = world.comp::<Job>(a).and_then(|j| j.employer);
+                crate::systems::commute::found_nothing(world, a, hd, d);
+                if world.comp::<Job>(a).and_then(|j| j.employer) != before {
+                    moved += 1;
+                }
+            }
+            continue;
+        };
+        let company_bed = world.company_homes.contains_key(&to);
         let place = world.name_of(to);
         let mover_name = world.name_of(a);
         for m in std::iter::once(a).chain(spouse) {
@@ -1066,18 +1148,32 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool) {
             // same midnight's relocation followed the deposit).
             if let Some(h) = world.comp_mut::<Household>(m) {
                 h.rent_due = h.rent_due.min(0.0);
+                // The island pass phase 4: a company bed starts clean, as
+                // `company::fill`'s.
+                if company_bed {
+                    h.arrears = 0;
+                }
+            }
+            if pressure {
+                crate::systems::commute::moved(world, m);
             }
             let name = world.name_of(m);
             // OPEN-140: "nearer work" is the worker's line; a spouse moves
             // with him (a jobless spouse read "moved nearer work").
             let text = if m != a {
                 format!("{name} moved with {mover_name}, into {place}")
+            } else if company_bed {
+                // The island pass phase 4: 3a's company line.
+                let what = crate::systems::company::of(world, to).map(|w| world.name_of(w)).unwrap_or_default();
+                let label = world.owner_label(world.owner_of(to));
+                format!("{name} moved nearer work, into {place}, {label}'s company housing for {what}'s staff")
             } else {
                 format!("{name} moved nearer work, into {place}")
             };
             world.push_event(EventKind::Housed, &[m, to], text);
         }
         let door = world.comp::<Building>(to).map(|b| b.door).unwrap_or_default();
+        let kids_n = kids.len() as u32;
         for c in kids {
             world.set_home(c, Some(to));
             world.remove_from_building(c);
@@ -1088,7 +1184,20 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool) {
             }
             world.enter_building(c, to);
         }
+        if pressure {
+            let n = 1 + u32::from(spouse.is_some()) + kids_n;
+            let row = crate::systems::ownership::jobs2_row(world);
+            row.pressure_moved += 1;
+            row.pressure_movers += n;
+            if company_bed {
+                row.pressure_company += 1;
+                row.company_moved_in += 1;
+            }
+        }
         moved += 1;
+    }
+    if pressure {
+        crate::systems::commute::prune(world, &read);
     }
 }
 
@@ -1613,8 +1722,8 @@ mod tests {
             let housed = |x: &World| x.events.iter().filter(|e| e.kind == EventKind::Housed).count();
             let before = housed(&w);
             let (mut a, mut b) = (w.clone(), w);
-            relocate_up_to_with(&mut a, usize::MAX, true);
-            relocate_up_to_with(&mut b, usize::MAX, false);
+            relocate_up_to_with(&mut a, usize::MAX, true, false);
+            relocate_up_to_with(&mut b, usize::MAX, false, false);
             let moved = housed(&a) - before;
             println!("{map:?}: {moved} Housed events");
             assert!(moved >= 10, "the test moves people ({map:?}: {moved})");
@@ -1647,7 +1756,7 @@ mod tests {
         for lazy in [false, true, false, true, false, true] {
             let mut x = w.clone();
             let t = std::time::Instant::now();
-            relocate_up_to_with(&mut x, limit, lazy);
+            relocate_up_to_with(&mut x, limit, lazy, false);
             let ms = t.elapsed().as_secs_f64() * 1e3;
             println!("relocation {} day {days} limit {limit}: {ms:.1} ms", if lazy { "lazy " } else { "eager" });
             out.push(crate::save::to_ron(&x));

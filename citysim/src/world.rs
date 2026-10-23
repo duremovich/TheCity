@@ -1301,6 +1301,11 @@ pub struct World {
     /// notice by a buyout (not by a job lost), for the eviction's line.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub company_notice: BTreeSet<EntityId>,
+    /// The island pass phase 4 (I2, `systems/commute.rs`): a worker -> his
+    /// commute pressure (the far days, the next search, the cooldown).
+    /// Written only when non-empty, so an off save holds none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub commute_pressure: BTreeMap<EntityId, crate::systems::commute::Pressure>,
     /// Scale S5 (docs/SCALE_20K.md § S5): the Ambient tier (empty, and not
     /// saved, on a map without Ambient flats).
     #[serde(default, skip_serializing_if = "crate::ambient::AmbientState::is_empty")]
@@ -1822,6 +1827,7 @@ impl World {
             company_homes: BTreeMap::new(),
             company_lapsed: BTreeMap::new(),
             company_notice: BTreeSet::new(),
+            commute_pressure: BTreeMap::new(),
             ambient: Default::default(),
             jobs2: Default::default(),
         };
