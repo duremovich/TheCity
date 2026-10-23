@@ -622,6 +622,214 @@ fn test_company_eviction_after_the_grace_not_before() {
     assert_eq!(home_of(&off, a), Some(block), "off (the base): the Block keeps him");
 }
 
+/// The map's tiles, row-major (a building's footprint shows as walls).
+fn tiles(w: &World) -> Vec<citysim::components::TileKind> {
+    let mut v = Vec::with_capacity(w.map.w() * w.map.h());
+    for y in 0..w.map.h() {
+        for x in 0..w.map.w() {
+            v.push(w.map.tile(x, y));
+        }
+    }
+    v
+}
+
+/// The island pass phase 3b (I6, Dylan 2026-10-22): the seeded company
+/// beds are floors inside the workplace: each company Home shares its
+/// workplace's rect and door, `within` names it, its label is the kind's
+/// room name, and no tile or Lot is added (no new footprint). The base (3a,
+/// `[company_housing.inside]` off) puts its blocks on a Lot or a plot.
+#[test]
+fn test_seeded_company_beds_are_floors_inside_the_workplace() {
+    let mut w = base();
+    w.company_homes.clear();
+    w.company_lapsed.clear();
+    // Every housed post is far (0 ticks) and no plain bed is that near: each
+    // staffed workplace of the kinds wants its staff's beds.
+    w.config.company_housing.as_mut().expect("[company_housing] on").far_ticks = 0;
+    let inside = w.config.company_housing.as_ref().and_then(|c| c.inside.clone()).expect("[company_housing.inside] on");
+    let (lots, before) = (w.buildings_of_kind(BuildingKind::Lot).len(), tiles(&w));
+    let mut on = w.clone();
+    let (blocks, beds) = citysim::systems::company::seed(&mut on);
+    assert!(blocks > 0 && beds > 0, "on: company floors seeded ({blocks}, {beds} beds)");
+    for (&h, &wp) in &on.company_homes {
+        let (hb, wb) = (on.comp::<Building>(h).expect("home"), on.comp::<Building>(wp).expect("workplace"));
+        assert_eq!(hb.kind, BuildingKind::Home);
+        assert_eq!(hb.within, Some(wp), "the floors name their workplace");
+        assert_eq!((hb.rect, hb.door), (wb.rect, wb.door), "inside the workplace: its rect and door");
+        assert_eq!(hb.label.as_deref(), Some(inside.room(wb.kind).0), "the kind's room name");
+        assert_eq!(on.owner_of(h), on.owner_of(wp), "the workplace's owner holds them");
+    }
+    assert!(on.company_homes.keys().any(|&h| !on.residents_of(h).is_empty()), "the far staff moved in");
+    assert_eq!(on.buildings_of_kind(BuildingKind::Lot).len(), lots, "no Lot built on or plot spawned");
+    assert!(tiles(&on) == before, "no tile changed: no new footprint");
+    // Off (the base, 3a): blocks of their own beside the workplace.
+    let mut off = w.clone();
+    off.config.company_housing.as_mut().expect("on").inside = None;
+    let (ob, _) = citysim::systems::company::seed(&mut off);
+    assert!(ob > 0, "off: 3a seeds blocks");
+    assert!(
+        off.company_homes.iter().all(|(&h, &wp)| {
+            let hb = off.comp::<Building>(h).expect("home");
+            hb.within.is_none() && hb.rect != off.comp::<Building>(wp).expect("w").rect
+        }),
+        "off: every block stands apart from its workplace"
+    );
+    assert!(tiles(&off) != before, "off: the blocks' walls went up");
+}
+
+/// Phase 3b's buyout setup: the seed-42 city with no company housing yet,
+/// a Farm hand `a` (housed, no spouse) and his Farm (a corp's), the buyout
+/// pass due tonight (`period_days` 1, `min_want` 1) and the corp funded.
+/// Returns `(world, a, farm, corp, h)`, `h` the plain Block the pass will
+/// buy: the nearest eligible one to the Farm's door, `a` moved into it.
+fn buyout_setup() -> (World, EntityId, EntityId, EntityId, EntityId) {
+    let mut w = base();
+    w.company_homes.clear();
+    w.company_lapsed.clear();
+    let (a, farm) = farm_worker(&w);
+    let corp = w.owner_of(farm).filter(|&o| w.has::<citysim::components::Corp>(o)).expect("a corp's Farm");
+    {
+        let ch = w.config.company_housing.as_mut().expect("[company_housing] on");
+        ch.far_ticks = 0;
+        let b = ch.buyout.as_mut().expect("[company_housing.buyout] on");
+        b.period_days = 1;
+        b.min_want = 1;
+        b.build_fallback = false;
+    }
+    let buy = w.config.company_housing.as_ref().and_then(|c| c.buyout.clone()).expect("buyout");
+    let fd = door_of(&w, farm);
+    let h = w
+        .buildings_of_kind(BuildingKind::Home)
+        .iter()
+        .copied()
+        .filter(|&h| {
+            w.comp::<Building>(h).is_some_and(|b| {
+                !b.demolished
+                    && !b.derelict
+                    && b.within.is_none()
+                    && b.under_construction_until.is_none()
+                    && b.tier <= buy.tier_max
+            }) && !citysim::systems::street::is_shanty(&w, h)
+        })
+        .map(|h| (citysim::systems::distance::travel(&w, door_of(&w, h), fd), h))
+        .min()
+        .expect("a Block near the Farm")
+        .1;
+    w.config.company_housing.as_mut().and_then(|c| c.buyout.as_mut()).expect("buyout").cap_ticks =
+        citysim::systems::distance::travel(&w, door_of(&w, h), fd);
+    // A corp converts its own Block at no price; the tests read a sale.
+    if w.owner_of(h) == Some(corp) {
+        citysim::systems::ownership::transfer_building(&mut w, h, None);
+    }
+    let n = w.residents_of(h).len() as u16;
+    w.comp_mut::<Building>(h).expect("b").capacity = w.comp::<Building>(h).expect("b").capacity.max(n + 1);
+    w.set_home(a, Some(h));
+    if let Some(c) = w.comp_mut::<citysim::components::Corp>(corp) {
+        c.treasury += 1_000_000;
+    }
+    w.tick = (w.tick / TICKS_PER_DAY + 1) * TICKS_PER_DAY;
+    (w, a, farm, corp, h)
+}
+
+/// The island pass phase 3b (I6): a corp whose Farm staff commute far buys
+/// the nearest plain Block in reach at `price_mult` x its value, paid to
+/// its owner (`Flow::Sale`, an `Acquired` line), and converts it to company
+/// housing for the Farm (bunks, the company rent); no coin made or lost.
+/// Off (the base): no buyout.
+#[test]
+fn test_buyout_converts_a_nearby_block_and_conserves_coin() {
+    let (w, _a, _farm, corp, h) = buyout_setup();
+    let (seller, cap) = (w.owner_of(h), w.comp::<Building>(h).expect("b").capacity);
+    let mut on = w.clone();
+    let (before, purse, paid_to) = (citysim::systems::econ::identity(&on), on.purse(Some(corp)), on.purse(seller));
+    citysim::systems::company::buyouts(&mut on);
+    // The corp's most-wanting workplace buys (this Farm, or another of its
+    // Farms with the same Block nearest).
+    let wp = on.company_homes.get(&h).copied().expect("on: the Block is company housing");
+    assert_eq!(on.owner_of(wp), Some(corp), "for one of the corp's workplaces");
+    let mine = on.company_homes.values().filter(|&&x| on.owner_of(x) == Some(corp)).count();
+    assert_eq!(mine, 1, "one buyout a corp a pass");
+    assert_eq!(on.owner_of(h), Some(corp), "the corp holds it");
+    let hb = on.comp::<Building>(h).expect("b");
+    assert!(hb.capacity >= cap, "bunks: never fewer beds ({cap} -> {})", hb.capacity);
+    assert_eq!(hb.rent_per_day, citysim::systems::company::rent_tenths(&on, h) / 10, "the company rent");
+    assert_ne!(seller, Some(corp), "a sale");
+    {
+        let price = purse - on.purse(Some(corp));
+        assert!(price > 0, "the corp paid");
+        assert_eq!(on.purse(seller), paid_to + price, "paid to the owner");
+        assert!(
+            on.events
+                .iter()
+                .any(|e| e.kind == EventKind::Acquired && e.actors.contains(&h) && e.text.contains("company housing")),
+            "an Acquired line naming the company housing"
+        );
+    }
+    assert_eq!(citysim::systems::econ::identity(&on), before, "no coin made or lost");
+    // Off (the base): no buyout.
+    let mut off = w.clone();
+    off.config.company_housing.as_mut().expect("on").buyout = None;
+    citysim::systems::company::buyouts(&mut off);
+    assert!(off.company_homes.is_empty(), "off: nothing bought");
+    assert_eq!(off.owner_of(h), seller);
+}
+
+/// The island pass phase 3b (I6): a buyout's tenant not on the corp's
+/// staff gets a `Notice` line, keeps the bed `grace_days` and is evicted
+/// the midnight after (an `Evicted` line naming the buyout); the Farm hand
+/// living there stays, on the company rent. Off (the base) both stay.
+#[test]
+fn test_buyout_notice_evicts_the_tenant_after_the_grace_staff_stays() {
+    let (mut w, a, _farm, corp, h) = buyout_setup();
+    let b = w
+        .residents_of(h)
+        .iter()
+        .copied()
+        .find(|&r| {
+            r != a
+                && w.has::<Brain>(r)
+                && demography::is_adult(&w, r)
+                && !demography::is_child_of(&w, r, a)
+                && !demography::is_child_of(&w, a, r)
+                && w.comp::<Job>(r).and_then(|j| j.employer).is_none_or(|e| w.owner_of(e) != Some(corp))
+        })
+        .expect("a tenant not on the corp's staff");
+    common::set_coins(&mut w, b, 10_000);
+    common::set_coins(&mut w, a, 10_000);
+    let grace = w.config.company_housing.as_ref().expect("on").grace_days;
+    let mut off = w.clone();
+    citysim::systems::company::buyouts(&mut w);
+    assert!(w.company_homes.get(&h).is_some_and(|&x| w.owner_of(x) == Some(corp)), "bought");
+    // No second buyout over the grace.
+    w.config.company_housing.as_mut().and_then(|c| c.buyout.as_mut()).expect("buyout").period_days = 100_000;
+    let noticed =
+        |w: &World, x: EntityId| w.events.iter().any(|e| e.kind == EventKind::Notice && e.actors.get(1) == Some(&x));
+    assert!(noticed(&w, b), "the tenant is given notice");
+    assert!(!noticed(&w, a), "the Farm hand is not");
+    // Notice given tonight; out `grace_days` midnights on.
+    for day in 1..grace {
+        midnight(&mut w);
+        assert_eq!(home_of(&w, b), Some(h), "the tenant keeps the bed on grace day {day}");
+    }
+    midnight(&mut w);
+    assert_ne!(home_of(&w, b), Some(h), "evicted after the grace");
+    assert!(
+        w.events
+            .iter()
+            .any(|e| e.kind == EventKind::Evicted && e.actors.first() == Some(&b) && e.text.contains("bought out")),
+        "an Evicted line naming the buyout"
+    );
+    assert_eq!(home_of(&w, a), Some(h), "the staff tenant stays");
+    assert!(citysim::systems::company::payer(&w, a, h), "on the docked company rent");
+    // Off (the base): no buyout, both stay.
+    off.config.company_housing.as_mut().expect("on").buyout = None;
+    for _ in 0..=grace {
+        midnight(&mut off);
+    }
+    assert_eq!(home_of(&off, b), Some(h), "off: the tenant stays");
+    assert!(off.company_homes.is_empty());
+}
+
 fn env<T: std::str::FromStr>(k: &str) -> Option<T> {
     std::env::var(k).ok().and_then(|v| v.parse().ok())
 }

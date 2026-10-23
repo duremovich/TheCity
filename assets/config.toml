@@ -4389,6 +4389,43 @@ grace_days = 7                     # a resident whose job there ended keeps the 
 fill_at_seed = true                # world build: the far posts' holders (longest commute first) wake in the seeded beds,
                                    # as the pre-roll houses its movers; false: only new hires and the homeless staff
 
+# The island pass phase 3b (I6, Dylan 2026-10-22; systems/company.rs): the city is dense and free Lots are rare
+# (3a put 52 of its 56 blocks on open-ground plots), so the seeded beds are floors of the workplace building itself, a
+# Home record sharing its rect and door: no new footprint. The beds are sized as 3a's (far posts less the free beds near,
+# beds_per_floor a floor as the workplace's interior allows, at most floors_max floors, one set per workplace). Each kind's
+# floors have a name, so the view draws the building as both workplace and warren. CITYSIM_COMPANY_HOUSING2_OFF=1 drops
+# this table and [company_housing.buyout] (3a's blocks, the switch in flight). Placeholders.
+[company_housing.inside]
+default_name = "Company Floors"    # the floors' name for a kind with no row below
+rooms = [
+    { kind = "Farm", name = "Dorm Storeys", below = false },            # bunk storeys over the vertical farm's racks
+    { kind = "PackingPlant", name = "Coffin Racks", below = true },     # capsule racks in the plant's basement
+    { kind = "FreightYard", name = "Container Bunks", below = false },  # stacked containers over the yard office
+    { kind = "UtilityPlant", name = "Coffin Racks", below = true },     # capsule racks under the turbine hall
+    { kind = "ConstructionYard", name = "Site Barracks", below = false },
+    { kind = "Warehouse", name = "Loft Bunks", below = false },
+]
+
+# The island pass phase 3b (I6): buyouts. At the midnight pass every period_days, a corp whose workplace (of the kinds
+# above) still has min_want far posts more than free company beds buys the nearest plain Block within cap_ticks of it
+# (tier_max and below, not its own company housing, ties lower id) at price_mult x its value, paid to the owner (the city
+# when unowned) through corps::acquire (Flow::Sale), and converts it: its beds become bunks, its staff tenants stay on the
+# docked company rent, every other tenant gets a Notice and is evicted grace_days later (the company town's leverage).
+# Nothing for sale in reach: a block on the nearest vacant Lot within cap_ticks (build_fallback), paid as a Grow build.
+[company_housing.buyout]
+period_days = 7                    # the buyout pass runs on the midnights of days divisible by this (weekly)
+per_corp = 1                       # buyouts (or fallback builds) a corp makes a pass, its most-wanting workplace first
+min_want = 12                      # a workplace buys when its far posts less its free company beds reach this (two
+                                   # plain Blocks' worth; 3a's min_beds seeds from 6)
+cap_ticks = 120                    # the block's door within this travel of the workplace door (= far_ticks: a bought bed
+                                   # past it would be a far bed)
+tier_max = 1                       # Sump and Mid Blocks only: no corp turns a Spire tower into a bunkhouse
+price_mult = 1.2                   # x the block's value ([corps] found_cost.home a floor, further floors at
+                                   # [floors] floor_cost_frac); 1.2 is [corps] acquire_premium, a hostile buy's
+reserve = true                     # the corp pays only from what it holds above treasury_ref, as a bankruptcy buyer
+bunks_per_floor = 30               # the converted block's beds a floor, the interior allowing (= beds_per_floor)
+build_fallback = true              # nothing for sale in reach: build on the nearest vacant Lot within cap_ticks
+
 # The pre-view pass phase 6 (docs/PREVIEW_PASS.md § 0 P9, P13-P15; systems/leaders.rs; OPEN-118, OPEN-128): the
 # leader's visible half, for a leader with a body (Full or Coarse). A Statistical leader keeps the off-screen path
 # (the midnight protection collection, the order in force the moment it is chosen). Placeholders.

@@ -3026,6 +3026,12 @@ pub struct Building {
     /// (`Rations`, `Braindance`, `Organs`: `good as usize - 3`).
     #[serde(default, skip_serializing_if = "is_zero_stock_x")]
     pub stock_x: [u32; 3],
+    /// The island pass phase 3b (I6): a Home that is company floors inside
+    /// this workplace (the same rect and door; `World.company_homes` names
+    /// it too, and `[company_housing.inside] rooms` the floors' name and
+    /// whether they are a basement). The view draws the workplace as both.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub within: Option<EntityId>,
 }
 
 fn is_zero_stock_x(v: &[u32; 3]) -> bool {

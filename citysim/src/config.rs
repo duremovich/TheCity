@@ -391,6 +391,83 @@ pub struct CompanyHousingCfg {
     /// (the seed city lives where it is housed); off, only the new hires
     /// and the homeless staff fill them.
     pub fill_at_seed: bool,
+    /// The island pass phase 3b (I6): the seeded beds as floors inside the
+    /// workplace (`[company_housing.inside]`). `None` (not written into a
+    /// save) with `CITYSIM_COMPANY_HOUSING2_OFF=1`: 3a's blocks on a Lot,
+    /// else a plot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inside: Option<CompanyInsideCfg>,
+    /// The island pass phase 3b (I6): a corp buying a nearby block for its
+    /// far staff (`[company_housing.buyout]`). `None` (not written into a
+    /// save) with `CITYSIM_COMPANY_HOUSING2_OFF=1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub buyout: Option<CompanyBuyoutCfg>,
+}
+
+/// The island pass phase 3b `[company_housing.inside]` (I6): the seeded
+/// company beds are floors of the workplace building itself (a Home record
+/// sharing the workplace's rect and door, no new footprint). Each kind's
+/// floors have a display name, so the view can draw the building as both
+/// workplace and warren. Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CompanyInsideCfg {
+    /// Per workplace kind: the company floors' name and whether they sit
+    /// below the workplace (a basement) or above it (storeys).
+    pub rooms: Vec<CompanyRoomCfg>,
+    /// The name for a kind with no `rooms` row.
+    pub default_name: String,
+}
+
+/// One `[[company_housing.inside.rooms]]` row.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CompanyRoomCfg {
+    pub kind: BuildingKind,
+    pub name: String,
+    /// The floors are a basement (else storeys on top).
+    #[serde(default)]
+    pub below: bool,
+}
+
+impl CompanyInsideCfg {
+    /// The company floors' `(name, below)` inside a `kind` workplace.
+    pub fn room(&self, kind: BuildingKind) -> (&str, bool) {
+        self.rooms
+            .iter()
+            .find(|r| r.kind == kind)
+            .map_or((self.default_name.as_str(), false), |r| (r.name.as_str(), r.below))
+    }
+}
+
+/// The island pass phase 3b `[company_housing.buyout]` (I6): a corp whose
+/// staff still commute far buys a nearby residential block and converts
+/// it. Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CompanyBuyoutCfg {
+    /// The buyout pass runs at the midnight whose day is a multiple of this;
+    /// each corp makes at most `per_corp` buyouts (or fallback builds) a pass.
+    pub period_days: u32,
+    pub per_corp: u32,
+    /// A workplace buys when its far posts less its free company beds reach
+    /// this many.
+    pub min_want: u32,
+    /// The block's door within this travel of the workplace door.
+    pub cap_ticks: u64,
+    /// Blocks of this tier and below only (0 Sump, 1 Mid, 2 Spire).
+    pub tier_max: u8,
+    /// The price: this x the block's value (`ownership::value(Home)` a
+    /// floor, the first floor whole and each further one at `[floors]
+    /// floor_cost_frac`).
+    pub price_mult: f32,
+    /// The corp buys only from what it holds above `treasury_ref` (its
+    /// reserve), as a bankruptcy buyer.
+    pub reserve: bool,
+    /// The converted block's bunks a floor (the interior allowing; a block
+    /// never loses beds by the conversion).
+    pub bunks_per_floor: u16,
+    /// With nothing for sale in reach, build a block on the nearest plain
+    /// vacant Lot within `cap_ticks` (through `life::pay_housing`, the
+    /// corp paying); false: no fallback.
+    pub build_fallback: bool,
 }
 
 /// The island pass phase 1 `[distance]` (docs/ISLAND_PASS.md I1): each
@@ -8577,6 +8654,14 @@ impl Config {
         // switch in flight (doctrine 6).
         if std::env::var("CITYSIM_COMPANY_HOUSING_OFF").is_ok_and(|v| v == "1") {
             cfg.company_housing = None;
+        }
+        // The island pass phase 3b (OPEN-163, I6): the in-building floors
+        // and the buyouts' switch in flight (doctrine 6); 3a's blocks stay.
+        if std::env::var("CITYSIM_COMPANY_HOUSING2_OFF").is_ok_and(|v| v == "1") {
+            if let Some(c) = cfg.company_housing.as_mut() {
+                c.inside = None;
+                c.buyout = None;
+            }
         }
         // Lives at work (D13): a config with `[lives] enabled = false` by any
         // path clears the milestone's sections, so the off save holds no

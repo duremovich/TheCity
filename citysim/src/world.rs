@@ -1297,6 +1297,10 @@ pub struct World {
     /// its workplace ended -> the tick it ended (evicted `grace_days` on).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub company_lapsed: BTreeMap<EntityId, Tick>,
+    /// The island pass phase 3b: the `company_lapsed` residents put on
+    /// notice by a buyout (not by a job lost), for the eviction's line.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub company_notice: BTreeSet<EntityId>,
     /// Scale S5 (docs/SCALE_20K.md § S5): the Ambient tier (empty, and not
     /// saved, on a map without Ambient flats).
     #[serde(default, skip_serializing_if = "crate::ambient::AmbientState::is_empty")]
@@ -1817,6 +1821,7 @@ impl World {
             housing_demand: BTreeMap::new(),
             company_homes: BTreeMap::new(),
             company_lapsed: BTreeMap::new(),
+            company_notice: BTreeSet::new(),
             ambient: Default::default(),
             jobs2: Default::default(),
         };
@@ -2005,6 +2010,7 @@ impl World {
                     bin_regular: None,
                     under_construction_until: None,
                     stock_x: [0; 3],
+                    within: None,
                 },
             );
             match def.kind {
