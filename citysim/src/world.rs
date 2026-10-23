@@ -602,6 +602,14 @@ pub struct World {
     /// empty).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub segments: BTreeMap<EntityId, (Tick, u8)>,
+    /// The island pass phase 5 (I3, `systems/motion.rs`): the vehicles in
+    /// motion, by vehicle (not saved while empty).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub motions: BTreeMap<EntityId, systems::motion::Motion>,
+    /// The island pass phase 5: rider -> the vehicle he is aboard (not
+    /// saved while empty).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub aboard: BTreeMap<EntityId, EntityId>,
     /// Measurement only (never saved, read by nothing in the sim): when
     /// `Some`, every commute arrival `(ticks, Manhattan tiles, mode)` with
     /// mode 0 walked, 1 drove, 2 rode.
@@ -1634,6 +1642,8 @@ impl World {
             transit: Default::default(),
             rides: BTreeMap::new(),
             segments: BTreeMap::new(),
+            motions: BTreeMap::new(),
+            aboard: BTreeMap::new(),
             commute_log: None,
             leg_log: None,
             dealers: BTreeMap::new(),
@@ -2831,6 +2841,7 @@ impl World {
                 return Err("report_index out of sync with crime_reports".to_string());
             }
         }
+        systems::motion::check(self)?;
         systems::assets::check(self)
     }
 
@@ -3593,6 +3604,7 @@ impl World {
         // M13 D20: a trip ends first, so the vehicle is parked, not lost.
         systems::vehicles::end_trip(self, id, false);
         systems::transit::end_ride(self, id);
+        systems::motion::alight(self, id);
         // M16a (plan C16): an emigrant's records settle as a death's (a
         // refund lands in the wallet it leaves with).
         systems::contracts::on_death(self, id, None);
@@ -3843,6 +3855,7 @@ impl World {
         // the corpse.
         systems::vehicles::end_trip(self, id, false);
         systems::transit::end_ride(self, id);
+        systems::motion::alight(self, id);
         // M13 D38: a dead dealer deals no more.
         systems::stims::end_deal(self, id);
         // L2 L15 (review fix): nor hangs out at a spot.

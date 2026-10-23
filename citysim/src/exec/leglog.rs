@@ -56,6 +56,138 @@ pub struct LegLog {
     pub leaders: BTreeMap<(u64, EntityId), [u32; 4]>,
     /// Each leader's last sleep: (night, building, asleep last tick).
     pub leader_last: BTreeMap<EntityId, (u64, Option<EntityId>, bool)>,
+    /// The island pass phase 5 (OPEN-165's device, `ride_tick`): a body on
+    /// a vehicle leg, last seen.
+    pub ride_track: BTreeMap<EntityId, RideSeen>,
+    /// By (day, body, mode, Full): [parked, jumped] on a vehicle leg that day.
+    pub ride_days: BTreeMap<(u64, EntityId, &'static str, bool), [bool; 2]>,
+}
+
+/// `ride_tick`'s last sight of a rider.
+#[derive(Clone, Copy, Debug)]
+pub struct RideSeen {
+    pub tile: TilePos,
+    pub since: Tick,
+    pub last: Tick,
+    pub mode: &'static str,
+    pub full: bool,
+}
+
+/// The device's parked stretch: a body on a vehicle leg on one tile this
+/// long (measurement only).
+pub const RIDE_PARKED_TICKS: Tick = 60;
+/// The device's jump: a body on a vehicle leg moved farther than this in
+/// one tick (a car makes ~1-3 tiles a tick, a flyer ~3-4; measurement only).
+pub const RIDE_JUMP_TILES: u32 = 12;
+
+/// The vehicle legs' modes (`start`'s): the cab, a body driver's fare leg,
+/// the exec's car, the El, a flyer, a drive.
+fn vehicle_mode(mode: &str) -> bool {
+    matches!(mode, "cab" | "fare_leg" | "exec_ride" | "el" | "fly" | "drive")
+}
+
+/// Where a body that left its leg stands: inside a building, its door (the
+/// step in to an interior slot is no jump); else its tile.
+fn landed_at(world: &World, id: EntityId) -> Option<TilePos> {
+    let p = world.comp::<crate::components::Position>(id)?;
+    match p.building.and_then(|b| world.comp::<crate::components::Building>(b)) {
+        Some(b) => Some(b.door),
+        None => Some(p.tile),
+    }
+}
+
+/// Every tick (`run --legs`, the island pass phase 5's device, OPEN-165):
+/// each Full or Coarse body on a vehicle leg (a timed leg, a flight, an El
+/// ride, a drive) is watched; a body-day is "parked" when it sat on one
+/// tile `RIDE_PARKED_TICKS` or more while on the leg, "jumped" when it moved
+/// more than `RIDE_JUMP_TILES` in one tick (the landing included: the tick
+/// after the leg ended). `#ride` rows of the TSV. Measurement only.
+pub fn ride_tick(world: &mut World) {
+    let Some(log) = world.leg_log.as_ref() else { return };
+    let tick = world.tick;
+    let day = tick / crate::time::TICKS_PER_DAY;
+    let mut seen: Vec<(EntityId, &'static str, bool, TilePos)> = Vec::new();
+    for (&id, s) in &log.open {
+        if !vehicle_mode(s.mode) {
+            continue;
+        }
+        let Some(b) = world.comp::<crate::components::Brain>(id) else { continue };
+        if b.lod == Lod::Statistical {
+            continue;
+        }
+        use crate::exec::ExecState;
+        // The mode this tick: the El's ride, a flight, the vehicle he is
+        // aboard (`motion`), else the leg's own.
+        let mode = match &b.exec {
+            ExecState::Ride { .. } => "el",
+            ExecState::Fly { .. } => "fly",
+            ExecState::GotoTimed { .. } | ExecState::Goto { .. } => {
+                match world.aboard.get(&id).and_then(|v| world.motions.get(v)) {
+                    Some(m) => match m.ride {
+                        crate::systems::motion::RideKind::Car => "drive",
+                        crate::systems::motion::RideKind::Flyer => "fly",
+                        crate::systems::motion::RideKind::Cab if m.driver == Some(id) => "fare_leg",
+                        crate::systems::motion::RideKind::Cab => "cab",
+                        crate::systems::motion::RideKind::Exec => "exec_ride",
+                    },
+                    None => s.mode,
+                }
+            }
+            _ => continue,
+        };
+        let Some(p) = world.comp::<crate::components::Position>(id) else { continue };
+        // A body set down on an El stop this tick (`transit::run` alights
+        // after the step) is the El's: its jump is the El's (phase 6).
+        let mode =
+            if world.transit.net.stops.contains(&p.tile) && log.ride_track.get(&id).is_some_and(|r| r.tile != p.tile) {
+                "el"
+            } else {
+                mode
+            };
+        // Inside a building, its door: the step out of (or in to) a deep
+        // interior slot is no jump.
+        let Some(at) = landed_at(world, id) else { continue };
+        seen.push((id, mode, b.lod == Lod::Full, at));
+    }
+    // The landing: a body watched last tick and off its leg now (a demotion
+    // to Statistical snaps it off screen: no ride's jump).
+    let gone: Vec<(EntityId, RideSeen, Option<TilePos>)> = log
+        .ride_track
+        .iter()
+        .filter(|(id, r)| r.last + 1 == tick && !seen.iter().any(|s| s.0 == **id))
+        .filter(|(id, _)| world.comp::<crate::components::Brain>(**id).is_some_and(|b| b.lod != Lod::Statistical))
+        .map(|(&id, &r)| (id, r, landed_at(world, id)))
+        .collect();
+    let Some(log) = world.leg_log.as_mut() else { return };
+    for (id, r, now) in gone {
+        if now.is_some_and(|t| t.manhattan(r.tile) > RIDE_JUMP_TILES) {
+            log.ride_days.entry((day, id, r.mode, r.full)).or_default()[1] = true;
+        }
+    }
+    log.ride_track.retain(|_, r| r.last + 1 >= tick);
+    for (id, mode, full, tile) in seen {
+        let next = match log.ride_track.get(&id).copied() {
+            Some(r) if r.last + 1 == tick && r.tile == tile => {
+                if tick - r.since >= RIDE_PARKED_TICKS {
+                    log.ride_days.entry((day, id, mode, full)).or_default()[0] = true;
+                }
+                RideSeen { last: tick, mode, full, ..r }
+            }
+            Some(r) if r.last + 1 == tick => {
+                // A jump is the mode it left (a landing), or the El's when
+                // it set him down on its stop.
+                if r.tile.manhattan(tile) > RIDE_JUMP_TILES {
+                    let m = if mode == "el" { mode } else { r.mode };
+                    log.ride_days.entry((day, id, m, r.full)).or_default()[1] = true;
+                }
+                RideSeen { tile, since: tick, last: tick, mode, full }
+            }
+            _ => RideSeen { tile, since: tick, last: tick, mode, full },
+        };
+        log.ride_days.entry((day, id, mode, full)).or_default();
+        log.ride_track.insert(id, next);
+    }
+    log.ride_track.retain(|_, r| r.last == tick);
 }
 
 /// Who `id` is, for the table: the trade's key, the built-in role, a corp
@@ -183,6 +315,20 @@ pub fn tsv(world: &World) -> String {
     }
     for (m, (n, t)) in &log.by_mode {
         out.push_str(&format!("#mode\t{m}\t{n}\t{t}\n"));
+    }
+    // The island pass phase 5 (OPEN-165's device): by mode and tier, the
+    // body-days on a vehicle leg, parked, jumped, either.
+    let mut rides: BTreeMap<(&'static str, bool), [u32; 4]> = BTreeMap::new();
+    for (&(_, _, mode, full), f) in &log.ride_days {
+        let r = rides.entry((mode, full)).or_default();
+        r[0] += 1;
+        r[1] += u32::from(f[0]);
+        r[2] += u32::from(f[1]);
+        r[3] += u32::from(f[0] || f[1]);
+    }
+    for ((m, full), r) in &rides {
+        let tier = if *full { "full" } else { "coarse" };
+        out.push_str(&format!("#ride\t{m}\t{tier}\t{}\t{}\t{}\t{}\n", r[0], r[1], r[2], r[3]));
     }
     out
 }

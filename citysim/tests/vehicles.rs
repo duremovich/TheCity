@@ -1048,3 +1048,370 @@ fn test_away_days_reset_with_the_keeper() {
     let x = asset(&w, car);
     assert_eq!((x.loc, x.keeper, x.away_days), (AssetLoc::Parked(away), Some(b), 1), "not recalled");
 }
+
+// ---------------------------------------------------------------------------
+// The island pass phase 5 (docs/ISLAND_PASS.md I3; OPEN-165): a vehicle in
+// motion with its riders aboard. Each fails on the base (d5269fc): a timed
+// leg kept the body inside the building it left until the arrival tick,
+// then put it at the door, hundreds of tiles on.
+// ---------------------------------------------------------------------------
+
+use citysim::systems::motion::{self, RideKind, Route};
+
+/// A Coarse adult in his Home with his own car, and the Market or Bar
+/// farthest from it (a ride of 100+ ticks), the GoTo planned.
+fn coarse_driver_set_out(w: &mut World, nth: usize) -> (EntityId, EntityId, EntityId, TilePos) {
+    let who = adults(w)
+        .into_iter()
+        .filter(|&a| w.comp::<citysim::Household>(a).and_then(|h| h.home).is_some() && w.gang_of(a).is_none())
+        .nth(nth)
+        .expect("a housed adult");
+    let home = w.comp::<citysim::Household>(who).and_then(|h| h.home).expect("home");
+    let car = assets::grant(w, who, AssetKind::Car, 1).expect("car");
+    lod::set_lod(w, who, Lod::Coarse);
+    w.leave_building(who);
+    w.enter_building(who, home);
+    let hd = w.comp::<Building>(home).expect("home").door;
+    let target = w
+        .buildings_of_kind(BuildingKind::Market)
+        .iter()
+        .chain(w.buildings_of_kind(BuildingKind::Bar))
+        .copied()
+        .max_by_key(|&b| (w.comp::<Building>(b).map_or(0, |bd| bd.door.manhattan(hd)), b))
+        .expect("a Market or Bar");
+    let origin = citysim::exec::walk_origin(w, who).expect("origin");
+    let tick = w.tick;
+    let b = w.comp_mut::<Brain>(who).expect("brain");
+    b.plan = Some(Plan {
+        goal: GoalKind::Idle,
+        target: Some(target),
+        steps: vec![ActionInstance {
+            action: ActionKind::GoTo(LocationKey::TargetHome),
+            target: Some(target),
+            tile: None,
+        }],
+        started_tick: tick,
+    });
+    b.plan_step = 0;
+    b.exec = ExecState::Idle;
+    (who, car, target, origin)
+}
+
+fn arrive_tick(w: &World, id: EntityId) -> u64 {
+    match w.comp::<Brain>(id).expect("brain").exec {
+        ExecState::GotoTimed { arrive_tick, .. } => arrive_tick,
+        ref s => panic!("not a timed leg: {s:?}"),
+    }
+}
+
+/// I3: mid-ride the driver's position is his car's, the car has left the
+/// boarding tile and is out on the road; on arrival there is no jump (the
+/// last tile aboard is the door's), and no tick moves him farther than the
+/// vehicle's pace. Base: the body stood inside its Home for the whole ride.
+#[test]
+fn test_a_coarse_car_carries_its_driver_along_the_road() {
+    let mut w = city();
+    assert!(motion::on(&w), "the shipped config has [motion]");
+    let (who, car, target, origin) = coarse_driver_set_out(&mut w, 3);
+    exec_tick(&mut w);
+    let arrive = arrive_tick(&w, who);
+    let ticks = arrive - (w.tick - 1);
+    assert!(ticks >= 40, "a long ride ({ticks} ticks)");
+    assert_eq!(motion::vehicle_of(&w, who), Some(car), "aboard his car");
+    let m = w.motions.get(&car).expect("the car in motion");
+    assert_eq!((m.ride, m.driver, m.asset), (RideKind::Car, Some(who), true));
+    assert!(matches!(m.route, Route::Timed { .. }));
+    let door = w.comp::<Building>(target).expect("target").door;
+    let mut last_aboard = origin;
+    let mut moved_max = 0u32;
+    let mut mid_checked = false;
+    while w.tick <= arrive + 2 {
+        let before = w.comp::<Position>(who).expect("pos").clone();
+        exec_tick(&mut w);
+        let now = w.comp::<Position>(who).expect("pos").clone();
+        if motion::vehicle_of(&w, who) == Some(car) {
+            let m = w.motions.get(&car).expect("motion");
+            assert_eq!(now.tile, m.pos, "the rider is where the car is");
+            assert_eq!(now.building, None, "out on the road");
+            moved_max = moved_max.max(before.tile.manhattan(now.tile));
+            last_aboard = now.tile;
+            if !mid_checked && w.tick > arrive - ticks / 2 {
+                assert!(m.pos.manhattan(origin) > 10, "the car left the boarding tile: {} vs {origin}", m.pos);
+                mid_checked = true;
+            }
+        }
+        w.check_indices().expect("the aboard links agree");
+    }
+    assert!(mid_checked, "seen mid-ride");
+    assert_eq!(w.comp::<Position>(who).expect("pos").building, Some(target), "arrived");
+    // No landing jump: the last tile aboard is one tick's pace from the
+    // door (the car makes 1-2 tiles a tick), where the way ends.
+    assert!(moved_max <= 3, "no tick moved him more than the car's pace ({moved_max} tiles)");
+    assert!(
+        citysim::systems::law::chebyshev(last_aboard, door) <= moved_max.max(1),
+        "no landing jump: last aboard {last_aboard}, door {door}"
+    );
+    assert!(w.motions.is_empty() && w.aboard.is_empty(), "the motion ends with its rider");
+    assert!(matches!(asset(&w, car).loc, AssetLoc::Parked(b) if b == target), "parked at the destination");
+}
+
+/// I3, an interrupt mid-ride (the plan dropped, as an urgent Eat does, or
+/// replaced without an abort): he steps off where the car stands, never
+/// back on the boarding tile; the car parks by him. Base: left in his Home.
+#[test]
+fn test_an_interrupt_mid_ride_leaves_no_parked_body() {
+    for replace in [false, true] {
+        let mut w = city();
+        let (who, car, _, origin) = coarse_driver_set_out(&mut w, 5);
+        exec_tick(&mut w);
+        let arrive = arrive_tick(&w, who);
+        let half = w.tick + (arrive - w.tick) / 2;
+        while w.tick < half {
+            exec_tick(&mut w);
+        }
+        let at = w.motions.get(&car).expect("in motion").pos;
+        if replace {
+            // A new plan installed over the leg (no abort): the next step
+            // starts a walk from where he is.
+            let tick = w.tick;
+            let b = w.comp_mut::<Brain>(who).expect("brain");
+            b.plan = Some(Plan {
+                goal: GoalKind::Idle,
+                target: None,
+                steps: vec![ActionInstance { action: ActionKind::Rest, target: None, tile: None }],
+                started_tick: tick,
+            });
+            b.plan_step = 0;
+            b.exec = ExecState::Idle;
+            exec_tick(&mut w);
+        } else {
+            w.abort_plan(who);
+        }
+        let p = w.comp::<Position>(who).expect("pos").clone();
+        assert_eq!(motion::vehicle_of(&w, who), None, "off the car");
+        assert!(w.motions.is_empty(), "the car's motion ended");
+        assert!(p.tile.manhattan(at) <= 2, "off where the car stood ({} vs {at})", p.tile);
+        assert!(p.tile.manhattan(origin) > 10, "not back on the boarding tile");
+        assert_ne!(p.building, w.comp::<citysim::Household>(who).and_then(|h| h.home), "not in his Home");
+        if !replace {
+            assert!(matches!(asset(&w, car).loc, AssetLoc::Parked(_)), "the car parked by him");
+        }
+        w.check_indices().expect("the aboard links agree");
+    }
+}
+
+/// I3: a save taken mid-ride resumes byte for byte (the vehicle, its way
+/// and its rider), and the loaded world arrives as the live one does.
+#[test]
+fn test_a_save_mid_ride_resumes_identically() {
+    let mut w = city();
+    let (who, car, target, _) = coarse_driver_set_out(&mut w, 7);
+    exec_tick(&mut w);
+    let arrive = arrive_tick(&w, who);
+    for _ in 0..(arrive - w.tick) / 3 {
+        exec_tick(&mut w);
+    }
+    assert!(w.motions.contains_key(&car), "mid-ride");
+    let text = citysim::save::to_ron(&w);
+    let mut back = citysim::save::from_ron(&text).expect("loads");
+    assert_eq!(citysim::save::to_ron(&back), text, "the save round-trips");
+    assert_eq!(back.motions, w.motions);
+    assert_eq!(back.aboard, w.aboard);
+    while w.tick <= arrive + 1 {
+        exec_tick(&mut w);
+        exec_tick(&mut back);
+        assert_eq!(
+            back.comp::<Position>(who).expect("pos").tile,
+            w.comp::<Position>(who).expect("pos").tile,
+            "tick {}",
+            w.tick
+        );
+    }
+    assert_eq!(citysim::save::to_ron(&back), citysim::save::to_ron(&w), "identical at the arrival");
+    assert_eq!(w.comp::<Position>(who).expect("pos").building, Some(target));
+}
+
+/// I3, LOD: a Coarse rider promoted to Full stays aboard and rides on; a
+/// demotion to Statistical mid-ride steps him off where the car is (then
+/// the off-screen snap), the motion gone.
+#[test]
+fn test_a_tier_change_mid_ride_keeps_the_rider_with_the_car() {
+    let mut w = city();
+    let (who, car, target, _) = coarse_driver_set_out(&mut w, 9);
+    exec_tick(&mut w);
+    let arrive = arrive_tick(&w, who);
+    for _ in 0..(arrive - w.tick) / 3 {
+        exec_tick(&mut w);
+    }
+    lod::set_lod(&mut w, who, Lod::Full);
+    assert_eq!(motion::vehicle_of(&w, who), Some(car), "still aboard at Full");
+    assert_eq!(arrive_tick(&w, who), arrive, "the same leg runs on");
+    while w.tick <= arrive + 1 {
+        exec_tick(&mut w);
+    }
+    assert_eq!(w.comp::<Position>(who).expect("pos").building, Some(target), "arrived at Full");
+    // The demotion.
+    let mut w = city();
+    let (who, car, _, _) = coarse_driver_set_out(&mut w, 9);
+    exec_tick(&mut w);
+    for _ in 0..20 {
+        exec_tick(&mut w);
+    }
+    assert!(w.motions.contains_key(&car));
+    lod::set_lod(&mut w, who, Lod::Statistical);
+    assert_eq!(motion::vehicle_of(&w, who), None);
+    assert!(w.motions.is_empty());
+    w.check_indices().expect("the aboard links agree");
+}
+
+/// I3, the flyer: airborne, the body is where the flyer is, on the straight
+/// line between the take-off and the door (base: on the take-off tile the
+/// whole flight).
+#[test]
+fn test_a_flyer_carries_its_pilot_across() {
+    let mut w = city();
+    let (who, _, target, origin) = coarse_driver_set_out(&mut w, 11);
+    // Swap the car for a flyer: park the car elsewhere, grant a flyer.
+    let home = w.comp::<citysim::Household>(who).and_then(|h| h.home).expect("home");
+    for v in w.vehicles.clone() {
+        if asset(&w, v).owner == Some(who) {
+            assets::set_loc(&mut w, v, AssetLoc::Parked(target));
+        }
+    }
+    let flyer = assets::grant(&mut w, who, AssetKind::Flyer, 1).expect("flyer");
+    assert_eq!(asset(&w, flyer).loc, AssetLoc::Parked(home));
+    exec_tick(&mut w);
+    let ExecState::Fly { arrive_tick, .. } = w.comp::<Brain>(who).expect("brain").exec else { panic!("flying") };
+    assert!(arrive_tick > w.tick + 4, "a flight of some ticks");
+    assert_eq!(w.motions.get(&flyer).map(|m| m.ride), Some(RideKind::Flyer));
+    let door = w.comp::<Building>(target).expect("t").door;
+    let mut seen_between = false;
+    while w.tick <= arrive_tick + 1 {
+        exec_tick(&mut w);
+        if let Some(m) = w.motions.get(&flyer) {
+            let p = w.comp::<Position>(who).expect("pos").tile;
+            assert_eq!(p, m.pos);
+            seen_between |= p != origin && p != door;
+        }
+    }
+    assert!(seen_between, "seen in the air between the ends");
+    assert_eq!(w.comp::<Position>(who).expect("pos").building, Some(target));
+}
+
+/// I3, the cab (the Garage's off-screen cab, `OPEN-149`): a commuter's GoTo
+/// to work rides a cab vehicle spawned for the ride, driverless, him aboard;
+/// it moves, and the vehicle is gone with the ride.
+#[test]
+fn test_an_off_screen_cab_carries_its_fare() {
+    let mut cfg = Config::load();
+    cfg.jobs2.p_cab = 1.0;
+    cfg.jobs2.cab_min_tiles = 40;
+    if let Some(l) = cfg.legs.as_mut() {
+        l.fare_wait_ticks = 0;
+    }
+    let mut w = World::new(42, cfg);
+    let rider = adults(&w)
+        .into_iter()
+        .find(|&a| {
+            let Some(j) = w.comp::<Job>(a) else { return false };
+            let (Some(e), Some(h)) = (j.employer, w.comp::<citysim::Household>(a).and_then(|h| h.home)) else {
+                return false;
+            };
+            w.gang_of(a).is_none()
+                && w.comp::<Building>(e).zip(w.comp::<Building>(h)).is_some_and(|(x, y)| x.door.manhattan(y.door) >= 60)
+        })
+        .expect("a far commuter");
+    set_coins(&mut w, rider, 5_000);
+    let home = w.comp::<citysim::Household>(rider).and_then(|h| h.home).expect("home");
+    // A cab driver at the Garage nearest his Home, off screen (no body
+    // drives: the Garage's off-screen cab takes the ride).
+    let hd = w.comp::<Building>(home).expect("home").door;
+    let garage = w
+        .buildings_of_kind(BuildingKind::Garage)
+        .iter()
+        .copied()
+        .min_by_key(|&g| (w.comp::<Building>(g).map_or(u32::MAX, |b| b.door.manhattan(hd)), g))
+        .expect("a Garage");
+    let driver = adults(&w).into_iter().find(|&a| a != rider && !w.has::<Job>(a)).expect("a jobless adult");
+    let role = w.config.trade_role("cab_driver").expect("the cab_driver trade");
+    demography::hire(&mut w, driver, garage, role);
+    lod::set_lod(&mut w, driver, Lod::Statistical);
+    let work = w.comp::<Job>(rider).and_then(|j| j.employer).expect("work");
+    lod::set_lod(&mut w, rider, Lod::Coarse);
+    w.leave_building(rider);
+    w.enter_building(rider, home);
+    for v in w.vehicles.clone() {
+        if asset(&w, v).owner == Some(rider) {
+            assets::set_loc(&mut w, v, AssetLoc::Parked(work));
+        }
+    }
+    let tick = w.tick;
+    let b = w.comp_mut::<Brain>(rider).expect("brain");
+    b.plan = Some(Plan {
+        goal: GoalKind::Work,
+        target: Some(work),
+        steps: vec![ActionInstance {
+            action: ActionKind::GoTo(LocationKey::Workplace),
+            target: Some(work),
+            tile: None,
+        }],
+        started_tick: tick,
+    });
+    b.plan_step = 0;
+    b.exec = ExecState::Idle;
+    exec_tick(&mut w);
+    let state = w.comp::<Brain>(rider).map(|b| b.exec.clone());
+    let cab =
+        motion::vehicle_of(&w, rider).unwrap_or_else(|| panic!("aboard a cab: {state:?} {:?}", w.stats.current.jobs2));
+    let m = w.motions.get(&cab).expect("the cab in motion").clone();
+    assert_eq!((m.ride, m.driver, m.asset), (RideKind::Cab, None, false), "the off-screen cab, no asset");
+    let arrive = arrive_tick(&w, rider);
+    let start = m.pos;
+    let mut moved = false;
+    while w.tick <= arrive + 1 {
+        exec_tick(&mut w);
+        if let Some(m) = w.motions.get(&cab) {
+            assert_eq!(w.comp::<Position>(rider).expect("pos").tile, m.pos);
+            moved |= m.pos.manhattan(start) > 10;
+        }
+    }
+    assert!(moved, "the cab moved off the boarding tile");
+    assert_eq!(w.comp::<Position>(rider).expect("pos").building, Some(work), "at work");
+    assert!(!w.is_alive(cab), "the cab's entity went with the ride");
+    assert!(w.motions.is_empty() && w.aboard.is_empty());
+}
+
+/// I3, a Full driver steers his car (`Route::Driven`): aboard from the
+/// first step, the car where he is; demoted to Coarse mid-drive, the car
+/// runs his timed leg on from where it stands, him aboard, to the door.
+#[test]
+fn test_a_full_driver_steers_and_a_demotion_runs_on_timed() {
+    let mut w = city();
+    let (who, car, target, _) = coarse_driver_set_out(&mut w, 13);
+    lod::set_lod(&mut w, who, Lod::Full);
+    for _ in 0..12 {
+        exec_tick(&mut w);
+        assert_eq!(motion::vehicle_of(&w, who), Some(car), "aboard while he drives");
+    }
+    let m = w.motions.get(&car).expect("in motion");
+    assert!(matches!(m.route, Route::Driven));
+    assert_eq!(m.pos, w.comp::<Position>(who).expect("pos").tile, "the car is where he is");
+    lod::set_lod(&mut w, who, Lod::Coarse);
+    assert_eq!(motion::vehicle_of(&w, who), Some(car), "still aboard at Coarse");
+    assert!(matches!(w.motions.get(&car).expect("motion").route, Route::Timed { .. }));
+    let arrive = arrive_tick(&w, who);
+    let mut last = w.comp::<Position>(who).expect("pos").tile;
+    let mut step = 0;
+    while w.tick <= arrive + 1 {
+        exec_tick(&mut w);
+        let now = w.comp::<Position>(who).expect("pos").clone();
+        if now.building.is_none() {
+            step = step.max(last.manhattan(now.tile));
+            last = now.tile;
+        }
+        w.check_indices().expect("the aboard links agree");
+    }
+    assert!(step <= 3, "no jump on the timed run ({step} tiles)");
+    assert_eq!(w.comp::<Position>(who).expect("pos").building, Some(target), "arrived");
+    assert!(w.motions.is_empty());
+}

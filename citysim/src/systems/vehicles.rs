@@ -299,6 +299,9 @@ pub fn begin_trip(world: &mut World, agent: EntityId, target: &GotoTarget) -> Op
 /// flagged for repossession while driven is towed now (D11); an arrival
 /// rolls the crash (D25).
 pub fn end_trip(world: &mut World, agent: EntityId, arrived: bool) {
+    // The island pass phase 5 (I3): the driver steps off where the vehicle
+    // is (the door on arrival), and it parks from there.
+    crate::systems::motion::alight(world, agent);
     let Some(trip) = world.trips.remove(&agent) else { return };
     // A god `Chase` pin lasts one trip, arrived or not.
     let pinned = world.chase_pins.remove(&agent);

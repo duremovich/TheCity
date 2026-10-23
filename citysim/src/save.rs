@@ -300,7 +300,11 @@ use crate::world::World;
 /// `World.commute_pressure` (written only when non-empty) and the
 /// `Jobs2Cols` pressure columns (written only when non-zero). An off save
 /// is byte-identical to version 57's.
-pub const SAVE_VERSION: u8 = 58;
+/// 59 (the island pass phase 5, OPEN-165, I3): `Config.motion` (`[motion]`,
+/// written only when set; serde default `None`), `World.motions` and
+/// `World.aboard` (written only when non-empty: a save mid-ride resumes the
+/// vehicle and its riders). An off save is byte-identical to version 58's.
+pub const SAVE_VERSION: u8 = 59;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
