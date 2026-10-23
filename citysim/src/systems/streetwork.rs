@@ -1829,6 +1829,39 @@ pub fn fare_plan(world: &mut World, id: EntityId) -> Option<Plan> {
 }
 
 /// A `fare` duty trade's job (the cab driver).
+/// The island pass phase 8 (`[island_trades] cab_quota`; OPEN-168): each
+/// Garage's first `cab_quota` cab drivers by id who are on shift or within
+/// the hour before it (the commute a body's), free and alive: the LOD's
+/// class-2 set (`lod::budget_sets`). At 20k no cab driver ranked into the
+/// body budget, so `book_cab` never found a body and the Garage's
+/// off-screen cab took every fare. Empty off.
+pub fn cab_body_set(world: &World) -> Vec<EntityId> {
+    let Some(quota) = world.config.island_trades.as_ref().map(|c| usize::from(c.cab_quota)) else {
+        return Vec::new();
+    };
+    if quota == 0 || !crate::systems::service::street_on(world) {
+        return Vec::new();
+    }
+    let tod = world.tick_of_day();
+    let lead = ((u64::from(tod) + TICKS_PER_HOUR) % TICKS_PER_DAY) as u16;
+    let mut out = Vec::new();
+    for &g in world.buildings_of_kind(BuildingKind::Garage) {
+        let mut staff: Vec<EntityId> = world
+            .staff_of(g)
+            .iter()
+            .copied()
+            .filter(|&s| {
+                world.comp::<Job>(s).is_some_and(|j| fare_duty(world, j) && (j.on_shift(tod) || j.on_shift(lead)))
+                    && !world.has::<Sentence>(s)
+                    && crate::systems::law::living(world, s)
+            })
+            .collect();
+        staff.sort_unstable();
+        out.extend(staff.into_iter().take(quota));
+    }
+    out
+}
+
 fn fare_duty(world: &World, job: &Job) -> bool {
     crate::systems::trades::row_of(world, job.role).is_some_and(|r| r.duty == TradeDuty::Fare)
 }

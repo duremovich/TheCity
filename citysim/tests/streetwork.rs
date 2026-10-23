@@ -671,6 +671,31 @@ fn test_the_corner_stands_at_every_yard_and_queues_by_travel() {
     assert!(q_on > q_off, "the off-screen broke queue by travel ({q_on} vs the base's {q_off})");
 }
 
+/// Phase 8 (OPEN-168, the cab): a Garage's first `cab_quota` cab drivers on
+/// shift rank with the gangs (class 2), so a 20k city's body budget holds a
+/// driver; the base ranked them with the civilians (0), and at 20k none was
+/// a body (`book_cab` found no driver: the off-screen cab drove every fare).
+#[test]
+fn test_cab_drivers_on_shift_keep_a_body() {
+    let drivers = |on: bool| {
+        let mut w = trades_world(on, |_| {});
+        w.run_ticks(citysim::TICKS_PER_DAY + 11 * TICKS_PER_HOUR);
+        let set = streetwork::cab_body_set(&w);
+        let classes: Vec<i32> = set
+            .iter()
+            .filter(|&&s| !w.has::<citysim::GangMember>(s))
+            .map(|&s| citysim::systems::lod::rank_class(&w, s))
+            .collect();
+        (set.len(), classes)
+    };
+    let (n_on, on) = drivers(true);
+    let (n_off, _) = drivers(false);
+    eprintln!("cab drivers kept: {n_on} (base {n_off}); classes {on:?}");
+    assert!(n_on > 0, "a cab driver on shift is in the set");
+    assert!(on.iter().all(|&c| c >= 2), "ranked with the gangs");
+    assert_eq!(n_off, 0, "the base keeps none");
+}
+
 /// Phase 8 (OPEN-168, the arms dealer): a gang that deals at a corner had no
 /// dealer registered at any Bar, and the arms trade sells only at a dealer's
 /// Bar (`weapons::bar_arms_dealer`): no arms dealer existed. With
