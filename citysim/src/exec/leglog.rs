@@ -144,7 +144,10 @@ pub fn ride_tick(world: &mut World) {
             } else {
                 mode
             };
-        seen.push((id, mode, b.lod == Lod::Full, p.tile));
+        // Inside a building, its door: the step out of (or in to) a deep
+        // interior slot is no jump.
+        let Some(at) = landed_at(world, id) else { continue };
+        seen.push((id, mode, b.lod == Lod::Full, at));
     }
     // The landing: a body watched last tick and off its leg now (a demotion
     // to Statistical snaps it off screen: no ride's jump).
