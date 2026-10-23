@@ -604,6 +604,9 @@ pub fn stat_vendor_meal(world: &mut World, id: EntityId, market: EntityId) -> bo
 /// The corners: per district with an open Construction or Freight Yard,
 /// the lowest-id one's door (the street outside it), ascending by district.
 pub fn corners(world: &World) -> Vec<(DistrictId, TilePos)> {
+    if world.config.island_trades.as_ref().is_some_and(|c| c.corner_per_yard) {
+        return yard_corners(world);
+    }
     let mut out: Vec<(DistrictId, EntityId)> = Vec::new();
     for kind in [BuildingKind::ConstructionYard, BuildingKind::FreightYard] {
         for &y in world.buildings_of_kind(kind) {
@@ -620,6 +623,50 @@ pub fn corners(world: &World) -> Vec<(DistrictId, TilePos)> {
     }
     out.sort();
     out.into_iter().filter_map(|(d, y)| world.comp::<Building>(y).map(|b| (d, world.outside_door(b)))).collect()
+}
+
+/// The island pass phase 8 (`[island_trades] corner_per_yard`; OPEN-168):
+/// a corner outside every open Construction and Freight Yard, in id order,
+/// one within `[jobs2] corner_tiles` of a corner already stood sharing it;
+/// ascending by (district, tile). The base's one a district stood the
+/// island's Vats corner 380 tiles from its Construction Yards, so their day
+/// posts drew on a queue of five.
+fn yard_corners(world: &World) -> Vec<(DistrictId, TilePos)> {
+    let reach = world.config.jobs2.corner_tiles;
+    let mut yards: Vec<EntityId> = [BuildingKind::ConstructionYard, BuildingKind::FreightYard]
+        .iter()
+        .flat_map(|&k| world.buildings_of_kind(k).iter().copied())
+        .filter(|&y| crate::systems::industry::open(world, y))
+        .collect();
+    yards.sort_unstable();
+    let mut out: Vec<(DistrictId, TilePos)> = Vec::new();
+    for y in yards {
+        let Some(b) = world.comp::<Building>(y) else { continue };
+        let t = world.outside_door(b);
+        if out.iter().any(|&(_, c)| c.manhattan(t) <= reach) {
+            continue;
+        }
+        out.push((world.district_of_building(y), t));
+    }
+    out.sort();
+    out
+}
+
+/// The island pass phase 8 (`[island_trades] corner_stat_ticks`;
+/// OPEN-168): past `corner_stat_reach` tiles of every corner, the corner
+/// nearest `from` by travel (`distance::travel`, the El where it wins)
+/// within the cap, ties the lower index; `None` off. The island's Yards sit
+/// at the Vats' edge, and the Statistical broke within 160 tiles of them
+/// queued five a dawn.
+fn corner_by_travel(world: &World, corners: &[(DistrictId, TilePos)], from: TilePos) -> Option<usize> {
+    let cap = world.config.island_trades.as_ref()?.corner_stat_ticks;
+    corners
+        .iter()
+        .enumerate()
+        .map(|(i, &(_, t))| (crate::systems::distance::travel(world, from, t), i))
+        .filter(|&(d, _)| d <= cap)
+        .min()
+        .map(|(_, i)| i)
 }
 
 /// The nearest corner to `from` within `reach` tiles.
@@ -713,8 +760,11 @@ fn dawn_pick(world: &mut World) {
         } else {
             let from =
                 crate::systems::contracts::home_door(world, a).or_else(|| world.comp::<Position>(a).map(|p| p.tile));
-            from.and_then(|t| corner_near(&corners, t, cfg.corner_stat_reach))
-                .filter(|_| hash(world, PURPOSE_CORNER, u64::from(a.index), day) < cfg.p_corner)
+            // The roll first: the travel fallback is the dear part.
+            let rolled = hash(world, PURPOSE_CORNER, u64::from(a.index), day) < cfg.p_corner;
+            from.filter(|_| rolled).and_then(|t| {
+                corner_near(&corners, t, cfg.corner_stat_reach).or_else(|| corner_by_travel(world, &corners, t))
+            })
         };
         if let Some(i) = at {
             queues[i].push(a);

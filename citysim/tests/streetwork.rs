@@ -224,6 +224,12 @@ fn test_dawn_pick_contacts_first_and_the_day_post_ends() {
         // The contact's rank alone: the queue spans the map (the reach), so
         // the island pass phase 1's job cap (a labourer within it first) is off.
         c.distance = None;
+        // One corner a district (the island pass phase 8's corner at every
+        // Yard splits the 40 between the 2k city's Yards: the contact's rank
+        // is the mechanism here, not where he queues).
+        if let Some(t) = c.island_trades.as_mut() {
+            t.corner_per_yard = false;
+        }
     });
     let yard = w.buildings_of_kind(BuildingKind::ConstructionYard)[0];
     let corp = w.corps()[0];
@@ -628,4 +634,39 @@ fn test_builder_works_a_far_site_for_the_day() {
     assert!(work, "the rest of the shift worked at the site");
     assert!(j2(&w).site_days > before, "the site day counted");
     assert_eq!(w.comp::<Job>(a).expect("job").last_shift_day, Some(key), "the shift closed (paid) at the site");
+}
+
+/// Phase 8 (OPEN-168, the foreman): the corner stands outside every open
+/// Yard (one within `corner_tiles` of another sharing it), and an
+/// off-screen broke jobless past `corner_stat_reach` tiles queues at the
+/// corner nearest by travel within `corner_stat_ticks`. With the tile reach
+/// cut to 0 (the island's Yards at the Vats' edge, the homes far in tiles)
+/// the base's dawn queue is the bodies standing at a corner, here none.
+#[test]
+fn test_the_corner_stands_at_every_yard_and_queues_by_travel() {
+    let queue = |on: bool| {
+        let mut w = trades_world(on, |c| c.jobs2.corner_stat_reach = 0);
+        let corners = streetwork::corners(&w);
+        let reach = w.config.jobs2.corner_tiles;
+        let yards: Vec<EntityId> = [BuildingKind::ConstructionYard, BuildingKind::FreightYard]
+            .iter()
+            .flat_map(|&k| w.buildings_of_kind(k).to_vec())
+            .filter(|&y| industry::open(&w, y))
+            .collect();
+        let uncovered = yards
+            .iter()
+            .filter(|&&y| {
+                let t = w.outside_door(w.comp::<citysim::Building>(y).expect("a yard"));
+                !corners.iter().any(|&(_, c)| c.manhattan(t) <= reach)
+            })
+            .count();
+        let hour = u64::from(w.config.jobs2.corner_hour);
+        w.run_ticks(hour + 1);
+        (uncovered, yards.len(), corners.len(), j2(&w).corner_queue)
+    };
+    let (u_on, n, c_on, q_on) = queue(true);
+    let (u_off, _, c_off, q_off) = queue(false);
+    eprintln!("yards {n}: corners {c_on} (base {c_off}), uncovered {u_on} (base {u_off}), queue {q_on} (base {q_off})");
+    assert_eq!(u_on, 0, "every open Yard has its corner");
+    assert!(q_on > q_off, "the off-screen broke queue by travel ({q_on} vs the base's {q_off})");
 }
