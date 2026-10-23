@@ -1380,3 +1380,38 @@ fn test_an_off_screen_cab_carries_its_fare() {
     assert!(!w.is_alive(cab), "the cab's entity went with the ride");
     assert!(w.motions.is_empty() && w.aboard.is_empty());
 }
+
+/// I3, a Full driver steers his car (`Route::Driven`): aboard from the
+/// first step, the car where he is; demoted to Coarse mid-drive, the car
+/// runs his timed leg on from where it stands, him aboard, to the door.
+#[test]
+fn test_a_full_driver_steers_and_a_demotion_runs_on_timed() {
+    let mut w = city();
+    let (who, car, target, _) = coarse_driver_set_out(&mut w, 13);
+    lod::set_lod(&mut w, who, Lod::Full);
+    for _ in 0..12 {
+        exec_tick(&mut w);
+        assert_eq!(motion::vehicle_of(&w, who), Some(car), "aboard while he drives");
+    }
+    let m = w.motions.get(&car).expect("in motion");
+    assert!(matches!(m.route, Route::Driven));
+    assert_eq!(m.pos, w.comp::<Position>(who).expect("pos").tile, "the car is where he is");
+    lod::set_lod(&mut w, who, Lod::Coarse);
+    assert_eq!(motion::vehicle_of(&w, who), Some(car), "still aboard at Coarse");
+    assert!(matches!(w.motions.get(&car).expect("motion").route, Route::Timed { .. }));
+    let arrive = arrive_tick(&w, who);
+    let mut last = w.comp::<Position>(who).expect("pos").tile;
+    let mut step = 0;
+    while w.tick <= arrive + 1 {
+        exec_tick(&mut w);
+        let now = w.comp::<Position>(who).expect("pos").clone();
+        if now.building.is_none() {
+            step = step.max(last.manhattan(now.tile));
+            last = now.tile;
+        }
+        w.check_indices().expect("the aboard links agree");
+    }
+    assert!(step <= 3, "no jump on the timed run ({step} tiles)");
+    assert_eq!(w.comp::<Position>(who).expect("pos").building, Some(target), "arrived");
+    assert!(w.motions.is_empty());
+}

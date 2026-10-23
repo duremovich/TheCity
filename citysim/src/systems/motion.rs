@@ -383,6 +383,11 @@ pub fn to_timed(world: &mut World, driver: EntityId) {
     if let Some(m) = world.motions.get_mut(&v) {
         m.route = route;
     }
+    // He had not stepped out yet: the timed vehicle carries him from here.
+    world.leave_building(driver);
+    if let Some(p) = world.comp_mut::<Position>(driver) {
+        p.tile = from;
+    }
 }
 
 /// A rider's exec is still the leg he boarded for: a timed leg, a walk
@@ -417,14 +422,20 @@ pub fn advance(world: &mut World) {
             },
         };
         let riders = m.riders.clone();
+        // A driven vehicle's driver steers it: his walk moves him (out of
+        // the building he leaves on his first step), the vehicle follows.
+        let steers = matches!(m.route, Route::Driven).then_some(m.driver).flatten();
         let mut off: Vec<EntityId> = Vec::new();
         for &r in &riders {
             let ok = world.is_alive(r)
                 && world.aboard.get(&r) == Some(&v)
                 && on_leg(world, r)
-                && world.comp::<Position>(r).is_some_and(|p| p.building.is_none());
+                && (steers == Some(r) || world.comp::<Position>(r).is_some_and(|p| p.building.is_none()));
             if !ok {
                 off.push(r);
+                continue;
+            }
+            if steers == Some(r) {
                 continue;
             }
             if let Some(p) = world.comp_mut::<Position>(r) {
