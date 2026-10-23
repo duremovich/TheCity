@@ -506,3 +506,126 @@ fn test_bug6_elder_opens_a_vendor_pitch_at_the_nearest_spot() {
     assert_eq!(kind, Some(streetwork::PitchKind::Vendor), "an elder vends");
     assert_eq!(p.spot.manhattan(home), nearest, "the free spot nearest home");
 }
+
+// ---------------------------------------------------------------------------
+// The island pass phase 8 (docs/ISLAND_PASS.md I4; OPEN-168): the dead
+// trades' bugs. Each test runs the mechanism with `[island_trades]` and
+// shows the base (the section dropped, `CITYSIM_TRADES_OFF=1`) failing it.
+// ---------------------------------------------------------------------------
+
+/// The world with `[island_trades]` (`on`) or without it (the base).
+fn trades_world(on: bool, f: impl FnOnce(&mut Config)) -> World {
+    world_with(|c| {
+        if !on {
+            c.island_trades = None;
+        }
+        f(c);
+    })
+}
+
+fn door_of(w: &World, b: EntityId) -> citysim::TilePos {
+    w.comp::<citysim::Building>(b).expect("a building").door
+}
+
+/// Phase 8 (OPEN-168, the courier): with `[jobs2] site_reach` 0 every corp's
+/// buildings lie past the tile radius of every Yard (the island's Yards sit
+/// 100-1,000 tiles from what they serve), and the base names a parcel only
+/// to a building at the Yard's own door (the Yard, its company floors): the
+/// couriers carry nothing off the Yard. The fix routes a corp's parcels
+/// through the Yard with its staffed buildings within `parcel_cap_ticks` of
+/// travel, and every named parcel's address lies within the cap.
+#[test]
+fn test_parcels_go_to_recipients_in_travel_reach() {
+    let named = |on: bool| {
+        let mut w = trades_world(on, |c| c.jobs2.site_reach = 0);
+        w.jobs2.parcels.clear();
+        streetwork::daily(&mut w);
+        let cap = w.config.island_trades.as_ref().map_or(u64::MAX, |c| c.parcel_cap_ticks);
+        for p in &w.jobs2.parcels {
+            let t = citysim::systems::distance::travel(&w, door_of(&w, p.yard), door_of(&w, p.at));
+            assert!(t <= cap, "parcel to {} is {t} ticks from its Yard (cap {cap})", p.at.index);
+            assert!(!w.staff_of(p.at).is_empty(), "a recipient building with staff to sign");
+        }
+        // (named off the Yard's door, named)
+        let away = w.jobs2.parcels.iter().filter(|p| door_of(&w, p.at) != door_of(&w, p.yard)).count();
+        (away, w.jobs2.parcels.len())
+    };
+    let (on, off) = (named(true), named(false));
+    eprintln!("parcels off the Yard's door: on {on:?}, base {off:?}");
+    assert!(on.0 > 0 && on.0 == on.1, "every parcel named to a building off the Yard: {on:?}");
+    assert_eq!(off.0, 0, "the base names none off the Yard past site_reach (the test's precondition): {off:?}");
+}
+
+/// Phase 8 (OPEN-168, the builder): a Construction Yard whose open sites all
+/// lie past `[shift.haul] haul_reach` ran every trip inside the Yard (the
+/// island's nearest Yard is 170-1,100 tiles from a site). With `site_day`
+/// the Builder carries a load to the nearest site, sets it down there and
+/// works the rest of the shift on it; the shift closes and is paid.
+#[test]
+fn test_builder_works_a_far_site_for_the_day() {
+    let builder_role = |w: &World| trade(w, "builder");
+    let setup = |on: bool| {
+        let mut w = trades_world(on, |_| {});
+        w.run_ticks(citysim::TICKS_PER_DAY + 5 * TICKS_PER_HOUR);
+        let role = builder_role(&w);
+        let reach = w.config.shift.as_ref().and_then(|c| c.haul.as_ref()).map_or(0, |h| h.haul_reach);
+        let (a, yard) = w
+            .citizens()
+            .into_iter()
+            .filter(|&a| citysim::systems::law::living(&w, a) && !w.has::<citysim::Sentence>(a))
+            .find_map(|a| {
+                let j = w.comp::<Job>(a)?;
+                let e = j.employer?;
+                let key = j.next_shift_key(w.tick);
+                (j.role == role
+                    && j.shifts.len() == 1
+                    && j.shifts.iter().all(|&(s, e)| s >= 360 && e <= 1200)
+                    && citysim::exec::routine::workday_of(&w, a, j, key)
+                    && w.comp::<citysim::Household>(a).is_some_and(|h| h.home.is_some()))
+                .then_some((a, e))
+            })
+            .expect("a Builder on a day shift");
+        // One open site, past haul_reach and an hour or two away.
+        let yd = door_of(&w, yard);
+        let site = w
+            .buildings_by_kind
+            .get(&BuildingKind::Home)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|&b| w.comp::<citysim::Building>(b).is_some_and(|x| !x.demolished && !x.derelict))
+            .map(|b| (citysim::systems::distance::travel(&w, yd, door_of(&w, b)), b))
+            .filter(|&(t, b)| (60..=120).contains(&t) && door_of(&w, b).manhattan(yd) > reach)
+            .min()
+            .map(|(_, b)| b)
+            .expect("a Block an hour or two from the Yard");
+        let tick = w.tick;
+        w.jobs2.sites.retain(|_, &mut (y, _)| y != yard);
+        w.jobs2.sites.insert(site, (yard, tick));
+        (w, a, yard, site)
+    };
+    // The base: no destination in reach, the trips stay inside the Yard.
+    let (w, a, yard, _) = setup(false);
+    assert!(citysim::systems::shift::haul_dests(&w, a, yard).is_empty(), "the base has no far site");
+    let (mut w, a, yard, site) = setup(true);
+    assert_eq!(citysim::systems::shift::haul_dests(&w, a, yard), vec![site], "the far site is the day's destination");
+    citysim::systems::lod::set_lod(&mut w, a, citysim::Lod::Full);
+    let key = w.comp::<Job>(a).expect("job").next_shift_key(w.tick);
+    let before = j2(&w).site_days;
+    let (mut unload, mut work) = (false, false);
+    let end = w.tick + 16 * TICKS_PER_HOUR;
+    while w.tick < end {
+        w.comp_mut::<Brain>(a).expect("brain").pinned = true;
+        w.run_ticks(1);
+        let here = w.comp::<citysim::Position>(a).and_then(|p| p.building);
+        if let citysim::ExecState::Use { kind, .. } = w.comp::<Brain>(a).expect("brain").exec {
+            unload |= here == Some(site) && kind == citysim::ActionKind::Unload;
+            work |= here == Some(site) && kind.is_work();
+        }
+    }
+    eprintln!("builder {} yard {} site {}: unload {unload}, work {work}", a.index, yard.index, site.index);
+    assert!(unload, "the load set down at the site");
+    assert!(work, "the rest of the shift worked at the site");
+    assert!(j2(&w).site_days > before, "the site day counted");
+    assert_eq!(w.comp::<Job>(a).expect("job").last_shift_day, Some(key), "the shift closed (paid) at the site");
+}

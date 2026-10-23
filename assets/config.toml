@@ -4479,6 +4479,32 @@ capacity = 400                     # riders aboard one train; a full train leave
 capacity = 8                       # prisoners one transfer van carries; more due at a Station send another. Placeholder
                                    # (a Station holds [law] station_cells 6, so it never binds there)
 
+# The island pass phase 8 (docs/ISLAND_PASS.md I4; OPEN-168 part): the dead trades' bugs. On the island the Yards sit
+# in a cluster at the Vats' edge, 100-1,000 tiles from most of what they serve, so the base's tile-radius rules found
+# nothing in reach: the courier's parcels went to no address, the builder's sites were all past haul_reach, the one
+# labour corner a district stood 380 tiles from the Construction Yards, and a 20k city ranked no cab driver a body.
+# Read by systems/streetwork.rs (parcels, the corner), systems/shift.rs (haul), systems/lod.rs (the cab quota) and
+# systems/weapons.rs (the arms dealer). CITYSIM_TRADES_OFF=1 drops the section (the switch in flight). Placeholders.
+[island_trades]
+parcel_cap_ticks = 120             # a corp's parcels go through the open Yard with the most of its staffed buildings
+                                   # within this travel of the Yard's door, to those buildings; none in reach of any
+                                   # Yard: the base's pick ([jobs2] site_reach from the Yard nearest its first building)
+parcel_stops_max = 6               # the recipient buildings of one corp's parcels a day (the base's six)
+haul_travel = true                 # a haul trip's fit reads the travel estimate (the El where it wins), not the doors'
+                                   # Manhattan distance at the walk's speed
+site_day = true                    # a Builder whose Yard's open sites are all past [shift.haul] haul_reach carries one
+                                   # load to the nearest and works the rest of the shift there (the island's nearest Yard
+                                   # is 170-1,100 tiles from a site): the base ran every trip inside the Yard
+corner_per_yard = true             # the labour corner stands outside every open Construction and Freight Yard (one within
+                                   # [jobs2] corner_tiles of another shares it), not one a district
+corner_stat_ticks = 120            # an off-screen broke jobless living past [jobs2] corner_stat_reach tiles of every corner
+                                   # queues at the corner nearest by travel within this ([distance] job_cap_ticks), on
+                                   # p_corner as the base's: the island's queue was five a dawn
+cab_quota = 2                      # cab drivers on shift a Garage who keep a body (ranked with the gangs, lowest id
+                                   # first): at 20k no cab driver ranked into the body budget, so no body drove a fare
+corner_arms = true                 # a gang that deals at a corner sells its armoury surplus at the nearest Bar to its
+                                   # deal district's centre (the base's arms dealer sold only where the drugs were sold)
+
 # The island pass phase 3c (OPEN-177, Dylan 2026-10-22; mood.rs housing_bias): a flat bias on the hourly mood target
 # from the agent's Home, as [litter] mood is. A Home's tier reached mood only through the night's sleep safety (+0.1 a
 # tier, often at its cap) and the synth diet; crowding and a company-owned bed registered nothing, so a coffin rack felt

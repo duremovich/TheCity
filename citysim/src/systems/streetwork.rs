@@ -899,11 +899,16 @@ fn parcels(world: &mut World) {
         }
         let want = (standing.len() as f32 * cfg.parcels_per_building).round() as u32;
         let from = world.comp::<Building>(standing[0]).map(|b| b.door).unwrap_or_default();
-        let yard = yards
-            .iter()
-            .copied()
-            .filter(|y| room.get(y).is_some_and(|&r| r > 0))
-            .min_by_key(|&y| (world.comp::<Building>(y).map_or(u32::MAX, |b| b.door.manhattan(from)), y));
+        // The island pass phase 8 (OPEN-168): the Yard with the most of the
+        // corp's staffed buildings in travel reach, those its recipients.
+        let reach = parcel_reach(world, &standing, &yards, &room);
+        let yard = reach.as_ref().map(|(y, _)| *y).or_else(|| {
+            yards
+                .iter()
+                .copied()
+                .filter(|y| room.get(y).is_some_and(|&r| r > 0))
+                .min_by_key(|&y| (world.comp::<Building>(y).map_or(u32::MAX, |b| b.door.manhattan(from)), y))
+        });
         let Some(y) = yard else { break };
         let n = want.min(room[&y]);
         if n == 0 {
@@ -917,18 +922,65 @@ fn parcels(world: &mut World) {
         row.parcels += n;
         row.parcel_fees += paid;
         let ydoor = world.comp::<Building>(y).map(|b| b.door).unwrap_or_default();
-        let near: Vec<EntityId> = standing
-            .iter()
-            .copied()
-            .filter(|&b| world.comp::<Building>(b).is_some_and(|x| x.door.manhattan(ydoor) <= cfg.site_reach))
-            .take(6)
-            .collect();
+        let near: Vec<EntityId> = match reach {
+            Some((_, near)) => near,
+            None => standing
+                .iter()
+                .copied()
+                .filter(|&b| world.comp::<Building>(b).is_some_and(|x| x.door.manhattan(ydoor) <= cfg.site_reach))
+                .take(6)
+                .collect(),
+        };
         // Lives at work phase 4 (§ 2.3): the parcels are named, and the
         // round's stops are their recipients' buildings (with staff to sign).
         let stops =
             if crate::systems::service::street_on(world) { name_parcels(world, y, &standing, &near, n) } else { near };
         world.jobs2.parcel_stops.entry(y).or_default().extend(stops);
     }
+}
+
+/// The island pass phase 8 (OPEN-168; `[island_trades] parcel_cap_ticks`):
+/// the open Yard with room holding the most of `standing`'s staffed
+/// buildings within the cap's travel of its door (ties the lower id), and
+/// those buildings (ascending, the first `parcel_stops_max`); `None` off or
+/// with none in reach of any Yard (the base's pick). The base took the Yard
+/// nearest the corp's first building and its buildings within `site_reach`
+/// tiles: on the island, where the Yards cluster at the Vats' edge, that
+/// left most corps' parcels with no address. No random draw.
+fn parcel_reach(
+    world: &World,
+    standing: &[EntityId],
+    yards: &[EntityId],
+    room: &std::collections::BTreeMap<EntityId, u32>,
+) -> Option<(EntityId, Vec<EntityId>)> {
+    let cfg = world.config.island_trades.as_ref()?;
+    let staffed: Vec<(EntityId, TilePos)> = standing
+        .iter()
+        .copied()
+        .filter(|&b| !world.staff_of(b).is_empty())
+        .filter_map(|b| world.comp::<Building>(b).map(|x| (b, x.door)))
+        .collect();
+    let mut best: Option<(usize, EntityId, Vec<EntityId>)> = None;
+    for &y in yards {
+        if !room.get(&y).is_some_and(|&r| r > 0) {
+            continue;
+        }
+        let Some(ydoor) = world.comp::<Building>(y).map(|b| b.door) else { continue };
+        // Not the Yard's own door (the Yard, its company floors): no trip.
+        let near: Vec<EntityId> = staffed
+            .iter()
+            .filter(|&&(_, d)| d != ydoor && crate::systems::distance::travel(world, ydoor, d) <= cfg.parcel_cap_ticks)
+            .map(|&(b, _)| b)
+            .collect();
+        // Two at least: a parcel is from one of the corp's buildings to another.
+        if near.len() >= 2 && best.as_ref().is_none_or(|(n, _, _)| near.len() > *n) {
+            best = Some((near.len(), y, near));
+        }
+    }
+    best.map(|(_, y, mut near)| {
+        near.truncate(usize::from(cfg.parcel_stops_max));
+        (y, near)
+    })
 }
 
 /// Lives at work phase 4 (§ 2.3): `n` parcels of one corp through `yard`:
