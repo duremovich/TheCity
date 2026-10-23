@@ -1415,3 +1415,222 @@ fn test_a_full_driver_steers_and_a_demotion_runs_on_timed() {
     assert_eq!(w.comp::<Position>(who).expect("pos").building, Some(target), "arrived");
     assert!(w.motions.is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// The island pass phase 6 (docs/ISLAND_PASS.md I3; OPEN-165): the El as
+// trains running the line. Each fails on the base (b68297e): an El rider
+// stood on the board stop's tile for the whole ride (no train, nothing
+// aboard), then landed on the alight stop, tens of tiles on.
+// ---------------------------------------------------------------------------
+
+/// The shipped city with the El on (the 2k fixture).
+fn el_city() -> World {
+    let mut cfg = Config::load();
+    cfg.transit.enabled = true;
+    World::new(42, cfg)
+}
+
+/// An adult whose Home is in the Sump near the Vat Line, and a Farm in the
+/// Vats: a trip the El wins (`transit.rs`'s `sump_farmer`).
+fn el_farmer(w: &World) -> (EntityId, EntityId, EntityId) {
+    let farm = *w.buildings_of_kind(BuildingKind::Farm).first().expect("a Farm");
+    let who = adults(w)
+        .into_iter()
+        .find(|&a| {
+            w.comp::<citysim::Household>(a)
+                .and_then(|h| h.home)
+                .and_then(|h| w.comp::<Building>(h))
+                .is_some_and(|b| b.door.y >= 125 && b.door.y <= 135 && b.door.x < 120)
+        })
+        .expect("a Sump resident near the Vat Line");
+    let home = w.comp::<citysim::Household>(who).and_then(|h| h.home).expect("home");
+    (who, home, farm)
+}
+
+/// `who` inside `home` at 08:00 on day 1, solvent and law-abiding, with a
+/// plan of one GoTo to `target`.
+fn el_set_out(w: &mut World, who: EntityId, home: EntityId, target: EntityId, lod_: Lod) {
+    w.tick = 1440 + 8 * 60;
+    lod::set_lod(w, who, lod_);
+    w.leave_building(who);
+    w.enter_building(who, home);
+    w.comp_mut::<Wallet>(who).expect("wallet").coins = 50;
+    let p = w.comp_mut::<citysim::Personality>(who).expect("personality");
+    p.lawfulness = 0.6;
+    p.courage = 0.5;
+    let tick = w.tick;
+    let b = w.comp_mut::<Brain>(who).expect("brain");
+    b.plan = Some(Plan {
+        goal: GoalKind::Idle,
+        target: Some(target),
+        steps: vec![ActionInstance {
+            action: ActionKind::GoTo(LocationKey::TargetHome),
+            target: Some(target),
+            tile: None,
+        }],
+        started_tick: tick,
+    });
+    b.plan_step = 0;
+    b.exec = ExecState::Idle;
+}
+
+/// Where a body stands: its building's door inside one, else its tile.
+fn stands(w: &World, id: EntityId) -> TilePos {
+    let p = w.comp::<Position>(id).expect("pos");
+    match p.building.and_then(|b| w.comp::<Building>(b)) {
+        Some(b) => b.door,
+        None => p.tile,
+    }
+}
+
+/// Run until `who` is aboard a vehicle between two stops (off every stop
+/// tile): the vehicle.
+fn until_mid_track(w: &mut World, who: EntityId) -> EntityId {
+    for _ in 0..1_500 {
+        exec_tick(w);
+        let Some(v) = motion::vehicle_of(w, who) else { continue };
+        let at = w.comp::<Position>(who).expect("pos").tile;
+        if !w.transit.net.stops.contains(&at) {
+            return v;
+        }
+    }
+    panic!("never aboard a train between stops (exec {:?})", w.comp::<Brain>(who).map(|b| b.exec.clone()));
+}
+
+/// I3: a train is a persistent vehicle on the line: aboard it, the rider's
+/// position is the train's, the train moves along the track between stops,
+/// and it runs on after he gets off.
+#[test]
+fn test_a_train_carries_its_riders_between_stops() {
+    let mut w = el_city();
+    let (who, home, farm) = el_farmer(&w);
+    el_set_out(&mut w, who, home, farm, Lod::Full);
+    let v = until_mid_track(&mut w, who);
+    assert_eq!(format!("{:?}", w.motions.get(&v).expect("in motion").ride), "Train");
+    let start = w.motions[&v].pos;
+    let mut far = 0;
+    while motion::vehicle_of(&w, who) == Some(v) {
+        let m = &w.motions[&v];
+        assert_eq!(m.pos, w.comp::<Position>(who).expect("pos").tile, "aboard: the rider is where the train is");
+        assert!(m.riders.contains(&who));
+        far = far.max(m.pos.manhattan(start));
+        w.check_indices().expect("the aboard links agree");
+        exec_tick(&mut w);
+    }
+    assert!(far >= 10, "the train moved along the line ({far} tiles)");
+    let at = w.motions.get(&v).expect("the train runs on after its rider is off").pos;
+    for _ in 0..5 {
+        exec_tick(&mut w);
+    }
+    assert_ne!(w.motions[&v].pos, at, "the empty train keeps running");
+}
+
+/// I3: the rider walks to the stop, waits on its platform, boards, rides
+/// and alights at his stop, and walks on: no tick moves him farther than a
+/// train's pace, none parks him an hour on one tile.
+#[test]
+fn test_an_el_rider_waits_boards_rides_and_alights_without_a_jump() {
+    let mut w = el_city();
+    let (who, home, farm) = el_farmer(&w);
+    el_set_out(&mut w, who, home, farm, Lod::Full);
+    let mut last = stands(&w, who);
+    let (mut step, mut since, mut stand, mut waited, mut aboard) = (0u32, w.tick, 0u64, 0u32, 0u32);
+    for _ in 0..2_000 {
+        exec_tick(&mut w);
+        let now = stands(&w, who);
+        step = step.max(last.manhattan(now));
+        if now != last {
+            since = w.tick;
+        }
+        stand = stand.max(w.tick - since);
+        last = now;
+        if let Some(ExecState::Ride { depart, .. }) = w.comp::<Brain>(who).map(|b| b.exec.clone()) {
+            if w.tick < depart && motion::vehicle_of(&w, who).is_none() {
+                assert!(w.transit.net.stops.contains(&now), "waits on the platform");
+                waited += 1;
+            }
+        }
+        if motion::vehicle_of(&w, who).is_some() {
+            aboard += 1;
+        }
+        if w.comp::<Position>(who).expect("pos").building == Some(farm) {
+            break;
+        }
+    }
+    assert_eq!(w.comp::<Position>(who).expect("pos").building, Some(farm), "arrived");
+    assert_eq!(w.stats.current.transit.rides_full, 1, "rode");
+    assert!(aboard > 0, "aboard a train");
+    assert!(step <= 12, "no jump ({step} tiles in a tick)");
+    assert!(stand < 60, "no parked hour ({stand} ticks on one tile)");
+    println!("waited {waited} ticks, aboard {aboard}, max step {step}, longest stand {stand}");
+}
+
+/// I3: a cut line stops its trains where they are; a rider aboard gets off
+/// at the nearest stop (walking the track to it, no jump) and walks on.
+#[test]
+fn test_a_cut_line_stops_its_trains_and_sets_riders_down_at_a_stop() {
+    let mut w = el_city();
+    let (who, home, farm) = el_farmer(&w);
+    el_set_out(&mut w, who, home, farm, Lod::Full);
+    let v = until_mid_track(&mut w, who);
+    let line = w.rides.get(&who).expect("a ride").line;
+    citysim::systems::transit::cut_line(&mut w, line, 1).expect("cut");
+    let held = w.motions[&v].pos;
+    let mut last = stands(&w, who);
+    let (mut step, mut at_stop) = (0u32, false);
+    for _ in 0..2_000 {
+        exec_tick(&mut w);
+        assert_eq!(w.motions.get(&v).map(|m| m.pos), Some(held), "the cut line's train stands still");
+        assert_ne!(motion::vehicle_of(&w, who), Some(v), "off the stopped train");
+        let now = stands(&w, who);
+        step = step.max(last.manhattan(now));
+        last = now;
+        at_stop |= w.transit.net.stops.contains(&now);
+        if w.comp::<Position>(who).expect("pos").building == Some(farm) {
+            break;
+        }
+    }
+    assert!(at_stop, "set down at a stop");
+    assert!(step <= 12, "no jump ({step} tiles in a tick)");
+    assert_eq!(w.comp::<Position>(who).expect("pos").building, Some(farm), "walked on to the Farm");
+}
+
+/// I3: interrupted between stops, a rider stays aboard to the next stop and
+/// gets off there (never mid-track).
+#[test]
+fn test_an_interrupt_aboard_a_train_gets_off_at_the_next_stop() {
+    let mut w = el_city();
+    let (who, home, farm) = el_farmer(&w);
+    el_set_out(&mut w, who, home, farm, Lod::Full);
+    let v = until_mid_track(&mut w, who);
+    w.abort_plan(who);
+    let mut ticks = 0;
+    while motion::vehicle_of(&w, who) == Some(v) {
+        assert_eq!(w.comp::<Position>(who).expect("pos").tile, w.motions[&v].pos, "carried on to the stop");
+        exec_tick(&mut w);
+        ticks += 1;
+        assert!(ticks < 200, "never off");
+    }
+    let at = w.comp::<Position>(who).expect("pos").tile;
+    assert!(w.transit.net.stops.contains(&at), "off at a stop, not mid-track ({at:?})");
+    w.check_indices().expect("the aboard links agree");
+}
+
+/// I3: a save taken while a rider is aboard a train between stops resumes
+/// byte for byte.
+#[test]
+fn test_a_save_mid_train_ride_resumes_identically() {
+    let mut w = el_city();
+    let (who, home, farm) = el_farmer(&w);
+    el_set_out(&mut w, who, home, farm, Lod::Coarse);
+    until_mid_track(&mut w, who);
+    let text = citysim::save::to_ron(&w);
+    let mut back = citysim::save::from_ron(&text).expect("loads");
+    assert_eq!(citysim::save::to_ron(&back), text, "the load is the save");
+    for _ in 0..300 {
+        exec_tick(&mut w);
+        exec_tick(&mut back);
+        assert_eq!(w.comp::<Position>(who).map(|p| p.tile), back.comp::<Position>(who).map(|p| p.tile));
+    }
+    assert_eq!(citysim::save::to_ron(&w), citysim::save::to_ron(&back));
+}
