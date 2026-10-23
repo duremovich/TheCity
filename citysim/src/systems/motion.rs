@@ -63,6 +63,8 @@ pub enum RideKind {
     Cab,
     /// An exec's car to his Hq or home (`streetwork::exec_ride`).
     Exec,
+    /// The island pass phase 6: an El train (`Route::Line`, persistent).
+    Train,
 }
 
 /// How a vehicle advances.
@@ -74,6 +76,10 @@ pub enum Route {
     /// door) at a steady pace, at `way[0]` until `depart` and at the end
     /// from `arrive`.
     Timed { way: Vec<TilePos>, depart: Tick, arrive: Tick },
+    /// The island pass phase 6: train `train` of El line `line`, at the
+    /// timetable's place (`transit::train_at`; a cut line's train stands).
+    /// Never despawned.
+    Line { line: u8, train: u16 },
 }
 
 /// A vehicle in motion.
@@ -110,7 +116,7 @@ pub fn vehicle_of(world: &World, rider: EntityId) -> Option<EntityId> {
 
 /// The position along `way` at `done` tiles (Chebyshev per segment) from
 /// its start; integer arithmetic (deterministic on every box).
-fn point_at(way: &[TilePos], done: u64) -> TilePos {
+pub fn point_at(way: &[TilePos], done: u64) -> TilePos {
     let mut left = done;
     for w in way.windows(2) {
         let l = u64::from(crate::systems::law::chebyshev(w[0], w[1]));
@@ -130,8 +136,39 @@ fn point_at(way: &[TilePos], done: u64) -> TilePos {
 }
 
 /// The way's length in tiles (Chebyshev per segment).
-fn way_len(way: &[TilePos]) -> u64 {
+pub fn way_len(way: &[TilePos]) -> u64 {
     way.windows(2).map(|w| u64::from(crate::systems::law::chebyshev(w[0], w[1]))).sum()
+}
+
+/// The rest of `way` from `done` tiles along it: on to its end (`to_end`),
+/// else back to its start; the first tile the point at `done`.
+pub fn split_way(way: &[TilePos], done: u64, to_end: bool) -> Vec<TilePos> {
+    let p = point_at(way, done);
+    let (mut before, mut after) = (Vec::new(), Vec::new());
+    let mut acc = 0u64;
+    for (i, &c) in way.iter().enumerate() {
+        if i > 0 {
+            acc += u64::from(crate::systems::law::chebyshev(way[i - 1], c));
+        }
+        if acc < done {
+            before.push(c);
+        } else if acc > done {
+            after.push(c);
+        }
+    }
+    let mut out = vec![p];
+    if to_end {
+        out.extend(after);
+    } else {
+        out.extend(before.into_iter().rev());
+    }
+    let end = if to_end { way.last() } else { way.first() };
+    if let Some(&e) = end {
+        if out.last() != Some(&e) {
+            out.push(e);
+        }
+    }
+    out
 }
 
 /// A timed vehicle's position at `tick`.
@@ -273,6 +310,27 @@ pub fn board_timed(
     Some(v)
 }
 
+/// The island pass phase 6: train `train` of El line `line` enters service
+/// as `v` at `pos` (`transit::ensure_trains`), empty and persistent.
+pub fn add_train(world: &mut World, v: EntityId, line: u8, train: u16, pos: TilePos) {
+    let m = Motion {
+        ride: RideKind::Train,
+        kind: AssetKind::Car,
+        asset: false,
+        driver: None,
+        riders: Vec::new(),
+        pos,
+        route: Route::Line { line, train },
+    };
+    world.motions.insert(v, m);
+}
+
+/// `rider` boards train `v` at the platform (`transit::board_train`).
+pub fn board_train(world: &mut World, rider: EntityId, v: EntityId) {
+    let Some(at) = pos_now(world, v) else { return };
+    seat(world, rider, v, at);
+}
+
 /// A Full driver's walk starts in `vehicle` (an `Asset`): the vehicle is
 /// steered by his steps (`Route::Driven`). `None` with `[motion]` off.
 pub fn board_driven(world: &mut World, driver: EntityId, vehicle: EntityId, kind: AssetKind) -> Option<EntityId> {
@@ -313,15 +371,64 @@ fn pos_now(world: &World, v: EntityId) -> Option<TilePos> {
     Some(match &m.route {
         Route::Timed { way, depart, arrive } => timed_pos(way, *depart, *arrive, world.tick),
         Route::Driven => m.pos,
+        Route::Line { line, train } => train_pos(world, *line, *train).unwrap_or(m.pos),
     })
+}
+
+/// A train's tile now: the timetable's place; `None` on a cut line (it
+/// stands where it stopped).
+fn train_pos(world: &World, line: u8, train: u16) -> Option<TilePos> {
+    use crate::systems::transit;
+    if transit::line_cut(world, line) {
+        return None;
+    }
+    transit::train_at(world, line, u64::from(train), world.tick).and_then(|at| transit::train_tile(world, line, at))
+}
+
+/// May a rider whose plan ended stay aboard a train to its next stop: alive,
+/// a body, free.
+fn holdable(world: &World, rider: EntityId) -> bool {
+    world.is_alive(rider)
+        && world
+            .comp::<Brain>(rider)
+            .is_some_and(|b| b.cuffed_by.is_none() && b.lod != crate::components::Lod::Statistical)
+        && !world.has::<crate::components::Sentence>(rider)
 }
 
 /// `rider` steps off where the vehicle is now (the way's end once it has
 /// arrived); the vehicle's motion ends with its last rider. No-op when he
-/// is aboard nothing.
+/// is aboard nothing. The island pass phase 6: aboard a train between two
+/// stops he rides on to the next one and gets off there (`advance_train`;
+/// never mid-track), held from acting meanwhile (`TransitState::held`).
 pub fn alight(world: &mut World, rider: EntityId) {
     if world.aboard.is_empty() {
         return;
+    }
+    let Some(&v) = world.aboard.get(&rider) else { return };
+    if let Some(Route::Line { line, train }) = world.motions.get(&v).map(|m| m.route.clone()) {
+        let between = !crate::systems::transit::line_cut(world, line)
+            && matches!(
+                crate::systems::transit::train_at(world, line, u64::from(train), world.tick),
+                Some(crate::systems::transit::TrainAt::Track { .. })
+            );
+        if between && holdable(world, rider) {
+            if world.transit.held.insert(rider) {
+                crate::systems::transit::note_train(world, 1);
+            }
+            return;
+        }
+    }
+    alight_now(world, rider);
+}
+
+/// `rider` steps off where the vehicle is now, a train between stops too
+/// (a death, an emigrant, a demotion off screen, a cut line's walk).
+pub fn alight_now(world: &mut World, rider: EntityId) {
+    if world.aboard.is_empty() {
+        return;
+    }
+    if !world.transit.held.is_empty() {
+        world.transit.held.remove(&rider);
     }
     let Some(v) = world.aboard.remove(&rider) else { return };
     let at = pos_now(world, v);
@@ -351,6 +458,10 @@ pub fn alight(world: &mut World, rider: EntityId) {
 /// The motion is over: the record goes, and a vehicle spawned for the ride
 /// with it (an asset parks by `vehicles::end_trip`).
 fn end(world: &mut World, v: EntityId) {
+    // A train runs on empty (the island pass phase 6).
+    if world.motions.get(&v).is_some_and(|m| matches!(m.route, Route::Line { .. })) {
+        return;
+    }
     let Some(m) = world.motions.remove(&v) else { return };
     for r in m.riders {
         if world.aboard.get(&r) == Some(&v) {
@@ -420,6 +531,10 @@ pub fn advance(world: &mut World) {
                 Some(p) if p.building.is_none() => p.tile,
                 _ => m.pos,
             },
+            &Route::Line { line, train } => {
+                advance_train(world, v, line, train);
+                continue;
+            }
         };
         let riders = m.riders.clone();
         // A driven vehicle's driver steers it: his walk moves him (out of
@@ -459,6 +574,52 @@ pub fn advance(world: &mut World) {
         }
         if world.motions.get(&v).is_some_and(|m| m.riders.is_empty()) {
             end(world, v);
+        }
+    }
+}
+
+/// A train advances to its timetable place (a cut line's stands) and
+/// carries its riders: each on his ride's leg (`ExecState::Ride`), or held
+/// to the next stop and off there; anyone else steps off where it is.
+fn advance_train(world: &mut World, v: EntityId, line: u8, train: u16) {
+    use crate::systems::transit::{self, TrainAt};
+    let Some(m) = world.motions.get(&v) else { return };
+    let cut = transit::line_cut(world, line);
+    let at = if cut { None } else { transit::train_at(world, line, u64::from(train), world.tick) };
+    let pos = at.and_then(|a| transit::train_tile(world, line, a)).unwrap_or(m.pos);
+    let at_stop = matches!(at, Some(TrainAt::Stop(_)));
+    let riders = m.riders.clone();
+    let mut off: Vec<EntityId> = Vec::new();
+    for &r in &riders {
+        let on = if world.transit.held.contains(&r) {
+            holdable(world, r) && !at_stop
+        } else {
+            world.comp::<Brain>(r).is_some_and(|b| {
+                b.cuffed_by.is_none()
+                    && b.lod != crate::components::Lod::Statistical
+                    && matches!(b.exec, ExecState::Ride { .. })
+            }) && !world.has::<crate::components::Sentence>(r)
+        };
+        let ok = on
+            && world.is_alive(r)
+            && world.aboard.get(&r) == Some(&v)
+            && world.comp::<Position>(r).is_some_and(|p| p.building.is_none());
+        if !ok {
+            off.push(r);
+            continue;
+        }
+        if let Some(p) = world.comp_mut::<Position>(r) {
+            p.tile = pos;
+        }
+    }
+    if let Some(m) = world.motions.get_mut(&v) {
+        m.pos = pos;
+    }
+    for r in off {
+        if world.aboard.get(&r) == Some(&v) {
+            alight_now(world, r);
+        } else if let Some(m) = world.motions.get_mut(&v) {
+            m.riders.retain(|&x| x != r);
         }
     }
 }

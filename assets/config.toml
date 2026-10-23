@@ -4458,6 +4458,16 @@ hire_now = true                    # a hire since the last midnight with a far H
 road_route = true                  # a timed road vehicle's way follows the road path (the walk's A*); false: an L, along
                                    # x then y (no search)
 
+# The island pass phase 6 (docs/ISLAND_PASS.md I3; OPEN-165; systems/transit.rs § Trains): the El runs as trains. Each
+# line's trains are persistent vehicles (never despawned) running its timetable: a departure from each terminus every
+# [transit] headway, at its ride_ticks_per_tile, dwell_ticks at each stop, turning at the far terminus for the next slot.
+# The count is derived (the round trip over the headway). A rider waits on the platform, boards the next train in his
+# direction, rides aboard (his position is the train's), alights at his stop or a transfer (re-boarding after the
+# [transit] transfer_ticks walk) and walks on. CITYSIM_TRAINS_OFF=1 drops it (the switch in flight).
+[motion.trains]
+capacity = 400                     # riders aboard one train; a full train leaves the rest for the next. Placeholder, set
+                                   # high to start (an island peak boarding is ~100 an hour at a stop)
+
 # The island pass phase 3c (OPEN-177, Dylan 2026-10-22; mood.rs housing_bias): a flat bias on the hourly mood target
 # from the agent's Home, as [litter] mood is. A Home's tier reached mood only through the night's sleep safety (+0.1 a
 # tier, often at its cap) and the synth diet; crowding and a company-owned bed registered nothing, so a coffin rack felt

@@ -1409,3 +1409,100 @@ fn test_switched_off_city_matches_main() {
     println!("main's hash   {want}");
     assert_eq!(hash, want);
 }
+
+// ---------------------------------------------------------------------------
+// The island pass phase 6 (ISLAND_PASS I3; OPEN-165): the El's trains. The
+// trains' core tests are in `vehicles.rs` with phase 5's vehicles.
+// ---------------------------------------------------------------------------
+
+/// A rider whose ride changes lines alights at the transfer stop, waits for
+/// the next line's train and boards it (two trains, no jump), and arrives on
+/// the route's exact schedule.
+#[test]
+fn test_a_transfer_alights_and_reboards_the_next_line() {
+    let mut w = city_on();
+    transit::ensure_net(&mut w);
+    let ends: Vec<EntityId> = [BuildingKind::Farm, BuildingKind::Market, BuildingKind::Bar]
+        .iter()
+        .flat_map(|&k| w.buildings_of_kind(k).to_vec())
+        .collect();
+    let mut found = None;
+    'search: for who in w.citizens() {
+        if !(w.has::<Brain>(who) && w.has::<Wallet>(who) && demography::is_adult(&w, who)) {
+            continue;
+        }
+        let Some(home) = w.comp::<Household>(who).and_then(|h| h.home) else { continue };
+        let Some(hd) = w.comp::<Building>(home).map(|b| b.door) else { continue };
+        for &end in &ends {
+            let ed = w.comp::<Building>(end).expect("building").door;
+            let Ok(r) = transit::choose(&w, who, hd, ed, TICKS_PER_DAY + 8 * 60) else { continue };
+            if transit::legs_of(&w, r.board, r.alight).is_some_and(|l| l.len() >= 2) {
+                found = Some((who, home, end));
+                break 'search;
+            }
+        }
+    }
+    let (who, home, end) = found.expect("a ride with a transfer");
+    set_out(&mut w, who, home, end, Lod::Coarse, 50, 0.6);
+    let from = citysim::exec::walk_origin(&w, who).expect("origin");
+    let door = w.comp::<Building>(end).expect("end").door;
+    let t0 = w.tick;
+    let r = transit::choose(&w, who, from, door, t0).expect("a ride");
+    let mut trains: Vec<EntityId> = Vec::new();
+    let mut last = w.comp::<Position>(who).expect("pos").tile;
+    let mut step = 0;
+    for _ in 0..3_000 {
+        exec_tick(&mut w);
+        if let Some(v) = citysim::systems::motion::vehicle_of(&w, who) {
+            if trains.last() != Some(&v) {
+                trains.push(v);
+            }
+        }
+        let p = w.comp::<Position>(who).expect("pos");
+        if p.building.is_none() {
+            step = step.max(last.manhattan(p.tile));
+            last = p.tile;
+        }
+        if p.building == Some(end) {
+            break;
+        }
+    }
+    assert_eq!(w.comp::<Position>(who).expect("pos").building, Some(end), "arrived");
+    assert!(trains.len() >= 2, "boarded a second line's train ({} trains)", trains.len());
+    assert!((w.tick - t0).abs_diff(r.total) <= 3, "arrived in {} ticks, the route's {}", w.tick - t0, r.total);
+    println!("two trains, max step {step}, {} ticks against the route's {}", w.tick - t0, r.total);
+}
+
+/// A full train leaves its rider on the platform for the next one, a
+/// headway on.
+#[test]
+fn test_a_full_train_leaves_the_rider_for_the_next() {
+    let mut w = city_on();
+    let (who, home, farm) = sump_farmer(&w);
+    if let Some(t) = w.config.motion.as_mut().and_then(|m| m.trains.as_mut()) {
+        t.capacity = 0;
+    }
+    set_out(&mut w, who, home, farm, Lod::Full, 50, 0.6);
+    let first = loop {
+        exec_tick(&mut w);
+        if let Some(ExecState::Ride { depart, .. }) = w.comp::<Brain>(who).map(|b| b.exec.clone()) {
+            break depart;
+        }
+        assert!(w.tick < TICKS_PER_DAY * 2, "never on the platform");
+    };
+    while w.tick <= first {
+        exec_tick(&mut w);
+    }
+    assert!(citysim::systems::motion::vehicle_of(&w, who).is_none(), "the full train left him");
+    let Some(ExecState::Ride { depart, .. }) = w.comp::<Brain>(who).map(|b| b.exec.clone()) else {
+        panic!("still riding");
+    };
+    assert_eq!(depart, first + u64::from(w.config.transit.headway), "the next train");
+    if let Some(t) = w.config.motion.as_mut().and_then(|m| m.trains.as_mut()) {
+        t.capacity = 400;
+    }
+    while w.tick <= depart {
+        exec_tick(&mut w);
+    }
+    assert!(citysim::systems::motion::vehicle_of(&w, who).is_some(), "aboard the next");
+}

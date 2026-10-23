@@ -1378,7 +1378,8 @@ fn test_an_off_screen_cab_carries_its_fare() {
     assert!(moved, "the cab moved off the boarding tile");
     assert_eq!(w.comp::<Position>(rider).expect("pos").building, Some(work), "at work");
     assert!(!w.is_alive(cab), "the cab's entity went with the ride");
-    assert!(w.motions.is_empty() && w.aboard.is_empty());
+    // The island pass phase 6: the El's trains run on (persistent, empty).
+    assert!(w.motions.values().all(|m| m.ride == RideKind::Train && m.riders.is_empty()) && w.aboard.is_empty());
 }
 
 /// I3, a Full driver steers his car (`Route::Driven`): aboard from the
@@ -1519,10 +1520,13 @@ fn test_a_train_carries_its_riders_between_stops() {
     }
     assert!(far >= 10, "the train moved along the line ({far} tiles)");
     let at = w.motions.get(&v).expect("the train runs on after its rider is off").pos;
-    for _ in 0..5 {
+    // A layover at the terminus is under a headway.
+    let mut moved = false;
+    for _ in 0..30 {
         exec_tick(&mut w);
+        moved |= w.motions[&v].pos != at;
     }
-    assert_ne!(w.motions[&v].pos, at, "the empty train keeps running");
+    assert!(moved, "the empty train keeps running");
 }
 
 /// I3: the rider walks to the stop, waits on its platform, boards, rides

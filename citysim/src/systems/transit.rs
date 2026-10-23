@@ -54,6 +54,10 @@ pub struct NetLine {
     pub stops: Vec<u16>,
     pub offsets: Vec<u32>,
     pub total: u32,
+    /// The island pass phase 6 (trains): the way from each call to the next
+    /// (`seg[k]`: `stops[k]` to `stops[k + 1]`), the stop tiles at its ends
+    /// and the track's corners between (derived with the line).
+    pub seg: Vec<Vec<TilePos>>,
 }
 
 /// The fastest ride between two stops over the open lines: its ticks and
@@ -68,9 +72,12 @@ pub struct Hop {
     pub forward: bool,
     /// The board stop's index in the line's `stops` the path starts from.
     pub pos: u16,
+    /// The island pass phase 6: the first leg's last call (its index in the
+    /// line's `stops`): the alight stop, or the first transfer's.
+    pub off: u16,
 }
 
-const NO_HOP: Hop = Hop { ticks: UNREACHABLE, line: 0, forward: true, pos: 0 };
+const NO_HOP: Hop = Hop { ticks: UNREACHABLE, line: 0, forward: true, pos: 0, off: 0 };
 
 /// The derived network (not saved).
 #[derive(Clone, Debug, Default)]
@@ -186,6 +193,20 @@ pub struct TransitState {
     /// (`staff_target`); `districts::reconcile_sanitation` hires them on
     /// top of the civic headcount.
     pub staff: u16,
+    /// The island pass phase 6 (§ Trains): each line's trains, by slot
+    /// (`train_for`); spawned once (`ensure_trains`), never despawned.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trains: Vec<Vec<EntityId>>,
+    /// Riders on a platform, by the departure they board: (tick, rider).
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub boarding: BTreeSet<(Tick, EntityId)>,
+    /// Riders whose plan ended between two stops: aboard to the next stop,
+    /// off there (`motion::alight`).
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub held: BTreeSet<EntityId>,
+    /// Riders set down by a cut line, walking the track to the nearest stop.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub evac: BTreeMap<EntityId, Evac>,
 }
 
 impl TransitState {
@@ -195,7 +216,34 @@ impl TransitState {
             && self.load.is_empty()
             && self.rode.is_empty()
             && self.staff == 0
+            && self.trains.is_empty()
+            && self.boarding.is_empty()
+            && self.held.is_empty()
+            && self.evac.is_empty()
     }
+}
+
+/// The island pass phase 6: one leg of a train ride, on one line in one
+/// direction, from the `from`-th call of the line to the `to`-th.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrainLeg {
+    pub line: u8,
+    pub forward: bool,
+    pub from: u16,
+    pub to: u16,
+}
+
+/// A rider walking the track of a cut line to its nearest stop: along
+/// `way` (its end the stop) over `depart..=arrive`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Evac {
+    pub way: Vec<TilePos>,
+    pub depart: Tick,
+    pub arrive: Tick,
+}
+
+fn is_zero(v: &u8) -> bool {
+    *v == 0
 }
 
 /// A ride in progress (`World::rides`): the itinerary between the legs.
@@ -221,6 +269,14 @@ pub struct Ride {
     /// `None` in a save from before it (the line's first call there).
     #[serde(default)]
     pub board_pos: Option<u16>,
+    /// The island pass phase 6 (trains): the ride's legs, a line each, in
+    /// order; empty without trains. `line`, `forward`, `board` and
+    /// `board_pos` name the leg in progress, `depart` its departure.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub legs: Vec<TrainLeg>,
+    /// The leg in progress (an index into `legs`).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub leg: u8,
 }
 
 /// Why a trip walks (the refusal columns).
@@ -332,6 +388,7 @@ pub fn build(world: &mut World) {
         let waypoints: BTreeSet<TilePos> = row.waypoints.iter().map(|&[x, y]| TilePos::new(x, y)).collect();
         let mut line = NetLine { name: row.name.clone(), ..NetLine::default() };
         let mut last_pos: Option<usize> = None;
+        let mut at_track: Vec<usize> = Vec::new();
         for (i, &p) in t.iter().enumerate() {
             let shared = on_lines.get(&p).is_some_and(|s| s.len() > 1 || !s.contains(&l));
             let is_stop = i % spacing == 0 || i + 1 == t.len() || waypoints.contains(&p) || shared;
@@ -355,9 +412,15 @@ pub fn build(world: &mut World) {
             };
             line.stops.push(s);
             line.offsets.push(off);
+            at_track.push(i);
             last_pos = Some(i);
         }
         line.total = line.offsets.last().copied().unwrap_or(0);
+        line.seg = at_track
+            .windows(2)
+            .zip(line.stops.windows(2))
+            .map(|(i, s)| seg_way(stops[usize::from(s[0])], &t[i[0]..=i[1]], stops[usize::from(s[1])]))
+            .collect();
         lines.push(line);
     }
     let (w, h) = (world.map.w(), world.map.h());
@@ -436,12 +499,36 @@ fn open_lines(world: &World) -> Vec<bool> {
 /// A path's first leg in `rebuild_table`: line, direction, board position.
 type FirstLeg = (u8, bool, u16);
 
+/// The way between two calls: the stop tile, the track's corners from the
+/// first call's track tile to the second's, the next stop tile (repeats
+/// dropped).
+fn seg_way(from: TilePos, track: &[TilePos], to: TilePos) -> Vec<TilePos> {
+    let mut out = vec![from];
+    let dir = |a: TilePos, b: TilePos| {
+        ((i32::from(b.x) - i32::from(a.x)).signum(), (i32::from(b.y) - i32::from(a.y)).signum())
+    };
+    for (i, &p) in track.iter().enumerate() {
+        let corner = i == 0 || i + 1 == track.len() || dir(track[i - 1], p) != dir(p, track[i + 1]);
+        if corner && out.last() != Some(&p) {
+            out.push(p);
+        }
+    }
+    if out.last() != Some(&to) {
+        out.push(to);
+    }
+    out
+}
+
 /// The all-pairs table over the open lines: Dijkstra from every stop over
 /// `(line, position)` nodes, ride edges along a line, `transfer_ticks`
 /// between two lines' nodes at one stop. Ties keep the first path found
 /// (the heap orders by `(ticks, node)`: deterministic).
 fn rebuild_table(world: &mut World, open: Vec<bool>) {
-    let transfer = world.config.transit.transfer_ticks;
+    // The island pass phase 6: with trains, a transfer also waits for the
+    // next train (half a headway on the mean), so the table's ticks (the
+    // structural `commute_ticks`) are the ride's expected value.
+    let transfer =
+        world.config.transit.transfer_ticks + if trains_on(world) { world.config.transit.headway / 2 } else { 0 };
     let net = &world.transit.net;
     let n = net.stops.len();
     // Nodes: (line, position) of the open lines.
@@ -460,42 +547,45 @@ fn rebuild_table(world: &mut World, open: Vec<bool>) {
     }
     let mut table = vec![NO_HOP; n * n];
     for src in 0..n {
-        let mut dist: Vec<(u32, Option<FirstLeg>)> = vec![(UNREACHABLE, None); nodes.len()];
+        // The ticks, the first leg, the first leg's last call (set at the
+        // first transfer).
+        let mut dist: Vec<(u32, Option<FirstLeg>, Option<u16>)> = vec![(UNREACHABLE, None, None); nodes.len()];
         let mut heap = BinaryHeap::new();
         for &v in &at_stop[src] {
-            dist[v] = (0, None);
+            dist[v] = (0, None, None);
             heap.push(std::cmp::Reverse((0u32, v)));
         }
         while let Some(std::cmp::Reverse((d, v))) = heap.pop() {
             if d > dist[v].0 {
                 continue;
             }
-            let first = dist[v].1;
+            let (first, off) = (dist[v].1, dist[v].2);
             let (l, k) = nodes[v];
             let line = &net.lines[l];
-            let mut relax = |to: usize, cost: u32, first: Option<FirstLeg>, heap: &mut BinaryHeap<_>| {
-                let nd = d.saturating_add(cost);
-                if nd < dist[to].0 {
-                    dist[to] = (nd, first);
-                    heap.push(std::cmp::Reverse((nd, to)));
-                }
-            };
+            let mut relax =
+                |to: usize, cost: u32, first: Option<FirstLeg>, off: Option<u16>, heap: &mut BinaryHeap<_>| {
+                    let nd = d.saturating_add(cost);
+                    if nd < dist[to].0 {
+                        dist[to] = (nd, first, off);
+                        heap.push(std::cmp::Reverse((nd, to)));
+                    }
+                };
             let lu = u8::try_from(l).unwrap_or(u8::MAX);
             let ku = u16::try_from(k).unwrap_or(u16::MAX);
             if k + 1 < line.stops.len() {
                 let to = node_of[&(l, k + 1)];
-                relax(to, line.offsets[k + 1] - line.offsets[k], first.or(Some((lu, true, ku))), &mut heap);
+                relax(to, line.offsets[k + 1] - line.offsets[k], first.or(Some((lu, true, ku))), off, &mut heap);
             }
             if k > 0 {
                 let to = node_of[&(l, k - 1)];
-                relax(to, line.offsets[k] - line.offsets[k - 1], first.or(Some((lu, false, ku))), &mut heap);
+                relax(to, line.offsets[k] - line.offsets[k - 1], first.or(Some((lu, false, ku))), off, &mut heap);
             }
             // A transfer only once riding (at the source it changes nothing).
             if first.is_some() {
                 let s = usize::from(line.stops[k]);
                 for &w in &at_stop[s] {
                     if w != v {
-                        relax(w, transfer, first, &mut heap);
+                        relax(w, transfer, first, off.or(Some(ku)), &mut heap);
                     }
                 }
             }
@@ -504,9 +594,12 @@ fn rebuild_table(world: &mut World, open: Vec<bool>) {
             if t == src {
                 continue;
             }
-            let best = at_stop[t].iter().filter_map(|&v| dist[v].1.map(|f| (dist[v].0, f))).min_by_key(|&(d, _)| d);
-            if let Some((ticks, (line, forward, pos))) = best {
-                table[src * n + t] = Hop { ticks, line, forward, pos };
+            let best = at_stop[t]
+                .iter()
+                .filter_map(|&v| dist[v].1.map(|f| (dist[v].0, f, dist[v].2.unwrap_or(nodes[v].1 as u16))))
+                .min_by_key(|&(d, _, _)| d);
+            if let Some((ticks, (line, forward, pos), off)) = best {
+                table[src * n + t] = Hop { ticks, line, forward, pos, off };
             }
         }
     }
@@ -590,6 +683,395 @@ fn board_pos(world: &World, ride: &Ride) -> Option<u16> {
 }
 
 // ---------------------------------------------------------------------------
+// Trains (the island pass phase 6, ISLAND_PASS I3, OPEN-165)
+// ---------------------------------------------------------------------------
+//
+// The timetable above, run by trains. A line's departures leave each
+// terminus every `headway` ticks (slot `s` at tick `s × headway`); a train
+// that leaves the first terminus at slot `s` reaches the far one at
+// `total` ticks and leaves it again at slot `s + m`, `m` = `total` over the
+// headway rounded up, so `2m` trains run a line and train `j` takes the
+// forward slots `≡ j` and the backward slots `≡ j + m` (mod `2m`). A train's
+// place is a pure function of the tick (`train_at`): travelling a stretch
+// between two calls at the line's speed (`seg`), or dwelling at a call
+// (`dwell_ticks` before each departure), or laid over at a terminus. Trains
+// run around the clock (the service hours gate boardings, not trains).
+//
+// Each train is a persistent `Motion` (`RideKind::Train`, `Route::Line`)
+// spawned once (`ensure_trains`) and never despawned; `motion::advance`
+// moves it and its riders. A rider on the platform waits for his
+// departure (`TransitState::boarding`), boards the train that makes it
+// (`board_trains`; a full one leaves him for the next), rides aboard (his
+// position is the train's), and at his leg's end alights at the stop: the
+// last leg walks on, a transfer walks `transfer_ticks` across the platform
+// and waits for the next line's train. A plan dropped between two stops
+// keeps him aboard to the next stop (`motion::alight`, `held`). A cut line
+// stops its trains where they are; their riders walk the track to the
+// nearest stop (`evacuate`) and walk on from there.
+//
+// The ride's ticks are the timetable's, as before: the wait for the
+// departure, the ride, now the transfer's real wait. `route` schedules
+// every leg exactly (`schedule`), and the table's transfer edge counts half
+// a headway of wait, so `commute_ticks` (the structural estimate) is the
+// ride's expected value. The Statistical mirror is the timed ride itself
+// (`stat_commute`): no body, the same fares and boardings.
+
+/// `[motion.trains]` on (with `[motion]` and the El).
+pub fn trains_on(world: &World) -> bool {
+    world.config.transit.enabled && world.config.motion.as_ref().is_some_and(|m| m.trains.is_some())
+}
+
+/// A line's `m`: its one-way trip in headways, rounded up (at least 1).
+fn line_m(world: &World, line: &NetLine) -> u64 {
+    let h = u64::from(world.config.transit.headway.max(1));
+    u64::from(line.total).div_ceil(h).max(1)
+}
+
+/// The ticks of one leg (its calls' offsets apart).
+fn leg_ticks(world: &World, leg: TrainLeg) -> Tick {
+    let Some(l) = world.transit.net.lines.get(usize::from(leg.line)) else { return 0 };
+    let (a, b) = (usize::from(leg.from), usize::from(leg.to));
+    match (l.offsets.get(a), l.offsets.get(b)) {
+        (Some(&x), Some(&y)) => Tick::from(x.abs_diff(y)),
+        _ => 0,
+    }
+}
+
+/// The legs of a ride from stop `s` to stop `e` over the open lines: the
+/// table's first leg (to its `off` call), then the table's ride from there,
+/// a line each. `None` with no ride or a path the table does not close.
+pub fn legs_of(world: &World, s: u16, e: u16) -> Option<Vec<TrainLeg>> {
+    let net = &world.transit.net;
+    let mut out = Vec::new();
+    let mut at = s;
+    for _ in 0..8 {
+        let hop = net.hop(at, e);
+        if hop.ticks == UNREACHABLE {
+            return None;
+        }
+        out.push(TrainLeg { line: hop.line, forward: hop.forward, from: hop.pos, to: hop.off });
+        let stop = *net.lines.get(usize::from(hop.line))?.stops.get(usize::from(hop.off))?;
+        if stop == e {
+            return Some(out);
+        }
+        if stop == at {
+            return None;
+        }
+        at = stop;
+    }
+    None
+}
+
+/// The exact departure of the first leg and the arrival of the last for a
+/// rider on the first platform at `t`: each leg's next departure, its ride,
+/// the `transfer_ticks` walk to the next platform. `None` past a line.
+pub fn schedule(world: &World, legs: &[TrainLeg], t: Tick) -> Option<(Tick, Tick)> {
+    let transfer = Tick::from(world.config.transit.transfer_ticks);
+    let (mut at, mut first, mut arrive) = (t, None, t);
+    for &leg in legs {
+        let dep = departure_at(world, leg.line, leg.forward, leg.from, at)?;
+        first.get_or_insert(dep);
+        arrive = dep + leg_ticks(world, leg);
+        at = arrive + transfer;
+    }
+    Some((first?, arrive))
+}
+
+/// Where a train is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrainAt {
+    /// At the line's `k`-th call (dwelling, departing or laid over).
+    Stop(u16),
+    /// Between call `seg` and `seg + 1`, `done` tiles along `NetLine::seg[seg]`
+    /// from call `seg`.
+    Track { seg: u16, done: u64 },
+}
+
+/// Train `j` of line `line` at `tick` (the timetable's pure function).
+pub fn train_at(world: &World, line: u8, j: u64, tick: Tick) -> Option<TrainAt> {
+    let l = world.transit.net.lines.get(usize::from(line))?;
+    let last = l.stops.len().checked_sub(1)?;
+    let h = u64::from(world.config.transit.headway.max(1));
+    let m = line_m(world, l);
+    let cycle = 2 * m * h;
+    let phase = (i128::from(tick) - i128::from(j * h)).rem_euclid(i128::from(cycle)) as u64;
+    let (forward, e) = if phase < m * h { (true, phase) } else { (false, phase - m * h) };
+    let total = u64::from(l.total);
+    if e >= total {
+        return Some(TrainAt::Stop(if forward { last as u16 } else { 0 }));
+    }
+    let off = |k: usize| u64::from(l.offsets[k]);
+    let dwell = u64::from(world.config.transit.dwell_ticks);
+    let len = |k: usize| l.seg.get(k).map_or(0, |w| crate::systems::motion::way_len(w));
+    // The stretch's progress: `x` of `span` ticks done from call `k`.
+    let track = |k: usize, x: u64, span: u64| TrainAt::Track { seg: k as u16, done: len(k) * x / span.max(1) };
+    if forward {
+        // Departed call k at off(k); at k + 1 from off(k + 1) - dwell.
+        let k = l.offsets.partition_point(|&o| u64::from(o) <= e) - 1;
+        if e == off(k) || k == last {
+            return Some(TrainAt::Stop(k as u16));
+        }
+        let arr = off(k + 1).saturating_sub(dwell).max(off(k) + 1);
+        if e >= arr {
+            return Some(TrainAt::Stop((k + 1) as u16));
+        }
+        Some(track(k, e - off(k), arr - off(k)))
+    } else {
+        // The forward clock run back: departed call i at e' = off(i), at
+        // i - 1 from e' = off(i - 1) + dwell.
+        let r = total - e;
+        let i = l.offsets.partition_point(|&o| u64::from(o) < r);
+        if i > last || off(i) == r || i == 0 {
+            return Some(TrainAt::Stop(i.min(last) as u16));
+        }
+        let arr = (off(i - 1) + dwell).min(off(i) - 1);
+        if r <= arr {
+            return Some(TrainAt::Stop((i - 1) as u16));
+        }
+        Some(track(i - 1, r - arr, off(i) - arr))
+    }
+}
+
+/// The tile of a train's place.
+pub fn train_tile(world: &World, line: u8, at: TrainAt) -> Option<TilePos> {
+    let l = world.transit.net.lines.get(usize::from(line))?;
+    match at {
+        TrainAt::Stop(k) => l.stops.get(usize::from(k)).map(|&s| world.transit.net.stops[usize::from(s)]),
+        TrainAt::Track { seg, done } => l.seg.get(usize::from(seg)).map(|w| crate::systems::motion::point_at(w, done)),
+    }
+}
+
+/// The train that makes the departure from the line's `pos`-th call at
+/// `dep` in a direction (a departure `departure_at` gives).
+pub fn train_for(world: &World, line: u8, forward: bool, pos: u16, dep: Tick) -> Option<EntityId> {
+    let l = world.transit.net.lines.get(usize::from(line))?;
+    let k = usize::from(pos);
+    let off = Tick::from(if forward { *l.offsets.get(k)? } else { l.total - *l.offsets.get(k)? });
+    let h = u64::from(world.config.transit.headway.max(1));
+    let slot = dep.checked_sub(off)? / h;
+    let m = line_m(world, l);
+    let j = if forward { slot % (2 * m) } else { (slot + m) % (2 * m) };
+    world.transit.trains.get(usize::from(line))?.get(j as usize).copied()
+}
+
+/// Spawn every line's trains once (`[motion.trains]` on, the network built):
+/// a persistent `Motion` each, at its place now.
+pub fn ensure_trains(world: &mut World) {
+    if !trains_on(world) || !world.transit.trains.is_empty() {
+        return;
+    }
+    ensure_net(world);
+    let lines = world.transit.net.lines.len();
+    if lines == 0 {
+        return;
+    }
+    let mut all = Vec::with_capacity(lines);
+    for l in 0..lines {
+        let n = 2 * line_m(world, &world.transit.net.lines[l]);
+        let lu = u8::try_from(l).unwrap_or(u8::MAX);
+        let mut ids = Vec::with_capacity(n as usize);
+        for j in 0..n {
+            let v = world.spawn();
+            let pos = train_at(world, lu, j, world.tick).and_then(|at| train_tile(world, lu, at)).unwrap_or_default();
+            crate::systems::motion::add_train(world, v, lu, j as u16, pos);
+            ids.push(v);
+        }
+        all.push(ids);
+    }
+    world.transit.trains = all;
+}
+
+/// Is `line` cut now?
+pub fn line_cut(world: &World, line: u8) -> bool {
+    world.transit.line_closed.get(&line).is_some_and(|&until| until > world.tick)
+}
+
+/// Note a train event in the leg log (measurement only): 0 a rider left on
+/// a full train's platform, 1 a dropped plan carried to the next stop, 2 a
+/// rider set down by a cut.
+pub fn note_train(world: &mut World, what: usize) {
+    if let Some(l) = world.leg_log.as_mut() {
+        l.trains[what] += 1;
+    }
+}
+
+/// Every tick, before the vehicles advance (`exec::run`): the trains exist,
+/// the riders due on a platform board, the cut lines' riders walk the
+/// track.
+pub fn trains_tick(world: &mut World) {
+    if !trains_on(world) {
+        return;
+    }
+    ensure_trains(world);
+    let now = world.tick;
+    while let Some(&(t, id)) = world.transit.boarding.first() {
+        if t > now {
+            break;
+        }
+        world.transit.boarding.pop_first();
+        board_train(world, id, t);
+    }
+    if !world.transit.evac.is_empty() {
+        let walking: Vec<(EntityId, TilePos)> = world
+            .transit
+            .evac
+            .iter()
+            .map(|(&id, e)| (id, crate::systems::motion::timed_pos(&e.way, e.depart, e.arrive, now)))
+            .collect();
+        for (id, at) in walking {
+            let ok = world.is_alive(id)
+                && matches!(world.comp::<crate::components::Brain>(id).map(|b| &b.exec), Some(ExecState::Ride { .. }))
+                && world.comp::<Position>(id).is_some_and(|p| p.building.is_none());
+            if !ok {
+                world.transit.evac.remove(&id);
+                continue;
+            }
+            if let Some(p) = world.comp_mut::<Position>(id) {
+                p.tile = at;
+            }
+        }
+    }
+}
+
+/// `id` on the platform for the departure at `t`: aboard the train that
+/// makes it, or (full) on to the next; a cut line's rider walks on.
+fn board_train(world: &mut World, id: EntityId, t: Tick) {
+    let Some(mut ride) = world.rides.get(&id).cloned() else { return };
+    if plan_key(world, id) != Some((ride.plan_started, ride.plan_step)) {
+        return;
+    }
+    let Some(lod) = world.comp::<crate::components::Brain>(id).map(|b| b.lod) else { return };
+    let Some(ExecState::Ride { target, depart, arrive_tick }) =
+        world.comp::<crate::components::Brain>(id).map(|b| b.exec.clone())
+    else {
+        return;
+    };
+    if depart != t || crate::systems::motion::vehicle_of(world, id).is_some() {
+        return;
+    }
+    let Some(&leg) = ride.legs.get(usize::from(ride.leg)) else { return };
+    let train = if line_cut(world, leg.line) { None } else { train_for(world, leg.line, leg.forward, leg.from, t) };
+    let Some(v) = train else {
+        abandon(world, id, &ride, lod);
+        return;
+    };
+    let cap = world.config.motion.as_ref().and_then(|m| m.trains.as_ref()).map_or(u32::MAX, |c| c.capacity);
+    if world.motions.get(&v).is_some_and(|m| m.riders.len() >= cap as usize) {
+        let h = Tick::from(world.config.transit.headway.max(1));
+        ride.depart = t + h;
+        ride.arrive += h;
+        world.rides.insert(id, ride);
+        if let Some(b) = world.comp_mut::<crate::components::Brain>(id) {
+            b.exec = ExecState::Ride { target, depart: t + h, arrive_tick: arrive_tick + h };
+        }
+        world.transit.boarding.insert((t + h, id));
+        note_train(world, 0);
+        return;
+    }
+    crate::systems::motion::board_train(world, id, v);
+}
+
+/// A transfer: off the train at the leg's last call, `transfer_ticks` across
+/// the platform, the next leg's departure; a cut line's rider walks on.
+fn transfer(world: &mut World, id: EntityId, mut ride: Ride, lod: Lod) {
+    crate::systems::motion::alight_now(world, id);
+    let next = usize::from(ride.leg) + 1;
+    let Some(&leg) = ride.legs.get(next) else {
+        abandon(world, id, &ride, lod);
+        return;
+    };
+    let net = &world.transit.net;
+    let Some(stop) = net.lines.get(usize::from(leg.line)).and_then(|l| l.stops.get(usize::from(leg.from))).copied()
+    else {
+        abandon(world, id, &ride, lod);
+        return;
+    };
+    let tile = net.stops[usize::from(stop)];
+    if let Some(p) = world.comp_mut::<Position>(id) {
+        p.tile = tile;
+        p.building = None;
+    }
+    let ready = world.tick + Tick::from(world.config.transit.transfer_ticks);
+    let depart = departure_at(world, leg.line, leg.forward, leg.from, ready).filter(|_| !line_cut(world, leg.line));
+    let Some(depart) = depart else {
+        abandon(world, id, &ride, lod);
+        return;
+    };
+    ride.leg = next as u8;
+    ride.line = leg.line;
+    ride.forward = leg.forward;
+    ride.board = stop;
+    ride.board_pos = Some(leg.from);
+    ride.depart = depart;
+    ride.arrive = schedule(world, &ride.legs[next..], depart).map_or(depart, |x| x.1);
+    let state = ExecState::Ride { target: ride.target.clone(), depart, arrive_tick: depart + leg_ticks(world, leg) };
+    world.rides.insert(id, ride);
+    if let Some(b) = world.comp_mut::<crate::components::Brain>(id) {
+        b.exec = state;
+    }
+    world.transit.boarding.insert((depart, id));
+}
+
+/// A cut line (`cut_line`): its trains stand where they are; each rider
+/// aboard walks the track to the nearest stop (ties: the one ahead), his
+/// ride's leg now that walk (`leg_done` walks on from the stop).
+fn evacuate(world: &mut World, line: u8) {
+    if !trains_on(world) {
+        return;
+    }
+    let Some(trains) = world.transit.trains.get(usize::from(line)).cloned() else { return };
+    let now = world.tick;
+    let step = world.config.exec.move_ticks_full.max(1);
+    for (j, v) in trains.into_iter().enumerate() {
+        let Some(riders) = world.motions.get(&v).map(|m| m.riders.clone()) else { continue };
+        if riders.is_empty() {
+            continue;
+        }
+        let Some(at) = train_at(world, line, j as u64, now) else { continue };
+        let l = &world.transit.net.lines[usize::from(line)];
+        // The way to the nearest call: a stop's tile, or along the stretch.
+        let way: Vec<TilePos> = match at {
+            TrainAt::Stop(k) => vec![world.transit.net.stops[usize::from(l.stops[usize::from(k)])]],
+            TrainAt::Track { seg, done } => {
+                let w = &l.seg[usize::from(seg)];
+                let len = crate::systems::motion::way_len(w);
+                let forward = train_forward(world, line, j as u64, now);
+                let to_end = match (len - done.min(len)).cmp(&done) {
+                    std::cmp::Ordering::Less => true,
+                    std::cmp::Ordering::Greater => false,
+                    std::cmp::Ordering::Equal => forward,
+                };
+                crate::systems::motion::split_way(w, done, to_end)
+            }
+        };
+        let tiles = crate::systems::motion::way_len(&way);
+        for r in riders {
+            if world.transit.held.contains(&r) {
+                crate::systems::motion::alight_now(world, r);
+                continue;
+            }
+            crate::systems::motion::alight_now(world, r);
+            let Some(target) = world.rides.get(&r).map(|x| x.target.clone()) else { continue };
+            let arrive = now + (tiles * step).max(1);
+            if let Some(b) = world.comp_mut::<crate::components::Brain>(r) {
+                b.exec = ExecState::Ride { target, depart: now, arrive_tick: arrive };
+            }
+            world.transit.evac.insert(r, Evac { way: way.clone(), depart: now, arrive });
+            note_train(world, 2);
+        }
+    }
+}
+
+/// Is train `j` of `line` on its forward run at `tick`?
+fn train_forward(world: &World, line: u8, j: u64, tick: Tick) -> bool {
+    let Some(l) = world.transit.net.lines.get(usize::from(line)) else { return true };
+    let h = u64::from(world.config.transit.headway.max(1));
+    let m = line_m(world, l);
+    let phase = (i128::from(tick) - i128::from(j * h)).rem_euclid(i128::from(2 * m * h)) as u64;
+    phase < m * h
+}
+
+// ---------------------------------------------------------------------------
 // Closures (T15)
 // ---------------------------------------------------------------------------
 
@@ -622,6 +1104,9 @@ pub fn cut_line(world: &mut World, line: u8, days: u32) -> Result<String, String
     // Phase 2: the table now, so the structural commute (`commute_ticks`,
     // read without `&mut`) sees the cut at once.
     ensure_net(world);
+    // The island pass phase 6: the line's trains stop; their riders walk
+    // the track to the nearest stop.
+    evacuate(world, line);
     Ok(format!("cut the {name} for {days} days"))
 }
 
@@ -687,11 +1172,18 @@ pub fn route(world: &World, who: EntityId, from: TilePos, to: TilePos, t: Tick) 
             if hop.ticks == UNREACHABLE {
                 continue;
             }
-            let Some(depart) = departure_at(world, hop.line, hop.forward, hop.pos, t + w1) else { continue };
+            // The island pass phase 6: with trains, every leg scheduled
+            // (a transfer waits for its train).
+            let (depart, arrive) = if trains_on(world) {
+                let Some(x) = legs_of(world, s, e).and_then(|legs| schedule(world, &legs, t + w1)) else { continue };
+                x
+            } else {
+                let Some(depart) = departure_at(world, hop.line, hop.forward, hop.pos, t + w1) else { continue };
+                (depart, depart + Tick::from(hop.ticks))
+            };
             if !in_service(world, depart) {
                 continue;
             }
-            let arrive = depart + Tick::from(hop.ticks);
             let w2 = crate::exec::timed_walk(world, who, net.stops[usize::from(e)], to);
             let total = arrive + w2 - t;
             if best.is_none_or(|b| total < b.total) {
@@ -946,19 +1438,25 @@ pub fn try_ride(world: &mut World, id: EntityId, target: &GotoTarget, lod: Lod) 
         Lod::Full => crate::exec::walking_goto(world, id, access)?,
         _ => crate::exec::timed_goto(world, id, access),
     };
+    // The island pass phase 6: the legs the route scheduled.
+    let legs =
+        if trains_on(world) { legs_of(world, route.board, route.alight).unwrap_or_default() } else { Vec::new() };
+    let hop_ticks = if legs.is_empty() { route.hop.ticks } else { (route.arrive - route.depart) as u32 };
     let ride = Ride {
         target: target.clone(),
         board: route.board,
         alight: route.alight,
         line: route.hop.line,
         forward: route.hop.forward,
-        hop_ticks: route.hop.ticks,
+        hop_ticks,
         depart: route.depart,
         arrive: route.arrive,
         dodge: route.dodge,
         plan_started,
         plan_step,
         board_pos: Some(route.hop.pos),
+        legs,
+        leg: 0,
     };
     world.rides.insert(id, ride);
     Some(state)
@@ -974,7 +1472,15 @@ pub fn leg_done(world: &mut World, id: EntityId, lod: Lod) -> bool {
         return false;
     }
     let aboard = matches!(world.comp::<crate::components::Brain>(id).map(|b| &b.exec), Some(ExecState::Ride { .. }));
-    if aboard {
+    if let Some(e) = world.transit.evac.remove(&id).filter(|_| aboard) {
+        // The island pass phase 6: at a cut line's stop, walking on.
+        if let (Some(&at), Some(p)) = (e.way.last(), world.comp_mut::<Position>(id)) {
+            p.tile = at;
+        }
+        abandon(world, id, &ride, lod);
+    } else if aboard && usize::from(ride.leg) + 1 < ride.legs.len() {
+        transfer(world, id, ride, lod);
+    } else if aboard {
         alight(world, id, &ride, lod);
     } else {
         board(world, id, ride, lod);
@@ -1043,7 +1549,14 @@ fn board(world: &mut World, id: EntityId, mut ride: Ride, lod: Lod) {
     count_boarding(world, ride.board, depart);
     ride.depart = depart;
     ride.arrive = depart + Tick::from(ride.hop_ticks);
-    let state = ExecState::Ride { target: ride.target.clone(), depart, arrive_tick: ride.arrive };
+    let mut state = ExecState::Ride { target: ride.target.clone(), depart, arrive_tick: ride.arrive };
+    // The island pass phase 6: the first leg's train, the whole ride
+    // scheduled from its departure; the platform until it comes.
+    if let Some(&leg) = ride.legs.first() {
+        ride.arrive = schedule(world, &ride.legs, depart).map_or(ride.arrive, |x| x.1);
+        state = ExecState::Ride { target: ride.target.clone(), depart, arrive_tick: depart + leg_ticks(world, leg) };
+        world.transit.boarding.insert((depart, id));
+    }
     world.rides.insert(id, ride);
     if let Some(b) = world.comp_mut::<crate::components::Brain>(id) {
         b.exec = state;
@@ -1064,6 +1577,7 @@ fn count_boarding(world: &mut World, stop: u16, at: Tick) {
 /// Off at the alight stop: stand on it and walk on to the `GoTo`'s target.
 fn alight(world: &mut World, id: EntityId, ride: &Ride, lod: Lod) {
     world.rides.remove(&id);
+    crate::systems::motion::alight_now(world, id);
     let tile = world.transit.net.stops[usize::from(ride.alight)];
     if let Some(p) = world.comp_mut::<Position>(id) {
         p.tile = tile;
@@ -1085,6 +1599,9 @@ pub fn end_ride(world: &mut World, id: EntityId) {
     }
     world.rides.remove(&id);
     world.transit.rode.remove(&id);
+    if !world.transit.evac.is_empty() {
+        world.transit.evac.remove(&id);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1244,6 +1761,11 @@ pub fn aboard_at(world: &World, id: EntityId) -> Option<(f32, f32)> {
     };
     if world.tick < *depart || world.tick >= *arrive_tick {
         return None;
+    }
+    // The island pass phase 6: aboard a train, the train's tile.
+    if trains_on(world) {
+        let v = crate::systems::motion::vehicle_of(world, id)?;
+        return world.motions.get(&v).map(|m| (f32::from(m.pos.x), f32::from(m.pos.y)));
     }
     let net = &world.transit.net;
     let line = net.lines.get(usize::from(ride.line))?;

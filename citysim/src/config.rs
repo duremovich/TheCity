@@ -501,6 +501,21 @@ pub struct MotionCfg {
     /// A timed road vehicle's way follows the road path (the walk's A*);
     /// false: an L, along x then y (no search).
     pub road_route: bool,
+    /// The island pass phase 6 `[motion.trains]` (OPEN-165): the El runs as
+    /// trains on its timetable (`transit.rs` § Trains). `None` (not written
+    /// into a save) with `CITYSIM_TRAINS_OFF=1`: the timed ride as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trains: Option<TrainsCfg>,
+}
+
+/// `[motion.trains]`: the El's trains. The headway, the dwell, the speed and
+/// the transfer walk are `[transit]`'s; the train count is derived (each
+/// line's round trip over the headway).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TrainsCfg {
+    /// Riders a train carries; a full train leaves the rest on the platform
+    /// for the next one.
+    pub capacity: u32,
 }
 
 /// The island pass phase 4 `[commute_pressure]` (docs/ISLAND_PASS.md I2):
@@ -8779,6 +8794,13 @@ impl Config {
         // switch in flight (doctrine 6).
         if std::env::var("CITYSIM_VEHICLES_MOVE_OFF").is_ok_and(|v| v == "1") {
             cfg.motion = None;
+        }
+        // The island pass phase 6 (OPEN-165, I3): the El's trains, the
+        // switch in flight (doctrine 6).
+        if std::env::var("CITYSIM_TRAINS_OFF").is_ok_and(|v| v == "1") {
+            if let Some(m) = cfg.motion.as_mut() {
+                m.trains = None;
+            }
         }
         // The island pass phase 3c (OPEN-177): the housing mood term's
         // switch in flight (doctrine 6).

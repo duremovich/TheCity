@@ -567,6 +567,11 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
             world.abort_plan(id);
             world.push_event(EventKind::PlanAborted, &[id], format!("{goal:?} LodDemotion"));
         }
+        // The island pass phase 6: off a train at once (no body to carry on
+        // to the next stop off screen).
+        if crate::systems::transit::trains_on(world) {
+            crate::systems::motion::alight_now(world, id);
+        }
         // M13 D46: no trip off screen; its own vehicles go home with it.
         crate::systems::vehicles::on_demoted(world, id);
         if let Some(b) = world.comp_mut::<Brain>(id) {
