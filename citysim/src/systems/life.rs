@@ -1116,11 +1116,7 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool, daily: bool)
                         row.pressure_movers += 1;
                     }
                 } else if pressure {
-                    let before = world.comp::<Job>(a).and_then(|j| j.employer);
-                    crate::systems::commute::found_nothing(world, a, hd, d);
-                    if world.comp::<Job>(a).and_then(|j| j.employer) != before {
-                        moved += 1;
-                    }
+                    crate::systems::commute::found_nothing(world, a);
                 }
                 continue;
             }
@@ -1128,13 +1124,9 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool, daily: bool)
         };
         let Some((_, to)) = pick else {
             // The island pass phase 4: nothing found; past `job_days`, a
-            // nearer post.
+            // nearer post at the next midnight's job search.
             if pressure {
-                let before = world.comp::<Job>(a).and_then(|j| j.employer);
-                crate::systems::commute::found_nothing(world, a, hd, d);
-                if world.comp::<Job>(a).and_then(|j| j.employer) != before {
-                    moved += 1;
-                }
+                crate::systems::commute::found_nothing(world, a);
             }
             continue;
         };

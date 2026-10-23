@@ -268,8 +268,24 @@ fn step_agent(world: &mut World, id: EntityId) {
     // M14 V12: a runner dazed by a lost contest sits it out in the chair.
     let dazed = brain.dazed_until.is_some_and(|t| t > tick);
     let daze_end = brain.dazed_until;
+    // The island pass phase 4 (OPEN-164): a leg in motion is spared the
+    // timeout (`[legs] timeout_spares_legs`): a timed walk, a flight or a
+    // ride before its arrival, a walk not blocked, and a segment's end
+    // re-starting its step (`legs::segment_done` keeps the step's entry).
+    // The base cut an island CEO's 931-tick ride at 900 (and a segmented
+    // walk at the segment end it had reached): the body stayed at the
+    // board stop, in another district, and the next plan rode again.
+    let moving = world.config.legs.as_ref().is_some_and(|l| l.timeout_spares_legs)
+        && match &state {
+            ExecState::GotoTimed { arrive_tick, .. }
+            | ExecState::Fly { arrive_tick, .. }
+            | ExecState::Ride { arrive_tick, .. } => tick <= *arrive_tick,
+            ExecState::Goto { blocked_since, .. } => blocked_since.is_none(),
+            ExecState::Idle => world.segments.get(&id).is_some_and(|&k| legs::plan_key(world, id) == Some(k)),
+            _ => false,
+        };
     // Replan trigger (d): a plan that has run too long.
-    if tick.saturating_sub(started) > world.config.brain.plan_timeout_ticks && !dazed {
+    if tick.saturating_sub(started) > world.config.brain.plan_timeout_ticks && !dazed && !moving {
         world.fail_plan(id);
         return;
     }

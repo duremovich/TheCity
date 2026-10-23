@@ -649,6 +649,18 @@ pub struct LegsCfg {
     /// the El does not shorten takes the cab when the purse allows (no
     /// `p_cab` roll), both tiers (`streetwork::cab_roll`).
     pub fares_el_missed: bool,
+    /// The island pass phase 4 (OPEN-164): the plan timeout (`[brain]
+    /// plan_timeout_ticks`) spares a leg in motion (a timed walk, a flight
+    /// or a ride before its arrival, a walk with its path left and not
+    /// blocked). False (and not written into a save) with
+    /// `CITYSIM_COMMUTE_PRESSURE_OFF=1`: the base timeout, which cut a
+    /// 931-tick ride at 900 and left the body at the board stop.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub timeout_spares_legs: bool,
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 /// The pre-view pass phase 4 `[presence]` (docs/PREVIEW_PASS.md § 0 P3):
@@ -8739,10 +8751,13 @@ impl Config {
                 c.buyout = None;
             }
         }
-        // The island pass phase 4 (OPEN-163, I2): the commute pressure's
-        // switch in flight (doctrine 6).
+        // The island pass phase 4 (OPEN-163, I2; OPEN-164): the commute
+        // pressure's and the leg timeout's switch in flight (doctrine 6).
         if std::env::var("CITYSIM_COMMUTE_PRESSURE_OFF").is_ok_and(|v| v == "1") {
             cfg.commute_pressure = None;
+            if let Some(l) = cfg.legs.as_mut() {
+                l.timeout_spares_legs = false;
+            }
         }
         // The island pass phase 3c (OPEN-177): the housing mood term's
         // switch in flight (doctrine 6).

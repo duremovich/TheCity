@@ -21,13 +21,16 @@
 //!   moves only when both commutes shrink by the margin; a household whose
 //!   Home has a School within `[ages] school_reach` moves only to one that
 //!   has one ([`school_kept`]).
-//! - **A nearer job** ([`nearer_job`]): past `job_days` with no Home found,
-//!   the worker takes an open post of his own role whose door is within
-//!   `[distance] job_cap_ticks` of his Home and saves `job_margin_ticks`
-//!   (nearest first, ties the lower id): the normal quit (`economy::
-//!   quit_job`, "far commute", the old employer posting the vacancy) and
-//!   the normal hire. A company bed's resident then goes through 3a's
-//!   grace and eviction. Graded, foreman and contract posts do not switch.
+//! - **A nearer job** ([`job_moves`], [`nearer_job`]): past `job_days` with
+//!   no Home found, the worker seeks; at the next midnight, before the job
+//!   search (the day's vacancies, before the unemployed and the Ambient
+//!   pool take them), he takes an open post of his own role whose door is
+//!   within `[distance] job_cap_ticks` of his Home and saves
+//!   `job_margin_ticks` (nearest first, ties the lower id): the normal quit
+//!   (`economy::quit_job`, "far commute", the old employer posting the
+//!   vacancy) and the normal hire. A company bed's resident then goes
+//!   through 3a's grace and eviction. Graded, foreman and contract posts do
+//!   not switch.
 //! - A search that found nothing waits `retry_days`.
 //!
 //! Statistical mirror: none needed. The pass walks every citizen whatever
@@ -55,10 +58,18 @@ pub struct Pressure {
     /// No pressure builds before this day (a move or a switch).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub cool: u32,
+    /// Past `job_days` with no Home found: looks for a nearer post at the
+    /// next midnight's job search ([`job_moves`]).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub seek: bool,
 }
 
 fn is_zero(v: &u32) -> bool {
     *v == 0
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 /// `[commute_pressure]` on.
@@ -88,6 +99,7 @@ pub fn note(world: &mut World, a: EntityId, d: Tick) -> bool {
     let cooling = p.cool > day;
     if d <= cfg.far_ticks || cooling {
         p.days = 0;
+        p.seek = false;
     } else {
         p.days = p.days.saturating_add(1);
     }
@@ -98,7 +110,7 @@ pub fn note(world: &mut World, a: EntityId, d: Tick) -> bool {
 
 fn store(world: &mut World, a: EntityId, p: Pressure) {
     let day = today(world);
-    if p.days == 0 && p.cool <= day && p.retry <= day {
+    if p.days == 0 && p.cool <= day && p.retry <= day && !p.seek {
         world.commute_pressure.remove(&a);
     } else {
         world.commute_pressure.insert(a, p);
@@ -113,6 +125,7 @@ pub fn prune(world: &mut World, read: &std::collections::BTreeSet<EntityId>) {
     world.commute_pressure.retain(|a, p| {
         if !read.contains(a) {
             p.days = 0;
+            p.seek = false;
         }
         if p.days > 0 {
             far += 1;
@@ -128,19 +141,58 @@ pub fn prune(world: &mut World, read: &std::collections::BTreeSet<EntityId>) {
 pub fn moved(world: &mut World, a: EntityId) {
     let Some(cfg) = world.config.commute_pressure.as_ref() else { return };
     let cool = today(world).saturating_add(u32::from(cfg.cool_days));
-    store(world, a, Pressure { days: 0, retry: 0, cool });
+    store(world, a, Pressure { days: 0, retry: 0, cool, seek: false });
 }
 
 /// `a`'s search found nothing: the next waits `retry_days`; past
-/// `job_days`, a nearer post ([`nearer_job`]).
-pub fn found_nothing(world: &mut World, a: EntityId, home_door: TilePos, d: Tick) {
+/// `job_days`, he looks for a nearer post at the next midnight's job
+/// search ([`job_moves`]).
+pub fn found_nothing(world: &mut World, a: EntityId) {
     let Some(cfg) = world.config.commute_pressure.clone() else { return };
     let mut p = world.commute_pressure.get(&a).copied().unwrap_or_default();
-    if p.days >= cfg.job_days && nearer_job(world, a, home_door, d) {
-        return;
-    }
+    p.seek |= p.days >= cfg.job_days;
     p.retry = today(world).saturating_add(u32::from(cfg.retry_days.max(1)));
     store(world, a, p);
+}
+
+/// Midnight, before `demography::job_search` (the day's vacancies, before
+/// the unemployed and the Ambient pool take them): each seeker ([`Pressure::
+/// seek`]) still housed far from work, longest commute first (ties the
+/// lower id), takes the nearest open post of his role ([`nearer_job`]);
+/// one who found none seeks again the next midnight.
+pub fn job_moves(world: &mut World) {
+    let Some(cfg) = world.config.commute_pressure.clone() else { return };
+    let seekers: Vec<EntityId> = world.commute_pressure.iter().filter(|(_, p)| p.seek).map(|(&a, _)| a).collect();
+    if seekers.is_empty() || world.vacancies.is_empty() {
+        return;
+    }
+    let mut keyed: Vec<(std::cmp::Reverse<Tick>, EntityId, TilePos)> = Vec::new();
+    for a in seekers {
+        let home = world.comp::<crate::components::Household>(a).and_then(|h| h.home);
+        let hd = home.and_then(|h| world.comp::<Building>(h)).map(|b| b.door);
+        let work =
+            world.comp::<Job>(a).and_then(|j| j.employer).and_then(|e| crate::systems::life::work_tile(world, a, e));
+        match (hd, work) {
+            (Some(hd), Some(wt)) if crate::systems::law::living(world, a) => {
+                let d = crate::systems::distance::travel(world, hd, wt);
+                if d > cfg.far_ticks {
+                    keyed.push((std::cmp::Reverse(d), a, hd));
+                    continue;
+                }
+            }
+            _ => {}
+        }
+        if let Some(p) = world.commute_pressure.get_mut(&a) {
+            p.seek = false;
+        }
+    }
+    keyed.sort_unstable();
+    for (std::cmp::Reverse(d), a, hd) in keyed {
+        if world.vacancies.is_empty() {
+            break;
+        }
+        nearer_job(world, a, hd, d);
+    }
 }
 
 /// Company Home `h` takes `a`'s household: its beds are reserved for the

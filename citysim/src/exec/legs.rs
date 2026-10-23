@@ -85,5 +85,11 @@ pub fn segment_done(world: &mut World, id: EntityId) -> bool {
     if let Some(b) = world.comp_mut::<Brain>(id) {
         b.exec = crate::exec::ExecState::Idle;
     }
+    // The island pass phase 4 (OPEN-164): the entry stays until the step
+    // re-starts (`exec::start_step` drops it), so the plan timeout spares
+    // the leg at its segment's end (`[legs] timeout_spares_legs`).
+    if world.config.legs.as_ref().is_some_and(|l| l.timeout_spares_legs) {
+        world.segments.insert(id, key);
+    }
     true
 }

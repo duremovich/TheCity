@@ -142,6 +142,44 @@ fn test_a_long_coarse_walk_moves_by_segments() {
     assert!(legs.len() >= 2 && moves as usize >= legs.len(), "{moves} moves over {} segments", legs.len());
 }
 
+/// The island pass phase 4 (OPEN-164): the plan timeout spares a leg in
+/// motion. A Coarse walk in segments whose plan passes `[brain]
+/// plan_timeout_ticks` on the way, and a Full body's timed leg (a ride's
+/// shape) arriving 30 ticks past it, both reach the target. Failed on the
+/// base (`timeout_spares_legs` off: the plan cut where the body stood, a
+/// segment's end or the board stop: the island CEO's 931-tick ride at 900).
+#[test]
+fn test_the_plan_timeout_spares_a_leg_in_motion() {
+    let w = city();
+    assert!(w.config.legs.as_ref().is_some_and(|l| l.timeout_spares_legs), "on in the shipped config");
+    let timeout = w.config.brain.plan_timeout_ticks;
+    let (who, home, far) = walker_and_far_target(&w);
+    let walk = |mut w: World, on: bool, lod_: Lod| {
+        if let Some(l) = w.config.legs.as_mut() {
+            l.timeout_spares_legs = on;
+        }
+        set_out(&mut w, who, home, far, lod_);
+        let tick = w.tick;
+        let b = w.comp_mut::<Brain>(who).expect("brain");
+        if lod_ == Lod::Coarse {
+            // The plan is old: the timeout passes on the way.
+            b.plan.as_mut().expect("plan").started_tick = tick.saturating_sub(timeout - 60);
+        } else {
+            let door = w.comp::<Building>(far).expect("far").door;
+            let target = citysim::exec::GotoTarget { dest: LocationKey::TargetHome, tile: door, building: Some(far) };
+            let b = w.comp_mut::<Brain>(who).expect("brain");
+            b.exec = ExecState::GotoTimed { target, arrive_tick: tick + timeout + 30, blocked_since: None };
+        }
+        let (legs, arrived, _) = walk_segments(&mut w, who, far, timeout + 2 * TICKS_PER_DAY / 3);
+        (arrived, legs.len())
+    };
+    let (on, n) = walk(w.clone(), true, Lod::Coarse);
+    assert!(on && n >= 2, "on: the old plan's segmented walk arrives ({n} segments)");
+    assert!(!walk(w.clone(), false, Lod::Coarse).0, "off (the base): cut at the timeout");
+    assert!(walk(w.clone(), true, Lod::Full).0, "on: the long timed leg arrives");
+    assert!(!walk(w, false, Lod::Full).0, "off (the base): cut 30 ticks short");
+}
+
 /// A guard escorting a cuffed suspect from `from` (a street tile).
 fn escort_from(w: &mut World, from: TilePos) -> (EntityId, EntityId) {
     let guard = w

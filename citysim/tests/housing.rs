@@ -950,6 +950,7 @@ fn test_company_floors_close_with_their_workplace() {
 fn nights(w: &mut World, n: u32, done: impl Fn(&World) -> bool) -> Option<u32> {
     for night in 1..=n {
         w.tick = (w.tick / TICKS_PER_DAY + 1) * TICKS_PER_DAY;
+        citysim::systems::commute::job_moves(w);
         life::relocate(w);
         if done(w) {
             return Some(night);
@@ -1042,7 +1043,7 @@ fn test_far_commuter_with_no_home_takes_a_nearer_job() {
     );
     let mut off = w.clone();
     off.config.commute_pressure = None;
-    let span = u32::from(cfg.job_days + cfg.retry_days);
+    let span = u32::from(cfg.job_days + cfg.retry_days) + 1;
     let switched = |x: &World| x.comp::<Job>(a).and_then(|j| j.employer) == Some(to);
     assert_eq!(nights(&mut off, span, switched), None, "off (the base): no nearer job");
     let night = nights(&mut w, span, switched).expect("on: a nearer post");

@@ -43,6 +43,9 @@ pub fn run(world: &mut World) {
     // Scale S5: the Ambient tier's donors and district aggregates, before
     // the job search reads its labour pool (nothing without the tier).
     crate::prof::timed!("demo::ambient::daily", crate::systems::ambient::daily(world));
+    // The island pass phase 4 (I2): a far commuter with no Home found takes
+    // a nearer post of his role first (nothing off).
+    crate::prof::timed!("demo::commute::job_moves", crate::systems::commute::job_moves(world));
     crate::prof::timed!("demo::job_search", job_search(world));
     // Jobs and room J19: the day's labour market for the migrants' means.
     crate::prof::timed!("demo::note_labour_market", note_labour_market(world));
