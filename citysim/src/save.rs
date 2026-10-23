@@ -292,7 +292,10 @@ use crate::world::World;
 /// only when set), `World.company_notice` (written only when non-empty) and
 /// the `Jobs2Cols` 3b company columns (written only when non-zero). An off
 /// save is byte-identical to version 55's.
-pub const SAVE_VERSION: u8 = 56;
+/// 57 (the island pass phase 3c, OPEN-177): `Config.mood` (`[mood.housing]`,
+/// written only when set; serde default empty). An off save is
+/// byte-identical to version 56's.
+pub const SAVE_VERSION: u8 = 57;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

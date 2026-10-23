@@ -830,6 +830,118 @@ fn test_buyout_notice_evicts_the_tenant_after_the_grace_staff_stays() {
     assert!(off.company_homes.is_empty());
 }
 
+/// Phase 3c's setup: the seed-42 city with its company beds seeded as
+/// floors inside the workplaces (`far_ticks` 0, as the 3b test). Returns
+/// `(world, h, wp)`: the lowest-id floors with residents and their workplace.
+fn floors_setup() -> (World, EntityId, EntityId) {
+    let mut w = base();
+    w.company_homes.clear();
+    w.company_lapsed.clear();
+    w.config.company_housing.as_mut().expect("[company_housing] on").far_ticks = 0;
+    citysim::systems::company::seed(&mut w);
+    let (h, wp) = w
+        .company_homes
+        .iter()
+        .find(|&(&h, &wp)| !w.residents_of(h).is_empty() && w.comp::<Building>(h).is_some_and(|b| b.within == Some(wp)))
+        .map(|(&h, &wp)| (h, wp))
+        .expect("seeded floors with residents");
+    (w, h, wp)
+}
+
+/// The island pass phase 3c (OPEN-177): a resident of a crowded company
+/// floor (one storey, 30 to it) is set a lower mood target than the same
+/// agent in an uncrowded plain Home of the same tier: crowding, the
+/// floor's factor and the company bed. The base (`[mood.housing]` off)
+/// sets both the same target.
+#[test]
+fn test_crowded_company_floor_lowers_the_mood_target() {
+    let (mut w, h, _) = floors_setup();
+    let tier = w.comp::<Building>(h).expect("floors").tier;
+    // Crowd it: one storey, 30 residents (unmarried adults, lowest id first).
+    w.comp_mut::<Building>(h).expect("floors").floors = 1;
+    w.comp_mut::<Building>(h).expect("floors").capacity = 30;
+    let movers: Vec<EntityId> = common::adults(&w)
+        .into_iter()
+        .filter(|&x| home_of(&w, x) != Some(h) && w.spouse_of(x).is_none())
+        .take(30usize.saturating_sub(w.residents_of(h).len()))
+        .collect();
+    for x in movers {
+        w.set_home(x, Some(h));
+    }
+    assert!(w.residents_of(h).len() >= 30, "the floor is crowded");
+    let a = *w.residents_of(h).iter().find(|&&r| w.has::<Brain>(r)).expect("an adult on the floor");
+    // The same agent in a plain Home of the tier with room for one more.
+    let plain = w
+        .buildings_of_kind(BuildingKind::Home)
+        .iter()
+        .copied()
+        .find(|&p| {
+            citysim::systems::company::open_to_all(&w, p)
+                && w.comp::<Building>(p).is_some_and(|b| {
+                    !b.demolished
+                        && !b.derelict
+                        && b.tier == tier
+                        && b.within.is_none()
+                        && (w.residents_of(p).len() as u16) < b.capacity
+                })
+        })
+        .expect("a plain Home of the tier with room");
+    let mut elsewhere = w.clone();
+    elsewhere.set_home(a, Some(plain));
+    let target = |w: &mut World| {
+        w.tick = (w.tick / TICKS_PER_HOUR + 1) * TICKS_PER_HOUR;
+        if let Some(m) = w.comp_mut::<citysim::components::Mood>(a) {
+            m.value = 0.0;
+        }
+        citysim::mood::run(w);
+        w.comp::<citysim::components::Mood>(a).expect("mood").value
+    };
+    let (mut off_floor, mut off_plain) = (w.clone(), elsewhere.clone());
+    let (on_floor, on_plain) = (target(&mut w), target(&mut elsewhere));
+    assert!(on_floor < on_plain, "on: the crowded company floor sets a lower target ({on_floor} vs {on_plain})");
+    let cfg = w.config.mood.housing.clone().expect("[mood.housing] on");
+    assert!(
+        citysim::mood::housing_bias(&w, a) <= cfg.tier[usize::from(tier.min(2))] - cfg.crowd_w * 3.0 - cfg.company,
+        "crowding and the company bed both count"
+    );
+    off_floor.config.mood.housing = None;
+    off_plain.config.mood.housing = None;
+    let (f, p) = (target(&mut off_floor), target(&mut off_plain));
+    assert!((f - p).abs() < 1e-6, "off (the base): the Home sets no target ({f} vs {p})");
+}
+
+/// The island pass phase 3c (the 3b loose end): company floors inside a
+/// workplace that is gone close with it at midnight: the residents are
+/// evicted the normal way (an `Evicted` line each), the record is
+/// demolished and dropped from the Home index, a `Derelict` line logs it.
+/// The base left them standing as a plain Home in the dead workplace.
+#[test]
+fn test_company_floors_close_with_their_workplace() {
+    let (mut w, h, wp) = floors_setup();
+    let residents: Vec<EntityId> = w.residents_of(h).to_vec();
+    w.comp_mut::<Building>(wp).expect("workplace").demolished = true;
+    midnight(&mut w);
+    let b = w.comp::<Building>(h).expect("floors");
+    assert!(b.demolished && b.occupants.is_empty(), "the floors are demolished with the workplace");
+    assert!(!w.buildings_of_kind(BuildingKind::Home).contains(&h), "dropped from the Home index");
+    assert!(!w.company_homes.contains_key(&h), "no longer company housing");
+    assert!(w.residents_of(h).is_empty(), "nobody lives there");
+    for &r in &residents {
+        assert_ne!(home_of(&w, r), Some(h), "every resident put out");
+    }
+    let adult = residents.iter().copied().find(|&r| w.has::<Brain>(r)).expect("an adult resident");
+    assert!(
+        w.events.iter().any(|e| e.kind == EventKind::Evicted
+            && e.actors.first() == Some(&adult)
+            && e.text.contains("company floors closed")),
+        "an Evicted line for the resident"
+    );
+    assert!(
+        w.events.iter().any(|e| e.kind == EventKind::Derelict && e.actors.first() == Some(&h)),
+        "a Derelict line for the floors"
+    );
+}
+
 fn env<T: std::str::FromStr>(k: &str) -> Option<T> {
     std::env::var(k).ok().and_then(|v| v.parse().ok())
 }
@@ -1026,5 +1138,41 @@ fn housing_churn_rows() {
     }
     for s in sample {
         println!("HD   {s}");
+    }
+}
+
+/// The island pass phase 3c's device rows (print only): a save's adults
+/// (`CITYSIM_HM_SAVE`, a `run --save-at` file) by housing kind (company
+/// floors in a workplace, a company block apart, a plain Home by tier, the
+/// homeless): n, mean mood, the share below `low_mood` (`[demography]
+/// emigrate_mood`) and the mean `mood::housing_bias`.
+#[test]
+#[ignore = "tier: diag"]
+fn housing_mood_rows() {
+    let Ok(path) = std::env::var("CITYSIM_HM_SAVE") else {
+        println!("HM set CITYSIM_HM_SAVE to a save file");
+        return;
+    };
+    let w = citysim::save::load_from_file(std::path::Path::new(&path)).expect("a save");
+    let low = w.config.demography.emigrate_mood;
+    let mut rows: BTreeMap<&str, (u32, f64, u32, f64)> = BTreeMap::new();
+    for a in common::adults(&w) {
+        let Some(m) = w.comp::<citysim::components::Mood>(a).map(|m| m.value) else { continue };
+        let kind = match home_of(&w, a).and_then(|h| w.comp::<Building>(h).map(|b| (h, b))) {
+            None => "homeless",
+            Some((h, b)) if w.company_homes.contains_key(&h) && b.within.is_some() => "company floor",
+            Some((h, _)) if w.company_homes.contains_key(&h) => "company block",
+            Some((_, b)) => ["home Sump", "home Mid", "home Spire"][usize::from(b.tier.min(2))],
+        };
+        let r = rows.entry(kind).or_default();
+        r.0 += 1;
+        r.1 += f64::from(m);
+        r.2 += u32::from(m < low);
+        r.3 += f64::from(citysim::mood::housing_bias(&w, a));
+    }
+    println!("HM kind | n | mean mood | below low_mood {low} | mean housing_bias");
+    for (k, (n, sum, below, bias)) in rows {
+        let n1 = f64::from(n.max(1));
+        println!("HM {k} | {n} | {:.3} | {:.3} | {:.3}", sum / n1, f64::from(below) / n1, bias / n1);
     }
 }

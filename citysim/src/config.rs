@@ -346,6 +346,49 @@ pub struct Config {
     /// into a save) with `CITYSIM_COMPANY_HOUSING_OFF=1`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub company_housing: Option<CompanyHousingCfg>,
+    /// The island pass phase 3c (OPEN-177): `[mood.*]`, the mood terms read
+    /// from config. Empty (not written into a save) with
+    /// `CITYSIM_HOUSING_MOOD_OFF=1`.
+    #[serde(default, skip_serializing_if = "MoodCfg::is_empty")]
+    pub mood: MoodCfg,
+}
+
+/// `[mood]`: the hourly mood target's config-read terms (the older terms
+/// read their own sections: `[litter] mood`, `[fashion] status_w`, ...).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct MoodCfg {
+    /// The island pass phase 3c (OPEN-177): `[mood.housing]`, the Home's
+    /// term (`mood::housing_bias`). `None`: no term.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub housing: Option<MoodHousingCfg>,
+}
+
+impl MoodCfg {
+    pub fn is_empty(&self) -> bool {
+        self.housing.is_none()
+    }
+}
+
+/// `[mood.housing]` (docs/ISLAND_PASS.md phase 3c, OPEN-177): a flat bias
+/// on the hourly mood target from the agent's Home. The homeless read none
+/// (sleeping rough already costs energy and safety). Every value a
+/// placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MoodHousingCfg {
+    /// By the Home's tier (Sump, Mid, Spire).
+    pub tier: [f32; 3],
+    /// Crowding: `crowd_w x min(excess, crowd_max) x factor`, the excess
+    /// the residents a floor over `[buildings] home` capacity (a plain
+    /// Block's beds a floor), less 1.
+    pub crowd_w: f32,
+    pub crowd_max: f32,
+    /// The factor for company floors inside a workplace above it (dorm
+    /// storeys, container bunks), and below it (`[company_housing.inside]
+    /// rooms` `below`: the coffin racks). Any other Home's is 1.
+    pub inside_factor: f32,
+    pub below_factor: f32,
+    /// A bed in company housing (the company town's grip): subtracted.
+    pub company: f32,
 }
 
 /// The island pass phase 3a `[company_housing]` (docs/ISLAND_PASS.md I6):
@@ -8662,6 +8705,11 @@ impl Config {
                 c.inside = None;
                 c.buyout = None;
             }
+        }
+        // The island pass phase 3c (OPEN-177): the housing mood term's
+        // switch in flight (doctrine 6).
+        if std::env::var("CITYSIM_HOUSING_MOOD_OFF").is_ok_and(|v| v == "1") {
+            cfg.mood.housing = None;
         }
         // Lives at work (D13): a config with `[lives] enabled = false` by any
         // path clears the milestone's sections, so the off save holds no
