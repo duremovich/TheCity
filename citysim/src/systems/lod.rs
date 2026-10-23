@@ -572,6 +572,11 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
     if lod == Lod::Statistical {
         if brain.plan.is_some() {
             let goal = brain.plan_goal();
+            // The island pass phase 9: off screen the body is snapped below,
+            // so a walk is not set down on its way first (no road search).
+            if let Some(ExecState::GotoTimed { walk, .. }) = world.comp_mut::<Brain>(id).map(|b| &mut b.exec) {
+                *walk = None;
+            }
             world.abort_plan(id);
             world.push_event(EventKind::PlanAborted, &[id], format!("{goal:?} LodDemotion"));
         }
@@ -634,10 +639,17 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
         crate::systems::contracts::on_promoted(world, id);
         return;
     }
-    let exec = brain.exec.clone();
     // The island pass phase 5 (I3): a rider aboard a timed vehicle stays
     // aboard a promotion (his leg runs on at Full).
     let riding = crate::systems::motion::vehicle_of(world, id).is_some();
+    // The island pass phase 9 (OPEN-181): a Coarse walker promoted mid-walk
+    // is set down where his walk has him now; the Full walk goes on from
+    // there.
+    if lod == Lod::Full && !riding {
+        exec::settle_walk(world, id);
+    }
+    let Some(brain) = world.comp::<Brain>(id) else { return };
+    let exec = brain.exec.clone();
     let new_exec = match (exec, lod) {
         (state @ ExecState::GotoTimed { .. }, Lod::Full) if riding => state,
         (ExecState::Goto { target, .. }, Lod::Coarse) => exec::timed_goto(world, id, target),

@@ -206,6 +206,16 @@ fn way(world: &World, from: TilePos, to: TilePos, straight: bool) -> Vec<TilePos
         return vec![from, to];
     }
     let road = world.config.motion.as_ref().is_some_and(|m| m.road_route);
+    walk_way(world, from, to, road)
+}
+
+/// The way from `from` to `to`: the corners of the road path when `road`
+/// (the big map's A*, else the grid A*), else (or with no path) an L. The
+/// island pass phase 9: a Coarse walk's way (`exec::walk_route`).
+pub fn walk_way(world: &World, from: TilePos, to: TilePos, road: bool) -> Vec<TilePos> {
+    if from == to {
+        return vec![from, to];
+    }
     let path = if !road {
         None
     } else if world.big_paths() {

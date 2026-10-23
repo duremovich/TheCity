@@ -4479,6 +4479,16 @@ capacity = 400                     # riders aboard one train; a full train leave
 capacity = 8                       # prisoners one transfer van carries; more due at a Station send another. Placeholder
                                    # (a Station holds [law] station_cells 6, so it never binds there)
 
+# The island pass phase 9 (docs/ISLAND_PASS.md row 9; OPEN-181; exec::walk_place): a Coarse body's timed walk on foot keeps
+# its body on its way. The walk stores its start (the tile and the tick); its place at any tick is the point along the
+# way at the walk's pace over its own ticks (the arrival is unchanged), computed when it is read (the view, a promotion,
+# an interrupt), never moved per tick. A promotion to Full mid-walk sets the body down on its way and the Full walk goes
+# on from there. CITYSIM_COARSE_WALK_OFF=1 drops it (the switch in flight).
+[motion.walks]
+road_route = true                  # the walk's way follows the road path (the Full walk's A*); false: an L, x then y
+settle_interrupt = true            # a walk cut short (its plan dropped or replaced) leaves the body where it stands on its
+                                   # way; false: back at the walk's start, as before
+
 # The island pass phase 8 (docs/ISLAND_PASS.md I4; OPEN-168 part): the dead trades' bugs. On the island the Yards sit
 # in a cluster at the Vats' edge, 100-1,000 tiles from most of what they serve, so the base's tile-radius rules found
 # nothing in reach: the courier's parcels went to no address, the builder's sites were all past haul_reach, the one
