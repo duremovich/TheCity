@@ -1403,6 +1403,7 @@ fn probe_worker_eats_before_the_shift_not_during_it() {
 fn probe_worker_stocks_the_pantry_off_shift() {
     let mut w = world();
     w.run_ticks(2 * TICKS_PER_DAY + 19 * TICKS_PER_HOUR);
+    let day = 2;
     let a = day_workers(&w)
         .into_iter()
         .find(|&a| {
@@ -1429,6 +1430,22 @@ fn probe_worker_stocks_the_pantry_off_shift() {
         b.stock_food = 0;
         b.synth_food = 0;
     }
+    // Housemates with no coins and no food carried: the grocery run is his,
+    // not a housemate's (the fixture city has three day workers who live
+    // alone, none at home at 19:00, so the scene is usually a household).
+    for r in w.residents_of(h).to_vec() {
+        if r == a {
+            continue;
+        }
+        if let Some(wl) = w.comp_mut::<Wallet>(r) {
+            wl.coins = 0;
+        }
+        if let Some(i) = w.comp_mut::<Inventory>(r) {
+            i.food = 0;
+            i.synth = 0;
+            i.stolen_food = 0;
+        }
+    }
     w.comp_mut::<Wallet>(a).expect("wallet").coins = 60;
     // The shelves are stocked: a grocery run needs food on sale, and the
     // fixture city's Market stock at 19:00 moves with every table regen.
@@ -1440,7 +1457,7 @@ fn probe_worker_stocks_the_pantry_off_shift() {
     let mut most = 0u32;
     let mut seen: Vec<ActionKind> = Vec::new();
     let mut spent_back_home: Option<i64> = None;
-    run_to(&mut w, a, 2 * TICKS_PER_DAY + 23 * TICKS_PER_HOUR, |w| {
+    run_to(&mut w, a, day * TICKS_PER_DAY + 23 * TICKS_PER_HOUR, |w| {
         let held = w.comp::<Building>(h).map_or(0, |b| b.stock_food)
             + w.comp::<Inventory>(a).map_or(0, |i| i.food - i.stolen_food);
         most = most.max(held);
