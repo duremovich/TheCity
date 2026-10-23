@@ -670,3 +670,62 @@ fn test_the_corner_stands_at_every_yard_and_queues_by_travel() {
     assert_eq!(u_on, 0, "every open Yard has its corner");
     assert!(q_on > q_off, "the off-screen broke queue by travel ({q_on} vs the base's {q_off})");
 }
+
+/// Phase 8 (OPEN-168, the arms dealer): a gang that deals at a corner had no
+/// dealer registered at any Bar, and the arms trade sells only at a dealer's
+/// Bar (`weapons::bar_arms_dealer`): no arms dealer existed. With
+/// `corner_arms` a gang holding an armoury surplus deals from its Bar, and
+/// its dealer there is the arms dealer (`sale_open`).
+#[test]
+fn test_a_gang_with_surplus_arms_deals_from_a_bar() {
+    use citysim::systems::{gang, stims, weapons};
+    let site = |on: bool| {
+        let mut w = trades_world(on, |_| {});
+        // The HangOut spots stand (the first hour builds them).
+        w.run_ticks(TICKS_PER_HOUR);
+        // The island's gangs hold no venue to deal in (the 2k city's all deal
+        // at a Club): none of the venue kinds stands.
+        let venues = [
+            BuildingKind::FightPit,
+            BuildingKind::Den,
+            BuildingKind::Club,
+            BuildingKind::StripClub,
+            BuildingKind::Brothel,
+            BuildingKind::Dollhouse,
+        ];
+        for c in venues.iter().flat_map(|&k| w.buildings_of_kind(k).to_vec()).collect::<Vec<_>>() {
+            if let Some(b) = w.comp_mut::<citysim::Building>(c) {
+                b.derelict = true;
+            }
+        }
+        let g = w
+            .gangs()
+            .into_iter()
+            .find(|&g| matches!(stims::deal_site(&w, g), Some(stims::DealSite::Corner(_))))
+            .expect("a gang dealing at a corner");
+        let h = w.hideout_of(g).expect("a hideout");
+        let p = citysim::Provenance { how: citysim::ProvKind::Granted, by: None, at: w.tick };
+        // Over the armoury's target with a member or two more (the dealer).
+        for _ in 0..4 {
+            weapons::spawn_weapon(&mut w, 1, Some(g), citysim::AssetLoc::Stock(h), p, true).expect("a weapon");
+        }
+        assert!(weapons::has_surplus(&w, g), "an armoury surplus");
+        let s = stims::deal_site(&w, g);
+        (w, g, s)
+    };
+    let (_, _, off) = site(false);
+    assert!(matches!(off, Some(stims::DealSite::Corner(_))), "the base deals at the corner: {off:?}");
+    let (mut w, g, on) = site(true);
+    let Some(stims::DealSite::Venue(bar)) = on else { panic!("the gang deals from a Bar: {on:?}") };
+    let d = jobless(&w).into_iter().find(|&a| !w.has::<citysim::GangMember>(a)).expect("a recruit");
+    gang::enlist(&mut w, d, g);
+    w.remove_from_building(d);
+    let tile = door_of(&w, bar);
+    if let Some(p) = w.comp_mut::<citysim::Position>(d) {
+        p.building = Some(bar);
+        p.tile = tile;
+    }
+    assert!(!weapons::sale_open(&w, bar), "no dealer registered yet");
+    stims::start_deal(&mut w, d, bar);
+    assert!(weapons::sale_open(&w, bar), "the gang's dealer at the Bar sells its arms");
+}
