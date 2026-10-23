@@ -224,6 +224,12 @@ fn test_dawn_pick_contacts_first_and_the_day_post_ends() {
         // The contact's rank alone: the queue spans the map (the reach), so
         // the island pass phase 1's job cap (a labourer within it first) is off.
         c.distance = None;
+        // One corner a district (the island pass phase 8's corner at every
+        // Yard splits the 40 between the 2k city's Yards: the contact's rank
+        // is the mechanism here, not where he queues).
+        if let Some(t) = c.island_trades.as_mut() {
+            t.corner_per_yard = false;
+        }
     });
     let yard = w.buildings_of_kind(BuildingKind::ConstructionYard)[0];
     let corp = w.corps()[0];
@@ -505,4 +511,246 @@ fn test_bug6_elder_opens_a_vendor_pitch_at_the_nearest_spot() {
     let kind = w.config.trade(p.trade).and_then(streetwork::pitch_kind);
     assert_eq!(kind, Some(streetwork::PitchKind::Vendor), "an elder vends");
     assert_eq!(p.spot.manhattan(home), nearest, "the free spot nearest home");
+}
+
+// ---------------------------------------------------------------------------
+// The island pass phase 8 (docs/ISLAND_PASS.md I4; OPEN-168): the dead
+// trades' bugs. Each test runs the mechanism with `[island_trades]` and
+// shows the base (the section dropped, `CITYSIM_TRADES_OFF=1`) failing it.
+// ---------------------------------------------------------------------------
+
+/// The world with `[island_trades]` (`on`) or without it (the base).
+fn trades_world(on: bool, f: impl FnOnce(&mut Config)) -> World {
+    world_with(|c| {
+        if !on {
+            c.island_trades = None;
+        }
+        f(c);
+    })
+}
+
+fn door_of(w: &World, b: EntityId) -> citysim::TilePos {
+    w.comp::<citysim::Building>(b).expect("a building").door
+}
+
+/// Phase 8 (OPEN-168, the courier): with `[jobs2] site_reach` 0 every corp's
+/// buildings lie past the tile radius of every Yard (the island's Yards sit
+/// 100-1,000 tiles from what they serve), and the base names a parcel only
+/// to a building at the Yard's own door (the Yard, its company floors): the
+/// couriers carry nothing off the Yard. The fix routes a corp's parcels
+/// through the Yard with its staffed buildings within `parcel_cap_ticks` of
+/// travel, and every named parcel's address lies within the cap.
+#[test]
+fn test_parcels_go_to_recipients_in_travel_reach() {
+    let named = |on: bool| {
+        let mut w = trades_world(on, |c| c.jobs2.site_reach = 0);
+        w.jobs2.parcels.clear();
+        streetwork::daily(&mut w);
+        let cap = w.config.island_trades.as_ref().map_or(u64::MAX, |c| c.parcel_cap_ticks);
+        for p in &w.jobs2.parcels {
+            let t = citysim::systems::distance::travel(&w, door_of(&w, p.yard), door_of(&w, p.at));
+            assert!(t <= cap, "parcel to {} is {t} ticks from its Yard (cap {cap})", p.at.index);
+            assert!(!w.staff_of(p.at).is_empty(), "a recipient building with staff to sign");
+        }
+        // (named off the Yard's door, named)
+        let away = w.jobs2.parcels.iter().filter(|p| door_of(&w, p.at) != door_of(&w, p.yard)).count();
+        (away, w.jobs2.parcels.len())
+    };
+    let (on, off) = (named(true), named(false));
+    eprintln!("parcels off the Yard's door: on {on:?}, base {off:?}");
+    assert!(on.0 > 0 && on.0 == on.1, "every parcel named to a building off the Yard: {on:?}");
+    assert_eq!(off.0, 0, "the base names none off the Yard past site_reach (the test's precondition): {off:?}");
+}
+
+/// Phase 8 (OPEN-168, the builder): a Construction Yard whose open sites all
+/// lie past `[shift.haul] haul_reach` ran every trip inside the Yard (the
+/// island's nearest Yard is 170-1,100 tiles from a site). With `site_day`
+/// the Builder carries a load to the nearest site, sets it down there and
+/// works the rest of the shift on it; the shift closes and is paid.
+#[test]
+fn test_builder_works_a_far_site_for_the_day() {
+    let builder_role = |w: &World| trade(w, "builder");
+    let setup = |on: bool| {
+        let mut w = trades_world(on, |_| {});
+        w.run_ticks(citysim::TICKS_PER_DAY + 5 * TICKS_PER_HOUR);
+        let role = builder_role(&w);
+        let reach = w.config.shift.as_ref().and_then(|c| c.haul.as_ref()).map_or(0, |h| h.haul_reach);
+        let (a, yard) = w
+            .citizens()
+            .into_iter()
+            .filter(|&a| citysim::systems::law::living(&w, a) && !w.has::<citysim::Sentence>(a))
+            .find_map(|a| {
+                let j = w.comp::<Job>(a)?;
+                let e = j.employer?;
+                let key = j.next_shift_key(w.tick);
+                (j.role == role
+                    && j.shifts.len() == 1
+                    && j.shifts.iter().all(|&(s, e)| s >= 360 && e <= 1200)
+                    && citysim::exec::routine::workday_of(&w, a, j, key)
+                    && w.comp::<citysim::Household>(a).is_some_and(|h| h.home.is_some()))
+                .then_some((a, e))
+            })
+            .expect("a Builder on a day shift");
+        // One open site, past haul_reach and an hour or two away.
+        let yd = door_of(&w, yard);
+        let site = w
+            .buildings_by_kind
+            .get(&BuildingKind::Home)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|&b| w.comp::<citysim::Building>(b).is_some_and(|x| !x.demolished && !x.derelict))
+            .map(|b| (citysim::systems::distance::travel(&w, yd, door_of(&w, b)), b))
+            .filter(|&(t, b)| (60..=120).contains(&t) && door_of(&w, b).manhattan(yd) > reach)
+            .min()
+            .map(|(_, b)| b)
+            .expect("a Block an hour or two from the Yard");
+        let tick = w.tick;
+        w.jobs2.sites.retain(|_, &mut (y, _)| y != yard);
+        w.jobs2.sites.insert(site, (yard, tick));
+        (w, a, yard, site)
+    };
+    // The base: no destination in reach, the trips stay inside the Yard.
+    let (w, a, yard, _) = setup(false);
+    assert!(citysim::systems::shift::haul_dests(&w, a, yard).is_empty(), "the base has no far site");
+    let (mut w, a, yard, site) = setup(true);
+    assert_eq!(citysim::systems::shift::haul_dests(&w, a, yard), vec![site], "the far site is the day's destination");
+    citysim::systems::lod::set_lod(&mut w, a, citysim::Lod::Full);
+    let key = w.comp::<Job>(a).expect("job").next_shift_key(w.tick);
+    let before = j2(&w).site_days;
+    let (mut unload, mut work) = (false, false);
+    let end = w.tick + 16 * TICKS_PER_HOUR;
+    while w.tick < end {
+        w.comp_mut::<Brain>(a).expect("brain").pinned = true;
+        w.run_ticks(1);
+        let here = w.comp::<citysim::Position>(a).and_then(|p| p.building);
+        if let citysim::ExecState::Use { kind, .. } = w.comp::<Brain>(a).expect("brain").exec {
+            unload |= here == Some(site) && kind == citysim::ActionKind::Unload;
+            work |= here == Some(site) && kind.is_work();
+        }
+    }
+    eprintln!("builder {} yard {} site {}: unload {unload}, work {work}", a.index, yard.index, site.index);
+    assert!(unload, "the load set down at the site");
+    assert!(work, "the rest of the shift worked at the site");
+    assert!(j2(&w).site_days > before, "the site day counted");
+    assert_eq!(w.comp::<Job>(a).expect("job").last_shift_day, Some(key), "the shift closed (paid) at the site");
+}
+
+/// Phase 8 (OPEN-168, the foreman): the corner stands outside every open
+/// Yard (one within `corner_tiles` of another sharing it), and an
+/// off-screen broke jobless past `corner_stat_reach` tiles queues at the
+/// corner nearest by travel within `corner_stat_ticks`. With the tile reach
+/// cut to 0 (the island's Yards at the Vats' edge, the homes far in tiles)
+/// the base's dawn queue is the bodies standing at a corner, here none.
+#[test]
+fn test_the_corner_stands_at_every_yard_and_queues_by_travel() {
+    let queue = |on: bool| {
+        let mut w = trades_world(on, |c| c.jobs2.corner_stat_reach = 0);
+        let corners = streetwork::corners(&w);
+        let reach = w.config.jobs2.corner_tiles;
+        let yards: Vec<EntityId> = [BuildingKind::ConstructionYard, BuildingKind::FreightYard]
+            .iter()
+            .flat_map(|&k| w.buildings_of_kind(k).to_vec())
+            .filter(|&y| industry::open(&w, y))
+            .collect();
+        let uncovered = yards
+            .iter()
+            .filter(|&&y| {
+                let t = w.outside_door(w.comp::<citysim::Building>(y).expect("a yard"));
+                !corners.iter().any(|&(_, c)| c.manhattan(t) <= reach)
+            })
+            .count();
+        let hour = u64::from(w.config.jobs2.corner_hour);
+        w.run_ticks(hour + 1);
+        (uncovered, yards.len(), corners.len(), j2(&w).corner_queue)
+    };
+    let (u_on, n, c_on, q_on) = queue(true);
+    let (u_off, _, c_off, q_off) = queue(false);
+    eprintln!("yards {n}: corners {c_on} (base {c_off}), uncovered {u_on} (base {u_off}), queue {q_on} (base {q_off})");
+    assert_eq!(u_on, 0, "every open Yard has its corner");
+    assert!(q_on > q_off, "the off-screen broke queue by travel ({q_on} vs the base's {q_off})");
+}
+
+/// Phase 8 (OPEN-168, the cab): a Garage's first `cab_quota` cab drivers on
+/// shift rank with the gangs (class 2), so a 20k city's body budget holds a
+/// driver; the base ranked them with the civilians (0), and at 20k none was
+/// a body (`book_cab` found no driver: the off-screen cab drove every fare).
+#[test]
+fn test_cab_drivers_on_shift_keep_a_body() {
+    let drivers = |on: bool| {
+        let mut w = trades_world(on, |_| {});
+        w.run_ticks(citysim::TICKS_PER_DAY + 11 * TICKS_PER_HOUR);
+        let set = streetwork::cab_body_set(&w);
+        let classes: Vec<i32> = set
+            .iter()
+            .filter(|&&s| !w.has::<citysim::GangMember>(s))
+            .map(|&s| citysim::systems::lod::rank_class(&w, s))
+            .collect();
+        (set.len(), classes)
+    };
+    let (n_on, on) = drivers(true);
+    let (n_off, _) = drivers(false);
+    eprintln!("cab drivers kept: {n_on} (base {n_off}); classes {on:?}");
+    assert!(n_on > 0, "a cab driver on shift is in the set");
+    assert!(on.iter().all(|&c| c >= 2), "ranked with the gangs");
+    assert_eq!(n_off, 0, "the base keeps none");
+}
+
+/// Phase 8 (OPEN-168, the arms dealer): a gang that deals at a corner had no
+/// dealer registered at any Bar, and the arms trade sells only at a dealer's
+/// Bar (`weapons::bar_arms_dealer`): no arms dealer existed. With
+/// `corner_arms` a gang holding an armoury surplus deals from its Bar, and
+/// its dealer there is the arms dealer (`sale_open`).
+#[test]
+fn test_a_gang_with_surplus_arms_deals_from_a_bar() {
+    use citysim::systems::{gang, stims, weapons};
+    let site = |on: bool| {
+        let mut w = trades_world(on, |_| {});
+        // The HangOut spots stand (the first hour builds them).
+        w.run_ticks(TICKS_PER_HOUR);
+        // The island's gangs hold no venue to deal in (the 2k city's all deal
+        // at a Club): none of the venue kinds stands.
+        let venues = [
+            BuildingKind::FightPit,
+            BuildingKind::Den,
+            BuildingKind::Club,
+            BuildingKind::StripClub,
+            BuildingKind::Brothel,
+            BuildingKind::Dollhouse,
+        ];
+        for c in venues.iter().flat_map(|&k| w.buildings_of_kind(k).to_vec()).collect::<Vec<_>>() {
+            if let Some(b) = w.comp_mut::<citysim::Building>(c) {
+                b.derelict = true;
+            }
+        }
+        let g = w
+            .gangs()
+            .into_iter()
+            .find(|&g| matches!(stims::deal_site(&w, g), Some(stims::DealSite::Corner(_))))
+            .expect("a gang dealing at a corner");
+        let h = w.hideout_of(g).expect("a hideout");
+        let p = citysim::Provenance { how: citysim::ProvKind::Granted, by: None, at: w.tick };
+        // Over the armoury's target with a member or two more (the dealer).
+        for _ in 0..4 {
+            weapons::spawn_weapon(&mut w, 1, Some(g), citysim::AssetLoc::Stock(h), p, true).expect("a weapon");
+        }
+        assert!(weapons::has_surplus(&w, g), "an armoury surplus");
+        let s = stims::deal_site(&w, g);
+        (w, g, s)
+    };
+    let (_, _, off) = site(false);
+    assert!(matches!(off, Some(stims::DealSite::Corner(_))), "the base deals at the corner: {off:?}");
+    let (mut w, g, on) = site(true);
+    let Some(stims::DealSite::Venue(bar)) = on else { panic!("the gang deals from a Bar: {on:?}") };
+    let d = jobless(&w).into_iter().find(|&a| !w.has::<citysim::GangMember>(a)).expect("a recruit");
+    gang::enlist(&mut w, d, g);
+    w.remove_from_building(d);
+    let tile = door_of(&w, bar);
+    if let Some(p) = w.comp_mut::<citysim::Position>(d) {
+        p.building = Some(bar);
+        p.tile = tile;
+    }
+    assert!(!weapons::sale_open(&w, bar), "no dealer registered yet");
+    stims::start_deal(&mut w, d, bar);
+    assert!(weapons::sale_open(&w, bar), "the gang's dealer at the Bar sells its arms");
 }

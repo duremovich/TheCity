@@ -315,7 +315,11 @@ use crate::world::World;
 /// (`RideKind::Van`, `RideKind::Foot`) and `World.van_runs` (written only
 /// when non-empty): a save mid-escort or mid-transfer resumes the van and
 /// its prisoners. An off save is byte-identical to version 60's.
-pub const SAVE_VERSION: u8 = 61;
+/// 62 (the island pass phase 8, OPEN-168, I4): `Config.island_trades`
+/// (`[island_trades]`, written only when set; serde default `None`) and
+/// the `Jobs2Cols` `site_days` column (written only when non-zero). An off
+/// save is byte-identical to version 61's.
+pub const SAVE_VERSION: u8 = 62;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

@@ -359,6 +359,13 @@ pub struct Config {
     /// its boarding tile, then at the door).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub motion: Option<MotionCfg>,
+    /// The island pass phase 8 (docs/ISLAND_PASS.md I4; OPEN-168 part): the
+    /// dead trades' bugs (`[island_trades]`: the courier's and the builder's
+    /// destinations, the corner at every Yard, the cab's body driver, the
+    /// arms dealer at the corner). `None` (not written into a save) with
+    /// `CITYSIM_TRADES_OFF=1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub island_trades: Option<IslandTradesCfg>,
     /// The island pass phase 3c (OPEN-177): `[mood.*]`, the mood terms read
     /// from config. Empty (not written into a save) with
     /// `CITYSIM_HOUSING_MOOD_OFF=1`.
@@ -633,6 +640,44 @@ pub struct FreeDistanceCfg {
     /// A Mission's cot's offer over a paid Hotel bed, in travel ticks (it
     /// is free): the cot unless a Hotel is nearer by more than this.
     pub cot_bed_ticks: u64,
+}
+
+/// The island pass phase 8 `[island_trades]` (docs/ISLAND_PASS.md I4;
+/// OPEN-168 part). Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct IslandTradesCfg {
+    /// A corp's parcels go through the open Yard (with room) that has the
+    /// most of the corp's staffed buildings within this travel of its door
+    /// (`distance::travel`), those buildings the recipients; with none in
+    /// reach of any Yard, the base pick (the Yard nearest the corp's first
+    /// building, `[jobs2] site_reach`).
+    pub parcel_cap_ticks: u64,
+    /// The recipient buildings one corp's parcels go to (the base's six).
+    pub parcel_stops_max: u8,
+    /// A haul trip's estimate reads `distance::travel` for the carry (the
+    /// base: the doors' Manhattan distance at the walk's speed).
+    pub haul_travel: bool,
+    /// A Construction Yard's Builder whose Yard has open sites but none in
+    /// `[shift.haul] haul_reach` carries one load out to the nearest site and
+    /// works the rest of the shift there (the base: the trips ran inside the
+    /// Yard).
+    pub site_day: bool,
+    /// The labour corner stands outside every open Construction and Freight
+    /// Yard (one within `[jobs2] corner_tiles` of another shares it), not
+    /// one a district (the island's Yards sit 380 tiles from the Vats'
+    /// lowest-id one).
+    pub corner_per_yard: bool,
+    /// An off-screen broke jobless past `[jobs2] corner_stat_reach` tiles of
+    /// every corner queues at the corner nearest his Home by travel within
+    /// this (on `p_corner`, as the base's within the tiles).
+    pub corner_stat_ticks: u64,
+    /// The cab drivers on shift at each Garage that keep a body (ranked with
+    /// the gangs, `lod::class_with`), lowest id first.
+    pub cab_quota: u8,
+    /// A corner dealer whose gang holds an armoury surplus sells it at the
+    /// gang's deal Bar (`stims::deal_bar`, the nearest Bar when the gang
+    /// deals at a corner) as the base's bar dealer does.
+    pub corner_arms: bool,
 }
 
 /// The pre-view pass phase 6 `[leaders]` (docs/PREVIEW_PASS.md § 0 P9,
@@ -8824,6 +8869,11 @@ impl Config {
             if let Some(m) = cfg.motion.as_mut() {
                 m.vans = None;
             }
+        }
+        // The island pass phase 8 (OPEN-168 part, I4): the dead trades'
+        // bugs, the switch in flight (doctrine 6).
+        if std::env::var("CITYSIM_TRADES_OFF").is_ok_and(|v| v == "1") {
+            cfg.island_trades = None;
         }
         // The island pass phase 3c (OPEN-177): the housing mood term's
         // switch in flight (doctrine 6).

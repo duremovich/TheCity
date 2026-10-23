@@ -277,7 +277,61 @@ pub fn haul_dests(world: &World, id: EntityId, post: EntityId) -> Vec<EntityId> 
         .filter(|&(d, _)| d <= hc.haul_reach)
         .collect();
     near.sort_unstable();
-    near.into_iter().take(usize::from(hc.haul_dests_max)).map(|(_, b)| b).collect()
+    let out: Vec<EntityId> = near.into_iter().take(usize::from(hc.haul_dests_max)).map(|(_, b)| b).collect();
+    if out.is_empty() && bd.kind == BuildingKind::ConstructionYard {
+        if let Some(site) = far_site(world, post) {
+            return vec![site];
+        }
+    }
+    out
+}
+
+/// The island pass phase 8 (`[island_trades] site_day`; OPEN-168): a
+/// Construction Yard's open site nearest its door by travel (ties the lower
+/// id) when every site lies past `[shift.haul] haul_reach` (a Builder's
+/// shift then carries one load out and is worked there); `None` off or with
+/// none open.
+pub fn far_site(world: &World, post: EntityId) -> Option<EntityId> {
+    if !world.config.island_trades.as_ref().is_some_and(|c| c.site_day) {
+        return None;
+    }
+    let door = world.comp::<Building>(post)?.door;
+    crate::systems::industry::sites_of(world, post)
+        .into_iter()
+        .filter_map(|s| {
+            let x = world.comp::<Building>(s).filter(|x| !x.demolished)?;
+            Some((crate::systems::distance::travel(world, door, x.door), s))
+        })
+        .min()
+        .map(|(_, s)| s)
+}
+
+/// The island pass phase 8 (`site_day`): `b` is a far site of `post`, a
+/// haul destination past `haul_reach` (only `far_site` puts one in a
+/// Builder's shift).
+fn site_day_dest(world: &World, post: EntityId, b: EntityId) -> bool {
+    let Some(reach) = world.config.shift.as_ref().and_then(|c| c.haul.as_ref()).map(|h| h.haul_reach) else {
+        return false;
+    };
+    world.config.island_trades.as_ref().is_some_and(|c| c.site_day)
+        && b != post
+        && match (world.comp::<Building>(post), world.comp::<Building>(b)) {
+            (Some(p), Some(x)) => p.kind == BuildingKind::ConstructionYard && x.door.manhattan(p.door) > reach,
+            _ => false,
+        }
+}
+
+/// `exec::actions::can_work_now`: `id` stands in one of his Construction
+/// Yard's open sites (a site day, `[island_trades] site_day`), where the
+/// shift's rest is worked.
+pub fn on_site(world: &World, id: EntityId, job: &Job) -> bool {
+    if !world.config.island_trades.as_ref().is_some_and(|c| c.site_day) {
+        return false;
+    }
+    let (Some(post), Some(here)) = (job.employer, world.comp::<Position>(id).and_then(|p| p.building)) else {
+        return false;
+    };
+    world.jobs2.sites.get(&here).is_some_and(|&(y, _)| y == post)
 }
 
 /// The pre-view pass phase 3 (`haul`, § 1): the haul shift's next part:
@@ -360,11 +414,43 @@ fn haul_plan(
     // and back, the unload.
     let mt = world.config.exec.move_ticks_full.max(1);
     let back = if inside { 0 } else { crate::systems::fixes::walk_estimate(world, id, post_door) };
+    let haul_travel = world.config.island_trades.as_ref().is_some_and(|c| c.haul_travel);
     let trip = dest.map(|(b, _, _)| {
-        let d = world.comp::<Building>(b).map_or(0, |x| Tick::from(x.door.manhattan(post_door)) * mt);
+        let d = world.comp::<Building>(b).map_or(0, |x| {
+            // The island pass phase 8 (OPEN-168): the carry's travel estimate
+            // (the El where it wins), as the leg itself goes.
+            if haul_travel && b != post {
+                crate::systems::distance::travel(world, post_door, x.door)
+            } else {
+                Tick::from(x.door.manhattan(post_door)) * mt
+            }
+        });
         // A quarter over: a street walk is longer than the doors' distance.
         (back + 2 * handle + 2 * d) * 5 / 4
     });
+    // The island pass phase 8 (`site_day`): a far site is one way: the
+    // load, the carry, the unload, the rest of the shift there.
+    let site_day = dest.is_some_and(|(b, _, _)| site_day_dest(world, post, b));
+    let trip = match (site_day, dest) {
+        (true, Some((b, _, _))) => world
+            .comp::<Building>(b)
+            .map(|x| (back + 2 * handle + crate::systems::distance::travel(world, post_door, x.door)) * 5 / 4),
+        _ => trip,
+    };
+    // A site day under way (the Builder stands in the site, the load set
+    // down): the rest of the shift there.
+    if stage == 2 && pos.building.is_some_and(|b| site_day_dest(world, post, b)) && on_site(world, id, &job) {
+        let work = routine::work_action(world, job.role);
+        let s = world.comp_mut::<Brain>(id)?.shift.as_mut()?;
+        s.blocks = vec![0];
+        s.plan_tick = now;
+        return Some(Plan {
+            goal: GoalKind::Work,
+            target: Some(post),
+            steps: vec![step(work, Some(post), None)],
+            started_tick: now,
+        });
+    }
     let close = match trip {
         Some(t) => now + t + cutoff > end,
         None => true,
@@ -398,10 +484,15 @@ fn haul_plan(
             steps.push(step(ActionKind::GoTo(LocationKey::TargetHome), Some(b), None));
         }
         steps.push(step(ActionKind::Unload, Some(b), None));
+        if site_day {
+            // The rest of the shift at the site (closed and paid at its end).
+            steps.push(step(work, Some(post), None));
+            blocks.push(0);
+        }
         new_drawn = k;
     }
     let s = world.comp_mut::<Brain>(id)?.shift.as_mut()?;
-    s.stage = if close { 2 } else { next_stage };
+    s.stage = if close || site_day { 2 } else { next_stage };
     s.drawn = new_drawn;
     s.blocks = blocks;
     s.plan_tick = now;
@@ -431,7 +522,9 @@ pub fn unloaded(world: &mut World, id: EntityId, target: Option<EntityId>) {
             crate::systems::ownership::jobs2_row(world).parcels_missed += 1;
         }
     }
+    let site_day = post.is_some_and(|p| site_day_dest(world, p, b));
     let row = crate::systems::ownership::jobs2_row(world);
+    row.site_days += u32::from(site_day);
     row.haul_trips += 1;
     row.haul_units += load;
     row.haul_away += u32::from(Some(b) != post);

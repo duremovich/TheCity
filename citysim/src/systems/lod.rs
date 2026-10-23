@@ -194,6 +194,10 @@ pub struct BudgetSets {
     /// M16a (plan C35, phase 4): Fixer owners in the matching window, by
     /// book size inside `fixer_quota` (class 2).
     pub fixer: std::collections::BTreeSet<EntityId>,
+    /// The island pass phase 8 (`[island_trades] cab_quota`; OPEN-168):
+    /// each Garage's cab drivers on shift (or within the hour before it)
+    /// who keep a body (class 2), lowest id first.
+    pub cab: std::collections::BTreeSet<EntityId>,
 }
 
 /// The tile a gang's front line stands near: under Contest the rival's
@@ -287,6 +291,7 @@ pub fn budget_sets(world: &World) -> BudgetSets {
     // M16a (plan C35, phase 4).
     sets.contract = crate::systems::contracts::contract_set(world);
     sets.fixer = crate::systems::contracts::fixer_set(world);
+    sets.cab = crate::systems::streetwork::cab_body_set(world).into_iter().collect();
     sets
 }
 
@@ -516,6 +521,9 @@ fn class_with(world: &World, id: EntityId, harvest: &[EntityId], sets: Option<&B
     // M16a (plan C35, phase 4): a Fixer's owner in the matching window,
     // inside `fixer_quota` (ranked with the gangs).
     let fixer = sets.is_some_and(|s| s.fixer.contains(&id));
+    // The island pass phase 8 (OPEN-168): a Garage's quota of cab drivers
+    // on shift keep a body, so a fare can be driven by one at 20k.
+    let fixer = fixer || sets.is_some_and(|s| !s.cab.is_empty() && s.cab.contains(&id));
     if brain.pinned {
         5
     } else if runner {
