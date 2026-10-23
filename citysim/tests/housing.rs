@@ -918,8 +918,11 @@ fn test_crowded_company_floor_lowers_the_mood_target() {
     );
     off_floor.config.mood.housing = None;
     off_plain.config.mood.housing = None;
-    let (f, p) = (target(&mut off_floor), target(&mut off_plain));
-    assert!((f - p).abs() < 1e-6, "off (the base): the Home sets no target ({f} vs {p})");
+    // The term itself is exactly 0 with the switch off; comparing the two
+    // worlds' whole targets would also compare the rest of the mood inputs,
+    // which drift with the Statistical table.
+    let (f, p) = (citysim::mood::housing_bias(&off_floor, a), citysim::mood::housing_bias(&off_plain, a));
+    assert!(f == 0.0 && p == 0.0, "off (the base): the Home sets no target ({f} vs {p})");
 }
 
 /// The island pass phase 3c (the 3b loose end): company floors inside a

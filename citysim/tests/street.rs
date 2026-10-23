@@ -1414,7 +1414,23 @@ mod lives_street {
             .into_iter()
             .flat_map(|g| w.comp::<citysim::Gang>(g).map(|x| x.members.clone()).unwrap_or_default())
             .find(|&m| m != o && m != c && citysim::systems::law::living(&w, m) && !w.has::<citysim::Sentence>(m))
-            .expect("a gang member");
+            // The fixture city's gangs move with the Statistical table: when
+            // no third member is free, any free grown citizen is enlisted as
+            // the district's pimp (the test reads his presence, not his gang).
+            .or_else(|| {
+                w.citizens().into_iter().find(|&m| {
+                    m != o
+                        && m != c
+                        && citysim::systems::law::living(&w, m)
+                        && !w.has::<citysim::Sentence>(m)
+                        && citysim::systems::demography::is_adult(&w, m)
+                })
+            })
+            .expect("a free pimp");
+        if w.gang_of(pimp).is_none() {
+            let gang = w.gangs()[0];
+            citysim::systems::gang::enlist(&mut w, pimp, gang);
+        }
         w.jobs2.vice.pimps.insert(p.district.index() as u16, pimp);
         citysim::systems::lod::set_lod(&mut w, pimp, Lod::Full);
         w.leave_building(pimp);

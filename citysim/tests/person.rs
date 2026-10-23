@@ -1430,13 +1430,29 @@ fn probe_worker_stocks_the_pantry_off_shift() {
         b.synth_food = 0;
     }
     w.comp_mut::<Wallet>(a).expect("wallet").coins = 60;
+    // The shelves are stocked: a grocery run needs food on sale, and the
+    // fixture city's Market stock at 19:00 moves with every table regen.
+    for m in w.buildings_of_kind(citysim::BuildingKind::Market).to_vec() {
+        if let Some(b) = w.comp_mut::<Building>(m) {
+            b.stock_food = b.stock_food.max(500);
+        }
+    }
     let mut most = 0u32;
     let mut seen: Vec<ActionKind> = Vec::new();
+    let mut spent_back_home: Option<i64> = None;
     run_to(&mut w, a, 2 * TICKS_PER_DAY + 23 * TICKS_PER_HOUR, |w| {
         let held = w.comp::<Building>(h).map_or(0, |b| b.stock_food)
             + w.comp::<Inventory>(a).map_or(0, |i| i.food - i.stolen_food);
         most = most.max(held);
         if let Some(st) = step(w, a) {
+            // The buy is instant at the Market's counter: a run's BuyFood step
+            // is not always on screen between two ticks, so the coins spent on
+            // the way back from the Market are read too.
+            if st == ActionKind::GoTo(citysim::LocationKey::Home)
+                && seen.contains(&ActionKind::GoTo(citysim::LocationKey::Market))
+            {
+                spent_back_home.get_or_insert(coins(w, a));
+            }
             if !seen.contains(&st) {
                 seen.push(st);
             }
@@ -1444,7 +1460,10 @@ fn probe_worker_stocks_the_pantry_off_shift() {
     });
     eprintln!("steps {seen:?}; residents {}", w.residents_of(h).len());
     eprintln!("worker {}: meals at hand (pantry + carried) peaked at {most} by 23:00; coins {}", a.index, coins(&w, a));
-    assert!(seen.contains(&ActionKind::BuyFood), "an empty pantry, coins and an evening off, and no grocery run");
+    assert!(
+        seen.contains(&ActionKind::BuyFood) || spent_back_home.is_some_and(|c| c < 60),
+        "an empty pantry, coins and an evening off, and no grocery run"
+    );
     assert!(most >= 1, "the run left nothing at hand");
 }
 
