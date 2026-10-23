@@ -2398,6 +2398,27 @@ fn pass_vehicle(world: &World, id: EntityId) -> Option<f32> {
     Some(1.0 / (world.config.exec.move_ticks_full.max(1) as f32 * m).max(0.01))
 }
 
+/// Shadow V8: a vehicle in motion's own move over the last two ticks (its
+/// route's place then and now; a driven car `[vehicles] max_steps_per_tick`
+/// a tick). Generous by a tick, so a boarding minute is never a jump for
+/// the vehicle's pace alone.
+fn veh_step(world: &World, v: EntityId) -> f32 {
+    use citysim::systems::{motion, transit};
+    let Some(m) = world.motions.get(&v) else { return 0.0 };
+    let t = world.tick;
+    let at = |k: Tick| match &m.route {
+        motion::Route::Timed { way, depart, arrive } => Some(motion::timed_pos(way, *depart, *arrive, k)),
+        motion::Route::Line { line, train } => {
+            transit::train_at(world, *line, u64::from(*train), k).and_then(|a| transit::train_tile(world, *line, a))
+        }
+        motion::Route::Driven => None,
+    };
+    match (at(t.saturating_sub(2)), at(t)) {
+        (Some(a), Some(b)) => chebyshev(a, b) as f32,
+        _ => 2.0 * f32::from(world.config.vehicles.max_steps_per_tick.max(1)),
+    }
+}
+
 fn chebyshev(a: citysim::TilePos, b: citysim::TilePos) -> u32 {
     u32::from(a.x.abs_diff(b.x)).max(u32::from(a.y.abs_diff(b.y)))
 }
@@ -2448,12 +2469,17 @@ fn cam_minute(world: &World, t: &mut Track, now: Tick, act: &'static str, here: 
     // vehicle's own move since the last minute is allowance. A snap onto
     // the vehicle at boarding still reads as a jump; the vehicle's own
     // continuity is the `run --legs` `#ride` device's to judge.
-    let veh = citysim::systems::motion::vehicle_of(world, id)
-        .and_then(|v| citysim::systems::motion::pos_of(world, v).map(|p| (v, p)));
-    if let (Some((v, p)), Some((pv, pp))) = (veh, t.cam.veh) {
-        if v == pv {
-            t.cam.allow += chebyshev(pp, p) as f32;
-        }
+    // `Motion::pos` is where `motion::advance` set its riders (the route's
+    // place at the tick's own time; `motion::pos_of` reads the timetable
+    // at `world.tick` and runs a tick ahead of the riders).
+    let veh = citysim::systems::motion::vehicle_of(world, id).and_then(|v| world.motions.get(&v).map(|m| (v, m.pos)));
+    match (veh, t.cam.veh) {
+        (Some((v, p)), Some((pv, pp))) if v == pv => t.cam.allow += chebyshev(pp, p) as f32,
+        // The boarding minute: the vehicle may already have pulled away
+        // (a train departs the tick its rider boards), so its own step is
+        // allowance too.
+        (Some((v, _)), _) => t.cam.allow += veh_step(world, v),
+        _ => {}
     }
     t.cam.veh = veh;
     let mut jump_line: Option<String> = None;
