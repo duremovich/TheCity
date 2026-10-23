@@ -346,6 +346,12 @@ pub struct Config {
     /// into a save) with `CITYSIM_COMPANY_HOUSING_OFF=1`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub company_housing: Option<CompanyHousingCfg>,
+    /// The island pass phase 4 (docs/ISLAND_PASS.md I2; OPEN-163): a far
+    /// commute is a pressure that resolves over weeks (`systems/commute.rs`).
+    /// `None` (not written into a save) with `CITYSIM_COMMUTE_PRESSURE_OFF=1`:
+    /// the relocation and the company move-in are the base ones.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commute_pressure: Option<CommutePressureCfg>,
     /// The island pass phase 3c (OPEN-177): `[mood.*]`, the mood terms read
     /// from config. Empty (not written into a save) with
     /// `CITYSIM_HOUSING_MOOD_OFF=1`.
@@ -479,6 +485,33 @@ impl CompanyInsideCfg {
             .find(|r| r.kind == kind)
             .map_or((self.default_name.as_str(), false), |r| (r.name.as_str(), r.below))
     }
+}
+
+/// The island pass phase 4 `[commute_pressure]` (docs/ISLAND_PASS.md I2):
+/// a worker whose commute (`distance::travel`, the Home door to the work
+/// tile) is past `far_ticks` builds a day of pressure each midnight; past
+/// `move_days` the household looks for a Home nearer work (any it can afford
+/// within `[distance] home_cap_ticks`, the corp's company beds included),
+/// and past `job_days` with none found, the worker a nearer post of the same
+/// role. Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CommutePressureCfg {
+    /// A commute past this travel builds a day of pressure.
+    pub far_ticks: u64,
+    /// Days of pressure before the household looks for a nearer Home.
+    pub move_days: u16,
+    /// Days of pressure before, with no Home found, the worker looks for a
+    /// nearer post of the same role.
+    pub job_days: u16,
+    /// A search that found nothing waits this many days for the next.
+    pub retry_days: u16,
+    /// After a move or a job switch, no pressure builds for this many days.
+    pub cool_days: u16,
+    /// A nearer post saves at least this much travel from the Home door.
+    pub job_margin_ticks: u64,
+    /// A worker hired since the last midnight with a far Home looks at once
+    /// (phase 3a's move-in of a far hire, on this one path).
+    pub hire_now: bool,
 }
 
 /// The island pass phase 3b `[company_housing.buyout]` (I6): a corp whose
@@ -616,6 +649,18 @@ pub struct LegsCfg {
     /// the El does not shorten takes the cab when the purse allows (no
     /// `p_cab` roll), both tiers (`streetwork::cab_roll`).
     pub fares_el_missed: bool,
+    /// The island pass phase 4 (OPEN-164): the plan timeout (`[brain]
+    /// plan_timeout_ticks`) spares a leg in motion (a timed walk, a flight
+    /// or a ride before its arrival, a walk with its path left and not
+    /// blocked). False (and not written into a save) with
+    /// `CITYSIM_COMMUTE_PRESSURE_OFF=1`: the base timeout, which cut a
+    /// 931-tick ride at 900 and left the body at the board stop.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub timeout_spares_legs: bool,
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 /// The pre-view pass phase 4 `[presence]` (docs/PREVIEW_PASS.md § 0 P3):
@@ -8706,6 +8751,14 @@ impl Config {
                 c.buyout = None;
             }
         }
+        // The island pass phase 4 (OPEN-163, I2; OPEN-164): the commute
+        // pressure's and the leg timeout's switch in flight (doctrine 6).
+        if std::env::var("CITYSIM_COMMUTE_PRESSURE_OFF").is_ok_and(|v| v == "1") {
+            cfg.commute_pressure = None;
+            if let Some(l) = cfg.legs.as_mut() {
+                l.timeout_spares_legs = false;
+            }
+        }
         // The island pass phase 3c (OPEN-177): the housing mood term's
         // switch in flight (doctrine 6).
         if std::env::var("CITYSIM_HOUSING_MOOD_OFF").is_ok_and(|v| v == "1") {
@@ -8979,7 +9032,8 @@ impl Config {
     /// retired with P10). The housing catch-up (`[life]
     /// housing_catchup_days`, 2026-10-11) is off: its housing growth is the
     /// flat P5h rule (the pre-roll reads the market wage law and no net).
-    /// No `[company_housing]` (the island pass phase 3a).
+    /// No `[company_housing]` (the island pass phase 3a) and no
+    /// `[commute_pressure]` (phase 4).
     pub fn dole_city(mut self) -> Config {
         self.policy = PolicyCfg::dole_city();
         // Transit phase 3: the old default had no El.
@@ -8989,6 +9043,9 @@ impl Config {
         // with no El its walked commutes would seed blocks on the Lots the
         // pinned tests read).
         self.company_housing = None;
+        // The island pass phase 4: no commute pressure (the old default's
+        // relocation, which the pinned tests read).
+        self.commute_pressure = None;
         self
     }
 

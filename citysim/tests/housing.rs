@@ -470,6 +470,9 @@ fn test_far_hire_takes_a_company_bed_near_the_farm() {
     w.comp_mut::<Job>(a).expect("job").hired_tick = now;
     let mut on = w.clone();
     midnight(&mut on);
+    // The island pass phase 4: the far hire moves on the commute pressure's
+    // path (`hire_now`), later the same midnight.
+    life::relocate(&mut on);
     assert_eq!(home_of(&on, a), Some(block), "on: the hire takes the company bed");
     assert!(
         on.events
@@ -940,6 +943,172 @@ fn test_company_floors_close_with_their_workplace() {
         w.events.iter().any(|e| e.kind == EventKind::Derelict && e.actors.first() == Some(&h)),
         "a Derelict line for the floors"
     );
+}
+
+/// The island pass phase 4 (I2): `n` midnights of the relocation pass
+/// alone (the commute pressure's path); the night `done` first holds.
+fn nights(w: &mut World, n: u32, done: impl Fn(&World) -> bool) -> Option<u32> {
+    for night in 1..=n {
+        w.tick = (w.tick / TICKS_PER_DAY + 1) * TICKS_PER_DAY;
+        citysim::systems::commute::job_moves(w);
+        life::relocate(w);
+        if done(w) {
+            return Some(night);
+        }
+    }
+    None
+}
+
+/// The plain Home with room nearest `to` (not `a`'s), its room made
+/// `need` beds: a free bed near work.
+fn near_home(w: &mut World, a: EntityId, to: TilePos, need: usize) -> EntityId {
+    let h = w
+        .buildings_of_kind(BuildingKind::Home)
+        .iter()
+        .copied()
+        .filter(|&h| Some(h) != home_of(w, a) && !w.company_homes.contains_key(&h))
+        .filter(|&h| w.comp::<Building>(h).is_some_and(|b| !b.demolished && !b.derelict && b.tier <= 1))
+        .map(|h| (life::commute_cost(w, door_of(w, h), to), h))
+        .min()
+        .expect("a Home")
+        .1;
+    let n = w.residents_of(h).len() + need;
+    w.comp_mut::<Building>(h).expect("b").capacity = n as u16;
+    h
+}
+
+/// The island pass phase 4 (ISLAND_PASS I2, OPEN-163): a far commuter with
+/// a free Home near work moves after `move_days` of pressure, not before
+/// (the base relocation moved him the first midnight), and then rests on
+/// the cooldown.
+#[test]
+fn test_far_commuter_moves_after_the_pressure_days() {
+    let mut w = base();
+    let cfg = w.config.commute_pressure.clone().expect("[commute_pressure] on");
+    let a = plain_worker(&w);
+    let work = work_door(&w, a).unwrap();
+    let far = far_home(&w, a, work, 1);
+    w.set_home(a, Some(far));
+    assert!(life::commute_cost(&w, door_of(&w, far), work) > cfg.far_ticks, "the far Home is past far_ticks");
+    let near = near_home(&mut w, a, work, 1);
+    common::set_coins(&mut w, a, 10_000);
+    let mut off = w.clone();
+    off.config.commute_pressure = None;
+    assert_eq!(nights(&mut off, 1, |x| home_of(x, a) != Some(far)), Some(1), "off (the base): the first midnight");
+    let night = nights(&mut w, u32::from(cfg.move_days) + 1, |x| home_of(x, a) != Some(far));
+    assert_eq!(night, Some(u32::from(cfg.move_days)), "on: after move_days of pressure");
+    assert_eq!(home_of(&w, a), Some(near), "into the free Home near work");
+    let p = w.commute_pressure.get(&a).copied().expect("the cooldown is kept");
+    assert!(p.days == 0 && p.cool > w.day() as u32, "the cooldown runs: {p:?}");
+}
+
+/// The island pass phase 4 (I2): with no Home he can take near work, past
+/// `job_days` the far commuter takes an open post of his role near his
+/// Home (the normal quit and hire), not before; the base never does.
+#[test]
+fn test_far_commuter_with_no_home_takes_a_nearer_job() {
+    let mut w = base();
+    let cfg = w.config.commute_pressure.clone().expect("[commute_pressure] on");
+    let a = plain_worker(&w);
+    let old = w.comp::<Job>(a).and_then(|j| j.employer).unwrap();
+    let work = work_door(&w, a).unwrap();
+    let far = far_home(&w, a, work, 1);
+    w.set_home(a, Some(far));
+    // No bed anywhere, and no coin for a first rent or a trade.
+    for h in w.buildings_of_kind(BuildingKind::Home).to_vec() {
+        let n = w.residents_of(h).len().max(1) as u16;
+        w.comp_mut::<Building>(h).expect("b").capacity = n;
+    }
+    common::set_coins(&mut w, a, 0);
+    // A Clerk's post open at the workplace nearest his Home.
+    let fd = door_of(&w, far);
+    let to = w
+        .with::<Building>()
+        .into_iter()
+        .filter(|&b| b != old)
+        .filter(|&b| {
+            w.comp::<Building>(b).is_some_and(|bd| {
+                !bd.demolished && !bd.derelict && !matches!(bd.kind, BuildingKind::Home | BuildingKind::Lot)
+            })
+        })
+        .map(|b| (citysim::systems::distance::travel(&w, fd, door_of(&w, b)), b))
+        .min()
+        .expect("a workplace")
+        .1;
+    w.vacancies.insert(to, vec![Role::Clerk]);
+    let d = life::commute_cost(&w, fd, work);
+    assert!(
+        citysim::systems::distance::travel(&w, fd, door_of(&w, to)) + cfg.job_margin_ticks <= d,
+        "the post is nearer"
+    );
+    let mut off = w.clone();
+    off.config.commute_pressure = None;
+    let span = u32::from(cfg.job_days + cfg.retry_days) + 1;
+    let switched = |x: &World| x.comp::<Job>(a).and_then(|j| j.employer) == Some(to);
+    assert_eq!(nights(&mut off, span, switched), None, "off (the base): no nearer job");
+    let night = nights(&mut w, span, switched).expect("on: a nearer post");
+    assert!(night >= u32::from(cfg.job_days), "not before job_days: night {night}");
+    assert_eq!(home_of(&w, a), Some(far), "he stays housed where he was");
+    assert!(
+        w.events
+            .iter()
+            .any(|e| e.kind == EventKind::Quit && e.actors.first() == Some(&a) && e.text.contains("far commute")),
+        "the normal quit, its reason named"
+    );
+    assert!(w.vacancies.get(&old).is_some_and(|v| v.contains(&Role::Clerk)), "the old post is open");
+}
+
+/// The island pass phase 4 (I2): a household moves together, after the
+/// pressure days: the worker and his jobless spouse into one Home near his
+/// work, the spouse's line "moved with" him.
+#[test]
+fn test_household_moves_together_on_the_pressure() {
+    let mut w = base();
+    let cfg = w.config.commute_pressure.clone().expect("[commute_pressure] on");
+    let execs = classes::exec_set(&w);
+    let (a, s) = common::adults(&w)
+        .into_iter()
+        .filter(|&a| w.comp::<Job>(a).is_some_and(|j| j.employer.is_some()) && !execs.contains(&a))
+        .filter(|&a| w.gang_of(a).is_none() && work_door(&w, a).is_some())
+        .find_map(|a| {
+            let s = w.spouse_of(a)?;
+            (home_of(&w, s) == home_of(&w, a)
+                && !w.has::<Job>(s)
+                && !execs.contains(&s)
+                && w.has::<Brain>(s)
+                && law::living(&w, s))
+            .then_some((a, s))
+        })
+        .expect("a worker with a jobless spouse at home");
+    let work = work_door(&w, a).unwrap();
+    let kids: Vec<EntityId> = demography::children_of_agent(&w, a)
+        .into_iter()
+        .filter(|&c| w.has::<citysim::components::Child>(c) && home_of(&w, c) == home_of(&w, a))
+        .collect();
+    let need = 2 + kids.len();
+    let far = far_home(&w, a, work, need);
+    for &m in [a, s].iter().chain(kids.iter()) {
+        w.set_home(m, Some(far));
+    }
+    let near = near_home(&mut w, a, work, need);
+    // No School rule in the way: the near Home keeps one if the far had it.
+    w.config.ages.school_reach = u32::MAX / 4;
+    common::set_coins(&mut w, a, 10_000);
+    let night = nights(&mut w, u32::from(cfg.move_days) + 1, |x| home_of(x, a) != Some(far));
+    assert_eq!(night, Some(u32::from(cfg.move_days)), "after move_days of pressure");
+    assert_eq!(home_of(&w, a), Some(near), "the worker near work");
+    assert_eq!(home_of(&w, s), Some(near), "the spouse with him");
+    for c in kids {
+        assert_eq!(home_of(&w, c), Some(near), "the children with them");
+    }
+    let lines = |m: EntityId| {
+        w.events
+            .iter()
+            .filter(|e| e.kind == EventKind::Housed && e.actors.first() == Some(&m))
+            .map(|e| e.text.clone())
+            .collect::<Vec<_>>()
+    };
+    assert!(lines(s).last().is_some_and(|t| t.contains("moved with")), "the spouse's line: {:?}", lines(s));
 }
 
 fn env<T: std::str::FromStr>(k: &str) -> Option<T> {

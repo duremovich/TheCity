@@ -216,7 +216,7 @@ fn prosthetics(world: &mut World) {
 // ---------------------------------------------------------------------------
 
 /// A School within `school_reach` of `from` (door Manhattan, ties the lower id).
-fn school_near(world: &World, from: crate::components::TilePos) -> Option<EntityId> {
+pub(crate) fn school_near(world: &World, from: crate::components::TilePos) -> Option<EntityId> {
     let reach = world.config.ages.school_reach;
     world
         .buildings_of_kind(BuildingKind::School)

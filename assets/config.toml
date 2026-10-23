@@ -4336,6 +4336,10 @@ fare_wait_ticks = 60               # the fares shape (OPEN-115): a booked rider 
                                    # harbour, 200+ tiles from the Mid-Levels, so no body ever drove: 0 of 699 at base)
 fares_el_missed = true             # the fares shape: a commute of [jobs2] cab_min_tiles or more the El does not shorten
                                    # takes the cab when the purse holds the fare and cab_reserve (no p_cab roll), both tiers
+timeout_spares_legs = true         # the island pass phase 4 (OPEN-164): [brain] plan_timeout_ticks spares a leg in motion
+                                   # (a timed walk, a flight or a ride before its arrival, a walk with path left and not
+                                   # blocked); the base cut an island CEO's 931-tick ride at 900, left him at the board stop
+                                   # in another district, and the next plan rode again (CITYSIM_COMMUTE_PRESSURE_OFF=1: off)
 
 # The island pass phase 1 (docs/ISLAND_PASS.md I1; OPEN-163 part; systems/distance.rs): travel time in the job
 # and bed picks. Each cap is on the travel estimate (`transit::commute_ticks`: the walk at [exec] move_ticks_full,
@@ -4425,6 +4429,26 @@ price_mult = 1.2                   # x the block's value ([corps] found_cost.hom
 reserve = true                     # the corp pays only from what it holds above treasury_ref, as a bankruptcy buyer
 bunks_per_floor = 30               # the converted block's beds a floor, the interior allowing (= beds_per_floor)
 build_fallback = true              # nothing for sale in reach: build on the nearest vacant Lot within cap_ticks
+
+# The island pass phase 4 (docs/ISLAND_PASS.md I2, Dylan 2026-10-22; systems/commute.rs): a far job is a pressure that
+# resolves over weeks. Each midnight a worker whose commute (distance::travel, the Home door to the work tile) is past
+# far_ticks builds a day of pressure (a nearer one drops it). Past move_days the household looks for a Home nearer work
+# on the relocation's path ([life] commute_margin_ticks, relocate_per_1000): any Home with room it can afford within
+# [distance] home_cap_ticks of work, the corp's company beds included (3b's weekly far-staff move and 3a's far-hire
+# move-in are this path while it is on). Past job_days with none found, the worker takes an open post of his role
+# nearer his Home instead, at the next midnight before the job search (quit and hire; a company bed's grace then runs). A couple moves only when both commutes
+# shrink; a household with a School near its Home moves only to a Home with one. The base relocation moved any worker
+# past [life] commute_move_ticks the same midnight it found a Home within it. CITYSIM_COMMUTE_PRESSURE_OFF=1 drops the
+# section (the switch in flight). Placeholders.
+[commute_pressure]
+far_ticks = 80                     # a commute past this builds a day of pressure (= [life] commute_move_ticks: 2 h 40 a
+                                   # day on the road)
+move_days = 7                      # a week of far commutes before the household looks for a nearer Home
+job_days = 14                      # two weeks with no Home found before the worker looks for a nearer post of his role
+retry_days = 3                     # a search that found nothing waits this many days for the next
+cool_days = 30                     # after a move or a job switch, no pressure builds for a month (no churn)
+job_margin_ticks = 40              # a nearer post saves at least this from the Home door (= commute_margin_ticks)
+hire_now = true                    # a hire since the last midnight with a far Home looks at once (3a's far-hire move-in)
 
 # The island pass phase 3c (OPEN-177, Dylan 2026-10-22; mood.rs housing_bias): a flat bias on the hourly mood target
 # from the agent's Home, as [litter] mood is. A Home's tier reached mood only through the night's sleep safety (+0.1 a

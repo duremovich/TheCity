@@ -16,8 +16,8 @@
 //! The sites: the job (`demography::job_search` and its pool, the graded
 //! pick, the seeded staff at world creation, the corner's day labour, the
 //! chip posts) and the bed (`ownership::rehouse` for a homeless worker,
-//! `life::hideout_bed`, which `plan::bed_of` reserves). The hangout, the
-//! Hotel and the move-nearer pressure are phases 2 and 3.
+//! `life::hideout_bed`, which `plan::bed_of` reserves). The hangout and the
+//! Hotel are phase 2; the move-nearer pressure is phase 4 (`systems/commute.rs`).
 //!
 //! Phase 2 (`[distance.free]`, `CITYSIM_DISTANCE2_OFF=1` drops it): the
 //! HangOut spot (`leisure::best_spot_kind`, the think's nearest spot, the

@@ -295,7 +295,12 @@ use crate::world::World;
 /// 57 (the island pass phase 3c, OPEN-177): `Config.mood` (`[mood.housing]`,
 /// written only when set; serde default empty). An off save is
 /// byte-identical to version 56's.
-pub const SAVE_VERSION: u8 = 57;
+/// 58 (the island pass phase 4, OPEN-163, I2): `Config.commute_pressure`
+/// (`[commute_pressure]`, written only when set; serde default `None`),
+/// `World.commute_pressure` (written only when non-empty) and the
+/// `Jobs2Cols` pressure columns (written only when non-zero). An off save
+/// is byte-identical to version 57's.
+pub const SAVE_VERSION: u8 = 58;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
