@@ -29,6 +29,8 @@ One line per live document: what it is and when to read it. Everything supersede
 - `HIT_MARKET.md`: organic paid kills, the Fixer's book, the buyer's silence.
 - `TRANSIT.md`: the El. `JOBS_V2.md` then `JOBS_AND_LIVES.md`: the trades, the street, weapons, ages, the gray market, faith.
 - `SCALE_20K.md`: the 20,000 city and the Ambient tier. `IMPORT_GRAPHICS.md`: the island map from D:\TheCityGraphics.
+- `ISLAND_PASS.md`: the island pass (closed 2026-10-24): distance in every pick, company housing, vehicles and El trains with riders aboard; gate `SHADOW_V8.md` and `shadow_v8/`.
+- `PERF_PASS.md`: the live milestone, the perf pass toward the 100k city (decisions R1-R6, byte-identical index work, parallel scoring, the P9 re-import, a quiet-box gate).
 - `POPULATION_STUDY.md`: how far the island city scales (OPEN-184, 2026-10-23): the 20k-150k curve, what binds (the import's cuts), the hot systems with exponents, the target (60k now, 100k after the index work), the optimisation roadmap.
 
 ## The judges

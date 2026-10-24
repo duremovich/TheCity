@@ -477,3 +477,21 @@ After Shadow V6 (`docs/SHADOW_V6.md`), the pre-view read at 20k.
 - **M18 is postponed** until the sim is solid in the full city and the 3D view stands. Dylan: "We probably have a long way to go to get the sim solid in the fully realized city in a way that makes it feel natural and alive." The order: the pre-view fix pass (V6's ranked rows, `OPEN-137..142` with `OPEN-115`, `OPEN-118`, `OPEN-119`, `OPEN-120`, `OPEN-121`), the island holding 20k (`OPEN-136`), the view milestone (the Bevy client reads the sim, follow-cam on an NPC, no input), then M18 rewritten against that client. M18's spec predates M13-M17 as built and moves its camera, HUD and input from the macroquad debug app to the 3D client.
 - **Nothing in camera range is Statistical** (`OPEN-149`). Statistical exists only off camera; whoever the camera (later the player) can see is Full. This replaces "Full when in view" for the circle with a rule for everyone, and makes promotion place a body where its schedule says it is.
 - **The player never starts on day 0** (`OPEN-150`). The world is pre-run, or built from a starting-condition seed that prepopulates it (gangs, trades, households with children, debts and edges). The seed is preferred: less randomness in the city you get, and a place for player-facing world options.
+
+## Addendum 21 (2026-10-24, Dylan): emergent story before structure; the perf pass's shape
+
+After the island pass closed and the 100k decision (`OPEN-184`).
+
+- **The order:** the perf pass (`docs/PERF_PASS.md`), Shadow V9 at 100k, **the pressure pass, then the vertical city
+  pass**, then the view and M18. Dylan: "Robust simulation that leads to emergent stories is most important,
+  structure of the city is less so." The pressure pass (mood that drives behaviour `OPEN-178`, the dead trades
+  `OPEN-176`) moves ahead of the vertical city (`OPEN-187`).
+- **It won't all be a spreadsheet.** Dylan: "We just need to be mindful it won't all be a spreadsheet eventually and
+  plan for that." From the pressure pass on, every new mechanism's spec states what the camera sees (a place, a
+  body doing something, an exchange you could watch), as doctrine 7 makes it state its Statistical mirror; one that
+  only moves a ledger number says so and why.
+- **Density is co-designed** (`OPEN-204`). Dylan: "The population will inform the city and the city will inform the
+  population ... Luckily height is an easy lever, so if the footprint works from a transport and gameplay
+  perspective, we can always add room for infrastructure above (or below)."
+- **The tiers stay at 2k and 20k**; 100k is read at gates and shadow passes. Parallel scoring is in the perf pass;
+  the co-worker crew cap goes to the pressure pass (`OPEN-205`).

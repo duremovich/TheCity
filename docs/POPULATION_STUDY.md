@@ -226,7 +226,8 @@ on.
    pairs from O(staff²) to O(staff × crew) per employer an hour, and shrinks the edge graph that the degree-walking
    scorers read.
    - **Gain:** `stat_work` + `coworkers` ~6.6 s, **7 %**, and less in think.
-   - **Doctrine risk:** this is a behaviour change, not an index. Friend edges fell 43 % at 2k with 32. It needs the
+   - **Doctrine risk:** this is a behaviour change, not an index. Friend edges fell 43 % at 2k with 32 (stale: that
+     predates the El crew cap; `SCALE_20K` re-measured −3 % at 2k, +8 % at 20k; now `OPEN-205`). It needs the
      parity test, a FINDING and Dylan's call.
    - **Effort:** small to code, medium to judge.
 7. **Parallel scoring.** Fix: think's goal scoring reads the world and writes only the agent's own brain. Score the

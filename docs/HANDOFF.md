@@ -48,18 +48,23 @@ off-screen violence amplifier is gone. The close tree, a08d383, ran change, merg
 
 ## Next, in order
 
-1. **The perf pass** (`docs/POPULATION_STUDY.md`, `OPEN-184`; spec to write). Phase 0 is housekeeping: retire the
-   island pass's fifteen switches after one all-off identity on seeds 42-44 (`OPEN-202`, with F3's ticks/s A/B and
-   the `access_cap_ticks` key), the change tier back under 4m (`OPEN-201`), the Rest loop (`OPEN-195`). Then the
-   study's five byte-identical fixes, venue index first, and the P9 island re-import sized for 100k (`OPEN-182`).
+Set with Dylan 2026-10-24 (`docs/ROADMAP_POST_M14.md` addendum 21): emergent story before city structure.
+
+1. **The perf pass**, spec written: `docs/PERF_PASS.md` (decisions R1-R6, phases 0-8, a checkpoint, a quiet-box
+   gate). Phase 0 housekeeping (`OPEN-201`, `OPEN-202`), phase 1 the Rest loop (`OPEN-195`), phases 2-5 the
+   study's items 1-5 (byte-identical), phases 6-7 parallel scoring (thread-count identity), phase 8 the P9
+   re-import at `k = 2` and `k = 1` (`OPEN-182`, reported, not fixed: `OPEN-204`). Gate: 100k ≥ 30 ticks/s, no tick
+   over 1 s, a build under 2 min.
 2. **Shadow V9** at 100k on the re-imported island: street sleeping (`OPEN-192`), the hunger climb (`OPEN-167`),
    a new-edges counter first (`OPEN-203`).
-3. **The vertical city pass** (`OPEN-187`): many tenancies per building, a Hideout per district (`OPEN-191`).
-4. The view milestone (Bevy client, follow-cam, `OPEN-149`'s ring), then M18 against the 3D client. The pressure
-   pass (`OPEN-176`, `OPEN-178`, `OPEN-169`, `OPEN-170`, `OPEN-194`) slots where Dylan picks.
+3. **The pressure pass** (`OPEN-178` mood drives behaviour, `OPEN-176` the dead trades, `OPEN-169`, `OPEN-170`,
+   `OPEN-194`, the co-worker crew `OPEN-205`). Its spec states, for every mechanism, what the camera sees.
+4. **The vertical city pass** (`OPEN-187`): many tenancies per building, a Hideout per district (`OPEN-191`).
+5. The view milestone (Bevy client, follow-cam, `OPEN-149`'s ring), then M18 against the 3D client.
 
 ## Open calls for Dylan
 
+- Push TheCityGraphics `855d0aa` (merged locally) before the perf pass's phase 8 re-imports from it.
 - `OPEN-150`: the starting-condition seed's shape.
 - Pressure-pass design: `OPEN-160`, `OPEN-162`, `OPEN-157`, `OPEN-176`, `OPEN-178`; the combat model `OPEN-179`.
 - Standing: `OPEN-062`, `OPEN-039`, `OPEN-057`, `OPEN-059`, `OPEN-077`, `OPEN-069`, `OPEN-070`.
