@@ -521,6 +521,8 @@ struct Cand {
     venue: Option<EntityId>,
     spot: Option<TilePos>,
     score: f32,
+    /// F3 (OPEN-190): the stay-in fallback's own-Home HangOut.
+    stay_in: bool,
 }
 
 pub(crate) fn rung_of(world: &World, b: EntityId, price: i64) -> Rung {
@@ -747,7 +749,7 @@ fn paid_candidates(
             continue;
         }
         let score = paid_score(world, id, b, rung, price, purse, tiles);
-        out.push(Cand { rung, act: act_of(kind), venue: Some(b), spot: None, score });
+        out.push(Cand { rung, act: act_of(kind), venue: Some(b), spot: None, score, stay_in: false });
     }
     out
 }
@@ -808,7 +810,14 @@ pub fn choice(world: &World, id: EntityId, scored: bool) -> Option<UnwindPick> {
     let g = &world.config.leisure.gain;
     if let Some(t) = watch_tile(world, from) {
         let score = g.watch * travel(world, t.manhattan(from));
-        cands.push(Cand { rung: Rung::Free, act: ActionKind::HangOut, venue: None, spot: Some(t), score });
+        cands.push(Cand {
+            rung: Rung::Free,
+            act: ActionKind::HangOut,
+            venue: None,
+            spot: Some(t),
+            score,
+            stay_in: false,
+        });
     }
     // Lives at work phase 2 (§ 3.1): a Home spot carries its Home as the
     // pick's venue (the HangOut runs inside it).
@@ -818,19 +827,26 @@ pub fn choice(world: &World, id: EntityId, scored: bool) -> Option<UnwindPick> {
                 SpotKind::Home(h) => Some(h),
                 _ => None,
             };
-            (s.tile, social, home)
+            (s.tile, social, home, false)
         })
     } else {
-        nearest_spot(world, id, from).map(|(t, social)| (t, social, None))
+        nearest_spot(world, id, from).map(|(t, social)| (t, social, None, false))
     };
-    if let Some((t, social, home)) = spot {
+    // Island fix round F3 (OPEN-190): with no spot within the cap, the
+    // stay-in: the own Home's HangOut, scored at `stay_in.fun_hour`.
+    let spot = spot.or_else(|| stay_in_home(world, id, from, scored).map(|(h, t)| (t, 0.0, Some(h), true)));
+    if let Some((t, social, home, stay_in)) = spot {
         let hours = world.config.leisure.hangout_ticks as f32 / TICKS_PER_HOUR as f32;
         // L2 shadow fixes item 5: a lone hour is not a full hour's fun (11
         // of 15 HangOuts were "nobody there"); company scales it up.
         let lone = world.config.life.spot_lone_fun;
         let company = lone + (1.0 - lone) * social.clamp(0.0, 1.0);
-        let score = (g.hangout_hour * hours * company + 0.1 * social.min(1.0)) * spot_travel(world, from, t);
-        cands.push(Cand { rung: Rung::Free, act: ActionKind::HangOut, venue: home, spot: Some(t), score });
+        let fun = match crate::systems::distance::stay_in(world).filter(|_| stay_in) {
+            Some(c) => c.fun_hour * hours,
+            None => g.hangout_hour * hours * company,
+        };
+        let score = (fun + 0.1 * social.min(1.0)) * spot_travel(world, from, t);
+        cands.push(Cand { rung: Rung::Free, act: ActionKind::HangOut, venue: home, spot: Some(t), score, stay_in });
     }
     let best = cands.iter().max_by(|a, b| {
         a.score.total_cmp(&b.score).then_with(|| b.venue.cmp(&a.venue)).then_with(|| b.spot.cmp(&a.spot))
@@ -839,7 +855,7 @@ pub fn choice(world: &World, id: EntityId, scored: bool) -> Option<UnwindPick> {
 }
 
 fn pick_of(c: &Cand) -> UnwindPick {
-    UnwindPick { rung: c.rung, act: c.act, venue: c.venue, spot: c.spot, score: c.score }
+    UnwindPick { rung: c.rung, act: c.act, venue: c.venue, spot: c.spot, score: c.score, stay_in: c.stay_in }
 }
 
 // ---------------------------------------------------------------------------
@@ -1127,6 +1143,25 @@ pub fn best_spot_kind(world: &World, id: EntityId, from: TilePos) -> Option<(Spo
         .map(|(_, _, s, social)| (s, social))
 }
 
+/// Island fix round F3 (OPEN-190; I1's stay-in, Dylan's D1 B): with
+/// `[distance.free.stay_in]` and the household on, no spot of `id`'s
+/// (`spots_near_with`) within `spot_cap_ticks` of `from`, and a standing
+/// Home, the Home and its outside door: the person stays in, and the
+/// evening runs inside it (its flatmates and Block-mates, else alone).
+fn stay_in_home(world: &World, id: EntityId, from: TilePos, with_friends: bool) -> Option<(EntityId, TilePos)> {
+    crate::systems::distance::stay_in(world)?;
+    if !crate::systems::household::on(world) {
+        return None;
+    }
+    let h = home_of(world, id)?;
+    let door = world.comp::<Building>(h).filter(|b| !b.demolished).map(|b| world.outside_door(b))?;
+    let cap = spot_cap(world);
+    if spots_near_with(world, id, from, with_friends).iter().any(|s| spot_dist(world, from, s.tile) <= cap) {
+        return None;
+    }
+    Some((h, door))
+}
+
 fn home_of(world: &World, id: EntityId) -> Option<EntityId> {
     world.comp::<Household>(id).and_then(|h| h.home)
 }
@@ -1328,8 +1363,14 @@ pub fn hangout_plan(world: &mut World, id: EntityId) -> Option<Plan> {
         SpotKind::Home(h) => Some(h),
         _ => None,
     };
-    let pick =
-        UnwindPick { rung: Rung::Free, act: ActionKind::HangOut, venue: home, spot: Some(tile), score: spot_score };
+    let pick = UnwindPick {
+        rung: Rung::Free,
+        act: ActionKind::HangOut,
+        venue: home,
+        spot: Some(tile),
+        score: spot_score,
+        stay_in: false,
+    };
     let steps = match home {
         Some(h) if Some(h) == home_of(world, id) => {
             vec![step(ActionKind::GoTo(LocationKey::Home), None), step(ActionKind::HangOut, None)]
@@ -1671,9 +1712,21 @@ fn hangout_done(world: &mut World, id: EntityId, started: Tick) {
             .unwrap_or_default(),
     };
     let mut gain = world.config.leisure.gain.hangout_hour * hours.max(0.5);
+    // Island fix round F3 (OPEN-190): the stay-in's hour (the own Home
+    // past the spot cap) is `stay_in.fun_hour` alone, and never less in
+    // company; it is not a spot left empty.
+    let stay_in =
+        world.unwind.get(&id).is_some_and(|p| p.stay_in) && at_home.is_some_and(|h| Some(h) == home_of(world, id));
+    let stay_cfg = crate::systems::distance::stay_in(world).filter(|_| stay_in).cloned();
+    if let Some(c) = &stay_cfg {
+        ownership::jobs2_row(world).stay_in_hangouts += 1;
+        gain = gain.max(c.fun_hour * hours.max(0.5));
+    }
     // L2 shadow fixes item 5: an hour alone on the corner is `spot_lone_fun`
     // of one in company.
-    if others.is_empty() {
+    if let (true, Some(c)) = (others.is_empty(), &stay_cfg) {
+        gain = c.fun_hour * hours.max(0.5);
+    } else if others.is_empty() {
         gain *= world.config.life.spot_lone_fun;
         // Lives at work phase 2 (§ 3.3): a spot left early is remembered empty.
         if world.tick.saturating_sub(started) < world.config.leisure.hangout_ticks {
@@ -2819,7 +2872,14 @@ pub fn preach_plan(world: &mut World, id: EntityId) -> Option<Plan> {
     let tile = busiest_spot(world, gang)?;
     world.unwind.insert(
         id,
-        UnwindPick { rung: Rung::Free, act: ActionKind::Preach, venue: None, spot: Some(tile), score: 0.0 },
+        UnwindPick {
+            rung: Rung::Free,
+            act: ActionKind::Preach,
+            venue: None,
+            spot: Some(tile),
+            score: 0.0,
+            stay_in: false,
+        },
     );
     let steps = vec![step(ActionKind::GoTo(LocationKey::Spot), None), step(ActionKind::Preach, None)];
     Some(Plan { goal: GoalKind::GangWork, target: None, steps, started_tick: world.tick })

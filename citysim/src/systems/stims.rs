@@ -353,6 +353,7 @@ pub fn corner_plan(world: &mut World, id: EntityId) -> Option<Plan> {
             venue: None,
             spot: Some(t),
             score: 0.0,
+            stay_in: false,
         },
     );
     Some(Plan { goal: GoalKind::GangWork, target: None, steps, started_tick: world.tick })
@@ -436,6 +437,7 @@ pub fn corner_buy_plan(world: &mut World, id: EntityId) -> Option<Plan> {
             venue: None,
             spot: Some(t),
             score: 0.0,
+            stay_in: false,
         },
     );
     let step = |action| ActionInstance { action, target: None, tile: None };

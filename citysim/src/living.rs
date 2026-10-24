@@ -75,6 +75,12 @@ pub struct UnwindPick {
     /// The pick's score (the inspector shows it).
     #[serde(default)]
     pub score: f32,
+    /// Island fix round F3 (OPEN-190): the own Home's HangOut picked as the
+    /// stay-in fallback (no spot within `[distance.free] spot_cap_ticks`):
+    /// it runs alone at `stay_in.fun_hour` and is never left as an empty
+    /// spot. Not written when false, so an off save is byte-identical.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stay_in: bool,
 }
 
 /// L2 L15: where a street spot stands.

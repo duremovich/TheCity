@@ -658,6 +658,21 @@ pub struct FreeDistanceCfg {
     /// A Mission's cot's offer over a paid Hotel bed, in travel ticks (it
     /// is free): the cot unless a Hotel is nearer by more than this.
     pub cot_bed_ticks: u64,
+    /// Island fix round F3 (OPEN-190): the stay-in fallback. `None` (not
+    /// written into a save) with `CITYSIM_STAY_IN_OFF=1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stay_in: Option<StayInCfg>,
+}
+
+/// Island fix round F3 `[distance.free.stay_in]` (docs/ISLAND_PASS.md I1,
+/// Dylan's D1 B; OPEN-190): with no HangOut spot within `spot_cap_ticks`
+/// the Unwind is the own Home's HangOut (`leisure::stay_in_home`), with
+/// its flatmates and Block-mates, else alone. A placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StayInCfg {
+    /// The fun of an hour in alone (the screen, the deck, the window); in
+    /// company, the larger of this and a HangOut's `gain.hangout_hour`.
+    pub fun_hour: f32,
 }
 
 /// The island pass phase 8 `[island_trades]` (docs/ISLAND_PASS.md I4;
@@ -8869,6 +8884,13 @@ impl Config {
         if std::env::var("CITYSIM_DISTANCE2_OFF").is_ok_and(|v| v == "1") {
             if let Some(d) = cfg.distance.as_mut() {
                 d.free = None;
+            }
+        }
+        // Island fix round F3 (OPEN-190): the stay-in fallback's switch in
+        // flight (doctrine 6).
+        if std::env::var("CITYSIM_STAY_IN_OFF").is_ok_and(|v| v == "1") {
+            if let Some(f) = cfg.distance.as_mut().and_then(|d| d.free.as_mut()) {
+                f.stay_in = None;
             }
         }
         // The island pass phase 3a (OPEN-163, I6): seeded company housing's

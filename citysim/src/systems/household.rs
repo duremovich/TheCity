@@ -270,6 +270,10 @@ pub fn empty_leave(world: &World, id: EntityId, started: Tick) -> bool {
     if !on(world) || world.tick.saturating_sub(started) < Tick::from(world.config.household.empty_leave_ticks) {
         return false;
     }
+    // Island fix round F3 (OPEN-190): the stay-in runs alone by design.
+    if world.unwind.get(&id).is_some_and(|p| p.stay_in) {
+        return false;
+    }
     match hanging_at_home(world, id) {
         Some(h) => !any_inside(world, h, id),
         None => world
