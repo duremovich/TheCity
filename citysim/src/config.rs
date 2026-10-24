@@ -377,6 +377,31 @@ pub struct Config {
     /// `CITYSIM_HOUSING_MOOD_OFF=1`.
     #[serde(default, skip_serializing_if = "MoodCfg::is_empty")]
     pub mood: MoodCfg,
+    /// The island fix round F1 (OPEN-188, SHADOW_V8 D3 A): a trip's way is
+    /// judged by tiles, not district labels (`[routes]`). `None` (not
+    /// written into a save) with `CITYSIM_ROUTES_OFF=1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routes: Option<RoutesCfg>,
+}
+
+/// `[routes]` (the island fix round F1, OPEN-188): when a trip's route is
+/// longer than walking, walk; and a label is not space (the Spire is one
+/// district 150-350 tiles across). Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RoutesCfg {
+    /// The exec's car (`streetwork::exec_ride`, the ride home and its bed
+    /// estimate) drives a trip of this many Manhattan tiles or more, home
+    /// to Hq or from where he stands to his Home; the base drove only
+    /// between two district labels.
+    pub exec_ride_min_tiles: u32,
+    /// The El (`transit::route`, `commute_ticks`) is not boarded at a stop
+    /// whose walk from the trip's start is past this, nor left at one whose
+    /// walk to its end is; 0, no cap.
+    pub access_cap_ticks: u64,
+    /// A stop pair is no route when the alight stop lies on the walk to
+    /// the board stop (within this many tiles of a shortest Manhattan way):
+    /// the rider would walk past his stop to ride back to it.
+    pub pass_slack_tiles: u32,
 }
 
 /// `[mood]`: the hourly mood target's config-read terms (the older terms
@@ -8987,6 +9012,11 @@ impl Config {
         // switch in flight (doctrine 6).
         if std::env::var("CITYSIM_HOUSING_MOOD_OFF").is_ok_and(|v| v == "1") {
             cfg.mood.housing = None;
+        }
+        // The island fix round F1 (OPEN-188): the routes' switch in flight
+        // (doctrine 6).
+        if std::env::var("CITYSIM_ROUTES_OFF").is_ok_and(|v| v == "1") {
+            cfg.routes = None;
         }
         // Lives at work (D13): a config with `[lives] enabled = false` by any
         // path clears the milestone's sections, so the off save holds no

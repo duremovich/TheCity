@@ -1164,8 +1164,11 @@ pub fn route(world: &World, who: EntityId, from: TilePos, to: TilePos, t: Tick) 
     let mut best: Option<Route> = None;
     for &s in &board {
         let w1 = crate::exec::timed_walk(world, who, from, net.stops[usize::from(s)]);
+        if !access_ok(world, w1) {
+            continue;
+        }
         for &e in &alight {
-            if s == e {
+            if s == e || passes(world, from, s, e) {
                 continue;
             }
             let hop = net.hop(s, e);
@@ -1185,6 +1188,9 @@ pub fn route(world: &World, who: EntityId, from: TilePos, to: TilePos, t: Tick) 
                 continue;
             }
             let w2 = crate::exec::timed_walk(world, who, net.stops[usize::from(e)], to);
+            if !access_ok(world, w2) {
+                continue;
+            }
             let total = arrive + w2 - t;
             if best.is_none_or(|b| total < b.total) {
                 best = Some(Route { board: s, alight: e, hop, depart, arrive, total, walk: 0, dodge: false });
@@ -1192,6 +1198,25 @@ pub fn route(world: &World, who: EntityId, from: TilePos, to: TilePos, t: Tick) 
         }
     }
     best
+}
+
+/// The island fix round F1 (OPEN-188, `[routes] access_cap_ticks`): a walk
+/// to the board stop or from the alight stop this long is no part of a
+/// route (V8: a 2.5 h walk to the platform). Always true off, or with the
+/// cap 0 (the shipped value: see `[routes]`).
+fn access_ok(world: &World, walk: Tick) -> bool {
+    world.config.routes.as_ref().is_none_or(|r| r.access_cap_ticks == 0 || walk <= r.access_cap_ticks)
+}
+
+/// The island fix round F1 (OPEN-188, `[routes] pass_slack_tiles`): does the
+/// walk from `from` to board stop `s` pass alight stop `e` (it lies within
+/// the slack of a shortest Manhattan way)? The rider would walk by his stop
+/// to ride round to it. Always false off.
+fn passes(world: &World, from: TilePos, s: u16, e: u16) -> bool {
+    let Some(r) = world.config.routes.as_ref() else { return false };
+    let net = &world.transit.net;
+    let (sp, ep) = (net.stops[usize::from(s)], net.stops[usize::from(e)]);
+    from.manhattan(ep) + ep.manhattan(sp) <= from.manhattan(sp) + r.pass_slack_tiles
 }
 
 /// The coins a meal costs (the poor test).
@@ -1279,8 +1304,11 @@ pub fn commute_ticks(world: &World, from: TilePos, to: TilePos) -> Tick {
     let near_to = net.near(to);
     for &s in net.near(from).iter().filter(|&&s| !shut(s)).take(k) {
         let w1 = Tick::from(net.stops[usize::from(s)].manhattan(from)) * step;
+        if !access_ok(world, w1) {
+            continue;
+        }
         for &e in near_to.iter().filter(|&&e| !shut(e)).take(k) {
-            if s == e {
+            if s == e || passes(world, from, s, e) {
                 continue;
             }
             let hop = net.hop(s, e);
@@ -1288,6 +1316,9 @@ pub fn commute_ticks(world: &World, from: TilePos, to: TilePos) -> Tick {
                 continue;
             }
             let w2 = Tick::from(net.stops[usize::from(e)].manhattan(to)) * step;
+            if !access_ok(world, w2) {
+                continue;
+            }
             best = best.min(w1 + Tick::from(c.headway / 2) + Tick::from(hop.ticks) + w2);
         }
     }

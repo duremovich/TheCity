@@ -1557,6 +1557,42 @@ mod lives_street {
         assert!(sw::exec_ride(&mut w, e, &target).is_none(), "off, no ride");
     }
 
+    /// The island fix round F1 (OPEN-188, SHADOW_V8 D3 A): a label is not
+    /// space. The Hq relabelled into the Home's district (the island's Spire
+    /// is one label 150-350 tiles across) still gets the car when the doors
+    /// are `[routes] exec_ride_min_tiles` apart; nearer, he walks. Fails on
+    /// the base (one label: no car).
+    #[test]
+    fn test_the_exec_rides_across_one_district_label() {
+        let mut w = city_with(|_| {});
+        let (e, corp, hq) = exec_far_from_hq(&mut w);
+        let home = citysim::systems::missions::home_of(&w, e).expect("home");
+        let hd = w.comp::<Building>(home).expect("home").door;
+        let door = w.comp::<Building>(hq).expect("hq").door;
+        let min = w.config.routes.as_ref().map_or(40, |r| r.exec_ride_min_tiles);
+        assert!(hd.manhattan(door) >= min, "the doors are a drive apart");
+        let width = w.map.w();
+        let cell = |p: citysim::TilePos| usize::from(p.y) * width + usize::from(p.x);
+        w.district_grid[cell(door)] = (w.district_grid[cell(door)] & 0xC0) | (w.district_grid[cell(hd)] & 0x3F);
+        assert_eq!(w.district_of_building(hq), w.district_of_building(home), "one label");
+        w.leave_building(e);
+        if let Some(p) = w.comp_mut::<Position>(e) {
+            p.tile = hd;
+            p.building = None;
+        }
+        if let Some(c) = w.comp_mut::<citysim::Corp>(corp) {
+            c.treasury = c.treasury.max(10_000);
+        }
+        w.jobs2.cab_rolled.clear();
+        let target = GotoTarget { dest: LocationKey::Workplace, tile: door, building: Some(hq) };
+        let state = sw::exec_ride(&mut w, e, &target).expect("the car across one label");
+        assert!(matches!(state, ExecState::GotoTimed { .. }), "a timed leg, not {state:?}");
+        // A Hq nearer than the cap: he walks.
+        w.jobs2.cab_rolled.clear();
+        w.config.routes.as_mut().expect("[routes]").exec_ride_min_tiles = hd.manhattan(door) + 1;
+        assert!(sw::exec_ride(&mut w, e, &target).is_none(), "too near to drive");
+    }
+
     /// The pre-view pass phase 5 (OPEN-140's remainder): the exec driven to
     /// his Hq is driven home too (once a day, from outside his Home's
     /// district), and the away bed reads that ride: his Home is nearer by car
