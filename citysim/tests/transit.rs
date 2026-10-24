@@ -1506,3 +1506,82 @@ fn test_a_full_train_leaves_the_rider_for_the_next() {
     }
     assert!(citysim::systems::motion::vehicle_of(&w, who).is_some(), "aboard the next");
 }
+
+// ---------------------------------------------------------------------------
+// The island fix round F1 (OPEN-188): when the route is longer than walking, walk
+// ---------------------------------------------------------------------------
+
+/// An El route whose walk to the platform is past `[routes]
+/// access_cap_ticks` is no route (V8: a 2.5 h walk to the platform). Fails
+/// on the base (no cap, no `[routes]`).
+#[test]
+fn test_a_long_walk_to_the_platform_is_no_route() {
+    let mut w = city_on();
+    let (who, home, farm) = sump_farmer(&w);
+    set_out(&mut w, who, home, farm, Lod::Full, 50, 0.6);
+    let from = citysim::exec::walk_origin(&w, who).expect("origin");
+    let door = w.comp::<Building>(farm).expect("farm").door;
+    let t = w.tick;
+    let r = transit::choose(&w, who, from, door, t).expect("a ride");
+    let access = citysim::exec::timed_walk(&w, who, from, w.transit.net.stops[usize::from(r.board)]);
+    assert!(access > 0, "a walk to the platform");
+    w.config.routes.as_mut().expect("[routes]").access_cap_ticks = 0;
+    assert_eq!(transit::choose(&w, who, from, door, t), Err(Refusal::NoRoute), "past the cap: walk");
+    assert_eq!(transit::commute_ticks(&w, from, door), u64::from(from.manhattan(door)) * w.config.exec.move_ticks_full);
+}
+
+/// No route boards at a stop whose walk passes the alight stop: the rider
+/// would walk by his stop to ride round to it. Every pair of stops on the
+/// shipped lines, the trip from just past the alight stop to a door far
+/// along the line the other way. Fails on the base.
+#[test]
+fn test_no_route_walks_past_its_alight_stop() {
+    let w = city_on();
+    let who = w.citizens().into_iter().find(|&a| w.has::<Brain>(a) && w.has::<Wallet>(a)).expect("a body");
+    let slack = w.config.routes.as_ref().expect("[routes]").pass_slack_tiles;
+    let t = TICKS_PER_DAY + 8 * 60;
+    let stops = w.transit.net.stops.clone();
+    let mut tried = 0;
+    for &from in &stops {
+        for &to in &stops {
+            if from.manhattan(to) < 40 {
+                continue;
+            }
+            let Ok(r) = transit::choose(&w, who, from, to, t) else { continue };
+            tried += 1;
+            let (s, e) = (stops[usize::from(r.board)], stops[usize::from(r.alight)]);
+            assert!(
+                from.manhattan(e) + e.manhattan(s) > from.manhattan(s) + slack,
+                "from {from:?} to {to:?}: walks past {e:?} to board at {s:?}"
+            );
+        }
+    }
+    assert!(tried > 0, "some trips ride");
+}
+
+/// A rider whose plan drops between two stops gets off at the next call,
+/// not later (SHADOW_V8 suspected `motion::alight`'s hold kept him aboard
+/// past his stop; F1 found the hold ends at the next call, this pins it).
+#[test]
+fn test_a_dropped_plan_aboard_gets_off_at_the_next_call() {
+    let mut w = city_on();
+    let (who, home, farm) = sump_farmer(&w);
+    set_out(&mut w, who, home, farm, Lod::Full, 50, 0.6);
+    let stop_gap = u64::from(w.config.transit.stop_spacing) + u64::from(w.config.transit.dwell_ticks) + 2;
+    loop {
+        exec_tick(&mut w);
+        assert!(w.tick < TICKS_PER_DAY * 2, "never between stops");
+        let tile = w.comp::<Position>(who).expect("pos").tile;
+        if citysim::systems::motion::vehicle_of(&w, who).is_some() && !w.transit.net.stops.contains(&tile) {
+            break;
+        }
+    }
+    w.abort_plan(who);
+    let t0 = w.tick;
+    while citysim::systems::motion::vehicle_of(&w, who).is_some() {
+        exec_tick(&mut w);
+        assert!(w.tick - t0 <= stop_gap, "still aboard {} ticks after the plan dropped", w.tick - t0);
+    }
+    let tile = w.comp::<Position>(who).expect("pos").tile;
+    assert!(w.transit.net.stops.contains(&tile), "off at a stop, not mid-track: {tile:?}");
+}

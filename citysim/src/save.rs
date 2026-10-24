@@ -335,7 +335,9 @@ use crate::world::World;
 /// and the `Jobs2Cols` `stay_in_hangouts` column (each written only when
 /// set): a save mid-stay-in resumes it. An off save is byte-identical to
 /// version 64's.
-pub const SAVE_VERSION: u8 = 65;
+/// 66 (island fix round F1, OPEN-188): `Config.routes` (`[routes]`,
+/// written only when set). An off save is byte-identical to version 65's.
+pub const SAVE_VERSION: u8 = 66;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
