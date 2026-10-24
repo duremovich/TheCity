@@ -118,6 +118,11 @@ pub fn open_to_all(world: &World, home: EntityId) -> bool {
 /// promoted or moved within the corp keeps the corp's bed; the beds are
 /// let to the workplace's staff, `move_in`).
 fn on_staff(world: &World, a: EntityId, home: EntityId) -> bool {
+    // The island fix round F2 (OPEN-189): the corp's other posts only
+    // within `[beds] company_post_ticks` of the bed.
+    if let Some(keep) = crate::systems::beds::company_keep(world, a, home) {
+        return keep;
+    }
     let Some(w) = of(world, home) else { return false };
     let Some(e) = world.comp::<Job>(a).and_then(|j| j.employer) else { return false };
     e == w || world.owner_of(home).is_some_and(|o| world.owner_of(e) == Some(o))
@@ -620,6 +625,8 @@ fn fill(world: &mut World, mode: Fill) {
                         .comp::<Building>(h)
                         .is_some_and(|b| world.residents_of(h).len() + need <= usize::from(b.capacity))
                 })
+                // The island fix round F2 (OPEN-189): within the cap of the post.
+                .filter(|&h| crate::systems::beds::company_take(world, a, h) != Some(false))
                 .filter_map(|h| Some((crate::systems::distance::travel(world, door(world, h)?, wdoor), h)))
                 .min()
                 .map(|(_, h)| h);

@@ -198,6 +198,11 @@ pub fn job_moves(world: &mut World) {
 /// Company Home `h` takes `a`'s household: its beds are reserved for the
 /// workplace `a` works at, or another of `h`'s owner's (`company::on_staff`).
 pub fn company_for(world: &World, a: EntityId, h: EntityId) -> bool {
+    // The island fix round F2 (OPEN-189): the workplace's own staff only,
+    // within `[beds] company_post_ticks` of the post.
+    if let Some(take) = crate::systems::beds::company_take(world, a, h) {
+        return take;
+    }
     let Some(w) = crate::systems::company::of(world, h) else { return false };
     let Some(e) = world.comp::<Job>(a).and_then(|j| j.employer) else { return false };
     e == w || world.owner_of(h).is_some_and(|o| world.owner_of(e) == Some(o))

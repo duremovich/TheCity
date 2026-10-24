@@ -337,7 +337,10 @@ use crate::world::World;
 /// version 64's.
 /// 66 (island fix round F1, OPEN-188): `Config.routes` (`[routes]`,
 /// written only when set). An off save is byte-identical to version 65's.
-pub const SAVE_VERSION: u8 = 66;
+/// 67 (the island fix round F2, OPEN-189, OPEN-191, OPEN-193):
+/// `Config.beds` (`[beds]`, written only when set; serde default `None`).
+/// An off save is byte-identical to version 66's.
+pub const SAVE_VERSION: u8 = 67;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

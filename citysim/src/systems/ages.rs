@@ -458,6 +458,8 @@ pub fn kin_home(world: &World, e: EntityId) -> Option<EntityId> {
     }
     kids.iter().copied().filter_map(|c| world.comp::<Household>(c).and_then(|h| h.home)).find(|&h| {
         Some(h) != home
+            // The island fix round F2 (OPEN-189): a relative's plain Home.
+            && crate::systems::beds::kin_ok(world, h)
             && world.comp::<Building>(h).is_some_and(|b| {
                 b.kind == BuildingKind::Home
                     && !b.demolished

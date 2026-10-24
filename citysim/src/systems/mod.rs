@@ -22,6 +22,7 @@ pub mod ages;
 pub mod ambient;
 pub mod assets;
 pub mod attention;
+pub mod beds;
 pub mod bind;
 pub mod bins;
 pub mod braindance;

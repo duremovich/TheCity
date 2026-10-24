@@ -360,7 +360,11 @@ fn brothers_since(w: &World, t: u64) -> usize {
 
 fn cool_hollow(w: &mut World) {
     for f in w.outside.factions.iter_mut().filter(|f| f.name == "Hollow Brothers") {
-        f.parent.as_mut().expect("p").last_brothers = None;
+        let p = f.parent.as_mut().expect("p");
+        p.last_brothers = None;
+        // Brothers the run-on scheduled before the test's start are not its
+        // own (a sack in `hollow_city`'s days lands them after `t0`).
+        p.brothers_due.clear();
     }
 }
 

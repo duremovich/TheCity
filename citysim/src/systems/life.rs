@@ -158,6 +158,11 @@ pub fn hideout_bed(world: &World, id: EntityId) -> Option<EntityId> {
         return None;
     }
     let t = tiles_to(world, id, h)?;
+    // The island fix round F2 (OPEN-191, D2 = A): a housed member's Hideout
+    // only within the walk and tomorrow's commute.
+    if crate::systems::beds::hideout_ok(world, id, h) == Some(false) {
+        return None;
+    }
     // The island pass phase 1 (OPEN-163): the bed is scored by the travel
     // from here (`distance::travel`; 0 inside), the Home's offer
     // (`[distance] home_bed_ticks`) off its score; a bed past
@@ -1080,7 +1085,9 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool, daily: bool)
         // can pay the mover's Home's first rent.
         let pick = match pick {
             Some(p) => Some(p),
-            None if fix && spouse.is_none() && kids.is_empty() => {
+            // The island fix round F2 (OPEN-189): a company bed is never
+            // traded to the other side.
+            None if fix && spouse.is_none() && kids.is_empty() && crate::systems::beds::trade_ok(world, home) => {
                 let mover = Mover { purse, evicted_by, min_tier };
                 // The trade walks the Homes nearest first: the whole row.
                 memo.fill(world, work, &cost);

@@ -431,7 +431,14 @@ fn haul_plan(
     // The island pass phase 8 (`site_day`): a far site is one way: the
     // load, the carry, the unload, the rest of the shift there.
     let site_day = dest.is_some_and(|(b, _, _)| site_day_dest(world, post, b));
+    // The island fix round F2 (OPEN-193, `[beds] site_from_home`): begun
+    // away from the Yard, the site day walks straight to the site (the
+    // crate carried from the Yard counted on the same leg).
+    let direct = site_day && !inside && crate::systems::beds::site_from_home(world);
     let trip = match (site_day, dest) {
+        (true, Some((b, _, _))) if direct => world
+            .comp::<Building>(b)
+            .map(|x| (crate::systems::fixes::walk_estimate(world, id, x.door) + handle) * 5 / 4),
         (true, Some((b, _, _))) => world
             .comp::<Building>(b)
             .map(|x| (back + 2 * handle + crate::systems::distance::travel(world, post_door, x.door)) * 5 / 4),
@@ -456,13 +463,25 @@ fn haul_plan(
         None => true,
     };
     let mut steps = Vec::new();
+    let work = routine::work_action(world, job.role);
+    let mut blocks = Vec::new();
+    let mut new_drawn = drawn;
+    if let (false, true, Some((b, _, k))) = (close, direct, dest) {
+        steps.push(step(ActionKind::GoTo(LocationKey::TargetHome), Some(b), None));
+        steps.push(step(ActionKind::Unload, Some(b), None));
+        steps.push(step(work, Some(post), None));
+        blocks.push(0);
+        let s = world.comp_mut::<Brain>(id)?.shift.as_mut()?;
+        s.stage = 2;
+        s.drawn = k;
+        s.blocks = blocks;
+        s.plan_tick = now;
+        return Some(Plan { goal: GoalKind::Work, target: Some(post), steps, started_tick: now });
+    }
     if !inside {
         steps.push(step(ActionKind::GoTo(routine::workplace_key_for(world, id, &job)), Some(post), None));
     }
     steps.push(step(ActionKind::GoTo(LocationKey::Station), Some(post), Some(spots[0])));
-    let work = routine::work_action(world, job.role);
-    let mut blocks = Vec::new();
-    let mut new_drawn = drawn;
     if close {
         // The rest of the shift at the post (closed and paid at its end).
         steps.push(step(work, Some(post), None));
