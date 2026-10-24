@@ -330,10 +330,15 @@ use crate::world::World;
 /// and the `LivingCols` probe `fv_hands_capped` (each written only when
 /// set): a save resumes the hands' windows and an open hole's hand. An off
 /// save is byte-identical to version 63's.
-/// 65 (the island fix round F2, OPEN-189, OPEN-191, OPEN-193):
+/// 65 (island fix round F3, OPEN-190): `FreeDistanceCfg.stay_in`
+/// (`[distance.free.stay_in]`, written only when set), `UnwindPick.stay_in`
+/// and the `Jobs2Cols` `stay_in_hangouts` column (each written only when
+/// set): a save mid-stay-in resumes it. An off save is byte-identical to
+/// version 64's.
+/// 66 (the island fix round F2, OPEN-189, OPEN-191, OPEN-193):
 /// `Config.beds` (`[beds]`, written only when set; serde default `None`).
-/// An off save is byte-identical to version 64's.
-pub const SAVE_VERSION: u8 = 65;
+/// An off save is byte-identical to version 65's.
+pub const SAVE_VERSION: u8 = 66;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

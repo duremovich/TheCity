@@ -332,6 +332,7 @@ pub fn pimp_plan(world: &mut World, id: EntityId) -> Option<crate::goap::Plan> {
             venue: None,
             spot: Some(spot),
             score: 0.0,
+            stay_in: false,
         },
     );
     let step = |action, target| ActionInstance { action, target, tile: None };
