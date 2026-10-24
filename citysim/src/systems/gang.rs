@@ -231,6 +231,9 @@ pub fn holes_up_at(world: &World, id: EntityId) -> Option<EntityId> {
         && !watch
         && !b.occupants.contains(&id)
         && world.comp::<crate::components::Position>(id).is_some_and(|p| p.tile.manhattan(b.door) > max);
+    // The island fix round F2 (OPEN-191, D2 = A): a housed member, the
+    // watch included, only within the walk and tomorrow's commute.
+    let far = far || (!homeless && crate::systems::beds::hideout_ok(world, id, g.hideout) == Some(false));
     (!far && (!b.is_full() || b.occupants.contains(&id))).then_some(g.hideout)
 }
 

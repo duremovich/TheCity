@@ -4529,6 +4529,28 @@ cab_quota = 2                      # cab drivers on shift a Garage who keep a bo
 corner_arms = true                 # a gang that deals at a corner sells its armoury surplus at the nearest Bar to its
                                    # deal district's centre (the base's arms dealer sold only where the drugs were sold)
 
+# The island fix round F2 (Shadow V8 bugs 2, 4, 6; docs/ISLAND_PASS.md I6, I8; OPEN-189, OPEN-191, OPEN-193): a bed is
+# taken only if it is the resident's own workplace's or within the commute cap. A company bed went to a corp's worker of
+# any of its workplaces at any distance (a D3 clinic's ripperdoc in a D6 Site Barracks), to a retiree taken in by a
+# child housed there (a D6 coffin rack, 721 min) and to the other side of a Home trade; the gang's one Hideout was
+# tonight's bed for the watch at any distance and the nearer bed when Home was farther still (58 of 78 island
+# GoTo(Hideout) legs to the Sump, median 144 min); a Builder's far-site day walked to the Yard first. Read by
+# systems/beds.rs (company.rs, commute.rs, life.rs, ages.rs, gang.rs) and systems/shift.rs. CITYSIM_BEDS_OFF=1 drops
+# the section (the switch in flight). Placeholders.
+[beds]
+company_post_ticks = 120           # a company bed is taken only by the workplace's own staff, and kept by a corp worker of
+                                   # another of its workplaces, only with the post within this travel of the bed
+                                   # ([distance] home_cap_ticks); the retiree's kin take-in goes to a plain Home only
+hideout_walk_ticks = 120           # tonight's Hideout bed (the nearer bed, the watch, lying low) for a housed member only
+                                   # within this travel from where the body stands, else Home ([distance] bed_cap_ticks;
+                                   # the base took the nearer of two beds both past it); a homeless member takes it as before
+hideout_work_ticks = 120           # ... and for a member with a post only with the Hideout within this travel of the post,
+                                   # tomorrow's commute ([distance] job_cap_ticks): a Spire day job's leader slept at a Sump
+                                   # Hideout and walked 589 min to work (Shadow V8 gangs)
+site_from_home = true              # a Builder's far-site day ([island_trades] site_day) begun away from the Yard walks
+                                   # straight to the site: the base walked to the Yard to load, then out (473 min walking
+                                   # for 311 min of work, Shadow V8 labour)
+
 # The island pass phase 3c (OPEN-177, Dylan 2026-10-22; mood.rs housing_bias): a flat bias on the hourly mood target
 # from the agent's Home, as [litter] mood is. A Home's tier reached mood only through the night's sleep safety (+0.1 a
 # tier, often at its cap) and the synth diet; crowding and a company-owned bed registered nothing, so a coffin rack felt

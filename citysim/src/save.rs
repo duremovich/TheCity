@@ -330,7 +330,10 @@ use crate::world::World;
 /// and the `LivingCols` probe `fv_hands_capped` (each written only when
 /// set): a save resumes the hands' windows and an open hole's hand. An off
 /// save is byte-identical to version 63's.
-pub const SAVE_VERSION: u8 = 64;
+/// 65 (the island fix round F2, OPEN-189, OPEN-191, OPEN-193):
+/// `Config.beds` (`[beds]`, written only when set; serde default `None`).
+/// An off save is byte-identical to version 64's.
+pub const SAVE_VERSION: u8 = 65;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

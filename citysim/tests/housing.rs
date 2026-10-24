@@ -1123,6 +1123,189 @@ fn test_household_moves_together_on_the_pressure() {
     assert!(lines(s).last().is_some_and(|t| t.contains("moved with")), "the spouse's line: {:?}", lines(s));
 }
 
+/// The island fix round F2 (OPEN-189): a company bed is its own workplace's
+/// staff's, within `[beds] company_post_ticks` of the post. A worker of
+/// another of the corp's workplaces past the cap neither takes one (the
+/// commute pressure's pick, `commute::company_for`) nor keeps one (the
+/// grace, then the eviction); the base let any of the corp's posts take and
+/// keep a bed at any distance (a D3 clinic's ripperdoc in a D6 Site
+/// Barracks). The retiree's kin take-in goes to a relative's plain Home,
+/// never a child's company bed (the base moved `worker_6720` into a D6
+/// coffin rack).
+#[test]
+fn test_company_bed_is_its_own_staffs_within_the_cap() {
+    let mut w = base();
+    let (a, farm) = farm_worker(&w);
+    let block = company_block(&mut w, farm, 4);
+    let bd = door_of(&w, block);
+    let travel = |w: &World, b: EntityId| citysim::systems::distance::travel(w, bd, door_of(w, b));
+    // A worker of another workplace, no spouse, no gang; the block his
+    // employer's owner's (the same corp), his post the farthest from it.
+    let execs = classes::exec_set(&w);
+    let (t, b, e) = common::adults(&w)
+        .into_iter()
+        .filter(|&b| b != a && w.spouse_of(b).is_none() && w.gang_of(b).is_none() && !execs.contains(&b))
+        .filter(|&b| home_of(&w, b).is_some() && w.has::<Brain>(b))
+        .filter_map(|b| {
+            let e = w.comp::<Job>(b)?.employer?;
+            (e != farm && w.owner_of(e).is_some()).then(|| (travel(&w, e), b, e))
+        })
+        .max()
+        .expect("a far worker of another workplace");
+    assert!(t > travel(&w, farm), "his post is farther from the block than the Farm");
+    let corp = w.owner_of(e);
+    citysim::systems::ownership::transfer_building(&mut w, block, corp);
+    let cap = t - 1;
+    w.config.beds.as_mut().expect("[beds] on").company_post_ticks = cap;
+    assert!(travel(&w, farm) <= cap, "the Farm's own post is within the cap");
+    let mut off = w.clone();
+    off.config.beds = None;
+    use citysim::systems::commute::company_for;
+    assert!(company_for(&w, a, block), "on: the Farm's own staff takes it");
+    assert!(!company_for(&w, b, block), "on: a far corp worker does not take it");
+    assert!(company_for(&off, b, block), "off (the base): any of the corp's posts takes it");
+    // Kept: the far corp worker is put out after the grace (the base keeps him).
+    let grace = w.config.company_housing.as_ref().expect("on").grace_days;
+    let keeps = |mut w: World| {
+        w.set_home(b, Some(block));
+        common::set_coins(&mut w, b, 10_000);
+        for _ in 0..=grace {
+            midnight(&mut w);
+        }
+        home_of(&w, b) == Some(block)
+    };
+    assert!(!keeps(w.clone()), "on: the far corp worker is evicted after the grace");
+    assert!(keeps(off.clone()), "off (the base): the corp's bed keeps him at any distance");
+    // The kin take-in: an elder whose grown child lives in the company bed.
+    let pair = w.citizens().into_iter().find_map(|p| {
+        let c = demography::children_of_agent(&w, p).into_iter().find(|&c| {
+            demography::is_adult(&w, c)
+                && law::living(&w, c)
+                && home_of(&w, c).is_some()
+                && home_of(&w, c) != home_of(&w, p)
+        })?;
+        Some((p, c))
+    });
+    let (p, c) = pair.expect("a parent with a grown child housed elsewhere");
+    let kin = |mut w: World| {
+        w.set_home(c, Some(block));
+        let room = w.residents_of(block).len() as u16 + 2;
+        w.comp_mut::<Building>(block).expect("b").capacity = room;
+        ages::kin_home(&w, p)
+    };
+    assert_ne!(kin(w.clone()), Some(block), "on: the take-in never lands in a company bed");
+    assert_eq!(kin(off), Some(block), "off (the base): the retiree moves into the child's company bed");
+}
+
+/// The island fix round F2 (OPEN-191, D2 = A): tonight's Hideout bed for a
+/// housed member (the nearer bed, the watch, lying low) only within `[beds]
+/// hideout_walk_ticks` of where the body stands and within
+/// `hideout_work_ticks` of the post; past either, Home. A homeless member
+/// takes it as before. The base sent a member lying low (or on watch) to
+/// the Hideout whatever his work's distance.
+#[test]
+fn test_far_hideout_sleeps_at_home_homeless_takes_it() {
+    let mut w = base();
+    // A housed Farm hand with a post, enlisted in the first gang.
+    let (m, _) = farm_worker(&w);
+    let g0 = w.gangs()[0];
+    citysim::systems::gang::enlist(&mut w, m, g0);
+    let gang = w.gang_of(m).expect("gang");
+    let h = w.hideout_of(gang).expect("a Hideout");
+    let hd = door_of(&w, h);
+    w.comp_mut::<citysim::components::Gang>(gang).expect("g").order = citysim::components::Order::LieLow;
+    w.comp_mut::<Building>(h).expect("b").capacity += 8;
+    // Five tiles from the Hideout's door, outside.
+    let at = TilePos { x: hd.x.saturating_sub(5), y: hd.y };
+    w.remove_from_building(m);
+    if let Some(p) = w.comp_mut::<Position>(m) {
+        p.tile = at;
+        p.building = None;
+    }
+    let walk = citysim::systems::distance::travel(&w, at, hd);
+    let to_work = citysim::systems::distance::travel(&w, hd, work_door(&w, m).expect("work"));
+    assert!(walk > 0 && to_work > 0, "a walk to the Hideout and a commute from it");
+    let with = |walk_cap: u64, work_cap: u64| {
+        let mut w = w.clone();
+        let c = w.config.beds.as_mut().expect("[beds] on");
+        c.hideout_walk_ticks = walk_cap;
+        c.hideout_work_ticks = work_cap;
+        w
+    };
+    use citysim::systems::gang::holes_up_at;
+    let mut off = w.clone();
+    off.config.beds = None;
+    assert_eq!(holes_up_at(&off, m), Some(h), "off (the base): lying low, the Hideout whatever the commute");
+    let near = with(walk, to_work);
+    assert_eq!(holes_up_at(&near, m), Some(h), "on: within both caps, the Hideout");
+    let far_walk = with(walk - 1, to_work);
+    assert_eq!(holes_up_at(&far_walk, m), None, "on: past the walk, Home");
+    assert_eq!(life::hideout_bed(&far_walk, m), None, "on: past the walk, no Hideout bed");
+    let far_work = with(walk, to_work - 1);
+    assert_eq!(holes_up_at(&far_work, m), None, "on: past tomorrow's commute, Home");
+    assert_eq!(life::hideout_bed(&far_work, m), None, "on: past tomorrow's commute, no Hideout bed");
+    let mut homeless = with(0, 0);
+    homeless.set_home(m, None);
+    assert_eq!(holes_up_at(&homeless, m), Some(h), "on: a homeless member still takes the Hideout");
+    assert_eq!(life::hideout_bed(&homeless, m), Some(h), "on: a homeless member's bed is the Hideout");
+}
+
+/// The island fix round F2 (OPEN-193): a Builder's far-site day begun away
+/// from the Yard walks straight to the site (`[beds] site_from_home`); the
+/// base walked to the Yard to load first (`builder_7236`: 473 min walking
+/// for 311 min of work).
+#[test]
+fn test_builders_site_day_begins_at_the_site() {
+    let mut w = base();
+    let role = w.config.trade_role("builder").expect("the builder trade");
+    let reach = w.config.shift.as_ref().and_then(|c| c.haul.as_ref()).map_or(0, |h| h.haul_reach);
+    let (a, yard) = w
+        .citizens()
+        .into_iter()
+        .filter(|&a| law::living(&w, a) && !w.has::<citysim::Sentence>(a) && home_of(&w, a).is_some())
+        .find_map(|a| {
+            let j = w.comp::<Job>(a)?;
+            let e = j.employer?;
+            let left = j.shift_end(w.tick)?.saturating_sub(w.tick);
+            (j.role == role && j.shifts.len() == 1 && j.on_shift(w.tick_of_day()) && left >= 360).then_some((a, e))
+        })
+        .expect("a Builder on shift with six hours left");
+    let yd = door_of(&w, yard);
+    let site = w
+        .buildings_of_kind(BuildingKind::Home)
+        .iter()
+        .copied()
+        .filter(|&b| w.comp::<Building>(b).is_some_and(|x| !x.demolished && !x.derelict))
+        .map(|b| (citysim::systems::distance::travel(&w, yd, door_of(&w, b)), b))
+        .filter(|&(t, b)| (30..=90).contains(&t) && door_of(&w, b).manhattan(yd) > reach)
+        .min()
+        .map(|(_, b)| b)
+        .expect("a Block past haul_reach, under two hours from the Yard");
+    let tick = w.tick;
+    w.jobs2.sites.retain(|_, &mut (y, _)| y != yard);
+    w.jobs2.sites.insert(site, (yard, tick));
+    citysim::systems::lod::set_lod(&mut w, a, citysim::Lod::Full);
+    w.comp_mut::<Job>(a).expect("job").last_shift_day = None;
+    w.comp_mut::<Brain>(a).expect("brain").shift = None;
+    // Out at his Home's door.
+    let hd = door_of(&w, home_of(&w, a).expect("home"));
+    w.remove_from_building(a);
+    if let Some(p) = w.comp_mut::<Position>(a) {
+        p.tile = hd;
+        p.building = None;
+    }
+    let first = |mut w: World| {
+        let p = citysim::systems::shift::plan(&mut w, a).expect("a haul plan");
+        (p.steps[0].action, p.steps[0].target)
+    };
+    let mut off = w.clone();
+    off.config.beds = None;
+    let (act, to) = first(off);
+    assert!(matches!(act, citysim::ActionKind::GoTo(_)) && to == Some(yard), "off (the base): to the Yard first");
+    let (act, to) = first(w);
+    assert_eq!((act, to), (citysim::ActionKind::GoTo(LocationKey::TargetHome), Some(site)), "on: straight to the site");
+}
+
 fn env<T: std::str::FromStr>(k: &str) -> Option<T> {
     std::env::var(k).ok().and_then(|v| v.parse().ok())
 }

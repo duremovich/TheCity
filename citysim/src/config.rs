@@ -366,6 +366,12 @@ pub struct Config {
     /// `CITYSIM_TRADES_OFF=1`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub island_trades: Option<IslandTradesCfg>,
+    /// The island fix round F2 (Shadow V8 bugs 2, 4, 6; OPEN-189, OPEN-191,
+    /// OPEN-193): a bed is taken only if it is the resident's own
+    /// workplace's or within the commute cap (`systems/beds.rs`). `None`
+    /// (not written into a save) with `CITYSIM_BEDS_OFF=1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub beds: Option<BedsCfg>,
     /// The island pass phase 3c (OPEN-177): `[mood.*]`, the mood terms read
     /// from config. Empty (not written into a save) with
     /// `CITYSIM_HOUSING_MOOD_OFF=1`.
@@ -658,6 +664,28 @@ pub struct FreeDistanceCfg {
     /// A Mission's cot's offer over a paid Hotel bed, in travel ticks (it
     /// is free): the cot unless a Hotel is nearer by more than this.
     pub cot_bed_ticks: u64,
+}
+
+/// The island fix round F2 `[beds]` (docs/ISLAND_PASS.md I6, I8; OPEN-189,
+/// OPEN-191, OPEN-193). Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BedsCfg {
+    /// A company bed is taken (or kept, by a corp's worker of another of its
+    /// workplaces) only by staff whose post's door is within this travel of
+    /// the bed's door (`distance::travel`).
+    pub company_post_ticks: u64,
+    /// Tonight's Hideout bed (the nearer bed, the watch, lying low) for a
+    /// housed member: only within this travel from where the body stands;
+    /// past it, Home.
+    pub hideout_walk_ticks: u64,
+    /// ... and, for a member with a post, only with the Hideout's door
+    /// within this travel of the post's door (tomorrow's commute); past it,
+    /// Home.
+    pub hideout_work_ticks: u64,
+    /// A Builder's far-site day ([island_trades] site_day) that starts away
+    /// from the Yard walks straight to the site (the base: to the Yard to
+    /// load, then out).
+    pub site_from_home: bool,
 }
 
 /// The island pass phase 8 `[island_trades]` (docs/ISLAND_PASS.md I4;
@@ -8927,6 +8955,11 @@ impl Config {
         // bugs, the switch in flight (doctrine 6).
         if std::env::var("CITYSIM_TRADES_OFF").is_ok_and(|v| v == "1") {
             cfg.island_trades = None;
+        }
+        // The island fix round F2 (OPEN-189, OPEN-191, OPEN-193): the beds'
+        // switch in flight (doctrine 6).
+        if std::env::var("CITYSIM_BEDS_OFF").is_ok_and(|v| v == "1") {
+            cfg.beds = None;
         }
         // The island pass phase 3c (OPEN-177): the housing mood term's
         // switch in flight (doctrine 6).
