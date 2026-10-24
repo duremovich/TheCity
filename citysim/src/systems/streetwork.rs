@@ -1408,7 +1408,8 @@ pub fn full_cab(world: &mut World, id: EntityId, target: &crate::exec::GotoTarge
 /// to his corp's Hq (`life::hq_of`), before the vehicle, the El and the
 /// walk. With `[service] exec_ride`, the street on and the exec housed at
 /// `[life] exec_home_tier` or better (the Spire) in a district other than
-/// the Hq's: the leg is timed at the Car's speed (`cab_ticks`, 4a's cab
+/// the Hq's (with `[routes]`, the island fix round F1: `exec_ride_min_tiles`
+/// or more from it, a label not being space): the leg is timed at the Car's speed (`cab_ticks`, 4a's cab
 /// leg). The corp's own road vehicle drives him when it owns one (no fare;
 /// deviation: the vehicle's asset is not moved, as the off-screen cab's
 /// is not), else the Garage nearest his Home with rides left sends its
@@ -1453,13 +1454,13 @@ pub fn exec_ride(world: &mut World, id: EntityId, target: &crate::exec::GotoTarg
     }
     let home = crate::systems::missions::home_of(world, id)?;
     let hb = world.comp::<Building>(home)?;
-    if hb.tier < tier || world.district_of_building(home) == world.district_of_building(hq) {
+    if hb.tier < tier || near_by_label(world, home, hb.door, hq) {
         return None;
     }
     let home_door = hb.door;
     let here = crate::exec::walk_origin(world, id)?;
     if home_ride {
-        if world.district_of(here) == world.district_of_building(home) {
+        if near_home(world, here, home, home_door) {
             return None;
         }
         world.jobs2.exec_home_rolled.insert(id);
@@ -1532,13 +1533,30 @@ pub fn ride_home_ticks(world: &World, id: EntityId, from: TilePos, door: TilePos
     let hq = crate::systems::life::hq_of(world, corp, id)?;
     let home = crate::systems::missions::home_of(world, id)?;
     let hb = world.comp::<Building>(home)?;
-    if hb.tier < tier
-        || world.district_of_building(home) == world.district_of_building(hq)
-        || world.district_of(from) == world.district_of_building(home)
-    {
+    if hb.tier < tier || near_by_label(world, home, hb.door, hq) || near_home(world, from, home, hb.door) {
         return None;
     }
     Some(cab_ticks(world, from, door))
+}
+
+/// The exec's car's test of a Home and an Hq too near to drive: with
+/// `[routes]` (the island fix round F1, OPEN-188), under `exec_ride_min_tiles`
+/// door to door; off, the base's one district label (a Spire CEO 300 tiles
+/// from his Spire Hq walked).
+fn near_by_label(world: &World, home: EntityId, home_door: TilePos, hq: EntityId) -> bool {
+    match world.config.routes.as_ref() {
+        Some(r) => world.comp::<Building>(hq).is_none_or(|b| b.door.manhattan(home_door) < r.exec_ride_min_tiles),
+        None => world.district_of_building(home) == world.district_of_building(hq),
+    }
+}
+
+/// The ride home's test of `from` too near the Home: with `[routes]`, under
+/// `exec_ride_min_tiles` of its door; off, inside its district.
+fn near_home(world: &World, from: TilePos, home: EntityId, home_door: TilePos) -> bool {
+    match world.config.routes.as_ref() {
+        Some(r) => from.manhattan(home_door) < r.exec_ride_min_tiles,
+        None => world.district_of(from) == world.district_of_building(home),
+    }
 }
 
 /// Lives at work phase 4 (§ 2.3, D3, D6): a cab ride from `garage` booked
