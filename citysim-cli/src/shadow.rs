@@ -79,6 +79,13 @@
 //! a tick); `camera.tsv` gains the longest work-class run on one step, the
 //! distinct work tiles and the GoTo steps over 120 min, per day; and
 //! `--lives --population N` reads `--map`.
+//!
+//! Shadow V8 (the island pass's gate): a pick aboard a vehicle in motion
+//! (`motion::vehicle_of`: the car, cab, flyer, exec ride, van or El train of
+//! ISLAND_PASS I3) is in a vehicle, and the vehicle's own move each minute
+//! is jump allowance (V7's allowances were the old timed speeds: the El at
+//! `1 / ride_ticks_per_tile` read a train's 7 tiles a minute as a jump, a
+//! cab rider with an Idle exec as a street walk).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -845,6 +852,9 @@ struct Cam {
     parcels_handed: u32,
     /// Shadow V7: the work-class run under way: its plan step key and start.
     work_run: Option<((Tick, u8), Tick)>,
+    /// Shadow V8: the vehicle in motion the pick rode at the last minute
+    /// (the island pass's I3, `motion::vehicle_of`) and its tile then.
+    veh: Option<(EntityId, citysim::TilePos)>,
 }
 
 /// Lives at work phase 0: the event kinds that are a service encounter's
@@ -2293,7 +2303,7 @@ fn cam_place(world: &World, id: EntityId, act: &str) -> usize {
             ExecState::Goto { .. } if driving => return CAM_VEHICLE,
             _ => {}
         }
-        if pass_vehicle(world, id).is_some() {
+        if pass_vehicle(world, id).is_some() || citysim::systems::motion::vehicle_of(world, id).is_some() {
             return CAM_VEHICLE;
         }
     }
@@ -2388,6 +2398,27 @@ fn pass_vehicle(world: &World, id: EntityId) -> Option<f32> {
     Some(1.0 / (world.config.exec.move_ticks_full.max(1) as f32 * m).max(0.01))
 }
 
+/// Shadow V8: a vehicle in motion's own move over the last two ticks (its
+/// route's place then and now; a driven car `[vehicles] max_steps_per_tick`
+/// a tick). Generous by a tick, so a boarding minute is never a jump for
+/// the vehicle's pace alone.
+fn veh_step(world: &World, v: EntityId) -> f32 {
+    use citysim::systems::{motion, transit};
+    let Some(m) = world.motions.get(&v) else { return 0.0 };
+    let t = world.tick;
+    let at = |k: Tick| match &m.route {
+        motion::Route::Timed { way, depart, arrive } => Some(motion::timed_pos(way, *depart, *arrive, k)),
+        motion::Route::Line { line, train } => {
+            transit::train_at(world, *line, u64::from(*train), k).and_then(|a| transit::train_tile(world, *line, a))
+        }
+        motion::Route::Driven => None,
+    };
+    match (at(t.saturating_sub(2)), at(t)) {
+        (Some(a), Some(b)) => chebyshev(a, b) as f32,
+        _ => 2.0 * f32::from(world.config.vehicles.max_steps_per_tick.max(1)),
+    }
+}
+
 fn chebyshev(a: citysim::TilePos, b: citysim::TilePos) -> u32 {
     u32::from(a.x.abs_diff(b.x)).max(u32::from(a.y.abs_diff(b.y)))
 }
@@ -2433,6 +2464,24 @@ fn cam_minute(world: &World, t: &mut Track, now: Tick, act: &'static str, here: 
     // step in through the door lands on an interior tile).
     let at = pos.building.and_then(|b| world.comp::<Building>(b)).map_or(pos.tile, |b| b.door);
     t.cam.allow += t.cam.speed;
+    // Shadow V8: a rider aboard a vehicle in motion (a car, cab, flyer, van
+    // or El train, `systems/motion.rs`) is where the vehicle is, so the
+    // vehicle's own move since the last minute is allowance. A snap onto
+    // the vehicle at boarding still reads as a jump; the vehicle's own
+    // continuity is the `run --legs` `#ride` device's to judge.
+    // `Motion::pos` is where `motion::advance` set its riders (the route's
+    // place at the tick's own time; `motion::pos_of` reads the timetable
+    // at `world.tick` and runs a tick ahead of the riders).
+    let veh = citysim::systems::motion::vehicle_of(world, id).and_then(|v| world.motions.get(&v).map(|m| (v, m.pos)));
+    match (veh, t.cam.veh) {
+        (Some((v, p)), Some((pv, pp))) if v == pv => t.cam.allow += chebyshev(pp, p) as f32,
+        // The boarding minute: the vehicle may already have pulled away
+        // (a train departs the tick its rider boards), so its own step is
+        // allowance too.
+        (Some((v, _)), _) => t.cam.allow += veh_step(world, v),
+        _ => {}
+    }
+    t.cam.veh = veh;
     let mut jump_line: Option<String> = None;
     match t.cam.anchor.clone() {
         None => t.cam.anchor = Some((at, now, here.to_string())),
