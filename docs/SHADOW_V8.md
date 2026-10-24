@@ -403,3 +403,242 @@ Same person in both reads: isle_s42_d0 `ceo_17908`, `elder_22703`, `elder_25682`
   - The super: up to 417 min, with 12 days on one tile.
   - The teachers (`teacher_21323` and `teacher_1351` are the same people).
   - The pick-asleep share at d90, now 3.3 %.
+
+---
+
+# Part 2: synthesis
+
+Seven Sonnet critics read their archetypes in all six windows against V7's diaries (`docs/shadow_v8/{street,gangs,crime,corp,labour,vice,care}.md`).
+This part dedups them, checks the orchestrator's cross-lens patterns against what the critics wrote, and ranks by how badly a
+bug breaks "people act like people" on camera. Every cite is the critic's own; a missing line is never evidence.
+
+## Verdict
+
+1. **The island pass did what ISLAND_PASS.md set out to do on its own claims.** Distance: island commute legs of 4 h or more fell
+   20.3 % to 4.4 %, structural commutes 29.6 % to 8.7 %, mostly-travel labour pick-days 126 of 378 to 3 of 406. Vehicles: pick-days parked
+   180 min or more 241 to 0, body-days parked or jumped 103,461 to 9 (the Coarse El walk excepted). Trades: courier parcels on screen 0 to 83,
+   day posts filled 0 to 185 of 1,000, body-driven cab rides 0.3 to 15, an arms dealer exists, the 04:00 prisoner jump is gone.
+2. **The camera still sees one mechanism the pass never touched: route choice.** The 4-16 h trips that remain are mostly to *near* targets:
+   a Spire CEO, a sweeper, a companion, a loader and an orderly each spend 5-16 h getting somewhere in their own or the next district (seven
+   lenses, bug 1). The pass fixed the pick and the body, not the path.
+3. **Part 1 over-read one thing.** The "16 legs of 300 min or more ending in the wrong district" and `ceo_21278`'s "wrong-district Neon Quarter" are
+   legs *cut* by hunger or sleep (`-> X (ended)` prints the cut point, not the destination; corp § 1 and its bug 2). `OPEN-164` stays closed; the
+   cause is bug 1.
+4. **Two things are pass regressions:** I6 company beds go to the wrong people or the wrong place (a ripperdoc in a yard barracks, a 444-min
+   dorm), and I1's stay-in rule has no fun fallback (zero-leisure vice diaries 0 to 9 of 70, fun 0.00, home Rest 1,358 to 2,454 h). Both are fixable and in scope.
+5. **Gate: passed on the pass's claims, not clean for the camera.** Close it with a fix round of two phases (routes; beds) and a third
+   conditional on Dylan's call on I1 (§ Proposed fix-round scope). No crash, no nondeterminism, 0 asserts failed. Hunger and Murders are not the pass's (§ FINDINGs).
+
+## The rows, V7 to V8
+
+| row | V7 on the island | V8 on the island |
+| --- | --- | --- |
+| 0 destinations without distance | failed, above all | **fixed in aggregate**; a tail remains: the Hideout bed (58 of 78 Hideout legs go to the Sump), company beds picked without the post (bugs 2, 4), non-urgent goals with no reach (bug 7) |
+| 1 statue shift | one block for fabber, super, Court, Deal | **partly**: sweeper 271 to 196, cook flat; fabber 537 and super 417 unchanged (`OPEN-169`); builder 90 to 296 and foreman (19 days over 180 min) are new site-day blocks; `GuardJail` 538 min unchanged |
+| 2 idle freeze | fixed | **fixed as a freeze, back as a stay-in**: elder home 24 h on 7 of 14 d0 pick-days (V7 0), idle +1.5 h/d on both 20k cities, 1-minute `Rest` loops in shift hours (bugs 3, 8) |
+| 3 presence | leaks left | **unchanged, vendor worse**: vendors settle asleep 26 vs 5 at d90, orderlies' 00:00 batch 26 of 26, the teacher's door; pick asleep 3.3 % at d90 (`OPEN-170`) |
+| 4 long legs | worse: 19-25 % of legs 4 h+, parked 3-11 h | **mostly fixed**: 4.4 %, 0 parked; the tail is same-district and adjacent-district rides of 5-16 h (bug 1) |
+| 5 housing churn | 6 of 18 corp picks sleep away | **churn fixed, new misallocation**: no double `Housed`; homeless +55 % (193 to 300; `off` 234); company beds misgiven (bug 2) |
+| 6 dead trades | all dead but leader, loader | **alive, thin**: courier, day labourer, foreman, arms dealer, cab (each at one fixed minute or one sale); bouncer, joytoy, scav still 0 (`OPEN-176`); pimp not a trade; black doc has no patient |
+| 7 implant loop | fixed | **fixed, not re-read** (no lens contradicts it) |
+
+## Cross-lens patterns, checked against the critiques
+
+| orchestrator's pattern | verdict | note |
+| --- | --- | --- |
+| 1 same-district trips that never converge | **confirmed, and wider** | corp (107/149 El and 64/74 `exec_ride` legs aborted), street (sweepers 10-16 h), gangs (same-district GangWork 4-13 h), vice (56 of 165 legs of 200+ min), care (orderly D4 to D5 313 min, 12 of 71 legs), labour (loader 443 min inside D6). Crime's pimp is the same *shape* but a different bug (a worker in another district, bug 10). The root differs in kind: for the Spire it is district size (D5 spans x 200-1252, 150-350 tiles apart inside one label); for the rest it is the route taken |
+| 2 company beds to non-staff or far | **confirmed** | care (ripperdoc), labour (loader, retiree) |
+| 3 picks still keyed to district or corp | **confirmed** for the builder, the sanitation beat, the Hideout and the pimp | one Hideout per gang is a design (D2) |
+| 4 1-minute `Rest` loops in shift hours | **confirmed** | crime (gun), gangs (scav 77 to 312), care (super), corp (`exec_22432`, 0 `Work` lines in 7 days) |
+| 5 I1 stay-in rule | **confirmed; part of it is a bug** | the vice critic's joytoy has *no Unwind goal at all* (0 in 697 lines) and `distance.rs` says the own Home stays as the fallback, so the offer is gated before that fallback. The rule is a decision (D1), the fallback a fix (bug 3) |
+
+## The ranked bug list
+
+Ranked by how badly it breaks a followed person on camera. "Lenses" are the critics that saw it.
+
+### 1. Short trips run half a day to a day: route choice, not the pick
+
+- **Root cause.** The route, not the destination. Two sub-causes the critics separate:
+  - *The Spire is one label.* Same-district D5-to-D5 legs run 150-350 tiles; the El is ~1 tile/min, the walk 2. `streetwork::exec_ride` returns `None` when
+    home and Hq share a district label, so a Spire exec gets no car (corp § 1).
+  - *The El loop is chosen when walking is shorter.* `transit::choose` accepts a 2.5 h access walk and a loop route longer than the walk (no cap versus the walk);
+    a plan dropped mid-ride keeps the rider aboard past the alight stop (`motion::alight`, `held`), so the loop is ridden again (street bug 1; the 1,111-min estimate is its signature).
+  - Unverified: the vice critic suspects a path that detours through a neighbour district (companion_7618 D5, D4, D5); the care critic's orderly earns 5c, which has no fare. The first step of the fix is a leg-log dump of the named cases below.
+- **Lenses.** corp, street, gangs, vice, crime, care, labour.
+- **Evidence.**
+  - corp: `B/ceo_21278 d30 06:00` 668 min, cut at `17:08` by Eat; `C/exec_6400 d91 01:47` 823 min, travel 20.6 h, meeting 1.5 h; `A/ceo_17908 d0 00:00` 974 min.
+  - street: `isle_s44_d90/sweeper_6405 d90 23:08` 1,111 min Block#90 D4 to Recycler#4461 D4, touring D6, D1, D3, D4, D2, then `Sleep @ street`; the same Recycler for `sweeper_10991`, `_7882`, `_8203`, `_8335`.
+  - vice: `s44/companion_7618 d91 10:28` 438 min and 649 min home, work 0.1 h, street 17.5 h; `s44/club_staff_8280 d94` 601 and 371 min.
+  - gangs: `isle_s43_d30/gang_member_7638 d35 00:16` 808 min, travel 20.1 h inside D1.
+  - care: `isle_s43_d30/orderly_22353 d30-d36` 313-382 min each way, D4 to D5.
+  - labour: `isle_s43_d30/loader_13401 d30 00:00` 443 and 444 min, dorm and yard both D6.
+- **Suspected sites.** `streetwork::exec_ride` (district-label gate), `transit::choose` (access walk, loop versus walk), `motion::alight` (`held`).
+- **OPEN.** New: `OPEN-188`. Folds `OPEN-163`'s remainder; `OPEN-164` and `OPEN-165` stay closed.
+- **Owner.** Island fix round (F1). It also drives the 0.5 h execs and the corp guards' street time.
+
+### 2. Company beds go to non-staff or far from the post (I6)
+
+- **Root cause.** The I6 allocation takes free beds, not the resident's own workplace or the commute. "Site Barracks" is the `ConstructionYard` row (`assets/config.toml:4423`) and a clinic doctor holds one; a loader's dorm is 265-444 min from its yard; a retiree's `move_in` "with family" lands in a D6 coffin rack.
+- **Lenses.** care, labour.
+- **Evidence.** `isle_s43_d30/ripperdoc_25321` Home Site Barracks#26462 D6, clinic D3, travel 19.9-24.0 h, `d34 18:06` 1,412 min; `loader_13401` Dorm Storeys#26520 (D6), 265-444 min; `loader_19054` a D1 bed for a D6 yard, 146-150 min each way; `worker_6720 d5 00:00` Coffin Racks#26535, 721 min.
+- **Suspected sites.** `household.rs:217 company_due` and `:303 company_only`, the `company.rs` bed assignment; the `move_in` target in the relative path.
+- **OPEN.** New: `OPEN-189`.
+- **Owner.** Island fix round (F2). A pass regression.
+
+### 3. The stay-in rule leaves nothing to do: no fun fallback
+
+- **Root cause.** With no spot in reach, the goal never offers the own-Home or own-Block HangOut. The joytoy has 0 `Unwind` goals in 697 lines; elders sit in 90-min `Rest` blocks for 19-24 h with food at home. This goes past I1's wording ("the person stays in"): staying in should still run a low-rate Unwind.
+- **Lenses.** street, vice, care (gangs and crime by idle hours).
+- **Evidence.**
+  - vice: 9 of 70 diaries with no HangOut and no fun hour (V7 0); `s43/joytoy_13649` fun 0.95 to 0.00; group HangOuts away from home 362 to 178; home Rest 1,358 to 2,454 h.
+  - street: `isle_s42_d0/elder_25682` home 24.0 h on d0-d3, d5, d6.
+  - care: new edges, ripperdoc 14.1 to 8.9 a week; island d90 carer settlements 81 to 10.
+  - Part 1: idle +1.5 h/d, home +2 h.
+- **Suspected sites.** `leisure.rs` after `unwind_cap`; `leisure::best_spot_kind`; the Unwind goal in `goap/`.
+- **OPEN.** New: `OPEN-190`; relates to `OPEN-109`.
+- **Owner.** Island fix round (F3, conditional on D1). The rule itself is Dylan's.
+
+### 4. One Hideout per gang: a cross-island commute
+
+- **Root cause.** `plan.rs:606 bed_of` returns the gang's one Hideout for a Sleep plan and does not compare it with Home or Work. 58 of 78 island Hideout legs go to the Sump; the walkers live in D3-D6.
+- **Lenses.** gangs (crime and corp see the commute).
+- **Evidence.** island GoTo(Hideout) median 103 to 144 min, 21 of 78 at 240+; `isle_s44_d90/purist_14764 d93 00:02` 1,061 min; `gang_leader_9711` (Spire day job, Hideout in D1): sleep 4 h, travel 19.9 h, work 0 on d91 and d93.
+- **Suspected site.** `systems/plan.rs:606` `bed_of`.
+- **OPEN.** New: `OPEN-191`. Not `OPEN-163`'s phase 1, which drops candidates past a cap *unless none is left*; a gang has one.
+- **Owner.** The bed gate: island fix round (F2). The design (a Hideout per district): D2, vertical city pass (`OPEN-187`).
+
+### 5. A person sleeps where they stand, on a street, for 4-13 hours
+
+- **Root cause.** The Work-to-Sleep interrupt sleeps in place after a cut leg or a long shift instead of walking to the bed; a company-housed man picks a street over a bed 3 min away. Most cases follow from bug 1.
+- **Lenses.** gangs, labour, street, crime.
+- **Evidence.** `isle_s44_d90/gang_leader_14477 d91 18:47` Sleep @ street 709 min, six minutes after leaving the Vat Farm; `isle_s43_d30/gang_leader_8256 d33 17:50` 747 min; `loader_13401 d31 06:32` 765 min; `sweeper_6405 d91 17:41` 240 min; `buyer_9460 d94` on a D1 street after `Housed` in the Spire. Island sweepers 15 Sleep @ street (2k 0); leaders 12 of 101 sleeps to 18 of 119.
+- **Suspected site.** The Sleep goal's place pick when a Home exists (the homeless are exempt); not traced.
+- **OPEN.** New: `OPEN-192`.
+- **Owner.** Island fix round, re-read after F1 and F2; fix only what is left.
+
+### 6. The builder's site day walks the wrong way
+
+- **Root cause.** With a far site the shift still starts with `GoTo(Workplace)` at the Yard, a 16-min load, then the carry out; a Garage, a Ripperdoc and a Capsule Hotel count as "sites".
+- **Lenses.** labour.
+- **Evidence.** `isle_s43_d30/builder_7236 d31 06:16-18:32`: 473 min walking, 311 min ClerkWork at a Garage in his own D1; `builder_23745` and `_9487 d93-d96`.
+- **Suspected sites.** `shift.rs::far_site`, `site_day_dest`; `industry::sites_of`.
+- **OPEN.** New: `OPEN-193`.
+- **Owner.** Island fix round (F2). A phase 8 regression.
+
+### 7. Non-urgent goals with no reach cap
+
+- **Root cause.** `[distance]` covers the job, bed, hangout and Hotel. Other goals pick any target: the clinic, reporting a crime (one Hall on the island), registering a company, an Intel stakeout, the sanitation beat.
+- **Lenses.** labour, vice, crime.
+- **Evidence.** `day_labourer_19868 d34 08:44` 577 min to report a crime, a shift lost; `s44/madam_21371` GoTo(Clinic) 208-278 min five mornings, never arrives; `d30/gun_8526 d32 00:01` 897 min to register a company; `worker_friday_17446 d30-d36` a sanitation beat six districts from the Recycler.
+- **OPEN.** New: `OPEN-194`.
+- **Owner.** Island fix round only as a stretch of F1 (a reach table in config); otherwise the pressure pass.
+
+### 8. 1-minute `Rest` loops, and an Idle goal when work exists
+
+- **Root cause.** The Idle goal fills with 1-min `Rest` plans every 6-30 min when nothing outranks it; an employed pick idles through the shift (`gun_8526 d31` 21.4 h idle with a Manager job); `C/exec_22432` plans no `Work` for seven days with no reason on the page.
+- **Lenses.** crime, gangs, care, corp, street.
+- **Evidence.** scav `Rest` 77 to 312 (`isle_s44_d90/scav_14509 d91 12:47-17:47`); `super_22721 d6` idle 21.5 h; `C/exec_22432` 113 plans, 0 `Work`; `isle_s42_d0/homeless_11420` d0 16.2 h (`OPEN-135`).
+- **Suspected sites.** `goap/` Idle fallback; `life::hq_of` returning `None` (corp).
+- **OPEN.** New: `OPEN-195`; relates to `OPEN-135`.
+- **Owner.** Pressure pass.
+
+### 9. The remaining presence leaks
+
+- **Evidence.** `isle_s44_d90/vendor_18034 d92 12:14` Sleep @ street 700 min, 20 settles asleep in one day (26 at d90 vs 5); orderlies' `treated` 26 of 26 at 00:00 (`[off]`).
+- **OPEN.** `OPEN-170` (annotate).
+- **Owner.** Island pass leftover (`presence::stat_home`); pressure pass if not closed in the round.
+
+### 10. The trades that are still not a trade
+
+- **Bouncer, joytoy, scav:** 0, 0, 0 (`OPEN-176`). The bouncer's door exists only at a Club; scav diaries have 0 `Rip` or Abduct.
+- **Pimp (`OPEN-120`):** 2 `Collect` and 0 `StreetCut` in 4 pimps; `vice.rs:367 pimp_collect` takes any worker with a pitch in his district, and the worker is buying food in D3 (`d30/pimp_8936`). Picks the worker by district, not travel.
+- **Arms dealer:** 1 sale in 28 pick-days, a gang paying itself; `bar_arms_dealer` needs a registered dealer in the bar and a gang `surplus()`.
+- **Black doc:** 0 patients (`OPEN-017`).
+- **Courier:** 3 of 6 diaries hand nothing; the rest settle ten parcels at one stamp (`courier_6744 d30 10:39`). New: `OPEN-196`.
+- **Owner.** Pressure pass.
+
+### 11. The rest, small
+
+- **Fare-evasion arrest loop** (`isle_s44_d90/fixer_14707` arrested 5 times in 6 days), a release a 296-min walk from home, 13 h from arrest to cell: `OPEN-197`.
+- **Day-0 post-holders pay from an empty purse and quit unpaid** (4 of 4): `OPEN-198`.
+- **Collected "0 to 0 members"** in 8 of 17 lines; `OPEN-118` closed on a different symptom: `OPEN-199`.
+- **Shadow tool label:** print `cut at X` for an `ended` leg and recount Part 1's wrong-district rows from `done` legs only: `OPEN-200`.
+- **`GuardJail` 538 min**, the 2k warden (0), the super's empty round (13 rounds, 0 calls) and 7-h lobby wait, the d0 foreman commute (11 legs of 4 h+): annotate `OPEN-169` and `OPEN-172`.
+- **Gossip label inverted**, `GoTo(Hotel)` `NoSuchPlace` twice, the self-therapy "treated X" label: annotate `OPEN-173`.
+
+## The calibration FINDINGs (not fixes)
+
+- **Hunger.** 6,185 islanders still malnourished at d90 (V7's binary 7,015), 3 of 8 d90 carers at 0.30 or more; the `sick` pick fell 2,188 to 934 because food reached more mouths, not because anyone is treated. `OPEN-167` is untraced and predates the pass.
+- **Murders.** Island 16 to 45 against V7's close at 156 on seed 42: the pass is not the cause. 2k 79 to 32: standing decision of 2026-10-17, leave it.
+- **Homeless +55 %** (193 to 300; `off` 234, so the pass adds 66): 489 job-loss and 323 buyout evictions a seed are I6 working as designed ("the company town's leverage"). No critic's pick shows an eviction.
+- **KnownMetWeek 1.27** (range 2.78-9.47) and new edges down 2-4x: isolation, tied to the stay-in rule; doctors treat nobody present on the island.
+- **Idle +1.5 h/d, home +2 h, street 7.4-8.8 to 5.9-6.7 h**: the camera's emptier street. Not tuned.
+- **Island Murders 3 x V7's base, arrests -15 %**; the Statistical mirror's kill rate 0.025 to 0.071.
+- **Cultist Persuade failed 3 of 3**, scav Extorts paying 0 in 6 of 10, dealer sales on camera 7 to 1.
+- **The courier a minute a day, the cab's 8 fares all Statistical regulars at 09:32** (`OPEN-149`).
+- **103 body jumps of 8 tiles or fewer at a car's kerb**; the Coarse walk to the El is parked or jumped on 82 % of its body-days (`OPEN-165` "left", for the view milestone).
+- **Ticks/s** 248 to 271 on the A/B; print only.
+
+## Decisions for Dylan
+
+### D1. I1's stay-in rule
+
+Cost, from three lenses: home Rest 1,358 to 2,454 h, zero-leisure vice diaries 0 to 9 of 70, fun 0.00 on joytoys and cooks, new social edges down 2-4x, carer settlements at d90 81 to 10, idle +1.5 h/d.
+
+- **A. Keep as it is.** Street life near home is `OPEN-109`'s later feature. The city is quieter and lonelier; cheap, and the camera sees emptier streets.
+- **B. Keep the cap, give stay-in a fallback.** Past the cap the person runs a low-rate Unwind at their own Block or Home (flatmates, a street spot next door) and fun does not sink. This is what `distance.rs`'s own comment promises. **Recommended**: the zero-Unwind joytoy is a bug under the rule's own text, and B costs one mechanism.
+- **C. Raise the cap.** Longer walks to a spot. Rejected: it is the 4-hour hangout walk I1 removed.
+
+### D2. One Hideout per gang
+
+58 of 78 Hideout legs go to the Sump; a leader with a Spire day job loses it to the Hideout bed.
+
+- **A. Keep one, gate the bed.** A Sleep plan uses the Hideout only when the walk is within the commute cap, else Home. Rounds, court and orders still go to the Hideout. **Recommended now** (F2).
+- **B. A Hideout per district the gang holds**, or a second once the median walk passes a cap. Right for the story and ties into territory; belongs with the vertical city pass (`OPEN-187`, a gang's floors in several towers).
+- **C. Hideout as a meeting place only.** Members sleep at Home. Cheapest, but it removes the safehouse.
+
+### D3. District labels are not space
+
+The Spire is 150-350 tiles across and is one "district" to every same-district test (`exec_ride` and the map's labels). A rule that treats the label as near is wrong at the Spire.
+
+- **A. Fix every "same district" test to tile distance.** In F1. **Recommended.**
+- **B. Place execs' homes next to their Hq** (`life::hq_of`, `exec_home_tier`). Right for the CEO; do it with the next island re-import (`OPEN-182`).
+- **C. Split the Spire in the map.** The graphics repo's call, before the view milestone. Not asked for yet.
+
+### D4. Malnutrition has no treatment path (I5 said: decide after distance)
+
+Distance is in; 6,185 are still malnourished and `GOAL Treat` runs once in 36 care diaries.
+
+- **A. No clinic path.** Hunger stays a pressure; the standing "harsh by design" and "no social safety net" decisions apply. **Recommended.**
+- **B. A clinic path for staff only** (a doctor treats a sick colleague). Small, and it keeps the carers visible.
+- **C. A general malnutrition treatment.** The safety net by another name; the 2026-10-08 decision says no.
+- Whatever the choice, trace why `OPEN-167` climbs from d30 to d90 in both binaries. That is a measurement, not a feature.
+
+### D5. When to close the pass
+
+- **A. Fix round F1 and F2 (F3 if D1 is B), then close; the view milestone next.** **Recommended.**
+- **B. Close now,** write bugs 1-4 as the view milestone's entry list. The camera starts on a city where sweepers ride 16 h. Not recommended.
+- **C. F1-F3 plus pressure-pass items 7-8.** The pressure pass has no spec yet; this delays the view for features.
+
+## Proposed fix-round scope
+
+Each phase is one mechanism, one fresh coder (Opus 5.5), ~300 turns, per the SOP. Light measurement per phase; the full set at the close.
+
+- **F1. Routes (bug 1).** One mechanism: when a trip's route is longer than walking, walk.
+  - `streetwork::exec_ride` gates on tile distance (the `leg_replan_tiles` scale), not the district label.
+  - `transit::choose` refuses an El route longer than the walk (or with an access walk above a config cap) and never boards a loop to a stop it passes.
+  - `motion::alight`: a dropped plan within walking distance of the alight stop gets off.
+  - Step 0 (30 min cap): dump the leg log of `sweeper_6405 d90`, `companion_7618 d91`, `orderly_22353 d30`, `loader_13401 d30` and `ceo_21278 d30`, and say which sub-cause each is before changing code.
+  - Measure: GoTo legs of 240 min or more that start and end in one district (vice 56 of 165, gangs 25), `exec_ride` and El legs `aborted` (107/149, 64/74), sweeper vehicle hours, the same cases' day summaries.
+  - Fold in the Shadow tool's `ended` label (`OPEN-200`), one line in `shadow.rs`.
+- **F2. Beds (bugs 2, 4, 6).** One mechanism: a bed is taken only if it is the resident's own workplace's or within the commute cap.
+  - Company beds: ownership and reach in the allocation.
+  - The retiree `move_in` target limited to a relative's own Home.
+  - The Hideout bed gated by the walk (D2 A).
+  - The builder's site day starts at the site (small, same file family).
+  - Measure: company beds held by non-staff (0), loader and ripperdoc travel hours, GoTo(Hideout) median and 240+ count, the builder's walking minutes, the off identity on the bed switch.
+- **F3. Stay-in fallback (bug 3), conditional on D1 = B.** The Unwind goal offered at the own Block or Home when no spot is in reach; the Rest loops (bug 8) are read after it.
+  - Measure: zero-leisure diaries (9 of 70 to 0), home Rest hours, `--lives` idle and named per week on both 20k cities.
+  - Bug 5 (sleeping on a street) is re-read after F1 and F2.
+
+Not in the round: bug 7 (a stretch for F1 only if the config table is cheap), bugs 8-11, and `OPEN-167`'s trace. They go to the pressure pass or a short trace.
