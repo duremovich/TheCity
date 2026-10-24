@@ -60,7 +60,6 @@ off-screen violence amplifier is gone. The close tree, a08d383, ran change, merg
 
 ## Open calls for Dylan
 
-- `OPEN-202`: keep `[routes] access_cap_ticks` at 0 or drop the key.
 - `OPEN-150`: the starting-condition seed's shape.
 - Pressure-pass design: `OPEN-160`, `OPEN-162`, `OPEN-157`, `OPEN-176`, `OPEN-178`; the combat model `OPEN-179`.
 - Standing: `OPEN-062`, `OPEN-039`, `OPEN-057`, `OPEN-059`, `OPEN-077`, `OPEN-069`, `OPEN-070`.
