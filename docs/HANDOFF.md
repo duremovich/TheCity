@@ -1,98 +1,93 @@
 # Handoff: now
 
-Rewritten at every session end; never appended. The session logs are `docs/history/SESSIONS.md`; the seventeenth
-session's close page is its last entry. Last rewrite: **2026-10-22, the eighteenth session: Track B, the pre-view
-fix pass (phases 0-6) and its gate, Shadow V7.**
+Rewritten at every session end; never appended. The session logs are `docs/history/SESSIONS.md`; the eighteenth
+session's close page is its last entry. Last rewrite: **2026-10-24, the nineteenth session: the island pass
+(phases 0-10), its gate Shadow V8, the fix round F1-F3, and the close.**
 
 ## Main
 
-Main holds **the pre-view fix pass, closed as done on the generated city** (`docs/PREVIEW_PASS.md` § 5,
-`SAVE_VERSION` 51). It also holds **Track B**: the island holds 20k (`assets/maps/isle_m_k2.txt`, `4fb10b9`).
-The gate's tree, 45aef8c, ran change, merge and milestone green.
+Main holds **the island pass, closed** (`docs/ISLAND_PASS.md`, deviations at its end; `SAVE_VERSION` 67). Distance
+counts in every pick, company housing sits in the workplace, vehicles and El trains move with riders aboard, and the
+off-screen violence amplifier is gone. The close tree, a08d383, ran change, merge and milestone green.
 
 | merge | phase | OPEN closed |
 |---|---|---|
-| `4fb10b9` | Track B: the island at k = 2 for 20,000 | — (`OPEN-136` stays: move `core_20k`/`god_20k` and cut the 2k fixture from the island) |
-| `f14b460` | 0: the switches retired, the idle freeze, the implant loop | 094, 138, 142 |
-| `b0245eb` | 1: housing churn | 140 (part) |
-| `d186412` | 2: the shift-shape machinery and `stations` | 137 (with 3) |
-| `cf9556f` | 3: `haul` and `counter` | 121, 141, 145 |
-| `24392c0` | 4: settlement by presence | 119, 120, 154 |
-| `129f17f` | 5: long legs, the island El, the cab | 115, 139, 140, 156 |
-| `0e09dee` | 6: leaders walk, hold court, give orders in person (P13-P16) | 118, 128 |
-| `45aef8c` | the gate: Shadow V7 plus the parity fix (the Statistical table regenerated) | — |
+| `fa74b64` | 0: the pre-view switches retired, the change tier under budget | 174, 175 |
+| `de348c8` / `82f626a` | 1-2: distance in the job, bed, hangout and Hotel picks (I1) | 171 |
+| `7fd7a7e` / `60dd9ba` / `61e854b` | 3a-3c: company housing, seeded then in-building with buyouts (I6); housing in mood | 177 |
+| `f9dfd8a` | 4: commute pressure (I2), legs spared at the plan timeout | 164 |
+| `b68297e` / `0a693b2` / `d1b64ee` | 5-7: vehicles in motion, El trains, the van (I3) | 165, 166 |
+| `b39229e` | 8: the dead trades' bugs (I4) | 168 |
+| `298807d` | 9: a Coarse timed walk's body on its path | 181 |
+| `d42a234` | 10: the Statistical violence mirror limited by its attackers | 185 |
+| `a9271e1` | the gate: Shadow V8 (`docs/SHADOW_V8.md`, critiques in `docs/shadow_v8/`) | — |
+| `449ea95` / `afcd34b` / `7351eb8` | F3 stay-in fallback (I7), F1 routes on tiles (I9), F2 company beds to staff, Hideout gate (I8) | 190, 188, 189, 193 |
+| `a08d383` | the shadow tool prints `cut at X` for an interrupted leg | 200 |
 
-## Shadow V7 in five lines (`docs/SHADOW_V7.md`, critiques in `docs/shadow_v7/`)
+`OPEN-163` (the island picks without distance) closed with the pass.
 
-1. On gen and at 2k the pass worked:
-   the shift reads as the trade for most roles (longest work action 530 → 89 min median); the idle freeze, housing
-   churn and the implant loop are fixed; 1 % settled apart, from 8 %.
-2. **The island picks destinations without distance** (`OPEN-163`). A quarter of commute legs run 4 h or more,
-   a third of labour days are mostly travel, and by d90 2,188 people are hunger-sick (`OPEN-167`).
-3. **Timed rides park the body, then jump it** (`OPEN-165`); so do arrests and transfers (`OPEN-166`).
-   A segment can end in the wrong district (`OPEN-164`).
-4. Row 6's dead trades are still dead on the island: courier, bouncer, joytoy, scav, arms dealer, foremen
-   (`OPEN-168`); the cab is `OPEN-149`.
-5. All eight pass switches off reproduces `4fb10b9` exactly. `shadow --assert` passes 132 of 132, and
-   ticks/s on the island are 260 → 255.
+## The pass in five lines
+
+1. Island labour legs of 4 h or more: 20.3 % → 4.4 % (V8); structural commutes 29.6 % → 8.7 % (company housing).
+2. Murders' runaway was the Statistical mirror amplifying itself (phase 10). Island hunger's scare was two measures
+   disagreeing (`OPEN-167`, I10: no clinic path).
+3. F3: island zero-leisure diaries 5 → 0 of 36, Murders 45.0 → 40.7. F1: exec rides 2.2x, exec El legs −22 %.
+   F2: non-staff in company beds 14/10/10 → 8/2/0.
+4. What is left of the long trips is distance, not routing: exec homes ignore the Hq (`OPEN-182`) and far
+   non-urgent goals (`OPEN-194`).
+5. The behaviour tier asserts only collapse bounds; calibration prints as FINDING (doctrine 1, this pass).
 
 ## In flight
 
 - No agents are running, and the only worktree is main.
-- The V7 diaries are kept in main's `target/shadow_v7/` (314 MB, untracked) for V8 to compare against.
-- Three empty dirs are left under `.claude/worktrees/`: `agent-a48242db…`, `agent-a75bba52…` and
-  `agent-ab0f1e7a…`. A process still holds them, so `rmdir` them after a restart.
-
-TheCityGraphics (a separate repo, read-only from here) has its own handoff and questions for Dylan. The authored El
-lines need track there (`OPEN-158`).
+- Locked empty folders under `.claude/worktrees/` (`agent-*`, `island-f3`): a process still holds them; delete
+  them after a restart. The `*.log` files there are old tier logs and can go too.
+- TheCityGraphics: master `855d0aa`, **merged locally, not pushed** (P9 closed: the D4 regen of 3,196 lots, 6 of 10
+  review findings fixed, deviations 4-5 in its DECISIONS). No camera path crosses D4 yet, so the 45-floor towers
+  are untested as occluders. Its HANDOFF lists its next steps (El lines on rail `OPEN-158`, building character).
 
 ## Next, in order
 
-1. **The island pass** (`docs/ISLAND_PASS.md`, a draft). Dylan's decisions so far:
-   I1, distance counts in every pick (a cost term plus a hard cap per purpose); I2, a far job resolves by moving
-   nearer, then by a nearer job; I3, a vehicle in motion is an entity with its own position, and riders are aboard it. The El runs as trains,
-     with the van and the flyer. Chases, explosions and carjackings come later, built on this model.
-   I4, the dead trades' bugs land here, their features (bouncer, joytoy, the scav's side) go to the pressure pass;
-   I5, hunger is re-read at V8 first. The phases are `ISLAND_PASS` § Phases (0-7, then the V8 gate on the island
-   against `target/shadow_v7/`).
-2. Then `OPEN-136`'s remainder: the 2k fixture cut from the island, with `core_20k`/`god_20k` on it.
-3. Then the view milestone: the Bevy client, a follow-cam, `OPEN-149`'s ring, and the requirements in `SHADOW_V6`
-   § What the view must handle.
-4. Then M18, rewritten against the 3D client.
+1. **The perf pass** (`docs/POPULATION_STUDY.md`, `OPEN-184`; spec to write). Phase 0 is housekeeping: retire the
+   island pass's fifteen switches after one all-off identity on seeds 42-44 (`OPEN-202`, with F3's ticks/s A/B and
+   the `access_cap_ticks` key), the change tier back under 4m (`OPEN-201`), the Rest loop (`OPEN-195`). Then the
+   study's five byte-identical fixes, venue index first, and the P9 island re-import sized for 100k (`OPEN-182`).
+2. **Shadow V9** at 100k on the re-imported island: street sleeping (`OPEN-192`), the hunger climb (`OPEN-167`),
+   a new-edges counter first (`OPEN-203`).
+3. **The vertical city pass** (`OPEN-187`): many tenancies per building, a Hideout per district (`OPEN-191`).
+4. The view milestone (Bevy client, follow-cam, `OPEN-149`'s ring), then M18 against the 3D client. The pressure
+   pass (`OPEN-176`, `OPEN-178`, `OPEN-169`, `OPEN-170`, `OPEN-194`) slots where Dylan picks.
 
 ## Open calls for Dylan
 
+- `OPEN-202`: keep `[routes] access_cap_ticks` at 0 or drop the key.
 - `OPEN-150`: the starting-condition seed's shape.
-- `OPEN-160` (owed protection piles up), `OPEN-162` (no protection at 20k), `OPEN-157` (Fixer parties at midnight):
-  pressure-pass design.
+- Pressure-pass design: `OPEN-160`, `OPEN-162`, `OPEN-157`, `OPEN-176`, `OPEN-178`; the combat model `OPEN-179`.
 - Standing: `OPEN-062`, `OPEN-039`, `OPEN-057`, `OPEN-059`, `OPEN-077`, `OPEN-069`, `OPEN-070`.
 
-## The report (`test.py report --since 4fb10b9`, 2026-10-22)
+## The report (`test.py report --since 595ff23`, 2026-10-24)
 
-Every cap met: god 20 of 20, asserted bullets 60 of 60, 58 ignores each with a reason, 105 test files (new: housing,
-leaders, legs, presence, shift).
+Every cap met: god 20 of 20, asserted bullets 60 of 60, 59 ignores each with a reason, 105 test files; lint green.
+On a08d383 with the box quiet: change **4m36s of 4m (breached, `OPEN-201`)**, merge 5m48s of 8m, milestone
+15m56s of 20m.
 
-The change tier is **over budget**: 4m53s against 4m on main at the close, 3m50s-4m33s through the pass. The island
-pass's phase 0 pays it back (`OPEN-175`). The merge tier ran 4m54s of 8m, and the milestone tier 13m53s of 20m on the gate tree.
-
-## Cost (eighteenth session, API-rate $ equivalent, `tools/session_cost.py --session 201a627d`)
+## Cost (nineteenth session, API-rate $ equivalent, `tools/session_cost.py --session 844f4590`)
 
 | part | agent | turns | median ctx | $ |
 |---|---|---|---|---|
-| Track B | Opus | 209 | 139k | 9 |
-| phase 0 (+ the arms fix round, Sonnet) | Opus | 309 (+36) | 191k | 17 |
-| phase 1 | Opus | 316 | 211k | 20 |
-| phase 2 | Opus | **507** | 295k | 50 |
-| phase 3 | Opus | 446 | 242k | 33 |
-| phase 4 (+ the camp fix round, Sonnet) | Opus | 420 (+18) | 283k | 32 |
-| phase 5 (+ fix rounds: Opus 159, Sonnet 112) | Opus | 395 | 283k | 46 |
-| phase 6 (+ the staff-pay fix round, Sonnet) | Opus | 327 (+85) | 241k | 33 |
-| V7 runs | Opus | 256 | 190k | 25 |
-| V7 critics, seven in parallel | Sonnet | 86-147 each | 137-162k | 36 |
-| the parity fix | Sonnet | 123 | 101k | 4 |
-| orchestrator | Opus | 399 | 130k | 36 |
+| phase 0 / 1 (+ Sonnet fix 110) / 2 | Opus | 210 / 308 / 316 | 153-218k | 15 / 19 (+5) / 21 |
+| phase 3a / 3b / 3c | Opus | **355** / 183 / 229 | 142-247k | 25 / 10 / 9 |
+| phase 4 / 5 / 6 (+ Sonnet fix 28) | Opus | 310 / 286 / 272 | 224-261k | 18 / 24 / 17 (+1) |
+| phase 7 (+ Sonnet fix 41) / 8 / 9 / 10 | Opus | 220 / **369** / 216 / 246 | 164-224k | 17 (+2) / 30 / 16 / 22 |
+| F1 / F2 / F3 | Opus | 281 / 276 / 207 | 168-210k | 28 / 34 / 32 |
+| Shadow V8 runs / seven critics + synthesis | Opus / Sonnet | 302 / 35-118 each | 204k / 94-128k | 35 / 24 |
+| population study, murders and hunger probes, tier restructure, stat regen fix | Opus, Sonnet | 52-201 | 69-122k | 22 / 5 / 2 / 2 / 4 |
+| graphics: bridge / look / T-D (+ review) | Opus | 229 / 118 / **430** (+113) | 88-187k | 14 / 5 / 114 (+9) |
+| orchestrator | Opus | 692 | 162k | 77 |
 
-Total ≈ $342. Phases 2-5 blew the 300-turn brief. Their contexts sat at 240-295k, and phase 2 ran 507 turns.
-The next pass should split its phases smaller, at about one mechanism each.
+Total ≈ $658 for 13 phases, 3 fix phases, a gate and three graphics stages. Every island phase stayed near the
+300-turn brief (3a and 8 ran 355-369), against 395-507 last pass. The cost sinks: graphics T-D ($114, 20.5M cache
+writes over a 4-hour regen) and the F rounds' ~8 h stalls on background jobs that never woke them: briefs now say
+run long jobs in the foreground.
 
 The standing decisions, the doctrine and the agent rules are in `CLAUDE.md`; the tiers, budgets and caps in `docs/TESTING.md`.
