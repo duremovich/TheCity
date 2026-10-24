@@ -453,6 +453,7 @@ fn test_an_empty_home_hangout_is_remembered_at_the_spot() {
             venue: Some(h),
             spot: Some(door),
             score: 0.0,
+            stay_in: false,
         },
     );
     w.enter_building(alone, h);
@@ -484,4 +485,111 @@ fn test_a_widowed_parents_newborn_is_kept_too() {
     household::daily(&mut w);
     let after = w.comp::<Building>(h).expect("home").child_food_debt;
     assert_eq!(after, before + w.config.household.newborn_cost_per_day, "the keep charged without a spouse");
+}
+
+/// Island fix round F3 (OPEN-190): `id` at its own Home's outside door,
+/// broke (no paid rung), bored, with no street spot in the city (none in
+/// reach); the evening.
+fn stayer(w: &mut World, id: EntityId) -> EntityId {
+    let h = home(w, id).expect("home");
+    let door = w.comp::<Building>(h).map(|b| w.outside_door(b)).expect("door");
+    if let Some(p) = w.comp_mut::<Position>(id) {
+        p.tile = door;
+        p.building = None;
+    }
+    if let Some(wl) = w.comp_mut::<citysim::components::Wallet>(id) {
+        wl.coins = 0;
+    }
+    if let Some(n) = w.comp_mut::<citysim::components::Needs>(id) {
+        n.fun = 0.1;
+        n.hunger = 1.0;
+    }
+    h
+}
+
+/// F3 (OPEN-190): past the spot cap the person stays in, and the stay-in
+/// runs an Unwind at the own Home: alone (nobody in or due) the pick is the
+/// Home's HangOut, its hour raises fun by `stay_in.fun_hour` and is not
+/// remembered empty. Off (`stay_in` dropped), no pick. Failed on the base
+/// `e7a8d6f` (no pick: `best_spot_kind` returned `None` past the cap).
+#[test]
+fn test_stay_in_unwinds_at_home_with_no_spot_in_reach() {
+    let mut w = city();
+    w.spots = vec![Vec::new(); w.districts.len()];
+    let alone = common::free_adults(&w)
+        .into_iter()
+        .find(|&a| {
+            home(&w, a).is_some_and(|h| w.residents_of(h).len() == 1) && w.comp::<citysim::components::Job>(a).is_none()
+        })
+        .expect("a jobless adult living alone");
+    let h = stayer(&mut w, alone);
+    assert!(!household::company_due(&w, alone, h), "nobody in or due");
+    let pick = leisure::choice(&w, alone, true).expect("a stay-in pick");
+    assert_eq!((pick.act, pick.venue, pick.stay_in), (citysim::goap::ActionKind::HangOut, Some(h), true));
+    assert!(leisure::considerations(&w, alone).is_some(), "the Unwind goal is offered");
+    let plan = leisure::unwind_plan(&mut w, alone).expect("a plan");
+    assert_eq!(plan.steps.len(), 2, "GoTo(Home), HangOut");
+    w.enter_building(alone, h);
+    assert!(leisure::can_start(&w, alone, citysim::goap::ActionKind::HangOut, None));
+    let fun0 = w.comp::<citysim::components::Needs>(alone).expect("needs").fun;
+    let started = w.tick - TICKS_PER_HOUR;
+    assert!(!household::empty_leave(&w, alone, started), "staying in alone is not leaving an empty spot");
+    leisure::on_complete(&mut w, alone, citysim::goap::ActionKind::HangOut, None, started);
+    let fun1 = w.comp::<citysim::components::Needs>(alone).expect("needs").fun;
+    let rate =
+        w.config.distance.as_ref().and_then(|d| d.free.as_ref()).and_then(|f| f.stay_in.as_ref()).expect("on").fun_hour;
+    assert!((fun1 - fun0 - rate).abs() < 1e-4, "an hour in: {fun0:.3} -> {fun1:.3} at {rate}");
+    assert!(!household::company_only(&w, alone), "not remembered as an empty spot");
+    assert_eq!(jobs2(&w).stay_in_hangouts, 1);
+    // Off: no fallback, no pick.
+    let mut off = common::world_with(|c| {
+        if let Some(f) = c.distance.as_mut().and_then(|d| d.free.as_mut()) {
+            f.stay_in = None;
+        }
+    });
+    off.tick = EVENING;
+    off.spots = vec![Vec::new(); off.districts.len()];
+    stayer(&mut off, alone);
+    assert!(leisure::choice(&off, alone, true).is_none(), "off: no spot, no pick");
+}
+
+/// F3 (OPEN-190): two Block-mates of different households, neither in nor
+/// due when the first plans, both stay in; the first's hour in meets the
+/// other (a social edge). Failed on the base `e7a8d6f` (no stay-in pick).
+#[test]
+fn test_block_mates_who_stay_in_meet() {
+    let mut w = city();
+    w.spots = vec![Vec::new(); w.districts.len()];
+    let free = common::free_adults(&w);
+    let (a, b, h) = free
+        .iter()
+        .find_map(|&a| {
+            let h = home(&w, a)?;
+            let b = w.residents_of(h).iter().copied().find(|&b| {
+                b != a && free.contains(&b) && w.edge(a, b).is_none() && w.comp::<citysim::components::Job>(a).is_none()
+            })?;
+            Some((a, b, h))
+        })
+        .expect("two Block-mates who have not met");
+    stayer(&mut w, a);
+    // Away now and not due within the hour: the rest of the Block too.
+    for &r in w.residents_of(h).to_vec().iter() {
+        if r != a {
+            if let Some(br) = w.comp_mut::<Brain>(r) {
+                br.lod = Lod::Statistical;
+            }
+            if let Some(p) = w.comp_mut::<Position>(r) {
+                p.building = None;
+            }
+        }
+    }
+    let pick = leisure::choice(&w, a, true).expect("a stay-in pick");
+    assert!(pick.stay_in && pick.venue == Some(h), "{pick:?}");
+    leisure::unwind_plan(&mut w, a).expect("a plan");
+    w.enter_building(a, h);
+    w.enter_building(b, h);
+    w.comp_mut::<Brain>(b).expect("brain").lod = Lod::Full;
+    let started = w.tick - TICKS_PER_HOUR;
+    leisure::on_complete(&mut w, a, citysim::goap::ActionKind::HangOut, None, started);
+    assert!(w.edge(a, b).is_some(), "the Block-mates met");
 }

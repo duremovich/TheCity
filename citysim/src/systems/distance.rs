@@ -29,6 +29,19 @@
 //! `cot_bed_ticks`, the cap `hotel_cap_ticks`), and a cot is walked to as
 //! `LocationKey::Cot`, never as a "Hotel" (OPEN-171).
 //!
+//! Island fix round F3 (`[distance.free.stay_in]`, `CITYSIM_STAY_IN_OFF=1`
+//! drops it; OPEN-190, Dylan's D1 B): the stay-in has a fallback. Phase 2
+//! offered the own Home only with company due (`household::company_due`),
+//! so past the cap a person living alone, or with a household out, had no
+//! Unwind at all (Shadow V8: a joytoy's fun 0.95 to 0.00). Now, with no
+//! spot within the cap, the Unwind's pick is the own Home's HangOut
+//! (`leisure::stay_in_home`): flatmates and Block-mates inside are its
+//! company (a first meeting forms an edge), else it runs alone at
+//! `fun_hour`, never left early as an empty spot. Its Statistical mirror is
+//! the table's free evening (`leisure::stat_daily`'s `free_stat`, with no
+//! spot and no cap), unchanged: the fallback brings the Full tier back
+//! toward it. No random draw.
+//!
 //! Phase 2's Statistical mirror: none needed. A Statistical body takes
 //! no HangOut walk and books no bed by plan (the evening and the night are
 //! the table's, off camera; `leisure::stat_daily` reads the paid venues
@@ -60,6 +73,12 @@ pub fn travel(world: &World, from: TilePos, to: TilePos) -> Tick {
 /// the Hotel), `None` off (either switch).
 pub fn free(world: &World) -> Option<&crate::config::FreeDistanceCfg> {
     world.config.distance.as_ref().and_then(|d| d.free.as_ref())
+}
+
+/// Island fix round F3's `[distance.free.stay_in]` (OPEN-190), `None` off
+/// (`CITYSIM_STAY_IN_OFF`, or either switch above).
+pub fn stay_in(world: &World) -> Option<&crate::config::StayInCfg> {
+    free(world).and_then(|f| f.stay_in.as_ref())
 }
 
 /// The job's cap, `None` off.

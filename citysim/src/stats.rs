@@ -1009,6 +1009,10 @@ pub struct Jobs2Cols {
     // worked there).
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub site_days: u32,
+    // Island fix round F3 (OPEN-190): the stay-in HangOuts completed (the
+    // own Home past the spot cap; `home_hangouts` counts them too).
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub stay_in_hangouts: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -1355,6 +1359,7 @@ impl Jobs2Cols {
                 "pressure_movers",
                 "pressure_jobs",
                 "site_days",
+                "stay_in_hangouts",
             ]
             .into_iter()
             .map(str::to_string),
@@ -1695,6 +1700,7 @@ impl Jobs2Cols {
             self.pressure_movers.to_string(),
             self.pressure_jobs.to_string(),
             self.site_days.to_string(),
+            self.stay_in_hangouts.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")
