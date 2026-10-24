@@ -1202,9 +1202,10 @@ pub fn route(world: &World, who: EntityId, from: TilePos, to: TilePos, t: Tick) 
 
 /// The island fix round F1 (OPEN-188, `[routes] access_cap_ticks`): a walk
 /// to the board stop or from the alight stop this long is no part of a
-/// route (V8: a 2.5 h walk to the platform). Always true off.
+/// route (V8: a 2.5 h walk to the platform). Always true off, or with the
+/// cap 0 (the shipped value: see `[routes]`).
 fn access_ok(world: &World, walk: Tick) -> bool {
-    world.config.routes.as_ref().is_none_or(|r| walk <= r.access_cap_ticks)
+    world.config.routes.as_ref().is_none_or(|r| r.access_cap_ticks == 0 || walk <= r.access_cap_ticks)
 }
 
 /// The island fix round F1 (OPEN-188, `[routes] pass_slack_tiles`): does the

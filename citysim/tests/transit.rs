@@ -1524,8 +1524,8 @@ fn test_a_long_walk_to_the_platform_is_no_route() {
     let t = w.tick;
     let r = transit::choose(&w, who, from, door, t).expect("a ride");
     let access = citysim::exec::timed_walk(&w, who, from, w.transit.net.stops[usize::from(r.board)]);
-    assert!(access > 0, "a walk to the platform");
-    w.config.routes.as_mut().expect("[routes]").access_cap_ticks = 0;
+    assert!(access > 1, "a walk to the platform");
+    w.config.routes.as_mut().expect("[routes]").access_cap_ticks = 1;
     assert_eq!(transit::choose(&w, who, from, door, t), Err(Refusal::NoRoute), "past the cap: walk");
     assert_eq!(transit::commute_ticks(&w, from, door), u64::from(from.manhattan(door)) * w.config.exec.move_ticks_full);
 }

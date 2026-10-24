@@ -4362,8 +4362,12 @@ timeout_spares_legs = true         # the island pass phase 4 (OPEN-164): [brain]
 exec_ride_min_tiles = 40           # the exec's car drives home-to-Hq (and the ride home) from this many Manhattan tiles
                                    # ([legs] leg_replan_tiles' scale, 80 min on foot); the base drove only across a
                                    # district label, so a Spire CEO 300 tiles from his Spire Hq walked or rode the El 11 h
-access_cap_ticks = 120             # the El is not boarded at a stop more than this walk from the trip's start, nor left
-                                   # at one more than this from its end (V8: a 2.5 h walk to the platform)
+access_cap_ticks = 0               # the El is not boarded at a stop more than this walk from the trip's start, nor left
+                                   # at one more than this from its end (V8: a 2.5 h walk to the platform); 0: no cap.
+                                   # Measured off (F1, island 20k 42-44 x 30): at 120 the capped riders walk instead, and
+                                   # same-district GoTo legs of 4 h+ rose 14,554 -> 15,550 (seed 42: 4,997 -> 5,458; with
+                                   # no cap 5,012). A route that beats the walk is the faster trip whatever its access
+                                   # walk; choose already refuses one that does not ([transit] min_saving_ticks)
 pass_slack_tiles = 8               # a stop pair is no route when the alight stop lies on the walk to the board stop
                                    # (within this of a shortest Manhattan way): walking past your stop to ride back to it
 

@@ -390,7 +390,7 @@ pub struct RoutesCfg {
     pub exec_ride_min_tiles: u32,
     /// The El (`transit::route`, `commute_ticks`) is not boarded at a stop
     /// whose walk from the trip's start is past this, nor left at one whose
-    /// walk to its end is.
+    /// walk to its end is; 0, no cap.
     pub access_cap_ticks: u64,
     /// A stop pair is no route when the alight stop lies on the walk to
     /// the board stop (within this many tiles of a shortest Manhattan way):
