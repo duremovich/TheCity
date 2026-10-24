@@ -35,7 +35,7 @@
 //!   racks in a plant's basement), sized as above but one set of floors per
 //!   workplace (`beds_per_floor` a floor as its interior allows, at most
 //!   `floors_max`). No tile changes and no Lot or plot is taken; the floors
-//!   change hands with the workplace. `CITYSIM_COMPANY_HOUSING2_OFF=1` keeps
+//!   change hands with the workplace. Without `[company_housing.inside]`,
 //!   3a's blocks on a Lot, else a plot.
 //! - **Buyouts** (phase 3b, [`buyouts`], `[company_housing.buyout]`, the
 //!   midnight of every `period_days`th day): each corp first moves its far
@@ -88,7 +88,7 @@
 //! move-in, the rent, the wage it is docked from (`lod`'s Statistical
 //! `collect_wage`) and the eviction are tier-blind, so a Statistical worker
 //! holds a company bed and pays its docked rent as a Full one does. No
-//! random draw. `CITYSIM_COMPANY_HOUSING_OFF=1` drops `[company_housing]`:
+//! random draw. With `[company_housing]` absent:
 //! nothing is seeded, `World.company_homes` stays empty and every filter
 //! passes.
 

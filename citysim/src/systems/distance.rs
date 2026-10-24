@@ -19,7 +19,7 @@
 //! `life::hideout_bed`, which `plan::bed_of` reserves). The hangout and the
 //! Hotel are phase 2; the move-nearer pressure is phase 4 (`systems/commute.rs`).
 //!
-//! Phase 2 (`[distance.free]`, `CITYSIM_DISTANCE2_OFF=1` drops it): the
+//! Phase 2 (`[distance.free]`): the
 //! HangOut spot (`leisure::best_spot_kind`, the think's nearest spot, the
 //! Socialise HangOut) is scored by this travel and dropped past
 //! `spot_cap_ticks`; with none within there is no spot (a discretionary
@@ -29,8 +29,8 @@
 //! `cot_bed_ticks`, the cap `hotel_cap_ticks`), and a cot is walked to as
 //! `LocationKey::Cot`, never as a "Hotel" (OPEN-171).
 //!
-//! Island fix round F3 (`[distance.free.stay_in]`, `CITYSIM_STAY_IN_OFF=1`
-//! drops it; OPEN-190, Dylan's D1 B): the stay-in has a fallback. Phase 2
+//! Island fix round F3 (`[distance.free.stay_in]`;
+//! OPEN-190, Dylan's D1 B): the stay-in has a fallback. Phase 2
 //! offered the own Home only with company due (`household::company_due`),
 //! so past the cap a person living alone, or with a household out, had no
 //! Unwind at all (Shadow V8: a joytoy's fun 0.95 to 0.00). Now, with no
@@ -51,7 +51,7 @@
 //! tier-blind (a Statistical adult is hired and housed by the same code),
 //! so the cap reaches both tiers alike; the Hideout bed is a Full or Coarse
 //! planner's context (a Statistical body sleeps by the table, off camera).
-//! No random draw. `CITYSIM_DISTANCE_OFF=1` drops `[distance]` and every
+//! No random draw. With `[distance]` absent every
 //! pick is the base one.
 
 use crate::components::{Building, Household, Job, Position, TilePos};
@@ -75,8 +75,8 @@ pub fn free(world: &World) -> Option<&crate::config::FreeDistanceCfg> {
     world.config.distance.as_ref().and_then(|d| d.free.as_ref())
 }
 
-/// Island fix round F3's `[distance.free.stay_in]` (OPEN-190), `None` off
-/// (`CITYSIM_STAY_IN_OFF`, or either switch above).
+/// Island fix round F3's `[distance.free.stay_in]` (OPEN-190), `None` when
+/// it, `[distance.free]` or `[distance]` is absent.
 pub fn stay_in(world: &World) -> Option<&crate::config::StayInCfg> {
     free(world).and_then(|f| f.stay_in.as_ref())
 }

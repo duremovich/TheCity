@@ -11,13 +11,7 @@ use citysim::systems::{chrome, gray};
 use citysim::{Brain, Config, EntityId, Gang, Job, Kit, Needs, World, TICKS_PER_DAY};
 
 fn city_with_gangs() -> World {
-    // Pinned: the island pass phase 5's vehicles in motion off (`[motion]`
-    // moved this city's trajectory: the drag test's first jobless member
-    // read GangWork as his free goal, the premise gone; re-read when the
-    // switch retires).
-    let mut cfg = Config::load();
-    cfg.motion = None;
-    let mut w = World::new(42, cfg);
+    let mut w = World::new(42, Config::load());
     for _ in 0..30 {
         if w.gangs().iter().any(|&g| w.comp::<Gang>(g).is_some_and(|x| x.members.len() >= 3)) {
             break;

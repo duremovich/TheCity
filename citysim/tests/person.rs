@@ -1994,21 +1994,8 @@ type WidowPick = (World, Vec<EntityId>, EntityId, EntityId, EntityId);
 
 fn widow_pick() -> WidowPick {
     // Jobs & lives phase 8's gate: the pin to the pre-milestone city is gone
-    // (on the Jobs & lives city the pick commissions the Hit again). The
-    // island pass phase 1: pinned to `[distance]` off while its switch is in
-    // flight (its city's widow has no Hit record in the week); re-read when
-    // the switch retires.
-    let mut w = citysim::World::new(42, {
-        let mut c = Config::load();
-        c.distance = None;
-        // The island pass phase 6: and to the El's timed ride while the
-        // trains' switch is in flight (with trains her week's Hit record
-        // went missing); re-read when it retires.
-        if let Some(m) = c.motion.as_mut() {
-            m.trains = None;
-        }
-        c
-    });
+    // (on the Jobs & lives city the pick commissions the Hit again).
+    let mut w = citysim::World::new(42, Config::load());
     // Day 10: the Fixers' books have filled (on day 2 too few regulars
     // would take a Hit at any price, and it priced at the old quote).
     w.run_ticks(10 * TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
@@ -2822,9 +2809,10 @@ fn probe_super_walks_under_four_hours_a_shift() {
     }
     // The two cities side by side (the change tier's budget, 2026-10-19).
     let ((on, _), (off, _)) = std::thread::scope(|sc| {
-        // The island pass phase 1: pinned to `[distance]` off while its
-        // switch is in flight (its city's super walks 293 min, OPEN-169's
-        // round); re-read when the switch retires.
+        // Pinned to `[distance]` absent (the island pass phase 1): on the
+        // shipped city this super walks 293 min of 540 (245 in the civic-off
+        // control), OPEN-169's round; re-read at OPEN-169 (the perf pass
+        // phase 0 retired the switch and re-read it, 2026-10-24).
         let on = sc.spawn(|| {
             let mut cfg = Config::load();
             cfg.distance = None;
@@ -2924,16 +2912,6 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
     let mut cfg = Config::load();
     cfg.vice.p_street_visit = 1.0;
     cfg.vice.street_intimacy = 1.0;
-    // Pinned: the island pass phase 2's free-time picks off (`[distance.free]` moved this city's scene; re-read when the switch retires).
-    if let Some(d) = cfg.distance.as_mut() {
-        d.free = None;
-    }
-    // Pinned: the island pass phase 3c's housing mood term off (the tier row moves this city's day-12 scene: the
-    // in-test worker is never met at the pitch; re-read when CITYSIM_HOUSING_MOOD_OFF retires).
-    cfg.mood.housing = None;
-    // Pinned: the island pass phase 8's trades off (`[island_trades]` moves this city's day-12 scene, its gangs'
-    // deal sites and its LOD budget: the pimp never reaches the pitch; re-read when CITYSIM_TRADES_OFF retires).
-    cfg.island_trades = None;
     let mut w = World::new(42, cfg);
     let start = 12 * TICKS_PER_DAY + 17 * TICKS_PER_HOUR;
     w.run_ticks(start);

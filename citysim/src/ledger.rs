@@ -174,7 +174,7 @@ pub type HandsKey = (ViolenceSource, EntityId);
 pub struct OrderRates {
     pub cells: BTreeMap<CellKey, RateCell>,
     /// The island pass phase 10: the actor side per faction (empty, and
-    /// not written into a save, with `CITYSIM_VIOLENCE_MIRROR_OFF=1`).
+    /// not written into a save, with `[fviolence.hands]` absent).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub hands: BTreeMap<HandsKey, HandsCell>,
 }

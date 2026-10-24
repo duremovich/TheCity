@@ -4353,11 +4353,11 @@ fares_el_missed = true             # the fares shape: a commute of [jobs2] cab_m
 timeout_spares_legs = true         # the island pass phase 4 (OPEN-164): [brain] plan_timeout_ticks spares a leg in motion
                                    # (a timed walk, a flight or a ride before its arrival, a walk with path left and not
                                    # blocked); the base cut an island CEO's 931-tick ride at 900, left him at the board stop
-                                   # in another district, and the next plan rode again (CITYSIM_COMMUTE_PRESSURE_OFF=1: off)
+                                   # in another district, and the next plan rode again (false: the base timeout)
 
 # The island fix round F1 (OPEN-188; SHADOW_V8 bug 1, D3 A): when a trip's route is longer than walking, walk; and a
 # district label is not space (the island's Spire is one label 150-350 tiles across, so "same district" is no test of
-# near). CITYSIM_ROUTES_OFF=1 drops the section (the switch in flight). Placeholders.
+# near). Absent, the base rule. Placeholders.
 [routes]
 exec_ride_min_tiles = 40           # the exec's car drives home-to-Hq (and the ride home) from this many Manhattan tiles
                                    # ([legs] leg_replan_tiles' scale, 80 min on foot); the base drove only across a
@@ -4375,7 +4375,7 @@ pass_slack_tiles = 8               # a stop pair is no route when the alight sto
 # and bed picks. Each cap is on the travel estimate (`transit::commute_ticks`: the walk at [exec] move_ticks_full,
 # or the El where it wins; ticks are minutes): a candidate past it is dropped while one within it is left, and with
 # none within, the nearest wins. The island put a quarter of its commute legs at 4 h or more (SHADOW_V7 bug 1).
-# CITYSIM_DISTANCE_OFF=1 drops the section (the switch in flight). Placeholders.
+# Absent, the base rule. Placeholders.
 [distance]
 job_cap_ticks = 120                # the job (the job search, the graded pick, the seeded staff, the corner, the chip
                                    # posts): a candidate's Home door (else tile) to the workplace door; a vacancy whose
@@ -4385,7 +4385,7 @@ bed_cap_ticks = 120                # tonight's bed (Home or the gang's Hideout),
 home_bed_ticks = 30                # the own Home's offer over a Hideout cot: the Hideout only when nearer by more than this
 
 # The island pass phase 2 (docs/ISLAND_PASS.md I1; OPEN-163, OPEN-171): the free-time spot and the night's bed out,
-# on the same travel estimate. CITYSIM_DISTANCE2_OFF=1 drops this table (the switch in flight). Placeholders.
+# on the same travel estimate. Absent, the base rule. Placeholders.
 [distance.free]
 spot_cap_ticks = 60                # the HangOut spot (a corner, the Hideout's door, a friend's Home) from where the body
                                    # sets out: past it the spot is dropped, and with none within there is no spot (the
@@ -4398,7 +4398,7 @@ cot_bed_ticks = 60                 # a Mission's cot's offer over a paid Hotel b
 # Island fix round F3 (docs/ISLAND_PASS.md I1, Dylan's D1 B; OPEN-190): the stay-in fallback. With no HangOut spot
 # within spot_cap_ticks the Unwind is the own Home's HangOut (its flatmates and Block-mates, else alone), not nothing:
 # the base offered no Unwind at all past the cap (Shadow V8: a joytoy's fun 0.95 to 0.00, 9 of 70 vice diaries with no
-# leisure). CITYSIM_STAY_IN_OFF=1 drops this table (the switch in flight). A placeholder.
+# leisure). Absent, the base rule. A placeholder.
 [distance.free.stay_in]
 fun_hour = 0.08                    # an hour in alone (the screen, the deck, the window); in company the larger of this
                                    # and gain.hangout_hour. A lone corner's hour is 0.04 (hangout_hour x spot_lone_fun);
@@ -4410,7 +4410,7 @@ fun_hour = 0.08                    # an hour in alone (the screen, the deck, the
 # the workplace's owner), its beds reserved for that workplace's staff. A new hire with a far Home, or a homeless one, moves in at midnight; the rent is
 # docked from the wage; a resident whose job there ended is evicted after grace_days. The island's 120 Farms hold
 # 3,473 Farmer posts with 2,525 adults within 60 tiles (phase 1). Phase 3b builds more; phase 4 moves the far workers
-# in. CITYSIM_COMPANY_HOUSING_OFF=1 drops the section (the switch in flight). Placeholders.
+# in. Absent, the base rule. Placeholders.
 [company_housing]
 kinds = ["Farm", "PackingPlant", "FreightYard", "UtilityPlant", "ConstructionYard", "Warehouse"]
                                    # the workplaces that house their staff: the Farms and the industries
@@ -4436,8 +4436,8 @@ fill_at_seed = true                # world build: the far posts' holders (longes
 # (3a put 52 of its 56 blocks on open-ground plots), so the seeded beds are floors of the workplace building itself, a
 # Home record sharing its rect and door: no new footprint. The beds are sized as 3a's (far posts less the free beds near,
 # beds_per_floor a floor as the workplace's interior allows, at most floors_max floors, one set per workplace). Each kind's
-# floors have a name, so the view draws the building as both workplace and warren. CITYSIM_COMPANY_HOUSING2_OFF=1 drops
-# this table and [company_housing.buyout] (3a's blocks, the switch in flight). Placeholders.
+# floors have a name, so the view draws the building as both workplace and warren. Without this table and
+# [company_housing.buyout], 3a's blocks. Placeholders.
 [company_housing.inside]
 default_name = "Company Floors"    # the floors' name for a kind with no row below
 rooms = [
@@ -4477,8 +4477,7 @@ build_fallback = true              # nothing for sale in reach: build on the nea
 # move-in are this path while it is on). Past job_days with none found, the worker takes an open post of his role
 # nearer his Home instead, at the next midnight before the job search (quit and hire; a company bed's grace then runs). A couple moves only when both commutes
 # shrink; a household with a School near its Home moves only to a Home with one. The base relocation moved any worker
-# past [life] commute_move_ticks the same midnight it found a Home within it. CITYSIM_COMMUTE_PRESSURE_OFF=1 drops the
-# section (the switch in flight). Placeholders.
+# past [life] commute_move_ticks the same midnight it found a Home within it. Absent, the base rule. Placeholders.
 [commute_pressure]
 far_ticks = 80                     # a commute past this builds a day of pressure (= [life] commute_move_ticks: 2 h 40 a
                                    # day on the road)
@@ -4492,7 +4491,7 @@ hire_now = true                    # a hire since the last midnight with a far H
 # The island pass phase 5 (docs/ISLAND_PASS.md I3, OPEN-165; systems/motion.rs): a vehicle in motion is an entity with
 # its own position, advancing along its way each tick, its riders aboard (the car, the exec's flyer, the cab, the exec's
 # car). The leg's arrival is the timed leg's, so ride times (and the Statistical mirror) are unchanged; the body is seen
-# on the road instead of on its boarding tile. CITYSIM_VEHICLES_MOVE_OFF=1 drops it (the switch in flight).
+# on the road instead of on its boarding tile. Absent, the base rule.
 [motion]
 road_route = true                  # a timed road vehicle's way follows the road path (the walk's A*); false: an L, along
                                    # x then y (no search)
@@ -4502,7 +4501,7 @@ road_route = true                  # a timed road vehicle's way follows the road
 # [transit] headway, at its ride_ticks_per_tile, dwell_ticks at each stop, turning at the far terminus for the next slot.
 # The count is derived (the round trip over the headway). A rider waits on the platform, boards the next train in his
 # direction, rides aboard (his position is the train's), alights at his stop or a transfer (re-boarding after the
-# [transit] transfer_ticks walk) and walks on. CITYSIM_TRAINS_OFF=1 drops it (the switch in flight).
+# [transit] transfer_ticks walk) and walks on. Absent, the base rule.
 [motion.trains]
 capacity = 400                     # riders aboard one train; a full train leaves the rest for the next. Placeholder, set
                                    # high to start (an island peak boarding is ~100 an hour at a stop)
@@ -4512,8 +4511,8 @@ capacity = 400                     # riders aboard one train; a full train leave
 # him along the road at the walk's pace); past it the van pulls up at the arrest's kerb, waits [legs] van_call_ticks, and
 # the guard drives it to the cells with the cuffed suspect aboard, at the Car's speed. At [law] transfer_hour each
 # Station's due prisoners board a van at its door and ride to the Precinct (the drive at the Car's speed, no body set
-# down early): Full and Coarse prisoners aboard, Statistical ones on the same timed run (the mirror). CITYSIM_VAN_OFF=1
-# drops it (the switch in flight).
+# down early): Full and Coarse prisoners aboard, Statistical ones on the same timed run (the mirror). Absent,
+# the base rule.
 [motion.vans]
 capacity = 8                       # prisoners one transfer van carries; more due at a Station send another. Placeholder
                                    # (a Station holds [law] station_cells 6, so it never binds there)
@@ -4522,7 +4521,7 @@ capacity = 8                       # prisoners one transfer van carries; more du
 # its body on its way. The walk stores its start (the tile and the tick); its place at any tick is the point along the
 # way at the walk's pace over its own ticks (the arrival is unchanged), computed when it is read (the view, a promotion,
 # an interrupt), never moved per tick. A promotion to Full mid-walk sets the body down on its way and the Full walk goes
-# on from there. CITYSIM_COARSE_WALK_OFF=1 drops it (the switch in flight).
+# on from there. Absent, the base rule.
 [motion.walks]
 road_route = true                  # the walk's way follows the road path (the Full walk's A*); false: an L, x then y
 settle_interrupt = true            # a walk cut short (its plan dropped or replaced) leaves the body where it stands on its
@@ -4533,7 +4532,7 @@ settle_interrupt = true            # a walk cut short (its plan dropped or repla
 # nothing in reach: the courier's parcels went to no address, the builder's sites were all past haul_reach, the one
 # labour corner a district stood 380 tiles from the Construction Yards, and a 20k city ranked no cab driver a body.
 # Read by systems/streetwork.rs (parcels, the corner), systems/shift.rs (haul), systems/lod.rs (the cab quota) and
-# systems/weapons.rs (the arms dealer). CITYSIM_TRADES_OFF=1 drops the section (the switch in flight). Placeholders.
+# systems/weapons.rs (the arms dealer). Absent, the base rule. Placeholders.
 [island_trades]
 parcel_cap_ticks = 120             # a corp's parcels go through the open Yard with the most of its staffed buildings
                                    # within this travel of the Yard's door, to those buildings; none in reach of any
@@ -4560,8 +4559,7 @@ corner_arms = true                 # a gang that deals at a corner sells its arm
 # child housed there (a D6 coffin rack, 721 min) and to the other side of a Home trade; the gang's one Hideout was
 # tonight's bed for the watch at any distance and the nearer bed when Home was farther still (58 of 78 island
 # GoTo(Hideout) legs to the Sump, median 144 min); a Builder's far-site day walked to the Yard first. Read by
-# systems/beds.rs (company.rs, commute.rs, life.rs, ages.rs, gang.rs) and systems/shift.rs. CITYSIM_BEDS_OFF=1 drops
-# the section (the switch in flight). Placeholders.
+# systems/beds.rs (company.rs, commute.rs, life.rs, ages.rs, gang.rs) and systems/shift.rs. Absent, the base rule. Placeholders.
 [beds]
 company_post_ticks = 120           # a company bed is taken only by the workplace's own staff, and kept by a corp worker of
                                    # another of its workplaces, only with the post within this travel of the bed
@@ -4583,7 +4581,7 @@ site_from_home = true              # a Builder's far-site day ([island_trades] s
 # reads the status need, not the Home, so nothing here is counted twice; the tier row is kept small for the sleep bonus.
 # The homeless read none: sleeping rough already costs energy and safety. Rent burden is left out (the company rent is
 # below market and docked; a market-rent term is the pressure pass's, OPEN-178). Full and Statistical alike (mood runs
-# for every citizen off the shared Home state). CITYSIM_HOUSING_MOOD_OFF=1 drops it (the switch in flight). Placeholders.
+# for every citizen off the shared Home state). Absent, the base rule. Placeholders.
 [mood.housing]
 tier = [-0.02, 0.0, 0.02]          # by the Home's tier, Sump / Mid / Spire (small: the tier's sleep safety is the other
                                    # half, about +0.03 of target a tier when it is not at its cap)

@@ -8,10 +8,12 @@
     python tools/test.py lint        ignore reasons, caps, OPEN.md ids
     python tools/test.py report      the close-of-milestone table [--since SHA]
 
-Each tier runs its cargo commands one at a time (the change tier's
-long poles, `core_sanity` first, run in a lane beside the tests step:
-`CHANGE_BESIDE`), writes every byte to
-target/test-logs/<tier>-<stamp>/<n>-<name>.log and prints only: one line per
+Each tier runs its cargo commands one at a time, except the change tier's
+tests step, which runs the built test binaries itself, `--jobs` (default
+`CHANGE_JOBS`) at a time, its long poles (`CHANGE_BESIDE`, `core_sanity`
+first) as jobs of their own. It writes every byte to
+target/test-logs/<tier>-<stamp>/<n>-<name>.log (the tests step's under
+<n>-tests/) and prints only: one line per
 test binary, every FAIL / panicked / FINDING line, and the wall time against
 the tier's budget. A budget breach is loud, never a failure (the box is noisy):
 the phase that breached pays it back before it closes.
@@ -69,15 +71,13 @@ TIERS = {
     ],
 }
 
-# The change tier's long poles, run in one lane beside the `tests` step
-# (island pass phase 0, OPEN-175): `core_sanity` (three seeds x 120 days on
-# three threads, ~45-55 s) and the single test that sets each slow binary's
-# wall (a seeded world run for weeks, 5-15 s, while the binary's other tests
-# end in a few). The lane (~100 s) ends well inside the tests step, which
-# skips them; every test still runs in this tier. Started with the tests, not
-# before: beside a cold clippy it slowed clippy 38 -> 69 s.
-# ("<binary stem>", "<exact test name>"); the name must be unique across the
-# workspace (it is the `--skip` filter too).
+# The change tier's long poles (island pass phase 0, OPEN-175): `core_sanity`
+# (three seeds x 120 days on three threads, ~45-55 s) and the single test that
+# sets each slow binary's wall (a seeded world run for weeks, 5-15 s, while the
+# binary's other tests end in a few). Each is a job of its own in the tests
+# step's pool, and its binary's job skips it; every test still runs in this
+# tier. ("<binary stem>", "<exact test name>"); the name must be unique across
+# the workspace (it is the `--skip` filter too).
 CHANGE_BESIDE = [
     ("core", "core_sanity"),
     ("person", "probe_laid_off_farm_worker_finds_work_within_14_days"),
@@ -88,6 +88,19 @@ CHANGE_BESIDE = [
     ("weapons", "test_parent_dies_at_death_days_and_takes_its_branches"),
     ("save", "test_live_save_resumes_after_lots_are_built"),
 ]
+
+# The change tier's tests step runs its jobs (every test binary, the long
+# poles above) this many at a time, longest first by the last change run
+# (perf pass phase 0, OPEN-201). `cargo test` ran the ~107 binaries one after
+# another: each launch of a 16 MB release test binary costs 0.3-0.5 s on this
+# box (30-52 s a run, measured 2026-10-24), and most binaries end on one test
+# while the rest of the box idles. Every test still runs; a binary runs as
+# cargo runs it (its package's directory, its own process), and the tests
+# write only to pid-keyed temp paths, so two binaries never share a file.
+# Measured on a quiet box (24 threads), the tests step: serial 223 s
+# (a08d383), 3 jobs 133 s, 4 jobs 110 s, 6 jobs 87 s; at 6 `core_sanity`
+# (68 s alone, 82 s in the pool) is the wall, so more jobs only slow it.
+CHANGE_JOBS = 6
 
 
 def built_binary(stem):
@@ -128,14 +141,14 @@ def fmt_secs(s):
     return f"{s // 60}m{s % 60:02d}s" if s >= 60 else f"{s}s"
 
 
-def run_step(name, cmd, log_path, only=None):
+def run_step(name, cmd, log_path, only=None, cwd=ROOT, allow_empty=False):
     """Run one cargo command, log every line, print the few that matter."""
     start = time.time()
     binary, bin_start = (None if cmd[0] == "cargo" else name), start
     rows = []
     with open(log_path, "w", encoding="utf-8") as log:
         log.write(" ".join(cmd) + "\n\n")
-        proc = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, encoding="utf-8", errors="replace", bufsize=1)
         for line in proc.stdout:
             log.write(line)
@@ -161,7 +174,7 @@ def run_step(name, cmd, log_path, only=None):
         proc.wait()
     secs = time.time() - start
     ok = proc.returncode == 0
-    if name not in ("fmt", "clippy") and sum(r["passed"] + r["failed"] for r in rows) == 0:
+    if name not in ("fmt", "clippy") and not allow_empty and sum(r["passed"] + r["failed"] for r in rows) == 0:
         ok = False
         print(f"    {name}: ran no test (a renamed filter, or a stale binary under --no-build): RED")
     if name in ("fmt", "clippy"):
@@ -169,6 +182,92 @@ def run_step(name, cmd, log_path, only=None):
         if not ok:
             print(f"    see {log_path.relative_to(ROOT)}")
     return {"step": name, "ok": ok, "secs": round(secs, 1), "binaries": rows, "log": str(log_path.relative_to(ROOT))}
+
+
+def test_executables():
+    """Every test binary of the workspace's release build: (label, exe, its
+    package's directory). `cargo test --no-run` is a no-op when built; it
+    builds what is stale, as the `cargo test` step did."""
+    r = subprocess.run(CARGO + ["test", "--workspace", "--release", "--no-run", "--message-format=json"], cwd=ROOT,
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if r.returncode != 0:
+        return None, r.stderr
+    found = []
+    for line in r.stdout.splitlines():
+        if not line.startswith("{"):
+            continue
+        m = json.loads(line)
+        if m.get("reason") != "compiler-artifact" or not m.get("executable") or not m.get("profile", {}).get("test"):
+            continue
+        exe = Path(m["executable"])
+        label = re.sub(r"-[0-9a-f]{8,}$", "", exe.stem)
+        found.append((label, exe, Path(m["manifest_path"]).parent))
+    return found, r.stderr
+
+
+def last_secs():
+    """The last change run's seconds per binary label and per long-pole step."""
+    s = last_summary("change")
+    secs = {}
+    for st in (s or {}).get("steps", []):
+        secs[st["step"]] = st.get("secs", 0.0)
+        for b in st.get("binaries", []):
+            secs.setdefault(b["binary"], b["secs"])
+    return secs
+
+
+def run_pool(out, beside, jobs):
+    """The change tier's tests step: every test binary and every long pole as
+    a job, `jobs` at a time, longest first. Returns (tests result, pole results)."""
+    start = time.time()
+    exes, err = test_executables()
+    if exes is None:
+        print("  the test build FAILED")
+        for l in err.splitlines():
+            if l.startswith("error"):
+                print("    " + l[:200])
+        return {"step": "tests", "ok": False, "secs": 0.0, "binaries": [], "log": ""}, []
+    logs = out / "3-tests"
+    logs.mkdir(exist_ok=True)
+    by_label = {label: (exe, cwd) for label, exe, cwd in exes}
+    skips = [a for (_, t) in beside for a in ("--skip", t)]
+    known = last_secs()
+    work = []  # (expected secs, kind, name, cmd, cwd)
+    for stem, test in beside:
+        if stem not in by_label:
+            print(f"- {test}: no test binary `{stem}` in the build")
+            continue
+        exe, cwd = by_label[stem]
+        work.append((known.get(f"{stem}::{test}", 60.0), "pole", f"{stem}::{test}",
+                     [str(exe), test, "--exact", "--nocapture"], cwd))
+    for label, exe, cwd in exes:
+        work.append((known.get(label, 30.0), "bin", label, [str(exe), "--nocapture", *skips], cwd))
+    work.sort(key=lambda w: -w[0])
+    print(f"- tests: {sum(1 for w in work if w[1] == 'bin')} binaries and {sum(1 for w in work if w[1] == 'pole')} "
+          f"long pole(s), {jobs} at a time; logs in {logs.relative_to(ROOT)}")
+    lock = threading.Lock()
+    results = {}
+
+    def worker():
+        while True:
+            with lock:
+                if not work:
+                    return
+                _, kind, name, cmd, cwd = work.pop(0)
+            log = logs / (name.replace("::", "-") + ".log")
+            results[name] = (kind, run_step(name, cmd, log, cwd=cwd, allow_empty=(kind == "bin")))
+
+    threads = [threading.Thread(target=worker) for _ in range(max(1, jobs))]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    bins = [r for k, r in results.values() if k == "bin"]
+    poles = [r for k, r in results.values() if k == "pole"]
+    tests = {"step": "tests", "ok": all(r["ok"] for r in bins) and bool(bins), "secs": round(time.time() - start, 1),
+             "binaries": [row for r in bins for row in r["binaries"]], "log": str(logs.relative_to(ROOT))}
+    print(f"  {tests['secs']:6.1f}s  {'tests (wall)':<24} {'ok' if tests['ok'] else 'FAILED'}")
+    return tests, poles
 
 
 def cmd_tier(tier, args):
@@ -196,31 +295,17 @@ def cmd_tier(tier, args):
                 if l.startswith("error"):
                     print("    " + l[:200])
             return 1
-    beside = CHANGE_BESIDE if tier == "change" and not args.only else []
-    print(f"[{tier}] {len(steps)} step(s), serial" + (f", {len(beside)} beside" if beside else "")
+    pool = tier == "change" and not args.only
+    print(f"[{tier}] {len(steps)} step(s), serial" + (f", the tests {args.jobs} at a time" if pool else "")
           + f"; logs in {out.relative_to(ROOT)}")
     start = time.time()
     results = []
-    threads, beside_results = [], []
-
-    def lane():
-        for k, (stem, test) in enumerate(beside, 1):
-            exe = built_binary(stem)
-            if exe is None:
-                print(f"- {test}: no built test binary for `{stem}` under target/release/deps (run without --no-build)")
-                beside_results.append({"step": test, "ok": False, "secs": 0.0, "binaries": [], "log": ""})
-                continue
-            r = run_step(f"{stem}::{test}", [str(exe), test, "--exact", "--nocapture"], out / f"b{k}-{stem}-{test}.log")
-            beside_results.append(r)
-
-    def launch_beside():
-        print(f"- {len(beside)} long pole(s) in a lane beside the tests: " + ", ".join(t for _, t in beside))
-        t = threading.Thread(target=lane)
-        t.start()
-        threads.append(t)
-
-    skips = [a for (_, t) in beside for a in ("--skip", t)]
+    beside_results = []
     for i, step in enumerate(steps, 1):
+        if pool and step[0] == "tests":
+            tests, beside_results = run_pool(out, CHANGE_BESIDE, args.jobs)
+            results.append(tests)
+            continue
         name, cmd = step_command(step)
         if cmd is None:
             print(f"- {name}: no built test binary for `{step[1]}` under target/release/deps (run without --no-build)")
@@ -228,13 +313,8 @@ def cmd_tier(tier, args):
             continue
         if name == "tests" and args.only:
             cmd = CARGO + ["test", "--workspace", "--release", "--no-fail-fast", "--test", args.only, "--", "--nocapture"]
-        if name == "tests" and beside:
-            cmd = cmd + skips
-            launch_beside()
         print(f"- {name}")
         results.append(run_step(name, cmd, out / f"{i}-{name}.log"))
-    for t in threads:
-        t.join()
     results += beside_results
     wall = time.time() - start
     budget = BUDGETS[tier]
@@ -472,6 +552,7 @@ def main():
     ap.add_argument("tier", choices=list(TIERS) + ["diag", "lint", "report"])
     ap.add_argument("--only", help="one test binary (change) or step (merge/milestone) or diag test name")
     ap.add_argument("--no-build", action="store_true", help="skip the --no-run build step")
+    ap.add_argument("--jobs", type=int, default=CHANGE_JOBS, help="change: test binaries run at a time")
     ap.add_argument("--since", help="report: a base sha for the test-growth lines")
     args = ap.parse_args()
     os.chdir(ROOT)
