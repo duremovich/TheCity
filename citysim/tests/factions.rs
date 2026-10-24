@@ -636,6 +636,11 @@ fn test_night_watch_rotates_through_the_grunts() {
     let mut w = world(56);
     // L1: the watch is stood by members within a walk of the Hideout; here all are.
     w.config.life.commute_cap_tiles = 10_000;
+    // F2 (OPEN-191): and tonight's Hideout bed is within the walk and the commute.
+    if let Some(b) = w.config.beds.as_mut() {
+        b.hideout_walk_ticks = u64::MAX;
+        b.hideout_work_ticks = u64::MAX;
+    }
     let (g0, _) = gangs(&w);
     let members = civilians(&w, 5);
     for (i, &m) in members.iter().enumerate() {
