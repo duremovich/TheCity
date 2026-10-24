@@ -2242,8 +2242,12 @@ fn close_action(world: &World, t: &mut Track, now: Tick, status: &str) {
     let loc = if matches!(o.action, ActionKind::GoTo(_)) {
         if o.start_place == end_place {
             end_place.to_string()
-        } else {
+        } else if status == "done" {
             format!("{} -> {}", o.start_place, end_place)
+        } else {
+            // OPEN-200: an interrupted leg's end is where it was cut, not
+            // where it was going (the target is printed after).
+            format!("{} -> cut at {}", o.start_place, end_place)
         }
     } else {
         end_place
