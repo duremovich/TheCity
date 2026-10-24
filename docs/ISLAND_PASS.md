@@ -15,6 +15,11 @@ first, as "done on gen", with the island failures written as OPEN rows.
 | I4 | **The dead trades split into bugs and features.** The bugs land in this pass: the courier and builder `Unload` at their own post, island foremen with 0 hires and no day labourer, the arms dealer no one is appointed to (`weapons.rs` `bar_arms_dealer` exists), and the cab with no body driver at 20k. The bouncer who never refuses, the joytoy with no client and a scav harvest seen from the scav's side are features for the pressure pass. | Dylan 2026-10-22 |
 | I5 | **Island hunger is re-read at V8 before it gets a fix.** The likely cause is commutes eating mealtimes; a clinic path for malnutrition waits until the distance phases show what is left. | Dylan 2026-10-22 |
 | I6 | **Company housing.** The island's 4-hour tail is the layout, not the pick: its 120 Farms hold 3,473 Farmer posts with 2,525 adults living within 60 tiles, and a perfect rematch of the same workers to the same posts floors at about 30 % of commutes at 4 h or more (phase 1). Farms and industry put up company housing (bunkhouses, company blocks) for their workers, the rent docked from the wage; it gives I2 the beds near work that it lacks, and works on any map. **In the workplace, then bought out** (the city is dense; free lots are rare): the seeded beds live inside the workplace building (dorm floors on a vertical farm, coffin racks in a plant's basement), with no new footprint; a corp whose staff still commute far buys a nearby apartment block and converts it, its tenants given notice and pushed out over the grace period. Building on a free lot is only the fallback when nothing near is for sale. **A worker who loses or quits the job is evicted after a grace period** (config): the company town's leverage. | Dylan 2026-10-22 |
+| I7 | **Stay-in gets a fallback** (Shadow V8 D1 = B): past the hangout cap the person unwinds at their own Block or Home (flatmates, Block neighbours, the street spot next door) at a low rate, so fun does not sink and Block-mates meet; the cap stays. | Dylan 2026-10-24 |
+| I8 | **The Hideout bed is gated by the walk** (D2 = A): Sleep uses the Hideout only within the commute cap, else Home; rounds, court and orders still go there. A Hideout per district the gang holds comes with the vertical city pass (`OPEN-187`). | Dylan 2026-10-24 |
+| I9 | **District labels are not space** (D3 = A): every "same district means near" test uses tile or travel distance; execs' homes beside their Hq come with the next island re-import (`OPEN-182`). | Dylan 2026-10-24 |
+| I10 | **No clinic path for malnutrition** (D4 = A): hunger stays a pressure under the standing harsh-by-design and no-safety-net decisions; why `OPEN-167` climbs from d30 to d90 is traced as a measurement. | Dylan 2026-10-24 |
+| I11 | **The pass closes after a fix round** (D5 = A): F1 routes (`OPEN-188`), F2 beds (`OPEN-189`, `OPEN-191`, `OPEN-193`), F3 the stay-in fallback (`OPEN-190`, with the Rest loops `OPEN-195`); then the perf pass. | Dylan 2026-10-24 |
 
 ## Phases
 
@@ -36,6 +41,9 @@ Distance comes before vehicles: with 4-hour commutes every ride is absurd, so ve
 | 8 | I4's bugs: the courier/builder `Unload`, island foremen hires and the day labourer, the arms dealer appointment, the cab's body driver at 20k | 168 (part) |
 | 9 | Coarse bodies stacked mid-`GotoTimed` (`OPEN-181`, found by the graphics integration bridge): a timed walk keeps its body on its path, and a promotion mid-route places it there | 181 |
 | 10 | The Statistical violence mirror limited by its attackers (`OPEN-185`): off-screen hits only from off-screen members, pre-bound; `vendetta_norm` scaled with the city (Dylan 2026-10-23) | 185 |
+| F1 | Routes: tile distance for every same-district test, no El route longer than the walk, a dropped plan near the stop alights (I9) | 188 |
+| F2 | Beds: company beds to own staff within the cap, the retiree to a relative's Home, the Hideout bed gated (I8), the builder's day at the site | 189, 191, 193 |
+| F3 | The stay-in fallback (I7) and the 1-minute Rest loops | 190, 195 |
 | gate | Shadow V8 on the island (`isle_m_k2`, 20k, seeds 42-44) against `target/shadow_v7/`, V7's tool, windows and critics | — |
 
 **Re-read at the gate, not fixed here unless V8 says so:** island hunger at d90 (`OPEN-167`, I5); the remaining
