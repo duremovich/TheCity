@@ -16,7 +16,7 @@ A Rust city simulator: ~2,000 (or 20,000) residents in a cyberpunk corporate dys
 Tests run through one script; each tier is minutes, so pick the tier, never run the ignored set blind.
 
 ```
-python tools/test.py change      # fmt, clippy, every non-ignored test   (~4.5 min; budget 4)
+python tools/test.py change      # fmt, clippy, every non-ignored test   (~1.5 min, six binaries at a time; budget 4)
 python tools/test.py merge       # + the year, the behaviour tier, the god scenarios, serial (budget 8)
 python tools/test.py milestone   # + Full-vs-Statistical parity, the 20k profile (budget 20)
 python tools/test.py lint        # ignore reasons, caps, OPEN.md ids
