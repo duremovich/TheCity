@@ -33,7 +33,7 @@
 //! eviction and the kin take-in are tier-blind passes over every citizen;
 //! the Hideout bed and the site day are Full-body plans (a Statistical body
 //! sleeps and works by the table, which has no Hideout bed or site leg). No
-//! random draw. `CITYSIM_BEDS_OFF=1` drops `[beds]`: every function here
+//! random draw. With `[beds]` absent every function here
 //! answers the base's rule.
 
 use crate::components::{Building, Household, Job, TilePos};

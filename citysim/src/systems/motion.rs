@@ -37,7 +37,7 @@
 //!   is no body to carry; a ride's ticks are the timed leg's, which the
 //!   vehicle's arrival keeps, so the parity rule reads the same durations.
 //!
-//! `CITYSIM_VEHICLES_MOVE_OFF=1` (`[motion]` absent): nothing here runs and
+//! With `[motion]` absent nothing here runs and
 //! the legs are the timed ones (the body on its boarding tile, then at the
 //! door). Phase 6 (the El) and 7 (the van) ride the same model: a train is
 //! a [`Route::Timed`] vehicle with many riders on a timetable's way, a van

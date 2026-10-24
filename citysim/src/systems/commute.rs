@@ -38,8 +38,8 @@
 //! one does) and moves him by `World::set_home`, the relocation's way; the
 //! Ambient labour pool's households are not residents (the pool hires the
 //! household nearest the post). No random draw: movers longest commute
-//! first, ties the lower id. `CITYSIM_COMMUTE_PRESSURE_OFF=1` drops
-//! `[commute_pressure]`: the base relocation and company move-in.
+//! first, ties the lower id. With
+//! `[commute_pressure]` absent: the base relocation and company move-in.
 
 use crate::components::{Building, Job, TilePos};
 use crate::entity::EntityId;

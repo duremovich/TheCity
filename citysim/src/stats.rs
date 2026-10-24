@@ -2088,7 +2088,7 @@ pub struct LivingCols {
     pub stat_spend: i64,
     /// The island pass phase 10 (not a CSV column): the midnight pass's
     /// hits not made because their source had no free hand or budget left
-    /// (`fviolence::daily`; 0 with `CITYSIM_VIOLENCE_MIRROR_OFF=1`).
+    /// (`fviolence::daily`; 0 with `[fviolence.hands]` absent).
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub fv_hands_capped: u32,
     /// Parts `assets::parts_market` moved today from a Fab, from the Recycler.

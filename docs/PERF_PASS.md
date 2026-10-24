@@ -88,4 +88,13 @@ changes the map, not a mechanism.
 
 ## Implemented: deviations
 
-(Written at the close.)
+- **Phase 0** (`c86aa55`, `OPEN-201` closed, `OPEN-202` left open for F3's A/B at the checkpoint). The all-off
+  identity against `fa74b64` (42-44 x 30) DIFFERed on all three seeds through one cause, `0d61e91` (the stat table
+  regenerated after the El trains, outside every switch by design): with `fa74b64`'s table in the tree the three
+  seeds are identical (events, report, save). The fifteen env reads retired; every section keeps its config path
+  (absent: the base rule) and SAVE_VERSION stays 67; identical to `3728aca` on 42-44 x 30. **Deviations:** no test
+  read an env switch, so none was switch-only; the phases' off halves (a section dropped in-test) stay, since the
+  config paths stay and they cost under a second (the island pass phase 0 removed its off halves). Six scene pins
+  waiting on the retirement were re-read: five pass on the shipped city and went; the super probe keeps `[distance]`
+  absent (293 min a shift, `OPEN-169`). The change tier came under budget not by cutting tests but by running the
+  binaries six at a time in `tools/test.py` (tests step 223 s -> 87 s; the tier 1m33s warm, quiet box).

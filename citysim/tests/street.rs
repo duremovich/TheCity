@@ -836,13 +836,7 @@ mod lives_street {
     const DAY2_EIGHT: u64 = 2 * TICKS_PER_DAY + 8 * TICKS_PER_HOUR;
 
     fn city_with(edit: impl FnOnce(&mut Config)) -> World {
-        // Pinned: the island pass phase 2's free-time picks off (`[distance.free]` moved this city's scene; re-read when the switch retires).
-        let mut w = common::world_with(|c| {
-            edit(c);
-            if let Some(d) = c.distance.as_mut() {
-                d.free = None;
-            }
-        });
+        let mut w = common::world_with(edit);
         assert!(service::street_on(&w), "the shipped config has the street switch on");
         w.run_ticks(DAY2_EIGHT);
         w
@@ -1338,10 +1332,6 @@ mod lives_street {
                     let mut w = common::world_with(|c| {
                         c.strip_careers();
                         c.gangs.strip_lieutenants();
-                        // Pinned: the island pass phase 2's free-time picks off (`[distance.free]` moved this city's scene; re-read when the switch retires).
-                        if let Some(d) = c.distance.as_mut() {
-                            d.free = None;
-                        }
                     });
                     w.run_ticks(TICKS_PER_DAY + 1);
                     w

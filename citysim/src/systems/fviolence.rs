@@ -83,7 +83,7 @@ pub fn daily_actor(world: &mut World) {
 /// other `*_KEY` prefixes).
 pub const HANDS_KEY: u64 = 0xF4A0 << 44;
 
-/// `[fviolence.hands]` is on (off with `CITYSIM_VIOLENCE_MIRROR_OFF=1`).
+/// `[fviolence.hands]` is on (the key present).
 pub fn hands_on(world: &World) -> bool {
     world.config.fviolence.hands.is_some()
 }

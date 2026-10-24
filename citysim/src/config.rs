@@ -337,25 +337,25 @@ pub struct Config {
     pub leaders: Option<LeadersCfg>,
     /// The island pass phase 1 (docs/ISLAND_PASS.md I1; OPEN-163 part):
     /// travel time in the job and bed picks (`systems/distance.rs`). `None`
-    /// (not written into a save) with `CITYSIM_DISTANCE_OFF=1`: the picks
+    /// (not written into a save) with the key absent: the picks
     /// read no cap.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub distance: Option<DistanceCfg>,
     /// The island pass phase 3a (docs/ISLAND_PASS.md I6; OPEN-163):
     /// seeded company housing (`systems/company.rs`). `None` (not written
-    /// into a save) with `CITYSIM_COMPANY_HOUSING_OFF=1`.
+    /// into a save) with the key absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub company_housing: Option<CompanyHousingCfg>,
     /// The island pass phase 4 (docs/ISLAND_PASS.md I2; OPEN-163): a far
     /// commute is a pressure that resolves over weeks (`systems/commute.rs`).
-    /// `None` (not written into a save) with `CITYSIM_COMMUTE_PRESSURE_OFF=1`:
+    /// `None` (not written into a save) with the key absent:
     /// the relocation and the company move-in are the base ones.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commute_pressure: Option<CommutePressureCfg>,
     /// The island pass phase 5 (docs/ISLAND_PASS.md I3; OPEN-165): a vehicle
     /// in motion is an entity with its own position, its riders aboard
     /// (`systems/motion.rs`). `None` (not written into a save) with
-    /// `CITYSIM_VEHICLES_MOVE_OFF=1`: the timed legs as before (the body on
+    /// the key absent: the timed legs as before (the body on
     /// its boarding tile, then at the door).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub motion: Option<MotionCfg>,
@@ -363,23 +363,23 @@ pub struct Config {
     /// dead trades' bugs (`[island_trades]`: the courier's and the builder's
     /// destinations, the corner at every Yard, the cab's body driver, the
     /// arms dealer at the corner). `None` (not written into a save) with
-    /// `CITYSIM_TRADES_OFF=1`.
+    /// the key absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub island_trades: Option<IslandTradesCfg>,
     /// The island fix round F2 (Shadow V8 bugs 2, 4, 6; OPEN-189, OPEN-191,
     /// OPEN-193): a bed is taken only if it is the resident's own
     /// workplace's or within the commute cap (`systems/beds.rs`). `None`
-    /// (not written into a save) with `CITYSIM_BEDS_OFF=1`.
+    /// (not written into a save) with the key absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub beds: Option<BedsCfg>,
     /// The island pass phase 3c (OPEN-177): `[mood.*]`, the mood terms read
     /// from config. Empty (not written into a save) with
-    /// `CITYSIM_HOUSING_MOOD_OFF=1`.
+    /// the key absent.
     #[serde(default, skip_serializing_if = "MoodCfg::is_empty")]
     pub mood: MoodCfg,
     /// The island fix round F1 (OPEN-188, SHADOW_V8 D3 A): a trip's way is
     /// judged by tiles, not district labels (`[routes]`). `None` (not
-    /// written into a save) with `CITYSIM_ROUTES_OFF=1`.
+    /// written into a save) with the key absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routes: Option<RoutesCfg>,
 }
@@ -487,13 +487,13 @@ pub struct CompanyHousingCfg {
     pub fill_at_seed: bool,
     /// The island pass phase 3b (I6): the seeded beds as floors inside the
     /// workplace (`[company_housing.inside]`). `None` (not written into a
-    /// save) with `CITYSIM_COMPANY_HOUSING2_OFF=1`: 3a's blocks on a Lot,
+    /// save) with the key absent: 3a's blocks on a Lot,
     /// else a plot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inside: Option<CompanyInsideCfg>,
     /// The island pass phase 3b (I6): a corp buying a nearby block for its
     /// far staff (`[company_housing.buyout]`). `None` (not written into a
-    /// save) with `CITYSIM_COMPANY_HOUSING2_OFF=1`.
+    /// save) with the key absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub buyout: Option<CompanyBuyoutCfg>,
 }
@@ -541,19 +541,19 @@ pub struct MotionCfg {
     pub road_route: bool,
     /// The island pass phase 6 `[motion.trains]` (OPEN-165): the El runs as
     /// trains on its timetable (`transit.rs` § Trains). `None` (not written
-    /// into a save) with `CITYSIM_TRAINS_OFF=1`: the timed ride as before.
+    /// into a save) with the key absent: the timed ride as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trains: Option<TrainsCfg>,
     /// The island pass phase 7 `[motion.vans]` (OPEN-166): the escort and
     /// the prisoner transfer ride a van (`stations.rs` § the van). `None`
-    /// (not written into a save) with `CITYSIM_VAN_OFF=1`: the timed escort
+    /// (not written into a save) with the key absent: the timed escort
     /// and the bodiless 04:00 transfer as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vans: Option<VansCfg>,
     /// The island pass phase 9 `[motion.walks]` (OPEN-181): a Coarse timed
     /// walk keeps its body on its way (`exec::walk_place`), and a promotion
     /// or an interrupt mid-walk sets it down there. `None` (not written into
-    /// a save) with `CITYSIM_COARSE_WALK_OFF=1`: the body stands at the
+    /// a save) with the key absent: the body stands at the
     /// walk's start until it arrives, as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub walks: Option<WalksCfg>,
@@ -669,7 +669,7 @@ pub struct DistanceCfg {
     pub home_bed_ticks: u64,
     /// The island pass phase 2 (OPEN-163, OPEN-171): the free-time spot and
     /// the Hotel. `None` (not written into a save) with
-    /// `CITYSIM_DISTANCE2_OFF=1`.
+    /// the key absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub free: Option<FreeDistanceCfg>,
 }
@@ -690,7 +690,7 @@ pub struct FreeDistanceCfg {
     /// is free): the cot unless a Hotel is nearer by more than this.
     pub cot_bed_ticks: u64,
     /// Island fix round F3 (OPEN-190): the stay-in fallback. `None` (not
-    /// written into a save) with `CITYSIM_STAY_IN_OFF=1`.
+    /// written into a save) with the key absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stay_in: Option<StayInCfg>,
 }
@@ -831,7 +831,7 @@ pub struct LegsCfg {
     /// plan_timeout_ticks`) spares a leg in motion (a timed walk, a flight
     /// or a ride before its arrival, a walk with its path left and not
     /// blocked). False (and not written into a save) with
-    /// `CITYSIM_COMMUTE_PRESSURE_OFF=1`: the base timeout, which cut a
+    /// the key absent: the base timeout, which cut a
     /// 931-tick ride at 900 and left the body at the board stop.
     #[serde(default, skip_serializing_if = "is_false")]
     pub timeout_spares_legs: bool,
@@ -8742,7 +8742,7 @@ pub struct FviolenceCfg {
     pub class_mult: FvClassCfg,
     /// The island pass phase 10 `[fviolence.hands]` (OPEN-185): a source
     /// strikes off screen only with its off-screen hands (`fviolence::daily`).
-    /// `None` (not written into a save) with `CITYSIM_VIOLENCE_MIRROR_OFF=1`:
+    /// `None` (not written into a save) with the key absent:
     /// the victim-side rolls limited only by `day_cap`, as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hands: Option<FvHandsCfg>,
@@ -8923,100 +8923,13 @@ impl Config {
         // phase 0 (OPEN-174), as the earlier milestones' did (OPEN-094);
         // every section's config path stays (`[shift]`, `[presence]`,
         // `[legs]`, `[leaders]`, `[hitmarket] enabled` and the rest). With
-        // `[shift]` gone, its haul and counter shapes go with it.
+        // `[shift]` gone, its haul and counter shapes go with it. The island
+        // pass's fifteen (`CITYSIM_DISTANCE_OFF` .. `CITYSIM_ROUTES_OFF`)
+        // retired at the perf pass phase 0 (OPEN-202); their sections'
+        // config paths stay (`[distance]`, `[company_housing]`, `[motion]`,
+        // `[routes]` and the rest; absent, the base behaviour).
         if cfg.shift.is_none() {
             cfg.drop_haul_counter();
-        }
-        // The island pass phase 1 (OPEN-163): the distance picks' switch in
-        // flight (doctrine 6).
-        if std::env::var("CITYSIM_DISTANCE_OFF").is_ok_and(|v| v == "1") {
-            cfg.distance = None;
-        }
-        // The island pass phase 2 (OPEN-163, OPEN-171): the free-time and
-        // Hotel picks' switch in flight (doctrine 6).
-        if std::env::var("CITYSIM_DISTANCE2_OFF").is_ok_and(|v| v == "1") {
-            if let Some(d) = cfg.distance.as_mut() {
-                d.free = None;
-            }
-        }
-        // Island fix round F3 (OPEN-190): the stay-in fallback's switch in
-        // flight (doctrine 6).
-        if std::env::var("CITYSIM_STAY_IN_OFF").is_ok_and(|v| v == "1") {
-            if let Some(f) = cfg.distance.as_mut().and_then(|d| d.free.as_mut()) {
-                f.stay_in = None;
-            }
-        }
-        // The island pass phase 3a (OPEN-163, I6): seeded company housing's
-        // switch in flight (doctrine 6).
-        if std::env::var("CITYSIM_COMPANY_HOUSING_OFF").is_ok_and(|v| v == "1") {
-            cfg.company_housing = None;
-        }
-        // The island pass phase 3b (OPEN-163, I6): the in-building floors
-        // and the buyouts' switch in flight (doctrine 6); 3a's blocks stay.
-        if std::env::var("CITYSIM_COMPANY_HOUSING2_OFF").is_ok_and(|v| v == "1") {
-            if let Some(c) = cfg.company_housing.as_mut() {
-                c.inside = None;
-                c.buyout = None;
-            }
-        }
-        // The island pass phase 4 (OPEN-163, I2; OPEN-164): the commute
-        // pressure's and the leg timeout's switch in flight (doctrine 6).
-        if std::env::var("CITYSIM_COMMUTE_PRESSURE_OFF").is_ok_and(|v| v == "1") {
-            cfg.commute_pressure = None;
-            if let Some(l) = cfg.legs.as_mut() {
-                l.timeout_spares_legs = false;
-            }
-        }
-        // The island pass phase 5 (OPEN-165, I3): vehicles in motion, the
-        // switch in flight (doctrine 6).
-        if std::env::var("CITYSIM_VEHICLES_MOVE_OFF").is_ok_and(|v| v == "1") {
-            cfg.motion = None;
-        }
-        // The island pass phase 6 (OPEN-165, I3): the El's trains, the
-        // switch in flight (doctrine 6).
-        if std::env::var("CITYSIM_TRAINS_OFF").is_ok_and(|v| v == "1") {
-            if let Some(m) = cfg.motion.as_mut() {
-                m.trains = None;
-            }
-        }
-        // The island pass phase 7 (OPEN-166, I3): the van, the switch in
-        // flight (doctrine 6).
-        if std::env::var("CITYSIM_VAN_OFF").is_ok_and(|v| v == "1") {
-            if let Some(m) = cfg.motion.as_mut() {
-                m.vans = None;
-            }
-        }
-        // The island pass phase 9 (OPEN-181): the Coarse walk on its way,
-        // the switch in flight (doctrine 6).
-        if std::env::var("CITYSIM_COARSE_WALK_OFF").is_ok_and(|v| v == "1") {
-            if let Some(m) = cfg.motion.as_mut() {
-                m.walks = None;
-            }
-        }
-        // The island pass phase 10 (OPEN-185): the Statistical violence
-        // mirror limited by its attackers, the switch in flight (doctrine 6).
-        if std::env::var("CITYSIM_VIOLENCE_MIRROR_OFF").is_ok_and(|v| v == "1") {
-            cfg.fviolence.hands = None;
-        }
-        // The island pass phase 8 (OPEN-168 part, I4): the dead trades'
-        // bugs, the switch in flight (doctrine 6).
-        if std::env::var("CITYSIM_TRADES_OFF").is_ok_and(|v| v == "1") {
-            cfg.island_trades = None;
-        }
-        // The island fix round F2 (OPEN-189, OPEN-191, OPEN-193): the beds'
-        // switch in flight (doctrine 6).
-        if std::env::var("CITYSIM_BEDS_OFF").is_ok_and(|v| v == "1") {
-            cfg.beds = None;
-        }
-        // The island pass phase 3c (OPEN-177): the housing mood term's
-        // switch in flight (doctrine 6).
-        if std::env::var("CITYSIM_HOUSING_MOOD_OFF").is_ok_and(|v| v == "1") {
-            cfg.mood.housing = None;
-        }
-        // The island fix round F1 (OPEN-188): the routes' switch in flight
-        // (doctrine 6).
-        if std::env::var("CITYSIM_ROUTES_OFF").is_ok_and(|v| v == "1") {
-            cfg.routes = None;
         }
         // Lives at work (D13): a config with `[lives] enabled = false` by any
         // path clears the milestone's sections, so the off save holds no
