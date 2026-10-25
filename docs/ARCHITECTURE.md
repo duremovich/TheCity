@@ -97,6 +97,14 @@ comment on or above the line.
   `commute_ticks`, the world build's index (perf phase 3: relocation's `HomeReach`, `free_beds_near`, the housing
   build's Lots and storeys, `classpay::GradedIndex`). `spatial::scans()` (unit tests only) turns those back into
   the scans for `life::tests::test_indexed_build_matches_the_scans`.
+- The price-keyed caches (perf phase 4). `NearTable` (`World::near_table(kind)`, keyed like `kind_grid`): per
+  16-tile bucket the 16 doors nearest its box, read nearest first with a lower bound, the scan as fallback;
+  behind `World::market_by_price` and `assets::nearest_seller`. `World.shop_gen` is bumped by every write path of
+  the Building, Corp and Market stores (`comp_mut`, `insert`, `remove`, `despawn`) and keys `World::with_shop_memo`
+  (`assets::lowest_level` per seller kind, `World::mean_price`). `World.res_partners` indexes the Partner
+  reservations (`social::LazyReserved`), kept by `reserve`, `release_all`, `sweep_reservations` and
+  `remove_agent`, rebuilt with `rebuild_reservation_index`. `spatial::scans()` turns each back into its scan
+  (`assets::tests::test_price_keyed_caches_match_the_scans`, `reservations::tests::test_partner_index_*`).
 - `map.rs` (tile map from `assets/map.txt`), `mapgen.rs` (generated maps, `--map gen:<N>`), `time.rs` (ticks, days,
   `DayPhase`, `Season`; `TICKS_PER_DAY`, `TICKS_PER_HOUR`).
 

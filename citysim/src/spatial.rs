@@ -415,6 +415,164 @@ impl BuildingGrid {
     }
 }
 
+/// The perf pass phase 4 (the price-keyed caches): for each
+/// [`NEAR_CELL`]-tile bucket of the map, the [`NEAR_K`] buildings of a list
+/// whose doors lie nearest the bucket's box (Manhattan distance from the box
+/// to the door, ties the lower id), ascending, and the box distance of the
+/// first building left out (`u32::MAX` when none is). Every tile of a bucket
+/// is at least that box distance from a door, so a caller minimising a key
+/// that grows with the door distance reads its bucket's list in order, stops
+/// once the box distance alone loses to its best, and falls back to its scan
+/// only when the list runs out first (`World::market_by_price`). Geometry
+/// only (doors never move): kept until the list or the Building store
+/// changes, as [`BuildingGrid`] is; every gate is the caller's, at query time.
+#[derive(Clone, Debug, Default)]
+pub struct NearTable {
+    gw: usize,
+    gh: usize,
+    /// Entries a bucket holds: `min(NEAR_K, ids.len())`.
+    m: usize,
+    ids: Vec<crate::entity::EntityId>,
+    doors: Vec<TilePos>,
+    /// Bucket `b`'s entries are `lists[b * m..(b + 1) * m]`: `(box distance,
+    /// index into ids)`, ascending by `(box distance, id)`.
+    lists: Vec<(u32, u32)>,
+    /// Per bucket, the box distance of the nearest building not in its list.
+    rest: Vec<u32>,
+}
+
+/// The bucket size of [`NearTable`] in tiles.
+pub const NEAR_CELL: u32 = 16;
+/// The buildings a [`NearTable`] bucket lists.
+pub const NEAR_K: usize = 16;
+
+impl NearTable {
+    /// `ids` ascending, each with its door tile, on a `w` x `h` map.
+    pub fn build(w: usize, h: usize, ids: Vec<crate::entity::EntityId>, doors: &[TilePos]) -> NearTable {
+        let c = NEAR_CELL as usize;
+        let (gw, gh) = (w.div_ceil(c).max(1), h.div_ceil(c).max(1));
+        let n = ids.len();
+        let m = n.min(NEAR_K);
+        let mut lists = Vec::with_capacity(gw * gh * m);
+        let mut rest = Vec::with_capacity(gw * gh);
+        let mut all: Vec<(u32, crate::entity::EntityId, u32)> = Vec::with_capacity(n);
+        for b in 0..gw * gh {
+            let ((x0, x1), (y0, y1)) = Self::bounds(gw, gh, b);
+            all.clear();
+            all.extend(doors.iter().enumerate().map(|(i, d)| {
+                let (x, y) = (u32::from(d.x), u32::from(d.y));
+                let dx = x0.saturating_sub(x) + x.saturating_sub(x1);
+                let dy = y0.saturating_sub(y) + y.saturating_sub(y1);
+                (dx + dy, ids[i], i as u32)
+            }));
+            if n > m {
+                all.select_nth_unstable(m);
+                rest.push(all[m].0);
+                all.truncate(m);
+            } else {
+                rest.push(u32::MAX);
+            }
+            all.sort_unstable();
+            lists.extend(all.iter().map(|&(d, _, i)| (d, i)));
+        }
+        NearTable { gw, gh, m, ids, doors: doors.to_vec(), lists, rest }
+    }
+
+    /// Bucket `b`'s box, `((x0, x1), (y0, y1))` inclusive; the last column
+    /// and row run to the end of the tile range (a tile off the map files
+    /// into them).
+    fn bounds(gw: usize, gh: usize, b: usize) -> ((u32, u32), (u32, u32)) {
+        let c = NEAR_CELL;
+        let (cx, cy) = ((b % gw) as u32, (b / gw) as u32);
+        let x1 = if cx as usize + 1 == gw { u32::MAX } else { cx * c + c - 1 };
+        let y1 = if cy as usize + 1 == gh { u32::MAX } else { cy * c + c - 1 };
+        ((cx * c, x1), (cy * c, y1))
+    }
+
+    /// The bucket holding `t`: its list (`(box distance, index)` ascending)
+    /// and the box distance of the nearest building it leaves out.
+    pub fn bucket(&self, t: TilePos) -> (&[(u32, u32)], u32) {
+        let c = NEAR_CELL as usize;
+        let cx = (usize::from(t.x) / c).min(self.gw - 1);
+        let cy = (usize::from(t.y) / c).min(self.gh - 1);
+        let b = cy * self.gw + cx;
+        (&self.lists[b * self.m..(b + 1) * self.m], self.rest[b])
+    }
+
+    /// Entry `i`'s building and door.
+    pub fn at(&self, i: u32) -> (crate::entity::EntityId, TilePos) {
+        (self.ids[i as usize], self.doors[i as usize])
+    }
+
+    /// The building minimising `(flag, cost, id)` over those `f(id, door
+    /// distance from `from`)` scores `Some((flag, cost))`, where a cost is at
+    /// least `per_tile x` the door distance: the bucket's list is read until
+    /// `per_tile x` its box distance exceeds the best unflagged cost (a
+    /// flagged building loses to any unflagged one: an empty shelf). `None`
+    /// when the list runs out before that, and the caller scans.
+    pub fn min_cost(
+        &self,
+        from: TilePos,
+        per_tile: i64,
+        mut f: impl FnMut(crate::entity::EntityId, u32) -> Option<(bool, i64)>,
+    ) -> Option<Option<crate::entity::EntityId>> {
+        let (list, rest) = self.bucket(from);
+        let mut best: Option<(bool, i64, crate::entity::EntityId)> = None;
+        let beaten = |best: Option<(bool, i64, crate::entity::EntityId)>, box_d: u32| {
+            best.is_some_and(|(flag, cost, _)| !flag && per_tile * i64::from(box_d) > cost)
+        };
+        for &(box_d, i) in list {
+            if beaten(best, box_d) {
+                return Some(best.map(|(_, _, b)| b));
+            }
+            let (b, door) = self.at(i);
+            if let Some((flag, cost)) = f(b, door.manhattan(from)) {
+                if best.is_none_or(|k| (flag, cost, b) < k) {
+                    best = Some((flag, cost, b));
+                }
+            }
+        }
+        (rest == u32::MAX || beaten(best, rest)).then(|| best.map(|(_, _, b)| b))
+    }
+
+    /// The building minimising `(door distance from `from`, id)` among those
+    /// `pass` accepts, `pass` called in that order up to the first accepted
+    /// (the order a sort of every building hands it): first the bucket's list
+    /// while its door distance is under the box distance of every building
+    /// it leaves out (each such building is on the list), then the rest of
+    /// the buildings, sorted.
+    pub fn nearest_passing(
+        &self,
+        from: TilePos,
+        mut pass: impl FnMut(crate::entity::EntityId) -> bool,
+    ) -> Option<crate::entity::EntityId> {
+        let (list, rest) = self.bucket(from);
+        let mut near: smallvec::SmallVec<[(u32, crate::entity::EntityId); NEAR_K]> =
+            list.iter().map(|&(_, i)| (self.doors[i as usize].manhattan(from), self.ids[i as usize])).collect();
+        near.sort_unstable();
+        for &(d, b) in &near {
+            if d >= rest {
+                break;
+            }
+            if pass(b) {
+                return Some(b);
+            }
+        }
+        if rest == u32::MAX {
+            return None;
+        }
+        let mut far: Vec<(u32, crate::entity::EntityId)> = self
+            .doors
+            .iter()
+            .zip(&self.ids)
+            .map(|(door, &b)| (door.manhattan(from), b))
+            .filter(|&(d, _)| d >= rest)
+            .collect();
+        far.sort_unstable();
+        far.into_iter().find(|&(_, b)| pass(b)).map(|(_, b)| b)
+    }
+}
+
 /// Scale S1: every entity with a `Position`, bucketed by tile cell and by
 /// the building it is inside, kept by marks: every write path of the
 /// Position store (`comp_mut`, `insert`, `remove`, `despawn`) marks the
@@ -750,5 +908,73 @@ mod tests {
         assert!(ties > 100, "too few ties ({ties}) to exercise the tie-break");
         let empty = BuildingGrid::build(w, h, Vec::new(), &[]);
         assert_eq!(empty.first_by_distance(TilePos::default(), TilePos::default(), u32::MAX, |_| 0, |_, _| true), None);
+    }
+
+    /// The perf pass phase 4: `NearTable::nearest_passing` hands `pass` the
+    /// sorted scan's `(distance, id)` sequence up to the first pass, and
+    /// `min_cost` (when it answers) is the scan's `(flag, cost, id)` minimum,
+    /// on random doors with many ties, random filters, flags and prices, a
+    /// list shorter and longer than `NEAR_K`, and points past the map's last
+    /// full bucket.
+    #[test]
+    fn test_near_table_is_the_sorted_scan() {
+        use crate::entity::EntityId;
+        let (w, h) = (203usize, 117usize);
+        let mut x = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = move || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        let (mut ties, mut answered, mut fell_back) = (0, 0, 0);
+        for n in [0usize, 5, NEAR_K, 90] {
+            let ids: Vec<EntityId> = (0..n as u32).map(|i| EntityId { index: 7 * i + 3, generation: 0 }).collect();
+            let doors: Vec<TilePos> = (0..n)
+                .map(|_| TilePos { x: (next() % (w as u64 / 3)) as u16 * 3, y: (next() % (h as u64 / 3)) as u16 * 3 })
+                .collect();
+            let table = NearTable::build(w, h, ids.clone(), &doors);
+            for round in 0..400 {
+                // A few points past the map (the last bucket runs on).
+                let t = TilePos { x: (next() % (w as u64 + 9)) as u16, y: (next() % (h as u64 + 9)) as u16 };
+                let keep = 1 + next() % 12;
+                let pass = |b: EntityId| u64::from(b.index) % keep == 0;
+                let mut all: Vec<(u32, EntityId)> =
+                    ids.iter().zip(&doors).map(|(&b, &d)| (d.manhattan(t), b)).collect();
+                all.sort_unstable();
+                ties += all.windows(2).filter(|p| p[0].0 == p[1].0).count().min(1);
+                let mut want_seq = Vec::new();
+                let mut want = None;
+                for &(_, b) in &all {
+                    want_seq.push(b);
+                    if pass(b) {
+                        want = Some(b);
+                        break;
+                    }
+                }
+                let mut seq = Vec::new();
+                let got = table.nearest_passing(t, |b| {
+                    seq.push(b);
+                    pass(b)
+                });
+                assert_eq!(got, want, "n {n} round {round}: nearest_passing from {t:?}");
+                assert_eq!(seq, want_seq, "n {n} round {round}: the tested sequence");
+                // A Market's (empty, 10 x distance + price, id), some closed.
+                let price = |b: EntityId| ((u64::from(b.index) * 2_654_435_761) >> 7) as i64 % (1 + round as i64 % 400);
+                let flag = |b: EntityId| u64::from(b.index) % (2 + keep) == 0;
+                let open = |b: EntityId| u64::from(b.index) % (3 + keep) != 1;
+                let cost = |b: EntityId, d: u32| open(b).then(|| (flag(b), 10 * i64::from(d) + price(b)));
+                let want = all.iter().filter_map(|&(d, b)| cost(b, d).map(|(f, c)| (f, c, b))).min().map(|k| k.2);
+                match table.min_cost(t, 10, cost) {
+                    Some(got) => {
+                        answered += 1;
+                        assert_eq!(got, want, "n {n} round {round}: min_cost from {t:?}");
+                    }
+                    None => fell_back += 1,
+                }
+            }
+        }
+        assert!(ties > 200, "too few ties ({ties}) to exercise the tie-break");
+        assert!(answered > 800 && fell_back > 0, "min_cost answered {answered}, fell back {fell_back}");
     }
 }

@@ -58,6 +58,9 @@ impl World {
         if self.has::<crate::components::Building>(id) {
             self.building_gen += 1;
         }
+        // The perf pass phase 4: a despawn clears every store, the
+        // price-keyed caches' three among them.
+        self.shop_gen += 1;
         let i = id.index as usize;
         self.unindex_brain(id);
         self.unindex_job(id);
@@ -109,6 +112,11 @@ impl World {
         // position index's next query (the type test is resolved at compile time).
         if std::any::TypeId::of::<T>() == std::any::TypeId::of::<crate::components::Position>() {
             self.pos_index.mark(id.index);
+        }
+        // The perf pass phase 4: a Building, Corp or Market written through
+        // here drops the price-keyed caches (`World::shop_memo`).
+        if Self::shop_store::<T>() {
+            self.shop_gen += 1;
         }
         T::store_mut(self).get_mut(id.index as usize).and_then(|c| c.as_mut())
     }

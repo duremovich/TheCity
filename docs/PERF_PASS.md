@@ -155,3 +155,32 @@ changes the map, not a mechanism.
   per-door `bases`, 3.4 s, and `pick_graded` 8.9 s), the other seeds' own scans (`seed_sellers` 7.5, `seed_venues`
   5.8, `ownership::seed` 5.1, `seed_fixers` 4.2, `ages::seed` 4.2), relocation's per-pass worker scan (23 passes, 5.3 s
   with the trade).
+- **Phase 4** (`OPEN-184` annotated). The price-keyed caches, measured first (a scoped profile at 60k) and cut where
+  the time was. (1) `spatial::NearTable` (`World::near_table(kind)`, keyed `(building_gen, kinds_gen)` like
+  `kind_grid`): per 16-tile bucket the 16 doors nearest its box, ascending `(box distance, id)`, and the box
+  distance of the first left out. `World::market_by_price` reads its bucket nearest first and stops once `10 x box
+  distance` loses to the best stocked Market (a price is never below 0, so that bounds the cost); the scan runs only
+  when the list runs out first. Stock, closures and prices are read at query time, so the table is geometry only.
+  `assets::nearest_seller` tests its bucket in the scan's `(door distance, id)` order up to the first pass
+  (`NearTable::nearest_passing`), the rest sorted after. (2) `seller_open` and `fixes::staff_present` read the
+  building's staff (`staff_of`) with a role test, not every holder of the role: the same set. That, not the scan of
+  sellers, was Shop's cost: `seller_open` ran on every seller and each walked the role's workers. (3)
+  `assets::lowest_level` (per seller kind) and `World::mean_price` are memoised on `(shop_gen, kinds_gen)`:
+  `shop_gen` is bumped by every write path of the Building, Corp and Market stores (`comp_mut`, `insert`, `remove`,
+  `despawn`), which covers an owner, a corp's level or a price changing, at midnight or mid-day (tests write prices
+  directly). Within a tick's think nothing writes those stores, so the memo holds for the slice. (4)
+  `World.res_partners`, the Partner reservations by the agent held (`social::LazyReserved` read every reservation
+  in the city per Socialise and Court score), kept by `reserve`, `release_all`, `sweep_reservations` and
+  `remove_agent`, rebuilt on load with the per-building index. Identical to `218ca03` on 2k 42-44 x 30 and 20k
+  `isle_m_k2` 42 x 30 (save, report, events). At 60k seed 42 (ms a game day, base -> branch): `goal::Shop` 3,541 ->
+  928, `goal::Socialise` 1,107 -> 714, `goal::Court` 785 -> 637, `goal::Eat` 566 -> 516, `goal::Earn` 428 -> 226,
+  `stat::stat_work` 2,810 -> 1,861, `tick::think` 12,727 -> 8,947, `tick::lod` 5,628 -> 4,162, the tick total
+  27,525 -> 21,695 (-21 %); ABAB (print only) 20k 321 -> 355, 60k 56 -> 73 ticks/s. SAVE_VERSION stays 67 (nothing
+  saved: every cache is rebuilt on its first query, the partner index on load). **Deviations:** "run twice per think"
+  was already fixed (the M13 review: `think_with_offer` scores Shop from one `shop_choice` and the planner reuses
+  it), so there was nothing to reuse. Court's occupant sum is not a counter: it measured 0.04 s a game day at 60k
+  (101k calls), and the sum only picks the faster of two candidate walks that give the same answer; a counter on
+  every occupancy path (deaths, arrests, re-kinds, the Statistical tier) would risk a silent drift for nothing.
+  The Bar nearest (`nearest_of_kind` behind `local()`) is not tabled either: 0.08 s a game day at 60k. Socialise
+  and Court were not `local()`'s: their time was `best_colocated_partner_in` (the reservation scan, now the index;
+  what is left is the walk over a crowded building's occupants).

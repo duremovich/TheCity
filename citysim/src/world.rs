@@ -706,6 +706,12 @@ pub struct World {
     /// `reserve`, `release_all` and `sweep_reservations`, rebuilt on load.
     #[serde(skip)]
     pub(crate) res_by_building: BTreeMap<EntityId, BTreeSet<EntityId>>,
+    /// The perf pass phase 4: per agent held by a `Partner` reservation,
+    /// each holder and how many it holds on them; kept by `reserve`,
+    /// `release_all`, `sweep_reservations` and a death, rebuilt on load
+    /// (`social::LazyReserved` reads it, not every reservation in the city).
+    #[serde(skip)]
+    pub(crate) res_partners: BTreeMap<EntityId, BTreeMap<EntityId, u32>>,
     pub door_queue: BTreeMap<TilePos, u8>,
     /// Lazily built, LRU-evicted (`[exec] flow_field_cache`); pure functions of map and door.
     #[serde(skip)]
@@ -756,6 +762,21 @@ pub struct World {
     /// cloned: a loaded world rebuilds on its first query).
     #[serde(skip)]
     kind_memo: Memo<KindGrids>,
+    /// The perf pass phase 4: bumped by every write path of the Building,
+    /// Corp and Market stores (`comp_mut`, `insert`, `remove`, `despawn`):
+    /// the key of the price-keyed caches (`shop_memo`; not saved).
+    #[serde(skip)]
+    pub(crate) shop_gen: u64,
+    /// The perf pass phase 4: `assets::lowest_level` per seller kind and
+    /// `mean_price`, keyed by the `(shop_gen, kinds_gen)` they were read at
+    /// (not saved, not cloned).
+    #[serde(skip)]
+    pub(crate) shop_memo: Memo<ShopMemo>,
+    /// The perf pass phase 4: one [`crate::spatial::NearTable`] per kind
+    /// (`World::near_table`), keyed by `(building_gen, kinds_gen)` as
+    /// `kind_memo` is (not saved, not cloned).
+    #[serde(skip)]
+    near_memo: Memo<NearTables>,
     pub vacancies: BTreeMap<EntityId, Vec<Role>>,
     pub edge_roads: Vec<TilePos>,
     pub view_rect: Option<Rect>,
@@ -1448,6 +1469,19 @@ impl<T> Clone for Memo<T> {
 /// The perf pass phase 2: `((building_gen, kinds_gen), each kind's grid)`.
 type KindGrids = ((u64, u64), BTreeMap<BuildingKind, std::sync::Arc<crate::spatial::BuildingGrid>>);
 
+/// The perf pass phase 4: `((building_gen, kinds_gen), each kind's table)`.
+type NearTables = ((u64, u64), BTreeMap<BuildingKind, std::sync::Arc<crate::spatial::NearTable>>);
+
+/// The perf pass phase 4: what `shop_memo` holds for one `(shop_gen,
+/// kinds_gen)`: each seller kind's lowest price level once read, and the
+/// mean food price once read.
+#[derive(Debug, Default)]
+pub(crate) struct ShopMemo {
+    pub key: (u64, u64),
+    pub lowest: BTreeMap<BuildingKind, Option<f32>>,
+    pub mean_price: Option<i64>,
+}
+
 /// `(tick, window, seen_gen)` and the open suspects seen inside the window
 /// then, ascending, each with its `last_seen` entry.
 type LocatedMemo = (Tick, Tick, u64, std::sync::Arc<Located>);
@@ -1697,6 +1731,7 @@ impl World {
             plan_stale_drops: 0,
             reservations: BTreeMap::new(),
             res_by_building: BTreeMap::new(),
+            res_partners: BTreeMap::new(),
             door_queue: BTreeMap::new(),
             flow_fields: FlowCache::default(),
             landmark_base: None,
@@ -1709,6 +1744,9 @@ impl World {
             building_memo: Memo::default(),
             kinds_gen: 0,
             kind_memo: Memo::default(),
+            shop_gen: 0,
+            shop_memo: Memo::default(),
+            near_memo: Memo::default(),
             vacancies: BTreeMap::new(),
             edge_roads,
             view_rect: None,
@@ -2429,6 +2467,17 @@ impl World {
         } else if TypeId::of::<T>() == TypeId::of::<Position>() {
             self.pos_index.mark(id.index);
         }
+        if Self::shop_store::<T>() {
+            self.shop_gen += 1;
+        }
+    }
+
+    /// The perf pass phase 4: a store the price-keyed caches read (a write
+    /// to one bumps `shop_gen`; the type test is resolved at compile time).
+    pub(crate) fn shop_store<T: Component>() -> bool {
+        use std::any::TypeId;
+        let t = TypeId::of::<T>();
+        t == TypeId::of::<Building>() || t == TypeId::of::<Corp>() || t == TypeId::of::<Market>()
     }
 
     pub(crate) fn after_remove<T: Component>(&mut self, id: EntityId) {
@@ -2451,6 +2500,9 @@ impl World {
             self.building_gen += 1;
         } else if TypeId::of::<T>() == TypeId::of::<Position>() {
             self.pos_index.mark(id.index);
+        }
+        if Self::shop_store::<T>() {
+            self.shop_gen += 1;
         }
     }
 
@@ -2932,6 +2984,43 @@ impl World {
             .clone()
     }
 
+    /// The perf pass phase 4: [`crate::spatial::NearTable`] over
+    /// `buildings_of_kind(kind)` that have a Building, built on the first
+    /// query after the lists or the Building store changed (`kinds_gen`,
+    /// `building_gen`), as [`World::kind_grid`] is.
+    pub fn near_table(&self, kind: BuildingKind) -> std::sync::Arc<crate::spatial::NearTable> {
+        let key = (self.building_gen, self.kinds_gen);
+        let mut memo = self.near_memo.0.lock().unwrap_or_else(|e| e.into_inner());
+        if memo.as_ref().is_some_and(|(k, _)| *k != key) {
+            *memo = None;
+        }
+        let (_, tables) = memo.get_or_insert_with(|| (key, BTreeMap::new()));
+        tables
+            .entry(kind)
+            .or_insert_with(|| {
+                let _t = crate::prof::scope!("near_table::build");
+                let (ids, doors): (Vec<EntityId>, Vec<TilePos>) = self
+                    .buildings_of_kind(kind)
+                    .iter()
+                    .filter_map(|&b| self.comp::<Building>(b).map(|bd| (b, bd.door)))
+                    .unzip();
+                std::sync::Arc::new(crate::spatial::NearTable::build(self.map.w(), self.map.h(), ids, &doors))
+            })
+            .clone()
+    }
+
+    /// The perf pass phase 4: `f` over `shop_memo` once it is current for
+    /// `(shop_gen, kinds_gen)` (emptied first when it is not).
+    pub(crate) fn with_shop_memo<R>(&self, f: impl FnOnce(&mut ShopMemo) -> R) -> R {
+        let key = (self.shop_gen, self.kinds_gen);
+        let mut memo = self.shop_memo.0.lock().unwrap_or_else(|e| e.into_inner());
+        let m = memo.get_or_insert_with(ShopMemo::default);
+        if m.key != key {
+            *m = ShopMemo { key, ..ShopMemo::default() };
+        }
+        f(m)
+    }
+
     /// The building of `kind` whose door is nearest `from` by Manhattan
     /// distance; ties to the lower index; demolished ones skipped.
     pub fn nearest_of_kind(&self, kind: BuildingKind, from: TilePos) -> Option<EntityId> {
@@ -3010,7 +3099,30 @@ impl World {
     /// holds food (seed 44's wages city starved 345 off-screen shoppers and
     /// thieves next to an empty Market for 37 days while the other two held
     /// 1,200 each); with every Market empty, the old pick.
+    ///
+    /// The perf pass phase 4: read off the Market [`World::near_table`]
+    /// (geometry only; stock, closures and prices are read here, at query
+    /// time). A price is never below 0 (`daily_price` floors it at a coin),
+    /// so `10 x box distance` bounds a Market's cost from below: the bucket's
+    /// list is read until that bound loses to the best stocked Market, and
+    /// the scan runs only when the list runs out first (or `per_coin < 0`).
     pub fn market_by_price(&self, from: TilePos) -> Option<EntityId> {
+        let per_coin = self.config.corps.shop_price_tiles;
+        if per_coin >= 0 && !crate::spatial::scans() {
+            let found = self.near_table(BuildingKind::Market).min_cost(from, 10, |m, d| {
+                let b = self.comp::<Building>(m).filter(|b| !b.demolished && !self.is_closed(m))?;
+                Some((b.stock_food == 0, 10 * i64::from(d) + per_coin * self.price_tenths_at(m)))
+            });
+            if let Some(m) = found {
+                return m;
+            }
+        }
+        self.market_by_price_scan(from)
+    }
+
+    /// [`World::market_by_price`] by the scan of every Market (the
+    /// reference, and the fallback).
+    fn market_by_price_scan(&self, from: TilePos) -> Option<EntityId> {
         let per_coin = self.config.corps.shop_price_tiles;
         self.buildings_of_kind(BuildingKind::Market)
             .iter()
@@ -3162,6 +3274,19 @@ impl World {
     /// The rounded mean price over every Market: the city-wide reading for
     /// wealth, stats, fines, Jail upkeep, the fence and the UI.
     pub fn mean_price(&self) -> i64 {
+        // The perf pass phase 4: read once a `(shop_gen, kinds_gen)`.
+        if crate::spatial::scans() {
+            return self.mean_price_scan();
+        }
+        if let Some(p) = self.with_shop_memo(|m| m.mean_price) {
+            return p;
+        }
+        let p = self.mean_price_scan();
+        self.with_shop_memo(|m| m.mean_price = Some(p));
+        p
+    }
+
+    fn mean_price_scan(&self) -> i64 {
         let prices: Vec<i64> = self
             .buildings_of_kind(BuildingKind::Market)
             .iter()
@@ -3694,6 +3819,8 @@ impl World {
             rs.retain(|r| !matches!(r.kind, crate::exec::ReservationKind::Partner { other } | crate::exec::ReservationKind::Corpse { corpse: other } | crate::exec::ReservationKind::Suspect { suspect: other } if other == id));
             !rs.is_empty()
         });
+        // The perf pass phase 4: every Partner reservation on `id` went.
+        self.res_partners.remove(&id);
         self.pending_purchase.remove(&id);
         self.plan_queue.retain(|&(_, who), _| who != id);
         self.remove_last_seen(&id);
