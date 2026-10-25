@@ -226,3 +226,38 @@ changes the map, not a mechanism.
   that grow at 100k: `holes_open` 200 -> 2,742, `contracts_open` 29 -> 623, `grudges` 6 -> 385; employed rose
   43k -> 56k and homeless fell 8.1k -> 2.9k over the month, so part of it is a busier city. POPULATION_STUDY's curve
   is a day-4 snapshot. The gate reads days 25-30 from here on, not days 2-4.
+- **Phase 6** (`OPEN-184` annotated, `OPEN-203` closed by its column, `OPEN-209`-`211` opened). The slope, diagnosed at
+  20k seed 42 x 30 with a per-day profile and store sizes, and read at 100k (a 9-day profiled run, then the branch
+  x 30). **What grows** (20k, day 2 -> 10 -> 20 -> 30): social edges 101k -> 328k -> 567k -> 767k (Friends 55k ->
+  250k, weak Acquaintances 15k -> 245k), a Full agent's neighbours 12 -> 41 -> 89 -> 144, the co-work pair-hours a day
+  0.45M -> 1.10M -> 1.42M -> 1.44M (the Recycler's Sanitation crew 139 -> 562 staff), the walked neighbours a day
+  2.1M -> 12.2M; holes 37 -> 556, contracts 94 -> 596, grudges 0 -> 907, memories capped (Full agents under 50), the
+  event ring capped at 50k. At 100k: edges 0.40M -> 8.7M by day 30, co-work pairs 1.4M -> ~25M a day from day 10.
+  **What scanned it:** the co-work bond (`lod` `work::coworkers`, pairs by the square of a same-role crew, crew cap 0:
+  100k 0.75 -> 10.2 s a game day by day 9); every neighbour walk that keeps a few kinds (the midnight's
+  `household::visits_due`, relocation's kin test through `children_of_agent`, the gang recruit per think); the gang
+  order's inputs, a scan of every citizen per call, run each tick of an order dwell after a Job settles (`OPEN-211`).
+  Holes, contracts and grudges are read daily, under 0.01 s a game day. The rest of the 20k slope (+1.0 s a game day
+  of goal scoring) is spread over every scorer with no one site; the Statistical rolls did not grow, and gang members
+  (0 -> 279), the employed (+12 %) and owned assets (0.3k -> 3k) did: a busier city, not proven. **Fixed,
+  byte-identical:** (1) `World::kin_candidates`, a superset of each agent's Spouse, Family and Parent edges filed by
+  `World::note_kin` where an edge is made kin (`set_spouse`, a birth, an immigrant child, `ages`' grown child, an
+  exile's edge, an ambient household), unfiled with the edge, rebuilt exact on load (not saved); `kin_of`,
+  `children_of_agent`, the siblings at a birth, the spouse heir, `grieve` and the healer's payers read it and filter
+  by kind as before, so the same agents in the same order. (2) The gang recruit walks the open rosters when they are
+  shorter than the agent's edges (the best is a total order on affinity, gang and roster position). (3) The order
+  inputs read `residents_of`. (4) The CLI report's `edges`, `edges_new` and `coworker_pairs` (CLI-only and not saved,
+  after `max_tick_at`; the two counters count from a load). Identical to `7ad2ec7` on 2k 42-44 x 30 and 20k `isle_m_k2`
+  42 x 30 (save, report, events). 20k (one pair, base -> branch, print only): ticks/s days 2-4 404/383/368 ->
+  398/386/365, days 27-30 185/218/190/205 -> 177/217/192/198; midnight days 2-4 270/259/285 -> 266/244/277 ms, days
+  27-30 640/586/678/628 -> 501/433/529/457 ms (`household` 0.19 -> 0.01 s, `reloc::loop` 0.09 -> 0.01 s at day 28).
+  100k seed 42 x 30 (the branch against the checkpoint's base run): ticks/s days 2-4 41/38/35 -> 41/38/35, days 27-30
+  16/20/18/18 -> 18/21/19/19; midnight days 2-4 1.9/2.0/2.6 s -> 1.8/1.9/2.4 s, days 25-30 7.5-8.1 s -> 3.8-4.1 s;
+  peak working set 3.06 GB both. **Deviations:** the per-tick slope is growth by design, so it stays: the co-work
+  bond's square (`OPEN-209`; a Sunday, with no shifts, runs ~10 % faster at 100k day 28) and the acquaintance graph's
+  month-long prune lag (`OPEN-210`; 8.7M edges, the working set). Both are behaviour (who befriends whom) for Dylan,
+  with `OPEN-205`. The Friend-filtered walks (`faith`'s spread, the visit hosts, `leisure`'s contacts, Court's
+  candidates) and the debt walks are left: Friends are the growing set itself, and each is under 0.05 s a game day at
+  20k. `OPEN-211` (the dwell's per-tick rescore) is a behaviour fix (`rep_flips`, `order_trace`). Three tests that
+  set a kin kind by hand file it (`note_kin`); no new test (R7). SAVE_VERSION stays 67. Midnight at 100k is still
+  3.8-4.5 s: phase 7's.
