@@ -238,45 +238,18 @@ pub fn merit(world: &World, id: EntityId, employer: EntityId, role: Role) -> f32
 /// (waived at world creation), not an exec, not leaving, not blocked from
 /// this employer by a quit. `None` when the post is not graded.
 pub fn pick_graded(world: &World, employer: EntityId, role: Role) -> Option<EntityId> {
-    let grade = base_grade(world, Some(employer), role);
-    if grade < PROFESSIONAL {
-        return None;
-    }
-    let seeding = world.tick == 0;
-    let promote = u64::from(world.config.classpay.promote_days);
-    let execs = crate::systems::classes::exec_set(world);
-    let band = crate::systems::careers::hire_band(world, role);
+    let g = Graded::new(world, employer, role)?;
     let mut best: Option<(f32, EntityId)> = None;
     let mut nearest: Option<(Tick, EntityId)> = None;
-    let cap = crate::systems::distance::job_cap(world);
-    let door = world.comp::<crate::components::Building>(employer).map(|b| b.door);
     for id in world.citizens() {
-        if !crate::systems::demography::is_adult(world, id)
-            || execs.contains(&id)
-            || world.has::<crate::components::Sentence>(id)
-            || world.comp::<crate::components::Brain>(id).is_none_or(|b| b.emigrating)
-            || crate::systems::life::quit_blocks(world, id, employer)
-            || !crate::systems::fashion::dress_ok(world, id, role)
-            || !crate::systems::dollhouse::hire_ok(world, role)
-            || !crate::systems::gray::hire_ok(world, id, role)
-            // Lives at work phase 6 (§ 4.1, § 4.4): the age band, the retired.
-            || !crate::systems::careers::admits(world, id, band)
-        {
+        if !g.eligible(world, id) {
             continue;
-        }
-        if let Some(j) = world.comp::<Job>(id) {
-            if j.grade >= grade || (j.employer == Some(employer) && j.role == role) {
-                continue;
-            }
-            if !seeding && tenure_days(world, id) < promote {
-                continue;
-            }
         }
         // The island pass phase 1 (OPEN-163): a candidate past `[distance]
         // job_cap_ticks` is passed over while one within it is left; with
         // none within, the nearest (ties lower id). Merit already reads the
         // commute (`commute_w`).
-        if let (Some(cap), Some(door)) = (cap, door) {
+        if let (Some(cap), Some(door)) = (g.cap, g.door) {
             let t = crate::systems::distance::set_out(world, id)
                 .map_or(Tick::MAX, |from| crate::systems::distance::travel(world, from, door));
             if t > cap {
@@ -292,6 +265,179 @@ pub fn pick_graded(world: &World, employer: EntityId, role: Role) -> Option<Enti
         }
     }
     best.map(|(_, id)| id).or(nearest.map(|(_, id)| id))
+}
+
+/// [`pick_graded`]'s rules for one vacancy: the post's grade, the exec set,
+/// the age band, the job's cap and the door.
+struct Graded {
+    employer: EntityId,
+    role: Role,
+    grade: u8,
+    seeding: bool,
+    promote: u64,
+    execs: std::collections::BTreeSet<EntityId>,
+    band: Option<(u32, u32)>,
+    cap: Option<Tick>,
+    door: Option<crate::components::TilePos>,
+}
+
+impl Graded {
+    /// `None` when the post is not graded.
+    fn new(world: &World, employer: EntityId, role: Role) -> Option<Graded> {
+        let grade = base_grade(world, Some(employer), role);
+        if grade < PROFESSIONAL {
+            return None;
+        }
+        Some(Graded {
+            employer,
+            role,
+            grade,
+            seeding: world.tick == 0,
+            promote: u64::from(world.config.classpay.promote_days),
+            execs: crate::systems::classes::exec_set(world),
+            band: crate::systems::careers::hire_band(world, role),
+            cap: crate::systems::distance::job_cap(world),
+            door: world.comp::<crate::components::Building>(employer).map(|b| b.door),
+        })
+    }
+
+    /// Every rule but the job's cap.
+    fn eligible(&self, world: &World, id: EntityId) -> bool {
+        let (employer, role) = (self.employer, self.role);
+        if !crate::systems::demography::is_adult(world, id)
+            || self.execs.contains(&id)
+            || world.has::<crate::components::Sentence>(id)
+            || world.comp::<crate::components::Brain>(id).is_none_or(|b| b.emigrating)
+            || crate::systems::life::quit_blocks(world, id, employer)
+            || !crate::systems::fashion::dress_ok(world, id, role)
+            || !crate::systems::dollhouse::hire_ok(world, role)
+            || !crate::systems::gray::hire_ok(world, id, role)
+            // Lives at work phase 6 (§ 4.1, § 4.4): the age band, the retired.
+            || !crate::systems::careers::admits(world, id, self.band)
+        {
+            return false;
+        }
+        if let Some(j) = world.comp::<Job>(id) {
+            if j.grade >= self.grade || (j.employer == Some(employer) && j.role == role) {
+                return false;
+            }
+            if !self.seeding && tenure_days(world, id) < self.promote {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// The perf pass phase 3 (the world build): one job-search pass's
+/// citizens by where they set out for work (`distance::set_out`: the Home
+/// door, else the tile), for [`pick_graded_in`]. A pass hires and promotes
+/// but moves nobody's Home or body, so the index holds for the pass; every
+/// other rule is read at the pick.
+pub struct GradedIndex {
+    /// The citizens that set out from somewhere, ascending, and where.
+    ids: Vec<EntityId>,
+    froms: Vec<crate::components::TilePos>,
+    grid: crate::spatial::TileGrid,
+    /// The citizens with neither a Home nor a tile, ascending.
+    nowhere: Vec<EntityId>,
+}
+
+impl GradedIndex {
+    pub fn new(world: &World) -> GradedIndex {
+        let _t = crate::prof::scope!("graded::index");
+        let mut ids = Vec::new();
+        let mut froms = Vec::new();
+        let mut nowhere = Vec::new();
+        // scan-ok: once a job-search pass, the graded picks' index
+        for id in world.citizens() {
+            match crate::systems::distance::set_out(world, id) {
+                Some(f) => {
+                    ids.push(id);
+                    froms.push(f);
+                }
+                None => nowhere.push(id),
+            }
+        }
+        let grid = crate::spatial::TileGrid::build(
+            world.map.w(),
+            world.map.h(),
+            crate::spatial::BUILDING_CELL,
+            froms.iter().copied(),
+        );
+        GradedIndex { ids, froms, grid, nowhere }
+    }
+}
+
+/// [`pick_graded`] over a pass's [`GradedIndex`]: the candidates within the
+/// job's cap are those of the grid over `transit::reach_discs` (a superset,
+/// read in ascending id as the scan reads them, cut by the travel); with
+/// none within, the nearest is found over discs of a doubling reach, the
+/// first that holds an eligible candidate deciding (every one past it is
+/// farther), and over every citizen once the reach covers the map. The
+/// same answer as the scan (`demography::tests::test_hire_pool_matches_pick_candidate`,
+/// `life::tests::test_indexed_build_matches_the_scans`).
+pub fn pick_graded_in(world: &World, employer: EntityId, role: Role, ix: &GradedIndex) -> Option<EntityId> {
+    let g = Graded::new(world, employer, role)?;
+    let (Some(cap), Some(door)) = (g.cap, g.door) else {
+        return pick_graded(world, employer, role);
+    };
+    let travel = |i: u32| crate::systems::distance::travel(world, ix.froms[i as usize], door);
+    let mut best: Option<(f32, EntityId)> = None;
+    for i in ix.grid.near_discs(&crate::systems::transit::reach_discs(world, door, cap)) {
+        let id = ix.ids[i as usize];
+        if !g.eligible(world, id) || travel(i) > cap {
+            continue;
+        }
+        let m = merit(world, id, employer, role);
+        if best.is_none_or(|(bm, bid)| m > bm || (m == bm && id < bid)) {
+            best = Some((m, id));
+        }
+    }
+    if let Some((_, id)) = best {
+        return Some(id);
+    }
+    let _t = crate::prof::scope!("graded::far");
+    // Every travel is at most the walk, and every walk on the map at most this.
+    let step = world.config.exec.move_ticks_full;
+    let span = (world.map.w() as Tick + world.map.h() as Tick) * step;
+    let mut reach = cap;
+    loop {
+        reach = reach.saturating_mul(2).max(1);
+        if reach >= span {
+            let _t = crate::prof::scope!("graded::all");
+            let mut nearest: Option<(Tick, EntityId)> = None;
+            for i in 0..ix.ids.len() as u32 {
+                let id = ix.ids[i as usize];
+                if g.eligible(world, id) {
+                    let k = (travel(i), id);
+                    if nearest.is_none_or(|n| k < n) {
+                        nearest = Some(k);
+                    }
+                }
+            }
+            for &id in &ix.nowhere {
+                if g.eligible(world, id) && nearest.is_none_or(|n| (Tick::MAX, id) < n) {
+                    nearest = Some((Tick::MAX, id));
+                }
+            }
+            return nearest.map(|(_, id)| id);
+        }
+        let mut nearest: Option<(Tick, EntityId)> = None;
+        for i in ix.grid.near_discs(&crate::systems::transit::reach_discs(world, door, reach)) {
+            let id = ix.ids[i as usize];
+            if !g.eligible(world, id) {
+                continue;
+            }
+            let k = (travel(i), id);
+            if k.0 <= reach && nearest.is_none_or(|n| k < n) {
+                nearest = Some(k);
+            }
+        }
+        if let Some((_, id)) = nearest {
+            return Some(id);
+        }
+    }
 }
 
 /// A graded hire who holds a post: it leaves it for the new one (vacated

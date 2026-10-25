@@ -496,6 +496,7 @@ pub fn grow_housing(world: &mut World) {
     let cap = cfg.commute_move_ticks;
     let demand = housing_far(world);
     let homes = housing_homes(world);
+    let grid = homes_grid(world, &homes);
     // (demand, employer, unmet far workers)
     let mut ready: Vec<(std::cmp::Reverse<u32>, EntityId, u32)> = Vec::new();
     let mut next: std::collections::BTreeMap<EntityId, u16> = std::collections::BTreeMap::new();
@@ -504,7 +505,7 @@ pub fn grow_housing(world: &mut World) {
             continue;
         }
         let Some(work) = world.comp::<Building>(employer).map(|b| b.door) else { continue };
-        let free = free_beds_near(world, &homes, work, cap);
+        let free = free_beds_near(world, &homes, &grid, work, cap);
         if free >= cfg.housing_demand_min as usize {
             continue;
         }
@@ -588,12 +589,36 @@ fn housing_homes(world: &World) -> Vec<(TilePos, usize, usize)> {
 }
 
 /// P5h: the free beds in `homes` within `cap` (`commute_cost`) of `work`.
-fn free_beds_near(world: &World, homes: &[(TilePos, usize, usize)], work: TilePos, cap: u64) -> usize {
-    homes
-        .iter()
-        .filter(|&&(door, _, _)| commute_cost(world, door, work) <= cap)
-        .map(|&(_, c, r)| c.saturating_sub(r))
+/// The perf pass phase 3: `grid` holds `homes`' doors ([`homes_grid`]); the
+/// Homes in it over `transit::reach_discs` are a superset of those within
+/// `cap`, cut by the measure (a sum: the order is free).
+fn free_beds_near(
+    world: &World,
+    homes: &[(TilePos, usize, usize)],
+    grid: &crate::spatial::TileGrid,
+    work: TilePos,
+    cap: u64,
+) -> usize {
+    let near: Vec<u32> = if crate::spatial::scans() {
+        (0..homes.len() as u32).collect()
+    } else {
+        grid.near_discs(&crate::systems::transit::reach_discs(world, work, cap))
+    };
+    near.into_iter()
+        .map(|i| homes[i as usize])
+        .filter(|&(door, _, _)| commute_cost(world, door, work) <= cap)
+        .map(|(_, c, r)| c.saturating_sub(r))
         .sum()
+}
+
+/// The perf pass phase 3: [`free_beds_near`]'s grid of `homes`' doors.
+fn homes_grid(world: &World, homes: &[(TilePos, usize, usize)]) -> crate::spatial::TileGrid {
+    crate::spatial::TileGrid::build(
+        world.map.w(),
+        world.map.h(),
+        crate::spatial::BUILDING_CELL,
+        homes.iter().map(|&(door, _, _)| door),
+    )
 }
 
 /// The pre-roll (the seed city has stood for years: it is not a city that
@@ -632,20 +657,24 @@ pub fn preroll_housing(world: &mut World) -> (u32, u32) {
     }
     let cap = world.config.life.commute_move_ticks;
     loop {
-        let demand = housing_far(world);
+        let demand = crate::prof::timed!("preroll::housing_far", housing_far(world));
         let homes = housing_homes(world);
-        let mut unmet: Vec<(std::cmp::Reverse<usize>, EntityId)> = demand
-            .iter()
-            .filter_map(|(&employer, &n)| {
-                let work = world.comp::<Building>(employer)?.door;
-                let free = free_beds_near(world, &homes, work, cap);
-                (n as usize > free).then(|| (std::cmp::Reverse(n as usize - free), employer))
-            })
-            .collect();
+        let grid = homes_grid(world, &homes);
+        let mut unmet: Vec<(std::cmp::Reverse<usize>, EntityId)> = crate::prof::timed!(
+            "preroll::unmet",
+            demand
+                .iter()
+                .filter_map(|(&employer, &n)| {
+                    let work = world.comp::<Building>(employer)?.door;
+                    let free = free_beds_near(world, &homes, &grid, work, cap);
+                    (n as usize > free).then(|| (std::cmp::Reverse(n as usize - free), employer))
+                })
+                .collect()
+        );
         unmet.sort_unstable();
         let mut round = 0;
         for (_, employer) in unmet {
-            match build_near(world, employer, true) {
+            match crate::prof::timed!("preroll::build_near", build_near(world, employer, true)) {
                 Some(true) => built.0 += 1,
                 Some(false) => built.1 += 1,
                 None => continue,
@@ -655,7 +684,7 @@ pub fn preroll_housing(world: &mut World) -> (u32, u32) {
         if round == 0 {
             break;
         }
-        relocate_up_to(world, usize::MAX);
+        crate::prof::timed!("preroll::relocate", relocate_up_to(world, usize::MAX));
     }
     if built != (0, 0) {
         crate::systems::demography::job_search(world);
@@ -699,8 +728,20 @@ fn build_near(world: &mut World, employer: EntityId, seeded: bool) -> Option<boo
     let corp = owner.filter(|&o| world.has::<Corp>(o));
     let what = world.name_of(employer);
     // A vacant Lot in range: plain Lots first, then shanties; nearest; ties lower id.
-    let lot = crate::systems::founding::vacant_lots(world)
+    // The perf pass phase 3: the Lots and Homes read are those of the kind's
+    // grid over `transit::reach_discs` (a superset of those in range, cut
+    // by the measure; a minimum: the order is free).
+    let discs = crate::systems::transit::reach_discs(world, work, cap);
+    let near = |kind: BuildingKind| -> Vec<EntityId> {
+        if crate::spatial::scans() {
+            world.buildings_of_kind(kind).to_vec()
+        } else {
+            world.kind_grid(kind).near_discs(&discs)
+        }
+    };
+    let lot = near(BuildingKind::Lot)
         .into_iter()
+        .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Lot && !bd.demolished))
         .filter_map(|l| {
             let d = commute_cost(world, world.comp::<Building>(l)?.door, work);
             (d <= cap).then(|| (crate::systems::street::is_shanty(world, l), d, l))
@@ -734,10 +775,9 @@ fn build_near(world: &mut World, employer: EntityId, seeded: bool) -> Option<boo
     }
     // Else a floor on the nearest Home in range below its cap.
     let max = world.config.floors.max_for(BuildingKind::Home);
-    let home = world
-        .buildings_of_kind(BuildingKind::Home)
-        .iter()
-        .filter_map(|&h| {
+    let home = near(BuildingKind::Home)
+        .into_iter()
+        .filter_map(|h| {
             // The island pass phase 3a (I6): a company block is its staff's
             // only; another employer's far workers get no storey on it.
             if !crate::systems::company::open_to_all(world, h) {
@@ -850,7 +890,7 @@ pub fn relocate(world: &mut World) {
 /// `rehouse_coins_mult` deposit), saving `commute_margin_ticks`. Off, the
 /// L1 rule in tiles (`commute_cap_tiles`, `bed_margin_tiles`).
 pub fn relocate_up_to(world: &mut World, limit: usize) {
-    relocate_up_to_with(world, limit, true, false);
+    relocate_up_to_with(world, limit, !crate::spatial::scans(), false);
 }
 
 /// [`relocate_up_to`]; `lazy` false fills every Home's measure to a work
@@ -863,6 +903,7 @@ pub fn relocate_up_to(world: &mut World, limit: usize) {
 /// a School near moves only near one; with none found, past `job_days`, a
 /// nearer post.
 fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool, daily: bool) {
+    let _tp = crate::prof::scope!("reloc::pass");
     let fix = crate::systems::fixes::relocate_fix(world);
     let pressure = daily && crate::systems::commute::on(world);
     let mut read: std::collections::BTreeSet<EntityId> = std::collections::BTreeSet::new();
@@ -967,6 +1008,13 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool, daily: bool)
     // pick and the trade read it for every mover; a pure function of the two
     // doors and the network, which a pass does not change).
     let mut memo = DoorCosts::new(homes.iter().map(|&(_, door, _)| door).collect());
+    // The perf pass phase 3: with the fix, a Home past `dest_cap` (the pick)
+    // or `cap` (the trade) of work is never taken, so each reads only the
+    // Homes within the larger of the two of its work tile (`HomeReach`, a
+    // superset by door and the El, cut by the measure), not every Home.
+    let mut reach = (lazy && fix).then(|| HomeReach::new(world, &homes, cap.max(dest_cap)));
+    let indexed = reach.is_some();
+    let every: Vec<u32> = if indexed { Vec::new() } else { (0..homes.len() as u32).collect() };
     let mut moved = 0usize;
     let tick = world.tick;
     for (std::cmp::Reverse(d), a, home, work) in movers {
@@ -1025,9 +1073,15 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool, daily: bool)
         // the filters and the minimum are the eager walk's.
         // The island pass phase 4: the children keep a School in reach.
         let school = |to: TilePos| !pressure || kids.is_empty() || crate::systems::commute::school_kept(world, hd, to);
+        let near: &[u32] = match reach.as_mut() {
+            Some(r) => r.of(world, work, &mut memo, &cost),
+            None => &every,
+        };
         let pick = crate::prof::timed!("reloc::pick", {
             let mut best: Option<(u64, EntityId)> = None;
-            for (i, &(h, hdoor, room)) in homes.iter().enumerate() {
+            for &i in near {
+                let i = i as usize;
+                let (h, hdoor, room) = homes[i];
                 let open = h != home
                     && (min_tier == 0 || world.comp::<Building>(h).is_some_and(|b| b.tier >= min_tier))
                     && world.residents_of(h).len() + need <= room
@@ -1089,9 +1143,15 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool, daily: bool)
             // traded to the other side.
             None if fix && spouse.is_none() && kids.is_empty() && crate::systems::beds::trade_ok(world, home) => {
                 let mover = Mover { purse, evicted_by, min_tier };
-                // The trade walks the Homes nearest first: the whole row.
-                memo.fill(world, work, &cost);
-                let near = NearHomes { homes: &homes, to_work: memo.row(work), order: memo.order(work) };
+                // The trade walks the Homes nearest first: the whole row (the
+                // perf pass phase 3: the reach, nearest first, which holds
+                // every Home within `cap` the walk reads before it stops).
+                let near = if indexed {
+                    NearHomes { homes: &homes, to_work: memo.row(work), order: near }
+                } else {
+                    memo.fill(world, work, &cost);
+                    NearHomes { homes: &homes, to_work: memo.row(work), order: memo.order(work) }
+                };
                 if let Some((_, to, r)) =
                     crate::prof::timed!("reloc::swap", swap_partner(world, a, home, near, cap, d, margin, mover))
                         .filter(|&(_, _, r)| !housed_now(world, r))
@@ -1254,6 +1314,54 @@ impl DoorCosts {
     /// The row's indices, nearest first (empty if none).
     fn order(&self, to: TilePos) -> &[u32] {
         self.rows.get(&to).map_or(&[], |r| r.1.as_slice())
+    }
+}
+
+/// The perf pass phase 3 (the world build): a relocation pass's Homes
+/// within `limit` (`commute_cost`) of each work tile, by index into the
+/// pass's list, nearest first (ties the lower index: [`DoorCosts::order`]
+/// cut at `limit`). A grid of the Homes' doors queried over
+/// `transit::reach_discs` (a superset), then the exact measure. The pass's
+/// list and the network do not change during it, so a tile's reach is
+/// found once.
+struct HomeReach {
+    grid: crate::spatial::TileGrid,
+    limit: Tick,
+    lists: std::collections::BTreeMap<TilePos, Vec<u32>>,
+}
+
+impl HomeReach {
+    fn new(world: &World, homes: &[(EntityId, TilePos, usize)], limit: Tick) -> HomeReach {
+        let grid = crate::spatial::TileGrid::build(
+            world.map.w(),
+            world.map.h(),
+            crate::spatial::BUILDING_CELL,
+            homes.iter().map(|&(_, door, _)| door),
+        );
+        HomeReach { grid, limit, lists: std::collections::BTreeMap::new() }
+    }
+
+    /// The Homes within the limit of `work`, nearest first.
+    fn of(
+        &mut self,
+        world: &World,
+        work: TilePos,
+        memo: &mut DoorCosts,
+        cost: &impl Fn(&World, TilePos, TilePos) -> u64,
+    ) -> &[u32] {
+        let (grid, limit) = (&self.grid, self.limit);
+        self.lists.entry(work).or_insert_with(|| {
+            let mut idx = grid.near_discs(&crate::systems::transit::reach_discs(world, work, limit));
+            let mut keyed: Vec<(u64, u32)> = idx
+                .drain(..)
+                .filter_map(|i| {
+                    let c = memo.cost(world, work, i as usize, cost);
+                    (c <= limit).then_some((c, i))
+                })
+                .collect();
+            keyed.sort_unstable();
+            keyed.into_iter().map(|(_, i)| i).collect()
+        })
     }
 }
 
@@ -1732,6 +1840,48 @@ mod tests {
             let hs = ["", "gen:4000"].map(|map| s.spawn(move || one(map)));
             for h in hs {
                 h.join().expect("a relocation city");
+            }
+        });
+    }
+
+    /// The perf pass phase 3 (the world build): the city built with the
+    /// indexed reads (relocation's Homes, the labour pool, the graded pick,
+    /// the free beds, the housing build's Lots and storeys) is the city built
+    /// with the scans they replaced (`spatial::scans`), byte for byte: the
+    /// same hires in the same order, the same movers to the same Homes, over
+    /// the pre-roll's rounds of builds (an index left stale by a build, a
+    /// hire or a move shows here). The shipped city and the generated 4,000
+    /// city. `band_refusals` is cleared on both sides: the scan's
+    /// `pick_candidate` counts none (the pooled walk's count is pinned by
+    /// the save identity against the base binary).
+    #[test]
+    fn test_indexed_build_matches_the_scans() {
+        let one = |map: &str| {
+            let mut c = crate::config::Config::load();
+            if !map.is_empty() {
+                c = c.scaled_to(4_000);
+                c.world.map = map.into();
+            }
+            let build = |scans: bool| {
+                crate::spatial::SCANS.with(|s| s.set(scans));
+                let mut w = World::new(42, c.clone());
+                crate::spatial::SCANS.with(|s| s.set(false));
+                if let Some(j) = w.stats.current.jobs2.as_mut() {
+                    j.band_refusals = 0;
+                }
+                w
+            };
+            let (a, b) = (build(false), build(true));
+            let count = |k: EventKind| a.events.iter().filter(|e| e.kind == k).count();
+            let (housed, hired) = (count(EventKind::Housed), count(EventKind::Hire));
+            println!("{map:?}: {housed} Housed, {hired} Hire events");
+            assert!(housed >= 50 && hired >= 100, "the build moves and hires ({map:?}: {housed}, {hired})");
+            assert!(crate::save::to_ron(&a) == crate::save::to_ron(&b), "indexed == scans on {map:?}");
+        };
+        std::thread::scope(|s| {
+            let hs = ["", "gen:4000"].map(|map| s.spawn(move || one(map)));
+            for h in hs {
+                h.join().expect("a built city");
             }
         });
     }

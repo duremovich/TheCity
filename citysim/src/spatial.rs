@@ -7,6 +7,29 @@
 
 use crate::components::TilePos;
 
+/// The perf pass phase 3 (the world build): in a unit test, the indexed
+/// reads of the world build (relocation's Homes, the labour pool, the graded
+/// pick, the free beds, the housing build's Lots and storeys) fall back to
+/// the scans they replaced, so a test builds the city both ways and
+/// compares (`life::tests::test_indexed_build_matches_the_scans`). Always
+/// false outside the crate's unit tests.
+#[cfg(test)]
+pub fn scans() -> bool {
+    SCANS.with(|c| c.get())
+}
+
+/// [`scans`] outside the unit tests: never.
+#[cfg(not(test))]
+pub const fn scans() -> bool {
+    false
+}
+
+#[cfg(test)]
+thread_local! {
+    /// [`scans`]' switch, per test thread.
+    pub static SCANS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// Items bucketed by `cell`-sized squares of tiles (a counting sort: one
 /// `Vec` of items in cell order and each cell's start).
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -85,6 +108,19 @@ impl TileGrid {
             let (a, b) = (self.starts[row + x0] as usize, self.starts[row + x1 + 1] as usize);
             out.extend_from_slice(&self.items[a..b]);
         }
+    }
+
+    /// The perf pass phase 3: every item in a cell that the square of any
+    /// `(centre, radius)` disc touches (a superset of the items within any
+    /// disc's Manhattan radius), ascending, each once.
+    pub fn near_discs(&self, discs: &[(TilePos, u32)]) -> Vec<u32> {
+        let mut out = Vec::new();
+        for &(t, r) in discs {
+            self.near(t, r, &mut out);
+        }
+        out.sort_unstable();
+        out.dedup();
+        out
     }
 
     /// The items in the cells at Chebyshev cell distance exactly `k` from
@@ -290,6 +326,13 @@ impl BuildingGrid {
                 return None;
             }
         }
+    }
+
+    /// The perf pass phase 3: every building whose door lies in a cell the
+    /// square of any `(centre, radius)` disc touches (a superset of the
+    /// doors within any disc's Manhattan radius), ascending, each once.
+    pub fn near_discs(&self, discs: &[(TilePos, u32)]) -> Vec<crate::entity::EntityId> {
+        self.grid.near_discs(discs).into_iter().map(|i| self.ids[i as usize]).collect()
     }
 
     /// Every building whose door lies within the Chebyshev square of
