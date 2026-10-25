@@ -62,27 +62,63 @@ fn recruit_gang_any(world: &World, id: EntityId) -> Option<EntityId> {
     let open: Vec<bool> = gangs.iter().map(|&g| world.comp::<Gang>(g).is_some_and(|g| recruiting(world, g))).collect();
     let mut best: Option<(f32, usize, usize, EntityId)> = None;
     if open.contains(&true) {
-        for m in world.neighbours(id) {
-            let Some(gid) = world.comp::<GangMember>(m).map(|gm| gm.gang) else { continue };
-            // `gangs` is ascending (Scale S4 perf: a search, not a scan).
-            let Ok(gi) = gangs.binary_search(&gid) else { continue };
+        // The perf pass phase 6 (the slope): an agent's edges grow with the
+        // days (co-workers and off-screen meetings), the open gangs' rosters
+        // do not, so the shorter of the two is read. The same candidates
+        // either way: a member `m` of gang `gid` at roster position `mi`
+        // with an edge to `id`; the best is the highest affinity, then the
+        // lowest `(gi, mi)`, a total order, so the walk's order is free (a
+        // member listed twice keeps its first position, as `position` did).
+        let known = world.neighbours.get(&id);
+        let roster_len: usize = gangs
+            .iter()
+            .zip(&open)
+            .filter(|(_, &o)| o)
+            .filter_map(|(&g, _)| world.comp::<Gang>(g))
+            .map(|g| g.members.len())
+            .sum();
+        let mut consider = |gi: usize, gid: EntityId, m: EntityId, mi: usize| {
             // M15 W31: a Purist gang refuses the chromed.
-            if !open[gi]
-                || !crate::systems::creeds::tolerated(world, gid, id)
+            if !crate::systems::creeds::tolerated(world, gid, id)
                 || !crate::systems::creeds::edge_recruits(world, gid, id, m)
             {
-                continue;
+                return;
             }
-            let Some(e) = world.edge(id, m) else { continue };
+            let Some(e) = world.edge(id, m) else { return };
             if e.affinity < cfg.join_gang_affinity {
-                continue;
+                return;
             }
-            let Some(mi) = world.comp::<Gang>(gid).and_then(|g| g.members.iter().position(|&x| x == m)) else {
-                continue;
-            };
             let better = best.is_none_or(|(a, bg, bm, _)| e.affinity > a || (e.affinity == a && (gi, mi) < (bg, bm)));
             if better {
                 best = Some((e.affinity, gi, mi, gid));
+            }
+        };
+        if roster_len < known.map_or(0, |s| s.len()) {
+            for (gi, &gid) in gangs.iter().enumerate() {
+                if !open[gi] {
+                    continue;
+                }
+                let Some(g) = world.comp::<Gang>(gid) else { continue };
+                for (mi, &m) in g.members.iter().enumerate() {
+                    if world.comp::<GangMember>(m).is_some_and(|gm| gm.gang == gid)
+                        && known.is_some_and(|s| s.contains(&m))
+                    {
+                        consider(gi, gid, m, mi);
+                    }
+                }
+            }
+        } else {
+            for m in world.neighbours(id) {
+                let Some(gid) = world.comp::<GangMember>(m).map(|gm| gm.gang) else { continue };
+                // `gangs` is ascending (Scale S4 perf: a search, not a scan).
+                let Ok(gi) = gangs.binary_search(&gid) else { continue };
+                if !open[gi] {
+                    continue;
+                }
+                let Some(mi) = world.comp::<Gang>(gid).and_then(|g| g.members.iter().position(|&x| x == m)) else {
+                    continue;
+                };
+                consider(gi, gid, m, mi);
             }
         }
     }

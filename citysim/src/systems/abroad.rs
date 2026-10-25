@@ -357,6 +357,7 @@ fn arrivals(world: &mut World) {
             e.kind = p.rel;
             e.affinity = if p.rel == RelKind::Friend { 0.6 } else { -0.6 };
             e.last_interaction = now;
+            world.note_kin(a, p.toward);
             if p.rel == RelKind::Enemy {
                 crate::systems::grudges::add(world, a, p.toward, GrudgeCause::Abroad, 0.7, 0);
             }

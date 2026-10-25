@@ -96,6 +96,7 @@ fn test_grudge_inherits_on_holder_death() {
         .expect("a younger adult");
     w.set_spouse(h, s);
     w.edge_entry(c, h).kind = RelKind::Parent;
+    w.note_kin(c, h);
     grudges::add(&mut w, h, t, GrudgeCause::Assaulted, 0.8, 2);
     w.kill_by(h, DeathCause::Violence, None);
     for heir in [s, c] {

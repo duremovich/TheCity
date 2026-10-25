@@ -122,6 +122,7 @@ fn test_fired_elder_moves_in_with_his_daughter() {
             }
             let edge = w.edge_entry(e, d);
             edge.kind = RelKind::Parent;
+            w.note_kin(e, d);
         }
         for _ in 0..7 {
             ages::daily(&mut w);

@@ -567,6 +567,7 @@ fn seed_kin(world: &mut World) {
         edge.kind = crate::components::RelKind::Parent;
         edge.affinity = 0.5;
         edge.trust = 0.6;
+        world.note_kin(e, c);
     }
 }
 

@@ -1633,9 +1633,17 @@ fn run(args: RunArgs) -> Result<(), String> {
         // day's longest single tick (ms) and its tick of day. CLI-only (not in
         // `DailyStats`, not saved); like `ticks_per_sec`, noise to every
         // identity comparison (`tools/phase_measure.py` masks them).
-        println!("{},max_tick_ms,max_tick_at", citysim::systems::stats::csv_header(&world));
+        println!(
+            "{},max_tick_ms,max_tick_at,edges,edges_new,coworker_pairs",
+            citysim::systems::stats::csv_header(&world)
+        );
     }
 
+    // The perf pass phase 6 (the slope): the social graph's size at the
+    // day's end, the edges made and the Statistical co-worker pair-hours
+    // bonded that day (`World::edges_made`, `World::coworker_pairs`, not
+    // saved: a loaded world counts from its load, as these do).
+    let mut made_at = (world.edges_made, world.coworker_pairs);
     let mut next_lever = 0;
     let mut last_event_tick: Option<u64> = None;
     // M12 fix pass (throughput): `--events` writes through one buffer flushed
@@ -1715,7 +1723,16 @@ fn run(args: RunArgs) -> Result<(), String> {
         if args.report && world.tick % TICKS_PER_DAY == 0 {
             if let Some(row) = world.stats.history.back_mut() {
                 row.ticks_per_sec = chunk_ticks as f32 / secs;
-                println!("{},{:.1},{}", row.csv_row(), max_tick.0, max_tick.1);
+                println!(
+                    "{},{:.1},{},{},{},{}",
+                    row.csv_row(),
+                    max_tick.0,
+                    max_tick.1,
+                    world.edges.len(),
+                    world.edges_made - made_at.0,
+                    world.coworker_pairs - made_at.1
+                );
+                made_at = (world.edges_made, world.coworker_pairs);
             }
         }
     }

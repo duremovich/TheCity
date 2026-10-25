@@ -1604,6 +1604,7 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
                 && !world.has::<Sentence>(c)
         })
         .collect();
+        world.coworker_pairs += mates.len() as u64;
         for c in mates {
             crate::systems::social::interacted(world, id, c);
         }

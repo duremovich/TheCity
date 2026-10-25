@@ -58,7 +58,7 @@ pub fn on_death(world: &mut World, id: EntityId) {
 /// Grief (0.9, -0.9) to every Spouse / Parent / Family partner.
 pub fn grieve(world: &mut World, id: EntityId) {
     let kin: Vec<EntityId> = world
-        .neighbours(id)
+        .kin_candidates(id)
         .filter(|&o| {
             world.has::<Brain>(o)
                 && world

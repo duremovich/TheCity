@@ -447,7 +447,7 @@ pub fn payers(world: &World, id: EntityId) -> Vec<(EntityId, i64)> {
     use crate::components::{RelKind, Wallet};
     let mut out = vec![(id, world.comp::<Wallet>(id).map_or(0, |w| w.coins.max(0)))];
     let mut kin: Vec<EntityId> = world
-        .neighbours(id)
+        .kin_candidates(id)
         .filter(|&o| {
             crate::systems::law::living(world, o)
                 && world

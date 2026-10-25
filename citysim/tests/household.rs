@@ -309,6 +309,8 @@ fn test_visit_to_an_elder_parent() {
         e.kind = citysim::RelKind::Parent;
         e.affinity = 0.5;
     }
+    // The perf pass phase 6: a kin kind set by hand is filed as the systems file it.
+    w.note_kin(child, parent);
     assert!(citysim::systems::demography::is_child_of(&w, child, parent));
     household::visits_due(&mut w);
     let v = w.visits.get(&child).copied().expect("an elder visit due");
