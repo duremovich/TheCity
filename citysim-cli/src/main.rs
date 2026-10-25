@@ -1629,7 +1629,11 @@ fn run(args: RunArgs) -> Result<(), String> {
     };
 
     if args.report {
-        println!("{}", citysim::systems::stats::csv_header(&world));
+        // Perf pass phase 5: two wall-clock columns after `ticks_per_sec`, the
+        // day's longest single tick (ms) and its tick of day. CLI-only (not in
+        // `DailyStats`, not saved); like `ticks_per_sec`, noise to every
+        // identity comparison (`tools/phase_measure.py` masks them).
+        println!("{},max_tick_ms,max_tick_at", citysim::systems::stats::csv_header(&world));
     }
 
     let mut next_lever = 0;
@@ -1645,6 +1649,8 @@ fn run(args: RunArgs) -> Result<(), String> {
             citysim::prof::reset();
         }
         let day_start = Instant::now();
+        // The day's longest `citysim::tick` (wall ms) and its tick of day.
+        let mut max_tick = (0.0f64, 0u64);
         // Chunk to the next day boundary so a mid-day `--load` still reports its first day.
         let day_end = ((world.tick / TICKS_PER_DAY + 1) * TICKS_PER_DAY).min(end_tick);
         let chunk_ticks = day_end - world.tick;
@@ -1662,7 +1668,15 @@ fn run(args: RunArgs) -> Result<(), String> {
                 }
                 next_lever += 1;
             }
+            let tick_of_day = world.tick % TICKS_PER_DAY;
+            let tick_start = args.report.then(Instant::now);
             citysim::tick(&mut world);
+            if let Some(t) = tick_start {
+                let ms = t.elapsed().as_secs_f64() * 1e3;
+                if ms > max_tick.0 {
+                    max_tick = (ms, tick_of_day);
+                }
+            }
             citysim::exec::leglog::leader_tick(&mut world);
             citysim::exec::leglog::ride_tick(&mut world);
             citysim::exec::leglog::walk_tick(&mut world);
@@ -1701,7 +1715,7 @@ fn run(args: RunArgs) -> Result<(), String> {
         if args.report && world.tick % TICKS_PER_DAY == 0 {
             if let Some(row) = world.stats.history.back_mut() {
                 row.ticks_per_sec = chunk_ticks as f32 / secs;
-                println!("{}", row.csv_row());
+                println!("{},{:.1},{}", row.csv_row(), max_tick.0, max_tick.1);
             }
         }
     }

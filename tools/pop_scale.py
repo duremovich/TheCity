@@ -13,7 +13,8 @@ Per run: ticks/s per day (the steady days are day >= --steady-from), wall per
 game day, peak working set (`MEM`), world build (the wall before day 1, i.e.
 process wall less the days' own seconds), the save's size at the end tick
 (`--save`; the file is deleted after it is measured), the last day's tiers and
-headline counters. With --prof (a `--features prof` binary) the PROF lines are
+headline counters, and the longest tick a day (`max_tick_ms` at its tick of day, the CLI's wall-clock
+columns; the gate's "no tick over 1 s"). With --prof (a `--features prof` binary) the PROF lines are
 kept in the run's stderr log for `--prof-table`.
 
   python tools/pop_scale.py --prof-table <dir> --days D --prof-from F   # PROF sites x size, ms/day
@@ -71,6 +72,13 @@ def run_one(args, exe, label, pop, rep, out):
     days_s = sum(TICKS_PER_DAY / t for t in tps if t > 0)
     rec["wall_per_day_s"] = round(TICKS_PER_DAY / rec["tps_med"], 1) if rec["tps_med"] else None
     rec["build_s"] = round(wall - days_s, 1)
+    # Perf pass phase 5: the day's longest tick (wall ms, its tick of day), per day, and the run's worst.
+    mt = [(float(r["max_tick_ms"]), int(r["max_tick_at"])) for r in rows if r.get("max_tick_ms")]
+    rec["max_tick_days"] = [f"{ms:.0f}@{at // 60:02d}:{at % 60:02d}" for ms, at in mt]
+    if mt:
+        ms, at = max(mt)
+        rec["max_tick_ms"] = round(ms, 1)
+        rec["max_tick_at"] = f"{at // 60:02d}:{at % 60:02d}"
     peak = 0.0
     with open(f"{stem}.err", errors="replace") as f:
         for l in f:
@@ -99,7 +107,8 @@ def summarise(recs):
     by = {}
     for r in recs:
         by.setdefault((r["label"], r["pop"]), []).append(r)
-    print("label pop reps tps_med(runs) wall/day_s build_s peak_MB save_MB full/coarse/stat homeless employed")
+    print("label pop reps tps_med(runs) wall/day_s build_s peak_MB save_MB full/coarse/stat homeless employed "
+          "max_tick_ms@tod(runs)")
     for (label, pop), rs in sorted(by.items(), key=lambda kv: (kv[0][0], kv[0][1])):
         med = lambda k: statistics.median([r[k] for r in rs if r.get(k) is not None]) if any(
             r.get(k) is not None for r in rs) else None
@@ -107,7 +116,8 @@ def summarise(recs):
         tiers = "/".join(str(last.get(c, "?")) for c in ("tier_full", "tier_coarse", "tier_stat"))
         print(f"{label} {pop} {len(rs)} {med('tps_med')} ({','.join(str(r.get('tps_med')) for r in rs)}) "
               f"{med('wall_per_day_s')} {med('build_s')} {med('peak_mb')} {med('save_mb')} {tiers} "
-              f"{last.get('homeless')} {last.get('employed')}")
+              f"{last.get('homeless')} {last.get('employed')} "
+              + ",".join(f"{r.get('max_tick_ms')}@{r.get('max_tick_at')}" for r in rs))
 
 
 def prof_table(out, days):
@@ -188,7 +198,8 @@ def main():
                 with open(out / "runs.jsonl", "a", newline="\n") as f:
                     f.write(json.dumps(rec) + "\n")
                 print(f"{label} {pop} r{rep}: rc {rec['rc']} tps {rec['tps_med']} days {rec['tps_days']} "
-                      f"build {rec['build_s']}s peak {rec['peak_mb']} MB save {rec.get('save_mb')} MB",
+                      f"build {rec['build_s']}s peak {rec['peak_mb']} MB save {rec.get('save_mb')} MB "
+                      f"max tick {rec.get('max_tick_days')}",
                       flush=True)
                 if rec["rc"] != 0:
                     print(f"  FAIL {rec.get('errors', [])[:3]}", flush=True)
