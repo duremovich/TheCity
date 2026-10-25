@@ -1395,12 +1395,18 @@ pub fn estimate_by(world: &World, who: EntityId, from: TilePos, to: TilePos, arr
 /// the walk, so the route is only computed once the walk's gate is open
 /// (the departure gate runs every tick for a body resting before its shift).
 pub fn trip_due(world: &World, who: EntityId, door: TilePos, until: Tick, lead: Tick) -> bool {
+    trip_due_at(world, who, door, until, lead, world.tick)
+}
+
+/// [`trip_due`] with the clock at `now` (`until` read from it): the perf
+/// pass phase 1's departure gate at a resting body's Rest start.
+pub fn trip_due_at(world: &World, who: EntityId, door: TilePos, until: Tick, lead: Tick, now: Tick) -> bool {
     let from = crate::exec::walk_origin(world, who).unwrap_or(door);
     let walk = crate::exec::timed_walk(world, who, from, door);
     if until > walk + lead {
         return false;
     }
-    let arrive_by = world.tick + until - lead.min(until);
+    let arrive_by = now + until - lead.min(until);
     until <= estimate_by(world, who, from, door, arrive_by) + lead
 }
 

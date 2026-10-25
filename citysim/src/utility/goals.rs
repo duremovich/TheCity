@@ -364,10 +364,13 @@ pub fn considerations(
                 return None;
             }
             let mut cs = vec![
-                // Hunger as sickness § 2: a sick day is no shift.
+                // Hunger as sickness § 2: a sick day is no shift. The perf
+                // pass phase 1: the refusals shared with the departure gate
+                // (a sentence returned above; a week unpaid zeroes `paid`
+                // too, so the goal is unavailable either way).
                 Consideration::new(
                     "in shift",
-                    can(shift_reachable(world, id, job) && !crate::systems::health::sick(world, id)),
+                    can(shift_reachable(world, id, job) && !crate::exec::routine::work_refused(world, id, job)),
                     GATE,
                 ),
                 Consideration::new("energy", n.energy, IDENTITY),

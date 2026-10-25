@@ -596,6 +596,37 @@ pub fn on_abort(world: &mut World, id: EntityId, kind: ActionKind, started: Tick
     }
 }
 
+/// The perf pass phase 1 (OPEN-195): the departure gate cuts a Rest begun
+/// at `started` only if it opened since (with `[rest]`): one begun with the
+/// gate open was chosen by a think that saw it and took Idle, and the next
+/// 30-tick think still lets Work win. The base cut it every minute while
+/// the Work goal did not answer (a rich manager's Work at 0.02 under Idle's
+/// 0.05; the departure gate's own refusals are `routine::work_refused`).
+fn rest_cut_by_work(world: &World, id: EntityId, started: Tick) -> bool {
+    use crate::exec::routine;
+    routine::must_leave_for_work(world, id) && !(routine::rest_fix(world) && routine::leave_gate_at(world, id, started))
+}
+
+/// The perf pass phase 1 (OPEN-195): `can_work_now` at the post cuts a Rest
+/// only on a shift the Work goal would take (with `[rest]`: a super at his
+/// own block on the rest day rested in 1-minute blocks all day), and an
+/// idle Rest begun on this shift at the post is not cut by it (as the
+/// departure gate's, the think that chose it saw the shift). A Work plan's
+/// Rest (the commute's wait, the cab's stand-by) is cut as before.
+fn rest_cut_on_shift(world: &World, id: EntityId, job: &Job, started: Tick) -> bool {
+    use crate::exec::routine;
+    if !routine::rest_fix(world) {
+        return true;
+    }
+    if !routine::work_due(world, id, job) {
+        return false;
+    }
+    let work_plan = world.comp::<Brain>(id).and_then(|b| b.plan_goal()) == Some(crate::components::GoalKind::Work);
+    let begun_on_shift = job.on_shift((started % crate::time::TICKS_PER_DAY) as u16)
+        && job.shift_key_at(started) == job.shift_key_at(world.tick);
+    work_plan || !begun_on_shift
+}
+
 /// Some actions end before their nominal duration.
 pub fn finishes_early(world: &World, id: EntityId, kind: ActionKind, started: Tick) -> bool {
     match kind {
@@ -613,8 +644,10 @@ pub fn finishes_early(world: &World, id: EntityId, kind: ActionKind, started: Ti
         // Lives at work phase 4 (§ 2.3): a cab driver standing by at the
         // Garage rests on until a ride is his (false off: the old rule).
         ActionKind::Rest => {
-            crate::exec::routine::must_leave_for_work(world, id)
-                || (world.comp::<Job>(id).is_some_and(|j| can_work_now(world, id, j))
+            rest_cut_by_work(world, id, started)
+                || (world
+                    .comp::<Job>(id)
+                    .is_some_and(|j| can_work_now(world, id, j) && rest_cut_on_shift(world, id, j, started))
                     && !crate::systems::streetwork::standing_by(world, id))
                 || crate::systems::streetwork::driving(world, id)
         }
