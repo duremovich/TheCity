@@ -11,7 +11,7 @@ It prints one table, and writes it to <out>/measure.md, for the three things a p
 
 1. **Off identity**: the candidate with every `--off` variable set to 1 against the base binary,
    `--off-seeds` x `--off-days` (default 42 x 30): events byte-identical, the report CSV's shared
-   columns identical (ticks_per_sec aside), the end-of-run save identical once `save_version:N` is
+   columns identical (the wall-clock ticks_per_sec, max_tick_ms, max_tick_at aside), the end-of-run save identical once `save_version:N` is
    masked. Any difference prints `OFF IDENTITY: DIFFER` and the script exits 2.
 2. **Counters**: base and candidate (switches on), `--seeds` x `--days` (default 42-44 x 120):
    Murders, J24 (employed share from day 30), J25 (homeless share), arrests, last-day wallets,
@@ -51,6 +51,8 @@ import analyze_run  # noqa: E402  (load_csv, load_events, analyze)
 
 EXE = ".exe" if os.name == "nt" else ""
 TPD = 1440
+# The report's wall-clock columns (the runner's clock, not the world's): never compared.
+WALL_COLS = {"ticks_per_sec", "max_tick_ms", "max_tick_at"}
 LIVES_FIELDS = [("n", r"n (\d+)"), ("idle h/d", r"idle_h/d ([\d.]+)"), ("short rest/d", r"short_rest/d ([\d.]+)"),
                 ("shifts", r"shifts (\d+)"),
                 ("Served-able", r"servedable ([\d.]+)"), ("met", r"met ([\d.]+)"), ("enc/shift", r"enc/shift ([\d.]+)")]
@@ -180,7 +182,7 @@ def off_compare(base: Path, cand: Path, save_masks=()):
     lines.append(f"events {'identical' if same_ev else 'DIFFER'} ({eb.count(b'\n')} lines base, {ec.count(b'\n')} cand)")
     hb, rb = csv_cols(base / "run.csv")
     hc, rc = csv_cols(cand / "run.csv")
-    shared = [h for h in hb if h in hc and h != "ticks_per_sec"]
+    shared = [h for h in hb if h in hc and h not in WALL_COLS]
     ib, ic = {h: i for i, h in enumerate(hb)}, {h: i for i, h in enumerate(hc)}
     diff_cells, diff_cols = 0, set()
     if len(rb) != len(rc):

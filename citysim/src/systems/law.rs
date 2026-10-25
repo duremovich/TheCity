@@ -526,9 +526,11 @@ fn chaseable(world: &World, s: EntityId, seen: (TilePos, Tick), by: Option<Pursu
     by.is_none_or(near) && located(world, s)
 }
 
-/// The L1 claim set for a pursuer (empty for the whole city). Scale S1:
-/// built on the first suspect in reach, not on every call (it walks every
-/// guard; most calls find nobody in reach and never read it).
+/// The L1 claim set for a pursuer (empty for the whole city). The perf
+/// pass phase 5: read from the world's claim index
+/// (`World::claimed_by_other`), kept current by marks, not built per
+/// scoring call by walking every guard (`life::claimed_suspects`, which a
+/// unit test's `spatial::scans()` still reads).
 struct Claims<'a> {
     world: &'a World,
     guard: Option<EntityId>,
@@ -536,13 +538,17 @@ struct Claims<'a> {
     radius: u32,
     /// The pursuer is a private (corp) guard: `on_beat` applies.
     private: bool,
+    /// The scan's set, built on the first read (`spatial::scans()` only).
     set: std::cell::OnceCell<BTreeSet<EntityId>>,
 }
 
 impl Claims<'_> {
     fn contains(&self, s: EntityId) -> bool {
         match self.guard {
-            Some(g) => self.set.get_or_init(|| crate::systems::life::claimed_suspects(self.world, g)).contains(&s),
+            Some(g) if crate::spatial::scans() => {
+                self.set.get_or_init(|| crate::systems::life::claimed_suspects(self.world, g)).contains(&s)
+            }
+            Some(g) => self.world.claimed_by_other(g, s),
             None => false,
         }
     }
@@ -2615,5 +2621,137 @@ mod tests {
             }
         }
         assert!(found > 0, "no guard had a warrant in reach: the test exercises nothing");
+    }
+
+    /// The perf pass phase 5: the claim index (`World::claimed_by_other`)
+    /// is the scan it replaced (`life::claimed_suspects`) for every guard
+    /// and every claimed suspect, read at once after each of its
+    /// invalidation points in one tick: an Arrest plan installed, an escort
+    /// begun, both dropped, a citizen holding an Arrest plan hired as a
+    /// guard, a claiming guard fired and another killed; then through a day
+    /// of the city with a warrant on every tenth adult. Without the Brain
+    /// mark (`comp_mut`) or the Job marks (`index_job` / `unindex_job`), the
+    /// read after the write is stale.
+    #[test]
+    fn test_claim_index_matches_the_scan() {
+        use crate::components::{DeathCause, GoalKind, Job, Role};
+        use crate::goap::Plan;
+        use crate::systems::life::claimed_suspects;
+        let mut w = World::new(42, crate::config::Config::load());
+        w.run_ticks(TICKS_PER_DAY + 9 * crate::time::TICKS_PER_HOUR);
+        // scan-ok: a unit test.
+        let people: Vec<EntityId> = w.citizens().into_iter().filter(|&a| living(&w, a)).collect();
+        let check = |w: &World, at: &str| -> usize {
+            let guards = w.guards().to_vec();
+            let mut all: BTreeSet<EntityId> = BTreeSet::new();
+            for &g in &guards {
+                all.extend(claimed_suspects(w, g));
+            }
+            let claimed = all.len();
+            all.extend(people.iter().step_by(97).copied());
+            for &g in &guards {
+                let scan = claimed_suspects(w, g);
+                for &s in &all {
+                    assert_eq!(w.claimed_by_other(g, s), scan.contains(&s), "{at}: guard {g}, suspect {s}");
+                }
+            }
+            claimed
+        };
+        let arrest = |w: &mut World, g: EntityId, s: EntityId| {
+            let tick = w.tick;
+            if let Some(b) = w.comp_mut::<Brain>(g) {
+                b.plan = Some(Plan { goal: GoalKind::Arrest, target: Some(s), steps: Vec::new(), started_tick: tick });
+            }
+        };
+        check(&w, "day 1 09:00");
+        let guards = w.guards().to_vec();
+        let civ: Vec<EntityId> = people.iter().copied().filter(|a| !guards.contains(a)).collect();
+        let (g1, g2, g3) = (guards[0], guards[1], guards[2]);
+        let (s1, s2, s3) = (civ[10], civ[20], civ[30]);
+        // An Arrest plan installed: g1 is after s1.
+        arrest(&mut w, g1, s1);
+        check(&w, "an Arrest plan installed");
+        assert!(w.claimed_by_other(g2, s1) && !w.claimed_by_other(g1, s1), "the plan claimed nobody");
+        // An escort begun: g2 takes s2.
+        if let Some(b) = w.comp_mut::<Brain>(g2) {
+            b.escorting = Some(s2);
+        }
+        check(&w, "an escort begun");
+        assert!(w.claimed_by_other(g1, s2), "the escort claimed nobody");
+        // Both dropped.
+        if let Some(b) = w.comp_mut::<Brain>(g1) {
+            b.plan = None;
+        }
+        if let Some(b) = w.comp_mut::<Brain>(g2) {
+            b.escorting = None;
+        }
+        check(&w, "both dropped");
+        assert!(!w.claimed_by_other(g3, s1) && !w.claimed_by_other(g3, s2), "a dropped claim stayed");
+        // A citizen after s3 (no guard: nobody's claim) hired as a guard.
+        let recruit = civ[40];
+        arrest(&mut w, recruit, s3);
+        check(&w, "a citizen's Arrest plan");
+        assert!(!w.claimed_by_other(g1, s3), "a citizen's plan claimed");
+        let job = w.comp::<Job>(g1).cloned().expect("a guard's Job");
+        assert_eq!(job.role, Role::Guard);
+        w.insert(recruit, job);
+        check(&w, "a guard hired");
+        assert!(w.claimed_by_other(g1, s3), "the hire's claim unseen");
+        // The recruit fired, g2 (after s1) killed.
+        w.remove::<Job>(recruit);
+        check(&w, "a guard fired");
+        assert!(!w.claimed_by_other(g1, s3), "the fired guard's claim stayed");
+        arrest(&mut w, g2, s1);
+        check(&w, "an Arrest plan before the kill");
+        w.kill(g2, DeathCause::Violence);
+        check(&w, "a guard killed");
+        // A day of the city, a warrant on every tenth adult, read every 97 ticks.
+        let tick = w.tick;
+        for &s in people.iter().step_by(10) {
+            w.push_report(CrimeReport { crime: Crime::Theft, suspect: s, witness: None, tick, resolved: false });
+        }
+        let mut claims = 0;
+        for _ in 0..15 {
+            w.run_ticks(97);
+            claims += check(&w, &format!("tick {}", w.tick));
+        }
+        assert!(claims > 0, "no guard claimed a suspect in the city: the test exercises nothing");
+    }
+
+    /// The perf pass phase 5: the law's indexes (the claim index, the
+    /// needs' guard grid) are the scans they replaced (`spatial::scans()`),
+    /// byte for byte: two days of the shipped city with a warrant on every
+    /// tenth adult, run both ways, save the same (`band_refusals` aside: the
+    /// switch also runs phase 3's labour-pool scan, which never counted it).
+    #[test]
+    fn test_law_indexes_match_the_scans() {
+        let run = |scans: bool| {
+            crate::spatial::SCANS.with(|s| s.set(scans));
+            let mut w = World::new(42, crate::config::Config::load());
+            w.run_ticks(9 * crate::time::TICKS_PER_HOUR);
+            let tick = w.tick;
+            // scan-ok: a unit test, once.
+            for s in w.citizens().into_iter().step_by(10) {
+                w.push_report(CrimeReport { crime: Crime::Theft, suspect: s, witness: None, tick, resolved: false });
+            }
+            w.run_ticks(2 * TICKS_PER_DAY);
+            crate::spatial::SCANS.with(|s| s.set(false));
+            // Phase 3's scan of the labour pool counts no `band_refusals`
+            // (a saved counter of the indexed walk): masked, all else equal.
+            let ron = crate::save::to_ron(&w);
+            let mut out = String::with_capacity(ron.len());
+            let mut rest = ron.as_str();
+            while let Some(i) = rest.find("band_refusals:") {
+                out.push_str(&rest[..i]);
+                rest = rest[i + "band_refusals:".len()..].trim_start_matches(|c: char| c.is_ascii_digit());
+                rest = rest.strip_prefix(',').unwrap_or(rest);
+            }
+            out.push_str(rest);
+            (out, w.stats.history.iter().map(|r| r.arrests).sum::<u32>())
+        };
+        let (a, arrests) = run(false);
+        let (b, _) = run(true);
+        assert!(arrests > 0, "no arrest: the law's claims exercised nothing");
+        assert!(a == b, "the indexes and the scans part");
     }
 }

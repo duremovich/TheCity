@@ -184,3 +184,30 @@ changes the map, not a mechanism.
   The Bar nearest (`nearest_of_kind` behind `local()`) is not tabled either: 0.08 s a game day at 60k. Socialise
   and Court were not `local()`'s: their time was `best_colocated_partner_in` (the reservation scan, now the index;
   what is left is the walk over a crowded building's occupants).
+- **Phase 5** (`OPEN-184` annotated). (1) `World::claimed_by_other(guard, s)` behind `law::chaseable`'s claim test
+  (Patrol's `any_located_suspect`, Arrest's and the plan bind's `located_suspects`): a `ClaimIndex` (per guard its
+  `[escort, Arrest target]`, per suspect its claimers) kept by marks as `PosIndex` is, not `life::claimed_suspects`'
+  walk of every guard per scoring call (226k walks in two days at 60k, 12.7 us each). Kept current: `comp_mut`,
+  `insert` and `remove` of a filed guard's Brain, and `index_job` / `unindex_job` (a Job inserted, removed or
+  re-posted, a despawn) mark the entity; each read re-files the marked first, so an Arrest plan installed or an
+  escort begun mid-tick is seen by the next read; `rebuild_tiers_and_roles` drops it; not saved. (2) `needs`' guard
+  test reads a per-tick `TileGrid` of the guards' tiles (`sight`-tile cells, `TileGrid::any_near_with`) instead of the
+  row-sorted list's band (every guard within `sight` rows, map-wide). Both answer an order-free yes/no by the same
+  rule. (3) The longest tick, measured: the CLI report's `max_tick_ms` and `max_tick_at` (the day's longest
+  `citysim::tick` wall and its tick of day) after `ticks_per_sec`, CLI-only (not in `DailyStats`, not saved);
+  `phase_measure.py` skips them with `ticks_per_sec` (`WALL_COLS`), `pop_scale.py` prints them per day and run.
+  (4) The midnight pass's cheap fix: `demography::hire_base` reads the commute once for its three uses (it was read
+  up to three times per candidate tile and door). Identical to `4f021de` on 2k 42-44 x 30 and 20k `isle_m_k2` 42 x 30
+  (save, report, events). At 60k seed 42 (ms a game day, base -> branch, one alternated pair): `goal::Patrol` 933 ->
+  149, `goal::Arrest` 692 -> 68, `tick::needs` 1,859 -> 1,573, `tick::think` 9,027 -> 7,794, `pool::bases` 349 ->
+  162, the tick total 21,910 -> 20,835; ABAB (print only) 60k 72 -> 78, 100k 29.5 -> 36.5 ticks/s. **The longest
+  tick is midnight**, not 21:00, every day at both sizes (non-prof, days 1-2): 60k 1.28-1.32 s -> 1.07-1.11 s
+  (21:00 0.45-0.51 s); 100k 2.45-2.54 s -> 1.94-2.07 s (21:00 0.79-0.86 s). The gate's 1 s misses at 100k by 2x.
+  Midnight at 100k (one profiled tick, day 1): `job_search` 0.65 s (`pick_candidate` 0.39 with `pool::bases` 0.22
+  and `pool::groups` 0.09, `pick_graded` 0.22), `living`'s midnight pass 0.37 (no sites inside yet),
+  `corp_brain`'s daily (rescore and act) 0.36, relocation 0.14, `word` 0.13, `household` 0.10, then under 0.07 each. Day 0's
+  first tick is 2.3 s at 60k and 4.0 s at 100k: the first midnight plus every lazy index built on its first query
+  (a loaded save pays it too). SAVE_VERSION stays 67. **Deviations:** item 4 (`nearest_seller`'s night fallback)
+  left: with nothing open every seller is tested whatever the order, so a grid saves only the sort. The claim
+  index is kept by marks, not a per-tick memo keyed on a counter: a guard's Brain is written every tick he acts,
+  so a counter would rebuild per guard think; the marks re-file only the guards written since the last read.

@@ -1030,18 +1030,26 @@ fn camp_band(world: &World) -> u32 {
 /// [`pick_candidate`]'s distance part of the key from `from` to a
 /// workplace door, `camp_band + 512 + band + d` (`near_cap`: the hire-near
 /// band's cap).
+///
+/// The perf pass phase 5: the commute (`life::commute_cost`, which
+/// `distance::travel` is too) read once for its three uses, the El's
+/// distance, the hire-near band and the job cap's band (it was read up to
+/// three times per `from` and door; a pure function of both and the world,
+/// so the same key). `pool::bases` was most of the midnight tick at 60k.
 fn hire_base(world: &World, from: TilePos, workplace_door: TilePos, near_cap: Option<u64>) -> u32 {
-    let d = if crate::systems::transit::enabled(world) {
-        let step = world.config.exec.move_ticks_full.max(1);
-        u32::try_from(crate::systems::life::commute_cost(world, from, workplace_door) / step).unwrap_or(u32::MAX)
-    } else {
-        from.manhattan(workplace_door)
+    let transit = crate::systems::transit::enabled(world);
+    let job_cap = crate::systems::distance::job_cap(world);
+    let cost = (transit || near_cap.is_some() || job_cap.is_some())
+        .then(|| crate::systems::life::commute_cost(world, from, workplace_door));
+    let past = |cap: Option<u64>| cap.zip(cost).is_some_and(|(c, cost)| cost > c);
+    let d = match cost.filter(|_| transit) {
+        Some(cost) => {
+            let step = world.config.exec.move_ticks_full.max(1);
+            u32::try_from(cost / step).unwrap_or(u32::MAX)
+        }
+        None => from.manhattan(workplace_door),
     };
-    let band = if near_cap.is_some_and(|c| crate::systems::life::commute_cost(world, from, workplace_door) > c) {
-        1024
-    } else {
-        0
-    } + past_cap_band(world, from, workplace_door);
+    let band = if past(near_cap) { 1024 } else { 0 } + if past(job_cap) { PAST_CAP_BAND } else { 0 };
     camp_band(world) + 512 + band + d
 }
 

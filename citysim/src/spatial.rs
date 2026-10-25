@@ -92,6 +92,23 @@ impl TileGrid {
         (y0..=y1).any(|cy| self.starts[cy * self.gw + x0] != self.starts[cy * self.gw + x1 + 1])
     }
 
+    /// The perf pass phase 5: does `f` hold for any item in a cell
+    /// [`TileGrid::near`] would read? (No allocation; an order-free test.)
+    pub fn any_near_with(&self, t: TilePos, r: u32, mut f: impl FnMut(u32) -> bool) -> bool {
+        let c = self.cell as usize;
+        let (x, y) = (usize::from(t.x), usize::from(t.y));
+        let r = r as usize;
+        let x0 = (x.saturating_sub(r) / c).min(self.gw - 1);
+        let x1 = ((x + r) / c).min(self.gw - 1);
+        let y0 = (y.saturating_sub(r) / c).min(self.gh - 1);
+        let y1 = ((y + r) / c).min(self.gh - 1);
+        (y0..=y1).any(|cy| {
+            let row = cy * self.gw;
+            let (a, b) = (self.starts[row + x0] as usize, self.starts[row + x1 + 1] as usize);
+            self.items[a..b].iter().any(|&i| f(i))
+        })
+    }
+
     /// Every item in a cell that the Chebyshev square of radius `r` around
     /// `t` touches (a superset of the items within `r`), appended to `out`
     /// in cell order (callers needing an order sort it).
