@@ -549,7 +549,7 @@ fn virt_snapshot(world: &mut World) {
     let decks = crate::systems::virt::decks_owned(world);
     // Phase 3 (V43): cameras posted and working.
     let cameras = world
-        .buildings_by_kind
+        .buildings_by_kind()
         .values()
         .flatten()
         .filter(|&&b| crate::systems::virt::camera_at(world, b).is_some())

@@ -684,7 +684,7 @@ pub(crate) fn nearest_building(
 /// The building whose door is nearest `from` (any kind, standing).
 fn nearest_any_building(world: &World, from: TilePos) -> Option<EntityId> {
     world
-        .buildings_by_kind
+        .buildings_by_kind()
         .values()
         .flatten()
         .filter_map(|&b| world.comp::<Building>(b).filter(|bd| !bd.demolished).map(|bd| (bd.door.manhattan(from), b)))

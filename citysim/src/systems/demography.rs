@@ -156,7 +156,7 @@ fn children_of(world: &World, home: EntityId) -> Vec<EntityId> {
 
 /// Each Home feeds its children from the pantry; three days unfed kills.
 fn children(world: &mut World) {
-    let homes = world.buildings_by_kind.get(&BuildingKind::Home).cloned().unwrap_or_default();
+    let homes = world.buildings_by_kind().get(&BuildingKind::Home).cloned().unwrap_or_default();
     let mut starved = Vec::new();
     let school = world.levers.school_meals;
     let reserve = world.building_of_kind(BuildingKind::Warehouse);
@@ -1960,7 +1960,7 @@ fn arrival_savings(world: &mut World, id: EntityId, home: Option<EntityId>) {
 /// The Home with the fewest residents among those under 6 (ties by id).
 pub fn emptiest_home(world: &World) -> Option<EntityId> {
     let mut counts: std::collections::BTreeMap<EntityId, usize> = world
-        .buildings_by_kind
+        .buildings_by_kind()
         .get(&BuildingKind::Home)
         .into_iter()
         .flatten()

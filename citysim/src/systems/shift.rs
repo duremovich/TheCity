@@ -262,7 +262,7 @@ pub fn haul_dests(world: &World, id: EntityId, post: EntityId) -> Vec<EntityId> 
         // The goods go where people work: the staffed workplaces (not Homes)
         // in reach (2k: the Yard's nearest Market is 56 tiles off).
         BuildingKind::FreightYard | BuildingKind::Farm | BuildingKind::Warehouse => world
-            .buildings_by_kind
+            .buildings_by_kind()
             .iter()
             .filter(|(k, _)| **k != BuildingKind::Home)
             .flat_map(|(_, v)| v.iter().copied())
@@ -780,7 +780,7 @@ fn food_venue(world: &World, id: EntityId) -> Option<(EntityId, BuildingKind)> {
     let reach = walk_max / world.config.exec.move_ticks_full.max(1);
     let mut best: Option<(Tick, u32, EntityId, BuildingKind)> = None;
     for kind in [BuildingKind::Market, BuildingKind::NoodleBar] {
-        for &m in world.buildings_by_kind.get(&kind).map_or(&[][..], |v| v.as_slice()) {
+        for &m in world.buildings_by_kind().get(&kind).map_or(&[][..], |v| v.as_slice()) {
             let Some(b) = world.comp::<Building>(m) else { continue };
             if Tick::from(b.door.manhattan(from)) > reach || b.stock_food == 0 || b.demolished || b.derelict {
                 continue;

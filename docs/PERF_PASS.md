@@ -113,3 +113,18 @@ changes the map, not a mechanism.
   pooled 0.16 -> 0.02 (super 0.89 -> 0.02, gun 0.49 -> 0.02), idle 4.46 -> 4.26 h/d. `person.rs`' loader-rehire
   probe now seats its two candidates in the Home nearest the Yard (a third, nearer jobless adult took the post once
   the city moved). SAVE_VERSION stays 67.
+- **Phase 2** (`8b5956d`, `OPEN-184` annotated). `leisure::nearest_venue` and `evening_venues` read a per-kind
+  `spatial::BuildingGrid` (`World::kind_grid`) through `BuildingGrid::first_by_distance`: rings outward from the
+  origin's box, the candidates tested in the old sort's `(door distance, id)` order up to the first pass. Kept
+  current by membership only (every gate, "open" included, is read at query time; doors never move):
+  `buildings_by_kind` is private and written only through `World::buildings_by_kind_mut()`, which bumps
+  `kinds_gen`; the grids are keyed by `(building_gen, kinds_gen)`, not saved. Identical to `acacea1` on 2k 42-44 x
+  30 and 20k `isle_m_k2` 42 x 30. At 60k seed 42 (ms a game day): `goal::Unwind` 7,927 -> 1,847, `stat_daily` (the
+  21:00 tick's call) 7,944 -> 527, `tick::plan` 1,847 -> 1,090, the tick total 46,660 -> 33,820 (-28 %); 20k ABAB
+  272 -> 314 ticks/s (print only). **Deviations:** two callers, not one: `stat_daily`'s learned evening goes through
+  `evening_venues`, its own collect-and-sort keyed `(other district, distance, id)`, now two searches (the Home's
+  district, then outside it). Both cut the search at the walk cap's tiles (`exec::walk_reach_tiles`, the
+  litter-free floor under `timed_walk`): a pick past them was dropped by every caller already, so fewer gates run
+  but the answer is the same. The 60k and 100k maps are under `D:/TheCity/target/perf_maps/` (`isle_60000.txt`,
+  `isle_100000.txt`, `--downsample 2`, the k2 lines). Left hot at 60k: `stat_daily` 0.53 s in one tick (~0.9 s
+  projected at 100k, against the gate's 1 s), the rest of think (`Shop`, `local()`: phase 4).

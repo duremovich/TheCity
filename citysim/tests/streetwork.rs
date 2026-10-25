@@ -594,7 +594,7 @@ fn test_builder_works_a_far_site_for_the_day() {
         // One open site, past haul_reach and an hour or two away.
         let yd = door_of(&w, yard);
         let site = w
-            .buildings_by_kind
+            .buildings_by_kind()
             .get(&BuildingKind::Home)
             .into_iter()
             .flatten()

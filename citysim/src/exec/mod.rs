@@ -1426,6 +1426,39 @@ pub fn timed_walk(world: &World, id: EntityId, from: TilePos, to: TilePos) -> Ti
     }
 }
 
+/// The perf pass phase 2: the most Manhattan tiles apart two tiles can be
+/// and still have `timed_walk` for `id` at most `cap` (every pair further
+/// apart walks longer), or `u32::MAX` when a pair `limit` apart still does.
+/// The floor under `timed_walk` at `d` tiles is its litter-free value
+/// (litter only lengthens a walk: its factor is used only above 1), which
+/// never falls as `d` grows and is 0 at 0 tiles, so the answer is a
+/// bisection over `0..=limit`.
+pub fn walk_reach_tiles(world: &World, id: EntityId, cap: Tick, limit: u32) -> u32 {
+    let m = crate::systems::vehicles::timed_mult(world, id);
+    let floor = |d: u32| {
+        let base = Tick::from(d) * world.config.exec.move_ticks_full;
+        if m == 1.0 {
+            base
+        } else {
+            (base as f32 * m).round() as Tick
+        }
+    };
+    if floor(limit) <= cap {
+        return u32::MAX;
+    }
+    // floor(lo) <= cap < floor(hi).
+    let (mut lo, mut hi) = (0u32, limit);
+    while hi - lo > 1 {
+        let mid = lo + (hi - lo) / 2;
+        if floor(mid) <= cap {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
+}
+
 /// M12 D18: the extra ticks before a Full mover's next step off `tile`,
 /// by the tile's litter band (`[litter] step_ticks`). One byte read on a
 /// step already taken; flow fields never change.

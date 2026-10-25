@@ -92,8 +92,8 @@ fn make_hotel(w: &mut World, owner: Option<EntityId>) -> EntityId {
         b.kind = BuildingKind::Hotel;
         b.capacity = 12;
     }
-    w.buildings_by_kind.get_mut(&BuildingKind::Bar).expect("bars").retain(|&b| b != bar);
-    w.buildings_by_kind.entry(BuildingKind::Hotel).or_default().push(bar);
+    w.buildings_by_kind_mut().get_mut(&BuildingKind::Bar).expect("bars").retain(|&b| b != bar);
+    w.buildings_by_kind_mut().entry(BuildingKind::Hotel).or_default().push(bar);
     ownership::transfer_building(w, bar, owner);
     districts::rebuild(w);
     bar

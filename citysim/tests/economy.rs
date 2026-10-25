@@ -57,7 +57,10 @@ fn test_farmer_produces_food() {
         w.comp_mut::<Needs>(id).expect("needs").hunger = 1.0;
     }
     let farm_stock = |w: &World| -> u32 {
-        w.buildings_by_kind[&BuildingKind::Farm].iter().map(|&f| w.comp::<Building>(f).expect("farm").stock_food).sum()
+        w.buildings_by_kind()[&BuildingKind::Farm]
+            .iter()
+            .map(|&f| w.comp::<Building>(f).expect("farm").stock_food)
+            .sum()
     };
     assert_eq!(farm_stock(&w), 0);
     w.run_ticks(TICKS_PER_DAY);

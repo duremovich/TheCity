@@ -63,7 +63,7 @@ pub fn vehicle_stand(world: &World, v: EntityId) -> Option<TilePos> {
 /// the lower id: where a trip that ends on the street parks.
 pub fn nearest_parking(world: &World, from: TilePos) -> Option<EntityId> {
     world
-        .buildings_by_kind
+        .buildings_by_kind()
         .iter()
         .filter(|(k, _)| **k != BuildingKind::Lot)
         .flat_map(|(_, v)| v.iter())

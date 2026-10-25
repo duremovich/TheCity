@@ -155,6 +155,49 @@ impl TileGrid {
         out.extend_from_slice(&self.items[self.starts[c] as usize..self.starts[c + 1] as usize]);
     }
 
+    /// The perf pass phase 2: [`TileGrid::ring`] around the box of cells
+    /// that the tiles `lo..=hi` span (a point when `lo == hi`): the items in
+    /// the cells at Chebyshev cell distance exactly `k` from that box (ring
+    /// 0 is the box itself), appended to `out` in cell order. `false` once
+    /// the ring lies wholly outside the grid (every later ring does too).
+    /// [`TileGrid::ring_floor`] bounds the Manhattan distance from any tile
+    /// of the box to any tile of ring `k`, as it does for a point.
+    pub fn ring_box(&self, lo: TilePos, hi: TilePos, k: usize, out: &mut Vec<u32>) -> bool {
+        let (ax, ay) = self.cxy(lo);
+        let (bx, by) = self.cxy(hi);
+        let (x0, x1) = (ax.min(bx) as isize, ax.max(bx) as isize);
+        let (y0, y1) = (ay.min(by) as isize, ay.max(by) as isize);
+        let (gw, gh) = (self.gw as isize, self.gh as isize);
+        let k = k as isize;
+        if x0 - k < 0 && y0 - k < 0 && x1 + k >= gw && y1 + k >= gh {
+            return false;
+        }
+        let mut cell = |x: isize, y: isize| {
+            if (0..gw).contains(&x) && (0..gh).contains(&y) {
+                let c = (y * gw + x) as usize;
+                let (a, b) = (self.starts[c] as usize, self.starts[c + 1] as usize);
+                out.extend_from_slice(&self.items[a..b]);
+            }
+        };
+        if k == 0 {
+            for y in y0..=y1 {
+                for x in x0..=x1 {
+                    cell(x, y);
+                }
+            }
+            return true;
+        }
+        for x in x0 - k..=x1 + k {
+            cell(x, y0 - k);
+            cell(x, y1 + k);
+        }
+        for y in y0 - k + 1..=y1 + k - 1 {
+            cell(x0 - k, y);
+            cell(x1 + k, y);
+        }
+        true
+    }
+
     /// A floor under the Manhattan distance from `t` to any tile of a cell
     /// in ring `k` of `t`'s cell: `(k − 1) × cell + 1` (0 for ring 0).
     pub fn ring_floor(&self, k: usize) -> u32 {
@@ -177,6 +220,8 @@ impl TileGrid {
 pub struct BuildingGrid {
     /// Every building, ascending.
     pub ids: Vec<crate::entity::EntityId>,
+    /// Each building's door, by `ids`' index.
+    doors: Vec<TilePos>,
     grid: TileGrid,
 }
 
@@ -187,7 +232,64 @@ impl BuildingGrid {
     /// `ids` ascending, each with its door tile, on a `w` x `h` map.
     pub fn build(w: usize, h: usize, ids: Vec<crate::entity::EntityId>, doors: &[TilePos]) -> BuildingGrid {
         let grid = TileGrid::build(w, h, BUILDING_CELL, doors.iter().copied());
-        BuildingGrid { ids, grid }
+        BuildingGrid { ids, doors: doors.to_vec(), grid }
+    }
+
+    /// The perf pass phase 2 (the venue index): the buildings whose door
+    /// lies within `max_d` of the box `lo..=hi` by `dist` (the caller's exact
+    /// distance, at least the Manhattan distance from the box to the door),
+    /// handed to `test` in ascending `(dist, id)` until one passes, which is
+    /// returned. Rings of cells are read outward from the box; after each,
+    /// the candidates nearer than any cell further out can hold are tested
+    /// in order, so `test` sees exactly the sequence a sort of every
+    /// building by `(dist, id)` would hand it, up to the first pass (the
+    /// scan it replaces), cut at `max_d`.
+    pub fn first_by_distance(
+        &self,
+        lo: TilePos,
+        hi: TilePos,
+        max_d: u32,
+        dist: impl Fn(TilePos) -> u32,
+        mut test: impl FnMut(u32, crate::entity::EntityId) -> bool,
+    ) -> Option<(u32, crate::entity::EntityId)> {
+        use std::cmp::Reverse;
+        if self.ids.is_empty() {
+            return None;
+        }
+        let mut pending: std::collections::BinaryHeap<Reverse<(u32, crate::entity::EntityId)>> =
+            std::collections::BinaryHeap::new();
+        let mut idx = Vec::new();
+        let mut k = 0usize;
+        let mut more = true;
+        loop {
+            if more && self.grid.ring_floor(k) <= max_d {
+                idx.clear();
+                more = self.grid.ring_box(lo, hi, k, &mut idx);
+                for &i in &idx {
+                    let d = dist(self.doors[i as usize]);
+                    if d <= max_d {
+                        pending.push(Reverse((d, self.ids[i as usize])));
+                    }
+                }
+                k += 1;
+            } else {
+                more = false;
+            }
+            // Every door in ring `k` or further is at least this far.
+            let floor = if more { self.grid.ring_floor(k) } else { u32::MAX };
+            while let Some(&Reverse((d, b))) = pending.peek() {
+                if more && d >= floor {
+                    break;
+                }
+                pending.pop();
+                if test(d, b) {
+                    return Some((d, b));
+                }
+            }
+            if !more {
+                return None;
+            }
+        }
     }
 
     /// Every building whose door lies within the Chebyshev square of
@@ -541,5 +643,69 @@ mod tests {
             let got = grid.nearest_sum(&[t, u], |b| pass(b).then(|| (sum(b), b.index)));
             assert_eq!(got, want, "round {round}: nearest_sum from {t:?} via {u:?}");
         }
+    }
+
+    /// The perf pass phase 2: `first_by_distance` hands `test` the same
+    /// sequence a sort of every building by `(distance, id)` does, up to
+    /// the first pass and cut at `max_d`, from points and boxes (a day's
+    /// rectangle), on random doors with many ties, random filters and
+    /// points past the map's last full cell.
+    #[test]
+    fn test_first_by_distance_is_the_sorted_scan() {
+        use crate::entity::EntityId;
+        let (w, h) = (203usize, 117usize);
+        let mut x = 0x2545_f491_4f6c_dd1du64;
+        let mut next = move || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        let n = 300;
+        let ids: Vec<EntityId> = (0..n).map(|i| EntityId { index: 5 * i + 2, generation: 0 }).collect();
+        // Doors on a coarse lattice, so equal distances are common.
+        let doors: Vec<TilePos> = (0..n)
+            .map(|_| TilePos { x: (next() % (w as u64 / 3)) as u16 * 3, y: (next() % (h as u64 / 3)) as u16 * 3 })
+            .collect();
+        let grid = BuildingGrid::build(w, h, ids.clone(), &doors);
+        let mut ties = 0;
+        for round in 0..600 {
+            let a = TilePos { x: (next() % w as u64) as u16, y: (next() % h as u64) as u16 };
+            let b = if round % 2 == 0 {
+                a
+            } else {
+                TilePos { x: (next() % w as u64) as u16, y: (next() % h as u64) as u16 }
+            };
+            let (lo, hi) = (TilePos { x: a.x.min(b.x), y: a.y.min(b.y) }, TilePos { x: a.x.max(b.x), y: a.y.max(b.y) });
+            let dist = |t: TilePos| {
+                let n = TilePos { x: t.x.clamp(lo.x, hi.x), y: t.y.clamp(lo.y, hi.y) };
+                n.manhattan(t)
+            };
+            let keep = 1 + next() % 30;
+            let pass = |b: EntityId| u64::from(b.index) % keep == 0;
+            let max_d = if round % 3 == 0 { u32::MAX } else { (next() % 120) as u32 };
+            let mut all: Vec<(u32, EntityId)> = ids.iter().zip(&doors).map(|(&b, &t)| (dist(t), b)).collect();
+            all.sort_unstable();
+            ties += all.windows(2).filter(|p| p[0].0 == p[1].0).count().min(1);
+            let mut want_seq = Vec::new();
+            let mut want = None;
+            for &(d, b) in all.iter().filter(|&&(d, _)| d <= max_d) {
+                want_seq.push((d, b));
+                if pass(b) {
+                    want = Some((d, b));
+                    break;
+                }
+            }
+            let mut seq = Vec::new();
+            let got = grid.first_by_distance(lo, hi, max_d, dist, |d, b| {
+                seq.push((d, b));
+                pass(b)
+            });
+            assert_eq!(got, want, "round {round}: {lo:?}..{hi:?} cut {max_d}");
+            assert_eq!(seq, want_seq, "round {round}: the tested sequence");
+        }
+        assert!(ties > 100, "too few ties ({ties}) to exercise the tie-break");
+        let empty = BuildingGrid::build(w, h, Vec::new(), &[]);
+        assert_eq!(empty.first_by_distance(TilePos::default(), TilePos::default(), u32::MAX, |_| 0, |_, _| true), None);
     }
 }

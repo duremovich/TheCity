@@ -89,7 +89,9 @@ comment on or above the line.
   enemies, tiers, asset indices, Virt indices, hunts, hangouts, contracts).
 - The social graph: `World.edges` (`edge_map.rs`, keyed `(min, max)`, iterates in key order), with `World::edge`,
   `edge_entry`, `remove_edge`, `neighbours`.
-- `spatial.rs`: `TileGrid`, a bucket grid for radius queries; returns a superset the caller filters.
+- `spatial.rs`: `TileGrid`, a bucket grid for radius queries; returns a superset the caller filters. `BuildingGrid`
+  over doors: `World::building_grid` (every building) and `World::kind_grid` (one kind, the venue index behind
+  `leisure::nearest_venue`; dropped when `buildings_by_kind_mut()` or the Building store changes).
 - `map.rs` (tile map from `assets/map.txt`), `mapgen.rs` (generated maps, `--map gen:<N>`), `time.rs` (ticks, days,
   `DayPhase`, `Season`; `TICKS_PER_DAY`, `TICKS_PER_HOUR`).
 

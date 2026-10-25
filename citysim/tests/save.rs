@@ -63,7 +63,7 @@ fn test_save_file_helpers() {
 fn test_current_save_keeps_live_claims() {
     let mut w = World::new(12, Config::load().dole_city().v1_profile());
     let gangs = w.gangs();
-    let home = w.buildings_by_kind[&BuildingKind::Home][0];
+    let home = w.buildings_by_kind()[&BuildingKind::Home][0];
     w.comp_mut::<citysim::Gang>(gangs[0]).expect("gang").territory = vec![home];
     w.comp_mut::<citysim::Building>(home).expect("home").claim = Some(citysim::Claim { gang: gangs[1], count: 2 });
     let back = save::from_ron(&save::to_ron(&w)).expect("load");

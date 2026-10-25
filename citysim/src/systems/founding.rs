@@ -254,11 +254,11 @@ pub fn convert(world: &mut World, b: EntityId, kind: BuildingKind, owner: Option
         bd.tier = tier;
         bd.stock_food = 0;
     }
-    if let Some(v) = world.buildings_by_kind.get_mut(&old) {
+    if let Some(v) = world.buildings_by_kind_mut().get_mut(&old) {
         v.retain(|&x| x != b);
     }
     // Kept ascending, as every other `buildings_by_kind` list.
-    let list = world.buildings_by_kind.entry(kind).or_default();
+    let list = world.buildings_by_kind_mut().entry(kind).or_default();
     if let Err(i) = list.binary_search(&b) {
         list.insert(i, b);
     }

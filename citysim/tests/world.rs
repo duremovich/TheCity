@@ -82,7 +82,7 @@ fn test_spawn_300_with_jobs() {
         );
     }
     // each home holds exactly 5 residents
-    for home in w.buildings_by_kind[&BuildingKind::Home].iter() {
+    for home in w.buildings_by_kind()[&BuildingKind::Home].iter() {
         assert_eq!(w.comp::<citysim::Building>(*home).expect("home").occupants.len(), 5);
     }
     // guards with an even index work nights
