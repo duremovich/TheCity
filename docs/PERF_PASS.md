@@ -211,3 +211,13 @@ changes the map, not a mechanism.
   left: with nothing open every seller is tested whatever the order, so a grid saves only the sort. The claim
   index is kept by marks, not a per-tick memo keyed on a counter: a guard's Brain is written every tick he acts,
   so a counter would rebuild per guard think; the marks re-file only the guards written since the last read.
+- **Checkpoint** (2026-10-25, main `e5048d7` against the pass base `3728aca`, seed 42, quiet box, `pop_scale.py`
+  ABAB, 2 reps, 4 days; maps under `target/perf_maps/`, the 20k one the committed `isle_m_k2`). Days 2-4 median
+  ticks/s: 20k 261 -> 387, 60k 33 -> 80, 100k 11 -> 37. Build: 20k 46 -> 6 s, 60k 280 -> 29 s, 100k 370 -> 52 s.
+  Longest tick (main only; the base has no column): always midnight; 100k 1.9-2.1 s on days 2-3, 2.6-3.0 s on day 4.
+  **A 4-day bench hides a slope.** Main alone, 30 days: 100k ticks/s 44 (d1) -> 18 (d27-30), midnight 1.9 s -> 7.9 s,
+  peak working set 1.1 -> 3.1 GB; 20k ticks/s 387 -> ~210, midnight 0.27 -> 0.65 s. Something accumulates with the
+  days and is scanned, worse with N (the base slid 15 -> 11 in 4 days too, so it predates the pass). Report columns
+  that grow at 100k: `holes_open` 200 -> 2,742, `contracts_open` 29 -> 623, `grudges` 6 -> 385; employed rose
+  43k -> 56k and homeless fell 8.1k -> 2.9k over the month, so part of it is a busier city. POPULATION_STUDY's curve
+  is a day-4 snapshot. The gate reads days 25-30 from here on, not days 2-4.
