@@ -81,7 +81,8 @@ fn test_cli_report_csv_header() {
     // phase 6: 12 careers and leaders columns; phase 7: 9 stations and Spire columns; gate 8d: `exec_rides`,
     // `exec_rides_corp`; the pre-view pass phase 2: 9 `shift_*` columns; phase 3: 9 haul and counter columns; phase 4: 10 presence columns; phase 5: 9 legs and fares columns;
     // phase 6: 9 leaders columns; the island pass phase 3a: 4 company housing columns; phase 3b: 5 more;
-    // phase 4: 5 commute pressure columns; phase 8: `site_days`; island fix round F3: `stay_in_hangouts`.
+    // phase 4: 5 commute pressure columns; phase 8: `site_days`; island fix round F3: `stay_in_hangouts`;
+    // the perf pass phase 5: the CLI's `max_tick_ms` and `max_tick_at` after `ticks_per_sec`.
     assert_eq!(
         row.split(',').count(),
         81 + 8 * 6
@@ -136,6 +137,7 @@ fn test_cli_report_csv_header() {
             + 5
             + 1
             + 1
+            + 2
     );
     assert!(lines.next().is_none());
 }
@@ -210,7 +212,8 @@ fn test_cli_lever_and_save_at() {
     assert!(out2.status.success(), "stderr: {}", String::from_utf8_lossy(&out2.stderr));
     let stdout2 = String::from_utf8(out2.stdout).expect("utf8");
     let row2 = stdout2.lines().nth(1).expect("row");
-    let strip = |r: &str| r.rsplit_once(',').map(|(a, _)| a.to_string()).expect("row");
+    // The three wall-clock columns (`ticks_per_sec`, `max_tick_ms`, `max_tick_at`) dropped.
+    let strip = |r: &str| r.rsplitn(4, ',').nth(3).map(str::to_string).expect("row");
     assert_eq!(strip(row2), strip(row));
     // replaying with the same --lever must not double-apply the lever already in the save
     let out3 = cli()

@@ -285,9 +285,8 @@ mod tests {
         let mut near = check(&w, "day 1 09:00");
         // A guard hired: a citizen with a guard's Job.
         let guards = w.guards().to_vec();
-        // scan-ok: a unit test.
-        let recruit =
-            w.citizens().into_iter().find(|a| !guards.contains(a) && w.has::<Position>(*a)).expect("a citizen");
+        let citizens = w.citizens(); // scan-ok: a unit test.
+        let recruit = citizens.into_iter().find(|a| !guards.contains(a) && w.has::<Position>(*a)).expect("a citizen");
         let job = w.comp::<Job>(guards[0]).cloned().expect("a guard's Job");
         assert_eq!(job.role, Role::Guard);
         w.insert(recruit, job);

@@ -2729,8 +2729,8 @@ mod tests {
             crate::spatial::SCANS.with(|s| s.set(scans));
             let mut w = World::new(42, crate::config::Config::load());
             w.run_ticks(9 * crate::time::TICKS_PER_HOUR);
-            // scan-ok: a unit test, once.
             let tick = w.tick;
+            // scan-ok: a unit test, once.
             for s in w.citizens().into_iter().step_by(10) {
                 w.push_report(CrimeReport { crime: Crime::Theft, suspect: s, witness: None, tick, resolved: false });
             }
