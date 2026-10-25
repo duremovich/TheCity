@@ -3,8 +3,8 @@
 //! Orders bias members' goals (`utility::goals`); the brain never acts.
 
 use crate::components::{
-    Building, BuildingKind, Corp, Gang, Household, LawShock, LobbyHold, MemoryKind, Order, OrderScore, PendingOrder,
-    Personality, Sentence,
+    Building, BuildingKind, Corp, Corpse, Gang, Identity, LawShock, LobbyHold, MemoryKind, Order, OrderScore,
+    PendingOrder, Personality, Sentence,
 };
 use crate::config::GangsCfg;
 use crate::entity::EntityId;
@@ -448,14 +448,12 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
     let rival_door = rg.and_then(|r| world.comp::<Building>(r.hideout)).map(|b| b.door);
 
     // Inhabited Homes on our side of the midline, and how many are still unclaimed.
-    let mut residents = vec![0u16; world.building.len()];
-    for id in world.citizens() {
-        if let Some(h) = world.comp::<Household>(id).and_then(|h| h.home) {
-            if let Some(n) = residents.get_mut(h.index as usize) {
-                *n += 1;
-            }
-        }
-    }
+    // The perf pass phase 6: a Home is inhabited when a citizen (an
+    // Identity, not a Corpse) is filed under it in `residents_of` (the
+    // Household index), not a count over every citizen per call (a gang
+    // rescoring after a settled job runs this each tick of its dwell).
+    let inhabited =
+        |h: EntityId| world.residents_of(h).iter().any(|&r| world.has::<Identity>(r) && !world.has::<Corpse>(r));
     // M12 D38: the districts this gang holds, and the open ones (Contested,
     // or held by a gang with nobody fit), each with Homes.
     let (held, open) = district_ground(world, gang);
@@ -465,7 +463,7 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
     let (mut frontier, mut frontier_total) = (0, 0);
     for &h in world.buildings_by_kind().get(&BuildingKind::Home).map(|v| v.as_slice()).unwrap_or(&[]) {
         let Some(b) = world.comp::<Building>(h) else { continue };
-        if b.demolished || b.derelict || residents.get(h.index as usize).is_none_or(|&n| n == 0) {
+        if b.demolished || b.derelict || !inhabited(h) {
             continue;
         }
         // M12 D38: with a district held, Expand's frontier is the held and

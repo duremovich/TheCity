@@ -561,8 +561,9 @@ pub fn daily(world: &mut World) {
 
 /// The kin of `id`: its spouse and its Family/Parent edges.
 fn kin_of(world: &World, id: EntityId) -> Vec<(EntityId, RelKind)> {
+    // The perf pass phase 6: the kin candidates, not every neighbour.
     world
-        .neighbours(id)
+        .kin_candidates(id)
         .filter_map(|c| {
             let e = world.edge(id, c)?;
             matches!(e.kind, RelKind::Spouse | RelKind::Family | RelKind::Parent).then_some((c, e.kind))

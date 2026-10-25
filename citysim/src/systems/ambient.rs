@@ -491,6 +491,7 @@ fn copy_contacts(world: &mut World, id: EntityId, b: EntityId, k: u32, household
         e.affinity = affinity;
         e.trust = trust;
         e.last_interaction = tick;
+        world.note_kin(id, t);
     }
 }
 

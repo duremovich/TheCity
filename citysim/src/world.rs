@@ -887,6 +887,27 @@ pub struct World {
     /// rebuilt on load.
     #[serde(skip)]
     pub neighbours: BTreeMap<EntityId, BTreeSet<EntityId>>,
+    /// The perf pass phase 6 (the slope): the kin candidates, a superset of
+    /// each agent's Spouse, Family and Parent edges (`World::kin_candidates`).
+    /// Filed by `note_kin` where an edge is made kin (a marriage, a birth, an
+    /// immigrant child, a grown child, an exile's edge, an ambient household),
+    /// unfiled with the edge; an edge that stops being kin (`make_enemy`)
+    /// stays filed, so a reader filters by kind as its neighbour walk did.
+    /// Not saved: rebuilt exact on load.
+    #[serde(skip)]
+    kin_index: BTreeMap<EntityId, BTreeSet<EntityId>>,
+    /// The perf pass phase 6 (the slope; `OPEN-203`): social edges created
+    /// (`edge_entry`'s new pairs), since the world was built or loaded.
+    /// Read by the CLI's `edges_new` column as a day's difference; not saved,
+    /// read by no system.
+    #[serde(skip)]
+    pub edges_made: u64,
+    /// The perf pass phase 6: Statistical co-worker pair-hours bonded
+    /// (`lod`'s hour of co-work, one per pair an hour), since the world was
+    /// built or loaded: the CLI's `coworker_pairs` column. Not saved, read by
+    /// no system.
+    #[serde(skip)]
+    pub coworker_pairs: u64,
     /// Spouse lookup, both directions; written only by `set_spouse` / death.
     #[serde(skip)]
     pub spouses: BTreeMap<EntityId, EntityId>,
@@ -1893,6 +1914,9 @@ impl World {
             next_riot_id: 0,
             rioter_of: BTreeMap::new(),
             neighbours: BTreeMap::new(),
+            kin_index: BTreeMap::new(),
+            edges_made: 0,
+            coworker_pairs: 0,
             spouses: BTreeMap::new(),
             enemies: BTreeMap::new(),
             by_tier: Default::default(),
@@ -3868,6 +3892,7 @@ impl World {
         match self.edges.entry(key) {
             std::collections::hash_map::Entry::Occupied(o) => o.into_mut(),
             std::collections::hash_map::Entry::Vacant(v) => {
+                self.edges_made += 1;
                 self.neighbours.entry(a).or_default().insert(b);
                 self.neighbours.entry(b).or_default().insert(a);
                 v.insert(Edge::new(RelKind::Acquaintance, tick))
@@ -3888,6 +3913,35 @@ impl World {
         if let Some(n) = self.neighbours.get_mut(&b) {
             n.remove(&a);
         }
+        for (x, y) in [(a, b), (b, a)] {
+            if let Some(s) = self.kin_index.get_mut(&x) {
+                s.remove(&y);
+                if s.is_empty() {
+                    self.kin_index.remove(&x);
+                }
+            }
+        }
+    }
+
+    /// The perf pass phase 6: file the pair as kin candidates when its edge
+    /// is a Spouse, Family or Parent edge now. Every write that makes an edge
+    /// kin calls it after setting the kind.
+    pub fn note_kin(&mut self, a: EntityId, b: EntityId) {
+        let kin =
+            self.edge(a, b).is_some_and(|e| matches!(e.kind, RelKind::Spouse | RelKind::Family | RelKind::Parent));
+        if kin {
+            self.kin_index.entry(a).or_default().insert(b);
+            self.kin_index.entry(b).or_default().insert(a);
+        }
+    }
+
+    /// The perf pass phase 6 (the slope): `id`'s kin candidates, ascending:
+    /// every neighbour whose edge is a Spouse, Family or Parent edge, and
+    /// some whose edge was one. A walk of `neighbours(id)` that keeps only
+    /// kin kinds reads the same agents in the same order from here (an
+    /// agent's edges grow with the days; its kin do not).
+    pub fn kin_candidates(&self, id: EntityId) -> impl Iterator<Item = EntityId> + '_ {
+        self.kin_index.get(&id).into_iter().flat_map(|s| s.iter().copied())
     }
 
     /// A first name for `sex` from the tables (seeded).
@@ -3959,6 +4013,7 @@ impl World {
             self.remove_edge(id, o);
         }
         self.neighbours.remove(&id);
+        self.kin_index.remove(&id);
         self.release_all(id);
         self.reservations.retain(|_, rs| {
             rs.retain(|r| !matches!(r.kind, crate::exec::ReservationKind::Partner { other } | crate::exec::ReservationKind::Corpse { corpse: other } | crate::exec::ReservationKind::Suspect { suspect: other } if other == id));
@@ -4035,6 +4090,7 @@ impl World {
             .collect();
         self.bins = bins;
         self.neighbours.clear();
+        self.kin_index.clear();
         self.spouses.clear();
         self.enemies.clear();
         self.last_seen_by_tick = Self::last_seen_by_tick_of(&self.last_seen);
@@ -4043,6 +4099,10 @@ impl World {
         for ((a, b), kind) in edges {
             self.neighbours.entry(a).or_default().insert(b);
             self.neighbours.entry(b).or_default().insert(a);
+            if matches!(kind, RelKind::Spouse | RelKind::Family | RelKind::Parent) {
+                self.kin_index.entry(a).or_default().insert(b);
+                self.kin_index.entry(b).or_default().insert(a);
+            }
             match kind {
                 RelKind::Spouse if living(self, a) && living(self, b) => {
                     self.spouses.insert(a, b);
@@ -4087,6 +4147,7 @@ impl World {
         let e = self.edge_entry(a, b);
         e.kind = RelKind::Spouse;
         e.last_interaction = tick;
+        self.note_kin(a, b);
         self.spouses.insert(a, b);
         self.spouses.insert(b, a);
     }

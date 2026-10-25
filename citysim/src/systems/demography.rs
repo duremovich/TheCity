@@ -315,7 +315,7 @@ pub fn spawn_child(world: &mut World, mother: EntityId, father: EntityId, home: 
     // Siblings: the parents' other children.
     let mut siblings: Vec<EntityId> = Vec::new();
     for parent in [mother, father] {
-        for o in world.neighbours(parent) {
+        for o in world.kin_candidates(parent) {
             if o != id
                 && world.edge(parent, o).is_some_and(|e| e.kind == RelKind::Parent)
                 && is_child_of(world, o, parent)
@@ -331,12 +331,14 @@ pub fn spawn_child(world: &mut World, mother: EntityId, father: EntityId, home: 
         e.affinity = 0.6;
         e.trust = 0.8;
         e.last_interaction = tick;
+        world.note_kin(parent, id);
     }
     for s in siblings {
         let e = world.edge_entry(s, id);
         e.kind = RelKind::Family;
         e.affinity = 0.3;
         e.last_interaction = tick;
+        world.note_kin(s, id);
     }
     world.stats.current.births += 1;
     let (nm, nf) = (world.name_of(mother), world.name_of(father));
@@ -358,8 +360,10 @@ pub fn is_child_of(world: &World, child: EntityId, parent: EntityId) -> bool {
 
 /// Living children of `id` (Parent edges to someone born later).
 pub fn children_of_agent(world: &World, id: EntityId) -> Vec<EntityId> {
+    // The perf pass phase 6: a child is on a Parent edge, so the kin
+    // candidates (`World::kin_candidates`), not every neighbour.
     world
-        .neighbours(id)
+        .kin_candidates(id)
         .filter(|&o| world.has::<Identity>(o) && !world.has::<Corpse>(o) && is_child_of(world, o, id))
         .collect()
 }
@@ -433,7 +437,7 @@ pub fn on_death(world: &mut World, id: EntityId) -> crate::components::Loot {
 /// M11 inheritance's heirs: the spouse (a living Spouse edge), else the
 /// living children; empty = the Treasury.
 pub fn coin_heirs(world: &World, dead: EntityId) -> Vec<EntityId> {
-    let spouse = world.neighbours(dead).find(|&o| {
+    let spouse = world.kin_candidates(dead).find(|&o| {
         world.edge(dead, o).is_some_and(|e| e.kind == RelKind::Spouse)
             && world.has::<Identity>(o)
             && !world.has::<Corpse>(o)
@@ -1998,12 +2002,14 @@ fn spawn_migrant_child(world: &mut World, mother: EntityId, father: EntityId, ho
         e.affinity = 0.6;
         e.trust = 0.8;
         e.last_interaction = tick;
+        world.note_kin(parent, id);
     }
     for s in siblings {
         let e = world.edge_entry(s, id);
         e.kind = RelKind::Family;
         e.affinity = 0.3;
         e.last_interaction = tick;
+        world.note_kin(s, id);
     }
     world.stats.current.immigrants += 1;
     let (name, parent) = (world.name_of(id), world.name_of(mother));
