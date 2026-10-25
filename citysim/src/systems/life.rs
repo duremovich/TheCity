@@ -350,7 +350,9 @@ pub fn earn_short(world: &World, id: EntityId) -> bool {
 /// The suspects another guard than `guard` already chases (an Arrest plan
 /// bound to them, or the escort): one pass over the guards' Brains, so a
 /// scoring round tests membership per suspect instead of re-walking every
-/// guard per (guard, suspect) pair (review fix).
+/// guard per (guard, suspect) pair (review fix). The perf pass phase 5: the
+/// scan `World::claimed_by_other` replaces (the law reads the claim index;
+/// a unit test's `spatial::scans()` reads this).
 pub fn claimed_suspects(world: &World, guard: EntityId) -> std::collections::BTreeSet<EntityId> {
     let mut out = std::collections::BTreeSet::new();
     for &g in world.guards().iter().filter(|&&g| g != guard) {

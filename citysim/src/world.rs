@@ -777,6 +777,11 @@ pub struct World {
     /// `kind_memo` is (not saved, not cloned).
     #[serde(skip)]
     near_memo: Memo<NearTables>,
+    /// The perf pass phase 5: the suspects each guard claims (an escort, an
+    /// Arrest plan's target), kept by marks (`World::claimed_by_other`; not
+    /// saved, not cloned: built on its first query).
+    #[serde(skip)]
+    claims: Memo<ClaimIndex>,
     pub vacancies: BTreeMap<EntityId, Vec<Role>>,
     pub edge_roads: Vec<TilePos>,
     pub view_rect: Option<Rect>,
@@ -1482,6 +1487,112 @@ pub(crate) struct ShopMemo {
     pub mean_price: Option<i64>,
 }
 
+/// The perf pass phase 5: every guard's claims on suspects (the L1 rule:
+/// one guard per suspect), so `law::chaseable` asks "does another guard
+/// chase `s`" without walking every guard per scoring call
+/// (`life::claimed_suspects`, the scan it replaces).
+///
+/// Kept current by marks, as `PosIndex` is: a guard's claims are its
+/// Brain's `escorting` and its Arrest plan's `target`, and the guards are
+/// `World::guards()`. Every write to a Brain goes through `comp_mut`,
+/// `insert`, `remove` or `despawn`, and each marks the entity when it is a
+/// filed guard; `guards()` changes only in `index_job` / `unindex_job`
+/// (a Job inserted, removed or re-posted, a despawn), which mark the entity
+/// whatever it was. A query re-files the marked first, so an Arrest plan
+/// installed, an escort begun, a guard hired or killed between two reads in
+/// one tick is seen by the second.
+#[derive(Debug, Default)]
+pub(crate) struct ClaimIndex {
+    /// Per entity index: the guard filed there and its claims `[escort,
+    /// Arrest target]`, while it is in `guards()`.
+    by_guard: Vec<Option<(EntityId, [Option<EntityId>; 2])>>,
+    /// Per suspect: the guards claiming them, once per claim.
+    claimers: BTreeMap<EntityId, SmallVec<[EntityId; 2]>>,
+    dirty: Vec<u32>,
+    flagged: Vec<bool>,
+}
+
+impl ClaimIndex {
+    fn mark(&mut self, index: u32) {
+        let i = index as usize;
+        if self.flagged.len() <= i {
+            self.flagged.resize(i + 1, false);
+        }
+        if !self.flagged[i] {
+            self.flagged[i] = true;
+            self.dirty.push(index);
+        }
+    }
+
+    /// A Brain written: only a filed guard's claims can change.
+    fn mark_brain(&mut self, index: u32) {
+        if self.by_guard.get(index as usize).is_some_and(Option::is_some) {
+            self.mark(index);
+        }
+    }
+
+    /// The claims of guard `g` as the world holds them now.
+    fn claims_of(world: &World, g: EntityId) -> [Option<EntityId>; 2] {
+        world.comp::<Brain>(g).map_or([None, None], |b| {
+            [b.escorting, b.plan.as_ref().filter(|p| p.goal == GoalKind::Arrest).and_then(|p| p.target)]
+        })
+    }
+
+    fn file(&mut self, i: usize, now: Option<(EntityId, [Option<EntityId>; 2])>) {
+        if self.by_guard.len() <= i {
+            self.by_guard.resize(i + 1, None);
+        }
+        if self.by_guard[i] == now {
+            return;
+        }
+        if let Some((g, old)) = self.by_guard[i].take() {
+            for s in old.into_iter().flatten() {
+                if let Some(v) = self.claimers.get_mut(&s) {
+                    if let Some(k) = v.iter().position(|&x| x == g) {
+                        v.swap_remove(k);
+                    }
+                    if v.is_empty() {
+                        self.claimers.remove(&s);
+                    }
+                }
+            }
+        }
+        if let Some((g, new)) = now {
+            for s in new.into_iter().flatten() {
+                self.claimers.entry(s).or_default().push(g);
+            }
+        }
+        self.by_guard[i] = now;
+    }
+
+    fn build(world: &World) -> ClaimIndex {
+        let mut ix = ClaimIndex::default();
+        for &g in world.guards() {
+            ix.file(g.index as usize, Some((g, Self::claims_of(world, g))));
+        }
+        ix
+    }
+
+    /// Re-file the marked: the live entity at each index, with its claims
+    /// if it is in `guards()`.
+    fn refresh(&mut self, world: &World) {
+        let dirty = std::mem::take(&mut self.dirty);
+        for &i in &dirty {
+            self.flagged[i as usize] = false;
+            let id = EntityId { index: i, generation: world.generations.get(i as usize).copied().unwrap_or(0) };
+            let now = (world.is_alive(id) && world.guards().binary_search(&id).is_ok())
+                .then(|| (id, Self::claims_of(world, id)));
+            self.file(i as usize, now);
+        }
+        self.dirty = dirty;
+        self.dirty.clear();
+    }
+
+    fn claimed_by_other(&self, guard: EntityId, s: EntityId) -> bool {
+        self.claimers.get(&s).is_some_and(|v| v.iter().any(|&g| g != guard))
+    }
+}
+
 /// `(tick, window, seen_gen)` and the open suspects seen inside the window
 /// then, ascending, each with its `last_seen` entry.
 type LocatedMemo = (Tick, Tick, u64, std::sync::Arc<Located>);
@@ -1747,6 +1858,7 @@ impl World {
             shop_gen: 0,
             shop_memo: Memo::default(),
             near_memo: Memo::default(),
+            claims: Memo::default(),
             vacancies: BTreeMap::new(),
             edge_roads,
             view_rect: None,
@@ -2450,6 +2562,7 @@ impl World {
         use std::any::TypeId;
         if TypeId::of::<T>() == TypeId::of::<Brain>() {
             self.index_brain(id);
+            self.mark_claims_brain(id.index);
         } else if TypeId::of::<T>() == TypeId::of::<Job>() {
             self.index_job(id);
         } else if TypeId::of::<T>() == TypeId::of::<Gang>() {
@@ -2484,6 +2597,7 @@ impl World {
         use std::any::TypeId;
         if TypeId::of::<T>() == TypeId::of::<Brain>() {
             self.unindex_brain(id);
+            self.mark_claims_brain(id.index);
         } else if TypeId::of::<T>() == TypeId::of::<Job>() {
             self.unindex_job(id);
         } else if TypeId::of::<T>() == TypeId::of::<Gang>() {
@@ -2649,6 +2763,7 @@ impl World {
     /// File the agent under its Job's role (and, J3, its workplace).
     pub fn index_job(&mut self, id: EntityId) {
         self.unindex_job(id);
+        self.mark_claims_job(id.index);
         if let Some(j) = self.comp::<Job>(id) {
             let (r, employer) = (role_index(j.role), j.employer);
             if r >= self.by_role.len() {
@@ -2663,6 +2778,7 @@ impl World {
     }
 
     pub fn unindex_job(&mut self, id: EntityId) {
+        self.mark_claims_job(id.index);
         for list in &mut self.by_role {
             Self::list_remove(list, id);
         }
@@ -2792,6 +2908,9 @@ impl World {
         let (tiers, roles, slots) = self.indices_from_stores();
         self.by_tier = tiers;
         self.by_role = roles;
+        // The perf pass phase 5: `guards()` rebuilt wholesale; the claim
+        // index with it, on its next query.
+        *self.claims.0.get_mut().unwrap_or_else(|e| e.into_inner()) = None;
         self.stat_slots = slots;
         (self.employers, self.employer_of) = self.employers_from_stores();
         self.gang_ids = self.with::<Gang>();
@@ -3459,6 +3578,32 @@ impl World {
         self.seen_gen += 1;
         if let Some((_, old)) = self.last_seen.remove(suspect) {
             self.last_seen_by_tick.remove(&(old, *suspect));
+        }
+    }
+
+    /// The perf pass phase 5: does a guard other than `guard` claim `s` (an
+    /// escort, or an Arrest plan bound to them)? The same answer as
+    /// `life::claimed_suspects(self, guard).contains(&s)`, from the claim
+    /// index ([`ClaimIndex`]), re-filed at each read from its marks.
+    pub fn claimed_by_other(&self, guard: EntityId, s: EntityId) -> bool {
+        let mut memo = self.claims.0.lock().unwrap_or_else(|e| e.into_inner());
+        let ix = memo.get_or_insert_with(|| ClaimIndex::build(self));
+        ix.refresh(self);
+        ix.claimed_by_other(guard, s)
+    }
+
+    /// The perf pass phase 5: a Brain written (`comp_mut`, `insert`,
+    /// `remove`): a mark on the claim index when it files this guard.
+    pub(crate) fn mark_claims_brain(&mut self, index: u32) {
+        if let Some(ix) = self.claims.0.get_mut().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            ix.mark_brain(index);
+        }
+    }
+
+    /// The perf pass phase 5: `guards()` may have changed at this entity.
+    fn mark_claims_job(&mut self, index: u32) {
+        if let Some(ix) = self.claims.0.get_mut().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            ix.mark(index);
         }
     }
 

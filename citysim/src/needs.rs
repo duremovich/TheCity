@@ -80,6 +80,40 @@ pub fn decay(n: &mut Needs, cfg: &NeedsCfg, ctx: &DecayCtx, ticks: u32) {
     n.intimacy = (n.intimacy - intimacy * t).max(0.0);
 }
 
+/// The perf pass phase 5: "is a guard other than `id` within `sight` tiles
+/// of `t`" for the tick, from one [`crate::spatial::TileGrid`] of the
+/// guards' tiles (rebuilt per call: guards move every tick). In a unit test
+/// with `spatial::scans()` on, the row-sorted list it replaced.
+fn guard_near_fn(world: &World, sight: u32) -> impl Fn(EntityId, crate::components::TilePos) -> bool {
+    let mut guard_tiles: Vec<(u16, EntityId, crate::components::TilePos)> = world
+        .guards()
+        .iter()
+        .copied()
+        .filter_map(|id| world.comp::<Position>(id).map(|p| (p.tile.y, id, p.tile)))
+        .collect();
+    let scans = crate::spatial::scans();
+    let grid = if scans {
+        guard_tiles.sort_unstable();
+        None
+    } else {
+        let tiles = guard_tiles.iter().map(|&(_, _, t)| t);
+        Some(crate::spatial::TileGrid::build(world.map.w(), world.map.h(), sight.max(1), tiles))
+    };
+    move |id: EntityId, t: crate::components::TilePos| -> bool {
+        if let Some(grid) = &grid {
+            return grid.any_near_with(t, sight, |i| {
+                let (_, g, gt) = guard_tiles[i as usize];
+                g != id && gt.manhattan(t) <= sight
+            });
+        }
+        let lo = guard_tiles.partition_point(|&(y, _, _)| u32::from(y) + sight < u32::from(t.y));
+        guard_tiles[lo..]
+            .iter()
+            .take_while(|&&(y, _, _)| u32::from(y) <= u32::from(t.y) + sight)
+            .any(|&(_, g, gt)| g != id && gt.manhattan(t) <= sight)
+    }
+}
+
 /// One meal.
 pub fn eat(n: &mut Needs, cfg: &NeedsCfg) {
     n.hunger = (n.hunger + cfg.food_satisfy).min(1.0);
@@ -90,24 +124,14 @@ pub fn run(world: &mut World) {
     let season_energy_mult = world.config.economy.energy_decay_mult[season];
     let hourly = world.tick.is_multiple_of(TICKS_PER_HOUR);
 
-    // Guard positions once per tick for the safety modifier.
-    // Sorted by row so each agent checks only the guards within `sight` rows
-    // (M11: twelve private guards made the all-pairs scan a third dearer).
-    let mut guard_tiles: Vec<(u16, EntityId, crate::components::TilePos)> = world
-        .guards()
-        .iter()
-        .copied()
-        .filter_map(|id| world.comp::<Position>(id).map(|p| (p.tile.y, id, p.tile)))
-        .collect();
-    guard_tiles.sort_unstable();
+    // Guard positions once per tick for the safety modifier. The perf pass
+    // phase 5: on a grid of `sight`-tile cells, so each agent reads the
+    // guards in the cells around it, not every guard within `sight` rows
+    // across the map (the row-sorted list's band; M11 sorted it to cut the
+    // all-pairs scan). "Any guard within `sight`" is order-free: the grid's
+    // superset, cut by the same test, is the same answer.
     let sight = world.config.crime.sight;
-    let guard_near_at = |id: EntityId, t: crate::components::TilePos| -> bool {
-        let lo = guard_tiles.partition_point(|&(y, _, _)| u32::from(y) + sight < u32::from(t.y));
-        guard_tiles[lo..]
-            .iter()
-            .take_while(|&&(y, _, _)| u32::from(y) <= u32::from(t.y) + sight)
-            .any(|&(_, g, gt)| g != id && gt.manhattan(t) <= sight)
-    };
+    let guard_near_at = guard_near_fn(world, sight);
 
     let assets = world.config.assets.enabled;
     for id in world.bodies() {
@@ -210,5 +234,76 @@ pub fn starvation(world: &mut World, id: EntityId) {
     }
     if tick.saturating_sub(since) >= grace {
         world.kill(id, crate::components::DeathCause::Starvation);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::components::{DeathCause, Job, Role, TilePos};
+    use crate::time::TICKS_PER_DAY;
+
+    /// The perf pass phase 5: the needs' guard grid (`guard_near_fn`) is
+    /// the row-sorted list it replaced (`spatial::scans()`) for every body
+    /// and at tiles around every guard, through a day of the city, a guard
+    /// hired, one killed and one moved. The grid is rebuilt per tick, so it
+    /// has no invalidation to miss; this pins the cell cut (a cell too
+    /// small, or a ring short, drops a guard at the reach's edge).
+    #[test]
+    fn test_guard_grid_matches_the_scan() {
+        let mut w = World::new(42, crate::config::Config::load());
+        w.run_ticks(TICKS_PER_DAY + 9 * TICKS_PER_HOUR);
+        let sight = w.config.crime.sight;
+        let check = |w: &World, at: &str| -> usize {
+            let grid = guard_near_fn(w, sight);
+            crate::spatial::SCANS.with(|s| s.set(true));
+            let scan = guard_near_fn(w, sight);
+            crate::spatial::SCANS.with(|s| s.set(false));
+            let mut probes: Vec<(EntityId, TilePos)> =
+                w.bodies().into_iter().filter_map(|id| w.comp::<Position>(id).map(|p| (id, p.tile))).collect();
+            // Tiles at and just past the reach of every guard, on each axis.
+            let nobody = EntityId { index: u32::MAX, generation: 0 };
+            for &g in w.guards() {
+                let Some(t) = w.comp::<Position>(g).map(|p| p.tile) else { continue };
+                for d in [sight, sight + 1] {
+                    let d = d as u16;
+                    let (x0, x1, y1) = (t.x.saturating_sub(d), t.x.saturating_add(d), t.y.saturating_add(d));
+                    for at in [TilePos { x: x1, y: t.y }, TilePos { x: x0, y: t.y }, TilePos { x: t.x, y: y1 }] {
+                        probes.push((g, at));
+                        probes.push((nobody, at));
+                    }
+                }
+            }
+            let mut near = 0;
+            for &(id, t) in &probes {
+                let want = scan(id, t);
+                assert_eq!(grid(id, t), want, "{at}: {id} at {t:?}");
+                near += usize::from(want);
+            }
+            near
+        };
+        let mut near = check(&w, "day 1 09:00");
+        // A guard hired: a citizen with a guard's Job.
+        let guards = w.guards().to_vec();
+        // scan-ok: a unit test.
+        let recruit =
+            w.citizens().into_iter().find(|a| !guards.contains(a) && w.has::<Position>(*a)).expect("a citizen");
+        let job = w.comp::<Job>(guards[0]).cloned().expect("a guard's Job");
+        assert_eq!(job.role, Role::Guard);
+        w.insert(recruit, job);
+        near += check(&w, "a guard hired");
+        // One killed, one moved across the map.
+        w.kill(guards[1], DeathCause::Violence);
+        near += check(&w, "a guard killed");
+        if let Some(p) = w.comp_mut::<Position>(guards[2]) {
+            p.tile = TilePos { x: 3, y: 3 };
+            p.building = None;
+        }
+        near += check(&w, "a guard moved");
+        for _ in 0..6 {
+            w.run_ticks(61);
+            near += check(&w, &format!("tick {}", w.tick));
+        }
+        assert!(near > 0, "no body was near a guard: the test exercises nothing");
     }
 }

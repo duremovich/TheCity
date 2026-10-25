@@ -118,6 +118,11 @@ impl World {
         if Self::shop_store::<T>() {
             self.shop_gen += 1;
         }
+        // The perf pass phase 5: a guard's Brain written through here is
+        // re-filed on the claim index's next query (`World::claimed_by_other`).
+        if std::any::TypeId::of::<T>() == std::any::TypeId::of::<crate::components::Brain>() {
+            self.mark_claims_brain(id.index);
+        }
         T::store_mut(self).get_mut(id.index as usize).and_then(|c| c.as_mut())
     }
 
