@@ -434,9 +434,12 @@ pub fn daily(world: &mut World) {
 /// the building, or a Statistical one credited by the clock).
 pub fn staff_present(world: &World, b: EntityId, role: Role) -> bool {
     let tod = world.tick_of_day();
-    world.workers(role).iter().any(|&w| {
+    // The perf pass phase 4: the building's staff (the employer index), not
+    // every holder of the role: the same set, read in fewer steps.
+    world.staff_of(b).iter().any(|&w| {
         world.comp::<Job>(w).is_some_and(|j| {
-            j.employer == Some(b)
+            j.role == role
+                && j.employer == Some(b)
                 && j.on_shift(tod)
                 && crate::exec::routine::is_workday(j.shift_key_at(world.tick))
                 && !world.has::<Sentence>(w)

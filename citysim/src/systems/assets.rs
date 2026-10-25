@@ -1932,7 +1932,12 @@ pub fn seller_open(world: &World, b: EntityId) -> bool {
         return crate::systems::fixes::staff_present(world, b, role);
     }
     let tod = world.tick_of_day();
-    world.workers(role).iter().any(|&w| world.comp::<Job>(w).is_some_and(|j| j.employer == Some(b) && j.on_shift(tod)))
+    // The perf pass phase 4: the building's staff (the employer index), not
+    // every holder of the role: the same set, read in fewer steps.
+    world
+        .staff_of(b)
+        .iter()
+        .any(|&w| world.comp::<Job>(w).is_some_and(|j| j.role == role && j.employer == Some(b) && j.on_shift(tod)))
 }
 
 /// What a Shop offer is for (D43).
@@ -1980,7 +1985,23 @@ fn finance_per_day(world: &World, kind: AssetKind, price: i64, coins: i64) -> i6
 
 /// The nearest seller of `kind` to `from` (ties lower id), open now when
 /// `require_open` (a body walks there; the Statistical pass buys remotely).
+/// The perf pass phase 4: off the kind's table (`World::near_table`),
+/// tested nearest first in the scan's `(door distance, id)` order up to the
+/// first that passes, so `seller_open` (a scan of the role's workers) runs
+/// only on the sellers nearer than the answer.
 pub(crate) fn nearest_seller(world: &World, kind: BuildingKind, from: TilePos, require_open: bool) -> Option<EntityId> {
+    if crate::spatial::scans() {
+        return nearest_seller_scan(world, kind, from, require_open);
+    }
+    let pass = |b: EntityId| {
+        world.comp::<Building>(b).is_some_and(|bd| !bd.demolished && !bd.derelict)
+            && (!require_open || seller_open(world, b))
+    };
+    world.near_table(kind).nearest_passing(from, pass)
+}
+
+/// [`nearest_seller`] by the scan of every seller (the reference).
+fn nearest_seller_scan(world: &World, kind: BuildingKind, from: TilePos, require_open: bool) -> Option<EntityId> {
     world
         .buildings_of_kind(kind)
         .iter()
@@ -1990,6 +2011,24 @@ pub(crate) fn nearest_seller(world: &World, kind: BuildingKind, from: TilePos, r
         .filter_map(|b| world.comp::<Building>(b).map(|bd| (bd.door.manhattan(from), b)))
         .min()
         .map(|(_, b)| b)
+}
+
+/// The lowest [`seller_level`] any seller of `kind` asks (`None` with no
+/// seller). The perf pass phase 4: read once a `(shop_gen, kinds_gen)`
+/// (`World::with_shop_memo`): a level moves only with a write to a Building
+/// (its owner), a Corp (its levels, or a corp founded or dissolved), or the
+/// kind's list, and each bumps one of the two.
+pub(crate) fn lowest_level(world: &World, kind: BuildingKind) -> Option<f32> {
+    let scan = || world.buildings_of_kind(kind).iter().map(|&b| seller_level(world, b)).min_by(|a, b| a.total_cmp(b));
+    if crate::spatial::scans() {
+        return scan();
+    }
+    if let Some(l) = world.with_shop_memo(|m| m.lowest.get(&kind).copied()) {
+        return l;
+    }
+    let l = scan();
+    world.with_shop_memo(|m| m.lowest.insert(kind, l));
+    l
 }
 
 /// Phase 5 (D43 reading): the coins a day a new asset may still take,
@@ -2113,9 +2152,7 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
     const VEHICLES: [(AssetKind, u8); 4] =
         [(AssetKind::Motorcycle, 1), (AssetKind::Car, 1), (AssetKind::Car, 2), (AssetKind::Flyer, 1)];
     const PACKS: [(AssetKind, u8); 2] = [(AssetKind::Pack, 1), (AssetKind::Pack, 2)];
-    let lowest = |kind: BuildingKind| {
-        world.buildings_of_kind(kind).iter().map(|&b| seller_level(world, b)).min_by(|a, b| a.total_cmp(b))
-    };
+    let lowest = |kind: BuildingKind| lowest_level(world, kind);
     let has_pack = assets_at(world, id)
         .iter()
         .any(|&a| world.comp::<Asset>(a).is_some_and(|x| x.kind == AssetKind::Pack && x.loc == AssetLoc::Carried(id)));
@@ -2653,5 +2690,144 @@ fn seed_seller(
             format!("{who} opened {what} in {district} (seeded; Lot {} {rect:?})", lot.index),
         );
         Some(lot)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::components::Market;
+    use crate::time::TICKS_PER_DAY;
+
+    const SELLERS: [BuildingKind; 4] =
+        [BuildingKind::Garage, BuildingKind::Clinic, BuildingKind::SecurityOffice, BuildingKind::Market];
+
+    /// `f` with the indexed reads switched to their scans.
+    fn scan<R>(f: impl FnOnce() -> R) -> R {
+        crate::spatial::SCANS.with(|s| s.set(true));
+        let r = f();
+        crate::spatial::SCANS.with(|s| s.set(false));
+        r
+    }
+
+    /// Every price-keyed read the cached way first (on the memo the last
+    /// check left), then by the scan: `market_by_price` and `nearest_seller`
+    /// (open and not) from every seller's door and a sample of the
+    /// citizens' tiles, `lowest_level` per seller kind and `mean_price`.
+    /// Returns how many Market picks were not the nearest Market (the price
+    /// and the shelf at work).
+    fn check(w: &World, label: &str) -> usize {
+        let mut tiles: Vec<TilePos> = SELLERS
+            .iter()
+            .flat_map(|&k| w.buildings_of_kind(k).iter())
+            .filter_map(|&b| w.comp::<Building>(b).map(|bd| bd.door))
+            .collect();
+        // scan-ok: a unit test.
+        tiles.extend(w.citizens().iter().step_by(5).filter_map(|&a| w.comp::<Position>(a).map(|p| p.tile)));
+        tiles.push(TilePos::default());
+        let mut priced = 0;
+        for &t in &tiles {
+            let got = w.market_by_price(t);
+            assert_eq!(got, scan(|| w.market_by_price(t)), "{label}: market_by_price from {t:?}");
+            priced += usize::from(got.is_some() && got != w.nearest_of_kind(BuildingKind::Market, t));
+            for kind in SELLERS {
+                for open in [false, true] {
+                    let got = nearest_seller(w, kind, t, open);
+                    let want = scan(|| nearest_seller(w, kind, t, open));
+                    assert_eq!(got, want, "{label}: nearest_seller {kind:?} open {open} from {t:?}");
+                }
+            }
+        }
+        for kind in SELLERS {
+            assert_eq!(lowest_level(w, kind), scan(|| lowest_level(w, kind)), "{label}: lowest_level {kind:?}");
+        }
+        assert_eq!(w.mean_price(), scan(|| w.mean_price()), "{label}: mean_price");
+        priced
+    }
+
+    /// The perf pass phase 4: the price-keyed caches are the scans they
+    /// replaced on the shipped city through each of their invalidation
+    /// points, read at once after each: the midnight price move, a price and
+    /// a corp's level written mid-day, a seller re-owned, a Market founded,
+    /// one closed (re-kinded), a Garage demolished, a Market shut by a riot
+    /// and an empty shelf. Without `shop_gen` (the Building, Corp and Market
+    /// stores' writes) or `kinds_gen` a read returns the stale answer.
+    #[test]
+    fn test_price_keyed_caches_match_the_scans() {
+        let mut w = World::new(42, crate::config::Config::load());
+        w.run_ticks(TICKS_PER_DAY + 9 * TICKS_PER_HOUR);
+        let mut priced = check(&w, "day 1 09:00");
+        // Midnight: the prices move.
+        let tenths = |w: &World| -> Vec<i64> {
+            w.buildings_of_kind(BuildingKind::Market).iter().map(|&m| w.price_tenths_at(m)).collect()
+        };
+        let before = tenths(&w);
+        w.run_ticks(TICKS_PER_DAY);
+        assert_ne!(tenths(&w), before, "no price moved at midnight");
+        priced += check(&w, "day 2 09:00");
+        // A price written mid-day: the dearest Market the cheapest.
+        let markets = w.buildings_of_kind(BuildingKind::Market).to_vec();
+        let dear = *markets.iter().max_by_key(|&&m| (w.price_tenths_at(m), m)).expect("a Market");
+        let mean = w.mean_price();
+        if let Some(m) = w.comp_mut::<Market>(dear) {
+            m.price_food = 1;
+            m.price_tenths = 10;
+        }
+        assert_ne!(scan(|| w.mean_price()), mean, "the write moved no mean");
+        priced += check(&w, "a price written");
+        // A corp's Tech level written: the cheapest Garage cheaper still.
+        let garages = w.buildings_of_kind(BuildingKind::Garage).to_vec();
+        let (g, corp) = garages.iter().find_map(|&g| w.corp_of_building(g).map(|c| (g, c))).expect("a corp's Garage");
+        let low = lowest_level(&w, BuildingKind::Garage);
+        if let Some(c) = w.comp_mut::<Corp>(corp) {
+            c.price_level.insert(crate::components::Niche::Tech, 0.25);
+        }
+        assert_ne!(scan(|| lowest_level(&w, BuildingKind::Garage)), low, "the level moved nothing");
+        priced += check(&w, "a corp's level written");
+        // That Garage re-owned by the city (level 1.0).
+        ownership::transfer_building(&mut w, g, None);
+        priced += check(&w, "a Garage re-owned");
+        // A Market founded on the empty Lot nearest a sample agent.
+        // scan-ok: a unit test.
+        let people = w.citizens();
+        let a = people[people.len() / 3];
+        let at = w.comp::<Position>(a).expect("a tile").tile;
+        let lot = w
+            .buildings_of_kind(BuildingKind::Lot)
+            .iter()
+            .copied()
+            .filter(|&b| w.comp::<Building>(b).is_some_and(|bd| !bd.demolished && bd.occupants.is_empty()))
+            .min_by_key(|&b| (w.comp::<Building>(b).map_or(u32::MAX, |bd| bd.door.manhattan(at)), b))
+            .expect("a Lot");
+        crate::systems::founding::convert(&mut w, lot, BuildingKind::Market, None, 1);
+        assert!(w.buildings_of_kind(BuildingKind::Market).contains(&lot), "not founded");
+        priced += check(&w, "a Market founded");
+        // The Market nearest another agent closed (re-kinded a Home).
+        let c = people[2 * people.len() / 3];
+        let cat = w.comp::<Position>(c).expect("a tile").tile;
+        let shut = w.nearest_of_kind(BuildingKind::Market, cat).expect("a Market");
+        crate::systems::founding::convert(&mut w, shut, BuildingKind::Home, None, 0);
+        assert!(!w.buildings_of_kind(BuildingKind::Market).contains(&shut), "not closed");
+        priced += check(&w, "a Market closed");
+        // A Garage demolished, the next Market shut by a riot, the one after
+        // with an empty shelf (query-time gates).
+        if let Some(bd) = garages.iter().find(|&&x| x != g).and_then(|&x| w.comp_mut::<Building>(x)) {
+            bd.demolished = true;
+        }
+        let riot = w.market_by_price(cat).expect("a Market");
+        let until = w.tick + TICKS_PER_HOUR;
+        if let Some(bd) = w.comp_mut::<Building>(riot) {
+            bd.closed_until = Some(until);
+        }
+        let bare = w.market_by_price(cat).expect("a Market");
+        assert_ne!(bare, riot, "the riot closed nothing");
+        if let Some(bd) = w.comp_mut::<Building>(bare) {
+            bd.stock_food = 0;
+        }
+        priced += check(&w, "demolished, shut and emptied");
+        // Ten minutes of the city on.
+        w.run_ticks(10);
+        priced += check(&w, "ten minutes on");
+        assert!(priced > 0, "every pick the nearest Market: the price term is not exercised");
     }
 }

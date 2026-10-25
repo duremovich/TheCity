@@ -219,7 +219,12 @@ impl<'a> LazyReserved<'a> {
         LazyReserved { world, holder, set: std::cell::OnceCell::new() }
     }
 
+    /// The perf pass phase 4: off the partner index (`World::res_partners`),
+    /// not the set built from every reservation in the city.
     pub fn contains(&self, o: &EntityId) -> bool {
+        if !crate::spatial::scans() {
+            return self.world.partner_reserved(*o, self.holder);
+        }
         self.set.get_or_init(|| reserved_partners(self.world, self.holder)).contains(o)
     }
 }

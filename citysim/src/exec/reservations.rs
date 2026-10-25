@@ -63,6 +63,9 @@ impl World {
         if let Some(b) = kind.building() {
             self.res_by_building.entry(b).or_default().insert(holder);
         }
+        if let ReservationKind::Partner { other } = kind {
+            *self.res_partners.entry(other).or_default().entry(holder).or_default() += 1;
+        }
     }
 
     pub fn release_all(&mut self, holder: EntityId) {
@@ -70,7 +73,35 @@ impl World {
             for b in rs.iter().filter_map(|r| r.kind.building()) {
                 self.unfile_reservation(holder, b);
             }
+            for r in &rs {
+                if let ReservationKind::Partner { other } = r.kind {
+                    self.unfile_partner(holder, other);
+                }
+            }
         }
+    }
+
+    /// The perf pass phase 4: one `Partner` reservation of `holder` on
+    /// `other` gone from the partner index.
+    fn unfile_partner(&mut self, holder: EntityId, other: EntityId) {
+        if let Some(hs) = self.res_partners.get_mut(&other) {
+            if let Some(n) = hs.get_mut(&holder) {
+                *n -= 1;
+                if *n == 0 {
+                    hs.remove(&holder);
+                }
+            }
+            if hs.is_empty() {
+                self.res_partners.remove(&other);
+            }
+        }
+    }
+
+    /// The perf pass phase 4: is `o` held by a `Partner` reservation of
+    /// anyone but `holder` (`social::reserved_partners(holder)` contains
+    /// `o`), off the partner index.
+    pub fn partner_reserved(&self, o: EntityId, holder: EntityId) -> bool {
+        self.res_partners.get(&o).is_some_and(|hs| hs.keys().any(|&h| h != holder))
     }
 
     /// Scale S4 perf: drop `holder` from `b`'s list unless it still holds a
@@ -108,6 +139,16 @@ impl World {
             }
         }
         self.res_by_building = idx;
+        let mut partners: std::collections::BTreeMap<EntityId, std::collections::BTreeMap<EntityId, u32>> =
+            Default::default();
+        for (&h, rs) in &self.reservations {
+            for r in rs {
+                if let ReservationKind::Partner { other } = r.kind {
+                    *partners.entry(other).or_default().entry(h).or_default() += 1;
+                }
+            }
+        }
+        self.res_partners = partners;
     }
 
     /// L2 (L30): live `Bed` and `Seat` reservations at `b` by holders other
@@ -172,12 +213,16 @@ impl World {
     pub fn sweep_reservations(&mut self) {
         let tick = self.tick;
         let mut dropped: Vec<(EntityId, EntityId)> = Vec::new();
+        let mut partners: Vec<(EntityId, EntityId)> = Vec::new();
         self.reservations.retain(|&h, v| {
             v.retain(|r| {
                 let live = r.expires > tick;
                 if !live {
                     if let Some(b) = r.kind.building() {
                         dropped.push((h, b));
+                    }
+                    if let ReservationKind::Partner { other } = r.kind {
+                        partners.push((h, other));
                     }
                 }
                 live
@@ -187,5 +232,63 @@ impl World {
         for (h, b) in dropped {
             self.unfile_reservation(h, b);
         }
+        for (h, other) in partners {
+            self.unfile_partner(h, other);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::time::{TICKS_PER_DAY, TICKS_PER_HOUR};
+
+    /// The partner index is the one `rebuild_reservation_index` builds from
+    /// the reservations, and `partner_reserved` is `reserved_partners`' set
+    /// for every holder and every agent anyone holds. Returns how many
+    /// Partner reservations the city holds.
+    fn check(w: &World, label: &str) -> usize {
+        let mut fresh = w.clone();
+        fresh.rebuild_reservation_index();
+        assert_eq!(w.res_partners, fresh.res_partners, "{label}: the partner index drifted");
+        let held: Vec<EntityId> = w.res_partners.keys().copied().collect();
+        let mut holders: Vec<EntityId> = w.reservations.keys().copied().collect();
+        // scan-ok: a unit test.
+        holders.extend(w.citizens().iter().step_by(50));
+        for &h in &holders {
+            let set = crate::systems::social::reserved_partners(w, h);
+            for &o in held.iter().chain(&holders) {
+                assert_eq!(w.partner_reserved(o, h), set.contains(&o), "{label}: {o} held, for {h}");
+            }
+        }
+        w.reservations.values().flatten().filter(|r| matches!(r.kind, ReservationKind::Partner { .. })).count()
+    }
+
+    /// The perf pass phase 4: the partner index through the evening's
+    /// Socialise and Court plans (reserved, released, expired), a death of
+    /// an agent someone holds, and a holder's death, each read at once.
+    /// Without one of its write paths the index drifts from the rebuild.
+    #[test]
+    fn test_partner_index_matches_the_reservations() {
+        let mut w = World::new(42, crate::config::Config::load());
+        w.run_ticks(TICKS_PER_DAY + 17 * TICKS_PER_HOUR);
+        let mut seen = 0;
+        for _ in 0..60 {
+            w.run_ticks(5);
+            seen += check(&w, "the evening");
+            if seen > 0 && !w.res_partners.is_empty() {
+                break;
+            }
+        }
+        // An agent someone holds dies, then a holder.
+        let held = w.res_partners.keys().next().copied().expect("no Partner reservation all evening");
+        w.remove_agent(held);
+        check(&w, "the held one gone");
+        if let Some(h) = w.res_partners.values().flat_map(|hs| hs.keys()).next().copied() {
+            w.remove_agent(h);
+            check(&w, "a holder gone");
+        }
+        w.run_ticks(3 * TICKS_PER_HOUR);
+        check(&w, "three hours on");
     }
 }
