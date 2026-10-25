@@ -98,3 +98,18 @@ changes the map, not a mechanism.
   waiting on the retirement were re-read: five pass on the shipped city and went; the super probe keeps `[distance]`
   absent (293 min a shift, `OPEN-169`). The change tier came under budget not by cutting tests but by running the
   binaries six at a time in `tools/test.py` (tests step 223 s -> 87 s; the tier 1m33s warm, quiet box).
+- **Phase 1** (`71fee8c`, `OPEN-195` closed, `[rest]`, `CITYSIM_REST_OFF`). The root was wider than F3's: three
+  families of one mechanism, a Rest cut by a work signal the next think does not answer. (1) The departure gate
+  ignored the Work goal's refusals: `routine::work_refused` (a sentence, a sick day, a week unpaid) is now shared by
+  Work's `in shift` gate and the gate. (2) The gate cut Rests it had already seen: a rich manager's Work scores under
+  Idle, and the sweeper's commute Rest at the beat is latched; `routine::leave_gate_at` reads the gate at the Rest's
+  start, and a Rest begun with it open runs (the 30-tick think still lets Work win). (3) `can_work_now` ignored the
+  rest day (the super at his own block); it now cuts only on a due shift, and not an idle Rest begun on it at the
+  post. **Deviations:** "share the predicate" is a new `work_refused` both read, not the Work goal's whole score
+  (Work losing on score cannot be a predicate, hence rule 2); the exec's 0-Work diaries are a Home-only corp with no
+  office (`OPEN-207`, the goal line says "Work: no Hq"), and the manager's idling is a scoring question (`OPEN-208`);
+  both left. The device row is a new `shadow --lives` column, `short_rest/d` (an idle Rest cut within 5 min), read
+  on the base by running the branch with the switch off (identical to the base by the off identity): 2k 42-44
+  pooled 0.16 -> 0.02 (super 0.89 -> 0.02, gun 0.49 -> 0.02), idle 4.46 -> 4.26 h/d. `person.rs`' loader-rehire
+  probe now seats its two candidates in the Home nearest the Yard (a third, nearer jobless adult took the post once
+  the city moved). SAVE_VERSION stays 67.
