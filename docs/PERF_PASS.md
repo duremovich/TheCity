@@ -128,3 +128,30 @@ changes the map, not a mechanism.
   but the answer is the same. The 60k and 100k maps are under `D:/TheCity/target/perf_maps/` (`isle_60000.txt`,
   `isle_100000.txt`, `--downsample 2`, the k2 lines). Left hot at 60k: `stat_daily` 0.53 s in one tick (~0.9 s
   projected at 100k, against the gate's 1 s), the rest of think (`Shop`, `local()`: phase 4).
+- **Phase 3** (`OPEN-184` annotated). The world build at 100k seed 42: 405 s -> 54 s (60k: 277 s -> 30 s, `prof`'s
+  `world_new`), under the gate's 2 minutes. One new primitive, `transit::reach_discs(to, limit)`: discs whose union
+  holds every door within `limit` of `to` by `commute_ticks` (the walk's disc; with the El, around each stop the walk
+  left after the half headway, the cheapest hop to one of `to`'s alight candidates and its walk), queried on a
+  door grid and cut by the exact measure. Its callers: relocation's pick and trade (`life::HomeReach`, per pass and
+  work tile, the Homes within `max(cap, dest_cap)` nearest first: the pick's minimum is order-free and every Home
+  past `dest_cap` was skipped; the trade's walk stops past `cap`), `free_beds_near` (the pre-roll's unmet demand and
+  `grow_housing`), `build_near`'s Lot and storey (`World::kind_grid`), and the graded pick
+  (`classpay::GradedIndex`, citizens by `set_out` once a job-search pass; with nobody within the job's cap, the
+  nearest over a doubling reach, every citizen once it spans the map). The labour pool's walk keeps its visits (the
+  age refusals it meets are `band_refusals`, a saved, reported counter) and reads each group's rules a hire cannot
+  change once, when the role's groups are built (the heirs, lawfulness, dress, the knowledge floor, a chip post,
+  the struck-off, the age gate), the hired and quit-blocked by member index. **Deviations:** the study's
+  "`seed_staff` from the `HirePool`" was already so (`seed_staff` ends in `job_search`); its 80 s was the pool's
+  walk, which visits every group within 512 key units of the best (`profession_w` 400 puts the floor that low), so
+  it is cheaper visits, not fewer. Kept current: nothing outlives a pass. `HomeReach` and the door grids are built
+  per relocation pass or round (no Home is added inside one), `kind_grid` is rebuilt after a Lot is built on
+  (`kinds_gen`), the pool's `member_hired` is set by `note_hired`, and `GradedIndex` holds only where a citizen sets
+  out from, which a hire does not move; every other rule is read at the pick. Identical to `2ced00a` on 2k 42-44 x 30,
+  20k `isle_m_k2` 42 x 30 (save, report, events) and the 100k day-0 save; `test_indexed_build_matches_the_scans`
+  builds the shipped and the 4,000 city both ways (it fails if the pool's hired go stale). At 60k (s, base ->
+  branch): `preroll_housing` 172.7 -> 8.6 (`reloc::pick` 110.7 -> 0.13, `preroll::unmet` 20.8 -> 0.24,
+  `build_near` 12.2 -> 0.09), `seed_staff` 74.5 -> 6.4 (the pool's walk 59.9 -> 0.28), `pick_graded` 36.0 -> 3.2,
+  `seed_after_staff` 15.8 -> 1.0. SAVE_VERSION stays 67. Left at 100k (54 s): `seed_staff` 13 s (the pool's
+  per-door `bases`, 3.4 s, and `pick_graded` 8.9 s), the other seeds' own scans (`seed_sellers` 7.5, `seed_venues`
+  5.8, `ownership::seed` 5.1, `seed_fixers` 4.2, `ages::seed` 4.2), relocation's per-pass worker scan (23 passes, 5.3 s
+  with the trade).

@@ -92,6 +92,11 @@ comment on or above the line.
 - `spatial.rs`: `TileGrid`, a bucket grid for radius queries; returns a superset the caller filters. `BuildingGrid`
   over doors: `World::building_grid` (every building) and `World::kind_grid` (one kind, the venue index behind
   `leisure::nearest_venue`; dropped when `buildings_by_kind_mut()` or the Building store changes).
+  `transit::reach_discs(to, limit)` is the commute ball as discs (the walk's around `to`, one around each stop that
+  can still arrive in time by the El): a grid over the discs holds every door within `limit` of `to` by
+  `commute_ticks`, the world build's index (perf phase 3: relocation's `HomeReach`, `free_beds_near`, the housing
+  build's Lots and storeys, `classpay::GradedIndex`). `spatial::scans()` (unit tests only) turns those back into
+  the scans for `life::tests::test_indexed_build_matches_the_scans`.
 - `map.rs` (tile map from `assets/map.txt`), `mapgen.rs` (generated maps, `--map gen:<N>`), `time.rs` (ticks, days,
   `DayPhase`, `Season`; `TICKS_PER_DAY`, `TICKS_PER_HOUR`).
 

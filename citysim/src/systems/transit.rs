@@ -1330,6 +1330,55 @@ pub fn commute_ticks(world: &World, from: TilePos, to: TilePos) -> Tick {
     }
 }
 
+/// The perf pass phase 3 (the world build): discs `(centre, radius in
+/// Manhattan tiles)` whose union holds every `from` with
+/// [`commute_ticks`]`(world, from, to) <= limit`: a superset the caller
+/// filters by the exact measure, so a query over the discs is the scan of
+/// every `from`. The walk's disc around `to`; with the El on, around each
+/// stop `s` the tiles from which boarding at `s` could still arrive within
+/// `limit`: the ride is at least the half headway, the hop from `s` to an
+/// alight stop `commute_ticks` may take (the first `stop_candidates` open
+/// ones nearest `to`) and the walk from it, so the walk to `s` is at most
+/// what is left (closures, `passes` and the access cap only drop rides).
+pub fn reach_discs(world: &World, to: TilePos, limit: Tick) -> Vec<(TilePos, u32)> {
+    let step = world.config.exec.move_ticks_full;
+    let tiles = |t: Tick| t.checked_div(step).map_or(u32::MAX, |v| u32::try_from(v).unwrap_or(u32::MAX));
+    let mut out = vec![(to, tiles(limit))];
+    let c = &world.config.transit;
+    if !c.enabled {
+        return out;
+    }
+    let net = &world.transit.net;
+    let k = c.stop_candidates.max(1);
+    let shut = |s: u16| world.transit.stop_closed.get(&s).is_some_and(|&until| until > world.tick);
+    let alight: Vec<(u16, Tick)> = net
+        .near(to)
+        .iter()
+        .filter(|&&e| !shut(e))
+        .take(k)
+        .map(|&e| (e, Tick::from(net.stops[usize::from(e)].manhattan(to)) * step))
+        .collect();
+    if alight.is_empty() {
+        return out;
+    }
+    let wait = Tick::from(c.headway / 2);
+    for s in 0..net.stops.len() {
+        let s16 = s as u16;
+        let best = alight
+            .iter()
+            .filter(|&&(e, _)| e != s16)
+            .filter_map(|&(e, w2)| {
+                let hop = net.hop(s16, e);
+                (hop.ticks != UNREACHABLE).then(|| Tick::from(hop.ticks) + w2)
+            })
+            .min();
+        if let Some(rest) = best.map(|b| b + wait).filter(|&b| b <= limit) {
+            out.push((net.stops[s], tiles(limit - rest)));
+        }
+    }
+    out
+}
+
 /// T14 (phase 3, plan D9): the commute band's upper bounds in ticks: `< 30`,
 /// `30-60`, `60-120`, `120-180`, `>= 180` (bands 0-4).
 pub const BANDS: [u64; 4] = [30, 60, 120, 180];
