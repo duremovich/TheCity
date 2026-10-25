@@ -322,7 +322,7 @@ pub fn candidate_at_venue_in(
     // candidate. The shorter of the two lists is read (both run ~200 at 20k).
     let occupants: usize = venues
         .iter()
-        .filter_map(|k| world.buildings_by_kind.get(k))
+        .filter_map(|k| world.buildings_by_kind().get(k))
         .flatten()
         .filter_map(|&b| world.comp::<Building>(b))
         .map(|bd| bd.occupants.len())
@@ -340,7 +340,7 @@ pub fn candidate_at_venue_in(
         Box::new(
             venues
                 .iter()
-                .filter_map(|k| world.buildings_by_kind.get(k))
+                .filter_map(|k| world.buildings_by_kind().get(k))
                 .flatten()
                 .filter_map(|&b| world.comp::<Building>(b))
                 .flat_map(|bd| bd.occupants.iter().copied()),

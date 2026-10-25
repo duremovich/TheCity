@@ -660,29 +660,64 @@ impl Origin {
     }
 }
 
+impl Origin {
+    /// The origin's box, `(lo, hi)` corners (a point for `At`).
+    fn bounds(self) -> (TilePos, TilePos) {
+        match self {
+            Origin::At(p) => (p, p),
+            Origin::Day(a, b) => {
+                (TilePos { x: a.x.min(b.x), y: a.y.min(b.y) }, TilePos { x: a.x.max(b.x), y: a.y.max(b.y) })
+            }
+        }
+    }
+}
+
+/// The perf pass phase 2 (the venue index): the venues of `kind` (those of
+/// `buildings_of_kind` with a Building) handed to `test` nearest first by
+/// `(door distance from `from`, id)`, up to the first that passes and no
+/// further than `max_d` tiles: the sequence the old collect-and-sort of
+/// every venue of the kind handed to its `find`, read off the kind's grid
+/// (`World::kind_grid`) ring by ring.
+fn venue_by_distance(
+    world: &World,
+    kind: BuildingKind,
+    from: Origin,
+    max_d: u32,
+    test: impl FnMut(u32, EntityId) -> bool,
+) -> Option<(u32, EntityId)> {
+    let (lo, hi) = from.bounds();
+    world.kind_grid(kind).first_by_distance(lo, hi, max_d, |door| from.dist(door), test)
+}
+
+/// The most tiles from the origin a venue's door can be and still be within
+/// `reach` ticks' walk for `id` (`exec::walk_reach_tiles`; `u32::MAX`
+/// unbounded).
+fn reach_tiles(world: &World, id: EntityId, reach: Option<u64>) -> u32 {
+    let limit = (world.map.w() + world.map.h()) as u32;
+    reach.map_or(u32::MAX, |r| crate::exec::walk_reach_tiles(world, id, r, limit))
+}
+
 /// The nearest open venue of `kind` `id` may enter from `from` (door
-/// Manhattan, ties the lower id), restricted to `district` when given.
+/// Manhattan, ties the lower id), restricted to `district` when given, and
+/// `None` past `max_d` tiles (the perf pass phase 2: the callers drop a pick
+/// past the walk cap, and no door further than `max_d` is within it).
 fn nearest_venue(
     world: &World,
     id: EntityId,
     kind: BuildingKind,
     from: Origin,
     district: Option<DistrictId>,
+    max_d: u32,
 ) -> Option<(u32, EntityId)> {
     // Scale S4 perf: the distances first, then the tests nearest first
     // until one passes (the door policy reads the staff, the room the
-    // reservations), not the tests over every venue of the kind: the same pick.
-    let mut near: Vec<(u32, EntityId)> = world
-        .buildings_of_kind(kind)
-        .iter()
-        .filter_map(|&b| world.comp::<Building>(b).map(|bd| (from.dist(bd.door), b)))
-        .collect();
-    near.sort_unstable();
+    // reservations), not the tests over every venue of the kind: the same
+    // pick. The perf pass phase 2: the nearest first off the kind's grid.
     // Shadow V4 bug 18: not the agent's own workplace (staff spent their
     // evening at their own Brothel or pit, then waited up to 10 h there for
     // the shift).
     let own = world.comp::<crate::components::Job>(id).and_then(|j| j.employer);
-    near.into_iter().find(|&(_, b)| {
+    venue_by_distance(world, kind, from, max_d, |_, b| {
         Some(b) != own
             && standing(world, b)
             && (kind == BuildingKind::Bar || world.comp::<Building>(b).is_some_and(|bd| bd.venue.is_some()))
@@ -714,6 +749,7 @@ fn paid_candidates(
     let drank = crate::utility::goals::drank_today(world, id);
     let hungry = world.comp::<Needs>(id).is_some_and(|n| n.hunger < 0.5);
     let high = high_ok(world, id);
+    let max_d = reach_tiles(world, id, reach);
     for kind in LADDER {
         if kind == BuildingKind::Bar && drank {
             continue;
@@ -728,9 +764,9 @@ fn paid_candidates(
                     .is_some_and(|bd| crate::exec::timed_walk(world, id, from.near(bd.door), bd.door) <= r)
             })
         };
-        let pick = nearest_venue(world, id, kind, from, district)
+        let pick = nearest_venue(world, id, kind, from, district, max_d)
             .filter(in_reach)
-            .or_else(|| district.and_then(|_| nearest_venue(world, id, kind, from, None)));
+            .or_else(|| district.and_then(|_| nearest_venue(world, id, kind, from, None, max_d)));
         let Some((tiles, b)) = pick.filter(in_reach) else { continue };
         let price = price_of(world, b);
         // The rung's affordability (spec § 2's brake): at most half the purse above
@@ -2005,29 +2041,34 @@ fn evening_venues(world: &World, id: EntityId) -> Vec<(BuildingKind, EntityId)> 
     let cap = world.config.leisure.venue_walk_cap_ticks;
     let high = high_ok(world, id);
     let mut out = Vec::new();
+    let max_d = reach_tiles(world, id, Some(cap));
     for kind in LADDER {
-        let mut near: Vec<(bool, u32, EntityId)> = world
-            .buildings_of_kind(kind)
-            .iter()
-            .filter(|&&b| {
-                standing(world, b)
-                    && (kind == BuildingKind::Bar || world.comp::<Building>(b).is_some_and(|bd| bd.venue.is_some()))
-                    // Phase-8 review: the Full ladder's gates (a closed,
-                    // swept, dark, raided, unstaffed or unbuilt venue takes
-                    // nobody; the door policy; the room; a shut table).
-                    && open(world, b)
-                    && door_seen(world, id, b)
-                    && has_room(world, id, b)
-                    && (kind != BuildingKind::Den || table_open(world, b))
-            })
-            .filter_map(|&b| {
-                let bd = world.comp::<Building>(b)?;
-                let walk = crate::exec::timed_walk(world, id, day_from.near(bd.door), bd.door);
-                (walk <= cap).then(|| (world.district_of_building(b) != district, day_from.dist(bd.door), b))
-            })
-            .collect();
-        near.sort_unstable();
-        let Some(&(_, _, b)) = near.first() else { continue };
+        // The perf pass phase 2: the lowest `(other district, door distance,
+        // id)` over the venues that pass, as the old sort of them all had it:
+        // the nearest that passes in the Home's district, else the nearest
+        // that passes outside it, each off the kind's grid.
+        let pass = |b: EntityId| {
+            standing(world, b)
+                && (kind == BuildingKind::Bar || world.comp::<Building>(b).is_some_and(|bd| bd.venue.is_some()))
+                // Phase-8 review: the Full ladder's gates (a closed,
+                // swept, dark, raided, unstaffed or unbuilt venue takes
+                // nobody; the door policy; the room; a shut table).
+                && open(world, b)
+                && door_seen(world, id, b)
+                && has_room(world, id, b)
+                && (kind != BuildingKind::Den || table_open(world, b))
+                && world
+                    .comp::<Building>(b)
+                    .is_some_and(|bd| crate::exec::timed_walk(world, id, day_from.near(bd.door), bd.door) <= cap)
+        };
+        let Some((_, b)) = venue_by_distance(world, kind, day_from, max_d, |_, b| {
+            world.district_of_building(b) == district && pass(b)
+        })
+        .or_else(|| {
+            venue_by_distance(world, kind, day_from, max_d, |_, b| world.district_of_building(b) != district && pass(b))
+        }) else {
+            continue;
+        };
         let price = price_of(world, b);
         if (!high && rung_of(world, b, price) == Rung::High) || (kind != BuildingKind::Bar && 2 * price > purse) {
             continue;
@@ -3153,4 +3194,169 @@ pub fn in_gang(world: &World, id: EntityId) -> bool {
 /// The owner kind of a venue (the building panel).
 pub fn owner_kind_of(world: &World, b: EntityId) -> OwnerKind {
     ownership::owner_kind(world, world.owner_of(b))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The old `nearest_venue`: every venue of the kind collected, sorted by
+    /// `(door distance, id)`, the first that passes (the base's code).
+    fn nearest_venue_scan(
+        world: &World,
+        id: EntityId,
+        kind: BuildingKind,
+        from: Origin,
+        district: Option<DistrictId>,
+    ) -> Option<(u32, EntityId)> {
+        let mut near: Vec<(u32, EntityId)> = world
+            .buildings_of_kind(kind)
+            .iter()
+            .filter_map(|&b| world.comp::<Building>(b).map(|bd| (from.dist(bd.door), b)))
+            .collect();
+        near.sort_unstable();
+        let own = world.comp::<crate::components::Job>(id).and_then(|j| j.employer);
+        near.into_iter().find(|&(_, b)| {
+            Some(b) != own
+                && standing(world, b)
+                && (kind == BuildingKind::Bar || world.comp::<Building>(b).is_some_and(|bd| bd.venue.is_some()))
+                && district.is_none_or(|d| world.district_of_building(b) == d)
+                && open(world, b)
+                && door_seen(world, id, b)
+                && has_room(world, id, b)
+        })
+    }
+
+    /// The old `evening_venues`' pick per kind: the lowest `(other district,
+    /// door distance, id)` over every venue that passes (the base's code).
+    fn evening_scan(world: &World, id: EntityId, kind: BuildingKind) -> Option<EntityId> {
+        let (day_from, district) = evening_day(world, id)?;
+        let cap = world.config.leisure.venue_walk_cap_ticks;
+        let mut near: Vec<(bool, u32, EntityId)> = world
+            .buildings_of_kind(kind)
+            .iter()
+            .filter(|&&b| {
+                standing(world, b)
+                    && (kind == BuildingKind::Bar || world.comp::<Building>(b).is_some_and(|bd| bd.venue.is_some()))
+                    && open(world, b)
+                    && door_seen(world, id, b)
+                    && has_room(world, id, b)
+                    && (kind != BuildingKind::Den || table_open(world, b))
+            })
+            .filter_map(|&b| {
+                let bd = world.comp::<Building>(b)?;
+                let walk = crate::exec::timed_walk(world, id, day_from.near(bd.door), bd.door);
+                (walk <= cap).then(|| (world.district_of_building(b) != district, day_from.dist(bd.door), b))
+            })
+            .collect();
+        near.sort_unstable();
+        near.first().map(|&(_, _, b)| b)
+    }
+
+    /// The index's picks against the scans for every 5th citizen and every
+    /// kind of the ladder: `nearest_venue` from where it stands and from its
+    /// day, with and without its district, unbounded and cut at the walk
+    /// cap's tiles (`None` exactly when the scan's pick lies past them, and
+    /// then the pick is past the cap's walk too); and `evening_venues`
+    /// against the old sort and its price gates. Returns the queries with a
+    /// tie at distance 0 (several doors inside a day's rectangle).
+    fn check(w: &World, label: &str) -> usize {
+        let cap = w.config.leisure.venue_walk_cap_ticks;
+        let mut ties = 0;
+        // scan-ok: a unit test.
+        for id in w.citizens().into_iter().step_by(5) {
+            let Some(at) = origin(w, id) else { continue };
+            let max_d = reach_tiles(w, id, Some(cap));
+            let mut froms = vec![(Origin::At(at), w.district_of(at))];
+            if let Some((o, d)) = evening_day(w, id) {
+                froms.push((o, d));
+            }
+            for kind in LADDER {
+                for &(from, district) in &froms {
+                    for dist in [None, Some(district)] {
+                        let want = nearest_venue_scan(w, id, kind, from, dist);
+                        let got = nearest_venue(w, id, kind, from, dist, u32::MAX);
+                        assert_eq!(got, want, "{label}: {id} {kind:?} from {from:?} in {dist:?}");
+                        let cut = nearest_venue(w, id, kind, from, dist, max_d);
+                        assert_eq!(cut, want.filter(|&(d, _)| d <= max_d), "{label}: {id} {kind:?} cut at {max_d}");
+                        if let Some((d, b)) = want.filter(|&(d, _)| d > max_d) {
+                            let door = w.comp::<Building>(b).expect("a venue").door;
+                            assert!(crate::exec::timed_walk(w, id, from.near(door), door) > cap, "{label}: {b} at {d}");
+                        }
+                    }
+                    let zero = w
+                        .buildings_of_kind(kind)
+                        .iter()
+                        .filter(|&&b| w.comp::<Building>(b).is_some_and(|bd| from.dist(bd.door) == 0))
+                        .count();
+                    ties += usize::from(zero >= 2);
+                }
+            }
+            let got: Vec<(BuildingKind, EntityId)> = evening_venues(w, id);
+            let purse = spendable(w, id);
+            let high = high_ok(w, id);
+            let want: Vec<(BuildingKind, EntityId)> = if purse < 1 {
+                Vec::new()
+            } else {
+                LADDER
+                    .iter()
+                    .filter_map(|&k| evening_scan(w, id, k).map(|b| (k, b)))
+                    .filter(|&(k, b)| {
+                        let price = price_of(w, b);
+                        !((!high && rung_of(w, b, price) == Rung::High)
+                            || (k != BuildingKind::Bar && 2 * price > purse))
+                    })
+                    .collect()
+            };
+            assert_eq!(got, want, "{label}: {id}'s evening");
+        }
+        ties
+    }
+
+    /// The perf pass phase 2: the venue index is the old collect-and-sort on
+    /// the shipped city at 20:30 on day 1 (the evening's venues open), then
+    /// after a Bar is founded beside a sample agent, the Bar nearest another
+    /// is closed (re-kinded a Home), and the next is shut (derelict), each
+    /// read at once: without the index's invalidation point
+    /// (`buildings_by_kind_mut`) the founded Bar is missed and the closed one
+    /// still offered.
+    #[test]
+    fn test_venue_index_matches_the_scan() {
+        let mut w = World::new(42, crate::config::Config::load());
+        w.run_ticks(TICKS_PER_DAY + 20 * TICKS_PER_HOUR + 30);
+        let ties = check(&w, "day 1 20:30");
+        assert!(ties > 0, "no tie at distance 0: the tie-break is not exercised");
+        // scan-ok: a unit test.
+        let people = w.citizens();
+        // A Bar founded on the empty building nearest a sample agent.
+        let a = people[people.len() / 3];
+        let at = origin(&w, a).expect("an origin");
+        let site = [BuildingKind::Lot, BuildingKind::Home]
+            .iter()
+            .flat_map(|&k| w.buildings_of_kind(k).iter().copied())
+            .filter(|&b| w.comp::<Building>(b).is_some_and(|bd| !bd.demolished && bd.occupants.is_empty()))
+            .min_by_key(|&b| (w.comp::<Building>(b).map_or(u32::MAX, |bd| bd.door.manhattan(at)), b))
+            .expect("a site");
+        let before = nearest_venue(&w, a, BuildingKind::Bar, Origin::At(at), None, u32::MAX);
+        crate::systems::founding::convert(&mut w, site, BuildingKind::Bar, None, 1);
+        let after = nearest_venue_scan(&w, a, BuildingKind::Bar, Origin::At(at), None);
+        assert_ne!(after, before, "the founded Bar is not the agent's nearest: the test exercises nothing");
+        check(&w, "a Bar founded");
+        // The Bar nearest another agent closed (re-kinded a Home).
+        let c = people[2 * people.len() / 3];
+        let cat = origin(&w, c).expect("an origin");
+        let (_, shut) = nearest_venue_scan(&w, c, BuildingKind::Bar, Origin::At(cat), None).expect("a Bar");
+        crate::systems::founding::convert(&mut w, shut, BuildingKind::Home, None, 0);
+        assert_ne!(nearest_venue_scan(&w, c, BuildingKind::Bar, Origin::At(cat), None).map(|p| p.1), Some(shut));
+        check(&w, "a Bar closed");
+        // And the next derelict (a query-time gate, no re-kind).
+        let (_, next) = nearest_venue_scan(&w, c, BuildingKind::Bar, Origin::At(cat), None).expect("a Bar");
+        if let Some(bd) = w.comp_mut::<Building>(next) {
+            bd.derelict = true;
+        }
+        check(&w, "a Bar derelict");
+        // Ten more minutes of the city (the reservations and crowds move).
+        w.run_ticks(10);
+        check(&w, "ten minutes on");
+    }
 }

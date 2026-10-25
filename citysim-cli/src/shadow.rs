@@ -1128,7 +1128,7 @@ fn header(world: &World, t: &Track) -> String {
         let _ = writeln!(h, "- **Job**: none");
     }
     let owned: Vec<String> = world
-        .buildings_by_kind
+        .buildings_by_kind()
         .values()
         .flatten()
         .copied()

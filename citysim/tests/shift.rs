@@ -26,7 +26,7 @@ fn stations_worker(w: &World, near_food: bool) -> (EntityId, EntityId) {
     let reach = walk / w.config.exec.move_ticks_full.max(1) / 2;
     let fed_near = |door: TilePos| {
         [BuildingKind::Market, BuildingKind::NoodleBar].iter().any(|k| {
-            w.buildings_by_kind.get(k).is_some_and(|v| {
+            w.buildings_by_kind().get(k).is_some_and(|v| {
                 v.iter().any(|&m| {
                     w.comp::<citysim::Building>(m).is_some_and(|b| u64::from(b.door.manhattan(door)) <= reach)
                 })

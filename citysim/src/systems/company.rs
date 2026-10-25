@@ -347,7 +347,7 @@ fn floors_within(
     };
     let id = world.spawn();
     world.insert(id, home);
-    let list = world.buildings_by_kind.entry(BuildingKind::Home).or_default();
+    let list = world.buildings_by_kind_mut().entry(BuildingKind::Home).or_default();
     if let Err(i) = list.binary_search(&id) {
         list.insert(i, id);
     }
@@ -494,7 +494,7 @@ fn next_site(
     b.stock_food = 0;
     let id = world.spawn();
     world.insert(id, b);
-    let list = world.buildings_by_kind.entry(BuildingKind::Lot).or_default();
+    let list = world.buildings_by_kind_mut().entry(BuildingKind::Lot).or_default();
     if let Err(i) = list.binary_search(&id) {
         list.insert(i, id);
     }
@@ -848,7 +848,7 @@ fn close_floors(world: &mut World, h: EntityId, w: EntityId) {
         b.synth_food = 0;
         b.rent_per_day = 0;
     }
-    if let Some(v) = world.buildings_by_kind.get_mut(&BuildingKind::Home) {
+    if let Some(v) = world.buildings_by_kind_mut().get_mut(&BuildingKind::Home) {
         v.retain(|&x| x != h);
     }
     let mut actors = vec![h, w];

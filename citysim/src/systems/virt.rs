@@ -115,7 +115,7 @@ fn wanted(world: &World) -> Vec<Wanted> {
     }
     let hideouts: BTreeMap<EntityId, EntityId> =
         world.gang_list().iter().filter_map(|&g| world.comp::<Gang>(g).map(|x| (x.hideout, g))).collect();
-    let mut buildings: Vec<EntityId> = world.buildings_by_kind.values().flatten().copied().collect();
+    let mut buildings: Vec<EntityId> = world.buildings_by_kind().values().flatten().copied().collect();
     buildings.sort_unstable();
     for b in buildings {
         let Some(bd) = world.comp::<Building>(b) else { continue };

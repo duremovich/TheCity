@@ -463,7 +463,7 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
     let open_districts = open.iter().filter(|&&x| x).count();
     let by_district = world.districts.len() > 1 && districts_held > 0;
     let (mut frontier, mut frontier_total) = (0, 0);
-    for &h in world.buildings_by_kind.get(&BuildingKind::Home).map(|v| v.as_slice()).unwrap_or(&[]) {
+    for &h in world.buildings_by_kind().get(&BuildingKind::Home).map(|v| v.as_slice()).unwrap_or(&[]) {
         let Some(b) = world.comp::<Building>(h) else { continue };
         if b.demolished || b.derelict || residents.get(h.index as usize).is_none_or(|&n| n == 0) {
             continue;

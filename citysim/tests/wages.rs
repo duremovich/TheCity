@@ -1193,7 +1193,7 @@ fn test_rehire_bonus_picks_the_laid_off_worker_over_a_nearer_stranger() {
             c.economy2.rehire_bonus = bonus;
             c.economy2.skill_w = 0.0;
         });
-        let farm = w.buildings_by_kind.get(&BuildingKind::Farm).and_then(|v| v.first().copied()).expect("a Farm");
+        let farm = w.buildings_by_kind().get(&BuildingKind::Farm).and_then(|v| v.first().copied()).expect("a Farm");
         let door = w.comp::<Building>(farm).map(|b| b.door).expect("door");
         let stranger =
             citysim::systems::demography::hire_candidate(&w, farm, citysim::Role::Farmer).expect("a candidate");
@@ -1244,7 +1244,7 @@ fn test_rehire_bonus_picks_the_laid_off_worker_over_a_nearer_stranger() {
 #[test]
 fn test_hiring_key_weighs_the_roles_skill() {
     let mut w = round_city(|c| c.economy2.skill_w = 0.5);
-    let farm = w.buildings_by_kind.get(&BuildingKind::Farm).and_then(|v| v.first().copied()).expect("a Farm");
+    let farm = w.buildings_by_kind().get(&BuildingKind::Farm).and_then(|v| v.first().copied()).expect("a Farm");
     let door = w.comp::<Building>(farm).map(|b| b.door).expect("door");
     for a in jobless(&w) {
         if let Some(s) = w.comp_mut::<citysim::Skills>(a) {
@@ -1387,7 +1387,7 @@ fn test_at_ceiling_skips_buildings_without_demand() {
     let cfg = w.config.economy2.clone();
     let corp = corp_named(&w, "Nutrix");
     pin_food_demand(&mut w, corp);
-    let garage = w.buildings_by_kind.get(&BuildingKind::Garage).and_then(|v| v.first().copied()).expect("a Garage");
+    let garage = w.buildings_by_kind().get(&BuildingKind::Garage).and_then(|v| v.first().copied()).expect("a Garage");
     ownership::transfer_building(&mut w, garage, Some(corp));
     if let Some(c) = w.comp_mut::<Corp>(corp) {
         c.niches.insert(Niche::Tech);

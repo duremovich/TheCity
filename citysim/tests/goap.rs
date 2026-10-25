@@ -172,7 +172,7 @@ fn test_reservation_prevents_overcommit() {
     let reserve = u32::try_from(w.config.sickness.real_meal_reserve).expect("a small reserve");
     w.comp_mut::<Building>(market).expect("market").stock_food = 2 * reserve;
     // nobody's pantry counts as a source
-    for h in w.buildings_by_kind[&BuildingKind::Home].clone() {
+    for h in w.buildings_by_kind()[&BuildingKind::Home].clone() {
         w.comp_mut::<Building>(h).expect("home").stock_food = 0;
     }
     let ids: Vec<_> = w.citizens().into_iter().filter(|&id| !w.has::<Job>(id)).take(3).collect();
@@ -205,7 +205,7 @@ fn test_synth_reservation_counts_shelf_units_not_meals() {
     assert!(stretch >= 2, "the case needs a synth unit of several meals");
     w.comp_mut::<Building>(market).expect("market").stock_food = 2;
     w.comp_mut::<citysim::Market>(market).expect("market").synth_frac = 0; // no open unit
-    for h in w.buildings_by_kind[&BuildingKind::Home].clone() {
+    for h in w.buildings_by_kind()[&BuildingKind::Home].clone() {
         w.comp_mut::<Building>(h).expect("home").stock_food = 0;
     }
     let ids: Vec<_> = w.citizens().into_iter().filter(|&id| !w.has::<Job>(id)).take(3).collect();
@@ -250,7 +250,7 @@ fn test_synth_reservation_does_not_count_open_meals_twice() {
     w.comp_mut::<citysim::Market>(market).expect("market").synth_frac = 1;
     let open = citysim::systems::diet::open_meals(&w, market);
     assert_eq!(open, stretch - 1);
-    for h in w.buildings_by_kind[&BuildingKind::Home].clone() {
+    for h in w.buildings_by_kind()[&BuildingKind::Home].clone() {
         w.comp_mut::<Building>(h).expect("home").stock_food = 0;
     }
     let ids: Vec<_> = w.citizens().into_iter().filter(|&id| !w.has::<Job>(id)).take(3).collect();

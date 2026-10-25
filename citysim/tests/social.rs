@@ -130,7 +130,7 @@ fn test_extort_moves_coins_and_adds_memory() {
     let g0 = w.gangs()[0];
     gang::enlist(&mut w, actor, g0);
     let actor_home = w.comp::<citysim::Household>(actor).and_then(|h| h.home);
-    let home = w.buildings_by_kind[&BuildingKind::Home]
+    let home = w.buildings_by_kind()[&BuildingKind::Home]
         .iter()
         .copied()
         .find(|&h| Some(h) != actor_home && w.comp::<citysim::Building>(h).is_some_and(|b| b.occupants.len() >= 2))

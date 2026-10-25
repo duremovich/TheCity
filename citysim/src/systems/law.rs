@@ -2317,7 +2317,7 @@ pub fn new_patrol_route(world: &mut World, guard: EntityId) -> Vec<EntityId> {
     route.extend(beat);
     route.extend(beat_door.and_then(|d| world.nearest_of_kind(BuildingKind::Bar, d)));
     route.extend(world.building_of_kind(BuildingKind::Hall));
-    let mut homes = world.buildings_by_kind.get(&BuildingKind::Home).cloned().unwrap_or_default();
+    let mut homes = world.buildings_by_kind().get(&BuildingKind::Home).cloned().unwrap_or_default();
     let beat_homes = world.config.law.patrol_beat_homes;
     if let (Some(door), true) = (beat_door, homes.len() > beat_homes) {
         let mut near: Vec<(u32, EntityId)> = homes
@@ -2389,7 +2389,7 @@ pub fn district_route(world: &mut World, d: crate::components::DistrictId) -> Ve
         route.extend(world.building_of_kind(BuildingKind::Hall));
     }
     let mut homes = if homes_d.is_empty() {
-        world.buildings_by_kind.get(&BuildingKind::Home).cloned().unwrap_or_default()
+        world.buildings_by_kind().get(&BuildingKind::Home).cloned().unwrap_or_default()
     } else {
         homes_d
     };
@@ -2461,7 +2461,7 @@ pub fn crackdown_turf(world: &World, gang: EntityId) -> Vec<EntityId> {
     }
     let Some(door) = world.comp::<Building>(g.hideout).map(|b| b.door) else { return Vec::new() };
     let mut homes: Vec<(u32, EntityId)> = world
-        .buildings_by_kind
+        .buildings_by_kind()
         .get(&BuildingKind::Home)
         .map(|v| v.as_slice())
         .unwrap_or(&[])

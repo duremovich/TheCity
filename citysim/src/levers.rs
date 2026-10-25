@@ -2561,7 +2561,7 @@ impl World {
             b.occupants.clear();
             b.stock_food = 0;
         }
-        if let Some(v) = self.buildings_by_kind.get_mut(&BuildingKind::Home) {
+        if let Some(v) = self.buildings_by_kind_mut().get_mut(&BuildingKind::Home) {
             v.retain(|&h| h != home);
         }
         self.invalidate_flow_fields();
@@ -2684,7 +2684,7 @@ impl World {
                 within: None,
             },
         );
-        self.buildings_by_kind.entry(BuildingKind::Home).or_default().push(id);
+        self.buildings_by_kind_mut().entry(BuildingKind::Home).or_default().push(id);
         self.invalidate_flow_fields();
         crate::systems::districts::rebuild(self);
         let homeless: Vec<EntityId> = self

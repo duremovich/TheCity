@@ -85,7 +85,7 @@ pub fn bind_target(world: &World, id: EntityId, goal: GoalKind) -> Option<Entity
         GoalKind::Eat => {
             let home = world.comp::<Household>(id).and_then(|h| h.home);
             let tile = world.comp::<Position>(id)?.tile;
-            world.buildings_by_kind.get(&BuildingKind::Home)?;
+            world.buildings_by_kind().get(&BuildingKind::Home)?;
             // Scale S4 perf: read outward from the agent on the building
             // grid (a building of kind Home is on the Home list unless
             // demolished), not every Home: the same pick.

@@ -232,7 +232,7 @@ fn test_claim_resets_on_a_rival_blow_and_flips_at_three() {
     gang::enlist(&mut w, a, g0);
     gang::enlist(&mut w, b, g1);
     let homes = [a, b].map(|x| w.comp::<citysim::Household>(x).and_then(|h| h.home));
-    let home = w.buildings_by_kind[&BuildingKind::Home]
+    let home = w.buildings_by_kind()[&BuildingKind::Home]
         .iter()
         .copied()
         .find(|&h| !homes.contains(&Some(h)) && w.comp::<Building>(h).is_some_and(|bd| bd.occupants.len() >= 2))
@@ -737,7 +737,7 @@ fn test_contest_keeps_working_a_home_after_the_first_blow() {
     temper(&mut w, a);
     let homes = [a, b].map(|x| w.comp::<citysim::Household>(x).and_then(|h| h.home));
     // The only rival-held Home: g1 holds it outright.
-    let home = w.buildings_by_kind[&BuildingKind::Home]
+    let home = w.buildings_by_kind()[&BuildingKind::Home]
         .iter()
         .copied()
         .find(|&h| !homes.contains(&Some(h)) && w.comp::<Building>(h).is_some_and(|bd| bd.occupants.len() >= 2))

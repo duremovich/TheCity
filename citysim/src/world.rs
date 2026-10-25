@@ -670,7 +670,11 @@ pub struct World {
     /// pending shocks.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub corp_rethink: bool,
-    pub buildings_by_kind: BTreeMap<BuildingKind, Vec<EntityId>>,
+    /// Every building by kind, ascending. Private since the perf pass
+    /// phase 2: read through `buildings_by_kind()` / `buildings_of_kind`,
+    /// written only through `buildings_by_kind_mut()`, which bumps
+    /// `kinds_gen` (the venue index's invalidation point).
+    buildings_by_kind: BTreeMap<BuildingKind, Vec<EntityId>>,
     /// Rebuilt each tick for Full agents.
     pub agents_by_tile: BTreeMap<TilePos, Vec<EntityId>>,
     pub levers: Levers,
@@ -741,6 +745,17 @@ pub struct World {
     /// with the `building_gen` it was built at (not saved, not cloned).
     #[serde(skip)]
     building_memo: Memo<(u64, std::sync::Arc<crate::spatial::BuildingGrid>)>,
+    /// The perf pass phase 2: bumped by every `buildings_by_kind_mut()` (a
+    /// building founded, converted, re-kinded or dropped from its kind's
+    /// list; not saved).
+    #[serde(skip)]
+    kinds_gen: u64,
+    /// The perf pass phase 2 (the venue index): one grid per kind over
+    /// `buildings_of_kind(kind)` by door (`World::kind_grid`), all keyed by
+    /// the `(building_gen, kinds_gen)` they were built at (not saved, not
+    /// cloned: a loaded world rebuilds on its first query).
+    #[serde(skip)]
+    kind_memo: Memo<KindGrids>,
     pub vacancies: BTreeMap<EntityId, Vec<Role>>,
     pub edge_roads: Vec<TilePos>,
     pub view_rect: Option<Rect>,
@@ -1430,6 +1445,9 @@ impl<T> Clone for Memo<T> {
     }
 }
 
+/// The perf pass phase 2: `((building_gen, kinds_gen), each kind's grid)`.
+type KindGrids = ((u64, u64), BTreeMap<BuildingKind, std::sync::Arc<crate::spatial::BuildingGrid>>);
+
 /// `(tick, window, seen_gen)` and the open suspects seen inside the window
 /// then, ascending, each with its `last_seen` entry.
 type LocatedMemo = (Tick, Tick, u64, std::sync::Arc<Located>);
@@ -1689,6 +1707,8 @@ impl World {
             pos_index: Default::default(),
             building_gen: 0,
             building_memo: Memo::default(),
+            kinds_gen: 0,
+            kind_memo: Memo::default(),
             vacancies: BTreeMap::new(),
             edge_roads,
             view_rect: None,
@@ -2046,14 +2066,14 @@ impl World {
                 BuildingKind::Jail => self.insert(id, Law::default()),
                 _ => {}
             }
-            self.buildings_by_kind.entry(def.kind).or_default().push(id);
+            self.buildings_by_kind_mut().entry(def.kind).or_default().push(id);
         }
     }
 
     /// One gang per Hideout, in map order, named and funded from `[gangs]`
     /// (Scale S4: past the configured names, a generated one).
     fn spawn_gangs(&mut self) {
-        let hideouts = self.buildings_by_kind.get(&BuildingKind::Hideout).cloned().unwrap_or_default();
+        let hideouts = self.buildings_by_kind().get(&BuildingKind::Hideout).cloned().unwrap_or_default();
         let cfg = self.config.gangs.clone();
         for (i, hideout) in hideouts.into_iter().enumerate() {
             let id = self.spawn();
@@ -2136,7 +2156,7 @@ impl World {
         // (a map Home with no floors field is one slot: the 2k city's dealing
         // is unchanged).
         let mut homes: Vec<EntityId> = self
-            .buildings_by_kind
+            .buildings_by_kind()
             .get(&BuildingKind::Home)
             .cloned()
             .unwrap_or_default()
@@ -2174,7 +2194,7 @@ impl World {
         // were free loot, and the Full thieves the table learns from cleared
         // them (M10 phase 5b).
         let used: BTreeSet<EntityId> = homes.iter().copied().take(n.div_ceil(per)).collect();
-        for h in self.buildings_by_kind.get(&BuildingKind::Home).cloned().unwrap_or_default() {
+        for h in self.buildings_by_kind().get(&BuildingKind::Home).cloned().unwrap_or_default() {
             if !used.contains(&h) {
                 if let Some(b) = self.comp_mut::<Building>(h) {
                     b.stock_food = 0;
@@ -2260,7 +2280,7 @@ impl World {
                     continue;
                 }
                 let workplaces =
-                    role.workplace().and_then(|k| self.buildings_by_kind.get(&k)).cloned().unwrap_or_default();
+                    role.workplace().and_then(|k| self.buildings_by_kind().get(&k)).cloned().unwrap_or_default();
                 // Lives at work phase 6 (§ 4.1): with careers on, a resident
                 // outside the role's age band is passed over (seeded into
                 // another row, or none); off, every door's first untaken.
@@ -2865,12 +2885,51 @@ impl World {
 
     /// The first building of a kind (the only one for singletons).
     pub fn building_of_kind(&self, kind: BuildingKind) -> Option<EntityId> {
-        self.buildings_by_kind.get(&kind).and_then(|v| v.first().copied())
+        self.buildings_by_kind().get(&kind).and_then(|v| v.first().copied())
     }
 
     /// Every building of a kind, ascending (map order), demolished included.
     pub fn buildings_of_kind(&self, kind: BuildingKind) -> &[EntityId] {
         self.buildings_by_kind.get(&kind).map_or(&[], Vec::as_slice)
+    }
+
+    /// Every kind's buildings (`buildings_of_kind`), read only.
+    pub fn buildings_by_kind(&self) -> &BTreeMap<BuildingKind, Vec<EntityId>> {
+        &self.buildings_by_kind
+    }
+
+    /// The perf pass phase 2: the kind lists for writing. Every write goes
+    /// through here and bumps `kinds_gen`, which drops the venue index
+    /// (`kind_grid`): its one invalidation point besides a Building inserted
+    /// or removed (`building_gen`).
+    pub fn buildings_by_kind_mut(&mut self) -> &mut BTreeMap<BuildingKind, Vec<EntityId>> {
+        self.kinds_gen += 1;
+        &mut self.buildings_by_kind
+    }
+
+    /// The perf pass phase 2 (the venue index): `buildings_of_kind(kind)`
+    /// that have a Building, bucketed by door, built on the first query
+    /// after the lists or the Building store changed (`kinds_gen`,
+    /// `building_gen`; doors never move). A query is a superset the caller
+    /// filters by its exact rule (`BuildingGrid::first_by_distance`).
+    pub fn kind_grid(&self, kind: BuildingKind) -> std::sync::Arc<crate::spatial::BuildingGrid> {
+        let key = (self.building_gen, self.kinds_gen);
+        let mut memo = self.kind_memo.0.lock().unwrap_or_else(|e| e.into_inner());
+        if memo.as_ref().is_some_and(|(k, _)| *k != key) {
+            *memo = None;
+        }
+        let (_, grids) = memo.get_or_insert_with(|| (key, BTreeMap::new()));
+        grids
+            .entry(kind)
+            .or_insert_with(|| {
+                let (ids, doors): (Vec<EntityId>, Vec<TilePos>) = self
+                    .buildings_of_kind(kind)
+                    .iter()
+                    .filter_map(|&b| self.comp::<Building>(b).map(|bd| (b, bd.door)))
+                    .unzip();
+                std::sync::Arc::new(crate::spatial::BuildingGrid::build(self.map.w(), self.map.h(), ids, &doors))
+            })
+            .clone()
     }
 
     /// The building of `kind` whose door is nearest `from` by Manhattan

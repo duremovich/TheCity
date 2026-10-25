@@ -183,7 +183,7 @@ fn test_crackdown_patrol_loop_walks_the_target_turf() {
     let gang = w.gangs()[0];
     let hideout = w.hideout_of(gang).expect("hideout");
     let market = w.building_of_kind(BuildingKind::Market).expect("market");
-    let homes: Vec<EntityId> = w.buildings_by_kind[&BuildingKind::Home].iter().copied().take(4).collect();
+    let homes: Vec<EntityId> = w.buildings_by_kind()[&BuildingKind::Home].iter().copied().take(4).collect();
     w.comp_mut::<Gang>(gang).expect("g").territory = homes.clone();
     {
         let l = w.law_mut().expect("law");
@@ -209,7 +209,7 @@ fn test_crackdown_patrol_loop_walks_the_target_turf() {
     let turf = law::crackdown_turf(&w, gang);
     assert_eq!(turf.len(), 6);
     let door = w.comp::<Building>(hideout).expect("b").door;
-    let far = w.buildings_by_kind[&BuildingKind::Home]
+    let far = w.buildings_by_kind()[&BuildingKind::Home]
         .iter()
         .filter_map(|&h| w.comp::<Building>(h).map(|b| b.door.manhattan(door)))
         .max()

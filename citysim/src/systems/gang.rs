@@ -760,7 +760,7 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
         }
         Some(_) => return None,
     };
-    let homes = world.buildings_by_kind.get(&BuildingKind::Home)?;
+    let homes = world.buildings_by_kind().get(&BuildingKind::Home)?;
     // Unclaimed (no gang holds it), or under Contest in the rival's list.
     let pick = |h: EntityId| match theirs {
         Some(t) => t.binary_search(&h).is_ok(),
@@ -1030,7 +1030,7 @@ pub fn stat_extort_target(world: &World, id: EntityId, o: Order) -> Option<Entit
     let r = world.config.crime.sight_day_crime;
     let purist = crate::systems::creeds::is_purist(world, gang);
     let mut best: Option<((bool, u32, u32), EntityId)> = None;
-    for &h in world.buildings_by_kind.get(&BuildingKind::Home)? {
+    for &h in world.buildings_by_kind().get(&BuildingKind::Home)? {
         if Some(h) == own_home {
             continue;
         }
@@ -1936,11 +1936,11 @@ pub fn convert_to_hideout(world: &mut World, gang: EntityId, b: EntityId) {
         bd.capacity = u16::try_from(interior).unwrap_or(u16::MAX).min(cap);
     }
     if let Some(k) = old_kind {
-        if let Some(v) = world.buildings_by_kind.get_mut(&k) {
+        if let Some(v) = world.buildings_by_kind_mut().get_mut(&k) {
             v.retain(|&x| x != b);
         }
     }
-    let list = world.buildings_by_kind.entry(BuildingKind::Hideout).or_default();
+    let list = world.buildings_by_kind_mut().entry(BuildingKind::Hideout).or_default();
     if let Err(i) = list.binary_search(&b) {
         list.insert(i, b);
     }

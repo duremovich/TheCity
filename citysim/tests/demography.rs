@@ -170,7 +170,7 @@ fn test_immigration_two_per_week() {
 #[test]
 fn test_demolish_home_makes_residents_homeless() {
     let mut w = world(49);
-    let home = w.buildings_by_kind[&BuildingKind::Home][3];
+    let home = w.buildings_by_kind()[&BuildingKind::Home][3];
     let residents: Vec<_> =
         w.citizens().into_iter().filter(|&c| w.comp::<Household>(c).and_then(|h| h.home) == Some(home)).collect();
     assert!(!residents.is_empty());
@@ -183,7 +183,7 @@ fn test_demolish_home_makes_residents_homeless() {
     let homeless_events = w.events.iter().filter(|e| e.kind == EventKind::Homeless).count();
     assert_eq!(homeless_events, residents.len());
     assert!(w.comp::<Building>(home).is_some_and(|b| b.demolished));
-    assert!(!w.buildings_by_kind[&BuildingKind::Home].contains(&home));
+    assert!(!w.buildings_by_kind()[&BuildingKind::Home].contains(&home));
 }
 
 #[test]
@@ -195,12 +195,12 @@ fn test_build_home_rejects_invalid_rect() {
     w.tick();
     assert_eq!(failed(&w), 1);
     // overlapping an existing building
-    let b = w.comp::<Building>(w.buildings_by_kind[&BuildingKind::Home][0]).expect("b").rect;
+    let b = w.comp::<Building>(w.buildings_by_kind()[&BuildingKind::Home][0]).expect("b").rect;
     w.push_command(PlayerCommand::BuildHome { rect: Rect { x: b.x, y: b.y, w: 4, h: 4 } });
     w.tick();
     assert_eq!(failed(&w), 2);
     // a valid rect, but the Treasury is short
-    let homes_before = w.buildings_by_kind[&BuildingKind::Home].len();
+    let homes_before = w.buildings_by_kind()[&BuildingKind::Home].len();
     let ground = find_ground_rect(&w).expect("a free 4x4 of Ground");
     w.treasury_mut().expect("t").coins = 10;
     w.push_command(PlayerCommand::BuildHome { rect: ground });
@@ -211,7 +211,7 @@ fn test_build_home_rejects_invalid_rect() {
     w.push_command(PlayerCommand::BuildHome { rect: ground });
     w.tick();
     assert_eq!(failed(&w), 3);
-    assert_eq!(w.buildings_by_kind[&BuildingKind::Home].len(), homes_before + 1);
+    assert_eq!(w.buildings_by_kind()[&BuildingKind::Home].len(), homes_before + 1);
     assert_eq!(w.treasury().expect("t").coins, 300);
 }
 
