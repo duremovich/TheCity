@@ -52,7 +52,8 @@ Set with Dylan 2026-10-24 (`docs/ROADMAP_POST_M14.md` addendum 21): emergent sto
 
 1. **The perf pass**, spec written: `docs/PERF_PASS.md` (decisions R1-R6, phases 0-8, a checkpoint, a quiet-box
    gate). Phase 0 housekeeping (`OPEN-201`, `OPEN-202`), phase 1 the Rest loop (`OPEN-195`), phases 2-5 the
-   study's items 1-5 (byte-identical), phases 6-7 parallel scoring (thread-count identity), phase 8 the P9
+   study's items 1-5 (byte-identical), phase 6 the 30-day slope and 7 midnight (R7, after the checkpoint), 8-9
+   parallel scoring (thread-count identity), phase 10 the P9
    re-import at `k = 2` and `k = 1` (`OPEN-182`, reported, not fixed: `OPEN-204`). Gate: 100k ≥ 30 ticks/s, no tick
    over 1 s, a build under 2 min.
 2. **Shadow V9** at 100k on the re-imported island: street sleeping (`OPEN-192`), the hunger climb (`OPEN-167`),
@@ -64,7 +65,7 @@ Set with Dylan 2026-10-24 (`docs/ROADMAP_POST_M14.md` addendum 21): emergent sto
 
 ## Open calls for Dylan
 
-- Push TheCityGraphics `855d0aa` (merged locally) before the perf pass's phase 8 re-imports from it.
+- Push TheCityGraphics `855d0aa` (merged locally) before the perf pass's phase 10 re-imports from it.
 - `OPEN-150`: the starting-condition seed's shape.
 - Pressure-pass design: `OPEN-160`, `OPEN-162`, `OPEN-157`, `OPEN-176`, `OPEN-178`; the combat model `OPEN-179`.
 - Standing: `OPEN-062`, `OPEN-039`, `OPEN-057`, `OPEN-059`, `OPEN-077`, `OPEN-069`, `OPEN-070`.
