@@ -382,7 +382,17 @@ pub struct Config {
     /// written into a save) with the key absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routes: Option<RoutesCfg>,
+    /// The perf pass phase 1 (docs/PERF_PASS.md; OPEN-195): the Rest loop's
+    /// fix (`exec::routine::rest_fix`). `None` (not written into a save)
+    /// with the key absent or `CITYSIM_REST_OFF=1`: the base rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rest: Option<RestCfg>,
 }
+
+/// `[rest]` (the perf pass phase 1, OPEN-195): a Rest is cut only by a work
+/// signal the Work goal will answer. No keys: the fix has no number.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct RestCfg {}
 
 /// `[routes]` (the island fix round F1, OPEN-188): when a trip's route is
 /// longer than walking, walk; and a label is not space (the Spire is one
@@ -8930,6 +8940,11 @@ impl Config {
         // `[routes]` and the rest; absent, the base behaviour).
         if cfg.shift.is_none() {
             cfg.drop_haul_counter();
+        }
+        // The perf pass phase 1 (OPEN-195): the Rest fix's switch in flight
+        // (doctrine 6), retired at the pass close.
+        if std::env::var("CITYSIM_REST_OFF").is_ok_and(|v| v == "1") {
+            cfg.rest = None;
         }
         // Lives at work (D13): a config with `[lives] enabled = false` by any
         // path clears the milestone's sections, so the off save holds no

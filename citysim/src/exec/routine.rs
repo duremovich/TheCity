@@ -122,10 +122,43 @@ pub fn work_pending(world: &World, id: EntityId, job: &Job) -> bool {
     shift_pending(world, id, job)
 }
 
+/// The perf pass phase 1 (OPEN-195): the Rest loop's fix is on (`[rest]`;
+/// absent, or `CITYSIM_REST_OFF=1`, the base rule).
+pub fn rest_fix(world: &World) -> bool {
+    world.config.rest.is_some()
+}
+
+/// The perf pass phase 1 (OPEN-195): the Work goal's refusals that are not
+/// the clock's: a sentence, a sick day (Hunger as sickness § 2), a week
+/// unpaid (the `paid` gate). The Work goal's `in shift` gate reads it, and
+/// with `[rest]` so does the departure gate, which is false while Work
+/// refuses (it cut every Rest at a minute for a shift Work would not take).
+pub fn work_refused(world: &World, id: EntityId, job: &Job) -> bool {
+    world.has::<crate::components::Sentence>(id) || crate::systems::health::sick(world, id) || job.days_unpaid >= 7
+}
+
+/// The perf pass phase 1 (OPEN-195): a shift the Work goal would take now:
+/// pending (a workday, not yet worked, a guard's jail day) and not refused.
+pub fn work_due(world: &World, id: EntityId, job: &Job) -> bool {
+    work_pending(world, id, job) && !work_refused(world, id, job)
+}
+
 /// Should this agent drop what it is doing and head to work now?
 pub fn must_leave_for_work(world: &World, id: EntityId) -> bool {
+    leave_gate_at(world, id, world.tick)
+}
+
+/// The departure gate with the clock at `at` (the body where it stands
+/// now): `must_leave_for_work` at `world.tick`; at a resting body's Rest
+/// start, whether the gate was already open when the Rest was chosen (a
+/// resting body has not moved, and `transit::trip_due` reads the deadline's
+/// trip, so the gate holds still while it waits).
+pub fn leave_gate_at(world: &World, id: EntityId, at: crate::time::Tick) -> bool {
     let Some(job) = world.comp::<Job>(id) else { return false };
-    let key = job.next_shift_key(world.tick);
+    if rest_fix(world) && work_refused(world, id, job) {
+        return false;
+    }
+    let key = job.next_shift_key(at);
     if !workday_of(world, id, job, key) || job.last_shift_day == Some(key) {
         return false;
     }
@@ -137,7 +170,7 @@ pub fn must_leave_for_work(world: &World, id: EntityId) -> bool {
     if pos.building == Some(employer) {
         return false;
     }
-    let tod = world.tick_of_day();
+    let tod = (at % crate::time::TICKS_PER_DAY) as u16;
     let until = u64::from(job.ticks_until_shift(tod));
     let door = world.comp::<Building>(employer).map_or(pos.tile, |b| b.door);
     // L2 shadow fixes item 1: a commute under way holds until arrival (the
@@ -148,7 +181,7 @@ pub fn must_leave_for_work(world: &World, id: EntityId) -> bool {
     }
     // Transit T16: a rider leaves later (`transit::trip_due`: the trip as
     // it would be made to arrive by the margin).
-    crate::systems::transit::trip_due(world, id, door, until, DEPARTURE_MARGIN)
+    crate::systems::transit::trip_due_at(world, id, door, until, DEPARTURE_MARGIN, at)
 }
 
 /// Work before the shift starts: head to the workplace and rest inside until

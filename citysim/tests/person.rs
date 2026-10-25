@@ -3322,8 +3322,20 @@ fn probe_laid_off_loader_with_a_profession_is_rehired_first() {
         .filter(|&s| w.gang_of(s).is_none() && citysim::systems::careers::age_ok(&w, s, role))
         .find(|&s| demography::is_adult(&w, s) && !w.laid_off.contains_key(&s))
         .expect("a jobless stranger");
-    let h = home(&w, a);
-    w.set_home(stranger, h);
+    // The perf pass phase 1 (OPEN-195): the two share the Home nearest the
+    // Yard (by day 5 a third jobless adult nearer than the loader's own Home
+    // took the post once the Rest loop was fixed; the premise is the nearest
+    // door, so the profession is the only edge).
+    let yard_door = w.comp::<citysim::Building>(yard).expect("yard").door;
+    let h = w
+        .buildings_of_kind(BuildingKind::Home)
+        .iter()
+        .copied()
+        .filter(|&b| w.comp::<citysim::Building>(b).is_some_and(|x| !x.demolished && !x.derelict))
+        .min_by_key(|&b| (w.comp::<citysim::Building>(b).map_or(u32::MAX, |x| x.door.manhattan(yard_door)), b))
+        .expect("a Home");
+    w.set_home(a, Some(h));
+    w.set_home(stranger, Some(h));
     for loader_holds in [true, false] {
         let mut w = w.clone();
         let (holder, other) = if loader_holds { (a, stranger) } else { (stranger, a) };

@@ -624,6 +624,9 @@ struct OpenAction {
     target: Option<EntityId>,
     start: Tick,
     start_place: String,
+    /// The perf pass phase 1 (OPEN-195): the step's plan goal (an idle Rest
+    /// is one outside a Work plan).
+    goal: Option<GoalKind>,
 }
 
 struct Track {
@@ -730,6 +733,8 @@ struct Track {
     spouse_coloc_stat: u32,
     /// HangOuts closed with nobody else at the tile.
     hang_empty: u32,
+    /// The perf pass phase 1 (OPEN-195): idle Rests cut within `SHORT_REST_MIN`.
+    short_rests: u32,
     /// `SERVED_SOURCE_KINDS` events seen at the workplace during a shift, by kind.
     source_kinds: BTreeMap<String, u32>,
     /// Shadow V6: the camera lens.
@@ -826,6 +831,10 @@ struct CamDay {
 
 /// Shadow V7: a GoTo step longer than this (minutes) is a long leg (PREVIEW_PASS § 3 phase 5's row).
 const CAM_LONG_GOTO_MIN: u64 = 120;
+
+/// The perf pass phase 1 (OPEN-195): an idle Rest this short or shorter
+/// (minutes) is a cut one (`--lives`' `short_rest/d`; the loop cut at 1).
+const SHORT_REST_MIN: u64 = 5;
 
 /// The key of an unchanged stretch: tile, building, step, exec state.
 type StillKey = (citysim::TilePos, Option<EntityId>, Option<ActionKind>, u8);
@@ -958,6 +967,7 @@ impl Track {
             spouse_coloc: 0,
             spouse_coloc_stat: 0,
             hang_empty: 0,
+            short_rests: 0,
             source_kinds: BTreeMap::new(),
             cam: Cam::default(),
         }
@@ -1252,7 +1262,7 @@ fn flow_kind(action: Option<ActionKind>, midnight: bool) -> &'static str {
     }
 }
 
-fn goal_line(world: &World, b: &Brain) -> String {
+fn goal_line(world: &World, id: EntityId, b: &Brain) -> String {
     let Some(tr) = b.last_think.as_ref() else { return "(no think trace)".into() };
     let chosen = b.current_goal;
     let mut s = String::new();
@@ -1283,8 +1293,35 @@ fn goal_line(world: &World, b: &Brain) -> String {
             g.considerations.iter().map(|c| format!("{} {:.2}->{:.2}", c.name, c.input, c.output)).collect();
         let _ = write!(s, "; because {}", cs.join(", "));
     }
-    let _ = world;
+    if chosen != Some(GoalKind::Work) {
+        if let Some(why) = work_blocked(world, id) {
+            let _ = write!(s, "; Work: {why}");
+        }
+    }
     s
+}
+
+/// The perf pass phase 1 (OPEN-195): why the Work goal cannot run, for the
+/// goal line: an exec whose corp has no office (`life::hq_of` skips Homes
+/// and Lots: a housing corp's exec never plans Work), a post with no
+/// workplace, or the Work goal's refusals (`routine::work_refused`).
+fn work_blocked(world: &World, id: EntityId) -> Option<&'static str> {
+    use citysim::systems::life;
+    let Some(job) = world.comp::<Job>(id) else {
+        let corp = life::exec_corp(world, id)?;
+        return life::hq_of(world, corp, id).is_none().then_some("no Hq");
+    };
+    if job.employer.is_none() {
+        Some("no workplace")
+    } else if world.has::<Sentence>(id) {
+        Some("sentenced")
+    } else if citysim::systems::health::sick(world, id) {
+        Some("sick")
+    } else if job.days_unpaid >= 7 {
+        Some("unpaid a week")
+    } else {
+        None
+    }
 }
 
 fn plan_line(world: &World, b: &Brain) -> Option<String> {
@@ -1664,7 +1701,7 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                         "GOAL {:?}{}: {}",
                         g,
                         t.last_goal.map_or(String::new(), |o| format!(" (was {o:?})")),
-                        goal_line(world, b)
+                        goal_line(world, id, b)
                     ),
                 );
             }
@@ -1706,6 +1743,7 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                     target: step.target,
                     start: now,
                     start_place: here.clone(),
+                    goal: b.plan.as_ref().map(|p| p.goal),
                 });
             }
         }
@@ -2201,6 +2239,10 @@ fn log_grouped(t: &mut Track, now: Tick, cat: &'static str, msgs: Vec<String>, n
 fn close_action(world: &World, t: &mut Track, now: Tick, status: &str) {
     let Some(o) = t.open.take() else { return };
     let dur = now.saturating_sub(o.start);
+    // The perf pass phase 1 (OPEN-195): an idle Rest cut within minutes.
+    if o.action == ActionKind::Rest && o.goal != Some(GoalKind::Work) && dur <= SHORT_REST_MIN {
+        t.short_rests += 1;
+    }
     let end_place = t.last_place.clone();
     let tgt = o.target.map_or(String::new(), |x| format!(" [target {}]", nm(world, x)));
     if o.action == ActionKind::HangOut {
@@ -3437,6 +3479,8 @@ struct Agg {
     spouse_coloc: u32,
     spouse_coloc_stat: u32,
     hang_empty: u32,
+    /// The perf pass phase 1 (OPEN-195): idle Rests cut within `SHORT_REST_MIN`.
+    short_rests: u32,
     /// Whole free workday shifts at a building; Served-able by a body or an
     /// event; by any of the three signals; the hourly samples and the
     /// non-staff bodies summed; the venue tally; the source events by kind.
@@ -3506,6 +3550,7 @@ impl Agg {
             self.spouse_coloc_stat += t.spouse_coloc_stat;
         }
         self.hang_empty += t.hang_empty;
+        self.short_rests += t.short_rests;
         self.housed += u32::from(t.home_tier.is_some());
         self.spire += u32::from(t.home_tier.is_some_and(|x| x >= 2));
         for s in t.shifts.iter().filter(|s| s.whole && s.workday && s.free && s.employer.is_some()) {
@@ -3538,6 +3583,7 @@ impl Agg {
         self.spouse_coloc += o.spouse_coloc;
         self.spouse_coloc_stat += o.spouse_coloc_stat;
         self.hang_empty += o.hang_empty;
+        self.short_rests += o.short_rests;
         self.served_shifts += o.served_shifts;
         self.servedable += o.servedable;
         self.servedable_any += o.servedable_any;
@@ -4273,11 +4319,12 @@ fn lives_line(text: &mut String, city: &str, label: &str, a: &Agg) {
     let kinds: Vec<String> = kinds.iter().take(3).map(|(k, n)| format!("{k} {n}")).collect();
     let _ = writeln!(
         text,
-        "PROBE lives {city} {label}: n {} agent-days {days:.1} | idle_h/d {:.2} | married {} never_named {} never_coloc {} \
+        "PROBE lives {city} {label}: n {} agent-days {days:.1} | idle_h/d {:.2} short_rest/d {:.2} | married {} never_named {} never_coloc {} \
          named/wk {:.2} coloc_h/wk {:.2} (stat-spouse {:.2}) | hang/wk {:.2} empty {:.2} ({}/{}) | shifts {} servedable \
          {:.2} any {:.2} bodies/h {:.2} venue_visits/shift {:.2} met {:.2} enc/shift {:.2} | travel_h/wk {:.2}          spire {}/{} | kinds: {}",
         a.agents,
         per_day(a.idle_min as f64 / 60.0),
+        per_day(f64::from(a.short_rests)),
         a.married,
         a.never_named,
         a.never_coloc,

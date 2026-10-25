@@ -18,7 +18,7 @@ It prints one table, and writes it to <out>/measure.md, for the three things a p
    ticks/s (print only: the runs share the box), every `--cols` column summed over the run and every
    `--events` kind counted, per seed and the mean, base -> candidate.
 3. **Device rows**: `shadow --lives` (2k, 42-44 pooled) on both binaries, the `--arch` rows and the
-   `all` row: n, idle h/d, shifts, Served-able, met, enc/shift.
+   `all` row: n, idle h/d, short rest/d (an idle Rest cut within 5 min; a binary without the column prints -), shifts, Served-able, met, enc/shift.
 
 The base is built from `git archive <sha>` into `<main repo>/target/measure/base-<sha>/` with its own
 target dir and is **run from that source root** (its `assets/config.toml` lacks the phase's keys; running
@@ -51,7 +51,8 @@ import analyze_run  # noqa: E402  (load_csv, load_events, analyze)
 
 EXE = ".exe" if os.name == "nt" else ""
 TPD = 1440
-LIVES_FIELDS = [("n", r"n (\d+)"), ("idle h/d", r"idle_h/d ([\d.]+)"), ("shifts", r"shifts (\d+)"),
+LIVES_FIELDS = [("n", r"n (\d+)"), ("idle h/d", r"idle_h/d ([\d.]+)"), ("short rest/d", r"short_rest/d ([\d.]+)"),
+                ("shifts", r"shifts (\d+)"),
                 ("Served-able", r"servedable ([\d.]+)"), ("met", r"met ([\d.]+)"), ("enc/shift", r"enc/shift ([\d.]+)")]
 
 

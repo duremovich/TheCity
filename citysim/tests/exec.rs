@@ -294,3 +294,72 @@ fn test_flowfield_radix_build_matches_binary_heap() {
         }
     }
 }
+
+/// The perf pass phase 1 (OPEN-195): a Rest is not cut, minute by minute,
+/// by a work signal the Work goal will not answer. A sick day worker at
+/// home in shift hours rested in 1-minute blocks (the departure gate is
+/// true all shift, the Work goal refuses a sick day): one long Rest now.
+/// A Rest begun with the gate already open runs (the think that chose it
+/// saw the gate), one begun before it opened is cut; and on a rest day a
+/// worker at the workplace in shift hours is not cut by `can_work_now`
+/// (the super at his own block: 21.5 h of 1-minute Rests on day 6).
+#[test]
+fn test_rest_is_one_block_not_a_loop() {
+    use citysim::exec::actions::finishes_early;
+    use citysim::{ActionKind, ExecState, Health, Needs};
+    let mut w = World::new(42, Config::load());
+    w.config.lod.force = Some(Lod::Full);
+    let home_of = |w: &World, id| citysim::systems::missions::home_of(w, id);
+    let id = w
+        .citizens()
+        .into_iter()
+        .find(|&a| {
+            w.comp::<Job>(a).is_some_and(|j| {
+                matches!(j.role, Role::Farmer | Role::Fabber | Role::Clerk)
+                    && j.shifts == [(540, 1080)]
+                    && j.employer.is_some_and(|e| home_of(&w, a).is_some_and(|h| h != e))
+            }) && w.has::<Health>(a)
+        })
+        .expect("a housed day worker");
+    let home = home_of(&w, id).expect("home");
+    let work = w.comp::<Job>(id).and_then(|j| j.employer).expect("employer");
+
+    // The gate's two cases (day 0 is a workday; 10:00 is on shift).
+    w.run_ticks(600);
+    w.abort_plan(id);
+    w.leave_building(id);
+    w.enter_building(id, home);
+    assert!(citysim::exec::routine::must_leave_for_work(&w, id), "on shift away from work: the gate is open");
+    assert!(finishes_early(&w, id, ActionKind::Rest, 60), "a Rest begun at 01:00 is cut when the gate opens");
+    assert!(!finishes_early(&w, id, ActionKind::Rest, 595), "a Rest begun with the gate open runs");
+
+    // A sick day at home: one long Rest, not a loop.
+    w.comp_mut::<Health>(id).expect("health").sick_today = true;
+    assert!(!citysim::exec::routine::must_leave_for_work(&w, id), "no departure for a shift Work refuses");
+    let n = w.comp_mut::<Needs>(id).expect("needs");
+    (n.hunger, n.energy, n.belonging, n.fun, n.safety) = (1.0, 0.9, 1.0, 1.0, 1.0);
+    let (mut short, mut rests, mut open) = (0, 0, None);
+    for _ in 0..240 {
+        w.run_ticks(1);
+        let now = match w.comp::<Brain>(id).expect("brain").exec {
+            ExecState::Use { kind: ActionKind::Rest, started, .. } => Some(started),
+            _ => None,
+        };
+        if open != now {
+            if let Some(s) = open {
+                short += u32::from(w.tick - s <= 5);
+            }
+            rests += u32::from(now.is_some());
+            open = now;
+        }
+    }
+    assert!(rests >= 1 && short <= 1, "a sick day's Rests: {rests} begun, {short} of them cut within 5 min");
+
+    // The rest day (day 6): at the workplace in shift hours, Work not due.
+    w.comp_mut::<Health>(id).expect("health").sick_today = false;
+    w.abort_plan(id);
+    w.leave_building(id);
+    w.enter_building(id, work);
+    w.tick = 6 * TICKS_PER_DAY + 600;
+    assert!(!finishes_early(&w, id, ActionKind::Rest, w.tick - 30), "a rest day's Rest at the workplace runs");
+}

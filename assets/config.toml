@@ -4371,6 +4371,15 @@ access_cap_ticks = 0               # the El is not boarded at a stop more than t
 pass_slack_tiles = 8               # a stop pair is no route when the alight stop lies on the walk to the board stop
                                    # (within this of a shortest Manhattan way): walking past your stop to ride back to it
 
+# The perf pass phase 1 (OPEN-195; exec/routine.rs, exec/actions.rs `finishes_early`): the Rest loop. A Rest is cut
+# only by a work signal the Work goal will answer: the departure gate is false while Work refuses (a sick day, a
+# sentence, unpaid a week); a Rest begun with the gate already open runs (the think that chose it saw the gate, and
+# the 30-tick think still lets Work win); `can_work_now` cuts a Rest only on a shift that is due, and an idle Rest
+# begun on shift at the post is not cut by it. Shadow V8: Idle filled with 1-minute Rests (a sick farmer 16 in 4 h,
+# a super on his rest day all day). Absent (`CITYSIM_REST_OFF=1` while the perf pass is in flight), the base rule.
+# No keys: the fix has no number.
+[rest]
+
 # The island pass phase 1 (docs/ISLAND_PASS.md I1; OPEN-163 part; systems/distance.rs): travel time in the job
 # and bed picks. Each cap is on the travel estimate (`transit::commute_ticks`: the walk at [exec] move_ticks_full,
 # or the El where it wins; ticks are minutes): a candidate past it is dropped while one within it is left, and with
