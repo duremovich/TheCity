@@ -1594,19 +1594,39 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
         let _timer = crate::prof::scope!("work::coworkers");
         let tod = world.tick_of_day();
         let crew = world.config.lod.coworker_crew;
-        let mates: Vec<EntityId> = crew_above(world.staff_of(employer), id, crew, |c| {
-            world.comp::<Job>(c).is_some_and(|j| j.role == job.role)
-        })
-        .into_iter()
-        .filter(|&c| {
-            world.comp::<Job>(c).is_some_and(|j| j.on_shift(tod))
-                && world.comp::<Brain>(c).is_some_and(|b| b.lod == Lod::Statistical)
-                && !world.has::<Sentence>(c)
-        })
-        .collect();
+        let mates: Vec<EntityId> = {
+            let _mates = crate::prof::scope!("work::mates");
+            crew_above(world.staff_of(employer), id, crew, |c| world.comp::<Job>(c).is_some_and(|j| j.role == job.role))
+                .into_iter()
+                .filter(|&c| {
+                    world.comp::<Job>(c).is_some_and(|j| j.on_shift(tod))
+                        && world.comp::<Brain>(c).is_some_and(|b| b.lod == Lod::Statistical)
+                        && !world.has::<Sentence>(c)
+                })
+                .collect()
+        };
         world.coworker_pairs += mates.len() as u64;
-        for c in mates {
-            crate::systems::social::interacted(world, id, c);
+        // The perf pass phase 9 (OPEN-184): the bond in two steps, reads then
+        // writes. Every pair's step is read first (the two temperaments) and
+        // its edge looked up, each lookup independent of the others, so the
+        // edge map's cache misses overlap instead of queueing one per write;
+        // then the drifts are written in mate order. The pairs are distinct
+        // and a drift writes only its own edge, the neighbour index and the
+        // enemies index, none of which a step reads, so each write is
+        // `social::interacted`'s for that mate exactly.
+        let _drift = crate::prof::scope!("work::interacted");
+        let mut looked = 0u32;
+        let steps: Vec<(EntityId, f32)> = mates
+            .iter()
+            .map(|&c| {
+                looked ^= world.edge(id, c).map_or(0, |e| e.affinity.to_bits());
+                (c, crate::systems::social::interaction_step(world, id, c))
+            })
+            .collect();
+        // The lookups are made for their cache lines alone.
+        std::hint::black_box(looked);
+        for (c, step) in steps {
+            crate::systems::social::interacted_at(world, id, c, step);
         }
     }
     let shift_ends_soon = job.shift_end(tick).is_some_and(|end| end <= tick + TICKS_PER_HOUR);
