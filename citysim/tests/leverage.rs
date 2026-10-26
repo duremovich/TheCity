@@ -376,6 +376,9 @@ fn test_protection_never_on_own_front() {
     // city another business there out-earned its staged 100 a day).
     if let Some(bd) = w.comp_mut::<Building>(b) {
         bd.revenue = std::iter::repeat_n(100_000, 7).collect();
+        // Pressure pass phase 6: a business under water closes, and a closed
+        // one is no target; the staged racket stands open.
+        bd.closed_until = None;
     }
     assert_eq!(leverage::protection_target(&w, g, d), Some(b));
     if let Some(bd) = w.comp_mut::<Building>(b) {

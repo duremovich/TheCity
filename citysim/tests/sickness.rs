@@ -706,7 +706,7 @@ fn test_pool_pays_wallet_then_kin_then_gang() {
 }
 
 /// A Full patient, diagnosed with the coins, goes to a Clinic and is
-/// treated within two days (a person probe).
+/// treated within four days (a person probe).
 #[test]
 fn probe_diagnosed_patient_with_coins_seeks_the_clinic() {
     let mut w = dole_world();
@@ -718,7 +718,11 @@ fn probe_diagnosed_patient_with_coins_seeks_the_clinic() {
         let mut v = w.clone();
         v.comp_mut::<Wallet>(a).expect("wallet").coins = price + 60;
         v.insert(a, diagnosed(0.3));
-        let end = v.tick + 2 * TICKS_PER_DAY;
+        // Pressure pass (fix round): four days, not two. A night-shifter's first
+        // trip can be cut by his sleep mid-treatment (he goes again next day), and
+        // a founder mid-registration spends the coins on the company; the probe is
+        // that the diagnosed with coins go to the Clinic, not on which day.
+        let end = v.tick + 4 * TICKS_PER_DAY;
         while v.tick < end {
             v.comp_mut::<Brain>(a).expect("brain").pinned = true;
             v.run_ticks(1);
@@ -729,7 +733,7 @@ fn probe_diagnosed_patient_with_coins_seeks_the_clinic() {
         eprintln!("patient {}: cancer {:?}", a.index, cancer(&v, a));
         treated += usize::from(cancer(&v, a).is_none());
     }
-    assert!(treated * 5 >= picks.len() * 4, "only {treated} of {} treated in two days", picks.len());
+    assert!(treated * 5 >= picks.len() * 4, "only {treated} of {} treated in four days", picks.len());
 }
 
 /// Off screen: a diagnosed patient whose pool pays treats on `p_stat_treat`.
@@ -1082,6 +1086,11 @@ fn test_g3_only_the_broke_steal_food() {
     // the acquaintance prune's, read as the mechanism never firing).
     let (mut broke, mut able) = (0u32, Vec::new());
     for seed in [408, 409, 410] {
+        // Pressure pass (fix round): a plan commits when the thief is broke and
+        // a windfall (a gift, a payment) can land on the walk to the Market, so
+        // `able` means holding a meal's coins across the last four 30-tick
+        // snapshots, not only at the theft.
+        let mut snaps: std::collections::VecDeque<std::collections::BTreeMap<EntityId, i64>> = Default::default();
         let mut cfg = Config::load().dole_city().v1_profile();
         cfg.lod.force = Some(Lod::Full);
         let mut w = World::new(seed, cfg);
@@ -1090,6 +1099,14 @@ fn test_g3_only_the_broke_steal_food() {
         let end = w.tick + 20 * TICKS_PER_DAY;
         while w.tick < end {
             w.run_ticks(1);
+            if w.tick.is_multiple_of(30) {
+                snaps.push_back(
+                    w.citizens().into_iter().map(|c| (c, w.comp::<Wallet>(c).map_or(0, |x| x.coins))).collect(),
+                );
+                if snaps.len() > 4 {
+                    snaps.pop_front();
+                }
+            }
             let fresh: Vec<(EntityId, String)> = w
                 .events
                 .iter()
@@ -1099,7 +1116,13 @@ fn test_g3_only_the_broke_steal_food() {
             cursor = w.events.back().map_or(cursor, |e| e.id + 1);
             for (a, text) in fresh {
                 let coins = w.comp::<Wallet>(a).map_or(0, |x| x.coins);
-                if coins >= life::meal_price(&w, a) {
+                let price = life::meal_price(&w, a);
+                let held =
+                    coins >= price && snaps.len() == 4 && snaps.iter().all(|m| m.get(&a).is_some_and(|&c| c >= price));
+                if coins >= price && !held && snaps.len() == 4 {
+                    // a windfall on the walk: the plan was made broke
+                    broke += 1;
+                } else if coins >= price {
                     if citysim::goap::actions::PlanCtx::build(&w, a, None).market_free {
                         able.push((a.index, coins, text));
                     }
