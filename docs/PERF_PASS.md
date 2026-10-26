@@ -303,3 +303,46 @@ changes the map, not a mechanism.
   (`faith`'s spread) stay a walk of the growing set (phase 6's finding, `OPEN-210`); the held's meeting draws one
   word per stranger per arrival, so it is not prunable. No new test: the memo is built every call under
   `spatial::scans`, so phase 3's `test_indexed_build_matches_the_scans` covers it (R7).
+- **Phase 8** (`OPEN-184` annotated, `[perf] threads`). Measured first (20k seed 42, `prof`, main): `tick::think`
+  is 33 % of the tick on days 2-4 (1,518 of 4,573 ms a game day) and on days 25-29 (2,251 of 6,774), and
+  `think_with_offer` 92 % of it; at 100k 35-46 % (phase 6's profiled base, days 1-8). So 8 threads can give the tick
+  at most 1.4x. A think is now `think::score` (reads only: the Court gate's daily pre-filter, computed there and
+  written by the apply, then `utility::think_scored`) and `think::apply` (every write). **The order is not free**: an
+  unguarded split (every score taken against the world at the top of the tick) moved 2k seeds 42 and 44 inside 30
+  days (seed 42 first at tick 2,412). An audit of the score's reads against the apply's writes: an abort
+  (`abort_plan`) releases reservations (Partner, seat: Socialise, Court, Unwind read them), sets a Coarse walker
+  down out of his building (`settle_walk`: occupancy, tiles), lets an escorted suspect go (`cuffed_by`: Arrest,
+  Hunt, the turn itself), changes the claim index, the dealers, a bin's diver, a parked vehicle's place and its
+  keeper's Kit; the Idle plan's install does the same set-down off a walk or a vehicle. None can be made order-free
+  without changing the rule, so those applies stay serial and are **barriers**: with `[perf] threads` above 1,
+  `run` scores the slice ahead on a rayon pool (one per thread count, the turns run on one of its threads), the
+  bodies apply in id order, and a score is used only while fresh; after a barrier the rest are scored again, in a
+  batch up to the next abort the stale scores predict (at least a thread's worth). Every other apply writes only the
+  body's own think bookkeeping (`current_goal`, `goal_since`, `last_think*`, `court_candidate`, `plan_queued`, the
+  plan queue, `shop_offers`, counters), which no score reads; the Idle plan on a body standing idle (exec Idle, not
+  aboard) writes only its plan, read by other scores by goal or step alone (Arrest, Lead, Work, Flee, HideFromLaw,
+  Fence: never Idle's). Turns are re-read at each body's place, and a body given a turn by an earlier apply scores
+  there, serially. With 1 thread `run` is the serial loop itself. 20k day 2 (8 threads): 116.7k thinks, 3.5k
+  aborts, 11.7k Idle plans; 7.0k re-score batches (4.9 a tick), 1.58x the scoring work; no late or dropped turn.
+  **The lazy state** stays behind its locks (every memo is a `Memo` Mutex since phase 2, the virt route cache its
+  own): each is a pure function of a world nothing writes while a batch is scored, so no prepare step. The locks
+  cost: a think's CPU rises 10.9 -> 13.9 us at 8 threads (2 threads 11.1, 4 12.5, 16 19.2), in the locking
+  scorers (`goal::Patrol` 0.32 -> 0.74 us, `Earn` 0.43 -> 0.71, `Unwind` 2.33 -> 3.10, `Shop` 0.96 -> 1.28; the
+  lock-free Socialise, Court and Hack flat). Identical to `560ad51` at 1 thread (2k 42-44 x 30 `phase_measure
+  --identity`; 20k `isle_m_k2` 42 x 30) and to itself at 2 and 8 threads (2k 42-44 x 30, 20k 42 x 30: save,
+  report, events). 20k seed 42 x 30 (one set back to back, print only; 24 cores) ticks/s main -> 1 thread -> 8
+  threads: days 2-4 406 -> 406 -> 452, days 25-30 246 -> 246 -> 282; `tick::think` ms a game day (prof, 8
+  threads): days 2-4 1,518 -> 881, days 25-29 2,251 -> 1,264 (the tick 4,573 -> 4,130 and 6,774 -> 5,840); 16
+  threads no better than 8 (day 2 865 ms against 826). 100k seed 42 x 30 at 8 threads against phase 7's run
+  (main): ticks/s days 2-4 42/38/35 -> 51/48/45, days 25-30 19/20/18/22/20/20 -> 24/25/22/28/24/24, the median
+  24 -> 29, wall a game day 60 -> 50 s; midnight days 25-30 2.59-2.71 -> 2.54-2.69 s (think is not midnight's);
+  peak working set 3.06 -> 3.10 GB; the same city at the end (homeless 2,903, employed 56,184). The gate's 30
+  ticks/s on days 25-30 is still missed (24). SAVE_VERSION stays 67 (`[perf]` is never saved: `serde(skip)`, `run
+  --threads N` sets it and keeps it over `--load`). **Deviations:** the scorers had no hidden writes to move
+  (`think_with_offer` took `&World` already, the memos were locked); what moved to the apply is the Court
+  pre-filter's write, and the brief's "apply in id order" is kept only by re-scoring after the barriers above,
+  since the plain split is a different city. With 1 thread the branch runs the serial loop, so its identity to
+  main is by construction and the proof is 2 and 8 against 1 (and 1 against main at 20k, the split's own path).
+  `test_determinism_same_seed_same_hash` gained a 4-thread leg (the pool's path runs in the change tier); it does
+  not catch a stale score (the unguarded split passed it over five days), so the identity is the proof (R7). A
+  lock-free memo read is the next lever for item 7 (the 27 % per-think rise at 8 threads), not done here.
