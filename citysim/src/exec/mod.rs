@@ -397,19 +397,23 @@ fn step_agent(world: &mut World, id: EntityId) {
         StepResult::Running => {}
         StepResult::Done => {
             // The pre-view pass phase 5: a segment's end re-starts the step.
-            if matches!(step.action, ActionKind::GoTo(_)) && !world.segments.is_empty() && legs::segment_done(world, id)
+            if matches!(step.action, ActionKind::GoTo(_) | ActionKind::FleeToHome)
+                && !world.segments.is_empty()
+                && legs::segment_done(world, id)
             {
                 return;
             }
             // Transit T12: a leg of a ride ended (the board stop, the alight
             // stop), not the GoTo.
-            if matches!(step.action, ActionKind::GoTo(_))
+            if matches!(step.action, ActionKind::GoTo(_) | ActionKind::FleeToHome)
                 && !world.rides.is_empty()
                 && crate::systems::transit::leg_done(world, id, lod)
             {
                 return;
             }
-            if world.leg_log.is_some() && matches!(step.action, ActionKind::GoTo(_) | ActionKind::Escort) {
+            if world.leg_log.is_some()
+                && matches!(step.action, ActionKind::GoTo(_) | ActionKind::Escort | ActionKind::FleeToHome)
+            {
                 leglog::end(world, id, "done");
             }
             if let Some(b) = world.comp_mut::<Brain>(id) {
@@ -892,8 +896,10 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                 return StepResult::Running;
             }
             // Transit T8, T12: on foot, a far GoTo may ride the El (the first
-            // leg, the walk to the board stop, comes back).
-            if driving.is_none() && matches!(step.action, ActionKind::GoTo(_)) {
+            // leg, the walk to the board stop, comes back). The pressure pass
+            // F1: so may a FleeToHome (the night's walk home of the unsafe:
+            // a Sleep's `[FleeToHome > Sleep]` walked 600-1,000 tiles, 10-20 h).
+            if driving.is_none() && matches!(step.action, ActionKind::GoTo(_) | ActionKind::FleeToHome) {
                 if let Some(state) = crate::systems::transit::try_ride(world, id, &target, lod) {
                     if let Some(b) = world.comp_mut::<Brain>(id) {
                         b.exec = state;
@@ -904,7 +910,10 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
             }
             // The pre-view pass phase 5 (OPEN-139): a long walk walks in
             // segments; each end re-starts the step (`exec::legs`).
-            if driving.is_none() && matches!(step.action, ActionKind::GoTo(_)) && legs::on(world) {
+            if driving.is_none()
+                && matches!(step.action, ActionKind::GoTo(_) | ActionKind::FleeToHome)
+                && legs::on(world)
+            {
                 if let Some(state) = segment(world, id, &target, lod) {
                     leglog::start(world, id, &target, "walk");
                     if let Some(b) = world.comp_mut::<Brain>(id) {
@@ -976,6 +985,7 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                         | crate::components::GoalKind::Rescue
                         | crate::components::GoalKind::Pitch
                         | crate::components::GoalKind::Visit
+                        | crate::components::GoalKind::Found
                 )
             });
             // The pre-view pass phase 4 (P8): so does a sweeper's round (its
@@ -996,6 +1006,9 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                 let ok = if goal == Some(crate::components::GoalKind::Pitch) {
                     // Jobs & lives phase 2: the street's own steps.
                     crate::systems::streetwork::can_start(world, id, kind)
+                } else if goal == Some(crate::components::GoalKind::Found) {
+                    // The pressure pass F1: a Station's desk is no planner `Hall`.
+                    actions::can_start(world, id, kind, step.target)
                 } else if goal == Some(crate::components::GoalKind::Visit) {
                     // Lives at work phase 2 (§ 3.5): the visit's own steps.
                     crate::systems::household::can_start(world, id, kind)

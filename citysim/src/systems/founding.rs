@@ -610,6 +610,63 @@ pub fn choose_kind_full(
     best.map(|(_, k)| k)
 }
 
+/// The pressure pass F1: where `agent` registers a company: the nearest by
+/// travel (`distance::travel`, from where the body sets out) of the Civic
+/// Hall and the district Stations, whose front desk takes the papers. With
+/// one Hall on the island the registration was a walk across it, past
+/// `[distance.reach] register_ticks` for most founders (foundings 55 -> 17
+/// at 20k). `None` without either.
+pub fn registry(world: &World, agent: EntityId) -> Option<EntityId> {
+    let from = crate::systems::life::origin(world, agent)?;
+    let here = world.comp::<Position>(agent).and_then(|p| p.building);
+    world
+        .buildings_of_kind(BuildingKind::Hall)
+        .iter()
+        .chain(world.buildings_of_kind(BuildingKind::Station).iter())
+        .copied()
+        .filter_map(|b| {
+            let bd = world.comp::<Building>(b).filter(|bd| !bd.demolished)?;
+            let t = if here == Some(b) { 0 } else { crate::systems::distance::travel(world, from, bd.door) };
+            Some((t, b))
+        })
+        .min()
+        .map(|(_, b)| b)
+}
+
+/// The pressure pass F1: inside a registry desk (the Hall or a Station).
+pub fn at_registry(world: &World, agent: EntityId) -> bool {
+    world
+        .comp::<Position>(agent)
+        .and_then(|p| p.building)
+        .and_then(|b| world.comp::<Building>(b))
+        .is_some_and(|b| matches!(b.kind, BuildingKind::Hall | BuildingKind::Station))
+}
+
+/// The pressure pass F1: the Found goal's plan, scripted (`plan::plan_for`'s
+/// bypass): to the nearest registry desk ([`registry`]), then `Register`.
+pub fn found_plan(world: &World, agent: EntityId) -> Option<crate::goap::Plan> {
+    let desk = registry(world, agent)?;
+    let mut steps = Vec::new();
+    if world.comp::<Position>(agent).and_then(|p| p.building) != Some(desk) {
+        steps.push(crate::components::ActionInstance {
+            action: crate::goap::ActionKind::GoTo(crate::goap::LocationKey::Seller),
+            target: Some(desk),
+            tile: None,
+        });
+    }
+    steps.push(crate::components::ActionInstance {
+        action: crate::goap::ActionKind::Register,
+        target: Some(desk),
+        tile: None,
+    });
+    Some(crate::goap::Plan {
+        goal: crate::components::GoalKind::Found,
+        target: Some(desk),
+        steps,
+        started_tick: world.tick,
+    })
+}
+
 /// The executive of some corp (they grow through the corp, not by founding).
 pub fn is_exec(world: &World, agent: EntityId) -> bool {
     crate::systems::life::exec_corp(world, agent).is_some()

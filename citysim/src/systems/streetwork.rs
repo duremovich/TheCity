@@ -417,7 +417,9 @@ fn openings(world: &mut World) {
             continue;
         }
         let Some(d) = district_of_agent(world, a) else { continue };
-        if count.get(d.index()).is_none_or(|&c| c >= cfg.pitches_per_district) {
+        // The pressure pass F1: the spot is chosen below from the home's
+        // reach, not the district the opener stood in at midnight.
+        if !crate::systems::distance::on(world) && count.get(d.index()).is_none_or(|&c| c >= cfg.pitches_per_district) {
             continue;
         }
         let skills = world.comp::<Skills>(a).cloned();
@@ -445,16 +447,36 @@ fn openings(world: &mut World) {
         // district's first free one had vendors walking 47-168 min a way).
         let from = crate::systems::contracts::home_door(world, a)
             .or_else(|| world.comp::<crate::components::Position>(a).map(|p| p.tile));
-        let spot = world
-            .spots
-            .get(d.index())
-            .and_then(|s| {
-                s.iter()
-                    .map(|x| x.tile)
-                    .filter(|t| !used.contains(t))
-                    .min_by_key(|t| (from.map_or(0, |f| f.manhattan(*t)), t.x, t.y))
-            })
-            .or_else(|| world.districts.get(d.index()).map(|x| x.centroid));
+        // The pressure pass F1 (`[distance]` on): the free spot nearest the
+        // home door in any district under its cap, and none past `[distance]
+        // job_cap_ticks` (a vendor whose midnight found him in the Sump
+        // pitched 670 tiles from his Mid-Levels home, 9 h a way).
+        let (spot, d) = if let (Some(cap), Some(f)) = (crate::systems::distance::job_cap(world), from) {
+            let near = world
+                .spots
+                .iter()
+                .enumerate()
+                .filter(|&(i, _)| count.get(i).is_some_and(|&c| c < cfg.pitches_per_district))
+                .flat_map(|(i, s)| s.iter().map(move |x| (x.tile, i)))
+                .filter(|(t, _)| !used.contains(t))
+                .min_by_key(|&(t, i)| (f.manhattan(t), t.x, t.y, i));
+            match near.filter(|&(t, _)| crate::systems::distance::travel(world, f, t) <= cap) {
+                Some((t, i)) => (Some(t), crate::components::DistrictId(i as u8)),
+                None => continue,
+            }
+        } else {
+            let spot = world
+                .spots
+                .get(d.index())
+                .and_then(|s| {
+                    s.iter()
+                        .map(|x| x.tile)
+                        .filter(|t| !used.contains(t))
+                        .min_by_key(|t| (from.map_or(0, |f| f.manhattan(*t)), t.x, t.y))
+                })
+                .or_else(|| world.districts.get(d.index()).map(|x| x.centroid));
+            (spot, d)
+        };
         let Some(spot) = spot else { continue };
         let p = Pitch {
             spot,
@@ -1454,11 +1476,22 @@ pub fn exec_ride(world: &mut World, id: EntityId, target: &crate::exec::GotoTarg
     }
     let home = crate::systems::missions::home_of(world, id)?;
     let hb = world.comp::<Building>(home)?;
-    if hb.tier < tier || near_by_label(world, home, hb.door, hq) {
+    // The pressure pass F1: an exec not yet housed at the tier (no free
+    // Spire flat near his Hq: `life::house_exec`) is driven too; the tier
+    // gate walked a CEO 764 tiles across the Mid-Levels to his Lab.
+    if near_by_label(world, home, hb.door, hq) {
         return None;
     }
     let home_door = hb.door;
     let here = crate::exec::walk_origin(world, id)?;
+    // The pressure pass F1: the car is timed at its Coarse road share (0.88
+    // min a tile against the El's 0.25), so across the island it is slower
+    // than the train: a ride the El beats is not taken, and the GoTo rides
+    // the El (`transit::try_ride`) or walks. A Spire exec sat 601 min in a
+    // car to his Sump Hq.
+    if crate::systems::transit::commute_ticks(world, here, target.tile) < cab_ticks(world, here, target.tile) {
+        return None;
+    }
     if home_ride {
         if near_home(world, here, home, home_door) {
             return None;
@@ -1533,10 +1566,12 @@ pub fn ride_home_ticks(world: &World, id: EntityId, from: TilePos, door: TilePos
     let hq = crate::systems::life::hq_of(world, corp, id)?;
     let home = crate::systems::missions::home_of(world, id)?;
     let hb = world.comp::<Building>(home)?;
-    if hb.tier < tier || near_by_label(world, home, hb.door, hq) || near_home(world, from, home, hb.door) {
+    if near_by_label(world, home, hb.door, hq) || near_home(world, from, home, hb.door) {
         return None;
     }
-    Some(cab_ticks(world, from, door))
+    // The pressure pass F1: as `exec_ride`, no car ride the El beats.
+    let car = cab_ticks(world, from, door);
+    (crate::systems::transit::commute_ticks(world, from, door) >= car).then_some(car)
 }
 
 /// The exec's car's test of a Home and an Hq too near to drive: with

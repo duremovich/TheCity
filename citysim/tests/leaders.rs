@@ -266,6 +266,9 @@ fn test_statistical_leader_order_in_force_at_once() {
     let (g, l, _) = led_gang(&mut w);
     let now = w.tick;
     leaders::hold(&mut w, g, raid_order(now));
+    // A leader on a hunt (or hunted) keeps his body (`lod::set_lod`): off it.
+    w.hunts.remove(&l);
+    w.hunted_by.remove(&l);
     lod::set_lod(&mut w, l, Lod::Statistical);
     assert!(!leaders::in_person(&w, g) && !leaders::collects(&w, g), "off camera: the old path");
     leaders::run(&mut w);

@@ -1254,10 +1254,14 @@ fn probe_working_couple_moves_near_work() {
             if w.comp::<Building>(employer).is_some_and(|b| b.kind.is_leisure()) {
                 return None;
             }
-            w.remove::<Job>(s);
-            demography::hire(&mut w, s, employer, role);
-            // ... and the hire takes (an age band or a dress may refuse it).
-            if !w.has::<Job>(s) {
+            // Both hired today (F1's city: the commute pressure's `hire_now`
+            // reads a fresh hire; the longest couple's post was days old).
+            for m in [a, s] {
+                w.remove::<Job>(m);
+                demography::hire(&mut w, m, employer, role);
+            }
+            // ... and the hires take (an age band or a dress may refuse one).
+            if !w.has::<Job>(a) || !w.has::<Job>(s) {
                 return None;
             }
             for m in [a, s] {
@@ -2757,6 +2761,13 @@ fn broke_parent_visits(mut c: World) -> (bool, bool) {
                 let cool = c.tick + TICKS_PER_DAY;
                 c.comp_mut::<Brain>(q).expect("brain").cooldowns.insert(citysim::GoalKind::Fight, cool);
             }
+            // F1's city: the other parent, hired near home, paid the fee;
+            // the household is kept broke (the premise).
+            if let Some(sp) = c.spouse_of(q) {
+                if let Some(wl) = c.comp_mut::<Wallet>(sp) {
+                    wl.coins = wl.coins.min(10);
+                }
+            }
             pin(&mut c, q);
             c.run_ticks(1);
         }
@@ -2769,7 +2780,10 @@ fn broke_parent_visits(mut c: World) -> (bool, bool) {
         home(&c, child2).map(|b| b.index),
         camp2.index
     );
-    (home(&c, child2) != Some(h2), met.is_some())
+    // F1's city: the other parent broke the child out (a CampBreakout): the
+    // control's claim is no buy-out by the broke household.
+    let bought = c.events.iter().any(|e| e.kind == EventKind::CampBuyout && e.actors.contains(&child2));
+    (!bought, met.is_some())
 }
 
 /// § 2.2 (the phase's acceptance): a super walks fewer than 4 hours of his

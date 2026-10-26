@@ -306,3 +306,29 @@ Each at its cause. Numbers: 20k `isle_m_k2` seed 42 x 30 `--scaled`, main `28aba
   garnishments 22). Murder 53, Assault 955, LaidOff 889 (all causes). FINDING: the gangs' treasuries are tens of
   coins, so a gang front is cheap and rare and its laundering is nearly nothing; nothing tuned.
 - No test (doctrine 2).
+
+**F1: distance at 100k.** The premise did not hold: 100k does not break the island pass's distance. Before any change,
+seed 42 days 0-8 (`run --legs`, every bodied leg): 4 h+ legs 7.3 % of all legs at 20k, 6.6 % at 100k; structural
+commutes of 240 min or more 13.3 % at 20k and 7.0 % at 100k; V8's 20k diaries read 8.1-9.3 % of GoTo legs at 4 h+,
+V9's 100k diaries 7.4 %. The critics read the island's tail, which the 20k pass left, at 100k for the first time. Its
+causes, each fixed where the pick or the leg is made (no knob moved): (1) **the city's hires ignore distance**:
+`reconcile_sanitation` hired the island's poorest for the one Recycler and `reconcile_guards` the island's most
+lawful for any post; both now take those within `[distance] job_cap_ticks` (of the Recycler, of a city post) first.
+(2) **District labels are space** (I9 again): a patrol's Market was drawn anywhere in
+a district up to 1,000 tiles wide (`law::district_route`: within the cap of the guard, the Hall only within it of the
+beat); a sweeper's beat stops were its district's dirtiest tiles anywhere (`jobs::sweep_route`: within `[distance.reach]
+beat_ticks` of the shift's start first, a soft anchor), and a body sweeper with no stop to walk (the commute before
+the round is planned, or a stand) walked to the beat district's dirtiest tile instead of the Recycler's yard
+(`jobs::beat_tile`: the post's door). (3) **The pitch** was chosen in the district the
+opener stood in at midnight (`streetwork::openings`: the free spot nearest the home in any district under its cap,
+none past the job cap). (4) **FleeToHome never rode**: a Sleep's `[FleeToHome > Sleep]` walked 600-1,000 tiles
+(`exec::start_step`: it rides the El and walks in segments like a GoTo). (5) **The exec's car**: an exec not housed
+at `exec_home_tier` walked (the tier gate is gone), and the car, timed at its Coarse road share (0.88 min a tile
+against the El's 0.25), is not taken where the El beats it (`streetwork::exec_ride`, `ride_home_ticks`). Execs still
+live 300-900 tiles from a Hq outside the Spire: that is `OPEN-182`'s re-import. Deviation, foundings: the papers are
+filed at the nearest of the Hall and the district Stations (`founding::registry`, a scripted `found_plan`; `[distance.
+reach] register_ticks` reads that desk). Deviation, contracts: a hunt-run record (an agent target, no Guard, Escort or
+Rescue) is offered only to a candidate within `stakeout_ticks` of the target's Home or workplace door
+(`contracts::hunt_in_reach`, in `offer`; a gang's crew is not filtered). 20k seed 42 x 30, base (main 53cab2d) -> F1: foundings 17 -> 53,
+contracts fulfilled 48 -> 67 (posted 599 -> 642). 100k seed 42 days 0-8 (`run --legs`, one run each): bodied legs of 4 h+ 6.6 % -> 5.3 %, of 2 h+ 17.7 % -> 15.2 %; structural commutes of 240 min+ 7.0 % -> 4.6 %; sweeper Beat legs of 4 h+ 189 -> 57. Guards still hold 78 % of the 4 h+ legs (Patrol 5,178 -> 4,664): a guard's beat is a whole district dealt by his Station's share, walked from his Home at the shift's start (`stations::deal_beats`), and the El refuses many 180-tile trips (`slow`: the island's lines run the long way round). Measurement only: `run --legs` prints `#commute_role` rows; the
+diary's header has a Commute line (doors, tiles, travel) and a GoTo line its tiles. No test added.

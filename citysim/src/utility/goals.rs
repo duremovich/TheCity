@@ -201,11 +201,11 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
             j.last_shift_day == Some(j.next_shift_key(world.tick)) && !crate::exec::routine::wage_pending(world, j)
         }),
         // M11 D26: nothing to found (also the eligibility gate).
-        // The pressure pass phase 4 (OPEN-194): or the Hall past the reach.
+        // The pressure pass phase 4 (OPEN-194): or the desk past the reach
+        // (F1: the nearest of the Hall and the Stations, `founding::registry`).
         GoalKind::Found => {
             !crate::systems::founding::can_found(world, id)
-                || world
-                    .building_of_kind(BuildingKind::Hall)
+                || crate::systems::founding::registry(world, id)
                     .is_some_and(|h| crate::systems::distance::out_of_reach(world, id, h, |r| r.register_ticks))
         }
         // M12 D27: squatting already, or nowhere to squat (the eligibility gate).

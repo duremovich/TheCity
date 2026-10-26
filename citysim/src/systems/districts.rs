@@ -793,8 +793,9 @@ pub fn reconcile_sanitation(world: &mut World) {
         usize::from(world.levers.sanitation_count) + world.jobs_book.works.len() + usize::from(world.transit.staff);
     let have = sweepers(world);
     let Some(recycler) = world.building_of_kind(BuildingKind::Cemetery) else { return };
+    let recycler_door = world.comp::<crate::components::Building>(recycler).map(|b| b.door);
     if have.len() < want {
-        let mut candidates: Vec<(i64, EntityId)> = world
+        let mut candidates: Vec<((i64, i64), EntityId)> = world
             // scan-ok: daily: reconcile_sanitation
             .citizens()
             .into_iter()
@@ -809,7 +810,22 @@ pub fn reconcile_sanitation(world: &mut World) {
             .filter(|&id| !crate::systems::founding::is_exec(world, id))
             // Lives at work phase 6 (§ 4.1, § 4.4): the band, the retired.
             .filter(|&id| crate::systems::careers::age_ok(world, id, Role::Sanitation))
-            .map(|id| (world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins), id))
+            .map(|id| {
+                let coins = world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins);
+                // The pressure pass F1: those within `[distance]
+                // job_cap_ticks` of the Recycler first (the poorest first
+                // among them), then the rest by travel. The poorest of the
+                // whole island walked 450-620 tiles to the one Recycler at
+                // 100k (sweeper legs of 13-14 h). 0 off: the base order.
+                let far = match (crate::systems::distance::job_cap(world), recycler_door) {
+                    (Some(cap), Some(door)) => crate::systems::distance::set_out(world, id)
+                        .map(|from| crate::systems::distance::travel(world, from, door))
+                        .filter(|&t| t > cap)
+                        .map_or(0, |t| t as i64 + 1),
+                    _ => 0,
+                };
+                ((far, if far == 0 { coins } else { 0 }), id)
+            })
             .collect();
         candidates.sort_unstable();
         for (_, id) in candidates.into_iter().take((want - have.len()).min(world.config.per_capita_count(5))) {

@@ -676,14 +676,25 @@ pub fn tsv(world: &World) -> String {
         log.trains[0], log.trains[1], log.trains[2]
     ));
     let mut far = (0u32, 0u32);
+    // The pressure pass F1: the same by role (n, at 120+, at 240+).
+    let mut by_role: BTreeMap<String, [u32; 3]> = BTreeMap::new();
     for a in world.citizens() {
-        let Some(w) = world.comp::<crate::components::Job>(a).and_then(|j| j.employer) else { continue };
+        let Some(job) = world.comp::<crate::components::Job>(a) else { continue };
+        let Some(w) = job.employer else { continue };
         let Some(wd) = world.comp::<crate::components::Building>(w).map(|b| b.door) else { continue };
         let Some(hd) = crate::systems::contracts::home_door(world, a) else { continue };
+        let t = crate::systems::distance::travel(world, hd, wd);
         far.0 += 1;
-        far.1 += u32::from(crate::systems::distance::travel(world, hd, wd) >= 240);
+        far.1 += u32::from(t >= 240);
+        let r = by_role.entry(format!("{:?}", job.role)).or_default();
+        r[0] += 1;
+        r[1] += u32::from(t >= 120);
+        r[2] += u32::from(t >= 240);
     }
     out.push_str(&format!("#commute\temployed_housed\t{}\tat_240_plus\t{}\n", far.0, far.1));
+    for (role, r) in &by_role {
+        out.push_str(&format!("#commute_role\t{role}\t{}\t{}\t{}\n", r[0], r[1], r[2]));
+    }
     out
 }
 

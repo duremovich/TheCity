@@ -636,6 +636,9 @@ struct OpenAction {
     target: Option<EntityId>,
     start: Tick,
     start_place: String,
+    /// The pressure pass F1: the body's tile at the step's start (a GoTo's
+    /// line gives the Manhattan tiles it moved).
+    start_tile: Option<citysim::components::TilePos>,
     /// The perf pass phase 1 (OPEN-195): the step's plan goal (an idle Rest
     /// is one outside a Work plan).
     goal: Option<GoalKind>,
@@ -1138,6 +1141,22 @@ fn header(world: &World, t: &Track) -> String {
         );
     } else {
         let _ = writeln!(h, "- **Job**: none");
+    }
+    // The pressure pass F1: the doors and the structural commute between them.
+    let door = |b: EntityId| world.comp::<Building>(b).map(|bd| bd.door);
+    let home_door = home.and_then(door);
+    let work_door = world.comp::<Job>(id).and_then(|j| j.employer).and_then(door);
+    if let (Some(hd), Some(wd)) = (home_door, work_door) {
+        let _ = writeln!(
+            h,
+            "- **Commute**: Home door ({}, {}) to work door ({}, {}): {} tiles, travel {} min",
+            hd.x,
+            hd.y,
+            wd.x,
+            wd.y,
+            hd.manhattan(wd),
+            citysim::systems::distance::travel(world, hd, wd)
+        );
     }
     let owned: Vec<String> = world
         .buildings_by_kind()
@@ -1755,6 +1774,7 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                     target: step.target,
                     start: now,
                     start_place: here.clone(),
+                    start_tile: world.comp::<Position>(id).map(|p| p.tile),
                     goal: b.plan.as_ref().map(|p| p.goal),
                 });
             }
@@ -2309,7 +2329,12 @@ fn close_action(world: &World, t: &mut Track, now: Tick, status: &str) {
     if matches!(o.action, ActionKind::GoTo(_)) && dur > CAM_LONG_GOTO_MIN {
         t.cam.days.entry(o.start / TICKS_PER_DAY).or_default().goto_long += 1;
     }
-    t.log(o.start, "action", format!("ACTION {:?} @ {loc}, {dur} min ({status}){tgt}", o.action));
+    // The pressure pass F1: a GoTo's Manhattan tiles from its start.
+    let tiles = match (o.action, o.start_tile, world.comp::<Position>(t.id).map(|p| p.tile)) {
+        (ActionKind::GoTo(_), Some(a), Some(b)) => format!(", {} tiles", a.manhattan(b)),
+        _ => String::new(),
+    };
+    t.log(o.start, "action", format!("ACTION {:?} @ {loc}, {dur} min{tiles} ({status}){tgt}", o.action));
 }
 
 fn flush_day(t: &mut Track, now: Tick) {

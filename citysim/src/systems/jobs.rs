@@ -708,6 +708,15 @@ pub fn beat_tile(world: &World, id: EntityId) -> Option<TilePos> {
     if let Some(t) = round_stop(world, id) {
         return Some(t);
     }
+    // The pressure pass F1: a body sweeper with no stop to walk (the
+    // commute before the shift's round is planned, or a stand: no stop fits
+    // the shift, `sweep_plan`) reports to the Recycler's yard, as P8 says;
+    // the planner's `GoTo(Beat)` sent him to the beat district's dirtiest
+    // tile, 300-500 tiles off (1,891 sweeper legs of 4 h+ in 8 days at 100k).
+    if body_sweeper(world, id) {
+        let post = world.comp::<Job>(id).and_then(|j| j.employer)?;
+        return world.comp::<Building>(post).map(|b| b.door);
+    }
     crate::systems::litter::dirtiest_tile(world, beat_of(world, id)?)
 }
 
@@ -717,6 +726,14 @@ pub fn beat_tile(world: &World, id: EntityId) -> Option<TilePos> {
 
 /// The keyed purpose of the sweeper's seeded stops (`econ::hash_unit`).
 const PURPOSE_SWEEP_STOP: u64 = 0x5052_0101;
+
+/// The pressure pass F1: `id` is a sweeper with a body (`[presence]` on,
+/// not Statistical), whose day is a round from the post.
+fn body_sweeper(world: &World, id: EntityId) -> bool {
+    world.config.presence.is_some()
+        && is_sweeper(world, id)
+        && world.comp::<crate::components::Brain>(id).is_some_and(|b| b.lod != crate::components::Lod::Statistical)
+}
 
 /// P8: the sweeper's round is live: `[presence]` on, Sweep on, `id` a body
 /// sweeper, and this shift not the stand ([`FALLBACK`]).
@@ -771,12 +788,19 @@ pub fn sweep_route(world: &World, id: EntityId, key: i64, from: TilePos, left: u
     let Some(door) = world.comp::<Building>(post).map(|b| b.door) else { return Vec::new() };
     let fits = |r: &[TilePos]| round_ticks(world, from, r, door) <= left;
     if let Some(d) = beat_of(world, id) {
-        let r = sweep_route_in(world, id, key, d, None);
+        // The pressure pass F1: the beat's stops within `[distance.reach]
+        // beat_ticks` of where the shift starts, walked (a district spans
+        // up to 1,000 tiles: its dirtiest tile anywhere was a 3-4 h walk
+        // out and a ride back, the shift a commute). None there: the post's.
+        let reach = crate::systems::distance::reach(world)
+            .map(|r| (from, (r.beat_ticks / world.config.exec.move_ticks_full.max(1)) as u32, false));
+        let r = sweep_route_in(world, id, key, d, reach);
         if !r.is_empty() && fits(&r) {
             return r;
         }
     }
-    let mut r = sweep_route_in(world, id, key, world.district_of_building(post), Some(door));
+    let reach = world.config.presence.as_ref().map(|c| (door, c.round_reach_tiles, true));
+    let mut r = sweep_route_in(world, id, key, world.district_of_building(post), reach);
     while !r.is_empty() && !fits(&r) {
         r.pop();
     }
@@ -810,7 +834,7 @@ pub fn round_ticks(world: &World, from: TilePos, stops: &[TilePos], door: TilePo
 
 /// The stops in district `d`: its street tiles, dirtiest first (ties by a
 /// hash of the sweeper, the shift and the tile: with no litter, the seeded
-/// set), within `round_reach_tiles` of `anchor` when given, each further
+/// set), within `anchor`'s tiles of its tile when given, each further
 /// than two `sweep_radius` from the others, within `round_reach_tiles` of
 /// the first, `sweep_stops` of them, walked nearest-first from the first.
 fn sweep_route_in(
@@ -818,29 +842,32 @@ fn sweep_route_in(
     id: EntityId,
     key: i64,
     d: crate::components::DistrictId,
-    anchor: Option<TilePos>,
+    anchor: Option<(TilePos, u32, bool)>,
 ) -> Vec<TilePos> {
     let Some(cfg) = world.config.presence.as_ref() else { return Vec::new() };
     let Some(d) = world.districts.get(d.index()) else { return Vec::new() };
     let w = world.map.w();
     let salt = u64::from(id.index) ^ (key as u64).rotate_left(24);
-    let mut tiles: Vec<(std::cmp::Reverse<u8>, u32, TilePos)> = d
+    // The pressure pass F1: a soft anchor (`false`) ranks the tiles past
+    // its reach after those within it, the nearest first.
+    let past = |p: TilePos| anchor.map_or(0, |(a, r, _)| p.manhattan(a).saturating_sub(r));
+    let mut tiles: Vec<(u32, std::cmp::Reverse<u8>, u32, TilePos)> = d
         .streets
         .iter()
         .map(|&i| {
             let p = TilePos { x: (i as usize % w) as u16, y: (i as usize / w) as u16 };
             let v = world.litter.get(i as usize).copied().unwrap_or(0);
             let h = crate::systems::econ::hash_unit(world.seed(), PURPOSE_SWEEP_STOP, salt, u64::from(i));
-            (std::cmp::Reverse(v), h.to_bits(), p)
+            (past(p), std::cmp::Reverse(v), h.to_bits(), p)
         })
-        .filter(|&(_, _, p)| anchor.is_none_or(|a| p.manhattan(a) <= cfg.round_reach_tiles))
+        .filter(|&(beyond, _, _, _)| anchor.is_none_or(|(_, _, hard)| !hard || beyond == 0))
         .collect();
     tiles.sort_unstable();
-    let Some(&(_, _, first)) = tiles.first() else { return Vec::new() };
+    let Some(&(_, _, _, first)) = tiles.first() else { return Vec::new() };
     let gap = u32::from(cfg.sweep_radius) * 2;
     let cheb = |a: TilePos, b: TilePos| u32::from(a.x.abs_diff(b.x)).max(u32::from(a.y.abs_diff(b.y)));
     let mut picked: Vec<TilePos> = vec![first];
-    for &(_, _, t) in &tiles[1..] {
+    for &(_, _, _, t) in &tiles[1..] {
         if picked.len() >= usize::from(cfg.sweep_stops.max(1)) {
             break;
         }
