@@ -52,7 +52,7 @@ the orchestrator added a standing rule after every incident. What changed, all o
 
 - No agents are running. Locked empty folders under `.claude/worktrees/` (`agent-*`, `island-f3`, `test-cut` if
   it remains) and the `*.log` tier logs there can go after a restart; `target/gate/` holds the gate's runs (~1 GB).
-- TheCityGraphics: master `855d0aa`, **no git remote yet**; the maps on main were imported from it.
+- TheCityGraphics: master `855d0aa`, local only by choice (Dylan 2026-10-26: it is large; it gets a remote after a cleanup of what the pipeline no longer needs); the maps on main were imported from it.
 
 ## Next, in order
 
@@ -67,7 +67,6 @@ the orchestrator added a standing rule after every incident. What changed, all o
 
 ## Open calls for Dylan
 
-- Add a remote and push TheCityGraphics `855d0aa`.
 - The Friend-edge drop at 20k (-55 %, the crew cap): a config value if the city feels too lonely in V9.
 - `OPEN-212`: the stagger's ~84 unaudited whole-day stamps; audit or accept (the gate read it as harmless at 100k).
 - `OPEN-150`: the starting-condition seed's shape. Pressure-pass design: `OPEN-160`, `OPEN-162`, `OPEN-157`,
