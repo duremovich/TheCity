@@ -113,6 +113,22 @@ pub fn run(world: &mut World) {
         }
         return;
     }
+    // The whole slice runs on the pool, this thread waiting: the turns on
+    // one of its threads, which takes its share of each batch while the
+    // others are still awake from the last.
+    #[cfg(test)]
+    let scans = crate::spatial::scans();
+    pool(threads).install(move || {
+        #[cfg(test)]
+        crate::spatial::SCANS.with(|s| s.set(scans));
+        run_pooled(world, bodies, threads);
+    });
+}
+
+/// [`run`] above 1 thread, on a pool thread.
+fn run_pooled(world: &mut World, bodies: Vec<EntityId>, threads: usize) {
+    let interval = world.config.brain.think_interval_ticks.max(1);
+    let tick = world.tick;
     let slice: Vec<EntityId> = bodies.iter().copied().filter(|&id| turn(world, id, tick, interval).is_some()).collect();
     let mut scores: Vec<Option<Scored>> = (0..slice.len()).map(|_| None).collect();
     let mut wide: Vec<bool> = vec![false; slice.len()];
@@ -176,16 +192,15 @@ fn score_ahead(
     // the pool's threads take it for the batch.
     #[cfg(test)]
     let scans = crate::spatial::scans();
-    let batch: Vec<Scored> = pool(threads).install(|| {
-        slice[from..to]
-            .par_iter()
-            .map(|&id| {
-                #[cfg(test)]
-                crate::spatial::SCANS.with(|s| s.set(scans));
-                score(world, id)
-            })
-            .collect()
-    });
+    let _ = threads;
+    let batch: Vec<Scored> = slice[from..to]
+        .par_iter()
+        .map(|&id| {
+            #[cfg(test)]
+            crate::spatial::SCANS.with(|s| s.set(scans));
+            score(world, id)
+        })
+        .collect();
     for (k, sc) in batch.into_iter().enumerate() {
         let i = from + k;
         wide[i] = likely_wide(world, slice[i], &sc);
