@@ -187,6 +187,18 @@ fn test_order_waits_for_a_lieutenant_at_court() {
     assert_ne!(old, Order::Raid, "precondition: not raiding already");
     let now = w.tick;
     leaders::hold(&mut w, g, raid_order(now));
+    // The perf pass phase 7d (OPEN-211): a settled Job with the next order held for the giving does not
+    // rescore every tick (an order_trace written is a `gather_inputs` run); it fails on the base.
+    w.comp_mut::<Gang>(g).expect("gang").order = Order::Job;
+    w.comp_mut::<Gang>(g).expect("gang").order_trace.clear();
+    w.tick += 1;
+    assert_ne!(w.tick_of_day(), 0, "not the daily tick");
+    for _ in 0..3 {
+        w.tick += 1;
+        citysim::systems::gang::run(&mut w);
+    }
+    assert!(w.comp::<Gang>(g).expect("gang").order_trace.is_empty(), "the held order is not rescored per tick");
+    w.comp_mut::<Gang>(g).expect("gang").order = old;
     w.run_ticks(1);
     assert_eq!(w.comp::<Gang>(g).expect("gang").order, old, "the members keep the old order till it is given");
     assert!(w.comp::<Gang>(g).expect("gang").pending_order.is_some());

@@ -1357,7 +1357,17 @@ pub fn run(world: &mut World) {
         // M16a (plan C26, phase 2): a gang whose job settled rescores at once.
         let job_done = world.comp::<Gang>(gang).is_some_and(|g| g.order == Order::Job)
             && !crate::systems::contracts::job_live(world, gang);
-        if job_done {
+        // Perf pass 7d (OPEN-211): the next order is already chosen and held for the giving in person; the
+        // same rescore every tick only re-derives it (an O(N) `gather_inputs` each). Rescore at the daily
+        // tick or on a shock rethink, as the other orders do.
+        let held = job_done
+            && world.config.gangs.dwell_hold
+            && world.comp::<Gang>(gang).is_some_and(|g| g.pending_order.is_some());
+        if held {
+            if daily || pending >= threshold {
+                faction::rethink(world, gang);
+            }
+        } else if job_done {
             faction::rethink(world, gang);
         } else if daily {
             if crate::prof::timed!("gang::rescore_daily", faction::rescore(world, gang, hysteresis)) {
