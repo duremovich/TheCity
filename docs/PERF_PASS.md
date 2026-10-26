@@ -346,3 +346,45 @@ changes the map, not a mechanism.
   `test_determinism_same_seed_same_hash` gained a 4-thread leg (the pool's path runs in the change tier); it does
   not catch a stale score (the unguarded split passed it over five days), so the identity is the proof (R7). A
   lock-free memo read is the next lever for item 7 (the 27 % per-think rise at 8 threads), not done here.
+- **Phase 9** (`OPEN-184` annotated). Measured first (20k `isle_m_k2` seed 42, `prof`, main at 8 threads):
+  `tick::lod` is 28 % of the tick on days 2-4 (1,139 of 4,103 ms a game day) and 22 % on days 25-30 (1,302 of
+  5,870), nearly all `lod::run_statistical`; the co-work bond (`work::coworkers`) 222 and 417 ms of it. At 100k
+  (phase 6's profiled base, one thread, days 1-8) the hour is 17-24 % of the tick and the bond grows 0.75 -> 8.0 s
+  a game day, 7.1 s of it the edge writes (`OPEN-209`). **How the hour draws:** every agent-stream draw is the
+  agent's own (`SimRng::agent(id)` is a stored stream per agent, drawn only for `id`, in `lod.rs` and
+  `jobs::scavenge_find`), so a roll's value does not depend on the order of the agents; the rest are pure hashes
+  (`attend_roll`, the meal hash) or keyed streams (holes, litter). One roll walks a **shared** stream:
+  `social::propose`'s world-stream roll, reached from `stat_flirt` (a known candidate it may propose to); it stays
+  where it is, in id order. **Order is not free:** how many draws an agent makes, and what they decide, read what
+  earlier agents' hours wrote the same tick: a Market's stock and price (`stat_eat`, `stat_grocery`, `has_means`, a
+  theft; a purchase also drops the price memos), a Home's pantry (housemates share a slot when their ids agree
+  mod 60), another agent's wallet (`stat_beg`'s passers), the edges and the neighbour index (`stranger_in_zone`'s
+  "already known", `stat_chat`'s neighbour list and pick, `stat_flirt`'s candidate, a beg's debt), the Treasury
+  (the dole), an employer's coin (the wage), the Farm and Fab stock, a promotion (a caught thief or dodger leaves
+  the tier and the co-work rosters). So rolls taken for the whole slot at the top of the tick are a different city,
+  as phase 8's unguarded split was; a guard in phase 8's style would be stale after nearly every purchase. And the
+  rolls themselves cost nothing measurable (ChaCha8, a few ns): the hour's time is its reads and writes, the
+  largest the bond's edge writes, which miss the cache (767k edges at 20k day 30, 8.7M at 100k). **What was done:**
+  the bond in two steps inside each agent's hour: every mate's step (`social::interaction_step`, the two
+  temperaments) is read and its edge looked up first, the lookups independent of each other so their misses
+  overlap, then the drifts are written in mate order (`social::interacted_at`, `interacted`'s write). The pairs
+  are distinct and a drift writes only its own edge, the neighbour and enemies indexes, none of which a step
+  reads, so each write is `interacted`'s exactly; the hour stays the serial loop at every thread count. Identical
+  to `25a8673` at 1 thread (2k 42-44 x 30 `phase_measure --identity`, the 120-day counters equal; 20k `isle_m_k2`
+  42 x 30) and to itself at 2 and 8 threads (2k 42-44 x 30, 20k 42 x 30: save, report, events). 20k seed 42, 8
+  threads, `prof` (one pair back to back, print only): `tick::lod` ms a game day days 2-4 1,139 -> 1,090, days
+  25-30 1,302 -> 1,148 (the bond 417 -> 278; the edge writes 194, the roster 77), the tick 5,870 -> 5,610; side by
+  side (two pairs) the bond 473 -> 320. Ticks/s non-profiled, main at 8 threads -> branch at 8 threads, back to
+  back: days 2-4 472/450/425 -> 465/445/427, days 25-30 301/288/228/280/241/283 -> 309/299/234/277/246/290
+  (median 282 -> 284). 100k seed 42 x 30 at 8 threads (`pop_scale`, `--ambient-flats 50`) against phase 8's run: ticks/s days 2-4 51/48/45 -> 51/48/45, days 25-30 24/25/22/28/24/24 -> 25/26/23/28/26/25 (median 24 -> 25.5), the run's median 29 -> 31, wall a game day 49.7 -> 46.5 s; the longest tick is still midnight, days 25-30 2.54-2.69 -> 2.59-2.74 s (the bond is not midnight's; print only); peak working set 3.10 GB both; the same city at the end (homeless 2,903, employed 56,184). The gate's 30 ticks/s on days 25-30 is still missed (25.5). SAVE_VERSION stays 67. **Deviations:** no rayon pool in the hour: the brief's
+  "rolls on the pool, writes in id order" is not order-free (above), and the part that is pure and costly, the
+  bond's reads, gains more on one thread than on the pool. Measured: a read-ahead on phase 8's pool (every due
+  agent's components and its mates' edges, read before the serial loop) cut the bond 2,157 -> 1,171 ms over days
+  25-30 but its own wall was 738 ms (the main thread waits on it; ~300 due agents a tick at 20k), `tick::lod` 7,277
+  -> 6,884 (-5 %); the in-loop two steps, 7,277 -> 6,329 (-13 %) on the same instrumentation. Warming the enemies
+  index in the read step as well was slower; the index's removal on every drift (`reindex_kind_as`, two BTreeMap
+  lookups a pair) is a lever only with an exact "no Enemy edge, no entry" invariant, which the direct `kind`
+  writes elsewhere (`abroad`, `ambient`, `bins`, `parents`) do not promise. The rest of the hour (about 70 % of it on days 25-30) is many small reads spread
+  over every roll (rows, prices behind memos a purchase drops, pantries, rosters), no one site over 0.1 s a game
+  day at 20k. No new test (R7): the identity is the proof, and the determinism test's 4-thread leg runs the same
+  hour as its 1-thread leg.
