@@ -4320,7 +4320,7 @@ pub struct GangsCfg {
     /// The perf pass phase 7d (OPEN-211): a gang still on `Order::Job` after its job settled, with the next
     /// order already held for the giving in person (`Gang.pending_order`), does not rescore every tick; it
     /// rescores at the daily tick or on a shock rethink. `CITYSIM_DWELL_OFF=1` turns it off (doctrine 6).
-    #[serde(default = "GangsCfg::default_dwell_hold")]
+    #[serde(default = "GangsCfg::default_dwell_hold", skip_serializing)]
     pub dwell_hold: bool,
     /// Members who sleep at the Hideout each night (at most half the gang), so a raid meets someone.
     #[serde(default = "GangsCfg::default_night_watch")]
