@@ -2,11 +2,11 @@
 
 2026-10-09 (Dylan): "The most important thing is emergent story. For that we need people that appear to act like people." The suite is a fast core that catches a *broken* city, a behaviour tier that judges whether people *act like people*, and a short list of god scenarios. Rewritten 2026-10-18 (the process review) around budgets and caps, because the 2026-10-09 prune regrew within eight days (663 → 1,347 tests, god 13 → 41). The old page with the per-seed history is `docs/history/TESTING_2026-10-09.md`; the per-seed counts also live in the tests' own comments.
 
-**The doctrine, in three lines:**
+**The doctrine, in three lines (rewritten 2026-10-26, Dylan: "move fast and break things"; CLAUDE.md § The doctrine):**
 
-1. Asserts catch broken: a panic, nondeterminism, a coin made or lost, a collapse, a mechanism that never fires.
-2. Behaviour judges alive: the archetypes' diaries and the person probes are the primary judge.
-3. Numbers are reports, not gates: `FINDING` lines, read with `tools/analyze_run.py` from `citysim-cli run --report`.
+1. Asserts catch broken: a panic, a coin made or lost, a collapse, a mechanism that never fires, a tps floor.
+2. A mechanism is proven by a shadow, not a test: the archetypes' diaries at the player level are the judge. A test is written only where a broken-system signal needs one, the brief names it, and the count is a ratchet (below).
+3. Numbers are reports, not gates: `FINDING` lines, read with `tools/analyze_run.py` from `citysim-cli run --report`. Dropped on purpose: determinism, identity and save-compatibility tests, Full-vs-Statistical parity as a test.
 
 ## The tiers
 
@@ -15,8 +15,8 @@ One command each (`python tools/test.py <tier>`); each runs its cargo steps one 
 | tier | command | what | asserts | budget | measured 2026-10-18 (2026-10-19) |
 |---|---|---|---|---|---|
 | **change** (every change) | `test.py change` | `cargo fmt --check`, `clippy -D warnings`, every non-ignored test: ~1,280 unit and integration tests in `citysim/tests/*.rs`, `citysim-cli`, plus `core_sanity` | each mechanism does what it says; `core_sanity`: seeds 42-44 x 120 days, the coin identity and `escrow_leak` daily, the collapse bounds, the mechanism-existence bullets, ticks/s printed | 4 min (3 until 2026-10-18: set before the measurement) | 4m43s: tests 272 s (`core` 40 s, `wounded` 28 s, `wages` 18 s, `person` 12 s, 80 binaries under 3 s), fmt + clippy 10 s. (2026-10-19, the Lives at work gate: 3m29s with clippy warm; `core` 40-45 s, `person` 14 s, `weapons` 10 s, `wages` 9.5 s, `bodies` 7 s, `ambient` 7 s, `leverage` 6.5 s; paid back from 4m25s by threading tests' independent cities, one built base world a binary (`OnceLock`), no empty doctest pass; the gate close 8c: 3m36s, `core` 41 s, `person` 14 s, `wages` 9 s, `weapons` 10 → 7 s) |
-| **merge** (before a merge to main, on the exact tree) | `test.py merge` | `core_year` (seed 42 x 365, the bounds per 30-day window); the behaviour tier (`shadow --assert`: 114 collapse rows assert, 18 print as FINDING, on seeds 42-44); the god scenarios (seed 42, 60 days, each against its control) | the city holds a year; people still act like people; the world reacts to a shock | 8 min | year ~100 s, behaviour ~80 s (~3 GB), god ~100 s at 20 scenarios (measured 2026-10-18: `god` 61 s, `god_corps` 18 s, `god_districts` 19 s, the three binaries in series, 108 s wall with an incremental build; the 41 took ~130 s). (2026-10-19: 4m16s; year 115 s, behaviour 58 s, `god` 49 s at 15, `god_corps` 17 s, `god_districts` 17 s; 8c: 4m26s, year 116 s, behaviour 63 s, `god` 50 s) |
-| **milestone** (at a close, or nightly) | `test.py milestone` | Full-vs-Statistical parity (`lod.rs`, the 2,000 city, rates within 15 %); `core_20k` (the 20,000 city, the bounds per capita, determinism of two runs); `god_cut_the_precinct` (`god_20k.rs`: two 20k cities, 40 days) | the Statistical tier mirrors Full; the big city holds | 20 min | parity ~3.5 min, 20k ~5 min (2026-10-19: `god_20k` 392 s, two 20k cities x 40 days; the tier read 7m51s before it; 8c: 13m46s, parity 235 s, `core_20k` 244 s, `god_20k` 347 s) |
+| **merge** (at a close or overnight, as a print; no longer per merge, 2026-10-26) | `test.py merge` | `core_year` (seed 42 x 365, the bounds per 30-day window); the behaviour tier (`shadow --assert`: 114 collapse rows assert, 18 print as FINDING, on seeds 42-44); the god scenarios (seed 42, 60 days, each against its control) | the city holds a year; people still act like people; the world reacts to a shock | 8 min | year ~100 s, behaviour ~80 s (~3 GB), god ~100 s at 20 scenarios (measured 2026-10-18: `god` 61 s, `god_corps` 18 s, `god_districts` 19 s, the three binaries in series, 108 s wall with an incremental build; the 41 took ~130 s). (2026-10-19: 4m16s; year 115 s, behaviour 58 s, `god` 49 s at 15, `god_corps` 17 s, `god_districts` 17 s; 8c: 4m26s, year 116 s, behaviour 63 s, `god` 50 s) |
+| **milestone** (at a close, or nightly, as a print) | `test.py milestone` | Full-vs-Statistical parity (`lod.rs`, the 2,000 city, rates within 15 %); `core_20k` (the 20,000 city, the bounds per capita, determinism of two runs); `god_cut_the_precinct` (`god_20k.rs`: two 20k cities, 40 days) | the Statistical tier mirrors Full; the big city holds | 20 min | parity ~3.5 min, 20k ~5 min (2026-10-19: `god_20k` 392 s, two 20k cities x 40 days; the tier read 7m51s before it; 8c: 13m46s, parity 235 s, `core_20k` 244 s, `god_20k` 347 s) |
 | **diag** (on demand) | `test.py diag --only NAME` | print-only probes (`hit_probe`, `law_probe`, `class_table`, the censuses, `measure_*`); the lives baseline is `citysim-cli shadow --lives [--population 20000]` | nothing | — | listed by `test.py diag` |
 
 Plus the human judge at every milestone: a shadow pass (`citysim-cli shadow --assert --out shadow_out`, critics read one diary per archetype, `docs/SHADOW_V4.md` is the pattern). The bounds catch regressions between reads; the read is the verdict on "alive".
@@ -25,6 +25,7 @@ Plus the human judge at every milestone: a shadow pass (`citysim-cli shadow --as
 
 ## The caps (`test.py lint`)
 
+- **Test functions: 1529** is the ratchet baseline (2026-10-26, doctrine 2). `test.py lint` fails when the count of `#[test]` under `citysim/` and `citysim-cli/` rises above it. To add a test: the brief names it, the commit raises this number and its message says `test-add: <reason>`. When the count falls, lower the number (a warning says so).
 - **God scenarios ≤ 20** plus controls, one per reaction class (below). A phase's scenario is a spec-time device: it runs at the phase's acceptance and at the close it replaces its class's scenario or is deleted, write-up to `docs/history/`.
 - **Asserted `core_sanity` bullets ≤ 60** (`mechanisms()` + `jobs2_mechanisms()` + `transit_mechanisms()` in `core.rs`). A new bullet replaces one or names the milestone that earns a row. Printed lists (`printed_mechanisms`, `jobs2_printed`) are uncapped: they cost nothing.
 - **Every `#[ignore]` has a reason**: `tier: merge`, `tier: milestone`, `tier: diag`, or `gap: OPEN-nnn` (an open row in `docs/OPEN.md`). A `gap:` older than two milestones is fixed or deleted at the next close.
@@ -34,6 +35,8 @@ Plus the human judge at every milestone: a shadow pass (`citysim-cli shadow --as
 `test.py report` prints the close-of-milestone table (tiers against budgets, counts against caps, ignores by tier, test files and lines, helper copies outside `tests/common`); `/close-milestone` pastes it into HANDOFF and every cap over becomes an `OPEN` row owned by the next milestone.
 
 ## Adding a test
+
+**First (2026-10-26): a mechanism is proven by a shadow, not a test.** Read the diaries of the archetypes it touches (`citysim-cli shadow`); what reads wrong is the next pass's input. The kinds below are written only where a broken-system signal needs one (the mechanism would otherwise fail silently), named in the brief, and counted by the ratchet above.
 
 **A mechanism** gets a unit test in a seeded world: set the preconditions by hand, call the system, assert the effect (`tech.rs::test_research_held_builds_a_lab_in_the_focus`, `camp.rs::test_unfed_child_taken_at_take_days_before_death` are the pattern). Build the world with `tests/common` (`world()` the shipped seed-42 city, `dole_world()` the pre-flip city most unit tests pin, `adults`, `set_coins`, `coins`, `corp_named`, `run_days`, `identity`). Most unit files run `Config::load().dole_city()` so they pin the mechanisms they were written for; `core.rs`, `lod.rs`, `person.rs`, `policy.rs`, the god scenarios and the behaviour tier run the shipped default.
 

@@ -424,6 +424,30 @@ def helper_copies(name="world"):
     return n
 
 
+TEST_ATTR = re.compile(r"^\s*#\[test\]\s*$", re.M)
+BASELINE_RE = re.compile(r"Test functions: (\d+)")
+
+
+def scan_test_count():
+    """Every `#[test]` under citysim/ and citysim-cli/ (src and tests): the ratchet's count (doctrine 2, 2026-10-26)."""
+    n = 0
+    for crate in ("citysim", "citysim-cli"):
+        for f in (ROOT / crate).rglob("*.rs"):
+            if "target" in f.parts:
+                continue
+            n += len(TEST_ATTR.findall(f.read_text(encoding="utf-8", errors="replace")))
+    return n
+
+
+def test_baseline():
+    """The count recorded in docs/TESTING.md (`Test functions: N`); None when the line is missing."""
+    doc = ROOT / "docs" / "TESTING.md"
+    if not doc.exists():
+        return None
+    m = BASELINE_RE.search(doc.read_text(encoding="utf-8", errors="replace"))
+    return int(m.group(1)) if m else None
+
+
 def cmd_lint(args):
     problems, warnings = [], []
     open_rows = scan_open()
@@ -446,6 +470,14 @@ def cmd_lint(args):
     total = sum(bullets.values())
     if total > CAP_ASSERTED_BULLETS:
         problems.append(f"asserted core_sanity bullets {total} > cap {CAP_ASSERTED_BULLETS} {bullets}")
+    tests, baseline = scan_test_count(), test_baseline()
+    if baseline is None:
+        warnings.append("no `Test functions: N` line in docs/TESTING.md: the test-count ratchet has no baseline")
+    elif tests > baseline:
+        problems.append(f"test functions {tests} > baseline {baseline} (the ratchet, doctrine 2): delete one, or raise "
+                        f"`Test functions:` in docs/TESTING.md in a commit whose message says `test-add: <reason>`")
+    elif tests < baseline:
+        warnings.append(f"test functions {tests} < baseline {baseline}: lower `Test functions:` in docs/TESTING.md")
     for f in test_files():
         n = len(f.read_text(encoding="utf-8", errors="replace").splitlines())
         if n > WARN_FILE_LINES:
@@ -467,7 +499,7 @@ def cmd_lint(args):
     for p in problems:
         print("FAIL", p)
     print(f"lint: {len(problems)} problem(s), {len(warnings)} warning(s); god {len(god)}/{CAP_GOD_SCENARIOS}, "
-          f"asserted bullets {total}/{CAP_ASSERTED_BULLETS}, ignores {len(scan_ignores())}")
+          f"asserted bullets {total}/{CAP_ASSERTED_BULLETS}, tests {tests}/{baseline}, ignores {len(scan_ignores())}")
     return 1 if problems else 0
 
 
