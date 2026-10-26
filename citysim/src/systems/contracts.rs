@@ -2764,6 +2764,10 @@ pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
     if next.phase == HuntPhase::Watch && next.intel.is_none() {
         next.intel = Some(crate::systems::hunt::habit(world, t, now));
     }
+    // The pressure pass phase 4 (OPEN-194): the first leg within reach.
+    if !crate::systems::hunt::within_reach(world, id, next.phase, &mut next.venue, next.intel) {
+        return None;
+    }
     let phase = next.phase;
     crate::systems::hunt::set_chase(world, id, next);
     crate::systems::hunt::reindex(world);

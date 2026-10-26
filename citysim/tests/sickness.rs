@@ -1077,30 +1077,35 @@ fn test_treatment_savings_zero_when_the_pool_covers_it() {
 /// Block#24, each with `PlanCtx::market_free` false.)
 #[test]
 fn test_g3_only_the_broke_steal_food() {
-    let mut cfg = Config::load().dole_city().v1_profile();
-    cfg.lod.force = Some(Lod::Full);
-    let mut w = World::new(408, cfg);
-    w.levers.dole_per_day = 0;
-    let mut cursor = w.events.back().map_or(0, |e| e.id + 1);
+    // The pressure pass phase 4: pooled over three seeds (seed 408 alone
+    // held one broke theft in 20 days, so any change of trajectory, here
+    // the acquaintance prune's, read as the mechanism never firing).
     let (mut broke, mut able) = (0u32, Vec::new());
-    let end = w.tick + 20 * TICKS_PER_DAY;
-    while w.tick < end {
-        w.run_ticks(1);
-        let fresh: Vec<(EntityId, String)> = w
-            .events
-            .iter()
-            .filter(|e| e.id >= cursor && e.kind == citysim::EventKind::Theft && e.text.contains("food"))
-            .filter_map(|e| e.actors.first().map(|&a| (a, e.text.clone())))
-            .collect();
-        cursor = w.events.back().map_or(cursor, |e| e.id + 1);
-        for (a, text) in fresh {
-            let coins = w.comp::<Wallet>(a).map_or(0, |x| x.coins);
-            if coins >= life::meal_price(&w, a) {
-                if citysim::goap::actions::PlanCtx::build(&w, a, None).market_free {
-                    able.push((a.index, coins, text));
+    for seed in [408, 409, 410] {
+        let mut cfg = Config::load().dole_city().v1_profile();
+        cfg.lod.force = Some(Lod::Full);
+        let mut w = World::new(seed, cfg);
+        w.levers.dole_per_day = 0;
+        let mut cursor = w.events.back().map_or(0, |e| e.id + 1);
+        let end = w.tick + 20 * TICKS_PER_DAY;
+        while w.tick < end {
+            w.run_ticks(1);
+            let fresh: Vec<(EntityId, String)> = w
+                .events
+                .iter()
+                .filter(|e| e.id >= cursor && e.kind == citysim::EventKind::Theft && e.text.contains("food"))
+                .filter_map(|e| e.actors.first().map(|&a| (a, e.text.clone())))
+                .collect();
+            cursor = w.events.back().map_or(cursor, |e| e.id + 1);
+            for (a, text) in fresh {
+                let coins = w.comp::<Wallet>(a).map_or(0, |x| x.coins);
+                if coins >= life::meal_price(&w, a) {
+                    if citysim::goap::actions::PlanCtx::build(&w, a, None).market_free {
+                        able.push((a.index, coins, text));
+                    }
+                } else {
+                    broke += 1;
                 }
-            } else {
-                broke += 1;
             }
         }
     }

@@ -201,7 +201,13 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
             j.last_shift_day == Some(j.next_shift_key(world.tick)) && !crate::exec::routine::wage_pending(world, j)
         }),
         // M11 D26: nothing to found (also the eligibility gate).
-        GoalKind::Found => !crate::systems::founding::can_found(world, id),
+        // The pressure pass phase 4 (OPEN-194): or the Hall past the reach.
+        GoalKind::Found => {
+            !crate::systems::founding::can_found(world, id)
+                || world
+                    .building_of_kind(BuildingKind::Hall)
+                    .is_some_and(|h| crate::systems::distance::out_of_reach(world, id, h, |r| r.register_ticks))
+        }
         // M12 D27: squatting already, or nowhere to squat (the eligibility gate).
         GoalKind::Squat => !crate::systems::street::can_squat(world, id),
         // M13 D43: nothing affordable, on cooldown, in arrears or no open seller.
@@ -209,9 +215,14 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
         // M13 D34: nothing to treat at `treat_below`; D39: and no addiction
         // within 0.2 of `hooked` to Detox.
         GoalKind::Treat => {
-            !crate::systems::chrome::wants_treatment(world, id)
+            (!crate::systems::chrome::wants_treatment(world, id)
                 && !crate::systems::stims::wants_detox(world, id)
-                && !crate::systems::health::wants_oncology(world, id)
+                && !crate::systems::health::wants_oncology(world, id))
+                // The pressure pass phase 4 (OPEN-194): the nearest Clinic
+                // past the reach (V8: a madam's 208-278 min, five mornings).
+                // A diagnosed cancer is not a discretionary trip: walked to
+                // at any distance.
+                || (!crate::systems::health::wants_oncology(world, id) && clinic_out_of_reach(world, id))
         }
         // M13 D39: high already, or no dose in hand and none to buy.
         GoalKind::GetHigh => !crate::systems::stims::wants_high(world, id),
@@ -225,6 +236,18 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
         GoalKind::Lead => crate::systems::leisure::lead_satisfied(world, id),
         _ => false,
     }
+}
+
+/// The pressure pass phase 4 (OPEN-194): the nearest Clinic (open or not)
+/// is past `[distance.reach] clinic_ticks` from where `id` sets out (none
+/// at all: past). `false` off.
+fn clinic_out_of_reach(world: &World, id: EntityId) -> bool {
+    if crate::systems::distance::reach(world).is_none() {
+        return false;
+    }
+    let Some(tile) = crate::systems::life::origin(world, id) else { return false };
+    crate::systems::assets::nearest_seller(world, BuildingKind::Clinic, tile, false)
+        .is_none_or(|c| crate::systems::distance::out_of_reach(world, id, c, |r| r.clinic_ticks))
 }
 
 /// Eat's "can afford/obtain" gate: food in hand, a meal's coins, a pantry,
@@ -630,11 +653,16 @@ pub fn considerations_with(
                 Consideration::new("1-affinity(suspect)", (1.0 - affinity).clamp(0.0, 1.0), IDENTITY),
             ];
             // L1: the walk to the Hall weighs against a report.
-            let tiles = world
-                .building_of_kind(BuildingKind::Hall)
-                .and_then(|h| crate::systems::life::tiles_to(world, id, h))
-                .unwrap_or(0);
+            let hall = world.building_of_kind(BuildingKind::Hall);
+            let tiles = hall.and_then(|h| crate::systems::life::tiles_to(world, id, h)).unwrap_or(0);
             cs.push(crate::systems::life::travel(world, tiles));
+            // The pressure pass phase 4 (OPEN-194): a Hall past the reach is
+            // not walked to for a report (V8: 577 min and a shift lost).
+            if crate::systems::distance::reach(world).is_some() {
+                let near =
+                    hall.is_none_or(|h| !crate::systems::distance::out_of_reach(world, id, h, |r| r.report_ticks));
+                cs.push(Consideration::new("hall within reach", can(near), GATE));
+            }
             cs
         }
         GoalKind::Patrol => {
