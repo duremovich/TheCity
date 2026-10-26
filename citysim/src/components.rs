@@ -4446,6 +4446,30 @@ pub struct Misery {
     pub low_days: u16,
     /// The day of the last brawl started (one a day).
     pub brawl_day: Option<u32>,
+    /// Pressure pass F3: the shift key a midnight roll chose to skip, acted
+    /// out at the shift's moment (`misery::hourly`: the body sets off or
+    /// wakes, then does not go) for a body; `None` once acted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skip_key: Option<i64>,
+    /// F3: the misery the midnight roll read (the moment's event names it).
+    #[serde(default)]
+    pub skip_misery: f32,
+    /// F3: the skipped shift's end: the Unwind goal's skip flat until then.
+    #[serde(default)]
+    pub skip_until: Tick,
+    /// F3: out of every hire until this tick (a firing's or a quit's idle days).
+    #[serde(default)]
+    pub idle_until: Tick,
+    /// F3: a work reputation until this tick: a hire pass passes the
+    /// candidate over on `stain_p` (a pure hash of the agent and the day).
+    #[serde(default)]
+    pub stain_until: Tick,
+    #[serde(default)]
+    pub stain_p: f32,
+    /// F3: `(employer, until)`: the employer who fired this worker does not
+    /// take him back before the tick.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fired_from: Option<(EntityId, Tick)>,
 }
 
 /// Jobs & lives phase 3: an item's provenance (its last change of hands).

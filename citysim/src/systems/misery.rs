@@ -50,10 +50,22 @@
 //!   `faith_min` misery as it draws the lonely, and converts on `p_convert ×
 //!   (1 + faith_convert_mult × misery)` (`faith::preach`). A join or a
 //!   conversion that misery opened names it in its event.
+//! - **F3, the skip's moment** ([`hourly`]): a body's skip is rolled at
+//!   midnight and acted out at the first hour within `skip_lead_ticks` of
+//!   the shift (it wakes or sets off, then does not go; the event names
+//!   where it turns instead), and Unwind scores `+ skip_unwind_flat` until
+//!   the skipped shift's end, so the miserable skipper's day is a bar, a
+//!   friend's or the street (and the brawls happen in venues).
+//! - **F3, the jobless** ([`note_left`], [`hire_blocked`] through
+//!   `life::quit_blocks`): a quit (misery, unpaid) or a misery firing keeps
+//!   the worker out of every hire for idle days, the firing employer
+//!   refuses him for `fired_block_days`, and a reputation passes him over
+//!   on `stain_*_p` a day for `stain_days`. A gang recruit is held for
+//!   `recruit_tenure_days` (`gang::desist`).
 //!
 //! Statistical mirror: the daily rolls are tier-blind (the skip, the
-//! firing, the quit); the theft is the hourly table's; the brawl and the
-//! gang join are the daily rolls above.
+//! firing, the quit; a Statistical skip is acted at midnight); the theft is
+//! the hourly table's; the brawl and the gang join are the daily rolls above.
 
 use crate::components::{
     Brain, Building, BuildingKind, Crime, Job, Lod, MemoryKind, Mood, Personality, Position, RelKind, Role, Sentence,
@@ -71,6 +83,8 @@ const PURPOSE_BRAWL: u64 = 0x6d15_0003;
 const PURPOSE_STAT_BRAWL: u64 = 0x6d15_0004;
 const PURPOSE_STAT_JOIN: u64 = 0x6d15_0005;
 const PURPOSE_PICK: u64 = 0x6d15_0006;
+const PURPOSE_IDLE: u64 = 0x6d15_0007;
+const PURPOSE_STAIN: u64 = 0x6d15_0008;
 
 /// A worker's misery bookkeeping (only for those it has touched).
 pub use crate::components::Misery;
@@ -106,9 +120,10 @@ fn misery_mut(world: &mut World, id: EntityId) -> Option<&mut Misery> {
     world.comp_mut::<Misery>(id)
 }
 
-/// Is `id`'s job at its own business (nobody fires the owner)?
+/// Is `id`'s job at its own household's business (his or his spouse's)?
+/// Nobody fires the owner, and an owner does not quit his own business (F3).
 fn own_business(world: &World, id: EntityId, job: &Job) -> bool {
-    job.employer.is_some_and(|e| world.owner_of(e) == Some(id))
+    crate::systems::economy::household_business(world, id, job.employer)
 }
 
 /// Midnight (LivingEarly, after `fixes::daily`): the quits, the skips and
@@ -157,11 +172,22 @@ pub fn daily(world: &mut World) {
                             * (1.0 - c.skip_loyal_damp * p.loyalty).max(0.0)
                     });
                     let key = job.next_shift_key(world.tick);
-                    if hash(world, PURPOSE_SKIP, id, day) < p
+                    let pending = world.comp::<Misery>(id).and_then(|x| x.skip_key);
+                    if pending == Some(key) && statistical {
+                        // F3: a body that went off screen before its moment.
+                        skips.push((id, m));
+                    } else if pending != Some(key)
+                        && hash(world, PURPOSE_SKIP, id, day) < p
                         && crate::exec::routine::workday_of(world, id, &job, key)
                         && job.last_shift_day != Some(key)
                     {
-                        skips.push((id, m));
+                        if statistical {
+                            skips.push((id, m));
+                        } else if let Some(x) = misery_mut(world, id) {
+                            // F3: decided now, acted out at the shift's moment (`hourly`).
+                            x.skip_key = Some(key);
+                            x.skip_misery = m;
+                        }
                     }
                 }
             }
@@ -205,7 +231,9 @@ fn quit_days(world: &World, c: &MiseryCfg, id: EntityId, job: &Job) -> u16 {
 fn quit(world: &mut World, id: EntityId, days: u16) {
     world.abort_plan(id);
     let reason = format!("miserable: {days} days low, mood {:+.2}", mood(world, id));
+    let employer = world.comp::<Job>(id).and_then(|j| j.employer);
     crate::systems::economy::quit_job(world, id, &reason);
+    note_left(world, id, employer, false);
     if let Some(x) = world.comp_mut::<Misery>(id) {
         x.low_days = 0;
         x.absences.clear();
@@ -215,8 +243,21 @@ fn quit(world: &mut World, id: EntityId, days: u16) {
 
 /// One skipped shift (a strike of one), counted; the firing at the count.
 fn skip(world: &mut World, c: &MiseryCfg, id: EntityId, m: f32) {
+    skip_as(world, c, id, m, String::new());
+}
+
+/// [`skip`] with the moment's words (F3: what the body does instead).
+fn skip_as(world: &mut World, c: &MiseryCfg, id: EntityId, m: f32, moment: String) {
     let Some(job) = world.comp::<Job>(id).cloned() else { return };
+    let end = {
+        let until = u64::from(job.ticks_until_shift(world.tick_of_day()));
+        job.shift_end(world.tick + until).unwrap_or(world.tick + until)
+    };
     crate::systems::classes::walk_out(world, &[id]);
+    if let Some(x) = misery_mut(world, id) {
+        x.skip_key = None;
+        x.skip_until = end;
+    }
     let day = world.day() as u32;
     let window = c.absence_window_days;
     let count = match misery_mut(world, id) {
@@ -228,7 +269,7 @@ fn skip(world: &mut World, c: &MiseryCfg, id: EntityId, m: f32) {
         None => 0,
     };
     let text = format!(
-        "{} skips the shift as {} (mood {:+.2}, misery {m:.2}; absence {count} in {window} days)",
+        "{} skips the shift as {}{moment} (mood {:+.2}, misery {m:.2}; absence {count} in {window} days)",
         world.name_of(id),
         job.role.label(),
         mood(world, id),
@@ -246,6 +287,7 @@ fn fire(world: &mut World, id: EntityId, count: u32, window: u32) {
     world.abort_plan(id);
     let Some(job) = world.vacate_job(id) else { return };
     crate::systems::life::note_quit(world, id, job.employer);
+    note_left(world, id, job.employer, true);
     let text =
         format!("{} dismissed as {} (absent {count} times in {window} days)", world.name_of(id), job.role.label());
     let mut actors = vec![id];
@@ -347,6 +389,7 @@ pub fn hourly(world: &mut World) {
     if !world.tick.is_multiple_of(TICKS_PER_HOUR) {
         return;
     }
+    skip_moments(world, &c);
     let day = world.day() as u32;
     let hour = world.tick / TICKS_PER_HOUR;
     let cands: Vec<(EntityId, f32)> = world
@@ -557,4 +600,135 @@ pub fn skipped_now(world: &World, id: EntityId) -> bool {
 pub fn theft_note(world: &World, id: EntityId) -> Option<String> {
     let m = misery(world, id);
     (m > 0.0).then(|| format!(" (miserable, mood {:+.2})", mood(world, id)))
+}
+
+// ---------------------------------------------------------------------------
+// F3: quits, wages and the jobless
+// ---------------------------------------------------------------------------
+
+/// F3: the skips decided at midnight, acted out at the first hour within
+/// `skip_lead_ticks` of the shift's start: the body is woken or on its way,
+/// and does not go. The words name what it does instead (bed, the street,
+/// the Unwind pick: a bar, a friend's); the Unwind flat then sends it there.
+fn skip_moments(world: &mut World, c: &MiseryCfg) {
+    let due: Vec<EntityId> = world
+        .bodies()
+        .into_iter()
+        .filter(|&id| world.comp::<Misery>(id).is_some_and(|x| x.skip_key.is_some()))
+        .collect();
+    for id in due {
+        let Some(key) = world.comp::<Misery>(id).and_then(|x| x.skip_key) else { continue };
+        let job = world.comp::<Job>(id).cloned();
+        let live = job.as_ref().is_some_and(|j| j.next_shift_key(world.tick) == key && j.last_shift_day != Some(key));
+        if !live || world.comp::<Brain>(id).is_none_or(|b| b.emigrating) {
+            if let Some(x) = world.comp_mut::<Misery>(id) {
+                x.skip_key = None;
+            }
+            continue;
+        }
+        let Some(job) = job else { continue };
+        if job.ticks_until_shift(world.tick_of_day()) > c.skip_lead_ticks {
+            continue;
+        }
+        let m = world.comp::<Misery>(id).map_or(0.0, |x| x.skip_misery).max(misery(world, id));
+        let moment = skip_moment(world, id);
+        skip_as(world, c, id, m, moment);
+    }
+}
+
+/// The skip's words: where the body is and where it turns instead.
+fn skip_moment(world: &World, id: EntityId) -> String {
+    let asleep = world
+        .comp::<Brain>(id)
+        .is_some_and(|b| matches!(b.exec, crate::exec::ExecState::Use { kind: crate::goap::ActionKind::Sleep, .. }));
+    if asleep {
+        return ": wakes for it and stays in bed".to_string();
+    }
+    let home = world.comp::<crate::components::Household>(id).and_then(|h| h.home);
+    let at = world.comp::<Position>(id).and_then(|p| p.building);
+    let going = world
+        .comp::<Brain>(id)
+        .and_then(|b| b.plan.as_ref())
+        .is_some_and(|p| p.goal == crate::components::GoalKind::Work);
+    let start = if going {
+        "sets off for it, then does not go in"
+    } else if at.is_some() && at == home {
+        "gets up and does not go"
+    } else {
+        "does not go in"
+    };
+    let instead = match crate::systems::leisure::choice(world, id, false) {
+        Some(p) if p.stay_in => String::new(),
+        Some(p) => match p.venue {
+            Some(v) if Some(v) == home => String::new(),
+            Some(v) if p.act == crate::goap::ActionKind::HangOut => {
+                format!("; goes round to a friend's at {}", world.name_of(v))
+            }
+            Some(v) => format!("; heads for {}", world.name_of(v)),
+            None => "; walks the streets instead".to_string(),
+        },
+        None => String::new(),
+    };
+    format!(": {start}{instead}")
+}
+
+/// F3: the Unwind goal's flat for a body inside its skipped shift.
+pub fn skip_flat(world: &World, id: EntityId) -> f32 {
+    let Some(c) = cfg(world) else { return 0.0 };
+    if world.comp::<Misery>(id).is_some_and(|x| x.skip_until > world.tick) {
+        c.skip_unwind_flat
+    } else {
+        0.0
+    }
+}
+
+/// F3: a quit (`fired` false) or a firing leaves the worker out of every
+/// hire for the idle days (plus a hash's jitter) and stained for
+/// `stain_days`; the firing employer refuses him for `fired_block_days`.
+pub fn note_left(world: &mut World, id: EntityId, employer: Option<EntityId>, fired: bool) {
+    let Some(c) = cfg(world).cloned() else { return };
+    let now = world.tick;
+    let day = world.day();
+    let jitter = ((hash(world, PURPOSE_IDLE, id, day) * (c.idle_jitter_days + 1) as f32) as u64)
+        .min(u64::from(c.idle_jitter_days));
+    let base = u64::from(if fired { c.fired_idle_days } else { c.quit_idle_days });
+    let idle = now + (base + jitter) * crate::time::TICKS_PER_DAY;
+    let stain = now + u64::from(c.stain_days) * crate::time::TICKS_PER_DAY;
+    let p = if fired { c.stain_fired_p } else { c.stain_quit_p };
+    let block = now + u64::from(c.fired_block_days) * crate::time::TICKS_PER_DAY;
+    if let Some(x) = misery_mut(world, id) {
+        x.stain_p = if x.stain_until > now { x.stain_p.max(p) } else { p };
+        x.idle_until = x.idle_until.max(idle);
+        x.stain_until = x.stain_until.max(stain);
+        if fired {
+            if let Some(e) = employer {
+                x.fired_from = Some((e, block));
+            }
+        }
+    }
+}
+
+/// F3: `id` is not hired by `employer` now: inside the idle days, refused by
+/// the employer who fired him, or passed over today on the reputation.
+pub fn hire_blocked(world: &World, id: EntityId, employer: EntityId) -> bool {
+    pool_out(world, id) || fired_by(world, id, employer)
+}
+
+/// F3: out of every hire today: inside the idle days, or passed over today
+/// on the reputation.
+pub fn pool_out(world: &World, id: EntityId) -> bool {
+    let Some(x) = world.comp::<Misery>(id) else { return false };
+    let now = world.tick;
+    x.idle_until > now
+        || (x.stain_until > now && x.stain_p > 0.0 && hash(world, PURPOSE_STAIN, id, world.day()) < x.stain_p)
+}
+
+/// F3: `employer` fired `id` within `fired_block_days`.
+pub fn fired_by(world: &World, id: EntityId, employer: EntityId) -> bool {
+    world.comp::<Misery>(id).and_then(|x| x.fired_from).is_some_and(|(e, until)| e == employer && world.tick < until)
+}
+
+/// F3: a gang recruit inside its initiation (`recruit_tenure_days`).
+pub fn recruit_holds(world: &World, joined_tick: crate::time::Tick) -> bool {
+    cfg(world).is_some_and(|c| world.tick < joined_tick + u64::from(c.recruit_tenure_days) * crate::time::TICKS_PER_DAY)
 }

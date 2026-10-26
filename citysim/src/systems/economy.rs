@@ -763,6 +763,33 @@ pub fn collect_wage_scaled(world: &mut World, agent: EntityId, scale: f32) -> i6
         return 0;
     }
     let payer = job.employer.and_then(|e| world.owner_of(e));
+    // Pressure pass F3: on payday a Fixer's server hands over the owner's
+    // cut he holds (`fixer_owed`, waiting for the owner's collection in
+    // person, which a Statistical owner never made): the forger kept 32c of
+    // each 40c sale and held the 8c, and his wage came up short against
+    // the cut he was holding.
+    if let (Some(e), Some(o)) = (job.employer, payer) {
+        settle_held_cut(world, agent, e, o);
+    }
+    // Pressure pass F3: a household business (the worker's own, or his
+    // spouse's) owes him no wage: the owner's income is the till's, and a
+    // spouse's purse is the household's. The owner paid himself out of his
+    // own purse, came up short and quit his own bar "unpaid"; a forger
+    // whose wife owned the office quit her with 348c in hand.
+    if household_business(world, agent, job.employer) {
+        let paid = if payer == Some(agent) {
+            0
+        } else {
+            let due = job.wage_per_day * i64::from(job.days_unpaid);
+            let paid = due.min(world.purse(payer).max(0));
+            ownership::pay(world, payer, Some(agent), paid, Flow::Wage)
+        };
+        if let Some(j) = world.comp_mut::<Job>(agent) {
+            j.days_unpaid = 0;
+            j.paid_once = true;
+        }
+        return paid;
+    }
     // D22: a Food corp in Squeeze pays 0.9.
     // M15 W29: a poached hire's premium multiplies too.
     // Real economy phase 2 (plan E15): × the revenue rule's `wage_rev`
@@ -866,6 +893,10 @@ pub fn collect_wage_scaled(world: &mut World, agent: EntityId, scale: f32) -> i6
 /// A worker with `days_unpaid >= 7`, or three Unpaid memories in 7 days, quits.
 pub fn maybe_quit(world: &mut World, agent: EntityId) {
     let Some(job) = world.comp::<Job>(agent) else { return };
+    // F3: nobody quits his own household's business for want of a wage.
+    if household_business(world, agent, job.employer) {
+        return;
+    }
     let mut week_ago = world.tick.saturating_sub(7 * time::TICKS_PER_DAY);
     // L1: only this job's short pays count: the memories of the last one
     // quit the rehired worker again at its first shift's end, every day.
@@ -937,8 +968,31 @@ pub(crate) fn withdraw_vacancy(world: &mut World, employer: EntityId, role: crat
     }
 }
 
+/// Pressure pass F3: the owner's cut `holder` holds for `fixer`
+/// (`World::fixer_owed`) handed to `owner` (a payday's settling).
+fn settle_held_cut(world: &mut World, holder: EntityId, fixer: EntityId, owner: EntityId) {
+    let Some(owed) = world.fixer_owed.get(&fixer) else { return };
+    if !owed.iter().any(|&(h, _)| h == holder) || holder == owner {
+        return;
+    }
+    let Some(owed) = world.fixer_owed.remove(&fixer) else { return };
+    let (mine, rest): (Vec<_>, Vec<_>) = owed.into_iter().partition(|&(h, _)| h == holder);
+    let coins: i64 = mine.iter().map(|&(_, c)| c).sum();
+    if !rest.is_empty() {
+        world.fixer_owed.insert(fixer, rest);
+    }
+    ownership::pay(world, Some(holder), Some(owner), coins, Flow::Gray);
+}
+
+/// Pressure pass F3: is `employer` (a building) `agent`'s household
+/// business: his own, or his spouse's?
+pub fn household_business(world: &World, agent: EntityId, employer: Option<EntityId>) -> bool {
+    employer.and_then(|e| world.owner_of(e)).is_some_and(|o| o == agent || world.spouse_of(agent) == Some(o))
+}
+
 /// Remove the Job (posting a vacancy), drop the plan, log the event.
 pub fn quit_job(world: &mut World, agent: EntityId, reason: &str) {
+    let owed = world.comp::<Job>(agent).map_or(0, |j| j.wage_per_day * i64::from(j.days_unpaid));
     let Some(job) = world.vacate_job(agent) else { return };
     // L2 (phase 1 deviation): with jobs on, an employer who cannot cover a
     // day's wage posts no vacancy for the unpaid quitter (a business that
@@ -965,7 +1019,52 @@ pub fn quit_job(world: &mut World, agent: EntityId, reason: &str) {
         b.clear_plan();
     }
     let name = world.name_of(agent);
+    if reason == "unpaid" {
+        walk_out_unpaid(world, agent, &job, owed);
+        return;
+    }
     world.push_event(EventKind::Quit, &[agent], format!("{name} quit as {} ({reason})", job.role.label()));
+}
+
+/// Pressure pass F3: an unpaid quit is a story, not noise: the event names
+/// the boss and the wages owed; a boss who is a person owes them as an edge
+/// debt (`social::repay_debts` takes it out of his income, the creditor
+/// calls it in when it ages) and the quitter holds a `Betrayed` grudge on
+/// him (`[misery] stiff_grudge`); the quitter is out of the hiring a while
+/// (`misery::note_left`).
+fn walk_out_unpaid(world: &mut World, agent: EntityId, job: &Job, owed: i64) {
+    let name = world.name_of(agent);
+    let place = job.employer.map_or_else(|| "the job".to_string(), |e| world.name_of(e));
+    let boss = job.employer.and_then(|e| world.owner_of(e));
+    let person = boss.filter(|&b| world.has::<crate::components::Identity>(b) && crate::systems::law::living(world, b));
+    let boss_name = match boss {
+        Some(b) => match world.comp::<Corp>(b) {
+            Some(c) => c.name.clone(),
+            None => world.name_of(b),
+        },
+        None => "the city".to_string(),
+    };
+    let mut actors = vec![agent];
+    actors.extend(person);
+    actors.extend(job.employer);
+    let owed_txt = if owed > 0 { format!(", owed {owed}c") } else { String::new() };
+    let text = format!("{name} walked out on {boss_name} at {place} as {} (unpaid{owed_txt})", job.role.label());
+    world.push_event(EventKind::Quit, &actors, text);
+    if let (Some(b), Some(c)) = (person, crate::systems::misery::cfg(world).cloned()) {
+        if owed > 0 {
+            let (lo, _) = crate::components::edge_key(b, agent);
+            let add = i32::try_from(owed).unwrap_or(i32::MAX);
+            let tick = world.tick;
+            let e = world.edge_entry(b, agent);
+            // The lower id owes the higher id when `debt > 0`.
+            e.debt = e.debt.saturating_add(if lo == b { add } else { -add });
+            e.debt_since.get_or_insert(tick);
+        }
+        if c.stiff_grudge > 0.0 {
+            crate::systems::grudges::add(world, agent, b, crate::word::GrudgeCause::Betrayed, c.stiff_grudge, 0);
+        }
+    }
+    crate::systems::misery::note_left(world, agent, job.employer, false);
 }
 
 /// Who may draw the dole: the jobless. A Job holder never does, paid or not

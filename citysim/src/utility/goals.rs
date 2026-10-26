@@ -1012,7 +1012,9 @@ pub fn considerations_with(
                 let m = 1.0 - (1.0 - world.config.life.work_night_unwind_mult.clamp(0.01, 1.0)) * p;
                 cs.push(Consideration::raw("a work night's bedtime", p, m));
             }
-            return Some((cs, flat));
+            // Pressure pass F3: a skipped shift's hours go somewhere (a bar,
+            // a friend's, the street), not to the empty day.
+            return Some((cs, flat + crate::systems::misery::skip_flat(world, id)));
         }
         GoalKind::Lead => return crate::systems::leisure::lead_considerations(world, id),
         // M15 W35.

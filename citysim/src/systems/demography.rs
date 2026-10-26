@@ -1174,6 +1174,8 @@ impl HirePool {
             .brained()
             .into_iter()
             .filter(|&id| world.has::<Identity>(id) && !world.has::<Corpse>(id) && pool_member(world, id, &execs))
+            // Pressure pass F3: the idle days and the reputation's pass-over (`life::quit_blocks`).
+            .filter(|&id| !crate::systems::misery::pool_out(world, id))
             .collect();
         let camp = members.iter().copied().filter(|&id| world.has::<crate::econ::CampRaised>(id)).collect();
         let from_of: Vec<TilePos> = members.iter().map(|&id| hire_from(world, id)).collect();
@@ -1322,7 +1324,10 @@ impl HirePool {
                 grp.head += 1;
             }
             for e in &grp.entries[grp.head..] {
-                if hired[e.m as usize] || quit[e.m as usize].is_some_and(|q| q == employer || q == EntityId::NONE) {
+                if hired[e.m as usize]
+                    || quit[e.m as usize].is_some_and(|q| q == employer || q == EntityId::NONE)
+                    || crate::systems::misery::fired_by(world, e.id, employer)
+                {
                     continue;
                 }
                 match e.gate {

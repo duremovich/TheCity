@@ -804,6 +804,8 @@ pub fn reconcile_sanitation(world: &mut World) {
             .filter(|&id| !world.has::<crate::components::GangMember>(id))
             .filter(|&id| world.comp::<Brain>(id).is_some_and(|b| !b.emigrating))
             .filter(|&id| crate::systems::demography::is_adult(world, id))
+            // Pressure pass F3: the idle days and the reputation (`misery::pool_out`).
+            .filter(|&id| !crate::systems::misery::pool_out(world, id))
             .filter(|&id| !crate::systems::founding::is_exec(world, id))
             // Lives at work phase 6 (§ 4.1, § 4.4): the band, the retired.
             .filter(|&id| crate::systems::careers::age_ok(world, id, Role::Sanitation))

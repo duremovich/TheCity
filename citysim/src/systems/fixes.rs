@@ -400,6 +400,9 @@ pub fn daily(world: &mut World) {
         // Not rehired there for `quit_rehire_days` (`pick_candidate`'s
         // `quit_blocks`): else the absentee was rehired next morning.
         crate::systems::life::note_quit(world, id, job.employer);
+        // Pressure pass F3: a no-show firing is a firing (the idle days, the
+        // reputation, the employer's refusal); it was rehired the same minute.
+        crate::systems::misery::note_left(world, id, job.employer, true);
         let text = format!("{} dismissed as {} (no-show)", world.name_of(id), job.role.label());
         let mut actors = vec![id];
         actors.extend(job.employer);

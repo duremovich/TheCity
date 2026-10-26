@@ -946,6 +946,30 @@ pub struct MiseryCfg {
     /// faith_convert_mult × misery)`.
     pub faith_min: f32,
     pub faith_convert_mult: f32,
+    /// F3 (quits, wages and the jobless): a body's skip is acted out at the
+    /// first hour within `skip_lead_ticks` of the shift's start (it sets off
+    /// or wakes, then does not go); the Unwind goal scores `+ skip_unwind_flat`
+    /// until the skipped shift's end (a bar, a friend's, the street).
+    pub skip_lead_ticks: u16,
+    pub skip_unwind_flat: f32,
+    /// F3: out of every hire for `quit_idle_days` after a quit (misery, unpaid)
+    /// and `fired_idle_days` after a firing, `+` up to `idle_jitter_days`
+    /// (a pure hash); the firing employer refuses him for `fired_block_days`.
+    pub quit_idle_days: u32,
+    pub fired_idle_days: u32,
+    pub idle_jitter_days: u32,
+    pub fired_block_days: u32,
+    /// F3: the reputation: for `stain_days` a hire pass passes the fired over
+    /// on `stain_fired_p`, a quitter on `stain_quit_p` (a hash of the day).
+    pub stain_days: u32,
+    pub stain_fired_p: f32,
+    pub stain_quit_p: f32,
+    /// F3: an unpaid quitter's `Betrayed` grudge on a boss who is a person
+    /// (the wages owed stay an edge debt, `social::repay_debts`).
+    pub stiff_grudge: f32,
+    /// F3: a gang recruit's initiation: no walk-away (`gang::desist`) in its
+    /// first `recruit_tenure_days` (every recruit).
+    pub recruit_tenure_days: u32,
 }
 
 /// The pre-view pass phase 5 `[legs]` (docs/PREVIEW_PASS.md § 2 "20k

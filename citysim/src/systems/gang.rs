@@ -1455,6 +1455,11 @@ pub fn desist(world: &mut World) {
             if b.cuffed_by.is_some() || world.hunts.contains_key(&m) || world.hunted_by.contains_key(&m) {
                 continue;
             }
+            // Pressure pass F3: a recruit's initiation holds him (`[misery] recruit_tenure_days`).
+            if world.comp::<GangMember>(m).is_some_and(|x| crate::systems::misery::recruit_holds(world, x.joined_tick))
+            {
+                continue;
+            }
             let mut p = cfg.desist_base;
             if world.comp::<Job>(m).is_some_and(|j| j.paid_once) {
                 p *= cfg.desist_employed;

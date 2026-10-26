@@ -260,7 +260,10 @@ pub fn nearer_job(world: &mut World, a: EntityId, home_door: TilePos, d: Tick) -
         }
     }
     let Some((_, to)) = best else { return false };
-    crate::systems::economy::quit_job(world, a, "far commute");
+    // Pressure pass F3: the switch reads as one move (a quit and a hire in
+    // the same minute read as a pointer shuffle).
+    let reason = format!("far commute: took a post at {} nearer home", world.name_of(to));
+    crate::systems::economy::quit_job(world, a, &reason);
     crate::systems::demography::hire(world, a, to, role);
     crate::systems::demography::close_vacancy(world, a, to, role);
     moved(world, a);
