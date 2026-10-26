@@ -1017,6 +1017,10 @@ pub enum MemoryKind {
     /// counter (`systems::service`). Mood weight 0 (`mood::memory_term`
     /// skips it); not a deed. Bodies only: a Statistical agent keeps none.
     Served,
+    /// The pressure pass phase 1 (OPEN-178, `systems::misery`): dismissed
+    /// for the absences of a miserable spell (subject the workplace). Not a
+    /// deed.
+    Sacked,
 }
 
 /// Lives at work phase 1 (docs/LIVES_AT_WORK.md § 1.1): what a service
@@ -4430,6 +4434,18 @@ pub struct Profession {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Retired {
     pub since: Tick,
+}
+
+/// The pressure pass phase 1 (OPEN-178, `systems::misery`): a body's misery
+/// bookkeeping, inserted when misery first touches it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Misery {
+    /// Days of the shifts skipped, within `[misery] absence_window_days`.
+    pub absences: Vec<u32>,
+    /// Consecutive midnights below `[misery] quit_mood` while employed.
+    pub low_days: u16,
+    /// The day of the last brawl started (one a day).
+    pub brawl_day: Option<u32>,
 }
 
 /// Jobs & lives phase 3: an item's provenance (its last change of hands).

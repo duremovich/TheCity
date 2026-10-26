@@ -1583,7 +1583,12 @@ fn steal_food(world: &mut World, id: EntityId, source: StealSource, target: Opti
     world.push_event(
         crate::events::EventKind::Theft,
         &[id, b],
-        format!("{name} stole {units} food from the {}#{}", kind.label(), b.index),
+        format!(
+            "{name} stole {units} food from the {}#{}{}",
+            kind.label(),
+            b.index,
+            crate::systems::misery::theft_note(world, id).unwrap_or_default()
+        ),
     );
     world.release_all(id);
     // Witnesses: the victims are the building's occupants (a Home's residents,

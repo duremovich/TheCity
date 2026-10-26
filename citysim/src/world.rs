@@ -995,6 +995,10 @@ pub struct World {
     pub profession: Vec<Option<crate::components::Profession>>,
     #[serde(default, skip_serializing_if = "all_none")]
     pub retired: Vec<Option<crate::components::Retired>>,
+    /// The pressure pass phase 1 (OPEN-178): misery's bookkeeping (only
+    /// with `[misery]`; an empty store is not written).
+    #[serde(default, skip_serializing_if = "all_none")]
+    pub misery: Vec<Option<crate::components::Misery>>,
     /// Hunger as sickness § 4: buildings whose bin holds scraps (rebuilt on load).
     #[serde(skip)]
     pub bins: BTreeSet<EntityId>,
@@ -1478,6 +1482,7 @@ components! {
     chipped: crate::components::Chipped,
     profession: crate::components::Profession,
     retired: crate::components::Retired,
+    misery: crate::components::Misery,
 }
 
 /// Scale S1: a memo cell on the world: skipped by serde and empty in a
@@ -1955,6 +1960,7 @@ impl World {
             chipped: Vec::new(),
             profession: Vec::new(),
             retired: Vec::new(),
+            misery: Vec::new(),
             bins: BTreeSet::new(),
             rumours: Vec::new(),
             regard: BTreeMap::new(),
@@ -4079,6 +4085,7 @@ impl World {
         self.chipped.resize_with(n.max(self.chipped.len()), || None);
         self.profession.resize_with(n.max(self.profession.len()), || None);
         self.retired.resize_with(n.max(self.retired.len()), || None);
+        self.misery.resize_with(n.max(self.misery.len()), || None);
         self.trace.resize_with(n.max(self.trace.len()), || None);
         self.life.resize_with(n.max(self.life.len()), || None);
         self.corp.resize_with(n.max(self.corp.len()), || None);
