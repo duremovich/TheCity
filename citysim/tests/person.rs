@@ -2685,6 +2685,13 @@ fn probe_parent_with_the_fee_buys_the_child_out_within_fourteen_days() {
                     break;
                 }
                 pin(&mut w, p);
+                // Pressure pass (fix round): the premise is a free parent. The vat
+                // foreman hires her on day 3 now, and a Vat Tech shift covers the
+                // whole visit window (hours 10-20: no shift is cut for a visit), so
+                // the Camp answer could never be made; kept jobless as `taken_child_nth` left her.
+                if w.has::<citysim::Job>(p) {
+                    w.remove::<citysim::Job>(p);
+                }
                 w.run_ticks(1);
                 // Home: the child's Household is its parent's Home (the family
                 // may have moved in the fortnight), not the Camp.
