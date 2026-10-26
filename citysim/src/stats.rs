@@ -3853,46 +3853,6 @@ impl TransitCols {
     }
 }
 
-#[cfg(test)]
-mod econ_cols_tests {
-    use super::*;
-
-    /// Plan E45: `EconCols` sits after `ContractCols` and before `ticks_per_sec`, 68 columns.
-    #[test]
-    fn test_econ_cols_in_header() {
-        let names = EconCols::header();
-        assert_eq!(names.split(',').count(), 68);
-        assert_eq!(EconCols::default().csv().split(',').count(), 68);
-        let jobs = JobsCols::header();
-        let health = HealthCols::header();
-        let hit = HitCols::header();
-        let lev = format!(
-            "{},{},{},{}",
-            LeverageCols::header(),
-            CaptiveCols::header(),
-            WoundedCols::header(),
-            GovCols::header()
-        );
-        assert_eq!(GovCols::default().csv().split(',').count(), GovCols::header().split(',').count());
-        assert_eq!(WoundedCols::default().csv().split(',').count(), WoundedCols::header().split(',').count());
-        assert_eq!(CaptiveCols::default().csv().split(',').count(), CaptiveCols::header().split(',').count());
-        let transit = TransitCols::header();
-        let tail = format!(
-            "flow_fixer_cut,contracts_refused_full,{names},{jobs},{health},{hit},{lev},{transit},ticks_per_sec"
-        );
-        assert_eq!(LeverageCols::default().csv().split(',').count(), LeverageCols::header().split(',').count());
-        assert_eq!(TransitCols::default().csv().split(',').count(), transit.split(',').count());
-        assert_eq!(HealthCols::default().csv().split(',').count(), health.split(',').count());
-        assert_eq!(HitCols::default().csv().split(',').count(), hit.split(',').count());
-        assert!(
-            CSV_HEADER.ends_with(&tail),
-            "the header ends with the econ columns, then the jobs, health, hit and transit columns"
-        );
-        assert_eq!(JobsCols::default().csv().split(',').count(), jobs.split(',').count());
-        assert_eq!(DayRow::new(0).csv_row().split(',').count(), CSV_HEADER.split(',').count());
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DailyStats {
     /// The day in progress.

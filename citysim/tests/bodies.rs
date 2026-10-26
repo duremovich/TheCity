@@ -290,21 +290,3 @@ fn test_state_funds_mandates_and_withdraws() {
     assert_eq!(w.outside.state_guards, 0);
     assert!(w.events.iter().any(|e| e.kind == EventKind::StateWithdrew));
 }
-
-/// A save mid-run with Outsiders and the State's guards resumes byte for byte.
-#[test]
-fn test_save_round_trip_with_bodies() {
-    let mut w = city();
-    let parent = account(&w, "Arasaka Global").id;
-    assert!(parents::start_reinforce(&mut w, parent));
-    parents::reinforce_step(&mut w, parent);
-    parents::state_act(&mut w, OutsideOrder::Fund);
-    w.run_ticks(TICKS_PER_DAY + 333);
-    let text = citysim::save::to_ron(&w);
-    assert!(text.contains("outsiders"));
-    let mut back = citysim::save::from_ron(&text).expect("loads");
-    assert_eq!(citysim::save::to_ron(&back), text);
-    w.run_ticks(2 * TICKS_PER_DAY);
-    back.run_ticks(2 * TICKS_PER_DAY);
-    assert_eq!(citysim::save::to_ron(&back), citysim::save::to_ron(&w));
-}

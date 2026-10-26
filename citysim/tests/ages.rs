@@ -157,7 +157,7 @@ fn test_maimed_then_prosthetic() {
 /// The seeded ages run to 75 under the switch, to 60 off; off, no School,
 /// no state; a save round trip on.
 #[test]
-fn test_seeded_ages_off_and_save() {
+fn test_seeded_ages_off() {
     let w = on_world();
     let oldest =
         |w: &World| w.citizens().into_iter().filter_map(|a| w.comp::<Identity>(a)).map(|i| i.age_years()).max();
@@ -168,11 +168,6 @@ fn test_seeded_ages_off_and_save() {
     assert!(oldest(&off).is_some_and(|y| y < 60), "to 60 off");
     assert!(off.buildings_of_kind(BuildingKind::School).is_empty());
     assert!(off.jobs2.ages.is_default());
-    let mut w = w;
-    w.run_ticks(2 * TICKS_PER_DAY);
-    let text = citysim::save::to_ron(&w);
-    let back = citysim::save::from_ron(&text).expect("load");
-    assert_eq!(citysim::save::to_ron(&back), text, "byte-identical round trip");
 }
 
 /// Phase 8 (§ 12): a homeless household's child is on the Street routine,

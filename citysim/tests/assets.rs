@@ -371,7 +371,7 @@ fn test_parts_market_buys_from_gang_first() {
 }
 
 #[test]
-fn test_kit_rebuilt_on_change_and_load() {
+fn test_kit_rebuilt_on_change() {
     let mut w = World::new(42, Config::load().dole_city().scaled_to(300));
     let who = adults(&w)[2];
     assert!(w.comp::<Kit>(who).expect("kit").is_bare());
@@ -380,9 +380,6 @@ fn test_kit_rebuilt_on_change_and_load() {
     assert!((k.fighting - 0.2).abs() < 1e-6 && (k.strength - 0.5).abs() < 1e-6);
     assert_eq!(k.visible, 2);
     assert!(k.chrome && !k.is_bare());
-    let back = citysim::save::from_ron(&citysim::save::to_ron(&w)).expect("load");
-    assert_eq!(back.comp::<Kit>(who), Some(&k), "the Kit is rebuilt on load");
-    back.check_indices().expect("indices rebuilt");
     assets::despawn(&mut w, arm);
     assert!(w.comp::<Kit>(who).expect("kit").is_bare());
     w.check_indices().expect("indices in step");

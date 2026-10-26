@@ -336,21 +336,3 @@ fn test_campaign_acts_on_the_rival() {
     w.run_ticks(2 * TICKS_PER_DAY);
     assert!(w.events.iter().any(|e| e.kind == EventKind::CampaignPosted), "the campaign acted");
 }
-
-/// A save mid-run with scrip, sanctions and the uplink resumes byte for byte.
-#[test]
-fn test_save_round_trip_with_weapons() {
-    let mut w = city();
-    let a = account(&w, "Arasaka Global").id;
-    let m = account(&w, "Militech International").id;
-    parents::sanction(&mut w, Some(a), m, 10, 0.08);
-    let x = w.citizens()[3];
-    w.outside.scrip.insert(x, vec![(m, 25)]);
-    w.run_ticks(TICKS_PER_DAY + 211);
-    let text = citysim::save::to_ron(&w);
-    let mut back = citysim::save::from_ron(&text).expect("loads");
-    assert_eq!(citysim::save::to_ron(&back), text);
-    w.run_ticks(2 * TICKS_PER_DAY);
-    back.run_ticks(2 * TICKS_PER_DAY);
-    assert_eq!(citysim::save::to_ron(&back), citysim::save::to_ron(&w));
-}

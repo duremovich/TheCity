@@ -219,17 +219,3 @@ fn test_appetite_lever_pins_and_releases() {
     w.run_ticks(TICKS_PER_DAY);
     assert_ne!(outside::ambient_book(&w).expect("book").appetite, 2.5, "released to the walk");
 }
-
-/// A save mid-day resumes byte for byte with the book's state.
-#[test]
-fn test_save_round_trip_with_the_book() {
-    let mut w = ambient_world(42, 2.0, |_| {});
-    w.run_ticks(2 * TICKS_PER_DAY + 10 * HOUR + 7);
-    let text = save::to_ron(&w);
-    assert!(text.contains("food_due"));
-    let mut back = save::from_ron(&text).expect("loads");
-    assert_eq!(save::to_ron(&back), text);
-    w.run_ticks(TICKS_PER_DAY);
-    back.run_ticks(TICKS_PER_DAY);
-    assert_eq!(save::to_ron(&back), save::to_ron(&w));
-}

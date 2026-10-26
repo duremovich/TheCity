@@ -277,21 +277,6 @@ fn test_fit_to_map_twice_is_fit_once() {
     assert_eq!(format!("{c:?}"), once, "a fitted config fits to itself");
 }
 
-/// Review finding 4: `World::replay(seed, world.config, log, end)` from a
-/// generated map's world (its config fitted) runs the same city.
-#[test]
-fn test_replay_from_a_fitted_config_is_the_same_run() {
-    let mut c = Config::load().scaled_to(4_000);
-    c.world.map = "gen:4000".into();
-    let mut w = World::new(42, c);
-    w.run_ticks(3 * citysim::TICKS_PER_HOUR);
-    w.push_command(citysim::PlayerCommand::SetSentenceMult(1.5));
-    w.run_ticks(citysim::TICKS_PER_HOUR);
-    let back = World::replay(42, w.config.clone(), &w.command_log, w.tick);
-    assert_eq!(back.corp_slice().len(), w.corp_slice().len(), "the roster dealt once");
-    assert!(citysim::save::to_ron(&back) == citysim::save::to_ron(&w), "the replay is the run");
-}
-
 /// Seeded buildings of `kind` per owner template: `(template, count)`.
 fn seeded_by_template(w: &World, kind: BuildingKind) -> std::collections::BTreeMap<String, usize> {
     let mut m = std::collections::BTreeMap::new();

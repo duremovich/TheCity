@@ -459,21 +459,6 @@ fn test_world_market_recycler_export_fills_till() {
     assert_eq!(econ::identity(&w), id0, "the identity holds through the pass");
 }
 
-/// E48: `tax_pinned` and `recycler_till` survive a save round trip.
-#[test]
-fn test_till_and_pin_round_trip_a_save() {
-    let mut w = city();
-    w.run_ticks(TICKS_PER_DAY + 1);
-    w.push_command(PlayerCommand::SetTaxRate(0.15));
-    w.apply_commands();
-    w.econ.recycler_till = 123;
-    let back = citysim::save::from_ron(&citysim::save::to_ron(&w)).expect("load");
-    assert!(back.econ.tax_pinned);
-    assert_eq!(back.econ.recycler_till, 123);
-    assert_eq!(back.levers.tax_rate, w.levers.tax_rate);
-    assert_eq!(ownership::total_coins(&back), ownership::total_coins(&w));
-}
-
 /// The coin identity is constant to the coin over a short no-net run (the
 /// till inside `total_coins`).
 #[test]

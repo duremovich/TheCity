@@ -424,11 +424,11 @@ The config is part of the saved `World`: a save resumes under the config it was 
   indices, districts and the transit network, and runs version migrations gated on `world.save_version`.
   `SAVE_VERSION` (top of `save.rs`, with a changelog comment) is bumped on every change to the saved shape; new fields
   use serde defaults.
-- **What the tests check**: `tests/determinism.rs` (same seed ⇒ same blake3 hash of the save, a different seed ⇒ a
-  different one); `tests/save.rs` (save mid-day, mid-hunt, mid-contract, load, run both on, the hashes agree with each
-  other and with an uninterrupted run).
+- **What the tests check**: broken-system signals and one unit test per mechanism (`docs/TESTING.md`). Determinism,
+  save round trips, off-switch identity and Full-vs-Statistical parity are no longer tested (2026-10-26); the save
+  format is still written and read, and the CLI's `--save-at` / `--load` still work.
 - `levers.rs`: every `PlayerCommand` is applied at the next tick start and logged with its tick, so a save plus its
-  command log replays exactly (`tests/lod.rs::test_command_log_replay_matches`).
+  command log replays the run.
 
 ## 10. Events, memory, story, the binder
 

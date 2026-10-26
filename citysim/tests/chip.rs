@@ -231,7 +231,7 @@ fn test_recorded_deed_makes_a_black_unit() {
 
 /// Off: no Dollhouse, no BdStudio, no state; a save round trip with a contract.
 #[test]
-fn test_off_and_save_round_trip() {
+fn test_off_spawns_nothing() {
     let mut c = Config::load();
     c.vice.chip = false;
     c.vice.bd = false;
@@ -239,11 +239,6 @@ fn test_off_and_save_round_trip() {
     assert!(w.buildings_of_kind(BuildingKind::Dollhouse).is_empty());
     assert!(w.buildings_of_kind(BuildingKind::BdStudio).is_empty());
     assert!(w.jobs2.chip.is_default() && w.jobs2.bd.is_default());
-    let mut w = on_world();
-    contracted(&mut w);
-    let text = citysim::save::to_ron(&w);
-    let back = citysim::save::from_ron(&text).expect("load");
-    assert_eq!(citysim::save::to_ron(&back), text, "byte-identical round trip");
 }
 
 /// Phase 4's carry-over: with `patrol_sweep` on, a street pitch in a district

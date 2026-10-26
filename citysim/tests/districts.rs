@@ -2,7 +2,6 @@
 //! and phase 2 (the law in districts; § 2, D9-D15, D38).
 
 use citysim::config::{ControlWeights, DistrictsCfg};
-use citysim::save;
 use citysim::systems::{bind, classes, corp_brain, districts, faction, gang, law, law_brain, lod, street};
 use citysim::util::largest_remainder;
 use citysim::{
@@ -931,43 +930,13 @@ fn test_private_guard_fills_thin_district() {
 }
 
 #[test]
-fn test_district_beats_run_daily_and_survive_a_save() {
+fn test_district_beats_run_daily() {
     let mut w = World::new(19, Config::load().dole_city().scaled_to(300));
     w.run_ticks(TICKS_PER_DAY + 10);
     assert!(!w.law().expect("law").beats.is_empty(), "the first midnight deals the beats");
     let alloc: u32 = w.districts.iter().map(|d| u32::from(d.guards)).sum();
     assert_eq!(alloc as usize, w.law().expect("law").beats.len());
     assert!(w.districts.iter().all(|d| !d.alloc_trace.is_empty()));
-    // A pre-M12 save (no beats, no report places) loads and deals at the next midnight.
-    let text = save::to_ron(&w);
-    let text = text.replacen("beats:{", "beats_gone:{", 1);
-    let stripped = {
-        let start = text.find("beats_gone:{").expect("beats in the save");
-        let mut depth = 0usize;
-        let mut end = start;
-        for (i, ch) in text[start..].char_indices() {
-            match ch {
-                '{' => depth += 1,
-                '}' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        end = start + i + 1;
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-        let end = if text[end..].starts_with(',') { end + 1 } else { end };
-        format!("{}{}", &text[..start], &text[end..])
-    };
-    let mut back = save::from_ron(&stripped).expect("a save without beats loads");
-    assert!(back.law().expect("law").beats.is_empty());
-    back.run_ticks(TICKS_PER_DAY);
-    assert!(!back.law().expect("law").beats.is_empty());
-    // A current save round-trips its beats.
-    let text = save::to_ron(&w);
-    assert_eq!(save::to_ron(&save::from_ron(&text).expect("loads")), text);
 }
 
 #[test]

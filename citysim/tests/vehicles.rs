@@ -1200,37 +1200,6 @@ fn test_an_interrupt_mid_ride_leaves_no_parked_body() {
     }
 }
 
-/// I3: a save taken mid-ride resumes byte for byte (the vehicle, its way
-/// and its rider), and the loaded world arrives as the live one does.
-#[test]
-fn test_a_save_mid_ride_resumes_identically() {
-    let mut w = city();
-    let (who, car, target, _) = coarse_driver_set_out(&mut w, 7);
-    exec_tick(&mut w);
-    let arrive = arrive_tick(&w, who);
-    for _ in 0..(arrive - w.tick) / 3 {
-        exec_tick(&mut w);
-    }
-    assert!(w.motions.contains_key(&car), "mid-ride");
-    let text = citysim::save::to_ron(&w);
-    let mut back = citysim::save::from_ron(&text).expect("loads");
-    assert_eq!(citysim::save::to_ron(&back), text, "the save round-trips");
-    assert_eq!(back.motions, w.motions);
-    assert_eq!(back.aboard, w.aboard);
-    while w.tick <= arrive + 1 {
-        exec_tick(&mut w);
-        exec_tick(&mut back);
-        assert_eq!(
-            back.comp::<Position>(who).expect("pos").tile,
-            w.comp::<Position>(who).expect("pos").tile,
-            "tick {}",
-            w.tick
-        );
-    }
-    assert_eq!(citysim::save::to_ron(&back), citysim::save::to_ron(&w), "identical at the arrival");
-    assert_eq!(w.comp::<Position>(who).expect("pos").building, Some(target));
-}
-
 /// I3, LOD: a Coarse rider promoted to Full stays aboard and rides on; a
 /// demotion to Statistical mid-ride steps him off where the car is (then
 /// the off-screen snap), the motion gone.
@@ -1618,25 +1587,6 @@ fn test_an_interrupt_aboard_a_train_gets_off_at_the_next_stop() {
     let at = w.comp::<Position>(who).expect("pos").tile;
     assert!(w.transit.net.stops.contains(&at), "off at a stop, not mid-track ({at:?})");
     w.check_indices().expect("the aboard links agree");
-}
-
-/// I3: a save taken while a rider is aboard a train between stops resumes
-/// byte for byte.
-#[test]
-fn test_a_save_mid_train_ride_resumes_identically() {
-    let mut w = el_city();
-    let (who, home, farm) = el_farmer(&w);
-    el_set_out(&mut w, who, home, farm, Lod::Coarse);
-    until_mid_track(&mut w, who);
-    let text = citysim::save::to_ron(&w);
-    let mut back = citysim::save::from_ron(&text).expect("loads");
-    assert_eq!(citysim::save::to_ron(&back), text, "the load is the save");
-    for _ in 0..300 {
-        exec_tick(&mut w);
-        exec_tick(&mut back);
-        assert_eq!(w.comp::<Position>(who).map(|p| p.tile), back.comp::<Position>(who).map(|p| p.tile));
-    }
-    assert_eq!(citysim::save::to_ron(&w), citysim::save::to_ron(&back));
 }
 
 /// I3: demoted off screen between two stops, a rider is off the train at

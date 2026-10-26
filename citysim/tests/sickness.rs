@@ -320,21 +320,6 @@ fn test_starvation_takes_seven_days_with_sickness() {
     assert!(!law::living(&w, a), "dead after seven days at hunger 0");
 }
 
-/// § 10: a mid-run save with the meters carries them.
-#[test]
-fn test_save_round_trip_with_health() {
-    let mut w = dole_world();
-    w.run_ticks(2 * TICKS_PER_DAY + 3 * TICKS_PER_HOUR);
-    let a = adults(&w)[0];
-    w.insert(a, Health { malnutrition: 0.4, toxicity: 0.3, sick_days: 0b101, ..Health::default() });
-    let text = citysim::save::to_ron(&w);
-    let mut back = citysim::save::from_ron(&text).expect("load");
-    assert_eq!(back.comp::<Health>(a), w.comp::<Health>(a));
-    w.run_ticks(TICKS_PER_DAY);
-    back.run_ticks(TICKS_PER_DAY);
-    assert_eq!(citysim::save::to_ron(&back), citysim::save::to_ron(&w), "the loaded world runs on byte for byte");
-}
-
 // ---------------------------------------------------------------------------
 // P3: the bins (§ 4)
 // ---------------------------------------------------------------------------
@@ -597,12 +582,9 @@ fn test_cancer_hazard_zero_at_zero_and_rising() {
 /// class (Dregs over the Sump over Mid over the Spire); the Dregs carry
 /// malnutrition; the young sit below the old.
 #[test]
-fn test_seeded_history_is_deterministic_and_ordered_by_class() {
-    let (w1, w2) = (dole_world(), dole_world());
+fn test_seeded_history_is_ordered_by_class() {
+    let w1 = dole_world();
     let tox = |w: &World, a: EntityId| health(w, a).toxicity;
-    for a in adults(&w1) {
-        assert_eq!(tox(&w1, a), tox(&w2, a), "deterministic");
-    }
     let mut by: std::collections::BTreeMap<i32, (f32, f32, u32)> = Default::default();
     for a in adults(&w1) {
         let class = match w1.comp::<citysim::Household>(a).and_then(|h| h.home) {

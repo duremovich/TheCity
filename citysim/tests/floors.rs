@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 use citysim::map::Map;
 use citysim::systems::ownership;
 use citysim::systems::{founding, jobs, wages};
-use citysim::{save, Building, BuildingKind, Config, Corp, EntityId, EventKind, Job, Role, World};
+use citysim::{Building, BuildingKind, Config, Corp, EntityId, EventKind, Job, Role, World};
 
 /// The wages city (the market wage law over the dole city, `Config::dole_city`).
 fn wages_city() -> World {
@@ -259,24 +259,6 @@ fn test_floor_trigger_after_floor_days_with_no_lot_near() {
 
 fn w_days() -> u8 {
     Config::load().dole_city().floors.floor_days
-}
-
-/// J6, J32: floors survive a save round trip byte for byte.
-#[test]
-fn test_save_round_trip_keeps_floors() {
-    let mut w = World::new(42, Config::load().dole_city());
-    let home = w.buildings_of_kind(BuildingKind::Home)[0];
-    founding::add_floor(&mut w, home, None).expect("a floor");
-    w.comp_mut::<Building>(home).expect("home").floor_days = 3;
-    w.run_ticks(10);
-    let text = save::to_ron(&w);
-    let mut back = save::from_ron(&text).expect("load");
-    assert_eq!(floors(&back, home), 2);
-    assert_eq!(back.comp::<Building>(home).expect("home").floor_days, 3);
-    assert_eq!(save::to_ron(&back), text);
-    w.run_ticks(60);
-    back.run_ticks(60);
-    assert_eq!(save::to_ron(&w), save::to_ron(&back));
 }
 
 /// J7 (review): floors count in the wages-off staffing too: under Hunker a

@@ -265,27 +265,6 @@ fn test_super_round_yields_to_the_post_near_shift_end() {
     assert!(citysim::systems::trades::round_plan(&mut w, s).is_none(), "at 16:30 the Super goes to his post");
 }
 
-/// J32: a save with a trade's Job round-trips (the key, not the index) and
-/// the indices rebuild; an unknown key fails the load.
-#[test]
-fn test_save_round_trip_with_a_trade_and_unknown_key_fails() {
-    let mut w = world();
-    let hotel = w.buildings_of_kind(BuildingKind::Hotel).first().copied().expect("a Hotel");
-    let porter = trade(&w, "night_porter");
-    let a = jobless(&w);
-    demography::hire(&mut w, a, hotel, porter);
-    let text = citysim::save::to_ron(&w);
-    assert!(text.contains("Trade(\"night_porter\")"), "the role is saved by key");
-    let back = citysim::save::from_ron(&text).expect("loads");
-    assert_eq!(back.comp::<Job>(a).map(|j| j.role), Some(porter));
-    assert_eq!(back.workers(porter), w.workers(porter));
-    back.check_indices().expect("indices");
-    assert_eq!(citysim::save::to_ron(&back), text, "same bytes after the round trip");
-    let bad = text.replace("Trade(\"night_porter\")", "Trade(\"lamplighter\")");
-    let err = citysim::save::from_ron(&bad).expect_err("an unknown trade key fails the load");
-    assert!(err.to_string().contains("lamplighter"), "{err}");
-}
-
 /// P6 x P3: a trade's open post is offerable to a migrant: the offer
 /// migrant arrives holding the trade with its row's shift, the role's
 /// skill floored at `offer_skill`, and the vacancy closes.

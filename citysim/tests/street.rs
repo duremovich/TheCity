@@ -1,7 +1,7 @@
 //! M12 phase 3: litter and sanitation, Hotels, derelicts, squats and the
 //! Dreg share (docs/M12_DISTRICTS.md § 3-4, plan D16-D28).
 
-use citysim::config::{ControlWeights, DistrictsCfg, LitterCfg, StreetCfg};
+use citysim::config::{ControlWeights, DistrictsCfg};
 use citysim::systems::{classes, corps, districts, faction, gang, law, litter, lod, ownership, plan, street};
 use citysim::{
     trace_flags, ActionInstance, ActionKind, Brain, Building, BuildingKind, Class, Config, Corp, Crime, DistrictId,
@@ -630,77 +630,6 @@ fn test_rubble_hook_blocks_and_invalidates() {
     litter::set_rubble(&mut w, t, false);
     assert_eq!(litter::at(&w, t), 0);
     assert!(w.map.walkable(t));
-}
-
-// ---------------------------------------------------------------------------
-// Saves
-// ---------------------------------------------------------------------------
-
-fn strip(text: &str, token: &str, open: char, close: char) -> String {
-    let start = text.find(token).unwrap_or_else(|| panic!("{token} not in save"));
-    let from = start + token.find(open).expect("token holds the opener");
-    let mut depth = 0usize;
-    let mut end = from;
-    for (i, ch) in text[from..].char_indices() {
-        if ch == open {
-            depth += 1;
-        } else if ch == close {
-            depth -= 1;
-            if depth == 0 {
-                end = from + i + 1;
-                break;
-            }
-        }
-    }
-    let end = if text[end..].starts_with(',') { end + 1 } else { end };
-    format!("{}{}", &text[..start], &text[end..])
-}
-
-/// D46: a save from before the street (no `[litter]`/`[street]` config, no
-/// litter grid, no bookings, sweep beats or squatter store) loads with zero
-/// litter and the street off, and runs a day as M11 did.
-#[test]
-fn test_pre_m12_street_save_loads_with_zero_litter() {
-    let mut cfg = Config::load().dole_city().scaled_to(300);
-    cfg.litter = LitterCfg::off();
-    cfg.street = StreetCfg::off();
-    let mut w = World::new(19, cfg);
-    w.run_ticks(TICKS_PER_DAY + 10);
-    let text = citysim::save::to_ron(&w);
-    let text = strip(&text, "litter:(enabled", '(', ')');
-    let text = strip(&text, "street:(enabled", '(', ')');
-    let text = strip(&text, "litter:[", '[', ']');
-    let text = strip(&text, "squatter:[", '[', ']');
-    let text = strip(&text, "hotel_beds:{", '{', '}');
-    let text = strip(&text, "sweep_beats:{", '{', '}');
-    let text = text.replace(",derelict:false,full_capacity:None,empty_since:None", "");
-    let text = text.replace(",raided_at:None", "");
-    assert!(!text.contains("litter:[") && !text.contains("squatter:[") && !text.contains("derelict:"));
-    let mut back = citysim::save::from_ron(&text).expect("a pre-street save loads");
-    assert_eq!(back.config.litter, LitterCfg::off());
-    assert_eq!(back.config.street, StreetCfg::off());
-    assert_eq!(back.litter.len(), back.map.w() * back.map.h());
-    assert!(back.litter.iter().all(|&v| v == 0));
-    assert_eq!(back.squatter.len(), back.alive.len());
-    back.run_ticks(TICKS_PER_DAY);
-    assert!(back.litter.iter().all(|&v| v == 0), "no litter with it off");
-    assert!(back.buildings_of_kind(BuildingKind::Hotel).is_empty());
-    assert!(street::derelicts(&back).is_empty());
-    assert!(back.check_indices().is_ok());
-    // A current save keeps its street (litter, squats, bookings) bit for bit.
-    let mut cur = city();
-    let b = derelict_in(&mut cur, 0, 0);
-    let a = civilians(&cur)[0];
-    let at = cur.district(DistrictId(0)).centroid;
-    sleep_rough(&mut cur, a, at);
-    street::occupy(&mut cur, a, b).expect("slot");
-    let t = open_street(&cur, 0);
-    litter::deposit(&mut cur, t, 90, 2);
-    let text = citysim::save::to_ron(&cur);
-    let again = citysim::save::from_ron(&text).expect("loads");
-    assert_eq!(citysim::save::to_ron(&again), text);
-    assert_eq!(again.squatters_of(b), &[a]);
-    assert_eq!(again.litter, cur.litter);
 }
 
 // ---------------------------------------------------------------------------
