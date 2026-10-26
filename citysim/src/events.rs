@@ -465,10 +465,20 @@ pub enum EventKind {
     /// The pressure pass phase 1 (OPEN-178): `[starter, mark]`, a brawl a
     /// miserable, drunk or high body started (`systems::misery`).
     Brawl,
+    /// The pressure pass phase 6 (`systems::underwater`): `[owner, business]`,
+    /// an owner under water hangs on, cuts the hours, shuts the business,
+    /// is afloat again; `[gang, front]` a front's laundering.
+    UnderWater,
+    /// Phase 6: `[borrower, lender, business]`, a loan made, an installment
+    /// missed, a collector's call (`[collector, borrower, lender]`), repaid.
+    Loan,
+    /// Phase 6: `[worker, owner, place?]`, a worker owed wages confronts the
+    /// owner in person (paid, refused, a fight, a report, a garnishment).
+    Confronted,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 227] = [
+    pub const ALL: [EventKind; 230] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -696,6 +706,9 @@ impl EventKind {
         EventKind::TakeHanded,
         EventKind::Skipped,
         EventKind::Brawl,
+        EventKind::UnderWater,
+        EventKind::Loan,
+        EventKind::Confronted,
     ];
 }
 

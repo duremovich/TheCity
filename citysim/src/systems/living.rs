@@ -112,6 +112,11 @@ fn early(world: &mut World) {
     // Lives at work phase 5 (§ 2.4): the walk-ins' walks, the Fixer owners'
     // weekly collections (nothing with `[service] tower` off).
     crate::prof::timed!("mid::service::tower_daily", crate::systems::service::tower_daily(world));
+    // The pressure pass phase 6: a business under water: the loans, the
+    // stiffed workers, the shut businesses, the fronts, the owners' choices
+    // and the hiring freezes (after the top-up and the visits due, before
+    // `demography` hires; nothing with `[underwater]` absent).
+    crate::prof::timed!("mid::underwater::daily", crate::systems::underwater::daily(world));
 }
 
 fn late(world: &mut World) {

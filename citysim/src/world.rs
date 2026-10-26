@@ -1223,6 +1223,11 @@ pub struct World {
     /// `service::hourly` or at a body's arrival. Saved while pending; empty off.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub walk_ins: Vec<crate::systems::service::WalkIn>,
+    /// The pressure pass phase 6 (`systems::underwater`): the businesses
+    /// under water, the loans against them, the stiffed workers, the shut
+    /// businesses for sale and the bought fronts. Saved while it holds anything.
+    #[serde(default, skip_serializing_if = "crate::systems::underwater::State::is_empty")]
+    pub underwater: crate::systems::underwater::State,
     /// L2 L15: the HangOut spots per district (`leisure::spots`, midnight).
     /// Saved (deviation: the plan's `serde(skip)` would rebuild them on load
     /// from a later state than the midnight's).
@@ -2012,6 +2017,7 @@ impl World {
             beats: BTreeMap::new(),
             bylines: BTreeMap::new(),
             walk_ins: Vec::new(),
+            underwater: Default::default(),
             spots: Vec::new(),
             last_met: BTreeMap::new(),
             told: BTreeMap::new(),

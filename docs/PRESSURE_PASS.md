@@ -249,3 +249,60 @@ Each at its cause. Numbers: 20k `isle_m_k2` seed 42 x 30 `--scaled`, main `28aba
   Companions at a full Lounge, the spouse laid off before the midnight), `housing.rs::test_company_rent_...` reads
   the owner's share with the tax its accumulator rolls over, `sickness.rs::test_g3_only_the_broke_steal_food` runs
   seed 410 (408 drew one broke theft in 20 days on `28aba7b`, none after; 409-412 draw 2-7).
+
+### Phase 6: a business under water (`systems/underwater.rs`, `[underwater]`)
+
+- **Under water** is the owner's purse under `short_cover_days` (1) of the day's wage bill (the staff outside his
+  household), or a hand owed `short_unpaid_days` (2). Every person-owned standing business with staff to pay (not a
+  Block, Lot, Hideout, Camp, Mission, Prison or Station) is read at the LivingEarly midnight's end (after the jobs'
+  top-up and the visits due, before `demography` hires); after `decide_days` (2) short midnights the owner chooses,
+  then no sooner than `decide_cooldown_days` (5). Both tiers decide the same way (the Statistical mirror: the decision,
+  the loans, sales and closures are midnight passes; the two scenes are `Visit`s a Statistical visitor is credited at
+  its hour).
+- **The choice** is one weighted draw (a hash of the building and day): hang on `w_hold × (0.25 + pride)`; shorter
+  hours, once, `w_hours × (0.5 + loyalty)` (every hand's shift trimmed off its end and wage cut by `hours_cut`); a
+  layoff `w_layoff × (1.5 − loyalty)` (`layoff_share`, newest first, `LaidOff` with the owner as an actor and the till
+  in the text); borrow `w_borrow × (0.5 + courage) × (1 − misery / 2)`; sell `w_sell × (0.5 + greed)` and close
+  `w_close × (0.25 + misery)`, both `× (1 + escalate × earlier decisions)`. A cut sets a hiring freeze (the day's
+  vacancies withdrawn) until the purse holds `recover_days` (3) of the bill ("afloat again").
+- **Loans**: a lender lends what it can spare up to `loan_days` (14) of the bill, never under `loan_min_days` (3):
+  the local gang (`gang_reserve` 20 kept back), the district's richest lawless free adult (a shark, `wealth / 2`), or
+  for an owner at least `corp_lawful_min` lawful the richest corp over its reserve; picked on the owner's lawfulness.
+  Weekly installments over `loan_weeks` at the lender's rate (`Flow::Finance`); a miss sends the gang's toughest free
+  member (or the shark) as a `Visit` (`VisitWhy::Dun`): the arrears paid, or what there is taken and a beating
+  (`law::resolve_fight_mods`, an Assault, the owner's grudge and report). At `seize_misses` (3) the gang or shark takes
+  the business (`Repossessed`; a gang's is a front), a corp repossesses at `corp_repo_misses` (2) with no collector; a
+  borrower who no longer owns it is written off. Nobody is dunned in the cells. Reused: the `Visit` machinery, the
+  fight resolver, `corps::move_building`; not the M16b coercion record (its 128 cap and weekly-protection shape).
+- **Sales**: a fire sale (`corps::acquire`, `Acquired`) at `sell_price_mult` of the value to the richest corp in the
+  kind's niche, or (an owner under `front_lawful_max` lawfulness, or past `front_misery`) to the local gang at
+  `front_price_mult` (0.25: muscle, not money). Deviation, "the local gang": the district's controller, then the gangs
+  holding Blocks there, then the nearest Hideout that can pay (20k island seed 42: gang turf is 0-4 Blocks a gang by day
+  11 and the holders' treasuries are 0c; the controller-only rule found no gang with coins and no gang loan or front
+  in 30 days). A **front** (`World.underwater.fronts`; a leisure venue's `front_of` too, so the L2 round and dealers
+  read it): its staff join the gang on `front_join_p × (1 − lawfulness)` a day; on its weekday `launder_share` of the
+  gang's week's tribute is booked through the till ("washed"); the gang's rival hits it on `rival_hit_p` a week (up to
+  `rival_take` from the gang, `Flow::Robbery`, shut `rival_close_days`). Deviation: the rival need not hold turf in the
+  district (none did). Laundering is booking only (no clean/dirty coin exists).
+- **Close**: every hand let go (wages owed become debts and stiffed workers), the doors shut (`closed_until` ten
+  years), the vacancies withdrawn daily; it stands for sale at `shut_price_mult` of its value to a would-be founder
+  (a free adult, jobless or on the dole, no gang, no exec, holding the price plus `buyer_reserve_days` of the kind's
+  wages), at most `shut_buys_per_day`: `Acquired` and `Founded` "reopened ... bought it shut". Deviation: not a Lot (a
+  building does not revert to an open Lot: walls and flow fields), so `founding::register` is untouched (F1's); a shut
+  Bar or Hotel unsold `shut_derelict_days` (21) goes derelict (D25's path, refittable).
+- **The stiffed worker** (F3's unpaid walkout, or a layoff owed wages: `World.underwater.stiffs`, the coins stay the
+  edge debt): from `confront_wait_days` on `confront_p × (0.5 + pride + misery)` a day, at most `confront_max` (3)
+  times, a `Visit` (`VisitWhy::Confront`, between `confront_hour_from..to`) to the owner wherever he is. The owner pays
+  what he holds on `pay_base + pay_lawful × lawfulness + pay_loyal × loyalty − pay_greed × greed`; refused, the
+  Betrayed grudge grows by `confront_grudge`, and at `fight_grudge` (0.5) he swings (an Assault; F3's 0.35 + one
+  refusal is 0.48, so the second refusal fights); under it a worker at least `report_lawful` reports the owner to the
+  Hall, which garnishes the owed from the owner's purse as it comes in (`Flow::Wage`). Nobody is confronted in jail.
+- **Shadow** (`citysim-cli shadow`, new pick `owner_broke`: owners with staff, lowest till over a week's bill first).
+- **Counters** (new `Jobs2Cols` `uw_*` columns, `analyze_run.py` "under water, run totals"), 20k island seed 42 x 30,
+  one run: owner-days under water 346; decisions: hang on 11, shorter hours 21, layoffs 73 (hands let go), loans 14
+  (missed installments 14, collectors' beatings 2, businesses seized 2, none repaid in 30 days), sold to a corp 11,
+  to a gang as a front 3 (staff drawn in 12, laundered 1c, rival hits 0), shut 5 (all 5 reopened by a new owner),
+  afloat again 17; unpaid walkouts 167 (F3's run: 369 unpaid quits); confrontations 79 (paid 14, fights 20, reports 22,
+  garnishments 22). Murder 53, Assault 955, LaidOff 889 (all causes). FINDING: the gangs' treasuries are tens of
+  coins, so a gang front is cheap and rare and its laundering is nearly nothing; nothing tuned.
+- No test (doctrine 2).

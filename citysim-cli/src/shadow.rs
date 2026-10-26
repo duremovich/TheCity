@@ -159,7 +159,7 @@ pub struct ShadowArgs {
     pub map: Option<PathBuf>,
 }
 
-const ARCHETYPES: [&str; 50] = [
+const ARCHETYPES: [&str; 51] = [
     "gang_member",
     "gang_leader",
     "ripperdoc",
@@ -223,6 +223,9 @@ const ARCHETYPES: [&str; 50] = [
     "scav",
     // The pressure pass phase 1 (OPEN-178): the lowest-mood free adults, lowest first (not shuffled).
     "miserable",
+    // The pressure pass phase 6: owners of person-owned businesses with staff to pay, the
+    // lowest till against a week's wage bill first (not shuffled).
+    "owner_broke",
 ];
 
 /// Activity classes of the time-use table, in print order.
@@ -509,6 +512,7 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
             let line = world.config.misery.as_ref().map_or(0.0, |c| c.mood_line);
             adults().filter(|&a| world.comp::<citysim::components::Mood>(a).is_some_and(|m| m.value < line)).collect()
         }
+        "owner_broke" => citysim::systems::underwater::owners_by_till(world).into_iter().map(|(_, o)| o).collect(),
         other => return Err(format!("unknown archetype {other:?} (known: {})", ARCHETYPES.join(", "))),
     };
     out.sort();
@@ -3316,6 +3320,14 @@ fn pick(
                     }
                     let ordered = if arch == "ceo" {
                         c
+                    } else if arch == "owner_broke" {
+                        let by = citysim::systems::underwater::owners_by_till(world);
+                        eprintln!(
+                            "note: owner_broke: {} owners with staff; the lowest till {:.2} weeks of wages",
+                            by.len(),
+                            by.first().map_or(0.0, |x| x.0)
+                        );
+                        by.into_iter().map(|(_, o)| o).filter(|o| c.contains(o)).collect()
                     } else if arch == "miserable" {
                         let mood = |a: &EntityId| world.comp::<citysim::components::Mood>(*a).map_or(0.0, |m| m.value);
                         let mut c = c;
