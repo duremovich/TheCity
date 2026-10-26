@@ -307,6 +307,74 @@ Each at its cause. Numbers: 20k `isle_m_k2` seed 42 x 30 `--scaled`, main `28aba
   coins, so a gang front is cheap and rare and its laundering is nearly nothing; nothing tuned.
 - No test (doctrine 2).
 
+### Phase 5a: consequence, the non-gang half (`systems/consequence.rs`, `[consequence]`)
+
+Raid results, gang duty shifts and release-to-the-gang are phase 5b. Every pass is a mechanism with its numbers in
+`[consequence]`; both tiers (the mirror sentence is the module's head: the demands and the services are `Visit`s, a
+Statistical visitor credited at the hour; the hit's choice, the cells and the release are tier-blind; the off-screen
+crime rolls have no witnesses, as before).
+
+- **Witnesses react.** A civilian who notes a crime that is not petty (`law::raise_crime_mult`, after the Witness
+  event; a guard on duty files as before) makes one weighted draw: report (`w_report x lawfulness`: the SawCrime
+  memory and the walk to the Hall, unchanged), flee (`w_flee x (1 - courage)`, a violent crime: an Enemy edge and
+  safety 0, so the Flee goal takes him), gossip (`w_gossip x sociability`, a crime that is a deed: up to
+  `gossip_tell` of his Friend/Family/Spouse/Parent edges hear the rumour at hops 1 through `memory::hear_entry`, so
+  grudges and the culprit's name move as any heard deed), or blackmail (`w_blackmail x (1 - lawfulness) x (0.5 +
+  greed)`, only the lawless (`bm_lawful_max`) and broke (`bm_broke_coins`)). The culprit sees who saw him on
+  `learn_p` (the pair's edge sours; an event in both diaries). Deviation: the city-wide Witness noise does not fall
+  (the event is still written; F2's cap of 4 holds); the reaction rides on it. A gang-mate of the culprit does not
+  react. A blackmailer's own SawCrime is skipped by ReportCrime (`consequence::keeps_quiet`).
+- **Blackmail** (`World.consequence.blackmail`, at most `bm_max_open`): after `bm_wait_days` the witness goes to the
+  culprit in person (`VisitWhy::Blackmail`, `bm_hour_from..to`) and names `bm_demand_share` of his purse
+  (`bm_demand_min..max`). He pays on `bm_pay_base + bm_pay_fear x (1 - courage) + bm_pay_lawful x lawfulness -
+  bm_pay_pride x pride` (`Flow::Bribe`; a Robbed grudge), the demand back in `bm_interval_days`, at most
+  `bm_max_demands` ("keeps X's secret now"). Refused: he silences the witness on `bm_silence_w x (1 - lawfulness) x
+  (0.5 + courage)` (a fight at `bm_kill_mult`, the Assault or Murder raised, the witness's grudge; a witness who
+  wins goes to the law), else the witness reports him (`law::file_report`) and he holds a Betrayed grudge.
+- **Hits escalate** (`contracts::set_status`, an organic Hit or Beat a person bought, Expired or Failed): repost
+  (`hit_w_repost x (0.5 + grudge)`, at `hit_repost_mult` the old price at the same Fixer or the nearest, at most
+  `hit_repost_max` a head, the deposit from his purse), go himself (`hit_w_self x courage x grudge`, the grudge at
+  least `hit_self_min`: a Hunt adopted directly, the cooldown lifted, Statistical promoted to Coarse), or let it go
+  (`hit_w_giveup x (1.5 - grudge)`, the grudge x `hit_giveup_decay`). `EventKind::HitEscalated` in his diary.
+  Deviation: at 20k a person-bought hit that lapses is rare (2 a month; V9's 700 expired at 100k are mostly
+  corps' tags, guards and locates, untouched).
+- **Jail is a place.** At sentencing (`law::sentence`) the run starts and a civilian reporter is named (a Betrayed
+  grudge at `snitch_grudge`; guards are not). Each midnight, per jail: a jailed worker's workday is an absence on
+  phase 1's count (`misery::jail_absence`; dismissed at `fire_absences`: a sentence over three days still vacates the
+  post at once, as before, so this is the short sentences); and per prisoner at most one of: a fight with a
+  cellmate he dislikes (a grudge, a rival's colours, an edge under `cell_fight_affinity`) on `cell_fight_p x (0.5 +
+  pride)`; a member cellmate's offer taken on `cell_recruit_p x (1 - lawfulness) x (0.5 + misery)` (`gang::enlist`,
+  in the cells, not the stipend rule); a Fixer's name from a cellmate who owns, works at or is a regular of one
+  (`cell_contact_p`: a regular there, so the hire pass offers him work); a loan from a cellmate (`cell_loan_*`, an
+  edge debt). At most `cell_events_max` a jail a day. Release (`law::release`) writes the changed life: the post
+  lost, the debt left, the grudge, the gang, the Fixer's name, the fights.
+- **The faith on screen.** Each creed's place holds a service once a week, its weekday and hour hashed on the place
+  (`svc_hour_from..to`): a cult's or the Purists' Hideout (the members) and a church's Mission (its creed's
+  followers housed in its district; the eldest not called elsewhere preaches). The congregation (at most `svc_cap`,
+  living within `svc_reach_ticks` of the place; the preacher always) is a `Visit` to the building `svc_lead_hours`
+  before; a congregant brings an unchurched Friend/Family/Spouse on `svc_guest_p`. A body is credited on arrival
+  (`consequence::arrivals`, every 10 ticks over the pending visits: the Visit's Rest was cut by Sleep before its
+  end). An attendee hears the preacher (belonging `svc_gain`), puts `svc_tithe_share` (at most `svc_tithe_max`) on
+  the plate (`Flow::Tithe`: the gang's treasury or the church's purse); a guest converts on `svc_convert_p x (0.5 +
+  misery + (1 - belonging))` (a cult's or church's follower; the Purists' gang); a congregant walks out on
+  `svc_walkout_p x (1.5 - loyalty) x (0.5 + misery)`: a cult member leaves the gang (the row's `apostasy_w` from the
+  leader, `faith::on_leave`), a Purist takes the preacher's `svc_heretic_w`, a church's follower leaves with no
+  grudge (its row has none): hunted past `[hunt] hunt_min` as any grudge. The midnight `faith::preach` roll stays
+  (the off-screen tier's draw). Deviation: night-shift members (18:00-24:00 posts) never attend (the Visit is not
+  taken on shift); many Purist chapels call only the preacher (few members within reach).
+- **Shadow** pick `jailed` (an adult under a Sentence on the start day).
+- **Counters** (`Jobs2Cols` `wr_*`, `bm_*`, `hit_*`, `snitch_grudges`, `released_changed`, `jail_*`, `cell_*`,
+  `svc_*`; `analyze_run.py` "consequence, run totals"), 20k island seed 42 x 30 `--scaled`, one run: witness
+  reactions report 1,016, flee 271, gossip 890, blackmail 316, the culprit saw the witness 781; blackmail demands 239
+  (paid 87, 717c; silenced 117; reported 35); hits reposted 0, done himself 1, let go 1 (the run before the last
+  config change: reposted 2); reporters' grudges 100, changed releases 417, jail absences 512 (93 dismissed), cell
+  fights 70, recruits 55, a Fixer's name 187, loans 80; services 78 (attendances 1,194, guests 99, conversions 24,
+  walkouts 16, tithe 1,430c), apostates hunted on day 29: 1. Murder 50, Assault 801, Report 2,820, Arrest 2,170,
+  Sentence 2,105, Witness 10,451, Fire 569, GangJoin 685 (phase 6's run: Murder 53, Assault 955). FINDING: the jail
+  absence dismisses ~90 a month at 20k, 88 of 93 after a 3-day Theft sentence (three workdays in the cells: the
+  third absence fires at `fire_absences` 3); nothing tuned.
+- No test (doctrine 2).
+
 **F1: distance at 100k.** The premise did not hold: 100k does not break the island pass's distance. Before any change,
 seed 42 days 0-8 (`run --legs`, every bodied leg): 4 h+ legs 7.3 % of all legs at 20k, 6.6 % at 100k; structural
 commutes of 240 min or more 13.3 % at 20k and 7.0 % at 100k; V8's 20k diaries read 8.1-9.3 % of GoTo legs at 4 h+,

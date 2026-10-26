@@ -4808,3 +4808,66 @@ confront_kill_mult = 0.2           # ... the fight kills on [crime] fight_death_
 report_lawful = 0.5                # under the fight, a worker this lawful reports the owner to the Hall, which takes the
                                    # owed out of the owner's purse as it comes in
 victim_report_lawful = 0.4         # a beaten owner this lawful reports the collector (or the worker)
+
+# The pressure pass phase 5a (docs/PRESSURE_PASS.md § Phase 5; systems/consequence.rs): consequence, the non-gang
+# half. What happens next, so a started story is picked up: a witness reacts, an expired hit escalates, jail is a
+# place, a creed's service is walked to. Absent: none of it. Every value a placeholder.
+[consequence]
+w_report = 1.0                     # a witness's reaction, one weighted draw: report (x lawfulness: the SawCrime memory
+w_flee = 0.6                       # and the walk to the Hall, as before) ... flee (x (1 - courage), a violent crime) ...
+w_gossip = 0.8                     # ... gossip (x sociability, a crime that is a deed) ...
+w_blackmail = 1.2                  # ... blackmail (x (1 - lawfulness) x (0.5 + greed), gated by bm_lawful_max, bm_broke_coins)
+flee_affinity = -0.4               # a fleeing witness's edge to the culprit falls by this (an Enemy: the Flee goal)
+gossip_tell = 3                    # a gossip tells this many of his closest people at once (a rumour, hops 1)
+learn_p = 0.3                      # the culprit sees who saw him on this chance (an edge: the Silence pass can buy him)
+bm_lawful_max = 0.35               # a blackmailer is at most this lawful ...
+bm_broke_coins = 20                # ... and holds at most this many coins
+bm_wait_days = 1                   # the first demand this many days after the crime, in person (a Visit) ...
+bm_hour_from = 9                   # ... between these hours (a Statistical blackmailer is credited at the hour)
+bm_hour_to = 21
+bm_urgency = 0.85                  # the Visit goal's urgency for the demand
+bm_demand_share = 0.3              # the price of silence: this share of the culprit's purse ...
+bm_demand_min = 5                  # ... at least this (a culprit holding less has nothing to give: refused) ...
+bm_demand_max = 80                 # ... at most this
+bm_pay_base = 0.2                  # the culprit pays on this + bm_pay_fear x (1 - courage) + bm_pay_lawful x lawfulness
+bm_pay_fear = 0.5                  # - bm_pay_pride x pride (the lawful have more to lose)
+bm_pay_lawful = 0.3
+bm_pay_pride = 0.3
+bm_silence_w = 1.0                 # refused: the culprit silences the witness on this x (1 - lawfulness) x (0.5 + courage)
+bm_kill_mult = 0.3                 # ... a beating that kills on [crime] fight_death_p x this; else the witness reports him
+bm_interval_days = 7               # a paid demand comes back after this many days ...
+bm_max_demands = 3                 # ... at most this many times (then the witness keeps the secret)
+bm_tries = 3                       # a demand not made (the visit failed) is tried this many times
+bm_max_open = 200                  # open blackmails, the city's, at most
+hit_w_repost = 1.0                 # an expired or failed Hit or Beat a person bought: repost (x (0.5 + grudge)) ...
+hit_repost_mult = 1.5              # ... at this x the old price ...
+hit_repost_max = 2                 # ... at most this many times a head
+hit_w_self = 1.0                   # ... go himself (x courage x grudge: a Hunt, the cooldown lifted) ...
+hit_self_min = 0.6                 # ... with a grudge at least this
+hit_w_giveup = 0.6                 # ... or let it go (x (1.5 - grudge)) ...
+hit_giveup_decay = 0.6             # ... the grudge x this
+snitch_grudge = 0.4                # a sentenced prisoner's Betrayed grudge on the person who reported him
+cell_recruit_p = 0.08              # the cells, a day a prisoner: a member cellmate's offer taken on this x (1 - lawfulness)
+                                   # x (0.5 + misery) (a join, in the cells)
+cell_contact_p = 0.1               # ... a Fixer's regular cellmate gives the Fixer's name on this (a regular there too)
+cell_fight_p = 0.05                # ... a fight with a cellmate he dislikes on this x (0.5 + pride) ...
+cell_fight_affinity = -0.2         # ... (an edge under this, a grudge, or a rival gang's colours) ...
+cell_kill_mult = 0.1               # ... that kills on [crime] fight_death_p x this
+cell_loan_p = 0.1                  # ... a broke prisoner borrows from a cellmate holding twice the loan on this ...
+cell_loan_coins = 10               # ... this many coins (an edge debt, called in as any) ...
+cell_loan_broke = 5                # ... when holding fewer than this
+cell_events_max = 20               # at most this many cell events a jail a day
+svc_hour_from = 18                 # a creed's place (a cult's or the Purists' chapel, a church) holds a service a week,
+svc_hour_to = 21                   # the day and the hour hashed on the place within these hours ...
+svc_lead_hours = 1                 # ... the congregation called this many hours before (a Visit) ...
+svc_cap = 30                       # ... at most this many (the members, else the followers of its district) ...
+svc_reach_ticks = 240              # ... living within this many travel ticks of the place (the preacher always)
+svc_urgency = 0.7                  # the Visit goal's urgency for the service
+svc_guest_p = 0.15                 # a congregant brings an unchurched friend on this
+svc_tithe_share = 0.1              # the plate: this share of an attendee's purse ...
+svc_tithe_max = 10                 # ... at most this (Flow::Tithe, to the cult's treasury or the church's purse)
+svc_gain = 0.25                    # belonging an attendance gives
+svc_convert_p = 0.25               # a guest converts on this x (0.5 + misery + (1 - belonging))
+svc_walkout_p = 0.03               # a congregant walks out on this x (1.5 - loyalty) x (0.5 + misery): a cult member
+                                   # leaves (the creed row's apostasy grudge: hunted past [hunt] hunt_min)
+svc_heretic_w = 0.8                # a Purist leaver's grudge from the preacher (a creed row without apostasy_w: none)

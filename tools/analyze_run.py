@@ -928,6 +928,12 @@ UNDERWATER_TOTALS = ("uw_short", "uw_hold", "uw_hours", "uw_layoffs", "uw_loans"
                      "uw_seized", "uw_repaid", "uw_sold_corp", "uw_sold_gang", "uw_closed", "uw_reopened", "uw_afloat",
                      "uw_walkouts", "uw_confronts", "uw_paid_up", "uw_confront_fights", "uw_reports", "uw_garnished",
                      "uw_front_joins", "uw_laundered", "uw_front_hits")
+# The pressure pass phase 5a: consequence (witnesses, blackmail, hits, the cells, the services).
+CONSEQUENCE_TOTALS = ("wr_report", "wr_flee", "wr_gossip", "wr_blackmail", "wr_learned", "bm_demands", "bm_paid",
+                      "bm_coins", "bm_silenced", "bm_reported", "hit_reposted", "hit_self", "hit_giveup",
+                      "snitch_grudges", "released_changed", "jail_absences", "jail_fired", "cell_fights",
+                      "cell_recruits", "cell_contacts", "cell_loans", "svc_held", "svc_attended", "svc_guests",
+                      "svc_converts", "svc_walkouts", "svc_tithe")
 ARMS_SNAP = ("weapons", "carriers", "armoury", "precinct_arms", "gunsmith_stock", "licences", "weapon_wants")
 # Phase 4, vice and fashion (§ 5.1, § 9).
 VICE_TOTALS = ("strip_visits", "brothel_visits", "companion_visits", "vice_revenue", "tips", "street_visits",
@@ -1007,6 +1013,8 @@ def jobs2(rows, events, out):
         J["misery_totals"] = {k: sum(col(rows, k)) for k in MISERY_TOTALS}
     if "uw_short" in rows[0]:
         J["underwater_totals"] = {k: sum(col(rows, k)) for k in UNDERWATER_TOTALS}
+    if "wr_report" in rows[0]:
+        J["consequence_totals"] = {k: sum(col(rows, k)) for k in CONSEQUENCE_TOTALS}
     if "vice_venues" in rows[0]:
         J["vice_totals"] = {k: sum(col(rows, k)) for k in VICE_TOTALS}
         J["vice_mean"] = {k: mean(col(rows, k)) for k in VICE_SNAP}
@@ -1346,14 +1354,16 @@ def fmt(o):
                      f"posts filled / offered {w['day_posts_fill']:.1%}")
         if "arms_totals" in w:
             L.append("weapons, run totals: " + f(w["arms_totals"]))
-        if "misery_totals" in w:
-            L.append("misery, run totals: " + f(w["misery_totals"]))
-        if "underwater_totals" in w:
-            L.append("under water, run totals: " + f(w["underwater_totals"]))
             L.append("weapons, daily mean: " + f(w["arms_mean"]) + f"; weapons per 1,000 {w['weapons_per_1000']:.1f};"
                      f" carriers per 1,000 {w['carriers_per_1000']:.1f}; armed fights / fights "
                      f"{w['armed_share_of_fights']:.1%}; deaths a fight armed {w['death_rate_armed']:.2%}, unarmed "
                      f"{w['death_rate_unarmed']:.2%} (Murders with and without [weapons]: an A/B pair of runs)")
+        if "misery_totals" in w:
+            L.append("misery, run totals: " + f(w["misery_totals"]))
+        if "underwater_totals" in w:
+            L.append("under water, run totals: " + f(w["underwater_totals"]))
+        if "consequence_totals" in w:
+            L.append("consequence, run totals: " + f(w["consequence_totals"]))
         if "vice_totals" in w:
             L.append("vice and fashion, run totals: " + f(w["vice_totals"]))
             L.append("vice and fashion, daily mean: " + f(w["vice_mean"]) + f"; tips / vice revenue "

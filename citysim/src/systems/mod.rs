@@ -37,6 +37,7 @@ pub mod classpay;
 pub mod commute;
 pub mod company;
 pub mod competence;
+pub mod consequence;
 pub mod contracts;
 pub mod corp_brain;
 pub mod corps;
