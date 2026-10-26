@@ -880,3 +880,31 @@ Total ≈ $342. Phases 2-5 blew the 300-turn brief. Their contexts sat at 240-29
 The next pass should split its phases smaller, at about one mechanism each.
 
 The standing decisions, the doctrine and the agent rules are in `CLAUDE.md`; the tiers, budgets and caps in `docs/TESTING.md`.
+
+## The twenty-first session (2026-10-26): the perf pass closed, the process reset
+
+Merged, each on the tiers of the day: phase 6 `7359e73` (the slope), 7 `560ad51` (midnight per pass), 8 `25a8673`
+(parallel think), 9 `915574f` (the Statistical hour stays serial), 7d `d02795a` (the gang dwell), 7c `5bc9297`+`f5f5edf`
+(the crew cap 32, the stat table regenerated), 7b `45f1882` (the midnight stagger), 10 `f824625` (the P9 re-import,
+`lot=`, I9, the 20k and 100k maps), the switches retired `357ad11`. The gate met on `b286ae9` (PERF_PASS § Implemented).
+
+Then the process reset, on Dylan's call ("I would rather move fast and break things than spend days of testing
+hell"): the doctrine cut to five rules (`daea1d7`, `c7f3b49`), the test cut (`b286ae9`, 59 tests, the ratchet
+baseline 1,470). The rules are in CLAUDE.md; the reasoning in this session's HANDOFF.
+
+Cost (`session_cost.py --session 25a0721b`, API-rate $ equivalent):
+
+| part | agent | turns | median ctx | $ |
+|---|---|---|---|---|
+| phase 7 | Opus | 332 | 216k | 39 |
+| phase 8 (+ a Sonnet order audit) | Opus (+ Sonnet) | 286 (+172) | 203k | 28 (+8) |
+| phase 9 | Opus | 190 | 173k | 16 |
+| phase 7b | Opus | 436 | 237k | 41 |
+| phase 7c | Opus | 198 | 129k | 10 |
+| phase 7d | Sonnet | 61 | 75k | 2 |
+| phase 10 | Opus | 316 | 189k | 17 |
+| the switch retirement | Sonnet | 19 | 55k | 1 |
+| the test audit and cut | Sonnet | 125 | 162k | 7 |
+| orchestrator (tiers, briefs, the gate, the reset, the handoff) | Fable | 307 | 150k | 53 |
+
+Total ~ $222. With the twentieth session's $137 the pass cost ~ $360 and added no mechanism: the reason for the reset.

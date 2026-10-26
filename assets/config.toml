@@ -4390,7 +4390,8 @@ pass_slack_tiles = 8               # a stop pair is no route when the alight sto
 # after the price move run whole, in their old order, in 12 slots over the night's first minutes instead of all on
 # tick 0 (100k day 28: 2.6 s in one tick, its largest pass 0.29 s). Written into a save when set; absent, 0.
 [perf]
-threads = 1                        # threads scoring the think slice; 1: on the calling thread
+threads = 8                        # threads scoring the think slice; 1: on the calling thread. 8 since the perf pass
+                                   # gate (2026-10-26): 100k days 2-6 at 1/4/8/16 threads 40/45/48/48 ticks/s, the knee
 stagger_midnight = 1               # ticks between two midnight slots (slot k at 00:0k); 0: every daily pass on tick 0,
                                    # the base. The last slot (12) times this must stay under 60 (asserted at load)
 

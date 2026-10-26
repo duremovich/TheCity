@@ -67,7 +67,7 @@ Light, per the SOP. One `phase_measure.py` call does the 2k part.
 - **Phase 10:** the 20k tier map's counters base -> branch (seed 42-44 x 30, island); the 100k table of R5.
 - **Every phase:** `test.py change` once at the end; the coder writes its report to the scratchpad path in the brief.
 
-## The gate
+## The gate (met 2026-10-26; the bullet under § Implemented)
 
 On a quiet box (no Blender renders, no parallel builds), against the pass base `6d6f7bc`. Asserted, as tps floors
 and identities (doctrine 1):
@@ -533,3 +533,23 @@ changes the map, not a mechanism.
   Spire Home the tier floor demands (Dylan's call). (7) `test_drag_holds_gangwork` re-pinned to an off-clock member
   whose free think is not GangWork (the I9 city's first one had a gang order), assertions unchanged; the CLI header
   pins count the two columns. `test.py change` green, 1m14s of 4m00s.
+- **The gate** (2026-10-26, main `b286ae9` after the process reset, a quiet box, `[perf] threads` 8, the committed
+  `isle_m_k2_100k`, seed 42 x 30, `pop_scale.py`): **met.** 100k ticks/s days 25-30 31/31/31/31/30/30 (median 31; the
+  checkpoint's base 11 at day 4, phase 9's 25.5 on a shared box); the longest tick days 25-30 0.79-0.83 s at 21:00;
+  over the month two ticks pass 1 s: day 1 tick 0 (3.4 s, the whole midnight on tick 0 by design) and day 8's job
+  search at 00:11 (1.10 s, `OPEN-212`); build 64 s; peak working set 2.08 GB; thread identity 2k 42-44 x 30 and 20k
+  42 x 30 at 1 vs 8 threads IDENTICAL (the last identity proof: the doctrine dropped them the same day). Prints: 20k
+  `isle_m_k2` 293 ticks/s days 25-30 (longest 0.09 s); the thread ladder 100k days 2-6 at 1/4/8/16 threads
+  40/45/48/48 ticks/s (the knee 8, so `[perf] threads` = 8; the change tier 2m04s of 4m with it, `core_sanity` 70 ->
+  96 s under six binaries); the Full budget (`max_full` 50/100/200, scaled 2.5k/5k/10k Full): 48/41/32 ticks/s days
+  2-6, ~1.4 us per Full agent a tick (`OPEN-149`'s 1.3 at 20k), so a camera ring of thousands is affordable; the
+  profile days 25-30 (ms a game day): `think_with_offer` 50.2k, `tick::think` 13.5k, `tick::exec` 10.5k, `tick::lod`
+  7.8k, `think::again` 7.7k, `run_statistical` 7.0k, `tick::plan` 6.7k, goals Unwind 6.6k / JoinGang 5.8k / Shop
+  5.3k / Socialise 4.1k / GangWork 4.0k, `work::coworkers` 1.3k. The 100k end city: employed 55,368, homeless 3,431,
+  Full/Coarse/Stat 2,493/7,517/88,745, deaths by violence 415, arrests 14.8k, no starvation. The whole pass at 2k,
+  42-47 x 120 against the pass base `6d6f7bc` (phases 7b, 7c, 7d and 10 included): Murders 34 -> 31, J24 0.770 ->
+  0.754, J25 0.013 -> 0.015, arrests 2,691 -> 2,855, wallets 69.6k -> 68.4k; the lives rows unchanged (idle 4.46 ->
+  4.45 h/d, short rests 0.02/d). The switches retired (`357ad11`); the milestone tier green 10m37s of 20m (parity
+  passed, then deleted by the process reset); `OPEN-206` stays open as the lever for the view's share. The gate's
+  first script ran twice at once for an hour (a stopped wrapper left the inner bash alive); the numbers above are
+  the rerun, alone on the box.

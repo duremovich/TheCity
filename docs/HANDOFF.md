@@ -1,84 +1,95 @@
 # Handoff: now
 
-Rewritten at every session end; never appended. The session logs are `docs/history/SESSIONS.md`; the eighteenth
-session's close page is its last entry. Last rewrite: **2026-10-26, the twenty-first session: perf pass phases 6-9
-merged (the twentieth session merged 0-5, ran the checkpoint and wrote R7, and ended without a rewrite).**
+Rewritten at every session end; never appended. The session logs are `docs/history/SESSIONS.md`; the twenty-first
+session's page is its last entry. Last rewrite: **2026-10-26, the twenty-first session: the perf pass closed with its
+gate met, and the process reset (CLAUDE.md § The doctrine rewritten on Dylan's call).**
 
 ## Main
 
-Main holds **the perf pass, phases 0-9 of 10** (`docs/PERF_PASS.md`, deviations per phase under § Implemented;
-`SAVE_VERSION` 67, unchanged by the pass). Phases 2-9 are byte-identical to their bases on 2k 42-44 x 30 and 20k
-`isle_m_k2` 42 x 30 (save, report, events); phases 8-9 also across 1, 2 and 8 threads. Every merge ran the change
-and merge tiers green on the exact tree; the last, 915574f: change 1m14s of 4m, merge 4m55s of 8m.
+Main holds **the perf pass, closed** (`docs/PERF_PASS.md`, the gate bullet last under § Implemented) and **the process
+reset**. The committed 100k map is `assets/maps/isle_m_k2_100k.txt`; the 20k tier map `isle_m_k2` is the P9 re-import;
+`[perf] threads` is 8; `SAVE_VERSION` 68. Every in-flight switch is retired.
 
-| merge | phase | OPEN |
+| gate item (100k seed 42 x 30, quiet box, 8 threads) | target | measured |
 |---|---|---|
-| `aecc8a6` | 0: the island switches retired, the change tier six binaries at a time | 201 closed, 202 |
-| `acacea1` | 1: the Rest loop (`[rest]`, `CITYSIM_REST_OFF`, retires at the close) | 195 closed, 207-208 opened |
-| `2ced00a` / `218ca03` / `4f021de` / `e5048d7` | 2-5: the venue index, the world build, the price-keyed caches, the claim index and guard grid | 184 |
-| `11ff4d4` / `7ad2ec7` | the checkpoint (found the 30-day slope) and R7 (the slope and midnight before parallel scoring) | — |
-| `7359e73` | 6: the slope: the kin index, the recruit's roster walk, `edges`/`edges_new`/`coworker_pairs` columns | 203 closed, 209-211 opened |
-| `560ad51` | 7: midnight per pass: faith draws first, the district grid memo, rehouse's rent once, `run --prof-midnight` | 184 |
-| `25a8673` | 8: parallel think: `think::score`/`apply` with serial barriers and re-scoring, `[perf] threads` (1), `run --threads` | 184 |
-| `915574f` | 9: the Statistical hour stays serial (its rolls read what earlier agents wrote); the co-work bond in two exact steps | 184 |
+| ticks/s, days 25-30 | ≥ 30 | **31** (the pass base: 11 at day 4, sliding) |
+| longest tick, days 25-30 | ≤ 1 s | 0.79-0.83 s (the 21:00 pass); day 8's 00:11 job search 1.10 s (`OPEN-212`) |
+| build | < 2 min | 64 s (the base: 370 s) |
+| thread identity 1 vs 8, 2k x 3 seeds and 20k | identical | identical (the last such proof) |
 
-## The pass so far, in five lines (100k seed 42, `isle_100000`, 8 threads where the branch has them)
+Prints to plan the view with: 1/4/8/16 threads give 40/45/48/48 ticks/s at 100k (the knee is 8); 2.5k/5k/10k Full
+agents give 48/41/32, about 1.4 us per Full agent a tick, so a camera ring of thousands is affordable; peak working
+set 2.1 GB; 20k runs at 293 ticks/s. The profile's top sites are the goal scorers (`think_with_offer` 50 s of a 100k
+game day, the next five under 14 s each): the data layout (`OPEN-206`) is the lever if the view's share needs more.
 
-1. Days 2-4: 11 -> 37 (checkpoint) -> 51 ticks/s. Days 25-30: 18 -> **25.5** against the gate's 30. Build 370 -> 47 s (gate 2 min, met).
-2. Midnight, the longest tick every day: 7.5-8.1 s (checkpoint, days 25-30) -> 3.9 (phase 6) -> **2.6 s** (phase 7) against the gate's 1 s. What is left is forty passes under 0.3 s each.
-3. The slope is growth by design: the acquaintance graph (0.6M -> 8.7M edges by day 30, still +8k/day at day 60 at 20k, `OPEN-210`) and the co-work bond's crew square (10 s of a 76 s game day, `OPEN-209`). Phase 6 indexed the kin walks; phase 7 made faith draw before it reads.
-4. Parallel scoring is bounded: think is a third of the tick and its plain split was not order-free (an abort's releases are read by later scorers), so phase 8 re-scores after barriers; the Statistical hour cannot split at all without a behaviour change (phase 9). Memo locks cost a quarter of a think's CPU at 8 threads: a lock-free memo read is the next byte-identical lever.
-5. 20k seed 42 days 25-30: 246 -> 284 ticks/s (8 threads); the 20k and 100k end cities are unchanged by the pass (homeless 2,903, employed 56,184 at 100k).
+Behaviour moved by the pass (FINDINGs, nothing retuned): at 2k, 42-47 x 120 against the pass base, Murders 34 -> 31,
+employed 0.770 -> 0.754, homeless 0.013 -> 0.015; at 20k on the new map Murders 37.7 -> 56 (seed 42-44 x 30; the map
+moves households toward the Sump, phase 10), Friend edges -55 % (the crew cap, phase 7c, per-capita now like the 2k city).
+
+## The process reset (2026-10-26)
+
+Dylan: "We are back to spending all our time on tests and gates and no progress is being made on the game itself
+... I would rather move fast and break things than spend days of testing hell. ... Things don't need to be byte
+identical or deterministic. We don't need to worry about save compatibility, since we have no players. We need to
+add, and iterate, and shadow to make sure it's working relatively well at the player level."
+
+Why it kept happening: every cleanup pruned tests and none touched the rules that generate them. Five of the ten
+doctrine rules were test factories (determinism, byte-identical switches, the mirror, SAVE_VERSION, test-first), and
+the orchestrator added a standing rule after every incident. What changed, all on main:
+
+- **CLAUDE.md § The doctrine is five rules**; the dropped ones are named there as dropped on purpose. A mechanism is
+  proven by a shadow read, not a test. The change tier is the only per-merge gate; merge and milestone tiers run at a
+  close as prints. No off switches, no identity runs, no A/B per phase.
+- **The test-count ratchet**: `test.py lint` fails when `#[test]` functions exceed `Test functions: N` in
+  `docs/TESTING.md` (1,470 now); raising it takes `test-add: <reason>` in the commit.
+- **59 tests deleted** (save round trips 48, determinism 4, parity 1, off identity 3, pins 3; `b286ae9`), the
+  off-identity stage out of `tools/phase_measure.py`, parity out of the milestone tier. The scan-vs-index oracle
+  tests stay (unit tests of an index, a second of CPU). The change tier is ~2 min, set by `core_sanity`.
+- The two skills (`/merge-set` is the close's tiers; `/close-milestone` opens with the shadow read), the SOP rule in
+  Dylan's global rules, `docs/TESTING.md` and `docs/ARCHITECTURE.md` match.
 
 ## In flight
 
-- No agents are running; the only worktree is main. Empty locked folders under `.claude/worktrees/` (`agent-*`,
-  `island-f3`) and the `p*_change.log` / `p*_merge.log` tier logs there can go after a restart.
-- TheCityGraphics: master `855d0aa`, **merged locally, not pushed**; phase 10 re-imports from it.
+- No agents are running. Locked empty folders under `.claude/worktrees/` (`agent-*`, `island-f3`, `test-cut` if
+  it remains) and the `*.log` tier logs there can go after a restart; `target/gate/` holds the gate's runs (~1 GB).
+- TheCityGraphics: master `855d0aa`, **no git remote yet**; the maps on main were imported from it.
 
 ## Next, in order
 
-1. **Dylan's four calls** (below), then the phases they open: **7b** the midnight stagger across the night's first
-   ticks, switched, off-identical (measured ~0.35 s longest tick against 2.6); the **crew cap** `[lod] coworker_crew`
-   32 as a switched behaviour phase with its stat table regenerated and the parity test (`OPEN-205`/`209`); the
-   **gang dwell** fix as a switched Sonnet round (`OPEN-211`).
-2. **Phase 10**, the P9 re-import (`OPEN-182`, `OPEN-204`): after the graphics push; the 20k tier map and the 100k
-   map at `k = 2` and `k = 1` side by side (R5); the 20k FINDINGs re-baselined for a written reason.
-3. **The gate** (`PERF_PASS` § The gate) on a quiet box against `6d6f7bc`, with `[perf] threads` set (8 is the knee
-   at 20k; 100k not measured past 8). If 30 ticks/s misses: lock-free memo reads (byte-identical, a small phase),
-   then `OPEN-206` as its own pass; the target is not lowered. The Rest switch retires at the close.
-4. Then as before: Shadow V9 at 100k on the re-imported island (`OPEN-192`, `OPEN-167`, `OPEN-203` closed), the
-   pressure pass (`OPEN-178`, `OPEN-176`, `OPEN-169`, `OPEN-170`, `OPEN-194`, `OPEN-205`, `OPEN-209`, `OPEN-210`), the
-   vertical city (`OPEN-187`, `OPEN-191`), the view milestone, M18.
+1. **Shadow V9 at 100k on the island, the new way**: one shadow run (`citysim-cli shadow`, 100k on
+   `isle_m_k2_100k`, 8 threads), one diary per archetype read by critics (Sonnet, in parallel, as V7 did), the issues
+   ranked by what the player would see; then fix rounds as mechanisms, one agent per phase, the change tier once,
+   shadow again. No identity proofs, no switches. Watch first: the 20k Murders 56 on the new map, the Friend-edge drop,
+   the execs' homes (I9 leaves them 133 tiles from the Hq on average), the Spire's full Homes.
+2. **The pressure pass** (`OPEN-178` mood drives behaviour, `OPEN-176` the dead trades, `OPEN-209`/`OPEN-205` the
+   crew, `OPEN-210` the acquaintance graph, `OPEN-169`, `OPEN-170`, `OPEN-194`), fed by V9's read.
+3. The vertical city (`OPEN-187`, `OPEN-191`), the view milestone, M18.
 
 ## Open calls for Dylan
 
-- **Phase 7b, the midnight stagger** (recommended yes): byte-identical work is exhausted at 2.6 s.
-- **The crew cap into this pass** (`OPEN-209`, recommended yes): the largest single term at 100k; R4 deferred it on a
-  7 % estimate that 100k has now measured at ~13 %.
-- **The gang dwell rescore** (`OPEN-211`): a bug, not byte-identical (`order_trace`, `rep_flips`); a switched Sonnet round or the pressure pass.
-- **The acquaintance graph** (`OPEN-210`): not levelled at day 60; an earlier prune is a knob retune (doctrine 2), a
-  per-person cap a mechanism. Recommended: the pressure pass.
-- Push TheCityGraphics `855d0aa` before phase 10.
+- Add a remote and push TheCityGraphics `855d0aa`.
+- The Friend-edge drop at 20k (-55 %, the crew cap): a config value if the city feels too lonely in V9.
+- `OPEN-212`: the stagger's ~84 unaudited whole-day stamps; audit or accept (the gate read it as harmless at 100k).
 - `OPEN-150`: the starting-condition seed's shape. Pressure-pass design: `OPEN-160`, `OPEN-162`, `OPEN-157`,
   `OPEN-176`, `OPEN-178`; the combat model `OPEN-179`. Standing: `OPEN-062`, `OPEN-039`, `OPEN-057`, `OPEN-059`,
   `OPEN-077`, `OPEN-069`, `OPEN-070`.
 
-## Cost (API-rate $ equivalent, `tools/session_cost.py`)
-
-Twentieth session (`--session 61af1740`, Opus orchestrator): phases 0-5 at 173 / 251 / 152 / 179 / 243 / 247 turns,
-$8 / 15 / 8 / 15 / 16 / 20; phase 6 **330** turns, $32; the orchestrator 199 turns, $23. Total ≈ $137.
-
-Twenty-first session (`--session 25a0721b`, Fable orchestrator):
+## Cost (API-rate $ equivalent, `tools/session_cost.py --session 25a0721b`)
 
 | part | agent | turns | median ctx | $ |
 |---|---|---|---|---|
-| phase 7 | Opus | **332** | 216k | 39 |
-| phase 8 (+ a Sonnet read-only order audit it spawned) | Opus (+ Sonnet) | 286 (+172) | 203k | 28 (+8) |
+| phase 7 | Opus | 332 | 216k | 39 |
+| phase 8 (+ a Sonnet order audit) | Opus (+ Sonnet) | 286 (+172) | 203k | 28 (+8) |
 | phase 9 | Opus | 190 | 173k | 16 |
-| orchestrator (merge tiers, three briefs, the handoff) | Fable | 91 | 123k | 20 |
+| phase 7b | Opus | **436** | 237k | 41 |
+| phase 7c | Opus | 198 | 129k | 10 |
+| phase 7d | Sonnet | 61 | 75k | 2 |
+| phase 10 | Opus | 316 | 189k | 17 |
+| the switch retirement | Sonnet | 19 | 55k | 1 |
+| the test audit and cut | Sonnet | 125 | 162k | 7 |
+| orchestrator (tiers, briefs, the gate, the reset, the handoff) | Fable | 307 | 150k | 53 |
 
-Total ≈ $111 for three phases. Phases 8 and 9 each stalled once on a background sim run and needed a nudge; the
-briefs now say foreground polling, and the next brief should say it in the first line, not the proof section.
+Total ≈ $222; with the twentieth session's $137 the pass cost ≈ $360 and added no mechanism to the game. The next
+session's cost line is the first measure of the reset.
 
 The standing decisions, the doctrine and the agent rules are in `CLAUDE.md`; the tiers, budgets and caps in `docs/TESTING.md`.
