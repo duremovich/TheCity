@@ -1,0 +1,59 @@
+# Shadow V9: the crime trades (critic: crime)
+
+Window: main `4108184`, 100k island, seed 42, d21-27. Ten diaries (forger 38102 and 8946, fixer 92149 and 98358, gun 53562 and 54225, buyer 51439 and 88930, pimp 20824 and 38428), plus `camera.tsv` and `analyze100k.txt`. Cites are `<arch>_<index> dDD HH:MM`. A missing line is not evidence. Two picks per trade is a thin sample; counts below are of these ten diaries only.
+
+## 1. Verdict
+
+The trades are people with job titles and no trade. Of ten followed crooks, three spend the week as commuters (an exec, a night guard, a fixer who walks 6 h each way), two are jailed or idle for days, and none brokers, forges for a client of their own, collects, or hunts. The one crime on screen is the same one as V8: fare evasion arrests, and now it also lands on the guard.
+It reads as a harsh city (the jailing is real, the hunger is real) but not as crime. The fixer and buyer shops that PRESSURE_PASS phase 2 wants to feed have no one who walks in: every owner-fixer diary shows 0 clients served.
+The strongest story seed in the group is dead on arrival: an 18-year-old with a 0.95 revenge grudge and a posted hit that nobody took sits at home for seven days.
+
+## 2. Per archetype
+
+**Forger: thin to dead.**
+- `forger_38102` (Hollis Novak, works for owner Smoke Ambrose) is the only trade-alive diary: 14 `served ... (a client, the forger)` memories, all at 09:00-13:00 on the tick, all clients Statistical (`d21 09:00`, `d22 09:00`). Nothing else on screen, no paper, no coin per job. Wage is 8c, 4c, 3c on three days against a posted 5c, each with a same-minute `Unpaid` memory; he quits `d23 18:00 Quit ... (unpaid)` holding 348c. Then 21.8 h idle in Bar#4440 on `d24` (`Rest` 90 min on a loop), 17.9 h on `d25`, 18.1 h on `d26`.
+- `forger_8946` (Ivo Stroud, owns Fixer#5719) works 8.6 h on `d21`, nets 0c, wealth need 0.98, steals a motorcycle at 23:35 and is sentenced to 6 days at `d22 04:30`. He sits in the Precinct for the rest of the window. His shop shows `book 3, regulars 5, closed until -` at the end: it is open and serving nobody while the owner is jailed.
+
+**Fixer: thin.**
+- `fixer_98358` (Aldo Draper, 48, owns Fixer#6002 in D3, lives in D4) has a 350-min walk to work (`d21 03:59 GoTo(Workplace) ... 350 min`) and 225 min home (`d21 18:18`). Travel is 9.9 h a day. Sleep is 2.9 h on `d21`. Shop ends `book 0, regulars 0`, 0 clients served. Three 1-day fare-evasion sentences in six days (`d24 05:21`, `d26 05:21`, `d27 18:36`).
+- `fixer_92149` (Thea Underhill, 65, owns Fixer#6075, 0c, wealth 0.00, mood -0.46 by `d26`): `JoinGang` hijacks the workday (`d21 05:48`, `d21 18:02`, `d24 18:02`, `d26 18:19`), each a 91-287 min walk to a Hideout, cut by sleep or an arrest. She never arrives. Fare evasion is the transport: four arrests and four 1-day sentences (`d22 14:58`, `d23 16:41`, `d25 02:06`, `d26 22:22`), and eight of nine nights end `FleeToHome` or a street sleep. Shop `book 0, regulars 0`.
+
+**Gun: thin (one), dead (one).**
+- `gun_53562` (Mateo Tanaka, 45, night Guard at Precinct#4485 in D2, home D3): travel 11-13 h/day. Shift 21:00-06:00 but the commute is `d21 21:12 GoTo(PatrolWaypoint) ... 229 min`, then waypoint walks of 61 and 155 min inside D2, and `d21 06:12 GoTo(Home) 251 min`. He witnesses 33 crimes in the window (28 fare evasion) and arrests nobody. The only arrests in the file are of him, for fare evasion, twice on `d26` (`15:18`, `22:03`, both a 5c fine). His one contract is a ledger `guard` taker (`d24 00:09 Reneged: Matthias Haas stiffed Mateo Tanaka`).
+- `gun_54225` (Elowen Upton, 35, homeless Dreg, left Ninefold `d22 00:05`, put out of her squat `d23 20:13`) holds a live `locate` contract (#1015, taken `d14`, Live) and never plans it. Her week is Soup Kitchen, `Wander` 30 min on a loop, and `Earn on Car T1 [Scavenge]` for three hours straight (`d27 01:04-04:10`), net 0c. No Intel, AskAround or StakeOut anywhere.
+
+**Buyer: dead.**
+- `buyer_51439` (Wire Sato, 18) carries `GRUDGE against Lavinia Inchbald (KilledKin, weight 0.95)`. Her revenge hit #854 (24c, 12c down) was posted `d11` at Fixer#5545 and expired; the refund lands as `d21 00:09 Escrow +12`, and the same minute `goal Hunt cooled until d28 00:09 (could not plan or plan failed twice)`. She then spends all seven days at home (24.0 h home on every row of `camera.tsv`, idle 9.5-17.7 h a day), and her one act is a random assault on a different man (`d24 07:04 Wire Sato attacked Axel Volkov`, a Robbed grudge from `d24 06:24`).
+- `buyer_88930` (Kenji Zhou, 70, Corp EXEC) commutes to a Meeting at Lab#6103: 496 min each way (`d21 00:40`), 15-16 h of travel on `d23-d25`, meetings shrink 6.8 h to 0.2 h by `d26` (the walk eats the day). No buy, no posting from this diary. The one human beat is `d21 14:00 Zelda Tanner visited Kenji Zhou at Lab#6103 (an elder parent)`.
+
+**Pimp: thin.**
+- `pimp_38428` (Cipher Park, a Builder with a gang) is the only successful collection in ten diaries: `d21 00:00 Collect ... 23 min` from Clemence Fairweather, `00:05 TRIBUTE +4c`, and the worker is a Statistical body (`d21 00:23`), so it is invisible. The `d22 04:01` plan on Zoe Sato is cut at 147 min. No collect after `d22`.
+- `pimp_20824` (Vex Garland, a Vat Tech in a gang): two `GangWork` plans in the whole window (`d21 00:00` and `d21 23:42`), 364 and 382 min walks, both cut. Travel 16.8 h and 17.3 h on `d21-22`, with a 504-min walk to the Vat Farm (`d21 06:04`). From `d23` the goal never returns; he is a worker.
+
+## 3. Bugs, ranked by what the player sees first
+
+1. **Everyone walks for hours.** Many crime-diary days carry 8-17 h of travel (`camera.tsv`); single legs of 350, 364, 382, 496, 504, 570 min in-district or one district over (`fixer_98358 d21 03:59`, `pimp_20824 d21 06:04`, `buyer_88930 d21 00:40`, `fixer_92149 d21 22:49 FleeToHome 570`). A player following a crook sees a man walking. Likely cause: path cost or speed for Full bodies on the 100k map, or home and work assigned districts apart. A Guard whose waypoints are 155 min apart is the worst cut. `docs/PRESSURE_PASS.md` phase 4 (reach) covers purposes, but not commute: nothing caps home-to-work distance.
+2. **The Guard's patrol never makes an arrest and is arrested for the same fare evasion he logs 28 times** (`gun_53562`: 33 witness lines, 0 `arrested`, `d26 15:18` he is the arrest). Likely cause: guards only react to a tag or a warrant, and fare evasion is witnessed, not enforced, while the arrest chain is run elsewhere.
+3. **Fare evasion as transport.** Nine arrests in these ten diaries, all 1-day sentences or 5c fines: `fixer_92149` four, `fixer_98358` three, `gun_53562` two. Release stands the prisoner in D2 with nothing: `fixer_98358 d26 15:22 Sleep @ street (D2 Civic Core) 792 min` (13 h). Same as V8 bug 3.
+4. **Owners and bosses are paid in part and then quit unpaid with money in hand.** `forger_38102` wages 8, 4, 3 against 5/day, `Unpaid` memory every day, `Quit d23 18:00` with 348c. Same family as V8 bug 4 (owner on a Statistical purse). The Hollis quit then costs him his week: see dull spot 1.
+5. **A posted hit that nobody takes dies and the buyer drops out of the loop.** `buyer_51439`: the hit expires, the escrow refunds, `Hunt` is cooled for a week (`d21 00:09`). `analyze100k.txt`: 2,062 contracts posted, 144 fulfilled, 700 expired, 8 hits done in 30 days. The ledger has the supply (hits posted) and the diaries show no taker.
+6. **Shops serve nobody in the owner's sight.** Fixer owners: 0 clients in 3 diaries (92149, 98358, 8946). Only the Statistical clients of a forger in a Statistical-owned shop are logged, and only as 09:00 memories. A followed fixer has no customer.
+
+## 4. Dull spots, ranked (mechanisms, not knobs)
+
+1. **The jobless crook with a purse.** `forger_38102` has 335c, no job, no goal above Idle (0.05), and spends 18-22 h in Bar#4440 for four days (`d24 01:37-` `Rest` every 90 min). Mechanism: a quitter with coin and a trade skill goes freelance. The forger becomes a street forger who sells fake IDs to the wanted (those who just left the Precinct, the evaders), with the price and a risk on a bad forgery. The same mechanism covers the evaders who need an ID: a place for the arrest loop to go.
+2. **The revenge buyer.** `buyer_51439`. Mechanism: when a hit expires unfilled, the buyer reposts at a higher price, or turns to the cheaper road: ask a friend, buy a gun, or take the shot herself with the `Hunt` goal (cooled for a week now). A KilledKin grudge at 0.95 is the loudest motivation in the group; it should end in a stakeout, a blade, or a person at a Fixer counter. The 12c refund line (`Escrow +12 (refund)`) should become "she came back, raised the price, and posted again".
+3. **The guard who does nothing.** `gun_53562`. Mechanism: a patrolling Guard who witnesses a crime arrests, takes a bribe, or looks away, by loyalty and greed. Fare evasion at 28 sightings a week is the ideal bribe market: the guard sells the look-away for coin, and the diary gets a "took 5c to look away" line and an arrest for the next witness who is incorruptible.
+4. **The gun who has a contract and no hunt.** `gun_54225` holds locate #1015 for 40c and wanders. Mechanism: a taken contract gets a plan the person cannot ignore (a deadline, a loss if reneged), starting with the Intel walk, and a miss shows a Reneged line. The hunter with a rival (a taken tag on the same target) goes to the same Fixer table. Right now the Dreg gun is a scavenger.
+5. **The fixer's counter.** Three owners, zero clients seen. Mechanism: a fixer shop in open hours makes the customers who book on it visible: a Full buyer or taker walks in, haggles, and the owner's diary shows `served` with a coin (the 100k ledger shows `fixer_cut` of only 20.6 a day).
+6. **The pimp's round.** One 23-minute collect in 14 pick-days, and the worker is Statistical. Mechanism: the pitch hour places the street worker (a Full body in the pimp's own district) at the spot, so the pimp's GoTo is under an hour and the collect happens. If the worker is not there, the pimp finds her, which is a beating or an argument.
+7. **The 70-year-old exec's meeting.** `buyer_88930` walks 8 h to sit in a lab. Mechanism: the meeting is a deal (a posted contract, a bribe) and the walk is a car (a corp exec has a driver). One sentence in the diary would turn an 8 h walk into a story.
+8. **Jail as a flat week.** `forger_8946`: 5.5 days of `was counted by ... (as an inmate; the jailer)` at 00:03 and a `MetInJail` line every few hours. Mechanism: a cell has a cellmate who offers a job, a debt, or a fight; a convict leaves with a contact, or a grudge, or a gang.
+
+## 5. PRESSURE_PASS evidence
+
+- **Phase 1 misery:** `fixer_92149 d26 22:00 mood -0.46`, wealth 0.00, three days of 0c purse, yet she still goes to work (`d24 02:42 GOAL Work 0.956`) and tries to join a gang; the `JoinGang` score 0.756-0.866 is the only behaviour a broke, miserable fixer shows. `forger_38102`'s quit shows quitting is rare and the quit comes from wages, not mood.
+- **Phase 2 dead trades:** the pimp collects (`pimp_38428 d21 00:00`, one in 14 days, worker Statistical), the buyer's hit goes unfilled (`buyer_51439`, #854 Expired), and a gun has no customers (`gun_54225`, #1015 Taken, unplanned). `analyze100k.txt`: 8 hits done and 700 expired contracts in 30 days.
+- **Phase 3 protection:** no protection line in these ten diaries. The fixers' shops are not shaken down: `heat 0.00` on all three.
+- **Phase 4 reach:** the 350-570 min legs (bug 1) are the reach problem for home and work and Hideout, not only clinic, report and stakeout. The `GoTo(Hideout)` for `JoinGang` (`fixer_92149 d21 18:02`, 287 min) is a reach item for the join purpose.
+- **Not in the pass, worth a phase:** the fare-evasion arrest loop and the release in the wrong district (bug 3), and the Guard who arrests nobody (bug 2).

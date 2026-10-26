@@ -46,9 +46,14 @@ Something sends bodies to the trades that exist but serve nobody:
 - the pimp collects from bodies on screen;
 - the arms dealer sells: gangs buy from dealers instead of paying themselves, the frightened (low safety) buy a gun;
 - the black doc treats the wounded who avoid a clinic (the wanted, the gang-hurt, the broke);
-- the scav's harvest is seen from the scav's side.
+- the scav's harvest is seen from the scav's side, and the scav has a day (bins, a body, a find);
+- (V9) the cab gets fares from bodies; the jobless get a dawn shape-up at a foreman's yard; the dealer and the
+  vendor get on-screen customers;
+- (V9) care-seeking: a diagnosed or hurt person plans a clinic trip, or chooses the black doc, begging or pawning
+  when broke; patients walk into a clinic queue; the super walks a round with tenant calls.
 
-Shadow: bouncer, joytoy, pimp, arms_dealer, black_doc, scav, and a customer of each.
+Shadow: bouncer, joytoy, pimp, arms_dealer, black_doc, scav, cabbie, day_labourer, sick, ripperdoc, super, and a
+customer of each.
 
 ### Phase 3: protection bites (`OPEN-160`, `OPEN-162`, `OPEN-157`)
 
@@ -64,9 +69,31 @@ Shadow: gang_leader, gang_member, vendor, cook, fixer, and a shop owner under pr
 A reach table per purpose (clinic, report a crime, register a company, stakeout, sanitation beat) in config; past
 it the goal drops unless none is left. Weak acquaintances prune sooner and each person's graph has a cap.
 
-### Fix phases from Shadow V9
+### Phase 5: consequence (Shadow V9's dull spots)
 
-Added here as the critics report, ranked by what the player sees.
+What happens next, so a started story is picked up:
+- witnesses react (report, flee, gossip, or blackmail the culprit), and the city-wide Witness noise falls with it;
+- a raid writes a result (wounded, a smashed till, stolen stock, a grudge between crews, a rumour at the venue);
+- an expired hit is reposted higher, or the buyer goes himself;
+- jail has cellmates and contacts; release returns a member to the gang (welcome, or a beating for talking); jail
+  absences cost the job;
+- a gang order puts a duty shift on the member's schedule with pay, competing with the day job;
+- the faith on screen: a creed's service at a Chapel at a set hour, a congregation, a tithe, conversion or walking
+  out, the leaver hunted as a heretic.
+
+Shadow: gang_member, gang_leader, cultist, purist, buyer, gun, guard, and a jailed pick.
+
+### Fix phases from Shadow V9 (`SHADOW_V9.md`)
+
+- **F1, distance at 100k** (after phase 4): legs of 4-11 h, same-district El rides of 4-9 h, the builder's site
+  day, a vendor's pitch or a sweeper's post districts away, food 5 h from a rich CEO. The island pass's distance
+  held at 20k; find why 100k breaks it and fix the cause.
+- **F2, the missing trades and the no-op verbs**: Office Worker, Teacher, Madam, Back-Room Doc, Contract Host and
+  Fighter are never hired at 100k; GangWork's Preach never executes; 0-coin extortion logged as success;
+  "Collected 0 to 0" (`OPEN-118`); a guard arrested for the fare evasion he logs, 13 of 16 Arrest plans
+  `PreconditionLost`; Bury's Cemetery resolving to a workplace.
+- **F3, quits and wages** (after phase 1): "quit unpaid" with money in hand, owners quitting their own venue,
+  partial wages, same-minute Quit and Hire.
 
 ## Implemented: deviations
 
