@@ -550,6 +550,68 @@ fn build_clinics(world: &mut World) {
         );
         world.push_event(EventKind::Founded, &[g, b], text);
     }
+    doc_clinics(world, cost);
+}
+
+/// Pressure pass F2: the other founder of JOBS_AND_LIVES § 7 ("founded by a
+/// struck-off doc or a gang"). Only the gang's door was built, and only a
+/// Harvest or typed gang with `found_cost + black_clinic_spare` in its
+/// treasury and a vacant Lot on held ground opens it: the typed (scav)
+/// gangs are memberless with 50 coins and hold nothing, so no BlackClinic
+/// stood at 20k or 100k and no Back-Room Doc was ever hired. A struck-off
+/// doc who holds the found cost and has no back room to work in (none
+/// standing with his post open, none of his own) opens one on the vacant
+/// Lot nearest his Home (ascending id, one a night).
+fn doc_clinics(world: &mut World, cost: i64) {
+    let docs: Vec<EntityId> = world.jobs2.gray.struck_off.iter().copied().collect();
+    if docs.is_empty() {
+        return;
+    }
+    let open_post = world.buildings_of_kind(BuildingKind::BlackClinic).iter().any(|&b| {
+        standing(world, b)
+            && world.vacancies.get(&b).is_some_and(|v| {
+                v.iter()
+                    .any(|&r| matches!(r, Role::Trade(t) if world.config.trade(t).is_some_and(|row| row.struck_off)))
+            })
+    });
+    if open_post {
+        return;
+    }
+    for a in docs {
+        if !world.has::<crate::components::Brain>(a) || world.has::<crate::components::Sentence>(a) {
+            continue;
+        }
+        let at_clinic = world
+            .comp::<Job>(a)
+            .and_then(|j| j.employer)
+            .is_some_and(|e| world.comp::<Building>(e).is_some_and(|bd| bd.kind == BuildingKind::BlackClinic));
+        let owns = world
+            .buildings_of_kind(BuildingKind::BlackClinic)
+            .iter()
+            .any(|&b| standing(world, b) && world.owner_of(b) == Some(a));
+        if at_clinic || owns || world.comp::<crate::components::Wallet>(a).is_none_or(|w| w.coins < cost) {
+            continue;
+        }
+        let from = world
+            .comp::<crate::components::Household>(a)
+            .and_then(|h| h.home)
+            .and_then(|h| world.comp::<Building>(h))
+            .map(|bd| bd.door)
+            .or_else(|| world.comp::<crate::components::Position>(a).map(|p| p.tile));
+        let Some(lot) =
+            from.and_then(|f| crate::systems::founding::nearest_lot_for(world, BuildingKind::BlackClinic, f))
+        else {
+            continue;
+        };
+        let Ok(b) = crate::systems::founding::build_on_lot(world, lot, BuildingKind::BlackClinic, Some(a)) else {
+            continue;
+        };
+        crate::systems::industry::pay_build(world, Some(a), cost, Some(b), true);
+        let text =
+            format!("{} opened a {} ({})", world.name_of(a), BuildingKind::BlackClinic.label(), world.name_of(b));
+        world.push_event(EventKind::Founded, &[a, b], text);
+        return;
+    }
 }
 
 /// Midnight: a BlackClinic in a Sweep district or one where the law cracks

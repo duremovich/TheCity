@@ -3246,6 +3246,16 @@ pub struct ScaleCfg {
     /// written into a save only when set.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub fitted: bool,
+    /// Pressure pass F2: the copies of the opening roster whose businesses
+    /// stand on Lots (`fit_to_map`: the map's Lots over `lots`, at most the
+    /// roster's copies; 0 before fitting: the roster's). Not a config.toml
+    /// key; written into a save only when set.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub lot_copies: u32,
+}
+
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
 }
 
 impl Default for ScaleCfg {
@@ -3261,6 +3271,7 @@ impl Default for ScaleCfg {
             lots: 160,
             districts: 8,
             fitted: false,
+            lot_copies: 0,
         }
     }
 }
@@ -4362,11 +4373,21 @@ pub struct CrimeCfg {
     /// M13 D47: sentences for the crimes appended after Vagrancy (days).
     #[serde(default)]
     pub sentence_days_ext: SentenceDaysExt,
+    /// Pressure pass F2: a crime's witnesses who note it (a `SawCrime`, an
+    /// edge, a `Witness` line), at most; the guards on shift are rolled first
+    /// and always count (a fare dodge on a 100k platform drew 26 witnesses
+    /// in a minute, 641k `Witness` lines in 30 days). 0: no cap.
+    #[serde(default = "CrimeCfg::default_witness_cap")]
+    pub witness_cap: u32,
 }
 
 impl CrimeCfg {
     fn default_answer_radius() -> u32 {
         96
+    }
+
+    fn default_witness_cap() -> u32 {
+        4
     }
 }
 
@@ -8189,6 +8210,10 @@ pub struct LifeCfg {
     pub arrest_off_shift: f32,
     /// A guard re-chases a suspect seen moving at most this many times per plan.
     pub chase_hops: u8,
+    /// Pressure pass F2: a guard at the last-seen tile with the suspect out
+    /// of sight chases on (a hop) to a sighting another guard made in the
+    /// last this many ticks (the radio), not only to one in his own sight.
+    pub chase_radio_ticks: u64,
     /// A suspect seen longer ago than this is chased only within `near_tiles`.
     pub arrest_fresh_ticks: u64,
     /// One `SawCrime` per (witness, actor, crime) within this many ticks.
@@ -8459,6 +8484,7 @@ impl Default for LifeCfg {
             idle_far_tiles: 30,
             arrest_off_shift: 0.0,
             chase_hops: 3,
+            chase_radio_ticks: 30,
             arrest_fresh_ticks: 120,
             witness_dedupe_ticks: 360,
             colocation_new_edges: 2,
@@ -9766,6 +9792,36 @@ impl Config {
         // 278-284). Copies keep every per-corp key as tuned, an exec per
         // ~2,000 residents and a bankruptcy's share of the economy.
         let k = (r_emp.round() as usize).max(1);
+        // Pressure pass F2: the opening businesses that stand on Lots (the
+        // venues, Labs, Clinics, Garages, Fixers, Feeds, the industries, the
+        // Hq, the vice and fashion houses, the School, the Missions and
+        // Hotels) are dealt per Lot, not per employer: the reference city
+        // seeds ~40 % of its Lots and leaves the rest to grow on. The 100k
+        // island holds 600 Farms (k = 50) on 1,415 Lots (8.8 x 160); the
+        // passes dealt 50 copies each in a fixed order, the Lots ran out at
+        // the Noodle Bars, and every kind seeded after (the Hq, the School,
+        // the Brothel and StripClub, the Dollhouse, the FightPit, the
+        // Stations) stood nowhere: Office Worker, Teacher, Madam, Contract
+        // Host and Fighter were never hired (Shadow V9). At 2k and 20k the
+        // two ratios agree and nothing moves.
+        let k_lot = (r_lot.round() as usize).clamp(1, k);
+        if k_lot < k {
+            self.scale.lot_copies = k_lot as u32;
+            let f = k_lot as f64 / up;
+            let down = |v: u32| if v == 0 { 0 } else { ((f64::from(v) * f).round() as u32).max(1) };
+            let v = &mut self.jobs.seed_venues;
+            *v = SeedVenuesCfg {
+                club: down(v.club),
+                arcade: down(v.arcade),
+                noodle_bar: down(v.noodle_bar),
+                fight_pit: down(v.fight_pit),
+                den: down(v.den),
+                lounge: down(v.lounge),
+                fab: down(v.fab),
+            };
+            self.street.seed_hotels = down(self.street.seed_hotels as u32) as usize;
+            self.charity.seed = down(self.charity.seed);
+        }
         let c = &mut self.corps;
         if c.row_count() > 0 {
             let total = |v: &Vec<u32>, r: f64| (f64::from(v.iter().sum::<u32>()) * r).round() as u32;

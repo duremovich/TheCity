@@ -333,7 +333,7 @@ pub const SEEDED_FIXERS: [crate::systems::districts::Seat; 1] =
 /// then the lower id). No coin is minted.
 pub fn seed_fixers(world: &mut World) -> Vec<EntityId> {
     let mut built = Vec::new();
-    let copies = world.seed_copies();
+    let copies = world.lot_copies();
     for (copy, seat) in (0..copies).flat_map(|j| SEEDED_FIXERS.into_iter().map(move |s| (j, s))) {
         let Some(d) = crate::systems::districts::seat_district(world, seat, copy, copies).map(|d| d.index()) else {
             log(world, 0, format!("no {:?} district: Fixer not seeded", seat.zone));

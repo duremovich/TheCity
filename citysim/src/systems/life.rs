@@ -390,13 +390,24 @@ pub fn arrive_at_suspect(world: &mut World, guard: EntityId, suspect: EntityId) 
     }
     let sight = world.config.crime.sight;
     let hops = world.comp::<Brain>(guard).map_or(0, |b| b.chase_hops);
-    let visible = crate::systems::law::living(world, suspect)
-        && !world.has::<Sentence>(suspect)
-        && crate::systems::law::near(world, guard, suspect, sight + 2);
-    if visible && hops < world.config.life.chase_hops {
-        let tile = world.comp::<Position>(suspect).map(|p| p.tile).unwrap_or_default();
-        let now = world.tick;
-        world.set_last_seen(suspect, (tile, now));
+    let free = crate::systems::law::living(world, suspect) && !world.has::<Sentence>(suspect);
+    let visible = free && crate::systems::law::near(world, guard, suspect, sight + 2);
+    // Pressure pass F2: out of his sight, a fresh sighting by another guard
+    // (`law::sightings`) elsewhere is the radio: he chases on to it (13 of 16
+    // of a 100k guard's Arrests walked 20-45 min to a tile the suspect had
+    // left and failed `PreconditionLost`).
+    let now = world.tick;
+    let here = world.comp::<Position>(guard).map(|p| p.tile);
+    let radioed = free
+        && world
+            .last_seen()
+            .get(&suspect)
+            .is_some_and(|&(t, at)| now.saturating_sub(at) <= world.config.life.chase_radio_ticks && Some(t) != here);
+    if (visible || radioed) && hops < world.config.life.chase_hops {
+        if visible {
+            let tile = world.comp::<Position>(suspect).map(|p| p.tile).unwrap_or_default();
+            world.set_last_seen(suspect, (tile, now));
+        }
         if let Some(b) = world.comp_mut::<Brain>(guard) {
             b.chase_hops = hops + 1;
             let at = usize::from(b.plan_step);

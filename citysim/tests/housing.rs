@@ -569,9 +569,13 @@ fn test_company_rent_is_docked_from_the_wage_and_conserved() {
     }
     w.config.rent.pay_from_income = false;
     let (before, purse, id) = (citysim::systems::econ::identity(&w), w.purse(owner), common::coins(&w, a));
+    let city = w.purse(None);
     citysim::systems::ownership::pay_rent_from_income(&mut w, a);
     assert_eq!(common::coins(&w, a), id - 3, "three coins docked");
-    assert_eq!(w.purse(owner), purse + 3, "paid to the block's owner");
+    // The pressure pass F2: the owner's share and the tax its accumulator
+    // rolls over (a coin of the three when the carry passes one: the run
+    // up to here picks a different block and owner as the city changes).
+    assert_eq!(w.purse(owner) + w.purse(None), purse + city + 3, "paid to the block's owner (and the tax)");
     assert_eq!(citysim::systems::econ::identity(&w), before, "no coin made or lost");
     // Off (the base): a plain Block's rent waits for midnight with the
     // switch off.

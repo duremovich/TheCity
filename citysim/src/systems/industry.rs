@@ -1100,7 +1100,7 @@ pub fn seed(world: &mut World) {
     let cfg = world.config.jobs2.clone();
     let owners_of = |w: &World, rows: &[usize]| -> Vec<EntityId> {
         let mut out = Vec::new();
-        let copies = w.seed_copies();
+        let copies = w.lot_copies();
         for j in 0..copies {
             for &r in rows {
                 let Some(t) = w.config.corps.row_template(r) else { continue };

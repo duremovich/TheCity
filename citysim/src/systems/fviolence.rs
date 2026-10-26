@@ -465,9 +465,10 @@ pub fn stat_gang_day(world: &mut World, id: EntityId) {
         }
         ActKind::Extort => {
             let Some(home) = crate::systems::gang::stat_extort_target(world, id, o) else { return };
-            crate::systems::gang::stat_extort(world, id, home);
+            let taken = crate::systems::gang::stat_extort(world, id, home);
             world.stats.current.budget.stat_extorts += 1;
-            Some(Crime::Extortion)
+            // Pressure pass F2: a door that gave nothing is no Extortion to catch.
+            (taken > 0).then_some(Crime::Extortion)
         }
     };
     let tick = world.tick;

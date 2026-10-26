@@ -283,6 +283,28 @@ pub(crate) fn seed_lot(world: &World, kind: BuildingKind) -> Option<EntityId> {
         .map(|(_, _, l)| l)
 }
 
+/// Pressure pass F2: the derelict Block a seeded venue with no Lot of its
+/// tier refits: the one nearest the centroid of the `i`-th district (in
+/// turn) whose zone the kind's tier rule takes.
+fn seed_derelict(world: &World, kind: BuildingKind, i: usize) -> Option<EntityId> {
+    use crate::components::Zone;
+    let seats: Vec<TilePos> = world
+        .districts
+        .iter()
+        .filter(|d| {
+            let tier = match d.zone {
+                Zone::Spire => 2,
+                Zone::Sump => 0,
+                _ => 1,
+            };
+            crate::systems::founding::tier_ok(kind, tier)
+        })
+        .map(|d| d.centroid)
+        .collect();
+    let from = *seats.get(i % seats.len().max(1))?;
+    crate::systems::founding::refit_ok(world, kind, from)
+}
+
 /// Plan L7: the venues and Fabs of the Seeding section on the vacant Lots
 /// (no RNG), each with its full staff posted, its `Venue` and (a
 /// NoodleBar) 30 food from the nearest Market. Returns the buildings in
@@ -293,10 +315,16 @@ pub fn seed_venues(world: &mut World) -> Vec<EntityId> {
         let n = world.config.jobs.seed_venues.count(kind) as usize;
         for i in 0..n {
             let Some((owner, front)) = seed_owner(world, kind, i) else { continue };
-            let Some(lot) = seed_lot(world, kind) else { continue };
-            if crate::systems::founding::build_on_lot(world, lot, kind, owner).is_err() {
-                continue;
-            }
+            let site = match seed_lot(world, kind) {
+                Some(lot) => crate::systems::founding::build_on_lot(world, lot, kind, owner).ok(),
+                // Pressure pass F2: no Lot of its tier (the 100k island has
+                // no Sump Lot, so no FightPit stood and no Fighter was ever
+                // hired): a derelict Block of the tier refitted, unpaid, as
+                // the run's own refits do.
+                None => seed_derelict(world, kind, i)
+                    .and_then(|d| crate::systems::founding::refit_with(world, d, kind, owner, false).ok()),
+            };
+            let Some(lot) = site else { continue };
             // L2 phase 2: the owner a city-deeded Club or Lounge passes to
             // once it earns (`leisure::hand_over`; a front's is its gang).
             let heir = seed_heir(world, kind, i);

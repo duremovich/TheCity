@@ -1508,7 +1508,7 @@ pub fn seed(world: &mut World) {
         return;
     }
     let cfg = world.config.weapons.clone();
-    let copies = world.seed_copies();
+    let copies = world.lot_copies();
     for j in 0..copies {
         for &r in &cfg.gunsmith_rows {
             let Some(t) = world.config.corps.row_template(r) else { continue };

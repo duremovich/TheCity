@@ -1236,7 +1236,10 @@ pub fn pays_or_dodges(world: &World, who: EntityId) -> Option<bool> {
         && world.comp::<crate::components::Memory>(who).is_some_and(|m| {
             m.entries.iter().any(|e| e.kind == crate::components::MemoryKind::WasArrested && e.tick >= since)
         });
-    let dodge = !deterred && (law < c.dodge_always || (coins < c.fare && law < c.dodge_lawfulness));
+    // Pressure pass F2: a guard with the fare pays it (the badge at the
+    // gate: a commuting guard jumped it and was arrested for his own fare).
+    let badge = coins >= c.fare && crate::systems::law::is_guard(world, who);
+    let dodge = !deterred && !badge && (law < c.dodge_always || (coins < c.fare && law < c.dodge_lawfulness));
     (dodge || coins >= c.fare).then_some(dodge)
 }
 

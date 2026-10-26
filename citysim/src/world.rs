@@ -3362,6 +3362,17 @@ impl World {
         templates.into_iter().map(|t| self.corps_of_template(t).len()).max().unwrap_or(0).max(1)
     }
 
+    /// Pressure pass F2: the copies of the roster whose opening businesses
+    /// stand on Lots (`ScaleCfg::lot_copies`, at most [`World::seed_copies`]):
+    /// every pass that builds on a Lot at `World::new` deals this many.
+    pub fn lot_copies(&self) -> usize {
+        let k = self.seed_copies();
+        match self.config.scale.lot_copies as usize {
+            0 => k,
+            l => k.min(l),
+        }
+    }
+
     /// Position of a corp in `corps()`: picks its colour in the app.
     pub fn corp_index(&self, corp: EntityId) -> usize {
         self.corps().iter().position(|&c| c == corp).unwrap_or(0)

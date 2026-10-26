@@ -523,7 +523,7 @@ pub fn seed(world: &mut World) {
     if !on(world) {
         return;
     }
-    for _ in 0..world.seed_copies() {
+    for _ in 0..world.lot_copies() {
         for _ in 0..world.config.ages.schools {
             crate::systems::vice::seed_venue(world, BuildingKind::School, None);
         }

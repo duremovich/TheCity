@@ -430,7 +430,7 @@ fn spread(world: &mut World) {
 fn seed(world: &mut World) {
     world.jobs2.faith.seeded = true;
     let rows = world.config.faith.creeds.clone();
-    let copies = world.seed_copies();
+    let copies = world.lot_copies();
     for (i, r) in rows.iter().enumerate() {
         let Ok(ix) = u8::try_from(i) else { break };
         for copy in 0..copies {
