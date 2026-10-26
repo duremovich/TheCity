@@ -1360,9 +1360,7 @@ pub fn run(world: &mut World) {
         // Perf pass 7d (OPEN-211): the next order is already chosen and held for the giving in person; the
         // same rescore every tick only re-derives it (an O(N) `gather_inputs` each). Rescore at the daily
         // tick or on a shock rethink, as the other orders do.
-        let held = job_done
-            && world.config.gangs.dwell_hold
-            && world.comp::<Gang>(gang).is_some_and(|g| g.pending_order.is_some());
+        let held = job_done && world.comp::<Gang>(gang).is_some_and(|g| g.pending_order.is_some());
         if held {
             if daily || pending >= threshold {
                 faction::rethink(world, gang);

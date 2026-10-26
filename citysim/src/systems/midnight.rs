@@ -11,7 +11,7 @@
 //! `districts`) and the price move (`economy`) keep `tick_of_day() == 0`,
 //! as `lod`'s ledger roll and the 23:59 report row keep theirs; every daily
 //! pass after them in the tick order is a `Mid` here. With
-//! `stagger_midnight = 0` (absent, or `CITYSIM_STAGGER_OFF=1`) every slot is
+//! `stagger_midnight = 0` (absent) every slot is
 //! tick 0: the base.
 //!
 //! The slots follow phase 7's 100k profile of days 27-30 (ms at midnight):
