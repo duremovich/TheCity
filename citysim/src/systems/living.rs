@@ -123,6 +123,10 @@ fn early(world: &mut World) {
     // services called, the cells' day (after the visits due; nothing with
     // `[consequence]` absent).
     crate::prof::timed!("mid::consequence::daily", crate::systems::consequence::daily(world));
+    // The pressure pass phase 5b: the gangs' duty, the talk inside, the
+    // reckonings, the gangs that cannot muster (after the visits due;
+    // nothing with `[crew]` absent).
+    crate::prof::timed!("mid::crew::daily", crate::systems::crew::daily(world));
 }
 
 fn late(world: &mut World) {

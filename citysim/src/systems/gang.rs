@@ -386,6 +386,8 @@ pub fn leader_scores(world: &World, gang: EntityId) -> Vec<(EntityId, f32)> {
             if ladder {
                 score += raid_w * f32::from(world.comp::<GangMember>(m).map_or(0, |x| x.raids_won));
             }
+            // The pressure pass phase 5b: duty kept and time served (0 off).
+            score += crate::systems::crew::standing_score(world, m);
             (m, score, leader_veteran(world, m))
         })
         .collect();
@@ -481,6 +483,9 @@ pub fn on_member_released(world: &mut World, id: EntityId) {
         }
     }
     recompute_leader(world, gang);
+    // The pressure pass phase 5b: the gang meets him (a welcome, or a
+    // beating for the one who talked).
+    crate::systems::crew::on_released(world, id);
 }
 
 /// Members serving a sentence (a Vagrancy night excluded).
@@ -534,6 +539,8 @@ pub fn on_member_arrested(world: &mut World, id: EntityId) {
     log_heat(world, gang, id);
     push_shock(world, gang, Shock::MemberArrested);
     recompute_leader_after(world, gang, Some(id));
+    // The pressure pass phase 5b: the sentence's start (the talk, the welcome).
+    crate::systems::crew::on_arrested(world, id);
 }
 
 /// `World::kill_by`, before the components go: the member leaves the roster;
@@ -1350,6 +1357,7 @@ pub fn fence(world: &mut World, actor: EntityId) -> i64 {
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.treasury -= pay;
     }
+    *world.probe.gang_out.entry("fence (direct)".to_string()).or_insert(0) += pay;
     // The gang resells at market price. Real economy (plan E25b): booked as
     // a crossing from the World with the market on (`flow_fence`), so the
     // identity holds without changing gang income: the fence stays a mint,
@@ -1671,17 +1679,28 @@ fn daily_economy(world: &mut World) {
         crate::systems::stims::cook(world, gang);
         // M13 D27: the chop shop, then D44: a bike for a member.
         crate::systems::vehicles::chop_daily(world, gang);
+        let before = world.purse(Some(gang));
         crate::systems::vehicles::gang_bikes(world, gang);
+        if world.purse(Some(gang)) < before {
+            crate::systems::crew::gear_bought(world, gang);
+        }
         // M15 W31: a Purist gang buys no chrome and no decks.
         let purist = crate::systems::creeds::is_purist(world, gang);
         // M13 D44 (phase 3): then an Arms implant for the strongest member
         // (Jobs & lives phase 6: not by a cult that tolerates no chrome).
+        // The pressure pass phase 5b: gear comes from what is left over the
+        // gang's commitments, one piece a week (`crew::gear_spare`; the daily
+        // purchase at the floor was the treasuries' sink).
+        let spent = world.purse(Some(gang));
         if !purist && !crate::systems::faith::no_chrome(world, gang) {
             crate::systems::chrome::gang_arms(world, gang);
         }
         // M14 V30: then a deck for the best hacker.
-        if !purist {
+        if !purist && world.purse(Some(gang)) == spent {
             crate::systems::virt::gang_deck(world, gang);
+        }
+        if world.purse(Some(gang)) < spent {
+            crate::systems::crew::gear_bought(world, gang);
         }
         // M14 V30 (phase 3): Hideout ICE, then VirtRaid's run orders.
         crate::systems::virt::gang_daily(world, gang);

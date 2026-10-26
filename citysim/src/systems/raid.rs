@@ -339,6 +339,12 @@ pub fn resolve(world: &mut World, actor: EntityId) -> Option<Outcome> {
         // M16a (plan C23): the mission's brawl.
         Expedition::Mission(_) => return crate::systems::missions::brawl(world, actor),
     };
+    // The pressure pass phase 5b: a marcher arriving after the brawl reads
+    // its result.
+    if world.comp::<Gang>(gid).is_some_and(|g| g.raid_at.is_none()) {
+        crate::systems::crew::late_to_raid(world, actor, gid);
+        return None;
+    }
     // Shadow V4 bug 9: a crew under `raid_min_members` at the door once the
     // wait is over calls the raid off (lone raids, 1 against 6, after an
     // 8-h march).
@@ -370,6 +376,12 @@ pub fn resolve(world: &mut World, actor: EntityId) -> Option<Outcome> {
     // (the leader at the door, else the best lieutenant there; the actor
     // off), and the head's ladder counts it.
     let raiding = world.comp::<Gang>(gid).is_some_and(|g| g.raid_at.is_some());
+    // The pressure pass phase 5b: the muster kept by those at the door.
+    if raiding && crate::systems::crew::on(world) {
+        let door = gang_target(world, gid).and_then(|b| world.comp::<Building>(b)).map(|b| b.door);
+        let present = door.map_or_else(Vec::new, |d| raiders_at(world, gid, actor, d));
+        crate::systems::crew::mustered(world, gid, &present);
+    }
     let head = if raiding && crate::systems::careers::lieutenants_on(world) {
         let door = gang_target(world, gid).and_then(|b| world.comp::<Building>(b)).map(|b| b.door);
         let present = door.map_or_else(Vec::new, |d| raiders_at(world, gid, actor, d));
@@ -861,6 +873,10 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
     let (n_raiders, n_defenders) = (raiders.len(), defenders.len());
     let place = format!("the {rival_name} Hideout");
     crate::systems::gossip::post_raid(world, Some(gid), Some(rival), door);
+    // The pressure pass phase 5b: who stood at the door, and what the Hideout held.
+    let (raiders0, defenders0) = (raiders.clone(), defenders.clone());
+    let chest0 = world.comp::<Gang>(rival).map_or(0, |g| g.treasury);
+    let food0 = world.comp::<Building>(rival_hideout).map_or(0, |b| b.stock_food);
     let tally = fight_out(world, &mut raiders, &mut defenders, door, &place, 1.0, None);
     let (raider_losses, deaths) = (tally.raider_losses, tally.deaths);
     let outcome = if n_defenders == 0 || (defenders.is_empty() && raider_losses == 0) {
@@ -871,6 +887,23 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
         Outcome::Lost
     };
     settle(world, gid, rival, outcome);
+    let coins = chest0 - world.comp::<Gang>(rival).map_or(0, |g| g.treasury);
+    let food = food0.saturating_sub(world.comp::<Building>(rival_hideout).map_or(0, |b| b.stock_food));
+    crate::systems::crew::raid_result(
+        world,
+        crate::systems::crew::RaidLeft {
+            gang: gid,
+            rival: Some(rival),
+            place: &place,
+            raiders: &raiders0,
+            defenders: &defenders0,
+            raiders_standing: &raiders,
+            defenders_standing: &defenders,
+            won: outcome != Outcome::Lost,
+            coins: coins.max(0),
+            food,
+        },
+    );
     world.push_event(
         EventKind::Raid,
         &[gid, rival, actor],
@@ -1095,6 +1128,7 @@ pub fn corp_brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
     let brk = world.config.gangs.corp_raid_break;
     let max_losses = if brk > 0.0 { ((n_raiders as f32 * brk).ceil() as usize).max(1) } else { usize::MAX };
     crate::systems::gossip::post_raid(world, Some(gid), corp.or(Some(target)), door);
+    let (raiders0, defenders0) = (raiders.clone(), defenders.clone());
     let tally = fight_out_until(world, &mut raiders, &mut defenders, door, &place, 1.0, None, max_losses);
     let outcome = if defenders.is_empty() { Outcome::Won } else { Outcome::Lost };
     let mut took = (0i64, 0u32);
@@ -1132,6 +1166,23 @@ pub fn corp_brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
         g.raid_target = None;
         g.retaliate_until = None;
     }
+    faction::rethink(world, gid);
+    // The pressure pass phase 5b: the result every raider and guard reads.
+    crate::systems::crew::raid_result(
+        world,
+        crate::systems::crew::RaidLeft {
+            gang: gid,
+            rival: None,
+            place: &place,
+            raiders: &raiders0,
+            defenders: &defenders0,
+            raiders_standing: &raiders,
+            defenders_standing: &defenders,
+            won: outcome == Outcome::Won,
+            coins: took.0,
+            food: took.1,
+        },
+    );
     world.push_event(
         EventKind::Raid,
         &[gid, target, actor],
@@ -1140,7 +1191,6 @@ pub fn corp_brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
             tally.deaths, took.0, took.1
         ),
     );
-    faction::rethink(world, gid);
     Some(outcome)
 }
 
@@ -1178,6 +1228,7 @@ fn settle(world: &mut World, gid: EntityId, rival: EntityId, outcome: Outcome) {
             if let Some(g) = world.comp_mut::<Gang>(rival) {
                 g.treasury -= prize;
             }
+            *world.probe.gang_out.entry("raid prize (direct)".to_string()).or_insert(0) += prize;
             world.gang_credit(gid, prize);
             // M13 D38: the loser Hideout's Stims and Parts.
             if let Some(h) = world.hideout_of(rival) {
@@ -1207,6 +1258,7 @@ fn settle(world: &mut World, gid: EntityId, rival: EntityId, outcome: Outcome) {
                 // grievance from retaliate_until once it can muster again.
                 g.retaliate_until = Some(now + (cfg.sacked_days + cfg.retaliate_days) * TICKS_PER_DAY);
             }
+            *world.probe.gang_out.entry("sack loot (direct)".to_string()).or_insert(0) += loot;
             world.gang_credit(gid, loot);
             // M13 D38: the sacked Hideout's Stims and Parts.
             crate::systems::stims::loot_goods(world, rival_hideout, gid);

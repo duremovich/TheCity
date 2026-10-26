@@ -159,8 +159,11 @@ pub struct ShadowArgs {
     pub map: Option<PathBuf>,
 }
 
-const ARCHETYPES: [&str; 52] = [
+const ARCHETYPES: [&str; 53] = [
     "gang_member",
+    // The pressure pass phase 5b: a member of a gang whose standing order
+    // marches (a raid, a retaliation, a breakout) at the start day.
+    "raider",
     "gang_leader",
     "ripperdoc",
     "homeless",
@@ -271,6 +274,14 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
             .collect(),
         "gang_leader" => adults()
             .filter(|&a| world.gang_of(a).and_then(|g| world.comp::<Gang>(g)).is_some_and(|g| g.leader == Some(a)))
+            .collect(),
+        "raider" => adults()
+            .filter(|&a| {
+                world.gang_of(a).and_then(|g| world.comp::<Gang>(g)).is_some_and(|g| {
+                    g.leader != Some(a)
+                        && (g.order.is_raid() || g.pending_order.as_ref().is_some_and(|p| p.order.is_raid()))
+                })
+            })
             .collect(),
         "ripperdoc" => {
             let owners: BTreeSet<EntityId> = world

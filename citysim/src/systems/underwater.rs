@@ -734,6 +734,9 @@ fn borrow(
     }
     world.push_event(EventKind::Loan, &actors, text);
     ownership::jobs2_row(world).uw_loans += 1;
+    if kind == Lender::Gang {
+        ownership::jobs2_row(world).crew_gang_loans += 1;
+    }
 }
 
 fn loans_daily(world: &mut World, c: &UnderwaterCfg) {

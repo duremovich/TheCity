@@ -362,7 +362,11 @@ use crate::world::World;
 /// `EventKind::{WitnessReacted, Blackmail, HitEscalated, Service, Cells}`,
 /// `[consequence]` (written only when set) and the `Jobs2Cols` phase 5a
 /// columns (serde defaults).
-pub const SAVE_VERSION: u8 = 70;
+/// 71 (the pressure pass phase 5b, the gang half): `World.crew` (written
+/// while it holds anything), `VisitWhy::{Crew, Reckoning}`,
+/// `EventKind::Crew`, `[crew]` (written only when set) and the `Jobs2Cols`
+/// `crew_*` columns (serde defaults).
+pub const SAVE_VERSION: u8 = 71;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

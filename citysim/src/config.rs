@@ -363,6 +363,13 @@ pub struct Config {
     /// `None` (not written into a save) with the key absent: none of it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub consequence: Option<ConsequenceCfg>,
+    /// The pressure pass phase 5b (docs/PRESSURE_PASS.md § Phase 5, the gang
+    /// half): raids write a result, gang duty against the day job, Court's
+    /// quorum and the gang that folds, release and return, the crew's rest
+    /// day (`systems/crew.rs`). `None` (not written into a save) with the key
+    /// absent: the gangs as phase 3 left them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crew: Option<CrewCfg>,
     /// The island pass phase 1 (docs/ISLAND_PASS.md I1; OPEN-163 part):
     /// travel time in the job and bed picks (`systems/distance.rs`). `None`
     /// (not written into a save) with the key absent: the picks
@@ -1520,6 +1527,142 @@ impl Default for ConsequenceCfg {
             svc_convert_p: 0.25,
             svc_walkout_p: 0.03,
             svc_heretic_w: 0.8,
+        }
+    }
+}
+
+/// The pressure pass phase 5b `[crew]` (docs/PRESSURE_PASS.md § Phase 5;
+/// `systems/crew.rs`): the gang's side of consequence. Every value a
+/// placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CrewCfg {
+    // --- raids write a result
+    /// A defender beaten at his door holds this grudge on the raiding gang;
+    /// a raider beaten holds it on the defending gang.
+    pub raid_grudge: f32,
+    /// The losing side's leader's grudge on the other gang.
+    pub raid_leader_grudge: f32,
+    /// A repelled raid is answered: the defenders' gang may retaliate for
+    /// this many days (`Gang.retaliate_until`, the order brain's input).
+    pub repelled_retaliate_days: u64,
+    // --- duty
+    /// A gang posts this share of its free members to the order's duty a
+    /// day (a watch on held ground, a guard at the Hideout), at least one,
+    /// at most `duty_max`. A raid order calls every member to the muster.
+    pub duty_share: f32,
+    pub duty_max: u8,
+    /// The duty's hour: a watch on held ground, a guard at the Hideout.
+    pub watch_hour: u8,
+    pub guard_hour: u8,
+    /// A member's duty place past this travel (ticks, from his Home) is not
+    /// posted to him (the walk would eat the duty).
+    pub duty_reach_ticks: u64,
+    /// Coins a kept duty pays from the treasury above `pay_reserve`.
+    pub duty_pay: i64,
+    pub pay_reserve: i64,
+    /// The duty's Visit urgency (the enforcer's is `[protection]
+    /// punish_urgency`).
+    pub duty_urgency: f32,
+    /// A member whose shift falls on the duty chooses: the gang on
+    /// `choose_base + choose_loyalty x (loyalty - 0.5) + choose_misery x
+    /// misery + choose_rank` (a lieutenant) `- choose_unpaid` (the gang
+    /// cannot pay), clamped to 0.05..0.95, else the shift. The gang's
+    /// choice skips the shift (`misery::skip_for`: the absence counts toward
+    /// the firing); the shift's is a missed duty.
+    pub choose_base: f32,
+    pub choose_loyalty: f32,
+    pub choose_misery: f32,
+    pub choose_rank: f32,
+    pub choose_unpaid: f32,
+    /// Standing (the ladder: `gang::leader_scores` adds `standing_w x
+    /// standing`): a kept duty adds `kept_standing`, a missed one takes
+    /// `miss_standing`, a sentence served without talking adds
+    /// `served_standing`.
+    pub standing_w: f32,
+    pub kept_standing: f32,
+    pub miss_standing: f32,
+    pub served_standing: f32,
+    /// Missed duties (the muster, a watch, a guard, a court summons) in
+    /// `miss_window_days` that cost the colours: a beating on the way out.
+    pub colours_misses: u32,
+    pub miss_window_days: u32,
+    /// The beating kills on `[crime] fight_death_p x` this.
+    pub beat_kill_mult: f32,
+    // --- court
+    /// Members summoned to court by name a day (the leader holds court in
+    /// person, `[leaders]`); a court with fewer than `court_quorum` of them
+    /// there fails, with the reason.
+    pub court_summons: u8,
+    pub court_quorum: u8,
+    /// `fold_fails` failed courts in `fold_window_days`: the gang cannot
+    /// muster. It takes a rival's offer (absorbed: the members, the
+    /// treasury, `absorb_offer` coins to the leader from the buyer) on
+    /// `w_absorb x (1.5 - pride)`, or folds (the members walk, the treasury
+    /// shared out) on `w_fold x (0.5 + pride)`. A creed gang folds.
+    pub fold_fails: u32,
+    pub fold_window_days: u32,
+    pub absorb_offer: i64,
+    pub w_absorb: f32,
+    pub w_fold: f32,
+    // --- release and return
+    /// A jailed member (a sentence of `talk_min_days` or more) talks once a
+    /// sentence on `talk_p x (1 - loyalty)`: a report naming a gang-mate.
+    pub talk_p: f32,
+    pub talk_min_days: u32,
+    /// The bail the gang paid is the member's debt, taken from his duty pay
+    /// until paid.
+    pub bail_debt: bool,
+    /// A released member walks to the Hideout this many hours after (a
+    /// Visit); a release past 21:00 is met at once.
+    pub welcome_after_hours: u8,
+    // --- rest days
+    /// A free member with no shift today goes to the crew (the Hideout under
+    /// a fighting order, the gang's own venue or the Hideout under Expand,
+    /// nobody under LieLow) on `crew_p`, at `crew_hour`.
+    pub crew_p: f32,
+    pub crew_hour: u8,
+}
+
+impl Default for CrewCfg {
+    fn default() -> Self {
+        CrewCfg {
+            raid_grudge: 0.3,
+            raid_leader_grudge: 0.5,
+            repelled_retaliate_days: 3,
+            duty_share: 0.3,
+            duty_max: 4,
+            watch_hour: 18,
+            guard_hour: 21,
+            duty_reach_ticks: 180,
+            duty_pay: 3,
+            pay_reserve: 30,
+            duty_urgency: 0.85,
+            choose_base: 0.3,
+            choose_loyalty: 0.6,
+            choose_misery: 0.5,
+            choose_rank: 0.15,
+            choose_unpaid: 0.15,
+            standing_w: 0.2,
+            kept_standing: 0.1,
+            miss_standing: 0.2,
+            served_standing: 1.0,
+            colours_misses: 3,
+            miss_window_days: 10,
+            beat_kill_mult: 0.2,
+            court_summons: 3,
+            court_quorum: 1,
+            fold_fails: 3,
+            fold_window_days: 7,
+            absorb_offer: 20,
+            w_absorb: 1.0,
+            w_fold: 0.6,
+            talk_p: 0.3,
+            talk_min_days: 3,
+            bail_debt: true,
+            welcome_after_hours: 1,
+            crew_p: 0.6,
+            crew_hour: 19,
         }
     }
 }

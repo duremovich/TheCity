@@ -1773,6 +1773,33 @@ fn run(args: RunArgs) -> Result<(), String> {
         }
     }
     citysim::prof::dump();
+    // The pressure pass phase 5b: where the gangs' coins went (diagnostic).
+    if args.report {
+        for (k, v) in &world.probe.gang_in {
+            let _ = writeln!(events_out, "#gang_flow	in	{k}	{v}");
+        }
+        for (k, v) in &world.probe.gang_out {
+            let _ = writeln!(events_out, "#gang_flow	out	{k}	{v}");
+        }
+        for g in world.gangs() {
+            if let Some(x) = world.comp::<citysim::components::Gang>(g) {
+                let _ = writeln!(
+                    events_out,
+                    "#gang_book	{}	{} members	{}c	{:?}	in {}",
+                    x.name,
+                    x.members.len(),
+                    x.treasury,
+                    x.order,
+                    world.probe.gang_in_by.get(&g).copied().unwrap_or(0)
+                );
+                for ((_, k), v) in world.probe.gang_out_by.range((g, String::new())..).take_while(|((x, _), _)| *x == g)
+                {
+                    let _ = writeln!(events_out, "#gang_book	{}	out	{k}	{v}", x.name);
+                }
+            }
+        }
+        let _ = events_out.flush();
+    }
     if let Some(p) = &args.legs {
         std::fs::write(p, citysim::exec::leglog::tsv(&world)).map_err(|e| format!("--legs {}: {e}", p.display()))?;
     }

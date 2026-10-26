@@ -246,6 +246,16 @@ fn skip(world: &mut World, c: &MiseryCfg, id: EntityId, m: f32) {
     skip_as(world, c, id, m, String::new());
 }
 
+/// The pressure pass phase 5b (`crew::post`): a shift skipped for the
+/// gang's duty, the same one-person strike, counted toward the firing.
+/// `false` with `[misery]` off (the caller strikes the shift itself).
+pub fn skip_for(world: &mut World, id: EntityId, moment: &str) -> bool {
+    let Some(c) = cfg(world).cloned() else { return false };
+    let m = misery(world, id);
+    skip_as(world, &c, id, m, moment.to_string());
+    true
+}
+
 /// [`skip`] with the moment's words (F3: what the body does instead).
 fn skip_as(world: &mut World, c: &MiseryCfg, id: EntityId, m: f32, moment: String) {
     let Some(job) = world.comp::<Job>(id).cloned() else { return };
