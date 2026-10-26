@@ -255,7 +255,6 @@ sacked_days = 3
 shock_severity_rethink = 0.5
 # Perf pass 7d (OPEN-211): a gang left on Order::Job after its job settled, whose next order is already held
 # for the giving in person, rescores at the daily tick or on a shock rethink, not every tick (1,440 O(N) scans a day).
-dwell_hold = true
 # M9: this many members (at most half the gang, newest first, rotating daily) sleep at the Hideout
 # each night, so a raid meets defenders. In M8 every raid found the Hideout empty and sacked it.
 # 4 (was 2): after phases 2-4 changed who is jailed or mustering, 2 left every seed-42 raid a sack (0 of 5 met a defender); 4 meets 3 of 5.
@@ -1667,7 +1666,7 @@ exec_home_spare = 1.5
 # The perf pass phase 10 (docs/ISLAND_PASS.md I9, a district label is not space; placeholder): an exec's Home stands
 # within exec_home_reach tiles (Manhattan, door to door) of his corp's Hq. The move above takes the free Home of
 # exec_home_tier nearest the Hq (not the emptiest), and an exec housed at the tier but further than this moves to a
-# nearer one within it when one has room. 0: off (the base pick); CITYSIM_EXEC_HOME_OFF=1 while the pass is in flight.
+# nearer one within it when one has room. 0: off (the base pick).
 exec_home_reach = 40
 
 # ---------------------------------------------------------------------------
@@ -4389,8 +4388,7 @@ pass_slack_tiles = 8               # a stop pair is no route when the alight sto
 # into a save; `run --threads N` overrides it. 1 until the perf pass's gate sets it.
 # Phase 7b (R8; systems/midnight.rs) adds the one key here that is the world's: the midnight stagger. The daily passes
 # after the price move run whole, in their old order, in 12 slots over the night's first minutes instead of all on
-# tick 0 (100k day 28: 2.6 s in one tick, its largest pass 0.29 s). Written into a save when set; absent (or
-# `CITYSIM_STAGGER_OFF=1` while the pass is in flight), 0.
+# tick 0 (100k day 28: 2.6 s in one tick, its largest pass 0.29 s). Written into a save when set; absent, 0.
 [perf]
 threads = 1                        # threads scoring the think slice; 1: on the calling thread
 stagger_midnight = 1               # ticks between two midnight slots (slot k at 00:0k); 0: every daily pass on tick 0,
@@ -4401,7 +4399,7 @@ stagger_midnight = 1               # ticks between two midnight slots (slot k at
 # sentence, unpaid a week); a Rest begun with the gate already open runs (the think that chose it saw the gate, and
 # the 30-tick think still lets Work win); `can_work_now` cuts a Rest only on a shift that is due, and an idle Rest
 # begun on shift at the post is not cut by it. Shadow V8: Idle filled with 1-minute Rests (a sick farmer 16 in 4 h,
-# a super on his rest day all day). Absent (`CITYSIM_REST_OFF=1` while the perf pass is in flight), the base rule.
+# a super on his rest day all day). Absent, the base rule.
 # No keys: the fix has no number.
 [rest]
 

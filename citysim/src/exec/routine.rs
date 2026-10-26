@@ -123,7 +123,7 @@ pub fn work_pending(world: &World, id: EntityId, job: &Job) -> bool {
 }
 
 /// The perf pass phase 1 (OPEN-195): the Rest loop's fix is on (`[rest]`;
-/// absent, or `CITYSIM_REST_OFF=1`, the base rule).
+/// absent, the base rule).
 pub fn rest_fix(world: &World) -> bool {
     world.config.rest.is_some()
 }

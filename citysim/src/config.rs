@@ -384,7 +384,7 @@ pub struct Config {
     pub routes: Option<RoutesCfg>,
     /// The perf pass phase 1 (docs/PERF_PASS.md; OPEN-195): the Rest loop's
     /// fix (`exec::routine::rest_fix`). `None` (not written into a save)
-    /// with the key absent or `CITYSIM_REST_OFF=1`: the base rule.
+    /// with the key absent: the base rule.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rest: Option<RestCfg>,
     /// The perf pass phase 8 (docs/PERF_PASS.md; OPEN-184): `[perf]`, how
@@ -409,8 +409,7 @@ pub struct PerfCfg {
     #[serde(default = "PerfCfg::one_thread", skip_serializing)]
     pub threads: usize,
     /// The perf pass phase 7b (R8): ticks between two slots of the
-    /// staggered midnight (`systems::midnight`); 0 (absent, or
-    /// `CITYSIM_STAGGER_OFF=1` while the pass is in flight): every daily
+    /// staggered midnight (`systems::midnight`); 0 (absent): every daily
     /// pass on tick 0, the base.
     #[serde(default)]
     pub stagger_midnight: u16,
@@ -4342,9 +4341,7 @@ pub struct GangsCfg {
     pub shock_severity_rethink: f32,
     /// The perf pass phase 7d (OPEN-211): a gang still on `Order::Job` after its job settled, with the next
     /// order already held for the giving in person (`Gang.pending_order`), does not rescore every tick; it
-    /// rescores at the daily tick or on a shock rethink. `CITYSIM_DWELL_OFF=1` turns it off (doctrine 6).
-    #[serde(default = "GangsCfg::default_dwell_hold", skip_serializing)]
-    pub dwell_hold: bool,
+    /// rescores at the daily tick or on a shock rethink.
     /// Members who sleep at the Hideout each night (at most half the gang), so a raid meets someone.
     #[serde(default = "GangsCfg::default_night_watch")]
     pub night_watch: usize,
@@ -4445,9 +4442,6 @@ pub struct GangsCfg {
 }
 
 impl GangsCfg {
-    fn default_dwell_hold() -> bool {
-        true
-    }
     fn default_night_watch() -> usize {
         4
     }
@@ -8306,7 +8300,7 @@ pub struct LifeCfg {
     /// housed under `exec_home_tier` into the free Home of that tier nearest
     /// the Hq (not the emptiest), and one housed at the tier but further
     /// than this into a nearer one within it when one has room. 0 is off (the
-    /// base pick) and not written; `CITYSIM_EXEC_HOME_OFF=1` while in flight.
+    /// base pick) and not written.
     #[serde(default, skip_serializing_if = "is_zero_u16_cfg")]
     pub exec_home_reach: u16,
 }
@@ -9003,26 +8997,9 @@ impl Config {
         if cfg.shift.is_none() {
             cfg.drop_haul_counter();
         }
-        // The perf pass phase 1 (OPEN-195): the Rest fix's switch in flight
-        // (doctrine 6), retired at the pass close.
-        if std::env::var("CITYSIM_REST_OFF").is_ok_and(|v| v == "1") {
-            cfg.rest = None;
-        }
-        // The perf pass phase 7d (OPEN-211): the gang dwell rescore's switch in flight.
-        if std::env::var("CITYSIM_DWELL_OFF").is_ok_and(|v| v == "1") {
-            cfg.gangs.dwell_hold = false;
-        }
-        // The perf pass phase 10 (I9): execs' homes beside their Hq, the
-        // switch in flight (doctrine 6), retired at the pass close.
-        if std::env::var("CITYSIM_EXEC_HOME_OFF").is_ok_and(|v| v == "1") {
-            cfg.life.exec_home_reach = 0;
-        }
-        // The perf pass phase 7b (R8): the midnight stagger's switch in
-        // flight (doctrine 6), retired at the pass close. The last slot
-        // stays inside the night's first hour.
-        if std::env::var("CITYSIM_STAGGER_OFF").is_ok_and(|v| v == "1") {
-            cfg.perf.stagger_midnight = 0;
-        }
+        // The perf pass's four in-flight switches (`CITYSIM_REST_OFF`, `_DWELL_OFF`, `_EXEC_HOME_OFF`,
+        // `_STAGGER_OFF`) retired at its close; the config paths stay. The last midnight slot stays inside
+        // the night's first hour.
         assert!(
             u64::from(cfg.perf.stagger_midnight) * u64::from(crate::systems::midnight::LAST_SLOT)
                 < crate::time::TICKS_PER_HOUR,
