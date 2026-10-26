@@ -144,7 +144,9 @@ fn run_pooled(world: &mut World, bodies: Vec<EntityId>, threads: usize) {
         });
         let Some(scheduled) = turn(world, id, tick, interval) else {
             if at.is_some() {
-                crate::prof::timed!("think::dropped", ());
+                // A score taken ahead for a body an earlier apply took the
+                // turn from (counted under `prof`).
+                let _counted = crate::prof::scope!("think::dropped");
             }
             continue;
         };
