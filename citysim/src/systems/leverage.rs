@@ -456,7 +456,7 @@ pub fn run(world: &mut World) {
         return;
     }
     let tod = u64::from(crate::time::tick_of_day(world.tick));
-    if tod == 0 {
+    if crate::systems::midnight::due(world, crate::systems::midnight::Mid::Tail) {
         daily(world);
     }
     if tod == TICKS_PER_DAY - 1 {

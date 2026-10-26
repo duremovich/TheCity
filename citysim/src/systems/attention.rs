@@ -166,11 +166,22 @@ pub fn faction_of_building(world: &World, b: EntityId) -> Option<Option<EntityId
 /// Hourly: the pools at midnight (or the first pass), the live threats
 /// held, the alertness recomputed, the day's columns.
 pub fn run(world: &mut World) {
-    if !on(world) || !world.tick.is_multiple_of(TICKS_PER_HOUR) {
+    // The perf pass phase 7b: the midnight pools at their slot; off the
+    // hour (the midnight staggered) the alertness follows them at once.
+    let hour = world.tick.is_multiple_of(TICKS_PER_HOUR);
+    let midnight = crate::systems::midnight::due(world, crate::systems::midnight::Mid::Tail);
+    if !on(world) || !(hour || midnight) {
         return;
     }
-    if world.attention.is_empty() || crate::time::tick_of_day(world.tick) == 0 {
+    if world.attention.is_empty() || midnight {
         pools(world);
+    }
+    if !hour {
+        let keys: Vec<EntityId> = world.attention.keys().copied().collect();
+        for k in keys {
+            recompute(world, k);
+        }
+        return;
     }
     let until = world.tick + TICKS_PER_HOUR + linger(world);
     for (f, kind, src) in live_threats(world) {

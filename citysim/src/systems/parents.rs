@@ -2610,7 +2610,7 @@ fn rival_of(world: &World, id: OutsideId) -> Option<(OutsideId, f32)> {
 /// else, when the parent is lawless (< 0.4), a Beat on the rival branch's
 /// exec. `CampaignPosted` on an action.
 pub fn campaign_step(world: &mut World, id: OutsideId) {
-    let now = world.tick;
+    let now = crate::systems::midnight::stamp(world);
     let Some(p) = parent(world, id) else { return };
     if now.saturating_sub(p.order_since) % (7 * TICKS_PER_DAY) >= TICKS_PER_DAY {
         return;

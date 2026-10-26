@@ -71,6 +71,32 @@ read it before moving one.
 Mechanisms with no system of their own hang off one of these `run`s: find the caller with `grep -rn
 "<module>::daily\|<module>::hourly"`.
 
+**The midnight stagger** (the perf pass phase 7b, `systems/midnight.rs`, `[perf] stagger_midnight`, 1 shipped; 0 or
+`CITYSIM_STAGGER_OFF=1`: every daily pass on tick 0). The daily passes after the price move do not all run on tick 0:
+each runs whole, in the order of the table above, at tick of day `slot × stagger_midnight` (`midnight::due(world,
+Mid::X)` replaces its `tick_of_day() == 0`), a pure function of the tick, so a save at any tick resumes the same and
+nothing is saved for it. Day 0's midnight stays whole on tick 0 (the seeded city's first, read by every think from tick
+1). Hourly passes stay on the hour; a midnight piece inside an hourly `run` runs at its slot.
+
+| slot (00:0k at 1) | passes |
+|---|---|
+| 0 | `memory`'s decay, `ownership`, `assets`, `tech`, `classes`, `districts`, `economy` (the price move); `lod`'s ledger roll; every hourly pass at 00:00 |
+| 1 | `bind` (`fviolence::daily`, the binds); `word` to the kin's hearing (`Mid::Bind`, `WordEarly`) |
+| 2 | `word` from the reputation rebuild (`WordLate`) |
+| 3 | `law`'s day and `law_brain`'s daily rescore (`Law`) |
+| 4 | `social::daily` (`Social`) |
+| 5 | the gangs' day in `gang::run` (`Gang`) |
+| 6 | `corp_brain`'s day (`Corp`) |
+| 7 | `living`'s day to `service::tower_daily` (`LivingEarly`; `industry::daily`, `streetwork::daily` inside) |
+| 8 | `living`'s day from `faith::daily` to the camps (`LivingLate`) |
+| 9 | `outside`'s parents and missions abroad, `contracts`' day, `leverage`, `captives`, `wounded`'s days, `governance`'s boards, `attention`'s pools (`Tail`) |
+| 10-12 | `demography`: to the job moves; the job search to the Spire homes; the relocation to the immigration (`DemoEarly`, `DemoJobs`, `DemoHomes`) |
+
+A pass that read "the tick before now" as yesterday reads `midnight::midnight(world) - 1`; a start or deadline a
+staggered pass stamps for a span of whole days read on the hour or by another slot is stamped from
+`midnight::stamp(world)` (a construction site, the daily run orders), so it ends where it ended before. A test or tool
+that drives a day boundary runs `midnight::window(world)` ticks past it.
+
 Rule (enforced by `citysim/tests/no_per_tick_scan.rs`): per-tick code never scans every citizen. It reads the tier and
 role indices (`World::bodies`, `tier`, `guards`, `workers`). A daily or hourly scan carries a `// scan-ok: <why>`
 comment on or above the line.
@@ -326,7 +352,7 @@ Outside `systems/`: `needs.rs`, `mood.rs`, `personality.rs` (agent internals), `
 | `[motion.vans]` (`capacity`; the island pass phase 7, I3, OPEN-166; absent: the timed escort and the bodiless 04:00 transfer) | `exec/mod.rs` (`escort_leg`: past `[legs] escort_walk_tiles` the van (`RideKind::Van`, the guard at the wheel, the cuffed suspect aboard, at the kerb for `van_call_ticks`), a timed walk led on foot (`RideKind::Foot`); `escort_to_timed` on a demotion), `systems/motion.rs` (`board_escort`, `spawn_van`, `finish`; the cuffed-rider rule `prisoner_aboard`; `alight` takes the guard's prisoner off with him), `systems/stations.rs` (`van` sends `VanRun`s in `World.van_runs`, `capacity` a van, Statistical prisoners bodiless on the run; `van_tick` books them in at the arrival; `on_promoted`), `vehicles.rs` (`car_ticks`), `exec/leglog.rs` (measurement only: the `escort`, `van`, `arrest`, `transfer` `#ride` rows) | | | | |
 | `[island_trades]` (`parcel_cap_ticks`, `parcel_stops_max`, `haul_travel`, `site_day`, `corner_per_yard`, `corner_stat_ticks`, `cab_quota`, `corner_arms`; the island pass phase 8, I4, OPEN-168; absent) | `streetwork.rs` (`parcel_reach`: a corp's parcels through the Yard with its staffed buildings in travel reach; `yard_corners`: the corner at every open Yard; `corner_by_travel`: the off-screen queue by travel; `cab_body_set`), `shift.rs` (`far_site`, `on_site`: a Builder's site day; the haul trip's travel estimate), `exec/actions.rs` (`can_work_now` at the site), `lod.rs` (`BudgetSets.cab`, class 2), `stims.rs` (`deal_site`: a gang with an armoury surplus deals from a Bar, `weapons::bar_arms_dealer`) | | | | |
 | `[beds]` (`company_post_ticks`, `hideout_walk_ticks`, `hideout_work_ticks`, `site_from_home`; the island fix round F2, I6, I8, OPEN-189, OPEN-191, OPEN-193; absent) | `systems/beds.rs` (`company_take`: a company bed to its workplace's own staff within the cap, read by `company::fill` and `commute::company_for`; `company_keep`: `company::on_staff`, the eviction and the rent; `trade_ok`: `life::relocate`'s Home trade; `kin_ok`: `ages::kin_home`; `hideout_ok`: `life::hideout_bed` and `gang::holes_up_at`, the Hideout as tonight's bed only within the walk and tomorrow's commute), `shift.rs` (`haul_plan`: a far-site day begun away from the Yard walks straight to the site) | | | | |
-| `[perf]` (`threads`; the perf pass phase 8, OPEN-184; a host setting, never saved; `run --threads N`) | `systems/think.rs` (`run`: 1, the serial loop; above 1, the slice scored ahead on a pool of that many and applied in id order, section 5) | | | | |
+| `[perf]` (`threads`; the perf pass phase 8, OPEN-184; a host setting, never saved; `run --threads N`. `stagger_midnight`, phase 7b: the world's, saved when set) | `systems/think.rs` (`run`: 1, the serial loop; above 1, the slice scored ahead on a pool of that many and applied in id order, section 5); `systems/midnight.rs` (the daily passes' slots, section 2) | | | | |
 | `[rest]` (no keys; the perf pass phase 1, OPEN-195; absent or `CITYSIM_REST_OFF=1`: the base rule) | `exec/routine.rs` (`work_refused`: the Work goal's refusals, read by its `in shift` gate and the departure gate; `leave_gate_at`: `must_leave_for_work` false while Work refuses, and the gate at a Rest's start), `exec/actions.rs` (`finishes_early` Rest: `rest_cut_by_work`, a gate already open at the Rest's start does not cut it; `rest_cut_on_shift`, `can_work_now` cuts only on a due shift, and not an idle Rest begun on it at the post) | | | | |
 | `[motion.trains]` (`capacity`; the island pass phase 6, I3, OPEN-165; absent: the El's timed ride, the body on the board stop) | `systems/transit.rs` § Trains (each line's `2m` trains, persistent `Motion`s `RideKind::Train`/`Route::Line` spawned once by `ensure_trains`, `TransitState.trains`; `train_at` the timetable's pure place; `trains_tick` before `motion::advance`: `boarding` (tick, rider) boards `train_for` the departure, a full one waits a headway; `legs_of`/`schedule` the ride's legs and exact times, `transfer`, `evacuate` on a cut; the table's transfer edge + headway/2), `systems/motion.rs` (`add_train`, `board_train`, `advance_train`; `alight` holds a rider between stops to the next one, `TransitState.held`, `alight_now` for a death, an emigrant, a demotion off screen), `exec/mod.rs` (a held rider does not step), `exec/leglog.rs` (measurement only: `#el`, `#elfit`, `#trains`, `#commute` rows; `el_walk` splits the walk to the El from the ride) | | | | |
 | `[mood.housing]` (`tier`, `crowd_w`, `crowd_max`, `inside_factor`, `below_factor`, `company`; the island pass phase 3c, OPEN-177; absent) | `mood.rs` (`housing_bias`: the Home's tier, residents a floor over a plain Block's, the company floor's factor and the company bed, a flat bias on the hourly target like `litter_bias`; every citizen, Full and Statistical) | | | | |

@@ -251,7 +251,7 @@ pub fn daily(world: &mut World) {
     if left > 0 {
         ownership::jobs2_row(world).parcels_returned += left;
     }
-    if !on(world) || world.tick_of_day() != 0 {
+    if !on(world) || !crate::systems::midnight::due(world, crate::systems::midnight::Mid::LivingEarly) {
         return;
     }
     idle_days(world);

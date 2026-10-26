@@ -500,7 +500,7 @@ pub fn gossip(world: &mut World, from: EntityId, _to: EntityId) {
 /// co-jail drift. Daily: decay, pruning, debt ageing.
 pub fn run(world: &mut World) {
     colocation(world);
-    if world.tick_of_day() == 0 {
+    if crate::systems::midnight::due(world, crate::systems::midnight::Mid::Social) {
         crate::prof::timed!("social::daily", daily(world));
     }
 }

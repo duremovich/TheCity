@@ -1603,7 +1603,9 @@ fn run(args: RunArgs) -> Result<(), String> {
         Some(path) => {
             let mut w = save::load_from_file(path)?;
             w.config.lod.force = config.lod.force;
-            w.config.perf = config.perf.clone();
+            // The host's threads; the midnight stagger (phase 7b) is the
+            // save's own.
+            w.config.perf.threads = config.perf.threads;
             w.config.assets_dir = config.assets_dir;
             w
         }

@@ -1419,7 +1419,7 @@ fn research(world: &mut World, corp: EntityId) {
 /// every corp rescores with hysteresis, then each acts, then `corps::daily`
 /// (contracts, shares, bankruptcy, monopolies).
 pub fn run(world: &mut World) {
-    if world.tick_of_day() == 0 {
+    if crate::systems::midnight::due(world, crate::systems::midnight::Mid::Corp) {
         world.corp_rethink = false;
         let corps = world.corps();
         if corps.is_empty() {

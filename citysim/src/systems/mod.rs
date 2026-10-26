@@ -75,6 +75,7 @@ pub mod litter;
 pub mod living;
 pub mod lod;
 pub mod memory;
+pub mod midnight;
 pub mod missions;
 pub mod motion;
 pub mod moves;

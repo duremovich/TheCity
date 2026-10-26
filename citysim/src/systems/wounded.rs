@@ -195,7 +195,7 @@ pub fn run(world: &mut World) {
         tick_down(world);
     }
     let tod = u64::from(crate::time::tick_of_day(world.tick));
-    if tod == 0 {
+    if crate::systems::midnight::due(world, crate::systems::midnight::Mid::Tail) {
         trauma_daily(world);
         care_daily(world);
     }

@@ -348,7 +348,7 @@ pub fn log_report(world: &mut World, suspect: EntityId) {
 pub fn run(world: &mut World) {
     let Some(l) = world.law() else { return };
     let pending: f32 = l.shocks.iter().map(|s| s.severity()).sum();
-    if world.tick_of_day() == 0 {
+    if crate::systems::midnight::due(world, crate::systems::midnight::Mid::Law) {
         let h = world.config.law.hysteresis;
         rescore(world, h, "daily");
         // M12 D6/D10/D12: after the posture, deal the guards, then the stances.

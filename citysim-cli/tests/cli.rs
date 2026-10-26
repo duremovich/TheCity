@@ -230,6 +230,27 @@ fn test_cli_lever_and_save_at() {
     assert!(stderr3.contains("skipped"), "stderr: {stderr3}");
     let stdout3 = String::from_utf8(out3.stdout).expect("utf8");
     assert_eq!(strip(stdout3.lines().nth(1).expect("row")), strip(row));
+    // The perf pass phase 7b: a save inside day 1's staggered midnight (00:05,
+    // between two slots; the save carries the stagger) resumes as the
+    // unbroken run: day 1's row is identical.
+    let out4 = cli()
+        .args(["run", "--days", "2", "--seed", "3", "--report", "--save-at", "1445"])
+        .arg("--saves-dir")
+        .arg(&dir)
+        .output()
+        .expect("run cli");
+    assert!(out4.status.success(), "stderr: {}", String::from_utf8_lossy(&out4.stderr));
+    let saved = std::fs::read_to_string(dir.join("3-1445.ron")).expect("the mid-midnight save");
+    assert!(saved.contains("stagger_midnight"), "the save carries the stagger");
+    let out5 = cli()
+        .args(["run", "--days", "2", "--seed", "3", "--report", "--load"])
+        .arg(dir.join("3-1445.ron"))
+        .output()
+        .expect("run cli");
+    assert!(out5.status.success(), "stderr: {}", String::from_utf8_lossy(&out5.stderr));
+    let day1 = String::from_utf8(out4.stdout).expect("utf8").lines().nth(2).map(strip).expect("day 1");
+    let resumed = String::from_utf8(out5.stdout).expect("utf8").lines().nth(1).map(strip).expect("day 1 resumed");
+    assert_eq!(resumed, day1);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

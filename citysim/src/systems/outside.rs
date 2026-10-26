@@ -364,17 +364,21 @@ fn sell_hour(world: &mut World, hour: u8) {
 /// The tick (after `living::run`): on the hour, the book opens its day if
 /// it has not, then sells the hour's share.
 pub fn run(world: &mut World) {
-    if !on(world) || !world.tick.is_multiple_of(TICKS_PER_HOUR) {
+    if !on(world) {
         return;
     }
-    // M17 phase 2: the parents' midnight (not on the first tick: nothing
-    // has traded yet, as `ownership`'s cashflow roll).
-    if world.tick_of_day() == 0 && world.tick > 0 {
+    // M17 phase 2: the parents' midnight (not on the first day: nothing
+    // has traded yet, as `ownership`'s cashflow roll). The perf pass phase
+    // 7b: at its slot, off the hour while the midnight is staggered.
+    if crate::systems::midnight::due(world, crate::systems::midnight::Mid::Tail) && world.day() > 0 {
         crate::systems::parents::daily(world);
         // M17 phase 5: missions abroad, the promoted cast, a breach due.
         if crate::systems::parents::parents_on(world) {
             crate::systems::abroad::daily(world);
         }
+    }
+    if !world.tick.is_multiple_of(TICKS_PER_HOUR) {
+        return;
     }
     if !ambient_on(world) {
         return;

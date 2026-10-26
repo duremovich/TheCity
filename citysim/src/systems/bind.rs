@@ -571,7 +571,7 @@ pub fn expire(world: &mut World, id: HoleId) {
 /// Daily pass at `tick_of_day == 0`: every consequential hole from before
 /// today, then every hole past `hole_ttl_days`, each in ascending id order.
 pub fn run(world: &mut World) {
-    if world.tick_of_day() != 0 {
+    if !crate::systems::midnight::due(world, crate::systems::midnight::Mid::Bind) {
         return;
     }
     // L2 (plan L26): faction violence off screen; its holes open now and

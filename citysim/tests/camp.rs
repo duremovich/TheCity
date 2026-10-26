@@ -148,7 +148,8 @@ fn run_days_starving(w: &mut World, days: u64, home: Option<EntityId>) {
             starve_home(w, h);
         }
         citysim::tick(w);
-        citysim::tick(w);
+        let window = citysim::systems::midnight::window(w);
+        w.run_ticks(window);
     }
 }
 

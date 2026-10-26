@@ -360,7 +360,7 @@ fn censored(world: &World) -> Vec<EntityId> {
 
 /// A Feed's Reporters, ascending; and those who worked a shift yesterday.
 fn reporters(world: &World, feed: EntityId) -> (Vec<EntityId>, usize) {
-    let now = world.tick;
+    let now = crate::systems::midnight::midnight(world);
     let staff: Vec<EntityId> = world
         .workers(Role::Reporter)
         .iter()

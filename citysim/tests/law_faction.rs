@@ -237,6 +237,7 @@ fn test_jailbreak_shocks_the_law_into_garrison() {
     // A week on, the Jail is let go.
     w.tick += (w.config.law.garrison_days + 1) * TICKS_PER_DAY;
     w.tick -= w.tick % TICKS_PER_DAY;
+    w.tick += u64::from(citysim::systems::midnight::tick_of(&w, citysim::systems::midnight::Mid::Law));
     law_brain::run(&mut w);
     assert_eq!(w.law().map(|l| l.posture), Some(Posture::Patrol));
 }

@@ -739,7 +739,7 @@ fn test_queued_guard_never_started_expires_unpaid() {
     assert!(contracts::accept(&mut w, id, taker, &[]));
     assert!(queued(&w, id), "queued behind the full quota");
     assert!(w.contracts[&id].started.is_none());
-    w.run_ticks(2 * TICKS_PER_DAY + 5 - w.tick);
+    w.run_ticks(2 * TICKS_PER_DAY + 4 + citysim::systems::midnight::window(&w) - w.tick);
     let c = &w.contracts[&id];
     assert_eq!(c.status, ContractStatus::Expired, "never stood: expired");
     assert_eq!(c.escrow, 0);

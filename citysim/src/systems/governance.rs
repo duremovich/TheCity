@@ -136,11 +136,15 @@ pub fn seat(world: &mut World, corp: EntityId) -> bool {
 /// the chair's death voted on at once; at noon the campaign and the
 /// scheduled vote.
 pub fn run(world: &mut World) {
-    if !on(world) || !world.tick.is_multiple_of(TICKS_PER_HOUR) {
+    // The perf pass phase 7b: the boards' midnight (the seats, the
+    // keep-up) at its slot, off the hour while the midnight is staggered.
+    let hour = world.tick.is_multiple_of(TICKS_PER_HOUR);
+    let midnight = crate::systems::midnight::due(world, crate::systems::midnight::Mid::Tail);
+    if !on(world) || !(hour || midnight) {
         return;
     }
     let tod = crate::time::tick_of_day(world.tick);
-    if tod == 0 {
+    if midnight {
         for c in world.corps() {
             if wants_board(world, c) && board_of(world, c).is_none() {
                 seat(world, c);
@@ -150,14 +154,17 @@ pub fn run(world: &mut World) {
     for c in board_corps(world) {
         let chair = board_of(world, c).and_then(|(_, ch)| ch);
         if chair.is_none_or(|ch| !law::living(world, ch)) {
-            keep_up(world, c);
-            vote(world, c, "the chair is dead");
+            // A chair dead since the hour waits for the next one.
+            if hour {
+                keep_up(world, c);
+                vote(world, c, "the chair is dead");
+            }
             continue;
         }
-        if tod == 0 {
+        if midnight {
             keep_up(world, c);
         }
-        if tod != NOON {
+        if !hour || tod != NOON {
             continue;
         }
         let due = last_vote(world, c) + Tick::from(world.config.governance.vote_days) * TICKS_PER_DAY;

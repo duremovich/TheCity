@@ -156,7 +156,7 @@ fn test_birth_blends_traits_and_links_parents() {
 fn test_immigration_two_per_week() {
     let mut w = world(48);
     let start = w.population();
-    w.run_ticks(28 * TICKS_PER_DAY + 1);
+    w.run_ticks(28 * TICKS_PER_DAY + citysim::systems::midnight::window(&w));
     let immigrants: u32 = w.stats.history.iter().map(|r| r.immigrants).sum::<u32>() + w.stats.current.immigrants;
     assert_eq!(immigrants, 8);
     let arrivals = w.events.iter().filter(|e| e.kind == EventKind::Immigration).count();

@@ -26,10 +26,23 @@ pub fn is_adult(world: &World, id: EntityId) -> bool {
 }
 
 pub fn run(world: &mut World) {
-    if world.tick_of_day() != 0 {
-        return;
+    // The perf pass phase 7b: the day in three slots (`systems::midnight`),
+    // split before the job search and before the relocation.
+    use crate::systems::midnight::{due, Mid};
+    if due(world, Mid::DemoEarly) {
+        early(world);
     }
-    if world.tick > 0 {
+    if due(world, Mid::DemoJobs) {
+        jobs(world);
+    }
+    if due(world, Mid::DemoHomes) {
+        homes(world);
+    }
+}
+
+fn early(world: &mut World) {
+    // Not on the first day (`world.tick > 0` at tick 0, before the stagger).
+    if world.day() > 0 {
         crate::prof::timed!("demo::ageing", ageing(world));
         crate::prof::timed!("demo::children", children(world));
         crate::prof::timed!("demo::births", births(world));
@@ -46,6 +59,9 @@ pub fn run(world: &mut World) {
     // The island pass phase 4 (I2): a far commuter with no Home found takes
     // a nearer post of his role first (nothing off).
     crate::prof::timed!("demo::commute::job_moves", crate::systems::commute::job_moves(world));
+}
+
+fn jobs(world: &mut World) {
     crate::prof::timed!("demo::job_search", job_search(world));
     // Jobs and room J19: the day's labour market for the migrants' means.
     crate::prof::timed!("demo::note_labour_market", note_labour_market(world));
@@ -55,10 +71,13 @@ pub fn run(world: &mut World) {
     // Lives at work phase 7 (§ 5.3): an exec housed low moves up when the
     // Spire has room, before the relocation reads his Home.
     crate::prof::timed!("demo::life::spire_homes", crate::systems::life::spire_homes(world));
+}
+
+fn homes(world: &mut World) {
     // L1: a long commute moves nearer work (a few households a night).
     crate::prof::timed!("demo::life::relocate", crate::systems::life::relocate(world));
     crate::prof::timed!("demo::emigration", emigration(world));
-    if world.tick > 0 && world.day().is_multiple_of(7) {
+    if world.day() > 0 && world.day().is_multiple_of(7) {
         crate::prof::timed!("demo::immigration", immigration(world));
     }
 }
