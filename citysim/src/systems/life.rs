@@ -1784,6 +1784,9 @@ pub fn quit_blocks(world: &World, a: EntityId, employer: EntityId) -> bool {
         .comp::<Brain>(a)
         .and_then(|b| b.quit_from)
         .is_some_and(|(e, until)| (e == employer || e == EntityId::NONE) && world.tick < until)
+        // Pressure pass F3: the idle days after a quit or a firing, the
+        // firing employer's refusal, the reputation's pass-over.
+        || crate::systems::misery::hire_blocked(world, a, employer)
 }
 
 /// Shadow V4 bug 6: a "no need of the wage" quit keeps the quitter out of

@@ -4725,3 +4725,16 @@ join_note_min = 0.2                # a join (or a conversion) past this misery n
 stat_join_p = 0.03                 # off screen: a miserable Statistical adult a gang would take joins on this x misery a day
 faith_min = 0.3                    # the faith: a Preach draws a resident past this misery (as it draws the lonely) ...
 faith_convert_mult = 2.0           # ... and converts on p_convert x (1 + this x misery)
+# F3 (quits, wages and the jobless; docs/PRESSURE_PASS.md F3). Placeholders.
+skip_lead_ticks = 60               # a body's skip (rolled at midnight) is acted out at the first hour within this many
+                                   # minutes of the shift's start: it sets off or wakes, then does not go
+skip_unwind_flat = 0.35            # ... and Unwind scores + this until the skipped shift's end (a bar, a friend's, the street)
+quit_idle_days = 2                 # a quitter (misery, unpaid) is out of every hire for this many days ...
+fired_idle_days = 5                # ... the fired for this many ...
+idle_jitter_days = 3               # ... plus up to this many more (a hash of the person): the jobless are a visible state
+fired_block_days = 120             # the employer who fired a worker does not take him back for this many days
+stain_days = 30                    # the reputation: for this many days after a firing or a quit a hire pass passes the
+stain_fired_p = 0.6                # fired over on this (a hash of the person and the day) ...
+stain_quit_p = 0.3                 # ... and a quitter on this
+stiff_grudge = 0.35                # an unpaid quitter's Betrayed grudge on the boss (a person); the wages owed stay a debt
+recruit_tenure_days = 14           # a gang recruit's initiation: no walking away in its first this many days (every recruit)

@@ -157,3 +157,40 @@ theft in 20 days; the new prune moved it to none).
   run predates the drink test's weight filter, the last change: a street brawl after a gang's welcome no longer counts
   as drunk, so on-screen street brawls run a little fewer.)
 - No test (doctrine 2).
+
+### F3: quits, wages and the jobless (`economy.rs`, `misery.rs`, `[misery]` F3 keys)
+
+- **Why wages came short.** A person-owned venue pays every wage out of its owner's own purse; a small bar's 2c drinks
+  do not cover 4-5c a head, the owner runs dry and every worker (the owner too, paying himself) is short. The forger's
+  case was different: a walk-in's 40c paid the forger 32c and left the owner's 8c cut *held by the forger* until the
+  owner collected in person (`World::fixer_owed`, `service::collected`), which a Statistical owner never does, so the
+  owner could not cover a 5c wage while his forger sat on 348c. Fixed: on payday the server hands the cut he holds to
+  the owner (`economy::settle_held_cut`) before the wage is paid. The worker_friday "owner flip" in V9 is the diary's
+  `place owner` column (where the pick stands: his Habitat-owned Block vs his Bar), not an ownership change.
+- **An owner does not quit his own business.** `economy::household_business` (his or his spouse's): no wage drawn from
+  himself (`collect_wage` clears the days owed), a spouse's purse pays what it has with no `Unpaid`, `maybe_quit` and
+  the misery quit skip it. Not done: an owner under water cutting hours, selling or closing (the owner still bleeds
+  his purse into staff wages and misses rent: an open item for the corp/ownership pass).
+- **An unpaid quit is a story**: `Quit` reads "X walked out on <boss> at <place> as <role> (unpaid, owed Nc)" with the
+  boss and the place as actors; a boss who is a person owes the wages as an edge debt (`social::repay_debts` takes it
+  from his income; the aged debt is called in) and the quitter holds a `Betrayed` grudge (`stiff_grudge` 0.35).
+  Deviation: no confrontation scene and no report; at 0.35 the grudge rarely reaches the Fight threshold.
+- **The jobless are a state** (`misery::note_left`, `hire_blocked`/`pool_out`/`fired_by`, read by `life::quit_blocks`,
+  the `HirePool` walk and members, and the city sweeper and guard reconciles): a misery or unpaid quit is out of every
+  hire for `quit_idle_days` (2), a misery or no-show firing for `fired_idle_days` (5), both + up to `idle_jitter_days`
+  (3); the firing employer refuses him for `fired_block_days` (120); for `stain_days` (30) a hire pass passes the fired
+  over on `stain_fired_p` (0.6) a day, a quitter on `stain_quit_p` (0.3). The commute switch is one move: "quit as X
+  (far commute: took a post at Y nearer home)" (still a Quit and a Hire in the same minute; no idle days).
+- **The skip is a moment**: rolled at midnight, acted out at the first hour within `skip_lead_ticks` (60) of the shift
+  (Statistical: at midnight as before): "skips the shift as Cab Driver: sets off for it, then does not go in" / "wakes
+  for it and stays in bed" / "gets up and does not go; heads for Bar#n" / "goes round to a friend's at Block#n"; Unwind
+  scores `+ skip_unwind_flat` (0.35) until the skipped shift's end.
+- **A recruit sticks**: no walk-away (`gang::desist`) in a member's first `recruit_tenure_days` (14), every recruit.
+  `tests/desist.rs` setup advances past it (no new test).
+- **Counters**, 20k island seed 42 x 30 (`--scaled --ambient-flats 50`), phase 1's after -> F3: employed mean 11,256 ->
+  11,176; misery firings 63 -> 49, misery quits 42 -> 34, skips 1,312 -> 1,208, brawls 119 -> 97; GangLeave 512 -> 115
+  (all "walked away"), GangJoin 966 -> 818, gang members day 29 432 -> 681. Quits 683 (unpaid 369, far commute 211,
+  misery 34, no need of the wage 33), Fire 483. Rehire gap (next Hire of the same name): misery firing median 6.3 days
+  (37 of 49 not rehired by day 30), misery quit 3.0 days (18 of 34 not), unpaid walkout 4.8 days (138 of 369 not), no-show
+  firing 1.0 day with 17 of 55 within the minute (that run predates the no-show firing's `note_left`). FINDING: gang
+  size +58 % with the leaves gone; nothing tuned.

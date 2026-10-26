@@ -27,6 +27,9 @@ fn setup(n: usize, pick: impl Fn(&World, EntityId) -> bool) -> (World, EntityId,
     for &a in &recruits {
         gang::enlist(&mut w, a, g);
     }
+    // Pressure pass F3: past the recruits' initiation (`[misery] recruit_tenure_days`).
+    let tenure = w.config.misery.as_ref().map_or(0, |c| u64::from(c.recruit_tenure_days));
+    w.tick += tenure * TICKS_PER_DAY;
     (w, g, recruits)
 }
 
