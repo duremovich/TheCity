@@ -87,6 +87,7 @@ pub mod parents;
 pub mod plan;
 pub mod policy;
 pub mod presence;
+pub mod protection;
 pub mod raid;
 pub mod reputation;
 pub mod riot;

@@ -1052,6 +1052,43 @@ pub struct Jobs2Cols {
     // own Home past the spot cap; `home_hangouts` counts them too).
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub stay_in_hangouts: u32,
+    // The pressure pass phase 3 (`systems::protection`): protections made on
+    // held ground, leans refused, weeks missed; the punishments (a till
+    // smashed or a stall kicked over, an owner beaten, a fire); the owner's
+    // choice after (paid, reported, a rival's cover, sold or shut); members
+    // bailed out and the bail paid; the gangs' treasuries at midnight
+    // (median, max; snapshots).
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub pr_leaned: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub pr_refused: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub pr_missed: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub pr_smash: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub pr_beat: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub pr_fire: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub pr_pay: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub pr_report: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub pr_rival: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub pr_sell: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub pr_bail: u32,
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub pr_bail_coins: i64,
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub gang_treasury_med: i64,
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub gang_treasury_max: i64,
+    // OPEN-157: a contract's party arrived at the Fixer in person in its hours.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub broker_walks: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -1428,6 +1465,21 @@ impl Jobs2Cols {
                 "pressure_jobs",
                 "site_days",
                 "stay_in_hangouts",
+                "pr_leaned",
+                "pr_refused",
+                "pr_missed",
+                "pr_smash",
+                "pr_beat",
+                "pr_fire",
+                "pr_pay",
+                "pr_report",
+                "pr_rival",
+                "pr_sell",
+                "pr_bail",
+                "pr_bail_coins",
+                "gang_treasury_med",
+                "gang_treasury_max",
+                "broker_walks",
             ]
             .into_iter()
             .map(str::to_string),
@@ -1798,6 +1850,21 @@ impl Jobs2Cols {
             self.pressure_jobs.to_string(),
             self.site_days.to_string(),
             self.stay_in_hangouts.to_string(),
+            self.pr_leaned.to_string(),
+            self.pr_refused.to_string(),
+            self.pr_missed.to_string(),
+            self.pr_smash.to_string(),
+            self.pr_beat.to_string(),
+            self.pr_fire.to_string(),
+            self.pr_pay.to_string(),
+            self.pr_report.to_string(),
+            self.pr_rival.to_string(),
+            self.pr_sell.to_string(),
+            self.pr_bail.to_string(),
+            self.pr_bail_coins.to_string(),
+            self.gang_treasury_med.to_string(),
+            self.gang_treasury_max.to_string(),
+            self.broker_walks.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

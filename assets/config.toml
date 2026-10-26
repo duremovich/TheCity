@@ -4808,3 +4808,52 @@ confront_kill_mult = 0.2           # ... the fight kills on [crime] fight_death_
 report_lawful = 0.5                # under the fight, a worker this lawful reports the owner to the Hall, which takes the
                                    # owed out of the owner's purse as it comes in
 victim_report_lawful = 0.4         # a beaten owner this lawful reports the collector (or the worker)
+
+# The pressure pass phase 3 (docs/PRESSURE_PASS.md § Phase 3; OPEN-160, OPEN-162; systems/protection.rs and
+# leverage::protection_pass): protection bites. M16b leaned on one business per held district only on the gang's weekday
+# under Expand or Contest, and "held" was the turf's Homes, which landed at 20k from day 5 to 25 (20k seed 42 x 30: no
+# protection made; 100k: 17 Protected in 30 days against 1,510 Extortion). Now the weekly pass leans on every gang's held
+# ground (its turf's districts and its Hideout's) whatever the order (not while lying low), a levy sized to the business;
+# a refused lean, or a week missed punish_misses times, sends the gang's toughest member in person (a Visit, both tiers):
+# the till smashed or the stall kicked over, the owner beaten, at the last a fire; the owner then chooses: pay, report,
+# go to a rival gang for cover (a turf war's spark), or sell or close (phase 6). The protection money joins the week's
+# tribute the leader's Collect shares out, and a gang with the coins bails its jailed out. Placeholders (no tuning yet).
+[protection]
+hideout_ground = true              # the Hideout's district is held ground from day 0 (the gang leans where it lives)
+lean_per_district = 3              # businesses leaned on per held district per weekly pass (M16b: 1)
+levy_share = 0.15                  # the weekly levy: this share of the business's week's revenue ...
+levy_min = 10                      # ... at least this (a business taking less is not leaned on) ... at most [leverage]
+                                   # protection_weekly (M16b: protection_weekly flat, a business under it never leaned on)
+punish_misses = 2                  # weeks missed (nobody met at the round stop, or the till short) before the gang punishes;
+                                   # a refused lean is punished at once
+punish_hour_from = 10              # the enforcer calls between these hours (the business open)
+punish_hour_to = 20
+punish_urgency = 0.9               # the enforcer's Visit urgency (the collector's dun_urgency is its neighbour)
+smash_weeks = 2.0                  # the first punishment, the till smashed (the stall kicked over): this many weeks of the
+                                   # levy taken from the payer's purse for the gang (Flow::Robbery; a share of the purse
+                                   # took 14,826c off a rich stall owner on the first run) ...
+smash_close_days = 1               # ... and the business shut this many days for the mess
+fire_close_days = 7                # the third: a fire, the business shut this many days (the second is the owner beaten)
+beat_kill_mult = 0.2               # the beating kills on [crime] fight_death_p x this
+enforcer_cut = 0.25                # the enforcer keeps this share of what he takes; the rest goes to the gang
+grudge = 0.5                       # the punished owner's grudge on the enforcer
+victim_report_lawful = 0.6         # a beaten or burned owner this lawful files the report whatever he chooses
+w_pay = 1.0                        # the owner's choice after a punishment, one weighted draw: pay, x (1.5 - courage) ...
+w_report = 0.6                     # ... report the enforcer and the leader, x lawfulness ...
+w_rival = 0.5                      # ... buy a rival gang's cover, x (0.5 + courage) (a rival with a leader): a turf war's
+                                   # spark (the holder's grudge on the rival, a HomeFlippedAgainst shock) ...
+w_sell = 0.3                       # ... sell or close (phase 6's sale, the gang the first buyer), x (0.25 + misery) x the
+                                   # punishments so far (with [underwater])
+cover_grudge = 0.4                 # the leader's grudge on the rival leader who gave the owner cover
+bail_per_day = 5                   # bail: daily, a gang frees a jailed member at this many coins a sentence day left ...
+bail_reserve = 100                 # ... keeping this much back ...
+bail_min_days = 2                  # ... not for the last day ...
+bail_max_days = 20                 # ... nor past this many days left
+stipend_jobless_only = true        # [social] gang_stipend goes daily only to members with no wage post; the employed are
+                                   # paid at the weekly Collect, their cut of the take (the stipend to every member spent
+                                   # the treasuries to 0: 20k seed 42 d15-d30 median 0) ...
+stipend_reserve = 150              # ... and comes out of the treasury above this war chest (jobless-only alone left the
+                                   # median at 0-6c from d18: the jobless members' stipends still spent every coin); a gang
+                                   # under it pays nobody daily and its unpaid members drift off ([living] desist_unpaid)
+broker_visits = true               # OPEN-157: a contract's party the Fixer cannot meet now (no server on duty, the body
+                                   # elsewhere) walks there at its next open hour (a Broker visit) instead of being missed

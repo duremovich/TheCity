@@ -928,6 +928,9 @@ UNDERWATER_TOTALS = ("uw_short", "uw_hold", "uw_hours", "uw_layoffs", "uw_loans"
                      "uw_seized", "uw_repaid", "uw_sold_corp", "uw_sold_gang", "uw_closed", "uw_reopened", "uw_afloat",
                      "uw_walkouts", "uw_confronts", "uw_paid_up", "uw_confront_fights", "uw_reports", "uw_garnished",
                      "uw_front_joins", "uw_laundered", "uw_front_hits")
+# The pressure pass phase 3: protection bites.
+PROTECTION_TOTALS = ("pr_leaned", "pr_refused", "pr_missed", "pr_smash", "pr_beat", "pr_fire", "pr_pay", "pr_report",
+                     "pr_rival", "pr_sell", "pr_bail", "pr_bail_coins")
 ARMS_SNAP = ("weapons", "carriers", "armoury", "precinct_arms", "gunsmith_stock", "licences", "weapon_wants")
 # Phase 4, vice and fashion (§ 5.1, § 9).
 VICE_TOTALS = ("strip_visits", "brothel_visits", "companion_visits", "vice_revenue", "tips", "street_visits",
@@ -1007,6 +1010,9 @@ def jobs2(rows, events, out):
         J["misery_totals"] = {k: sum(col(rows, k)) for k in MISERY_TOTALS}
     if "uw_short" in rows[0]:
         J["underwater_totals"] = {k: sum(col(rows, k)) for k in UNDERWATER_TOTALS}
+    if "pr_leaned" in rows[0]:
+        J["protection_totals"] = {k: sum(col(rows, k)) for k in PROTECTION_TOTALS}
+        J["gang_treasury_last"] = {k: rows[-1].get(k, 0) for k in ("gang_treasury_med", "gang_treasury_max")}
     if "vice_venues" in rows[0]:
         J["vice_totals"] = {k: sum(col(rows, k)) for k in VICE_TOTALS}
         J["vice_mean"] = {k: mean(col(rows, k)) for k in VICE_SNAP}
@@ -1350,6 +1356,9 @@ def fmt(o):
             L.append("misery, run totals: " + f(w["misery_totals"]))
         if "underwater_totals" in w:
             L.append("under water, run totals: " + f(w["underwater_totals"]))
+        if "protection_totals" in w:
+            L.append("protection, run totals: " + f(w["protection_totals"]))
+            L.append("gang treasuries, last day (median, max): " + f(w["gang_treasury_last"]))
             L.append("weapons, daily mean: " + f(w["arms_mean"]) + f"; weapons per 1,000 {w['weapons_per_1000']:.1f};"
                      f" carriers per 1,000 {w['carriers_per_1000']:.1f}; armed fights / fights "
                      f"{w['armed_share_of_fights']:.1%}; deaths a fight armed {w['death_rate_armed']:.2%}, unarmed "

@@ -310,6 +310,9 @@ fn record(
         payer,
         building,
         closed: None,
+        missed: 0,
+        punished: 0,
+        refusing: false,
     };
     world.coercions.insert(id, c);
     let what = match demand {
@@ -515,7 +518,11 @@ fn protection_holds(world: &World, c: &Coercion) -> bool {
         return false;
     }
     let d = world.district_of_building(b);
-    let held = crate::systems::gang::held_districts(world, g).iter().any(|&(x, _)| x == d);
+    let held = if crate::systems::protection::on(world) {
+        crate::systems::protection::ground(world, g).binary_search(&d).is_ok()
+    } else {
+        crate::systems::gang::held_districts(world, g).iter().any(|&(x, _)| x == d)
+    };
     held && payer_of(world, b) == c.payer
 }
 
@@ -567,6 +574,9 @@ fn broken_week(world: &World, id: CoercionId) -> bool {
     let Some(c) = world.coercions.get(&id) else { return false };
     let gone = |e: EntityId| !law::living(world, e) || world.has::<Sentence>(e);
     match c.why {
+        // The pressure pass phase 3: the hold is the gang's; the leaner
+        // jailed or dead does not end it.
+        CoercionWhy::Protection if crate::systems::protection::on(world) => !protection_holds(world, c) || gone(c.over),
         CoercionWhy::Protection => !protection_holds(world, c) || gone(c.over) || gone(c.agent),
         CoercionWhy::Parley => {
             c.holder.is_none_or(|h| !world.has::<crate::components::Gang>(h))
@@ -599,7 +609,17 @@ fn pay_week(world: &mut World, id: CoercionId) -> i64 {
         return 0;
     }
     let payer = c.payer.unwrap_or(c.over);
-    if world.purse(Some(payer)) < amount {
+    if world.purse(Some(payer)) < amount || c.refusing {
+        // The pressure pass phase 3: a protection week the till cannot meet
+        // (or the owner will not) is a miss (punished at `punish_misses`),
+        // tried again tomorrow.
+        if c.why == CoercionWhy::Protection && crate::systems::protection::on(world) {
+            if let Some(x) = world.coercions.get_mut(&id) {
+                x.next_due = x.next_due.max(now) + TICKS_PER_DAY;
+            }
+            crate::systems::protection::miss(world, id);
+            return 0;
+        }
         close(world, id, CoercionStatus::Refused, "would not pay");
         return 0;
     }
@@ -616,6 +636,16 @@ fn pay_week(world: &mut World, id: CoercionId) -> i64 {
         let row = &mut world.stats.current.leverage;
         row.protection_paid += 1;
         row.protection_coins += paid;
+        // The pressure pass phase 3: the protection joins the week's take
+        // the leader's Collect shares out to the members.
+        if crate::systems::protection::on(world) {
+            if let Some(g) = c.holder.filter(|&g| world.has::<crate::components::Gang>(g)) {
+                crate::systems::leisure::note_tribute(world, g, paid);
+            }
+            if let Some(x) = world.coercions.get_mut(&id) {
+                x.missed = 0;
+            }
+        }
     }
     paid
 }
@@ -646,7 +676,7 @@ fn week_revenue(b: &Building) -> i64 {
 
 /// Who answers for a business: an agent owner itself, a corp's exec, a
 /// gang's leader (a rival's front); living and free.
-fn answers_for(world: &World, owner: EntityId) -> Option<EntityId> {
+pub(crate) fn answers_for(world: &World, owner: EntityId) -> Option<EntityId> {
     let who = match ownership::owner_kind(world, Some(owner)) {
         OwnerKind::Agent(a) => Some(a),
         OwnerKind::Corp(c) => world.comp::<crate::components::Corp>(c).and_then(|x| x.exec),
@@ -691,7 +721,13 @@ pub fn protection_target(world: &World, gang: EntityId, d: crate::components::Di
                 continue;
             }
             let rev = week_revenue(bd);
-            if rev < weekly || tried_recently(world, gang, b, tried::PROTECT) {
+            // The pressure pass phase 3: a levy sized to the business.
+            let short = if crate::systems::protection::on(world) {
+                crate::systems::protection::levy(world, rev, weekly).is_none()
+            } else {
+                rev < weekly
+            };
+            if short || tried_recently(world, gang, b, tried::PROTECT) {
                 continue;
             }
             if best.is_none_or(|(r, x)| rev > r || (rev == r && b < x)) {
@@ -717,18 +753,31 @@ fn protection_pass(world: &mut World) {
         else {
             continue;
         };
-        if !matches!(order, crate::components::Order::Expand | crate::components::Order::Contest)
-            || !free(world, leader)
-        {
+        // The pressure pass phase 3 (OPEN-162): keyed to held ground, not
+        // the day's order (only a gang lying low leans on nobody).
+        let ground_on = crate::systems::protection::on(world);
+        let order_ok = if ground_on {
+            order != crate::components::Order::LieLow
+        } else {
+            matches!(order, crate::components::Order::Expand | crate::components::Order::Contest)
+        };
+        if !order_ok || !free(world, leader) {
             continue;
         }
-        let districts: Vec<_> = crate::systems::gang::held_districts(world, g).into_iter().map(|(d, _)| d).collect();
+        let districts: Vec<_> = if ground_on {
+            crate::systems::protection::ground(world, g)
+        } else {
+            crate::systems::gang::held_districts(world, g).into_iter().map(|(d, _)| d).collect()
+        };
+        let per = crate::systems::protection::cfg(world).map_or(1, |c| c.lean_per_district.max(1));
         for d in districts {
-            if !room(world) {
-                return;
+            for _ in 0..per {
+                if !room(world) {
+                    return;
+                }
+                let Some(b) = protection_target(world, g, d) else { break };
+                try_protection(world, g, leader, b);
             }
-            let Some(b) = protection_target(world, g, d) else { continue };
-            try_protection(world, g, leader, b);
         }
     }
 }
@@ -745,10 +794,32 @@ pub fn try_protection(world: &mut World, gang: EntityId, leader: EntityId, b: En
         return false;
     }
     mark(world, gang, b, tried::PROTECT);
-    let amount = world.config.leverage.protection_weekly;
+    let weekly = world.config.leverage.protection_weekly;
+    let amount = match world.comp::<Building>(b) {
+        Some(bd) if crate::systems::protection::on(world) => {
+            crate::systems::protection::levy(world, week_revenue(bd), weekly).unwrap_or(weekly)
+        }
+        _ => weekly,
+    };
     let demand = Demand::Coins { amount, weekly: true };
     let out = roll(world, leader, over, Some(owner), &Leverage::Threat, &demand);
     if !out.success {
+        // The pressure pass phase 3 (OPEN-160): a refusal stands as a hold
+        // the gang punishes in person.
+        if crate::systems::protection::on(world) {
+            let id = record(
+                world,
+                Some(gang),
+                leader,
+                over,
+                Leverage::Threat,
+                demand,
+                CoercionWhy::Protection,
+                Some(owner),
+                Some(b),
+            );
+            crate::systems::protection::refused(world, id);
+        }
         return false;
     }
     let id = record(
@@ -763,6 +834,9 @@ pub fn try_protection(world: &mut World, gang: EntityId, leader: EntityId, b: En
         Some(b),
     );
     world.stats.current.leverage.protection_made += 1;
+    if crate::systems::protection::on(world) {
+        crate::systems::ownership::jobs2_row(world).pr_leaned += 1;
+    }
     let d = world.district_of_building(b);
     crate::systems::gossip::post_deed(world, d, Deed::Extorted, Some(leader), Some(over));
     // The first week now (the pre-view pass phase 6, P13: a body leader
@@ -771,6 +845,36 @@ pub fn try_protection(world: &mut World, gang: EntityId, leader: EntityId, b: En
         collect_one(world, id);
     }
     true
+}
+
+/// The pressure pass phase 3: an owner who went to rival `gang` for cover
+/// pays it `amount` a week from now on (no roll: he asked); the first week
+/// now unless its leader collects in person.
+pub(crate) fn cover(
+    world: &mut World,
+    gang: EntityId,
+    leader: EntityId,
+    over: EntityId,
+    payer: EntityId,
+    b: EntityId,
+    amount: i64,
+) {
+    let demand = Demand::Coins { amount, weekly: true };
+    let id = record(
+        world,
+        Some(gang),
+        leader,
+        over,
+        Leverage::Threat,
+        demand,
+        CoercionWhy::Protection,
+        Some(payer),
+        Some(b),
+    );
+    world.stats.current.leverage.protection_made += 1;
+    if !crate::systems::leaders::collects(world, gang) {
+        collect_one(world, id);
+    }
 }
 
 /// A coercion just made pays its first week now.

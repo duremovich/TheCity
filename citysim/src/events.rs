@@ -475,10 +475,16 @@ pub enum EventKind {
     /// Phase 6: `[worker, owner, place?]`, a worker owed wages confronts the
     /// owner in person (paid, refused, a fight, a report, a garnishment).
     Confronted,
+    /// The pressure pass phase 3 (`systems::protection`): `[enforcer, owner,
+    /// business, gang]`, a refused or missed protection punished in person
+    /// (the till smashed, the owner beaten, a fire), and `[owner, gang,
+    /// business]` the owner's choice after (pays, reports, a rival's cover,
+    /// sells or shuts); `[member, gang]` a member bailed out.
+    Punished,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 230] = [
+    pub const ALL: [EventKind; 231] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -709,6 +715,7 @@ impl EventKind {
         EventKind::UnderWater,
         EventKind::Loan,
         EventKind::Confronted,
+        EventKind::Punished,
     ];
 }
 

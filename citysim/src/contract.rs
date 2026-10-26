@@ -838,6 +838,17 @@ pub struct Coercion {
     pub building: Option<EntityId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub closed: Option<Tick>,
+    /// The pressure pass phase 3 (`[protection]`): weeks missed since the
+    /// last payment or punishment (a round stop met nobody, the till short).
+    #[serde(default)]
+    pub missed: u8,
+    /// Phase 3: punishments dealt on it (0 the till, 1 the owner, 2+ a fire).
+    #[serde(default)]
+    pub punished: u8,
+    /// Phase 3: the owner refuses to pay (a refused lean, or a report after a
+    /// punishment) until he chooses to pay up: each week due is a miss.
+    #[serde(default)]
+    pub refusing: bool,
 }
 
 impl Coercion {

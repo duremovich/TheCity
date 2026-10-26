@@ -78,6 +78,10 @@ fn gang_world_in(cell: &std::sync::OnceLock<World>, pre_mirror: bool) -> World {
         // timed ride while the trains' switch is in flight (with trains its
         // racket's hold broke in the second week); re-read when it retires.
         let mut w = world_trains(!pre_mirror);
+        // These tests pin M16b's protection (the turf's districts under
+        // Expand or Contest, a refusal no hold, the leaner's fall the hold's
+        // end): the pressure pass phase 3 ([protection]) moved the 2k city and its semantics.
+        w.config.protection = None;
         if pre_mirror {
             no_venue_rates(&mut w);
         }

@@ -1425,6 +1425,8 @@ pub fn run(world: &mut World) {
     crate::systems::leaders::run(world);
     if daily {
         crate::prof::timed!("gang::daily_economy", daily_economy(world));
+        // The pressure pass phase 3: the bail, the treasuries' snapshot.
+        crate::prof::timed!("gang::protection_daily", crate::systems::protection::daily(world));
         crate::prof::timed!("gang::desist", desist(world));
     }
 }
@@ -1611,9 +1613,15 @@ fn daily_economy(world: &mut World) {
             }
             // L2 L20: the week's Collect is set aside (0 with leisure off).
             let set_aside = crate::systems::leisure::set_aside(world, gang);
+            // The pressure pass phase 3: the employed wait for the Collect.
+            let jobless_only = world.config.protection.as_ref().is_some_and(|c| c.stipend_jobless_only);
+            let reserve = world.config.protection.as_ref().map_or(0, |c| c.stipend_reserve);
             for m in members {
-                if !world.comp::<Gang>(gang).is_some_and(|g| g.treasury - set_aside >= stipend) {
+                if !world.comp::<Gang>(gang).is_some_and(|g| g.treasury - set_aside - reserve >= stipend) {
                     break;
+                }
+                if jobless_only && world.comp::<Job>(m).is_some_and(|j| j.employer.is_some()) {
+                    continue;
                 }
                 // Shadow V4 bug 14: the stipend on the books (`Flow::Tribute`,
                 // the gang's pay to its members; it was a bare wallet write

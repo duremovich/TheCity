@@ -25,7 +25,11 @@ use common::set_coins;
 fn city() -> World {
     static CITY: std::sync::OnceLock<World> = std::sync::OnceLock::new();
     CITY.get_or_init(|| {
-        let mut w = World::new(42, Config::load());
+        // The fixture city before the pressure pass phase 3 ([protection]) moved the 2k city
+        // (the led gang's order no longer walked to its lieutenant).
+        let mut cfg = Config::load();
+        cfg.protection = None;
+        let mut w = World::new(42, cfg);
         w.run_ticks(10 * TICKS_PER_HOUR);
         for _ in 0..30 {
             if led(&w).is_some() {

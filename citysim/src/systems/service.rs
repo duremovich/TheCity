@@ -1162,6 +1162,41 @@ fn fixer_meet(world: &mut World, server: EntityId, served: EntityId, fixer: Enti
 /// the takes come at the match hour), to the Fixer's book ([`fixer_book`]).
 /// Tower only.
 pub fn contract_party(world: &mut World, party: EntityId, fixer: EntityId) {
+    contract_party_at(world, party, fixer, true);
+}
+
+/// The pressure pass phase 3 (OPEN-157): a contract's party sent to the
+/// Fixer in its open hours (`VisitWhy::Broker`) is there: the encounter now
+/// if a server is on duty (else it is missed, not sent again).
+pub fn broker_arrived(world: &mut World, party: EntityId, fixer: EntityId) {
+    ownership::jobs2_row(world).broker_walks += 1;
+    contract_party_at(world, party, fixer, false);
+}
+
+/// OPEN-157: send `party` to `fixer` in person at its next open hour today
+/// (the staff's first shift hour, or the next hour if later), when the
+/// visits are on and the party has no other visit due. `false`: not sent.
+fn send_broker(world: &mut World, party: EntityId, fixer: EntityId) -> bool {
+    if !world.config.protection.as_ref().is_some_and(|c| c.broker_visits)
+        || !crate::systems::household::on(world)
+        || world.visits.contains_key(&party)
+        || world.comp::<Building>(fixer).is_none_or(|b| b.demolished || b.derelict)
+    {
+        return false;
+    }
+    let Some(open) = fixer_first_hour(world, fixer) else { return false };
+    let now = u8::try_from(u64::from(world.tick_of_day()) / TICKS_PER_HOUR).unwrap_or(23);
+    let hour = open.max(now.saturating_add(1));
+    if hour >= 23 {
+        return false;
+    }
+    let v =
+        crate::systems::household::PendingVisit { kin: fixer, why: crate::systems::household::VisitWhy::Broker, hour };
+    world.visits.insert(party, v);
+    true
+}
+
+fn contract_party_at(world: &mut World, party: EntityId, fixer: EntityId, may_send: bool) {
     if !tower_on(world) || party == EntityId::NONE || !world.has::<Brain>(party) {
         return;
     }
@@ -1176,6 +1211,12 @@ pub fn contract_party(world: &mut World, party: EntityId, fixer: EntityId) {
             .filter(|_| here)
             .or_else(|| fixer_book(world, fixer, party).filter(|&s| !body(s) && !body(party)));
         let Some(server) = server else {
+            // The pressure pass phase 3 (OPEN-157): the party comes in
+            // person in the open hours (both tiers: a Statistical party is
+            // credited at the visit's hour).
+            if may_send && send_broker(world, party, fixer) {
+                return;
+            }
             crate::systems::presence::missed(world);
             return;
         };
