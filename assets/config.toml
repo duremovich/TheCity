@@ -514,8 +514,12 @@ watch_on_shift_only = false
 # Scale S1: a Statistical worker's hour of co-work ties it to its crew, the coworker_crew co-workers of its
 # role nearest it in id order (half each side), not to every co-worker (pairs grow with the square of a
 # workplace's staff: ~300 farmers a Farm at 20,000). 0 = every co-worker (the 2,000 city, byte-identical).
-# 32 at 2,000 (seeds 42-47 x 120 days): Friend edges -43 %; the 20,000 probe needs it for its tps.
-coworker_crew = 0
+# 32 at 2,000 (seeds 42-47 x 120 days): Friend edges -43 % (before the El crews' cap; SCALE_20K re-read -3 %).
+# The perf pass phase 7c (Dylan 2026-10-26, PERF_PASS R8, OPEN-205/209): 32, nobody at a 300-farmer Farm or on the
+# Recycler's 500-strong sweeper roster knows all of them. Uncapped, the bond grew with the square of a crew (100k:
+# ~25M pairs a day, ~13 % of the day). Statistical-only: calibrate's all-Full city never reads it (0 and 32
+# regenerate the same stat table). 2k seeds 42-44 x 120 against 0: Friend edges at day 120 -10 %, edges -2 %.
+coworker_crew = 32
 
 # M10 holes and the binder (docs/M10_SCALE.md § 3). Weight per candidate:
 # (1 - lawfulness)^lawfulness_power x (1 + gang_claim_mult*gang*claims) x (1 + enemy_mult*enemy) x (1 + statistical_mult*stat),
