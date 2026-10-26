@@ -342,7 +342,7 @@ pub fn bump_epoch(world: &mut World) {
 /// plane off.
 pub fn seed_labs(world: &mut World) -> Vec<EntityId> {
     let mut built = Vec::new();
-    let copies = world.seed_copies();
+    let copies = world.lot_copies();
     // M17 phase 5: the seeded Labs are `[corps] seed_labs` (owner corp by
     // its row's template, Scale S4: copy `j` goes to the template's `j`-th
     // copy; district by role: the Spire, the Civic, the Vats, Mid West on the

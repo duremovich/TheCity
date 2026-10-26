@@ -1024,19 +1024,41 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
     }
     // Shadow V4 bug 9 (and 4): an empty-handed shakedown advances no claim
     // and is no crime to file (a 0-coin shakedown drew 6 days).
-    let suffix = if taken > 0 { claim(world, actor, home).unwrap_or_default() } else { String::new() };
     let name = world.name_of(actor);
+    if taken == 0 {
+        // Pressure pass F2: nor is it an Extortion (V9: "extorted 0 coins"
+        // logged as a take): it is a door that gave nothing, `Refused`.
+        empty_shakedown(world, actor, home, occupants.is_empty(), "");
+        crate::systems::fviolence::note_act(world, actor, crate::ledger::ActKind::Extort);
+        return 0;
+    }
+    let suffix = claim(world, actor, home).unwrap_or_default();
     world.push_event(
         EventKind::Extortion,
         &[actor, home],
         format!("{name} extorted {taken} coins from Block#{}{suffix}", home.index),
     );
-    if taken > 0 {
-        let tile = world.comp::<Position>(actor).map_or(TilePos::default(), |p| p.tile);
-        law::raise_crime(world, actor, None, crate::components::Crime::Extortion, tile);
-    }
+    let tile = world.comp::<Position>(actor).map_or(TilePos::default(), |p| p.tile);
+    law::raise_crime(world, actor, None, crate::components::Crime::Extortion, tile);
     crate::systems::fviolence::note_act(world, actor, crate::ledger::ActKind::Extort);
     taken
+}
+
+/// Pressure pass F2: a shakedown that took nothing (nobody home, or nobody
+/// with a coin) is a `Refused` at the door, not an `Extortion`: no claim, no
+/// crime, the task done for the day.
+fn empty_shakedown(world: &mut World, actor: EntityId, home: EntityId, nobody: bool, suffix: &str) {
+    let today = world.day();
+    if let Some(b) = world.comp_mut::<Brain>(actor) {
+        b.gang_task_day = Some(today);
+    }
+    let name = world.name_of(actor);
+    let why = if nobody { "nobody was home" } else { "nobody had a coin" };
+    world.push_event(
+        EventKind::Refused,
+        &[actor, home],
+        format!("Block#{} gave {name} nothing ({why}){suffix}", home.index),
+    );
 }
 
 /// L2 (L23): the Home a Statistical member's GangWork day extorts under
@@ -1115,7 +1137,13 @@ pub fn stat_extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
         .collect();
     let total: i64 = payers.iter().map(|&o| world.comp::<Wallet>(o).map_or(0, |w| w.coins.max(0))).sum();
     let take = amount.min(total);
+    if take <= 0 {
+        // Pressure pass F2: nothing to take is no take (no claim, no grudge).
+        empty_shakedown(world, actor, home, payers.is_empty(), " (off screen)");
+        return 0;
+    }
     let mut taken = 0;
+    let held: Vec<i64> = payers.iter().map(|&o| world.comp::<Wallet>(o).map_or(0, |w| w.coins)).collect();
     for &o in &payers {
         let coins = world.comp::<Wallet>(o).map_or(0, |w| w.coins.max(0));
         let share = if total > 0 { (take * coins) / total } else { 0 };
@@ -1123,8 +1151,6 @@ pub fn stat_extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
             w.coins -= share;
         }
         taken += share;
-        world.remember(o, MemoryKind::WasRobbed, Some(actor), 0.7, -0.7, false);
-        social::robbed_by(world, o, actor);
     }
     let mut guard = 0;
     while taken < take && guard < 64 {
@@ -1139,6 +1165,13 @@ pub fn stat_extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
             w.coins -= 1;
         }
         taken += 1;
+    }
+    // Pressure pass F2: as a body's shakedown, the robbed are those who paid.
+    for (i, &o) in payers.iter().enumerate() {
+        if world.comp::<Wallet>(o).is_some_and(|w| w.coins < held[i]) {
+            world.remember(o, MemoryKind::WasRobbed, Some(actor), 0.7, -0.7, false);
+            social::robbed_by(world, o, actor);
+        }
     }
     let to_gang = taken / 2;
     if let Some(w) = world.comp_mut::<Wallet>(actor) {

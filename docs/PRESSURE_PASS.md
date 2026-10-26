@@ -98,3 +98,49 @@ Shadow: gang_member, gang_leader, cultist, purist, buyer, gun, guard, and a jail
 ## Implemented: deviations
 
 (Per phase, as they land.)
+
+### F2, the missing trades and the no-op verbs (2026-10-26)
+
+Each at its cause. Numbers: 20k `isle_m_k2` seed 42 x 30 `--scaled`, main `28aba7b` then F2, one run each.
+
+- **The trades at 100k.** `Config::fit_to_map` deals the roster `k` = 50 copies from the island's employers (600
+  Farms, 150 Markets, 100 Offices), and every opening pass that builds on a Lot dealt 50 copies in a fixed order on
+  the 1,415 Lots (8.8 x the reference 160): the Lots ran out at the Noodle Bars, and the Hq, Packing Plant, School,
+  StripClub, Brothel, Boutique, Dollhouse, BdStudio and Gunsmith stood nowhere (no Office Worker, Teacher, Madam or
+  Contract Host). The Lot-built passes now deal `World::lot_copies` (`ScaleCfg::lot_copies`, set by `fit_to_map`:
+  the map's Lots over the reference's, at most `k`; 9 at 100k, 10 at 20k, 1 at 2k, so 2k and 20k are unchanged),
+  and the per-capita venue, Hotel and Mission counts follow it: the reference city's mix, ~40 % of the Lots seeded
+  and the rest left to grow on (100k: 965 of 1,415 Lots vacant after the seeding, was 0). **Deviation:** the 100k
+  map has no Sump Lot at all (1,328 Mid, 87 Spire), so the FightPit (Sump only) never stood and no Fighter was
+  hired: a seeded venue with no Lot of its tier refits a derelict Block of the tier, unpaid, as the run's refits
+  do (`jobs::seed_derelict`). The Sump's Capsule Hotels still find no Lot at 100k (`OPEN-204`).
+- **The Back-Room Doc** was never hired at 20k either: only a Harvest or typed gang with 700 coins and a vacant Lot
+  on held ground opened a BlackClinic, and the typed (scav) gangs are memberless with 50 coins and hold nothing.
+  JOBS_AND_LIVES § 7's other founder is added (`gray::doc_clinics`): a struck-off doc with the found cost opens one
+  on the Lot nearest his Home. Struck-off docs stay rare (`p_struck_off`, 1 in 30 days at 20k), so the trade stays
+  rare; no knob moved.
+- **Preach** (`gang_member_18708`: 17 GangWork plans, 0 Preach): `busiest_spot` broke a 0-hanger tie by the lowest
+  tile of every held district, a map corner 2-3 h away, and the walk was always cut by another goal. The preacher's
+  own district first when held, ties by distance.
+- **Extortion of 0 coins** is a `Refused` ("Block#N gave X nothing (nobody was home | nobody had a coin)"), no
+  claim, no crime, the task done for the day, on screen and off; the off-screen shakedown now marks only the payers
+  robbed (it marked every resident). "extorted 0 coins" 171 -> 0, 237 such `Refused` lines instead.
+- **"Collected 0 to 0 members"** (`OPEN-118`, `OPEN-199`): an empty week is no Collect (`collect_pool`); 90 of
+  100 Collected lines -> 0 of 16.
+- **The law's noise.** A guard off shift files no petty offence (`law::on_duty`, `is_petty`: a fare dodge seen
+  from a commuting guard's seat; a murder he still reports); a guard with the fare pays it (`pays_or_dodges`); a
+  crime's noting witnesses are capped at `[crime] witness_cap` 4, the law's eye rolled first and always counted.
+  Witness 15,304 -> 9,643, Report 3,475 -> 2,994, Arrest 2,957 -> 2,530. **Arrest's `PreconditionLost`** is the suspect gone from a sighting up to
+  `suspect_seen_ticks` (240) old after a 15-45 min walk, the chase going on only within `sight + 2`: a guard at
+  the last-seen tile now also chases on to another guard's sighting `[life] chase_radio_ticks` (30) fresh. 4,936
+  -> 2,128 a month; the rest is the honest lost trail (what the guard does next is phase 5's).
+- **Bury** (`worker_friday_93234`): the "Cemetery" is the Recycler (the map's one Cemetery) and also his workplace,
+  so that resolution was right. The failures were a digger carrying one corpse into a Bury planned for another
+  (BuryCorpse `PreconditionLost` 337 -> 0: an abandoned Bury puts the body down, and a Bury binds the corpse in hand
+  first), and a second digger walking after a body in the first one's arms once the 2-h reservation lapsed (the
+  Corpse reservation now lasts `plan_timeout_ticks`; CarryCorpse `PreconditionLost` 404 -> 24, Buried 855 -> 947). The 18.9 h Bury day is the distance (F1).
+- **Tests** (no test added): three premises the moved city broke, re-pinned with the reason in place:
+  `person.rs::probe_working_couple_moves_near_work` skips a venue's floor (the longest couple became two
+  Companions at a full Lounge, the spouse laid off before the midnight), `housing.rs::test_company_rent_...` reads
+  the owner's share with the tax its accumulator rolls over, `sickness.rs::test_g3_only_the_broke_steal_food` runs
+  seed 410 (408 drew one broke theft in 20 days on `28aba7b`, none after; 409-412 draw 2-7).

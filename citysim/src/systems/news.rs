@@ -127,7 +127,7 @@ fn open_feed(world: &mut World, feed: EntityId, name: String) {
 /// three Reporter vacancies (`build_on_lot`). No RNG. A no-op with the news off.
 pub fn seed_feeds(world: &mut World) -> Vec<EntityId> {
     let mut built = Vec::new();
-    let copies = world.seed_copies();
+    let copies = world.lot_copies();
     // W41: the opening Feeds, the city's (the Civic, once per city) then
     // `[corps] seed_feeds` (M17 phase 5: owner corp by its row's template,
     // never by name; "<owner> Now", dealt once per copy of the template,

@@ -1079,7 +1079,9 @@ fn test_treatment_savings_zero_when_the_pool_covers_it() {
 fn test_g3_only_the_broke_steal_food() {
     let mut cfg = Config::load().dole_city().v1_profile();
     cfg.lod.force = Some(Lod::Full);
-    let mut w = World::new(408, cfg);
+    // The pressure pass F2: seed 410 (408 drew one broke theft in 20 days on
+    // `28aba7b` and none after F2 moved the law's noise; 409-412 draw 2-7).
+    let mut w = World::new(410, cfg);
     w.levers.dole_per_day = 0;
     let mut cursor = w.events.back().map_or(0, |e| e.id + 1);
     let (mut broke, mut able) = (0u32, Vec::new());

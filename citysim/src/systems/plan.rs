@@ -159,6 +159,13 @@ pub fn bind_target(world: &World, id: EntityId, goal: GoalKind) -> Option<Entity
         // Bury binds the nearest unburied corpse the agent knows of (SawCorpse),
         // skipping corpses someone else has reserved.
         GoalKind::Bury => {
+            // Pressure pass F2: the body in hand first (BuryCorpse buries
+            // what is carried; a plan for another corpse failed its start).
+            if let Some(c) = world.comp::<Brain>(id).and_then(|b| b.carrying_corpse) {
+                if world.comp::<crate::components::Corpse>(c).is_some_and(|k| !k.buried) {
+                    return Some(c);
+                }
+            }
             let tile = world.comp::<Position>(id)?.tile;
             let reserved: Vec<EntityId> = world
                 .reservations
@@ -586,6 +593,14 @@ fn reserve_for(world: &mut World, id: EntityId, plan: &Plan) {
             }
             ActionKind::CarryCorpse => plan.target.map(|corpse| ReservationKind::Corpse { corpse }),
             _ => None,
+        };
+        // Pressure pass F2: a corpse is held for the Bury's life (the walk
+        // there and the carry to the Recycler outlast `reservation_ttl`, and a
+        // second digger then walked after the body in the first one's arms:
+        // 404 CarryCorpse `PreconditionLost` in 30 days at 20k).
+        let expires = match kind {
+            Some(ReservationKind::Corpse { .. }) => world.tick + world.config.brain.plan_timeout_ticks,
+            _ => expires,
         };
         if let Some(kind) = kind {
             world.reserve(id, kind, expires);

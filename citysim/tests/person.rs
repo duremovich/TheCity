@@ -1248,8 +1248,18 @@ fn probe_working_couple_moves_near_work() {
             let mut w = w.clone();
             // The spouse works at the same place.
             let (employer, role) = w.comp::<Job>(a).map(|j| (j.employer.unwrap(), j.role)).unwrap();
+            // The pressure pass F2: not a venue's floor (a Lounge at full
+            // staff laid the extra Companion off before the midnight, and the
+            // longest couple was then no pair at one workplace).
+            if w.comp::<Building>(employer).is_some_and(|b| b.kind.is_leisure()) {
+                return None;
+            }
             w.remove::<Job>(s);
             demography::hire(&mut w, s, employer, role);
+            // ... and the hire takes (an age band or a dress may refuse it).
+            if !w.has::<Job>(s) {
+                return None;
+            }
             for m in [a, s] {
                 w.comp_mut::<Wallet>(m).expect("wallet").coins = 1_000;
             }

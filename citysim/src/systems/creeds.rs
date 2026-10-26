@@ -108,7 +108,7 @@ pub fn seed_unplugged(world: &mut World) -> Option<EntityId> {
     if world.gang_list().iter().any(|&g| is_purist(world, g)) {
         return None;
     }
-    let copies = world.seed_copies();
+    let copies = world.lot_copies();
     let mut first = None;
     for copy in 0..copies {
         if let Some(g) = seed_chapel(world, copy, copies) {

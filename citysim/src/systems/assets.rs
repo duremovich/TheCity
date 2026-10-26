@@ -2611,7 +2611,7 @@ pub fn seed_sellers(world: &mut World) -> Vec<EntityId> {
         (Seat::new(Zone::Sump, 0.0), false, BuildingKind::Clinic),
         (Seat::new(Zone::Mid, 0.75), false, BuildingKind::Clinic),
     ];
-    let copies = world.seed_copies();
+    let copies = world.lot_copies();
     for copy in 0..copies {
         let tech = if techs.is_empty() { None } else { Some(techs[copy % techs.len()]) };
         for &(seat, corp_owned, kind) in &rows {

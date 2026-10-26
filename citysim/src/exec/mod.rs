@@ -650,6 +650,21 @@ impl World {
     /// Drop the current plan: abandon the running step (partial effects per
     /// `actions::on_abort`), release reservations, reset execution.
     pub fn abort_plan(&mut self, id: EntityId) {
+        // Pressure pass F2: a Bury given up puts its body down where the
+        // digger stands (it was toted into the next goal, then a Bury for
+        // another corpse failed BuryCorpse with the first still carried, and
+        // a second digger walked after the moving body: 337 and 404
+        // `PreconditionLost` in 30 days at 20k).
+        let burying = self.comp::<Brain>(id).is_some_and(|b| b.plan_goal() == Some(crate::components::GoalKind::Bury));
+        if burying {
+            if let Some(c) = self.comp::<Brain>(id).and_then(|b| b.carrying_corpse) {
+                if self.has::<crate::components::Corpse>(c) {
+                    if let Some(b) = self.comp_mut::<Brain>(id) {
+                        b.carrying_corpse = None;
+                    }
+                }
+            }
+        }
         // A guard abandoning an escort lets the suspect go (to be re-arrested);
         // M13 D36: an abductor, its abductee.
         if let Some(suspect) = self.comp::<Brain>(id).and_then(|b| b.escorting) {

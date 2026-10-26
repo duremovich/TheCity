@@ -492,7 +492,7 @@ pub fn seed(world: &mut World) {
     }
     let n = world.config.vice.dollhouses;
     let rows = world.config.vice.corp_rows.clone();
-    for j in 0..world.seed_copies() {
+    for j in 0..world.lot_copies() {
         for &r in &rows {
             let Some(t) = world.config.corps.row_template(r) else { continue };
             let Some(&c) = world.corps_of_template(t).get(j) else { continue };

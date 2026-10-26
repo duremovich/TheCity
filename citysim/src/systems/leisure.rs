@@ -2668,6 +2668,11 @@ fn lead_started(world: &World, gang: EntityId) -> Option<Tick> {
 /// L2 shadow fixes item 15: a round started on the collect day stays due
 /// past midnight until its Collect runs.
 pub(crate) fn collect_due(world: &World, gang: EntityId) -> bool {
+    // Pressure pass F2 (OPEN-118's "Collected 0 to 0 members"): a week with
+    // nothing to share is no Collect; the tribute waits for the next one.
+    if collect_pool(world, gang) <= 0 {
+        return false;
+    }
     let today = world.day();
     let weekday = world.config.leisure.collect_weekday % 7;
     if let Some(t) = lead_started(world, gang) {
@@ -2773,6 +2778,22 @@ fn call(world: &mut World, gang: EntityId, leader: EntityId) {
     world.push_event(EventKind::Called, &[leader, gang], text);
 }
 
+/// Plan L20: the coins a Collect shares, `tribute_share × (the week's
+/// tribute + the fronts' take)`, net of the fronts' payroll the stipends
+/// keep back (review fix), at most the treasury.
+fn collect_pool(world: &World, gang: EntityId) -> i64 {
+    let take: i64 = fronts_of(world, gang)
+        .iter()
+        .filter_map(|&b| world.comp::<Building>(b).and_then(|bd| bd.venue.as_ref()))
+        .map(|v| v.take_week.max(0))
+        .sum();
+    let Some(g) = world.comp::<Gang>(gang) else { return 0 };
+    let week = g.tribute_week.max(0) + take;
+    let pool = (world.config.leisure.tribute_share * week as f32).floor() as i64;
+    let keep = 2 * owner_payroll(world, Some(gang));
+    pool.min((g.treasury - keep).max(0))
+}
+
 /// Plan L20: `tribute_share × (the week's territory tribute + the fronts'
 /// take)` from the treasury to the members, equal shares, highest rank
 /// first (the leader's ranking, then the rest by id); `Flow::Tribute`.
@@ -2787,10 +2808,7 @@ pub fn payout(world: &mut World, gang: EntityId, leader: Option<EntityId>) -> u3
         .sum();
     let Some(g) = world.comp::<Gang>(gang) else { return 0 };
     let week = g.tribute_week.max(0) + take;
-    let pool = (world.config.leisure.tribute_share * week as f32).floor() as i64;
-    // Review fix: net of the fronts' payroll the stipends keep back.
-    let keep = 2 * owner_payroll(world, Some(gang));
-    let pool = pool.min((g.treasury - keep).max(0));
+    let pool = collect_pool(world, gang);
     let mut members: Vec<EntityId> = crate::systems::gang::leader_ranking(world, gang);
     let mut rest: Vec<EntityId> = g.members.iter().copied().filter(|m| !members.contains(m)).collect();
     rest.sort_unstable();
@@ -2862,6 +2880,11 @@ pub fn payout(world: &mut World, gang: EntityId, leader: Option<EntityId>) -> u3
         g.collected_day = Some(today);
     }
     world.stats.current.living.collected += paid_members;
+    // Pressure pass F2 (OPEN-118): an empty Collect (the pool spent between
+    // the plan and the Hideout) closes the week without a line.
+    if paid_total == 0 && cut_note.is_empty() {
+        return 0;
+    }
     let who = leader.map_or_else(|| "the leader".to_string(), |l| world.name_of(l));
     let text = format!(
         "{who} collected for {}: {paid_total} to {paid_members} members (the week's tribute and take {week}{cut_note})",
@@ -2906,11 +2929,19 @@ pub fn preacher(world: &World, id: EntityId) -> bool {
         && world.comp::<Brain>(id).is_none_or(|b| b.gang_task_day != Some(world.day()))
 }
 
-/// The busiest spot (most hanging out now, then the lower tile) of the
-/// gang's held districts, else of its Hideout's district.
-fn busiest_spot(world: &World, gang: EntityId) -> Option<TilePos> {
+/// The busiest spot (most hanging out now, then the nearest to `from`, then
+/// the lower tile) of the gang's held districts, else of its Hideout's
+/// district. Pressure pass F2: the preacher's own district first when the
+/// gang holds it, and ties by distance (with nobody hanging out anywhere the
+/// lowest tile of every held district won: a preacher in D4 set out for a
+/// corner of the map 2-3 h away, 17 plans and no Preach in a week).
+fn busiest_spot(world: &World, gang: EntityId, from: TilePos) -> Option<TilePos> {
     let mut ds: Vec<DistrictId> =
         crate::systems::gang::held_districts(world, gang).into_iter().map(|(d, _)| d).collect();
+    let here = world.district_of(from);
+    if ds.contains(&here) {
+        ds = vec![here];
+    }
     if ds.is_empty() {
         ds.push(world.district_of_building(world.hideout_of(gang)?));
     }
@@ -2918,9 +2949,9 @@ fn busiest_spot(world: &World, gang: EntityId) -> Option<TilePos> {
         .filter_map(|d| world.spots.get(d.index()))
         .flat_map(|v| v.iter())
         .filter(|s| !matches!(s.kind, SpotKind::Hideout(g) if g != gang))
-        .map(|s| (world.hangouts.get(&s.tile).map_or(0, |v| v.len()), s.tile))
-        .max_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)))
-        .map(|(_, t)| t)
+        .map(|s| (world.hangouts.get(&s.tile).map_or(0, |v| v.len()), s.tile.manhattan(from), s.tile))
+        .max_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)).then(b.2.cmp(&a.2)))
+        .map(|(_, _, t)| t)
 }
 
 /// Plan L20: Preach's GangWork: `GoTo(Spot) → Preach` at the busiest spot.
@@ -2929,7 +2960,8 @@ pub fn preach_plan(world: &mut World, id: EntityId) -> Option<Plan> {
         return None;
     }
     let gang = world.gang_of(id)?;
-    let tile = busiest_spot(world, gang)?;
+    let from = world.comp::<Position>(id)?.tile;
+    let tile = busiest_spot(world, gang, from)?;
     world.unwind.insert(
         id,
         UnwindPick {

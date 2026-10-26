@@ -43,6 +43,12 @@ pub fn is_guard(world: &World, id: EntityId) -> bool {
     world.comp::<Job>(id).is_some_and(|j| j.role == Role::Guard)
 }
 
+/// Pressure pass F2: a guard on shift now (the law at work, whose sighting
+/// of a crime is a report).
+pub fn on_duty(world: &World, id: EntityId) -> bool {
+    world.comp::<Job>(id).is_some_and(|j| j.role == Role::Guard && j.on_shift(world.tick_of_day()))
+}
+
 /// Guards (any LOD) within `r` tiles of `id`, excluding `id`.
 pub fn guard_within(world: &World, id: EntityId, r: u32) -> bool {
     world.guards().iter().any(|&g| g != id && near(world, id, g, r))
@@ -235,7 +241,7 @@ pub fn raise_crime_mult(
     if let (false, Some(b)) = (detained, actor_building) {
         crate::systems::virt::camera_sense(world, actor, crime, b);
     }
-    let witnesses: Vec<EntityId> = world
+    let mut witnesses: Vec<EntityId> = world
         .bodies()
         .into_iter()
         .filter(|_| !detained)
@@ -250,8 +256,13 @@ pub fn raise_crime_mult(
             })
         })
         .collect();
+    // Pressure pass F2: the law's eye is rolled first (the cap below never
+    // drops it), then the rest in id order.
+    witnesses.sort_by_key(|&w| (!(on_duty(world, w) || (is_guard(world, w) && !is_petty(crime))), w));
 
     let mut noticed = 0usize;
+    let mut recorded = 0u32;
+    let cap = cfg.witness_cap;
     // M15 W28: a guard notices × the law's competence multiplier (1 when off).
     let law_mult = crate::systems::competence::law_mult(world);
     // M15 W24: a Hunt's strike on its target: the street keeps quiet.
@@ -262,6 +273,15 @@ pub fn raise_crime_mult(
         // another -0.2 of affinity, so a stranger was an Enemy in 32 minutes.
         if crate::systems::life::saw_recently(world, w, actor, crime) {
             noticed += 1;
+            continue;
+        }
+        // Pressure pass F2: the law's eye: a guard on shift, or one off shift
+        // for anything past petty (a murder is reported off duty, a fare
+        // dodge seen from a commuting guard's seat is not).
+        let duty = on_duty(world, w) || (is_guard(world, w) && !is_petty(crime));
+        // Past `witness_cap` noting witnesses the crowd saw nothing it will
+        // remember (the law's eye always counts).
+        if cap > 0 && recorded >= cap && !duty {
             continue;
         }
         let guard = is_guard(world, w);
@@ -294,6 +314,7 @@ pub fn raise_crime_mult(
             world.stats.current.word.silenced += 1;
             continue;
         }
+        recorded += 1;
         world.remember_crime(w, actor, crime, salience, object);
         crate::systems::social::witnessed_crime_of(world, w, actor);
         if let Some(n) = world.comp_mut::<Needs>(w) {
@@ -305,7 +326,10 @@ pub fn raise_crime_mult(
             format!("{} saw {} commit {}", world.name_of(w), world.name_of(actor), crime.label()),
         );
         // M16a (plan C31): a guard on the take keeps the memory, files nothing.
-        if guard && !crate::systems::contracts::on_take_of(world, w, actor) {
+        // Pressure pass F2: nor does one off shift for a petty offence (a
+        // commuting guard filed 113 fare dodges from his train seat and the
+        // watch walked to each); there he is a witness like anyone.
+        if duty && !crate::systems::contracts::on_take_of(world, w, actor) {
             file_report(world, crime, actor, Some(w));
         }
     }
