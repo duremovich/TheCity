@@ -571,8 +571,14 @@ fn test_parley_makes_peace_for_tribute() {
     w.config.taste.meet_gap = f32::MAX;
     assert!(until_ok(&mut w, |w| leverage::try_parley(w, g, r)), "the parley landed");
     assert!(!w.vendettas.iter().any(|v| (v.a == g && v.b == r) || (v.a == r && v.b == g)), "the feud closed");
-    let c = w.coercions.values().find(|c| c.why == CoercionWhy::Parley).expect("a tribute");
-    assert_eq!((c.holder, c.payer, c.paid), (Some(r), Some(g), 1));
+    // The pressure pass (phases 3 and 5a merged): the city may already hold
+    // another gang pair's Parley tribute, so read this pair's.
+    let c = w
+        .coercions
+        .values()
+        .find(|c| c.why == CoercionWhy::Parley && c.holder == Some(r) && c.payer == Some(g))
+        .expect("a tribute");
+    assert_eq!(c.paid, 1);
     assert!(w.regard[&(g, r)].value > regard);
     assert!(has_event(&w, EventKind::Parleyed, l));
 }
