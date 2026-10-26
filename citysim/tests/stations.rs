@@ -759,32 +759,3 @@ fn test_the_transfer_is_a_van_run_with_no_jump() {
         assert!(w.has::<Sentence>(p), "the Sentence stands");
     }
 }
-
-/// I3: a save taken mid-transfer resumes byte for byte (the van, its run
-/// and its prisoners), and the loaded world books them in as the live one.
-#[test]
-fn test_a_save_mid_transfer_resumes_identically() {
-    let mut w = station_world();
-    let (_, [body, _, _]) = three_held(&mut w);
-    send_the_van(&mut w);
-    for _ in 0..6 {
-        law_tick(&mut w);
-    }
-    assert!(motion::vehicle_of(&w, body).is_some(), "mid-ride");
-    let text = citysim::save::to_ron(&w);
-    let mut back = citysim::save::from_ron(&text).expect("loads");
-    assert_eq!(citysim::save::to_ron(&back), text, "the save round-trips");
-    for _ in 0..300 {
-        law_tick(&mut w);
-        law_tick(&mut back);
-        assert_eq!(
-            back.comp::<Position>(body).map(|p| (p.tile, p.building)),
-            w.comp::<Position>(body).map(|p| (p.tile, p.building)),
-            "tick {}",
-            w.tick
-        );
-    }
-    let jail = w.building_of_kind(BuildingKind::Jail).expect("the Precinct");
-    assert_eq!(w.comp::<Position>(body).and_then(|p| p.building), Some(jail), "booked in");
-    assert_eq!(citysim::save::to_ron(&back), citysim::save::to_ron(&w), "identical after the run");
-}

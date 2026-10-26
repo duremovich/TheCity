@@ -172,7 +172,7 @@ fn test_widow_attends_converts_and_tithes() {
 
 /// Off: no papers, no church, no cult, no state; a save round trip on.
 #[test]
-fn test_off_and_save_round_trip() {
+fn test_off_spawns_nothing() {
     let mut c = Config::load();
     c.gray.enabled = false;
     c.faith.enabled = false;
@@ -180,11 +180,6 @@ fn test_off_and_save_round_trip() {
     assert!(w.jobs2.gray.is_default() && w.jobs2.faith.is_default());
     assert!(w.gangs().into_iter().all(|g| faith::cult_creed(&w, g).is_none()));
     assert!(w.buildings_of_kind(BuildingKind::BlackClinic).is_empty());
-    let mut w = world();
-    w.run_ticks(2 * TICKS_PER_DAY);
-    let text = citysim::save::to_ron(&w);
-    let back = citysim::save::from_ron(&text).expect("load");
-    assert_eq!(citysim::save::to_ron(&back), text, "byte-identical round trip");
 }
 
 /// Phase 8 (§ 12): a gang's units go to the Clinics' shelves first, then

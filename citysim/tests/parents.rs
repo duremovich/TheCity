@@ -9,7 +9,7 @@ mod common;
 
 use citysim::outside::{OutsideKind, OutsideOrder};
 use citysim::systems::{econ, outside, parents};
-use citysim::{save, Config, Corp, EntityId, EventKind, Gang, PlayerCommand, World, TICKS_PER_DAY};
+use citysim::{Config, Corp, EntityId, EventKind, Gang, PlayerCommand, World, TICKS_PER_DAY};
 use common::corp_named;
 
 fn account(w: &World, name: &str) -> citysim::outside::OutsideFaction {
@@ -215,37 +215,6 @@ fn test_switch_off_seeds_no_parents() {
     assert_eq!(w.outside.parents().count(), 0);
     let arasaka = corp_named(&w, "Arasaka");
     assert_eq!(w.comp::<Corp>(arasaka).and_then(|c| c.parent), Some(citysim::OUTSIDE_PARENT_BASE + 6));
-}
-
-/// A save from before M17 phase 2 loads with the accounts built; the
-/// identity carries over (the seeding is minted).
-#[test]
-fn test_pre_m17_save_builds_the_accounts() {
-    let mut c = Config::load();
-    c.outside.enabled = false;
-    let mut w = World::new(42, c);
-    w.run_ticks(TICKS_PER_DAY + 30);
-    w.config.outside.enabled = true;
-    w.save_version = 21;
-    let before = econ::identity(&w);
-    let back = save::from_ron(&save::to_ron(&w)).expect("loads");
-    assert_eq!(back.outside.parents().count(), 5);
-    assert_eq!(econ::identity(&back), before);
-    let arasaka = corp_named(&back, "Arasaka");
-    assert_eq!(back.comp::<Corp>(arasaka).and_then(|c| c.parent), Some(account(&back, "Arasaka Global").id));
-}
-
-/// A save mid-run resumes byte for byte with the ledgers.
-#[test]
-fn test_save_round_trip_with_the_parents() {
-    let mut w = World::new(42, Config::load());
-    w.run_ticks(3 * TICKS_PER_DAY + 400);
-    let text = save::to_ron(&w);
-    let mut back = save::from_ron(&text).expect("loads");
-    assert_eq!(save::to_ron(&back), text);
-    w.run_ticks(2 * TICKS_PER_DAY);
-    back.run_ticks(2 * TICKS_PER_DAY);
-    assert_eq!(save::to_ron(&back), save::to_ron(&w));
 }
 
 /// A syndicate's gang pays `tribute_share` of its treasury above

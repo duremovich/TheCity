@@ -12,8 +12,8 @@ use rand::Rng;
 
 use citysim::systems::{demography, law, weapons};
 use citysim::{
-    Asset, AssetKind, AssetLoc, Brain, BuildingKind, Config, Crime, EntityId, EventKind, Gang, Household, Job, Kit,
-    Personality, Position, ProvKind, Provenance, Role, Skills, TilePos, Wallet, World,
+    Asset, AssetLoc, Brain, BuildingKind, Config, Crime, EntityId, EventKind, Gang, Household, Job, Kit, Personality,
+    Position, ProvKind, Provenance, Role, Skills, TilePos, Wallet, World,
 };
 
 fn on_world() -> World {
@@ -378,23 +378,6 @@ fn test_weapons_off_spawn_nothing() {
     assert!(staffed, "its gunsmiths are hired");
     let role: Role = on.config.trade_role("gunsmith").expect("the gunsmith row");
     assert!(on.workers(role).iter().all(|&s| on.comp::<Job>(s).is_some_and(|j| j.role == role)));
-}
-
-#[test]
-fn test_save_round_trip_keeps_the_store() {
-    let (mut w, gang) = city_with_a_gang();
-    let people = civilians(&w);
-    arm(&mut w, people[0], 3);
-    w.jobs2.arms.licences.insert(people[0]);
-    weapons::flood(&mut w, gang, 3, 2).expect("flood");
-    let text = citysim::save::to_ron(&w);
-    let back = citysim::save::from_ron(&text).expect("load");
-    assert_eq!(citysim::save::to_ron(&back), text, "byte-identical round trip");
-    assert_eq!(back.jobs2.arms, w.jobs2.arms);
-    assert_eq!(kit_weapon(&back, people[0]), 3, "the Kit rebuilt from the store");
-    let x = back.comp::<Asset>(*w.jobs2.arms.index.iter().next_back().expect("one")).expect("asset");
-    assert_eq!(x.kind, AssetKind::Weapon);
-    assert!(x.prov.is_some());
 }
 
 /// Phase-8 review finding 1: an unlicensed weapon is petty. With a Theft

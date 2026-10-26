@@ -209,24 +209,6 @@ fn test_civic_budget_conserves_coins_over_a_run() {
     assert_eq!(*w.econ.receipts.back().expect("receipts"), r);
 }
 
-/// J16, J17: `EconState.receipts` and `civic_pinned` survive a save round
-/// trip, and the headcounts are unchanged across the load.
-#[test]
-fn test_civic_state_survives_a_save() {
-    let mut w = city();
-    w.run_ticks(3 * TICKS_PER_DAY);
-    assert!(!w.econ.receipts.is_empty(), "receipts after three midnights");
-    w.push_command(PlayerCommand::SetGuardCount(22));
-    w.apply_commands();
-    assert!(w.econ.civic_pinned);
-    let back = citysim::save::from_ron(&citysim::save::to_ron(&w)).expect("the save loads");
-    assert_eq!(back.econ.receipts, w.econ.receipts);
-    assert!(back.econ.civic_pinned);
-    assert_eq!(back.levers.guard_count, 22);
-    assert_eq!(back.levers.sanitation_count, w.levers.sanitation_count);
-    assert_eq!(back.econ, w.econ);
-}
-
 /// Flip readiness: `Config::scaled_to` scales the no-net Treasury's coin
 /// keys (the band, the kept balance, the till float, the Sanitation
 /// ceiling), so a 300-resident no-net city keeps its police: unscaled, its

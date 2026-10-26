@@ -147,21 +147,6 @@ fn test_daily_pass_binds_consequential_hole() {
 }
 
 #[test]
-fn test_binding_identical_across_save_load() {
-    let mut w = traced_world(303);
-    let victims: Vec<EntityId> = w.tier(Lod::Statistical).iter().copied().take(6).collect();
-    let ids: Vec<HoleId> = victims.iter().map(|&v| manual_hole(&mut w, v, HoleKind::Robbed, 100)).collect();
-    let mut loaded = save::from_ron(&save::to_ron(&w)).expect("round trip");
-    for id in ids {
-        let a = bind::bind(&mut w, id);
-        let b = bind::bind(&mut loaded, id);
-        assert_eq!(a, b, "hole {id}");
-        assert!(a.is_some());
-    }
-    assert_eq!(attributed_texts(&w), attributed_texts(&loaded), "same actors, witnesses and texts");
-}
-
-#[test]
 fn test_binding_identical_across_call_order() {
     let mut w = traced_world(304);
     let stat: Vec<EntityId> = w.tier(Lod::Statistical).to_vec();

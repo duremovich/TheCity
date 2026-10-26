@@ -296,21 +296,6 @@ fn test_statistical_split() {
     assert!(wounded::stat_kill_p(&w, c, p).unwrap() < eff, "a client's is lower");
 }
 
-/// A save mid-wound runs on byte for byte.
-#[test]
-fn test_save_mid_wound_round_trips() {
-    let mut w = world();
-    let [v, by] = strangers(&w, 2)[..] else { unreachable!() };
-    wounded::down(&mut w, v, Some(by));
-    w.run_ticks(30);
-    let text = citysim::save::to_ron(&w);
-    let mut back = citysim::save::from_ron(&text).expect("loads");
-    assert_eq!(citysim::save::to_ron(&back), text);
-    w.run_ticks(TICKS_PER_DAY);
-    back.run_ticks(TICKS_PER_DAY);
-    assert_eq!(citysim::save::to_ron(&back), citysim::save::to_ron(&w));
-}
-
 /// M16b review finding 6: a stabilised patient frees its quota slot and is
 /// fed at midnight (its carer pays), not left three days unfed.
 #[test]

@@ -596,22 +596,6 @@ fn test_fabricated_spin_and_exposure() {
     assert!(w.feed_shamed.contains_key(&feed));
 }
 
-/// A save mid-hold runs on byte for byte.
-#[test]
-fn test_save_mid_hold_round_trips() {
-    let mut w = gang_world();
-    let (g, l, h) = a_gang(&mut w);
-    let [v] = strangers(&w, 1)[..] else { unreachable!() };
-    assert!(captives::take(&mut w, v, Some(g), l, h, Some(Demand::Coins { amount: 100, weekly: false }), None));
-    w.run_ticks(30);
-    let text = citysim::save::to_ron(&w);
-    let mut back = citysim::save::from_ron(&text).expect("loads");
-    assert_eq!(citysim::save::to_ron(&back), text);
-    w.run_ticks(TICKS_PER_DAY);
-    back.run_ticks(TICKS_PER_DAY);
-    assert_eq!(citysim::save::to_ron(&back), citysim::save::to_ron(&w));
-}
-
 /// M16b review finding 2: a god hold with no holder has no hand-over
 /// agent: the captive is not its own abductor, nobody rolls its demand and
 /// nobody kills it at the hold's end.

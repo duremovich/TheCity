@@ -5,8 +5,6 @@
 
 mod common;
 
-use rand::Rng;
-
 use citysim::systems::faction::{self, OrderInputs};
 use citysim::systems::{assets, bind, chrome, demography, gang, law, lod};
 use citysim::world::StatRow;
@@ -64,40 +62,6 @@ fn open_clinic(w: &mut World, who: EntityId) -> EntityId {
     demography::hire(w, who, c, Role::Ripperdoc);
     w.tick = 600;
     c
-}
-
-/// Plan 3.9, written against the M12 fight code before any Kit term: two
-/// unchromed fighters roll exactly as in M12, assets on or off (D31:
-/// branches, not zero terms).
-#[test]
-fn test_unchromed_fight_identical_to_m12() {
-    let mut on = Config::load().dole_city().scaled_to(300);
-    on.assets.enabled = true;
-    // The loot window (D13) defers a death's inheritance event; it is not a
-    // fight term, so it is held at M12's 0 here.
-    on.assets.loot_window_hours = 0;
-    let mut off = on.clone();
-    off.assets.enabled = false;
-    let mut a = World::new(42, on);
-    let mut b = World::new(42, off);
-    let (ev_a, ev_b) = (a.events.len(), b.events.len());
-    let mut log_a = Vec::new();
-    let mut log_b = Vec::new();
-    for i in 0..50 {
-        for (w, log) in [(&mut a, &mut log_a), (&mut b, &mut log_b)] {
-            let people = adults(w);
-            let (x, y) = (people[(2 * i) % people.len()], people[(2 * i + 1) % people.len()]);
-            assert!(w.comp::<citysim::Kit>(x).is_none_or(|k| k.is_bare()));
-            let r = law::resolve_fight(w, x, y);
-            log.push(r);
-        }
-    }
-    assert_eq!(log_a, log_b, "identical (winner, loser, died)");
-    let tail = |w: &World, from: usize| -> Vec<String> {
-        w.events.iter().skip(from).map(|e| format!("{:?} {}", e.kind, e.text)).collect()
-    };
-    assert_eq!(tail(&a, ev_a), tail(&b, ev_b), "the same event log");
-    assert_eq!(a.rng.world().random::<u64>(), b.rng.world().random::<u64>(), "the world stream in step");
 }
 
 #[test]

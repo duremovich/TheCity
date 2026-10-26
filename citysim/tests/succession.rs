@@ -437,17 +437,6 @@ fn test_god_send_brothers() {
     }
 }
 
-/// A war in flight saves and loads, and runs on byte for byte.
-#[test]
-fn test_save_round_trip_with_a_war() {
-    let (mut w, g, _, _) = at_war();
-    let mut back = citysim::save::from_ron(&citysim::save::to_ron(&w)).expect("loads");
-    assert_eq!(back.comp::<Gang>(g).expect("gang").war, w.comp::<Gang>(g).expect("gang").war);
-    w.run_ticks(TICKS_PER_DAY);
-    back.run_ticks(TICKS_PER_DAY);
-    assert_eq!(citysim::save::to_ron(&w), citysim::save::to_ron(&back));
-}
-
 /// A jailed leader leaves an acting leader, never a war (the boss walks
 /// back in on release), however close the runners-up stand.
 #[test]

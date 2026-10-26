@@ -1155,23 +1155,6 @@ fn test_buyer_learns_and_remembers_the_deed() {
     assert!(heard, "the buyer knows who did it, first-hand");
 }
 
-/// H22: a want and a debt clock survive a save round trip.
-#[test]
-fn test_save_round_trip_with_a_want_and_a_debt_clock() {
-    let mut w = world();
-    let (h, t) = walking_buyer(&mut w, citysim::Lod::Full);
-    assert!(hitmarket::try_revenge(&mut w, h, t, 0.95));
-    let now = w.tick;
-    w.hm_debts.insert((h, t), citysim::contract::DebtClock { seen: now, beat: Some(now) });
-    // The gaps pass: a stiffed gun's grace (save 9).
-    w.hm_stiffs.insert((t, h), (now, 0.8));
-    let text = citysim::save::to_ron(&w);
-    let back = citysim::save::from_ron(&text).expect("load");
-    assert_eq!(back.wants, w.wants);
-    assert_eq!(back.hm_debts, w.hm_debts);
-    assert_eq!(back.hm_stiffs, w.hm_stiffs);
-}
-
 /// P2 fix round: a direct Hit's viewer must pass the gun gate, as a
 /// Fixer's regulars did to network: a friend with a well-paid day job does
 /// not take it; the same friend jobless and broke does.

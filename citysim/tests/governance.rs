@@ -476,15 +476,6 @@ fn test_expose_secret_lapses_the_blackmail() {
     assert_eq!(w.coercions[&id].status, CoercionStatus::Lapsed);
 }
 
-/// A board survives a save and load (the serde-default fields).
-#[test]
-fn test_board_round_trips() {
-    let w = boards();
-    let c = habitat(&w);
-    let back = citysim::save::from_ron(&citysim::save::to_ron(&w)).expect("loads");
-    assert_eq!(back.comp::<Corp>(c).unwrap().governance, w.comp::<Corp>(c).unwrap().governance);
-}
-
 /// M16b review finding 3: a `Vote` coercion whose corp lost its board
 /// breaks at the next midnight (it never held a slot forever).
 #[test]

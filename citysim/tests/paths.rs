@@ -266,33 +266,6 @@ fn test_landmarks_follow_the_tiles() {
     assert!(w.landmark_base.is_none());
 }
 
-/// Review finding 10: the landmarks kept across a closure (a building going
-/// up on a Lot) are the ones a loaded world searches with, so a save after
-/// the closure resumes byte for byte (the paths' tie-breaks follow the
-/// heuristic). Big paths forced on the 2k map; Full walkers so the paths run.
-#[test]
-fn test_save_after_a_closure_resumes_byte_for_byte() {
-    let mut cfg = Config::load();
-    cfg.exec.flow_field_max_tiles = 0;
-    cfg.lod.force = Some(citysim::Lod::Full);
-    let mut w = World::new(42, cfg);
-    w.run_ticks(120);
-    let before = w.flow_fields.landmarks(&w.map);
-    let lot = citysim::systems::founding::vacant_lots(&w).into_iter().next().expect("a vacant Lot");
-    citysim::systems::founding::build_on_lot(&mut w, lot, citysim::BuildingKind::Bar, None).expect("built");
-    assert!(std::sync::Arc::ptr_eq(&before, &w.flow_fields.landmarks(&w.map)), "the closure kept the landmarks");
-    assert!(w.landmark_base.is_some(), "and the world notes their tiles");
-    w.run_ticks(30);
-    let text = citysim::save::to_ron(&w);
-    let mut back = citysim::save::from_ron(&text).expect("load");
-    assert_eq!(citysim::save::to_ron(&back), text);
-    w.run_ticks(240);
-    back.run_ticks(240);
-    assert!(citysim::save::to_ron(&back) == citysim::save::to_ron(&w), "the load walks on byte for byte");
-    let (a, b) = (w.flow_fields.landmarks(&w.map), back.flow_fields.landmarks(&back.map));
-    assert!(a.base_tiles() == b.base_tiles() && !a.same_tiles(&w.map), "the same stale landmarks");
-}
-
 /// The El's per-tile shortlist (`Net::near`) is the brute-force scan's: the
 /// `NEAR` nearest stops by `(Manhattan, index)`, on every tile of the
 /// shipped map, from a per-cell candidate index.

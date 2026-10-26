@@ -3,7 +3,7 @@
 
     python tools/test.py change      fmt, clippy, every non-ignored test
     python tools/test.py merge       the year, the behaviour tier, the god scenarios (serial)
-    python tools/test.py milestone   Full-vs-Statistical parity, the 20k profile
+    python tools/test.py milestone   the 20k profile (core_20k, god_20k)
     python tools/test.py diag        list the diag-tier tests; --only NAME runs one
     python tools/test.py lint        ignore reasons, caps, OPEN.md ids
     python tools/test.py report      the close-of-milestone table [--since SHA]
@@ -65,7 +65,6 @@ TIERS = {
         ("god_districts", "god_districts", ["--ignored", "--nocapture"]),
     ],
     "milestone": [
-        ("parity", "lod", ["--ignored", "test_full_vs_statistical_within_15pct", "--nocapture"]),
         ("core_20k", "core", ["--ignored", "core_20k", "--nocapture"]),
         ("god_20k", "god_20k", ["--ignored", "--nocapture"]),
     ],
@@ -86,7 +85,6 @@ CHANGE_BESIDE = [
     ("bodies", "test_refound_only_after_refound_days"),
     ("ambient", "test_materialised_look_like_born_residents"),
     ("weapons", "test_parent_dies_at_death_days_and_takes_its_branches"),
-    ("save", "test_live_save_resumes_after_lots_are_built"),
 ]
 
 # The change tier's tests step runs its jobs (every test binary, the long

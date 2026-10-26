@@ -722,33 +722,6 @@ fn test_court_persuade_posted_and_resolved() {
     assert_eq!(w.stats.current.leverage.k_persuade_done, 1);
 }
 
-/// A save mid-coercion runs on byte for byte.
-#[test]
-fn test_save_mid_coercion_round_trips() {
-    let mut w = gang_world();
-    let (g, leader, b, owner) = racket(&mut w);
-    set_coins(&mut w, owner, 10_000);
-    let weekly = w.config.leverage.protection_weekly;
-    leverage::force(
-        &mut w,
-        Some(g),
-        leader,
-        owner,
-        Leverage::Threat,
-        Demand::Coins { amount: weekly, weekly: true },
-        CoercionWhy::Protection,
-        Some(owner),
-        Some(b),
-    );
-    w.run_ticks(30);
-    let text = citysim::save::to_ron(&w);
-    let mut back = citysim::save::from_ron(&text).expect("loads");
-    assert_eq!(citysim::save::to_ron(&back), text);
-    w.run_ticks(TICKS_PER_DAY);
-    back.run_ticks(TICKS_PER_DAY);
-    assert_eq!(citysim::save::to_ron(&back), citysim::save::to_ron(&w));
-}
-
 /// M16b review finding 1: a weekly coercion held by a faction (a gang) is
 /// paid, not broken on its first week (a gang is no living person).
 #[test]

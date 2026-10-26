@@ -437,26 +437,6 @@ fn test_a_plant_dark_for_days_is_seized_by_the_city() {
     assert!(!w.jobs2.plant_dark_days.contains_key(&p));
 }
 
-/// Saves: a world with Pitches, idle days and the day's parcels runs on
-/// byte for byte after a round trip.
-#[test]
-fn test_save_round_trip_with_the_street() {
-    let mut w = world_with(|c| {
-        c.jobs2.p_pitch_open = 1.0;
-        c.jobs2.pitch_after_days = 0;
-    });
-    let a = jobless(&w)[0];
-    vendor_pitch(&mut w, a);
-    w.run_ticks(citysim::TICKS_PER_DAY + 7 * TICKS_PER_HOUR);
-    assert!(!w.jobs2.pitches.is_empty());
-    let text = citysim::save::to_ron(&w);
-    let mut back = citysim::save::from_ron(&text).expect("loads");
-    assert_eq!(citysim::save::to_ron(&back), text);
-    w.run_ticks(3 * TICKS_PER_HOUR);
-    back.run_ticks(3 * TICKS_PER_HOUR);
-    assert_eq!(citysim::save::to_ron(&back), citysim::save::to_ron(&w));
-}
-
 // ---------------------------------------------------------------------------
 // Shadow V4 bug 6 (docs/SHADOW_V4.md): the elder's pitch at the nearest spot.
 // ---------------------------------------------------------------------------

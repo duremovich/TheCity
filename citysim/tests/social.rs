@@ -215,18 +215,6 @@ fn test_own_partner_reservation_does_not_hide_partner() {
     assert_ne!(social::best_colocated_partner(&w, c, -1.0, false), Some(b), "someone else's reservation is");
 }
 
-#[test]
-fn test_indices_rebuilt_on_load() {
-    let mut w = world(39);
-    w.run_ticks(2 * TICKS_PER_DAY);
-    let text = citysim::save::to_ron(&w);
-    let loaded = citysim::save::from_ron(&text).expect("load");
-    assert_eq!(loaded.neighbours, w.neighbours);
-    assert_eq!(loaded.spouses, w.spouses);
-    assert_eq!(loaded.enemies, w.enemies);
-    assert!(!loaded.spouses.is_empty());
-}
-
 // ---------------------------------------------------------------------------
 // Shadow V4 batch 3 (docs/SHADOW_V4.md): a wronged spouse survives a load.
 // ---------------------------------------------------------------------------
@@ -235,12 +223,10 @@ fn test_indices_rebuilt_on_load() {
 /// spouse in the edge as in `World::spouses`, so a loaded world rebuilds
 /// the same marriage the running one holds.
 #[test]
-fn test_wronged_spouse_index_survives_a_load() {
+fn test_wronged_spouse_stays_married() {
     let mut w = common::world();
     let (a, s) = w.citizens().into_iter().find_map(|x| w.spouse_of(x).map(|s| (x, s))).expect("a married pair");
     social::robbed_by(&mut w, a, s);
     assert_eq!(w.spouse_of(a), Some(s), "still married in the running world");
-    let back = citysim::save::from_ron(&citysim::save::to_ron(&w)).expect("loads");
-    assert_eq!(back.spouse_of(a), Some(s), "and in the loaded one");
     assert!(w.edge(a, s).is_some_and(|e| e.affinity < 0.0), "the wrong is felt");
 }

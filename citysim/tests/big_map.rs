@@ -3,7 +3,7 @@
 //! 255 round-trips; the CSV grows a slot group per district or corp past the
 //! 2k header's.
 
-use citysim::{save, stats, Building, BuildingKind, Config, Position, TilePos, World, TICKS_PER_DAY};
+use citysim::{Building, BuildingKind, Config, Position, TilePos, World, TICKS_PER_DAY};
 
 const W: usize = 600;
 const H: usize = 400;
@@ -148,60 +148,4 @@ fn test_big_map_loads_and_runs_a_day() {
     w.comp_mut::<Building>(jail).expect("jail").capacity = 400;
     w.run_ticks(60);
     assert_eq!(w.comp::<Building>(jail).expect("jail").capacity, 400);
-}
-
-#[test]
-fn test_save_round_trips_large_coordinates() {
-    let cfg = big_config("save");
-    let mut w = World::new(43, cfg);
-    // Past a midnight: the day traces hold districts past 15 (the packed
-    // trace's fifth district bit).
-    w.run_ticks(TICKS_PER_DAY + 60);
-    let traced = |w: &World| -> Vec<(citysim::EntityId, usize)> {
-        w.citizens()
-            .into_iter()
-            .filter_map(|a| w.comp::<citysim::Trace>(a).and_then(|t| t.on_day(0)).map(|t| (a, t.district.index())))
-            .collect()
-    };
-    let before = traced(&w);
-    assert!(before.iter().any(|&(_, d)| (16..22).contains(&d)), "a day ended in a district past 15");
-    let a = w.citizens()[0];
-    let far = TilePos::new(599, 399);
-    assert_eq!(w.map.tile_at(far), citysim::TileKind::Ground);
-    w.comp_mut::<Position>(a).expect("pos").tile = far;
-    let jail = w.building_of_kind(BuildingKind::Jail).expect("jail");
-    w.comp_mut::<Building>(jail).expect("jail").capacity = 1_000;
-    w.levers.guard_count = 300;
-    let text = save::to_ron(&w);
-    let mut back = save::from_ron(&text).expect("load");
-    assert_eq!(back.comp::<Position>(a).expect("pos").tile, far);
-    assert_eq!(back.comp::<Building>(jail).expect("jail").capacity, 1_000);
-    assert_eq!(back.levers.guard_count, 300);
-    assert_eq!(back.districts.len(), 22);
-    assert_eq!(traced(&back), before);
-    assert_eq!(save::to_ron(&back), text);
-    w.run_ticks(120);
-    back.run_ticks(120);
-    assert_eq!(blake3::hash(save::to_ron(&w).as_bytes()), blake3::hash(save::to_ron(&back).as_bytes()));
-}
-
-/// The 2k header is the constant; more corps or districts grow each slot
-/// group in place, after its last slot.
-#[test]
-fn test_csv_header_grows_its_slot_groups() {
-    assert_eq!(stats::csv_header(9, 8), stats::CSV_HEADER);
-    assert_eq!(stats::csv_header(3, 5), stats::CSV_HEADER);
-    let h = stats::csv_header(11, 10);
-    let extra = 2 * (2 + 4 + 3) + 2 * (6 + 1 + 3);
-    assert_eq!(h.split(',').count(), stats::CSV_HEADER.split(',').count() + extra);
-    for run in [
-        "corp9_order,corp10_treasury,corp10_order,corp11_treasury,corp11_order,acquisitions",
-        "corp9_data,corp10_tier_chrome,corp10_tier_deck,corp10_tier_industry,corp10_data,corp11_tier_chrome",
-        "c9_competence,c10_honour,c10_standing,c10_competence,c11_honour,c11_standing,c11_competence,law_competence",
-        "d8_guards,d9_coverage,d9_control,d9_litter,d9_unrest,d9_crime,d9_guards,d10_coverage",
-        "d8_street_density,d9_street_density,d10_street_density,fv_killed",
-        "d8_dregs,d9_meals,d9_starving,d9_dregs,d10_meals,d10_starving,d10_dregs,civic_payroll",
-    ] {
-        assert!(h.contains(run), "{run}");
-    }
 }

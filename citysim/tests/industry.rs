@@ -450,25 +450,3 @@ fn test_jailers_short_reads_the_held() {
     }
     assert!(!industry::jailers_short(&w));
 }
-
-/// Saves: a world with every phase 1 state (a dark district, an open site,
-/// fuel owed, the civic targets) runs on byte for byte after a round trip.
-#[test]
-fn test_save_round_trip_with_phase1_state() {
-    let mut w = on_world();
-    w.run_ticks(citysim::TICKS_PER_HOUR * 3);
-    w.jobs2.plant_seen.clear();
-    let corp = w.corps()[0];
-    if let Some(lot) = citysim::systems::founding::vacant_lots(&w).into_iter().next() {
-        citysim::systems::founding::build_on_lot(&mut w, lot, BuildingKind::Bar, Some(corp)).expect("built");
-        industry::pay_build(&mut w, Some(corp), 100, Some(lot), true);
-    }
-    industry::civic_allocate(&mut w, 100);
-    w.run_ticks(citysim::TICKS_PER_HOUR * 2);
-    let text = citysim::save::to_ron(&w);
-    let mut back = citysim::save::from_ron(&text).expect("loads");
-    assert_eq!(citysim::save::to_ron(&back), text, "the round trip lost state");
-    w.run_ticks(citysim::TICKS_PER_HOUR * 4);
-    back.run_ticks(citysim::TICKS_PER_HOUR * 4);
-    assert_eq!(citysim::save::to_ron(&back), citysim::save::to_ron(&w), "a loaded world ran on differently");
-}

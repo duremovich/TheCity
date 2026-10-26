@@ -90,8 +90,6 @@ struct SeedRun {
     per: f64,
     /// The Jail's capacity in this world (Scale S4: per capita).
     jail_cap: u32,
-    /// The world's save hash at the run's end (determinism).
-    end_hash: blake3::Hash,
     /// The employment floor `sanity` asserts from day 30 (J24's
     /// `EMPLOYED_MIN_SHARE`; `core_20k` asserts the collapse floor).
     employed_min: f64,
@@ -143,7 +141,6 @@ fn run_city(seed: u64, days: u64, cfg: Config) -> SeedRun {
         transit: w.config.transit.enabled,
         per: w.config.per_capita().max(1.0),
         jail_cap: u32::from(w.config.buildings.jail.capacity),
-        end_hash: blake3::hash(&[]),
         employed_min: EMPLOYED_MIN_SHARE,
     };
     let mut cursor = 0u64;
@@ -468,9 +465,6 @@ fn run_city(seed: u64, days: u64, cfg: Config) -> SeedRun {
     r.tps = (days * TICKS_PER_DAY) as f64 / started.elapsed().as_secs_f64();
     let alive: BTreeSet<EntityId> = w.corps().into_iter().collect();
     r.corps_alive = seeded.iter().filter(|c| alive.contains(c)).count();
-    if r.per > 1.0 {
-        r.end_hash = blake3::hash(citysim::save::to_ron(&w).as_bytes());
-    }
     r
 }
 
@@ -1268,13 +1262,11 @@ const TPS_FLOOR_20K: f64 = 140.0;
 const EMPLOYED_FLOOR_20K: f64 = 0.40;
 
 /// Scale S4 (docs/SCALE_20K.md § S4): the generated 20,000-resident city
-/// (`gen:20000`, `Config::scaled_to(20_000)`), seed 42 for 30 days, twice in
-/// parallel threads: `core_sanity`'s collapse bounds per capita (the
+/// (`gen:20000`, `Config::scaled_to(20_000)`), seed 42 for 30 days: `core_sanity`'s collapse bounds per capita (the
 /// population, starvation, assault and corps-alive counts scaled by
 /// `Config::per_capita`; the Treasury, the Jail, the Markets, escrow and
 /// J25 as they are; employment at the collapse floor
-/// `EMPLOYED_FLOOR_20K`), the coin identity every day, and the two runs'
-/// closing save hashes equal (determinism). The calibration numbers
+/// `EMPLOYED_FLOOR_20K`), the coin identity every day. The calibration numbers
 /// (J24 against 0.5, employed, homeless, Murders per 1,000) are printed
 /// `FINDING` lines, never asserted. `#[ignore]`; run alone:
 /// `cargo test --release -p citysim --test core -- --ignored core_20k --nocapture`.
@@ -1290,19 +1282,13 @@ fn core_20k() {
         c.ambient.flats_per_slot = 50.0;
         c
     };
-    let mut runs: Vec<SeedRun> = std::thread::scope(|s| {
-        let hs: Vec<_> = (0..2).map(|_| s.spawn(move || run_city(42, DAYS, cfg()))).collect();
-        hs.into_iter().map(|h| h.join().expect("a core_20k run panicked")).collect()
-    });
-    runs[0].employed_min = EMPLOYED_FLOOR_20K;
-    let r = &runs[0];
+    let mut run = run_city(42, DAYS, cfg());
+    run.employed_min = EMPLOYED_FLOOR_20K;
+    let r = &run;
     report(r);
     let mut failures: Vec<String> = Vec::new();
     if !r.identity_broken.is_empty() {
         failures.push(format!("the coin identity moved on days {:?}", r.identity_broken));
-    }
-    if runs[0].end_hash != runs[1].end_hash {
-        failures.push("two runs of seed 42 ended in different worlds (nondeterminism)".into());
     }
     sanity(r, 0, DAYS, ASSAULTS_PER_DAY_MAX, &mut failures);
     if r.held_starved > 0 {

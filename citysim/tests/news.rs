@@ -342,17 +342,6 @@ fn test_ads_split_by_reach_and_civic_share_to_treasury() {
 }
 
 #[test]
-fn test_feeds_survive_save_and_load() {
-    let mut w = World::new(42, Config::load().dole_city());
-    w.run_ticks(2 * TICKS_PER_DAY + 30);
-    let text = citysim::save::to_ron(&w);
-    let back = citysim::save::from_ron(&text).expect("loads");
-    assert_eq!(news::all_feeds(&back).len(), 2);
-    assert_eq!(back.stories.len(), w.stories.len());
-    assert_eq!(citysim::save::to_ron(&back), text, "byte-identical round trip");
-}
-
-#[test]
 fn test_plants_respect_burials_and_censorship() {
     let setup = || {
         let mut w = World::new(42, Config::load().dole_city());

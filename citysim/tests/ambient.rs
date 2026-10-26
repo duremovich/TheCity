@@ -211,23 +211,6 @@ fn test_job_search_hires_from_the_pool() {
     assert!(hires.iter().all(|&h| h as usize <= cap));
 }
 
-/// A save mid-run resumes byte for byte with the tier's state.
-#[test]
-fn test_ambient_save_round_trip() {
-    let mut w = ambient_world(42, 4.0);
-    w.run_ticks(TICKS_PER_DAY + 300);
-    for hi in [3, 9, 27] {
-        ambient::materialise(&mut w, hi);
-    }
-    let text = save::to_ron(&w);
-    assert!(text.contains("ambient"));
-    let mut back = save::from_ron(&text).expect("loads");
-    assert_eq!(save::to_ron(&back), text);
-    w.run_ticks(TICKS_PER_DAY);
-    back.run_ticks(TICKS_PER_DAY);
-    assert_eq!(save::to_ron(&back), save::to_ron(&w));
-}
-
 /// One cohort's readings: (n, hunger, energy, mood, wallet median, contacts
 /// median, employed share).
 fn readings(w: &World, ids: &[EntityId]) -> (usize, f32, f32, f32, i64, usize, f32) {

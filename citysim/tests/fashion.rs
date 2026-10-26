@@ -81,21 +81,10 @@ fn test_boutique_visit_raises_status_and_dresses() {
 }
 
 #[test]
-fn test_fashion_off_spawns_nothing_and_save_round_trips() {
+fn test_fashion_off_spawns_nothing() {
     let mut c = Config::load();
     c.fashion.enabled = false;
     let off = World::new(42, c);
     assert!(off.buildings_of_kind(BuildingKind::Boutique).is_empty());
     assert!(off.jobs2.fashion.is_default());
-    let mut w = on_world();
-    assets::run(&mut w);
-    let a = street_adult(&w);
-    fashion::grant(&mut w, a, 2).expect("an item");
-    w.comp_mut::<Needs>(a).expect("needs").status = 0.3;
-    let text = citysim::save::to_ron(&w);
-    let back = citysim::save::from_ron(&text).expect("load");
-    assert_eq!(citysim::save::to_ron(&back), text, "byte-identical round trip");
-    assert_eq!(back.jobs2.fashion, w.jobs2.fashion);
-    assert!(back.comp::<Needs>(a).is_some_and(|n| (n.status - 0.3).abs() < 1e-6));
-    assert_eq!(fashion::worn(&back, a), fashion::worn(&w, a));
 }

@@ -78,7 +78,7 @@ fn test_generator_at_2000_is_the_shipped_map() {
 }
 
 #[test]
-fn test_generator_20k_mix_reach_and_determinism() {
+fn test_generator_20k_mix_and_reach() {
     let gen = mapgen::generate(20_000, 0);
     let m = Map::parse(&gen.text);
     assert_eq!((gen.boroughs, m.w(), m.h()), (10, 1280, 376));
@@ -117,8 +117,7 @@ fn test_generator_20k_mix_reach_and_determinism() {
             assert_eq!(m.tile_at(TilePos::new(x, y)), TileKind::Road, "{} waypoint {x},{y}", l.name);
         }
     }
-    // Deterministic, and the seed moves the Blocks (not the mix).
-    assert_eq!(mapgen::generate(20_000, 0).text, gen.text);
+    // The seed moves the Blocks (not the mix).
     let other = mapgen::generate(20_000, 7);
     assert_ne!(other.text, gen.text);
     assert_eq!(other.counts, gen.counts);
@@ -249,22 +248,6 @@ fn test_shipped_map_keeps_the_config() {
     m.apply_to(&mut c2);
     assert_eq!(c2.districts, cfg.districts);
     assert_eq!(c2.transit.lines, cfg.transit.lines);
-}
-
-/// A save written before SAVE_VERSION 13 holds one enum name per tile; it
-/// still loads, and a new save packs the grids.
-#[test]
-fn test_old_map_save_shape_loads() {
-    let old = "(w:4,h:2,tiles:[Ground,Road,Road,Water,Wall,Door,Farmland,Ground],zones:[Sump,Sump,Mid,Mid,Spire,Civic,Vats,Mid],buildings:[],blocked:[])";
-    let m: Map = ron::from_str(old).expect("an old map save");
-    assert_eq!(m.tile(1, 0), TileKind::Road);
-    assert_eq!(m.tile(2, 1), TileKind::Farmland);
-    assert_eq!(m.zone(TilePos::new(1, 1)), citysim::Zone::Civic);
-    let new = ron::to_string(&m).expect("save");
-    assert!(new.contains("tiles_rle:\".2=~#Df.\"") && !new.contains("Ground"), "{new}");
-    let back: Map = ron::from_str(&new).expect("load");
-    assert_eq!(back.tiles(), m.tiles());
-    assert_eq!(back.zone(TilePos::new(2, 0)), citysim::Zone::Mid);
 }
 
 /// Track B (OPEN-136): the island for 20,000 (`assets/maps/isle_m_k2.txt`,

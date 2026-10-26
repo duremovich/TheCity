@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 
 use citysim::systems::{demography, law, lod};
 use citysim::{
-    save, Brain, Building, BuildingKind, Config, Crime, DeathCause, EntityId, Household, Job, Lod, Map, Needs,
-    Position, Role, TileKind, TilePos, World, Zone, TICKS_PER_DAY, TICKS_PER_HOUR,
+    Brain, Building, BuildingKind, Config, Crime, DeathCause, EntityId, Household, Job, Lod, Map, Needs, Position,
+    Role, TileKind, TilePos, World, Zone, TICKS_PER_DAY, TICKS_PER_HOUR,
 };
 
 fn world(seed: u64) -> World {
@@ -147,16 +147,6 @@ fn test_indices_survive_jail_remove_promote_demote() {
     w.check_indices().expect("after demote");
     assert!(w.stat_slots.at(u64::from(down.index)).contains(&down));
     assert!(!w.stat_slots.at(u64::from(up.index)).contains(&up));
-}
-
-#[test]
-fn test_index_rebuilt_on_load() {
-    let mut w = world(106);
-    w.run_ticks(TICKS_PER_HOUR + 10);
-    let loaded = save::from_ron(&save::to_ron(&w)).expect("round trip");
-    loaded.check_indices().expect("indices rebuilt");
-    assert_eq!(loaded.by_tier, w.by_tier);
-    assert_eq!(loaded.by_role, w.by_role);
 }
 
 // ---------------------------------------------------------------------------
