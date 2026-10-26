@@ -300,6 +300,7 @@ dependencies = [
  "ordered-float",
  "rand 0.9.5",
  "rand_chacha",
+ "rayon",
  "ron",
  "serde",
  "smallvec 1.16.2",

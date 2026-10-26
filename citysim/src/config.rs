@@ -387,6 +387,27 @@ pub struct Config {
     /// with the key absent or `CITYSIM_REST_OFF=1`: the base rule.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rest: Option<RestCfg>,
+    /// The perf pass phase 8 (docs/PERF_PASS.md; OPEN-184): `[perf]`, how
+    /// the host runs the tick (the think slice's scoring threads). A host
+    /// setting, not the world's: never written into a save (a loaded world
+    /// reads the default until its host sets it), and no value of it moves
+    /// the city (the thread-count identity).
+    #[serde(default, skip_serializing)]
+    pub perf: PerfCfg,
+}
+
+/// `[perf]` (the perf pass phase 8, OPEN-184): the host's threads.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PerfCfg {
+    /// Threads scoring the tick's think slice (`systems::think::run`); 1
+    /// scores it on the calling thread. Every value gives the same city.
+    pub threads: usize,
+}
+
+impl Default for PerfCfg {
+    fn default() -> Self {
+        PerfCfg { threads: 1 }
+    }
 }
 
 /// `[rest]` (the perf pass phase 1, OPEN-195): a Rest is cut only by a work
