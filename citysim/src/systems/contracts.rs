@@ -910,6 +910,32 @@ pub fn eligible(world: &World, c: &Contract, cand: EntityId) -> bool {
     !holds_taken(world, cand)
 }
 
+/// The pressure pass F1: a record run as a hunt (`plan`'s `GoTo(Intel)`:
+/// an agent target, no Guard or Escort, no crew's Rescue) is offered only
+/// (`offer`, a gun's own acceptance; not a gang's crew, which marches as a
+/// mission) to a candidate within `[distance.reach] stakeout_ticks` of the target's
+/// Home or workplace door (the habits a stakeout watches). Phase 4 cools a
+/// stakeout past the reach, so a far taker held the record to its deadline
+/// (20k: contracts fulfilled 71 -> 45). `true` off, or with no door known.
+fn hunt_in_reach(world: &World, c: &Contract, cand: EntityId) -> bool {
+    let Some(cap) = crate::systems::distance::reach(world).map(|r| r.stakeout_ticks) else { return true };
+    let Target::Agent(t) = c.target else { return true };
+    if matches!(c.kind, ContractKind::Guard | ContractKind::Escort | ContractKind::Rescue) {
+        return true;
+    }
+    let Some(from) = crate::systems::life::origin(world, cand) else { return true };
+    let door = |b: Option<EntityId>| b.and_then(|b| world.comp::<Building>(b)).map(|bd| bd.door);
+    let doors = [home_door(world, t), door(world.comp::<Job>(t).and_then(|j| j.employer))];
+    let mut known = false;
+    for d in doors.into_iter().flatten() {
+        known = true;
+        if crate::systems::distance::travel(world, from, d) <= cap {
+            return true;
+        }
+    }
+    !known
+}
+
 /// C12: `risk_for(cand)` against a target whose defenders sum to `s_def`.
 fn risk_against(world: &World, kind: ContractKind, cand: EntityId, s_def: f32) -> f32 {
     if kind.fights() {
@@ -1497,6 +1523,8 @@ fn offer(
         .into_iter()
         .filter(|a| !taken_today.contains(a))
         .filter(|&a| eligible(world, &c, a))
+        // The pressure pass F1: a hunt's taker within reach of its target.
+        .filter(|&a| hunt_in_reach(world, &c, a))
         .map(|a| (fit(world, &c, a, s_def), a))
         .collect();
     // Phase 2 (C12, C26): a gang is a candidate for a Hit or a Beat, scored

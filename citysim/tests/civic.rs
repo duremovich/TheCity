@@ -304,7 +304,9 @@ fn test_jailer_meal_is_an_inmate_encounter() {
     // Jailers are posted one per `held_per_jailer` held, so day 2 has none: one is hired by hand.
     let jail = w.building_of_kind(BuildingKind::Jail).expect("the Jail");
     let role = w.config.trade_role("jailer").expect("the jailer trade");
-    let adults = common::free_adults(&w);
+    // Two jobless ones (F1: the city's sweepers are hired near the Recycler,
+    // so the first free adults may hold a shift).
+    let adults: Vec<_> = common::free_adults(&w).into_iter().filter(|&a| !w.has::<citysim::Job>(a)).collect();
     let jailer = adults[0];
     demography::hire(&mut w, jailer, jail, role);
     on_duty(&mut w, jailer, jail, (0, 1440));

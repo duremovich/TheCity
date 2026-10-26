@@ -266,7 +266,10 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         // L1: out on the street; office hours inside the HQ.
         ActionKind::Scavenge => world.comp::<Position>(id).is_some_and(|p| p.building.is_none()),
         ActionKind::Meeting => target.is_some() && world.comp::<Position>(id).and_then(|p| p.building) == target,
-        ActionKind::Register => at(world, id, BuildingKind::Hall) && crate::systems::founding::can_found(world, id),
+        // The pressure pass F1: at the Hall or a Station's desk.
+        ActionKind::Register => {
+            crate::systems::founding::at_registry(world, id) && crate::systems::founding::can_found(world, id)
+        }
         // M12 D21: inside a standing Hotel (bed and coins re-checked at completion).
         ActionKind::CheckIn => world
             .comp::<Position>(id)

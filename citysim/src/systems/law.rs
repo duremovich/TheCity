@@ -1777,7 +1777,7 @@ pub fn reconcile_guards(world: &mut World) {
     // nearest his Home of the Stations under their share and the Precinct.
     let mut posts = if guards.len() < want { crate::systems::stations::Posts::new(world, want) } else { None };
     if guards.len() < want {
-        let mut candidates: Vec<(ordered_float::OrderedFloat<f32>, EntityId)> = world
+        let candidates: Vec<(ordered_float::OrderedFloat<f32>, EntityId)> = world
             // scan-ok: daily: reconcile_guards
             .citizens()
             .into_iter()
@@ -1788,8 +1788,28 @@ pub fn reconcile_guards(world: &mut World) {
             .filter_map(|id| world.comp::<Personality>(id).map(|p| (ordered_float::OrderedFloat(p.lawfulness), id)))
             .filter(|&(l, _)| l.0 >= 0.4)
             .collect();
-        candidates.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-        for (_, id) in candidates.into_iter().take((want - guards.len()).min(world.config.per_capita_count(5))) {
+        // The pressure pass F1: those within `[distance] job_cap_ticks` of a
+        // city post (a Station or the Precinct) first, the most lawful first
+        // among them, then the rest (the base took the most lawful of the
+        // island: Sump guards posted on Civic Core). Off: the base order.
+        let doors: Vec<crate::components::TilePos> = posts
+            .as_ref()
+            .map(|p| p.posts.iter().map(|&(_, d, _)| d).collect::<Vec<_>>())
+            .unwrap_or_default()
+            .into_iter()
+            .chain(world.comp::<crate::components::Building>(jail).map(|b| b.door))
+            .collect();
+        let far = |id: EntityId| match (
+            crate::systems::distance::job_cap(world),
+            crate::systems::distance::set_out(world, id),
+        ) {
+            (Some(cap), Some(from)) => doors.iter().all(|&d| crate::systems::distance::travel(world, from, d) > cap),
+            _ => false,
+        };
+        let mut candidates: Vec<(bool, ordered_float::OrderedFloat<f32>, EntityId)> =
+            candidates.into_iter().map(|(l, id)| (far(id), l, id)).collect();
+        candidates.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)));
+        for (_, _, id) in candidates.into_iter().take((want - guards.len()).min(world.config.per_capita_count(5))) {
             let post = posts.as_mut().and_then(|p| p.pick(world, id)).unwrap_or(jail);
             crate::systems::demography::hire(world, id, post, Role::Guard);
             // A dead guard's vacancy is this hire, not a second one (at the
@@ -2300,7 +2320,8 @@ pub fn new_patrol_route(world: &mut World, guard: EntityId) -> Vec<EntityId> {
         .and_then(|l| l.beats.get(&guard).copied())
         .filter(|d| d.index() < world.districts.len());
     if let Some(d) = beat {
-        return district_route(world, d);
+        let from = crate::exec::walk_origin(world, guard);
+        return district_route(world, d, from);
     }
     let target = world.law().filter(|l| l.posture == Posture::Crackdown).and_then(|l| l.target);
     if let Some(gang) = target.filter(|&g| world.has::<crate::components::Gang>(g)) {
@@ -2352,7 +2373,17 @@ pub fn new_patrol_route(world: &mut World, guard: EntityId) -> Vec<EntityId> {
 /// the beat stays in the district; with the plan's Market nearest the
 /// centroid, Sump guards spent their loop at a Mid Market and the Sump read
 /// the coverage floor (0.5) with four guards allocated.
-pub fn district_route(world: &mut World, d: crate::components::DistrictId) -> Vec<EntityId> {
+///
+/// The pressure pass F1 (`[distance]` on, `from` the guard's place): the
+/// Market is drawn among the district's within `[distance] job_cap_ticks`
+/// of `from` (none: the nearest), and the Hall joins only within that
+/// travel of the beat. A district label spans up to 1,000 tiles on the
+/// island: a random Market of it sent guards on 4-13 h patrol legs.
+pub fn district_route(
+    world: &mut World,
+    d: crate::components::DistrictId,
+    from: Option<crate::components::TilePos>,
+) -> Vec<EntityId> {
     use crate::components::Stance;
     // M12 D34: under a Cordon every guard on the beat stands at the riot's target.
     if world.district(d).stance == Stance::Cordon {
@@ -2375,6 +2406,23 @@ pub fn district_route(world: &mut World, d: crate::components::DistrictId) -> Ve
             .collect()
     };
     let markets = of_kind(world, BuildingKind::Market);
+    let near_cap = crate::systems::distance::job_cap(world).zip(from);
+    // The draw stays one over the district's Markets (the world stream
+    // unchanged), mapped onto those within reach.
+    let mut pool = markets.clone();
+    if let Some((cap, f)) = near_cap.filter(|_| markets.len() > 1) {
+        let door = |w: &World, b: EntityId| w.comp::<Building>(b).map_or(f, |bd| bd.door);
+        let within: Vec<EntityId> = markets
+            .iter()
+            .copied()
+            .filter(|&m| crate::systems::distance::travel(world, f, door(world, m)) <= cap)
+            .collect();
+        pool = if within.is_empty() {
+            markets.iter().copied().min_by_key(|&m| (door(world, m).manhattan(f), m)).into_iter().collect()
+        } else {
+            within
+        };
+    }
     let hall_here = !of_kind(world, BuildingKind::Hall).is_empty();
     let centroid = world.district(d).centroid;
     let homes_d: Vec<EntityId> = world.district(d).homes.iter().copied().filter(|&h| standing(world, h)).collect();
@@ -2382,7 +2430,10 @@ pub fn district_route(world: &mut World, d: crate::components::DistrictId) -> Ve
         0 if !homes_d.is_empty() => None,
         0 => world.nearest_of_kind(BuildingKind::Market, centroid),
         1 => Some(markets[0]),
-        n => Some(markets[world.rng.world().random_range(0..n)]),
+        n => {
+            let i = world.rng.world().random_range(0..n);
+            Some(pool[i % pool.len().max(1)])
+        }
     };
     let draws = if markets.is_empty() && !homes_d.is_empty() { 4 } else { 2 };
     let beat_door = beat.and_then(|m| world.comp::<Building>(m)).map(|b| b.door);
@@ -2392,7 +2443,12 @@ pub fn district_route(world: &mut World, d: crate::components::DistrictId) -> Ve
         route.extend(beat_door.and_then(|door| world.nearest_of_kind(BuildingKind::Bar, door)));
     }
     if hall_here {
-        route.extend(world.building_of_kind(BuildingKind::Hall));
+        let hall = world.building_of_kind(BuildingKind::Hall);
+        let near = |h: EntityId| match (near_cap, beat_door, world.comp::<Building>(h).map(|b| b.door)) {
+            (Some((cap, _)), Some(b), Some(hd)) => crate::systems::distance::travel(world, b, hd) <= cap,
+            _ => true,
+        };
+        route.extend(hall.filter(|&h| near(h)));
     }
     let mut homes = if homes_d.is_empty() {
         world.buildings_by_kind().get(&BuildingKind::Home).cloned().unwrap_or_default()
