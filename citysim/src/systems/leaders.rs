@@ -356,6 +356,9 @@ pub fn round_stop(world: &mut World, leader: EntityId, gang: EntityId, b: Entity
         };
         if !met {
             ownership::jobs2_row(world).lead_owner_out += 1;
+            // The pressure pass phase 3 (OPEN-160): a stop that met nobody is
+            // a missed week; at `punish_misses` the gang punishes.
+            crate::systems::protection::miss(world, id);
             continue;
         }
         let paid = crate::systems::leverage::collect_in_person(world, id);

@@ -1057,6 +1057,27 @@ fn sell(world: &mut World, c: &UnderwaterCfg, b: EntityId, owner: EntityId, buye
     }
 }
 
+/// The pressure pass phase 3 (`protection::choose`): an owner punished past
+/// bearing gives the business up: sold to the gang that leans on it as a
+/// front (at `front_price_mult`, if it can spare the price), else shut.
+/// `Some(true)` a front, `Some(false)` shut, `None` not his to give.
+pub(crate) fn forced_out(world: &mut World, b: EntityId, owner: EntityId, gang: EntityId) -> Option<bool> {
+    let c = cfg(world).cloned()?;
+    if world.owner_of(b) != Some(owner) {
+        return None;
+    }
+    let till = format!("leaned on by {}", name(world, gang));
+    let price = sale_price(world, b, c.front_price_mult);
+    if world.gang_of(owner).is_none_or(|g| g == gang) && gang_spare(world, &c, gang) >= price {
+        sell(world, &c, b, owner, gang, true, &till);
+        if world.owner_of(b) == Some(gang) {
+            return Some(true);
+        }
+    }
+    close(world, &c, b, owner, &till);
+    Some(false)
+}
+
 // ---------------------------------------------------------------------------
 // Close
 // ---------------------------------------------------------------------------

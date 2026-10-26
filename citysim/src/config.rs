@@ -352,6 +352,11 @@ pub struct Config {
     /// key absent: the trades serve whom they served.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub customers: Option<CustomersCfg>,
+    /// The pressure pass phase 3 (docs/PRESSURE_PASS.md § Phase 3):
+    /// protection bites (`systems/protection.rs`). `None` (not written into
+    /// a save) with the key absent: M16b's protection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protection: Option<ProtectionCfg>,
     /// The island pass phase 1 (docs/ISLAND_PASS.md I1; OPEN-163 part):
     /// travel time in the job and bed picks (`systems/distance.rs`). `None`
     /// (not written into a save) with the key absent: the picks
@@ -1233,6 +1238,110 @@ impl Default for UnderwaterCfg {
             confront_kill_mult: 0.2,
             report_lawful: 0.5,
             victim_report_lawful: 0.4,
+        }
+    }
+}
+
+/// The pressure pass phase 3 `[protection]` (docs/PRESSURE_PASS.md § Phase
+/// 3; `systems/protection.rs`, `leverage::protection_pass`): protection
+/// keyed to held ground, refusals punished in person, the owner's choice
+/// after, and the gang's purse (bail, the enforcer's cut). Absent: M16b's
+/// protection (Expand/Contest weekday, the turf's Homes only). Every value a
+/// placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProtectionCfg {
+    /// The Hideout's district is held ground (a gang leans where it lives).
+    pub hideout_ground: bool,
+    /// Businesses leaned on per held district per weekly pass.
+    pub lean_per_district: u8,
+    /// The weekly levy: `levy_share` of the business's week's revenue, at
+    /// least `levy_min` (a business taking less is not leaned on), at most
+    /// `[leverage] protection_weekly`.
+    pub levy_share: f32,
+    pub levy_min: i64,
+    /// Missed weeks (nobody met at a round stop, or the till short) before
+    /// the gang punishes; a refused lean is punished at once.
+    pub punish_misses: u8,
+    /// The enforcer calls between these hours (open hours).
+    pub punish_hour_from: u8,
+    pub punish_hour_to: u8,
+    /// The enforcer's Visit urgency.
+    pub punish_urgency: f32,
+    /// A smashed till: this many weeks of the levy taken from the payer's
+    /// purse (what it holds of them) for the gang.
+    pub smash_weeks: f32,
+    /// A smashed till shuts the business this many days; a fire this many.
+    pub smash_close_days: u16,
+    pub fire_close_days: u16,
+    /// The beating kills on `[crime] fight_death_p x` this.
+    pub beat_kill_mult: f32,
+    /// The enforcer keeps this share of what he takes; the rest is the gang's.
+    pub enforcer_cut: f32,
+    /// The punished owner's grudge on the enforcer.
+    pub grudge: f32,
+    /// A punished owner this lawful files the report himself (the choice's
+    /// report is the weighted one).
+    pub victim_report_lawful: f32,
+    /// The owner's choice after a punishment, one weighted draw: pay
+    /// `w_pay x (1.5 - courage)`, report `w_report x lawfulness`, a rival's
+    /// cover `w_rival x (0.5 + courage)` (a rival gang with a leader), sell
+    /// or close `w_sell x (0.25 + misery) x punishments` (with `[underwater]`).
+    pub w_pay: f32,
+    pub w_report: f32,
+    pub w_rival: f32,
+    pub w_sell: f32,
+    /// A gang loses this much standing grudge on the rival that gave cover
+    /// (its leader's grudge on the rival's leader).
+    pub cover_grudge: f32,
+    /// Bail: daily, a gang with the treasury frees a jailed member at
+    /// `bail_per_day` a day of his sentence left, keeping `bail_reserve`;
+    /// not past `bail_max_days` left.
+    pub bail_per_day: i64,
+    pub bail_reserve: i64,
+    pub bail_min_days: u32,
+    pub bail_max_days: u32,
+    /// The daily stipend goes only to members with no wage post; the
+    /// employed are paid at the weekly Collect (their cut of the take).
+    pub stipend_jobless_only: bool,
+    /// The stipends come out of the treasury above this war chest (a gang
+    /// below it pays nobody daily, and its unpaid drift away).
+    pub stipend_reserve: i64,
+    /// OPEN-157: a contract's party the Fixer cannot meet now is sent there
+    /// in person at its next open hour (`service::send_broker`).
+    pub broker_visits: bool,
+}
+
+impl Default for ProtectionCfg {
+    fn default() -> Self {
+        ProtectionCfg {
+            hideout_ground: true,
+            lean_per_district: 3,
+            levy_share: 0.15,
+            levy_min: 10,
+            punish_misses: 2,
+            punish_hour_from: 10,
+            punish_hour_to: 20,
+            punish_urgency: 0.9,
+            smash_weeks: 2.0,
+            smash_close_days: 1,
+            fire_close_days: 7,
+            beat_kill_mult: 0.2,
+            enforcer_cut: 0.25,
+            grudge: 0.5,
+            victim_report_lawful: 0.6,
+            w_pay: 1.0,
+            w_report: 0.6,
+            w_rival: 0.5,
+            w_sell: 0.3,
+            cover_grudge: 0.4,
+            bail_per_day: 5,
+            bail_reserve: 100,
+            bail_min_days: 2,
+            bail_max_days: 20,
+            stipend_jobless_only: true,
+            stipend_reserve: 150,
+            broker_visits: true,
         }
     }
 }

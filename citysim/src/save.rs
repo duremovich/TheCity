@@ -353,7 +353,11 @@ use crate::world::World;
 /// (`[customers]`), `ActionKind::Patch`, `Misery.patched_at`,
 /// `ArmsState.quarter`, `Jobs2State.{hailed, fares_shift}` (serde defaults;
 /// an old save need not load, 2026-10-26).
-pub const SAVE_VERSION: u8 = 69;
+/// 70 (the pressure pass phase 3, protection bites): `Coercion.{missed,
+/// punished}`, `VisitWhy::Punish`, `EventKind::Punished`, `[protection]`
+/// (written only when set) and the `Jobs2Cols` `pr_*` columns (serde
+/// defaults).
+pub const SAVE_VERSION: u8 = 70;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

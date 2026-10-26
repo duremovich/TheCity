@@ -404,3 +404,64 @@ Each trade gets a body that walks to it, through the machinery it already had. N
   licensed post, not jobless), `person::probe_cabbie_drives_a_fare_on_his_shift` (`p_hail` 0: the probe's rides are
   the roll's), `captives::test_weak_gang_under_retaliate_takes_a_hostage` (the rival leader's spouse was jailed by
   day 40: released in-test). `person::probe_pimp_purse_grows_on_a_pitch_night` stays red as on main (the fix round's).
+### Phase 3: protection bites (`systems/protection.rs`, `[protection]`; `OPEN-160`, `OPEN-162`, `OPEN-157`)
+
+- **Held ground** (`protection::ground`): the districts of a gang's turf Homes and (`hideout_ground`) its Hideout's
+  district from day 0, so the pass runs at 2k, 20k and 100k alike. `leverage::protection_pass` (each gang on its weekday,
+  as before) leans on up to `lean_per_district` (3) businesses per district of that ground under any order but LieLow
+  (M16b: one, under Expand or Contest only, turf districts only). The levy is sized to the business: `levy_share` (0.15)
+  of its week's revenue, `levy_min` (10) to `[leverage] protection_weekly` (40); a business under `levy_min` is left
+  alone (M16b: 40 flat, nothing under it leaned on). The hold is the gang's (`protection_holds` reads the ground): the
+  leaner jailed or dead no longer ends it.
+- **Refusal bites** (`OPEN-160`): a lean the owner refuses is recorded standing (`Coercion.refusing`, `Refused` "X
+  refused G's protection on B"), and a week missed (a round stop that met nobody, the till short, a refuser's week) is
+  a miss (`Coercion.missed`; a short or refused week retried the next day). At `punish_misses` (2; a refusal at once)
+  the gang's toughest free member off shift at the hour goes in person (`VisitWhy::Punish` to the business between
+  `punish_hour_from..to`; a Statistical enforcer credited at the hour; one enforcer a business): first the till smashed
+  or the stall kicked over (a Market or Noodle Bar; `smash_weeks` 2 of the levy from the payer's purse, the enforcer
+  keeps `enforcer_cut`, `Flow::Robbery`, shut `smash_close_days`), second the owner beaten if he is there
+  (`law::resolve_fight_mods`, an Assault or Murder; out, the till again), from the third a fire (shut
+  `fire_close_days` 7). Each raises the crime, leaves the owner's grudge (`Robbed` or `Assaulted`) and a lawful owner's
+  report. `EventKind::Punished`.
+- **The owner's choice** after, one keyed draw: pay up now `w_pay × (1.5 − courage)` (refusing cleared), report the
+  enforcer and the leaner `w_report × lawfulness` (refusing stays: the next week escalates), a rival's cover `w_rival ×
+  (0.5 + courage)` (another gang with ground in the district and a free leader: the hold `Broken`, the rival's protection
+  recorded at the same levy, the holder a `HomeFlippedAgainst` shock and its leader's grudge on the rival's), or sell or
+  shut `w_sell × (0.25 + misery) × punishments` (`underwater::forced_out`: to the gang as a front at
+  `front_price_mult` if it can spare it, else phase 6's close). **Deviation:** a rival gang's front leaned on and
+  punished makes no choice: a `Trespass { by }` shock on the owning gang and its leader's grudge on the enforcer (the
+  turf war's spark is the shock; the Retaliate order reads it).
+- **The gang's purse.** The protection paid joins the week's tribute (`leisure::note_tribute`) the leader's Collect
+  shares out, so a member's cut shows as a `TRIBUTE received` line at the Collect. Daily (`protection::daily`, after
+  `gang::daily_economy`) a gang bails out its jailed (`bail_per_day` 5 a sentence day left, `bail_min_days` 2 to
+  `bail_max_days` 20 left, the leader first, keeping `bail_reserve` 100; `Flow::Fine` to the city; `law::release`).
+  **Deviation (the stipend):** the daily `[social] gang_stipend` goes only to members with no wage post
+  (`stipend_jobless_only`) and only from the treasury above `stipend_reserve` (150): the stipend to every member spent
+  every treasury to 0 (first run: median 0 from d18). A gang under its war chest pays nobody daily, and `[living]
+  desist_unpaid` takes its unpaid members. Weapons, loans and fronts read the treasury as before.
+- **`OPEN-157`, the Fixer's parties in person:** a contract's party the Fixer cannot meet now (no server on duty, the
+  body elsewhere) is sent there at the next open hour today (`[protection] broker_visits`, `service::send_broker`, `VisitWhy::Broker`, the staff's
+  first shift hour or later; a Statistical party credited at the hour), and met on arrival (`broker_arrived`); the
+  encounter is missed only when no visit can be sent. The book credit between two Statistical parties stands.
+- **Shadow** (20k island seed 42, d21-d27; picks gang_leader:3, gang_member:3, vendor:2, cook:2, owner_broke:3,
+  fixer:2, then four punished owners by `--agent`): a round paid ("Ivo Stroud collected 40 coins of protection at
+  Braindance Parlour#5786 from the till, Nico Greaves on shift"); a refusal punished ("Dex Stroud refused The Static
+  Rats's protection on Club#4777" d25 00:09, "Perrin Chrome smashed the till at Club#4777 ... took 80c" 17:57) and the
+  owner's choice ("Dex Stroud went to the law ... reported Perrin Chrome and Kira Stroud", then Kessler posts a guard
+  on the Club and a locate and a tag on Kira Stroud); "Cutter Sato paid The Unplugged 5 40c after the stall kicked
+  over at Street Market#4414"; a rival front's answer ("The Hollow will answer The Wire Hands for the smashed till at
+  Fight Pit#5580"); bail (a first-build shadow: "The Drowned Choir paid 30c bail for Ivo Stroud (6 days left)", then "released from the Precinct"). Reads wrong: most
+  punished businesses are rival gangs' Fight Pits and Dens (a gang leans on a rival's front and smashes 0c); a
+  refuser can wait days for the enforcer (`Cutter Sato` refused d26, nobody came by d27); the member's weekly cut is
+  1-13c; vendors and cooks work corp venues and see none of it.
+- **Counters**, 20k island seed 42 x 30 `--scaled`, `bbb7ae2` then phase 3, one run each (new `Jobs2Cols` `pr_*`,
+  `gang_treasury_*`, `broker_walks`; `analyze_run.py` "protection, run totals"): protections made 13 -> 75, weeks paid
+  13 -> 110, protection coins 520 -> 4,172, standing at d30 13 -> 115, `Protected` 13 -> 100, Extortion 631 -> 558,
+  Refused 745 -> 604 (72 of them refused leans), weeks missed 245, punishments 62 (till 58, beating 1, fire 3), choices
+  pay 18, report 6, rival 34 (most a rival front's Trespass), sell 0; bail 67 (1,360c); gang income 18,111 -> 26,651,
+  `flow_coerced` 2,230 -> 6,107; gang loans 17 -> 13, gang fronts bought 4 -> 5; members at d30 635 -> 787 (GangLeave
+  109 -> 134); Assault 909 -> 1,027, Murder 50 -> 57; `contract_encounters` 78 -> 86 (31 broker walks).
+  FINDING: gang treasuries at d30 median 11c, max 297c (start 50): the income rose half again and is spent (the
+  Collect, bail, the fronts' payroll and the daily purchases; untraced which dominates), so lending and front buying
+  did not move. Nothing tuned.
+- No test (doctrine 2). `SAVE_VERSION` 70.
