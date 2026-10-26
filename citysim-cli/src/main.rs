@@ -176,8 +176,9 @@ struct RunArgs {
     #[arg(long, value_name = "DAY")]
     prof_from: Option<u64>,
     /// With the `prof` feature: profile each day's midnight tick alone, a
-    /// `PROFDAY <day>` line then its `PROF` lines (the perf pass phase 7;
-    /// the run's own profile then holds only the last midnight).
+    /// `PROFDAY <day> <tick of day>` line then its `PROF` lines (the perf
+    /// pass phase 7; phase 7b: every tick of the staggered midnight, each
+    /// alone; the run's own profile then holds only the last of them).
     #[arg(long)]
     prof_midnight: bool,
     /// The perf pass phase 8: threads scoring the think slice, overriding
@@ -1696,13 +1697,15 @@ fn run(args: RunArgs) -> Result<(), String> {
             }
             let tick_of_day = world.tick % TICKS_PER_DAY;
             let tick_start = args.report.then(Instant::now);
-            let prof_this = args.prof_midnight && tick_of_day == 0;
+            // The perf pass phase 7b: each tick of the staggered midnight alone
+            // (tick 0 alone with the stagger off), its tick of day after the day.
+            let prof_this = args.prof_midnight && tick_of_day < citysim::systems::midnight::window(&world);
             if prof_this {
                 citysim::prof::reset();
             }
             citysim::tick(&mut world);
             if prof_this {
-                eprintln!("PROFDAY {}", world.tick / TICKS_PER_DAY + 1);
+                eprintln!("PROFDAY {} {tick_of_day}", world.tick / TICKS_PER_DAY + 1);
                 citysim::prof::dump();
             }
             if let Some(t) = tick_start {
