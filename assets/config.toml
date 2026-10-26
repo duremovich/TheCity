@@ -4649,3 +4649,53 @@ order_word_ticks = 1440            # P15: past order_wait_ticks + this, the orde
                                    # orders by word on 2k seed 42 x 30)
 order_reach = 3                    # P15: the order is given in the lieutenant's building or within this Chebyshev radius
 order_give_min = 10                # P15: minutes the order takes, given at the lieutenant
+
+# The pressure pass phase 1 (docs/PRESSURE_PASS.md § Phase 1, OPEN-178; systems/misery.rs): misery acts. Mood moved only
+# Socialise/Court, emigration, riots and class unrest; a miserable worker worked, ate and slept like a happy one. Misery
+# = clamp((mood_line - mood) / mood_span, 0, 1): 0 at the line, 1 a span below. It skips shifts (a strike of one: no
+# work, no wage), gets the absentee fired, makes the worker quit, cheapens theft, starts brawls and opens the door to a
+# gang or the faith. Both tiers: the skip, firing and quit are midnight rolls for every holder; the theft is the
+# planner's cost on screen and the hourly p_steal off it; the brawl and the gang join are an hourly roll for bodies and
+# a daily one off screen. Absent, mood moves only what it moved. Placeholders (Dylan 2026-10-26: no tuning yet).
+[misery]
+mood_line = -0.15                  # misery starts below this mood (20k island seed 42 day 21: 7 % of adults under -0.2,
+                                   # the lowest -0.87; the city's mean about +0.05)
+mood_span = 0.5                    # ... and is 1 this far below the line (mood -0.65)
+skip_p = 0.5                       # absenteeism: a day's chance of skipping the next shift at misery 1, before the damps
+skip_lawful_damp = 0.5             # x (1 - this x lawfulness): the law-abiding turn up anyway
+skip_loyal_damp = 0.4              # x (1 - this x loyalty): the loyal too (Personality has no conscientiousness)
+absence_window_days = 14           # the employer counts the absences within this many days
+fire_absences = 3                  # ... and dismisses the worker at this many (a Fire event, a Sacked memory)
+quit_mood = -0.3                   # quitting: consecutive midnights below this mood while employed
+quit_days = 10                     # ... this many, less the terms below, and the worker quits on quit_p a day
+quit_commute_ticks = 90            # a commute (home door to work door) past this many minutes ...
+quit_commute_days = 3              # ... takes this many days off
+quit_pay_meals = 6.0               # a day's wage under this many meals (the worker's own meal price) ...
+quit_pay_days = 2                  # ... takes this many off
+quit_bed_days = 2                  # a company bed (the company town's grip) takes this many off
+quit_min_days = 3                  # never fewer than this many low midnights
+quit_p = 0.35                      # a day's quit chance once the days are reached
+steal_cost_cut = 8.0               # petty crime: the planner's steal costs (food, a vehicle) - this x misery (the
+                                   # lawfulness term is 20 x lawfulness: misery 1 is lawfulness -0.4)
+steal_lawful_cut = 0.3             # the vehicle theft's lawfulness gate (< 0.4) widened by this x misery
+stat_steal_mult = 2.0              # off screen: the hour's p_steal (the broke adult's) x (1 + this x misery)
+brawl_min = 0.3                    # fights: a body past this misery in a Bar or a leisure venue (drinking there), or on
+brawl_p = 0.25                     # the street drunk or high, picks a fight on this x misery an hour (one a day at most)
+brawl_lawful_damp = 0.7            # ... x (1 - this x lawfulness)
+drink_hours = 4                    # a drink (a Socialised memory) within this many hours is drunk; a dose is high
+brawl_reach = 3                    # on the street, the mark stands within this many tiles (in a venue, inside it)
+brawl_kill_mult = 0.3              # a brawl's death chance x this ([crime] fight_death_p): fists, mostly
+brawl_grudge_w = 0.5               # the struck's grudge on the starter (an Enemy edge, the Fight and Hunt goals read it)
+brawl_grudge_back = 0.6            # ... and a struck winner's starter holds this x that on him
+stat_brawl_p = 0.04                # off screen: a miserable Statistical adult's day holds a brawl with a stranger in its
+                                   # zone on this x misery x the lawful damp
+stat_brawl_report_p = 0.3          # ... reported to the law on this
+join_flat = 0.15                   # recruitment: JoinGang scores + this x misery
+join_affinity_cut = 0.2            # a recruit's edge to a member needs this x misery less affinity ([social]
+                                   # join_gang_affinity)
+join_min = 0.5                     # past this misery and under join_lawfulness, a gang takes the agent off the street (as
+join_lawfulness = 0.45             # the desperate: the nearest recruiting Hideout)
+join_note_min = 0.2                # a join (or a conversion) past this misery names it in its event
+stat_join_p = 0.03                 # off screen: a miserable Statistical adult a gang would take joins on this x misery a day
+faith_min = 0.3                    # the faith: a Preach draws a resident past this misery (as it draws the lonely) ...
+faith_convert_mult = 2.0           # ... and converts on p_convert x (1 + this x misery)

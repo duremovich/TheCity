@@ -637,6 +637,11 @@ pub struct PlanCtx {
     /// M13 D39: in withdrawal, `withdrawal_steal_bonus` off a theft's cost
     /// (0 otherwise: a branch).
     pub withdrawal_bonus: f32,
+    /// The pressure pass phase 1 (OPEN-178): from the agent's misery
+    /// (`[misery]` absent: 0): a theft's cost `− steal_cost_cut × misery`, the
+    /// vehicle theft's lawfulness gate `+ steal_lawful_cut × misery`.
+    pub misery_steal_cut: f32,
+    pub misery_lawful_cut: f32,
     /// Hunger fix G3: `[life] steal_can_buy` added to a food theft's cost
     /// while the agent can buy a meal (0 otherwise: a branch).
     pub steal_can_buy: f32,
@@ -1161,6 +1166,8 @@ impl PlanCtx {
             detox_affordable: detox_pick
                 && target_clinic.is_some_and(|c| coins_now >= crate::systems::stims::detox_price(world, c)),
             withdrawal_bonus,
+            misery_steal_cut: crate::systems::misery::steal_cut(world, agent).0,
+            misery_lawful_cut: crate::systems::misery::steal_cut(world, agent).1,
             steal_can_buy,
             run_order: world.run_orders.contains_key(&agent)
                 && world.comp::<crate::components::Kit>(agent).is_some_and(|k| k.deck.is_some()),
@@ -1288,7 +1295,10 @@ impl ActionKind {
             // M14 V11/V29: the Hack goal's chain.
             ActionKind::JackIn | ActionKind::SellData => ctx.adult && ctx.serves(&[GoalKind::Hack]),
             ActionKind::StealVehicle => {
-                ctx.adult && ctx.lawfulness < 0.4 && !ctx.is(Role::Guard) && ctx.serves(&[GoalKind::Earn])
+                ctx.adult
+                    && ctx.lawfulness < 0.4 + ctx.misery_lawful_cut
+                    && !ctx.is(Role::Guard)
+                    && ctx.serves(&[GoalKind::Earn])
             }
             ActionKind::Therapy | ActionKind::Uninstall | ActionKind::Detox => {
                 ctx.adult && ctx.serves(&[GoalKind::Treat])
@@ -1784,6 +1794,10 @@ impl ActionKind {
             // M13 D39: withdrawal makes a theft cheaper (as starving does).
             if ctx.withdrawal_bonus != 0.0 {
                 c -= ctx.withdrawal_bonus;
+            }
+            // The pressure pass phase 1 (OPEN-178): misery steals sooner.
+            if ctx.misery_steal_cut != 0.0 {
+                c -= ctx.misery_steal_cut;
             }
             c - ctx.stealth * 4.0
         };

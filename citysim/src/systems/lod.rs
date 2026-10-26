@@ -959,7 +959,7 @@ fn stat_meet(world: &mut World, id: EntityId) {
 /// and drawing them gave the gang members and guards hundreds of
 /// acquaintances that every think walks. A scan of the zone's Homes per
 /// meeting cost 7 % of the 2,000 city's throughput.
-fn stranger_in_zone(world: &mut World, id: EntityId) -> Option<EntityId> {
+pub(crate) fn stranger_in_zone(world: &mut World, id: EntityId) -> Option<EntityId> {
     const STRANGER_TRIES: usize = 16;
     let zone_of = |w: &World, o: EntityId| w.comp::<Position>(o).map(|p| w.map.zone(p.tile));
     let zone = zone_of(world, id)?;
@@ -1022,6 +1022,10 @@ pub fn stat_probs(world: &World, id: EntityId, row: &StatRow) -> (f32, f32, f32,
     };
     if crate::systems::stims::in_withdrawal(world, id) {
         steal *= world.config.stims.withdrawal_steal_mult;
+    }
+    // The pressure pass phase 1 (OPEN-178): misery steals sooner.
+    if steal > 0.0 && world.config.misery.is_some() {
+        steal *= crate::systems::misery::stat_steal_mult(world, id);
     }
     (killed, assaulted, robbed, steal)
 }
@@ -1239,7 +1243,8 @@ fn stat_theft(world: &mut World, id: EntityId) -> bool {
     let key = crate::components::hole_id(world.tick, id, HoleKind::Robbed);
     crate::systems::litter::deposit_in_district(world, d, 6, 0, key);
     let name = world.name_of(id);
-    world.push_event(EventKind::Theft, &[id, market], format!("{name} stole food (off screen)"));
+    let note = crate::systems::misery::theft_note(world, id).unwrap_or_default();
+    world.push_event(EventKind::Theft, &[id, market], format!("{name} stole food (off screen){note}"));
     let caught: f64 = world.rng.agent(id).random();
     let p = world
         .stat_table

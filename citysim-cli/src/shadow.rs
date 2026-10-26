@@ -159,7 +159,7 @@ pub struct ShadowArgs {
     pub map: Option<PathBuf>,
 }
 
-const ARCHETYPES: [&str; 49] = [
+const ARCHETYPES: [&str; 50] = [
     "gang_member",
     "gang_leader",
     "ripperdoc",
@@ -221,6 +221,8 @@ const ARCHETYPES: [&str; 49] = [
     "cultist",
     "teacher",
     "scav",
+    // The pressure pass phase 1 (OPEN-178): the lowest-mood free adults, lowest first (not shuffled).
+    "miserable",
 ];
 
 /// Activity classes of the time-use table, in print order.
@@ -500,6 +502,12 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
                 }
             }
             adults().filter(|a| buyers.contains(a)).collect()
+        }
+        // The pressure pass phase 1 (OPEN-178): the adults below `[misery] mood_line` (any adult
+        // below 0 without the section); `pick` orders them lowest mood first.
+        "miserable" => {
+            let line = world.config.misery.as_ref().map_or(0.0, |c| c.mood_line);
+            adults().filter(|&a| world.comp::<citysim::components::Mood>(a).is_some_and(|m| m.value < line)).collect()
         }
         other => return Err(format!("unknown archetype {other:?} (known: {})", ARCHETYPES.join(", "))),
     };
@@ -3306,7 +3314,22 @@ fn pick(
                             );
                         }
                     }
-                    let ordered = if arch == "ceo" { c } else { shuffled(c, seed, arch) };
+                    let ordered = if arch == "ceo" {
+                        c
+                    } else if arch == "miserable" {
+                        let mood = |a: &EntityId| world.comp::<citysim::components::Mood>(*a).map_or(0.0, |m| m.value);
+                        let mut c = c;
+                        c.sort_by(|a, b| mood(a).total_cmp(&mood(b)).then(a.cmp(b)));
+                        let adults = world.citizens().into_iter().filter(|&a| adult_alive(world, a)).count();
+                        eprintln!(
+                            "note: miserable: {} of {adults} adults under the misery line; the lowest mood {:+.2}",
+                            c.len(),
+                            c.first().map_or(0.0, mood)
+                        );
+                        c
+                    } else {
+                        shuffled(c, seed, arch)
+                    };
                     // L1 (the V1 tool note): free agents first; a jailed pick's
                     // week is the cells (V1's dealer and leader were inside).
                     let (free, jailed): (Vec<EntityId>, Vec<EntityId>) =

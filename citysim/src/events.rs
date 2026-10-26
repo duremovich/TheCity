@@ -459,10 +459,16 @@ pub enum EventKind {
     OrderGiven,
     /// `[member, leader, gang]`: a member's take handed to the leader at court.
     TakeHanded,
+    /// The pressure pass phase 1 (OPEN-178): `[worker, employer]`, a shift
+    /// skipped in a miserable spell (`systems::misery`).
+    Skipped,
+    /// The pressure pass phase 1 (OPEN-178): `[starter, mark]`, a brawl a
+    /// miserable, drunk or high body started (`systems::misery`).
+    Brawl,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 225] = [
+    pub const ALL: [EventKind; 227] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -688,6 +694,8 @@ impl EventKind {
         EventKind::Protected,
         EventKind::OrderGiven,
         EventKind::TakeHanded,
+        EventKind::Skipped,
+        EventKind::Brawl,
     ];
 }
 

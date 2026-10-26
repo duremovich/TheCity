@@ -60,6 +60,8 @@ fn recruit_gang_any(world: &World, id: EntityId) -> Option<EntityId> {
     // the first gang in `gangs()` then the first in its roster. Walks the
     // agent's own edges rather than every roster (M10 phase 5b).
     let open: Vec<bool> = gangs.iter().map(|&g| world.comp::<Gang>(g).is_some_and(|g| recruiting(world, g))).collect();
+    // The pressure pass phase 1 (OPEN-178): the miserable need a weaker tie.
+    let min_affinity = cfg.join_gang_affinity - crate::systems::misery::join_affinity_cut(world, id);
     let mut best: Option<(f32, usize, usize, EntityId)> = None;
     if open.contains(&true) {
         // The perf pass phase 6 (the slope): an agent's edges grow with the
@@ -85,7 +87,7 @@ fn recruit_gang_any(world: &World, id: EntityId) -> Option<EntityId> {
                 return;
             }
             let Some(e) = world.edge(id, m) else { return };
-            if e.affinity < cfg.join_gang_affinity {
+            if e.affinity < min_affinity {
                 return;
             }
             let better = best.is_none_or(|(a, bg, bm, _)| e.affinity > a || (e.affinity == a && (gi, mi) < (bg, bm)));
@@ -128,7 +130,9 @@ fn recruit_gang_any(world: &World, id: EntityId) -> Option<EntityId> {
     // M11 D36: a fresh, lawless evictee is desperate too (the spiral's first link).
     let desperate = (world.comp::<Needs>(id).is_some_and(|n| n.hunger < cfg.join_gang_desperation_hunger)
         && world.comp::<Personality>(id).is_some_and(|p| p.lawfulness < cfg.join_gang_desperation_lawfulness))
-        || crate::systems::classes::evicted_desperate(world, id);
+        || crate::systems::classes::evicted_desperate(world, id)
+        // The pressure pass phase 1 (OPEN-178): the miserable and lawless too.
+        || crate::systems::misery::join_desperate(world, id);
     let arrested =
         world.comp::<Memory>(id).is_some_and(|m| m.entries.iter().any(|e| e.kind == MemoryKind::WasArrested));
     if !desperate && !arrested {
@@ -305,9 +309,16 @@ pub fn enlist(world: &mut World, id: EntityId, gang: EntityId) {
             .position(|e| e.kind == MemoryKind::MetInJail && e.subject.is_some_and(|s| s != id && members.contains(&s)))
     });
     let name = world.name_of(id);
-    let text = match cites {
-        Some(n) => format!("{name} joined {gname} (cites mem#{n})"),
-        None => format!("{name} joined {gname}"),
+    // The pressure pass phase 1 (OPEN-178): a recruit misery delivered says so.
+    let misery = crate::systems::misery::join_note(world, id);
+    if misery.is_some() {
+        crate::systems::ownership::jobs2_row(world).misery_joins += 1;
+    }
+    let text = match (cites, misery) {
+        (Some(n), Some(m)) => format!("{name} joined {gname} (cites mem#{n}; {m})"),
+        (Some(n), None) => format!("{name} joined {gname} (cites mem#{n})"),
+        (None, Some(m)) => format!("{name} joined {gname} ({m})"),
+        (None, None) => format!("{name} joined {gname}"),
     };
     world.push_event(EventKind::GangJoin, &[id, gang], text);
     recompute_leader(world, gang);

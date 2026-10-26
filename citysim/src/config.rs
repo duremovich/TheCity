@@ -335,6 +335,11 @@ pub struct Config {
     /// person (`systems/leaders.rs`). `None` (not written into a save).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub leaders: Option<LeadersCfg>,
+    /// The pressure pass phase 1 (docs/PRESSURE_PASS.md § Phase 1;
+    /// OPEN-178): misery acts (`systems/misery.rs`). `None` (not written
+    /// into a save) with the key absent: mood moves only what it moved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub misery: Option<MiseryCfg>,
     /// The island pass phase 1 (docs/ISLAND_PASS.md I1; OPEN-163 part):
     /// travel time in the job and bed picks (`systems/distance.rs`). `None`
     /// (not written into a save) with the key absent: the picks
@@ -848,6 +853,75 @@ pub struct LeadersCfg {
     pub order_reach: u32,
     /// P15: minutes the order takes, given at the lieutenant.
     pub order_give_min: u16,
+}
+
+/// The pressure pass phase 1 `[misery]` (docs/PRESSURE_PASS.md § Phase 1,
+/// OPEN-178; `systems/misery.rs`). Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MiseryCfg {
+    /// Misery is `clamp((mood_line − mood) / mood_span, 0, 1)`.
+    pub mood_line: f32,
+    pub mood_span: f32,
+    /// Absenteeism: a day's skip chance at misery 1, `× (1 − skip_lawful_damp
+    /// × lawfulness) × (1 − skip_loyal_damp × loyalty)`.
+    pub skip_p: f32,
+    pub skip_lawful_damp: f32,
+    pub skip_loyal_damp: f32,
+    /// Absences counted over this many days; at `fire_absences` the worker is dismissed.
+    pub absence_window_days: u32,
+    pub fire_absences: u32,
+    /// Quitting: consecutive midnights below `quit_mood` while employed.
+    pub quit_mood: f32,
+    pub quit_days: u16,
+    /// Less `quit_commute_days` past this commute (ticks, home door to work door).
+    pub quit_commute_ticks: u64,
+    pub quit_commute_days: u16,
+    /// Less `quit_pay_days` for a day's wage under this many meals.
+    pub quit_pay_meals: f32,
+    pub quit_pay_days: u16,
+    /// Less `quit_bed_days` in a company bed.
+    pub quit_bed_days: u16,
+    pub quit_min_days: u16,
+    /// A day's quit chance once the days are reached.
+    pub quit_p: f32,
+    /// Petty crime: the planner's steal costs `− steal_cost_cut × misery`;
+    /// the vehicle theft's lawfulness gate `+ steal_lawful_cut × misery`.
+    pub steal_cost_cut: f32,
+    pub steal_lawful_cut: f32,
+    /// Off screen: the hour's `p_steal × (1 + stat_steal_mult × misery)`.
+    pub stat_steal_mult: f32,
+    /// Fights: misery past `brawl_min`, drunk or high, an hour's chance at
+    /// misery 1 `brawl_p × (1 − brawl_lawful_damp × lawfulness)`.
+    pub brawl_min: f32,
+    pub brawl_p: f32,
+    pub brawl_lawful_damp: f32,
+    /// A drink (a `Socialised` memory) within this many hours is drunk.
+    pub drink_hours: u32,
+    /// The street brawl's reach (tiles).
+    pub brawl_reach: u32,
+    /// The brawl's death chance multiplier (`FightMods.kill_mult`).
+    pub brawl_kill_mult: f32,
+    /// The struck's grudge on the starter; `× brawl_grudge_back` the starter's on a struck winner.
+    pub brawl_grudge_w: f32,
+    pub brawl_grudge_back: f32,
+    /// Off screen: a day's brawl at misery 1 (`× (1 − brawl_lawful_damp ×
+    /// lawfulness)`), a report filed on `stat_brawl_report_p`.
+    pub stat_brawl_p: f32,
+    pub stat_brawl_report_p: f32,
+    /// Recruitment: JoinGang `+ join_flat × misery`; the edge's affinity
+    /// `− join_affinity_cut × misery`; past `join_min` misery and under
+    /// `join_lawfulness` taken off the street; the join's event names misery
+    /// past `join_note_min`; off screen `stat_join_p × misery` a day.
+    pub join_flat: f32,
+    pub join_affinity_cut: f32,
+    pub join_min: f32,
+    pub join_lawfulness: f32,
+    pub join_note_min: f32,
+    pub stat_join_p: f32,
+    /// The faith: a Preach draws past `faith_min` misery; `p_convert × (1 +
+    /// faith_convert_mult × misery)`.
+    pub faith_min: f32,
+    pub faith_convert_mult: f32,
 }
 
 /// The pre-view pass phase 5 `[legs]` (docs/PREVIEW_PASS.md § 2 "20k

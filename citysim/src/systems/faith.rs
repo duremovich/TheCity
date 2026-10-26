@@ -120,7 +120,14 @@ pub fn convert(world: &mut World, id: EntityId, i: u8) {
     }
     world.jobs2.faith.followers.insert(id, i);
     ownership::jobs2_row(world).conversions += 1;
-    let text = format!("{} took up {}", world.name_of(id), label(world, i));
+    // The pressure pass phase 1 (OPEN-178): a convert misery delivered says so.
+    let text = match crate::systems::misery::join_note(world, id) {
+        Some(m) => {
+            ownership::jobs2_row(world).misery_converts += 1;
+            format!("{} took up {} ({m})", world.name_of(id), label(world, i))
+        }
+        None => format!("{} took up {}", world.name_of(id), label(world, i)),
+    };
     world.push_event(EventKind::Preached, &[id], text);
 }
 
@@ -363,7 +370,9 @@ fn preach(world: &mut World) {
             let mine = creed_of(world, id);
             let belonging = world.comp::<Needs>(id).map_or(1.0, |n| n.belonging);
             let grief = grieving(world, id);
-            let drawn = mine == Some(i) || belonging < cfg.attend_belonging || grief;
+            // The pressure pass phase 1 (OPEN-178): misery draws as loneliness does.
+            let miserable = crate::systems::misery::faith_drawn(world, id);
+            let drawn = mine == Some(i) || belonging < cfg.attend_belonging || grief || miserable;
             if !drawn {
                 continue;
             }
@@ -372,8 +381,9 @@ fn preach(world: &mut World) {
             }
             ownership::jobs2_row(world).preach_attend += 1;
             if mine.is_none()
-                && (belonging < cfg.convert_belonging || grief)
-                && hash(world, PURPOSE_CONVERT, key(id), day) < p_convert
+                && (belonging < cfg.convert_belonging || grief || miserable)
+                && hash(world, PURPOSE_CONVERT, key(id), day)
+                    < p_convert * crate::systems::misery::faith_mult(world, id)
             {
                 convert(world, id, i);
             }

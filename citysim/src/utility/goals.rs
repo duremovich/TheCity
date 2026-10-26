@@ -412,7 +412,9 @@ pub fn considerations_with(
             world.comp::<Wallet>(id)?;
             world.comp::<Skills>(id)?;
             let p = pers?;
-            let in_shift = world.comp::<Job>(id).is_some_and(|j| j.on_shift(tod));
+            // The pressure pass phase 1 (OPEN-178): a skipped shift's hours are his own.
+            let in_shift = world.comp::<Job>(id).is_some_and(|j| j.on_shift(tod))
+                && !crate::systems::misery::skipped_now(world, id);
             let mut cs = vec![
                 Consideration::new("U(wealth)", urgency(n.wealth), SQUARE),
                 Consideration::new("U(hunger)", urgency(n.hunger), IDENTITY),
@@ -728,6 +730,8 @@ pub fn considerations_with(
             }
             let n = needs?;
             let p = pers?;
+            // The pressure pass phase 1 (OPEN-178): the miserable are easy recruits.
+            flat += crate::systems::misery::join_flat(world, id);
             vec![
                 Consideration::new("1-lawfulness", 1.0 - p.lawfulness, SQUARE),
                 Consideration::new("U(wealth)", urgency(n.wealth), IDENTITY),

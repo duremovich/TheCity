@@ -1064,10 +1064,11 @@ pub fn steal(world: &mut World, thief: EntityId, v: EntityId) -> bool {
     start_trip(world, thief, v, door, door);
     let (tn, on, what) = (world.name_of(thief), world.owner_label(x.owner), world.name_of(v));
     let place = world.district_name(world.district_of(door)).to_string();
+    let note = crate::systems::misery::theft_note(world, thief).unwrap_or_default();
     world.push_event(
         EventKind::VehicleStolen,
         &[thief, x.owner.unwrap_or(EntityId::NONE), v],
-        format!("{tn} stole {on}'s {what} in {place}"),
+        format!("{tn} stole {on}'s {what} in {place}{note}"),
     );
     world.stats.current.vehicle_thefts += 1;
     true

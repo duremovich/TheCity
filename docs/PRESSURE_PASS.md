@@ -71,3 +71,43 @@ Added here as the critics report, ranked by what the player sees.
 ## Implemented: deviations
 
 (Per phase, as they land.)
+
+### Phase 1: misery acts (`OPEN-178`, `systems/misery.rs`, `[misery]`)
+
+- **Misery** is `clamp((mood_line − mood) / mood_span, 0, 1)` (-0.15, 0.5): the city's mean mood is about +0.05 and
+  7-13 % of adults sit under the line on 20k island seed 42 day 21 (the lowest about -0.85), so a span to -1 left
+  misery near 0 for everyone and nothing fired; a misery of 1 is mood -0.65.
+- **Absenteeism** is a one-person strike (`classes::walk_out`), decided once at the LivingEarly midnight (after the
+  no-shows) for the next shift of a holder not on shift: the shift is marked worked and struck, so neither tier works
+  or is paid, and the day is off hours. The skipper's day is what the brain makes of it (bed, the street, a gang, a
+  theft); the spec's "sleeps in, drinks, wanders, stays with kin" is not forced. Personality has no conscientiousness:
+  loyalty stands in beside lawfulness. The owner of the workplace skips but is never fired.
+- **Firing** at `fire_absences` (3) in `absence_window_days` (14): a `Fire` event, a `Sacked` memory (new
+  `MemoryKind`), `life::note_quit`'s rehire block. The base no-show rule (`fixes::daily`) is untouched (a struck shift
+  is no missed workday).
+- **Quitting**: consecutive low midnights (`Misery.low_days`, a new component), `quit_days` less the commute, pay and
+  company-bed terms, then `quit_p` a day; `economy::quit_job` with the reason in the event. The company bed goes with
+  the job through the existing `company::evictions` (noted, evicted after the grace).
+- **Petty crime**: the steal costs (food and the vehicle) fall by `steal_cost_cut × misery` and the vehicle theft's
+  lawfulness gate widens; off screen `p_steal × (1 + stat_steal_mult × misery)`. No new shoplifting path (the items'
+  pickpocket rides the food theft, `weapons::market_petty`). A theft by a miserable thief names it in the event.
+- **Brawls** are not the Fight goal (it needs a wronging enemy): an hourly pass over bodies (Full, Coarse) past
+  `brawl_min`, in a Bar or a leisure venue (drinking there) or on the street after a drink or a dose, resolved at once by
+  `law::resolve_fight_mods` at `brawl_kill_mult`, an Assault (or a Murder) raised, the bouncer's ejection, and grudges
+  (`grudges::add`, Assaulted) that make Enemy edges for Fight and Hunt. Off screen: a daily roll against
+  `lod::stranger_in_zone`. A drink is a `Socialised` memory naming nobody at the drink's weight (the gang's welcome
+  is not one).
+- **Recruitment**: JoinGang `+ join_flat × misery`; the member edge needs `join_affinity_cut × misery` less affinity;
+  the miserable and lawless are taken off the street as the desperate are; off screen there was no gang join at all,
+  so `stat_join_p × misery` a day is new. The faith's Preach draws and converts the miserable. Joins and conversions
+  past `join_note_min` name misery in the event.
+- **The other side** (good mood, item 6) is not done: room spent on the five.
+- **Counters** (new `Jobs2Cols` columns, `analyze_run.py` "misery, run totals"): 20k island seed 42 x 30, before ->
+  after: skips 0 -> 1,312, misery firings 63, misery quits 42, brawls 119 (57 on screen; 119 grudges formed, 2 Hunts
+  and 3 later assaults between a brawl's pair), misery gang joins 368, misery conversions 165; Murder events 58 -> 57,
+  Assault 859 -> 1,070, Theft 855 -> 1,052, arrests 2,957 -> 2,989, GangJoin 813 -> 966, gang members day 29 350 ->
+  432, followers day 29 4,616 -> 4,671, employed mean 11,226 -> 11,256 (the fired and the quitters are rehired from the
+  pool), mean mood 0.043 -> 0.042. FINDING: assaults +25 %, thefts +23 %, gang size +23 %; nothing tuned. (The after
+  run predates the drink test's weight filter, the last change: a street brawl after a gang's welcome no longer counts
+  as drunk, so on-screen street brawls run a little fewer.)
+- No test (doctrine 2).
