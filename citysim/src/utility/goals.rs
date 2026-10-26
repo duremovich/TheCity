@@ -636,6 +636,8 @@ pub fn considerations_with(
                 .iter()
                 .filter(|e| e.kind == MemoryKind::SawCrime && e.tick >= two_days && !e.second_hand)
                 .filter(|e| e.subject.is_some_and(|s| !crate::systems::law::reported_since(world, s, e.tick)))
+                // The pressure pass phase 5a: a crime kept to sell is not reported.
+                .filter(|e| e.subject.is_none_or(|s| !crate::systems::consequence::keeps_quiet(world, id, s)))
                 .max_by(|a, b| a.salience.partial_cmp(&b.salience).unwrap_or(std::cmp::Ordering::Equal))?;
             let in_gang = world.has::<crate::components::GangMember>(id);
             let betraying = world.comp::<Brain>(id).is_some_and(|b| b.betraying);

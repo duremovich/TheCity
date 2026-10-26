@@ -357,6 +357,12 @@ pub struct Config {
     /// a save) with the key absent: M16b's protection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protection: Option<ProtectionCfg>,
+    /// The pressure pass phase 5a (docs/PRESSURE_PASS.md § Phase 5):
+    /// consequence, the non-gang half (`systems/consequence.rs`): witnesses
+    /// react, an expired hit escalates, jail is a place, the faith's service.
+    /// `None` (not written into a save) with the key absent: none of it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consequence: Option<ConsequenceCfg>,
     /// The island pass phase 1 (docs/ISLAND_PASS.md I1; OPEN-163 part):
     /// travel time in the job and bed picks (`systems/distance.rs`). `None`
     /// (not written into a save) with the key absent: the picks
@@ -1342,6 +1348,178 @@ impl Default for ProtectionCfg {
             stipend_jobless_only: true,
             stipend_reserve: 150,
             broker_visits: true,
+        }
+    }
+}
+
+/// The pressure pass phase 5a `[consequence]` (docs/PRESSURE_PASS.md § Phase 5;
+/// `systems/consequence.rs`): what happens next. A witness reacts (reports,
+/// flees, gossips or blackmails), an expired hit is reposted higher or the
+/// buyer goes himself or lets it go, jail has cellmates, contacts, fights and
+/// a release into a changed life, and a creed holds a weekly service its
+/// followers walk to. Absent: none of it. Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ConsequenceCfg {
+    /// A witness's reaction (one weighted draw, a hash of the witness and the
+    /// minute): report (`w_report x lawfulness`: today's SawCrime memory and
+    /// the walk to the Hall), flee (`w_flee x (1 - courage)`, a violent
+    /// crime only), gossip (`w_gossip x sociability`, a crime that is a deed)
+    /// or blackmail (`w_blackmail x (1 - lawfulness) x (0.5 + greed)`, gated below).
+    pub w_report: f32,
+    pub w_flee: f32,
+    pub w_gossip: f32,
+    pub w_blackmail: f32,
+    /// A fleeing witness's edge to the culprit falls by this (an Enemy: the Flee goal's "hostile near").
+    pub flee_affinity: f32,
+    /// A gossiping witness tells this many of his closest people at once (hops 1).
+    pub gossip_tell: u8,
+    /// The culprit sees who saw him on this chance (an edge: `hitmarket::knows_witness`).
+    pub learn_p: f32,
+    /// Blackmail's gate: the witness at most this lawful and holding at most this many coins.
+    pub bm_lawful_max: f32,
+    pub bm_broke_coins: i64,
+    /// The first demand comes after this many days, in person, between these hours (a `Visit`).
+    pub bm_wait_days: u16,
+    pub bm_hour_from: u8,
+    pub bm_hour_to: u8,
+    pub bm_urgency: f32,
+    /// The demand: this share of the culprit's purse, within these bounds.
+    pub bm_demand_share: f32,
+    pub bm_demand_min: i64,
+    pub bm_demand_max: i64,
+    /// The culprit pays on `bm_pay_base + bm_pay_fear x (1 - courage) + bm_pay_lawful x
+    /// lawfulness - bm_pay_pride x pride` (the lawful have more to lose).
+    pub bm_pay_base: f32,
+    pub bm_pay_fear: f32,
+    pub bm_pay_lawful: f32,
+    pub bm_pay_pride: f32,
+    /// Refused, the culprit silences the witness on `bm_silence_w x (1 - lawfulness) x (0.5 +
+    /// courage)` (a beating at `bm_kill_mult`), else the witness goes to the law.
+    pub bm_silence_w: f32,
+    pub bm_kill_mult: f32,
+    /// A paid demand comes back after this many days, at most this many times;
+    /// a demand not made (the visit failed) is tried at most `bm_tries` times.
+    pub bm_interval_days: u16,
+    pub bm_max_demands: u8,
+    pub bm_tries: u8,
+    /// Open blackmails at most (the city's).
+    pub bm_max_open: usize,
+    /// An expired (or failed) hit or beating a person bought: repost
+    /// (`hit_w_repost x (0.5 + grudge)`, at `hit_repost_mult` the old price,
+    /// at most `hit_repost_max` times a head), go himself (`hit_w_self x
+    /// courage x grudge`, the grudge at least `hit_self_min`), or let it go
+    /// (`hit_w_giveup x (1.5 - grudge)`: the grudge x `hit_giveup_decay`).
+    pub hit_w_repost: f32,
+    pub hit_repost_mult: f32,
+    pub hit_repost_max: u8,
+    pub hit_w_self: f32,
+    pub hit_self_min: f32,
+    pub hit_w_giveup: f32,
+    pub hit_giveup_decay: f32,
+    /// A sentenced prisoner's Betrayed grudge on the person who reported him.
+    pub snitch_grudge: f32,
+    /// The cells, a day per prisoner: a gang member cellmate's offer taken on `cell_recruit_p
+    /// x (1 - lawfulness) x (0.5 + misery)`; a Fixer's regular cellmate's name on
+    /// `cell_contact_p` (a regular there too); a fight with a cellmate he dislikes (affinity
+    /// under `cell_fight_affinity`, a grudge or a rival's colours) on `cell_fight_p x (0.5 +
+    /// pride)` at `cell_kill_mult`; a broke prisoner (under `cell_loan_broke`) borrows
+    /// `cell_loan_coins` from a cellmate with twice that on `cell_loan_p` (an edge debt).
+    pub cell_recruit_p: f32,
+    pub cell_contact_p: f32,
+    pub cell_fight_p: f32,
+    pub cell_fight_affinity: f32,
+    pub cell_kill_mult: f32,
+    pub cell_loan_p: f32,
+    pub cell_loan_coins: i64,
+    pub cell_loan_broke: i64,
+    /// At most this many cell events a jail a day.
+    pub cell_events_max: u16,
+    /// The service: a creed's place (a cult's or the Purists' chapel, a church's Mission)
+    /// holds one a week, its day and hour hashed on the place within `svc_hour_from..to`;
+    /// the congregation is called `svc_lead_hours` before (a `Visit`), at most `svc_cap`.
+    pub svc_hour_from: u8,
+    pub svc_hour_to: u8,
+    pub svc_lead_hours: u8,
+    pub svc_cap: usize,
+    /// A congregant whose home is past this many travel ticks from the place is not called
+    /// (the preacher always is).
+    pub svc_reach_ticks: u64,
+    pub svc_urgency: f32,
+    /// A congregant brings an unchurched friend on this chance.
+    pub svc_guest_p: f32,
+    /// The plate: this share of an attendee's purse, at most `svc_tithe_max`.
+    pub svc_tithe_share: f32,
+    pub svc_tithe_max: i64,
+    /// Belonging an attendance gives.
+    pub svc_gain: f32,
+    /// A guest converts on `svc_convert_p x (0.5 + misery + (1 - belonging))`.
+    pub svc_convert_p: f32,
+    /// A congregant walks out on `svc_walkout_p x (1.5 - loyalty) x (0.5 + misery)`.
+    pub svc_walkout_p: f32,
+    /// A Purist (or a creed row without `apostasy_w`) leaver's grudge from the preacher.
+    pub svc_heretic_w: f32,
+}
+
+impl Default for ConsequenceCfg {
+    fn default() -> Self {
+        ConsequenceCfg {
+            w_report: 1.0,
+            w_flee: 0.6,
+            w_gossip: 0.8,
+            w_blackmail: 1.2,
+            flee_affinity: -0.4,
+            gossip_tell: 3,
+            learn_p: 0.3,
+            bm_lawful_max: 0.35,
+            bm_broke_coins: 20,
+            bm_wait_days: 1,
+            bm_hour_from: 9,
+            bm_hour_to: 21,
+            bm_urgency: 0.85,
+            bm_demand_share: 0.3,
+            bm_demand_min: 5,
+            bm_demand_max: 80,
+            bm_pay_base: 0.2,
+            bm_pay_fear: 0.5,
+            bm_pay_lawful: 0.3,
+            bm_pay_pride: 0.3,
+            bm_silence_w: 1.0,
+            bm_kill_mult: 0.3,
+            bm_interval_days: 7,
+            bm_max_demands: 3,
+            bm_tries: 3,
+            bm_max_open: 200,
+            hit_w_repost: 1.0,
+            hit_repost_mult: 1.5,
+            hit_repost_max: 2,
+            hit_w_self: 1.0,
+            hit_self_min: 0.6,
+            hit_w_giveup: 0.6,
+            hit_giveup_decay: 0.6,
+            snitch_grudge: 0.4,
+            cell_recruit_p: 0.08,
+            cell_contact_p: 0.1,
+            cell_fight_p: 0.05,
+            cell_fight_affinity: -0.2,
+            cell_kill_mult: 0.1,
+            cell_loan_p: 0.1,
+            cell_loan_coins: 10,
+            cell_loan_broke: 5,
+            cell_events_max: 20,
+            svc_hour_from: 18,
+            svc_hour_to: 21,
+            svc_lead_hours: 1,
+            svc_cap: 30,
+            svc_reach_ticks: 240,
+            svc_urgency: 0.7,
+            svc_guest_p: 0.15,
+            svc_tithe_share: 0.1,
+            svc_tithe_max: 10,
+            svc_gain: 0.25,
+            svc_convert_p: 0.25,
+            svc_walkout_p: 0.03,
+            svc_heretic_w: 0.8,
         }
     }
 }

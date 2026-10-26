@@ -357,6 +357,11 @@ use crate::world::World;
 /// punished}`, `VisitWhy::Punish`, `EventKind::Punished`, `[protection]`
 /// (written only when set) and the `Jobs2Cols` `pr_*` columns (serde
 /// defaults).
+/// Also 70 (the pressure pass phase 5a, consequence, merged beside phase 3): `World.consequence`
+/// (written while it holds anything), `VisitWhy::{Blackmail, Service}`,
+/// `EventKind::{WitnessReacted, Blackmail, HitEscalated, Service, Cells}`,
+/// `[consequence]` (written only when set) and the `Jobs2Cols` phase 5a
+/// columns (serde defaults).
 pub const SAVE_VERSION: u8 = 70;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.

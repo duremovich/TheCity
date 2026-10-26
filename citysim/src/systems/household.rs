@@ -103,12 +103,18 @@ pub enum VisitWhy {
     /// contract's party off the Fixer's hours comes to the Fixer (`kin`) in
     /// person in its open hours.
     Broker,
+    /// The pressure pass phase 5a (`consequence::blackmailed`): a witness
+    /// goes to the culprit (`kin`) in person to name the price of silence.
+    Blackmail,
+    /// Phase 5a (`consequence::attended`): a creed's service at its place
+    /// (`kin` is the chapel or the church).
+    Service,
 }
 
 impl VisitWhy {
     /// Phase 5's visits go to a building, not to a person.
     pub fn to_building(self) -> bool {
-        matches!(self, VisitWhy::Papers | VisitWhy::Collect | VisitWhy::Punish | VisitWhy::Broker)
+        matches!(self, VisitWhy::Papers | VisitWhy::Collect | VisitWhy::Punish | VisitWhy::Broker | VisitWhy::Service)
     }
 }
 
@@ -677,7 +683,7 @@ fn pair(a: EntityId, b: EntityId) -> (EntityId, EntityId) {
 fn kin_there(world: &World, v: PendingVisit) -> bool {
     match v.why {
         VisitWhy::Camp(_) => camp_of(world, v.kin).is_some(),
-        VisitWhy::Papers | VisitWhy::Collect | VisitWhy::Punish | VisitWhy::Broker => {
+        VisitWhy::Papers | VisitWhy::Collect | VisitWhy::Punish | VisitWhy::Broker | VisitWhy::Service => {
             world.comp::<Building>(v.kin).is_some_and(|b| !b.demolished && !b.derelict)
         }
         _ => world.has::<Brain>(v.kin) && crate::systems::law::living(world, v.kin),
@@ -1021,6 +1027,7 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
         VisitWhy::Collect => u.collect,
         VisitWhy::Confront | VisitWhy::Dun => crate::systems::underwater::urgency(world, v.why),
         VisitWhy::Punish => crate::systems::protection::urgency(world),
+        VisitWhy::Blackmail | VisitWhy::Service => crate::systems::consequence::urgency(world, v.why),
     };
     let cs = vec![
         Consideration::new("a visit due", can(true), GATE),
@@ -1091,6 +1098,9 @@ fn credit(world: &mut World, id: EntityId, v: PendingVisit, walked: bool) {
         VisitWhy::Dun => return crate::systems::underwater::dunned(world, id, v.kin, walked),
         VisitWhy::Punish => return crate::systems::protection::punished(world, id, v.kin, walked),
         VisitWhy::Broker => return crate::systems::service::broker_arrived(world, id, v.kin),
+        // The pressure pass phase 5a: the blackmailer's demand, the service.
+        VisitWhy::Blackmail => return crate::systems::consequence::blackmailed(world, id, v.kin, walked),
+        VisitWhy::Service => return crate::systems::consequence::attended(world, id, v.kin, walked),
         _ => {}
     }
     crate::systems::social::interacted(world, id, v.kin);
@@ -1110,7 +1120,9 @@ fn credit(world: &mut World, id: EntityId, v: PendingVisit, walked: bool) {
         | VisitWhy::Confront
         | VisitWhy::Dun
         | VisitWhy::Punish
-        | VisitWhy::Broker => {}
+        | VisitWhy::Broker
+        | VisitWhy::Blackmail
+        | VisitWhy::Service => {}
     }
     let place = world.comp::<Position>(v.kin).and_then(|p| p.building);
     let at = place.map_or_else(|| "where they were".to_string(), |b| world.name_of(b));
@@ -1128,7 +1140,9 @@ fn credit(world: &mut World, id: EntityId, v: PendingVisit, walked: bool) {
                 | VisitWhy::Confront
                 | VisitWhy::Dun
                 | VisitWhy::Punish
-                | VisitWhy::Broker,
+                | VisitWhy::Broker
+                | VisitWhy::Blackmail
+                | VisitWhy::Service,
                 _,
             ) => "",
         }

@@ -159,7 +159,7 @@ pub struct ShadowArgs {
     pub map: Option<PathBuf>,
 }
 
-const ARCHETYPES: [&str; 51] = [
+const ARCHETYPES: [&str; 52] = [
     "gang_member",
     "gang_leader",
     "ripperdoc",
@@ -226,6 +226,9 @@ const ARCHETYPES: [&str; 51] = [
     // The pressure pass phase 6: owners of person-owned businesses with staff to pay, the
     // lowest till against a week's wage bill first (not shuffled).
     "owner_broke",
+    // The pressure pass phase 5a: an adult serving a sentence on the start day (the cells, the
+    // release into a changed life).
+    "jailed",
 ];
 
 /// Activity classes of the time-use table, in print order.
@@ -513,6 +516,7 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
             adults().filter(|&a| world.comp::<citysim::components::Mood>(a).is_some_and(|m| m.value < line)).collect()
         }
         "owner_broke" => citysim::systems::underwater::owners_by_till(world).into_iter().map(|(_, o)| o).collect(),
+        "jailed" => adults().filter(|&a| world.has::<Sentence>(a)).collect(),
         other => return Err(format!("unknown archetype {other:?} (known: {})", ARCHETYPES.join(", "))),
     };
     out.sort();

@@ -34,6 +34,8 @@ pub fn run(world: &mut World) {
     crate::prof::timed!("service", crate::systems::service::hourly(world));
     // Lives at work phase 2 (§ 3.5): a Statistical visitor credited at its hour.
     crate::prof::timed!("living::household::hourly", crate::systems::household::hourly(world));
+    // The pressure pass phase 5a: a body arrived at its service or its blackmail.
+    crate::prof::timed!("living::consequence::arrivals", crate::systems::consequence::arrivals(world));
     // Jobs & lives phase 5: an episode under a chip ends the contract
     // (nothing with `[vice] chip` off).
     crate::prof::timed!("living::dollhouse::hourly", crate::systems::dollhouse::hourly(world));
@@ -117,6 +119,10 @@ fn early(world: &mut World) {
     // and the hiring freezes (after the top-up and the visits due, before
     // `demography` hires; nothing with `[underwater]` absent).
     crate::prof::timed!("mid::underwater::daily", crate::systems::underwater::daily(world));
+    // The pressure pass phase 5a: the blackmailers' demands, today's
+    // services called, the cells' day (after the visits due; nothing with
+    // `[consequence]` absent).
+    crate::prof::timed!("mid::consequence::daily", crate::systems::consequence::daily(world));
 }
 
 fn late(world: &mut World) {

@@ -286,7 +286,7 @@ pub fn owed(world: &World, debtor: EntityId, creditor: EntityId) -> i64 {
     i64::from(if lo == debtor { e.debt } else { -e.debt }).max(0)
 }
 
-fn owe(world: &mut World, debtor: EntityId, creditor: EntityId, amount: i64) {
+pub(crate) fn owe(world: &mut World, debtor: EntityId, creditor: EntityId, amount: i64) {
     if amount <= 0 {
         return;
     }

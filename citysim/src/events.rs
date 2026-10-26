@@ -481,10 +481,26 @@ pub enum EventKind {
     /// business]` the owner's choice after (pays, reports, a rival's cover,
     /// sells or shuts); `[member, gang]` a member bailed out.
     Punished,
+    /// The pressure pass phase 5a (`systems::consequence`): `[witness,
+    /// culprit]`, a witness fled, told his people, or kept it to sell; the
+    /// culprit saw who saw him.
+    WitnessReacted,
+    /// Phase 5a: `[witness, culprit, place?]`, a blackmailer's demand in
+    /// person (paid, refused and silenced, refused and reported).
+    Blackmail,
+    /// Phase 5a: `[buyer, target, fixer?]`, an unfilled Hit or Beat: reposted
+    /// higher, the buyer goes himself, or he lets it go.
+    HitEscalated,
+    /// Phase 5a: `[attendee, preacher, place]`, a creed's service: preached,
+    /// heard, the plate, a guest converted, a congregant walked out.
+    Service,
+    /// Phase 5a: `[prisoner, other?]`, the cells (a recruit, a Fixer's name, a
+    /// fight, a loan, a missed shift) and the release into a changed life.
+    Cells,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 231] = [
+    pub const ALL: [EventKind; 236] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -716,6 +732,11 @@ impl EventKind {
         EventKind::Loan,
         EventKind::Confronted,
         EventKind::Punished,
+        EventKind::WitnessReacted,
+        EventKind::Blackmail,
+        EventKind::HitEscalated,
+        EventKind::Service,
+        EventKind::Cells,
     ];
 }
 

@@ -1228,6 +1228,11 @@ pub struct World {
     /// businesses for sale and the bought fronts. Saved while it holds anything.
     #[serde(default, skip_serializing_if = "crate::systems::underwater::State::is_empty")]
     pub underwater: crate::systems::underwater::State,
+    /// The pressure pass phase 5a (`systems::consequence`): the open
+    /// blackmails, the hit reposts, the prisoners' runs, today's services.
+    /// Saved while it holds anything.
+    #[serde(default, skip_serializing_if = "crate::systems::consequence::State::is_empty")]
+    pub consequence: crate::systems::consequence::State,
     /// L2 L15: the HangOut spots per district (`leisure::spots`, midnight).
     /// Saved (deviation: the plan's `serde(skip)` would rebuild them on load
     /// from a later state than the midnight's).
@@ -2018,6 +2023,7 @@ impl World {
             bylines: BTreeMap::new(),
             walk_ins: Vec::new(),
             underwater: Default::default(),
+            consequence: Default::default(),
             spots: Vec::new(),
             last_met: BTreeMap::new(),
             told: BTreeMap::new(),

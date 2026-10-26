@@ -331,6 +331,10 @@ pub fn raise_crime_mult(
         // watch walked to each); there he is a witness like anyone.
         if duty && !crate::systems::contracts::on_take_of(world, w, actor) {
             file_report(world, crime, actor, Some(w));
+        } else if !guard {
+            // The pressure pass phase 5a: the civilian reacts (report, flee,
+            // gossip, blackmail); the culprit may see who saw him.
+            crate::systems::consequence::witnessed(world, w, actor, crime, object);
         }
     }
     // M13 D41: a robot victim has no memory, edges or needs.
@@ -1438,6 +1442,9 @@ pub fn sentence(world: &mut World, who: EntityId, crime: Crime, until: Tick, jai
     // (`World::vagrancy_places`, else where they stand), before the Jail.
     // Any other crime leaves the entry for the Vagrancy report it belongs to.
     let place = (crime == Crime::Vagrancy).then(|| vagrancy_place(world, who));
+    // The pressure pass phase 5a: the run in the cells begins (the post held
+    // going in, who reported him).
+    crate::systems::consequence::on_sentenced(world, who, crime);
     // Whoever was escorting them is done; a cuffed prisoner is a contradiction.
     // Every escort, not only `cuffed_by`: when two guards had cuffed the same
     // suspect, the first to reach the Jail cleared `cuffed_by`, the second kept
@@ -1532,6 +1539,8 @@ pub fn release(world: &mut World, who: EntityId, full: bool) {
     }
     let name = world.name_of(who);
     world.push_event(EventKind::Release, &[who], format!("{name} released from the {from}"));
+    // The pressure pass phase 5a: the life he comes out to.
+    crate::systems::consequence::on_released(world, who);
     crate::systems::gang::on_member_released(world, who);
 }
 

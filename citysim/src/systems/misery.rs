@@ -284,12 +284,44 @@ fn skip_as(world: &mut World, c: &MiseryCfg, id: EntityId, m: f32, moment: Strin
 }
 
 fn fire(world: &mut World, id: EntityId, count: u32, window: u32) {
+    fire_as(world, id, count, window, "");
+}
+
+/// The pressure pass phase 5a: a jailed worker's workday is an absence on
+/// phase 1's count (the cells do not strike the shift: the worker is not
+/// there). `None` without `[misery]`, a job, an employer, for the owner, or
+/// a second call the same day; `Some((count, fired))`, the firing done at
+/// `fire_absences`.
+pub fn jail_absence(world: &mut World, id: EntityId) -> Option<(u32, u32, bool)> {
+    let c = cfg(world).cloned()?;
+    let job = world.comp::<Job>(id).cloned()?;
+    job.employer?;
+    if own_business(world, id, &job) {
+        return None;
+    }
+    let day = world.day() as u32;
+    let window = c.absence_window_days;
+    let x = misery_mut(world, id)?;
+    if x.absences.last() == Some(&day) {
+        return None;
+    }
+    x.absences.retain(|&d| d + window > day);
+    x.absences.push(day);
+    let count = x.absences.len() as u32;
+    let fired = count >= c.fire_absences;
+    if fired {
+        fire_as(world, id, count, window, ", in the cells");
+    }
+    Some((count, window, fired))
+}
+
+fn fire_as(world: &mut World, id: EntityId, count: u32, window: u32, why: &str) {
     world.abort_plan(id);
     let Some(job) = world.vacate_job(id) else { return };
     crate::systems::life::note_quit(world, id, job.employer);
     note_left(world, id, job.employer, true);
     let text =
-        format!("{} dismissed as {} (absent {count} times in {window} days)", world.name_of(id), job.role.label());
+        format!("{} dismissed as {} (absent {count} times in {window} days{why})", world.name_of(id), job.role.label());
     let mut actors = vec![id];
     actors.extend(job.employer);
     world.push_event(EventKind::Fire, &actors, text);

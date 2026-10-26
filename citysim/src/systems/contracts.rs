@@ -1830,6 +1830,13 @@ pub fn set_status(world: &mut World, id: ContractId, status: ContractStatus, why
         if status == ContractStatus::Reneged { [c.buyer.unwrap_or(EntityId::NONE), taker] } else { [taker, target] };
     world.push_event(ev, &actors, text.clone());
     log(world, id, text);
+    // The pressure pass phase 5a: an unfilled bought Hit or Beat: the buyer
+    // reposts it higher, goes himself, or lets it go.
+    if !c.motive.is_none() && matches!(status, ContractStatus::Expired | ContractStatus::Failed) {
+        let mut closed = c.clone();
+        closed.status = status;
+        crate::systems::consequence::hit_unfilled(world, &closed, status);
+    }
 }
 
 /// Drop `who`'s run on record `id` (and its Contract plan).
