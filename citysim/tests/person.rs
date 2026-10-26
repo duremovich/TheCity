@@ -726,7 +726,10 @@ fn probe_broke_hand_networks_at_a_fixer_within_a_week() {
         .into_iter()
         .filter(|&a| home(&w, a).is_some() && !regular(&w, a))
         .filter(|&a| w.comp::<citysim::Personality>(a).is_some_and(|p| p.lawfulness < 0.5))
-        .find(|&a| contracts::gun_gate(&w, a) && contracts::nearest_fixer(&w, a) == Some(f))
+        // The pressure pass (phase 1 misery brawls) made the city's first
+        // such hand a murder victim before the week ended; the probe wants
+        // a person who lives the week, so it takes the last candidate.
+        .rfind(|&a| contracts::gun_gate(&w, a) && contracts::nearest_fixer(&w, a) == Some(f))
         .expect("a jobless hand with a sellable skill near the Fixer");
     pin(&mut w, a);
     w.comp_mut::<Wallet>(a).expect("wallet").coins = 0;

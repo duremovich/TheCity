@@ -1201,7 +1201,11 @@ fn fronts_daily(world: &mut World, c: &UnderwaterCfg) {
             world.underwater.fronts.remove(&b);
             continue;
         }
-        // The staff are drawn in.
+        // The staff are drawn in (not into an emptied gang waiting on its
+        // refound: the front is no back door round `gang::may_reform`).
+        if !crate::systems::gang::may_reform(world, g) {
+            continue;
+        }
         let staff: Vec<EntityId> = world.staff_of(b).to_vec();
         for s in staff {
             if world.has::<GangMember>(s)
