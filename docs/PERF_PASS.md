@@ -392,3 +392,39 @@ changes the map, not a mechanism.
   over every roll (rows, prices behind memos a purchase drops, pantries, rosters), no one site over 0.1 s a game
   day at 20k. No new test (R7): the identity is the proof, and the determinism test's 4-thread leg runs the same
   hour as its 1-thread leg.
+- **Phase 7c** (`e8d9721`, `47c113e`; `OPEN-205` closed, `OPEN-209` and `OPEN-184` annotated). `[lod] coworker_crew`
+  0 -> 32 (R8): a Statistical worker's hour of co-work bonds it with the 32 same-role co-workers of its employer nearest
+  it in the roster (16 each side, wrapping; `lod::crew_above`, Scale S1's mechanism, unchanged), chosen before the
+  on-shift and Statistical filter, so a crew is a fixed roster neighbourhood; both halves of phase 9's two-step bond
+  read the one `mates` list. The El crews' cap (`[transit] staff_per_line`) caps how many sweepers the fares hire; the
+  crew cap caps how many of them each bonds with: different quantities, no double cap. The switch is the value: crew 0
+  with `c472f6e`'s table is identical to `c472f6e` on 2k 42-44 x 30 (events, report, save; on the final tree too).
+  Statistical mirror: none moves, the bond is the Statistical tier's own (bodies drift by co-location). The CLI report
+  gains `friends` (Friend edges at the day's end, CLI-only, not saved). 2k 42-44 x 120 against `c472f6e`: Friend edges
+  at day 120 38.5k -> 34.8k (-10 %), edges 100.2k -> 97.8k, co-work pair-hours a day at day 120 71.1k -> 58.0k; Murders
+  37 -> 30 (cap alone, the old table: 37 -> 35), employed share 0.743 -> 0.751, gang members (summed) -1 %. 20k
+  `isle_m_k2` 42 x 30, 8 threads, base -> branch: pair-hours a day days 10/20/30 1.10M/1.42M/1.44M -> 0.47M/0.46M/0.44M;
+  edges 328k/567k/767k -> 253k/440k/641k; Friend edges 145k/219k/250k -> 69k/86k/113k (-55 % at day 30: per capita
+  the 2k city's, ~11 a resident against 25); `prof` days 25-30 ms a game day `tick::lod` 1,390 -> 1,291, the bond 338
+  -> 221 (`work::mates` 97 -> 110, the walk to 16 each side), the tick 6,832 -> 5,912, 757 ms of it `tick::gang`
+  (`gang::harvest_target`, an order's dwell rescored on the base's days 25-30, `OPEN-211`'s: another city, not the
+  cap); ticks/s days 25-30 (print only, side by side) median 234 -> 266. 100k seed 42 x 30 at
+  8 threads (`pop_scale`, `--ambient-flats 50`) against phase 9's run: pair-hours a day days 10/20/30 26.3M/25.1M/24.5M
+  -> 2.6M/3.0M/2.9M; edges at day 30 8.73M -> 5.11M (Friend edges 1.23M); peak working set 3.10 -> 2.13 GB; ticks/s
+  days 25-30 25/26/23/28/26/25 -> 29/28/25/29/26/25 (median 25.5 -> 27; a shared box, two other phases running, print
+  only); the longest tick midnight 2.59-2.74 -> 2.58-2.78 s (untouched, 7b's); the end city homeless 2,903 -> 2,850,
+  employed 56,184 -> 55,558. The gate's 30 ticks/s is still missed. **The stat table:** the cap cannot move it
+  (`calibrate` runs an all-Full city; crew 0 and 32 regenerate it byte for byte), but the committed table had drifted
+  from the tree since `0d61e91`, and on it the cap pushed the parity test's law2 actor share past its tolerance (Full
+  0.020; Statistical 0.060 at crew 0 -> 0.075 at 32, tolerance 0.050; 41 -> 49 acts over six seeds). Regenerated on the
+  tree (`47c113e`), it reads 0.064 and the test passes; no band widened. Parity rows, Full | base | crew 32 old table |
+  crew 32 regenerated: thefts 0.067 | 0.089 | 0.079 | 0.096, arrests 0.712 | 0.359 | 0.362 | 0.390, assaults 0.091 |
+  0.132 | 0.129 | 0.153, marriages 1.092 | 0.831 | 0.832 | 0.839, hunger-days 0.842 | 0.392 | 0.393 | 0.451, paid
+  venue visits 12.05 | 12.96 | 13.19 | 12.51, law0 share 0.854 | 0.755 | 0.728 | 0.728 (FINDING), law1 0.127 | 0.184 |
+  0.197 | 0.207 (FINDING). SAVE_VERSION stays 67 (the table's format is unchanged). **Deviations:** (1) the regen is the
+  tree's drift, not the cap's (above), committed apart with that reason; Murders 37 -> 30 at 2k is mostly the regen's
+  redraw (FINDING). (2) `friends` is a new CLI column, the brief's Friend edges having none. (3) `captives`'s abduct
+  test takes the first stranger holding no contract (on the regenerated table's city the first held one; the same pair
+  on the base city). No new test (R7): `test_crew_above_bounds_coworker_pairs` and
+  `test_coworker_crew_bounds_the_coworker_edges` cover the mechanism, the identity the switch. The round workers'
+  variant (no co-work bond for sweepers on a beat) stays in `OPEN-209`.
