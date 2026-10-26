@@ -253,6 +253,9 @@ retaliate_days = 3
 sacked_days = 3
 # 0.5: one arrest (0.3) alone no longer forces a rethink; two in a day, or any death, does.
 shock_severity_rethink = 0.5
+# Perf pass 7d (OPEN-211): a gang left on Order::Job after its job settled, whose next order is already held
+# for the giving in person, rescores at the daily tick or on a shock rethink, not every tick (1,440 O(N) scans a day).
+dwell_hold = true
 # M9: this many members (at most half the gang, newest first, rotating daily) sleep at the Hideout
 # each night, so a raid meets defenders. In M8 every raid found the Hideout empty and sacked it.
 # 4 (was 2): after phases 2-4 changed who is jailed or mustering, 2 left every seed-42 raid a sack (0 of 5 met a defender); 4 meets 3 of 5.

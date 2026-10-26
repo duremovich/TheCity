@@ -4317,6 +4317,11 @@ pub struct GangsCfg {
     pub sacked_days: u64,
     /// Pending shock severities that force an immediate rescoring.
     pub shock_severity_rethink: f32,
+    /// The perf pass phase 7d (OPEN-211): a gang still on `Order::Job` after its job settled, with the next
+    /// order already held for the giving in person (`Gang.pending_order`), does not rescore every tick; it
+    /// rescores at the daily tick or on a shock rethink. `CITYSIM_DWELL_OFF=1` turns it off (doctrine 6).
+    #[serde(default = "GangsCfg::default_dwell_hold", skip_serializing)]
+    pub dwell_hold: bool,
     /// Members who sleep at the Hideout each night (at most half the gang), so a raid meets someone.
     #[serde(default = "GangsCfg::default_night_watch")]
     pub night_watch: usize,
@@ -4417,6 +4422,9 @@ pub struct GangsCfg {
 }
 
 impl GangsCfg {
+    fn default_dwell_hold() -> bool {
+        true
+    }
     fn default_night_watch() -> usize {
         4
     }
@@ -8966,6 +8974,10 @@ impl Config {
         // (doctrine 6), retired at the pass close.
         if std::env::var("CITYSIM_REST_OFF").is_ok_and(|v| v == "1") {
             cfg.rest = None;
+        }
+        // The perf pass phase 7d (OPEN-211): the gang dwell rescore's switch in flight.
+        if std::env::var("CITYSIM_DWELL_OFF").is_ok_and(|v| v == "1") {
+            cfg.gangs.dwell_hold = false;
         }
         // Lives at work (D13): a config with `[lives] enabled = false` by any
         // path clears the milestone's sections, so the off save holds no
