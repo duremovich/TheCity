@@ -1650,7 +1650,7 @@ fn run(args: RunArgs) -> Result<(), String> {
         // `DailyStats`, not saved); like `ticks_per_sec`, noise to every
         // identity comparison (`tools/phase_measure.py` masks them).
         println!(
-            "{},max_tick_ms,max_tick_at,edges,edges_new,coworker_pairs",
+            "{},max_tick_ms,max_tick_at,edges,edges_new,coworker_pairs,friends",
             citysim::systems::stats::csv_header(&world)
         );
     }
@@ -1658,7 +1658,9 @@ fn run(args: RunArgs) -> Result<(), String> {
     // The perf pass phase 6 (the slope): the social graph's size at the
     // day's end, the edges made and the Statistical co-worker pair-hours
     // bonded that day (`World::edges_made`, `World::coworker_pairs`, not
-    // saved: a loaded world counts from its load, as these do).
+    // saved: a loaded world counts from its load, as these do). Phase 7c
+    // (the crew cap, OPEN-205): `friends`, the Friend edges at the day's end
+    // (a walk of the edges once a day; CLI-only like the rest).
     let mut made_at = (world.edges_made, world.coworker_pairs);
     let mut next_lever = 0;
     let mut last_event_tick: Option<u64> = None;
@@ -1748,13 +1750,14 @@ fn run(args: RunArgs) -> Result<(), String> {
             if let Some(row) = world.stats.history.back_mut() {
                 row.ticks_per_sec = chunk_ticks as f32 / secs;
                 println!(
-                    "{},{:.1},{},{},{},{}",
+                    "{},{:.1},{},{},{},{},{}",
                     row.csv_row(),
                     max_tick.0,
                     max_tick.1,
                     world.edges.len(),
                     world.edges_made - made_at.0,
-                    world.coworker_pairs - made_at.1
+                    world.coworker_pairs - made_at.1,
+                    world.edges.values().filter(|e| e.kind == citysim::RelKind::Friend).count()
                 );
                 made_at = (world.edges_made, world.coworker_pairs);
             }

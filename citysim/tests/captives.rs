@@ -276,7 +276,12 @@ fn test_rescue_win_frees_the_holders_captives() {
 fn test_abduct_plan_and_hand_over() {
     let mut w = gang_world();
     let (g, l, h) = a_gang(&mut w);
-    let [taker, v] = strangers(&w, 2)[..] else { unreachable!() };
+    // The perf pass 7c (the regenerated stat table): on the moved city the
+    // first stranger already holds a taken contract, so the taker is the
+    // first who holds none.
+    let free = strangers(&w, 8);
+    let taker = *free.iter().find(|&&a| !contracts::holds_taken(&w, a)).expect("a free taker");
+    let v = *free.iter().find(|&&a| a != taker).expect("a victim");
     heavy(&mut w, taker);
     let hold = Hold { at: h, demand: Some(Demand::Coins { amount: 100, weekly: false }), over: None };
     let id = captives::post_abduct(
