@@ -71,3 +71,23 @@ Added here as the critics report, ranked by what the player sees.
 ## Implemented: deviations
 
 (Per phase, as they land.)
+
+**Phase 4: reach and the social graph (`OPEN-194`, `OPEN-210`).** `[distance.reach]` (`systems/distance.rs`
+`reach`, `out_of_reach`): the reach is measured in travel ticks (`distance::travel`, the walk or the El) from where
+the body sets out, as `[distance]`. ReportCrime carries a "hall within reach" gate; Found and Treat are skipped
+(`already_satisfied`) with the Hall or the nearest Clinic past reach (a diagnosed cancer is walked to at any
+distance: the 2k probe `probe_diagnosed_patient_with_coins_seeks_the_clinic`); a Hunt's or a hit Contract's first
+`GoTo(Intel)` (`hunt::within_reach`, read by `contracts::plan`): an ask venue past reach becomes the hunter's own
+district's busiest Bar, a stakeout past it is not planned and the goal cools; a sweeper's beat
+(`districts::sanitation`) is dealt within reach of the post (home district first, then the nearest district with a
+slot), else the post's own district, and `District.sweepers` counts the dealt beats. Deviation: "unless none is
+left" reads per purpose: a purpose with alternatives takes the nearest within reach; a discretionary trip with none
+within reach is dropped, not walked (the one Hall, the nearest Clinic). `[social]` `weak_affinity`,
+`weak_prune_days` (7, the base's 30), `acquaintance_cap` (40): the daily pass drops a person's weakest, then
+stalest Acquaintances past the cap; a debt's edge is neither pruned nor counted (the base pruned a weak one with a
+debt). 20k island seed 42 x 30 (before = this build with the reach table out and the base prune): edges at d30
+663k -> 426k, Friend edges 133k -> 132k, foundings 55 -> 17, contracts fulfilled 71 -> 45, Reports 3,475 -> 3,489,
+Treated 43 -> 54 (that run gated the cancer too), ticks/s days 25-30 182 -> 187 (both runs and a shadow on the box
+at once; a print). `sickness::test_g3_only_the_broke_steal_food` pools seeds 408-410 (seed 408 alone held one broke
+theft in 20 days; the new prune moved it to none).
+

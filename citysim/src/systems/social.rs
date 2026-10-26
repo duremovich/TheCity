@@ -701,7 +701,10 @@ pub fn first_meeting(world: &mut World, a: EntityId, b: EntityId, affinity: f32)
 fn daily(world: &mut World) {
     let tick = world.tick;
     let week = 7 * TICKS_PER_DAY;
-    let month = 30 * TICKS_PER_DAY;
+    // The pressure pass phase 4 (OPEN-210): the weak prune's wait and
+    // threshold from `[social]` (the base: 30 days, 0.05).
+    let weak_wait = world.config.social.weak_prune_days * TICKS_PER_DAY;
+    let weak = world.config.social.weak_affinity;
     let mut prune = Vec::new();
     let mut aged_debts = Vec::new();
     let mut called: Vec<(EntityId, EntityId, i64)> = Vec::new();
@@ -719,8 +722,9 @@ fn daily(world: &mut World) {
             }
         }
         if e.kind == RelKind::Acquaintance
-            && e.affinity.abs() < 0.05
-            && tick.saturating_sub(e.last_interaction) >= month
+            && e.affinity.abs() < weak
+            && e.debt == 0
+            && tick.saturating_sub(e.last_interaction) >= weak_wait
         {
             prune.push((a, b));
         }
@@ -746,6 +750,7 @@ fn daily(world: &mut World) {
     for (a, b) in prune {
         world.remove_edge(a, b);
     }
+    cap_acquaintances(world);
     // A debt older than 14 days costs affinity on the donor's side (the creditor).
     for (a, b) in aged_debts {
         let e = world.edge_entry(a, b);
@@ -756,6 +761,39 @@ fn daily(world: &mut World) {
     // M16b § 4 Debt: the creditor calls the aged debt in.
     called.sort_unstable();
     crate::systems::leverage::call_debts(world, &called);
+}
+
+/// The pressure pass phase 4 (OPEN-210): no one keeps more than
+/// `[social] acquaintance_cap` Acquaintances. Past it, in id order, the
+/// weakest (`|affinity|`) go first, then the stalest (ties the lower other
+/// id); an edge holding a debt is neither counted nor dropped, nor is any
+/// other kind (kin, spouse, Friend, Rival, Enemy). Off screen,
+/// `lod::stat_meet` adds an edge a meeting and only the weak ever pruned,
+/// so the graph grew all run (20k seed 42: 78k -> 767k edges in 30 days).
+fn cap_acquaintances(world: &mut World) {
+    let cap = world.config.social.acquaintance_cap;
+    let droppable = |e: &crate::components::Edge| e.kind == RelKind::Acquaintance && e.debt == 0;
+    let mut over: Vec<EntityId> = world.neighbours.iter().filter(|(_, n)| n.len() > cap).map(|(&a, _)| a).collect();
+    over.sort_unstable();
+    for a in over {
+        let mut acq: Vec<(u32, Tick, EntityId)> = world
+            .neighbours(a)
+            .filter_map(|o| {
+                world
+                    .edge(a, o)
+                    .filter(|e| droppable(e))
+                    .map(|e| ((e.affinity.abs() * 1e6) as u32, e.last_interaction, o))
+            })
+            .collect();
+        if acq.len() <= cap {
+            continue;
+        }
+        acq.sort_unstable();
+        let excess = acq.len() - cap;
+        for &(_, _, o) in &acq[..excess] {
+            world.remove_edge(a, o);
+        }
+    }
 }
 
 /// Automatic repayment at CollectWage when `coins > 20`: pay

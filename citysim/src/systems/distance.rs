@@ -53,6 +53,16 @@
 //! planner's context (a Statistical body sleeps by the table, off camera).
 //! No random draw. With `[distance]` absent every
 //! pick is the base one.
+//!
+//! The pressure pass phase 4 (`[distance.reach]`, OPEN-194): the
+//! non-urgent trips the caps above never covered. ReportCrime and Treat are
+//! not scored, and Found is skipped, with the Hall or the nearest Clinic
+//! past its reach ([`out_of_reach`]); a Hunt's or a hit Contract's ask
+//! venue past `stakeout_ticks` is the hunter's own district's busiest Bar,
+//! and a stakeout past it is not planned (`hunt::within_reach`); a
+//! sweeper's beat is dealt within `beat_ticks` of its post
+//! (`districts::sanitation`). Tier-blind (a Statistical body does not
+//! score these goals or walk a beat). No random draw.
 
 use crate::components::{Building, Household, Job, Position, TilePos};
 use crate::entity::EntityId;
@@ -79,6 +89,26 @@ pub fn free(world: &World) -> Option<&crate::config::FreeDistanceCfg> {
 /// it, `[distance.free]` or `[distance]` is absent.
 pub fn stay_in(world: &World) -> Option<&crate::config::StayInCfg> {
     free(world).and_then(|f| f.stay_in.as_ref())
+}
+
+/// The pressure pass phase 4's `[distance.reach]` (OPEN-194), `None` off.
+pub fn reach(world: &World) -> Option<&crate::config::ReachCfg> {
+    world.config.distance.as_ref().and_then(|d| d.reach.as_ref())
+}
+
+/// The pressure pass phase 4 (OPEN-194): building `b` is past the reach
+/// `cap` reads from `[distance.reach]`, from where `id` sets out (inside
+/// it: never). `false` off, or with no origin or door.
+pub fn out_of_reach(world: &World, id: EntityId, b: EntityId, cap: impl Fn(&crate::config::ReachCfg) -> Tick) -> bool {
+    let Some(r) = reach(world) else { return false };
+    if world.comp::<Position>(id).and_then(|p| p.building) == Some(b) {
+        return false;
+    }
+    let (Some(from), Some(door)) = (crate::systems::life::origin(world, id), world.comp::<Building>(b).map(|b| b.door))
+    else {
+        return false;
+    };
+    travel(world, from, door) > cap(r)
 }
 
 /// The job's cap, `None` off.

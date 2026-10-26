@@ -587,11 +587,31 @@ pub fn sanitation(world: &mut World) {
                 .map(|h| w.district_of_building(h))
                 .or_else(|| w.sweep_beats.get(&s).copied())
         };
+        // The pressure pass phase 4 (OPEN-194, `[distance.reach]
+        // beat_ticks`): a beat is dealt only within reach of the sweeper's
+        // post (V8: a beat six districts from the Recycler, 181-693 min);
+        // the rest take the nearest district with a slot left, else the
+        // post's own district (a slot past every sweeper's reach stays
+        // unswept by a body).
+        let reach = crate::systems::distance::reach(world).map(|r| r.beat_ticks);
+        let post = |w: &World, s: EntityId| {
+            w.comp::<Job>(s)
+                .and_then(|j| j.employer)
+                .and_then(|e| w.comp::<crate::components::Building>(e))
+                .map(|b| b.door)
+        };
+        let travel = |w: &World, from: crate::components::TilePos, d: DistrictId| {
+            crate::systems::distance::travel(w, from, w.districts[d.index()].centroid)
+        };
+        let within = |w: &World, s: EntityId, d: DistrictId| match (reach, post(w, s)) {
+            (Some(cap), Some(from)) => travel(w, from, d) <= cap,
+            _ => true,
+        };
         let mut left: Vec<u16> = alloc.clone();
         let mut out: Vec<(EntityId, DistrictId)> = Vec::new();
         let mut rest: Vec<EntityId> = Vec::new();
         for &s in &workers {
-            match prefer(world, s).filter(|d| left.get(d.index()).is_some_and(|&k| k > 0)) {
+            match prefer(world, s).filter(|&d| left.get(d.index()).is_some_and(|&k| k > 0) && within(world, s, d)) {
                 Some(d) => {
                     left[d.index()] -= 1;
                     out.push((s, d));
@@ -599,11 +619,30 @@ pub fn sanitation(world: &mut World) {
                 None => rest.push(s),
             }
         }
-        let mut it = rest.into_iter();
-        for (i, k) in left.iter().enumerate() {
-            for _ in 0..*k {
-                if let Some(s) = it.next() {
-                    out.push((s, DistrictId(i as u8)));
+        if let Some(cap) = reach {
+            for s in rest {
+                let Some(from) = post(world, s) else { continue };
+                let best = (0..n)
+                    .filter(|&i| left[i] > 0)
+                    .map(|i| (travel(world, from, DistrictId(i as u8)), i))
+                    .min()
+                    .filter(|&(t, _)| t <= cap)
+                    .map(|(_, i)| i);
+                match best {
+                    Some(i) => {
+                        left[i] -= 1;
+                        out.push((s, DistrictId(i as u8)));
+                    }
+                    None => out.push((s, world.district_of(from))),
+                }
+            }
+        } else {
+            let mut it = rest.into_iter();
+            for (i, k) in left.iter().enumerate() {
+                for _ in 0..*k {
+                    if let Some(s) = it.next() {
+                        out.push((s, DistrictId(i as u8)));
+                    }
                 }
             }
         }
@@ -622,6 +661,18 @@ pub fn sanitation(world: &mut World) {
             }
         }
     }
+    // Phase 4: with `[distance.reach]` the dealt beats, not the slots.
+    let alloc = if crate::systems::distance::reach(world).is_some() {
+        let mut dealt = vec![0u16; n];
+        for d in world.sweep_beats.values() {
+            if let Some(k) = dealt.get_mut(d.index()) {
+                *k += 1;
+            }
+        }
+        dealt
+    } else {
+        alloc
+    };
     for (d, &k) in world.districts.iter_mut().zip(&alloc) {
         d.sweepers = k;
     }

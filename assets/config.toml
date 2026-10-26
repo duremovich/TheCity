@@ -213,6 +213,14 @@ extort_amount = 5
 join_gang_affinity = 0.4
 join_gang_desperation_hunger = 0.2
 join_gang_desperation_lawfulness = 0.3
+# The pressure pass phase 4 (OPEN-210): the acquaintance graph is bounded. lod::stat_meet adds ~13.5k edges a day
+# at 20k, and a 30-day prune of the weak never fired inside a 30-day run (20k seed 42: 78k -> 767k edges, every
+# agent's neighbours 7 -> 73, still +8k a day at day 60). Kin, spouses, Friends, Rivals, Enemies and a debt's edge
+# are never pruned or counted. Placeholders.
+weak_affinity = 0.05               # an Acquaintance with |affinity| below this is weak
+weak_prune_days = 7                # ... and is pruned after this many days without contact (the base: 30)
+acquaintance_cap = 40              # the most Acquaintances one person keeps; past it, the daily pass drops the
+                                   # weakest (|affinity|), then the stalest
 
 [gangs]
 # One gang per Hideout in map order: The Hollow holds the south-west corner, Ninefold the south-east.
@@ -4436,6 +4444,24 @@ cot_bed_ticks = 60                 # a Mission's cot's offer over a paid Hotel b
 fun_hour = 0.08                    # an hour in alone (the screen, the deck, the window); in company the larger of this
                                    # and gain.hangout_hour. A lone corner's hour is 0.04 (hangout_hour x spot_lone_fun);
                                    # ~4 h in a day is the Statistical table's free evening ([leisure] gain.free_stat 0.3)
+
+# The pressure pass phase 4 (docs/PRESSURE_PASS.md; OPEN-194): the reach of a non-urgent trip, in travel ticks
+# (distance::travel, the walk or the El). Past it the trip is not made: the goal is not scored (a report, a
+# registration, a Clinic visit) or its leg is not planned (a stakeout), and a nearer alternative is taken where the
+# purpose has one (a Hunt's ask venue in the hunter's own district, a sweeper's nearer beat). Shadow V8: a day
+# labourer walked 577 min to the island's one Hall to report a crime and lost a shift, a madam set out for a Clinic
+# 208-278 min away five mornings running and never arrived, a gun walked 897 min to register a company, a sweeper's
+# beat lay six districts from the Recycler. Absent, the base rule. Placeholders.
+[distance.reach]
+report_ticks = 120                 # ReportCrime: the Hall's door from where the witness sets out (one Hall on the
+                                   # island: a witness across the island lets it go)
+register_ticks = 240               # Found: the Hall's door, for the registration (once in years; a long trip's worth)
+clinic_ticks = 120                 # Treat (therapy, detox; a diagnosed cancer walks any distance): the nearest Clinic
+stakeout_ticks = 180               # a Hunt's or a hit Contract's first leg: the ask venue (past it, the hunter's own
+                                   # district's busiest Bar) or the stakeout; past it the leg waits (V8: legs of
+                                   # 174-250 min cut by Sleep every evening, the hunt never reached)
+beat_ticks = 90                    # a sweeper's beat: the district's centroid from the post's door; past it, the
+                                   # nearest district with a slot left, else the post's own district
 
 # The island pass phase 3a (docs/ISLAND_PASS.md I6; OPEN-163; systems/company.rs): seeded company housing. At world
 # build, after the staffing and the housing pre-roll, each workplace of these kinds whose far posts outnumber

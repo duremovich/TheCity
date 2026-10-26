@@ -426,6 +426,9 @@ pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
     if next.phase == HuntPhase::Watch && next.intel.is_none() {
         next.intel = Some(habit(world, s.target, world.tick));
     }
+    if !within_reach(world, id, next.phase, &mut next.venue, next.intel) {
+        return None;
+    }
     let phase = next.phase;
     world.hunts.insert(id, next);
     reindex(world);
@@ -439,6 +442,47 @@ pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
     steps.push(step(ActionKind::StakeOut, t));
     steps.push(step(ActionKind::Attack, t));
     Some(Plan { goal: GoalKind::Hunt, target: t, steps, started_tick: world.tick })
+}
+
+/// The pressure pass phase 4 (OPEN-194): `next`'s first `GoTo(Intel)` is
+/// within `[distance.reach] stakeout_ticks` of where `id` sets out. An ask
+/// venue past it gives way to the busiest Bar of the hunter's own district
+/// when that one is within it (word is asked for nearer home); a stakeout
+/// past it, or an ask with no near Bar, is `false`: the leg is not planned
+/// and the goal cools (V8: legs of 174-250 min cut by Sleep every evening).
+/// `true` off.
+pub fn within_reach(
+    world: &World,
+    id: EntityId,
+    phase: HuntPhase,
+    venue: &mut Option<EntityId>,
+    intel: Option<Intel>,
+) -> bool {
+    let Some(cap) = crate::systems::distance::reach(world).map(|r| r.stakeout_ticks) else { return true };
+    let Some(from) = crate::systems::life::origin(world, id) else { return true };
+    let here = world.comp::<Position>(id).and_then(|p| p.building);
+    let door = |b: EntityId| world.comp::<Building>(b).map(|bd| bd.door);
+    let near = |b: Option<EntityId>, tile: Option<crate::components::TilePos>| {
+        if b.is_some() && b == here {
+            return true;
+        }
+        b.and_then(door).or(tile).is_none_or(|t| crate::systems::distance::travel(world, from, t) <= cap)
+    };
+    match phase {
+        HuntPhase::Ask => {
+            if near(*venue, None) {
+                return true;
+            }
+            match busiest_bar(world, world.district_of(from)).filter(|&b| near(Some(b), None)) {
+                Some(b) => {
+                    *venue = Some(b);
+                    true
+                }
+                None => false,
+            }
+        }
+        HuntPhase::Watch => intel.is_none_or(|i| near(i.building, Some(i.tile))),
+    }
 }
 
 /// `LocationKey::Intel` for `agent`: the venue while asking, the intel

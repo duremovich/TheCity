@@ -725,6 +725,30 @@ pub struct DistanceCfg {
     /// the key absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub free: Option<FreeDistanceCfg>,
+    /// The pressure pass phase 4 (OPEN-194): the reach of the non-urgent
+    /// trips. `None` (not written into a save) with the key absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reach: Option<ReachCfg>,
+}
+
+/// The pressure pass phase 4 `[distance.reach]` (docs/PRESSURE_PASS.md;
+/// OPEN-194): how far, in travel ticks (`distance::travel`), a non-urgent
+/// trip is walked. Past it the trip is not made (a nearer alternative where
+/// the purpose has one). Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ReachCfg {
+    /// ReportCrime: the Hall's door from where the witness sets out.
+    pub report_ticks: u64,
+    /// Found (Register): the Hall's door from where the founder sets out.
+    pub register_ticks: u64,
+    /// Treat (therapy, detox; never a diagnosed cancer): the nearest Clinic.
+    pub clinic_ticks: u64,
+    /// A Hunt's or a hit Contract's first `GoTo(Intel)`: the ask venue (past
+    /// it, the hunter's own district's busiest Bar) or the stakeout.
+    pub stakeout_ticks: u64,
+    /// A sweeper's beat: the district's centroid from the post's door (past
+    /// it, the nearest district with a slot left, else the post's own).
+    pub beat_ticks: u64,
 }
 
 /// The island pass phase 2 `[distance.free]` (docs/ISLAND_PASS.md I1):
@@ -4301,6 +4325,17 @@ pub struct SocialCfg {
     pub join_gang_affinity: f32,
     pub join_gang_desperation_hunger: f32,
     pub join_gang_desperation_lawfulness: f32,
+    /// The pressure pass phase 4 (OPEN-210): an Acquaintance this weak
+    /// (`|affinity|` below it) is pruned after `weak_prune_days` without
+    /// contact.
+    pub weak_affinity: f32,
+    /// Days without contact before a weak Acquaintance is pruned.
+    pub weak_prune_days: u64,
+    /// The most Acquaintances one person keeps; past it, the daily pass
+    /// drops the weakest (`|affinity|`), then the stalest. Friends, kin,
+    /// spouses, Rivals, Enemies and an edge holding a debt are never
+    /// dropped or counted.
+    pub acquaintance_cap: usize,
 }
 
 /// Several gangs and their faction brain (M8, `docs/M8_FACTIONS.md`).
