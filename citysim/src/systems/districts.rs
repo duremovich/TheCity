@@ -76,25 +76,43 @@ fn row_of(rows: &[Row], zone: Zone, x: u16) -> u8 {
     hit.unwrap_or(0) as u8
 }
 
-/// D1: rebuild the grid, the rows (creating `World::districts` when the
-/// save had none or a different row count), each district's `buildings`,
-/// `homes`, `walk_tiles` and `centroid`, and the adjacency masks. Saved
-/// aggregates of an existing row are kept. Draws nothing.
-pub fn rebuild(world: &mut World) {
-    let rows = rows(world);
-    let (w, h) = (world.map.w(), world.map.h());
+/// The perf pass phase 7: what [`rebuild`]'s grid half reads, compared
+/// whole (no hash): the map's size and tile edits (its zones and district
+/// grid never change after a load), the rubble, the rows and every standing
+/// building's rect in store order. Doors never move, so the building lists
+/// need only the grid.
+#[derive(Clone, Debug, PartialEq)]
+struct GeoKey {
+    w: usize,
+    h: usize,
+    tile_edits: u64,
+    blocked: Vec<TilePos>,
+    rows: Vec<(String, Zone, u16, u16)>,
+    rects: Vec<crate::components::Rect>,
+}
 
-    // Building rects (standing buildings; a demolished Home is open ground).
+/// The perf pass phase 7: [`rebuild`]'s grid half (the district and street
+/// byte per tile, the adjacency masks, each row's walk tiles, streets and
+/// centroid sums), kept on the world (`World::district_geo`, not saved,
+/// empty in a clone) with the [`GeoKey`] it was built from. A rebuild
+/// whose key matches reuses it: a building re-kinded (a refit, a Lot built
+/// on, a derelict) changes only the per-building lists, and the grid pass
+/// over every tile was ~6 ms a call at 100k, run per refit at midnight.
+#[derive(Clone, Debug)]
+pub struct DistrictGeo {
+    key: GeoKey,
+    grid: Vec<u8>,
+    adjacent: Vec<DistrictMask>,
+    walk: Vec<u32>,
+    streets: Vec<Vec<u32>>,
+    sum: Vec<(u64, u64, u64)>,
+}
+
+/// [`DistrictGeo`] from its key's inputs (the pre-phase-7 `rebuild` body).
+fn district_geo(world: &World, rows: &[Row], key: GeoKey) -> DistrictGeo {
+    let (w, h) = (key.w, key.h);
     let mut in_building = vec![false; w * h];
-    let mut buildings: Vec<(EntityId, TilePos, BuildingKind, bool)> = Vec::new();
-    for id in world.with::<Building>() {
-        let Some(b) = world.comp::<Building>(id) else { continue };
-        // M12 D25: a derelict Block is nobody's Home.
-        buildings.push((id, b.door, b.kind, b.demolished || b.derelict));
-        if b.demolished {
-            continue;
-        }
-        let r = b.rect;
+    for r in &key.rects {
         for y in u32::from(r.y)..u32::from(r.y) + u32::from(r.h) {
             for x in u32::from(r.x)..u32::from(r.x) + u32::from(r.w) {
                 let (x, y) = (x as usize, y as usize);
@@ -116,7 +134,7 @@ pub fn rebuild(world: &mut World) {
             // Scale S3b: a map's districts grid decides where it has one.
             let d = match world.map.district_at(p) {
                 Some(d) => d.min(n.saturating_sub(1) as u8),
-                None => row_of(&rows, world.map.zone(p), x as u16),
+                None => row_of(rows, world.map.zone(p), x as u16),
             };
             let i = y * w + x;
             // Scale S3c: an import's hills are walkable but no street.
@@ -154,6 +172,46 @@ pub fn rebuild(world: &mut World) {
             }
         }
     }
+    DistrictGeo { key, grid, adjacent, walk, streets, sum }
+}
+
+/// D1: rebuild the grid, the rows (creating `World::districts` when the
+/// save had none or a different row count), each district's `buildings`,
+/// `homes`, `walk_tiles` and `centroid`, and the adjacency masks. Saved
+/// aggregates of an existing row are kept. Draws nothing. The perf pass
+/// phase 7: the grid half is reused while its inputs are unchanged
+/// ([`DistrictGeo`]).
+pub fn rebuild(world: &mut World) {
+    let _t = crate::prof::scope!("districts::rebuild");
+    let rows = rows(world);
+    let (w, h) = (world.map.w(), world.map.h());
+
+    // Building rects (standing buildings; a demolished Home is open ground).
+    let mut rects: Vec<crate::components::Rect> = Vec::new();
+    let mut buildings: Vec<(EntityId, TilePos, BuildingKind, bool)> = Vec::new();
+    for id in world.with::<Building>() {
+        let Some(b) = world.comp::<Building>(id) else { continue };
+        // M12 D25: a derelict Block is nobody's Home.
+        buildings.push((id, b.door, b.kind, b.demolished || b.derelict));
+        if !b.demolished {
+            rects.push(b.rect);
+        }
+    }
+    let key = GeoKey {
+        w,
+        h,
+        tile_edits: world.map.tile_edits(),
+        blocked: world.map.blocked.iter().copied().collect(),
+        rows: rows.iter().map(|r| (r.name.clone(), r.zone, r.x_from, r.x_to)).collect(),
+        rects,
+    };
+    // `spatial::scans()` (the unit tests) builds it every call, the base
+    // walk `life::tests::test_indexed_build_matches_the_scans` compares.
+    let (geo, hit) = match world.district_geo.slot().take() {
+        Some(g) if g.key == key && !crate::spatial::scans() => (g, true),
+        _ => (district_geo(world, &rows, key), false),
+    };
+    let n = rows.len();
 
     // Rows: keep a save's districts when they match the config, else start fresh.
     let matches = world.districts.len() == n && world.districts.iter().zip(&rows).all(|(d, r)| d.name == r.name);
@@ -170,14 +228,21 @@ pub fn rebuild(world: &mut World) {
             })
             .collect();
     }
+    // A memo hit on kept rows: the grid half already stands as the last
+    // rebuild wrote it from this same memo (nothing else writes the grid,
+    // the masks or a district's walk tiles, streets and centroid).
+    let fresh = !hit || !matches;
     for (i, d) in world.districts.iter_mut().enumerate() {
         d.id = DistrictId(i as u8);
         d.zone = rows[i].zone;
         d.buildings.clear();
         d.homes.clear();
-        d.walk_tiles = walk[i];
-        d.streets = std::mem::take(&mut streets[i]);
-        let (sx, sy, c) = sum[i];
+        if !fresh {
+            continue;
+        }
+        d.walk_tiles = geo.walk[i];
+        d.streets.clone_from(&geo.streets[i]);
+        let (sx, sy, c) = geo.sum[i];
         d.centroid = match ((sx + c / 2).checked_div(c), (sy + c / 2).checked_div(c)) {
             (Some(x), Some(y)) => TilePos { x: x as u16, y: y as u16 },
             _ => TilePos::default(),
@@ -185,15 +250,18 @@ pub fn rebuild(world: &mut World) {
     }
     buildings.sort_by_key(|&(id, ..)| id);
     for (id, door, kind, unhoused) in buildings {
-        let i = usize::from(grid[usize::from(door.y) * w + usize::from(door.x)] & ID_MASK);
+        let i = usize::from(geo.grid[usize::from(door.y) * w + usize::from(door.x)] & ID_MASK);
         let d = &mut world.districts[i];
         d.buildings.push(id);
         if kind == BuildingKind::Home && !unhoused {
             d.homes.push(id);
         }
     }
-    world.district_grid = grid;
-    world.district_adjacent = adjacent;
+    if fresh {
+        world.district_grid.clone_from(&geo.grid);
+        world.district_adjacent.clone_from(&geo.adjacent);
+    }
+    *world.district_geo.slot() = Some(geo);
 }
 
 impl World {
@@ -351,22 +419,22 @@ pub fn daily(world: &mut World) {
     }
     // M12 phase 3: the street's day (abandonment, re-letting), then the
     // litter's (decay, the sweepers, owners and gangs cleaning, the means).
-    crate::systems::street::daily(world);
+    crate::prof::timed!("dist::street::daily", crate::systems::street::daily(world));
     if crate::systems::litter::enabled(world) {
-        crate::systems::litter::decay(world);
-        crate::systems::litter::district_means(world);
-        sanitation(world);
-        owner_cleaning(world);
-        gang_cleaning(world);
-        crate::systems::litter::district_means(world);
+        crate::prof::timed!("dist::litter::decay", crate::systems::litter::decay(world));
+        crate::prof::timed!("dist::litter::district_means", crate::systems::litter::district_means(world));
+        crate::prof::timed!("dist::sanitation", sanitation(world));
+        crate::prof::timed!("dist::owner_cleaning", owner_cleaning(world));
+        crate::prof::timed!("dist::gang_cleaning", gang_cleaning(world));
+        crate::prof::timed!("dist::litter::district_means", crate::systems::litter::district_means(world));
     }
-    aggregates(world);
-    update_control(world);
+    crate::prof::timed!("dist::aggregates", aggregates(world));
+    crate::prof::timed!("dist::update_control", update_control(world));
     // M12 phase 4: unrest per district (D29), the riot trigger (D30), the
     // district strikes (D41), all reading today's aggregates.
-    unrest(world);
-    crate::systems::riot::trigger(world);
-    crate::systems::classes::strike(world);
+    crate::prof::timed!("dist::unrest", unrest(world));
+    crate::prof::timed!("dist::riot::trigger", crate::systems::riot::trigger(world));
+    crate::prof::timed!("dist::classes::strike", crate::systems::classes::strike(world));
 }
 
 /// D29: each district's unrest over its Street and Dreg resident adults:

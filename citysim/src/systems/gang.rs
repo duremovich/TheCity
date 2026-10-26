@@ -1347,11 +1347,11 @@ pub fn run(world: &mut World) {
             }
         }
         if daily {
-            crate::systems::succession::daily(world, gang);
-            recompute_leader(world, gang);
+            crate::prof::timed!("gang::succession_daily", crate::systems::succession::daily(world, gang));
+            crate::prof::timed!("gang::recompute_leader", recompute_leader(world, gang));
             // The law has just rescored (it runs before this system): a gang
             // under Crackdown may buy its way out before choosing its order.
-            faction::consider_bribe(world, gang);
+            crate::prof::timed!("gang::consider_bribe", faction::consider_bribe(world, gang));
         }
         let pending: f32 = world.comp::<Gang>(gang).map_or(0.0, |g| g.shocks.iter().map(|s| s.severity()).sum());
         // M16a (plan C26, phase 2): a gang whose job settled rescores at once.
@@ -1360,7 +1360,7 @@ pub fn run(world: &mut World) {
         if job_done {
             faction::rethink(world, gang);
         } else if daily {
-            if faction::rescore(world, gang, hysteresis) {
+            if crate::prof::timed!("gang::rescore_daily", faction::rescore(world, gang, hysteresis)) {
                 if let Some(g) = world.comp_mut::<Gang>(gang) {
                     g.shocks.clear();
                 }
@@ -1372,8 +1372,8 @@ pub fn run(world: &mut World) {
     // The pre-view pass phase 6 (P15): the waiting orders given in person.
     crate::systems::leaders::run(world);
     if daily {
-        daily_economy(world);
-        desist(world);
+        crate::prof::timed!("gang::daily_economy", daily_economy(world));
+        crate::prof::timed!("gang::desist", desist(world));
     }
 }
 

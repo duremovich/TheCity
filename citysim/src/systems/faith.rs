@@ -329,8 +329,8 @@ pub fn daily(world: &mut World) {
     if !world.jobs2.faith.seeded {
         seed(world);
     }
-    preach(world);
-    spread(world);
+    crate::prof::timed!("faith::preach", preach(world));
+    crate::prof::timed!("faith::spread", spread(world));
     let dead: Vec<EntityId> =
         world.jobs2.faith.followers.keys().copied().filter(|&a| !crate::systems::law::living(world, a)).collect();
     for a in dead {
@@ -354,14 +354,17 @@ fn preach(world: &mut World) {
         let d = world.district_of_building(b);
         let residents = world.districts.get(d.index()).map(|x| x.residents.clone()).unwrap_or_default();
         for id in residents {
-            if !adult_free(world, id) {
+            // The perf pass phase 7: the attendance draw first (pure, keyed
+            // by the resident and the day), then the tests that read the
+            // agent (all pure reads): the same attendees.
+            if hash(world, PURPOSE_ATTEND, key(id), day) >= cfg.p_attend || !adult_free(world, id) {
                 continue;
             }
             let mine = creed_of(world, id);
             let belonging = world.comp::<Needs>(id).map_or(1.0, |n| n.belonging);
             let grief = grieving(world, id);
             let drawn = mine == Some(i) || belonging < cfg.attend_belonging || grief;
-            if !drawn || hash(world, PURPOSE_ATTEND, key(id), day) >= cfg.p_attend {
+            if !drawn {
                 continue;
             }
             if let Some(n) = world.comp_mut::<Needs>(id) {
@@ -387,21 +390,23 @@ fn spread(world: &mut World) {
         if p <= 0.0 {
             continue;
         }
+        // The perf pass phase 7: the spread's own draw first (pure, keyed by
+        // the pair and the day; `p_spread` is ~0.001), so the edge is read
+        // only for the few that would convert. The same set, sorted, so the
+        // same converts in the same order.
         let mut near: Vec<EntityId> = world
             .neighbours(a)
             .filter(|&o| {
-                world.edge(a, o).is_some_and(|e| {
-                    e.affinity >= min
-                        && matches!(e.kind, RelKind::Friend | RelKind::Family | RelKind::Spouse | RelKind::Parent)
-                })
+                hash(world, PURPOSE_SPREAD, key(o), day ^ key(a)) < p
+                    && world.edge(a, o).is_some_and(|e| {
+                        e.affinity >= min
+                            && matches!(e.kind, RelKind::Friend | RelKind::Family | RelKind::Spouse | RelKind::Parent)
+                    })
             })
             .collect();
         near.sort_unstable();
         for o in near {
-            if creed_of(world, o).is_none()
-                && adult_free(world, o)
-                && hash(world, PURPOSE_SPREAD, key(o), day ^ key(a)) < p
-            {
+            if creed_of(world, o).is_none() && adult_free(world, o) {
                 convert(world, o, i);
             }
         }

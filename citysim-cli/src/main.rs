@@ -175,6 +175,11 @@ struct RunArgs {
     /// so the printed profile is the run's tail (Scale S1).
     #[arg(long, value_name = "DAY")]
     prof_from: Option<u64>,
+    /// With the `prof` feature: profile each day's midnight tick alone, a
+    /// `PROFDAY <day>` line then its `PROF` lines (the perf pass phase 7;
+    /// the run's own profile then holds only the last midnight).
+    #[arg(long)]
+    prof_midnight: bool,
 }
 
 /// An absolute map path for `config.world.map` (`Config::asset` joins it onto
@@ -1678,7 +1683,15 @@ fn run(args: RunArgs) -> Result<(), String> {
             }
             let tick_of_day = world.tick % TICKS_PER_DAY;
             let tick_start = args.report.then(Instant::now);
+            let prof_this = args.prof_midnight && tick_of_day == 0;
+            if prof_this {
+                citysim::prof::reset();
+            }
             citysim::tick(&mut world);
+            if prof_this {
+                eprintln!("PROFDAY {}", world.tick / TICKS_PER_DAY + 1);
+                citysim::prof::dump();
+            }
             if let Some(t) = tick_start {
                 let ms = t.elapsed().as_secs_f64() * 1e3;
                 if ms > max_tick.0 {

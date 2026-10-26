@@ -1500,30 +1500,34 @@ pub fn run(world: &mut World) {
     if world.tick_of_day() != 0 {
         return;
     }
-    let rents: Vec<(EntityId, i64)> =
-        world.buildings_of_kind(BuildingKind::Home).iter().map(|&h| (h, rent_tenths_for(world, h))).collect();
-    for &(h, _) in &rents {
-        let r = rent_for(world, h);
-        if let Some(b) = world.comp_mut::<Building>(h) {
-            b.rent_per_day = r;
+    let rents: Vec<(EntityId, i64)> = {
+        let _t = crate::prof::scope!("own::rents");
+        let rents: Vec<(EntityId, i64)> =
+            world.buildings_of_kind(BuildingKind::Home).iter().map(|&h| (h, rent_tenths_for(world, h))).collect();
+        for &(h, _) in &rents {
+            let r = rent_for(world, h);
+            if let Some(b) = world.comp_mut::<Building>(h) {
+                b.rent_per_day = r;
+            }
         }
-    }
+        rents
+    };
     // Under v1_profile and in a pre-M11 save every rent is 0: no rent, no
     // evictions, no re-housing (M9 behaviour). The rent pass still runs: a
     // rent cap of 0 forgives what was owed.
-    collect_rent(world, &rents);
+    crate::prof::timed!("own::collect_rent", collect_rent(world, &rents));
     if rents.iter().any(|&(_, r)| r > 0) {
-        evictions(world);
+        crate::prof::timed!("own::evictions", evictions(world));
         // Lives at work phase 2 (§ 3.4): the spouse's Home is tried first.
-        crate::systems::household::reunite(world);
-        crate::systems::household::tied_housing(world);
+        crate::prof::timed!("own::household::reunite", crate::systems::household::reunite(world));
+        crate::prof::timed!("own::household::tied_housing", crate::systems::household::tied_housing(world));
         // The island pass phase 3a (I6): the company beds' grace and
         // evictions, then the staff who move in, before the city's rehouse.
-        crate::systems::company::evictions(world);
+        crate::prof::timed!("own::company::evictions", crate::systems::company::evictions(world));
         // The island pass phase 3b: the weekly buyouts.
-        crate::systems::company::buyouts(world);
-        crate::systems::company::move_in(world);
-        rehouse(world);
+        crate::prof::timed!("own::company::buyouts", crate::systems::company::buyouts(world));
+        crate::prof::timed!("own::company::move_in", crate::systems::company::move_in(world));
+        crate::prof::timed!("own::rehouse", rehouse(world));
     }
     // Phase 5: the books close before the upkeep lump (`Corp.closing`).
     for c in world.corps() {
@@ -1531,13 +1535,13 @@ pub fn run(world: &mut World) {
             cc.closing = cc.treasury;
         }
     }
-    upkeep(world);
-    exec_wages(world);
+    crate::prof::timed!("own::upkeep", upkeep(world));
+    crate::prof::timed!("own::exec_wages", exec_wages(world));
     // D27: an agent owning enough buildings becomes a corp (inheritance,
     // the seeded Bar owners); a `Register` checks its founder at once.
-    crate::systems::founding::incorporate_daily(world);
-    bar_vacancies(world);
-    rolls(world);
+    crate::prof::timed!("own::founding::incorporate_daily", crate::systems::founding::incorporate_daily(world));
+    crate::prof::timed!("own::bar_vacancies", bar_vacancies(world));
+    crate::prof::timed!("own::rolls", rolls(world));
 }
 
 /// Settle the rent already due, then accrue today's share: a coin that falls
@@ -1903,8 +1907,12 @@ fn rehouse(world: &mut World) {
     if homeless.is_empty() {
         return;
     }
-    // Each Home's own capacity (a built Home's is its interior's).
-    let homes: Vec<(EntityId, crate::components::TilePos, Option<EntityId>, usize)> = world
+    // Each Home's own capacity (a built Home's is its interior's). The perf
+    // pass phase 7: and its rent, read once (nothing in this pass moves a
+    // rent: the owners, their Housing levels and the levers stand; a
+    // move-in pays coins only), not per homeless adult per Home.
+    type Cand = (EntityId, crate::components::TilePos, Option<EntityId>, usize, i64);
+    let homes: Vec<Cand> = world
         .buildings_of_kind(BuildingKind::Home)
         .iter()
         // The island pass phase 3a (I6): a company bed is the staff's
@@ -1914,9 +1922,13 @@ fn rehouse(world: &mut World) {
             world
                 .comp::<Building>(h)
                 .filter(|b| !b.demolished && !b.derelict)
-                .map(|b| (h, b.door, b.owner, usize::from(b.capacity)))
+                .map(|b| (h, b.door, b.owner, usize::from(b.capacity), rent_for(world, h)))
         })
         .collect();
+    // The perf pass phase 7: the cheapest rent, so an adult who can pay
+    // none (`coins < mult x rent` for every Home, `mult` not negative)
+    // skips the walk: its pick was `None`.
+    let min_rent = homes.iter().map(|c| c.4).min();
     for a in homeless {
         // Housed already, as someone's spouse, earlier in this pass.
         if world.comp::<Household>(a).is_none_or(|h| h.home.is_some()) {
@@ -1940,9 +1952,12 @@ fn rehouse(world: &mut World) {
         let mult = if worker { deposit_days.max(1) } else { mult };
         let refused_by = world.comp::<Household>(a).and_then(|h| h.evicted_by).filter(|&(_, t)| tick < t + refuse);
         let from = world.comp::<Position>(a).map_or_else(Default::default, |p| p.tile);
-        let open = |&&(h, _, owner, cap): &&(EntityId, crate::components::TilePos, Option<EntityId>, usize)| {
+        if mult >= 0 && min_rent.is_some_and(|r| coins < mult * r) {
+            continue;
+        }
+        let open = |&&(h, _, owner, cap, rent): &&Cand| {
             world.residents_of(h).len() + need <= cap
-                && coins >= mult * rent_for(world, h)
+                && coins >= mult * rent
                 && refused_by.is_none_or(|(o, _)| o != owner)
         };
         // The island pass phase 1 (OPEN-163): a worker's bed is scored by
@@ -1953,13 +1968,13 @@ fn rehouse(world: &mut World) {
         let work = world.config.distance.as_ref().and(crate::systems::distance::work_door(world, a));
         let pick = match (work, world.config.distance.as_ref()) {
             (Some(work), Some(cfg)) => crate::systems::distance::pick(
-                homes.iter().filter(open).map(|&(h, d, _, _)| {
+                homes.iter().filter(open).map(|&(h, d, _, _, _)| {
                     let t = crate::systems::distance::travel(world, d, work);
                     (t, t as i64, h)
                 }),
                 cfg.home_cap_ticks,
             ),
-            _ => homes.iter().filter(open).map(|&(h, d, _, _)| (d.manhattan(from), h)).min().map(|(_, h)| h),
+            _ => homes.iter().filter(open).map(|&(h, d, _, _, _)| (d.manhattan(from), h)).min().map(|(_, h)| h),
         };
         let Some(home) = pick else { continue };
         if deposit_days > 0 {

@@ -24,18 +24,18 @@ pub fn run(world: &mut World) {
     if world.rumours.len() != n {
         world.rumours.resize_with(n, Default::default);
     }
-    crate::systems::gossip::decay_and_leak(world);
+    crate::prof::timed!("word::gossip::decay_and_leak", crate::systems::gossip::decay_and_leak(world));
     // Phase 4 (W37, W40): the Feeds' reach, Spin, stories and ads, before
     // the hearing so a story is read the same night.
-    crate::systems::news::daily(world);
-    crate::systems::gossip::hear(world);
-    crate::systems::gossip::kin(world);
-    crate::systems::reputation::rebuild(world);
-    crate::systems::competence::daily(world);
+    crate::prof::timed!("word::news::daily", crate::systems::news::daily(world));
+    crate::prof::timed!("word::gossip::hear", crate::systems::gossip::hear(world));
+    crate::prof::timed!("word::gossip::kin", crate::systems::gossip::kin(world));
+    crate::prof::timed!("word::reputation::rebuild", crate::systems::reputation::rebuild(world));
+    crate::prof::timed!("word::competence::daily", crate::systems::competence::daily(world));
     // Phase 3: grudge decay and settlement, kill_chain expiry, vendettas
     // (W16, W18); abandoned Hunts and the Statistical pass (W22, W23).
-    crate::systems::grudges::daily(world);
-    crate::systems::hunt::daily(world);
-    crate::systems::gossip::expire_sightings(world);
-    crate::systems::gossip::prune_anon(world);
+    crate::prof::timed!("word::grudges::daily", crate::systems::grudges::daily(world));
+    crate::prof::timed!("word::hunt::daily", crate::systems::hunt::daily(world));
+    crate::prof::timed!("word::gossip::expire_sightings", crate::systems::gossip::expire_sightings(world));
+    crate::prof::timed!("word::gossip::prune_anon", crate::systems::gossip::prune_anon(world));
 }

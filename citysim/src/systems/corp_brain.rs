@@ -440,7 +440,7 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
     let lots_total = crate::systems::founding::vacant_lots(world).len();
     let mut niches = BTreeMap::new();
     for &n in &c.niches {
-        let share_map = shares(world, n);
+        let share_map = crate::prof::timed!("gi::shares", shares(world, n));
         let share = share_map.get(&corp).copied().unwrap_or(0.0);
         let own_buildings = niche_buildings(world, corp, n);
         let (demand, world_demand) = demand_of(world, corp, n);
@@ -534,7 +534,7 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
     let virt = {
         let (tech_gap, max_lapse) = crate::systems::tech::research_inputs(world, corp);
         let lab_cost = cfg.found_cost.lab;
-        let run = crate::systems::virt::corp_run(world, corp);
+        let run = crate::prof::timed!("gi::corp_run", crate::systems::virt::corp_run(world, corp));
         VirtInputs {
             enabled: true,
             tech_gap,
@@ -1119,7 +1119,9 @@ fn grow(world: &mut World, corp: EntityId, n: Niche, i: &CorpInputs) {
                 // E19: no Lot: a derelict refitted (`founding::refit` charges
                 // `refit_frac × found_cost` and logs `Refit`).
                 if let Some(d) = refit_target(world, corp, kind) {
-                    if crate::systems::founding::refit(world, d, kind, Some(corp)).is_ok() {
+                    if crate::prof::timed!("grow::refit", crate::systems::founding::refit(world, d, kind, Some(corp)))
+                        .is_ok()
+                    {
                         if let Some(c) = world.comp_mut::<Corp>(corp) {
                             c.last_build_tick = Some(now);
                         }
@@ -1351,10 +1353,10 @@ fn lobby(world: &mut World, corp: EntityId, i: &CorpInputs) {
 /// The standing order's effect, daily after the rescore.
 pub fn act(world: &mut World, corp: EntityId) {
     let Some((order, niche)) = world.comp::<Corp>(corp).map(|c| (c.order, c.order_niche)) else { return };
-    let Some(i) = gather_inputs(world, corp) else { return };
+    let Some(i) = crate::prof::timed!("act::gather_inputs", gather_inputs(world, corp)) else { return };
     let n = niche.or_else(|| i.niches.keys().next().copied());
     match (order, n) {
-        (CorpOrder::Grow, Some(n)) => grow(world, corp, n, &i),
+        (CorpOrder::Grow, Some(n)) => crate::prof::timed!("act::grow", grow(world, corp, n, &i)),
         (CorpOrder::Squeeze, Some(n)) => squeeze(world, corp, n),
         (CorpOrder::Undercut, Some(n)) => undercut(world, corp, n, &i),
         (CorpOrder::Acquire, Some(n)) => acquire(world, corp, n, &i),
@@ -1367,7 +1369,7 @@ pub fn act(world: &mut World, corp: EntityId) {
     }
     // M15 W29: under Grow, Research or Secure, one poach for the first
     // skilled vacancy (before `job_search` fills it tonight).
-    crate::systems::competence::poach_daily(world, corp);
+    crate::prof::timed!("act::poach_daily", crate::systems::competence::poach_daily(world, corp));
 }
 
 /// M14 V31 (phase 1 part), daily under `Research` (the research itself is
@@ -1425,19 +1427,19 @@ pub fn run(world: &mut World) {
         }
         let h = world.config.corps.hysteresis;
         for &c in &corps {
-            rescore(world, c, h, "daily");
+            crate::prof::timed!("corp::rescore_daily", rescore(world, c, h, "daily"));
             if let Some(cc) = world.comp_mut::<Corp>(c) {
                 cc.shocks.clear();
             }
         }
         for &c in &corps {
-            act(world, c);
+            crate::prof::timed!("corp::act", act(world, c));
             // M14 phase 5: the node robbed last week hardens under any order.
-            crate::systems::virt::harden_robbed(world, c);
+            crate::prof::timed!("corp::harden_robbed", crate::systems::virt::harden_robbed(world, c));
             // M13 D44: one fleet purchase (or a Hunker sale) inside the order.
-            crate::systems::vehicles::corp_fleet(world, c);
+            crate::prof::timed!("corp::corp_fleet", crate::systems::vehicles::corp_fleet(world, c));
         }
-        crate::systems::corps::daily(world);
+        crate::prof::timed!("corp::corps_daily", crate::systems::corps::daily(world));
         return;
     }
     if !world.corp_rethink {
