@@ -105,6 +105,10 @@ comment on or above the line.
   reservations (`social::LazyReserved`), kept by `reserve`, `release_all`, `sweep_reservations` and
   `remove_agent`, rebuilt with `rebuild_reservation_index`. `spatial::scans()` turns each back into its scan
   (`assets::tests::test_price_keyed_caches_match_the_scans`, `reservations::tests::test_partner_index_*`).
+- The district grid memo (perf phase 7): `districts::rebuild` keeps its grid half (tile bytes, masks, walk
+  tiles, streets, centroids) in `World::district_geo` under its whole input (map size, `Map::tile_edits`, rubble,
+  rows, every standing rect); a rebuild after a re-kinding (a refit, a derelict) rewrites only the building lists.
+  `run --prof-midnight` (with `prof`) prints each midnight tick's PROF lines under `PROFDAY <day>`.
 - `map.rs` (tile map from `assets/map.txt`), `mapgen.rs` (generated maps, `--map gen:<N>`), `time.rs` (ticks, days,
   `DayPhase`, `Season`; `TICKS_PER_DAY`, `TICKS_PER_HOUR`).
 

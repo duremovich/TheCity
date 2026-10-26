@@ -261,3 +261,45 @@ changes the map, not a mechanism.
   20k. `OPEN-211` (the dwell's per-tick rescore) is a behaviour fix (`rep_flips`, `order_trace`). Three tests that
   set a kin kind by hand file it (`note_kin`); no new test (R7). SAVE_VERSION stays 67. Midnight at 100k is still
   3.8-4.5 s: phase 7's.
+- **Phase 7** (`OPEN-184` annotated). Midnight, measured per pass before anything was touched: `run --prof-midnight`
+  (with `prof`; each day's midnight tick alone under `PROFDAY <day>`), with PROF sites added inside `living`'s
+  (`mid::*`), `word`'s, `ownership`'s (`own::*`), `corp_brain`'s (`corp::*`, `act::*`, `gi::*`), the gangs'
+  (`gang::*`), `districts`' (`dist::*`), `faith`'s and `dollhouse`'s midnight passes, so the day-28 midnight is
+  accounted for site by site. **What doubled it** from day 1 to day 28 at 100k (seed 42, profiled, the midnight's
+  `tick::` sum): days 2-4 2.36 s, days 27-30 4.33 s; `faith::daily` 0.09 -> 1.37 s (its spread walks every
+  follower's neighbours: followers uncapped by decision and the graph growing, `OPEN-210`), the gang rescore 0.01
+  -> 0.34 s, `ownership`'s rehouse 0.00 -> 0.22 s, `word`'s reputation 0.10 -> 0.21 s, `social::daily` 0.01 -> 0.16 s
+  (every edge), the jail's upkeep and the held 0.01 -> 0.15 s; `job_search` fell 0.57 -> 0.23 s and `corp_brain`
+  0.71 -> 0.24 s with the days (days 3-4's Grow refits, ~78 a night, each a full `districts::rebuild` of ~6 ms at
+  100k). At 20k the same passes, a fifth the size (days 27-30 0.44 s). **Fixed, byte-identical:** (1) `faith`'s
+  spread and Preach test their own pure draw (`p_spread` 0.0005-0.001, `p_attend` 0.3) before the edge or the agent,
+  the same converts in the same order. (2) `districts::rebuild`'s grid half (the district and street byte per tile,
+  the masks, the walk tiles, streets and centroids) is memoised on `World::district_geo` (not saved, empty in a clone)
+  under its whole input compared as data, not hashed: the map's size, `Map::tile_edits` (bumped by `set_tile`), the
+  rubble, the rows, every standing rect in store order; a hit on kept rows rewrites only the per-building lists
+  (nothing else writes the grid half). (3) `ownership::rehouse` reads each Home's rent once a pass (nothing in the pass
+  moves a rent) and an adult who can pay no Home skips the walk. (4) The gang frontier and `chrome::harvest_target`
+  test the side or ground before the residents and the reputation. Identical to `7359e73` on 2k 42-44 x 30 and 20k
+  `isle_m_k2` 42 x 30 (save, report, events). Midnight at day 28, profiled (`tick::` sum, base -> branch): 20k 384
+  -> 360 ms (`faith` 26 -> 9, rehouse 15 -> 2); 100k 4.07 -> 2.67 s, days 27-30 4.33 -> 2.63 s (`faith` 1.37 ->
+  0.21, rehouse 0.22 -> 0.01, `ownership` 0.29 -> 0.07, the gang rescore 0.34 -> 0.29). Non-profiled, one pair
+  (print only), 20k midnight days 2-4 251/237/261 -> 240/232/252 ms, days 25-30 387/420/453/386/484/423 ->
+  353/396/368/352/430/379 ms. 100k seed 42 x 30 (the branch against phase 6's `long100.txt`, main): midnight days
+  2-4 1.82/1.91/2.36 -> 1.66/1.66/1.70 s, **days 25-30 3.85-4.15 -> 2.59-2.71 s**, the worst day 4.53 -> 3.24 s
+  (day 14); ticks/s days 27-30 18/21/19/19 -> 18/22/20/20; peak working set 3.06 GB both; the build 57 -> 47 s
+  (print only). **The gate's 1 s is missed by 2.6x**: what is left at day 28 is a long tail (100k, branch, days
+  27-30): the gang rescore 0.29 s (149 gangs; `harvest_target` 0.20 s, a scan of every Kit for each scav gang),
+  `faith` 0.21 s (spread 0.17), `job_search` 0.19 s, `word`'s reputation 0.17 s, `social::daily` 0.15 s (8.7M
+  edges), relocation 0.15 s (its worker scan 0.11 s), `corp_brain` 0.21 s, the law's midnight 0.21 s (jail upkeep
+  0.09, the held 0.06), `contracts` 0.10 s, `household` 0.09 s, the corpses 0.09 s, then ~40 passes under 0.07 s
+  each. No pass is over 0.3 s, so a stagger of the passes over the night's ticks would bring the longest tick to
+  ~0.35 s (a 100k tick is ~50 ms on days 27-30, plus the largest pass); a parallel split would need ~3x on the 2.6 s.
+  Both are design questions for Dylan. The 60-day read for `OPEN-210` (main, 20k `isle_m_k2` seed 42; `edges`,
+  `edges_new` at days 10/20/30/40/50/60): 328k/36k, 567k/19k, 767k/22k, 869k/21k, 960k/23k, 1,036k/21k; the
+  month's prune slows the net growth (+22k a day on days 10-30, +10k on 30-40, +9k on 40-50, +8k on 50-60) but has not
+  levelled it by day 60; midnight there 0.51-0.53 s on days 50-60. SAVE_VERSION stays 67. **Deviations:** no
+  stagger and no parallel split (out of scope); `job_search`'s pool and graded picks were not cut: on days 25-30
+  they are 0.19 s at 100k, below five other passes, where phase 5's day-1 profile had them first. The Friend walks
+  (`faith`'s spread) stay a walk of the growing set (phase 6's finding, `OPEN-210`); the held's meeting draws one
+  word per stranger per arrival, so it is not prunable. No new test: the memo is built every call under
+  `spatial::scans`, so phase 3's `test_indexed_build_matches_the_scans` covers it (R7).
