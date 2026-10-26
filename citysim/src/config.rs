@@ -340,6 +340,12 @@ pub struct Config {
     /// into a save) with the key absent: mood moves only what it moved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub misery: Option<MiseryCfg>,
+    /// The pressure pass phase 6 (docs/PRESSURE_PASS.md § Phase 6): a
+    /// business under water (`systems/underwater.rs`). `None` (not written
+    /// into a save) with the key absent: an owner bleeds his purse into the
+    /// wages as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub underwater: Option<UnderwaterCfg>,
     /// The island pass phase 1 (docs/ISLAND_PASS.md I1; OPEN-163 part):
     /// travel time in the job and bed picks (`systems/distance.rs`). `None`
     /// (not written into a save) with the key absent: the picks
@@ -970,6 +976,184 @@ pub struct MiseryCfg {
     /// F3: a gang recruit's initiation: no walk-away (`gang::desist`) in its
     /// first `recruit_tenure_days` (every recruit).
     pub recruit_tenure_days: u32,
+}
+
+/// The pressure pass phase 6 `[underwater]` (docs/PRESSURE_PASS.md § Phase 6;
+/// `systems/underwater.rs`): a person-owned business whose till cannot meet
+/// its wages becomes a story with choices (cut back, borrow, sell, close),
+/// and a worker walked out unpaid comes back for his wages. Absent: none of
+/// it. Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UnderwaterCfg {
+    /// Under water: the owner's purse under `short_cover_days` of the day's
+    /// wage bill (the staff outside his household), or one of them owed
+    /// `short_unpaid_days` days.
+    pub short_cover_days: f32,
+    pub short_unpaid_days: u8,
+    /// The owner decides after `decide_days` short midnights in a row, and
+    /// again no sooner than `decide_cooldown_days` later.
+    pub decide_days: u16,
+    pub decide_cooldown_days: u16,
+    /// The till back over `recover_days` of the bill: afloat (the freeze lifts).
+    pub recover_days: f32,
+    /// The choice weights (`x the owner's personality`, see the module):
+    /// hang on, shorter hours, lay staff off, borrow, sell, close.
+    pub w_hold: f32,
+    pub w_hours: f32,
+    pub w_layoff: f32,
+    pub w_borrow: f32,
+    pub w_sell: f32,
+    pub w_close: f32,
+    /// Each earlier decision multiplies sell and close by `1 + escalate x n`.
+    pub escalate: f32,
+    /// Shorter hours: each shift and its wage cut by this share.
+    pub hours_cut: f32,
+    /// A layoff lets this share of the staff go (at least one), newest first.
+    pub layoff_share: f32,
+    /// A loan: `loan_days` of the wage bill, repaid over `loan_weeks` weekly
+    /// installments with the lender's rate on top.
+    pub loan_days: u32,
+    pub loan_weeks: u32,
+    /// A lender lends what it can spare up to `loan_days` of the bill, never
+    /// under `loan_min_days` of it.
+    pub loan_min_days: u32,
+    pub rate_shark: f32,
+    pub rate_gang: f32,
+    pub rate_corp: f32,
+    /// A loan shark: a free adult under `shark_lawful_max` holding
+    /// `shark_wealth_mult x` the principal (the owner's district first).
+    pub shark_lawful_max: f32,
+    pub shark_wealth_mult: f32,
+    /// A corp lends only to an owner at least `corp_lawful_min` lawful, from
+    /// its treasury over its reserve by `corp_spare_mult x` the principal.
+    pub corp_lawful_min: f32,
+    pub corp_spare_mult: f32,
+    /// A gang lends or buys from its treasury over `gang_reserve`.
+    pub gang_reserve: i64,
+    /// Missed installments: the gang's or the shark's collector comes; at
+    /// `seize_misses` the lender takes the business; a corp repossesses at
+    /// `corp_repo_misses`. The collector's beating kills on `x collector_kill_mult`.
+    pub seize_misses: u8,
+    pub corp_repo_misses: u8,
+    pub collector_kill_mult: f32,
+    /// A fire sale at `sell_price_mult x` the building's value; an owner over
+    /// `front_lawful_max` lawfulness sells to no gang unless past `front_misery`.
+    pub sell_price_mult: f32,
+    /// A gang buys a front at `front_price_mult x` the value (muscle, not money).
+    pub front_price_mult: f32,
+    pub front_lawful_max: f32,
+    pub front_misery: f32,
+    /// A bought front: its staff join the gang on `front_join_p x (1 -
+    /// lawfulness)` a day; `launder_share` of the gang's week's tribute is
+    /// booked through its till (its weekday); a rival holding turf in its
+    /// district hits it on `rival_hit_p` a week, taking up to `rival_take`
+    /// from the gang and shutting it `rival_close_days`.
+    pub front_join_p: f32,
+    pub launder_share: f32,
+    pub rival_hit_p: f32,
+    pub rival_take: i64,
+    pub rival_close_days: u32,
+    /// A shut business stands for sale at `shut_price_mult x` its value to a
+    /// would-be founder holding `buyer_reserve_days` of its wage bill on top;
+    /// `shut_buys_per_day` a day; a Bar or Hotel unsold `shut_derelict_days`
+    /// goes derelict.
+    pub shut_price_mult: f32,
+    pub buyer_reserve_days: u32,
+    pub shut_buys_per_day: u32,
+    pub shut_derelict_days: u32,
+    /// The stiffed worker (an unpaid walkout or a layoff owed wages): from
+    /// `confront_wait_days` after, on `confront_p x (0.5 + pride + misery)` a
+    /// day, he goes to the owner in person (a Visit between the hours) at
+    /// most `confront_max` times.
+    pub confront_wait_days: u32,
+    pub confront_p: f32,
+    pub confront_max: u8,
+    pub confront_hour_from: u8,
+    pub confront_hour_to: u8,
+    /// The Visit goal's urgency for the confrontation and the collector's call.
+    pub confront_urgency: f32,
+    pub dun_urgency: f32,
+    /// The owner pays (what he holds, up to the owed) on `pay_base + pay_lawful
+    /// x lawfulness + pay_loyal x loyalty - pay_greed x greed`.
+    pub pay_base: f32,
+    pub pay_lawful: f32,
+    pub pay_loyal: f32,
+    pub pay_greed: f32,
+    /// Refused: the worker's grudge grows by `confront_grudge`; at
+    /// `fight_grudge` he swings (`x confront_kill_mult`); under it, a worker
+    /// at least `report_lawful` reports the owner to the Hall, which takes
+    /// the owed out of the owner's purse as it comes in.
+    pub confront_grudge: f32,
+    pub fight_grudge: f32,
+    pub confront_kill_mult: f32,
+    pub report_lawful: f32,
+    /// The beaten owner reports the collector (or the worker) at this lawfulness.
+    pub victim_report_lawful: f32,
+}
+
+impl Default for UnderwaterCfg {
+    fn default() -> Self {
+        UnderwaterCfg {
+            short_cover_days: 1.0,
+            short_unpaid_days: 2,
+            decide_days: 2,
+            decide_cooldown_days: 5,
+            recover_days: 3.0,
+            w_hold: 0.5,
+            w_hours: 1.0,
+            w_layoff: 1.0,
+            w_borrow: 1.0,
+            w_sell: 0.6,
+            w_close: 0.4,
+            escalate: 0.6,
+            hours_cut: 0.35,
+            layoff_share: 0.5,
+            loan_days: 14,
+            loan_weeks: 4,
+            loan_min_days: 3,
+            rate_shark: 0.6,
+            rate_gang: 0.4,
+            rate_corp: 0.15,
+            shark_lawful_max: 0.35,
+            shark_wealth_mult: 2.0,
+            corp_lawful_min: 0.4,
+            corp_spare_mult: 3.0,
+            gang_reserve: 20,
+            seize_misses: 3,
+            corp_repo_misses: 2,
+            collector_kill_mult: 0.2,
+            sell_price_mult: 0.6,
+            front_price_mult: 0.25,
+            front_lawful_max: 0.5,
+            front_misery: 0.6,
+            front_join_p: 0.1,
+            launder_share: 0.3,
+            rival_hit_p: 0.15,
+            rival_take: 30,
+            rival_close_days: 2,
+            shut_price_mult: 0.5,
+            buyer_reserve_days: 7,
+            shut_buys_per_day: 2,
+            shut_derelict_days: 21,
+            confront_wait_days: 1,
+            confront_p: 0.3,
+            confront_max: 3,
+            confront_hour_from: 10,
+            confront_hour_to: 20,
+            confront_urgency: 0.8,
+            dun_urgency: 0.9,
+            pay_base: 0.2,
+            pay_lawful: 0.5,
+            pay_loyal: 0.3,
+            pay_greed: 0.4,
+            confront_grudge: 0.2,
+            fight_grudge: 0.5,
+            confront_kill_mult: 0.2,
+            report_lawful: 0.5,
+            victim_report_lawful: 0.4,
+        }
+    }
 }
 
 /// The pre-view pass phase 5 `[legs]` (docs/PREVIEW_PASS.md § 2 "20k

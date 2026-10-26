@@ -90,6 +90,12 @@ pub enum VisitWhy {
     /// Lives at work phase 5 (§ 2.4, § 3.4's owner-operator): a Fixer's owner
     /// without a post collects the week's cut in person (`kin` is the Fixer).
     Collect,
+    /// The pressure pass phase 6 (`underwater::confronted`): a worker owed
+    /// wages goes to the owner (`kin`) in person to demand them.
+    Confront,
+    /// Phase 6 (`underwater::dunned`): a loan's collector calls on the
+    /// borrower (`kin`) behind on his installments.
+    Dun,
 }
 
 impl VisitWhy {
@@ -1006,6 +1012,7 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
         VisitWhy::Camp(_) => u.camp,
         VisitWhy::Papers => u.papers,
         VisitWhy::Collect => u.collect,
+        VisitWhy::Confront | VisitWhy::Dun => crate::systems::underwater::urgency(world, v.why),
     };
     let cs = vec![
         Consideration::new("a visit due", can(true), GATE),
@@ -1071,6 +1078,9 @@ fn credit(world: &mut World, id: EntityId, v: PendingVisit, walked: bool) {
     match v.why {
         VisitWhy::Papers => return crate::systems::service::walk_in_arrived(world, id, v.kin),
         VisitWhy::Collect => return crate::systems::service::collected(world, id, v.kin),
+        // The pressure pass phase 6: the stiffed worker's scene, the collector's call.
+        VisitWhy::Confront => return crate::systems::underwater::confronted(world, id, v.kin, walked),
+        VisitWhy::Dun => return crate::systems::underwater::dunned(world, id, v.kin, walked),
         _ => {}
     }
     crate::systems::social::interacted(world, id, v.kin);
@@ -1084,7 +1094,7 @@ fn credit(world: &mut World, id: EntityId, v: PendingVisit, walked: bool) {
     match v.why {
         VisitWhy::Hurt => row.kin_visits += 1,
         VisitWhy::Elder => row.elder_visits += 1,
-        VisitWhy::Camp(_) | VisitWhy::Papers | VisitWhy::Collect => {}
+        VisitWhy::Camp(_) | VisitWhy::Papers | VisitWhy::Collect | VisitWhy::Confront | VisitWhy::Dun => {}
     }
     let place = world.comp::<Position>(v.kin).and_then(|p| p.building);
     let at = place.map_or_else(|| "where they were".to_string(), |b| world.name_of(b));
@@ -1096,7 +1106,7 @@ fn credit(world: &mut World, id: EntityId, v: PendingVisit, walked: bool) {
             (VisitWhy::Hurt, _) => " (hurt)",
             (VisitWhy::Elder, _) => " (an elder parent)",
             (VisitWhy::Camp(_), _) => " (a Camp child)",
-            (VisitWhy::Papers | VisitWhy::Collect, _) => "",
+            (VisitWhy::Papers | VisitWhy::Collect | VisitWhy::Confront | VisitWhy::Dun, _) => "",
         }
     );
     let actors: Vec<EntityId> = [Some(id), Some(v.kin), place].into_iter().flatten().collect();

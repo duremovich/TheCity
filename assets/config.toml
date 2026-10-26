@@ -4738,3 +4738,71 @@ stain_fired_p = 0.6                # fired over on this (a hash of the person an
 stain_quit_p = 0.3                 # ... and a quitter on this
 stiff_grudge = 0.35                # an unpaid quitter's Betrayed grudge on the boss (a person); the wages owed stay a debt
 recruit_tenure_days = 14           # a gang recruit's initiation: no walking away in its first this many days (every recruit)
+
+# The pressure pass phase 6 (docs/PRESSURE_PASS.md § Phase 6; systems/underwater.rs): a business under water. A
+# person-owned business whose till cannot meet its wages is a story with choices the owner makes once a day at midnight
+# (both tiers), weighted by his personality and misery; the stiffed worker comes back for his wages. Absent: an owner
+# bleeds his purse into the wages until the staff walk out (F3: 152 unpaid walkouts at bars in 30 days at 20k).
+# Every value a placeholder.
+[underwater]
+short_cover_days = 1.0             # under water: the owner's purse under this many days of the wage bill (his staff
+short_unpaid_days = 2              # outside his household) ... or one of them owed this many days
+decide_days = 2                    # the owner decides after this many short midnights in a row ...
+decide_cooldown_days = 5           # ... and again no sooner than this many days later
+recover_days = 3.0                 # the purse back over this many days of the bill: afloat (the hiring freeze lifts)
+w_hold = 0.5                       # the choices' weights: hang on (x (0.25 + pride): the proud bleed on) ...
+w_hours = 1.0                      # ... shorter hours, once (x (0.5 + loyalty): the loyal keep the staff, cut the hours)
+w_layoff = 1.0                     # ... let staff go (x (1.5 - loyalty))
+w_borrow = 1.0                     # ... borrow, one loan at a time (x (0.5 + courage) x (1 - misery / 2))
+w_sell = 0.6                       # ... sell, to a corp in the niche or the district's gang (x (0.5 + greed) x escalation)
+w_close = 0.4                      # ... shut it (x (0.25 + misery) x escalation)
+escalate = 0.6                     # each earlier decision of the run multiplies sell and close by 1 + this x n
+hours_cut = 0.35                   # shorter hours: every hand's shift (off its end) and wage cut by this share
+layoff_share = 0.5                 # a layoff lets this share of the staff go (at least one), newest first
+loan_days = 14                     # a loan: this many days of the wage bill ...
+loan_weeks = 4                     # ... repaid in this many weekly installments, the lender's rate on top:
+loan_min_days = 3                  # (a lender lends what it can spare up to loan_days, never under this many days)
+rate_shark = 0.6                   # a loan shark's (a lawless rich adult living in the district)
+rate_gang = 0.4                    # the gang's (the district's controller, else the gang holding most Blocks there)
+rate_corp = 0.15                   # a corp's (the richest over its reserve)
+shark_lawful_max = 0.35            # a shark is under this lawfulness ...
+shark_wealth_mult = 2.0            # ... and holds this x the principal
+corp_lawful_min = 0.4              # a corp lends only to an owner this lawful ...
+corp_spare_mult = 3.0              # ... out of a treasury over its reserve by this x the principal
+gang_reserve = 20                  # a gang lends or buys out of its treasury over this (20k island seed 42: a gang's
+                                   # treasury is tens of coins after the stipends; 150 kept every gang out)
+seize_misses = 3                   # missed installments: the gang's toughest free member (or the shark) calls in person;
+                                   # at this many in a row the lender takes the business (a gang's becomes a front)
+corp_repo_misses = 2               # a corp sends no collector: it repossesses at this many
+collector_kill_mult = 0.2          # the collector's beating kills on [crime] fight_death_p x this
+sell_price_mult = 0.6              # a fire sale at this x the building's value
+front_price_mult = 0.25            # ... a gang buys it as a front at this x (muscle, not money)
+front_lawful_max = 0.5             # an owner over this lawfulness sells to no gang ...
+front_misery = 0.6                 # ... unless his misery is past this
+front_join_p = 0.1                 # a bought front: its staff join the gang on this x (1 - lawfulness) a day
+launder_share = 0.3                # ... this share of the gang's week's tribute is booked through its till (its weekday)
+rival_hit_p = 0.15                 # ... a rival gang with turf in the district hits it on this a week ...
+rival_take = 30                    # ... taking up to this from the gang ...
+rival_close_days = 2               # ... and shutting it this many days
+shut_price_mult = 0.5              # a shut business stands for sale at this x its value ...
+buyer_reserve_days = 7             # ... to a would-be founder (jobless or on the dole) holding this many days of its
+                                   # staff's wages on top
+shut_buys_per_day = 2              # at most this many reopened a day
+shut_derelict_days = 21            # a shut Bar or Hotel unsold this long goes derelict
+confront_wait_days = 1             # the stiffed worker (an unpaid walkout or a layoff owed wages): from this many days on
+confront_p = 0.3                   # ... goes to the owner in person on this x (0.5 + pride + misery) a day ...
+confront_max = 3                   # ... at most this many times
+confront_hour_from = 10            # ... between these hours (a Visit; a Statistical worker is credited at the hour)
+confront_hour_to = 20
+confront_urgency = 0.8             # the Visit goal's urgency for the confrontation
+dun_urgency = 0.9                  # ... and for the collector's call
+pay_base = 0.2                     # the owner pays (what he holds, up to the owed) on this + pay_lawful x lawfulness
+pay_lawful = 0.5                   # + pay_loyal x loyalty - pay_greed x greed
+pay_loyal = 0.3
+pay_greed = 0.4
+confront_grudge = 0.2              # refused: the worker's Betrayed grudge grows by this ...
+fight_grudge = 0.5                 # ... and at this he swings (an Assault)
+confront_kill_mult = 0.2           # ... the fight kills on [crime] fight_death_p x this
+report_lawful = 0.5                # under the fight, a worker this lawful reports the owner to the Hall, which takes the
+                                   # owed out of the owner's purse as it comes in
+victim_report_lawful = 0.4         # a beaten owner this lawful reports the collector (or the worker)

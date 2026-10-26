@@ -1065,6 +1065,11 @@ fn walk_out_unpaid(world: &mut World, agent: EntityId, job: &Job, owed: i64) {
         }
     }
     crate::systems::misery::note_left(world, agent, job.employer, false);
+    // The pressure pass phase 6: the stiffed worker may come back for it.
+    ownership::jobs2_row(world).uw_walkouts += 1;
+    if let Some(b) = person.filter(|_| owed > 0) {
+        crate::systems::underwater::note_stiffed(world, agent, b, job.employer);
+    }
 }
 
 /// Who may draw the dole: the jobless. A Job holder never does, paid or not
