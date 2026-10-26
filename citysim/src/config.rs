@@ -340,6 +340,12 @@ pub struct Config {
     /// into a save) with the key absent: mood moves only what it moved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub misery: Option<MiseryCfg>,
+    /// The pressure pass phase 2 (docs/PRESSURE_PASS.md § Phase 2; OPEN-176,
+    /// OPEN-190, OPEN-120, OPEN-017): the dead trades get customers
+    /// (`systems/customers.rs`). `None` (not written into a save) with the
+    /// key absent: the trades serve whom they served.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub customers: Option<CustomersCfg>,
     /// The island pass phase 1 (docs/ISLAND_PASS.md I1; OPEN-163 part):
     /// travel time in the job and bed picks (`systems/distance.rs`). `None`
     /// (not written into a save) with the key absent: the picks
@@ -877,6 +883,81 @@ pub struct LeadersCfg {
     pub order_reach: u32,
     /// P15: minutes the order takes, given at the lieutenant.
     pub order_give_min: u16,
+}
+
+/// The pressure pass phase 2 `[customers]` (docs/PRESSURE_PASS.md § Phase 2;
+/// `systems/customers.rs`). Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CustomersCfg {
+    /// The door: a visitor with a cause (drunk or high, a brawl within
+    /// `door_brawl_days`, a rival gang's colours, a dress under
+    /// `door_dress_min`) is turned away by a bouncer on duty on `door_p`.
+    pub door_brawl_days: u32,
+    pub door_dress_min: u8,
+    /// A visitor carrying a weapon is a cause.
+    pub door_armed: bool,
+    pub door_p: f32,
+    /// A turned-away drunk or brawler swings at the bouncer on
+    /// `door_swing_p × (1 − lawfulness)`; the turned-away holds `door_grudge`.
+    pub door_swing_p: f32,
+    pub door_grudge: f32,
+    /// Clients: intimacy under `lonely_intimacy` is lonely (0..1 below it);
+    /// a venue with a companion, a host or a dancer on duty scores `× (1 +
+    /// lonely_pull × lonely + misery_pull × misery)`; Unwind's need is
+    /// `max(U(fun), lonely_unwind × lonely)` for such a pick, with
+    /// `client_coins` in the purse.
+    pub lonely_intimacy: f32,
+    pub lonely_pull: f32,
+    pub misery_pull: f32,
+    pub lonely_unwind: f32,
+    pub client_coins: i64,
+    /// Arms: safety under `fear_safety` is a reason to want a gun (the
+    /// frightened buy one at a dealer's Bar or, licensed, a Gunsmith).
+    pub fear_safety: f32,
+    /// Care: a lost fight within `hurt_hours` is a wound to have seen to: a
+    /// Clinic's patch-up at `patch_price`, or the back room's at
+    /// `back_price` for the wanted, a gang member, or one short of the
+    /// Clinic's price; `patch_min` minutes on the table.
+    pub hurt_hours: u32,
+    pub patch_price: i64,
+    pub back_price: i64,
+    pub patch_min: u32,
+    /// Care: a diagnosed cancer whose pool falls short of the Clinic's
+    /// treatment buys the back room's at `back_onco_price`: a remission of
+    /// `back_onco_mult ×` the Clinic's, never a cure.
+    pub back_onco_price: i64,
+    pub back_onco_mult: f32,
+    /// The back room's founder: while fewer stand than one per
+    /// `back_room_adults` adults, a struck-off doc (else the least lawful
+    /// licensed Ripperdoc under `rogue_lawful`, who leaves his Clinic for
+    /// it) opens one: a vacant Lot he can pay for, else a derelict refitted.
+    pub back_room_adults: u32,
+    pub rogue_lawful: f32,
+    /// A back room is walked to from within `back_reach_ticks` of travel.
+    pub back_reach_ticks: u64,
+    /// The cab: a body's GoTo of `hail_min_tiles` or more, not to work,
+    /// hails a cab once a day on `p_hail` when it holds `hail_rich_coins`
+    /// or is hurried (Treat, Flee, Rescue), with the fare.
+    pub hail_min_tiles: u32,
+    pub hail_rich_coins: i64,
+    pub p_hail: f32,
+    /// A cab driver's body is paid `min(1, fares / cab_fares_full)` of the
+    /// day's wage (no fare, no pay for Rest at the Garage).
+    pub cab_fares_full: u16,
+    /// The shape-up: every open Construction and Freight Yard posts
+    /// `shape_up_posts` day posts at the dawn pick; a broke jobless body
+    /// walks to a corner within `shape_up_reach` tiles (`[jobs2] corner_reach` off).
+    pub shape_up_posts: u8,
+    pub shape_up_reach: u32,
+    /// The vendor: a working stall sells up to `vendor_per_hour` meals an
+    /// hour to bodies on the street within `vendor_tiles` with hunger under
+    /// `vendor_hunger`.
+    pub vendor_tiles: u32,
+    pub vendor_per_hour: u8,
+    pub vendor_hunger: f32,
+    /// The scav's day: a scav gang's member walks `scav_reach` tiles to a
+    /// Market's bin on the gang's round (off hours), or to a fresh body.
+    pub scav_reach: u32,
 }
 
 /// The pressure pass phase 1 `[misery]` (docs/PRESSURE_PASS.md § Phase 1,

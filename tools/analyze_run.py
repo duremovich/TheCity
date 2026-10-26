@@ -923,6 +923,10 @@ ARMS_TOTALS = ("weapons_made", "sold_legal", "sold_dealer", "issued", "seized", 
                "home_thefts", "fenced", "flow_licence", "flow_arms")
 # The pressure pass phase 1 (OPEN-178): misery acts.
 MISERY_TOTALS = ("misery_skips", "misery_fired", "misery_quits", "brawls", "misery_joins", "misery_converts")
+# The pressure pass phase 2 (OPEN-176): the dead trades get customers.
+CUSTOMER_TOTALS = ("door_refusals", "door_scenes", "lonely_visits", "companion_visits", "cab_hails", "cab_trips",
+                   "fear_wants", "sold_dealer", "gang_arms_buys", "patched", "black_patients", "back_rooms",
+                   "vendor_bodies", "day_posts_filled", "pimp_collections")
 ARMS_SNAP = ("weapons", "carriers", "armoury", "precinct_arms", "gunsmith_stock", "licences", "weapon_wants")
 # Phase 4, vice and fashion (§ 5.1, § 9).
 VICE_TOTALS = ("strip_visits", "brothel_visits", "companion_visits", "vice_revenue", "tips", "street_visits",
@@ -1000,6 +1004,8 @@ def jobs2(rows, events, out):
         J["carriers_per_1000"] = 1000 * J["arms_mean"]["carriers"] / pop if pop else 0
     if "misery_skips" in rows[0]:
         J["misery_totals"] = {k: sum(col(rows, k)) for k in MISERY_TOTALS}
+    if "door_scenes" in rows[0]:
+        J["customer_totals"] = {k: sum(col(rows, k)) for k in CUSTOMER_TOTALS if k in rows[0]}
     if "vice_venues" in rows[0]:
         J["vice_totals"] = {k: sum(col(rows, k)) for k in VICE_TOTALS}
         J["vice_mean"] = {k: mean(col(rows, k)) for k in VICE_SNAP}
@@ -1341,6 +1347,8 @@ def fmt(o):
             L.append("weapons, run totals: " + f(w["arms_totals"]))
         if "misery_totals" in w:
             L.append("misery, run totals: " + f(w["misery_totals"]))
+        if "customer_totals" in w:
+            L.append("customers, run totals: " + f(w["customer_totals"]))
             L.append("weapons, daily mean: " + f(w["arms_mean"]) + f"; weapons per 1,000 {w['weapons_per_1000']:.1f};"
                      f" carriers per 1,000 {w['carriers_per_1000']:.1f}; armed fights / fights "
                      f"{w['armed_share_of_fights']:.1%}; deaths a fight armed {w['death_rate_armed']:.2%}, unarmed "

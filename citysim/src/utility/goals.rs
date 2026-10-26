@@ -215,7 +215,10 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
         // M13 D34: nothing to treat at `treat_below`; D39: and no addiction
         // within 0.2 of `hooked` to Detox.
         GoalKind::Treat => {
-            (!crate::systems::chrome::wants_treatment(world, id)
+            // The pressure pass phase 2: a wound or a short cancer's care trip.
+            let care = crate::systems::customers::care_choice(world, id).is_some();
+            (!care
+                && !crate::systems::chrome::wants_treatment(world, id)
                 && !crate::systems::stims::wants_detox(world, id)
                 && !crate::systems::health::wants_oncology(world, id))
                 // The pressure pass phase 4 (OPEN-194): the nearest Clinic
@@ -788,6 +791,19 @@ pub fn considerations_with(
                 ];
                 return Some((cs, 0.0));
             }
+            // The pressure pass phase 2 (OPEN-176): a scav's off hours are
+            // the gang's round of the bins (a Harvest target outranks it).
+            if crate::systems::gang::gang_work_target(world, id).is_none()
+                && crate::systems::customers::scav_bin(world, id).is_some()
+            {
+                let cs = vec![
+                    Consideration::new("the scav round", 1.0, GATE),
+                    Consideration::new("U(wealth)", urgency(n.wealth), Curve::Linear { m: 0.5, b: 0.3 }),
+                    Consideration::new("energy", n.energy, Curve::Logistic { k: 10.0, mid: 0.3 }),
+                    Consideration::new("loyalty", p.loyalty, Curve::Linear { m: 0.4, b: 0.4 }),
+                ];
+                return Some((cs, 0.0));
+            }
             let in_shift = world.comp::<Job>(id).is_some_and(|j| j.on_shift(tod));
             // The order tilts the day: a loyal member following orders scores
             // 1.0 here, a freelancer 1 - order_weight. Hunger and fear still win.
@@ -904,6 +920,27 @@ pub fn considerations_with(
         GoalKind::Treat => {
             let n = needs?;
             let p = pers?;
+            // The pressure pass phase 2 (care-seeking): a fresh wound, or a
+            // cancer the Clinic is out of reach of the pool, seen to at a
+            // Clinic or the back room (`customers::care_plan`).
+            if !crate::systems::health::wants_oncology(world, id) {
+                if let Some((_, what, _)) = crate::systems::customers::care_choice(world, id) {
+                    let x = match what {
+                        crate::systems::customers::Care::Onco => {
+                            world.comp::<crate::components::Health>(id).and_then(|h| h.cancer).map_or(0.0, |c| c.stage)
+                        }
+                        crate::systems::customers::Care::Patch => 1.0 - n.safety,
+                    };
+                    return Some((
+                        vec![
+                            Consideration::new("a doctor within reach, can pay", 1.0, GATE),
+                            Consideration::new("hurt or stage", x, Curve::Linear { m: 0.6, b: 0.4 }),
+                            Consideration::new("energy", n.energy, Curve::Linear { m: 0.4, b: 0.6 }),
+                        ],
+                        0.0,
+                    ));
+                }
+            }
             // Hunger as sickness § 3: a diagnosed cancer the pool can pay for.
             if crate::systems::health::wants_oncology(world, id) {
                 let stage = world.comp::<crate::components::Health>(id).and_then(|h| h.cancer).map_or(0.0, |c| c.stage);

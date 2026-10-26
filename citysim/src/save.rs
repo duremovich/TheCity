@@ -345,7 +345,11 @@ use crate::world::World;
 /// and `[life] exec_home_reach` (ISLAND_PASS I9, written only when set): an
 /// island save carries its venues' lots. A save of a map without `lot=`
 /// with the reach off is byte-identical to version 67's.
-pub const SAVE_VERSION: u8 = 68;
+/// 69 (the pressure pass phase 2, OPEN-176): `Config.customers`
+/// (`[customers]`), `ActionKind::Patch`, `Misery.patched_at`,
+/// `ArmsState.quarter`, `Jobs2State.{hailed, fares_shift}` (serde defaults;
+/// an old save need not load, 2026-10-26).
+pub const SAVE_VERSION: u8 = 69;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

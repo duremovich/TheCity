@@ -854,6 +854,11 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                     .or_else(|| {
                         mode = "exec_ride";
                         crate::systems::streetwork::exec_ride(world, id, &target)
+                    })
+                    .or_else(|| {
+                        // The pressure pass phase 2: the rich or the hurried hail one.
+                        mode = "cab";
+                        crate::systems::streetwork::hail_cab(world, id, &target)
                     });
                 if let Some(state) = street {
                     leglog::start(world, id, &target, mode);

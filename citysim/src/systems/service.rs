@@ -773,10 +773,21 @@ pub fn refused(world: &mut World, id: EntityId, b: EntityId) {
     let (vb, vr) = (world.config.service.tune.refused_bouncer, world.config.service.tune.refused);
     world.remember(bouncer, MemoryKind::Served, Some(id), salience, vb, false);
     world.remember(id, MemoryKind::Served, Some(bouncer), salience, vr, false);
+    // The pressure pass phase 2 (OPEN-176): the cause named, and the scene
+    // a drunk or a brawler makes of it.
+    let why = crate::systems::customers::cause(world, id, b);
     if row.event_on.contains(&ServeOutcome::Refused) {
-        let text =
-            format!("{} turned {} away at the door of {}", world.name_of(bouncer), world.name_of(id), world.name_of(b));
+        let because = why.map(|w| format!(" ({w})")).unwrap_or_default();
+        let text = format!(
+            "{} turned {} away at the door of {}{because}",
+            world.name_of(bouncer),
+            world.name_of(id),
+            world.name_of(b)
+        );
         world.push_event(EventKind::Served, &[bouncer, id, b], text);
+    }
+    if let Some(line) = why.and_then(|w| crate::systems::customers::scene(world, id, bouncer, b, w)) {
+        world.push_event(EventKind::Brawl, &[id, bouncer, b], line);
     }
 }
 

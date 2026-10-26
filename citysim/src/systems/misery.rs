@@ -305,6 +305,17 @@ fn fire(world: &mut World, id: EntityId, count: u32, window: u32) {
 // Brawls
 // ---------------------------------------------------------------------------
 
+/// The pressure pass phase 2 (the door): drunk or high now, else `None`
+/// (`None` with `[misery]` absent).
+pub fn influence(world: &World, id: EntityId) -> Option<&'static str> {
+    under_the_influence(world, cfg(world)?, id)
+}
+
+/// The pressure pass phase 2 (the door): the day of the last brawl `id` started.
+pub fn last_brawl(world: &World, id: EntityId) -> Option<u32> {
+    world.comp::<Misery>(id).and_then(|m| m.brawl_day)
+}
+
 /// Drunk (a drink within `drink_hours`) or high: the label, else `None`.
 fn under_the_influence(world: &World, c: &MiseryCfg, id: EntityId) -> Option<&'static str> {
     if crate::systems::stims::is_high(world, id) {

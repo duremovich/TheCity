@@ -119,6 +119,7 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::EatAlms => 30,
         ActionKind::DumpsterDive => 20,
         ActionKind::Oncology => 120,
+        ActionKind::Patch => crate::systems::customers::patch_ticks(world),
         ActionKind::PackMeal => 5,
         // Jobs & lives phase 2: an hour at the Pitch, or to the dawn pick.
         ActionKind::Vend => crate::systems::streetwork::vend_ticks(world, id),
@@ -233,6 +234,7 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         // Hunger as sickness § 4: the dive's start check.
         ActionKind::DumpsterDive => crate::systems::bins::can_start(world, id, target),
         ActionKind::Oncology => crate::systems::health::can_start_oncology(world, id, target),
+        ActionKind::Patch => crate::systems::customers::can_patch(world, id, target),
         ActionKind::PackMeal => at_home(world, id) && home_pantry(world, id) > 0,
         // M11 D13: at the wage desk (the Hall for a city job, else the workplace).
         ActionKind::CollectWage => {
@@ -874,6 +876,10 @@ pub fn on_complete(
             Some(c) if crate::systems::health::oncology(world, id, c) => StepResult::Done,
             _ => StepResult::Failed(FailReason::PreconditionLost),
         },
+        ActionKind::Patch => match crate::systems::customers::patch(world, id, target) {
+            true => StepResult::Done,
+            false => StepResult::Failed(FailReason::PreconditionLost),
+        },
         ActionKind::Donate => crate::systems::charity::on_donate(world, id, target),
         ActionKind::Guard => crate::systems::contracts::on_guard_done(world, id, target),
         ActionKind::CollectWage => {
@@ -885,7 +891,14 @@ pub fn on_complete(
             StepResult::Done
         }
         // L1: the Recycler buys the haul (the Treasury pays; a broke city pays nothing).
-        ActionKind::Scavenge => scavenge(world, id),
+        ActionKind::Scavenge => {
+            // The pressure pass phase 2: a scav's round names its find.
+            let before = world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins);
+            let r = scavenge(world, id);
+            let found = world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins) - before;
+            crate::systems::customers::scav_note(world, id, target, found);
+            r
+        }
         // L1: office hours kept today.
         ActionKind::Meeting => {
             let today = world.day();
@@ -1780,7 +1793,12 @@ pub fn end_shift(world: &mut World, id: EntityId) {
     // always was), not on a walk to the Hall; a short payment carries over
     // to the next shift's.
     if owed {
-        economy::collect_wage(world, id);
+        // The pressure pass phase 2 (OPEN-176): a cab driver's body is paid
+        // by the fares he drove, not for Rest at the Garage.
+        match crate::systems::customers::fare_scale(world, id) {
+            Some(scale) => economy::collect_wage_scaled(world, id, scale),
+            None => economy::collect_wage(world, id),
+        };
         return;
     }
     economy::maybe_quit(world, id);

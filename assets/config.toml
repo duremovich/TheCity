@@ -3936,6 +3936,8 @@ per_hour = 3
 minutes = 20
 regular_after = 0
 valence = 0.0
+event_on = ["done"]                # the pressure pass phase 2: the client's visit is an event the chipped host's diary
+                                   # reads (she remembers nothing; the record does)
 
 [[serves]]
 key = "bouncer"                    # the door: a refusal (Refused) and an ejection (Ejected), both events
@@ -3987,6 +3989,18 @@ skill = "knowledge"
 skill_gain = 0.0005
 regular_after = 0
 valence = 0.0
+
+[[serves]]
+key = "black_doc"                  # the pressure pass phase 2: the back room's patients (a patch-up, a cut-rate remission)
+kind = "patient"
+per_hour = 3
+minutes = 20
+skill = "knowledge"
+skill_gain = 0.001
+regular_after = 2
+regular_days = 30
+valence = 0.1
+event_on = ["done"]
 
 # Lives at work phase 3 (§ 2.2): the civic rows (`civic = true`: live with [service] civic, stripped off). No regulars
 # among children or prisoners (no edge table on a child); the super's tenants are adults but a Notice is the event.
@@ -4740,3 +4754,43 @@ stain_fired_p = 0.6                # fired over on this (a hash of the person an
 stain_quit_p = 0.3                 # ... and a quitter on this
 stiff_grudge = 0.35                # an unpaid quitter's Betrayed grudge on the boss (a person); the wages owed stay a debt
 recruit_tenure_days = 14           # a gang recruit's initiation: no walking away in its first this many days (every recruit)
+
+# The pressure pass phase 2 (docs/PRESSURE_PASS.md § Phase 2; OPEN-176, OPEN-190, OPEN-120, OPEN-017): the dead trades
+# get customers (`systems/customers.rs`). Placeholders: mechanism first, nothing tuned.
+[customers]
+door_brawl_days = 3                # the door: a brawl started within this many days is a cause ...
+door_dress_min = 1                 # ... as is a dress under this (rags: a Dreg) at a Club or a StripClub, drunk or high,
+                                   # or a rival gang's colours (the venue's gang: its owner, else its district's holder)
+door_armed = true                  # ... as is a weapon carried on the body (the door takes no piece in)
+door_p = 0.85                      # a bouncer on duty turns a visitor with a cause away on this (a hash of the visitor,
+                                   # the venue and the hour)
+door_swing_p = 0.4                 # a turned-away drunk, high or brawler swings at the bouncer on this x (1 - lawfulness)
+door_grudge = 0.3                  # the turned-away's Assaulted-weight grudge on the bouncer (a face at the door)
+lonely_intimacy = 0.4              # clients: intimacy under this is lonely (1 at intimacy 0)
+lonely_pull = 2.0                  # a Lounge, Dollhouse, StripClub, Brothel or Club with its tipped worker on duty scores
+misery_pull = 1.0                  # x (1 + lonely_pull x lonely + misery_pull x misery) on the Unwind ladder
+lonely_unwind = 0.7                # Unwind's need for such a pick: max(U(fun), this x lonely) ...
+client_coins = 15                  # ... with this many coins in the purse (the lonely broke stay home)
+fear_safety = 0.3                  # arms: safety under this is a reason to want a gun (the frightened: a beating, a Hunt)
+hurt_hours = 24                    # care: a lost fight within this many hours is a wound to have seen to ...
+patch_price = 12                   # ... a Clinic's patch-up (Flow::Treatment, the doctor's Patient encounter) ...
+back_price = 6                     # ... or the back room's, cash and no questions: the wanted, a gang member, the short
+patch_min = 40                     # minutes on the table
+back_onco_price = 80               # a diagnosed cancer short of the Clinic's treatment ([sickness] cancer_treat_price)
+back_onco_mult = 0.5               # ... buys the back room's: this x the Clinic's remission, never a cure
+back_room_adults = 4000            # the back room's founder: while fewer stand than one per this many adults ...
+rogue_lawful = 0.45                # ... a struck-off doc, else the least lawful licensed Ripperdoc under this, opens one
+back_reach_ticks = 300             # a back room is walked to from this far (travel minutes; [distance.reach] clinic_ticks 120)
+hail_min_tiles = 50                # the cab: a body's trip (not the commute) this many tiles or more ...
+hail_rich_coins = 80               # ... hails a cab when it holds this many coins (flush) or is hurried (Treat, Flee,
+                                   # Rescue: the hurt, the frightened, the carrier), with the fare and [jobs2] cab_reserve ...
+p_hail = 0.5                       # ... on this (a hash of the rider and the day; one a day)
+cab_fares_full = 3                 # a cab driver's body is paid min(1, fares / this) of the day's wage (no fare, no pay)
+shape_up_posts = 2                 # the shape-up: every open Construction and Freight Yard's foreman takes this many day
+                                   # hands at the dawn pick, sites or none ([jobs2] day_per_site and yard_posts on top)
+shape_up_reach = 80                # a broke jobless body walks to a corner this many tiles away ([jobs2] corner_reach 40)
+vendor_tiles = 6                   # the vendor: a working stall sells to the bodies on the street within this many tiles ...
+vendor_per_hour = 3                # ... up to this many meals an hour ...
+vendor_hunger = 0.6                # ... to those with hunger under this (the off-screen buyer is [jobs2] p_vendor_pick's)
+scav_reach = 60                    # the scav's day: a scav gang's member walks this many tiles to a Market's bin (its
+                                   # round, off hours) or to a fresh body to strip and rip ([chrome] loot_reach for others)

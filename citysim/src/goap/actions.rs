@@ -203,6 +203,10 @@ pub enum ActionKind {
     /// collected. A Lead plan's scripted step (`systems/leaders.rs`), never
     /// in `PLANNABLE`.
     Court,
+    /// The pressure pass phase 2 (care): at a Clinic or a back room, a lost
+    /// fight's wound patched or a cancer cut back (the Treat goal's scripted
+    /// step, `customers::care_plan`; never in `PLANNABLE`).
+    Patch,
 }
 
 /// Every action the planner may consider, in tie-break order.
@@ -436,6 +440,7 @@ impl ActionKind {
                 | ActionKind::Donate
                 | ActionKind::DumpsterDive
                 | ActionKind::Oncology
+                | ActionKind::Patch
                 | ActionKind::PackMeal
                 | ActionKind::Vend
                 | ActionKind::Break
@@ -1329,6 +1334,7 @@ impl ActionKind {
             k if k.is_charity_step() => false,
             ActionKind::DumpsterDive
             | ActionKind::Oncology
+            | ActionKind::Patch
             | ActionKind::PackMeal
             | ActionKind::Vend
             | ActionKind::Break
@@ -1428,6 +1434,7 @@ impl ActionKind {
             k if k.is_charity_step() => true,
             ActionKind::DumpsterDive
             | ActionKind::Oncology
+            | ActionKind::Patch
             | ActionKind::PackMeal
             | ActionKind::Vend
             | ActionKind::Break
@@ -1919,6 +1926,7 @@ impl ActionKind {
             | ActionKind::Donate
             | ActionKind::DumpsterDive
             | ActionKind::Oncology
+            | ActionKind::Patch
             | ActionKind::PackMeal
             | ActionKind::Vend
             | ActionKind::Break

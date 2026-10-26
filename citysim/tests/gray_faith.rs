@@ -246,7 +246,9 @@ fn test_struck_off_leaves_the_post() {
         })
         .expect("a Ripperdoc");
     gray::daily(&mut w);
-    assert!(w.comp::<Job>(doc).is_none(), "off the post");
+    // The pressure pass phase 2: the struck-off doc may open a back room
+    // that same midnight (`gray::back_rooms`) and work it; off the licensed post.
+    assert!(w.comp::<Job>(doc).is_none_or(|j| j.role != citysim::Role::Ripperdoc), "off the post");
     assert!(!gray::hire_ok(&w, doc, citysim::Role::Ripperdoc), "and not hired again");
     assert!(w.stats.current.jobs2.as_ref().is_some_and(|j| j.struck_off >= 1));
 }

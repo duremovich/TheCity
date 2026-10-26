@@ -255,6 +255,11 @@ pub fn door_ok(world: &World, id: EntityId, b: EntityId) -> bool {
     {
         return false;
     }
+    // The pressure pass phase 2 (OPEN-176): a bouncer on duty turns a
+    // visitor with a cause away (drunk, a brawler, a rival's colours, rags).
+    if crate::systems::customers::door_cause(world, id, b).is_some() {
+        return false;
+    }
     match kind_of(world, b) {
         Some(BuildingKind::Lounge) => {
             crate::systems::classes::class_of(world, id) != Class::Dreg
@@ -293,7 +298,13 @@ pub fn door_ok(world: &World, id: EntityId, b: EntityId) -> bool {
 /// within `[exec] refused_ticks`. Off: `door_ok` (the bouncer's verdict
 /// read at the pick, so the door never refused anyone).
 pub fn door_seen(world: &World, id: EntityId, b: EntityId) -> bool {
-    if !crate::systems::shift::counter_on(world) || kind_of(world, b) != Some(BuildingKind::Club) {
+    // The pressure pass phase 2: every door a bouncer keeps is his call at
+    // the door (`[customers]`), not the Club's alone.
+    let kept = kind_of(world, b).is_some_and(|k| {
+        k == BuildingKind::Club
+            || (crate::systems::customers::cfg(world).is_some() && crate::systems::customers::kept_kind(world, k))
+    });
+    if !crate::systems::shift::counter_on(world) || !kept {
         return door_ok(world, id, b);
     }
     let turned = world
@@ -611,6 +622,9 @@ fn paid_score(world: &World, id: EntityId, b: EntityId, rung: Rung, price: i64, 
     if let Some(k) = kind_of(world, b).filter(|&k| matches!(k, BuildingKind::Brothel | BuildingKind::Boutique)) {
         s *= crate::systems::vice::score_mult(world, id, k) * crate::systems::fashion::score_mult(world, id, k);
     }
+    // The pressure pass phase 2 (OPEN-176): the lonely and the miserable
+    // are drawn to a venue whose companion, host or dancer is on duty.
+    s *= crate::systems::customers::client_mult(world, id, b);
     let share = price.max(1) as f32 / purse.max(1) as f32;
     s * (1.0 - greed * share).max(0.05)
 }
@@ -1239,7 +1253,10 @@ fn adult_free(world: &World, id: EntityId) -> bool {
 /// Spec § 2: Unwind is satisfied at `fun_satisfied` (and off for a child,
 /// a prisoner, or with leisure off).
 pub fn unwind_satisfied(world: &World, id: EntityId) -> bool {
-    !adult_free(world, id) || world.comp::<Needs>(id).is_none_or(|n| n.fun >= world.config.needs.fun_satisfied)
+    !adult_free(world, id)
+        || world.comp::<Needs>(id).is_none_or(|n| n.fun >= world.config.needs.fun_satisfied)
+            // The pressure pass phase 2: the lonely with coins look for company.
+            && !crate::systems::customers::lonely_wants(world, id)
 }
 
 /// Day gaps 1 (2026-10-11): `job`'s shift is being worked now: on shift on
@@ -1309,8 +1326,12 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
         return None;
     }
     let pick = choice(world, id, false)?;
+    // The pressure pass phase 2 (OPEN-176): a lonely body whose pick is a
+    // companion's, host's or dancer's venue unwinds for the company.
+    let fun_u = Curve::Logistic { k: 8.0, mid: 0.5 }.eval(urgency(n.fun));
+    let need = fun_u.max(crate::systems::customers::lonely_need(world, id, pick.venue));
     let cs = vec![
-        Consideration::new("U(fun)", urgency(n.fun), Curve::Logistic { k: 8.0, mid: 0.5 }),
+        Consideration::raw("U(fun) or lonely", urgency(n.fun), need),
         Consideration::new("off hours", can(off_hours(world, id)), gate_or(0.3)),
         Consideration::raw("rung", pick.score, (0.5 + pick.score).min(1.0)),
         // Deviation (measured): food before fun. Without it a hungry body
@@ -1740,6 +1761,11 @@ fn phase4_visit(world: &mut World, id: EntityId, b: EntityId) {
     }
     let price = price_of(world, b);
     let high = rung_of(world, b, price) == Rung::High;
+    // The pressure pass phase 2: a lonely client's visit (counted before
+    // the visit's intimacy lands).
+    if crate::systems::customers::lonely(world, id) > 0.0 && crate::systems::customers::worker_on(world, b) {
+        ownership::jobs2_row(world).lonely_visits += 1;
+    }
     crate::systems::vice::on_visit(world, id, b, price);
     crate::systems::fashion::on_visit(world, id, b, high);
 }

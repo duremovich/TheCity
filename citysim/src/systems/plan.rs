@@ -248,7 +248,10 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
         }
         GoalKind::Socialise => crate::systems::charity::donate_plan(world, id),
         // Hunger as sickness § 3: the cancer's treatment.
-        GoalKind::Treat => crate::systems::health::oncology_plan(world, id),
+        // The pressure pass phase 2: the care trip when the Clinic's oncology is not the plan.
+        GoalKind::Treat => {
+            crate::systems::health::oncology_plan(world, id).or_else(|| crate::systems::customers::care_plan(world, id))
+        }
         _ => None,
     };
     if let Some(plan) = scripted {
@@ -260,9 +263,12 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
         GoalKind::Socialise => crate::systems::leisure::hangout_plan(world, id),
         // Lives at work phase 4b (§ 2.3): the pimp's round, the corner's
         // dealer and its buyer (a corner is a tile: no planner location).
-        GoalKind::GangWork => crate::systems::leisure::preach_plan(world, id)
-            .or_else(|| crate::systems::vice::pimp_plan(world, id))
-            .or_else(|| crate::systems::stims::corner_plan(world, id)),
+        // The pressure pass phase 2 (OPEN-120): the pimp's round before a
+        // cult's sermon (a pimp of a creed gang preached his pitch hours away).
+        GoalKind::GangWork => crate::systems::vice::pimp_plan(world, id)
+            .or_else(|| crate::systems::leisure::preach_plan(world, id))
+            .or_else(|| crate::systems::stims::corner_plan(world, id))
+            .or_else(|| crate::systems::customers::scav_plan(world, id)),
         GoalKind::GetHigh => crate::systems::stims::corner_buy_plan(world, id),
         _ => None,
     };
