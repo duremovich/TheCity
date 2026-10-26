@@ -292,11 +292,11 @@ pub fn daily(world: &mut World) {
         return;
     }
     let _t = crate::prof::scope!("dollhouse::daily");
-    close_contracts(world);
-    chip_captives(world);
-    offer_places(world);
-    front_orders(world);
-    tidy_vacancies(world);
+    crate::prof::timed!("doll::close_contracts", close_contracts(world));
+    crate::prof::timed!("doll::chip_captives", chip_captives(world));
+    crate::prof::timed!("doll::offer_places", offer_places(world));
+    crate::prof::timed!("doll::front_orders", front_orders(world));
+    crate::prof::timed!("doll::tidy_vacancies", tidy_vacancies(world));
 }
 
 fn close_contracts(world: &mut World) {

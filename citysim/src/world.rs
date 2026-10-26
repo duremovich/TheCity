@@ -782,6 +782,11 @@ pub struct World {
     /// saved, not cloned: built on its first query).
     #[serde(skip)]
     claims: Memo<ClaimIndex>,
+    /// The perf pass phase 7: `districts::rebuild`'s grid half with the
+    /// inputs it was built from (not saved, not cloned: a loaded world
+    /// builds it on its first rebuild).
+    #[serde(skip)]
+    pub(crate) district_geo: Memo<crate::systems::districts::DistrictGeo>,
     pub vacancies: BTreeMap<EntityId, Vec<Role>>,
     pub edge_roads: Vec<TilePos>,
     pub view_rect: Option<Rect>,
@@ -1492,6 +1497,14 @@ impl<T> Clone for Memo<T> {
     }
 }
 
+impl<T> Memo<T> {
+    /// The perf pass phase 7: the cell itself, for a writer holding the
+    /// world mutably (no lock taken).
+    pub(crate) fn slot(&mut self) -> &mut Option<T> {
+        self.0.get_mut().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
 /// The perf pass phase 2: `((building_gen, kinds_gen), each kind's grid)`.
 type KindGrids = ((u64, u64), BTreeMap<BuildingKind, std::sync::Arc<crate::spatial::BuildingGrid>>);
 
@@ -1880,6 +1893,7 @@ impl World {
             shop_memo: Memo::default(),
             near_memo: Memo::default(),
             claims: Memo::default(),
+            district_geo: Memo::default(),
             vacancies: BTreeMap::new(),
             edge_roads,
             view_rect: None,

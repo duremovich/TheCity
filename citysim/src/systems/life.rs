@@ -932,49 +932,52 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool, daily: bool)
         .into_iter()
         .filter_map(|c| world.comp::<Corp>(c).and_then(|cc| cc.exec).map(|e| (e, c)))
         .collect();
-    for a in world.citizens() {
-        let employer = match world.comp::<Job>(a) {
-            Some(job) => job.employer,
-            None => execs.get(&a).and_then(|&c| hq_of(world, c, a)),
-        };
-        let Some(employer) = employer else { continue };
-        if world.has::<Sentence>(a) || world.comp::<Brain>(a).is_none_or(|b| b.emigrating) {
-            continue;
-        }
-        let Some(home) = home_of(world, a) else { continue };
-        // OPEN-140: one move a body a midnight; an elder under a grown
-        // child's roof stays there (the kin take-in moved him back).
-        if housed_now(world, a) || crate::systems::ages::with_kin(world, a) {
-            continue;
-        }
-        // Lives at work phase 3 (§ 2.2, tied housing): a household housed
-        // rent-free by a tied worker's landlord stays (the first build moved
-        // the super's spouse nearer her work every midnight, the super with
-        // her, and `tied_housing` moved them back: 50 moves in 120 days).
-        if world.residents_of(home).iter().any(|&r| crate::systems::ownership::tied_here(world, r, home)) {
-            continue;
-        }
-        // The island pass phase 3a (I6): a company block's household stays
-        // (housed by the job; its own pass moves it). Phase 4: this is that
-        // pass, and the household is read as any other.
-        if !pressure && !crate::systems::company::open_to_all(world, home) {
-            continue;
-        }
-        let Some(work) =
-            (if fix { work_tile(world, a, employer) } else { world.comp::<Building>(employer).map(|b| b.door) })
-        else {
-            continue;
-        };
-        let Some(hd) = world.comp::<Building>(home).map(|b| b.door) else { continue };
-        let d = cost(world, hd, work);
-        if pressure {
-            // The island pass phase 4: the day's pressure decides.
-            read.insert(a);
-            if crate::systems::commute::note(world, a, d) {
+    {
+        let _scan = crate::prof::scope!("reloc::scan");
+        for a in world.citizens() {
+            let employer = match world.comp::<Job>(a) {
+                Some(job) => job.employer,
+                None => execs.get(&a).and_then(|&c| hq_of(world, c, a)),
+            };
+            let Some(employer) = employer else { continue };
+            if world.has::<Sentence>(a) || world.comp::<Brain>(a).is_none_or(|b| b.emigrating) {
+                continue;
+            }
+            let Some(home) = home_of(world, a) else { continue };
+            // OPEN-140: one move a body a midnight; an elder under a grown
+            // child's roof stays there (the kin take-in moved him back).
+            if housed_now(world, a) || crate::systems::ages::with_kin(world, a) {
+                continue;
+            }
+            // Lives at work phase 3 (§ 2.2, tied housing): a household housed
+            // rent-free by a tied worker's landlord stays (the first build moved
+            // the super's spouse nearer her work every midnight, the super with
+            // her, and `tied_housing` moved them back: 50 moves in 120 days).
+            if world.residents_of(home).iter().any(|&r| crate::systems::ownership::tied_here(world, r, home)) {
+                continue;
+            }
+            // The island pass phase 3a (I6): a company block's household stays
+            // (housed by the job; its own pass moves it). Phase 4: this is that
+            // pass, and the household is read as any other.
+            if !pressure && !crate::systems::company::open_to_all(world, home) {
+                continue;
+            }
+            let Some(work) =
+                (if fix { work_tile(world, a, employer) } else { world.comp::<Building>(employer).map(|b| b.door) })
+            else {
+                continue;
+            };
+            let Some(hd) = world.comp::<Building>(home).map(|b| b.door) else { continue };
+            let d = cost(world, hd, work);
+            if pressure {
+                // The island pass phase 4: the day's pressure decides.
+                read.insert(a);
+                if crate::systems::commute::note(world, a, d) {
+                    movers.push((std::cmp::Reverse(d), a, home, work));
+                }
+            } else if d > cap {
                 movers.push((std::cmp::Reverse(d), a, home, work));
             }
-        } else if d > cap {
-            movers.push((std::cmp::Reverse(d), a, home, work));
         }
     }
     movers.sort_unstable();

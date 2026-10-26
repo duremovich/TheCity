@@ -111,6 +111,10 @@ pub struct Map {
     district_grid: Vec<u8>,
     /// Scale S3b: the map's El lines (`L` lines); empty: the config's.
     pub lines: Vec<TransitLineCfg>,
+    /// The perf pass phase 7: bumped by every `set_tile` (the key of
+    /// `districts::rebuild`'s grid memo; not saved: a loaded map counts
+    /// from 0 and a loaded world's memo is empty).
+    tile_edits: u64,
 }
 
 /// The saved shape of a [`Map`]. SAVE_VERSION 13 writes the grids as
@@ -204,6 +208,7 @@ impl TryFrom<MapRepr> for Map {
             districts: r.districts,
             district_grid,
             lines: r.lines,
+            tile_edits: 0,
         })
     }
 }
@@ -516,6 +521,7 @@ impl Map {
             districts: Vec::new(),
             district_grid: Vec::new(),
             lines: Vec::new(),
+            tile_edits: 0,
         };
         let mut n = at;
         while n < lines.len() {
@@ -762,6 +768,12 @@ impl Map {
     pub fn set_tile(&mut self, p: TilePos, kind: TileKind) {
         let i = self.index(p);
         self.tiles[i] = kind;
+        self.tile_edits += 1;
+    }
+
+    /// The perf pass phase 7: how many `set_tile`s this map has taken.
+    pub fn tile_edits(&self) -> u64 {
+        self.tile_edits
     }
 
     /// The zone a tile lies in; `Mid` everywhere on a map without a zone grid.

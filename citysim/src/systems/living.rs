@@ -42,75 +42,75 @@ pub fn run(world: &mut World) {
     // midnight: the next one retries).
     if world.venues_due && !crate::systems::jobs::seed_venues(world).is_empty() {
         world.venues_due = false;
-        crate::systems::virt::relink(world);
+        crate::prof::timed!("mid::virt::relink", crate::systems::virt::relink(world));
     }
-    crate::systems::jobs::daily(world);
-    crate::systems::jobs::top_up(world);
+    crate::prof::timed!("mid::jobs::daily", crate::systems::jobs::daily(world));
+    crate::prof::timed!("mid::jobs::top_up", crate::systems::jobs::top_up(world));
     // Real economy phase 2 (plan E17, E18): the wage rule, then hiring and
     // layoffs on the margin, before the band and `demography`'s hires.
-    crate::systems::wages::daily(world);
-    crate::systems::wages::staff(world);
+    crate::prof::timed!("mid::wages::daily", crate::systems::wages::daily(world));
+    crate::prof::timed!("mid::wages::staff", crate::systems::wages::staff(world));
     // Class pay: the skilled promotions, before `demography`'s hires.
-    crate::systems::classpay::daily(world);
+    crate::prof::timed!("mid::classpay::daily", crate::systems::classpay::daily(world));
     // Class pay P3: the rich spend on status (Spire nights, fashion, chrome).
-    crate::systems::classpay::status_daily(world);
+    crate::prof::timed!("mid::classpay::status_daily", crate::systems::classpay::status_daily(world));
     // P10: the safety net lapses when the Treasury cannot pay it (before
     // the band reads the lever).
-    crate::systems::policy::daily(world);
+    crate::prof::timed!("mid::policy::daily", crate::systems::policy::daily(world));
     // Real economy E21 (phase 3a): under the market wage law the Treasury's
     // tax band replaces L2's budget band (no upkeep levy to cut); public
     // works, when enacted, open and close on the tax band's reading (P10).
     if crate::systems::econ::wages_on(world) {
-        crate::systems::treasury::daily(world);
-        crate::systems::budget::market_works(world);
+        crate::prof::timed!("mid::treasury::daily", crate::systems::treasury::daily(world));
+        crate::prof::timed!("mid::budget::market_works", crate::systems::budget::market_works(world));
     } else {
-        crate::systems::budget::daily(world);
+        crate::prof::timed!("mid::budget::daily", crate::systems::budget::daily(world));
     }
     // L2 shadow fixes: no-shows, the sweepers' wage, the told-memory.
-    crate::systems::fixes::daily(world);
+    crate::prof::timed!("mid::fixes::daily", crate::systems::fixes::daily(world));
     // Real economy (plan E6-E10): the World's book, appetite, refill and the
     // midnight Parts and Data sales.
-    crate::systems::world_market::daily(world);
+    crate::prof::timed!("mid::world_market::daily", crate::systems::world_market::daily(world));
     // Jobs & lives phase 1: the Rations sale (after the book's refill), the
     // civic posts, the offices and an Hq built (nothing with `[jobs2]` off).
-    crate::systems::industry::daily(world);
+    crate::prof::timed!("mid::industry::daily", crate::systems::industry::daily(world));
     // Jobs & lives phase 2: the Pitches' day (the cut, sweeps, closings,
     // openings), the couriers' parcels (nothing with the street off).
     // Jobs & lives phase 4: the pimps named and the Brothels the law shuts,
     // before the street's day closes (nothing with `[vice]` off).
-    crate::systems::vice::daily(world);
-    crate::systems::streetwork::daily(world);
+    crate::prof::timed!("mid::vice::daily", crate::systems::vice::daily(world));
+    crate::prof::timed!("mid::streetwork::daily", crate::systems::streetwork::daily(world));
     // Lives at work phase 2 (§ 3.4, § 3.5): the newborns' keep and the visits due.
     crate::prof::timed!("household", crate::systems::household::daily(world));
     // Jobs & lives phase 3: the armouries, the fence, the carry roll, the
     // wants and licences, the guards' stock (nothing with `[weapons]` off).
-    crate::systems::weapons::daily(world);
+    crate::prof::timed!("mid::weapons::daily", crate::systems::weapons::daily(world));
     // Jobs & lives phase 4: status's decay, the gangs' clothing (nothing with `[fashion]` off).
-    crate::systems::fashion::daily(world);
+    crate::prof::timed!("mid::fashion::daily", crate::systems::fashion::daily(world));
     // Jobs & lives phase 5: the chip contracts and the braindance day
     // (nothing with `[vice] chip` / `bd` off).
-    crate::systems::dollhouse::daily(world);
-    crate::systems::braindance::daily(world);
+    crate::prof::timed!("mid::dollhouse::daily", crate::systems::dollhouse::daily(world));
+    crate::prof::timed!("mid::braindance::daily", crate::systems::braindance::daily(world));
     // Jobs & lives phase 6: the gray market's and the faith's day (nothing
     // with `[gray]` / `[faith]` off).
-    crate::systems::gray::daily(world);
+    crate::prof::timed!("mid::gray::daily", crate::systems::gray::daily(world));
     // Lives at work phase 5 (§ 2.4): the walk-ins' walks, the Fixer owners'
     // weekly collections (nothing with `[service] tower` off).
-    crate::systems::service::tower_daily(world);
-    crate::systems::faith::daily(world);
+    crate::prof::timed!("mid::service::tower_daily", crate::systems::service::tower_daily(world));
+    crate::prof::timed!("mid::faith::daily", crate::systems::faith::daily(world));
     // Jobs & lives phase 7: the children's routines, the kin, the
     // prosthetics (nothing with `[ages]` off).
-    crate::systems::ages::daily(world);
+    crate::prof::timed!("mid::ages::daily", crate::systems::ages::daily(world));
     // Lives at work phase 6 (§ 4): retirements, frailty exits, the foremen,
     // the gangs' lieutenants (nothing with `[careers]` / `[gangs]
     // lieutenants` off).
-    crate::systems::careers::daily(world);
+    crate::prof::timed!("mid::careers::daily", crate::systems::careers::daily(world));
     // L2 phase 2: the spots, the wealth decile, the venues' hand-over.
-    crate::systems::leisure::daily(world);
+    crate::prof::timed!("mid::leisure::daily", crate::systems::leisure::daily(world));
     // The Real economy E27, E34, E37, E39, E40, E42: the kitchens' day, the
     // camps' day (before `demography` feeds the Blocks and takes), the
     // corps' camp founding.
-    crate::systems::charity::daily(world);
-    crate::systems::camp::daily(world);
-    crate::systems::camp::found_daily(world);
+    crate::prof::timed!("mid::charity::daily", crate::systems::charity::daily(world));
+    crate::prof::timed!("mid::camp::daily", crate::systems::camp::daily(world));
+    crate::prof::timed!("mid::camp::found_daily", crate::systems::camp::found_daily(world));
 }

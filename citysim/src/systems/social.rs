@@ -491,7 +491,7 @@ pub fn gossip(world: &mut World, from: EntityId, _to: EntityId) {
 pub fn run(world: &mut World) {
     colocation(world);
     if world.tick_of_day() == 0 {
-        daily(world);
+        crate::prof::timed!("social::daily", daily(world));
     }
 }
 

@@ -764,6 +764,18 @@ pub fn harvest_target(world: &World, gang: EntityId) -> Option<(EntityId, i64)> 
             continue;
         }
         let value = k.chrome_value + organs;
+        // The perf pass phase 7: the ground first (a district byte or two),
+        // then the rest; every test here is a pure read, so the same
+        // candidates by the same key.
+        let home = world
+            .comp::<crate::components::Household>(id)
+            .and_then(|h| h.home)
+            .and_then(|h| world.comp::<Building>(h))
+            .map(|b| b.door);
+        let tile = world.comp::<Position>(id).map(|p| p.tile);
+        if !seen && !home.is_some_and(in_ground) && !tile.is_some_and(in_ground) {
+            continue;
+        }
         if !crate::systems::law::living(world, id)
             || world.gang_of(id) == Some(gang)
             || world.has::<crate::components::Sentence>(id)
@@ -773,15 +785,6 @@ pub fn harvest_target(world: &World, gang: EntityId) -> Option<(EntityId, i64)> 
         }
         // M15 W32: nobody harvests the feared.
         if crate::systems::reputation::rep(world, id).dread >= world.config.reputation.harvest_dread_max {
-            continue;
-        }
-        let home = world
-            .comp::<crate::components::Household>(id)
-            .and_then(|h| h.home)
-            .and_then(|h| world.comp::<Building>(h))
-            .map(|b| b.door);
-        let tile = world.comp::<Position>(id).map(|p| p.tile);
-        if !seen && !home.is_some_and(in_ground) && !tile.is_some_and(in_ground) {
             continue;
         }
         // Jobs & lives phase 8 (the scavs): a gang hunting organs ranks its

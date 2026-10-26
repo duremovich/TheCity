@@ -463,7 +463,7 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
     let (mut frontier, mut frontier_total) = (0, 0);
     for &h in world.buildings_by_kind().get(&BuildingKind::Home).map(|v| v.as_slice()).unwrap_or(&[]) {
         let Some(b) = world.comp::<Building>(h) else { continue };
-        if b.demolished || b.derelict || !inhabited(h) {
+        if b.demolished || b.derelict {
             continue;
         }
         // M12 D38: with a district held, Expand's frontier is the held and
@@ -478,7 +478,9 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
                 _ => true,
             }
         };
-        if !ours {
+        // The perf pass phase 7: the side before the residents (both pure
+        // reads; the same Homes counted).
+        if !ours || !inhabited(h) {
             continue;
         }
         frontier_total += 1;
@@ -526,7 +528,10 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
         .buildings_of_kind(BuildingKind::Clinic)
         .iter()
         .any(|&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished && !bd.derelict));
-    let harvest_target = if clinic_exists { crate::systems::chrome::harvest_target(world, gang) } else { None };
+    let harvest_target = crate::prof::timed!(
+        "gang::harvest_target",
+        if clinic_exists { crate::systems::chrome::harvest_target(world, gang) } else { None }
+    );
     let harvest_cover = harvest_target
         .and_then(|(t, _)| world.comp::<crate::components::Position>(t))
         .map_or(0.0, |p| tile_cover(world, gang, p.tile));
