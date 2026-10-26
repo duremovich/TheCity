@@ -1103,6 +1103,45 @@ pub struct Jobs2Cols {
     // OPEN-157: a contract's party arrived at the Fixer in person in its hours.
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub broker_walks: u32,
+    // The pressure pass phase 5b (`systems::crew`): raid results, duty, court, release, rest days.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub crew_raid_results: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub crew_raid_wounded: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub crew_duty_posted: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub crew_duty_kept: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub crew_duty_missed: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub crew_chose_gang: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub crew_chose_job: u32,
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub crew_duty_pay: i64,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub crew_colours_lost: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub crew_talked: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub crew_talker_beaten: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub crew_welcomes: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub crew_promoted: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub crew_court_quorum: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub crew_court_failed: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub crew_absorbed: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub crew_folded: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub crew_rest_nights: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub crew_gang_loans: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -1503,6 +1542,25 @@ impl Jobs2Cols {
                 "gang_treasury_med",
                 "gang_treasury_max",
                 "broker_walks",
+                "crew_raid_results",
+                "crew_raid_wounded",
+                "crew_duty_posted",
+                "crew_duty_kept",
+                "crew_duty_missed",
+                "crew_chose_gang",
+                "crew_chose_job",
+                "crew_duty_pay",
+                "crew_colours_lost",
+                "crew_talked",
+                "crew_talker_beaten",
+                "crew_welcomes",
+                "crew_promoted",
+                "crew_court_quorum",
+                "crew_court_failed",
+                "crew_absorbed",
+                "crew_folded",
+                "crew_rest_nights",
+                "crew_gang_loans",
             ]
             .into_iter()
             .map(str::to_string),
@@ -1897,6 +1955,25 @@ impl Jobs2Cols {
             self.gang_treasury_med.to_string(),
             self.gang_treasury_max.to_string(),
             self.broker_walks.to_string(),
+            self.crew_raid_results.to_string(),
+            self.crew_raid_wounded.to_string(),
+            self.crew_duty_posted.to_string(),
+            self.crew_duty_kept.to_string(),
+            self.crew_duty_missed.to_string(),
+            self.crew_chose_gang.to_string(),
+            self.crew_chose_job.to_string(),
+            self.crew_duty_pay.to_string(),
+            self.crew_colours_lost.to_string(),
+            self.crew_talked.to_string(),
+            self.crew_talker_beaten.to_string(),
+            self.crew_welcomes.to_string(),
+            self.crew_promoted.to_string(),
+            self.crew_court_quorum.to_string(),
+            self.crew_court_failed.to_string(),
+            self.crew_absorbed.to_string(),
+            self.crew_folded.to_string(),
+            self.crew_rest_nights.to_string(),
+            self.crew_gang_loans.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

@@ -117,6 +117,10 @@ fn early(world: &mut World) {
     // and the hiring freezes (after the top-up and the visits due, before
     // `demography` hires; nothing with `[underwater]` absent).
     crate::prof::timed!("mid::underwater::daily", crate::systems::underwater::daily(world));
+    // The pressure pass phase 5b: the gangs' duty, the talk inside, the
+    // reckonings, the gangs that cannot muster (after the visits due;
+    // nothing with `[crew]` absent).
+    crate::prof::timed!("mid::crew::daily", crate::systems::crew::daily(world));
 }
 
 fn late(world: &mut World) {

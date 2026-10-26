@@ -1292,7 +1292,8 @@ pub fn chop_daily(world: &mut World, gang: EntityId) {
 /// treasury, one motorcycle for the best-ranked member without a vehicle,
 /// up to quota: owned by the gang, kept by the member, parked at the Hideout.
 pub fn gang_bikes(world: &mut World, gang: EntityId) {
-    if !world.config.assets.enabled || world.purse(Some(gang)) < world.config.shop.gang_buy_floor {
+    if !world.config.assets.enabled || !crate::systems::crew::gear_spare(world, gang, world.config.shop.gang_buy_floor)
+    {
         return;
     }
     let Some(h) = world.hideout_of(gang) else { return };

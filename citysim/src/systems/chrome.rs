@@ -333,8 +333,9 @@ pub fn gang_arms(world: &mut World, gang: EntityId) {
             assets::set_keeper(world, a, Some(m));
         }
     }
-    // Then one bought, while the treasury holds the floor.
-    if world.purse(Some(gang)) < world.config.chrome.gang_chrome_floor {
+    // Then one bought, while the treasury holds the floor (the pressure
+    // pass phase 5b: over the gang's commitments, one piece a week).
+    if !crate::systems::crew::gear_spare(world, gang, world.config.chrome.gang_chrome_floor) {
         return;
     }
     let Some(member) = strongest(world, Slot::Arms) else { return };

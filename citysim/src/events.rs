@@ -481,10 +481,15 @@ pub enum EventKind {
     /// business]` the owner's choice after (pays, reports, a rival's cover,
     /// sells or shuts); `[member, gang]` a member bailed out.
     Punished,
+    /// The pressure pass phase 5b (`systems::crew`): `[member, gang, place]`
+    /// a duty kept, missed or chosen against the shift, a court held or
+    /// failed, a rest day with the crew, a welcome back, the colours taken,
+    /// the talk inside; `[gang, buyer, members..]` a gang absorbed or folded.
+    Crew,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 231] = [
+    pub const ALL: [EventKind; 232] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -716,6 +721,7 @@ impl EventKind {
         EventKind::Loan,
         EventKind::Confronted,
         EventKind::Punished,
+        EventKind::Crew,
     ];
 }
 

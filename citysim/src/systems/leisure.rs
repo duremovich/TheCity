@@ -87,7 +87,7 @@ pub fn spendable(world: &World, id: EntityId) -> i64 {
 }
 
 /// The daily wage bill of everyone employed at `owner`'s staffed buildings.
-fn owner_payroll(world: &World, owner: Option<EntityId>) -> i64 {
+pub fn owner_payroll(world: &World, owner: Option<EntityId>) -> i64 {
     const STAFFED: [BuildingKind; 4] =
         [BuildingKind::Bar, BuildingKind::Clinic, BuildingKind::Garage, BuildingKind::Hotel];
     // Review fix (perf): one allocation-free pass over the staffed kinds'

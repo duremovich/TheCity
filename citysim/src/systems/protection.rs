@@ -503,6 +503,8 @@ pub fn daily(world: &mut World) {
             let row = ownership::jobs2_row(world);
             row.pr_bail += 1;
             row.pr_bail_coins += paid;
+            // The pressure pass phase 5b: the bail is the member's debt.
+            crate::systems::crew::note_bail(world, m, paid);
             law::release(world, m, false);
         }
     }

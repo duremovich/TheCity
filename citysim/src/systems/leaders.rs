@@ -456,6 +456,8 @@ pub fn court_done(world: &mut World, id: EntityId, target: Option<EntityId>) {
     let Some(gang) = world.gang_of(id) else { return };
     if target.is_some() && target == world.hideout_of(gang) && body_leader(world, gang) == Some(id) {
         ownership::jobs2_row(world).courts += 1;
+        // The pressure pass phase 5b: the summoned make the quorum.
+        crate::systems::crew::court_held(world, gang, id);
     }
 }
 

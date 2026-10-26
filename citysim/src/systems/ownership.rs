@@ -106,6 +106,8 @@ impl World {
     pub fn gang_credit(&mut self, gang: EntityId, coins: i64) {
         let Some(g) = self.comp_mut::<Gang>(gang) else { return };
         g.treasury += coins;
+        *self.probe.gang_in.entry("credit (raid, loot)".to_string()).or_insert(0) += coins;
+        *self.probe.gang_in_by.entry(gang).or_insert(0) += coins;
         if coins > 0 && self.config.assets.enabled {
             self.stats.current.gang_income += coins;
         }
@@ -524,6 +526,26 @@ fn transfer(
         *world.probe.treasury_out.entry(label(from)).or_insert(0) += moved;
     }
     let to_city = city(world, to);
+    // The pressure pass phase 5b: the gangs' books by flow (diagnostic).
+    let gang_kind = |w: &World, o: Option<EntityId>| o.is_some_and(|g| w.has::<Gang>(g));
+    if gang_kind(world, from) {
+        let to_kind = match owner_kind(world, to) {
+            OwnerKind::City => "city",
+            OwnerKind::Corp(_) => "corp",
+            OwnerKind::Gang(_) => "gang",
+            OwnerKind::Agent(_) => "agent",
+        };
+        *world.probe.gang_out.entry(format!("{flow:?} -> {to_kind}")).or_insert(0) += moved;
+        if let Some(g) = from {
+            *world.probe.gang_out_by.entry((g, format!("{flow:?} -> {to_kind}"))).or_insert(0) += moved;
+        }
+    }
+    if gang_kind(world, to) {
+        *world.probe.gang_in.entry(format!("{flow:?}")).or_insert(0) += moved;
+        if let Some(g) = to {
+            *world.probe.gang_in_by.entry(g).or_insert(0) += moved;
+        }
+    }
     world.purse_add(from, -moved);
     let tax = match to {
         Some(payee) if flow.taxed() => withhold(world, payee, moved),

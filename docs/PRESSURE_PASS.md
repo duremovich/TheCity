@@ -465,3 +465,88 @@ Each trade gets a body that walks to it, through the machinery it already had. N
   Collect, bail, the fronts' payroll and the daily purchases; untraced which dominates), so lending and front buying
   did not move. Nothing tuned.
 - No test (doctrine 2). `SAVE_VERSION` 70.
+
+### Phase 5b: consequence, the gang half (`systems/crew.rs`, `[crew]`)
+
+- **Raids write a result** (`crew::raid_result`, from `raid::brawl` and `raid::corp_brawl`): one `Raid` line with every
+  raider and defender as an actor (the winner, the coins and food taken or the till smashed, the wounded and the dead
+  by name, each gang's next order); the beaten hold a grudge on the other gang (`raid_grudge`), the losing leader on
+  the winner (`raid_leader_grudge`); a repelled raid is answered (the defenders' `retaliate_until`/`retaliate_on`, a
+  `Raided` shock, a rethink at once). The wounded carry the fight's `Lost` memory, so phase 2's care sends them to a
+  Clinic or (a gang member avoids the Clinic) the back room: no new path. A marcher reaching the door after the brawl
+  reads it (`late_to_raid`; V9's purist with a 16-min Brawl and no result). The rumour at the venue is the existing
+  `gossip::post_raid`. Deviation: no result line for a breach (BreakOut).
+- **Duty** (`crew::daily`, the LivingEarly midnight after `household`'s visits): the order posts today's duty: a raid
+  order every free member to the muster (kept at the door, `raid::resolve`; a muster that never marched is no miss);
+  Contest/Retaliate a guard at the Hideout (`guard_hour`); Expand and the street orders a watch at the nearest of the
+  gang's protected businesses, fronts and Hideout (`watch_hour`); LieLow none; `duty_share` of the members, at most
+  `duty_max`. A body leader summons `court_summons` members to court by name. Each is a `Visit` (`VisitWhy::Crew`),
+  set out by the trip's estimate, none past `duty_reach_ticks` from Home (most members live far from their Hideout on
+  the island: the gate keeps V9's 4-h walks out). A kept watch or guard pays `duty_pay` (`Flow::Tribute`, over
+  `pay_reserve`, less the bail owed). A member whose shift falls on the duty or the walk chooses (a keyed draw,
+  `choose_*` on loyalty, misery, rank, an unpaid gang): the gang strikes the shift (`misery::skip_for`: the absence
+  counts toward phase 1's firing), the shift is a missed duty. Misses take standing; `colours_misses` in
+  `miss_window_days` send the gang's toughest (`VisitWhy::Reckoning`, a person visit; met at the next midnight if the
+  walk never came off) to beat him out (`law::resolve_fight_mods`, `gang::leave`). Deviation: the leader's round takes
+  no member along (the round stays the leader's).
+- **Standing** is a ladder term (`gang::leader_scores` + `standing_w x standing`): kept duty, missed duty, time served.
+- **Court's quorum** (`crew::court_held`, from `leaders::court_done`): fewer than `court_quorum` of the summoned there
+  and the court fails with each name's reason (at work, in the cells, did not come); `fold_fails` in
+  `fold_window_days` and the gang takes the offer of its rival or the nearest bigger creedless gang (members and
+  treasury over, `absorb_offer` to the leader) on `w_absorb x (1.5 - pride)`, or folds (the treasury shared, the
+  members walk) on `w_fold x (0.5 + pride)`. Deviation: a creed gang is never absorbed (it folds; `faith::on_leave`
+  takes "folded" as no apostasy).
+- **Release and return**: `gang::on_member_arrested` notes the sentence (`crew::on_arrested`); daily a jailed member
+  with `talk_min_days` or more left talks once on `talk_p x (1 - loyalty)`: a report on a gang-mate (the leader first)
+  for Extortion with himself as the witness. On release (`gang::on_member_released`): one who talked (his flag, any
+  report he filed on a gang-mate since the sentence began, or phase 5a's hook `crew::note_talked`) gets the
+  reckoning; the rest walk to the Hideout (a `Crew` visit `welcome_after_hours` later) and are welcomed by the crew
+  there by name, the bail the gang paid (`protection::daily` -> `note_bail`) a debt kept from duty pay,
+  `served_standing` for a sentence served (the ladder: "made lieutenant"). A night in the cells is no homecoming.
+- **Rest days**: a free member with no shift today goes to the crew on `crew_p` at `crew_hour`, at the first within
+  reach of the gang's fronts (Expand and the street orders), the Hideout and the crew's local (the Bar of his home
+  district nearest the Hideout); none under LieLow. The line names who else is there (bodies, or the members whose
+  own visit there was kept).
+- **The treasury's sink, traced** (new `CoinProbe.gang_*`; `run --report` prints `#gang_flow` and `#gang_book` lines
+  to stderr, diagnostic): 20k island seed 42 x 30 on main, the gangs took in 16,451c and paid out 15,751c, 5,884c of
+  it in gear (an Arms implant for the strongest member every day the treasury touched `[chrome] gang_chrome_floor`
+  80, a bike at `gang_buy_floor`, a deck), then the Collect and stipends 2,040, fronts bought 1,647, bribes 1,350,
+  front wages 930, loans 692, bail 480. The fix is a budget, not a floor: gear only from what is left over the gang's
+  commitments (`crew::commitments`: a week of its duty slots' pay, two days of its fronts' payroll, `[protection]
+  bail_reserve`), one piece a week (`crew::gear_spare`, read by `chrome::gang_arms`, `vehicles::gang_bikes`,
+  `virt::gang_deck`). After (the same seed, one run): in 26,421c, out 20,408c; gear 948c; the coins go to fronts
+  (bought 2,806c, built 750c; front acquisitions, foundings and repossessions 7 -> 12 events), front wages 2,428c,
+  the Collect, stipends and duty pay 3,046c, bail 1,770c, loans 1,077c (14 gang loans; 11 on main, 692c). FINDING:
+  the median stays low because a third of the gangs earn almost nothing (end books 0-60c: no protection, no turf, a
+  Squat or Job order); the earners hold 150-730c.
+- **Counters** (new `Jobs2Cols` `crew_*`, `analyze_run.py` "crew, run totals"), 20k island seed 42 x 30 `--scaled`,
+  one run: raid results 4 (wounded named 5; raids called off at the door 16); duties posted 1,886, kept 790, missed
+  668; the shift chosen 438 times, the gang 291; duty pay 663c; colours lost 91; talked inside 28, talkers beaten out
+  13; welcomed back 65, promoted 19; courts with a quorum 93, failed 33; gangs absorbed 0, folded 2 (an earlier
+  build's run: absorbed 2, folded 3); rest-day nights with the crew 260; gang treasuries at d30 median 75, max 1,022
+  (main: 48, 235).
+- **Shadow** (20k island seed 42 d21-d27, picks gang_leader:3, gang_member:4, purist:2, runner:2, dealer:2, raider:4,
+  then raider:12; the shadow tool gains a `raider` pick: a member of a gang under a marching order): "Volt Tanaka
+  stood guard at Hideout#4463 for The Hollow with Zoe Santoro, Beatrix Tanner, Tank Quarry, Vale Sato (paid 0c, 3c
+  kept against his bail)"; "Roderick Reyes welcomed back to The Ash Rats at Hideout#4478 by Casimir Singh, Vale
+  Vasquez, Dorian Singh, Quinn Nightingale; made lieutenant"; "Kestrel Wozniak's court at Hideout#4480 failed: nobody
+  came (summoned Tobin Sallow (at work); 3 failed in 7 days)", then "The Iron Crows could not muster and took The
+  Static Rats's offer: 4 members and 66c went over, 20c to Kestrel Wozniak"; "Taz Northcott talked in the cells: named
+  Lavinia Bartlett of The Drowned Choir" (d22), released d26, "is out of The Drowned Choir (talked to the law: thrown
+  out, beaten out by Matthias Hallow)"; "Jinx Penhallow chose the shift as Recycler Tech over The Drowned Choir 8's
+  court summons" twice, then "is out of The Drowned Choir 8 (lost the colours: 3 duties missed, beaten out by Odile
+  Nakamura)"; "Casimir Singh spent a day off with the crew at Hideout#4478: Rue Zhou, Corwin Brandt, Jasper
+  Coldwater there". No pick raided in the window (two raid plans, one a 417-min walk to the door); the raid result
+  from an earlier build's counter run (the same code but the hash purposes): "Raid on Nutrix 2's Street Market#4427: The Neon Wolves won (5 raiders, 1
+  defenders); the till smashed, 500c and 274 food taken; wounded: Rex Carrow, Mags Sallow; The Neon Wolves next:
+  Harvest". Reads wrong (next pass): every corp raid in 30 days hits the same Street Market#4427 and takes the 500c
+  cap; raids mostly die on the walk (16 called off to 4 fought); the colours go fast (91 in 30 days: three chosen
+  shifts in ten days is enough, and the daily court summons is most of the misses); a reckoning sent at midnight
+  rarely walks (met at the next midnight, "caught up with"); a summoned member who arrives after court ends reads
+  "answered"; members far from the Hideout get no duty at all (the reach gate), so a gang spread over the island is a
+  gang on paper.
+- `person::probe_evicted_worker_rehouses_on_the_first_rent` goes red with `[crew]` on (green with it off): no crew
+  line touches the Farmer; another city around her, she holds 22c at d5 against the 21c deposit, then spends 9c on an
+  Unwind and 9c on a Capsule Hotel night and is on 0c at the rehouse day. A probe whose purse premise a butterfly
+  breaks (as its Shop cooldown already guards); left for the fix round.
+- No test (doctrine 2). `SAVE_VERSION` 71.

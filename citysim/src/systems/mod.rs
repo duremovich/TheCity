@@ -41,6 +41,7 @@ pub mod contracts;
 pub mod corp_brain;
 pub mod corps;
 pub mod creeds;
+pub mod crew;
 pub mod customers;
 pub mod demography;
 pub mod diet;

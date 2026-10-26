@@ -2281,7 +2281,8 @@ pub fn gang_deck(world: &mut World, gang: EntityId) {
     }
     let floor = world.config.decks.gang_deck_floor;
     let treasury = world.purse(Some(gang));
-    if treasury < floor {
+    // The pressure pass phase 5b: over the gang's commitments, one a week.
+    if !crate::systems::crew::gear_spare(world, gang, floor) {
         return;
     }
     let owned = crate::systems::assets::assets_of(world, Some(gang))

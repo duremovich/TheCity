@@ -4910,3 +4910,47 @@ stipend_reserve = 150              # ... and comes out of the treasury above thi
                                    # under it pays nobody daily and its unpaid members drift off ([living] desist_unpaid)
 broker_visits = true               # OPEN-157: a contract's party the Fixer cannot meet now (no server on duty, the body
                                    # elsewhere) walks there at its next open hour (a Broker visit) instead of being missed
+
+# The pressure pass phase 5b (docs/PRESSURE_PASS.md § Phase 5, the gang half; systems/crew.rs): raids write a result,
+# gang duty against the day job, Court's quorum and the gang that folds, release and return, the crew's rest day, and
+# the treasury's sink (gear bought over the gang's commitments, one piece a week). Placeholders (no tuning yet).
+[crew]
+raid_grudge = 0.3                  # a raid's result: a beaten defender's grudge on the raiding gang (a beaten raider's on
+                                   # the defenders') ...
+raid_leader_grudge = 0.5           # ... the losing side's leader's on the winning gang ...
+repelled_retaliate_days = 3        # ... and a repelled raid is answered: the defenders may retaliate this many days
+duty_share = 0.3                   # duty: a gang posts this share of its free members a day to its order's duty (a watch on
+duty_max = 4                       # held ground under Expand, a guard at the Hideout under Contest/Retaliate), at least one,
+                                   # at most duty_max; a raid order calls every member to the muster; LieLow none
+watch_hour = 18                    # the watch's hour (a protected business, a front, else the Hideout) ...
+guard_hour = 21                    # ... the Hideout guard's
+duty_reach_ticks = 180             # a duty place past this travel from the member's Home is not posted to him
+duty_pay = 3                       # a kept watch or guard pays this from the treasury (less the bail he owes) ...
+pay_reserve = 30                   # ... out of the treasury above this
+duty_urgency = 0.85                # the duty's (and the reckoning's) Visit urgency ([protection] punish_urgency 0.9)
+choose_base = 0.3                  # a member whose shift falls on the duty chooses the gang on choose_base ...
+choose_loyalty = 0.6               # ... + this x (loyalty - 0.5) ...
+choose_misery = 0.5                # ... + this x misery ([misery]) ...
+choose_rank = 0.15                 # ... + this for a lieutenant ...
+choose_unpaid = 0.15               # ... - this when the gang cannot pay, clamped 0.05..0.95; the gang's choice skips the
+                                   # shift (misery's absence count: the firing); the shift's is a missed duty
+standing_w = 0.2                   # standing on the ladder: gang::leader_scores adds this x standing (loyalty + days/100) ...
+kept_standing = 0.1                # ... a kept duty adds this ...
+miss_standing = 0.2                # ... a missed one takes this ...
+served_standing = 1.0              # ... a sentence served without talking adds this (a new rank: 20 days in the gang)
+colours_misses = 3                 # missed duties in miss_window_days that cost the colours: the gang's toughest goes to
+miss_window_days = 10              # him and beats him out
+beat_kill_mult = 0.2               # the reckoning's beating kills on [crime] fight_death_p x this
+court_summons = 3                  # court: the leader holding court ([leaders]) summons this many members by name ...
+court_quorum = 1                   # ... and fewer of them there than this fails the court, with the reasons
+fold_fails = 3                     # failed courts in fold_window_days: the gang cannot muster and takes a rival's offer
+fold_window_days = 7               # (absorbed: members and treasury, absorb_offer to the leader) on w_absorb x
+absorb_offer = 20                  # (1.5 - pride), or folds (the treasury shared, the members walk) on w_fold x
+w_absorb = 1.0                     # (0.5 + pride); a creed gang folds
+w_fold = 0.6
+talk_p = 0.3                       # a jailed member with talk_min_days or more left talks once a sentence on talk_p x
+talk_min_days = 3                  # (1 - loyalty): a report naming a gang-mate; on release he is beaten out
+bail_debt = true                   # the bail the gang paid is the member's debt, kept from his duty pay
+welcome_after_hours = 1            # a released member walks to the Hideout this many hours after (past 21:00 met at once)
+crew_p = 0.6                       # rest days: a free member with no shift today goes to the crew on this, at crew_hour
+crew_hour = 19                     # (the Hideout under a fighting order, the gang's own venue under Expand, none LieLow)

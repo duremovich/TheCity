@@ -205,6 +205,16 @@ pub struct CoinProbe {
     /// both tiers alike (`classpay::status_daily`'s night out). `calibrate`
     /// learns `p_venue` without them. Diagnostic only.
     pub venue_unmirrored: std::collections::BTreeMap<String, u64>,
+    /// The pressure pass phase 5b: every gang treasury's inflows and outflows
+    /// by flow (`ownership::transfer`, `World::gang_credit`, the direct
+    /// writes), and by the payee's kind for the outflows. Diagnostic only
+    /// (`citysim-cli run --report` prints it at the end as `#gang_flow`).
+    pub gang_in: std::collections::BTreeMap<String, i64>,
+    pub gang_out: std::collections::BTreeMap<String, i64>,
+    /// Each gang's inflows, all flows together (the same diagnostic).
+    pub gang_in_by: std::collections::BTreeMap<crate::entity::EntityId, i64>,
+    /// Each gang's outflows by flow (the same diagnostic).
+    pub gang_out_by: std::collections::BTreeMap<(crate::entity::EntityId, String), i64>,
 }
 
 // ---------------------------------------------------------------------------

@@ -181,7 +181,8 @@ pub fn on_leave(world: &mut World, id: EntityId, gang: EntityId, reason: &str) {
     world.jobs2.faith.followers.remove(&id);
     let Some(i) = cult_creed(world, gang) else { return };
     let w = row(world, i).map_or(0.0, |r| r.apostasy_w);
-    if w <= 0.0 || reason == "expelled" || !crate::systems::law::living(world, id) {
+    // The pressure pass phase 5b: a cult that folded has no apostates.
+    if w <= 0.0 || reason == "expelled" || reason == "folded" || !crate::systems::law::living(world, id) {
         return;
     }
     let Some(leader) = world.comp::<Gang>(gang).and_then(|g| g.leader).filter(|&l| l != id) else { return };
