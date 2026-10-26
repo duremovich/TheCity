@@ -177,8 +177,18 @@ pub fn fought(world: &mut World, winner: EntityId, loser: EntityId) {
 /// Interaction drift (Chat, Drink together, Flirt, each hour of co-work;
 /// co-jail drifts in four-hour steps): `affinity += 0.05 × m`, `trust += 0.02`.
 pub fn interacted(world: &mut World, a: EntityId, b: EntityId) {
-    let m = similarity_mult(world, a, b);
-    let step = world.config.social.affinity_per_hour * m;
+    let step = interaction_step(world, a, b);
+    interacted_at(world, a, b, step);
+}
+
+/// [`interacted`]'s affinity step for the pair: `affinity_per_hour × m`
+/// (reads the two temperaments only).
+pub fn interaction_step(world: &World, a: EntityId, b: EntityId) -> f32 {
+    world.config.social.affinity_per_hour * similarity_mult(world, a, b)
+}
+
+/// [`interacted`]'s write, its step read first by [`interaction_step`].
+pub fn interacted_at(world: &mut World, a: EntityId, b: EntityId, step: f32) {
     adjust(world, a, b, step, 0.02);
 }
 

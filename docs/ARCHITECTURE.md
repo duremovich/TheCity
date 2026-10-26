@@ -158,8 +158,14 @@ not agents at all.
   held_prisoners`, `lod::is_held`).
 - **Statistical**: no think, plan or exec. `lod::run_statistical` runs each agent once an hour on its slot tick and
   replaces the brain with rolls from a `StatRow`: `stat_eat`, `stat_work`, `stat_earn`, `stat_theft`, `stat_flirt`,
-  `stat_social`, `stat_rolls` (robbed, beaten, killed: each opens a `Hole`, section 10), etc. All draws from the
-  agent's own stream (`SimRng::agent`).
+  `stat_social`, `stat_rolls` (robbed, beaten, killed: each opens a `Hole`, section 10), etc. The draws are the
+  agent's own stream (`SimRng::agent`), pure hashes (`attend_roll`, the meal hash) and keyed streams; one roll is
+  the world stream's (`social::propose`, from `stat_flirt`). The hour is one serial loop in id order at every
+  `[perf] threads` (the perf pass phase 9): what an agent's rolls decide reads what earlier agents wrote that tick
+  (a Market's stock and price, a pantry, a passer's wallet, the edges), so it does not split into rolls on a pool
+  and writes after. Inside an agent's hour the co-work bond is two steps: every mate's step and edge read first
+  (`social::interaction_step`; the lookups overlap their cache misses), then the drifts written in mate order
+  (`social::interacted_at`).
 - **The policy** (`systems/stat_policy.rs`): `[lod] policy = "table"` (default; `assets/stat_table.toml`, 24 rows by
   phase x lawfulness bucket x hunger bucket, loaded by `world::load_stat_table`) or `"mlp"` (experiment). The policy
   changes only the probabilities, never the order of the rolls.
