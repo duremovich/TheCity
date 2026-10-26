@@ -83,6 +83,16 @@ What happens next, so a started story is picked up:
 
 Shadow: gang_member, gang_leader, cultist, purist, buyer, gun, guard, and a jailed pick.
 
+### Phase 6: a business under water (F3's hand-back)
+
+A person-owned venue whose till cannot meet its wages today pays short until the staff walk out (152 unpaid
+walkouts at bars in 30 days at 20k). Make failure a story with choices: the owner cuts hours or lets staff go,
+borrows (a loan shark, a gang, a corp), sells (to a corp, or to a gang as a front that launders and recruits), or
+closes and the building goes vacant for the next founder. A walked-out worker can come back to confront the owner
+over the owed wages (a scene, a fight past a grudge threshold, or a report).
+
+Shadow: an owner under water (cook, worker_friday as owner, a bar owner), their staff, a gang leader buying.
+
 ### Fix phases from Shadow V9 (`SHADOW_V9.md`)
 
 - **F1, distance at 100k** (after phase 4): legs of 4-11 h, same-district El rides of 4-9 h, the builder's site
