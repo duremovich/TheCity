@@ -105,6 +105,76 @@ Shadow: an owner under water (cook, worker_friday as owner, a bar owner), their 
 - **F3, quits and wages** (after phase 1): "quit unpaid" with money in hand, owners quitting their own venue,
   partial wages, same-minute Quit and Hire.
 
+### Round 2 from Shadow V10 (`SHADOW_V10.md`, opened 2026-10-26)
+
+Dylan's calls (2026-10-26): this round before the map re-import (`OPEN-220` waits on `OPEN-204`); fares get a
+ladder, never a cell; gang attrition is judged after the stalls are fixed, not softened first; coders run in waves.
+Wave 1 is R1-R4 at once; wave 2 (R5, R6a, R6b) starts once R2 has merged, since a stalled walk may be the pace bug.
+Iterate at 20k (`--population 20000 --map assets/maps/isle_m_k2.txt`); the V10 repro picks are 100k seed 42 days
+21-27 (`target/shadow_v10/`), read there only when 20k cannot show the case.
+
+#### R1, petty law: the fare (`OPEN-213`)
+
+Fare evasion is never a cell. A dodger caught on the El pays a fine on the spot if the wallet holds it; if not, the
+El's guard (an on-duty guard or transit body at the stop; with none, skip the rung and say so) beats them: a wound,
+a grudge, a memory. A repeat dodger inside a window is banned from the El and walks; a ban broken is caught again
+and beaten. Jail is for what makes story (assault, theft past a threshold, the hit, the gang). Release puts the body
+on the street by the cell, not a far one. The Statistical tier takes the same rule, coarse. Numbers in a new
+`[fares]` section (or `[law]`'s neighbours). Shadow: scav, raider, pimp, jailed, guard. Moves a number: jailed mean
+and arrests for fares, 20k seed 42 x 30, before and after.
+
+#### R2, walking pace (`OPEN-215`)
+
+Same-district walks run well under a tile a minute (`joytoy_103306 d23` 384 min for 149 tiles, `office_worker_14234`
+383 for 176). Diagnose before fixing: path cost (detours, blocked or costed tiles), pace (the step's speed), or the
+executor (stalls, re-plans, waits booked as walking). Fix the cause. Then: a guard's escort runs as legs, not one
+935-min action (`guard_26314`); guard beats are dealt near the guard's home (F1's leftover); find why F3's "took a
+post nearer home" never fires for a 997-min commute. The execs' far Hqs are the map (`OPEN-182`), not this phase.
+Shadow: joytoy, office_worker, loader, guard, courier. Moves a number: minutes per tile walked (or the walk legs over
+120 min), 20k seed 42, before and after.
+
+#### R3, the wounded and the sick (`OPEN-216`)
+
+A wounded body acts and is acted on: the bleeding seek a patch (clinic, black doc, a friend), and the people at hand
+(a co-worker, a friend, a guard on the beat) help or carry them; nobody bleeds three hours with no goal
+(`guard_8327 d26`). A diagnosed patient short of the fee has choices: care on credit (the clinic books a debt), a
+pawn, the black doc's cheaper back room, begging for it (`sick_70955`, `sick_61720`). The treatment fee reaches the
+doctor's or the clinic's till. A sick worker's post is covered (a co-worker's extra shift, a shape-up hire) or the
+employer counts the absence as phase 1's do. A diagnosed founder keeps the treatment money out of a founding.
+Sump back rooms see patients. Shadow: sick, guard, black_doc, orderly, ripperdoc, bouncer.
+
+#### R4, the friendship flip and the diary's noise (`OPEN-218`, `OPEN-219`)
+
+Find and fix why 51 friendships flip to enemy in one minute with no event line, followed by seven assaults on
+strangers in two hours (`gun_28759 d21 14:46`, 100k seed 42), and the gossip line with winner and loser swapped.
+Noise: the super's notices fold into one line a round with a count; zero-valence "called on" memories are not
+written; phase 5a's "X saw Y watching" is dropped or folded; the shiftless rest day (weekday 6) is marked in the
+diary; a Camp child's parent on a shift over the 10-20 window can answer, and a Punish or Hurt visit no longer
+overwrites a Camp one in the single slot. Shadow: gun, super, a camp child's parent, and a 5a witness.
+
+#### R5, gang verbs that stall (`OPEN-214`), wave 2
+
+Raids that muster lose to Sleep (0 brawls in V10's gang diaries); JoinGang walks of 300+ min never arrive
+(`jailed_93738` 11 goals, 0 joins); a try-out ends with no accepted or refused line; Scavenge loops a 1-min step
+failing `PreconditionLost` (52, 0 finds); "unpaid: the gang is broke" every duty night. Then judge 5b's attrition
+(91 colours lost in 30 days at 20k, mostly missed court summons): print it before and after with the reasons; the
+duty rule changes only if it is still silly once the walks arrive. Shadow: raider, gang_member, gang_leader, scav,
+jailed, homeless.
+
+#### R6a, the trades' verbs I (`OPEN-217`), wave 2
+
+On a followed body: the cabbie drives fares; the pimp collects; the fighter has bouts (and bettors); the madam and
+the joytoy have bookings. Shadow: cabbie, pimp, fighter, madam, joytoy, street_worker, and a customer of each.
+
+#### R6b, the trades' verbs II (`OPEN-217`, `OPEN-207`), wave 2
+
+The gun hunts (a contract taken and walked); the teacher has pupils; the reporter writes a story from what happened
+on the beat; the CEO's day is the Hq, not a market stall, and a landlord corp's exec has an office or a round
+(`OPEN-207`); gangs buy guns from each other when their treasuries allow. Shadow: gun, teacher, reporter, ceo, exec,
+arms_dealer, gang_leader.
+
+Then Shadow V11 in V10's window (100k, seed 42, days 21-27, two per archetype), Sonnet critics, the synthesis.
+
 ## Implemented: deviations
 
 (Per phase, as they land.)
