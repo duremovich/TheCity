@@ -1664,6 +1664,11 @@ beg_cool_hours = 1                  # ... for this many hours
 # No eviction. The Spire's beds are checked at seed against execs x exec_home_spare (printed).
 exec_home_tier = 2
 exec_home_spare = 1.5
+# The perf pass phase 10 (docs/ISLAND_PASS.md I9, a district label is not space; placeholder): an exec's Home stands
+# within exec_home_reach tiles (Manhattan, door to door) of his corp's Hq. The move above takes the free Home of
+# exec_home_tier nearest the Hq (not the emptiest), and an exec housed at the tier but further than this moves to a
+# nearer one within it when one has room. 0: off (the base pick); CITYSIM_EXEC_HOME_OFF=1 while the pass is in flight.
+exec_home_reach = 40
 
 # ---------------------------------------------------------------------------
 # Life pass L2: the living city (docs/LIFE_L2.md; plan ~/.claude/plans/life-l2.md). Every key is a

@@ -211,13 +211,19 @@ fn test_map_text_round_trips() {
             in_flight: false,
         }],
         comments: vec!["a test".into()],
-        extra: vec![citysim::map::BuildingExtra { flats: Some(12), storeys: Some(9) }],
+        extra: vec![citysim::map::BuildingExtra {
+            flats: Some(12),
+            storeys: Some(9),
+            lot: Some("sb00_01_r0c5_p0_l0".into()),
+        }],
     };
     for rle in [false, true] {
         let m = Map::parse(&parts.to_text(rle));
         assert_eq!(m.buildings.len(), 1);
         assert_eq!((m.buildings[0].floors, m.buildings[0].tier, m.buildings[0].door), (3, 0, TilePos::new(3, 3)));
         assert_eq!((m.buildings[0].flats, m.buildings[0].storeys), (Some(12), Some(9)));
+        // The perf pass phase 10 (OPEN-182): the door's lot round-trips.
+        assert_eq!(m.buildings[0].lot.as_deref(), Some("sb00_01_r0c5_p0_l0"));
         assert_eq!(m.tile(11, 8), TileKind::Mountain);
         assert!(m.walkable(TilePos::new(11, 8)));
         assert_eq!(m.districts, parts.districts);
@@ -266,7 +272,10 @@ fn test_old_map_save_shape_loads() {
 /// The broken-system signals: fewer household slots than 20,000 residents
 /// need (the k = 4 snapshot for 5,000 left ~8,000 homeless at 20k), no Spire
 /// Lot (the megacorps' Hqs never stand), a district of households without
-/// a Market, a door off the street network.
+/// a Market, a door off the street network. The perf pass phase 10 (the
+/// P9 re-import, OPEN-182): a venue stands on its own lot: every building
+/// but a piece (a cut holding no lot centre, a Home or a Lot) names its
+/// door's lot (`lot=`), and no two name the same one.
 #[test]
 fn test_graphics_import_20k_holds_20k() {
     let cfg = Config::load();
@@ -290,6 +299,15 @@ fn test_graphics_import_20k_holds_20k() {
     }
     assert_eq!(m.count_kind(BuildingKind::Farm), 120);
     assert_eq!(unreachable_doors(&m), 0, "every door on one street network");
+    let mut named = std::collections::BTreeSet::new();
+    for b in &m.buildings {
+        match b.lot.as_deref() {
+            Some(lot) => assert!(named.insert(lot), "{:?} at {:?} shares its lot {lot}", b.kind, b.door),
+            None => assert!(matches!(b.kind, BuildingKind::Home | BuildingKind::Lot), "{:?} names no lot", b.kind),
+        }
+    }
+    let pieces = m.buildings.len() - named.len();
+    assert!(pieces * 50 < m.buildings.len(), "{pieces} of {} buildings name no lot", m.buildings.len());
 }
 
 /// The committed TheCityGraphics import (`assets/maps/isle_m_k4.txt`: the

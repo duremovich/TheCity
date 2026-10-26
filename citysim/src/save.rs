@@ -340,7 +340,12 @@ use crate::world::World;
 /// 67 (the island fix round F2, OPEN-189, OPEN-191, OPEN-193):
 /// `Config.beds` (`[beds]`, written only when set; serde default `None`).
 /// An off save is byte-identical to version 66's.
-pub const SAVE_VERSION: u8 = 67;
+/// 68 (the perf pass phase 10, the P9 re-import, OPEN-182): `MapBuilding.lot`
+/// (a map's `lot=`, the source lot under the door, written only when set)
+/// and `[life] exec_home_reach` (ISLAND_PASS I9, written only when set): an
+/// island save carries its venues' lots. A save of a map without `lot=`
+/// with the reach off is byte-identical to version 67's.
+pub const SAVE_VERSION: u8 = 68;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

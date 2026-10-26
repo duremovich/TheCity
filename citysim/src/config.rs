@@ -8300,6 +8300,15 @@ pub struct LifeCfg {
     /// exec_home_spare` beds and the result printed (never an eviction).
     #[serde(skip_serializing_if = "is_zero_f32_cfg")]
     pub exec_home_spare: f32,
+    /// The perf pass phase 10 (ISLAND_PASS I9, a label is not space): an
+    /// exec's Home stands within this many tiles (Manhattan, door to door)
+    /// of his corp's Hq (`life::hq_of`). `life::house_exec` moves an exec
+    /// housed under `exec_home_tier` into the free Home of that tier nearest
+    /// the Hq (not the emptiest), and one housed at the tier but further
+    /// than this into a nearer one within it when one has room. 0 is off (the
+    /// base pick) and not written; `CITYSIM_EXEC_HOME_OFF=1` while in flight.
+    #[serde(default, skip_serializing_if = "is_zero_u16_cfg")]
+    pub exec_home_reach: u16,
 }
 
 impl Default for LifeCfg {
@@ -8409,6 +8418,7 @@ impl Default for LifeCfg {
             beg_cool_hours: 1,
             exec_home_tier: 0,
             exec_home_spare: 0.0,
+            exec_home_reach: 0,
         }
     }
 }
@@ -9002,6 +9012,11 @@ impl Config {
         if std::env::var("CITYSIM_DWELL_OFF").is_ok_and(|v| v == "1") {
             cfg.gangs.dwell_hold = false;
         }
+        // The perf pass phase 10 (I9): execs' homes beside their Hq, the
+        // switch in flight (doctrine 6), retired at the pass close.
+        if std::env::var("CITYSIM_EXEC_HOME_OFF").is_ok_and(|v| v == "1") {
+            cfg.life.exec_home_reach = 0;
+        }
         // The perf pass phase 7b (R8): the midnight stagger's switch in
         // flight (doctrine 6), retired at the pass close. The last slot
         // stays inside the night's first hour.
@@ -9053,6 +9068,7 @@ impl Config {
         }
         if cfg.life.exec_home_tier == 0 {
             cfg.life.exec_home_spare = 0.0;
+            cfg.life.exec_home_reach = 0;
         }
         if !cfg.household.enabled {
             cfg.household = HouseholdCfg::default();

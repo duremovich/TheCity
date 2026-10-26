@@ -71,6 +71,9 @@ the shipped map and the generator write none of S3c's, so the 2k city is byte-id
   `MapBuilding` (`flats`, `storeys`, saved when present) and read by nothing yet: `flats` is the source city's
   flat count in a Home (their estimate), for S5's Ambient tier; `storeys` its storeys (the members' mean). An
   unknown key fails the load.
+- **The perf pass phase 10 (OPEN-182):** `lot=<id>` after them, the `lots.json` id of the lot the door stands on
+  (MAP_RECONCILE "TheCity" 2: the view tells which of a multi-lot cut's graphics buildings is the Bar). Carried on
+  `MapBuilding.lot` (saved when present, SAVE_VERSION 68), read by no system.
 
 ## Mapping table
 
@@ -93,6 +96,7 @@ the shipped map and the generator write none of S3c's, so the 2k city is byte-id
 | **S3c** `lots_sim.json` `floors` | `storeys=` | the members' mean; Homes' household slots come from flats (below), workplaces keep one floor |
 | **S3c** `lots_sim.json` `use`, `ground`, `civic` | the cut's use | a member's named civic site, else its members' most common use; "workshop" when half its members' ground floor is one |
 | **S3c** `lots_sim.json` `doors_m[].out` | the door | the wall tile (not a corner) whose outside tile is an `out` tile and Road, else the road-facing wall tile nearest any `out` tile, else the S3b side search; a door whose outside tile a later whole-block cut built over moves to the nearest wall tile still facing open Road |
+| `lots.json` `id` (the perf pass phase 10) | `lot=` | of the cut's lots (its members; a cut holding no lot centre: its part's), the one whose rect is nearest the door tile's centre (0 inside), ties the lower id. A cut holding no lot centre (a piece of a lot another cut holds: 70 at k = 2, 367 at k = 1) is kept a Home and dealt no venue and no Lot, so every venue and Lot names a lot no other cut but such a piece names |
 | **S3c** `lots_sim.json` `flats` | Home floor slots, `flats=` | `ceil(N / 5)` households dealt over the Homes by their flats (largest remainder), at least one slot a Home; `World::new` deals households by stride over the slots, so a tower holds its flats' share |
 | S3b `lots.json` `floors` `[lo, hi]` + `seed` | floors | `lo + seed % (hi - lo + 1)` (the district's range, not the lot's massing) |
 | S3b `bldg/<lot>/sim_layout.toml` | floors, flats, shop units, the door | storeys (tier not `roof`); units with a `living` room; units with a `shop`; `door_tiles` on one-lot cuts facing N or S |

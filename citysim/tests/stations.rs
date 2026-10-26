@@ -197,7 +197,9 @@ fn test_van_transfers_the_long_sentence() {
 
 /// § 5.3: a seeded exec lives at `exec_home_tier` or better when the Spire
 /// has room; with none free, an exec housed low stays put and nobody is
-/// evicted; a bed freed lets him move up at the next pass.
+/// evicted; a bed freed lets him move up at the next pass. The perf pass
+/// phase 10 (ISLAND_PASS I9, `[life] exec_home_reach`): into the free Home
+/// of the tier nearest his corp's Hq, not the emptiest.
 #[test]
 fn test_exec_lives_in_the_spire_without_evictions() {
     let mut w = common::world();
@@ -247,8 +249,23 @@ fn test_exec_lives_in_the_spire_without_evictions() {
             b.capacity = c;
         }
     }
+    // I9: the free tier Home nearest his Hq, door to door (then the id).
+    assert!(w.config.life.exec_home_reach > 0, "the shipped config's reach");
+    let hq = life::exec_hq_door(&w, e).expect("his corp's Hq");
+    let nearest = spire
+        .iter()
+        .copied()
+        .filter(|&h| {
+            w.comp::<Building>(h)
+                .is_some_and(|b| !b.demolished && !b.derelict && w.residents_of(h).len() < usize::from(b.capacity))
+                && citysim::systems::company::open_to_all(&w, h)
+        })
+        .min_by_key(|&h| (w.comp::<Building>(h).unwrap().door.manhattan(hq), h))
+        .expect("a free Spire Home");
     life::spire_homes(&mut w);
     assert!(tier_of(&w, e) >= tier, "a free Spire bed: he moves up");
+    let home = w.comp::<Household>(e).and_then(|h| h.home);
+    assert_eq!(home, Some(nearest), "the free Spire Home nearest his Hq");
 }
 
 /// The off cities (stations off, Spire homes off, both): three days write
@@ -260,11 +277,13 @@ fn test_off_cities_write_nothing() {
         |c| {
             c.life.exec_home_tier = 0;
             c.life.exec_home_spare = 0.0;
+            c.life.exec_home_reach = 0;
         },
         |c| {
             c.strip_stations();
             c.life.exec_home_tier = 0;
             c.life.exec_home_spare = 0.0;
+            c.life.exec_home_reach = 0;
         },
     ];
     // The three cities side by side (the change tier's budget, 2026-10-19).
