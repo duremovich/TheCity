@@ -29,6 +29,12 @@
 //!   source city's own flat count and storeys (an import's; the sim deals a
 //!   Home's households by its floors field and only carries these).
 //!
+//! The perf pass phase 10 (the P9 re-import, OPEN-182), also optional:
+//! - after the floors field, `lot=<id>`: the source city's lot the
+//!   building's door stands on (TheCityGraphics' `lots.json` id), so the
+//!   view can tell which of a multi-lot cut's buildings is the Bar or the
+//!   Market. The sim carries it and never reads it (SAVE_VERSION 68).
+//!
 //! A save packs the grids as run-length strings (SAVE_VERSION 13); an older
 //! save's one-enum-per-tile lists still load.
 
@@ -58,13 +64,19 @@ pub struct MapBuilding {
     /// Scale S3c: the source city's storeys (`storeys=`); `None` without.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub storeys: Option<u16>,
+    /// The perf pass phase 10 (OPEN-182): the source city's lot under the
+    /// door (`lot=`); `None` without. Carried for the view, never read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lot: Option<String>,
 }
 
 /// Scale S3c: a `B` line's optional `key=value` fields ([`MapText::extra`]).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BuildingExtra {
     pub flats: Option<u32>,
     pub storeys: Option<u16>,
+    /// The perf pass phase 10: the door's lot id (`lot=`).
+    pub lot: Option<String>,
 }
 
 /// Scale S3b: one `D <zone> <x_from> <x_to> <name...>` line, a `[districts]`
@@ -371,7 +383,7 @@ pub struct MapText {
     /// `#` lines written before the buildings.
     pub comments: Vec<String>,
     /// Scale S3c: per building (aligned with `buildings`; empty for none),
-    /// the optional `flats=` / `storeys=` fields.
+    /// the optional `flats=` / `storeys=` / `lot=` fields.
     pub extra: Vec<BuildingExtra>,
 }
 
@@ -402,7 +414,7 @@ impl MapText {
         }
         for (i, (kind, r, tier, floors)) in self.buildings.iter().enumerate() {
             out.push_str(&format!("B {kind:?} {} {} {} {} {tier}", r.x, r.y, r.w, r.h));
-            let extra = self.extra.get(i).copied().unwrap_or_default();
+            let extra = self.extra.get(i).cloned().unwrap_or_default();
             if *floors > 1 || extra != BuildingExtra::default() {
                 out.push_str(&format!(" {floors}"));
             }
@@ -411,6 +423,9 @@ impl MapText {
             }
             if let Some(n) = extra.storeys {
                 out.push_str(&format!(" storeys={n}"));
+            }
+            if let Some(id) = &extra.lot {
+                out.push_str(&format!(" lot={id}"));
             }
             out.push('\n');
         }
@@ -569,18 +584,19 @@ impl Map {
                     // Jobs and room J6: the optional eighth field.
                     let floors = parts.get(7).map_or(1, |s| num(s));
                     assert!(floors >= 1, "line {}: floors must be at least 1", n + 1);
-                    let (mut flats, mut storeys) = (None, None);
+                    let (mut flats, mut storeys, mut lot) = (None, None, None);
                     for kv in keyed {
                         let (k, v) = kv.split_once('=').unwrap_or((kv, ""));
                         let bad = || -> ! { panic!("line {}: bad field {kv}", n + 1) };
                         match k {
                             "flats" => flats = Some(v.parse().unwrap_or_else(|_| bad())),
                             "storeys" => storeys = Some(v.parse().unwrap_or_else(|_| bad())),
-                            _ => panic!("line {}: unknown field {k:?} (flats, storeys)", n + 1),
+                            "lot" if !v.is_empty() => lot = Some(v.to_string()),
+                            _ => panic!("line {}: unknown field {k:?} (flats, storeys, lot)", n + 1),
                         }
                     }
                     let door = map.validate_building(kind, rect);
-                    map.buildings.push(MapBuilding { kind, rect, door, tier, floors, flats, storeys });
+                    map.buildings.push(MapBuilding { kind, rect, door, tier, floors, flats, storeys, lot });
                 }
             }
             n += 1;

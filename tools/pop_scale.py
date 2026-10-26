@@ -19,7 +19,8 @@ kept in the run's stderr log for `--prof-table`.
 
   python tools/pop_scale.py --prof-table <dir> --days D --prof-from F   # PROF sites x size, ms/day
 
-A map per size (the committed isle_m_k2 houses only 31,645):
+The gate's 100k map is committed (the perf pass phase 10, the P9 re-import): --map assets/maps/isle_m_k2_100k.txt.
+A map per size (the committed isle_m_k2 houses only 28,950):
   citysim-cli import-graphics --src D:/TheCityGraphics/assets/city/isle_m/out --out <dir>/isle_N.txt \
       --downsample 2 --residents N --lines assets/maps/isle_m_k2_lines.txt
 then --map "<dir>/isle_{n}.txt".

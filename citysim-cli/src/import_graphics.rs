@@ -94,6 +94,10 @@ pub struct Report {
     pub doors_searched: usize,
     /// Doors moved off an outside tile a later cut built over.
     pub doors_moved: usize,
+    /// The perf pass phase 10: `B` lines that name their door's lot (`lot=`).
+    pub lots_named: usize,
+    /// The perf pass phase 10: cuts holding no lot centre (no `lot=`, no venue).
+    pub pieces: usize,
     /// S3c: flats in the Homes (their estimate) and Home floor slots capped at 255.
     pub home_flats: u64,
     pub slots_capped: usize,
@@ -204,8 +208,8 @@ impl Report {
             self.slots_capped
         );
         println!(
-            "doors: {} on their out tile, {} on the nearest road-facing wall tile, {} by the side search; {} moved off a built-over alley",
-            self.doors_exact, self.doors_near, self.doors_searched, self.doors_moved
+            "doors: {} on their out tile, {} on the nearest road-facing wall tile, {} by the side search; {} moved off a built-over alley; {} name their lot (lot=); {} cuts hold no lot centre (no lot=, no venue)",
+            self.doors_exact, self.doors_near, self.doors_searched, self.doors_moved, self.lots_named, self.pieces
         );
         println!(
             "terrain: {} Mountain tiles, {} sea tiles before the blocks and roads",
@@ -558,6 +562,8 @@ fn overlaps(r: [f64; 4], win: [f64; 4]) -> bool {
 
 #[derive(Clone, Debug)]
 struct Lot {
+    /// The perf pass phase 10: the lot's `lots.json` id (a `B` line's `lot=`).
+    id: String,
     rect: [f64; 4],
     front: char,
     floors: u32,
@@ -628,6 +634,30 @@ struct Seg {
     workshop: bool,
     flats: u32,
     civic: Option<String>,
+    /// The perf pass phase 10 (OPEN-182): the cut's member lots, id and
+    /// rect in metres, for the door's lot (`lot=`).
+    lots: Vec<(String, [f64; 4])>,
+    /// The perf pass phase 10: the cut holds a lot centre (it has members);
+    /// one that does not is a piece of a lot another cut holds.
+    own_lot: bool,
+}
+
+/// The perf pass phase 10 (OPEN-182, MAP_RECONCILE "TheCity" 2): the lot
+/// the cut's door stands on, so the view can tell which of a multi-lot cut's
+/// buildings is the venue: of the cut's members, the one whose rect is
+/// nearest the door tile's centre (0 inside it), ties the lower id. `None`
+/// for a cut holding no lot centre (a piece of a lot another cut names).
+fn door_lot(f: &Frame, sg: &Seg) -> Option<String> {
+    if !sg.own_lot {
+        return None;
+    }
+    let (mx, my) = (f.x0 + (sg.door.0 as f64 + 0.5) * f.s, f.y1 - (sg.door.1 as f64 + 0.5) * f.s);
+    let gap = |r: &[f64; 4]| {
+        let dx = (r[0] - mx).max(mx - r[2]).max(0.0);
+        let dy = (r[1] - my).max(my - r[3]).max(0.0);
+        dx + dy
+    };
+    sg.lots.iter().min_by(|a, b| gap(&a.1).total_cmp(&gap(&b.1)).then_with(|| a.0.cmp(&b.0))).map(|(id, _)| id.clone())
 }
 
 /// A named civic site's rank when two share a cut (the first is kept).
@@ -1090,6 +1120,7 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
             rep.flats += rec.flats as usize;
             rep.shop_units += rec.shops;
             let lot = Lot {
+                id: id.to_string(),
                 rect,
                 front,
                 floors: rec.floors.max(1),
@@ -1112,6 +1143,7 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
         // Massing floors are not in lots.json (only the district's range):
         // a deterministic pick in the range from the lot's seed.
         let mut lot = Lot {
+            id: id.to_string(),
             rect,
             front,
             floors: lo + (seed % u64::from(hi.saturating_sub(lo) + 1)) as u32,
@@ -1441,6 +1473,8 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                     workshop: !recs.is_empty() && recs.iter().filter(|r| r.workshop).count() * 2 >= recs.len(),
                     flats: members.iter().map(|l| l.flats as u32).sum(),
                     civic,
+                    lots: members.iter().map(|l| (l.id.clone(), l.rect)).collect(),
+                    own_lot: !members.is_empty(),
                 });
             }
         }
@@ -1553,6 +1587,21 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
     } else {
         // S3c: the export's use leads; the counts stay the generator's mix.
         let segs = &segs;
+        // The perf pass phase 10 (OPEN-182): a venue stands on its own lot
+        // (`lot=` names it alone), so a cut holding no lot centre, a piece of
+        // a lot another cut holds, is dealt no venue: it takes the kind the
+        // S3c rule gives a cut nobody dealt (`rest` below: a Home, or a Lot
+        // for an industrial, civic or flat-less commercial piece).
+        for (i, sg) in segs.iter().enumerate() {
+            if !sg.own_lot {
+                kind[i] = Some(match sg.use_ {
+                    Some(Use::Residential | Use::ShopHouse) => K::Home,
+                    Some(Use::Commercial) if sg.flats > 0 => K::Home,
+                    _ => K::Lot,
+                });
+                rep.pieces += 1;
+            }
+        }
         let is = |u: Use| move |i: usize| segs[i].use_ == Some(u);
         let (vat, factory, godown) = (is(Use::VatFarm), is(Use::Factory), is(Use::Godown));
         let (shop_house, commercial) = (is(Use::ShopHouse), is(Use::Commercial));
@@ -1801,14 +1850,18 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
             BuildingExtra {
                 flats: (kd == K::Home).then_some(sg.flats),
                 storeys: Some(u16::try_from(sg.floors).unwrap_or(u16::MAX)),
+                lot: door_lot(&f, sg),
             }
         } else {
-            BuildingExtra::default()
+            BuildingExtra { lot: door_lot(&f, sg), ..BuildingExtra::default() }
         };
+        if extra.lot.is_some() {
+            rep.lots_named += 1;
+        }
         *rep.kinds.entry(kd).or_default() += 1;
         let u = sg.use_.map_or("-".to_string(), |u| format!("{u:?}"));
         *rep.kind_use.entry((kd, u)).or_default() += 1;
-        out_b.push((kd, sg.rect, tier_of(z), floors, extra));
+        out_b.push((kd, sg.rect, tier_of(z), floors, extra.clone()));
         doors.push(sg.door);
     }
 
@@ -2065,7 +2118,7 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
     let zones: Vec<char> =
         dgrid.iter().map(|&d| zone_of_d.get(usize::from(d)).copied().unwrap_or(Z::Mid).letter()).collect();
     let grid: Vec<u8> = dgrid.iter().map(|&d| d as u8).collect();
-    let extra: Vec<BuildingExtra> = out_b.iter().map(|b| b.4).collect();
+    let extra: Vec<BuildingExtra> = out_b.iter().map(|b| b.4.clone()).collect();
     let text_out = MapText {
         w,
         h,

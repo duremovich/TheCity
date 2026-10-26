@@ -1659,9 +1659,24 @@ pub fn snapshot(world: &mut World) {
     row.execs_spire = housed as u32;
 }
 
+/// The perf pass phase 10 (I9): an exec's corp Hq door when
+/// `[life] exec_home_reach` is on (`hq_of`, ranked from his Home); `None`
+/// off, or for an exec with no corp or no standing workplace.
+pub fn exec_hq_door(world: &World, exec: EntityId) -> Option<TilePos> {
+    if world.config.life.exec_home_reach == 0 {
+        return None;
+    }
+    let corp = exec_corp(world, exec)?;
+    hq_of(world, corp, exec).and_then(|b| world.comp::<Building>(b)).map(|b| b.door)
+}
+
 /// Move an exec (with a spouse and children sharing the Home) into a free
 /// Spire Home (tier 2; Lives at work phase 7: `exec_home_tier` when on)
-/// when they live lower down and one has room.
+/// when they live lower down and one has room. The perf pass phase 10
+/// (ISLAND_PASS I9, `[life] exec_home_reach`): the free Home nearest his
+/// corp's Hq (door to door, then the id) instead of the emptiest, and an
+/// exec housed at the tier but further than the reach moves to a nearer
+/// one within it when one has room.
 pub fn house_exec(world: &mut World, exec: EntityId) {
     let Some(home) = home_of(world, exec) else { return };
     // OPEN-140: one move a body a midnight (an exec tied as a super was
@@ -1673,7 +1688,14 @@ pub fn house_exec(world: &mut World, exec: EntityId) {
         0 => 2,
         t => t,
     };
-    if world.comp::<Building>(home).is_some_and(|b| b.tier >= tier) {
+    let at_tier = world.comp::<Building>(home).is_some_and(|b| b.tier >= tier);
+    let reach = u32::from(world.config.life.exec_home_reach);
+    // I9: the Hq's door and how far the Home stands from it.
+    let near = exec_hq_door(world, exec).map(|hq| {
+        let d = world.comp::<Building>(home).map_or(u32::MAX, |b| b.door.manhattan(hq));
+        (hq, d)
+    });
+    if at_tier && near.is_none_or(|(_, d)| d <= reach) {
         return;
     }
     let spouse = world.spouse_of(exec).filter(|&s| home_of(world, s) == Some(home) && world.has::<Brain>(s));
@@ -1682,21 +1704,26 @@ pub fn house_exec(world: &mut World, exec: EntityId) {
         .filter(|&c| world.has::<crate::components::Child>(c) && home_of(world, c) == Some(home))
         .collect();
     let need = 1 + usize::from(spouse.is_some()) + kids.len();
-    let pick = world
-        .buildings_of_kind(BuildingKind::Home)
-        .iter()
-        .copied()
-        .filter(|&h| {
-            world.comp::<Building>(h).is_some_and(|b| {
-                b.tier >= tier
+    let pick = world.buildings_of_kind(BuildingKind::Home).iter().copied().filter(|&h| {
+        world.comp::<Building>(h).is_some_and(|b| {
+            b.tier >= tier
                     && !b.demolished
                     && !b.derelict
                     && world.residents_of(h).len() + need <= usize::from(b.capacity)
                     // The island pass phase 3a (I6): a company bed is its staff's only.
                     && crate::systems::company::open_to_all(world, h)
-            })
         })
-        .min_by_key(|&h| (world.residents_of(h).len(), h));
+    });
+    let pick = match near {
+        // I9: the nearest to the Hq; housed at the tier, only a nearer Home
+        // within the reach.
+        Some((hq, d)) => pick
+            .filter_map(|h| world.comp::<Building>(h).map(|b| (b.door.manhattan(hq), h)))
+            .filter(|&(dh, _)| !at_tier || (dh <= reach && dh < d))
+            .min()
+            .map(|(_, h)| h),
+        None => pick.min_by_key(|&h| (world.residents_of(h).len(), h)),
+    };
     let Some(to) = pick else { return };
     let tick = world.tick;
     let place = world.name_of(to);

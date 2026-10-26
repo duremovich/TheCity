@@ -100,13 +100,27 @@ fn test_drag_holds_gangwork() {
     let mut w = city_with_gangs();
     let g = w.gangs().into_iter().find(|&g| w.comp::<Gang>(g).is_some_and(|x| x.members.len() >= 3)).expect("a gang");
     // Shadow V4: a member off the clock (on the regenerated table's city the
-    // first member was a worker in shift, and Work outscored the drag).
+    // first member was a worker in shift, and Work outscored the drag). The
+    // perf pass phase 10: and one the gang's order is not already working
+    // (on the I9 city the first such member's order made GangWork win with
+    // no one in tow).
     let members = w.comp::<Gang>(g).expect("gang").members.clone();
-    let m = members.iter().copied().find(|&x| !w.has::<citysim::Job>(x)).unwrap_or(members[0]);
     let v = outsiders(&w)[0];
     // Rested (an exhausted member's Sleep is an emergency too).
-    w.comp_mut::<Needs>(m).expect("needs").energy = 1.0;
-    w.comp_mut::<Needs>(m).expect("needs").hunger = 0.4;
+    let rest = |w: &mut World, x: EntityId| {
+        w.comp_mut::<Needs>(x).expect("needs").energy = 1.0;
+        w.comp_mut::<Needs>(x).expect("needs").hunger = 0.4;
+    };
+    let mut m = members[0];
+    let off_clock: Vec<EntityId> = members.iter().copied().filter(|&x| !w.has::<citysim::Job>(x)).collect();
+    for x in off_clock {
+        rest(&mut w, x);
+        if citysim::utility::think(&w, x).map(|(goal, _)| goal) != Some(GoalKind::GangWork) {
+            m = x;
+            break;
+        }
+    }
+    rest(&mut w, m);
     let free = citysim::utility::think(&w, m).map(|(goal, _)| goal);
     assert_ne!(free, Some(GoalKind::GangWork), "no one in tow: another goal wins ({free:?})");
     if let Some(b) = w.comp_mut::<Brain>(m) {

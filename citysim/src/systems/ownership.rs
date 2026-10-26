@@ -1417,13 +1417,15 @@ pub fn seed(world: &mut World) {
                 .max_by(|x, y| x.0.total_cmp(&y.0).then(y.1.cmp(&x.1)))
                 .map(|(_, a)| a)
         });
+        if let Some(cc) = world.comp_mut::<Corp>(c) {
+            cc.exec = pick;
+        }
         if let Some(a) = pick {
             execs.insert(a);
             // L1: the exec lives in the Spire when a Block there has room.
+            // The perf pass phase 10: after `Corp.exec` is set, so the move
+            // reads his Hq (`life::exec_hq_door`; the base pick reads neither).
             crate::systems::life::house_exec(world, a);
-        }
-        if let Some(cc) = world.comp_mut::<Corp>(c) {
-            cc.exec = pick;
         }
     }
     // Opening rents: corp Blocks at level 1.0, city Blocks the lever.

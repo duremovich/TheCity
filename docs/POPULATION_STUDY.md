@@ -99,6 +99,11 @@ re-import is byte-identical to the committed map.
   - What a bigger city needs from the re-import is cuts, not flats. P9's 2,858 new `shop_house` lots, and a venue on
     its own lot (`B ... lot=<id>`, OPEN-182), give the employers and Lots room.
   - Past 100k it needs `--downsample 1` (14,516 lots, about 2× the cuts).
+- **Re-measured at the P9 re-import (the perf pass phase 10, `OPEN-204`):** the committed `isle_m_k2.txt` houses
+  28,950 (5,790 slots; Home flats 237,179). At 100k, k = 2 (`isle_m_k2_100k.txt`): 3,585 Homes (20,047 slots,
+  150,537 flats), 600 Farms, 150 Markets and Bars, **1,415 Lots of 8,000**; k = 1: 8,765 cuts (not 2x), 2,108 Lots,
+  600 Farms. The flats never bind (332,862 for 20,000 households); the Lots stop at the importer's 80 Lots to 200
+  Blocks. PERF_PASS § phase 10 has the run table.
 
 ## Where the time goes
 

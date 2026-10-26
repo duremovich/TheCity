@@ -474,3 +474,62 @@ changes the map, not a mechanism.
   `test_coworker_crew_bounds_the_coworker_edges` cover the mechanism, the identity the switch. The round workers'
   variant (no co-work bond for sweepers on a beat) stays in `OPEN-209`.
 - **Phase 7d (the gang dwell rescore, OPEN-211, switched `[gangs] dwell_hold` / `CITYSIM_DWELL_OFF`).** The cause was not the young dwell: at 20k seed 42 every `rescore` of a settled Job had `young=false` and `feasible=false` (the Job row is absent once no job is live), the winner was Expand each time, and with a body leader and lieutenants (`leaders::in_person`) the order is only *held* in `Gang.pending_order` for the giving, so the gang stayed on `Order::Job` and `gang::run`'s `job_done` branch rethought it every tick until the giving (2,959 rescores in 16 days, all with `po=true`). **The fix:** `job_done` with a `pending_order` held and `dwell_hold` on skips the rethink, except at the daily tick or when the pending shocks reach `shock_severity_rethink` (the same cadence as every other order); the giving (`leaders`) and `apply_order` end it as before. `dwell_hold` is `skip_serializing` so the off save is byte-identical (a plain bool added 19 bytes to the saved config). **Off identity** (`CITYSIM_DWELL_OFF=1`, 42-44 x 30): events, 1,092 report columns and save identical. **Counters** 42-44 x 120, base -> branch (seeds 42 and 43 identical; 44 diverges after a held order is no longer re-derived each tick): Murders 51 -> 51, 22 -> 22, 37 -> 48 (mean 37 -> 40); rep_flips 48 -> 48, 17 -> 17, 18 -> 21; OrderChanged 52 -> 52, 61 -> 61, 68 -> 65; gang_members 9,482 / 8,877 / 9,422 -> 9,482 / 8,877 / 9,230; arrests 2,670 -> 2,538 on 44; all of 44's moves are the butterfly of a different pending-order refresh, FINDINGs, not retuned. **Device**, 20k `isle_m_k2` seed 42 (`--features prof`, off switch as the base): `gang::harvest_target` (one per `gather_inputs`) days 13-15 3,071 -> 112 calls, 1.375 -> 0.036 s (0.46 -> 0.01 s a game day); days 26-28 3,804 -> 120, 1.801 -> 0.043 s (0.60 -> 0.014 s a day); `rep_flips` a day 0-1 on both. Statistical mirror: none (one gang brain per gang at both tiers). SAVE_VERSION stays 67. **Deviations:** the brief's "young dwell" mechanism is the held order; the extended test is `test_order_waits_for_a_lieutenant_at_court` (a rethink writes `order_trace`; the assertion fails with the switch off). The 3-seed 120-day divergence on 44 is the expected cost of not rescoring the held order every tick (it picks up the day's inputs at the daily tick instead of every tick's). `test.py change` green, 2m27s of 4m00s.
+- **Phase 10** (`2e17531`, `83cdf71`, `0b8d1e4`; `OPEN-182` closed, `OPEN-204`, `OPEN-184`, `OPEN-136` annotated;
+  `[life] exec_home_reach`, `CITYSIM_EXEC_HOME_OFF`). The P9 re-import from TheCityGraphics `855d0aa` (`isle_m/out`,
+  `sim/lots_sim.json` of 2026-10-24: 14,516 lots, 13,216 laid out, 332,862 flats). **What P9 changed** (its DECISIONS
+  T-D deviations 4-5): D4's massing moved (slab lots 31 -> 13 floors, low-rise 30 -> 4, towers kept), so D4 holds 62 %
+  of the flats, not 83 %, and 2,858 D4 lots are `shop_house`; the cuts are the same 6,104 rects at k = 2. **The
+  importer:** every cut holding a lot centre writes `lot=<id>`, the member lot under its door (map format, `MapBuilding.
+  lot`, saved when present, read by no system; SAVE_VERSION 67 -> 68); a cut holding none (a piece of a lot another
+  cut holds: 70 at k = 2, 367 at k = 1) writes none and is dealt no venue (the S3c rule's Home, or a Lot for an
+  industrial or flat-less piece), so no two buildings name one lot. **I9** (`[life] exec_home_reach` 40 tiles,
+  switched): `house_exec` takes the free tier Home nearest the corp's Hq (door to door, then the id), not the
+  emptiest, and moves an exec housed at the tier but further than the reach to a nearer one within it when one has
+  room (no eviction); the seed sets `Corp.exec` before the move. Statistical mirror: the rule itself (seed, daily,
+  promotion, both tiers). **2k** (the rule applies there): off identity `CITYSIM_EXEC_HOME_OFF=1` against `8c0da33`,
+  42-44 x 30, events, 1,093 report columns and save IDENTICAL (on the final tree too); counters 42-44 x 120 base ->
+  branch: Murders 32 -> 38 (31/33/32 -> 45/36/33), J24 0.752 -> 0.748, J25 0.014 -> 0.016, arrests 2,913 -> 2,826,
+  wallets 61.6k -> 69.4k, `execs_spire` +2 %, exec Home-to-Hq (`exec_hq_tiles`, a new CLI column with `exec_hq_max`)
+  days 0-29 51 -> 24 tiles; FINDINGs (the moves are a butterfly), nothing retuned. **The 20k tier map** (`isle_m_k2`,
+  re-imported `--downsample 2 --residents 20000`, the lines file as before): Home slots 6,329 -> 5,790 (beds 31,645 ->
+  28,950), Sump/Mid/Spire 1,920/4,268/141 -> 2,042/3,561/187 (the Mid 67 % -> 61 %, `OPEN-136`'s split), Home flats
+  782,702 -> 237,179, Lots 1,600, Farms 120, Markets and Bars 30 kept (852 Lots and Homes trade cuts, the Lots onto D4's
+  shop-houses), the `B` order new. 20k seeds 42-44 x 30, 8 threads, means, base (`8c0da33`, old map) -> map only
+  (switch off) -> branch: employed d29 11,434 -> 11,849 -> 11,800 (share 0.572 -> 0.593 -> 0.591), homeless 290 ->
+  266 -> 286 (D1 124 -> 109 -> 122, D4 55 -> 40 -> 39), starving d29 19 -> 17 -> 22, starvation deaths 0, mean hunger
+  0.706 throughout, Murders 37.7 -> 45.7 -> 56.0 (30/45/38 -> 56/37/44 -> 58/48/62), arrests 2,761 -> 2,933 -> 2,927,
+  Hqs 49, exec Home-to-Hq d29 241 -> 133 tiles; the households follow the flats, the venues the shop-houses, every
+  seed a new city (FINDINGs, re-baselined, nothing retuned). **The R5 table at 100k** (seed 42 x 30, 8 threads,
+  `--ambient-flats 50`; k = 2 and k = 1 run side by side on one shared box; build alone `run --days 0`):
+
+  | | 7b's map (`perf_maps/isle_100000`) | **k = 2 (committed)** | k = 1 |
+  |---|---|---|---|
+  | cuts | 6,104 | 6,104 | 8,765 |
+  | Lots (of 8,000) | 1,428 | **1,415** | 2,108 |
+  | Farms (of 600) | 600 | 600 | 600 |
+  | Home flats / slots (beds) | 153,379 / 20,009 | 150,537 / 20,047 (100,235) | 156,070 / 20,282 (101,410) |
+  | employed d30 (share) | 56,231 (0.561) | 55,368 (0.553) | 53,608 (0.535) |
+  | homeless d30 | 2,837 | 3,431 | 2,795 |
+  | build wall | 57.5 s | 50 s alone (85 s shared) | 76 s alone (102 s shared) |
+  | ticks/s days 25-30 | 26/18/20/27/26/25 (25.5) | 29/29/28/28/27/27 (28) | 29/28/28/29/29/29 (29) |
+  | longest tick days 25-30 | 0.80-0.94 s @21:00 | 0.87-0.92 s @21:00 | 0.97-1.11 s @21:00 |
+  | peak working set | 3.13 GB | 2.10 GB | 1.77 GB |
+
+  The 100k run against 7b's is the main tree since (7c's crew cap: the working set; 7d) plus this phase: ticks/s
+  days 25-30 median 25.5 -> 28, the gate's 30 still missed; the longest tick 0.87-0.92 s at 21:00, every day 2-30 under
+  1 s but day 8's job search at 00:11 (1.77 s) and days 12-13 at 21:00 (1.05, 1.03 s); day 1's tick (day 0's whole
+  midnight) 4.2 s. **Deviations:** (1)
+  `--identity` with no switch differs at 2k by design: I9 applies to the 2k city, so it is switched and its counters
+  reported. (2) 70 `B` lines (the pieces) carry no `lot=`; MAP_RECONCILE asked for one on each. (3) SAVE_VERSION 68:
+  the map format holds `lot`. (4) **k = 2 is committed although k = 1 has more of the wanted Lots** (R5's literal
+  measure, both builds under 2 min): the sim has no tile size, so a 2 m tile halves every tile-denominated reach, cap
+  and walk in metres and doubles every walk's game time (a retune of every distance knob the tiers were never read
+  on: employed 0.553 -> 0.535); its 21:00 tick passed 1 s on four of days 25-30 on the same box; the authored El lines
+  (`isle_m_k2_lines.txt`) are in the k = 2 frame (the k = 1 import placed its three `L+` lines at half scale). (5) The
+  perf maps under `target/perf_maps` were already imported from the P9 export (2026-10-24 22:11, 13,216 laid out), so
+  the perf pass ran at P9's 100k capacity throughout; this phase adds `lot=`, the pieces rule and the new order. (6)
+  I9 halves the execs' distance, not to the reach: at 20k the mean ends 133 tiles (max 865) because the Spire's Homes
+  are full at seed (no eviction) and a small corp's `hq_of` building (a shop outside the Spire) sits far from every
+  Spire Home the tier floor demands (Dylan's call). (7) `test_drag_holds_gangwork` re-pinned to an off-clock member
+  whose free think is not GangWork (the I9 city's first one had a gang order), assertions unchanged; the CLI header
+  pins count the two columns. `test.py change` green, 1m14s of 4m00s.

@@ -1653,7 +1653,7 @@ fn run(args: RunArgs) -> Result<(), String> {
         // `DailyStats`, not saved); like `ticks_per_sec`, noise to every
         // identity comparison (`tools/phase_measure.py` masks them).
         println!(
-            "{},max_tick_ms,max_tick_at,edges,edges_new,coworker_pairs,friends",
+            "{},max_tick_ms,max_tick_at,edges,edges_new,coworker_pairs,friends,exec_hq_tiles,exec_hq_max",
             citysim::systems::stats::csv_header(&world)
         );
     }
@@ -1754,8 +1754,12 @@ fn run(args: RunArgs) -> Result<(), String> {
         if args.report && world.tick % TICKS_PER_DAY == 0 {
             if let Some(row) = world.stats.history.back_mut() {
                 row.ticks_per_sec = chunk_ticks as f32 / secs;
+                // The perf pass phase 10 (I9): how far the execs live from
+                // their Hq (`exec_hq_spread`; CLI-only like the rest).
+                let (hq_mean, hq_max) = exec_hq_spread(&world);
+                let row = world.stats.history.back().expect("the row above");
                 println!(
-                    "{},{:.1},{},{},{},{},{}",
+                    "{},{:.1},{},{},{},{},{},{hq_mean:.1},{hq_max}",
                     row.csv_row(),
                     max_tick.0,
                     max_tick.1,
@@ -2756,6 +2760,29 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     eprintln!("new non-co-worker edge ends per row {met:?}");
     eprintln!("chats (all, with a housemate) per row {chats:?}");
     Ok(())
+}
+
+/// The perf pass phase 10 (ISLAND_PASS I9): the mean and the largest
+/// Manhattan distance, Home door to Hq door (`life::hq_of`), over the living
+/// corp execs who have both; `(0, 0)` with none.
+fn exec_hq_spread(world: &citysim::World) -> (f64, u32) {
+    use citysim::systems::{classes, life, missions};
+    let mut d: Vec<u32> = Vec::new();
+    for e in classes::exec_set(world) {
+        let Some(corp) = life::exec_corp(world, e) else { continue };
+        let Some(hq) = life::hq_of(world, corp, e).and_then(|b| world.comp::<citysim::components::Building>(b)) else {
+            continue;
+        };
+        let Some(home) = missions::home_of(world, e).and_then(|h| world.comp::<citysim::components::Building>(h))
+        else {
+            continue;
+        };
+        d.push(home.door.manhattan(hq.door));
+    }
+    if d.is_empty() {
+        return (0.0, 0);
+    }
+    (d.iter().map(|&x| f64::from(x)).sum::<f64>() / d.len() as f64, d.iter().copied().max().unwrap_or(0))
 }
 
 fn main() {
