@@ -180,6 +180,10 @@ struct RunArgs {
     /// the run's own profile then holds only the last midnight).
     #[arg(long)]
     prof_midnight: bool,
+    /// The perf pass phase 8: threads scoring the think slice, overriding
+    /// `[perf] threads` (a host setting, not saved: kept with `--load`).
+    #[arg(long, value_name = "N")]
+    threads: Option<usize>,
 }
 
 /// An absolute map path for `config.world.map` (`Config::asset` joins it onto
@@ -1589,10 +1593,17 @@ fn run(args: RunArgs) -> Result<(), String> {
     if args.ambient_hire_far {
         config.ambient.hire_far = true;
     }
+    if let Some(n) = args.threads {
+        if n == 0 {
+            return Err("--threads must be 1 or more".into());
+        }
+        config.perf.threads = n;
+    }
     let mut world = match &args.load {
         Some(path) => {
             let mut w = save::load_from_file(path)?;
             w.config.lod.force = config.lod.force;
+            w.config.perf = config.perf.clone();
             w.config.assets_dir = config.assets_dir;
             w
         }

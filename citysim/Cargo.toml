@@ -20,6 +20,8 @@ ron = { version = "0.10", features = ["integer128"] }
 toml = "0.8"
 smallvec = { version = "1", features = ["serde"] }
 ordered-float = { version = "5", features = ["serde"] }
+# The perf pass phase 8 (OPEN-184): the think slice scored on `[perf] threads`.
+rayon = "1.10"
 
 [dev-dependencies]
 blake3 = "1"

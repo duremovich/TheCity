@@ -4371,6 +4371,13 @@ access_cap_ticks = 0               # the El is not boarded at a stop more than t
 pass_slack_tiles = 8               # a stop pair is no route when the alight stop lies on the walk to the board stop
                                    # (within this of a shortest Manhattan way): walking past your stop to ride back to it
 
+# The perf pass phase 8 (docs/PERF_PASS.md; OPEN-184; systems/think.rs): how the host runs the tick, never the city.
+# The think slice is scored against the world as it stood at the top of `think::run`, on this many threads, and
+# applied in id order on the calling thread; every value gives the same save (the thread-count identity). Not written
+# into a save; `run --threads N` overrides it. 1 until the perf pass's gate sets it.
+[perf]
+threads = 1                        # threads scoring the think slice; 1: on the calling thread
+
 # The perf pass phase 1 (OPEN-195; exec/routine.rs, exec/actions.rs `finishes_early`): the Rest loop. A Rest is cut
 # only by a work signal the Work goal will answer: the departure gate is false while Work refuses (a sick day, a
 # sentence, unpaid a week); a Rest begun with the gate already open runs (the think that chose it saw the gate, and

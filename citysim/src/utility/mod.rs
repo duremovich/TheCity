@@ -102,6 +102,19 @@ pub fn think_with_offer(
     world: &World,
     id: EntityId,
 ) -> Option<(GoalKind, ThinkTrace, Option<crate::systems::assets::ShopOffer>)> {
+    think_scored(world, id, None)
+}
+
+/// [`think_with_offer`] with the Court gate's daily pre-filter given:
+/// `court` is the value the think writes into the brain's
+/// `court_candidate` before it scores (the perf pass phase 8: the think
+/// slice is scored against a world it cannot write, and the write is
+/// applied after); `None` reads the brain's.
+pub fn think_scored(
+    world: &World,
+    id: EntityId,
+    court: Option<bool>,
+) -> Option<(GoalKind, ThinkTrace, Option<crate::systems::assets::ShopOffer>)> {
     let brain = world.comp::<crate::components::Brain>(id)?;
     let current = brain.current_goal;
     // Hysteresis protects a goal being pursued, not one already achieved:
@@ -196,7 +209,9 @@ pub fn think_with_offer(
         if goals::already_satisfied(world, id, goal, has_spouse) {
             continue;
         }
-        let Some((considerations, flat)) = goals::considerations(world, id, goal, has_spouse) else { continue };
+        let Some((considerations, flat)) = goals::considerations_with(world, id, goal, has_spouse, court) else {
+            continue;
+        };
         if let Some(s) = score_goal(goal, considerations, current, hysteresis, flat) {
             scored.push(s);
         }

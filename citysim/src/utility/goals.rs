@@ -258,6 +258,19 @@ pub fn considerations(
     goal: GoalKind,
     has_spouse: bool,
 ) -> Option<(Vec<Consideration>, f32)> {
+    considerations_with(world, id, goal, has_spouse, None)
+}
+
+/// [`considerations`] with the Court gate's daily pre-filter given
+/// (`crate::utility::think_scored`); `None` reads the brain's
+/// `court_candidate`.
+pub fn considerations_with(
+    world: &World,
+    id: EntityId,
+    goal: GoalKind,
+    has_spouse: bool,
+    court: Option<bool>,
+) -> Option<(Vec<Consideration>, f32)> {
     let needs = world.comp::<Needs>(id);
     let pers = world.comp::<Personality>(id);
     let mood = world.comp::<crate::components::Mood>(id).map_or(0.0, |m| m.value);
@@ -459,7 +472,8 @@ pub fn considerations(
             }
             // Daily pre-filter (any edge >= 0.3 to an unmarried agent), then a
             // target the plan can act on now: someone here, or at a venue.
-            let candidate = world.comp::<Brain>(id).and_then(|b| b.court_candidate).is_some_and(|(_, c)| c)
+            let candidate = court
+                .unwrap_or_else(|| world.comp::<Brain>(id).and_then(|b| b.court_candidate).is_some_and(|(_, c)| c))
                 && crate::systems::social::court_target(world, id).is_some();
             // A widowed spouse grieves for 14 days (Social); a Courted memory toward
             // the same subject adds +0.1 (Memory readers).
