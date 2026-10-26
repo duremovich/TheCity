@@ -908,3 +908,15 @@ Cost (`session_cost.py --session 25a0721b`, API-rate $ equivalent):
 | orchestrator (tiers, briefs, the gate, the reset, the handoff) | Fable | 307 | 150k | 53 |
 
 Total ~ $222. With the twentieth session's $137 the pass cost ~ $360 and added no mechanism: the reason for the reset.
+
+## The twenty-second session (2026-10-26): Shadow V9, the pressure pass, Shadow V10
+
+The first session under the reset doctrine. Shadow V9 at 100k (one window, seven Sonnet critics) read the city as
+commuters with job titles; the pressure pass (`docs/PRESSURE_PASS.md`) then landed ten phases, one Opus coder each,
+up to four at once in worktrees: misery acts, reach and the social graph, distance (F1: 100k does not break distance;
+the tail was there at 20k), the missing trades at 100k and the no-op verbs (F2: the map is short of Lots), quits and
+the jobless, a business under water, customers for the dead trades, protection, consequence, the gang's side of it.
+Merging branches built apart turned tests red on the combination four times (one real bug: fronts re-staffing a gang
+that could not reform); the change tier on main after each hand-resolved merge caught them. No test added (1,470).
+Shadow V10 in V9's window read better in every group, with unscripted chains of consequence; still thin are the
+trades' verbs on a followed body and the fare-evasion loop (`OPEN-213`-`OPEN-220`). Cost ≈ $350 (HANDOFF § Cost).

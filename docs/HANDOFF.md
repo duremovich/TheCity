@@ -1,94 +1,89 @@
 # Handoff: now
 
-Rewritten at every session end; never appended. The session logs are `docs/history/SESSIONS.md`; the twenty-first
-session's page is its last entry. Last rewrite: **2026-10-26, the twenty-first session: the perf pass closed with its
-gate met, and the process reset (CLAUDE.md § The doctrine rewritten on Dylan's call).**
+Rewritten at every session end; never appended. The session logs are `docs/history/SESSIONS.md`. Last rewrite:
+**2026-10-26, the twenty-second session: Shadow V9 at 100k, the pressure pass built (eight mechanism phases, three
+fix phases), Shadow V10 read against V9.** The first session under the reset doctrine.
 
 ## Main
 
-Main holds **the perf pass, closed** (`docs/PERF_PASS.md`, the gate bullet last under § Implemented) and **the process
-reset**. The committed 100k map is `assets/maps/isle_m_k2_100k.txt`; the 20k tier map `isle_m_k2` is the P9 re-import;
-`[perf] threads` is 8; `SAVE_VERSION` 68. Every in-flight switch is retired.
+Main holds **the pressure pass** (`docs/PRESSURE_PASS.md`, every phase's "Implemented: deviations" entry) on the
+perf pass. The change tier is green at the merge of phase 5b (`33f9c55`); the test count is still 1,470 (no test
+added by the pass; probes whose premise the meaner city moved were re-pinned with the reason in place).
+`SAVE_VERSION` 71. The 100k map is `assets/maps/isle_m_k2_100k.txt`; 100k runs at 31 ticks/s with the pass in.
 
-| gate item (100k seed 42 x 30, quiet box, 8 threads) | target | measured |
-|---|---|---|
-| ticks/s, days 25-30 | ≥ 30 | **31** (the pass base: 11 at day 4, sliding) |
-| longest tick, days 25-30 | ≤ 1 s | 0.79-0.83 s (the 21:00 pass); day 8's 00:11 job search 1.10 s (`OPEN-212`) |
-| build | < 2 min | 64 s (the base: 370 s) |
-| thread identity 1 vs 8, 2k x 3 seeds and 20k | identical | identical (the last such proof) |
+| phase | what it added (each its own module and config section) |
+|---|---|
+| 1 misery acts (`[misery]`) | skipped shifts and firing, misery quits, petty crime, brawls with grudges, recruitment and conversion of the miserable |
+| 4 reach (`[distance.reach]`, `[social]`) | a reach cap per purpose; weak acquaintances pruned in 7 days, 40 a person |
+| F1 distance | the city's own hires near the post, beats and patrols near the shift, pitches near home, FleeToHome on the El, registering at the nearest Hall or Station, hunts offered in reach |
+| F2 trades and verbs | Lot copies fit the map (the six trades missing at 100k exist), Preach near home, 0-coin shakedowns refused, the witness cap, guards, Bury |
+| F3 quits and the jobless | the held cut settles, owners never quit their venue, unpaid walkouts owe a debt, the fired sit out and are refused, the skip is a moment |
+| 6 a business under water (`[underwater]`) | cut hours, lay off, borrow (shark, gang, corp; collectors), sell (corp, gang front), close and reopen; the stiffed worker confronts the owner |
+| 2 customers (`[customers]`) | the door refuses for cause, lonely clients, the pimp's round, the frightened buy guns, back rooms, the scav's round, hailed cabs, the dawn shape-up, wounds patched |
+| 3 protection (`[protection]`) | the levy on held ground, refusals punished (till, owner, fire), the owner's choice, tribute, bail, the Fixer in person |
+| 5a consequence (`[consequence]`) | witnesses report, flee, gossip, blackmail; hits reposted or done in person; jail as a place; the faith's weekly services and heretics |
+| 5b the gang's side (`[crew]`) | raid results, duty against the day job, court quorums, release welcomed or beaten out, the gear sink capped, rest days with the crew |
 
-Prints to plan the view with: 1/4/8/16 threads give 40/45/48/48 ticks/s at 100k (the knee is 8); 2.5k/5k/10k Full
-agents give 48/41/32, about 1.4 us per Full agent a tick, so a camera ring of thousands is affordable; peak working
-set 2.1 GB; 20k runs at 293 ticks/s. The profile's top sites are the goal scorers (`think_with_offer` 50 s of a 100k
-game day, the next five under 14 s each): the data layout (`OPEN-206`) is the lever if the view's share needs more.
+**Shadow V9** (`docs/SHADOW_V9.md`, `docs/shadow_v9/`): the 100k city read as commuters with job titles. **Shadow
+V10** (`docs/SHADOW_V10.md`, `docs/shadow_v10/`, same window): better in every group; lives have consequences
+(chains nobody scripted: a broke back-room doc's slide to eviction and her creditors' confrontation, an exec
+reported, fleeing, arrested, defrauded, buying a guard, a super's round turning into a feud). Still thin: the
+trades' own verbs on a followed body, and the fare-evasion loop now fills the gaps.
 
-Behaviour moved by the pass (FINDINGs, nothing retuned): at 2k, 42-47 x 120 against the pass base, Murders 34 -> 31,
-employed 0.770 -> 0.754, homeless 0.013 -> 0.015; at 20k on the new map Murders 37.7 -> 56 (seed 42-44 x 30; the map
-moves households toward the Sump, phase 10), Friend edges -55 % (the crew cap, phase 7c, per-capita now like the 2k city).
-
-## The process reset (2026-10-26)
-
-Dylan: "We are back to spending all our time on tests and gates and no progress is being made on the game itself
-... I would rather move fast and break things than spend days of testing hell. ... Things don't need to be byte
-identical or deterministic. We don't need to worry about save compatibility, since we have no players. We need to
-add, and iterate, and shadow to make sure it's working relatively well at the player level."
-
-Why it kept happening: every cleanup pruned tests and none touched the rules that generate them. Five of the ten
-doctrine rules were test factories (determinism, byte-identical switches, the mirror, SAVE_VERSION, test-first), and
-the orchestrator added a standing rule after every incident. What changed, all on main:
-
-- **CLAUDE.md § The doctrine is five rules**; the dropped ones are named there as dropped on purpose. A mechanism is
-  proven by a shadow read, not a test. The change tier is the only per-merge gate; merge and milestone tiers run at a
-  close as prints. No off switches, no identity runs, no A/B per phase.
-- **The test-count ratchet**: `test.py lint` fails when `#[test]` functions exceed `Test functions: N` in
-  `docs/TESTING.md` (1,470 now); raising it takes `test-add: <reason>` in the commit.
-- **59 tests deleted** (save round trips 48, determinism 4, parity 1, off identity 3, pins 3; `b286ae9`), the
-  off-identity stage out of `tools/phase_measure.py`, parity out of the milestone tier. The scan-vs-index oracle
-  tests stay (unit tests of an index, a second of CPU). The change tier is ~2 min, set by `core_sanity`.
-- The two skills (`/merge-set` is the close's tiers; `/close-milestone` opens with the shadow read), the SOP rule in
-  Dylan's global rules, `docs/TESTING.md` and `docs/ARCHITECTURE.md` match.
+FINDINGs (printed, 100k seed 42 x 30 against V9's run, `OPEN-220`): employed 51.6k -> 39.3k, thefts 3.0k -> 22.5k,
+Murders 205 -> 264, starvation deaths 0 -> 34, jailed mean 470 -> 890. The employment drop is mostly F2's per-Lot
+venue mix at 100k (the map is short of Lots and has no Sump Lot: `OPEN-204`'s re-import).
 
 ## In flight
 
-- No agents are running. Locked empty folders under `.claude/worktrees/` (`agent-*`, `island-f3`, `test-cut` if
-  it remains) and the `*.log` tier logs there can go after a restart; `target/gate/` holds the gate's runs (~1 GB).
-- TheCityGraphics: master `855d0aa`, local only by choice (Dylan 2026-10-26: it is large; it gets a remote after a cleanup of what the pipeline no longer needs); the maps on main were imported from it.
+- No agents are running. Locked empty worktree folders under `.claude/worktrees/` can go after a restart (their
+  `target/` dirs are deleted); `target/shadow_v9/`, `target/shadow_v10/`, `target/pp100k/` hold the runs.
 
 ## Next, in order
 
-1. **Shadow V9 at 100k on the island, the new way**: one shadow run (`citysim-cli shadow`, 100k on
-   `isle_m_k2_100k`, 8 threads), one diary per archetype read by critics (Sonnet, in parallel, as V7 did), the issues
-   ranked by what the player would see; then fix rounds as mechanisms, one agent per phase, the change tier once,
-   shadow again. No identity proofs, no switches. Watch first: the 20k Murders 56 on the new map, the Friend-edge drop,
-   the execs' homes (I9 leaves them 133 tiles from the Hq on average), the Spire's full Homes.
-2. **The pressure pass** (`OPEN-178` mood drives behaviour, `OPEN-176` the dead trades, `OPEN-209`/`OPEN-205` the
-   crew, `OPEN-210` the acquaintance graph, `OPEN-169`, `OPEN-170`, `OPEN-194`), fed by V9's read.
+1. **The next pressure pass round from V10** (`OPEN-213`-`OPEN-219`), one agent per phase as this session ran:
+   the fare-evasion loop (fines, not cells), gang verbs that stall (raids lose to Sleep, JoinGang walks, Scavenge's
+   failing step), walking pace inside a district, the wounded and the sick (rescue, care on credit), the trades'
+   verbs on a followed body, the friendship flip bug, diary noise. Then Shadow V11 in V10's window.
+2. **The 100k map re-import** (`OPEN-204`, `OPEN-182`): Lots enough for the venue mix and Sump Lots; it is the
+   lever on `OPEN-220`'s employment and the execs' commutes.
 3. The vertical city (`OPEN-187`, `OPEN-191`), the view milestone, M18.
+
+## Process notes from this session
+
+- Parallel coders on one main work, but each merge of branches built apart turned tests red on the combination
+  (four fix rounds; one real bug: phase 6's fronts re-staffed a gang that could not reform). Running the change
+  tier once on main after each hand-resolved merge caught every one. Union merges of `config.rs` defaults dropped
+  closing braces twice; the build catches it.
+- Critics on Sonnet with a one-page brief cost ~$1-2 each; the 100k shadow window takes ~40 min.
 
 ## Open calls for Dylan
 
-- The Friend-edge drop at 20k (-55 %, the crew cap): a config value if the city feels too lonely in V9.
-- `OPEN-212`: the stagger's ~84 unaudited whole-day stamps; audit or accept (the gate read it as harmless at 100k).
-- `OPEN-150`: the starting-condition seed's shape. Pressure-pass design: `OPEN-160`, `OPEN-162`, `OPEN-157`,
-  `OPEN-176`, `OPEN-178`; the combat model `OPEN-179`. Standing: `OPEN-062`, `OPEN-039`, `OPEN-057`, `OPEN-059`,
+- `OPEN-220`: is the meaner 100k city the city you want (a quarter of adults miserable, 34 starved in a month), or
+  should the next round restore jobs first (the map) before adding more pressure?
+- Gangs lose members fast under 5b's duty rule (91 colours lost in 30 days at 20k, mostly missed court summons).
+- Carried: `OPEN-212`, `OPEN-150`, `OPEN-179`; standing `OPEN-062`, `OPEN-039`, `OPEN-057`, `OPEN-059`,
   `OPEN-077`, `OPEN-069`, `OPEN-070`.
 
-## Cost (API-rate $ equivalent, `tools/session_cost.py --session 25a0721b`)
+## Cost (API-rate $ equivalent, `tools/session_cost.py --session f370b8f3`)
 
 | part | agent | turns | median ctx | $ |
 |---|---|---|---|---|
-| phase 7 | Opus | 332 | 216k | 39 |
-| phase 8 (+ a Sonnet order audit) | Opus (+ Sonnet) | 286 (+172) | 203k | 28 (+8) |
-| phase 9 | Opus | 190 | 173k | 16 |
-| phase 7b | Opus | **436** | 237k | 41 |
-| phase 7c | Opus | 198 | 129k | 10 |
-| phase 7d | Sonnet | 61 | 75k | 2 |
-| phase 10 | Opus | 316 | 189k | 17 |
-| the switch retirement | Sonnet | 19 | 55k | 1 |
-| the test audit and cut | Sonnet | 125 | 162k | 7 |
-| orchestrator (tiers, briefs, the gate, the reset, the handoff) | Fable | 307 | 150k | 53 |
+| phase 1 misery | Opus | 254 | 213k | 23 |
+| phase 4 reach | Opus | 174 | 143k | 8 |
+| F1 distance | Opus | **556** | 321k | **58** |
+| F2 trades and verbs | Opus | 511 | 291k | 47 |
+| F3 quits | Opus | 228 | 176k | 11 |
+| phase 6 under water | Opus | 240 | 233k | 26 |
+| phase 2 customers | Opus | 458 | 321k | 41 |
+| phase 3 protection | Opus | 281 | 225k | 21 |
+| phase 5a consequence | Opus | 309 | 294k | 25 |
+| phase 5b the gang | Opus | 387 | 284k | 37 |
+| four fix rounds | Sonnet | 224 | 57-91k | 8 |
+| Shadow V9 and V10 critics (14) | Sonnet | 616 | 81-122k | 21 |
+| orchestrator (runs, briefs, merges, synthesis) | Opus | 379 | 212k | 27 |
 
-Total ≈ $222; with the twentieth session's $137 the pass cost ≈ $360 and added no mechanism to the game. The next
-session's cost line is the first measure of the reset.
+Total ≈ $350 for ten phases of mechanism and two shadow reads (the perf pass's two sessions: ≈ $360, no
+mechanism). F1 and F2 ran past the ~300-turn brief size; both were diagnosis-heavy.
 
-The standing decisions, the doctrine and the agent rules are in `CLAUDE.md`; the tiers, budgets and caps in `docs/TESTING.md`.
+The standing decisions, the doctrine and the agent rules are in `CLAUDE.md`; the tiers in `docs/TESTING.md`.
