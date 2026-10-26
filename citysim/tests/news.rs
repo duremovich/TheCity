@@ -204,7 +204,7 @@ fn test_spin_buries_own_story_for_bury_days() {
     assert!(w.stories.iter().all(|s| !(s.feed == civic && s.actor == exec && s.deed == Deed::Killed)));
     // Past bury_days the bury lapses.
     w.config.news.spin_min = 99.0;
-    w.run_ticks(3 * TICKS_PER_DAY + 1);
+    w.run_ticks(3 * TICKS_PER_DAY + citysim::systems::midnight::window(&w));
     let st = news::feed_state(&w, civic).unwrap();
     assert!(!st.buried.iter().any(|&(a, _)| a == exec), "lapsed after bury_days: {:?}", st.buried);
 }

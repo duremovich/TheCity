@@ -136,7 +136,8 @@ fn test_daily_pass_binds_consequential_hole() {
     while w.tick_of_day() != 0 || w.tick < TICKS_PER_DAY {
         w.tick();
     }
-    w.tick(); // the daily pass runs at tick_of_day 0
+    // The daily pass runs at its midnight slot (the perf pass phase 7b).
+    w.run_ticks(citysim::systems::midnight::window(&w));
     assert!(w.holes.values().all(|h| h.kind != HoleKind::Killed), "a Killed hole survived the daily pass");
     assert_eq!(attributed_texts(&w).len(), n, "one Attributed event per hole");
     let bound = w.stats.history.iter().map(|r| r.holes_bound + r.holes_unknown).sum::<u32>()

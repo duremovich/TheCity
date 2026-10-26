@@ -644,7 +644,7 @@ pub fn pay_build(world: &mut World, payer: Option<EntityId>, cost: i64, site: Op
 /// crew_slow_max)` days, its posted vacancies withdrawn (re-posted when it
 /// opens).
 fn start_site(world: &mut World, site: EntityId, yard: EntityId, close: bool) {
-    let now = world.tick;
+    let now = crate::systems::midnight::stamp(world);
     world.jobs2.sites.insert(site, (yard, now));
     ownership::jobs2_row(world).builds_started += 1;
     let Some(kind) = world.comp::<Building>(site).map(|bd| bd.kind) else { return };
@@ -659,7 +659,7 @@ fn start_site(world: &mut World, site: EntityId, yard: EntityId, close: bool) {
         .sum();
     let slow = (crew.max(1) as f32 / builders).clamp(1.0, cfg.crew_slow_max.max(1.0));
     let days = cfg.crew_days.max(0.0) * slow;
-    let until = world.tick + (days * TICKS_PER_DAY as f32).round() as Tick;
+    let until = now + (days * TICKS_PER_DAY as f32).round() as Tick;
     if let Some(bd) = world.comp_mut::<Building>(site) {
         bd.under_construction_until = Some(until);
     }
@@ -1236,7 +1236,7 @@ pub fn shift_lifts(world: &World, yard: EntityId) -> u32 {
 /// Midnight (from `living::run`, after the World's book refills): the
 /// Rations sale, the civic posts reconciled, `Corp.office`, an Hq built.
 pub fn daily(world: &mut World) {
-    if !on(world) || world.tick_of_day() != 0 {
+    if !on(world) || !crate::systems::midnight::due(world, crate::systems::midnight::Mid::LivingEarly) {
         return;
     }
     sell_rations(world);

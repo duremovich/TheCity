@@ -17,9 +17,18 @@ use crate::world::World;
 pub fn run(world: &mut World) {
     // Phase 3 (W22): the Hunts' validity, every tick (≤ `max_hunts`).
     crate::systems::hunt::tick(world);
-    if world.tick_of_day() != 0 {
-        return;
+    // The perf pass phase 7b: the chain in two slots, split before the
+    // reputation rebuild (`systems::midnight`).
+    use crate::systems::midnight::{due, Mid};
+    if due(world, Mid::WordEarly) {
+        early(world);
     }
+    if due(world, Mid::WordLate) {
+        late(world);
+    }
+}
+
+fn early(world: &mut World) {
     let n = world.districts.len();
     if world.rumours.len() != n {
         world.rumours.resize_with(n, Default::default);
@@ -30,6 +39,9 @@ pub fn run(world: &mut World) {
     crate::prof::timed!("word::news::daily", crate::systems::news::daily(world));
     crate::prof::timed!("word::gossip::hear", crate::systems::gossip::hear(world));
     crate::prof::timed!("word::gossip::kin", crate::systems::gossip::kin(world));
+}
+
+fn late(world: &mut World) {
     crate::prof::timed!("word::reputation::rebuild", crate::systems::reputation::rebuild(world));
     crate::prof::timed!("word::competence::daily", crate::systems::competence::daily(world));
     // Phase 3: grudge decay and settlement, kill_chain expiry, vendettas

@@ -315,6 +315,7 @@ fn test_jailer_meal_is_an_inmate_encounter() {
     let market = w.nearest_of_kind(BuildingKind::Market, w.comp::<Building>(jail).expect("jail").door).expect("market");
     w.comp_mut::<Building>(market).expect("market").stock_food += 100;
     w.tick = 3 * TICKS_PER_DAY;
+    w.tick += u64::from(citysim::systems::midnight::tick_of(&w, citysim::systems::midnight::Mid::Law));
     let before = jobs2(&w).served[ServeKind::Inmate as usize];
     law::run(&mut w);
     assert!(jobs2(&w).served[ServeKind::Inmate as usize] > before, "the fed prisoner met the jailer");

@@ -389,24 +389,47 @@ pub struct Config {
     pub rest: Option<RestCfg>,
     /// The perf pass phase 8 (docs/PERF_PASS.md; OPEN-184): `[perf]`, how
     /// the host runs the tick (the think slice's scoring threads). A host
-    /// setting, not the world's: never written into a save (a loaded world
-    /// reads the default until its host sets it), and no value of it moves
-    /// the city (the thread-count identity).
-    #[serde(default, skip_serializing)]
+    /// setting, not the world's: `threads` is never written into a save (a
+    /// loaded world reads the default until its host sets it), and no value
+    /// of it moves the city (the thread-count identity). Phase 7b's
+    /// `stagger_midnight` is the world's (it moves a midnight pass by
+    /// minutes): written into a save when set, as a section is; a save
+    /// without it reads 0, the base.
+    #[serde(default, skip_serializing_if = "PerfCfg::host_only")]
     pub perf: PerfCfg,
 }
 
-/// `[perf]` (the perf pass phase 8, OPEN-184): the host's threads.
+/// `[perf]` (the perf pass phase 8, OPEN-184): the host's threads; phase
+/// 7b: the midnight stagger.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PerfCfg {
     /// Threads scoring the tick's think slice (`systems::think::run`); 1
     /// scores it on the calling thread. Every value gives the same city.
+    /// Never saved.
+    #[serde(default = "PerfCfg::one_thread", skip_serializing)]
     pub threads: usize,
+    /// The perf pass phase 7b (R8): ticks between two slots of the
+    /// staggered midnight (`systems::midnight`); 0 (absent, or
+    /// `CITYSIM_STAGGER_OFF=1` while the pass is in flight): every daily
+    /// pass on tick 0, the base.
+    #[serde(default)]
+    pub stagger_midnight: u16,
 }
 
 impl Default for PerfCfg {
     fn default() -> Self {
-        PerfCfg { threads: 1 }
+        PerfCfg { threads: 1, stagger_midnight: 0 }
+    }
+}
+
+impl PerfCfg {
+    fn one_thread() -> usize {
+        1
+    }
+
+    /// Nothing of the world's in it (no stagger): left out of a save.
+    pub fn host_only(&self) -> bool {
+        self.stagger_midnight == 0
     }
 }
 
@@ -8979,6 +9002,18 @@ impl Config {
         if std::env::var("CITYSIM_DWELL_OFF").is_ok_and(|v| v == "1") {
             cfg.gangs.dwell_hold = false;
         }
+        // The perf pass phase 7b (R8): the midnight stagger's switch in
+        // flight (doctrine 6), retired at the pass close. The last slot
+        // stays inside the night's first hour.
+        if std::env::var("CITYSIM_STAGGER_OFF").is_ok_and(|v| v == "1") {
+            cfg.perf.stagger_midnight = 0;
+        }
+        assert!(
+            u64::from(cfg.perf.stagger_midnight) * u64::from(crate::systems::midnight::LAST_SLOT)
+                < crate::time::TICKS_PER_HOUR,
+            "[perf] stagger_midnight {} puts the last midnight slot past 00:59",
+            cfg.perf.stagger_midnight
+        );
         // Lives at work (D13): a config with `[lives] enabled = false` by any
         // path clears the milestone's sections, so the off save holds no
         // `[lives]`, `[service]` or `[[serves]]`. The milestone's env

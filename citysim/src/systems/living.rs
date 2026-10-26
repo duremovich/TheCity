@@ -34,9 +34,18 @@ pub fn run(world: &mut World) {
     // Jobs & lives phase 5: an episode under a chip ends the contract
     // (nothing with `[vice] chip` off).
     crate::prof::timed!("living::dollhouse::hourly", crate::systems::dollhouse::hourly(world));
-    if world.tick_of_day() != 0 {
-        return;
+    // The perf pass phase 7b: the day in two slots, split before the
+    // faith's day (`systems::midnight`).
+    use crate::systems::midnight::{due, Mid};
+    if due(world, Mid::LivingEarly) {
+        early(world);
     }
+    if due(world, Mid::LivingLate) {
+        late(world);
+    }
+}
+
+fn early(world: &mut World) {
     // Plan L7: an older save's venues, at the first midnight with Lots.
     // Review fix: `venues_due` holds until a venue stands (no Lot at this
     // midnight: the next one retries).
@@ -97,6 +106,9 @@ pub fn run(world: &mut World) {
     // Lives at work phase 5 (§ 2.4): the walk-ins' walks, the Fixer owners'
     // weekly collections (nothing with `[service] tower` off).
     crate::prof::timed!("mid::service::tower_daily", crate::systems::service::tower_daily(world));
+}
+
+fn late(world: &mut World) {
     crate::prof::timed!("mid::faith::daily", crate::systems::faith::daily(world));
     // Jobs & lives phase 7: the children's routines, the kin, the
     // prosthetics (nothing with `[ages]` off).

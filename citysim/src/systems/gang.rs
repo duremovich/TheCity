@@ -1334,7 +1334,7 @@ pub fn fence(world: &mut World, actor: EntityId) -> i64 {
 // ---------------------------------------------------------------------------
 
 pub fn run(world: &mut World) {
-    let daily = world.tick_of_day() == 0;
+    let daily = crate::systems::midnight::due(world, crate::systems::midnight::Mid::Gang);
     let hysteresis = world.config.gangs.hysteresis;
     let threshold = world.config.gangs.shock_severity_rethink;
     for gang in world.gangs() {

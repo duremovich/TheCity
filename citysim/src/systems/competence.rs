@@ -326,7 +326,7 @@ fn knowledge_work(world: &mut World) {
     workers.extend_from_slice(world.workers(Role::Reporter));
     for r in workers {
         let Some(j) = world.comp::<Job>(r) else { continue };
-        let yesterday = j.shift_key_at(world.tick.saturating_sub(1));
+        let yesterday = j.shift_key_at(crate::systems::midnight::midnight(world).saturating_sub(1));
         if j.last_shift_day != Some(yesterday) {
             continue;
         }

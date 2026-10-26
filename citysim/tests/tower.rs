@@ -113,7 +113,7 @@ fn test_paper_sale_is_a_walk_in_in_open_hours_never_at_midnight() {
     let mut w = common::world_at(TICKS_PER_DAY);
     let (fixer, forger) = fixer_and_forger(&w);
     let a = buyer(&mut w, 500);
-    w.run_ticks(1); // the midnight pass of day 1
+    w.run_ticks(citysim::systems::midnight::window(&w)); // the midnight passes of day 1
     assert!(!w.jobs2.gray.papers.contains_key(&a), "no sale at 00:00");
     assert!(w.walk_ins.iter().any(|x| x.buyer == a && x.fixer == fixer), "queued for {}", w.name_of(fixer));
     // A wanted agent may be given a body at midnight (then he walks in,
@@ -146,7 +146,7 @@ fn test_paper_sale_is_a_walk_in_in_open_hours_never_at_midnight() {
     let mut off = common::world_with(|c| c.strip_tower());
     off.run_ticks(TICKS_PER_DAY);
     let b = buyer(&mut off, 500);
-    off.run_ticks(1);
+    off.run_ticks(citysim::systems::midnight::window(&off));
     assert!(off.jobs2.gray.papers.contains_key(&b), "off sells at midnight");
     assert!(off.walk_ins.is_empty());
 }

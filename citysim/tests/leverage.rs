@@ -357,7 +357,7 @@ fn test_protection_pays_weekly_and_stops_when_district_lost() {
     w.coercions.get_mut(&id).unwrap().next_due = w.tick;
     // Straight to the midnight tick (no day for the gang to win a Home back).
     w.tick = (w.tick / TICKS_PER_DAY + 1) * TICKS_PER_DAY;
-    w.run_ticks(1);
+    w.run_ticks(citysim::systems::midnight::window(&w));
     assert_eq!(w.coercions[&id].status, CoercionStatus::Broken, "lost with the district");
 }
 

@@ -10,7 +10,10 @@ fn hash_after(seed: u64, ticks: u64, threads: usize) -> blake3::Hash {
     let mut config = Config::load().dole_city();
     config.perf.threads = threads;
     let mut w = World::new(seed, config);
-    w.run_ticks(ticks);
+    // The perf pass phase 7b: through the last slot of a staggered midnight
+    // (`ticks` ends one tick past a day boundary).
+    let window = citysim::systems::midnight::window(&w);
+    w.run_ticks(ticks + window - 1);
     blake3::hash(save::to_ron(&w).as_bytes())
 }
 

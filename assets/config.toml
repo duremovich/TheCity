@@ -4382,8 +4382,14 @@ pass_slack_tiles = 8               # a stop pair is no route when the alight sto
 # The think slice is scored against the world as it stood at the top of `think::run`, on this many threads, and
 # applied in id order on the calling thread; every value gives the same save (the thread-count identity). Not written
 # into a save; `run --threads N` overrides it. 1 until the perf pass's gate sets it.
+# Phase 7b (R8; systems/midnight.rs) adds the one key here that is the world's: the midnight stagger. The daily passes
+# after the price move run whole, in their old order, in 12 slots over the night's first minutes instead of all on
+# tick 0 (100k day 28: 2.6 s in one tick, its largest pass 0.29 s). Written into a save when set; absent (or
+# `CITYSIM_STAGGER_OFF=1` while the pass is in flight), 0.
 [perf]
 threads = 1                        # threads scoring the think slice; 1: on the calling thread
+stagger_midnight = 1               # ticks between two midnight slots (slot k at 00:0k); 0: every daily pass on tick 0,
+                                   # the base. The last slot (12) times this must stay under 60 (asserted at load)
 
 # The perf pass phase 1 (OPEN-195; exec/routine.rs, exec/actions.rs `finishes_early`): the Rest loop. A Rest is cut
 # only by a work signal the Work goal will answer: the departure gate is false while Work refuses (a sick day, a

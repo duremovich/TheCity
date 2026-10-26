@@ -2948,7 +2948,7 @@ pub fn run(world: &mut World) {
     if u64::from(tod) == u64::from(world.config.fixers.match_hour) * TICKS_PER_HOUR {
         match_day(world);
     }
-    if tod == 0 {
+    if crate::systems::midnight::due(world, crate::systems::midnight::Mid::Tail) {
         daily(world);
     }
 }
@@ -4046,7 +4046,7 @@ pub fn run_offers(world: &mut World, fixer: EntityId) {
     let Some(k) = world.comp::<Broker>(fixer) else { return };
     let regulars: Vec<EntityId> = k.regulars.keys().copied().collect();
     let min = world.config.fixers.gun_skill_min;
-    let now = world.tick;
+    let now = crate::systems::midnight::stamp(world);
     let mut given = 0;
     for r in regulars {
         if given >= n {

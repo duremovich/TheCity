@@ -318,7 +318,7 @@ fn test_materialised_look_like_born_residents() {
 fn test_immigration_draws_from_ambient_flats_first() {
     let mut w = ambient_world(42, 4.0);
     w.econ.outside_wage_pin = Some(0.1);
-    w.run_ticks(7 * TICKS_PER_DAY + 1);
+    w.run_ticks(7 * TICKS_PER_DAY + citysim::systems::midnight::window(&w));
     let pull: u32 =
         w.stats.history.iter().map(|r| r.jobs.migrants_pull).sum::<u32>() + w.stats.current.jobs.migrants_pull;
     // Review finding 6: `immigrants` counts the Ambient arrivals too; an edge
@@ -345,7 +345,7 @@ fn test_immigration_draws_from_ambient_flats_first() {
 fn test_ambient_arrivals_count_as_immigrants() {
     let mut w = ambient_world(42, 4.0);
     w.econ.outside_wage_pin = Some(0.1);
-    w.run_ticks(7 * TICKS_PER_DAY + 1);
+    w.run_ticks(7 * TICKS_PER_DAY + citysim::systems::midnight::window(&w));
     let pull: u32 =
         w.stats.history.iter().map(|r| r.jobs.migrants_pull).sum::<u32>() + w.stats.current.jobs.migrants_pull;
     let counted: u32 = w.stats.history.iter().map(|r| r.immigrants).sum::<u32>() + w.stats.current.immigrants;

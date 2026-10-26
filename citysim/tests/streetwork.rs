@@ -506,6 +506,7 @@ fn test_bug6_elder_opens_a_vendor_pitch_at_the_nearest_spot() {
         .map(|t| t.manhattan(home))
         .min()
         .expect("a free spot");
+    w.tick += u64::from(citysim::systems::midnight::tick_of(&w, citysim::systems::midnight::Mid::LivingEarly));
     streetwork::daily(&mut w);
     let p = w.jobs2.pitches.get(&a).expect("the elder opened a pitch");
     let kind = w.config.trade(p.trade).and_then(streetwork::pitch_kind);

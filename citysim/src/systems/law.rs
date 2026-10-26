@@ -1618,7 +1618,7 @@ pub fn run(world: &mut World) {
         // Lives at work phase 7 (§ 5.2): the van, at `transfer_hour`.
         crate::prof::timed!("law::stations::van", crate::systems::stations::van(world));
     }
-    if world.tick_of_day() == 0 {
+    if crate::systems::midnight::due(world, crate::systems::midnight::Mid::Law) {
         crate::prof::timed!("law::expire_warrants", expire_warrants(world));
         // L2 (L21): the held prisoners' day (meetings, the pitch), before their meal.
         crate::prof::timed!("law::held_daily", held_daily(world));

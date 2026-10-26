@@ -239,6 +239,7 @@ fn test_trauma_subscription_weekly_and_lapses() {
         x.coins = 0;
     }
     w.tick = (w.tick / TICKS_PER_DAY + 8) * TICKS_PER_DAY;
+    w.tick += u64::from(citysim::systems::midnight::tick_of(&w, citysim::systems::midnight::Mid::Tail));
     wounded::run(&mut w);
     assert_eq!(w.contracts[&rec.id].status, ContractStatus::Expired, "lapsed");
     assert!(!w.trauma_clients.contains_key(&c));
@@ -354,7 +355,7 @@ fn test_stabilised_patient_fed_and_off_the_quota() {
         n.hunger = 0.2;
     }
     let to_midnight = TICKS_PER_DAY - w.tick % TICKS_PER_DAY;
-    w.run_ticks(to_midnight + 1);
+    w.run_ticks(to_midnight + citysim::systems::midnight::window(&w));
     if wounded::is_down(&w, v) {
         assert!(w.comp::<citysim::Needs>(v).unwrap().hunger > 0.2, "fed in care");
     }

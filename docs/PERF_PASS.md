@@ -392,6 +392,51 @@ changes the map, not a mechanism.
   over every roll (rows, prices behind memos a purchase drops, pantries, rosters), no one site over 0.1 s a game
   day at 20k. No new test (R7): the identity is the proof, and the determinism test's 4-thread leg runs the same
   hour as its 1-thread leg.
+- **Phase 7b** (`OPEN-184` annotated, `[perf] stagger_midnight`, `CITYSIM_STAGGER_OFF`). The daily passes after the
+  price move run whole, in their old order, in 12 slots over the night's first minutes (`systems/midnight.rs`: slot k at
+  tick of day k x `stagger_midnight`, 1 shipped), not all on tick 0; a pure function of the tick, so a save at any tick
+  resumes the same and nothing is saved for it. Slot 0 keeps `memory`'s decay, `ownership`, `assets`, `tech`, `classes`,
+  `districts` and `economy` (the price move), `lod`'s ledger roll and every hourly pass at 00:00; then `bind` and `word`
+  to the kin's hearing (1), `word` from the reputation rebuild (2), `law` and `law_brain`'s day (3), `social::daily`
+  (4), the gangs' day (5), `corp_brain` (6), `living` to `service::tower_daily` (7), `living` from `faith::daily` (8),
+  the light tail (9: `outside`'s parents, `contracts`, `leverage`, `captives`, `wounded`, `governance`'s boards,
+  `attention`'s pools, the last three out of their hourly gate), `demography` in three (10-12: to the job moves, the job
+  search to the Spire homes, the relocation on). The slots follow phase 7's 100k profile: one heavy pass a slot. **Day
+  0's midnight stays whole on tick 0**: staggered, every think of ticks 1-11 on the seeded city ran before its hires,
+  posts and orders and the 2k counters moved from day 0 (arrests, refusals). Two passes read "the tick before now" as
+  yesterday (`news`' reporters who worked: the bylines fell 861 -> 25 on 2k 42-44 x 120; `competence`'s knowledge
+  work) and read `midnight(world) - 1`; a start or deadline a staggered pass stamps for whole days, read on the hour or
+  at another slot, is stamped from the midnight (`midnight::stamp`: a construction site begun at 00:07 stood at 01:00,
+  after the job search that staffed it, so a new Hq's office staff came a day late, `emp_hq` halved on days 4-7; the
+  day's run orders outlived `tech`'s 00:00 sweep and a freelance hack overwrote a lapsed corp order without a re-kit,
+  a stale `Kit` the debug index check caught). `[perf] stagger_midnight` is the world's: written into a save when set,
+  absent = 0 = the base, `run --load` keeps the save's (the host's `threads` only); `Config::load` asserts the last slot
+  inside 00:59. SAVE_VERSION stays 67 (a config key, as `[rest]`). Statistical mirror (doctrine 7): the Statistical hour
+  is a per-tick pass like the think; the stagger moves the daily passes for both tiers alike, and both see the city
+  half-rolled between two slots. Off identity (`CITYSIM_STAGGER_OFF=1` against `c472f6e`, 2k 42-44 x 30): events,
+  report, save IDENTICAL. Counters 42-44 x 120, base -> branch (mean): Murders 37 -> 29 (51/22/37 -> 27/31/28), J24
+  0.743 -> 0.756, J25 0.014 -> 0.014, arrests 2,689 -> 2,558, wallets 70.9k -> 79.0k, gang income 28.9k -> 29.0k,
+  tribute 16.3k -> 16.4k, wages 902k -> 913k, rent 82.1k -> 81.4k, evictions 200 -> 209, followers 27.1k -> 23.7k,
+  vacancies open 697 -> 823 (seed 42 701 -> 1,050, seed 44 743 -> 634), bylines 861 -> 917; `rep_flips` 28 -> 546 is
+  seed 44's 18 -> 1,442, two days of `OPEN-211`'s per-tick rethink (934 and 486) on its new trajectory (7d's fix).
+  Days 0-6, what still moves on all three seeds is the half-rolled city's thinks, small: the El's night refusals for
+  danger 89 -> 104 and fare 40 -> 51, hangout stays 180 -> 152; the late spread is a trajectory's. 20k `isle_m_k2` seed 42 x 30 (8 threads, base then branch back to back, print only): the longest tick
+  days 25-30 386-470 ms at 00:00 -> 89-248 ms (00:07, 00:11 or 21:00), days 2-19 264-462 -> 85-111 ms; end employed 11,305
+  -> 11,286, homeless 295 -> 284, Murders 42 -> 47, arrests 2,517 -> 2,479. **The device**, 100k seed 42 x 30 at 8
+  threads against phase 9's run: the longest tick days 25-30 **2.59-2.74 s at 00:00 -> 0.80-0.94 s at 21:00**
+  (892/940/914/802/810/828 ms), every day from 2 on under 1 s but four: the job search alone at 00:11 on days 7 and
+  14 (1.57 and 1.21 s; profiled, `pick_graded` 0.9 s those days) and two 21:00s, 1.24 and 1.04 s (days 18, 22); ticks/s days
+  25-30 25/26/23/28/26/25 -> 26/18/20/27/26/25 (median 25.5 both; the box shared with two coders, print only), the
+  run's median 31 -> 29; peak working set 3.10 -> 3.13 GB; the end city homeless 2,903 -> 2,837, employed 56,184 ->
+  56,231. `run --prof-midnight` profiles every tick of the window, `PROFDAY <day> <tick of day>`: at 100k days 2-15
+  every slot under 0.65 s but the job search on days 7 and 14 (tick 0 0.19-0.54 s, `own::rehouse` 0.29 s on day 8). Tests that
+  drove one midnight tick run `midnight::window` ticks (a direct call to a daily `run` sets its slot's tick); the
+  determinism hash runs through day 1's last slot, the CLI resume identity gains a save at 00:05 of day 1 (R7: extended,
+  no new test). **Deviations:** day 0 is not staggered (above); the stamp fix covers the sites the counters showed (the
+  construction site, the run orders of `gang_daily`, `corp_virt_raid`, `stat_pass`, `run_offers`, `campaign_step`),
+  not every `now + days` a daily pass writes (84 sites): a span begun at a slot and read by an earlier slot ends up to
+  12 minutes, or an hour on the hour, later. The job search's spikes (1.2-1.6 s, one pass, not split by the brief) are
+  the next midnight lever; the gate's days 25-30 are clear of them on seed 42.
 - **Phase 7c** (`e8d9721`, `47c113e`; `OPEN-205` closed, `OPEN-209` and `OPEN-184` annotated). `[lod] coworker_crew`
   0 -> 32 (R8): a Statistical worker's hour of co-work bonds it with the 32 same-role co-workers of its employer nearest
   it in the roster (16 each side, wrapping; `lod::crew_above`, Scale S1's mechanism, unchanged), chosen before the

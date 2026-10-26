@@ -365,10 +365,14 @@ fn test_school_meals_off_with_no_net() {
             })
             .expect("a Home with two adults");
         let kid = demography::spawn_child(x, adults[0], adults[1], home);
+        // The perf pass phase 7b: to day 1's child pass (its midnight slot),
+        // the pantry bare as it opens.
+        use citysim::systems::midnight::{slot, Mid};
+        x.run_ticks(1 + u64::from(slot(Mid::DemoEarly) * x.config.perf.stagger_midnight));
         let b = x.comp_mut::<Building>(home).expect("home");
         b.stock_food = 0;
         b.child_food_debt = 0.9;
-        x.run_ticks(2);
+        x.run_ticks(1);
         unfed.push(x.comp::<Child>(kid).map_or(0, |c| c.hunger_days));
     }
     assert_eq!(unfed[0], 0, "with the net the school meal fed the child");

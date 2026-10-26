@@ -213,7 +213,7 @@ fn test_competence_falls_after_exec_dies() {
             s.persuasion = 0.0;
         }
     }
-    let to_midnight = TICKS_PER_DAY - w.tick % TICKS_PER_DAY + 2;
+    let to_midnight = TICKS_PER_DAY - w.tick % TICKS_PER_DAY + 1 + citysim::systems::midnight::window(&w);
     w.run_ticks(to_midnight);
     let after = w.comp::<Corp>(corp).map(|c| c.competence).expect("corp");
     assert!(after < before, "competence {before} -> {after}");

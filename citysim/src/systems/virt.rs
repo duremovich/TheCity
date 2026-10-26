@@ -2551,7 +2551,7 @@ pub fn gang_daily(world: &mut World, gang: EntityId) {
         return;
     }
     let prize = crate::systems::raid::corp_target(world, gang);
-    let now = world.tick;
+    let now = crate::systems::midnight::stamp(world);
     let mut taken: Vec<NodeId> = Vec::new();
     let max = world.config.hack.virt_runners as usize;
     let runners: Vec<EntityId> =
@@ -2770,7 +2770,7 @@ pub fn corp_virt_raid(world: &mut World, corp: EntityId) {
             Err(_) => return,
         }
     }
-    let now = world.tick;
+    let now = crate::systems::midnight::stamp(world);
     let wipe = matches!(run.purpose, Purpose::Data { wipe: true });
     let order = RunOrder {
         patron: Some(corp),
@@ -3096,7 +3096,7 @@ pub fn stat_pass(world: &mut World) {
             continue;
         }
         let Some(portal) = offer.portal else { continue };
-        let now = world.tick;
+        let now = crate::systems::midnight::stamp(world);
         let order = RunOrder {
             patron: None,
             purpose: offer.purpose,
