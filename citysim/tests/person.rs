@@ -3073,6 +3073,12 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
         while w.tick < to {
             if let Some(gg) = w.comp_mut::<citysim::Gang>(g) {
                 gg.order = citysim::components::Order::Expand;
+                // Pressure pass (day-13 city): the first veteran-led gang is found a
+                // day later than before, with an order waiting at court; a waiting
+                // order sends the lieutenant (the pimp) to the Hideout for hours
+                // (`leaders::attend_due`) and he reached his pitch only as its hours
+                // closed. The probe is about the round, not about court.
+                gg.pending_order = None;
             }
             // He is no client of his own pitch: with the intimacy line raised, a body
             // standing at the pitch is a client, and the pimp stands there. On a
@@ -3098,6 +3104,20 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
                 // The step walks a fresh path from where he stands.
                 if let Some(b) = w.comp_mut::<Brain>(pimp) {
                     b.exec = citysim::exec::ExecState::Idle;
+                }
+            }
+            // Pressure pass (day-13 city): his evening's Unwind (a venue he walks to
+            // and sits at) ran to midnight and his round, which sets out only in the
+            // pitch hours, began as they closed. He is let out of it as they open
+            // (22:00), once a night, to take his round.
+            if w.tick % TICKS_PER_DAY == 22 * TICKS_PER_HOUR {
+                if let Some(b) = w.comp_mut::<Brain>(pimp) {
+                    if b.current_goal != Some(citysim::components::GoalKind::GangWork) {
+                        b.current_goal = None;
+                        b.plan = None;
+                        b.plan_step = 0;
+                        b.exec = citysim::exec::ExecState::Idle;
+                    }
                 }
             }
             run_to(w, pimp, w.tick + 1, |w| each(w));
