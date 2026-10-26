@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 The checklist that keeps the repo honest between sessions. Do every step; paste the evidence (command output, shas) into your reply. Nothing here is optional.
 
-1. **Main is green on the exact tree.** `python tools/test.py merge` on main (the change tier too if anything merged since its last run). Paste the footers. A RED tier blocks the close.
+1. **The shadow read** (doctrine 2, 2026-10-26): one diary per archetype the milestone touched (`citysim-cli shadow`, at 100k on the island when it can be iterated, else 20k); what reads wrong at the player level becomes an `OPEN-nnn` row or the next pass's first item. Then **the heavier tiers as prints**: `python tools/test.py merge` and `milestone` on main (`/merge-set`). Paste the footers. A RED tier is a broken-system signal: fix it or open a row; it does not block the close by itself.
 2. **`python tools/test.py report`** (`--since <the milestone's base sha>`). Paste the table. Every cap over (god scenarios, asserted bullets, pass-named files, ignores without a reason) is fixed now or becomes a `docs/OPEN.md` row owned by the next milestone; a budget breach the same. Lint must be green: `python tools/test.py lint`.
 3. **`docs/OPEN.md`**: every carry-over the milestone produced gets a row (`OPEN-nnn`, next free id); every row the milestone fixed becomes `closed <sha>`; the spec's "Implemented: deviations" tags each open item with its `OPEN-nnn`. No open list anywhere else (HANDOFF, SHADOW, GOD docs point at OPEN.md).
 4. **The spec**: "Implemented: deviations" written (what differs from the spec and why, with the numbers against the base); the god write-up updated or the phase scenarios deleted to `docs/history/` per `docs/TESTING.md` § caps.

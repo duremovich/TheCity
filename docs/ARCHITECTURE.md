@@ -414,9 +414,9 @@ The config is part of the saved `World`: a save resumes under the config it was 
   (`stream_id_*`), so they never collide; `rng.rs`'s own tests check that.
 - **Pure hashes**: `rng::splitmix64` and `systems::econ::{hash_unit, hash_normal}(seed, purpose, a, b)` with a purpose
   constant unique to the call site (e.g. `econ::PURPOSE_*`).
-- **The rule**: a new mechanism never draws from the world stream. It uses a keyed stream or a hashed purpose unique
-  to its site, so an off switch leaves every other draw where it was and the switched-off city is byte-identical to
-  main.
+- **The habit** (a gate until 2026-10-26, now a habit; CLAUDE.md § The doctrine): a new mechanism never draws from the
+  world stream. It uses a keyed stream or a hashed purpose unique to its site, so a seed replays and one change moves
+  only its own draws. Nothing asserts identity any more (no save-hash, thread-count or off-switch identity).
 - No `HashMap`/`HashSet` iteration and no wall clock in sim code. Ordered maps are `BTreeMap` / `BTreeSet`; `EdgeMap`
   sorts when iterated.
 - **Saves** (`save.rs`): the whole `World` as compact RON (`to_ron`, `from_ron`, `save_to_file`, `load_from_file`,
@@ -487,19 +487,19 @@ Checklist (the doctrine is in `CLAUDE.md`; test rules in `docs/TESTING.md` and `
 4. **Randomness**: a keyed stream or a hashed purpose unique to the site; never the world stream.
 5. **Money** moves only through `ownership::pay` / `charge` / `cross_*` / `escrow_*` with a `Flow`.
 6. **The Statistical mirror** in `systems/lod.rs` (a `stat_*` roll, a stat-table row, or a ledger rate), or a written
-   reason why none is needed; check the parity test still holds.
+   reason why none is needed: one sentence in the spec (no parity test since 2026-10-26).
 7. **Visibility**: `World::push_event` for story events; `DailyStats` counters for the run report; gate numbers print
    as `FINDING` lines (`eprintln!("FINDING …")`), never asserts.
 8. **`SAVE_VERSION`** bumped in `save.rs`, with a line in its changelog comment, if the saved shape changed; new
-   fields take serde defaults.
-9. **A unit test in a seeded world** that fails on the base: build the world, set the preconditions by hand, call the
-   system, assert the effect, ideally against a control. Helpers live in `citysim/tests/common/mod.rs` (`mod common;` at the top of the test file): `world`, `dole_world`, `world_with`, `run_days`, `adults`, `coins`, `set_coins`, `corp_named`.
-10. **The off switch** while the phase is in flight (a config `enabled` flag and/or a `CITYSIM_<NAME>_OFF=1` env var
-    read in `Config::load_from`); off must be byte-identical to main on seeds 42-44 x 30 days. Retire it when the
-    phase lands: delete the env read, keep the config path. No retired milestone's env switch is read today
-    (`OPEN-094`, closed in the pre-view pass phase 0); the in-flight ones are the live phases' own.
-11. **The spec**: write any deviation into the milestone spec (with an `OPEN-nnn` tag if it leaves work open), and
-    state the Statistical mirror in the commit.
+   fields take serde defaults. A save must load; an old save need not (no players yet, 2026-10-26).
+9. **The shadow read** (doctrine 2, 2026-10-26): the diaries of the archetypes the mechanism touches
+   (`citysim-cli shadow`), quoted in the report. A unit test in a seeded world only where a broken-system signal
+   needs one and the brief names it (the test count is a lint ratchet, `docs/TESTING.md`): build the world, set the
+   preconditions by hand, call the system, assert the effect. Helpers live in `citysim/tests/common/mod.rs`.
+10. **No off switch** (2026-10-26; until then every phase carried a `CITYSIM_<NAME>_OFF=1` env var proven
+    byte-identical and retired at the close). A behaviour change lands as a behaviour change, its counters in the commit.
+11. **The spec**: write any deviation into the milestone spec (with an `OPEN-nnn` tag if it leaves work open), the
+    mirror sentence with it.
 
 ### Worked example: Shadow V4 bug 21, one deed in at most N Feeds (`79af4bc`)
 
