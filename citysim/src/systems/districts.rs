@@ -205,8 +205,10 @@ pub fn rebuild(world: &mut World) {
         rows: rows.iter().map(|r| (r.name.clone(), r.zone, r.x_from, r.x_to)).collect(),
         rects,
     };
+    // `spatial::scans()` (the unit tests) builds it every call, the base
+    // walk `life::tests::test_indexed_build_matches_the_scans` compares.
     let (geo, hit) = match world.district_geo.slot().take() {
-        Some(g) if g.key == key => (g, true),
+        Some(g) if g.key == key && !crate::spatial::scans() => (g, true),
         _ => (district_geo(world, &rows, key), false),
     };
     let n = rows.len();

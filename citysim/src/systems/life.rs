@@ -1855,7 +1855,9 @@ mod tests {
     /// with the scans they replaced (`spatial::scans`), byte for byte: the
     /// same hires in the same order, the same movers to the same Homes, over
     /// the pre-roll's rounds of builds (an index left stale by a build, a
-    /// hire or a move shows here). The shipped city and the generated 4,000
+    /// hire or a move shows here; the perf pass phase 7: and
+    /// `districts::rebuild`'s grid memo, built every call under the scans).
+    /// The shipped city and the generated 4,000
     /// city. `band_refusals` is cleared on both sides: the scan's
     /// `pick_candidate` counts none (the pooled walk's count is pinned by
     /// the save identity against the base binary).
