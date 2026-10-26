@@ -349,6 +349,10 @@ use crate::world::World;
 /// (written while it holds anything), `VisitWhy::{Confront, Dun}`,
 /// `EventKind::{UnderWater, Loan, Confronted}`, `[underwater]` (written only
 /// when set) and the `Jobs2Cols` `uw_*` columns (serde defaults).
+/// Also 69 (the pressure pass phase 2, OPEN-176, merged beside phase 6): `Config.customers`
+/// (`[customers]`), `ActionKind::Patch`, `Misery.patched_at`,
+/// `ArmsState.quarter`, `Jobs2State.{hailed, fares_shift}` (serde defaults;
+/// an old save need not load, 2026-10-26).
 pub const SAVE_VERSION: u8 = 69;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.

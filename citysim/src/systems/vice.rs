@@ -305,6 +305,17 @@ pub fn round_pitch(world: &World, id: EntityId) -> Option<EntityId> {
         return None;
     }
     let hour = (world.tick / TICKS_PER_HOUR) as usize;
+    // The pressure pass phase 2 (OPEN-120): a pimp's body walks to the
+    // nearest pitch due, not the
+    // hour's turn across the district (V9: 334-360 min legs, no collection).
+    if crate::systems::customers::cfg(world).is_some()
+        && world.comp::<Brain>(id).is_some_and(|b| b.lod != Lod::Statistical)
+    {
+        if let Some(from) = world.comp::<Position>(id).map(|p| p.tile) {
+            let near = |o: &EntityId| world.jobs2.pitches.get(o).map_or(u32::MAX, |p| p.spot.manhattan(from));
+            return due.iter().copied().min_by_key(|o| (near(o), *o));
+        }
+    }
     Some(due[hour % due.len()])
 }
 

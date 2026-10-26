@@ -58,6 +58,8 @@ use serde::{Deserialize, Serialize};
 
 const PURPOSE_OPEN: u64 = 0x5713_0001;
 const PURPOSE_PICK: u64 = 0x5713_0002;
+/// The pressure pass phase 2: a body's hail (one a day).
+const PURPOSE_HAIL: u64 = 0x5713_00a1;
 const PURPOSE_CORNER: u64 = 0x5713_0003;
 const PURPOSE_STREET: u64 = 0x5713_00F1;
 const PURPOSE_CAB: u64 = 0x5713_0004;
@@ -246,6 +248,8 @@ pub fn daily(world: &mut World) {
     world.jobs2.cab_rides.clear();
     world.jobs2.cab_rolled.clear();
     world.jobs2.exec_home_rolled.clear();
+    world.jobs2.hailed.clear();
+    world.jobs2.fares_shift.clear();
     // A parcel no courier's round reached went back to the Yard.
     let left = std::mem::take(&mut world.jobs2.parcels).len() as u32;
     if left > 0 {
@@ -519,6 +523,7 @@ pub fn hourly(world: &mut World) {
         return;
     }
     restock(world);
+    vendor_passers(world);
     let ended = crate::systems::industry::end_day_posts(world);
     ownership::jobs2_row(world).day_posts_ended += ended;
     if world.tick_of_day() == world.config.jobs2.corner_hour {
@@ -617,6 +622,91 @@ pub fn stat_vendor_meal(world: &mut World, id: EntityId, market: EntityId) -> bo
         crate::systems::service::encounter(world, v, id, None, d, crate::components::ServeKind::Buyer, paid);
     }
     true
+}
+
+/// The pressure pass phase 2 (OPEN-176, `[customers]`): a working
+/// vendor's stall sells, each hour, up to `vendor_per_hour` meals to the
+/// hungry bodies passing it (Full or Coarse, out on the street within
+/// `vendor_tiles`, hunger under `vendor_hunger`, the price in hand; the
+/// lowest hash of the hour first), at the off-screen buyer's price
+/// (`vendor_markup` × the nearest Market's synth meal): the meal eaten
+/// there, the coins to the vendor, the Buyer encounter on both sides. The
+/// off-screen buyer is `stat_vendor_meal`.
+fn vendor_passers(world: &mut World) {
+    let Some(c) = crate::systems::customers::cfg(world).cloned() else { return };
+    let owners: Vec<EntityId> = world.jobs2.pitches.keys().copied().collect();
+    let hour = world.tick / TICKS_PER_HOUR;
+    for o in owners {
+        let Some(p) = world.jobs2.pitches.get(&o).cloned() else { continue };
+        if kind_of_pitch(world, &p) != Some(PitchKind::Vendor) || p.stock == 0 || !working(world, &p) {
+            continue;
+        }
+        let market = world
+            .buildings_of_kind(BuildingKind::Market)
+            .iter()
+            .copied()
+            .filter(|&m| world.comp::<Building>(m).is_some_and(|b| !b.demolished))
+            .min_by_key(|&m| (world.comp::<Building>(m).map_or(u32::MAX, |b| b.door.manhattan(p.spot)), m));
+        let Some(m) = market else { continue };
+        let mut buyers: Vec<(u32, EntityId)> = world
+            .agents_near(p.spot, c.vendor_tiles, None)
+            .into_iter()
+            .filter(|&id| {
+                id != o
+                    && world.comp::<Brain>(id).is_some_and(|b| b.lod != Lod::Statistical)
+                    && world.comp::<Position>(id).is_some_and(|x| x.building.is_none())
+                    && crate::systems::demography::is_adult(world, id)
+                    && !world.has::<Sentence>(id)
+                    && crate::systems::law::living(world, id)
+                    && world.comp::<crate::components::Needs>(id).is_some_and(|n| n.hunger < c.vendor_hunger)
+            })
+            .map(|id| (hash(world, PURPOSE_PICK, u64::from(id.index) ^ u64::from(o.index), hour).to_bits(), id))
+            .collect();
+        buyers.sort_unstable();
+        let mut sold = 0u8;
+        for (_, id) in buyers {
+            if sold >= c.vendor_per_hour {
+                break;
+            }
+            if world.jobs2.pitches.get(&o).is_none_or(|x| x.stock == 0) {
+                break;
+            }
+            let (_, synth) = crate::systems::diet::offer(world, id, m);
+            let price = ((synth as f32 * world.config.jobs2.vendor_markup).ceil() as i64).max(1);
+            if coins(world, id) < price {
+                continue;
+            }
+            let paid = ownership::pay(world, Some(id), Some(o), price, Flow::Food);
+            if paid <= 0 {
+                continue;
+            }
+            if let Some(x) = world.jobs2.pitches.get_mut(&o) {
+                x.stock -= 1;
+                x.take_today += paid;
+            }
+            let cfg = world.config.needs.clone();
+            if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
+                crate::needs::eat(n, &cfg);
+            }
+            crate::systems::health::ate(world, id, crate::components::MealKind::Synth);
+            world.mark_day(id, crate::components::trace_flags::ATE);
+            world.remember(id, crate::components::MemoryKind::Ate, None, 0.2, 0.3, false);
+            let row = ownership::jobs2_row(world);
+            row.vendor_meals += 1;
+            row.vendor_take += paid;
+            row.vendor_bodies += 1;
+            crate::systems::service::encounter(
+                world,
+                o,
+                id,
+                None,
+                p.district,
+                crate::components::ServeKind::Buyer,
+                paid,
+            );
+            sold += 1;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -730,6 +820,18 @@ fn day_posts(world: &World, wage: i64) -> Vec<EntityId> {
             out.extend(std::iter::repeat_n(y, usize::from(cfg.yard_posts)));
         }
     }
+    // The pressure pass phase 2 (OPEN-176): every open Yard's foreman
+    // takes `shape_up_posts` hands at the dawn shape-up, sites or none
+    // (the corner's posts dried up with the sites: two picks in a week).
+    if let Some(n) = crate::systems::customers::cfg(world).map(|c| usize::from(c.shape_up_posts)) {
+        for k in [BuildingKind::ConstructionYard, BuildingKind::FreightYard] {
+            for y in world.buildings_of_kind(k).to_vec() {
+                if crate::systems::industry::open(world, y) {
+                    out.extend(std::iter::repeat_n(y, n));
+                }
+            }
+        }
+    }
     if cfg.harvest_seasons.contains(&world.season()) {
         for f in world.buildings_of_kind(BuildingKind::Farm).to_vec() {
             if world.comp::<Building>(f).is_some_and(|b| !b.demolished && !b.derelict) {
@@ -840,6 +942,12 @@ fn dawn_pick(world: &mut World) {
         crate::systems::demography::hire(world, a, b, role);
         if let Some(j) = world.comp_mut::<Job>(a) {
             j.until = Some(until);
+        }
+        // The pressure pass phase 2: the shape-up is a meeting (both diaries).
+        if let Some(f) = foreman.filter(|_| crate::systems::customers::cfg(world).is_some()) {
+            let sal = world.config.service.served_salience;
+            world.remember(f, crate::components::MemoryKind::Served, Some(a), sal, 0.1, false);
+            world.remember(a, crate::components::MemoryKind::Served, Some(f), sal, 0.2, false);
         }
         picked[i] += 1;
         ownership::jobs2_row(world).day_posts_filled += 1;
@@ -1352,6 +1460,105 @@ pub fn full_cab(world: &mut World, id: EntityId, target: &crate::exec::GotoTarge
     world.jobs2.cab_rolled.insert(id);
     let ride = cab_roll(world, id, &job)?;
     let here = crate::exec::walk_origin(world, id)?;
+    take_ride(world, id, target, ride, here)
+}
+
+/// The pressure pass phase 2 (OPEN-176, `[customers]`): a body's GoTo to a
+/// building `hail_min_tiles` or more away, not to work (the commute's roll
+/// is `full_cab`'s), hails a cab once a day when rich (`hail_rich_coins`)
+/// or hurried (its goal is `Treat`, `Flee` or `Rescue`, or a shift starting
+/// within the walk), holding the fare and `cab_reserve`, on `p_hail` (a
+/// hash of the rider and the day): the Garage nearest the rider with
+/// drivers and rides left sends a driver's body (`book_cab`, the pick-up
+/// and the drop-off legs) or its off-screen cab, as the commuter's ride.
+pub fn hail_cab(world: &mut World, id: EntityId, target: &crate::exec::GotoTarget) -> Option<crate::exec::ExecState> {
+    let c = crate::systems::customers::cfg(world)?.clone();
+    if !crate::systems::service::street_on(world) || world.jobs2.hailed.contains(&id) {
+        return None;
+    }
+    let to_b = target.building?;
+    let here = crate::exec::walk_origin(world, id)?;
+    let to = world.comp::<Building>(to_b)?.door;
+    let tiles = here.manhattan(to);
+    if tiles < c.hail_min_tiles {
+        return None;
+    }
+    // Late for a shift: the walk is longer than the time left before it.
+    let walk = Tick::from(tiles) * world.config.exec.move_ticks_full;
+    let late = world
+        .comp::<Job>(id)
+        .is_some_and(|j| j.employer == Some(to_b) && Tick::from(j.ticks_until_shift(world.tick_of_day())) < walk);
+    if world.comp::<Job>(id).is_some_and(|j| j.employer == Some(to_b)) && !late {
+        return None;
+    }
+    let cfg = &world.config.jobs2;
+    let fare = cfg.fare_base + (tiles as f32 * cfg.fare_per_tile).round() as i64;
+    let purse = coins(world, id);
+    if purse < fare + cfg.cab_reserve {
+        return None;
+    }
+    let goal = world.comp::<Brain>(id).and_then(|b| b.current_goal);
+    let hurried = late || matches!(goal, Some(GoalKind::Treat | GoalKind::Flee | GoalKind::Rescue));
+    if purse < c.hail_rich_coins && !hurried {
+        return None;
+    }
+    if hash(world, PURPOSE_HAIL, u64::from(id.index), world.day()) >= c.p_hail {
+        return None;
+    }
+    let open: Vec<EntityId> = world
+        .buildings_of_kind(BuildingKind::Garage)
+        .iter()
+        .copied()
+        .filter(|&g| crate::systems::industry::open(world, g))
+        .filter(|&g| world.jobs2.cab_trips.get(&g).copied().unwrap_or(0) < drivers(world, g) * cfg.rides_per_driver)
+        .collect();
+    // A hailed cab is the one a driver's body can bring soonest within the
+    // rider's wait, from any Garage; else the nearest Garage's (off screen).
+    let wait = match world.config.legs.as_ref() {
+        Some(l) => Tick::from(l.fare_wait_ticks),
+        None => Tick::from(world.config.service.cab_wait_ticks),
+    };
+    let body = open
+        .iter()
+        .filter_map(|&g| {
+            drivers_free(world, g, here).into_iter().filter(|&(_, eta)| eta <= wait).map(|(_, eta)| (eta, g)).min()
+        })
+        .min()
+        .map(|(_, g)| g);
+    let garage = body.or_else(|| {
+        open.iter()
+            .copied()
+            .min_by_key(|&g| (world.comp::<Building>(g).map_or(u32::MAX, |b| b.door.manhattan(here)), g))
+    })?;
+    world.jobs2.hailed.insert(id);
+    ownership::jobs2_row(world).cab_hails += 1;
+    let why = if late {
+        "late for a shift"
+    } else if hurried {
+        "in a hurry"
+    } else {
+        "flush"
+    };
+    let text = format!(
+        "{} hailed a cab ({why}) from {} to {}",
+        world.name_of(id),
+        world.district_name(world.district_of(here)),
+        world.name_of(to_b)
+    );
+    world.push_event(EventKind::Served, &[id, garage, to_b], text);
+    let ride = Ride { from: here, to, fare, by: RideBy::Cab(garage) };
+    take_ride(world, id, target, ride, here)
+}
+
+/// A ride taken now from `here` (the commuter's and the hailer's): the
+/// driver booked, the fare paid (or dodged), the leg timed or carried.
+fn take_ride(
+    world: &mut World,
+    id: EntityId,
+    target: &crate::exec::GotoTarget,
+    ride: Ride,
+    here: TilePos,
+) -> Option<crate::exec::ExecState> {
     let now = world.tick;
     // `pays_or_dodges` is `Some(dodge)`: `Some(true)` rides without paying.
     let dodges = crate::systems::transit::pays_or_dodges(world, id) == Some(true);
@@ -1651,7 +1858,10 @@ fn ride_encounter(world: &mut World, rider: EntityId, driver: Option<EntityId>, 
     }
     let kind = crate::components::ServeKind::Fare;
     match (driver, ride.by) {
-        (Some(s), RideBy::Cab(g)) => crate::systems::service::serve(world, s, rider, g, kind, 0),
+        (Some(s), RideBy::Cab(g)) => {
+            *world.jobs2.fares_shift.entry(s).or_default() += 1;
+            crate::systems::service::serve(world, s, rider, g, kind, 0)
+        }
         (_, RideBy::Rickshaw(r)) => crate::systems::service::encounter(world, r, rider, None, d, kind, 0),
         _ => {}
     }
@@ -2046,7 +2256,9 @@ fn corner_for(world: &World, id: EntityId) -> Option<TilePos> {
     }
     let from = world.comp::<Position>(id).map(|p| p.tile)?;
     let cs = corners(world);
-    corner_near(&cs, from, world.config.jobs2.corner_reach).map(|i| cs[i].1)
+    // The pressure pass phase 2: the jobless walk farther to a shape-up.
+    let reach = crate::systems::customers::cfg(world).map_or(world.config.jobs2.corner_reach, |c| c.shape_up_reach);
+    corner_near(&cs, from, reach).map(|i| cs[i].1)
 }
 
 /// The Pitch goal's considerations: one's own Pitch in its hours (as Work

@@ -4470,6 +4470,10 @@ pub struct Misery {
     /// take him back before the tick.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fired_from: Option<(EntityId, Tick)>,
+    /// The pressure pass phase 2 (care): the tick a lost fight's wound was
+    /// last seen to (a Clinic's or a back room's patch-up).
+    #[serde(default)]
+    pub patched_at: Tick,
 }
 
 /// Jobs & lives phase 3: an item's provenance (its last change of hands).

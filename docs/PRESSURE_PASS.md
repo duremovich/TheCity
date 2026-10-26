@@ -332,3 +332,75 @@ Rescue) is offered only to a candidate within `stakeout_ticks` of the target's H
 (`contracts::hunt_in_reach`, in `offer`; a gang's crew is not filtered). 20k seed 42 x 30, base (main 53cab2d) -> F1: foundings 17 -> 53,
 contracts fulfilled 48 -> 67 (posted 599 -> 642). 100k seed 42 days 0-8 (`run --legs`, one run each): bodied legs of 4 h+ 6.6 % -> 5.3 %, of 2 h+ 17.7 % -> 15.2 %; structural commutes of 240 min+ 7.0 % -> 4.6 %; sweeper Beat legs of 4 h+ 189 -> 57. Guards still hold 78 % of the 4 h+ legs (Patrol 5,178 -> 4,664): a guard's beat is a whole district dealt by his Station's share, walked from his Home at the shift's start (`stations::deal_beats`), and the El refuses many 180-tile trips (`slow`: the island's lines run the long way round). Measurement only: `run --legs` prints `#commute_role` rows; the
 diary's header has a Commute line (doors, tiles, travel) and a GoTo line its tiles. No test added.
+### Phase 2: the dead trades get customers (`OPEN-176`, `OPEN-190`, `OPEN-120`, `OPEN-017`; `systems/customers.rs`, `[customers]`)
+
+Each trade gets a body that walks to it, through the machinery it already had. Numbers: 20k `isle_m_k2` seed 42 x 30
+`--scaled`, main `7823960` (before) then phase 2 (after), one run each.
+
+- **The door** (`customers::door_cause`, read by `leisure::door_ok`): every venue whose door a fighting trade keeps
+  (the Bouncer's Club, Den, FightPit, StripClub; `kept_kind` reads the trade rows) turns away, with a bouncer on
+  duty, the drunk or high (`misery::influence`), a brawl's starter within `door_brawl_days`, a carried weapon
+  (`door_armed`), a rival gang's colours (the venue's gang: its owner, else the holder of its Homes) and, at a Club or
+  StripClub, rags (`door_dress_min`), on `door_p`. `door_seen` leaves the call to the door for every kept kind (it was
+  the Club's alone). The refusal event names the cause; a drunk, high, armed or brawling refused swings at the
+  bouncer on `door_swing_p × (1 − lawfulness)` (`customers::scene`: `law::resolve_fight_mods`, an Assault, "threw X
+  out" or "put X down"), and every refused holds a grudge on him. Refusals 111 -> 343 (353 of 374 on an earlier build for drink), scenes 0 -> 83 (one ejection a month).
+- **Clients** (`client_mult`, `lonely_need`): a venue with its tipped worker on duty (a companion's Lounge, a host's
+  Dollhouse, a dancer's StripClub or Club, a Brothel) scores `× (1 + lonely_pull × lonely + misery_pull × misery)` on
+  the Unwind ladder, and the lonely (intimacy under `lonely_intimacy`) with `client_coins` unwind for company with fun
+  full (`unwind_satisfied`). The visit is the existing `Enjoy` and its encounter. **Deviation:** OPEN-190 was closed
+  by the island F3 (the own-Home Unwind); the joytoy's missing clients were the ladder never weighting the
+  Dollhouse, not a missing goal. The chip host remembers nothing under the chip (by design), so her `[[serves]]`
+  row now writes the visit as an event (`event_on = ["done"]`). Lonely visits 4,833 (a new counter), companion visits 410 -> 427, Dollhouse visits 38 -> 74, Brothel 3,155 -> 3,393.
+- **The pimp** (`OPEN-120`): a pimp's round ran after a cult's sermon (`preach_plan` first: a creed gang's pimp
+  preached his pitch hours away), and the hour's pitch was the round's turn across the district (334-360 min legs).
+  The round now comes first in GangWork and a pimp's body walks to the nearest pitch due (the run predates the last change: the pitch with a take owed first).
+  Collections 41 -> 33 (the street workers are few: 128 street visits a month). The probe `probe_pimp_purse_grows_on_a_pitch_night` is the fix round's.
+- **Arms**: the frightened want a gun (`customers::frightened`: safety under `fear_safety`, or a living Enemy edge
+  held on them; `weapons::has_reason`); a gang under its armoury target names a quartermaster at midnight
+  (`weapons::quartermasters`, a body first) who walks to another gang's dealer through the Shop goal
+  (`assets::shop_choice`'s first offer) and buys with the gang's purse into its Hideout; the dealer and the buyer
+  each remember the sale. **Deviation:** crates abroad stay (a gang with no other dealer to buy from still ships);
+  the gang does not stop "paying itself", it buys from a rival first. Fear's wants 502 want-days, dealer sales 11 -> 12, gang
+  buys 0 (the gangs short of stock hold 0-180c; a dealer's T1 is 90c).
+- **Care-seeking** (`customers::care_choice`, `care_plan`, `ActionKind::Patch`): a lost fight within `hurt_hours`
+  is a wound to have seen to: the Treat goal plans `[GoTo(Clinic) > Patch]` to the nearest open Clinic within reach
+  (`patch_price`, the doctor's Patient encounter, "patched X up"), or, for the wanted, a gang member or the short, to
+  the back room within `back_reach_ticks` (`back_price` from the patient's pool: wallet, kin, gang; the broke pay
+  what they hold). A diagnosed cancer whose pool is short of the Clinic's treatment buys the back room's cut-rate
+  remission (`back_onco_price`, `back_onco_mult`, no cure). **Not done:** begging is Earn's as before; pawning has
+  no item sale to stand on (next step). Patched 57 (all at Clinics), back-room patients 0 (see below), Treated events 71 -> 124 Treated events.
+- **The back room's founder** (`gray::back_rooms`, `OPEN-017`): while fewer stand than one per `back_room_adults`
+  adults, a struck-off doc, else the least lawful licensed Ripperdoc under `rogue_lawful` (who quits his Clinic and
+  is struck off), opens one: a vacant Lot he can pay for, else the derelict Block nearest his Home refitted unpaid
+  (`founding::refit_with` takes a BlackClinic), and is hired as its doc. Back rooms 0 -> 5 (five rogue Ripperdocs, days 0-4, every one a derelict in the Sump).
+- **The cab**: a body's GoTo of `hail_min_tiles` or more hails a cab once a day (`streetwork::hail_cab`, after the
+  commute roll) when flush (`hail_rich_coins`) or hurried (late for a shift, Treat, Flee, Rescue), from the Garage
+  whose driver's body can come soonest within the wait (else the nearest Garage's off-screen cab); the ride is the
+  commuter's (`take_ride`: the pick-up and the drop-off legs). A cab driver's body is paid `min(1, fares /
+  cab_fares_full)` of the day's wage (`customers::fare_scale`): no fare, no pay for Rest at the Garage (a
+  Statistical driver keeps the wage). Hails 915, rides a body drove 44 -> 214 (cab trips 1,035 -> 1,825).
+- **The shape-up**: every open Construction and Freight Yard posts `shape_up_posts` day posts at the dawn pick, sites
+  or none (the corner's posts dried up with the sites), the broke jobless walk `shape_up_reach` tiles to a corner,
+  and the foreman and the pick each remember the meeting. Day posts filled 228 -> 393 (offered 1,028 -> 2,250).
+- **The vendor**: a working stall sells, each hour, up to `vendor_per_hour` meals to the hungry bodies on the street
+  within `vendor_tiles` (`streetwork::vendor_passers`; the Buyer encounter both sides). Vendor meals to bodies 2,099 (vendor meals 10,918 -> 12,710).
+- **The scav's day**: a scav gang's member off hours runs the gang's round of the bins (`customers::scav_plan`:
+  GangWork `[GoTo(Bin) > Scavenge]` at the nearest Market's bin within `scav_reach`, the find named in an event), and
+  walks `scav_reach` to a fresh body to strip and rip (`chrome::loot_target`). Scav rounds not counted (an event a round).
+- **Reads wrong / open** (the next pass's input): no back-room patient in 30 days: every back room stands in a
+  Sump derelict and the hurt who avoid a Clinic are elsewhere (300 travel minutes; distance is F1's); back-room docs
+  quit unpaid (a room with no patients pays no wage; 10 walkouts). The picked cabbies drove no fare (body rides 214 a
+  month city-wide; `fares_no_body` and `fares_too_far` still most of the hails). No gang bought from a rival's
+  dealer. The scav's round ran hourly through the night with nothing found (now one round a day, the day's gang
+  task; not re-shadowed). The four picked bouncers met no cause in their week though the city's doors turned 343 away.
+- **Not done:** the dealer's on-screen buyers (the stims corner is as it was; next step), pawning, the super's
+  round with tenant calls.
+- **The Statistical mirror**: the door is `door_ok`, which the off-screen visit already meets; the gang's buy runs
+  through `assets::stat_shop`'s weapon path; the shape-up's posts are world-side; the rest (clients' pull, care,
+  hails, vendor passers, the scav's round) are bodies' choices, the off-screen city keeping its learned rates.
+- No test (doctrine 2). `SAVE_VERSION` 69. Premises the moved city broke, re-pinned with the reason in place:
+  `gray_faith::test_struck_off_leaves_the_post` (the struck-off doc may open a back room that night: off the
+  licensed post, not jobless), `person::probe_cabbie_drives_a_fare_on_his_shift` (`p_hail` 0: the probe's rides are
+  the roll's), `captives::test_weak_gang_under_retaliate_takes_a_hostage` (the rival leader's spouse was jailed by
+  day 40: released in-test). `person::probe_pimp_purse_grows_on_a_pitch_night` stays red as on main (the fix round's).

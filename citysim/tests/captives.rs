@@ -361,6 +361,9 @@ fn test_weak_gang_under_retaliate_takes_a_hostage() {
         w.set_spouse(rl, s);
     }
     let spouse = w.spouse_of(rl).unwrap();
+    // The pressure pass phase 2's city jailed the rival leader's spouse by
+    // day 40 (a held spouse is no hostage): out, for the probe of the order.
+    w.remove::<citysim::Sentence>(spouse);
     captives::gang_hostages(&mut w);
     let c = w.contracts.values().find(|c| c.kind == ContractKind::Abduct).expect("an Abduct");
     assert_eq!((c.buyer, c.target, c.broker), (Some(g), Target::Agent(spouse), None));

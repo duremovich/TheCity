@@ -122,6 +122,11 @@ pub struct ArmsState {
     pub petty_today: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub ua_today: u32,
+    /// The pressure pass phase 2 (OPEN-176): a gang short of its armoury's
+    /// target sends a member (its quartermaster) to another gang's dealer;
+    /// member -> his gang, booked at midnight, cleared by the buy.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub quarter: BTreeMap<EntityId, EntityId>,
 }
 
 fn is_zero_u32(v: &u32) -> bool {
@@ -412,6 +417,10 @@ fn has_reason(world: &World, id: EntityId) -> bool {
     if world.jobs2.pitches.contains_key(&id) {
         return true;
     }
+    // The pressure pass phase 2 (OPEN-176): the frightened (low safety).
+    if crate::systems::customers::frightened(world, id) {
+        return true;
+    }
     let since = world.tick.saturating_sub(u64::from(cfg.robbed_days) * TICKS_PER_DAY);
     world.comp::<crate::components::Memory>(id).is_some_and(|m| {
         m.entries.iter().any(|e| e.tick >= since && matches!(e.kind, MemoryKind::WasRobbed | MemoryKind::Lost))
@@ -645,16 +654,22 @@ pub fn offer(
     from: crate::components::TilePos,
     require_open: bool,
 ) -> Option<(EntityId, u8, i64, bool)> {
-    if !wants(world, id) || world.comp::<Kit>(id).is_some_and(|k| k.weapon > 0) {
+    // The pressure pass phase 2: a quartermaster buys for his gang's
+    // armoury with its purse, from another gang's dealer only.
+    let qm = world.jobs2.arms.quarter.get(&id).copied();
+    if !wants(world, id) || (qm.is_none() && world.comp::<Kit>(id).is_some_and(|k| k.weapon > 0)) {
         return None;
     }
     let _t = crate::prof::scope!("weapons::offer");
-    let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins) - world.config.weapons.coin_reserve;
+    let coins = match qm {
+        Some(g) => world.purse(Some(g)) - world.config.weapons.coin_reserve,
+        None => world.comp::<Wallet>(id).map_or(0, |w| w.coins) - world.config.weapons.coin_reserve,
+    };
     if coins <= 0 {
         return None;
     }
     let door = |b: EntityId| world.comp::<Building>(b).map_or(u32::MAX, |bd| bd.door.manhattan(from));
-    if licensed(world, id) {
+    if qm.is_none() && licensed(world, id) {
         let shop = world
             .buildings_of_kind(BuildingKind::Gunsmith)
             .iter()
@@ -674,10 +689,8 @@ pub fn offer(
             }
         }
     }
-    let bar = deal_bars(world, require_open)
-        .into_iter()
-        .filter(|&b| bar_arms_dealer(world, b, require_open).is_some())
-        .min_by_key(|&b| (door(b), b))?;
+    let other = |b: EntityId| bar_arms_dealer(world, b, require_open).is_some_and(|(_, g)| Some(g) != qm);
+    let bar = deal_bars(world, require_open).into_iter().filter(|&b| other(b)).min_by_key(|&b| (door(b), b))?;
     let (_, gang) = bar_arms_dealer(world, bar, require_open)?;
     let t = surplus(world, gang).first().and_then(|&a| world.comp::<Asset>(a)).map(|x| x.tier)?;
     let p = dealer_price(world, t)?;
@@ -806,17 +819,29 @@ pub fn buy(
         return Ok(a);
     }
     let (dealer, gang) = bar_arms_dealer(world, seller, present).ok_or("no dealer")?;
+    let qm = world.jobs2.arms.quarter.get(&buyer).copied();
+    if qm == Some(gang) {
+        return Err("his own gang's dealer".into());
+    }
+    let coins = qm.map_or(coins, |g| world.purse(Some(g)));
     let a = surplus(world, gang).into_iter().next().ok_or("sold out")?;
     let tier = world.comp::<Asset>(a).map_or(1, |x| x.tier);
     let price = dealer_price(world, tier).ok_or("no price")?;
     if coins < price {
         return Err("cannot afford".into());
     }
-    ownership::pay(world, Some(buyer), Some(gang), price, Flow::Arms);
+    ownership::pay(world, Some(qm.unwrap_or(buyer)), Some(gang), price, Flow::Arms);
     let cut = world.config.weapons.dealer_cut.min(price);
     ownership::pay(world, Some(gang), Some(dealer), cut, Flow::Arms);
     let p = prov(world, ProvKind::Dealt, Some(dealer));
-    hand_over(world, a, Some(buyer), AssetLoc::Carried(buyer), p, false);
+    match qm.and_then(|g| world.hideout_of(g).map(|h| (g, h))) {
+        Some((g, h)) => {
+            hand_over(world, a, Some(g), AssetLoc::Stock(h), p, false);
+            world.jobs2.arms.quarter.remove(&buyer);
+            ownership::jobs2_row(world).gang_arms_buys += 1;
+        }
+        None => hand_over(world, a, Some(buyer), AssetLoc::Carried(buyer), p, false),
+    }
     ownership::jobs2_row(world).sold_dealer += 1;
     if let Some(b) = world.comp_mut::<crate::components::Body>(buyer) {
         b.last_shop = Some(now);
@@ -831,12 +856,26 @@ pub fn buy(
         tile,
         Some(buyer),
     );
-    let text = format!(
-        "{} bought a Weapon T{tier} from a dealer at {} for {price}",
-        world.name_of(buyer),
-        world.name_of(seller)
-    );
-    world.push_event(EventKind::AssetBought, &[buyer, seller, a], text);
+    let text = match qm {
+        Some(g) => format!(
+            "{} bought a Weapon T{tier} from {} at {} for {price}, for {}'s armoury",
+            world.name_of(buyer),
+            world.name_of(dealer),
+            world.name_of(seller),
+            world.owner_label(Some(g))
+        ),
+        None => format!(
+            "{} bought a Weapon T{tier} from {} at {} for {price}",
+            world.name_of(buyer),
+            world.name_of(dealer),
+            world.name_of(seller)
+        ),
+    };
+    world.push_event(EventKind::AssetBought, &[buyer, seller, a, dealer], text);
+    // The pressure pass phase 2: the dealer's side of it (a body's diary).
+    let sal = world.config.service.served_salience;
+    world.remember(dealer, MemoryKind::Served, Some(buyer), sal, 0.1, false);
+    world.remember(buyer, MemoryKind::Served, Some(dealer), sal, 0.1, false);
     world.jobs2.arms.wants.remove(&buyer);
     Ok(a)
 }
@@ -1394,8 +1433,56 @@ pub fn daily(world: &mut World) {
     fence_daily(world);
     carry_roll(world);
     wants_and_licences(world);
+    quartermasters(world);
     restock_guards(world);
     guard_shares(world);
+}
+
+/// The pressure pass phase 2 (OPEN-176; `[customers]`): a gang whose
+/// armoury is under its target and whose purse holds a dealer's price
+/// sends a member (a body first, else its lowest id; free, no dealer) to
+/// buy from another gang's dealer with a surplus, before it ships abroad:
+/// the quartermaster wants a weapon (the Shop goal walks him to the Bar),
+/// the gang's purse pays, the weapon goes to its Hideout. One a gang a day;
+/// a booking unspent by the next midnight is dropped.
+fn quartermasters(world: &mut World) {
+    world.jobs2.arms.quarter.clear();
+    if crate::systems::customers::cfg(world).is_none() {
+        return;
+    }
+    let price = match dealer_price(world, 1) {
+        Some(p) => p,
+        None => return,
+    };
+    let sellers: BTreeSet<EntityId> =
+        deal_bars(world, false).into_iter().filter_map(|b| bar_arms_dealer(world, b, false).map(|(_, g)| g)).collect();
+    if sellers.is_empty() {
+        return;
+    }
+    for g in world.gangs() {
+        let Some(h) = world.hideout_of(g) else { continue };
+        if stock_at(world, h).len() >= armoury_target(world, g) || !sellers.iter().any(|&x| x != g) {
+            continue;
+        }
+        if world.purse(Some(g)) < price + world.config.weapons.coin_reserve {
+            continue;
+        }
+        let Some(members) = world.comp::<Gang>(g).map(|x| x.members.clone()) else { continue };
+        let fit = |w: &World, m: EntityId| {
+            free_adult(w, m) && !crate::systems::stims::is_dealer(w, m) && !w.jobs2.arms.wants.contains(&m)
+        };
+        let body =
+            |w: &World, m: EntityId| w.comp::<Brain>(m).is_some_and(|b| b.lod != crate::components::Lod::Statistical);
+        let pick = members
+            .iter()
+            .copied()
+            .find(|&m| fit(world, m) && body(world, m))
+            .or_else(|| members.iter().copied().find(|&m| fit(world, m)));
+        if let Some(m) = pick {
+            world.jobs2.arms.quarter.insert(m, g);
+            world.jobs2.arms.wants.insert(m);
+        }
+    }
 }
 
 /// Each weapon an agent owns: carried today when the owner has a reason
@@ -1459,6 +1546,8 @@ fn wants_and_licences(world: &mut World) {
             wants.insert(id);
         }
     }
+    let fear = wants.iter().filter(|&&id| crate::systems::customers::frightened(world, id)).count() as u32;
+    ownership::jobs2_row(world).fear_wants += fear;
     world.jobs2.arms.wants = wants;
     if crate::systems::industry::clerks_on_books(world) == 0 {
         return;

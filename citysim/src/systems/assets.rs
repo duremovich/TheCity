@@ -2110,6 +2110,30 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
     if let Some(offer) = install_offer(world, id, require_open) {
         return Some(offer);
     }
+    // The pressure pass phase 2 (OPEN-176): a gang's quartermaster buys for
+    // its armoury with the gang's purse (his own wallet and cooldown aside).
+    if world.jobs2.arms.quarter.contains_key(&id) {
+        let from = world.comp::<Position>(id)?.tile;
+        let (seller, tier, price, _) = crate::systems::weapons::offer(world, id, from, require_open)?;
+        let cs = vec![
+            Consideration::new("the gang's errand", can(true), GATE),
+            Consideration::new(
+                "loyalty",
+                world.comp::<crate::components::Personality>(id).map_or(0.5, |p| p.loyalty),
+                Curve::Linear { m: 0.4, b: 0.6 },
+            ),
+        ];
+        let pick = ShopPick { kind: AssetKind::Weapon, tier, used: None, upgrade: false };
+        return Some(ShopOffer {
+            pick,
+            seller,
+            price,
+            financed: false,
+            category: ShopCategory::Weapon,
+            score: 0.9,
+            considerations: cs,
+        });
+    }
     let cooldown = u64::from(cfg.shop.shop_cooldown_days) * crate::time::TICKS_PER_DAY;
     if body.last_shop.is_some_and(|t| world.tick.saturating_sub(t) < cooldown) {
         return None;

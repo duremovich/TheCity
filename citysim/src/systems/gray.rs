@@ -551,6 +551,113 @@ fn build_clinics(world: &mut World) {
         world.push_event(EventKind::Founded, &[g, b], text);
     }
     doc_clinics(world, cost);
+    back_rooms(world, cost);
+}
+
+/// The pressure pass phase 2 (OPEN-017; `[customers]`): the back room's
+/// reliable founder. F2's struck-off doc with the found cost was one a
+/// month at 20k (`p_struck_off`), so the trade stood at 0. While fewer back
+/// rooms stand than one per `back_room_adults` adults, a founder opens one,
+/// one a night: a struck-off doc not working or owning one (the lowest id),
+/// else the least lawful licensed Ripperdoc under `rogue_lawful` (not his
+/// own Clinic's owner), who quits his Clinic for it and is struck off. He
+/// builds on the vacant Lot nearest his Home when he holds the found cost,
+/// else refits the derelict Block nearest it (unpaid: a squat with a
+/// table and a lamp), and is hired at his own back room as its doc.
+fn back_rooms(world: &mut World, cost: i64) {
+    let Some(per) = crate::systems::customers::cfg(world).map(|c| (c.back_room_adults.max(1), c.rogue_lawful)) else {
+        return;
+    };
+    let (per, rogue_lawful) = per;
+    let Some(role) = world.config.trade_role("black_doc") else { return };
+    let adults: usize = world.districts.iter().map(|d| d.residents.len()).sum();
+    let want = (adults / per as usize).max(1);
+    let standing_n = world.buildings_of_kind(BuildingKind::BlackClinic).iter().filter(|&&b| standing(world, b)).count();
+    if standing_n >= want {
+        return;
+    }
+    let works_one = |w: &World, a: EntityId| {
+        w.comp::<Job>(a)
+            .and_then(|j| j.employer)
+            .is_some_and(|e| w.comp::<Building>(e).is_some_and(|bd| bd.kind == BuildingKind::BlackClinic))
+            || w.buildings_of_kind(BuildingKind::BlackClinic)
+                .iter()
+                .any(|&b| standing(w, b) && w.owner_of(b) == Some(a))
+    };
+    let free = |w: &World, a: EntityId| w.has::<Brain>(a) && !w.has::<Sentence>(a) && crate::systems::law::living(w, a);
+    let struck = world.jobs2.gray.struck_off.iter().copied().find(|&a| free(world, a) && !works_one(world, a));
+    let (doc, rogue) = match struck {
+        Some(a) => (a, None),
+        None => {
+            let mut pool: Vec<EntityId> = world.workers(Role::Ripperdoc).to_vec();
+            pool.sort_unstable();
+            let pick = pool
+                .into_iter()
+                .filter(|&a| free(world, a) && world.comp::<Job>(a).is_some_and(|j| j.role == Role::Ripperdoc))
+                .filter(|&a| {
+                    let clinic = world.comp::<Job>(a).and_then(|j| j.employer);
+                    clinic.is_none_or(|c| world.owner_of(c) != Some(a))
+                })
+                .filter_map(|a| {
+                    let law = world.comp::<Personality>(a).map_or(1.0, |p| p.lawfulness);
+                    (law < rogue_lawful).then_some(((law * 1e6) as i64, a))
+                })
+                .min();
+            let Some((_, a)) = pick else { return };
+            (a, world.comp::<Job>(a).and_then(|j| j.employer))
+        }
+    };
+    if rogue.is_some() || struck.is_none() {
+        world.jobs2.gray.struck_off.insert(doc);
+        crate::systems::economy::quit_job(world, doc, "went to work a back room");
+        ownership::jobs2_row(world).struck_off += 1;
+    }
+    let from = world
+        .comp::<crate::components::Household>(doc)
+        .and_then(|h| h.home)
+        .and_then(|h| world.comp::<Building>(h))
+        .map(|bd| bd.door)
+        .or_else(|| world.comp::<crate::components::Position>(doc).map(|p| p.tile));
+    let Some(from) = from else { return };
+    let paid_lot = (world.purse(Some(doc)) >= cost)
+        .then(|| crate::systems::founding::nearest_lot_for(world, BuildingKind::BlackClinic, from))
+        .flatten();
+    let b = match paid_lot {
+        Some(lot) => match crate::systems::founding::build_on_lot(world, lot, BuildingKind::BlackClinic, Some(doc)) {
+            Ok(b) => {
+                crate::systems::industry::pay_build(world, Some(doc), cost, Some(b), false);
+                b
+            }
+            Err(_) => return,
+        },
+        None => {
+            // scan-ok: daily, one founder a night: the derelicts nearest his Home
+            let derelict = crate::systems::street::derelicts(world)
+                .into_iter()
+                .filter_map(|d| {
+                    let bd = world.comp::<Building>(d)?;
+                    (bd.kind == BuildingKind::Home && !bd.demolished).then(|| (bd.door.manhattan(from), d))
+                })
+                .min()
+                .map(|(_, d)| d);
+            let Some(d) = derelict else { return };
+            match crate::systems::founding::refit_with(world, d, BuildingKind::BlackClinic, Some(doc), false) {
+                Ok(b) => b,
+                Err(_) => return,
+            }
+        }
+    };
+    if world.comp::<Job>(doc).is_none() {
+        crate::systems::demography::hire(world, doc, b, role);
+    }
+    ownership::jobs2_row(world).back_rooms += 1;
+    let how = match rogue {
+        Some(c) => format!(", leaving {}", world.name_of(c)),
+        None => " (struck off)".to_string(),
+    };
+    let text =
+        format!("{} opened a {} ({}){how}", world.name_of(doc), BuildingKind::BlackClinic.label(), world.name_of(b));
+    world.push_event(EventKind::Founded, &[doc, b], text);
 }
 
 /// Pressure pass F2: the other founder of JOBS_AND_LIVES § 7 ("founded by a

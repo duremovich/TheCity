@@ -2876,6 +2876,11 @@ fn probe_cabbie_drives_a_fare_on_his_shift() {
         // The island pass phase 1: `[distance]` off (its seeded staff move
         // the probe's cabbie and his fares).
         cfg.distance = None;
+        // The pressure pass phase 2: the probe's rides are the commute roll's;
+        // a hailed cab (`streetwork::hail_cab`) is another source.
+        if let Some(c) = cfg.customers.as_mut() {
+            c.p_hail = 0.0;
+        }
         let mut w = World::new(42, cfg);
         let start = 2 * TICKS_PER_DAY + 5 * TICKS_PER_HOUR;
         w.run_ticks(start);

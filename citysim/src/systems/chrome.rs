@@ -558,7 +558,8 @@ pub fn loot_target(world: &World, agent: EntityId) -> Option<EntityId> {
         return None;
     }
     let tile = world.comp::<Position>(agent)?.tile;
-    let reach = world.config.chrome.loot_reach;
+    // The pressure pass phase 2: a scav walks farther to a fresh body.
+    let reach = crate::systems::customers::loot_reach(world, agent, world.config.chrome.loot_reach);
     world
         .loot_corpses
         .iter()

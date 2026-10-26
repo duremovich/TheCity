@@ -724,6 +724,7 @@ fn mid_service(world: &World, id: EntityId, post: EntityId) -> bool {
                             | ActionKind::Uninstall
                             | ActionKind::Detox
                             | ActionKind::Oncology
+                            | ActionKind::Patch
                             | ActionKind::Stabilise,
                         ..
                     }
