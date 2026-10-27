@@ -238,6 +238,11 @@ care counted), gate School by age in `ages`, and the teacher's day has pupils. T
 no pupil goes. Changes household make-up citywide, so print employment, starvation, homeless and the housing split,
 20k seed 42 x 30, before and after. Shadow: teacher, camp_parent, a school child, a parent who works, elder.
 
+**No child is harmed** (Dylan 2026-10-27, added to S6): under 18 a body is never a victim (violence, hits, raids,
+the Statistical rolls, theft, arrest force, the fare beating), never in vice, never dies of hunger or sickness (the
+service takes the unfed child); the work camps stay without the beating (`p_camp_beating` goes). At 18 all bets are
+off. One predicate in `ages`, checked at every pick; a hard rule, not a switch.
+
 #### S7, the diary's noise (`OPEN-225`), wave 2
 
 A raid minute writes one Raid line ("Raid on X: won/lost", the toll) and folds its Witness, Assault and relationship
