@@ -336,6 +336,11 @@ fn probe_laid_off_farm_worker_finds_work_within_14_days() {
     let mut w = World::new(42, {
         let mut c = Config::load();
         c.exec.move_ticks_full = 2;
+        // Re-pinned, round 3 S4 (OPEN-216): the off-screen patients seen at
+        // the Clinics and the super's legs move the seed-42 city, and the
+        // pick was abducted and killed on day 26 before the search ended (a
+        // butterfly); `[care]` off keeps the probe's ground.
+        c.care = None;
         c
     });
     // Day 20, a minute to midnight: the layoff lands just before the

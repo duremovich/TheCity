@@ -2546,6 +2546,8 @@ model = "overhead"
 duty = "round"
 round_stops = 6
 round_near = true                  # Lives at work phase 3 (§ 2.2): the stops nearest the super's Home (V4: 63-79 h of travel a week)
+shape = "stations"                 # round 3 S4 (OPEN-216): past the round the shift is legs at the post ([presence]
+                                   # super_legs), not one 500-min ClerkWork (V11 super_104162 d21 09:02)
 tied_housing = true                # Lives at work phase 3 (§ 2.2): housed rent-free in the landlord's Block, moved in at midnight (V4: Bex evicted from her own building)
 
 [[trades]]
@@ -4385,6 +4387,15 @@ sweep_walk_factor = 1.5            # P8: a round is planned only when its walk (
                                    # else the stops near the Recycler (in its district, within round_reach_tiles), trimmed
                                    # to fit; none: the shift is swept in the Recycler's yard
 arms_wait_hours = 24               # an off-screen buyer's arms sale waits this long for the dealer's body at the Bar
+# Round 3 S4 (docs/PRESSURE_PASS.md § S4, OPEN-216): the super's day without arrears. Placeholders.
+round_post_stop = true             # a super's round with no other Block of the landlord's within round_reach_tiles is his
+                                   # own post's Block (its tenants served), not one 538-min ClerkWork
+super_legs = ["repair", "complaint", "stairs"]  # the rest of his shift at the post in legs (the super's shape =
+                                   # "stations"), each block one of these, drawn: a repair in a tenant's flat, a
+                                   # tenant at home stopping him in the hall, the stairs walked
+super_repairs = ["a leak", "a jammed door", "the wiring", "a cracked window", "the water heater"]
+super_complaints = ["the water", "the lift", "the noise next door", "the rent", "the smell in the stairwell"]
+super_leg_days = 7                 # a tenant he saw to (a repair, a complaint) is not the next leg's for this many days
 
 # The pre-view pass phase 5 (docs/PREVIEW_PASS.md § 0 P10-P12, § 2 "20k legs"; OPEN-139, OPEN-115, OPEN-140's
 # remainder, OPEN-156): the long legs at 20k. Without it a map's `L+` lines are dropped too.
@@ -5161,6 +5172,9 @@ pawn_mult = 0.5                    # a pawn: an owned deck, weapon or vehicle ha
 ask_affinity = 0.3                 # begging for it: a diagnosed patient short of the fee asks the warmest kin or Friend at
 ask_days = 3                       # or above this affinity, once in this many days, who lends what he holds above
 ask_keep = 20                      # this, up to the shortfall (a debt between them)
+ask_tries = 3                      # round 3 S4: the asks a night, warmest Friend first, until the shortfall is covered (one
+ask_refused_days = 7               # line); a Friend who turned him down is not asked again for this many days (one with
+                                   # nothing above ask_keep is asked again the next time)
 cover_purse_days = 3               # the sick worker's post: covered at midnight by a jobless adult of the employer's district
 cover_lawful = 0.3                 # (lawfulness at or above this; a day hire to the shift's end) when the owner holds this
                                    # many days of the role's wage; else the absence is written

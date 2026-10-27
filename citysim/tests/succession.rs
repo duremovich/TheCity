@@ -401,13 +401,16 @@ fn test_brothers_after_a_gutting_sack() {
     w.config.outside.parents.brothers_p = 1.0;
     let g = hollow(&w);
     cool_hollow(&mut w);
+    // Re-pinned, round 3 S4 (OPEN-216): the whole gang is the clone before
+    // the trim (the moved seed-42 city lost the two kept members in the run,
+    // and the "whole" Hollow, gutted to none, got brothers: a butterfly).
+    let mut big = w.clone();
     let members = w.comp::<Gang>(g).expect("gang").members.clone();
     let keep = w.config.outside.parents.brothers_gutted_below - 2;
     for &m in members.iter().skip(keep) {
         gang::leave(&mut w, m, "test");
     }
     assert!(gang::fit_headcount(&w, g) < w.config.outside.parents.brothers_gutted_below);
-    let mut big = w.clone();
     let mut off = w.clone();
     let t0 = w.tick;
     // Gutted, the roll certain; the roll off; not gutted. The three cities

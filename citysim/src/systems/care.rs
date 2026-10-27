@@ -63,11 +63,14 @@ pub struct Cover {
 pub struct State {
     pub asked: BTreeMap<EntityId, u64>,
     pub covers: Vec<Cover>,
+    /// Round 3 S4: `(patient, friend, day)` a Friend turned the patient down
+    /// (not asked again inside `ask_refused_days`).
+    pub refused: Vec<(EntityId, EntityId, u64)>,
 }
 
 impl State {
     pub fn is_empty(&self) -> bool {
-        self.asked.is_empty() && self.covers.is_empty()
+        self.asked.is_empty() && self.covers.is_empty() && self.refused.is_empty()
     }
 }
 
@@ -433,10 +436,13 @@ pub fn daily(world: &mut World) {
 }
 
 /// A diagnosed patient whose pool falls short of the Clinic's treatment
-/// asks (once in `ask_days`) the warmest Friend at or above `ask_affinity`
-/// with coins above `ask_keep` for the shortfall; he lends on `affinity ×
-/// (1 − greed / 2)` what he holds above `ask_keep`, up to the shortfall (an
-/// edge debt), or turns him down. Kin already pay through the pool.
+/// (his own and his kin's coins, the pool, already in) asks his own for the
+/// rest once in `ask_days`: round 3 S4, a ladder of up to `ask_tries`
+/// Friends at or above `ask_affinity`, warmest first, until the shortfall is
+/// covered. One with coins above `ask_keep` lends on `affinity × (1 −
+/// greed / 2)` what he holds above it (an edge debt) or turns him down (not
+/// asked again for `ask_refused_days`); one with nothing to spare says so.
+/// The night is one line naming each. The street (begging, Earn) comes after.
 fn asks(world: &mut World, c: &CareCfg) {
     let price = crate::systems::health::treat_price(world);
     let day = world.day();
@@ -446,6 +452,8 @@ fn asks(world: &mut World, c: &CareCfg) {
         .filter(|&id| crate::systems::health::saving_short(world, id) && !crate::systems::wounded::is_down(world, id))
         .collect();
     world.care.asked.retain(|_, d| day.saturating_sub(*d) < 30);
+    let keep = u64::from(c.ask_refused_days);
+    world.care.refused.retain(|&(_, _, d)| day.saturating_sub(d) < keep);
     for id in short {
         if world.care.asked.get(&id).is_some_and(|&d| day.saturating_sub(d) < u64::from(c.ask_days.max(1))) {
             continue;
@@ -453,61 +461,94 @@ fn asks(world: &mut World, c: &CareCfg) {
         if world.has::<crate::components::Sentence>(id) {
             continue;
         }
-        let need = price - crate::systems::health::pool(world, id);
+        let in_pool = crate::systems::health::pool(world, id);
+        let mut need = price - in_pool;
         if need <= 0 {
             continue;
         }
-        let friend = world
+        let refused = |w: &World, o: EntityId| w.care.refused.iter().any(|&(p, f, _)| p == id && f == o);
+        let mut friends: Vec<(f32, EntityId)> = world
             .neighbours(id)
-            .filter(|&o| crate::systems::law::living(world, o) && coins(world, o) > c.ask_keep)
+            .filter(|&o| crate::systems::law::living(world, o) && !refused(world, o))
             .filter_map(|o| {
                 world
                     .edge(id, o)
                     .filter(|e| e.kind == RelKind::Friend && e.affinity >= c.ask_affinity)
                     .map(|e| (e.affinity, o))
             })
-            .max_by(|p, q| p.0.total_cmp(&q.0).then(q.1.cmp(&p.1)));
-        let Some((aff, f)) = friend else { continue };
+            .collect();
+        friends.sort_by(|p, q| q.0.total_cmp(&p.0).then(p.1.cmp(&q.1)));
+        friends.truncate(c.ask_tries.max(1) as usize);
         world.care.asked.insert(id, day);
-        let greed = world.comp::<crate::components::Personality>(f).map_or(0.5, |p| p.greed);
-        let yes = hash(world, PURPOSE_ASK, id, day) < aff * (1.0 - greed / 2.0);
-        let (who, fname) = (world.name_of(id), world.name_of(f));
-        if !yes {
-            world.remember(id, crate::components::MemoryKind::Rejected, Some(f), 0.5, -0.4, false);
-            world.push_event(
-                EventKind::Loan,
-                &[id, f],
-                format!("{who} begged {fname} for {need}c toward a vat-cancer treatment; {fname} turned them down"),
+        let asked_for = need;
+        // The pool named: his own coins, then each of his kin's (the spouse
+        // first) and his gang's, as `health::payers` takes them.
+        let pool: Vec<String> = crate::systems::health::payers(world, id)
+            .into_iter()
+            .map(|(p, c)| if p == id { format!("{c}c of their own") } else { format!("{} {c}c", world.name_of(p)) })
+            .collect();
+        if friends.is_empty() {
+            // Nobody of his own left to ask: the line says so (the street,
+            // Earn's begging and scavenging, is what is left).
+            let who = world.name_of(id);
+            let text = format!(
+                "{who}, {asked_for}c short of a vat-cancer treatment after the {in_pool}c they and theirs could put in ({}), has no friend left to ask",
+                pool.join(", ")
             );
-            ownership::jobs2_row(world).care_asks_refused += 1;
+            world.push_event(EventKind::Loan, &[id], text);
             continue;
         }
-        let lend = (coins(world, f) - c.ask_keep).min(need);
-        if lend <= 0 {
-            continue;
+        let mut bits: Vec<String> = Vec::new();
+        let mut actors = vec![id];
+        for (k, (aff, f)) in friends.into_iter().enumerate() {
+            if need <= 0 {
+                break;
+            }
+            actors.push(f);
+            let fname = world.name_of(f);
+            let spare = coins(world, f) - c.ask_keep;
+            if spare <= 0 {
+                bits.push(format!("{fname} had nothing to spare"));
+                continue;
+            }
+            let greed = world.comp::<crate::components::Personality>(f).map_or(0.5, |p| p.greed);
+            let roll = hash(world, PURPOSE_ASK, id, day.wrapping_mul(8).wrapping_add(k as u64));
+            if roll >= aff * (1.0 - greed / 2.0) {
+                world.remember(id, crate::components::MemoryKind::Rejected, Some(f), 0.5, -0.4, false);
+                world.care.refused.push((id, f, day));
+                bits.push(format!("{fname} turned them down"));
+                ownership::jobs2_row(world).care_asks_refused += 1;
+                continue;
+            }
+            let lend = spare.min(need);
+            if let Some(w) = world.comp_mut::<Wallet>(f) {
+                w.coins -= lend;
+            }
+            if let Some(w) = world.comp_mut::<Wallet>(id) {
+                w.coins += lend;
+            }
+            need -= lend;
+            let (lo, _) = crate::components::edge_key(id, f);
+            let tick = world.tick;
+            let e = world.edge_entry(id, f);
+            e.debt += if lo == id { lend as i32 } else { -(lend as i32) };
+            e.debt_since.get_or_insert(tick);
+            e.last_interaction = tick;
+            world.remember(f, crate::components::MemoryKind::Paid, Some(id), 0.5, 0.1, false);
+            world.remember(id, crate::components::MemoryKind::Paid, Some(f), 0.6, 0.3, false);
+            bits.push(format!("{fname} lent {lend}c"));
+            let row = ownership::jobs2_row(world);
+            row.care_asks_lent += 1;
+            row.care_ask_coins += lend;
         }
-        if let Some(w) = world.comp_mut::<Wallet>(f) {
-            w.coins -= lend;
-        }
-        if let Some(w) = world.comp_mut::<Wallet>(id) {
-            w.coins += lend;
-        }
-        let (lo, _) = crate::components::edge_key(id, f);
-        let tick = world.tick;
-        let e = world.edge_entry(id, f);
-        e.debt += if lo == id { lend as i32 } else { -(lend as i32) };
-        e.debt_since.get_or_insert(tick);
-        e.last_interaction = tick;
-        world.remember(f, crate::components::MemoryKind::Paid, Some(id), 0.5, 0.1, false);
-        world.remember(id, crate::components::MemoryKind::Paid, Some(f), 0.6, 0.3, false);
-        world.push_event(
-            EventKind::Loan,
-            &[id, f],
-            format!("{who} begged {fname} for {need}c toward a vat-cancer treatment; {fname} lent {lend}c"),
+        let who = world.name_of(id);
+        let tail = if need <= 0 { ": covered".to_string() } else { format!(": still {need}c short") };
+        let text = format!(
+            "{who}, {asked_for}c short of a vat-cancer treatment after the {in_pool}c they and theirs could put in ({}), begged their friends: {}{tail}",
+            pool.join(", "),
+            bits.join("; ")
         );
-        let row = ownership::jobs2_row(world);
-        row.care_asks_lent += 1;
-        row.care_ask_coins += lend;
+        world.push_event(EventKind::Loan, &actors, text);
     }
 }
 
@@ -591,7 +632,12 @@ fn cover_pick(world: &World, c: &CareCfg, emp: EntityId, role: crate::components
 /// Hourly (from `wounded::run`): the covers past their `until` end (the Job
 /// gone, no layoff: the day was the post).
 pub fn hourly(world: &mut World) {
-    if cfg(world).is_none() || world.care.covers.is_empty() || !world.tick.is_multiple_of(TICKS_PER_HOUR) {
+    if cfg(world).is_none() || !world.tick.is_multiple_of(TICKS_PER_HOUR) {
+        return;
+    }
+    // Round 3 S4 (OPEN-216): the off-screen patients seen where a body goes.
+    crate::systems::customers::stat_care(world);
+    if world.care.covers.is_empty() {
         return;
     }
     let now = world.tick;

@@ -888,7 +888,11 @@ pub fn detox(world: &mut World, agent: EntityId, clinic: EntityId) -> bool {
     }
     world.stats.current.detoxes += 1;
     let (who, at) = (world.name_of(agent), world.name_of(clinic));
-    world.push_event(EventKind::Treated, &[agent, clinic], format!("{who} took Detox at {at}"));
+    // Round 3 S4 (OPEN-216): the doctor (or orderly) who sees him named.
+    let doc = crate::systems::service::server_for(world, clinic, crate::components::ServeKind::Patient, agent);
+    let by = doc.map_or_else(String::new, |d| format!(" with {}", world.name_of(d)));
+    let actors: Vec<EntityId> = [Some(agent), Some(clinic), doc].into_iter().flatten().collect();
+    world.push_event(EventKind::Treated, &actors, format!("{who} took Detox at {at}{by}"));
     // Lives at work phase 1 (§ 2.2): the detox is the doctor's (or orderly's) encounter.
     crate::systems::service::arrive(world, agent, clinic, crate::components::ServeKind::Patient, price);
     true

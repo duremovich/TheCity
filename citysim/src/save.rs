@@ -396,7 +396,9 @@ use crate::world::World;
 /// and the `[brain] cool_backoff*` keys (serde defaults).
 /// 82 (pressure pass round 3, S7, the diary's noise): `[noise] raid_names`,
 /// `petty_rewitness_days` (serde defaults).
-pub const SAVE_VERSION: u8 = 82;
+/// 83 (pressure pass round 3, S4, care at 100k): `care::State.refused`, the `[care]`
+/// ask keys and the `[presence]` super keys (serde defaults).
+pub const SAVE_VERSION: u8 = 83;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

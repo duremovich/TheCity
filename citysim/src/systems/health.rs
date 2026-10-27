@@ -158,6 +158,7 @@ pub fn daily(world: &mut World) {
         let employed = world.comp::<Job>(id).is_some() && !world.has::<Sentence>(id);
         let age = age_years(world, id);
         let fire_at = crate::systems::ages::fire_days(world, id, cfg.sick_fire_days);
+        let protected = crate::systems::ages::is_protected(world, id);
         let Some(h) = health_mut(world, id) else { continue };
         let t = std::mem::take(&mut h.today);
         let synthy = f32::from(t.synth) + f32::from(t.alms);
@@ -192,7 +193,9 @@ pub fn daily(world: &mut World) {
                 None => {}
             }
             if let Some(c) = h.cancer.as_mut() {
-                if c.stage >= 1.0 {
+                // S6's rule (Dylan 2026-10-27): sickness never kills anyone
+                // under 18 (the stage holds at its end; at 18 it runs on).
+                if c.stage >= 1.0 && !protected {
                     dying.push(id);
                 } else if !c.diagnosed && c.stage >= cfg.cancer_symptom {
                     c.diagnosed = true;
@@ -234,7 +237,10 @@ pub fn daily(world: &mut World) {
         world.kill(id, crate::components::DeathCause::Disease);
     }
     // § 3: a diagnosed patient off screen treats on `p_stat_treat` of days.
-    if cfg.cancer {
+    // Round 3 S4 (OPEN-216): with `[care]` at an open Clinic's hour, by its
+    // doctor on duty (`customers::stat_care`; the midnight roll treated at
+    // a shut Clinic, or one still being built, with nobody at the table).
+    if cfg.cancer && crate::systems::care::cfg(world).is_none() {
         stat_treat(world, &cfg, seed, day);
     }
     world.stats.current.health.cancer_new += cancer_new;
@@ -554,7 +560,7 @@ pub fn oncology(world: &mut World, id: EntityId, clinic: EntityId) -> bool {
     }
     // Pressure pass R3: the doctor on the table takes his cut (`[care]`).
     if crate::systems::care::cfg(world).is_some() {
-        let doc = crate::systems::customers::doctor(world, clinic);
+        let doc = crate::systems::customers::doctor_for(world, clinic, id);
         let s = crate::systems::care::settle(world, id, clinic, doc, price);
         let note = s.note(world);
         oncology_effect(world, id, clinic, doc, &note);

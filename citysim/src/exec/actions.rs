@@ -1001,6 +1001,9 @@ pub fn on_complete(
             // before the shift's last closes nothing (the wage and the
             // output wait for the last, at the post).
             if crate::systems::shift::block_done(world, id, started) {
+                // Round 3 S4 (OPEN-216): a super's block is a leg (a repair,
+                // a complaint, the stairs).
+                crate::systems::service::super_leg(world, id, started);
                 return StepResult::Done;
             }
             // Jobs and room J13: a producing trade's shift makes its output

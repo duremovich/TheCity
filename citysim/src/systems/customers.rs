@@ -407,10 +407,16 @@ fn avoids_clinic(world: &World, id: EntityId, price: i64) -> bool {
 /// to the nearest open Clinic with `patch_price`. `None`: nothing to see
 /// to, or no coins (the broke beg, scavenge or pawn through Earn).
 pub fn care_choice(world: &World, id: EntityId) -> Option<(EntityId, Care, i64)> {
-    let c = cfg(world)?;
     if world.comp::<Brain>(id).is_none_or(|b| b.lod == Lod::Statistical) {
         return None;
     }
+    care_choice_any(world, id)
+}
+
+/// [`care_choice`] for any tier (round 3 S4: the off-screen patient's
+/// pick, [`stat_care`]).
+fn care_choice_any(world: &World, id: EntityId) -> Option<(EntityId, Care, i64)> {
+    let c = cfg(world)?;
     let short = crate::systems::health::saving_short(world, id);
     // Pressure pass R3: the Clinic's treatment for the short who can settle
     // it (a pawn covers it, or a wage puts the rest on the doctor's slate).
@@ -512,10 +518,113 @@ pub fn can_patch(world: &World, id: EntityId, target: Option<EntityId>) -> bool 
 /// wound seen to (or the remission), the doctor's encounter (both sides
 /// remember it), the event and the counters.
 pub fn patch(world: &mut World, id: EntityId, target: Option<EntityId>) -> bool {
-    use crate::systems::ownership::{self, Flow};
     let Some(b) = target else { return false };
     let Some((place, what, price)) = care_choice(world, id).filter(|&(p, _, _)| p == b) else { return false };
-    let Some(doc) = doctor(world, place) else { return false };
+    let Some(doc) = doctor_for(world, place, id) else { return false };
+    see_to(world, id, place, what, price, doc)
+}
+
+/// Round 3 S4 (OPEN-216): the doctor who sees `patient` at `b`: the on-duty
+/// server `service::arrive` would hand him to (the encounter's), else
+/// [`doctor`] (a back room's doc on call). The orderly who triaged a
+/// patient had his memory and not the `Treated` line.
+pub fn doctor_for(world: &World, b: EntityId, patient: EntityId) -> Option<EntityId> {
+    crate::systems::service::server_for(world, b, crate::components::ServeKind::Patient, patient)
+        .or_else(|| doctor(world, b))
+}
+
+/// Round 3 S4 (OPEN-216): each hour, the off-screen patients are seen as a
+/// body would be (the mirror of the Treat goal, as the counter's off-screen
+/// visits): a Statistical adult with a fresh wound, or a diagnosed cancer
+/// the pool, a pawn or the slate can settle, is seen at [`care_choice`]'s
+/// place (a diagnosed cancer the pool pays for: the nearest open Clinic, on
+/// the day's `[sickness] p_stat_treat` roll, once a day) when a doctor is on
+/// duty there: paid, seen to and written as a walk-in, so the doctor's
+/// diary has the patient. The Clinic's day doctor is a body only near the
+/// camera; the patient stays off screen (no body is promoted).
+pub fn stat_care(world: &mut World) {
+    if cfg(world).is_none() || crate::systems::care::cfg(world).is_none() {
+        return;
+    }
+    let now = world.tick;
+    let day = world.day();
+    let p = world.config.sickness.p_stat_treat;
+    let ids: Vec<EntityId> = world
+        .tier(Lod::Statistical)
+        .iter()
+        .copied()
+        .filter(|&id| {
+            let diagnosed =
+                world.comp::<crate::components::Health>(id).and_then(|h| h.cancer).is_some_and(|c| c.diagnosed);
+            (diagnosed || hurt(world, id))
+                && crate::systems::demography::is_adult(world, id)
+                && crate::systems::law::living(world, id)
+                && !world.has::<crate::components::Sentence>(id)
+                && !crate::systems::wounded::is_down(world, id)
+        })
+        .collect();
+    for id in ids {
+        let seen_today = world
+            .comp::<crate::components::Misery>(id)
+            .is_some_and(|m| m.patched_at > 0 && now.saturating_sub(m.patched_at) < crate::time::TICKS_PER_DAY);
+        let cancer_day = crate::systems::econ::hash_unit(world.seed(), PURPOSE_STAT_CARE, u64::from(id.index), day) < p;
+        if crate::systems::health::wants_oncology(world, id) {
+            if seen_today || !cancer_day {
+                continue;
+            }
+            let Some(from) = crate::systems::life::origin(world, id) else { continue };
+            let Some(c) = crate::systems::assets::nearest_seller(world, BuildingKind::Clinic, from, true) else {
+                continue;
+            };
+            let Some(doc) = doctor_for(world, c, id).filter(|&d| crate::systems::service::has_room(world, d)) else {
+                continue;
+            };
+            if crate::systems::health::oncology(world, id, c) {
+                mark_seen(world, id);
+                crate::systems::service::take_room_on_call(world, doc, c);
+            }
+            continue;
+        }
+        let Some((place, what, price)) = care_choice_any(world, id) else { continue };
+        if what != Care::Patch && (seen_today || !cancer_day) {
+            continue;
+        }
+        if world.is_closed(place) {
+            continue;
+        }
+        // The doctor's hour has room (his `[[serves]] per_hour`): a back
+        // room's doc on call off his shift counts his walk-ins too.
+        let Some(doc) = doctor_for(world, place, id).filter(|&d| crate::systems::service::has_room(world, d)) else {
+            continue;
+        };
+        if !see_to(world, id, place, what, price, doc) {
+            continue;
+        }
+        crate::systems::service::take_room_on_call(world, doc, place);
+        if what != Care::Patch {
+            mark_seen(world, id);
+        }
+    }
+}
+
+const PURPOSE_STAT_CARE: u64 = 0xc057_0004;
+
+/// The patient seen today (`Misery.patched_at`: a wound seen to, and once
+/// a day for a cancer off screen).
+fn mark_seen(world: &mut World, id: EntityId) {
+    let now = world.tick;
+    if !world.has::<crate::components::Misery>(id) {
+        world.insert(id, crate::components::Misery::default());
+    }
+    if let Some(m) = world.comp_mut::<crate::components::Misery>(id) {
+        m.patched_at = now;
+    }
+}
+
+/// The care `what` at `place` for `price`, by `doc`: paid, seen to, the
+/// encounter, the event (a body's `Patch` and [`stat_care`]'s walk-in).
+fn see_to(world: &mut World, id: EntityId, place: EntityId, what: Care, price: i64, doc: EntityId) -> bool {
+    use crate::systems::ownership::{self, Flow};
     let back = world.comp::<Building>(place).is_some_and(|bd| bd.kind == BuildingKind::BlackClinic);
     let to = world.owner_of(place);
     // Pressure pass R3: the Clinic's fee settled (the doctor's cut, a pawn,

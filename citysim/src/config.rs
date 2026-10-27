@@ -2008,6 +2008,12 @@ pub struct CareCfg {
     /// ... who lends what he holds above this, up to the shortfall (a debt
     /// between them).
     pub ask_keep: i64,
+    /// Round 3 S4 (OPEN-216): the asks a night, warmest first (the Friends at
+    /// or above `ask_affinity`), until the shortfall is covered; one line.
+    pub ask_tries: u32,
+    /// ... a Friend who turned him down is not asked again for this many days
+    /// (one with nothing above `ask_keep` is asked again at the next ask).
+    pub ask_refused_days: u32,
     // --- the sick worker's post
     /// A sick body's post is covered at midnight by a jobless adult living
     /// in the employer's district (a day hire to the end of the shift) when
@@ -2084,6 +2090,8 @@ impl Default for CareCfg {
             ask_affinity: 0.3,
             ask_days: 3,
             ask_keep: 20,
+            ask_tries: 3,
+            ask_refused_days: 7,
             cover_purse_days: 3,
             cover_lawful: 0.3,
         }
@@ -2156,6 +2164,40 @@ pub struct PresenceCfg {
     pub sweep_walk_factor: f32,
     /// An off-screen arms buyer's meeting waits this many hours for the dealer's body at the Bar.
     pub arms_wait_hours: u16,
+    /// Round 3 S4 (OPEN-216): a super's round with no other Block of the
+    /// landlord's in reach is his own post's Block (its tenants served:
+    /// the notices, the door rent), not no round at all.
+    #[serde(default)]
+    pub round_post_stop: bool,
+    /// Round 3 S4: the jobs a super's legs at the post are (the rest of his
+    /// shift past the round, worked in stations blocks: `shape = "stations"`
+    /// on his trade row), one drawn per block (purpose-keyed): a repair in a
+    /// tenant's flat, a tenant's complaint in the hall, the stairs walked.
+    /// Empty: the blocks are bare work.
+    #[serde(default)]
+    pub super_legs: Vec<SuperLeg>,
+    /// Round 3 S4: what a repair leg fixes (drawn), the diary's words.
+    #[serde(default)]
+    pub super_repairs: Vec<String>,
+    /// Round 3 S4: what a tenant's complaint is about (drawn).
+    #[serde(default)]
+    pub super_complaints: Vec<String>,
+    /// Round 3 S4: a tenant a super saw to (a repair, a complaint) is not
+    /// the next leg's for this many days.
+    #[serde(default)]
+    pub super_leg_days: u32,
+}
+
+/// Round 3 S4 (OPEN-216): a super's leg at his post (`[presence] super_legs`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SuperLeg {
+    /// A repair in a tenant's flat (any tenant: he has the keys).
+    Repair,
+    /// A tenant at home stops him in the hall with a complaint.
+    Complaint,
+    /// The stairs and halls walked, floor by floor.
+    Stairs,
 }
 
 /// The pre-view pass phase 2 (docs/PREVIEW_PASS.md § 0 P1): the shape a
