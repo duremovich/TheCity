@@ -501,7 +501,13 @@ pub fn wait_for_crew(world: &World, actor: EntityId, id: ContractId) -> bool {
 pub fn defenders(world: &World, id: ContractId) -> Vec<EntityId> {
     let Some(m) = world.missions.get(&id) else { return Vec::new() };
     let Some(t) = world.contracts.get(&id).and_then(|c| c.target_agent()) else { return Vec::new() };
-    let fit = |a: EntityId| law::living(world, a) && !world.has::<Sentence>(a) && !m.crew.contains(&a);
+    // Round 3 V12 fix: a minor is never a defender (no brawl for a child).
+    let fit = |a: EntityId| {
+        law::living(world, a)
+            && !world.has::<Sentence>(a)
+            && !m.crew.contains(&a)
+            && !crate::systems::ages::is_protected(world, a)
+    };
     // M16b phase 2: a Rescue meets the hold's guards.
     if world.contracts.get(&id).is_some_and(|c| c.kind == ContractKind::Rescue) {
         return crate::systems::captives::guards_at(world, t).into_iter().filter(|&a| fit(a)).collect();
