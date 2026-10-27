@@ -29,6 +29,8 @@ fn city() -> World {
         // (the led gang's order no longer walked to its lieutenant).
         let mut cfg = Config::load();
         cfg.protection = None;
+        // R6a: nor the trades' verbs (the pit's bettors moved the gangs' purses; no led gang by day 30).
+        cfg.trade_verbs = None;
         let mut w = World::new(42, cfg);
         w.run_ticks(10 * TICKS_PER_HOUR);
         for _ in 0..30 {

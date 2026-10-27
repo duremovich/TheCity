@@ -21,6 +21,8 @@ fn on_world() -> World {
     // OPEN-111: the venues' evening staff move seed 42's gangs (no gang of
     // three with a Hideout by day 12); pinned to the day shift.
     cfg.service.evening_staff.clear();
+    // R6a: the trades' verbs (the cab's dispatch, the pit's bettors) moved the gang the crate tests are cut from.
+    cfg.trade_verbs = None;
     World::new(42, cfg)
 }
 

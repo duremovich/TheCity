@@ -377,7 +377,10 @@ use crate::world::World;
 /// 75 (pressure pass round 2, R5, the gang verbs): `crew::State.stood_down`,
 /// the `[crew]` R5 keys and the `Jobs2Cols` `crew_stood_down`,
 /// `crew_tryout_refused` columns (serde defaults).
-pub const SAVE_VERSION: u8 = 75;
+/// 76 (pressure pass round 2, R6a, the trades' verbs I): `ViceState.{pimp_visits,
+/// bookings, barred}` (written while they hold anything) and `[trade_verbs]`
+/// (written only when set).
+pub const SAVE_VERSION: u8 = 76;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

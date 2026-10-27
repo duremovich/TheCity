@@ -36,6 +36,9 @@ fn world() -> World {
     // jobs and ranks move the gangs this file's scenes are cut from).
     c.strip_careers();
     c.gangs.strip_lieutenants();
+    // R6a: nor the trades' verbs (the pit's off-screen bettors stake on the
+    // bout, not a table: the purses this file's gangs are cut from moved).
+    c.trade_verbs = None;
     World::new(42, c)
 }
 

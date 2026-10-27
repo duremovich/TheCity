@@ -260,6 +260,10 @@ pub fn door_ok(world: &World, id: EntityId, b: EntityId) -> bool {
     if crate::systems::customers::door_cause(world, id, b).is_some() {
         return false;
     }
+    // The pressure pass R6a (OPEN-217): a rough client barred by the madam.
+    if crate::systems::vice::barred(world, id, b) {
+        return false;
+    }
     match kind_of(world, b) {
         Some(BuildingKind::Lounge) => {
             crate::systems::classes::class_of(world, id) != Class::Dreg
@@ -495,6 +499,40 @@ fn table_open(world: &World, b: EntityId) -> bool {
     world.comp::<Building>(b).and_then(|bd| bd.venue.as_ref()).is_none_or(|v| v.table_shut_day != Some(today))
 }
 
+/// The pressure pass R6a (OPEN-217): an off-screen visitor of the pit `b`
+/// in the bet window with `gamble_rung_courage` and a coin stakes on
+/// tonight's bout as a body's `Gamble` does (`Flow::Gamble` into the
+/// house, the bet settled at `bout_hour`), at most `pit_bettors_max` a
+/// pit. Returns the stake placed (0 none). Nothing with `[trade_verbs]` absent.
+fn bout_bet(world: &mut World, id: EntityId, b: EntityId) -> i64 {
+    let Some(max) = world.config.trade_verbs.as_ref().map(|c| c.pit_bettors_max) else { return 0 };
+    let brave = world.comp::<Personality>(id).is_some_and(|p| p.courage >= world.config.leisure.gamble_rung_courage);
+    if !bet_window(world) || !brave {
+        return 0;
+    }
+    let placed = world.comp::<Building>(b).and_then(|bd| bd.venue.as_ref()).map_or(usize::MAX, |v| v.bets.len());
+    let left = spendable(world, id).min(coins(world, id));
+    if placed >= max as usize || left < 1 {
+        return 0;
+    }
+    let stake = stake_of(world, left);
+    let paid = pay_venue(world, id, b, stake, Flow::Gamble);
+    if paid <= 0 {
+        return 0;
+    }
+    if let Some(v) = world.comp_mut::<Building>(b).and_then(|bd| bd.venue.as_mut()) {
+        v.bets.push((id, paid, false));
+    }
+    paid
+}
+
+/// R6a: is the bet window open at the time of day `tod` (a body's arrival)?
+fn bet_window_at(world: &World, tod: u64) -> bool {
+    let cfg = &world.config.leisure;
+    let h = ((tod % TICKS_PER_DAY) / TICKS_PER_HOUR) as u16;
+    h < cfg.bout_hour && cfg.bout_hour.saturating_sub(cfg.bet_window_hours) <= h && !world.levers.ban_gambling
+}
+
 /// A FightPit takes bets in the `bet_window_hours` before `bout_hour`.
 fn bet_window(world: &World) -> bool {
     let cfg = &world.config.leisure;
@@ -567,6 +605,16 @@ fn act_of(kind: BuildingKind) -> ActionKind {
 }
 
 /// Spec § 2: execs and the top wealth decile reach the high rung.
+/// The pressure pass R6a (OPEN-217): the lonely with `[customers]
+/// client_coins` reach the Dollhouse below the high rung's purse (it was
+/// the execs' and the top tenth's alone: 25 visits in 30 days at 20k, the
+/// joytoys' shifts empty). Nothing with `[trade_verbs]` absent.
+fn lonely_client(world: &World, id: EntityId, b: EntityId) -> bool {
+    world.config.trade_verbs.is_some()
+        && kind_of(world, b) == Some(BuildingKind::Dollhouse)
+        && crate::systems::customers::lonely_wants(world, id)
+}
+
 fn high_ok(world: &World, id: EntityId) -> bool {
     crate::systems::life::exec_corp(world, id).is_some()
         || (world.wealth_p90 > 0 && coins(world, id) >= world.wealth_p90)
@@ -795,7 +843,7 @@ fn paid_candidates(
             continue;
         }
         let rung = rung_of(world, b, price);
-        if rung == Rung::High && !high {
+        if rung == Rung::High && !high && !lonely_client(world, id, b) {
             continue;
         }
         let score = paid_score(world, id, b, rung, price, purse, tiles);
@@ -1374,7 +1422,20 @@ fn steps_for(world: &World, id: EntityId, pick: &UnwindPick) -> Vec<ActionInstan
                 steps.push(step(ActionKind::Drink, Some(v)));
             }
             steps.push(step(pick.act, Some(v)));
-            if kind == Some(BuildingKind::FightPit) && bet_window(world) && purse >= 1 {
+            // R6a (OPEN-217): the window read at the body's arrival, not at
+            // the plan (a pit planned at 20:30 with a walk into the window
+            // took no bet).
+            let window = match world.config.trade_verbs.as_ref() {
+                Some(_) => {
+                    let walk = world
+                        .comp::<Position>(id)
+                        .zip(world.comp::<Building>(v))
+                        .map_or(0, |(p, bd)| crate::exec::timed_walk(world, id, p.tile, bd.door));
+                    bet_window_at(world, u64::from(world.tick_of_day()) + walk)
+                }
+                None => bet_window(world),
+            };
+            if kind == Some(BuildingKind::FightPit) && window && purse >= 1 {
                 let brave = world
                     .comp::<Personality>(id)
                     .is_some_and(|p| p.courage >= world.config.leisure.gamble_rung_courage);
@@ -2096,7 +2157,9 @@ fn evening_venues(world: &World, id: EntityId) -> Vec<(BuildingKind, EntityId)> 
             continue;
         };
         let price = price_of(world, b);
-        if (!high && rung_of(world, b, price) == Rung::High) || (kind != BuildingKind::Bar && 2 * price > purse) {
+        if (!high && rung_of(world, b, price) == Rung::High && !lonely_client(world, id, b))
+            || (kind != BuildingKind::Bar && 2 * price > purse)
+        {
             continue;
         }
         out.push((kind, b));
@@ -2342,8 +2405,25 @@ fn stat_learned_evening(world: &mut World, ids: &[EntityId], pv: &std::collectio
         let mut went = false;
         for (kind, b) in venues {
             let i = LADDER.iter().position(|&k| k == kind).unwrap_or(0);
-            let rate = pv.get(&venue_key(kind)).copied().unwrap_or(0.0).max(0.0);
-            let r = rate * adults / eligible[i].max(1) as f32;
+            // The pressure pass R6a (OPEN-217): the learned table has no
+            // Dollhouse row (learned before the chip had clients: no
+            // off-screen visit ever), so its rate is `[trade_verbs]`'s.
+            let rate = pv
+                .get(&venue_key(kind))
+                .copied()
+                .or_else(|| {
+                    (kind == BuildingKind::Dollhouse)
+                        .then(|| world.config.trade_verbs.as_ref().map(|c| c.dollhouse_p_venue))
+                        .flatten()
+                })
+                .unwrap_or(0.0)
+                .max(0.0);
+            let mut r = rate * adults / eligible[i].max(1) as f32;
+            // R6a: the few eligible for the Dollhouse (the lonely with the
+            // purse, the rich) take at most a visit a night (three at 21:00).
+            if kind == BuildingKind::Dollhouse && world.config.trade_verbs.is_some() {
+                r = r.min(1.0);
+            }
             let u = crate::systems::econ::hash_unit(
                 world.seed(),
                 PURPOSE_STAT_VENUE,
@@ -2454,7 +2534,18 @@ fn stat_visit(
             // Leisure stream), when brave enough and in funds. Not on the
             // learned path (phase 7b: the Full tier bet at a pit once in
             // three calibration cities against 1,320 pit visits).
-            if evening.is_none() && kind_of(world, b) == Some(BuildingKind::FightPit) && !world.levers.ban_gambling {
+            // The pressure pass R6a (OPEN-217): in the bet window the brave
+            // back a fighter in tonight's bout (`bout_bet`), both paths; the
+            // table game above only stood in for it (V10: every bout "bets
+            // paid 0": the bettors were the Full tier's, who plan the
+            // pit before the window opens).
+            let bet = if kind_of(world, b) == Some(BuildingKind::FightPit) { bout_bet(world, id, b) } else { 0 };
+            if bet > 0 {
+                gross += bet;
+            } else if evening.is_none()
+                && kind_of(world, b) == Some(BuildingKind::FightPit)
+                && !world.levers.ban_gambling
+            {
                 let brave = world
                     .comp::<Personality>(id)
                     .is_some_and(|p| p.courage >= world.config.leisure.gamble_rung_courage);
@@ -3361,7 +3452,7 @@ mod tests {
                     .filter_map(|&k| evening_scan(w, id, k).map(|b| (k, b)))
                     .filter(|&(k, b)| {
                         let price = price_of(w, b);
-                        !((!high && rung_of(w, b, price) == Rung::High)
+                        !((!high && rung_of(w, b, price) == Rung::High && !lonely_client(w, id, b))
                             || (k != BuildingKind::Bar && 2 * price > purse))
                     })
                     .collect()

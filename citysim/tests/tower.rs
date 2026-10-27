@@ -269,7 +269,11 @@ fn test_licence_names_the_clerk() {
 /// tower key.
 #[test]
 fn test_off_city_writes_nothing_in_three_days() {
-    let mut w = common::world_with(|c| c.strip_tower());
+    // R6a: the pit's bettors are the Fighter's Attendees (not the tower's): off with the tower's device.
+    let mut w = common::world_with(|c| {
+        c.strip_tower();
+        c.trade_verbs = None;
+    });
     assert!(!service::tower_on(&w));
     w.run_ticks(3 * TICKS_PER_DAY);
     assert!(w.meeting_tables.is_empty() && w.beats.is_empty() && w.bylines.is_empty() && w.walk_ins.is_empty());
