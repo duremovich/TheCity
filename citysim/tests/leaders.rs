@@ -234,6 +234,11 @@ fn test_order_walked_to_the_lieutenant_then_by_word() {
     let hideout = w.hideout_of(g).expect("hideout");
     // Past the wait: the Lead is due and walks to the lieutenant.
     let now = w.tick;
+    // The pressure pass round 2 (premise moved): on the combined city the gang
+    // already held its own Raid (decided 700 ticks ago), and `hold` keeps the
+    // first `decided` of a repeated order, so the wait was not yet past. The
+    // test holds its own order: the city's is cleared.
+    w.comp_mut::<Gang>(g).expect("gang").pending_order = None;
     leaders::hold(&mut w, g, raid_order(now - c.order_wait_ticks));
     assert!(leaders::due(&w, g, l), "the order is walked to a lieutenant past the wait");
     let plan = leaders::plan(&mut w, l, g, hideout).expect("a Lead plan");
