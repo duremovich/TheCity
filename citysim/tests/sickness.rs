@@ -741,6 +741,10 @@ fn probe_diagnosed_patient_with_coins_seeks_the_clinic() {
 fn test_stat_patient_treats_on_p_stat_treat() {
     let mut cfg = sick_cfg();
     cfg.sickness.p_stat_treat = 1.0;
+    // Re-pinned, round 3 S4 (OPEN-216): with `[care]` the off-screen patient
+    // treats at an open Clinic's hour by its doctor (`customers::stat_care`),
+    // not at midnight; this is the midnight roll, `[care]` off.
+    cfg.care = None;
     let mut w = World::new(42, cfg);
     let a = adults(&w)[0];
     citysim::systems::lod::set_lod(&mut w, a, Lod::Statistical);

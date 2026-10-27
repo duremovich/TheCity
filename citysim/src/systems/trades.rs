@@ -351,7 +351,14 @@ fn new_round(world: &World, id: EntityId, post: EntityId, row: &TradeCfg, shift_
     };
     let stops = usize::from(row.round_stops).min(blocks.len());
     if stops == 0 {
-        return Vec::new();
+        // Round 3 S4 (OPEN-216): no other Block in reach: the round is the
+        // post's own (V11 super_104162: one 538-min ClerkWork a day).
+        let own = !yard
+            && !freight
+            && world.config.presence.as_ref().is_some_and(|c| c.round_post_stop)
+            && standing(world, post)
+            && world.comp::<Building>(post).is_some_and(|bd| row.workplace.contains(&bd.kind));
+        return if own && row.round_stops > 0 { vec![post] } else { Vec::new() };
     }
     let door = |x: EntityId| world.comp::<Building>(x).map(|bd| bd.door).unwrap_or_default();
     // Lives at work phase 3 (§ 2.2, `round_near`): the stops nearest the
@@ -472,7 +479,11 @@ pub fn round_plan(world: &mut World, id: EntityId) -> Option<Plan> {
             crate::systems::service::notices_folded(world, id, Some(route.len()));
             let (name, what) = (world.name_of(id), world.owner_label(world.owner_of(post)));
             let at = world.district_name(world.district_of_building(post)).to_string();
-            let text = format!("{name} walked the round of {} {what} Blocks in {at}", route.len());
+            let text = if route == [post] {
+                format!("{name} walked {} door to door, the only {what} Block near", world.name_of(post))
+            } else {
+                format!("{name} walked the round of {} {what} Blocks in {at}", route.len())
+            };
             world.push_event(EventKind::SuperRound, &[id, post], text);
             world.stats.current.jobs.super_rounds += 1;
             return None;

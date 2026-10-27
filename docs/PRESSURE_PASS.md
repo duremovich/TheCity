@@ -1394,3 +1394,83 @@ other phases' builds and sims shared the box).
   `probe_trade_respects_rent_and_the_evictor` (the hire's hard cap leaves no far Farmer at the v1 pace;
   `[distance.choice]` off), `fviolence::test_short_riot_rolls_its_hours_not_a_day` (the fix-on and fix-off worlds
   part before the riot; off). No test (doctrine 2). `SAVE_VERSION` 77 (`[distance.choice]`, the `choice_*` columns).
+
+### S4, care at 100k (`OPEN-216`; `customers::stat_care`, `care::asks`, `service::super_leg`, `[care]` and `[presence]` S4 keys)
+
+- **The diagnosis** (one 100k seed-42 run of 10 days with temporary prints, removed). Not distance and not a
+  per-district cap. (1) **The patients are off screen**: the 100k city is 2,500 Full, 7,500 Coarse and ~90,000
+  Statistical, and `care_choice` (the Treat goal's pick) answered `None` for a Statistical agent. At noon 50-100 of the
+  wounded and 15-30 of the diagnosed were Statistical against 0-14 and 1-2 with a body; the off-screen wounded had no
+  care path at all, and the off-screen diagnosed treated only on the midnight `stat_treat` roll, at the nearest
+  Clinic *open or not* (a shut one, or one still being built), with nobody at the table. 20k has the same tier split
+  (10 % bodies), so R3's 20k reading was a lucky pick, not a scale effect. (2) **Founded Clinics stand shut for
+  days**: the founders' 30-odd Clinics of days 0-3 are construction sites (`industry::start_site` withdraws the
+  vacancies until the Yard's crew is done, `crew_days` x up to `crew_slow_max`), so 22 of 38-58 Clinics were staffed
+  until day 4, 47-60 after; open Clinics close at 18:00 (a day shift) and the wounded of the night go to the back rooms
+  (on call). (3) Of ~60 staffed Clinics only ~10 have a doctor with a body: a Clinic's patient is almost always an
+  off-screen doctor's. Distance after S1 is not it: the bodies' care trips that planned reached the door.
+- **Off-screen patients are seen where a body would go** (`customers::stat_care`, hourly from `care::hourly`): a
+  Statistical adult with a fresh wound (`hurt`), or a diagnosed cancer the pool, a pawn or the slate can settle, takes
+  `care_choice`'s place for his tier (`care_choice_any`: the Clinic for the patch or the slate treatment, the back room
+  for the gang-hurt, the wanted and the broke, the back room's cut rate), and a diagnosed cancer the pool pays for the
+  nearest open Clinic. Seen there when a doctor is on duty with room in his hour (`[[serves]] per_hour`; a back room's
+  doc on call counts his own walk-ins, `service::take_room_on_call`): paid, seen to and written as a body's `Patch`
+  is (`see_to`, split out of `patch`), so the doctor's diary has the patient. A cancer is seen on the day's
+  `[sickness] p_stat_treat` roll, once a day (`Misery.patched_at`). With `[care]` the midnight `stat_treat` is off.
+  **Deviation:** the patient is not given a body (the counter's off-screen visit is the precedent): a doctor on
+  camera treats a patient who is never on screen.
+- **The doctor named is the one who serves** (`service::server_for`, `customers::doctor_for`): the `Treated` event's
+  doctor (and the fee's cut) is the on-duty server `service::arrive` hands the patient to, not the lowest id on duty
+  (V11 `orderly_18123`: three "treated X (a patient)" memories and no `Treated` line). The install, the Therapy and the
+  Detox events name him too and make him an actor ("had Legs implant T1 installed at Ripperdoc#5037 by X").
+- **The sick ask their own, more than once** (`care::asks`; `[care] ask_tries` 3, `ask_refused_days` 7): the night's
+  ask is a ladder down the Friends at or above `ask_affinity`, warmest first, until the shortfall is covered; one with
+  nothing above `ask_keep` says so, one who refuses is not asked again for a week; the kin are named as the pool they
+  already are; with no Friend left the line says so (the street, Earn's begging, is what is left). One line a night
+  of asking: "Benedikt Wozniak, 175c short of a vat-cancer treatment after the 65c they and theirs could put in (24c of
+  their own, Rue Quarry 7c, Rhys Mercer 34c), begged their friends: Leopold Ashcombe lent 2c; Elowen Tanaka turned them
+  down: still 173c short". **Deviation:** the spouse is not asked for coins (his purse is in the pool already); he is
+  named in the line.
+- **The super's day** (`[presence] round_post_stop`, `super_legs`, `super_repairs`, `super_complaints`,
+  `super_leg_days`; the super's trade row `shape = "stations"`): a round with no other Block of the landlord's within
+  `round_reach_tiles` is the post's own Block (its tenants served: notices, door rent; "walked Block#230 door to door,
+  the only Militech 3 Block near"), and the rest of the shift past the round is worked in stations blocks at the post,
+  each block a leg drawn from `super_legs`: a repair in a tenant's flat, a tenant at home stopping him in the hall
+  about one of `super_complaints`, the stairs walked. A tenant seen to is not the next leg's for `super_leg_days`
+  (a Served memory both sides). V11's cause was not arrears: `super_104162`'s post had no other Block in 20 tiles,
+  so the round was empty and the shift one `ClerkWork`.
+- **The rule** (S6's): a cancer under 18 never kills (`health::daily`: the stage holds at its end; at 18 it runs on).
+  A child (`Child`) carries no cancer, so "a sick child goes to care" has no case yet; an adult under 18 goes as anyone.
+- **Numbers** (100k `isle_m_k2_100k` seed 42 x 10, `--scaled --ambient-flats 50`, one run each, base `9dce338`):
+  `Treated` events 115 -> 1,463 (at a Clinic 57 -> 287, of them patches 23 -> 257; back rooms 58 -> 1,176), `Cured`
+  12 -> 36 (the slate's cures at a Clinic), `Loan` lines 145 -> 392, `SuperRound` 80 -> 85 (4 a post's own); violent
+  deaths 87 -> 75, arrests 832 -> 880; ticks/s 24.8 -> 21.7 (shadows and builds on the box at once: a print).
+- **Shadow** (seed 42 d21-27; 20k `isle_m_k2` sick, ripperdoc, orderly, black_doc, super x2; 100k ripperdoc,
+  orderly, sick, super x2). The Clinic at 100k: `ripperdoc_104417 d21 10:52` "Treated: Thea Carrow patched Idris
+  Moreau up at Ripperdoc#5039 for 12c (3c of it to the doctor)", four more on d24-25; `ripperdoc_60222 d25 13:42`
+  one (V11: none in four clinic workers' six work days). The orderly's line at 20k: `orderly_12191 d26 13:34` "Yuki
+  Ellery patched Ysolde Kaneda up at Ripperdoc#4978 (3c of it to the doctor)", with his cut and his memory. The back
+  room: `black_doc_8530` 62 `Treated` in the week ("patched Dagger Penhallow up in the back room of Back Room#3095
+  for 6c, no questions asked", every hour or two through the night). The ask: `sick_10650 d21, d24, d27 00:00` "Nico
+  Park, 223c short of a vat-cancer treatment after the 17c they and theirs could put in (6c of their own, Hale Haas 6c,
+  Jasper Bartlett 5c), has no friend left to ask"; at 100k (events) the ladder: "Hana Tanaka ...: Nico Ellery turned
+  them down; Idris Penhallow turned them down; Odile Jarrow lent 6c: still 202c short". The super: `super_105346 d21
+  11:42` the round and its Notice, then "Sebastian Yardley stopped Benedikt Bellamy in the hall of Block#3526 about the
+  smell in the stairwell" (12:47), "fixed the wiring in Rhys Ellery's flat" (`d22 13:47`), 30-33 legs a week in blocks
+  of 30-90 min with the break (was one 538-min `ClerkWork`); "Kestrel Lockridge walked Block#518 door to door, the
+  only Habitat 5 Block near" (20k events).
+  **Reads wrong / next pass:** both 100k orderlies still show "treated X (a patient)" memories with no line in the
+  shadow (that build named no doctor on an install; the install, Therapy and Detox lines name him now: "had Legs
+  implant T1 installed at Ripperdoc#4978 by Yuki Ellery", 20k events, not re-shadowed). Neither 100k `sick` pick is
+  diagnosed (the archetype takes the malnourished), so the cancer ladder is read at 20k and in the events. The off-
+  screen patient never appears on camera. Clinics are quiet against the back rooms (the poor, the gang-hurt and the
+  night's wounded go to the back room: 1,176 of 1,463 at 100k); a ripperdoc sees ~1 a day, a back-room doc ~10. Most
+  legs are the stairs (the tenants are at work by day and one seen to waits a week), and the leg's line comes at the
+  block's end. Founded Clinics stand shut days 0-3 at 100k (construction, untouched).
+- Re-pinned with the reason in place: `sickness::test_stat_patient_treats_on_p_stat_treat` (the midnight roll, `[care]`
+  off: with `[care]` the off-screen patient treats at an open Clinic's hour) and
+  `person::probe_laid_off_farm_worker_finds_work_within_14_days` (`[care]` off: the moved seed-42 city abducted and
+  killed the pick on day 26, a butterfly) and `succession::test_brothers_after_a_gutting_sack` (the whole gang is the
+  clone before the trim: the trimmed Hollow lost its two kept members in the moved city). A walk-in seen off duty
+  writes no service room with `[service]` off (`service::test_off_city_writes_nothing`).
+- No test (doctrine 2). `SAVE_VERSION` 81 (`care::State.refused`, the `[care]` and `[presence]` keys).

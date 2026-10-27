@@ -146,11 +146,16 @@ fn installed_now(world: &mut World, agent: EntityId, clinic: Option<EntityId>, i
     let (who, what) = (world.name_of(agent), world.name_of(implant));
     let at = clinic.map_or_else(|| "a back room".to_string(), |c| world.name_of(c));
     let gang = world.gang_of(agent).and_then(|g| world.comp::<Gang>(g)).map(|g| g.name.clone());
+    // Round 3 S4 (OPEN-216): the doctor at the table named, an actor (the
+    // encounter's server: his diary had "treated X (a patient)" and no line).
+    let doc = clinic
+        .and_then(|c| crate::systems::service::server_for(world, c, crate::components::ServeKind::Patient, agent));
+    let by = doc.map_or_else(String::new, |d| format!(" by {}", world.name_of(d)));
     let text = match gang {
-        Some(g) => format!("{who} had {what} installed at {at} (gang: {g})"),
-        None => format!("{who} had {what} installed at {at}"),
+        Some(g) => format!("{who} had {what} installed at {at}{by} (gang: {g})"),
+        None => format!("{who} had {what} installed at {at}{by}"),
     };
-    let actors: Vec<EntityId> = [Some(agent), clinic, Some(implant)].into_iter().flatten().collect();
+    let actors: Vec<EntityId> = [Some(agent), clinic, Some(implant), doc].into_iter().flatten().collect();
     world.push_event(EventKind::Installed, &actors, text);
     // Lives at work phase 1 (§ 2.2): the install is the doctor's encounter.
     if let Some(c) = clinic {
@@ -248,7 +253,11 @@ pub fn therapy(world: &mut World, agent: EntityId, clinic: EntityId) -> bool {
     }
     world.stats.current.treatments += 1;
     let (who, at) = (world.name_of(agent), world.name_of(clinic));
-    world.push_event(EventKind::Treated, &[agent, clinic], format!("{who} took Therapy at {at}"));
+    // Round 3 S4 (OPEN-216): the doctor who sees him named, an actor.
+    let doc = crate::systems::service::server_for(world, clinic, crate::components::ServeKind::Patient, agent);
+    let by = doc.map_or_else(String::new, |d| format!(" with {}", world.name_of(d)));
+    let actors: Vec<EntityId> = [Some(agent), Some(clinic), doc].into_iter().flatten().collect();
+    world.push_event(EventKind::Treated, &actors, format!("{who} took Therapy at {at}{by}"));
     // Lives at work phase 1 (§ 2.2): the therapy is the doctor's encounter.
     crate::systems::service::arrive(world, agent, clinic, crate::components::ServeKind::Patient, price);
     true

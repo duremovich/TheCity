@@ -270,6 +270,45 @@ fn servers(world: &World, place: EntityId, kind: ServeKind) -> Vec<(EntityId, u8
         .collect()
 }
 
+/// Round 3 S4 (OPEN-216): the on-duty server of `place` [`arrive`] would
+/// hand `served` to now (room left this hour, the pair's lowest hash);
+/// `None` with none (or off).
+pub fn server_for(world: &World, place: EntityId, kind: ServeKind, served: EntityId) -> Option<EntityId> {
+    if !on(world) {
+        return None;
+    }
+    let hour = world.tick / TICKS_PER_HOUR;
+    servers(world, place, kind)
+        .into_iter()
+        .filter(|&(s, cap)| world.service_room.get(&s).is_none_or(|r| r.hour != hour || r.taken < cap))
+        .map(|(s, _)| (hash(world, PURPOSE_SERVE, key(place) ^ key(served), key(s)), s))
+        .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+        .map(|(_, s)| s)
+}
+
+/// Round 3 S4 (OPEN-216): `s` has room this hour for one more of his
+/// row's `per_hour` (no row: room).
+pub fn has_room(world: &World, s: EntityId) -> bool {
+    let Some(per_hour) = row_of_agent(world, s).map(|r| r.per_hour) else { return true };
+    let hour = world.tick / TICKS_PER_HOUR;
+    world.service_room.get(&s).is_none_or(|r| r.hour != hour || r.taken < per_hour)
+}
+
+/// Round 3 S4: a walk-in seen by `s` at `place` while he is not on duty
+/// there (a back room's doc on call: [`arrive`] serves only the on-duty)
+/// takes one of his hour's room.
+pub fn take_room_on_call(world: &mut World, s: EntityId, place: EntityId) {
+    if !on(world) || present(world, s, place) {
+        return;
+    }
+    let hour = world.tick / TICKS_PER_HOUR;
+    let r = world.service_room.entry(s).or_default();
+    if r.hour != hour {
+        *r = Room { hour, taken: 0 };
+    }
+    r.taken = r.taken.saturating_add(1);
+}
+
 /// The one-line hook: `served` arrives at `place` for `kind`, with the
 /// coins its source moved, and is served now by the on-duty server with
 /// room left this hour whose hash is lowest (D6), or waits (counted).
@@ -534,6 +573,85 @@ pub fn super_stop(world: &mut World, id: EntityId, block: EntityId) {
         serve(world, id, t, block, ServeKind::Tenant, 0);
     }
 }
+
+/// Round 3 S4 (OPEN-216): a super's leg at his post, the stations block
+/// that `started` just worked, named for one of `[presence] super_legs`
+/// (a draw keyed on the super and the block): a repair in a tenant's flat
+/// (any adult tenant), a tenant at home stopping him in the hall with a
+/// complaint (present: a body in the Block, a Statistical one on the home
+/// draw), or the stairs walked. One event, the tenant an actor; nothing
+/// for anyone but a super inside his post.
+pub fn super_leg(world: &mut World, id: EntityId, started: Tick) {
+    use crate::config::SuperLeg;
+    let Some(c) = world.config.presence.clone() else { return };
+    if c.super_legs.is_empty()
+        || !civic_on(world)
+        || !row_of_agent(world, id).is_some_and(|r| r.kind == ServeKind::Tenant)
+    {
+        return;
+    }
+    let Some(post) = world.comp::<Job>(id).and_then(|j| j.employer) else { return };
+    if world.comp::<crate::components::Position>(id).and_then(|p| p.building) != Some(post) {
+        return;
+    }
+    let k = key(id) ^ started.rotate_left(20);
+    let pick = |u: f32, n: usize| ((u * n as f32) as usize).min(n.saturating_sub(1));
+    let leg = c.super_legs[pick(hash(world, PURPOSE_LEG, k, 0), c.super_legs.len())];
+    // A tenant he saw to inside `super_leg_days` (a Served memory between
+    // them) waits his turn: one complaint a week, not one a morning.
+    let since = world.tick.saturating_sub(u64::from(c.super_leg_days) * crate::time::TICKS_PER_DAY);
+    let seen = |w: &World, t: EntityId| {
+        w.comp::<crate::components::Memory>(id).is_some_and(|m| {
+            m.entries.iter().any(|e| e.kind == MemoryKind::Served && e.subject == Some(t) && e.tick >= since)
+        })
+    };
+    let tenants: Vec<EntityId> = world
+        .residents_of(post)
+        .iter()
+        .copied()
+        .filter(|&t| {
+            t != id
+                && world.has::<Brain>(t)
+                && crate::systems::demography::is_adult(world, t)
+                && crate::systems::law::living(world, t)
+                && !seen(world, t)
+        })
+        .collect();
+    let (who, at) = (world.name_of(id), world.name_of(post));
+    let floors = world.comp::<Building>(post).map_or(1, |bd| bd.floors.max(1));
+    let stairs =
+        format!("{who} walked the stairs and halls of {at} ({floors} floor{})", if floors == 1 { "" } else { "s" });
+    let (text, tenant) = match leg {
+        SuperLeg::Repair if !tenants.is_empty() && !c.super_repairs.is_empty() => {
+            let t = tenants[pick(hash(world, PURPOSE_LEG, k, 1), tenants.len())];
+            let what = &c.super_repairs[pick(hash(world, PURPOSE_LEG, k, 2), c.super_repairs.len())];
+            (format!("{who} fixed {what} in {}'s flat at {at}", world.name_of(t)), Some(t))
+        }
+        SuperLeg::Complaint if !c.super_complaints.is_empty() => {
+            let present: Vec<EntityId> =
+                tenants.iter().copied().filter(|&t| crate::systems::presence::met_at_home(world, t, post, k)).collect();
+            if present.is_empty() {
+                (stairs, None)
+            } else {
+                let t = present[pick(hash(world, PURPOSE_LEG, k, 1), present.len())];
+                let what = &c.super_complaints[pick(hash(world, PURPOSE_LEG, k, 2), c.super_complaints.len())];
+                (format!("{} stopped {who} in the hall of {at} about {what}", world.name_of(t)), Some(t))
+            }
+        }
+        _ => (stairs, None),
+    };
+    let mut actors = vec![id];
+    actors.extend(tenant);
+    actors.push(post);
+    world.push_event(EventKind::Served, &actors, text);
+    if let Some(t) = tenant {
+        let salience = world.config.service.served_salience;
+        world.remember(id, MemoryKind::Served, Some(t), salience, 0.0, false);
+        world.remember(t, MemoryKind::Served, Some(id), salience, 0.0, false);
+    }
+}
+
+const PURPOSE_LEG: u64 = 0x5e52_0020;
 
 /// The pressure pass R4 (OPEN-219): the round's one `Notice` line, at its
 /// end (`trades::round_plan`, `lod`'s Statistical round; `stops` the
