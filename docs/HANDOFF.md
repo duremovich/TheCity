@@ -1,93 +1,94 @@
 # Handoff: now
 
 Rewritten at every session end; never appended. The session logs are `docs/history/SESSIONS.md`. Last rewrite:
-**2026-10-27, the twenty-third session: pressure pass round 2 from Shadow V10 (six mechanism phases R1-R6b, three fix
-rounds), Shadow V11 read against V10.**
+**2026-10-27, the twenty-fourth session: pressure pass round 3 from Shadow V11 (seven mechanism phases S1-S7, two
+fix rounds, the under-18 rule), Shadow V12 read against V11.**
 
 ## Main
 
-Main holds **pressure pass round 2** (`docs/PRESSURE_PASS.md` § "Round 2 from Shadow V10", every phase's entry under
-"Implemented: deviations") on the pressure pass. The change tier is green at the merge of fix round 3 (`fcdee37`);
-tests still 1,470 (none added; probes the moved city broke were re-pinned with the reason in place). `SAVE_VERSION`
-76.
+Main holds **pressure pass round 3** (`docs/PRESSURE_PASS.md` § "Round 3 from Shadow V11", every phase's entry under
+"Implemented: deviations"). The change tier is green at the V12 fix round (`1aa78df`, merged `b70fa7d`); tests still 1,470 (none added; probes the combined
+city broke were re-pinned with "Round 3" reasons in place). `SAVE_VERSION` 83.
 
 | phase | what it added |
 |---|---|
-| R1 fares (`[fares]`, `systems/fares.rs`) | a fare dodger is fined, else beaten, a repeat dodger banned from the El; never a warrant or a cell |
-| R2 pace | walking was v1's toy pace (2 min a tile; `move_ticks_full` 2 -> 1); the escort van by road; guard beats by the guard's Home |
-| R3 care (`[care]`, `systems/care.rs`) | the doctor's cut, the pawn, the slate, the Friend's loan, the downed call and the woken street, back rooms reached, the sick post covered |
-| R4 noise (`[noise]`) | the friendship flip (only holders who see a blow turn Enemy), the loser's gossip, the super's one notice line, the rest day marked, the Camp answer |
-| R5 gangs (`[crew]` keys) | the muster holds, full Hideouts admit their own, the try-out and its refusal, Scavenge, the broke gang's stand-down; court missed at work excused (colours lost 100 -> 33 at 20k) |
-| R6a trades I (`[trade_verbs]`) | the cab pool and rides home, the pimp's round, bets at the pit, the madam's bookings, the Dollhouse |
-| R6b trades II (`[verbs]`) | the gun hunts (contract quotas per capita), the Hq as the office, the landlord's desk (`OPEN-207` closed), the reporter's beat story, the gangs' arms trade |
+| S1 distance (`[distance.choice]`, `distance::trip`) | the Deal spot, muster, hire, site, Visit, Camp answer and JoinGang chosen by the body's own trip; "stays off the trade", "could not make the trip", "sat out the raid" |
+| S2 plans | a walk for a lost post turns back, the order left at the door, the goal back-off (`[brain] cool_backoff`), a muster sat is kept |
+| S3 justice | the charge names its victim ("resisted arrest"), jail meals and sleep, the guard's collar, jail duty in blocks, the fare beating's cool-down |
+| S4 care at 100k | off-screen patients seen at the doctor on duty (`customers::stat_care`), the Friends' ladder of asks, the super's round in legs |
+| S5 trades | the cabbie's cut and rank, the hired hand at the yard, the bouncer's rough client and bar, the beat story and crime desk at 100k, a hit heard of |
+| S6 children (`ages::seed_children`) | school-age children seeded, School from 6, the jobless parent's grocery run, `ages::is_protected` at every victim pick, the `kill_by` backstop, the camp beating gone |
+| S7 noise | the raid result line, crowd and hourly folds, the petty re-witness skip, the same-crime memory merge, titles by grade, the rest day in the hour lines |
+| V12 fix (`OPEN-230`) | the non-lethal backstop: no fight and no fare beating lands on a protected person (`law::resolve_fight_mods` refuses a protected party; defenders, raiders and the crossfire drop them; a protected dodger is turned off the platform; the bin shakedown skips them) |
 
-**Shadow V11** (`docs/SHADOW_V11.md`, `docs/shadow_v11/`, V10's window): better than V10 in five groups of seven;
-care reads worse at 100k (no clinic worker sees a patient, the supers do no round). Most of what's left is a body
-that never gets there: distance-blind goals on a map short of Lots, and plans that fail at the end of the walk.
+**The under-18 rule** (CLAUDE.md, Dylan 2026-10-27) is a hard rule, not a config switch: `ages::is_protected` at the
+pick, `World::kill_by` and the fight resolver as backstops, `harm_blocked` counting a pick site that missed (0 over 30
+days at 100k).
 
-FINDINGs (100k seed 42 x 30, `target/r2_100k/` against V10's `target/pp100k/`): employed 39.3k -> 39.8k, thefts
-22.5k -> 17.0k, arrests 16.2k -> 9.3k, Murders 264 -> 242, starvation deaths 34 -> 10, jailed mean 890 -> 1,028.
-Ticks/s days 25-30 23.7 -> 24.8 (`OPEN-226`).
+**Shadow V12** (`docs/SHADOW_V12.md`, `docs/shadow_v12/`, V11's window): better than V11 in all seven groups; care
+and corp jump most (supers' rounds, orderlies' patients, teachers' classes, reporters' Stories, a raid's headline). No
+minor harmed in 110 diaries. Left: walks that eat the day, shifts with no trade inside them, the camp as a number,
+children not at School, the 00:07 standing-fact line.
 
-**A 20k run needs `--scaled --ambient-flats 50`**: `citysim-cli run --days 30 --seed 42 --population 20000 --scaled
---map assets/maps/isle_m_k2.txt --ambient-flats 50 --report --events > run.csv 2> events.tsv`. Without `--scaled`
-the city keeps the 2k config's jobs and starves (it cost a false-alarm bisect this session). `shadow --population`
-scales by itself; a full shadow pass needs `--pick` with the archetype list (`target/shadow_v11/picks.txt`).
+FINDINGs (100k seed 42 x 30, `target/r3_100k/` against `target/r2_100k/`): the city starts 111.2k (+11k children);
+employed 39.8k -> 39.9k, deaths by violence 393 -> 441, starvation 10 -> 11, jailed mean 1,028 -> 1,065, homeless max
+11.3k -> 11.9k, Treated 3.0k -> 12.3k, Story 3.4k -> 7.1k, Witness 377k -> 190k, ChildTaken 32 -> 3,726. Ticks/s
+days 25-29 24.6 -> 22.4; 20k quiet box 277 -> 218 (`OPEN-229`).
 
 ## In flight
 
-- No agents are running; no worktrees. Locked empty folders under `.claude/worktrees/` can go after a restart.
-  `target/shadow_v11/`, `target/r2_100k/`, `target/r2main/` (an unscaled 20k run: ignore) hold the runs.
+- No agents are running; no worktrees. `target/shadow_v12/`, `target/r3_100k/`, `target/r3_perf/` hold the runs.
 
 ## Next, in order
 
 1. **Dylan's calls below**, then either:
-   - **the 100k map re-import** (`OPEN-204`, `OPEN-182`): V11's top item (`OPEN-221`) is half the map, and it is the
-     lever on employment; or
-   - **round 3 from V11**: distance in goal choice (`OPEN-221`'s other half), plans that fail at the end
-     (`OPEN-222`), justice (`OPEN-223`), care at 100k (`OPEN-216`), the trades left (`OPEN-217`), noise (`OPEN-225`).
-     One agent per phase in waves, as this session ran. Then Shadow V12 in V11's window.
+   - **the 100k map re-import** (`OPEN-204`, `OPEN-182`): walking still eats 4-10 h of the day in every group
+     (`OPEN-221`); the goal side is done, home-to-post is the map; or
+   - **round 4 from V12**: the camp as a place (`OPEN-231`), plans that still die silently (`OPEN-222`), the trades'
+     inside (`OPEN-217`), money and labels that disagree, noise (`OPEN-233`), the victim's age on Assault lines
+     (`OPEN-233`, with the victim's age on Assault lines). Then Shadow V13 in V12's window, with a sick pick that carries an illness.
 2. The vertical city (`OPEN-187`, `OPEN-191`), the view milestone, M18.
 
 ## Open calls for Dylan
 
-- **Map first or round 3 first?** Distance is now the top complaint at 100k; the re-import is a joint job with
-  TheCityGraphics.
-- `OPEN-224`: the seeded city has no school-age children (Schools empty). Seed them at world generation and gate
-  School by age (my take: yes, as its own phase; it changes household make-up citywide).
-- `OPEN-226`: 100k reads ~24-25 ticks/s on this run's method against the perf gate's 31; round 2 didn't move it.
-  Re-measure at the gate's conditions, then a perf phase or accept.
-- R2: the walk is still ~20x slower than a person on 4 m tiles; going faster needs sub-tick steps and an El and
-  vehicle rescale.
+- **Map first or round 4 first?** Distance is still the top complaint, now mostly home-to-post; the Lot shortage
+  needs either the footprint redesign or `OPEN-187` multi-tenancy, a joint job with TheCityGraphics.
+- `OPEN-231`: the service takes ~124 children a day into the camps at 100k (3,726 in 30 days, 1,782 inside on a
+  given day, of ~11k). That's your "service takes them" at work; is that size right, or should neglect take longer
+  (or warn first) before the take?
+- `OPEN-232`: 18 Schools for ~11k children, school days 4 % of child-days. A School per district, or reach by travel
+  time?
+- `OPEN-229`: ticks/s 22.4 at 100k, 218 at 20k, below the ~25 you accepted. A perf phase before V13, or accept again?
+- S1 left natives stranded (homeless max up 0.6k; `OPEN-228`'s follow-up): hire by distance favours the Ambient
+  pool over the city's own jobless.
 - Carried: `OPEN-220`, `OPEN-212`, `OPEN-150`, `OPEN-179`; standing `OPEN-062`, `OPEN-039`, `OPEN-057`, `OPEN-059`,
   `OPEN-077`, `OPEN-069`, `OPEN-070`.
 
 ## Process notes from this session
 
-- Waves of four on disjoint areas worked; every hand-resolved merge was followed by the change tier on main, and the
-  combinations went red three times (all premise re-pins by Sonnet, ~$1-2 each, no code bug). One probe
-  (`probe_parent_with_the_fee_buys_the_child_out...`) flipped on four merges until fix round 3 found its real cause
-  (the employed spouse paid the buy-out) and isolated it.
-- Union merges of `config.rs` dropped a Default impl's closing braces again (R3); fixing a conflicted file after
-  `git add` left the merge commit broken while the working tree built. `git status` before committing a merge.
+- Two waves (four, then three) on disjoint areas; the combinations went red twice, both premise re-pins by Sonnet
+  ($1-2 each). One re-pin excluded a farmer by index (`OPEN-227`): fix rounds key on the premise, never an index.
+- My first guess at `OPEN-228` (the children leaking from Ambient) was wrong; a $1 Sonnet diagnosis found S1's hire
+  cap. Diagnose before guessing in a brief.
+- The critics' brief named the under-18 rule as a top bug, which is how the two non-lethal holes surfaced: a shadow
+  cannot check what a line doesn't print (victims' ages), so the backstop at the resolver is what holds the rule.
 
-## Cost (API-rate $ equivalent, `tools/session_cost.py --session befa23da`)
+## Cost (API-rate $ equivalent, `tools/session_cost.py --session 4535a6ef`)
 
 | part | agent | turns | median ctx | $ |
 |---|---|---|---|---|
-| R1 fares | Opus | 292 | 204k | 17 |
-| R2 pace | Opus | 358 | 209k | 35 |
-| R3 care | Opus | 273 | 220k | 26 |
-| R4 flip and noise | Opus | 301 | 178k | 18 |
-| R5 gangs | Opus | 331 | 234k | 25 |
-| R6a trades I | Opus | 373 | 231k | **48** |
-| R6b trades II | Opus | 332 | 226k | 21 |
-| three fix rounds | Sonnet | 170 | 57-77k | 4 |
-| the false-alarm bisect | Opus | 58 | 61k | 1 |
-| Shadow V11 critics (7) | Sonnet | 279 | 78-109k | 9 |
-| orchestrator (briefs, merges, runs, synthesis) | Opus | ~280 | 167k | ~20 |
+| S1 distance | Opus | 392 | 244k | **40** |
+| S2 plans | Opus | 222 | 178k | 12 |
+| S3 justice | Opus | 387 | 248k | 27 |
+| S4 care at 100k | Opus | 372 | 248k | **45** |
+| S5 trades | Opus | 453 | 263k | **45** |
+| S6 children (+ its read-only harm audit, $14) | Opus | 346 + 290 | 214k | 46 |
+| S7 noise | Opus | 323 | 217k | 28 |
+| three fix rounds + the OPEN-228 diagnosis | Sonnet | 165 | 62-69k | 5 |
+| Shadow V12 critics (7) | Sonnet | 329 | 77-121k | 11 |
+| orchestrator (briefs, merges, runs, synthesis) | Opus | ~270 | 114k | 14 |
 
-Total ≈ $225 for six mechanism phases and a shadow read (the last session: ≈ $350 for ten phases and two reads).
-R6a ran past the ~300-turn brief (four trades in one brief; three change-tier runs).
+Total ≈ $275 for seven mechanism phases and a shadow read (the last session: ≈ $225 for six). S1, S4 and S5
+ran past the ~300-turn brief; S5 was four trades in one brief, as R6a was: split trades two to a brief next time.
 
 The standing decisions, the doctrine and the agent rules are in `CLAUDE.md`; the tiers in `docs/TESTING.md`.
