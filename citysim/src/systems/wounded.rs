@@ -117,6 +117,8 @@ pub fn down(world: &mut World, id: EntityId, by: Option<EntityId>) {
             murder: by.is_some(),
             clinic: clinic_near(world, tile),
             care_by: None,
+            called: None,
+            aided: false,
         },
     );
     let s = crate::virt::Sighting { who: id, tile, tick: now, confidence: 1.0, relayed: false };
@@ -129,6 +131,8 @@ pub fn down(world: &mut World, id: EntityId, by: Option<EntityId>) {
         crate::systems::virt::record_sighting(world, Some(o), s);
     }
     world.stats.current.wounded.downed += 1;
+    // Pressure pass R3: the street hears it (the nearest off-screen adults wake).
+    crate::systems::care::wake_bystanders(world, id, tile);
     let who = by.map_or_else(|| "unknown hands".to_string(), |b| world.name_of(b));
     let text = format!("{} went down, bleeding, at {}'s hands", world.name_of(id), who);
     world.push_event(EventKind::Wounded, &[id, by.unwrap_or(EntityId::NONE)], text);
@@ -194,6 +198,8 @@ pub fn run(world: &mut World) {
     if !world.wounded.is_empty() {
         tick_down(world);
     }
+    // Pressure pass R3: the sick workers' day covers end.
+    crate::systems::care::hourly(world);
     let tod = u64::from(crate::time::tick_of_day(world.tick));
     if crate::systems::midnight::due(world, crate::systems::midnight::Mid::Tail) {
         trauma_daily(world);
@@ -231,6 +237,10 @@ fn tick_down(world: &mut World) {
             let c = clinic_near(world, at);
             if let Some(x) = world.wounded.get_mut(&id) {
                 x.clinic = c;
+            }
+            // Pressure pass R3: the downed calls a tied body for help.
+            if w.rescuer.is_none() {
+                crate::systems::care::call_for_help(world, id);
             }
         }
         let cuff = world.comp::<Brain>(id).and_then(|b| b.cuffed_by);
@@ -320,6 +330,14 @@ fn tie(world: &World, a: EntityId, w: EntityId, rec: &Wounded) -> Option<(f32, b
     if employer(a).is_some() && employer(a) == employer(w) {
         return Some((1.0, false, Tie::Colleague));
     }
+    // Pressure pass R3 (OPEN-216): a guard on the beat carries anyone down;
+    // a stranger at hand may (`[care]`; nothing with it absent).
+    if let Some(t) = crate::systems::care::beat_term(world, a) {
+        return Some((t, false, Tie::Beat));
+    }
+    if let Some(t) = crate::systems::care::stranger_term(world, a, w, rec.by) {
+        return Some((t, false, Tie::Stranger));
+    }
     None
 }
 
@@ -331,10 +349,18 @@ enum Tie {
     Colleague,
     Guard,
     Trauma,
+    /// Pressure pass R3: a city guard on shift (any downed body).
+    Beat,
+    /// Pressure pass R3: a stranger at hand.
+    Stranger,
 }
 
-/// The nearest Clinic to `tile` (open, not derelict).
+/// The nearest Clinic to `tile` (open, not derelict); with `[care]` the
+/// nearest staffed doctor, a Clinic or a back room (`care::doctor_near`).
 fn clinic_near(world: &World, tile: crate::components::TilePos) -> Option<EntityId> {
+    if crate::systems::care::cfg(world).is_some() {
+        return crate::systems::care::doctor_near(world, tile);
+    }
     world
         .buildings_of_kind(BuildingKind::Clinic)
         .iter()
@@ -365,12 +391,18 @@ fn pick(world: &World, a: EntityId) -> Option<(EntityId, f32, bool, Tie)> {
         let Some((term, trauma, how)) = tie(world, a, w, rec) else { continue };
         let at = world.comp::<Position>(w).map_or(rec.tile, |p| p.tile);
         let d = me.manhattan(at);
-        if !trauma && law::chebyshev(me, at) > r {
+        // Pressure pass R3: the one the downed called comes from any distance.
+        if !trauma && rec.called != Some(a) && law::chebyshev(me, at) > r {
             continue;
         }
         let Some(c) = rec.clinic else { continue };
         let to_clinic = world.comp::<Building>(c).map_or(u32::MAX, |b| b.door.manhattan(at));
-        if now + Tick::from(d) + Tick::from(to_clinic) > rec.bleed_until {
+        // Pressure pass R3: the first helper binds the wound (`aid_min` once).
+        let aid = match crate::systems::care::cfg(world) {
+            Some(c) if !rec.aided => Tick::from(c.aid_min),
+            _ => 0,
+        };
+        if now + Tick::from(d) + Tick::from(to_clinic) > rec.bleed_until + aid {
             continue;
         }
         if best.is_none_or(|(bt, bw, _, _)| term > bt || (term == bt && w < bw)) {
@@ -428,6 +460,9 @@ pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
 /// A Ripperdoc on `clinic`'s staff (plan deviation: on call; the spec's
 /// "inside" left every night's downed to bleed out at a shut door).
 fn doc_in(world: &World, clinic: EntityId) -> bool {
+    if crate::systems::care::cfg(world).is_some() {
+        return crate::systems::care::staffed(world, clinic);
+    }
     world
         .staff_of(clinic)
         .iter()
@@ -473,6 +508,18 @@ pub fn on_carry(world: &mut World, id: EntityId, target: Option<EntityId>) -> St
     if let Some(x) = world.wounded.get_mut(&w) {
         x.rescuer = Some(id);
     }
+    // Pressure pass R3: the first helper binds the wound as he lifts it.
+    if let Some(aid) = crate::systems::care::cfg(world).map(|c| Tick::from(c.aid_min)) {
+        let fresh = world.wounded.get(&w).is_some_and(|x| !x.aided && !x.stable);
+        if fresh {
+            if let Some(x) = world.wounded.get_mut(&w) {
+                x.aided = true;
+                x.bleed_until += aid;
+            }
+            let text = format!("{} bound {}'s wound and lifted them", world.name_of(id), world.name_of(w));
+            world.push_event(EventKind::Rescued, &[id, w], text);
+        }
+    }
     StepResult::Done
 }
 
@@ -488,7 +535,12 @@ pub fn on_stabilise(world: &mut World, id: EntityId, target: Option<EntityId>) -
     };
     let Some(rec) = world.wounded.get(&w).cloned() else { return StepResult::Failed(FailReason::PreconditionLost) };
     let how = tie(world, id, w, &rec).map_or(Tie::Kin, |t| t.2);
-    let price = world.config.wounded.stabilise_price;
+    // Pressure pass R3: a back room's price.
+    let back = world.comp::<Building>(clinic).is_some_and(|b| b.kind == BuildingKind::BlackClinic);
+    let price = match crate::systems::care::cfg(world) {
+        Some(c) if back => c.back_stabilise_price,
+        _ => world.config.wounded.stabilise_price,
+    };
     let faction = match how {
         Tie::Trauma => rec.trauma,
         Tie::Gang => world.gang_of(id),
@@ -528,6 +580,16 @@ pub fn on_stabilise(world: &mut World, id: EntityId, target: Option<EntityId>) -
         Tie::Colleague => row.rescued_colleague += 1,
         Tie::Guard => row.rescued_guard += 1,
         Tie::Trauma => row.trauma_saves += 1,
+        Tie::Beat => row.rescued_guard += 1,
+        Tie::Stranger => {}
+    }
+    match how {
+        Tie::Beat => ownership::jobs2_row(world).care_beat += 1,
+        Tie::Stranger => ownership::jobs2_row(world).care_strangers += 1,
+        _ => {}
+    }
+    if back {
+        ownership::jobs2_row(world).care_back_stabilised += 1;
     }
     let d = world.district_of_building(clinic);
     crate::systems::gossip::post_deed(world, d, Deed::Rescued, Some(id), Some(w));

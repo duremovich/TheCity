@@ -1237,6 +1237,10 @@ pub struct World {
     /// books (standing, bail owed, the talk), failed courts, reckonings.
     #[serde(default, skip_serializing_if = "crate::systems::crew::State::is_empty")]
     pub crew: crate::systems::crew::State,
+    /// Pressure pass round 2, R3 (`systems::care`): the asks for treatment
+    /// money, the sick workers' covers. Saved while it holds anything.
+    #[serde(default, skip_serializing_if = "crate::systems::care::State::is_empty")]
+    pub care: crate::systems::care::State,
     /// L2 L15: the HangOut spots per district (`leisure::spots`, midnight).
     /// Saved (deviation: the plan's `serde(skip)` would rebuild them on load
     /// from a later state than the midnight's).
@@ -2029,6 +2033,7 @@ impl World {
             underwater: Default::default(),
             consequence: Default::default(),
             crew: Default::default(),
+            care: Default::default(),
             spots: Vec::new(),
             last_met: BTreeMap::new(),
             told: BTreeMap::new(),

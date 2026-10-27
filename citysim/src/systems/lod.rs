@@ -484,6 +484,8 @@ fn class_with(world: &World, id: EntityId, harvest: &[EntityId], sets: Option<&B
         || brain.abducted_by.is_some()
         // M16b phase 3: the downed keep a body (inside `wounded_quota`).
         || (!world.wounded.is_empty() && world.wounded.contains_key(&id))
+        // Pressure pass R3: the people at hand of a body bleeding keep one.
+        || (!world.wounded.is_empty() && crate::systems::care::bystander(world, id))
         || harvest.contains(&id)
         || (!world.episodes.is_empty() && world.episodes.contains(&id));
     // M10 D20: guards rank with gang members, or at 2,000 the gangs take

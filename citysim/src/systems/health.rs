@@ -245,6 +245,8 @@ pub fn daily(world: &mut World) {
         let name = world.name_of(id);
         crate::systems::economy::dismiss(world, id, building, format!("{name} was let go: too sick to work"));
     }
+    // Pressure pass R3: the asks for treatment money, the sick posts covered.
+    crate::systems::care::daily(world);
     let row = &mut world.stats.current.health;
     row.malnourished = malnourished;
     row.toxic = toxic;
@@ -548,6 +550,15 @@ pub fn oncology(world: &mut World, id: EntityId, clinic: EntityId) -> bool {
     if !on(world) || !diagnosed || pool(world, id) < price {
         return false;
     }
+    // Pressure pass R3: the doctor on the table takes his cut (`[care]`).
+    if crate::systems::care::cfg(world).is_some() {
+        let doc = crate::systems::customers::doctor(world, clinic);
+        let s = crate::systems::care::settle(world, id, clinic, doc, price);
+        let note = s.note(world);
+        oncology_effect(world, id, clinic, doc, &note);
+        crate::systems::service::arrive(world, id, clinic, crate::components::ServeKind::Patient, price);
+        return true;
+    }
     let to = world.owner_of(clinic);
     let mut due = price;
     for (payer, holds) in payers(world, id) {
@@ -564,6 +575,20 @@ pub fn oncology(world: &mut World, id: EntityId, clinic: EntityId) -> bool {
             }
         }
     }
+    if !oncology_effect(world, id, clinic, None, "") {
+        return false;
+    }
+    // Lives at work phase 1 (§ 2.2): the treatment is the doctor's encounter.
+    crate::systems::service::arrive(world, id, clinic, crate::components::ServeKind::Patient, price);
+    true
+}
+
+/// The treatment's effect at `clinic` (paid): below `cure_stage` a cure
+/// (toxicity × `treat_tox_mult`), else remission (`stage − remission`); the
+/// event carries `note` (how it was paid, R3).
+pub fn oncology_effect(world: &mut World, id: EntityId, clinic: EntityId, doc: Option<EntityId>, note: &str) -> bool {
+    let mut actors = vec![id, clinic];
+    actors.extend(doc);
     let cfg = world.config.sickness.clone();
     let (who, at) = (world.name_of(id), world.name_of(clinic));
     let Some(h) = world.comp_mut::<Health>(id) else { return false };
@@ -580,20 +605,18 @@ pub fn oncology(world: &mut World, id: EntityId, clinic: EntityId) -> bool {
         world.stats.current.health.cancer_cured += 1;
         world.push_event(
             crate::events::EventKind::Cured,
-            &[id, clinic],
-            format!("{who} was cured of a vat-cancer at {at}"),
+            &actors,
+            format!("{who} was cured of a vat-cancer at {at}{note}"),
         );
     } else {
         world.push_event(
             crate::events::EventKind::Treated,
-            &[id, clinic],
-            format!("{who} bought a remission of a vat-cancer at {at}"),
+            &actors,
+            format!("{who} bought a remission of a vat-cancer at {at}{note}"),
         );
         // Jobs & lives phase 7 (§ 6.3): a remission leaves a level (no slot).
         crate::systems::ages::maim(world, id, None, "a cancer in remission");
     }
-    // Lives at work phase 1 (§ 2.2): the treatment is the doctor's encounter.
-    crate::systems::service::arrive(world, id, clinic, crate::components::ServeKind::Patient, price);
     true
 }
 

@@ -946,6 +946,10 @@ CREW_TOTALS = ("crew_raid_results", "crew_raid_wounded", "crew_duty_posted", "cr
                "crew_chose_gang", "crew_chose_job", "crew_duty_pay", "crew_colours_lost", "crew_talked",
                "crew_talker_beaten", "crew_welcomes", "crew_promoted", "crew_court_quorum", "crew_court_failed",
                "crew_absorbed", "crew_folded", "crew_rest_nights", "crew_gang_loans")
+# Pressure pass round 2, R3: the wounded and the sick.
+CARE_TOTALS = ("care_doc_cut", "care_pawns", "care_slates", "care_slate_coins", "care_asks_refused", "care_asks_lent",
+               "care_ask_coins", "care_calls", "care_strangers", "care_beat", "care_back_stabilised", "care_woken", "care_covered",
+               "care_uncovered", "patched", "black_patients")
 ARMS_SNAP = ("weapons", "carriers", "armoury", "precinct_arms", "gunsmith_stock", "licences", "weapon_wants")
 # Phase 4, vice and fashion (§ 5.1, § 9).
 VICE_TOTALS = ("strip_visits", "brothel_visits", "companion_visits", "vice_revenue", "tips", "street_visits",
@@ -1034,6 +1038,8 @@ def jobs2(rows, events, out):
         J["consequence_totals"] = {k: sum(col(rows, k)) for k in CONSEQUENCE_TOTALS}
     if "crew_duty_posted" in rows[0]:
         J["crew_totals"] = {k: sum(col(rows, k)) for k in CREW_TOTALS if k in rows[0]}
+    if "care_slates" in rows[0]:
+        J["care_totals"] = {k: sum(col(rows, k)) for k in CARE_TOTALS if k in rows[0]}
     if "vice_venues" in rows[0]:
         J["vice_totals"] = {k: sum(col(rows, k)) for k in VICE_TOTALS}
         J["vice_mean"] = {k: mean(col(rows, k)) for k in VICE_SNAP}
@@ -1390,6 +1396,8 @@ def fmt(o):
             L.append("consequence, run totals: " + f(w["consequence_totals"]))
         if "crew_totals" in w:
             L.append("crew (gang duty, courts, release, raid results), run totals: " + f(w["crew_totals"]))
+        if "care_totals" in w:
+            L.append("care (the slate, the pawn, the asks, the downed, the covers), run totals: " + f(w["care_totals"]))
         if "vice_totals" in w:
             L.append("vice and fashion, run totals: " + f(w["vice_totals"]))
             L.append("vice and fashion, daily mean: " + f(w["vice_mean"]) + f"; tips / vice revenue "

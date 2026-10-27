@@ -685,7 +685,9 @@ pub fn is_exec(world: &World, agent: EntityId) -> bool {
 /// the dole, off the founding cooldown, who can afford a foundable kind,
 /// with a vacant Lot in the city. Cheap checks first: this runs per think.
 pub fn can_found(world: &World, agent: EntityId) -> bool {
-    let coins = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);
+    // Pressure pass R3: a diagnosed founder keeps the treatment out of it.
+    let coins =
+        world.comp::<Wallet>(agent).map_or(0, |w| w.coins) - crate::systems::care::founder_reserve(world, agent);
     let c = &world.config.corps.found_cost;
     // L2 L6: with jobs on, the NoodleBar is the cheapest foundable rung.
     let floor = c.bar.min(c.home).min(c.noodle_bar);
@@ -762,7 +764,8 @@ pub fn register(world: &mut World, agent: EntityId) -> Result<EntityId, String> 
     if !can_found(world, agent) {
         return Err("cannot found".into());
     }
-    let coins = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);
+    let coins =
+        world.comp::<Wallet>(agent).map_or(0, |w| w.coins) - crate::systems::care::founder_reserve(world, agent);
     let kind = choose_kind_full(
         world,
         coins,
@@ -855,6 +858,8 @@ fn incorporate_owned(world: &mut World, agent: EntityId, owned: Vec<EntityId>) -
     // upkeep on day 40, twelve days after it incorporated.
     // The founder keeps a day's exec wage to eat on until the first draw.
     let float = world.config.economy.wage_exec;
+    // Pressure pass R3: a diagnosed founder keeps the treatment out of it.
+    let float = float + crate::systems::care::founder_reserve(world, agent);
     let capital = world.comp::<Wallet>(agent).map_or(0, |w| (w.coins - float).max(0));
     if capital > 0 {
         ownership::pay(world, Some(agent), Some(corp), capital, ownership::Flow::Subsidy);

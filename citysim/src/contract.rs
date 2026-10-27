@@ -932,6 +932,13 @@ pub struct Wounded {
     /// Review finding 6: who paid the stabilisation (and pays the care).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub care_by: Option<EntityId>,
+    /// Pressure pass R3 (`care::call_for_help`): the tied body the downed
+    /// called, who comes from any distance it can make in time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub called: Option<EntityId>,
+    /// Pressure pass R3: a helper bound the wound (`[care] aid_min` added once).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub aided: bool,
 }
 
 // ---------------------------------------------------------------------------
