@@ -920,3 +920,17 @@ Merging branches built apart turned tests red on the combination four times (one
 that could not reform); the change tier on main after each hand-resolved merge caught them. No test added (1,470).
 Shadow V10 in V9's window read better in every group, with unscripted chains of consequence; still thin are the
 trades' verbs on a followed body and the fare-evasion loop (`OPEN-213`-`OPEN-220`). Cost ≈ $350 (HANDOFF § Cost).
+
+## The twenty-third session (2026-10-26/27): pressure pass round 2, Shadow V11
+
+Round 2 from Shadow V10 (`docs/PRESSURE_PASS.md` § Round 2), Dylan's calls up front: this round before the map
+re-import, fares a ladder never a cell, gang attrition judged after the stalls are fixed, coders in waves. Wave 1 (R1
+fares, R2 walking pace, R3 the wounded and the sick, R4 the friendship flip and noise) and wave 2 (R5 gang verbs, R6a
+and R6b the trades' verbs), one Opus coder each in a worktree. The pace was v1's toy pace (2 min a tile); the flip
+was `gang::claim` turning a whole rival gang Enemy on any blow; the gun never hunted because the contract quota
+didn't scale. R5 judged 5b's attrition after the walks arrived and excused a court missed at work (colours lost 100 ->
+33 at 20k). Three Sonnet fix rounds re-pinned probes the combinations moved; no code bug, no test added (1,470),
+`SAVE_VERSION` 76. A false alarm: an unscaled 20k run (no `--scaled`) read as a pressure-pass collapse until the
+bisect agent's first two runs found the flag. Shadow V11 at 100k in V10's window: better in five groups of seven,
+care worse; what's left is distance-blind goals on a short map and plans that fail at the end of the walk
+(`OPEN-221`-`OPEN-226`). Cost ≈ $225 (HANDOFF § Cost).

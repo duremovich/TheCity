@@ -37,7 +37,7 @@ One line per live document: what it is and when to read it. Everything supersede
 ## The judges
 
 - `PREVIEW_PASS.md`: the live milestone, the pre-view pass (five shift shapes, encounters need bodies, SHADOW_V6 rows 1-7 and the dead trades; P1-P10; gate Shadow V7 at 20k).
-- `SHADOW_V10.md` and `shadow_v10/`: the latest shadow pass (the pressure pass at 100k, read against V9 in the same window). `SHADOW_V9.md` and `shadow_v9/`: the one before (the 100k city before the pressure pass; the first read the new way).
+- `SHADOW_V11.md` and `shadow_v11/`: the latest shadow pass (pressure pass round 2 at 100k, read against V10 in the same window). `SHADOW_V10.md` and `shadow_v10/`: the one before (the pressure pass at 100k, against V9).
 - `SHADOW_V6.md` and `shadow_v6/`: the latest shadow pass (the pre-view read at 20k: lives, the camera, the first week, the island probe; 298 diaries; `OPEN-137..150`). `SHADOW_V5.md` and `shadow_v5/`: the one before (Lives at work gate, 250 diaries; 21 bugs). `SHADOW_V4.md` and `shadow_v4/`: the one before (23 bugs, 12 features; § The sweep has the fixes). The pattern for the next one.
 - `GOD_SCENARIOS_V12.md`: the live god-scenario write-up and its gaps.
 
