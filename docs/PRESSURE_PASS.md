@@ -742,4 +742,6 @@ are deterministic on this box (two before runs matched), so the deltas are the p
   Starvation (an island FINDING, both runs) 1,415 -> 1,448; violence 112 -> 105.
 - **The Statistical mirror:** the ask and the covers are world-side (any tier); the slate, the pawn and the call are
   a body's; an off-screen diagnosed patient treats on `p_stat_treat` as before (with the doctor's cut when a body
-  is on duty). No test (doctrine 2). `SAVE_VERSION` 72.
+  is on duty). No test (doctrine 2). `SAVE_VERSION` 72. Re-pinned with `[care]` off and the reason in place:
+  `wounded::test_bleed_out_is_a_murder` ("left alone": the woken street binds and carries), and
+  `scavs::test_scav_prey_ranked_past_cover` (the covers move the seed-42 city off the test's ground; a butterfly).
