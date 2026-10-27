@@ -1011,6 +1011,9 @@ pub fn daily(world: &mut World) {
     for b in world.beats.values_mut() {
         b.interviewed.clear();
     }
+    // Round 3 S5: the crime desk keeps the last day.
+    let since = world.tick.saturating_sub(TICKS_PER_DAY);
+    world.beat_desk.retain(|e| e.tick >= since);
     world.beats.retain(|_, b| usize::from(b.legs) < b.stops.len());
     ads(world);
 }
@@ -1061,11 +1064,20 @@ pub fn beat_stops(world: &World, feed: EntityId) -> SmallVec<[(EntityId, BeatDee
     let Some(from) = world.comp::<Building>(feed).map(|b| b.door) else { return out };
     let since = world.tick.saturating_sub(TICKS_PER_DAY);
     let mut cands: BTreeMap<EntityId, BeatDeed> = BTreeMap::new();
-    for (d, pool) in world.rumours.iter().enumerate() {
-        if d >= MAX_DISTRICTS || st.covers & (1 << d) == 0 {
-            continue;
-        }
-        for e in &pool.entries {
+    // Round 3 S5 (OPEN-217): the pools, then the crime desk (the first
+    // tellings a busy pool shed).
+    let desk = world.beat_desk.iter().filter(|e| {
+        let d = e.district.index();
+        d < MAX_DISTRICTS && st.covers & (1 << d) != 0
+    });
+    let pools = world
+        .rumours
+        .iter()
+        .enumerate()
+        .filter(|&(d, _)| d < MAX_DISTRICTS && st.covers & (1 << d) != 0)
+        .flat_map(|(_, pool)| pool.entries.iter());
+    {
+        for e in pools.chain(desk) {
             let Some(actor) = e.actor else { continue };
             if e.hops != 0 || e.tick < since || world.config.gossip.deed_sev.get(e.deed) <= 0.0 {
                 continue;
@@ -1080,14 +1092,7 @@ pub fn beat_stops(world: &World, feed: EntityId) -> SmallVec<[(EntityId, BeatDee
             {
                 continue;
             }
-            // Round 3 S5 (OPEN-217): a scene `outlets_per_deed` other Feeds'
-            // reporters already have on today's beat is their scoop: every
-            // Feed of a district sent its reporters to the same nearest
-            // scene, and all but two filed old news.
             let k = (e.deed, actor, e.object, time::day(e.tick));
-            if world.config.verbs.is_some() && outlets > 0 && scooped(world, feed, k) >= outlets {
-                continue;
-            }
             let Some(b) = scene_of(world, e) else { continue };
             cands.entry(b).or_insert(k);
         }
@@ -1101,18 +1106,6 @@ pub fn beat_stops(world: &World, feed: EntityId) -> SmallVec<[(EntityId, BeatDee
         out.push((b, k));
     }
     out
-}
-
-/// Round 3 S5: the other Feeds whose reporters hold `deed` on today's beat.
-fn scooped(world: &World, feed: EntityId, deed: BeatDeed) -> u8 {
-    let feeds: std::collections::BTreeSet<EntityId> = world
-        .beats
-        .iter()
-        .filter(|(_, b)| b.stops.iter().any(|&(_, k)| k == deed))
-        .filter_map(|(&r, _)| world.comp::<Job>(r).and_then(|j| j.employer))
-        .filter(|&f| f != feed)
-        .collect();
-    feeds.len().min(usize::from(u8::MAX)) as u8
 }
 
 /// § 2.4 (reporter): at a scene, a witness is interviewed: a body (Full or
@@ -1161,7 +1154,15 @@ fn ensure_beat(world: &mut World, reporter: EntityId, feed: EntityId, key: i64) 
     if world.beats.get(&reporter).is_some_and(|b| b.shift == key) {
         return;
     }
-    let stops = beat_stops(world, feed);
+    let mut stops = beat_stops(world, feed);
+    // Round 3 S5 (OPEN-217): the Feed's reporters split the scenes, each
+    // starting at his own (the k-th reporter's beat rotated by k): all three
+    // walked the same nearest scene and the Feed filed one of their stories.
+    if world.config.verbs.is_some() && stops.len() > 1 {
+        let k = reporters(world, feed).0.iter().position(|&r| r == reporter).unwrap_or(0);
+        let n = stops.len();
+        stops.rotate_left(k % n);
+    }
     let interviewed = world.beats.get(&reporter).map(|b| b.interviewed.clone()).unwrap_or_default();
     world.beats.insert(reporter, Beat { shift: key, stops, legs: 0, interviewed });
 }

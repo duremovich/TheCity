@@ -200,13 +200,15 @@ fn test_abandon_gang_leaves_its_own() {
     if let Some(p) = w.comp_mut::<Personality>(mate) {
         p.loyalty = 1.0;
     }
-    place_beside(&mut w, mate, v);
     // The gang tie alone (a Friend carries whatever the gang's way).
     w.remove_edge(v, mate);
     if let Some(j) = w.comp_mut::<Job>(mate) {
         j.employer = None;
     }
     wounded::down(&mut w, v, None);
+    // Round 3 S5: the mate stood beside the downed where he fell (S5's city
+    // downed him away from where he stood before the fall, out of reach).
+    place_beside(&mut w, mate, v);
     if let Some(x) = w.wounded.get_mut(&v) {
         x.bleed_until = w.tick + 100 * TICKS_PER_DAY;
     }

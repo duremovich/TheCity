@@ -526,8 +526,8 @@ impl Default for VerbsCfg {
             trade_reserve_days: 1,
             trade_days: 3,
             cab_fare_cut: 0.5,
-            cab_rank_tiles: 100,
-            cab_rank_ticks: 45,
+            cab_rank_tiles: 60,
+            cab_rank_ticks: 120,
             cab_rank_kinds: vec![
                 crate::components::BuildingKind::Home,
                 crate::components::BuildingKind::Market,

@@ -131,6 +131,20 @@ pub fn door_cause(world: &World, id: EntityId, b: EntityId) -> Option<&'static s
     (hash(world, PURPOSE_DOOR, id, key(b) ^ hour.rotate_left(17)) < c.door_p).then_some(why)
 }
 
+/// Round 3 S5 (OPEN-217; `service::serve`): a visit served inside a venue
+/// a bouncer keeps is one he let in (his night's ledger, `vice::door_told`).
+pub fn door_visit(world: &mut World, client: EntityId, b: EntityId) {
+    if world.config.verbs.is_none() || cfg(world).is_none() {
+        return;
+    }
+    if !world.comp::<Building>(b).is_some_and(|bd| kept_kind(world, bd.kind)) {
+        return;
+    }
+    let staff = crate::systems::trades::door_staff(world, b);
+    let Some(&bouncer) = staff.iter().filter(|&&s| s != client).min() else { return };
+    crate::systems::vice::door_note(world, bouncer, b, |n| n.let_in += 1);
+}
+
 /// Round 3 S5 (OPEN-217; `service::serve`, the customer ledger): a client
 /// served by a tipped worker (a dancer) at a venue a bouncer keeps (not the
 /// Brothel: the madam's, `vice::booked`) turns rough on `[verbs]
@@ -191,12 +205,13 @@ pub fn rough_at_door(world: &mut World, worker: EntityId, client: EntityId, b: E
     let row = crate::systems::ownership::jobs2_row(world);
     row.ejections += 1;
     row.door_rough += 1;
+    crate::systems::vice::door_note(world, bouncer, b, |n| n.thrown += 1);
     let text = format!(
-        "{} got rough with {} at {}; {} threw him out and barred him from the door",
-        world.name_of(client),
+        "{c} got rough with {} at {}; {} threw {c} out, barred from the door",
         world.name_of(worker),
         world.name_of(b),
-        world.name_of(bouncer)
+        world.name_of(bouncer),
+        c = world.name_of(client)
     );
     world.push_event(crate::events::EventKind::Served, &[bouncer, client, worker, b], text);
 }
@@ -604,7 +619,7 @@ pub fn fare_scale(world: &mut World, id: EntityId) -> Option<f32> {
     // cut of each fare, in hand at the fare (`streetwork::driver_cut`); the
     // shift's end tells the shift, and no wage is owed (the scaled wage
     // paid 0c on a fare-less shift and its memory said "Paid").
-    if world.config.verbs.as_ref().is_some_and(|v| v.cab_fare_cut > 0.0) {
+    if world.config.verbs.as_ref().is_some_and(|v| v.cab_fare_cut > 0.0) && crate::systems::service::street_on(world) {
         let coins = world.jobs2.fare_cuts.remove(&id).unwrap_or(0);
         let (who, at) = (world.name_of(id), garage.map_or_else(|| "the Garage".to_string(), |g| world.name_of(g)));
         let text = if n == 0 {

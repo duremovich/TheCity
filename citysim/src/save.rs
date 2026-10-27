@@ -382,7 +382,8 @@ use crate::world::World;
 /// (written only when set).
 /// 77 (pressure pass round 3, S5, the trades still thin): `Jobs2State.fare_cuts`
 /// (written while it holds anything), the `[verbs]` S5 keys and the `Jobs2Cols`
-/// `cab_cuts`, `door_rough`, `door_barred`, `hit_heard` columns (serde defaults).
+/// `cab_cuts`, `door_rough`, `door_barred`, `hit_heard` columns, `ViceState.door_nights`
+/// and `World.beat_desk` (written while they hold anything; serde defaults).
 pub const SAVE_VERSION: u8 = 77;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.

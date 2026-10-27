@@ -1220,6 +1220,14 @@ pub struct World {
     /// Saved while it holds anything; empty off.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub beats: BTreeMap<EntityId, crate::systems::news::Beat>,
+    /// Round 3 S5 (OPEN-217): the crime desk: the last day's first tellings
+    /// of a deed with a `deed_sev` above 0 (`gossip::post_deed_at`), which
+    /// the beat reads beside the pools (`news::beat_stops`): a district's
+    /// pool holds `pool_cap` entries at any population, and at 100k the
+    /// first-hand ones were shed for hearsay by day 4 (no beat stop).
+    /// Pruned at midnight (`news::daily`); empty with `[verbs]` absent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub beat_desk: Vec<crate::word::PoolEntry>,
     /// Lives at work phase 5 (§ 2.4, reporter): bylines a reporter has had.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub bylines: BTreeMap<EntityId, u16>,
@@ -2038,6 +2046,7 @@ impl World {
             notice_fold: BTreeMap::new(),
             meeting_tables: BTreeMap::new(),
             beats: BTreeMap::new(),
+            beat_desk: Vec::new(),
             bylines: BTreeMap::new(),
             walk_ins: Vec::new(),
             underwater: Default::default(),

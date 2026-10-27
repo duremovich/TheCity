@@ -5115,8 +5115,8 @@ trade_days = 3                     # one deal a buying gang every this many days
 cab_fare_cut = 0.5                 # a cab driver's body takes this share of each fare he drives, in hand when the rider
                                    # pays (from the Garage's owner); above 0 the cut is his pay, no shift wage (the wage
                                    # scaled by fares paid 0c and wrote "Paid" on a fare-less shift)
-cab_rank_tiles = 100               # standing by with no fare he waits at a rank: a door of cab_rank_kinds within this many
-cab_rank_ticks = 45                # tiles of his Garage (a hash of the driver and the wait), this many ticks a rank, then
+cab_rank_tiles = 60                # standing by with no fare he waits at a rank: a door of cab_rank_kinds within this many
+cab_rank_ticks = 120               # tiles of his Garage (a hash of the driver and the wait), this many ticks a rank, then
 cab_rank_kinds = ["Home", "Market", "Bar", "Hotel"]  # he cruises to the next (not a Rest inside the Garage)
 door_rough_p = 0.03                # a client served by a tipped worker at a door a bouncer keeps turns rough on this x
 door_ban_days = 14                 # (1 - lawfulness): the bouncer throws him out, barred from the venue this many days
