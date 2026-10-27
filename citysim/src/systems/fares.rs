@@ -119,6 +119,24 @@ pub fn caught(world: &mut World, guard: Option<EntityId>, dodger: EntityId, tile
         return;
     }
     let now = world.tick;
+    // Round 3 V12 fix (no child is harmed): a minor caught at the gate is
+    // turned off the platform, the mildest rung: no beating, no fine, no
+    // record toward a ban.
+    if crate::systems::ages::is_protected(world, dodger) {
+        ownership::jobs2_row(world).fare_turned_off += 1;
+        let gname = guard.map_or_else(|| "the El's guard".to_string(), |g| world.name_of(g));
+        let dname = world.name_of(dodger);
+        let place = world.district_name(world.district_of(tile)).to_string();
+        let actors: Vec<EntityId> = std::iter::once(dodger).chain(guard).collect();
+        let text = format!(
+            "{gname} caught {dname} on the El in {place} and turned them off the platform (too young to be touched)"
+        );
+        world.push_event(EventKind::Fare, &actors, text);
+        if world.comp::<Brain>(dodger).is_some_and(|b| b.lod != Lod::Statistical) {
+            world.abort_plan(dodger);
+        }
+        return;
+    }
     let window = c.ban_window_days * TICKS_PER_DAY;
     let was_banned = banned(world, dodger);
     let rec = world.fares.book.entry(dodger).or_default();
@@ -223,6 +241,11 @@ fn ban(world: &mut World, c: &FaresCfg, dodger: EntityId) {
 /// a grudge on the guard, the mood and the safety; a body lies on the
 /// platform `beat_down_minutes`. True when the body was laid down.
 fn beat(world: &mut World, c: &FaresCfg, guard: Option<EntityId>, dodger: EntityId) -> bool {
+    // Round 3 V12 fix: the backstop; `caught` turns a minor off first.
+    if crate::systems::ages::is_protected(world, dodger) {
+        ownership::jobs2_row(world).harm_blocked += 1;
+        return false;
+    }
     let now = world.tick;
     world.fares.book.entry(dodger).or_default().beaten = Some(now);
     world.remember(dodger, MemoryKind::Lost, guard, 0.6, -0.6, false);

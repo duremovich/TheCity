@@ -345,7 +345,11 @@ pub fn contest(world: &mut World, id: EntityId, b: EntityId) -> Contest {
     }
     // The gang's turf.
     if let Some(gang) = turf(world, b) {
-        if world.gang_of(id) != Some(gang) && world.comp::<Health>(id).is_none_or(|h| h.shaken_day != Some(day)) {
+        // Round 3 V12 fix: a minor is never shaken down at a bin.
+        if world.gang_of(id) != Some(gang)
+            && !crate::systems::ages::is_protected(world, id)
+            && world.comp::<Health>(id).is_none_or(|h| h.shaken_day != Some(day))
+        {
             let p = world.config.sickness.bin_shake_p;
             let roll = crate::systems::econ::hash_unit(world.seed(), ROLL_SHAKE, u64::from(id.index), day);
             if roll < p {

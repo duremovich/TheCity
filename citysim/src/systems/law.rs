@@ -870,6 +870,14 @@ pub fn resolve_fight_with(world: &mut World, a: EntityId, b: EntityId, kill_mult
 /// wrecked (`assets::wreck`, Parts at the door), never killed; a robot that
 /// kills passes its owner as the killer (no crime is raised for it).
 pub fn resolve_fight_mods(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> (EntityId, EntityId, bool) {
+    // Round 3 V12 fix (Dylan 2026-10-27, no child is harmed): the non-lethal
+    // backstop. No blow lands when either side is under 18: no rolls, no
+    // memories, no wounds; the attacker stands down (`(a, b, false)`). Counted
+    // like `kill_by`'s: `harm_blocked` above 0 is a pick site that missed.
+    if crate::systems::ages::is_protected(world, a) || crate::systems::ages::is_protected(world, b) {
+        crate::systems::ownership::jobs2_row(world).harm_blocked += 1;
+        return (a, b, false);
+    }
     let out = fight_inner(world, a, b, mods);
     // M14 V12: a body jacked in and attacked is dumped from its run.
     if !world.runner_of.is_empty() {

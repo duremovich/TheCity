@@ -1324,6 +1324,15 @@ are off.** `ages::is_protected` (a `Child`, or under `[ages] protected_under_yea
   `person` (two probes), `camp` (its fixture; the no-feed test now asserts the child lives), `world`; `scale`,
   `ambient`, `cli` count the adults or open the account on day 0's row; `utility` reads Brain holders. The camp
   beating's test half is deleted. `SAVE_VERSION` 77.
+- **V12 fix: the non-lethal backstop** (Shadow V12's critics; `kill_by` guards only deaths). `law::resolve_fight_mods`
+  refuses any fight with a protected party (no rolls, no memories, no wounds; returns `(a, b, false)`; counted
+  `harm_blocked`, so above 0 is a pick site that missed). The brawl pickers filter first: `missions::defenders`,
+  `raid::gathered_for` (raiders, marchers, riots), `raid::jail_defenders`, the gang-raid defenders, and
+  `raid::fight_out_until` drops a minor from either side as the last gate. The fare ladder: `fares::caught` turns a
+  protected dodger off the platform (the existing turned-off rung: no beating, no fine, no ban record) and `beat()`
+  refuses as the backstop (counted). Also fixed: the gang bin shakedown (`bins.rs`) skips a minor. Audited and
+  already shut: tags' chrome mugging (`free_adult` pick), `wounded` (reached only through the fight), camp (the
+  beating is gone).
 
 ### S1, distance in the choice (`OPEN-221`'s sim half; `systems/distance.rs` `trip`, `[distance.choice]`)
 

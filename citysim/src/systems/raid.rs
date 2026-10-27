@@ -507,6 +507,8 @@ pub fn gathered_for(world: &World, pool: &[EntityId], actor: EntityId, door: Til
         .iter()
         .copied()
         .filter(|&m| !world.has::<Sentence>(m) && law::living(world, m))
+        // Round 3 V12 fix: a minor never marches into a brawl.
+        .filter(|&m| !crate::systems::ages::is_protected(world, m))
         .filter(|&m| {
             m == actor
                 || (world.comp::<Position>(m).is_some_and(|p| law::chebyshev(p.tile, door) <= radius)
@@ -564,6 +566,11 @@ pub fn fight_out_until(
     max_losses: usize,
 ) -> Tally {
     let mut t = Tally::default();
+    // Round 3 V12 fix: the last gate before the crossfire and the pairings: a
+    // minor on either side stands out of the brawl (the pick sites filter
+    // first; `law::resolve_fight_mods` counts what slips past).
+    raiders.retain(|&x| !crate::systems::ages::is_protected(world, x));
+    defenders.retain(|&x| !crate::systems::ages::is_protected(world, x));
     // A brawl needs two sides: a door nobody defends has no crossfire.
     if let (Some(&attacker), false) = (raiders.first(), defenders.is_empty()) {
         let parties: Vec<EntityId> = raiders.iter().chain(defenders.iter()).copied().collect();
@@ -836,7 +843,7 @@ pub fn jail_defenders(world: &World, jail: EntityId, door: TilePos) -> Vec<Entit
     let radius = world.config.gangs.raid_gather_radius;
     let mut defenders: Vec<EntityId> = law_brain::guards(world)
         .into_iter()
-        .filter(|&g| law::living(world, g))
+        .filter(|&g| law::living(world, g) && !crate::systems::ages::is_protected(world, g))
         .filter(|&g| {
             world
                 .comp::<Position>(g)
@@ -931,7 +938,7 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
         .map(|g| g.members.clone())
         .unwrap_or_default()
         .into_iter()
-        .filter(|&m| !world.has::<Sentence>(m))
+        .filter(|&m| !world.has::<Sentence>(m) && !crate::systems::ages::is_protected(world, m))
         .filter(|&m| world.comp::<Position>(m).is_some_and(|p| p.building == Some(rival_hideout)))
         .collect();
     by_strength(world, &mut defenders);
