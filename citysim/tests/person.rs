@@ -2720,6 +2720,16 @@ fn probe_parent_with_the_fee_buys_the_child_out_within_fourteen_days() {
                     break;
                 }
                 pin(&mut w, p);
+                // Pressure pass round 2 (fix round 3): the subject is `p`'s fee, so
+                // `p` is the only body that can pay it. The other parent (employed,
+                // with a purse of its own) answers the Camp too and, on some
+                // butterflies, bought the child out first (CampBuyout by the
+                // spouse, `p` unpaid); held broke each tick as the control holds it.
+                if let Some(sp) = w.spouse_of(p) {
+                    if let Some(wl) = w.comp_mut::<Wallet>(sp) {
+                        wl.coins = wl.coins.min(10);
+                    }
+                }
                 // Pressure pass (fix round): the premise is a free parent. The vat
                 // foreman hires her on day 3 now, and a Vat Tech shift covers the
                 // whole visit window (hours 10-20: no shift is cut for a visit), so

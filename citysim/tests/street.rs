@@ -814,7 +814,16 @@ mod lives_street {
     /// roll plus `pay_ride`.
     #[test]
     fn test_full_commuter_rolls_the_same_cab_as_a_statistical_one() {
-        let mut w = city_with(|c| c.jobs2.p_cab = 1.0);
+        // Pressure pass round 2 R6a (premise moved, on purpose): with
+        // `[trade_verbs]` the Garage pick is the tier's own (`fare_wait_for`:
+        // an off-screen rider waits `stat_fare_wait_ticks` for a driver's body,
+        // a Full one only `fare_wait`), so the two tiers may pick different
+        // Garages. The tier-blind roll (p_cab, the fare, the rickshaw, the
+        // nearest Garage) is what this pins, with `[trade_verbs]` off.
+        let mut w = city_with(|c| {
+            c.jobs2.p_cab = 1.0;
+            c.trade_verbs = None;
+        });
         let min = w.config.jobs2.cab_min_tiles;
         let a = far_commuter(&w, min).expect("a far commuter");
         set_coins(&mut w, a, 500);
