@@ -1176,6 +1176,23 @@ pub struct Jobs2Cols {
     pub crew_rest_nights: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub crew_gang_loans: u32,
+    // Pressure pass round 2, R1 (`systems::fares`): the fare dodger's ladder:
+    // caught (both tiers), fined on the spot, beaten, banned, a ban broken,
+    // caught off screen (of the caught), a banned rider turned off the platform.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub fare_caught: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub fare_fined: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub fare_beaten: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub fare_banned: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub fare_ban_broken: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub fare_stat: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub fare_ban_walks: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -1622,6 +1639,13 @@ impl Jobs2Cols {
                 "crew_folded",
                 "crew_rest_nights",
                 "crew_gang_loans",
+                "fare_caught",
+                "fare_fined",
+                "fare_beaten",
+                "fare_banned",
+                "fare_ban_broken",
+                "fare_stat",
+                "fare_ban_walks",
             ]
             .into_iter()
             .map(str::to_string),
@@ -2062,6 +2086,13 @@ impl Jobs2Cols {
             self.crew_folded.to_string(),
             self.crew_rest_nights.to_string(),
             self.crew_gang_loans.to_string(),
+            self.fare_caught.to_string(),
+            self.fare_fined.to_string(),
+            self.fare_beaten.to_string(),
+            self.fare_banned.to_string(),
+            self.fare_ban_broken.to_string(),
+            self.fare_stat.to_string(),
+            self.fare_ban_walks.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

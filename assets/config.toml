@@ -5016,3 +5016,19 @@ bail_debt = true                   # the bail the gang paid is the member's debt
 welcome_after_hours = 1            # a released member walks to the Hideout this many hours after (past 21:00 met at once)
 crew_p = 0.6                       # rest days: a free member with no shift today goes to the crew on this, at crew_hour
 crew_hour = 19                     # (the Hideout under a fighting order, the gang's own venue under Expand, none LieLow)
+
+[fares]
+# Pressure pass round 2, R1 (docs/PRESSURE_PASS.md § R1, OPEN-213; systems/fares.rs): fare evasion is never a cell.
+# A dodger caught at the El by the on-duty guard who saw him (the catcher; a fare is nobody's warrant) climbs a
+# ladder: the fine on the spot, else a beating, and a repeat dodger is banned and walks. Off screen the same rule,
+# coarse (the fine, else the beating's memory and mood, no body). Placeholders.
+fine = 5                           # the fine on the platform when the wallet holds it (to the city)
+beat_down_minutes = 30             # can't pay: the guard beats him; down on the platform this long (neither thinks nor walks) ...
+beat_grudge = 0.4                  # ... with this grudge on the guard ...
+beat_mood = 0.3                    # ... and this off his mood ...
+beat_safety = 0.4                  # ... and his safety
+ban_after = 3                      # caught this many times inside ban_window_days: banned from the El for ban_days; he walks
+ban_window_days = 7
+ban_days = 14
+ban_break_lawfulness = 0.1         # a banned rider under this lawfulness boards anyway: caught, beaten whatever his wallet, banned afresh
+wary_hours = 24                    # caught this recently, he jumps no gate (pays or walks): the ban takes three bad days, not one bad hour

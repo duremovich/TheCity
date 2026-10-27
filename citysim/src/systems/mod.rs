@@ -53,6 +53,7 @@ pub mod econ;
 pub mod economy;
 pub mod faction;
 pub mod faith;
+pub mod fares;
 pub mod fashion;
 pub mod fixes;
 pub mod founding;

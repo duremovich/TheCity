@@ -329,7 +329,13 @@ pub fn raise_crime_mult(
         // Pressure pass F2: nor does one off shift for a petty offence (a
         // commuting guard filed 113 fare dodges from his train seat and the
         // watch walked to each); there he is a witness like anyone.
-        if duty && !crate::systems::contracts::on_take_of(world, w, actor) {
+        if duty && crime == Crime::FareEvasion && crate::systems::fares::on(world) {
+            // Pressure pass round 2, R1: the fare's ladder on the spot (a
+            // fine, a beating, a ban), never a warrant or a cell.
+            if !crate::systems::contracts::on_take_of(world, w, actor) {
+                crate::systems::fares::caught(world, Some(w), actor, tile);
+            }
+        } else if duty && !crate::systems::contracts::on_take_of(world, w, actor) {
             file_report(world, crime, actor, Some(w));
         } else if !guard {
             // The pressure pass phase 5a: the civilian reacts (report, flee,
@@ -409,6 +415,11 @@ pub fn silent_witness(world: &World, w: EntityId, actor: EntityId, victim: Optio
 
 /// File (or refresh) the one open report per `(suspect, crime)`.
 pub fn file_report(world: &mut World, crime: Crime, suspect: EntityId, witness: Option<EntityId>) {
+    // Pressure pass round 2, R1: a fare is settled at the gate
+    // (`systems::fares`), nobody's warrant.
+    if crime == Crime::FareEvasion && crate::systems::fares::on(world) {
+        return;
+    }
     let tick = world.tick;
     if world.refresh_open_report(crime, suspect, witness) {
         return;

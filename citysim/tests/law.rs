@@ -382,10 +382,13 @@ fn test_guard_on_duty_at_shift_end_is_owed_the_day() {
 // ---------------------------------------------------------------------------
 
 /// Bug 4: a fare dodger who can pay is fined at the Precinct, not jailed,
-/// with room in the cells; one who cannot pay serves the night.
+/// with room in the cells; one who cannot pay serves the night. (Pressure
+/// pass round 2, R1: the Precinct's path without `[fares]`; with it a fare
+/// is settled at the gate and never reaches the Precinct.)
 #[test]
 fn test_bug4_petty_offence_fined_when_the_suspect_can_pay() {
     let mut w = common::world();
+    w.config.fares = None;
     let guard = w.guards()[0];
     let pool: Vec<citysim::EntityId> = free_adults(&w).into_iter().filter(|&x| !law::is_guard(&w, x)).collect();
     let (a, b) = (pool[0], pool[1]);

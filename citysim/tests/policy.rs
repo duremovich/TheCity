@@ -66,14 +66,22 @@ fn test_dole_enacted_on_day_10_is_paid_from_the_treasury() {
         .find(|&a| {
             economy::dole_eligible(&w, a)
                 && demography::is_adult(&w, a)
-                && w.comp::<Brain>(a).is_some_and(|b| b.last_dole_day != Some(w.day()))
+                && w.comp::<Brain>(a).is_some()
                 // Jobs & lives phase 7b: no rent to settle (`collect_dole`
                 // settles a tenant's rent out of the dole,
                 // `pay_rent_from_income`; the first pick under the mirrored
-                // off-screen evening was a tenant): no Home, or its own.
-                && w.comp::<citysim::Household>(a).and_then(|h| h.home).is_none_or(|h| w.owner_of(h) == Some(a))
+                // off-screen evening was a tenant): no company bed, and the
+                // rent from income off for the draw below.
+                && !citysim::systems::company::housed(&w, a)
         })
-        .expect("a jobless adult who has not drawn today");
+        .expect("a jobless adult");
+    // Pressure pass round 2, R1 (a butterfly: no jobless adult left who had
+    // not drawn today, none without a tenancy): today's draw forgotten and
+    // the rent left out, so the one draw below is the dole's alone.
+    if let Some(b) = w.comp_mut::<Brain>(a) {
+        b.last_dole_day = None;
+    }
+    w.config.rent.pay_from_income = false;
     let (t0, c0) = (treasury(&w), w.comp::<Wallet>(a).map_or(0, |x| x.coins));
     assert!(t0 >= 0, "the Treasury holds coins ({t0})");
     assert!(economy::collect_dole(&mut w, a));
