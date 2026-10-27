@@ -29,6 +29,7 @@ pub mod braindance;
 pub mod budget;
 pub mod camp;
 pub mod captives;
+pub mod care;
 pub mod careers;
 pub mod charity;
 pub mod chrome;

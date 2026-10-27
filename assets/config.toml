@@ -5038,3 +5038,26 @@ contest_names = 3                  # a blow on a rival's hold names this many of
 notice_names = 3                   # the super's one notice line a round names this many tenants (the count is the round's)
 camp_visit_last_hour = 22          # a Camp answer whose hashed hour falls on the parent's shift moves to his first free hour
                                    # up to this ([household] visit_hour_from..visit_hour_to; past it, the hashed hour stands)
+# Pressure pass round 2, R3 (docs/PRESSURE_PASS.md § R3, OPEN-216): the wounded and the sick (systems/care.rs).
+# Every value a placeholder.
+[care]
+help_radius = 6                    # the downed: a stranger within this many tiles (Chebyshev) may carry it to a doctor ...
+stranger_term = 0.5                # ... the Rescue tie's term: this x (sociability + lawfulness) / 2
+help_wake = 3                      # a body going down wakes this many nearest off-screen adults within help_radius
+aid_min = 180                      # the first helper binds the wound as he lifts it: the bleed clock gets this much more, once
+beat_term = 0.9                    # a city guard on shift within [wounded] rescue_radius carries anyone down (the beat)
+call_every_min = 30                # the downed calls one tied body (kin, Friend, loyal gang-mate, colleague) able to reach it
+                                   # and a doctor before it bleeds out; again this often while nobody has come
+back_stabilise_price = 30          # a back room stabilises a carried downed body for this ([wounded] stabilise_price 80)
+doctor_cut = 0.25                  # the fee: the doctor on the table takes this share of a Clinic's fee into his wallet
+slate_down = 10                    # the short: the doctor treats (or patches) a pool short of the fee for this down ...
+slate_rate = 0.3                   # ... the rest on his own book marked up by this (an edge debt: repaid as any debt; a
+                                   # lawless doctor's Debt Beat, [hitmarket] debt_min) ...
+slate_cap = 400                    # ... while the patient owes him less than this (barred past it)
+pawn_mult = 0.5                    # a pawn: an owned deck, weapon or vehicle handed to the doctor covers this x its value
+ask_affinity = 0.3                 # begging for it: a diagnosed patient short of the fee asks the warmest kin or Friend at
+ask_days = 3                       # or above this affinity, once in this many days, who lends what he holds above
+ask_keep = 20                      # this, up to the shortfall (a debt between them)
+cover_purse_days = 3               # the sick worker's post: covered at midnight by a jobless adult of the employer's district
+cover_lawful = 0.3                 # (lawfulness at or above this; a day hire to the shift's end) when the owner holds this
+                                   # many days of the role's wage; else the absence is written

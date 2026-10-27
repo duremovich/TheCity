@@ -371,7 +371,10 @@ use crate::world::World;
 /// only when set) and the `Jobs2Cols` `fare_*` columns (serde defaults).
 /// 73 (the pressure pass round 2, R4): `World.notice_fold` (written while it
 /// holds anything) and `[noise]` (serde defaults).
-pub const SAVE_VERSION: u8 = 73;
+/// 74 (pressure pass round 2, R3, the wounded and the sick): `World.care`
+/// (written while it holds anything), `Wounded.called`, `[care]` (written
+/// only when set) and the `Jobs2Cols` `care_*` columns (serde defaults).
+pub const SAVE_VERSION: u8 = 74;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

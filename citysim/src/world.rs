@@ -1246,6 +1246,10 @@ pub struct World {
     /// records (caught, banned) and the beaten down on the platform.
     #[serde(default, skip_serializing_if = "crate::systems::fares::State::is_empty")]
     pub fares: crate::systems::fares::State,
+    /// Pressure pass round 2, R3 (`systems::care`): the asks for treatment
+    /// money, the sick workers' covers. Saved while it holds anything.
+    #[serde(default, skip_serializing_if = "crate::systems::care::State::is_empty")]
+    pub care: crate::systems::care::State,
     /// L2 L15: the HangOut spots per district (`leisure::spots`, midnight).
     /// Saved (deviation: the plan's `serde(skip)` would rebuild them on load
     /// from a later state than the midnight's).
@@ -2040,6 +2044,7 @@ impl World {
             consequence: Default::default(),
             crew: Default::default(),
             fares: Default::default(),
+            care: Default::default(),
             spots: Vec::new(),
             last_met: BTreeMap::new(),
             told: BTreeMap::new(),

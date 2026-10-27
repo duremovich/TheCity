@@ -380,6 +380,11 @@ pub struct Config {
     /// diary's folds and the Camp answer's hour. Absent: the defaults.
     #[serde(default)]
     pub noise: NoiseCfg,
+    /// Pressure pass round 2, R3 (docs/PRESSURE_PASS.md § R3; OPEN-216): the
+    /// wounded and the sick (`systems/care.rs`). `None` (not written into a
+    /// save) with the key absent: care as phase 2 left it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub care: Option<CareCfg>,
     /// The island pass phase 1 (docs/ISLAND_PASS.md I1; OPEN-163 part):
     /// travel time in the job and bed picks (`systems/distance.rs`). `None`
     /// (not written into a save) with the key absent: the picks
@@ -1739,6 +1744,89 @@ impl Default for FaresCfg {
             ban_days: 14,
             ban_break_lawfulness: 0.1,
             wary_hours: 24,
+/// Pressure pass round 2, R3 `[care]` (docs/PRESSURE_PASS.md § R3,
+/// OPEN-216; `systems/care.rs`): the wounded and the sick. Every value a
+/// placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CareCfg {
+    // --- the downed: the people at hand, the call, the back room
+    /// A stranger within this Chebyshev radius of a downed body may carry
+    /// it to a doctor (the people at hand) ...
+    pub help_radius: u32,
+    /// ... the Rescue tie's term: this × (sociability + lawfulness) / 2.
+    pub stranger_term: f32,
+    /// A body going down wakes the `help_wake` nearest off-screen adults
+    /// within `help_radius` (a body each while it bleeds: the street hears).
+    pub help_wake: u32,
+    /// The first helper binds the wound when he lifts the body: the bleed
+    /// clock gets this many more minutes (once), so a far doctor is in reach.
+    pub aid_min: u32,
+    /// A city guard on shift within `[wounded] rescue_radius` carries anyone
+    /// down (a guard on the beat), at this term.
+    pub beat_term: f32,
+    /// The downed calls one tied body (kin, a Friend, a loyal gang-mate, a
+    /// colleague) who can reach it and a doctor before it bleeds out; again
+    /// every this many minutes while nobody has come.
+    pub call_every_min: u32,
+    /// A back room stabilises a carried downed body for this (the nearest
+    /// staffed doctor, a Clinic or a back room, is the carrier's).
+    pub back_stabilise_price: i64,
+    // --- the fee
+    /// The doctor on the table takes this share of a Clinic's fee (a patch,
+    /// a treatment) into his own wallet; the rest to the owner's till.
+    pub doctor_cut: f32,
+    // --- the short: the slate, the pawn, begging for it
+    /// Care on the slate: the doctor treats a diagnosed patient (or patches
+    /// a wound) whose pool falls short for this down, the rest on his own
+    /// book (an edge debt: repaid from the wallet as any debt, a Debt Beat
+    /// from a lawless doctor) ...
+    pub slate_down: i64,
+    /// ... marked up by this ...
+    pub slate_rate: f32,
+    /// ... while the patient owes this doctor less than this (barred past it).
+    pub slate_cap: i64,
+    /// A pawn: an owned deck, weapon or vehicle (not chrome, financed or
+    /// stolen) handed to the doctor covers this × its value of the fee.
+    pub pawn_mult: f32,
+    /// Begging for it: a diagnosed patient short of the fee asks the warmest
+    /// kin or Friend at or above this affinity ...
+    pub ask_affinity: f32,
+    /// ... once in this many days ...
+    pub ask_days: u32,
+    /// ... who lends what he holds above this, up to the shortfall (a debt
+    /// between them).
+    pub ask_keep: i64,
+    // --- the sick worker's post
+    /// A sick body's post is covered at midnight by a jobless adult living
+    /// in the employer's district (a day hire to the end of the shift) when
+    /// the owner's purse holds this many days of the role's wage; else the
+    /// absence is written.
+    pub cover_purse_days: i64,
+    /// A cover is lawful enough to hire: lawfulness at or above this.
+    pub cover_lawful: f32,
+}
+
+impl Default for CareCfg {
+    fn default() -> Self {
+        CareCfg {
+            help_radius: 6,
+            stranger_term: 0.5,
+            help_wake: 3,
+            aid_min: 180,
+            beat_term: 0.9,
+            call_every_min: 30,
+            back_stabilise_price: 30,
+            doctor_cut: 0.25,
+            slate_down: 10,
+            slate_rate: 0.3,
+            slate_cap: 400,
+            pawn_mult: 0.5,
+            ask_affinity: 0.3,
+            ask_days: 3,
+            ask_keep: 20,
+            cover_purse_days: 3,
+            cover_lawful: 0.3,
         }
     }
 }

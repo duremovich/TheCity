@@ -224,8 +224,13 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
                 // The pressure pass phase 4 (OPEN-194): the nearest Clinic
                 // past the reach (V8: a madam's 208-278 min, five mornings).
                 // A diagnosed cancer is not a discretionary trip: walked to
-                // at any distance.
-                || (!crate::systems::health::wants_oncology(world, id) && clinic_out_of_reach(world, id))
+                // at any distance. Pressure pass R3: nor is a care trip
+                // (`care_choice` reads its own reach: the back room's is
+                // longer; the gate cut every back-room patient past the
+                // nearest Clinic's 120 minutes).
+                || (!crate::systems::health::wants_oncology(world, id)
+                    && !(care && crate::systems::care::cfg(world).is_some())
+                    && clinic_out_of_reach(world, id))
         }
         // M13 D39: high already, or no dose in hand and none to buy.
         GoalKind::GetHigh => !crate::systems::stims::wants_high(world, id),
@@ -928,7 +933,7 @@ pub fn considerations_with(
             if !crate::systems::health::wants_oncology(world, id) {
                 if let Some((_, what, _)) = crate::systems::customers::care_choice(world, id) {
                     let x = match what {
-                        crate::systems::customers::Care::Onco => {
+                        crate::systems::customers::Care::Onco | crate::systems::customers::Care::Clinic => {
                             world.comp::<crate::components::Health>(id).and_then(|h| h.cancer).map_or(0.0, |c| c.stage)
                         }
                         crate::systems::customers::Care::Patch => 1.0 - n.safety,

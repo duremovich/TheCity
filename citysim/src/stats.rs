@@ -1193,6 +1193,35 @@ pub struct Jobs2Cols {
     pub fare_stat: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub fare_ban_walks: u32,
+    // Pressure pass round 2, R3 (`systems::care`).
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub care_doc_cut: i64,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub care_pawns: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub care_slates: u32,
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub care_slate_coins: i64,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub care_asks_refused: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub care_asks_lent: u32,
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub care_ask_coins: i64,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub care_calls: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub care_strangers: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub care_beat: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub care_back_stabilised: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub care_woken: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub care_covered: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub care_uncovered: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -1646,6 +1675,20 @@ impl Jobs2Cols {
                 "fare_ban_broken",
                 "fare_stat",
                 "fare_ban_walks",
+                "care_doc_cut",
+                "care_pawns",
+                "care_slates",
+                "care_slate_coins",
+                "care_asks_refused",
+                "care_asks_lent",
+                "care_ask_coins",
+                "care_calls",
+                "care_strangers",
+                "care_beat",
+                "care_back_stabilised",
+                "care_woken",
+                "care_covered",
+                "care_uncovered",
             ]
             .into_iter()
             .map(str::to_string),
@@ -2093,6 +2136,20 @@ impl Jobs2Cols {
             self.fare_ban_broken.to_string(),
             self.fare_stat.to_string(),
             self.fare_ban_walks.to_string(),
+            self.care_doc_cut.to_string(),
+            self.care_pawns.to_string(),
+            self.care_slates.to_string(),
+            self.care_slate_coins.to_string(),
+            self.care_asks_refused.to_string(),
+            self.care_asks_lent.to_string(),
+            self.care_ask_coins.to_string(),
+            self.care_calls.to_string(),
+            self.care_strangers.to_string(),
+            self.care_beat.to_string(),
+            self.care_back_stabilised.to_string(),
+            self.care_woken.to_string(),
+            self.care_covered.to_string(),
+            self.care_uncovered.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

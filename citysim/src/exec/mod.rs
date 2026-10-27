@@ -1860,10 +1860,14 @@ impl World {
                     .or_else(|| self.local(agent, K::Garage))
             }
             // M13 D34: the bound Clinic, else a Ripperdoc's employer, else the nearest.
+            // Pressure pass R3 (OPEN-216): a bound back room is walked to (a
+            // care trip or a Rescue bound to a BlackClinic resolved to the
+            // nearest Clinic, and its Patch there failed `PreconditionLost`).
             LocationKey::Clinic => {
                 let clinic = |t: &EntityId| self.comp::<Building>(*t).is_some_and(|b| b.kind == K::Clinic);
+                let back = |t: &EntityId| self.comp::<Building>(*t).is_some_and(|b| b.kind == K::BlackClinic);
                 target
-                    .filter(clinic)
+                    .filter(|t| clinic(t) || back(t))
                     .or_else(|| self.comp::<crate::components::Job>(agent).and_then(|j| j.employer).filter(clinic))
                     .or_else(|| self.local(agent, K::Clinic))
             }

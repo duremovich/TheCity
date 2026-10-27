@@ -256,6 +256,10 @@ pub enum Care {
     Patch,
     /// The back room's cut-rate remission of a diagnosed cancer.
     Onco,
+    /// Pressure pass R3: the Clinic's treatment of a diagnosed cancer whose
+    /// pool falls short, settled with a pawn and the doctor's slate
+    /// (`care::settle`).
+    Clinic,
 }
 
 /// A lost fight within `hurt_hours`, not yet seen to (a body's memory).
@@ -311,7 +315,15 @@ pub fn care_choice(world: &World, id: EntityId) -> Option<(EntityId, Care, i64)>
     if world.comp::<Brain>(id).is_none_or(|b| b.lod == Lod::Statistical) {
         return None;
     }
-    if crate::systems::health::saving_short(world, id) && crate::systems::health::pool(world, id) >= c.back_onco_price {
+    let short = crate::systems::health::saving_short(world, id);
+    // Pressure pass R3: the Clinic's treatment for the short who can settle
+    // it (a pawn covers it, or a wage puts the rest on the doctor's slate).
+    if short {
+        if let Some(clinic) = slate_clinic(world, id) {
+            return Some((clinic, Care::Clinic, crate::systems::health::treat_price(world)));
+        }
+    }
+    if short && crate::systems::health::pool(world, id) >= c.back_onco_price {
         if let Some(b) = back_room(world, id) {
             return Some((b, Care::Onco, c.back_onco_price));
         }
@@ -326,15 +338,25 @@ pub fn care_choice(world: &World, id: EntityId) -> Option<(EntityId, Care, i64)>
             return Some((b, Care::Patch, c.back_price));
         }
     }
-    if coins(world, id) < c.patch_price {
-        return None;
-    }
     let from = crate::systems::life::origin(world, id)?;
     let clinic = crate::systems::assets::nearest_seller(world, BuildingKind::Clinic, from, true)?;
+    // Pressure pass R3: short of the patch, a pawn and the doctor's slate.
+    if coins(world, id) < c.patch_price && !crate::systems::care::slate_ok(world, id, clinic, c.patch_price) {
+        return None;
+    }
     if crate::systems::distance::out_of_reach(world, id, clinic, |r| r.clinic_ticks) {
         return None;
     }
     Some((clinic, Care::Patch, c.patch_price))
+}
+
+/// Pressure pass R3: the nearest open Clinic (a diagnosed cancer walks to it
+/// at any distance) where `id`, short of the treatment, can settle it.
+fn slate_clinic(world: &World, id: EntityId) -> Option<EntityId> {
+    crate::systems::care::cfg(world)?;
+    let from = crate::systems::life::origin(world, id)?;
+    let clinic = crate::systems::assets::nearest_seller(world, BuildingKind::Clinic, from, true)?;
+    crate::systems::care::slate_ok(world, id, clinic, crate::systems::health::treat_price(world)).then_some(clinic)
 }
 
 /// The Treat goal's care plan: `[GoTo(Clinic) b, Patch b]`.
@@ -355,8 +377,24 @@ pub fn care_plan(world: &World, id: EntityId) -> Option<crate::goap::Plan> {
 
 /// The doctor on duty at `b` for a patient (a Ripperdoc or an orderly at a
 /// Clinic, a Back-Room Doc at a BlackClinic).
-fn doctor(world: &World, b: EntityId) -> Option<EntityId> {
-    crate::systems::service::servers_on_duty(world, b, crate::components::ServeKind::Patient).into_iter().next()
+pub fn doctor(world: &World, b: EntityId) -> Option<EntityId> {
+    let on =
+        crate::systems::service::servers_on_duty(world, b, crate::components::ServeKind::Patient).into_iter().next();
+    // Pressure pass R3: a back room's doc is on call (no hours on the door:
+    // a patient walked 200 minutes to a shut back room and left unseen).
+    on.or_else(|| {
+        let back = world.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::BlackClinic);
+        if !back || crate::systems::care::cfg(world).is_none() {
+            return None;
+        }
+        let role = world.config.trade_role("black_doc")?;
+        world.staff_of(b).iter().copied().find(|&o| {
+            crate::systems::law::living(world, o)
+                && world.comp::<Job>(o).is_some_and(|j| j.role == role)
+                && !world.has::<crate::components::Sentence>(o)
+                && !crate::systems::wounded::is_down(world, o)
+        })
+    })
 }
 
 /// `Patch`'s ticks.
@@ -384,9 +422,32 @@ pub fn patch(world: &mut World, id: EntityId, target: Option<EntityId>) -> bool 
     let Some(doc) = doctor(world, place) else { return false };
     let back = world.comp::<Building>(place).is_some_and(|bd| bd.kind == BuildingKind::BlackClinic);
     let to = world.owner_of(place);
+    // Pressure pass R3: the Clinic's fee settled (the doctor's cut, a pawn,
+    // the slate); the Clinic's treatment of a short cancer the same way.
+    if crate::systems::care::cfg(world).is_some() && !back {
+        let s = crate::systems::care::settle(world, id, place, Some(doc), price);
+        let note = s.note(world);
+        let (who, dn, at) = (world.name_of(id), world.name_of(doc), world.name_of(place));
+        if what == Care::Clinic {
+            crate::systems::health::oncology_effect(world, id, place, Some(doc), &note);
+        } else {
+            let now = world.tick;
+            if !world.has::<crate::components::Misery>(id) {
+                world.insert(id, crate::components::Misery::default());
+            }
+            if let Some(m) = world.comp_mut::<crate::components::Misery>(id) {
+                m.patched_at = now;
+            }
+            ownership::jobs2_row(world).patched += 1;
+            let text = format!("{dn} patched {who} up at {at} for {price}c{note}");
+            world.push_event(crate::events::EventKind::Treated, &[id, doc, place], text);
+        }
+        crate::systems::service::arrive(world, id, place, crate::components::ServeKind::Patient, s.cash);
+        return true;
+    }
     let paid = match what {
         Care::Patch if !back => ownership::pay(world, Some(id), to, price, Flow::Treatment),
-        Care::Patch | Care::Onco => {
+        Care::Patch | Care::Onco | Care::Clinic => {
             let mut due = price;
             let mut paid = 0;
             for (payer, holds) in crate::systems::health::payers(world, id) {
@@ -421,7 +482,7 @@ pub fn patch(world: &mut World, id: EntityId, target: Option<EntityId>) -> bool 
                 format!("{dn} patched {who} up at {at} for {paid}c")
             }
         }
-        Care::Onco => {
+        Care::Onco | Care::Clinic => {
             let mult = cfg(world).map_or(0.5, |c| c.back_onco_mult);
             let rem = world.config.sickness.remission * mult;
             if let Some(c) = world.comp_mut::<crate::components::Health>(id).and_then(|h| h.cancer.as_mut()) {

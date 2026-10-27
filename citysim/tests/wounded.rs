@@ -98,6 +98,9 @@ fn test_wounds_never_add_deaths() {
 #[test]
 fn test_bleed_out_is_a_murder() {
     let mut w = world();
+    // R3 (OPEN-216): "left alone" is `[care]` off: with it the street wakes,
+    // a stranger at hand binds the wound and carries it in.
+    w.config.care = None;
     let [v, by] = strangers(&w, 2)[..] else { unreachable!() };
     wounded::down(&mut w, v, Some(by));
     assert!(wounded::is_down(&w, v));
