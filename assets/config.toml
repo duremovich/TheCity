@@ -5126,6 +5126,11 @@ contest_names = 3                  # a blow on a rival's hold names this many of
 notice_names = 3                   # the super's one notice line a round names this many tenants (the count is the round's)
 camp_visit_last_hour = 22          # a Camp answer whose hashed hour falls on the parent's shift moves to his first free hour
                                    # up to this ([household] visit_hour_from..visit_hour_to; past it, the hashed hour stands)
+raid_names = 4                     # round 3 S7 (OPEN-225): a raid's result line names this many of its dead, hurt and
+                                   # freed (the count is the toll's; the rest "and N more")
+petty_rewitness_days = 7           # a civilian who saw the same actor's same petty crime (a fare dodge, vagrancy) within
+                                   # this many days takes no new record: no Witness line, memory or affinity hit (0 off;
+                                   # the law's eye always acts)
 # Pressure pass round 2, R3 (docs/PRESSURE_PASS.md § R3, OPEN-216): the wounded and the sick (systems/care.rs).
 # Every value a placeholder.
 [care]

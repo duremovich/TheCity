@@ -833,10 +833,11 @@ fn job_search_round(
             if let Some(pool) = pool.as_mut() {
                 pool.note_hired(id);
             }
+            let was = classpay::held(world, id);
             let moved = graded && classpay::leave_for_promotion(world, id);
             hire(world, id, employer, role);
             if moved {
-                classpay::note_promoted(world, id, Some(employer));
+                classpay::note_promoted(world, id, Some(employer), was);
             }
             // L2 L10: a public-works vacancy's hire joins the works roster.
             crate::systems::budget::note_hire(world, id, employer, role);

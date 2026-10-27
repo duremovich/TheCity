@@ -736,6 +736,8 @@ pub fn breach(world: &mut World, actor: EntityId) -> Option<Outcome> {
     let past = crate::systems::service::jailers_passed(world, jail).map(|j| format!(", past {}", world.name_of(j)));
     let (n_raiders, n_defenders) = (raiders.len(), defenders.len());
     crate::systems::gossip::post_raid(world, Some(gid), Some(jail), door);
+    // Round 3 S7 (OPEN-225): who stood at the door, for the result line.
+    let (raiders0, defenders0) = (raiders.clone(), defenders.clone());
     let tally = fight_out(world, &mut raiders, &mut defenders, door, "the Precinct", 1.0, None);
     let (deaths, beaten) = (tally.deaths, tally.defenders_beaten);
     let outcome = if defenders.is_empty() { Outcome::Won } else { Outcome::Lost };
@@ -801,6 +803,25 @@ pub fn breach(world: &mut World, actor: EntityId) -> Option<Outcome> {
             "{gname} stormed the Precinct: {verdict} ({n_raiders} raiders vs {n_defenders} guards, {deaths} dead, {} freed)",
             freed.len()
         ),
+    );
+    // Round 3 S7 (OPEN-225): the result every raider and guard reads (the
+    // line above named only the head: a raider's diary had ten Assaults and
+    // no outcome).
+    crate::systems::crew::raid_result(
+        world,
+        crate::systems::crew::RaidLeft {
+            gang: gid,
+            rival: None,
+            place: "the Precinct",
+            raiders: &raiders0,
+            defenders: &defenders0,
+            raiders_standing: &raiders,
+            defenders_standing: &defenders,
+            won: outcome == Outcome::Won,
+            coins: 0,
+            food: 0,
+            freed: Some(&freed),
+        },
     );
     crate::systems::law::on_breakout(world, gid, outcome == Outcome::Won && !freed.is_empty(), beaten);
     faction::rethink(world, gid);
@@ -913,7 +934,8 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
     by_strength(world, &mut defenders);
     robots_first(world, rival_hideout, &mut defenders);
     let (n_raiders, n_defenders) = (raiders.len(), defenders.len());
-    let place = format!("the {rival_name} Hideout");
+    // Round 3 S7: "the The Static Rats Hideout" read twice.
+    let place = format!("the {} Hideout", rival_name.strip_prefix("The ").unwrap_or(&rival_name));
     crate::systems::gossip::post_raid(world, Some(gid), Some(rival), door);
     // The pressure pass phase 5b: who stood at the door, and what the Hideout held.
     let (raiders0, defenders0) = (raiders.clone(), defenders.clone());
@@ -944,6 +966,7 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
             won: outcome != Outcome::Lost,
             coins: coins.max(0),
             food,
+            freed: None,
         },
     );
     world.push_event(
@@ -1223,6 +1246,7 @@ pub fn corp_brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
             won: outcome == Outcome::Won,
             coins: took.0,
             food: took.1,
+            freed: None,
         },
     );
     world.push_event(

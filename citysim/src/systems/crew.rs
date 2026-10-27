@@ -992,7 +992,7 @@ pub fn mustered(world: &mut World, gang: EntityId, present: &[EntityId]) {
 // Raids write a result
 // ---------------------------------------------------------------------------
 
-/// What a raid's brawl left (`raid::brawl`, `raid::corp_brawl`).
+/// What a raid's brawl left (`raid::brawl`, `raid::corp_brawl`, `raid::breach`).
 pub struct RaidLeft<'a> {
     pub gang: EntityId,
     /// The defending gang (a rival Hideout), `None` at a corp's door.
@@ -1005,10 +1005,24 @@ pub struct RaidLeft<'a> {
     pub won: bool,
     pub coins: i64,
     pub food: u32,
+    /// Round 3 S7 (OPEN-225): a breakout at the Precinct (`raid::breach`), the
+    /// convicts it freed: the line reads them, and the guards beaten hold no
+    /// crew grudge (the law answers a breakout through `law::on_breakout`).
+    pub freed: Option<&'a [EntityId]>,
 }
 
-/// The raid's result line for every raider and defender, the wounded named,
-/// the crews' grudges, the repelled raid answered, the next orders.
+/// `ids` named up to `[noise] raid_names`, the rest "and N more".
+fn names_capped(world: &World, ids: &[EntityId]) -> String {
+    let cap = usize::from(world.config.noise.raid_names);
+    let shown: Vec<String> = ids.iter().take(cap).map(|&x| world.name_of(x)).collect();
+    let more = ids.len().saturating_sub(shown.len());
+    let tail = if more > 0 { format!(" and {more} more") } else { String::new() };
+    format!("{}{tail}", shown.join(", "))
+}
+
+/// The raid's result line for every raider and defender, the toll counted
+/// (round 3 S7: the dead and the hurt by count, the first `[noise] raid_names`
+/// named), the crews' grudges, the repelled raid answered, the next orders.
 pub fn raid_result(world: &mut World, r: RaidLeft) {
     let Some(c) = cfg(world).cloned() else { return };
     let now = world.tick;
@@ -1030,7 +1044,7 @@ pub fn raid_result(world: &mut World, r: RaidLeft) {
     }
     // The crews' grudges: the beaten on the other gang, the losing leader
     // on the winner.
-    for &d in &beaten_def {
+    for &d in beaten_def.iter().filter(|_| r.freed.is_none()) {
         if law::living(world, d) {
             crate::systems::grudges::add(world, d, r.gang, crate::word::GrudgeCause::Assaulted, c.raid_grudge, 0);
         }
@@ -1066,13 +1080,20 @@ pub fn raid_result(world: &mut World, r: RaidLeft) {
     }
     // The wounded: the lost fight is in their memory (phase 2's care reads
     // it); the line names where the gang-hurt go.
-    let wounded_text =
-        if wounded.is_empty() { String::new() } else { format!("; wounded: {}", names_of(world, &wounded)) };
-    let dead_text = if dead.is_empty() { String::new() } else { format!("; dead: {}", names_of(world, &dead)) };
-    let took = match (r.won, r.rival.is_some()) {
-        (true, true) => format!("; {gname} took {}c and {} food from the Hideout", r.coins, r.food),
-        (true, false) => format!("; the till smashed, {}c and {} food taken", r.coins, r.food),
-        (false, _) => "; nothing taken".to_string(),
+    let wounded_text = if wounded.is_empty() {
+        String::new()
+    } else {
+        format!("; {} hurt: {}", wounded.len(), names_capped(world, &wounded))
+    };
+    let dead_text =
+        if dead.is_empty() { String::new() } else { format!("; {} dead: {}", dead.len(), names_capped(world, &dead)) };
+    let took = match (r.won, r.rival.is_some(), r.freed) {
+        (true, _, Some([])) => "; nobody inside to free".to_string(),
+        (true, _, Some(f)) => format!("; {} freed: {}", f.len(), names_capped(world, f)),
+        (false, _, Some(_)) => "; nobody freed".to_string(),
+        (true, true, None) => format!("; {gname} took {}c and {} food from the Hideout", r.coins, r.food),
+        (true, false, None) => format!("; the till smashed, {}c and {} food taken", r.coins, r.food),
+        (false, _, None) => "; nothing taken".to_string(),
     };
     let next = |w: &World, g: EntityId| {
         w.comp::<Gang>(g).map_or_else(String::new, |x| {

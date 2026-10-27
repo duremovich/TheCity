@@ -560,11 +560,18 @@ pub struct NoiseCfg {
     /// The last hour a Camp answer moves to when the parent's shift covers
     /// the `[household] visit_hour_from..visit_hour_to` hash (`household::visits_due`).
     pub camp_visit_last_hour: u8,
+    /// Round 3 S7 (OPEN-225): names a raid's result line gives of its dead,
+    /// its hurt and the freed (`crew::raid_result`; the rest "and N more").
+    pub raid_names: u8,
+    /// Round 3 S7: a civilian who saw the same actor's same petty crime
+    /// within this many days takes no new record of it (`law::raise_crime_on`;
+    /// 0 off).
+    pub petty_rewitness_days: u16,
 }
 
 impl Default for NoiseCfg {
     fn default() -> Self {
-        NoiseCfg { contest_names: 3, notice_names: 3, camp_visit_last_hour: 22 }
+        NoiseCfg { contest_names: 3, notice_names: 3, camp_visit_last_hour: 22, raid_names: 4, petty_rewitness_days: 7 }
     }
 }
 

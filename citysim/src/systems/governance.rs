@@ -349,8 +349,9 @@ pub fn vote(world: &mut World, corp: EntityId, why: &str) -> Option<EntityId> {
     if let Some(w) = winner.filter(|&w| Some(w) != old) {
         world.stats.current.gov.chairs_fallen += u32::from(old.is_some_and(|o| law::living(world, o)));
         let at = world.comp::<crate::components::Job>(w).and_then(|j| j.employer);
+        let was = crate::systems::classpay::held(world, w);
         crate::systems::classpay::leave_for_promotion(world, w);
-        crate::systems::classpay::note_promoted(world, w, at);
+        crate::systems::classpay::note_promoted(world, w, at, was);
         if let Some(c) = world.comp_mut::<Corp>(corp) {
             c.exec = Some(w);
         }

@@ -279,6 +279,18 @@ pub fn raise_crime_mult(
         // for anything past petty (a murder is reported off duty, a fare
         // dodge seen from a commuting guard's seat is not).
         let duty = on_duty(world, w) || (is_guard(world, w) && !is_petty(crime));
+        // Round 3 S7 (OPEN-225): a petty habit seen again is not news. Two
+        // commutes crossing at one gate at one minute daily wrote the same
+        // Fare Evasion line five days running and sank a stranger to Enemy
+        // -1.00 (`gang_leader_18246` 18:43, 100k). A civilian holding a
+        // sighting of the same petty crime by the same actor from the last
+        // `[noise] petty_rewitness_days` takes no new record (no line, no
+        // memory, no affinity hit); the law's eye always acts.
+        let habit = Tick::from(world.config.noise.petty_rewitness_days) * TICKS_PER_DAY;
+        if !duty && is_petty(crime) && habit > 0 && crate::systems::life::saw_within(world, w, actor, crime, habit) {
+            noticed += 1;
+            continue;
+        }
         // Past `witness_cap` noting witnesses the crowd saw nothing it will
         // remember (the law's eye always counts).
         if cap > 0 && recorded >= cap && !duty {

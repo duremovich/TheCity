@@ -436,7 +436,11 @@ pub fn arrive_at_suspect(world: &mut World, guard: EntityId, suspect: EntityId) 
 
 /// Has `w` already seen `actor` commit `crime` within `witness_dedupe_ticks`?
 pub fn saw_recently(world: &World, w: EntityId, actor: EntityId, crime: crate::components::Crime) -> bool {
-    let window = world.config.life.witness_dedupe_ticks;
+    saw_within(world, w, actor, crime, world.config.life.witness_dedupe_ticks)
+}
+
+/// `w` holds a `SawCrime` of `actor` for `crime` from the last `window` ticks.
+pub fn saw_within(world: &World, w: EntityId, actor: EntityId, crime: crate::components::Crime, window: Tick) -> bool {
     let now = world.tick;
     world.comp::<Memory>(w).is_some_and(|m| {
         m.entries.iter().any(|e| {

@@ -1325,6 +1325,7 @@ fn note_byline(world: &mut World, reporter: EntityId) {
     if j.grade >= crate::systems::classpay::PROFESSIONAL {
         return;
     }
+    let was = crate::systems::classpay::held(world, reporter);
     let (role, grade, at) = (j.role, j.grade.max(crate::systems::classpay::role_grade(world, j.role)) + 1, j.employer);
     let wage = crate::systems::classpay::wage_at(world, role, grade);
     if let Some(j) = world.comp_mut::<Job>(reporter) {
@@ -1332,5 +1333,5 @@ fn note_byline(world: &mut World, reporter: EntityId) {
         j.wage_per_day = wage;
     }
     crate::systems::ownership::jobs2_row(world).byline_promotions += 1;
-    crate::systems::classpay::note_promoted(world, reporter, at);
+    crate::systems::classpay::note_promoted(world, reporter, at, was);
 }
