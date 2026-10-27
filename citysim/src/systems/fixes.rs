@@ -227,6 +227,10 @@ pub fn committed(world: &World, id: EntityId, brain: &Brain, winner: GoalKind) -
             }
         }
     }
+    // Pressure pass round 2, R5 (OPEN-214): a try-out and a raid's muster.
+    if crate::systems::crew::holds(world, id, plan, winner) {
+        return true;
+    }
     // Item 15: a Lead holds until its Collect runs or fails.
     plan.goal == GoalKind::Lead
 }

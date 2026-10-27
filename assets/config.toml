@@ -5027,6 +5027,17 @@ bail_debt = true                   # the bail the gang paid is the member's debt
 welcome_after_hours = 1            # a released member walks to the Hideout this many hours after (past 21:00 met at once)
 crew_p = 0.6                       # rest days: a free member with no shift today goes to the crew on this, at crew_hour
 crew_hour = 19                     # (the Hideout under a fighting order, the gang's own venue under Expand, none LieLow)
+# Pressure pass round 2, R5 (OPEN-214): the gang verbs that stalled. A raid's muster and a recruit's try-out hold
+# like a commute (only danger or starving breaks them); a gang that cannot pay its watch stands it down.
+tryout_reach_ticks = 180           # a recruit tries out at the Hideout, or past this travel from where he stands at the
+                                   # gang's nearest front within it; neither in reach: no JoinGang today (V10: 300-min walks)
+tryout_cool_days = 3               # a recruit turned away at the try-out does not try again for this many days
+muster_flat = 0.5                  # a member posted to today's muster (not the shift's) scores Raid this much over its
+                                   # considerations (V10: Raid ~0.3 lost to Eat, Unwind and Sleep all evening; 0 brawls)
+raid_target_reach_ticks = 240      # a corp raid's prize lies within this travel of the gang's Hideout (the march window is
+                                   # 6 h; 5b: every corp raid marched to one Street Market across the island)
+court_work_excused = true          # a court summons missed at work takes standing, not the colours (R5's judgement of 5b's
+                                   # attrition: after the stall fixes the daily court rota was 2/3 of the misses behind a loss)
 
 [fares]
 # Pressure pass round 2, R1 (docs/PRESSURE_PASS.md § R1, OPEN-213; systems/fares.rs): fare evasion is never a cell.

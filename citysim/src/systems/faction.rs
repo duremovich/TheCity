@@ -4,7 +4,7 @@
 
 use crate::components::{
     Building, BuildingKind, Corp, Corpse, Gang, Identity, LawShock, LobbyHold, MemoryKind, Order, OrderScore,
-    PendingOrder, Personality, Sentence,
+    PendingOrder, Personality, Sentence, TilePos,
 };
 use crate::config::GangsCfg;
 use crate::entity::EntityId;
@@ -504,7 +504,11 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
             *t = true;
         }
     }
-    let corp_prize = if corp_raids { corp_prize(world, &turf, hoard_corp) } else { None };
+    // Pressure pass round 2, R5 (OPEN-214): with `[crew]`, a prize the
+    // crew can march to from the Hideout in the window.
+    let from = crate::systems::crew::cfg(world)
+        .and_then(|c| world.comp::<Building>(g.hideout).map(|b| (b.door, c.raid_target_reach_ticks)));
+    let corp_prize = if corp_raids { corp_prize(world, &turf, hoard_corp, from) } else { None };
     let corp_cover = corp_prize.map_or(0.0, |(b, _)| cover_of(world, gang, b));
     // Fix pass: the guards the gang can expect at the door are the ones the
     // corp posts there (`raid::posted_guards`' cap), not its whole roster.
@@ -677,8 +681,16 @@ pub fn district_ground(world: &World, gang: EntityId) -> (Vec<bool>, Vec<bool>) 
 
 /// M12 D39: the hoarding corp's building with the highest 7-day revenue
 /// (ties lower id) in a district `held` marks (the gang's turf) or next to one, with the
-/// prize a won raid on it takes (`raid::corp_prize_value`).
-pub fn corp_prize(world: &World, held: &[bool], hoard_corp: Option<EntityId>) -> Option<(EntityId, i64)> {
+/// prize a won raid on it takes (`raid::corp_prize_value`). R5 (OPEN-214):
+/// with `reach` (the Hideout's door, a travel cap), only a building within
+/// that travel of it (V10 and 5b: every corp raid marched to the same
+/// Street Market across the island, 589 tiles, and most died on the walk).
+pub fn corp_prize(
+    world: &World,
+    held: &[bool],
+    hoard_corp: Option<EntityId>,
+    reach: Option<(TilePos, Tick)>,
+) -> Option<(EntityId, i64)> {
     let corp = hoard_corp?;
     let mask: crate::components::DistrictMask =
         held.iter().enumerate().filter(|(_, &h)| h).fold(0, |m, (i, _)| m | (1 << i));
@@ -691,6 +703,7 @@ pub fn corp_prize(world: &World, held: &[bool], hoard_corp: Option<EntityId>) ->
         .into_iter()
         .filter_map(|b| world.comp::<Building>(b).filter(|bd| !bd.demolished && !bd.derelict).map(|bd| (b, bd)))
         .filter(|(_, bd)| near(world.district_of(bd.door).index()))
+        .filter(|(_, bd)| reach.is_none_or(|(from, cap)| crate::systems::distance::travel(world, from, bd.door) <= cap))
         .map(|(b, bd)| (bd.revenue.iter().sum::<i64>(), b))
         .max_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)))?;
     let value = crate::systems::raid::corp_prize_value(world, corp);
@@ -886,6 +899,9 @@ pub fn apply_order(world: &mut World, gang: EntityId, p: PendingOrder, note: Opt
         }
         g.pending_order = None;
     }
+    // Pressure pass round 2, R5 (OPEN-214): a raid ordered after midnight's
+    // duties calls its muster now.
+    crate::systems::crew::raid_ordered(world, gang);
     // M14 V32: the Raid prelude, timed off the corp raid's muster.
     if let (Some(t), Some(at)) = (corp_target, muster) {
         crate::systems::virt::raid_prelude(world, gang, t, at);

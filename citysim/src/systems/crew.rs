@@ -190,6 +190,9 @@ pub struct State {
     /// A gang's last raid result (tick, the verdict, who was in it), for
     /// the marchers who reach the door after it.
     pub last_raid: BTreeMap<EntityId, (Tick, String, Vec<EntityId>)>,
+    /// R5 (OPEN-214): a gang whose treasury cannot pay a watch or a guard
+    /// stood its duty down on this day (told once; told again when it pays).
+    pub stood_down: BTreeMap<EntityId, u64>,
 }
 
 impl State {
@@ -201,6 +204,7 @@ impl State {
             && self.gear_week.is_empty()
             && self.raided_day.is_empty()
             && self.last_raid.is_empty()
+            && self.stood_down.is_empty()
     }
 }
 
@@ -462,6 +466,20 @@ pub fn daily(world: &mut World) {
 fn missed(world: &mut World, c: &CrewCfg, m: EntityId, d: &Duty) {
     let day = world.day() as u32;
     let window = c.miss_window_days;
+    // R5 (OPEN-214), the attrition judged: a court summons missed at work is
+    // excused (the standing, not the colours).
+    if c.court_work_excused && d.kind == DutyKind::Court && d.chose_job {
+        book(world, m).standing -= c.miss_standing;
+        let text = format!(
+            "{} missed {}'s court summons at {} (at work: excused)",
+            world.name_of(m),
+            gang_name(world, d.gang),
+            world.name_of(d.place)
+        );
+        world.push_event(EventKind::Crew, &[m, d.gang], text);
+        ownership::jobs2_row(world).crew_duty_missed += 1;
+        return;
+    }
     let count = {
         let b = book(world, m);
         b.misses.retain(|&x| x + window > day);
@@ -585,6 +603,12 @@ fn out_of_colours(world: &mut World, target: EntityId, gang: EntityId, why: Call
     }
     world.crew.books.remove(&target);
     crate::systems::gang::leave(world, target, &reason);
+    // R5 (OPEN-214): beaten out is a leaver's cooldown, as walking away is
+    // (a shadow pick beaten out at 11:54 joined the same gang at 17:45).
+    let until = world.tick + world.config.living.desist_cooldown_days * TICKS_PER_DAY;
+    if let Some(b) = world.comp_mut::<crate::components::Brain>(target) {
+        b.cooldowns.insert(crate::components::GoalKind::JoinGang, until);
+    }
 }
 
 /// A jailed member's talk, once a sentence of `talk_min_days` or more: a
@@ -678,7 +702,7 @@ fn post_gang(world: &mut World, c: &CrewCfg, gang: EntityId) {
             _ => None,
         };
         if let Some(kind) = kind {
-            let slots = duty_slots(c, members.len());
+            let slots = paid_slots(world, c, gang, kind, duty_slots(c, members.len()));
             let mut n = 0;
             let mut i = 0;
             while i < free.len() && n < slots {
@@ -704,6 +728,116 @@ fn post_gang(world: &mut World, c: &CrewCfg, gang: EntityId) {
         let Some(p) = crew_place(world, c, gang, m) else { continue };
         post(world, c, m, gang, DutyKind::Crew, p, c.crew_hour);
     }
+}
+
+/// R5 (OPEN-214): a raid ordered after midnight's duties were posted, its
+/// muster before the next midnight: the members free and holding no duty
+/// today are called to it now (V10: a Raid ordered at 06:58 scored ~0.3 on
+/// courage and loyalty alone, with no muster posted).
+pub fn raid_ordered(world: &mut World, gang: EntityId) {
+    let Some(c) = cfg(world).cloned() else { return };
+    let Some(g) = world.comp::<Gang>(gang) else { return };
+    let (leader, raid_at, members) = (g.leader, g.raid_at, g.members.clone());
+    let Some(at) = raid_at.filter(|_| g.order.is_raid()) else { return };
+    let midnight = (world.tick / TICKS_PER_DAY + 1) * TICKS_PER_DAY;
+    if at >= midnight {
+        return;
+    }
+    let Some(hideout) = world.hideout_of(gang) else { return };
+    let hour = ((at % TICKS_PER_DAY) / TICKS_PER_HOUR) as u8;
+    let today = world.day();
+    for m in members {
+        if Some(m) == leader || !free_for_duty(world, m) {
+            continue;
+        }
+        if world.crew.duties.get(&m).is_some_and(|d| d.day == today) {
+            continue;
+        }
+        post(world, &c, m, gang, DutyKind::Muster, hideout, hour);
+    }
+}
+
+/// R5 (OPEN-214): the watch or guard slots a gang can pay today (its
+/// treasury over `pay_reserve`, `duty_pay` a slot), at most `slots`. A gang
+/// that can pay none stands its duty down (told once, and again when it
+/// pays): V10's "unpaid: the gang is broke" every night on the same watch.
+fn paid_slots(world: &mut World, c: &CrewCfg, gang: EntityId, kind: DutyKind, slots: usize) -> usize {
+    let spare = (world.purse(Some(gang)) - c.pay_reserve).max(0);
+    let can = if c.duty_pay > 0 { usize::try_from(spare / c.duty_pay).unwrap_or(usize::MAX) } else { slots };
+    let n = slots.min(can);
+    let today = world.day();
+    let was = world.crew.stood_down.contains_key(&gang);
+    let gname = gang_name(world, gang);
+    let mut actors = vec![gang];
+    actors.extend(world.comp::<Gang>(gang).and_then(|g| g.leader));
+    if n == 0 && slots > 0 && !was {
+        world.crew.stood_down.insert(gang, today);
+        let text = format!(
+            "{gname} stood its {} down: the treasury ({}c) cannot pay a {}c duty",
+            kind.label(),
+            world.purse(Some(gang)),
+            c.duty_pay
+        );
+        world.push_event(EventKind::Crew, &actors, text);
+        ownership::jobs2_row(world).crew_stood_down += 1;
+    } else if n > 0 && was {
+        world.crew.stood_down.remove(&gang);
+        let text = format!("{gname} can pay a {} again: {n} posted", kind.label());
+        world.push_event(EventKind::Crew, &actors, text);
+    }
+    n
+}
+
+/// R5 (OPEN-214): the Raid goal's duty flat: `muster_flat` for a member
+/// posted to today's muster who did not choose the shift; 0 otherwise.
+pub fn muster_flat(world: &World, id: EntityId) -> f32 {
+    let Some(c) = cfg(world) else { return 0.0 };
+    match world.crew.duties.get(&id) {
+        Some(d) if d.kind == DutyKind::Muster && !d.chose_job && world.gang_of(id) == Some(d.gang) => c.muster_flat,
+        _ => 0.0,
+    }
+}
+
+/// R5 (OPEN-214): `plan` holds against anything but danger or starving
+/// (`fixes::committed`): a recruit's try-out (the walk there and the half
+/// hour; V10: a 254-min walk, then Sleep at the door 14 minutes in), and a
+/// raid's muster until the march (V10: both musters cut by Sleep, 0
+/// brawls), unless the member chose the shift over it at midnight. A try-out
+/// gives way to the shift (`winner` Work), a raid only to the chosen one.
+pub fn holds(world: &World, id: EntityId, plan: &crate::goap::Plan, winner: crate::components::GoalKind) -> bool {
+    if !on(world) {
+        return false;
+    }
+    match plan.goal {
+        crate::components::GoalKind::JoinGang => {
+            !world.has::<GangMember>(id) && winner != crate::components::GoalKind::Work
+        }
+        crate::components::GoalKind::Raid => {
+            crate::systems::raid::raid_pending(world, id)
+                && !crate::systems::raid::raid_done(world, id)
+                && !world.crew.duties.get(&id).is_some_and(|d| d.kind == DutyKind::Muster && d.chose_job)
+        }
+        _ => false,
+    }
+}
+
+/// R5 (OPEN-214): a full door does not keep the crew out: a member into his
+/// own gang's Hideout, a member to today's duty place, a recruit to his
+/// try-out. The Hideout's capacity is its beds; V10's musters, courts and
+/// rest nights at a full Hideout failed `BuildingFull` at the door.
+pub fn capacity_exempt(world: &World, agent: EntityId, b: EntityId) -> bool {
+    if !on(world) {
+        return false;
+    }
+    if let Some(g) = world.gang_of(agent) {
+        if world.hideout_of(g) == Some(b) || world.crew.duties.get(&agent).is_some_and(|d| d.place == b) {
+            return true;
+        }
+    }
+    world
+        .comp::<crate::components::Brain>(agent)
+        .and_then(|br| br.plan.as_ref())
+        .is_some_and(|p| p.goal == crate::components::GoalKind::JoinGang && p.target == Some(b))
 }
 
 /// A crew Visit arrived (`household::credit`), or a Statistical one at its

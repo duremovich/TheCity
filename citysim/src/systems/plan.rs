@@ -193,6 +193,16 @@ pub fn bind_target(world: &World, id: EntityId, goal: GoalKind) -> Option<Entity
 /// Plan one agent's current goal. Returns the expansions used.
 pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
     let tick = world.tick;
+    // Pressure pass round 2, R5 (OPEN-214): with `[crew]` the try-out is
+    // scripted (the Hideout or a front in reach), never the planner's walk
+    // to a Hideout across the island.
+    if goal == GoalKind::JoinGang && crate::systems::crew::on(world) {
+        match crate::systems::gang::tryout_plan(world, id) {
+            Some(plan) => install(world, id, plan),
+            None => world.cool_goal(id, goal),
+        }
+        return 0;
+    }
     // Goals that bypass the planner.
     let bypass = match goal {
         GoalKind::Idle => routine::idle_plan(world, id),

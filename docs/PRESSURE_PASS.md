@@ -928,3 +928,73 @@ last change, the beat's outlet filter, came after the run).
   seed) and gate the School routine by age.
 - No test (doctrine 2). `SAVE_VERSION` unchanged: no World state; the save's config carries `[verbs]` as an optional
   section (absent: `None`).
+
+### R5, gang verbs that stall (`OPEN-214`; `systems/crew.rs`, `gang.rs` the try-out, `[crew]` R5 keys)
+
+Numbers: 20k `isle_m_k2` seed 42 x 30 (`--scaled --ambient-flats 50`), one run each, base `9755275`. Raid outcomes
+swing run to run (three after-runs of near-final trees: 17, 15, 12 results), so read them as a range.
+
+- **The muster held** (`crew::holds`, read by `fixes::committed`): a Raid plan holds against anything but danger or
+  starving (as a commute) while the expedition is pending, unless the member chose the shift at midnight. The posted
+  muster is a duty: `muster_flat` (0.5) over the Raid goal's considerations for a member holding today's Muster
+  (V10: Raid ~0.3 lost to Eat, Unwind and Sleep all evening). A raid ordered after midnight's posting calls its muster
+  then (`crew::raid_ordered`, from `faction::apply_order`; the shadow's raiders had no muster on a 06:58 order).
+  **Found on the way:** the muster point is inside the Hideout, and a full Hideout failed the walk `BuildingFull` at
+  the door (two of four raider picks); courts, rest nights and welcomes there failed the same. `crew::capacity_exempt`
+  (in `World::capacity_exempt`): a member into his own Hideout or today's duty place, a recruit into his try-out.
+  **The target** (`faction::corp_prize`): a corp raid's prize lies within `raid_target_reach_ticks` (240) of the
+  Hideout; every corp raid had marched to one Street Market across the island (5b's reads-wrong). A marcher whose
+  Brawl fails its start after the raid is over now reads 5b's late line. Raid results 8 -> 12 (6 won -> 2: three
+  raids on Bar#4448 in the Precinct's district met 19-68 answering defenders; the a5 run won 15 of 17), called off at
+  the door 8 -> 4, fizzled 2 -> 1; raiders at a fight 3-9 -> 3-24; Raid walk legs to the muster of 120 min+ done 34 ->
+  140, aborted 55 -> 20.
+- **The try-out** (`gang::tryout_plan`, `tryout_place`, `turned_away`; with `[crew]`): JoinGang is scripted (the
+  planner's walk to a Hideout across the island is gone): `[GoTo place, JoinGang place]`, the place the recruit's gang's
+  Hideout within `tryout_reach_ticks` (180) of where he stands, else its nearest front within it; neither: JoinGang is
+  not scored (`already_satisfied`). The walk and the half hour hold (`crew::holds`; the shift alone breaks it).
+  Arriving to no place in the roster (the treasury fell under the stipend line, the roster filled, the tie cooled):
+  "X tried out for G at P and was turned away: the treasury could not feed another mouth", a `Crew` line, and no
+  second try for `tryout_cool_days` (3). Joins 1,157 -> 1,143; JoinGang walk legs of 120 min+ 3,154 (2,377 aborted)
+  -> 1,044 (240 aborted), of 240 min+ 983 -> 118; turned away 376 (265 treasury, 108 full up, 3 no tie). Beaten
+  out of the colours is now a leaver's JoinGang cooldown (`[living] desist_cooldown_days`; a pick beaten out at
+  11:54 joined the same gang at 17:45).
+- **Scavenge** (`exec`): the scav's round is GangWork's Scavenge, which the start check read through the planner's
+  `poor` symbol (every scav with a meal's coins failed `PreconditionLost` on the first tick, V10's 52). Every
+  Scavenge now checks its own start (`actions::can_start`: outside, or inside a building that is not his Home, which
+  the planner reads as the street after an Extort or in a back room; `on_start` steps out). Scav rounds 253 -> 350,
+  finds 37 -> 47; Scavenge aborts (all goals) 2,755 -> 0.
+- **The broke gang** (`crew::paid_slots`): a gang posts only the watches or guards its treasury over `pay_reserve`
+  pays; none and it stands the duty down, told once to the gang and its leader ("The Drowned Choir 8 stood its watch
+  down: the treasury (0c) cannot pay a 3c duty") and again when it pays ("can pay a watch again: 1 posted";
+  `crew.stood_down`). "Unpaid: the gang is broke" 163 -> 20 (a watch posted at midnight whose purse fell by evening);
+  stand-downs 45. Deviation: no new money (R6b's gun trade touches the treasuries).
+- **5b's attrition, judged after the stalls** (colours lost in 30 days; behind each, the three misses that cost it):
+  base 100 (court summons did not come 94, watch at work 63, court summons at work 61, watch did not come 42, muster
+  did not come 23, guard 13, muster at work 4); the stall fixes alone (a5) 50 (court did not come 56, court at work
+  42, watch did not come 15, muster did not come 15, watch at work 12, muster at work 8). The daily court rota was two
+  thirds of the misses behind a lost colour, and a court at 20:00 posted to a cook whose set-out falls in a shift ending
+  at 18:00 read as "chose the shift" three times and a beating. The rule changed: `court_work_excused` (true), a court
+  summons missed at work takes the standing ("... (at work: excused)") but not the colours; a watch, a guard or a
+  muster missed at work still counts. After (the final tree): 33 (court did not come 57, watch at work 20, muster did
+  not come 12, muster at work 5, watch did not come 5; the a6 run 26). Gang leaves 220 -> 207 (walked away 72 -> 75,
+  folded and absorbed members 27 -> 73).
+- **Shadow** (20k seed 42 d16-d22, picks raider:6, gang_member:3, gang_leader:3, scav:3, jailed:2, homeless:3; the
+  a6 build, the final adds the Earn Scavenge's step-out and the late line): "Viktor Volkov ... GOAL Raid (was Work):
+  score 0.906 ... muster called", Muster 97 min, Brawl at 22:43, "Raid on Nutrix 2's Street Market#4427: The Ash Rats
+  won (15 raiders, 1 defenders); the till smashed, 500c and 351 food taken; wounded: Joss Nakamura, Moth Haas";
+  "PLAN JoinGang on Hideout#4464 ... ACTION JoinGang @ Hideout#4464, 31 min ... Tristan Marlow joined Ninefold
+  (miserable, mood -0.28)" (`jailed_12466`; sh4: a 163-min walk, the try-out, "Marek Fairweather joined The Red
+  Lanterns"); "Dahlia Volkov picked over the bins behind Street Market#4418 on the scav round and sold a find for 3c";
+  "Wire Pembroke stood watch at Hideout#4474 for The Salt Widows with Juno Ostrowski, Bex Novak, Edric Novak, Hiro
+  Yates (paid 3c)"; "Dorian Ravensworth missed The Drowned Choir 8's court summons at Hideout#4800 (at work: excused)".
+  Reads wrong (next pass): a muster at the Hideout marches 461 tiles on an El-estimated reach (227 min) and two picks
+  reached the door minutes after the brawl; a corp raid next to the Precinct meets the district's answering guards
+  (the brain scores the posted ones only); a gang at the cap or the stipend line turns away a stream of recruits (The
+  Unplugged 2, The Drowned Choir 8); "court summons did not come" is now the main loss (a duty Visit lost to another
+  visit in the single slot, a far member, a night shift); musters still sit 3-5 h (the 8-h gather window).
+- `person::probe_pimp_purse_grows_on_a_pitch_night` goes red here (green on main's last change run): the pick reaches
+  his pitch at 23:36, the Collect is cut at midnight after 36 min, and he is jailed for a Deal at 16:03 the next day,
+  so no second night; no R5 path touches him (his duty that day a rest-day crew visit). A butterfly on the probe's
+  premise; left for the fix round. `probe_hungry_worker_eats_from_the_wage_before_rent` is red as on main.
+- No test (doctrine 2). `SAVE_VERSION` 75 (`crew::State.stood_down`, the `[crew]` R5 keys, `Jobs2Cols`
+  `crew_stood_down`, `crew_tryout_refused`; `analyze_run.py` prints them in the crew totals).
