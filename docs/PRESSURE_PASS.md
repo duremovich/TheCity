@@ -254,6 +254,73 @@ worker on day 27.
 
 Then Shadow V12 in V11's window (100k, seed 42, days 21-27, two per archetype), Sonnet critics, the synthesis.
 
+### Round 4 from Shadow V12 (`SHADOW_V12.md`, opened 2026-10-27)
+
+Dylan's calls (2026-10-27): round 4 before the map; neglect warns first and takes on a repeat (`OPEN-231`); School
+reach by travel time, not a School per district (`OPEN-232`); ticks/s 22.4 at 100k and 218 at 20k accepted again,
+profiled once at the next close (`OPEN-229`). The under-18 rule holds in every phase (CLAUDE.md): a brief that
+touches a victim pick, a fight or a punishment says how `ages::is_protected` gates it. Trades go two to a brief (S5
+and R6a ran past the turn budget with four). Wave 1 is T1, T3, T4, T6 at once; wave 2 (T2, T5, T7) after wave 1
+merges (T2 shares `ages.rs` with T1, T7 folds lines T3-T6 add). Iterate at 20k (`--population 20000 --map
+assets/maps/isle_m_k2.txt`, `run` also `--scaled --ambient-flats 50`); V12's repro picks are 100k seed 42 days 21-27
+(`target/shadow_v12/`), read there only when 20k cannot show the case.
+
+#### T1, neglect warns first and the Camp is a place (`OPEN-231`)
+
+The take is a ladder, not a roll: a neglected child first brings the service to the door (a warning the parent hears,
+a few days' grace read from config), and only neglect again inside the window takes the child. The camp from the
+inside: a warden's day among the children (headcount, rations, an absconder brought back, never a blow), the parent's
+visit by reach (S1's trip; "could not make the trip" stays when it is true), the buy-out and the break-out read from
+the parent's side, a child let home when the parent has fed the household long enough. Shadow: camp_parent,
+camp_warden, school_parent, homeless. Moves a number: ChildTaken and the daily ch_camp, 20k seed 42, before and after.
+
+#### T2, School by travel time (`OPEN-232`), wave 2
+
+A school-age child goes to the nearest School inside a travel limit (walk, or the El with the fare a parent pays); a
+full School turns the next child away; a child out of reach stays home and the `[family]` line says why ("no School
+within 1 h"). The teacher's day follows the roll: no class, no ClerkWork at an empty School. Shadow: school_parent,
+teacher, and the archetypes whose `[family]` lines show children (gang_member, forger, buyer). Moves a number: school
+days / child-days (4.0 % at 100k), 20k and 100k, before and after.
+
+#### T3, plans that still die silently (`OPEN-222`)
+
+A held contract that never plans (`gun_36512`, "backed off, 7 in a row", then `ContractExpired`): find why the plan
+fails and either plan it or let the taker drop it with a reason. An arrest chase that ends in `Unwind` says so and
+hands the case on (`guard_8440 d23 11:10`, 1 of 4 completed). A Guard's Work plan that times out on a 0-tile GoTo
+(`runner_90375`, 25 times in 6 days). A mustered raider marked "missed" (`raider_70326 d22 00:07`, V11's). A contract
+brawl that hits three people who are not the target (`gun_37892 d26 00:09`). Shadow: gun, guard, runner, raider.
+
+#### T4, the trades' inside: the door and the yard (`OPEN-217`)
+
+Bouncers, dancers and club staff at 100k are Wage plus ClerkWork for 28 job-nights; S5's door fired at 20k only. Find
+why the followed body never meets a client at 100k (the LOD tier, as S4's care was, is the first suspect) and give the
+shift its inside: the door's refusals and ejections, the dancer's set and tips. The foreman's 174 Hire lines become a
+morning at the yard (who was picked, who was sent home). Shadow: bouncer, dancer, club_staff, foreman.
+
+#### T5, the jobless look for work (`OPEN-217`, `OPEN-228`'s follow-up), wave 2
+
+A laid-off worker searches (asks Friends, walks to the yards and the hiring boards, takes worse work) instead of four
+idle days (`night_shift_23119 d21`); a hired day labourer works the day he was hired for (`day_labourer_100168 d23`);
+the hire by distance prefers the city's own jobless near the post over the Ambient pool (S1 stranded natives: homeless
+max 11.3k -> 11.9k). Shadow: night_shift, day_labourer, worker, homeless. Moves a number: Materialised and employed
+mean, 20k seed 42, before and after.
+
+#### T6, money and labels that disagree
+
+A treatment billed 80c that moves 1c to another payee (`miserable_64146 d22 05:10`); a con that names two sellers
+(`vendor_11367 d24 00:09`); the foreman named who just lost the post (`ripperdoc_61226 d27 00:11`, V11's); a CEO's
+decision `Served` five times in 70 min at home (`ceo_88522 d24 00:07`); an exec hired as an Engineer while still an
+exec (`exec_78363 d26`); a 600c ledger theft four times a week with no heat (`fixer_100695`). Each line says what the
+money did. Shadow: miserable, vendor, ripperdoc, ceo, exec, fixer.
+
+#### T7, noise after round 3 (`OPEN-233`), wave 2
+
+The 00:07 standing-fact line ("stays off the trade", "sat out the raid", "chose the shift") logs on the first day and
+on the change; "N in a row" back-off lines fold; gossip runs of 20-40 lines fold; a guard's Fare Evasion witness lines
+from inside the Precinct; the hourly "met at the table" memories (`ceo_88522`). The victim's age on Assault and
+beating lines, so a shadow can check the under-18 rule. The shadow's `sick` pick carries an illness (V12's had none).
+Shadow: every group's busiest diary (gang_member, madam, guard, ceo, sick).
+
 ## Implemented: deviations
 
 (Per phase, as they land.)

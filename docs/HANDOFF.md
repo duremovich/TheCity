@@ -41,28 +41,23 @@ days 25-29 24.6 -> 22.4; 20k quiet box 277 -> 218 (`OPEN-229`).
 
 ## Next, in order
 
-1. **Dylan's calls below**, then either:
-   - **the 100k map re-import** (`OPEN-204`, `OPEN-182`): walking still eats 4-10 h of the day in every group
-     (`OPEN-221`); the goal side is done, home-to-post is the map; or
-   - **round 4 from V12**: the camp as a place (`OPEN-231`), plans that still die silently (`OPEN-222`), the trades'
-     inside (`OPEN-217`), money and labels that disagree, noise (`OPEN-233`), the victim's age on Assault lines
-     (`OPEN-233`, with the victim's age on Assault lines). Then Shadow V13 in V12's window, with a sick pick that carries an illness.
-2. The vertical city (`OPEN-187`, `OPEN-191`), the view milestone, M18.
+1. **Pressure pass round 4 from V12** (`docs/PRESSURE_PASS.md` § "Round 4 from Shadow V12"): wave 1 T1 neglect warns
+   first and the Camp as a place (`OPEN-231`), T3 plans that still die silently (`OPEN-222`), T4 the trades' inside
+   (`OPEN-217`), T6 money and labels that disagree; wave 2 T2 School by travel time (`OPEN-232`), T5 the jobless look
+   for work, T7 noise (`OPEN-233`). One Opus coder per phase in a worktree, as rounds 2 and 3 ran. Then Shadow V13 in
+   V12's window, and one 100k profile at that close (`OPEN-229`).
+2. The 100k map re-import (`OPEN-204`, `OPEN-182`; home-to-post walking, `OPEN-221`): the Lot shortage needs the
+   footprint redesign or `OPEN-187` multi-tenancy, a joint job with TheCityGraphics.
+3. The vertical city (`OPEN-187`, `OPEN-191`), the view milestone, M18.
 
-## Open calls for Dylan
+## Calls Dylan made at the close (2026-10-27)
 
-- **Map first or round 4 first?** Distance is still the top complaint, now mostly home-to-post; the Lot shortage
-  needs either the footprint redesign or `OPEN-187` multi-tenancy, a joint job with TheCityGraphics.
-- `OPEN-231`: the service takes ~124 children a day into the camps at 100k (3,726 in 30 days, 1,782 inside on a
-  given day, of ~11k). That's your "service takes them" at work; is that size right, or should neglect take longer
-  (or warn first) before the take?
-- `OPEN-232`: 18 Schools for ~11k children, school days 4 % of child-days. A School per district, or reach by travel
-  time?
-- `OPEN-229`: ticks/s 22.4 at 100k, 218 at 20k, below the ~25 you accepted. A perf phase before V13, or accept again?
-- S1 left natives stranded (homeless max up 0.6k; `OPEN-228`'s follow-up): hire by distance favours the Ambient
-  pool over the city's own jobless.
-- Carried: `OPEN-220`, `OPEN-212`, `OPEN-150`, `OPEN-179`; standing `OPEN-062`, `OPEN-039`, `OPEN-057`, `OPEN-059`,
-  `OPEN-077`, `OPEN-069`, `OPEN-070`.
+- Round 4 before the map.
+- Neglect warns first; a repeat takes the child (`OPEN-231`).
+- School reach by travel time, not a School per district (`OPEN-232`).
+- Ticks/s 22.4 at 100k and 218 at 20k accepted again; one profile at the next close (`OPEN-229`).
+- Carried, still open: `OPEN-220`, `OPEN-212`, `OPEN-150`, `OPEN-179`; standing `OPEN-062`, `OPEN-039`, `OPEN-057`,
+  `OPEN-059`, `OPEN-077`, `OPEN-069`, `OPEN-070`.
 
 ## Process notes from this session
 
