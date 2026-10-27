@@ -385,6 +385,12 @@ pub struct Config {
     /// save) with the key absent: care as phase 2 left it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub care: Option<CareCfg>,
+    /// Pressure pass round 2, R6a (docs/PRESSURE_PASS.md § R6a; OPEN-217):
+    /// the trades' verbs on a followed body (the cab's pool, the pimp's
+    /// round, the pit's bettors, the madam's bookings, the joytoy's lonely).
+    /// `None` (not written into a save) with the key absent: as R1-R4 left them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trade_verbs: Option<TradeVerbsCfg>,
     /// The island pass phase 1 (docs/ISLAND_PASS.md I1; OPEN-163 part):
     /// travel time in the job and bed picks (`systems/distance.rs`). `None`
     /// (not written into a save) with the key absent: the picks
@@ -1815,6 +1821,54 @@ pub struct CareCfg {
     pub cover_purse_days: i64,
     /// A cover is lawful enough to hire: lawfulness at or above this.
     pub cover_lawful: f32,
+}
+
+/// Pressure pass round 2, R6a `[trade_verbs]` (docs/PRESSURE_PASS.md §
+/// R6a, OPEN-217). Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TradeVerbsCfg {
+    /// The pimp's round: a pitch collected at within this many ticks is
+    /// visited after the pitches owed a take and the ones not yet seen.
+    pub pimp_revisit_ticks: u64,
+    /// ... and a pitch farther than this many tiles from him only when no
+    /// nearer one is due.
+    pub pimp_round_tiles: u32,
+    /// The pit: an off-screen visitor of a FightPit in the bet window with
+    /// `[leisure] gamble_rung_courage` stakes on tonight's bout (not a table
+    /// game), at most this many bettors a pit a night (the house's book).
+    pub pit_bettors_max: u32,
+    /// The madam books every Brothel visit served while she is on duty: her
+    /// night's bookings are told in one line at her shift's end, naming at
+    /// most this many of the house's workers.
+    pub madam_names: usize,
+    /// A booked client turns rough on this x (1 - lawfulness) (a hash of
+    /// the pair and the night): the worker hurt, the madam's grudge and the
+    /// house's door shut to him for `rough_ban_days`.
+    pub rough_p: f32,
+    pub rough_ban_days: u64,
+    /// The cab: an off-screen rider waits this many ticks for a driver's
+    /// body (a body waits `[legs] fare_wait_ticks`); the Garage's off-screen
+    /// cab past it.
+    pub stat_fare_wait_ticks: u64,
+    /// The Dollhouse's off-screen evening rate (visits per adult a day, as
+    /// the learned table's `p_venue`, which has no Dollhouse row).
+    pub dollhouse_p_venue: f32,
+}
+
+impl Default for TradeVerbsCfg {
+    fn default() -> Self {
+        TradeVerbsCfg {
+            pimp_revisit_ticks: 180,
+            pimp_round_tiles: 120,
+            pit_bettors_max: 12,
+            madam_names: 3,
+            rough_p: 0.03,
+            rough_ban_days: 14,
+            stat_fare_wait_ticks: 120,
+            dollhouse_p_venue: 0.002,
+        }
+    }
 }
 
 impl Default for CareCfg {

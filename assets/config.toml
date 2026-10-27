@@ -4871,6 +4871,24 @@ vendor_hunger = 0.6                # ... to those with hunger under this (the of
 scav_reach = 60                    # the scav's day: a scav gang's member walks this many tiles to a Market's bin (its
                                    # round, off hours) or to a fresh body to strip and rip ([chrome] loot_reach for others)
 
+# Pressure pass round 2, R6a (docs/PRESSURE_PASS.md § R6a; OPEN-217): the trades' verbs on a followed body. The cab's
+# ride goes to the Garage whose standing-by driver's body comes soonest within [legs] fare_wait_ticks (else the nearest
+# Garage's off-screen cab), and a driver on shift drives back to his Garage; the pimp's round; the pit's off-screen
+# bettors; the madam's bookings; the lonely reach the Dollhouse. Absent: as R1-R4 left them.
+[trade_verbs]
+pimp_revisit_ticks = 180           # the pimp's round: a pitch collected at within this is visited after the unseen ones
+                                   # (a take owed first among each), the nearest of them
+pimp_round_tiles = 120             # ... a pitch farther than this from him only when no nearer one is due
+pit_bettors_max = 12               # an off-screen pit visitor in the bet window with [leisure] gamble_rung_courage backs a
+                                   # fighter in tonight's bout (not a table game), at most this many bettors a pit a night
+madam_names = 3                    # the madam's night of bookings is one line at her shift's end naming this many workers
+rough_p = 0.03                     # a booked client turns rough on this x (1 - lawfulness): the worker hurt, an Assault,
+rough_ban_days = 14                # ... the madam throws him out and bars him from her house this many days
+stat_fare_wait_ticks = 120         # the cab: an off-screen rider waits this long for a driver's body (nobody sees his door;
+                                   # a body waits [legs] fare_wait_ticks); past it the Garage's off-screen cab
+dollhouse_p_venue = 0.002          # the Dollhouse's off-screen evening rate (visits per adult a day, as stat_table.toml's
+                                   # p_venue, which has no Dollhouse row: no off-screen visit ever; the Brothel's is 0.006)
+
 # The pressure pass phase 3 (docs/PRESSURE_PASS.md § Phase 3; OPEN-160, OPEN-162; systems/protection.rs and
 # leverage::protection_pass): protection bites. M16b leaned on one business per held district only on the gang's weekday
 # under Expand or Contest, and "held" was the turf's Homes, which landed at 20k from day 5 to 25 (20k seed 42 x 30: no

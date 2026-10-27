@@ -880,3 +880,68 @@ Dylan's call).
   `move_ticks_full` 2 (their city's far workers are near or married at 1); the laid-off loader probe makes the loader's
   the Yard's one open post. Shadow tool: the van's jump allowance reads the road column. No test. `SAVE_VERSION`
   unchanged (no saved state moved).
+
+### R6a, the trades' verbs I (`OPEN-217`; `[trade_verbs]`, `streetwork.rs`, `vice.rs`, `leisure.rs`, `service.rs`)
+
+Each trade's emptiness on a followed body had a cause; the fix is the cause's. 20k island seed 42 x 30 (`--scaled
+--ambient-flats 50`), main `9755275` (before) and this branch (after: the build before the last two pimp changes, the
+cab, pit, madam and Dollhouse code as merged), one run each. Shadow: 20k, days 14-17, cabbie x4, pimp, fighter x2,
+madam x2, joytoy x3, street_worker x2 and six customers (`--agent`).
+
+- **The cabbie.** A Garage keeps one driver a shift (`staff_per_floor` 2, `cab_shifts` alternating), and the
+  commute's roll took the Garage nearest the rider's Home: when its one driver was not standing by within the
+  rider's wait the off-screen cab took the fare and, past `rides_per_driver`, filled the Garage's day cap by the
+  morning rush, so its driver's body stood by all shift with nothing booked (a debug pass: 240 of ~700 bookings
+  with no driver on shift, most of the rest with the one driver an hour or more away; a followed D3 driver's
+  Garage shut by the cap at 09:00). And every rider came at a shift's start (the evening driver, 16-24, met no
+  rush), and after a drop-off the driver walked back (`cabbie_10678 d15`: 224 min for 227 tiles). Now
+  (`garage_for`): the ride goes to the free driver's body within the wait with the fewest fares this shift, then
+  the soonest, from any open Garage, the cap only the off-screen cab's; an off-screen rider waits
+  `stat_fare_wait_ticks` (120; nobody sees his door); a shift's last hour rides home on the commute's own rule
+  (`cab_roll_home`: `stat_cab`'s last hour, a body's GoTo home from the workplace once a day, the set
+  `exec_home_rolled` reused, an exec holding no Job); a driver on shift heading back to his Garage drives
+  (`cab_home`, the `fare_leg` timing). Rides a body drove 396 -> 817 (unmanned 3,637 -> 3,945), cab trips 3,949 ->
+  4,685, cab fares 33.7k -> 38.9k. **Deviation:** a driver late past his shift's start drives in from home too
+  (`cab_home` reads the GoTo, not where the cab is).
+- **The pimp.** He collected (V10's 100k "never" is gone at 20k), but his body went to the nearest pitch due every
+  hour, so one worker all night (12 collections from her in four nights, the cut after the first nothing, none from
+  the other worker of his district), and a sitting pimp who took a day job kept the post (a Statistical pimp is
+  credited present, so absence never dropped him; a Recycler Tech slept through every pitch night). Now the round
+  (`round_pitch`) takes a pitch within `pimp_round_tiles` first, then one not collected at within
+  `pimp_revisit_ticks`, one owed a take before one not, the nearest (`ViceState.pimp_visits`, pruned at midnight);
+  `name_pimps` names the jobless member living nearest the district's street pitches and replaces a sitting pimp
+  holding a Job or living `pimp_round_tiles` farther than him; an off-screen worker due at the hour's start is
+  met by the pimp's body that stood the hour at her pitch (the hour's `p_pitch` draw met nobody at the end of a
+  three-hour walk). Pimp collections 51 -> 32 (one district's pimp in the city; street pitches 3.8 -> 2.8 a day).
+- **The fighter.** Bouts were already nightly (513 in 30 days), every one "bets paid 0": the bettors were the
+  Full tier's, who plan a pit before the window opens (the step was gated on the window at the plan), and the
+  off-screen pit visitor played a table game. Now an off-screen visitor of a pit in the bet window with
+  `gamble_rung_courage` stakes on tonight's bout (`bout_bet`, `pit_bettors_max` a pit; both the learned and the
+  choice paths), and a body's bet step reads the window at its arrival (`bet_window_at`). Bouts with bets 0 of 513 ->
+  239 of 509; the bettors are the Fighter's Attendees ("fought before X (a bettor)").
+- **The madam.** She had her workers and her cut, but no client in her diary. Now every Brothel visit served while
+  she is on duty is her booking (`vice::booked` from `service::serve`), told in one line at her shift's end
+  (`bookings_told`: the clients, the coins through the house, her busiest `madam_names` workers); on `rough_p` x
+  (1 - lawfulness) a booked client roughs the worker up (an Assault, her `Lost`, the madam's grudge) and is thrown
+  out and barred from the house for `rough_ban_days` (`ViceState.barred`, `leisure::door_ok`). Booking lines 0 -> 249,
+  rough clients 35 in 30 days.
+- **The joytoy.** `stat_table.toml`'s `p_venue` has no Dollhouse row (learned before the chip had clients), so the
+  off-screen evening never visited one, and the high rung was the execs' and the top tenth's alone. Now the
+  Dollhouse's off-screen rate is `dollhouse_p_venue` (0.002) where the table has none, at most a visit a night an
+  eligible adult, and the lonely with `[customers] client_coins` reach it below the high rung (`lonely_client`).
+  Dollhouse visits 25 -> 507. **Not done:** the stat table is not re-learned (Dylan's call).
+- **Reads wrong / open** (the next pass's input): a body driver drives about one fare a shift (rides are ~140 a
+  day for 35 Garages' 70 drivers) and is paid 2c of 6 (`[customers] cab_fares_full` 3); an off-screen pickup can
+  sit 270 tiles off (`cabbie_10678 d14`: 79 + 95 min of legs for one fare). The pimp's district pitches lie up to
+  340 tiles apart (`pimp_18110 d17` walked six hours to the far one when no near one was due); one collection in
+  his four nights. A fighter's bout is an event while his body does ClerkWork (no fight action). A followed joytoy
+  is hired 741 tiles from her Dollhouse (`joytoy_12426`: 330-min commute, in at 23:36); another pick is a corp exec
+  holding a Contract Host post outside any chip contract (`joytoy_9225` works the Hq's office hours): the exec
+  pick and the post, upstream. A Full lonely client's ladder never picks the Dollhouse (only the off-screen
+  evening visits it). Pit#5578's bouts drew no bettor in four nights.
+- No test (doctrine 2). `SAVE_VERSION` 75 (`ViceState.{pimp_visits, bookings, barred}`). Premises the moved city
+  broke, re-pinned with `trade_verbs = None` and the reason in place: `captives::test_weak_gang_under_retaliate_takes_a_hostage`,
+  `captives::test_corp_refused_twice_takes_a_hostage_for_the_sale`, `leaders::test_staff_on_shift_pay_the_week_when_the_owner_is_away`,
+  `arms::test_seized_crate_lands_in_the_precinct`, `arms::test_landed_crate_fills_the_armoury_and_the_muster_draws_it`
+  (the bettors' stakes moved the gangs' purses), and `tower::test_off_city_writes_nothing_in_three_days` (the pit's
+  bettors are the Fighter's Attendees, not the tower's).

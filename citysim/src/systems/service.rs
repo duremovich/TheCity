@@ -613,6 +613,10 @@ pub fn serve(world: &mut World, server: EntityId, served: EntityId, place: Entit
     }
     let d = world.district_of_building(place);
     encounter(world, server, served, Some(place), d, kind, coins);
+    // The pressure pass R6a (OPEN-217): a Brothel visit is the madam's booking.
+    if kind == ServeKind::Visit {
+        crate::systems::vice::booked(world, server, served, place, coins);
+    }
 }
 
 /// Lives at work phase 4 (§ 2.3): the encounter, at a place or (a street
@@ -892,6 +896,8 @@ pub fn shift_end(world: &mut World, id: EntityId) {
     if j.shift_tips > 0 {
         madam_settles(world, id, &j);
     }
+    // R6a: the madam's night of bookings, one line.
+    crate::systems::vice::bookings_told(world, id);
     // Lives at work phase 4 (§ 2.3): the courier's undelivered parcels back
     // to the Yard (the loader's lifts are `lift_hour`'s).
     if street_on(world) {

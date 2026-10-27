@@ -54,6 +54,8 @@ const PURPOSE_ASSAULT: u64 = 0x5649_0003;
 const PURPOSE_SWEEP: u64 = 0x5649_0004;
 /// Lives at work phase 4 (§ 2.3): the client among the bodies near a pitch.
 const PURPOSE_CLIENT: u64 = 0x5649_0005;
+/// R6a: a booked client turning rough.
+const PURPOSE_ROUGH: u64 = 0x5649_0006;
 
 /// Phase 4's vice is live: `[jobs2] enabled` and `[vice] enabled`.
 pub fn on(world: &World) -> bool {
@@ -84,6 +86,37 @@ pub struct ViceState {
     /// on. Written only with `[service] street` on.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub pimp_seen: BTreeMap<u16, u64>,
+    /// The pressure pass R6a (OPEN-217): a street worker (`key`) -> the tick
+    /// her pimp's body last collected at her pitch (`round_pitch` walks to
+    /// the pitch owed, then the one longest unvisited). Pruned at midnight.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub pimp_visits: BTreeMap<u64, u64>,
+    /// R6a: a madam (`key`) -> her night's bookings, told at her shift's end.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub bookings: BTreeMap<u64, Bookings>,
+    /// R6a: a client (`key`) barred from a house after a rough booking ->
+    /// (the house, the day the bar lifts).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub barred: BTreeMap<u64, (EntityId, u64)>,
+}
+
+/// R6a (OPEN-217): a madam's night of bookings at her house.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Bookings {
+    pub house: EntityId,
+    /// Clients booked and the coins their visits paid.
+    pub clients: u32,
+    pub coins: i64,
+    /// The workers booked, with their count tonight.
+    pub workers: Vec<(EntityId, u32)>,
+    /// Rough clients thrown out tonight.
+    pub rough: u32,
+}
+
+impl Default for Bookings {
+    fn default() -> Self {
+        Bookings { house: EntityId::NONE, clients: 0, coins: 0, workers: Vec::new(), rough: 0 }
+    }
 }
 
 fn is_zero_u32(v: &u32) -> bool {
@@ -210,6 +243,114 @@ pub fn on_visit(world: &mut World, visitor: EntityId, b: EntityId, price: i64) {
 }
 
 // ---------------------------------------------------------------------------
+// The madam's bookings (the pressure pass R6a, OPEN-217)
+// ---------------------------------------------------------------------------
+
+/// `service::serve`: a Brothel visit served by `worker` while a madam is on
+/// duty at the house is her booking: tallied for her shift's line
+/// (`bookings_told`), and on `[trade_verbs] rough_p x (1 - lawfulness)` (a
+/// hash of the pair and the night) the client turns rough: the worker hurt
+/// (safety, a `Lost` memory, an Assault raised on him), the madam throws
+/// him out and bars him from the house for `rough_ban_days` (`barred`),
+/// her grudge on him, the event. The madam had no client in her diary (V10:
+/// "a madam who manages nobody"); her cut of the tips was the only trace.
+/// Both tiers (the serve is world-side). Nothing with `[trade_verbs]` absent.
+pub fn booked(world: &mut World, worker: EntityId, client: EntityId, house: EntityId, coins: i64) {
+    let Some(c) = world.config.trade_verbs.clone() else { return };
+    if !on(world) || world.comp::<Building>(house).is_none_or(|b| b.kind != BuildingKind::Brothel) {
+        return;
+    }
+    let Some(madam) = crate::systems::service::servers_on_duty(world, house, crate::components::ServeKind::Staff)
+        .into_iter()
+        .find(|&m| m != worker && m != client)
+    else {
+        return;
+    };
+    let night = world.day();
+    let lawful = world.comp::<crate::components::Personality>(client).map_or(0.5, |p| p.lawfulness);
+    let rough = hash(world, PURPOSE_ROUGH, key(client) ^ key(worker), night) < c.rough_p * (1.0 - lawful).max(0.0);
+    {
+        let b = world.jobs2.vice.bookings.entry(key(madam)).or_default();
+        if b.house != house {
+            *b = Bookings { house, ..Bookings::default() };
+        }
+        b.clients += 1;
+        b.coins += coins.max(0);
+        match b.workers.iter_mut().find(|(w, _)| *w == worker) {
+            Some((_, n)) => *n += 1,
+            None => b.workers.push((worker, 1)),
+        }
+        b.rough += u32::from(rough);
+    }
+    if !rough {
+        return;
+    }
+    if let Some(n) = world.comp_mut::<Needs>(worker) {
+        n.safety = (n.safety - 0.3).max(0.0);
+    }
+    world.remember(worker, MemoryKind::Lost, Some(client), 0.6, -0.5, false);
+    crate::systems::grudges::add(world, madam, client, crate::word::GrudgeCause::Assaulted, 0.3, 0);
+    let tile = world.comp::<Building>(house).map(|b| b.door).unwrap_or_default();
+    crate::systems::law::raise_crime_on(
+        world,
+        client,
+        Some(worker),
+        Some(madam),
+        crate::components::Crime::Assault,
+        tile,
+    );
+    let until = night + c.rough_ban_days;
+    world.jobs2.vice.barred.insert(key(client), (house, until));
+    if world.comp::<Position>(client).is_some_and(|p| p.building == Some(house)) {
+        world.abort_plan(client);
+        world.leave_building(client);
+    }
+    let text = format!(
+        "{} roughed up {} at {}; {} threw him out and barred him from the house",
+        world.name_of(client),
+        world.name_of(worker),
+        world.name_of(house),
+        world.name_of(madam)
+    );
+    world.push_event(EventKind::Served, &[madam, client, worker, house], text);
+}
+
+/// R6a: is `id` barred from the house `b` today (a rough booking's)?
+pub fn barred(world: &World, id: EntityId, b: EntityId) -> bool {
+    world.jobs2.vice.barred.get(&key(id)).is_some_and(|&(h, until)| h == b && world.day() < until)
+}
+
+/// R6a: the madam's shift ends (`service::shift_end`): her night's bookings
+/// told in one line (the clients, the house's take, her busiest workers by
+/// name, the rough ones thrown out), the tally cleared; the lifted bars dropped.
+pub fn bookings_told(world: &mut World, madam: EntityId) {
+    let Some(names) = world.config.trade_verbs.as_ref().map(|c| c.madam_names) else { return };
+    let today = world.day();
+    world.jobs2.vice.barred.retain(|_, &mut (_, until)| today < until);
+    let Some(mut b) = world.jobs2.vice.bookings.remove(&key(madam)) else { return };
+    if b.clients == 0 {
+        return;
+    }
+    b.workers.sort_by(|x, y| y.1.cmp(&x.1).then(x.0.cmp(&y.0)));
+    let named: Vec<String> = b.workers.iter().take(names).map(|&(w, n)| format!("{} {n}", world.name_of(w))).collect();
+    let more = b.workers.len().saturating_sub(names);
+    let rough = if b.rough > 0 { format!("; {} rough, thrown out", b.rough) } else { String::new() };
+    let text = format!(
+        "{} booked {} client{} at {} tonight ({}{}), {}c through the house{rough}",
+        world.name_of(madam),
+        b.clients,
+        if b.clients == 1 { "" } else { "s" },
+        world.name_of(b.house),
+        named.join(", "),
+        if more > 0 { format!(" and {more} more") } else { String::new() },
+        b.coins
+    );
+    let mut subjects = vec![madam, b.house];
+    subjects.extend(b.workers.iter().take(names).map(|&(w, _)| w));
+    world.push_event(EventKind::Served, &subjects, text);
+}
+
+// ---------------------------------------------------------------------------
 // The street (on the phase-2 Pitch)
 // ---------------------------------------------------------------------------
 
@@ -308,12 +449,30 @@ pub fn round_pitch(world: &World, id: EntityId) -> Option<EntityId> {
     // The pressure pass phase 2 (OPEN-120): a pimp's body walks to the
     // nearest pitch due, not the
     // hour's turn across the district (V9: 334-360 min legs, no collection).
+    // R6a (OPEN-217): within `[trade_verbs] pimp_round_tiles` first (a
+    // far pitch of a wide district was a six-hour walk), then a pitch not
+    // collected at within `pimp_revisit_ticks`, one with a take owed before
+    // one without, the nearest of those (the nearest alone kept him on one pitch all night: 12
+    // collections from one worker in four nights, none from the other
+    // worker of his district; the cut after the first was nothing).
     if crate::systems::customers::cfg(world).is_some()
         && world.comp::<Brain>(id).is_some_and(|b| b.lod != Lod::Statistical)
     {
         if let Some(from) = world.comp::<Position>(id).map(|p| p.tile) {
-            let near = |o: &EntityId| world.jobs2.pitches.get(o).map_or(u32::MAX, |p| p.spot.manhattan(from));
-            return due.iter().copied().min_by_key(|o| (near(o), *o));
+            let now = world.tick;
+            let tv = world.config.trade_verbs.as_ref().map(|c| (c.pimp_revisit_ticks, c.pimp_round_tiles));
+            let rank = |o: &EntityId| {
+                let Some(p) = world.jobs2.pitches.get(o) else { return (true, 3u8, u32::MAX) };
+                let dist = p.spot.manhattan(from);
+                match tv {
+                    None => (false, 0, dist),
+                    Some((r, reach)) => {
+                        let seen = world.jobs2.vice.pimp_visits.get(&key(*o)).is_some_and(|&t| now < t + r);
+                        (dist > reach, 2 * u8::from(seen) + u8::from(p.take_today <= p.cut_paid), dist)
+                    }
+                }
+            };
+            return due.iter().copied().min_by_key(|o| (rank(o), *o));
         }
     }
     Some(due[hour % due.len()])
@@ -382,11 +541,28 @@ pub fn pimp_collect(world: &mut World, id: EntityId, target: Option<EntityId>) -
     if !is_street_pitch(world, &p) || pimp_district(world, id) != Some(p.district) {
         return false;
     }
+    // R6a: the visit marks the pitch for the round, met or missed.
+    if world.config.trade_verbs.is_some() {
+        let now = world.tick;
+        world.jobs2.vice.pimp_visits.insert(key(worker), now);
+    }
     // The pre-view pass phase 4 (P3, OPEN-120): the collection needs both
     // bodies: the worker at his pitch (`streetwork::working`: a body within
     // `pitch_reach` of the spot, a Statistical one on the hour's draw), else
     // no "collected" line in either diary (the next hour's pitch is tried).
-    if crate::systems::presence::on(world) && !crate::systems::streetwork::working(world, &p) {
+    // R6a (OPEN-217): an off-screen worker in her pitch hours (now or at the
+    // hour's start) is met by the pimp's body that stood the hour at her
+    // pitch (the hour's draw stands in for the passers-by; on it, a round of
+    // three hours' walk met nobody).
+    let met = if world.config.trade_verbs.is_some()
+        && world.comp::<Brain>(worker).is_some_and(|b| b.lod == Lod::Statistical)
+    {
+        let start = (u64::from(world.tick_of_day()) + TICKS_PER_DAY - TICKS_PER_HOUR) % TICKS_PER_DAY;
+        crate::systems::streetwork::due(world, &p) || crate::systems::streetwork::due_at(world, &p, start as u16)
+    } else {
+        crate::systems::streetwork::working(world, &p)
+    };
+    if crate::systems::presence::on(world) && !met {
         crate::systems::presence::missed(world);
         return true;
     }
@@ -678,6 +854,9 @@ pub fn daily(world: &mut World) {
     }
     let _t = crate::prof::scope!("vice::daily");
     world.jobs2.vice.solicit_today = 0;
+    // R6a: the round's marks last a night.
+    let since = world.tick.saturating_sub(TICKS_PER_DAY);
+    world.jobs2.vice.pimp_visits.retain(|_, t| *t >= since);
     name_pimps(world);
     close_brothels(world);
 }
@@ -730,12 +909,49 @@ fn name_pimps(world: &mut World) {
                 && !crate::systems::stims::is_dealer(world, m)
                 && !(absent && sitting_any == Some(m))
         };
-        let pick = sitting.or_else(|| {
+        // Lives at work phase 4b (§ 2.3): the round is a night's work, so
+        // a member with no Job first (a day job's sleeper is no pimp).
+        // R6a (OPEN-217): the jobless member living nearest the district's
+        // street pitches (the lowest id walked 453 tiles, six hours, to his
+        // pitch and came after its hours); the lowest id without `[trade_verbs]`.
+        let spots: Vec<TilePos> = world
+            .jobs2
+            .pitches
+            .values()
+            .filter(|p| p.district == d && is_street_pitch(world, p))
+            .map(|p| p.spot)
+            .collect();
+        let near = |m: EntityId| {
+            crate::systems::contracts::home_door(world, m)
+                .map_or(u32::MAX, |h| spots.iter().map(|s| s.manhattan(h)).min().unwrap_or(u32::MAX))
+        };
+        let free = if street {
+            world.comp::<Gang>(g).and_then(|x| {
+                let jobless = x.members.iter().copied().filter(|&m| fit(m) && !world.has::<Job>(m));
+                if world.config.trade_verbs.is_some() {
+                    jobless.min_by_key(|&m| (near(m), m))
+                } else {
+                    jobless.into_iter().next()
+                }
+            })
+        } else {
+            None
+        };
+        // R6a (OPEN-217): a sitting pimp who has taken a Job gives the post to
+        // a jobless member (a Recycler Tech pimp slept through every pitch
+        // night; a Statistical pimp is credited present, so absence never
+        // dropped him).
+        // Likewise one living past `pimp_round_tiles` farther from the
+        // pitches than the nearest jobless member (`pimp_18110` walked 3 h
+        // 20 min to his one pitch and met nobody).
+        let reach = world.config.trade_verbs.as_ref().map(|c| c.pimp_round_tiles);
+        let sitting = sitting.filter(|&p| match (reach, free) {
+            (None, _) | (_, None) => true,
+            (Some(r), Some(f)) => !world.has::<Job>(p) && near(p) <= near(f).saturating_add(r),
+        });
+        let pick = sitting.or(free).or_else(|| {
             let members = &world.comp::<Gang>(g)?.members;
-            // Lives at work phase 4b (§ 2.3): the round is a night's work, so
-            // a member with no Job first (a day job's sleeper is no pimp).
-            let free = if street { members.iter().copied().find(|&m| fit(m) && !world.has::<Job>(m)) } else { None };
-            free.or_else(|| members.iter().copied().find(|&m| fit(m)))
+            members.iter().copied().find(|&m| fit(m))
         });
         if let Some(p) = pick {
             want.insert(k, p);
