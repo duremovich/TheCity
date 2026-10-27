@@ -471,7 +471,12 @@ mood_w_need = 0.7
 mood_w_memory = 0.3
 
 [exec]
-move_ticks_full = 2
+# The walking pace: ticks (minutes) a tile on foot, the one pace every walk, commute estimate and vehicle mult reads
+# (a vehicle's [vehicles] mult and timed_mult are shares of it). The pressure pass R2 (OPEN-215): 2 -> 1. The v1 pace
+# (2 a tile, a toy map's) made the island's 4 m tiles a 2 m-a-minute crawl: 20k seed 42 x 30 walked at 2.06 min a
+# Manhattan tile (Full 2.24: the road's detour; no stall, no re-plan), a 158-tile same-district commute 383 min. A
+# Full walker steps at most once a tick, so 1 is the fastest the executor walks without sub-tick steps.
+move_ticks_full = 1
 interrupt_check_ticks = 30
 door_capacity_per_tick = 2
 door_queue_max_ticks = 30
@@ -4296,7 +4301,7 @@ station_block_max = 90             # per shift); a trade row's station_block_min
 station_spots_max = 4              # P2: the spots a shift works, 2 to this (at most the workplace's interior tiles),
                                    # drawn per body per shift from the footprint; under 2 interior tiles: one block
 station_move_max = 3               # P2: the walk across the room between spots, at most this many minutes (the tiles
-                                   # at [exec] move_ticks_full otherwise; a Market's far wall was 16 min at 2 a tile)
+                                   # at [exec] move_ticks_full otherwise; a Market's far wall was 16 min at the v1 pace of 2 a tile)
 break_min = 30                     # P7: the mid-shift break: hungry (under the planner's HUNGER_SATISFIED 0.6) a meal
                                    # bought and eaten at the nearest open Market (a packed meal eaten outside the
                                    # door); fed, this long outside the door
@@ -4330,8 +4335,9 @@ haul_cutoff_min = 60               # no trip starts that would end within this m
                                    # rest is worked at the post, where the shift closes and is paid (the round's
                                    # ROUND_CUTOFF was two hours for a whole round; a trip is one leg out and back)
 haul_handle_min = 15               # the load at the stock tile and the unload at the destination, minutes each
-haul_reach = 30                    # a destination's door at most this many tiles from the post's door (an hour's walk
-                                   # each way at [exec] move_ticks_full 2); none in reach: the trips run inside the post
+haul_reach = 30                    # a destination's door at most this many tiles from the post's door (half an hour's
+                                   # walk each way at [exec] move_ticks_full 1; an hour before R2); none in reach: the
+                                   # trips run inside the post
 haul_dests_max = 4                 # the most destinations one shift's trips turn through (nearest first)
 drive = ["driver"]                 # these trades take the post's fleet truck when one is parked there
 
@@ -4347,8 +4353,8 @@ roles = ["Cook", "Bartender"]      # the built-in roles that stand the counter (
 # OPEN-154): an encounter posts when, and only when, both bodies are present, else it waits or is narrated off
 # screen. Without it encounters settle by link. Placeholders.
 [presence]
-round_reach_tiles = 20             # OPEN-154: a round's stops at most this many tiles from the post's door (40 min at
-                                   # [exec] move_ticks_full 2; super 596's near-home stops spanned 64 tiles, 514 of 540 min
+round_reach_tiles = 20             # OPEN-154: a round's stops at most this many tiles from the post's door (20 min at
+                                   # [exec] move_ticks_full 1, 40 before R2; super 596's near-home stops spanned 64 tiles, 514 of 540 min
                                    # walked)
 stat_home_p = 0.5                  # an off-screen counterpart at home (off shift, not the night 00-06) is met at this
                                    # rate (purpose-keyed draw)
@@ -4366,8 +4372,8 @@ arms_wait_hours = 24               # an off-screen buyer's arms sale waits this 
 # remainder, OPEN-156): the long legs at 20k. Without it a map's `L+` lines are dropped too.
 # Placeholders.
 [legs]
-leg_replan_tiles = 40              # a Full or Coarse walking GoTo past this (Manhattan tiles, 80 min at [exec]
-                                   # move_ticks_full 2) walks in segments of this length; each end re-plans the rest
+leg_replan_tiles = 40              # a Full or Coarse walking GoTo past this (Manhattan tiles, 40 min at [exec]
+                                   # move_ticks_full 1) walks in segments of this length; each end re-plans the rest
                                    # (the cab, the El, the next segment): the body is seen en route, never frozen at
                                    # its door for the whole leg (V6 corp 1: a CEO still 724 min at home)
 segment_snap = 6                   # a Coarse segment's end snaps to a walkable Road tile within this radius (none: one leg);
@@ -4478,6 +4484,9 @@ stakeout_ticks = 180               # a Hunt's or a hit Contract's first leg: the
                                    # 174-250 min cut by Sleep every evening, the hunt never reached)
 beat_ticks = 90                    # a sweeper's beat: the district's centroid from the post's door; past it, the
                                    # nearest district with a slot left, else the post's own district
+patrol_ticks = 60                  # R2 (OPEN-215): a guard's patrol loop: its Market within this of the guard (none: the
+                                   # district's Homes nearest him), its Bar and the Hall within this of the Market (20k
+                                   # seed 42: the Bar nearest a Mid-Levels Market stood 117 tiles off, every loop 2 h legs)
 
 # The island pass phase 3a (docs/ISLAND_PASS.md I6; OPEN-163; systems/company.rs): seeded company housing. At world
 # build, after the staffing and the housing pre-roll, each workplace of these kinds whose far posts outnumber

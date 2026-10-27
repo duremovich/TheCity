@@ -104,7 +104,11 @@ fn test_no_teacher_no_taught_day_and_a_taught_day_counts() {
     // Lives at work phase 6: pinned to `[careers]` off (on the careers
     // city's moved day 2 the staged child is not taught at the hour; the
     // cause was not chased, the subject is the teacher's day, not the ages).
-    let mut w = common::world_with(|c| c.strip_careers());
+    // The pressure pass R2: and the v1 pace (`common::v1_pace`).
+    let mut w = common::world_with(|c| {
+        c.strip_careers();
+        common::v1_pace(c);
+    });
     w.run_ticks(DAY2_ONE);
     let (_, child, _, school) = schoolchild(&mut w);
     let (teacher, _) = worker(&w, "teacher");
@@ -300,7 +304,9 @@ fn test_super_stop_serves_notice_and_takes_the_door_rent() {
 /// encounter with the jailer on duty.
 #[test]
 fn test_jailer_meal_is_an_inmate_encounter() {
-    let mut w = city();
+    // The pressure pass R2: the v1 pace (`common::v1_pace`).
+    let mut w = common::world_with(common::v1_pace);
+    w.run_ticks(DAY2_ONE);
     // Jailers are posted one per `held_per_jailer` held, so day 2 has none: one is hired by hand.
     let jail = w.building_of_kind(BuildingKind::Jail).expect("the Jail");
     let role = w.config.trade_role("jailer").expect("the jailer trade");

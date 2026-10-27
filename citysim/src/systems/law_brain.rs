@@ -514,11 +514,18 @@ pub fn allocate(world: &mut World) {
     let weights = alloc_weights(world);
     let patrol = patrol_guards(world);
     let w: Vec<f32> = weights.iter().map(|(x, _)| *x).collect();
-    let counts = crate::util::largest_remainder(patrol.len() as u32, &w);
+    let mut counts = crate::util::largest_remainder(patrol.len() as u32, &w);
     let mut beats = BTreeMap::new();
     // Lives at work phase 7 (§ 5.2): a Station's guards to its districts first.
     if let Some(deal) = crate::systems::stations::deal_beats(world, &patrol, &counts) {
+        // The pressure pass R2: the deal keeps a far district's slots
+        // empty and doubles up near home, so a district counts the beats
+        // dealt to it.
+        counts.iter_mut().for_each(|c| *c = 0);
         for (g, i) in deal {
+            if let Some(c) = counts.get_mut(i) {
+                *c += 1;
+            }
             beats.insert(g, DistrictId(i as u8));
         }
     } else {

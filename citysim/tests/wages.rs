@@ -1192,6 +1192,9 @@ fn test_rehire_bonus_picks_the_laid_off_worker_over_a_nearer_stranger() {
         let mut w = round_city(|c| {
             c.economy2.rehire_bonus = bonus;
             c.economy2.skill_w = 0.0;
+            // The pressure pass R2: the v1 pace (2 ticks a tile) the
+            // ranking's tiles were written for.
+            c.exec.move_ticks_full = 2;
         });
         let farm = w.buildings_by_kind().get(&BuildingKind::Farm).and_then(|v| v.first().copied()).expect("a Farm");
         let door = w.comp::<Building>(farm).map(|b| b.door).expect("door");
@@ -1243,7 +1246,11 @@ fn test_rehire_bonus_picks_the_laid_off_worker_over_a_nearer_stranger() {
 /// farther off is hired over the nearest applicant.
 #[test]
 fn test_hiring_key_weighs_the_roles_skill() {
-    let mut w = round_city(|c| c.economy2.skill_w = 0.5);
+    // The pressure pass R2: the v1 pace (2 ticks a tile): "worth 50 tiles".
+    let mut w = round_city(|c| {
+        c.economy2.skill_w = 0.5;
+        c.exec.move_ticks_full = 2;
+    });
     let farm = w.buildings_by_kind().get(&BuildingKind::Farm).and_then(|v| v.first().copied()).expect("a Farm");
     let door = w.comp::<Building>(farm).map(|b| b.door).expect("door");
     for a in jobless(&w) {

@@ -158,6 +158,22 @@ pub fn timed_mult_of(world: &World, kind: AssetKind) -> f32 {
     c.road_share * c.mult_of(kind, 0) + (1.0 - c.road_share) * c.mult_of(kind, 1)
 }
 
+/// The pressure pass R2 (`OPEN-215`): a drive of `road` tiles measured
+/// along the road (`motion::road_len`) at a Full Car's road pace: [`step_q`]'s
+/// quarters a Road tile (`[vehicles] mult` road column), at most `[vehicles]
+/// max_steps_per_tick` tiles a tick, at least 1 tick: the escort's van and
+/// the transfer van. [`car_ticks`]' Coarse blend (`road_share`) prices a
+/// Manhattan line's off-road share, which a road-measured way has not: the
+/// island's escorts drove ~2x their road time (`guard_26314`, 935 min).
+pub fn road_ticks(world: &World, road: u32) -> crate::time::Tick {
+    let c = &world.config.vehicles;
+    let road = crate::time::Tick::from(road);
+    let q = ((4 * world.config.exec.move_ticks_full) as f32 * c.mult_of(AssetKind::Car, 0)).round().max(1.0)
+        as crate::time::Tick;
+    let per_tick = crate::time::Tick::from(c.max_steps_per_tick.max(1));
+    (road * q).div_ceil(4).max(road.div_ceil(per_tick)).max(1)
+}
+
 /// A drive of `tiles` (Manhattan) at the Car's timed speed: the escort's
 /// van (P12) and the transfer van (the island pass phase 7), at least 1.
 pub fn car_ticks(world: &World, tiles: u32) -> crate::time::Tick {

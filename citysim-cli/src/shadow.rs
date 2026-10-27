@@ -2492,7 +2492,10 @@ fn pass_vehicle(world: &World, id: EntityId) -> Option<f32> {
     if !(van(id) || fare || aboard || cuffed) {
         return None;
     }
-    let m = citysim::systems::vehicles::timed_mult_of(world, citysim::components::AssetKind::Car);
+    // The pressure pass R2: the vans drive the road at its own speed
+    // (`vehicles::road_ticks`), faster than the cab's Coarse blend.
+    let car = citysim::components::AssetKind::Car;
+    let m = citysim::systems::vehicles::timed_mult_of(world, car).min(world.config.vehicles.mult_of(car, 0));
     Some(1.0 / (world.config.exec.move_ticks_full.max(1) as f32 * m).max(0.01))
 }
 

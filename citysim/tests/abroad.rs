@@ -353,7 +353,10 @@ fn test_a_won_convoy_is_no_state_sanction() {
 /// abroad still opens the succession.
 #[test]
 fn test_a_death_abroad_is_quiet_but_opens_the_succession() {
-    let mut w = common::world_at(4 * TICKS_PER_DAY + 30);
+    // The pressure pass R2: the v1 pace (`common::v1_pace`; the leader
+    // stayed home in the halved walk's butterfly).
+    let mut w = common::world_with(common::v1_pace);
+    w.run_ticks(4 * TICKS_PER_DAY + 30);
     w.config.outside.abroad.death_p = 1.0;
     let on = account(&w, "Arasaka Global");
     let g = w.gangs().into_iter().max_by_key(|&g| gang::fit_headcount(&w, g)).expect("a gang");

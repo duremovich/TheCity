@@ -688,3 +688,51 @@ Each trade gets a body that walks to it, through the machinery it already had. N
   Unwind and 9c on a Capsule Hotel night and is on 0c at the rehouse day. A probe whose purse premise a butterfly
   breaks (as its Shop cooldown already guards); left for the fix round.
 - No test (doctrine 2). `SAVE_VERSION` 71.
+
+### R2, walking pace (`OPEN-215`; `[exec] move_ticks_full`, `stations::deal_beats`, `law::district_route`, `vehicles::road_ticks`)
+
+**Diagnosis: the pace, not the path or the executor.** 20k island seed 42 x 30 (`run --scaled --ambient-flats 50 --legs
+--legs-min 30`): walk legs ran at 2.06 min a Manhattan tile (Full 2.24, Coarse 1.99), i.e. `[exec] move_ticks_full` 2 (v1's toy-map pace) plus a
+road detour of ~10 % for a Full walker; no stalls, no re-plans booked as walking (a third of the long legs end
+`aborted`: interrupts, not waits). On the island's 4 m tiles (`isle_m_k2`, `s = 2 m x k`) that is 2 m a minute. The
+fix: `move_ticks_full` 2 -> 1, the fastest the executor walks without sub-tick steps (a Full walker steps at most once
+a tick). Every tick-denominated cap (`[distance]`, `[distance.reach]`, `[commute_pressure]`) keeps its time and now
+admits twice the tiles; the tile-denominated reaches (`haul_reach`, `round_reach_tiles`, `leg_replan_tiles`) keep their
+tiles and halve in time (their comments say so); the vehicles' `mult` scales with the pace, the El's absolute
+`ride_ticks_per_tile` does not (the El is 4x the walk, was 8x: fewer rides). Deviation: the El was not rescaled, and
+the walk is still ~20x slower than a person on 4 m tiles (faster needs sub-tick steps and an El and vehicle rescale:
+Dylan's call).
+- **The escort** (`guard_26314`'s 935 min): the van is one timed vehicle leg, timed over the road's length at the
+  Car's Coarse blend (`road_share` 0.7: 30 % off-road at walking speed), which a road-measured way does not have.
+  `vehicles::road_ticks` times the escort van and the 04:00 transfer at the road column. Deviation: not split into
+  legs. A segment shows no new diary line (a segmented GoTo is one ACTION line) and the van would re-spawn per
+  segment; the long escorts are Station cells full (`stations_full` 612 of 2,626 escort legs at 20k) sending the guard
+  to the Precinct across the island: capacity, the next pass's. The van drives at a Full Car's road pace (`step_q`'s
+  quarters, at most `max_steps_per_tick` tiles a tick: the shadow's and the stations tests' no-jump bound).
+- **Guard beats near home** (F1's leftover): `deal_beats` deals both rounds by the guard's Home (a district's
+  nearness: its nearest Market door, else Home door, else centroid), pairs nearest first, the rest only within
+  `[distance] job_cap_ticks` walked of the Home; a guard left over takes his nearest district (a far district's slots
+  stay empty; `law_brain::allocate` counts the beats dealt). `district_route`: a district whose Markets all lie past
+  the cap walks its Homes nearest the guard (the Spire's one Market drew Mid-Levels guards 340-550 tiles); new
+  `[distance.reach] patrol_ticks` (60) caps the loop: the Market within it of the guard, the Bar and the Hall within it
+  of the Market, the Homes within it of the anchor (the Bar nearest a Mid-Levels Market stood 117 tiles off).
+- **F3's "took a post nearer home"** is not a bug: it fires (20k scaled: 244 -> 200 switches in 30 days). A temporary
+  probe of `commute::nearer_job` over 30 days (an unscaled 20k run): 5,079 in-cap candidates rejected for the margin (commutes of 81-120 against
+  posts 86-120 away), 517 the own employer, 13 blocked; every far loader, builder, driver and courier search found
+  0-1 open posts of its role within `job_cap_ticks` of home (the switch is same-role only). The 100k loader's 997-min
+  commute is that: no loader post within reach of his Home. Execs (no `Job`; their Hq) build pressure and drop out of
+  the seek: correct. Next pass: a far commuter takes any post he qualifies for (`OPEN-215`).
+- **Numbers**, 20k seed 42 x 30 (`--scaled --ambient-flats 50`), one run each, before -> after: min a tile walked
+  2.06 -> 1.06 (Full 2.24 -> 1.16, Coarse 1.99 -> 1.02); walk legs of 120 min+ 22,968 -> 20,817 (of 103,983 -> 127,469
+  walk legs of 30 min+: fewer ride the El), of 240 min+ 7,529 -> 5,454; Full walk legs of 120 min+ 8,072 -> 4,893; El
+  legs of 120 min+ 27,844 -> 15,821; escort legs of 120 min+ 1,670 -> 193 (mean 189 -> 72 min); Patrol legs of 120 min+
+  (all modes) 12,183 -> 5,609. Printed: employed d30 11,971 -> 11,591; jailed d30 218 -> 450; arrests 2,243 -> 2,712;
+  starvation 0 -> 0; cab fares 20,544 -> 32,591 (`fares_el_missed`: the El shortens fewer commutes against the halved
+  walk, so more take the cab); Full El rides 25,264 -> 13,129; Home moves 2,199 -> 2,169. The long walks left are
+  placement (Sleep/Home 4,137, Work 1,924: far Homes and posts), JoinGang's Hideout walks (1,850, R5's) and Patrol
+  (3,329).
+- Re-pinned (the pace moved their premise; reasons in place): `person::el_commuter` sets `[jobs2] p_cab` 0 (the pick
+  rolled a cab before the El was asked); the far-Farmer, trade, Home-growth and married-pick probes pin
+  `move_ticks_full` 2 (their city's far workers are near or married at 1); the laid-off loader probe makes the loader's
+  the Yard's one open post. Shadow tool: the van's jump allowance reads the road column. No test. `SAVE_VERSION`
+  unchanged (no saved state moved).

@@ -114,7 +114,11 @@ fn test_profession_survives_a_layoff_and_ranks_the_rehire() {
     // phase 1's `[distance]` (its cap ranks a within-cap candidate first
     // whatever it holds, and the seed-42 city has no other jobless
     // loader-age adult within the yard's cap).
-    let mut w = common::world_with(|c| c.distance = None);
+    let mut w = common::world_with(|c| {
+        c.distance = None;
+        // The pressure pass R2: the v1 pace (`common::v1_pace`).
+        common::v1_pace(c);
+    });
     let role = loader(&w);
     let yard = w.buildings_of_kind(citysim::components::BuildingKind::FreightYard)[0];
     // A worker laid off: the profession stays.

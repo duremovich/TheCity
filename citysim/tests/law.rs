@@ -39,6 +39,8 @@ fn test_theft_witnessed_by_guard_leads_to_jail_within_1_day() {
     // subject is the guard's report and arrest).
     let mut cfg = Config::load().dole_city().v1_profile();
     cfg.strip_careers();
+    // The pressure pass R2: the v1 pace (`common::v1_pace`).
+    common::v1_pace(&mut cfg);
     // The pre-view pass phase 3: and to the shapes before haul and counter
     // (the moved crews and counters move the scene: no arrest in the day).
     cfg.drop_haul_counter();

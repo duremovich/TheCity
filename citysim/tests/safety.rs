@@ -250,7 +250,11 @@ fn corp_worker(w: &mut World, wage: i64) -> (EntityId, EntityId) {
 #[test]
 fn test_negative_rate_pays_a_wage_credit_from_the_surplus() {
     use citysim::systems::economy;
-    let mut w = city();
+    // The pressure pass R2: the v1 pace (2 ticks a tile) the scene was
+    // written for (at 1 the paid worker works other hours).
+    let mut cfg = config();
+    cfg.exec.move_ticks_full = 2;
+    let mut w = World::new(42, cfg);
     // The wage alone (no rent settled from it).
     w.config.rent.pay_from_income = false;
     let lo = w.config.treasury.band[0];

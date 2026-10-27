@@ -516,7 +516,9 @@ fn stayer(w: &mut World, id: EntityId) -> EntityId {
 /// `e7a8d6f` (no pick: `best_spot_kind` returned `None` past the cap).
 #[test]
 fn test_stay_in_unwinds_at_home_with_no_spot_in_reach() {
-    let mut w = city();
+    // The pressure pass R2: the v1 pace (`common::v1_pace`).
+    let mut w = common::world_with(common::v1_pace);
+    w.tick = EVENING;
     w.spots = vec![Vec::new(); w.districts.len()];
     let alone = common::free_adults(&w)
         .into_iter()
@@ -548,6 +550,7 @@ fn test_stay_in_unwinds_at_home_with_no_spot_in_reach() {
         if let Some(f) = c.distance.as_mut().and_then(|d| d.free.as_mut()) {
             f.stay_in = None;
         }
+        common::v1_pace(c);
     });
     off.tick = EVENING;
     off.spots = vec![Vec::new(); off.districts.len()];
