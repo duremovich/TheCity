@@ -14,7 +14,8 @@ use citysim::{Config, EntityId, EventKind, World, TICKS_PER_DAY, TICKS_PER_HOUR}
 const EVENING: u64 = TICKS_PER_DAY + 19 * TICKS_PER_HOUR;
 
 fn city() -> World {
-    let mut w = common::world();
+    // The pressure pass S6 (OPEN-224): the seeded children off (they crowd the Homes this scene's room rule reads).
+    let mut w = common::world_with(|c| c.ages.seed_child_slots = 0);
     assert!(household::on(&w), "the shipped config has the household on");
     w.tick = EVENING;
     w

@@ -141,6 +141,9 @@ fn test_hangout_picks_spot_where_friend_habit_is() {
     // The pressure pass R2: the v1 pace (`common::v1_pace`).
     let mut cfg = Config::load().dole_city();
     common::v1_pace(&mut cfg);
+    // The pressure pass S6 (OPEN-224): the seeded children off (a child at
+    // home makes the own Home a spot: "nobody expected" reads none).
+    cfg.ages.seed_child_slots = 0;
     let mut w = World::new(42, cfg);
     let a = civilian(&w, &[]);
     let friend = civilian(&w, &[a]);

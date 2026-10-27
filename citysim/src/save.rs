@@ -383,7 +383,10 @@ use crate::world::World;
 /// 77 (pressure pass round 3, S3, justice that reads right): `fares::Record.beaten`
 /// (written while set), `[fares] beat_cooldown_days`, `[justice]` (written only
 /// when set) and the `Jobs2Cols` `fare_turned_off`, `law_collars` columns (serde defaults).
-pub const SAVE_VERSION: u8 = 77;
+/// 78 (pressure pass round 3, S6, school-age children and the child-safety
+/// rule): `[ages]` S6 keys, `[service] p_camp_beating` and `[service.tune]
+/// camp_beating_*` gone, `Jobs2Cols.harm_blocked` in, `camp_beatings` out.
+pub const SAVE_VERSION: u8 = 78;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

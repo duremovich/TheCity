@@ -10,12 +10,18 @@
 //!   from its household: a camp's child → `Camp`; a homeless household's →
 //!   `Street` (it begs `child_beg_coins` from a resident of its district, a
 //!   gift; steals on `child_theft_p`; after `street_take_days` the camp
-//!   takes it, the E38 path); on a weekday a School in reach whose fee the
+//!   takes it, the E38 path); on a weekday a child of `school_from_years`
+//!   or more with a School in reach whose fee the
 //!   household can spare (or the `public_school` lever) → `School` (the fee
 //!   `Flow::Contract` to its owner, `edu_days`); on a weekday a parent with a
 //!   Pitch → `Chores` (at the pitch); else `Play`. At 18 the school days add
 //!   `edu_gain` each to the education (`Schooling`), and a street childhood
 //!   takes stealth up and lawfulness down.
+//! - **The seeded children** (the pressure pass S6, `OPEN-224`): at the
+//!   seed's end each couple sharing a Home has `seed_child_slots` chances at
+//!   a child on `seed_child_p`, aged under 18 and kept when the younger
+//!   parent was `seed_child_gap_years` old at the birth (a materialised
+//!   Ambient couple brings its own the same way); pure hashes, no world draw.
 //! - **The elderly** (no pension). From `frail_from_years` work output
 //!   falls `frail_slope` a year over (`scale_ticks` on the Farm, Fab and
 //!   trade accruals, both tiers); the sick-day firing comes at
@@ -49,6 +55,11 @@ const PURPOSE_BEG: u64 = 0x4147_0001;
 const PURPOSE_THEFT: u64 = 0x4147_0002;
 const PURPOSE_KIN: u64 = 0x4147_0003;
 const PURPOSE_MAIM: u64 = 0x4147_0004;
+/// The pressure pass S6 (OPEN-224): a seeded couple's child slot (kept on
+/// `seed_child_p`), the child's age, and the child's own stream.
+const PURPOSE_SEED_CHILD: u64 = 0x4147_0005;
+const PURPOSE_SEED_AGE: u64 = 0x4147_0006;
+const PURPOSE_SEED_STREAM: u64 = 0x4147_0007;
 
 /// The life stages are live: `[jobs2] enabled` and `[ages] enabled`.
 pub fn on(world: &World) -> bool {
@@ -66,6 +77,19 @@ fn hash(world: &World, purpose: u64, a: u64, b: u64) -> f32 {
 
 fn key(id: EntityId) -> u64 {
     u64::from(id.index) << 32 | u64::from(id.generation)
+}
+
+/// The pressure pass S6 (Dylan 2026-10-27, a hard rule): `id` is under
+/// `protected_under_years` (18), or a `Child`: never killed, hurt or harmed,
+/// never a victim, a hire, a vice worker or client, a bettor. Every site that
+/// picks a victim or deals harm skips them in the pick (`World::kill_by`
+/// refuses as the backstop and counts `harm_blocked`). Not under `on`.
+pub fn is_protected(world: &World, id: EntityId) -> bool {
+    if world.has::<Child>(id) {
+        return true;
+    }
+    let under = world.config.ages.protected_under_years * crate::time::DAYS_PER_YEAR as u32;
+    world.comp::<Identity>(id).is_some_and(|i| i.age_days < under)
 }
 
 /// Phase 7's state on `Jobs2State` (empty, and not saved, off).
@@ -272,6 +296,45 @@ pub fn place_of(world: &World, child: EntityId) -> Option<Place> {
     })
 }
 
+/// S6 (OPEN-224): a School child is out of its Home now (its routine is
+/// `School` and the hour is inside `school_hours`); `household::home_term`
+/// leaves it out of the company at home.
+pub fn at_school_now(world: &World, c: &Child) -> bool {
+    if c.routine != Routine::School {
+        return false;
+    }
+    let [from, to] = world.config.ages.school_hours;
+    let tod = world.tick_of_day();
+    (from..to).contains(&tod)
+}
+
+/// S6 (OPEN-224): the children's food a Home's pantry keeps: `ceil(
+/// CHILD_FOOD_PER_DAY × the children at home × child_pantry_days)` (a Camp
+/// or Street child eats elsewhere); 0 off.
+pub fn children_food_need(world: &World, home: EntityId) -> u32 {
+    if !on(world) {
+        return 0;
+    }
+    let kids = world
+        .residents_of(home)
+        .iter()
+        .filter(|&&r| world.comp::<Child>(r).is_some_and(|c| !matches!(c.routine, Routine::Camp | Routine::Street)))
+        .count() as f32;
+    (crate::systems::demography::CHILD_FOOD_PER_DAY * kids * world.config.ages.child_pantry_days).ceil() as u32
+}
+
+/// S6: `id` is a parent with a child of theirs living in their Home (the
+/// jobless parent's grocery run, `routine::grocery_plan`, `lod`'s mirror).
+pub fn feeds_children(world: &World, id: EntityId) -> bool {
+    if !on(world) {
+        return false;
+    }
+    let Some(home) = world.comp::<Household>(id).and_then(|h| h.home) else { return false };
+    crate::systems::demography::children_of_agent(world, id)
+        .into_iter()
+        .any(|c| world.has::<Child>(c) && world.comp::<Household>(c).and_then(|h| h.home) == Some(home))
+}
+
 /// Midnight: each child's routine and its day's effect.
 fn children(world: &mut World) {
     let cfg = world.config.ages.clone();
@@ -290,7 +353,10 @@ fn children(world: &mut World) {
             Routine::Camp
         } else if let Some(h) = home {
             let door = world.comp::<Building>(h).map(|b| b.door);
-            let school = if wd { door.and_then(|d| school_near(world, d)) } else { None };
+            // S6 (OPEN-224): School from `school_from_years` (an infant on
+            // a paid fee was a "pupil" before).
+            let school_age = years(world, k) >= cfg.school_from_years;
+            let school = if wd && school_age { door.and_then(|d| school_near(world, d)) } else { None };
             let head = head_of(world, k, h);
             let paid = school.is_some_and(|s| {
                 if world.levers.public_school {
@@ -569,6 +635,67 @@ fn seed_kin(world: &mut World) {
         edge.trust = 0.6;
         world.note_kin(e, c);
     }
+}
+
+/// The pressure pass S6 (OPEN-224, `OPEN-150`'s starting condition):
+/// `World::new`, last (the households settled: the pre-roll, the company
+/// blocks): every couple sharing a Home gets its children
+/// ([`children_for_couple`]). Pure hashes and keyed streams, no world draw.
+/// Returns the children seeded.
+pub fn seed_children(world: &mut World) -> u32 {
+    if !on(world) || world.config.ages.seed_child_slots == 0 {
+        return 0;
+    }
+    let pairs: Vec<(EntityId, EntityId)> = world.spouses.iter().filter(|(a, b)| a < b).map(|(&a, &b)| (a, b)).collect();
+    let mut n = 0;
+    for (a, b) in pairs {
+        let ha = world.comp::<Household>(a).and_then(|h| h.home);
+        let Some(home) = ha.filter(|_| ha == world.comp::<Household>(b).and_then(|h| h.home)) else { continue };
+        n += children_for_couple(world, a, b, home, key(a) ^ key(b).rotate_left(17)).len() as u32;
+    }
+    n
+}
+
+/// S6: the children of the couple `a`, `b` in `home` (a Home), keyed on
+/// `k`: `seed_child_slots` slots, each kept on `seed_child_p`, aged
+/// uniformly under 18 and kept when the younger parent was
+/// `seed_child_gap_years` old at the birth; oldest first, spawned as a
+/// migrant's child is (`demography::spawn_child_aged`). The seed's couples
+/// and a materialised Ambient couple (`ambient::materialise`).
+pub fn children_for_couple(world: &mut World, a: EntityId, b: EntityId, home: EntityId, k: u64) -> Vec<EntityId> {
+    let cfg = world.config.ages.clone();
+    if !on(world) || cfg.seed_child_slots == 0 {
+        return Vec::new();
+    }
+    if world.comp::<Building>(home).is_none_or(|bd| bd.kind != BuildingKind::Home || bd.demolished) {
+        return Vec::new();
+    }
+    let year = crate::time::DAYS_PER_YEAR as f32;
+    let adult = crate::systems::demography::ADULT_AGE_DAYS;
+    let younger = |w: &World| {
+        let d = |x: EntityId| w.comp::<Identity>(x).map_or(0, |i| i.age_days);
+        d(a).min(d(b)) as f32 / year
+    };
+    let parent = younger(world);
+    let mut ages: Vec<u32> = (0..cfg.seed_child_slots)
+        .filter(|&i| hash(world, PURPOSE_SEED_CHILD, k, u64::from(i)) < cfg.seed_child_p)
+        .filter_map(|i| {
+            let years = hash(world, PURPOSE_SEED_AGE, k, u64::from(i)) * (adult as f32 / year);
+            let gap = parent - years;
+            (gap >= cfg.seed_child_gap_years[0] && gap <= cfg.seed_child_gap_years[1])
+                .then(|| ((years * year) as u32).min(adult - 1))
+        })
+        .collect();
+    ages.sort_unstable_by(|x, y| y.cmp(x));
+    let female =
+        |w: &World, x: EntityId| w.comp::<Identity>(x).is_some_and(|i| i.sex == crate::components::Sex::Female);
+    let (mother, father) = if female(world, b) && !female(world, a) { (b, a) } else { (a, b) };
+    let mut out = Vec::new();
+    for (i, age) in ages.into_iter().enumerate() {
+        let mut r = world.rng.keyed(PURPOSE_SEED_STREAM ^ k.rotate_left(7) ^ ((i as u64) << 56));
+        out.push(crate::systems::demography::spawn_child_aged(world, mother, father, home, age, &mut r));
+    }
+    out
 }
 
 /// The day's end (`systems::stats`): the life stages' snapshots.

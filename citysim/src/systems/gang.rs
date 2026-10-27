@@ -381,6 +381,11 @@ pub fn turned_away(world: &mut World, id: EntityId, place: Option<EntityId>) {
 /// Put `id` into `gang` with every side effect of joining. No eligibility
 /// check: `join` does that; tests call this directly.
 pub fn enlist(world: &mut World, id: EntityId, gang: EntityId) {
+    // The pressure pass S6 (Dylan 2026-10-27): gangs from 18 (every caller
+    // picks an adult; the backstop).
+    if crate::systems::ages::is_protected(world, id) {
+        return;
+    }
     let tick = world.tick;
     world.insert(id, GangMember { gang, rank: 0, joined_tick: tick, raids_led: 0, raids_won: 0 });
     if let Some(g) = world.comp_mut::<Gang>(gang) {
@@ -1054,6 +1059,8 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
                 .iter()
                 .copied()
                 .filter(|&o| o != actor && world.has::<Wallet>(o))
+                // The pressure pass S6 (Dylan 2026-10-27): nobody under 18 is a victim.
+                .filter(|&o| !crate::systems::ages::is_protected(world, o))
                 .filter(|&o| mates.is_none() || world.gang_of(o) != mates)
                 // Shadow V4 bug 9: nor a Friend or kin of the actor (the
                 // extorter squeezed his new Friend with the rest).
@@ -1327,8 +1334,10 @@ pub fn stat_extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
 /// whether the occupants pay.
 fn intimidate(world: &mut World, actor: EntityId, home: EntityId, occupants: &[EntityId], amount: i64) -> bool {
     use crate::systems::moves;
+    // The pressure pass S6 (Dylan 2026-10-27): nobody under 18 is a victim.
     let target = occupants
         .iter()
+        .filter(|&&o| !crate::systems::ages::is_protected(world, o))
         .map(|&o| (moves::might(world, o), o))
         .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)))
         .map(|(_, o)| o);
@@ -1728,7 +1737,13 @@ fn daily_economy(world: &mut World) {
         // Territory tribute: 2 coins/day per Home when the occupants can pay.
         let territory = world.comp::<Gang>(gang).map(|g| g.territory.clone()).unwrap_or_default();
         for home in territory {
-            let residents: Vec<EntityId> = world.residents_of(home).to_vec();
+            // The pressure pass S6 (Dylan 2026-10-27): nobody under 18 is a victim.
+            let residents: Vec<EntityId> = world
+                .residents_of(home)
+                .iter()
+                .copied()
+                .filter(|&r| !crate::systems::ages::is_protected(world, r))
+                .collect();
             let mut owed = 2;
             for r in residents {
                 if owed == 0 {

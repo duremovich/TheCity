@@ -1231,7 +1231,8 @@ pub fn market_petty(world: &mut World, thief: EntityId) {
         return;
     }
     let near = world.agents_near(tile, cfg.petty_reach, None);
-    let victim = near.into_iter().filter(|&o| o != thief).find(|&o| {
+    // The pressure pass S6 (Dylan 2026-10-27): nobody under 18 is a victim.
+    let victim = near.into_iter().filter(|&o| o != thief && !crate::systems::ages::is_protected(world, o)).find(|&o| {
         world.has::<Identity>(o) && !world.has::<Corpse>(o) && world.comp::<Kit>(o).is_some_and(|k| k.weapon > 0)
     });
     if let Some(v) = victim {

@@ -267,7 +267,10 @@ fn test_flow_field_lazy_lru_and_wall_change() {
 #[test]
 fn test_two_thousand_spawn_housed() {
     let w = World::new(42, Config::load().dole_city());
-    assert_eq!(w.population(), 2000);
+    // The pressure pass S6 (OPEN-224): the seeded couples' children come on
+    // top of the 2,000 adults.
+    let adults = w.citizens().into_iter().filter(|&a| citysim::systems::demography::is_adult(&w, a)).count();
+    assert_eq!(adults, 2000);
     let homeless =
         w.citizens().into_iter().filter(|&id| w.comp::<Household>(id).is_none_or(|h| h.home.is_none())).count();
     // M12 D26: the seeded derelicts' residents start homeless, nobody else.

@@ -19,6 +19,9 @@ use citysim::{
 fn config() -> Config {
     let mut cfg = Config::load().dole_city();
     cfg.policy.school_meals = false;
+    // The pressure pass S6 (OPEN-224): the tests stage their own families;
+    // the seeded children would crowd the Blocks and the camps.
+    cfg.ages.seed_child_slots = 0;
     cfg
 }
 
@@ -363,6 +366,13 @@ fn test_unfed_camp_is_scandal_then_closed_and_children_moved() {
     if let Some(b) = w.comp_mut::<Building>(bad) {
         b.stock_food = 0;
     }
+    // The pressure pass S6 (Dylan 2026-10-27): the Reserve covers a camp's
+    // shortfall first; emptied, so the camp's unfed day is the scene.
+    for r in w.buildings_of_kind(BuildingKind::Warehouse).to_vec() {
+        if let Some(b) = w.comp_mut::<Building>(r) {
+            b.stock_food = 0;
+        }
+    }
     let stories0 = w.events.iter().filter(|e| e.kind == citysim::EventKind::Story).count();
     camp::daily(&mut w);
     let s1 = w.comp::<Building>(bad).and_then(|b| b.camp.clone()).expect("state");
@@ -542,11 +552,12 @@ fn test_take_prefers_a_camp_that_can_feed_tonight() {
 }
 
 /// Review fix: when no camp can feed (every Market empty) the take still
-/// happens, nothing is bought (no `CampFood` line), the child the service
-/// could not feed dies, the day counts it as `camp_unfed` and the Feeds carry
-/// a bulletin naming the service.
+/// happens, nothing is bought (no `CampFood` line), the day counts the
+/// unfed as `camp_unfed` and the Feeds carry a bulletin naming the service.
+/// The pressure pass S6 (Dylan 2026-10-27, no child is harmed): the Reserve
+/// covers the shortfall first (emptied here), and the unfed child lives.
 #[test]
-fn test_no_camp_can_feed_counts_the_death_and_tells_the_feeds() {
+fn test_no_camp_can_feed_counts_the_unfed_and_tells_the_feeds() {
     let mut w = world();
     let (h, c) = family_home(&mut w);
     let city = city_camp(&w);
@@ -557,6 +568,11 @@ fn test_no_camp_can_feed_counts_the_death_and_tells_the_feeds() {
     }
     if let Some(b) = w.comp_mut::<Building>(city) {
         b.stock_food = 0;
+    }
+    for r in w.buildings_of_kind(BuildingKind::Warehouse).to_vec() {
+        if let Some(b) = w.comp_mut::<Building>(r) {
+            b.stock_food = 0;
+        }
     }
     assert!(!camp::can_feed_tonight(&w, city, 1));
     // Both of the Block's children (a lone child's half ration needs no whole
@@ -572,10 +588,10 @@ fn test_no_camp_can_feed_counts_the_death_and_tells_the_feeds() {
     let food0 = w.stats.current.econ.flow_camp_food;
     camp::daily(&mut w);
     assert_eq!(w.stats.current.econ.flow_camp_food, food0, "nothing bought from empty shelves");
-    assert!(!w.has::<Child>(c) && w.has::<citysim::Corpse>(c), "the third unfed day killed");
+    assert!(w.has::<Child>(c) && !w.has::<citysim::Corpse>(c), "S6: hungry, alive");
     assert!(w.stats.current.econ.camp_unfed >= 1);
     assert!(w
         .events
         .iter()
-        .any(|e| e.kind == citysim::EventKind::Story && e.text.contains("could not feed") && e.actors.contains(&c)));
+        .any(|e| e.kind == citysim::EventKind::Story && e.text.contains("could not feed") && e.actors.contains(&city)));
 }

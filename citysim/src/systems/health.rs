@@ -126,7 +126,9 @@ pub fn child_day(world: &mut World, child: EntityId, fed: bool, synth: Option<bo
     } else {
         -cfg.mal_real
     };
-    h.malnutrition = (h.malnutrition + d).clamp(0.0, 1.0);
+    // The pressure pass S6 (Dylan 2026-10-27, no child is harmed): a
+    // child's hunger floors below the onset of any effect.
+    h.malnutrition = (h.malnutrition + d).clamp(0.0, (cfg.mal_onset - f32::EPSILON).max(0.0));
 }
 
 /// Midnight (`economy::run`, after spoilage): every adult citizen's meters

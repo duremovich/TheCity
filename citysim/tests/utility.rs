@@ -100,7 +100,8 @@ fn test_hysteresis_prevents_flip() {
 fn test_think_runs_every_30_ticks_staggered() {
     let mut w = world(3);
     w.config.lod.force = Some(citysim::Lod::Full);
-    let ids = w.citizens();
+    // The pressure pass S6 (OPEN-224): the seeded children think nothing (no Brain).
+    let ids: Vec<_> = w.citizens().into_iter().filter(|&id| w.has::<Brain>(id)).collect();
     w.run_ticks(TICKS_PER_HOUR); // let everyone think at least once
     let before: Vec<u64> = ids.iter().map(|&id| w.comp::<Brain>(id).expect("brain").last_think_tick).collect();
     w.run_ticks(30);

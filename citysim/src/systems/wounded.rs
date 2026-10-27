@@ -91,6 +91,11 @@ pub fn wound_instead(world: &mut World, loser: EntityId, by: EntityId, armour: f
 /// employer's databases and, for a Trauma client, its Trauma corp's
 /// (`TraumaCall`). `Wounded`.
 pub fn down(world: &mut World, id: EntityId, by: Option<EntityId>) {
+    // The pressure pass S6 (Dylan 2026-10-27): nobody under 18 is hurt
+    // (every caller picks a living adult; the backstop).
+    if crate::systems::ages::is_protected(world, id) {
+        return;
+    }
     let now = world.tick;
     let tile = world.comp::<Position>(id).map(|p| p.tile).unwrap_or_default();
     world.abort_plan(id);

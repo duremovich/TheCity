@@ -2206,6 +2206,10 @@ impl World {
         // Lives at work phase 6 (§ 4.2, § 4.3): the seeded Jobs' seniority
         // and professions (a hash, no RNG; nothing with `[careers]` off).
         crate::prof::timed!("new::careers::seed", systems::careers::seed(&mut w));
+        // The pressure pass S6 (OPEN-224): the seeded couples' children, once
+        // the households are settled (keyed streams, no world draw; nothing
+        // with `[ages]` off).
+        crate::prof::timed!("new::ages::seed_children", systems::ages::seed_children(&mut w));
         // OPEN-140: the seed city's housing is not the first midnight's move.
         w.housed_now.1.clear();
         w
@@ -2330,8 +2334,12 @@ impl World {
             // `[ages] seed_max_years` under the switch.
             let max =
                 if systems::ages::on_cfg(&self.config) { self.config.ages.seed_max_years } else { wc.age_max_years };
+            // The pressure pass S6 (Dylan 2026-10-27): a seeded adult (a Brain,
+            // a body every victim pick reads as fair) is never under the
+            // protected age, whatever `age_min_years` says.
+            let min = wc.age_min_years.max(self.config.ages.protected_under_years as f32);
             let rng = self.rng.world();
-            let years: f32 = rng.random_range(wc.age_min_years..max);
+            let years: f32 = rng.random_range(min..max.max(min + 1.0));
             let age_days = (years * DAYS_PER_YEAR as f32) as u32;
             let born_tick = -(i64::from(age_days) * TICKS_PER_DAY as i64);
             let coins = rng.random_range(wc.initial_coins_min..=wc.initial_coins_max);
@@ -4309,6 +4317,13 @@ impl World {
     /// `kill` with the killer named, so a gang knows whether a rival did it.
     pub fn kill_by(&mut self, id: EntityId, cause: DeathCause, killer: Option<EntityId>) {
         if !self.has::<Identity>(id) || self.has::<Corpse>(id) {
+            return;
+        }
+        // The pressure pass S6 (Dylan 2026-10-27, a hard rule): nobody under
+        // 18 dies. Every pick skips them first; this is the backstop, counted
+        // (`harm_blocked` above 0 is a pick site that missed).
+        if systems::ages::is_protected(self, id) {
+            systems::ownership::jobs2_row(self).harm_blocked += 1;
             return;
         }
         // L2 phase 4 (plan L25): the ledger and the kill-rate tally read the

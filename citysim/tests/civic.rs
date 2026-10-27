@@ -105,9 +105,12 @@ fn test_no_teacher_no_taught_day_and_a_taught_day_counts() {
     // city's moved day 2 the staged child is not taught at the hour; the
     // cause was not chased, the subject is the teacher's day, not the ages).
     // The pressure pass R2: and the v1 pace (`common::v1_pace`).
+    // The pressure pass S6 (OPEN-224): the seeded children off (the staged
+    // child is the School's one pupil; the roll would hold the city's too).
     let mut w = common::world_with(|c| {
         c.strip_careers();
         common::v1_pace(c);
+        c.ages.seed_child_slots = 0;
     });
     w.run_ticks(DAY2_ONE);
     let (_, child, _, school) = schoolchild(&mut w);
@@ -419,20 +422,8 @@ fn test_escape_roll_returns_the_child_home() {
     assert!(!camp::children_of(&w, cmp).contains(&child));
     assert_eq!(jobs2(&w).camp_escapes, 1);
     assert!(w.events.iter().any(|e| e.kind == EventKind::CampEscape && e.actors[0] == child));
-    // The beating roll at 1: a grief to each parent.
-    let mut w = common::world_with(|c| c.service.p_camp_beating = 1.0);
-    w.run_ticks(DAY2_ONE);
-    let (a, child, _, _) = taken_child(&mut w);
-    let before = w
-        .comp::<citysim::Memory>(a)
-        .map_or(0, |m| m.entries.iter().filter(|e| e.kind == citysim::MemoryKind::ChildTaken).count());
-    w.tick = 3 * TICKS_PER_DAY;
-    camp::daily(&mut w);
-    let after = w
-        .comp::<citysim::Memory>(a)
-        .map_or(0, |m| m.entries.iter().filter(|e| e.kind == citysim::MemoryKind::ChildTaken).count());
-    assert!(after > before, "a ChildTaken-class grief for {}", w.name_of(child));
-    assert_eq!(jobs2(&w).camp_beatings, 1);
+    // The pressure pass S6 (Dylan 2026-10-27, no child is harmed): the
+    // warden's beating roll is gone (it was checked here).
 }
 
 /// § 3.5: the parent's answer is chosen from the household's state at

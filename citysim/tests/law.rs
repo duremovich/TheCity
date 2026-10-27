@@ -39,6 +39,8 @@ fn test_theft_witnessed_by_guard_leads_to_jail_within_1_day() {
     // subject is the guard's report and arrest).
     let mut cfg = Config::load().dole_city().v1_profile();
     cfg.strip_careers();
+    // The pressure pass S6 (OPEN-224): the seeded children off (they move this scene's ground: a butterfly).
+    cfg.ages.seed_child_slots = 0;
     // The pressure pass R2: the v1 pace (`common::v1_pace`).
     common::v1_pace(&mut cfg);
     // The pre-view pass phase 3: and to the shapes before haul and counter

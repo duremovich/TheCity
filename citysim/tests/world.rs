@@ -3,7 +3,11 @@
 use citysim::{BuildingKind, Config, EntityId, Household, Identity, Job, Position, Role, Wallet, World};
 
 fn world(seed: u64) -> World {
-    World::new(seed, Config::load().dole_city().v1_profile())
+    // The pressure pass S6 (OPEN-224): the seeded adults are the subject;
+    // the seeded couples' children off.
+    let mut cfg = Config::load().dole_city().v1_profile();
+    cfg.ages.seed_child_slots = 0;
+    World::new(seed, cfg)
 }
 
 #[test]

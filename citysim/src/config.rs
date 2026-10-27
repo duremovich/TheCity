@@ -2402,10 +2402,6 @@ pub struct ServiceCfg {
     pub served_salience: f32,
     // --- Phase 3 (civic), each left out of a save at its default so the
     // off save is byte-identical (`ServiceCfg::strip_civic`).
-    /// § 2.2 (warden): a Camp child-day's chance of a beating (a
-    /// `ChildTaken`-class grief to its parents).
-    #[serde(skip_serializing_if = "is_zero_f32_cfg")]
-    pub p_camp_beating: f32,
     /// § 2.2 (warden): a Camp child-day's chance of an escape (the child
     /// back to a parent's Home with room, else the street).
     #[serde(skip_serializing_if = "is_zero_f32_cfg")]
@@ -2533,9 +2529,6 @@ pub struct ServeTuneCfg {
     pub notice: f32,
     /// § 2.2 (jailer): each jailer on duty when the Jail is broken.
     pub jailbreak: f32,
-    /// § 2.2 (warden): a Camp beating's `ChildTaken` grief to each parent, salience and valence.
-    pub camp_beating_salience: f32,
-    pub camp_beating_valence: f32,
     /// § 2.3 (cab): the driver's `Robbed` grudge on a rider who skipped his fare.
     pub fare_dodge_grudge: f32,
     /// § 3.5: a parent breaks his child out of a Camp alone when lawfulness
@@ -2556,8 +2549,6 @@ impl Default for ServeTuneCfg {
             ejected: -0.4,
             notice: -0.3,
             jailbreak: -0.3,
-            camp_beating_salience: 0.5,
-            camp_beating_valence: -0.6,
             fare_dodge_grudge: 0.4,
             breakout_lawfulness: 0.3,
             breakout_courage: 0.6,
@@ -2600,7 +2591,6 @@ impl Default for ServiceCfg {
             p_eject: 0.5,
             staff_meal: true,
             served_salience: 0.15,
-            p_camp_beating: 0.0,
             p_camp_escape: 0.0,
             buyout_fee: 0,
             buyout_food_days: 0.0,
@@ -2641,7 +2631,6 @@ impl ServiceCfg {
     pub fn strip_civic(&mut self) {
         let d = ServiceCfg::default();
         self.civic = false;
-        self.p_camp_beating = d.p_camp_beating;
         self.p_camp_escape = d.p_camp_escape;
         self.buyout_fee = d.buyout_fee;
         self.buyout_food_days = d.buyout_food_days;
@@ -2793,6 +2782,28 @@ pub struct AgesCfg {
     /// (a Parent edge to an adult 20-35 years younger) on `seed_kin_p`.
     pub kin_from_years: u32,
     pub seed_kin_p: f32,
+    /// The pressure pass S6 (OPEN-224): the seeded city's children. Each
+    /// couple sharing a Home at the seed's end (and each couple an Ambient
+    /// flat materialises) has `seed_child_slots` chances at a child, each on
+    /// `seed_child_p` (a pure hash), aged uniformly under 18 and kept when
+    /// the younger parent was `seed_child_gap_years[0]` to `[1]` years old at
+    /// the birth; the child lives in the couple's Home as a born child does.
+    pub seed_child_slots: u32,
+    pub seed_child_p: f32,
+    pub seed_child_gap_years: [f32; 2],
+    /// S6: a child goes to School (the fee, the roster) from this age to 18;
+    /// younger, it plays at home (or does chores at a parent's Pitch).
+    pub school_from_years: u32,
+    /// S6: a School child is out of its Home from `school_hours[0]` to
+    /// `[1]` (minutes of the day) on a school day (`household::home_term`).
+    pub school_hours: [u16; 2],
+    /// S6: a Home's pantry keeps the children's food for this many days (a
+    /// grocery run's level; a jobless parent shops for it by day).
+    pub child_pantry_days: f32,
+    /// S6 (Dylan 2026-10-27, a hard rule): nobody under this age is ever
+    /// killed, hurt or harmed (`ages::is_protected`, read whatever `enabled`
+    /// says; a child, `Child`, is protected at any setting).
+    pub protected_under_years: u32,
     /// Disability: a stabilised survivor maimed on `p_maimed`; a packer's
     /// shift-hour on `p_press_maim`; a level's work output × (1 −
     /// `maimed_work`); a beggar's odds × `maimed_beg_mult`.
@@ -2820,6 +2831,13 @@ impl Default for AgesCfg {
             kin_take_in_p: 0.3,
             kin_from_years: 45,
             seed_kin_p: 0.6,
+            seed_child_slots: 3,
+            seed_child_p: 0.6,
+            seed_child_gap_years: [18.0, 45.0],
+            school_from_years: 6,
+            school_hours: [540, 900],
+            child_pantry_days: 2.0,
+            protected_under_years: 18,
             p_maimed: 0.25,
             p_press_maim: 0.0005,
             maimed_work: 0.2,
@@ -11868,8 +11886,8 @@ impl Default for CharityCfg {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CampCfg {
-    /// E38: `Child.hunger_days` (consecutive unfed days; 3 kills) at which
-    /// the service takes a child (must be ≤ 2).
+    /// E38: `Child.hunger_days` (consecutive unfed days; S6: never a death)
+    /// at which the service takes a child.
     pub take_days: u8,
     /// E40: sim years; younger children are housed and fed, not worked.
     pub work_age: u32,

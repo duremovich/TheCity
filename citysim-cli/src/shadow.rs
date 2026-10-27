@@ -159,7 +159,7 @@ pub struct ShadowArgs {
     pub map: Option<PathBuf>,
 }
 
-const ARCHETYPES: [&str; 55] = [
+const ARCHETYPES: [&str; 56] = [
     "gang_member",
     // The pressure pass phase 5b: a member of a gang whose standing order
     // marches (a raid, a retaliation, a breakout) at the start day.
@@ -238,6 +238,9 @@ const ARCHETYPES: [&str; 55] = [
     // The pressure pass R4 (OPEN-219): a parent of a child held in a standing Camp (the weekly
     // answer: a visit, a buy-out, a break-out).
     "camp_parent",
+    // The pressure pass S6 (OPEN-224): a working parent whose child is on a
+    // School's roll at the start day or earlier in the childhood (the seeded city's children).
+    "school_parent",
 ];
 
 /// Activity classes of the time-use table, in print order.
@@ -537,6 +540,26 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
         "dodger" => adults()
             .filter(|a| world.fares.book.get(a).is_some_and(|r| r.caught.len() >= 2 || r.banned_until.is_some()))
             .collect(),
+        "school_parent" => {
+            // The pressure pass S6 (OPEN-224): a parent with a job whose child
+            // is on a School's roll today or has been this childhood (a start
+            // day after the rest day still holds the rest day's Play).
+            let mut v = Vec::new();
+            for &k in all.iter() {
+                if !world.has::<Child>(k) || world.has::<Corpse>(k) {
+                    continue;
+                }
+                let at_school = matches!(
+                    citysim::systems::ages::place_of(world, k),
+                    Some(citysim::systems::ages::Place::School(_))
+                );
+                if at_school || world.comp::<Child>(k).is_some_and(|c| c.edu_days > 0) {
+                    v.extend(citysim::systems::camp::parents_of(world, k));
+                }
+            }
+            v.retain(|&a| world.has::<Brain>(a) && world.has::<Job>(a) && !world.has::<Sentence>(a));
+            v
+        }
         "camp_parent" => {
             let mut v = Vec::new();
             for camp in citysim::systems::camp::standing_camps(world) {
@@ -1878,6 +1901,43 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
         }
     }
 
+    // The pressure pass S6 (OPEN-224): a child has no diary, so a parent's
+    // reads the children once a day (09:30, the school day begun): where
+    // each is today and the Home's pantry.
+    if now % TICKS_PER_DAY == 9 * TICKS_PER_HOUR + 30 {
+        let kids: Vec<EntityId> = citysim::systems::demography::children_of_agent(world, id)
+            .into_iter()
+            .filter(|&c| world.has::<Child>(c))
+            .collect();
+        if !kids.is_empty() {
+            use citysim::systems::ages::Place;
+            let parts: Vec<String> = kids
+                .iter()
+                .map(|&c| {
+                    let yrs = world.comp::<citysim::Identity>(c).map_or(0, |i| i.age_years());
+                    let at = match citysim::systems::ages::place_of(world, c) {
+                        Some(Place::School(s)) => format!("at {}", nm(world, s)),
+                        Some(Place::Pitch(_)) => "at the pitch (chores)".to_string(),
+                        Some(Place::Home) => "at home (play)".to_string(),
+                        Some(Place::Street) => "on the street".to_string(),
+                        Some(Place::Camp) => {
+                            let camp = world.comp::<citysim::Household>(c).and_then(|h| h.home);
+                            camp.map_or("in a Camp".to_string(), |b| format!("in {}", nm(world, b)))
+                        }
+                        None => "nowhere known".to_string(),
+                    };
+                    format!("{} ({yrs} y) {at}", nm(world, c))
+                })
+                .collect();
+            let pantry = world
+                .comp::<citysim::Household>(id)
+                .and_then(|h| h.home)
+                .and_then(|h| world.comp::<Building>(h))
+                .map_or(String::new(), |b| format!("; the pantry holds {}", b.stock_food));
+            t.log(now, "family", format!("my children: {}{pantry}", parts.join(", ")));
+        }
+    }
+
     // Hunger as sickness: each meal by kind (the tally rises), and the
     // meters with the needs line.
     if let Some(hl) = world.comp::<citysim::Health>(id) {
@@ -2843,6 +2903,12 @@ fn served_text(world: &World, holder: EntityId, e: &MemoryEntry) -> String {
         row_kind(o).map(|(k, key)| (o, k, key))
     } else if unled(holder) {
         row_kind(holder).map(|(k, key)| (holder, k, key))
+    } else if let Some((K::Pupil, key)) = row_kind(o) {
+        // The pressure pass S6 (OPEN-224): the teacher met at the door by a
+        // parent with a row of his own (no ledger on the parent's side).
+        Some((o, K::Pupil, key))
+    } else if let Some((K::Pupil, key)) = row_kind(holder) {
+        Some((holder, K::Pupil, key))
     } else {
         match (row_kind(holder), row_kind(o)) {
             (Some((k, key)), None) => Some((holder, k, key)),
@@ -2866,7 +2932,21 @@ fn served_text(world: &World, holder: EntityId, e: &MemoryEntry) -> String {
         (K::Visit, false) => format!("was served by {who} (as a customer; {who} the {key})"),
         (K::Patient, true) => format!("treated {who} (a patient)"),
         (K::Patient, false) => format!("was treated by {who} (as a patient; the {key})"),
-        (K::Pupil, true) => format!("met {who} at the door (a pupil's parent)"),
+        // The pressure pass S6 (OPEN-224): V11's "a pupil's parent" was the
+        // pupil (an infant on the roll). A pupil now writes no memory; the
+        // parent is named with the child on today's roll here.
+        (K::Pupil, true) if world.has::<Child>(o) => format!("taught {who} (a pupil)"),
+        (K::Pupil, true) => {
+            let school = world.comp::<Job>(holder).and_then(|j| j.employer);
+            let kid = citysim::systems::demography::children_of_agent(world, o).into_iter().find(|&c| {
+                school.is_some()
+                    && citysim::systems::ages::place_of(world, c) == school.map(citysim::systems::ages::Place::School)
+            });
+            match kid {
+                Some(c) => format!("met {who} at the door (the parent of {}, a pupil)", nm(world, c)),
+                None => format!("met {who} at the door (a parent; no child of theirs on today's roll)"),
+            }
+        }
         (K::Pupil, false) => format!("met {who} at the door (my child's teacher)"),
         (K::Inmate, true) if key == "camp_warden" => format!("counted {who} (the Camp's headcount)"),
         (K::Inmate, true) => format!("fed and counted {who} (an inmate)"),

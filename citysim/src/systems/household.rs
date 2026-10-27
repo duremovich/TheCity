@@ -262,14 +262,21 @@ pub fn company_due(world: &World, id: EntityId, home: EntityId) -> bool {
 
 /// § 3.1's household term for a Home spot: `home_w` per household member
 /// home now (bodies inside, the agent aside) plus `child_w` per child at
-/// home (routine not `Camp`/`Street`).
+/// home (routine not `Camp`/`Street`, nor a School child in the school
+/// hours, `ages::at_school_now`).
 pub fn home_term(world: &World, id: EntityId, home: EntityId) -> f32 {
     let cfg = &world.config.household;
     let mut adults = 0u32;
     let mut children = 0u32;
     for r in residents_inside(world, home, id) {
         match world.comp::<Child>(r) {
-            Some(c) => children += u32::from(!matches!(c.routine, Routine::Camp | Routine::Street)),
+            // S6 (OPEN-224): a School child is out during the school hours.
+            Some(c) => {
+                children += u32::from(
+                    !matches!(c.routine, Routine::Camp | Routine::Street)
+                        && !crate::systems::ages::at_school_now(world, c),
+                )
+            }
             None => adults += 1,
         }
     }

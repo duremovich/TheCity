@@ -20,6 +20,8 @@ fn base() -> World {
         // more, so the hand-picked far and near Homes land on the other
         // side of the thresholds these scenes are built on.
         let mut cfg = Config::load();
+        // The pressure pass S6 (OPEN-224): the seeded children off (they crowd the Homes this scene's room rule reads).
+        cfg.ages.seed_child_slots = 0;
         if let Some(m) = cfg.motion.as_mut() {
             m.trains = None;
         }
