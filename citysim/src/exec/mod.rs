@@ -1049,7 +1049,9 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                 // Lives at work phase 4b (§ 2.3): a corner's `Deal` or
                 // `BuyStims` (no target: a tile, no planner location) checks
                 // its own start condition only.
-                let corner = step.target.is_none() && matches!(kind, ActionKind::Deal | ActionKind::BuyStims);
+                let corner = step.target.is_none() && matches!(kind, ActionKind::Deal | ActionKind::BuyStims)
+                    // Round 3 S5 (OPEN-217): the cab's wait at its rank (the street).
+                    || (kind == ActionKind::Rest && crate::systems::streetwork::at_rank(world, id));
                 let symbols = corner || {
                     let ctx = step_ctx(world, id, kind);
                     let ws = crate::goap::WorldState::observe(world, id, ctx.target);

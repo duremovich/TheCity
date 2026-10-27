@@ -1498,12 +1498,62 @@ pub fn accept(world: &mut World, id: ContractId, taker: EntityId, crew: &[Entity
     );
     world.push_event(EventKind::ContractTaken, &[taker, target], text.clone());
     log(world, id, text);
+    heard_of(world, id, taker);
     // Lives at work phase 5 (§ 2.4): a brokered take is the taker's
     // encounter with the fixer on duty.
     if let Some(b) = world.contracts.get(&id).and_then(|c| c.broker) {
         crate::systems::service::contract_party(world, taker, b);
     }
     true
+}
+
+/// Round 3 S5 (OPEN-217): a Hit, Beat or Abduct taken on an agent is heard
+/// of: a corp's exec through his security (`missions::exec_guards`, who
+/// know the street) at once; anyone else on `[verbs] hit_heard_p` (a hash
+/// of the record), the street's tip. The target's safety falls by
+/// `hit_heard_safety` (a `Threatened` memory of the taker), the event names
+/// him and his guards (their diaries hold it). The client is not named.
+/// A beat on a CEO was in his file and invisible to him (`ceo_88522 d24`:
+/// a club, a hotel, twelve hours' sleep). Nothing with `[verbs]` absent.
+fn heard_of(world: &mut World, id: ContractId, taker: EntityId) {
+    const PURPOSE_HEARD: u64 = 0xc0_7e_a7_d1;
+    let Some(v) = world.config.verbs.clone() else { return };
+    let Some((kind, target)) = world.contracts.get(&id).and_then(|c| match c.target {
+        Target::Agent(t) if matches!(c.kind, ContractKind::Hit | ContractKind::Beat | ContractKind::Abduct) => {
+            Some((c.kind, t))
+        }
+        _ => None,
+    }) else {
+        return;
+    };
+    if !crate::systems::law::living(world, target) {
+        return;
+    }
+    let guards = missions::exec_guards(world, target);
+    let tipped =
+        crate::systems::econ::hash_unit(world.seed(), PURPOSE_HEARD, id, u64::from(target.index)) < v.hit_heard_p;
+    if guards.is_empty() && !tipped {
+        return;
+    }
+    if let Some(n) = world.comp_mut::<crate::components::Needs>(target) {
+        n.safety = (n.safety - v.hit_heard_safety).max(0.0);
+    }
+    world.remember(target, crate::components::MemoryKind::Threatened, Some(taker), 0.6, -0.5, false);
+    ownership::jobs2_row(world).hit_heard += 1;
+    let (who, by) = (world.name_of(target), world.owner_label(Some(taker)));
+    let text = if guards.is_empty() {
+        format!("{who} got word on the street: {by} took the {} on {who}", kind.label())
+    } else {
+        let names: Vec<String> = guards.iter().take(3).map(|&g| world.name_of(g)).collect();
+        format!(
+            "{}, {who}'s security, heard {by} took the {} on {who} and warned the boss",
+            names.join(", "),
+            kind.label()
+        )
+    };
+    let mut actors = vec![target];
+    actors.extend(guards.iter().take(3).copied());
+    world.push_event(EventKind::Contract, &actors, text);
 }
 
 /// C12: one record's offers: its candidates by `fit` descending (ties the

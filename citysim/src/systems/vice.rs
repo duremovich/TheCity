@@ -315,6 +315,12 @@ pub fn booked(world: &mut World, worker: EntityId, client: EntityId, house: Enti
     world.push_event(EventKind::Served, &[madam, client, worker, house], text);
 }
 
+/// Round 3 S5: bar `id` from the house `b` until the day `until` (the
+/// bouncer's rough client, `customers::rough_at_door`).
+pub fn bar(world: &mut World, id: EntityId, b: EntityId, until: u64) {
+    world.jobs2.vice.barred.insert(key(id), (b, until));
+}
+
 /// R6a: is `id` barred from the house `b` today (a rough booking's)?
 pub fn barred(world: &World, id: EntityId, b: EntityId) -> bool {
     world.jobs2.vice.barred.get(&key(id)).is_some_and(|&(h, until)| h == b && world.day() < until)

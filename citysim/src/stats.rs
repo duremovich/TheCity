@@ -820,6 +820,18 @@ pub struct Jobs2Cols {
     pub cab_rides_driven: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub cab_rides_unmanned: u32,
+    /// Round 3 S5 (OPEN-217): the cab drivers' cuts of the fares they drove
+    /// (coins), clients a bouncer threw out for turning rough, refusals of
+    /// the barred at a kept door, a harm contract heard of by its target
+    /// (or his security).
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub cab_cuts: i64,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub door_rough: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub door_barred: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub hit_heard: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub fares_short: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
@@ -1530,6 +1542,10 @@ impl Jobs2Cols {
                 "taught_days",
                 "cab_rides_driven",
                 "cab_rides_unmanned",
+                "cab_cuts",
+                "door_rough",
+                "door_barred",
+                "hit_heard",
                 "fares_short",
                 "parcels_delivered",
                 "parcels_returned",
@@ -1993,6 +2009,10 @@ impl Jobs2Cols {
             self.taught_days.to_string(),
             self.cab_rides_driven.to_string(),
             self.cab_rides_unmanned.to_string(),
+            self.cab_cuts.to_string(),
+            self.door_rough.to_string(),
+            self.door_barred.to_string(),
+            self.hit_heard.to_string(),
             self.fares_short.to_string(),
             self.parcels_delivered.to_string(),
             self.parcels_returned.to_string(),

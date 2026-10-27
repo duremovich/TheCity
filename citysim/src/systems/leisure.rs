@@ -1560,6 +1560,10 @@ pub fn spot_of(world: &World, id: EntityId) -> Option<TilePos> {
             return Some(t);
         }
     }
+    // Round 3 S5 (OPEN-217): a cab driver standing by drives to his rank.
+    if let Some(t) = crate::systems::streetwork::rank_spot(world, id) {
+        return Some(t);
+    }
     world.unwind.get(&id).and_then(|p| p.spot)
 }
 

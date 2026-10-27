@@ -667,6 +667,8 @@ pub fn finishes_early(world: &World, id: EntityId, kind: ActionKind, started: Ti
                     .is_some_and(|j| can_work_now(world, id, j) && rest_cut_on_shift(world, id, j, started))
                     && !crate::systems::streetwork::standing_by(world, id))
                 || crate::systems::streetwork::driving(world, id)
+                // Round 3 S5: the rank's wait is up: he cruises to the next.
+                || crate::systems::streetwork::rank_wait_over(world, id, started)
         }
         // Waiting at the workplace for the shift: start the moment it begins.
         ActionKind::Wander => world.comp::<Job>(id).is_some_and(|j| can_work_now(world, id, j)),

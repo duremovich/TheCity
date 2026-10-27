@@ -616,6 +616,8 @@ pub fn serve(world: &mut World, server: EntityId, served: EntityId, place: Entit
     // The pressure pass R6a (OPEN-217): a Brothel visit is the madam's booking.
     if kind == ServeKind::Visit {
         crate::systems::vice::booked(world, server, served, place, coins);
+        // Round 3 S5 (OPEN-217): a rough client at a kept door, the bouncer's.
+        crate::systems::customers::rough_at_door(world, server, served, place);
     }
 }
 
@@ -829,6 +831,9 @@ pub fn refused(world: &mut World, id: EntityId, b: EntityId) {
     // The pressure pass phase 2 (OPEN-176): the cause named, and the scene
     // a drunk or a brawler makes of it.
     let why = crate::systems::customers::cause(world, id, b);
+    if why == Some("barred") {
+        ownership::jobs2_row(world).door_barred += 1;
+    }
     if row.event_on.contains(&ServeOutcome::Refused) {
         let because = why.map(|w| format!(" ({w})")).unwrap_or_default();
         let text = format!(

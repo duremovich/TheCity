@@ -38,6 +38,8 @@ use crate::world::World;
 
 const PURPOSE_DOOR: u64 = 0xc057_0001;
 const PURPOSE_SWING: u64 = 0xc057_0002;
+/// Round 3 S5: a client turning rough at a kept venue.
+const PURPOSE_ROUGH: u64 = 0xc057_0003;
 
 pub fn cfg(world: &World) -> Option<&CustomersCfg> {
     world.config.customers.as_ref()
@@ -83,6 +85,11 @@ pub fn cause(world: &World, id: EntityId, b: EntityId) -> Option<&'static str> {
     if world.comp::<Job>(id).is_some_and(|j| j.role == Role::Guard) {
         return None;
     }
+    // Round 3 S5 (OPEN-217): a client barred from the house (a rough night,
+    // the bouncer's or the madam's) is known at its door.
+    if world.config.verbs.is_some() && crate::systems::vice::barred(world, id, b) {
+        return Some("barred");
+    }
     if let Some(s) = crate::systems::misery::influence(world, id) {
         return Some(s);
     }
@@ -116,8 +123,82 @@ pub fn door_cause(world: &World, id: EntityId, b: EntityId) -> Option<&'static s
     if crate::systems::trades::door_staff(world, b).is_empty() {
         return None;
     }
+    // Round 3 S5: the barred face is turned away every time.
+    if why == "barred" {
+        return Some(why);
+    }
     let hour = world.tick / TICKS_PER_HOUR;
     (hash(world, PURPOSE_DOOR, id, key(b) ^ hour.rotate_left(17)) < c.door_p).then_some(why)
+}
+
+/// Round 3 S5 (OPEN-217; `service::serve`, the customer ledger): a client
+/// served by a tipped worker (a dancer) at a venue a bouncer keeps (not the
+/// Brothel: the madam's, `vice::booked`) turns rough on `[verbs]
+/// door_rough_p` x (1 - lawfulness) (a hash of the pair and the night):
+/// the worker hurt (safety, a `Lost` memory, an Assault raised on him), and
+/// the bouncer on the door throws him out and bars him from the venue for
+/// `door_ban_days` (`vice::barred`, read by [`cause`]: "barred"), the
+/// grudges both ways, the event in the bouncer's diary. Bouncers ran 12
+/// nights at the door with no refusal or ejection (V11). Both tiers.
+pub fn rough_at_door(world: &mut World, worker: EntityId, client: EntityId, b: EntityId) {
+    let Some(v) = world.config.verbs.clone() else { return };
+    if v.door_rough_p <= 0.0 || cfg(world).is_none() || worker == client {
+        return;
+    }
+    let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) else { return };
+    if kind == BuildingKind::Brothel || !kept_kind(world, kind) {
+        return;
+    }
+    if !crate::systems::trades::job_row(world, worker).is_some_and(|r| r.tipped) {
+        return;
+    }
+    let staff = crate::systems::trades::door_staff(world, b);
+    let Some(bouncer) = staff.into_iter().filter(|&s| s != client && s != worker).max_by(|&x, &y| {
+        crate::systems::law::fighting(world, x).total_cmp(&crate::systems::law::fighting(world, y)).then(y.cmp(&x))
+    }) else {
+        return;
+    };
+    let night = world.day();
+    let lawful = world.comp::<Personality>(client).map_or(0.5, |p| p.lawfulness);
+    if hash(world, PURPOSE_ROUGH, client, key(worker) ^ night) >= v.door_rough_p * (1.0 - lawful).max(0.0) {
+        return;
+    }
+    if let Some(n) = world.comp_mut::<Needs>(worker) {
+        n.safety = (n.safety - 0.3).max(0.0);
+    }
+    world.remember(worker, crate::components::MemoryKind::Lost, Some(client), 0.6, -0.5, false);
+    let tile = world.comp::<Building>(b).map(|bd| bd.door).unwrap_or_default();
+    crate::systems::law::raise_crime_on(
+        world,
+        client,
+        Some(worker),
+        Some(bouncer),
+        crate::components::Crime::Assault,
+        tile,
+    );
+    let grudge = cfg(world).map_or(0.3, |c| c.door_grudge);
+    crate::systems::grudges::add(world, client, bouncer, crate::word::GrudgeCause::Assaulted, grudge, 0);
+    crate::systems::grudges::add(world, bouncer, client, crate::word::GrudgeCause::Assaulted, grudge, 0);
+    crate::systems::vice::bar(world, client, b, night + v.door_ban_days);
+    if world.comp::<crate::components::Position>(client).is_some_and(|p| p.building == Some(b)) {
+        world.abort_plan(client);
+        world.leave_building(client);
+    }
+    let salience = world.config.service.served_salience;
+    let (vb, va) = (world.config.service.tune.eject_bouncer, world.config.service.tune.ejected);
+    world.remember(bouncer, crate::components::MemoryKind::Served, Some(client), salience, vb, false);
+    world.remember(client, crate::components::MemoryKind::Served, Some(bouncer), salience, va, false);
+    let row = crate::systems::ownership::jobs2_row(world);
+    row.ejections += 1;
+    row.door_rough += 1;
+    let text = format!(
+        "{} got rough with {} at {}; {} threw him out and barred him from the door",
+        world.name_of(client),
+        world.name_of(worker),
+        world.name_of(b),
+        world.name_of(bouncer)
+    );
+    world.push_event(crate::events::EventKind::Served, &[bouncer, client, worker, b], text);
 }
 
 /// `service::refused`'s scene: the turned-away `id` (drunk, high or a
@@ -507,15 +588,35 @@ pub fn patch(world: &mut World, id: EntityId, target: Option<EntityId>) -> bool 
 /// `exec::actions::end_shift`: a fare trade's body (the Cab Driver) is paid
 /// `min(1, fares / cab_fares_full)` of the day's wage for the shift's fares
 /// (the count cleared); `None` for any other worker, a Statistical driver
-/// (the mirror keeps the wage) and off.
+/// (the mirror keeps the wage) and off. Round 3 S5: with `[verbs]
+/// cab_fare_cut` the cuts were his pay: `Some(0.0)`, the shift told in
+/// one line ("drove N fares ... Xc his cut", or "no fare, no pay").
 pub fn fare_scale(world: &mut World, id: EntityId) -> Option<f32> {
     let full = cfg(world)?.cab_fares_full.max(1);
     let j = world.comp::<Job>(id)?;
+    let garage = j.employer;
     let fare = crate::systems::trades::row_of(world, j.role).is_some_and(|r| r.duty == crate::config::TradeDuty::Fare);
     if !fare || world.comp::<Brain>(id).is_none_or(|b| b.lod == Lod::Statistical) {
         return None;
     }
     let n = world.jobs2.fares_shift.remove(&id).unwrap_or(0);
+    // Round 3 S5 (OPEN-217): with `[verbs] cab_fare_cut` his pay is the
+    // cut of each fare, in hand at the fare (`streetwork::driver_cut`); the
+    // shift's end tells the shift, and no wage is owed (the scaled wage
+    // paid 0c on a fare-less shift and its memory said "Paid").
+    if world.config.verbs.as_ref().is_some_and(|v| v.cab_fare_cut > 0.0) {
+        let coins = world.jobs2.fare_cuts.remove(&id).unwrap_or(0);
+        let (who, at) = (world.name_of(id), garage.map_or_else(|| "the Garage".to_string(), |g| world.name_of(g)));
+        let text = if n == 0 {
+            format!("{who} stood by all shift for {at} and drove no fare: no fare, no pay")
+        } else {
+            format!("{who} drove {n} fare{} for {at} this shift, {coins}c his cut", if n == 1 { "" } else { "s" })
+        };
+        let mut actors = vec![id];
+        actors.extend(garage);
+        world.push_event(crate::events::EventKind::Served, &actors, text);
+        return Some(0.0);
+    }
     Some((f32::from(n) / f32::from(full)).min(1.0))
 }
 

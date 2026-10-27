@@ -73,6 +73,8 @@ const PURPOSE_FARE: u64 = 0x5713_0008;
 /// Lives at work phase 4 (§ 2.3): a parcel's sender, recipient building and
 /// recipient (one draw each, keyed by the yard, the day and the parcel).
 const PURPOSE_PARCEL: u64 = 0x5713_0009;
+/// Round 3 S5: the cab's rank for the wait.
+const PURPOSE_RANK: u64 = 0x5713_000a;
 
 /// Lives at work phase 4 (§ 2.3): who takes a booked ride.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -263,6 +265,7 @@ pub fn daily(world: &mut World) {
     world.jobs2.exec_home_rolled.clear();
     world.jobs2.hailed.clear();
     world.jobs2.fares_shift.clear();
+    world.jobs2.fare_cuts.clear();
     // A parcel no courier's round reached went back to the Yard.
     let left = std::mem::take(&mut world.jobs2.parcels).len() as u32;
     if left > 0 {
@@ -871,6 +874,12 @@ fn day_posts(world: &World, wage: i64) -> Vec<EntityId> {
 /// `Job.until` two hours past the shift's end (`DawnPick` per corner).
 fn dawn_pick(world: &mut World) {
     let Some(role) = day_role(world) else { return };
+    // Round 3 S5 (OPEN-217): no shape-up on the rest day: the post's shift
+    // is a workday's (`routine::workday_of`), so a hand picked then held a
+    // post with no shift and wandered all day (`day_labourer_75212 d27`).
+    if world.config.verbs.is_some() && !crate::exec::routine::is_workday(world.day() as i64) {
+        return;
+    }
     let cfg = world.config.jobs2.clone();
     let corners = corners(world);
     if corners.is_empty() {
@@ -1982,10 +1991,31 @@ fn ride_encounter(world: &mut World, rider: EntityId, driver: Option<EntityId>, 
     match (driver, ride.by) {
         (Some(s), RideBy::Cab(g)) => {
             *world.jobs2.fares_shift.entry(s).or_default() += 1;
+            driver_cut(world, s, g, ride.fare);
             crate::systems::service::serve(world, s, rider, g, kind, 0)
         }
         (_, RideBy::Rickshaw(r)) => crate::systems::service::encounter(world, r, rider, None, d, kind, 0),
         _ => {}
+    }
+}
+
+/// Round 3 S5 (OPEN-217): the driver's body takes `[verbs] cab_fare_cut`
+/// of the `fare` he drives in hand, from the Garage's owner (who took the
+/// fare: `pay_ride`), told in his diary as a money line and tallied for
+/// the shift's line (`fare_cuts`). A dodged fare (0) pays no cut. The
+/// fare went to the corp and the shift's wage, scaled by the fares, paid
+/// 0c and wrote "Paid" on a fare-less shift (`cabbie_82150`, 0c all week).
+fn driver_cut(world: &mut World, s: EntityId, g: EntityId, fare: i64) {
+    let Some(share) = world.config.verbs.as_ref().map(|v| v.cab_fare_cut).filter(|&c| c > 0.0) else { return };
+    let cut = (fare as f32 * share).round() as i64;
+    if cut <= 0 {
+        return;
+    }
+    let owner = world.owner_of(g);
+    let paid = ownership::pay(world, owner, Some(s), cut, Flow::CabFare);
+    if paid > 0 {
+        *world.jobs2.fare_cuts.entry(s).or_default() += paid;
+        ownership::jobs2_row(world).cab_cuts += paid;
     }
 }
 
@@ -2154,7 +2184,9 @@ pub fn fare_tile(world: &World, id: EntityId) -> Option<TilePos> {
 
 /// `exec::start_step`: a driver's leg is a drive, timed at the cab's speed.
 pub fn fare_leg(world: &World, id: EntityId, target: &crate::exec::GotoTarget) -> Option<crate::exec::ExecState> {
-    if !on_fare(world, id) && !cab_home(world, id, target) {
+    // Round 3 S5: the drive to the rank is the cab's too.
+    let to_rank = target.building.is_none() && rank_spot(world, id) == Some(target.tile);
+    if !on_fare(world, id) && !cab_home(world, id, target) && !to_rank {
         return None;
     }
     let here = crate::exec::walk_origin(world, id)?;
@@ -2231,11 +2263,82 @@ pub fn fare_plan(world: &mut World, id: EntityId) -> Option<Plan> {
     if !standing_by(world, id) {
         return None;
     }
+    // Round 3 S5 (OPEN-217): no fare, he waits at a rank (`rank_tile`),
+    // a Rest on the street there, and cruises to the next when the wait is
+    // up (`rank_wait_over`). He stood by 9.8 h resting inside the Garage
+    // (`cabbie_82150 d23`), the dispatch measuring every rider from there.
+    if let Some(rank) = rank_tile(world, id) {
+        let here = world.comp::<Position>(id).map(|p| (p.building, p.tile));
+        let action = if here == Some((None, rank)) { ActionKind::Rest } else { ActionKind::GoTo(LocationKey::Spot) };
+        let steps = vec![ActionInstance { action, target: None, tile: None }];
+        return Some(Plan { goal: GoalKind::Work, target: Some(garage), steps, started_tick: world.tick });
+    }
     let steps = vec![
         ActionInstance { action: ActionKind::GoTo(LocationKey::Workplace), target: Some(garage), tile: None },
         ActionInstance { action: ActionKind::Rest, target: None, tile: None },
     ];
     Some(Plan { goal: GoalKind::Work, target: Some(garage), steps, started_tick: world.tick })
+}
+
+/// Round 3 S5 (OPEN-217): the rank a cab driver standing by waits at: the
+/// door of a building of `[verbs] cab_rank_kinds` within `cab_rank_tiles`
+/// of his Garage's door, picked on a hash of the driver and the wait
+/// (`cab_rank_ticks`: each wait a fresh rank, the cruise). `None` off, for
+/// anyone not on a fare trade, or with no such door.
+pub fn rank_tile(world: &World, id: EntityId) -> Option<TilePos> {
+    let v = world.config.verbs.as_ref()?;
+    if v.cab_rank_tiles == 0 || v.cab_rank_kinds.is_empty() {
+        return None;
+    }
+    let job = world.comp::<Job>(id)?;
+    if !fare_duty(world, job) {
+        return None;
+    }
+    let door = world.comp::<Building>(job.employer?)?.door;
+    let r = v.cab_rank_tiles;
+    let mut doors: Vec<TilePos> = Vec::new();
+    for &k in &v.cab_rank_kinds {
+        for b in world.kind_grid(k).near(door, r) {
+            if let Some(bd) = world.comp::<Building>(b).filter(|bd| !bd.demolished && bd.door.manhattan(door) <= r) {
+                doors.push(bd.door);
+            }
+        }
+    }
+    doors.sort_unstable_by_key(|t| (t.x, t.y));
+    doors.dedup();
+    if doors.is_empty() {
+        return None;
+    }
+    let slot = world.tick / v.cab_rank_ticks.max(1);
+    let u = hash(world, PURPOSE_RANK, u64::from(id.index), slot);
+    Some(doors[((u * doors.len() as f32) as usize).min(doors.len() - 1)])
+}
+
+/// Round 3 S5: a cab driver resting at his rank (on the street, standing
+/// by) since `started` whose wait is up (`cab_rank_ticks`): he cruises on
+/// (`exec::actions::finishes_early`). False off.
+pub fn rank_wait_over(world: &World, id: EntityId, started: Tick) -> bool {
+    let Some(t) = world.config.verbs.as_ref().map(|v| v.cab_rank_ticks.max(1)) else { return false };
+    world.comp::<Position>(id).is_some_and(|p| p.building.is_none())
+        && started / t != world.tick / t
+        && standing_by(world, id)
+        && rank_tile(world, id).is_some()
+}
+
+/// Round 3 S5: is `id` a cab driver standing by at his rank's tile (the
+/// street Rest's start check, `exec::start_step`)?
+pub fn at_rank(world: &World, id: EntityId) -> bool {
+    standing_by(world, id)
+        && world.comp::<Position>(id).is_some_and(|p| p.building.is_none() && rank_tile(world, id) == Some(p.tile))
+}
+
+/// Round 3 S5: the rank's tile as the Work plan's `GoTo(Spot)` reads it
+/// (standing by, in the Work plan). `leisure::spot_of`.
+pub fn rank_spot(world: &World, id: EntityId) -> Option<TilePos> {
+    if world.comp::<Brain>(id).and_then(|b| b.plan_goal()) != Some(GoalKind::Work) || !standing_by(world, id) {
+        return None;
+    }
+    rank_tile(world, id)
 }
 
 /// A `fare` duty trade's job (the cab driver).

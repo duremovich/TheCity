@@ -148,6 +148,11 @@ pub struct Jobs2State {
     /// (`streetwork::ride_encounter`; read and cleared at the shift's end).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub fares_shift: std::collections::BTreeMap<EntityId, u16>,
+    /// Round 3 S5 (OPEN-217): a cab driver's body's cut of those fares this
+    /// shift, in coins (`streetwork::driver_cut`; told and cleared at the
+    /// shift's end, `customers::fare_scale`).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub fare_cuts: std::collections::BTreeMap<EntityId, i64>,
     /// The pre-view pass phase 5 (the `fares` shape, OPEN-115): a booked
     /// rider waiting at his door or aboard, by rider: his driver
     /// (`streetwork::carry`; the exec skips him while here).
