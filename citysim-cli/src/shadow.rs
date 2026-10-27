@@ -1039,6 +1039,10 @@ impl Track {
 /// The activity class of the agent this tick.
 fn activity(world: &World, id: EntityId) -> &'static str {
     if world.has::<Sentence>(id) {
+        // Pressure pass round 3, S3: lights-out in the cells is sleep.
+        if citysim::systems::law::asleep_in_cell(world, id) {
+            return "sleep";
+        }
         return "jail";
     }
     let Some(b) = world.comp::<Brain>(id) else { return "idle" };

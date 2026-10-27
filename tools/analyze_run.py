@@ -949,7 +949,7 @@ CREW_TOTALS = ("crew_raid_results", "crew_raid_wounded", "crew_duty_posted", "cr
                "crew_stood_down", "crew_tryout_refused")  # R5
 # Pressure pass round 2, R1: the fare dodger's ladder (systems/fares.rs).
 FARE_TOTALS = ("fare_caught", "fare_fined", "fare_beaten", "fare_banned", "fare_ban_broken", "fare_stat",
-               "fare_ban_walks")
+               "fare_ban_walks", "fare_turned_off", "law_collars")  # the last two: round 3 S3
 # Pressure pass round 2, R3: the wounded and the sick.
 CARE_TOTALS = ("care_doc_cut", "care_pawns", "care_slates", "care_slate_coins", "care_asks_refused", "care_asks_lent",
                "care_ask_coins", "care_calls", "care_strangers", "care_beat", "care_back_stabilised", "care_woken", "care_covered",

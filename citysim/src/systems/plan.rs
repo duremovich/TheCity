@@ -100,6 +100,10 @@ pub fn bind_target(world: &World, id: EntityId, goal: GoalKind) -> Option<Entity
         }
         // Arrest binds the located warrant suspect nearest the guard.
         GoalKind::Arrest => {
+            // Pressure pass round 3, S3: his own collar first (the crime he saw).
+            if let Some(s) = crate::systems::law::collar_of(world, id) {
+                return Some(s);
+            }
             let tile = world.comp::<Position>(id)?.tile;
             let located =
                 crate::systems::law::located_suspects(world, Some(crate::systems::law::Pursuer { tile, guard: id }));

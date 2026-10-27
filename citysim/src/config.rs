@@ -376,6 +376,12 @@ pub struct Config {
     /// reported, arrested and jailed as any petty offender.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fares: Option<FaresCfg>,
+    /// Pressure pass round 3, S3 (docs/PRESSURE_PASS.md § S3, `OPEN-223`):
+    /// justice that reads right: the cells' kitchen and lights-out, the
+    /// guard who acts on what he saw. `None` (not written into a save) with
+    /// the key absent: the cells and the watch as round 2 left them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub justice: Option<JusticeCfg>,
     /// The pressure pass round 2, R4 (OPEN-218, OPEN-219): `[noise]`, the
     /// diary's folds and the Camp answer's hour. Absent: the defaults.
     #[serde(default)]
@@ -1812,6 +1818,10 @@ pub struct FaresCfg {
     /// fare or walks (a beaten dodger does not try the same gate again
     /// within the hour).
     pub wary_hours: u64,
+    /// Pressure pass round 3, S3: beaten this many days ago or less, a
+    /// caught dodger is not beaten again: the guard turns him off the
+    /// platform and he walks (0: every catch past the fine is a beating).
+    pub beat_cooldown_days: u64,
 }
 
 impl Default for FaresCfg {
@@ -1827,7 +1837,39 @@ impl Default for FaresCfg {
             ban_days: 14,
             ban_break_lawfulness: 0.1,
             wary_hours: 24,
+            beat_cooldown_days: 3,
         }
+    }
+}
+
+/// Pressure pass round 3, S3 `[justice]` (docs/PRESSURE_PASS.md § S3;
+/// `OPEN-223`): the cells keep the body alive, the watch acts on what it
+/// sees. Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct JusticeCfg {
+    /// The cells' kitchen: the day's meal comes from the first of the
+    /// Jail's nearest this-many Markets with food on the shelf (the nearest
+    /// alone ran dry at 100k and the held starved).
+    pub kitchen_markets: usize,
+    /// Lights-out: a prisoner on screen sleeps in the cell from this hour
+    /// to `wake_hour` (energy restores as in a bed; the midnight reset to
+    /// 1.0 is the off-screen hold's alone).
+    pub lights_out_hour: u8,
+    pub wake_hour: u8,
+    /// A guard who saw a crime past petty himself (the report he filed)
+    /// takes the suspect as his collar for this many hours: the Arrest
+    /// goal's target first, on shift or off (0: the nearest warrant, on
+    /// shift only, as before).
+    pub collar_hours: u64,
+    /// ... and his Arrest goal carries this flat while he has one (a guard
+    /// who saw a murder on his commute walked on to the desk: Work 0.99).
+    pub collar_flat: f32,
+}
+
+impl Default for JusticeCfg {
+    fn default() -> Self {
+        JusticeCfg { kitchen_markets: 4, lights_out_hour: 22, wake_hour: 6, collar_hours: 2, collar_flat: 0.5 }
     }
 }
 

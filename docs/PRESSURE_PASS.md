@@ -1136,3 +1136,68 @@ madam x2, joytoy x3, street_worker x2 and six customers (`--agent`).
   `arms::test_seized_crate_lands_in_the_precinct`, `arms::test_landed_crate_fills_the_armoury_and_the_muster_draws_it`
   (the bettors' stakes moved the gangs' purses), and `tower::test_off_city_writes_nothing_in_three_days` (the pit's
   bettors are the Fighter's Attendees, not the tower's).
+
+### S3, justice that reads right (`OPEN-223`; `law.rs`, `fares.rs`, `[justice]`, `[fares] beat_cooldown_days`)
+
+- **The "victim booked" was a resisted arrest.** `miserable_29154`'s three "Assault: Cutter Crane fought off X" lines
+  were `law::arrest`'s scuffle text: three guards came for an open Assault warrant (filed before the diary's window)
+  while he slept, a courage-0.95 suspect fought two off, and the third (Emeric Yardley, the "attacker") cuffed him.
+  The attribution is right: at 20k seed 42 x 30, of 1,088 witnessed Assault/Murder lines 879 name the actor first and
+  the 180 others are all blackmail victims who "went for" the blackmailer; every Assault sentence checked by hand has
+  its swing (a drunk at a door, a Confronted owner, a brawl). What was wrong is the line. Now the scuffle reads
+  "X resisted arrest and fought off the guard Y (wanted for Assault on Z)", the arrest "Y arrested X for Assault on
+  Z", the sentence "X sentenced to 10 days for Assault on Z" (`law::charge_label`: the newest report's witness's
+  `SawCrime` object; Murder "of", thefts and the shakedown "from"; no witness memory: the crime alone). No crime is
+  added for resisting. Deviation: the brief's "name the attackers" is the guards, named as guards, and the warrant's
+  victim. Not confirmed at 100k (the warrant predates d21); the 20k reading stands in.
+- **The cells keep the body.** `jail_upkeep`'s meal came from the Market nearest the Jail alone; at 100k it ran dry
+  and `jailed_75054` starved from d26. Now the first of the Jail's nearest `kitchen_markets` (4) with food; a body on
+  screen that goes without gets a `Cells` line ("went without: the cells' kitchen had no food"), and a starving body
+  is fed hourly as the held were (`held_hourly`). Sleep: `jail_upkeep` set energy to 1.0 at midnight, so a body on
+  screen ran 1.0 -> 0.00 every day and never slept; now a sentenced body inside sleeps at lights-out
+  (`lights_out_hour` 22 to `wake_hour` 6, `law::asleep_in_cell`, read by `needs::run` and the shadow tool's
+  activity), and the midnight 1.0 is the off-screen hold's alone.
+- **The cell is not a meeting hall.** The 1,171 Acquaintance lines a day were the gang pitch: `social::colocation`'s
+  four-hourly jail drift (and `held_daily`'s) called `adjust` for a member with every inmate, which made an edge each
+  time; `[social] acquaintance_cap` pruned them at midnight and the drift made them again. The drift now warms only a
+  pair with an edge (the arrival's capped `jail_meet_max` meetings). No key: a bug.
+- **The fare's cool-down.** `[fares] beat_cooldown_days` 3: a dodger beaten inside it (banned, or broke) is turned off
+  the platform instead ("turned him off the platform (banned, the ban stands; beaten for it on d25)"), a lighter
+  `Lost`, his plan aborted (he walks), and a broken ban stands rather than restarting. `fares::Record.beaten`;
+  `fare_turned_off` 56 in 30 days; the most-beaten dodger 6 -> 5 (a cool-down, not an end: a ban-breaker under
+  `ban_break_lawfulness` still rides and is beaten every fourth day at most).
+- **The guard acts on what he saw.** `[justice] collar_hours` 2, `collar_flat` 0.5: the suspect of a report past
+  petty that the guard himself filed in the last two hours, located and chaseable by him, is his collar
+  (`law::collar_of`): the Arrest goal's target first (`plan::bind_target`), open off shift (`[life] arrest_off_shift`
+  0 shut it), with a flat while he has it or chases it, so it beats the commute or the desk (a guard who saw a murder
+  on his commute walked on to the desk, Work 0.99). The collar is his before another guard's claim (`chaseable` but
+  for the claim: in `law::test_theft_witnessed_by_guard_leads_to_jail_within_1_day` a guard across the district
+  claimed the thief first while the witness walked to his desk); `law::arrest` refuses a suspect another guard has
+  cuffed (two after one). `law_collars` 196 in 30 days; arrests by the witness within 6 h of a guard's sighting
+  28 -> 218. A guard on the take still files nothing and so has no collar.
+- **Jail duty in blocks.** `[shift.roles] Guard = "stations"` with a gate in `shift::plan` (a guard's shape is the jail
+  day's only; a patrol day is Patrol's): the 538-min `GuardJail` is now 40-75 min blocks across the Station or the
+  Precinct with the mid-shift break, each block's end a think (`guard_24289 d23 09:06-17:17`: nine blocks).
+- **Numbers** (20k island seed 42 x 30, one run each, base `7bbf9b8`): arrests 1,131 -> 1,451; jailed mean 150.1 ->
+  181.9 (max 292 -> 392); Assault+Murder events a day 36.1 -> 51.0 (resisted arrests 217 -> 317, "attacked" 666 ->
+  964, fights at the Precinct 19 -> 61: more arrests, more grudges on the released); violent deaths 85 -> 83; cell
+  fights 55 -> 101; ticks/s 196 -> 130 (three runs on the box at once; a print). The arrests by part, one ablation
+  run each on the build before the collar's claim fix (1,452 arrests): without the collar 1,294, without the desk
+  blocks 1,384. The harsher law is the mechanism working, not a knob (doctrine 1, 5): a FINDING.
+- **Shadow** (20k seed 42 d21-27; miserable, jailed, dodger, guard x2, plus `--agent 24289`, `7825`; no arms_dealer
+  candidate at 20k, the jail edge flood read on `jailed_9922`): jail days read "sleep 8.0h, jail 16.0h" (was "jail
+  24.0h"), energy 0.92 at 08:00 down to 0.42 at 20:00 and back by 06:00 (was 0.00 every midnight); new edges in a
+  jailed week 898 -> 17-31; "Mirabel Draper arrested Quinn Penhallow for Grand Theft from Katrin Adeyemi", "Xia Sato
+  resisted arrest and fought off the guard Mirabel Draper (wanted for Assault on Orrin Adeyemi)" three times, then
+  "arrested Xia Sato for Assault on Orrin Adeyemi"; "Jasper Crane arrested Orrin Okafor for Murder of Varek Achebe";
+  the collar: `guard_7825 d24 13:42` "Juno Adeyemi saw Dante Kaneda commit Shakedown", 13:55 "GOAL Arrest (was
+  Patrol): score 1.292", 14:05 "arrested Dante Kaneda for Shakedown".
+  Reads wrong (next pass): a patrol day still ends at ~14:00 "not in shift" with 1.8 h of work (corp V11 bug 2,
+  untouched); an off-shift guard who saw a Grand Theft (`guard_24289 d21 13:49`) took no collar (the car thief out of
+  a chaseable sighting); a sentence names the worst crime's victim even when the arrest was for a later one; a
+  report with no witness (off screen) reads "for Theft" with no victim; the harsher law fills the cells (392 at peak) and the street's attacks rise with it.
+- No test (doctrine 2). `SAVE_VERSION` 77 (`fares::Record.beaten`, `[justice]`, `[fares] beat_cooldown_days`, the
+  `fare_turned_off`, `law_collars` columns). Re-pinned with the reason in place:
+  `law::test_theft_witnessed_by_guard_leads_to_jail_within_1_day` to the one-action desk day (`[shift.roles] Guard`
+  removed: the desk in blocks moved the scene and the witness lost the walking thief at the chase's last hop) and
+  `scavs::test_drag_holds_gangwork`'s starving member holds a meal's coins (the moved city's pick was broke).

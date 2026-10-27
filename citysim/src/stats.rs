@@ -1199,6 +1199,13 @@ pub struct Jobs2Cols {
     pub fare_stat: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub fare_ban_walks: u32,
+    /// Pressure pass round 3, S3: caught inside `beat_cooldown_days` of his
+    /// last beating, turned off the platform instead.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub fare_turned_off: u32,
+    /// Round 3 S3: arrests by the guard who saw the crime (his collar).
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub law_collars: u32,
     // Pressure pass round 2, R3 (`systems::care`).
     #[serde(skip_serializing_if = "is_zero_i64")]
     pub care_doc_cut: i64,
@@ -1683,6 +1690,8 @@ impl Jobs2Cols {
                 "fare_ban_broken",
                 "fare_stat",
                 "fare_ban_walks",
+                "fare_turned_off",
+                "law_collars",
                 "care_doc_cut",
                 "care_pawns",
                 "care_slates",
@@ -2146,6 +2155,8 @@ impl Jobs2Cols {
             self.fare_ban_broken.to_string(),
             self.fare_stat.to_string(),
             self.fare_ban_walks.to_string(),
+            self.fare_turned_off.to_string(),
+            self.law_collars.to_string(),
             self.care_doc_cut.to_string(),
             self.care_pawns.to_string(),
             self.care_slates.to_string(),

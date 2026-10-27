@@ -622,6 +622,50 @@ pub fn located_suspects(world: &World, by: Option<Pursuer>) -> Vec<EntityId> {
         .collect()
 }
 
+/// Pressure pass round 3, S3 (`OPEN-223`, `[justice] collar_hours`): the
+/// suspect `guard` saw commit a crime past petty himself (the open report
+/// he filed in the last `collar_hours`), when it is located and chaseable
+/// by him: his collar, the Arrest goal's target on shift or off (a guard
+/// at 100k witnessed 132 crimes in a week and arrested none: off shift the
+/// Arrest goal is shut, and on shift the nearest warrant won). The newest.
+pub fn collar_of(world: &World, guard: EntityId) -> Option<EntityId> {
+    let hours = world.config.justice.as_ref()?.collar_hours;
+    if hours == 0 || !is_guard(world, guard) {
+        return None;
+    }
+    let since = world.tick.saturating_sub(hours * crate::time::TICKS_PER_HOUR);
+    let mine: Vec<(Tick, EntityId)> = world
+        .crime_reports()
+        .iter()
+        .filter(|r| !r.resolved && r.witness == Some(guard) && r.tick >= since && !is_petty(r.crime))
+        .map(|r| (r.tick, r.suspect))
+        .collect();
+    if mine.is_empty() {
+        return None;
+    }
+    let tile = world.comp::<Position>(guard)?.tile;
+    let radius = pursuit_radius_for(world, guard);
+    let private = is_private_guard(world, guard);
+    // `chaseable` but for the claim: the witness's collar is his before any
+    // guard who heard the report (another's chase from across the district
+    // claimed it first and lost the thief, while the guard who saw it walked
+    // on to his desk).
+    mine.into_iter()
+        .filter(|&(_, s)| {
+            s != guard
+                && wanted(world, s)
+                && located(world, s)
+                && world.last_seen().get(&s).is_some_and(|&seen| {
+                    seen.0.manhattan(tile) <= radius
+                        && crate::systems::life::sighting_fresh_at(world, seen, tile)
+                        && (!private || on_beat_at(world, guard, seen.0))
+                })
+                && !crate::systems::contracts::on_take_of(world, guard, s)
+        })
+        .max()
+        .map(|(_, s)| s)
+}
+
 /// Is `located_suspects(world, by)` non-empty?
 pub fn any_located_suspect(world: &World, by: Option<Pursuer>) -> bool {
     let claimed = claim_set(world, by);
@@ -658,6 +702,45 @@ fn fine_for(world: &World, crime: Crime) -> i64 {
 /// Solicitation), fined whenever the suspect can pay (Shadow V4 bug 4).
 pub fn is_petty(crime: Crime) -> bool {
     matches!(crime, Crime::Vagrancy | Crime::FareEvasion | Crime::UnlicensedArms | Crime::Solicitation)
+}
+
+/// The worst open warrant on `suspect` (the one its sentence would be for).
+pub fn wanted_for(world: &World, suspect: EntityId) -> Option<Crime> {
+    world.crime_reports().iter().filter(|r| !r.resolved && r.suspect == suspect).map(|r| r.crime).max()
+}
+
+/// Pressure pass round 3, S3 (OPEN-223): the charge as a line reads it, the
+/// crime and whom it was done to when the report's witness saw that
+/// ("Assault on Thea Kemp"): an arrest of a sleeper read as the sleeper
+/// attacked, with the warrant nowhere in his diary. The victim comes from
+/// the newest report of `crime` on `suspect`, its witness's `SawCrime`
+/// memory; none (an off-screen report, a memory gone): the crime alone.
+pub fn charge_label(world: &World, suspect: EntityId, crime: Crime) -> String {
+    let prep = match crime {
+        Crime::Assault | Crime::Abduction => "on",
+        Crime::Murder | Crime::Manslaughter => "of",
+        Crime::Theft | Crime::GrandTheft | Crime::Extortion | Crime::Blackmail | Crime::Fraud => "from",
+        _ => return crime.label().to_string(),
+    };
+    let victim = world
+        .crime_reports()
+        .iter()
+        .filter(|r| r.suspect == suspect && r.crime == crime)
+        .max_by_key(|r| (!r.resolved, r.tick))
+        .and_then(|r| r.witness)
+        .and_then(|w| world.comp::<crate::components::Memory>(w))
+        .and_then(|m| {
+            m.entries
+                .iter()
+                .filter(|e| e.kind == MemoryKind::SawCrime && e.subject == Some(suspect) && e.crime == Some(crime))
+                .max_by_key(|e| e.tick)
+                .and_then(|e| e.object)
+        })
+        .filter(|&v| v != suspect && world.has::<crate::components::Identity>(v));
+    match victim {
+        Some(v) => format!("{} {prep} {}", crime.label(), world.name_of(v)),
+        None => crime.label().to_string(),
+    }
 }
 
 /// Sentence length in ticks for a crime at the current lever.
@@ -970,6 +1053,9 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
         || !living(world, guard)
         || world.has::<Sentence>(suspect)
         || !near(world, guard, suspect, 1)
+        // S3: two guards after one suspect (a collar and a claim): the
+        // second to reach a cuffed suspect has nothing to do.
+        || world.comp::<Brain>(suspect).and_then(|b| b.cuffed_by).is_some_and(|c| c != guard && c != suspect)
     {
         return false;
     }
@@ -1015,10 +1101,21 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
             if let Some(n) = world.comp_mut::<Needs>(suspect) {
                 n.safety = (n.safety - 0.3).max(0.0);
             }
+            // Pressure pass round 3, S3 (OPEN-223): the line says it was an
+            // arrest resisted and for what ("fought off X" read as the
+            // sleeper attacked three times and booked for it).
+            let charge = wanted_for(world, suspect).map_or_else(
+                || "an open warrant".to_string(),
+                |c| format!("wanted for {}", charge_label(world, suspect, c)),
+            );
             world.push_event(
                 EventKind::Assault,
                 &[suspect, guard],
-                format!("{} fought off {}", world.name_of(suspect), world.name_of(guard)),
+                format!(
+                    "{} resisted arrest and fought off the guard {} ({charge})",
+                    world.name_of(suspect),
+                    world.name_of(guard)
+                ),
             );
             crate::systems::law_brain::push_shock(world, LawShock::GuardBeaten);
             return false;
@@ -1050,10 +1147,16 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
     }
     // Lives at work phase 7 (§ 5.2): the nearest Station full: sent on.
     crate::systems::stations::on_arrest(world, guard);
+    // S3: the arrest names its charge; the witness's own arrest is his collar.
+    if world.crime_reports().iter().any(|r| !r.resolved && r.suspect == suspect && r.witness == Some(guard)) {
+        crate::systems::ownership::jobs2_row(world).law_collars += 1;
+    }
+    let charge =
+        wanted_for(world, suspect).map_or_else(String::new, |c| format!(" for {}", charge_label(world, suspect, c)));
     world.push_event(
         EventKind::Arrest,
         &[guard, suspect],
-        format!("{} arrested {}", world.name_of(guard), world.name_of(suspect)),
+        format!("{} arrested {}{charge}", world.name_of(guard), world.name_of(suspect)),
     );
     true
 }
@@ -1509,7 +1612,8 @@ pub fn sentence(world: &mut World, who: EntityId, crime: Crime, until: Tick, jai
     world.retier(who);
     let name = world.name_of(who);
     let days = until.saturating_sub(world.tick).div_ceil(TICKS_PER_DAY);
-    world.push_event(EventKind::Sentence, &[who], format!("{name} sentenced to {days} days for {}", crime.label()));
+    let charge = charge_label(world, who, crime);
+    world.push_event(EventKind::Sentence, &[who], format!("{name} sentenced to {days} days for {charge}"));
     if let Some(place) = place {
         crate::systems::street::note_vagrancy(world, place);
         let text = format!("{name} jailed for the night for vagrancy in {}", world.district_name(place));
@@ -2095,16 +2199,21 @@ fn expire_warrants(world: &mut World) {
 
 /// Prisoners get one meal a day from the Market nearest the Jail, paid by the
 /// Treasury at the city's mean price to the Market's owner (M11 D46; the
-/// coins used to vanish), and a full night's sleep.
+/// coins used to vanish), and a full night's sleep. Pressure pass round 3,
+/// S3 (`[justice]`): the meal from the first of the nearest
+/// `kitchen_markets` Markets with food (a bare kitchen is a `Cells` line for
+/// a body on screen), and the night's sleep is the off-screen hold's alone
+/// (a body sleeps at lights-out, `in_lights_out`).
 fn jail_upkeep(world: &mut World) {
     let price = world.mean_price();
-    let market = jail_market(world);
+    let kitchens = jail_kitchens(world);
     let cfg = world.config.needs.clone();
+    let lights = world.config.justice.is_some();
     // Lives at work phase 3 (§ 2.2, jailer): the meal and the count are the
     // jailer's: a fed prisoner is an `Inmate` encounter (civic only).
     let jail = world.building_of_kind(BuildingKind::Jail).filter(|_| crate::systems::service::civic_on(world));
     for who in world.with::<Sentence>() {
-        if jail_meal(world, who, market, price, &cfg) {
+        if jail_meal(world, who, &kitchens, price, &cfg) {
             // Lives at work phase 7: a Station's held are fed, but the
             // Precinct's jailer serves only the Precinct's.
             let in_station = world
@@ -2114,6 +2223,12 @@ fn jail_upkeep(world: &mut World) {
             if let Some(j) = jail.filter(|_| !in_station) {
                 crate::systems::service::arrive(world, who, j, crate::components::ServeKind::Inmate, 0);
             }
+        } else if lights && !crate::systems::lod::is_held(world, who) {
+            let text = format!("{} went without: the cells' kitchen had no food", world.name_of(who));
+            world.push_event(EventKind::Cells, &[who], text);
+        }
+        if lights && !crate::systems::lod::is_held(world, who) {
+            continue;
         }
         if let Some(n) = world.comp_mut::<Needs>(who) {
             n.energy = 1.0;
@@ -2121,43 +2236,70 @@ fn jail_upkeep(world: &mut World) {
     }
 }
 
-/// The Market nearest the Jail's door (the cells' kitchen).
-fn jail_market(world: &World) -> Option<EntityId> {
-    world
-        .building_of_kind(BuildingKind::Jail)
-        .and_then(|j| world.comp::<Building>(j).map(|b| b.door))
-        .and_then(|door| world.nearest_of_kind(BuildingKind::Market, door))
+/// Pressure pass round 3, S3: is it lights-out in the cells (`[justice]`
+/// `lights_out_hour`..`wake_hour`)? A sentenced body sleeps then.
+pub fn in_lights_out(world: &World) -> bool {
+    let Some(c) = world.config.justice.as_ref() else { return false };
+    let h = (u64::from(world.tick_of_day()) / crate::time::TICKS_PER_HOUR) as u8;
+    if c.lights_out_hour <= c.wake_hour {
+        h >= c.lights_out_hour && h < c.wake_hour
+    } else {
+        h >= c.lights_out_hour || h < c.wake_hour
+    }
 }
 
-/// One Jail meal for a prisoner from `market`'s shelf, the Treasury paying
-/// (`Flow::JailFood`). False when the shelf is empty.
+/// S3: is `id` a prisoner asleep in the cells now (sentenced, inside, at
+/// lights-out)? Read by `needs::run` (the bed's restore) and the shadow tool.
+pub fn asleep_in_cell(world: &World, id: EntityId) -> bool {
+    in_lights_out(world)
+        && world.has::<Sentence>(id)
+        && world.comp::<Position>(id).is_some_and(|p| p.building.is_some())
+}
+
+/// The cells' kitchens: the Market nearest the Jail's door; with
+/// `[justice]`, its nearest `kitchen_markets`, nearest first.
+fn jail_kitchens(world: &World) -> Vec<EntityId> {
+    let Some(door) = world.building_of_kind(BuildingKind::Jail).and_then(|j| world.comp::<Building>(j).map(|b| b.door))
+    else {
+        return Vec::new();
+    };
+    let Some(n) = world.config.justice.as_ref().map(|c| c.kitchen_markets.max(1)) else {
+        return world.nearest_of_kind(BuildingKind::Market, door).into_iter().collect();
+    };
+    let mut all: Vec<(u32, EntityId)> = world
+        .buildings_of_kind(BuildingKind::Market)
+        .iter()
+        .filter_map(|&b| {
+            world.comp::<Building>(b).filter(|bd| !bd.demolished && !bd.derelict).map(|bd| (bd.door.manhattan(door), b))
+        })
+        .collect();
+    all.sort_unstable();
+    all.into_iter().take(n).map(|(_, b)| b).collect()
+}
+
+/// One Jail meal for a prisoner from the first of `kitchens` with food on
+/// the shelf, the Treasury paying (`Flow::JailFood`). False when every
+/// shelf is empty.
 fn jail_meal(
     world: &mut World,
     who: EntityId,
-    market: Option<EntityId>,
+    kitchens: &[EntityId],
     price: i64,
     cfg: &crate::config::NeedsCfg,
 ) -> bool {
-    let fed = market.and_then(|m| world.comp_mut::<Building>(m)).is_some_and(|b| {
-        if b.stock_food > 0 {
-            b.stock_food -= 1;
-            true
-        } else {
-            false
-        }
-    });
-    if !fed {
+    let Some(market) = kitchens.iter().copied().find(|&m| world.comp::<Building>(m).is_some_and(|b| b.stock_food > 0))
+    else {
         return false;
+    };
+    if let Some(b) = world.comp_mut::<Building>(market) {
+        b.stock_food -= 1;
     }
     if crate::systems::lod::is_held(world, who) {
         world.stats.current.budget.held_fed += 1;
     }
-    if let Some(m) = market {
-        let owner = world.owner_of(m);
-        let paid =
-            crate::systems::ownership::charge(world, None, owner, price, crate::systems::ownership::Flow::JailFood);
-        crate::systems::ownership::credit(world, m, paid);
-    }
+    let owner = world.owner_of(market);
+    let paid = crate::systems::ownership::charge(world, None, owner, price, crate::systems::ownership::Flow::JailFood);
+    crate::systems::ownership::credit(world, market, paid);
     if let Some(n) = world.comp_mut::<Needs>(who) {
         crate::needs::eat(n, cfg);
     }
@@ -2243,6 +2385,12 @@ pub fn held_daily(world: &mut World) {
                 if p == m || (member(world, p) && p < m) {
                     continue;
                 }
+                // Pressure pass round 3, S3 (OPEN-223): the met only (see
+                // `social::colocation`'s jail drift): a member's day drifted
+                // him with the whole hold, an edge with each.
+                if world.edge(m, p).is_none() {
+                    continue;
+                }
                 let step = world.config.social.affinity_per_hour * social::similarity_mult(world, m, p);
                 social::adjust(world, m, p, hours * step, hours * 0.02);
             }
@@ -2259,7 +2407,7 @@ fn held_hourly(world: &mut World) {
     }
     let held: Vec<EntityId> =
         world.sentenced().iter().copied().filter(|&p| crate::systems::lod::is_held(world, p)).collect();
-    let mut kitchen: Option<(Option<EntityId>, i64, crate::config::NeedsCfg)> = None;
+    let mut kitchen: Option<(Vec<EntityId>, i64, crate::config::NeedsCfg)> = None;
     for id in held {
         settle_held(world, id);
         // L2 phase 5: a held prisoner who is starving (an arrest of the
@@ -2267,12 +2415,30 @@ fn held_hourly(world: &mut World) {
         // meal now, not at midnight: on 42-47 one or two a run died within
         // the hour of arrival (the gate's "no held prisoner starves").
         if world.comp::<Needs>(id).is_some_and(|n| n.starving_since.is_some()) {
-            let (market, price, cfg) = kitchen
-                .get_or_insert_with(|| (jail_market(world), world.mean_price(), world.config.needs.clone()))
+            let (kitchens, price, cfg) = kitchen
+                .get_or_insert_with(|| (jail_kitchens(world), world.mean_price(), world.config.needs.clone()))
                 .clone();
-            jail_meal(world, id, market, price, &cfg);
+            jail_meal(world, id, &kitchens, price, &cfg);
         }
         crate::needs::starvation(world, id);
+    }
+    // Pressure pass round 3, S3: a prisoner on screen (a pinned body in the
+    // cells) starving gets the same meal now (the hold's rule was the held's
+    // alone: `jailed_75054` starved from d26 at Full).
+    if world.config.justice.is_some() {
+        let bodies: Vec<EntityId> = world
+            .sentenced()
+            .iter()
+            .copied()
+            .filter(|&p| !crate::systems::lod::is_held(world, p))
+            .filter(|&p| world.comp::<Needs>(p).is_some_and(|n| n.starving_since.is_some()))
+            .collect();
+        for id in bodies {
+            let (kitchens, price, cfg) = kitchen
+                .get_or_insert_with(|| (jail_kitchens(world), world.mean_price(), world.config.needs.clone()))
+                .clone();
+            jail_meal(world, id, &kitchens, price, &cfg);
+        }
     }
 }
 
