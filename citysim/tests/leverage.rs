@@ -310,6 +310,13 @@ fn test_protection_pays_weekly_and_stops_when_district_lost() {
     let before = identity(&w);
     let weekly = w.config.leverage.protection_weekly;
     let day0 = w.day();
+    // The pressure pass round 2 (premise moved): on the combined city the
+    // two led gangs flip each other's Blocks week on week (R4's friendship
+    // flip: only the holders who see a blow turn Enemy), and the racket's
+    // district changed hands in the second week, ending the hold before the
+    // test's loss. This test is the weekly payment, so the turf is held as
+    // staged; the loss is the explicit removal below.
+    let held_turf: Vec<EntityId> = w.comp::<Gang>(g).unwrap().territory.clone();
     let id = leverage::force(
         &mut w,
         Some(g),
@@ -336,6 +343,7 @@ fn test_protection_pays_weekly_and_stops_when_district_lost() {
         for _ in 0..=left {
             w.underwater.shut.clear();
             w.run_ticks(1);
+            w.comp_mut::<Gang>(g).unwrap().territory.clone_from(&held_turf);
             if w.has::<citysim::Sentence>(leader) {
                 citysim::systems::law::release(&mut w, leader, false);
             }
