@@ -850,6 +850,39 @@ pub struct DistanceCfg {
     /// trips. `None` (not written into a save) with the key absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reach: Option<ReachCfg>,
+    /// Pressure pass round 3, S1 (OPEN-221): distance in the goals' place
+    /// picks. `None` (not written into a save) with the key absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub choice: Option<ChoiceCfg>,
+}
+
+/// Pressure pass round 3, S1 `[distance.choice]` (docs/PRESSURE_PASS.md;
+/// OPEN-221): the place a goal picks is picked by reach, on the body's own
+/// trip (`distance::trip`: the El only for a body that would board it), and
+/// a trip past its cap is not set out on: the nearer option, else another
+/// goal, and the diary says so. Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ChoiceCfg {
+    /// A dealer's site today: the gang's spot (venue or corner) of each
+    /// district it holds, nearest first, from his Home door (by the Hideout
+    /// when he must pick up first); none within: no Deal today.
+    pub deal_ticks: u64,
+    /// A gang member's order work (`gang::gang_work_target`: the Home to
+    /// shake down or claim, the derelict to squat): past this from where he
+    /// stands he does not set out.
+    pub gang_work_ticks: u64,
+    /// The hire: a candidate whose Home door is past this from the
+    /// workplace door is not hired even with nobody nearer (the vacancy
+    /// waits); `[distance] job_cap_ticks` stays the soft cap.
+    pub hire_max_ticks: u64,
+    /// A Builder's (the day labourer's) far site day (`shift::far_site`):
+    /// the open site past this from the Yard's door is not walked to (the
+    /// shift is worked at the Yard).
+    pub site_ticks: u64,
+    /// A Visit (a Camp child, a hurt kin, an elder parent, an errand; not a
+    /// gang duty): the place past this from where the visitor sets out is
+    /// not walked to.
+    pub visit_ticks: u64,
 }
 
 /// The pressure pass phase 4 `[distance.reach]` (docs/PRESSURE_PASS.md;

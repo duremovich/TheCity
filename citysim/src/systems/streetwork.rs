@@ -951,6 +951,19 @@ fn dawn_pick(world: &mut World) {
             None => admitted.max_by(order),
         };
         let Some(a) = best else { continue };
+        // Pressure pass round 3, S1 (OPEN-221): the nearest left is no hire
+        // past `[distance.choice] hire_max_ticks` of the post.
+        if let Some(c) = crate::systems::distance::choice(world) {
+            let from = world
+                .comp::<crate::components::Position>(a)
+                .map(|p| p.tile)
+                .or_else(|| crate::systems::distance::set_out(world, a));
+            // The structural trip, as `demography::past_hire_max`.
+            if from.is_some_and(|t| crate::systems::distance::travel(world, t, door) > c.hire_max_ticks) {
+                ownership::jobs2_row(world).choice_hire_far += 1;
+                continue;
+            }
+        }
         queues[i].retain(|&x| x != a);
         crate::systems::demography::hire(world, a, b, role);
         if let Some(j) = world.comp_mut::<Job>(a) {

@@ -79,6 +79,13 @@ fn recruit_gang_any(world: &World, id: EntityId) -> Option<EntityId> {
             .filter_map(|(&g, _)| world.comp::<Gang>(g))
             .map(|g| g.members.len())
             .sum();
+        // Pressure pass round 3, S1 (OPEN-221): with `[distance.choice]` and
+        // `[crew]` on, a gang with no try-out place within the recruit's reach
+        // (`tryout_place`) is no pick: the best tie among the gangs he can
+        // walk to (V11: the best tie's Hideout across the island, JoinGang
+        // not scored, a nearer gang's tie never read). Read once a gang.
+        let reach_on = crate::systems::distance::choice(world).is_some() && crate::systems::crew::cfg(world).is_some();
+        let mut in_reach: Vec<Option<bool>> = vec![None; gangs.len()];
         let mut consider = |gi: usize, gid: EntityId, m: EntityId, mi: usize| {
             // M15 W31: a Purist gang refuses the chromed.
             if !crate::systems::creeds::tolerated(world, gid, id)
@@ -91,6 +98,9 @@ fn recruit_gang_any(world: &World, id: EntityId) -> Option<EntityId> {
                 return;
             }
             let better = best.is_none_or(|(a, bg, bm, _)| e.affinity > a || (e.affinity == a && (gi, mi) < (bg, bm)));
+            if better && reach_on && !*in_reach[gi].get_or_insert_with(|| tryout_place(world, id, gid).is_some()) {
+                return;
+            }
             if better {
                 best = Some((e.affinity, gi, mi, gid));
             }
@@ -306,7 +316,8 @@ pub fn tryout_place(world: &World, id: EntityId, gang: EntityId) -> Option<Entit
         world
             .comp::<Building>(b)
             .filter(|bd| !bd.demolished)
-            .map(|bd| crate::systems::distance::travel(world, from, bd.door))
+            // S1 (OPEN-221): the recruit's own trip (the walk without the fare).
+            .map(|bd| crate::systems::distance::trip(world, id, from, bd.door))
     };
     if ticks(hideout).is_some_and(|t| t <= reach) {
         return Some(hideout);
@@ -818,6 +829,22 @@ pub fn squat_claim_with(world: &mut World, actor: EntityId, b: EntityId, fights:
 /// definition `claim` flips on, so a contested Home whose claim has been
 /// reset still reads as the rival's until the third blow lands.
 pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option<Order>)> {
+    // Pressure pass round 3, S1 (OPEN-221): the order's Home (a shakedown, a
+    // claim) or derelict lies within `[distance.choice] gang_work_ticks` of
+    // where the member stands, else no GangWork (V11 at 20k: a dealer off his
+    // spot walked 300-580 min to a Home picked near the Hideout).
+    let t = gang_work_pick(world, id)?;
+    let Some(cap) = crate::systems::distance::choice(world).map(|c| c.gang_work_ticks) else { return Some(t) };
+    let errand = world.comp::<Building>(t.0).is_some_and(|b| b.kind == BuildingKind::Home || b.derelict)
+        && matches!(t.1, None | Some(Order::Expand | Order::VirtRaid | Order::Contest | Order::Squat));
+    if errand && crate::systems::distance::trip_to(world, id, t.0).is_some_and(|x| x > cap) {
+        return None;
+    }
+    Some(t)
+}
+
+/// [`gang_work_target`] before S1's reach.
+fn gang_work_pick(world: &World, id: EntityId) -> Option<(EntityId, Option<Order>)> {
     let gang = world.gang_of(id)?;
     let g = world.comp::<Gang>(gang)?;
     let own_home = world.comp::<Household>(id).and_then(|h| h.home);

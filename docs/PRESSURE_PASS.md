@@ -1136,3 +1136,73 @@ madam x2, joytoy x3, street_worker x2 and six customers (`--agent`).
   `arms::test_seized_crate_lands_in_the_precinct`, `arms::test_landed_crate_fills_the_armoury_and_the_muster_draws_it`
   (the bettors' stakes moved the gangs' purses), and `tower::test_off_city_writes_nothing_in_three_days` (the pit's
   bettors are the Fighter's Attendees, not the tower's).
+
+### S1, distance in the choice (`OPEN-221`'s sim half; `systems/distance.rs` `trip`, `[distance.choice]`)
+
+Numbers: 20k `isle_m_k2` seed 42 x 30 (`--scaled --ambient-flats 50 --legs --legs-min 60`), one run each, base
+`7bbf9b8`. The pick sites found, and what each now reads:
+
+- **The body's own trip** (`distance::trip`, `trip_ahead`): the reach checks read `distance::travel`, the El's
+  structural estimate, for bodies who then walked (no fare and no nerve to jump it, a ban, or after the last train:
+  `noroute` 00:00-04:00). 20k base: 491 JoinGang legs over 120 min under the 180-tick try-out reach, 109 over 240.
+  `trip` is the El's estimate only when he would board (`transit::pays_or_dodges`) and it runs now and at the
+  estimate's end (`in_service`), else the walk; `trip_ahead` drops the hours for a trip planned at midnight. Read by
+  `out_of_reach` (`[distance.reach]`), `crew::in_reach` and `set_out` (duty places), `gang::tryout_place`, and every
+  pick below. The night's danger test is not read. The hire keeps the structural `travel` (the broke candidate who
+  walks today rides on his first wage).
+- **The Deal spot** (`stims::site_today` -> `member_site`): the gang's spot (`deal_site_in`: its venue, else its
+  corner, else the deal Bar) in each district it holds and its deal district, the nearest by his trip from where he
+  sets out (via the Hideout when he must pick up), within `deal_ticks` (120); none: no Deal now, his GangWork falls to
+  the order's work. One Crew line a midnight for a stocked dealer with a body off every spot (`distance::daily`: "X
+  stays off G's trade today: the nearest spot, P, is 3 h 38 from home").
+- **The order's work** (`gang::gang_work_target`, a new `gang_work_ticks` 120): the Home to shake down or claim and the
+  derelict to squat (picked near the Hideout and him) past the reach of where he stands is no GangWork (the first S1
+  run: dealers off the spot walked 300-580 min to such a Home). The pimp's round pitch (`vice::round_pitch`) and the
+  preacher's spot (`leisure::busiest_spot`) on the same reach.
+- **The muster** (`crew::post_gang`, `raid_ordered`; `raid::muster_trip`, `muster_in_reach`): a member (and the
+  leader) whose Home is past `[crew] duty_reach_ticks` (180) of today's muster point is not posted, and says so ("X
+  sat out G's raid: the muster at a door in D1 The Sump is 8 h 40 from home"); the Raid goal's "muster called" gate
+  reads the reach from where he stands (not re-read once his Raid plan runs: the march carries him off). **The raid's
+  rival** (`faction`): `rival_exists` is false when the rival's Hideout lies past `[crew] raid_target_reach_ticks`
+  (240) of ours (R5 bounded the corp prize so; a rival raid or a retaliation marched across the island).
+- **The hire** (`demography::job_search_round`'s second round, the corner's dawn pick): the nearest left past
+  `hire_max_ticks` (240) is not hired; the vacancy waits. `[distance] job_cap_ticks` stays the soft cap. World
+  creation's staffing is the same job search, so the seeded far posts thin too.
+- **The site day** (`shift::far_site`): a Construction Yard's nearest open site past `site_ticks` (120) of the Yard
+  is no site day; the shift is worked at the Yard (V11's day labourer's 263-min walk to a Parts Fab).
+- **The visit** (`household::considerations`, `visits_due`): a Visit's place past `visit_ticks` (240) of where the
+  visitor sets out is not walked (a kin, the Camp, an errand: papers, a collection, a dun; a gang duty is `[crew]`'s);
+  the week's Camp answer past it from his Home is dropped at midnight, both tiers, with a Visited line ("X could not
+  make the trip to Y at Work Camp#4835 this week: 9 h 28 from home").
+- **JoinGang** (`gang::recruit_gang`): with `[crew]` on, a gang with no try-out place in the recruit's reach is no
+  pick; the best tie among the gangs he can walk to.
+- Counters (`Jobs2Cols`): `choice_muster_out` 257, `choice_deal_off` 3,122 (lines), `choice_visit_far` 35,
+  `choice_hire_far` 6,411 (refusals; a vacancy is re-read daily).
+
+Before -> after: legs over 120 min cut short (`aborted`, every mode) 6,478 -> 5,173; walk legs over 120 min 16,216 ->
+16,319 (flat: what is left is the guards' patrols 3,541 -> 3,954, Sleep Home ~3,000, Unwind Home ~1,450, Eat Market
+~1,400 and commutes, none a pick of this phase), over 240 3,941 -> 3,694, over 360 1,029 -> 1,010. By pick (walk legs
+over 120 min / cut / max min): GangWork Spot 297/156/630 -> 18/3/182; GangWork TargetHome 197/77/374 -> 67/4/192;
+GangWork Seller (the pick-up) 115/68/630 -> 3/0/137; Raid MusterPoint 52/14/687 -> 52/0/386 (over 240: 22 -> 1);
+JoinGang 491/88/457 -> 446/43/372 (over 240: 109 -> 2); Visit Victim 129/76/805 -> 67/14/364; Work TargetHome (the
+site day) 59/3/311 -> 36/1/203; Work Workplace 1,563/57/1,092 -> 1,457/55/885 (over 240: 325 -> 224). Employed mean
+11,309 -> 11,265, homeless mean 366 -> 330, starvation 0 -> 0. FINDING (not tuned): Extortion 532 -> 1,066, Assault
+1,030 -> 1,548, Arrest 1,164 -> 1,539, GangJoin 1,030 -> 1,245, Raid events 67 -> 56: a dealer off his spot does the
+order's work near him (the shakedowns), and recruits reach a gang they can walk to. Ticks/s 199 -> ~150 (a print:
+other phases' builds and sims shared the box).
+
+- **Deviations.** The spec's "picks the next nearer option or a different goal, and says so": a line for the muster,
+  the dealer's day and the Camp answer; a kin visit, an errand, a JoinGang, a pimp's or a preacher's reach drops the
+  goal silently (a line a think would be noise). The raid's target reuses `raid_target_reach_ticks` and the muster
+  `duty_reach_ticks` rather than new keys. The map's shortage (Lots) is not this phase.
+- **Reads wrong** (the next pass's input): commutes held from before the cap, or where the El estimate holds and the
+  body walks (`gang_leader_6422`'s 438-min walk to his Bar post; a Utility Plant post 608 tiles off); a Contract's
+  Guard post 290 min away (`miserable_6527 d22 04:13`, the hit market's pick); a back-room patch walk cut at 217-236
+  min (`[care] back_reach_ticks` 300, R3); a Capsule Hotel 371 min off (`hotel_cap_ticks` on the El's estimate); the
+  guards' patrol legs (S3's); the Unwind's stay-in fallback walks Home from anywhere. A dealer whose gang holds only
+  far districts is off the trade for days ("15 h 08 from home" daily). A Crew duty's place is posted from the Home, so
+  a member out at the hour still walks 400-550 min to it (Visit Seller over 240: 87 -> 75).
+- Re-pinned premises (the reason in place): `person::probe_far_worker_with_one_rent_moves_near_work` and
+  `probe_trade_respects_rent_and_the_evictor` (the hire's hard cap leaves no far Farmer at the v1 pace;
+  `[distance.choice]` off), `fviolence::test_short_riot_rolls_its_hours_not_a_day` (the fix-on and fix-off worlds
+  part before the riot; off). No test (doctrine 2). `SAVE_VERSION` 77 (`[distance.choice]`, the `choice_*` columns).

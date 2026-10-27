@@ -818,6 +818,14 @@ fn job_search_round(
                     d.push((employer, vec![role]));
                     continue;
                 }
+                // Pressure pass round 3, S1 (OPEN-221): the nearest left is
+                // still no hire past `[distance.choice] hire_max_ticks` (V11:
+                // a 767-tile commute, 11.8 h a day on the road); the vacancy
+                // waits for the next pass.
+                if past_hire_max(world, hire_from(world, id), workplace_door) {
+                    ownership_row(world).choice_hire_far += 1;
+                    continue;
+                }
             }
             // Scale S5 (`[ambient] hire_far`): an Ambient household within
             // the commute cap before a simulated adult beyond it.
@@ -1006,6 +1014,15 @@ fn skill_key(world: &World, id: EntityId, role: Role) -> u32 {
 }
 
 /// [`pick_candidate`]'s home door (else tile) of a candidate.
+/// S1 (OPEN-221): a candidate setting out from `from` is past
+/// `[distance.choice] hire_max_ticks` of the workplace door (false off). The
+/// structural trip (`distance::travel`, the El where it wins), not his own:
+/// the broke candidate who walks today rides on his first wage.
+fn past_hire_max(world: &World, from: TilePos, door: TilePos) -> bool {
+    crate::systems::distance::choice(world)
+        .is_some_and(|c| crate::systems::distance::travel(world, from, door) > c.hire_max_ticks)
+}
+
 fn hire_from(world: &World, id: EntityId) -> TilePos {
     world
         .comp::<Household>(id)

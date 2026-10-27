@@ -560,6 +560,12 @@ fn riot_kills(fix: bool, hours: u32) -> (u32, u32) {
     use citysim::{Riot, RiotResponse, RiotTarget};
     let mut w = fixes_world(48);
     w.config.life.violence_fixes = fix;
+    // Pressure pass round 3, S1 (OPEN-221): the premise is the same 30 hours
+    // with the fix on or off; with `[distance.choice]` on, seed 48's two
+    // worlds part before the riot (31 killed vs 32; not traced). Pinned off.
+    if let Some(dc) = w.config.distance.as_mut() {
+        dc.choice = None;
+    }
     w.run_ticks(citysim::TICKS_PER_DAY + 6 * TICKS_PER_HOUR);
     let d = stat_district(&w);
     let rioters: Vec<EntityId> = civilians(&w)

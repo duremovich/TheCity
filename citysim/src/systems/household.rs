@@ -622,6 +622,7 @@ pub fn visits_due(world: &mut World) {
     let frail = u32::try_from(u64::from(world.config.ages.frail_from_years) * DAYS_PER_YEAR).unwrap_or(u32::MAX);
     let elder_days = u64::from(world.config.household.elder_visit_days);
     let mut due: Vec<(EntityId, PendingVisit)> = Vec::new();
+    let mut too_far: Vec<(EntityId, EntityId, EntityId, Tick)> = Vec::new();
     // Lives at work phase 3 (§ 3.5): the parents' answers to their Camp
     // children due today (and the neglect tally).
     let camp_due = camp_answers_due(world);
@@ -640,6 +641,15 @@ pub fn visits_due(world: &mut World) {
         // single slot and the week's answer was lost.
         let mut pick: Option<(EntityId, VisitWhy)> =
             camp_due.get(&id).map(|&(child, answer)| (child, VisitWhy::Camp(answer)));
+        // Pressure pass round 3, S1 (OPEN-221): the week's answer past
+        // `[distance.choice] visit_ticks` of his Home is not walked, and he
+        // says so (V11: a Camp answer 1,150 tiles off). Both tiers.
+        if let Some((child, _)) = pick {
+            if let Some((t, camp)) = camp_too_far(world, id, child) {
+                too_far.push((id, child, camp, t));
+                pick = None;
+            }
+        }
         for (k, rel) in kin_of(world, id) {
             if pick.is_some() {
                 break;
@@ -688,6 +698,41 @@ pub fn visits_due(world: &mut World) {
     for (id, v) in due {
         world.visits.insert(id, v);
     }
+    for (id, child, camp, t) in too_far {
+        let text = format!(
+            "{} could not make the trip to {} at {} this week: {} from home",
+            world.name_of(id),
+            world.name_of(child),
+            world.name_of(camp),
+            crate::systems::distance::hours(t)
+        );
+        world.push_event(EventKind::Visited, &[id, child, camp], text);
+        ownership::jobs2_row(world).choice_visit_far += 1;
+    }
+}
+
+/// S1 (OPEN-221): `child`'s Camp past `[distance.choice] visit_ticks` of
+/// `id`'s Home door (else his tile), by his trip: the trip and the Camp.
+fn camp_too_far(world: &World, id: EntityId, child: EntityId) -> Option<(Tick, EntityId)> {
+    let cap = crate::systems::distance::choice(world)?.visit_ticks;
+    let camp = camp_of(world, child)?;
+    let to = world.comp::<Building>(camp)?.door;
+    let from = crate::systems::distance::set_out(world, id)?;
+    let t = crate::systems::distance::trip_ahead(world, id, from, to);
+    (t > cap).then_some((t, camp))
+}
+
+/// S1 (OPEN-221): the visit's place within `[distance.choice] visit_ticks`
+/// of where the visitor sets out: a kin, the Camp, and the errands (a
+/// walk-in's papers, a collection, a dun; the 20k shadow: a 610-min walk to
+/// a Fixer). A gang duty's place is posted within `[crew]
+/// duty_reach_ticks` (always). True off.
+fn visit_in_reach(world: &World, id: EntityId, v: PendingVisit, place: EntityId) -> bool {
+    let Some(c) = crate::systems::distance::choice(world) else { return true };
+    if matches!(v.why, VisitWhy::Crew | VisitWhy::Reckoning) {
+        return true;
+    }
+    crate::systems::distance::trip_to(world, id, place).is_none_or(|t| t <= c.visit_ticks)
 }
 
 /// The pressure pass R4 (OPEN-219): a Camp answer's hour off the parent's
@@ -1057,7 +1102,11 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
         return None;
     }
     let v = visit_now(world, id)?;
-    if !kin_there(world, v) || visit_place(world, v).is_none() {
+    if !kin_there(world, v) {
+        return None;
+    }
+    // S1 (OPEN-221): a kin past the visit's reach is not walked to.
+    if !visit_place(world, v).is_some_and(|p| visit_in_reach(world, id, v, p)) {
         return None;
     }
     let on_shift =

@@ -262,6 +262,48 @@ pub fn muster_point(world: &World, agent: EntityId) -> Option<MusterAt> {
     }
 }
 
+/// Pressure pass round 3, S1 (OPEN-221): the trip from where `agent` sets
+/// out (his Home door with `from_home`, else where he stands) to his gang
+/// expedition's muster (`muster_point`), with the place's label; `None` with
+/// `[distance.choice]` or `[crew]` off, for a riot or a mission, or with no
+/// muster. 0 inside it.
+pub fn muster_trip(world: &World, agent: EntityId, from_home: bool) -> Option<(Tick, String)> {
+    crate::systems::distance::choice(world)?;
+    crate::systems::crew::cfg(world)?;
+    if !matches!(expedition_of(world, agent)?, Expedition::Gang(_)) {
+        return None;
+    }
+    let (to, label, inside) = match muster_point(world, agent)? {
+        MusterAt::Door(t) => (t, format!("a door in {}", world.district_name(world.district_of(t))), None),
+        MusterAt::Inside(h) => (world.comp::<Building>(h)?.door, world.name_of(h), Some(h)),
+    };
+    if from_home {
+        let from = crate::systems::contracts::home_door(world, agent)
+            .or_else(|| crate::systems::life::origin(world, agent))?;
+        return Some((crate::systems::distance::trip_ahead(world, agent, from, to), label));
+    }
+    if inside.is_some() && world.comp::<Position>(agent).and_then(|p| p.building) == inside {
+        return Some((0, label));
+    }
+    let from = crate::systems::life::origin(world, agent)?;
+    Some((crate::systems::distance::trip(world, agent, from, to), label))
+}
+
+/// S1 (OPEN-221): the Raid goal's reach gate: a gang member does not set
+/// out for a muster past `[crew] duty_reach_ticks` from where he stands (V11:
+/// a leader's 330- and 630-min walks to his own muster, both cut, "missed").
+/// A member already on his Raid plan is not re-read (the march carries him
+/// away from the muster). True off.
+pub fn muster_in_reach(world: &World, agent: EntityId) -> bool {
+    if world.comp::<crate::components::Brain>(agent).and_then(|b| b.plan_goal())
+        == Some(crate::components::GoalKind::Raid)
+    {
+        return true;
+    }
+    let Some(c) = crate::systems::crew::cfg(world) else { return true };
+    muster_trip(world, agent, false).is_none_or(|(t, _)| t <= c.duty_reach_ticks)
+}
+
 /// Muster complete: the expedition departs. False when the order changed
 /// meanwhile, or the target fell under full cover (the step fails and the
 /// member replans).

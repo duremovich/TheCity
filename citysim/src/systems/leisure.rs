@@ -3052,7 +3052,7 @@ pub fn preacher(world: &World, id: EntityId) -> bool {
 /// gang holds it, and ties by distance (with nobody hanging out anywhere the
 /// lowest tile of every held district won: a preacher in D4 set out for a
 /// corner of the map 2-3 h away, 17 plans and no Preach in a week).
-fn busiest_spot(world: &World, gang: EntityId, from: TilePos) -> Option<TilePos> {
+fn busiest_spot(world: &World, id: EntityId, gang: EntityId, from: TilePos) -> Option<TilePos> {
     let mut ds: Vec<DistrictId> =
         crate::systems::gang::held_districts(world, gang).into_iter().map(|(d, _)| d).collect();
     let here = world.district_of(from);
@@ -3062,10 +3062,19 @@ fn busiest_spot(world: &World, gang: EntityId, from: TilePos) -> Option<TilePos>
     if ds.is_empty() {
         ds.push(world.district_of_building(world.hideout_of(gang)?));
     }
+    // Pressure pass round 3, S1 (OPEN-221): a spot past `[distance.choice]
+    // gang_work_ticks` of the preacher is no pulpit (V11: a cultist's five
+    // sermons, each walk cut, no Preach).
+    let cap = crate::systems::distance::choice(world).map(|c| c.gang_work_ticks);
+    let rides = std::cell::OnceCell::new();
+    let rides = || *rides.get_or_init(|| crate::systems::distance::rider(world, id));
     ds.iter()
         .filter_map(|d| world.spots.get(d.index()))
         .flat_map(|v| v.iter())
         .filter(|s| !matches!(s.kind, SpotKind::Hideout(g) if g != gang))
+        .filter(|s| {
+            cap.is_none_or(|c| crate::systems::distance::trip_by(world, from, s.tile, rides, Some(world.tick)) <= c)
+        })
         .map(|s| (world.hangouts.get(&s.tile).map_or(0, |v| v.len()), s.tile.manhattan(from), s.tile))
         .max_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)).then(b.2.cmp(&a.2)))
         .map(|(_, _, t)| t)
@@ -3078,7 +3087,7 @@ pub fn preach_plan(world: &mut World, id: EntityId) -> Option<Plan> {
     }
     let gang = world.gang_of(id)?;
     let from = world.comp::<Position>(id)?.tile;
-    let tile = busiest_spot(world, gang, from)?;
+    let tile = busiest_spot(world, id, gang, from)?;
     world.unwind.insert(
         id,
         UnwindPick {

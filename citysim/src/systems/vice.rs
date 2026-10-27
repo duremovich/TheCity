@@ -472,7 +472,19 @@ pub fn round_pitch(world: &World, id: EntityId) -> Option<EntityId> {
                     }
                 }
             };
-            return due.iter().copied().min_by_key(|o| (rank(o), *o));
+            // Pressure pass round 3, S1 (OPEN-221): the pick past
+            // `[distance.choice] gang_work_ticks` of him is no round now
+            // (V11: the pimp's legs of 398 tiles, cut, no Collect).
+            let cap = crate::systems::distance::choice(world).map(|c| c.gang_work_ticks);
+            return due.iter().copied().min_by_key(|o| (rank(o), *o)).filter(|o| {
+                cap.is_none_or(|c| {
+                    world
+                        .jobs2
+                        .pitches
+                        .get(o)
+                        .is_some_and(|p| crate::systems::distance::trip(world, id, from, p.spot) <= c)
+                })
+            });
         }
     }
     Some(due[hour % due.len()])

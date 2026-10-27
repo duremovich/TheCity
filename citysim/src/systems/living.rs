@@ -127,6 +127,9 @@ fn early(world: &mut World) {
     // reckonings, the gangs that cannot muster (after the visits due;
     // nothing with `[crew]` absent).
     crate::prof::timed!("mid::crew::daily", crate::systems::crew::daily(world));
+    // Pressure pass round 3, S1 (OPEN-221): the dealers off today's spot,
+    // told (nothing with `[distance.choice]` absent).
+    crate::prof::timed!("mid::distance::daily", crate::systems::distance::daily(world));
 }
 
 fn late(world: &mut World) {
