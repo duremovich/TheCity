@@ -3208,6 +3208,10 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
                 b.current_goal == Some(citysim::components::GoalKind::GangWork)
                     && matches!(step(w, pimp), Some(ActionKind::GoTo(citysim::goap::LocationKey::Spot)))
                     && w.tick % TICKS_PER_DAY >= 20 * TICKS_PER_HOUR
+                    // Round 3 S2/S1: only his round's walk to this pitch (a GangWork Deal
+                    // also begins GoTo(Spot), before any pitch is due, and spent the night's
+                    // set-down on a walk that is not the round).
+                    && b.plan.as_ref().is_some_and(|p| p.target == Some(o))
             });
             if goes && stood != day + 1 {
                 stood = day + 1;
@@ -3216,7 +3220,13 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
                     pp.building = None;
                 }
                 // The step walks a fresh path from where he stands.
+                // Round 3 S1 (the trip choice): the walk's route was already a Ride from
+                // where he stood, and it carried on from there; the round is planned anew
+                // from the pitch.
                 if let Some(b) = w.comp_mut::<Brain>(pimp) {
+                    b.current_goal = None;
+                    b.plan = None;
+                    b.plan_step = 0;
                     b.exec = citysim::exec::ExecState::Idle;
                 }
             }
@@ -3226,7 +3236,13 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
             // (22:00), once a night, to take his round.
             if w.tick % TICKS_PER_DAY == 22 * TICKS_PER_HOUR {
                 if let Some(b) = w.comp_mut::<Brain>(pimp) {
-                    if b.current_goal != Some(citysim::components::GoalKind::GangWork) {
+                    // Round 3 S2 (wave 2 combined with S1's trip cap): before the hours open the
+                    // round has no pitch due, so his GangWork plan is the Deal he walked off on
+                    // (t1320 at 109,176 against a pitch at 203,150, two hours of it); a GangWork
+                    // that is not the round to this pitch is let go too, so the plan is re-made
+                    // as `pimp_plan`.
+                    let on_round = b.plan.as_ref().is_some_and(|p| p.target == Some(o));
+                    if b.current_goal != Some(citysim::components::GoalKind::GangWork) || !on_round {
                         b.current_goal = None;
                         b.plan = None;
                         b.plan_step = 0;
