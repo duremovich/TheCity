@@ -709,11 +709,15 @@ fn test_queued_guard_never_started_expires_unpaid() {
     let mut w = shipped(42);
     w.run_ticks(9 * TICKS_PER_HOUR + 5);
     w.config.missions.max_missions = 100;
-    let people = strangers(&w, 26);
-    for i in 0..12 {
-        guard_record(&mut w, people[2 * i], people[2 * i + 1], 200 + i as i64, 20);
+    // Round 3 S3: justice arrests takers off the street (seed 42 lost a
+    // filler's taker, its slot went to the queued post, which then stood).
+    // The premise (the quota stays full) is re-pinned with two spare pairs
+    // priced above the post, so a freed slot goes to a spare, not to it.
+    let people = strangers(&w, 30);
+    for i in 0..14 {
+        guard_record(&mut w, people[2 * i], people[2 * i + 1], 600 + i as i64, 20);
     }
-    let (client, taker) = (people[24], people[25]);
+    let (client, taker) = (people[28], people[29]);
     let fixer = contracts::open_fixers(&w)[0];
     if let Some(x) = w.comp_mut::<Wallet>(client) {
         x.coins = 510;
