@@ -688,3 +688,58 @@ Each trade gets a body that walks to it, through the machinery it already had. N
   Unwind and 9c on a Capsule Hotel night and is on 0c at the rehouse day. A probe whose purse premise a butterfly
   breaks (as its Shop cooldown already guards); left for the fix round.
 - No test (doctrine 2). `SAVE_VERSION` 71.
+
+### R3, the wounded and the sick (`OPEN-216`; `systems/care.rs`, `[care]`)
+
+Numbers: 20k `isle_m_k2` seed 42 x 30, one run each, this build with `[care]` out (before) and in (after). The runs
+are deterministic on this box (two before runs matched), so the deltas are the phase's, butterflies included.
+
+- **The fee reaches the doctor** (`care::pay_fee`): the doctor on the table takes `doctor_cut` (0.25) of a Clinic's
+  fee (a patch, the Clinic's treatment) into his wallet, the rest to the owner's till as before; the event says so
+  ("patched Gideon Crane up at Ripperdoc#4864 for 12c (3c of it to the doctor)"). Doctors' cut 0 -> 88c a month.
+- **The short have choices** (`customers::care_choice`, `care::settle`): a diagnosed patient short of the Clinic's
+  treatment (240c) settles it at the nearest open Clinic (any distance) with the pool, then a pawn (an owned deck,
+  weapon or vehicle, not chrome, financed or stolen, handed to the doctor for `pawn_mult` of its value), then the
+  doctor's slate for the rest (`slate_down` down, marked up `slate_rate`, while owing the Clinic's doctors under
+  `slate_cap`); the slate needs a standing post's wage unless the pawn covers it. The slate is an edge debt to the
+  Clinic's Ripperdoc (an orderly patches, the Ripperdoc carries the book): repaid from the wallet as any debt
+  (`social` repay) and, past `[hitmarket] debt_min`, a lawless doctor's Debt Beat. A hurt worker short of a patch
+  goes on the slate the same way. Without a wage the patient begs the warmest Friend (affinity >= `ask_affinity`,
+  holding over `ask_keep`) at midnight once in `ask_days`: he lends on `affinity x (1 - greed/2)` (an edge debt) or
+  turns him down; kin already pay through the pool. Then the back room's cut rate (phase 2). Slates 0 -> 1 (199c),
+  asks 0 -> 90 (62 lent, 944c; 28 refused), pawns 0 (one in the shadow), Cured 0 -> 1. **Deviation:** the slate is
+  the doctor's book, not the owner's: the owner is paid the down and loses the rest (no new ledger; the edge debt
+  and the Debt hit market were there). Begging is a Friend's loan; the street bowl stays Earn's.
+- **Back rooms see patients** (`exec` `LocationKey::Clinic`): a care trip or a Rescue bound to a BlackClinic
+  resolved its GoTo to the nearest Clinic and the Patch there failed `PreconditionLost` (phase 2's "no back-room
+  patient in 30 days"; R1's fare-beaten hit the same). The bound back room is walked to now (ungated: a bug fix).
+  The Treat goal's "nearest Clinic past reach" skip no longer cuts a care trip (`care_choice` reads its own reach:
+  the back room's 300 minutes). A back room's doc is on call when no server is on duty. Back-room patients 0 -> 21,
+  patched 26 -> 61, Treated events 31 -> 64.
+- **The downed act and are acted on** (`wounded.rs`, `care::call_for_help`, `wake_bystanders`, `bystander`): every
+  `call_every_min` while nobody has come the downed calls the warmest tied body (kin, Friend, gang-mate, colleague)
+  who can reach it and a doctor in time; the one called comes from any distance (an event: "Kenji Bartlett,
+  bleeding, called Cato Marlow for help"). A city guard on shift within `rescue_radius` (the beat) and a stranger
+  within `help_radius` (term `stranger_term x (sociability + lawfulness)/2`, not its attacker, no grudge) carry
+  anyone down. The street hears it: the `help_wake` nearest off-screen adults within `help_radius` get a body and
+  keep one while it bleeds (`lod::class_with`; at 20k the downed lay among Statistical agents, 0 bodies within 12
+  tiles in 4 of 5 cases). The first helper binds the wound as he lifts it (`aid_min` once: the nearest doctor was
+  150-193 tiles off against a 180-minute bleed). The nearest staffed doctor is a Clinic or a back room
+  (`back_stabilise_price`). Calls 31, woken 136, bound 21, carried in time 0 -> 6, bled out 54 -> 44.
+- **The sick worker's post** (`care::covers`, `hourly`): at midnight each sick worker's standing post (any tier,
+  not his own business) is covered by the nearest jobless lawful adult of the employer's district, hired for the
+  day on the sick worker's shifts (`Job.until`, ended hourly), when the owner holds `cover_purse_days` of the wage;
+  else the absence is written ("off sick from X (n sick days in 14); nobody covers the Guard's post"). The sick
+  day's count and firing stay health's (`sick_fire_days`). **Deviation:** no co-worker's extra shift (one shift a
+  day per key in the routine; a second would need the shift model changed). Covered 441, uncovered 41.
+- **The founder** (`founding::can_found`, `register`, incorporation): a diagnosed founder's coins count less the
+  Clinic's treatment (`care::founder_reserve`), and the incorporation keeps it out of the capital.
+- **Reads wrong / open:** a carrier who bound and lifted a body can drop it (`Marek Abernathy`: bound 21851, called
+  again 21957, bled out 22047): the Rescue plan is interrupted and nobody picks it up in time; carries are slow
+  (R2's pace). Strangers carried 0 at Stabilise (the bound were the tied, woken or called). A slate repayment is a
+  bare wallet move (the diary's money line shows "-10c (Wage)"), no flow or event. The jobless old with no Friend
+  (`sick_17778`, 71 y, 8c, diagnosed 0.38) have nothing to try: no slate, no back room, no ask; they Earn and climb.
+  Starvation (an island FINDING, both runs) 1,415 -> 1,448; violence 112 -> 105.
+- **The Statistical mirror:** the ask and the covers are world-side (any tier); the slate, the pawn and the call are
+  a body's; an off-screen diagnosed patient treats on `p_stat_treat` as before (with the doctor's cut when a body
+  is on duty). No test (doctrine 2). `SAVE_VERSION` 72.

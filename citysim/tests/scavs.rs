@@ -11,7 +11,12 @@ use citysim::systems::{chrome, gray};
 use citysim::{Brain, Config, EntityId, Gang, Job, Kit, Needs, World, TICKS_PER_DAY};
 
 fn city_with_gangs() -> World {
-    let mut w = World::new(42, Config::load());
+    // R3 (OPEN-216): `[care]` off: its covers and asks move the seed-42 city
+    // and the covered/bare pair below stopped standing on the gang's ground
+    // (a butterfly; the premise is the scav's ranking, not care).
+    let mut cfg = Config::load();
+    cfg.care = None;
+    let mut w = World::new(42, cfg);
     for _ in 0..30 {
         if w.gangs().iter().any(|&g| w.comp::<Gang>(g).is_some_and(|x| x.members.len() >= 3)) {
             break;
