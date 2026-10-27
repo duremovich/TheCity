@@ -177,6 +177,11 @@ pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
         if job.last_shift_day == Some(key) || !routine::workday_of(world, id, job, key) {
             return None;
         }
+        // Pressure pass round 3, S3 (OPEN-223): a guard's shape is the jail
+        // day's (the desk in blocks); a patrol day is the Patrol goal's.
+        if job.role == Role::Guard && !crate::systems::law::jail_duty(world, id, key) {
+            return None;
+        }
         if world.comp::<Brain>(id).is_none_or(|b| b.lod == Lod::Statistical) {
             return None;
         }

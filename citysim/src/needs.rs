@@ -134,6 +134,7 @@ pub fn run(world: &mut World) {
     let guard_near_at = guard_near_fn(world, sight);
 
     let assets = world.config.assets.enabled;
+    let lights_out = crate::systems::law::in_lights_out(world);
     for id in world.bodies() {
         let Some(brain) = world.comp::<Brain>(id) else { continue };
         if brain.lod == Lod::Statistical {
@@ -149,7 +150,9 @@ pub fn run(world: &mut World) {
             (None, Some(n)) => Some(n),
             (Some(m), Some(n)) => Some(m * n),
         };
-        let sleeping = matches!(brain.exec, ExecState::Use { kind: ActionKind::Sleep, .. });
+        // Pressure pass round 3, S3: a prisoner sleeps in the cell at lights-out.
+        let sleeping = matches!(brain.exec, ExecState::Use { kind: ActionKind::Sleep, .. })
+            || (lights_out && crate::systems::law::asleep_in_cell(world, id));
         let sleeping_outside = sleeping && world.comp::<Position>(id).is_some_and(|p| p.building.is_none());
         let farm_working = matches!(brain.exec, ExecState::Use { kind: ActionKind::FarmWork, .. });
         let jailed = world.has::<Sentence>(id);

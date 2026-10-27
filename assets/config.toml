@@ -4327,6 +4327,8 @@ Researcher = "stations"
 Reporter = "stations"
 Fixer = "stations"
 Volunteer = "stations"
+Guard = "stations"                 # round 3 S3 (OPEN-223): a jail-duty shift in blocks across the Precinct (one 538-min GuardJail
+                                   # was a shift nothing could interrupt); a patrol day is the Patrol goal's, untouched
 
 # The pre-view pass phase 3 (docs/PREVIEW_PASS.md § 1, systems/shift.rs): the `haul` shape (a trade row's
 # `shape = "haul"`: night stocker, loader, driver, depot hand, builder, courier, day labourer). Without it
@@ -5072,6 +5074,20 @@ ban_window_days = 7
 ban_days = 14
 ban_break_lawfulness = 0.1         # a banned rider under this lawfulness boards anyway: caught, beaten whatever his wallet, banned afresh
 wary_hours = 24                    # caught this recently, he jumps no gate (pays or walks): the ban takes three bad days, not one bad hour
+beat_cooldown_days = 3             # round 3 S3 (OPEN-223): beaten this recently, a caught dodger is turned off the platform and walks,
+                                   # not beaten again (a banned rider who boarded anyway was beaten at the El 6 days of 7)
+# Pressure pass round 3, S3 (docs/PRESSURE_PASS.md § S3, OPEN-223): justice that reads right. The cells keep the body
+# alive and the watch acts on what it sees. Placeholders.
+[justice]
+kitchen_markets = 4                # the cells' meal comes from the first of the Jail's nearest this-many Markets with food on
+                                   # the shelf (the nearest alone ran dry at 100k: a prisoner starving from d26 of a 9-day term)
+lights_out_hour = 22               # a prisoner on screen sleeps in the cell from this hour ...
+wake_hour = 6                      # ... to this (energy restores as in a bed; the off-screen hold keeps the midnight 1.0)
+collar_hours = 2                   # a guard who saw a crime past petty himself (the report he filed) takes the suspect as his
+                                   # collar this long: the Arrest goal's target first, on shift or off (a guard at 100k
+                                   # witnessed 132 crimes in a week and arrested none; [life] arrest_off_shift 0 shut him out)
+collar_flat = 0.5                  # ... and his Arrest goal carries this flat while he has one (a guard who saw a murder on
+                                   # his commute walked on to the desk: Work scored 0.99)
 # The pressure pass round 2, R4 (OPEN-218, OPEN-219): the diary's folds and the Camp answer's hour.
 [noise]
 contest_names = 3                  # a blow on a rival's hold names this many of the holders who saw it (the rest "and N more")

@@ -742,9 +742,12 @@ pub fn considerations_with(
                 .and_then(|p| p.target)
                 .filter(|&s| crate::systems::law::is_located_suspect(world, s));
             let dist = |s: EntityId| world.last_seen().get(&s).map(|&(t, _)| t.manhattan(here));
+            // Pressure pass round 3, S3 (OPEN-223): the suspect this guard
+            // saw do it himself is his collar, on shift or off.
+            let collar = if escorting { None } else { crate::systems::law::collar_of(world, id) };
             let nearest = if escorting {
                 Some(0)
-            } else if let Some(s) = chasing {
+            } else if let Some(s) = chasing.or(collar) {
                 dist(s)
             } else {
                 // Shadow V4 bug 11: a corp guard's warrants on its beat only
@@ -754,7 +757,7 @@ pub fn considerations_with(
             // L2 shadow fixes item 10: the shift is a workday's.
             let working =
                 job.on_shift(tod) && crate::exec::routine::workday_of(world, id, job, job.shift_key_at(world.tick));
-            let on = if working || escorting { 1.0 } else { world.config.life.arrest_off_shift };
+            let on = if working || escorting || collar.is_some() { 1.0 } else { world.config.life.arrest_off_shift };
             return Some((
                 vec![
                     Consideration::new("warrant located", can(nearest.is_some()), GATE),
@@ -763,7 +766,8 @@ pub fn considerations_with(
                     Consideration::new("energy", n.energy, Curve::Linear { m: 0.8, b: 0.2 }),
                     crate::systems::life::travel(world, nearest.unwrap_or(0)),
                 ],
-                0.0,
+                // S3: his collar outweighs the commute or the shift's desk.
+                if collar.is_some() { world.config.justice.as_ref().map_or(0.0, |c| c.collar_flat) } else { 0.0 },
             ));
         }
         GoalKind::JoinGang => {

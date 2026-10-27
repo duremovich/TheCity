@@ -631,6 +631,15 @@ fn colocation(world: &mut World) {
                 if world.edge(a, b).is_some_and(|e| matches!(e.kind, RelKind::Enemy | RelKind::Rival)) {
                     continue;
                 }
+                // Pressure pass round 3, S3 (OPEN-223): the pitch warms the
+                // cellmates a prisoner has met (the arrival's capped first
+                // meetings), not the block: a gang member's drift made an
+                // edge with each of ~160 inmates every four hours (1,171
+                // Acquaintance lines in one jailed day at 100k, pruned at
+                // midnight and made again).
+                if world.edge(a, b).is_none() {
+                    continue;
+                }
                 let step = world.config.social.affinity_per_hour * similarity_mult(world, a, b);
                 let hours = JAIL_DRIFT_HOURS as f32;
                 // L2 shadow fixes item 10: a guard and a prisoner warm to

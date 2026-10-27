@@ -12,6 +12,10 @@
 //! caught, he is beaten whatever his wallet holds and banned afresh.
 //! Caught within `wary_hours` he jumps no gate (pays the fare or walks), so
 //! the ban takes three bad days, not three tries at one gate in an hour.
+//! Pressure pass round 3, S3 (`OPEN-223`): beaten inside `beat_cooldown_days`,
+//! a caught dodger is not beaten again: the guard turns him off the platform
+//! (his trip is over, he walks) and a ban he broke stands as it was (a
+//! banned rider was beaten at the El six days of seven, banned afresh each).
 //!
 //! Off screen (`transit::stat_commute`, `stat_errand`) the same rule, coarse:
 //! a jumped leg caught at the Full city's rate is fined, else beaten (the
@@ -60,6 +64,9 @@ pub struct Record {
     pub caught: Vec<Tick>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub banned_until: Option<Tick>,
+    /// Round 3 S3: when he was last beaten for it (the cool-down's clock).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub beaten: Option<Tick>,
 }
 
 pub fn cfg(world: &World) -> Option<&FaresCfg> {
@@ -133,6 +140,30 @@ pub fn caught(world: &mut World, guard: Option<EntityId>, dodger: EntityId, tile
     let dname = world.name_of(dodger);
     let place = world.district_name(world.district_of(tile)).to_string();
     let actors: Vec<EntityId> = std::iter::once(dodger).chain(guard).collect();
+    let coins = world.comp::<Wallet>(dodger).map_or(0, |w| w.coins);
+    // Round 3 S3: beaten lately (and past the fine: banned, or broke), he is
+    // turned off the platform, not beaten again; a broken ban stands.
+    let cool = c.beat_cooldown_days * TICKS_PER_DAY;
+    let last_beaten = world.fares.book.get(&dodger).and_then(|r| r.beaten);
+    if cool > 0 && (was_banned || coins < c.fine) && last_beaten.is_some_and(|t| t + cool > now) {
+        ownership::jobs2_row(world).fare_turned_off += 1;
+        if was_banned {
+            ownership::jobs2_row(world).fare_ban_broken += 1;
+        }
+        let day = last_beaten.map_or(0, |t| t / TICKS_PER_DAY);
+        let why = if was_banned { "banned, the ban stands" } else { "no fare, no fine" };
+        let him = him(world, dodger);
+        let text = format!(
+            "{gname} caught {dname} on the El in {place} and turned {him} off the platform ({why}; beaten for it on d{day})"
+        );
+        world.push_event(EventKind::Fare, &actors, text);
+        world.remember(dodger, MemoryKind::Lost, guard, 0.3, -0.3, false);
+        // His trip is over: a body walks (the ride's caller sees the plan gone).
+        if world.comp::<Brain>(dodger).is_some_and(|b| b.lod != Lod::Statistical) {
+            world.abort_plan(dodger);
+        }
+        return;
+    }
     if was_banned {
         beat(world, &c, guard, dodger);
         ban(world, &c, dodger);
@@ -145,7 +176,6 @@ pub fn caught(world: &mut World, guard: Option<EntityId>, dodger: EntityId, tile
         world.push_event(EventKind::Fare, &actors, text);
         return;
     }
-    let coins = world.comp::<Wallet>(dodger).map_or(0, |w| w.coins);
     if coins >= c.fine {
         ownership::pay(world, Some(dodger), None, c.fine, Flow::Fine);
         world.remember(dodger, MemoryKind::Paid, guard, 0.4, -0.4, false);
@@ -193,6 +223,8 @@ fn ban(world: &mut World, c: &FaresCfg, dodger: EntityId) {
 /// a grudge on the guard, the mood and the safety; a body lies on the
 /// platform `beat_down_minutes`. True when the body was laid down.
 fn beat(world: &mut World, c: &FaresCfg, guard: Option<EntityId>, dodger: EntityId) -> bool {
+    let now = world.tick;
+    world.fares.book.entry(dodger).or_default().beaten = Some(now);
     world.remember(dodger, MemoryKind::Lost, guard, 0.6, -0.6, false);
     if let Some(g) = guard {
         world.remember(g, MemoryKind::Won, Some(dodger), 0.3, 0.2, false);
@@ -247,9 +279,13 @@ pub fn run(world: &mut World) {
     }
     let Some(c) = cfg(world) else { return };
     let keep = c.ban_window_days.max(u64::from(world.config.transit.dodge_deterred_days)) * TICKS_PER_DAY;
+    let cool = c.beat_cooldown_days * TICKS_PER_DAY;
     let now = world.tick;
     world.fares.book.retain(|_, r| {
         r.caught.retain(|&t| t + keep > now);
-        !r.caught.is_empty() || r.banned_until.is_some_and(|t| t > now)
+        if r.beaten.is_some_and(|t| t + cool <= now) {
+            r.beaten = None;
+        }
+        !r.caught.is_empty() || r.banned_until.is_some_and(|t| t > now) || r.beaten.is_some()
     });
 }

@@ -44,6 +44,12 @@ fn test_theft_witnessed_by_guard_leads_to_jail_within_1_day() {
     // The pre-view pass phase 3: and to the shapes before haul and counter
     // (the moved crews and counters move the scene: no arrest in the day).
     cfg.drop_haul_counter();
+    // Round 3 S3: and to the guards' one-action desk day (`[shift.roles]
+    // Guard`: the desk in blocks moved the scene; the witness chases from
+    // the Market and loses the walking thief at the chase's last hop).
+    if let Some(s) = cfg.shift.as_mut() {
+        s.roles.remove("Guard");
+    }
     let mut w = World::new(21, cfg);
     w.config.lod.force = Some(citysim::Lod::Full); // an arbitrary agent must be simulated in full
                                                    // A certain roll for the guard: `witness_base` 0.6 + the guard's bonus
