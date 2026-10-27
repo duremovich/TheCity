@@ -1394,3 +1394,67 @@ other phases' builds and sims shared the box).
   `probe_trade_respects_rent_and_the_evictor` (the hire's hard cap leaves no far Farmer at the v1 pace;
   `[distance.choice]` off), `fviolence::test_short_riot_rolls_its_hours_not_a_day` (the fix-on and fix-off worlds
   part before the riot; off). No test (doctrine 2). `SAVE_VERSION` 77 (`[distance.choice]`, the `choice_*` columns).
+
+### S2, plans that fail at the end (`OPEN-222`; `leaders.rs`, `gang::recompute_leader`, `crew::sat_muster`, `[brain] cool_backoff*`)
+
+Diagnosed at 20k (seed 42 x 30, a debug print on every leader's `Collect`/`Court` that failed its start; 75 in 30
+days): **every** `Collect` failure (18) was a body who **no longer led**: `gang::recompute_leader` re-ranks the
+gang on a join, a release or the daily pass, and the post moved while he walked (V11 `gang_leader_96308` was a
+lieutenant by d26). Of 57 `Court` failures, 42 were the leader at a lieutenant who was out (an off-screen one missed
+on the Home draw, a body moved on) or asleep; 8 a court that had closed hours before he arrived (the El estimate,
+capped at `court_walk_max`, set a leader 8 h off walking at 15:00 for a 19:00-21:00 court); 7 a lieutenant walking
+to court who had lost his rank. Built:
+
+- **A Lead walk for a post lost turns back** (`leaders::posts_changed`, called by `recompute_leader` with `[leaders]`
+  on): a member walking a Lead plan for a post he no longer holds (the leader's round, Collect or court; a
+  lieutenant's walk to court while he is not one) drops it where he is, with a Crew line ("Tomas Singh turned back
+  on the way to Hideout#5034: Hesper Vance leads The Unplugged 2 now").
+- **The order left at the door** (`can_court`, `court_start`, `Given::Door`): at a lieutenant's Home the Court step
+  starts met or not; out, or asleep beside him, the order is left at his door (counted `orders_word`; "Adela Adeyemi
+  left the order at Brenna Yardley's door (Brenna Yardley was asleep): Raid").
+- **Court by the trip** (`sets_out`, with `[distance.choice]`): the body's own trip (`distance::trip` from where he
+  stands) and a trip past `court_walk_max` is no court today (silent: the summoned still come, and are kept).
+- **The door's reason**: a leader's `Collect`/`Court` abort names its check in the PlanAborted line
+  (`leaders::door_why`: `not the leader`, `court over`, `no post`, `no longer a lieutenant`, `not beside him`).
+- **A muster sat is kept** (`crew::sat_muster`, from `raid::depart`): a member who sat the muster to its departure
+  kept the duty, whether or not the march reached the door (only the brawl's present had counted; V11
+  `raider_39544` mustered 120 min, his march was cut, "missed" at midnight).
+- **A want that cannot plan backs off** (`World::cool_ticks`; `[brain] cool_backoff` 2.0, `cool_backoff_max_ticks`
+  720, `cool_backoff_reset_ticks` 1440; `Brain.cool_streak`): the nth cool of a goal in a row (no plan of it
+  finished between) lasts `goal_cooldown_ticks x 2^(n-1)`, at most 12 h; a finished plan clears the streak, a day
+  with no cool lapses it. General, not Hunt-only: `GoalKind::backs_off` keeps the flat 2 h for the needs and duties
+  (Eat, Sleep, Work, Earn, Flee, Fight, Idle, Treat, Rescue, Patrol, Arrest, Squat, Pitch) and Visit (one goal for
+  many errands, dropped when it cools). The diary's cool line says "backed off, N in a row" from the second.
+- Device (measurement only, `run --legs`): `#failafter` rows (steps failed within 3 ticks of a done leg of
+  `--legs-min` or more, by goal, action, reason) and `#goalplan` rows (plans installed and cools by goal).
+
+Numbers: 20k `isle_m_k2` seed 42 x 30 (`--scaled --ambient-flats 50 --legs --legs-min 120`), one run each, base
+`9dce338` plus the device (`386ef7c`). **`PreconditionLost` within 3 min of a leg over 120 min: 679 -> 338**; by
+step, Lead Court 27 -> 12, Lead Collect 10 -> 0 (Lead aborts anywhere 77 -> 27, every one "not beside him": a body
+lieutenant who moved on), Treat Patch 324 -> 6 (not this phase's mechanism: Treat keeps the flat cool; S4's area,
+read as the run's divergence), the rest flat (Patrol 74 -> 72, Shop BuyAsset 64 -> 57, Sleep 40 -> 43, Raid Brawl
+21 -> 35 with the raids up). **Hunt goals per Hunt plan** ((plans + cools) / plans) 2.29 -> 1.80 (531 plans and
+683 cools -> 443 and 355); the other wants' cools: Bury 4,442 -> 1,679, Shop 3,145 -> 1,560, Contract 2,992 ->
+1,278, Unwind 6,126 -> 5,764; Work 409 -> 453, Eat 86 -> 99, Sleep 146 -> 86 (flat cools). Courts held 307 -> 245,
+orders by word or door 7 -> 26, Lead rounds 128 -> 195. FINDING (not tuned): Raid events 50 -> 82 (orders in force
+sooner), muster misses 88 -> 115 (1.7 -> 1.4 a raid), Murders 47 -> 62, Assaults 1,244 -> 1,408, thefts 989 ->
+1,216, homeless max 562 -> 734, employed mean 11.28k -> 11.37k, starvation 0 -> 0. The after-run had Visit backing
+off (exempted after it; Visit cools 7 -> 15).
+
+- **Shadow** (20k, d21-27, gang_leader, buyer, vendor, raider, gun, gang_member x2, and seven picked from the run's
+  long Lead, Hunt and Raid legs). Working: a leader's day of rounds and court (`agent_11007 d22 16:27` GoTo 187 min
+  to the Hideout, `19:34` Court 86 min, `19:35` "gave Gwendolyn Thorne the order at court: Expand", `21:00` "held
+  court at Hideout#5510: Mags Ambrose, Nadia Garland, Hale Pembroke came"); `agent_27793 d21 20:56` Muster 64 min,
+  `d22 02:03` Brawl after the raid, and no "missed" at `d22 00:07`; a hunter whose target is out of reach backs off
+  (`agent_11007 d27 21:19` "cooled until d27 23:19", `23:27` "cooled until d28 03:27 ... backed off, 2 in a row");
+  `gun_18205` "goal Contract cooled until d22 06:06 (... backed off, 5 in a row)" (was every 2 h). The V11 buyer and
+  vendor flicker did not come up in the 20k picks (no Hunt in either buyer or vendor).
+- **Deviations.** Collect: "re-check before setting out" cannot see a post that moves on the way, so the walk turns
+  back at the change (the brief's "hold it"); the walk's length to a far Hideout is unchanged (no reach on the Lead's
+  Collect or round; `OPEN-222` keeps it). Hunt: the general back-off rather than a per-target cooldown (the streak
+  is per goal; a heavier grudge waits out the cool). Court with the choice off keeps the capped estimate.
+- **Reads wrong** (the next pass's input): leaders still walk 4-8 h to a round's first stop (`agent_11007 d21 10:47`
+  407 min to Gambling Den#5725, `d24 09:26` 278 min): the round has no reach. The street chase of a body lieutenant
+  ("not beside him", 26 a month). The leader ranking churns (a join or the daily pass moves the post) with no line
+  of its own; `turned back` is the first the diary hears of it. Raid Brawl failures after the march up 21 -> 35.
+- No test (doctrine 2). `SAVE_VERSION` 81 (`Brain.cool_streak`, `[brain] cool_backoff*`).

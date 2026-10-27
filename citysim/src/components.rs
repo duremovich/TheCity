@@ -1159,6 +1159,7 @@ impl GoalKind {
     /// sleep, the shift, the coin for a meal, danger, a wound, a downed
     /// friend, the guard's beat and collar, the squatter's night move by
     /// the hour, and a long cool would cost a meal, a night or a shift.
+    /// Nor does a Visit (below).
     pub fn backs_off(self) -> bool {
         !matches!(
             self,
@@ -1175,6 +1176,10 @@ impl GoalKind {
                 | GoalKind::Arrest
                 | GoalKind::Squat
                 | GoalKind::Pitch
+                // One goal for many errands (a kin, a duty, a dun): a cooled
+                // Visit is dropped (`drop_cooled_visit`), and the next is
+                // another visit, not this one again.
+                | GoalKind::Visit
         )
     }
 }

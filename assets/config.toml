@@ -464,7 +464,8 @@ goal_cooldown_ticks = 120
 # cool_backoff_max_ticks (0 = off); the streak lapses after cool_backoff_reset_ticks with no cool.
 # V11: a buyer's Hunt on a target past the stakeout reach re-rolled every 2 h (57 Hunt goals before
 # one plan). Needs and duties (Eat, Sleep, Work, Earn, Flee, Fight, Treat, Rescue, Patrol, Arrest,
-# Squat, Pitch) keep the flat cool (`GoalKind::backs_off`).
+# Squat, Pitch) keep the flat cool, and so does Visit (one goal for many errands, dropped when it cools;
+# `GoalKind::backs_off`).
 cool_backoff = 2.0
 cool_backoff_max_ticks = 720
 cool_backoff_reset_ticks = 1440
