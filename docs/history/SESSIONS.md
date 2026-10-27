@@ -934,3 +934,19 @@ didn't scale. R5 judged 5b's attrition after the walks arrived and excused a cou
 bisect agent's first two runs found the flag. Shadow V11 at 100k in V10's window: better in five groups of seven,
 care worse; what's left is distance-blind goals on a short map and plans that fail at the end of the walk
 (`OPEN-221`-`OPEN-226`). Cost ≈ $225 (HANDOFF § Cost).
+
+## The twenty-fourth session (2026-10-27): pressure pass round 3, Shadow V12
+
+Round 3 from Shadow V11 (`docs/PRESSURE_PASS.md` § Round 3), Dylan's calls up front: this round before the map, the
+seeded school-age children as their own phase (`OPEN-224`), ~25 ticks/s at 100k accepted (`OPEN-226`), the walk pace
+left. Mid-round Dylan set a hard rule: **no one under 18 is ever harmed** (the work camps stay but beat nobody and
+feed everyone; neglect's teeth are the service taking the child; at 18 all bets are off; CLAUDE.md). Wave 1 (S3
+justice, S6 children and the rule, S1 distance in the choice, S5 trades) and wave 2 (S2 plans that fail at the end,
+S7 noise, S4 care at 100k), one Opus coder each in a worktree. S4's cause was the tier: off-screen patients had no
+care path (Treated 3.0k -> 12.3k at 100k). S1's hire cap pushed hiring onto the Ambient pool, which read as a
+population leak (`OPEN-228`, diagnosed, no code change). Two Sonnet fix rounds re-pinned probes the combinations
+moved; no test added (1,470), `SAVE_VERSION` 83. Shadow V12 at 100k in V11's window: better in all seven groups, no
+minor harmed in 110 diaries; the critics found two non-lethal holes in the rule (the fight resolver and the fare
+ladder, `OPEN-230`), fixed at the close. Left: walks that eat the day, shifts with no trade inside them, the camp as a
+number (3,726 children taken in 30 days, `OPEN-231`), children not at School (`OPEN-232`), noise (`OPEN-233`).
+Cost ≈ $275 (HANDOFF § Cost).
