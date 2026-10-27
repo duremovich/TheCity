@@ -2354,6 +2354,11 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                         theft_arrests -= u64::from(thief);
                     }
                 }
+                // Pressure pass round 2, R1: a guard's catch at the gate (the
+                // fine or the beating, `systems::fares`) is the jumped gate caught.
+                if e.kind == EventKind::Fare && e.actors.len() > 1 && e.text.contains("for Fare Evasion") {
+                    dodges_caught += 1;
+                }
                 let hit = |k: usize, who: Option<&citysim::EntityId>, hour: &mut BTreeMap<_, HourTally>| {
                     if let Some(t) = who.and_then(|w| hour.get_mut(w)) {
                         t.extra[k] += 1;

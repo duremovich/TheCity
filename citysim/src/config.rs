@@ -370,6 +370,12 @@ pub struct Config {
     /// absent: the gangs as phase 3 left them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crew: Option<CrewCfg>,
+    /// Pressure pass round 2, R1 (docs/PRESSURE_PASS.md § R1, `OPEN-213`):
+    /// petty law for the fare, a ladder and never a cell (`systems/fares.rs`).
+    /// `None` (not written into a save) with the key absent: a dodger is
+    /// reported, arrested and jailed as any petty offender.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fares: Option<FaresCfg>,
     /// The island pass phase 1 (docs/ISLAND_PASS.md I1; OPEN-163 part):
     /// travel time in the job and bed picks (`systems/distance.rs`). `None`
     /// (not written into a save) with the key absent: the picks
@@ -1663,6 +1669,52 @@ impl Default for CrewCfg {
             welcome_after_hours: 1,
             crew_p: 0.6,
             crew_hour: 19,
+        }
+    }
+}
+
+/// Pressure pass round 2, R1 `[fares]` (docs/PRESSURE_PASS.md § R1;
+/// `systems/fares.rs`): the fare dodger's ladder. Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FaresCfg {
+    /// The fine on the platform when the wallet holds it (to the city).
+    pub fine: i64,
+    /// A dodger who cannot pay is beaten by the guard who caught him: down
+    /// on the platform this many minutes (he neither thinks nor walks) ...
+    pub beat_down_minutes: u64,
+    /// ... with this grudge on the guard ...
+    pub beat_grudge: f32,
+    /// ... and this off his mood and his safety.
+    pub beat_mood: f32,
+    pub beat_safety: f32,
+    /// Caught `ban_after` times inside `ban_window_days`: banned from the El
+    /// for `ban_days`, and he walks.
+    pub ban_after: u8,
+    pub ban_window_days: u64,
+    pub ban_days: u64,
+    /// A banned rider under this lawfulness boards anyway (the ban broken):
+    /// caught, he is beaten whatever his wallet holds, and the ban starts again.
+    pub ban_break_lawfulness: f32,
+    /// Caught this many hours ago or less, he jumps no gate: he pays the
+    /// fare or walks (a beaten dodger does not try the same gate again
+    /// within the hour).
+    pub wary_hours: u64,
+}
+
+impl Default for FaresCfg {
+    fn default() -> Self {
+        FaresCfg {
+            fine: 5,
+            beat_down_minutes: 30,
+            beat_grudge: 0.4,
+            beat_mood: 0.3,
+            beat_safety: 0.4,
+            ban_after: 3,
+            ban_window_days: 7,
+            ban_days: 14,
+            ban_break_lawfulness: 0.1,
+            wary_hours: 24,
         }
     }
 }

@@ -688,3 +688,53 @@ Each trade gets a body that walks to it, through the machinery it already had. N
   Unwind and 9c on a Capsule Hotel night and is on 0c at the rehouse day. A probe whose purse premise a butterfly
   breaks (as its Shop cooldown already guards); left for the fix round.
 - No test (doctrine 2). `SAVE_VERSION` 71.
+
+### R1, petty law: the fare (`OPEN-213`; `systems/fares.rs`, `[fares]`)
+
+- **The catch** (`law::raise_crime_mult`): the on-duty guard who notices a jumped gate settles it on the spot
+  (`fares::caught`), not with a report; `law::file_report` files no Fare Evasion while `[fares]` is set, so no fare is
+  a warrant, an arrest or a cell (a guard on the take still lets it go). The El's crews (`TransitState.staff`) are a
+  sweeper headcount, not bodies at the stops, so the catcher is always a guard (city or private, on shift, in sight
+  of the stop): the beating rung is never skipped on screen, and a stop with no guard on duty catches nobody.
+- **The ladder**: the fine (`fine` 5, `Flow::Fine` to the city, a `Paid` memory) if the wallet holds it, and the
+  fined dodger rides on; else the guard beats him: down on the platform `beat_down_minutes` (30; `cuffed_by` himself,
+  `fares::run` stands him up: "picked himself up off the platform"), a `Lost` memory of the guard (the street hears
+  "assaulted by"), a grudge on the guard (`beat_grudge` 0.4: an Enemy edge), `beat_mood`/`beat_safety` off. Deviation:
+  the wound is the half hour down, not a `World::wounded` entry (a stable entry's `rise` rolls `[ages] p_maimed` 0.25,
+  a maiming for a 1c fare). Caught `ban_after` 3 times in `ban_window_days` 7: banned `ban_days` 14
+  (`transit::pays_or_dodges` refuses the ride: he walks; `board` turns a rider banned since his plan off the
+  platform). A banned rider under `ban_break_lawfulness` 0.1 boards anyway; caught, he is beaten whatever his wallet
+  and banned afresh. Added: `wary_hours` 24, a dodger caught that recently jumps no gate (pays or walks); the first
+  build beat one broke woman three times in 100 minutes at one stop on her way to a HangOut and banned her by 17:24.
+  The phase-3 deterrence (`dodge_deterred_days`) reads a catch as it read an arrest.
+- **Off screen** (`transit::stat_commute`, `stat_errand`): a jumped leg caught at `StatTable.p_dodge_caught` takes
+  the same ladder coarse (`fares::stat_caught`: the fine, else the beating's memory and mood, no body and no guard;
+  counts toward the ban), and the body no longer comes on screen for an arrest. `calibrate` counts a guard's catch
+  (`EventKind::Fare` with the guard as an actor) as the jumped gate caught, so the next table measures the ladder.
+- **Release** already puts the body on the street at the cell's door (`release_at_jail_door`, `release`: the
+  Precinct's street in D2); V10's "far street" was the Precinct's district, far from a dodger's home, and fares no
+  longer go there. No change. Not built: "theft past a threshold" (a Theft report carries no value; the petty food
+  theft is now the jail loop: 738 -> 826 Theft sentences).
+- **Numbers** (20k island seed 42 x 30, one run each, base `49098c9`): fare arrests 531 (409 sentenced, 122 fined at
+  the Precinct) -> 0; arrests 1,448 -> 999; jailed mean 110.2 -> 110.2 (max 210 -> 199; the fare nights were ~10 h
+  each, lost in the run's noise: an earlier build without `wary_hours` read 102.9). The ladder: 8,294 caught (1,589
+  on screen, 6,705 off), 391 fined, 7,661 beaten, 546 banned, 242 bans broken. FINDING: the fine is rare by the dodge
+  rule's construction (a rider with the fare jumps only under `dodge_always` 0.1); `p_dodge_caught` (0.116) was
+  calibrated on sentences and wants the next `calibrate`.
+- **Shadow** (20k island seed 42 d14-d21; picks scav, raider, pimp, jailed, guard and the tool's new `dodger` pick, a
+  repeat dodger at the start day; diaries gain a `Fares` header line): "Hana Oakes fined Knox Yates 5 coins at the El
+  in D1 The Sump for Fare Evasion" and two days later "Hana Oakes beat Quinn Abernathy at the El in D1 The Sump for
+  Fare Evasion: no fare, no fine, left on the platform 30 min" (the guard's diary and the scav's: Enemy edge, grudge,
+  "picked herself up off the platform", then back to work); "Winifred Mbeki beat Gideon Pembroke at the El in D1 The
+  Sump ... / Gideon Pembroke banned from the El for 14 days: caught at the gate 3 times in 7 days", then a 621-min
+  walk to his Club shift, and d21 "Osric Achebe caught Gideon Pembroke on the El in D1 The Sump inside the ban and
+  beat him for Fare Evasion; banned 14 days afresh". Repeat dodgers with coins now pay (10 fares in 5 days, no
+  sighting). Jail picks are Assault, Smuggling, Grand Theft; no pick was jailed for a fare. Reads wrong (next pass):
+  a banned worker's walk (301 tiles, 621 min: R2's pace) costs the shift, so the ban is a firing; the beaten seek a
+  patch and fail `Patch` `PreconditionLost` at a Ripperdoc targeting a Back Room (R3's); the petty-theft jail loop
+  (3 days for 2 food) is the fare loop's successor; a private Security Office guard polices the El like the watch.
+- No test added (doctrine 2; count 1470). Three `transit` tests of the off-screen catch now read the ladder (a fare
+  record, no body for an arrest; `test_caught_commuter_leaves_the_statistical_hour` is `..._keeps_...`: the hour runs
+  on), `law::test_bug4_petty_offence_fined_when_the_suspect_can_pay` runs without `[fares]` (the Precinct path), and
+  `policy::test_dole_enacted_on_day_10_is_paid_from_the_treasury` lost its pick to a butterfly (every jobless adult a
+  tenant who had drawn): today's draw forgotten and the rent from income off for the measured draw. `SAVE_VERSION` 72.

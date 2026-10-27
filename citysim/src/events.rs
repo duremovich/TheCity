@@ -502,10 +502,14 @@ pub enum EventKind {
     /// failed, a rest day with the crew, a welcome back, the colours taken,
     /// the talk inside; `[gang, buyer, members..]` a gang absorbed or folded.
     Crew,
+    /// Pressure pass round 2, R1 (`systems::fares`): `[dodger, guard?]` a
+    /// fare dodger caught at the El (fined, beaten), banned, a ban broken,
+    /// up off the platform.
+    Fare,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 237] = [
+    pub const ALL: [EventKind; 238] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -743,6 +747,7 @@ impl EventKind {
         EventKind::Service,
         EventKind::Cells,
         EventKind::Crew,
+        EventKind::Fare,
     ];
 }
 

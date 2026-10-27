@@ -159,7 +159,7 @@ pub struct ShadowArgs {
     pub map: Option<PathBuf>,
 }
 
-const ARCHETYPES: [&str; 53] = [
+const ARCHETYPES: [&str; 54] = [
     "gang_member",
     // The pressure pass phase 5b: a member of a gang whose standing order
     // marches (a raid, a retaliation, a breakout) at the start day.
@@ -232,6 +232,9 @@ const ARCHETYPES: [&str; 53] = [
     // The pressure pass phase 5a: an adult serving a sentence on the start day (the cells, the
     // release into a changed life).
     "jailed",
+    // Pressure pass round 2, R1: a repeat fare dodger at the start day (caught at the gate
+    // twice or more inside the window, or banned from the El).
+    "dodger",
 ];
 
 /// Activity classes of the time-use table, in print order.
@@ -528,6 +531,9 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
         }
         "owner_broke" => citysim::systems::underwater::owners_by_till(world).into_iter().map(|(_, o)| o).collect(),
         "jailed" => adults().filter(|&a| world.has::<Sentence>(a)).collect(),
+        "dodger" => adults()
+            .filter(|a| world.fares.book.get(a).is_some_and(|r| r.caught.len() >= 2 || r.banned_until.is_some()))
+            .collect(),
         other => return Err(format!("unknown archetype {other:?} (known: {})", ARCHETYPES.join(", "))),
     };
     out.sort();
@@ -1205,6 +1211,14 @@ fn header(world: &World, t: &Track) -> String {
     let wallet = world.comp::<Wallet>(id).map_or(0, |w| w.coins);
     let inv = world.comp::<Inventory>(id).map(|i| format!("food {}, stims {}, parts {}", i.food, i.stims, i.parts));
     let _ = writeln!(h, "- **Wallet**: {} | inventory: {}", money(wallet), inv.unwrap_or_default());
+    // Pressure pass round 2, R1: the fare record (caught at the gate, the El's ban).
+    if let Some(r) = world.fares.book.get(&id) {
+        let ban = r.banned_until.filter(|&t| t > world.tick).map_or_else(
+            || "not banned".to_string(),
+            |t| format!("banned from the El until d{}", t / citysim::time::TICKS_PER_DAY),
+        );
+        let _ = writeln!(h, "- **Fares**: caught at the gate {} time(s) lately, {ban}", r.caught.len());
+    }
     if let Some(hl) = world.comp::<citysim::Health>(id) {
         let _ = writeln!(h, "- **Health**: {}", health_line(hl));
     }

@@ -517,8 +517,9 @@ fn test_statistical_rider_pays_two_fares_at_the_shift_start() {
 }
 
 /// Phase 3 (parity: Full's dodgers are arrested, 70 % of the all-Full
-/// city's sentences): an off-screen dodger is reported at the table's
-/// `p_dodge_caught` and comes on screen for the arrest; at 0, never.
+/// city's sentences): an off-screen dodger is caught at the table's
+/// `p_dodge_caught`; at 0, never. Pressure pass round 2, R1: caught, the
+/// ladder coarse (`fares::stat_caught`: the record, no arrest), off screen.
 #[test]
 fn test_statistical_dodger_is_caught_at_the_learned_rate() {
     use citysim::Job;
@@ -534,8 +535,8 @@ fn test_statistical_dodger_is_caught_at_the_learned_rate() {
         w.tick = TICKS_PER_DAY + u64::from(job.shifts[0].0) + 7;
         transit::stat_commute(&mut w, who, &job, None);
         assert_eq!(w.stats.current.transit.rides_stat, 2, "p {p}: rode through the gate");
-        let lod_now = w.comp::<Brain>(who).expect("brain").lod;
-        assert_eq!(lod_now != Lod::Statistical, caught, "p {p}: on screen for the arrest");
+        assert_eq!(w.fares.book.contains_key(&who), caught, "p {p}: caught at the gate");
+        assert_eq!(w.comp::<Brain>(who).expect("brain").lod, Lod::Statistical, "p {p}: no body for an arrest");
     }
 }
 
@@ -575,8 +576,8 @@ fn test_statistical_commute_rides_at_the_learned_share() {
 
 /// Parity (arrests): an off-screen adult rides the El off the commute on
 /// its row's `p_errand_ride`: a payer pays the fare; a lawless broke rider
-/// jumps the gate, is counted, and at `p_dodge_caught` 1 is reported and
-/// comes on screen for the arrest. A table without the rate: no ride.
+/// jumps the gate, is counted, and at `p_dodge_caught` 1 is caught (R1: the
+/// ladder coarse, off screen). A table without the rate: no ride.
 #[test]
 fn test_statistical_errand_ride_pays_or_jumps_the_gate() {
     for (rated, payer) in [(true, true), (true, false), (false, false)] {
@@ -614,7 +615,8 @@ fn test_statistical_errand_ride_pays_or_jumps_the_gate() {
             assert_eq!(lod_now, Lod::Statistical);
         } else {
             assert!(c.fare_dodges > c0.fare_dodges, "the gate jumped");
-            assert_ne!(lod_now, Lod::Statistical, "reported, on screen for the arrest");
+            assert!(w.fares.book.contains_key(&who), "caught at the gate");
+            assert_eq!(lod_now, Lod::Statistical, "the ladder off screen, no arrest");
         }
     }
 }
@@ -632,11 +634,12 @@ fn alone_at_slot(w: &mut World, who: EntityId, t: u64) {
 }
 
 /// Review item 1 (`/code-review high 7324e60..dfaca2e`): a dodger caught at
-/// the commute's gate comes on screen for the arrest, and the rest of the
-/// Statistical hour is not run on it (no meal from the hourly draw, no
-/// grocery run, no rolls), as after the errand ride's catch.
+/// the commute's gate came on screen for the arrest and left the rest of
+/// the Statistical hour. Pressure pass round 2, R1: the catch is the ladder
+/// off screen (beaten, broke), no arrest, so the body stays Statistical and
+/// its hour runs on (the hourly meal).
 #[test]
-fn test_caught_commuter_leaves_the_statistical_hour() {
+fn test_caught_commuter_keeps_the_statistical_hour() {
     use citysim::{Inventory, Job, Needs};
     let mut w = city_on();
     let (who, _, _) = rider_worker(&w, 40);
@@ -657,8 +660,9 @@ fn test_caught_commuter_leaves_the_statistical_hour() {
     alone_at_slot(&mut w, who, TICKS_PER_DAY + u64::from(job.shifts[0].0));
     lod::run_statistical(&mut w);
     assert_eq!(w.stats.current.transit.rides_stat, 2, "rode through the gate");
-    assert_ne!(w.comp::<Brain>(who).expect("brain").lod, Lod::Statistical, "on screen for the arrest");
-    assert_eq!(w.comp::<Inventory>(who).expect("inv").food, 2, "no off-screen meal after the catch");
+    assert!(w.fares.book.contains_key(&who), "caught at the gate");
+    assert_eq!(w.comp::<Brain>(who).expect("brain").lod, Lod::Statistical, "no body for an arrest");
+    assert!(w.comp::<Inventory>(who).expect("inv").food < 2, "the hour runs on: the meal");
 }
 
 /// Review item 2 (`/code-review high 7324e60..dfaca2e`): attendance is

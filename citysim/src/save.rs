@@ -366,7 +366,10 @@ use crate::world::World;
 /// while it holds anything), `VisitWhy::{Crew, Reckoning}`,
 /// `EventKind::Crew`, `[crew]` (written only when set) and the `Jobs2Cols`
 /// `crew_*` columns (serde defaults).
-pub const SAVE_VERSION: u8 = 71;
+/// 72 (pressure pass round 2, R1, the fare's ladder): `World.fares`
+/// (written while it holds anything), `EventKind::Fare`, `[fares]` (written
+/// only when set) and the `Jobs2Cols` `fare_*` columns (serde defaults).
+pub const SAVE_VERSION: u8 = 72;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

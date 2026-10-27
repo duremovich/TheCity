@@ -1237,6 +1237,10 @@ pub struct World {
     /// books (standing, bail owed, the talk), failed courts, reckonings.
     #[serde(default, skip_serializing_if = "crate::systems::crew::State::is_empty")]
     pub crew: crate::systems::crew::State,
+    /// Pressure pass round 2, R1 (`systems::fares`): the fare dodgers'
+    /// records (caught, banned) and the beaten down on the platform.
+    #[serde(default, skip_serializing_if = "crate::systems::fares::State::is_empty")]
+    pub fares: crate::systems::fares::State,
     /// L2 L15: the HangOut spots per district (`leisure::spots`, midnight).
     /// Saved (deviation: the plan's `serde(skip)` would rebuild them on load
     /// from a later state than the midnight's).
@@ -2029,6 +2033,7 @@ impl World {
             underwater: Default::default(),
             consequence: Default::default(),
             crew: Default::default(),
+            fares: Default::default(),
             spots: Vec::new(),
             last_met: BTreeMap::new(),
             told: BTreeMap::new(),
@@ -3858,6 +3863,7 @@ impl World {
         crate::prof::timed!("tick::leverage", systems::leverage::run(self));
         crate::prof::timed!("tick::captives", systems::captives::run(self));
         crate::prof::timed!("tick::wounded", systems::wounded::run(self));
+        systems::fares::run(self);
         crate::prof::timed!("tick::governance", systems::governance::run(self));
         crate::prof::timed!("tick::tags", systems::tags::run(self));
         crate::prof::timed!("tick::attention", systems::attention::run(self));

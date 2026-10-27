@@ -1228,14 +1228,27 @@ fn meal_price(world: &World) -> i64 {
 /// `Some(true)` jumps the gate, `None` can't pay and won't jump it. Phase 3:
 /// fresh from the cells, a rider with the fare pays it. Pure.
 pub fn pays_or_dodges(world: &World, who: EntityId) -> Option<bool> {
+    // Pressure pass round 2, R1: banned from the El he walks, unless he
+    // boards anyway (the ban broken, never paid: he has no right to the ride).
+    let wary = crate::systems::fares::wary(world, who);
+    if crate::systems::fares::banned(world, who) {
+        return (crate::systems::fares::breaks_ban(world, who) && !wary).then_some(true);
+    }
     let c = &world.config.transit;
     let coins = world.comp::<Wallet>(who).map_or(0, |w| w.coins);
+    // R1: caught lately, he pays or walks.
+    if wary {
+        return (coins >= c.fare).then_some(false);
+    }
     let law = world.comp::<Personality>(who).map_or(0.5, |p| p.lawfulness);
     let since = world.tick.saturating_sub(u64::from(c.dodge_deterred_days) * TICKS_PER_DAY);
+    // R1: caught at the gate lately (the fine, the beating) deters as the
+    // cells did.
     let deterred = coins >= c.fare
-        && world.comp::<crate::components::Memory>(who).is_some_and(|m| {
-            m.entries.iter().any(|e| e.kind == crate::components::MemoryKind::WasArrested && e.tick >= since)
-        });
+        && (crate::systems::fares::caught_since(world, who, since)
+            || world.comp::<crate::components::Memory>(who).is_some_and(|m| {
+                m.entries.iter().any(|e| e.kind == crate::components::MemoryKind::WasArrested && e.tick >= since)
+            }));
     // Pressure pass F2: a guard with the fare pays it (the badge at the
     // gate: a commuting guard jumped it and was arrested for his own fare).
     let badge = coins >= c.fare && crate::systems::law::is_guard(world, who);
@@ -1615,8 +1628,31 @@ fn board(world: &mut World, id: EntityId, mut ride: Ride, lod: Lod) {
     let fare = world.config.transit.fare;
     let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins);
     let law = world.comp::<Personality>(id).map_or(0.5, |p| p.lawfulness);
-    if ride.dodge || (coins < fare && law < world.config.transit.dodge_lawfulness) {
+    // Pressure pass round 2, R1: a rider banned since the ride was planned
+    // walks, or jumps the gate in breach of the ban.
+    let banned = crate::systems::fares::banned(world, id);
+    let wary = crate::systems::fares::wary(world, id);
+    if banned && (wary || !crate::systems::fares::breaks_ban(world, id)) {
+        crate::systems::ownership::jobs2_row(world).fare_ban_walks += 1;
+        abandon(world, id, &ride, lod);
+        return;
+    }
+    if wary && !banned && coins < fare {
+        abandon(world, id, &ride, lod);
+        return;
+    }
+    if banned || (!wary && (ride.dodge || (coins < fare && law < world.config.transit.dodge_lawfulness))) {
         dodge(world, id, tile);
+        // R1: caught and banned now, he is turned off the platform and walks
+        // (a fined dodger rides on: the fine bought the ride).
+        if crate::systems::fares::caught_now(world, id)
+            && crate::systems::fares::banned(world, id)
+            && plan_key(world, id) == Some((ride.plan_started, ride.plan_step))
+        {
+            crate::systems::ownership::jobs2_row(world).fare_ban_walks += 1;
+            abandon(world, id, &ride, lod);
+            return;
+        }
     } else if coins >= fare {
         crate::systems::ownership::pay(world, Some(id), None, fare, crate::systems::ownership::Flow::Fare);
     } else {
@@ -1771,7 +1807,10 @@ pub fn stat_commute(world: &mut World, id: EntityId, job: &crate::components::Jo
     let caught = (0..dodged).any(|leg| {
         crate::systems::econ::hash_unit(world.seed(), 0xfa2e_0001, u64::from(id.index), world.day() * 2 + leg) < p
     });
-    if caught {
+    if caught && crate::systems::fares::on(world) {
+        // Pressure pass round 2, R1: the ladder, coarse (no body, no cell).
+        crate::systems::fares::stat_caught(world, id);
+    } else if caught {
         crate::systems::law::file_report(world, Crime::FareEvasion, id, None);
         crate::systems::lod::set_lod(world, id, Lod::Coarse);
     }
@@ -1810,7 +1849,11 @@ pub fn stat_errand(world: &mut World, id: EntityId, row: usize) -> bool {
     }
     world.stats.current.transit.fare_dodges += 1;
     let p = world.stat_table.as_ref().and_then(|t| t.p_dodge_caught).unwrap_or(0.0);
-    if crate::systems::econ::hash_unit(world.seed(), 0xfa2e_0004, u64::from(id.index), hour) < p {
+    let caught = crate::systems::econ::hash_unit(world.seed(), 0xfa2e_0004, u64::from(id.index), hour) < p;
+    if caught && crate::systems::fares::on(world) {
+        // Pressure pass round 2, R1: the ladder, coarse.
+        crate::systems::fares::stat_caught(world, id);
+    } else if caught {
         crate::systems::law::file_report(world, Crime::FareEvasion, id, None);
         crate::systems::lod::set_lod(world, id, Lod::Coarse);
     }
