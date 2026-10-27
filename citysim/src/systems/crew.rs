@@ -972,6 +972,21 @@ fn pay(world: &mut World, c: &CrewCfg, id: EntityId, gang: EntityId) -> String {
     }
 }
 
+/// Round 3 S2 (OPEN-222): a member who sat the muster to its departure
+/// (`raid::depart`) kept it: a march cut short on the way (Sleep, a
+/// street cut) is no miss (`raider_39544` mustered 120 min and was marked
+/// "missed" when only the brawl's present counted).
+pub fn sat_muster(world: &mut World, gang: EntityId, m: EntityId) {
+    if !on(world) {
+        return;
+    }
+    if let Some(d) = world.crew.duties.get_mut(&m) {
+        if d.gang == gang && d.kind == DutyKind::Muster {
+            d.kept = true;
+        }
+    }
+}
+
 /// The raid's muster kept by those at the door (`raid::resolve`).
 pub fn mustered(world: &mut World, gang: EntityId, present: &[EntityId]) {
     if !on(world) {

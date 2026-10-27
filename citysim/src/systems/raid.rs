@@ -368,6 +368,9 @@ pub fn depart(world: &mut World, agent: EntityId) -> bool {
     }
     // Jobs & lives phase 3 (section 4): the member draws from the armoury.
     crate::systems::weapons::issue(world, agent);
+    // Round 3 S2 (OPEN-222): he sat the muster and marched with it; his
+    // duty is kept whether or not the march reaches the door.
+    crate::systems::crew::sat_muster(world, gid, agent);
     true
 }
 
