@@ -880,3 +880,51 @@ Dylan's call).
   `move_ticks_full` 2 (their city's far workers are near or married at 1); the laid-off loader probe makes the loader's
   the Yard's one open post. Shadow tool: the van's jump allowance reads the road column. No test. `SAVE_VERSION`
   unchanged (no saved state moved).
+
+### R6b, the trades' verbs II (`OPEN-217`, `OPEN-207`; `[verbs]`, `[lod] contract_quota`)
+
+Numbers: 20k `isle_m_k2` seed 42 x 30 (`--scaled --ambient-flats 50`), one run each, base `9755275` -> this build (the
+last change, the beat's outlet filter, came after the run).
+
+- **The gun hunts.** Cause: `[lod] contract_quota` (24 bodies, the live contract parties' class) was the one contract
+  cap `Config::scaled_to` did not scale: `max_missions` read 120 at 20k but 24 bodies held ~8 runs, so a taken hit,
+  beat, locate or tag queued to its deadline (base: 238 of 261 live takes `QUEUED`; V10's 100k guns held a Taken,
+  Live hit and never walked). `contract_quota` and `fixer_quota` are now in `config.toml` and per capita in
+  `scaled_to`. Second cause, once the runs started: `hunt::within_reach` cooled the goal when the habit's pick (a
+  modal district's busiest Bar, the post by day) stood past `stakeout_ticks` (517 cools in 21 days); `contracts::
+  reachable_door` now falls back to the target's Home, then its post, within the reach (the doors F1's take gate
+  admitted the take on) before the goal cools (231 left: no door in reach from where the taker stands). Takes LIVE
+  23 -> 287, QUEUED 238 -> 0; contracts fulfilled 78 -> 139, expired 140 -> 124; Hits done 4 -> 2; HuntStarted 121 ->
+  193. FINDING (printed, not tuned): Assault 1,132 -> 1,391, Murder 46 -> 56. Left: a target in a cell (`target_ok`
+  false: 1,034 cools by day 22) keeps the run waiting to its deadline, a cool every two hours.
+- **The CEO's day is the Hq.** Cause: `industry::grow_hq` built one Hq a day city-wide, so at 20k (90 corps) and 100k
+  the food corps waited weeks, and `life::hq_of` ranked the `Market` (a street market's stalls) above every venue:
+  their execs held office at a stall with no Job (V10's `ceo_91004`). `[verbs] hq_builds_per_day` (1, per capita in
+  `scaled_to`: 10 at 20k) and the Market leaves the rank (a packing plant's or a freight yard's office ranks after
+  the Feed). Hqs built in 30 days 29 -> 42; Hq offices at day 21 60 (Market offices 0, from 9 at day 14).
+- **A landlord corp's exec has an office** (`OPEN-207`): `life::office_of` = `hq_of`, else under `[verbs]
+  landlord_desk` a lettings desk in the corp's standing Block nearest the exec's Home; read by `exec_day_pending`,
+  the table (`service::meeting_hour`, `decided`'s district), the exec's ride (`streetwork`) and the diary's "no
+  Hq". `hq_of` itself still gives no office in a Home (`test_review7_no_office_in_a_home_or_a_lot` stands).
+  Deviation: no round over the blocks; the desk is a Meeting with nobody at it (the corp's supers walk their rounds),
+  and a landlord corp past `hq_min_buildings` builds a real Hq anyway (Habitat's exec at Corp HQ#4532 by day 21).
+- **The reporter files from his beat.** Cause: the beat (Lives at work phase 5) was walked and its interviews went
+  nowhere: the night's ranked picks were other deeds, the byline went to the sharpest reporter, and the interviewed
+  deed was often gone from the busy pool by midnight (201 of 367 by day 16) or already run by two outlets. Now
+  `run_stories` runs `[verbs] beat_stories` (1) of each reporter's interviewed deeds under his byline first (inside
+  `stories_per_day`; the pool's copy, else the deed as he took it down), the Story event names him ("... by Jocasta
+  Jarrow (from the beat)"), and `beat_stops` skips a scene whose deed the other Feeds already ran
+  (`outlets_per_deed`). Beat stories 0 -> 90 in 30 days (before the outlet filter).
+- **The gangs' gun trade** (`weapons::gang_arms_trade`, its own function, the purses through `ownership::pay`): on
+  its hashed trade day (`trade_days` 3, no saved state) a gang under its armoury target buys up to `trade_lot` (4)
+  from the gang with the largest surplus at `trade_price_share` (0.75) of the dealer's T1 price (68c), keeping
+  `trade_reserve_days` (1) of its stipends; the seller's registered dealer (else its leader) deals with the buyer's
+  leader, the weapons move armoury to armoury. Deals 0 -> 11 (gang_arms_buys 5 -> 14 with the quartermasters).
+  Deviation: a midnight ledger line, no meeting walked; most gang purses (0-200c) afford one weapon at most.
+- **The teacher's pupils: diagnosed, not built.** The seeded city has no children (`seed_kin_p` gives grown kin
+  only); the only children are the run's newborns (20k: 32 at day 14, 51 at day 21, all under 21 days old), and
+  `ages::children` has no school age, so a paid infant would be a "pupil". All 20 Schools' rosters are 0 at days 14
+  and 21. A design call for Dylan: seed school-age children at world generation (`OPEN-150`'s starting-condition
+  seed) and gate the School routine by age.
+- No test (doctrine 2). `SAVE_VERSION` unchanged: no World state; the save's config carries `[verbs]` as an optional
+  section (absent: `None`).

@@ -663,6 +663,10 @@ fn spin(world: &mut World, mut known: BTreeMap<EntityId, Misdeeds>) -> Vec<Plant
     plants
 }
 
+/// A story to run tonight: the deed, the slant, the payer of a plant, a
+/// fabrication, and the reporter who filed it from his beat (R6b).
+type StoryRun = (PoolEntry, f32, Option<EntityId>, bool, Option<EntityId>);
+
 /// A Feed's display name.
 pub fn feed_name(world: &World, feed: EntityId) -> String {
     feed_state(world, feed).map_or_else(|| world.name_of(feed), |s| s.name.clone())
@@ -685,28 +689,95 @@ fn run_stories(world: &mut World, plants: Vec<Plant>) {
         let Some(st) = feed_state(world, feed).cloned() else { continue };
         let owner = world.comp::<Building>(feed).and_then(|b| b.owner);
         let mut cands: BTreeMap<DeedKey, (f32, PoolEntry)> = BTreeMap::new();
+        let runnable = |e: &PoolEntry| -> bool {
+            let Some(actor) = e.actor else { return false };
+            if e.hops > 2 || !world.is_alive(actor) {
+                return false;
+            }
+            if silenced(world, feed, &censor, actor, e.object) {
+                return false;
+            }
+            // Plan deviation: a Feed never runs its own owner's deeds
+            // (or its people's) unpaid.
+            if owner.is_some_and(|o| about(world, actor, o)) {
+                return false;
+            }
+            if ran_recently(world, feed, e.deed, actor, e.object) {
+                return false;
+            }
+            // Shadow V4 bug 21: a deed other Feeds already ran enough.
+            !(cfg.outlets_per_deed > 0 && outlets_running(world, e.deed, actor, e.object) >= cfg.outlets_per_deed)
+        };
+        // R6b (OPEN-217): the reporter files from his beat: each of the
+        // Feed's reporters runs `[verbs] beat_stories` of the deeds he
+        // interviewed at a scene (the first walked first) under his byline,
+        // ahead of the ranked picks, inside `stories_per_day`. V10's beat was
+        // walked and its interviews ran nowhere: the night's ranked picks
+        // were other deeds and the byline went to the sharpest reporter.
+        let per_reporter = world.config.verbs.as_ref().map_or(0, |v| usize::from(v.beat_stories));
+        let mut beat_runs: Vec<(PoolEntry, EntityId)> = Vec::new();
+        if per_reporter > 0 {
+            for r in reporters(world, feed).0 {
+                let Some(beat) = world.beats.get(&r) else { continue };
+                let mut filed = 0;
+                for &(deed, actor, object, day) in &beat.interviewed {
+                    if filed >= per_reporter || beat_runs.len() >= usize::from(cfg.stories_per_day) {
+                        break;
+                    }
+                    if beat_runs.iter().any(|(e, _)| e.deed == deed && e.actor == Some(actor) && e.object == object) {
+                        continue;
+                    }
+                    // The pool's copy when it still holds one, else the deed as
+                    // the reporter took it down at the scene (a busy pool sheds a
+                    // day-old entry before midnight: 201 of 367 interviewed deeds
+                    // at 20k by day 16).
+                    let found = world
+                        .rumours
+                        .iter()
+                        .enumerate()
+                        .filter(|&(d, _)| d < MAX_DISTRICTS && st.covers & (1 << d) != 0)
+                        .flat_map(|(_, pool)| pool.entries.iter())
+                        .filter(|e| {
+                            e.deed == deed && e.actor == Some(actor) && e.object == object && time::day(e.tick) == day
+                        })
+                        .min_by_key(|e| (e.hops, e.tick))
+                        .cloned()
+                        .unwrap_or_else(|| PoolEntry {
+                            deed,
+                            actor: Some(actor),
+                            object,
+                            tick: day * TICKS_PER_DAY,
+                            hops: 0,
+                            reach: 0.0,
+                            hole: None,
+                            story: None,
+                            kin: SmallVec::new(),
+                            told: SmallVec::new(),
+                            district: world
+                                .comp::<crate::components::Job>(r)
+                                .and_then(|j| j.employer)
+                                .map(|f| world.district_of_building(f))
+                                .unwrap_or_default(),
+                            press: 0,
+                        });
+                    let found = Some(found).filter(|e| runnable(e));
+                    if let Some(e) = found {
+                        beat_runs.push((e, r));
+                        filed += 1;
+                    }
+                }
+            }
+        }
         for (d, pool) in world.rumours.iter().enumerate() {
             if d >= MAX_DISTRICTS || st.covers & (1 << d) == 0 {
                 continue;
             }
             for e in &pool.entries {
                 let Some(actor) = e.actor else { continue };
-                if e.hops > 2 || !world.is_alive(actor) {
+                if !runnable(e) {
                     continue;
                 }
-                if silenced(world, feed, &censor, actor, e.object) {
-                    continue;
-                }
-                // Plan deviation: a Feed never runs its own owner's deeds
-                // (or its people's) unpaid.
-                if owner.is_some_and(|o| about(world, actor, o)) {
-                    continue;
-                }
-                if ran_recently(world, feed, e.deed, actor, e.object) {
-                    continue;
-                }
-                // Shadow V4 bug 21: a deed other Feeds already ran enough.
-                if cfg.outlets_per_deed > 0 && outlets_running(world, e.deed, actor, e.object) >= cfg.outlets_per_deed {
+                if beat_runs.iter().any(|(b, _)| b.deed == e.deed && b.actor == e.actor && b.object == e.object) {
                     continue;
                 }
                 let score = newsworthiness(world, e, now);
@@ -726,16 +797,20 @@ fn run_stories(world: &mut World, plants: Vec<Plant>) {
                 .then(a.1.tick.cmp(&b.1.tick))
                 .then(a.1.actor.map_or(0, |x| x.index).cmp(&b.1.actor.map_or(0, |x| x.index)))
         });
-        let mut runs: Vec<(PoolEntry, f32, Option<EntityId>, bool)> = ranked
+        let mut runs: Vec<StoryRun> = beat_runs
             .into_iter()
-            .take(usize::from(cfg.stories_per_day))
-            .map(|(_, e)| {
+            .map(|(e, r)| {
                 let slant = organic_slant(world, e.deed);
-                (e, slant, None, false)
+                (e, slant, None, false, Some(r))
             })
             .collect();
+        let room = usize::from(cfg.stories_per_day).saturating_sub(runs.len());
+        runs.extend(ranked.into_iter().take(room).map(|(_, e)| {
+            let slant = organic_slant(world, e.deed);
+            (e, slant, None, false, None)
+        }));
         for (_, e, payer, fab) in plants.iter().filter(|(f, _, _, _)| *f == feed) {
-            runs.push((e.clone(), -1.0, Some(*payer), *fab));
+            runs.push((e.clone(), -1.0, Some(*payer), *fab, None));
         }
         if runs.is_empty() {
             continue;
@@ -751,10 +826,11 @@ fn run_stories(world: &mut World, plants: Vec<Plant>) {
         let reach = (st.reach * world.config.news.story_reach).clamp(0.0, 1.0);
         let fname = st.name.clone();
         let mut ran = 0u8;
-        for (e, slant, payer, fabricated) in runs {
+        for (e, slant, payer, fabricated, filed_by) in runs {
             // Lives at work phase 5 (§ 2.4): the byline, read before the
             // distortion (the deed's own actor is the beat's key).
-            let byline = byline_for(world, feed, e.actor.map(|a| (e.deed, a, e.object, time::day(e.tick))));
+            let byline =
+                filed_by.or_else(|| byline_for(world, feed, e.actor.map(|a| (e.deed, a, e.object, time::day(e.tick)))));
             let mut r = DeedRef { deed: e.deed, actor: e.actor, object: e.object };
             let p = world.config.gossip.distort_base * (1.0 - k).clamp(0.0, 1.0);
             let roll: f32 = rng.random();
@@ -811,7 +887,15 @@ fn run_stories(world: &mut World, plants: Vec<Plant>) {
             let by = byline.map_or_else(String::new, |b| format!(" by {}", world.name_of(b)));
             let text =
                 format!("{fname}: {} {}{obj}{paid}{by}", crate::systems::grudges::label(world, actor), r.deed.label());
-            world.push_event(EventKind::Story, &[feed, actor, r.object.unwrap_or(EntityId::NONE)], text);
+            // R6b: the reporter who filed it is an actor (his diary keeps his story).
+            match filed_by {
+                Some(b) => world.push_event(
+                    EventKind::Story,
+                    &[feed, actor, r.object.unwrap_or(EntityId::NONE), b],
+                    format!("{text} (from the beat)"),
+                ),
+                None => world.push_event(EventKind::Story, &[feed, actor, r.object.unwrap_or(EntityId::NONE)], text),
+            };
             world.stats.current.word.stories += 1;
             if let Some(b) = byline {
                 note_byline(world, b);
@@ -947,6 +1031,13 @@ pub fn beat_stops(world: &World, feed: EntityId) -> SmallVec<[(EntityId, BeatDee
                 continue;
             }
             if ran_recently(world, feed, e.deed, actor, e.object) {
+                continue;
+            }
+            // R6b: the scene of a deed the other Feeds already ran enough is
+            // no story to file (`run_stories` would drop it: old news).
+            let outlets = world.config.news.outlets_per_deed;
+            if world.config.verbs.is_some() && outlets > 0 && outlets_running(world, e.deed, actor, e.object) >= outlets
+            {
                 continue;
             }
             let Some(b) = scene_of(world, e) else { continue };

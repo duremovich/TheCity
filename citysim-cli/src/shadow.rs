@@ -1382,7 +1382,7 @@ fn work_blocked(world: &World, id: EntityId) -> Option<&'static str> {
     use citysim::systems::life;
     let Some(job) = world.comp::<Job>(id) else {
         let corp = life::exec_corp(world, id)?;
-        return life::hq_of(world, corp, id).is_none().then_some("no Hq");
+        return life::office_of(world, corp, id).is_none().then_some("no Hq");
     };
     if job.employer.is_none() {
         Some("no workplace")

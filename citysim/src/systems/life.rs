@@ -1536,12 +1536,17 @@ pub fn pick_exec(world: &World, candidates: impl Iterator<Item = EntityId>) -> O
 /// came first and there was no Hq in the ranking, so CEOs held office at
 /// Vat Farms and Arasaka's head moved to the Sump).
 pub fn hq_of(world: &World, corp: EntityId, exec: EntityId) -> Option<EntityId> {
-    const RANK: [BuildingKind; 11] = [
+    // R6b (OPEN-217): the Market is a street market's stalls, no office (a
+    // food corp's CEO sat at a stall with no Job, V10): it ranks with the
+    // unranked kinds, after the packing plant's and the freight yard's
+    // offices.
+    const RANK: [BuildingKind; 12] = [
         BuildingKind::Hq,
         BuildingKind::Lab,
         BuildingKind::SecurityOffice,
         BuildingKind::Feed,
-        BuildingKind::Market,
+        BuildingKind::PackingPlant,
+        BuildingKind::FreightYard,
         BuildingKind::Clinic,
         BuildingKind::Garage,
         BuildingKind::Hotel,
@@ -1565,6 +1570,34 @@ pub fn hq_of(world: &World, corp: EntityId, exec: EntityId) -> Option<EntityId> 
         .map(|(_, _, b)| b)
 }
 
+/// R6b (OPEN-207): the exec's office: the corp's Hq or its best working
+/// building (`hq_of`), else, for a landlord corp (Homes and Lots only) under
+/// `[verbs] landlord_desk`, a lettings desk in its standing Block nearest
+/// the exec's Home (then the lower id). `None` for a corp with neither.
+pub fn office_of(world: &World, corp: EntityId, exec: EntityId) -> Option<EntityId> {
+    hq_of(world, corp, exec).or_else(|| lettings_desk(world, corp, exec))
+}
+
+/// R6b (OPEN-207): a landlord corp's lettings desk (`office_of`).
+pub fn lettings_desk(world: &World, corp: EntityId, exec: EntityId) -> Option<EntityId> {
+    if !world.config.verbs.as_ref().is_some_and(|v| v.landlord_desk) {
+        return None;
+    }
+    let c = world.comp::<Corp>(corp)?;
+    let from = home_of(world, exec).and_then(|h| world.comp::<Building>(h)).map(|b| b.door);
+    c.buildings
+        .iter()
+        .copied()
+        .filter_map(|b| {
+            let bd = world
+                .comp::<Building>(b)
+                .filter(|bd| !bd.demolished && !bd.derelict && bd.kind == BuildingKind::Home)?;
+            Some((from.map_or(0, |f| f.manhattan(bd.door)), b))
+        })
+        .min()
+        .map(|(_, b)| b)
+}
+
 /// The corp `id` is the exec of.
 pub fn exec_corp(world: &World, id: EntityId) -> Option<EntityId> {
     world.corp_slice().iter().copied().find(|&c| world.comp::<Corp>(c).is_some_and(|cc| cc.exec == Some(id)))
@@ -1582,7 +1615,7 @@ pub fn exec_day_pending(world: &World, id: EntityId) -> Option<EntityId> {
         return None;
     }
     let corp = exec_corp(world, id)?;
-    let hq = hq_of(world, corp, id)?;
+    let hq = office_of(world, corp, id)?;
     let (s, e) = world.config.life.exec_shift;
     let tod = u64::from(world.tick_of_day());
     if !crate::exec::routine::is_workday(today as i64) || tod >= u64::from(e) {

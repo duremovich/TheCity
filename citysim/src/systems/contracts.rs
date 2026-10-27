@@ -2801,7 +2801,13 @@ pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
     }
     // The pressure pass phase 4 (OPEN-194): the first leg within reach.
     if !crate::systems::hunt::within_reach(world, id, next.phase, &mut next.venue, next.intel) {
-        return None;
+        // R6b (OPEN-217): the stakeout falls back to a door of the
+        // target's the taker can reach (the take gate's: its Home, then
+        // its post) before the goal cools: the habit's pick (a modal
+        // district's busiest Bar, the post by day) stood past the reach and
+        // V10's guns held a taken hit to its deadline, never walking.
+        next.intel = Some(reachable_door(world, id, t)?);
+        next.phase = HuntPhase::Watch;
     }
     let phase = next.phase;
     crate::systems::hunt::set_chase(world, id, next);
@@ -2824,6 +2830,26 @@ pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
         steps.push(step(ActionKind::HandOver, Some(at)));
     }
     Some(Plan { goal: GoalKind::Contract, target: tt, steps, started_tick: now })
+}
+
+/// R6b (OPEN-217): the first of the target's Home and workplace doors
+/// within `[distance.reach] stakeout_ticks` of the taker's origin (the
+/// doors `hunt_in_reach` admitted the take on), as a habit intel; `None`
+/// without `[verbs]` or with neither in reach.
+fn reachable_door(world: &World, id: EntityId, t: EntityId) -> Option<Intel> {
+    world.config.verbs.as_ref()?;
+    let cap = crate::systems::distance::reach(world).map(|r| r.stakeout_ticks)?;
+    let from = crate::systems::life::origin(world, id)?;
+    let home = world.comp::<crate::components::Household>(t).and_then(|h| h.home);
+    let post = world.comp::<Job>(t).and_then(|j| j.employer);
+    [home, post].into_iter().flatten().find_map(|b| {
+        let door = world.comp::<Building>(b).filter(|bd| !bd.demolished).map(|bd| bd.door)?;
+        (crate::systems::distance::travel(world, from, door) <= cap).then_some(Intel {
+            building: Some(b),
+            tile: door,
+            source: IntelSource::Habit,
+        })
+    })
 }
 
 /// A sighting of `t` in the buyer's database younger than

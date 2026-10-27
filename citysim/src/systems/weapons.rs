@@ -79,6 +79,8 @@ const PURPOSE_WANT: u64 = 0x5745_0003;
 const PURPOSE_SIGHT: u64 = 0x5745_0004;
 const PURPOSE_CRATE: u64 = 0x5745_0005;
 const PURPOSE_PETTY: u64 = 0x5745_0006;
+/// R6b: the gangs' gun trade day (`gang_arms_trade`).
+const PURPOSE_TRADE: u64 = 0x5745_0007;
 
 /// Phase 3 is live: `[jobs2] enabled` and `[weapons] enabled`.
 pub fn on(world: &World) -> bool {
@@ -1434,6 +1436,7 @@ pub fn daily(world: &mut World) {
     carry_roll(world);
     wants_and_licences(world);
     quartermasters(world);
+    gang_arms_trade(world);
     restock_guards(world);
     guard_shares(world);
 }
@@ -1482,6 +1485,94 @@ fn quartermasters(world: &mut World) {
             world.jobs2.arms.quarter.insert(m, g);
             world.jobs2.arms.wants.insert(m);
         }
+    }
+}
+
+/// The pressure pass round 2, R6b (OPEN-217; `[verbs]`): the gangs' gun
+/// trade, hideout to hideout. On its trade day (`trade_days`, a hash of
+/// the gang: no saved state) a gang under its armoury target whose purse
+/// holds a weapon's price above `trade_reserve_days` of its members'
+/// stipends buys up to `trade_lot` from the other gang with the largest
+/// surplus (its Hideout nearest, then the lower id) at `trade_price_share`
+/// of the dealer's T1 price a weapon: the seller's dealer (a registered
+/// one, else its leader) makes the deal with the buyer's leader, the gang
+/// purses pay (`Flow::Arms`), the weapons move armoury to armoury. The
+/// quartermaster's walk-in (phase 2) buys one at the full price; this is
+/// the lot a purse affords.
+fn gang_arms_trade(world: &mut World) {
+    let Some(cfg) = world.config.verbs.clone() else { return };
+    if cfg.trade_lot == 0 || cfg.trade_days == 0 {
+        return;
+    }
+    let Some(list) = dealer_price(world, 1) else { return };
+    let unit = ((list as f32 * cfg.trade_price_share).round() as i64).max(1);
+    let day = world.day();
+    let stipend = world.config.social.gang_stipend.max(0);
+    for g in world.gangs() {
+        // The gang's trade day: the hash's slot in the cycle.
+        let slot = (hash(world, PURPOSE_TRADE, key(g), 0) * f32::from(cfg.trade_days)) as u64;
+        if day % u64::from(cfg.trade_days) != slot.min(u64::from(cfg.trade_days) - 1) {
+            continue;
+        }
+        let Some(h) = world.hideout_of(g) else { continue };
+        let members = world.comp::<Gang>(g).map_or(0, |x| x.members.len());
+        if members == 0 {
+            continue;
+        }
+        let want = armoury_target(world, g).saturating_sub(stock_at(world, h).len());
+        if want == 0 {
+            continue;
+        }
+        let reserve = stipend * members as i64 * i64::from(cfg.trade_reserve_days);
+        let budget = world.purse(Some(g)) - reserve;
+        let afford = (budget.max(0) / unit) as usize;
+        let n = want.min(usize::from(cfg.trade_lot)).min(afford);
+        if n == 0 {
+            continue;
+        }
+        let from = world.comp::<Building>(h).map(|b| b.door).unwrap_or_default();
+        let seller = world
+            .gangs()
+            .into_iter()
+            .filter(|&s| s != g)
+            .filter_map(|s| {
+                let left = surplus(world, s).len();
+                let door = world.hideout_of(s).and_then(|x| world.comp::<Building>(x)).map(|b| b.door)?;
+                (left > 0).then(|| (std::cmp::Reverse(left), door.manhattan(from), s))
+            })
+            .min()
+            .map(|(_, _, s)| s);
+        let Some(s) = seller else { continue };
+        let lot: Vec<EntityId> = surplus(world, s).into_iter().take(n).collect();
+        let price = unit * lot.len() as i64;
+        if lot.is_empty() || ownership::pay(world, Some(g), Some(s), price, Flow::Arms) < price {
+            continue;
+        }
+        let dealer = world
+            .dealers
+            .values()
+            .flatten()
+            .copied()
+            .find(|&d| world.gang_of(d) == Some(s) && crate::systems::law::living(world, d))
+            .or_else(|| world.comp::<Gang>(s).and_then(|x| x.leader));
+        let buyer = world.comp::<Gang>(g).and_then(|x| x.leader);
+        for &a in &lot {
+            let p = prov(world, ProvKind::Dealt, dealer.or(Some(s)));
+            hand_over(world, a, Some(g), AssetLoc::Stock(h), p, false);
+        }
+        ownership::jobs2_row(world).gang_arms_buys += 1;
+        let (gn, sn) = (world.owner_label(Some(g)), world.owner_label(Some(s)));
+        let who = |w: &World, e: Option<EntityId>| e.map_or_else(|| "nobody".to_string(), |x| w.name_of(x));
+        let what = if lot.len() == 1 { "a weapon".to_string() } else { format!("{} weapons", lot.len()) };
+        let text = format!(
+            "{sn} sold {gn} {what} for {price} ({unit} each): {} dealt with {}; the lot moved hideout to hideout",
+            who(world, dealer),
+            who(world, buyer)
+        );
+        let mut actors = vec![g, s];
+        actors.extend(dealer);
+        actors.extend(buyer);
+        world.push_event(EventKind::AssetBought, &actors, text);
     }
 }
 

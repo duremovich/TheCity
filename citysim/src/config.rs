@@ -385,6 +385,12 @@ pub struct Config {
     /// save) with the key absent: care as phase 2 left it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub care: Option<CareCfg>,
+    /// Pressure pass round 2, R6b (docs/PRESSURE_PASS.md § R6b; OPEN-217,
+    /// OPEN-207): the trades' verbs II (the corp's office, the reporter's
+    /// story, the gangs' gun trade). `None` (not written into a save) with
+    /// the key absent: as R6a left them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verbs: Option<VerbsCfg>,
     /// The island pass phase 1 (docs/ISLAND_PASS.md I1; OPEN-163 part):
     /// travel time in the job and bed picks (`systems/distance.rs`). `None`
     /// (not written into a save) with the key absent: the picks
@@ -447,6 +453,45 @@ pub struct Config {
     /// without it reads 0, the base.
     #[serde(default, skip_serializing_if = "PerfCfg::host_only")]
     pub perf: PerfCfg,
+}
+
+/// `[verbs]` (the pressure pass round 2, R6b; OPEN-217, OPEN-207).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VerbsCfg {
+    /// Corps without an Hq that build one a day (`industry::grow_hq`; the
+    /// base built one a day city-wide); per capita in `scaled_to`.
+    pub hq_builds_per_day: u32,
+    /// A corp holding only Homes (and Lots) gives its exec a lettings desk in
+    /// its Block nearest his Home (`life::office_of`, OPEN-207).
+    pub landlord_desk: bool,
+    /// Stories a reporter files a night from the deeds he interviewed on his
+    /// beat (`news::run_stories`, ahead of the Feed's ranked picks).
+    pub beat_stories: u8,
+    /// The gangs' gun trade (`weapons::gang_arms_trade`): a gang short of its
+    /// armoury buys a lot from a gang with a surplus at this share of the
+    /// dealer's price a weapon ...
+    pub trade_price_share: f32,
+    /// ... at most this many weapons a deal ...
+    pub trade_lot: u8,
+    /// ... keeping this many days of its stipends after paying ...
+    pub trade_reserve_days: u8,
+    /// ... one deal a gang every this many days.
+    pub trade_days: u8,
+}
+
+impl Default for VerbsCfg {
+    fn default() -> Self {
+        VerbsCfg {
+            hq_builds_per_day: 1,
+            landlord_desk: true,
+            beat_stories: 1,
+            trade_price_share: 0.75,
+            trade_lot: 4,
+            trade_reserve_days: 1,
+            trade_days: 3,
+        }
+    }
 }
 
 /// `[noise]` (the pressure pass round 2, R4; OPEN-218, OPEN-219).
@@ -10461,6 +10506,16 @@ impl Config {
         self.lod.max_full = up_usize(self.lod.max_full);
         self.lod.max_coarse = up_usize(self.lod.max_coarse);
         self.lod.private_quota = up_usize(self.lod.private_quota);
+        // R6b (OPEN-217): the live contract parties' and the Fixer owners'
+        // bodies grow with the city, as `max_missions` does: unscaled, 24
+        // bodies held ~8 runs city-wide at 20k against 120 run slots, and a
+        // taken hit or locate queued to its deadline (20k seed 42 x 30: 238
+        // of 261 live takes QUEUED, Hits done 4; V10's guns never hunted).
+        self.lod.contract_quota = up_usize(self.lod.contract_quota);
+        self.lod.fixer_quota = up_usize(self.lod.fixer_quota);
+        if let Some(v) = self.verbs.as_mut() {
+            v.hq_builds_per_day = up_u32(v.hq_builds_per_day);
+        }
         // The planner's and the paths' per-tick budgets serve the bodies.
         let k = (self.lod.max_full + self.lod.max_coarse) as f64 / bodies;
         let b = &mut self.brain;
