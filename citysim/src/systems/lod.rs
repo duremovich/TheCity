@@ -1417,25 +1417,38 @@ fn stat_eat(world: &mut World, id: EntityId) {
 /// holds a meal's coins at its stocked food Market buys the shortfall (at
 /// most three meals) into the pantry, as a Full worker's grocery run does. The Full city's
 /// jobless ate from the pantries the workers' runs filled (hungry at
-/// midnight 0.3-0.7 % against 3-3.6 % off screen on the flipped city).
+/// midnight 0.3-0.7 % against 3-3.6 % off screen on the flipped city). S6
+/// (OPEN-224): the children's food on top, and a jobless parent by day.
 fn stat_grocery(world: &mut World, id: EntityId) {
     if !crate::systems::fixes::shift_meals(world) {
         return;
     }
-    let Some(job) = world.comp::<Job>(id) else { return };
-    if job.on_shift(world.tick_of_day()) {
-        return;
-    }
-    let need_one = crate::exec::routine::shift_meals_needed(world, job);
     let Some(home) = world.comp::<Household>(id).and_then(|h| h.home) else { return };
+    // The pressure pass S6 (OPEN-224): the children's food on top (the
+    // learned level is the childless city's), and a jobless parent shops
+    // for it by day, as the Full parent's run (`routine::grocery_plan`).
+    let kids = crate::systems::ages::children_food_need(world, home);
+    let cap = world.config.buildings.home.stock_cap;
+    let need = match world.comp::<Job>(id) {
+        Some(job) => {
+            if job.on_shift(world.tick_of_day()) {
+                return;
+            }
+            let need_one = crate::exec::routine::shift_meals_needed(world, job);
+            let residents = world.residents_of(home).len().max(1) as u32;
+            // The level: the Full city's learned pantry per resident (a run does
+            // not always win the evening), else a shift's worth each.
+            let per =
+                world.stat_table.as_ref().and_then(|t| t.pantry_per_resident).map_or(need_one as f32, |p| p.max(0.0));
+            (((per * residents as f32).round() as u32).min(need_one * residents) + kids).min(cap)
+        }
+        None if kids > 0 && world.phase() != DayPhase::Night && crate::systems::ages::feeds_children(world, id) => {
+            kids.min(cap)
+        }
+        None => return,
+    };
     let pantry = world.comp::<Building>(home).map_or(0, |b| b.stock_food);
     let carried = world.comp::<crate::components::Inventory>(id).map_or(0, |i| i.food.saturating_sub(i.stolen_food));
-    let residents = world.residents_of(home).len().max(1) as u32;
-    // The level: the Full city's learned pantry per resident (a run does
-    // not always win the evening), else a shift's worth each.
-    let per = world.stat_table.as_ref().and_then(|t| t.pantry_per_resident).map_or(need_one as f32, |p| p.max(0.0));
-    let need =
-        ((per * residents as f32).round() as u32).min(need_one * residents).min(world.config.buildings.home.stock_cap);
     if pantry + carried >= need {
         return;
     }

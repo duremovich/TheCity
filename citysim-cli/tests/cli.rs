@@ -32,7 +32,10 @@ fn test_cli_ten_days_seed_42() {
     // checked as an account: 2,000 + births + immigrants - deaths - emigrants, with at most
     // thirteen immigrants a week from day 7 (M11 § 7: the lever times a logistic of Street
     // happiness).
-    let mut expected: i64 = 2000;
+    // The pressure pass S6 (OPEN-224): the opening account is the seed's
+    // people, the 2,000 adults and the seeded couples' children (read off
+    // day 0's row, less its own moves).
+    let mut expected: Option<i64> = None;
     let mut immigrants = 0;
     for (i, row) in rows.iter().enumerate() {
         let cols: Vec<i64> =
@@ -43,9 +46,12 @@ fn test_cli_ten_days_seed_42() {
         let other_deaths: i64 = other.iter().map(|&k| raw[k].parse::<i64>().unwrap_or(0)).sum();
         // M17 phase 3: agents from abroad (Outsiders, brothers) arrive outside the immigrant count.
         let abroad: i64 = outside_cols.iter().map(|&k| raw[k].parse::<i64>().unwrap_or(0)).sum();
-        expected += cols[16] + cols[17] + abroad - cols[13] - cols[14] - cols[15] - cols[18] - other_deaths;
+        let net = cols[16] + cols[17] + abroad - cols[13] - cols[14] - cols[15] - cols[18] - other_deaths;
+        let e = expected.get_or_insert(cols[1] - net);
+        assert!(i > 0 || *e >= 2000, "the 2,000 adults at least: {e}");
+        *e += net;
         immigrants += cols[17];
-        assert_eq!(cols[1], expected, "day {i}");
+        assert_eq!(cols[1], *e, "day {i}");
         assert!(immigrants <= 13 * (i as i64 / 7), "day {i}");
         if i % 7 != 0 {
             assert_eq!(cols[17], 0, "immigrants arrive weekly: day {i}");

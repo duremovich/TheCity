@@ -389,9 +389,31 @@ fn civic_hour(world: &mut World) {
                 }
             }
         }
+        let hour = world.tick / TICKS_PER_HOUR;
         for (s, kids) in roster {
+            let n = kids.len();
             for k in kids {
                 arrive(world, k, s, ServeKind::Pupil, 0);
+            }
+            // S6 (OPEN-224): the class, one event a teacher (the pupils
+            // taught this hour; the rest of the roster waited, untaught).
+            let classes: Vec<(EntityId, u32)> = servers(world, s, ServeKind::Pupil)
+                .into_iter()
+                .filter_map(|(t, _)| {
+                    world
+                        .service_room
+                        .get(&t)
+                        .filter(|r| r.hour == hour && r.taken > 0)
+                        .map(|r| (t, u32::from(r.taken)))
+                })
+                .collect();
+            let taught: u32 = classes.iter().map(|&(_, m)| m).sum();
+            let left = (n as u32).saturating_sub(taught);
+            for (t, m) in classes {
+                let (who, at) = (world.name_of(t), world.name_of(s));
+                let rest = if left > 0 { format!(" ({left} more on the roll, no room)") } else { String::new() };
+                let pupils = if m == 1 { "1 pupil".to_string() } else { format!("{m} pupils") };
+                world.push_event(EventKind::Served, &[t, s], format!("{who} taught {pupils} at {at}{rest}"));
             }
         }
     }
@@ -709,7 +731,12 @@ fn encounter_row(
     // in it (the row's zero valence, no notice: `tenant` wrote the notice's
     // own) is no memory either side (V10: ~40 "called on" lines a round).
     let blank_call = kind == ServeKind::Tenant && row.valence == 0.0;
-    if !blank_call {
+    // The pressure pass S6 (OPEN-224): a pupil is no memory of the
+    // teacher's (a child has none of its own; a roster of 30 a morning
+    // buried the teacher's memory, and the diary read the pupil as "a
+    // pupil's parent"): the day's class is one event (`civic_hour`).
+    let pupil = kind == ServeKind::Pupil && world.has::<Child>(served);
+    if !blank_call && !pupil {
         world.remember(server, MemoryKind::Served, Some(served), salience, row.valence, false);
         world.remember(served, MemoryKind::Served, Some(server), salience, row.valence, false);
     }

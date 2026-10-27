@@ -238,6 +238,12 @@ care counted), gate School by age in `ages`, and the teacher's day has pupils. T
 no pupil goes. Changes household make-up citywide, so print employment, starvation, homeless and the housing split,
 20k seed 42 x 30, before and after. Shadow: teacher, camp_parent, a school child, a parent who works, elder.
 
+**The rule (Dylan 2026-10-27, hard, not a switch): no child under 18 is ever killed, hurt or harmed; at 18 all bets
+are off.** One predicate (`ages::is_protected`) skips them at every victim pick and harm site; no vice, no job, no
+bet under 18; hunger and sickness floor before any damage (an unfed child is taken by the service, never starved);
+the camps work children 10+ for Parts, feed them, and the warden's beating is deleted; a child caught stealing or
+begging is taken by the service or let go, never arrested with force.
+
 #### S7, the diary's noise (`OPEN-225`), wave 2
 
 A raid minute writes one Raid line ("Raid on X: won/lost", the toll) and folds its Witness, Assault and relationship
@@ -1136,3 +1142,57 @@ madam x2, joytoy x3, street_worker x2 and six customers (`--agent`).
   `arms::test_seized_crate_lands_in_the_precinct`, `arms::test_landed_crate_fills_the_armoury_and_the_muster_draws_it`
   (the bettors' stakes moved the gangs' purses), and `tower::test_off_city_writes_nothing_in_three_days` (the pit's
   bettors are the Fighter's Attendees, not the tower's).
+
+### S6, school-age children and the child-safety rule (`OPEN-224`; `[ages]` S6 keys, `ages.rs`, `camp.rs`, `routine.rs`)
+
+**The rule (Dylan 2026-10-27, hard, not a switch): no child under 18 is ever killed, hurt or harmed; at 18 all bets
+are off.** `ages::is_protected` (a `Child`, or under `[ages] protected_under_years` = 18, read whatever `enabled` says).
+
+- **Seeded children** (`ages::seed_children`, the last pass of `World::new`): every couple sharing a Home has
+  `seed_child_slots` (3) chances at a child on `seed_child_p` (0.6, a pure hash), aged uniformly under 18 and kept
+  when the younger parent was `seed_child_gap_years` (18-45) at the birth; spawned as a migrant's child is
+  (`demography::spawn_child_aged`, shared now: keyed stream, Parent and sibling edges, no world draw). A
+  materialised Ambient couple brings its own (`ambient::materialise`: "... entered the simulation with 2
+  children"), so the Statistical tier's households have them too. Day 0: 20k island 2,575 children, gen:5000 620,
+  `isle_m_k2_100k` 12,555. **Deviation:** the households are the existing chunks (a couple and roommates); the
+  children are dependants in the couple's Home over its capacity, as a birth is, not a re-dealt family Home.
+- **School by age** (`school_from_years` 6): a younger child plays at home (an infant on a paid fee was V11's
+  "pupil"). A School child is out of the Home 09:00-15:00 (`school_hours`, `household::home_term`).
+- **The class** (`service::civic_hour`): one event a teacher ("Solene Hawthorne taught 2 pupils at School#5123",
+  "(n more on the roll, no room)"); a pupil writes no teacher memory (V11's "a pupil's parent" was the pupil, an
+  infant). The shadow names the parent with the pupil ("met Ines Ashcombe at the door (the parent of Cordelia
+  Nakamura, a pupil)"), reads the parent's side ("my child's teacher", was "served-pair ... kind unknown"), writes a
+  daily `[family]` line in a parent's diary (each child's place, the pantry), and picks `school_parent`.
+- **Food counted** (`routine::grocery_plan`, `lod::stat_grocery`): the seeding alone starved 374 children in days
+  6-11 (the jobless never stocked a pantry: the grocery run was a worker's errand, so the service took 1,100 and the
+  camps could not feed them). A jobless parent now shops for the children's food by day, and every run's level
+  holds `child_pantry_days` (2) of it (`ages::children_food_need`). Taken 1,100 -> 573, starved 374 -> 0.
+- **The rule's sites** (audited every victim pick and harm site; the Brain-only ones already shut children out:
+  Attack, arrest, brawls, raids and crossfire, riots, `fviolence` and `lod::stat_rolls`, contracts and hunts,
+  harvest and abduction, captives, the fare ladder, vehicles, tags, consequence, the god commands, every hire and
+  vice gate). Fixed where a child slipped in: the extortion's occupants, the intimidation's target, the territory
+  tribute (`gang.rs`), the Home theft's named victim and the beggar's passers (`exec/actions.rs`), the pickpocket
+  (`weapons.rs`), a child-owned vehicle (`vehicles.rs`), the organ take (`gray.rs`: a living child fails `living`
+  too). Backstops that refuse: `World::kill_by` (counted `harm_blocked`: 0 in the 20k run), `wounded::down`,
+  `demography::hire`, `gang::enlist`; the seed never deals an adult under 18. Hunger and sickness floor: no child
+  dies unfed (home or camp: the Reserve covers a camp's shortfall, else an unfed day and the scandal), a child's
+  malnutrition stops under `mal_onset`. The warden's beating is deleted (`p_camp_beating`, `camp_beating_*`, the
+  `camp_beatings` column). A child's street theft and begging are ledger moves with no arrest; the service takes a
+  street child at `street_take_days`. The camps still work children of `work_age` (10) for Parts.
+- **Numbers** (20k island seed 42 x 30, `--scaled --ambient-flats 50`, before = main 7bbf9b8, one run each):
+  people d0 20,027 -> 22,602; employed mean 11,309 -> 11,434 (d29 11,526 -> 11,802); starvation deaths 0 -> 0
+  (children 0); homeless mean 366 -> 418 (d29 394 -> 500: the children count in a Home's residents, so the
+  relocation and the move-ins find less room; not chased); company beds 4,206 -> 4,428, hotel nights 94 -> 93,
+  cots 6.7 -> 6.8, squatters 255 -> 260; camp children d29 14 -> 478, street children 0 -> 81; violence deaths
+  85 -> 91 (no child); School days 8 -> 1,868, but ~60 a day after week 1.
+- **Reads wrong / open:** most school-age children never reach a School: 195 of 1,520 have one within
+  `school_reach` (60 tiles; 20 Schools, Mid and up only, so the Sump has none), and the heads who can spare the fee
+  fell 1,449 -> 687 by day 9; teachers teach 0-5 a day (`teacher_12629`: none in 7 days). A School per district or
+  a reach by travel (S1's distance) is the next pass; no knob turned. A parent's diary shows the children only in
+  the `[family]` line (no school run walked: a child has no body). A camp parent with a full pantry and three
+  children in the Camp does not buy them out (`camp_parent_18435`: pantry 17, the fee 60). Re-pinned with the
+  seeded children off and the reason in place (a butterfly or a room rule): `ages`
+  (`test_fired_elder_moves_in_with_his_daughter`), `civic`, `household`, `housing`, `law`, `leaders`, `leisure`,
+  `person` (two probes), `camp` (its fixture; the no-feed test now asserts the child lives), `world`; `scale`,
+  `ambient`, `cli` count the adults or open the account on day 0's row; `utility` reads Brain holders. The camp
+  beating's test half is deleted. `SAVE_VERSION` 77.

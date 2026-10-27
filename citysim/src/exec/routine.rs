@@ -326,10 +326,29 @@ fn meals_held(world: &World, id: EntityId, home: EntityId) -> u32 {
 
 /// Hunger fix item 11 (b): the pantry level a grocery run fills: a shift's
 /// meals for each resident (5-6 share a Block's pantry; one worker's meal
-/// was eaten by the rest), capped at the pantry.
-fn household_need(world: &World, home: EntityId, job: &Job) -> u32 {
-    let residents = world.residents_of(home).len().max(1) as u32;
-    (shift_meals_needed(world, job) * residents).min(world.config.buildings.home.stock_cap)
+/// was eaten by the rest), capped at the pantry. The pressure pass S6
+/// (OPEN-224): a jobless parent's run (`job` None) fills the children's
+/// food (`ages::children_food_need`).
+fn household_need(world: &World, home: EntityId, job: Option<&Job>) -> u32 {
+    let cap = world.config.buildings.home.stock_cap;
+    match job {
+        Some(job) => {
+            let residents = world.residents_of(home).len().max(1) as u32;
+            (shift_meals_needed(world, job) * residents).min(cap)
+        }
+        None => crate::systems::ages::children_food_need(world, home).min(cap),
+    }
+}
+
+/// S6 (OPEN-224): the shopper's post for the grocery run: a worker's Job
+/// (with an employer), else `None` for a jobless parent whose child lives
+/// at home (`ages::feeds_children`); `Err` when neither shops.
+fn shopper_job(world: &World, id: EntityId) -> Result<Option<&Job>, ()> {
+    match world.comp::<Job>(id).filter(|j| j.employer.is_some()) {
+        Some(j) => Ok(Some(j)),
+        None if crate::systems::ages::feeds_children(world, id) => Ok(None),
+        None => Err(()),
+    }
 }
 
 /// Hunger fix item 11 (b): the meals a grocery run buys at the shop, the
@@ -343,7 +362,7 @@ pub fn grocery_cap(world: &World, id: EntityId) -> Option<u32> {
         return None;
     }
     let home = world.comp::<Household>(id).and_then(|h| h.home)?;
-    let job = world.comp::<Job>(id)?;
+    let job = shopper_job(world, id).ok()?;
     let short = household_need(world, home, job).saturating_sub(meals_held(world, id, home));
     Some(short.max(1))
 }
@@ -364,11 +383,13 @@ pub fn grocery_plan(world: &World, id: EntityId) -> Option<Plan> {
     if !crate::systems::fixes::shift_meals(world) {
         return None;
     }
-    let job = world.comp::<Job>(id)?;
-    job.employer?;
-    // Shadow V4 bug 2: no run out of bed in a day worker's small hours.
-    if job.on_shift(world.tick_of_day()) || day_worker_night(world, id) {
-        return None;
+    // S6 (OPEN-224): a jobless parent shops for the children's food, by day.
+    let job = shopper_job(world, id).ok()?;
+    match job {
+        // Shadow V4 bug 2: no run out of bed in a day worker's small hours.
+        Some(job) if job.on_shift(world.tick_of_day()) || day_worker_night(world, id) => return None,
+        None if world.phase() == crate::time::DayPhase::Night => return None,
+        _ => {}
     }
     // The cheap shortfall test before any walk estimate.
     let home = world.comp::<Household>(id).and_then(|h| h.home)?;
@@ -403,7 +424,7 @@ pub fn grocery_plan(world: &World, id: EntityId) -> Option<Plan> {
     }
     let (detour, m, can) = best?;
     // One run cannot fill the household's pantry: the worker's own shift's meals.
-    if can < short && held >= shift_meals_needed(world, job) {
+    if job.is_some_and(|job| can < short && held >= shift_meals_needed(world, job)) {
         return None;
     }
     let trip = detour + 20;
@@ -419,11 +440,13 @@ pub fn grocery_plan(world: &World, id: EntityId) -> Option<Plan> {
         }
     }
     // The run must end before the worker must leave for the shift ...
-    let employer_door = job.employer.and_then(|e| world.comp::<Building>(e)).map(|b| b.door)?;
-    let to_work = crate::exec::timed_walk(world, id, home_door, employer_door);
-    let until = u64::from(job.ticks_until_shift(world.tick_of_day()));
-    if trip + to_work + 2 * DEPARTURE_MARGIN > until {
-        return None;
+    if let Some(job) = job {
+        let employer_door = job.employer.and_then(|e| world.comp::<Building>(e)).map(|b| b.door)?;
+        let to_work = crate::exec::timed_walk(world, id, home_door, employer_door);
+        let until = u64::from(job.ticks_until_shift(world.tick_of_day()));
+        if trip + to_work + 2 * DEPARTURE_MARGIN > until {
+            return None;
+        }
     }
     // ... before bedtime (home by the time the night's sleep must begin) ...
     if let Some(b) = ticks_to_bedtime(world, id) {

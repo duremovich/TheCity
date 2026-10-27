@@ -1627,7 +1627,10 @@ fn steal_food(world: &mut World, id: EntityId, source: StealSource, target: Opti
     // the clerk on duty); for the Market and Warehouse there is no single victim.
     let tile = world.comp::<Position>(id).map_or(TilePos::default(), |p| p.tile);
     let victim = match source {
-        StealSource::Home => world.comp::<Building>(b).and_then(|bd| bd.occupants.iter().copied().find(|&o| o != id)),
+        // The pressure pass S6 (Dylan 2026-10-27): nobody under 18 is a victim.
+        StealSource::Home => world.comp::<Building>(b).and_then(|bd| {
+            bd.occupants.iter().copied().find(|&o| o != id && !crate::systems::ages::is_protected(world, o))
+        }),
         _ => None,
     };
     crate::systems::law::raise_crime(world, id, victim, crate::components::Crime::Theft, tile);
@@ -1660,6 +1663,8 @@ fn beg(world: &mut World, id: EntityId) -> StepResult {
         .into_iter()
         .filter(|&o| world.has::<crate::components::Identity>(o) && !world.has::<crate::components::Corpse>(o))
         .filter(|&o| o != id)
+        // The pressure pass S6 (Dylan 2026-10-27): nobody under 18 is a victim.
+        .filter(|&o| !crate::systems::ages::is_protected(world, o))
         .filter(|&o| world.comp::<Position>(o).is_some_and(|p| p.tile.manhattan(tile) <= 3))
         .take(4)
         .collect();

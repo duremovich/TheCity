@@ -960,6 +960,10 @@ fn stealable_at(world: &World, agent: EntityId, v: EntityId, pos: TilePos) -> Op
     if d > world.config.vehicles.steal_reach || own_or_gang(world, agent, x) || powered_robot(world, b) {
         return None;
     }
+    // The pressure pass S6 (Dylan 2026-10-27): nobody under 18 is a victim.
+    if x.owner.is_some_and(|o| crate::systems::ages::is_protected(world, o)) {
+        return None;
+    }
     Some(d)
 }
 

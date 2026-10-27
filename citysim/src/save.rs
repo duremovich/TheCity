@@ -380,7 +380,10 @@ use crate::world::World;
 /// 76 (pressure pass round 2, R6a, the trades' verbs I): `ViceState.{pimp_visits,
 /// bookings, barred}` (written while they hold anything) and `[trade_verbs]`
 /// (written only when set).
-pub const SAVE_VERSION: u8 = 76;
+/// 77 (pressure pass round 3, S6, school-age children and the child-safety
+/// rule): `[ages]` S6 keys, `[service] p_camp_beating` and `[service.tune]
+/// camp_beating_*` gone, `Jobs2Cols.harm_blocked` in, `camp_beatings` out.
+pub const SAVE_VERSION: u8 = 77;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

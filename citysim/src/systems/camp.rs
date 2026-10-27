@@ -11,8 +11,8 @@
 //! membership and coins moved between integer purses, nothing more.
 
 use crate::components::{
-    Building, BuildingKind, Child, Corp, DeathCause, Household, Identity, MemoryKind, Niche, Personality, Position,
-    Role, Skills, TilePos, Zone,
+    Building, BuildingKind, Child, Corp, Household, Identity, MemoryKind, Niche, Personality, Position, Role, Skills,
+    TilePos, Zone,
 };
 use crate::econ::{CampRaised, CampState, RING_DAYS};
 use crate::entity::EntityId;
@@ -36,8 +36,6 @@ pub enum ReleaseWhy {
     BoughtOut,
 }
 
-/// Lives at work phase 3: a Camp child-day's beating roll.
-const PURPOSE_BEATING: u64 = 0x4341_0001;
 /// Lives at work phase 3: a Camp child-day's escape roll.
 const PURPOSE_ESCAPE: u64 = 0x4341_0002;
 
@@ -279,7 +277,7 @@ pub fn can_feed_tonight(world: &World, camp: EntityId, extra: usize) -> bool {
 
 /// The camp a take goes to: among the open camps with room, one that can
 /// feed tonight first (review fix: a taken child arrives at `take_days`
-/// unfed and the third unfed day kills, before the law's closure), then
+/// unfed; S6: hungry, never killed), then
 /// corp camps before the city's, then the nearest (ties the lower id);
 /// else the city camp over capacity (the first camp when none is the
 /// city's); `(camp, over)`.
@@ -417,8 +415,8 @@ pub fn take(world: &mut World, child: EntityId) -> Option<EntityId> {
 
 /// Midnight (from `living::run`, before `demography`): per standing camp,
 /// the restock (the owner's purse, the Treasury for the city's, `Flow::CampFood`),
-/// the meals (`CHILD_FOOD_PER_DAY` a child; an unfed day counts as at
-/// home and the third kills), the rings, the scandal and the closure, the
+/// the meals (`CHILD_FOOD_PER_DAY` a child; the Reserve covers a shortfall
+/// and an unfed day is counted, never a death: S6), the rings, the scandal and the closure, the
 /// shift (Parts from the older children's days), the reopening.
 pub fn daily(world: &mut World) {
     let now = world.tick;
@@ -442,12 +440,11 @@ pub fn daily(world: &mut World) {
     }
 }
 
-/// Lives at work phase 3 (§ 2.2, camp warden; civic only, midnight): a
-/// child-day's beating on `p_camp_beating` (a `ChildTaken`-class grief,
-/// 0.5/−0.6, to each living parent; the take's own is 0.9/−0.9) and an
+/// Lives at work phase 3 (§ 2.2, camp warden; civic only, midnight): an
 /// escape on `p_camp_escape` (`release(Escaped)`, then the first living
 /// parent's Home with room, else the street as `release` leaves it).
-/// Hashed on (child, day): no world-stream draw.
+/// Hashed on (child, day): no world-stream draw. The pressure pass S6
+/// (Dylan 2026-10-27, no child is harmed): the warden's beating is gone.
 fn warden_rolls(world: &mut World) {
     let cfg = world.config.service.clone();
     let day = world.day();
@@ -458,20 +455,6 @@ fn warden_rolls(world: &mut World) {
     for (k, camp) in kids {
         if !world.is_alive(k) || world.has::<crate::components::Corpse>(k) {
             continue;
-        }
-        if hash(world, PURPOSE_BEATING, key(k), day) < cfg.p_camp_beating {
-            for p in parents_of(world, k) {
-                let t = &cfg.tune;
-                world.remember(
-                    p,
-                    MemoryKind::ChildTaken,
-                    Some(k),
-                    t.camp_beating_salience,
-                    t.camp_beating_valence,
-                    false,
-                );
-            }
-            ownership::jobs2_row(world).camp_beatings += 1;
         }
         if hash(world, PURPOSE_ESCAPE, key(k), day) < cfg.p_camp_escape {
             release(world, k, ReleaseWhy::Escaped);
@@ -579,7 +562,8 @@ fn restock(world: &mut World, camp: EntityId) {
 
 /// E39: each child eats `CHILD_FOOD_PER_DAY` from the camp's stock (the
 /// Home's debt shape); the children the stock could not cover go unfed
-/// (ascending id), `hunger_days` as at home, the third day kills.
+/// (ascending id), `hunger_days` as at home (S6: the Reserve covers the
+/// shortfall first; an unfed child never dies).
 fn feed(world: &mut World, camp: EntityId) {
     let kids = children_of(world, camp).to_vec();
     if kids.is_empty() {
@@ -594,8 +578,23 @@ fn feed(world: &mut World, camp: EntityId) {
         b.child_food_debt -= take as f32;
         (needed, take)
     };
+    // The pressure pass S6 (Dylan 2026-10-27, no child is harmed): camp
+    // children are fed: a shortfall the camp's stock cannot meet is eaten
+    // from the Reserve (the Warehouse), as the school meal; what neither
+    // holds is an unfed day (the scandal's count), never a death.
+    let short = needed - take;
+    let reserve = world.building_of_kind(BuildingKind::Warehouse);
+    let covered = reserve.and_then(|r| world.comp::<Building>(r)).map_or(0, |b| b.stock_food.min(short));
+    if covered > 0 {
+        if let Some(b) = reserve.and_then(|r| world.comp_mut::<Building>(r)) {
+            b.stock_food -= covered;
+        }
+        if let Some(b) = world.comp_mut::<Building>(camp) {
+            b.child_food_debt -= covered as f32;
+        }
+    }
+    let take = take + covered;
     let fed_n = if take == needed { kids.len() } else { (take as usize * 2).min(kids.len()) };
-    let mut starved = Vec::new();
     for (i, &k) in kids.iter().enumerate() {
         let fed = i < fed_n;
         let Some(c) = world.comp_mut::<Child>(k) else { continue };
@@ -603,9 +602,6 @@ fn feed(world: &mut World, camp: EntityId) {
             c.hunger_days = 0;
         } else {
             c.hunger_days = c.hunger_days.saturating_add(1);
-            if c.hunger_days >= 3 {
-                starved.push(k);
-            }
         }
         if let Some(s) = state_mut(world, camp) {
             if fed {
@@ -629,16 +625,15 @@ fn feed(world: &mut World, camp: EntityId) {
         }
     }
     world.stats.current.econ.camp_unfed += u32::from(unfed);
-    for k in starved {
+    if unfed > 0 {
         // Review fix: a child the service could not feed is a scandal
-        // naming the service (no Treasury-to-pantry path exists to save it).
-        let (name, what) = (world.name_of(k), world.name_of(camp));
+        // naming the service (S6: hungry, never starved to death).
+        let what = world.name_of(camp);
         crate::systems::news::bulletin(
             world,
-            &[k, camp],
-            format!("the child protective service could not feed {name} at {what}, who starved"),
+            &[camp],
+            format!("the child protective service could not feed {unfed} children at {what}"),
         );
-        world.kill(k, DeathCause::Starvation);
     }
 }
 
@@ -706,8 +701,8 @@ fn scandal(world: &mut World, camp: EntityId) {
     world.stats.current.econ.camp_scandals += 1;
     let owner = world.owner_of(camp);
     let (what, who) = (world.name_of(camp), world.owner_label(owner));
-    // Deviation: the third unfed day kills (as at home), so the law closes
-    // the camp before it: at `close_days − 1` unfed days (2 of the plan's
+    // Deviation: the third unfed day killed (as at home) before S6, so the
+    // law closes the camp early: at `close_days − 1` unfed days (2 of the plan's
     // 3) the children move to the city's camp and eat there on the third.
     let close_days = world.config.camp.close_days.saturating_sub(1).max(1);
     if days == 1 || days == close_days {

@@ -131,13 +131,17 @@ fn test_materialise_houses_and_keeps_the_books() {
     let mut w = ambient_world(42, 4.0);
     w.run_ticks(TICKS_PER_DAY + 7);
     let before = econ::identity(&w);
-    let pop = w.population();
+    // The pressure pass S6 (OPEN-224): a couple brings its children too
+    // (`ages::children_for_couple`); the adults are the materialised.
+    let adults_now =
+        |w: &World| w.citizens().into_iter().filter(|&a| citysim::systems::demography::is_adult(w, a)).count();
+    let pop = adults_now(&w);
     let hi = 5;
     let home = w.ambient.homes[hi].clone();
     let cap = w.comp::<Building>(home.building).expect("home").capacity;
     let adults = ambient::materialise(&mut w, hi);
     assert!(!adults.is_empty());
-    assert_eq!(w.population(), pop + adults.len());
+    assert_eq!(adults_now(&w), pop + adults.len());
     assert_eq!(econ::identity(&w), before, "coins made or lost");
     let after = &w.ambient.homes[hi];
     assert_eq!(after.occupied, home.occupied - 1);

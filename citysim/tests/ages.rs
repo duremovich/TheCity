@@ -64,6 +64,12 @@ fn test_vendors_child_chores_then_school() {
         coins(&mut w, p, 0);
     }
     let kid = citysim::systems::demography::spawn_child(&mut w, mother, father, home);
+    // The pressure pass S6 (OPEN-224): School is gated by age now (`[ages]
+    // school_from_years`); the probe's child is of school age, not a newborn.
+    let school_age = w.config.ages.school_from_years * 120 + 1;
+    if let Some(i) = w.comp_mut::<Identity>(kid) {
+        i.age_days = school_age;
+    }
     let trade = w.config.trade_role("vendor").and_then(|r| r.trade()).expect("the vendor row");
     let at = w.comp::<citysim::Position>(mother).expect("pos").tile;
     let p = Pitch {
@@ -96,7 +102,11 @@ fn test_vendors_child_chores_then_school() {
 #[test]
 fn test_fired_elder_moves_in_with_his_daughter() {
     let run = |daughter: bool| -> bool {
-        let mut w = on_world();
+        // The pressure pass S6 (OPEN-224): the seeded children off (they
+        // fill the daughter's Home past the take-in's room rule).
+        let mut cfg = Config::load();
+        cfg.ages.seed_child_slots = 0;
+        let mut w = World::new(42, cfg);
         let pool = idle(&w);
         let (e, d) = (pool[0], pool[1]);
         let farm = *w.buildings_of_kind(BuildingKind::Farm).first().expect("a Farm");

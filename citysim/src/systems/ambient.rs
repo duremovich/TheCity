@@ -286,11 +286,15 @@ pub fn materialise(world: &mut World, hi: usize) -> Vec<EntityId> {
         let id = spawn_adult(world, b, k, a, sex, &last, &mut rng);
         adults.push(id);
     }
+    // The pressure pass S6 (OPEN-224): a couple brings its children, as
+    // the seeded couples have them (keyed on the flat).
+    let mut kids: Vec<EntityId> = Vec::new();
     if let [x, y] = adults[..] {
         world.set_spouse(x, y);
         let e = world.edge_entry(x, y);
         e.affinity = 0.6;
         e.trust = 0.6;
+        kids = crate::systems::ages::children_for_couple(world, x, y, b, flat_key(b, k, 0));
     }
     for &id in &adults {
         copy_contacts(world, id, b, k, &adults);
@@ -302,10 +306,15 @@ pub fn materialise(world: &mut World, hi: usize) -> Vec<EntityId> {
     let names: Vec<String> = adults.iter().map(|&id| world.name_of(id)).collect();
     let mut actors = adults.clone();
     actors.push(b);
+    let with = match kids.len() {
+        0 => String::new(),
+        1 => " with a child".to_string(),
+        n => format!(" with {n} children"),
+    };
     world.push_event(
         EventKind::Materialised,
         &actors,
-        format!("{} of Block#{} flat {k} entered the simulation", names.join(" and "), b.index),
+        format!("{} of Block#{} flat {k} entered the simulation{with}", names.join(" and "), b.index),
     );
     adults
 }

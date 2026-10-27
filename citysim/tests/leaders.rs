@@ -31,6 +31,8 @@ fn city() -> World {
         cfg.protection = None;
         // R6a: nor the trades' verbs (the pit's bettors moved the gangs' purses; no led gang by day 30).
         cfg.trade_verbs = None;
+        // The pressure pass S6 (OPEN-224): the seeded children off (they move this scene's ground: a butterfly).
+        cfg.ages.seed_child_slots = 0;
         let mut w = World::new(42, cfg);
         w.run_ticks(10 * TICKS_PER_HOUR);
         for _ in 0..30 {

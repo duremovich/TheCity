@@ -1004,6 +1004,8 @@ fn probe_far_worker_with_one_rent_moves_near_work() {
     // `commute_cost` rides and no single farmer reads far (the El case is
     // `probe_el_*` and `tests/transit.rs`).
     cfg.transit.enabled = false;
+    // The pressure pass S6 (OPEN-224): the seeded children off (they crowd the Homes this scene's room rule reads).
+    cfg.ages.seed_child_slots = 0;
     // Lives at work phase 3: the civic switch moves the seeded households
     // (tied supers housed by their landlords on day 0) and the far Farmer's
     // trade partner with them; this pins the city the probe was written for.
@@ -2661,6 +2663,8 @@ fn world_at_day2() -> World {
     let mut c = Config::load();
     c.commute_pressure = None;
     c.exec.move_ticks_full = 2;
+    // The pressure pass S6 (OPEN-224): the seeded children off (they move this scene's ground: a butterfly).
+    c.ages.seed_child_slots = 0;
     let mut w = World::new(42, c);
     w.run_ticks(2 * TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
     w

@@ -367,7 +367,13 @@ fn organ_store(world: &World, gang: EntityId) -> Option<EntityId> {
 /// `chrome::rip_for`'s end: a body no longer living, ripped by `gang`
 /// for the first time, yields `organs_per_body` units into its store.
 pub fn take_organs(world: &mut World, gang: Option<EntityId>, body: EntityId) {
-    if !on(world) || crate::systems::law::living(world, body) {
+    // S6 (Dylan 2026-10-27): a living child fails `living` too; never one.
+    if !on(world)
+        || crate::systems::law::living(world, body)
+        || (world.is_alive(body)
+            && !world.has::<crate::components::Corpse>(body)
+            && crate::systems::ages::is_protected(world, body))
+    {
         return;
     }
     let Some(g) = gang.filter(|&g| !crate::systems::creeds::is_purist(world, g)) else { return };
@@ -387,6 +393,8 @@ pub fn wants_organs(world: &World, agent: EntityId, body: EntityId) -> bool {
     on(world)
         && world.gang_of(agent).is_some_and(|g| organ_targets(world, g))
         && !crate::systems::law::living(world, body)
+        // S6 (Dylan 2026-10-27): a living child is no body to rip.
+        && (world.has::<crate::components::Corpse>(body) || !crate::systems::ages::is_protected(world, body))
         && !world.jobs2.gray.ripped.contains(&body)
 }
 

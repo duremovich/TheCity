@@ -173,10 +173,11 @@ fn children_of(world: &World, home: EntityId) -> Vec<EntityId> {
     world.residents_of(home).iter().copied().filter(|&c| world.has::<Child>(c)).collect()
 }
 
-/// Each Home feeds its children from the pantry; three days unfed kills.
+/// Each Home feeds its children from the pantry. The pressure pass S6
+/// (Dylan 2026-10-27, no child is harmed): an unfed day counts toward the
+/// service's take (`camp::take_daily`, `[camp] take_days`), never a death.
 fn children(world: &mut World) {
     let homes = world.buildings_by_kind().get(&BuildingKind::Home).cloned().unwrap_or_default();
-    let mut starved = Vec::new();
     let school = world.levers.school_meals;
     let reserve = world.building_of_kind(BuildingKind::Warehouse);
     for home in homes {
@@ -215,14 +216,8 @@ fn children(world: &mut World) {
                 c.hunger_days = 0;
             } else {
                 c.hunger_days = c.hunger_days.saturating_add(1);
-                if c.hunger_days >= 3 {
-                    starved.push(k);
-                }
             }
         }
-    }
-    for k in starved {
-        world.kill(k, DeathCause::Starvation);
     }
 }
 
@@ -1357,6 +1352,11 @@ pub fn hire_candidate(world: &World, employer: EntityId, role: Role) -> Option<E
 }
 
 pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
+    // The pressure pass S6 (Dylan 2026-10-27): no job under 18 (every pick
+    // takes an adult; the backstop).
+    if crate::systems::ages::is_protected(world, id) {
+        return;
+    }
     let wc = &world.config.world;
     let mut shifts =
         if role == Role::Guard && id.index.is_multiple_of(2) { wc.shift_night.clone() } else { wc.shift_day.clone() };
@@ -1978,23 +1978,52 @@ pub fn spawn_migrant(world: &mut World, work: Option<TilePos>) -> (EntityId, u32
 /// occupant's place taken), with Parent and sibling edges as `spawn_child`
 /// writes; no coins cross (an empty wallet), no Birth.
 fn spawn_migrant_child(world: &mut World, mother: EntityId, father: EntityId, home: EntityId) -> EntityId {
-    let tick = world.tick;
-    let id = world.spawn();
-    let mut r = migrant_rng(world, 3, u64::from(id.index));
-    let sex = if r.random_bool(0.5) { Sex::Male } else { Sex::Female };
+    let mut r = migrant_rng(world, 3, u64::from(world.stats.current.immigrants));
     let years: f32 = r.random_range(1.0..17.5);
     let age_days = ((years * DAYS_PER_YEAR as f32) as u32).min(ADULT_AGE_DAYS - 1);
+    let id = spawn_child_aged(world, mother, father, home, age_days, &mut r);
+    world.stats.current.immigrants += 1;
+    let (name, parent) = (world.name_of(id), world.name_of(mother));
+    world.push_event(EventKind::Immigration, &[id, mother], format!("{name} arrived with {parent}, a child"));
+    id
+}
+
+/// A child of `age_days` (under 18) of `mother` and `father` in `home`, as
+/// a born child is (no occupant's place taken; Parent and sibling edges as
+/// `spawn_child` writes; an empty wallet; no Birth, no event): the sex, the
+/// first name and the blended personality from `r` (the world stream is
+/// untouched). The migrant's child and the pressure pass S6's seeded
+/// children (`ages::seed_children`, OPEN-224).
+pub fn spawn_child_aged(
+    world: &mut World,
+    mother: EntityId,
+    father: EntityId,
+    home: EntityId,
+    age_days: u32,
+    r: &mut rand_chacha::ChaCha8Rng,
+) -> EntityId {
+    let tick = world.tick;
+    let id = world.spawn();
+    let sex = if r.random_bool(0.5) { Sex::Male } else { Sex::Female };
+    let age_days = age_days.min(ADULT_AGE_DAYS - 1);
     let personality = {
         let m = world.comp::<Personality>(mother).cloned();
         let f = world.comp::<Personality>(father).cloned();
-        Personality::inherit(m.as_ref(), f.as_ref(), &mut r)
+        Personality::inherit(m.as_ref(), f.as_ref(), r)
     };
     let last = world
         .comp::<Identity>(father)
         .or_else(|| world.comp::<Identity>(mother))
         .map(|i| i.name.rsplit(' ').next().unwrap_or("Doe").to_string())
         .unwrap_or_else(|| "Doe".to_string());
-    let first = world.random_first_name(sex);
+    let first = {
+        let table = world.names.first_names(sex);
+        if table.is_empty() {
+            "Nameless".to_string()
+        } else {
+            table[r.random_range(0..table.len())].clone()
+        }
+    };
     world.insert(
         id,
         Identity {
@@ -2035,9 +2064,6 @@ fn spawn_migrant_child(world: &mut World, mother: EntityId, father: EntityId, ho
         e.last_interaction = tick;
         world.note_kin(s, id);
     }
-    world.stats.current.immigrants += 1;
-    let (name, parent) = (world.name_of(id), world.name_of(mother));
-    world.push_event(EventKind::Immigration, &[id, mother], format!("{name} arrived with {parent}, a child"));
     id
 }
 

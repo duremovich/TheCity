@@ -723,6 +723,10 @@ pub struct Jobs2Cols {
     pub street_takes: u32,
     pub child_begged: i64,
     pub child_thefts: u32,
+    /// The pressure pass S6 (Dylan 2026-10-27): a death of a person under
+    /// 18 refused at `World::kill_by` (every pick skips them first: a
+    /// non-zero count is a pick site that missed, a broken-system signal).
+    pub harm_blocked: u32,
     pub schools: u32,
     pub elders: u32,
     pub elders_employed: u32,
@@ -779,12 +783,11 @@ pub struct Jobs2Cols {
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub carers: u32,
     /// Lives at work phase 3 (docs/LIVES_AT_WORK.md § 2.2, § 3.5): the
-    /// Camp's beatings, escapes, headcounts, the parents' visits, buy-outs
+    /// Camp's escapes, headcounts, the parents' visits, buy-outs
     /// and break-outs, the neglecting parents (a daily tally), the super's
     /// notices, door rent (coins), stops and tied move-ins, the buy-out
-    /// coins (`Flow::Buyout`) and the School days taught.
-    #[serde(skip_serializing_if = "is_zero_u32")]
-    pub camp_beatings: u32,
+    /// coins (`Flow::Buyout`) and the School days taught (S6: the beating
+    /// is gone, Dylan 2026-10-27).
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub camp_escapes: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
@@ -1484,6 +1487,7 @@ impl Jobs2Cols {
             "street_takes",
             "child_begged",
             "child_thefts",
+            "harm_blocked",
             "schools",
             "elders",
             "elders_employed",
@@ -1515,7 +1519,6 @@ impl Jobs2Cols {
                 "kin_visits",
                 "elder_visits",
                 "carers",
-                "camp_beatings",
                 "camp_escapes",
                 "camp_headcounts",
                 "camp_visits",
@@ -1949,6 +1952,7 @@ impl Jobs2Cols {
             self.street_takes.to_string(),
             self.child_begged.to_string(),
             self.child_thefts.to_string(),
+            self.harm_blocked.to_string(),
             self.schools.to_string(),
             self.elders.to_string(),
             self.elders_employed.to_string(),
@@ -1978,7 +1982,6 @@ impl Jobs2Cols {
             self.kin_visits.to_string(),
             self.elder_visits.to_string(),
             self.carers.to_string(),
-            self.camp_beatings.to_string(),
             self.camp_escapes.to_string(),
             self.camp_headcounts.to_string(),
             self.camp_visits.to_string(),
