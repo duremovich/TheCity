@@ -114,13 +114,21 @@ fn probe_hungry_worker_eats_from_the_wage_before_rent() {
     w.comp_mut::<Needs>(a).expect("needs").energy = 0.9;
     let (mut paid_at, mut ate_after) = (None, false);
     let mut last = 0;
+    let mut prev_hunger = 0.25f32;
     run_to(&mut w, a, 2 * TICKS_PER_DAY, |w| {
         let c = coins(w, a);
         if c > last && paid_at.is_none() {
             paid_at = Some(w.tick);
         }
         last = c;
-        if paid_at.is_some() && is_eat(step(w, a)) && !ate_after {
+        // Pressure pass R2 (fix round 2): a Cook paid at the Diner buys the
+        // meal at the counter in the pay tick itself (hunger 0.19 -> 0.69,
+        // 7 coins -> 6) and no Eat step is on the books at any tick the probe
+        // samples. A hunger jump from the pay tick on counts as the meal.
+        let hunger = w.comp::<Needs>(a).map_or(0.0, |n| n.hunger);
+        let fed = paid_at.is_some() && hunger > prev_hunger + 0.2;
+        prev_hunger = hunger;
+        if paid_at.is_some() && (fed || is_eat(step(w, a))) && !ate_after {
             ate_after = true;
             eprintln!("ate ({:?}) at day 1 {:02}:{:02}", step(w, a), (w.tick % TICKS_PER_DAY) / 60, w.tick % 60);
         }
@@ -2810,6 +2818,13 @@ fn broke_parent_visits(mut c: World) -> (bool, bool) {
                     wl.coins = wl.coins.min(10);
                 }
             }
+            // Pressure pass R2 (fix round 2): jobless all day, not just at the
+            // eve: at the combined city's pace she was rehired (Farm, Sweep, Fab)
+            // within hours of each eve's dismissal and worked the days through,
+            // as the buy-out leg above already holds.
+            if c.has::<citysim::Job>(q) {
+                c.remove::<citysim::Job>(q);
+            }
             pin(&mut c, q);
             c.run_ticks(1);
         }
@@ -3437,7 +3452,15 @@ fn probe_laid_off_loader_with_a_profession_is_rehired_first() {
         w.remove::<Profession>(other);
         pin(&mut w, a);
         let start = w.tick;
-        run_to(&mut w, a, start + 2 * TICKS_PER_HOUR, |_| {});
+        // Fix round 2: at the halved pace a Fab (lower id than the Yard, so
+        // searched first) posted a Fabber post inside the two hours and hired
+        // the stranger before the Yard's turn; the Yard's loader post is the
+        // only one open anywhere, the premise of the one door.
+        while w.tick < start + 2 * TICKS_PER_HOUR {
+            w.vacancies.retain(|b, _| *b == yard);
+            pin(&mut w, a);
+            w.run_ticks(1);
+        }
         let job = |id: EntityId| w.comp::<Job>(id).map(|j| (j.role, j.employer));
         eprintln!("the loader holds {loader_holds}: loader {:?}, stranger {:?}", job(a), job(stranger));
         assert_eq!(job(holder), Some((role, Some(yard))), "the profession's holder is hired at the Yard");
