@@ -394,7 +394,9 @@ use crate::world::World;
 /// and `World.beat_desk` (written while they hold anything; serde defaults).
 /// 81 (pressure pass round 3, S2, plans that fail at the end): `Brain.cool_streak`
 /// and the `[brain] cool_backoff*` keys (serde defaults).
-pub const SAVE_VERSION: u8 = 81;
+/// 82 (pressure pass round 3, S7, the diary's noise): `[noise] raid_names`,
+/// `petty_rewitness_days` (serde defaults).
+pub const SAVE_VERSION: u8 = 82;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

@@ -25,8 +25,15 @@ pub fn weight(e: &MemoryEntry, now: Tick, half_life_days: f32) -> f32 {
 /// Returns false when it merged into an entry already there (M15 W15: a
 /// grudge forms on a new memory only).
 pub fn insert(mem: &mut Memory, entry: MemoryEntry, now: Tick, cap: usize, half_life_days: f32) -> bool {
+    // Round 3 S7 (OPEN-225): a sighting of another crime is its own entry. A
+    // Dealing seen a minute after an Arms Dealing merged into it (crime kept),
+    // so `life::saw_recently` never found the Dealing and its ten witnesses
+    // were recorded afresh every minute of the deal (100k `arms_dealer`).
     if let Some(e) = mem.entries.iter_mut().find(|e| {
-        e.kind == entry.kind && e.subject == entry.subject && entry.tick.saturating_sub(e.tick) < MERGE_WINDOW
+        e.kind == entry.kind
+            && e.subject == entry.subject
+            && e.crime == entry.crime
+            && entry.tick.saturating_sub(e.tick) < MERGE_WINDOW
     }) {
         e.salience = e.salience.max(entry.salience);
         e.tick = entry.tick;

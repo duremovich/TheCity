@@ -811,6 +811,26 @@ struct Track {
     source_kinds: BTreeMap<String, u32>,
     /// Shadow V6: the camera lens.
     cam: Cam,
+    /// Round 3 S7 (OPEN-225): the last sighting logged per subject (the
+    /// place and the day); an hourly refresh of the same one is not news.
+    sighted: BTreeMap<EntityId, (Option<EntityId>, u64)>,
+    /// Round 3 S7: each diary day's rest-day note (`rest_day_note`).
+    rest_days: BTreeMap<u64, &'static str>,
+    /// Round 3 S7: the hour's quiet lines (`flush_hourly`), and the hour.
+    hourly: Vec<Quiet>,
+    hourly_hour: Tick,
+}
+
+/// Round 3 S7 (OPEN-225): a line that carries little alone (a new
+/// Acquaintance, an Acquaintance's affinity drifting, a retelling of my deed
+/// its hearer knew). A 100k cell wrote ~1,200 a day, one or two a minute,
+/// past any per-minute fold; an hour of them folds by `key`.
+struct Quiet {
+    tick: Tick,
+    cat: &'static str,
+    key: &'static str,
+    name: String,
+    line: String,
 }
 
 /// One shift of the agent's job, as observed.
@@ -1042,6 +1062,10 @@ impl Track {
             short_rests: 0,
             source_kinds: BTreeMap::new(),
             cam: Cam::default(),
+            sighted: BTreeMap::new(),
+            rest_days: BTreeMap::new(),
+            hourly: Vec::new(),
+            hourly_hour: start / TICKS_PER_HOUR,
         }
     }
 
@@ -1490,6 +1514,11 @@ fn mem_text(world: &World, holder: EntityId, e: &MemoryEntry) -> String {
 fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&Event], notes: &[ShadowNote]) {
     let id = t.id;
     let day = now / TICKS_PER_DAY;
+    t.rest_days.entry(day).or_insert_with(|| rest_day_note(world, id, day));
+    if now / TICKS_PER_HOUR != t.hourly_hour {
+        flush_hourly(t);
+        t.hourly_hour = now / TICKS_PER_HOUR;
+    }
     // Day rollover: close the finished day.
     if day != t.cur_day {
         flush_day(world, t, now);
@@ -1520,8 +1549,25 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
     // Shadow V6: a courier's parcels handed over (before the round's event).
     cam_parcels(world, t, now);
     let mut event_ctx: Vec<String> = Vec::new();
+    // Round 3 S7 (OPEN-225): the minute's crowd lines fold into one each.
+    let mut folds: Vec<Fold> = Vec::new();
+    // The raid's head reads the result line ("Raid on X: ..."); the sim's
+    // older summary of the same brawl ("G raided X: Won (...)", "G stormed
+    // the Precinct: ...") is the same fact twice and stays in the event log.
+    let raid_result: BTreeSet<Tick> = events
+        .iter()
+        .filter(|e| e.kind == EventKind::Raid && e.actors.contains(&id) && e.text.starts_with("Raid on "))
+        .map(|e| e.tick)
+        .collect();
     for e in events {
         if !e.actors.contains(&id) {
+            continue;
+        }
+        if e.kind == EventKind::Raid
+            && raid_result.contains(&e.tick)
+            && (e.text.contains(" stormed the Precinct: ")
+                || (e.text.contains(" raided ") && !e.text.starts_with("Raid on ")))
+        {
             continue;
         }
         *t.event_kinds.entry(format!("{:?}", e.kind)).or_insert(0) += 1;
@@ -1530,6 +1576,29 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
             t.contact(world, o);
         }
         let text = format!("{:?}: {}", e.kind, e.text);
+        if let Some(sh) = fold_shape(e) {
+            if let Some(f) = folds.iter_mut().find(|f| f.tick == e.tick && f.kind == e.kind && f.shape.same(&sh)) {
+                f.names.push(sh.name);
+                f.sum += sh.sum;
+                let folded = f.text();
+                t.entries[f.entry].text.clone_from(&folded);
+                if let Some(i) = f.notable {
+                    t.notable[i].1.clone_from(&folded);
+                }
+                event_ctx[f.ctx] = folded;
+                continue;
+            }
+            folds.push(Fold {
+                tick: e.tick,
+                kind: e.kind,
+                names: vec![sh.name.clone()],
+                sum: sh.sum,
+                shape: sh,
+                entry: t.entries.len(),
+                notable: (!matches!(e.kind, EventKind::Witness)).then_some(t.notable.len()),
+                ctx: event_ctx.len(),
+            });
+        }
         if !matches!(e.kind, EventKind::Witness) {
             t.notable.push((e.tick, text.clone()));
         }
@@ -1615,19 +1684,20 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
             ShadowNote::Told { tick, from, to, r, heard } if r.actor == Some(id) || r.object == Some(id) => {
                 t.gossip_about += 1;
                 let role = if r.actor == Some(id) { "as the doer" } else { "as the object" };
-                t.log(
-                    *tick,
-                    "gossip",
-                    format!(
-                        "GOSSIP ABOUT ME ({role}): {} told {}: {:?} by {} on {}{}",
-                        nm(world, *from),
-                        nm(world, *to),
-                        r.deed,
-                        r.actor.map_or("someone unnamed".into(), |a| nm(world, a)),
-                        r.object.map_or("?".into(), |o| nm(world, o)),
-                        if *heard { "" } else { " (already known / dropped)" }
-                    ),
+                let line = format!(
+                    "GOSSIP ABOUT ME ({role}): {} told {}: {:?} by {} on {}{}",
+                    nm(world, *from),
+                    nm(world, *to),
+                    r.deed,
+                    r.actor.map_or("someone unnamed".into(), |a| nm(world, a)),
+                    r.object.map_or("?".into(), |o| nm(world, o)),
+                    if *heard { "" } else { " (already known / dropped)" }
                 );
+                if *heard {
+                    t.log(*tick, "gossip", line);
+                } else {
+                    t.hourly.push(Quiet { tick: *tick, cat: "gossip", key: "retold", name: nm(world, *from), line });
+                }
             }
             ShadowNote::Flow { tick, from, to, coins, flow, refund } if *from == Some(id) || *to == Some(id) => {
                 let other = if *from == Some(id) { *to } else { *from };
@@ -1895,11 +1965,19 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                     .comp::<Body>(id)
                     .map(|b| format!(" sanity {:.2} addiction {:.2}", b.sanity, b.addiction))
                     .unwrap_or_default();
+                // Round 3 S7 (OPEN-225): the rest day in the hour lines too.
+                let rest = t.rest_days.get(&day).copied().unwrap_or("").trim().trim_matches(['(', ')']);
+                // Not while at Work: a night shift's tail runs into the rest day's morning.
+                let rest = if rest.is_empty() || b.current_goal == Some(GoalKind::Work) {
+                    String::new()
+                } else {
+                    format!(" | {rest}")
+                };
                 t.log(
                     now,
                     "needs",
                     format!(
-                        "needs hunger {:.2} energy {:.2} safety {:.2} wealth {:.2} belonging {:.2} intimacy {:.2} fun {:.2} mood {:.2}{} | {:?} | {:?} | {}",
+                        "needs hunger {:.2} energy {:.2} safety {:.2} wealth {:.2} belonging {:.2} intimacy {:.2} fun {:.2} mood {:.2}{} | {:?} | {:?} | {}{rest}",
                         n.hunger, n.energy, n.safety, n.wealth, n.belonging, n.intimacy, n.fun, m.value, body, b.lod, b.current_goal, here
                     ),
                 );
@@ -2081,8 +2159,8 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
         }
         t.inv = Some(cur);
     }
-    let mut mem_msgs: Vec<String> = Vec::new();
-    let mut edge_msgs: Vec<String> = Vec::new();
+    let mut mem_msgs: Vec<(String, String)> = Vec::new();
+    let mut edge_msgs: Vec<(String, String)> = Vec::new();
     // Memories.
     if let Some(m) = world.comp::<Memory>(id) {
         let prime = !t.mem_primed;
@@ -2109,6 +2187,16 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                         t.contact(world, s);
                     }
                 }
+                // Round 3 S7 (OPEN-225): a heard sighting refreshed hourly (a
+                // colleague at his bench) is logged once a day per place.
+                if e.kind == MemoryKind::Sighting {
+                    if let Some(s) = e.subject {
+                        if t.sighted.get(&s) == Some(&(e.at, day)) {
+                            continue;
+                        }
+                        t.sighted.insert(s, (e.at, day));
+                    }
+                }
                 let text = mem_text(world, id, e);
                 // Shadow V6: an encounter with the counterpart elsewhere.
                 if e.kind == MemoryKind::Served && !heard {
@@ -2122,7 +2210,12 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                 } else {
                     String::new()
                 };
-                mem_msgs.push(format!("{text}{old}"));
+                if let (MemoryKind::MetInJail, Some(s)) = (e.kind, e.subject) {
+                    let (name, line) = (nm(world, s), format!("{text}{old}"));
+                    t.hourly.push(Quiet { tick: now, cat: "memory", key: "cells", name, line });
+                } else {
+                    mem_msgs.push((format!("{:?}", e.kind), format!("{text}{old}")));
+                }
             }
         }
     }
@@ -2135,33 +2228,31 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
         match t.edges.get(&o).copied() {
             None => {
                 if t.edges_primed {
-                    edge_msgs.push(format!(
-                        "new relationship with {}: {:?} affinity {:+.2}",
-                        nm(world, o),
-                        e.kind,
-                        e.affinity
-                    ));
+                    let line =
+                        format!("new relationship with {}: {:?} affinity {:+.2}", nm(world, o), e.kind, e.affinity);
+                    if e.kind == RelKind::Acquaintance {
+                        t.hourly.push(Quiet { tick: now, cat: "edge", key: "new", name: nm(world, o), line });
+                    } else {
+                        edge_msgs.push((format!("new {:?}", e.kind), line));
+                    }
                 }
                 t.edges.insert(o, (e.affinity, e.kind));
             }
             Some((aff, kind)) => {
                 if kind != e.kind {
-                    edge_msgs.push(format!(
-                        "{} is now {:?} (was {:?}), affinity {:+.2}",
-                        nm(world, o),
-                        e.kind,
-                        kind,
-                        e.affinity
+                    edge_msgs.push((
+                        format!("now {:?}", e.kind),
+                        format!("{} is now {:?} (was {:?}), affinity {:+.2}", nm(world, o), e.kind, kind, e.affinity),
                     ));
                     t.edges.insert(o, (e.affinity, e.kind));
                 } else if (e.affinity - aff).abs() >= 0.1 {
-                    edge_msgs.push(format!(
-                        "affinity to {} {:+.2} -> {:+.2} ({:?})",
-                        nm(world, o),
-                        aff,
-                        e.affinity,
-                        e.kind
-                    ));
+                    let dir = if e.affinity > aff { "warmer" } else { "colder" };
+                    let line = format!("affinity to {} {:+.2} -> {:+.2} ({:?})", nm(world, o), aff, e.affinity, e.kind);
+                    if e.kind == RelKind::Acquaintance {
+                        t.hourly.push(Quiet { tick: now, cat: "edge", key: dir, name: nm(world, o), line });
+                    } else {
+                        edge_msgs.push((format!("{dir} {:?}", e.kind), line));
+                    }
                     t.edges.insert(o, (e.affinity, e.kind));
                 }
             }
@@ -2368,15 +2459,107 @@ fn lives_minute(world: &World, t: &mut Track, now: Tick, act: &'static str, even
     }
 }
 
-/// Log up to three lines, then one line counting the rest (a gang-wide feud
-/// adjustment touches dozens of edges in one minute).
-fn log_grouped(t: &mut Track, now: Tick, cat: &'static str, msgs: Vec<String>, noun: &str) {
+/// Log up to `FOLD_NAMES` lines, then one line counting the rest by kind (a
+/// gang-wide feud adjustment touches dozens of edges in one minute; round 3
+/// S7: a raid's 259). Each message is `(kind, line)`; a fold of one line is
+/// the line.
+fn log_grouped(t: &mut Track, now: Tick, cat: &'static str, msgs: Vec<(String, String)>, noun: &str) {
     let n = msgs.len();
-    for m in msgs.into_iter().take(3) {
-        t.log(now, cat, m);
+    let shown = if n <= FOLD_NAMES + 1 { n } else { FOLD_NAMES };
+    let mut by: BTreeMap<String, u32> = BTreeMap::new();
+    for (i, (kind, m)) in msgs.into_iter().enumerate() {
+        if i < shown {
+            t.log(now, cat, m);
+        } else {
+            *by.entry(kind).or_insert(0) += 1;
+        }
     }
-    if n > 3 {
-        t.log(now, cat, format!("... and {} more {noun} in the same minute", n - 3));
+    if n > shown {
+        let mut kinds: Vec<(String, u32)> = by.into_iter().collect();
+        kinds.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        let parts: Vec<String> = kinds.iter().map(|(k, c)| format!("{c} {k}")).collect();
+        t.log(now, cat, format!("... and {} more {noun} in the same minute: {}", n - shown, parts.join(", ")));
+    }
+}
+
+/// Names a folded line gives before "and N more" (round 3 S7, OPEN-225).
+const FOLD_NAMES: usize = 3;
+
+/// Round 3 S7 (OPEN-225): a crowd event's shape. One minute of a raid wrote
+/// 260 `Witness` lines, ten `Assault`s by one raider and a `Report` and
+/// `WitnessReacted` per witness. The lines of one shape in one minute fold
+/// into the first: `{before}{count}{after} (names)`, `{}` in `after` the
+/// summed count (a gossip's "told K of his people").
+struct FoldShape {
+    before: String,
+    after: String,
+    name: String,
+    sum: u32,
+}
+
+impl FoldShape {
+    fn same(&self, o: &FoldShape) -> bool {
+        self.before == o.before && self.after == o.after
+    }
+}
+
+struct Fold {
+    tick: Tick,
+    kind: EventKind,
+    shape: FoldShape,
+    names: Vec<String>,
+    sum: u32,
+    /// Where the first line went: the diary entry, the notable list, the money line's events.
+    entry: usize,
+    notable: Option<usize>,
+    ctx: usize,
+}
+
+impl Fold {
+    fn text(&self) -> String {
+        let n = self.names.len();
+        let shown: Vec<&str> = self.names.iter().take(FOLD_NAMES).map(String::as_str).collect();
+        let more = n.saturating_sub(shown.len());
+        let tail = if more > 0 { format!(" and {more} more") } else { String::new() };
+        let after = self.shape.after.replace("{}", &self.sum.to_string());
+        format!("{:?}: {}{n}{after} ({}{tail})", self.kind, self.shape.before, shown.join(", "))
+    }
+}
+
+/// The fold shape of a crowd event, `None` for a line that stands alone (a
+/// death, a blackmail, anything not of a crowd's shapes).
+fn fold_shape(e: &Event) -> Option<FoldShape> {
+    let t = e.text.as_str();
+    let shape = |before: String, after: String, name: &str, sum: u32| {
+        Some(FoldShape { before, after, name: name.to_string(), sum })
+    };
+    match e.kind {
+        // "W saw A commit C".
+        EventKind::Witness => {
+            t.split_once(" saw ").and_then(|(w, rest)| shape(String::new(), format!(" saw {rest}"), w, 0))
+        }
+        // "W reported A for C".
+        EventKind::Report => {
+            t.split_once(" reported ").and_then(|(w, rest)| shape(String::new(), format!(" reported {rest}"), w, 0))
+        }
+        // "W saw A's C and ran"; "W told K of his people what A did (the C)".
+        EventKind::WitnessReacted if t.ends_with(" and ran") => {
+            t.split_once(" saw ").and_then(|(w, rest)| shape(String::new(), format!(" saw {rest}"), w, 0))
+        }
+        EventKind::WitnessReacted => {
+            let (w, rest) = t.split_once(" told ")?;
+            let (k, rest) = rest.split_once(" of ")?;
+            let k: u32 = k.parse().ok()?;
+            let (_, what) = rest.split_once(" people ")?;
+            shape(String::new(), format!(" told {{}} of their people {what}"), w, k)
+        }
+        // A brawl's pairing, "R attacked D at P" (one that killed stands alone).
+        EventKind::Assault if !t.ends_with(" and died") => {
+            let (r, rest) = t.split_once(" attacked ")?;
+            let (d, place) = rest.split_once(" at ")?;
+            shape(format!("{r} attacked "), format!(" at {place}"), d, 0)
+        }
+        _ => None,
     }
 }
 
@@ -2449,7 +2632,45 @@ fn close_action(world: &World, t: &mut Track, now: Tick, status: &str) {
     t.log(o.start, "action", format!("ACTION {:?} @ {loc}, {dur} min{tiles} ({status}){tgt}", o.action));
 }
 
+/// Round 3 S7 (OPEN-225): the hour's quiet lines, each at its minute while
+/// they are few (`FOLD_NAMES` + 1), else one line a key at its first minute.
+fn flush_hourly(t: &mut Track) {
+    let buf = std::mem::take(&mut t.hourly);
+    if buf.len() <= FOLD_NAMES + 1 {
+        for q in buf {
+            t.log(q.tick, q.cat, q.line);
+        }
+        return;
+    }
+    let mut keys: Vec<&'static str> = Vec::new();
+    for q in &buf {
+        if !keys.contains(&q.key) {
+            keys.push(q.key);
+        }
+    }
+    for k in keys {
+        let g: Vec<&Quiet> = buf.iter().filter(|q| q.key == k).collect();
+        if g.len() == 1 {
+            t.log(g[0].tick, g[0].cat, g[0].line.clone());
+            continue;
+        }
+        let shown: Vec<&str> = g.iter().take(FOLD_NAMES).map(|q| q.name.as_str()).collect();
+        let more = g.len() - shown.len();
+        let tail = if more > 0 { format!(" and {more} more") } else { String::new() };
+        let (n, names) = (g.len(), format!("{}{tail}", shown.join(", ")));
+        let text = match k {
+            "new" => format!("{n} new Acquaintances this hour ({names})"),
+            "warmer" => format!("{n} Acquaintances warmer this hour ({names})"),
+            "colder" => format!("{n} Acquaintances colder this hour ({names})"),
+            "cells" => format!("met {n} in the cells this hour ({names})"),
+            _ => format!("GOSSIP ABOUT ME: {n} retellings this hour, every hearer knew already (told by {names})"),
+        };
+        t.log(g[0].tick, g[0].cat, text);
+    }
+}
+
 fn flush_day(world: &World, t: &mut Track, now: Tick) {
+    flush_hourly(t);
     let day = t.cur_day;
     // The pressure pass R4 (OPEN-219): the shiftless rest day (weekday 6, a
     // guard's staggered one) is marked, so its zero work does not read as a bug.
@@ -3218,7 +3439,8 @@ fn write_diary(world: &World, t: &mut Track, dir: &std::path::Path, end: Tick) -
     }
     for (day, es) in &by_day {
         let _ = day_open.insert(*day);
-        let _ = writeln!(md, "## Day {day}\n");
+        // Round 3 S7 (OPEN-225): the rest day in the heading.
+        let _ = writeln!(md, "## Day {day}{}\n", t.rest_days.get(day).copied().unwrap_or(""));
         let (sum, rest): (Vec<&&Entry>, Vec<&&Entry>) = es.iter().partition(|e| e.cat == "summary");
         for e in rest.iter().chain(sum.iter()) {
             let line = match e.cat {

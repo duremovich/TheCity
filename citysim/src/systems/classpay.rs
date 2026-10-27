@@ -99,13 +99,22 @@ pub fn post_wage(world: &World, employer: EntityId, role: Role) -> f32 {
     }
 }
 
-/// A Job's title: "Senior <label>" at the skilled grade, else the label.
-pub fn title(job: &Job) -> String {
-    if job.grade == 1 {
-        format!("Senior {}", job.role.label())
-    } else {
-        job.role.label().to_string()
+/// A Job's title by its grade above the role's base (`role_grade`): the
+/// label at the base, "Senior <label>" one above, "Lead <label>" past it.
+/// Round 3 S7 (OPEN-225): grade 1 read "Senior" whatever the base, so a
+/// Reporter (base 1) raised to grade 2 read "promoted to Reporter (was
+/// Senior Reporter)".
+pub fn title(world: &World, job: &Job) -> String {
+    match grade_of(world, job).saturating_sub(role_grade(world, job.role)) {
+        0 => job.role.label().to_string(),
+        1 => format!("Senior {}", job.role.label()),
+        _ => format!("Lead {}", job.role.label()),
     }
+}
+
+/// A Job's grade, never under its role's base.
+pub fn grade_of(world: &World, job: &Job) -> u8 {
+    job.grade.max(role_grade(world, job.role))
 }
 
 // ---------------------------------------------------------------------------
@@ -451,14 +460,43 @@ pub fn leave_for_promotion(world: &mut World, id: EntityId) -> bool {
     true
 }
 
-/// `Promoted [id, workplace]`.
-pub fn note_promoted(world: &mut World, id: EntityId, workplace: Option<EntityId>) {
+/// The words for a pay grade (`Job.grade`).
+pub fn grade_label(grade: u8) -> &'static str {
+    match grade {
+        0 => "entry",
+        1 => "skilled",
+        PROFESSIONAL => "professional",
+        _ => "management",
+    }
+}
+
+/// What a body held before a promotion: its title and grade (`None` with no post).
+pub fn held(world: &World, id: EntityId) -> Option<(String, u8)> {
+    world.comp::<Job>(id).map(|j| (title(world, j), grade_of(world, j)))
+}
+
+/// `Promoted [id, workplace]`. `was` is [`held`] before the move. Round 3 S7
+/// (OPEN-225): a rise under the same title reads as the grade ("promoted to
+/// Reporter" was written for a Reporter whose byline raised his grade).
+pub fn note_promoted(world: &mut World, id: EntityId, workplace: Option<EntityId>, was: Option<(String, u8)>) {
     let name = world.name_of(id);
-    let what = world.comp::<Job>(id).map_or_else(|| "exec".to_string(), title);
+    let now = world.comp::<Job>(id).map(|j| (title(world, j), grade_of(world, j), j.wage_per_day));
     let at = workplace.map(|b| world.name_of(b)).unwrap_or_default();
+    let text = match (now, was) {
+        (Some((t, g, wage)), Some((t0, g0))) if t == t0 && g == g0 => {
+            format!("{name} moved up to a {t} post at {at} ({wage}c a day)")
+        }
+        (Some((t, g, wage)), Some((t0, g0))) if t == t0 => {
+            format!("{name} rose from {} to {} grade as {t} at {at} ({wage}c a day)", grade_label(g0), grade_label(g))
+        }
+        (Some((t, _, _)), Some((t0, _))) => format!("{name} promoted to {t} at {at} (was {t0})"),
+        (Some((t, _, _)), None) => format!("{name} promoted to {t} at {at}"),
+        (None, Some((t0, _))) => format!("{name} promoted to exec at {at} (was {t0})"),
+        (None, None) => format!("{name} promoted to exec at {at}"),
+    };
     let mut actors = vec![id];
     actors.extend(workplace);
-    world.push_event(EventKind::Promoted, &actors, format!("{name} promoted to {what} at {at}"));
+    world.push_event(EventKind::Promoted, &actors, text);
 }
 
 // ---------------------------------------------------------------------------
@@ -545,13 +583,14 @@ pub fn promote_skilled(world: &mut World, seeding: bool) -> u32 {
                 // Best first (ties the lower id).
                 pool.sort_by(|x, y| y.0.total_cmp(&x.0).then(x.1.cmp(&y.1)));
                 for (_, a) in pool.into_iter().take(slots.saturating_sub(have)) {
+                    let was = held(world, a);
                     let wage = wage_at(world, role, 1);
                     if let Some(j) = world.comp_mut::<Job>(a) {
                         j.grade = 1;
                         j.wage_per_day = wage;
                     }
                     if !seeding {
-                        note_promoted(world, a, Some(b));
+                        note_promoted(world, a, Some(b), was);
                     }
                     done += 1;
                 }

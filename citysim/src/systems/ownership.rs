@@ -2077,8 +2077,9 @@ fn exec_wages(world: &mut World) {
                 }
                 if let Some(e) = ranked {
                     let at = world.comp::<Job>(e).and_then(|j| j.employer);
+                    let was = crate::systems::classpay::held(world, e);
                     crate::systems::classpay::leave_for_promotion(world, e);
-                    crate::systems::classpay::note_promoted(world, e, at);
+                    crate::systems::classpay::note_promoted(world, e, at, was);
                 } else if let Some(e) = next {
                     // Shadow V4 bug 5: the fallback pick leaves its post too
                     // (an exec kept her Guard post and never held office).

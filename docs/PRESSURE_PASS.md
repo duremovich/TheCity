@@ -1458,3 +1458,63 @@ off (exempted after it; Visit cools 7 -> 15).
   ("not beside him", 26 a month). The leader ranking churns (a join or the daily pass moves the post) with no line
   of its own; `turned back` is the first the diary hears of it. Raid Brawl failures after the march up 21 -> 35.
 - No test (doctrine 2). `SAVE_VERSION` 81 (`Brain.cool_streak`, `[brain] cool_backoff*`).
+
+### S7, the diary's noise (`OPEN-225`; `citysim-cli/src/shadow.rs`, `crew::raid_result`, `[noise]` S7 keys)
+
+- **The raid result.** `purist_56353`'s raid was a breakout (`raid::breach`, the Precinct), and only `brawl` and
+  `corp_brawl` wrote `crew::raid_result`; breach's own line named the gang, the jail and the head. Breach now writes
+  the result for every raider and guard ("Raid on the Precinct: the Precinct held (4 raiders, 66 defenders); nobody
+  freed; 6 hurt: Smoke Thorne, Ulric Voss, Rhoswen Marlow, Odile Jessop and 2 more; The Unplugged 5 next:
+  BreakOut"), with `RaidLeft.freed` (the convicts freed, "2 freed: A, B"; the guards it beat hold no crew grudge,
+  `law::on_breakout` answers a breakout as before). Every result line counts its toll, "N dead: ...", "N hurt:
+  ...", `[noise] raid_names` 4 named and "and N more". **Deviation:** no "arrested" or "turf" in the toll: a raid
+  arrests nobody in its minute (the reports come after; `purist_56353` was taken 6 h later) and no raid moves turf
+  (`settle` takes coin, food and goods). "the The Static Rats Hideout" reads "the Static Rats Hideout".
+- **The minute's folds (the shadow).** Crowd events of one shape in one minute fold into the first line, the count
+  and three names (`fold_shape`, `FOLD_NAMES` 3): "Witness: 58 saw Yuki Ellery commit Assault (Kasimir Inchbald,
+  Marek Jessop, Emeric Fletcher and 55 more)", "Assault: Yuki Ellery attacked 2 at the Precinct (Ulric Voss, Piers
+  Ellery)" (a pairing that killed stands alone), `Report` ("N reported X for C") and `WitnessReacted` ("2 told 4 of
+  their people what X did (the Grand Theft)", the told summed; "N saw X's C and ran"). The money line's `events:`
+  and the notable list carry the folded line. The head's older summary of the same brawl ("G raided X: Won (...)",
+  "G stormed the Precinct: ...") is not repeated when the minute has the result line (it stays in the event log;
+  `analyze_run.py` parses it). Memories and edges past four in a minute show three and count the rest by kind
+  ("... and 55 more relationship changes in the same minute: 53 new Acquaintance, 2 new Enemy"; four show as four).
+- **The hour's folds (the shadow).** Lines that carry little alone (a new Acquaintance, an Acquaintance's affinity
+  drifting, a `MetInJail` memory, a retelling of my deed its hearer knew) wait for the hour (`Quiet`,
+  `flush_hourly`): four or fewer print at their minutes, more fold one line a kind at the first ("75 new
+  Acquaintances this hour (A, B, C and 72 more)", "met 4 in the cells this hour (...)", "GOSSIP ABOUT ME: N
+  retellings this hour, every hearer knew already (told by ...)"). Kind changes and every Friend, Rival or Enemy
+  move print at their minute. V11's 100k cells wrote ~1,200 lines a day this way, one or two a minute, past any
+  per-minute fold. A heard `Sighting` refreshed hourly (a colleague at his bench, 40 a week in `worker_6654`)
+  prints once a day per subject and place.
+- **The repeated witness line** (`gang_leader_18246` 18:43, five days) is a re-raised crime, not a re-read record:
+  the dodger jumps the same gate on his evening commute and the witness passes it at the same minute, every day; the
+  6-h `[life] witness_dedupe_ticks` let each day record afresh (a memory and -0.2 affinity: a stranger sank to Enemy
+  -1.00 over a fare). A civilian holding a sighting of the same actor's same petty crime (`law::is_petty`) from the
+  last `[noise] petty_rewitness_days` 7 takes no new record (`law::raise_crime_on`, `life::saw_within`): no line,
+  memory or affinity hit. The law's eye always acts (the fare ladder and S3's `beat_cooldown_days` are untouched).
+  20k seed 42 x 28: Fare Evasion witness lines of a witness and dodger already paired 817 -> 517 (the rest are guards
+  on duty, and memories evicted past `memory_cap`). **Found on the way:** `memory::insert` merged a `SawCrime` of a
+  second crime into the first (same kind and subject inside 60 min, the first crime kept), so `saw_recently` never
+  found the second: an arms dealer's ten witnesses were recorded afresh every minute of her Dealing after one Arms
+  Dealing (100k `arms_dealer_40733 d24 00:00-00:08`). The merge now needs the same crime.
+- **"Promoted to X" when already X.** `classpay::title` read "Senior" at grade 1 whatever the role's base, so a
+  Reporter (`role_grade` 1) raised to grade 2 by his bylines read "promoted to Reporter (was Senior Reporter)". The
+  title is by the grade above the base (`grade_of`): the label, "Senior", "Lead". `note_promoted` takes what the
+  body held (`classpay::held`): "promoted to Senior Reporter at X (was Reporter)", "promoted to Manager at X (was
+  Vat Tech)"; a rise under an unchanged title reads "rose from skilled to professional grade as T at X (8c a day)",
+  a graded move at the same title and grade "moved up to a T post at X".
+- **The rest day in the hour lines.** The two-hourly needs line ends "| rest day: no shift" (or "| the city's rest
+  day") on such a day, except while the body is at Work (a night shift's tail runs into the rest day's morning,
+  `worker_6651 d27 00:00-06:00`), and the day's heading reads "## Day 27 (rest day: no shift)".
+- **Diary size** (lines a diary-day, the `## Day` sections; 20k seed 42, purist, raider, gang_leader, reporter,
+  worker x2, d21-27; the same picks and lives, the two sim changes off): median 100 -> 91, max 154 -> 154, total
+  6,383 -> 6,131 (-4 %). These 20k picks hold no raid and no crowd; the folds bite where V11's 100k floods were. 100k
+  seed 42 (purist, jailed, arms_dealer, raider x2; the city has moved since V11 and S3 emptied the cells' meeting
+  hall): median 77, max 137 a diary-day, against V11's medians of 1,204 (purist), 1,192 (arms_dealer), 1,014
+  (raider); the hour's fold took 529 Acquaintance lines into 25 there.
+- **Reads wrong still (next pass):** a big workplace's crowd is "new Acquaintances" again every few days (edges decay
+  and re-form: `Thea Draper#6275` new on d22, d25, d26 in one worker's diary, 56-75 a shift start); a guard counts
+  as a witness of the raider's assault on him (`Kieran Draper saw Rin Garland commit Assault`, d24 07:41); a 20k
+  cell still makes Friends at +1.00 inside 12 h (`raider_19825 d21 04:00-12:00`, S3's area).
+- No test (doctrine 2). `SAVE_VERSION` 81 (the `[noise]` S7 keys).
