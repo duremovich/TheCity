@@ -441,6 +441,9 @@ fn step_agent(world: &mut World, id: EntityId) {
             }
             count_abort(world, &step, reason);
             let goal = world.comp::<Brain>(id).and_then(|b| b.plan_goal());
+            if world.leg_log.is_some() {
+                leglog::step_failed(world, id, goal, &format!("{:?}", step.action), &format!("{reason:?}"));
+            }
             // L2 (L30, instrumentation): a bed step's abort names the bed
             // kind and the failing check.
             let detail = abort_detail(world, id, &step);
@@ -616,6 +619,7 @@ impl World {
             b.cooldowns.insert(goal, until);
             b.last_plan_failure = None;
         }
+        leglog::goal_plan(self, goal, 1);
         self.drop_cooled_visit(id, goal);
     }
 
@@ -648,6 +652,7 @@ impl World {
                 }
             }
         }
+        leglog::goal_plan(self, goal, 1);
         self.drop_cooled_visit(id, goal);
     }
 

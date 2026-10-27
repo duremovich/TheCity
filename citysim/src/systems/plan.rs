@@ -563,6 +563,7 @@ fn install(world: &mut World, id: EntityId, plan: Plan) {
     }
     // The island pass phase 9 (OPEN-181): so does a walk cut short.
     crate::exec::settle_interrupted(world, id);
+    crate::exec::leglog::goal_plan(world, plan.goal, 0);
     if let Some(b) = world.comp_mut::<Brain>(id) {
         b.plan = Some(plan);
         b.plan_step = 0;

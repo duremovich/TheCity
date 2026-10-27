@@ -81,6 +81,15 @@ pub struct LegLog {
     pub walk_ways: BTreeMap<EntityId, KeptWay>,
     /// The device's sums (`#walk` rows).
     pub walks: WalkSums,
+    /// Round 3 S2 (OPEN-222's device): each body's last done leg of
+    /// `min_ticks` or more, by its end tick.
+    pub last_long: BTreeMap<EntityId, Tick>,
+    /// By (goal, action, reason): steps failed within `FAIL_AFTER_TICKS` of
+    /// such a leg's end (`#failafter` rows).
+    pub fail_after: BTreeMap<(String, String, String), u64>,
+    /// By goal: [plans installed, cools] (`#goalplan` rows; a cool is a
+    /// goal that could not plan or whose plan failed twice).
+    pub goal_plans: BTreeMap<String, [u64; 2]>,
 }
 
 /// A walk's way kept by its walker: (depart, way, arrive).
@@ -560,8 +569,40 @@ pub fn end(world: &mut World, id: EntityId, outcome: &'static str) {
     e.0 += 1;
     e.1 += ticks;
     if ticks >= min {
+        if outcome == "done" {
+            log.last_long.insert(id, tick);
+        }
         log.rows.push(LegRow { id, who, goal, start: s, ticks, outcome });
     }
+}
+
+/// OPEN-222's device: a step this close after a long leg's end failed "at
+/// the end of the walk" (measurement only).
+pub const FAIL_AFTER_TICKS: Tick = 3;
+
+/// A step failed (`exec`): counted when it is within `FAIL_AFTER_TICKS` of
+/// the body's last long leg's end (measurement only).
+pub fn step_failed(
+    world: &mut World,
+    id: EntityId,
+    goal: Option<crate::components::GoalKind>,
+    action: &str,
+    reason: &str,
+) {
+    let tick = world.tick;
+    let Some(log) = world.leg_log.as_mut() else { return };
+    let Some(&end) = log.last_long.get(&id) else { return };
+    if tick.saturating_sub(end) > FAIL_AFTER_TICKS {
+        return;
+    }
+    let goal = goal.map_or_else(|| "-".to_string(), |g| format!("{g:?}"));
+    *log.fail_after.entry((goal, action.to_string(), reason.to_string())).or_default() += 1;
+}
+
+/// A plan installed (`slot` 0) or a goal cooled (`slot` 1; measurement only).
+pub fn goal_plan(world: &mut World, goal: crate::components::GoalKind, slot: usize) {
+    let Some(log) = world.leg_log.as_mut() else { return };
+    log.goal_plans.entry(format!("{goal:?}")).or_default()[slot] += 1;
 }
 
 /// The TSV header and rows (`run --legs`).
@@ -607,6 +648,14 @@ pub fn tsv(world: &World) -> String {
     }
     for (m, (n, t)) in &log.by_mode {
         out.push_str(&format!("#mode\t{m}\t{n}\t{t}\n"));
+    }
+    // Round 3 S2 (OPEN-222's device): failures at a long leg's end, and
+    // each goal's plans against its cools.
+    for ((g, a, r), n) in &log.fail_after {
+        out.push_str(&format!("#failafter\t{g}\t{a}\t{r}\t{n}\n"));
+    }
+    for (g, [p, c]) in &log.goal_plans {
+        out.push_str(&format!("#goalplan\t{g}\t{p}\t{c}\n"));
     }
     // The island pass phase 5 (OPEN-165's device): by mode and tier, the
     // body-days on a vehicle leg, parked, jumped, either.
