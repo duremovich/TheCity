@@ -995,8 +995,21 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
             });
             // The pre-view pass phase 4 (P8): so does a sweeper's round (its
             // close is inside the Recycler, which the planner reads as no Beat).
-            if goal == Some(crate::components::GoalKind::Work)
-                && (crate::systems::shift::scripted(world, id) || crate::systems::jobs::sweep_round_on(world, id))
+            // Pressure pass round 2, R5 (OPEN-214): a scav's bin round
+            // (`customers::scav_plan`) is GangWork's scripted Scavenge, not
+            // the broke's Earn: the planner's `poor` symbol failed it
+            // `PreconditionLost` on every scav with a meal's coins.
+            // R5: every Scavenge checks its own start (the planner reads
+            // someone else's Home as the street, so a broke extorter's
+            // Earn Scavenge failed the same way inside the Block).
+            let scav_round = kind == ActionKind::Scavenge;
+            // R5: so is a try-out at a front (the planner's `at(Hideout)`
+            // reads the building's kind).
+            let tryout = goal == Some(crate::components::GoalKind::JoinGang) && crate::systems::crew::on(world);
+            if scav_round
+                || tryout
+                || (goal == Some(crate::components::GoalKind::Work)
+                    && (crate::systems::shift::scripted(world, id) || crate::systems::jobs::sweep_round_on(world, id)))
             {
                 // The pre-view pass phase 2 (OPEN-137): a shape plan's steps
                 // check their own start (the planner reads a worker inside
@@ -1043,6 +1056,13 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                     kind.preconditions(&ws, &ctx)
                 };
                 if !symbols || !actions::can_start(world, id, kind, step.target) {
+                    // R5 (OPEN-214): a marcher at the door after the brawl
+                    // (the raid done) reads its result, as `raid::resolve`'s.
+                    if kind == ActionKind::Brawl {
+                        if let Some(g) = world.gang_of(id) {
+                            crate::systems::crew::late_to_raid(world, id, g);
+                        }
+                    }
                     // Lives at work phase 1 (§ 2.1): a venue step failing to
                     // start inside its venue against the door policy is a
                     // refusal at the door (the bouncer's encounter).
@@ -1974,6 +1994,7 @@ impl World {
             || sweeper
             || staff
             || crate::systems::trades::capacity_exempt(self, agent, b)
+            || crate::systems::crew::capacity_exempt(self, agent, b)
     }
 
     /// The street tile just outside a building's door (a Road if there is one).

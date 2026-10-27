@@ -192,8 +192,14 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
                     && crate::systems::vice::pimp_target(world, id).is_none())
         }
         // A guard never scores JoinGang (`considerations` says None): skip the scan.
+        // Pressure pass round 2, R5 (OPEN-214): with `[crew]`, and a try-out place in reach.
         GoalKind::JoinGang => {
-            world.comp::<Job>(id).is_some_and(|j| j.role == Role::Guard) || !crate::systems::gang::eligible(world, id)
+            world.comp::<Job>(id).is_some_and(|j| j.role == Role::Guard)
+                || if crate::systems::crew::on(world) {
+                    !crate::systems::gang::tryout_open(world, id)
+                } else {
+                    !crate::systems::gang::eligible(world, id)
+                }
         }
         // M12 D31: a rioter has an expedition too (raid_done is true without one).
         GoalKind::Raid => crate::systems::raid::raid_done(world, id),
@@ -858,6 +864,10 @@ pub fn considerations_with(
             let in_shift = world.comp::<Job>(id).is_some_and(|j| j.on_shift(tod));
             let called = crate::systems::raid::raid_pending(world, id)
                 && (rioter || p.loyalty >= world.config.gangs.freelance_loyalty);
+            // Pressure pass round 2, R5 (OPEN-214): the posted muster is a duty.
+            if called {
+                flat += crate::systems::crew::muster_flat(world, id);
+            }
             vec![
                 Consideration::new("muster called", can(called), GATE),
                 Consideration::new("courage", p.courage, Curve::Linear { m: 0.7, b: 0.3 }),

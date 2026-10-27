@@ -1176,6 +1176,12 @@ pub struct Jobs2Cols {
     pub crew_rest_nights: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub crew_gang_loans: u32,
+    // Pressure pass round 2, R5 (OPEN-214): a gang standing its paid duty
+    // down (broke), a try-out turned away.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub crew_stood_down: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub crew_tryout_refused: u32,
     // Pressure pass round 2, R1 (`systems::fares`): the fare dodger's ladder:
     // caught (both tiers), fined on the spot, beaten, banned, a ban broken,
     // caught off screen (of the caught), a banned rider turned off the platform.
@@ -1668,6 +1674,8 @@ impl Jobs2Cols {
                 "crew_folded",
                 "crew_rest_nights",
                 "crew_gang_loans",
+                "crew_stood_down",
+                "crew_tryout_refused",
                 "fare_caught",
                 "fare_fined",
                 "fare_beaten",
@@ -2129,6 +2137,8 @@ impl Jobs2Cols {
             self.crew_folded.to_string(),
             self.crew_rest_nights.to_string(),
             self.crew_gang_loans.to_string(),
+            self.crew_stood_down.to_string(),
+            self.crew_tryout_refused.to_string(),
             self.fare_caught.to_string(),
             self.fare_fined.to_string(),
             self.fare_beaten.to_string(),

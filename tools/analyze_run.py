@@ -945,7 +945,8 @@ CONSEQUENCE_TOTALS = ("wr_report", "wr_flee", "wr_gossip", "wr_blackmail", "wr_l
 CREW_TOTALS = ("crew_raid_results", "crew_raid_wounded", "crew_duty_posted", "crew_duty_kept", "crew_duty_missed",
                "crew_chose_gang", "crew_chose_job", "crew_duty_pay", "crew_colours_lost", "crew_talked",
                "crew_talker_beaten", "crew_welcomes", "crew_promoted", "crew_court_quorum", "crew_court_failed",
-               "crew_absorbed", "crew_folded", "crew_rest_nights", "crew_gang_loans")
+               "crew_absorbed", "crew_folded", "crew_rest_nights", "crew_gang_loans",
+               "crew_stood_down", "crew_tryout_refused")  # R5
 # Pressure pass round 2, R1: the fare dodger's ladder (systems/fares.rs).
 FARE_TOTALS = ("fare_caught", "fare_fined", "fare_beaten", "fare_banned", "fare_ban_broken", "fare_stat",
                "fare_ban_walks")

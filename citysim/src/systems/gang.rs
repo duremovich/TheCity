@@ -284,6 +284,100 @@ pub fn join(world: &mut World, id: EntityId) -> bool {
     true
 }
 
+// ---------------------------------------------------------------------------
+// The try-out (pressure pass round 2, R5, OPEN-214)
+// ---------------------------------------------------------------------------
+
+/// Where `id` would try out for `gang` from where he stands: its Hideout
+/// within `[crew] tryout_reach_ticks`, else its nearest front within it
+/// (the Vice and leisure venues it holds); `None` past both (V10: 300- to
+/// 800-tile JoinGang walks that never arrived). Without `[crew]`, the
+/// Hideout.
+pub fn tryout_place(world: &World, id: EntityId, gang: EntityId) -> Option<EntityId> {
+    let hideout = world.hideout_of(gang)?;
+    let Some(c) = crate::systems::crew::cfg(world) else { return Some(hideout) };
+    let here = world.comp::<Position>(id)?;
+    if here.building == Some(hideout) {
+        return Some(hideout);
+    }
+    let from = here.tile;
+    let reach = c.tryout_reach_ticks;
+    let ticks = |b: EntityId| {
+        world
+            .comp::<Building>(b)
+            .filter(|bd| !bd.demolished)
+            .map(|bd| crate::systems::distance::travel(world, from, bd.door))
+    };
+    if ticks(hideout).is_some_and(|t| t <= reach) {
+        return Some(hideout);
+    }
+    crate::systems::leisure::fronts_of(world, gang)
+        .into_iter()
+        .filter_map(|b| ticks(b).map(|t| (t, b)))
+        .filter(|&(t, _)| t <= reach)
+        .min()
+        .map(|(_, b)| b)
+}
+
+/// JoinGang's goal gate with `[crew]` on: a gang would take `id` and a
+/// try-out place is in reach.
+pub fn tryout_open(world: &World, id: EntityId) -> bool {
+    recruit_gang(world, id).is_some_and(|g| tryout_place(world, id, g).is_some())
+}
+
+/// The try-out plan with `[crew]` on (`plan::plan_for` bypasses the
+/// planner, as the raid's chain): `[GoTo(Hideout) place, JoinGang place]`,
+/// the walk dropped when he is inside. `None` with no place in reach.
+pub fn tryout_plan(world: &World, id: EntityId) -> Option<crate::goap::Plan> {
+    crate::systems::crew::cfg(world)?;
+    let gang = recruit_gang(world, id)?;
+    let place = tryout_place(world, id, gang)?;
+    let step = |action, target| crate::components::ActionInstance { action, target, tile: None };
+    let mut steps = Vec::new();
+    if world.comp::<Position>(id).and_then(|p| p.building) != Some(place) {
+        steps.push(step(crate::goap::ActionKind::GoTo(crate::goap::LocationKey::Hideout), Some(place)));
+    }
+    steps.push(step(crate::goap::ActionKind::JoinGang, Some(place)));
+    Some(crate::goap::Plan { goal: GoalKind::JoinGang, target: Some(place), steps, started_tick: world.tick })
+}
+
+/// The gang whose try-out `place` is: the gang whose Hideout it is, else
+/// the gang fronting it.
+fn gang_at(world: &World, place: EntityId) -> Option<EntityId> {
+    let gangs = world.gang_list();
+    gangs
+        .iter()
+        .copied()
+        .find(|&g| world.hideout_of(g) == Some(place))
+        .or_else(|| gangs.iter().copied().find(|&g| crate::systems::leisure::fronts_of(world, g).contains(&place)))
+}
+
+/// The try-out at `place` ended with no gang to take `id` (the treasury
+/// fell short, the roster filled, the tie cooled on the walk): turned away,
+/// said so, and no second try for `tryout_cool_days`.
+pub fn turned_away(world: &mut World, id: EntityId, place: Option<EntityId>) {
+    let Some(c) = crate::systems::crew::cfg(world).cloned() else { return };
+    let gang = place.and_then(|p| gang_at(world, p));
+    let why = match gang.and_then(|g| world.comp::<Gang>(g)) {
+        Some(g) if g.is_sacked(world.tick) => "the place had just been sacked",
+        Some(g) if g.members.len() >= world.config.gangs.max_members => "they were full up",
+        Some(g) if !recruiting(world, g) => "the treasury could not feed another mouth",
+        _ => "nobody there would vouch for him",
+    };
+    let gname = gang.and_then(|g| world.comp::<Gang>(g)).map_or_else(|| "the gang".to_string(), |g| g.name.clone());
+    let at = place.map_or_else(|| "the door".to_string(), |p| world.name_of(p));
+    let text = format!("{} tried out for {gname} at {at} and was turned away: {why}", world.name_of(id));
+    let mut actors = vec![id];
+    actors.extend(gang);
+    actors.extend(place);
+    world.push_event(EventKind::Crew, &actors, text);
+    crate::systems::ownership::jobs2_row(world).crew_tryout_refused += 1;
+    let until = world.tick + c.tryout_cool_days * TICKS_PER_DAY;
+    if let Some(b) = world.comp_mut::<Brain>(id) {
+        b.cooldowns.insert(GoalKind::JoinGang, until);
+    }
+}
+
 /// Put `id` into `gang` with every side effect of joining. No eligibility
 /// check: `join` does that; tests call this directly.
 pub fn enlist(world: &mut World, id: EntityId, gang: EntityId) {

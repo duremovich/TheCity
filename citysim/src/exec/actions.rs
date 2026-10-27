@@ -266,7 +266,12 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         // The pre-view pass phase 6: at the Hideout in court hours, or at the lieutenant.
         ActionKind::Court => crate::systems::leaders::can_court(world, id, target),
         // L1: out on the street; office hours inside the HQ.
-        ActionKind::Scavenge => world.comp::<Position>(id).is_some_and(|p| p.building.is_none()),
+        // R5 (OPEN-214): or inside a building the planner reads as the
+        // street (someone else's Home after an Extort, a back room): the
+        // planner only plans it there; `on_start` steps out. Never at home.
+        ActionKind::Scavenge => world
+            .comp::<Position>(id)
+            .is_some_and(|p| p.building.is_none_or(|b| world.comp::<Household>(id).and_then(|h| h.home) != Some(b))),
         ActionKind::Meeting => target.is_some() && world.comp::<Position>(id).and_then(|p| p.building) == target,
         // The pressure pass F1: at the Hall or a Station's desk.
         ActionKind::Register => {
@@ -400,6 +405,12 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
                 && world.comp::<Position>(t).and_then(|p| p.building)
                     == world.comp::<Position>(id).and_then(|p| p.building)
         }),
+        // R5 (OPEN-214): a scripted try-out stands inside its place (a
+        // Hideout or a front); the planner's symbols cover the rest.
+        ActionKind::JoinGang => {
+            !world.has::<crate::components::GangMember>(id)
+                && target.is_none_or(|t| world.comp::<Position>(id).and_then(|p| p.building) == Some(t))
+        }
         // Symbolic preconditions (goap::ActionKind::preconditions) cover these.
         ActionKind::StealFood(_)
         | ActionKind::Forage
@@ -410,7 +421,6 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         | ActionKind::Arrest
         | ActionKind::HideFromLaw
         | ActionKind::Chat
-        | ActionKind::JoinGang
         | ActionKind::Extort
         | ActionKind::SplitLoot
         | ActionKind::Fence
@@ -424,6 +434,8 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
 /// Start effects: money moves now so an interruption cannot duplicate it.
 pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Option<EntityId>) {
     match kind {
+        // R5 (OPEN-214): the bins are outside (`can_start`'s other Home).
+        ActionKind::Scavenge => world.leave_building(id),
         // The pre-view pass phase 6 (P15): the order given as the leader reaches the lieutenant.
         ActionKind::Court => crate::systems::leaders::court_start(world, id, target),
         // Sleeping at home beside a spouse: intimacy +0.4, at the start so an
@@ -1157,6 +1169,10 @@ pub fn on_complete(
         }
         ActionKind::JoinGang => {
             if crate::systems::gang::join(world, id) {
+                StepResult::Done
+            } else if crate::systems::crew::on(world) {
+                // R5 (OPEN-214): the try-out decided: turned away, said so.
+                crate::systems::gang::turned_away(world, id, target);
                 StepResult::Done
             } else {
                 StepResult::Failed(FailReason::PreconditionLost)

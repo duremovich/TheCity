@@ -1663,6 +1663,26 @@ pub struct CrewCfg {
     /// nobody under LieLow) on `crew_p`, at `crew_hour`.
     pub crew_p: f32,
     pub crew_hour: u8,
+    // --- Pressure pass round 2, R5 (OPEN-214): the verbs that stalled
+    /// A recruit tries out at his gang's Hideout or, past this travel from
+    /// where he stands, its nearest front within it; with neither in reach
+    /// the gang is too far to join today (JoinGang is not scored).
+    pub tryout_reach_ticks: u64,
+    /// A recruit turned away at the try-out does not try again for this
+    /// many days.
+    pub tryout_cool_days: u64,
+    /// A member posted to today's muster (who did not choose the shift)
+    /// scores the Raid goal this much over its considerations: the muster
+    /// is a duty, as a crew Visit is (`duty_urgency`), not an evening's whim.
+    pub muster_flat: f32,
+    /// A corp raid's prize is a building of the hoarding corp within this
+    /// travel of the gang's Hideout (the march's window is 6 h).
+    pub raid_target_reach_ticks: u64,
+    /// A court summons missed at work is excused: it takes the standing but
+    /// does not count toward `colours_misses` (the attrition, judged after
+    /// the stalls: two thirds of the misses behind a lost colour were the
+    /// daily court rota).
+    pub court_work_excused: bool,
 }
 
 impl Default for CrewCfg {
@@ -1704,6 +1724,12 @@ impl Default for CrewCfg {
             welcome_after_hours: 1,
             crew_p: 0.6,
             crew_hour: 19,
+            // R5 (OPEN-214)
+            tryout_reach_ticks: 180,
+            tryout_cool_days: 3,
+            muster_flat: 0.5,
+            raid_target_reach_ticks: 240,
+            court_work_excused: true,
         }
     }
 }
