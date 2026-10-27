@@ -187,6 +187,9 @@ fn test_civic_cut_spares_public_works_hires() {
     // The island pass phase 1: nor the distance picks (a works hire lost
     // his post in their butterfly).
     cfg.distance = None;
+    // The pressure pass R2: the v1 pace, 2 ticks a tile (a works hire lost
+    // his post in the halved walk's butterfly).
+    cfg.exec.move_ticks_full = 2;
     let mut w = World::new(42, cfg);
     w.run_ticks(2 * TICKS_PER_DAY);
     w.push_command(PlayerCommand::SetSafetyNet(true));

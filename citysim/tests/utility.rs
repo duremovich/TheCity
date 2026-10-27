@@ -217,8 +217,9 @@ fn test_worked_example_through_goal_table() {
     assert!((score(GoalKind::Eat) - 0.823).abs() < 0.005, "eat {}", score(GoalKind::Eat));
     assert!((score(GoalKind::Earn) - 0.240).abs() < 0.005, "earn {}", score(GoalKind::Earn));
     // The spec's example reads 0.072; the life pass (always on since 2026-10-09)
-    // weighs the walk to company, 0.034 on this seed's farmer.
-    assert!((score(GoalKind::Socialise) - 0.034).abs() < 0.005, "socialise {}", score(GoalKind::Socialise));
+    // weighs the walk to company, 0.047 on this seed's farmer (0.034 before
+    // the pressure pass R2 halved the walk, `[exec] move_ticks_full` 1).
+    assert!((score(GoalKind::Socialise) - 0.047).abs() < 0.005, "socialise {}", score(GoalKind::Socialise));
     assert_eq!(
         goals::GOAL_ORDER.len(),
         32,

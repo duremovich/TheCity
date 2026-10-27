@@ -23,6 +23,9 @@ fn base() -> World {
         if let Some(m) = cfg.motion.as_mut() {
             m.trains = None;
         }
+        // The pressure pass R2: and the v1 pace (`common::v1_pace`; at 1 a
+        // tile the farm worker's household and the bought Block move).
+        common::v1_pace(&mut cfg);
         let mut w = World::new(42, cfg);
         w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
         w

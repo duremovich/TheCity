@@ -323,7 +323,13 @@ fn probe_guard_eats_on_a_long_shift() {
 /// on the moved city, hired the same night; the stimulus is two posts.
 #[test]
 fn probe_laid_off_farm_worker_finds_work_within_14_days() {
-    let mut w = world();
+    // The pressure pass R2: the v1 pace, 2 ticks a tile (in the halved
+    // walk's city the pick was abducted and killed before the search).
+    let mut w = World::new(42, {
+        let mut c = Config::load();
+        c.exec.move_ticks_full = 2;
+        c
+    });
     // Day 20, a minute to midnight: the layoff lands just before the
     // midnight job search, as `wages::staff`'s do. Shadow V4 batch 3: or the
     // first later day (to 40) with two posts open at that minute (the moved
@@ -1000,6 +1006,9 @@ fn probe_far_worker_with_one_rent_moves_near_work() {
     // OPEN-111: the venues' evening staff move the seeded city's picks (no
     // single far Farmer with a partner); pinned to the day shift.
     cfg.service.evening_staff.clear();
+    // The pressure pass R2: the v1 pace (2 ticks a tile), whose far workers
+    // this probe's city has (at 1 a tile they are near, or married).
+    cfg.exec.move_ticks_full = 2;
     // Jobs & lives phase 8's gate: the pin to the pre-milestone city is gone
     // (the industries on, seed 42 has its single far Farmer again).
     let mut w = World::new(42, cfg);
@@ -1150,6 +1159,9 @@ fn probe_city_grows_homes_toward_jobs() {
     // while a Lot or floor is left there (its most-far employer is then the
     // land-locked Farm#405: 0 Lots, every Home at floors_max).
     cfg.life.housing_preroll = false;
+    // The pressure pass R2: the v1 pace (2 ticks a tile), whose far workers
+    // this probe's city has (at 1 a tile they are near, or married).
+    cfg.exec.move_ticks_full = 2;
     let mut w = World::new(42, cfg);
     let cap = w.config.life.commute_move_ticks;
     let door_of = |w: &World, b: EntityId| w.comp::<Building>(b).map(|b| b.door);
@@ -1661,6 +1673,9 @@ fn probe_trade_respects_rent_and_the_evictor() {
     // `commute_cost` rides and no single farmer reads far (the El case is
     // `probe_el_*` and `tests/transit.rs`).
     cfg.transit.enabled = false;
+    // The pressure pass R2: the v1 pace (2 ticks a tile), whose far workers
+    // this probe's city has (at 1 a tile they are near, or married).
+    cfg.exec.move_ticks_full = 2;
     // Jobs & lives phase 8's gate: the pin to the pre-milestone city is gone
     // (the industries on, seed 42 has its single far Farmer again).
     let mut w = World::new(42, cfg);
@@ -2261,6 +2276,10 @@ fn el_commuter() -> (World, EntityId, EntityId, u64) {
     // Lives at work phase 6: careers off (on its city the cut-line commuter
     // does not reach work by noon; the subject is the El, not the ages).
     cfg.strip_careers();
+    // The pressure pass R2 (move_ticks_full 2 -> 1): no cab roll either (the
+    // subject is the El; at the halved pace the commuter picked rolled a
+    // cab, `streetwork::full_cab`, before the El was asked).
+    cfg.jobs2.p_cab = 0.0;
     let mut w = World::new(42, cfg);
     w.run_ticks(TICKS_PER_DAY + 5 * TICKS_PER_HOUR);
     let t = TICKS_PER_DAY + 7 * TICKS_PER_HOUR;
@@ -2550,6 +2569,9 @@ fn probe_married_pick_is_home_by_nine_with_the_spouse() {
     // The island pass phase 1: `[distance]` off too (its seeded staff pick
     // another married day worker).
     cfg.distance = None;
+    // The pressure pass R2: the v1 pace (2 ticks a tile); at 1 a tile the
+    // pick is another married day worker.
+    cfg.exec.move_ticks_full = 2;
     let mut w = World::new(42, cfg);
     w.run_ticks(TICKS_PER_DAY + 19 * TICKS_PER_HOUR);
     let (a, s, h) = married_day_worker(&w).expect("a married day worker");
@@ -2626,7 +2648,12 @@ fn world_at_day2() -> World {
     // The island pass phase 4: the commute pressure's city moves who lives
     // where by day 2 (a butterfly: seed 42's first pair never bought out,
     // with no move of its own); the probes on it read the base relocation.
-    let mut w = world_no_pressure();
+    // The pressure pass R2: at the v1 pace, 2 ticks a tile (the halved
+    // walk's city never bought its child out).
+    let mut c = Config::load();
+    c.commute_pressure = None;
+    c.exec.move_ticks_full = 2;
+    let mut w = World::new(42, c);
     w.run_ticks(2 * TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
     w
 }
@@ -3373,7 +3400,10 @@ fn probe_laid_off_loader_with_a_profession_is_rehired_first() {
         .expect("a housed loader");
     citysim::systems::economy::dismiss_as(&mut w, a, Some(yard), "laid off (probe)".into(), EventKind::LaidOff);
     w.laid_off.remove(&a);
-    w.vacancies.entry(yard).or_default().push(role);
+    // The pressure pass R2 (move_ticks_full 2 -> 1): the loader's is the
+    // Yard's one open post (at the halved pace a driver's stood open there
+    // on day 5, and the holder took it).
+    w.vacancies.insert(yard, vec![role]);
     let stranger = w
         .citizens()
         .into_iter()

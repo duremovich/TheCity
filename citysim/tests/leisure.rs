@@ -138,7 +138,10 @@ fn test_club_door_refuses_heat() {
 /// door beat a nearer spot with nobody expected.
 #[test]
 fn test_hangout_picks_spot_where_friend_habit_is() {
-    let mut w = World::new(42, Config::load().dole_city());
+    // The pressure pass R2: the v1 pace (`common::v1_pace`).
+    let mut cfg = Config::load().dole_city();
+    common::v1_pace(&mut cfg);
+    let mut w = World::new(42, cfg);
     let a = civilian(&w, &[]);
     let friend = civilian(&w, &[a]);
     // A Bar's door spot and a street tile 4-6 tiles off it.
@@ -644,7 +647,10 @@ fn test_socialise_evening_follows_the_agents_own_shift() {
 /// has a paid rung (on d2eea01 the closed venues still took visits).
 #[test]
 fn test_learned_evening_skips_closed_venues() {
-    let mut w = World::new(42, Config::load().dole_city());
+    // The pressure pass R2: the v1 pace (`common::v1_pace`).
+    let mut cfg = Config::load().dole_city();
+    common::v1_pace(&mut cfg);
+    let mut w = World::new(42, cfg);
     w.run_ticks(1259);
     let mut skip = Vec::new();
     let a = loop {

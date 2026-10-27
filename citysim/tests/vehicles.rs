@@ -17,7 +17,15 @@ use citysim::{
 };
 
 fn city() -> World {
-    World::new(42, Config::load().dole_city())
+    World::new(42, v1_pace(Config::load().dole_city()))
+}
+
+/// The pressure pass R2 (`[exec] move_ticks_full` 2 -> 1): these scenes pin
+/// M12/M13's step arithmetic at the v1 pace (an unchromed walker's 8
+/// quarters a step, a car's 2 on the road), which they were written for.
+fn v1_pace(mut cfg: Config) -> Config {
+    cfg.exec.move_ticks_full = 2;
+    cfg
 }
 
 /// Living adults with a Brain and a Wallet, ascending.

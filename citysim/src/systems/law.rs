@@ -2437,6 +2437,8 @@ pub fn new_patrol_route(world: &mut World, guard: EntityId) -> Vec<EntityId> {
 /// of `from` (none: the nearest), and the Hall joins only within that
 /// travel of the beat. A district label spans up to 1,000 tiles on the
 /// island: a random Market of it sent guards on 4-13 h patrol legs.
+/// The pressure pass R2: a district with no Market walks the
+/// `patrol_beat_homes` of its Homes nearest `from`, not its centroid.
 pub fn district_route(
     world: &mut World,
     d: crate::components::DistrictId,
@@ -2464,10 +2466,24 @@ pub fn district_route(
             .collect()
     };
     let markets = of_kind(world, BuildingKind::Market);
-    let near_cap = crate::systems::distance::job_cap(world).zip(from);
+    // R2: the patrol's own reach (`[distance.reach] patrol_ticks`), else
+    // the job cap.
+    let patrol_cap = crate::systems::distance::reach(world).and_then(|r| r.patrol_ticks);
+    let near_cap = crate::systems::distance::job_cap(world).map(|c| patrol_cap.unwrap_or(c)).zip(from);
     // The draw stays one over the district's Markets (the world stream
     // unchanged), mapped onto those within reach.
     let mut pool = markets.clone();
+    // The pressure pass R2 (OPEN-215): with `[distance]` on, a district
+    // whose Markets all lie past the cap of the guard walks its Homes
+    // nearest him (below), one Market or several: the Spire's one Market
+    // sent Mid-Levels guards on 340-550-tile legs.
+    let homes_d: Vec<EntityId> = world.district(d).homes.iter().copied().filter(|&h| standing(world, h)).collect();
+    let far_markets = near_cap.is_some_and(|(cap, f)| {
+        !homes_d.is_empty()
+            && markets.iter().all(|&m| {
+                world.comp::<Building>(m).is_none_or(|bd| crate::systems::distance::travel(world, f, bd.door) > cap)
+            })
+    });
     if let Some((cap, f)) = near_cap.filter(|_| markets.len() > 1) {
         let door = |w: &World, b: EntityId| w.comp::<Building>(b).map_or(f, |bd| bd.door);
         let within: Vec<EntityId> = markets
@@ -2483,8 +2499,8 @@ pub fn district_route(
     }
     let hall_here = !of_kind(world, BuildingKind::Hall).is_empty();
     let centroid = world.district(d).centroid;
-    let homes_d: Vec<EntityId> = world.district(d).homes.iter().copied().filter(|&h| standing(world, h)).collect();
     let beat = match markets.len() {
+        _ if far_markets => None,
         0 if !homes_d.is_empty() => None,
         0 => world.nearest_of_kind(BuildingKind::Market, centroid),
         1 => Some(markets[0]),
@@ -2493,16 +2509,29 @@ pub fn district_route(
             Some(pool[i % pool.len().max(1)])
         }
     };
-    let draws = if markets.is_empty() && !homes_d.is_empty() { 4 } else { 2 };
+    let draws = if (markets.is_empty() || far_markets) && !homes_d.is_empty() { 4 } else { 2 };
     let beat_door = beat.and_then(|m| world.comp::<Building>(m)).map(|b| b.door);
     let mut route = Vec::new();
     route.extend(beat);
     if beat.is_some() {
-        route.extend(beat_door.and_then(|door| world.nearest_of_kind(BuildingKind::Bar, door)));
+        let bar = beat_door.and_then(|door| world.nearest_of_kind(BuildingKind::Bar, door).map(|b| (door, b)));
+        // R2: the Bar only within the patrol's reach of the Market.
+        route.extend(
+            bar.filter(|&(door, b)| {
+                patrol_cap.is_none_or(|cap| {
+                    world
+                        .comp::<Building>(b)
+                        .is_some_and(|bd| crate::systems::distance::travel(world, door, bd.door) <= cap)
+                })
+            })
+            .map(|(_, b)| b),
+        );
     }
     if hall_here {
         let hall = world.building_of_kind(BuildingKind::Hall);
-        let near = |h: EntityId| match (near_cap, beat_door, world.comp::<Building>(h).map(|b| b.door)) {
+        // R2: a Homes-only beat measures the Hall from the guard.
+        let anchor = beat_door.or(near_cap.map(|(_, f)| f));
+        let near = |h: EntityId| match (near_cap, anchor, world.comp::<Building>(h).map(|b| b.door)) {
             (Some((cap, _)), Some(b), Some(hd)) => crate::systems::distance::travel(world, b, hd) <= cap,
             _ => true,
         };
@@ -2514,14 +2543,26 @@ pub fn district_route(
         homes_d
     };
     let beat_homes = world.config.law.patrol_beat_homes;
-    let from = beat_door.unwrap_or(centroid);
+    // The pressure pass R2 (OPEN-215): a district with no Market walks the
+    // Homes nearest the guard (`[distance]` on), not its centroid's: the
+    // Spire is one label 150-350 tiles across.
+    let from = beat_door.or(near_cap.map(|(_, f)| f)).unwrap_or(centroid);
     if homes.len() > beat_homes {
         let mut near: Vec<(u32, EntityId)> = homes
             .iter()
             .filter_map(|&h| world.comp::<Building>(h).filter(|b| !b.demolished).map(|b| (b.door.manhattan(from), h)))
             .collect();
         near.sort();
-        homes = near.into_iter().take(beat_homes).map(|(_, h)| h).collect();
+        // R2: within the patrol's reach of the loop's anchor (walked), the
+        // nearest always (the Spire's 60 nearest towers spanned 200 tiles).
+        let tiles = patrol_cap.map(|c| c / world.config.exec.move_ticks_full.max(1));
+        let first = near.first().map(|&(t, _)| t).unwrap_or(0);
+        homes = near
+            .into_iter()
+            .take(beat_homes)
+            .filter(|&(t, _)| tiles.is_none_or(|r| u64::from(t) <= r) || t == first)
+            .map(|(_, h)| h)
+            .collect();
     }
     if !homes.is_empty() {
         for _ in 0..draws {

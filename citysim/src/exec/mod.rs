@@ -1153,12 +1153,13 @@ fn escort_leg(world: &mut World, id: EntityId, target: &GotoTarget, lod: Lod) ->
         // The island pass phase 7: the van drives the road (the island's
         // bays make it far longer than the Manhattan line), so the drive is
         // timed over the road's length.
-        let road = if crate::systems::motion::vans_on(world) {
-            crate::systems::motion::road_len(world, from, target.tile)
+        // The pressure pass R2: a road-measured way at the road's speed.
+        let drive = if crate::systems::motion::vans_on(world) {
+            let road = crate::systems::motion::road_len(world, from, target.tile);
+            crate::systems::vehicles::road_ticks(world, road.max(tiles))
         } else {
-            tiles
+            crate::systems::vehicles::car_ticks(world, tiles)
         };
-        let drive = crate::systems::vehicles::car_ticks(world, road.max(tiles));
         let call = Tick::from(cfg.van_call_ticks);
         let ticks = call + drive;
         crate::systems::ownership::jobs2_row(world).escort_vans += 1;

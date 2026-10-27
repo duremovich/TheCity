@@ -444,7 +444,7 @@ fn send_vans(world: &mut World, s: EntityId, precinct: EntityId, ps: Vec<EntityI
     let from = world.outside_door(sb);
     let now = world.tick;
     let road = crate::systems::motion::road_len(world, from, to).max(from.manhattan(to));
-    let arrive = now + crate::systems::vehicles::car_ticks(world, road);
+    let arrive = now + crate::systems::vehicles::road_ticks(world, road);
     for load in ps.chunks(cap) {
         let v = crate::systems::motion::spawn_van(world, from, to, now, arrive);
         for &p in load {
@@ -530,11 +530,24 @@ pub fn snapshot(world: &mut World) {
 
 /// `law::allocate`'s deal under the switch: the patrol guards in `patrol`
 /// (ascending) to the districts' `counts`, each Station guard to the
-/// districts whose centroid is nearest his Station first (the nearest of
-/// them with a slot left), then everyone left, in id order, to the district
-/// with a slot left whose centroid is nearest his Home (his post without
-/// one; ties the lower index: a patrol walks from home to the beat; the off deal filled the slots district by district in id order,
-/// which sent Precinct guards across the island).
+/// districts whose centroid is nearest his Station first, then everyone
+/// left to any district with a slot left (the off deal filled the slots
+/// district by district in id order, which sent Precinct guards across the
+/// island).
+///
+/// The pressure pass R2 (`OPEN-215`, F1's leftover): both rounds deal by
+/// the guard's Home (his post without one), as the patrol walks from home
+/// to the beat: a district's nearness is the Manhattan from the Home door
+/// to its nearest Market door (a district with no Market: its nearest
+/// Home door; neither: its centroid), and each round deals its (guard,
+/// district) pairs nearest first (ties the lower guard, then the lower
+/// index), not each guard in id order to his nearest district with a slot
+/// left: the last guards dealt took whatever districts were left, across
+/// the island (20k seed 42, unscaled: Patrol legs averaged 146 tiles, a third of
+/// them into another district). With `[distance]` on, the rest are dealt
+/// only within `job_cap_ticks` (walked) of the Home; a guard left over
+/// takes his nearest district, slot or none (a far district's slots stay
+/// empty, `law_brain::allocate` counting the beats dealt).
 pub fn deal_beats(world: &World, patrol: &[EntityId], counts: &[u16]) -> Option<Vec<(EntityId, usize)>> {
     if !on(world) {
         return None;
@@ -546,56 +559,99 @@ pub fn deal_beats(world: &World, patrol: &[EntityId], counts: &[u16]) -> Option<
     let precinct = world.building_of_kind(BuildingKind::Jail);
     let posts: Vec<(EntityId, TilePos)> =
         st.iter().copied().chain(precinct).filter_map(|b| door(world, b).map(|d| (b, d))).collect();
-    // Each district's post (the nearest to its centroid) and walk.
-    let owner: Vec<(EntityId, u32)> = world
+    // Each district's post (the nearest to its centroid).
+    let owner: Vec<EntityId> = world
         .districts
         .iter()
         .map(|d| {
-            posts
-                .iter()
-                .map(|&(b, door)| (door.manhattan(d.centroid), b))
-                .min()
-                .map_or((EntityId::NONE, 0), |(t, b)| (b, t))
+            posts.iter().map(|&(b, door)| (door.manhattan(d.centroid), b)).min().map_or(EntityId::NONE, |(_, b)| b)
         })
         .collect();
-    let mut left: Vec<u16> = counts.to_vec();
-    let mut out: Vec<(EntityId, usize)> = Vec::with_capacity(patrol.len());
-    let mut rest: Vec<EntityId> = Vec::new();
-    for &g in patrol {
-        let Some(s) = station_post(world, g) else {
-            rest.push(g);
-            continue;
-        };
-        let pick = owner
-            .iter()
-            .enumerate()
-            .filter(|&(i, &(b, _))| b == s && left.get(i).is_some_and(|&n| n > 0))
-            .min_by_key(|&(i, &(_, t))| (t, i))
-            .map(|(i, _)| i);
-        match pick {
-            Some(i) => {
-                left[i] -= 1;
-                out.push((g, i));
+    // Each district's anchors: its Markets' doors, else its Homes', else
+    // its centroid.
+    let standing_doors = |ids: &[EntityId], kind: Option<BuildingKind>| -> Vec<TilePos> {
+        ids.iter()
+            .filter_map(|&b| world.comp::<Building>(b))
+            .filter(|b| !b.demolished && kind.is_none_or(|k| b.kind == k))
+            .map(|b| b.door)
+            .collect()
+    };
+    let anchors: Vec<Vec<TilePos>> = world
+        .districts
+        .iter()
+        .map(|d| {
+            let m = standing_doors(&d.buildings, Some(BuildingKind::Market));
+            if !m.is_empty() {
+                return m;
             }
-            None => rest.push(g),
-        }
-    }
-    for g in rest {
-        let from = world
+            let h = standing_doors(&d.homes, None);
+            if h.is_empty() {
+                vec![d.centroid]
+            } else {
+                h
+            }
+        })
+        .collect();
+    let home_of = |g: EntityId| {
+        world
             .comp::<Household>(g)
             .and_then(|h| h.home)
             .or_else(|| station_post(world, g).or(precinct))
-            .and_then(|b| door(world, b));
-        let pick = world
-            .districts
-            .iter()
-            .enumerate()
-            .filter(|&(i, _)| left.get(i).is_some_and(|&n| n > 0))
-            .min_by_key(|&(i, d)| (from.map_or(0, |f| f.manhattan(d.centroid)), i))
-            .map(|(i, _)| i);
-        let Some(i) = pick else { break };
-        left[i] -= 1;
-        out.push((g, i));
+            .and_then(|b| door(world, b))
+    };
+    let near = |from: Option<TilePos>, i: usize| -> u32 {
+        from.and_then(|f| anchors[i].iter().map(|a| a.manhattan(f)).min()).unwrap_or(0)
+    };
+    let mut left: Vec<u16> = counts.to_vec();
+    let mut out: Vec<(EntityId, usize)> = Vec::with_capacity(patrol.len());
+    // One round: the pairs nearest first, each guard dealt once.
+    let deal = |guards: &[(EntityId, Option<TilePos>, Option<EntityId>)],
+                reach: Option<u64>,
+                left: &mut Vec<u16>,
+                out: &mut Vec<(EntityId, usize)>|
+     -> Vec<EntityId> {
+        let mut pairs: Vec<(u32, usize, usize)> = Vec::new();
+        for (gi, &(_, from, post)) in guards.iter().enumerate() {
+            for (i, &own) in owner.iter().enumerate() {
+                let t = near(from, i);
+                if left.get(i).is_some_and(|&n| n > 0)
+                    && post.is_none_or(|s| own == s)
+                    && reach.is_none_or(|r| u64::from(t) <= r)
+                {
+                    pairs.push((t, gi, i));
+                }
+            }
+        }
+        pairs.sort_unstable();
+        let mut dealt = vec![false; guards.len()];
+        for (_, gi, i) in pairs {
+            if dealt[gi] || left[i] == 0 {
+                continue;
+            }
+            left[i] -= 1;
+            dealt[gi] = true;
+            out.push((guards[gi].0, i));
+        }
+        guards.iter().zip(dealt).filter(|(_, d)| !d).map(|(g, _)| g.0).collect()
+    };
+    let posted: Vec<(EntityId, Option<TilePos>, Option<EntityId>)> =
+        patrol.iter().filter_map(|&g| station_post(world, g).map(|s| (g, home_of(g), Some(s)))).collect();
+    let mut rest: Vec<EntityId> = patrol.iter().copied().filter(|&g| station_post(world, g).is_none()).collect();
+    rest.extend(deal(&posted, None, &mut left, &mut out));
+    rest.sort_unstable();
+    let rest: Vec<(EntityId, Option<TilePos>, Option<EntityId>)> =
+        rest.into_iter().map(|g| (g, home_of(g), None)).collect();
+    // The rest: only within `[distance] job_cap_ticks` (walked) of the
+    // Home, then each guard still undealt to his nearest district, slot
+    // or none (a far district's empty slots stay empty: the island's
+    // Precinct guards were dealt the Vats 700 tiles from home).
+    let reach = crate::systems::distance::job_cap(world).map(|c| c / world.config.exec.move_ticks_full.max(1));
+    let undealt = deal(&rest, reach, &mut left, &mut out);
+    for g in undealt {
+        let from = home_of(g);
+        if let Some(i) = (0..world.districts.len()).min_by_key(|&i| (near(from, i), i)) {
+            out.push((g, i));
+        }
     }
     Some(out)
 }

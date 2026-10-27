@@ -272,8 +272,9 @@ fn test_a_long_escort_uses_the_van_and_a_short_one_walks() {
     // length (never under the Manhattan line).
     let road = citysim::systems::motion::road_len(&w, far, target.tile);
     let tiles = u64::from(far.manhattan(target.tile).max(road));
-    let m = citysim::systems::vehicles::timed_mult_of(&w, citysim::components::AssetKind::Car);
-    let drive = ((tiles * w.config.exec.move_ticks_full) as f32 * m).round() as u64;
+    // The pressure pass R2: at a Full Car's road pace (`vehicles::road_ticks`;
+    // the Coarse blend priced an off-road share the road's length has not).
+    let drive = citysim::systems::vehicles::road_ticks(&w, tiles as u32);
     assert_eq!(arrive_tick - (w.tick - 1), u64::from(cfg.van_call_ticks) + drive, "the call, then the Car's speed");
     let j = w.stats.current.jobs2.clone().unwrap_or_default();
     assert_eq!(j.escort_vans, 1);
@@ -370,8 +371,11 @@ fn drawn(w: &World, id: EntityId) -> TilePos {
 #[test]
 fn test_a_coarse_walk_keeps_its_body_on_its_way() {
     let mut w = city();
-    let run = road_run(&w, 20);
-    let (from, to) = (run[0], run[20]);
+    // The pressure pass R2 (move_ticks_full 2 -> 1): 40 road tiles, the
+    // walk's 40 ticks at the halved pace (20 tiles was 20 ticks: no walk of
+    // some ticks left).
+    let run = road_run(&w, 40);
+    let (from, to) = (run[0], run[40]);
     let who = coarse_walker(&mut w, 3, from, to);
     let arrive = timed_arrival(&w, who).expect("a timed walk");
     assert!(arrive > w.tick + 20, "a walk of some ticks");

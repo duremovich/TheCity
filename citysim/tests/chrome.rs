@@ -688,7 +688,8 @@ fn test_capped_civilian_gets_no_chrome_offer() {
 /// when the step starts (it fails at once, not after the wait).
 #[test]
 fn test_refused_sale_cools_before_the_wait() {
-    let mut w = common::world();
+    // The pressure pass R2: the v1 pace (`common::v1_pace`).
+    let mut w = common::world_with(common::v1_pace);
     w.run_ticks(12 * 60);
     w.config.economy2.asset_import_per_day = 1;
     for c in w.corps() {

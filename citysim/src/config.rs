@@ -819,6 +819,12 @@ pub struct ReachCfg {
     /// A sweeper's beat: the district's centroid from the post's door (past
     /// it, the nearest district with a slot left, else the post's own).
     pub beat_ticks: u64,
+    /// The pressure pass R2 (`OPEN-215`): a city guard's patrol loop
+    /// (`law::district_route`): its Market within this of the guard (none:
+    /// the district's Homes nearest him), its Bar and the Hall within this
+    /// of the Market. Absent: `[distance] job_cap_ticks`, the Bar anywhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patrol_ticks: Option<u64>,
 }
 
 /// The island pass phase 2 `[distance.free]` (docs/ISLAND_PASS.md I1):

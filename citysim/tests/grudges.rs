@@ -144,7 +144,10 @@ fn test_hunt_gates_on_max_hunts() {
 
 #[test]
 fn test_hunted_statistical_target_promoted_at_stakeout() {
-    let mut w = World::new(42, Config::load().dole_city());
+    // The pressure pass R2: the v1 pace (`common::v1_pace`).
+    let mut cfg = Config::load().dole_city();
+    common::v1_pace(&mut cfg);
+    let mut w = World::new(42, cfg);
     w.run_ticks(2 * TICKS_PER_HOUR);
     let lod = |w: &World, x: EntityId| w.comp::<Brain>(x).map(|b| b.lod);
     let stat: Vec<EntityId> = adults(&w).into_iter().filter(|&x| lod(&w, x) == Some(Lod::Statistical)).collect();

@@ -25,6 +25,14 @@ pub fn dole_world() -> World {
     World::new(42, Config::load().dole_city())
 }
 
+/// The pressure pass R2 (`[exec] move_ticks_full` 2 -> 1): a scene whose
+/// pick or premise the halved walk moved (another body picked, a far
+/// worker now near) is pinned to the v1 pace it was written for.
+#[allow(dead_code)]
+pub fn v1_pace(cfg: &mut Config) {
+    cfg.exec.move_ticks_full = 2;
+}
+
 /// The shipped config with one edit applied before the world is built.
 pub fn world_with(edit: impl FnOnce(&mut Config)) -> World {
     let mut cfg = Config::load();
