@@ -359,6 +359,12 @@ fn brothers_since(w: &World, t: u64) -> usize {
 }
 
 fn cool_hollow(w: &mut World) {
+    // The pressure pass round 2 (premise moved): the run-on's failed courts
+    // (phase 5b) stood at the fold threshold on the combined city, and The
+    // Hollow was absorbed into Ninefold on the test's first midnight (4
+    // members over, none left to gut). The tests are the brothers' roll, so
+    // the run-on's court record is not theirs.
+    w.crew.failed_courts.clear();
     for f in w.outside.factions.iter_mut().filter(|f| f.name == "Hollow Brothers") {
         let p = f.parent.as_mut().expect("p");
         p.last_brothers = None;
