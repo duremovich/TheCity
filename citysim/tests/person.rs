@@ -2743,6 +2743,11 @@ fn probe_parent_with_the_fee_buys_the_child_out_within_fourteen_days() {
 /// control, on its own thread: a broke parent (10 coins, an empty pantry)
 /// whose child was taken on day 2 visits. (Did the child stay, did he meet it.)
 fn broke_parent_visits(mut c: World) -> (bool, bool) {
+    // The pressure pass round 2 R1 (premise moved): the broke parent (10 coins)
+    // now meets the fare ladder at the El gate (fined, beaten, banned: a wary
+    // dodger walks or pays), and never reached the Camp in the fortnight. The
+    // control is the parent's purse and pantry, not the El's gate: fares off.
+    c.config.fares = None;
     let (q, child2, h2, camp2) = taken_child(&mut c);
     pin(&mut c, q);
     // The harsh city: a parent killed inside the fortnight (the pre-view
