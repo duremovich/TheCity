@@ -469,6 +469,7 @@ pub fn round_plan(world: &mut World, id: EntityId) -> Option<Plan> {
             b.patrol_legs = u8::try_from(legs).unwrap_or(u8::MAX);
         }
         if legs >= route.len() {
+            crate::systems::service::notices_folded(world, id, Some(route.len()));
             let (name, what) = (world.name_of(id), world.owner_label(world.owner_of(post)));
             let at = world.district_name(world.district_of_building(post)).to_string();
             let text = format!("{name} walked the round of {} {what} Blocks in {at}", route.len());

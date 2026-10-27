@@ -117,6 +117,9 @@ pub fn deed_of(holder: EntityId, e: &MemoryEntry) -> Option<DeedRef> {
             r(deed, e.subject, e.object)
         }
         MemoryKind::WasRobbed => r(Deed::Robbed, e.subject, Some(holder)),
+        // The pressure pass R4: a loss in a fight the holder started (`object`
+        // the holder himself, `law::fight_inner`) is no deed on him.
+        MemoryKind::Lost if e.object == Some(holder) => None,
         MemoryKind::Lost => r(Deed::Assaulted, e.subject, Some(holder)),
         MemoryKind::Stripped => r(Deed::Stripped, e.subject, e.object),
         MemoryKind::Grief => r(Deed::Killed, None, e.subject),

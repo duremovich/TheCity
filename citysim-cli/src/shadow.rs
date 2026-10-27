@@ -159,7 +159,7 @@ pub struct ShadowArgs {
     pub map: Option<PathBuf>,
 }
 
-const ARCHETYPES: [&str; 54] = [
+const ARCHETYPES: [&str; 55] = [
     "gang_member",
     // The pressure pass phase 5b: a member of a gang whose standing order
     // marches (a raid, a retaliation, a breakout) at the start day.
@@ -235,6 +235,9 @@ const ARCHETYPES: [&str; 54] = [
     // Pressure pass round 2, R1: a repeat fare dodger at the start day (caught at the gate
     // twice or more inside the window, or banned from the El).
     "dodger",
+    // The pressure pass R4 (OPEN-219): a parent of a child held in a standing Camp (the weekly
+    // answer: a visit, a buy-out, a break-out).
+    "camp_parent",
 ];
 
 /// Activity classes of the time-use table, in print order.
@@ -534,6 +537,16 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
         "dodger" => adults()
             .filter(|a| world.fares.book.get(a).is_some_and(|r| r.caught.len() >= 2 || r.banned_until.is_some()))
             .collect(),
+        "camp_parent" => {
+            let mut v = Vec::new();
+            for camp in citysim::systems::camp::standing_camps(world) {
+                for &k in citysim::systems::camp::children_of(world, camp) {
+                    v.extend(citysim::systems::camp::parents_of(world, k));
+                }
+            }
+            v.retain(|&a| world.has::<Brain>(a) && !world.has::<Sentence>(a) && !world.has::<Corpse>(a));
+            v
+        }
         other => return Err(format!("unknown archetype {other:?} (known: {})", ARCHETYPES.join(", "))),
     };
     out.sort();
@@ -1452,7 +1465,7 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
     let day = now / TICKS_PER_DAY;
     // Day rollover: close the finished day.
     if day != t.cur_day {
-        flush_day(t, now);
+        flush_day(world, t, now);
         t.cur_day = day;
         // Reputation and class at the day's start.
         if world.has::<Identity>(id) && !world.has::<Corpse>(id) {
@@ -2366,8 +2379,11 @@ fn close_action(world: &World, t: &mut Track, now: Tick, status: &str) {
     t.log(o.start, "action", format!("ACTION {:?} @ {loc}, {dur} min{tiles} ({status}){tgt}", o.action));
 }
 
-fn flush_day(t: &mut Track, now: Tick) {
+fn flush_day(world: &World, t: &mut Track, now: Tick) {
     let day = t.cur_day;
+    // The pressure pass R4 (OPEN-219): the shiftless rest day (weekday 6, a
+    // guard's staggered one) is marked, so its zero work does not read as a bug.
+    let rest = rest_day_note(world, t.id, day);
     let tick = day * TICKS_PER_DAY + TICKS_PER_DAY - 1;
     let _ = now;
     let hours: Vec<String> = CLASSES
@@ -2378,7 +2394,7 @@ fn flush_day(t: &mut Track, now: Tick) {
     pl.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
     let places: Vec<String> = pl.iter().filter(|(_, &m)| m >= 5).take(8).map(|(p, m)| format!("{p} {m}m")).collect();
     let text = format!(
-        "DAY SUMMARY d{day}: {} | net {}{} | places: {}",
+        "DAY SUMMARY d{day}{rest}: {} | net {}{} | places: {}",
         if hours.is_empty() { "no activity".into() } else { hours.join(", ") },
         if t.day_net > 0 { "+" } else { "" },
         money(t.day_net),
@@ -2388,6 +2404,19 @@ fn flush_day(t: &mut Track, now: Tick) {
     t.day_use.clear();
     t.day_places.clear();
     t.day_net = 0;
+}
+
+/// The pressure pass R4: " (rest day: no shift)" when `id` holds a job with
+/// no shift on `day` (weekday 6, a guard's staggered day), " (the city's rest
+/// day)" for the jobless on weekday 6, else nothing.
+fn rest_day_note(world: &World, id: EntityId, day: u64) -> &'static str {
+    let key = i64::try_from(day).unwrap_or(i64::MAX);
+    match world.comp::<Job>(id) {
+        Some(j) if !citysim::exec::routine::workday_of(world, id, j, key) => " (rest day: no shift)",
+        Some(_) => "",
+        None if !citysim::exec::routine::is_workday(key) => " (the city's rest day)",
+        None => "",
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3476,7 +3505,7 @@ fn follow(world: &mut World, picked: &[(String, EntityId)], days: u64, pin: bool
     for t in &mut tracks {
         // The last day's summary and any open action.
         close_action(world, t, end, "run ended");
-        flush_day(t, end);
+        flush_day(world, t, end);
         end_sleep_block(t, end);
         close_still(t, end);
     }

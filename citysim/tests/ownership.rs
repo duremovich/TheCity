@@ -369,6 +369,7 @@ fn test_daily_ownership_pass_conserves_coins() {
     w.run_ticks(3 * TICKS_PER_DAY);
     assert_eq!(w.tick_of_day(), 0);
     let before = ownership::total_coins(&w);
+    let scrip0 = w.outside.today.scrip_spent;
     let ident = citysim::systems::econ::identity(&w);
     let rent0 = w.stats.current.rent_paid;
     let upkeep0 = w.stats.current.flow_upkeep + w.stats.current.econ.flow_property;
@@ -384,7 +385,11 @@ fn test_daily_ownership_pass_conserves_coins() {
     if citysim::systems::wages::on(&w) {
         assert_eq!(citysim::systems::econ::identity(&w), ident, "the identity unchanged");
     } else {
-        assert_eq!(ownership::total_coins(&w), before, "wallets + gangs + corps + Treasury unchanged");
+        // The pressure pass R4 (premise moved): a tenant holding a parent's
+        // scrip pays a branch's rent in it, coins crossing in from outside
+        // (`parents::scrip_spend`, M17): the only coins the pass brings in.
+        let crossed = w.outside.today.scrip_spent - scrip0;
+        assert_eq!(ownership::total_coins(&w), before + crossed, "wallets + gangs + corps + Treasury unchanged");
     }
 }
 

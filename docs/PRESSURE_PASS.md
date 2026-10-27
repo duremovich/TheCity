@@ -738,3 +738,40 @@ Each trade gets a body that walks to it, through the machinery it already had. N
   on), `law::test_bug4_petty_offence_fined_when_the_suspect_can_pay` runs without `[fares]` (the Precinct path), and
   `policy::test_dole_enacted_on_day_10_is_paid_from_the_treasury` lost its pick to a butterfly (every jobless adult a
   tenant who had drawn): today's draw forgotten and the rent from income off for the measured draw. `SAVE_VERSION` 72.
+
+### R4: the friendship flip and the diary's noise (`OPEN-218`, `OPEN-219`; `[noise]`)
+
+- **The flip's cause** (`gun_28759 d21 14:46`, 100k seed 42): `gang::claim`, every blow of a gang claim on a Block
+  in another gang's territory (an Extort, or the Squat order's `Occupy` via `squat_claim`), ran
+  `make_enemy(m, actor, -0.7)` for **every member** of the holding gang, wherever they were. Edges are one per pair
+  and `make_enemy` caps affinity at the Enemy threshold, so a +1.00 Friend in the rival gang read "Enemy, -0.60": her
+  Occupy at Block#725 ended 14:46 and 51 of her friends flipped that minute, with no line. The Fight goal then scored
+  "enemy near" on the rival members at the Block, hence the seven Attacks there. Now `gang::contested`: only the
+  holders who **see** the blow turn (a body in the Block, or within `[crime] sight_day_crime`/`sight_night_crime` of
+  the actor, as a crime's witnesses), and the edges made are told: `Crew` `[actor, holder gang, home]`, "X struck at
+  H's hold on Block#N for G: 4 of H saw it and count X an enemy now (A, B, C and 1 more)" (`[noise] contest_names`
+  3). The other bulk `make_enemy` paths already carry a line (`Betrayal`, `Split`, the succession war, 30 pairs at
+  most). The flip did not recur at 20k (no blow on a rival hold in 10 gang and gun picks over the window).
+- **The swapped gossip** (`super_101327 d27 10:04`): `memory::deed_of` read every `Lost` as "Assaulted by the
+  winner on the holder", so an attacker who lost told people the defender had assaulted him. `law::fight_inner`
+  writes the attacker's `Lost` with `object` = himself (`World::remember_entry`: `remember`'s body, the entry built
+  by the caller) and `deed_of` reads that as no deed (no gossip, no grudge from it). The memory itself (the care and
+  revenge readers, by kind) is unchanged.
+- **The super's notices** fold into one `Notice` a round, at its end (`service::notices_folded`, from
+  `trades::round_plan` and `lod`'s Statistical round; a round cut short is told at midnight): "W served notice on 4
+  tenants in arrears on the round of 4 Blocks (A, B, C and 1 more)" (`[noise] notice_names` 3), every tenant noticed
+  an actor so his diary keeps it. `World.notice_fold` holds the open rounds; `analyze_run.py`'s Notice count is now
+  per round. **Zero-valence calls:** a `Tenant` encounter at the row's 0.0 valence writes no `Served` memory either
+  side (the notice's own -0.3 memory on the tenant stays).
+- **"X saw Y watching"** (phase 5a's culprit-learns roll) has no line: the soured edge (-0.1) and `wr_learned` carry it.
+- **The rest day** is marked in the diary's day summary: "DAY SUMMARY d27 (rest day: no shift)" for a job with no
+  shift that day (weekday 6, a guard's staggered day), "(the city's rest day)" for the jobless on weekday 6.
+- **The Camp answer.** The week's answer takes the single visit slot before a Hurt or Elder visit (it comes once a
+  week on a hashed day and was lost for the week). Its hour moves off the parent's shift (`household::camp_hour`):
+  the hashed hour stands when free, else the first free hour after it up to `[noise] camp_visit_last_hour` 22, else
+  the first free one from `visit_hour_from`. **Deviation:** a Punish visit could not overwrite a Camp one (midnight's
+  `visits_due` sets the Camp slot and `protection::enforcer` already skips anyone holding a visit); nothing changed
+  there. The shadow tool gains a `camp_parent` archetype (a parent of a child in a standing Camp). At 20k both picks
+  are jobless and set out at 12:08 and 14:24 on a 1,150-tile, 600-min walk to the one Camp that Sleep cuts at 22:00:
+  the answer still fails there, on the walk (R2's pace, `OPEN-215`), not on the slot or the shift.
+- No test (doctrine 2). `SAVE_VERSION` 73 (72 at the branch; R1 took 72 first).

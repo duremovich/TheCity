@@ -244,6 +244,8 @@ fn test_claim_resets_on_a_rival_blow_and_flips_at_three() {
     assert!(w.comp::<Gang>(g0).expect("g").territory.contains(&home));
     assert!(!w.events.iter().any(|e| e.kind == EventKind::TerritoryFlipped), "a first claim is not a flip");
 
+    // The pressure pass R4: the holders who see the blow turn (a in the Block).
+    w.enter_building(a, home);
     gang::extort(&mut w, b, home);
     assert_eq!(w.comp::<Building>(home).expect("b").claim, Some(Claim { gang: g1, count: 1 }), "a rival blow resets");
     assert!(w.comp::<Gang>(g0).expect("g").territory.contains(&home), "still held until the third blow");

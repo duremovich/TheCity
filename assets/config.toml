@@ -5032,3 +5032,9 @@ ban_window_days = 7
 ban_days = 14
 ban_break_lawfulness = 0.1         # a banned rider under this lawfulness boards anyway: caught, beaten whatever his wallet, banned afresh
 wary_hours = 24                    # caught this recently, he jumps no gate (pays or walks): the ban takes three bad days, not one bad hour
+# The pressure pass round 2, R4 (OPEN-218, OPEN-219): the diary's folds and the Camp answer's hour.
+[noise]
+contest_names = 3                  # a blow on a rival's hold names this many of the holders who saw it (the rest "and N more")
+notice_names = 3                   # the super's one notice line a round names this many tenants (the count is the round's)
+camp_visit_last_hour = 22          # a Camp answer whose hashed hour falls on the parent's shift moves to his first free hour
+                                   # up to this ([household] visit_hour_from..visit_hour_to; past it, the hashed hour stands)

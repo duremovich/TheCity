@@ -809,7 +809,19 @@ fn fight_inner(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> 
     world.remember(winner, MemoryKind::Won, Some(loser), 0.6, 0.4, false);
     // Shadow V4 review 4: taken in by the law, the loser was arrested.
     let lost = if mods.arrest && loser == b { MemoryKind::WasArrested } else { MemoryKind::Lost };
-    world.remember(loser, lost, Some(winner), 0.6, -0.6, false);
+    // The pressure pass R4 (Shadow V10 care item 6): the attacker who lost
+    // was not assaulted by the one he attacked; his `Lost` carries himself as
+    // `object`, which `memory::deed_of` reads as no deed (V10's gossip told
+    // "Assaulted by <the defender> on <the attacker>").
+    let object = (loser == a).then_some(a);
+    let entry = crate::components::MemoryEntry {
+        subject: Some(winner),
+        salience: 0.6,
+        valence: -0.6,
+        object,
+        ..crate::components::MemoryEntry::blank(lost, world.tick)
+    };
+    world.remember_entry(loser, entry);
     if let Some(p) = world.comp_mut::<Personality>(winner) {
         p.drift(Drift::WonFight);
     }

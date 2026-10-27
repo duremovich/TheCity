@@ -329,8 +329,12 @@ fn test_protection_pays_weekly_and_stops_when_district_lost() {
         // on the moved city a robot jailed him for a shakedown the next day
         // (a Sentence breaks the hold). This test is the weekly payment, not
         // his record: he walks free.
+        // The pressure pass R4 (premise moved): with the 10,000 the owner
+        // bought a shut Noodle Bar (phase 6's market), incorporated, and the
+        // Bar changed hands: no shut business is for sale in this test.
         let left = TICKS_PER_DAY - w.tick % TICKS_PER_DAY;
         for _ in 0..=left {
+            w.underwater.shut.clear();
             w.run_ticks(1);
             if w.has::<citysim::Sentence>(leader) {
                 citysim::systems::law::release(&mut w, leader, false);

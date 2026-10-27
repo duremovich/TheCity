@@ -283,7 +283,9 @@ fn test_super_stop_serves_notice_and_takes_the_door_rent() {
     let j = jobs2(&w);
     assert_eq!(j.super_stops, 1);
     assert_eq!(j.notices, 1, "one notice for the tenant in arrears");
-    assert!(w.events.iter().any(|e| e.kind == EventKind::Notice && e.actors.as_slice() == [sup, tenant, stop]));
+    // The pressure pass R4: a round's notices are one line at its end.
+    service::notices_folded(&mut w, sup, Some(1));
+    assert!(w.events.iter().any(|e| e.kind == EventKind::Notice && e.actors.as_slice() == [sup, tenant]));
     assert_eq!(j.door_rent, 3, "the whole coins of rent paid at the door");
     // A full payment clears the arrears as the midnight one does; a short
     // one at the door adds no day of arrears (`settle_rent(midnight = false)`).

@@ -482,8 +482,8 @@ pub enum EventKind {
     /// sells or shuts); `[member, gang]` a member bailed out.
     Punished,
     /// The pressure pass phase 5a (`systems::consequence`): `[witness,
-    /// culprit]`, a witness fled, told his people, or kept it to sell; the
-    /// culprit saw who saw him.
+    /// culprit]`, a witness fled, told his people, or kept it to sell (the
+    /// culprit seeing who saw him is no line since R4: the edge carries it).
     WitnessReacted,
     /// Phase 5a: `[witness, culprit, place?]`, a blackmailer's demand in
     /// person (paid, refused and silenced, refused and reported).
@@ -500,7 +500,8 @@ pub enum EventKind {
     /// The pressure pass phase 5b (`systems::crew`): `[member, gang, place]`
     /// a duty kept, missed or chosen against the shift, a court held or
     /// failed, a rest day with the crew, a welcome back, the colours taken,
-    /// the talk inside; `[gang, buyer, members..]` a gang absorbed or folded.
+    /// the talk inside; `[gang, buyer, members..]` a gang absorbed or folded;
+    /// R4: `[actor, holder gang, home]` a claim blow seen by the holders.
     Crew,
     /// Pressure pass round 2, R1 (`systems::fares`): `[dodger, guard?]` a
     /// fare dodger caught at the El (fined, beaten), banned, a ban broken,

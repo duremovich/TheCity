@@ -380,10 +380,10 @@ pub fn witnessed(world: &mut World, w: EntityId, actor: EntityId, crime: Crime, 
         _ => ownership::jobs2_row(world).wr_report += 1,
     }
     // The culprit sees who saw him (the pair's edge sours; the Silence pass reads it).
+    // The pressure pass R4 (OPEN-219): no line of its own (781 a month at
+    // 20k, one a witness a blow); the soured edge and the counter carry it.
     if hash(world, P_LEARN, actor, world.tick ^ key(w)) < c.learn_p {
         crate::systems::social::adjust(world, actor, w, -0.1, 0.0);
-        let text = format!("{an} saw {wn} watching (the {label})");
-        world.push_event(EventKind::WitnessReacted, &[actor, w], text);
         ownership::jobs2_row(world).wr_learned += 1;
     }
 }

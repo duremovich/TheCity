@@ -1204,6 +1204,11 @@ pub struct World {
     /// serves the same notices), empty off.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub notices_today: BTreeSet<(EntityId, u64)>,
+    /// The pressure pass R4 (OPEN-219): the tenants a super has served
+    /// notice on in the round he is walking, by super; one `Notice` line a
+    /// round names them (`service::notices_folded`). Saved while it holds anything.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub notice_fold: BTreeMap<EntityId, Vec<EntityId>>,
     /// Lives at work phase 5 (§ 2.4, exec): each corp's last Meeting table
     /// (the attendees of its exec's last Meeting hour; the decision names
     /// them). Saved while it holds anything (deviation: the brief's unsaved
@@ -2026,6 +2031,7 @@ impl World {
             regulars: BTreeMap::new(),
             visits: BTreeMap::new(),
             notices_today: BTreeSet::new(),
+            notice_fold: BTreeMap::new(),
             meeting_tables: BTreeMap::new(),
             beats: BTreeMap::new(),
             bylines: BTreeMap::new(),
@@ -3886,6 +3892,15 @@ impl World {
         valence: f32,
         second_hand: bool,
     ) {
+        let entry = MemoryEntry { subject, salience, valence, second_hand, ..MemoryEntry::blank(kind, self.tick) };
+        self.remember_entry(id, entry);
+    }
+
+    /// `remember` with the entry built by the caller (the pressure pass R4:
+    /// a fight's loser who started it carries `object` = himself, so the
+    /// loss is no `Assaulted` deed on him; `memory::deed_of`).
+    pub fn remember_entry(&mut self, id: EntityId, entry: MemoryEntry) {
+        let kind = entry.kind;
         // Jobs & lives phase 5 (§ 5.2, D9): nothing is written under a chip.
         if !self.jobs2.chip.contracts.is_empty() && systems::dollhouse::under_chip(self, id) {
             return;
@@ -3922,7 +3937,7 @@ impl World {
             }
             cap = 8;
         }
-        let entry = MemoryEntry { subject, salience, valence, second_hand, ..MemoryEntry::blank(kind, tick) };
+        let second_hand = entry.second_hand;
         // M15 W15: a new deed memory may leave a grudge (never on a merge).
         let deed = systems::memory::deed_of(id, &entry);
         let Some(m) = self.comp_mut::<Memory>(id) else { return };

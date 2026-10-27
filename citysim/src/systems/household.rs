@@ -635,8 +635,15 @@ pub fn visits_due(world: &mut World) {
         {
             continue;
         }
-        let mut pick: Option<(EntityId, VisitWhy)> = None;
+        // The pressure pass R4 (OPEN-219): the week's Camp answer first. It
+        // comes once a week on a hashed day; a Hurt or Elder visit took the
+        // single slot and the week's answer was lost.
+        let mut pick: Option<(EntityId, VisitWhy)> =
+            camp_due.get(&id).map(|&(child, answer)| (child, VisitWhy::Camp(answer)));
         for (k, rel) in kin_of(world, id) {
+            if pick.is_some() {
+                break;
+            }
             if !world.has::<Brain>(k) || !crate::systems::law::living(world, k) || k == id {
                 continue;
             }
@@ -667,22 +674,41 @@ pub fn visits_due(world: &mut World) {
                 }
             }
         }
-        if pick.is_none() {
-            if let Some(&(child, answer)) = camp_due.get(&id) {
-                pick = Some((child, VisitWhy::Camp(answer)));
-            }
-        }
         if let Some((kin, why)) = pick {
             let cfg = &world.config.household;
             let span = u32::from(cfg.visit_hour_to.saturating_sub(cfg.visit_hour_from)).max(1);
             let u = hash(world, PURPOSE_VISIT_HOUR, key(id), day);
-            let hour = cfg.visit_hour_from + ((u * span as f32) as u8).min(span as u8 - 1);
+            let mut hour = cfg.visit_hour_from + ((u * span as f32) as u8).min(span as u8 - 1);
+            if matches!(why, VisitWhy::Camp(_)) {
+                hour = camp_hour(world, id, hour, day);
+            }
             due.push((id, PendingVisit { kin, why, hour }));
         }
     }
     for (id, v) in due {
         world.visits.insert(id, v);
     }
+}
+
+/// The pressure pass R4 (OPEN-219): a Camp answer's hour off the parent's
+/// shift. The hashed `hour` stands when he is free then; else his first free
+/// hour after it up to `[noise] camp_visit_last_hour`, else his first free
+/// hour from `[household] visit_hour_from`, else the hashed hour (a Vat Tech's
+/// shift covered the whole 10-20 window: no shift is cut for a visit, so the
+/// answer was never made).
+fn camp_hour(world: &World, id: EntityId, hour: u8, day: u64) -> u8 {
+    let Some(job) = world.comp::<crate::components::Job>(id) else { return hour };
+    let start = day * TICKS_PER_DAY;
+    let busy = |h: u8| {
+        let tod = u16::from(h) * TICKS_PER_HOUR as u16;
+        job.on_shift(tod) && crate::exec::routine::workday_of(world, id, job, job.shift_key_at(start + Tick::from(tod)))
+    };
+    if !busy(hour) {
+        return hour;
+    }
+    let last = world.config.noise.camp_visit_last_hour.min(23);
+    let from = world.config.household.visit_hour_from;
+    (hour..=last).chain(from..hour).find(|&h| !busy(h)).unwrap_or(hour)
 }
 
 fn pair(a: EntityId, b: EntityId) -> (EntityId, EntityId) {

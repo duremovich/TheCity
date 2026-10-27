@@ -376,6 +376,10 @@ pub struct Config {
     /// reported, arrested and jailed as any petty offender.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fares: Option<FaresCfg>,
+    /// The pressure pass round 2, R4 (OPEN-218, OPEN-219): `[noise]`, the
+    /// diary's folds and the Camp answer's hour. Absent: the defaults.
+    #[serde(default)]
+    pub noise: NoiseCfg,
     /// The island pass phase 1 (docs/ISLAND_PASS.md I1; OPEN-163 part):
     /// travel time in the job and bed picks (`systems/distance.rs`). `None`
     /// (not written into a save) with the key absent: the picks
@@ -438,6 +442,26 @@ pub struct Config {
     /// without it reads 0, the base.
     #[serde(default, skip_serializing_if = "PerfCfg::host_only")]
     pub perf: PerfCfg,
+}
+
+/// `[noise]` (the pressure pass round 2, R4; OPEN-218, OPEN-219).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NoiseCfg {
+    /// Names a contested claim's line gives of the holders who saw the blow
+    /// and now count the actor an enemy (`gang::contested`; the rest "and N more").
+    pub contest_names: u8,
+    /// Names the super's one notice line a round gives (`service::notices_folded`).
+    pub notice_names: u8,
+    /// The last hour a Camp answer moves to when the parent's shift covers
+    /// the `[household] visit_hour_from..visit_hour_to` hash (`household::visits_due`).
+    pub camp_visit_last_hour: u8,
+}
+
+impl Default for NoiseCfg {
+    fn default() -> Self {
+        NoiseCfg { contest_names: 3, notice_names: 3, camp_visit_last_hour: 22 }
+    }
 }
 
 /// `[perf]` (the perf pass phase 8, OPEN-184): the host's threads; phase
