@@ -6211,6 +6211,18 @@ pub struct BrainCfg {
     pub memory_half_life_days: f32,
     pub goal_hysteresis: f32,
     pub goal_cooldown_ticks: u64,
+    /// Round 3 S2 (OPEN-222): each cool of a goal in a row (no plan of it
+    /// finished between) lasts this many times the last one, from
+    /// `goal_cooldown_ticks`, at most `cool_backoff_max_ticks` (0: off, every
+    /// cool `goal_cooldown_ticks`); `GoalKind::backs_off` goals only.
+    #[serde(default)]
+    pub cool_backoff: f32,
+    #[serde(default)]
+    pub cool_backoff_max_ticks: u64,
+    /// The streak lapses when the goal has not cooled for this long after
+    /// its last cool ended.
+    #[serde(default)]
+    pub cool_backoff_reset_ticks: u64,
     pub think_interval_ticks: u64,
     pub plan_budget_per_tick: usize,
     pub plan_max_expansions: usize,

@@ -459,6 +459,16 @@ goal_hysteresis = 0.10
 # Raising this to stop Bar retries costs whole shifts: two failed wage trips at a full Hall cooled
 # Work for the morning. The planner now refuses a visibly full Bar instead.
 goal_cooldown_ticks = 120
+# Round 3 S2 (OPEN-222): a want that cannot plan backs off. Each cool of the same goal in a row (no
+# plan of it finished between) lasts cool_backoff times the last, from goal_cooldown_ticks, at most
+# cool_backoff_max_ticks (0 = off); the streak lapses after cool_backoff_reset_ticks with no cool.
+# V11: a buyer's Hunt on a target past the stakeout reach re-rolled every 2 h (57 Hunt goals before
+# one plan). Needs and duties (Eat, Sleep, Work, Earn, Flee, Fight, Treat, Rescue, Patrol, Arrest,
+# Squat, Pitch) keep the flat cool, and so does Visit (one goal for many errands, dropped when it cools;
+# `GoalKind::backs_off`).
+cool_backoff = 2.0
+cool_backoff_max_ticks = 720
+cool_backoff_reset_ticks = 1440
 think_interval_ticks = 30
 plan_budget_per_tick = 12
 plan_max_expansions = 200

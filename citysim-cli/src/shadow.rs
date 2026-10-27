@@ -1810,10 +1810,16 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
         // Cooldowns: a failed or unplannable goal cools.
         for (&g, &until) in &b.cooldowns {
             if until > now && t.cooldowns.get(&g) != Some(&until) {
+                // Round 3 S2 (OPEN-222): the back-off's streak, from the second.
+                let streak = b
+                    .cool_streak
+                    .get(&g)
+                    .filter(|&&(n, end)| n > 1 && end == until)
+                    .map_or_else(String::new, |&(n, _)| format!("; backed off, {n} in a row"));
                 t.log(
                     now,
                     "plan",
-                    format!("goal {g:?} cooled until {} (could not plan or plan failed twice)", clock(until)),
+                    format!("goal {g:?} cooled until {} (could not plan or plan failed twice{streak})", clock(until)),
                 );
             }
         }

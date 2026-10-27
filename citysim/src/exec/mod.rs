@@ -278,8 +278,12 @@ fn step_agent(world: &mut World, id: EntityId) {
         return;
     }
     let Some(step) = brain.current_step().cloned() else {
-        // Plan finished: a success resets the consecutive-failure count.
+        // Plan finished: a success resets the consecutive-failure count
+        // (and the goal's back-off, round 3 S2).
         if let Some(b) = world.comp_mut::<Brain>(id) {
+            if let Some(g) = b.plan_goal() {
+                b.cool_streak.remove(&g);
+            }
             b.clear_plan();
             b.last_plan_failure = None;
         }
@@ -441,6 +445,9 @@ fn step_agent(world: &mut World, id: EntityId) {
             }
             count_abort(world, &step, reason);
             let goal = world.comp::<Brain>(id).and_then(|b| b.plan_goal());
+            if world.leg_log.is_some() {
+                leglog::step_failed(world, id, goal, &format!("{:?}", step.action), &format!("{reason:?}"));
+            }
             // L2 (L30, instrumentation): a bed step's abort names the bed
             // kind and the failing check.
             let detail = abort_detail(world, id, &step);
@@ -541,6 +548,11 @@ fn rough_fallback(
 /// step. Pure reads, no draw.
 fn abort_detail(world: &World, id: EntityId, step: &crate::components::ActionInstance) -> String {
     use crate::systems::{life, street};
+    // Round 3 S2 (OPEN-222): a leader's step at the door names its check.
+    if matches!(step.action, ActionKind::Collect | ActionKind::Court) {
+        return crate::systems::leaders::door_why(world, id, step.action, step.target)
+            .map_or_else(String::new, |w| format!(" [{w}]"));
+    }
     if !matches!(step.action, ActionKind::Sleep | ActionKind::CheckIn) {
         return String::new();
     }
@@ -611,12 +623,34 @@ impl World {
     /// it cools straight away (the replan-once rule is for steps that fail
     /// in execution, where the world may have moved).
     pub fn cool_goal(&mut self, id: EntityId, goal: crate::components::GoalKind) {
-        let until = self.tick + self.config.brain.goal_cooldown_ticks;
+        let until = self.tick + self.cool_ticks(id, goal);
         if let Some(b) = self.comp_mut::<Brain>(id) {
             b.cooldowns.insert(goal, until);
             b.last_plan_failure = None;
         }
+        leglog::goal_plan(self, goal, 1);
         self.drop_cooled_visit(id, goal);
+    }
+
+    /// Round 3 S2 (OPEN-222): this cool's length, the streak counted: the
+    /// `n`th cool of a goal in a row lasts `goal_cooldown_ticks x
+    /// cool_backoff^(n-1)`, at most `cool_backoff_max_ticks`; a streak whose
+    /// last cool ended `cool_backoff_reset_ticks` ago starts again. Needs
+    /// and duties (`GoalKind::backs_off`) and `cool_backoff_max_ticks` 0 keep
+    /// the flat cool.
+    fn cool_ticks(&mut self, id: EntityId, goal: crate::components::GoalKind) -> Tick {
+        let c = &self.config.brain;
+        let (base, mult, max, reset) =
+            (c.goal_cooldown_ticks, c.cool_backoff, c.cool_backoff_max_ticks, c.cool_backoff_reset_ticks);
+        if max == 0 || !goal.backs_off() {
+            return base;
+        }
+        let tick = self.tick;
+        let Some(b) = self.comp_mut::<Brain>(id) else { return base };
+        let n = b.cool_streak.get(&goal).filter(|&&(_, end)| tick <= end + reset).map_or(0, |&(n, _)| n);
+        let ticks = ((base as f64) * f64::from(mult.max(1.0)).powi(i32::from(n))).min(max.max(base) as f64) as Tick;
+        b.cool_streak.insert(goal, (n.saturating_add(1), tick + ticks));
+        ticks
     }
 
     /// Shadow V5 bug 3: a Visit that cools (it could not plan, or its plan
@@ -635,7 +669,8 @@ impl World {
     /// consecutive-ness is the usable reading.
     pub fn goal_failed(&mut self, id: EntityId, goal: crate::components::GoalKind) {
         let tick = self.tick;
-        let cooldown = self.config.brain.goal_cooldown_ticks;
+        let second = self.comp::<Brain>(id).and_then(|b| b.last_plan_failure).is_some_and(|(g, _)| g == goal);
+        let cooldown = if second { self.cool_ticks(id, goal) } else { 0 };
         if let Some(b) = self.comp_mut::<Brain>(id) {
             match b.last_plan_failure {
                 Some((g, _)) if g == goal => {
@@ -648,6 +683,7 @@ impl World {
                 }
             }
         }
+        leglog::goal_plan(self, goal, 1);
         self.drop_cooled_visit(id, goal);
     }
 

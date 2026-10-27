@@ -581,6 +581,10 @@ fn recompute_leader_inner(world: &mut World, gang: EntityId, fallen: Option<Enti
     if old.is_some() && leader != old {
         push_shock(world, gang, Shock::LeaderChanged);
     }
+    // Round 3 S2 (OPEN-222): a Lead walk for a post lost turns back.
+    if crate::systems::leaders::on(world) {
+        crate::systems::leaders::posts_changed(world, gang);
+    }
 }
 
 /// A member is out of the Jail (served, player-released or broken out):

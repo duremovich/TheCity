@@ -1151,6 +1151,39 @@ pub enum GoalKind {
     Visit,
 }
 
+impl GoalKind {
+    /// Round 3 S2 (OPEN-222): a goal that cannot plan, or whose plan failed
+    /// twice, cools longer each time in a row (`[brain] cool_backoff`): a
+    /// want (a hunt, a court, a shop, a burial, a visit) waits for the
+    /// world to change. The body's needs and the day's duties do not: hunger,
+    /// sleep, the shift, the coin for a meal, danger, a wound, a downed
+    /// friend, the guard's beat and collar, the squatter's night move by
+    /// the hour, and a long cool would cost a meal, a night or a shift.
+    /// Nor does a Visit (below).
+    pub fn backs_off(self) -> bool {
+        !matches!(
+            self,
+            GoalKind::Eat
+                | GoalKind::Sleep
+                | GoalKind::Work
+                | GoalKind::Earn
+                | GoalKind::Flee
+                | GoalKind::Fight
+                | GoalKind::Idle
+                | GoalKind::Treat
+                | GoalKind::Rescue
+                | GoalKind::Patrol
+                | GoalKind::Arrest
+                | GoalKind::Squat
+                | GoalKind::Pitch
+                // One goal for many errands (a kin, a duty, a dun): a cooled
+                // Visit is dropped (`drop_cooled_visit`), and the next is
+                // another visit, not this one again.
+                | GoalKind::Visit
+        )
+    }
+}
+
 /// Jobs & lives phase 2 (§ 1, D3): a venue without a building (a vendor's
 /// stall, a rickshaw's rank, a tinker's mat), its owner's own
 /// (`Jobs2State::pitches`, one an owner, capped per district).
@@ -2373,6 +2406,11 @@ pub struct Brain {
     /// cools it; the first is simply replanned.
     #[serde(default)]
     pub last_plan_failure: Option<(GoalKind, Tick)>,
+    /// Round 3 S2 (OPEN-222): by goal, the cools in a row (no plan of it
+    /// finished between) and the tick the last one ends: each backs off
+    /// longer (`[brain] cool_backoff`).
+    #[serde(default)]
+    pub cool_streak: BTreeMap<GoalKind, (u8, Tick)>,
     /// Waiting in `World::plan_queue`.
     #[serde(default)]
     pub plan_queued: bool,
@@ -2550,6 +2588,7 @@ impl Default for Brain {
             last_dole_day: None,
             last_urgent_think_tick: 0,
             last_plan_failure: None,
+            cool_streak: BTreeMap::new(),
             plan_queued: false,
             cuffed_by: None,
             escorting: None,

@@ -190,6 +190,11 @@ fn court_due(world: &World, gang: EntityId, leader: EntityId) -> bool {
 
 /// `who` sets out for court now: his trip to the Hideout (at most
 /// `court_walk_max`) lands him there from `court_hour` and before its end.
+/// Round 3 S2 (OPEN-222): with `[distance.choice]` the trip is the body's
+/// own (`distance::trip`: the walk when he would not board) from where he
+/// stands, and a trip past `court_walk_max` is no court today; the capped
+/// El estimate set a leader 8 h off walking at 15:00 to a court that closed
+/// at 21:00 (20k: `Court` failing at the Hideout at 01:35-05:32).
 fn sets_out(world: &World, gang: EntityId, who: EntityId) -> bool {
     let Some(c) = cfg(world) else { return false };
     let (s, e) = court_window(c);
@@ -198,7 +203,20 @@ fn sets_out(world: &World, gang: EntityId, who: EntityId) -> bool {
         return false;
     }
     let Some(door) = world.hideout_of(gang).and_then(|h| door(world, h)) else { return false };
-    let walk = crate::systems::fixes::walk_estimate(world, who, door).min(c.court_walk_max);
+    let walk = if crate::systems::distance::choice(world).is_some() {
+        if world.comp::<Position>(who).and_then(|p| p.building) == world.hideout_of(gang) {
+            0
+        } else {
+            let from = crate::systems::life::origin(world, who).unwrap_or(door);
+            let trip = crate::systems::distance::trip(world, who, from, door);
+            if trip > c.court_walk_max {
+                return false;
+            }
+            trip
+        }
+    } else {
+        crate::systems::fixes::walk_estimate(world, who, door).min(c.court_walk_max)
+    };
     t + walk >= s && t + walk < e
 }
 
@@ -427,17 +445,77 @@ pub fn can_court(world: &World, id: EntityId, target: Option<EntityId>) -> bool 
     if !lieutenants(world, gang).contains(&t) {
         return false;
     }
+    // Round 3 S2 (OPEN-222): at his Home's door, met or not: an absent or
+    // sleeping lieutenant has the order left there (`court_start`); the
+    // leader's 2-4 h walk ended in `PreconditionLost` (20k: 32 of 57 Court
+    // failures) and was walked again after the replan.
+    let home = world.comp::<Household>(t).and_then(|h| h.home);
+    if home.is_some() && here.building == home {
+        return true;
+    }
     if presence::is_body(world, t) {
         let Some(there) = world.comp::<Position>(t) else { return false };
-        let beside = match (here.building, there.building) {
-            (Some(a), Some(b)) => a == b,
-            (None, None) => law::chebyshev(here.tile, there.tile) <= c.order_reach,
-            _ => false,
-        };
-        return beside && !presence::asleep(world, t);
+        return beside(c, here, there);
+    }
+    false
+}
+
+/// `here` and `there` share a building, or stand on the street within
+/// `order_reach`.
+fn beside(c: &LeadersCfg, here: &Position, there: &Position) -> bool {
+    match (here.building, there.building) {
+        (Some(a), Some(b)) => a == b,
+        (None, None) => law::chebyshev(here.tile, there.tile) <= c.order_reach,
+        _ => false,
+    }
+}
+
+/// The lieutenant `t` takes the order from `id` in person: beside him and
+/// awake, or an off-screen one met at his Home on the presence draw.
+fn met_lieutenant(world: &World, id: EntityId, gang: EntityId, t: EntityId) -> bool {
+    let (Some(c), Some(here)) = (cfg(world), world.comp::<Position>(id)) else { return false };
+    if presence::is_body(world, t) {
+        return world.comp::<Position>(t).is_some_and(|there| beside(c, here, there)) && !presence::asleep(world, t);
     }
     let home = world.comp::<Household>(t).and_then(|h| h.home);
     home.is_some() && here.building == home && presence::met_at_home(world, t, home.unwrap_or(t), u64::from(gang.index))
+}
+
+/// Round 3 S2 (OPEN-222): why a leader's `Collect` or `Court` at the door
+/// could not start (the abort line's detail); `None` for a pimp's Collect.
+pub fn door_why(world: &World, id: EntityId, kind: ActionKind, target: Option<EntityId>) -> Option<&'static str> {
+    let gang = world.gang_of(id)?;
+    let g = world.comp::<Gang>(gang)?;
+    let inside = world.comp::<Position>(id).and_then(|p| p.building);
+    let hideout = world.hideout_of(gang);
+    if kind == ActionKind::Collect {
+        if world.jobs2.pitches.contains_key(&target?) {
+            return None;
+        }
+        return Some(if g.leader != Some(id) {
+            "not the leader"
+        } else if inside != target {
+            "not inside"
+        } else {
+            "other"
+        });
+    }
+    let c = cfg(world)?;
+    Some(if target == hideout {
+        if inside != target {
+            "not inside"
+        } else if !court_open(world, c) {
+            "court over"
+        } else if g.leader != Some(id) && !lieutenants(world, gang).contains(&id) {
+            "no post"
+        } else {
+            "other"
+        }
+    } else if !target.is_some_and(|t| lieutenants(world, gang).contains(&t)) {
+        "no longer a lieutenant"
+    } else {
+        "not beside him"
+    })
 }
 
 /// `Court` starts at a lieutenant: the waiting order is given there.
@@ -447,7 +525,9 @@ pub fn court_start(world: &mut World, id: EntityId, target: Option<EntityId>) {
         return;
     }
     if let Some(lt) = target {
-        give(world, gang, Some(id), Some(lt), Given::Walked);
+        // Round 3 S2: out or asleep, the order is left at his door.
+        let how = if met_lieutenant(world, id, gang, lt) { Given::Walked } else { Given::Door };
+        give(world, gang, Some(id), Some(lt), how);
     }
 }
 
@@ -466,6 +546,8 @@ enum Given {
     Court,
     Walked,
     Word,
+    /// Round 3 S2: left at the lieutenant's door (out, or asleep).
+    Door,
 }
 
 /// Put the waiting order in force, given by `leader` to `lt` (`how`).
@@ -477,6 +559,7 @@ fn give(world: &mut World, gang: EntityId, leader: Option<EntityId>, lt: Option<
         Given::Court => format!("given to {lname} at court"),
         Given::Walked => format!("given to {lname} where he was"),
         Given::Word => "sent by word".to_string(),
+        Given::Door => format!("left at {lname}'s door"),
     };
     crate::systems::faction::apply_order(world, gang, p, Some(&note));
     {
@@ -484,7 +567,7 @@ fn give(world: &mut World, gang: EntityId, leader: Option<EntityId>, lt: Option<
         match how {
             Given::Court => row.orders_court += 1,
             Given::Walked => row.orders_walked += 1,
-            Given::Word => row.orders_word += 1,
+            Given::Word | Given::Door => row.orders_word += 1,
         }
     }
     if how == Given::Court {
@@ -494,9 +577,57 @@ fn give(world: &mut World, gang: EntityId, leader: Option<EntityId>, lt: Option<
         }
     }
     if let (Some(l), Some(t)) = (leader, lt) {
-        let at = if how == Given::Court { "at court" } else { "in person" };
-        let text = format!("{} gave {} the order {at}: {order:?}", world.name_of(l), world.name_of(t));
+        let text = if how == Given::Door {
+            let why = if presence::is_body(world, t) && presence::asleep(world, t) { "asleep" } else { "out" };
+            format!(
+                "{} left the order at {}'s door ({} was {why}): {order:?}",
+                world.name_of(l),
+                world.name_of(t),
+                world.name_of(t)
+            )
+        } else {
+            let at = if how == Given::Court { "at court" } else { "in person" };
+            format!("{} gave {} the order {at}: {order:?}", world.name_of(l), world.name_of(t))
+        };
         world.push_event(EventKind::OrderGiven, &[l, t, gang], text);
+    }
+}
+
+/// Round 3 S2 (OPEN-222): the gang's posts changed (`gang::recompute_leader`):
+/// a member walking a Lead plan for a post he no longer holds (the leader's
+/// round, Collect or court; a lieutenant's walk to court) turns back where
+/// he is, with a Crew line; he walked 8-11 h to a one-minute
+/// `PreconditionLost` at the door (V11 `gang_leader_96308 d21 08:43`, 20k:
+/// 18 of 18 `Collect` failures by a member who no longer led).
+pub fn posts_changed(world: &mut World, gang: EntityId) {
+    let Some(g) = world.comp::<Gang>(gang) else { return };
+    let (members, leader) = (g.members.clone(), g.leader);
+    let hideout = world.hideout_of(gang);
+    let lts = lieutenants(world, gang);
+    for m in members {
+        if Some(m) == leader {
+            continue;
+        }
+        let Some(plan) = world.comp::<Brain>(m).and_then(|b| b.plan.as_ref()).filter(|p| p.goal == GoalKind::Lead)
+        else {
+            continue;
+        };
+        // A lieutenant's walk to court (`attend_plan`) holds while he is one.
+        let attend = plan.steps.iter().all(|s| s.action != ActionKind::Collect)
+            && plan.steps.last().is_some_and(|s| s.action == ActionKind::Court && s.target == hideout);
+        if attend && lts.contains(&m) {
+            continue;
+        }
+        let place =
+            plan.steps.last().and_then(|s| s.target).map_or_else(|| "the Hideout".to_string(), |b| world.name_of(b));
+        world.abort_plan(m);
+        let now = leader.map_or_else(|| "nobody".to_string(), |l| world.name_of(l));
+        let text = format!(
+            "{} turned back on the way to {place}: {now} leads {} now",
+            world.name_of(m),
+            world.owner_label(Some(gang))
+        );
+        world.push_event(EventKind::Crew, &[m, gang], text);
     }
 }
 
