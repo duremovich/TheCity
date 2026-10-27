@@ -1584,10 +1584,13 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
                 crate::systems::streetwork::courier_stop(world, id, b);
             }
         } else if first {
-            for b in crate::systems::trades::round_for(world, id, key) {
+            let round = crate::systems::trades::round_for(world, id, key);
+            let stops = round.len();
+            for b in round {
                 crate::systems::service::super_stop(world, id, b);
                 crate::systems::streetwork::courier_stop(world, id, b);
             }
+            crate::systems::service::notices_folded(world, id, Some(stops));
         }
     }
     // An hour of co-work drifts each pair of co-workers as `social`'s

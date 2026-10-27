@@ -1265,9 +1265,10 @@ fn intimidate(world: &mut World, actor: EntityId, home: EntityId, occupants: &[E
 
 /// The claim rules (spec › Contested Homes): own blows count up, a rival's
 /// first blow takes the claim at one, the third blow holds the Home. Every
-/// blow on a Home in another gang's territory makes that gang's members the
-/// actor's enemies; the flip itself logs `TerritoryFlipped` and shocks the
-/// loser. Returns a suffix for the Extortion event text when the Home is held.
+/// blow on a Home in another gang's territory makes that gang's members who
+/// see it (`contested`) the actor's enemies; the flip itself logs
+/// `TerritoryFlipped` and shocks the loser. Returns a suffix for the
+/// Extortion event text when the Home is held.
 fn claim(world: &mut World, actor: EntityId, home: EntityId) -> Option<String> {
     let gang = world.gang_of(actor)?;
     let gname = world.comp::<Gang>(gang)?.name.clone();
@@ -1277,10 +1278,7 @@ fn claim(world: &mut World, actor: EntityId, home: EntityId) -> Option<String> {
         .filter(|&g| g != gang && world.comp::<Gang>(g).is_some_and(|gg| gg.territory.binary_search(&home).is_ok()))
         .collect();
     for &h in &holders {
-        let members = world.comp::<Gang>(h).map(|g| g.members.clone()).unwrap_or_default();
-        for m in members {
-            social::make_enemy(world, m, actor, -0.7);
-        }
+        contested(world, actor, gang, h, home);
     }
     let count = {
         let b = world.comp_mut::<Building>(home)?;
@@ -1316,6 +1314,55 @@ fn claim(world: &mut World, actor: EntityId, home: EntityId) -> Option<String> {
         }
     }
     Some(suffix.unwrap_or_else(|| format!(" (now {gname} territory)")))
+}
+
+/// Pressure pass R4 (OPEN-218): a blow on Block `home` held by gang `h`
+/// makes enemies of the holders who see it (a body in the Block, or within
+/// the crime sight of the actor, `[crime] sight_day_crime` /
+/// `sight_night_crime`), not of the whole gang: V10's 100k squat blow flipped
+/// 51 of a 71-year-old's friends to Enemy in one minute with no line, and the
+/// Fight goal then read every one of them near as a target (seven assaults in
+/// two hours). The edges made are told (`Crew`, `[actor, holder gang, home]`).
+fn contested(world: &mut World, actor: EntityId, gang: EntityId, h: EntityId, home: EntityId) {
+    let Some(at) = world.comp::<Position>(actor).map(|p| p.tile) else { return };
+    let cfg = &world.config.crime;
+    let r = if world.is_dark() { cfg.sight_night_crime } else { cfg.sight_day_crime };
+    let members = world.comp::<Gang>(h).map(|g| g.members.clone()).unwrap_or_default();
+    let mut made: Vec<EntityId> = Vec::new();
+    for m in members {
+        if m == actor {
+            continue;
+        }
+        let sees =
+            world.comp::<Position>(m).is_some_and(|p| p.building == Some(home) || law::chebyshev(p.tile, at) <= r);
+        if !sees {
+            continue;
+        }
+        let was = world.edge(m, actor).is_some_and(|e| e.kind == crate::components::RelKind::Enemy);
+        social::make_enemy(world, m, actor, -0.7);
+        if !was {
+            made.push(m);
+        }
+    }
+    if made.is_empty() {
+        return;
+    }
+    let names = world.config.noise.contest_names;
+    let shown: Vec<String> = made.iter().take(usize::from(names)).map(|&m| world.name_of(m)).collect();
+    let more = made.len().saturating_sub(shown.len());
+    let tail = if more > 0 { format!(" and {more} more") } else { String::new() };
+    let (an, gn, hn) = (
+        world.name_of(actor),
+        world.comp::<Gang>(gang).map_or_else(String::new, |g| g.name.clone()),
+        world.comp::<Gang>(h).map_or_else(String::new, |g| g.name.clone()),
+    );
+    let text = format!(
+        "{an} struck at {hn}'s hold on Block#{} for {gn}: {} of {hn} saw it and count {an} an enemy now ({}{tail})",
+        home.index,
+        made.len(),
+        shown.join(", ")
+    );
+    world.push_event(EventKind::Crew, &[actor, h, home], text);
 }
 
 /// SplitLoot at the Hideout: half the day's haul into the gang treasury.

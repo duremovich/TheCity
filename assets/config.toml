@@ -5016,3 +5016,10 @@ bail_debt = true                   # the bail the gang paid is the member's debt
 welcome_after_hours = 1            # a released member walks to the Hideout this many hours after (past 21:00 met at once)
 crew_p = 0.6                       # rest days: a free member with no shift today goes to the crew on this, at crew_hour
 crew_hour = 19                     # (the Hideout under a fighting order, the gang's own venue under Expand, none LieLow)
+
+# The pressure pass round 2, R4 (OPEN-218, OPEN-219): the diary's folds and the Camp answer's hour.
+[noise]
+contest_names = 3                  # a blow on a rival's hold names this many of the holders who saw it (the rest "and N more")
+notice_names = 3                   # the super's one notice line a round names this many tenants (the count is the round's)
+camp_visit_last_hour = 22          # a Camp answer whose hashed hour falls on the parent's shift moves to his first free hour
+                                   # up to this ([household] visit_hour_from..visit_hour_to; past it, the hashed hour stands)

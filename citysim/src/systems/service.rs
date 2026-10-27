@@ -312,6 +312,12 @@ pub fn hourly(world: &mut World) {
     staff_hour(world);
     if world.tick_of_day() == 0 {
         world.notices_today.clear();
+        // The pressure pass R4: a round cut short (the shift's end, a
+        // demotion) tells its notices at midnight.
+        let open: Vec<EntityId> = world.notice_fold.keys().copied().collect();
+        for s in open {
+            notices_folded(world, s, None);
+        }
     }
     if civic_on(world) {
         civic_hour(world);
@@ -490,6 +496,9 @@ pub fn super_stop(world: &mut World, id: EntityId, block: EntityId) {
     // draw); the rest wait for the next round (`presence_missed`).
     let presence = crate::systems::presence::on(world);
     let key = u64::from(id.index);
+    // The pressure pass R4 (OPEN-219): the stop's notices go into the
+    // round's one line (`notices_folded`), not a line a tenant.
+    world.notice_fold.entry(id).or_default();
     for t in tenants {
         if presence && !crate::systems::presence::met_at_home(world, t, block, key) {
             crate::systems::presence::missed(world);
@@ -497,6 +506,33 @@ pub fn super_stop(world: &mut World, id: EntityId, block: EntityId) {
         }
         serve(world, id, t, block, ServeKind::Tenant, 0);
     }
+}
+
+/// The pressure pass R4 (OPEN-219): the round's one `Notice` line, at its
+/// end (`trades::round_plan`, `lod`'s Statistical round; `stops` the
+/// round's Blocks) or at midnight for a round cut short (`None`): the count
+/// and the first `[noise] notice_names` tenants; every tenant noticed is an
+/// actor (his diary keeps the line). Nothing when the round noticed nobody.
+pub fn notices_folded(world: &mut World, id: EntityId, stops: Option<usize>) {
+    let Some(tenants) = world.notice_fold.remove(&id) else { return };
+    if tenants.is_empty() {
+        return;
+    }
+    let names = usize::from(world.config.noise.notice_names);
+    let shown: Vec<String> = tenants.iter().take(names).map(|&t| world.name_of(t)).collect();
+    let more = tenants.len().saturating_sub(shown.len());
+    let tail = if more > 0 { format!(" and {more} more") } else { String::new() };
+    let round = match stops {
+        Some(n) => format!("the round of {n} Blocks"),
+        None => "a round cut short".to_string(),
+    };
+    let n = tenants.len();
+    let who = world.name_of(id);
+    let s = if n == 1 { "" } else { "s" };
+    let text = format!("{who} served notice on {n} tenant{s} in arrears on {round} ({}{tail})", shown.join(", "));
+    let mut actors = vec![id];
+    actors.extend(tenants);
+    world.push_event(EventKind::Notice, &actors, text);
 }
 
 /// § 2.2 (jailer): a breakout past the jailers on duty: a `Served` memory
@@ -665,8 +701,14 @@ fn encounter_row(
         _ => {}
     }
     // 2. Memories, bodies only (`remember` drops a Statistical agent's and a chip's).
-    world.remember(server, MemoryKind::Served, Some(served), salience, row.valence, false);
-    world.remember(served, MemoryKind::Served, Some(server), salience, row.valence, false);
+    // The pressure pass R4 (OPEN-219): a super's call at a door with nothing
+    // in it (the row's zero valence, no notice: `tenant` wrote the notice's
+    // own) is no memory either side (V10: ~40 "called on" lines a round).
+    let blank_call = kind == ServeKind::Tenant && row.valence == 0.0;
+    if !blank_call {
+        world.remember(server, MemoryKind::Served, Some(served), salience, row.valence, false);
+        world.remember(served, MemoryKind::Served, Some(server), salience, row.valence, false);
+    }
     // 3. The regulars ledger and the edge.
     let regular = note_regular(world, server, served, &row);
     // 4. The skill.
@@ -676,6 +718,13 @@ fn encounter_row(
         outcome = Outcome::Regular;
     }
     if row.event_on.contains(&outcome.cfg()) {
+        // The pressure pass R4: a notice on the round is folded into its line.
+        if outcome == Outcome::Notice {
+            if let Some(f) = world.notice_fold.get_mut(&server) {
+                f.push(served);
+                return;
+            }
+        }
         let (who, whom) = (world.name_of(server), world.name_of(served));
         let at = match place {
             Some(p) => world.name_of(p),
