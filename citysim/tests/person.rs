@@ -1019,6 +1019,12 @@ fn probe_far_worker_with_one_rent_moves_near_work() {
     // The pressure pass R2: the v1 pace (2 ticks a tile), whose far workers
     // this probe's city has (at 1 a tile they are near, or married).
     cfg.exec.move_ticks_full = 2;
+    // Pressure pass round 3, S1 (OPEN-221): the hire's hard cap
+    // (`[distance.choice] hire_max_ticks`) hires no Farmer past 240 ticks, so
+    // at the v1 pace the seeded city has no far Farmer to move; pinned off.
+    if let Some(d) = cfg.distance.as_mut() {
+        d.choice = None;
+    }
     // Jobs & lives phase 8's gate: the pin to the pre-milestone city is gone
     // (the industries on, seed 42 has its single far Farmer again).
     let mut w = World::new(42, cfg);
@@ -1686,6 +1692,11 @@ fn probe_trade_respects_rent_and_the_evictor() {
     // The pressure pass R2: the v1 pace (2 ticks a tile), whose far workers
     // this probe's city has (at 1 a tile they are near, or married).
     cfg.exec.move_ticks_full = 2;
+    // Pressure pass round 3, S1 (OPEN-221): no far Farmer under the hire's
+    // hard cap at the v1 pace (as `probe_far_worker_with_one_rent_moves_near_work`).
+    if let Some(d) = cfg.distance.as_mut() {
+        d.choice = None;
+    }
     // Jobs & lives phase 8's gate: the pin to the pre-milestone city is gone
     // (the industries on, seed 42 has its single far Farmer again).
     let mut w = World::new(42, cfg);

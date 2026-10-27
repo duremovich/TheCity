@@ -4496,6 +4496,34 @@ patrol_ticks = 60                  # R2 (OPEN-215): a guard's patrol loop: its M
                                    # district's Homes nearest him), its Bar and the Hall within this of the Market (20k
                                    # seed 42: the Bar nearest a Mid-Levels Market stood 117 tiles off, every loop 2 h legs)
 
+# Pressure pass round 3, S1 (docs/PRESSURE_PASS.md; OPEN-221; systems/distance.rs `trip`, read by stims, demography,
+# shift, household, crew, gang and faction): distance in the choice. A goal that picks a place picks it by reach, and
+# a trip past its cap is not set out on: the nearer option, else another goal, and the diary says so (a Crew or a
+# Visited line). Every reach here and in [distance.reach] and [crew] (duty_reach_ticks, tryout_reach_ticks) reads the
+# body's own trip: the El's estimate only for a body that would board it (the fare, or the nerve to jump it, and no
+# ban), else the walk. Shadow V11 (100k): legs of 200-800 tiles cut short (a 72-year-old's 801 tiles to deal, a
+# leader's 630-min walk to his own muster, a 767-tile commute, a Camp answer's 1,150), and JoinGang legs of 435 tiles
+# under a 180-tick try-out reach that assumed the El for a body with no fare. The muster reads [crew]
+# duty_reach_ticks, the raid's rival Hideout [crew] raid_target_reach_ticks, the try-out [crew] tryout_reach_ticks.
+# Absent, the base rule. Placeholders.
+[distance.choice]
+deal_ticks = 120                   # a dealer's site today: the gang's spot (its venue, else its corner) in each district
+                                   # it holds, nearest his Home door (by the Hideout when he must pick up first); none
+                                   # within: no Deal today (V11: one gang spot per gang, walked from across the island)
+gang_work_ticks = 120              # a member's order work (the Home to shake down or claim, the derelict to squat, picked
+                                   # near the Hideout and him): past this from where he stands he does not set out (the
+                                   # first S1 run at 20k: dealers off the spot walked 300-580 min to such a Home)
+hire_max_ticks = 240               # the hire: a candidate past this from the workplace door is not hired even with
+                                   # nobody nearer (the vacancy waits; [distance] job_cap_ticks stays the soft cap): 4 h
+                                   # a way is 8 h a day on the road
+site_ticks = 120                   # a Builder's or day labourer's far site day ([island_trades] site_day): an open site
+                                   # past this from the Yard's door is not walked to, the shift is worked at the Yard
+                                   # (V11: a day labourer's 263-min walk to a Parts Fab in another district)
+visit_ticks = 240                  # a Visit (the weekly Camp answer, a hurt kin, an elder parent, an errand: papers, a
+                                   # collection, a dun; not a gang duty, [crew] duty_reach_ticks): the place past this
+                                   # from where the visitor sets out is not walked to (V11: a Camp answer 1,150 tiles
+                                   # off; 20k: a 610-min walk to a Fixer; a weekly trip earns more than an errand's 120)
+
 # The island pass phase 3a (docs/ISLAND_PASS.md I6; OPEN-163; systems/company.rs): seeded company housing. At world
 # build, after the staffing and the housing pre-roll, each workplace of these kinds whose far posts outnumber
 # the free beds near it gets company blocks (a Home on the nearest vacant Lot, else on a plot of open ground, owned by

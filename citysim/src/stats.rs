@@ -1238,6 +1238,17 @@ pub struct Jobs2Cols {
     pub care_covered: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub care_uncovered: u32,
+    // Pressure pass round 3, S1 (`[distance.choice]`, OPEN-221): the trips
+    // not set out on past their reach (a muster sat out, a dealer off the
+    // spot today, a kin visit too far, a hire not made).
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub choice_muster_out: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub choice_deal_off: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub choice_visit_far: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub choice_hire_far: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -1709,6 +1720,10 @@ impl Jobs2Cols {
                 "care_woken",
                 "care_covered",
                 "care_uncovered",
+                "choice_muster_out",
+                "choice_deal_off",
+                "choice_visit_far",
+                "choice_hire_far",
             ]
             .into_iter()
             .map(str::to_string),
@@ -2174,6 +2189,10 @@ impl Jobs2Cols {
             self.care_woken.to_string(),
             self.care_covered.to_string(),
             self.care_uncovered.to_string(),
+            self.choice_muster_out.to_string(),
+            self.choice_deal_off.to_string(),
+            self.choice_visit_far.to_string(),
+            self.choice_hire_far.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

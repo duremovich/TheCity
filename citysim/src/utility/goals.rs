@@ -866,8 +866,10 @@ pub fn considerations_with(
             let n = needs?;
             let p = pers?;
             let in_shift = world.comp::<Job>(id).is_some_and(|j| j.on_shift(tod));
+            // Pressure pass round 3, S1 (OPEN-221): and the muster within his reach.
             let called = crate::systems::raid::raid_pending(world, id)
-                && (rioter || p.loyalty >= world.config.gangs.freelance_loyalty);
+                && (rioter || p.loyalty >= world.config.gangs.freelance_loyalty)
+                && crate::systems::raid::muster_in_reach(world, id);
             // Pressure pass round 2, R5 (OPEN-214): the posted muster is a duty.
             if called {
                 flat += crate::systems::crew::muster_flat(world, id);

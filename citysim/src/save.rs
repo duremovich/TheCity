@@ -386,7 +386,9 @@ use crate::world::World;
 /// 78 (pressure pass round 3, S6, school-age children and the child-safety
 /// rule): `[ages]` S6 keys, `[service] p_camp_beating` and `[service.tune]
 /// camp_beating_*` gone, `Jobs2Cols.harm_blocked` in, `camp_beatings` out.
-pub const SAVE_VERSION: u8 = 78;
+/// 79 (pressure pass round 3, S1, distance in the choice): `[distance.choice]`
+/// (written only when set) and the `Jobs2Cols` `choice_*` columns (serde defaults).
+pub const SAVE_VERSION: u8 = 79;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

@@ -301,6 +301,10 @@ pub fn far_site(world: &World, post: EntityId) -> Option<EntityId> {
         return None;
     }
     let door = world.comp::<Building>(post)?.door;
+    // Pressure pass round 3, S1 (OPEN-221): a site past `[distance.choice]
+    // site_ticks` of the Yard is no site day (the shift is worked at the
+    // Yard; V11: a day labourer's 263-min walk to a Parts Fab two districts off).
+    let cap = crate::systems::distance::choice(world).map_or(Tick::MAX, |c| c.site_ticks);
     crate::systems::industry::sites_of(world, post)
         .into_iter()
         .filter_map(|s| {
@@ -308,6 +312,7 @@ pub fn far_site(world: &World, post: EntityId) -> Option<EntityId> {
             Some((crate::systems::distance::travel(world, door, x.door), s))
         })
         .min()
+        .filter(|&(t, _)| t <= cap)
         .map(|(_, s)| s)
 }
 

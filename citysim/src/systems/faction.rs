@@ -144,6 +144,19 @@ pub fn target_cover(world: &World, gang: EntityId, order: Order) -> f32 {
     target.map_or(0.0, |t| cover_of(world, gang, t))
 }
 
+/// S1 (OPEN-221): the rival Hideout's door within the march window of
+/// ours (`[crew] raid_target_reach_ticks`, `distance::travel`); true off or
+/// with a door unknown.
+fn rival_in_reach(world: &World, own: Option<TilePos>, rival: Option<TilePos>) -> bool {
+    let Some(c) = crate::systems::crew::cfg(world).filter(|_| crate::systems::distance::choice(world).is_some()) else {
+        return true;
+    };
+    match (own, rival) {
+        (Some(a), Some(b)) => crate::systems::distance::travel(world, a, b) <= c.raid_target_reach_ticks,
+        _ => true,
+    }
+}
+
 /// M12 D38: the cover over a target building for `gang`: 1 when it is the
 /// Jail under Garrison, or its district's stance is `Crackdown(gang)` or
 /// `Cordon`; else `((cov − 0.5) ÷ 1.5).clamp(0, 0.95)`, with a district
@@ -557,7 +570,11 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
         courage: p.courage,
         pride: p.pride,
         raid_ready: g.last_raid_tick.is_none_or(|t| now.saturating_sub(t) >= cooldown) && !g.is_sacked(now),
-        rival_exists: rg.is_some(),
+        // Pressure pass round 3, S1 (OPEN-221): with `[distance.choice]` and
+        // `[crew]` on, a rival whose Hideout lies past `raid_target_reach_ticks`
+        // of ours is no raid or retaliation target (R5 bounded the corp
+        // prize so; the rival's Hideout was marched to from across the island).
+        rival_exists: rg.is_some() && rival_in_reach(world, own_door, rival_door),
         sacked: g.is_sacked(now),
         jailed,
         boss_jailed: g.boss.is_some_and(|b| world.has::<Sentence>(b)),

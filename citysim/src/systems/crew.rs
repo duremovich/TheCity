@@ -292,7 +292,28 @@ fn in_reach(world: &World, c: &CrewCfg, m: EntityId, place: EntityId) -> bool {
     let from = crate::systems::contracts::home_door(world, m)
         .or_else(|| world.comp::<Position>(m).map(|p| p.tile))
         .unwrap_or(to);
-    crate::systems::distance::travel(world, from, to) <= c.duty_reach_ticks
+    // S1 (OPEN-221): the member's own trip (the walk without the fare).
+    crate::systems::distance::trip_ahead(world, m, from, to) <= c.duty_reach_ticks
+}
+
+/// Pressure pass round 3, S1 (OPEN-221): today's muster within `m`'s
+/// reach (`raid::muster_trip` from his Home door, `duty_reach_ticks`), else
+/// he is not posted to it and says so (a Crew line): V11's leader walked
+/// 330 and 630 min to his own muster, both cut, then "missed". True off.
+fn muster_reach(world: &mut World, c: &CrewCfg, m: EntityId, gang: EntityId) -> bool {
+    let Some((t, at)) = crate::systems::raid::muster_trip(world, m, true) else { return true };
+    if t <= c.duty_reach_ticks {
+        return true;
+    }
+    let text = format!(
+        "{} sat out {}'s raid: the muster at {at} is {} from home",
+        world.name_of(m),
+        gang_name(world, gang),
+        crate::systems::distance::hours(t)
+    );
+    world.push_event(EventKind::Crew, &[m, gang], text);
+    ownership::jobs2_row(world).choice_muster_out += 1;
+    false
 }
 
 /// The order's watch place for `m`: the nearest to his Home within reach of
@@ -366,7 +387,7 @@ fn free_for_duty(world: &World, m: EntityId) -> bool {
 fn set_out(world: &World, m: EntityId, place: EntityId, hour: u8) -> u8 {
     let Some(to) = world.comp::<Building>(place).map(|b| b.door) else { return hour };
     let Some(from) = crate::systems::contracts::home_door(world, m) else { return hour };
-    let lead = crate::systems::distance::travel(world, from, to).div_ceil(TICKS_PER_HOUR);
+    let lead = crate::systems::distance::trip_ahead(world, m, from, to).div_ceil(TICKS_PER_HOUR);
     hour.saturating_sub(u8::try_from(lead).unwrap_or(hour))
 }
 
@@ -692,8 +713,15 @@ fn post_gang(world: &mut World, c: &CrewCfg, gang: EntityId) {
     let raid_today = order.is_raid() && raid_at.is_some_and(|t| t < window_end);
     if raid_today {
         let hour = raid_at.map_or(c.guard_hour, |t| ((t % TICKS_PER_DAY) / TICKS_PER_HOUR) as u8);
+        // Pressure pass round 3, S1 (OPEN-221): the leader too says so when
+        // he leaves the march to his crew.
+        if let Some(l) = leader.filter(|&l| free_for_duty(world, l)) {
+            muster_reach(world, c, l, gang);
+        }
         for m in std::mem::take(&mut free) {
-            post(world, c, m, gang, DutyKind::Muster, hideout, hour);
+            if muster_reach(world, c, m, gang) {
+                post(world, c, m, gang, DutyKind::Muster, hideout, hour);
+            }
         }
     } else {
         let kind = match order {
@@ -751,6 +779,9 @@ pub fn raid_ordered(world: &mut World, gang: EntityId) {
             continue;
         }
         if world.crew.duties.get(&m).is_some_and(|d| d.day == today) {
+            continue;
+        }
+        if !muster_reach(world, &c, m, gang) {
             continue;
         }
         post(world, &c, m, gang, DutyKind::Muster, hideout, hour);

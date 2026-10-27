@@ -203,7 +203,11 @@ pub fn is_dealer(world: &World, member: EntityId) -> bool {
 /// D38: the Bar whose door is nearest the centroid of the gang's most-held
 /// district (ties the lower id; no Homes held: its Hideout's district).
 pub fn deal_bar(world: &World, gang: EntityId) -> Option<EntityId> {
-    let d = deal_district(world, gang)?;
+    deal_bar_in(world, gang, deal_district(world, gang)?)
+}
+
+/// [`deal_bar`] for district `d` (S1: a dealer's nearer held district).
+fn deal_bar_in(world: &World, gang: EntityId, d: DistrictId) -> Option<EntityId> {
     // L2 L20: with leisure on, the gang's open front (or a Club there) first.
     if let Some(b) = crate::systems::leisure::deal_venue(world, gang, d) {
         return Some(b);
@@ -239,7 +243,11 @@ pub fn corner_on(world: &World) -> bool {
 /// (`World::spots`, no Hideout door) of its deal district nearest the
 /// district's centroid (ties the lower tile). One a gang.
 pub fn deal_corner(world: &World, gang: EntityId) -> Option<TilePos> {
-    let d = deal_district(world, gang)?;
+    deal_corner_in(world, deal_district(world, gang)?)
+}
+
+/// [`deal_corner`] for district `d`.
+fn deal_corner_in(world: &World, d: DistrictId) -> Option<TilePos> {
     let centroid = world.district(d).centroid;
     world
         .spots
@@ -253,7 +261,7 @@ pub fn deal_corner(world: &World, gang: EntityId) -> Option<TilePos> {
 
 /// Where a gang deals today: its venue (`leisure::deal_venue`) or, with
 /// none and the corner on, its corner; else the nearest Bar (`deal_bar`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DealSite {
     Venue(EntityId),
     Corner(TilePos),
@@ -261,8 +269,12 @@ pub enum DealSite {
 
 /// The gang's `DealSite` (the corner replaces "the nearest Bar" fallback).
 pub fn deal_site(world: &World, gang: EntityId) -> Option<DealSite> {
+    deal_site_in(world, gang, deal_district(world, gang)?)
+}
+
+/// [`deal_site`] in district `d` (S1: each held district has its spot).
+fn deal_site_in(world: &World, gang: EntityId, d: DistrictId) -> Option<DealSite> {
     if corner_on(world) {
-        let d = deal_district(world, gang)?;
         // The island pass phase 8 (`[island_trades] corner_arms`; OPEN-168):
         // a gang with an armoury surplus deals from a Bar, where the arms
         // dealer's counter is (`weapons::bar_arms_dealer`): at the corner no
@@ -270,12 +282,78 @@ pub fn deal_site(world: &World, gang: EntityId) -> Option<DealSite> {
         let arms = world.config.island_trades.as_ref().is_some_and(|c| c.corner_arms)
             && crate::systems::weapons::has_surplus(world, gang);
         if !arms && crate::systems::leisure::deal_venue(world, gang, d).is_none() {
-            if let Some(t) = deal_corner(world, gang) {
+            if let Some(t) = deal_corner_in(world, d) {
                 return Some(DealSite::Corner(t));
             }
         }
     }
-    deal_bar(world, gang).map(DealSite::Venue)
+    deal_bar_in(world, gang, d).map(DealSite::Venue)
+}
+
+/// Pressure pass round 3, S1 (OPEN-221): where `agent` deals for `gang`
+/// today with `[distance.choice]` on: the gang's spot ([`deal_site_in`]) in
+/// each district it holds and its deal district, the nearest by his trip
+/// from where he sets out now (by the Hideout when he holds no dose and
+/// picks up first), within `deal_ticks`; none within: he does not deal now
+/// (his GangWork falls to the order's other work). Off: the gang's one
+/// site. V11: a 72-year-old walked 801 tiles to the gang's one corner.
+fn member_site(world: &World, agent: EntityId, gang: EntityId) -> Option<DealSite> {
+    let Some(c) = crate::systems::distance::choice(world) else { return deal_site(world, gang) };
+    let from = crate::systems::life::origin(world, agent)?;
+    member_site_trip(world, agent, gang, from, c.deal_ticks, true)
+        .and_then(|(site, t)| (t <= c.deal_ticks).then_some(site))
+}
+
+/// [`member_site`]'s pick from `from` and its trip, `deal_ticks` aside: the
+/// nearest site within `cap`, else the nearest (`distance::daily`'s line
+/// reads it from the Home door).
+pub fn member_site_trip(
+    world: &World,
+    agent: EntityId,
+    gang: EntityId,
+    from: TilePos,
+    cap: u64,
+    now: bool,
+) -> Option<(DealSite, u64)> {
+    let rides = std::cell::OnceCell::new();
+    let when = now.then_some(world.tick);
+    let leg = |a: TilePos, b: TilePos| {
+        crate::systems::distance::trip_by(
+            world,
+            a,
+            b,
+            || *rides.get_or_init(|| crate::systems::distance::rider(world, agent)),
+            when,
+        )
+    };
+    let carrying = world.comp::<Inventory>(agent).is_some_and(|i| i.stims > 0);
+    let via =
+        if carrying { None } else { world.hideout_of(gang).and_then(|h| world.comp::<Building>(h)).map(|b| b.door) };
+    let trip = |to: TilePos| match via {
+        Some(h) => leg(from, h) + leg(h, to),
+        None => leg(from, to),
+    };
+    let mut ds: Vec<DistrictId> =
+        crate::systems::gang::held_districts(world, gang).into_iter().map(|(d, _)| d).collect();
+    ds.extend(deal_district(world, gang));
+    ds.sort_unstable();
+    ds.dedup();
+    let mut cands: Vec<(u64, i64, (DistrictId, DealSite))> = Vec::with_capacity(ds.len());
+    for d in ds {
+        let Some(site) = deal_site_in(world, gang, d) else { continue };
+        let to = match site {
+            DealSite::Venue(b) => match world.comp::<Building>(b) {
+                Some(bd) => bd.door,
+                None => continue,
+            },
+            DealSite::Corner(t) => t,
+        };
+        let t = trip(to);
+        cands.push((t, t as i64, (d, site)));
+    }
+    let times: Vec<(DistrictId, u64)> = cands.iter().map(|&(t, _, (d, _))| (d, t)).collect();
+    let (d, site) = crate::systems::distance::pick(cands, cap)?;
+    times.into_iter().find(|&(x, _)| x == d).map(|(_, t)| (site, t))
 }
 
 /// D38, for `gang::gang_work_target`: the deal Bar when this member deals
@@ -320,12 +398,17 @@ pub fn site_today(world: &World, agent: EntityId) -> Option<DealSite> {
         return None;
     }
     let gang = world.gang_of(agent)?;
-    let stock = world.hideout_of(gang).map_or(0, |h| world.stock(h, Good::Stims));
-    let carrying = world.comp::<Inventory>(agent).is_some_and(|i| i.stims > 0);
-    if stock < world.config.stims.deal_batch && !carrying {
+    if !stocked(world, agent, gang) {
         return None;
     }
-    deal_site(world, gang)
+    member_site(world, agent, gang)
+}
+
+/// `agent` has doses to deal for `gang`: a batch in the Hideout's stock or
+/// doses on him.
+pub fn stocked(world: &World, agent: EntityId, gang: EntityId) -> bool {
+    let stock = world.hideout_of(gang).map_or(0, |h| world.stock(h, Good::Stims));
+    stock >= world.config.stims.deal_batch || world.comp::<Inventory>(agent).is_some_and(|i| i.stims > 0)
 }
 
 /// GangWork's scripted plan for a corner dealer's body (`plan::plan_for`):

@@ -63,6 +63,27 @@
 //! sweeper's beat is dealt within `beat_ticks` of its post
 //! (`districts::sanitation`). Tier-blind (a Statistical body does not
 //! score these goals or walk a beat). No random draw.
+//!
+//! Pressure pass round 3, S1 (`[distance.choice]`, OPEN-221): distance in
+//! the goals' place picks. Every body-specific reach reads [`trip`], the
+//! body's own trip (the El only when he would board it and it runs, else the
+//! walk; [`trip_ahead`] for a trip planned at midnight). The picks: a
+//! dealer's spot today, the nearest of his gang's held districts' spots
+//! (`stims::site_today`); a member's order work, its Home or derelict
+//! (`gang::gang_work_target`), the pimp's round pitch (`vice::round_pitch`),
+//! the preacher's spot (`leisure::preach_plan`); the muster (`crew::post_gang`,
+//! `raid::muster_in_reach` in the Raid goal) on `[crew] duty_reach_ticks`;
+//! the rival Hideout a raid or retaliation marches to on `[crew]
+//! raid_target_reach_ticks` (`faction`); the hire's hard cap
+//! (`demography::job_search_round`, the corner's dawn pick); the Builder's
+//! far site day (`shift::far_site`); a kin visit and the week's Camp answer
+//! (`household`); the gang a recruit tries out for (`gang::recruit_gang`, on
+//! `[crew] tryout_reach_ticks`). Past the reach the body does not set out:
+//! the nearer option, else another goal, and a Crew or Visited line says so
+//! for the muster, the dealer's day ([`daily`]) and the Camp answer.
+//! Statistical mirror: the hire, the site, the Camp answer and the raid's
+//! rival are tier-blind; the dealer's spot, the muster and the order work
+//! are a body's walk (a Statistical body deals and raids by its table).
 
 use crate::components::{Building, Household, Job, Position, TilePos};
 use crate::entity::EntityId;
@@ -104,11 +125,127 @@ pub fn out_of_reach(world: &World, id: EntityId, b: EntityId, cap: impl Fn(&crat
     if world.comp::<Position>(id).and_then(|p| p.building) == Some(b) {
         return false;
     }
-    let (Some(from), Some(door)) = (crate::systems::life::origin(world, id), world.comp::<Building>(b).map(|b| b.door))
-    else {
-        return false;
-    };
-    travel(world, from, door) > cap(r)
+    trip_to(world, id, b).is_some_and(|t| t > cap(r))
+}
+
+/// Pressure pass round 3, S1's `[distance.choice]` (OPEN-221), `None` off.
+pub fn choice(world: &World) -> Option<&crate::config::ChoiceCfg> {
+    world.config.distance.as_ref().and_then(|d| d.choice.as_ref())
+}
+
+/// S1 (OPEN-221): the trip `id` would make from `from` to `to` setting out
+/// now, in ticks: [`travel`] when he would board the El (`transit::
+/// pays_or_dodges`: the fare in hand, or the nerve to jump the gate, and no
+/// ban) and it runs now and at the estimate's end (`transit::in_service`),
+/// else the walk (Manhattan at `[exec] move_ticks_full`). [`travel`] exactly
+/// off. The night's danger test is not read. 20k: JoinGang legs of 400+
+/// tiles under the 180-tick try-out reach, the reach read the El for a body
+/// with no fare or after the last train (`noroute`, 00:00-04:00), and the
+/// walk was the leg.
+pub fn trip(world: &World, id: EntityId, from: TilePos, to: TilePos) -> Tick {
+    trip_when(world, id, from, to, Some(world.tick))
+}
+
+/// S1: [`trip`] for a trip planned ahead (a duty posted at midnight, the
+/// week's Camp answer): the El's hours not read.
+pub fn trip_ahead(world: &World, id: EntityId, from: TilePos, to: TilePos) -> Tick {
+    trip_when(world, id, from, to, None)
+}
+
+fn trip_when(world: &World, id: EntityId, from: TilePos, to: TilePos, now: Option<Tick>) -> Tick {
+    trip_by(world, from, to, || rider(world, id), now)
+}
+
+/// S1: `id` would board the El now (`transit::pays_or_dodges`), for a
+/// caller reading many trips of one body ([`trip_by`]).
+pub fn rider(world: &World, id: EntityId) -> bool {
+    crate::systems::transit::pays_or_dodges(world, id).is_some()
+}
+
+/// S1: [`trip`] with the rider test supplied (read only when the El would
+/// win), `now` `None` for a trip planned ahead.
+pub fn trip_by(world: &World, from: TilePos, to: TilePos, rides: impl FnOnce() -> bool, now: Option<Tick>) -> Tick {
+    let t = travel(world, from, to);
+    let walk = Tick::from(from.manhattan(to)) * world.config.exec.move_ticks_full;
+    if choice(world).is_none() || t >= walk {
+        return t;
+    }
+    let runs = now.is_none_or(|n| {
+        crate::systems::transit::in_service(world, n) && crate::systems::transit::in_service(world, n + t)
+    });
+    if runs && rides() {
+        t
+    } else {
+        walk
+    }
+}
+
+/// S1: [`trip`] from where `id` sets out now (`life::origin`) to building
+/// `b`'s door (0 inside it); `None` with no origin or door.
+pub fn trip_to(world: &World, id: EntityId, b: EntityId) -> Option<Tick> {
+    if world.comp::<Position>(id).and_then(|p| p.building) == Some(b) {
+        return Some(0);
+    }
+    let from = crate::systems::life::origin(world, id)?;
+    let door = world.comp::<Building>(b)?.door;
+    Some(trip(world, id, from, door))
+}
+
+/// S1 (OPEN-221): a duration for the diary ("2 h 05").
+pub fn hours(t: Tick) -> String {
+    use crate::time::TICKS_PER_HOUR;
+    format!("{} h {:02}", t / TICKS_PER_HOUR, t % TICKS_PER_HOUR)
+}
+
+/// S1 (OPEN-221), the LivingEarly midnight after the crew's duties: a gang
+/// dealer with a body whose nearest spot today lies past `[distance.choice]
+/// deal_ticks` of his Home is off it today (`stims::site_today` reads the
+/// same pick), and his diary says why: one Crew line a day. Nothing off.
+pub fn daily(world: &mut World) {
+    let Some(cap) = choice(world).map(|c| c.deal_ticks) else { return };
+    if !crate::systems::stims::on(world) {
+        return;
+    }
+    let mut lines: Vec<(EntityId, EntityId, String)> = Vec::new();
+    for &gang in world.gang_list() {
+        let Some(g) = world.comp::<crate::components::Gang>(gang) else { continue };
+        for &m in &g.members {
+            let bodied =
+                world.comp::<crate::components::Brain>(m).is_some_and(|b| b.lod != crate::components::Lod::Statistical);
+            if !bodied
+                || world.has::<crate::components::Sentence>(m)
+                || !crate::systems::stims::is_dealer(world, m)
+                || crate::systems::gang::following_order(world, m).is_none()
+                || !crate::systems::stims::stocked(world, m, gang)
+            {
+                continue;
+            }
+            let Some(from) = set_out(world, m) else { continue };
+            let Some((site, t)) = crate::systems::stims::member_site_trip(world, m, gang, from, cap, false) else {
+                continue;
+            };
+            if t <= cap {
+                continue;
+            }
+            let at = match site {
+                crate::systems::stims::DealSite::Venue(b) => world.name_of(b),
+                crate::systems::stims::DealSite::Corner(c) => {
+                    format!("the corner in {}", world.district_name(world.district_of(c)))
+                }
+            };
+            let text = format!(
+                "{} stays off {}'s trade today: the nearest spot, {at}, is {} from home",
+                world.name_of(m),
+                g.name,
+                hours(t)
+            );
+            lines.push((m, gang, text));
+        }
+    }
+    for (m, gang, text) in lines {
+        world.push_event(crate::events::EventKind::Crew, &[m, gang], text);
+        crate::systems::ownership::jobs2_row(world).choice_deal_off += 1;
+    }
 }
 
 /// The job's cap, `None` off.
