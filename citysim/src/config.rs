@@ -490,6 +490,35 @@ pub struct VerbsCfg {
     pub trade_reserve_days: u8,
     /// ... one deal a gang every this many days.
     pub trade_days: u8,
+    /// Round 3 S5 (OPEN-217): a cab driver's body takes this share of each
+    /// fare he drives, in hand when the rider pays (`Flow::CabFare` from the
+    /// Garage's owner, who took the fare); above 0 the cut is his pay and
+    /// the shift's wage is not paid (`customers::fare_scale`: the wage
+    /// scaled by the fares paid 0c and wrote "Paid" on a fare-less shift).
+    pub cab_fare_cut: f32,
+    /// ... standing by with no fare, he waits at a rank: the door of a
+    /// building of `cab_rank_kinds` within this many tiles of his Garage
+    /// (a hash of the driver and the wait), not a Rest inside the Garage ...
+    pub cab_rank_tiles: u32,
+    /// ... this many ticks at one rank, then he cruises to the next.
+    pub cab_rank_ticks: u64,
+    pub cab_rank_kinds: Vec<crate::components::BuildingKind>,
+    /// A client served by a tipped worker at a venue a bouncer keeps (the
+    /// customer ledger: a dancer's StripClub or Club) turns rough on this x
+    /// (1 - lawfulness) (a hash of the pair and the night): the bouncer on
+    /// the door throws him out and bars him from the venue, as the madam's
+    /// rough booking (`[trade_verbs] rough_p`) ...
+    pub door_rough_p: f32,
+    /// ... for this many days; the barred is turned away at the door
+    /// ("barred"), the bouncer's refusal.
+    pub door_ban_days: u64,
+    /// A Hit, Beat or Abduct taken on a corp's exec reaches him through his
+    /// security (`missions::exec_guards`) at once; on anyone else it reaches
+    /// him on this (a hash of the contract): the street's tip ...
+    pub hit_heard_p: f32,
+    /// ... his safety falls by this (a `Threatened` memory, the event in
+    /// his diary and his guards').
+    pub hit_heard_safety: f32,
 }
 
 impl Default for VerbsCfg {
@@ -502,6 +531,19 @@ impl Default for VerbsCfg {
             trade_lot: 4,
             trade_reserve_days: 1,
             trade_days: 3,
+            cab_fare_cut: 0.5,
+            cab_rank_tiles: 60,
+            cab_rank_ticks: 120,
+            cab_rank_kinds: vec![
+                crate::components::BuildingKind::Home,
+                crate::components::BuildingKind::Market,
+                crate::components::BuildingKind::Bar,
+                crate::components::BuildingKind::Hotel,
+            ],
+            door_rough_p: 0.03,
+            door_ban_days: 14,
+            hit_heard_p: 0.5,
+            hit_heard_safety: 0.3,
         }
     }
 }

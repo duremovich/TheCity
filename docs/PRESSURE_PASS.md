@@ -960,6 +960,69 @@ Dylan's call).
   the Yard's one open post. Shadow tool: the van's jump allowance reads the road column. No test. `SAVE_VERSION`
   unchanged (no saved state moved).
 
+### S5, the trades still thin (`OPEN-217`; `[verbs]` S5 keys, `streetwork.rs`, `customers.rs`, `news.rs`, `contracts.rs`)
+
+Numbers: 20k `isle_m_k2` seed 42 x 30 (`--scaled --ambient-flats 50`), one run each, main `7bbf9b8` -> this branch;
+100k (`isle_m_k2_100k`, `--scaled`) seed 42 x 8 for the reporter. No number is claimed; these are prints.
+
+- **The cabbie's "Paid" with no coin (the bug).** The fare went to the Garage's owner (`pay_ride`), and a body
+  driver's wage was R6a's `fare_scale`: the day's wage x fares / `cab_fares_full`, so a fare-less shift owed 0c,
+  `collect_wage_scaled` paid 0c and wrote `Paid` anyway (`cabbie_82150`: Paid daily, 0c all week); a shift cut while
+  he drove a fare (`d24`) never reached `end_shift` and the one fare paid nothing. Now `collect_wage_scaled` writes
+  `Paid` only when something was owed; with `[verbs] cab_fare_cut` (0.5) the driver takes his cut of each fare in hand
+  at the fare (`streetwork::driver_cut`, `Flow::CabFare` from the Garage's owner: "+3c (CabFare) ... from corp
+  Zetatech 8"), the cut is his pay (`fare_scale` gives `Some(0.0)`), and the shift's end tells the shift ("drove 2
+  fares for Garage#4791 this shift, 4c his cut" 308 times, "stood by all shift ... no fare, no pay" 213;
+  `Jobs2State.fare_cuts`). **The rank:** standing by he no longer rests inside the Garage: `fare_plan` sends him to a
+  rank (`rank_tile`: a door of `cab_rank_kinds` within `cab_rank_tiles` 60 of the Garage, hashed on the driver and the
+  `cab_rank_ticks` 120 window), a `Rest` on the street there (`exec::start_step` admits it: `at_rank`), driven at the
+  cab's speed (`fare_leg`), and when the window turns he cruises to the next (`rank_wait_over`). Cab rides a body
+  drove 853 -> 805 (not moved: the riders are not near the ranks; deviation: the rank is not demand-led). Cuts paid
+  3,565c.
+- **The hired day labourer works the site.** `day_labourer_75212 d27` was hired on the rest day (the post's shift is a
+  workday's, `workday_of`), so he held a post with no shift and wandered; on `d25` he scavenged 06:00-08:00 until his
+  shift. Now `dawn_pick` holds no shape-up on the rest day, and a one-day post (`Job.until`: the dawn's hire, a sick
+  worker's cover) is `shift_pending` from the hire: he walks to the yard and waits there. Posts offered 2,377 ->
+  2,086, filled 438 -> 374 (the rest days). The site's distance is S1's.
+- **The bouncer.** The door already refused at 20k (960 in 30 days, nearly all "drunk", most at a few Clubs); V11's
+  100k bouncers kept quiet doors, and the ejection path (an Assault inside) fired once in 30 days. Now (the customer
+  ledger, `customers::rough_at_door` from `service::serve`): a client a tipped worker (a dancer) serves at a door a
+  bouncer keeps (not the Brothel: the madam's) turns rough on `[verbs] door_rough_p` (0.03) x (1 - lawfulness): the
+  worker hurt, an Assault, the bouncer throws him out and bars him `door_ban_days` (14) (`vice::bar`), grudges both
+  ways; a barred client is turned away at that door every time (`customers::cause` "barred", past `door_p`). The
+  bouncer's night is one line at his shift's end (`vice::door_told`, bodies only): "Clemence Quarry kept the door of
+  Gambling Den#4757 tonight: 9 let in, 4 turned away (drunk 4)" (`ViceState.door_nights`; every Visit arrival counts,
+  `service::arrive`). Refusals 960 -> 1,299 (barred 147), ejections 1 -> 81, door lines 507.
+- **The reporter at 100k.** Diagnosed with a debug print at 100k (removed): two causes. (1) `run_stories` ran the
+  Feeds in id order, each its beat and then its ranked picks, so the lower Feeds' ranked picks of an interviewed deed
+  filled `outlets_per_deed` (2) before the walking reporter's Feed came up (every 100k beat deed past day 2 dropped
+  on "outlets 2"). Now two passes: every Feed's beat stories, then every Feed's picks and plants. (2) The beat had no
+  stops from day 4: `[gossip] pool_cap` is 64 entries a district at any population, and at 100k the first-hand
+  entries (hops 0, the beat's only source) fell from 6,068 to 475 in five days as hearsay displaced them. Now the
+  crime desk (`World.beat_desk`): `gossip::post_deed_at` keeps each first telling of a deed with a `deed_sev` for a
+  day (pruned at midnight), and `beat_stops` reads it beside the pools. And a Feed's reporters split the scenes
+  (`ensure_beat` rotates the k-th reporter's stops by k: all three walked the same nearest scene). Beat stories at
+  20k 101 -> 420; 100k x 8: before, 16 runnable over days 0-6 and no stop from day 4; after, 17-19 a day on days 2-6.
+  Deviation: `pool_cap` is not scaled per capita (that would move all gossip).
+- **A hit on a CEO is heard of** (`contracts::heard_of`, from `accept`): a Hit, Beat or Abduct taken on an agent
+  reaches a corp's exec through his security (`missions::exec_guards`) at once, anyone else on `hit_heard_p` (0.5, a
+  hash of the record); the target's safety falls `hit_heard_safety` (0.3), a `Threatened` memory of the taker, and
+  the event sits in his and his guards' diaries ("Jasper Ostrowski, Wren Hawthorne, Cato Carrow, Imani Ambrose's
+  security, heard The Unplugged took the beat on Imani Ambrose and warned the boss"; "... got word on the street:
+  ..."). 34 in 30 days. Deviation: nothing more follows (no guard bought, no hotel moved); the client is not named.
+- **Reads wrong** (the next pass): the cab rank cruises but the riders stay far (one driver 0 fares in six shifts,
+  the other 1 a shift); a cabbie on a gang's Guard at a Street Market for 481 min is still dispatched a fare
+  (`standing_by` reads the shift, not where he is: `cabbie_11530 d22`); the warned CEO's safety is back to 0.94 four
+  hours later and his night is unchanged; an exec is warned again each day a lapsed beat is re-taken; a Club's door
+  counted 0 let in on the night its bouncer turned a drunk away; the hired hand rests 3 h at the yard before an
+  08:00 shift.
+- FINDING (printed, not tuned): Assault 1,030 -> 1,128, Murder 54 -> 71 (the rough clients' Assaults, the bouncers'
+  fights). No test (doctrine 2). `SAVE_VERSION` 77 (`Jobs2State.fare_cuts`, `ViceState.door_nights`,
+  `World.beat_desk`, the `[verbs]` S5 keys, the `Jobs2Cols` `cab_cuts`, `door_rough`, `door_barred`, `hit_heard`). Premises the moved city broke, re-pinned with the reason in place:
+  `street::test_full_commuters_cab_is_timed_and_a_driver_drives_it` (the Garage stand-by: `cab_rank_tiles` 0),
+  `scavs::test_drag_holds_gangwork` (the member a broke greedy one: coins and wealth set),
+  `wounded::test_abandon_gang_leaves_its_own` (the mate placed beside the downed after the fall).
+
 ### R6b, the trades' verbs II (`OPEN-217`, `OPEN-207`; `[verbs]`, `[lod] contract_quota`)
 
 Numbers: 20k `isle_m_k2` seed 42 x 30 (`--scaled --ambient-flats 50`), one run each, base `9755275` -> this build (the

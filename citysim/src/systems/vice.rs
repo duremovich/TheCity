@@ -98,6 +98,66 @@ pub struct ViceState {
     /// (the house, the day the bar lifts).
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub barred: BTreeMap<u64, (EntityId, u64)>,
+    /// Round 3 S5 (OPEN-217): a bouncer (`key`) -> his night at the door
+    /// (the customer ledger), told at his shift's end (`door_told`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub door_nights: BTreeMap<u64, DoorNight>,
+}
+
+/// Round 3 S5 (OPEN-217): a bouncer's night at his door: the visits served
+/// inside, the turned away (and the commonest cause), the thrown out.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DoorNight {
+    pub venue: EntityId,
+    pub let_in: u32,
+    pub refused: u32,
+    pub causes: Vec<(String, u32)>,
+    pub thrown: u32,
+}
+
+impl Default for DoorNight {
+    fn default() -> Self {
+        DoorNight { venue: EntityId::NONE, let_in: 0, refused: 0, causes: Vec::new(), thrown: 0 }
+    }
+}
+
+/// Round 3 S5: note on `bouncer`'s door night at `venue` (`f` edits it).
+pub fn door_note(world: &mut World, bouncer: EntityId, venue: EntityId, f: impl FnOnce(&mut DoorNight)) {
+    let n = world.jobs2.vice.door_nights.entry(key(bouncer)).or_default();
+    if n.venue != venue {
+        *n = DoorNight { venue, ..DoorNight::default() };
+    }
+    f(n);
+}
+
+/// Round 3 S5 (`service::shift_end`): the bouncer's night told in one line
+/// ("kept the door of X tonight: N let in, M turned away (drunk 3), K thrown
+/// out"), the tally cleared. Bouncers worked 12 nights with no door line in
+/// their diaries (V11): a quiet door is a door too.
+pub fn door_told(world: &mut World, bouncer: EntityId) {
+    let Some(n) = world.jobs2.vice.door_nights.remove(&key(bouncer)) else { return };
+    // A body's diary; the off-screen door's night is cleared untold.
+    let body =
+        world.comp::<crate::components::Brain>(bouncer).is_some_and(|b| b.lod != crate::components::Lod::Statistical);
+    if !body || n.let_in + n.refused + n.thrown == 0 {
+        return;
+    }
+    let mut causes = n.causes.clone();
+    causes.sort_by(|x, y| y.1.cmp(&x.1).then(x.0.cmp(&y.0)));
+    let why: Vec<String> = causes.iter().take(2).map(|(c, k)| format!("{c} {k}")).collect();
+    let refused = if n.refused == 0 {
+        "nobody turned away".to_string()
+    } else {
+        format!("{} turned away ({})", n.refused, why.join(", "))
+    };
+    let thrown = if n.thrown > 0 { format!(", {} thrown out", n.thrown) } else { String::new() };
+    let text = format!(
+        "{} kept the door of {} tonight: {} let in, {refused}{thrown}",
+        world.name_of(bouncer),
+        world.name_of(n.venue),
+        n.let_in
+    );
+    world.push_event(EventKind::Served, &[bouncer, n.venue], text);
 }
 
 /// R6a (OPEN-217): a madam's night of bookings at her house.
@@ -313,6 +373,12 @@ pub fn booked(world: &mut World, worker: EntityId, client: EntityId, house: Enti
         world.name_of(madam)
     );
     world.push_event(EventKind::Served, &[madam, client, worker, house], text);
+}
+
+/// Round 3 S5: bar `id` from the house `b` until the day `until` (the
+/// bouncer's rough client, `customers::rough_at_door`).
+pub fn bar(world: &mut World, id: EntityId, b: EntityId, until: u64) {
+    world.jobs2.vice.barred.insert(key(id), (b, until));
 }
 
 /// R6a: is `id` barred from the house `b` today (a rough booking's)?

@@ -278,6 +278,11 @@ pub fn arrive(world: &mut World, served: EntityId, place: EntityId, kind: ServeK
     if !on(world) || served == EntityId::NONE || !world.has::<Building>(place) {
         return;
     }
+    // Round 3 S5 (OPEN-217): the door's ledger (every arrival, served or
+    // waiting).
+    if kind == ServeKind::Visit {
+        crate::systems::customers::door_visit(world, served, place);
+    }
     let hour = world.tick / TICKS_PER_HOUR;
     // OPEN-111: the hash is the pair's, not the hour's, so a patron gets
     // the same server whenever that server is on duty with room (a regular
@@ -638,6 +643,8 @@ pub fn serve(world: &mut World, server: EntityId, served: EntityId, place: Entit
     // The pressure pass R6a (OPEN-217): a Brothel visit is the madam's booking.
     if kind == ServeKind::Visit {
         crate::systems::vice::booked(world, server, served, place, coins);
+        // Round 3 S5 (OPEN-217): a rough client at a kept door, the bouncer's.
+        crate::systems::customers::rough_at_door(world, server, served, place);
     }
 }
 
@@ -856,6 +863,19 @@ pub fn refused(world: &mut World, id: EntityId, b: EntityId) {
     // The pressure pass phase 2 (OPEN-176): the cause named, and the scene
     // a drunk or a brawler makes of it.
     let why = crate::systems::customers::cause(world, id, b);
+    if why == Some("barred") {
+        ownership::jobs2_row(world).door_barred += 1;
+    }
+    if world.config.verbs.is_some() {
+        let c = why.unwrap_or("no cause").to_string();
+        crate::systems::vice::door_note(world, bouncer, b, |n| {
+            n.refused += 1;
+            match n.causes.iter_mut().find(|(k, _)| *k == c) {
+                Some((_, k)) => *k += 1,
+                None => n.causes.push((c, 1)),
+            }
+        });
+    }
     if row.event_on.contains(&ServeOutcome::Refused) {
         let because = why.map(|w| format!(" ({w})")).unwrap_or_default();
         let text = format!(
@@ -896,6 +916,9 @@ pub fn maybe_eject(world: &mut World, attacker: EntityId) -> bool {
     world.abort_plan(attacker);
     world.leave_building(attacker);
     ownership::jobs2_row(world).ejections += 1;
+    if world.config.verbs.is_some() {
+        crate::systems::vice::door_note(world, bouncer, b, |n| n.thrown += 1);
+    }
     let salience = world.config.service.served_salience;
     let (vb, va) = (world.config.service.tune.eject_bouncer, world.config.service.tune.ejected);
     world.remember(bouncer, MemoryKind::Served, Some(attacker), salience, vb, false);
@@ -925,6 +948,8 @@ pub fn shift_end(world: &mut World, id: EntityId) {
     }
     // R6a: the madam's night of bookings, one line.
     crate::systems::vice::bookings_told(world, id);
+    // Round 3 S5: the bouncer's night at the door, one line.
+    crate::systems::vice::door_told(world, id);
     // Lives at work phase 4 (§ 2.3): the courier's undelivered parcels back
     // to the Yard (the loader's lifts are `lift_hour`'s).
     if street_on(world) {

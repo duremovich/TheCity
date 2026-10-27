@@ -865,7 +865,11 @@ pub fn collect_wage_scaled(world: &mut World, agent: EntityId, scale: f32) -> i6
         j.days_unpaid = days_left;
     }
     if remainder == 0 {
-        world.remember(agent, MemoryKind::Paid, None, 0.3, 0.3, false);
+        // Round 3 S5 (OPEN-217): nothing owed is not "Paid" (a fare-less
+        // cab shift scaled to 0 wrote the memory with no coin, every day).
+        if due > 0 {
+            world.remember(agent, MemoryKind::Paid, None, 0.3, 0.3, false);
+        }
         crate::systems::social::repay_debts(world, agent);
     } else {
         // Short: no second visit today.

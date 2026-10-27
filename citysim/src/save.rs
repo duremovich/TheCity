@@ -388,7 +388,11 @@ use crate::world::World;
 /// camp_beating_*` gone, `Jobs2Cols.harm_blocked` in, `camp_beatings` out.
 /// 79 (pressure pass round 3, S1, distance in the choice): `[distance.choice]`
 /// (written only when set) and the `Jobs2Cols` `choice_*` columns (serde defaults).
-pub const SAVE_VERSION: u8 = 79;
+/// 80 (pressure pass round 3, S5, the trades still thin): `Jobs2State.fare_cuts`
+/// (written while it holds anything), the `[verbs]` S5 keys and the `Jobs2Cols`
+/// `cab_cuts`, `door_rough`, `door_barred`, `hit_heard` columns, `ViceState.door_nights`
+/// and `World.beat_desk` (written while they hold anything; serde defaults).
+pub const SAVE_VERSION: u8 = 80;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

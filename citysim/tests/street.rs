@@ -868,6 +868,11 @@ mod lives_street {
             c.jobs2.p_cab = 1.0;
             c.service.cab_wait_ticks = 100_000;
             c.legs = None;
+            // Round 3 S5: the stand-by at the Garage is this probe's premise
+            // (the rank, `[verbs] cab_rank_tiles`, sends him to a street door).
+            if let Some(v) = c.verbs.as_mut() {
+                v.cab_rank_tiles = 0;
+            }
         });
         let min = w.config.jobs2.cab_min_tiles;
         let (garage, driver) = garage_and_driver(&w);

@@ -112,7 +112,12 @@ pub fn shift_pending(world: &World, id: EntityId, job: &Job) -> bool {
     }
     let at_work = job.employer.is_some() && world.comp::<Position>(id).is_some_and(|p| p.building == job.employer);
     let until = u64::from(job.ticks_until_shift(tod));
-    (at_work && until <= WAIT_AT_WORK_MAX) || must_leave_for_work(world, id)
+    // Round 3 S5 (OPEN-217): a one-day post (the dawn's hire, a sick
+    // worker's cover) goes to the post as hired and waits there for the
+    // shift: a day labourer picked at 06:00 scavenged the street until his
+    // 08:00 shift (`day_labourer_75212 d25`).
+    let day_post = job.until.is_some_and(|u| world.tick < u) && world.config.verbs.is_some();
+    ((at_work || day_post) && until <= WAIT_AT_WORK_MAX) || must_leave_for_work(world, id)
 }
 
 /// The Work goal's gate: a shift to work, or wages to collect for one.

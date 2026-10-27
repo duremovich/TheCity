@@ -154,6 +154,10 @@ pub fn post_deed_at(
         district: d,
         press: 0,
     };
+    // Round 3 S5 (OPEN-217): the crime desk keeps the first telling.
+    if world.config.verbs.is_some() && world.config.gossip.deed_sev.get(deed) > 0.0 && actor.is_some() {
+        world.beat_desk.push(e.clone());
+    }
     post(world, d, e);
 }
 

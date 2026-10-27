@@ -1152,6 +1152,8 @@ def lives(rows, events, out):
                                          ("tied move-ins", "tied_housed"))}
     L["street"] = {k: tot(c) for k, c in (("cab rides driven", "cab_rides_driven"),
                                           ("cab rides unmanned", "cab_rides_unmanned"), ("fares short", "fares_short"),
+                                          ("cab cuts", "cab_cuts"), ("door rough", "door_rough"),
+                                          ("door barred", "door_barred"), ("hit heard", "hit_heard"),
                                           ("parcels delivered", "parcels_delivered"),
                                           ("parcels returned", "parcels_returned"), ("lifts", "lifts"),
                                           ("pilfer reports", "pilfer_reports"),

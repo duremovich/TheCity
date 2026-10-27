@@ -139,10 +139,14 @@ fn test_drag_holds_gangwork() {
     let (goal, trace) = citysim::utility::think(&w, m).expect("a goal");
     assert_eq!(goal, GoalKind::GangWork, "the drag holds: {trace:?}");
     w.comp_mut::<Needs>(m).expect("needs").hunger = 0.05;
-    // Round 3 S3: the moved city's pick was broke (Earn won: no meal it could
-    // obtain); the emergency needs a meal in reach, so it holds a meal's coins.
-    w.comp_mut::<citysim::components::Wallet>(m).expect("wallet").coins = 20;
-    assert_eq!(citysim::utility::think(&w, m).map(|(g, _)| g), Some(GoalKind::Eat), "starving: the emergency wins");
+    // Round 3 S3 and S5: the moved city's pick was broke (Earn won: no meal it could
+    // obtain); the emergency against the drag, not a broke greedy
+    // member's Earn (S5's city picked one at 0c, Earn 0.9467 to Eat 0.9465):
+    // the member holds a meal's coins and his wealth is met.
+    w.comp_mut::<citysim::Wallet>(m).expect("wallet").coins = 100;
+    w.comp_mut::<Needs>(m).expect("needs").wealth = 1.0;
+    let starving = citysim::utility::think(&w, m);
+    assert_eq!(starving.as_ref().map(|(g, _)| *g), Some(GoalKind::Eat), "starving: the emergency wins: {starving:?}");
 }
 
 /// A victim already in one abductor's hands is not taken by a second
