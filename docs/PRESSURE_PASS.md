@@ -175,6 +175,79 @@ arms_dealer, gang_leader.
 
 Then Shadow V11 in V10's window (100k, seed 42, days 21-27, two per archetype), Sonnet critics, the synthesis.
 
+### Round 3 from Shadow V11 (`SHADOW_V11.md`, opened 2026-10-27)
+
+Dylan's calls (2026-10-27): round 3 before any map work (the "re-import" is really a ground-site shortage: 1,415 of
+8,000 Lots at 100k, which only a footprint redesign or `OPEN-187`'s tenancies fix); school-age children seeded as
+their own phase (`OPEN-224`); 100k at ~25 ticks/s is accepted (`OPEN-226`); the walk's pace is left alone (R2's ~20x
+slow walk waits for the view). Wave 1 is S1, S3, S5, S6 at once; wave 2 (S2, S4, S7) starts once S1 has merged,
+since a plan that fails after an 8-hour walk and a clinic that sees no patient may both be distance. Iterate at 20k
+(`--population 20000 --map assets/maps/isle_m_k2.txt`, `run` also `--scaled --ambient-flats 50`); V11's repro picks
+are 100k seed 42 days 21-27 (`target/shadow_v11/`), read there only when 20k cannot show the case.
+
+#### S1, distance in the choice (`OPEN-221`'s sim half)
+
+Goals that pick a place pick it by reach: the day labourer's site, the Deal spot, the muster point and the raid
+target, the hire (a job taken across the island), the Camp answer, the JoinGang Hideout. A distance (or travel-time)
+term enters each pick, and a body does not start a walk it cannot finish inside the plan limit: it picks the next
+nearer option or a different goal, and says so. The map's shortage is not this phase. Shadow: day_labourer, forger,
+night_shift, miserable, dealer, camp_parent. Moves a number: legs cut at the plan limit (and walk legs over 120 min),
+20k seed 42, before and after.
+
+#### S2, plans that fail at the end (`OPEN-222`), wave 2
+
+Collect and Court end in a one-minute `PreconditionLost` after an 8-11 h walk (`gang_leader_96308 d21 08:43`,
+`d26 19:24`): find which precondition goes stale on the walk and either re-check it before setting out, hold it on
+the way, or have the body do the next sensible thing at the door. Hunt flickers "could not plan or plan failed twice"
+every two hours (`buyer_82590 d27`; `vendor_19534` 57 Hunt goals before one plan): a goal that cannot plan backs off
+or drops, it does not re-roll. A raider who sat the muster is not marked "missed" (`raider_39544 d22 00:07`).
+Shadow: gang_leader, buyer, vendor, raider, gun.
+
+#### S3, justice that reads right (`OPEN-223`)
+
+A victim is not booked for the fight they lost: a sleeper attacked three times and arrested for Assault
+(`miserable_29154 d21 01:27-04:26`) is the attribution being wrong; the attackers are named in the victim's diary.
+Jail keeps the body alive: meals and sleep in the cell (`jailed_75054` a week at energy 0.00, starving from d26), and
+the cell is not a meeting hall (`arms_dealer_65421` 1,171 Acquaintance lines in a jailed day). The fare ladder's
+beating has a cool-down per dodger (`dodger_29048` beaten daily). A guard on patrol who witnesses a crime acts on it
+(132 witnessed, 0 arrests: `guard_8360`); jail duty is legs or rounds, not one 9-hour action. Shadow: miserable,
+jailed, arms_dealer, dodger, guard.
+
+#### S4, care at 100k (`OPEN-216`), wave 2
+
+R3's chain read right at 20k and starves at 100k: no `Treated:` in two ripperdocs' and two orderlies' six work days.
+Diagnose the 100k case first (who gets sick, where they ask, why no patient reaches a clinic; distance after S1 is a
+suspect), then fix the cause. The sick ask more than once and ask their own (spouse, Friends) before the street
+(`sick_91688 d26 00:00`: one refused ask, then nothing). A super with no Block in arrears does a round (repairs,
+complaints, the stairs), not one 500-minute ClerkWork (`super_104162 d21 09:02`). Shadow: sick, ripperdoc, orderly,
+black_doc, super; read at 100k for the clinic case.
+
+#### S5, the trades still thin (`OPEN-217`)
+
+Bouncers refuse at the door and eject the rough (0 in 12 nights). A day labourer hired works the site, not Scavenge
+(`day_labourer_75212 d27 06:00`; the site's distance is S1's). The cabbie's `Paid` with no coin is a bug: find where
+the fare goes (`cabbie_82150` 0c all week); resting 9.8 h at the Garage is not work. Reporters print a Story at 100k
+(R6b's beat story fires at 20k: find what 100k starves). A hit on a CEO is heard of: the target or the CEO's security
+learns, and the diary says so (`ceo_88522 d24 18:00`). Shadow: bouncer, day_labourer, cabbie, reporter, ceo, gun.
+
+#### S6, school-age children (`OPEN-224`)
+
+The seeded city has no school-age children: every School's roster is 0, the teachers' days are empty. Seed children
+in the households at world generation (an age spread the config sets, households built with them: rent, food and
+care counted), gate School by age in `ages`, and the teacher's day has pupils. The daily "pupil's parent" line with
+no pupil goes. Changes household make-up citywide, so print employment, starvation, homeless and the housing split,
+20k seed 42 x 30, before and after. Shadow: teacher, camp_parent, a school child, a parent who works, elder.
+
+#### S7, the diary's noise (`OPEN-225`), wave 2
+
+A raid minute writes one Raid line ("Raid on X: won/lost", the toll) and folds its Witness, Assault and relationship
+lines into counts (`purist_56353 d22 00:06`: 260 Witness, 10 Assaults, 256 more changes, no result line). A witness
+line does not repeat at the same minute daily (`gang_leader_18246`, the fare). No "promoted to X" when already X.
+The rest day is marked in the hour lines, not only the summary. Shadow: purist, raider, gang_leader, reporter, a
+worker on day 27.
+
+Then Shadow V12 in V11's window (100k, seed 42, days 21-27, two per archetype), Sonnet critics, the synthesis.
+
 ## Implemented: deviations
 
 (Per phase, as they land.)
