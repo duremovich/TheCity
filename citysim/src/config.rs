@@ -1744,6 +1744,10 @@ impl Default for FaresCfg {
             ban_days: 14,
             ban_break_lawfulness: 0.1,
             wary_hours: 24,
+        }
+    }
+}
+
 /// Pressure pass round 2, R3 `[care]` (docs/PRESSURE_PASS.md § R3,
 /// OPEN-216; `systems/care.rs`): the wounded and the sick. Every value a
 /// placeholder.
