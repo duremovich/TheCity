@@ -1022,7 +1022,7 @@ fn meeting_hour(world: &mut World) {
     let cap = usize::from(world.config.service.meeting_attendees);
     for corp in world.corps() {
         let Some(exec) = world.comp::<crate::components::Corp>(corp).and_then(|c| c.exec) else { continue };
-        let Some(hq) = crate::systems::life::hq_of(world, corp, exec) else { continue };
+        let Some(hq) = crate::systems::life::office_of(world, corp, exec) else { continue };
         if !exec_present(world, exec, hq) {
             continue;
         }
@@ -1116,7 +1116,8 @@ pub fn decided(world: &mut World, corp: EntityId, exec: EntityId, what: String) 
     for &a in &table {
         world.remember(a, MemoryKind::Served, Some(exec), salience, 0.0, false);
     }
-    let d = crate::systems::life::hq_of(world, corp, exec).map(|h| world.district_of_building(h)).unwrap_or_default();
+    let d =
+        crate::systems::life::office_of(world, corp, exec).map(|h| world.district_of_building(h)).unwrap_or_default();
     crate::systems::gossip::post_deed(world, d, crate::word::Deed::Decided, Some(exec), Some(corp));
 }
 

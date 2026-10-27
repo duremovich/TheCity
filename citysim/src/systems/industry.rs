@@ -973,10 +973,18 @@ fn offices(world: &mut World) {
 /// `hq_min_buildings` standing buildings and holding the Hq's cost plus
 /// `hq_reserve`, builds one on the vacant Spire Lot nearest its first
 /// building (paid as any build: [`pay_build`]).
+///
+/// R6b (OPEN-217): `[verbs] hq_builds_per_day` corps a day (per capita): one
+/// a day city-wide left the 100k city's food corps holding office at a
+/// street market for months (V10's CEO at a stall).
 fn grow_hq(world: &mut World) {
     let cfg = world.config.jobs2.clone();
     let Some(cost) = crate::systems::founding::found_cost(world, BuildingKind::Hq) else { return };
+    let mut left = world.config.verbs.as_ref().map_or(1, |v| v.hq_builds_per_day);
     for c in world.corps() {
+        if left == 0 {
+            return;
+        }
         let Some(cc) = world.comp::<Corp>(c) else { continue };
         if cc.office.is_some() {
             continue;
@@ -1011,7 +1019,7 @@ fn grow_hq(world: &mut World) {
         }
         let (who, what) = (world.owner_label(Some(c)), world.name_of(lot));
         world.push_event(EventKind::Founded, &[c, lot], format!("{who} built its Corp HQ, {what}, for {paid}"));
-        return;
+        left -= 1;
     }
 }
 

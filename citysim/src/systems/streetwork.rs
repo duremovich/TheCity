@@ -1677,7 +1677,7 @@ pub fn exec_ride(world: &mut World, id: EntityId, target: &crate::exec::GotoTarg
         }
     }
     let corp = crate::systems::life::exec_corp(world, id)?;
-    let hq = crate::systems::life::hq_of(world, corp, id)?;
+    let hq = crate::systems::life::office_of(world, corp, id)?;
     if !home_ride && target.building != Some(hq) {
         return None;
     }
@@ -1770,7 +1770,7 @@ pub fn ride_home_ticks(world: &World, id: EntityId, from: TilePos, door: TilePos
         return None;
     }
     let corp = crate::systems::life::exec_corp(world, id)?;
-    let hq = crate::systems::life::hq_of(world, corp, id)?;
+    let hq = crate::systems::life::office_of(world, corp, id)?;
     let home = crate::systems::missions::home_of(world, id)?;
     let hb = world.comp::<Building>(home)?;
     if near_by_label(world, home, hb.door, hq) || near_home(world, from, home, hb.door) {

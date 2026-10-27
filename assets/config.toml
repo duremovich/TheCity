@@ -522,6 +522,8 @@ raid_quota = 40                     # a gang's class-2 bodies from raid_promote_
 raid_promote_hours = 4
 front_tiles = 30                    # members this close to the order's target rank in the front line
 release_soon_hours = 2              # a prisoner this close to release holds a body (the walk out is real)
+contract_quota = 24                 # M16a C35: live contract parties' bodies (taker, crew, target; class 4); R6b: per capita in scaled_to
+fixer_quota = 4                     # M16a C35: Fixer owners' bodies in the matching window (class 2); R6b: per capita in scaled_to
 # The spec's watch rule (off-shift guards and gravediggers rank as civilians) is off: measured on
 # seeds 42-44 (120 days, against 7f392db) it raised Murders 137 -> 216 (+58 %) and broke the M15
 # gate's Murders bound (192.5); with it off (M10 D20 kept) Murders 160 and violent deaths 485 vs
@@ -5070,3 +5072,13 @@ ask_keep = 20                      # this, up to the shortfall (a debt between t
 cover_purse_days = 3               # the sick worker's post: covered at midnight by a jobless adult of the employer's district
 cover_lawful = 0.3                 # (lawfulness at or above this; a day hire to the shift's end) when the owner holds this
                                    # many days of the role's wage; else the absence is written
+# Pressure pass round 2, R6b (docs/PRESSURE_PASS.md § R6b, OPEN-217, OPEN-207): the trades' verbs II. Every value a
+# placeholder.
+[verbs]
+hq_builds_per_day = 1              # corps with no Hq that build one a day (industry::grow_hq; per capita in scaled_to)
+landlord_desk = true               # a corp of Homes only gives its exec a lettings desk in its Block nearest his Home
+beat_stories = 1                   # stories a reporter files a night from the deeds he interviewed on his beat
+trade_price_share = 0.75           # the gangs' gun trade: a gang short of its armoury buys a lot from a gang with a surplus
+trade_lot = 4                      # at this share of the dealer's price a weapon, at most this many a deal,
+trade_reserve_days = 1             # keeping this many days of its members' stipends after paying,
+trade_days = 3                     # one deal a buying gang every this many days
