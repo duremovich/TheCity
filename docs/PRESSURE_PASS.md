@@ -1804,3 +1804,54 @@ later); a Block's adults ate the pantry bare before the children's midnight meal
   (the pick is at day 21; the door came earlier): the `[family]` line carries "on the service's warning since d19".
   The camp tests' fixture takes at `take_days` (`warn_window_days = 0`, the reason in place);
   `test_unfed_child_taken_at_take_days_before_death` walks the ladder. No new test. `SAVE_VERSION` 84.
+
+### T6, money and labels that disagree (round 4; `customers.rs`, `leverage.rs`, `industry.rs`, `corp_brain.rs`, `service.rs`, `care.rs`, `demography.rs`, `virt.rs`)
+
+Six lines whose money or names disagreed, each fixed at its cause:
+
+1. **The back room's bill** (`miserable_64146 d22 05:10`, "for 80c" with 0c in the purse and a 1c flow to Cipher
+   Santoro). Not a pay bug: the back room's fee is drawn from the pool (`health::payers`: the patient, kin, the
+   gang's treasury), and the patient had joined The Hollow, whose treasury put up the rest; the flow went to the
+   room's owner, not the doctor. The line now says so: `customers::money_note` appends who put the coins up when the
+   patient did not pay them all and whose till took them when it is not the doctor's ("for 80c (38c of their own,
+   Omar Kaneda put up 5c, Cato Delacroix put up 37c)", "for 6c, to Ronin Santoro's till, no questions asked").
+2. **The con with two sellers** (`vendor_11367 d24 00:09`). Two real cons on one tick: Omar Oakes's fake job of d17
+   came due (`fake_due`: the Defrauded line and the grudge on Omar, right) and the same midnight's `fake_pass` sold
+   the just-burned mark Kenji Blackwood's (the open-fake-job filter had just been cleared). `[leverage]
+   fake_wary_days` (14): a mark holding an unsettled `Betrayed` grudge that young buys no fake job (`leverage::wary`).
+3. **The foreman who had just lost the shop** (`ripperdoc_61226 d27 00:11`). `seize` hands the business to the gang
+   and the owner-operator stays on as staff, the longest-serving, so `foreman` named him. `industry::picker`: in a
+   gang's house (the owner a Gang: a front, a seizure, a fire sale) the gang's own man picks, its member on the staff
+   (lowest id), else its leader, and the line says for whom ("picked by Rook Marlow, for The Salt Widows");
+   `careers::foreman_actor` reads the same. Elsewhere the foreman as before.
+4. **The CEO's call five times in 70 minutes** (`ceo_88522 d24 00:07`). Each shock rescore re-made the exec's
+   "keep" call (the same hash of his traits all day) and logged it. `Corp.kept_call`: a keep call is told once per
+   standing order, cleared when the order changes. The line also says where it was made: "at the table: ..." only
+   inside the office hours with him at the Hq (`exec_present`); else "called from Block#198" (a body) or "off the
+   table" (off screen), with "the table last sat: ..." when one had.
+5. **The exec hired as an Engineer** (`exec_78363 d26 00:00`). The sick-cover pick (`care::cover_pick`) took any
+   jobless adult, and an exec holds no Job. It leaves the execs out, and `demography::hire` refuses an exec as it
+   refuses a child (the backstop for every pick beside the labour pool, which already left execs out).
+6. **The ledger as free money** (`fixer_100695`, 600c four times a week at heat 0). A ledger run that won every
+   contest left no trace at all. `virt::audit_ledger`: a ledger's books (a corp's, the city's) catch each run as a
+   shortfall in the same line ("Nutrix's books came up 750c short, the hand unknown") and keep `(tick, runner)` in
+   `World.ledger_books` for `[hack] ledger_audit_days` (14); the runner's `ledger_audit_runs`-th (2) run on the same
+   books inside the window is matched (the same deck on each: the books, not a roll) and he is named as a naming
+   trace names him (`named_by_books`: the Sighting, `DataTheft` filed so he is wanted and his heat rises,
+   `last_seen` and `last_trace` at the chair). One run is free; a habit on one ledger is not. 20k seed 42: Rue
+   Eastwick's second 750c off the city's ledger in a week was matched (`d12 22:01`), reported, arrested and
+   sentenced to 5 days inside the day; a Story ran. 100k (V12's six ids re-shadowed, d21-27): `fixer_100695` is
+   arrested for Data Theft `d21 11:32` (matched before the window), 5 days, heat 0.40 through d27, posts a guard on
+   himself, and his one run after release is "Nutrix 2's books came up 600c short, the hand unknown".
+
+Read at 100k on V12's ids: `miserable_64146 d22 05:32` "for 80c (The Hollow put up 80c), to Mbeki Holdings's till
+(no cure)"; `vendor_11367` one Defrauded (d25), no second sale that night; `ceo_88522` no decision line in the week
+(the order stood at Grow; V12 had 15 "keep Grow in Tech"); `exec_78363` no Hire, ExecWage only; `ripperdoc_61226` was
+not repossessed this run (he picks as the owner's foreman, right), the front's picker read at 20k ("picked by Rook
+Marlow, for The Salt Widows").
+
+Deviations: case 2's critic read ("the grudge and the report land on the wrong man") was wrong; Omar Oakes did sell
+the first fake job. Case 6's "a ledger that runs short" is the books' shortfall line and the existing ICE-after-loss
+(`ice_target`), not a smaller take. The 20k runners spread over many corps (Rue Eastwick hit six ledgers once each)
+and repeat on the city's, so the city's books are kept too. `SAVE_VERSION` 84 (`Corp.kept_call`,
+`World.ledger_books`). No test (doctrine 2).

@@ -1375,6 +1375,11 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
     if crate::systems::ages::is_protected(world, id) {
         return;
     }
+    // Round 4 T6: nor a corp's exec (the labour pool leaves him out; the
+    // backstop for the picks beside it, `exec_78363 d26`'s sick cover).
+    if crate::systems::founding::is_exec(world, id) {
+        return;
+    }
     let wc = &world.config.world;
     let mut shifts =
         if role == Role::Guard && id.index.is_multiple_of(2) { wc.shift_night.clone() } else { wc.shift_day.clone() };

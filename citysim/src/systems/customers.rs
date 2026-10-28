@@ -650,6 +650,7 @@ fn see_to(world: &mut World, id: EntityId, place: EntityId, what: Care, price: i
         crate::systems::service::arrive(world, id, place, crate::components::ServeKind::Patient, s.cash);
         return true;
     }
+    let mut shares: Vec<(EntityId, i64)> = Vec::new();
     let paid = match what {
         Care::Patch if !back => ownership::pay(world, Some(id), to, price, Flow::Treatment),
         Care::Patch | Care::Onco | Care::Clinic => {
@@ -664,12 +665,19 @@ fn see_to(world: &mut World, id: EntityId, place: EntityId, what: Care, price: i
                     let p = ownership::pay(world, Some(payer), to, take, Flow::Treatment);
                     due -= p;
                     paid += p;
+                    if p > 0 {
+                        shares.push((payer, p));
+                    }
                 }
             }
             paid
         }
     };
     ownership::credit(world, place, paid);
+    // Round 4 T6: the line says what the money did: who put the coins up
+    // (the pool: kin, the gang) and whose till took them (the room's
+    // owner, when he is not the doctor named).
+    let money = money_note(world, id, doc, to, &shares);
     let (who, dn, at) = (world.name_of(id), world.name_of(doc), world.name_of(place));
     let text = match what {
         Care::Patch => {
@@ -682,7 +690,7 @@ fn see_to(world: &mut World, id: EntityId, place: EntityId, what: Care, price: i
             }
             ownership::jobs2_row(world).patched += 1;
             if back {
-                format!("{dn} patched {who} up in the back room of {at} for {paid}c, no questions asked")
+                format!("{dn} patched {who} up in the back room of {at} for {paid}c{money}, no questions asked")
             } else {
                 format!("{dn} patched {who} up at {at} for {paid}c")
             }
@@ -694,7 +702,7 @@ fn see_to(world: &mut World, id: EntityId, place: EntityId, what: Care, price: i
                 c.stage = (c.stage - rem).max(0.0);
             }
             world.stats.current.treatments += 1;
-            format!("{dn} cut back {who}'s vat-cancer in the back room of {at} for {paid}c (no cure)")
+            format!("{dn} cut back {who}'s vat-cancer in the back room of {at} for {paid}c{money} (no cure)")
         }
     };
     if back {
@@ -703,6 +711,32 @@ fn see_to(world: &mut World, id: EntityId, place: EntityId, what: Care, price: i
     world.push_event(crate::events::EventKind::Treated, &[id, doc, place], text);
     crate::systems::service::arrive(world, id, place, crate::components::ServeKind::Patient, paid);
     true
+}
+
+/// Round 4 T6: the money of a back-room fee, for its line: who put the
+/// coins up when the patient did not pay them all (` (The Hollow put up
+/// 79c, 1c of their own)`) and the till that took them when it is not the
+/// doctor's (`, to Cipher Santoro's till`). Empty when the patient paid the
+/// doctor himself, or nothing moved.
+fn money_note(world: &World, id: EntityId, doc: EntityId, to: Option<EntityId>, shares: &[(EntityId, i64)]) -> String {
+    let mut out = String::new();
+    if shares.iter().any(|&(p, _)| p != id) {
+        let parts: Vec<String> = shares
+            .iter()
+            .map(|&(p, c)| {
+                if p == id {
+                    format!("{c}c of their own")
+                } else {
+                    format!("{} put up {c}c", world.owner_label(Some(p)))
+                }
+            })
+            .collect();
+        out.push_str(&format!(" ({})", parts.join(", ")));
+    }
+    if !shares.is_empty() && to != Some(doc) {
+        out.push_str(&format!(", to {}'s till", world.owner_label(to)));
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------

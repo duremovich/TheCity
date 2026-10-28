@@ -8721,6 +8721,12 @@ pub struct HackCfg {
     /// Plan V66: a freelancer runs loud when `(1 - lawfulness) x courage`
     /// reaches this.
     pub loud_min: f32,
+    /// Round 4 T6: a corp's books keep the ledger runs on them this many
+    /// days (0: no audit, the base's free money).
+    pub ledger_audit_days: u32,
+    /// Round 4 T6: the runner's run that is this many on the same books
+    /// inside the window is matched and he is named (at least 2).
+    pub ledger_audit_runs: u32,
 }
 
 impl Default for HackCfg {
@@ -8746,6 +8752,8 @@ impl Default for HackCfg {
             quiet_att: 0.0,
             loud_att: 0.0,
             loud_min: 0.3,
+            ledger_audit_days: 0,
+            ledger_audit_runs: 2,
         }
     }
 }
@@ -12452,6 +12460,9 @@ pub struct LeverageCfg {
     pub fake_p: f32,
     /// Plan key: the fake job's victim learns it after this many days.
     pub fake_days: u32,
+    /// Round 4 T6: a mark who learned of a con (an unsettled `Betrayed`
+    /// grudge) inside this many days buys no fake job (0 off).
+    pub fake_wary_days: u32,
     pub parley_ratio: f32,
     pub parley_tribute: i64,
     /// Plan key: a fulfilled Persuade adds this to the courted's affinity.
@@ -12494,6 +12505,7 @@ impl Default for LeverageCfg {
             fake_fee: 40,
             fake_p: 0.1,
             fake_days: 7,
+            fake_wary_days: 0,
             parley_ratio: 0.3,
             parley_tribute: 30,
             persuade_affinity: 0.3,

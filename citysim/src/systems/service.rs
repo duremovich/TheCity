@@ -1296,7 +1296,33 @@ pub fn decided(world: &mut World, corp: EntityId, exec: EntityId, what: String) 
     let names: Vec<String> = table.iter().map(|&a| world.name_of(a)).collect();
     let at = if names.is_empty() { "nobody".to_string() } else { names.join(", ") };
     let corp_name = world.comp::<crate::components::Corp>(corp).map_or_else(|| world.name_of(corp), |c| c.name.clone());
-    let text = format!("{} decided {corp_name} would {what}; at the table: {at}", world.name_of(exec));
+    // Round 4 T6: a call made off the office hours or away from the Hq (a
+    // shock rescore at night) is made from where he is; the table is the
+    // last one that sat.
+    let tod = world.tick_of_day();
+    let (s, e) = world.config.life.exec_shift;
+    let sitting = tod >= s
+        && tod < e
+        && crate::exec::routine::is_workday(world.day() as i64)
+        && crate::systems::life::office_of(world, corp, exec).is_some_and(|hq| exec_present(world, exec, hq));
+    let seat = if sitting {
+        format!("at the table: {at}")
+    } else {
+        // A body's building names where the call was made; off screen
+        // (Statistical) the place is not kept.
+        let body = world.comp::<Brain>(exec).is_some_and(|b| b.lod != Lod::Statistical);
+        let from = world
+            .comp::<Position>(exec)
+            .and_then(|p| p.building)
+            .filter(|_| body)
+            .map_or_else(|| "off the table".to_string(), |b| format!("called from {}", world.name_of(b)));
+        if names.is_empty() {
+            from
+        } else {
+            format!("{from}; the table last sat: {at}")
+        }
+    };
+    let text = format!("{} decided {corp_name} would {what}; {seat}", world.name_of(exec));
     let mut actors = vec![exec, corp];
     actors.extend(table.iter().copied());
     world.push_event(EventKind::Served, &actors, text);

@@ -857,10 +857,17 @@ pub fn rescore(world: &mut World, corp: EntityId, hysteresis: f32, why: &str) {
                 Some(n) => format!("keep {current} in {n}"),
                 None => format!("keep {current}"),
             };
-            crate::systems::service::decided(world, corp, exec, keep);
+            // Round 4 T6: the same call on the same standing order is told
+            // once; each shock rescore re-made it (`ceo_88522 d24 00:07`:
+            // five `Served` lines in 70 min, the exec asleep at home).
+            if c.kept_call.as_deref() != Some(keep.as_str()) {
+                c.kept_call = Some(keep.clone());
+                crate::systems::service::decided(world, corp, exec, keep);
+            }
         }
         return;
     };
+    c.kept_call = None;
     if current == CorpOrder::Squeeze {
         c.wage_mult = 1.0;
         c.evict_days_override = None;

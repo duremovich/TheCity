@@ -1312,6 +1312,12 @@ loud_trace = 2.0
 quiet_att = 0.0
 loud_att = 0.0
 loud_min = 0.3                     # a freelancer runs loud at (1 - lawfulness) x courage >= this
+# Round 4 T6 (fixer_100695 took 600c from ledgers four times in a week at heat 0): a ledger's books (a corp's, the city's) catch
+# each ledger run as a shortfall and keep it ledger_audit_days; the runner's ledger_audit_runs-th run on the
+# same books inside the window is matched (the same deck on each) and he is named: DataTheft filed, the
+# chair's door his last-seen. A mechanism, not a roll: one run is free, a habit on one corp is not.
+ledger_audit_days = 14
+ledger_audit_runs = 2
 
 [db]
 db_cap = 32
@@ -2194,6 +2200,7 @@ debt_call_min = 3                    # plan key: begging loans are not called
 fake_fee = 40
 fake_p = 0.1                         # plan key: a fake-job candidate tries on a day with this p
 fake_days = 7                        # plan key: the victim learns it after this
+fake_wary_days = 14                  # round 4 T6: a mark who learned of a con (a Betrayed grudge) this recently buys no fake job (vendor_11367: the night he learned of one con he bought the next, one line with two sellers)
 parley_ratio = 0.3
 parley_tribute = 30
 persuade_affinity = 0.3              # plan key: a fulfilled Persuade's affinity toward the buyer
