@@ -2061,7 +2061,12 @@ type WidowPick = (World, Vec<EntityId>, EntityId, EntityId, EntityId);
 fn widow_pick() -> WidowPick {
     // Jobs & lives phase 8's gate: the pin to the pre-milestone city is gone
     // (on the Jobs & lives city the pick commissions the Hit again).
-    let mut w = citysim::World::new(42, Config::load());
+    // Round 4 wave 2: no job search (the subject is the Hit market, not work;
+    // with it the city moved and the pick, a jobless thief, was arrested and
+    // sentenced on the way to the Fixer).
+    let mut cfg = Config::load();
+    cfg.search = None;
+    let mut w = citysim::World::new(42, cfg);
     // Day 10: the Fixers' books have filled (on day 2 too few regulars
     // would take a Hit at any price, and it priced at the old quote).
     w.run_ticks(10 * TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
@@ -3043,6 +3048,10 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
     let mut cfg = Config::load();
     cfg.vice.p_street_visit = 1.0;
     cfg.vice.street_intimacy = 1.0;
+    // Round 4 wave 2: the probe holds the pimp out of the labour market, so
+    // no job search either; with it the city moved and the pick (jobless)
+    // was arrested for a Shakedown before his first pitch night.
+    cfg.search = None;
     let mut w = World::new(42, cfg);
     let start = 12 * TICKS_PER_DAY + 17 * TICKS_PER_HOUR;
     w.run_ticks(start);
