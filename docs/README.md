@@ -32,6 +32,7 @@ One line per live document: what it is and when to read it. Everything supersede
 - `ISLAND_PASS.md`: the island pass (closed 2026-10-24): distance in every pick, company housing, vehicles and El trains with riders aboard; gate `SHADOW_V8.md` and `shadow_v8/`.
 - `PERF_PASS.md`: the perf pass toward the 100k city, closed 2026-10-26 with the gate met (decisions R1-R6, byte-identical index work, parallel scoring, the P9 re-import, a quiet-box gate).
 - `PRESSURE_PASS.md`: the live pass (opened and built 2026-10-26; the next round from Shadow V10): misery acts, the dead trades get customers, protection bites, reach and the social graph; fed by Shadow V9.
+- `TURF.md`: gang turf (Dylan 2026-10-28, after San Andreas): cells held by presence, the corner, turf that pays, the war (provoked, answered, held or lost) and its peace; built in pressure pass round 6 (V2, V5).
 - `POPULATION_STUDY.md`: how far the island city scales (OPEN-184, 2026-10-23): the 20k-150k curve, what binds (the import's cuts), the hot systems with exponents, the target (60k now, 100k after the index work), the optimisation roadmap.
 
 ## The judges

@@ -35,24 +35,19 @@ day** (U6's `pimp_trip_ticks` 120), licences sold 120 -> 158; ticks/s 25 -> 24 (
 - No agents are running; no worktrees.
 - `target/shadow_v14/`, `target/r5_100k/` hold the runs.
 
-## Calls for Dylan (open)
+## Calls Dylan made (2026-10-28, on Shadow V14)
 
-- **The empty street** (`OPEN-217`): U6's bound names a pimp only within 2 h of a pitch, and at 100k almost nobody
-  is. Raise the bound, or a mechanism (the pimp takes the El to the pitch; a pitch where the members live)?
-- **The soup lines** (`OPEN-235`, closed): the charity founds up to 3 soup lines a day (150c each) where the starving
-  are and shares the kitchens' purses. The pots still run dry for thousands a day; confirm that is the charity you
-  meant.
-- **The fee keeps the new Schools near empty** (teachers with 1-2 pupils): your call stands (the fee stays); say if
-  the empty rooms should become a feature (a School closes, a teacher laid off).
-- **Order:** round 6 from V14, or the 100k map re-import first.
+- Gangs get **turf** (`docs/TURF.md`, after San Andreas): cells held by presence, the corner, turf that pays (the
+  pimp's pitch where the members live, replacing U6's trip bound), a war with a shape and an end.
+- Order: deferred to the orchestrator: round 6 before the 100k map re-import. The soup lines stand as U3 built them;
+  the School fee stays, an empty School is not yet a feature.
 
 ## Next, in order
 
-1. **Pressure pass round 6 from V14** (`docs/SHADOW_V14.md` § "Round 6's input"): the ladder hanging at 100k and
-   children out of care (`OPEN-231`, `OPEN-242`), the street (`OPEN-217`), violence with no law after it
-   (`OPEN-238`), empty rooms beside full ones (`OPEN-232`, `OPEN-217`), the night out at the door (`OPEN-239`),
-   homes and fares far from work (`OPEN-240`), gang life without a raid (`OPEN-241`). Plan it on the calls above,
-   one Opus coder per phase in a worktree as rounds 2-5 ran, then Shadow V15 in V14's window.
+1. **Pressure pass round 6 from V14** (`docs/PRESSURE_PASS.md` § "Round 6 from Shadow V14", planned on the calls
+   above): wave 1 V1 the ladder at 100k and children out of care, V2 turf you hold, V3 violence with consequence, V4
+   the night out and the trip; wave 2 V5 the turf war, V6 empty rooms beside full ones. One Opus coder per phase in a
+   worktree, then Shadow V15 in V14's window.
 2. The 100k map re-import (`OPEN-204`, `OPEN-182`; home-to-post walking, `OPEN-221`).
 3. The vertical city (`OPEN-187`, `OPEN-191`), the view milestone, M18.
 

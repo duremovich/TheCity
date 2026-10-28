@@ -402,6 +402,77 @@ scores need not be byte-identical (doctrine: no identity gates), but the choices
 diary. Numbers: the site's ms a game day and ticks/s, 100k days 25-27 under `--features prof`, before and after, one
 run each; a gang_member and gang_leader shadow at 20k.
 
+### Round 6 from Shadow V14 (`SHADOW_V14.md`, opened 2026-10-28)
+
+Dylan's calls (2026-10-28): gangs get **turf** (`docs/TURF.md`: cells held by presence, the corner, turf that pays,
+the pimp's pitch where the members live, a war that is provoked, answered, held or lost, and ends); the order is
+round 6 before the 100k map re-import (Dylan deferred it); the soup lines stand as U3 built them; the School fee
+stays and an empty School is not yet a feature. The under-18 rule holds in every phase (CLAUDE.md): a brief that
+touches a victim pick, a fight or a punishment says how `ages::is_protected` gates it. **Cost rule from round 5** (U3
+and U6 ran $80 each): a phase's 100k work is at most one run (a counter run or one shadow), named in its brief. Wave 1
+is V1, V2, V3, V4 (disjoint: the Camp and household, the gang and vice, the law and the wounded, leisure and the
+trip); wave 2 is V5 (on V2's cells) and V6 (the vice and care rooms V2 and U6 touched), each started as soon as its
+dependency merges. Iterate at 20k (`--population 20000 --map assets/maps/isle_m_k2.txt`, `run` also `--scaled
+--ambient-flats 50`); V14's repro picks are 100k seed 42 days 21-27 (`target/shadow_v14/`).
+
+#### V1, the ladder at 100k and children out of care (`OPEN-231`, `OPEN-242`)
+
+U2's ladder hangs at 100k: warnings standing a week and more with empty pantries and no second warning or take
+(`camp_parent_102044` since d5, `scav_46032` since d14, `owner_broke_6426` past his jailing on d26,
+`jailed_71789`'s children evicted onto the street d26 untaken); one warning names 18 children of ten families at one
+door (`owner_broke_6426 d21 00:10`: a warning is per household, not per Block). Find why the second unfed spell is not
+seen at 100k (the tier, the household's pantry read, the warning's household) and fix it there. Children out of care
+are found and returned: a child slipped out of the Camp is fetched by the warden or the service within a day; a child
+on the street with no free parent is taken (`camp_jobless_61284` d24-27, `miserable_12664` d21-23, two-year-olds).
+Shadow: neglect_parent, camp_parent, camp_jobless, camp_warden, miserable (20k; one 100k shadow of neglect_parent and
+camp_jobless if 20k cannot show it). Moves a number: ChildTaken, ch_camp, ch_street and warnings standing past 14 days,
+20k seed 42 x 30 before and after.
+
+#### V2, turf you hold (`docs/TURF.md` § 1-2; `OPEN-241`, `OPEN-217`'s street)
+
+Turf cells held by presence, the corner, `rival_of` the neighbour, a holder change told; tribute and protection by
+cell, the deal spot on the corner, the pimp's pitch in a held cell where members live and the pimp named among them
+(replacing U6's `pimp_trip_ticks`, which left 0.2 pimps a day at 100k), recruits from the turf, residents who read the
+colours. Both tiers. Fix the two age gaps the codemap found (`gang::contested`, the squat-eviction fight). Also V14's
+gang contradictions at their cause: a member dying mid-Extort still collects (`gang_member_6572 d22 14:24`), one
+door paying three gangs in 15 hours (`Block#478`; the cell's holder protects his own), `BountyPaid` printed three or
+four times a sighting. Shadow: gang_member, gang_leader, dealer, pimp (20k). Moves a number: cells held per gang,
+pimps a day and street visits, 20k seed 42 x 30 before and after; one 100k x 30 for pimps a day.
+
+#### V3, violence with consequence (`OPEN-238`)
+
+A death is found: a corpse in the street is seen, reported, and the law opens a case (`courier_48760 d25 05:25`: a
+murder and a strip, then work at 08:10 with no Report or corpse line); a looted till is reported by its owner and the
+thieves are known (`vendor_9648 d23`: ten strangers in six hours, no report); the wounded on Flee are treated or
+carried, not left 72 h at energy 0.01 (`ceo_91004`, `guard_8429`), and a man laid up draws no wage; a Fixer "closed by
+the law" is closed (`fixer_40483 d26`). Shadow: courier, vendor, ceo, guard, fixer (20k). Moves a number: Reports and
+arrests per Murder, corpses found, the longest Flee, 20k seed 42 x 30 before and after.
+
+#### V4, the night out and the trip (`OPEN-239`, `OPEN-240`)
+
+The Unwind plan does not drink before the door: the bouncer's refusal of the drunk is answered (gamble first, or
+another venue), a "barred till" is honoured (`office_worker_56309 d23 21:23`, nightly). A move-in with family reads
+the commute (`night_shift_27693 d23 00:08`: 475 tiles, 503 min each way); a cab leg is paid to the cab, not a
+stranger, and lands where it was paid for (`fabber_84414`, `exec_73953 d24 01:16`). Shadow: office_worker,
+night_shift, fabber, exec, cabbie (20k). Moves a number: door refusals of the drunk, commutes over 3 h, cab fares by
+payee kind, 20k seed 42 x 30 before and after.
+
+#### V5, the turf war (`docs/TURF.md` § 3), wave 2 after V2
+
+Provocation on a held cell, the local answer at the corner, hold or flip, the loser's counter-attack, and peace:
+exhaustion, a truce between leaders, the law's crackdown on a contested cell; a raid on a Hideout moves the cells
+around it; off screen a daily roll with the same events. Shadow: gang_member, gang_leader, raider (20k). Moves a
+number: wars started, cells flipped, truces, gang deaths, 20k seed 42 x 30 before and after.
+
+#### V6, empty rooms beside full ones (`OPEN-232`, `OPEN-217`), wave 2 after V2
+
+Patients spread to the clinics that are open, a doc's post not dark all week (two of four clinic posts with no
+patient, a ripperdoc struck off unexplained: `ripperdoc_11838 d26`); the back rooms share the trade (574 patients at
+one, none at the other); the door turns someone away (bouncers "nobody turned away" every night at 100k) and the
+fighter has a bout (no Bout line in a week, the pit door 18-59 a night). Shadow: ripperdoc, orderly, black_doc,
+bouncer, fighter (20k). Moves a number: patients per clinic (median and max), door refusals, bouts, 20k seed 42 x 30
+before and after.
+
 ## Implemented: deviations
 
 (Per phase, as they land.)
