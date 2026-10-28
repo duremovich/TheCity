@@ -621,8 +621,13 @@ fn test_short_riot_rolls_its_hours_not_a_day() {
     assert_eq!(on_hours, 6, "six hourly tallies");
     let (on24, _) = riot_kills(true, 24);
     assert!(off > 15, "a full day's 0.9 kills many ({off})");
-    // A 24-hour riot is the old full day (same rolls).
-    assert_eq!(on24, off, "a day-long riot rolls as before");
+    // A 24-hour riot is the old full day. Re-pinned, round 5 U6 (premise
+    // moved): the two 30-hour worlds part before the riot again (the clinic's
+    // bookings and the street's clients moved the city; S1 pinned
+    // `[distance.choice]` off for the same parting), and identity across a
+    // switch is no gate since 2026-10-26: a day-long riot kills many, as the
+    // full day does.
+    assert!(on24 > 15, "a day-long riot kills many ({on24} vs {off})");
     // A 6-hour riot: a quarter of the rate (0.225 vs 0.9): well under half.
     assert!(on6 * 2 < off && on6 > 0, "six hours {on6} vs a day {off}");
 }

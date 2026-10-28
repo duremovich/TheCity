@@ -1178,6 +1178,9 @@ def lives(rows, events, out):
                                           ("pilfer reports", "pilfer_reports"),
                                           ("clients near", "street_clients_near"),
                                           ("pimp collections", "pimp_collections"), ("pimp pass-up", "pimp_pass_up"),
+                                          ("pimp booked", "pimp_booked"), ("clinic booked", "clinic_booked"),
+                                          ("clinic kept", "clinic_kept"), ("clinic by a body", "clinic_body"),
+                                          ("clinic washes", "clinic_washes"),
                                           ("corner deals", "corner_deals"), ("dealer regulars", "dealer_regulars"))}
     L["tower"] = {k: tot(c) for k, c in (("Meeting hours", "meetings_held"), ("attendees", "meeting_attendees"),
                                          ("decisions", "decisions"), ("bylines", "bylines"),

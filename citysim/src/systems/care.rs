@@ -66,12 +66,182 @@ pub struct State {
     /// Round 3 S4: `(patient, friend, day)` a Friend turned the patient down
     /// (not asked again inside `ask_refused_days`).
     pub refused: Vec<(EntityId, EntityId, u64)>,
+    /// Round 5 U6 (OPEN-217): the off-screen chrome booked at midnight for
+    /// an hour of the clinic's day (`book`, kept by `keep_bookings`).
+    pub booked: Vec<Booking>,
 }
 
 impl State {
     pub fn is_empty(&self) -> bool {
-        self.asked.is_empty() && self.covers.is_empty() && self.refused.is_empty()
+        self.asked.is_empty() && self.covers.is_empty() && self.refused.is_empty() && self.booked.is_empty()
     }
+}
+
+/// Round 5 U6: an off-screen patient's visit, booked at `clinic` for the
+/// hour `at` (a tick of today's clinic day).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Booking {
+    pub patient: EntityId,
+    pub clinic: EntityId,
+    pub visit: Visit,
+    pub at: Tick,
+}
+
+/// Round 5 U6: what a booking is for.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Visit {
+    /// `stat_shop`'s chrome, the pick bought and installed at the visit.
+    Install(crate::components::ShopPick),
+    /// The blood washed (`[care] wash_*`).
+    Wash,
+}
+
+const PURPOSE_BOOK: u64 = 0xca7e_0002;
+const PURPOSE_WASH: u64 = 0xca7e_0003;
+
+/// Round 5 U6 (OPEN-217; `[care] book_hours`): `stat_shop`'s chrome is
+/// booked, not installed at 00:00: the patient comes to `clinic` at an hour
+/// of `book_hours` (a hash of the patient and the day), when the doctor is
+/// at the counter. `false` with booking off (the base rule installs in
+/// place). V13: 34 installs a week on one night orderly, 5-6 every 00:00.
+pub fn book(world: &mut World, patient: EntityId, clinic: EntityId, pick: &crate::components::ShopPick) -> bool {
+    book_visit(world, patient, clinic, Visit::Install(pick.clone()))
+}
+
+fn book_visit(world: &mut World, patient: EntityId, clinic: EntityId, visit: Visit) -> bool {
+    let Some([from, to]) = cfg(world).map(|c| c.book_hours) else { return false };
+    if to < from || to >= 24 {
+        return false;
+    }
+    if world.care.booked.iter().any(|b| b.patient == patient) {
+        return true;
+    }
+    let span = u64::from(to - from) + 1;
+    let day = world.day();
+    let h = u64::from(from) + ((hash(world, PURPOSE_BOOK, patient, day) * span as f32) as u64).min(span - 1);
+    let at = day * TICKS_PER_DAY + h * TICKS_PER_HOUR;
+    world.care.booked.push(Booking { patient, clinic, visit, at });
+    ownership::jobs2_row(world).clinic_booked += 1;
+    true
+}
+
+/// Round 5 U6: the hour's bookings kept (from `hourly`): one due this hour
+/// at a Clinic open now (its doctor at the counter) is installed by the
+/// doctor the counter gives him (`chrome::stat_install`; a body first,
+/// `[care] clinic_body_first`); one at a shut Clinic goes to the nearest
+/// Clinic open now, else waits for the next hour of `book_hours`, and past
+/// the last is let go (counted booked, not kept), as is a patient held,
+/// dead or become a body.
+fn keep_bookings(world: &mut World) {
+    if world.care.booked.is_empty() {
+        return;
+    }
+    let Some([_, to]) = cfg(world).map(|c| c.book_hours) else { return };
+    let now = world.tick;
+    let end = now - now % TICKS_PER_DAY + (u64::from(to) + 1) * TICKS_PER_HOUR;
+    let due: Vec<Booking> = world.care.booked.iter().filter(|b| b.at < now + TICKS_PER_HOUR).cloned().collect();
+    if due.is_empty() {
+        return;
+    }
+    world.care.booked.retain(|b| b.at >= now + TICKS_PER_HOUR);
+    for b in due {
+        let gone = !crate::systems::law::living(world, b.patient)
+            || world.has::<crate::components::Sentence>(b.patient)
+            || world.comp::<Brain>(b.patient).is_none_or(|x| x.lod != Lod::Statistical);
+        if gone {
+            continue;
+        }
+        // A shut Clinic at the hour: the nearest one open now (a used
+        // implant of the booked Clinic's stock waits for it), else the next
+        // hour (the first 20k run: 1,679 booked, 811 kept, installs 1,275 ->
+        // 1,006 against the midnight's in-place install).
+        let used = matches!(&b.visit, Visit::Install(pick) if pick.used.is_some());
+        let clinic = if crate::systems::assets::seller_open(world, b.clinic) {
+            Some(b.clinic)
+        } else if used {
+            None
+        } else {
+            crate::systems::contracts::home_door(world, b.patient)
+                .and_then(|from| crate::systems::assets::nearest_seller(world, BuildingKind::Clinic, from, true))
+        };
+        let Some(clinic) = clinic else {
+            if now + TICKS_PER_HOUR < end {
+                world.care.booked.push(Booking { at: now + TICKS_PER_HOUR, ..b });
+            }
+            continue;
+        };
+        let kept = match &b.visit {
+            Visit::Install(pick) => crate::systems::chrome::stat_install(world, b.patient, clinic, pick),
+            Visit::Wash => wash(world, b.patient, clinic),
+        };
+        if kept {
+            ownership::jobs2_row(world).clinic_kept += 1;
+        }
+    }
+}
+
+/// Round 5 U6 (OPEN-217; `[care] wash_*`): the clinic's everyday trade.
+/// At midnight an off-screen adult carrying `wash_min_tox` or more of
+/// toxicity (the synth diet's, the bins') and holding `wash_price` above
+/// `wash_keep` books a wash on `p_wash` (a hash of him and the day) at the
+/// Clinic nearest his Home, for an hour of `book_hours`. V13: a clinic's
+/// trade was the chrome alone, 25 Clinics at 20k a median of 5 patients a
+/// week; the island's toxicity is everyone's (8,259 of 20k over 0.4).
+/// Adults only: a child is never a patient of the pass (nothing here is a
+/// harm; the fee is an adult's).
+fn book_washes(world: &mut World, c: &CareCfg) {
+    if c.p_wash <= 0.0 || c.wash_price <= 0 {
+        return;
+    }
+    let day = world.day();
+    // scan-ok: daily: the off-screen toxic who can pay
+    let due: Vec<EntityId> = world
+        .tier(Lod::Statistical)
+        .iter()
+        .copied()
+        .filter(|&id| hash(world, PURPOSE_WASH, id, day) < c.p_wash)
+        .filter(|&id| world.comp::<Health>(id).is_some_and(|h| h.toxicity >= c.wash_min_tox))
+        .filter(|&id| coins(world, id) >= c.wash_price + c.wash_keep)
+        .filter(|&id| {
+            crate::systems::demography::is_adult(world, id)
+                && !crate::systems::ages::is_protected(world, id)
+                && !world.has::<crate::components::Sentence>(id)
+        })
+        .collect();
+    for id in due {
+        let Some(from) = crate::systems::contracts::home_door(world, id) else { continue };
+        let Some(clinic) = crate::systems::assets::nearest_seller(world, BuildingKind::Clinic, from, false) else {
+            continue;
+        };
+        book_visit(world, id, clinic, Visit::Wash);
+    }
+}
+
+/// Round 5 U6: the wash at the counter: `wash_price` paid (`pay_fee`, the
+/// doctor's `doctor_cut`), `wash_frac` of the toxicity taken out, the line
+/// naming the doctor the counter gave him (a body first), the encounter.
+fn wash(world: &mut World, patient: EntityId, clinic: EntityId) -> bool {
+    let Some(c) = cfg(world).cloned() else { return false };
+    if coins(world, patient) < c.wash_price {
+        return false;
+    }
+    let doc = crate::systems::service::server_for(world, clinic, crate::components::ServeKind::Patient, patient);
+    let (paid, to_doc) = pay_fee(world, patient, clinic, doc, c.wash_price);
+    if paid <= 0 {
+        return false;
+    }
+    if let Some(h) = world.comp_mut::<Health>(patient) {
+        h.toxicity = (h.toxicity * (1.0 - c.wash_frac.clamp(0.0, 1.0))).clamp(0.0, 1.0);
+    }
+    let (who, at) = (world.name_of(patient), world.name_of(clinic));
+    let by = doc.map_or_else(String::new, |d| format!(" by {}", world.name_of(d)));
+    let cut = if to_doc > 0 { format!(", {to_doc}c of it to the doctor") } else { String::new() };
+    let text = format!("{who} had the blood washed at {at}{by} ({paid}c{cut})");
+    let actors: Vec<EntityId> = [Some(patient), Some(clinic), doc].into_iter().flatten().collect();
+    world.push_event(EventKind::Treated, &actors, text);
+    crate::systems::service::arrive(world, patient, clinic, crate::components::ServeKind::Patient, paid);
+    ownership::jobs2_row(world).clinic_washes += 1;
+    true
 }
 
 fn coins(world: &World, id: EntityId) -> i64 {
@@ -433,6 +603,7 @@ pub fn daily(world: &mut World) {
     let Some(c) = cfg(world).cloned() else { return };
     asks(world, &c);
     covers(world, &c);
+    book_washes(world, &c);
 }
 
 /// A diagnosed patient whose pool falls short of the Clinic's treatment
@@ -645,6 +816,7 @@ pub fn hourly(world: &mut World) {
     }
     // Round 3 S4 (OPEN-216): the off-screen patients seen where a body goes.
     crate::systems::customers::stat_care(world);
+    keep_bookings(world);
     if world.care.covers.is_empty() {
         return;
     }

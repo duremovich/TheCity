@@ -562,6 +562,12 @@ pub struct VerbsCfg {
     /// ... and the scene a return makes (drunk, high, a brawler, carrying)
     /// swings on `[customers] door_swing_p` times this.
     pub door_return_swing_mult: f32,
+    /// Round 5 U6 (OPEN-217): a body already inside his workplace waits
+    /// there for a shift at most this many ticks off (the routine's base
+    /// rule waited 600: V13's ripperdoc came in at 04:00 to collect a wage
+    /// and rested at the post five hours before her 09:00 shift). A day
+    /// post's hire still waits the base rule's.
+    pub wait_at_work_ticks: u64,
 }
 
 impl Default for VerbsCfg {
@@ -596,6 +602,7 @@ impl Default for VerbsCfg {
             door_return_ticks: 2880,
             door_return_ban_days: 2,
             door_return_swing_mult: 2.0,
+            wait_at_work_ticks: 120,
         }
     }
 }
@@ -2141,6 +2148,24 @@ pub struct CareCfg {
     pub cover_purse_days: i64,
     /// A cover is lawful enough to hire: lawfulness at or above this.
     pub cover_lawful: f32,
+    // --- round 5 U6 (OPEN-217): the clinic's day
+    /// A patient goes to a doctor's body on duty with room first (the
+    /// Clinic's off-screen colleagues, present by the clock, took the pair
+    /// hash).
+    pub clinic_body_first: bool,
+    /// The off-screen chrome bought at midnight is booked for an hour from
+    /// the first to the last of these (hours of the day, inclusive; the
+    /// Ripperdoc's day shift), kept when the doctor is at the counter.
+    pub book_hours: [u16; 2],
+    /// The wash: an off-screen adult carrying this much toxicity or more ...
+    pub wash_min_tox: f32,
+    /// ... and holding `wash_price` above `wash_keep` books one on this a
+    /// day (a hash), at the Clinic nearest his Home ...
+    pub p_wash: f32,
+    pub wash_price: i64,
+    pub wash_keep: i64,
+    /// ... which takes this share of his toxicity out. `p_wash` 0 off.
+    pub wash_frac: f32,
 }
 
 /// Pressure pass round 2, R6a `[trade_verbs]` (docs/PRESSURE_PASS.md §
@@ -2174,6 +2199,18 @@ pub struct TradeVerbsCfg {
     /// The Dollhouse's off-screen evening rate (visits per adult a day, as
     /// the learned table's `p_venue`, which has no Dollhouse row).
     pub dollhouse_p_venue: f32,
+    /// Round 5 U6 (OPEN-217): the pimp's body at a dry pitch (nothing taken
+    /// since his last collection) draws this many off-screen residents of
+    /// the district for a client to send her (the first adult with the
+    /// street's wants and price); 0 off.
+    pub pimp_book_draws: u32,
+    /// Round 5 U6: a named pimp holding a day post quits it for the round
+    /// (and the job market passes him over while he holds the street).
+    pub pimp_quits: bool,
+    /// Round 5 U6: the round's trip bound (with `[distance.choice]`): a
+    /// pitch past this from where the pimp stands is no round this hour, and
+    /// nobody living past it from the district's nearest pitch is named.
+    pub pimp_trip_ticks: u64,
 }
 
 impl Default for TradeVerbsCfg {
@@ -2187,6 +2224,9 @@ impl Default for TradeVerbsCfg {
             rough_ban_days: 14,
             stat_fare_wait_ticks: 120,
             dollhouse_p_venue: 0.002,
+            pimp_book_draws: 8,
+            pimp_quits: true,
+            pimp_trip_ticks: 120,
         }
     }
 }
@@ -2213,6 +2253,13 @@ impl Default for CareCfg {
             ask_refused_days: 7,
             cover_purse_days: 3,
             cover_lawful: 0.3,
+            clinic_body_first: true,
+            book_hours: [9, 17],
+            wash_min_tox: 0.4,
+            p_wash: 0.05,
+            wash_price: 8,
+            wash_keep: 10,
+            wash_frac: 0.5,
         }
     }
 }

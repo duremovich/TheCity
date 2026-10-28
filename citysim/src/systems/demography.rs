@@ -879,6 +879,7 @@ fn pick_candidate(
     // L2 shadow fixes item 13: a corp's exec is not in the labour pool
     // (Zetatech's exec was hired as a Militech Fab Tech and laid off).
     let execs = crate::systems::classes::exec_set(world);
+    let pimps: Vec<EntityId> = world.jobs2.vice.pimps.values().copied().collect();
     let (skill_w, rehire) = if crate::systems::wages::on(world) {
         (world.config.economy2.skill_w.max(0.0), world.config.economy2.rehire_bonus)
     } else {
@@ -899,6 +900,8 @@ fn pick_candidate(
         .filter(|&id| !world.has::<Job>(id) && !world.has::<Sentence>(id))
         .filter(|&id| is_adult(world, id))
         .filter(|id| !execs.contains(id))
+        // Round 5 U6 (OPEN-217): a named pimp's round is his work.
+        .filter(|id| !pimps.contains(id))
         .filter(|&id| role != Role::Guard || world.comp::<Personality>(id).is_some_and(|p| p.lawfulness >= 0.4))
         // Jobs & lives phase 4 (§ 9): a row's `min_dress` (fashion on).
         .filter(|&id| crate::systems::fashion::dress_ok(world, id, role))
@@ -1400,6 +1403,7 @@ pub fn can_take(world: &World, id: EntityId, employer: EntityId, role: Role) -> 
         && is_adult(world, id)
         && !crate::systems::ages::is_protected(world, id)
         && !crate::systems::founding::is_exec(world, id)
+        && crate::systems::vice::pimp_district(world, id).is_none()
         && !crate::systems::life::quit_blocks(world, id, employer)
         && (role != Role::Guard || world.comp::<Personality>(id).is_some_and(|p| p.lawfulness >= 0.4))
         && crate::systems::fashion::dress_ok(world, id, role)

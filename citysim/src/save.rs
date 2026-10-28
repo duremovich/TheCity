@@ -437,7 +437,12 @@ use crate::world::World;
 /// keys and the `Jobs2Cols` `soup_starving_fed`, `soup_queued`, `soup_short`, `soup_far` columns.
 /// 95 (pressure pass round 5, U7, contradictions): `[chrome] strip_heir_salience` in the
 /// saved config (serde default).
-pub const SAVE_VERSION: u8 = 95;
+/// 96 (pressure pass round 5, U6, the pimp and the ripperdoc): `care::State.booked` (`Booking`,
+/// `Visit`: the clinic's day), the `[care]` `clinic_body_first`, `book_hours`, `wash_*` keys, the
+/// `[trade_verbs]` `pimp_book_draws`, `pimp_quits`, `pimp_trip_ticks` keys, `[verbs] wait_at_work_ticks` and the
+/// `Jobs2Cols` `pimp_booked`, `clinic_booked`, `clinic_kept`, `clinic_body`, `clinic_washes` columns
+/// (serde defaults).
+pub const SAVE_VERSION: u8 = 96;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
