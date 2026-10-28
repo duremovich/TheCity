@@ -756,6 +756,16 @@ pub struct World {
     /// with the `building_gen` it was built at (not saved, not cloned).
     #[serde(skip)]
     building_memo: Memo<(u64, std::sync::Arc<crate::spatial::BuildingGrid>)>,
+    /// Pressure pass round 5, U8 (OPEN-229): the Homes with a chromed
+    /// resident by door (`World::chromed_homes`), with the hour they were
+    /// read in (`tick / TICKS_PER_HOUR`; not saved, not cloned).
+    #[serde(skip)]
+    chromed_memo: Memo<(Tick, std::sync::Arc<crate::spatial::BuildingGrid>)>,
+    /// Pressure pass round 5, U8 (OPEN-229): the guards' tiles on a grid
+    /// (`World::guard_grid`), with the tick they were read at (not saved,
+    /// not cloned).
+    #[serde(skip)]
+    guard_memo: Memo<(Tick, std::sync::Arc<GuardGrid>)>,
     /// The perf pass phase 2: bumped by every `buildings_by_kind_mut()` (a
     /// building founded, converted, re-kinded or dropped from its kind's
     /// list; not saved).
@@ -1556,6 +1566,10 @@ impl<T> Memo<T> {
     }
 }
 
+/// Pressure pass round 5, U8: every guard's tile and the grid over them
+/// (`World::guard_grid`).
+pub type GuardGrid = (Vec<TilePos>, crate::spatial::TileGrid);
+
 /// The perf pass phase 2: `((building_gen, kinds_gen), each kind's grid)`.
 type KindGrids = ((u64, u64), BTreeMap<BuildingKind, std::sync::Arc<crate::spatial::BuildingGrid>>);
 
@@ -1939,6 +1953,8 @@ impl World {
             pos_index: Default::default(),
             building_gen: 0,
             building_memo: Memo::default(),
+            chromed_memo: Memo::default(),
+            guard_memo: Memo::default(),
             kinds_gen: 0,
             kind_memo: Memo::default(),
             shop_gen: 0,
@@ -2967,6 +2983,78 @@ impl World {
             ids.iter().map(|&b| self.comp::<Building>(b).map_or_else(TilePos::default, |bd| bd.door)).collect();
         let grid = std::sync::Arc::new(crate::spatial::BuildingGrid::build(self.map.w(), self.map.h(), ids, &doors));
         *memo = Some((self.building_gen, grid.clone()));
+        grid
+    }
+
+    /// Pressure pass round 5, U8 (OPEN-229): every Home a Purist gang could
+    /// shake down for its chrome (`gang::gang_work_target`): a resident above
+    /// the Purist tolerance (`creeds::chromed_home`), standing, not derelict,
+    /// inhabited and held by no gang, by door, read on the first query of an
+    /// hour. The pick searches it outward for the chromed first instead of
+    /// reading every Home in the city per member think (21.7 % of the 100k
+    /// profile at round 4's close). The pick re-tests every gate live, so a
+    /// Home that left the list within the hour is never taken for one on it;
+    /// one chromed or freed within the hour waits for the next (read per tick,
+    /// the rebuild was 3 % of the 100k profile).
+    pub fn chromed_homes(&self) -> std::sync::Arc<crate::spatial::BuildingGrid> {
+        let _t = crate::prof::scope!("gang::chromed_homes");
+        let hour = self.tick / time::TICKS_PER_HOUR;
+        let mut memo = self.chromed_memo.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((h, grid)) = memo.as_ref() {
+            if *h == hour {
+                return grid.clone();
+            }
+        }
+        let tol = self.config.creeds.creed_tolerance;
+        let mut ids: Vec<EntityId> = self
+            .kit
+            .iter()
+            .enumerate()
+            .filter(|(_, k)| k.as_ref().is_some_and(|k| k.visible > tol))
+            .filter_map(|(i, _)| {
+                let id = EntityId { index: i as u32, generation: self.generations[i] };
+                // `Household::home`, the one source of `residents_of`.
+                self.comp::<Household>(id).and_then(|h| h.home)
+            })
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        let mut held: Vec<EntityId> = self
+            .gang_ids
+            .iter()
+            .filter_map(|&g| self.comp::<Gang>(g))
+            .flat_map(|g| g.territory.iter().copied())
+            .collect();
+        held.sort_unstable();
+        ids.retain(|&h| {
+            held.binary_search(&h).is_err()
+                && self.comp::<Building>(h).is_some_and(|b| {
+                    b.kind == BuildingKind::Home && !b.demolished && !b.derelict && !b.occupants.is_empty()
+                })
+        });
+        let doors: Vec<TilePos> =
+            ids.iter().map(|&b| self.comp::<Building>(b).map_or_else(TilePos::default, |bd| bd.door)).collect();
+        let grid = std::sync::Arc::new(crate::spatial::BuildingGrid::build(self.map.w(), self.map.h(), ids, &doors));
+        *memo = Some((hour, grid.clone()));
+        grid
+    }
+
+    /// Pressure pass round 5, U8 (OPEN-229): every guard's tile on a grid,
+    /// read on the first query of a tick (`gang::guard_test`: it was built
+    /// per GangWork target pick, two a member think). A guard who moved later
+    /// in the tick is read where he stood at its first query.
+    pub fn guard_grid(&self) -> std::sync::Arc<GuardGrid> {
+        let mut memo = self.guard_memo.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((t, grid)) = memo.as_ref() {
+            if *t == self.tick {
+                return grid.clone();
+            }
+        }
+        let tiles: Vec<TilePos> =
+            self.guards().iter().filter_map(|&g| self.comp::<Position>(g).map(|p| p.tile)).collect();
+        let grid = crate::spatial::TileGrid::build(self.map.w(), self.map.h(), 16, tiles.iter().copied());
+        let grid = std::sync::Arc::new((tiles, grid));
+        *memo = Some((self.tick, grid.clone()));
         grid
     }
 

@@ -2626,3 +2626,49 @@ Re-pinned on its premise, the reason in place: `bodies`' `test_refound_only_afte
 brothers arrived (the event's arrivals), not that the gang still holds them days later (the moved city lost them to
 the cells and the street before the check). No test (doctrine 2). `SAVE_VERSION` 95, renumbered at the merge (`[chrome] strip_heir_salience`
 in the saved config; serde default).
+
+### U8, the GangWork hotspot (`OPEN-229`; `gang::gang_work_pick`, `gang::guard_test`, `World::chromed_homes`, `World::guard_grid`, `utility::goals`)
+
+**The scan.** Instrumented once at 20k (seed 42, day 21; the timers removed): 75 % of `goal::GangWork` was the
+Purist branch of `gang_work_pick`. A Purist gang shakes down the chromed's Homes first (M15 W31), and a chromed Home
+anywhere beats a plain one nearby, so the pick walked **every Home in the city** per call, running `holder_of` (a walk
+over every gang's territory) on each Home that survived the cheap rejects (9.2M `holder_of` calls in one 20k day,
+~184 us a pick). The pick also ran twice a member think (the scav check, then the walk), and `guard_test` built a
+fresh grid of every guard on each pick.
+
+**The index.** (1) `World::chromed_homes`: the Homes a Purist could shake down for their chrome (a resident with
+`Kit.visible` over `creed_tolerance`, standing, not derelict, inhabited, held by no gang: the territories read once a
+rebuild), by door on a `BuildingGrid`, rebuilt on the first query of an hour. The Purist pick is two grid searches:
+the nearest chromed Home on that grid, else the nearest Home on the building grid (the non-Purist search, as before);
+the Contest branch reads the rival's list as before. Every gate is re-tested live in the score, so the only thing
+the hourly list can do is miss a Home chromed or freed within the hour (it waits for the next hour); a Home that
+left the list is never taken. (2) `World::guard_grid`: the guards' tiles on a grid, read on the first query of a
+tick, shared by every pick (the Squat branch too); a guard who moved later in the tick is read where he stood.
+(3) `utility::goals` GangWork picks the target once a think. No numbers added (the hour is `TICKS_PER_HOUR`, the
+guard grid's 16-tile cell the old literal); no state saved (`#[serde(skip)]` memos), `SAVE_VERSION` stays 95.
+
+**Numbers** (100k `isle_m_k2_100k`, `--scaled --ambient-flats 50`, seed 42, a day-25 save made by main `b4fc720`,
+days 25-27 under `--features prof`, one run each; `target/u8_perf/before.err`, `after3.err`): `goal::GangWork`
+**75.6 s -> 21.6 s** (25.2 -> 7.2 s a game day; 30.1 % -> 6.9 % of the profiled ticks; 3.61M calls each); it is now
+below `goal::Unwind` (25.3 -> 29.7 s) and near `goal::Arrest` (14.2 -> 16.1 s). `think::think_with_offer` summed
+232.5 -> 206.9 s. The per-tick chromed rebuild was 7.5 s of an intermediate run; hourly it is 0.1 s. Ticks/s
+18 / 18 / 16 -> 12 / 12 / 19: **a print on a shared box** (U6 and the fix round building): every site the phase does
+not touch ran 10-25 % slower in the after run (`lod::run_statistical` 39.6 -> 48.8 s, `goal::Eat` 14.8 -> 17.9 s,
+`tick::think` wall 80 -> 115 s for less summed think time), so the ticks/s are not read.
+
+**Shadow** (20k `isle_m_k2` seed 42 days 21-27, `gang_member:2,gang_leader:1`; `target/u8_shadow_before`,
+`u8_shadow_after`). The run diverges (the hour-old list and the tick's guard grid move a few picks), so the members
+picked differ; the leader is the same man (Zed Abernathy, The Grey Lanterns). The choices read the same: the same
+GangWork lines (`target 1.00->1.00`, `order`, `travel`), the Home shaken down near the member (before
+`gang_member_6468 d21 04:15` "PLAN GangWork on Block#1007 ... travel 0.45->0.82", "extorted 5 coins from
+Block#1007"; after `gang_leader_14064 d21 05:54` "GOAL GangWork ... travel 2.15->0.48", "PLAN GangWork on
+Block#235"), the scav round (`gang_member_26117 d22 03:17` "the scav round 1.00->1.00 ... Scavenge->Street
+Market#4418"), the Squat order's Occupy (`Block#2207`, three mornings), and a Purist member of The Unplugged
+(`gang_member_6435 d24 18:15`) whose GangWork is the creed's Preach, as the cult member's was before
+(`gang_member_10538`, 8 Preach plans). No diary shows a Purist shakedown in the window (the Unplugged member preached),
+so the chromed-first pick is read from the code: the same Home as the walk it replaced, but for a Home chromed or
+freed within the hour.
+
+**Deviations.** The brief's "cache or index": both (a grid index of the chromed, a per-tick guard grid) plus the
+duplicate pick removed. Not taken: `holder_of` stays a walk over the gangs (0.9 s in a 20k day once the Purist
+walk was gone); `goal::Unwind` is now the top goal (`OPEN-229`'s next read). No test (doctrine 2).
