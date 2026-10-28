@@ -435,7 +435,9 @@ use crate::world::World;
 /// 94 (pressure pass round 5, U3, the soup line): `Charity.short_today` (written while set),
 /// `EventKind::SoupLine`, the `[charity]` `starving_reach_ticks`, `servings_per_day`, `soup_hour`
 /// keys and the `Jobs2Cols` `soup_starving_fed`, `soup_queued`, `soup_short`, `soup_far` columns.
-pub const SAVE_VERSION: u8 = 94;
+/// 95 (pressure pass round 5, U7, contradictions): `[chrome] strip_heir_salience` in the
+/// saved config (serde default).
+pub const SAVE_VERSION: u8 = 95;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

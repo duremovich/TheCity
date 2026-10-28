@@ -203,6 +203,48 @@ pub fn raise_crime_mult(
     except: Option<EntityId>,
     witness_mult: f32,
 ) {
+    raise_crime_core(world, actor, victim, object, crime, tile, except, &[], witness_mult);
+}
+
+/// Round 5 U7 (`OPEN-237`): `raise_crime_on` with the crime's other parties
+/// (a shakedown's payers, who have their own `WasRobbed`) kept out of the
+/// witnesses.
+pub fn raise_crime_parties(
+    world: &mut World,
+    actor: EntityId,
+    victim: Option<EntityId>,
+    object: Option<EntityId>,
+    crime: Crime,
+    tile: TilePos,
+    parties: &[EntityId],
+) {
+    raise_crime_core(world, actor, victim, object, crime, tile, None, parties, 1.0);
+}
+
+/// Round 5 U7 (`OPEN-237`): an accomplice of `actor`: a member of the same
+/// gang on the same goal (two partners at one shakedown, a raid's crew).
+/// An accomplice is in the deed, not a witness of it.
+pub fn accomplice(world: &World, w: EntityId, actor: EntityId) -> bool {
+    let Some(g) = world.gang_of(actor) else { return false };
+    if world.gang_of(w) != Some(g) {
+        return false;
+    }
+    let goal = |id: EntityId| world.comp::<Brain>(id).and_then(|b| b.current_goal);
+    goal(actor).is_some_and(|k| goal(w) == Some(k))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn raise_crime_core(
+    world: &mut World,
+    actor: EntityId,
+    victim: Option<EntityId>,
+    object: Option<EntityId>,
+    crime: Crime,
+    tile: TilePos,
+    except: Option<EntityId>,
+    parties: &[EntityId],
+    witness_mult: f32,
+) {
     // L2 phase 4 (plan L25): the ledger's on-screen victims.
     if let Some(v) = victim {
         let kind = match crime {
@@ -286,7 +328,12 @@ pub fn raise_crime_mult(
     };
     let mut witnesses: Vec<EntityId> = candidates
         .into_iter()
-        .filter(|&w| w != actor && Some(w) != except)
+        // Round 5 U7 (`OPEN-237`): the actor, the victim, the deed's object,
+        // its named parties and the actor's accomplices are in the deed, never
+        // its witnesses (a shakedown's payer saw his own robbery, `courier_50838
+        // d23 03:28`; two partners in one Home each saw the other's, U4's shadow).
+        .filter(|&w| w != actor && Some(w) != except && Some(w) != victim && Some(w) != object && !parties.contains(&w))
+        .filter(|&w| !accomplice(world, w, actor))
         // M14 V12: a body jacked in sees nothing.
         .filter(|w| world.runner_of.is_empty() || !world.runner_of.contains_key(w))
         .filter(|&w| {
@@ -392,6 +439,25 @@ pub fn raise_crime_mult(
             // The pressure pass phase 5a: the civilian reacts (report, flee,
             // gossip, blackmail); the culprit may see who saw him.
             crate::systems::consequence::witnessed(world, w, actor, crime, object);
+        }
+    }
+    // Round 5 U7 (`OPEN-237`): the victim and the named parties are no
+    // witnesses, but they know who did it: a first-hand `SawCrime` (what
+    // `ReportCrime` reads; the witness roll gave them one before), with no
+    // Witness line and no witness's reaction. A guard on shift who is the
+    // victim files at once, as his witness roll did.
+    if !detained {
+        let knowers: Vec<EntityId> =
+            victim.into_iter().chain(parties.iter().copied()).filter(|&k| k != actor).collect();
+        for k in knowers {
+            if crate::systems::robots::is_robot(world, k) || !living(world, k) || !world.has::<Brain>(k) {
+                continue;
+            }
+            world.remember_crime(k, actor, crime, salience, object);
+            noticed += 1;
+            if on_duty(world, k) && !is_petty(crime) && !crate::systems::contracts::on_take_of(world, k, actor) {
+                file_report(world, crime, actor, Some(k));
+            }
         }
     }
     // M13 D41: a robot victim has no memory, edges or needs.

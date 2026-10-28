@@ -303,6 +303,11 @@ pub enum Flow {
     /// parent -> the Camp's owner (untaxed; `flow_other` plus
     /// `Jobs2Cols.flow_buyout`, the `Fine` shape).
     Buyout,
+    /// Round 5 U7 (`OPEN-237`): a cab driver's cut of a fare, the Garage's
+    /// owner -> the driver (taxed and in `flow_other`, as the `CabFare` it
+    /// was booked under: V13's driver read every cut as a rider's fare "from"
+    /// the agent who owns his Garage, `cabbie_73680`).
+    FareCut,
 }
 
 impl Flow {
@@ -343,6 +348,7 @@ impl Flow {
                 | Flow::Power
                 | Flow::Build
                 | Flow::CabFare
+                | Flow::FareCut
         )
     }
 }
@@ -441,7 +447,7 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
             row.flow_other += coins;
             row.jobs2.get_or_insert_with(Default::default).flow_buyout += coins;
         }
-        Flow::CabFare | Flow::StreetCut | Flow::Gray => row.flow_other += coins,
+        Flow::CabFare | Flow::FareCut | Flow::StreetCut | Flow::Gray => row.flow_other += coins,
     }
 }
 
@@ -2096,7 +2102,10 @@ fn exec_wages(world: &mut World) {
                 next
             }
         };
-        if let Some(e) = exec {
+        // Round 5 U7 (`OPEN-237`): an exec held in the cells keeps the chair
+        // and draws no salary for the day (V13: a jailed exec paid his
+        // ExecWage; a worker in the cells works no shift and is paid none).
+        if let Some(e) = exec.filter(|&e| !world.has::<crate::components::Sentence>(e)) {
             let paid = pay(world, Some(c), Some(e), wage, Flow::ExecWage);
             // Real economy phase 2 (plan E16): the exec's wage is payroll.
             note_payroll(world, Some(c), paid);

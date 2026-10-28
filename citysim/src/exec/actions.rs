@@ -1646,8 +1646,15 @@ fn steal_food(world: &mut World, id: EntityId, source: StealSource, target: Opti
     let tile = world.comp::<Position>(id).map_or(TilePos::default(), |p| p.tile);
     let victim = match source {
         // The pressure pass S6 (Dylan 2026-10-27): nobody under 18 is a victim.
+        // Round 5 U7 (`OPEN-237`): the robbed is a resident at home, never a
+        // visitor there (a thief who had just stolen from the same Home was
+        // "robbed" by the next thief, `homeless_71553 d21 16:26`).
         StealSource::Home => world.comp::<Building>(b).and_then(|bd| {
-            bd.occupants.iter().copied().find(|&o| o != id && !crate::systems::ages::is_protected(world, o))
+            let res = world.residents_of(b);
+            bd.occupants
+                .iter()
+                .copied()
+                .find(|&o| o != id && res.contains(&o) && !crate::systems::ages::is_protected(world, o))
         }),
         _ => None,
     };

@@ -686,7 +686,22 @@ pub fn post_with(world: &mut World, p: Posting, extra: PostExtra) -> Result<Cont
     let who = world.owner_label(p.buyer);
     let on = world.name_of(p.target.id());
     let at = p.broker.map(|b| format!(" at {}", world.name_of(b))).unwrap_or_default();
-    let mut text = format!("{who} posted a {} on {on} for {price}{at}", p.kind.label());
+    // Round 5 U7 (`OPEN-237`): a guard or an escort is posted for its ward,
+    // a bodyguard for oneself as such (V13: "Cato Park posted a guard on Cato
+    // Park", a hit's grammar on his own name, `gun_41438 d23 00:09`).
+    let mut text = if matches!(p.kind, ContractKind::Guard | ContractKind::Escort) {
+        let on = if Some(p.target.id()) == p.buyer {
+            match world.comp::<Identity>(p.target.id()).map(|i| i.sex) {
+                Some(crate::components::Sex::Female) => "herself".to_string(),
+                _ => "himself".to_string(),
+            }
+        } else {
+            on
+        };
+        format!("{who} posted a {} for {on} for {price}{at}", p.kind.label())
+    } else {
+        format!("{who} posted a {} on {on} for {price}{at}", p.kind.label())
+    };
     if !extra.motive.is_none() {
         let down = deposit.map(|d| format!("{d} down, ")).unwrap_or_default();
         let why = extra.why.as_deref().map(|w| format!(" {w}")).unwrap_or_default();
@@ -2696,8 +2711,34 @@ pub fn on_contact(world: &mut World, taker: EntityId) {
         return;
     }
     let tile = world.comp::<Position>(r.target).map_or_else(Default::default, |p| p.tile);
-    pay_sighting(world, r.contract, taker, r.target, tile, false);
+    if !pay_sighting(world, r.contract, taker, r.target, tile, false) {
+        spent_locate(world, r.contract);
+    }
     reset_chase(world, taker);
+}
+
+/// Round 5 U7 (`OPEN-222`): a taken Locate whose payer has nothing left for
+/// a sighting is settled as the ledger tracker's report settles it
+/// (fulfilled on the sightings it bought; a direct buyer short with none
+/// bought reneges; else back on the board). A brokered Locate escrows its
+/// price (30-40c) while `cap_sightings` x `per_sighting` is 150c: after two
+/// or three paid sightings every contact was refused, the cap never came,
+/// and the taker staked out a week (`gun_41438`: 12 aborts, 5-11 h a day, no
+/// result; 20k `gun_23612`: 49 two-minute stake-outs). A refusal for the
+/// gap between sightings is not this (the payer still holds coins).
+fn spent_locate(world: &mut World, id: ContractId) {
+    let Some(x) = world.contracts.get(&id).filter(|x| x.status == ContractStatus::Taken).cloned() else { return };
+    let spent = if x.brokered() { x.escrow <= 0 } else { x.buyer.is_some() && world.purse(x.buyer) <= 0 };
+    if !spent || x.paid_sightings >= world.config.bounty.cap_sightings {
+        return;
+    }
+    if x.paid_sightings > 0 {
+        settle(world, id, Settle::Fulfilled, "");
+    } else if x.buyer.is_some() && !x.brokered() {
+        renege(world, id, &x);
+    } else {
+        fail_attempt(world, id, "nothing left to pay a sighting with");
+    }
 }
 
 /// C15: `taker`'s chase back to asking (intel, venue and stakeout cleared).

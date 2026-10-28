@@ -1118,13 +1118,19 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
     let take = amount.min(total);
     let mut taken = 0;
     let held: Vec<i64> = occupants.iter().map(|&o| world.comp::<Wallet>(o).map_or(0, |w| w.coins)).collect();
+    // Round 5 U7 (`OPEN-237`): the coins move on the books (`Flow::Coerced`,
+    // as the gang's tribute), so the payer's money line names the shakedown
+    // (it read `other`, `courier_50838 d23 03:28`).
     for &o in &occupants {
         let coins = world.comp::<Wallet>(o).map_or(0, |w| w.coins.max(0));
         let share = if total > 0 { (take * coins) / total } else { 0 };
-        if let Some(w) = world.comp_mut::<Wallet>(o) {
-            w.coins -= share;
-        }
-        taken += share;
+        taken += crate::systems::ownership::pay(
+            world,
+            Some(o),
+            Some(actor),
+            share,
+            crate::systems::ownership::Flow::Coerced,
+        );
     }
     // The rounding remainder comes a coin at a time from whoever still has one.
     let mut guard = 0;
@@ -1136,20 +1142,22 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
         if world.comp::<Wallet>(payer).is_none_or(|w| w.coins <= 0) {
             break;
         }
-        if let Some(w) = world.comp_mut::<Wallet>(payer) {
-            w.coins -= 1;
-        }
-        taken += 1;
-    }
-    if let Some(w) = world.comp_mut::<Wallet>(actor) {
-        w.coins += taken;
+        taken += crate::systems::ownership::pay(
+            world,
+            Some(payer),
+            Some(actor),
+            1,
+            crate::systems::ownership::Flow::Coerced,
+        );
     }
     // Shadow V4 bug 9: the robbed are those who paid (9 of 17 shakedowns
     // took 0 coins and still made Enemies, memories and claims).
+    let mut paid = Vec::new();
     for (i, &o) in occupants.iter().enumerate() {
         if world.comp::<Wallet>(o).is_some_and(|w| w.coins < held[i]) {
             world.remember(o, MemoryKind::WasRobbed, Some(actor), 0.7, -0.7, false);
             social::robbed_by(world, o, actor);
+            paid.push(o);
         }
     }
     let today = world.day();
@@ -1189,7 +1197,9 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
         format!("{name} extorted {taken} coins from Block#{}{suffix}", home.index),
     );
     let tile = world.comp::<Position>(actor).map_or(TilePos::default(), |p| p.tile);
-    law::raise_crime(world, actor, None, crate::components::Crime::Extortion, tile);
+    // Round 5 U7 (`OPEN-237`): the payers are the deed's parties, not its
+    // witnesses (they know who did it all the same).
+    law::raise_crime_parties(world, actor, None, None, crate::components::Crime::Extortion, tile, &paid);
     crate::systems::fviolence::note_act(world, actor, crate::ledger::ActKind::Extort);
     taken
 }
@@ -1284,6 +1294,8 @@ pub fn stat_extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
         .iter()
         .copied()
         .filter(|&o| o != actor && world.has::<Wallet>(o) && world.has::<Brain>(o) && !world.has::<Sentence>(o))
+        // Round 5 U7: as the body's shakedown, nobody under 18 pays (S6).
+        .filter(|&o| !crate::systems::ages::is_protected(world, o))
         .collect();
     let total: i64 = payers.iter().map(|&o| world.comp::<Wallet>(o).map_or(0, |w| w.coins.max(0))).sum();
     let take = amount.min(total);

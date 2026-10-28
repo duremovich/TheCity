@@ -496,7 +496,7 @@ pub struct VerbsCfg {
     /// ... one deal a gang every this many days.
     pub trade_days: u8,
     /// Round 3 S5 (OPEN-217): a cab driver's body takes this share of each
-    /// fare he drives, in hand when the rider pays (`Flow::CabFare` from the
+    /// fare he drives, in hand when the rider pays (`Flow::FareCut` from the
     /// Garage's owner, who took the fare); above 0 the cut is his pay and
     /// the shift's wage is not paid (`customers::fare_scale`: the wage
     /// scaled by the fares paid 0c and wrote "Paid" on a fare-less shift).
@@ -8057,6 +8057,10 @@ pub struct ChromeCfg {
     /// treat, else the Treat curve's floor sent the calm to Therapy whenever
     /// they idled).
     pub treat_below: f32,
+    /// Round 5 U7 (`OPEN-237`): an heir who did not see a body stripped of
+    /// coins learns it when the body is settled, an unnamed `Stripped` memory
+    /// of this salience (the one in sight remembers the stripper at 0.7).
+    pub strip_heir_salience: f32,
 }
 
 impl Default for ChromeCfg {
@@ -8101,6 +8105,7 @@ impl ChromeCfg {
             loot_reach: 16,
             gang_chrome_floor: 300,
             treat_below: 1.0,
+            strip_heir_salience: 0.5,
         }
     }
 }

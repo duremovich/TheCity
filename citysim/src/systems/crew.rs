@@ -301,6 +301,14 @@ fn in_reach(world: &World, c: &CrewCfg, m: EntityId, place: EntityId) -> bool {
 /// he is not posted to it and says so (a Crew line): V11's leader walked
 /// 330 and 630 min to his own muster, both cut, then "missed". True off.
 fn muster_reach(world: &mut World, c: &CrewCfg, m: EntityId, gang: EntityId) -> bool {
+    // Round 5 U7 (`OPEN-222`): a member already on his Raid plan is in the
+    // raid (the march past the muster): no muster to post him to and no
+    // "sat out" line (V13: "sat out the raid" at 00:07 while he marched on
+    // the Precinct, `raider_84195 d21`).
+    if world.comp::<crate::components::Brain>(m).and_then(|b| b.plan_goal()) == Some(crate::components::GoalKind::Raid)
+    {
+        return false;
+    }
     let Some((t, at)) = crate::systems::raid::muster_trip(world, m, true) else { return true };
     if t <= c.duty_reach_ticks {
         return true;
