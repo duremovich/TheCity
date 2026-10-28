@@ -38,23 +38,23 @@ quiet box 218 -> 192. The profile: `goal::GangWork` 21.7 % of the 100k profiled 
 
 - No agents are running; no worktrees. `target/shadow_v13/`, `target/r4_100k/`, `target/r4_perf/` hold the runs.
 
-## Calls for Dylan (before round 5 is planned)
+## Calls Dylan made (2026-10-28, on Shadow V13)
 
-- **Schools at 100k**: 18 for ~11k children, every one full (`schools` counts per Lot copy). Seed by child count, or
-  found on demand? And the 2c fee keeps most children in reach at home at 20k (`OPEN-232`).
-- **The neglect ladder**: a child goes 2 days unfed before the warning and again before a take; warned, slip, warned
-  again is possible with no take (`OPEN-231`). As built on his call; does it sit right beside the under-18 rule?
-- **Broke adults starving at 100k** (`OPEN-235`): a meal source within the week as a mechanism (the Mission's reach,
-  the soup line), not a dole (no safety net, 2026-10-08).
-- **The GangWork hotspot**: a small perf phase in round 5, or leave ticks/s (20.8 at 100k) as a print?
+- Schools: seeded by child count **and** founded on demand (`OPEN-232`); the 2c fee stays.
+- The neglect ladder tightens: a second warning inside 30 days takes; a warning with no free parent at home takes at
+  once (`OPEN-231`).
+- The starving broke get a Mission meal that reaches them: charity that runs short, not a dole (`OPEN-235`).
+- A small perf phase for `goal::GangWork` (`OPEN-229`).
+- Round 5 also takes witnessing indoors (`OPEN-236`), the label trades (`OPEN-217`) and the contradictions
+  (`OPEN-237`); the search's other edges and the crew / BinContest noise wait for the next noise pass.
 
 ## Next, in order
 
-1. **Pressure pass round 5 from V13**, planned on Dylan's calls: witnessing indoors (`OPEN-236`), the trades' inside
-   for the label trades (forger, fixer, pimp, ripperdoc, the 100k door; `OPEN-217`, two to a brief), the
-   contradictions (`OPEN-237`, `OPEN-222`'s leftovers), the ladder's edges (`OPEN-231`), the starving broke
-   (`OPEN-235`), the search's edges (the released, the pimp, the parent's Camp visit), noise (crew day-off,
-   BinContest), maybe GangWork's perf.
+1. **Pressure pass round 5 from V13** (`docs/PRESSURE_PASS.md` § "Round 5 from Shadow V13", planned on the calls
+   above): wave 1 U1 Schools by child count and on demand, U3 the starving reach a meal, U4 who is indoors sees
+   indoors, U5 the forger and the fixer; wave 2 U2 the ladder tightens, U6 the pimp and the ripperdoc, U7
+   contradictions, U8 the GangWork hotspot. One Opus coder per phase in a worktree, as rounds 2-4 ran. Then Shadow
+   V14 in V13's window.
 2. The 100k map re-import (`OPEN-204`, `OPEN-182`; home-to-post walking, `OPEN-221`): the Lot shortage needs the
    footprint redesign or `OPEN-187` multi-tenancy, a joint job with TheCityGraphics.
 3. The vertical city (`OPEN-187`, `OPEN-191`), the view milestone, M18.

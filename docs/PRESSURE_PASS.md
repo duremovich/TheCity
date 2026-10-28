@@ -321,6 +321,87 @@ from inside the Precinct; the hourly "met at the table" memories (`ceo_88522`). 
 beating lines, so a shadow can check the under-18 rule. The shadow's `sick` pick carries an illness (V12's had none).
 Shadow: every group's busiest diary (gang_member, madam, guard, ceo, sick).
 
+### Round 5 from Shadow V13 (`SHADOW_V13.md`, opened 2026-10-28)
+
+Dylan's calls (2026-10-28): Schools seeded by child count **and** founded on demand (`OPEN-232`); the 2c fee stays
+(poor children out of School is the city); the neglect ladder tightens: a second warning inside 30 days takes, and a
+warning with no free parent at home takes at once (`OPEN-231`); the starving broke get a Mission meal that reaches
+them, charity that runs short, not a dole (`OPEN-235`); a small perf phase for `goal::GangWork` (`OPEN-229`); the
+round also takes witnessing indoors (`OPEN-236`), the label trades (`OPEN-217`, two to a brief) and the
+contradictions (`OPEN-237`, `OPEN-222`'s leftovers). Left out on purpose: the search's other edges and the crew
+day-off / BinContest noise (the next noise pass). The under-18 rule holds in every phase (CLAUDE.md): a brief that
+touches a victim pick, a fight or a punishment says how `ages::is_protected` gates it. Wave 1 is U1, U3, U4, U5;
+wave 2 (U2, U6, U7, U8) after wave 1 merges (U2 shares the Camp parent with U1's Schools, U7 the witness and memory
+paths U4 changes, U8 profiles the code the round leaves). Iterate at 20k (`--population 20000 --map
+assets/maps/isle_m_k2.txt`, `run` also `--scaled --ambient-flats 50`); V13's repro picks are 100k seed 42 days 21-27
+(`target/shadow_v13/`), read there only when 20k cannot show the case.
+
+#### U1, Schools for the children there are (`OPEN-232`)
+
+Seed Schools from the city's school-age count (`[ages]` children a School, placed by T2's reach rule), so 100k stops
+undercounting (`schools` counts per Lot copy: 18 for ~11k children, every one full); then found one on demand: a
+district whose children are turned away full for N days gets a School on a vacant Lot (or a refit Block, as
+`jobs::seed_derelict` does), staffed by the hire. The fee stays. Shadow: school_parent, teacher, and a `[family]` line
+with children. Moves a number: school days / child-days and the turned-away-full count, 20k and 100k x 8, before and
+after.
+
+#### U2, the neglect ladder tightens (`OPEN-231`), wave 2
+
+A second warning inside `warn_repeat_days` (30) takes; a warning with no free parent at home (every parent jailed,
+hospitalised or gone) takes at once. The bugs at its edges: the warning's household is not the child's own
+(`reporter_57837 d27 00:10`, Rin Duarte at Block#3363, her Home Block#205); the `[family]` line still "at home" hours
+after a take (`camp_parent_23527 d25 09:30`); a jailed parent's warning hanging open all week (`dancer_99218`); a
+jobless parent's search crowding out the week's Camp visit (T5's re-pinned buy-out probe: a visit due outranks a
+search day). Shadow: camp_parent, camp_warden, school_parent, dancer. Moves a number: ChildTaken and ch_camp, 20k seed
+42, before and after.
+
+#### U3, the starving broke reach a meal (`OPEN-235`)
+
+Charity, not a dole: a Mission or soup line serves the starving within the week (servings in config, a queue, a meal
+that runs out), a body at hunger 0 walks there by reach, the off-screen starving get the same at the Mission's hour;
+the evicted and the just-released are the cases (V13's dead: ~17 evicted, ~7 out of the cells, 7 housed with
+`RentShort 0 of N`). Shadow: homeless, miserable, jailed (the released), sick. Moves a number: starvation deaths and
+Starving events at 100k x 30, before and after (20k shows none).
+
+#### U4, who is indoors sees indoors (`OPEN-236`)
+
+A witness inside a building sees what happens in that building; a body outside sees the street within sight. The
+cells do not see the El gate (`gang_member_6738`, 31 Fare Evasion lines), the Precinct's desk does not see the
+street's assaults it cannot reach (`guard_27360`, 41 crimes, the one Arrest `Unreachable`). Witness 190k -> 269k at
+100k is the number to read. Shadow: guard, jailed, gang_member, reporter.
+
+#### U5, the forger and the fixer at work (`OPEN-217`)
+
+Both do ClerkWork in V13 (crime). First find why the followed body never meets a client at 100k (T4 found the LOD
+tier took the door's customers; S4 the same for care): then the forger's commission (the papers, the walk-in, the
+cut) and the fixer's day (posts brokered, the crew picked, the job's outcome back to him; corp's Fixer posts "never
+come back with an outcome"). Shadow: forger, fixer, buyer.
+
+#### U6, the pimp and the ripperdoc at work (`OPEN-217`), wave 2
+
+The pimp runs gang Extort errands, no round and no booked client (crime); ripperdocs see 0 and 1 patients a week, 8.8
+h of ClerkWork or Rest, and rest at the post five hours before the shift (`ripperdoc_11503 d22 04:13`); the orderly's
+34 installs land at 00:00 (care). The same cause first (the tier), then the round and the clinic's day. A jobless pimp
+does not search like a labourer (`pimp_84453`). Shadow: pimp, ripperdoc, orderly, street_worker.
+
+#### U7, contradictions (`OPEN-237`, `OPEN-222`'s leftovers), wave 2
+
+Each at its cause: the thief gets the "was robbed" memory and grudge (`homeless_71553 d21 16:26`); a raider "sat out
+the raid" while it marches (`raider_84195 d21 00:07`); a contract posts a guard on its own taker (`runner_94196`,
+`gun_41438 d23 00:09`); a seven-day stakeout with 12 aborts and no result (`gun_41438`); CabFare names one Friend as
+every rider's payer (`cabbie_73680`); a shakedown's victim witnesses his own robbery, its money line `other`
+(`jobless_6204`, `courier_50838 d23 03:28`); a sick worker foreman of her own cover hire (`sick_47483 d21`); a CEO's
+585c corpse strip unwitnessed (`ceo_20314 d21 08:20`); a jailed exec paid his ExecWage. Shadow: homeless, raider,
+gun, runner, cabbie, courier, ceo, exec.
+
+#### U8, the GangWork hotspot (`OPEN-229`), wave 2
+
+`goal::GangWork` scoring is 21.7 % of the 100k profiled time (45.8 s in days 25-27, 3.66M calls, ~12.5 µs each,
+`target/r4_perf/prof100k.err`), ahead of `goal::Unwind` (11.3 %). Find the scan behind it and cache or index it; the
+scores need not be byte-identical (doctrine: no identity gates), but the choices should read the same in a gang
+diary. Numbers: the site's ms a game day and ticks/s, 100k days 25-27 under `--features prof`, before and after, one
+run each; a gang_member and gang_leader shadow at 20k.
+
 ## Implemented: deviations
 
 (Per phase, as they land.)
