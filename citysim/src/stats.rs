@@ -856,6 +856,20 @@ pub struct Jobs2Cols {
     pub shape_up_home: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub foreman_gate: u32,
+    /// Round 4 T5 (OPEN-217): a body's search day begun (its Friends asked),
+    /// a Friend's word of a post, a door asked, a hire at the door, and the
+    /// midnight job search's far post (past `hire_max_ticks`) taken by a
+    /// native who takes worse work.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub search_days: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub search_leads: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub search_asks: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub search_hires: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub far_hires: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub fares_short: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
@@ -1596,6 +1610,11 @@ impl Jobs2Cols {
                 "door_under_age",
                 "shape_up_home",
                 "foreman_gate",
+                "search_days",
+                "search_leads",
+                "search_asks",
+                "search_hires",
+                "far_hires",
                 "fares_short",
                 "parcels_delivered",
                 "parcels_returned",
@@ -2077,6 +2096,11 @@ impl Jobs2Cols {
             self.door_under_age.to_string(),
             self.shape_up_home.to_string(),
             self.foreman_gate.to_string(),
+            self.search_days.to_string(),
+            self.search_leads.to_string(),
+            self.search_asks.to_string(),
+            self.search_hires.to_string(),
+            self.far_hires.to_string(),
             self.fares_short.to_string(),
             self.parcels_delivered.to_string(),
             self.parcels_returned.to_string(),

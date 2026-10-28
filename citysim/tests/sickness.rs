@@ -1097,6 +1097,10 @@ fn test_g3_only_the_broke_steal_food() {
         let mut snaps: std::collections::VecDeque<std::collections::BTreeMap<EntityId, i64>> = Default::default();
         let mut cfg = Config::load().dole_city().v1_profile();
         cfg.lod.force = Some(Lod::Full);
+        // Round 4 T5: no job search (the subject is the thief's purse; a door
+        // hire's wage landing between the snapshots read as a thief with a
+        // meal's coins).
+        cfg.search = None;
         let mut w = World::new(seed, cfg);
         w.levers.dole_per_day = 0;
         let mut cursor = w.events.back().map_or(0, |e| e.id + 1);

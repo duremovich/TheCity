@@ -97,6 +97,7 @@ pub mod raid;
 pub mod reputation;
 pub mod riot;
 pub mod robots;
+pub mod search;
 pub mod security;
 pub mod service;
 pub mod shift;

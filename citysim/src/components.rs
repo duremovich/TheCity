@@ -4530,6 +4530,36 @@ pub struct Misery {
     /// last seen to (a Clinic's or a back room's patch-up).
     #[serde(default)]
     pub patched_at: Tick,
+    /// Round 4 T5 (`systems::search`): the day's search (a body's): the day
+    /// it is for, the doors asked, the door he is making for and the Friend
+    /// who told him of it; `None` once no search has been made.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search: Option<SearchDay>,
+    /// Round 4 T5: the jobless spell (its first day) whose Friends were told
+    /// "nobody knew of an opening" (a later day's ask is told only with a word).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_spell: Option<u64>,
+}
+
+/// Round 4 T5: one body's search day (`Misery.search`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SearchDay {
+    pub day: u64,
+    /// Sent home from the shape-up today: a search day whatever his idle days.
+    #[serde(default)]
+    pub sent_home: bool,
+    /// The Friends were asked today (one line).
+    #[serde(default)]
+    pub asked: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tried: Vec<EntityId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub board: Option<EntityId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lead: Option<EntityId>,
+    /// No door left today (the line said so).
+    #[serde(default)]
+    pub done: bool,
 }
 
 /// Jobs & lives phase 3: an item's provenance (its last change of hands).

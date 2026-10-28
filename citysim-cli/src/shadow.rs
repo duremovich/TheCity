@@ -159,7 +159,7 @@ pub struct ShadowArgs {
     pub map: Option<PathBuf>,
 }
 
-const ARCHETYPES: [&str; 56] = [
+const ARCHETYPES: [&str; 57] = [
     "gang_member",
     // The pressure pass phase 5b: a member of a gang whose standing order
     // marches (a raid, a retaliation, a breakout) at the start day.
@@ -241,6 +241,9 @@ const ARCHETYPES: [&str; 56] = [
     // The pressure pass S6 (OPEN-224): a working parent whose child is on a
     // School's roll at the start day or earlier in the childhood (the seeded city's children).
     "school_parent",
+    // Round 4 T5 (OPEN-217): a jobless adult inside the search at the start day (a post lost
+    // in the last `[search] search_days`), the freshest first (not shuffled).
+    "jobless",
 ];
 
 /// Activity classes of the time-use table, in print order.
@@ -465,6 +468,15 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
             .filter(|&a| world.has::<GangMember>(a))
             .filter(|&a| world.gang_of(a).is_some_and(|g| citysim::systems::gray::organ_targets(world, g)))
             .collect(),
+        // Round 4 T5: the searching jobless, the freshest post lost first (then id).
+        "jobless" => {
+            let mut v: Vec<(u64, EntityId)> = adults()
+                .filter(|&a| citysim::systems::search::searching(world, a))
+                .map(|a| (citysim::systems::search::idle_days(world, a), a))
+                .collect();
+            v.sort();
+            v.into_iter().map(|(_, a)| a).collect()
+        }
         // V2: the diary should start on the weekday before `[leisure] collect_weekday` (Friday on
         // the shipped config: weekday 5 of `day % 7`, the last workday before the rest day 6).
         "worker_friday" => adults()
@@ -4196,6 +4208,9 @@ fn pick(
                                 .and_then(|h| h.cancer.as_ref())
                                 .is_some_and(|k| k.diagnosed && k.stage > 0.0)
                         });
+                        c
+                    } else if arch == "jobless" {
+                        // Round 4 T5: the candidates' order (the freshest post lost first).
                         c
                     } else {
                         shuffled(c, seed, arch)

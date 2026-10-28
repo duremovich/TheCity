@@ -816,10 +816,16 @@ fn job_search_round(
                 // Pressure pass round 3, S1 (OPEN-221): the nearest left is
                 // still no hire past `[distance.choice] hire_max_ticks` (V11:
                 // a 767-tile commute, 11.8 h a day on the road); the vacancy
-                // waits for the next pass.
-                if past_hire_max(world, hire_from(world, id), workplace_door) {
-                    ownership_row(world).choice_hire_far += 1;
-                    continue;
+                // waits for the next pass. Round 4 T5 (OPEN-228's follow-up):
+                // a native who takes worse work (`search::takes_far`) takes
+                // it up to `[search] far_ticks`, before the Ambient pool.
+                let from = hire_from(world, id);
+                if past_hire_max(world, from, workplace_door) {
+                    if !crate::systems::search::takes_far(world, id, from, workplace_door) {
+                        ownership_row(world).choice_hire_far += 1;
+                        continue;
+                    }
+                    ownership_row(world).far_hires += 1;
                 }
             }
             // Scale S5 (`[ambient] hire_far`): an Ambient household within
@@ -1371,6 +1377,34 @@ pub fn hire_candidate(world: &World, employer: EntityId, role: Role) -> Option<E
 
 pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
     hire_with(world, id, employer, role, true);
+}
+
+/// Round 4 T5 (OPEN-217, `search::on_ask`): `id` may take the open `role`
+/// at `employer` at its door: [`pick_candidate`]'s rules for one candidate
+/// (a free unemployed adult who is no exec, not quit-blocked there, the
+/// guard's lawfulness, the dress, the knowledge floor, a chip post, the
+/// struck-off, the age band). A graded post (merit, `classpay`) and a
+/// skill-ranked one (the best of the city) are the midnight's, not a walk-in's.
+pub fn can_take(world: &World, id: EntityId, employer: EntityId, role: Role) -> bool {
+    use crate::systems::classpay;
+    if skill_ranked(role)
+        || (classpay::on(world) && classpay::base_grade(world, Some(employer), role) >= classpay::PROFESSIONAL)
+    {
+        return false;
+    }
+    world.comp::<Brain>(id).is_some_and(|b| !b.emigrating)
+        && !world.has::<Job>(id)
+        && !world.has::<Sentence>(id)
+        && is_adult(world, id)
+        && !crate::systems::ages::is_protected(world, id)
+        && !crate::systems::founding::is_exec(world, id)
+        && !crate::systems::life::quit_blocks(world, id, employer)
+        && (role != Role::Guard || world.comp::<Personality>(id).is_some_and(|p| p.lawfulness >= 0.4))
+        && crate::systems::fashion::dress_ok(world, id, role)
+        && crate::systems::trades::skill_ok(world, id, role)
+        && crate::systems::dollhouse::hire_ok(world, role)
+        && crate::systems::gray::hire_ok(world, id, role)
+        && crate::systems::careers::admits(world, id, crate::systems::careers::hire_band(world, role))
 }
 
 /// [`hire`], the foreman an actor of the Hire event or not (round 4 T4: a

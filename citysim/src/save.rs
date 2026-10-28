@@ -414,7 +414,11 @@ use crate::world::World;
 /// 88 (pressure pass round 4, T7, noise after round 3): `ViceState.turned` (written while
 /// it holds anything) and the `[verbs]` door-return keys
 /// (serde defaults).
-pub const SAVE_VERSION: u8 = 88;
+/// 89 (pressure pass round 4, T5, the jobless look for work): `Misery.search`
+/// (`SearchDay`) and `Misery.search_spell` (written while set), `EventKind::JobSearch`, the `[search]` keys and
+/// the `Jobs2Cols` `search_days`, `search_leads`, `search_asks`, `search_hires`,
+/// `far_hires` columns (serde defaults).
+pub const SAVE_VERSION: u8 = 89;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

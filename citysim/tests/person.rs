@@ -2314,6 +2314,9 @@ fn el_commuter() -> (World, EntityId, EntityId, u64) {
     // subject is the El; at the halved pace the commuter picked rolled a
     // cab, `streetwork::full_cab`, before the El was asked).
     cfg.jobs2.p_cab = 0.0;
+    // Round 4 T5: no job search (the subject is the El; the day-1 door hires
+    // reordered the posts and the pick became a commuter whose ride waited).
+    cfg.search = None;
     let mut w = World::new(42, cfg);
     w.run_ticks(TICKS_PER_DAY + 5 * TICKS_PER_HOUR);
     let t = TICKS_PER_DAY + 7 * TICKS_PER_HOUR;
@@ -2730,6 +2733,10 @@ fn probe_parent_with_the_fee_buys_the_child_out_within_fourteen_days() {
     let mut run: Option<(World, EntityId, EntityId, EntityId, Option<u64>)> = None;
     for skip in 0..4 {
         let mut w = base.clone();
+        // Round 4 T5: no job search (the subject is the buy-out; a jobless
+        // parent held at 80 coins searched the boards through the days of
+        // the week's Camp answer).
+        w.config.search = None;
         let (p, child, h, camp) = taken_child_nth(&mut w, skip);
         let mut bought = None;
         tried += 1;

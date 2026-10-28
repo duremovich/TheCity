@@ -15,6 +15,9 @@ const HOUR: u64 = TICKS_PER_DAY / 24;
 /// The shipped city with `per_slot` Ambient flats per household slot.
 fn ambient_world(seed: u64, per_slot: f32, tune: impl FnOnce(&mut Config)) -> World {
     let mut c = Config::load();
+    // Round 4 T5: no job search (the subject is the outside's demand; the
+    // searchers' day-1 walks took the 2.0-flat city's uncapped visits to 1).
+    c.search = None;
     c.ambient.flats_per_slot = per_slot;
     tune(&mut c);
     World::new(seed, c)

@@ -397,6 +397,11 @@ pub struct Config {
     /// the key absent: as R6a left them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verbs: Option<VerbsCfg>,
+    /// Pressure pass round 4, T5 (docs/PRESSURE_PASS.md § T5; OPEN-217,
+    /// OPEN-228's follow-up): the jobless look for work (`systems/search.rs`).
+    /// `None` (not written into a save) with the key absent: as T4 left them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search: Option<SearchCfg>,
     /// Pressure pass round 2, R6a (docs/PRESSURE_PASS.md § R6a; OPEN-217):
     /// the trades' verbs on a followed body (the cab's pool, the pimp's
     /// round, the pit's bettors, the madam's bookings, the joytoy's lonely).
@@ -591,6 +596,73 @@ impl Default for VerbsCfg {
             door_return_ticks: 2880,
             door_return_ban_days: 2,
             door_return_swing_mult: 2.0,
+        }
+    }
+}
+
+/// `[search]` (the pressure pass round 4, T5; OPEN-217, OPEN-228's follow-up).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SearchCfg {
+    /// A jobless adult searches each day for this many days after his last
+    /// post (`Jobs2State.idle_since`); after, he is the job search's
+    /// candidate and the shape-up's (broke) as before.
+    pub search_days: u64,
+    /// From this many days without a post he takes worse work: the dawn
+    /// shape-up whatever his purse (while he searches), and the midnight job
+    /// search hires him to a post past `[distance.choice] hire_max_ticks` up
+    /// to `far_ticks` before the Ambient pool takes it.
+    pub worse_after_days: u64,
+    pub far_ticks: u64,
+    /// A body's search hours (ticks of the day, from and to).
+    pub hours_from: u16,
+    pub hours_to: u16,
+    /// A hiring board (the door of an open post he can take) within this
+    /// travel of where he stands; a lead a Friend gives within `lead_ticks`.
+    pub reach_ticks: u64,
+    pub lead_ticks: u64,
+    /// With no open post within reach, the nearest of these kinds within
+    /// `reach_ticks` is the hiring board: it names the nearest open post he
+    /// can take within `lead_ticks` of it (the next door), or nothing.
+    pub board_kinds: Vec<crate::components::BuildingKind>,
+    /// Minutes asking at a door; doors asked a day.
+    pub ask_ticks: u16,
+    pub tries: u8,
+    /// Friends and kin asked a day (the closest by affinity); names the
+    /// line gives of them (the rest "and N more").
+    pub asks: u8,
+    pub friend_names: u8,
+    /// A door is no searcher's next while this many searchers a post open
+    /// there are making for it already.
+    pub crowd: u8,
+    /// The dawn's hand starts work this many minutes after `[jobs2]
+    /// corner_hour`, to the day shift's end: V12's hand rested three hours
+    /// at the Yard for a 09:00 shift.
+    pub day_start_min: u16,
+}
+
+impl Default for SearchCfg {
+    fn default() -> Self {
+        SearchCfg {
+            search_days: 7,
+            worse_after_days: 2,
+            far_ticks: 360,
+            hours_from: 420,
+            hours_to: 960,
+            reach_ticks: 120,
+            lead_ticks: 240,
+            board_kinds: vec![
+                crate::components::BuildingKind::Hall,
+                crate::components::BuildingKind::Market,
+                crate::components::BuildingKind::ConstructionYard,
+                crate::components::BuildingKind::FreightYard,
+            ],
+            ask_ticks: 15,
+            tries: 3,
+            asks: 8,
+            friend_names: 3,
+            crowd: 2,
+            day_start_min: 30,
         }
     }
 }
