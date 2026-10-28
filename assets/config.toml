@@ -2438,6 +2438,24 @@ give_floor_days = 14               # E28 (plan key): a donor keeps this many day
 gang_gift = 10                     # E28 (plan key): a gang under Expand with a front, weekly
 rep_gift_min = 20                  # E29 (plan key): a gift of at least this writes the Gave deed
 residents_per_mission = 1000       # E26 (plan key): Register's per-capita target of Missions
+# Round 5 U3 (OPEN-235, Dylan 2026-10-28: charity that runs short, not a dole). V13 at 100k: the kitchens sat on a
+# 126k-coin purse and served 200-350 meals a day against 1,300+ starving, 40 tiles (80 starving) around 19 kitchens
+# on a 1500x938 island; 30 broke adults starved, most just evicted or out of the cells.
+starving_reach_ticks = 240         # a starving adult (hunger < [life] starving_hunger) walks to a kitchen this far, in
+                                   # travel ticks (distance::trip: the walk, or the El if he would board it), when no
+                                   # bin is nearer (the near kitchen in reach_tiles, then the bin, then this); both tiers
+servings_per_day = 150             # the pot: the bowls a kitchen cooks a day (the restock buys the units, at the diet's
+                                   # synth_stretch, under [buildings.mission] stock_cap); gone, the line is turned away
+soup_hour = 12                     # the soup line off screen: the Statistical hungry poor, hungriest first, at the
+                                   # nearest kitchen in reach with a bowl left (one a day)
+share_keep_days = 7                # a kitchen keeps this many days of its own pots; at midnight the rest goes to the
+                                   # kitchens that turned a line away, the most turned away first (every tithe of a
+                                   # creed lands in its first church: at 100k one kitchen held the city's charity)
+found_far_min = 20                 # this many off-screen starving out of every kitchen's reach at the soup hour, within a
+                                   # walk of starving_reach_ticks of the hungriest of them, get a soup line beside him (a
+                                   # Mission on the vacant Lot, else the derelict, nearest him within half that walk),
+                                   # paid ([corps] found_cost.mission and a pot) from the richest kitchen past its keep
+found_far_per_day = 3              # at most this many such soup lines open a day (the bodies one covers drop out first)
 
 [camp]                             # addendum 19; placeholders
 take_days = 2                      # E38: Child.hunger_days (unfed days; S6: never a death) at which the service takes a child

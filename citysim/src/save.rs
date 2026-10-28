@@ -422,7 +422,10 @@ use crate::world::World;
 /// `AgesState.{rolls, roll_day}` (written while set), `[ages] school_trip_ticks`,
 /// `school_el_fares`, `school_places_per_teacher`, `school_by_reach` (`school_reach` dropped) and the
 /// `Jobs2Cols` `school_far`, `school_full`, `school_unpaid`, `school_el` columns.
-pub const SAVE_VERSION: u8 = 90;
+/// 91 (pressure pass round 5, U3, the soup line): `Charity.short_today` (written while set),
+/// `EventKind::SoupLine`, the `[charity]` `starving_reach_ticks`, `servings_per_day`, `soup_hour`
+/// keys and the `Jobs2Cols` `soup_starving_fed`, `soup_queued`, `soup_short`, `soup_far` columns.
+pub const SAVE_VERSION: u8 = 91;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

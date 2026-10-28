@@ -2201,3 +2201,71 @@ Folding is the diary's (the shadow tool): the events and counters underneath are
   School by the trip. No test (doctrine 2). `SAVE_VERSION` 88 (`Child.{school, school_miss}`,
   `AgesState.{rolls, roll_day}`, the `[ages]` T2 keys, the `Jobs2Cols` `school_far`, `school_full`, `school_unpaid`,
   `school_el`).
+
+### U3, the starving broke reach a meal (`OPEN-235`; `charity.rs`, `plan.rs`'s Eat, `exec`'s EatAlms, `[charity]` U3 keys)
+
+**Dylan's call (2026-10-28): charity that runs short, not a dole.** The diagnosis came first. At 100k the kitchens
+were not short of coins: `mission_purse` stood at 126,493 on d29 (V13) while they served 200-350 meals a day. Every
+tithe of a creed lands in its first church (`faith::tithe`), so one kitchen held the city's charity and cooked one pot
+a day with it. The other kitchens were broke, and the starving were out of reach (40 tiles, 80 starving, around 19
+kitchens on a 1500x938 island). The Starving bursts sat on the mass `LodDemotion` ticks: the dead were off-screen
+evicted adults, whom the 12:00 Statistical pass served only within 40 Manhattan tiles of a door. Built, on the
+existing Mission path:
+
+- **The starving's reach by trip** (`far_target`, `kitchens_by_trip`): a starving adult (`[life] starving_hunger`)
+  reaches a kitchen with a bowl left within `starving_reach_ticks` (240) by `distance::trip` (the walk, or the El for
+  a body that would board it) from where he sets out. Eat's order is the near kitchen (`reach_tiles`), then the bin,
+  then the far kitchen (`far_alms_plan`, a `SoupLine` line: "set out for the soup line at Soup Kitchen#2930, 1 h 56
+  away (starving, no bin nearer)"). G2's `hungry_reach_mult` x the tiles is retired for the kitchen (the bin keeps it).
+- **The pot** (`servings_per_day` 150): the nightly restock buys the units that make it (at `synth_stretch`, under
+  `stock_cap`) from the nearest Markets with stock, nearest first (the base took the nearest Market whatever its
+  shelf, as its comment said it did not).
+- **The line** (`queue_until`, `turned_away`; `exec` gives EatAlms its own `Wait`): inside a kitchen whose hour's
+  bowls (`meals_per_hour`, doubled by a Volunteer) are out, the body waits for the next hour ("waits in the soup line
+  ... the hour's 10 bowls are out, the next at 04:00"). With the pot dry it is turned away ("the pot at Soup
+  Kitchen#2559 ran dry before Kestrel Pembroke's turn"), counted in the kitchen's day ("served 150 meals and 6 cots;
+  the pot ran dry for 10 more in the line").
+- **The off-screen line** (`stat_daily` at `soup_hour` 12): one line for the city. The Statistical hungry poor go
+  hungriest first, each to the nearest kitchen in reach with a bowl left (the starving by trip): one bowl a day.
+- **Deviation: the kitchens share a purse** (`share_purses`, midnight before the restock; `share_keep_days` 7). A
+  kitchen that turned a line away with less than a pot's coins is sent the difference by the kitchens holding more
+  than a week of their own pots, the most turned away first. It is a purse-to-purse move, the ledger's `Donate` line,
+  and a `Donated` line ("Church of the Open Circuit#2591 sent 150 to Soup Kitchen#5436: its pot ran dry for 1 in the
+  line"). Without it the pot and the reach moved nothing: the first run served the same 330 meals a day while 18
+  kitchens ran dry beside a 54k purse.
+- **Deviation: a soup line where the starving are** (`found_far`, `site_near`; `found_far_min` 20,
+  `found_far_per_day` 3). After the off-screen line, take the hungriest starving body out of every kitchen's reach
+  who has `found_far_min` others within the walk. The richest kitchen past its keep pays `found_cost.mission` (150,
+  `Flow::Found`) to open a Mission on the vacant Lot (else the derelict) nearest him within half the walk, and sends
+  it a pot ("Church of the Open Circuit#2591 paid 150 to open Soup Kitchen#2559 in D1 The Sump and sent it 150: 54
+  starving out of every kitchen's reach there"). The first cut placed them at the district centroid: six kitchens
+  stacked in the Sump and `soup_far` climbed to 1,778 a day.
+- **The hall takes its line** (`charity::capacity_exempt`, read by `World::capacity_exempt`). `[buildings.mission]
+  capacity` 12 is the night's cots. A packed line failed the walk at the door with `BuildingFull`: in the first
+  shadow, `homeless_52040` walked 1-3 h to Soup Kitchen#2930 five times in d26-27 and was locked out each time.
+- The kitchen's lines name it by its label (`kitchen_name`): `name_of` read the kind, so one kitchen was "Church of
+  the Open Circuit#5432" in a plan and "Soup Kitchen#5432" in the line.
+- **The under-18 rule**: the meal paths stay adult-only (`alms_eligible` and `stat_daily` test
+  `demography::is_adult`). A child eats through the household and the Camp, and `World::kill_by` refuses a protected
+  death (`harm_blocked` 0 in the run). Nothing here picks a victim, a fight or a punishment.
+- **Numbers** (100k `isle_m_k2_100k` seed 42 x 30, `--scaled --ambient-flats 50`; before = `target/r4_100k`, main
+  `a70800f`; one run each): **starvation deaths 30 -> 1** (before 23 on d29, the rest d26-d29; after one on d29,
+  `Sprocket Reyes`, in the cells). **Starving events 13,404 -> 6,296.** Kitchen meals a day d22-29 199-346 ->
+  2,924-4,421 (`meals_alms` 3,148 -> 35,949 over the run), with 30,206 starving fed. Turned away with the pot dry: 0-30
+  a day to d17, then 316 (d18) to 6,073 (d28). The off-screen starving out of every kitchen's reach: 155 (d17) ->
+  0-1 from d22, after 5 soup lines opened (d16, d17, d18, d21 x2). Waits in the line 533. The purse still ends at
+  94,250 (before 126,493): the pots, not the coins, run short. Homeless max 13,117 -> 12,969; violence deaths 431 ->
+  419; thefts 19,147 -> 16,442 (a FINDING: the fed steal less; the tone comes back through features, not a knob);
+  `harm_blocked` 0. 20k (seed 42, the shadow's days 21-27) shows no broke starving body: its one Starving pick
+  (`miserable_21501`) went to 0 in a Station cell, and the cells fed her.
+- **Shadow** (100k days 21-27, `homeless:4,miserable:2`, `target/u3_shadow100k`). Reads right: `homeless_92259`
+  sets out ("1 h 08 away"), waits for the 03:00 bowls, eats at 03:31 (d26). The next night the pot runs dry before
+  his turn (d27 04:56) and he sets out for the next kitchen, "3 h 09 away". `homeless_72458` starving walks 2-3 h
+  and eats three times in the week (Church of the Open Circuit#5430, Chapel#2600). **Reads wrong / open** (the next
+  pass's input): the 3 h 09 walk is cut at 90 min ("cut at street (D4 Mid-Levels)"), and at hunger 0 the body turns
+  to Earn's Scavenge and back to its squat (`homeless_92259` d27 12:09), likely the far pot dry on the way. A starving
+  body sets out several times a day for the same kitchen, one `SoupLine` line each. The one death left is a body "in
+  the cells till d34" (the hold's food, not the line). In the first run's diary a body whose walk the pot outran
+  starved 14 h after setting out (`Liesl Ramirez`, d28). A rich kitchen cooks one pot whatever its purse.
+- No test (doctrine 2). `SAVE_VERSION` 91 (`Charity.short_today`, `EventKind::SoupLine`, the `[charity]` U3 keys, the
+  `Jobs2Cols` `soup_starving_fed`, `soup_queued`, `soup_short`, `soup_far`).

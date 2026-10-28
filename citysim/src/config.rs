@@ -12136,6 +12136,30 @@ pub struct CharityCfg {
     /// E26 (plan key): `Register`'s per-capita target of Missions is
     /// `population ÷ this` (the founding tie-break's denominator).
     pub residents_per_mission: u32,
+    /// Round 5 U3 (OPEN-235): a starving adult (`[life] starving_hunger`)
+    /// walks to a kitchen this far, in travel ticks (`distance::trip`: the
+    /// walk, or the El for a body that would board it), from where he sets
+    /// out; both tiers. Others keep `reach_tiles`.
+    pub starving_reach_ticks: u64,
+    /// Round 5 U3: the kitchen's pot, the bowls it cooks a day: the nightly
+    /// restock buys the shelf units that make this many meals (at the diet's
+    /// synth stretch), capped by `[buildings.mission] stock_cap`, the purse
+    /// and the Market's shelf. When it is gone the line is turned away.
+    pub servings_per_day: u32,
+    /// Round 5 U3: the hour of the soup line off screen: the Statistical
+    /// hungry poor, hungriest first, are served from the pots in reach.
+    pub soup_hour: u16,
+    /// Round 5 U3: a kitchen keeps this many days of its own pots; the rest
+    /// of its purse goes, at midnight, to the kitchens whose pot ran dry
+    /// (`charity::share_purses`).
+    pub share_keep_days: i64,
+    /// Round 5 U3: a district counting this many off-screen starving out of
+    /// every kitchen's reach at the soup hour gets a soup line, paid from
+    /// the richest kitchen's purse past its keep (`charity::found_far`; one
+    /// a day). 0: none.
+    pub found_far_min: u32,
+    /// Round 5 U3: at most this many such soup lines open a day.
+    pub found_far_per_day: u32,
 }
 
 impl Default for CharityCfg {
@@ -12156,6 +12180,12 @@ impl Default for CharityCfg {
             gang_gift: 10,
             rep_gift_min: 20,
             residents_per_mission: 1000,
+            starving_reach_ticks: 240,
+            servings_per_day: 150,
+            soup_hour: 12,
+            share_keep_days: 7,
+            found_far_min: 20,
+            found_far_per_day: 3,
         }
     }
 }

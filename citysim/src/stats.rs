@@ -1305,6 +1305,18 @@ pub struct Jobs2Cols {
     pub choice_visit_far: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub choice_hire_far: u32,
+    // Round 5 U3 (OPEN-235, `systems::charity`): the soup line. A starving
+    // adult served a bowl (both tiers); a body in the line waiting out the
+    // hour's cap; the hungry poor turned away with a kitchen in reach and its
+    // pot dry; the off-screen starving with no kitchen within reach.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub soup_starving_fed: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub soup_queued: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub soup_short: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub soup_far: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -1801,6 +1813,10 @@ impl Jobs2Cols {
                 "choice_deal_off",
                 "choice_visit_far",
                 "choice_hire_far",
+                "soup_starving_fed",
+                "soup_queued",
+                "soup_short",
+                "soup_far",
             ]
             .into_iter()
             .map(str::to_string),
@@ -2291,6 +2307,10 @@ impl Jobs2Cols {
             self.choice_deal_off.to_string(),
             self.choice_visit_far.to_string(),
             self.choice_hire_far.to_string(),
+            self.soup_starving_fed.to_string(),
+            self.soup_queued.to_string(),
+            self.soup_short.to_string(),
+            self.soup_far.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

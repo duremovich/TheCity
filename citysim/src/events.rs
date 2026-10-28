@@ -523,10 +523,14 @@ pub enum EventKind {
     /// `[searcher, workplace]` a door asked; `[worker, workplace]` a post
     /// let go for an exec's chair.
     JobSearch,
+    /// Round 5 U3 (OPEN-235, `systems::charity`): `[agent, kitchen]` the
+    /// soup line: a starving body setting out for a far kitchen, waiting in
+    /// the line for the next hour's bowls, turned away when the pot ran dry.
+    SoupLine,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 241] = [
+    pub const ALL: [EventKind; 242] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -768,6 +772,7 @@ impl EventKind {
         EventKind::Pursuit,
         EventKind::Custody,
         EventKind::JobSearch,
+        EventKind::SoupLine,
     ];
 }
 
