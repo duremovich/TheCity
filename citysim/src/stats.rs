@@ -873,6 +873,20 @@ pub struct Jobs2Cols {
     pub serve_nights: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub door_under_age: u32,
+    /// Round 6 V4 (OPEN-239): the door's refusals of the drunk.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub door_drunk: u32,
+    /// Round 6 V4 (OPEN-240): a rider's cab or rickshaw fares by payee: a
+    /// driver (a fare trade's post or a rickshaw's puller), anyone else
+    /// (the Garage's owner: a corp or a stranger).
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub cab_paid_driver: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub cab_paid_other: u32,
+    /// Round 6 V4 (OPEN-240): the relocation's midnight read, workers whose
+    /// Home-to-post commute is past `[life] commute_long_ticks`.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub commute_long: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub shape_up_home: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
@@ -1673,6 +1687,10 @@ impl Jobs2Cols {
                 "sets_danced",
                 "serve_nights",
                 "door_under_age",
+                "door_drunk",
+                "cab_paid_driver",
+                "cab_paid_other",
+                "commute_long",
                 "shape_up_home",
                 "foreman_gate",
                 "search_days",
@@ -2180,6 +2198,10 @@ impl Jobs2Cols {
             self.sets_danced.to_string(),
             self.serve_nights.to_string(),
             self.door_under_age.to_string(),
+            self.door_drunk.to_string(),
+            self.cab_paid_driver.to_string(),
+            self.cab_paid_other.to_string(),
+            self.commute_long.to_string(),
             self.shape_up_home.to_string(),
             self.foreman_gate.to_string(),
             self.search_days.to_string(),

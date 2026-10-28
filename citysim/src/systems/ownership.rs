@@ -525,6 +525,22 @@ fn transfer(
     }
     ledger(world, flow, moved);
     shadow_flow(world, from, to, moved, flow, false);
+    // Round 6 V4 (OPEN-240): a rider's fare by payee kind (diagnostic).
+    if flow == Flow::CabFare && from.is_some_and(|f| world.has::<crate::components::Identity>(f)) {
+        let driver = to.is_some_and(|t| {
+            world.jobs2.pitches.contains_key(&t)
+                || world.comp::<crate::components::Job>(t).is_some_and(|j| {
+                    crate::systems::trades::row_of(world, j.role)
+                        .is_some_and(|r| r.duty == crate::config::TradeDuty::Fare)
+                })
+        });
+        let row = jobs2_row(world);
+        if driver {
+            row.cab_paid_driver += 1;
+        } else {
+            row.cab_paid_other += 1;
+        }
+    }
     // The Treasury's census (diagnostic, never read by the simulation).
     let city = |w: &World, o: Option<EntityId>| matches!(owner_kind(w, o), OwnerKind::City);
     let label = |o: Option<EntityId>| if o.is_some() { format!("{flow:?} (dead owner)") } else { format!("{flow:?}") };

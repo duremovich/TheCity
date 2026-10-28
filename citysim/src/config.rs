@@ -9796,6 +9796,11 @@ pub struct LifeCfg {
     /// `relocate_per_1000` a day per 1,000 residents.
     pub hf_relocate: bool,
     pub commute_move_ticks: u64,
+    /// Round 6 V4 (OPEN-240): a report's line only: a commute past this
+    /// many ticks is counted at the relocation's midnight read
+    /// (`Jobs2Cols.commute_long`). Read by no decision.
+    #[serde(default = "default_commute_long_ticks")]
+    pub commute_long_ticks: u64,
     pub commute_margin_ticks: u64,
     pub relocate_per_1000: f32,
     /// P5g (Dylan: the hiring cap): a candidate within `commute_hire_ticks`
@@ -9982,6 +9987,7 @@ impl Default for LifeCfg {
             hf_shift_first: true,
             hf_relocate: true,
             commute_move_ticks: 80,
+            commute_long_ticks: 180,
             commute_margin_ticks: 40,
             relocate_per_1000: 20.0,
             hf_hire_near: true,
@@ -13020,4 +13026,8 @@ impl Default for AttentionCfg {
             brain_tilt: 0.2,
         }
     }
+}
+
+fn default_commute_long_ticks() -> u64 {
+    180
 }

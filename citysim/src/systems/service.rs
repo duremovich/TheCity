@@ -1093,6 +1093,9 @@ pub fn refused(world: &mut World, id: EntityId, b: EntityId) {
     if why == Some("under age") {
         ownership::jobs2_row(world).door_under_age += 1;
     }
+    if why == Some("drunk") {
+        ownership::jobs2_row(world).door_drunk += 1;
+    }
     if world.config.verbs.is_some() {
         let c = why.unwrap_or("no cause").to_string();
         crate::systems::vice::door_note(world, bouncer, b, |n| {
