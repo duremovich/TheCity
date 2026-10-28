@@ -732,6 +732,9 @@ pub struct Jobs2Cols {
     pub school_full: u32,
     pub school_unpaid: u32,
     pub school_el: u32,
+    /// Round 5 U1 (OPEN-232): Schools founded on demand today (a district's
+    /// children turned away full `[ages] found_full_days` running).
+    pub schools_founded: u32,
     /// The pressure pass S6 (Dylan 2026-10-27): a death of a person under
     /// 18 refused at `World::kill_by` (every pick skips them first: a
     /// non-zero count is a pick site that missed, a broken-system signal).
@@ -1565,6 +1568,7 @@ impl Jobs2Cols {
             "school_full",
             "school_unpaid",
             "school_el",
+            "schools_founded",
             "harm_blocked",
             "schools",
             "elders",
@@ -2057,6 +2061,7 @@ impl Jobs2Cols {
             self.school_full.to_string(),
             self.school_unpaid.to_string(),
             self.school_el.to_string(),
+            self.schools_founded.to_string(),
             self.harm_blocked.to_string(),
             self.schools.to_string(),
             self.elders.to_string(),

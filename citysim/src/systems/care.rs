@@ -599,7 +599,12 @@ fn covers(world: &mut World, c: &CareCfg) {
             &[id, cv, emp],
             format!("{who} is off sick from {at} ({days} sick days in 14); {cn} covers the {role}'s shift for the day"),
         );
-        world.remember(cv, crate::components::MemoryKind::Served, Some(id), 0.3, 0.1, false);
+        // Round 5 U1: a `Served` memory is the service section's (the off
+        // city remembers none, `service`'s `test_off_city_writes_nothing`;
+        // U1's seed moved a cover onto day 1 there).
+        if crate::systems::service::on(world) {
+            world.remember(cv, crate::components::MemoryKind::Served, Some(id), 0.3, 0.1, false);
+        }
         ownership::jobs2_row(world).care_covered += 1;
     }
 }

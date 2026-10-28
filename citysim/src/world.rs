@@ -2232,6 +2232,9 @@ impl World {
         // the households are settled (keyed streams, no world draw; nothing
         // with `[ages]` off).
         crate::prof::timed!("new::ages::seed_children", systems::ages::seed_children(&mut w));
+        // Round 5 U1 (OPEN-232): the Schools topped up to the school-age
+        // count, by reach, their teachers hired (no RNG, no coins).
+        crate::prof::timed!("new::ages::seed_by_children", systems::ages::seed_by_children(&mut w));
         // OPEN-140: the seed city's housing is not the first midnight's move.
         w.housed_now.1.clear();
         w
