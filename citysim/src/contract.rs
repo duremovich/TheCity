@@ -415,6 +415,10 @@ pub struct Contract {
     /// M16b phase 2: an Abduct's holding building and demand.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hold: Option<Hold>,
+    /// Round 5 U5 (OPEN-217): the Fixer's cut paid at fulfilment (the
+    /// outcome told to its fixer names it); 0 direct or unpaid.
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub cut: i64,
 }
 
 fn is_zero_i64(v: &i64) -> bool {

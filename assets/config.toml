@@ -3718,6 +3718,15 @@ clerk_lawful = 0.35                # ... this lawfulness (Flow::Bribe)
 id_w = 0.15                        # a wanted holder passes a guard's sighting for the hour on this x tier
 p_expose = 0.3                     # fake papers exposed at an arrest (Forgery on the holder and the forger)
 fixer_cut = 0.2                    # the Fixer's owner's share of a forger's sale
+# Round 5 U5 (OPEN-217; V13: both forgers ClerkWork, 14 papers sold at 100k in 30 days): the forger's second commission,
+# a forged weapons licence. An adult who wants a weapon ([weapons] wants), holds no licence and is under licence_lawful
+# (the lawful buy the Civic Clerk's, licence_fee) orders one at midnight from the nearest forger within reach, with the
+# coins for it, the cheapest weapon and [weapons] coin_reserve; picked up and paid at the Fixer's counter as the papers
+# are (the fixer_cut held for the owner). The Gunsmith takes it; a guard who notices the weapon looks at it.
+licence_price = 40                 # a forged licence at a forger (0: none); the Clerk's licence_fee is 60
+licence_lawful = 0.5               # the buyers are under this lawfulness (the Clerk's buyers are at or above it)
+licence_reach_ticks = 120          # the forger's Fixer within this trip of the buyer's Home (a want, not a flight)
+licence_pass = 0.6                 # a guard who notices the weapon passes the forged licence on this; else exposed (Forgery)
 organs_per_body = 2                # units a body ripped by a gang yields (once)
 organ_rot = 0.25                   # of a stock lost a day (rounded up)
 clinic_organs = 3                  # a licensed Clinic's shelf, bought from a gang at ...

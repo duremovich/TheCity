@@ -57,6 +57,7 @@ const PURPOSE_ORGAN: u64 = 0x4752_0004;
 const PURPOSE_CUSTOMS: u64 = 0x4752_0005;
 const PURPOSE_RAID: u64 = 0x4752_0006;
 const PURPOSE_STRUCK: u64 = 0x4752_0007;
+const PURPOSE_LICENCE: u64 = 0x4752_0008;
 
 /// The gray market is live: `[jobs2] enabled` and `[gray] enabled`.
 pub fn on(world: &World) -> bool {
@@ -95,6 +96,10 @@ pub struct GrayState {
     pub types: BTreeMap<EntityId, u8>,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub typed_seen: u32,
+    /// Round 5 U5 (OPEN-217): forged weapons licences, holder -> the
+    /// forger who made it (`weapons::licensed` reads them).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub licences: BTreeMap<EntityId, EntityId>,
 }
 
 fn is_zero_u32(v: &u32) -> bool {
@@ -225,6 +230,7 @@ pub fn on_arrest(world: &mut World, suspect: EntityId) {
     if !on(world) {
         return;
     }
+    licence_on_arrest(world, suspect);
     let Some(p) = world.jobs2.gray.papers.get(&suspect).cloned() else { return };
     if !p.fake {
         return;
@@ -242,7 +248,58 @@ pub fn on_arrest(world: &mut World, suspect: EntityId) {
     world.push_event(EventKind::Report, &[suspect], text);
 }
 
+/// Round 5 U5 (OPEN-217): at an arrest a forged weapons licence is
+/// exposed on `p_expose` (its own draw), as fake papers are.
+fn licence_on_arrest(world: &mut World, suspect: EntityId) {
+    if !world.jobs2.gray.licences.contains_key(&suspect) {
+        return;
+    }
+    if hash(world, PURPOSE_LICENCE, key(suspect), world.day()) >= world.config.gray.p_expose {
+        return;
+    }
+    expose_licence(world, suspect, None);
+}
+
+/// Round 5 U5 (OPEN-217): a guard `guard` noticed `holder`'s weapon and
+/// looks at his forged licence: it passes on `licence_pass` (a hash of the
+/// holder and the hour: `false`, nothing filed), else it is exposed
+/// (`true`: the caller files the weapon's `UnlicensedArms`).
+pub fn licence_looked_at(world: &mut World, holder: EntityId, guard: EntityId) -> bool {
+    let hour = world.tick / TICKS_PER_HOUR;
+    if hash(world, PURPOSE_LICENCE, key(holder), hour) < world.config.gray.licence_pass {
+        ownership::jobs2_row(world).licences_passed += 1;
+        return false;
+    }
+    expose_licence(world, holder, Some(guard));
+    true
+}
+
+/// The forged licence void: off the register, `Forgery` filed on the
+/// holder and (alive) its forger, an event naming the guard who saw it.
+fn expose_licence(world: &mut World, holder: EntityId, guard: Option<EntityId>) {
+    let Some(forger) = world.jobs2.gray.licences.remove(&holder) else { return };
+    crate::systems::law::file_report(world, Crime::Forgery, holder, guard);
+    let forger = Some(forger).filter(|&f| crate::systems::law::living(world, f));
+    if let Some(f) = forger {
+        crate::systems::law::file_report(world, Crime::Forgery, f, guard);
+    }
+    ownership::jobs2_row(world).licences_exposed += 1;
+    let by = match guard {
+        Some(g) => format!(" by {}", world.name_of(g)),
+        None => " at the arrest".to_string(),
+    };
+    let made = forger.map(|f| format!(" (made by {})", world.name_of(f))).unwrap_or_default();
+    let text = format!("{}'s forged weapons licence was exposed{by}{made}", world.name_of(holder));
+    let mut actors = vec![holder];
+    actors.extend(guard);
+    actors.extend(forger);
+    world.push_event(EventKind::Report, &actors, text);
+}
+
 /// A forger on staff at a standing Fixer, nearest `from` (ties the lower id).
+/// Round 5 U5 (OPEN-217): at a Fixer with more than one forger, a body
+/// first (the camera's; round 4 T4's door: an off-screen colleague named by
+/// id took the work), then the lowest id.
 fn forger_near(world: &World, from: crate::components::TilePos) -> Option<(EntityId, EntityId)> {
     let mut best: Option<(u32, EntityId, EntityId)> = None;
     for &b in world.buildings_of_kind(BuildingKind::Fixer) {
@@ -250,14 +307,19 @@ fn forger_near(world: &World, from: crate::components::TilePos) -> Option<(Entit
             continue;
         }
         let Some(door) = world.comp::<Building>(b).map(|bd| bd.door) else { continue };
-        let f = world.staff_of(b).iter().copied().find(|&s| {
-            world
-                .comp::<Job>(s)
-                .and_then(|j| crate::systems::trades::row_of(world, j.role))
-                .is_some_and(|r| r.gray && r.workplace.contains(&BuildingKind::Fixer))
-                && crate::systems::law::living(world, s)
-                && !world.has::<Sentence>(s)
-        });
+        let f = world
+            .staff_of(b)
+            .iter()
+            .copied()
+            .filter(|&s| {
+                world
+                    .comp::<Job>(s)
+                    .and_then(|j| crate::systems::trades::row_of(world, j.role))
+                    .is_some_and(|r| r.gray && r.workplace.contains(&BuildingKind::Fixer))
+                    && crate::systems::law::living(world, s)
+                    && !world.has::<Sentence>(s)
+            })
+            .min_by_key(|&s| (!crate::systems::presence::is_body(world, s), s));
         if let Some(f) = f {
             let k = (door.manhattan(from), b, f);
             if best.is_none_or(|x| k < x) {
@@ -343,6 +405,71 @@ fn papers_daily(world: &mut World) {
             }
             _ => {}
         }
+    }
+}
+
+/// Round 5 U5 (OPEN-217), midnight after the papers: the forged licences
+/// ordered. A buyer wants a weapon (`[weapons]`'s midnight set), holds no
+/// licence and no order, is under `licence_lawful` (the lawful buy the
+/// Clerk's) and has `licence_price`, the cheapest weapon and `[weapons]
+/// coin_reserve`; the nearest forger's Fixer is within `licence_reach_ticks`
+/// of his Home (else of where he stands). Queued as a walk-in (paid at the
+/// handover with `[presence]`, else now); without the tower, made now.
+/// Nobody under 18 is in `[weapons]`'s set (adults only).
+fn licences_daily(world: &mut World) {
+    let cfg = world.config.gray.clone();
+    if cfg.licence_price <= 0 || !crate::systems::weapons::on(world) {
+        return;
+    }
+    let cheapest =
+        crate::systems::assets::list_price(world, crate::components::AssetKind::Weapon, 1).unwrap_or(i64::MAX);
+    let need = cfg.licence_price.saturating_add(cheapest).saturating_add(world.config.weapons.coin_reserve);
+    let buyers: Vec<EntityId> = world
+        .jobs2
+        .arms
+        .wants
+        .iter()
+        .copied()
+        .filter(|&id| {
+            !crate::systems::weapons::licensed(world, id)
+                && !crate::systems::ages::is_protected(world, id)
+                && !world.has::<Sentence>(id)
+                && crate::systems::law::living(world, id)
+                && world.comp::<Personality>(id).is_some_and(|p| p.lawfulness < cfg.licence_lawful)
+                && world.purse(Some(id)) >= need
+                && !crate::systems::service::walk_in_pending(world, id)
+        })
+        .collect();
+    if buyers.is_empty() {
+        return;
+    }
+    let tower = crate::systems::service::tower_on(world);
+    let cap = cfg.licence_reach_ticks;
+    for id in buyers {
+        let home = crate::systems::contracts::home_door(world, id);
+        let Some(from) = home.or_else(|| world.comp::<crate::components::Position>(id).map(|p| p.tile)) else {
+            continue;
+        };
+        let Some((b, f)) = forger_near(world, from) else { continue };
+        let Some(door) = world.comp::<Building>(b).map(|bd| bd.door) else { continue };
+        if crate::systems::distance::trip(world, id, from, door) > cap {
+            continue;
+        }
+        if tower && crate::systems::presence::on(world) {
+            crate::systems::service::queue_commission(world, id, b, f, 1, crate::systems::service::WalkKind::Licence);
+            continue;
+        }
+        let price = cfg.licence_price;
+        let cut = (price as f32 * cfg.fixer_cut).round() as i64;
+        ownership::pay(world, Some(id), Some(f), price - cut, Flow::Gray);
+        let owner = world.owner_of(b);
+        ownership::pay(world, Some(id), owner, cut, Flow::Gray);
+        if tower {
+            crate::systems::service::queue_commission(world, id, b, f, 1, crate::systems::service::WalkKind::Licence);
+            continue;
+        }
+        world.jobs2.gray.licences.insert(id, f);
+        ownership::jobs2_row(world).licences_forged += 1;
     }
 }
 
@@ -774,6 +901,7 @@ pub fn daily(world: &mut World) {
     let _t = crate::prof::scope!("gray::daily");
     assign_types(world);
     papers_daily(world);
+    licences_daily(world);
     strike_off(world);
     build_clinics(world);
     raids(world);

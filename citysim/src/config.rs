@@ -3126,6 +3126,21 @@ pub struct GrayCfg {
     pub p_expose: f32,
     /// The Fixer's owner's share of a forger's sale.
     pub fixer_cut: f32,
+    /// Round 5 U5 (OPEN-217): the forger's second commission, a forged
+    /// weapons licence: an adult who wants a weapon, holds no licence, is
+    /// under `licence_lawful` (the lawful buy the Clerk's) and has the
+    /// coins for it, the cheapest weapon and `[weapons] coin_reserve`
+    /// orders one at midnight from the nearest forger within
+    /// `licence_reach_ticks` of home, picked up and paid in the Fixer's
+    /// open hours as the papers are. 0: no forged licences.
+    pub licence_price: i64,
+    pub licence_lawful: f32,
+    pub licence_reach_ticks: u64,
+    /// A forged licence passes a guard who notices the weapon on this
+    /// chance (a pure hash of the holder and the hour); else it is
+    /// exposed: void, `Forgery` on the holder and the forger, and the
+    /// weapon's `UnlicensedArms` filed. At an arrest, `p_expose`.
+    pub licence_pass: f32,
     /// Organs a body yields to the gang that rips it, the share lost a day,
     /// a Clinic's shelf (bought from a gang at `organ_price`), a
     /// stabilisation's draw on it, and customs on the World's book.
@@ -3180,6 +3195,10 @@ impl Default for GrayCfg {
             id_w: 0.15,
             p_expose: 0.3,
             fixer_cut: 0.2,
+            licence_price: 0,
+            licence_lawful: 0.5,
+            licence_reach_ticks: 120,
+            licence_pass: 0.6,
             organs_per_body: 2,
             organ_rot: 0.25,
             clinic_organs: 3,

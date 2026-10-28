@@ -1269,6 +1269,25 @@ pub struct WalkIn {
     /// handover, not at midnight (written only when set).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unpaid: bool,
+    /// Round 5 U5 (OPEN-217): what the forger made (papers, or a forged
+    /// weapons licence; written only when not papers).
+    #[serde(default, skip_serializing_if = "WalkKind::is_papers")]
+    pub kind: WalkKind,
+}
+
+/// Round 5 U5 (OPEN-217): a forger's commission: papers for the wanted, or
+/// a forged weapons licence (`[gray] licence_price`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WalkKind {
+    #[default]
+    Papers,
+    Licence,
+}
+
+impl WalkKind {
+    pub fn is_papers(&self) -> bool {
+        *self == WalkKind::Papers
+    }
 }
 
 /// Is `id` a graded member of staff (its post graded, or its base grade)?
@@ -1506,6 +1525,23 @@ fn fixer_book(world: &World, fixer: EntityId, party: EntityId) -> Option<EntityI
         })
 }
 
+/// Round 5 U5 (OPEN-217): the fixer who runs `fixer`'s book, told of its
+/// posts, takes and outcomes (`contracts`' events name him): a holder of
+/// its `Fixer` post alive and free, a body first (the camera's; round 4
+/// T4: an off-screen colleague named by id took a body's work), then the
+/// lowest id; else its owner, a person alive and free. `None` with
+/// neither (an empty office, a corp's or a gang's).
+pub fn fixer_hand(world: &World, fixer: EntityId) -> Option<EntityId> {
+    let free = |s: EntityId| crate::systems::law::living(world, s) && !world.has::<Sentence>(s);
+    world
+        .staff_of(fixer)
+        .iter()
+        .copied()
+        .filter(|&s| free(s) && world.comp::<Job>(s).is_some_and(|j| j.role == crate::components::Role::Fixer))
+        .min_by_key(|&s| (!crate::systems::presence::is_body(world, s), s))
+        .or_else(|| world.owner_of(fixer).filter(|&o| world.has::<Brain>(o) && free(o)))
+}
+
 /// The `Client` encounter at the Fixer: a staff server through his row
 /// (the room counted), the owner through the `Fixer` row.
 fn fixer_meet(world: &mut World, server: EntityId, served: EntityId, fixer: EntityId, coins: i64) {
@@ -1617,10 +1653,20 @@ fn walking_in(world: &World, w: &WalkIn) -> bool {
 /// event. `Some(true)` handed over, `Some(false)` nobody on duty (it
 /// waits), `None` the pickup is off (the buyer gone, jailed or papered, the
 /// Fixer gone: `walk_ins_dropped`; the forger keeps the coins).
+/// Round 5 U5 (OPEN-217): the forger who made it hands it over when he is
+/// behind the counter with room this hour (at 20k the counter's other
+/// server took the sale and the forger was paid asleep at home,
+/// `forger_19041 d21 13:01 SETTLED APART`); else the counter's server
+/// hands over his work. A forged licence is the same walk-in at `[gray]
+/// licence_price`.
 fn walk_in_sale(world: &mut World, w: WalkIn) -> Option<bool> {
+    let has = match w.kind {
+        WalkKind::Papers => world.jobs2.gray.papers.contains_key(&w.buyer),
+        WalkKind::Licence => crate::systems::weapons::licensed(world, w.buyer),
+    };
     if !crate::systems::law::living(world, w.buyer)
         || world.has::<Sentence>(w.buyer)
-        || world.jobs2.gray.papers.contains_key(&w.buyer)
+        || has
         || world.comp::<Building>(w.fixer).is_none_or(|b| b.demolished || b.derelict)
     {
         ownership::jobs2_row(world).walk_ins_dropped += 1;
@@ -1634,13 +1680,36 @@ fn walk_in_sale(world: &mut World, w: WalkIn) -> Option<bool> {
     {
         return Some(false);
     }
-    let Some(server) = fixer_server(world, w.fixer, w.buyer) else { return Some(false) };
+    let alive = crate::systems::law::living(world, w.forger);
+    let at_desk = alive && w.forger != w.buyer && present(world, w.forger, w.fixer) && has_room(world, w.forger);
+    // The forger due at his desk later today: an order of today waits for
+    // him (100k: the counter opened at 09:00, the commuting forger came in
+    // at 09:2x, and the hired Fixer handed over his work, `fixer_98933 d22
+    // 09:00` "(Moth Bellamy made)"); from the next day the counter hands it.
+    if !at_desk && w.day == world.day() && forger_due_today(world, w.forger, w.fixer) {
+        return Some(false);
+    }
+    let server = if at_desk {
+        w.forger
+    } else {
+        match fixer_server(world, w.fixer, w.buyer) {
+            Some(s) => s,
+            None => return Some(false),
+        }
+    };
     let tier = w.tier.max(1);
-    let price = world.config.gray.id_price[usize::from(tier - 1)];
-    let forger = if crate::systems::law::living(world, w.forger) { w.forger } else { server };
+    let price = match w.kind {
+        WalkKind::Papers => world.config.gray.id_price[usize::from(tier - 1)],
+        WalkKind::Licence => world.config.gray.licence_price,
+    };
+    // Round 5 U5: a forger in the cells (or dead) made nothing today: the
+    // counter's server is paid as the maker (20k: `forger_9672 d21 12:08`,
+    // his share paid to him in the cells).
+    let forger = if alive && !world.has::<Sentence>(w.forger) { w.forger } else { server };
     // The pre-view pass phase 4 (P3, OPEN-119): paid here, at the handover:
     // the forger's share to him, the owner's cut to the server, who holds it
     // for the owner's collection in person (`collected`).
+    let mut held = 0;
     if w.unpaid {
         if world.purse(Some(w.buyer)) < price {
             ownership::jobs2_row(world).walk_ins_dropped += 1;
@@ -1648,21 +1717,62 @@ fn walk_in_sale(world: &mut World, w: WalkIn) -> Option<bool> {
         }
         let cut = (price as f32 * world.config.gray.fixer_cut).round() as i64;
         ownership::pay(world, Some(w.buyer), Some(forger), price - cut, Flow::Gray);
-        let held = ownership::pay(world, Some(w.buyer), Some(server), cut, Flow::Gray);
+        held = ownership::pay(world, Some(w.buyer), Some(server), cut, Flow::Gray);
         if held > 0 {
             world.fixer_owed.entry(w.fixer).or_default().push((server, held));
         }
-        let row = ownership::jobs2_row(world);
-        row.fake_sold += 1;
-        row.papers_handover += 1;
+        if w.kind == WalkKind::Papers {
+            let row = ownership::jobs2_row(world);
+            row.fake_sold += 1;
+            row.papers_handover += 1;
+        }
     }
-    world.jobs2.gray.papers.insert(w.buyer, crate::systems::gray::Papers { tier, fake: true, forger: Some(forger) });
+    let what = match w.kind {
+        WalkKind::Papers => {
+            let p = crate::systems::gray::Papers { tier, fake: true, forger: Some(forger) };
+            world.jobs2.gray.papers.insert(w.buyer, p);
+            "papers"
+        }
+        WalkKind::Licence => {
+            world.jobs2.gray.licences.insert(w.buyer, forger);
+            ownership::jobs2_row(world).licences_forged += 1;
+            "a forged weapons licence"
+        }
+    };
     ownership::jobs2_row(world).walk_ins_served += 1;
     fixer_meet(world, server, w.buyer, w.fixer, price);
-    let text =
-        format!("{} handed {} papers at {}", world.name_of(server), world.name_of(w.buyer), world.name_of(w.fixer));
-    world.push_event(EventKind::Served, &[server, w.buyer, w.fixer], text);
+    let made = if forger == server { String::new() } else { format!(" ({} made)", world.name_of(forger)) };
+    let paid = match (w.unpaid, held > 0) {
+        (true, true) => format!(", {price}c paid, {held}c of it held for the owner"),
+        (true, false) => format!(", {price}c paid"),
+        (false, _) => String::new(),
+    };
+    let text = format!(
+        "{} handed {} {what}{made} at {}{paid}",
+        world.name_of(server),
+        world.name_of(w.buyer),
+        world.name_of(w.fixer)
+    );
+    let mut actors = vec![server, w.buyer, w.fixer];
+    if forger != server {
+        actors.push(forger);
+    }
+    world.push_event(EventKind::Served, &actors, text);
     Some(true)
+}
+
+/// Round 5 U5: `forger` alive, free, on the books at `fixer` and on a
+/// workday with his shift not yet over today.
+fn forger_due_today(world: &World, forger: EntityId, fixer: EntityId) -> bool {
+    if !crate::systems::law::living(world, forger) || world.has::<Sentence>(forger) {
+        return false;
+    }
+    let tod = world.tick_of_day();
+    world.comp::<Job>(forger).is_some_and(|j| {
+        j.employer == Some(fixer)
+            && j.shifts.iter().any(|&(_, end)| tod < end)
+            && crate::exec::routine::workday_of(world, forger, j, j.shift_key_at(world.tick))
+    })
 }
 
 /// § 2.4 (fixer): each hour, the walk-ins not walking are served by the
@@ -1701,12 +1811,25 @@ pub fn walk_in_arrived(world: &mut World, buyer: EntityId, fixer: EntityId) {
 /// `buyer` for the pickup in `fixer`'s open hours (once: a buyer already
 /// queued keeps his place).
 pub fn queue_walk_in(world: &mut World, buyer: EntityId, fixer: EntityId, forger: EntityId, tier: u8) {
+    queue_commission(world, buyer, fixer, forger, tier, WalkKind::Papers);
+}
+
+/// Round 5 U5 (OPEN-217): queue a forger's commission of `kind` (once a
+/// buyer: one already queued keeps his place).
+pub fn queue_commission(
+    world: &mut World,
+    buyer: EntityId,
+    fixer: EntityId,
+    forger: EntityId,
+    tier: u8,
+    kind: WalkKind,
+) {
     if world.walk_ins.iter().any(|w| w.buyer == buyer) {
         return;
     }
     let day = world.day();
     let unpaid = crate::systems::presence::on(world);
-    world.walk_ins.push(WalkIn { buyer, fixer, forger, tier, day, unpaid });
+    world.walk_ins.push(WalkIn { buyer, fixer, forger, tier, day, unpaid, kind });
 }
 
 /// Is `buyer` queued for a walk-in?
@@ -1731,7 +1854,12 @@ pub fn walk_ins_daily(world: &mut World) {
         {
             continue;
         }
-        let Some(hour) = fixer_first_hour(world, w.fixer) else { continue };
+        // Round 5 U5 (OPEN-217): the first open hour he is off his own
+        // shift; none today, no walk (he comes on his rest day). The counter
+        // keeps the day shift: a 09:00 visit waited out a 09-18 shift and
+        // walked to a shut Fixer at 18:xx, every day (20k: 258 waited-days
+        // against 29 served in 30 days).
+        let Some(hour) = walk_in_hour_for(world, w.buyer, w.fixer, day) else { continue };
         let v = crate::systems::household::PendingVisit {
             kin: w.fixer,
             why: crate::systems::household::VisitWhy::Papers,
@@ -1739,6 +1867,27 @@ pub fn walk_ins_daily(world: &mut World) {
         };
         world.visits.insert(w.buyer, v);
     }
+}
+
+/// Round 5 U5: the first hour of `fixer`'s open hours today (its staff's
+/// shifts, `fixer_first_hour` to the latest shift's end) when `buyer` is
+/// not on his own shift on a workday. `None`: no such hour.
+fn walk_in_hour_for(world: &World, buyer: EntityId, fixer: EntityId, day: u64) -> Option<u8> {
+    let first = fixer_first_hour(world, fixer)?;
+    let end = world
+        .staff_of(fixer)
+        .iter()
+        .filter_map(|&s| world.comp::<Job>(s))
+        .flat_map(|j| j.shifts.iter().map(|&(_, b)| b))
+        .max()
+        .map_or(first, |m| u8::try_from(u64::from(m) / TICKS_PER_HOUR).unwrap_or(24));
+    let Some(job) = world.comp::<Job>(buyer) else { return Some(first) };
+    let start = day * crate::time::TICKS_PER_DAY;
+    (first..end.max(first + 1)).find(|&h| {
+        let tod = u16::from(h) * TICKS_PER_HOUR as u16;
+        !(job.on_shift(tod)
+            && crate::exec::routine::workday_of(world, buyer, job, job.shift_key_at(start + Tick::from(tod))))
+    })
 }
 
 /// The first hour of `fixer`'s staff's earliest shift (its open hours' start).

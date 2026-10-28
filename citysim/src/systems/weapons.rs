@@ -393,9 +393,10 @@ pub fn confiscate(world: &mut World, suspect: EntityId) {
 // Carrying, licences and the sightings (§ 4)
 // ---------------------------------------------------------------------------
 
-/// Licensed by the post (guards, Security staff) or the Clerk's register.
+/// Licensed by the post (guards, Security staff) or the Clerk's register,
+/// or holding a forged licence (Round 5 U5: the Gunsmith takes it).
 pub fn licensed(world: &World, id: EntityId) -> bool {
-    if world.jobs2.arms.licences.contains(&id) {
+    if world.jobs2.arms.licences.contains(&id) || world.jobs2.gray.licences.contains_key(&id) {
         return true;
     }
     world.comp::<Job>(id).is_some_and(|j| {
@@ -511,7 +512,10 @@ pub fn sight_carriers(world: &mut World) {
         if world.jobs2.arms.ua_today >= cap {
             break;
         }
-        if !free_adult(world, c) || licensed(world, c) {
+        // Round 5 U5 (OPEN-217): a forged licence is shown when the weapon
+        // is noticed (`gray::licence_looked_at`), not waved through.
+        let forged = world.jobs2.gray.licences.contains_key(&c);
+        if !free_adult(world, c) || (licensed(world, c) && !forged) {
             continue;
         }
         let t = world.comp::<Kit>(c).map_or(0, |k| k.weapon);
@@ -538,6 +542,9 @@ pub fn sight_carriers(world: &mut World) {
         };
         let seen = (0..rolls).any(|r| hash(world, PURPOSE_SIGHT, key(c), hour * 4 + u64::from(r)) < p);
         if !seen {
+            continue;
+        }
+        if forged && !crate::systems::gray::licence_looked_at(world, c, g) {
             continue;
         }
         world.jobs2.arms.ua_today += 1;
