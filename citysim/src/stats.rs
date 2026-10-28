@@ -723,6 +723,15 @@ pub struct Jobs2Cols {
     pub street_takes: u32,
     pub child_begged: i64,
     pub child_thefts: u32,
+    /// Round 4 T2 (OPEN-232): a school-age child home on a school day: no
+    /// School within `[ages] school_trip_ticks` (`school_far`), every one in
+    /// reach full or with no teacher (`school_full`), the fee or the El's
+    /// fares beyond the purse (`school_unpaid`); and the school days ridden
+    /// on the El (`school_el`, the fares paid).
+    pub school_far: u32,
+    pub school_full: u32,
+    pub school_unpaid: u32,
+    pub school_el: u32,
     /// The pressure pass S6 (Dylan 2026-10-27): a death of a person under
     /// 18 refused at `World::kill_by` (every pick skips them first: a
     /// non-zero count is a pick site that missed, a broken-system signal).
@@ -1538,6 +1547,10 @@ impl Jobs2Cols {
             "street_takes",
             "child_begged",
             "child_thefts",
+            "school_far",
+            "school_full",
+            "school_unpaid",
+            "school_el",
             "harm_blocked",
             "schools",
             "elders",
@@ -2021,6 +2034,10 @@ impl Jobs2Cols {
             self.street_takes.to_string(),
             self.child_begged.to_string(),
             self.child_thefts.to_string(),
+            self.school_far.to_string(),
+            self.school_full.to_string(),
+            self.school_unpaid.to_string(),
+            self.school_el.to_string(),
             self.harm_blocked.to_string(),
             self.schools.to_string(),
             self.elders.to_string(),

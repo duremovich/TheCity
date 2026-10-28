@@ -19,7 +19,7 @@
 //! - **The household** (as the relocation always had it): a co-resident
 //!   spouse and the children move together; a spouse with a job of her own
 //!   moves only when both commutes shrink by the margin; a household whose
-//!   Home has a School within `[ages] school_reach` moves only to one that
+//!   Home has a School within `[ages] school_trip_ticks` moves only to one that
 //!   has one ([`school_kept`]).
 //! - **A nearer job** ([`job_moves`], [`nearer_job`]): past `job_days` with
 //!   no Home found, the worker seeks; at the next midnight, before the job

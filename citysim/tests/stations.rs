@@ -14,7 +14,15 @@ use citysim::{Building, Config, EntityId, EventKind, Sentence, World};
 /// The 2k city with a Station in every district (each at least a tile from
 /// the Precinct and the others).
 fn station_world() -> World {
-    common::world_with(|c| c.law.station_min_tiles = 1)
+    // Round 4 T2 re-pin (the Lot layout, not a Station rule): the Schools seeded
+    // by reach take Lots near the Homes and the Stations move onto the district
+    // centroids; at 2k every guard then lives nearer the Precinct than a Station
+    // with a share (none posted) and the farthest Station's district has no
+    // jobless adult. The Schools stay at S6's centroids here.
+    common::world_with(|c| {
+        c.law.station_min_tiles = 1;
+        c.ages.school_by_reach = false;
+    })
 }
 
 fn door(w: &World, b: EntityId) -> citysim::components::TilePos {

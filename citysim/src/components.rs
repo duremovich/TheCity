@@ -2040,6 +2040,29 @@ pub struct Child {
     /// count, `[camp] let_home_days`).
     #[serde(default, skip_serializing_if = "is_zero_u16_child")]
     pub home_fed_days: u16,
+    /// Round 4 T2 (OPEN-232): today's School (the roll it is on, `Routine::
+    /// School`), or the School that turned it away or was too dear (`school_
+    /// miss` `Full` or `Purse`); set at midnight by `ages::children`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub school: Option<crate::entity::EntityId>,
+    /// Round 4 T2: why a school-age child is not at School on a school day
+    /// (the parent's `[family]` line reads it); `None` at School, too young,
+    /// on a rest day, in a Camp or on the street.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub school_miss: Option<SchoolMiss>,
+}
+
+/// Round 4 T2 (OPEN-232): a school-age child kept home on a school day.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum SchoolMiss {
+    /// No School within `[ages] school_trip_ticks`, on foot or by the El.
+    Far,
+    /// Every School within it is full (its roll at `school_places_per_
+    /// teacher` x its teachers; one with no teacher takes no one).
+    Full,
+    /// One has room, but the fee (and the El's fares, for one past the walk)
+    /// is beyond the household's purse.
+    Purse,
 }
 
 fn is_zero_u16_child(v: &u16) -> bool {

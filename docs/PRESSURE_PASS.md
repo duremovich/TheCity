@@ -1926,3 +1926,62 @@ and repeat on the city's, so the city's books are kept too. `SAVE_VERSION` 84 (`
   `door_under_age`, `shape_up_home`, `foreman_gate`). One premise re-pinned, with the reason in place:
   `leverage::test_protection_pays_weekly_and_stops_when_district_lost` (with 10,000 coins the owner was the richest
   purse at a corp's bankruptcy, bought its Noodle Bar and incorporated, so the Hotel changed hands; she now holds 600).
+
+### T2, School by travel time (`OPEN-232`; `ages.rs`, `exec::routine::workday_of`, `[ages]` T2 keys)
+
+**Dylan's call (2026-10-27): reach by travel time, not a School per district.** Built:
+
+- **The pick** (`ages::children` -> `pick_school`, midnight, both tiers): a school-age child on a school day goes to
+  the nearest School (`schools_in_reach`, by `ages::school_trip`: the walk at `[exec] move_ticks_full`, or the El's
+  structural estimate `distance::travel` when quicker) within `school_trip_ticks` (60) of its Home door, with room
+  on its roll, whose fee (and `school_el_fares` (2) `[transit]` fares a day when the School is past the walk) the
+  household's payer can spare; the payer is now the parent at home with the most to spare (S6 read the lower id's
+  purse alone). The fares go to the Treasury (`Flow::Fare`); a child never rides on a dodge, so no gate, guard or
+  beating is reached (the under-18 rule: no new victim pick, no fight, no fare ladder for a child; nothing calls
+  `law` or `fares`).
+- **The roll** (`roll_cap`): `school_places_per_teacher` (30, the teacher row's `per_hour`) for each teacher on the
+  School's staff; full, the next child goes to the next School in reach, else home (`SchoolMiss::Full`); a School
+  with no teacher takes no one. `Child.{school, school_miss}` hold today's School (or the one that turned it away
+  or was too dear) and why not (`Far`, `Full`, `Purse`); `AgesState.{rolls, roll_day}` the day's rolls.
+- **The teacher's day follows the roll** (`ages::teacher_idle`, read by `routine::workday_of`, so the Full Work goal
+  and `lod::stat_work` alike): a School with no child on today's roll (a weekend, or none in reach and paid) is no
+  workday: no class, no ClerkWork, no shift and no wage. On a school day the School says so ("No pupil on the roll
+  at School#5176 today: no class for Delia Underhill, Kuro Singh (no shift, no wage)"). V12's teacher worked
+  Saturdays at an empty School; now Saturday and Sunday are off.
+- **The `[family]` line** (shadow): "at School#4938 (D4 Mid-Levels) (56 min walk)", "(38 min by the El, the fares
+  paid)", "at home (play: no School within 1 h)", "(play: School#X is full, 60 of 60 on the roll)", "(play: the 2c
+  fee at School#5279 (D4 Mid-Levels) is beyond the purse)", "(play, under 6 for School)", "(play, no School today)".
+- **Deviation: the Schools seeded by reach** (`school_by_reach`, `ages::seed` -> `school_lot`, `HomeGrid`). The
+  spec's pick alone moved nothing at 20k: S6's seed put each School on the vacant Lot nearest its district's
+  centroid, 20 Schools at five centroids, and 225 of 1,533 school-age children (15 %) had one within an hour (the El
+  added 14). Each seeded School now takes the Lot (Mid and up, as before) whose door has the most Home residents not
+  yet within the walk of `school_trip_ticks` of a seeded School: 645 (42 %) within an hour, the Sump 3 -> 111 of 462
+  (from Mid Lots on its edge), D6 The Vats 0 of 95. Same count, no School per district. `jobs::seed_lots` exposes
+  `seed_lot`'s candidates, `vice::seed_venue_on` builds on a chosen Lot.
+- **Numbers** (20k island seed 42 x 30, `--scaled --ambient-flats 50`, before = main `0452241`, one run each):
+  school days / child-days 2.5 % -> 7.6 % (school days 2,034 -> 6,327; mean ch_school 67.8 -> 210.8); of the
+  school-age children's school days, at School 18.5 %, no School within 1 h 20,010, full 488, the purse 7,441, by the
+  El 150. Daily school days d0-d4 629 -> 378, then ~210-230 (before 201 -> 134, then ~80): the purse falls in week 1
+  as S6 saw. Employed mean 11,240 -> 11,320, homeless max 657 -> 715, violence deaths 81 -> 101, starvation 0 -> 1
+  (an adult, `Imani Garland`, evicted d11; the Lot layout moved the city, not chased), harm_blocked 0 -> 0. **100k**
+  (`isle_m_k2_100k` seed 42 x 8, same flags): 6.7 % -> 7.2 % (school days 6,029 -> 6,480): the roll binds, 1,080 a
+  day flat (18 Schools x 2 teachers x 30) against 10,180 turned away full, 22,440 out of reach, 1,820 unpaid; the
+  before fell 1,302 -> 628 by d7 on the purse. The 100k city has 18 Schools for ~11k children (fewer than the 20k's
+  20: `schools` is per Lot copy).
+- **Reads wrong / open** (the next pass's input): at 100k the Schools are full, not far: two teachers a School and
+  18 Schools is the cap (a founding by demand, or Schools by the child count, is Dylan's call; no knob turned). At
+  20k the fee is the binder in reach (7,441 unpaid against 6,327 schooled): a jobless parent's child is at School one
+  day and home the next ("Ottilie Santoro (7 y) at School#4876 ... (55 min walk)" d21, "the 2c fee ... is beyond the
+  purse" d22, `camp_parent_11600`); a teacher's own child is home on the fee (`teacher_11833`: "Dex Greaves (13 y) at
+  home (play: the 2c fee at School#5279 ... is beyond the purse)"). A parent on the service's warning still pays the
+  fee from what `spendable` leaves (the children's food is not reserved first). Classes are small (1-5 a teacher). The
+  El carries few (150 school days at 20k): the stops lie far from most Homes. Mid-Levels children past an hour stay
+  home ("Rin Varley (13 y) at home (play: no School within 1 h)", Block#1226 D4).
+- Re-pinned on the premise, the reason in place: `civic`'s `schoolchild` fixture puts the staged child on the roll
+  (an empty roll is no teacher's workday); `stations`' `station_world` and `person`'s
+  `probe_working_couple_moves_near_work`, `probe_worker_eats_before_the_shift_not_during_it` keep S6's centroid
+  Schools (`school_by_reach = false`: the Lot layout moved the Stations off guards' reach and the room near work);
+  `housing`'s school rule reads `school_trip_ticks`. `ages::place_of` for a hand-set School routine reads the nearest
+  School by the trip. No test (doctrine 2). `SAVE_VERSION` 88 (`Child.{school, school_miss}`,
+  `AgesState.{rolls, roll_day}`, the `[ages]` T2 keys, the `Jobs2Cols` `school_far`, `school_full`, `school_unpaid`,
+  `school_el`).

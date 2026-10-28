@@ -260,6 +260,13 @@ fn seed_heir(world: &World, kind: BuildingKind, i: usize) -> Option<EntityId> {
 /// interior of at least `min(capacity, 6)` tiles; least `(copies of the kind
 /// in its district, door distance to the district's centroid, id)`.
 pub(crate) fn seed_lot(world: &World, kind: BuildingKind) -> Option<EntityId> {
+    seed_lots(world, kind).into_iter().min().map(|(_, _, l)| l)
+}
+
+/// [`seed_lot`]'s candidates: `(copies of the kind in its district, door
+/// distance to the district's centroid, Lot)`, unordered. Round 4 T2 (the
+/// Schools by reach, `ages::seed`) ranks them by the Homes they serve first.
+pub(crate) fn seed_lots(world: &World, kind: BuildingKind) -> Vec<(usize, u32, EntityId)> {
     let need = usize::from(world.config.buildings.for_kind(kind).capacity.min(6));
     crate::systems::founding::vacant_lots(world)
         .into_iter()
@@ -279,8 +286,7 @@ pub(crate) fn seed_lot(world: &World, kind: BuildingKind) -> Option<EntityId> {
             let centroid = world.districts.get(d.index()).map_or(bd.door, |x| x.centroid);
             Some((copies, bd.door.manhattan(centroid), l))
         })
-        .min()
-        .map(|(_, _, l)| l)
+        .collect()
 }
 
 /// Pressure pass F2: the derelict Block a seeded venue with no Lot of its

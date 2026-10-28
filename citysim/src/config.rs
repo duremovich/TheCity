@@ -2913,12 +2913,24 @@ pub struct AgesCfg {
     /// The seeded population's oldest age (sim years; `[world]
     /// age_max_years` with the switch off).
     pub seed_max_years: f32,
-    /// Schools seeded (Mid and up, on the city's deed) per copy; a School
-    /// within `school_reach` tiles of the child's Home, its fee a school day
-    /// paid by the household (`Flow::Contract`; the Treasury's with the
-    /// `public_school` lever); `edu_gain` of education a school day at 18.
+    /// Schools seeded (Mid and up, on the city's deed) per copy; its fee a
+    /// school day paid by the household (`Flow::Contract`; the Treasury's
+    /// with the `public_school` lever); `edu_gain` of education a school day
+    /// at 18.
     pub schools: u32,
-    pub school_reach: u32,
+    /// Round 4 T2 (OPEN-232, Dylan 2026-10-27: reach by travel time): a
+    /// child goes to the nearest School with room within `school_trip_ticks`
+    /// of its Home door, on foot (`[exec] move_ticks_full` a tile) or by the
+    /// El (`distance::travel`, when quicker), the household paying
+    /// `school_el_fares` fares a day for the El; a School's roll holds
+    /// `school_places_per_teacher` a teacher on its staff.
+    pub school_trip_ticks: crate::time::Tick,
+    pub school_el_fares: i64,
+    pub school_places_per_teacher: u32,
+    /// T2: each seeded School on the Lot whose door has the most Home
+    /// residents not yet within the walk of `school_trip_ticks` of one
+    /// (`false`: S6's district centroid, the probes pinned to that layout).
+    pub school_by_reach: bool,
     pub school_fee: i64,
     pub edu_gain: f32,
     /// A Street child begs `child_beg_coins` a day from a resident of its
@@ -2976,7 +2988,10 @@ impl Default for AgesCfg {
             enabled: false,
             seed_max_years: 75.0,
             schools: 2,
-            school_reach: 60,
+            school_trip_ticks: 60,
+            school_el_fares: 2,
+            school_places_per_teacher: 30,
+            school_by_reach: true,
             school_fee: 2,
             edu_gain: 0.003,
             child_beg_coins: 1,

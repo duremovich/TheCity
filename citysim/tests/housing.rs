@@ -1113,7 +1113,7 @@ fn test_household_moves_together_on_the_pressure() {
     }
     let near = near_home(&mut w, a, work, need);
     // No School rule in the way: the near Home keeps one if the far had it.
-    w.config.ages.school_reach = u32::MAX / 4;
+    w.config.ages.school_trip_ticks = u64::MAX / 4;
     common::set_coins(&mut w, a, 10_000);
     let night = nights(&mut w, u32::from(cfg.move_days) + 1, |x| home_of(x, a) != Some(far));
     assert_eq!(night, Some(u32::from(cfg.move_days)), "after move_days of pressure");

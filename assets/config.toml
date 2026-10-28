@@ -3786,8 +3786,11 @@ p_spread = 0.001
 [ages]
 enabled = true
 seed_max_years = 75.0              # the seeded ages run to this (Dylan's answer 5; [world] age_max_years off)
-schools = 2                        # seeded per copy (Mid and up, the city's deed)
-school_reach = 60                  # a School within this many tiles of the child's Home ...
+schools = 2                        # seeded per copy (Mid and up, the city's deed; where: school_by_reach)
+school_trip_ticks = 60             # round 4 T2 (OPEN-232, Dylan 2026-10-27: reach by travel time, not a School per district): a child goes to the nearest School with room within this of its Home door, walked (60 tiles at [exec] move_ticks_full 1, S6's school_reach) or by the El when quicker; none: home ("no School within 1 h")
+school_el_fares = 2                # ... by the El the household pays this many [transit] fares a day (there and back; a child never rides on a dodge)
+school_places_per_teacher = 30     # ... a School's roll holds this a teacher on its staff ([[serves]] teacher per_hour 30); full, the next child is turned away; no teacher, no roll
+school_by_reach = true             # ... and each seeded School stands on the Lot (Mid and up) whose door has the most Home residents not yet within the walk of school_trip_ticks of one (false: S6's district centroid, 20 Schools at five centroids, 15 % of the 20k island's school-age children within an hour of one; 42 % by reach)
 school_fee = 2                     # ... at this a school day, paid by the household (Flow::Contract)
 edu_gain = 0.003                   # education a school day, added at 18
 child_beg_coins = 1                # a street child's day: a gift from a resident of its district ...

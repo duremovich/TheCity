@@ -82,11 +82,14 @@ pub fn is_workday(shift_key: i64) -> bool {
 /// day is staggered by its index (the whole watch shared the city's rest
 /// day, so with Patrol and Arrest gated on the workday no guard worked one
 /// day in seven: arrests on that weekday fell 8,226 -> 1,121 over 42-53).
-pub fn workday_of(_world: &World, id: EntityId, job: &Job, shift_key: i64) -> bool {
+///
+/// Round 4 T2 (OPEN-232): a teacher's School with no child on today's roll
+/// is no workday (no class, no ClerkWork; `ages::teacher_idle`).
+pub fn workday_of(world: &World, id: EntityId, job: &Job, shift_key: i64) -> bool {
     if job.role == Role::Guard {
         return (shift_key + i64::from(id.index % 7)).rem_euclid(7) != 6;
     }
-    is_workday(shift_key)
+    is_workday(shift_key) && !crate::systems::ages::teacher_idle(world, job, shift_key)
 }
 
 /// A worked shift whose wages have not been collected today: the tail of the

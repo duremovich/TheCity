@@ -91,6 +91,10 @@ fn schoolchild(w: &mut World) -> (EntityId, EntityId, EntityId, EntityId) {
     }
     let child = demography::spawn_child(w, s, a, h);
     w.comp_mut::<Child>(child).expect("child").routine = Routine::School;
+    // Round 4 T2 (OPEN-232): on the School's roll today, as the midnight's pick
+    // puts it (a School with an empty roll is no teacher's workday).
+    w.comp_mut::<Child>(child).expect("child").school = Some(school);
+    *w.jobs2.ages.rolls.entry(school).or_insert(0) += 1;
     assert_eq!(ages::place_of(w, child), Some(ages::Place::School(school)), "the child's School day is there");
     (a, child, h, school)
 }
