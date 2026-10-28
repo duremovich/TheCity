@@ -747,17 +747,13 @@ fn gang_districts(world: &World, g: &Gang) -> Vec<crate::components::DistrictId>
 }
 
 /// Scale S4 perf: "a guard within `r` (Chebyshev) of this door", the
-/// guards' tiles on a grid built on the first test (a search that tests
-/// many doors read every guard per door).
+/// guards' tiles on a grid read on the first test (a search that tests
+/// many doors read every guard per door). Pressure pass round 5, U8
+/// (OPEN-229): the tick's grid (`World::guard_grid`), not one built per pick.
 fn guard_test(world: &World, r: u32) -> impl Fn(TilePos) -> bool + '_ {
-    let grid: std::cell::OnceCell<(Vec<TilePos>, crate::spatial::TileGrid)> = std::cell::OnceCell::new();
+    let grid: std::cell::OnceCell<std::sync::Arc<crate::world::GuardGrid>> = std::cell::OnceCell::new();
     move |door: TilePos| {
-        let (tiles, grid) = grid.get_or_init(|| {
-            let tiles: Vec<TilePos> =
-                world.guards().iter().filter_map(|&g| world.comp::<Position>(g).map(|p| p.tile)).collect();
-            let grid = crate::spatial::TileGrid::build(world.map.w(), world.map.h(), 16, tiles.iter().copied());
-            (tiles, grid)
-        });
+        let (tiles, grid) = &**grid.get_or_init(|| world.guard_grid());
         let mut near = Vec::new();
         grid.near(door, r, &mut near);
         near.iter().any(|&i| law::chebyshev(tiles[i as usize], door) <= r)
@@ -944,75 +940,51 @@ fn gang_work_pick(world: &World, id: EntityId) -> Option<(EntityId, Option<Order
         }
         Some(_) => return None,
     };
-    let homes = world.buildings_by_kind().get(&BuildingKind::Home)?;
     // Unclaimed (no gang holds it), or under Contest in the rival's list.
     let pick = |h: EntityId| match theirs {
         Some(t) => t.binary_search(&h).is_ok(),
         None => holder_of(world, h).is_none(),
     };
     let r = world.config.crime.sight_day_crime;
-    // M15 W31: a Purist gang shakes down the chromed's Homes first.
-    let purist = crate::systems::creeds::is_purist(world, gang);
     // L1: an order's Home is near the Hideout and near the member.
     let own = if from != actor_tile { Some(actor_tile) } else { None };
-    if !purist {
-        // Scale S4 perf: the least `(door distance, index)` read outward
-        // from `from` on the building grid (the distance is at least the
-        // door's from `from`), not every Home: the same Home. A building of
-        // kind Home is on the Home list unless demolished.
-        let guarded = guard_test(world, r);
-        let score = |h: EntityId| {
-            if Some(h) == own_home {
-                return None;
-            }
-            let b = world.comp::<Building>(h)?;
-            if b.kind != BuildingKind::Home || b.demolished || b.derelict || b.occupants.is_empty() {
-                return None;
-            }
-            let dist = b.door.manhattan(from) + own.map_or(0, |t| b.door.manhattan(t));
-            (pick(h) && !guarded(b.door)).then_some((dist, h.index))
-        };
-        // Under Contest the candidates are the rival's territory.
-        let best = match (theirs, own) {
-            (Some(t), _) => t.iter().filter_map(|&h| score(h).map(|(d, i)| (d, i, h))).min(),
-            (None, None) => world.building_grid().nearest(from, 0, score),
-            // The walk via the Hideout: the cells by the summed distance.
-            (None, Some(o)) => world.building_grid().nearest_sum(&[from, o], score),
-        };
-        return best.map(|(_, _, h)| (h, order));
-    }
-    // Guarded: a guard within `sight_day_crime` of the door. The nearest
-    // unguarded candidate by `(door distance, index)`; the guard test runs
-    // only for a candidate that would beat the best so far (it was a
-    // Homes x guards table rebuilt whenever a guard moved; perf).
-    let guards: Vec<TilePos> =
-        world.guards().iter().filter_map(|&g| world.comp::<Position>(g).map(|p| p.tile)).collect();
-    let guarded = |door: TilePos| guards.iter().any(|&gt| law::chebyshev(gt, door) <= r);
-    let mut best: Option<((bool, u32, u32), EntityId)> = None;
-    for &h in homes {
+    // Scale S4 perf: the least `(door distance, index)` read outward from
+    // `from` on the building grid (the distance is at least the door's from
+    // `from`), not every Home: the same Home. A building of kind Home is on
+    // the Home list unless demolished. Guarded: a guard within
+    // `sight_day_crime` of the door.
+    let guarded = guard_test(world, r);
+    let score = |h: EntityId, chromed: bool| {
         if Some(h) == own_home {
-            continue;
+            return None;
         }
-        let Some(b) = world.comp::<Building>(h) else { continue };
+        let b = world.comp::<Building>(h)?;
         // M12 D25: a derelict is no extortion target.
-        if b.demolished || b.derelict || b.occupants.is_empty() {
-            continue;
+        if b.kind != BuildingKind::Home || b.demolished || b.derelict || b.occupants.is_empty() {
+            return None;
+        }
+        if chromed && !crate::systems::creeds::chromed_home(world, h) {
+            return None;
         }
         let dist = b.door.manhattan(from) + own.map_or(0, |t| b.door.manhattan(t));
-        // The best this Home could key (chromed) cannot beat the best so far:
-        // skip before the filters (for a creedless gang, the original test).
-        if best.is_some_and(|(k, _)| (false, dist, h.index) >= k) || !pick(h) || guarded(b.door) {
-            continue;
-        }
-        // The resident scan runs only for a Home that passed the cheap rejects.
-        let plain = purist && !crate::systems::creeds::chromed_home(world, h);
-        let key = (plain, dist, h.index);
-        if best.is_some_and(|(k, _)| key >= k) {
-            continue;
-        }
-        best = Some((key, h));
-    }
-    best.map(|(_, h)| (h, order))
+        (pick(h) && !guarded(b.door)).then_some((dist, h.index))
+    };
+    let best_of = |grid: &crate::spatial::BuildingGrid, chromed: bool| match (theirs, own) {
+        // Under Contest the candidates are the rival's territory.
+        (Some(t), _) => t.iter().filter_map(|&h| score(h, chromed).map(|(d, i)| (d, i, h))).min(),
+        (None, None) => grid.nearest(from, 0, |h| score(h, chromed)),
+        // The walk via the Hideout: the cells by the summed distance.
+        (None, Some(o)) => grid.nearest_sum(&[from, o], |h| score(h, chromed)),
+    };
+    // M15 W31: a Purist gang shakes down the chromed's Homes first: the
+    // nearest chromed Home, else the nearest of any. Pressure pass round 5,
+    // U8 (OPEN-229): the chromed are read on their own grid
+    // (`World::chromed_homes`), not by a walk over every Home in the city per
+    // member think (`goal::GangWork` 21.7 % of the 100k profile): the same
+    // Home.
+    let best =
+        if crate::systems::creeds::is_purist(world, gang) { best_of(&world.chromed_homes(), true) } else { None };
+    best.or_else(|| best_of(&world.building_grid(), false)).map(|(_, _, h)| (h, order))
 }
 
 /// M14 V30: the Home of the newest freelance runner (no gang) the gang's

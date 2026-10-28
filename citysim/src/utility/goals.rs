@@ -810,9 +810,10 @@ pub fn considerations_with(
             }
             // The pressure pass phase 2 (OPEN-176): a scav's off hours are
             // the gang's round of the bins (a Harvest target outranks it).
-            if crate::systems::gang::gang_work_target(world, id).is_none()
-                && crate::systems::customers::scav_bin(world, id).is_some()
-            {
+            // Pressure pass round 5, U8 (OPEN-229): the target is picked once
+            // a think (it was picked here and again for the walk below).
+            let target = crate::systems::gang::gang_work_target(world, id);
+            if target.is_none() && crate::systems::customers::scav_bin(world, id).is_some() {
                 let cs = vec![
                     Consideration::new("the scav round", 1.0, GATE),
                     Consideration::new("U(wealth)", urgency(n.wealth), Curve::Linear { m: 0.5, b: 0.3 }),
@@ -841,7 +842,7 @@ pub fn considerations_with(
             ];
             // L1: the target is found here (once), for its walk; a tired or
             // hungry member works less (GangWork's flat ~0.85 beat Sleep).
-            let (target, _) = crate::systems::gang::gang_work_target(world, id)?;
+            let (target, _) = target?;
             let tiles = if world.has::<crate::components::Building>(target) {
                 crate::systems::life::tiles_to(world, id, target)
             } else {
