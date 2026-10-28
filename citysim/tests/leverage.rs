@@ -300,7 +300,12 @@ fn test_protection_pays_weekly_and_stops_when_district_lost() {
     // Jobs & lives phase 7b: the pre-mirror off-screen evening (no `p_venue`): the learned Bar visits fed the leader's black-BD dealing and its arrest, not this test's protection.
     let mut w = gang_world_pre_mirror();
     let (g, leader, b, owner) = racket(&mut w);
-    set_coins(&mut w, owner, 10_000);
+    // Round 4 T4 (premise moved): with 10,000 the owner was the richest
+    // purse at a corp's bankruptcy (`corps` estate sale, d15), bought its
+    // Noodle Bar, incorporated, and the Hotel changed hands: the hold broke.
+    // This test is the weekly payment: a purse that pays the weeks and
+    // loses an estate sale to the corps' spare treasuries.
+    set_coins(&mut w, owner, 600);
     // Shadow V4 batch 1: on the moved city the owner spent the 10,000 on a
     // founding and incorporated, so the Hotel changed hands (payer) and the
     // hold broke; she has just founded (the cooldown), and this is the

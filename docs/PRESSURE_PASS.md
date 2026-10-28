@@ -1855,3 +1855,74 @@ the first fake job. Case 6's "a ledger that runs short" is the books' shortfall 
 (`ice_target`), not a smaller take. The 20k runners spread over many corps (Rue Eastwick hit six ledgers once each)
 and repeat on the city's, so the city's books are kept too. `SAVE_VERSION` 84 (`Corp.kept_call`,
 `World.ledger_books`). No test (doctrine 2).
+
+### T4, the trades' inside: the door and the yard (`OPEN-217`; `[verbs]` T4 keys, `service.rs`, `customers.rs`, `vice.rs`, `leisure.rs`, `streetwork.rs`)
+
+- **The 100k diagnosis** (from V12's diaries, then two 100k shadows). The LOD tier, as with S4's care. (1) **The
+  door's ledger went to an off-screen colleague**: `customers::door_visit` credited every arrival to the *lowest id*
+  of `trades::door_staff`, which counts a Statistical bouncer present on any day. V12's `dancer_79123` and
+  `bouncer_95519` kept the same Strip Club#5671 on the same nights: she served 18 visitors there, and he had no door
+  line in seven nights. Refusals and rough clients went by a hash over all the present door staff, so the body took a
+  share of a share. (2) **A Club whose only body was its Host took its evening in one 21:00 batch**:
+  `leisure::queue_at_counter` drew the off-screen visits into a *counter* body's shift only (the bouncer is a counter
+  body; the Host and the dancer are not), so `club_staff_36728`'s "served" memories are all at 21:00. (3) **The
+  floor's visits went to the colleagues**: a 100k Club or Strip Club has a dozen or more Hosts and dancers present by
+  the clock, so the pair hash gave the body about one visit in twenty ("a room of 22, nobody to serve", the first
+  100k read). (4) **The foreman picked from his bed**: `dawn_pick` ran at 06:00 wherever he was (V12 `foreman_21236`
+  at Rest in Block#540), and he was an actor of each Hire (174 lines).
+- **The door** (`[verbs] door_body_first`, `service::door_man`): the let-in, the refusal and the rough client's
+  throw-out go to the present door staff, a body first (the hash of the visitor and the hour among them), else the
+  hash among all. `maybe_eject` keeps the strongest.
+- **The floor** (`service::pick_server`, `[verbs] night_rows` = dancer, Host): a visit goes first to a body of
+  `night_rows` on duty with room, and such a body also draws the venue's off-screen visits into its shift as a
+  counter body does (`leisure::counter_bodies`). **Deviation:** the body's off-screen colleagues lose those customers
+  (and their tips) to her. The coins move between the same purses; none are made.
+- **The dancer's set and tips** (`vice::set_done` from the stations block's end, `[verbs] set_rows`; the `[shift]` blocks of
+  30-90 min, since a 25-45 override on the dancer row put "station" into the off city's config,
+  `stations::test_off_cities_write_nothing`; the shadows above ran with it): each block on the stage is a set, with one line for the room (the visits that
+  arrived while she was on), the tips and the tippers. A set to an empty room is counted in the night line, not given
+  a line. **The night** (`vice::night_told` from `service::shift_end`, bodies only; `ViceState.serve_nights`; the room
+  from `service::arrive`, the served and the regulars from `encounter_row`, the tips where they are paid): the
+  dancer's sets and tips, and the club hand's floor (the room, whom he served, the regulars).
+- **The yard** (`[verbs] shape_up_gate`, `shape_up_lead_min` 20): a Yard's foreman with a body goes to its gate in the
+  dawn window unless the owner cannot pay a hand (the Pitch goal, `streetwork::foreman_gate`/`foreman_due`). He sets
+  out when the travel from where he is, plus the lead, reaches `corner_hour`; never when he cannot make it; and the
+  goal holds once he is on his way. A committed Sleep ends for it as it does for a shift. The shape-up is one
+  `DawnPick` line a Yard (`shape_up_told`): "picked N at the gate" (a body there, or a foreman off screen) or "took N
+  off the list, the foreman X not at the gate", with the picked and the corner's sent home named (`[verbs]
+  night_names`, "and N more"). A foreman at the gate of a Yard that took nobody says so. Each body sent home has its
+  own line and a memory of the foreman. The picks' Hire is the hand's (`demography::hire_with`: the foreman is no
+  longer an actor, but the text still names him).
+- **The under-18 rule** (`ages::is_protected`): a kept door turns the under-age away every time ("under age" in
+  `customers::cause`, past `door_p`; no scene and no grudge). No vice house (StripClub, Brothel, Dollhouse) admits one,
+  with a bouncer on or not (`leisure::door_ok`). `rough_at_door` skips a protected client or worker, `scene` never
+  fights one, and `maybe_eject` never throws one out by force. `harm_blocked` was 0 in the 20k x 30 run.
+- **Shadow** (20k `isle_m_k2` and 100k `isle_m_k2_100k`, seed 42, d21-27; the 100k twice, the second after the floor
+  and foreman fixes). The door at 100k: `bouncer_59955 d23 00:00` "Bronwen Crane kept the door of Club#5138 tonight:
+  135 let in, 3 turned away (carrying 3)"; `d25 23:30` "Axel Kettering got rough with Rafe Quarry at Club#5138; Bronwen
+  Crane threw Axel Kettering out, barred from the door"; `d26 20:45` "turned Axel Kettering away ... (barred)". Ghost
+  Chrome was turned away "carrying" nine times in four nights, then `d26 00:02` "HuntStarted: Ghost Chrome went
+  looking for Bronwen Crane". The dancer: `dancer_104644 d23 21:28` "Ignatius Fletcher danced a set at Strip
+  Club#5357 (43 min) to a room of 5, 5 tips, 5c (Casimir Underhill, Rhoswen Oyelaran, Ulric Quarry and 2 more)";
+  `d22 00:00` "danced 9 sets at Strip Club#5357 tonight to a room of 24: 20 tips, 20c; regulars Casimir Underhill";
+  `d22 22:00` a rough client thrown out. The club hand: `club_staff_35574 d26 00:00` "Sprocket Stroud worked the
+  floor of Club#4902 tonight: a room of 19, served 19 (Xia Blackwood, Rhys Osgood, Imogen Crane and 16 more);
+  regulars Rhys Osgood" (the first 100k read: "a room of 22, nobody to serve"). The yard: `foreman_21236 d21 05:26`
+  GOAL Pitch, `05:36` Vend at the gate, `06:00` "Silas Ostrowski picked 24 at the gate of Construction Yard#5328 at
+  dawn: Xia Ashcombe, Jinx Quarry, Zane Stroud and 21 more; 657 sent home (...)", six lines in the week (174 before).
+  At 20k, `foreman_13714 d25 06:00` "Construction Yard#5251 took 1 at dawn off the list, the foreman Jinx Ironside not
+  at the gate".
+- **Reads wrong** (the next pass): a 100k Fight Pit's door lets in 1-14 a night and turns nobody away
+  (`bouncer_94173`), and a Strip Club's sets play to an empty room most of the night (`dancer_75115`: 8 of 9 sets one
+  night). That is the venues' traffic, not the door. A door turning the same armed man away nine times is a loop, not
+  a scene (the refused passes the door over only for `[exec] refused_ticks`). A 100k corner's shape-up queue is 600-700
+  a dawn (`p_corner` over the Statistical broke), and the passed-over have no sequel. A foreman whose walk runs long
+  arrives at 06:08, after the pick, and the far foreman (224 min away) is "not at the gate" every day. The first 100k
+  read made the foreman an actor of 174 "sent home" lines (fixed: the line is the hand's).
+- Numbers (prints, not claimed), 20k seed 42 x 30 (`--scaled --ambient-flats 50`): refusals 1,212, ejections 75,
+  door rough 72, barred 113, sets danced 7,836, serve nights 3,512, under age 0, shape-up sent home (bodies) 10,
+  harm_blocked 0, tps mean 128.8 (the box shared with three wave-mates). No test (doctrine 2). `SAVE_VERSION` 84
+  (`ViceState.serve_nights`, the `[verbs]` T4 keys, and the `Jobs2Cols` `sets_danced`, `serve_nights`,
+  `door_under_age`, `shape_up_home`, `foreman_gate`). One premise re-pinned, with the reason in place:
+  `leverage::test_protection_pays_weekly_and_stops_when_district_lost` (with 10,000 coins the owner was the richest
+  purse at a corp's bankruptcy, bought its Noodle Bar and incorporated, so the Hotel changed hands; she now holds 600).

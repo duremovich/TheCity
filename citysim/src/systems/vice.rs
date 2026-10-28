@@ -102,6 +102,231 @@ pub struct ViceState {
     /// (the customer ledger), told at his shift's end (`door_told`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub door_nights: BTreeMap<u64, DoorNight>,
+    /// Round 4 T4 (OPEN-217): a serving body of `[verbs] night_rows` (`key`)
+    /// -> its night (the room, the served, the tips, a dancer's sets), told
+    /// at the shift's end (`night_told`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub serve_nights: BTreeMap<u64, ServeNight>,
+}
+
+/// Round 4 T4 (OPEN-217): a serving body's night at its venue: the room
+/// (every visit that arrived there), whom it served (the regulars among
+/// them), the tips it took, and a dancer's sets (the set in progress apart).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ServeNight {
+    pub venue: EntityId,
+    pub room: u32,
+    pub served: u32,
+    /// The served, first come (at most a line's names and a few more).
+    pub faces: Vec<EntityId>,
+    /// The regulars among the served (the ledger's `regular_after`).
+    pub regulars: Vec<EntityId>,
+    pub tips: u32,
+    pub coins: i64,
+    pub sets: u32,
+    /// The sets danced to an empty room (no line of their own).
+    pub empty_sets: u32,
+    pub set_room: u32,
+    pub set_tips: u32,
+    pub set_coins: i64,
+    pub set_faces: Vec<EntityId>,
+}
+
+impl Default for ServeNight {
+    fn default() -> Self {
+        ServeNight {
+            venue: EntityId::NONE,
+            room: 0,
+            served: 0,
+            faces: Vec::new(),
+            regulars: Vec::new(),
+            tips: 0,
+            coins: 0,
+            sets: 0,
+            empty_sets: 0,
+            set_room: 0,
+            set_tips: 0,
+            set_coins: 0,
+            set_faces: Vec::new(),
+        }
+    }
+}
+
+/// The names kept on a night's ledger (a line's names and the "N more").
+const NIGHT_FACES: usize = 12;
+
+/// Round 4 T4: a body of `[verbs] night_rows` at its own venue `b` now.
+fn night_body(world: &World, id: EntityId, b: EntityId) -> bool {
+    world.comp::<Brain>(id).is_some_and(|br| br.lod != Lod::Statistical)
+        && world.comp::<Job>(id).is_some_and(|j| j.employer == Some(b))
+        && crate::systems::service::night_row(world, id, false)
+}
+
+fn night_note(world: &mut World, id: EntityId, b: EntityId, f: impl FnOnce(&mut ServeNight)) {
+    let n = world.jobs2.vice.serve_nights.entry(key(id)).or_default();
+    if n.venue != b {
+        *n = ServeNight { venue: b, ..ServeNight::default() };
+    }
+    f(n);
+}
+
+/// Round 4 T4 (`service::arrive`): a visit arrived at `b`: the room of
+/// every serving body of `night_rows` on duty there.
+pub fn night_room(world: &mut World, b: EntityId) {
+    if world.config.verbs.is_none() {
+        return;
+    }
+    let tod = world.tick_of_day();
+    let on: Vec<EntityId> = world
+        .staff_of(b)
+        .iter()
+        .copied()
+        .filter(|&s| {
+            world.comp::<Job>(s).is_some_and(|j| j.on_shift(tod))
+                && night_body(world, s, b)
+                && world.comp::<Position>(s).is_some_and(|p| p.building == Some(b))
+        })
+        .collect();
+    for s in on {
+        night_note(world, s, b, |n| {
+            n.room += 1;
+            n.set_room += 1;
+        });
+    }
+}
+
+/// Round 4 T4 (`service::encounter_row`): `server` served `served` at `b`
+/// (`regular`: a regular of his ledger now).
+pub fn night_served(world: &mut World, server: EntityId, served: EntityId, b: EntityId, regular: bool) {
+    if world.config.verbs.is_none() || !night_body(world, server, b) {
+        return;
+    }
+    night_note(world, server, b, |n| {
+        n.served += 1;
+        if n.faces.len() < NIGHT_FACES && !n.faces.contains(&served) {
+            n.faces.push(served);
+        }
+        if regular && n.regulars.len() < NIGHT_FACES && !n.regulars.contains(&served) {
+            n.regulars.push(served);
+        }
+    });
+}
+
+/// Round 4 T4 (`service::encounter_row`): `worker` took a tip of `paid`
+/// from `from` at `b`.
+pub fn night_tip(world: &mut World, worker: EntityId, from: EntityId, b: EntityId, paid: i64) {
+    if paid <= 0 || world.config.verbs.is_none() || !night_body(world, worker, b) {
+        return;
+    }
+    night_note(world, worker, b, |n| {
+        n.tips += 1;
+        n.coins += paid;
+        n.set_tips += 1;
+        n.set_coins += paid;
+        if n.set_faces.len() < NIGHT_FACES && !n.set_faces.contains(&from) {
+            n.set_faces.push(from);
+        }
+    });
+}
+
+/// `names` of a line: the first `[verbs] night_names`, then "and N more".
+pub fn named(world: &World, ids: &[EntityId], more: usize) -> String {
+    let cap = world.config.verbs.as_ref().map_or(3, |v| usize::from(v.night_names.max(1)));
+    let mut out: Vec<String> = ids.iter().take(cap).map(|&a| world.name_of(a)).collect();
+    let rest = more.max(ids.len()).saturating_sub(cap);
+    if rest > 0 {
+        out.push(format!("{rest} more"));
+    }
+    match out.len() {
+        0 => String::new(),
+        1 => out.remove(0),
+        _ => {
+            let last = out.pop().unwrap_or_default();
+            format!("{} and {last}", out.join(", "))
+        }
+    }
+}
+
+/// Round 4 T4 (`exec::actions`, a stations block's end): a body of `[verbs]
+/// set_rows` (the dancer) closed a block begun at `started` at her venue:
+/// a set on the stage, one line (the room, the tips, the tippers), the set
+/// folded into the night.
+pub fn set_done(world: &mut World, id: EntityId, started: crate::time::Tick) {
+    let Some(b) = world.comp::<Job>(id).and_then(|j| j.employer) else { return };
+    if world.config.verbs.is_none()
+        || !night_body(world, id, b)
+        || !crate::systems::service::night_row(world, id, true)
+        || world.comp::<Position>(id).is_none_or(|p| p.building != Some(b))
+    {
+        return;
+    }
+    let mins = world.tick.saturating_sub(started);
+    let mut n = ServeNight::default();
+    night_note(world, id, b, |s| {
+        s.sets += 1;
+        s.empty_sets += u32::from(s.set_room == 0);
+        n = s.clone();
+        s.set_room = 0;
+        s.set_tips = 0;
+        s.set_coins = 0;
+        s.set_faces.clear();
+    });
+    crate::systems::ownership::jobs2_row(world).sets_danced += 1;
+    // A set to an empty room is the night line's count, not a line.
+    if n.set_room == 0 {
+        return;
+    }
+    let room = match n.set_room {
+        1 => "to a room of one".to_string(),
+        k => format!("to a room of {k}"),
+    };
+    let tips = if n.set_tips == 0 {
+        ", no tips".to_string()
+    } else {
+        let s = if n.set_tips == 1 { "" } else { "s" };
+        format!(", {} tip{s}, {}c ({})", n.set_tips, n.set_coins, named(world, &n.set_faces, n.set_faces.len()))
+    };
+    let text = format!("{} danced a set at {} ({mins} min) {room}{tips}", world.name_of(id), world.name_of(b));
+    world.push_event(EventKind::Served, &[id, b], text);
+}
+
+/// Round 4 T4 (`service::shift_end`): a serving body's night told in one
+/// line, the ledger cleared: a dancer's sets and tips, a club hand's floor
+/// (served, the regulars, the room). A dead night is a night too.
+pub fn night_told(world: &mut World, id: EntityId) {
+    let n = world.jobs2.vice.serve_nights.remove(&key(id));
+    let Some(b) = world.comp::<Job>(id).and_then(|j| j.employer) else { return };
+    if world.config.verbs.is_none() || !night_body(world, id, b) {
+        return;
+    }
+    let n = n.filter(|n| n.venue == b).unwrap_or_default();
+    let name = world.name_of(id);
+    let at = world.name_of(b);
+    let regs = if n.regulars.is_empty() {
+        String::new()
+    } else {
+        format!("; regulars {}", named(world, &n.regulars, n.regulars.len()))
+    };
+    let text = if crate::systems::service::night_row(world, id, true) {
+        let tips = if n.tips == 0 {
+            "no tips".to_string()
+        } else {
+            format!("{} tip{}, {}c", n.tips, if n.tips == 1 { "" } else { "s" }, n.coins)
+        };
+        let empty = if n.empty_sets > 0 { format!(" ({} to an empty room)", n.empty_sets) } else { String::new() };
+        format!("{name} danced {} sets{empty} at {at} tonight to a room of {}: {tips}{regs}", n.sets, n.room)
+    } else if n.served == 0 {
+        format!("{name} worked the floor of {at} tonight: a room of {}, nobody to serve", n.room)
+    } else {
+        format!(
+            "{name} worked the floor of {at} tonight: a room of {}, served {} ({}){regs}",
+            n.room,
+            n.served,
+            named(world, &n.faces, n.served as usize)
+        )
+    };
+    world.push_event(EventKind::Served, &[id, b], text);
+    crate::systems::ownership::jobs2_row(world).serve_nights += 1;
 }
 
 /// Round 3 S5 (OPEN-217): a bouncer's night at his door: the visits served

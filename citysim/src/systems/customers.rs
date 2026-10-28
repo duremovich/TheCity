@@ -85,6 +85,12 @@ pub fn cause(world: &World, id: EntityId, b: EntityId) -> Option<&'static str> {
     if world.comp::<Job>(id).is_some_and(|j| j.role == Role::Guard) {
         return None;
     }
+    // Round 4 T4 (the under-18 rule, CLAUDE.md): the door takes nobody under
+    // 18 in (`ages::is_protected`): never a vice client, a bettor, a drinker
+    // at a kept door; turned away every time, never handled.
+    if crate::systems::ages::is_protected(world, id) {
+        return Some("under age");
+    }
     // Round 3 S5 (OPEN-217): a client barred from the house (a rough night,
     // the bouncer's or the madam's) is known at its door.
     if world.config.verbs.is_some() && crate::systems::vice::barred(world, id, b) {
@@ -123,8 +129,9 @@ pub fn door_cause(world: &World, id: EntityId, b: EntityId) -> Option<&'static s
     if crate::systems::trades::door_staff(world, b).is_empty() {
         return None;
     }
-    // Round 3 S5: the barred face is turned away every time.
-    if why == "barred" {
+    // Round 3 S5: the barred face is turned away every time (round 4 T4:
+    // and the under-age).
+    if why == "barred" || why == "under age" {
         return Some(why);
     }
     let hour = world.tick / TICKS_PER_HOUR;
@@ -140,8 +147,9 @@ pub fn door_visit(world: &mut World, client: EntityId, b: EntityId) {
     if !world.comp::<Building>(b).is_some_and(|bd| kept_kind(world, bd.kind)) {
         return;
     }
-    let staff = crate::systems::trades::door_staff(world, b);
-    let Some(&bouncer) = staff.iter().filter(|&&s| s != client).min() else { return };
+    // Round 4 T4 (OPEN-217): the bouncer standing the door (a body first;
+    // the lowest id was an off-screen colleague's at 100k).
+    let Some(bouncer) = crate::systems::service::door_man(world, b, client, &[client]) else { return };
     crate::systems::vice::door_note(world, bouncer, b, |n| n.let_in += 1);
 }
 
@@ -166,12 +174,15 @@ pub fn rough_at_door(world: &mut World, worker: EntityId, client: EntityId, b: E
     if !crate::systems::trades::job_row(world, worker).is_some_and(|r| r.tipped) {
         return;
     }
-    let staff = crate::systems::trades::door_staff(world, b);
-    let Some(bouncer) = staff.into_iter().filter(|&s| s != client && s != worker).max_by(|&x, &y| {
-        crate::systems::law::fighting(world, x).total_cmp(&crate::systems::law::fighting(world, y)).then(y.cmp(&x))
-    }) else {
+    // Round 4 T4 (the under-18 rule): nobody under 18 is the rough client
+    // thrown out or the worker hurt (`ages::is_protected`; the door turned
+    // the under-age away and the trade hires none).
+    if crate::systems::ages::is_protected(world, client) || crate::systems::ages::is_protected(world, worker) {
         return;
-    };
+    }
+    // Round 4 T4: the bouncer standing the door throws him out (a body
+    // first; the strongest was an off-screen colleague's at 100k).
+    let Some(bouncer) = crate::systems::service::door_man(world, b, client, &[client, worker]) else { return };
     let night = world.day();
     let lawful = world.comp::<Personality>(client).map_or(0.5, |p| p.lawfulness);
     if hash(world, PURPOSE_ROUGH, client, key(worker) ^ night) >= v.door_rough_p * (1.0 - lawful).max(0.0) {
@@ -222,10 +233,19 @@ pub fn rough_at_door(world: &mut World, worker: EntityId, client: EntityId, b: E
 /// way the refused holds a grudge on the bouncer. Returns the scene's line.
 pub fn scene(world: &mut World, id: EntityId, bouncer: EntityId, b: EntityId, why: &str) -> Option<String> {
     let c = cfg(world)?.clone();
+    // Round 4 T4: the under-age turned away is no scene and no grudge.
+    if why == "under age" {
+        return None;
+    }
     if crate::systems::law::living(world, id) {
         crate::systems::grudges::add(world, id, bouncer, crate::word::GrudgeCause::Assaulted, c.door_grudge, 0);
     }
     if !matches!(why, "drunk" | "high" | "a brawler" | "carrying") {
+        return None;
+    }
+    // Round 4 T4 (the under-18 rule): no fight at the door with anyone under
+    // 18 (the cause is "under age" first; this is the explicit gate).
+    if crate::systems::ages::is_protected(world, id) || crate::systems::ages::is_protected(world, bouncer) {
         return None;
     }
     // A body on either side: the scene is for the camera.

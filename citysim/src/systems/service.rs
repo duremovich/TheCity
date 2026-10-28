@@ -212,6 +212,16 @@ fn row_of_agent(world: &World, id: EntityId) -> Option<&ServesCfg> {
     }
 }
 
+/// Round 4 T4 (OPEN-217): `id`'s serving row is one of `[verbs]
+/// night_rows` (the dancer, the club staff: the night told, the venue's
+/// off-screen visits drawn into the shift); with `sets`, of `set_rows`.
+pub fn night_row(world: &World, id: EntityId, sets: bool) -> bool {
+    let Some(v) = world.config.verbs.as_ref() else { return false };
+    let Some(row) = row_of_agent(world, id) else { return false };
+    let keys = if sets { &v.set_rows } else { &v.night_rows };
+    row.kind == ServeKind::Visit && keys.contains(&row.key)
+}
+
 /// The tipped worker on duty at `place` a visit's tip goes to when the
 /// encounter's server is not tipped: the lowest hash among the present
 /// holders of a tipped `Visit` row (room not counted: a tip is coins, not
@@ -277,11 +287,36 @@ pub fn server_for(world: &World, place: EntityId, kind: ServeKind, served: Entit
     if !on(world) {
         return None;
     }
+    pick_server(world, place, kind, served)
+}
+
+/// The on-duty server of `place` with room this hour whose pair hash with
+/// `served` is lowest (D6, OPEN-111). Round 4 T4 (OPEN-217; `[verbs]
+/// door_body_first`): a visit goes to a body of `[verbs] night_rows` on the
+/// floor with room first (the camera's dancer or club hand; at 100k a
+/// venue's off-screen colleagues, present by the clock, took all but one
+/// in twenty: "a room of 22, nobody to serve").
+fn pick_server(world: &World, place: EntityId, kind: ServeKind, served: EntityId) -> Option<EntityId> {
     let hour = world.tick / TICKS_PER_HOUR;
-    servers(world, place, kind)
+    let free: Vec<EntityId> = servers(world, place, kind)
         .into_iter()
         .filter(|&(s, cap)| world.service_room.get(&s).is_none_or(|r| r.hour != hour || r.taken < cap))
-        .map(|(s, _)| (hash(world, PURPOSE_SERVE, key(place) ^ key(served), key(s)), s))
+        .map(|(s, _)| s)
+        .collect();
+    let first = kind == ServeKind::Visit && world.config.verbs.as_ref().is_some_and(|v| v.door_body_first);
+    let bodies: Vec<EntityId> = if first {
+        free.iter()
+            .copied()
+            .filter(|&s| {
+                world.comp::<Brain>(s).is_some_and(|b| b.lod != Lod::Statistical) && night_row(world, s, false)
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let pool = if bodies.is_empty() { free } else { bodies };
+    pool.into_iter()
+        .map(|s| (hash(world, PURPOSE_SERVE, key(place) ^ key(served), key(s)), s))
         .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
         .map(|(_, s)| s)
 }
@@ -321,18 +356,15 @@ pub fn arrive(world: &mut World, served: EntityId, place: EntityId, kind: ServeK
     // waiting).
     if kind == ServeKind::Visit {
         crate::systems::customers::door_visit(world, served, place);
+        // Round 4 T4 (OPEN-217): the room of the serving bodies on duty.
+        crate::systems::vice::night_room(world, place);
     }
     let hour = world.tick / TICKS_PER_HOUR;
     // OPEN-111: the hash is the pair's, not the hour's, so a patron gets
     // the same server whenever that server is on duty with room (a regular
     // accumulates on one ledger); still never the lowest id (D6).
-    let pick = servers(world, place, kind)
-        .into_iter()
-        .filter(|&(s, cap)| world.service_room.get(&s).is_none_or(|r| r.hour != hour || r.taken < cap))
-        .map(|(s, _)| (hash(world, PURPOSE_SERVE, key(place) ^ key(served), key(s)), s))
-        .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-    match pick {
-        Some((_, server)) => {
+    match pick_server(world, place, kind, served) {
+        Some(server) => {
             let r = world.service_room.entry(server).or_default();
             if r.hour != hour {
                 *r = Room { hour, taken: 0 };
@@ -843,6 +875,10 @@ fn encounter_row(
         if let Some(t) = tipped.filter(|&t| t != served) {
             let tip = ((coins as f32 * world.config.vice.tip_share).round() as i64).max(1);
             let paid = ownership::pay(world, Some(served), Some(t), tip, Flow::Tip);
+            // Round 4 T4 (OPEN-217): the tip on a serving body's night.
+            if let Some(place) = place {
+                crate::systems::vice::night_tip(world, t, served, place, paid);
+            }
             // § 2.1, 8d (OPEN-123): a tip at her own house is noted on the
             // worker's shift; the madam's cut of the total settles once at
             // `shift_end` (per tip, 0.3 of a 1 c tip rounded to nothing).
@@ -879,6 +915,17 @@ fn encounter_row(
     }
     // 3. The regulars ledger and the edge.
     let regular = note_regular(world, server, served, &row);
+    // Round 4 T4 (OPEN-217): the served on a serving body's night (the
+    // regulars: the ledger's count at `regular_after` or past it).
+    if let (ServeKind::Visit, Some(p)) = (kind, place) {
+        let reg = row.regular_after > 0
+            && world
+                .regulars
+                .get(&server)
+                .and_then(|l| l.iter().find(|r| r.who == served))
+                .is_some_and(|r| r.visits >= row.regular_after);
+        crate::systems::vice::night_served(world, server, served, p, reg);
+    }
     // 4. The skill.
     train(world, server, row.skill, row.skill_gain);
     // 5. The event.
@@ -963,6 +1010,29 @@ fn door_staff(world: &World, b: EntityId) -> Vec<EntityId> {
     crate::systems::trades::door_staff(world, b).into_iter().filter(|&s| present(world, s, b)).collect()
 }
 
+/// Round 4 T4 (OPEN-217; `[verbs] door_body_first`): the bouncer at `b`'s
+/// door who meets `id` now: of the present door staff (`exclude` left out),
+/// a body first (the one standing the door tile), the hash of the visitor
+/// and the hour among them; else among all. V12's 100k bouncers kept 28
+/// nights with no door line: an off-screen colleague, present by the clock
+/// on any day, took every let-in as the lowest id and half the refusals.
+/// Without the key: the hash among all.
+pub fn door_man(world: &World, b: EntityId, id: EntityId, exclude: &[EntityId]) -> Option<EntityId> {
+    let staff: Vec<EntityId> = door_staff(world, b).into_iter().filter(|s| !exclude.contains(s)).collect();
+    let first = world.config.verbs.as_ref().is_some_and(|v| v.door_body_first);
+    let bodies: Vec<EntityId> = if first {
+        staff.iter().copied().filter(|&s| world.comp::<Brain>(s).is_some_and(|br| br.lod != Lod::Statistical)).collect()
+    } else {
+        Vec::new()
+    };
+    let pool = if bodies.is_empty() { staff } else { bodies };
+    if pool.is_empty() {
+        return None;
+    }
+    let u = hash(world, PURPOSE_DOOR, key(id), world.tick / TICKS_PER_HOUR);
+    Some(pool[((u * pool.len() as f32) as usize).min(pool.len() - 1)])
+}
+
 /// § 2.1 (bouncer): `id` was turned away at `b`'s door (the exec's failed
 /// start of a venue step inside it): `Refused`, an event when the bouncer's
 /// row names it, a memory each side, the counter. Nothing off.
@@ -979,12 +1049,8 @@ pub fn refused(world: &mut World, id: EntityId, b: EntityId) {
             br.refused = Some((b, tick));
         }
     }
-    let staff = door_staff(world, b);
-    if staff.is_empty() {
-        return;
-    }
-    let u = hash(world, PURPOSE_DOOR, key(id), world.tick / TICKS_PER_HOUR);
-    let bouncer = staff[((u * staff.len() as f32) as usize).min(staff.len() - 1)];
+    // Round 4 T4: the bouncer standing the door (a body first).
+    let Some(bouncer) = door_man(world, b, id, &[]) else { return };
     let Some(row) = row_of_agent(world, bouncer).cloned() else { return };
     let salience = world.config.service.served_salience;
     let (vb, vr) = (world.config.service.tune.refused_bouncer, world.config.service.tune.refused);
@@ -995,6 +1061,9 @@ pub fn refused(world: &mut World, id: EntityId, b: EntityId) {
     let why = crate::systems::customers::cause(world, id, b);
     if why == Some("barred") {
         ownership::jobs2_row(world).door_barred += 1;
+    }
+    if why == Some("under age") {
+        ownership::jobs2_row(world).door_under_age += 1;
     }
     if world.config.verbs.is_some() {
         let c = why.unwrap_or("no cause").to_string();
@@ -1026,7 +1095,9 @@ pub fn refused(world: &mut World, id: EntityId, b: EntityId) {
 /// attacker's plan aborted and the attacker put at the door. Returns
 /// whether it was thrown out. Nothing off.
 pub fn maybe_eject(world: &mut World, attacker: EntityId) -> bool {
-    if !on(world) {
+    // Round 4 T4 (the under-18 rule): nobody under 18 is thrown out by force
+    // (`ages::is_protected`; the door turns him away "under age" first).
+    if !on(world) || crate::systems::ages::is_protected(world, attacker) {
         return false;
     }
     let Some(b) = world.comp::<Position>(attacker).and_then(|p| p.building) else { return false };
@@ -1080,6 +1151,8 @@ pub fn shift_end(world: &mut World, id: EntityId) {
     crate::systems::vice::bookings_told(world, id);
     // Round 3 S5: the bouncer's night at the door, one line.
     crate::systems::vice::door_told(world, id);
+    // Round 4 T4: a dancer's or a club hand's night, one line.
+    crate::systems::vice::night_told(world, id);
     // Lives at work phase 4 (§ 2.3): the courier's undelivered parcels back
     // to the Yard (the loader's lifts are `lift_hour`'s).
     if street_on(world) {

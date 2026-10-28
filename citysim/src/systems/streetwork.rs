@@ -919,8 +919,14 @@ fn dawn_pick(world: &mut World) {
     let queued: u32 = queues.iter().map(|q| q.len() as u32).sum();
     ownership::jobs2_row(world).corner_queue += queued;
     let mut picked = vec![0u32; corners.len()];
+    // Round 4 T4 (OPEN-217): each Yard's morning (its corner, its foreman,
+    // whom he picked), told after the pick.
+    let gate = world.config.verbs.as_ref().is_some_and(|v| v.shape_up_gate);
+    let mut mornings: Vec<Morning> = Vec::new();
     let shift_end = world.config.world.shift_day.iter().map(|&(_, e)| e).max().unwrap_or(1080);
     let until = world.tick - Tick::from(world.tick_of_day()) + Tick::from(shift_end) + 2 * TICKS_PER_HOUR;
+    let mut posted: Vec<EntityId> = posts.clone();
+    posted.dedup();
     for b in posts {
         let Some(door) = world.comp::<Building>(b).map(|x| x.door) else { continue };
         let Some(i) = corner_near(&corners, door, u32::MAX) else { continue };
@@ -974,7 +980,19 @@ fn dawn_pick(world: &mut World) {
             }
         }
         queues[i].retain(|&x| x != a);
-        crate::systems::demography::hire(world, a, b, role);
+        // Round 4 T4: the pick's Hire is the hand's; the foreman's diary has
+        // the morning's one line (174 Hire lines a week).
+        let yard = gate
+            && world
+                .comp::<Building>(b)
+                .is_some_and(|bd| matches!(bd.kind, BuildingKind::ConstructionYard | BuildingKind::FreightYard));
+        crate::systems::demography::hire_with(world, a, b, role, !yard);
+        if yard {
+            match mornings.iter_mut().find(|m| m.0 == b) {
+                Some(m) => m.3.push(a),
+                None => mornings.push((b, i, foreman, vec![a])),
+            }
+        }
         if let Some(j) = world.comp_mut::<Job>(a) {
             j.until = Some(until);
         }
@@ -987,6 +1005,9 @@ fn dawn_pick(world: &mut World) {
         picked[i] += 1;
         ownership::jobs2_row(world).day_posts_filled += 1;
     }
+    if gate {
+        shape_up_told(world, &mornings, &queues, &posted);
+    }
     for (i, &(d, _)) in corners.iter().enumerate() {
         let left = queues[i].len();
         if picked[i] == 0 && left == 0 {
@@ -998,6 +1019,89 @@ fn dawn_pick(world: &mut World) {
             &[],
             format!("the labour corner in {at}: {} picked at dawn, {left} sent away", picked[i]),
         );
+    }
+}
+
+/// Round 4 T4: a Yard's morning at the shape-up: the Yard, its corner, its
+/// foreman, the hands he picked.
+type Morning = (EntityId, usize, Option<EntityId>, Vec<EntityId>);
+
+/// Round 4 T4 (OPEN-217): the shape-up told. One line a Yard that picked
+/// (its foreman an actor: at the gate, or "not at the gate" when his body
+/// was elsewhere), naming the picked and the corner's sent home; each body
+/// sent home its own line and a memory of the foreman who passed him over
+/// (the Yard that took the most at his corner).
+fn shape_up_told(world: &mut World, mornings: &[Morning], queues: &[Vec<EntityId>], posted: &[EntityId]) {
+    for (y, i, foreman, hands) in mornings {
+        let left = &queues[*i];
+        let names = crate::systems::vice::named(world, hands, hands.len());
+        let home = if left.is_empty() {
+            "nobody sent home".to_string()
+        } else {
+            format!("{} sent home ({})", left.len(), crate::systems::vice::named(world, left, left.len()))
+        };
+        let at = world.name_of(*y);
+        let text = match foreman {
+            Some(f) if at_gate(world, *f, *y) => {
+                if world.comp::<Brain>(*f).is_some_and(|b| b.lod != Lod::Statistical) {
+                    ownership::jobs2_row(world).foreman_gate += 1;
+                }
+                format!("{} picked {} at the gate of {at} at dawn: {names}; {home}", world.name_of(*f), hands.len())
+            }
+            Some(f) => format!(
+                "{at} took {} at dawn off the list, the foreman {} not at the gate: {names}; {home}",
+                hands.len(),
+                world.name_of(*f)
+            ),
+            None => format!("{at} took {} at dawn: {names}; {home}", hands.len()),
+        };
+        let actors: Vec<EntityId> = foreman.iter().copied().chain([*y]).collect();
+        world.push_event(EventKind::DawnPick, &actors, text);
+    }
+    // A foreman's body at the gate of a Yard that took nobody: his morning
+    // too (he walked there for it).
+    let mut yards: Vec<EntityId> = [BuildingKind::ConstructionYard, BuildingKind::FreightYard]
+        .iter()
+        .flat_map(|&k| world.buildings_of_kind(k).iter().copied())
+        .filter(|y| !mornings.iter().any(|m| m.0 == *y))
+        .collect();
+    yards.sort_unstable();
+    for y in yards {
+        let Some(f) = crate::systems::industry::foreman(world, y, None) else { continue };
+        if world.comp::<Brain>(f).is_none_or(|b| b.lod == Lod::Statistical) || !at_gate(world, f, y) {
+            continue;
+        }
+        let why = if posted.contains(&y) { "nobody at the gate he would take" } else { "no post the owner pays today" };
+        let text =
+            format!("{} opened the gate of {} at dawn and took nobody: {why}", world.name_of(f), world.name_of(y));
+        world.push_event(EventKind::DawnPick, &[f, y], text);
+        ownership::jobs2_row(world).foreman_gate += 1;
+    }
+    // The bodies sent home: the corner's busiest Yard passed them over.
+    let sal = world.config.service.served_salience;
+    for (i, q) in queues.iter().enumerate() {
+        let Some((y, f)) = mornings
+            .iter()
+            .filter(|m| m.1 == i)
+            .max_by_key(|m| (m.3.len(), std::cmp::Reverse(m.0)))
+            .map(|m| (m.0, m.2))
+        else {
+            continue;
+        };
+        for &a in q {
+            if world.comp::<Brain>(a).is_none_or(|b| b.lod == Lod::Statistical) {
+                continue;
+            }
+            let by = f.map(|f| format!(" ({} picked others)", world.name_of(f))).unwrap_or_default();
+            let text =
+                format!("{} stood at the gate of {} at dawn and was sent home{by}", world.name_of(a), world.name_of(y));
+            // His line, not the foreman's (the foreman's is the Yard's one).
+            world.push_event(EventKind::DawnPick, &[a, y], text);
+            if let Some(f) = f {
+                world.remember(a, crate::components::MemoryKind::Served, Some(f), sal, -0.2, false);
+            }
+            ownership::jobs2_row(world).shape_up_home += 1;
+        }
     }
 }
 
@@ -2483,7 +2587,72 @@ pub fn street_tile(world: &World, id: EntityId) -> Option<TilePos> {
     if let Some(p) = world.jobs2.pitches.get(&id) {
         return Some(p.spot);
     }
-    corner_for(world, id)
+    corner_for(world, id).or_else(|| foreman_gate(world, id))
+}
+
+/// Round 4 T4 (OPEN-217; `[verbs] shape_up_gate`): in the dawn window after
+/// a dawn that offered posts, a Yard's foreman with a body (a Construction
+/// or Freight Yard's, `Job.foreman`, well and free) goes to its gate (the
+/// outside door) for the shape-up: the gate's tile, else `None`. V12's
+/// foreman picked 19-32 hands a morning from his bed.
+pub fn foreman_gate(world: &World, id: EntityId) -> Option<TilePos> {
+    if !world.config.verbs.as_ref().is_some_and(|v| v.shape_up_gate) || !dawn(world) || world.jobs2.last_posts == 0 {
+        return None;
+    }
+    let j = world.comp::<Job>(id).filter(|j| j.foreman)?;
+    let y = j.employer?;
+    let bd = world.comp::<Building>(y)?;
+    if !matches!(bd.kind, BuildingKind::ConstructionYard | BuildingKind::FreightYard)
+        || !crate::systems::industry::open(world, y)
+        || world.comp::<Brain>(id).is_none_or(|b| b.lod == Lod::Statistical)
+        || world.has::<Sentence>(id)
+        || crate::systems::health::sick(world, id)
+        || !crate::exec::routine::is_workday(world.day() as i64)
+    {
+        return None;
+    }
+    // A Yard whose owner cannot pay a hand a day posts nothing (`day_posts`).
+    let wage = day_role(world).map_or(0, |r| world.config.wage(r));
+    if world.purse(world.owner_of(y)) < wage {
+        return None;
+    }
+    Some(world.outside_door(bd))
+}
+
+/// Round 4 T4: the foreman's walk to the gate is due: `foreman_gate`, and
+/// he stands there already or it is time to set out (the travel from where
+/// he is and `[verbs] shape_up_lead_min` before `corner_hour`). The Pitch
+/// goal's gate and the wake from a committed Sleep (`exec::actions`).
+pub fn foreman_due(world: &World, id: EntityId) -> bool {
+    let Some(gate) = foreman_gate(world, id) else { return false };
+    let Some(p) = world.comp::<Position>(id) else { return false };
+    if p.building.is_none() && p.tile.manhattan(gate) <= world.config.jobs2.corner_tiles {
+        return true;
+    }
+    // On his way already: the walk holds (the travel read mid-route said
+    // "too far" and he turned to Idle in the street).
+    if world.comp::<Brain>(id).and_then(|b| b.plan_goal()) == Some(GoalKind::Pitch) {
+        return true;
+    }
+    let lead = world.config.verbs.as_ref().map_or(0, |v| Tick::from(v.shape_up_lead_min));
+    let (tod, pick) = (Tick::from(world.tick_of_day()), Tick::from(world.config.jobs2.corner_hour));
+    let t = crate::systems::distance::travel(world, p.tile, gate);
+    // Too far to make the pick from here: he does not set out.
+    tod + t <= pick && tod + t + lead >= pick
+}
+
+/// Round 4 T4: the foreman `f` stands at `y`'s gate now (a body within
+/// `[jobs2] corner_tiles` of its outside door, on the street; an
+/// off-screen foreman counts as there).
+fn at_gate(world: &World, f: EntityId, y: EntityId) -> bool {
+    if world.comp::<Brain>(f).is_some_and(|b| b.lod == Lod::Statistical) {
+        return true;
+    }
+    let Some(bd) = world.comp::<Building>(y) else { return false };
+    let gate = world.outside_door(bd);
+    world
+        .comp::<Position>(f)
+        .is_some_and(|p| p.building.is_none() && p.tile.manhattan(gate) <= world.config.jobs2.corner_tiles)
 }
 
 /// The dawn window: the two hours before `corner_hour`.
@@ -2517,8 +2686,23 @@ fn corner_for(world: &World, id: EntityId) -> Option<TilePos> {
 /// scores a shift), or the broke jobless' dawn walk to the corner (as Earn
 /// scores the wallet). `None` off, or with neither.
 pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>, f32)> {
-    if !on(world) || world.has::<Sentence>(id) || world.has::<Job>(id) {
+    if !on(world) || world.has::<Sentence>(id) {
         return None;
+    }
+    // Round 4 T4 (OPEN-217): a Yard's foreman goes to the gate at dawn.
+    if world.has::<Job>(id) {
+        if !foreman_due(world, id) {
+            return None;
+        }
+        let n = world.comp::<crate::components::Needs>(id)?;
+        return Some((
+            vec![
+                Consideration::new("the shape-up at dawn", 1.0, GATE),
+                Consideration::new("hunger", n.hunger, IDENTITY),
+                Consideration::new("energy", n.energy, IDENTITY),
+            ],
+            0.0,
+        ));
     }
     let n = world.comp::<crate::components::Needs>(id)?;
     if let Some(p) = world.jobs2.pitches.get(&id) {

@@ -407,7 +407,11 @@ use crate::world::World;
 /// `camp_caught` columns (serde defaults).
 /// 86 (pressure pass round 4, T6, money and labels): `Corp.kept_call`, `World.ledger_books`
 /// (written while set; serde defaults).
-pub const SAVE_VERSION: u8 = 86;
+/// 87 (pressure pass round 4, T4, the door and the yard): `ViceState.serve_nights`
+/// (written while it holds anything), the `[verbs]` T4 keys and the `Jobs2Cols`
+/// `sets_danced`, `serve_nights`, `door_under_age`, `shape_up_home`, `foreman_gate`
+/// columns (serde defaults).
+pub const SAVE_VERSION: u8 = 87;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

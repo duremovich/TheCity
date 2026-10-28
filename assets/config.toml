@@ -5219,3 +5219,19 @@ door_rough_p = 0.03                # a client served by a tipped worker at a doo
 door_ban_days = 14                 # (1 - lawfulness): the bouncer throws him out, barred from the venue this many days
 hit_heard_p = 0.5                  # a Hit, Beat or Abduct taken on someone reaches him on this (an exec: his security, always)
 hit_heard_safety = 0.3             # ... his safety falls by this (Threatened, the line in his diary and his guards')
+# Round 4 T4 (docs/PRESSURE_PASS.md § T4, OPEN-217): the trades' inside, the door and the yard. Placeholders.
+door_body_first = true             # the door's arrivals, refusals and rough clients go to the bouncer standing it: a body
+                                   # among the present door staff first (an off-screen colleague counted present by the
+                                   # clock took every let-in as the lowest id: V12's 100k bouncers, 0 door lines in 28 nights);
+                                   # and a visit goes to a body of night_rows on the floor with room first (a 100k Club's
+                                   # off-screen hands took all but one in twenty: "a room of 22, nobody to serve")
+night_rows = ["dancer", "Host"]    # [[serves]] keys whose body tells its night at the shift's end (served, tips, regulars,
+                                   # the room) and whose venue's off-screen visits are drawn into its shift as a counter
+                                   # body's (a Club with only a body Host took its evening in one 21:00 batch)
+set_rows = ["dancer"]              # ... of them, the keys whose stations blocks are sets on the stage (a line a set)
+night_names = 3                    # names a night's, a set's or a shape-up's line gives (the rest "and N more")
+shape_up_gate = true               # a Yard's foreman with a body walks to its gate in the dawn window and the shape-up is
+                                   # his morning (one line a Yard: picked, sent home), not 19-32 Hire lines; a body sent home
+                                   # has its own line
+shape_up_lead_min = 20             # ... he is at the gate this many minutes before [jobs2] corner_hour (sets out, or wakes
+                                   # from a committed sleep, by the travel from where he is)
