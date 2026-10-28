@@ -119,6 +119,10 @@ pub struct ArmsState {
     pub law: (f32, u8),
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub offices: BTreeMap<EntityId, (f32, u8)>,
+    /// Round 6 V3 (`OPEN-238`): a stall owner -> the tick its till was last
+    /// emptied (pruned at midnight past `stall_rob_gap_hours`).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub till_robbed: BTreeMap<EntityId, Tick>,
     /// Today's capped counts (reset at midnight).
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub petty_today: u32,
@@ -1264,17 +1268,26 @@ pub fn market_petty(world: &mut World, thief: EntityId) {
         return;
     }
     // A stall of the Market's district with a take today (the till on the
-    // thief's way out; the lowest owner id).
+    // thief's way out). Round 6 V3 (`OPEN-238`): the nearest stall to the
+    // thief (was the lowest owner id), never a minor's, and not one emptied
+    // in the last `stall_rob_gap_hours` (its owner minds the till after):
+    // V14 `vendor_9648 d23` took ten Market thieves from across the Sump in
+    // six hours as the district's lowest owner id.
     let d = world.district_of(tile);
+    let gap = u64::from(cfg.stall_rob_gap_hours) * crate::time::TICKS_PER_HOUR;
     let stall = world
         .jobs2
         .pitches
         .iter()
         // Jobs & lives phase 4: a street worker's pitch is no stall.
-        .find(|(&o, p)| {
+        .filter(|(&o, p)| {
             o != thief && p.take_today > 0 && p.district == d && !crate::systems::vice::is_street_pitch(world, p)
         })
-        .map(|(&o, p)| (o, p.take_today));
+        .filter(|(&o, _)| world.jobs2.arms.till_robbed.get(&o).is_none_or(|&t| tick >= t + gap))
+        .filter(|(&o, _)| !crate::systems::ages::is_protected(world, o))
+        .map(|(&o, p)| (crate::systems::law::chebyshev(p.spot, tile), o, p.take_today))
+        .min()
+        .map(|(_, o, take)| (o, take));
     let Some((owner, take)) = stall else { return };
     let coins = take.min(cfg.stall_take_max).min(world.comp::<Wallet>(owner).map_or(0, |w| w.coins.max(0)));
     if coins <= 0 {
@@ -1290,6 +1303,7 @@ pub fn market_petty(world: &mut World, thief: EntityId) {
         p.take_today -= coins;
     }
     world.jobs2.arms.petty_today += 1;
+    world.jobs2.arms.till_robbed.insert(owner, tick);
     ownership::jobs2_row(world).stall_thefts += 1;
     let text = format!("{} emptied the till of {}'s stall ({coins} coins)", world.name_of(thief), world.name_of(owner));
     world.push_event(EventKind::Theft, &[thief, owner], text);
@@ -1420,6 +1434,9 @@ pub fn daily(world: &mut World) {
     }
     let _t = crate::prof::scope!("weapons::daily");
     world.jobs2.arms.petty_today = 0;
+    let gap = u64::from(world.config.weapons.stall_rob_gap_hours) * crate::time::TICKS_PER_HOUR;
+    let now = world.tick;
+    world.jobs2.arms.till_robbed.retain(|_, t| now < *t + gap);
     world.jobs2.arms.ua_today = 0;
     let index: BTreeSet<EntityId> = world.jobs2.arms.index.iter().copied().filter(|&a| is_weapon(world, a)).collect();
     world.jobs2.arms.index = index;
@@ -1658,6 +1675,9 @@ fn wants_and_licences(world: &mut World) {
         .iter()
         .copied()
         .filter(|&id| !licensed(world, id))
+        // Round 6 V3 (`OPEN-238`): not from a clinic's floor (V14
+        // `ceo_91004 d25 00:07` bought a licence laid up at a Ripperdoc).
+        .filter(|&id| !crate::systems::wounded::is_down(world, id))
         .filter(|&id| world.comp::<Personality>(id).is_some_and(|p| p.lawfulness >= 0.5))
         .filter(|&id| {
             world.comp::<Wallet>(id).is_some_and(|w| w.coins >= cfg.licence_fee + cheapest + cfg.coin_reserve)

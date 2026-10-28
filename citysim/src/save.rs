@@ -442,7 +442,10 @@ use crate::world::World;
 /// `[trade_verbs]` `pimp_book_draws`, `pimp_quits`, `pimp_trip_ticks` keys, `[verbs] wait_at_work_ticks` and the
 /// `Jobs2Cols` `pimp_booked`, `clinic_booked`, `clinic_kept`, `clinic_body`, `clinic_washes` columns
 /// (serde defaults).
-pub const SAVE_VERSION: u8 = 96;
+/// 97 (pressure pass round 6, V3, violence with consequence; the orchestrator renumbers at the
+/// merge): `Corpse.killer`, `tied`, `found`, `EventKind::CorpseFound`, the `[crime.case]` section,
+/// `ArmsState.till_robbed` and `[weapons] stall_rob_gap_hours` (serde defaults).
+pub const SAVE_VERSION: u8 = 97;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

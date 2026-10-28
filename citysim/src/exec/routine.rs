@@ -89,7 +89,16 @@ pub fn workday_of(world: &World, id: EntityId, job: &Job, shift_key: i64) -> boo
     if job.role == Role::Guard {
         return (shift_key + i64::from(id.index % 7)).rem_euclid(7) != 6;
     }
-    is_workday(shift_key) && !crate::systems::ages::teacher_idle(world, job, shift_key)
+    is_workday(shift_key) && !crate::systems::ages::teacher_idle(world, job, shift_key) && !law_shut(world, job)
+}
+
+/// Round 6 V3 (`OPEN-238`): the job's Fixer office is shut by the law
+/// (`contracts::heat_bust`): its staff stay away, unpaid, until it reopens
+/// (V14 `fixer_40483 d26 09:05`: ClerkWork at an office closed at 00:09).
+fn law_shut(world: &World, job: &Job) -> bool {
+    job.employer.is_some_and(|e| {
+        world.comp::<crate::contract::Broker>(e).is_some_and(|k| k.closed_until.is_some_and(|t| t > world.tick))
+    })
 }
 
 /// A worked shift whose wages have not been collected today: the tail of the

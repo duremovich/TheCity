@@ -70,6 +70,13 @@ fn turn(world: &World, id: EntityId, tick: crate::time::Tick, interval: u64) -> 
     if brain.lod == Lod::Statistical || world.has::<Sentence>(id) || brain.cuffed_by.is_some() || brain.emigrating {
         return None;
     }
+    // Round 6 V3 (`OPEN-238`): the downed never think, even in the tick a
+    // carrier's aborted plan let go of them (`wounded::tick_down` re-cuffs
+    // after): V14 `ceo_91004 d24 05:53` picked Flee while carried and
+    // carried the goal 72 h on the Ripperdoc's floor.
+    if crate::systems::wounded::is_down(world, id) {
+        return None;
+    }
     let scheduled = tick % interval == u64::from(id.index) % interval;
     let urgent = brain.plan.is_none()
         && !brain.plan_queued

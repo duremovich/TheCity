@@ -152,7 +152,8 @@ pub fn run(world: &mut World) {
         };
         // Pressure pass round 3, S3: a prisoner sleeps in the cell at lights-out.
         let sleeping = matches!(brain.exec, ExecState::Use { kind: ActionKind::Sleep, .. })
-            || (lights_out && crate::systems::law::asleep_in_cell(world, id));
+            || (lights_out && crate::systems::law::asleep_in_cell(world, id))
+            || crate::systems::wounded::laid_up(world, id);
         let sleeping_outside = sleeping && world.comp::<Position>(id).is_some_and(|p| p.building.is_none());
         let farm_working = matches!(brain.exec, ExecState::Use { kind: ActionKind::FarmWork, .. });
         let jailed = world.has::<Sentence>(id);

@@ -2964,6 +2964,18 @@ pub struct Corpse {
     /// M13 D13: inheritance has run on what was left (`assets::settle_corpse`).
     #[serde(default)]
     pub settled: bool,
+    /// Round 6 V3 (`OPEN-238`): who killed it (a violent death's named
+    /// killer), for the law's case when the body is found.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub killer: Option<EntityId>,
+    /// Round 6 V3: the killer and the dead knew each other (an edge at the
+    /// death): the case's motive lead.
+    #[serde(default)]
+    pub tied: bool,
+    /// Round 6 V3: someone found the body and the law has the case
+    /// (`demography::find_bodies`); off for a death nobody has come upon.
+    #[serde(default)]
+    pub found: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

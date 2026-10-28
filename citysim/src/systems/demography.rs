@@ -568,6 +568,121 @@ fn corpses(world: &mut World) {
     }
 }
 
+/// Round 6 V3 (`OPEN-238`): every `[crime.case] find_every_ticks`, each
+/// unburied, unfound body of violence is looked for: the first waking body
+/// (ascending) that sees it (`law::sees_scene` within `[crime] sight`, never
+/// through a wall), not its killer, finds it (`found`). V14 `courier_48760
+/// d25 05:25`: a murder and a strip in a Block, the killer at work at 08:10,
+/// and the body lay with no line at all (SawCorpse came only at the death's
+/// minute and after two days; nothing turned it into a case).
+pub fn find_bodies(world: &mut World) {
+    let every = world.config.crime.case.find_every_ticks;
+    if every == 0 || !world.tick.is_multiple_of(every) {
+        return;
+    }
+    let unfound: Vec<EntityId> = world
+        .with::<Corpse>()
+        .into_iter()
+        .filter(|&c| world.comp::<Corpse>(c).is_some_and(|k| !k.found && !k.buried && k.cause == DeathCause::Violence))
+        .collect();
+    if unfound.is_empty() {
+        return;
+    }
+    let sight = world.config.crime.sight;
+    for c in unfound {
+        let Some((tile, building)) = world.comp::<Position>(c).map(|p| (p.tile, p.building)) else { continue };
+        let killer = world.comp::<Corpse>(c).and_then(|k| k.killer);
+        let out = crate::systems::law::outdoors(world, tile, building);
+        let finder = world.agents_near(tile, sight, building).into_iter().find(|&o| {
+            o != c
+                && Some(o) != killer
+                && world.has::<Identity>(o)
+                && !world.has::<Corpse>(o)
+                && world.comp::<Brain>(o).is_some_and(|b| {
+                    b.lod != Lod::Statistical
+                        && !matches!(b.exec, crate::exec::ExecState::Use { kind: crate::goap::ActionKind::Sleep, .. })
+                })
+                && !crate::systems::wounded::is_down(world, o)
+                && world
+                    .comp::<Position>(o)
+                    .is_some_and(|p| crate::systems::law::sees_scene(world, p, tile, building, out, sight))
+        });
+        if let Some(f) = finder {
+            found(world, c, f);
+        }
+    }
+}
+
+/// Round 6 V3 (`OPEN-238`): `finder` comes upon the body `c` (the find
+/// pass, or the Gravedigger at the burial): SawCorpse, the fright, and the
+/// law's case on it. The killer is named (a Murder report, the file's own
+/// line) on `[crime.case] lead_p`, or `tie_lead_p` when the two knew each
+/// other, x the law's competence; else the case stands with no suspect.
+/// Never a minor: a protected killer is never named (CLAUDE.md, the
+/// under-18 rule: no arrest force on a child), and the case says no suspect.
+pub fn found(world: &mut World, c: EntityId, finder: EntityId) {
+    let Some(k) = world.comp::<Corpse>(c).cloned() else { return };
+    if k.found || k.cause != DeathCause::Violence {
+        return;
+    }
+    if let Some(x) = world.comp_mut::<Corpse>(c) {
+        x.found = true;
+    }
+    world.remember(finder, MemoryKind::SawCorpse, Some(c), 0.6, -0.5, false);
+    if let Some(n) = world.comp_mut::<Needs>(finder) {
+        n.safety = (n.safety - 0.2).max(0.0);
+    }
+    let cfg = world.config.crime.case.clone();
+    let place = world.comp::<Position>(c).and_then(|p| p.building).map_or_else(
+        || {
+            format!(
+                "the street ({})",
+                world
+                    .district_name(world.district_of(world.comp::<Position>(c).map_or(TilePos::default(), |p| p.tile)))
+            )
+        },
+        |b| world.name_of(b),
+    );
+    let hours = world.tick.saturating_sub(k.died_tick) / crate::time::TICKS_PER_HOUR;
+    let (fname, dname) = (world.name_of(finder), world.name_of(c));
+    let lay = if hours > 0 { format!(", dead {hours} h") } else { String::new() };
+    let killer = k.killer.filter(|&x| crate::systems::law::living(world, x));
+    let wanted = killer.is_some_and(|x| {
+        world
+            .crime_reports()
+            .iter()
+            .any(|r| !r.resolved && r.suspect == x && r.crime == crate::components::Crime::Murder)
+    });
+    let nameable = killer.filter(|&x| !crate::systems::ages::is_protected(world, x) && !wanted);
+    let named = nameable.filter(|_| {
+        let p = if k.tied { cfg.tie_lead_p } else { cfg.lead_p };
+        let p = (p * crate::systems::competence::law_mult(world)).clamp(0.0, 1.0);
+        world.rng.world().random::<f32>() < p
+    });
+    let case = match (named, wanted) {
+        (Some(_), _) => "; the law opened a case and has a name",
+        (None, true) => "; the law's case is open on the killer already wanted",
+        (None, false) => "; the law opened a case: no suspect",
+    };
+    world.push_event(
+        EventKind::CorpseFound,
+        &[finder, c],
+        format!("{fname} found the body of {dname} at {place}{lay}{case}"),
+    );
+    if let Some(x) = named {
+        let how = if k.tied { "who knew the dead" } else { "from the scene" };
+        let text =
+            format!("the law named {} for the Murder of {dname} ({how}; the body found by {fname})", world.name_of(x));
+        crate::systems::law::file_report_as(
+            world,
+            crate::components::Crime::Murder,
+            x,
+            None,
+            Some((text, &[c, finder])),
+        );
+    }
+}
+
 /// The Gravedigger is told of every unburied corpse daily so Bury can fire.
 fn gravedigger_notices(world: &mut World) {
     let corpses: Vec<EntityId> =
@@ -594,6 +709,8 @@ pub fn bury(world: &mut World, digger: EntityId, corpse: EntityId) -> bool {
     if !world.comp::<Corpse>(corpse).is_some_and(|c| !c.buried) {
         return false;
     }
+    // Round 6 V3 (`OPEN-238`): a body nobody found is found by its digger.
+    found(world, corpse, digger);
     let tick = world.tick;
     let slot = world.comp::<Building>(cemetery).map_or(TilePos::default(), |b| b.interior().next().unwrap_or(b.door));
     if let Some(p) = world.comp_mut::<Position>(corpse) {

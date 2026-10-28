@@ -55,6 +55,14 @@ pub fn is_down(world: &World, id: EntityId) -> bool {
     world.wounded.contains_key(&id)
 }
 
+/// Round 6 V3 (`OPEN-238`): stabilised and abed under a roof, waiting to
+/// rise: the patient sleeps (`needs::run`), so the laid-up recover instead
+/// of draining to energy 0.01 on a 72 h floor (V14 `guard_8429 d22-25` in a
+/// Back Room, `ceo_91004 d24-27` at a Ripperdoc).
+pub fn laid_up(world: &World, id: EntityId) -> bool {
+    world.wounded.get(&id).is_some_and(|w| w.stable) && world.comp::<Position>(id).is_some_and(|p| p.building.is_some())
+}
+
 // ---------------------------------------------------------------------------
 // The wound
 // ---------------------------------------------------------------------------
@@ -571,6 +579,8 @@ pub fn on_stabilise(world: &mut World, id: EntityId, target: Option<EntityId>) -
     }
     if let Some(b) = world.comp_mut::<Brain>(w) {
         b.cuffed_by = Some(w);
+        // Round 6 V3: abed, no goal (the needs line read `Some(Flee)` 72 h).
+        b.current_goal = None;
     }
     // Jobs & lives phase 6 (§ 7): a unit off the Clinic's shelf (nothing off).
     crate::systems::gray::on_stabilise(world, clinic);
