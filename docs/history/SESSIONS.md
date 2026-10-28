@@ -966,3 +966,20 @@ V12's window: better in all seven groups, no minor harmed in 132 diaries, ages p
 witnessing through walls, trades as labels, contradictions, and broke adults starving at 100k (30 deaths; a Sonnet
 diagnosis: a hunger ramp's 7-day echo among the evicted and released, `OPEN-235`). The profile names
 `goal::GangWork` (21.7 %). Cost ≈ $243 (HANDOFF § Cost).
+
+## The twenty-sixth session (2026-10-28): pressure pass round 5, Shadow V14
+
+Round 5 from Shadow V13 (`docs/PRESSURE_PASS.md` § Round 5) on Dylan's calls: Schools by child count and on demand
+(the fee stays), the neglect ladder tightens, a Mission meal that reaches the starving (charity, not a dole), a
+GangWork perf phase. Wave 1 (U1 Schools, U3 the soup line, U4 witnessing indoors, U5 the forger and the fixer) and
+wave 2 (U2 the ladder, U6 the pimp and the ripperdoc, U7 contradictions, U8 GangWork), one Opus coder each in a
+worktree; wave 2 started as soon as U1 and U4 merged, U8 after U3. U3's cause was money in the wrong place: every
+tithe landed in one church, the other kitchens broke (100k starvation 30 -> 7). U5 and U6 found the same three
+causes for a label trade (no market, a colleague or the clock taking the sale, the book never reaching the body);
+U6's trip bound on who may be named pimp then emptied the 100k street (pimps 1.63 -> 0.2 a day). U8: the Purist
+pick walked every Home (GangWork 30.1 % -> 6.9 % of the 100k profile). Two red combinations re-pinned three probes
+whose picks the merges moved (two Sonnet fix rounds, no code bug); no test added (1,470), `SAVE_VERSION` 96 (four
+phases bumped the same number, renumbered at each merge). Shadow V14 at 100k in V13's window: better where round 5
+aimed (the forger and the fixer's book, the clinic's day, the take's reason, the soup line), no minor harmed in any
+diary; left the ladder's warnings hanging at 100k, the empty street, violence with no law after it, empty Schools and
+clinics beside full ones, gang life without a raid (`OPEN-238` to `OPEN-242`). Cost ≈ $369 (HANDOFF § Cost).
