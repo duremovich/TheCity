@@ -33,6 +33,33 @@ pub fn near(world: &World, a: EntityId, b: EntityId, r: u32) -> bool {
     (pa.building.is_some() && pa.building == pb.building) || chebyshev(pa.tile, pb.tile) <= r
 }
 
+/// Round 5 U4 (`OPEN-236`): is the spot `(tile, building)` in the open?
+/// Outside any building, on a building's door tile (the threshold sees both
+/// ways), or inside a wall-less kind (`[crime] open_air`).
+pub fn outdoors(world: &World, tile: TilePos, building: Option<EntityId>) -> bool {
+    let Some(b) = building else { return true };
+    world.comp::<Building>(b).is_none_or(|bd| bd.door == tile || world.config.crime.open_air.contains(&bd.kind))
+}
+
+/// Round 5 U4 (`OPEN-236`): who is indoors sees indoors. A body at `p` sees
+/// a scene at `(tile, building)` when both are in the same building, or both
+/// are [`outdoors`] within `reach` Chebyshev tiles; never through a wall (the
+/// cells do not see the El gate, the street does not see into a flat).
+/// `scene_out` is `outdoors(tile, building)`, read once by the caller.
+pub fn sees_scene(
+    world: &World,
+    p: &Position,
+    tile: TilePos,
+    building: Option<EntityId>,
+    scene_out: bool,
+    reach: u32,
+) -> bool {
+    if building.is_some() && p.building == building {
+        return true;
+    }
+    scene_out && chebyshev(p.tile, tile) <= reach && outdoors(world, p.tile, p.building)
+}
+
 /// A live agent: the entity exists and still has a Brain (corpses keep
 /// Position and Identity, so `is_alive` alone is not enough).
 pub fn living(world: &World, id: EntityId) -> bool {
@@ -241,19 +268,31 @@ pub fn raise_crime_mult(
     if let (false, Some(b)) = (detained, actor_building) {
         crate::systems::virt::camera_sense(world, actor, crime, b);
     }
-    let mut witnesses: Vec<EntityId> = world
-        .bodies()
+    // Round 5 U4 (`OPEN-236`): who is indoors sees indoors. A scene behind
+    // walls is seen only from its building (the position index's building
+    // list, not every body); a street scene by the bodies outside within
+    // sight (the cells do not see the El gate).
+    let scene_out = outdoors(world, tile, actor_building);
+    let candidates: Vec<EntityId> = if detained {
+        Vec::new()
+    } else if scene_out {
+        world.bodies()
+    } else {
+        world
+            .agents_near(tile, 0, actor_building)
+            .into_iter()
+            .filter(|&w| world.comp::<Brain>(w).is_some_and(|b| b.lod != crate::components::Lod::Statistical))
+            .collect()
+    };
+    let mut witnesses: Vec<EntityId> = candidates
         .into_iter()
-        .filter(|_| !detained)
         .filter(|&w| w != actor && Some(w) != except)
         // M14 V12: a body jacked in sees nothing.
         .filter(|w| world.runner_of.is_empty() || !world.runner_of.contains_key(w))
         .filter(|&w| {
             // M13 D32: a witness with Eyes sees `Kit.sight` tiles further.
             let reach = r + world.comp::<Kit>(w).map_or(0, |k| u32::from(k.sight));
-            world.comp::<Position>(w).is_some_and(|p| {
-                (actor_building.is_some() && p.building == actor_building) || chebyshev(p.tile, tile) <= reach
-            })
+            world.comp::<Position>(w).is_some_and(|p| sees_scene(world, p, tile, actor_building, scene_out, reach))
         })
         .collect();
     // Pressure pass F2: the law's eye is rolled first (the cap below never
@@ -2211,8 +2250,11 @@ fn sightings_with(world: &mut World, grid_pairs: usize) {
     for s in suspects {
         let Some(ps) = world.comp::<Position>(s) else { continue };
         let (tile, building) = (ps.tile, ps.building);
+        // Round 5 U4 (`OPEN-236`): the walls hold (`sees_scene`).
+        let scene_out = outdoors(world, tile, building);
         let sees = |g: &GuardSight| {
-            (g.building.is_some() && g.building == building) || chebyshev(g.tile, tile) <= sight + g.extra
+            (g.building.is_some() && g.building == building)
+                || (scene_out && g.outside && chebyshev(g.tile, tile) <= sight + g.extra)
         };
         // The guards who see `s`, ascending (`guards` is ascending by id, so
         // ascending indices are): from the grid's cells and the building, or
@@ -2257,12 +2299,14 @@ fn sightings_with(world: &mut World, grid_pairs: usize) {
 /// seed 42, the 20,000 probe city hundreds of thousands).
 const SIGHTINGS_GRID_PAIRS: usize = 16_384;
 
-/// A guard as `sightings` reads it: where, inside what, and its Eyes' reach.
+/// A guard as `sightings` reads it: where, inside what, whether in the open
+/// (Round 5 U4, `law::outdoors`), and its Eyes' reach.
 #[derive(Clone, Copy, Debug)]
 struct GuardSight {
     id: EntityId,
     tile: TilePos,
     building: Option<EntityId>,
+    outside: bool,
     extra: u32,
 }
 
@@ -2273,7 +2317,13 @@ fn guard_sights(world: &World) -> Vec<GuardSight> {
         .iter()
         .filter_map(|&g| {
             let extra = world.comp::<Kit>(g).map_or(0, |k| u32::from(k.sight));
-            world.comp::<Position>(g).map(|p| GuardSight { id: g, tile: p.tile, building: p.building, extra })
+            world.comp::<Position>(g).map(|p| GuardSight {
+                id: g,
+                tile: p.tile,
+                building: p.building,
+                outside: outdoors(world, p.tile, p.building),
+                extra,
+            })
         })
         .collect()
 }
@@ -2288,12 +2338,12 @@ fn sightings_scan(world: &mut World) {
         return;
     }
     let sight = world.config.crime.sight;
-    let guards: Vec<(TilePos, Option<EntityId>, u32)> = world
+    let guards: Vec<(Position, u32)> = world
         .guards()
         .iter()
         .filter_map(|&g| {
             let extra = world.comp::<Kit>(g).map_or(0, |k| u32::from(k.sight));
-            world.comp::<Position>(g).map(|p| (p.tile, p.building, extra))
+            world.comp::<Position>(g).map(|p| (p.clone(), extra))
         })
         .collect();
     let tick = world.tick;
@@ -2302,8 +2352,8 @@ fn sightings_scan(world: &mut World) {
     for s in suspects {
         let Some(ps) = world.comp::<Position>(s) else { continue };
         let (tile, building) = (ps.tile, ps.building);
-        let seen =
-            guards.iter().any(|&(t, b, extra)| (b.is_some() && b == building) || chebyshev(t, tile) <= sight + extra);
+        let out = outdoors(world, tile, building);
+        let seen = guards.iter().any(|(p, extra)| sees_scene(world, p, tile, building, out, sight + extra));
         if seen {
             world.set_last_seen(s, (tile, tick));
             if note {
@@ -2312,9 +2362,9 @@ fn sightings_scan(world: &mut World) {
                     .copied()
                     .filter(|&g| {
                         let extra = world.comp::<Kit>(g).map_or(0, |k| u32::from(k.sight));
-                        world.comp::<Position>(g).is_some_and(|p| {
-                            (p.building.is_some() && p.building == building) || chebyshev(p.tile, tile) <= sight + extra
-                        })
+                        world
+                            .comp::<Position>(g)
+                            .is_some_and(|p| sees_scene(world, p, tile, building, out, sight + extra))
                     })
                     .collect();
                 for g in seers {

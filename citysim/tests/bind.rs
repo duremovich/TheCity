@@ -267,9 +267,12 @@ fn test_bound_actor_with_witness_is_reported_and_arrested() {
         .iter()
         .find(|&&id| !w.has::<Job>(id) && w.spouse_of(victim) != Some(id))
         .expect("a jobless statistical agent");
+    // Round 5 U4 (OPEN-236): the others are kept out of the candidates as
+    // Full that day (never bound, still on the street), not jailed: one held
+    // in the cells witnesses no street, which emptied the witness pool.
     for o in adults_with_trace(&w) {
         if o != victim && o != actor {
-            set_trace_flag(&mut w, o, 0, trace_flags::JAILED);
+            set_trace_flag(&mut w, o, 0, trace_flags::FULL);
         }
     }
     let id = manual_hole(&mut w, victim, HoleKind::Assaulted, 600);
