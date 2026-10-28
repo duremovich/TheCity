@@ -422,7 +422,11 @@ use crate::world::World;
 /// `AgesState.{rolls, roll_day}` (written while set), `[ages] school_trip_ticks`,
 /// `school_el_fares`, `school_places_per_teacher`, `school_by_reach` (`school_reach` dropped) and the
 /// `Jobs2Cols` `school_far`, `school_full`, `school_unpaid`, `school_el` columns.
-pub const SAVE_VERSION: u8 = 90;
+/// 91 (pressure pass round 5, U5, the forger and the fixer): `GrayState.licences`,
+/// `WalkIn.kind` (`WalkKind`, written when not papers), `Contract.cut` (written while
+/// set), the `[gray]` licence keys and the `Jobs2Cols` `licences_forged`,
+/// `licences_passed`, `licences_exposed`, `fixer_outcomes` columns (serde defaults).
+pub const SAVE_VERSION: u8 = 91;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

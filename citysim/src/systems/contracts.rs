@@ -465,7 +465,11 @@ pub fn quote(world: &World, kind: ContractKind, target: &Target, broker: Option<
     (base * (1.0 + c.risk_w * risk) * (1.0 + c.standing_w * standing) * level).round().max(1.0) as i64
 }
 
-fn target_ok(world: &World, target: &Target) -> bool {
+/// Round 5 U5 (the under-18 rule, CLAUDE.md): nobody under 18 is a record's
+/// mark (`ages::is_protected`): no Hit, Beat, Abduct, Locate, Persuade or
+/// any other job on a child; only a Guard or an Escort (protection) may
+/// name one.
+fn target_ok(world: &World, kind: ContractKind, target: &Target) -> bool {
     match *target {
         // M17 review: an agent away on a job abroad is no target.
         Target::Agent(t) => {
@@ -473,6 +477,8 @@ fn target_ok(world: &World, target: &Target) -> bool {
                 && crate::systems::law::living(world, t)
                 && world.has::<Brain>(t)
                 && !crate::systems::abroad::is_away(world, t)
+                && (matches!(kind, ContractKind::Guard | ContractKind::Escort)
+                    || !crate::systems::ages::is_protected(world, t))
         }
         Target::Building(b) => world.comp::<Building>(b).is_some_and(|bd| !bd.demolished),
         // M16b phase 2: a corpse still unburied; a story's actor alive.
@@ -597,6 +603,7 @@ fn record_of(
         deposit: 0,
         motive: Motive::None,
         hold: None,
+        cut: 0,
     }
 }
 
@@ -616,7 +623,7 @@ pub fn post_with(world: &mut World, p: Posting, extra: PostExtra) -> Result<Cont
     // M16b phase 2: and a Steal; M17 phase 3: and a Retake.
     let building = matches!(p.target, Target::Building(_))
         && !matches!(p.kind, ContractKind::Guard | ContractKind::Steal | ContractKind::Retake);
-    if !target_ok(world, &p.target) || on_self || building || !buyer_ok(world, p.buyer) {
+    if !target_ok(world, p.kind, &p.target) || on_self || building || !buyer_ok(world, p.buyer) {
         return Err(Refusal::NoTarget);
     }
     if world.contracts.values().any(|c| c.is_live() && c.buyer == p.buyer && c.kind == p.kind && c.target == p.target) {
@@ -689,7 +696,15 @@ pub fn post_with(world: &mut World, p: Posting, extra: PostExtra) -> Result<Cont
         h.hm_price_sum += price;
         h.hm_deposit_sum += deposit.unwrap_or(price);
     }
-    let actors = [p.agent.unwrap_or(EntityId::NONE), p.target.id(), p.broker.unwrap_or(EntityId::NONE)];
+    // Round 5 U5 (OPEN-217): a brokered post is on its fixer's book (his
+    // diary holds it; V13's fixers never saw a post).
+    let hand = p.broker.and_then(|b| crate::systems::service::fixer_hand(world, b));
+    if let Some(h) = hand {
+        text.push_str(&format!(", on {}'s book", world.name_of(h)));
+    }
+    let mut actors: SmallVec<[EntityId; 4]> =
+        SmallVec::from_slice(&[p.agent.unwrap_or(EntityId::NONE), p.target.id(), p.broker.unwrap_or(EntityId::NONE)]);
+    actors.extend(hand.filter(|h| !actors.contains(h)));
     world.push_event(EventKind::ContractPosted, &actors, text.clone());
     log(world, id, text);
     // Lives at work phase 5 (§ 2.4): a brokered post is the placing
@@ -747,7 +762,7 @@ fn post_unpaid(
     how: &str,
 ) -> Option<ContractId> {
     let live = world.contracts.values().filter(|c| c.is_live()).count();
-    if live >= world.config.contracts.max_open || !target_ok(world, &p.target) || !buyer_ok(world, p.buyer) {
+    if live >= world.config.contracts.max_open || !target_ok(world, p.kind, &p.target) || !buyer_ok(world, p.buyer) {
         return None;
     }
     if world.contracts.values().any(|c| c.is_live() && c.buyer == p.buyer && c.kind == p.kind && c.target == p.target) {
@@ -879,7 +894,9 @@ pub fn eligible(world: &World, c: &Contract, cand: EntityId) -> bool {
     if cand == t || Some(cand) == c.buyer || Some(cand) == c.agent {
         return false;
     }
-    if !free_adult(world, cand) {
+    // Round 5 U5 (the under-18 rule): nobody under 18 takes a job or rides
+    // on its crew (`squad_crew` and `job_crew` read this through `crew_ok`).
+    if !free_adult(world, cand) || crate::systems::ages::is_protected(world, cand) {
         return false;
     }
     // C31: a corruption record is a bribe: only a city guard under
@@ -1501,13 +1518,34 @@ pub fn accept(world: &mut World, id: ContractId, taker: EntityId, crew: &[Entity
     let (kind, target) =
         world.contracts.get(&id).map(|c| (c.kind, c.target.id())).unwrap_or((ContractKind::Hit, taker));
     let crew_txt = if crew.is_empty() { String::new() } else { format!(", crew {}", crew.len()) };
+    // Round 5 U5 (OPEN-217): a brokered take is the fixer's pick from his
+    // regulars: he and the crew are named, and his diary holds it.
+    let hand = world
+        .contracts
+        .get(&id)
+        .and_then(|c| c.broker)
+        .and_then(|b| crate::systems::service::fixer_hand(world, b).map(|h| (h, b)));
+    let from = match hand {
+        Some((h, b)) => {
+            let names: Vec<String> = crew.iter().map(|&m| world.name_of(m)).collect();
+            let with = if names.is_empty() { String::new() } else { format!(" with {}", names.join(", ")) };
+            format!(", put on it{with} by {} at {}", world.name_of(h), world.name_of(b))
+        }
+        None => String::new(),
+    };
     let text = format!(
-        "{} took the {} on {} ({tag}{crew_txt})",
+        "{} took the {} on {} ({tag}{crew_txt}){from}",
         world.owner_label(Some(taker)),
         kind.label(),
         world.name_of(target)
     );
-    world.push_event(EventKind::ContractTaken, &[taker, target], text.clone());
+    let mut actors: SmallVec<[EntityId; 6]> = SmallVec::from_slice(&[taker, target]);
+    if let Some((h, _)) = hand {
+        if !actors.contains(&h) {
+            actors.push(h);
+        }
+    }
+    world.push_event(EventKind::ContractTaken, &actors, text.clone());
     log(world, id, text);
     heard_of(world, id, taker);
     // Lives at work phase 5 (§ 2.4): a brokered take is the taker's
@@ -1637,6 +1675,11 @@ pub fn match_day(world: &mut World) {
             .iter()
             .filter_map(|id| world.contracts.get(id))
             .filter(|c| c.is_open())
+            // Round 5 U5 (OPEN-217): the fixer puts nobody on a job whose
+            // mark is held past its deadline (the cells, abroad, leaving):
+            // it stays on the book (20k: three Locates taken at 18:00 on
+            // marks in the cells till d36, each let go within the hour).
+            .filter(|c| !mark_gone_past_deadline(world, c))
             .map(|c| {
                 let age = now.saturating_sub(c.posted) as f64 / TICKS_PER_DAY as f64;
                 let days = (c.deadline.saturating_sub(c.posted) as f64 / TICKS_PER_DAY as f64).max(1.0);
@@ -1899,6 +1942,27 @@ pub fn set_status(world: &mut World, id: ContractId, status: ContractStatus, why
             actors.push(m);
         }
     }
+    // Round 5 U5 (OPEN-217): a brokered record's outcome comes back to its
+    // fixer (V13: corp posts "never come back with an outcome"), with the
+    // cut paid to the owner, or the escrow returned.
+    let mut text = text;
+    if let Some(b) = c.broker {
+        if let Some(h) = crate::systems::service::fixer_hand(world, b) {
+            let cut = world.contracts.get(&id).map_or(0, |x| x.cut);
+            let owner = world.owner_of(b).map(|o| world.owner_label(Some(o))).unwrap_or_else(|| "nobody".into());
+            let money = match status {
+                ContractStatus::Fulfilled if cut > 0 => format!("the cut {cut}c to {owner}"),
+                ContractStatus::Fulfilled => "no cut".to_string(),
+                ContractStatus::Reneged => "the buyer's coins gone".to_string(),
+                _ => "the escrow back to the buyer".to_string(),
+            };
+            text.push_str(&format!("; back to {} at {}: {money}", world.name_of(h), world.name_of(b)));
+            if !actors.contains(&h) {
+                actors.push(h);
+            }
+            ownership::jobs2_row(world).fixer_outcomes += 1;
+        }
+    }
     world.push_event(ev, &actors, text.clone());
     log(world, id, text);
     // The pressure pass phase 5a: an unfilled bought Hit or Beat: the buyer
@@ -1992,6 +2056,9 @@ fn fulfil(world: &mut World, id: ContractId, c: &Contract, why: &str) {
             let owner = world.owner_of(b);
             let paid = ownership::escrow_out(world, id, owner, cut, Flow::FixerCut);
             note_cut(world, b, paid);
+            if let Some(x) = world.contracts.get_mut(&id) {
+                x.cut = paid;
+            }
         }
         refund(world, id);
         set_status(world, id, ContractStatus::Fulfilled, "");
@@ -2012,6 +2079,9 @@ fn fulfil(world: &mut World, id: ContractId, c: &Contract, why: &str) {
         }
         let paid = ownership::escrow_out(world, id, owner, cut, Flow::FixerCut);
         note_cut(world, b, paid);
+        if let Some(x) = world.contracts.get_mut(&id) {
+            x.cut = paid;
+        }
         refund(world, id);
         set_status(world, id, ContractStatus::Fulfilled, why);
         if got < balance {
@@ -2922,6 +2992,12 @@ pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
 /// that ends if it does (a sentence's release); `None` for a mark in reach
 /// of the chase, or one in a guard's hands (the cells come next: the plain
 /// back-off waits for them).
+/// Round 5 U5: `c`'s agent mark is away ([`mark_away`]) with no return
+/// before `c`'s deadline.
+fn mark_gone_past_deadline(world: &World, c: &Contract) -> bool {
+    c.target_agent().and_then(|t| mark_away(world, t)).is_some_and(|(_, until)| until.is_none_or(|u| u >= c.deadline))
+}
+
 fn mark_away(world: &World, t: EntityId) -> Option<(String, Option<Tick>)> {
     let name = world.name_of(t);
     if !crate::systems::law::living(world, t) {

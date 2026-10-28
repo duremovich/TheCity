@@ -2263,3 +2263,94 @@ held and guards on main's binary in `target/u4_shadow_before`):
   jailed for the day, which now also empties the witness pool; they are marked Full that day instead (never bound,
   still witnesses). `SAVE_VERSION` unchanged: no component or save field moved; `[crime] open_air` has a serde
   default.
+
+### U5, the forger and the fixer at work (`OPEN-217`; `gray.rs`, `service.rs` walk-ins and `fixer_hand`, `contracts.rs`, `weapons.rs`, `[gray]` U5 keys)
+
+- **The cause** (V13's diaries, the round 4 100k run, a 20k base shadow). Three, and the tier is only one. (1) **No
+  market**: papers are bought only by the wanted, and the Clerk's 60c bribe takes every buyer who can afford a tier-2
+  forgery (120c), so the 100k city sold 14 fake papers in 30 days (70 bribed) across ~14 Fixers that ever named one;
+  a followed forger saw a client every few weeks. (2) **The counter took the forger's sale**: the walk-in's server was
+  the pair hash over the Fixer's present `Client` staff (the hired Fixer and the forger), so half the handovers went
+  to the colleague, and the forger the midnight pass named was paid wherever he was (20k base `forger_19041 d21
+  13:01` "SETTLED APART: Gray 32c ... I am asleep at Block#3996"); `forger_near` named the first forger on the books,
+  not a body. (3) **The fixer's book never reached him**: a brokered post and a take are `Client` encounters only when
+  both parties are present (P3), the corps post at 00:06 and the takes come at the match hour, so a body fixer's diary
+  held nothing (20k base `fixer_8620`: no post, take or outcome in seven days), and a record's close named nobody at
+  the Fixer. The shadow's `fixer` also took absentee owners with a day job elsewhere (V13's `fixer_23959` a Vat Tech,
+  the base `fixer_21976` a Street Market clerk).
+- **The forger's commission** (`service::walk_in_sale`, `WalkKind`): the forger who made it hands it over when he is
+  at the desk with room this hour (`present`, `has_room`); else the counter's server hands over his work ("Hale
+  Abernathy handed Casimir Novak a forged weapons licence (Osric Stroud made)"), and a forger in the cells or dead made
+  nothing (the server is paid as the maker). An order of today waits for a forger still due at his desk today
+  (`forger_due_today`): the counter opened at 09:00 and the commuting forger came in at 09:2x, so the hired Fixer
+  handed over his work (100k `fixer_98933 d22 09:00` "(Moth Bellamy made)"); from the next day the counter hands it. Paid at the handover: the forger's share, the owner's `fixer_cut` held by
+  the server for the owner (F3's `fixer_owed`, settled on payday or at `collected`); the line says so ("40c paid, 8c of
+  it held for the owner"). `forger_near` names a body first, then the lowest id.
+- **The forged licence** (`gray::licences_daily`, `[gray] licence_price` 40, `licence_lawful` 0.5,
+  `licence_reach_ticks` 120, `licence_pass` 0.6): the second commission. An adult in `[weapons]`' want set, holding no
+  licence and no order, under `licence_lawful` (the Clerk's buyers are at or above it: the split is clean), with the
+  price, the cheapest weapon and `coin_reserve`, orders one at midnight from the nearest forger whose Fixer is within
+  the reach of his Home; the same walk-in as the papers. `GrayState.licences` (holder -> forger) makes him `licensed`:
+  the Gunsmith sells to him and he carries. A guard who notices the weapon (`sight_carriers`) looks at it: it passes on
+  `licence_pass` (a hash of the holder and the hour), else it is exposed: void, `Forgery` on the holder and the forger,
+  and the weapon's `UnlicensedArms` filed; at an arrest, `p_expose` (`gray::on_arrest`). **Deviation:** the spec named
+  "the papers"; a forger with only the wanted for clients has no trade at any size, and the unlawful who want a gun had
+  nowhere to buy one (`sold_dealer` 0 at 100k, ~240 wants standing a day).
+- **The visit's hour** (`service::walk_in_hour_for`): a body buyer's pickup visit is the first hour of the Fixer's
+  open hours he is off his own shift; none today, no walk (he comes on his rest day). The counter keeps the day shift:
+  a 09:00 visit waited out a 09-18 shift and walked to a shut Fixer at 18:xx, daily.
+- **The fixer's day** (`service::fixer_hand`: the holder of the Fixer's `Fixer` post alive and free, a body first, then
+  the lowest id; else the owner, a person alive and free). The book is told to him, not met: **posted** ("Vatra 2
+  posted a guard on Block#1335 for 33 at Fixer#5271, on Mateo Sato's book"), **taken** from his regulars at the match
+  hour with the crew named ("The Drowned Choir 10 took the beat on Roderick Sallow (LIVE, crew 1), put on it with
+  Dorian Bellamy by Imogen Duarte at Fixer#4755"), and **the outcome** on every close of a brokered record, with the
+  cut (`Contract.cut`, set in `fulfil`) or the escrow's return ("beat on Roderick Sallow: done by The Drowned Choir 10
+  (... won (2 vs 2, 0 dead)); back to Imogen Duarte at Fixer#4755: the cut 25c to Imogen Duarte"). **Deviation:** the
+  money path stays the owner's (`FixerCut` from escrow): a hired fixer's outcome names the owner's cut; nothing is
+  routed through him. The match puts nobody on a job whose mark is away past its deadline (`mark_gone_past_deadline`:
+  the cells, abroad, leaving): it stays on the book and expires (20k: three Locates taken at 18:00 on marks "in the
+  cells till d36", each let go within the hour). The shadow's `fixer` is the `Fixer` post's holder or an owner with no
+  post (an owner with a post elsewhere is not running the office).
+- **The under-18 rule** (`ages::is_protected`): a record's mark is never protected (`contracts::target_ok`, now by
+  kind: only a Guard or an Escort may name a child), so no Hit, Beat, Abduct, Locate or Persuade is posted on one,
+  brokered or direct; and nobody protected takes a job or rides on its crew (`eligible`, read by `crew_ok` for
+  `squad_crew` and `job_crew`). `free_adult`'s adult age is also 18; the gate no longer leans on that. The licence's
+  buyers are `[weapons]`' adults, and `licences_daily` skips the protected as well.
+- **Shadow** (20k `isle_m_k2`, seed 42, d21-27, forger:2, fixer:2, buyer:1; 100k below). The forger: `forger_22831
+  d21 09:00` "Rin Pembroke handed Rosalind Blackwood a forged weapons licence at Fixer#5154, 40c paid, 8c of it held
+  for the owner"; `d25 12:10` and `d26 17:50` papers to Lux Chrome and Winifred Ellery; `forger_9672` four in the week
+  (three licences, `d24 17:00` papers to Kieran Eastwick), and `d21 09:41` "Ines Delacroix arrested Osric Stroud for
+  Forgery" (a licence of his exposed), two days in the cells. The fixer: `fixer_8620` all week: two to three posts a
+  night "on Mateo Sato's book", the takes at 18:00 "put on it by Mateo Sato at Fixer#5271" (seven), and the closes
+  "back to Mateo Sato at Fixer#5271: the escrow back to the buyer" (five, before the mark filter).
+- **Shadow at 100k** (`isle_m_k2_100k`, seed 42, d21-27, forger:1, fixer:1; the build before the visit-hour and the
+  wait-for-the-forger fixes, 49 min). The forger: `forger_90429 d23 09:00` "Rosalind Achebe handed Alaric Penhallow a
+  forged weapons licence at Fixer#5897, 40c paid, 8c of it held for the owner", again `d26 09:00` (V13: no papers
+  handed by either forger). The fixer: `fixer_98933` (the Fixer post at Fixer#5120, owned by The Ash Knives) is told
+  8-10 posts a night ("Zetatech 7 posted a hit on Quill Oyelaran for 1486 at Fixer#5120 (culprit), on Odile Tanner's
+  book"), the takes at 18:00 with the crew ("The Red Lanterns took the hit on Quill Oyelaran (LIVE, crew 4), put on
+  it with Santiago Novak, Quill Lockridge, Gwendolyn Ramirez, Bertram Wexford by Odile Tanner at Fixer#5120"), and
+  the outcomes ("steal on Lab#5949: done by Elspeth Oakes (49 taken); back to Odile Tanner at Fixer#5120: the cut 35c
+  to The Ash Knives"). V13's fixers had two events a week. **Read wrong there:** Odile handed out the forger Moth
+  Bellamy's licences at the 09:00 opening (`d22`, `d23` "(Moth Bellamy made)", 21 lines), fixed after the read
+  (`forger_due_today`; 20k x 30: 5 -> 1 handed by another server), not re-shadowed at 100k (one 100k shadow a phase).
+- **The final 20k shadow** (the same picks' window on the final build): `fixer_8620 d24 00:09` "guard on Braindance
+  Parlour#5786: done by Anton Northcott; back to Mateo Sato at Fixer#5271: the cut 9c to Mateo Sato", eight takes "put
+  on it by Mateo Sato"; the two forgers drawn this time (Fixer#6013, Fixer#6050 in the Neon Quarter) had no client in
+  the week: neither Fixer sold anything in the 30-day run (9 Fixers did). An owner with a hired Fixer on the post
+  (`fixer_23495`, Fixer#4755) is not told the book (the post is); she has `d21 13:44` "collected the week's cut at
+  Fixer#4755 in person".
+- **Reads wrong** (the next pass): the walk-in queue still waits (20k x 30: 223 waited-days and 39 dropped against 33
+  served): the wanted are ordered to the nearest forger at any distance, past `[distance.choice] visit_ticks` they
+  never walk, and are arrested waiting; a working buyer comes only on his rest day (the counter's day shift, the
+  clientele's too). A forger off the desk at a later day's handover is still paid apart (the colleague's handover is
+  right, the camera's SETTLED APART line is not). Demand clusters: 9 of the island's Fixers sell; a forger at a quiet
+  one has an empty week. A fixer whose office has no posts (`fixer_8354`:
+  records none) clerks the counter's ClerkWork, joins a gang and sells a sighting: the week reads as a life, not the
+  trade. A corp's Guard converted by a Security corp closes "no cut" (`corp_take` pays the Fixer nothing). Posts reach
+  the fixer's diary at 00:06 while he sleeps (the book overnight; not met in person).
+- Numbers (prints, not claimed), 20k seed 42 x 30 (`--scaled --ambient-flats 50`, `target/u5_run3.csv`): forger
+  commissions handed 33 (forged licences 26, papers 7; 1 by another server) at 9 Fixers; licences exposed 3, passed 4;
+  papers bribed 19; fixer outcomes told 91 (fulfilled 59, failed 29, expired 3) to 11 fixers; contracts posted 732.
+  No test (doctrine 2). `SAVE_VERSION` 91 (`GrayState.licences`, `WalkIn.kind`, `Contract.cut`, the `[gray]` U5 keys,
+  the `Jobs2Cols` `licences_forged`, `licences_passed`, `licences_exposed`, `fixer_outcomes`).

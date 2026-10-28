@@ -514,6 +514,8 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
             adults().filter(|a| dealers.contains(a) && world.has::<GangMember>(*a)).collect()
         }
         // M16a 5.3: whoever runs a Fixer's office: its owner (an agent) or a hired Fixer.
+        // Round 5 U5 (OPEN-217): an owner with a post elsewhere is not running it (V13's
+        // fixer_23959 a Vat Tech, U5's base fixer_21976 a Street Market clerk).
         "fixer" => {
             let owners: BTreeSet<EntityId> = world
                 .buildings_of_kind(BuildingKind::Fixer)
@@ -521,7 +523,10 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
                 .filter_map(|&b| world.comp::<Building>(b).and_then(|b| b.owner))
                 .collect();
             adults()
-                .filter(|a| owners.contains(a) || world.comp::<Job>(*a).is_some_and(|j| j.role == Role::Fixer))
+                .filter(|a| match world.comp::<Job>(*a) {
+                    Some(j) => j.role == Role::Fixer,
+                    None => owners.contains(a),
+                })
                 .collect()
         }
         // M16a 5.3: an agent holding a taken contract (its taker or a crew member) or one that

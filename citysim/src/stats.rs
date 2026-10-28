@@ -926,6 +926,17 @@ pub struct Jobs2Cols {
     pub contract_encounters: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub fixer_collections: u32,
+    /// Round 5 U5 (OPEN-217): forged weapons licences handed over at a
+    /// Fixer's counter, passed and exposed at a guard's look (or an
+    /// arrest), and brokered records closed with the office's fixer told.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub licences_forged: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub licences_passed: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub licences_exposed: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub fixer_outcomes: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub licences_named: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
@@ -1651,6 +1662,10 @@ impl Jobs2Cols {
                 "walk_ins_dropped",
                 "contract_encounters",
                 "fixer_collections",
+                "licences_forged",
+                "licences_passed",
+                "licences_exposed",
+                "fixer_outcomes",
                 "licences_named",
                 "bribes_named",
                 "band_refusals",
@@ -2141,6 +2156,10 @@ impl Jobs2Cols {
             self.walk_ins_dropped.to_string(),
             self.contract_encounters.to_string(),
             self.fixer_collections.to_string(),
+            self.licences_forged.to_string(),
+            self.licences_passed.to_string(),
+            self.licences_exposed.to_string(),
+            self.fixer_outcomes.to_string(),
             self.licences_named.to_string(),
             self.bribes_named.to_string(),
             self.band_refusals.to_string(),
