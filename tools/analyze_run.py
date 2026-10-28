@@ -975,7 +975,7 @@ GRAY_SNAP = ("papers_held", "fake_ids", "organ_stock", "scav_gangs", "black_clin
 # Phase 7, life stages (§ 6).
 AGES_TOTALS = ("child_days", "school_days", "school_fees", "street_takes", "child_begged", "child_thefts",
                "elders_taken_in", "maimed_new", "prosthetics", "school_far", "school_full", "school_unpaid",
-               "school_el")
+               "school_el", "schools_founded")
 AGES_SNAP = ("ch_play", "ch_school", "ch_chores", "ch_street", "ch_camp", "schools", "elders", "elders_employed",
              "elders_on_cots", "maimed")
 
@@ -1080,6 +1080,9 @@ def jobs2(rows, events, out):
         # the share at School.
         due = t["school_days"] + sum(t.get(k, 0) for k in ("school_far", "school_full", "school_unpaid"))
         J["school_due_share"] = t["school_days"] / due if "school_far" in t and due else None
+        # Round 5 U1 (OPEN-232): the Schools at the first day and the last (the founded between).
+        sc = col(rows, "schools")
+        J["schools_first_last"] = (sc[0], sc[-1]) if sc else None
     # Phase 8's gate: the § 12 bands not printed by a phase (numbers only).
     G = {}
     if "children_taken" in rows[0]:
@@ -1441,6 +1444,10 @@ def fmt(o):
             if w.get("school_due_share") is not None:
                 L.append(f"school days / school-age school-day child-days {w['school_due_share']:.1%} (T2: the rest "
                          f"far, full or unpaid)")
+            if w.get("schools_first_last") is not None:
+                s0, s1 = w["schools_first_last"]
+                L.append(f"Schools standing day 0 -> last {s0:.0f} -> {s1:.0f} (U1: the founded "
+                         f"{w['ages_totals'].get('schools_founded', 0):.0f})")
         if "gate" in w:
             g = w["gate"]
             L.append("phase 8 bands: " + ", ".join(

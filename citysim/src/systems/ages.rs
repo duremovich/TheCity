@@ -111,6 +111,11 @@ pub struct AgesState {
     pub rolls: BTreeMap<EntityId, u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub roll_day: Option<u64>,
+    /// Round 5 U1 (OPEN-232): the school days running each district (by
+    /// index) has had `[ages] found_full_min` or more of its children
+    /// turned away full; at `found_full_days` a School is founded there.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub full_run: BTreeMap<u8, u32>,
 }
 
 impl AgesState {
@@ -486,6 +491,8 @@ fn children(world: &mut World) {
     let mut rolls: BTreeMap<EntityId, u32> = BTreeMap::new();
     let mut caps: BTreeMap<EntityId, u32> = BTreeMap::new();
     let mut reach: BTreeMap<EntityId, Vec<(Tick, bool, EntityId)>> = BTreeMap::new();
+    // Round 5 U1: the children turned away full tonight, by their Home's district.
+    let mut full: FullDay = BTreeMap::new();
     for k in kids {
         // A child has no Brain (`law::living` reads one): alive, not a corpse.
         if !world.is_alive(k) || world.has::<crate::components::Corpse>(k) {
@@ -505,6 +512,14 @@ fn children(world: &mut World) {
             if let (true, true, Some(d)) = (wd, school_age, door) {
                 let cands = reach.entry(h).or_insert_with(|| schools_in_reach(world, d)).clone();
                 pick = pick_school(world, head, &cands, &mut rolls, &mut caps);
+                if pick.miss == Some(SchoolMiss::Full) {
+                    let e = full.entry(world.district_of(d).0).or_default();
+                    e.0.push(d);
+                    e.1.extend(cands.iter().map(|c| c.2));
+                    if let Some(s) = pick.school {
+                        *e.2.entry(s).or_insert(0) += 1;
+                    }
+                }
             }
             let paid = pick.school.is_some() && pick.miss.is_none();
             let pitch =
@@ -589,6 +604,9 @@ fn children(world: &mut World) {
     }
     world.jobs2.ages.rolls = rolls;
     world.jobs2.ages.roll_day = Some(day);
+    if wd {
+        found_on_demand(world, full);
+    }
 }
 
 /// A Street child's day: a gift of `child_beg_coins` from a resident of its
@@ -773,7 +791,7 @@ pub fn seed(world: &mut World) {
             break;
         }
         if let Some(d) = world.comp::<Building>(lot).map(|b| b.door) {
-            homes.cover(d);
+            homes.cover(d, u32::MAX);
         }
     }
     seed_kin(world);
@@ -782,6 +800,9 @@ pub fn seed(world: &mut World) {
 /// Round 4 T2 (OPEN-232): the seed's Homes (door, residents) in cells of
 /// `HOME_CELL` tiles, for the Schools by reach. A Home is covered once a
 /// seeded School's door lies within the walk of `school_trip_ticks`.
+/// Round 5 U1: the weight is any count by door (the school-age children,
+/// or the children turned away full), and a School covers up to its seats,
+/// nearest first (T2's residents: every Home in the walk, uncapped).
 struct HomeGrid {
     radius: u32,
     cells: HomeCells,
@@ -789,22 +810,28 @@ struct HomeGrid {
 
 const HOME_CELL: u32 = 8;
 
-/// A cell of the grid: its Homes (door, residents, covered).
-type HomeCells = BTreeMap<(u32, u32), Vec<(TilePos, u32, bool)>>;
+/// A cell of the grid: its Homes (door, the weight not yet covered).
+type HomeCells = BTreeMap<(u32, u32), Vec<(TilePos, u32)>>;
 
 impl HomeGrid {
     fn new(world: &World) -> Self {
+        let homes = world.buildings_of_kind(BuildingKind::Home).iter().filter_map(|&h| {
+            let bd = world.comp::<Building>(h).filter(|b| !b.demolished)?;
+            Some((bd.door, world.residents_of(h).len() as u32))
+        });
+        Self::of(world, homes)
+    }
+
+    /// U1: the grid of `(door, weight)` (a door may repeat).
+    fn of(world: &World, doors: impl IntoIterator<Item = (TilePos, u32)>) -> Self {
         let step = world.config.exec.move_ticks_full.max(1);
         let radius = (world.config.ages.school_trip_ticks / step).min(u64::from(u32::MAX / 4)) as u32;
         let mut cells: HomeCells = BTreeMap::new();
-        for &h in world.buildings_of_kind(BuildingKind::Home) {
-            let Some(bd) = world.comp::<Building>(h).filter(|b| !b.demolished) else { continue };
-            let n = world.residents_of(h).len() as u32;
+        for (d, n) in doors {
             if n == 0 {
                 continue;
             }
-            let d = bd.door;
-            cells.entry((u32::from(d.x) / HOME_CELL, u32::from(d.y) / HOME_CELL)).or_default().push((d, n, false));
+            cells.entry((u32::from(d.x) / HOME_CELL, u32::from(d.y) / HOME_CELL)).or_default().push((d, n));
         }
         HomeGrid { radius, cells }
     }
@@ -825,22 +852,38 @@ impl HomeGrid {
         let mut sum = 0;
         for cx in x0..=x1 {
             for (_, v) in self.cells.range((cx, y0)..=(cx, y1)) {
-                sum += v.iter().filter(|e| !e.2 && e.0.manhattan(at) <= self.radius).map(|e| e.1).sum::<u32>();
+                sum += v.iter().filter(|e| e.0.manhattan(at) <= self.radius).map(|e| e.1).sum::<u32>();
             }
         }
         sum
     }
 
-    /// Marks the Homes within the walk radius of `at` covered.
-    fn cover(&mut self, at: TilePos) {
+    /// Covers up to `seats` of the weight within the walk radius of `at`,
+    /// nearest door first (ties the cell order); `u32::MAX`: all of it.
+    fn cover(&mut self, at: TilePos, seats: u32) {
         let ([x0, x1], [y0, y1]) = self.span(at);
         let r = self.radius;
+        let mut near: Vec<(u32, (u32, u32), usize)> = Vec::new();
         for cx in x0..=x1 {
-            for (_, v) in self.cells.range_mut((cx, y0)..=(cx, y1)) {
-                for e in v.iter_mut().filter(|e| e.0.manhattan(at) <= r) {
-                    e.2 = true;
+            for (&k, v) in self.cells.range((cx, y0)..=(cx, y1)) {
+                for (i, e) in v.iter().enumerate() {
+                    let d = e.0.manhattan(at);
+                    if d <= r && e.1 > 0 {
+                        near.push((d, k, i));
+                    }
                 }
             }
+        }
+        near.sort_unstable();
+        let mut left = seats;
+        for (_, k, i) in near {
+            if left == 0 {
+                break;
+            }
+            let Some(e) = self.cells.get_mut(&k).and_then(|v| v.get_mut(i)) else { continue };
+            let take = e.1.min(left);
+            e.1 -= take;
+            left -= take;
         }
     }
 }
@@ -863,6 +906,182 @@ fn school_lot(world: &World, homes: &HomeGrid) -> Option<EntityId> {
         })
         .min()
         .map(|(_, _, _, l)| l)
+}
+
+/// Round 5 U1 (OPEN-232): where the next School stands for the weight in
+/// `grid` (children by Home door): of the vacant Lots of `jobs::seed_lots`
+/// (the tier, the interior) and the derelict Blocks of a School's tier
+/// (refitted, as `jobs::seed_derelict`'s are), the one whose door has the
+/// most of it within the walk (up to `seats`, then the most; a Lot before
+/// a Block, then `seed_lot`'s order, the lower id). `None` when no site
+/// reaches any of it. `(site, refit)`.
+fn school_site(world: &World, grid: &HomeGrid, seats: u32) -> Option<(EntityId, bool)> {
+    use std::cmp::Reverse;
+    let lot = crate::systems::jobs::seed_lots(world, BuildingKind::School)
+        .into_iter()
+        .filter_map(|(copies, centroid, l)| {
+            let n = grid.count(world.comp::<Building>(l)?.door);
+            (n > 0).then_some((Reverse(n.min(seats)), Reverse(n), copies, centroid, l))
+        })
+        .min()
+        .map(|t| ((t.0, t.1), t.4));
+    let block = crate::systems::street::derelicts(world)
+        .into_iter()
+        .filter_map(|d| {
+            let bd = world.comp::<Building>(d)?;
+            if bd.kind != BuildingKind::Home
+                || bd.demolished
+                || !crate::systems::founding::tier_ok(BuildingKind::School, bd.tier)
+            {
+                return None;
+            }
+            let n = grid.count(bd.door);
+            (n > 0).then_some((Reverse(n.min(seats)), Reverse(n), d))
+        })
+        .min()
+        .map(|t| ((t.0, t.1), t.2));
+    match (lot, block) {
+        (Some(l), Some(b)) if b.0 < l.0 => Some((b.1, true)),
+        (Some(l), _) => Some((l.1, false)),
+        (None, b) => b.map(|b| (b.1, true)),
+    }
+}
+
+/// U1: a School on `site` on the city's deed, unpaid as the seed's (a
+/// refit's squatters put out, as every refit's); its teacher posts open as
+/// vacancies (`founding::convert`), the hire staffs it.
+fn open_school(world: &mut World, site: EntityId, refit: bool) -> Option<EntityId> {
+    let built = if refit {
+        crate::systems::founding::refit_with(world, site, BuildingKind::School, None, false)
+    } else {
+        crate::systems::founding::build_on_lot(world, site, BuildingKind::School, None)
+    };
+    built.ok()
+}
+
+fn district_name(world: &World, b: EntityId) -> String {
+    let d = world.district_of_building(b);
+    world.districts.get(d.index()).map_or_else(|| "?".to_string(), |x| x.name.clone())
+}
+
+/// U1: the school-age children (`school_from_years` and up, not in a Camp)
+/// by their Home's door.
+fn school_age_doors(world: &World) -> Vec<(TilePos, u32)> {
+    let from = world.config.ages.school_from_years;
+    let mut by: BTreeMap<EntityId, u32> = BTreeMap::new();
+    for k in world.with::<Child>() {
+        if !world.is_alive(k) || years(world, k) < from {
+            continue;
+        }
+        let Some(h) = world.comp::<Household>(k).and_then(|h| h.home) else { continue };
+        if world.comp::<Building>(h).is_some_and(|b| b.kind == BuildingKind::Home && !b.demolished) {
+            *by.entry(h).or_insert(0) += 1;
+        }
+    }
+    by.into_iter().filter_map(|(h, n)| Some((world.comp::<Building>(h)?.door, n))).collect()
+}
+
+/// Round 5 U1 (OPEN-232, Dylan 2026-10-28: Schools by the child count):
+/// `World::new`, after `seed_children`: the Schools topped up to one for
+/// each `school_age_per_school` school-age children (T2's per-copy seed
+/// the floor). The standing Schools cover their rolls of the nearest
+/// children first; each new one stands where the most are left
+/// ([`school_site`]); its teacher posts open as vacancies, filled by the
+/// first night's hire (a job search here hired into every open post of the
+/// seed: the probes' staffing moved). No RNG, no coins. Returns the Schools
+/// built.
+pub fn seed_by_children(world: &mut World) -> u32 {
+    let per = world.config.ages.school_age_per_school;
+    if !on(world) || per == 0 {
+        return 0;
+    }
+    let doors = school_age_doors(world);
+    let target = doors.iter().map(|d| d.1).sum::<u32>().div_ceil(per) as usize;
+    let standing: Vec<EntityId> = world
+        .buildings_of_kind(BuildingKind::School)
+        .iter()
+        .copied()
+        .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished && !bd.derelict))
+        .collect();
+    let mut grid = HomeGrid::of(world, doors);
+    for &b in &standing {
+        let Some(d) = world.comp::<Building>(b).map(|bd| bd.door) else { continue };
+        let cap = roll_cap(world, b);
+        grid.cover(d, if cap > 0 { cap } else { per });
+    }
+    let mut built = 0usize;
+    while standing.len() + built < target {
+        let Some((site, refit)) = school_site(world, &grid, per) else { break };
+        let Some(door) = world.comp::<Building>(site).map(|b| b.door) else { break };
+        let near = grid.count(door);
+        let Some(s) = open_school(world, site, refit) else { break };
+        grid.cover(door, per);
+        let how = if refit {
+            format!("a derelict Block refitted, {}", world.name_of(s))
+        } else {
+            format!("Lot {}", site.index)
+        };
+        let text = format!(
+            "The city opened a School in {} (seeded for the children: {near} school-age without a seat within the walk; {how})",
+            district_name(world, s)
+        );
+        world.push_event(EventKind::Founded, &[s], text);
+        built += 1;
+    }
+    built as u32
+}
+
+/// U1: a school day's children turned away full, by their Home's district:
+/// their Home doors, the Schools in their reach, the count each full School
+/// turned away.
+type FullDay = BTreeMap<u8, (Vec<TilePos>, std::collections::BTreeSet<EntityId>, BTreeMap<EntityId, u32>)>;
+
+/// U1 (OPEN-232, Dylan 2026-10-28: Schools on demand), a school day's
+/// midnight after the pick: a district with `found_full_min` or more of
+/// its children turned away full on `found_full_days` school days running
+/// gets a School on the city's deed where most of them are within the
+/// walk ([`school_site`]), staffed by the hire; not while a School in
+/// their reach still waits for its teachers (a roll of 0).
+fn found_on_demand(world: &mut World, full: FullDay) {
+    let (days, min, per) =
+        (world.config.ages.found_full_days, world.config.ages.found_full_min, world.config.ages.school_age_per_school);
+    let old = std::mem::take(&mut world.jobs2.ages.full_run);
+    if days == 0 {
+        return;
+    }
+    let mut run: BTreeMap<u8, u32> = BTreeMap::new();
+    for (d, (doors, near, by)) in full {
+        let turned = doors.len() as u32;
+        if turned < min.max(1) {
+            continue;
+        }
+        let n = old.get(&d).copied().unwrap_or(0) + 1;
+        if n < days || near.iter().any(|&s| roll_cap(world, s) == 0) {
+            run.insert(d, n);
+            continue;
+        }
+        let grid = HomeGrid::of(world, doors.iter().map(|&p| (p, 1)));
+        let Some((site, refit)) = school_site(world, &grid, per.max(1)) else { continue };
+        let Some(s) = open_school(world, site, refit) else { continue };
+        let full_school = by.iter().max_by_key(|&(&b, &c)| (c, std::cmp::Reverse(b))).map_or(s, |(&b, _)| b);
+        let how = if refit {
+            format!("a derelict Block refitted as {}", world.name_of(s))
+        } else {
+            format!("{} on Lot {}", world.name_of(s), site.index)
+        };
+        let text = format!(
+            "The city opened a School in {} ({how}): {turned} of the district's children turned away full, {n} school days running ({} full); its teachers to hire",
+            world.districts.get(usize::from(d)).map_or("?", |x| x.name.as_str()),
+            world.name_of(full_school)
+        );
+        let mut who = vec![s];
+        if full_school != s {
+            who.push(full_school);
+        }
+        world.push_event(EventKind::Founded, &who, text);
+        ownership::jobs2_row(world).schools_founded += 1;
+    }
+    world.jobs2.ages.full_run = run;
 }
 
 /// The seeded city has no grown children (every resident arrives an adult):

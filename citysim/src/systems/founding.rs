@@ -478,6 +478,8 @@ pub fn refit_with(
                 | BuildingKind::Camp
                 | BuildingKind::Prison
                 | BuildingKind::BlackClinic
+                // Round 5 U1 (OPEN-232): a School the city founds where no Lot reaches the children.
+                | BuildingKind::School
         )
         && !grow_refit_kind(world, kind)
     {

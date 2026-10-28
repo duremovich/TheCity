@@ -2354,3 +2354,71 @@ held and guards on main's binary in `target/u4_shadow_before`):
   papers bribed 19; fixer outcomes told 91 (fulfilled 59, failed 29, expired 3) to 11 fixers; contracts posted 732.
   No test (doctrine 2). `SAVE_VERSION` 91 (`GrayState.licences`, `WalkIn.kind`, `Contract.cut`, the `[gray]` U5 keys,
   the `Jobs2Cols` `licences_forged`, `licences_passed`, `licences_exposed`, `fixer_outcomes`).
+
+### U1, Schools for the children there are (`OPEN-232`; `ages.rs`, `founding::refit_with`, `[ages]` U1 keys)
+
+**Dylan's call (2026-10-28): Schools by the child count and on demand; the 2c fee stays.** Built:
+
+- **The seed by the child count** (`ages::seed_by_children`, `World::new` after `seed_children`): once the children
+  are seeded, the Schools are topped up to one for each `school_age_per_school` (60, a one-floor School's roll of 2
+  teachers x 30) school-age children. T2's `schools` per copy stays the floor, placed as T2 placed it. The standing
+  Schools cover their rolls of the nearest school-age children first (`HomeGrid` now holds a weight by Home door,
+  and a School covers up to its seats, nearest first; T2's residents pass is the uncapped case). Each new School
+  stands on the site whose door has the most children left without a seat within the walk of `school_trip_ticks`
+  (`school_site`: the vacant Lots of `jobs::seed_lots` and the derelict Blocks of a School's tier compete, a Lot
+  first on ties). Its teacher posts open as vacancies (`founding::convert`), filled by the first night's hire, so its
+  children are turned away full on day 0 only (20k: 134 that day). A job search run at the seed's end staffed them
+  on day 0 but hired into every open post of the seed and moved eight probes' staffing (a Reporter post, the
+  Guards, the Supers, a jobless agent); dropped. "The city opened a School in D4 Mid-Levels (seeded for the
+  children: 31 school-age without a seat within the walk; Lot 5103)". 20k: 20 -> 26 Schools (1,533 school-age);
+  100k: 18 -> 114 (96 built: 74 in D4 Mid-Levels, 22 in D3 Neon Quarter, none on a refit; the median opened with 51
+  children without a seat in its walk, the first 179, the last 3).
+- **The founding on demand** (`ages::found_on_demand`, a school day's midnight after the pick, both tiers): the
+  children turned away full are kept by their Home's district. A district with `found_full_min` (30, a teacher's
+  class) or more of them on `found_full_days` (5) school days running (`AgesState.full_run`; a day under the line
+  resets it) gets a School on the city's deed, by the same site rule over the turned-away children's doors (a Lot,
+  else a refit Block: `founding::refit_with` now takes a School), its posts filled by the day's hire. Not while a
+  School in their reach has a roll of 0 (its teachers not yet hired), so one founding is not followed by the next
+  before it opens. The fee and the reach rule are T2's, unchanged. Nothing touches a victim pick, a fight, a
+  punishment or the fares (the under-18 rule is not reached; a refit's squatters are put out as every refit's).
+- **Deviation: unpaid, on the city's deed.** The spec does not say who pays; the seed's Schools are the city's deed,
+  unpaid, and a founding draws no coin either (no Treasury gate; no coin made or lost).
+- **Deviation: the founding does not fire in the shipped city.** With the seed by the count, the turned-away-full
+  line reaches 30 in a district only on day 0, before the hire (20k: 3-27 a day after; 100k: 14-33 a day across the
+  city after), and a day under the line resets the run. It is proven on a
+  demo root (`target/u1_demo/assets/config.toml`: `school_age_per_school = 0`, `found_full_min = 5`, 20k seed 42 x
+  30): day 4, "The city opened a School in D4 Mid-Levels (School#4893 on Lot 4893): 24 of the district's children
+  turned away full, 5 school days running (School#4938 full); its teachers to hire"; turned away full 26 -> 0 from
+  day 7; at d21 "Tank Park taught 17 pupils at School#4893" (`teacher_22930`), 17-19 a day all week.
+- **Deviation: the Sump and the Vats stay far.** A School stands off the Sump (phase 7's tier rule). At 20k the count
+  (26) is met while 16,860 school-day child-days are still past an hour's walk: no Mid Lot or Mid derelict Block
+  lies within the walk of the Sump's and the Vats' Homes. Left as the city (no knob).
+- **Numbers** (seed 42, `--scaled --ambient-flats 50`, before = main `8cf7fe1`, one run each). 20k x 30: school days
+  / child-days 7.6 % -> 10.5 % (school days 6,184 -> 8,605; of the school-age school-day child-days 18.2 % -> 25.4
+  %); turned away full 579 -> 457 (134 of them on day 0, then 3-27 a day), far 19,620 -> 16,730, unpaid 7,667 ->
+  8,119, by the El 147 -> 119; Schools 20 -> 26, none founded. Side numbers (the Lots built on moved the city, not
+  chased): violence deaths 94 -> 103, homeless max 683 -> 775, employed mean 11,230 -> 11,330, starvation 0 -> 0,
+  harm_blocked 0 -> 0. 100k x
+  8: 7.2 % -> 24.2 % (school days 6,471 -> 21,680; of the due 15.8 % -> 53.0 %); turned away full 10,200 -> 4,132
+  (4,019 of them on day 0, the top-up's 96 Schools waiting for the first night's hire; then 14-33 a day), far 22,420
+  -> 10,210, unpaid 1,833 -> 4,889; Schools 18 -> 114, none founded; daily school days 1,080 on d0 (T2's 18 Schools
+  alone), 5,038 on d1 -> 3,063 on d7 (before 1,080 flat: the roll bound; now the purse falls through week 1, as at
+  20k in T2); violence deaths 53 -> 56, homeless max 10,760 -> 10,740, employed mean 35,250 -> 35,450, harm_blocked 0
+  -> 0. A seed-end job search (dropped, above) had d0 at 5,066 and the run at 28.3 %.
+- **Reads wrong / open** (the next pass's input): the fee is now the binder at both sizes, and it flickers: a child
+  is at School one day and home the next, even a teacher's own child at her own School, 3 min away (`teacher_7582`
+  at School#5171: "Sprocket Stroud (6 y) at home (play: the 2c fee at School#5171 (D4 Mid-Levels) is beyond the
+  purse)" d21-d22, "at School#5171 (D4 Mid-Levels) (3 min walk)" d23-d25). The family on the service's warning since
+  d24 still pays the fee on d24-d25 (T2's note: the children's food is not reserved first). Classes at the top-up Schools are small (`teacher_12033` Jocasta
+  Sato at School#5269: 2-5 pupils a day), so most of a top-up School's roll sits empty on the fee, not on the seats.
+  A T2 School the top-up drew its children from stands idle: "No pupil on the roll at School#5176 today: no class
+  for Zed Moreau, Cato Carrow" every school day of the shadow (12 days of 22 at 20k, 1 before); nothing closes a
+  School nobody attends or moves its teachers. The teacher's "met X at the door (the parent of Y, a pupil)" memory
+  repeats every school day with the same parent (`teacher_22930`, five days of Ysolde Hawthorne): noise for the next
+  noise pass. The far children in the Sump and the Vats (above).
+- Re-pinned on the premise, the reason in place: `ages`' `test_vendors_child_chores_then_school` takes a School with a
+  teacher on its roll (the first School by id is now a top-up one waiting for the hire). `care`'s sick cover writes
+  its `Served` memory only with the service section on (`service`'s `test_off_city_writes_nothing`: the seed moved a
+  cover onto day 1 of the off city, a leak that was there before U1).
+- No test (doctrine 2). `SAVE_VERSION` 92 (91 was U5's) (`AgesState.full_run`, the `[ages]` U1 keys, the `Jobs2Cols`
+  `schools_founded` column); `analyze_run.py` prints the Schools at day 0 and the last day, and the founded count.

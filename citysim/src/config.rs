@@ -3017,6 +3017,20 @@ pub struct AgesCfg {
     /// residents not yet within the walk of `school_trip_ticks` of one
     /// (`false`: S6's district centroid, the probes pinned to that layout).
     pub school_by_reach: bool,
+    /// Round 5 U1 (OPEN-232, Dylan 2026-10-28: Schools by the child count
+    /// and on demand): once the children are seeded, the Schools are topped
+    /// up to one for each `school_age_per_school` school-age children (the
+    /// `schools` per copy the floor), each on the Lot (else a derelict
+    /// Block) whose door has the most of them not yet given a seat within
+    /// the walk of `school_trip_ticks` (0: no top-up, T2's per-copy seed).
+    pub school_age_per_school: u32,
+    /// U1: a district with `found_full_min` or more of its children turned
+    /// away full on each of `found_full_days` school days running gets a
+    /// School founded on the city's deed, by the same reach rule over the
+    /// children turned away, staffed by the hire (0: none founded); not
+    /// while a School in their reach still waits for its teachers.
+    pub found_full_days: u32,
+    pub found_full_min: u32,
     pub school_fee: i64,
     pub edu_gain: f32,
     /// A Street child begs `child_beg_coins` a day from a resident of its
@@ -3078,6 +3092,9 @@ impl Default for AgesCfg {
             school_el_fares: 2,
             school_places_per_teacher: 30,
             school_by_reach: true,
+            school_age_per_school: 60,
+            found_full_days: 5,
+            found_full_min: 30,
             school_fee: 2,
             edu_gain: 0.003,
             child_beg_coins: 1,

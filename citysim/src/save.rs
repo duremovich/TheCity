@@ -426,7 +426,10 @@ use crate::world::World;
 /// `WalkIn.kind` (`WalkKind`, written when not papers), `Contract.cut` (written while
 /// set), the `[gray]` licence keys and the `Jobs2Cols` `licences_forged`,
 /// `licences_passed`, `licences_exposed`, `fixer_outcomes` columns (serde defaults).
-pub const SAVE_VERSION: u8 = 91;
+/// 92 (pressure pass round 5, U1, Schools for the children there are): `AgesState.full_run` (written while
+/// set), `[ages] school_age_per_school`, `found_full_days`, `found_full_min` and the `Jobs2Cols`
+/// `schools_founded` column (serde defaults).
+pub const SAVE_VERSION: u8 = 92;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

@@ -48,7 +48,14 @@ fn to_weekday(w: &mut World) {
 #[test]
 fn test_vendors_child_chores_then_school() {
     let mut w = on_world();
-    let school = *w.buildings_of_kind(BuildingKind::School).first().expect("a School is seeded");
+    // Round 5 U1 (OPEN-232): a School with a teacher on its roll (the
+    // seed's top-up Schools wait for the first night's hire; the probe
+    // calls `ages::daily` before any).
+    let school = *w
+        .buildings_of_kind(BuildingKind::School)
+        .iter()
+        .find(|&&s| ages::roll_cap(&w, s) > 0)
+        .expect("a staffed School is seeded");
     let door = w.comp::<citysim::Building>(school).map(|b| b.door).expect("door");
     let home = w
         .buildings_of_kind(BuildingKind::Home)
