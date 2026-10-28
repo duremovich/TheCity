@@ -357,6 +357,13 @@ fn in_reach(world: &World, parent: Option<EntityId>, from: TilePos, to: TilePos)
 fn house(world: &mut World, child: EntityId, camp: EntityId) {
     let day = world.day();
     world.set_home(child, Some(camp));
+    // Round 5 U2 (`camp_parent_23527 d25 09:30`): the Camp's routine from the
+    // take (the day's was picked at midnight before it).
+    if let Some(c) = world.comp_mut::<Child>(child) {
+        c.routine = crate::components::Routine::Camp;
+        c.school = None;
+        c.school_miss = None;
+    }
     world.remove_from_building(child);
     let tick = world.tick;
     let d = door(world, camp).unwrap_or_default();
@@ -400,7 +407,7 @@ fn unhouse(world: &mut World, child: EntityId, camp: EntityId) -> (u32, u32) {
 /// E38 (`demography::run`, after `children`): every `Child` in a Block
 /// with `hunger_days ≥ take_days` is on the ladder, ascending id (round 4
 /// T1, OPEN-231: the first neglect a warning at the door, a repeat inside
-/// `warn_window_days` past `warn_grace_days` the take); before it the
+/// `warn_repeat_days` past `warn_grace_days` the take); before it the
 /// Camp children whose parent's pantry has held are let home.
 pub fn take_daily(world: &mut World) {
     let cfg = world.config.camp.clone();
@@ -409,7 +416,36 @@ pub fn take_daily(world: &mut World) {
         prune(world, c);
     }
     let_home_daily(world);
+    follow_parents(world);
     let day = u32::try_from(world.day()).unwrap_or(u32::MAX);
+    let window = u32::from(cfg.warn_repeat_days);
+    // Round 5 U2 (OPEN-231, Dylan 2026-10-28): a warning with no free parent
+    // at home takes at once: a child on an open warning whose every parent
+    // is jailed, held, downed or gone (fed or not tonight).
+    if window > 0 {
+        let mut open: Vec<(EntityId, EntityId)> = world
+            .with::<Child>()
+            .into_iter()
+            .filter(|&c| {
+                world.comp::<Child>(c).is_some_and(|k| {
+                    k.hunger_days < take_days && k.warned_day.is_some_and(|w| day.saturating_sub(w) <= window)
+                })
+            })
+            .filter_map(|c| {
+                let h = world.comp::<Household>(c).and_then(|h| h.home)?;
+                world.comp::<Building>(h).is_some_and(|b| b.kind == BuildingKind::Home).then_some((c, h))
+            })
+            .collect();
+        open.sort_unstable();
+        for (c, h) in open {
+            if free_parents_at(world, c, h).is_empty() {
+                let why = no_parent_why(world, c, h);
+                if take_why(world, c, &format!("on the service's warning and {why}")).is_some() {
+                    ownership::jobs2_row(world).camp_take_no_parent += 1;
+                }
+            }
+        }
+    }
     let mut due: Vec<EntityId> = world
         .with::<Child>()
         .into_iter()
@@ -431,12 +467,26 @@ pub fn take_daily(world: &mut World) {
             (None, _) => {
                 take(world, c);
             }
-            _ if cfg.warn_window_days == 0 => {
+            _ if window == 0 => {
                 take(world, c);
             }
-            (Some(_), Some(w)) if day.saturating_sub(w) <= u32::from(cfg.warn_window_days) => {
+            // Round 5 U2: a neglect with no free parent at home takes at
+            // once (no door to warn: nobody free behind it).
+            (Some(h), _) if free_parents_at(world, c, h).is_empty() => {
+                let why = no_parent_why(world, c, h);
+                let unfed = world.comp::<Child>(c).map_or(0, |k| k.hunger_days);
+                if take_why(world, c, &format!("{unfed} days unfed and {why}")).is_some() {
+                    ownership::jobs2_row(world).camp_take_no_parent += 1;
+                }
+            }
+            // A second neglect inside `warn_repeat_days` of the warning takes
+            // (past the grace).
+            (Some(_), Some(w)) if day.saturating_sub(w) <= window => {
                 if day.saturating_sub(w) >= u32::from(cfg.warn_grace_days) {
-                    take(world, c);
+                    let unfed = world.comp::<Child>(c).map_or(0, |k| k.hunger_days);
+                    if take_why(world, c, &format!("unfed {unfed} days again, inside the warning of d{w}")).is_some() {
+                        ownership::jobs2_row(world).camp_take_repeat += 1;
+                    }
                 }
             }
             (Some(h), _) => warns.entry(h).or_default().push(c),
@@ -444,6 +494,101 @@ pub fn take_daily(world: &mut World) {
     }
     for (h, kids) in warns {
         warn(world, h, &kids, day);
+    }
+}
+
+/// Round 5 U2 (OPEN-231): `p` is a free parent: alive, adult, not
+/// sentenced, not in cuffs (held, or carried), not downed or laid up
+/// (`World::wounded`), not leaving the city.
+pub fn free_parent(world: &World, p: EntityId) -> bool {
+    crate::systems::law::living(world, p)
+        && crate::systems::demography::is_adult(world, p)
+        && !world.has::<crate::components::Sentence>(p)
+        && !world.wounded.contains_key(&p)
+        && world.comp::<crate::components::Brain>(p).is_some_and(|b| b.cuffed_by.is_none() && !b.emigrating)
+}
+
+/// Round 5 U2: the free parents of `child` living at `home`, ascending.
+pub fn free_parents_at(world: &World, child: EntityId, home: EntityId) -> Vec<EntityId> {
+    parents_of(world, child)
+        .into_iter()
+        .filter(|&p| free_parent(world, p) && world.comp::<Household>(p).and_then(|h| h.home) == Some(home))
+        .collect()
+}
+
+/// Round 5 U2: why no parent of `child` is free at `home` (the take's
+/// line): each parent and where he is, or "no parent living".
+fn no_parent_why(world: &World, child: EntityId, home: EntityId) -> String {
+    let ps = parents_of(world, child);
+    if ps.is_empty() {
+        return "no parent living".to_string();
+    }
+    let bits: Vec<String> = ps
+        .iter()
+        .map(|&p| {
+            let n = world.name_of(p);
+            if world.has::<crate::components::Sentence>(p) {
+                format!("{n} in the cells")
+            } else if world.wounded.contains_key(&p) {
+                format!("{n} laid up")
+            } else if world.comp::<crate::components::Brain>(p).is_some_and(|b| b.cuffed_by.is_some()) {
+                format!("{n} held")
+            } else if !crate::systems::demography::is_adult(world, p) {
+                format!("{n} a child")
+            } else if world.comp::<Household>(p).and_then(|h| h.home) != Some(home) {
+                format!("{n} not living there")
+            } else {
+                format!("{n} leaving the city")
+            }
+        })
+        .collect();
+    format!("no free parent at home ({})", bits.join(", "))
+}
+
+/// Round 5 U2 (OPEN-231, `reporter_57837`: a child unfed at a Block his
+/// mother had left, her pantry full at hers): midnight, before the ladder,
+/// a child living (not in a Camp, not on the street) where no free parent
+/// of his lives goes to live with his first free parent who has a standing
+/// Home (`send_home`: a dependant, never counted against the flat). A
+/// marriage, a swap or a move that took a parent and left the child is
+/// mended here; a parent in the cells keeps the Home, so the child goes to
+/// the other one if he is free elsewhere.
+fn follow_parents(world: &mut World) {
+    let mut moves: Vec<(EntityId, EntityId, EntityId)> = Vec::new();
+    for c in world.with::<Child>() {
+        let Some(h) = world.comp::<Household>(c).and_then(|x| x.home) else { continue };
+        if !world.comp::<Building>(h).is_some_and(|b| b.kind == BuildingKind::Home) {
+            continue;
+        }
+        if !world.is_alive(c) || world.has::<crate::components::Corpse>(c) || !free_parents_at(world, c, h).is_empty() {
+            continue;
+        }
+        let to = parents_of(world, c).into_iter().find(|&p| {
+            free_parent(world, p)
+                && world.comp::<Household>(p).and_then(|x| x.home).filter(|&ph| ph != h).is_some_and(|ph| {
+                    world
+                        .comp::<Building>(ph)
+                        .is_some_and(|b| b.kind == BuildingKind::Home && !b.demolished && !b.derelict)
+                })
+        });
+        if let Some(p) = to {
+            moves.push((c, p, h));
+        }
+    }
+    moves.sort_unstable();
+    for (c, p, from) in moves {
+        let why = no_parent_why(world, c, from);
+        let Some(to) = send_home(world, c, p) else { continue };
+        let yrs = world.comp::<Identity>(c).map_or(0, |i| i.age_years());
+        let text = format!(
+            "{} ({yrs} y) went to live with {} at {}: {why} at {}",
+            world.name_of(c),
+            world.name_of(p),
+            world.name_of(to),
+            world.name_of(from)
+        );
+        world.push_event(EventKind::Housed, &[p, c, to], text);
+        ownership::jobs2_row(world).camp_followed += 1;
     }
 }
 
@@ -464,7 +609,9 @@ fn warn(world: &mut World, home: EntityId, kids: &[EntityId], day: u32) {
             c.warned_day = Some(day);
             c.hunger_days = 0;
         }
-        parents.extend(parents_of(world, k));
+        // Round 5 U2 (`reporter_57837 d27`): the parents living at this door
+        // hear it (a parent elsewhere was named at a Block not his).
+        parents.extend(free_parents_at(world, k, home));
     }
     parents.sort_unstable();
     parents.dedup();
@@ -479,7 +626,7 @@ fn warn(world: &mut World, home: EntityId, kids: &[EntityId], day: u32) {
     } else {
         format!("{} heard it", who.join(" and "))
     };
-    let until = day + u32::from(cfg.warn_window_days);
+    let until = day + u32::from(cfg.warn_repeat_days);
     let mut text = format!(
         "the child protective service came to the door of {}: {} went {unfed} days unfed; {heard}: {} days' grace, and unfed again before d{until} the service takes them",
         world.name_of(home),
@@ -579,11 +726,11 @@ fn warn_ask(
 }
 
 /// Round 4 T1 (OPEN-231): a child living in `home` is on the service's
-/// warning (inside `warn_window_days` of it): the household's grocery run
+/// warning (inside `warn_repeat_days` of it): the household's grocery run
 /// fills the children's food from the pantry alone (`routine::grocery_plan`,
 /// `lod::stat_grocery`: food carried for a shift feeds no child).
 pub fn home_on_warning(world: &World, home: EntityId) -> bool {
-    let window = u32::from(world.config.camp.warn_window_days);
+    let window = u32::from(world.config.camp.warn_repeat_days);
     if window == 0 {
         return false;
     }
@@ -692,7 +839,7 @@ fn let_home_daily(world: &mut World) {
             format!(
                 "the service let {} go home from {what} to {pn} at {to}: the pantry has held their food {n} nights running (home on a warning: unfed again before d{} and they go back)",
                 names.join(", "),
-                day + u32::from(cfg.warn_window_days)
+                day + u32::from(cfg.warn_repeat_days)
             ),
         );
         ownership::jobs2_row(world).camp_let_home += ks.len() as u32;
@@ -704,6 +851,11 @@ fn let_home_daily(world: &mut World) {
 /// `ChildTaken` for the child and each living parent (a Grief-class
 /// `ChildTaken` memory, no deed; a grudge on the Law), a Feed bulletin.
 pub fn take(world: &mut World, child: EntityId) -> Option<EntityId> {
+    take_why(world, child, "")
+}
+
+/// Round 5 U2: the take with its reason on the line (empty: none).
+pub fn take_why(world: &mut World, child: EntityId, why: &str) -> Option<EntityId> {
     if !world.has::<Child>(child) {
         return None;
     }
@@ -719,6 +871,10 @@ pub fn take(world: &mut World, child: EntityId) -> Option<EntityId> {
         }
     }
     house(world, child, camp);
+    // Round 5 U2: the warning is spent by the take (a let-home sets a new one).
+    if let Some(c) = world.comp_mut::<Child>(child) {
+        c.warned_day = None;
+    }
     note_move(world, camp, child, CampMove::Taken);
     let (name, what) = (world.name_of(child), world.name_of(camp));
     let from_home = home.map_or_else(|| "the street".to_string(), |h| world.name_of(h));
@@ -727,7 +883,11 @@ pub fn take(world: &mut World, child: EntityId) -> Option<EntityId> {
     world.push_event(
         EventKind::ChildTaken,
         &actors,
-        format!("the child protective service took {name} from {from_home} to {what}"),
+        if why.is_empty() {
+            format!("the child protective service took {name} from {from_home} to {what}")
+        } else {
+            format!("the child protective service took {name} from {from_home} to {what}: {why}")
+        },
     );
     world.stats.current.econ.children_taken += 1;
     let law = world.building_of_kind(BuildingKind::Jail).filter(|&j| world.has::<crate::components::Law>(j));
@@ -935,6 +1095,12 @@ pub fn send_home(world: &mut World, child: EntityId, parent: EntityId) -> Option
         p.tile = d;
         p.building = Some(h);
         p.entered = tick;
+    }
+    // Round 5 U2: at home from tonight (the midnight pick sets tomorrow's).
+    if let Some(c) = world.comp_mut::<Child>(child) {
+        if c.routine == crate::components::Routine::Camp {
+            c.routine = crate::components::Routine::Play;
+        }
     }
     Some(h)
 }

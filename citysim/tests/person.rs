@@ -2750,10 +2750,10 @@ fn probe_parent_with_the_fee_buys_the_child_out_within_fourteen_days() {
     let mut run: Option<(World, EntityId, EntityId, EntityId, Option<u64>)> = None;
     for skip in 0..4 {
         let mut w = base.clone();
-        // Round 4 T5: no job search (the subject is the buy-out; a jobless
-        // parent held at 80 coins searched the boards through the days of
-        // the week's Camp answer).
-        w.config.search = None;
+        // Round 4 T5 had the job search off here (a jobless parent held at
+        // 80 coins searched the boards through the days of the week's Camp
+        // answer). Round 5 U2: on again, the premise restored: the week's
+        // answer due outranks a search day (`household::camp_visit_due`).
         let (p, child, h, camp) = taken_child_nth(&mut w, skip);
         let mut bought = None;
         tried += 1;

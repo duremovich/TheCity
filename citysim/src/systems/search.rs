@@ -390,6 +390,10 @@ fn names(world: &World, ids: &[EntityId], cap: usize) -> String {
 /// to ask at today.
 pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>, f32)> {
     let c = cfg(world)?;
+    // Round 5 U2 (OPEN-231): the week's Camp answer due outranks a search day.
+    if crate::systems::household::camp_visit_due(world, id) {
+        return None;
+    }
     board(world, id)?;
     let n = world.comp::<crate::components::Needs>(id)?;
     // The first days most eager (the search's want fades over `search_days`).
