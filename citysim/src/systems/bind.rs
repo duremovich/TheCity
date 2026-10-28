@@ -331,7 +331,10 @@ fn bind_in(world: &mut World, id: HoleId, pools: &mut DayPools) -> Option<Bound>
         let silence = world.config.hunt.street_silence;
         let pool: Vec<EntityId> = pools.with_day(world, day, |pool| {
             pool.iter()
-                .filter(|&&(w, t)| w != actor && w != hole.victim && t.has(trace_flags::ALIVE))
+                // Round 5 U4 (`OPEN-236`): one held in the cells saw no street (as the actor pool, `JAILED`).
+                .filter(|&&(w, t)| {
+                    w != actor && w != hole.victim && t.has(trace_flags::ALIVE) && !t.has(trace_flags::JAILED)
+                })
                 .filter(|&&(_, t)| if by_district { t.district == hole.district } else { t.zone == hole.zone })
                 .map(|&(w, _)| w)
                 .filter(|&w| crate::systems::law::living(world, w) && crate::systems::demography::is_adult(world, w))

@@ -5691,11 +5691,28 @@ pub struct CrimeCfg {
     /// in a minute, 641k `Witness` lines in 30 days). 0: no cap.
     #[serde(default = "CrimeCfg::default_witness_cap")]
     pub witness_cap: u32,
+    /// Round 5 U4 (`OPEN-236`): the building kinds with no walls to see
+    /// through (a market's stalls, a yard, an empty lot): a body in one sees
+    /// the street and the street sees in, as on its door tile. Every other
+    /// building's walls hold: who is inside sees inside, who is outside sees
+    /// the street (`law::sees_scene`).
+    #[serde(default = "CrimeCfg::default_open_air")]
+    pub open_air: Vec<BuildingKind>,
 }
 
 impl CrimeCfg {
     fn default_answer_radius() -> u32 {
         96
+    }
+
+    fn default_open_air() -> Vec<BuildingKind> {
+        vec![
+            BuildingKind::Market,
+            BuildingKind::Cemetery,
+            BuildingKind::Lot,
+            BuildingKind::FreightYard,
+            BuildingKind::ConstructionYard,
+        ]
     }
 
     fn default_witness_cap() -> u32 {

@@ -398,14 +398,16 @@ pub fn on_death(world: &mut World, id: EntityId) -> crate::components::Loot {
     let sight = world.config.crime.sight;
     // Scale S1: the position index's neighbourhood (and the building), not
     // every citizen; the same citizens, ascending.
+    // Round 5 U4 (`OPEN-236`): never through a wall (`law::sees_scene`).
+    let out = crate::systems::law::outdoors(world, tile, building);
     let witnesses: Vec<EntityId> = world
         .agents_near(tile, sight, building)
         .into_iter()
         .filter(|&o| o != id && world.has::<Brain>(o) && world.has::<Identity>(o) && !world.has::<Corpse>(o))
         .filter(|&o| {
-            world.comp::<Position>(o).is_some_and(|p| {
-                (building.is_some() && p.building == building) || crate::systems::law::chebyshev(p.tile, tile) <= sight
-            })
+            world
+                .comp::<Position>(o)
+                .is_some_and(|p| crate::systems::law::sees_scene(world, p, tile, building, out, sight))
         })
         .collect();
     for w in witnesses {

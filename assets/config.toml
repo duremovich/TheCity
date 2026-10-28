@@ -178,6 +178,10 @@ witness_base = 0.6
 witness_stealth_factor = 0.5
 witness_guard_bonus = 0.3
 witness_cap = 4                     # pressure pass F2: a crime's noting witnesses at most (guards on shift first, always; 0 none)
+# Round 5 U4 (OPEN-236): who is indoors sees indoors. A body inside a building witnesses (a crime, a corpse,
+# a wanted face) only what happens in that building; a body outside, on a door tile or in one of these
+# wall-less kinds sees the street within sight, never through a wall. The cells did not see the El gate.
+open_air = ["Market", "Cemetery", "Lot", "FreightYard", "ConstructionYard"]
 sight = 6
 sight_day_crime = 8
 sight_night_crime = 4

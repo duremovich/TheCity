@@ -2201,3 +2201,65 @@ Folding is the diary's (the shadow tool): the events and counters underneath are
   School by the trip. No test (doctrine 2). `SAVE_VERSION` 88 (`Child.{school, school_miss}`,
   `AgesState.{rolls, roll_day}`, the `[ages]` T2 keys, the `Jobs2Cols` `school_far`, `school_full`, `school_unpaid`,
   `school_el`).
+
+### U4, who is indoors sees indoors (`OPEN-236`; `law::outdoors`, `law::sees_scene`, `[crime] open_air`)
+
+**Built.** One predicate, `law::sees_scene(p, tile, building, scene_out, reach)`: a body sees a scene when both are
+in the same building, or both are `law::outdoors` within `reach` Chebyshev tiles; never through a wall. `outdoors` is
+no building, a building's door tile (the threshold sees both ways), or a wall-less kind (`[crime] open_air`: Market,
+Cemetery, Lot, FreightYard, ConstructionYard). It gates, and only these (U7 takes the witness and memory paths next):
+
+- **A crime's witnesses** (`law::raise_crime_mult`): an indoor scene is read from the position index's building list
+  (`agents_near(tile, 0, building)`, the bodies only), not every body, so it is cheaper than before; a street scene
+  is the old body scan with the walls added after the distance check. `witness_cap`, the law's eye first, Eyes'
+  `Kit.sight` and the jacked-in skip are as F2 left them.
+- **The guards' sightings of the wanted** (`law::sightings_with` and its `#[cfg(test)]` twin `sightings_scan`, kept
+  identical): `GuardSight.outside` is read once per guard; the desk inside the Precinct no longer locates a suspect
+  walking past on the street, and a guard on the street no longer sees into a flat.
+- **SawCorpse at a death** (`demography::on_death`).
+- **The off-screen witness** (`bind::bind_in`): the pool skips a body held in the cells that day (`JAILED`, as the
+  actor pool already did). The off-screen pool is by district and day, with no tile or building to gate on; the
+  meeting draw (`lod::stranger_in_zone`) already skips the held and is no witness roll, so it is unchanged.
+
+**Deviation: what is not gated.** Interaction distances (`law::near`: a loot, a punch, a hand-off), the actor's read of
+the law (`guard_within`, `needs::guard_near_fn`: a thief still minds a guard behind a window), the gang's squat-blow
+sight (`gang::contested`), a raid's or riot's answerers and the reporter's interview (`news::interview`, who is near
+the door, not who saw) keep tile distance. One building is one room: a crime on a tower's floor is seen from all of
+it, as before (`Position` has no floor).
+
+**Numbers** (20k island seed 42 x 30, `--scaled --ambient-flats 50`, before = main `8cf7fe1`, one run each): Witness
+19,528 -> 12,126 (Fare Evasion 5,844 -> 4,130, Assault 7,023 -> 4,564, Grand Theft 2,963 -> 1,445, Shakedown 2,559
+-> 1,382, Theft 702 -> 353), WitnessReacted 4,472 -> 2,633, Report 1,864 -> 1,472, Arrest 1,437 -> 1,054 (arrests a
+day 46.7 -> 34.2), jailed mean 174.9 -> 124.2 (max 371 -> 254), thefts 1,094 -> 1,176, assaults+murders a day 53.1
+-> 50.4, suspect sightings 7,106 -> 8,306 (more wanted walk free longer), the consequence pass's reports 3,700 ->
+2,068. ticks/s mean 138 -> 132 under three wave-mates' builds (a print). The lower arrest count is the city's law
+seeing less, not a knob: no band moved.
+
+**Shadow** (`shadow --population 20000 --map assets/maps/isle_m_k2.txt --seed 42 --start-day 21 --days 7`, picks
+`guard:2,gang_member:2,reporter:1` in `target/u4_shadow`, the held by `--agent` in `target/u4_shadow_jailed`, the same
+held and guards on main's binary in `target/u4_shadow_before`):
+
+- Before, from the cells: "Ysolde Yates saw Wren Ostrowski commit Fare Evasion" (d22 11:14, at Precinct#4460), and the
+  desk guard "Elowen Underhill saw Quill Whitlock commit Fare Evasion" (d24 11:32, inside the Precinct). After: no
+  Fare Evasion is witnessed from inside any building in 13 diaries.
+- The held see the cells: Solene Lindqvist, in the Precinct from before d21 to her release at d27 22:52, has one
+  Witness line all week, "saw Axel Kimura commit Assault" (d23 06:18, Precinct#4460); Imogen Ashcombe "saw Juniper
+  Bellamy commit Assault" (d23 18:23) and "Anselm Mbeki" (d26 19:15), both in the Precinct.
+- The jail guard sees the indoor crime: `guard_24275` at `GuardJail` in Precinct#4460 "saw Rosalind Yardley commit
+  Assault" (d26 16:30); `guard_7793` the same at d23 16:00 (Tristan Achebe). Two Witness lines a week each (V13's
+  `guard_27360` had 41).
+- The street still reports: `guard_7793` on patrol in the Neon Quarter "saw Juniper Sallow commit Grand Theft" (d27
+  09:38, on the street) and "arrested Juniper Sallow for Grand Theft" at 10:06; `guard_24275` on a street break "saw
+  Vivienne Ostrowski commit Fare Evasion" (d27 14:27). A crew's shakedown inside Block#746 is seen by its partner in
+  the building (`gang_member_10186` d22 03:59 / 04:07). The reporter's interviews are unchanged (9 lines).
+- **Reads wrong / open** (the next pass's input): `guard_24275` picks Arrest from his own Home (Block#2831, d22 09:05,
+  "warrant located") and it dies `Unreachable` at 09:07: a located warrant, not his sighting (the arrest's reach, not
+  U4's). A crew's two members each witness the other's shakedown inside the same Home ("Ghost Ironside saw Cato Varley
+  commit Shakedown" then the reverse, 8 min apart): accomplices are witnesses (U7's contradictions). With fewer
+  arrests the cells hold ~50 fewer; the pressure that cost is the law's, to come back as features if the city reads
+  soft (doctrine 5).
+- No test (doctrine 2). Re-pinned on its premise, the reason in place: `tests/bind.rs`
+  `test_bound_actor_with_witness_is_reported_and_arrested` kept the others out of the candidates by marking them
+  jailed for the day, which now also empties the witness pool; they are marked Full that day instead (never bound,
+  still witnesses). `SAVE_VERSION` unchanged: no component or save field moved; `[crime] open_air` has a serde
+  default.
