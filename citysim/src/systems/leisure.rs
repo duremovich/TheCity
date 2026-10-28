@@ -322,7 +322,14 @@ pub fn door_seen(world: &World, id: EntityId, b: EntityId) -> bool {
         .comp::<Brain>(id)
         .and_then(|br| br.refused)
         .is_some_and(|(r, t)| r == b && world.tick.saturating_sub(t) < world.config.exec.refused_ticks.max(1));
-    !turned && !crate::systems::industry::closed_site(world, b) && !crate::systems::industry::dark_at(world, b)
+    // Round 4 T7 (OPEN-233): a face the house barred (a rough night, or a
+    // return to a door that turned him away) knows it and goes elsewhere;
+    // the barred came back to be turned away "barred" every night.
+    let barred = crate::systems::vice::barred(world, id, b);
+    !turned
+        && !barred
+        && !crate::systems::industry::closed_site(world, b)
+        && !crate::systems::industry::dark_at(world, b)
 }
 
 /// The venue's price today (`Venue.price`; a Bar's drink is 2).

@@ -231,7 +231,8 @@ pub fn rough_at_door(world: &mut World, worker: EntityId, client: EntityId, b: E
 /// brawler) swings at `bouncer` on `door_swing_p × (1 − lawfulness)`: a
 /// fight (`law::resolve_fight_mods`), an Assault raised, the event. Either
 /// way the refused holds a grudge on the bouncer. Returns the scene's line.
-pub fn scene(world: &mut World, id: EntityId, bouncer: EntityId, b: EntityId, why: &str) -> Option<String> {
+/// Round 4 T7: `mult` scales the swing (a return, `[verbs] door_return_swing_mult`).
+pub fn scene(world: &mut World, id: EntityId, bouncer: EntityId, b: EntityId, why: &str, mult: f32) -> Option<String> {
     let c = cfg(world)?.clone();
     // Round 4 T4: the under-age turned away is no scene and no grudge.
     if why == "under age" {
@@ -254,7 +255,7 @@ pub fn scene(world: &mut World, id: EntityId, bouncer: EntityId, b: EntityId, wh
         return None;
     }
     let lawful = world.comp::<Personality>(id).map_or(0.5, |p| p.lawfulness);
-    let p = c.door_swing_p * (1.0 - lawful).max(0.0);
+    let p = (c.door_swing_p * mult * (1.0 - lawful).max(0.0)).min(1.0);
     if hash(world, PURPOSE_SWING, id, world.tick) >= p {
         return None;
     }

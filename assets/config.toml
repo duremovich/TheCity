@@ -5235,3 +5235,11 @@ shape_up_gate = true               # a Yard's foreman with a body walks to its g
                                    # has its own line
 shape_up_lead_min = 20             # ... he is at the gate this many minutes before [jobs2] corner_hour (sets out, or wakes
                                    # from a committed sleep, by the travel from where he is)
+# Round 4 T7 (docs/PRESSURE_PASS.md § T7, OPEN-233): the door's loop. Placeholders.
+door_return_ticks = 2880           # a face turned away at a door and back at it inside this many ticks (two days: last
+                                   # night's face counts) is a return: T4's 100k door turned one armed man away nine times
+                                   # in four nights, [exec] refused_ticks (one door a face) all that held him off; 0 off
+door_return_ban_days = 2           # ... a return is barred from the house this many days, today counted (the patron's
+                                   # pick passes a house that bars him over; the barred came back nightly to be refused)
+door_return_swing_mult = 2.0       # ... and the scene a return makes (drunk, high, a brawler, carrying) swings on
+                                   # [customers] door_swing_p times this

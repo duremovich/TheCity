@@ -765,6 +765,51 @@ impl EventKind {
     ];
 }
 
+/// Round 4 T7 (OPEN-233): a line of harm (an assault, a killing, a beating,
+/// a brawl, a crossfire, a gang's punishment, a wound, the fare's beating)
+/// names each person in it with the age, so a shadow can check the under-18
+/// rule (CLAUDE.md) on every such line; V12's victim lines printed none.
+fn harm_line(kind: EventKind, text: &str) -> bool {
+    use EventKind as E;
+    matches!(kind, E::Assault | E::Murder | E::Assaulted | E::Brawl | E::Crossfire | E::Punished | E::Wounded)
+        || (kind == E::Fare && text.contains(" beat "))
+}
+
+/// `" (17 y)"` already at the start of `s`.
+fn aged_at(s: &str) -> bool {
+    let Some(r) = s.strip_prefix(" (") else { return false };
+    let d = r.chars().take_while(char::is_ascii_digit).count();
+    d > 0 && r[d..].starts_with(" y)")
+}
+
+/// `text` with " (N y)" after the first whole-word mention of each person
+/// among `actors` (a name in a longer word, or one already aged, is passed).
+fn with_ages(world: &World, actors: &[EntityId], mut text: String) -> String {
+    for (k, &a) in actors.iter().enumerate() {
+        if a == EntityId::NONE || actors[..k].contains(&a) {
+            continue;
+        }
+        let Some(i) = world.comp::<Identity>(a) else { continue };
+        if i.name.is_empty() {
+            continue;
+        }
+        let name = i.name.as_str();
+        let mut from = 0;
+        while let Some(off) = text[from..].find(name) {
+            let (start, end) = (from + off, from + off + name.len());
+            let before = text[..start].chars().next_back().is_some_and(char::is_alphanumeric);
+            let after = text[end..].chars().next().is_some_and(char::is_alphanumeric);
+            if before || after || aged_at(&text[end..]) {
+                from = end;
+                continue;
+            }
+            text.insert_str(end, &format!(" ({} y)", i.age_years()));
+            break;
+        }
+    }
+    text
+}
+
 impl World {
     /// Append one event at the current tick, evicting the oldest past the cap.
     /// Returns the event's id.
@@ -783,7 +828,11 @@ impl World {
         }
         let id = self.next_event_id;
         self.next_event_id += 1;
-        let event = Event { id, tick: self.tick, kind, actors: SmallVec::from_slice(actors), text: text.into() };
+        let mut text: String = text.into();
+        if harm_line(kind, &text) {
+            text = with_ages(self, actors, text);
+        }
+        let event = Event { id, tick: self.tick, kind, actors: SmallVec::from_slice(actors), text };
         record_life(self, &event);
         // OPEN-140: a move's body, for the midnight's one writer and the walk home.
         if kind == EventKind::Housed {
