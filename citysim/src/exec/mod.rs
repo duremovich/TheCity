@@ -386,6 +386,16 @@ fn step_agent(world: &mut World, id: EntityId) {
         ExecState::Wait { until } if step.action == ActionKind::JackIn && !dazed && daze_end != Some(until) => {
             StepResult::Failed(FailReason::PreconditionLost)
         }
+        // Round 5 U3 (OPEN-235): the soup line waits out the hour's bowls,
+        // then retries the step (never done uneaten).
+        ExecState::Wait { until } if step.action == ActionKind::EatAlms => {
+            if tick >= until {
+                if let Some(b) = world.comp_mut::<Brain>(id) {
+                    b.exec = ExecState::Idle;
+                }
+            }
+            StepResult::Running
+        }
         ExecState::Wait { until } => {
             if tick >= until || (!dazed && routine::must_leave_for_work(world, id)) {
                 StepResult::Done
@@ -1018,6 +1028,20 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                         b.exec = ExecState::Wait { until };
                     }
                     return StepResult::Running;
+                }
+            }
+            // Round 5 U3 (OPEN-235): the soup line. Inside the kitchen with
+            // the hour's bowls out, the body waits for the next hour; with
+            // the pot dry, it is turned away.
+            if kind == ActionKind::EatAlms {
+                if let Some(until) = crate::systems::charity::queue_until(world, id, step.target) {
+                    if let Some(b) = world.comp_mut::<Brain>(id) {
+                        b.exec = ExecState::Wait { until };
+                    }
+                    return StepResult::Running;
+                }
+                if crate::systems::charity::turned_away(world, id, step.target) {
+                    return StepResult::Failed(FailReason::StockGone);
                 }
             }
             // M15 W19/W35: a scripted Hunt or GuardBody plan checks its
@@ -2051,6 +2075,7 @@ impl World {
             || staff
             || crate::systems::trades::capacity_exempt(self, agent, b)
             || crate::systems::crew::capacity_exempt(self, agent, b)
+            || crate::systems::charity::capacity_exempt(self, agent, b)
     }
 
     /// The street tile just outside a building's door (a Road if there is one).

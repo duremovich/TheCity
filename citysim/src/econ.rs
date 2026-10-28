@@ -248,6 +248,10 @@ pub struct Charity {
     /// opened (`0..synth_stretch`).
     #[serde(skip_serializing_if = "crate::econ::is_zero_u32")]
     pub synth_frac: u32,
+    /// Round 5 U3 (OPEN-235): the hungry poor turned away today with the
+    /// pot dry (the day's `MissionServed` says so); cleared at midnight.
+    #[serde(skip_serializing_if = "crate::econ::is_zero_u32")]
+    pub short_today: u32,
 }
 
 pub fn is_zero_u32(v: &u32) -> bool {

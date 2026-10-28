@@ -432,7 +432,10 @@ use crate::world::World;
 /// 93 (pressure pass round 5, U2, the neglect ladder tightens): `[camp] warn_repeat_days` (was
 /// `warn_window_days`, 14 -> 30) and the `Jobs2Cols` `camp_followed`, `camp_take_repeat`,
 /// `camp_take_no_parent` columns (serde defaults).
-pub const SAVE_VERSION: u8 = 93;
+/// 94 (pressure pass round 5, U3, the soup line): `Charity.short_today` (written while set),
+/// `EventKind::SoupLine`, the `[charity]` `starving_reach_ticks`, `servings_per_day`, `soup_hour`
+/// keys and the `Jobs2Cols` `soup_starving_fed`, `soup_queued`, `soup_short`, `soup_far` columns.
+pub const SAVE_VERSION: u8 = 94;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

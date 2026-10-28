@@ -259,9 +259,10 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
     // gift at its door from a donor; scripted as the leisure plans.
     let scripted = match goal {
         // Hunger as sickness § 4: the bin when no Mission serves.
-        GoalKind::Eat => {
-            crate::systems::charity::alms_plan(world, id).or_else(|| crate::systems::bins::dive_plan(world, id))
-        }
+        // Round 5 U3 (OPEN-235): then the starving's long walk to a kitchen.
+        GoalKind::Eat => crate::systems::charity::alms_plan(world, id)
+            .or_else(|| crate::systems::bins::dive_plan(world, id))
+            .or_else(|| crate::systems::charity::far_alms_plan(world, id)),
         GoalKind::Socialise => crate::systems::charity::donate_plan(world, id),
         // Hunger as sickness § 3: the cancer's treatment.
         // The pressure pass phase 2: the care trip when the Clinic's oncology is not the plan.
