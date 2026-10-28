@@ -2745,7 +2745,7 @@ the hourly list can do is miss a Home chromed or freed within the hour (it waits
 left the list is never taken. (2) `World::guard_grid`: the guards' tiles on a grid, read on the first query of a
 tick, shared by every pick (the Squat branch too); a guard who moved later in the tick is read where he stood.
 (3) `utility::goals` GangWork picks the target once a think. No numbers added (the hour is `TICKS_PER_HOUR`, the
-guard grid's 16-tile cell the old literal); no state saved (`#[serde(skip)]` memos), `SAVE_VERSION` stays 95.
+guard grid's 16-tile cell the old literal); no state saved (`#[serde(skip)]` memos), `SAVE_VERSION` unchanged (96 after U6).
 
 **Numbers** (100k `isle_m_k2_100k`, `--scaled --ambient-flats 50`, seed 42, a day-25 save made by main `b4fc720`,
 days 25-27 under `--features prof`, one run each; `target/u8_perf/before.err`, `after3.err`): `goal::GangWork`
