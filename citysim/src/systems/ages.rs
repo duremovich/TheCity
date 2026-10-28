@@ -1218,9 +1218,17 @@ pub fn snapshot(world: &mut World) {
         return;
     }
     let mut by = [0u32; 5];
+    // Round 6 V1 (OPEN-231): a warning standing past `warn_stale_days`.
+    let day = u32::try_from(world.day()).unwrap_or(u32::MAX);
+    let (stale, window) = (u32::from(world.config.camp.warn_stale_days), u32::from(world.config.camp.warn_repeat_days));
+    let mut warned_old = 0u32;
     for k in world.with::<Child>() {
         if let Some(c) = world.comp::<Child>(k) {
             by[c.routine as usize] += 1;
+            let age = c.warned_day.map(|w| day.saturating_sub(w));
+            if c.routine != crate::components::Routine::Camp && age.is_some_and(|a| a > stale && a <= window) {
+                warned_old += 1;
+            }
         }
     }
     let from = world.config.ages.frail_from_years;
@@ -1244,6 +1252,7 @@ pub fn snapshot(world: &mut World) {
     row.ch_chores = by[2];
     row.ch_street = by[3];
     row.ch_camp = by[4];
+    row.ch_warned_old = warned_old;
     row.elders = elders;
     row.elders_employed = employed;
     row.elders_on_cots = cots;

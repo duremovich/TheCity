@@ -976,7 +976,7 @@ GRAY_SNAP = ("papers_held", "fake_ids", "organ_stock", "scav_gangs", "black_clin
 AGES_TOTALS = ("child_days", "school_days", "school_fees", "street_takes", "child_begged", "child_thefts",
                "elders_taken_in", "maimed_new", "prosthetics", "school_far", "school_full", "school_unpaid",
                "school_el", "schools_founded")
-AGES_SNAP = ("ch_play", "ch_school", "ch_chores", "ch_street", "ch_camp", "schools", "elders", "elders_employed",
+AGES_SNAP = ("ch_play", "ch_school", "ch_chores", "ch_street", "ch_camp", "ch_warned_old", "schools", "elders", "elders_employed",
              "elders_on_cots", "maimed")
 
 

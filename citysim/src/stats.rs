@@ -717,6 +717,10 @@ pub struct Jobs2Cols {
     pub ch_chores: u32,
     pub ch_street: u32,
     pub ch_camp: u32,
+    /// Round 6 V1 (OPEN-231): children out of a Camp on a warning older
+    /// than `[camp] warn_stale_days` (a warning standing), at the day's end.
+    #[serde(default)]
+    pub ch_warned_old: u32,
     pub child_days: u32,
     pub school_days: u32,
     pub school_fees: i64,
@@ -1603,6 +1607,7 @@ impl Jobs2Cols {
             "ch_chores",
             "ch_street",
             "ch_camp",
+            "ch_warned_old",
             "child_days",
             "school_days",
             "school_fees",
@@ -2112,6 +2117,7 @@ impl Jobs2Cols {
             self.ch_chores.to_string(),
             self.ch_street.to_string(),
             self.ch_camp.to_string(),
+            self.ch_warned_old.to_string(),
             self.child_days.to_string(),
             self.school_days.to_string(),
             self.school_fees.to_string(),
