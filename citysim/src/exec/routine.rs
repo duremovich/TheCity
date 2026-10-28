@@ -345,6 +345,20 @@ fn household_need(world: &World, home: EntityId, job: Option<&Job>) -> u32 {
     }
 }
 
+/// The grocery run's `(held, need)`: `meals_held` against
+/// `household_need`. Round 4 T1 (OPEN-231): a Home on the service's
+/// warning (`camp::home_on_warning`) holds only its pantry (food carried
+/// for a shift feeds no child) and needs at least the children's food.
+fn run_level(world: &World, id: EntityId, home: EntityId, job: Option<&Job>) -> (u32, u32) {
+    let need = household_need(world, home, job);
+    if crate::systems::camp::home_on_warning(world, home) {
+        let pantry = world.comp::<Building>(home).map_or(0, |b| b.stock_food);
+        let kids = crate::systems::ages::children_food_need(world, home).min(world.config.buildings.home.stock_cap);
+        return (pantry, need.max(kids));
+    }
+    (meals_held(world, id, home), need)
+}
+
 /// S6 (OPEN-224): the shopper's post for the grocery run: a worker's Job
 /// (with an employer), else `None` for a jobless parent whose child lives
 /// at home (`ages::feeds_children`); `Err` when neither shops.
@@ -368,7 +382,8 @@ pub fn grocery_cap(world: &World, id: EntityId) -> Option<u32> {
     }
     let home = world.comp::<Household>(id).and_then(|h| h.home)?;
     let job = shopper_job(world, id).ok()?;
-    let short = household_need(world, home, job).saturating_sub(meals_held(world, id, home));
+    let (held, need) = run_level(world, id, home, job);
+    let short = need.saturating_sub(held);
     Some(short.max(1))
 }
 
@@ -399,8 +414,7 @@ pub fn grocery_plan(world: &World, id: EntityId) -> Option<Plan> {
     // The cheap shortfall test before any walk estimate.
     let home = world.comp::<Household>(id).and_then(|h| h.home)?;
     let home_door = world.comp::<Building>(home).filter(|b| !b.demolished)?.door;
-    let held = meals_held(world, id, home);
-    let need = household_need(world, home, job);
+    let (held, need) = run_level(world, id, home, job);
     if held >= need || must_leave_for_work(world, id) {
         return None;
     }

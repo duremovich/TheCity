@@ -2446,6 +2446,17 @@ scandal_standing = -0.05           # E42: the owner's standing per unfed child-d
 family_affinity = -0.2             # E41
 loyal_share = 0.9                  # E41
 grudge_share = 0.7                 # E41
+# Round 4 T1 (OPEN-231, Dylan 2026-10-27: neglect warns first, a repeat takes): the service's ladder and the Camp's inside.
+warn_window_days = 14              # the first take_days unfed days bring the service to the door (a warning); unfed again inside this window takes the child (0: no warning)
+warn_grace_days = 3                # no take before this many days after the warning
+warn_ask_tries = 3                 # a warned parent short of the grace's food money (warn_grace_days of the children's food at his meal price) asks this many Friends, warmest first
+warn_ask_affinity = 0.3            # ... at or above this affinity
+warn_ask_keep = 10                 # ... one lends what he holds above this, on affinity x (1 - greed / 2) (an edge debt)
+home_pantry_days = 3.0             # a Camp child goes home once a parent's Home holds this many days of its children's food (the child counted in) ...
+let_home_days = 7                  # ... for this many midnights running (home on a warning: unfed again inside the window and the service takes it back)
+p_abscond = 0.004                  # a Camp child-day's chance of a try at the fence in the day ([service] p_camp_escape is the night's, unwatched)
+abscond_hours = [9, 17]            # ... at a hashed hour in this span
+p_abscond_caught = 0.75            # ... a warden on duty catches the child and walks it back in (never a blow: the under-18 rule); none on duty, it gets away
 
 # Spec § 5 [treasury] (phase 2, plan E13, E14): the property rate replaces [corps] upkeep with wages on
 # (Farm 245 and Market 600 a day were a 70 % levy that funded the dole); the Treasury opens with

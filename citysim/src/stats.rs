@@ -800,6 +800,14 @@ pub struct Jobs2Cols {
     pub camp_breakouts: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub camp_neglect: u32,
+    /// Round 4 T1 (OPEN-231): the service's warnings at the door (one a
+    /// child), the children let home, the absconders walked back in.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub camp_warnings: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub camp_let_home: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub camp_caught: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub notices: u32,
     #[serde(skip_serializing_if = "is_zero_i64")]
@@ -1555,6 +1563,9 @@ impl Jobs2Cols {
                 "camp_buyouts",
                 "camp_breakouts",
                 "camp_neglect",
+                "camp_warnings",
+                "camp_let_home",
+                "camp_caught",
                 "notices",
                 "door_rent",
                 "super_stops",
@@ -2028,6 +2039,9 @@ impl Jobs2Cols {
             self.camp_buyouts.to_string(),
             self.camp_breakouts.to_string(),
             self.camp_neglect.to_string(),
+            self.camp_warnings.to_string(),
+            self.camp_let_home.to_string(),
+            self.camp_caught.to_string(),
             self.notices.to_string(),
             self.door_rent.to_string(),
             self.super_stops.to_string(),

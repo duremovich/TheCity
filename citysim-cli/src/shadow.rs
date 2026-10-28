@@ -567,6 +567,14 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
                     v.extend(citysim::systems::camp::parents_of(world, k));
                 }
             }
+            // Round 4 T1 (OPEN-231): and a parent whose Home is on the
+            // service's warning (the ladder's first rung).
+            for &k in all.iter() {
+                let home = world.comp::<citysim::Household>(k).and_then(|h| h.home);
+                if world.has::<Child>(k) && home.is_some_and(|h| citysim::systems::camp::home_on_warning(world, h)) {
+                    v.extend(citysim::systems::camp::parents_of(world, k));
+                }
+            }
             v.retain(|&a| world.has::<Brain>(a) && !world.has::<Sentence>(a) && !world.has::<Corpse>(a));
             v
         }
@@ -2010,7 +2018,26 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                         }
                         None => "nowhere known".to_string(),
                     };
-                    format!("{} ({yrs} y) {at}", nm(world, c))
+                    // Round 4 T1 (OPEN-231): the service's eye on the child
+                    // (a warning inside its window) and the let-home count.
+                    let camp_cfg = &world.config.camp;
+                    let day = (now / TICKS_PER_DAY) as u32;
+                    let ward = world.comp::<Child>(c).map_or(String::new(), |k| {
+                        let mut v = String::new();
+                        if let Some(w) =
+                            k.warned_day.filter(|&w| day.saturating_sub(w) <= u32::from(camp_cfg.warn_window_days))
+                        {
+                            v.push_str(&format!(", on the service's warning since d{w}"));
+                        }
+                        if k.home_fed_days > 0 {
+                            v.push_str(&format!(
+                                ", home after {} of {} nights of a held pantry",
+                                k.home_fed_days, camp_cfg.let_home_days
+                            ));
+                        }
+                        v
+                    });
+                    format!("{} ({yrs} y) {at}{ward}", nm(world, c))
                 })
                 .collect();
             let pantry = world

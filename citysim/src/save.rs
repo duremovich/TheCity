@@ -400,7 +400,12 @@ use crate::world::World;
 /// ask keys and the `[presence]` super keys (serde defaults).
 /// 84 (pressure pass round 4, T3, plans that still die silently): `World.handoffs`
 /// (written while it holds anything) and `EventKind::Pursuit`.
-pub const SAVE_VERSION: u8 = 84;
+/// 85 (pressure pass round 4, T1, neglect's ladder and the Camp's inside):
+/// `Child.{warned_day, home_fed_days}`, `CampState.{since_count, reserve_today}`
+/// (written while set), `ReleaseWhy::{BrokenOut, LetHome}`, `EventKind::Custody`,
+/// the `[camp]` T1 keys and the `Jobs2Cols` `camp_warnings`, `camp_let_home`,
+/// `camp_caught` columns (serde defaults).
+pub const SAVE_VERSION: u8 = 85;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

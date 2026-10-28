@@ -892,20 +892,24 @@ fn camp_answer(world: &mut World, id: EntityId, child: EntityId, answer: CampAns
         n.belonging = (n.belonging + gain).min(1.0);
     }
     let Some(camp) = camp_of(world, child) else { return };
+    // Round 4 T1 (OPEN-231): the answer read from the parent's side (what
+    // the buy-out asks and what he holds), weighed before the arm moves it.
+    let weighed = weighed(world, id, child, answer);
     match answer {
-        CampAnswer::Visit => camp_visit(world, id, child, camp),
+        CampAnswer::Visit => camp_visit(world, id, child, camp, &weighed),
         CampAnswer::BuyOut => {
             let fee = world.config.service.buyout_fee;
             let owner = world.owner_of(camp);
             let paid = ownership::pay(world, Some(id), owner, fee, Flow::Buyout);
             if paid >= fee {
+                let gate = gate_of(world, camp);
                 child_home(
                     world,
                     id,
                     child,
                     camp,
                     EventKind::CampBuyout,
-                    &format!("bought {{child}} out of {{camp}} for {fee}"),
+                    &format!("bought {{child}} out of {{camp}} for {fee}{gate} ({weighed})"),
                 );
                 ownership::jobs2_row(world).camp_buyouts += 1;
             } else {
@@ -913,32 +917,103 @@ fn camp_answer(world: &mut World, id: EntityId, child: EntityId, answer: CampAns
                 if paid > 0 {
                     ownership::refund(world, id, owner, paid, Flow::Buyout);
                 }
-                camp_visit(world, id, child, camp);
+                let why = format!("came to buy them out, {paid}c short of the {fee}c at the gate");
+                camp_visit(world, id, child, camp, &why);
             }
         }
-        CampAnswer::BreakOut => breakout(world, id, child, camp, walked),
+        CampAnswer::BreakOut => breakout(world, id, child, camp, walked, &weighed),
     }
 }
 
 /// § 3.5 (visit): a `Served` memory with the warden on duty, if any (the
 /// visit is not queued at his counter: his row serves children), the
 /// counter, the event.
-fn camp_visit(world: &mut World, id: EntityId, child: EntityId, camp: EntityId) {
+fn camp_visit(world: &mut World, id: EntityId, child: EntityId, camp: EntityId, weighed: &str) {
     let salience = world.config.service.served_salience;
-    if let Some(&w) = crate::systems::service::servers_on_duty(world, camp, ServeKind::Inmate).first() {
+    let warden = crate::systems::service::servers_on_duty(world, camp, ServeKind::Inmate).first().copied();
+    if let Some(w) = warden {
         world.remember(id, MemoryKind::Served, Some(w), salience, -0.1, false);
         world.remember(w, MemoryKind::Served, Some(id), salience, 0.0, false);
     }
     ownership::jobs2_row(world).camp_visits += 1;
-    let text =
-        format!("{} visited {} at {} (a Camp child)", world.name_of(id), world.name_of(child), world.name_of(camp));
-    world.push_event(EventKind::Visited, &[id, child, camp], text);
+    // Round 4 T1 (OPEN-231): the warden at the gate in the line (and an
+    // actor: his diary has the parent), and the parent's side.
+    let gate =
+        warden.map_or_else(|| ", nobody on the gate".to_string(), |w| format!(", let in by {}", world.name_of(w)));
+    let side = if weighed.is_empty() { String::new() } else { format!("; {weighed}") };
+    let text = format!(
+        "{} visited {} at {} (a Camp child{gate}){side}",
+        world.name_of(id),
+        world.name_of(child),
+        world.name_of(camp)
+    );
+    let mut actors = vec![id, child, camp];
+    actors.extend(warden);
+    world.push_event(EventKind::Visited, &actors, text);
+}
+
+/// Round 4 T1 (OPEN-231): ", paid to <warden> at the gate" with one on
+/// duty at `camp`, else "".
+fn gate_of(world: &World, camp: EntityId) -> String {
+    crate::systems::service::servers_on_duty(world, camp, ServeKind::Inmate)
+        .first()
+        .map_or_else(String::new, |&w| format!(", paid to {} at the gate", world.name_of(w)))
+}
+
+/// Round 4 T1 (OPEN-231): the parent's side of the week's answer, as
+/// `answer_of` weighed it: the buy-out's fee against the purse and the
+/// pantry against a week of the child's food; the break-out's nerve or
+/// crew. Empty for a buy-out he could make from both.
+fn weighed(world: &World, p: EntityId, child: EntityId, answer: CampAnswer) -> String {
+    let cfg = &world.config.service;
+    let purse = world.purse(Some(p)).max(0);
+    let fee = cfg.buyout_fee;
+    let need = cfg.buyout_food_days * crate::systems::demography::CHILD_FOOD_PER_DAY;
+    let pantry = home_of(world, p).and_then(|h| world.comp::<Building>(h)).map_or(0, |b| b.stock_food);
+    let days = world
+        .comp::<Household>(child)
+        .and_then(|h| h.home)
+        .and_then(|c| world.comp::<Building>(c))
+        .and_then(|b| b.camp.as_ref())
+        .and_then(|s| s.arrived.iter().find(|(c, _)| *c == child).map(|(_, d)| world.day().saturating_sub(*d)))
+        .unwrap_or(0);
+    let short = if purse < fee {
+        format!("the {fee}c buy-out beyond the {purse}c in hand")
+    } else if (pantry as f32) < need {
+        format!(
+            "the {purse}c would buy them out but the pantry holds {pantry} of the {need:.0} a week of their food needs"
+        )
+    } else {
+        String::new()
+    };
+    match answer {
+        CampAnswer::BuyOut => format!("{days} days in, {purse}c in hand and {pantry} in the pantry"),
+        CampAnswer::Visit => short,
+        CampAnswer::BreakOut => {
+            let crew = world.gang_of(p).map_or(0, |g| crew_of(world, g, p).len());
+            let nerve = if crew >= usize::from(cfg.breakout_crew) {
+                format!("{crew} of the gang free to come")
+            } else {
+                "nerve enough to try alone".to_string()
+            };
+            if short.is_empty() {
+                nerve
+            } else {
+                format!("{short}, and {nerve}")
+            }
+        }
+    }
 }
 
 /// The child out of the Camp and home (`camp::release`, then the parent's
 /// Home with room, else the street as `release` leaves it), the event.
 fn child_home(world: &mut World, id: EntityId, child: EntityId, camp: EntityId, kind: EventKind, what: &str) {
-    crate::systems::camp::release(world, child, crate::systems::camp::ReleaseWhy::BoughtOut);
+    let why = if kind == EventKind::CampBreakout {
+        crate::systems::camp::ReleaseWhy::BrokenOut
+    } else {
+        crate::systems::camp::ReleaseWhy::BoughtOut
+    };
+    crate::systems::camp::release(world, child, why);
     let home = crate::systems::camp::send_home(world, child, id);
     let (name, cn, camp_name) = (world.name_of(id), world.name_of(child), world.name_of(camp));
     let to = home.map_or_else(|| "the street".to_string(), |h| world.name_of(h));
@@ -954,7 +1029,7 @@ fn child_home(world: &mut World, id: EntityId, child: EntityId, camp: EntityId, 
 /// (`law::arrest` takes any arrester adjacent), else the Abduction is
 /// filed with the parent as suspect and the warrant runs (deviation: a
 /// Statistical parent has no body at the door).
-fn breakout(world: &mut World, id: EntityId, child: EntityId, camp: EntityId, walked: bool) {
+fn breakout(world: &mut World, id: EntityId, child: EntityId, camp: EntityId, walked: bool, weighed: &str) {
     let Some(door) = world.comp::<Building>(camp).map(|b| b.door) else { return };
     let cfg = world.config.service.clone();
     let radius = world.config.gangs.raid_gather_radius;
@@ -976,7 +1051,8 @@ fn breakout(world: &mut World, id: EntityId, child: EntityId, camp: EntityId, wa
     let witness = defenders.first().copied();
     let _tally = crate::systems::raid::fight_out(world, &mut raiders, &mut defenders, door, "the Camp", 1.0, None);
     if defenders.is_empty() {
-        child_home(world, id, child, camp, EventKind::CampBreakout, "broke {child} out of {camp}");
+        let what = format!("broke {{child}} out of {{camp}} ({weighed})");
+        child_home(world, id, child, camp, EventKind::CampBreakout, &what);
         if crate::systems::law::living(world, id) {
             crate::systems::law::raise_crime_on(world, id, None, Some(child), Crime::Abduction, door);
             crate::systems::law::file_report(world, Crime::Abduction, id, witness);
@@ -987,6 +1063,19 @@ fn breakout(world: &mut World, id: EntityId, child: EntityId, camp: EntityId, wa
     if !crate::systems::law::living(world, id) {
         return;
     }
+    // Round 4 T1 (OPEN-231): the failed try read from the parent's side
+    // and the wardens' (the child stays; no child is in the fight).
+    let held: Vec<String> = defenders.iter().take(3).map(|&w| world.name_of(w)).collect();
+    let text = format!(
+        "{} tried to break {} out of {} ({weighed}) and was beaten back by {}",
+        world.name_of(id),
+        world.name_of(child),
+        world.name_of(camp),
+        held.join(", ")
+    );
+    let mut actors = vec![id, child, camp];
+    actors.extend(defenders.iter().take(3).copied());
+    world.push_event(EventKind::Custody, &actors, text);
     let cuffed =
         walked && defenders.iter().any(|&w| world.has::<Brain>(w) && crate::systems::law::arrest(world, w, id));
     if !cuffed {

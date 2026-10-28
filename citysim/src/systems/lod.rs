@@ -1303,10 +1303,8 @@ fn stat_eat(world: &mut World, id: EntityId) {
         return;
     }
     // The Home pantry feeds a Statistical resident as it feeds a Full one.
-    let pantry = world
-        .comp::<Household>(id)
-        .and_then(|h| h.home)
-        .filter(|&h| world.comp::<Building>(h).is_some_and(|b| b.stock_food > 0));
+    let pantry =
+        world.comp::<Household>(id).and_then(|h| h.home).filter(|&h| crate::systems::camp::adults_share(world, h) > 0);
     if let Some(h) = pantry {
         let mut meal = crate::components::MealKind::Real;
         if let Some(b) = world.comp_mut::<Building>(h) {
@@ -1448,7 +1446,13 @@ fn stat_grocery(world: &mut World, id: EntityId) {
         None => return,
     };
     let pantry = world.comp::<Building>(home).map_or(0, |b| b.stock_food);
-    let carried = world.comp::<crate::components::Inventory>(id).map_or(0, |i| i.food.saturating_sub(i.stolen_food));
+    // Round 4 T1 (OPEN-231): on the service's warning the pantry alone
+    // holds the children's food (the Full run's `routine::run_level`).
+    let carried = if crate::systems::camp::home_on_warning(world, home) {
+        0
+    } else {
+        world.comp::<crate::components::Inventory>(id).map_or(0, |i| i.food.saturating_sub(i.stolen_food))
+    };
     if pantry + carried >= need {
         return;
     }
