@@ -4974,7 +4974,10 @@ scav_reach = 60                    # the scav's day: a scav gang's member walks 
 [trade_verbs]
 pimp_revisit_ticks = 180           # the pimp's round: a pitch collected at within this is visited after the unseen ones
                                    # (a take owed first among each), the nearest of them
-pimp_round_tiles = 120             # ... a pitch farther than this from him only when no nearer one is due
+pimp_round_tiles = 120             # ... a pitch farther than this from him only when no nearer one is due; round 5 U6: and
+                                   # nobody whose trip home to the nearest pitch is past pimp_trip_ticks (this in tiles
+                                   # without [distance.choice]) is named: a Sump pimp 771 tiles off never set out; none, no
+                                   # pimp
 pit_bettors_max = 12               # an off-screen pit visitor in the bet window with [leisure] gamble_rung_courage backs a
                                    # fighter in tonight's bout (not a table game), at most this many bettors a pit a night
 madam_names = 3                    # the madam's night of bookings is one line at her shift's end naming this many workers
@@ -4984,6 +4987,19 @@ stat_fare_wait_ticks = 120         # the cab: an off-screen rider waits this lon
                                    # a body waits [legs] fare_wait_ticks); past it the Garage's off-screen cab
 dollhouse_p_venue = 0.002          # the Dollhouse's off-screen evening rate (visits per adult a day, as stat_table.toml's
                                    # p_venue, which has no Dollhouse row: no off-screen visit ever; the Brothel's is 0.006)
+pimp_book_draws = 8                # round 5 U6 (OPEN-217): the pimp at a dry pitch (nothing taken since his last round;
+                                   # his body, or off screen credited present) sends her a client, the first of this many
+                                   # off-screen residents of the district (an adult, never one ages::is_protected, fed, under
+                                   # [vice] street_intimacy, twice street_price in hand); V13: a round collected 2c or nothing,
+                                   # dry pitches closed ([jobs2] pitch_fail_days) and a district emptied; 0 off
+pimp_quits = true                  # ... a named pimp holding a day post quits it for the round, and no hire takes him while
+                                   # he holds the street (the jobless fit member is named first; with none left, the fit one
+                                   # living nearest the pitches: V13's pimps were an Engineer and a Sanitation hand asleep
+                                   # through every pitch night)
+pimp_trip_ticks = 120              # ... the round's trip bound (as [distance.choice] gang_work_ticks): a pitch past it from
+                                   # where he stands is no round this hour, and nobody living past it from the nearest pitch
+                                   # is named. 20k x 30 seed 42: at 120, 66 collections; at 180, 5 (the far quitters named,
+                                   # off screen away from every pitch); at 120 the shadow city had no pimp on d21
 
 # The pressure pass phase 3 (docs/PRESSURE_PASS.md § Phase 3; OPEN-160, OPEN-162; systems/protection.rs and
 # leverage::protection_pass): protection bites. M16b leaned on one business per held district only on the gang's weekday
@@ -5217,6 +5233,21 @@ ask_refused_days = 7               # line); a Friend who turned him down is not 
 cover_purse_days = 3               # the sick worker's post: covered at midnight by a jobless adult of the employer's district
 cover_lawful = 0.3                 # (lawfulness at or above this; a day hire to the shift's end) when the owner holds this
                                    # many days of the role's wage; else the absence is written
+clinic_body_first = true           # round 5 U6 (OPEN-217): a patient goes to a doctor's body on duty with room first (the
+                                   # Clinic's off-screen colleagues, present by the clock, took the pair hash: V13's 100k
+                                   # ripperdocs saw 0 and 1 patients a week)
+book_hours = [9, 17]               # ... and the off-screen chrome bought at midnight is booked for an hour of these (first
+                                   # and last, inclusive; the Ripperdoc's day shift), installed then if the doctor is at the
+                                   # counter, else at the nearest Clinic open, else the next hour, else let go (V13: 5-6
+                                   # installs every 00:00 on a night orderly)
+wash_min_tox = 0.4                 # the wash, the clinic's everyday trade: an off-screen adult carrying this toxicity or
+p_wash = 0.05                      # more ([sickness] tox_onset) and wash_price above wash_keep books one on this a day,
+wash_price = 8                     # at the Clinic nearest his Home for an hour of book_hours (paid as care: doctor_cut to
+wash_keep = 10                     # the doctor at the counter) ...
+wash_frac = 0.5                    # ... which takes this share of his toxicity out (V13: the chrome alone was a clinic's
+                                   # trade, a median 5 patients a week at 20k; 8,259 of 20k over 0.4). The toxic are the
+                                   # synth-fed poor: at 15c over 20c kept and 0.01 a day, 8 washes in 30 days at 20k;
+                                   # p_wash 0 off
 # Pressure pass round 2, R6b (docs/PRESSURE_PASS.md § R6b, OPEN-217, OPEN-207): the trades' verbs II. Every value a
 # placeholder.
 [verbs]
@@ -5262,6 +5293,10 @@ door_return_ban_days = 2           # ... a return is barred from the house this 
                                    # pick passes a house that bars him over; the barred came back nightly to be refused)
 door_return_swing_mult = 2.0       # ... and the scene a return makes (drunk, high, a brawler, carrying) swings on
                                    # [customers] door_swing_p times this
+# Round 5 U6 (docs/PRESSURE_PASS.md § U6, OPEN-217). Placeholders.
+wait_at_work_ticks = 120           # a body already inside his workplace waits there for a shift at most this far off (the
+                                   # base rule's 600: V13's ripperdoc in at 04:00 for a wage rested at the post five hours
+                                   # before a 09:00 shift); a day post's hire waits the base rule's
 
 # Pressure pass round 4, T5 (docs/PRESSURE_PASS.md § T5; OPEN-217, OPEN-228's follow-up): the jobless look for work
 # (systems/search.rs; under [jobs2] street; absent: as T4 left them). Placeholders.

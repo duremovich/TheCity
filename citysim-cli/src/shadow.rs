@@ -301,9 +301,16 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
                 .iter()
                 .filter_map(|&b| world.comp::<Building>(b).and_then(|b| b.owner))
                 .collect();
-            adults()
-                .filter(|a| owners.contains(a) || world.comp::<Job>(*a).is_some_and(|j| j.role == Role::Ripperdoc))
-                .collect()
+            // Round 5 U6 (OPEN-217): the doctors at the counter (a Ripperdoc
+            // post); an owner only when nobody holds one (an absentee owner
+            // with no post read as a doctor with no patients).
+            let docs: Vec<EntityId> =
+                adults().filter(|a| world.comp::<Job>(*a).is_some_and(|j| j.role == Role::Ripperdoc)).collect();
+            if docs.is_empty() {
+                adults().filter(|a| owners.contains(a)).collect()
+            } else {
+                docs
+            }
         }
         "homeless" => adults().filter(|&a| world.comp::<Household>(a).is_some_and(|h| h.home.is_none())).collect(),
         // Shadow V4 bug 23: a cancer past stage 0 (it took one at 0.00).

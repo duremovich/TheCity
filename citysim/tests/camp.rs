@@ -211,7 +211,12 @@ fn test_unfed_child_taken_at_take_days_before_death() {
     assert_eq!(taken.actors[0], c);
     assert!(w.comp::<citysim::Life>(c).is_some_and(|l| l.events.iter().any(|e| e.kind == citysim::LifeKind::Taken)));
     let law = w.building_of_kind(BuildingKind::Jail).expect("jail");
-    for &p in &parents {
+    // Re-pinned, round 5 U6 (premise moved): the living parents remember (the
+    // moved city's starving week killed one parent before the take: a dead
+    // parent keeps no memory; the other remembered it).
+    let living: Vec<_> = parents.iter().copied().filter(|&p| citysim::systems::law::living(&w, p)).collect();
+    assert!(!living.is_empty(), "a parent alive at the take");
+    for &p in &living {
         assert!(
             w.comp::<Memory>(p).is_some_and(|m| m.entries.iter().any(|e| e.kind == MemoryKind::ChildTaken)),
             "a parent remembers"

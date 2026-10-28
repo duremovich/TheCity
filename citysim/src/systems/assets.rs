@@ -2554,8 +2554,12 @@ fn stat_shop(world: &mut World) {
             continue;
         }
         // Phase 3 (D43): Statistical chrome is installed in place.
+        // Round 5 U6 (OPEN-217): booked for an hour of the clinic's day
+        // (`care::book`; installed in place without `[care] book_hours`).
         if o.category == ShopCategory::Chrome {
-            crate::systems::chrome::stat_install(world, id, o.seller, &o.pick);
+            if !crate::systems::care::book(world, id, o.seller, &o.pick) {
+                crate::systems::chrome::stat_install(world, id, o.seller, &o.pick);
+            }
             continue;
         }
         if o.category == ShopCategory::Install {

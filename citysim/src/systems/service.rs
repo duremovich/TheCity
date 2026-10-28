@@ -314,6 +314,18 @@ fn pick_server(world: &World, place: EntityId, kind: ServeKind, served: EntityId
     } else {
         Vec::new()
     };
+    // Round 5 U6 (OPEN-217; `[care] clinic_body_first`): a patient goes to
+    // a doctor's body on duty with room first (the Clinic's off-screen
+    // colleagues, present by the clock, took the pair hash: V13's 100k
+    // ripperdocs saw 0 and 1 patients a week).
+    let bodies = if bodies.is_empty()
+        && kind == ServeKind::Patient
+        && crate::systems::care::cfg(world).is_some_and(|c| c.clinic_body_first)
+    {
+        free.iter().copied().filter(|&s| world.comp::<Brain>(s).is_some_and(|b| b.lod != Lod::Statistical)).collect()
+    } else {
+        bodies
+    };
     let pool = if bodies.is_empty() { free } else { bodies };
     pool.into_iter()
         .map(|s| (hash(world, PURPOSE_SERVE, key(place) ^ key(served), key(s)), s))
@@ -370,6 +382,9 @@ pub fn arrive(world: &mut World, served: EntityId, place: EntityId, kind: ServeK
                 *r = Room { hour, taken: 0 };
             }
             r.taken += 1;
+            if kind == ServeKind::Patient && crate::systems::presence::is_body(world, server) {
+                ownership::jobs2_row(world).clinic_body += 1;
+            }
             serve(world, server, served, place, kind, coins);
         }
         None => ownership::jobs2_row(world).served_waited += 1,

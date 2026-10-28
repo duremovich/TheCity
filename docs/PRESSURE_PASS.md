@@ -2422,3 +2422,103 @@ held and guards on main's binary in `target/u4_shadow_before`):
   cover onto day 1 of the off city, a leak that was there before U1).
 - No test (doctrine 2). `SAVE_VERSION` 92 (91 was U5's) (`AgesState.full_run`, the `[ages]` U1 keys, the `Jobs2Cols`
   `schools_founded` column); `analyze_run.py` prints the Schools at day 0 and the last day, and the founded count.
+
+### U6, the pimp and the ripperdoc at work (`OPEN-217`; `vice.rs` the round and `name_pimps`, `care.rs` the bookings and the wash, `service::pick_server`, `exec::routine::shift_pending`, `search.rs`, `demography.rs`, `[trade_verbs]`, `[care]`, `[verbs]` U6 keys)
+
+- **The cause** (a 20k base shadow and run, main `85886ba`; the 100k V13 picks reproduce at 20k). U5's three
+  causes, and the tier is one of them. (1) **No market**: the street's off-screen payer is three draws an hour, so 82
+  street visits in 30 days at 20k (410c), a pimp's collection 2c or nothing, and a pitch dry `[jobs2] pitch_fail_days`
+  closes: a pimp's district empties and the round stops (`pimp_18110 d23`: no pitch hours to d27). A clinic's trade
+  was the chrome alone: 25 Clinics, a median of 5 patients a week, half at 00:00. (2) **The colleague and the clock
+  took the patient**: the counter's pick (`service::pick_server`) was the pair hash over the present Patient staff,
+  the off-screen ones present by the clock, with T4's body-first rule for `Visit` only; and `stat_shop`'s chrome was
+  installed in place at midnight, when only a night orderly is on (V13's `orderly_13352`, 5-6 every 00:00; half named
+  nobody). (3) **The label**: `name_pimps` fell back to the lowest-id member holding a Job when no jobless one was fit
+  (the round 4 search found most of them work): V13's Engineer, the 20k `pimp_21194` a Sanitation hand, asleep through
+  every pitch night, GangWork a daytime Extort; and it named the jobless member nearest the pitches at any distance (the
+  20k Sump's pimp at 771 tiles, a 347-minute trip, past S1's `gang_work_ticks` every hour: `round_pitch` returned
+  nothing, no round ever). A jobless pimp searched like a labourer (V13 `pimp_84453`; T5's search knew no pimp).
+- **The pimp's round** (`vice::collection`, `book_client`, `tell_collection`): each collection with a body on either
+  side is told in both diaries with the take since the last round, the cut and the gang's share ("came round the pitch
+  of X (37 y) and took the cut: 2c of 5c since the last round (1 client), 1c of it up to The Drowned Choir 8"). At a
+  dry pitch (nothing since his last collection) the pimp sends her a client (`[trade_verbs] pimp_book_draws` 8): the
+  first of eight off-screen district residents with the street's wants and twice its price, never one
+  `ages::is_protected`; he pays her `street_price`, the take the cut is taken from ("sent X (73 y) to the pitch of Y (37
+  y) (5c) and took the cut ..."). An off-screen pimp credited present books too (the pitches of a pimped district stay
+  open). **Deviation:** the spec named "a booked client" for the pimp; the madam's bookings (R6a) are the house's, so
+  the pimp's is the tout's: the client he brings.
+- **Who holds the street** (`name_pimps`): nobody whose trip from his Home door to the district's nearest pitch is past
+  `[trade_verbs] pimp_trip_ticks` (120, as S1's `gang_work_ticks`, which `round_pitch` read before and reads now from
+  where he stands) is named (`pimp_round_tiles` in tiles without `[distance.choice]`); the jobless fit member first,
+  else the fit member nearest the pitches, who quits a day post for it (`pimp_quits`: "quit as Sanitation (to run The
+  Drowned Choir 8's street in D4 Mid-Levels)"); a district with no member that near has no pimp. A named pimp is off
+  the job search (`search::jobless`), the midnight hire (`pick_candidate`) and the door hire (`can_take`). A street
+  that changes hands is told with its reason ("Yorick Park lost the street of D3 Neon Quarter to Kenji Yates (Rust
+  Saints holds the district now)"; in the cells, away from every pitch, holding a day post, living too far, no pitch
+  left, no gang holding). **Deviation:** the bound costs pimps: the shadow's 20k city had none on d21 (a 120-tile bound,
+  then the 120-minute trip). At 180 minutes it named one, but the 30-day city's collections fell 66 -> 5: the far
+  members named were day workers who quit and, off screen, were "away from every pitch 3 days". So 120 shipped.
+- **The clinic's day**: a patient goes to a doctor's body on duty with room first (`[care] clinic_body_first`; the
+  pair hash among the bodies, then among all); `stat_shop`'s chrome is booked for an hour of `book_hours` (9-17, the
+  Ripperdoc's shift) and installed then by the doctor at the counter (`care::book`, `keep_bookings`, hourly from
+  `care::hourly`); a shut Clinic's patient goes to the nearest one open, else the next hour, past 17:00 let go (a used
+  implant of the booked stock waits for its Clinic). The second trade (`[care] wash_*`, `care::book_washes`, `wash`):
+  an off-screen adult carrying `wash_min_tox` 0.4 or more (the synth diet's) with `wash_price` 8 above `wash_keep` 10
+  books a blood wash on `p_wash` 0.05 a day at the Clinic nearest his Home, paid as care (`pay_fee`, the doctor's
+  `doctor_cut`), half his toxicity out ("had the blood washed at Ripperdoc#N by D (8c, 2c of it to the doctor)").
+  **Deviation:** the spec named the patients reaching the body; a trade of chrome alone has no week at a quiet Clinic
+  (U5's forger licence, the clinic's wash). At 15c over 20c and 0.01 a day it fired 8 times in 30 days (the toxic are
+  the synth-fed poor), so the price was set where it fires, not tuned. Prosthetics, chip installs and detox stay at
+  midnight (rare: 11 lines at 00:00 in a week against 254 in the day).
+- **No Rest at the post hours before the shift** (`[verbs] wait_at_work_ticks` 120): a body already inside his
+  workplace waits for a shift at most two hours off (the routine's 600: V13's ripperdoc came in at 04:00 for a wage and
+  rested five hours); a day post's hire keeps the base rule's wait. The 20k doctors' pre-shift Rest is 33-59 min.
+- **The under-18 rule** (`ages::is_protected`): the round passes a protected owner's pitch (`round_pitch`), no
+  protected member is named pimp (`name_pimps`' `fit`), the pimp's client and the street's own (`client_near`,
+  `street_payer`, `book_client`) are never protected, and the street worker is never protected (`book_client`, as well
+  as the opener's adult age). The wash takes adults only; a booked install keeps `stat_shop`'s Statistical adults.
+- **Shadow** (20k `isle_m_k2`, seed 42, d21-27; the brief's picks; the picker's `ripperdoc` is now a Ripperdoc post's
+  holder, an owner only with none: shadow 3's `ripperdoc_7409` was an absentee owner with no Job). The pimp (the build with the booking and the line, before
+  the naming bound; its wording since reworded and its gang printed by id, since fixed): `pimp_18110 d21 00:07`
+  "Kieran Hawthorne sent Ghost Ashcombe (73 y) to Silvio Wexford (37 y)'s pitch (5c), and took the cut: 2c of 5c since
+  the last round, 1c of it up to" the gang; `d21 23:11` "collected 2c of Silvio Wexford (37 y)'s 5c since the last
+  round (1 client)"; `d22 01:10` a client sent to Brenna Mbeki (48 y); `d22 03:03`, `d22 23:40` the round at Idris
+  Sato's and Brenna's pitches; then no pitch due from d23 (the dry street closing: the booking reached the round's
+  pitches only when the pimp's body stood at them, so it was opened to the off-screen pimp too). The final builds'
+  pimp picks did not hold the street a night: shadow 4's two "lost the street ... (The Drowned Choir 10 holds the
+  district now)", "(Rust Saints holds the district now)" at `d21 00:07`; shadow 8's `pimp_12173` (Lena Kowalczyk, the
+  base's orderly, named at d19) "lost the street of D4 Mid-Levels" at `d22 00:07`, her Home moved 313 tiles off (and
+  the same night twice, a dropped-district line: fixed), then worked a Club's floor all week ("a room of 15, served
+  8"). The quit: "Quill Thorne quit as Sanitation (to run ...'s street in D4 Mid-Levels)" (20k run, d16).
+  The clinic: `agent_10309` (Vale Vasquez, the orderly at Ripperdoc#5566, `--agent`): `d21 09:00` "Vale Vasquez patched
+  Juniper Pembroke up at Ripperdoc#5566 for 12c (3c of it to the doctor)", `d21 12:37`, `13:00`, `14:00`, `16:00`
+  installs "by Vale Vasquez" (V13: every install at 00:00), `d23 13:34` a gang's ("(gang: The Iron Knives)"), 19 lines
+  in the week, the `[memory] treated X (a patient)` beside each; `ripperdoc_9562 d23 09:00` "Corwin Brandt patched
+  Winifred Ravensworth up at Ripperdoc#5466 for 12c" and a cure; pre-shift Rest 33-59 min.
+- **Reads wrong** (the next pass): the clinics' trade is lopsided by catchment and by the shut: a Clinic opens only
+  with its Ripperdoc at the counter (`fixes::staff_present`), so one with the post vacant, a doctor walked out unpaid
+  (`ripperdoc_9896 d23 14:51`, an under-water owner's cut hours) or on his rest day sends its patients to the few open
+  ones: 20k x 30, one Clinic took 118 of the week's 265, the median 4; `ripperdoc_14015` and `ripperdoc_14363` at the
+  counter all week with no patient. The night orderly has nobody now (the Clinic is shut at night; the installs moved
+  to the day). A district's street changes hands with its gang's splits (D4 six times in 30 days among The Drowned
+  Choir 8, 9, 10), and a named pimp quitting his day post is taken on again by a graded post's hire (`d9` "Yorick
+  Fletcher quit as Researcher (to run ...)", `d10` "quit as Manager"): the graded and skill-ranked hires are not
+  `pick_candidate`'s. A quitter named off screen is often "away from every pitch 3 days" (an off-screen pimp is present
+  only while he follows his gang's order). The 20k street is thin by geography: 4-6 pitches, and the gangs holding
+  their districts rarely house a member within a commute of them, so a pimp is named on about half the days. No
+  shadow of a working round on the final build: the shadow's pimp pick is made at d21 00:00 before the midnight pass
+  renames. Not re-shadowed at 100k (the causes show at 20k).
+- Numbers (prints, not claimed; 20k seed 42 x 30, `--scaled --ambient-flats 50`; base `target/u6_base_run.csv`, after
+  `target/u6_run3.csv`): pimp collections 47 -> 66 (pass-up 19 -> 17), clients the
+  pimp sent 11, street visits 82 -> 113, street take 410 -> 565c, pimps' cut 34 -> 32c, pimps 0.73 -> 0.67 a day;
+  off-screen chrome booked 2,039, kept 1,329 (installs 1,275 -> 1,124), washes 424, patients a doctor's body served
+  757 (a body doctor's week, ~177 across the city), treatments 63 -> 66, patched 1,702 -> 1,537. Clinic events d21-27:
+  12 of 271 at 00:00 (base 133 of 238), 252 naming the doctor (base 158), 24 Clinics, the busiest 96, median 3. (The
+  first build, before the naming bound, made 89-104 collections a run; the bound costs the named-but-far ones.)
+- No test (doctrine 2). `SAVE_VERSION` 93 (92 was U1's) (`care::State.booked`, `Booking`, `Visit`; the U6 keys; the
+  `Jobs2Cols` `pimp_booked`, `clinic_booked`, `clinic_kept`, `clinic_body`, `clinic_washes`, printed on
+  `analyze_run.py`'s street line). Premises the moved city broke, re-pinned with "Round 5 U6" in place:
+  `succession::test_brothers_after_a_gutting_sack` (the Hollow's brothers, not any gang's), `camp::
+  test_unfed_child_taken_at_take_days_before_death` (the living parents remember: one died in the starving week),
+  `fviolence::test_short_riot_rolls_its_hours_not_a_day` (the two worlds part before the riot; a day-long riot kills
+  many, no identity across the switch).

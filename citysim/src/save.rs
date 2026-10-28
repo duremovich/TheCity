@@ -429,7 +429,12 @@ use crate::world::World;
 /// 92 (pressure pass round 5, U1, Schools for the children there are): `AgesState.full_run` (written while
 /// set), `[ages] school_age_per_school`, `found_full_days`, `found_full_min` and the `Jobs2Cols`
 /// `schools_founded` column (serde defaults).
-pub const SAVE_VERSION: u8 = 92;
+/// 93 (pressure pass round 5, U6, the pimp and the ripperdoc): `care::State.booked` (`Booking`,
+/// `Visit`: the clinic's day), the `[care]` `clinic_body_first`, `book_hours`, `wash_*` keys, the
+/// `[trade_verbs]` `pimp_book_draws`, `pimp_quits`, `pimp_trip_ticks` keys, `[verbs] wait_at_work_ticks` and the
+/// `Jobs2Cols` `pimp_booked`, `clinic_booked`, `clinic_kept`, `clinic_body`, `clinic_washes` columns
+/// (serde defaults).
+pub const SAVE_VERSION: u8 = 93;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

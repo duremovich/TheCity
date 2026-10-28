@@ -65,7 +65,10 @@ pub fn idle_days(world: &World, id: EntityId) -> u64 {
 /// leaving, no exec, not retired, not inside F3's idle days, and in need of
 /// a wage (`Needs.wealth` under 1: the secure quit's line, `fixes::daily`).
 fn jobless(world: &World, id: EntityId) -> bool {
+    // Round 5 U6 (OPEN-217): a named pimp's round is his work (V13's
+    // `pimp_84453` read three boards on d21 morning, "nothing going").
     if world.has::<Job>(id)
+        || crate::systems::vice::pimp_district(world, id).is_some()
         || world.has::<Sentence>(id)
         || world.has::<crate::components::Retired>(id)
         || world.comp::<Misery>(id).is_some_and(|m| m.idle_until > world.tick)

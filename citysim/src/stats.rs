@@ -940,6 +940,19 @@ pub struct Jobs2Cols {
     pub licences_exposed: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub fixer_outcomes: u32,
+    /// Round 5 U6: clients a pimp's body sent to a dry pitch.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub pimp_booked: u32,
+    /// Round 5 U6: off-screen installs booked for an hour of the clinic's day;
+    /// kept at their hour; patients a doctor's body served at a Clinic.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub clinic_booked: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub clinic_kept: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub clinic_body: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub clinic_washes: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub licences_named: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
@@ -1670,6 +1683,11 @@ impl Jobs2Cols {
                 "licences_passed",
                 "licences_exposed",
                 "fixer_outcomes",
+                "pimp_booked",
+                "clinic_booked",
+                "clinic_kept",
+                "clinic_body",
+                "clinic_washes",
                 "licences_named",
                 "bribes_named",
                 "band_refusals",
@@ -2165,6 +2183,11 @@ impl Jobs2Cols {
             self.licences_passed.to_string(),
             self.licences_exposed.to_string(),
             self.fixer_outcomes.to_string(),
+            self.pimp_booked.to_string(),
+            self.clinic_booked.to_string(),
+            self.clinic_kept.to_string(),
+            self.clinic_body.to_string(),
+            self.clinic_washes.to_string(),
             self.licences_named.to_string(),
             self.bribes_named.to_string(),
             self.band_refusals.to_string(),

@@ -120,7 +120,10 @@ pub fn shift_pending(world: &World, id: EntityId, job: &Job) -> bool {
     // shift: a day labourer picked at 06:00 scavenged the street until his
     // 08:00 shift (`day_labourer_75212 d25`).
     let day_post = job.until.is_some_and(|u| world.tick < u) && world.config.verbs.is_some();
-    ((at_work || day_post) && until <= WAIT_AT_WORK_MAX) || must_leave_for_work(world, id)
+    // Round 5 U6 (OPEN-217; `[verbs] wait_at_work_ticks`): at the post, a
+    // shift that near (V13: five hours' Rest at the Clinic before 09:00).
+    let wait = world.config.verbs.as_ref().map_or(WAIT_AT_WORK_MAX, |v| v.wait_at_work_ticks);
+    (at_work && until <= wait) || (day_post && until <= WAIT_AT_WORK_MAX) || must_leave_for_work(world, id)
 }
 
 /// The Work goal's gate: a shift to work, or wages to collect for one.

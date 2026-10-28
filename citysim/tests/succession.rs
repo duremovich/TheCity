@@ -423,7 +423,15 @@ fn test_brothers_after_a_gutting_sack() {
                 s.spawn(move || {
                     sacked(&mut x, g);
                     x.run_ticks((delay + 2) * TICKS_PER_DAY);
-                    brothers_since(&x, t0)
+                    // Re-pinned, round 5 U6 (premise moved): the Hollow's
+                    // brothers (the whole city's `brothers_gutted_below` 1
+                    // is every gang's: the moved city emptied another gang
+                    // of free members, and its brothers counted here).
+                    let joined = format!("joined {}", x.owner_label(Some(g)));
+                    x.events
+                        .iter()
+                        .filter(|e| e.kind == EventKind::BrothersArrived && e.tick >= t0 && e.text.ends_with(&joined))
+                        .count()
                 })
             })
             .map(|h| h.join().expect("a sacked city"))
