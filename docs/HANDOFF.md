@@ -32,8 +32,7 @@ day** (U6's `pimp_trip_ticks` 120), licences sold 120 -> 158; ticks/s 25 -> 24 (
 
 ## In flight
 
-- No agents are running. One worktree folder is left locked by its finished agent
-  (`.claude/worktrees/agent-a62cc7605f7d41757`, U7's, its `target/` deleted): `git worktree unlock` then remove.
+- No agents are running; no worktrees.
 - `target/shadow_v14/`, `target/r5_100k/` hold the runs.
 
 ## Calls for Dylan (open)
