@@ -2031,7 +2031,7 @@ pub struct Child {
     pub edu_taught: f32,
     /// Round 4 T1 (OPEN-231): the day the service came to the door over
     /// this child's unfed days (the warning); neglect again inside `[camp]
-    /// warn_window_days` (and past `warn_grace_days`) takes the child. Set
+    /// warn_repeat_days` (and past `warn_grace_days`) takes the child. Set
     /// too on a child let home (`camp::let_home`: home on a warning).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warned_day: Option<u32>,

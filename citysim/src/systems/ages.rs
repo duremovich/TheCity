@@ -741,18 +741,45 @@ pub fn with_kin(world: &World, e: EntityId) -> bool {
 
 /// [`kin`]'s take-in: `e` moves into `h` (a `Housed` event, `elders_taken_in`).
 pub fn move_in(world: &mut World, e: EntityId, h: EntityId) {
-    world.set_home(e, Some(h));
+    let kids = bring_children(world, e, h);
     ownership::jobs2_row(world).elders_taken_in += 1;
-    let text = format!("{} moved in with family at {}", world.name_of(e), world.name_of(h));
+    let text = format!("{} moved in with family at {}{kids}", world.name_of(e), world.name_of(h));
     world.push_event(EventKind::Housed, &[e, h], text);
+}
+
+/// Round 5 U2 (OPEN-231): `e` moves into `h` and his children living
+/// under his old roof come with him (`camp::send_home`: dependants, never
+/// counted against the flat). An elder taken in by a grown child, or a
+/// retiree's spouse, left the young ones behind: 54 children on day 1 and
+/// ~6 a day after at 20k, unfed at a Block with no parent and on the
+/// service's ladder. The line's tail names them.
+fn bring_children(world: &mut World, e: EntityId, h: EntityId) -> String {
+    let old = world.comp::<Household>(e).and_then(|x| x.home);
+    world.set_home(e, Some(h));
+    let Some(old) = old.filter(|&o| o != h) else { return String::new() };
+    let kids: Vec<EntityId> = crate::systems::demography::children_of_agent(world, e)
+        .into_iter()
+        .filter(|&c| world.has::<Child>(c) && world.comp::<Household>(c).and_then(|x| x.home) == Some(old))
+        .collect();
+    let mut names = Vec::new();
+    for c in kids {
+        if crate::systems::camp::send_home(world, c, e).is_some() {
+            names.push(world.name_of(c));
+        }
+    }
+    if names.is_empty() {
+        String::new()
+    } else {
+        format!(", with {}", names.join(", "))
+    }
 }
 
 /// Review fix 4 (`careers::retire`): the retiree's co-resident spouse moves
 /// into the same Home with him (a `Housed` event; not an elder's take-in,
 /// so `elders_taken_in` counts the retiree only).
 pub fn move_in_with(world: &mut World, e: EntityId, h: EntityId) {
-    world.set_home(e, Some(h));
-    let text = format!("{} moved in with family at {}", world.name_of(e), world.name_of(h));
+    let kids = bring_children(world, e, h);
+    let text = format!("{} moved in with family at {}{kids}", world.name_of(e), world.name_of(h));
     world.push_event(EventKind::Housed, &[e, h], text);
 }
 

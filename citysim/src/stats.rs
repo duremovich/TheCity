@@ -820,6 +820,15 @@ pub struct Jobs2Cols {
     pub camp_let_home: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub camp_caught: u32,
+    /// Round 5 U2 (OPEN-231): children gone to live with a free parent
+    /// elsewhere (`camp::follow_parents`), takes on a second neglect inside
+    /// `warn_repeat_days`, takes with no free parent at home.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub camp_followed: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub camp_take_repeat: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub camp_take_no_parent: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub notices: u32,
     #[serde(skip_serializing_if = "is_zero_i64")]
@@ -1621,6 +1630,9 @@ impl Jobs2Cols {
                 "camp_warnings",
                 "camp_let_home",
                 "camp_caught",
+                "camp_followed",
+                "camp_take_repeat",
+                "camp_take_no_parent",
                 "notices",
                 "door_rent",
                 "super_stops",
@@ -2116,6 +2128,9 @@ impl Jobs2Cols {
             self.camp_warnings.to_string(),
             self.camp_let_home.to_string(),
             self.camp_caught.to_string(),
+            self.camp_followed.to_string(),
+            self.camp_take_repeat.to_string(),
+            self.camp_take_no_parent.to_string(),
             self.notices.to_string(),
             self.door_rent.to_string(),
             self.super_stops.to_string(),

@@ -25,7 +25,7 @@ fn config() -> Config {
     // Round 4 T1 (OPEN-231): the camp's own probes take at `take_days`
     // (the warning ladder off); the ladder is walked in
     // `test_unfed_child_taken_at_take_days_before_death`.
-    cfg.camp.warn_window_days = 0;
+    cfg.camp.warn_repeat_days = 0;
     cfg
 }
 
@@ -183,8 +183,8 @@ fn test_seed_city_camp() {
 #[test]
 fn test_unfed_child_taken_at_take_days_before_death() {
     let mut cfg = config();
-    cfg.camp.warn_window_days = Config::load().camp.warn_window_days;
-    assert!(cfg.camp.warn_window_days > cfg.camp.warn_grace_days, "the ladder on");
+    cfg.camp.warn_repeat_days = Config::load().camp.warn_repeat_days;
+    assert!(cfg.camp.warn_repeat_days > cfg.camp.warn_grace_days, "the ladder on");
     let mut w = World::new(42, cfg);
     let (h, c) = family_home(&mut w);
     let parents = camp::parents_of(&w, c);

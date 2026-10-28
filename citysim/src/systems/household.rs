@@ -1178,6 +1178,14 @@ pub fn visit_now(world: &World, id: EntityId) -> Option<PendingVisit> {
     (u16::from(v.hour) * TICKS_PER_HOUR as u16 <= world.tick_of_day()).then_some(v)
 }
 
+/// Round 5 U2 (OPEN-231): `id` owes the week's Camp answer now (its hour
+/// come, the child still in a Camp): it outranks a search day
+/// (`search::considerations`; T5's buy-out probe: a jobless parent searched
+/// the boards through the day of the week's answer).
+pub fn camp_visit_due(world: &World, id: EntityId) -> bool {
+    visit_now(world, id).is_some_and(|v| matches!(v.why, VisitWhy::Camp(_)) && kin_there(world, v))
+}
+
 /// Where a Full visitor walks for `v`: the building itself for a building
 /// visit, else the building the kin is in now (a kin on the street, or a
 /// Statistical one with no building, has nowhere to walk to: the plan's own

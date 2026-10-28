@@ -159,7 +159,7 @@ pub struct ShadowArgs {
     pub map: Option<PathBuf>,
 }
 
-const ARCHETYPES: [&str; 57] = [
+const ARCHETYPES: [&str; 59] = [
     "gang_member",
     // The pressure pass phase 5b: a member of a gang whose standing order
     // marches (a raid, a retaliation, a breakout) at the start day.
@@ -238,6 +238,11 @@ const ARCHETYPES: [&str; 57] = [
     // The pressure pass R4 (OPEN-219): a parent of a child held in a standing Camp (the weekly
     // answer: a visit, a buy-out, a break-out).
     "camp_parent",
+    // Round 5 U2 (OPEN-231): a parent whose child at home went unfed last night (the ladder's
+    // next rung: a warning, a second warning's take, or a take with no free parent), and a
+    // jobless parent of a Camp child (the week's answer against a search day).
+    "neglect_parent",
+    "camp_jobless",
     // The pressure pass S6 (OPEN-224): a working parent whose child is on a
     // School's roll at the start day or earlier in the childhood (the seeded city's children).
     "school_parent",
@@ -604,6 +609,31 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
                 }
             }
             v.retain(|&a| world.has::<Brain>(a) && !world.has::<Sentence>(a) && !world.has::<Corpse>(a));
+            v
+        }
+        "neglect_parent" => {
+            let mut v = Vec::new();
+            for &k in all.iter() {
+                let home = world.comp::<citysim::Household>(k).and_then(|h| h.home);
+                let at_home =
+                    home.and_then(|h| world.comp::<Building>(h)).is_some_and(|b| b.kind == BuildingKind::Home);
+                if at_home && world.comp::<Child>(k).is_some_and(|c| c.hunger_days >= 1) {
+                    v.extend(citysim::systems::camp::parents_of(world, k));
+                }
+            }
+            v.retain(|&a| world.has::<Brain>(a) && !world.has::<Corpse>(a));
+            v
+        }
+        "camp_jobless" => {
+            let mut v = Vec::new();
+            for camp in citysim::systems::camp::standing_camps(world) {
+                for &k in citysim::systems::camp::children_of(world, camp) {
+                    v.extend(citysim::systems::camp::parents_of(world, k));
+                }
+            }
+            v.retain(|&a| {
+                world.has::<Brain>(a) && !world.has::<Job>(a) && !world.has::<Sentence>(a) && !world.has::<Corpse>(a)
+            });
             v
         }
         other => return Err(format!("unknown archetype {other:?} (known: {})", ARCHETYPES.join(", "))),
@@ -2295,7 +2325,16 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                     let at = match citysim::systems::ages::place_of(world, c) {
                         Some(Place::School(s)) => format!("at {}{why}", nm(world, s)),
                         Some(Place::Pitch(_)) => format!("at the pitch (chores{why})"),
-                        Some(Place::Home) => format!("at home (play{why})"),
+                        // Round 5 U2 (`reporter_57837`): a child living
+                        // elsewhere than the parent says where.
+                        Some(Place::Home) => {
+                            let ch = world.comp::<citysim::Household>(c).and_then(|h| h.home);
+                            let mine = world.comp::<citysim::Household>(id).and_then(|h| h.home);
+                            match ch.filter(|&h| Some(h) != mine) {
+                                Some(h) => format!("at home at {} (play{why})", nm(world, h)),
+                                None => format!("at home (play{why})"),
+                            }
+                        }
                         Some(Place::Street) => "on the street".to_string(),
                         Some(Place::Camp) => {
                             let camp = world.comp::<citysim::Household>(c).and_then(|h| h.home);
@@ -2310,7 +2349,7 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                     let ward = world.comp::<Child>(c).map_or(String::new(), |k| {
                         let mut v = String::new();
                         if let Some(w) =
-                            k.warned_day.filter(|&w| day.saturating_sub(w) <= u32::from(camp_cfg.warn_window_days))
+                            k.warned_day.filter(|&w| day.saturating_sub(w) <= u32::from(camp_cfg.warn_repeat_days))
                         {
                             v.push_str(&format!(", on the service's warning since d{w}"));
                         }

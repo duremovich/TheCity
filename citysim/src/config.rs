@@ -12244,8 +12244,10 @@ pub struct CampCfg {
     /// Round 4 T1 (OPEN-231, Dylan 2026-10-27: neglect warns first): the
     /// first `take_days` of unfed days bring the service to the door (a
     /// warning); neglect again inside this many days of it takes the child.
-    /// 0: no warning (the take at the first neglect, the base).
-    pub warn_window_days: u8,
+    /// 0: no warning (the take at the first neglect, the base). Round 5 U2
+    /// (OPEN-231, Dylan 2026-10-28: a second warning inside 30 days takes):
+    /// 30, was `warn_window_days` 14.
+    pub warn_repeat_days: u8,
     /// Round 4 T1: the warning's grace: no take before this many days
     /// after it, whatever the pantry does.
     pub warn_grace_days: u8,
@@ -12288,7 +12290,7 @@ impl Default for CampCfg {
             family_affinity: -0.2,
             loyal_share: 0.9,
             grudge_share: 0.7,
-            warn_window_days: 14,
+            warn_repeat_days: 30,
             warn_grace_days: 3,
             warn_ask_tries: 3,
             warn_ask_affinity: 0.3,

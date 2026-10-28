@@ -2422,3 +2422,67 @@ held and guards on main's binary in `target/u4_shadow_before`):
   cover onto day 1 of the off city, a leak that was there before U1).
 - No test (doctrine 2). `SAVE_VERSION` 92 (91 was U5's) (`AgesState.full_run`, the `[ages]` U1 keys, the `Jobs2Cols`
   `schools_founded` column); `analyze_run.py` prints the Schools at day 0 and the last day, and the founded count.
+
+### U2, the neglect ladder tightens (`OPEN-231`; `camp.rs`, `ages::move_in`, `search.rs`, `[camp] warn_repeat_days`)
+
+**Dylan's call (2026-10-28): a second warning inside 30 days takes; a warning with no free parent at home takes at
+once.** Built:
+
+- **The second warning takes** (`camp::take_daily`): `[camp] warn_window_days` (14) is now `warn_repeat_days` (30):
+  unfed again to `take_days` inside 30 days of the warning, past `warn_grace_days` (3), is the take, and the line
+  says so ("the child protective service took Nadia Kettering from Block#324 to Work Camp#4835: unfed 3 days again,
+  inside the warning of d7"). The same 30 days hold the household's share (`adults_share`) and the let-home's
+  warning. 20k x 30: children warned twice inside 30 days with no take 73 -> 0 (Block#239's five, d3 and d21).
+- **No free parent at home takes at once.** A free parent (`camp::free_parent`): living, adult, not sentenced, not
+  in cuffs (held or carried), not downed or laid up (`World::wounded`), not leaving; at home is the child's
+  `Household.home`. A neglect with none is the take, not a warning; so is a child on an open warning whose parents
+  are all not free at midnight (fed or not: `dancer_99218`'s warning hung open while she sat in the cells). The
+  line names each parent and where he is ("... from Block#586 to Work Camp#4835: on the service's warning and no
+  free parent at home (Winifred Adeyemi laid up, Viktor Abernathy in the cells)").
+- **The warning's household is the child's own** (`reporter_57837 d27`): the cause was `ages::move_in` /
+  `move_in_with`. An elder past `frail_from_years` taken in by a grown child (or a retiree's spouse) moved and left
+  his own young children in the old Block, unfed, with the warning naming him at a door not his. The move now
+  brings the children under his roof (`camp::send_home`, dependants: "... moved in with family at Block#21, with
+  Cerys Novak"; 295 such moves at 20k x 30). The warning is heard by the free parents living at that door only. A
+  catch-all at midnight before the ladder (`camp::follow_parents`): a child whose Home holds no free parent goes to
+  live with his first free parent with a standing Home elsewhere (a `Housed` line: "Lorcan Sato (8 y) went to live
+  with Dorian Sato at Block#2145: no free parent at home (Jocasta Marlow in the cells, Dorian Sato not living there)
+  at Block#545"). Before the move-in fix it fired 191 times (54 on day 1); after, 6 (a mother in the cells, the
+  children to their father).
+- **The `[family]` line after a take** (`camp_parent_23527 d25 09:30`): the take sets the child's routine to the
+  Camp's (the day's was picked at midnight before it), so the 09:30 line reads "in Work Camp#4835" the morning of
+  the take; `send_home` sets it back to Play. The take spends the warning (`warned_day` cleared; a let-home sets a
+  new one), so a Camp child no longer reads "on the service's warning". The line names the child's Home when it is
+  not the parent's ("at home at Block#X").
+- **A Camp answer due outranks a search day** (`household::camp_visit_due`, gated in `search::considerations`):
+  once the week's answer's hour has come and the child is still in a Camp, the search branch of the Pitch goal
+  is off until the answer is made. T5's re-pinned buy-out probe runs with the search on again (the premise
+  restored, the reason in place) and passes.
+- **Deviation: "hospitalised" is `World::wounded`.** The city has no admission; a parent downed or laid up until he
+  rises is not free. A parent in cuffs (an arrest's walk, a carry) counts as held.
+- **Deviation: the catch-all's no room check.** A child is a dependant (`send_home`'s rule, T1): it goes to the
+  parent's Home whatever its capacity, as a let-home child does.
+- **Numbers** (20k island seed 42 x 30, `--scaled --ambient-flats 50`, before = main `85886ba`, one run each):
+  ChildTaken 76 -> 73 (street takes 45 -> 41; at home 31 -> 32: 25 on a second warning, 5 with no free parent);
+  daily ch_camp mean 13.0 -> 17.3 (d29 58 -> 67); warnings 646 -> 531; Custody 339 -> 291; ch_street mean 75.9 ->
+  68.4 (d29 178 -> 133); let home 6 -> 1; followed a parent 6; buy-outs 0 -> 0, break-outs 0 -> 3; starvation
+  deaths 1 -> 0; violence deaths 80 -> 88. The `warned_day` clear at the take landed after the run (a Camp child's
+  warning read nowhere but the shadow).
+- **Shadow** (20k seed 42, `target/u2_shadow*`; `neglect_parent` and `camp_jobless` are new `--pick` archetypes):
+  the second warning's take and the line after it (`neglect_parent_19571`, Wisp Adeyemi, d10 00:10 three takes
+  "unfed 3 days again, inside the warning of d7", 09:30 "Nadia Kettering (4 y) in Work Camp#4835 (D6 The Vats)");
+  the warning at the child's own door, heard by the parents living there and the 30 days (`neglect_parent_17601
+  d21 00:10`: "... the door of Block#1696: Gwendolyn Santoro (1 y) went 2 days unfed; Lux Dunmore and Sabine
+  Santoro heard it: 3 days' grace, and unfed again before d51 the service takes them"); the warden's count
+  (`camp_warden_14571`: 21 -> 30 children d21-d26, every child ate). No-free-parent takes show in the run's events
+  (above), not in a pick's diary.
+- **Reads wrong / open** (the next pass's input): at 20k the one Camp (Work Camp#4835, the Vats) is 8-11 h from
+  every Camp parent picked, so every week's answer is "could not make the trip" (`camp_jobless_11341 d24`, `_11409`,
+  `_24312`) and a visit against a search day cannot happen in a shadow: the probe is the proof. The warning
+  groups a Block's children of two families into one line with four parents heard (`neglect_parent d10`, Block#3086).
+  A parent at 0c with "no friend to ask" has three days to find 3c, and the pantry at 0-2 runs on the
+  child-food debt for days before the second neglect lands. Buy-outs still 0.
+- Under-18: nothing here touches a victim pick, a fight or a punishment. The service's take is the ladder's only
+  teeth; the Camp feeds every child (unchanged), and the moves are a set_home at midnight. No test (doctrine 2).
+  `SAVE_VERSION` 93 (`[camp] warn_repeat_days`, the `Jobs2Cols` `camp_followed`, `camp_take_repeat`,
+  `camp_take_no_parent` columns); `analyze_run.py` prints the three.
