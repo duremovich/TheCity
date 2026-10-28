@@ -3494,7 +3494,12 @@ fn probe_laid_off_loader_with_a_profession_is_rehired_first() {
     // adult nearer the Yard takes the post (the households sit elsewhere by
     // day 5); the probe's premise is two candidates at one door.
     let mut w = world_no_pressure();
-    w.run_ticks(5 * TICKS_PER_DAY - 1);
+    // Round 5 U6 (OPEN-217): the named pimps left the hire pool, so the
+    // 00:03 Sanitation post went to the nearest jobless adult at this door
+    // (the stranger). The premise is the Yard's one post, so the laid-off
+    // are made after the midnight Sanitation hire (tick +5), not a minute
+    // before it.
+    w.run_ticks(5 * TICKS_PER_DAY + 5);
     let role = w.config.trade_role("loader").expect("the loader row");
     let yard = w.buildings_of_kind(BuildingKind::FreightYard)[0];
     let a = w

@@ -125,12 +125,29 @@ fn test_drag_holds_gangwork() {
         members.iter().copied().filter(|&x| w.comp::<citysim::Job>(x).is_none_or(|j| !j.on_shift(tod))).collect();
     for x in off_clock {
         rest(&mut w, x);
-        if citysim::utility::think(&w, x).map(|(goal, _)| goal) != Some(GoalKind::GangWork) {
+        // Round 5 U6/U3: a job off the clock at 00:00 can still have its shift
+        // pending (`shift_pending`, the pre-shift wait) and Work outscores
+        // the drag, as for a worker in shift; the pick is one whose free goal
+        // is neither.
+        if !matches!(citysim::utility::think(&w, x).map(|(goal, _)| goal), Some(GoalKind::GangWork | GoalKind::Work)) {
             m = x;
             break;
         }
     }
     rest(&mut w, m);
+    // Round 5 U6/U3: on this city every member off the clock has a GangWork
+    // target of its own at 00:00 (and the one on shift has Work), so the
+    // control's member is a well-off, ungreedy one: the drag is the only
+    // thing holding GangWork against Idle.
+    if matches!(citysim::utility::think(&w, m).map(|(goal, _)| goal), Some(GoalKind::GangWork | GoalKind::Work)) {
+        if let Some(job) = w.comp::<citysim::Job>(m).map(|j| j.on_shift(w.tick_of_day())) {
+            if job {
+                w.remove::<citysim::Job>(m);
+            }
+        }
+        w.comp_mut::<Needs>(m).expect("needs").wealth = 1.0;
+        w.comp_mut::<citysim::Personality>(m).expect("personality").greed = 0.0;
+    }
     let free = citysim::utility::think(&w, m).map(|(goal, _)| goal);
     assert_ne!(free, Some(GoalKind::GangWork), "no one in tow: another goal wins ({free:?})");
     if let Some(b) = w.comp_mut::<Brain>(m) {
