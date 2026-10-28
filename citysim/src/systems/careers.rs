@@ -175,12 +175,13 @@ pub fn foreman(world: &World, b: EntityId, exclude: Option<EntityId>) -> Option<
 }
 
 /// The Hire's and Layoff's extra actor: `b`'s foreman (careers on), `who`
-/// left out.
+/// left out; in a gang's house the gang's man (round 4 T6,
+/// `industry::picker`), as the line names him.
 pub fn foreman_actor(world: &World, b: EntityId, who: EntityId) -> Option<EntityId> {
     if !on(world) {
         return None;
     }
-    foreman(world, b, Some(who))
+    crate::systems::industry::picker(world, b, who).map(|(f, _)| f)
 }
 
 /// `economy::collect_wage`'s foreman multiplier (1 for anyone else).

@@ -945,7 +945,14 @@ fn test_shed_extra_sheds_past_cap_hires_first() {
         citysim::systems::demography::hire(&mut w, a, m, role);
     }
     w.remove::<Job>(exec);
+    // Round 4 T6: `hire` refuses a corp's exec, so the post is taken before
+    // the chair (the premise: an exec holding a post, as an owner who
+    // incorporates keeps his own).
+    let chair = w.comp_mut::<Corp>(corp).and_then(|c| c.exec.take());
     citysim::systems::demography::hire(&mut w, exec, m, role);
+    if let Some(c) = w.comp_mut::<Corp>(corp) {
+        c.exec = chair;
+    }
     w.comp_mut::<Job>(exec).expect("job").hired_tick = 1_000_000;
     let count = |w: &World| ownership::staff_at(w, m).len();
     assert_eq!(count(&w), full + 4, "full + 3 hires + the exec");

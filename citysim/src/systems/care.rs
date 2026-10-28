@@ -618,6 +618,9 @@ fn cover_pick(world: &World, c: &CareCfg, emp: EntityId, role: crate::components
         .iter()
         .copied()
         .filter(|&a| !world.has::<Job>(a) && crate::systems::demography::is_adult(world, a))
+        // Round 4 T6: a corp's exec holds no Job and is not jobless
+        // (`exec_78363 d26 00:00`: an exec hired as a sick man's Engineer).
+        .filter(|&a| !crate::systems::founding::is_exec(world, a))
         .filter(|&a| world.comp::<Brain>(a).is_some_and(|b| b.cuffed_by.is_none()))
         .filter(|&a| crate::systems::law::living(world, a) && !world.has::<crate::components::Sentence>(a))
         .filter(|&a| world.gang_of(a).is_none() && !crate::systems::wounded::is_down(world, a))

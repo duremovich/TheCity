@@ -1466,7 +1466,7 @@ fn fake_pass(world: &mut World) {
                 .iter()
                 .copied()
                 .filter(|&v| v != r && free(world, v) && !tried_recently(world, r, v, tried::FAKE))
-                .filter(|&v| !world.fake_jobs.iter().any(|j| j.victim == v))
+                .filter(|&v| !world.fake_jobs.iter().any(|j| j.victim == v) && !wary(world, v))
                 .map(|v| (world.purse(Some(v)), v))
                 .filter(|&(c, _)| c >= fee)
                 .max_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)))
@@ -1476,6 +1476,24 @@ fn fake_pass(world: &mut World) {
             }
         }
     }
+}
+
+/// Round 4 T6: a mark who learned of a con (an unsettled `Betrayed` grudge)
+/// inside `fake_wary_days` buys no job up front: the same night's second
+/// fake job read as one con with two sellers (`vendor_11367 d24 00:09`).
+fn wary(world: &World, v: EntityId) -> bool {
+    let days = world.config.leverage.fake_wary_days;
+    if days == 0 {
+        return false;
+    }
+    let window = Tick::from(days) * TICKS_PER_DAY;
+    world.comp::<crate::word::Grudges>(v).is_some_and(|gs| {
+        gs.list.iter().any(|g| {
+            g.settled.is_none()
+                && g.cause == crate::word::GrudgeCause::Betrayed
+                && world.tick.saturating_sub(g.since) < window
+        })
+    })
 }
 
 /// One fake job: `faker` sells `victim` a job that does not exist. True

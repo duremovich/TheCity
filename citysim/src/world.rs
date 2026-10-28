@@ -1215,6 +1215,12 @@ pub struct World {
     /// map would name nobody after a resume); empty off.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub meeting_tables: BTreeMap<EntityId, SmallVec<[EntityId; 6]>>,
+    /// Round 4 T6: each ledger's books, by owner (a corp, `EntityId::NONE`
+    /// the city's): the runs they caught, `(tick, runner)`, `[hack]
+    /// ledger_audit_days`, newest last (`virt::audit_ledger`). Saved while
+    /// it holds anything.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub ledger_books: BTreeMap<EntityId, std::collections::VecDeque<(Tick, EntityId)>>,
     /// Lives at work phase 5 (§ 2.4, reporter): each reporter's beat this
     /// shift (`news::beat_plan`): the scenes and the deeds interviewed.
     /// Saved while it holds anything; empty off.
@@ -2045,6 +2051,7 @@ impl World {
             notices_today: BTreeSet::new(),
             notice_fold: BTreeMap::new(),
             meeting_tables: BTreeMap::new(),
+            ledger_books: BTreeMap::new(),
             beats: BTreeMap::new(),
             beat_desk: Vec::new(),
             bylines: BTreeMap::new(),

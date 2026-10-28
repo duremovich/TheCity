@@ -285,10 +285,29 @@ pub fn foreman_note(world: &World, b: EntityId, who: EntityId, verb: &str) -> St
     if !on(world) {
         return String::new();
     }
-    match foreman(world, b, Some(who)) {
-        Some(f) => format!(" ({verb} by {}, the foreman)", world.name_of(f)),
+    match picker(world, b, who) {
+        Some((f, Some(g))) => format!(" ({verb} by {}, for {})", world.name_of(f), world.owner_label(Some(g))),
+        Some((f, None)) => format!(" ({verb} by {}, the foreman)", world.name_of(f)),
         None => String::new(),
     }
+}
+
+/// Round 4 T6: who picks (or tells) at `b`, `who` left out: in a gang's
+/// house (a front, a business the gang took for a debt) the gang's own man,
+/// its member on the staff (the lowest id), else its leader, with the gang;
+/// elsewhere [`foreman`]. The repossessed owner kept on at his old post is
+/// staff, not the gang's man (`ripperdoc_61226 d27 00:11`: the man who had
+/// just lost the shop was named picking its next hire).
+pub fn picker(world: &World, b: EntityId, who: EntityId) -> Option<(EntityId, Option<EntityId>)> {
+    let gang = world.owner_of(b).filter(|&o| world.has::<crate::components::Gang>(o));
+    if let Some(g) = gang {
+        let man = world.staff_of(b).iter().copied().filter(|&s| s != who && world.gang_of(s) == Some(g)).min();
+        let leader = world.comp::<crate::components::Gang>(g).and_then(|x| x.leader).filter(|&l| l != who);
+        if let Some(p) = man.or(leader).filter(|&p| crate::systems::law::living(world, p)) {
+            return Some((p, Some(g)));
+        }
+    }
+    foreman(world, b, Some(who)).map(|f| (f, None))
 }
 
 // ---------------------------------------------------------------------------

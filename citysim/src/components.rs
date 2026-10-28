@@ -1884,6 +1884,11 @@ pub struct Corp {
     /// stands (`industry::daily` keeps it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub office: Option<EntityId>,
+    /// Round 4 T6: the standing order the exec's last told call kept
+    /// (`"keep Grow in Tech"`); a shock rescore's same call is not news
+    /// again until the order changes (`corp_brain::rescore`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kept_call: Option<String>,
 }
 
 fn is_zero_f32_c(v: &f32) -> bool {
@@ -1960,6 +1965,7 @@ impl Corp {
             prem_today: 0,
             prem: VecDeque::new(),
             office: None,
+            kept_call: None,
         }
     }
 

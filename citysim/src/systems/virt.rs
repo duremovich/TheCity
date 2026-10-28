@@ -2012,8 +2012,21 @@ fn apply_out(world: &mut World, r: &mut Run) -> RunOutcome {
             }
             world.stats.current.virt.ledger_hacks += 1;
             note_virt_loss(world, r.target, moved, r.runner);
-            let text = format!("{runner_name} took {moved} from {}'s ledger", world.owner_label(corp));
+            let books = audit_ledger(world, corp, r.runner);
+            let cname = world.owner_label(corp);
+            let tail = match books {
+                Audit::Off => String::new(),
+                Audit::Short => format!("; {cname}'s books came up {moved}c short, the hand unknown"),
+                Audit::Matched(n) => {
+                    let before = if n == 1 { "the run before it".to_string() } else { format!("{n} runs before it") };
+                    format!("; {cname}'s books came up {moved}c short and its auditors matched it to {before}: {runner_name}")
+                }
+            };
+            let text = format!("{runner_name} took {moved} from {cname}'s ledger{tail}");
             world.push_event(EventKind::LedgerHacked, &[r.runner, corp.unwrap_or(EntityId::NONE)], text);
+            if matches!(books, Audit::Matched(_)) {
+                named_by_books(world, corp, r);
+            }
         }
     }
     let now = world.tick;
@@ -2024,6 +2037,64 @@ fn apply_out(world: &mut World, r: &mut Run) -> RunOutcome {
         }
     }
     RunOutcome::Success
+}
+
+/// Round 4 T6: what a corp's books made of a ledger run.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Audit {
+    /// The audit off (`[hack] ledger_audit_days` 0).
+    Off,
+    /// The shortfall noticed, the hand unknown.
+    Short,
+    /// The hand matched to this many of its runs on these books before.
+    Matched(usize),
+}
+
+/// Round 4 T6 (`fixer_100695`: 600c from a ledger four times a week, heat
+/// 0): a ledger's books (a corp's, `None` the city's) catch every run at
+/// once (the shortfall), and keep `(tick, runner)` for `[hack]
+/// ledger_audit_days` (`World::ledger_books`). A runner whose run
+/// is the `ledger_audit_runs`-th on the same books inside the window is
+/// matched: the same deck's prints on each (the books, not a roll).
+fn audit_ledger(world: &mut World, corp: Option<EntityId>, runner: EntityId) -> Audit {
+    let h = &world.config.hack;
+    let (days, need) = (h.ledger_audit_days, h.ledger_audit_runs.max(2) as usize);
+    if days == 0 {
+        return Audit::Off;
+    }
+    let now = world.tick;
+    let horizon = now.saturating_sub(Tick::from(days) * TICKS_PER_DAY);
+    let book = world.ledger_books.entry(corp.unwrap_or(EntityId::NONE)).or_default();
+    while book.front().is_some_and(|&(t, _)| t < horizon) {
+        book.pop_front();
+    }
+    let before = book.iter().filter(|&&(_, w)| w == runner).count();
+    book.push_back((now, runner));
+    if before + 1 >= need {
+        Audit::Matched(before)
+    } else {
+        Audit::Short
+    }
+}
+
+/// Round 4 T6: a ledger run the books matched names the runner as a trace
+/// that named him does (`trace`): the corp's Sighting at the chair's door,
+/// `DataTheft` filed (wanted: his heat), `last_seen` and `last_trace` for
+/// the guards and the chair arrest.
+fn named_by_books(world: &mut World, corp: Option<EntityId>, r: &Run) {
+    if !crate::systems::law::living(world, r.runner) {
+        return;
+    }
+    let now = world.tick;
+    let door = world.comp::<Building>(r.chair).map(|b| b.door).unwrap_or_default();
+    record_sighting(
+        world,
+        corp,
+        crate::virt::Sighting { who: r.runner, tile: door, tick: now, confidence: 1.0, relayed: false },
+    );
+    crate::systems::law::file_report(world, crate::components::Crime::DataTheft, r.runner, None);
+    world.set_last_seen(r.runner, (door, now));
+    world.last_trace.insert(r.runner, (r.chair, now));
 }
 
 /// V27 (phase 3): a Virt loss of `coins` on node `n`: a corp owner books it
