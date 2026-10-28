@@ -1424,6 +1424,9 @@ fn probe_worker_eats_before_the_shift_not_during_it() {
     pin(&mut w, a);
     let employer = w.comp::<Job>(a).and_then(|j| j.employer).unwrap();
     w.comp_mut::<Needs>(a).expect("needs").hunger = 0.75;
+    // Round 5 U7 re-pin (a moved pick): the contradictions moved the day's draws and the pick became a bartender who went out to gamble at 06:10 (Unwind) and walked straight to the bar; the subject is the meal before the shift of a worker at home, so he is amused, as the grocery probe's worker is.
+    w.comp_mut::<Needs>(a).expect("needs").fun = 0.95;
+    w.visits.remove(&a);
     if let Some(i) = w.comp_mut::<Inventory>(a) {
         i.food = 0;
         i.synth = 0;
