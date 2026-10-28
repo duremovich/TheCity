@@ -3478,6 +3478,11 @@ pub fn daily(world: &mut World) {
             _ => settle(world, id, Settle::Expired, "the deadline passed"),
         }
     }
+    // Round 6 V3 (`OPEN-238`): the law's bust before the night's posting
+    // passes (hire, the Hit market's), so a busted office takes no post in
+    // the minute it closes (V14 `fixer_40483 d26 00:09`: a beat posted on
+    // Wisp Varley's book and cancelled in the same minute).
+    heat_daily(world);
     prune_regulars(world);
     stat_regulars(world);
     // The Hit market (phase 2): stale wants lapse first (H8); the gaps
@@ -3759,7 +3764,11 @@ pub fn heat_bust(world: &mut World, fixer: EntityId) {
         settle(world, id, Settle::Cancelled, "the Fixer was closed by the law");
     }
     let d = world.district_name(world.district_of_building(fixer)).to_string();
-    let text = format!("the {d} Fixer office was closed by the law for {days} days");
+    // Round 6 V3 (`OPEN-238`): the staff go home (`routine::workday_of`
+    // reads the shut office), so the line names them.
+    let staff = world.staff_of(fixer).len();
+    let sent = if staff > 0 { format!("; its staff of {staff} sent home") } else { String::new() };
+    let text = format!("the {d} Fixer office was closed by the law for {days} days{sent}");
     world.push_event(EventKind::FixerBusted, &[fixer, owner.unwrap_or(EntityId::NONE)], text.clone());
     log(world, 0, text);
 }
@@ -4470,7 +4479,7 @@ fn prune_fixer_runs(world: &mut World) {
 
 /// Phase 3's midnight steps (C30, C31, C33, C34), from `daily`.
 fn law_and_street_daily(world: &mut World) {
-    heat_daily(world);
+    // Round 6 V3: `heat_daily` runs at the top of `daily` (before the posts).
     corruption_daily(world);
     post_vendetta_locates(world);
     prune_fixer_runs(world);

@@ -3714,6 +3714,11 @@ pub struct WeaponsCfg {
     /// ... or empties the till of a stall in the Market's district of up to
     /// this many coins.
     pub stall_take_max: i64,
+    /// Round 6 V3 (`OPEN-238`): ... the nearest stall to the thief, not one
+    /// emptied in the last this many hours (its owner minds the till after;
+    /// V14 `vendor_9648 d23`: ten Market thieves across the Sump emptied the
+    /// district's lowest owner id's till in six hours).
+    pub stall_rob_gap_hours: u32,
     /// Petty item thefts a day at most, per 1,000 residents (R3).
     pub petty_per_1000_day: f32,
     /// What a fence pays of an item's value.
@@ -3762,6 +3767,7 @@ impl Default for WeaponsCfg {
             p_pickpocket: 0.3,
             petty_reach: 3,
             stall_take_max: 10,
+            stall_rob_gap_hours: 24,
             petty_per_1000_day: 2.0,
             fence_frac: 0.4,
         }
@@ -5781,6 +5787,48 @@ pub struct CrimeCfg {
     /// the street (`law::sees_scene`).
     #[serde(default = "CrimeCfg::default_open_air")]
     pub open_air: Vec<BuildingKind>,
+    /// Round 6 V3 (`OPEN-238`): a body found and the law's case, and the
+    /// victim who tells a guard on the street (`[crime.case]`).
+    #[serde(default)]
+    pub case: CaseCfg,
+}
+
+/// Round 6 V3 (`OPEN-238`, `[crime.case]`; `demography::find_bodies`,
+/// `law::hue_and_cry`, `law::tell_the_beat`): violence with consequence.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CaseCfg {
+    /// The find pass runs every this many ticks over the unfound bodies of
+    /// violence (a body is found within this long of a passer-by's sight).
+    pub find_every_ticks: u64,
+    /// The law names the killer of a found body on this chance (the scene,
+    /// the street asked) ...
+    pub lead_p: f32,
+    /// ... or this one when the killer and the dead knew each other (a
+    /// motive, the people around them asked).
+    pub tie_lead_p: f32,
+    /// A victim's shout (the hue and cry) reaches an on-duty guard outdoors
+    /// within this many tiles of a street crime (Chebyshev; sight is 4-8).
+    pub hue_reach: u32,
+    /// Hourly, a victim (or a murder's witness) holding an unreported
+    /// first-hand sighting tells an on-duty guard outdoors within
+    /// `hue_reach`, from a lawfulness this high.
+    pub tell_lawful_min: f32,
+    /// ... of a sighting no older than this many days (ReportCrime's two).
+    pub tell_days: u64,
+}
+
+impl Default for CaseCfg {
+    fn default() -> Self {
+        CaseCfg {
+            find_every_ticks: 5,
+            lead_p: 0.25,
+            tie_lead_p: 0.6,
+            hue_reach: 12,
+            tell_lawful_min: 0.3,
+            tell_days: 2,
+        }
+    }
 }
 
 impl CrimeCfg {

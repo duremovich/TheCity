@@ -2105,7 +2105,11 @@ fn exec_wages(world: &mut World) {
         // Round 5 U7 (`OPEN-237`): an exec held in the cells keeps the chair
         // and draws no salary for the day (V13: a jailed exec paid his
         // ExecWage; a worker in the cells works no shift and is paid none).
-        if let Some(e) = exec.filter(|&e| !world.has::<crate::components::Sentence>(e)) {
+        // Round 6 V3 (`OPEN-238`): nor one laid up wounded (V14 `ceo_91004
+        // d25 00:00` +40c ExecWage on the Ripperdoc's floor).
+        if let Some(e) = exec
+            .filter(|&e| !world.has::<crate::components::Sentence>(e) && !crate::systems::wounded::is_down(world, e))
+        {
             let paid = pay(world, Some(c), Some(e), wage, Flow::ExecWage);
             // Real economy phase 2 (plan E16): the exec's wage is payroll.
             note_payroll(world, Some(c), paid);

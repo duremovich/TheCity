@@ -2843,3 +2843,85 @@ freed within the hour.
 **Deviations.** The brief's "cache or index": both (a grid index of the chromed, a per-tick guard grid) plus the
 duplicate pick removed. Not taken: `holder_of` stays a walk over the gangs (0.9 s in a 20k day once the Purist
 walk was gone); `goal::Unwind` is now the top goal (`OPEN-229`'s next read). No test (doctrine 2).
+
+### V3, violence with consequence (`OPEN-238`; `demography::find_bodies`, `demography::found`, `law::hue_and_cry`, `law::tell_the_beat`, `law::file_report_as`, `weapons::market_petty`, `wounded::laid_up`, `think::turn`, `contracts::daily`, `routine::workday_of`, `[crime.case]`, `[weapons] stall_rob_gap_hours`)
+
+Each at its cause (20k island seed 42 x 30, `--scaled --ambient-flats 50`, before = main `794bc6d`, after = the
+branch, one run each; counts from the event log by name; the one 100k run is the branch's 100k x 30 counters, for
+the Fixer's bust that no 20k run has):
+
+1. **A death is found** (`courier_48760 d25 05:25`). SawCorpse came only at the death's minute (the bodies in sight
+   then: at 05:25 in a Block, nobody awake) and after two days (`corpses`), and nothing turned a body into a case: a
+   Murder with no noticing witness left no report at all (and a witness's ReportCrime walks to the one Hall in Civic
+   Core, past `[distance.reach] report_ticks` from most of the 100k island). A `Corpse` now keeps its `killer`,
+   `tied` (killer and dead had an edge at the death: a motive) and `found`. Every `[crime.case] find_every_ticks` (5)
+   each unfound, unburied body of violence is looked for: the first waking, on-screen body that sees it
+   (`law::sees_scene`, `[crime] sight`; never through a wall, never the killer), or the Gravedigger at the burial,
+   finds it: SawCorpse, a `CorpseFound` line, and the law's case. The killer is named on `lead_p` 0.25, or
+   `tie_lead_p` 0.6 when tied, x `competence::law_mult`: a Murder report with no witness and its own line ("the law
+   named X for the Murder of Y (who knew the dead; the body found by Z)"); else "no suspect"; a killer already wanted
+   for Murder is noted. 20k after: "Beatrix Adeyemi found the body of Quill Draper at the street (D4 Mid-Levels); the
+   law opened a case and has a name" (d1 19:30), "the law named Smoke Wozniak for the Murder of Quill Draper", "Rafe
+   Crane arrested Smoke Wozniak for Murder" (d4), 30 days. 60 of 91 bodies found inside the hour, the slowest at 25 h.
+2. **A looted till is reported and the thieves known** (`vendor_9648 d23`). The till was the district's *lowest
+   owner id* with a take: every Market thief in the Sump drained one stall (main 20k: Clemence Nakamura four times,
+   twice in 6 h). Now the nearest stall to the thief, not one emptied in the last `[weapons] stall_rob_gap_hours`
+   (24), never a minor's. The owner already knew each thief (the victim's first-hand SawCrime, U7); what was missing
+   was a way to the law: **the hue and cry** (`law::hue_and_cry`, at a crime's living victim: an on-duty city guard
+   outdoors within `[crime.case] hue_reach` 12 takes the report, the suspect last seen there) and **the tell**
+   (`law::tell_the_beat`, hourly: a victim, or a Murder's witness, holding an unreported first-hand sighting from
+   the last `tell_days` tells an on-duty guard on the street within `hue_reach`; one tell a person a pass). Both read
+   ReportCrime's filters (`tell_lawful_min` 0.3, no gang member unless betraying, not keeping it to sell), and the
+   teller is awake, adult, on his feet and wanted for nothing. 100k: "Amara Upton emptied the till of Volt Ito's
+   stall (4 coins)", "Volt Ito cried out and Clemence Ramirez took the report: Amara Upton for Theft" (d15 10:28),
+   "Lux Tanner arrested Amara Upton for Theft from Volt Ito" (16:34), 3 days. 100k: 418 till thefts on 81 stalls, at
+   most 12 a stall in 30 days (V14: ten on one in six hours). 20k shadow (`target/v3_shadow2`, `guard_24210`), robbed
+   of a Grand Theft off shift at d25 19:44: "Gideon Bellamy told Kasimir Inchbald on the street: Nico Crane, for Grand
+   Theft" (d27 01:00).
+3. **The wounded** (`ceo_91004`, `guard_8429`). Both *were* carried and stabilised (V14 `d24 06:51 Rescued ... in
+   time`); what read wrong: a downed body thought in the tick its carrier's aborted plan let it go (`tick_down`
+   re-cuffs after; the CEO picked Flee at 05:53 and the needs line read `Some(Flee)` 72 h); a stabilised patient was
+   neither asleep nor thinking, so its energy drained to 0.01 every night; the ExecWage gate read only `Sentence`;
+   the licence pass sold him a weapons licence from the Ripperdoc's floor. Now `think::turn` skips the downed, the
+   stabilise clears the goal, `wounded::laid_up` (stable, under a roof) counts as asleep in `needs::run`, the exec
+   pay and the licence buyers skip the downed. The guard was already unpaid down (no duty goal,
+   `credit_guard_shifts`). No laid-up exec in the 20k picks: read from the code.
+4. **A Fixer closed is closed** (`fixer_40483 d26 00:09`). `heat_daily` (the bust) ran in `law_and_street_daily`
+   after `hire_pass` and the Hit market's posting passes in the same `contracts::daily`; it now runs first, so the
+   night's posts find the office shut (`fixer_open`) and go to another book. `routine::workday_of` reads the shut
+   office: its staff have no shift (no wage) until it reopens, and the `FixerBusted` line names them. 100k (d17
+   00:09): "the D4 Mid-Levels Fixer office was closed by the law for 7 days; its staff of 2 sent home", the same
+   minute's posts on Fixer#5120 and #5801, none on Wisp Varley's book until the minute it reopened (d24 00:09).
+
+**Numbers** (20k x 30 before -> after): Murders 50 -> 60, bodies of violence found 0 -> 91 (of 92 violent deaths;
+24 named, 64 no suspect, 3 already wanted), Murder reports 7 -> 32 (0.14 -> 0.53 a Murder; 24 of them the case's),
+Murder arrests 6 -> 26 (0.12 -> 0.43 a Murder), all Reports 1,393 -> 1,579 (hue and cry 12, tells 29), all Arrests
+974 -> 1,106, till thefts 6 -> 4 (four owners). The longest laid-up span (down to `Recovered`) 76.6 h -> 77.8 h
+(median 74.1 -> 74.5): `[wounded] recover_days` 3 is the design and was not touched; the patient now sleeps through
+it instead of draining. 100k x 30 (branch only): Murders 223, found 409 of 409 violent deaths, Murder reports 0.74
+and arrests 0.61 a Murder, hue and cry 45, tells 147, FixerBusted 1. Two earlier 20k runs of the branch (before the
+till and tell fixes) gave 0.90/0.73 and 0.75/0.58: the ratios move run to run, the shape holds.
+
+**Deviations.** The till stays the "on the thief's way out" abstraction: a reach cap on the stall (the owner out on
+the street within 10 or 40 tiles of the thief) took the 20k thefts 6 -> 0 and 1 (stalls sit far from the Markets; a
+Statistical vendor keeps no street tile), so not taken (doctrine 5). Not taken: the member dying mid-Extort (V2's
+brief); a laid-up guard posting no cover at the Precinct (V14 corp's mechanism 4); the killer's own week after
+(labour's "Haunted", a skipped shift). The found-body finder skips the Statistical (U4's indoor rule); off camera a
+body is found at its burial. `CorpseFound` is one new `EventKind`; the case's and the tells' reports are `Report`
+lines with their own text (`law::file_report_as`).
+
+**Under 18.** No victim pick widened. The till's owner gains `!ages::is_protected` (S6 had filtered the pickpocket's
+victim only). The case never names a protected killer (it says "no suspect"), and neither the hue and cry nor the
+tell files on a protected suspect: no warrant, so no arrest force, on a child. A finder may be any age (a find harms
+no one). No fight or punishment changed.
+
+**Reads wrong / open** (the next pass's input): 64 of 91 found bodies at 20k stand with no suspect and nothing comes
+after (the street's word naming a killer reaches no guard; a case could be named later from it). The 20k shadow's
+picks (`target/v3_shadow` .. `v3_shadow5`, 63 diaries) met no found body; item 1's proof is the event log. Two
+bodies in the Precinct's cells (`v3_shadow4` d26 00:13 and 00:49, "Killed by gang Ninefold") are the cells' own
+question. A tell 29 h after the robbery reads late but right (a guard robbed off shift met an on-duty colleague the
+next night).
+
+No test (doctrine 2); the arms till probe holds on its premise (one stall, at the thief's tile). `SAVE_VERSION` 97,
+renumbered at the merge (`Corpse.killer`/`tied`/`found`, `ArmsState.till_robbed`, `EventKind::CorpseFound`,
+`[crime.case]`, `[weapons] stall_rob_gap_hours`; serde defaults).

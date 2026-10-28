@@ -457,6 +457,9 @@ fn raise_crime_core(
             noticed += 1;
             if on_duty(world, k) && !is_petty(crime) && !crate::systems::contracts::on_take_of(world, k, actor) {
                 file_report(world, crime, actor, Some(k));
+            } else {
+                // Round 6 V3 (`OPEN-238`): the victim cries out on the street.
+                hue_and_cry(world, k, actor, crime, tile);
             }
         }
     }
@@ -514,6 +517,126 @@ fn raise_crime_core(
     }
 }
 
+/// Round 6 V3 (`OPEN-238`): would `w` take what it saw of `suspect` to the
+/// law (the ReportCrime goal's filters, for a word on the street): a waking,
+/// free adult on its feet and wanted for nothing, `[crime.case]
+/// tell_lawful_min` lawful, no gang
+/// member (unless betraying), not keeping it to sell, and never on a minor
+/// (CLAUDE.md, the under-18 rule: no warrant, so no arrest force, on a child).
+fn tells_the_law(world: &World, w: EntityId, suspect: EntityId) -> bool {
+    let min = world.config.crime.case.tell_lawful_min;
+    living(world, w)
+        && living(world, suspect)
+        && w != suspect
+        && !wanted(world, w)
+        && crate::systems::demography::is_adult(world, w)
+        && !crate::systems::ages::is_protected(world, suspect)
+        && !world.has::<Sentence>(w)
+        && !crate::systems::wounded::is_down(world, w)
+        && world.comp::<crate::components::Personality>(w).is_some_and(|p| p.lawfulness >= min)
+        && (world.gang_of(w).is_none() || world.comp::<Brain>(w).is_some_and(|b| b.betraying))
+        && world
+            .comp::<Brain>(w)
+            .is_some_and(|b| !matches!(b.exec, crate::exec::ExecState::Use { kind: ActionKind::Sleep, .. }))
+        && !crate::systems::consequence::keeps_quiet(world, w, suspect)
+}
+
+/// Round 6 V3 (`OPEN-238`): the nearest on-duty city guard outdoors within
+/// `[crime.case] hue_reach` of `tile` (Chebyshev; ties the lower id), not on
+/// `suspect`'s take.
+fn guard_in_earshot(world: &World, tile: TilePos, suspect: EntityId) -> Option<EntityId> {
+    let reach = world.config.crime.case.hue_reach;
+    world
+        .guards()
+        .iter()
+        .copied()
+        .filter(|&g| g != suspect && on_duty(world, g) && is_city_guard(world, g) && !world.has::<Sentence>(g))
+        .filter_map(|g| {
+            let p = world.comp::<Position>(g)?;
+            let d = chebyshev(p.tile, tile);
+            (d <= reach && outdoors(world, p.tile, p.building)).then_some((d, g))
+        })
+        .filter(|&(_, g)| !crate::systems::contracts::on_take_of(world, g, suspect))
+        .min()
+        .map(|(_, g)| g)
+}
+
+/// Round 6 V3 (`OPEN-238`): a victim on the street shouts, and an on-duty
+/// guard in earshot takes the report on the spot (the witness the victim,
+/// the suspect seen there). V14 `vendor_9648 d23`: ten thieves on one till,
+/// a SawCrime each, and no report (the Hall out of `report_ticks` reach).
+pub fn hue_and_cry(world: &mut World, victim: EntityId, actor: EntityId, crime: Crime, tile: TilePos) {
+    if is_petty(crime) || !tells_the_law(world, victim, actor) {
+        return;
+    }
+    let Some((vt, vb)) = world.comp::<Position>(victim).map(|p| (p.tile, p.building)) else { return };
+    if !outdoors(world, vt, vb) {
+        return;
+    }
+    let Some(g) = guard_in_earshot(world, vt, actor) else { return };
+    let (vn, gn, an) = (world.name_of(victim), world.name_of(g), world.name_of(actor));
+    let text = format!("{vn} cried out and {gn} took the report: {an} for {}", crime.label());
+    if file_report_as(world, crime, actor, Some(victim), Some((text, &[victim, g]))) {
+        world.set_last_seen(actor, (tile, world.tick));
+    }
+}
+
+/// Round 6 V3 (`OPEN-238`), hourly: an on-duty city guard on the street
+/// meets the people around him (`[crime.case] hue_reach`); one holding a
+/// first-hand sighting from the last `tell_days` (as its victim, or of a
+/// Murder) of a suspect not reported since tells him, and he takes the
+/// report. The street's way to the law where the one Hall is out of reach.
+fn tell_the_beat(world: &mut World) {
+    let cfg = world.config.crime.case.clone();
+    let since = world.tick.saturating_sub(cfg.tell_days * TICKS_PER_DAY);
+    let guards: Vec<EntityId> = world
+        .guards()
+        .iter()
+        .copied()
+        .filter(|&g| on_duty(world, g) && is_city_guard(world, g) && !world.has::<Sentence>(g))
+        .collect();
+    // One tell a person a pass (V3 shadow: one victim told five guards five
+    // suspects in one minute).
+    let mut tellers: BTreeSet<EntityId> = BTreeSet::new();
+    for g in guards {
+        let Some((gt, gb)) = world.comp::<Position>(g).map(|p| (p.tile, p.building)) else { continue };
+        if !outdoors(world, gt, gb) {
+            continue;
+        }
+        let near: Vec<EntityId> = world.agents_near(gt, cfg.hue_reach, None);
+        for w in near {
+            if w == g
+                || tellers.contains(&w)
+                || world.comp::<Brain>(w).is_none_or(|b| b.lod == crate::components::Lod::Statistical)
+            {
+                continue;
+            }
+            let Some((wt, wb)) = world.comp::<Position>(w).map(|p| (p.tile, p.building)) else { continue };
+            if !outdoors(world, wt, wb) || chebyshev(wt, gt) > cfg.hue_reach {
+                continue;
+            }
+            let Some(mem) = world.comp::<crate::components::Memory>(w) else { continue };
+            let told = mem
+                .entries
+                .iter()
+                .filter(|e| e.kind == MemoryKind::SawCrime && !e.second_hand && e.tick >= since)
+                .filter_map(|e| Some((e.subject?, e.crime?, e.object, e.tick, e.salience)))
+                .filter(|&(_, c, o, _, _)| !is_petty(c) && (o == Some(w) || c == Crime::Murder))
+                .filter(|&(s, _, _, t, _)| !reported_since(world, s, t))
+                .max_by(|a, b| a.4.total_cmp(&b.4))
+                .map(|(s, c, _, _, _)| (s, c));
+            let Some((s, crime)) = told else { continue };
+            if !tells_the_law(world, w, s) || crate::systems::contracts::on_take_of(world, g, s) {
+                continue;
+            }
+            let (wn, gn, sn) = (world.name_of(w), world.name_of(g), world.name_of(s));
+            let text = format!("{wn} told {gn} on the street: {sn}, for {}", crime.label());
+            tellers.insert(w);
+            file_report_as(world, crime, s, Some(w), Some((text, &[w, g])));
+        }
+    }
+}
+
 /// M15 W24: is this an Attack's crime by a hunter on its Hunt's target,
 /// with `[hunt] street_silence` on?
 pub fn street_silence_on(world: &World, actor: EntityId, object: Option<EntityId>, crime: Crime) -> bool {
@@ -532,32 +655,55 @@ pub fn silent_witness(world: &World, w: EntityId, actor: EntityId, victim: Optio
 
 /// File (or refresh) the one open report per `(suspect, crime)`.
 pub fn file_report(world: &mut World, crime: Crime, suspect: EntityId, witness: Option<EntityId>) {
+    file_report_as(world, crime, suspect, witness, None);
+}
+
+/// `file_report` with the Report line's text and extra actors given (Round 6
+/// V3: the law's case on a found body, a guard taking a victim's word);
+/// `None` is the plain "X reported Y for Z". True when a new report filed.
+pub fn file_report_as(
+    world: &mut World,
+    crime: Crime,
+    suspect: EntityId,
+    witness: Option<EntityId>,
+    line: Option<(String, &[EntityId])>,
+) -> bool {
     // Pressure pass round 2, R1: a fare is settled at the gate
     // (`systems::fares`), nobody's warrant.
     if crime == Crime::FareEvasion && crate::systems::fares::on(world) {
-        return;
+        return false;
     }
     let tick = world.tick;
     if world.refresh_open_report(crime, suspect, witness) {
-        return;
+        return false;
     }
     world.push_report(CrimeReport { crime, suspect, witness, tick, resolved: false });
     // M13 D38: a new Dealing report (a refreshed one is the same warrant).
     if crime == Crime::Dealing {
         world.stats.current.dealing_reports += 1;
     }
-    let who = witness.map_or("the city".to_string(), |w| world.name_of(w));
-    world.push_event(
-        EventKind::Report,
-        &[suspect],
-        format!("{who} reported {} for {}", world.name_of(suspect), crime.label()),
-    );
+    match line {
+        Some((text, actors)) => {
+            let mut all: Vec<EntityId> = vec![suspect];
+            all.extend(actors.iter().copied().filter(|&a| a != suspect));
+            world.push_event(EventKind::Report, &all, text);
+        }
+        None => {
+            let who = witness.map_or("the city".to_string(), |w| world.name_of(w));
+            world.push_event(
+                EventKind::Report,
+                &[suspect],
+                format!("{who} reported {} for {}", world.name_of(suspect), crime.label()),
+            );
+        }
+    }
     // Fix pass (phase 2 review): sleeping rough is not gang business; a
     // Vagrancy report against a member must not feed the wanted-gang log,
     // the pressure or the district's top gang.
     if crime != Crime::Vagrancy && crime != Crime::FareEvasion {
         crate::systems::law_brain::log_report(world, suspect);
     }
+    true
 }
 
 /// Is `a` at work: on shift inside its employer, or on a Work plan (the
@@ -2018,6 +2164,12 @@ pub fn run(world: &mut World) {
     crate::prof::timed!("law::tally_watch", tally_watch(world));
     crate::prof::timed!("law::credit_guard_shifts", credit_guard_shifts(world));
     crate::prof::timed!("law::sightings", sightings(world));
+    // Round 6 V3 (`OPEN-238`): bodies found, the case opened; victims who
+    // tell the beat.
+    crate::prof::timed!("law::find_bodies", crate::systems::demography::find_bodies(world));
+    if world.tick.is_multiple_of(crate::time::TICKS_PER_HOUR) {
+        crate::prof::timed!("law::tell_the_beat", tell_the_beat(world));
+    }
     // The island pass phase 7: the transfer vans at the Precinct.
     crate::prof::timed!("law::stations::van_tick", crate::systems::stations::van_tick(world));
     // L2 (L21): the held prisoners' needs decay hour by hour, as a body's

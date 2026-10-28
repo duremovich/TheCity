@@ -4439,6 +4439,9 @@ impl World {
             systems::ownership::jobs2_row(self).harm_blocked += 1;
             return;
         }
+        // Round 6 V3 (`OPEN-238`): the case's motive lead, read before the
+        // dead's edges go: the killer and the dead knew each other.
+        let tied = killer.is_some_and(|k| k != id && self.edge(k, id).is_some());
         // L2 phase 4 (plan L25): the ledger and the kill-rate tally read the
         // victim's tier, class and gang before anything is unlinked.
         systems::fviolence::note_death(self, id, cause, killer);
@@ -4534,7 +4537,18 @@ impl World {
         self.plan_queue.retain(|&(_, who), _| who != id);
         self.insert(
             id,
-            Corpse { died_tick: tick, cause, buried: false, buried_tick: None, loot, stripped: false, settled: false },
+            Corpse {
+                died_tick: tick,
+                cause,
+                buried: false,
+                buried_tick: None,
+                loot,
+                stripped: false,
+                settled: false,
+                killer,
+                tied,
+                found: false,
+            },
         );
         systems::assets::on_corpse(self, id);
         match cause {

@@ -205,6 +205,21 @@ fine_mult = 2
 # call-in a won corp raid feeds the gang and the law's Crackdowns; 96 keeps the M12 bands.
 answer_radius = 96
 
+# Round 6 V3 (OPEN-238; demography::find_bodies, law::hue_and_cry, law::tell_the_beat): violence with
+# consequence. A body of violence is found by the first waking body that sees it (law::sees_scene: never
+# through a wall) and the law opens a case: the killer named on a lead (the file's Report), else no
+# suspect. V14: a murder and a strip in a Block at 05:25, the killer at work at 08:10, nothing after. A
+# victim of a street crime shouts and an on-duty guard outdoors within hue_reach takes the report; hourly, a
+# victim (or a murder's witness) still holding an unreported sighting tells a guard he meets. One Hall on the
+# island: a Sump vendor robbed ten times never had a report in reach (distance.reach report_ticks).
+[crime.case]
+find_every_ticks = 5               # the find pass's cadence (ticks; a body lies at most this long in a passer-by's sight)
+lead_p = 0.25                      # the law names a found body's killer on this chance (the scene, the street asked) ...
+tie_lead_p = 0.6                   # ... or this when killer and dead knew each other (an edge at the death: a motive)
+hue_reach = 12                     # a victim's shout reaches an on-duty guard outdoors this far (tiles, Chebyshev; sight 4-8)
+tell_lawful_min = 0.3              # the hourly tell: a victim (or a murder's witness) this lawful tells a guard he meets ...
+tell_days = 2                      # ... of a first-hand sighting this fresh (ReportCrime's window)
+
 [social]
 edge_create_ticks = 30
 affinity_per_hour = 0.05
@@ -3652,6 +3667,8 @@ bribe_mult = 0.5
 p_pickpocket = 0.3                 # a Market thief also lifts a carried item within petty_reach (a contest after) ...
 petty_reach = 3
 stall_take_max = 10                # ... or empties the till of a stall in the Market's district of up to this many coins
+stall_rob_gap_hours = 24           # Round 6 V3 (OPEN-238): ... the nearest stall to the thief, not one emptied this recently
+                                   # (V14: the district's lowest owner id's till, emptied ten times in six hours)
 petty_per_1000_day = 2.0           # petty item thefts a day at most, per 1,000 residents (R3)
 fence_frac = 0.4                   # the fence pays this of an item's value (into the gang's armoury)
 

@@ -527,10 +527,14 @@ pub enum EventKind {
     /// soup line: a starving body setting out for a far kitchen, waiting in
     /// the line for the next hour's bowls, turned away when the pot ran dry.
     SoupLine,
+    /// Round 6 V3 (`OPEN-238`, `demography::find_bodies`): `[finder, dead]`
+    /// a body of violence found where it lay and the law's case on it (the
+    /// killer named on a lead is the Report line after, else no suspect).
+    CorpseFound,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 242] = [
+    pub const ALL: [EventKind; 243] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -773,6 +777,7 @@ impl EventKind {
         EventKind::Custody,
         EventKind::JobSearch,
         EventKind::SoupLine,
+        EventKind::CorpseFound,
     ];
 }
 
