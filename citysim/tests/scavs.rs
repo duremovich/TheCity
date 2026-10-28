@@ -117,7 +117,12 @@ fn test_drag_holds_gangwork() {
         w.comp_mut::<Needs>(x).expect("needs").hunger = 0.4;
     };
     let mut m = members[0];
-    let off_clock: Vec<EntityId> = members.iter().copied().filter(|&x| !w.has::<citysim::Job>(x)).collect();
+    // Round 4 (wave 1 merged): every jobless member was already on the
+    // gang's order and the fallback was a worker in shift (Work won the
+    // drag); off the clock is no Job, or a Job not on shift this tick.
+    let tod = w.tick_of_day();
+    let off_clock: Vec<EntityId> =
+        members.iter().copied().filter(|&x| w.comp::<citysim::Job>(x).is_none_or(|j| !j.on_shift(tod))).collect();
     for x in off_clock {
         rest(&mut w, x);
         if citysim::utility::think(&w, x).map(|(goal, _)| goal) != Some(GoalKind::GangWork) {
