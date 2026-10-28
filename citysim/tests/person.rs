@@ -3541,6 +3541,12 @@ fn probe_laid_off_loader_with_a_profession_is_rehired_first() {
         while w.tick < start + 2 * TICKS_PER_HOUR {
             w.vacancies.retain(|b, _| *b == yard);
             pin(&mut w, a);
+            // Round 4 wave 2: the Yard's own staffing opens a second loader
+            // post at 00:08 (the Lot layout moved the Yard's roster); the
+            // premise is the one post, so it stays one.
+            if let Some(v) = w.vacancies.get_mut(&yard) {
+                v.truncate(1);
+            }
             w.run_ticks(1);
         }
         let job = |id: EntityId| w.comp::<Job>(id).map(|j| (j.role, j.employer));

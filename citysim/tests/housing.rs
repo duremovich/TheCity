@@ -78,7 +78,15 @@ fn plain_worker(w: &World) -> EntityId {
     let execs = classes::exec_set(w);
     common::adults(w)
         .into_iter()
-        .filter(|&a| w.comp::<Job>(a).is_some_and(|j| j.employer.is_some() && j.role == Role::Clerk))
+        // Round 4 wave 2: not hired in the first day (T5's door hires put a
+        // Clerk on a post then, and `[commute_pressure] hire_now` makes a
+        // fresh hire look for a Home at the first midnight: the pressure
+        // days are this scene's subject, not the hire's).
+        .filter(|&a| {
+            w.comp::<Job>(a).is_some_and(|j| {
+                j.employer.is_some() && j.role == Role::Clerk && j.hired_tick < citysim::time::TICKS_PER_DAY
+            })
+        })
         .find(|&a| {
             w.spouse_of(a).is_none()
                 && w.gang_of(a).is_none()
