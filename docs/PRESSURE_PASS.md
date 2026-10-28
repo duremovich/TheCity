@@ -1674,3 +1674,52 @@ off (exempted after it; Visit cools 7 -> 15).
   clone before the trim: the trimmed Hollow lost its two kept members in the moved city). A walk-in seen off duty
   writes no service room with `[service]` off (`service::test_off_city_writes_nothing`).
 - No test (doctrine 2). `SAVE_VERSION` 81 (`care::State.refused`, the `[care]` and `[presence]` keys).
+
+### T1, neglect warns first and the Camp is a place (`OPEN-231`; `camp.rs`, `household.rs`, `service::civic_hour`, `[camp]` T1 keys)
+
+**The ladder (Dylan 2026-10-27: neglect warns first, a repeat inside the window takes).** `camp::take_daily`: a
+child at home at `take_days` (2) unfed brings the service to the door: one `Custody` event a Home ("the child
+protective service came to the door of Block#3641: Kieran Lindqvist (11 y), Fenn ... went 2 days unfed; Fiora
+Oyelaran and Ulric Lindqvist heard it: 3 days' grace, and unfed again before d36 the service takes them"),
+`Child.warned_day` set, the unfed count started again. Unfed again to `take_days` inside `warn_window_days` (14) and
+past `warn_grace_days` (3) is the take; past the window a neglect is a fresh warning. A street child (no door) is
+taken as before; `warn_window_days = 0` is the base (the camp's own probes run so). **The parent's side of it:**
+the first free parent short of the grace's food money (`warn_grace_days` of the children's food at his meal price)
+asks up to `warn_ask_tries` Friends at `warn_ask_affinity`, each lending above `warn_ask_keep` on `affinity x (1 -
+greed / 2)` (an edge debt; the line names each). **The household keeps the children's share** (`camp::adults_share`,
+read by `EatAtHome`/`PackMeal`, the GOAP pantry and the Statistical meal): on a warning the adults eat only what is
+above `ages::children_food_need`, and the grocery run (`routine::run_level`, `lod::stat_grocery`) counts the pantry
+alone, not food carried for a shift. **Deviation:** the spec's ladder alone moved little (ChildTaken 654 -> 389): of
+318 warnings, 163 were Homes whose parents held the food money (Block#239: four parents, 225c, taken three days
+later); a Block's adults ate the pantry bare before the children's midnight meal. The share is what moved it.
+- **Let home:** `let_home_daily` (midnight, before the ladder): a Camp child's count of midnights a parent's Home
+  (standing, the parent free and adult) held `home_pantry_days` (3) of the children's food, his other Camp children
+  counted in; at `let_home_days` (7) the parent's children go home together, on a warning ("the service let Wire
+  Ostrowski, Moth Ostrowski, Hale Ostrowski go home from Work Camp#4835 to Bertram Ostrowski at Block#927: the
+  pantry has held their food 7 nights running (home on a warning: ...)").
+- **Placement by reach:** a take prefers (after "can feed tonight") a Camp within `[distance.choice] visit_ticks`
+  of the child's Home by the first parent's `distance::trip_ahead`, then corp before city, then the nearest. "Could
+  not make the trip" stays when true.
+- **The warden's day:** the headcount at a shift's first hour is one `Custody` line naming the comings and goings
+  since the last count (`CampState.since_count`: brought in, slipped out, caught, let home, bought out, broken out,
+  came of age) and last night's meals (`reserve_today`, the unfed); a child's Inmate encounter is no warden memory
+  (as a pupil's). A day try at the fence (`p_abscond` 0.004 at a hashed hour in `abscond_hours` 9-17; the night's
+  `[service] p_camp_escape` stands): a warden on duty catches it on `p_abscond_caught` (0.75) and walks it back in
+  (no fight, no blow: nothing calls `law`; the under-18 rule), else it slips out "past <warden> in the day". The
+  visit names the warden who let the parent in (an actor: his diary has it); a failed break-out is a `Custody` line
+  naming the wardens who held the door (the fight is adults only; the child is never a party).
+- **The parent's side:** each weekly answer says what was weighed (`household::weighed`): "the 60c buy-out beyond
+  the 9c in hand", the pantry short of a week of the child's food, the break-out's crew or nerve; a buy-out says the
+  days in and the purse.
+- **Numbers** (20k island seed 42 x 30, `--scaled --ambient-flats 50`, before = main 7a56d67, one run each):
+  ChildTaken 654 -> 105 (52 of them street takes, 32 before); daily ch_camp mean 304.5 -> 24.0 (d29 591 -> 82);
+  warnings 616 (children), let home 5, absconders caught 2, escapes 30 -> 4, visits 61 -> 16, buy-outs 0 -> 0;
+  ch_street mean 59.5 -> 89.6 (d29 85 -> 159); starvation deaths 0 -> 0, mean hunger 0.636 -> 0.636, harm_blocked 0.
+  Without the share (the ladder and the ask alone): ChildTaken 389, ch_camp 129.
+- **Reads wrong / open:** street children rose (a family kept home through the warning is later evicted; its
+  children are on the street until `street_take_days`: `homeless_11532`'s three all week); the ladder does not reach
+  a homeless family. "Nobody in or out since the last count" is a daily warden line in a quiet week (T7's fold).
+  Buy-outs still 0: no camp parent holds 60c (`buyout_fee`). A camp parent's diary rarely shows the warning itself
+  (the pick is at day 21; the door came earlier): the `[family]` line carries "on the service's warning since d19".
+  The camp tests' fixture takes at `take_days` (`warn_window_days = 0`, the reason in place);
+  `test_unfed_child_taken_at_take_days_before_death` walks the ladder. No new test. `SAVE_VERSION` 84.

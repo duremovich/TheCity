@@ -287,6 +287,37 @@ pub struct CampState {
     /// The last day a take found no place and this camp took over capacity
     /// (E37: corps found a camp within 7 days of one).
     pub last_overflow_day: Option<u64>,
+    /// Round 4 T1 (OPEN-231): the comings and goings since the warden's
+    /// last headcount (`service::civic_hour` reads and clears them).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub since_count: Vec<(EntityId, CampMove)>,
+    /// Round 4 T1: tonight's meals the Reserve made up (`camp::feed`).
+    #[serde(skip_serializing_if = "is_zero_u32_camp")]
+    pub reserve_today: u32,
+}
+
+fn is_zero_u32_camp(v: &u32) -> bool {
+    *v == 0
+}
+
+/// Round 4 T1 (OPEN-231): a child's coming or going at a Camp, as the
+/// warden's headcount tells it.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CampMove {
+    /// Brought in by the service.
+    Taken,
+    /// Slipped out unseen.
+    Escaped,
+    /// Caught going over the fence and walked back in.
+    Caught,
+    /// Let home by the service (the parent's pantry held).
+    LetHome,
+    /// Bought out by a parent.
+    BoughtOut,
+    /// Broken out by a parent.
+    BrokenOut,
+    /// Came of age.
+    CameOfAge,
 }
 
 impl CampState {

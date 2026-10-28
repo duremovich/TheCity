@@ -14,7 +14,7 @@ use crate::components::{
     Building, BuildingKind, Child, Corp, Household, Identity, MemoryKind, Niche, Personality, Position, Role, Skills,
     TilePos, Zone,
 };
-use crate::econ::{CampRaised, CampState, RING_DAYS};
+use crate::econ::{CampMove, CampRaised, CampState, RING_DAYS};
 use crate::entity::EntityId;
 use crate::events::EventKind;
 use crate::systems::demography::CHILD_FOOD_PER_DAY;
@@ -32,12 +32,34 @@ pub enum ReleaseWhy {
     Rescue,
     /// Lives at work phase 3 (§ 2.2): slipped out (`p_camp_escape`).
     Escaped,
-    /// Lives at work phase 3 (§ 3.5): bought or broken out by a parent.
+    /// Lives at work phase 3 (§ 3.5): bought out by a parent.
     BoughtOut,
+    /// Round 4 T1 (OPEN-231): broken out by a parent (was `BoughtOut`).
+    BrokenOut,
+    /// Round 4 T1: let home by the service (the parent's pantry held).
+    LetHome,
+}
+
+impl ReleaseWhy {
+    fn camp_move(self) -> CampMove {
+        match self {
+            ReleaseWhy::Adult => CampMove::CameOfAge,
+            ReleaseWhy::Rescue | ReleaseWhy::BrokenOut => CampMove::BrokenOut,
+            ReleaseWhy::Escaped => CampMove::Escaped,
+            ReleaseWhy::BoughtOut => CampMove::BoughtOut,
+            ReleaseWhy::LetHome => CampMove::LetHome,
+        }
+    }
 }
 
 /// Lives at work phase 3: a Camp child-day's escape roll.
 const PURPOSE_ESCAPE: u64 = 0x4341_0002;
+/// Round 4 T1 (OPEN-231): the day's try at the fence, its hour, the catch,
+/// a warned parent's Friends' ask.
+const PURPOSE_ABSCOND: u64 = 0x4341_0003;
+const PURPOSE_ABSCOND_HOUR: u64 = 0x4341_0004;
+const PURPOSE_CAUGHT: u64 = 0x4341_0005;
+const PURPOSE_WARN_ASK: u64 = 0x4341_0006;
 
 fn hash(world: &World, purpose: u64, a: u64, b: u64) -> f32 {
     crate::systems::econ::hash_unit(world.seed(), purpose, a, b)
@@ -68,6 +90,20 @@ fn state(world: &World, camp: EntityId) -> Option<&CampState> {
 fn state_mut(world: &mut World, camp: EntityId) -> Option<&mut CampState> {
     world.comp_mut::<Building>(camp).and_then(|bd| bd.camp.as_mut())
 }
+
+/// Round 4 T1 (OPEN-231): a coming or going for the warden's next
+/// headcount (the last `MOVES_KEPT`).
+fn note_move(world: &mut World, camp: EntityId, child: EntityId, m: CampMove) {
+    if let Some(s) = state_mut(world, camp) {
+        s.since_count.push((child, m));
+        if s.since_count.len() > MOVES_KEPT {
+            s.since_count.remove(0);
+        }
+    }
+}
+
+/// The comings and goings a Camp keeps between two headcounts.
+const MOVES_KEPT: usize = 64;
 
 /// E42 (the Rescue hook): the children housed at `camp`.
 pub fn children_of(world: &World, camp: EntityId) -> &[EntityId] {
@@ -281,22 +317,39 @@ pub fn can_feed_tonight(world: &World, camp: EntityId, extra: usize) -> bool {
 /// corp camps before the city's, then the nearest (ties the lower id);
 /// else the city camp over capacity (the first camp when none is the
 /// city's); `(camp, over)`.
-fn placement(world: &World, from: TilePos) -> Option<(EntityId, bool)> {
+fn placement(world: &World, from: TilePos, parent: Option<EntityId>) -> Option<(EntityId, bool)> {
     let camps = standing_camps(world);
     let with_room = camps
         .iter()
         .copied()
         .filter(|&c| open(world, c) && children_of(world, c).len() < capacity(world, c))
         .filter_map(|c| {
-            door(world, c).map(|d| (!can_feed_tonight(world, c, 1), is_city(world, c), d.manhattan(from), c))
+            door(world, c).map(|d| {
+                (
+                    !can_feed_tonight(world, c, 1),
+                    !in_reach(world, parent, from, d),
+                    is_city(world, c),
+                    d.manhattan(from),
+                    c,
+                )
+            })
         })
         .min()
-        .map(|(_, _, _, c)| c);
+        .map(|(_, _, _, _, c)| c);
     if let Some(c) = with_room {
         return Some((c, false));
     }
     let city = camps.iter().copied().filter(|&c| open(world, c)).find(|&c| is_city(world, c));
     city.or_else(|| camps.iter().copied().find(|&c| open(world, c))).map(|c| (c, true))
+}
+
+/// Round 4 T1 (OPEN-231): a Camp door within `[distance.choice]
+/// visit_ticks` of the child's Home by the parent's trip (S1's
+/// `distance::trip_ahead`, the week's visit as `household::camp_too_far`
+/// reads it). True with no parent or the choice off.
+fn in_reach(world: &World, parent: Option<EntityId>, from: TilePos, to: TilePos) -> bool {
+    let (Some(p), Some(c)) = (parent, crate::systems::distance::choice(world)) else { return true };
+    crate::systems::distance::trip_ahead(world, p, from, to) <= c.visit_ticks
 }
 
 /// E38: a child moves into `camp`: its Household, the camp's lists, its
@@ -345,12 +398,18 @@ fn unhouse(world: &mut World, child: EntityId, camp: EntityId) -> (u32, u32) {
 }
 
 /// E38 (`demography::run`, after `children`): every `Child` in a Block
-/// with `hunger_days ≥ take_days` is taken, ascending id.
+/// with `hunger_days ≥ take_days` is on the ladder, ascending id (round 4
+/// T1, OPEN-231: the first neglect a warning at the door, a repeat inside
+/// `warn_window_days` past `warn_grace_days` the take); before it the
+/// Camp children whose parent's pantry has held are let home.
 pub fn take_daily(world: &mut World) {
-    let take_days = world.config.camp.take_days;
+    let cfg = world.config.camp.clone();
+    let take_days = cfg.take_days;
     for c in standing_camps(world) {
         prune(world, c);
     }
+    let_home_daily(world);
+    let day = u32::try_from(world.day()).unwrap_or(u32::MAX);
     let mut due: Vec<EntityId> = world
         .with::<Child>()
         .into_iter()
@@ -363,8 +422,280 @@ pub fn take_daily(world: &mut World) {
         })
         .collect();
     due.sort_unstable();
+    let mut warns: std::collections::BTreeMap<EntityId, Vec<EntityId>> = std::collections::BTreeMap::new();
     for c in due {
-        take(world, c);
+        let home = world.comp::<Household>(c).and_then(|h| h.home);
+        let warned = world.comp::<Child>(c).and_then(|k| k.warned_day);
+        match (home, warned) {
+            // No door to come to (a street child), or the ladder off: the take.
+            (None, _) => {
+                take(world, c);
+            }
+            _ if cfg.warn_window_days == 0 => {
+                take(world, c);
+            }
+            (Some(_), Some(w)) if day.saturating_sub(w) <= u32::from(cfg.warn_window_days) => {
+                if day.saturating_sub(w) >= u32::from(cfg.warn_grace_days) {
+                    take(world, c);
+                }
+            }
+            (Some(h), _) => warns.entry(h).or_default().push(c),
+        }
+    }
+    for (h, kids) in warns {
+        warn(world, h, &kids, day);
+    }
+}
+
+/// Round 4 T1 (OPEN-231, Dylan 2026-10-27: neglect warns first): the
+/// service at `home`'s door over `kids`' unfed days. Each child's
+/// `warned_day` is today and its unfed count starts again; the parents
+/// hear it (one `Custody` event, the grace and the window in it); the
+/// first free parent short of the grace's food money (`warn_grace_days`
+/// of the children's food at his meal price) asks his Friends for it
+/// (`warn_ask_*`, an edge debt), and the line says how it went.
+fn warn(world: &mut World, home: EntityId, kids: &[EntityId], day: u32) {
+    let cfg = world.config.camp.clone();
+    let mut parents: Vec<EntityId> = Vec::new();
+    let mut unfed = 0u8;
+    for &k in kids {
+        if let Some(c) = world.comp_mut::<Child>(k) {
+            unfed = unfed.max(c.hunger_days);
+            c.warned_day = Some(day);
+            c.hunger_days = 0;
+        }
+        parents.extend(parents_of(world, k));
+    }
+    parents.sort_unstable();
+    parents.dedup();
+    ownership::jobs2_row(world).camp_warnings += kids.len() as u32;
+    let names: Vec<String> = kids
+        .iter()
+        .map(|&k| format!("{} ({} y)", world.name_of(k), world.comp::<Identity>(k).map_or(0, |i| i.age_years())))
+        .collect();
+    let who: Vec<String> = parents.iter().map(|&p| world.name_of(p)).collect();
+    let heard = if who.is_empty() {
+        "nobody was home to hear it".to_string()
+    } else {
+        format!("{} heard it", who.join(" and "))
+    };
+    let until = day + u32::from(cfg.warn_window_days);
+    let mut text = format!(
+        "the child protective service came to the door of {}: {} went {unfed} days unfed; {heard}: {} days' grace, and unfed again before d{until} the service takes them",
+        world.name_of(home),
+        names.join(", "),
+        cfg.warn_grace_days,
+    );
+    let mut actors: Vec<EntityId> = parents.clone();
+    if let Some(asker) = parents.iter().copied().find(|&p| {
+        world.has::<crate::components::Brain>(p)
+            && !world.has::<crate::components::Sentence>(p)
+            && crate::systems::demography::is_adult(world, p)
+            && crate::systems::law::living(world, p)
+    }) {
+        let kids_home = world.residents_of(home).iter().filter(|&&r| world.has::<Child>(r)).count().max(1) as f32;
+        let units = (CHILD_FOOD_PER_DAY * kids_home * f32::from(cfg.warn_grace_days)).ceil() as i64;
+        let cost = units * crate::systems::life::meal_price(world, asker);
+        let held: i64 =
+            parents.iter().map(|&p| world.comp::<crate::components::Wallet>(p).map_or(0, |w| w.coins.max(0))).sum();
+        if held >= cost {
+            text.push_str(&format!(" ({held}c between them covers the {cost}c of food)"));
+        } else {
+            let (bits, lenders) = warn_ask(world, asker, cost - held, &cfg, day);
+            actors.extend(lenders);
+            text.push_str(&format!("; {} has {held}c of the {cost}c of food and {bits}", world.name_of(asker)));
+        }
+    }
+    actors.extend(kids.iter().copied());
+    actors.push(home);
+    world.push_event(EventKind::Custody, &actors, text);
+}
+
+/// Round 4 T1: the warned parent's ladder of Friends (care's ask, round 3
+/// S4, with `[camp] warn_ask_*`): the line's tail and the Friends asked.
+fn warn_ask(
+    world: &mut World,
+    id: EntityId,
+    mut need: i64,
+    cfg: &crate::config::CampCfg,
+    day: u32,
+) -> (String, Vec<EntityId>) {
+    use crate::components::{MemoryKind, RelKind, Wallet};
+    let mut friends: Vec<(f32, EntityId)> = world
+        .neighbours(id)
+        .filter(|&o| o != id && crate::systems::law::living(world, o))
+        .filter_map(|o| {
+            world
+                .edge(id, o)
+                .filter(|e| e.kind == RelKind::Friend && e.affinity >= cfg.warn_ask_affinity)
+                .map(|e| (e.affinity, o))
+        })
+        .collect();
+    friends.sort_by(|p, q| q.0.total_cmp(&p.0).then(p.1.cmp(&q.1)));
+    friends.truncate(usize::from(cfg.warn_ask_tries.max(1)));
+    if friends.is_empty() {
+        return ("no friend to ask".to_string(), Vec::new());
+    }
+    let mut bits: Vec<String> = Vec::new();
+    let mut asked = Vec::new();
+    for (k, (aff, f)) in friends.into_iter().enumerate() {
+        if need <= 0 {
+            break;
+        }
+        asked.push(f);
+        let fname = world.name_of(f);
+        let spare = world.comp::<Wallet>(f).map_or(0, |w| w.coins) - cfg.warn_ask_keep;
+        if spare <= 0 {
+            bits.push(format!("{fname} had nothing to spare"));
+            continue;
+        }
+        let greed = world.comp::<Personality>(f).map_or(0.5, |p| p.greed);
+        let roll = hash(world, PURPOSE_WARN_ASK, key(id), u64::from(day) * 8 + k as u64);
+        if roll >= aff * (1.0 - greed / 2.0) {
+            world.remember(id, MemoryKind::Rejected, Some(f), 0.5, -0.4, false);
+            bits.push(format!("{fname} turned them down"));
+            continue;
+        }
+        let lend = spare.min(need);
+        if let Some(w) = world.comp_mut::<Wallet>(f) {
+            w.coins -= lend;
+        }
+        if let Some(w) = world.comp_mut::<Wallet>(id) {
+            w.coins += lend;
+        }
+        need -= lend;
+        let (lo, _) = crate::components::edge_key(id, f);
+        let tick = world.tick;
+        let e = world.edge_entry(id, f);
+        e.debt += if lo == id { lend as i32 } else { -(lend as i32) };
+        e.debt_since.get_or_insert(tick);
+        e.last_interaction = tick;
+        world.remember(f, MemoryKind::Paid, Some(id), 0.5, 0.1, false);
+        world.remember(id, MemoryKind::Paid, Some(f), 0.6, 0.3, false);
+        bits.push(format!("{fname} lent {lend}c"));
+    }
+    let tail = if need <= 0 { ": covered".to_string() } else { format!(": still {need}c short") };
+    (format!("asked friends for the rest: {}{tail}", bits.join("; ")), asked)
+}
+
+/// Round 4 T1 (OPEN-231): a child living in `home` is on the service's
+/// warning (inside `warn_window_days` of it): the household's grocery run
+/// fills the children's food from the pantry alone (`routine::grocery_plan`,
+/// `lod::stat_grocery`: food carried for a shift feeds no child).
+pub fn home_on_warning(world: &World, home: EntityId) -> bool {
+    let window = u32::from(world.config.camp.warn_window_days);
+    if window == 0 {
+        return false;
+    }
+    let day = u32::try_from(world.day()).unwrap_or(u32::MAX);
+    world
+        .residents_of(home)
+        .iter()
+        .any(|&r| world.comp::<Child>(r).and_then(|c| c.warned_day).is_some_and(|w| day.saturating_sub(w) <= window))
+}
+
+/// Round 4 T1 (OPEN-231): the pantry units of `home` an adult may eat or
+/// pack: on the service's warning the children's food
+/// (`ages::children_food_need`) is kept back for the midnight meal (a
+/// Block's adults ate the pantry bare before the children's turn); else
+/// the whole stock.
+pub fn adults_share(world: &World, home: EntityId) -> u32 {
+    let stock = world.comp::<Building>(home).map_or(0, |b| b.stock_food);
+    if !home_on_warning(world, home) {
+        return stock;
+    }
+    stock.saturating_sub(crate::systems::ages::children_food_need(world, home))
+}
+
+/// Round 4 T1 (OPEN-231): `p` can have his Camp children home: alive,
+/// adult, free, in a standing Home whose pantry holds `home_pantry_days` of
+/// the children's food with his `away` Camp children counted in. The Home.
+fn home_holds(world: &World, p: EntityId, away: usize, cfg: &crate::config::CampCfg) -> Option<EntityId> {
+    if !crate::systems::law::living(world, p)
+        || !crate::systems::demography::is_adult(world, p)
+        || world.has::<crate::components::Sentence>(p)
+    {
+        return None;
+    }
+    let h = world.comp::<Household>(p).and_then(|x| x.home)?;
+    let b = world.comp::<Building>(h).filter(|b| b.kind == BuildingKind::Home && !b.demolished && !b.derelict)?;
+    let kids = (world.residents_of(h).iter().filter(|&&r| world.has::<Child>(r)).count() + away) as f32;
+    (b.stock_food as f32 >= CHILD_FOOD_PER_DAY * kids * cfg.home_pantry_days).then_some(h)
+}
+
+/// Round 4 T1 (OPEN-231): midnight, before the ladder: each Camp child's
+/// let-home count (a parent's Home held the food of him and his other Camp
+/// children tonight: one more, else none); at `let_home_days` the service
+/// lets the parent's children home together, on a warning (`warned_day`
+/// today: unfed again inside the window and the service takes them back).
+fn let_home_daily(world: &mut World) {
+    let cfg = world.config.camp.clone();
+    if cfg.let_home_days == 0 {
+        return;
+    }
+    let day = u32::try_from(world.day()).unwrap_or(u32::MAX);
+    // (child, its camp, its parents), every Camp child.
+    let mut kids: Vec<(EntityId, EntityId, Vec<EntityId>)> = Vec::new();
+    for camp in standing_camps(world) {
+        for &k in children_of(world, camp) {
+            kids.push((k, camp, parents_of(world, k)));
+        }
+    }
+    let mut away_n: std::collections::BTreeMap<EntityId, usize> = std::collections::BTreeMap::new();
+    for (_, _, ps) in &kids {
+        for &p in ps {
+            *away_n.entry(p).or_default() += 1;
+        }
+    }
+    let away = |p: EntityId| away_n.get(&p).copied().unwrap_or(0);
+    let picks: Vec<(EntityId, EntityId, Option<EntityId>)> = kids
+        .iter()
+        .map(|(k, camp, ps)| (*k, *camp, ps.iter().copied().find(|&p| home_holds(world, p, away(p), &cfg).is_some())))
+        .collect();
+    // (parent, camp) -> the children going home and the nights held.
+    let mut going: std::collections::BTreeMap<(EntityId, EntityId), (Vec<EntityId>, u16)> =
+        std::collections::BTreeMap::new();
+    for (k, camp, pick) in picks {
+        let Some(c) = world.comp_mut::<Child>(k) else { continue };
+        if pick.is_some() {
+            c.home_fed_days = c.home_fed_days.saturating_add(1);
+        } else {
+            c.home_fed_days = 0;
+        }
+        if let Some(p) = pick.filter(|_| c.home_fed_days >= cfg.let_home_days) {
+            let n = c.home_fed_days;
+            let e = going.entry((p, camp)).or_default();
+            e.0.push(k);
+            e.1 = e.1.max(n);
+        }
+    }
+    for ((p, camp), (ks, n)) in going {
+        let mut at = None;
+        for &k in &ks {
+            release(world, k, ReleaseWhy::LetHome);
+            at = send_home(world, k, p);
+            if let Some(c) = world.comp_mut::<Child>(k) {
+                c.warned_day = Some(day);
+                c.home_fed_days = 0;
+                c.hunger_days = 0;
+            }
+        }
+        let names: Vec<String> = ks.iter().map(|&k| world.name_of(k)).collect();
+        let (pn, what) = (world.name_of(p), world.name_of(camp));
+        let to = at.map_or_else(|| "the street".to_string(), |h| world.name_of(h));
+        let mut actors = ks.clone();
+        actors.extend([p, camp]);
+        actors.extend(at);
+        world.push_event(
+            EventKind::Custody,
+            &actors,
+            format!(
+                "the service let {} go home from {what} to {pn} at {to}: the pantry has held their food {n} nights running (home on a warning: unfed again before d{} and they go back)",
+                names.join(", "),
+                day + u32::from(cfg.warn_window_days)
+            ),
+        );
+        ownership::jobs2_row(world).camp_let_home += ks.len() as u32;
     }
 }
 
@@ -379,15 +710,16 @@ pub fn take(world: &mut World, child: EntityId) -> Option<EntityId> {
     let home = world.comp::<Household>(child).and_then(|h| h.home);
     let from =
         home.and_then(|h| door(world, h)).or_else(|| world.comp::<Position>(child).map(|p| p.tile)).unwrap_or_default();
-    let (camp, over) = placement(world, from)?;
+    let parents = parents_of(world, child);
+    let (camp, over) = placement(world, from, parents.first().copied())?;
     let day = world.day();
     if over {
         if let Some(s) = state_mut(world, camp) {
             s.last_overflow_day = Some(day);
         }
     }
-    let parents = parents_of(world, child);
     house(world, child, camp);
+    note_move(world, camp, child, CampMove::Taken);
     let (name, what) = (world.name_of(child), world.name_of(camp));
     let from_home = home.map_or_else(|| "the street".to_string(), |h| world.name_of(h));
     let mut actors = vec![child];
@@ -457,16 +789,129 @@ fn warden_rolls(world: &mut World) {
             continue;
         }
         if hash(world, PURPOSE_ESCAPE, key(k), day) < cfg.p_camp_escape {
-            release(world, k, ReleaseWhy::Escaped);
-            let home = parents_of(world, k).into_iter().find_map(|p| send_home(world, k, p));
-            let (name, what) = (world.name_of(k), world.name_of(camp));
-            let to = home.map_or_else(|| "the street".to_string(), |h| world.name_of(h));
-            let mut actors = vec![k, camp];
-            actors.extend(home);
-            world.push_event(EventKind::CampEscape, &actors, format!("{name} slipped out of {what} to {to}"));
-            ownership::jobs2_row(world).camp_escapes += 1;
+            escape(world, k, camp, "");
         }
     }
+}
+
+/// A Camp child out and away: `release(Escaped)`, then the first living
+/// parent's Home, else the street; the event (`how` after the Camp's name).
+fn escape(world: &mut World, k: EntityId, camp: EntityId, how: &str) {
+    release(world, k, ReleaseWhy::Escaped);
+    let home = parents_of(world, k).into_iter().find_map(|p| send_home(world, k, p));
+    let (name, what) = (world.name_of(k), world.name_of(camp));
+    let to = home.map_or_else(|| "the street".to_string(), |h| world.name_of(h));
+    let mut actors = vec![k, camp];
+    actors.extend(home);
+    world.push_event(EventKind::CampEscape, &actors, format!("{name} slipped out of {what}{how} to {to}"));
+    ownership::jobs2_row(world).camp_escapes += 1;
+}
+
+/// Round 4 T1 (OPEN-231, the warden's day; civic only, hourly from
+/// `service::civic_hour`): a Camp child's try at the fence on `p_abscond`
+/// at its hashed hour inside `abscond_hours`; a warden on duty there
+/// catches it on `p_abscond_caught` and walks it back in (no blow, no
+/// fight: the under-18 rule; the child stays), else it gets away
+/// (`escape`). Hashed on (child, day): no world-stream draw.
+pub fn abscond_hour(world: &mut World) {
+    let cfg = world.config.camp.clone();
+    let [from, to] = cfg.abscond_hours;
+    if cfg.p_abscond <= 0.0 || to <= from {
+        return;
+    }
+    let day = world.day();
+    let hour = (u64::from(world.tick_of_day()) / crate::time::TICKS_PER_HOUR) as u8;
+    if !(from..to).contains(&hour) {
+        return;
+    }
+    let span = f32::from(to - from);
+    let mut tries: Vec<(EntityId, EntityId)> = Vec::new();
+    for camp in standing_camps(world) {
+        for &k in children_of(world, camp) {
+            let h = from + ((hash(world, PURPOSE_ABSCOND_HOUR, key(k), day) * span) as u8).min(to - from - 1);
+            if h == hour && hash(world, PURPOSE_ABSCOND, key(k), day) < cfg.p_abscond {
+                tries.push((k, camp));
+            }
+        }
+    }
+    for (k, camp) in tries {
+        if !world.is_alive(k) || world.has::<crate::components::Corpse>(k) {
+            continue;
+        }
+        let wardens = crate::systems::service::servers_on_duty(world, camp, crate::components::ServeKind::Inmate);
+        let w = wardens.first().copied();
+        if let Some(w) = w.filter(|_| hash(world, PURPOSE_CAUGHT, key(k), day) < cfg.p_abscond_caught) {
+            let (wn, cn, what) = (world.name_of(w), world.name_of(k), world.name_of(camp));
+            let age = world.comp::<Identity>(k).map_or(0, |i| i.age_years());
+            world.push_event(
+                EventKind::Custody,
+                &[w, k, camp],
+                format!("{wn} caught {cn} ({age} y) at the fence of {what} and walked them back in"),
+            );
+            note_move(world, camp, k, CampMove::Caught);
+            ownership::jobs2_row(world).camp_caught += 1;
+        } else {
+            let how = match w {
+                Some(w) => format!(" past {} in the day", world.name_of(w)),
+                None => " in the day, no warden on the gate,".to_string(),
+            };
+            escape(world, k, camp, &how);
+        }
+    }
+}
+
+/// Round 4 T1 (OPEN-231, the warden's day): the headcount at the first
+/// hour of `wardens`' shift, one `Custody` line: the children counted, the
+/// comings and goings since the last count (by name, three a kind), last
+/// night's meals (the unfed, the Reserve's share). The ledger cleared.
+pub fn headcount(world: &mut World, camp: EntityId, wardens: &[EntityId]) {
+    if wardens.is_empty() {
+        return;
+    }
+    let n = children_of(world, camp).len();
+    let (moves, unfed, reserve) = match state_mut(world, camp) {
+        Some(s) => (std::mem::take(&mut s.since_count), s.unfed_days.back().copied().unwrap_or(0), s.reserve_today),
+        None => return,
+    };
+    let kinds = [
+        (CampMove::Taken, "brought in"),
+        (CampMove::Escaped, "slipped out"),
+        (CampMove::Caught, "caught at the fence"),
+        (CampMove::LetHome, "let home"),
+        (CampMove::BoughtOut, "bought out"),
+        (CampMove::BrokenOut, "broken out"),
+        (CampMove::CameOfAge, "came of age and left"),
+    ];
+    let mut bits: Vec<String> = Vec::new();
+    for (m, label) in kinds {
+        let who: Vec<EntityId> = moves.iter().filter(|(_, x)| *x == m).map(|(c, _)| *c).collect();
+        if who.is_empty() {
+            continue;
+        }
+        let mut names: Vec<String> = who.iter().take(3).map(|&c| world.name_of(c)).collect();
+        if who.len() > 3 {
+            names.push(format!("{} more", who.len() - 3));
+        }
+        bits.push(format!("{} {label} ({})", who.len(), names.join(", ")));
+    }
+    let since = if bits.is_empty() {
+        "; nobody in or out since the last count".to_string()
+    } else {
+        format!("; since the last count {}", bits.join(", "))
+    };
+    let meals = match (unfed, reserve) {
+        (0, 0) => "; every child ate last night".to_string(),
+        (0, r) => format!("; every child ate last night, {r} of the meals from the Reserve"),
+        (u, _) => format!("; {u} went without last night"),
+    };
+    let mut names: Vec<String> = wardens.iter().take(2).map(|&x| world.name_of(x)).collect();
+    if wardens.len() > 2 {
+        names.push(format!("{} other wardens", wardens.len() - 2));
+    }
+    let text = format!("{} counted {n} children at {}{since}{meals}", names.join(" and "), world.name_of(camp));
+    let mut actors = wardens.to_vec();
+    actors.push(camp);
+    world.push_event(EventKind::Custody, &actors, text);
 }
 
 /// Lives at work phase 3: a released child goes home to `parent`'s Home
@@ -592,6 +1037,9 @@ fn feed(world: &mut World, camp: EntityId) {
         if let Some(b) = world.comp_mut::<Building>(camp) {
             b.child_food_debt -= covered as f32;
         }
+    }
+    if let Some(s) = state_mut(world, camp) {
+        s.reserve_today = covered;
     }
     let take = take + covered;
     let fed_n = if take == needed { kids.len() } else { (take as usize * 2).min(kids.len()) };
@@ -736,7 +1184,7 @@ pub fn close(world: &mut World, camp: EntityId) {
     let from = door(world, camp).unwrap_or_default();
     let mut moved = 0;
     for k in kids {
-        let Some((to, _)) = placement(world, from) else { break };
+        let Some((to, _)) = placement(world, from, None) else { break };
         if to == camp {
             break;
         }
@@ -793,6 +1241,7 @@ pub fn release(world: &mut World, id: EntityId, why: ReleaseWhy) {
         return;
     };
     let (days, fed) = unhouse(world, id, camp);
+    note_move(world, camp, id, why.camp_move());
     world.set_home(id, None);
     let now = world.tick;
     if let Some(h) = world.comp_mut::<Household>(id) {

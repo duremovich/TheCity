@@ -22,6 +22,10 @@ fn config() -> Config {
     // The pressure pass S6 (OPEN-224): the tests stage their own families;
     // the seeded children would crowd the Blocks and the camps.
     cfg.ages.seed_child_slots = 0;
+    // Round 4 T1 (OPEN-231): the camp's own probes take at `take_days`
+    // (the warning ladder off); the ladder is walked in
+    // `test_unfed_child_taken_at_take_days_before_death`.
+    cfg.camp.warn_window_days = 0;
     cfg
 }
 
@@ -170,12 +174,18 @@ fn test_seed_city_camp() {
     assert!(camp::children_of(&w, c).is_empty());
 }
 
-/// E38 (plan 3c.6): a Block with an empty pantry: the child is at the Camp
-/// on day 2 (`take_days`), alive on day 5, `ChildTaken` logged with a Life
-/// row, each parent holds a `ChildTaken` memory and a grudge on the Law.
+/// E38 (plan 3c.6): a Block with an empty pantry: round 4 T1 (OPEN-231,
+/// Dylan 2026-10-27: neglect warns first) the service warns at day 2
+/// (`take_days`) and the child stays; unfed again past `warn_grace_days`
+/// inside the window it is at the Camp, alive two days on, `ChildTaken`
+/// logged with a Life row, each parent holds a `ChildTaken` memory and a
+/// grudge on the Law.
 #[test]
 fn test_unfed_child_taken_at_take_days_before_death() {
-    let mut w = world();
+    let mut cfg = config();
+    cfg.camp.warn_window_days = Config::load().camp.warn_window_days;
+    assert!(cfg.camp.warn_window_days > cfg.camp.warn_grace_days, "the ladder on");
+    let mut w = World::new(42, cfg);
     let (h, c) = family_home(&mut w);
     let parents = camp::parents_of(&w, c);
     let camp_b = city_camp(&w);
@@ -183,10 +193,18 @@ fn test_unfed_child_taken_at_take_days_before_death() {
     assert_eq!(hunger_days(&w, c), 1);
     assert_eq!(home_of(&w, c), Some(h));
     run_days_starving(&mut w, 1, Some(h));
-    assert_eq!(home_of(&w, c), Some(camp_b), "taken at two unfed days");
+    // Warned, not taken: still with the family (the broke family may have
+    // moved Homes on the emptied wallets; the starving follows it).
+    let h2 = home_of(&w, c).expect("a home");
+    assert_ne!(h2, camp_b, "warned at two unfed days, not taken");
+    assert!(w.comp::<Child>(c).is_some_and(|k| k.warned_day.is_some()), "the warning");
+    assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::Custody && e.actors.contains(&c)));
+    let grace = u64::from(w.config.camp.warn_grace_days);
+    run_days_starving(&mut w, grace, Some(h2));
+    assert_eq!(home_of(&w, c), Some(camp_b), "unfed again past the grace: taken");
     assert!(camp::children_of(&w, camp_b).contains(&c));
     assert_eq!(w.comp::<Position>(c).and_then(|p| p.building), Some(camp_b));
-    assert!(!w.residents_of(h).contains(&c), "out of the Block's residents");
+    assert!(!w.residents_of(h2).contains(&c), "out of the Block's residents");
     // The take is the new day's midnight pass: its row is `stats.current`.
     assert!(w.stats.current.econ.children_taken >= 1);
     let taken = w.events.iter().find(|e| e.kind == citysim::EventKind::ChildTaken).expect("ChildTaken");
@@ -204,7 +222,7 @@ fn test_unfed_child_taken_at_take_days_before_death() {
             .comp::<citysim::Life>(p)
             .is_some_and(|l| l.events.iter().any(|e| e.kind == citysim::LifeKind::ChildTaken)));
     }
-    // Alive on day 5, fed at the camp (the hunger debt cleared).
+    // Alive days on, fed at the camp (the hunger debt cleared).
     run_days_starving(&mut w, 3, Some(h));
     assert!(w.has::<Identity>(c) && w.has::<Child>(c), "alive at the camp");
     assert_eq!(hunger_days(&w, c), 0, "the camp fed tonight's debt first");

@@ -473,7 +473,16 @@ fn civic_hour(world: &mut World) {
         for k in kids {
             arrive(world, k, camp, ServeKind::Inmate, 0);
         }
+        // Round 4 T1 (OPEN-231): the count is one line (a child's Inmate
+        // encounter is no memory of the warden's, as a pupil's).
+        let counting: Vec<EntityId> = servers(world, camp, ServeKind::Inmate)
+            .into_iter()
+            .filter(|&(t, _)| first_hour(world, t))
+            .map(|(t, _)| t)
+            .collect();
+        crate::systems::camp::headcount(world, camp, &counting);
     }
+    crate::systems::camp::abscond_hour(world);
 }
 
 /// § 2.2 (teacher): a taught School day: `teacher_floor + (1 −
@@ -861,7 +870,10 @@ fn encounter_row(
     // buried the teacher's memory, and the diary read the pupil as "a
     // pupil's parent"): the day's class is one event (`civic_hour`).
     let pupil = kind == ServeKind::Pupil && world.has::<Child>(served);
-    if !blank_call && !pupil {
+    // Round 4 T1 (OPEN-231): nor a Camp child at the warden's count (the
+    // headcount is one `Custody` line, `camp::headcount`).
+    let counted = kind == ServeKind::Inmate && world.has::<Child>(served);
+    if !blank_call && !pupil && !counted {
         world.remember(server, MemoryKind::Served, Some(served), salience, row.valence, false);
         world.remember(served, MemoryKind::Served, Some(server), salience, row.valence, false);
     }

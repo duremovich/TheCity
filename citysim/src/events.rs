@@ -507,10 +507,16 @@ pub enum EventKind {
     /// fare dodger caught at the El (fined, beaten), banned, a ban broken,
     /// up off the platform.
     Fare,
+    /// Round 4 T1 (OPEN-231): the child protective service and the Camp's
+    /// inside. `[parent.., child.., home]` the service at the door (a
+    /// warning); `[warden, camp]` a headcount; `[warden, child, camp]` an
+    /// absconder walked back in; `[child, parent, camp, home?]` a child let
+    /// home; `[parent, friends..]` a warned parent's ask.
+    Custody,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 238] = [
+    pub const ALL: [EventKind; 239] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -749,6 +755,7 @@ impl EventKind {
         EventKind::Cells,
         EventKind::Crew,
         EventKind::Fare,
+        EventKind::Custody,
     ];
 }
 

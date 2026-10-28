@@ -12046,6 +12046,35 @@ pub struct CampCfg {
     pub loyal_share: f32,
     /// E41: fed share below which the released adult holds a grudge.
     pub grudge_share: f32,
+    /// Round 4 T1 (OPEN-231, Dylan 2026-10-27: neglect warns first): the
+    /// first `take_days` of unfed days bring the service to the door (a
+    /// warning); neglect again inside this many days of it takes the child.
+    /// 0: no warning (the take at the first neglect, the base).
+    pub warn_window_days: u8,
+    /// Round 4 T1: the warning's grace: no take before this many days
+    /// after it, whatever the pantry does.
+    pub warn_grace_days: u8,
+    /// Round 4 T1: a warned parent short of the grace's food money asks up
+    /// to this many Friends at or above `warn_ask_affinity`, warmest first;
+    /// one with coins above `warn_ask_keep` lends on `affinity × (1 −
+    /// greed / 2)` (an edge debt).
+    pub warn_ask_tries: u8,
+    pub warn_ask_affinity: f32,
+    pub warn_ask_keep: i64,
+    /// Round 4 T1: a Camp child goes home once a parent's Home has held
+    /// this many days of its children's food (`CHILD_FOOD_PER_DAY`, the
+    /// child counted in) ...
+    pub home_pantry_days: f32,
+    /// ... for this many midnights running (home on a warning).
+    pub let_home_days: u16,
+    /// Round 4 T1 (the warden's day): a Camp child-day's chance of a try
+    /// at the fence in the day, at a hashed hour inside `abscond_hours`
+    /// (the night's `[service] p_camp_escape` stands beside it) ...
+    pub p_abscond: f32,
+    pub abscond_hours: [u8; 2],
+    /// ... and a warden on duty's chance of catching the child and walking
+    /// it back in (never a blow: the under-18 rule).
+    pub p_abscond_caught: f32,
 }
 
 impl Default for CampCfg {
@@ -12064,6 +12093,16 @@ impl Default for CampCfg {
             family_affinity: -0.2,
             loyal_share: 0.9,
             grudge_share: 0.7,
+            warn_window_days: 14,
+            warn_grace_days: 3,
+            warn_ask_tries: 3,
+            warn_ask_affinity: 0.3,
+            warn_ask_keep: 10,
+            home_pantry_days: 3.0,
+            let_home_days: 7,
+            p_abscond: 0.004,
+            abscond_hours: [9, 17],
+            p_abscond_caught: 0.75,
         }
     }
 }
