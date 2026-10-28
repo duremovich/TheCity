@@ -519,6 +519,33 @@ pub struct VerbsCfg {
     /// ... his safety falls by this (a `Threatened` memory, the event in
     /// his diary and his guards').
     pub hit_heard_safety: f32,
+    /// Round 4 T4 (OPEN-217): the door's arrivals, refusals and rough
+    /// clients go to the bouncer standing the door: a body among the present
+    /// door staff first (the hash of the visitor and the hour among them),
+    /// else the hash among all (an off-screen colleague counted present by
+    /// the clock took every let-in as the lowest id: V12's 100k bouncers);
+    /// and a visit goes to a body of `night_rows` on the floor with room
+    /// first (`service::pick_server`).
+    pub door_body_first: bool,
+    /// Round 4 T4: the `[[serves]]` keys whose body tells its night at the
+    /// shift's end (served, tips, regulars, the room) and whose venue's
+    /// off-screen visits are drawn into its shift (`leisure::queue_at_counter`,
+    /// as a counter body's: a Club with a body Host took its whole evening
+    /// in one 21:00 batch).
+    pub night_rows: Vec<String>,
+    /// ... the keys among them whose stations blocks are sets on the stage
+    /// (one line a set: the room, the tips, the tippers).
+    pub set_rows: Vec<String>,
+    /// ... names a night's, a set's or a shape-up's line gives (the rest "and N more").
+    pub night_names: u8,
+    /// Round 4 T4: a Yard's foreman with a body walks to its gate in the dawn
+    /// window (the Pitch goal) and the shape-up is his morning: one line a
+    /// Yard (who was picked, who was sent home), the picks' Hire lines no
+    /// longer his (174 a week), a line for each body sent home.
+    pub shape_up_gate: bool,
+    /// ... he is at the gate this many minutes before `[jobs2] corner_hour`
+    /// (he sets out, or wakes, by the travel from where he is).
+    pub shape_up_lead_min: u16,
 }
 
 impl Default for VerbsCfg {
@@ -544,6 +571,12 @@ impl Default for VerbsCfg {
             door_ban_days: 14,
             hit_heard_p: 0.5,
             hit_heard_safety: 0.3,
+            door_body_first: true,
+            night_rows: vec!["dancer".to_string(), "Host".to_string()],
+            set_rows: vec!["dancer".to_string()],
+            night_names: 3,
+            shape_up_gate: true,
+            shape_up_lead_min: 20,
         }
     }
 }

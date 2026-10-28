@@ -264,6 +264,13 @@ pub fn door_ok(world: &World, id: EntityId, b: EntityId) -> bool {
     if crate::systems::vice::barred(world, id, b) {
         return false;
     }
+    // Round 4 T4 (the under-18 rule): no vice house takes a client under 18,
+    // a bouncer on the door or not (`ages::is_protected`).
+    if kind_of(world, b).is_some_and(|k| crate::systems::vice::is_vice_kind(k) || k == BuildingKind::Dollhouse)
+        && crate::systems::ages::is_protected(world, id)
+    {
+        return false;
+    }
     match kind_of(world, b) {
         Some(BuildingKind::Lounge) => {
             crate::systems::classes::class_of(world, id) != Class::Dreg
@@ -2253,9 +2260,14 @@ pub fn counter_bodies(world: &World, b: EntityId) -> Vec<EntityId> {
         .iter()
         .copied()
         .filter(|&s| {
-            world
+            // Round 4 T4 (OPEN-217): a serving body of `[verbs] night_rows`
+            // (a dancer, a club hand) draws the venue's off-screen visits
+            // into its shift as a counter body does (a Club with only a body
+            // Host took its whole evening in one 21:00 batch).
+            (world
                 .comp::<crate::components::Job>(s)
                 .is_some_and(|j| crate::systems::shift::shape_of(world, j.role) == crate::config::ShiftShape::Counter)
+                || crate::systems::service::night_row(world, s, false))
                 && world.comp::<Brain>(s).is_some_and(|br| br.lod != Lod::Statistical)
                 && !world.has::<crate::components::Sentence>(s)
                 && crate::systems::law::living(world, s)

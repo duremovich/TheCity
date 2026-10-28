@@ -835,6 +835,19 @@ pub struct Jobs2Cols {
     pub door_barred: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub hit_heard: u32,
+    /// Round 4 T4 (OPEN-217): a dancer's sets on the stage, a serving
+    /// body's night told, the under-age turned away at a kept door, a
+    /// body sent home from the shape-up, a Yard's foreman at the gate for it.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub sets_danced: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub serve_nights: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub door_under_age: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub shape_up_home: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub foreman_gate: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub fares_short: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
@@ -1567,6 +1580,11 @@ impl Jobs2Cols {
                 "door_rough",
                 "door_barred",
                 "hit_heard",
+                "sets_danced",
+                "serve_nights",
+                "door_under_age",
+                "shape_up_home",
+                "foreman_gate",
                 "fares_short",
                 "parcels_delivered",
                 "parcels_returned",
@@ -2040,6 +2058,11 @@ impl Jobs2Cols {
             self.door_rough.to_string(),
             self.door_barred.to_string(),
             self.hit_heard.to_string(),
+            self.sets_danced.to_string(),
+            self.serve_nights.to_string(),
+            self.door_under_age.to_string(),
+            self.shape_up_home.to_string(),
+            self.foreman_gate.to_string(),
             self.fares_short.to_string(),
             self.parcels_delivered.to_string(),
             self.parcels_returned.to_string(),

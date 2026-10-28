@@ -654,7 +654,9 @@ pub fn finishes_early(world: &World, id: EntityId, kind: ActionKind, started: Ti
             // L2 shadow fixes item 3: a sleep runs to `sleep_wake_energy`.
             let wake = world.config.life.sleep_wake_energy;
             world.comp::<Needs>(id).is_some_and(|n| n.energy >= wake)
-                || (crate::exec::routine::must_leave_for_work(world, id)
+                || ((crate::exec::routine::must_leave_for_work(world, id)
+                    // Round 4 T4 (OPEN-217): a Yard's foreman up for the shape-up.
+                    || crate::systems::streetwork::foreman_due(world, id))
                     && world.tick.saturating_sub(started) >= world.config.life.sleep_min_ticks)
         }
         ActionKind::Meeting => crate::systems::life::exec_shift_over(world),
@@ -1004,6 +1006,8 @@ pub fn on_complete(
                 // Round 3 S4 (OPEN-216): a super's block is a leg (a repair,
                 // a complaint, the stairs).
                 crate::systems::service::super_leg(world, id, started);
+                // Round 4 T4 (OPEN-217): a dancer's block is a set.
+                crate::systems::vice::set_done(world, id, started);
                 return StepResult::Done;
             }
             // Jobs and room J13: a producing trade's shift makes its output
@@ -1014,6 +1018,7 @@ pub fn on_complete(
                     crate::systems::trades::accrue(world, id, b, now.saturating_sub(from));
                 }
             }
+            crate::systems::vice::set_done(world, id, started);
             crate::systems::shift::shift_closed(world, id);
             end_shift(world, id);
             StepResult::Done

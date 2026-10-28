@@ -1370,6 +1370,13 @@ pub fn hire_candidate(world: &World, employer: EntityId, role: Role) -> Option<E
 }
 
 pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
+    hire_with(world, id, employer, role, true);
+}
+
+/// [`hire`], the foreman an actor of the Hire event or not (round 4 T4: a
+/// Yard's shape-up is the foreman's one line a morning, `streetwork::dawn_pick`;
+/// the hand's Hire still names him).
+pub fn hire_with(world: &mut World, id: EntityId, employer: EntityId, role: Role, foreman_actor: bool) {
     // The pressure pass S6 (Dylan 2026-10-27): no job under 18 (every pick
     // takes an adult; the backstop).
     if crate::systems::ages::is_protected(world, id) {
@@ -1434,7 +1441,9 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
     // diary holds the hire); a holder of the trade counted.
     let mut actors = vec![id, employer];
     if let Some(f) = crate::systems::careers::foreman_actor(world, employer, id) {
-        actors.push(f);
+        if foreman_actor {
+            actors.push(f);
+        }
         ownership_row(world).foreman_hires += 1;
     }
     if crate::systems::careers::holds(world, id, role) {
