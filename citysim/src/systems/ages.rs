@@ -11,9 +11,12 @@
 //!   `Street` (it begs `child_beg_coins` from a resident of its district, a
 //!   gift; steals on `child_theft_p`; after `street_take_days` the camp
 //!   takes it, the E38 path); on a weekday a child of `school_from_years`
-//!   or more with a School in reach whose fee the
-//!   household can spare (or the `public_school` lever) → `School` (the fee
-//!   `Flow::Contract` to its owner, `edu_days`); on a weekday a parent with a
+//!   or more → `School` at the nearest School with room on its roll
+//!   (`school_places_per_teacher` a teacher) within `school_trip_ticks` of
+//!   the Home door, walked or by the El (round 4 T2, OPEN-232), whose fee
+//!   (and the El's fares) the household can spare (the fee waived by the
+//!   `public_school` lever) (the fee `Flow::Contract` to its owner,
+//!   `edu_days`); why not is `Child.school_miss`; on a weekday a parent with a
 //!   Pitch → `Chores` (at the pitch); else `Play`. At 18 the school days add
 //!   `edu_gain` each to the education (`Schooling`), and a street childhood
 //!   takes stealth up and lawfulness down.
@@ -43,11 +46,13 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::components::{
-    Building, BuildingKind, Child, Household, Identity, Job, Personality, Routine, Sentence, Skills, Slot, Wallet,
+    Building, BuildingKind, Child, Household, Identity, Job, Personality, Routine, SchoolMiss, Sentence, Skills, Slot,
+    TilePos, Wallet,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
 use crate::systems::ownership::{self, Flow};
+use crate::time::Tick;
 
 use crate::world::World;
 
@@ -99,6 +104,13 @@ pub struct AgesState {
     /// The maimed: their level (1-3) and the slot (none for a cancer).
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub maimed: BTreeMap<EntityId, (u8, Option<Slot>)>,
+    /// Round 4 T2 (OPEN-232): the children on each School's roll today (the
+    /// midnight's pick), and the day it was taken: a teacher's shift at a
+    /// School with none on it is no workday ([`teacher_idle`]).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub rolls: BTreeMap<EntityId, u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub roll_day: Option<u64>,
 }
 
 impl AgesState {
@@ -239,29 +251,142 @@ fn prosthetics(world: &mut World) {
 // Children
 // ---------------------------------------------------------------------------
 
-/// A School within `school_reach` of `from` (door Manhattan, ties the lower id).
-pub(crate) fn school_near(world: &World, from: crate::components::TilePos) -> Option<EntityId> {
-    let reach = world.config.ages.school_reach;
-    world
+/// Round 4 T2 (OPEN-232): the school run from a Home door `from` to a
+/// School door `to`: the walk (Manhattan at `[exec] move_ticks_full`), or
+/// the El's structural estimate (`distance::travel`) when it is quicker;
+/// `(ticks, by the El)`. The child rides on the fares its household pays
+/// (`school_el_fares`), never on a dodge: no gate, no guard, no beating.
+pub fn school_trip(world: &World, from: TilePos, to: TilePos) -> (Tick, bool) {
+    let walk = Tick::from(from.manhattan(to)) * world.config.exec.move_ticks_full;
+    let el = crate::systems::distance::travel(world, from, to);
+    if el < walk {
+        (el, true)
+    } else {
+        (walk, false)
+    }
+}
+
+/// T2: the standing Schools within `[ages] school_trip_ticks` of `from`
+/// by [`school_trip`], nearest first (ties the lower id): `(ticks, by the
+/// El, School)`.
+pub fn schools_in_reach(world: &World, from: TilePos) -> Vec<(Tick, bool, EntityId)> {
+    let limit = world.config.ages.school_trip_ticks;
+    let mut v: Vec<(Tick, bool, EntityId)> = world
         .buildings_of_kind(BuildingKind::School)
         .iter()
         .copied()
         .filter_map(|b| {
             let bd = world.comp::<Building>(b).filter(|bd| !bd.demolished && !bd.derelict)?;
-            let d = bd.door.manhattan(from);
-            (d <= reach).then_some((d, b))
+            let (t, el) = school_trip(world, from, bd.door);
+            (t <= limit).then_some((t, el, b))
         })
-        .min()
-        .map(|(_, b)| b)
+        .collect();
+    v.sort_by_key(|&(t, _, b)| (t, b));
+    v
 }
 
-/// The household's payer: a living adult parent sharing the child's home,
-/// else any adult resident of it (the lowest id).
+/// The nearest School within the trip limit of `from` (no roll, no fee:
+/// the relocation's `commute::school_kept`).
+pub(crate) fn school_near(world: &World, from: TilePos) -> Option<EntityId> {
+    schools_in_reach(world, from).first().map(|&(_, _, b)| b)
+}
+
+/// T2: a School's roll: `school_places_per_teacher` for each living
+/// teacher on its staff (a School with none takes no one).
+pub fn roll_cap(world: &World, school: EntityId) -> u32 {
+    let teachers = world
+        .staff_of(school)
+        .iter()
+        .filter(|&&t| world.is_alive(t) && world.comp::<Job>(t).is_some_and(|j| j.employer == Some(school)))
+        .count() as u32;
+    teachers * world.config.ages.school_places_per_teacher
+}
+
+/// T2 (OPEN-232): `job` is a post at a School whose roll for `shift_key`'s
+/// day is empty (a rest day, or no child in reach): no class, no
+/// ClerkWork, no shift and no wage (`exec::routine::workday_of`, both
+/// tiers). `false` before the first midnight's roll, for a shift on another
+/// day than the roll's, or off.
+pub fn teacher_idle(world: &World, job: &Job, shift_key: i64) -> bool {
+    let Some(s) = job.employer else { return false };
+    if !on(world) || world.jobs2.ages.roll_day.is_none_or(|d| d as i64 != shift_key) {
+        return false;
+    }
+    if world.comp::<Building>(s).is_none_or(|b| b.kind != BuildingKind::School) {
+        return false;
+    }
+    !world.jobs2.ages.rolls.contains_key(&s)
+}
+
+/// T2: tonight's pick for a school-age child at Home `h` (door `door`) on
+/// a school day: the nearest School in reach with room on its roll whose
+/// fee (and the El's fares past the walk) the household can spare, paid
+/// here; else why not, with the School that turned it away or was too dear.
+struct Pick {
+    school: Option<EntityId>,
+    miss: Option<SchoolMiss>,
+}
+
+fn pick_school(
+    world: &mut World,
+    head: Option<EntityId>,
+    cands: &[(Tick, bool, EntityId)],
+    rolls: &mut BTreeMap<EntityId, u32>,
+    caps: &mut BTreeMap<EntityId, u32>,
+) -> Pick {
+    let cfg = &world.config.ages;
+    let fee = if world.levers.public_school { 0 } else { cfg.school_fee };
+    let el_fare = world.config.transit.fare * cfg.school_el_fares;
+    let purse = head.map_or(0, |p| crate::systems::leisure::spendable(world, p));
+    let mut miss = Pick { school: None, miss: Some(if cands.is_empty() { SchoolMiss::Far } else { SchoolMiss::Full }) };
+    for &(_, el, s) in cands {
+        let cap = *caps.entry(s).or_insert_with(|| roll_cap(world, s));
+        let on_roll = rolls.get(&s).copied().unwrap_or(0);
+        if on_roll >= cap {
+            if miss.school.is_none() {
+                miss.school = Some(s);
+            }
+            continue;
+        }
+        let cost = fee + if el { el_fare } else { 0 };
+        if cost > 0 && (head.is_none() || purse < cost) {
+            if miss.miss != Some(SchoolMiss::Purse) {
+                miss = Pick { school: Some(s), miss: Some(SchoolMiss::Purse) };
+            }
+            continue;
+        }
+        if el && el_fare > 0 {
+            // The fares, the head's, to the Treasury as every fare.
+            ownership::pay(world, head, None, el_fare, Flow::Fare);
+            ownership::jobs2_row(world).school_el += 1;
+        }
+        if fee > 0 {
+            let owner = world.owner_of(s);
+            let moved = ownership::pay(world, head, owner, fee, Flow::Contract);
+            ownership::credit(world, s, moved);
+            ownership::jobs2_row(world).school_fees += moved;
+        }
+        *rolls.entry(s).or_insert(0) += 1;
+        return Pick { school: Some(s), miss: None };
+    }
+    miss
+}
+
+/// The household's payer: the living adult parent sharing the child's home
+/// with the most to spare (round 4 T2: whichever parent holds the money
+/// pays; S6 read the lower id's purse alone), ties the lower id; else any
+/// adult resident of it (the lowest id).
 fn head_of(world: &World, child: EntityId, home: EntityId) -> Option<EntityId> {
     let parents = crate::systems::camp::parents_of(world, child);
-    parents.into_iter().filter(|&p| world.comp::<Household>(p).and_then(|h| h.home) == Some(home)).min().or_else(|| {
-        world.residents_of(home).iter().copied().filter(|&r| crate::systems::demography::is_adult(world, r)).min()
-    })
+    parents
+        .into_iter()
+        .filter(|&p| world.comp::<Household>(p).and_then(|h| h.home) == Some(home))
+        .map(|p| (std::cmp::Reverse(crate::systems::leisure::spendable(world, p)), p))
+        .min()
+        .map(|(_, p)| p)
+        .or_else(|| {
+            world.residents_of(home).iter().copied().filter(|&r| crate::systems::demography::is_adult(world, r)).min()
+        })
 }
 
 /// Where `child` is today (the § 12 probe reads it): the School, a
@@ -280,10 +405,24 @@ pub fn place_of(world: &World, child: EntityId) -> Option<Place> {
     let c = world.comp::<Child>(child)?;
     let home = world.comp::<Household>(child).and_then(|h| h.home);
     Some(match c.routine {
-        Routine::School => {
-            let from = home.and_then(|h| world.comp::<Building>(h)).map(|b| b.door)?;
-            Place::School(school_near(world, from)?)
-        }
+        // T2 (OPEN-232): the School whose roll it is on (a routine set by
+        // hand, as a probe's, reads the nearest standing School by the trip).
+        Routine::School => match c.school {
+            Some(s) => Place::School(s),
+            None => {
+                let from = home.and_then(|h| world.comp::<Building>(h)).map(|b| b.door)?;
+                let s = world
+                    .buildings_of_kind(BuildingKind::School)
+                    .iter()
+                    .copied()
+                    .filter_map(|b| {
+                        let bd = world.comp::<Building>(b).filter(|bd| !bd.demolished && !bd.derelict)?;
+                        Some((school_trip(world, from, bd.door).0, b))
+                    })
+                    .min()?;
+                Place::School(s.1)
+            }
+        },
         Routine::Chores => {
             let p = crate::systems::camp::parents_of(world, child)
                 .into_iter()
@@ -342,6 +481,11 @@ fn children(world: &mut World) {
     let wd = weekday(world);
     let kids: Vec<EntityId> = world.with::<Child>();
     let mut takes: Vec<EntityId> = Vec::new();
+    // Round 4 T2 (OPEN-232): tonight's rolls fill in child order; a Home's
+    // Schools in reach are read once.
+    let mut rolls: BTreeMap<EntityId, u32> = BTreeMap::new();
+    let mut caps: BTreeMap<EntityId, u32> = BTreeMap::new();
+    let mut reach: BTreeMap<EntityId, Vec<(Tick, bool, EntityId)>> = BTreeMap::new();
     for k in kids {
         // A child has no Brain (`law::living` reads one): alive, not a corpse.
         if !world.is_alive(k) || world.has::<crate::components::Corpse>(k) {
@@ -349,6 +493,7 @@ fn children(world: &mut World) {
         }
         let home = world.comp::<Household>(k).and_then(|h| h.home);
         let in_camp = home.is_some_and(|h| world.comp::<Building>(h).is_some_and(|b| b.kind == BuildingKind::Camp));
+        let mut pick = Pick { school: None, miss: None };
         let routine = if in_camp {
             Routine::Camp
         } else if let Some(h) = home {
@@ -356,21 +501,12 @@ fn children(world: &mut World) {
             // S6 (OPEN-224): School from `school_from_years` (an infant on
             // a paid fee was a "pupil" before).
             let school_age = years(world, k) >= cfg.school_from_years;
-            let school = if wd && school_age { door.and_then(|d| school_near(world, d)) } else { None };
             let head = head_of(world, k, h);
-            let paid = school.is_some_and(|s| {
-                if world.levers.public_school {
-                    return true;
-                }
-                let Some(p) = head.filter(|&p| crate::systems::leisure::spendable(world, p) >= cfg.school_fee) else {
-                    return false;
-                };
-                let owner = world.owner_of(s);
-                let moved = ownership::pay(world, Some(p), owner, cfg.school_fee, Flow::Contract);
-                ownership::credit(world, s, moved);
-                ownership::jobs2_row(world).school_fees += moved;
-                moved > 0
-            });
+            if let (true, true, Some(d)) = (wd, school_age, door) {
+                let cands = reach.entry(h).or_insert_with(|| schools_in_reach(world, d)).clone();
+                pick = pick_school(world, head, &cands, &mut rolls, &mut caps);
+            }
+            let paid = pick.school.is_some() && pick.miss.is_none();
             let pitch =
                 crate::systems::camp::parents_of(world, k).into_iter().any(|p| world.jobs2.pitches.contains_key(&p));
             if paid {
@@ -389,6 +525,8 @@ fn children(world: &mut World) {
         let take = {
             let Some(c) = world.comp_mut::<Child>(k) else { continue };
             c.routine = routine;
+            c.school = pick.school;
+            c.school_miss = pick.miss;
             if routine == Routine::School {
                 c.edu_days = c.edu_days.saturating_add(1);
             }
@@ -404,6 +542,12 @@ fn children(world: &mut World) {
         }
         let row = ownership::jobs2_row(world);
         row.child_days += 1;
+        match pick.miss {
+            Some(SchoolMiss::Far) => row.school_far += 1,
+            Some(SchoolMiss::Full) => row.school_full += 1,
+            Some(SchoolMiss::Purse) => row.school_unpaid += 1,
+            None => {}
+        }
         if routine == Routine::School {
             row.school_days += 1;
         }
@@ -413,6 +557,38 @@ fn children(world: &mut World) {
             ownership::jobs2_row(world).street_takes += 1;
         }
     }
+    // T2: a School with teachers and no child on a school day's roll says so
+    // (the teachers have no class, no shift and no wage today).
+    if wd {
+        let idle: Vec<EntityId> = world
+            .buildings_of_kind(BuildingKind::School)
+            .iter()
+            .copied()
+            .filter(|s| !rolls.contains_key(s) && world.comp::<Building>(*s).is_some_and(|b| !b.demolished))
+            .collect();
+        for s in idle {
+            let staff: Vec<EntityId> = world
+                .staff_of(s)
+                .iter()
+                .copied()
+                .filter(|&t| world.is_alive(t) && world.comp::<Job>(t).is_some_and(|j| j.employer == Some(s)))
+                .collect();
+            if staff.is_empty() {
+                continue;
+            }
+            let names: Vec<String> = staff.iter().map(|&t| world.name_of(t)).collect();
+            let text = format!(
+                "No pupil on the roll at {} today: no class for {} (no shift, no wage)",
+                world.name_of(s),
+                names.join(", ")
+            );
+            let mut who = staff;
+            who.push(s);
+            world.push_event(EventKind::Served, &who, text);
+        }
+    }
+    world.jobs2.ages.rolls = rolls;
+    world.jobs2.ages.roll_day = Some(day);
 }
 
 /// A Street child's day: a gift of `child_beg_coins` from a resident of its
@@ -589,12 +765,104 @@ pub fn seed(world: &mut World) {
     if !on(world) {
         return;
     }
-    for _ in 0..world.lot_copies() {
-        for _ in 0..world.config.ages.schools {
-            crate::systems::vice::seed_venue(world, BuildingKind::School, None);
+    let n = world.lot_copies() * world.config.ages.schools as usize;
+    let mut homes = HomeGrid::new(world);
+    for _ in 0..n {
+        let Some(lot) = school_lot(world, &homes) else { break };
+        if crate::systems::vice::seed_venue_on(world, lot, BuildingKind::School, None).is_none() {
+            break;
+        }
+        if let Some(d) = world.comp::<Building>(lot).map(|b| b.door) {
+            homes.cover(d);
         }
     }
     seed_kin(world);
+}
+
+/// Round 4 T2 (OPEN-232): the seed's Homes (door, residents) in cells of
+/// `HOME_CELL` tiles, for the Schools by reach. A Home is covered once a
+/// seeded School's door lies within the walk of `school_trip_ticks`.
+struct HomeGrid {
+    radius: u32,
+    cells: HomeCells,
+}
+
+const HOME_CELL: u32 = 8;
+
+/// A cell of the grid: its Homes (door, residents, covered).
+type HomeCells = BTreeMap<(u32, u32), Vec<(TilePos, u32, bool)>>;
+
+impl HomeGrid {
+    fn new(world: &World) -> Self {
+        let step = world.config.exec.move_ticks_full.max(1);
+        let radius = (world.config.ages.school_trip_ticks / step).min(u64::from(u32::MAX / 4)) as u32;
+        let mut cells: HomeCells = BTreeMap::new();
+        for &h in world.buildings_of_kind(BuildingKind::Home) {
+            let Some(bd) = world.comp::<Building>(h).filter(|b| !b.demolished) else { continue };
+            let n = world.residents_of(h).len() as u32;
+            if n == 0 {
+                continue;
+            }
+            let d = bd.door;
+            cells.entry((u32::from(d.x) / HOME_CELL, u32::from(d.y) / HOME_CELL)).or_default().push((d, n, false));
+        }
+        HomeGrid { radius, cells }
+    }
+
+    /// The cells' column range and row range around `at`.
+    fn span(&self, at: TilePos) -> ([u32; 2], [u32; 2]) {
+        let r = self.radius;
+        let (x, y) = (u32::from(at.x), u32::from(at.y));
+        (
+            [x.saturating_sub(r) / HOME_CELL, x.saturating_add(r) / HOME_CELL],
+            [y.saturating_sub(r) / HOME_CELL, y.saturating_add(r) / HOME_CELL],
+        )
+    }
+
+    /// The uncovered residents within the walk radius of `at`.
+    fn count(&self, at: TilePos) -> u32 {
+        let ([x0, x1], [y0, y1]) = self.span(at);
+        let mut sum = 0;
+        for cx in x0..=x1 {
+            for (_, v) in self.cells.range((cx, y0)..=(cx, y1)) {
+                sum += v.iter().filter(|e| !e.2 && e.0.manhattan(at) <= self.radius).map(|e| e.1).sum::<u32>();
+            }
+        }
+        sum
+    }
+
+    /// Marks the Homes within the walk radius of `at` covered.
+    fn cover(&mut self, at: TilePos) {
+        let ([x0, x1], [y0, y1]) = self.span(at);
+        let r = self.radius;
+        for cx in x0..=x1 {
+            for (_, v) in self.cells.range_mut((cx, y0)..=(cx, y1)) {
+                for e in v.iter_mut().filter(|e| e.0.manhattan(at) <= r) {
+                    e.2 = true;
+                }
+            }
+        }
+    }
+}
+
+/// T2: the next seeded School's Lot: of `jobs::seed_lots` (the tier, the
+/// interior), the one whose door has the most uncovered Home residents
+/// within the walk of `school_trip_ticks`, then `seed_lot`'s order (fewest
+/// in the district, nearest its centroid, the lower id). S6's seed took the
+/// centroid each time: 20 Schools at five centroids, 15 % of the island's
+/// school-age children within an hour of one.
+fn school_lot(world: &World, homes: &HomeGrid) -> Option<EntityId> {
+    if !world.config.ages.school_by_reach {
+        return crate::systems::jobs::seed_lot(world, BuildingKind::School);
+    }
+    crate::systems::jobs::seed_lots(world, BuildingKind::School)
+        .into_iter()
+        .filter_map(|(copies, centroid, l)| {
+            let door = world.comp::<Building>(l)?.door;
+            Some((std::cmp::Reverse(homes.count(door)), copies, centroid, l))
+        })
+        .min()
+        .map(|(_, _, _, l)| l)
 }
 
 /// The seeded city has no grown children (every resident arrives an adult):

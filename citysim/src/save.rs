@@ -418,7 +418,11 @@ use crate::world::World;
 /// (`SearchDay`) and `Misery.search_spell` (written while set), `EventKind::JobSearch`, the `[search]` keys and
 /// the `Jobs2Cols` `search_days`, `search_leads`, `search_asks`, `search_hires`,
 /// `far_hires` columns (serde defaults).
-pub const SAVE_VERSION: u8 = 89;
+/// 90 (pressure pass round 4, T2, School by travel time): `Child.{school, school_miss}`,
+/// `AgesState.{rolls, roll_day}` (written while set), `[ages] school_trip_ticks`,
+/// `school_el_fares`, `school_places_per_teacher`, `school_by_reach` (`school_reach` dropped) and the
+/// `Jobs2Cols` `school_far`, `school_full`, `school_unpaid`, `school_el` columns.
+pub const SAVE_VERSION: u8 = 90;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

@@ -1353,6 +1353,16 @@ pub fn seed(world: &mut World) {
 /// A seeded venue of `kind` for `owner` on a vacant Lot (`jobs::seed_lot`).
 pub(crate) fn seed_venue(world: &mut World, kind: BuildingKind, owner: Option<EntityId>) -> Option<EntityId> {
     let lot = crate::systems::jobs::seed_lot(world, kind)?;
+    seed_venue_on(world, lot, kind, owner)
+}
+
+/// [`seed_venue`] on a Lot already chosen (round 4 T2: a School by reach).
+pub(crate) fn seed_venue_on(
+    world: &mut World,
+    lot: EntityId,
+    kind: BuildingKind,
+    owner: Option<EntityId>,
+) -> Option<EntityId> {
     crate::systems::founding::build_on_lot(world, lot, kind, owner).ok()?;
     let at = world.districts.get(world.district_of_building(lot).index()).map_or("?", |x| x.name.as_str());
     let who = world.owner_label(owner);

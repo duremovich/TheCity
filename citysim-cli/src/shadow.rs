@@ -643,6 +643,77 @@ fn bname(world: &World, b: EntityId) -> String {
     }
 }
 
+/// A duration as "1 h", "1 h 20" or "38 min".
+fn span(t: u64) -> String {
+    match (t / 60, t % 60) {
+        (0, m) => format!("{m} min"),
+        (h, 0) => format!("{h} h"),
+        (h, m) => format!("{h} h {m:02}"),
+    }
+}
+
+/// Round 4 T2 (OPEN-232): the `[family]` line's why for a child's place
+/// today: the school run (walked or by the El), or why it is home on a
+/// school day (no School in reach, full, the purse), too young, no school
+/// today. Empty in a Camp or on the street.
+fn school_why(world: &World, c: EntityId, now: u64) -> String {
+    use citysim::components::{Routine, SchoolMiss};
+    use citysim::systems::ages;
+    let Some(k) = world.comp::<Child>(c) else { return String::new() };
+    let cfg = &world.config.ages;
+    let door = world
+        .comp::<citysim::Household>(c)
+        .and_then(|h| h.home)
+        .and_then(|h| world.comp::<Building>(h))
+        .map(|b| b.door);
+    let roll = |s: EntityId| {
+        let on = world.jobs2.ages.rolls.get(&s).copied().unwrap_or(0);
+        format!("{on} of {} on the roll", ages::roll_cap(world, s))
+    };
+    match (k.routine, k.school_miss) {
+        (Routine::School, _) => {
+            let Some((s, d)) = k.school.zip(door) else { return String::new() };
+            let Some(sd) = world.comp::<Building>(s).map(|b| b.door) else { return String::new() };
+            let (t, el) = ages::school_trip(world, d, sd);
+            if el {
+                format!(" ({} by the El, the fares paid)", span(t))
+            } else {
+                format!(" ({} walk)", span(t))
+            }
+        }
+        (Routine::Camp | Routine::Street, _) => String::new(),
+        (_, Some(SchoolMiss::Far)) => format!(": no School within {}", span(cfg.school_trip_ticks)),
+        (_, Some(SchoolMiss::Full)) => match k.school {
+            Some(s) if ages::roll_cap(world, s) == 0 => format!(": {} has no teacher", nm(world, s)),
+            Some(s) => format!(": {} is full, {}", nm(world, s), roll(s)),
+            None => ": every School in reach is full".to_string(),
+        },
+        (_, Some(SchoolMiss::Purse)) => {
+            let s = k.school;
+            let el =
+                s.zip(door).and_then(|(s, d)| world.comp::<Building>(s).map(|b| ages::school_trip(world, d, b.door).1));
+            let fee = if world.levers.public_school { 0 } else { cfg.school_fee };
+            let fares = if el == Some(true) { world.config.transit.fare * cfg.school_el_fares } else { 0 };
+            let at = s.map_or("School".to_string(), |s| nm(world, s));
+            match (fee, fares) {
+                (_, 0) => format!(": the {fee}c fee at {at} is beyond the purse"),
+                (0, f) => format!(": the El's {f}c of fares to {at} are beyond the purse"),
+                (fee, f) => format!(": the {fee}c fee and the El's {f}c of fares to {at} are beyond the purse"),
+            }
+        }
+        (_, None) => {
+            let yrs = world.comp::<Identity>(c).map_or(0, |i| i.age_years());
+            if yrs < cfg.school_from_years {
+                format!(", under {} for School", cfg.school_from_years)
+            } else if (now / 1440) % 7 >= 5 {
+                ", no School today".to_string()
+            } else {
+                String::new()
+            }
+        }
+    }
+}
+
 /// An agent as `Name#index`, a building, a gang or a corp by name.
 fn nm(world: &World, id: EntityId) -> String {
     if id == EntityId::NONE {
@@ -2215,10 +2286,11 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                 .iter()
                 .map(|&c| {
                     let yrs = world.comp::<citysim::Identity>(c).map_or(0, |i| i.age_years());
+                    let why = school_why(world, c, now);
                     let at = match citysim::systems::ages::place_of(world, c) {
-                        Some(Place::School(s)) => format!("at {}", nm(world, s)),
-                        Some(Place::Pitch(_)) => "at the pitch (chores)".to_string(),
-                        Some(Place::Home) => "at home (play)".to_string(),
+                        Some(Place::School(s)) => format!("at {}{why}", nm(world, s)),
+                        Some(Place::Pitch(_)) => format!("at the pitch (chores{why})"),
+                        Some(Place::Home) => format!("at home (play{why})"),
                         Some(Place::Street) => "on the street".to_string(),
                         Some(Place::Camp) => {
                             let camp = world.comp::<citysim::Household>(c).and_then(|h| h.home);

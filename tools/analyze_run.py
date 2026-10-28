@@ -974,7 +974,8 @@ GRAY_SNAP = ("papers_held", "fake_ids", "organ_stock", "scav_gangs", "black_clin
              "followers_c2", "followers_c3", "followers_c4", "cult_members", "apostates_hunted", "church_purse")
 # Phase 7, life stages (§ 6).
 AGES_TOTALS = ("child_days", "school_days", "school_fees", "street_takes", "child_begged", "child_thefts",
-               "elders_taken_in", "maimed_new", "prosthetics")
+               "elders_taken_in", "maimed_new", "prosthetics", "school_far", "school_full", "school_unpaid",
+               "school_el")
 AGES_SNAP = ("ch_play", "ch_school", "ch_chores", "ch_street", "ch_camp", "schools", "elders", "elders_employed",
              "elders_on_cots", "maimed")
 
@@ -1071,10 +1072,14 @@ def jobs2(rows, events, out):
         J["tithes_per_wages"] = t["tithes"] / wages if wages else 0
         J["organs_paid_a_day"] = t["organs_export_paid"] / days
     if "ch_play" in rows[0]:
-        J["ages_totals"] = {k: sum(col(rows, k)) for k in AGES_TOTALS}
+        J["ages_totals"] = {k: sum(col(rows, k)) for k in AGES_TOTALS if k in rows[0]}
         J["ages_mean"] = {k: mean(col(rows, k)) for k in AGES_SNAP}
         t = J["ages_totals"]
         J["school_share"] = t["school_days"] / t["child_days"] if t["child_days"] else 0
+        # Round 4 T2 (OPEN-232): of the school-age children's school days (at home or at School on a school day),
+        # the share at School.
+        due = t["school_days"] + sum(t.get(k, 0) for k in ("school_far", "school_full", "school_unpaid"))
+        J["school_due_share"] = t["school_days"] / due if "school_far" in t and due else None
     # Phase 8's gate: the § 12 bands not printed by a phase (numbers only).
     G = {}
     if "children_taken" in rows[0]:
@@ -1433,6 +1438,9 @@ def fmt(o):
             L.append("life stages, run totals: " + f(w["ages_totals"]))
             L.append("life stages, daily mean: " + f(w["ages_mean"]) + f"; school days / child-days "
                      f"{w['school_share']:.1%}")
+            if w.get("school_due_share") is not None:
+                L.append(f"school days / school-age school-day child-days {w['school_due_share']:.1%} (T2: the rest "
+                         f"far, full or unpaid)")
         if "gate" in w:
             g = w["gate"]
             L.append("phase 8 bands: " + ", ".join(

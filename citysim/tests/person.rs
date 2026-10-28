@@ -1225,7 +1225,13 @@ fn probe_city_grows_homes_toward_jobs() {
 /// the Farm the new Homes served on day 8, flipped seed 42).
 #[test]
 fn probe_working_couple_moves_near_work() {
-    let mut w = world();
+    // Round 4 T2 re-pin (the Lot layout): the Schools seeded by reach take the Lots near the couples' work, so no long-commute couple has room built near it. The Schools stay at S6's
+    // district centroids here (`[ages] school_by_reach = false`).
+    let mut w = World::new(42, {
+        let mut c = Config::load();
+        c.ages.school_by_reach = false;
+        c
+    });
     w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
     let cap = w.config.life.commute_move_ticks;
     let work_of = |w: &World, a: EntityId| {
@@ -1400,7 +1406,13 @@ fn day_workers(w: &World) -> Vec<EntityId> {
 /// nothing carried and an empty pantry.
 #[test]
 fn probe_worker_eats_before_the_shift_not_during_it() {
-    let mut w = world();
+    // Round 4 T2 re-pin (the Lot layout): the Schools seeded by reach moved the Lots and the day's picks; the subject is the meal before the shift, not the School. The Schools stay at S6's
+    // district centroids here (`[ages] school_by_reach = false`).
+    let mut w = World::new(42, {
+        let mut c = Config::load();
+        c.ages.school_by_reach = false;
+        c
+    });
     w.run_ticks(2 * TICKS_PER_DAY + 6 * TICKS_PER_HOUR);
     let a = day_workers(&w)
         .into_iter()
