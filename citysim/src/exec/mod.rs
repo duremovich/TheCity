@@ -753,6 +753,9 @@ impl World {
         // body where it stands on its way.
         settle_interrupted(self, id);
         self.segments.remove(&id);
+        if !self.jobs2.riding.is_empty() {
+            self.jobs2.riding.remove(&id);
+        }
         if !self.jobs2.passengers.is_empty() {
             crate::systems::streetwork::passenger_off(self, id);
         }

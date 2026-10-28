@@ -212,6 +212,10 @@ pub fn committed(world: &World, id: EntityId, brain: &Brain, winner: GoalKind) -
             return true;
         }
     }
+    // Round 6 V4 (OPEN-240): a cab under way (paid or booked) lands first.
+    if crate::systems::streetwork::riding(world, id) {
+        return true;
+    }
     if plan.goal == GoalKind::Work {
         match world.comp::<Job>(id) {
             Some(job) => {

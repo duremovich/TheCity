@@ -3516,6 +3516,14 @@ pub struct Jobs2Cfg {
     /// × `rickshaw_mult`); a driver's and a rickshaw's rides a day.
     pub cab_min_tiles: u32,
     pub cab_reserve: i64,
+    /// Round 6 V4 (OPEN-240): the commute's cab (the roll, the ride home,
+    /// the El-missed ride) takes a fare of at most this share of the day's
+    /// wage, unless the rider holds `cab_flush_coins` (`fabber_84414`: a 7c
+    /// leg each way on a 7c wage). 0 reads no wage.
+    #[serde(default = "default_cab_wage_share")]
+    pub cab_wage_share: f32,
+    #[serde(default = "default_cab_flush_coins")]
+    pub cab_flush_coins: i64,
     pub p_cab: f32,
     pub fare_base: i64,
     pub fare_per_tile: f32,
@@ -3603,6 +3611,8 @@ impl Default for Jobs2Cfg {
             parcel_fee: 1,
             cab_min_tiles: 60,
             cab_reserve: 30,
+            cab_wage_share: 0.5,
+            cab_flush_coins: 80,
             p_cab: 0.03,
             fare_base: 3,
             fare_per_tile: 0.05,
@@ -9796,9 +9806,9 @@ pub struct LifeCfg {
     /// `relocate_per_1000` a day per 1,000 residents.
     pub hf_relocate: bool,
     pub commute_move_ticks: u64,
-    /// Round 6 V4 (OPEN-240): a report's line only: a commute past this
-    /// many ticks is counted at the relocation's midnight read
-    /// (`Jobs2Cols.commute_long`). Read by no decision.
+    /// Round 6 V4 (OPEN-240): a long commute: counted at the relocation's
+    /// midnight read (`Jobs2Cols.commute_long`), and a retirement to kin
+    /// does not move a working spouse into one (`careers::retire`).
     #[serde(default = "default_commute_long_ticks")]
     pub commute_long_ticks: u64,
     pub commute_margin_ticks: u64,
@@ -13030,4 +13040,12 @@ impl Default for AttentionCfg {
 
 fn default_commute_long_ticks() -> u64 {
     180
+}
+
+fn default_cab_wage_share() -> f32 {
+    0.5
+}
+
+fn default_cab_flush_coins() -> i64 {
+    80
 }

@@ -1432,10 +1432,23 @@ fn steps_for(world: &World, id: EntityId, pick: &UnwindPick) -> Vec<ActionInstan
             steps.push(step(ActionKind::GoTo(LocationKey::Seller), Some(v)));
             let kind = kind_of(world, v);
             let purse = spendable(world, id) - price_of(world, v);
-            if kind == Some(BuildingKind::Den) && purse >= 3 && !crate::utility::goals::drank_today(world, id) {
+            let drink = kind == Some(BuildingKind::Den) && purse >= 3 && !crate::utility::goals::drank_today(world, id);
+            // Round 6 V4 (OPEN-239): at a door a bouncer keeps, the drink
+            // comes after the bet: the door's check runs at the venue step's
+            // start (`exec::start_step`) and turns the drunk away, so the
+            // plan's own Drink made its Gamble refused, nightly
+            // (`office_worker_56309 d23 21:23`, `PreconditionLost`).
+            let after = drink
+                && kind.is_some_and(|k| {
+                    crate::systems::customers::cfg(world).is_some() && crate::systems::customers::kept_kind(world, k)
+                });
+            if drink && !after {
                 steps.push(step(ActionKind::Drink, Some(v)));
             }
             steps.push(step(pick.act, Some(v)));
+            if after {
+                steps.push(step(ActionKind::Drink, Some(v)));
+            }
             // R6a (OPEN-217): the window read at the body's arrival, not at
             // the plan (a pit planned at 20:30 with a walk into the window
             // took no bet).

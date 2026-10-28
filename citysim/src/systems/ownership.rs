@@ -303,11 +303,13 @@ pub enum Flow {
     /// parent -> the Camp's owner (untaxed; `flow_other` plus
     /// `Jobs2Cols.flow_buyout`, the `Fine` shape).
     Buyout,
-    /// Round 5 U7 (`OPEN-237`): a cab driver's cut of a fare, the Garage's
-    /// owner -> the driver (taxed and in `flow_other`, as the `CabFare` it
-    /// was booked under: V13's driver read every cut as a rider's fare "from"
-    /// the agent who owns his Garage, `cabbie_73680`).
-    FareCut,
+    /// Round 6 V4 (`OPEN-240`): the house's share of a fare, the driver ->
+    /// the Garage's owner (untaxed: the fare was taxed at the driver; the
+    /// owner's revenue all the same, `note_revenue`). The rider pays the
+    /// cab (`streetwork::pay_ride`); U7's `FareCut` ran the owner's cut the
+    /// other way and the rider's line named the owner (`fabber_84414`: a
+    /// stranger or a corp each leg, never a cabbie).
+    CabTake,
 }
 
 impl Flow {
@@ -348,7 +350,6 @@ impl Flow {
                 | Flow::Power
                 | Flow::Build
                 | Flow::CabFare
-                | Flow::FareCut
         )
     }
 }
@@ -447,7 +448,9 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
             row.flow_other += coins;
             row.jobs2.get_or_insert_with(Default::default).flow_buyout += coins;
         }
-        Flow::CabFare | Flow::FareCut | Flow::StreetCut | Flow::Gray => row.flow_other += coins,
+        Flow::CabFare | Flow::StreetCut | Flow::Gray => row.flow_other += coins,
+        // Round 6 V4: the fare's second hand (driver -> house) is no new flow of coins.
+        Flow::CabTake => {}
     }
 }
 
@@ -613,7 +616,7 @@ fn transfer(
 
 /// Plan E16: a taxed flow reaching a corp is revenue (`Corp.rev_today`).
 fn note_revenue(world: &mut World, to: Option<EntityId>, flow: Flow, net: i64) {
-    if !flow.taxed() || net <= 0 {
+    if !(flow.taxed() || flow == Flow::CabTake) || net <= 0 {
         return;
     }
     if let Some(c) = to.and_then(|o| world.comp_mut::<Corp>(o)) {

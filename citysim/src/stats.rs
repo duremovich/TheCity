@@ -887,6 +887,10 @@ pub struct Jobs2Cols {
     /// Home-to-post commute is past `[life] commute_long_ticks`.
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub commute_long: u32,
+    /// Round 6 V4 (OPEN-240): a retirement to kin passed over because the
+    /// working spouse's commute from the child's Home would be too long.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub kin_spouse_far: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub shape_up_home: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
@@ -1133,6 +1137,10 @@ pub struct Jobs2Cols {
     pub fares_driven: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub fares_unmanned: u32,
+    /// Round 6 V4 (OPEN-240): body rides handed to the off-screen cab when
+    /// the driver's plan left the fare (`streetwork::carry`).
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub fares_dropped: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub fares_no_body: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
@@ -1691,6 +1699,7 @@ impl Jobs2Cols {
                 "cab_paid_driver",
                 "cab_paid_other",
                 "commute_long",
+                "kin_spouse_far",
                 "shape_up_home",
                 "foreman_gate",
                 "search_days",
@@ -1790,6 +1799,7 @@ impl Jobs2Cols {
                 "exec_rides_home",
                 "fares_driven",
                 "fares_unmanned",
+                "fares_dropped",
                 "fares_no_body",
                 "fares_too_far",
                 "lead_rounds",
@@ -2202,6 +2212,7 @@ impl Jobs2Cols {
             self.cab_paid_driver.to_string(),
             self.cab_paid_other.to_string(),
             self.commute_long.to_string(),
+            self.kin_spouse_far.to_string(),
             self.shape_up_home.to_string(),
             self.foreman_gate.to_string(),
             self.search_days.to_string(),
@@ -2301,6 +2312,7 @@ impl Jobs2Cols {
             self.exec_rides_home.to_string(),
             self.fares_driven.to_string(),
             self.fares_unmanned.to_string(),
+            self.fares_dropped.to_string(),
             self.fares_no_body.to_string(),
             self.fares_too_far.to_string(),
             self.lead_rounds.to_string(),

@@ -264,6 +264,8 @@ pub fn daily(world: &mut World) {
     world.jobs2.cab_rolled.clear();
     world.jobs2.exec_home_rolled.clear();
     world.jobs2.hailed.clear();
+    let now = world.tick;
+    world.jobs2.riding.retain(|_, &mut t| t > now);
     world.jobs2.fares_shift.clear();
     world.jobs2.fare_cuts.clear();
     // A parcel no courier's round reached went back to the Yard.
@@ -1461,13 +1463,14 @@ pub fn stat_cab(world: &mut World, id: EntityId, job: &Job) -> bool {
     }
     let ride = if first { cab_roll(world, id, job) } else { cab_roll_home(world, id, job) };
     let Some(ride) = ride else { return false };
-    pay_ride(world, id, &ride);
     // Lives at work phase 4 (§ 2.3, D3): the ride booked to a driver's
     // body (the same rule as a Full rider's) and its encounter. Nothing off.
+    // Round 6 V4: booked first, so the fare goes to the driver.
     let driver = match ride.by {
         RideBy::Cab(g) => book_cab(world, id, g, ride.from, &ride).map(|(s, _)| s),
         RideBy::Rickshaw(_) => None,
     };
+    pay_ride(world, id, &ride, driver);
     let d = world.district_of(ride.from);
     ride_encounter(world, id, driver, &ride, d);
     true
@@ -1524,6 +1527,15 @@ fn roll(world: &World, id: EntityId, job: &Job, home_bound: bool) -> Option<Ride
     }
     let fare = cfg.fare_base + (tiles as f32 * cfg.fare_per_tile).round() as i64;
     let purse = coins(world, id);
+    // Round 6 V4 (OPEN-240): the commute reads the wage: a fare past
+    // `cab_wage_share` of the day's pay walks or rides the El, unless flush
+    // (`fabber_84414`: 7c a leg on a 7c wage, net -12c a day).
+    if cfg.cab_wage_share > 0.0
+        && purse < cfg.cab_flush_coins
+        && fare as f32 > cfg.cab_wage_share * job.wage_per_day.max(0) as f32
+    {
+        return None;
+    }
     let d = world.district_of(home);
     let rickshaw = world
         .jobs2
@@ -1640,8 +1652,13 @@ fn garage_for(world: &World, open: &[EntityId], at: TilePos, rider: EntityId) ->
 
 /// Lives at work phase 4 (§ 2.3): the ride's coins and counters (the
 /// rickshaw's or the Garage's `Flow::CabFare`, the pitch's or the Garage's
-/// rides today). Returns the coins paid.
-pub fn pay_ride(world: &mut World, id: EntityId, ride: &Ride) -> i64 {
+/// rides today). Returns the coins paid. Round 6 V4 (OPEN-240): the rider
+/// pays the cab: `driver` (the body who drove him), else the Garage's
+/// off-screen driver of record ([`driver_of_record`]), takes the fare and
+/// hands the house its share (`Flow::CabTake`): a body keeps `[verbs]
+/// cab_fare_cut` (his pay, `driver_cut`), an off-screen driver (on the
+/// mirror's wage) hands it all. No driver at all: the owner, as before.
+pub fn pay_ride(world: &mut World, id: EntityId, ride: &Ride, driver: Option<EntityId>) -> i64 {
     match ride.by {
         RideBy::Rickshaw(r) => {
             let paid = ownership::pay(world, Some(id), Some(r), ride.fare, Flow::CabFare);
@@ -1656,7 +1673,20 @@ pub fn pay_ride(world: &mut World, id: EntityId, ride: &Ride) -> i64 {
         }
         RideBy::Cab(g) => {
             let owner = world.owner_of(g);
-            let paid = ownership::pay(world, Some(id), owner, ride.fare, Flow::CabFare);
+            let body = driver.filter(|&s| s != id && world.comp::<Brain>(s).is_some_and(|b| b.lod != Lod::Statistical));
+            let cabbie = body.or_else(|| driver_of_record(world, g).filter(|&s| s != id));
+            let paid = match cabbie {
+                Some(s) => {
+                    let before = world.purse(Some(s));
+                    let paid = ownership::pay(world, Some(id), Some(s), ride.fare, Flow::CabFare);
+                    // What reached his hand (the fare's tax withheld at him).
+                    let got = (world.purse(Some(s)) - before).max(0);
+                    let keep = if body.is_some() { driver_cut(world, s, got) } else { 0 };
+                    ownership::pay(world, Some(s), owner, got - keep, Flow::CabTake);
+                    paid
+                }
+                None => ownership::pay(world, Some(id), owner, ride.fare, Flow::CabFare),
+            };
             ownership::credit(world, g, paid);
             *world.jobs2.cab_trips.entry(g).or_default() += 1;
             let row = ownership::jobs2_row(world);
@@ -1850,6 +1880,7 @@ fn take_ride(
             world.push_event(EventKind::FareShort, &[id, s, g], text);
         }
         world.jobs2.passengers.insert(id, s);
+        world.jobs2.riding.insert(id, Tick::MAX);
         return Some(crate::exec::ExecState::GotoTimed {
             target: target.clone(),
             arrive_tick: Tick::MAX,
@@ -1881,10 +1912,11 @@ fn take_ride(
             }
         }
     } else {
-        pay_ride(world, id, &ride);
+        pay_ride(world, id, &ride, driver.map(|(s, _)| s));
     }
     let d = world.district_of(here);
     ride_encounter(world, id, driver.map(|(s, _)| s), &ride, d);
+    world.jobs2.riding.insert(id, arrive);
     Some(crate::exec::ExecState::GotoTimed {
         target: target.clone(),
         arrive_tick: arrive,
@@ -2122,7 +2154,6 @@ fn ride_encounter(world: &mut World, rider: EntityId, driver: Option<EntityId>, 
     match (driver, ride.by) {
         (Some(s), RideBy::Cab(g)) => {
             *world.jobs2.fares_shift.entry(s).or_default() += 1;
-            driver_cut(world, s, g, ride.fare);
             crate::systems::service::serve(world, s, rider, g, kind, 0)
         }
         (_, RideBy::Rickshaw(r)) => crate::systems::service::encounter(world, r, rider, None, d, kind, 0),
@@ -2130,24 +2161,41 @@ fn ride_encounter(world: &mut World, rider: EntityId, driver: Option<EntityId>, 
     }
 }
 
-/// Round 3 S5 (OPEN-217): the driver's body takes `[verbs] cab_fare_cut`
-/// of the `fare` he drives in hand, from the Garage's owner (who took the
-/// fare: `pay_ride`), told in his diary as a money line and tallied for
-/// the shift's line (`fare_cuts`). A dodged fare (0) pays no cut. The
-/// fare went to the corp and the shift's wage, scaled by the fares, paid
-/// 0c and wrote "Paid" on a fare-less shift (`cabbie_82150`, 0c all week).
-fn driver_cut(world: &mut World, s: EntityId, g: EntityId, fare: i64) {
-    let Some(share) = world.config.verbs.as_ref().map(|v| v.cab_fare_cut).filter(|&c| c > 0.0) else { return };
-    let cut = (fare as f32 * share).round() as i64;
-    if cut <= 0 {
-        return;
+/// Round 3 S5 (OPEN-217): the driver's body keeps `[verbs] cab_fare_cut`
+/// of the `fare` he took in hand, told in his diary as the shift's line
+/// (`fare_cuts`) and tallied (`cab_cuts`); returns the coins kept. A
+/// dodged fare (0) keeps nothing. The fare went to the corp and the
+/// shift's wage, scaled by the fares, paid 0c and wrote "Paid" on a
+/// fare-less shift (`cabbie_82150`, 0c all week). Round 6 V4 (OPEN-240):
+/// the rider pays him (`pay_ride`) and he hands the rest in; U7's cut came
+/// from the owner, who had the fare.
+fn driver_cut(world: &mut World, s: EntityId, fare: i64) -> i64 {
+    let Some(share) = world.config.verbs.as_ref().map(|v| v.cab_fare_cut).filter(|&c| c > 0.0) else { return 0 };
+    let cut = ((fare as f32 * share).round() as i64).clamp(0, fare.max(0));
+    if cut > 0 {
+        *world.jobs2.fare_cuts.entry(s).or_default() += cut;
+        ownership::jobs2_row(world).cab_cuts += cut;
     }
-    let owner = world.owner_of(g);
-    let paid = ownership::pay(world, owner, Some(s), cut, Flow::FareCut);
-    if paid > 0 {
-        *world.jobs2.fare_cuts.entry(s).or_default() += paid;
-        ownership::jobs2_row(world).cab_cuts += paid;
-    }
+    cut
+}
+
+/// Round 6 V4 (OPEN-240): the off-screen cab's driver, who takes an
+/// unmanned ride's fare for Garage `g`: a living, free Statistical driver
+/// on its staff, on shift first, then the fewest fares today, then the
+/// lowest id. `None`: the Garage has none (the owner takes the fare).
+fn driver_of_record(world: &World, g: EntityId) -> Option<EntityId> {
+    let tod = world.tick_of_day();
+    world
+        .staff_of(g)
+        .iter()
+        .copied()
+        .filter(|&s| {
+            world.comp::<Job>(s).is_some_and(|j| fare_duty(world, j))
+                && crate::systems::law::living(world, s)
+                && !world.has::<Sentence>(s)
+                && world.comp::<Brain>(s).is_some_and(|b| b.lod == Lod::Statistical)
+        })
+        .min_by_key(|&s| (!world.comp::<Job>(s).is_some_and(|j| j.on_shift(tod)), fares_of(world, s), s))
 }
 
 /// The ride `id` drives now, if any (the first pending with him as
@@ -2194,11 +2242,13 @@ pub fn fares_on(world: &World) -> bool {
 }
 
 /// The `fares` shape: a body ride's rider steps off. `arrived`: at the
-/// destination with the driver (the fare paid now, `pay_ride`, and the
-/// rider's leg ends there); else the driver could not finish (his shift
-/// over, jailed, gone off screen, the day's end): the Garage's off-screen
-/// cab takes the rider on from where he stands, timed at the cab's speed,
-/// paid now. No-op for a ride without a body rider.
+/// destination with the driver (the rider's leg ends there); else the
+/// driver could not finish (his shift over, jailed, gone off screen, the
+/// day's end, round 6 V4: his plan off the fare): the Garage's off-screen
+/// cab takes the rider on from where he stands, timed at the cab's speed.
+/// Round 6 V4: the fare is paid to the driver at the pick-up (`fare_plan`);
+/// one still owed here (never picked up) goes to the off-screen cab. No-op
+/// for a ride without a body rider.
 fn release(world: &mut World, r: &CabRide, arrived: bool) {
     if !r.body || world.jobs2.passengers.remove(&r.rider).is_none() {
         return;
@@ -2213,7 +2263,9 @@ fn release(world: &mut World, r: &CabRide, arrived: bool) {
     if r.fare > 0 {
         if let Some(g) = garage {
             let ride = Ride { from: r.from, to: r.to, fare: r.fare, by: RideBy::Cab(g) };
-            pay_ride(world, r.rider, &ride);
+            // Round 6 V4: a fare still owed here is a ride never picked up
+            // (paid at the pick-up, `fare_plan`): the off-screen cab's.
+            pay_ride(world, r.rider, &ride, None);
         }
     }
     let arrive = if arrived {
@@ -2225,6 +2277,7 @@ fn release(world: &mut World, r: &CabRide, arrived: bool) {
         world.tick + cab_ticks(world, here, target.tile)
     };
     let to = target.tile;
+    world.jobs2.riding.insert(r.rider, arrive);
     if let Some(b) = world.comp_mut::<Brain>(r.rider) {
         b.exec = crate::exec::ExecState::GotoTimed { target, arrive_tick: arrive, blocked_since: None, walk: None };
     }
@@ -2251,6 +2304,21 @@ pub fn fare_vehicle(world: &World, driver: EntityId) -> Option<EntityId> {
 /// (stage 1, picked up) takes his tile, out on the street (`exec::run`
 /// after the driver's step, as an escort's suspect follows the guard).
 pub fn carry(world: &mut World, driver: EntityId) {
+    // Round 6 V4 (OPEN-240): a driver whose plan is no longer the fare's
+    // (another goal pre-empted the Work plan) leaves his rider to the
+    // off-screen cab from where the rider stands, paid then (`release`):
+    // the rider rode along wherever the driver went instead
+    // (`exec_73953 d24 01:16`: a paid cab to a D4 kitchen, 167 min later on
+    // a street in D5).
+    let off_fare = world.comp::<Brain>(driver).and_then(|b| b.plan_goal()).is_some_and(|g| g != GoalKind::Work);
+    if off_fare {
+        if let Some(i) = world.jobs2.cab_rides.iter().position(|r| r.driver == driver && r.body) {
+            let r = world.jobs2.cab_rides.remove(i);
+            ownership::jobs2_row(world).fares_dropped += 1;
+            release(world, &r, false);
+        }
+        return;
+    }
     let Some(r) = world.jobs2.cab_rides.iter().find(|r| r.driver == driver && r.body && r.stage >= 1).copied() else {
         return;
     };
@@ -2275,10 +2343,24 @@ pub fn carry(world: &mut World, driver: EntityId) {
 /// The `fares` shape: `rider`'s plan was dropped while he waited or rode:
 /// he leaves the cab where he stands, and the driver's ride is over (no fare).
 pub fn passenger_off(world: &mut World, rider: EntityId) {
+    world.jobs2.riding.remove(&rider);
     if world.jobs2.passengers.remove(&rider).is_none() {
         return;
     }
     world.jobs2.cab_rides.retain(|r| !(r.body && r.rider == rider));
+}
+
+/// Round 6 V4 (OPEN-240): `id` rides a cab under way (a timed leg not yet
+/// landed, or aboard a driver's body's cab): `fixes::committed` holds it.
+pub fn riding(world: &World, id: EntityId) -> bool {
+    // The cab's own leg: its landing tick on the timed GoTo (`Tick::MAX`
+    // while a passenger), so an entry a plan reset left behind holds nothing.
+    let Some(&t) = world.jobs2.riding.get(&id) else { return false };
+    t > world.tick
+        && world.comp::<Brain>(id).is_some_and(
+            |b| matches!(b.exec, crate::exec::ExecState::GotoTimed { arrive_tick, .. } if arrive_tick == t),
+        )
+        && (t != Tick::MAX || world.jobs2.passengers.contains_key(&id))
 }
 
 /// The `fares` shape: the day's end (`daily`): every rider still waiting or
@@ -2369,6 +2451,14 @@ pub fn fare_plan(world: &mut World, id: EntityId) -> Option<Plan> {
                 let d = world.district_of(r.from);
                 let ride = Ride { from: r.from, to: r.to, fare: r.fare, by: RideBy::Cab(garage) };
                 ride_encounter(world, r.rider, Some(id), &ride, d);
+                // Round 6 V4 (OPEN-240): the fare paid to him as the rider
+                // climbs in, both at the door (at the drop-off the rider was
+                // already inside: the settle was apart); the ride then
+                // carries no fare (`release` pays none).
+                if r.fare > 0 {
+                    pay_ride(world, r.rider, &ride, Some(id));
+                    world.jobs2.cab_rides[i].fare = 0;
+                }
                 carry(world, id);
             }
             false

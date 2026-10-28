@@ -836,7 +836,8 @@ mod lives_street {
         assert!(full.fare >= w.config.jobs2.fare_base);
         // The Statistical path is the roll plus the payment: the same coins move.
         let (before, j0) = (coins(&w, a), jobs2(&w));
-        let paid = sw::pay_ride(&mut w, a, &stat);
+        // Round 6 V4: the payee is the cab (no body here: the off-screen driver).
+        let paid = sw::pay_ride(&mut w, a, &stat, None);
         assert_eq!(paid, stat.fare);
         assert_eq!(coins(&w, a), before - stat.fare);
         let j = jobs2(&w);
@@ -963,10 +964,12 @@ mod lives_street {
     /// cab with a driver's body on duty within `[legs] fare_wait_ticks`: the
     /// rider waits at his door (no coins yet), the driver drives to him, picks
     /// him up (both bodies there: the `Fare` encounter), drives him to work
-    /// with the rider at his side, and the fare is paid on arrival
-    /// (`pay_ride`: rider to the Garage's owner). Fails on the base (the
-    /// fare paid at the booking and the rider's leg timed alone: the driver
-    /// never carried anyone).
+    /// with the rider at his side. Round 6 V4 (premise moved, on purpose):
+    /// the fare is paid at the pick-up, to the driver, who hands the
+    /// Garage's owner the house's share (`pay_ride`; paid on arrival, the
+    /// rider was already inside and the settle read apart). Fails on the
+    /// base (the fare paid at the booking and the rider's leg timed alone:
+    /// the driver never carried anyone).
     #[test]
     fn test_a_drivers_body_carries_the_rider_and_is_paid() {
         let mut w = city_with(|c| {
@@ -1026,6 +1029,7 @@ mod lives_street {
         b.exec = state;
         let mut together = 0;
         let mut arrived = false;
+        let driver0 = coins(&w, driver);
         for _ in 0..(2 * TICKS_PER_DAY) {
             if w.comp::<Brain>(driver).is_some_and(|b| b.plan.is_none()) {
                 let p = sw::fare_plan(&mut w, driver).expect("the driver's plan");
@@ -1042,7 +1046,13 @@ mod lives_street {
                 if pa.building.is_none() && pd.building.is_none() && pa.tile == pd.tile {
                     together += 1;
                 }
-                assert_eq!(coins(&w, a), before, "nothing paid before the arrival");
+                // Round 6 V4: nothing paid before the pick-up (the ride's stage 1).
+                if coins(&w, a) < before {
+                    assert!(
+                        w.jobs2.cab_rides.iter().any(|r| r.rider == a && r.stage >= 1),
+                        "paid at the pick-up, not before"
+                    );
+                }
             }
             if w.comp::<Position>(a).is_some_and(|p| p.building == Some(work)) {
                 arrived = true;
@@ -1055,9 +1065,10 @@ mod lives_street {
         assert_eq!(j.fares_driven, j0.fares_driven + 1, "a fare driven by a body");
         assert!(j.served[ServeKind::Fare as usize] > j0.served[ServeKind::Fare as usize], "the pick-up's encounter");
         let fare = before - coins(&w, a);
-        assert!(fare > 0, "paid on arrival");
+        assert!(fare > 0, "the fare paid");
+        assert!(coins(&w, driver) > driver0, "the driver kept his cut");
         if owner.is_some() {
-            assert!(till(&w) > till0, "the Garage's owner took the fare");
+            assert!(till(&w) > till0, "the Garage's owner took the house's share");
         }
         assert!(!w.jobs2.passengers.contains_key(&a));
     }

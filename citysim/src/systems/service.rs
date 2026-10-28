@@ -1116,7 +1116,10 @@ pub fn refused(world: &mut World, id: EntityId, b: EntityId) {
     if row.event_on.contains(&ServeOutcome::Refused) {
         let because = why.map(|w| format!(" ({w})")).unwrap_or_default();
         let again = if back { " again" } else { "" };
-        let bar = barred_till.map_or(String::new(), |d| format!(": barred till d{d}"));
+        // Round 6 V4 (OPEN-239): the last day barred (`vice::barred` is
+        // `day < until`; "barred till d26" read as d26 barred, and the d26
+        // return as the bar ignored).
+        let bar = barred_till.map_or(String::new(), |d| format!(": barred through d{}", d.saturating_sub(1)));
         let text = format!(
             "{} turned {} away{again} at the door of {}{because}{bar}",
             world.name_of(bouncer),
