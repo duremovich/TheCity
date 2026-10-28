@@ -466,6 +466,12 @@ pub fn daily(world: &mut World) {
         if world.gang_of(m) != Some(d.gang) || !law::living(world, m) || world.has::<Sentence>(m) {
             continue;
         }
+        // Round 4 T3 (OPEN-222): a member who leads the gang by midnight
+        // owes it no duty (the leader is posted none; `raider_70326` took
+        // the post on d23 and was "missed ... guard" for the round he led).
+        if world.comp::<Gang>(d.gang).is_some_and(|g| g.leader == Some(m)) {
+            continue;
+        }
         // A muster that never marched (called off, the order changed) is no miss.
         if d.kind == DutyKind::Muster && world.crew.raided_day.get(&d.gang).is_none_or(|&x| x < d.day) {
             continue;
@@ -980,10 +986,26 @@ pub fn sat_muster(world: &mut World, gang: EntityId, m: EntityId) {
     if !on(world) {
         return;
     }
+    let (muster, today) = (world.hideout_of(gang), world.day());
+    let mut turned = false;
     if let Some(d) = world.crew.duties.get_mut(&m) {
         if d.gang == gang && d.kind == DutyKind::Muster {
             d.kept = true;
+        } else if d.gang == gang && d.day == today && !d.kept && d.kind.owed() {
+            // Round 4 T3 (OPEN-222): the gang's raid outranks the day's other
+            // owed duty (a court summons, a watch, a guard): he answered the
+            // muster, so the duty he held becomes it, kept (V11's and V12's
+            // `raider_70326` mustered 353 min at the Hideout he was summoned
+            // to, marched, and was "missed ... court summons" at midnight:
+            // a raid ordered after midnight posts no muster over a duty).
+            d.kind = DutyKind::Muster;
+            d.place = muster.unwrap_or(d.place);
+            d.kept = true;
+            turned = true;
         }
+    }
+    if turned && world.visits.get(&m).is_some_and(|v| v.why == VisitWhy::Crew) {
+        world.visits.remove(&m);
     }
 }
 

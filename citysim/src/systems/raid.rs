@@ -653,6 +653,9 @@ pub fn crossfire(
         .filter(|a| !parties.contains(a))
         .filter(|&a| !own_side(world, a))
         .filter(|&a| law::living(world, a) && !world.has::<Sentence>(a))
+        // Round 4 T3 (OPEN-222): a minor is never caught in the crossfire
+        // (the under-18 rule: the bystander pool had no age gate).
+        .filter(|&a| !crate::systems::ages::is_protected(world, a))
         .filter(|&a| world.comp::<Position>(a).is_some_and(|p| law::chebyshev(p.tile, door) <= cfg.crossfire_radius))
         .collect();
     if let Some(d) = riot {
@@ -666,6 +669,7 @@ pub fn crossfire(
             .filter(|&a| {
                 law::living(world, a)
                     && !world.has::<Sentence>(a)
+                    && !crate::systems::ages::is_protected(world, a)
                     && world.comp::<Brain>(a).is_some_and(|b| b.lod == crate::components::Lod::Statistical)
             })
             .collect();

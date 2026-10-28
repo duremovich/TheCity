@@ -507,10 +507,15 @@ pub enum EventKind {
     /// fare dodger caught at the El (fined, beaten), banned, a ban broken,
     /// up off the platform.
     Fare,
+    /// Pressure pass round 4, T3 (`OPEN-222`): `[pursuer, quarry, other?]`, a
+    /// pursuit that stops short and says so: a held contract waiting out its
+    /// mark's cells or let go, an arrest chase given up and the case handed
+    /// on (`other` the guard who has it now).
+    Pursuit,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 238] = [
+    pub const ALL: [EventKind; 239] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -749,6 +754,7 @@ impl EventKind {
         EventKind::Cells,
         EventKind::Crew,
         EventKind::Fare,
+        EventKind::Pursuit,
     ];
 }
 

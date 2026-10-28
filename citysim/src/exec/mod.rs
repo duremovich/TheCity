@@ -456,6 +456,10 @@ fn step_agent(world: &mut World, id: EntityId) {
                 &[id],
                 format!("{goal:?} failed at {:?}: {reason:?}{detail}", step.action),
             );
+            // Round 4 T3 (OPEN-222): an arrest chase that failed says so.
+            if goal == Some(crate::components::GoalKind::Arrest) {
+                crate::systems::law::chase_dropped(world, id, None);
+            }
             world.fail_plan(id);
         }
     }
@@ -625,6 +629,9 @@ impl World {
     pub fn cool_goal(&mut self, id: EntityId, goal: crate::components::GoalKind) {
         let until = self.tick + self.cool_ticks(id, goal);
         if let Some(b) = self.comp_mut::<Brain>(id) {
+            // Round 4 T3 (OPEN-222): a longer cool the plan itself just set
+            // (a held contract waiting out its mark's cells) stands.
+            let until = b.cooldowns.get(&goal).map_or(until, |&t| t.max(until));
             b.cooldowns.insert(goal, until);
             b.last_plan_failure = None;
         }
@@ -1716,6 +1723,17 @@ fn try_enter(
     let cap = world.config.exec.door_capacity_per_tick;
     let slots = world.door_queue.get(&door).copied().unwrap_or(0);
     let full = world.comp::<Building>(b).is_some_and(|bd| bd.is_full()) && !world.capacity_exempt(id, b);
+    // Round 4 T3 (OPEN-222): with `[exec] staff_door` the building's own
+    // staff go in by the staff door, past the public door's queue: a shift
+    // starting at once locked itself out (20k seed 42: 66 guards into the
+    // Precinct at 08:10-08:44 held its door at 2 a tick and the 67th timed
+    // out; V12's `runner_90375` timed out on a 0-tile GoTo 25 times in 6 days).
+    let staff =
+        world.config.exec.staff_door && world.comp::<crate::components::Job>(id).is_some_and(|j| j.employer == Some(b));
+    if staff && !full {
+        world.enter_building(id, b);
+        return StepResult::Done;
+    }
     if slots < cap && !full {
         *world.door_queue.entry(door).or_insert(0) += 1;
         world.enter_building(id, b);

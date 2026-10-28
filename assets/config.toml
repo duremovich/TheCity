@@ -492,7 +492,9 @@ door_capacity_per_tick = 2
 door_queue_max_ticks = 30
 # Workplace room (2026-10-11): an agent refused at a full building passes it over in `World::local` for this many
 # ticks (its replan goes to another Market or the home pantry, not back to the same door; 0: off), and a
-# building's own staff are let in when it is full (the staff door: customers never lock the shift out).
+# building's own staff are let in when it is full (the staff door: customers never lock the shift out). Round 4 T3
+# (OPEN-222): the staff door also passes them by the public door's queue (door_capacity_per_tick): 66 guards
+# starting at the Precinct at once held its door at 2 a tick and the 67th timed out at door_queue_max_ticks.
 refused_ticks = 120
 staff_door = true
 reservation_ttl = 120

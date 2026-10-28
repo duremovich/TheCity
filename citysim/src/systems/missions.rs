@@ -602,9 +602,19 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<raid::Outcome> {
         contracts::fail_attempt(world, id, &text);
         return Some(raid::Outcome::Lost);
     }
+    // Round 4 T3 (OPEN-222): the crew goes for its mark first; the ones who
+    // stand with him come after (V12 `gun_37892 d26 00:09` beat three of
+    // Anselm Dunmore's people at Block#3343 and never reached Anselm: the
+    // pairings ran by strength). The list is `defenders`', which
+    // `ages::is_protected` has already gated (and `fight_out` gates again):
+    // the order changes, never who may be hit.
+    mark_first(&mut defs, t);
     let (n_raiders, n_defenders) = (raiders.len(), defs.len());
     let tally = fight(world, &mut raiders, &mut defs, m.door, &place);
     let won = defs.is_empty();
+    // ... and a Beat is done once the mark lost his pairing (beaten, alive),
+    // whoever still stands at the door.
+    let beaten = !defs.contains(&t) && law::living(world, t);
     let mut finished = false;
     if won && c.kind == ContractKind::Hit && law::living(world, t) && taken(world, id) {
         let mut standing: Vec<EntityId> =
@@ -625,12 +635,18 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<raid::Outcome> {
             finished = murder;
         }
     }
-    let result = if won { "won" } else { "lost" };
+    let result = if won {
+        "won"
+    } else if beaten {
+        "beat him, then lost the door"
+    } else {
+        "lost"
+    };
     let line =
         format!("{crew_name} hit {tname} at {place}: {result} ({n_raiders} vs {n_defenders}, {} dead)", tally.deaths);
     contracts::note(world, id, line.clone());
     if taken(world, id) {
-        match (won, c.kind) {
+        match (won || beaten, c.kind) {
             (true, ContractKind::Beat) => contracts::settle(world, id, contracts::Settle::Fulfilled, &line),
             (true, ContractKind::Hit) if !finished && law::living(world, t) => {
                 contracts::fail_attempt(world, id, &format!("{line}; {tname} survived"))
@@ -639,6 +655,15 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<raid::Outcome> {
         }
     }
     Some(if won { raid::Outcome::Won } else { raid::Outcome::Lost })
+}
+
+/// Round 4 T3 (OPEN-222): the mission brawl's pairing order: the mark
+/// `t` first, the rest of `defs` as they stood.
+pub fn mark_first(defs: &mut Vec<EntityId>, t: EntityId) {
+    if let Some(i) = defs.iter().position(|&d| d == t) {
+        let mark = defs.remove(i);
+        defs.insert(0, mark);
+    }
 }
 
 fn taken(world: &World, id: ContractId) -> bool {

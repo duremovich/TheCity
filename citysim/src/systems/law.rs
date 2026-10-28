@@ -5,8 +5,8 @@
 use rand::Rng;
 
 use crate::components::{
-    Brain, Building, BuildingKind, Crime, CrimeReport, DeathCause, Job, Kit, LawShock, MemoryKind, Needs, Personality,
-    Position, Posture, Role, Sentence, Skills, TilePos,
+    Brain, Building, BuildingKind, Crime, CrimeReport, DeathCause, GoalKind, Job, Kit, LawShock, MemoryKind, Needs,
+    Personality, Position, Posture, Role, Sentence, Skills, TilePos,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -646,12 +646,19 @@ pub fn collar_of(world: &World, guard: EntityId) -> Option<EntityId> {
         return None;
     }
     let since = world.tick.saturating_sub(hours * crate::time::TICKS_PER_HOUR);
-    let mine: Vec<(Tick, EntityId)> = world
+    let mut mine: Vec<(Tick, EntityId)> = world
         .crime_reports()
         .iter()
         .filter(|r| !r.resolved && r.witness == Some(guard) && r.tick >= since && !is_petty(r.crime))
         .map(|r| (r.tick, r.suspect))
         .collect();
+    // Round 4 T3 (OPEN-222): a chase handed to him (`chase_dropped`) is his
+    // collar for as long.
+    if let Some(&(s, t)) = world.handoffs.get(&guard) {
+        if t >= since {
+            mine.push((t, s));
+        }
+    }
     if mine.is_empty() {
         return None;
     }
@@ -676,6 +683,125 @@ pub fn collar_of(world: &World, guard: EntityId) -> Option<EntityId> {
         })
         .max()
         .map(|(_, s)| s)
+}
+
+/// Round 4 T3 (`OPEN-222`): guard `guard`'s Arrest plan ends without the
+/// arrest (a re-think's `winner`, or a failed step with `None`): one
+/// `Pursuit` line says why (the warrant closed, the trail cold, another
+/// guard on him, out of his reach, the shift over, another want first; a
+/// failed step with the chase still on says nothing: he re-plans it) and,
+/// while the suspect is still wanted and located, hands the case to the
+/// nearest free guard on shift who can chase him (`handoffs`: his collar
+/// for `[justice] collar_hours`). V12's `guard_8440 d23 11:10` chased Zane
+/// Oakes four legs, then `Arrest -> Unwind` at 13:10 with no line (his
+/// collar lapsed off shift); 20k seed 42 x 30 had 347 such ends. A chase
+/// that made its arrest (escorting) or whose suspect is dead says nothing.
+pub fn chase_dropped(world: &mut World, guard: EntityId, winner: Option<GoalKind>) {
+    let Some(b) = world.comp::<Brain>(guard) else { return };
+    if b.escorting.is_some() {
+        return;
+    }
+    let Some(s) = b.plan.as_ref().filter(|p| p.goal == GoalKind::Arrest).and_then(|p| p.target) else { return };
+    if s == guard || !living(world, s) {
+        return;
+    }
+    let now = world.tick;
+    let held = world.has::<Sentence>(s) || world.comp::<Brain>(s).is_some_and(|x| x.cuffed_by.is_some());
+    let seen = world.last_seen().get(&s).copied();
+    let here = world.comp::<Position>(guard).map(|p| p.tile);
+    let on = world.comp::<Job>(guard).is_some_and(|j| {
+        j.on_shift(world.tick_of_day()) && crate::exec::routine::workday_of(world, guard, j, j.shift_key_at(now))
+    });
+    let open = wanted(world, s) && !held;
+    let out_of_reach = seen.zip(here).is_some_and(|((t, _), h)| t.manhattan(h) > pursuit_radius_for(world, guard));
+    // A failed step (the suspect gone from the tile he was seen on, or he
+    // fought free) with the chase still on: the guard re-plans it, silent.
+    if winner.is_none() && open && located(world, s) && !world.claimed_by_other(guard, s) && !out_of_reach {
+        return;
+    }
+    let why = if held {
+        "already in custody".to_string()
+    } else if !wanted(world, s) {
+        "the warrant is closed".to_string()
+    } else if !located(world, s) {
+        match seen {
+            Some((_, t)) => {
+                format!("the trail went cold: last seen {} h ago", now.saturating_sub(t) / crate::time::TICKS_PER_HOUR)
+            }
+            None => "the trail went cold".to_string(),
+        }
+    } else if world.claimed_by_other(guard, s) {
+        "another guard has the chase".to_string()
+    } else if out_of_reach {
+        "out of reach".to_string()
+    } else if !on {
+        "the shift is over".to_string()
+    } else {
+        winner.map_or_else(|| "got away".to_string(), |w| format!("{w:?} came first"))
+    };
+    let free = open && located(world, s) && !world.claimed_by_other(guard, s);
+    let receiver =
+        if free { seen.and_then(|(at, _)| handoff_guard(world, guard, s, at).map(|r| (r, at))) } else { None };
+    let (gname, sname) = (world.name_of(guard), world.name_of(s));
+    let text = match receiver {
+        Some((r, at)) => {
+            let hours = world.config.justice.as_ref().map_or(0, |c| c.collar_hours);
+            let since = now.saturating_sub(hours * crate::time::TICKS_PER_HOUR);
+            world.handoffs.retain(|_, &mut (_, t)| t >= since);
+            world.handoffs.insert(r, (s, now));
+            let far = world.comp::<Position>(r).map_or(0, |p| p.tile.manhattan(at));
+            format!(
+                "{gname} gave up the chase of {sname} ({why}): handed to {} on shift, {far} tiles off",
+                world.name_of(r)
+            )
+        }
+        None if free => {
+            format!("{gname} gave up the chase of {sname} ({why}): no guard on shift near; the warrant stays open")
+        }
+        None => format!("{gname} gave up the chase of {sname} ({why})"),
+    };
+    let mut actors = vec![guard, s];
+    actors.extend(receiver.map(|(r, _)| r));
+    world.push_event(EventKind::Pursuit, &actors, text);
+}
+
+/// `chase_dropped`'s hand-on: the nearest guard to `at` (the suspect's last
+/// sighting; ties the lower id), not `from`, of the same force (a private
+/// guard's only on his beat), at work on shift, free (no chase, no escort,
+/// not a Statistical one, not on the suspect's take), within his pursuit
+/// radius of `at` with the sighting fresh to him.
+fn handoff_guard(world: &World, from: EntityId, s: EntityId, at: TilePos) -> Option<EntityId> {
+    let private = is_private_guard(world, from);
+    let tod = world.tick_of_day();
+    let seen = world.last_seen().get(&s).copied()?;
+    world
+        .guards()
+        .iter()
+        .copied()
+        .filter(|&g| g != from && g != s && is_private_guard(world, g) == private)
+        .filter(|&g| living(world, g) && !world.has::<Sentence>(g))
+        .filter(|&g| {
+            world.comp::<Brain>(g).is_some_and(|b| {
+                b.lod != crate::components::Lod::Statistical
+                    && b.cuffed_by.is_none()
+                    && b.escorting.is_none()
+                    && b.plan_goal() != Some(GoalKind::Arrest)
+            })
+        })
+        .filter(|&g| {
+            world.comp::<Job>(g).is_some_and(|j| {
+                j.on_shift(tod) && crate::exec::routine::workday_of(world, g, j, j.shift_key_at(world.tick))
+            })
+        })
+        .filter_map(|g| world.comp::<Position>(g).map(|p| (g, p.tile)))
+        .filter(|&(g, t)| {
+            t.manhattan(at) <= pursuit_radius_for(world, g)
+                && crate::systems::life::sighting_fresh_at(world, seen, t)
+                && (!private || on_beat_at(world, g, at))
+                && !crate::systems::contracts::on_take_of(world, g, s)
+        })
+        .min_by_key(|&(g, t)| (t.manhattan(at), g))
+        .map(|(g, _)| g)
 }
 
 /// Is `located_suspects(world, by)` non-empty?
