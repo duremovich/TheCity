@@ -5235,3 +5235,27 @@ shape_up_gate = true               # a Yard's foreman with a body walks to its g
                                    # has its own line
 shape_up_lead_min = 20             # ... he is at the gate this many minutes before [jobs2] corner_hour (sets out, or wakes
                                    # from a committed sleep, by the travel from where he is)
+
+# Pressure pass round 4, T5 (docs/PRESSURE_PASS.md § T5; OPEN-217, OPEN-228's follow-up): the jobless look for work
+# (systems/search.rs; under [jobs2] street; absent: as T4 left them). Placeholders.
+[search]
+search_days = 7                    # a jobless adult searches each day for this many days after his last post (V12's laid-off
+                                   # night stocker sat four days idle); after, the job search's and the broke shape-up's as before
+worse_after_days = 2               # from this many days without a post he takes worse work: the dawn shape-up whatever his
+far_ticks = 360                    # purse, and a post past [distance.choice] hire_max_ticks up to this travel (the far hire
+                                   # moves him nearer, [commute_pressure]) before the Ambient pool takes it (S1 stranded natives)
+hours_from = 420                   # a body's search day: from 07:00 ...
+hours_to = 960                     # ... to 16:00 (ticks of the day)
+reach_ticks = 120                  # a hiring board is the door of an open post he can take within this travel of where he stands
+lead_ticks = 240                   # ... a Friend's or kin's word of a post at his own workplace within this travel
+board_kinds = ["Hall", "Market", "ConstructionYard", "FreightYard"]  # with no open post within reach the nearest of
+                                   # these within reach_ticks is the hiring board: it names the nearest open post he can
+                                   # take within lead_ticks of it (the next door), or nothing (V12's searcher sat idle)
+ask_ticks = 15                     # minutes asking at a door
+tries = 3                          # doors asked a day
+asks = 8                           # Friends and kin asked a day, the closest by affinity (the first read asked 98)
+friend_names = 3                   # names the Friends-asked line gives (the rest "and N more")
+crowd = 2                          # a door is no searcher's next while this many searchers a post open there make for it
+                                   # (the first read sent a dozen to one Bar's one post)
+day_start_min = 30                 # the dawn's hand works from this many minutes after [jobs2] corner_hour to the day shift's end
+                                   # (V12's hand rested three hours at the Yard for a 09:00 shift)

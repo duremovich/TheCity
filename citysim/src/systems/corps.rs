@@ -488,6 +488,10 @@ pub fn break_up(world: &mut World, corp: EntityId) -> Result<EntityId, String> {
     let exec = staff.get(1).or(staff.first()).map(|&(_, a)| a);
     let spin_name = format!("{name} Spinoff");
     let spinoff = ownership::spawn_corp(world, spin_name.clone(), [niche].into_iter().collect(), 0, exec);
+    // Round 4 T5 (OPEN-234): the employee made its exec lets his post go.
+    if let Some(e) = exec {
+        crate::systems::search::leave_post_for_chair(world, e, spinoff);
+    }
     let amount = (treasury.max(0) as f64 * moved.len() as f64 / owned.max(1) as f64).round() as i64;
     if amount > 0 {
         ownership::charge(world, Some(corp), Some(spinoff), amount, Flow::Sale);

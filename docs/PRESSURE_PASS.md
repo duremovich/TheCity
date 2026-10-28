@@ -1926,3 +1926,73 @@ and repeat on the city's, so the city's books are kept too. `SAVE_VERSION` 84 (`
   `door_under_age`, `shape_up_home`, `foreman_gate`). One premise re-pinned, with the reason in place:
   `leverage::test_protection_pays_weekly_and_stops_when_district_lost` (with 10,000 coins the owner was the richest
   purse at a corp's bankruptcy, bought its Noodle Bar and incorporated, so the Hotel changed hands; she now holds 600).
+
+### T5, the jobless look for work (`OPEN-217`, `OPEN-228`'s follow-up, `OPEN-234`; `systems/search.rs`, `[search]`)
+
+- **Who searches** (`search::searching`): a free jobless adult in need of a wage (`Needs.wealth` under 1, the secure
+  quit's line), no exec, not retired, not inside F3's idle days (`Misery.idle_until`), for `search_days` (7) after his
+  last post (`Jobs2State.idle_since`; a post lost since the last midnight is day 0), and any jobless body the shape-up
+  sent home this morning (`note_sent_home`, T4's passed-over: the sequel). F3's jobless state, the stain and the
+  firing employer's refusal stand (`life::quit_blocks` is read at every door).
+- **Asking Friends** (a body, the first hour of `hours_from..hours_to`, 07:00-16:00): his `asks` (8) closest Friends
+  and kin; one employed where a post he can take is open (`demography::can_take`: `pick_candidate`'s rules for one
+  candidate; a graded or skill-ranked post stays the midnight's) within `lead_ticks` (240) gives the word ("Taz
+  Coldwater told Kuro Ito of a Packer post at Packing Plant#5313"). "Nobody knew of an opening" is told once a jobless
+  spell (`Misery.search_spell`).
+- **The doors and the boards** (the Pitch goal's search branch: `streetwork::street_tile`, `considerations`,
+  `vend_ticks`; the ask is the `Vend` step's end, `search::on_ask`): the lead's door, else the nearest door with an
+  open post he can take within `reach_ticks` (120), else the nearest hiring board (`board_kinds`: the Hall, a
+  Market, the yards). At a door with the post open and his he is taken on (`demography::hire`, the vacancy closed
+  before the night's Ambient pool); else "the post was gone" or "turned away". A board names the nearest open post
+  he can take within `lead_ticks` of it (the next door) or "nothing going". A door `crowd` (2) searchers a post are
+  making for is nobody's next; `tries` (3) doors a day, `ask_ticks` (15) at each. The want fades over the search
+  days; the score is U(wealth), hunger and energy as the corner's.
+- **Worse work** (`worse_after_days` 2): while he searches he stands at the dawn shape-up whatever his purse
+  (`streetwork::corner_ok`); and the midnight job search hires a native past `[distance.choice] hire_max_ticks` up
+  to `far_ticks` (360) (`search::takes_far` in `demography::job_search_round`), before the Ambient pool takes the
+  post. The far hire's move-in is `[commute_pressure]`'s. This is item 3: S1's stranded natives were the posts past
+  4 h that the pool filled.
+- **The day labourer's day** (`streetwork::dawn_pick`): the picked hand's `Job.shifts` is `[corner_hour +
+  day_start_min (30), the day shift's end]`, so he works from 06:30 (V12: Rest 91 + 83 min at the Yard for 09:00).
+- **The exec's post** (`OPEN-234`, closed): `search::leave_post_for_chair` lets a held post go with a line at an
+  incorporation (`founding::incorporate_owned`), a spinoff's exec (`corps.rs`) and, as the backstop, daily for any
+  living exec holding one (`ownership::exec_wages`). `exec_6526`'s path was the incorporation: "Sprocket Singh gave up
+  the post of Ripperdoc at Ripperdoc#4936 to take the chair of Singh Holdings" (20k day 12; 15 lines in the run).
+- **Statistical mirror**: no walk and no door; an off-screen searcher is the midnight job search's candidate with
+  the far reach from `worse_after_days`, and the shape-up's queue on `p_corner` whatever his purse while he
+  searches. No child: `is_adult` and `ages::is_protected` in `can_take` (no victim pick, fight or punishment is
+  touched); `harm_blocked` 0.
+- **Shadow** (20k `isle_m_k2` seed 42 d21-27; a new `jobless` pick, the searching jobless freshest first, as the
+  repro of V12's laid-off `night_shift_23119`): `jobless_6381 d21 07:00` "Philippa Whitlock asked Razor Stroud,
+  Bertram Kettering, Rafe Whitlock and 5 more about work: nobody knew of an opening"; `09:07` "read the board at
+  Construction Yard#5260: a Vat Tech post at Vat Farm#4377"; `13:05` "asked at Vat Farm#4377 about work: the post was
+  gone"; `d22` two more boards; `d23 09:38` "asked at Ripperdoc#5658 about work: turned away"; `14:40` "asked at
+  Packing Plant#5552 about work and was taken on as Packer". `jobless_6397 d21 08:39` a board, `11:35` taken on as
+  Vat Tech. `jobless_6465 d21` two boards "nothing going", then the shape-up d22-25 (worse work), `d22 06:02` Rest 28
+  min at Construction Yard#5274, `06:32` the first load, `18:00` +3c. `worker_13107 d27 11:32` out of the cells to
+  "the post as Club Staff ... gone", `12:00` asks her Friends, `15:01` a board names a Super's post. An earlier read:
+  "Adela Dunmore asked at Block#2227 ... taken on as Super" at 09:04, and Philippa Whitlock at the same door at 09:31,
+  "the post was gone".
+- **Reads wrong** (the next pass): "the post was gone" is the commonest door line (a board names a post two hours'
+  walk away and a nearer searcher or the midnight takes it). A door hire into a post the layoff pass sheds at the
+  next midnight ("taken on as Vat Tech" d21 09:06, "laid off: revenue, a shift past full staff" d22 00:07): the post
+  was open past the corp's cap. The dawn corner's eat-or-queue tie (Eat 0.240 vs Pitch 0.239 at 05:21) costs a
+  searcher the shape-up two mornings. A homeless pick named a board's post and never walked it (`homeless_10221
+  d21`). A searcher with no door or board in reach still idles (the rest of the day, once the tries are spent).
+- **Numbers** (20k `isle_m_k2` seed 42 x 30, `--scaled --ambient-flats 50`, one run each, base `0452241`):
+  Materialised 863 -> 648, Ambient pool hires 821 -> 602, far posts taken by natives 0 -> 300 (191 on day 2),
+  employed mean 11,240 -> 11,248 (days 2-6 +180..+200: the natives fill the open posts past the pool's 100 a day;
+  vacancies open mean 132 -> 86), population mean 23,641 -> 23,412 (fewer Ambient households come in), employed per
+  resident 0.475 -> 0.480. Search days (bodies) 3,412, Friends' words 95, doors and boards asked 4,872, taken on at
+  the door 384; day posts filled 394 -> 323. FINDING (not tuned): homeless mean 457 -> 512, max 657 -> 783 (day 20):
+  day 14's company-housing buyouts 297 -> 420 evictions (the far-hired natives' corps buy Blocks near work); day 29
+  582 -> 589. Ticks/s mean 160 -> 146 (a shadow ran beside it; a print). Not read at 100k (20k shows every case).
+- Re-pinned premises (`search = None`, the reason in place; the subject of each is not the search):
+  `civic::test_jailer_meal_is_an_inmate_encounter` (a searcher took a jailer's post at the Jail's door by day 2 and
+  the prisoner's meal went to him), `outside::test_demand_linear_until_the_cap` (the 2.0-flat city's uncapped visits
+  fell to 1), `person::probe_el_commuter_with_coins_rides_and_beats_the_walk` (a different commuter picked, whose ride
+  waited), `person::probe_parent_with_the_fee_buys_the_child_out_within_fourteen_days` (a jobless parent searched
+  through the week's Camp answer: a reads-wrong for the next pass), `sickness::test_g3_only_the_broke_steal_food` (a
+  door hire's wage between the snapshots). The `jobless` shadow pick is new (`citysim-cli/src/shadow.rs`).
+- No test (doctrine 2). `SAVE_VERSION` 88 (`Misery.search`, `Misery.search_spell`, `EventKind::JobSearch`, the
+  `[search]` keys, the `Jobs2Cols` `search_days`, `search_leads`, `search_asks`, `search_hires`, `far_hires`).

@@ -852,6 +852,9 @@ fn incorporate_owned(world: &mut World, agent: EntityId, owned: Vec<EntityId>) -
     let last = full.split_whitespace().last().unwrap_or("Nobody").to_string();
     let name = format!("{last} Holdings");
     let corp = ownership::spawn_corp(world, name.clone(), niches, 0, Some(agent));
+    // Round 4 T5 (OPEN-234): the new exec lets a post he holds go
+    // (`exec_6526` kept a Ripperdoc's post on another corp's payroll).
+    crate::systems::search::leave_post_for_chair(world, agent, corp);
     // Phase 5: the founder's savings become the corp's capital (an exec
     // draws a wage from it from now on) and its first `incorporate_grace_days`
     // carry no upkeep: at treasury 0 Varley Holdings went bankrupt under

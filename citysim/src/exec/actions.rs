@@ -876,7 +876,11 @@ pub fn on_complete(
         ActionKind::EatAlms => crate::systems::charity::on_eat_alms(world, id, target),
         ActionKind::DumpsterDive => crate::systems::bins::on_complete(world, id, target),
         // Jobs & lives phase 2: the hour stood (the sales are world-side).
-        ActionKind::Vend => StepResult::Done,
+        // Round 4 T5 (OPEN-217): a searcher's ask at a door settled.
+        ActionKind::Vend => {
+            crate::systems::search::on_ask(world, id);
+            StepResult::Done
+        }
         // P5i: one pantry unit (synth first, as eaten) into the carried food.
         ActionKind::PackMeal => {
             let Some(home) = world.comp::<Household>(id).and_then(|h| h.home) else {

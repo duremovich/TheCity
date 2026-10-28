@@ -2066,7 +2066,12 @@ fn exec_wages(world: &mut World) {
         let exec = world.comp::<Corp>(c).and_then(|cc| cc.exec);
         let living = exec.filter(|&e| world.has::<Wallet>(e) && world.has::<Brain>(e) && !world.has::<Corpse>(e));
         let exec = match living {
-            Some(e) => Some(e),
+            Some(e) => {
+                // Round 4 T5 (OPEN-234): the backstop: an exec holding a post
+                // (one held when the chair came, by any path) lets it go.
+                crate::systems::search::leave_post_for_chair(world, e, c);
+                Some(e)
+            }
             None => {
                 // Class pay: the corp's management, then its professionals,
                 // first; the new exec leaves the post (re-posted).

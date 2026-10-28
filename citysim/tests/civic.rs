@@ -309,8 +309,13 @@ fn test_super_stop_serves_notice_and_takes_the_door_rent() {
 /// encounter with the jailer on duty.
 #[test]
 fn test_jailer_meal_is_an_inmate_encounter() {
-    // The pressure pass R2: the v1 pace (`common::v1_pace`).
-    let mut w = common::world_with(common::v1_pace);
+    // The pressure pass R2: the v1 pace (`common::v1_pace`). Round 4 T5: no
+    // job search (a searcher asking at the Jail's door took a jailer's post
+    // by day 2, and the prisoner's meal went to him, not the hand-hired one).
+    let mut w = common::world_with(|c| {
+        common::v1_pace(c);
+        c.search = None;
+    });
     w.run_ticks(DAY2_ONE);
     // Jailers are posted one per `held_per_jailer` held, so day 2 has none: one is hired by hand.
     let jail = w.building_of_kind(BuildingKind::Jail).expect("the Jail");

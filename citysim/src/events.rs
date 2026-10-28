@@ -518,10 +518,15 @@ pub enum EventKind {
     /// absconder walked back in; `[child, parent, camp, home?]` a child let
     /// home; `[parent, friends..]` a warned parent's ask.
     Custody,
+    /// Round 4 T5 (OPEN-217, `systems::search`): the jobless look for work.
+    /// `[searcher, friends..]` the Friends asked (and the word of a post);
+    /// `[searcher, workplace]` a door asked; `[worker, workplace]` a post
+    /// let go for an exec's chair.
+    JobSearch,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 240] = [
+    pub const ALL: [EventKind; 241] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -762,6 +767,7 @@ impl EventKind {
         EventKind::Fare,
         EventKind::Pursuit,
         EventKind::Custody,
+        EventKind::JobSearch,
     ];
 }
 

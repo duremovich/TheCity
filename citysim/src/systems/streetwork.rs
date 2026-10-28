@@ -545,6 +545,8 @@ pub fn hourly(world: &mut World) {
     if world.tick_of_day() == world.config.jobs2.corner_hour {
         dawn_pick(world);
     }
+    // Round 4 T5 (OPEN-217): the searchers' Friends and next doors.
+    crate::systems::search::hourly(world);
 }
 
 /// A working vendor short of a batch buys `vendor_batch` shelf units at
@@ -813,8 +815,10 @@ fn corner_ok(world: &World, id: EntityId) -> bool {
     let cfg = &world.config.jobs2;
     free_adult(world, id)
         && !world.has::<Job>(id)
-        && coins(world, id) < cfg.corner_broke
         && world.comp::<Personality>(id).is_some_and(|p| p.lawfulness >= cfg.corner_lawful)
+        // Round 4 T5 (OPEN-217): a searcher who takes worse work stands
+        // there whatever his purse.
+        && (coins(world, id) < cfg.corner_broke || crate::systems::search::at_shape_up(world, id))
 }
 
 /// The day's posts by employer: a Construction Yard's `day_per_site` a
@@ -993,8 +997,16 @@ fn dawn_pick(world: &mut World) {
                 None => mornings.push((b, i, foreman, vec![a])),
             }
         }
+        // Round 4 T5 (OPEN-217): the hand works the day he was picked for,
+        // from `[search] day_start_min` after the pick to the day shift's
+        // end (V12's rested three hours at the Yard for a 09:00 shift).
+        let start = crate::systems::search::cfg(world)
+            .map(|c| (cfg.corner_hour + c.day_start_min).min(shift_end.saturating_sub(1)));
         if let Some(j) = world.comp_mut::<Job>(a) {
             j.until = Some(until);
+            if let Some(s) = start {
+                j.shifts = vec![(s, shift_end)];
+            }
         }
         // The pressure pass phase 2: the shape-up is a meeting (both diaries).
         if let Some(f) = foreman.filter(|_| crate::systems::customers::cfg(world).is_some()) {
@@ -1097,6 +1109,8 @@ fn shape_up_told(world: &mut World, mornings: &[Morning], queues: &[Vec<EntityId
                 format!("{} stood at the gate of {} at dawn and was sent home{by}", world.name_of(a), world.name_of(y));
             // His line, not the foreman's (the foreman's is the Yard's one).
             world.push_event(EventKind::DawnPick, &[a, y], text);
+            // Round 4 T5 (OPEN-217): he goes on looking today.
+            crate::systems::search::note_sent_home(world, a);
             if let Some(f) = f {
                 world.remember(a, crate::components::MemoryKind::Served, Some(f), sal, -0.2, false);
             }
@@ -2587,7 +2601,10 @@ pub fn street_tile(world: &World, id: EntityId) -> Option<TilePos> {
     if let Some(p) = world.jobs2.pitches.get(&id) {
         return Some(p.spot);
     }
-    corner_for(world, id).or_else(|| foreman_gate(world, id))
+    corner_for(world, id)
+        .or_else(|| foreman_gate(world, id))
+        // Round 4 T5 (OPEN-217): a searcher's door to ask at.
+        .or_else(|| crate::systems::search::board_tile(world, id))
 }
 
 /// Round 4 T4 (OPEN-217; `[verbs] shape_up_gate`): in the dawn window after
@@ -2716,7 +2733,10 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
             0.0,
         ));
     }
-    corner_for(world, id)?;
+    if corner_for(world, id).is_none() {
+        // Round 4 T5 (OPEN-217): the search's door, after the dawn.
+        return crate::systems::search::considerations(world, id);
+    }
     Some((
         vec![
             Consideration::new("the corner at dawn", 1.0, GATE),
@@ -2755,6 +2775,12 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind) -> bool {
 pub fn vend_ticks(world: &World, id: EntityId) -> Tick {
     if world.jobs2.pitches.contains_key(&id) {
         return TICKS_PER_HOUR;
+    }
+    // Round 4 T5: a searcher's ask at a door (never in the dawn window).
+    if corner_for(world, id).is_none() {
+        if let Some(t) = crate::systems::search::ask_ticks(world, id) {
+            return t;
+        }
     }
     let h = world.config.jobs2.corner_hour;
     Tick::from(h.saturating_sub(world.tick_of_day()).max(1))
