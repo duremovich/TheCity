@@ -506,6 +506,9 @@ fn test_mission_fight_out_matches_gang_raid() {
     assert!(defenders.contains(&ta), "the target at its door");
     assert_eq!(raiders.len(), 3);
     assert_eq!(defenders.len(), 3);
+    // Round 4 T3 (OPEN-222): the mission arm pairs its mark first; the gang
+    // arm is handed the same order, so the premise (one pairing machine) holds.
+    missions::mark_first(&mut defenders, ta);
     let place = format!("a street in {}", a.district_name(a.district_of(door)));
     let tally = raid::fight_out(&mut a, &mut raiders, &mut defenders, door, &place, 1.0, None);
     // The mission arm.
@@ -529,7 +532,8 @@ fn test_mission_fight_out_matches_gang_raid() {
     assert!(tally.deaths <= fa.len(), "deaths are pairings'");
     // The Beat settled on the result; the mission is over.
     assert!(!b.missions.contains_key(&idb));
-    let won = defenders.is_empty();
+    // T3: a Beat is done once the mark lost his pairing, whoever still stands.
+    let won = defenders.is_empty() || (!defenders.contains(&ta) && law::living(&a, ta));
     let st = b.contracts[&idb].status;
     if won {
         assert_eq!(st, ContractStatus::Fulfilled, "a Beat won");

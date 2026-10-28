@@ -1209,23 +1209,34 @@ pub fn reach_offer(world: &World, kind: ContractKind, target: &Target, buyer: En
     Some((f, (p as f32 * (1.0 + world.config.hitmarket.reach_premium.max(0.0))).ceil() as i64))
 }
 
+/// The kinds worked on the ledger at any tier (`render_for`'s first test):
+/// no live plan works them. M16b phase 1: a Persuade is a social move
+/// resolved at any tier; phase 2: a Deliver and a Spin likewise, a Steal
+/// unless its heist runs (`captives::start_heist`, its own run). Phase 4: a
+/// Vote's Intimidate likewise; a Tag too, unless its party is shown (Shadow
+/// V4 bug 15: a pinned gun was paid 261 c for a plant made while he rested;
+/// shown, he stakes the mark out and plants at contact). M17 phase 3: a
+/// Retake is one strike draw at the building. Round 4 T3 (`OPEN-222`): a
+/// body taker or target never turns such a record live (`on_promoted`,
+/// `resolve_ledger`): V12's pinned `gun_36512` held a Steal on a Lab the
+/// Contract plan could not walk to, cooled it "7 in a row" and let it expire.
+fn ledger_kind(world: &World, c: &Contract) -> bool {
+    matches!(
+        c.kind,
+        ContractKind::Persuade
+            | ContractKind::Deliver
+            | ContractKind::Spin
+            | ContractKind::Steal
+            | ContractKind::Vote
+            | ContractKind::Retake
+    ) || (c.kind == ContractKind::Tag && !party_shown(world, c))
+}
+
 /// C17: `Live` when the target or the taker is a body, pinned or on
 /// screen, or the record is a Guard taken by an agent; else `Ledger`.
 pub fn render_for(world: &World, id: ContractId) -> Render {
     let Some(c) = world.contracts.get(&id) else { return Render::Ledger };
-    // M16b phase 1: a Persuade is a social move resolved at any tier;
-    // phase 2: a Deliver and a Spin likewise, a Steal unless its heist runs.
-    if matches!(c.kind, ContractKind::Persuade | ContractKind::Deliver | ContractKind::Spin | ContractKind::Steal) {
-        return Render::Ledger;
-    }
-    // Phase 4: a Vote's Intimidate likewise; a Tag too, unless its party is
-    // shown (Shadow V4 bug 15: a pinned gun was paid 261 c for a plant made
-    // while he rested; shown, he stakes the mark out and plants at contact).
-    if c.kind == ContractKind::Vote || (c.kind == ContractKind::Tag && !party_shown(world, c)) {
-        return Render::Ledger;
-    }
-    // M17 phase 3: a Retake is one strike draw at the building.
-    if c.kind == ContractKind::Retake {
+    if ledger_kind(world, c) {
         return Render::Ledger;
     }
     // Phase 2: an Escort is a Guard on a person; an Abduct is never ledger.
@@ -1876,8 +1887,18 @@ pub fn set_status(world: &mut World, id: ContractId, status: ContractStatus, why
         ),
         ContractStatus::Open | ContractStatus::Taken | ContractStatus::Standing => return,
     };
-    let actors =
-        if status == ContractStatus::Reneged { [c.buyer.unwrap_or(EntityId::NONE), taker] } else { [taker, target] };
+    let mut actors: SmallVec<[EntityId; 6]> = if status == ContractStatus::Reneged {
+        SmallVec::from_slice(&[c.buyer.unwrap_or(EntityId::NONE), taker])
+    } else {
+        SmallVec::from_slice(&[taker, target])
+    };
+    // Round 4 T3 (OPEN-222): the crew hears how its job ended (V12's
+    // `gun_37892` brawled for a corp's Beat and no line closed it).
+    for &m in &c.crew {
+        if !actors.contains(&m) {
+            actors.push(m);
+        }
+    }
     world.push_event(ev, &actors, text.clone());
     log(world, id, text);
     // The pressure pass phase 5a: an unfilled bought Hit or Beat: the buyer
@@ -2191,7 +2212,14 @@ pub fn fail_attempt(world: &mut World, id: ContractId, why: &str) {
         reindex_take(world);
     }
     let text = format!("{} on {}: attempt {attempts} failed ({why})", c.kind.label(), world.name_of(c.target.id()));
-    world.push_event(EventKind::ContractFailed, &[c.taker.unwrap_or(EntityId::NONE), c.target.id()], text.clone());
+    // Round 4 T3 (OPEN-222): the crew hears it too.
+    let mut actors: SmallVec<[EntityId; 6]> = SmallVec::from_slice(&[c.taker.unwrap_or(EntityId::NONE), c.target.id()]);
+    for &m in &c.crew {
+        if !actors.contains(&m) {
+            actors.push(m);
+        }
+    }
+    world.push_event(EventKind::ContractFailed, &actors, text.clone());
     log(world, id, text);
 }
 
@@ -2318,7 +2346,7 @@ pub fn resolve_ledger(world: &mut World, id: ContractId) {
     // party came in front of the player, after it went to the ledger goes
     // back to the live queue rather than roll a death off-screen
     // (`ledger_ok`).
-    if !c.motive.is_none() && !ledger_ok(world, &c) {
+    if !c.motive.is_none() && !ledger_ok(world, &c) && !ledger_kind(world, &c) {
         if let Some(x) = world.contracts.get_mut(&id) {
             x.render = Render::Live;
             x.due = None;
@@ -2824,8 +2852,16 @@ pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
         crate::systems::hunt::reindex(world);
         return Some(Plan { goal: GoalKind::Contract, target: Some(c.target.id()), steps, started_tick: now });
     }
+    // Round 4 T3 (OPEN-222): a run no walk can work (a ledger kind turned
+    // live before the gate, a building for a mark) goes back to the ledger,
+    // said; a mark out of reach is waited out or let go, said.
+    if ledger_kind(world, &c) || c.target_agent().is_none() {
+        back_to_ledger(world, id, r.contract);
+        return None;
+    }
     let t = r.target;
     if !crate::systems::hunt::target_ok(world, t) {
+        mark_out_of_reach(world, id, &c, t);
         return None;
     }
     let mut next = crate::systems::hunt::chase(world, id)?;
@@ -2880,6 +2916,83 @@ pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
         steps.push(step(ActionKind::HandOver, Some(at)));
     }
     Some(Plan { goal: GoalKind::Contract, target: tt, steps, started_tick: now })
+}
+
+/// Round 4 T3 (`OPEN-222`): why mark `t` cannot be walked to now, and when
+/// that ends if it does (a sentence's release); `None` for a mark in reach
+/// of the chase, or one in a guard's hands (the cells come next: the plain
+/// back-off waits for them).
+fn mark_away(world: &World, t: EntityId) -> Option<(String, Option<Tick>)> {
+    let name = world.name_of(t);
+    if !crate::systems::law::living(world, t) {
+        return Some((format!("{name} is dead"), None));
+    }
+    if let Some(s) = world.comp::<Sentence>(t) {
+        let until = s.until_tick;
+        let when = format!("d{} {}", until / TICKS_PER_DAY, time::clock(until));
+        return Some((format!("{name} is in the cells till {when}"), Some(until)));
+    }
+    let b = world.comp::<Brain>(t)?;
+    if b.cuffed_by.is_some() {
+        return None;
+    }
+    if b.emigrating {
+        return Some((format!("{name} is leaving the city"), None));
+    }
+    if crate::systems::abroad::is_away(world, t) {
+        return Some((format!("{name} is away from the city"), None));
+    }
+    None
+}
+
+/// Round 4 T3 (`OPEN-222`): the taker of a run whose mark is out of reach
+/// (`mark_away`): a mark out of the cells before the deadline is waited
+/// out (the Contract goal cooled to the release, one `Pursuit` line);
+/// otherwise the taker lets it go (`fail_attempt` with the reason). V12 and
+/// 20k seed 42: held Locates and Tags on jailed marks cooled every 2-12 h
+/// to the deadline (955 cools in 30 days at 20k), then expired unsaid.
+fn mark_out_of_reach(world: &mut World, taker: EntityId, c: &Contract, t: EntityId) {
+    let Some((why, until)) = mark_away(world, t) else { return };
+    let (kind, tname, who) = (c.kind.label(), world.name_of(t), world.name_of(taker));
+    match until {
+        Some(u) if u < c.deadline => {
+            if let Some(b) = world.comp_mut::<Brain>(taker) {
+                b.cooldowns.insert(GoalKind::Contract, u);
+            }
+            let text = format!("{who} holds the {kind} on {tname} and waits: {why}");
+            world.push_event(EventKind::Pursuit, &[taker, t], text.clone());
+            log(world, c.id, text);
+        }
+        _ => fail_attempt(world, c.id, &format!("{who} let it go: {why}")),
+    }
+}
+
+/// Round 4 T3 (`OPEN-222`): `taker`'s live run on record `id` that no walk
+/// works goes back to the ledger: the run ended, a `due` drawn over half the
+/// time left (`ContractNs::Due`, key `1 + attempts`, as
+/// `ledger_stale_queue`), one `Pursuit` line.
+fn back_to_ledger(world: &mut World, taker: EntityId, id: ContractId) {
+    let Some(c) = world.contracts.get(&id).cloned() else { return };
+    end_run(world, taker, id);
+    let now = world.tick;
+    let span = (c.deadline.saturating_sub(now) / 2).max(60);
+    let u: f64 = world.rng.contract(ContractNs::Due, id, 1 + u64::from(c.attempts)).random();
+    let due = now + (u * span as f64).floor() as Tick;
+    if let Some(x) = world.contracts.get_mut(&id) {
+        x.render = Render::Ledger;
+        x.due = Some(due);
+    }
+    world.ledger_due.insert((due, id));
+    let tname = world.name_of(c.target.id());
+    let text = format!(
+        "{} works the {} on {tname} off the street: no walk plans it (due d{} {})",
+        world.name_of(taker),
+        c.kind.label(),
+        due / TICKS_PER_DAY,
+        time::clock(due)
+    );
+    world.push_event(EventKind::Pursuit, &[taker, c.target.id()], text.clone());
+    log(world, id, text);
 }
 
 /// R6b (OPEN-217): the first of the target's Home and workplace doors
@@ -3171,6 +3284,10 @@ pub fn on_promoted(world: &mut World, id: EntityId) {
         }
         let Some(due) = c.due else { continue };
         if c.taker != Some(id) && c.target.id() != id {
+            continue;
+        }
+        // Round 4 T3 (OPEN-222): a ledger kind stays on the ledger.
+        if ledger_kind(world, c) {
             continue;
         }
         // C35 (phase 4): only into a set with room (else it stays a ledger record).

@@ -713,6 +713,11 @@ pub struct World {
     #[serde(skip)]
     pub(crate) res_partners: BTreeMap<EntityId, BTreeMap<EntityId, u32>>,
     pub door_queue: BTreeMap<TilePos, u8>,
+    /// Pressure pass round 4, T3 (`OPEN-222`): per guard, the chase another
+    /// guard handed him (`law::chase_dropped`): `(suspect, tick)`, his collar
+    /// for `[justice] collar_hours` (`law::collar_of`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub handoffs: BTreeMap<EntityId, (EntityId, Tick)>,
     /// Lazily built, LRU-evicted (`[exec] flow_field_cache`); pure functions of map and door.
     #[serde(skip)]
     pub flow_fields: FlowCache,
@@ -1918,6 +1923,7 @@ impl World {
             res_by_building: BTreeMap::new(),
             res_partners: BTreeMap::new(),
             door_queue: BTreeMap::new(),
+            handoffs: BTreeMap::new(),
             flow_fields: FlowCache::default(),
             landmark_base: None,
             last_seen: BTreeMap::new(),

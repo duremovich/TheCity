@@ -398,7 +398,9 @@ use crate::world::World;
 /// `petty_rewitness_days` (serde defaults).
 /// 83 (pressure pass round 3, S4, care at 100k): `care::State.refused`, the `[care]`
 /// ask keys and the `[presence]` super keys (serde defaults).
-pub const SAVE_VERSION: u8 = 83;
+/// 84 (pressure pass round 4, T3, plans that still die silently): `World.handoffs`
+/// (written while it holds anything) and `EventKind::Pursuit`.
+pub const SAVE_VERSION: u8 = 84;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

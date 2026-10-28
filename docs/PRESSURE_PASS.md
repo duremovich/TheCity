@@ -1674,3 +1674,84 @@ off (exempted after it; Visit cools 7 -> 15).
   clone before the trim: the trimmed Hollow lost its two kept members in the moved city). A walk-in seen off duty
   writes no service room with `[service]` off (`service::test_off_city_writes_nothing`).
 - No test (doctrine 2). `SAVE_VERSION` 81 (`care::State.refused`, the `[care]` and `[presence]` keys).
+
+### T3, plans that still die silently (`OPEN-222`; `contracts.rs`, `law::chase_dropped`, `exec::try_enter`, `crew::sat_muster`, `missions::brawl`, `EventKind::Pursuit`)
+
+Diagnosed at 20k (seed 42 x 30, temporary prints, removed) and from the V12 100k diaries. Each case at its cause:
+
+- **A held contract that never plans.** Two causes. (1) `gun_36512`'s record was a **Steal on a Lab**: a ledger
+  kind (`render_for` sends Steal, Persuade, Deliver, Spin, Vote, Retake and an unshown Tag to the ledger), but the
+  shadow's pin made the taker a body and `on_promoted` (and `resolve_ledger`'s re-queue of an organic record with a
+  body in it) turned it live; the Contract plan's chase has no walk to a building (`hunt::target_ok` on a Lab), so
+  the goal cooled "7 in a row" to the deadline. Built: `ledger_kind` (`render_for`'s first test) and neither path
+  turns one live; a run that no walk works (a ledger kind, a building for a mark) goes back to the ledger with a
+  `due` and a `Pursuit` line ("X works the steal on Lab#4915 off the street: no walk plans it (due dN hh:mm)").
+  (2) At 20k the cools were **Locates and Tags on a jailed mark** (955 cools in 30 days, 0 with this build): the
+  chase gate refuses a mark in the cells. `mark_away` / `mark_out_of_reach`: a mark out of the cells before the
+  deadline is waited out (the Contract goal cooled to the release, one line: "Sable Dunmore holds the locate on
+  Hana Ironside and waits: Hana Ironside is in the cells till d26 17:06"); one out after it, dead, leaving or abroad
+  is let go (`fail_attempt`, the reason in the line: "locate on Imani Ferreira: failed (Solene Lindqvist let it go:
+  Imani Ferreira is in the cells till d31 10:53)"). `World::cool_goal` keeps a longer cool the plan set itself.
+- **An arrest chase that ends silent** (`law::chase_dropped`, from `think`'s abort of an Arrest plan and from a
+  failed Arrest step): one `Pursuit` line says why (already in custody, the warrant closed, the trail went cold, another guard
+  has the chase, out of reach, the shift is over, another want first) and, while the suspect is wanted, located and
+  unclaimed, hands the case to the nearest free guard at work on shift who can chase him (`handoff_guard`: the same
+  force, his pursuit radius, the sighting fresh to him, not on the take) as his collar for `[justice] collar_hours`
+  (`World.handoffs`, read by `collar_of`), else "no guard on shift near; the warrant stays open". A failed step with
+  the chase still on says nothing (the guard re-plans it). V12 `guard_8440 d23 11:10`: his own collar (S3) lapsed at
+  2 h while he chased off shift, and the in-shift factor went to 0.
+- **A Guard's 0-tile GoTo timeout** (`exec::try_enter`): the Precinct's door queue (`door_capacity_per_tick` 2) at a
+  shift start. 20k: 66 guards entering for Work from 08:10 held the door at 2 a tick to 08:44 and the 67th timed out
+  at `door_queue_max_ticks` 30 (2 in 30 days at 20k; `runner_90375` 25 in 6 days at 100k, five times the guards).
+  With `[exec] staff_door` on, a building's own staff go in by the staff door, past the public queue (the key's
+  comment extended; no new key).
+- **A mustered raider "missed"** (`crew::sat_muster`): V12 `raider_70326`'s d21 miss was a **court summons**, not
+  the muster: the raid was ordered after midnight (`raid_ordered` posts no muster over a member's day duty), he
+  mustered 353 min at the very Hideout he was summoned to and marched, the court was never held, and midnight
+  booked the summons missed. A member who sits his gang's muster now has the day's other duty of that gang turned
+  into the muster, kept (the court's pending Visit dropped). His `d24` "missed ... guard" was a duty owed by a member
+  who led the gang by midnight (the leader is posted none): no longer booked.
+- **A contract brawl that hits three not the target** (`missions::brawl`): the pairings ran by strength, so the
+  crew's strongest beat Anselm Dunmore's people one by one and never reached him. The crew now goes for its mark
+  first (the mark moved to the front of `defenders`), and a Beat is done once the mark lost his pairing ("beat him,
+  then lost the door" when the rest held). **Under-18:** the list is `defenders`', which drops every
+  `ages::is_protected` body (`fit`), and `fight_out_until` drops them again before the pairings: the order changes,
+  never who may be hit. `raid::crossfire` had **no** age gate on its bystander pool (bodies near the door and a riot's
+  Statistical draw): both now drop `ages::is_protected` (20k `harm_blocked` 0 -> 0). The crew hears how its job
+  ended: `ContractFailed`/`Fulfilled`/`Expired` carry the crew as actors ("hit on Mako Moreau: attempt 1 failed (The
+  Drowned Choir 8's crew hit Mako Moreau at Block#248: won (2 vs 1, 0 dead); Mako Moreau survived)" in
+  `raider_11724`'s diary).
+
+Numbers (20k `isle_m_k2` seed 42 x 30, `--scaled --ambient-flats 50`, base `7a56d67`, one run each; prints, nothing
+claimed but the silent cools): Contract cools on a run that could not plan 955 -> 0 (each now a wait or a let-go
+line: ~85 waits, ~90 let go); Precinct door timeouts 2 -> 0; `Pursuit` 1,216 a month (the arrest ends: the trail
+went cold 681, out of reach 171, already in custody 113, the shift is over 100, another guard has the chase 73; 49
+handed on, 16 of the handed collars cuffed); court summons missed 389 -> 297; 23 day duties turned into a sat
+muster (17 a court summons; the run before Welcome and Crew were excluded). FINDING (not tuned, the runs diverge):
+Arrests 1,508 -> 1,438, Assaults 1,451 -> 1,229, Murders 65 -> 67, Raids 83 -> 60, ContractExpired 115 -> 68,
+ContractFailed 142 -> 204, homeless max 779 -> 686, starvation deaths 0 -> 1, `harm_blocked` 0 -> 0.
+
+- **Shadow** (20k, d21-27, `--pick guard:14,raider:10,gun:8,runner:3`). Working: `gun_20043 d26 05:46`
+  "ContractFailed: locate on Imani Ferreira: failed (Solene Lindqvist let it go: Imani Ferreira is in the cells till
+  d31 10:53)"; `gun_21749 d26 13:29` "Sable Dunmore holds the locate on Hana Ironside and waits: Hana Ironside is in
+  the cells till d26 17:06"; `raider_19389 d23 05:50` the same for a tag; `guard_7793 d26 18:23` "Zelda Draper gave
+  up the chase of Ilse Chrome (the shift is over): no guard on shift near; the warrant stays open" (V12's
+  `guard_8440` case, said); `guard_25123 d23 15:29` "(he is out of reach)" (the shadows ran before the reasons lost
+  their pronoun: a suspect is often a woman); the run's hand-ons ("Zara Voss gave up the
+  chase of Tobin Crane (out of reach): handed to Lux Mercer on shift, 2 tiles off"); `raider_11724 d24 22:28` hears
+  the crew's job end ("hit on Mako Moreau: attempt 1 failed (The Drowned Choir 8's crew hit Mako Moreau at
+  Block#248: won (2 vs 1, 0 dead); Mako Moreau survived)") though he slept through it; no GoTo(Jail) Timeout in 16
+  guard and runner diaries (V12: 25 in one).
+- **Deviations.** The contract: "plan it" for a Steal is the ledger's roll (a body taker has no heist walk without
+  a deck), said. The chase "hands the case on" to a named on-shift guard as his collar, not to the Precinct's board
+  (that is the warrant, which stays open either way). The raider: the miss was the court summons, so the fix is the
+  duty, not the muster. The brawl: the mark first is an order, not a new target pick.
+- **Reads wrong** (the next pass's input): most chases go cold (681 a month): at walking pace a guard reaches the
+  last-seen tile after the suspect left it and `arrest` needs him beside the guard (an intercept or a radio
+  sighting, not a line); nine guards chased `gun_21749`'s Sable Dunmore over four days, each "the trail went cold".
+  A mark in the cells is still taken (the take gate does not read the cells: `gun_20043` took the locate on Imani
+  Ferreira at d25 18:00 and let it go at 05:46), and a corp's Tags and Locates stack a dozen holds on one jailed mark
+  (Ada Bellamy). The Steal under a pin and the brawl's "beat him, then lost the door" did not come up at 20k (5
+  mission brawls in 30 days); 100k was not re-run (V12's 21+7 days at 22 ticks/s is past the foreground cap). The
+  `Pursuit` lines are T7's to fold.
+- No test (doctrine 2). `SAVE_VERSION` 84 (`World.handoffs`, `EventKind::Pursuit`).

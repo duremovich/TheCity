@@ -313,6 +313,10 @@ fn apply(world: &mut World, id: EntityId, scheduled: bool, s: Scored) -> bool {
         world.shop_offers.insert(id, (tick, offer));
     }
     if abort {
+        // Round 4 T3 (OPEN-222): an arrest chase given up says so.
+        if old == Some(GoalKind::Arrest) {
+            crate::systems::law::chase_dropped(world, id, Some(winner));
+        }
         crate::prof::timed!("think::abort", world.abort_plan(id));
         if let Some(old) = old {
             world.push_event(EventKind::PlanAborted, &[id], format!("{old:?} -> {winner:?}"));
