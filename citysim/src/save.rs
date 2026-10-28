@@ -429,7 +429,9 @@ use crate::world::World;
 /// 92 (pressure pass round 5, U1, Schools for the children there are): `AgesState.full_run` (written while
 /// set), `[ages] school_age_per_school`, `found_full_days`, `found_full_min` and the `Jobs2Cols`
 /// `schools_founded` column (serde defaults).
-pub const SAVE_VERSION: u8 = 92;
+/// 93 (pressure pass round 5, U7, contradictions): `[chrome] strip_heir_salience` in the
+/// saved config (serde default).
+pub const SAVE_VERSION: u8 = 93;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

@@ -279,6 +279,22 @@ pub fn foreman(world: &World, b: EntityId, exclude: Option<EntityId>) -> Option<
         .map(|(_, s)| s)
 }
 
+/// Round 5 U7 (`OPEN-237`): [`foreman`] with the staff off sick or held in
+/// the cells passed over: who picks or tells today is at work.
+pub fn foreman_on_hand(world: &World, b: EntityId, exclude: Option<EntityId>) -> Option<EntityId> {
+    if crate::systems::careers::on(world) {
+        return crate::systems::careers::foreman_on_hand(world, b, exclude);
+    }
+    world
+        .staff_of(b)
+        .iter()
+        .copied()
+        .filter(|&s| Some(s) != exclude && crate::systems::careers::on_hand(world, s))
+        .filter_map(|s| world.comp::<Job>(s).map(|j| (j.hired_tick, s)))
+        .min()
+        .map(|(_, s)| s)
+}
+
 /// The event text's foreman clause (", picked by Ines Vo, the foreman"),
 /// empty with the switch off or no foreman.
 pub fn foreman_note(world: &World, b: EntityId, who: EntityId, verb: &str) -> String {
@@ -301,13 +317,19 @@ pub fn foreman_note(world: &World, b: EntityId, who: EntityId, verb: &str) -> St
 pub fn picker(world: &World, b: EntityId, who: EntityId) -> Option<(EntityId, Option<EntityId>)> {
     let gang = world.owner_of(b).filter(|&o| world.has::<crate::components::Gang>(o));
     if let Some(g) = gang {
-        let man = world.staff_of(b).iter().copied().filter(|&s| s != who && world.gang_of(s) == Some(g)).min();
+        // Round 5 U7: the gang's man at work today (not off sick, not held).
+        let man = world
+            .staff_of(b)
+            .iter()
+            .copied()
+            .filter(|&s| s != who && world.gang_of(s) == Some(g) && crate::systems::careers::on_hand(world, s))
+            .min();
         let leader = world.comp::<crate::components::Gang>(g).and_then(|x| x.leader).filter(|&l| l != who);
         if let Some(p) = man.or(leader).filter(|&p| crate::systems::law::living(world, p)) {
             return Some((p, Some(g)));
         }
     }
-    foreman(world, b, Some(who)).map(|f| (f, None))
+    foreman_on_hand(world, b, Some(who)).map(|f| (f, None))
 }
 
 // ---------------------------------------------------------------------------

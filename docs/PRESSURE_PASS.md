@@ -2422,3 +2422,75 @@ held and guards on main's binary in `target/u4_shadow_before`):
   cover onto day 1 of the off city, a leak that was there before U1).
 - No test (doctrine 2). `SAVE_VERSION` 92 (91 was U5's) (`AgesState.full_run`, the `[ages]` U1 keys, the `Jobs2Cols`
   `schools_founded` column); `analyze_run.py` prints the Schools at day 0 and the last day, and the founded count.
+
+### U7, contradictions (`OPEN-237`, `OPEN-222`'s leftovers; `law::raise_crime_parties`, `law::accomplice`, `crew::muster_reach`, `contracts::spent_locate`, `Flow::FareCut`, `industry::foreman_on_hand`, `[chrome] strip_heir_salience`)
+
+Each at its cause (20k island seed 42 x 30, `--scaled --ambient-flats 50`, before = main `85886ba`, after = the
+branch, one run each; counts from the event log by name; shadows `target/u7_shadow`, `u7_shadow2`, `u7_shadow3`):
+
+1. **The thief "was robbed"** (`exec::steal_food`): a Home theft's victim was the first body in the building, so a
+   visiting thief who had just stolen there was the next thief's victim (`homeless_71553`). The victim is now a
+   resident of that Home who is present (`World::residents_of`), never a visitor; none present, no victim.
+2. **The victim and the accomplices witness the deed** (`law::raise_crime_core`): the witness roll dropped only the
+   actor and `except`. It now drops the victim, the deed's object, the named parties (`raise_crime_parties`: a
+   shakedown's payers, who had `victim: None`) and the actor's accomplices (`law::accomplice`: a member of the same
+   gang on the same goal). The victim and the parties still know who did it: a first-hand `SawCrime` (what
+   `ReportCrime` reads; the roll gave them one before) with no Witness line and no witness's reaction, and a guard on
+   shift who is the victim files at once. A body shakedown's coins move on the books (`Flow::Coerced`, as the gang's
+   tribute), so the payer's money line names it: `courier_15714 d21 23:39` "-5c (Coerced) ... flows: Coerced -5 to
+   Kuro Sallow", then "memory WasRobbed of Kuro Sallow", "memory SawCrime of Kuro Sallow (Extortion)", no Witness
+   line (V13: "(other)" and "saw ... commit Shakedown"). Counts: an assault's victim "saw" his own assault 372 -> 13
+   (the 13 are raid brawls: one raider hits several defenders in the minute, a defender saw the blow on another);
+   mutual sightings of one Shakedown within the hour 16 -> 3; Shakedown witness lines 1,397 -> 757; all named
+   Witness lines 12,938 -> 11,498, Report 1,545 -> 1,542, Arrest 1,131 -> 1,033.
+3. **"Sat out the raid" while marching** (`crew::muster_reach`): the 00:07 duty pass read the muster trip from home
+   for a member already on his Raid plan, past the muster (`raider_84195`). A member on his Raid plan is in the raid:
+   no line, no muster post. Instrumented once (removed): 125 such members in 30 days (98 in the shadow's week) no
+   longer get the line or a second post. All "sat out" lines 121 -> 158 (the rest are members off the march past
+   `duty_reach_ticks`, the city moving under the other fixes). No raider of 15 picked marched in the window.
+4. **A guard "on" its own buyer; the week-long stakeout** (`contracts::post`, `contracts::spent_locate`). (a) A Guard
+   or Escort is posted *for* its ward, a bodyguard for "himself"/"herself": "posted a guard on X" with X the buyer 67
+   -> 0, "for himself/herself" 0 -> 56; `exec_24735 d24 00:06` "Kessler 2 posted a guard for Block#2200". (b) The
+   stakeout: a brokered Locate escrows its price (30-40c) while `cap_sightings` x `per_sighting` is 150c; after
+   three paid sightings every contact was refused ("the sighting went in, unpaid"), the cap never came, and the
+   taker re-planned a 2-minute StakeOut every 5-20 min for days (20k `gun_23612`: 49 stake-outs on Florian Upton, no
+   sale; V13 `gun_41438`). A live taker's contact that finds the payer spent settles the record as the ledger
+   tracker's report does (fulfilled on the sightings it bought; a direct buyer short with none bought reneges; else
+   back on the board). Locates fulfilled 50 -> 74, taken 102 -> 72 (spent records no longer cycle takers), 28 closed
+   spent (each after 3 paid sightings). A refusal for the 6-h gap is not "spent" and still re-stakes (left).
+5. **CabFare from one Friend** (`streetwork::driver_cut`): the 3-4c lines were the driver's cut, paid by the
+   Garage's owner (an agent who owns the Garage) under `Flow::CabFare`, so they read as a rider's fare. The cut is
+   `Flow::FareCut` (taxed and in `flow_other`, as before: no ledger number moves): `cabbie_14444 d22 09:13` "+7c
+   (FareCut) ... flows: FareCut +8 from Ivo Voss" (the owner).
+6. **The sick foreman** (`industry::picker`): the Hire's and Layoff's named picker is the foreman (or the gang's
+   man) at work today, `careers::on_hand` (not off sick, not held); the midnight foreman flag and his premium are
+   unchanged. Hire/LaidOff lines naming a foreman off sick that day 43 -> 8 (6 at the seed's tick 0, 2 at the 00:10
+   hire pass before that midnight's sick roll).
+7. **The CEO's 585c strip** (`chrome::strip`): the street was empty (nobody within `sight_day_crime` at 08:20; at
+   20k half the body strips are witnessed, 51 of 95), and only an heir in sight ever learned. An heir out of sight now
+   learns at the settling (strip settles the body at once): an unnamed `Stripped` memory at `[chrome]
+   strip_heir_salience` (0.5); no name, so no grudge, report or hunt. The windfall stays the stripper's luck. Strips
+   of 100c+ 2 -> 5, unseen 0 -> 4 (1,179c).
+8. **The jailed exec's ExecWage** (`ownership` daily exec pay): an exec held in the cells keeps the chair and draws
+   no salary that day (a worker in the cells works no shift). Read from the code: no exec was jailed in the 5 exec
+   diaries.
+
+**Deviations.** Not taken: the released man who never searches (`loader_74097 d26 16:13` goes straight to
+`JoinGang`, a choice his scores explain, not a contradiction); the jobless pimp (U6). The off-screen shakedown
+(`gang::stat_extort`) keeps its wallet moves (the payers' money line there is a stand-in); its payers gained the
+under-18 filter the body path had.
+
+**Under 18.** No victim pick widened: the Home theft's victim is still `!ages::is_protected` (now also a resident);
+the body shakedown's occupants keep their filter, and the off-screen shakedown's payers gain it (S6 had missed it).
+The witness changes only remove witnesses; no fight, punishment or target pick changed.
+
+**Reads wrong / open** (the next pass's input): with the shakedown on the books the camera now flags its payer
+asleep ("SETTLED APART: Coerced 2c to; Kuro Sallow beside me; I am asleep", `courier_15714 d22 00:35`): an
+Intimidate "SUCCESS" against a sleeping household, older than U7, newly visible. A Locate taker still re-stakes every
+few minutes through the 6-h gap between paid sightings. Mutual Theft sightings 5 -> 15: two thieves in one Home
+now each see the other (no longer each other's "victim"), which reads right.
+
+Re-pinned on its premise, the reason in place: `bodies`' `test_refound_only_after_refound_days` asserts the refound's
+brothers arrived (the event's arrivals), not that the gang still holds them days later (the moved city lost them to
+the cells and the street before the check). No test (doctrine 2). `SAVE_VERSION` 93 (`[chrome] strip_heir_salience`
+in the saved config; serde default).

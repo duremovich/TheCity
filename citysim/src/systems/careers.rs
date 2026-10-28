@@ -158,12 +158,33 @@ pub fn seed(world: &mut World) {
 /// `foreman_min_age` or more (ties the row's skill, then the lower id),
 /// `exclude` left out. `None` when nobody qualifies.
 pub fn foreman(world: &World, b: EntityId, exclude: Option<EntityId>) -> Option<EntityId> {
+    foreman_where(world, b, exclude, |_| true)
+}
+
+/// Round 5 U7 (`OPEN-237`): the foreman who is at work today: `foreman`
+/// with anyone off sick or held in the cells passed over (V13: a Vat Tech off
+/// sick "picked" her own cover hire and laid him off, `sick_47483 d21`).
+pub fn foreman_on_hand(world: &World, b: EntityId, exclude: Option<EntityId>) -> Option<EntityId> {
+    foreman_where(world, b, exclude, |s| on_hand(world, s))
+}
+
+/// Round 5 U7: `s` is at work today (not off sick, not in the cells).
+pub fn on_hand(world: &World, s: EntityId) -> bool {
+    !crate::systems::health::sick(world, s) && !world.has::<crate::components::Sentence>(s)
+}
+
+fn foreman_where(
+    world: &World,
+    b: EntityId,
+    exclude: Option<EntityId>,
+    keep: impl Fn(EntityId) -> bool,
+) -> Option<EntityId> {
     let min = world.config.careers.foreman_min_age;
     world
         .staff_of(b)
         .iter()
         .copied()
-        .filter(|&s| Some(s) != exclude && years(world, s) >= min)
+        .filter(|&s| Some(s) != exclude && years(world, s) >= min && keep(s))
         .filter_map(|s| {
             let j = world.comp::<Job>(s)?;
             let skill = crate::systems::competence::role_skill(world, s, j.role).map_or(0.0, |(v, _, _)| v);

@@ -2143,7 +2143,7 @@ fn driver_cut(world: &mut World, s: EntityId, g: EntityId, fare: i64) {
         return;
     }
     let owner = world.owner_of(g);
-    let paid = ownership::pay(world, owner, Some(s), cut, Flow::CabFare);
+    let paid = ownership::pay(world, owner, Some(s), cut, Flow::FareCut);
     if paid > 0 {
         *world.jobs2.fare_cuts.entry(s).or_default() += paid;
         ownership::jobs2_row(world).cab_cuts += paid;

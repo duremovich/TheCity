@@ -1045,6 +1045,7 @@ abduct_base = 0.002
 p_rip_kill = 0.5
 loot_reach = 16                    # plan D35: the Loot goal's reach (Manhattan tiles)
 treat_below = 1.0                  # plan D34 (phase 3): Treat is considered below this sanity (a whole body has nothing to treat)
+strip_heir_salience = 0.5          # round 5 U7 (OPEN-237): an heir out of sight of a strip of coins learns it at the settling, unnamed, at this salience (the one in sight: 0.7, named)
 gang_chrome_floor = 80             # plan D44 (phase 3): a gang's Arms purchase floor; phase 5: 300 -> 80 (one T1 at 60 and a margin)
 
 [vehicles]

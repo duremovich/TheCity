@@ -257,8 +257,12 @@ fn test_refound_only_after_refound_days() {
     w.run_ticks((u64::from(cfg.refound_days) - 2) * TICKS_PER_DAY);
     assert!(!w.events.iter().any(|e| e.kind == EventKind::GangRefounded), "not before refound_days");
     w.run_ticks((u64::from(cfg.brother_delay_days) + 4) * TICKS_PER_DAY);
-    assert!(w.events.iter().any(|e| e.kind == EventKind::GangRefounded));
-    assert!(!w.comp::<Gang>(g).expect("gang").members.is_empty(), "re-formed");
+    // Round 5 U7: re-pinned on the premise (the refound sends its brothers
+    // into the gang); whether they are all still in it days later is the
+    // city's (U7's moved city lost them to the cells and the street before
+    // the check).
+    let refound = w.events.iter().find(|e| e.kind == EventKind::GangRefounded).expect("refounded");
+    assert!(!refound.actors.is_empty(), "re-formed: the brothers arrived");
 }
 
 /// The State: Fund under high heat and an honest captain, Withdraw on a

@@ -611,14 +611,22 @@ pub fn strip(world: &mut World, agent: EntityId, c: EntityId) -> bool {
     let tile = world.comp::<Position>(c).map_or_else(Default::default, |p| p.tile);
     crate::systems::law::raise_crime(world, agent, None, crate::components::Crime::Theft, tile);
     let r = world.config.crime.sight;
+    let unseen = world.config.chrome.strip_heir_salience;
     for h in crate::systems::demography::coin_heirs(world, c) {
-        if world.has::<Brain>(h)
-            && world.comp::<Position>(h).is_some_and(|p| crate::systems::law::chebyshev(p.tile, tile) <= r)
-        {
+        if !world.has::<Brain>(h) {
+            continue;
+        }
+        if world.comp::<Position>(h).is_some_and(|p| crate::systems::law::chebyshev(p.tile, tile) <= r) {
             world.remember(h, MemoryKind::Stripped, Some(agent), 0.7, -0.7, false);
             // M15 W35: a witnessed strip of a close one's body leaves a grudge.
             let r = crate::word::DeedRef { deed: crate::word::Deed::Stripped, actor: Some(agent), object: Some(c) };
             crate::systems::grudges::on_learn(world, h, &r, 1.0, 0);
+        } else if loot.coins > 0 && unseen > 0.0 {
+            // Round 5 U7 (`OPEN-237`): the body comes back without its coins
+            // (the heir's inheritance gone): the loss is known, the hand is
+            // not (no name, no grudge, no report). V13: 585c stripped on an
+            // empty Spire street with no line anywhere (`ceo_20314 d21 08:20`).
+            world.remember(h, MemoryKind::Stripped, None, unseen, -unseen, false);
         }
     }
     world.stats.current.stripped += 1;
