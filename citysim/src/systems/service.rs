@@ -1049,6 +1049,19 @@ pub fn refused(world: &mut World, id: EntityId, b: EntityId) {
             br.refused = Some((b, tick));
         }
     }
+    // Round 4 T7 (OPEN-233): back at a door that turned him away inside
+    // `[verbs] door_return_ticks` is a return, and the door's answer changes:
+    // he is barred from the house `door_return_ban_days` (`vice::barred`,
+    // which `leisure::door_seen` passes over) and the scene he makes of it
+    // is likelier. T4's 100k door turned one armed man away nine times in
+    // four nights, the pass-over (`[exec] refused_ticks`, one door a face)
+    // all that held him off.
+    let (ret_ticks, ban_days, swing) = world
+        .config
+        .verbs
+        .as_ref()
+        .map_or((0, 0, 1.0), |v| (v.door_return_ticks, v.door_return_ban_days, v.door_return_swing_mult));
+    let back = ret_ticks > 0 && crate::systems::vice::turned_again(world, id, b, ret_ticks);
     // Round 4 T4: the bouncer standing the door (a body first).
     let Some(bouncer) = door_man(world, b, id, &[]) else { return };
     let Some(row) = row_of_agent(world, bouncer).cloned() else { return };
@@ -1075,17 +1088,27 @@ pub fn refused(world: &mut World, id: EntityId, b: EntityId) {
             }
         });
     }
+    // ... the bar, a door's own (`vice::shut_out`; R6a's `bar` holds one a face).
+    let mut barred_till: Option<u64> = None;
+    if back && why != Some("barred") {
+        let until = world.day() + ban_days;
+        crate::systems::vice::shut_out(world, id, b, until);
+        barred_till = Some(until);
+    }
     if row.event_on.contains(&ServeOutcome::Refused) {
         let because = why.map(|w| format!(" ({w})")).unwrap_or_default();
+        let again = if back { " again" } else { "" };
+        let bar = barred_till.map_or(String::new(), |d| format!(": barred till d{d}"));
         let text = format!(
-            "{} turned {} away at the door of {}{because}",
+            "{} turned {} away{again} at the door of {}{because}{bar}",
             world.name_of(bouncer),
             world.name_of(id),
             world.name_of(b)
         );
         world.push_event(EventKind::Served, &[bouncer, id, b], text);
     }
-    if let Some(line) = why.and_then(|w| crate::systems::customers::scene(world, id, bouncer, b, w)) {
+    let mult = if back { swing } else { 1.0 };
+    if let Some(line) = why.and_then(|w| crate::systems::customers::scene(world, id, bouncer, b, w, mult)) {
         world.push_event(EventKind::Brawl, &[id, bouncer, b], line);
     }
 }

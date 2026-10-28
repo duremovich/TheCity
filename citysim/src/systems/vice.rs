@@ -107,6 +107,11 @@ pub struct ViceState {
     /// at the shift's end (`night_told`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub serve_nights: BTreeMap<u64, ServeNight>,
+    /// Round 4 T7 (OPEN-233): a face turned away at a kept door (`key`) ->
+    /// (the door, the tick, the day a return's bar there lifts or 0), kept
+    /// `[verbs] door_return_ticks` or while barred (`turned_again`, `barred`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub turned: BTreeMap<u64, Vec<(EntityId, u64, u64)>>,
 }
 
 /// Round 4 T4 (OPEN-217): a serving body's night at its venue: the room
@@ -606,9 +611,39 @@ pub fn bar(world: &mut World, id: EntityId, b: EntityId, until: u64) {
     world.jobs2.vice.barred.insert(key(id), (b, until));
 }
 
-/// R6a: is `id` barred from the house `b` today (a rough booking's)?
+/// Round 4 T7 (OPEN-233; `service::refused`): `id` is turned away at `b`
+/// now; was he turned away there inside `window` ticks before (a return)?
+/// The ledger keeps each face's refusals that long (one door a face was all
+/// `Brain.refused` held: a drunk refused at two doors in turn came back to
+/// each).
+pub fn turned_again(world: &mut World, id: EntityId, b: EntityId, window: u64) -> bool {
+    let (now, day) = (world.tick, world.day());
+    let ledger = &mut world.jobs2.vice.turned;
+    ledger.retain(|_, v| {
+        v.retain(|&(_, at, until)| now.saturating_sub(at) < window || day < until);
+        !v.is_empty()
+    });
+    let list = ledger.entry(key(id)).or_default();
+    let prev = list.iter().position(|&(d, _, _)| d == b);
+    let until = prev.map_or(0, |i| list.remove(i).2);
+    list.push((b, now, until));
+    prev.is_some()
+}
+
+/// Round 4 T7: the return `id` made to `b` bars him there until the day
+/// `until` (the ledger holds a bar a door; `bar`'s one a face is R6a's).
+pub fn shut_out(world: &mut World, id: EntityId, b: EntityId, until: u64) {
+    if let Some(e) = world.jobs2.vice.turned.get_mut(&key(id)).and_then(|v| v.iter_mut().find(|e| e.0 == b)) {
+        e.2 = e.2.max(until);
+    }
+}
+
+/// R6a: is `id` barred from the house `b` today (a rough booking's; round
+/// 4 T7: or a return's, `shut_out`)?
 pub fn barred(world: &World, id: EntityId, b: EntityId) -> bool {
-    world.jobs2.vice.barred.get(&key(id)).is_some_and(|&(h, until)| h == b && world.day() < until)
+    let day = world.day();
+    world.jobs2.vice.barred.get(&key(id)).is_some_and(|&(h, until)| h == b && day < until)
+        || world.jobs2.vice.turned.get(&key(id)).is_some_and(|v| v.iter().any(|&(d, _, u)| d == b && day < u))
 }
 
 /// R6a: the madam's shift ends (`service::shift_end`): her night's bookings

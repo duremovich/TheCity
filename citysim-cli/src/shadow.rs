@@ -304,13 +304,24 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
         }
         "homeless" => adults().filter(|&a| world.comp::<Household>(a).is_some_and(|h| h.home.is_none())).collect(),
         // Shadow V4 bug 23: a cancer past stage 0 (it took one at 0.00).
-        "sick" => adults()
-            .filter(|&a| {
-                world
-                    .comp::<citysim::Health>(a)
-                    .is_some_and(|h| h.malnutrition >= 0.5 || h.cancer.as_ref().is_some_and(|c| c.stage > 0.0))
-            })
-            .collect(),
+        // Round 4 T7 (OPEN-233): an illness, not hunger alone: V12's 100k
+        // picks were jobless and malnourished, "no cancer | sick days 0/14"
+        // (the sick roll is the employed's), so S4's ladder went unwatched.
+        // A cancer past stage 0 or a sick day in the last 14 (`pick` puts a
+        // diagnosed cancer first); the malnourished only when nobody is ill.
+        "sick" => {
+            let health = |a: EntityId| world.comp::<citysim::Health>(a);
+            let ill: Vec<EntityId> = adults()
+                .filter(|&a| {
+                    health(a).is_some_and(|h| h.sick_days != 0 || h.cancer.as_ref().is_some_and(|c| c.stage > 0.0))
+                })
+                .collect();
+            if ill.is_empty() {
+                adults().filter(|&a| health(a).is_some_and(|h| h.malnutrition >= 0.5)).collect()
+            } else {
+                ill
+            }
+        }
         "ceo" => {
             let mut corps: Vec<(i64, EntityId, EntityId)> = world
                 .corps()
@@ -827,6 +838,96 @@ struct Track {
     /// Round 3 S7: the hour's quiet lines (`flush_hourly`), and the hour.
     hourly: Vec<Quiet>,
     hourly_hour: Tick,
+    /// Round 4 T7 (OPEN-233): a standing fact (a daily 00:07 refusal, a
+    /// quiet headcount) told on its first day and on the change, by class.
+    standing: BTreeMap<&'static str, DayFold>,
+    /// Round 4 T7: the day's folds (a chase given up, the door's refusals,
+    /// the word about me), each into the day's first line, by key.
+    day_folds: BTreeMap<String, DayFold>,
+    /// Round 4 T7: a goal's back-off streak folded into the day's first line.
+    cool_folds: BTreeMap<GoalKind, DayFold>,
+    /// Round 4 T7: the day's encounters told (the counterpart, the line's
+    /// shape): the same pair in the same role again that day is not news.
+    served_today: BTreeSet<(EntityId, String)>,
+}
+
+/// Round 4 T7 (OPEN-233): a line other lines fold into, in place: the
+/// diary entry and the notable list, the count and what was tallied.
+struct DayFold {
+    /// The fact's key (a standing class compares it; a day fold is keyed by it).
+    key: String,
+    day: u64,
+    entry: usize,
+    notable: Option<usize>,
+    /// The first line as it was logged.
+    base: String,
+    /// The days it was told again (a standing fact), or the lines folded in.
+    days: Vec<u64>,
+    count: u32,
+    names: Vec<String>,
+    tally: Vec<(String, u32)>,
+    last: String,
+}
+
+impl DayFold {
+    fn new(key: String, day: u64, entry: usize, notable: Option<usize>, base: String) -> Self {
+        DayFold {
+            key,
+            day,
+            entry,
+            notable,
+            base,
+            days: Vec::new(),
+            count: 1,
+            names: Vec::new(),
+            tally: Vec::new(),
+            last: String::new(),
+        }
+    }
+
+    fn note(&mut self, what: &str) {
+        match self.tally.iter_mut().find(|(k, _)| k == what) {
+            Some((_, n)) => *n += 1,
+            None => self.tally.push((what.to_string(), 1)),
+        }
+    }
+
+    fn name(&mut self, who: &str) {
+        if !self.names.iter().any(|n| n == who) {
+            self.names.push(who.to_string());
+        }
+    }
+
+    fn tally_text(&self) -> String {
+        let parts: Vec<String> =
+            self.tally.iter().map(|(k, n)| if *n > 1 { format!("{k} x{n}") } else { k.clone() }).collect();
+        parts.join(", ")
+    }
+
+    fn names_text(&self) -> String {
+        let shown: Vec<&str> = self.names.iter().take(FOLD_NAMES).map(String::as_str).collect();
+        let more = self.names.len().saturating_sub(shown.len());
+        let tail = if more > 0 { format!(" and {more} more") } else { String::new() };
+        format!("{}{tail}", shown.join(", "))
+    }
+}
+
+/// Round 4 T7: a minute's new encounter (the name, a regular, off screen, the line).
+type Met = (String, bool, bool, String);
+
+/// Round 4 T7: `d22-d24, d26` for a sorted list of days.
+fn days_text(days: &[u64]) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < days.len() {
+        let mut j = i;
+        while j + 1 < days.len() && days[j + 1] == days[j] + 1 {
+            j += 1;
+        }
+        parts.push(if j > i { format!("d{}-d{}", days[i], days[j]) } else { format!("d{}", days[i]) });
+        i = j + 1;
+    }
+    parts.join(", ")
 }
 
 /// Round 3 S7 (OPEN-225): a line that carries little alone (a new
@@ -1074,6 +1175,10 @@ impl Track {
             rest_days: BTreeMap::new(),
             hourly: Vec::new(),
             hourly_hour: start / TICKS_PER_HOUR,
+            standing: BTreeMap::new(),
+            day_folds: BTreeMap::new(),
+            cool_folds: BTreeMap::new(),
+            served_today: BTreeSet::new(),
         }
     }
 
@@ -1531,6 +1636,10 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
     if day != t.cur_day {
         flush_day(world, t, now);
         t.cur_day = day;
+        // Round 4 T7: the day folds and the day's encounters start afresh.
+        t.day_folds.clear();
+        t.cool_folds.clear();
+        t.served_today.clear();
         // Reputation and class at the day's start.
         if world.has::<Identity>(id) && !world.has::<Corpse>(id) {
             let r = rep(world, id);
@@ -1557,6 +1666,8 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
     // Shadow V6: a courier's parcels handed over (before the round's event).
     cam_parcels(world, t, now);
     let mut event_ctx: Vec<String> = Vec::new();
+    // Round 4 T7: the actors of the petty crimes the pick saw this tick.
+    let mut petty_now: BTreeSet<EntityId> = BTreeSet::new();
     // Round 3 S7 (OPEN-225): the minute's crowd lines fold into one each.
     let mut folds: Vec<Fold> = Vec::new();
     // The raid's head reads the result line ("Raid on X: ..."); the sim's
@@ -1584,6 +1695,26 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
             t.contact(world, o);
         }
         let text = format!("{:?}: {}", e.kind, e.text);
+        // Round 4 T7 (OPEN-233): a petty crime the pick saw (a guard inside
+        // the Precinct by the El's gate saw 52 Fare Evasions in two days)
+        // folds by the hour; its `SawCrime` memory is the same fact.
+        if let Some(key) = petty_seen(e, id) {
+            let name = e.text.split_once(" saw ").and_then(|(_, r)| r.split_once(" commit ")).map_or("", |x| x.0);
+            if let Some(&a) = e.actors.get(1) {
+                petty_now.insert(a);
+            }
+            t.hourly.push(Quiet { tick: e.tick, cat: "event", key, name: name.to_string(), line: text });
+            continue;
+        }
+        // Round 4 T7: a standing fact told again, or the day's fold.
+        let refold = refold_of(e, id);
+        if let Some(r) = &refold {
+            if fold_into(t, r, e) {
+                continue;
+            }
+        }
+        let entry_at = t.entries.len();
+        let notable_at = (!matches!(e.kind, EventKind::Witness)).then_some(t.notable.len());
         if let Some(sh) = fold_shape(e) {
             if let Some(f) = folds.iter_mut().find(|f| f.tick == e.tick && f.kind == e.kind && f.shape.same(&sh)) {
                 f.names.push(sh.name);
@@ -1611,7 +1742,10 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
             t.notable.push((e.tick, text.clone()));
         }
         event_ctx.push(format!("{:?} \"{}\"", e.kind, e.text));
-        t.log(e.tick, "event", text);
+        t.log(e.tick, "event", text.clone());
+        if let Some(r) = refold {
+            open_fold(t, r, e, entry_at, notable_at, text);
+        }
         // Shadow V6 (V5 bug 20): the courier's round is the parcel round.
         if e.kind == EventKind::SuperRound && e.actors.first() == Some(&id) && is_courier(world, id) {
             let line = format!(
@@ -1701,10 +1835,45 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                     r.object.map_or("?".into(), |o| nm(world, o)),
                     if *heard { "" } else { " (already known / dropped)" }
                 );
-                if *heard {
-                    t.log(*tick, "gossip", line);
-                } else {
-                    t.hourly.push(Quiet { tick: *tick, cat: "gossip", key: "retold", name: nm(world, *from), line });
+                // Round 4 T7 (OPEN-233): the word about me goes round in runs of
+                // 20-40 retellings; the day's run of one rumour folds into its
+                // first line (the new hearers named, the rest counted).
+                let day = *tick / TICKS_PER_DAY;
+                let key = format!("gossip:{role}:{:?}:{:?}:{:?}", r.deed, r.actor, r.object);
+                let pair = format!("{} to {}", nm(world, *from), nm(world, *to));
+                let what = if *heard { "to new ears" } else { "heard already" };
+                let refold = match t.day_folds.get_mut(&key) {
+                    Some(f) if f.day == day => {
+                        f.count += 1;
+                        f.note(what);
+                        if *heard {
+                            f.name(&pair);
+                        }
+                        let names = if f.names.is_empty() { String::new() } else { format!(": {}", f.names_text()) };
+                        let text = format!(
+                            "GOSSIP ABOUT ME ({role}): {:?} by {} on {}, told {} times today ({}){names}",
+                            r.deed,
+                            r.actor.map_or("someone unnamed".into(), |a| nm(world, a)),
+                            r.object.map_or("?".into(), |o| nm(world, o)),
+                            f.count,
+                            f.tally.iter().map(|(k, n)| format!("{n} {k}")).collect::<Vec<_>>().join(", ")
+                        );
+                        Some((f.entry, text))
+                    }
+                    _ => None,
+                };
+                match refold {
+                    Some((entry, text)) => t.refold_line(entry, None, &text),
+                    None => {
+                        let entry = t.entries.len();
+                        t.log(*tick, "gossip", line.clone());
+                        let mut f = DayFold::new(key.clone(), day, entry, None, line);
+                        f.note(what);
+                        if *heard {
+                            f.name(&pair);
+                        }
+                        t.day_folds.insert(key, f);
+                    }
                 }
             }
             ShadowNote::Flow { tick, from, to, coins, flow, refund } if *from == Some(id) || *to == Some(id) => {
@@ -1889,16 +2058,43 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
         for (&g, &until) in &b.cooldowns {
             if until > now && t.cooldowns.get(&g) != Some(&until) {
                 // Round 3 S2 (OPEN-222): the back-off's streak, from the second.
-                let streak = b
-                    .cool_streak
-                    .get(&g)
-                    .filter(|&&(n, end)| n > 1 && end == until)
-                    .map_or_else(String::new, |&(n, _)| format!("; backed off, {n} in a row"));
-                t.log(
-                    now,
-                    "plan",
-                    format!("goal {g:?} cooled until {} (could not plan or plan failed twice{streak})", clock(until)),
-                );
+                let streak_n = b.cool_streak.get(&g).filter(|&&(n, end)| n > 1 && end == until).map(|&(n, _)| n);
+                let streak = streak_n.map_or_else(String::new, |n| format!("; backed off, {n} in a row"));
+                // Round 4 T7 (OPEN-233): a goal's later cools of the day fold
+                // into its first ("Bury cooled ... 33 in a row", one every few
+                // hours; a jobless "Earn cooled" every two), the streak's
+                // range kept (`days` holds the streaks seen).
+                let folded = t.cool_folds.get_mut(&g).map(|f| {
+                    f.count += 1;
+                    f.days.extend(streak_n.map(u64::from));
+                    let range = match (f.days.iter().min(), f.days.iter().max()) {
+                        (Some(a), Some(z)) if a < z => format!("; backed off, {a} to {z} in a row"),
+                        (Some(a), _) => format!("; backed off, {a} in a row"),
+                        _ => String::new(),
+                    };
+                    let text = format!(
+                        "goal {g:?} cooled {} times today, the last until {} (could not plan or plan failed twice{range})",
+                        f.count,
+                        clock(until)
+                    );
+                    (f.entry, text)
+                });
+                match folded {
+                    Some((entry, text)) => t.refold_line(entry, None, &text),
+                    None => {
+                        let mut f = DayFold::new(String::new(), day, t.entries.len(), None, String::new());
+                        f.days.extend(streak_n.map(u64::from));
+                        t.cool_folds.insert(g, f);
+                        t.log(
+                            now,
+                            "plan",
+                            format!(
+                                "goal {g:?} cooled until {} (could not plan or plan failed twice{streak})",
+                                clock(until)
+                            ),
+                        );
+                    }
+                }
             }
         }
         t.cooldowns = b.cooldowns.clone();
@@ -2188,6 +2384,8 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
     }
     let mut mem_msgs: Vec<(String, String)> = Vec::new();
     let mut edge_msgs: Vec<(String, String)> = Vec::new();
+    // Round 4 T7: the minute's new encounters by shape (name, regular, off screen, line).
+    let mut served: Vec<(String, Vec<Met>)> = Vec::new();
     // Memories.
     if let Some(m) = world.comp::<Memory>(id) {
         let prime = !t.mem_primed;
@@ -2224,11 +2422,39 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                         t.sighted.insert(s, (e.at, day));
                     }
                 }
+                // Round 4 T7 (OPEN-233): a petty crime's `SawCrime` is its
+                // Witness line this tick, told once.
+                if e.kind == MemoryKind::SawCrime
+                    && !heard
+                    && e.crime.is_some_and(citysim::systems::law::is_petty)
+                    && e.subject.is_some_and(|s| petty_now.contains(&s))
+                {
+                    continue;
+                }
                 let text = mem_text(world, id, e);
                 // Shadow V6: an encounter with the counterpart elsewhere.
                 if e.kind == MemoryKind::Served && !heard {
                     if let Some(s) = e.subject {
-                        cam_settle(world, t, now, s, &format!("memory: {text}"));
+                        // Round 4 T7: the encounter's line says "off screen"
+                        // itself; the same pair in the same role again today
+                        // (the CEO's hourly table, the madam's staff) is not
+                        // news, and a minute's encounters of one shape fold.
+                        let off = cam_settle_with(world, t, now, s, &format!("memory: {text}"), false);
+                        let who = nm(world, s);
+                        let body = text.rsplit_once(" (valence ").map_or(text.as_str(), |x| x.0);
+                        let (body, regular) = match body.strip_suffix(", a regular") {
+                            Some(b) => (b, true),
+                            None => (body, false),
+                        };
+                        let shape = body.replacen(&who, "{}", 1);
+                        if !t.served_today.insert((s, shape.clone())) {
+                            continue;
+                        }
+                        match served.iter_mut().find(|g| g.0 == shape) {
+                            Some(g) => g.1.push((who, regular, off, text)),
+                            None => served.push((shape, vec![(who, regular, off, text)])),
+                        }
+                        continue;
                     }
                 }
                 // Rumours heard already appear as gossip lines when told in person.
@@ -2245,6 +2471,24 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                 }
             }
         }
+    }
+    for (shape, g) in served {
+        if let [(_, _, off, text)] = g.as_slice() {
+            mem_msgs.push(("Served".into(), if *off { format!("{text} [off screen]") } else { text.clone() }));
+            continue;
+        }
+        let names: Vec<&str> = g.iter().take(FOLD_NAMES).map(|x| x.0.as_str()).collect();
+        let more = g.len() - names.len();
+        let (regs, offs) = (g.iter().filter(|x| x.1).count(), g.iter().filter(|x| x.2).count());
+        let mut tail = if more > 0 { format!(" and {more} more") } else { String::new() };
+        if regs > 0 {
+            tail.push_str(&format!("; {regs} regular{}", if regs == 1 { "" } else { "s" }));
+        }
+        if offs > 0 {
+            tail.push_str(&format!("; {offs} off screen"));
+        }
+        let head = shape.replacen("{}", &g.len().to_string(), 1);
+        mem_msgs.push(("Served".into(), format!("{head} ({}{tail})", names.join(", "))));
     }
     // Edges.
     let mut seen: BTreeSet<EntityId> = BTreeSet::new();
@@ -2590,6 +2834,172 @@ fn fold_shape(e: &Event) -> Option<FoldShape> {
     }
 }
 
+/// Round 4 T7 (OPEN-233): the petty crimes (`law::is_petty`) by their
+/// labels, each its own hourly fold key.
+const PETTY: [&str; 4] = ["petty:Fare Evasion", "petty:Vagrancy", "petty:Unlicensed Arms", "petty:Solicitation"];
+
+/// Round 4 T7: a `Witness` line with the pick the witness of a petty crime,
+/// as its hourly fold key.
+fn petty_seen(e: &Event, me: EntityId) -> Option<&'static str> {
+    if e.kind != EventKind::Witness || e.actors.first() != Some(&me) {
+        return None;
+    }
+    PETTY.iter().copied().find(|k| k.strip_prefix("petty:").is_some_and(|c| e.text.ends_with(&format!(" commit {c}"))))
+}
+
+/// Round 4 T7 (OPEN-233): how an event line folds. A standing fact (its
+/// class and key) is told on its first day and on the change, the days it
+/// was told again listed on the first line; a day fold (its key) folds the
+/// day's lines of one chase or one face at one door into the first.
+enum Refold {
+    Standing(&'static str, String),
+    Day(String),
+}
+
+fn refold_of(e: &Event, me: EntityId) -> Option<Refold> {
+    let t = e.text.as_str();
+    match e.kind {
+        // `distance`'s trade reach, `crew::muster_reach`, `crew`'s duty pick:
+        // the same sentence at 00:07 daily (V12: 4-6 times a life).
+        EventKind::Crew if t.contains(" stays off ") && t.contains("'s trade today: ") => {
+            Some(Refold::Standing("stays_off", t.to_string()))
+        }
+        EventKind::Crew if t.contains(" sat out ") && t.contains("'s raid: ") => {
+            Some(Refold::Standing("sat_out", t.to_string()))
+        }
+        EventKind::Crew if t.contains(" chose the shift as ") => {
+            let key = t.rsplit_once(" (").map_or(t, |(k, _)| k);
+            Some(Refold::Standing("chose_shift", key.to_string()))
+        }
+        // `camp`'s quiet headcount (T1), the wardens' names aside.
+        EventKind::Custody if t.contains("; nobody in or out since the last count") => {
+            let key = t.split_once(" counted ").map_or(t, |(_, k)| k);
+            Some(Refold::Standing("count", key.to_string()))
+        }
+        // `law::chase_dropped` (T3): per guard and suspect in the guard's
+        // diary, per suspect in anyone else's.
+        EventKind::Pursuit => {
+            let (g, rest) = t.split_once(" gave up the chase of ")?;
+            let (s, _) = rest.split_once(" (")?;
+            Some(Refold::Day(if e.actors.first() == Some(&me) {
+                format!("chase:{g}:{s}")
+            } else {
+                format!("chased:{s}")
+            }))
+        }
+        // `service::refused` (T4): one face at one door.
+        EventKind::Served if t.contains(" away at the door of ") || t.contains(" away again at the door of ") => {
+            let (_, rest) = t.split_once(" turned ")?;
+            let (x, rest) = rest.split_once(" away")?;
+            let (_, door) = rest.split_once(" at the door of ")?;
+            let door = door.split([' ', ':']).next().unwrap_or(door);
+            Some(Refold::Day(format!("door:{x}:{door}")))
+        }
+        _ => None,
+    }
+}
+
+/// Round 4 T7: what a line adds to its day fold (the reason, the name).
+fn absorb(f: &mut DayFold, e: &Event) {
+    let t = e.text.as_str();
+    match e.kind {
+        EventKind::Pursuit => {
+            let Some((g, rest)) = t.split_once(" gave up the chase of ") else { return };
+            f.name(g);
+            let why = rest.split_once(" (").and_then(|(_, w)| w.split_once(')')).map_or("", |x| x.0);
+            f.note(why.split(':').next().unwrap_or(why));
+            if let Some((_, to)) = rest.split_once(": handed to ") {
+                f.note(&format!("handed to {}", to.split(" on shift").next().unwrap_or(to)));
+            }
+        }
+        EventKind::Served => {
+            let head = t.split(": barred till ").next().unwrap_or(t);
+            let why = head.rsplit_once(" (").and_then(|(_, w)| w.split_once(')')).map_or("no cause", |x| x.0);
+            f.note(why);
+            if let Some((_, till)) = t.split_once(": barred till ") {
+                f.last = format!("barred till {till}");
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Round 4 T7: a fold's first line, rewritten.
+fn render(f: &DayFold, kind: EventKind) -> String {
+    match kind {
+        EventKind::Pursuit if f.key.starts_with("chase:") => {
+            let (g, s) = f.key["chase:".len()..].split_once(':').unwrap_or(("", ""));
+            format!("Pursuit: {g} gave up the chase of {s} {} times today ({})", f.count, f.tally_text())
+        }
+        EventKind::Pursuit => {
+            let s = &f.key["chased:".len()..];
+            format!("Pursuit: {} chases of {s} given up today (by {}; {})", f.count, f.names_text(), f.tally_text())
+        }
+        EventKind::Served => {
+            let last = if f.last.is_empty() { String::new() } else { format!("; {}", f.last) };
+            format!("{} (turned away {} times today: {}{last})", f.base, f.count, f.tally_text())
+        }
+        _ => {
+            let n = f.days.len();
+            format!("{} (the same on {n} more day{}: {})", f.base, if n == 1 { "" } else { "s" }, days_text(&f.days))
+        }
+    }
+}
+
+impl Track {
+    /// Round 4 T7: rewrite a fold's first line in place (the diary entry and the notable list).
+    fn refold_line(&mut self, entry: usize, notable: Option<usize>, text: &str) {
+        if let Some(e) = self.entries.get_mut(entry) {
+            e.text = text.to_string();
+        }
+        if let Some(n) = notable.and_then(|i| self.notable.get_mut(i)) {
+            n.1 = text.to_string();
+        }
+    }
+}
+
+/// Round 4 T7: fold `e` into an earlier line; false when it opens its own.
+fn fold_into(t: &mut Track, r: &Refold, e: &Event) -> bool {
+    let day = e.tick / TICKS_PER_DAY;
+    let f = match r {
+        Refold::Standing(class, key) => match t.standing.get_mut(class) {
+            Some(f) if f.key == *key => {
+                if f.day != day && !f.days.contains(&day) {
+                    f.days.push(day);
+                }
+                f
+            }
+            _ => return false,
+        },
+        Refold::Day(key) => match t.day_folds.get_mut(key) {
+            Some(f) if f.day == day => {
+                f.count += 1;
+                absorb(f, e);
+                f
+            }
+            _ => return false,
+        },
+    };
+    let (entry, notable, text) = (f.entry, f.notable, render(f, e.kind));
+    t.refold_line(entry, notable, &text);
+    true
+}
+
+/// Round 4 T7: `e`, just logged at `entry`, opens its fold.
+fn open_fold(t: &mut Track, r: Refold, e: &Event, entry: usize, notable: Option<usize>, text: String) {
+    let day = e.tick / TICKS_PER_DAY;
+    match r {
+        Refold::Standing(class, key) => {
+            t.standing.insert(class, DayFold::new(key, day, entry, notable, text));
+        }
+        Refold::Day(key) => {
+            let mut f = DayFold::new(key.clone(), day, entry, notable, text);
+            absorb(&mut f, e);
+            t.day_folds.insert(key, f);
+        }
+    }
+}
+
 fn close_action(world: &World, t: &mut Track, now: Tick, status: &str) {
     let Some(o) = t.open.take() else { return };
     let dur = now.saturating_sub(o.start);
@@ -2690,6 +3100,7 @@ fn flush_hourly(t: &mut Track) {
             "warmer" => format!("{n} Acquaintances warmer this hour ({names})"),
             "colder" => format!("{n} Acquaintances colder this hour ({names})"),
             "cells" => format!("met {n} in the cells this hour ({names})"),
+            k if k.starts_with("petty:") => format!("Witness: saw {n} commit {} this hour ({names})", &k[6..]),
             _ => format!("GOSSIP ABOUT ME: {n} retellings this hour, every hearer knew already (told by {names})"),
         };
         t.log(g[0].tick, g[0].cat, text);
@@ -3026,8 +3437,15 @@ fn close_still(t: &mut Track, now: Tick) {
 /// pick is asleep (V5 bugs 6 and 7: the encounter narrates a settlement the
 /// body was not present for).
 fn cam_settle(world: &World, t: &mut Track, now: Tick, other: EntityId, what: &str) {
+    cam_settle_with(world, t, now, other, what, true);
+}
+
+/// `cam_settle`, the `[off]` narration left to the caller when `narrate_off`
+/// is false (round 4 T7: an encounter's memory line says "off screen"
+/// itself; a SETTLED APART line is always logged). True for an `[off]` one.
+fn cam_settle_with(world: &World, t: &mut Track, now: Tick, other: EntityId, what: &str, narrate_off: bool) -> bool {
     if other == t.id || other == EntityId::NONE || !world.has::<Identity>(other) {
-        return;
+        return false;
     }
     let asleep = activity(world, t.id) == "sleep";
     let stat = world.comp::<Brain>(other).is_some_and(|b| b.lod == Lod::Statistical);
@@ -3049,9 +3467,14 @@ fn cam_settle(world: &World, t: &mut Track, now: Tick, other: EntityId, what: &s
         // The pre-view pass phase 4 (P3): an encounter with an off-screen
         // party, the pick awake, is narrated `[off]`; a body elsewhere or the
         // pick asleep is the bug (SETTLED APART).
-        let tag = if stat && !asleep { "[off]" } else { "SETTLED APART:" };
-        t.log(now, "camera", format!("{tag} {what}; {} {where_}{me}", nm(world, other)));
+        let off = stat && !asleep;
+        let tag = if off { "[off]" } else { "SETTLED APART:" };
+        if narrate_off || !off {
+            t.log(now, "camera", format!("{tag} {what}; {} {where_}{me}", nm(world, other)));
+        }
+        return off;
     }
+    false
 }
 
 /// A `PlanAborted` text's reason: the `FailReason` of a failed step, else
@@ -3763,6 +4186,16 @@ fn pick(
                             c.len(),
                             c.first().map_or(0.0, mood)
                         );
+                        c
+                    } else if arch == "sick" {
+                        // Round 4 T7: a diagnosed cancer first (the care it asks for).
+                        let mut c = shuffled(c, seed, arch);
+                        c.sort_by_key(|&a| {
+                            !world
+                                .comp::<citysim::Health>(a)
+                                .and_then(|h| h.cancer.as_ref())
+                                .is_some_and(|k| k.diagnosed && k.stage > 0.0)
+                        });
                         c
                     } else {
                         shuffled(c, seed, arch)

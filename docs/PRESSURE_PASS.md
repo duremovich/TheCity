@@ -1926,3 +1926,68 @@ and repeat on the city's, so the city's books are kept too. `SAVE_VERSION` 84 (`
   `door_under_age`, `shape_up_home`, `foreman_gate`). One premise re-pinned, with the reason in place:
   `leverage::test_protection_pays_weekly_and_stops_when_district_lost` (with 10,000 coins the owner was the richest
   purse at a corp's bankruptcy, bought its Noodle Bar and incorporated, so the Hotel changed hands; she now holds 600).
+
+### T7, noise after round 3 (`OPEN-233`; `citysim-cli/src/shadow.rs`, `events::with_ages`, `service::refused`, `vice::turned_again`, `[verbs]` T7 keys)
+
+Folding is the diary's (the shadow tool): the events and counters underneath are unchanged, except the door's (below).
+
+- **Standing facts** (`Refold::Standing`): the 00:07 Crew lines ("stays off G's trade today", "sat out G's raid",
+  "chose the shift as R over G's duty", the percentage aside) and T1's quiet headcount ("nobody in or out since the
+  last count", the wardens' names aside) are told on the first day and on the change; a repeat folds into the first
+  line, which lists the days: "Crew: Roxy Whitlock stays off The Drowned Choir 10's trade today: the nearest spot,
+  Club#5035, is 3 h 12 from home (the same on 2 more days: d22, d25)". A new spot or a new duty is a new line.
+- **The day's folds** (`Refold::Day`, the first line rewritten in place): T3's `Pursuit` per guard and suspect in
+  the guard's diary ("Garrick Oakes gave up the chase of Agathe Ambrose 2 times today (the trail went cold x2)"), per
+  suspect in anyone else's ("2 chases of Moth Duarte given up today (by Wire Lockridge, Odile Greaves; the trail went
+  cold x2)"); T4's refusals per face and door ("turned Bex Quarry away ... (drunk) (turned away 2 times today: drunk
+  x2; barred till d23)"); a goal's cools per goal and day, streak or not ("goal Earn cooled 7 times today, the last
+  until d26 01:50 (...)", "backed off, 2 to 7 in a row"; a jobless pick's Earn cooled every two hours); the word
+  about me per rumour and day ("GOSSIP ABOUT ME (as the object): Assaulted by Ignatius Ostrowski on Flux Vance, told
+  34 times today (27 to new ears, 7 heard already): A to B, C to D, E to F and 24 more"), which replaces S7's hourly
+  fold of the known retellings.
+- **The hour's folds**: a petty crime the pick witnessed (`law::is_petty`) waits for the hour (S7's `Quiet`, "Witness:
+  saw N commit Fare Evasion this hour (...)"), and its `SawCrime` memory, the same fact, is not printed.
+- **Encounters** (`Served` memories): the same pair in the same role again the same day is not news (the CEO's
+  hourly table, the madam's hourly staff); a minute's new ones of one shape fold ("met 6 at the table (an attendee)
+  (Seraphine Tanaka, Rook Thorne, Hesper Bellamy and 3 more; 2 regulars; 6 off screen)"); the `[off]` camera line is
+  the memory line's "off screen" (`cam_settle_with`; SETTLED APART lines and the camera's counts unchanged).
+- **The victim's age** (`events::harm_line`, `with_ages`, in `World::push_event`): every person named in an Assault,
+  Murder, Assaulted, Brawl, Crossfire, Punished or Wounded line, and a Fare beating, carries " (N y)" after the first
+  whole-word mention of the name ("Zelda Draper (35 y) beat Cerys Ramirez (30 y) at the El ..."). One place for every
+  site; no text parser reads these kinds (`analyze_run.py` counts them by kind). 20k seed 42 x 30: 3,652 harm lines,
+  3,608 with an age (the rest name gangs only), **0 under 18**; `harm_blocked` 0.
+- **The `sick` pick** carries an illness: a cancer past stage 0 or a sick day in the last 14 (the malnourished only
+  when nobody is ill), a diagnosed cancer first. V12's 100k picks were jobless and malnourished, "no cancer | sick
+  days 0/14" (the sick roll is the employed's). Now both 20k picks hold a diagnosed cancer: `sick_14797` "Loan:
+  Cordelia Chrome, 234c short of a vat-cancer treatment after the 6c they and theirs could put in ..., has no friend
+  left to ask" (d21, d24, d27); in a run before the door's bar, `sick_15869` "Loan: Priya Nakamura, 228c short ...
+  begged their friends: Tristan Moreau lent 10c; Amara Blackwood had nothing to spare ..." (S4's ladder), then
+  "Treated: Hesper Ellery cut back Priya Nakamura's vat-cancer in the back room ...".
+- **The door's answer changes** (a sim change; T4's 100k loop). `[exec] refused_ticks` holds one door a face
+  (`Brain.refused`), so a drunk refused at two doors in turn came back to each, and the barred came back nightly to be
+  refused "barred". `vice::turned_again` keeps each face's refusals at kept doors for `[verbs] door_return_ticks`
+  (2880, `ViceState.turned`); a face back inside it is a return: barred from that house `door_return_ban_days` (2,
+  today counted, `vice::shut_out`, a bar a door beside R6a's one a face), the line "turned X away again at the door of
+  D (drunk): barred till dN", and the scene he makes swings on `door_swing_p x door_return_swing_mult` (2.0). The
+  patron's pick passes over a house that bars him (`leisure::door_seen` reads `vice::barred`, which reads both).
+  **Under-18:** the under-age is turned away first ("under age"); a return bars him (no force), and `scene` never
+  fights one (`ages::is_protected`, unchanged). 20k `isle_m_k2` seed 42 x 30 (`--scaled --ambient-flats 50`, main
+  `0452241` before, one run each): door refusals 1,144 -> 974, refused "barred" 117 -> 4, door scenes 157 -> 210,
+  returns 149, faces turned away 3+ times at one door in a 4-day window 33 -> 8, ejections 79 -> 72; FINDING (the
+  runs diverge): Brawl 230 -> 294, Assault 1,360 -> 1,418, Murders 48 -> 45, Arrests 1,585 -> 1,434, harm_blocked 0.
+- **Diary size** (the same picks and window, 20k seed 42 d21-27, the door off so the world is identical; diary lines):
+  `ceo_10496` 1,157 -> 730 (its "at the table" lines 423 -> 43), `ceo_16592` 1,110 -> 855, `madam_23135` 917 -> 770,
+  `madam_11894` 874 -> 840, `bouncer_18251` 521 -> 489; the 14 diaries 11,686 -> 10,725 (-8 %).
+- **Deviations.** The Fare Evasion lines are folded, not stopped: the guard on jail duty sees the El's gate because
+  witnesses are by tile distance whatever the building (`law::raise_crime_mult`: a body inside the Precinct within
+  `sight_day_crime` of the gate), a sim matter with counters underneath, left for the next pass. A standing fact
+  folds across gaps (a later day's same sentence is "the same" though a day came between). The door's change is a
+  bar by day, not "for the night" (`barred` reads days).
+- **Reads wrong** (the next pass): the 20k Camp was busy all week, so the quiet count never folded at 20k (V12's 100k
+  Camp is the case). A suspect "resisted arrest and fought off the guard X" six times in three days
+  (`gang_member_6468`, Moth Duarte): six events, not noise, but the chase never ends. A cancer cut back twice in 43
+  minutes at the same back room for 80c each (`sick_15869 d22 05:06`, `05:49`, the run before the bar). Friend affinity moves (25-30 a week
+  in a ceo's and a gang member's diary) still print one a line. A fold's first line says "today" but sits at the
+  first minute, so a later "again" reads earlier than it happened. 100k was not re-run (V12's 21+7 days at 22
+  ticks/s is past the foreground cap); the door loop was read at 20k through the event log.
+- No test (doctrine 2). `SAVE_VERSION` 88 (`ViceState.turned`, the `[verbs]` T7 keys).

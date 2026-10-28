@@ -546,6 +546,17 @@ pub struct VerbsCfg {
     /// ... he is at the gate this many minutes before `[jobs2] corner_hour`
     /// (he sets out, or wakes, by the travel from where he is).
     pub shape_up_lead_min: u16,
+    /// Round 4 T7 (OPEN-233): a face turned away at a door and back at it
+    /// inside this many ticks is a return (`service::refused`,
+    /// `vice::turned_again`): T4's 100k door turned one armed man away nine
+    /// times in four nights. 0 off.
+    pub door_return_ticks: u64,
+    /// ... a return is barred from the house this many days (today counted;
+    /// `vice::bar`, which `leisure::door_seen` passes over).
+    pub door_return_ban_days: u64,
+    /// ... and the scene a return makes (drunk, high, a brawler, carrying)
+    /// swings on `[customers] door_swing_p` times this.
+    pub door_return_swing_mult: f32,
 }
 
 impl Default for VerbsCfg {
@@ -577,6 +588,9 @@ impl Default for VerbsCfg {
             night_names: 3,
             shape_up_gate: true,
             shape_up_lead_min: 20,
+            door_return_ticks: 2880,
+            door_return_ban_days: 2,
+            door_return_swing_mult: 2.0,
         }
     }
 }

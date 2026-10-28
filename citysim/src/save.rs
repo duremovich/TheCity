@@ -411,7 +411,10 @@ use crate::world::World;
 /// (written while it holds anything), the `[verbs]` T4 keys and the `Jobs2Cols`
 /// `sets_danced`, `serve_nights`, `door_under_age`, `shape_up_home`, `foreman_gate`
 /// columns (serde defaults).
-pub const SAVE_VERSION: u8 = 87;
+/// 88 (pressure pass round 4, T7, noise after round 3): `ViceState.turned` (written while
+/// it holds anything) and the `[verbs]` door-return keys
+/// (serde defaults).
+pub const SAVE_VERSION: u8 = 88;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
