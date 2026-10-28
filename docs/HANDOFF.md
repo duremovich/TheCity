@@ -1,89 +1,97 @@
 # Handoff: now
 
 Rewritten at every session end; never appended. The session logs are `docs/history/SESSIONS.md`. Last rewrite:
-**2026-10-27, the twenty-fourth session: pressure pass round 3 from Shadow V11 (seven mechanism phases S1-S7, two
-fix rounds, the under-18 rule), Shadow V12 read against V11.**
+**2026-10-28, the twenty-fifth session: pressure pass round 4 from Shadow V12 (seven mechanism phases T1-T7 in two
+waves, two fix rounds), Shadow V13 read against V12, the 100k profile.**
 
 ## Main
 
-Main holds **pressure pass round 3** (`docs/PRESSURE_PASS.md` § "Round 3 from Shadow V11", every phase's entry under
-"Implemented: deviations"). The change tier is green at the V12 fix round (`1aa78df`, merged `b70fa7d`); tests still 1,470 (none added; probes the combined
-city broke were re-pinned with "Round 3" reasons in place). `SAVE_VERSION` 83.
+Main holds **pressure pass round 4** (`docs/PRESSURE_PASS.md` § "Round 4 from Shadow V12", every phase's entry under
+"Implemented: deviations"). The change tier is green at `a70800f` (quiet box 2m16s at wave 1's close); tests still
+1,470 (none added; probes the combined city broke were re-pinned with "Round 4" reasons in place, seven of them with
+`[search]` off where the search is not the probe's subject). `SAVE_VERSION` 90.
 
 | phase | what it added |
 |---|---|
-| S1 distance (`[distance.choice]`, `distance::trip`) | the Deal spot, muster, hire, site, Visit, Camp answer and JoinGang chosen by the body's own trip; "stays off the trade", "could not make the trip", "sat out the raid" |
-| S2 plans | a walk for a lost post turns back, the order left at the door, the goal back-off (`[brain] cool_backoff`), a muster sat is kept |
-| S3 justice | the charge names its victim ("resisted arrest"), jail meals and sleep, the guard's collar, jail duty in blocks, the fare beating's cool-down |
-| S4 care at 100k | off-screen patients seen at the doctor on duty (`customers::stat_care`), the Friends' ladder of asks, the super's round in legs |
-| S5 trades | the cabbie's cut and rank, the hired hand at the yard, the bouncer's rough client and bar, the beat story and crime desk at 100k, a hit heard of |
-| S6 children (`ages::seed_children`) | school-age children seeded, School from 6, the jobless parent's grocery run, `ages::is_protected` at every victim pick, the `kill_by` backstop, the camp beating gone |
-| S7 noise | the raid result line, crowd and hourly folds, the petty re-witness skip, the same-crime memory merge, titles by grade, the rest day in the hour lines |
-| V12 fix (`OPEN-230`) | the non-lethal backstop: no fight and no fare beating lands on a protected person (`law::resolve_fight_mods` refuses a protected party; defenders, raiders and the crossfire drop them; a protected dodger is turned off the platform; the bin shakedown skips them) |
+| T1 neglect warns first (`camp.rs`, `[camp]` T1 keys) | the service at the door, a grace, a repeat inside the window takes; the children's share of the pantry on a warning (`camp::adults_share`); let home; placement by reach; the warden's headcount, the fence, visits, break-outs; `EventKind::Custody` |
+| T2 School by travel time (`ages::pick_school`) | the nearest School with room within `school_trip_ticks` (walk or El, fares paid), a roll of 30 a teacher, no class at an empty School, the `[family]` line says why; Schools seeded by reach of the Homes (`school_by_reach`) |
+| T3 plans say why (`OPEN-222`) | ledger-kind contracts stay on the ledger, a jailed mark waited out or let go, the dropped chase a `Pursuit` line handed to a guard on shift, staff skip the door queue, a sat muster keeps the day's duty, the brawl takes the mark first; raid crossfire drops the protected |
+| T4 the trades' inside (`OPEN-217`) | the door's let-in, refusal and throw-out to a body first, the floor's visits to a dancer or Host body, the dancer's sets and tips, the night's line, the foreman at the gate and one `DawnPick` line |
+| T5 the jobless search (`systems/search.rs`, `[search]`) | Friends asked, boards and doors walked, taken on at the door, worse work, far posts before the Ambient pool, the day labourer's 06:30 shift; an exec gives up a held post (`OPEN-234` closed) |
+| T6 money and labels | who paid a bill and whose till took it, a burned mark wary of a fake job, the gang's man picks at a seized shop, a CEO's call told once and where, no exec hired into a post, the ledger's books audited (`[hack] ledger_audit_*`) |
+| T7 noise (`OPEN-233`) | standing facts on the first day and the change, day folds (chases, refusals, cools, gossip), served encounters once a day; **the age on every harm line**; the `sick` pick ill; a refused face that returns is barred (`[verbs] door_return_*`) |
 
-**The under-18 rule** (CLAUDE.md, Dylan 2026-10-27) is a hard rule, not a config switch: `ages::is_protected` at the
-pick, `World::kill_by` and the fight resolver as backstops, `harm_blocked` counting a pick site that missed (0 over 30
-days at 100k).
+**Shadow V13** (`docs/SHADOW_V13.md`, `docs/shadow_v13/`, V12's window): better than V12 in all seven groups, by
+less than V12 gained; the gain moved into the middle of a life (the Camp's inside, the jobless week, the door's
+night, the runner's audited ledger). The under-18 rule held and was checkable for the first time: every harm line
+prints ages, no minor harmed in 132 diaries, `harm_blocked` 0. Left: witnessing through walls (`OPEN-236`), trades
+as labels (`OPEN-217`), contradictions (`OPEN-237`), the ladder's edges (`OPEN-231`), broke adults starving at 100k
+(`OPEN-235`), walks (`OPEN-221`).
 
-**Shadow V12** (`docs/SHADOW_V12.md`, `docs/shadow_v12/`, V11's window): better than V11 in all seven groups; care
-and corp jump most (supers' rounds, orderlies' patients, teachers' classes, reporters' Stories, a raid's headline). No
-minor harmed in 110 diaries. Left: walks that eat the day, shifts with no trade inside them, the camp as a number,
-children not at School, the 00:07 standing-fact line.
-
-FINDINGs (100k seed 42 x 30, `target/r3_100k/` against `target/r2_100k/`): the city starts 111.2k (+11k children);
-employed 39.8k -> 39.9k, deaths by violence 393 -> 441, starvation 10 -> 11, jailed mean 1,028 -> 1,065, homeless max
-11.3k -> 11.9k, Treated 3.0k -> 12.3k, Story 3.4k -> 7.1k, Witness 377k -> 190k, ChildTaken 32 -> 3,726. Ticks/s
-days 25-29 24.6 -> 22.4; 20k quiet box 277 -> 218 (`OPEN-229`).
+FINDINGs (100k seed 42 x 30, `target/r4_100k/` against `target/r3_100k/`): employed 39.9k -> 40.1k, Materialised 655
+-> 597, deaths by violence 441 -> 431, **starvation 11 -> 30** (adults, 23 on day 29, `OPEN-235`), homeless max 11.9k
+-> 13.1k, jailed mean 1,065 -> 1,141, ChildTaken 3,726 -> 677, ch_camp 1,782 -> 91, ch_street 105 -> 266, school
+days / child-days 4.0 % -> 6.5 %, Witness 190k -> 269k, Story 7.1k -> 4.1k. Ticks/s days 25-29 22.4 -> 20.8; 20k
+quiet box 218 -> 192. The profile: `goal::GangWork` 21.7 % of the 100k profiled time (`OPEN-229`).
 
 ## In flight
 
-- No agents are running; no worktrees. `target/shadow_v12/`, `target/r3_100k/`, `target/r3_perf/` hold the runs.
+- No agents are running; no worktrees. `target/shadow_v13/`, `target/r4_100k/`, `target/r4_perf/` hold the runs.
+
+## Calls for Dylan (before round 5 is planned)
+
+- **Schools at 100k**: 18 for ~11k children, every one full (`schools` counts per Lot copy). Seed by child count, or
+  found on demand? And the 2c fee keeps most children in reach at home at 20k (`OPEN-232`).
+- **The neglect ladder**: a child goes 2 days unfed before the warning and again before a take; warned, slip, warned
+  again is possible with no take (`OPEN-231`). As built on his call; does it sit right beside the under-18 rule?
+- **Broke adults starving at 100k** (`OPEN-235`): a meal source within the week as a mechanism (the Mission's reach,
+  the soup line), not a dole (no safety net, 2026-10-08).
+- **The GangWork hotspot**: a small perf phase in round 5, or leave ticks/s (20.8 at 100k) as a print?
 
 ## Next, in order
 
-1. **Pressure pass round 4 from V12** (`docs/PRESSURE_PASS.md` § "Round 4 from Shadow V12"): wave 1 T1 neglect warns
-   first and the Camp as a place (`OPEN-231`), T3 plans that still die silently (`OPEN-222`), T4 the trades' inside
-   (`OPEN-217`), T6 money and labels that disagree; wave 2 T2 School by travel time (`OPEN-232`), T5 the jobless look
-   for work, T7 noise (`OPEN-233`). One Opus coder per phase in a worktree, as rounds 2 and 3 ran. Then Shadow V13 in
-   V12's window, and one 100k profile at that close (`OPEN-229`).
+1. **Pressure pass round 5 from V13**, planned on Dylan's calls: witnessing indoors (`OPEN-236`), the trades' inside
+   for the label trades (forger, fixer, pimp, ripperdoc, the 100k door; `OPEN-217`, two to a brief), the
+   contradictions (`OPEN-237`, `OPEN-222`'s leftovers), the ladder's edges (`OPEN-231`), the starving broke
+   (`OPEN-235`), the search's edges (the released, the pimp, the parent's Camp visit), noise (crew day-off,
+   BinContest), maybe GangWork's perf.
 2. The 100k map re-import (`OPEN-204`, `OPEN-182`; home-to-post walking, `OPEN-221`): the Lot shortage needs the
    footprint redesign or `OPEN-187` multi-tenancy, a joint job with TheCityGraphics.
 3. The vertical city (`OPEN-187`, `OPEN-191`), the view milestone, M18.
 
-## Calls Dylan made at the close (2026-10-27)
-
-- Round 4 before the map.
-- Neglect warns first; a repeat takes the child (`OPEN-231`).
-- School reach by travel time, not a School per district (`OPEN-232`).
-- Ticks/s 22.4 at 100k and 218 at 20k accepted again; one profile at the next close (`OPEN-229`).
-- Carried, still open: `OPEN-220`, `OPEN-212`, `OPEN-150`, `OPEN-179`; standing `OPEN-062`, `OPEN-039`, `OPEN-057`,
-  `OPEN-059`, `OPEN-077`, `OPEN-069`, `OPEN-070`.
+Carried, still open: `OPEN-220`, `OPEN-212`, `OPEN-150`, `OPEN-179`; standing `OPEN-062`, `OPEN-039`, `OPEN-057`,
+`OPEN-059`, `OPEN-077`, `OPEN-069`, `OPEN-070`.
 
 ## Process notes from this session
 
-- Two waves (four, then three) on disjoint areas; the combinations went red twice, both premise re-pins by Sonnet
-  ($1-2 each). One re-pin excluded a farmer by index (`OPEN-227`): fix rounds key on the premise, never an index.
-- My first guess at `OPEN-228` (the children leaking from Ambient) was wrong; a $1 Sonnet diagnosis found S1's hire
-  cap. Diagnose before guessing in a brief.
-- The critics' brief named the under-18 rule as a top bug, which is how the two non-lethal holes surfaced: a shadow
-  cannot check what a line doesn't print (victims' ages), so the backstop at the resolver is what holds the rule.
+- Two waves (four, then three) on disjoint areas, as round 3. The combination went red three times (six premise
+  re-pins, $1-3 of Sonnet or orchestrator time each); every one was a moved premise, no code bug.
+- Every coder's change tier breached the 4-min budget with three wave-mates building (4m30-4m49, `core_sanity` 200+
+  s); main alone ran 2m16s. A breach under load is fine to report, not to chase (the wave-2 brief said so).
+- The harness now refuses a subagent's report file in the scratchpad: the hand-back message is the report.
+- A `cd` into a worktree from the orchestrator moved the session's cwd there and broke `SendMessage`'s resume of that
+  agent ("worktree could not be verified") until the cwd went back to the repo root. Never `cd` into a worktree;
+  use `git -C`.
+- Three coders stopped on their own background jobs despite the brief's first line; a one-line nudge resumed each.
+- T5 switched its search off in five probes, the fix round in two more. Defensible (not their subject), but it hid one
+  real regression (a jobless parent's search crowding out the Camp visit), now on the next pass's list.
 
-## Cost (API-rate $ equivalent, `tools/session_cost.py --session 4535a6ef`)
+## Cost (API-rate $ equivalent, `tools/session_cost.py --session 32fcc1d8`)
 
 | part | agent | turns | median ctx | $ |
 |---|---|---|---|---|
-| S1 distance | Opus | 392 | 244k | **40** |
-| S2 plans | Opus | 222 | 178k | 12 |
-| S3 justice | Opus | 387 | 248k | 27 |
-| S4 care at 100k | Opus | 372 | 248k | **45** |
-| S5 trades | Opus | 453 | 263k | **45** |
-| S6 children (+ its read-only harm audit, $14) | Opus | 346 + 290 | 214k | 46 |
-| S7 noise | Opus | 323 | 217k | 28 |
-| three fix rounds + the OPEN-228 diagnosis | Sonnet | 165 | 62-69k | 5 |
-| Shadow V12 critics (7) | Sonnet | 329 | 77-121k | 11 |
-| orchestrator (briefs, merges, runs, synthesis) | Opus | ~270 | 114k | 14 |
+| T1 neglect and the Camp | Opus | 247 | 212k | 30 |
+| T2 School by travel | Opus | 272 | 177k | 29 |
+| T3 plans that die silently | Opus | 293 | 218k | 27 |
+| T4 the door and the yard (two 100k shadows) | Opus | 353 | 243k | **49** |
+| T5 the jobless search | Opus | 421 | 258k | 33 |
+| T6 money and labels | Opus | 248 | 165k | 22 |
+| T7 noise | Opus | 312 | 240k | 26 |
+| two fix rounds + the starvation diagnosis | Sonnet | 152 | 65-70k | 4 |
+| Shadow V13 critics (7) | Sonnet | 295 | 87-101k | 9 |
+| orchestrator (briefs, merges, runs, synthesis) | Opus | ~213 | 167k | 14 |
 
-Total ≈ $275 for seven mechanism phases and a shadow read (the last session: ≈ $225 for six). S1, S4 and S5
-ran past the ~300-turn brief; S5 was four trades in one brief, as R6a was: split trades two to a brief next time.
+Total ≈ $243 for seven mechanism phases and a shadow read (round 3: ≈ $275). T5 ran past the ~300-turn brief (four
+items under one brief); T4's two 100k shadows were the dearest single cost.
 
 The standing decisions, the doctrine and the agent rules are in `CLAUDE.md`; the tiers in `docs/TESTING.md`.

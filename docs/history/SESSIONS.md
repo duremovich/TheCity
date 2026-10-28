@@ -950,3 +950,19 @@ minor harmed in 110 diaries; the critics found two non-lethal holes in the rule 
 ladder, `OPEN-230`), fixed at the close. Left: walks that eat the day, shifts with no trade inside them, the camp as a
 number (3,726 children taken in 30 days, `OPEN-231`), children not at School (`OPEN-232`), noise (`OPEN-233`).
 Cost ≈ $275 (HANDOFF § Cost).
+
+## The twenty-fifth session (2026-10-27/28): pressure pass round 4, Shadow V13
+
+Round 4 from Shadow V12 (`docs/PRESSURE_PASS.md` § Round 4) on Dylan's calls: round 4 before the map, neglect warns
+first and a repeat takes, School reach by travel time, ticks/s accepted. Wave 1 (T1 the neglect ladder and the Camp's
+inside, T3 plans that die silently, T4 the trades' inside, T6 money and labels) and wave 2 (T2 School by travel, T5
+the jobless search, T7 noise and the age on every harm line), one Opus coder each in a worktree. T4's cause was the
+tier again: off-screen colleagues counted present by the clock took every let-in and customer at 100k. T1's ladder
+alone left ChildTaken at 389 of 654 at 20k; the adults eating the pantry bare before the children's meal was the
+cause, so a warning holds the children's share. T2 found the Schools seeded at five district centroids and placed
+them by reach. T3 closed an under-18 gap (raid crossfire had no age gate). Three red combinations re-pinned six
+probes the merges moved (two Sonnet fix rounds); no test added (1,470), `SAVE_VERSION` 90. Shadow V13 at 100k in
+V12's window: better in all seven groups, no minor harmed in 132 diaries, ages printed on every harm line; left
+witnessing through walls, trades as labels, contradictions, and broke adults starving at 100k (30 deaths; a Sonnet
+diagnosis: a hunger ramp's 7-day echo among the evicted and released, `OPEN-235`). The profile names
+`goal::GangWork` (21.7 %). Cost ≈ $243 (HANDOFF § Cost).
