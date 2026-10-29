@@ -1668,6 +1668,8 @@ hf_shift_first = true               # 5 (P5f): a worker on shift does not leave 
 # move_ticks_full; the El will swap its body). 80 ticks = 40 tiles walked.
 hf_relocate = true                  # 8: a worker past commute_move_ticks moves near work on the first rent, not 21x
 commute_move_ticks = 80
+commute_long_ticks = 180            # round 6 V4: a long commute (3 h): counted (commute_long), and a retirement to kin does
+                                    # not move a working spouse into one longer than hers now (night_shift_27693: 503 min)
 commute_margin_ticks = 40           # 8: ... when the move saves this much
 relocate_per_1000 = 20.0            # 8: movers a day per 1,000 residents (40 at 2,000; was a flat 8)
 hf_hire_near = true                 # 9: a candidate within commute_hire_ticks is hired before any beyond it
@@ -3609,6 +3611,8 @@ parcels_per_courier = 12
 parcel_fee = 1
 cab_min_tiles = 60                 # off screen, a commute this long or longer ...
 cab_reserve = 30                   # ... with the fare and this many coins to spare ...
+cab_wage_share = 0.5               # ... (round 6 V4) a fare at most this share of the day's wage (a leg is never a day's pay) ...
+cab_flush_coins = 80               # ... unless holding this many coins (flush: = [customers] hail_rich_coins) ...
 p_cab = 0.03                       # ... takes a cab or a rickshaw on this chance
 fare_base = 3
 fare_per_tile = 0.05

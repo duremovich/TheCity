@@ -158,6 +158,13 @@ pub struct Jobs2State {
     /// (`streetwork::carry`; the exec skips him while here).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub passengers: std::collections::BTreeMap<EntityId, EntityId>,
+    /// Round 6 V4 (OPEN-240): a rider whose cab is under way, by rider: the
+    /// tick it lands (`Tick::MAX` while a driver's body carries him). The
+    /// ride holds against any goal but an emergency (`fixes::committed`):
+    /// a paid cab cut short by the rider's next think left him on a street
+    /// short of where he paid to go (`exec_16679 d26 17:02`).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub riding: std::collections::BTreeMap<EntityId, crate::time::Tick>,
     /// The day's parcels, from the sender to a named recipient, until
     /// delivered or returned (cleared at midnight).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

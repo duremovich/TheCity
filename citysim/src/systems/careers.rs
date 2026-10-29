@@ -387,6 +387,16 @@ fn retire(world: &mut World) {
             .flatten()
             .filter(|&h| spouse.is_none() || room_for(world, h, 2))
             .filter(|_| crate::systems::econ::hash_unit(world.seed(), PURPOSE_RETIRE_KIN, key(a), day) < kin_p);
+        // Round 6 V4 (OPEN-240): the spouse who moves along keeps her post's
+        // commute: a child's Home that puts it past `[life]
+        // commute_long_ticks` (and longer than now) is no retirement to kin
+        // (`night_shift_27693 d23`: moved in with family 475 tiles from her
+        // post, 503 min each way).
+        let far = kin.is_some_and(|h| spouse.is_some_and(|s| !spouse_commute_ok(world, s, h)));
+        if far {
+            ownership::jobs2_row(world).kin_spouse_far += 1;
+        }
+        let kin = kin.filter(|_| !far);
         let (coins, cost) = household_cover(world, a);
         let saved = coins >= i64::from(cfg.retire_days) * cost;
         if kin.is_none() && !saved {
@@ -411,6 +421,33 @@ fn retire(world: &mut World) {
             }
         }
     }
+}
+
+/// Round 6 V4 (OPEN-240): the working spouse `s` moving into `h` keeps a
+/// commute within `[life] commute_long_ticks`, or no longer than the one
+/// she has (the move-in read no distance; the relocation's "nearer work"
+/// does). No post, or a sweeper's beat: any Home.
+fn spouse_commute_ok(world: &World, s: EntityId, h: EntityId) -> bool {
+    let Some(work) = world
+        .comp::<crate::components::Job>(s)
+        .and_then(|j| j.employer)
+        .and_then(|e| world.comp::<crate::components::Building>(e))
+        .map(|b| b.door)
+    else {
+        return true;
+    };
+    if crate::systems::jobs::is_sweeper(world, s) {
+        return true;
+    }
+    let Some(to) = world.comp::<crate::components::Building>(h).map(|b| b.door) else { return false };
+    let cap = world.config.life.commute_long_ticks;
+    let new = crate::systems::life::commute_cost(world, to, work);
+    let now = world
+        .comp::<crate::components::Household>(s)
+        .and_then(|x| x.home)
+        .and_then(|o| world.comp::<crate::components::Building>(o))
+        .map_or(crate::time::Tick::MAX, |b| crate::systems::life::commute_cost(world, b.door, work));
+    new <= cap || new <= now
 }
 
 /// Review fix 4: `a`'s living spouse when the two share a Home.

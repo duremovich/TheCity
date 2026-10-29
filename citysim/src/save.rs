@@ -448,7 +448,11 @@ use crate::world::World;
 /// 98 (pressure pass round 6, V2, turf you hold; renumbered from 97 at the merge after V3): `World.turf` (`turf::State`: the cells, their status, corner,
 /// landmark and window of presence, the held lists, the neighbours, the night's corner ticks), `Shock::LostTurf`,
 /// `EventKind::Turf`, the `[turf]` section and the `Jobs2Cols` `turf_*` columns (serde defaults).
-pub const SAVE_VERSION: u8 = 98;
+/// 99 (pressure pass round 6, V4, the night out and the trip; 97 on the branch, renumbered at the merge): the `[life]
+/// commute_long_ticks` and `[jobs2]` `cab_wage_share`, `cab_flush_coins` keys and the `Jobs2Cols`
+/// `door_drunk`, `cab_paid_driver`, `cab_paid_other`, `commute_long`, `kin_spouse_far`,
+/// `fares_dropped` columns and `Jobs2State.riding` (serde defaults; written only when set).
+pub const SAVE_VERSION: u8 = 99;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

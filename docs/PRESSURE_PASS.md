@@ -3035,3 +3035,77 @@ renumbered at the merge (`Corpse.killer`/`tied`/`found`, `ArmsState.till_robbed`
   `leverage::test_protection_never_on_own_front` (the staged racket holds no cell, `[turf]` off),
   `person::probe_pimp_purse_grows_on_a_pitch_night` (the hand-named pimp, `[turf]` off),
   `factions::test_contest_keeps_working_a_home_after_the_first_blow` (the next blow is the next day's work).
+### V4, the night out and the trip (`OPEN-239`, `OPEN-240`; `leisure::steps_for`, `service::refused`, `careers::retire`, `streetwork` the fare, `fixes::committed`, `[life] commute_long_ticks`, `[jobs2] cab_wage_share`, `cab_flush_coins`)
+
+**The door (OPEN-239).** The bouncer's check runs at the start of a venue step inside the venue (`exec::start_step`:
+Enjoy, EatOut, Gamble), and a Den's Unwind plan was `GoTo > Drink > Gamble`: the plan's own Drink made its patron
+"drunk" (`misery::influence`, a drink within `drink_hours`) and its Gamble was refused, nightly. At a door a bouncer
+keeps (`customers::kept_kind`) the Drink now comes after the main act (`GoTo > Gamble > Drink`); an unkept Den is
+as before. A drunk who arrives drunk from elsewhere is still turned away, and the pick passes that door over for
+`[exec] refused_ticks` (another venue). The bar was honoured all along (`vice::barred` is `day < until`: "barred till
+d26" meant d24-d25, and the d26 return was legal); the line now names the last day barred ("barred through d25").
+
+**The move-in (OPEN-240).** `night_shift_27693`'s "moved in with family" is `careers::retire`: a retiree going to a
+grown child's Home takes his co-resident spouse along (`ages::move_in_with`, which U2 made bring the children) with
+no distance check. The retirement to kin now passes over a child's Home that would put a working spouse's commute
+(`life::commute_cost`) past `[life] commute_long_ticks` (180, 3 h) and longer than hers now; a sweeper's beat or no
+post reads no commute. The retiree then retires on savings or keeps his post (work till the body quits). The first cap
+tried, `commute_move_ticks` (80), passed over a third of the city's retirements (most commutes here run past 80).
+
+**The fare (OPEN-240).** The rider pays the cab, not the Garage's owner: `pay_ride` takes the driver (the body who
+drives him, else the Garage's Statistical driver of record: on shift, fewest fares, lowest id), who keeps his cut
+(a body: `[verbs] cab_fare_cut`, his pay; an off-screen driver is on the mirror's wage and keeps none) and hands the
+house the rest (`Flow::CabTake`, driver -> owner, untaxed since the fare was taxed at him, counted as the owner's
+revenue; it replaces U7's `FareCut`, which ran the cut owner -> driver). A body ride is paid at the pick-up, both at
+the door (paid at the drop-off, the motion system had already put the rider inside: the settle read apart). A Garage
+with no off-screen driver leaves the fare to its owner (the line names the corp). The rider's money line names the
+driver's post ("CabFare -10 to Raven Dunmore#20147 (Cab Driver)"). The commute's cab (the roll, the ride home, the
+El-missed ride) also reads the wage: a fare past `[jobs2] cab_wage_share` (0.5) of the day's pay walks or rides the
+El unless the rider holds `cab_flush_coins` (80): `fabber_84414` paid 7c a leg on a 7c wage.
+
+**The wrong district (OPEN-240).** Two causes. (1) `streetwork::carry` moved a body ride's rider with his driver on
+every driver step, whatever the driver's plan: a driver pre-empted mid-fare took his rider wherever he went
+(`exec_73953 d24 01:16`: a paid cab to a D4 kitchen, 167 min later on a street in D5). A driver whose plan leaves
+the Work goal with the rider aboard now hands him to the off-screen cab from where he stands (`release`;
+`fares_dropped`, 3 in 30 days); a rider still waiting at his door waits for a driver finishing another plan. (2) A paid cab was cut by the rider's own next think (`exec_16679 d26 17:02` in the first after-shadow: an
+87-min ride cut 3 min short, Shop 0.07 -> Unwind 0.81). `Jobs2State.riding` holds a cab under way (its landing tick,
+`Tick::MAX` while a body carries him, aboard) and `fixes::committed` holds it against any goal but an emergency;
+the hold reads the cab's own leg (the same landing tick), so an entry a plan reset left behind holds nothing.
+
+**Numbers** (20k `isle_m_k2`, seed 42 x 30, `--scaled --ambient-flats 50`, one run each; before is main `794bc6d`
+plus the counters commit, identical in every main column to a run of `794bc6d` itself; `target/v4_before`,
+`target/v4_after/run5.csv`): door refusals 1,058 -> 122, **of the drunk 892 -> 25**; door brawls (`Brawl`) 312 -> 86;
+**rider fares to a driver 0 -> 1,402, to an owner 4,040 -> 583**; cab trips 4,452 -> 2,378 (the wage share) and cab
+hails 428 -> 490; **workers past a 3-h commute** at the midnight read d15 589 -> 497, d30 435 -> 400 (mean 1,213 ->
+1,130); retirements 908 -> 623 (`kin_spouse_far`: 1,283 nights a retirement to kin was passed over) and elders taken
+in 2,229 -> 1,839. FINDING, not explained within the cap: the after-runs grow their gangs sooner (members d30 934 ->
+1,003, and 1,138 in the after-run before the last two narrowings; Extortion 812 -> 999, Assault 1,145 -> 1,382,
+GangJoin 1,122 -> 1,213), with employment within 0.5 % and ~150 more elders at work; the gangs' founding tips on day
+7 in one run and not the other, and the spread between the two after-runs reads as divergence, not a mechanism.
+
+**Shadow** (20k, seed 42, days 21-27, `office_worker:6,night_shift:2,fabber:3,exec:2,cabbie:2`; `target/v4_shadow`,
+before `target/v4_base/shadow` with the brief's picks). The night out gets in: `office_worker_18570 d24 21:55`
+"PLAN Unwind on Gambling Den#4757 [GoTo(Seller) > Gamble > Drink]", `22:50` Gamble, `23:21` Drink, back on d27
+(06:54 Gamble, 5c to The Neon Wolves); no `PLAN FAILED ... Unwind ... PreconditionLost` and no door line in 15
+diaries. The fare to the cab: `exec_16592 d23 17:58` "-10c CabFare to Raven Dunmore#20147 (Cab Driver)", "rode with
+Raven Dunmore (as a fare)", `19:06` "now at Fixer#4805": landed where paid; `d27 09:02` "hailed a cab (flush) ...
+to Fixer#4805", "-> Fixer#4805 ... 60 min, 127 tiles (done)". The driver's side (first after-shadow):
+`cabbie_21507 d21 21:18` "CabFare +6 from Gwendolyn Osgood#14015, CabTake -3 to corp Zetatech 6", the shift line
+"drove 1 fare ... 3c his cut". No CabFare `SETTLED APART` in the final shadow (the base had 2). The move-in has no
+case at 20k in these picks; it is read from the counter (`kin_spouse_far`) and the code.
+
+**Reads wrong (next pass).** An off-screen ride from a Garage whose drivers are all bodies still pays the owner
+(583 of 1,985; "CabFare -22 to corp Zetatech 7"); the fix is a ride that does not happen (no driver, no cab) or the
+nearest Garage with an off-screen driver. The cabbie still stands by most of a shift (the commuter cab halved).
+`office_worker_18570 d27 07:25` "ACTION Drink @ street ... (ended)": the diary prints where an interrupted step's
+body stood when it ended (it left the Den at 07:30). Under-18: nothing here picks a victim or a fight; a minor at a
+kept door is turned away "under age" as T4 built, unchanged.
+
+**Deviations.** No new test. Two `tests/street.rs` probes re-pinned on their premise (Round 6 V4): the tier-blind
+roll's `pay_ride` takes the driver (`None`), and the body ride is paid at the pick-up, to the driver (`cab_paid_driver`),
+the owner taking the house's share (it asserted payment on arrival, to the owner); and
+`person.rs`'s `probe_pimp_purse_grows_on_a_pitch_night` reads the meeting as it happens (the pimp's regulars keep 8
+faces and his busier gang day on the V4 city pushed the worker off by the window's end). New config: `[life]
+commute_long_ticks`, `[jobs2] cab_wage_share`, `cab_flush_coins` (serde defaults). New `Jobs2Cols`: `door_drunk`,
+`cab_paid_driver`, `cab_paid_other`, `commute_long`, `kin_spouse_far`, `fares_dropped`; `analyze_run.py` prints
+them in "the street". `SAVE_VERSION` 99 (97 on the branch, renumbered at the merge after V3 and V2; the keys, the columns, `Jobs2State.riding`).

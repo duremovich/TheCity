@@ -3213,6 +3213,11 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
     let (cut, up) = (w.config.vice.pimp_cut, w.config.service.pimp_pass_up);
     let mut collecting = 0u32;
     let mut kept_nights = 0u32;
+    // Round 6 V4 (premise held): the meeting is read as it happens. The
+    // pimp's regulars keep `REGULARS_CAP` (8) faces, and on the V4 city his
+    // gang day served eight others on day 14, so the worker he met on night 1
+    // had fallen off the list by the end of the window.
+    let mut met = false;
     // The subject's gang is held to GangWork (Expand) through the window: a diverged
     // seed (the tower on) can have it muster a Raid on a pitch night, and the probe is
     // about the pimp's round, not about what a raid order does to a night.
@@ -3313,6 +3318,7 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
             if step(w, pimp) == Some(ActionKind::Collect) {
                 collecting += 1;
             }
+            met |= citysim::systems::service::regulars_of(w, pimp).iter().any(|r| r.who == o);
             let (c, m) = (coins(w, pimp), met_cut(w));
             if m > last_meet {
                 at_meet += c - last_coins;
@@ -3340,7 +3346,6 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
             kept_nights += u32::from(kept > 0);
         }
     }
-    let met = citysim::systems::service::regulars_of(&w, pimp).iter().any(|r| r.who == o);
     eprintln!("pimp {}: {collecting} ticks collecting, met the worker {met}", pimp.index);
     assert!(collecting > 0 && met, "the pimp never walked his pitch");
     if presence {

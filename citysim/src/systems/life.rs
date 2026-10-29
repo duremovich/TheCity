@@ -984,6 +984,10 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool, daily: bool)
             };
             let Some(hd) = world.comp::<Building>(home).map(|b| b.door) else { continue };
             let d = cost(world, hd, work);
+            // Round 6 V4 (OPEN-240): the report's long commutes.
+            if d > world.config.life.commute_long_ticks {
+                crate::systems::ownership::jobs2_row(world).commute_long += 1;
+            }
             if pressure {
                 // The island pass phase 4: the day's pressure decides.
                 read.insert(a);

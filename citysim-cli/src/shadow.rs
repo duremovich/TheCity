@@ -2034,6 +2034,13 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                     );
                 }
                 let sign = if inn > 0 { "+" } else { "-" };
+                // Round 6 V4 (OPEN-240): a fare paid to a driver says so.
+                let who = match other.and_then(|o| world.comp::<Job>(o)) {
+                    Some(j) if matches!(flow, F::CabFare) && *from == Some(id) => {
+                        format!("{who} ({})", j.role.label())
+                    }
+                    _ => who,
+                };
                 flow_ctx.push(format!(
                     "{label} {sign}{}{} {} {who}",
                     coins,
@@ -3048,11 +3055,11 @@ fn absorb(f: &mut DayFold, e: &Event) {
             }
         }
         EventKind::Served => {
-            let head = t.split(": barred till ").next().unwrap_or(t);
+            let head = t.split(": barred through ").next().unwrap_or(t);
             let why = head.rsplit_once(" (").and_then(|(_, w)| w.split_once(')')).map_or("no cause", |x| x.0);
             f.note(why);
-            if let Some((_, till)) = t.split_once(": barred till ") {
-                f.last = format!("barred till {till}");
+            if let Some((_, till)) = t.split_once(": barred through ") {
+                f.last = format!("barred through {till}");
             }
         }
         _ => {}
