@@ -4596,6 +4596,11 @@ pub struct Misery {
     /// last seen to (a Clinic's or a back room's patch-up).
     #[serde(default)]
     pub patched_at: Tick,
+    /// Round 6 V6 (OPEN-217): the tick of an off-screen drink (a Bar's, a
+    /// venue's bar), the mark the door reads where the Statistical tier
+    /// keeps no `Socialised` memory (`misery::influence`); 0 none.
+    #[serde(default)]
+    pub drank_at: Tick,
     /// Round 4 T5 (`systems::search`): the day's search (a body's): the day
     /// it is for, the doors asked, the door he is making for and the Friend
     /// who told him of it; `None` once no search has been made.

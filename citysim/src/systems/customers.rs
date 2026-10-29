@@ -118,6 +118,18 @@ pub fn cause(world: &World, id: EntityId, b: EntityId) -> Option<&'static str> {
     {
         return Some("no dress");
     }
+    // Round 6 V6 (OPEN-217): the door has a price. Off screen the visitor
+    // carries none of the state above (no drink is kept in an off-screen
+    // memory, no gang member is off screen, nobody off screen carried at a
+    // kept door in 9,264 arrivals at 20k), so the 100k door, all off-screen
+    // arrivals, turned nobody away; the one it can see is the purse (the
+    // coins in hand, not the rent put by: the door cannot see that).
+    if c.door_broke {
+        let price = crate::systems::leisure::price_of(world, b);
+        if price > 0 && coins(world, id) < price {
+            return Some("broke");
+        }
+    }
     None
 }
 
@@ -130,8 +142,8 @@ pub fn door_cause(world: &World, id: EntityId, b: EntityId) -> Option<&'static s
         return None;
     }
     // Round 3 S5: the barred face is turned away every time (round 4 T4:
-    // and the under-age).
-    if why == "barred" || why == "under age" {
+    // and the under-age; round 6 V6: and the broke, the door's price).
+    if why == "barred" || why == "under age" || why == "broke" {
         return Some(why);
     }
     let hour = world.tick / TICKS_PER_HOUR;
@@ -234,8 +246,9 @@ pub fn rough_at_door(world: &mut World, worker: EntityId, client: EntityId, b: E
 /// Round 4 T7: `mult` scales the swing (a return, `[verbs] door_return_swing_mult`).
 pub fn scene(world: &mut World, id: EntityId, bouncer: EntityId, b: EntityId, why: &str, mult: f32) -> Option<String> {
     let c = cfg(world)?.clone();
-    // Round 4 T4: the under-age turned away is no scene and no grudge.
-    if why == "under age" {
+    // Round 4 T4: the under-age turned away is no scene and no grudge (round
+    // 6 V6: nor the broke; the door's price is no insult).
+    if why == "under age" || why == "broke" {
         return None;
     }
     if crate::systems::law::living(world, id) {
@@ -401,17 +414,28 @@ fn coins(world: &World, id: EntityId) -> i64 {
 fn back_room(world: &World, id: EntityId) -> Option<EntityId> {
     let cap = cfg(world)?.back_reach_ticks;
     let from = crate::systems::life::origin(world, id)?;
-    let (d, b) = world
+    let mut rooms: Vec<(u32, EntityId)> = world
         .buildings_of_kind(BuildingKind::BlackClinic)
         .iter()
         .copied()
         .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished && !bd.derelict))
         .filter(|&b| !world.is_closed(b) && !world.staff_of(b).is_empty())
         .filter_map(|b| world.comp::<Building>(b).map(|bd| (bd.door.manhattan(from), b)))
-        .min()?;
-    let door = world.comp::<Building>(b)?.door;
-    let _ = d;
-    (crate::systems::distance::travel(world, from, door) <= cap).then_some(b)
+        .collect();
+    rooms.sort_unstable();
+    // Round 6 V6 (OPEN-217; `[care] clinic_spill`): the nearest whose doc
+    // has room this hour, within reach; else the nearest (the queue).
+    let spill = crate::systems::care::cfg(world).is_some_and(|c| c.clinic_spill);
+    let reach = |b: EntityId| {
+        world.comp::<Building>(b).is_some_and(|bd| crate::systems::distance::travel(world, from, bd.door) <= cap)
+    };
+    let &(_, nearest) = rooms.first()?;
+    if spill {
+        if let Some(&(_, b)) = rooms.iter().find(|&&(_, b)| crate::systems::care::room_at(world, b, id) && reach(b)) {
+            return Some(b);
+        }
+    }
+    reach(nearest).then_some(nearest)
 }
 
 /// One who would rather not walk into a licensed Clinic: wanted, a gang
@@ -462,7 +486,9 @@ fn care_choice_any(world: &World, id: EntityId) -> Option<(EntityId, Care, i64)>
         }
     }
     let from = crate::systems::life::origin(world, id)?;
-    let clinic = crate::systems::assets::nearest_seller(world, BuildingKind::Clinic, from, true)?;
+    // Round 6 V6 (OPEN-217): open for a patch-up with an orderly on (the
+    // night), the nearest with room first (`care::patch_clinic`).
+    let clinic = crate::systems::care::patch_clinic(world, from, id)?;
     // Pressure pass R3: short of the patch, a pawn and the doctor's slate.
     if coins(world, id) < c.patch_price && !crate::systems::care::slate_ok(world, id, clinic, c.patch_price) {
         return None;
@@ -503,22 +529,46 @@ pub fn care_plan(world: &World, id: EntityId) -> Option<crate::goap::Plan> {
 pub fn doctor(world: &World, b: EntityId) -> Option<EntityId> {
     let on =
         crate::systems::service::servers_on_duty(world, b, crate::components::ServeKind::Patient).into_iter().next();
-    // Pressure pass R3: a back room's doc is on call (no hours on the door:
-    // a patient walked 200 minutes to a shut back room and left unseen).
-    on.or_else(|| {
-        let back = world.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::BlackClinic);
-        if !back || crate::systems::care::cfg(world).is_none() {
-            return None;
-        }
-        let role = world.config.trade_role("black_doc")?;
-        world.staff_of(b).iter().copied().find(|&o| {
+    on.or_else(|| on_call(world, b, EntityId::NONE))
+}
+
+/// Pressure pass R3: a back room's doc is on call (no hours on the door: a
+/// patient walked 200 minutes to a shut back room and left unseen). Round
+/// 6 V6 (OPEN-217): the doc on call for `patient` is the pair hash among
+/// the room's free docs with room this hour (else among them all), not the
+/// first found: the 20k Back Room#1971's one doc saw 469 of its 724
+/// patients in 30 days, three colleagues 20-123 (V14's 100k: 574 a week
+/// to one, none to the other).
+fn on_call(world: &World, b: EntityId, patient: EntityId) -> Option<EntityId> {
+    let back = world.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::BlackClinic);
+    if !back || crate::systems::care::cfg(world).is_none() {
+        return None;
+    }
+    let role = world.config.trade_role("black_doc")?;
+    let docs: Vec<EntityId> = world
+        .staff_of(b)
+        .iter()
+        .copied()
+        .filter(|&o| {
             crate::systems::law::living(world, o)
                 && world.comp::<Job>(o).is_some_and(|j| j.role == role)
                 && !world.has::<crate::components::Sentence>(o)
                 && !crate::systems::wounded::is_down(world, o)
         })
-    })
+        .collect();
+    let spread = crate::systems::care::cfg(world).is_some_and(|c| c.on_call_spread);
+    if !spread {
+        return docs.first().copied();
+    }
+    let free: Vec<EntityId> = docs.iter().copied().filter(|&d| crate::systems::service::has_room(world, d)).collect();
+    let pool = if free.is_empty() { docs } else { free };
+    pool.into_iter()
+        .map(|d| (crate::systems::econ::hash_unit(world.seed(), PURPOSE_ON_CALL, key(patient) ^ key(b), key(d)), d))
+        .min_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)))
+        .map(|(_, d)| d)
 }
+
+const PURPOSE_ON_CALL: u64 = 0xc057_0005;
 
 /// `Patch`'s ticks.
 pub fn patch_ticks(world: &World) -> crate::time::Tick {
@@ -551,7 +601,10 @@ pub fn patch(world: &mut World, id: EntityId, target: Option<EntityId>) -> bool 
 /// patient had his memory and not the `Treated` line.
 pub fn doctor_for(world: &World, b: EntityId, patient: EntityId) -> Option<EntityId> {
     crate::systems::service::server_for(world, b, crate::components::ServeKind::Patient, patient)
-        .or_else(|| doctor(world, b))
+        .or_else(|| {
+            crate::systems::service::servers_on_duty(world, b, crate::components::ServeKind::Patient).into_iter().next()
+        })
+        .or_else(|| on_call(world, b, patient))
 }
 
 /// Round 3 S4 (OPEN-216): each hour, the off-screen patients are seen as a

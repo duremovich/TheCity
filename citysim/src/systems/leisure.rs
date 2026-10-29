@@ -2056,16 +2056,27 @@ pub fn bouts(world: &mut World) {
                     b.lod == Lod::Statistical || world.comp::<Position>(f).is_some_and(|p| p.building == Some(pit))
                 })
         };
+        // Round 6 V6 (OPEN-217): the pit's own book of who fought when (the
+        // `Bout` memory, read before, is one an off-screen fighter's eight
+        // slots can drop), else the memory (a save from before the book).
         let last_bout = |f: EntityId| {
+            let book = crate::systems::vice::last_bout(world, f);
+            if book > 0 {
+                return book;
+            }
             world
                 .comp::<crate::components::Memory>(f)
                 .and_then(|m| m.entries.iter().filter(|e| e.kind == MemoryKind::Bout).map(|e| e.tick).max())
                 .unwrap_or(0)
         };
+        // The under-18 rule (CLAUDE.md): nobody under 18 is on the card
+        // (`ages::is_protected`; the Fighter's hire is 18 and up, this is the
+        // explicit gate).
         let mut fighters: Vec<(f32, EntityId, u64)> = ownership::staff_at(world, pit)
             .into_iter()
             .filter(|&f| world.comp::<Job>(f).is_some_and(|j| j.role == Role::Fighter && j.on_shift(tod)))
             .filter(|&f| crate::systems::law::living(world, f) && !world.has::<Sentence>(f))
+            .filter(|&f| !crate::systems::ages::is_protected(world, f))
             .filter(|&f| present(f))
             .map(|f| (crate::systems::law::fighting(world, f), f, last_bout(f)))
             .collect();
@@ -2083,43 +2094,74 @@ pub fn bouts(world: &mut World) {
             }
             continue;
         }
-        let (a, b) = (fighters[0].1, fighters[1].1);
-        let (fa, fb) = (fighters[0].0, fighters[1].0);
-        let (ca, cb) = (crate::systems::law::courage(world, a), crate::systems::law::courage(world, b));
-        let p_win = (0.5 + 0.4 * (fa - fb) + 0.1 * (ca - cb)).clamp(0.1, 0.9);
         let mut rng = world.rng.word(WordNs::Bout, day, u64::from(pit.index));
-        let a_wins = rng.random::<f32>() < p_win;
-        let (winner, loser) = if a_wins { (a, b) } else { (b, a) };
-        if let Some(n) = world.comp_mut::<Needs>(loser) {
-            n.energy = (n.energy - 0.3).max(0.0);
-            n.safety = (n.safety - 0.3).max(0.0);
-        }
-        // L2 shadow fixes item 9: a bout is sanctioned, not an assault (its
-        // `Lost` was read as Assaulted: rumours, news Stories, dread 0.82,
-        // a best friend turned Enemy).
-        world.remember(winner, MemoryKind::Bout, Some(loser), 0.4, 0.3, false);
-        world.remember(loser, MemoryKind::Bout, Some(winner), 0.5, -0.4, false);
-        if let Some(s) = world.comp_mut::<crate::components::Skills>(winner) {
-            s.fighting = (s.fighting + 0.01).min(1.0);
-        }
-        let mut paid_out = 0;
-        for (who, stake, _) in bets {
-            // Lives at work phase 1 (§ 2.1): the bettors are the bout's served.
-            crate::systems::service::arrive(world, who, pit, crate::components::ServeKind::Attendee, stake);
-            let courage = world.comp::<Personality>(who).map_or(0.5, |p| p.courage);
-            let backs_a = rng.random::<f32>() < 0.3 + 0.4 * courage;
-            if backs_a == a_wins && world.has::<Wallet>(who) {
-                paid_out += house_pays(world, pit, who, 2 * stake, 2 * stake);
+        // Round 6 V6 (OPEN-217): the night's card, a bout for every
+        // `bout_card_per` Fighters on shift here (at least one), paired in
+        // the order above; the bets ride on the first (the main event).
+        let per = usize::from(world.config.leisure.bout_card_per.max(2));
+        let card = (fighters.len() / per).max(1).min(fighters.len() / 2);
+        for k in 0..card {
+            let (a, b) = (fighters[2 * k].1, fighters[2 * k + 1].1);
+            let (fa, fb) = (fighters[2 * k].0, fighters[2 * k + 1].0);
+            let a_wins = fight_bout(world, &mut rng, a, b, fa, fb);
+            let (winner, loser) = if a_wins { (a, b) } else { (b, a) };
+            if k > 0 {
+                let text = format!(
+                    "{} beat {} at {} on the undercard",
+                    world.name_of(winner),
+                    world.name_of(loser),
+                    world.name_of(pit)
+                );
+                world.push_event(EventKind::Bout, &[winner, loser, pit], text);
+                continue;
             }
+            let mut paid_out = 0;
+            for &(who, stake, _) in &bets {
+                // Lives at work phase 1 (§ 2.1): the bettors are the bout's served.
+                crate::systems::service::arrive(world, who, pit, crate::components::ServeKind::Attendee, stake);
+                let courage = world.comp::<Personality>(who).map_or(0.5, |p| p.courage);
+                let backs_a = rng.random::<f32>() < 0.3 + 0.4 * courage;
+                if backs_a == a_wins && world.has::<Wallet>(who) {
+                    paid_out += house_pays(world, pit, who, 2 * stake, 2 * stake);
+                }
+            }
+            let text = format!(
+                "{} beat {} at {} (bets paid {paid_out})",
+                world.name_of(winner),
+                world.name_of(loser),
+                world.name_of(pit)
+            );
+            world.push_event(EventKind::Bout, &[winner, loser, pit], text);
         }
-        let text = format!(
-            "{} beat {} at {} (bets paid {paid_out})",
-            world.name_of(winner),
-            world.name_of(loser),
-            world.name_of(pit)
-        );
-        world.push_event(EventKind::Bout, &[winner, loser, pit], text);
     }
+    // Round 6 V6: the book keeps the living Fighters only.
+    crate::systems::vice::keep_bouts(world);
+}
+
+/// One bout of the card (plan L18's draw): `a` beats `b` on `p_win` from
+/// the fighting and the courage; the loser's energy and safety, both
+/// memories, the winner's skill, the pit's book (round 6 V6). Returns
+/// whether `a` won.
+fn fight_bout(world: &mut World, rng: &mut impl Rng, a: EntityId, b: EntityId, fa: f32, fb: f32) -> bool {
+    let (ca, cb) = (crate::systems::law::courage(world, a), crate::systems::law::courage(world, b));
+    let p_win = (0.5 + 0.4 * (fa - fb) + 0.1 * (ca - cb)).clamp(0.1, 0.9);
+    let a_wins = rng.random::<f32>() < p_win;
+    let (winner, loser) = if a_wins { (a, b) } else { (b, a) };
+    if let Some(n) = world.comp_mut::<Needs>(loser) {
+        n.energy = (n.energy - 0.3).max(0.0);
+        n.safety = (n.safety - 0.3).max(0.0);
+    }
+    // L2 shadow fixes item 9: a bout is sanctioned, not an assault (its
+    // `Lost` was read as Assaulted: rumours, news Stories, dread 0.82,
+    // a best friend turned Enemy).
+    world.remember(winner, MemoryKind::Bout, Some(loser), 0.4, 0.3, false);
+    world.remember(loser, MemoryKind::Bout, Some(winner), 0.5, -0.4, false);
+    if let Some(s) = world.comp_mut::<crate::components::Skills>(winner) {
+        s.fighting = (s.fighting + 0.01).min(1.0);
+    }
+    crate::systems::vice::note_bout(world, a);
+    crate::systems::vice::note_bout(world, b);
+    a_wins
 }
 
 // ---------------------------------------------------------------------------
@@ -2517,12 +2559,29 @@ fn stat_visit(
     let now = spendable(world, id);
     let purse = evening.unwrap_or(now);
     let price = price_of(world, b);
+    // Round 6 V6 (OPEN-217): at a kept door the bouncer meets the visitor
+    // before his purse does: one come with the evening's purse spent is
+    // turned away "broke" (`customers::cause`), not a silent stay-home.
+    let counter = crate::systems::shift::counter_on(world);
+    let door_first = counter
+        && crate::systems::customers::cfg(world).is_some_and(|c| c.door_broke)
+        && kind_of(world, b).is_some_and(|k| crate::systems::customers::kept_kind(world, k));
+    // A visitor this door turned away tonight does not queue back into it
+    // (the evening's later visits rolled before the refusal: the 100k
+    // shadow's broke came back and were barred for the return).
+    if door_first && !door_seen(world, id, b) {
+        return false;
+    }
+    if door_first && !door_ok(world, id, b) {
+        crate::systems::service::refused(world, id, b);
+        return false;
+    }
     if now < 1 || (act != ActionKind::Drink && 2 * price > purse) {
         return false;
     }
     // The pre-view pass phase 3 (OPEN-121, the mirror): the off-screen
     // visitor meets the same door a body does (`door_seen` picked it).
-    if crate::systems::shift::counter_on(world) && !door_ok(world, id, b) {
+    if counter && !door_first && !door_ok(world, id, b) {
         crate::systems::service::refused(world, id, b);
         return false;
     }
@@ -2539,6 +2598,18 @@ fn stat_visit(
             add_fun(world, id, gain_at(world, b));
             add_belonging(world, id, 0.15);
             world.remember(id, MemoryKind::Socialised, None, 0.2, 0.3, false);
+            // Round 6 V6 (OPEN-217): the drink's mark the door reads (the
+            // off-screen memory keeps no `Socialised`: 9,264 off-screen
+            // arrivals at 20k's kept doors, none drunk).
+            if paid > 0 && crate::systems::customers::cfg(world).is_some_and(|c| c.door_stat_drink) {
+                let now = world.tick;
+                if !world.has::<crate::components::Misery>(id) {
+                    world.insert(id, crate::components::Misery::default());
+                }
+                if let Some(m) = world.comp_mut::<crate::components::Misery>(id) {
+                    m.drank_at = now;
+                }
+            }
             // Jobs & lives phase 5 (§ 5.3): a black unit from the Bar's dealer (nothing off).
             crate::systems::braindance::bar_visit(world, id, b, false);
         }

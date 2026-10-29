@@ -457,7 +457,10 @@ use crate::world::World;
 /// `Household.pantry_stake`, `Household.kin`, `Child.slipped` (written while set),
 /// `CampMove::FetchedBack`, the `[camp] warn_stale_days` key and the `Jobs2Cols` `ch_warned_old`,
 /// `camp_fetched`, `camp_off_street`, `camp_take_street`, `camp_pocket` columns (serde defaults).
-pub const SAVE_VERSION: u8 = 100;
+/// 101 (pressure pass round 6, V6, empty rooms beside full ones; renumbered at the merge): `ViceState.bouts`
+/// (the pit's book of who fought when), `Misery.drank_at`, the `[care] orderly_opens`, `clinic_spill`,
+/// `on_call_spread`, `[customers] door_broke`, `door_stat_drink` and `[leisure] bout_card_per` keys (serde defaults).
+pub const SAVE_VERSION: u8 = 101;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

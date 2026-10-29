@@ -3199,3 +3199,94 @@ Under-18: nothing here touches a victim pick, a fight or a punishment, and nothi
 toward the service's take and never harms a child (`health::child_day` floors below onset, unchanged); the fetch is
 a walk back in; the street take and the moves are the service's protection; the Camp feeds every child. No test
 (doctrine 2). `SAVE_VERSION` 100 (97 on the branch, renumbered at the merge after V3, V2, V4).
+
+### V6, empty rooms beside full ones (`OPEN-217`, `OPEN-232`; `care::patch_clinic`, `care::open_for_patch`, `customers::on_call`, `customers::back_room`, `customers::cause`, `leisure::stat_visit`, `leisure::bouts`, `vice::last_bout`, `gray::strike_off`, `[care]`, `[customers]`, `[leisure]` V6 keys)
+
+- **The causes** (20k `isle_m_k2` seed 42, main `4d8ee83`; a temporary probe on the door, the pits and the clinics,
+  removed). (1) **The Clinic was dark at night**: `assets::seller_open` opens a Clinic only with its Ripperdoc at the
+  counter, so at 02:00 every one of 29 Clinics was shut with its orderly on the split shift (21:00-06:00); the night's
+  wounded waited for 09:00 and the orderly saw nobody (V14 `orderly_14910`; 20k: 9 Clinic events between 21:00 and
+  09:00 in a week). (2) **The back room's doc on call was the first found** (`customers::doctor`'s `find`): the 20k
+  Back Room#1971's one doc saw 469 of its 724 patients in 30 days, three colleagues 20-123 (V14's 574 and none is the
+  same pick; the two V14 picks are colleagues of one Sump). (3) **The nearest took every patient whatever the queue**:
+  `care_choice` and `back_room` named the nearest open, with no read of the doctor's hour (`[[serves]] per_hour`).
+  (4) **The door could see nothing off screen**: of 9,264 off-screen arrivals at kept doors in 8 days none had a cause
+  (no gang member is off screen, nobody off screen carried, and the off-screen memory keeps no `Socialised`, so a
+  Bar's drink never made anyone drunk); a 100k door's arrivals are all off screen, so "nobody turned away" nightly.
+  And the broke never reached the door: `stat_visit` let a short purse fail silently before it. (5) **The bout read
+  its rotation from the `Bout` memory**, which an off-screen fighter's eight slots can drop, and a pit held one bout
+  a night whatever its roster. 20k pits hold four fighters and rotate cleanly (each every other night), so the 100k
+  cause is not shown at 20k; both readings are fixed. (6) **Struck off with no why**: the quit said "struck off".
+- **Built.** A Clinic is open for a patch-up with any of its patient staff on duty (`[care] orderly_opens`,
+  `care::open_for_patch`; a sale, an install and a treatment still wait for the Ripperdoc, `seller_open`). A wound
+  walks to the nearest Clinic open for it whose doctor has room this hour, else the nearest open (`care::patch_clinic`,
+  `[care] clinic_spill`); the back room the same, within `back_reach_ticks` (`customers::back_room`). The doc on call
+  is the pair hash of the patient among the free docs with room (`customers::on_call`, `[care] on_call_spread`). The
+  door: a purse short of the venue's price (coins in hand) is a cause, turned away every time, no scene and no grudge
+  (`[customers] door_broke`), and the off-screen visitor meets a kept door before his purse (`leisure::stat_visit`); an
+  off-screen drink leaves the mark the door reads (`Misery.drank_at`, `[customers] door_stat_drink`, read by
+  `misery::influence` within `[misery] drink_hours`; a body's drink is still its memory, V4's ordering untouched). The
+  pit keeps its own book of who fought when (`ViceState.bouts`, `vice::last_bout`, the memory only for a fighter not
+  in the book) and its card is a bout for every `[leisure] bout_card_per` (4) Fighters on shift, at least one; the
+  undercard prints "X beat Y at Z on the undercard", the bets ride on the main event. The strike-off quit says why
+  ("struck off the register: the licence board found a lawless practice").
+- **Deviations.** The door's list in the brief was the barred, the broke, the armed, the minor and the brawler; off
+  screen only the broke and the drink are there to read (the armed and the colours are bodies: gang members are never
+  off screen; a minor has no Brain and never reaches a door; the barred know and stay away, `door_seen`). The drink
+  is V4's on a body; here only the off-screen mirror (V4's body refusals of the drunk are not moved: 23 -> 68 drunk
+  lines a month are the off-screen tier's). The capacity spill rarely binds at 20k (no doctor's hour full); it is
+  there for 100k's queue. Patients per clinic stay lopsided by catchment (the Sump's and the Mid-Levels' Clinics); no
+  pick sends a patient past a nearer open one with room.
+- **Under-18** (`ages::is_protected`): the off-screen patients are adults (`stat_care`'s `is_adult`), a child has no
+  Brain to plan a Treat; the bout card filters `is_protected` explicitly (the Fighter's hire is 18 and up); at the door
+  "under age" is read before "broke" and is no scene, the broke turned away is no scene and no grudge, the scene's own
+  gate is unchanged. Nothing here picks a victim or a fight.
+- **Shadow** (20k, seed 42, d21-27, picks ripperdoc:3, orderly:2, black_doc:2, bouncer:2, fighter:2; the after build's
+  picks differ from the base's by the moved city). The night orderly (`orderly_9822`, Santiago Ito, Ripperdoc#4998,
+  split shift; base orderlies: no line in the week): `d21 21:00` "Santiago Ito patched Orrin Yates up at
+  Ripperdoc#4998 for 12c (3c of it to the doctor)", `d25 23:00`, `d26 21:00` the same at night. The back room
+  (`black_doc_13078`, Bronwen Pembroke, the base's 469-patient doc): `d21 01:00` "patched Zelda Novak up in the back
+  room of Back Room#1971 for 0c, no questions asked", `d21 07:00` "... for 6c (Fiora Fairweather put up 6c), to
+  Eastwick Holdings's till"; in 30 days #1971's docs 258 / 188 / 220 (base 112 / 469 / 123). The door
+  (`bouncer_20093`, Clemence Quarry, Gambling Den#4757): `d23 22:00` "turned Mirabel Bartlett away at the door of
+  Gambling Den#4757 (carrying)", `d24 22:00` "turned Santiago Crane away ... (drunk)", `d24 00:00` "18 let in, 1 turned
+  away (carrying 1)"; `bouncer_17697` (a1 build, Gambling Den#5054) `d23 20:45` "turned Mina Sallow away ... (broke)",
+  `d24 00:00` "93 let in, 1 turned away (broke 1)". The pit (`fighter_11655`): `d21`, `d23`, `d25 23:00` Bouts as the
+  base. The one 100k shadow (why: the door
+  and the pit are 100k's, every arrival off screen and the rosters past four; `isle_m_k2_100k`, seed 42, d21-27,
+  bouncer:2, fighter:2, black_doc:2, orderly:1; the build before the last fix): `bouncer_61555` (Verity Ito, Club#5702)
+  `d21 21:30` "turned Mateo Eastwick away at the door of Club#5702 (drunk)", `d21 22:00` "turned Sabine Jarrow away
+  ... (broke)", `d22 00:00` "8 let in, 8 turned away (broke 6, drunk 2)" (V14: "nobody turned away" 7 of 7 nights);
+  the broke came back on the evening's queued visits and were barred for the return ("turned away 2 times today:
+  broke x2; barred through d22"), so a face turned away at a kept door now drops its queued visits there
+  (`stat_visit`'s `door_seen`), the final build. `fighter_64821` (Hesper Ashcombe, Fight Pit#1887): `d23 23:00` "Mags
+  Wexford beat Hesper Ashcombe at Fight Pit#1887 (bets paid 0)", `d26 23:00` "Knox Duarte beat Hesper Ashcombe at
+  Fight Pit#1887 on the undercard" (V14: no Bout for either fighter in a week; the undercard says the 100k roster is
+  past four). The other fighter and that bouncer spent the week jailed. `black_doc_60434` (Tomas Nakamura) 9 patients,
+  `black_doc_95016` 14, two rooms of the Sump, neither empty.
+- **Reads wrong** (the next pass): a fighter clocks in at a pit shut seven days by a protection fire
+  (`fighter_8049`, Fight Pit#5496 burned d16, d18, d20: no bout from d16, she works the dark pit all week); a 20k Club
+  door lets in 1 a night (`bouncer_17841`, Club#4621, the Spire): the venue's traffic, not the door; the night
+  orderly's chip installs still land at 00:07 (U6's midnight leftovers); the door's off-screen causes stay few (13 of
+  1,095 a body door's week), the drink and the purse the only state the off-screen tier carries to it; the clinics'
+  catchment (one Clinic 107 of 443 in a week).
+- Numbers (prints; 20k seed 42 x 30, `--scaled --ambient-flats 50`, one run each; base main `4d8ee83`, after the
+  final build):
+
+  | | base | after |
+  |---|---|---|
+  | Clinics with a patient (30 d / d21-27) | 29 / 20 | 32 / 27 |
+  | patients per Clinic, 30 d: median, max | 30, 398 | 30, 344 |
+  | patients per Clinic, d21-27: median, max | 9.5, 137 | 6, 107 |
+  | Clinic patients 21:00-09:00 (30 d / week) | 56 / 9 | 234 / 57 |
+  | patched (all) | 1,556 | 1,683 |
+  | back rooms, 30 d: median, max, min | 145, 724, 89 | 207, 693, 51 |
+  | Back Room#1971 by doc (30 d) | 469 / 123 / 112 / 20 | 258 / 220 / 188 / 12 (a1 build) |
+  | door refusals (`door_refusals`) | 191 | 208 |
+  | refusal lines by cause | colours 39, drunk 23, brawler 9, high 6, dress 5, barred 3, carrying 2, no cause 58 | drunk 67, broke 46, colours 24, high 17, dress 4, brawler 4, carrying 2, no cause 5 |
+  | a body bouncer's nights with a refusal | 34 of 571 | 37 of 573 |
+  | bouts (30 d) | 511 | 496 (one pit burned shut three times) |
+  | Assaults + Murders (a moved city, not claimed) | 1,289 | 1,101 |
+
+  No test (doctrine 2). `SAVE_VERSION` 101 (renumbered at the merge):
+  `ViceState.bouts`, `Misery.drank_at` and the V6 keys (serde defaults).

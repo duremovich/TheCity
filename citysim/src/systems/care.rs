@@ -505,6 +505,43 @@ pub fn beat_term(world: &World, a: EntityId) -> Option<f32> {
     (crate::systems::law::is_city_guard(world, a) && crate::systems::law::on_duty(world, a)).then_some(c.beat_term)
 }
 
+/// Round 6 V6 (OPEN-217; `[care] orderly_opens`): `clinic` is open for a
+/// patch-up: its Ripperdoc at the counter (`assets::seller_open`), or any of
+/// its patient staff on duty (the night orderly). A sale, an install and a
+/// treatment still wait for the Ripperdoc (`seller_open`).
+pub fn open_for_patch(world: &World, clinic: EntityId) -> bool {
+    if crate::systems::assets::seller_open(world, clinic) {
+        return true;
+    }
+    cfg(world).is_some_and(|c| c.orderly_opens)
+        && world.comp::<Building>(clinic).is_some_and(|bd| !bd.demolished && !bd.derelict)
+        && !world.is_closed(clinic)
+        && !crate::systems::service::servers_on_duty(world, clinic, crate::components::ServeKind::Patient).is_empty()
+}
+
+/// Round 6 V6 (`[care] clinic_spill`): a doctor at `place` would see
+/// `patient` this hour (one on duty or on call with room left).
+pub fn room_at(world: &World, place: EntityId, patient: EntityId) -> bool {
+    crate::systems::customers::doctor_for(world, place, patient)
+        .is_some_and(|d| crate::systems::service::has_room(world, d))
+}
+
+/// Round 6 V6 (OPEN-217): the Clinic a wound walks to from `from`: the
+/// nearest open for a patch-up ([`open_for_patch`]) whose doctor has room
+/// this hour ([`room_at`], `[care] clinic_spill`), else the nearest open.
+/// The nearest open alone took every patient, queue or none, and every
+/// Clinic was shut from 21:00 to 09:00 with its orderly on.
+pub fn patch_clinic(world: &World, from: crate::components::TilePos, patient: EntityId) -> Option<EntityId> {
+    let table = world.near_table(BuildingKind::Clinic);
+    if cfg(world).is_some_and(|c| c.clinic_spill) {
+        let roomy = table.nearest_passing(from, |b| open_for_patch(world, b) && room_at(world, b, patient));
+        if roomy.is_some() {
+            return roomy;
+        }
+    }
+    table.nearest_passing(from, |b| open_for_patch(world, b))
+}
+
 /// The nearest staffed doctor's door to `tile` for a downed body: a Clinic
 /// with a Ripperdoc on staff, or (with `[care]`) an open back room with its
 /// doc. `(place, door distance)`.

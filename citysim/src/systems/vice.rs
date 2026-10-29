@@ -114,6 +114,39 @@ pub struct ViceState {
     /// `[verbs] door_return_ticks` or while barred (`turned_again`, `barred`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub turned: BTreeMap<u64, Vec<(EntityId, u64, u64)>>,
+    /// Round 6 V6 (OPEN-217): a Fighter (`key`) -> the tick of his last
+    /// bout, the pit's card (`leisure::bouts` read it from the `Bout`
+    /// memory, which an off-screen fighter's eight slots can drop: V14's
+    /// 100k fighters stood in the pit at 23:00 a week with no bout). Pruned
+    /// at the bout to the living Fighters.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub bouts: BTreeMap<u64, u64>,
+}
+
+/// Round 6 V6: the tick of `fighter`'s last bout on the card (0: none).
+pub fn last_bout(world: &World, fighter: EntityId) -> u64 {
+    world.jobs2.vice.bouts.get(&key(fighter)).copied().unwrap_or(0)
+}
+
+/// Round 6 V6: `fighter` fought tonight.
+pub fn note_bout(world: &mut World, fighter: EntityId) {
+    let tick = world.tick;
+    world.jobs2.vice.bouts.insert(key(fighter), tick);
+}
+
+/// Round 6 V6: the pit's book pruned to the living Fighters.
+pub fn keep_bouts(world: &mut World) {
+    if world.jobs2.vice.bouts.is_empty() {
+        return;
+    }
+    let keep: std::collections::BTreeSet<u64> = world
+        .workers(crate::components::Role::Fighter)
+        .iter()
+        .copied()
+        .filter(|&f| crate::systems::law::living(world, f))
+        .map(key)
+        .collect();
+    world.jobs2.vice.bouts.retain(|k, _| keep.contains(k));
 }
 
 /// Round 4 T4 (OPEN-217): a serving body's night at its venue: the room
