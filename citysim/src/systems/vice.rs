@@ -1336,11 +1336,35 @@ fn name_pimps(world: &mut World) {
     // Round 5 U6: a sitting pimp's street passed on, and why (told below).
     let mut lost: Vec<(EntityId, Option<EntityId>, DistrictId, String)> = Vec::new();
     let mut held: BTreeMap<DistrictId, (usize, std::cmp::Reverse<EntityId>)> = BTreeMap::new();
-    for g in world.gangs() {
-        for (d, n) in crate::systems::gang::held_districts(world, g) {
-            let e = held.entry(d).or_insert((0, std::cmp::Reverse(g)));
-            if (n, std::cmp::Reverse(g)) > *e {
-                *e = (n, std::cmp::Reverse(g));
+    // Pressure pass round 6, V2 (TURF § 2): with `[turf]`, a district's street
+    // is the gang's holding the cells its street pitches stand in (most
+    // pitches, then most cells held in the district, then the lower id).
+    let turf = crate::systems::turf::on(world);
+    if turf {
+        let mut by: BTreeMap<DistrictId, BTreeMap<EntityId, (usize, usize)>> = BTreeMap::new();
+        for p in world.jobs2.pitches.values().filter(|p| is_street_pitch(world, p)) {
+            if let Some(g) = crate::systems::turf::holder_at(world, p.spot) {
+                by.entry(p.district).or_default().entry(g).or_default().0 += 1;
+            }
+        }
+        for (&g, cells) in &world.turf.held {
+            for &k in cells {
+                let d = world.district_of(crate::systems::turf::centre(world, k));
+                by.entry(d).or_default().entry(g).or_default().1 += 1;
+            }
+        }
+        for (d, m) in by {
+            if let Some((g, (a, b))) = m.into_iter().max_by(|x, y| x.1.cmp(&y.1).then(y.0.cmp(&x.0))) {
+                held.insert(d, (a + b, std::cmp::Reverse(g)));
+            }
+        }
+    } else {
+        for g in world.gangs() {
+            for (d, n) in crate::systems::gang::held_districts(world, g) {
+                let e = held.entry(d).or_insert((0, std::cmp::Reverse(g)));
+                if (n, std::cmp::Reverse(g)) > *e {
+                    *e = (n, std::cmp::Reverse(g));
+                }
             }
         }
     }
@@ -1400,7 +1424,18 @@ fn name_pimps(world: &mut World) {
         // `pimp_round_tiles` of it (tiles).
         let reach = world.config.trade_verbs.as_ref().map(|c| c.pimp_round_tiles);
         let cap = pimp_trip_cap(world);
+        // Round 6 V2 (TURF § 2): with `[turf]` the pimp is named among the
+        // members living on the gang's blocks: his Home cell held by the gang
+        // within `[turf] pimp_cells` of a cell with one of the district's
+        // street pitches (replaces U6's `pimp_trip_ticks` bound).
+        let pitch_cells: Vec<u32> = spots.iter().filter_map(|&s| crate::systems::turf::cell_of(world, s)).collect();
+        let near_cells = crate::systems::turf::cfg(world).map_or(1, |c| u32::from(c.pimp_cells));
         let within = |m: EntityId| {
+            if turf {
+                let Some(hc) = crate::systems::turf::home_cell(world, m) else { return false };
+                return world.turf.cells.get(&hc).is_some_and(|x| x.status == crate::systems::turf::Status::Held(g))
+                    && pitch_cells.iter().any(|&pc| crate::systems::turf::cell_dist(world, hc, pc) <= near_cells);
+            }
             if reach.is_none() {
                 return true;
             }
@@ -1432,6 +1467,9 @@ fn name_pimps(world: &mut World) {
         // 20 min to his one pitch and met nobody).
         let sitting = sitting.filter(|&p| within(p)).filter(|&p| match (reach, free) {
             (None, _) | (_, None) => true,
+            // Round 6 V2: on the turf, the sitting pimp keeps the street while
+            // he lives on it and holds no day post.
+            (Some(_), Some(_)) if turf => !world.has::<Job>(p),
             (Some(r), Some(f)) => !world.has::<Job>(p) && near(p) <= near(f).saturating_add(r),
         });
         // Round 5 U6 (OPEN-217): with no jobless member fit, the fit member
@@ -1453,6 +1491,12 @@ fn name_pimps(world: &mut World) {
                 format!("{gang} holds the district now")
             } else if absent {
                 format!("away from every pitch {absent_days} days")
+            } else if !within(old) && turf {
+                let contested = crate::systems::turf::home_cell(world, old)
+                    .and_then(|k| world.turf.cells.get(&k))
+                    .is_some_and(|x| matches!(x.status, crate::systems::turf::Status::Contested(..)));
+                if contested { "the blocks the pimp lives on contested" } else { "living off the gang's blocks" }
+                    .to_string()
             } else if !within(old) {
                 format!("living {} tiles from the pitches", near(old))
             } else if world.has::<Job>(old) {

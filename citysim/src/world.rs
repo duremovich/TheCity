@@ -1271,6 +1271,10 @@ pub struct World {
     /// books (standing, bail owed, the talk), failed courts, reckonings.
     #[serde(default, skip_serializing_if = "crate::systems::crew::State::is_empty")]
     pub crew: crate::systems::crew::State,
+    /// Pressure pass round 6, V2 (`systems::turf`): the cells, their
+    /// holders, corners and windows of presence, the neighbours.
+    #[serde(default, skip_serializing_if = "crate::systems::turf::State::is_empty")]
+    pub turf: crate::systems::turf::State,
     /// Pressure pass round 2, R1 (`systems::fares`): the fare dodgers'
     /// records (caught, banned) and the beaten down on the platform.
     #[serde(default, skip_serializing_if = "crate::systems::fares::State::is_empty")]
@@ -2081,6 +2085,7 @@ impl World {
             underwater: Default::default(),
             consequence: Default::default(),
             crew: Default::default(),
+            turf: Default::default(),
             fares: Default::default(),
             care: Default::default(),
             spots: Vec::new(),
@@ -3880,7 +3885,13 @@ impl World {
     }
 
     /// The other gang; with more than two, the one holding the most territory.
+    /// Pressure pass round 6, V2 (TURF § 1): with `[turf]`, the neighbour (the
+    /// gang holding the most cells bordering ours), so a rival is in reach;
+    /// the old rule for a gang holding no cell or bordering nobody.
     pub fn rival_of(&self, gang: EntityId) -> Option<EntityId> {
+        if let Some(r) = crate::systems::turf::rival(self, gang) {
+            return Some(r);
+        }
         self.gang_ids
             .iter()
             .copied()

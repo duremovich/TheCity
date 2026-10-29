@@ -1126,6 +1126,16 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool, daily: bool)
                 if !school(hdoor) {
                     continue;
                 }
+                // Pressure pass round 6, V2 (TURF § 2): a family with children
+                // moves into no contested cell.
+                if !kids.is_empty()
+                    && matches!(
+                        crate::systems::turf::status_at(world, hdoor),
+                        crate::systems::turf::Status::Contested(..)
+                    )
+                {
+                    continue;
+                }
                 if best.is_none_or(|b| (dd + sp, h) < b) {
                     best = Some((dd + sp, h));
                 }

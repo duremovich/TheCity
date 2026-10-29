@@ -189,7 +189,9 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
             !world.has::<crate::components::GangMember>(id)
                 || (world.comp::<Brain>(id).is_some_and(|b| b.gang_task_day == Some(world.day()))
                     // Lives at work phase 4b (§ 2.3): a pimp's round runs every pitch hour.
-                    && crate::systems::vice::pimp_target(world, id).is_none())
+                    && crate::systems::vice::pimp_target(world, id).is_none()
+                    // Round 6 V2 (TURF § 1): the evening's corner after the day's work.
+                    && crate::systems::turf::corner_hold(world, id).is_none())
         }
         // A guard never scores JoinGang (`considerations` says None): skip the scan.
         // Pressure pass round 2, R5 (OPEN-214): with `[crew]`, and a try-out place in reach.
@@ -819,6 +821,20 @@ pub fn considerations_with(
                     Consideration::new("U(wealth)", urgency(n.wealth), Curve::Linear { m: 0.5, b: 0.3 }),
                     Consideration::new("energy", n.energy, Curve::Logistic { k: 10.0, mid: 0.3 }),
                     Consideration::new("loyalty", p.loyalty, Curve::Linear { m: 0.4, b: 0.4 }),
+                ];
+                return Some((cs, 0.0));
+            }
+            // Round 6 V2 (TURF § 1): holding the corner (the target is the
+            // member himself and he deals no corner): the gang's evening.
+            if target.is_some_and(|(t, _)| t == id)
+                && crate::systems::stims::corner_target(world, id).is_none()
+                && crate::systems::turf::corner_hold(world, id).is_some()
+            {
+                let cs = vec![
+                    Consideration::new("the corner", 1.0, GATE),
+                    Consideration::new("loyalty", p.loyalty, Curve::Linear { m: 0.5, b: 0.4 }),
+                    Consideration::new("energy", n.energy, Curve::Logistic { k: 10.0, mid: 0.3 }),
+                    Consideration::new("hunger", n.hunger, Curve::Linear { m: 0.6, b: 0.4 }),
                 ];
                 return Some((cs, 0.0));
             }

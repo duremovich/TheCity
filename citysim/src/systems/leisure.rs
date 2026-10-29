@@ -801,6 +801,8 @@ fn nearest_venue(
             && open(world, b)
             && door_seen(world, id, b)
             && has_room(world, id, b)
+            // Round 6 V2 (TURF § 2): nor a venue in a contested cell after dark.
+            && !world.comp::<Building>(b).is_some_and(|bd| crate::systems::turf::avoids(world, id, bd.door))
     })
 }
 
@@ -1057,6 +1059,11 @@ pub fn spots_daily(world: &mut World) {
 fn spot_ok(world: &World, id: EntityId, s: &Spot) -> bool {
     // L2 shadow fixes item 6: not the street just fled.
     if crate::systems::fixes::avoided(world, id, s.tile) {
+        return false;
+    }
+    // Pressure pass round 6, V2 (TURF § 2): after dark a contested cell's
+    // street is passed over (its own sides aside).
+    if !matches!(s.kind, SpotKind::Home(_)) && crate::systems::turf::avoids(world, id, s.tile) {
         return false;
     }
     match s.kind {
@@ -1479,6 +1486,10 @@ pub fn unwind_plan(world: &mut World, id: EntityId) -> Option<Plan> {
     if steps.is_empty() {
         return None;
     }
+    // Round 6 V2: a contested corner passed over tonight is told.
+    if let Some(from) = origin(world, id) {
+        crate::systems::turf::note_avoided(world, id, from);
+    }
     let target = pick.venue;
     // Lives at work phase 2 (§ 3.1): a Home has no seats to hold.
     let at_home = pick.act == ActionKind::HangOut;
@@ -1522,6 +1533,8 @@ pub fn hangout_plan(world: &mut World, id: EntityId) -> Option<Plan> {
         score: spot_score,
         stay_in: false,
     };
+    // Round 6 V2: a contested corner passed over tonight is told.
+    crate::systems::turf::note_avoided(world, id, from);
     let steps = match home {
         Some(h) if Some(h) == home_of(world, id) => {
             vec![step(ActionKind::GoTo(LocationKey::Home), None), step(ActionKind::HangOut, None)]
@@ -3076,6 +3089,25 @@ pub fn preacher(world: &World, id: EntityId) -> bool {
 /// lowest tile of every held district won: a preacher in D4 set out for a
 /// corner of the map 2-3 h away, 17 plans and no Preach in a week).
 fn busiest_spot(world: &World, id: EntityId, gang: EntityId, from: TilePos) -> Option<TilePos> {
+    // Pressure pass round 6, V2 (TURF § 2): with `[turf]`, the preacher
+    // preaches on his gang's own corners (the busiest within his reach), and
+    // only without one in reach on the district's spots as before.
+    if crate::systems::turf::on(world) {
+        let cap = crate::systems::distance::choice(world).map(|c| c.gang_work_ticks);
+        let rides = std::cell::OnceCell::new();
+        let rides = || *rides.get_or_init(|| crate::systems::distance::rider(world, id));
+        let best = crate::systems::turf::corners_of(world, gang)
+            .into_iter()
+            .filter(|&t| {
+                cap.is_none_or(|c| crate::systems::distance::trip_by(world, from, t, rides, Some(world.tick)) <= c)
+            })
+            .map(|t| (world.hangouts.get(&t).map_or(0, |v| v.len()), t.manhattan(from), t))
+            .max_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)).then(b.2.cmp(&a.2)))
+            .map(|(_, _, t)| t);
+        if best.is_some() {
+            return best;
+        }
+    }
     let mut ds: Vec<DistrictId> =
         crate::systems::gang::held_districts(world, gang).into_iter().map(|(d, _)| d).collect();
     let here = world.district_of(from);

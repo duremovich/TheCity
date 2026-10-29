@@ -3067,6 +3067,11 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
     // no job search either; with it the city moved and the pick (jobless)
     // was arrested for a Shakedown before his first pitch night.
     cfg.search = None;
+    // Round 6 V2: the probe hand-names its pimp on a held Home (round 5's
+    // naming); `[turf]` names him among the members living on the held cells
+    // by the pitch, and the midnight unseated the probe's subject. The round
+    // is under test, not the naming (read in the V2 shadow).
+    cfg.turf = None;
     let mut w = World::new(42, cfg);
     let start = 12 * TICKS_PER_DAY + 17 * TICKS_PER_HOUR;
     w.run_ticks(start);

@@ -2626,23 +2626,50 @@ fn pay_sighting(
     tile: TilePos,
     force: bool,
 ) -> bool {
-    let Some(c) = world.contracts.get(&id).cloned() else { return false };
+    let paid = pay_sighting_quiet(world, id, writer, who, tile, force);
+    if paid > 0 {
+        tell_sighting(world, writer, who, paid, 1);
+    }
+    if paid > 0 && world.contracts.get(&id).is_some_and(|x| x.paid_sightings >= world.config.bounty.cap_sightings) {
+        settle(world, id, Settle::Fulfilled, "");
+    }
+    paid > 0
+}
+
+/// Round 6 V2 (V14: `BountyPaid` printed three or four times a sighting):
+/// one line a sighting, whatever the buyers it was sold to.
+fn tell_sighting(world: &mut World, writer: EntityId, who: EntityId, paid: i64, buyers: usize) {
+    let to = if buyers > 1 { format!(" ({buyers} buyers)") } else { String::new() };
+    let text = format!("{} sold a sighting of {} for {paid}{to}", world.name_of(writer), world.name_of(who));
+    world.push_event(EventKind::BountyPaid, &[writer, who], text);
+}
+
+/// [`pay_sighting`] untold and unsettled: the coins paid (0: none).
+fn pay_sighting_quiet(
+    world: &mut World,
+    id: ContractId,
+    writer: EntityId,
+    who: EntityId,
+    tile: TilePos,
+    force: bool,
+) -> i64 {
+    let Some(c) = world.contracts.get(&id).cloned() else { return 0 };
     if !c.is_live() || c.paid_sightings >= world.config.bounty.cap_sightings {
-        return false;
+        return 0;
     }
     let now = world.tick;
     let gap = Tick::from(world.config.bounty.min_gap_hours) * TICKS_PER_HOUR;
     if !force && c.last_paid.is_some_and(|t| now < t + gap) {
-        return false;
+        return 0;
     }
     if Some(writer) == c.buyer || Some(writer) == c.agent || writer == who {
-        return false;
+        return 0;
     }
     // Shadow V4 bug 15: a taken Locate is its taker's job: only the taker's
     // and the crew's sightings pay (others' filled the cap and refunded the
     // price while the taker staked out three days for nothing).
     if c.status == ContractStatus::Taken && c.taker.is_some() && c.taker != Some(writer) && !c.crew.contains(&writer) {
-        return false;
+        return 0;
     }
     let s = crate::virt::Sighting { who, tile, tick: now, confidence: 1.0, relayed: true };
     let owner = c.buyer.unwrap_or(EntityId::NONE);
@@ -2660,19 +2687,14 @@ fn pay_sighting(
     };
     // Nothing left to pay with: the sighting went in, unpaid.
     if paid <= 0 {
-        return false;
+        return 0;
     }
     if let Some(x) = world.contracts.get_mut(&id) {
         x.paid_sightings = x.paid_sightings.saturating_add(1);
         x.last_paid = Some(now);
     }
     world.stats.current.contract.bounties_paid += 1;
-    let text = format!("{} sold a sighting of {} for {paid}", world.name_of(writer), world.name_of(who));
-    world.push_event(EventKind::BountyPaid, &[writer, who], text);
-    if world.contracts.get(&id).is_some_and(|x| x.paid_sightings >= world.config.bounty.cap_sightings) {
-        settle(world, id, Settle::Fulfilled, "");
-    }
-    true
+    paid
 }
 
 /// C27, from `gossip::maybe_sight` after a body's sighting is written: each
@@ -2689,10 +2711,27 @@ pub fn on_sighting(world: &mut World, observer: EntityId, who: EntityId, tile: T
         crate::systems::ownership::jobs2_row(world).sight_asleep += 1;
         return;
     }
+    // Round 6 V2: the buyers paid for one sighting, told on one line.
+    let mut paid = 0i64;
+    let mut buyers = 0usize;
+    let mut full: Vec<ContractId> = Vec::new();
     for id in ids {
         if sees(world, observer, id) {
-            pay_sighting(world, id, observer, who, tile, false);
+            let p = pay_sighting_quiet(world, id, observer, who, tile, false);
+            if p > 0 {
+                paid += p;
+                buyers += 1;
+                if world.contracts.get(&id).is_some_and(|x| x.paid_sightings >= world.config.bounty.cap_sightings) {
+                    full.push(id);
+                }
+            }
         }
+    }
+    if paid > 0 {
+        tell_sighting(world, observer, who, paid, buyers);
+    }
+    for id in full {
+        settle(world, id, Settle::Fulfilled, "");
     }
 }
 

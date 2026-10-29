@@ -221,6 +221,9 @@ fn test_aggregates_on_hand_built_world() {
 #[test]
 fn test_gang_holding_most_homes_controls() {
     let mut w = v1_three();
+    // Round 6 V2: the claim rule (held Homes), which `[turf]` replaces with the
+    // holder of each Home's cell; with turf the district reads the cells.
+    w.config.turf = None;
     w.run_ticks(1);
     let g = w.gangs()[0];
     let d = DistrictId(1);
@@ -282,6 +285,9 @@ fn test_city_under_high_coverage_beats_lone_corp() {
 #[test]
 fn test_control_first_computation_is_silent() {
     let mut w = v1_three();
+    // Round 6 V2: the claim rule (held Homes), which `[turf]` replaces with the
+    // holder of each Home's cell; with turf the district reads the cells.
+    w.config.turf = None;
     w.run_ticks(1);
     assert_eq!(count(&w, EventKind::DistrictControl), 0, "day 0 sets control silently");
     assert!(w.districts.iter().all(|d| d.control_init));
@@ -1385,6 +1391,9 @@ fn test_district_strike_hits_highest_priced_employer_of_residents() {
 #[test]
 fn test_gang_owned_home_weighs_as_a_home() {
     let mut w = v1_three();
+    // Round 6 V2: the claim rule (held Homes), which `[turf]` replaces with the
+    // holder of each Home's cell; with turf the district reads the cells.
+    w.config.turf = None;
     w.run_ticks(1);
     let g = w.gangs()[0];
     let d = DistrictId(1);

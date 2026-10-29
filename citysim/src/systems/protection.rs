@@ -81,8 +81,14 @@ fn gang_name(world: &World, g: EntityId) -> String {
 /// The districts a gang's protection reaches: its turf's, and with
 /// `hideout_ground` its Hideout's; ascending, deduplicated.
 pub fn ground(world: &World, gang: EntityId) -> Vec<DistrictId> {
-    let mut out: Vec<DistrictId> =
-        crate::systems::gang::held_districts(world, gang).into_iter().map(|(d, _)| d).collect();
+    // Pressure pass round 6, V2 (TURF § 2): with `[turf]`, the districts of
+    // its held and contested cells (the lean itself reads the cell,
+    // `turf::leans`).
+    let mut out: Vec<DistrictId> = if crate::systems::turf::on(world) {
+        crate::systems::turf::ground(world, gang)
+    } else {
+        crate::systems::gang::held_districts(world, gang).into_iter().map(|(d, _)| d).collect()
+    };
     if cfg(world).is_some_and(|c| c.hideout_ground) {
         if let Some(h) = world.hideout_of(gang).filter(|&h| world.has::<Building>(h)) {
             let d = world.district_of_building(h);

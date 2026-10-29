@@ -531,10 +531,15 @@ pub enum EventKind {
     /// a body of violence found where it lay and the law's case on it (the
     /// killer named on a lead is the Report line after, else no suspect).
     CorpseFound,
+    /// Pressure pass round 6, V2 (`systems::turf`): `[gang, members.., other
+    /// gang?, members.., landmark?]` a cell held, taken, contested or let go;
+    /// `[member, gang]` a member on his gang's corner; `[resident]` a
+    /// contested cell passed over after dark.
+    Turf,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 243] = [
+    pub const ALL: [EventKind; 244] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -778,6 +783,7 @@ impl EventKind {
         EventKind::JobSearch,
         EventKind::SoupLine,
         EventKind::CorpseFound,
+        EventKind::Turf,
     ];
 }
 

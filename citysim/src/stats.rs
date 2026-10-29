@@ -1353,6 +1353,39 @@ pub struct Jobs2Cols {
     pub soup_short: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub soup_far: u32,
+    // Pressure pass round 6, V2 (`systems::turf`): the day's cells held (all
+    // gangs), contested, and the gangs holding one (snapshots at the pass);
+    // holder changes told, cells taken from a gang, holds contested; corner
+    // holds planned and body hours on a corner; contested cells passed over
+    // after dark (told), families moved out of one, recruits taken by the
+    // holder of their cell, Street pitches opened in a held cell; the turf's
+    // tribute (coins).
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_cells_held: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_cells_contested: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_gangs_holding: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_changes: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_lost: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_contests: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_corner_holds: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_corner_hours: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_avoided: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_family_moves: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_recruits: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_pitches: u32,
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub turf_tribute: i64,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -1866,6 +1899,19 @@ impl Jobs2Cols {
                 "soup_queued",
                 "soup_short",
                 "soup_far",
+                "turf_cells_held",
+                "turf_cells_contested",
+                "turf_gangs_holding",
+                "turf_changes",
+                "turf_lost",
+                "turf_contests",
+                "turf_corner_holds",
+                "turf_corner_hours",
+                "turf_avoided",
+                "turf_family_moves",
+                "turf_recruits",
+                "turf_pitches",
+                "turf_tribute",
             ]
             .into_iter()
             .map(str::to_string),
@@ -2373,6 +2419,19 @@ impl Jobs2Cols {
             self.soup_queued.to_string(),
             self.soup_short.to_string(),
             self.soup_far.to_string(),
+            self.turf_cells_held.to_string(),
+            self.turf_cells_contested.to_string(),
+            self.turf_gangs_holding.to_string(),
+            self.turf_changes.to_string(),
+            self.turf_lost.to_string(),
+            self.turf_contests.to_string(),
+            self.turf_corner_holds.to_string(),
+            self.turf_corner_hours.to_string(),
+            self.turf_avoided.to_string(),
+            self.turf_family_moves.to_string(),
+            self.turf_recruits.to_string(),
+            self.turf_pitches.to_string(),
+            self.turf_tribute.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

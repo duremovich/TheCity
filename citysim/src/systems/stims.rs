@@ -338,7 +338,15 @@ pub fn member_site_trip(
     ds.extend(deal_district(world, gang));
     ds.sort_unstable();
     ds.dedup();
-    let mut cands: Vec<(u64, i64, (DistrictId, DealSite))> = Vec::with_capacity(ds.len());
+    let mut cands: Vec<(u64, i64, (usize, DealSite))> = Vec::with_capacity(ds.len());
+    // Pressure pass round 6, V2 (TURF § 2): the deal spot is the corner: with
+    // `[turf]` and the corner on, a district's corner is replaced by the
+    // corners of the gang's held cells (a venue or the arms Bar as before).
+    let turf_corners = if corner_on(world) && crate::systems::turf::on(world) {
+        crate::systems::turf::corners_of(world, gang)
+    } else {
+        Vec::new()
+    };
     for d in ds {
         let Some(site) = deal_site_in(world, gang, d) else { continue };
         let to = match site {
@@ -346,14 +354,21 @@ pub fn member_site_trip(
                 Some(bd) => bd.door,
                 None => continue,
             },
+            DealSite::Corner(_) if !turf_corners.is_empty() => continue,
             DealSite::Corner(t) => t,
         };
         let t = trip(to);
-        cands.push((t, t as i64, (d, site)));
+        let k = cands.len();
+        cands.push((t, t as i64, (k, site)));
     }
-    let times: Vec<(DistrictId, u64)> = cands.iter().map(|&(t, _, (d, _))| (d, t)).collect();
-    let (d, site) = crate::systems::distance::pick(cands, cap)?;
-    times.into_iter().find(|&(x, _)| x == d).map(|(_, t)| (site, t))
+    for c in turf_corners {
+        let t = trip(c);
+        let k = cands.len();
+        cands.push((t, t as i64, (k, DealSite::Corner(c))));
+    }
+    let times: Vec<(usize, u64)> = cands.iter().map(|&(t, _, (k, _))| (k, t)).collect();
+    let (k, site) = crate::systems::distance::pick(cands, cap)?;
+    times.into_iter().find(|&(x, _)| x == k).map(|(_, t)| (site, t))
 }
 
 /// D38, for `gang::gang_work_target`: the deal Bar when this member deals

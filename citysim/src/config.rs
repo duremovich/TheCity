@@ -370,6 +370,11 @@ pub struct Config {
     /// absent: the gangs as phase 3 left them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crew: Option<CrewCfg>,
+    /// Pressure pass round 6, V2 (docs/TURF.md § 1-2): turf cells held by
+    /// presence, the corner, turf that pays (`systems/turf.rs`). `None` (not
+    /// written into a save) with the key absent: territory is Homes alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turf: Option<TurfCfg>,
     /// Pressure pass round 2, R1 (docs/PRESSURE_PASS.md § R1, `OPEN-213`):
     /// petty law for the fare, a ladder and never a cell (`systems/fares.rs`).
     /// `None` (not written into a save) with the key absent: a dodger is
@@ -1661,6 +1666,96 @@ impl Default for ProtectionCfg {
             stipend_jobless_only: true,
             stipend_reserve: 150,
             broker_visits: true,
+        }
+    }
+}
+
+/// Pressure pass round 6, V2 (docs/TURF.md § 1-2): `[turf]`. The city is cut
+/// into square cells of `cell_tiles`; a gang's daily presence in a cell (held
+/// Homes, members living there, members' hours on its street and corner, its
+/// Hideout and fronts) summed over `presence_days` decides who holds it.
+/// Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TurfCfg {
+    /// A cell's side in tiles.
+    pub cell_tiles: u16,
+    /// The days of presence a hold reads.
+    pub presence_days: u8,
+    /// A gang holds a cell with this much presence over the window ...
+    pub hold_min: f32,
+    /// ... ahead of the next gang by this share of the next's (else the cell
+    /// is contested, when the next has at least `keep_share` of `hold_min`).
+    pub hold_margin: f32,
+    /// A holder keeps its cell while its presence is at least this share of
+    /// `hold_min` and nobody passes it by the margin.
+    pub keep_share: f32,
+    /// A day's presence: a held Home (claim at `CLAIM_HELD`) in the cell ...
+    pub w_held_home: f32,
+    /// ... a member living there ...
+    pub w_resident: f32,
+    /// ... the gang's Hideout, a front it owns ...
+    pub w_hideout: f32,
+    pub w_front: f32,
+    /// ... a member's hour on the cell's street (or in a venue there), an
+    /// hour on its corner ...
+    pub w_street_hour: f32,
+    pub w_corner_hour: f32,
+    /// ... and a Statistical member's day on the street, credited to his
+    /// corner's cell (his Home's when he has none).
+    pub stat_street_hours: f32,
+    /// The corner is held from this tick of the day to this one (wrapping).
+    pub corner_from: u16,
+    pub corner_to: u16,
+    /// A member holds the corner at most this many ticks a night.
+    pub corner_ticks_day: u16,
+    /// A member's corner: his Home's cell when his gang holds it, else the
+    /// nearest held cell whose corner lies within this of his Home door.
+    pub corner_reach_tiles: u32,
+    /// A day's tribute to a cell's holder: a Home it holds pays this ...
+    pub tribute_held: i64,
+    /// ... any other Home in the cell this.
+    pub tribute_home: i64,
+    /// The holder of a recruit's Home cell takes him on a tie this much weaker.
+    pub recruit_affinity_cut: f32,
+    /// After dark the residents pass over spots and venues in a contested
+    /// cell; a body is told it within this of a contested corner.
+    pub avoid_tiles: u32,
+    /// Families with children moved out of contested cells a day, per 1,000
+    /// residents, into a Home with room within `family_move_tiles`.
+    pub family_moves_per_1000: f32,
+    pub family_move_tiles: u32,
+    /// A district's pimp lives in a cell its gang holds within this many
+    /// cells of one of the district's street pitches.
+    pub pimp_cells: u8,
+}
+
+impl Default for TurfCfg {
+    fn default() -> Self {
+        TurfCfg {
+            cell_tiles: 24,
+            presence_days: 7,
+            hold_min: 30.0,
+            hold_margin: 0.25,
+            keep_share: 0.5,
+            w_held_home: 2.0,
+            w_resident: 1.0,
+            w_hideout: 6.0,
+            w_front: 3.0,
+            w_street_hour: 1.0,
+            w_corner_hour: 2.0,
+            stat_street_hours: 3.0,
+            corner_from: 1080,
+            corner_to: 120,
+            corner_ticks_day: 240,
+            corner_reach_tiles: 60,
+            tribute_held: 2,
+            tribute_home: 1,
+            recruit_affinity_cut: 0.1,
+            avoid_tiles: 40,
+            family_moves_per_1000: 0.2,
+            family_move_tiles: 120,
+            pimp_cells: 1,
         }
     }
 }
