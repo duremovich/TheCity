@@ -763,6 +763,27 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
             g.strike = None;
         }
     }
+    // Round 6 V5 (TURF § 3): a gang spent in a turf war lies low until it
+    // has its breath back (`turf::lies_low`, `[turf.war] lielow_days`).
+    if crate::systems::turf::lies_low(world, gang) {
+        let Some((current, name)) = world.comp::<Gang>(gang).map(|g| (g.order, g.name.clone())) else { return false };
+        if let Some(g) = world.comp_mut::<Gang>(gang) {
+            g.order = Order::LieLow;
+            g.raid_at = None;
+            g.pending_order = None;
+            if current != Order::LieLow {
+                g.order_since = now;
+            }
+        }
+        if current != Order::LieLow {
+            world.push_event(
+                EventKind::OrderChanged,
+                &[gang],
+                format!("{name}: {current:?} -> LieLow (spent in the turf war)"),
+            );
+        }
+        return true;
+    }
     // M16a (plan C26, phase 2): a gang holding a taken contract works it
     // under Job until it settles (as the strike pin: exempt from dwell and
     // hysteresis; `gang::run` rescores the moment it settles). The order

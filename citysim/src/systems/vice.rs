@@ -1433,7 +1433,10 @@ fn name_pimps(world: &mut World) {
         let within = |m: EntityId| {
             if turf {
                 let Some(hc) = crate::systems::turf::home_cell(world, m) else { return false };
-                return world.turf.cells.get(&hc).is_some_and(|x| x.status == crate::systems::turf::Status::Held(g))
+                // Round 6 V5 (V2's reads-wrong: a pimp lost his street the
+                // night his cell turned contested): blocks his gang is
+                // fighting for are still his; a cell lost is not.
+                return world.turf.cells.get(&hc).is_some_and(|x| x.status.involves(g))
                     && pitch_cells.iter().any(|&pc| crate::systems::turf::cell_dist(world, hc, pc) <= near_cells);
             }
             if reach.is_none() {

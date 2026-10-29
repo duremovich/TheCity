@@ -3199,3 +3199,104 @@ Under-18: nothing here touches a victim pick, a fight or a punishment, and nothi
 toward the service's take and never harms a child (`health::child_day` floors below onset, unchanged); the fetch is
 a walk back in; the street take and the moves are the service's protection; the Camp feeds every child. No test
 (doctrine 2). `SAVE_VERSION` 100 (97 on the branch, renumbered at the merge after V3, V2, V4).
+
+### V5, the turf war (`docs/TURF.md` § 3; `OPEN-241`; `systems/turf.rs` § the war, `[turf.war]`)
+
+- **Provocation** (`turf::provoke_at`, `war_hourly`, `rolls`): another gang's act on a held cell heats it for the
+  holder (`Cell.heat`, by gang), seen by a holder's adult body in the cell (a Statistical act is seen off screen):
+  a body an hour on its corner in the corner hours (`heat_corner_hour`; by day a walk past the venue door is no
+  trespass), his mark sprayed at the corner once a night (`heat_tag`, the "tag": told first), a deal in the cell
+  (`stims`, `heat_deal`), a shakedown of a door there (`gang::extort`, `stat_extort`, `heat_shakedown`), a holder's
+  member beaten there by another gang's (`law::resolve_fight_mods` -> `turf::beaten`, `heat_beating`). Off screen a
+  gang trespasses on a held cell it borders at `provoke_p_day` a day (x `provoke_order_mult` under Contest, Expand,
+  Retaliate), a night's heat (`heat_stat`). Heat keeps `heat_keep_day` a day. Told once a cell a night when a Full
+  body did it or saw it ("Agathe Osgood of The Unplugged 3 saw Alaric Voss of The Drowned Choir 9 spraying The
+  Drowned Choir 9's mark on the wall at The Unplugged 3's corner by Bar#4432"). A gang lying low provokes nobody.
+- **The answer** (`open_fight`, `resolve`): past `answer_heat` the holder's leader calls the members living in the
+  cell and within `muster_cells` of it to the corner (his line; `Shock::Trespass { by }` to the gang), the fight
+  `answer_window_hours` later (an off-screen provocation's at the evening: `corner_from` + the window). The muster:
+  `turf::muster_corner`, read by `corner_hold` (any hour, no cap; not on shift, not lying low, never under 18),
+  `gang::gang_work_target` (before the order's work) and the corner arm's `muster_flat`. At the fight each side is
+  its adult bodies within `muster_reach_tiles` of the corner, then its Statistical members living about the cell
+  (stood at the corner; promoted to Coarse only when the corner is on screen, `lod::on_screen`), sized by its
+  presence about the cell (`side_max` x its share of the larger), paired by `raid::fight_out` (each blow an Assault
+  or a Murder raised at the corner, witnessed and reported as any: "the law's attention if seen" is the existing
+  law). **Deviation**: the spec's "pushes the trespassers off" is the holder as the aggressor; an answer nobody
+  of the holder's comes to turns the cell contested; one nobody of the trespassers' is at is told as such.
+- **Hold or flip** (`take` through `set_status`): the side left standing holds the cell, locked `hold_lock_days`
+  (`Cell.won`, read by `daily`'s judge); a flip gives the loser `Cell.lost` for `retake_days`; held Homes' claims
+  are not moved (**deviation**: the cell's holder already takes their tribute and door, V2's `tribute`/`free_door`;
+  `Building.claim` stays the claimant's until a shakedown moves it). **A raid on a Hideout** won or sacking moves
+  the loser's cells within `raid_cells` of its Hideout to the raider (`raid::settle` -> `turf::raid_moves`).
+- **Counter-attack**: a cell's loser comes back for it at `retake_p_day` a day inside `retake_days` (`rolls`, a
+  Retake fight at the evening, his leader's line "sent 32 of theirs about the blocks back to the corner by
+  Block#756 tonight"). **Deviation**: not a Retaliate order on the cell; the faction brain's Retaliate stays the
+  Hideout raid (its 30-day cooldown), fed by `LostTurf` and the answer's `Trespass` as grudges (Raids 55 -> 99).
+  **The front**: a contested cell is fought over at `front_p_day` a day.
+- **Peace** (`war_daily`): a war (`State.wars`, a pair of gangs) starts at its first corner fight (told, the
+  leaders named), goes quiet after `war_quiet_days` without one (told). Its losses are its men's: each side's
+  fallen in its corner fights (beaten or dead) and its fighters' later deaths, jailings and leavings
+  (`note_loss` from `gang::on_member_killed`, `on_member_arrested`, `leave`; **deviation**: "members dead, jailed
+  or desisted in the war" read as the war's own men; counting every arrest of a 60-strong gang spent it in a day).
+  Past `exhaust_share` of the side's fit adults at the start (at least `exhaust_min`) over `exhaust_days` the
+  leader calls it off the corners: `lie_low` for `lielow_days`, pinned by `faction::rescore` (LieLow, an
+  `OrderChanged` "spent in the turf war"); a lying-low holder does not answer. Two spent sides' leaders strike a
+  **truce** (`truce_days`): the contested cells between them go to the side ahead (quietly), every cell on the line
+  is locked to its holder, their fights are called off, no heat between them. **The law's crackdown**: each
+  corner fight adds 1 to the cell's `law_heat` and each death `crackdown_death_w` (kept `crackdown_keep_day` a
+  day); past `crackdown_heat` the cell is cracked down on `crackdown_days`: nobody holds its corner, no fight there,
+  no heat, and the district's beat walks its Homes (`turf::crackdown_beat` in `law::district_route`;
+  **deviation**: not `law::crackdown_turf`, which stays the Crackdown posture's gang route).
+- **Off screen**: the same events from the daily `rolls` (the night's trespass, the front, the retake), resolved at
+  the corner with the Statistical members placed there; no new tier. 723 of 856 gang members are bodies at 20k
+  (`gang_bodies`), so the corner hour is most of it.
+- **V2's reads-wrong** taken: the leader has the war's decisions (the answer, the retake, lying low, the truce,
+  named at the war's start and on the crackdown); a cell with no building is named by its nearest ("the blocks
+  near Block#1172"); a pimp keeps his street while his own blocks are contested by his gang (`vice::name_pimps`:
+  `involves`, a cell lost still loses it).
+- **The under-18 rule** (`ages::is_protected`): `provoke_at` returns for a protected actor and the hourly loop skips
+  protected members (no provoker); `eyes_in` takes an adult seer; `corner_hold` returns for a protected member
+  before the muster (never mustered); `can_fight` (living, free, not down, **not protected**) gates `fighters` and
+  `muster_pool` (never a defender, an attacker or counted strength), and `raid::fight_out` and its crossfire gate
+  again; `note_loss` counts no minor. `harm_blocked` 0 in both runs (no blow reached a minor).
+- **Shadow** (20k `isle_m_k2`, seed 42; `target/v5_shadow3/` d14-20, `target/v5_shadow2/` and `target/v5_shadow/`
+  d21-27; picks gang_leader x16, gang_member x8, raider x2). A provocation answered: `gang_member_6529 d14 20:00`
+  "Agathe Osgood of The Unplugged 3 saw Alaric Voss of The Drowned Choir 9 spraying The Drowned Choir 9's mark on
+  the wall at The Unplugged 3's corner by Bar#4432", `gang_leader_7508 d14 20:00` "Ulric Quarry, The Unplugged 3's
+  leader, called 42 of theirs about the blocks to the corner by Bar#4432: The Drowned Choir 9 were on their
+  turf". Flipped: `gang_member_6529 d14 23:00` "The Drowned Choir 9 beat The Unplugged 3 back on the corner by
+  Bar#4432, 6 against 6, and hold it now". Taken back: `gang_member_25702 d15 03:00` "The Unplugged 3 beat The
+  Drowned Choir 9 back on the corner by Bar#4432, 2 against 6, and hold it now"; the counter-attack on the next
+  cell: `gang_leader_7508 d15 00:05` "Ulric Quarry ... sent 32 of theirs about the blocks back to the corner by
+  Block#756 tonight", `gang_leader_19742 d15 21:00` "The Drowned Choir 9 held the corner by Block#756 when The
+  Unplugged 3 came back for it, 6 against 6". The crackdown: `gang_leader_19742 d15 03:00` "The law cracked down on
+  the blocks around Bar#4432: The Drowned Choir 9 and The Unplugged 3 kept off the corner, the beat walks its
+  Homes for 7 days". Spent and the truce: `gang_leader_19742 d16 00:05` "Fenn Novak called The Drowned Choir 9 off
+  the corners to lie low: 13 of their 51 dead, jailed or gone since the war with The Unplugged 3 began on day 13"
+  (now "beaten, dead, jailed or gone": the fallen in its fights count),
+  `gang_leader_7508 d16 00:05` (21 of 56), then "Ulric Quarry of The Unplugged 3 and Fenn Novak of The Drowned Choir
+  9 struck a truce: the line runs where it stands (10 blocks and 5, 11 on the border), held 21 days". The war's
+  start: `v5_shadow2` "The Ash Wolves and The Iron Knives are at war over the blocks around Street Market#4415 (Hana
+  Park leads 10 of The Ash Wolves; Ghost Blackwood leads 43 of The Iron Knives)".
+- **Reads wrong** (the next pass): the muster rarely moves a Full member who is at work or on a contract
+  (`gang_member_6337`, DC8, worked through Delia Brandt's call); the fights are mostly the corner's neighbours and
+  the placed Statistical men; "6 against 1" pushes of a lone tagger are common; the big gangs (50-60 members of the
+  Unplugged 3, the Drowned Choirs) fight three wars at once and their leaders roam and spray other gangs' corners
+  (`Ilse Greaves`, Iron Knives' leader, on four gangs' corners in a week; Hana Park, a leader, tagging); "The Iron
+  Knives had nobody about the blocks to send": cells held by hours where no member lives; a lying-low gang lies low
+  twice for two wars (`gang_leader_7508 d16`, `d17`); fights at 03:00-13:00 come from beatings and shakedowns (the
+  corner's trespass is evening only); the gang's line "came to the corner ... nobody of X's there" when the
+  trespassers left. Pimp collections 93 -> 68 (gangs lying low, corners cracked down: a number moved for a known
+  reason, a FINDING).
+- Numbers (prints; 20k seed 42 x 30 `--scaled --ambient-flats 50`; before main `4d8ee83`, after
+  `target/v5_after/`): wars started 0 -> 34, provocations 1,571, answers and fights scheduled 131 (unopposed 47),
+  corner fights 61, cells flipped in the war 44 (13 by a raid), taken back 6, sides spent 18, truces 5,
+  crackdowns 3, war deaths 6 (gang deaths 22, a new column); TerritoryFlipped (Homes) 23 -> 18, Raids 55 -> 99,
+  Sacked 3 -> 5, Murders 65 -> 67, Assaults 1,224 -> 1,362, Extortion 557 -> 462, violent deaths 91 -> 101; cells
+  held last day 210 -> 190 (contested 19 -> 25); ticks/s 161 -> 144 (shadows on the box at once; a print).
+- No test (doctrine 2). `SAVE_VERSION` 101 (renumbered at the merge): `turf::State` `wars`, `truces`, `lie_low`,
+  `open`, `tagged`, `trespass_told`; `turf::Cell` `heat`, `fight`, `won`, `lost`, `law_heat`, `crackdown_until`;
+  `[turf.war]`; the `Jobs2Cols` `turf_provocations` ... `turf_crackdowns`, `gang_deaths` (printed on
+  `analyze_run.py`'s "turf war" line). Probes re-pinned with "Round 6 V5" in place (`[turf.war]` off, the subject
+  not the war): `leverage::test_protection_pays_weekly_and_stops_when_district_lost`, `person::widow_pick`
+  (`probe_widow_commissions_a_hit_at_the_fixer`).

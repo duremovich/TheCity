@@ -836,7 +836,13 @@ pub fn considerations_with(
                     Consideration::new("energy", n.energy, Curve::Logistic { k: 10.0, mid: 0.3 }),
                     Consideration::new("hunger", n.hunger, Curve::Linear { m: 0.6, b: 0.4 }),
                 ];
-                return Some((cs, 0.0));
+                // Round 6 V5 (TURF § 3): a muster to the corner weighs more.
+                let flat = if crate::systems::turf::muster_corner(world, id).is_some() {
+                    crate::systems::turf::war_cfg(world).map_or(0.0, |w| w.muster_flat)
+                } else {
+                    0.0
+                };
+                return Some((cs, flat));
             }
             let in_shift = world.comp::<Job>(id).is_some_and(|j| j.on_shift(tod));
             // The order tilts the day: a loyal member following orders scores

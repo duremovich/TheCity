@@ -2097,6 +2097,12 @@ fn widow_pick() -> WidowPick {
     // sentenced on the way to the Fixer).
     let mut cfg = Config::load();
     cfg.search = None;
+    // Round 6 V5 (premise moved): with the turf war on, the 2k city's corner
+    // fights moved the day-10 city and no widow's Fixer took the Hit inside
+    // the week (records []). The subject is the Hit market, not the war.
+    if let Some(t) = cfg.turf.as_mut() {
+        t.war = None;
+    }
     let mut w = citysim::World::new(42, cfg);
     // Day 10: the Fixers' books have filled (on day 2 too few regulars
     // would take a Hit at any price, and it priced at the old quote).

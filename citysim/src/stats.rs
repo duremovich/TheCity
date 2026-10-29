@@ -1425,7 +1425,39 @@ pub struct Jobs2Cols {
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub turf_pitches: u32,
     #[serde(skip_serializing_if = "is_zero_i64")]
-    pub turf_tribute: i64,
+    pub turf_tribute: i64, // Round 6 V5 (TURF § 3, the war): provocations seen (heat added),
+    // answers opened (the leader's muster, a front or a retake scheduled),
+    // answers with nobody of the other side there, corner fights, cells
+    // flipped by a fight, cells taken back by the side that lost them, cells
+    // moved by a raid, wars started, members dead in corner fights, sides
+    // exhausted (LieLow), truces, the law's crackdowns on a cell.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_provocations: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_answers: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_unopposed: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_fights: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_flips: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_retaken: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_raid_moves: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_wars: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_war_deaths: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_exhausted: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_truces: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub turf_crackdowns: u32,
+    /// Gang members killed (any cause of violence, any tier).
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub gang_deaths: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -1963,6 +1995,19 @@ impl Jobs2Cols {
                 "turf_recruits",
                 "turf_pitches",
                 "turf_tribute",
+                "turf_provocations",
+                "turf_answers",
+                "turf_unopposed",
+                "turf_fights",
+                "turf_flips",
+                "turf_retaken",
+                "turf_raid_moves",
+                "turf_wars",
+                "turf_war_deaths",
+                "turf_exhausted",
+                "turf_truces",
+                "turf_crackdowns",
+                "gang_deaths",
             ]
             .into_iter()
             .map(str::to_string),
@@ -2494,6 +2539,19 @@ impl Jobs2Cols {
             self.turf_recruits.to_string(),
             self.turf_pitches.to_string(),
             self.turf_tribute.to_string(),
+            self.turf_provocations.to_string(),
+            self.turf_answers.to_string(),
+            self.turf_unopposed.to_string(),
+            self.turf_fights.to_string(),
+            self.turf_flips.to_string(),
+            self.turf_retaken.to_string(),
+            self.turf_raid_moves.to_string(),
+            self.turf_wars.to_string(),
+            self.turf_war_deaths.to_string(),
+            self.turf_exhausted.to_string(),
+            self.turf_truces.to_string(),
+            self.turf_crackdowns.to_string(),
+            self.gang_deaths.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

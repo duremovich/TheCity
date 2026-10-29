@@ -1071,6 +1071,12 @@ def jobs2(rows, events, out):
                           if last.get("turf_gangs_holding") else 0}
         J["turf_mean"] = {"cells_held": mean(held), "contested": mean(col(rows, "turf_cells_contested")),
                           "gangs_holding": mean(holding)}
+    # Pressure pass round 6, V5 (systems/turf.rs, the war): provoked, answered, held or flipped, taken back, ended.
+    if "turf_fights" in rows[0]:
+        J["war_totals"] = {k: sum(col(rows, k)) for k in (
+            "turf_provocations", "turf_answers", "turf_unopposed", "turf_fights", "turf_flips", "turf_retaken",
+            "turf_raid_moves", "turf_wars", "turf_war_deaths", "turf_exhausted", "turf_truces", "turf_crackdowns",
+            "gang_deaths") if k in rows[0]}
     if "dollhouses" in rows[0]:
         J["chip_totals"] = {k: sum(col(rows, k)) for k in CHIP_TOTALS}
         J["chip_mean"] = {k: mean(col(rows, k)) for k in CHIP_SNAP}
@@ -1459,6 +1465,9 @@ def fmt(o):
         if "turf_totals" in w:
             L.append("turf (cells, the corner, the pay), run totals: " + f(w["turf_totals"]))
             L.append("turf, last day: " + f(w["turf_last"]) + "; daily mean: " + f(w["turf_mean"]))
+        if "war_totals" in w:
+            L.append("turf war (provoked, answered, fought, flipped, taken back, ended), run totals: "
+                     + f(w["war_totals"]))
         if "chip_totals" in w:
             L.append("chip and braindance, run totals: " + f(w["chip_totals"]))
             L.append("chip and braindance, daily mean: " + f(w["chip_mean"]) + f"; BD units legal / black "

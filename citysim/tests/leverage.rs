@@ -299,6 +299,13 @@ fn racket(w: &mut World) -> (EntityId, EntityId, EntityId, EntityId) {
 fn test_protection_pays_weekly_and_stops_when_district_lost() {
     // Jobs & lives phase 7b: the pre-mirror off-screen evening (no `p_venue`): the learned Bar visits fed the leader's black-BD dealing and its arrest, not this test's protection.
     let mut w = gang_world_pre_mirror();
+    // Round 6 V5 (premise moved): with the turf war on, the racket's gang
+    // fought for its corners in the test's weeks (a corner fight, a gang spent
+    // and lying low) and the hold broke before the loss. This test is the
+    // weekly payment and the district's loss, not the war.
+    if let Some(t) = w.config.turf.as_mut() {
+        t.war = None;
+    }
     let (g, leader, b, owner) = racket(&mut w);
     // Round 4 T4 (premise moved): with 10,000 the owner was the richest
     // purse at a corp's bankruptcy (`corps` estate sale, d15), bought its

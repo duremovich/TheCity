@@ -788,6 +788,8 @@ fn sell(world: &mut World, buyer: EntityId, dealer: EntityId, place: Option<Enti
     let paid = ownership::pay(world, Some(buyer), Some(gang), n * price, Flow::Stims);
     ownership::pay(world, Some(gang), Some(dealer), n * world.config.stims.dealer_cut, Flow::Stims);
     world.stats.current.stims_dealt += units;
+    // Round 6 V5 (TURF § 3): a deal on another gang's held cell provokes it.
+    crate::systems::turf::provoke_at(world, dealer, tile, crate::systems::turf::Provoke::Deal);
     let mut mult = 1.0;
     if crate::systems::service::street_on(world) {
         if place.is_none() {
