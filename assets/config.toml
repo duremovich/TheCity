@@ -2505,6 +2505,8 @@ let_home_days = 7                  # ... for this many midnights running (home o
 p_abscond = 0.004                  # a Camp child-day's chance of a try at the fence in the day ([service] p_camp_escape is the night's, unwatched)
 abscond_hours = [9, 17]            # ... at a hashed hour in this span
 p_abscond_caught = 0.75            # ... a warden on duty catches the child and walks it back in (never a blow: the under-18 rule); none on duty, it gets away
+warn_stale_days = 14               # Round 6 V1 (OPEN-231), a report only: the daily ch_warned_old counts children out of a Camp on a warning older than this (the V14 hang read at 100k); the ladder never reads it
+# Round 6 V1 (OPEN-231, Shadow V14: a broke family in a Block of ten ate the neighbours' groceries, so the second unfed spell never came): in a Home of two households or more (kin under one roof) each household's children eat, and its grocery run reads, the units it stored and the common ones; each household has a Home's stock_cap of room ([buildings] home); no number (shelf.rs)
 
 # Spec § 5 [treasury] (phase 2, plan E13, E14): the property rate replaces [corps] upkeep with wages on
 # (Farm 245 and Market 600 a day were a 70 % levy that funded the dole); the Treasury opens with

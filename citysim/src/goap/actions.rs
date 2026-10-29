@@ -1035,7 +1035,7 @@ impl PlanCtx {
                 .map(|j| crate::exec::routine::workplace_key_for(world, agent, j)),
             pantry: {
                 // Round 4 T1 (OPEN-231): the adults' share of it.
-                let stock = home.map_or(0, |h| crate::systems::camp::adults_share(world, h));
+                let stock = home.map_or(0, |h| crate::systems::camp::adults_share(world, agent, h));
                 // L2 shadow fixes item 20: at plan time, less what housemates
                 // reserved on the way (several walked home to one meal).
                 match home {

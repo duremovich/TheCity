@@ -340,7 +340,8 @@ pub fn shift_meals_needed(world: &World, job: &Job) -> u32 {
 /// Hunger fix item 11 (b): the meals the household holds toward a shift:
 /// its Home pantry and the worker's own carried (not stolen) food.
 fn meals_held(world: &World, id: EntityId, home: EntityId) -> u32 {
-    let pantry = world.comp::<Building>(home).map_or(0, |b| b.stock_food);
+    // Round 6 V1 (OPEN-231): his household's claim in a shared Home.
+    let pantry = crate::systems::shelf::held_by(world, id, home);
     pantry + world.comp::<Inventory>(id).map_or(0, |i| i.food.saturating_sub(i.stolen_food))
 }
 
@@ -349,14 +350,19 @@ fn meals_held(world: &World, id: EntityId, home: EntityId) -> u32 {
 /// was eaten by the rest), capped at the pantry. The pressure pass S6
 /// (OPEN-224): a jobless parent's run (`job` None) fills the children's
 /// food (`ages::children_food_need`).
-fn household_need(world: &World, home: EntityId, job: Option<&Job>) -> u32 {
+///
+/// Round 6 V1 (OPEN-231): in a shared Home (two households or more under
+/// one roof) the residents and the children are his household's
+/// (`shelf::members`, `shelf::kids_need`): a Block's ten families no longer
+/// read one pantry.
+fn household_need(world: &World, id: EntityId, home: EntityId, job: Option<&Job>) -> u32 {
     let cap = world.config.buildings.home.stock_cap;
     match job {
         Some(job) => {
-            let residents = world.residents_of(home).len().max(1) as u32;
+            let residents = crate::systems::shelf::members(world, id, home);
             (shift_meals_needed(world, job) * residents).min(cap)
         }
-        None => crate::systems::ages::children_food_need(world, home).min(cap),
+        None => crate::systems::shelf::kids_need(world, id, home).min(cap),
     }
 }
 
@@ -365,10 +371,10 @@ fn household_need(world: &World, home: EntityId, job: Option<&Job>) -> u32 {
 /// warning (`camp::home_on_warning`) holds only its pantry (food carried
 /// for a shift feeds no child) and needs at least the children's food.
 fn run_level(world: &World, id: EntityId, home: EntityId, job: Option<&Job>) -> (u32, u32) {
-    let need = household_need(world, home, job);
-    if crate::systems::camp::home_on_warning(world, home) {
-        let pantry = world.comp::<Building>(home).map_or(0, |b| b.stock_food);
-        let kids = crate::systems::ages::children_food_need(world, home).min(world.config.buildings.home.stock_cap);
+    let need = household_need(world, id, home, job);
+    if crate::systems::camp::household_on_warning(world, id, home) {
+        let pantry = crate::systems::shelf::held_by(world, id, home);
+        let kids = crate::systems::shelf::kids_need(world, id, home).min(world.config.buildings.home.stock_cap);
         return (pantry, need.max(kids));
     }
     (meals_held(world, id, home), need)

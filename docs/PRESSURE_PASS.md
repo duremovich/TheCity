@@ -3109,3 +3109,93 @@ faces and his busier gang day on the V4 city pushed the worker off by the window
 commute_long_ticks`, `[jobs2] cab_wage_share`, `cab_flush_coins` (serde defaults). New `Jobs2Cols`: `door_drunk`,
 `cab_paid_driver`, `cab_paid_other`, `commute_long`, `kin_spouse_far`, `fares_dropped`; `analyze_run.py` prints
 them in "the street". `SAVE_VERSION` 99 (97 on the branch, renumbered at the merge after V3 and V2; the keys, the columns, `Jobs2State.riding`).
+### V1, the ladder at 100k and children out of care (`OPEN-231`, `OPEN-242`; `systems/shelf.rs`, `camp.rs`, `demography::children`, `routine::run_level`, `lod::stat_grocery`, `[camp] warn_stale_days`)
+
+**The cause: the household's pantry read.** Not the tier: the ladder fires at 100k (r5 100k x 30: 3,378 children
+warned, 540 taken on a second warning). A Home's pantry is one `stock_food`, and a 100k Block holds up to ten
+families: the children's meal, the grocery runs (`household_need`: a jobless parent's `children_food_need(home)`, a
+worker's shift meals x residents, both the Block's) and the warning read the Block. A broke family's run was never
+made while the neighbours' groceries stood on the shelf, its children ate them, and the second unfed spell never
+came: of the children warned at a door of ten or more children 0.5 % were taken later, against 27.6 % at a door of
+one or two (r5 100k events); when the Block did run dry every family was warned in one line (`owner_broke_6426
+d21`, eighteen children). 20k doors hold one to five children (the same read, smaller).
+
+**Built:**
+- **The household's shelf** (`shelf.rs`). The households under one roof are the kin living there (union-find over
+  Spouse, Parent and Family edges between residents, at midnight before the children's meal: `Household.kin`, the
+  lowest id). `Household.pantry_stake` is the units on the shelf that are his: `StoreFood` (Full and
+  `lod::stat_store_food`) adds to it, his children's meal takes off it, an adult's pantry meal (`EatAtHome`,
+  `PackMeal`, the off-screen meal) comes off, in order, his household's units above its children's food, the
+  common units, the neighbours' spare above theirs, his own children's food last; at midnight the stakes are
+  scaled down to the stock (spoilage, a theft, a raid); a move leaves the stake behind (`World::set_home`). Units
+  nobody holds (the seeded stock, a stake left behind) are common. In a shared Home (two households or more, a
+  stake on the shelf) a household's claim is its stake and the common units; a Home of one household, or none
+  staked, keeps the common shelf as before. Each household has a Home pantry's `stock_cap` of room (`shelf::room`).
+- **What reads the claim:** the children's meal (a household whose claim is short of its children's meal goes
+  unfed that night, whatever the neighbours hold), the Full and Statistical grocery runs (`shelf::held_by`,
+  `members`, `kids_need`; the pantry alone on its own household's warning, `camp::household_on_warning`), the
+  adults' share (`camp::adults_share(world, id, home)`: his household's claim and the neighbours' spare; a
+  neighbour's crust is eaten, his child's meal is not), the let-home (`home_holds`) and the warning's food money.
+- **The parent's pocket** (`shelf::pocket_to_shelf`, before the children's meal): a free parent living there puts
+  the food he carries (not stolen) on the shelf, up to his children's meal tonight (`camp_parent_11848 d24`, first
+  cut: a worker on the warning bought three meals, ate one, carried two, and his infant went unfed beside them);
+  740 units in 20k x 30.
+- **A warning per household** (`take_daily` groups by `(home, shelf::key)`; the food money is that household's
+  children's).
+- **Children out of care** (`OPEN-242`). A child who slipped out (`escape` sets `Child.slipped`) is fetched back the
+  next midnight (`fetch_daily`: into the same Camp if it stands open, else the take's placement; a warden named;
+  the headcount's "fetched back"). A street child (no Home, not in a Camp) at midnight (`street_daily`) goes to a
+  free parent with a standing Home ("off the street"), else is taken with no free parent ("on the street and no
+  free parent (...)") or on an open warning (the street is no door to come back to); a homeless family with a free
+  parent and no warning keeps `[ages] street_take_days`. A child moved to a parent's door (`follow_parents`, off
+  the street) starts its unfed count again (`camp_jobless_25426 d27 00:10`: the father was warned the night his son
+  came, over days unfed at the mother's; landed after the numbers run).
+- **The `[family]` line** reads the household's share: "the pantry holds 19, 7 of it ours (18 households under the
+  roof)". `ch_warned_old` (daily: children out of a Camp on a warning older than `[camp] warn_stale_days` 14; a
+  report only) and the `camp_fetched`, `camp_off_street`, `camp_take_street`, `camp_pocket` columns, printed by
+  `analyze_run.py`.
+
+**Deviations.**
+- Fixing it at its cause is a model change, not a ladder change: the Block's pantry is shared out by household (no
+  per-flat `Building`; the ledger rides on `Household`). The first cut (claims a share of the stock, adults eating
+  any household's units first from their own) took 470, then 583 children at 20k x 30, half from households whose
+  purse covered the food: the Block's non-shoppers, and the parent himself, ate the food bought for the children.
+  The pocket rule and the order of the adult's meal are what made it read right. Cutting adults off the
+  neighbours' shelf entirely (tried) cost evictions 1,126 -> 1,480 and thefts 1,161 -> 1,558 and was dropped.
+- A broken-out child (a parent's crew) is not fetched: the brief named the slip, and a break-out is the parent's deed.
+- The pocket needs no walk home: a free parent living there is enough (the midnight meal is the family's).
+- School meals (`[policy]`, off) do not reach a household unfed on its claim (the Reserve pays the Home's debt).
+- No 100k run (the cost rule): the 20k shadow shows the shared Block (`camp_parent_11226`, eighteen households
+  under one roof) and the per-household warning; the close's 100k counters read it at size.
+
+**Numbers** (20k island seed 42 x 30, `--scaled --ambient-flats 50`, before = main `794bc6d` plus the
+`ch_warned_old` column, one run each): ChildTaken 69 -> 100 (on a second warning 28 -> 63, no free parent 2 -> 2,
+the street on the new rule 23, `street_take_days` 39 -> 12); daily ch_camp mean 16.7 -> 22.5 (d29 68 -> 96);
+ch_street mean 59.0 -> 37.4 (d29 100 -> 63); warnings standing past 14 days mean 62.6 -> 31.4 (d29 292 -> 140);
+children warned 540 -> 372; fetched back 4 (escapes 1 -> 4); off the street 43; followed a parent 10 -> 26; let
+home 0 -> 0; buy-outs 0 -> 1; starvation deaths 0 -> 0; evictions 1,126 -> 1,154; thefts 1,161 -> 1,031; violence
+deaths 86 -> 79; food bought 1.22M -> 1.19M coins.
+
+**Shadow** (20k seed 42 days 21-27, `target/v1_shadow`; the first cut's in the notes above): the slip and the
+fetch (`camp_warden_14571 d22 09:00` "1 slipped out (Rex Reyes)", `d23 09:00` "1 fetched back (Rex Reyes)"; the
+run's line "Razor Mercer of Work Camp#4835 and the service fetched Rex Reyes (11 y) back to Work Camp#4835 from
+Block#3423: slipped out on d22"); the warning per household in a shared Block (`neglect_parent_13080 d21 00:10`,
+first cut: "Nova Achebe (11 y) went 2 days unfed; Kenji Achebe heard it", then "the pantry holds 3, 0 of it ours (3
+households under the roof)" and 1-3 of his own the rest of the week); the second spell seen (`camp_parent_11848
+d25`, first cut: "the pantry holds 8, 0 of it ours", d26 00:10 "took Kasimir Adeyemi ... unfed 2 days again, inside
+the warning of d13"; the run: "took Maren Novak from Block#738 ...: unfed 3 days again, inside the warning of
+d17"); a street family on a warning taken ("took Delia Adeyemi from the street ...: on the service's warning of
+d12 and on the street (Smoke Adeyemi, Vivienne Ambrose with no Home)", `miserable_9202`'s three) and children off
+the street to a parent ("Gideon Kaneda (11 y) went to live with Casimir Novak at Block#255: off the street").
+
+**Reads wrong / open** (the next pass): 37 of 63 second-warning takes are households whose purse covered the food
+at the warning (13 of 28 before): a hungry worker's Eat errand buys for himself (`grocery_due` is a fed worker's),
+the pocket catches some of it. A warned household that feeds its children stands on the warning the full 30 days
+(`camp_parent_11226`, since d2, 3-7 units of its own all week): Dylan's 30 days, not a hang, but `ch_warned_old`
+counts it. A broken-out 5-year-old sat at his mother's door while she was in the cells (`camp_jobless_25426 d26`)
+until the midnight move. Let home still 0; buy-outs 1.
+
+Under-18: nothing here touches a victim pick, a fight or a punishment, and nothing calls `law`. An unfed day counts
+toward the service's take and never harms a child (`health::child_day` floors below onset, unchanged); the fetch is
+a walk back in; the street take and the moves are the service's protection; the Camp feeds every child. No test
+(doctrine 2). `SAVE_VERSION` 100 (97 on the branch, renumbered at the merge after V3, V2, V4).

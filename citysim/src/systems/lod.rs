@@ -1303,13 +1303,17 @@ fn stat_eat(world: &mut World, id: EntityId) {
         return;
     }
     // The Home pantry feeds a Statistical resident as it feeds a Full one.
-    let pantry =
-        world.comp::<Household>(id).and_then(|h| h.home).filter(|&h| crate::systems::camp::adults_share(world, h) > 0);
+    let pantry = world
+        .comp::<Household>(id)
+        .and_then(|h| h.home)
+        .filter(|&h| crate::systems::camp::adults_share(world, id, h) > 0);
     if let Some(h) = pantry {
         let mut meal = crate::components::MealKind::Real;
         if let Some(b) = world.comp_mut::<Building>(h) {
             meal = crate::systems::health::eat_pantry_unit(b);
         }
+        // Round 6 V1 (OPEN-231): off his household's stake first.
+        crate::systems::shelf::ate(world, id, h, 1.0);
         if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
             crate::needs::eat(n, &cfg);
         }
@@ -1425,7 +1429,9 @@ fn stat_grocery(world: &mut World, id: EntityId) {
     // The pressure pass S6 (OPEN-224): the children's food on top (the
     // learned level is the childless city's), and a jobless parent shops
     // for it by day, as the Full parent's run (`routine::grocery_plan`).
-    let kids = crate::systems::ages::children_food_need(world, home);
+    // Round 6 V1 (OPEN-231): his household's children, residents and claim
+    // in a shared Home (`shelf.rs`), as the Full run reads them.
+    let kids = crate::systems::shelf::kids_need(world, id, home);
     let cap = world.config.buildings.home.stock_cap;
     let need = match world.comp::<Job>(id) {
         Some(job) => {
@@ -1433,7 +1439,7 @@ fn stat_grocery(world: &mut World, id: EntityId) {
                 return;
             }
             let need_one = crate::exec::routine::shift_meals_needed(world, job);
-            let residents = world.residents_of(home).len().max(1) as u32;
+            let residents = crate::systems::shelf::members(world, id, home);
             // The level: the Full city's learned pantry per resident (a run does
             // not always win the evening), else a shift's worth each.
             let per =
@@ -1445,10 +1451,10 @@ fn stat_grocery(world: &mut World, id: EntityId) {
         }
         None => return,
     };
-    let pantry = world.comp::<Building>(home).map_or(0, |b| b.stock_food);
+    let pantry = crate::systems::shelf::held_by(world, id, home);
     // Round 4 T1 (OPEN-231): on the service's warning the pantry alone
     // holds the children's food (the Full run's `routine::run_level`).
-    let carried = if crate::systems::camp::home_on_warning(world, home) {
+    let carried = if crate::systems::camp::household_on_warning(world, id, home) {
         0
     } else {
         world.comp::<crate::components::Inventory>(id).map_or(0, |i| i.food.saturating_sub(i.stolen_food))
@@ -1483,7 +1489,8 @@ fn stat_grocery(world: &mut World, id: EntityId) {
 fn stat_store_food(world: &mut World, id: EntityId) {
     let Some(home) = world.comp::<Household>(id).and_then(|h| h.home) else { return };
     let cap = world.config.buildings.home.stock_cap;
-    let room = world.comp::<Building>(home).map_or(0, |b| cap.saturating_sub(b.stock_food));
+    // Round 6 V1 (OPEN-231): his household's room, and his stake.
+    let room = crate::systems::shelf::room(world, id, home, cap);
     let Some(inv) = world.comp_mut::<crate::components::Inventory>(id) else { return };
     let movable = inv.food.saturating_sub(inv.stolen_food).min(room);
     let synth = inv.synth_held().min(movable);
@@ -1494,6 +1501,7 @@ fn stat_store_food(world: &mut World, id: EntityId) {
         b.synth_food = b.synth_food.min(b.stock_food) + synth;
         b.stock_food += movable;
     }
+    crate::systems::shelf::stored(world, id, movable);
 }
 
 fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Option<usize>) {

@@ -12513,6 +12513,10 @@ pub struct CampCfg {
     /// ... and a warden on duty's chance of catching the child and walking
     /// it back in (never a blow: the under-18 rule).
     pub p_abscond_caught: f32,
+    /// Round 6 V1 (OPEN-231, a report only): the day's `ch_warned_old`
+    /// counts the children out of a Camp on a warning older than this many
+    /// days (a warning standing; the ladder never reads it).
+    pub warn_stale_days: u8,
 }
 
 impl Default for CampCfg {
@@ -12541,6 +12545,7 @@ impl Default for CampCfg {
             p_abscond: 0.004,
             abscond_hours: [9, 17],
             p_abscond_caught: 0.75,
+            warn_stale_days: 14,
         }
     }
 }

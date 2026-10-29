@@ -100,6 +100,7 @@ pub mod robots;
 pub mod search;
 pub mod security;
 pub mod service;
+pub mod shelf;
 pub mod shift;
 pub mod social;
 pub mod stat_policy;

@@ -2059,6 +2059,11 @@ pub struct Child {
     /// on a rest day, in a Camp or on the street.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub school_miss: Option<SchoolMiss>,
+    /// Round 6 V1 (OPEN-242): the Camp this child slipped out of and the
+    /// day (`camp::escape`); the next midnight the service fetches it back
+    /// (`camp::fetch_daily`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slipped: Option<(crate::entity::EntityId, u32)>,
 }
 
 /// Round 4 T2 (OPEN-232): a school-age child kept home on a school day.
@@ -2388,6 +2393,21 @@ pub struct Household {
     /// an eviction. Cleared when housed.
     #[serde(default)]
     pub homeless_since: Option<Tick>,
+    /// Round 6 V1 (OPEN-231): the food units this adult stored in his
+    /// Home's pantry (`StoreFood`), decayed a day by `1 / [camp]
+    /// shelf_days`, his household's children's meals taken off it. In a
+    /// shared Home his household's claim on the pantry is its stake's share
+    /// (`shelf::claim`).
+    #[serde(default, skip_serializing_if = "is_zero_f32_hh")]
+    pub pantry_stake: f32,
+    /// Round 6 V1: his household under this roof (the lowest id of the kin
+    /// living here, `shelf::daily` at midnight); `None`: on his own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kin: Option<EntityId>,
+}
+
+fn is_zero_f32_hh(v: &f32) -> bool {
+    *v == 0.0
 }
 
 impl Household {
@@ -2403,6 +2423,8 @@ impl Household {
             miserable_days: 0,
             squat_ban: None,
             homeless_since: None,
+            pantry_stake: 0.0,
+            kin: None,
         }
     }
 

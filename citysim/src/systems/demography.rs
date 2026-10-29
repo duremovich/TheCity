@@ -44,6 +44,9 @@ fn early(world: &mut World) {
     // Not on the first day (`world.tick > 0` at tick 0, before the stagger).
     if world.day() > 0 {
         crate::prof::timed!("demo::ageing", ageing(world));
+        // Round 6 V1 (OPEN-231): the households under each roof and the
+        // pantry stakes, before the children's meal reads them.
+        crate::prof::timed!("demo::shelf::daily", crate::systems::shelf::daily(world));
         crate::prof::timed!("demo::children", children(world));
         crate::prof::timed!("demo::births", births(world));
         crate::prof::timed!("demo::old_age", old_age(world));
@@ -182,6 +185,45 @@ fn children(world: &mut World) {
     let reserve = world.building_of_kind(BuildingKind::Warehouse);
     for home in homes {
         let kids = children_of(world, home);
+        if kids.is_empty() {
+            continue;
+        }
+        // Round 6 V1 (OPEN-231): a parent's pocket first (`shelf::pocket_to_shelf`).
+        let pocket = crate::systems::shelf::pocket_to_shelf(world, home, &kids);
+        if pocket > 0 {
+            crate::systems::ownership::jobs2_row(world).camp_pocket += pocket;
+        }
+        // Round 6 V1 (OPEN-231): in a shared Home each household's children
+        // eat its claim on the shelf (`shelf::meal_groups`); a household
+        // whose claim is short of their meal goes unfed tonight, whatever
+        // the neighbours' groceries on the shelf. The rest eat together.
+        let (eat, hungry): (Vec<EntityId>, Vec<EntityId>) = match crate::systems::shelf::meal_groups(world, home, &kids)
+        {
+            None => (kids.clone(), Vec::new()),
+            Some(groups) => {
+                let (mut eat, mut hungry, mut ate) = (Vec::new(), Vec::new(), Vec::new());
+                for (k, ks, claim) in groups {
+                    let need = CHILD_FOOD_PER_DAY * ks.len() as f32;
+                    if claim + 1e-3 >= need {
+                        ate.push((k, need));
+                        eat.extend(ks);
+                    } else {
+                        hungry.extend(ks);
+                    }
+                }
+                for (k, need) in ate {
+                    crate::systems::shelf::eaten(world, home, k, need);
+                }
+                (eat, hungry)
+            }
+        };
+        for &k in &hungry {
+            crate::systems::health::child_day(world, k, false, None);
+            if let Some(c) = world.comp_mut::<Child>(k) {
+                c.hunger_days = c.hunger_days.saturating_add(1);
+            }
+        }
+        let kids = eat;
         if kids.is_empty() {
             continue;
         }

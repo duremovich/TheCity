@@ -452,7 +452,12 @@ use crate::world::World;
 /// commute_long_ticks` and `[jobs2]` `cab_wage_share`, `cab_flush_coins` keys and the `Jobs2Cols`
 /// `door_drunk`, `cab_paid_driver`, `cab_paid_other`, `commute_long`, `kin_spouse_far`,
 /// `fares_dropped` columns and `Jobs2State.riding` (serde defaults; written only when set).
-pub const SAVE_VERSION: u8 = 99;
+/// 100 (pressure pass round 6, V1, the household's shelf and children out of care; 97 on the branch,
+/// renumbered at the merge):
+/// `Household.pantry_stake`, `Household.kin`, `Child.slipped` (written while set),
+/// `CampMove::FetchedBack`, the `[camp] warn_stale_days` key and the `Jobs2Cols` `ch_warned_old`,
+/// `camp_fetched`, `camp_off_street`, `camp_take_street`, `camp_pocket` columns (serde defaults).
+pub const SAVE_VERSION: u8 = 100;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

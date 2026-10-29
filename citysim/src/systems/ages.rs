@@ -456,6 +456,12 @@ pub fn at_school_now(world: &World, c: &Child) -> bool {
 /// CHILD_FOOD_PER_DAY × the children at home × child_pantry_days)` (a Camp
 /// or Street child eats elsewhere); 0 off.
 pub fn children_food_need(world: &World, home: EntityId) -> u32 {
+    children_food_need_of(world, home, None)
+}
+
+/// Round 6 V1 (OPEN-231): `children_food_need` over the children of
+/// household `kin` only (`shelf::key`); `None`: every child at home.
+pub fn children_food_need_of(world: &World, home: EntityId, kin: Option<EntityId>) -> u32 {
     if !on(world) {
         return 0;
     }
@@ -463,6 +469,7 @@ pub fn children_food_need(world: &World, home: EntityId) -> u32 {
         .residents_of(home)
         .iter()
         .filter(|&&r| world.comp::<Child>(r).is_some_and(|c| !matches!(c.routine, Routine::Camp | Routine::Street)))
+        .filter(|&&r| kin.is_none_or(|k| crate::systems::shelf::key(world, r) == k))
         .count() as f32;
     (crate::systems::demography::CHILD_FOOD_PER_DAY * kids * world.config.ages.child_pantry_days).ceil() as u32
 }
@@ -1218,9 +1225,17 @@ pub fn snapshot(world: &mut World) {
         return;
     }
     let mut by = [0u32; 5];
+    // Round 6 V1 (OPEN-231): a warning standing past `warn_stale_days`.
+    let day = u32::try_from(world.day()).unwrap_or(u32::MAX);
+    let (stale, window) = (u32::from(world.config.camp.warn_stale_days), u32::from(world.config.camp.warn_repeat_days));
+    let mut warned_old = 0u32;
     for k in world.with::<Child>() {
         if let Some(c) = world.comp::<Child>(k) {
             by[c.routine as usize] += 1;
+            let age = c.warned_day.map(|w| day.saturating_sub(w));
+            if c.routine != crate::components::Routine::Camp && age.is_some_and(|a| a > stale && a <= window) {
+                warned_old += 1;
+            }
         }
     }
     let from = world.config.ages.frail_from_years;
@@ -1244,6 +1259,7 @@ pub fn snapshot(world: &mut World) {
     row.ch_chores = by[2];
     row.ch_street = by[3];
     row.ch_camp = by[4];
+    row.ch_warned_old = warned_old;
     row.elders = elders;
     row.elders_employed = employed;
     row.elders_on_cots = cots;

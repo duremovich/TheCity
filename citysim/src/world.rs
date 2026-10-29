@@ -2804,6 +2804,12 @@ impl World {
             } else {
                 h.homeless_since = None;
             }
+            // Round 6 V1 (OPEN-231): a move leaves his pantry stake behind
+            // (the units stay on the old shelf, common there).
+            if h.home != home {
+                h.pantry_stake = 0.0;
+                h.kin = None;
+            }
             h.home = home;
             self.index_household(id);
         }
