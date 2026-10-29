@@ -983,3 +983,20 @@ phases bumped the same number, renumbered at each merge). Shadow V14 at 100k in 
 aimed (the forger and the fixer's book, the clinic's day, the take's reason, the soup line), no minor harmed in any
 diary; left the ladder's warnings hanging at 100k, the empty street, violence with no law after it, empty Schools and
 clinics beside full ones, gang life without a raid (`OPEN-238` to `OPEN-242`). Cost ≈ $369 (HANDOFF § Cost).
+
+## The twenty-sixth session, continued (2026-10-29): pressure pass round 6, gang turf, Shadow V15
+
+Dylan asked whether gangs need turf, as San Andreas had; the answer was `docs/TURF.md` (cells held by presence, the
+corner, turf that pays, a war that is provoked, answered, held or lost, and ends; no enemy waves), and Dylan deferred
+the order: round 6 before the map re-import. Round 6 from Shadow V14 (`docs/PRESSURE_PASS.md` § Round 6): wave 1 V1
+the ladder at 100k, V2 turf you hold, V3 violence with consequence, V4 the night out and the trip; wave 2 V5 the turf
+war and V6 empty rooms, spawned on a red sha with the known red named in the brief. V1's cause was one shelf
+feeding a 100k Block's ten families (the household's stake on the shelf); V2 replaced U6's pimp trip bound with the
+pitch in the turf (100k pimps 0.2 -> 1.1 a day); V3 found the till picked by lowest owner id and a body nobody could
+find; V4 the Den's own Drink getting its Gamble refused; V6 Clinics dark while the orderlies worked the night. One
+red combination (V1's stakes in a grocery probe; a Sonnet fix round); no test added (1,470), `SAVE_VERSION` 102.
+Shadow V15 at 100k in V14's window: gangs on the street, pimps with a stable, the door and the pit, cabs paid to the
+driver, a body found, no child on the street, no minor harmed in 114 diaries (`harm_blocked` 0); V1 overshot
+(ChildTaken 624 -> 4,103: families with coins let children go unfed till the warning, `OPEN-243`), and the war and
+the case reach the counters more than the diaries. `OPEN-243` to `OPEN-245` opened, `OPEN-239` and `OPEN-242`
+closed. Cost ≈ $316 (HANDOFF § Cost).
