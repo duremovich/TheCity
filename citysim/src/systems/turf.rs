@@ -49,7 +49,7 @@ use crate::components::{
     ActionInstance, Brain, Building, BuildingKind, DistrictId, Gang, GoalKind, Household, Job, Lod, Order, Position,
     Sentence, Shock, TilePos, Wallet,
 };
-use crate::config::TurfCfg;
+use crate::config::{TurfCfg, WarCfg};
 use crate::entity::EntityId;
 use crate::events::EventKind;
 use crate::goap::{ActionKind, LocationKey, Plan};
@@ -116,6 +116,63 @@ pub struct Cell {
     pub landmark: Option<EntityId>,
     /// The window, newest last.
     pub days: VecDeque<Vec<Pres>>,
+    /// V5 (the war): the heat on the cell for its holder, by provoking gang.
+    pub heat: Vec<(EntityId, f32)>,
+    /// V5: the fight scheduled on the corner (an answer, a front, a retake).
+    pub fight: Option<Fight>,
+    /// V5: won in a corner fight (or settled by a truce): held by the gang
+    /// until the tick whatever the presence says.
+    pub won: Option<(EntityId, Tick)>,
+    /// V5: taken from the gang, who may come back for it until the tick.
+    pub lost: Option<(EntityId, Tick)>,
+    /// V5: the law's attention on the cell (fights and deaths there).
+    pub law_heat: f32,
+    /// V5: the law's crackdown on the cell runs to this tick.
+    pub crackdown_until: Tick,
+}
+
+/// V5: why a corner fight is scheduled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FightKind {
+    /// The holder pushes the trespassers off (past `answer_heat`).
+    Answer,
+    /// The two sides of a contested cell.
+    Front,
+    /// The gang that lost the cell comes back for it.
+    Retake,
+}
+
+/// V5: a corner fight scheduled at `due`; `side` stands on the cell (its
+/// holder, or the leader of a contest), `by` comes at it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Fight {
+    pub kind: FightKind,
+    pub side: EntityId,
+    pub by: EntityId,
+    pub opened: Tick,
+    pub due: Tick,
+}
+
+/// V5: a war between two gangs (the lower id first).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct War {
+    pub started: Tick,
+    pub last: Tick,
+    /// The cell it began over.
+    pub cell: u32,
+    pub fights: u32,
+    pub flips: u32,
+    pub deaths: u32,
+    /// Each side's fit adults at the start.
+    pub size: [u16; 2],
+    /// Each side's losses (dead, jailed, gone) since, by tick.
+    pub losses: [VecDeque<Tick>; 2],
+    /// When each side was spent.
+    pub exhausted: [Option<Tick>; 2],
+    /// Each side's members who stood in its corner fights (their later
+    /// deaths, jailings and leavings are the war's losses).
+    pub men: [BTreeSet<EntityId>; 2],
 }
 
 impl Cell {
@@ -148,6 +205,21 @@ pub struct State {
     pub avoided: BTreeMap<EntityId, u64>,
     /// The first pass seeds silently.
     pub init: bool,
+    /// V5: the wars, by `(lower, higher)` gang id.
+    pub wars: BTreeMap<(EntityId, EntityId), War>,
+    /// V5: truces, `(lower, higher)` -> the tick they end.
+    pub truces: BTreeMap<(EntityId, EntityId), Tick>,
+    /// V5: a spent gang lies low until the tick.
+    pub lie_low: BTreeMap<EntityId, Tick>,
+    /// V5: the corner fights scheduled, `(cell, side, by)` (the muster's index).
+    pub open: Vec<(u32, EntityId, EntityId)>,
+    /// V5: member -> the night he sprayed his mark; cell -> the night its
+    /// trespass was told.
+    pub tagged: BTreeMap<EntityId, u64>,
+    pub trespass_told: BTreeMap<u32, u64>,
+    /// V5: a corner fight resolving (its blows provoke nothing).
+    #[serde(skip)]
+    pub fighting: bool,
 }
 
 impl State {
@@ -266,8 +338,17 @@ fn around(world: &World, c: u32) -> String {
     match world.turf.cells.get(&c).and_then(|x| x.landmark) {
         Some(b) => format!("the blocks around {}", world.name_of(b)),
         None => {
+            // V5 (V2's reads-wrong: "the blocks at (588, 732)"): a cell with
+            // no building of its own is named by the nearest one.
             let t = centre(world, c);
-            format!("the blocks at ({}, {})", t.x, t.y)
+            let near = world.building_grid().nearest(t, 0, |b| {
+                let x = world.comp::<Building>(b)?;
+                (!x.demolished && x.kind != BuildingKind::Lot).then(|| (x.door.manhattan(t), b.index))
+            });
+            match near {
+                Some((_, _, b)) => format!("the blocks near {}", world.name_of(b)),
+                None => format!("the blocks at ({}, {})", t.x, t.y),
+            }
         }
     }
 }
@@ -319,25 +400,35 @@ pub fn corner_hold(world: &World, id: EntityId) -> Option<TilePos> {
     if b.lod == Lod::Statistical || b.cuffed_by.is_some() {
         return None;
     }
-    let tod = world.tick_of_day();
-    if !corner_hours(c, tod) {
-        return None;
-    }
     if world.comp::<Gang>(g).is_none_or(|x| x.order == Order::LieLow) {
         return None;
     }
-    // The under-18 rule: a child never stands a gang's corner.
+    // The under-18 rule: a child never stands a gang's corner, nor is he
+    // mustered to one (V5).
     if world.has::<Sentence>(id) || crate::systems::ages::is_protected(world, id) {
         return None;
     }
+    let tod = world.tick_of_day();
     if world.comp::<Job>(id).is_some_and(|j| j.on_shift(tod)) {
+        return None;
+    }
+    // V5: a muster outranks the evening's corner (any hour, no cap).
+    if let Some(t) = muster_corner(world, id) {
+        return Some(t);
+    }
+    if !corner_hours(c, tod) {
         return None;
     }
     if world.turf.corner_ticks.get(&id).is_some_and(|&t| t >= c.corner_ticks_day) {
         return None;
     }
     let k = corner_cell(world, id)?;
-    world.turf.cells.get(&k)?.corner
+    let x = world.turf.cells.get(&k)?;
+    // V5: nobody holds a corner the law cracks down on.
+    if x.crackdown_until > world.tick {
+        return None;
+    }
+    x.corner
 }
 
 /// GangWork's scripted plan for holding the corner: `GoTo(Spot) -> HangOut`
@@ -399,6 +490,10 @@ pub fn hourly(world: &mut World) {
     let mut corner_hours_n = 0u32;
     // (cell, gang) -> the members on its corner this hour.
     let mut on: BTreeMap<(u32, EntityId), u16> = BTreeMap::new();
+    // V5: (cell, gang) -> its first body about the cell this hour (the eyes
+    // a provocation needs); a member on another gang's held corner.
+    let mut eyes: BTreeMap<(u32, EntityId), EntityId> = BTreeMap::new();
+    let mut trespass: Vec<(u32, EntityId, EntityId)> = Vec::new();
     for g in world.gangs() {
         let members = world.comp::<Gang>(g).map(|x| x.members.clone()).unwrap_or_default();
         for m in members {
@@ -430,6 +525,15 @@ pub fn hourly(world: &mut World) {
             let f = world.turf.faces.entry(k).or_default();
             if let Err(i) = f.binary_search(&(g, m)) {
                 f.insert(i, (g, m));
+            }
+            eyes.entry((k, g)).or_insert(m);
+            // V5: another gang's held corner in the corner hours (the evening
+            // a gang stands its corner; a walk past it by day is no trespass).
+            if on_corner
+                && corner_hours(&c, world.tick_of_day())
+                && world.turf.cells.get(&k).and_then(|x| x.status.holder()).is_some_and(|h| h != g)
+            {
+                trespass.push((k, g, m));
             }
             if on_corner {
                 corner_hours_n += 1;
@@ -471,6 +575,7 @@ pub fn hourly(world: &mut World) {
         let text = format!("{} holds {} corner {by} ({with})", world.name_of(m), poss(&gname(world, g)));
         world.push_event(EventKind::Turf, &[m, g], text);
     }
+    war_hourly(world, &trespass, &eyes);
 }
 
 /// The cell index of every standing building, by door (the day's pass).
@@ -647,6 +752,14 @@ pub fn daily(world: &mut World) {
         ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
         let old = world.turf.cells.get(&k).map_or(Status::Open, |x| x.status);
         let new = judge(&c, old, &ranked);
+        // V5: a cell won in a corner fight (or settled by a truce) holds.
+        let new = world
+            .turf
+            .cells
+            .get(&k)
+            .and_then(|x| x.won)
+            .filter(|&(w, until)| until > now && world.has::<Gang>(w))
+            .map_or(new, |(w, _)| Status::Held(w));
         if new != old {
             changes.push((k, old, new));
         }
@@ -678,6 +791,9 @@ pub fn daily(world: &mut World) {
     world.turf.init = true;
     reindex(world);
     family_moves(world, &c, &index);
+    // V5: the war's day (the heat cooled, the off-screen rolls, exhaustion,
+    // truces, the law's crackdowns).
+    war_daily(world);
     let held_n: u32 = world.turf.held.values().map(|v| v.len() as u32).sum();
     let contested_n = world.turf.cells.values().filter(|x| matches!(x.status, Status::Contested(..))).count() as u32;
     let gangs_n = world.turf.held.values().filter(|v| !v.is_empty()).count() as u32;
@@ -1145,5 +1261,964 @@ fn family_moves(world: &mut World, c: &TurfCfg, index: &BTreeMap<u32, Vec<Entity
             moved += 1;
             crate::systems::ownership::jobs2_row(world).turf_family_moves += 1;
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// V5: the war (TURF § 3)
+// ---------------------------------------------------------------------------
+//
+// **Provocation** ([`provoke_at`], the hourly corner in [`war_hourly`], the
+// off-screen night in [`war_daily`]): another gang's act on a held cell (a
+// body on its corner, his mark sprayed by it, a deal, a shakedown, a beating
+// of a holder's member there) raises the cell's heat for the holder, seen by
+// a holder's adult body there (a Statistical act is seen off screen). Past
+// `answer_heat` the holder **answers** ([`open_fight`]): the leader sends the
+// cell's and the neighbouring cells' members to the corner (the muster:
+// [`muster_corner`] in `corner_hold`, local, so reach is no gate) and the
+// fight comes `answer_window_hours` later ([`resolve`]): the bodies within
+// `muster_reach_tiles` of the corner and, off screen, the Statistical members
+// living there stand (placed at the corner; promoted to Coarse on screen,
+// the raid window's path), each side scaled by its presence about the cell,
+// and `raid::fight_out` pairs them (each blow an Assault or a Murder,
+// witnessed as any). **Hold or flip**: the side left standing holds the cell
+// (`set_status`, the lock `hold_lock_days`); the side that lost it may come
+// back within `retake_days` (**the counter-attack**: a daily roll, the
+// leader's line). A contested cell is fought over (**the front**, a daily
+// roll). A raid won or a Hideout sacked moves the cells about the Hideout
+// ([`raid_moves`]). **Peace**: a side whose losses in the war (dead, jailed,
+// gone) pass `exhaust_share` of its strength lies low (`faction::rescore`
+// pins LieLow, [`lies_low`]); two spent sides' leaders strike a **truce**
+// (the line held `truce_days`); a cell fought over past `crackdown_heat` is
+// **cracked down on** by the law (no corner held there, the district's beat
+// walks its Homes, [`crackdown_beat`]).
+//
+// The under-18 rule (CLAUDE.md): a protected member provokes nothing, is
+// never mustered (`corner_hold` returns before the muster), never fights
+// ([`fighters`]; `raid::fight_out` and its crossfire gate again), never
+// counts as a loss; a family with children moves out of a contested cell.
+
+/// `[turf.war]` (absent: no war).
+pub fn war_cfg(world: &World) -> Option<&WarCfg> {
+    cfg(world)?.war.as_ref()
+}
+
+fn pair(a: EntityId, b: EntityId) -> (EntityId, EntityId) {
+    if a <= b {
+        (a, b)
+    } else {
+        (b, a)
+    }
+}
+
+fn days(n: u16) -> Tick {
+    Tick::from(n) * crate::time::TICKS_PER_DAY
+}
+
+fn hours(n: u16) -> Tick {
+    Tick::from(n) * TICKS_PER_HOUR
+}
+
+/// `a` and `b` keep a truce.
+pub fn in_truce(world: &World, a: EntityId, b: EntityId) -> bool {
+    world.turf.truces.get(&pair(a, b)).is_some_and(|&t| t > world.tick)
+}
+
+/// A spent gang lies low (`faction::rescore` pins the order).
+pub fn lies_low(world: &World, g: EntityId) -> bool {
+    world.turf.lie_low.get(&g).is_some_and(|&t| t > world.tick)
+}
+
+fn cracked(world: &World, k: u32) -> bool {
+    world.turf.cells.get(&k).is_some_and(|x| x.crackdown_until > world.tick)
+}
+
+fn night_of(world: &World) -> u64 {
+    world.tick.saturating_sub(12 * TICKS_PER_HOUR) / crate::time::TICKS_PER_DAY
+}
+
+/// A keyed draw in [0, 1) (no stream touched).
+fn draw(world: &World, purpose: u64, a: u64, b: u64) -> f32 {
+    use rand::Rng;
+    let x = purpose.rotate_left(56) ^ a.rotate_left(17) ^ b.rotate_left(37) ^ world.day();
+    world.rng.keyed(crate::rng::splitmix64(x) >> 4).random()
+}
+
+/// The corner tile of cell `k` (its centre without one).
+fn corner_tile(world: &World, k: u32) -> TilePos {
+    world.turf.cells.get(&k).and_then(|x| x.corner).unwrap_or_else(|| centre(world, k))
+}
+
+/// "the corner by Bar#12" (else "the corner of the blocks near ...").
+fn corner_name(world: &World, k: u32) -> String {
+    match world.turf.cells.get(&k).and_then(|x| x.landmark) {
+        Some(b) => format!("the corner by {}", world.name_of(b)),
+        None => format!("the corner of {}", around(world, k)),
+    }
+}
+
+fn leader_of(world: &World, g: EntityId) -> Option<EntityId> {
+    world.comp::<Gang>(g)?.leader.filter(|&l| crate::systems::law::living(world, l))
+}
+
+/// "Vic Stone, The Rust Saints' leader," or "The Rust Saints".
+fn who_leads(world: &World, g: EntityId) -> String {
+    match leader_of(world, g) {
+        Some(l) => format!("{}, {} leader,", world.name_of(l), poss(&gname(world, g))),
+        None => gname(world, g),
+    }
+}
+
+fn order_of(world: &World, g: EntityId) -> Option<Order> {
+    world.comp::<Gang>(g).map(|x| x.order)
+}
+
+/// An adult member who can stand in a fight (living, free, not down).
+fn can_fight(world: &World, m: EntityId) -> bool {
+    crate::systems::law::living(world, m)
+        && world.has::<Brain>(m)
+        && !world.has::<Sentence>(m)
+        // The under-18 rule: never a combatant.
+        && !crate::systems::ages::is_protected(world, m)
+        && !world.wounded.contains_key(&m)
+        && world.comp::<Brain>(m).is_none_or(|b| b.cuffed_by.is_none())
+}
+
+/// `g`'s fit adults (a war side's strength at its start).
+fn fit(world: &World, g: EntityId) -> u16 {
+    world.comp::<Gang>(g).map_or(0, |x| x.members.iter().filter(|&&m| can_fight(world, m)).count() as u16)
+}
+
+/// `g`'s members living in cell `k` or within `muster_cells` of it.
+fn muster_pool(world: &World, w: &WarCfg, k: u32, g: EntityId) -> Vec<EntityId> {
+    let Some(x) = world.comp::<Gang>(g) else { return Vec::new() };
+    x.members
+        .iter()
+        .copied()
+        .filter(|&m| {
+            can_fight(world, m) && home_cell(world, m).is_some_and(|h| cell_dist(world, h, k) <= w.muster_cells)
+        })
+        .collect()
+}
+
+/// The corner `id` is mustered to: a fight his gang stands in, due within
+/// `answer_window_hours`, on a cell within `muster_cells` of his Home's.
+pub fn muster_corner(world: &World, id: EntityId) -> Option<TilePos> {
+    if world.turf.open.is_empty() {
+        return None;
+    }
+    let w = war_cfg(world)?;
+    let g = world.gang_of(id)?;
+    let lead = hours(w.answer_window_hours);
+    let home = home_cell(world, id)?;
+    world.turf.open.iter().filter(|&&(_, a, b)| a == g || b == g).find_map(|&(k, _, _)| {
+        let f = world.turf.cells.get(&k)?.fight?;
+        (f.due <= world.tick + lead && cell_dist(world, home, k) <= w.muster_cells).then(|| corner_tile(world, k))
+    })
+}
+
+/// A provocation's kind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Provoke {
+    Corner,
+    Tag,
+    Deal,
+    Shakedown,
+    Beating,
+    /// An off-screen night of trespass (the daily roll).
+    Night,
+}
+
+fn heat_of(w: &WarCfg, p: Provoke) -> f32 {
+    match p {
+        Provoke::Corner => w.heat_corner_hour,
+        Provoke::Tag => w.heat_tag,
+        Provoke::Deal => w.heat_deal,
+        Provoke::Shakedown => w.heat_shakedown,
+        Provoke::Beating => w.heat_beating,
+        Provoke::Night => w.heat_stat,
+    }
+}
+
+/// `gang`'s first adult body about cell `k` (the eyes a provocation needs).
+fn eyes_in(world: &World, gang: EntityId, k: u32) -> Option<EntityId> {
+    world.comp::<Gang>(gang)?.members.iter().copied().find(|&m| {
+        world.comp::<Brain>(m).is_some_and(|b| b.lod != Lod::Statistical)
+            && !world.has::<Sentence>(m)
+            && !crate::systems::ages::is_protected(world, m)
+            && crate::systems::law::living(world, m)
+            && world.comp::<Position>(m).is_some_and(|p| cell_of(world, p.tile) == Some(k))
+    })
+}
+
+/// The hooks' provocation (a deal, a shakedown): `actor`'s act at tile `t`
+/// heats the cell for its holder when a holder's adult body there sees it (a
+/// Statistical actor's act is seen off screen). Nobody under 18 provokes.
+pub fn provoke_at(world: &mut World, actor: EntityId, t: TilePos, p: Provoke) {
+    if world.turf.fighting {
+        return;
+    }
+    let Some(w) = war_cfg(world) else { return };
+    let heat = heat_of(w, p);
+    let Some(k) = cell_of(world, t) else { return };
+    let Some(h) = world.turf.cells.get(&k).and_then(|x| x.status.holder()) else { return };
+    let Some(y) = world.gang_of(actor) else { return };
+    if y == h || crate::systems::ages::is_protected(world, actor) {
+        return;
+    }
+    let stat = world.comp::<Brain>(actor).is_some_and(|b| b.lod == Lod::Statistical);
+    let seer = eyes_in(world, h, k);
+    if seer.is_none() && !stat {
+        return;
+    }
+    provoke(world, k, h, y, heat, Some(actor), seer, p);
+}
+
+/// From `law::resolve_fight_mods`: `winner` beat `loser`, a member of the
+/// gang holding the cell where `loser` stands (not in a corner fight).
+pub fn beaten(world: &mut World, winner: EntityId, loser: EntityId) {
+    if world.turf.fighting || war_cfg(world).is_none() {
+        return;
+    }
+    let Some(t) = world.comp::<Position>(loser).map(|p| p.tile) else { return };
+    let (Some(gl), Some(gw)) = (world.gang_of(loser), world.gang_of(winner)) else { return };
+    if gl == gw || holder_at(world, t) != Some(gl) {
+        return;
+    }
+    provoke_at(world, winner, t, Provoke::Beating);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn provoke(
+    world: &mut World,
+    k: u32,
+    h: EntityId,
+    y: EntityId,
+    heat: f32,
+    actor: Option<EntityId>,
+    seer: Option<EntityId>,
+    p: Provoke,
+) {
+    let Some(w) = war_cfg(world).cloned() else { return };
+    if heat <= 0.0 || in_truce(world, h, y) || cracked(world, k) || !world.has::<Gang>(y) {
+        return;
+    }
+    // A gang lying low provokes nobody (its members' walks are not a push).
+    if lies_low(world, y) || order_of(world, y) == Some(Order::LieLow) {
+        return;
+    }
+    let now = world.tick;
+    let Some(cell) = world.turf.cells.get_mut(&k) else { return };
+    if cell.status != Status::Held(h) {
+        return;
+    }
+    let v = match cell.heat.iter_mut().find(|e| e.0 == y) {
+        Some(e) => {
+            e.1 += heat;
+            e.1
+        }
+        None => {
+            cell.heat.push((y, heat));
+            heat
+        }
+    };
+    let open = cell.fight.is_some();
+    crate::systems::ownership::jobs2_row(world).turf_provocations += 1;
+    // Told once a cell a night, when a Full body did it or saw it.
+    let night = night_of(world);
+    let full = |id: Option<EntityId>| id.and_then(|x| world.comp::<Brain>(x)).is_some_and(|b| b.lod == Lod::Full);
+    let tell = p != Provoke::Night && (full(actor) || full(seer)) && world.turf.trespass_told.get(&k) != Some(&night);
+    if let Some(a) = actor.filter(|_| tell) {
+        world.turf.trespass_told.insert(k, night);
+        let (hn, yn, at) = (gname(world, h), gname(world, y), around(world, k));
+        let by = match world.turf.cells.get(&k).and_then(|x| x.landmark) {
+            Some(b) => format!("by {}", world.name_of(b)),
+            None => format!("of {at}"),
+        };
+        let phrase = match p {
+            Provoke::Corner => format!("hanging on {} corner {by}", poss(&hn)),
+            Provoke::Tag => format!("spraying {} mark on the wall at {} corner {by}", poss(&yn), poss(&hn)),
+            Provoke::Deal => format!("dealing on {} blocks ({at})", poss(&hn)),
+            Provoke::Shakedown => format!("shaking down a door on {} blocks ({at})", poss(&hn)),
+            Provoke::Beating | Provoke::Night => format!("beating one of {hn} on their own blocks ({at})"),
+        };
+        let an = world.name_of(a);
+        let text = match seer {
+            Some(s) => format!("{} of {hn} saw {an} of {yn} {phrase}", world.name_of(s)),
+            None => format!("{an} of {yn} was seen {phrase}"),
+        };
+        let mut actors = vec![a];
+        actors.extend(seer);
+        actors.extend([h, y]);
+        world.push_event(EventKind::Turf, &actors, text);
+    }
+    // A holder lying low does not answer (the heat stands).
+    if v >= w.answer_heat && !open && !lies_low(world, h) {
+        let due = if p == Provoke::Night { evening_due(world, &w) } else { now + hours(w.answer_window_hours) };
+        open_fight(world, k, FightKind::Answer, h, y, due);
+    }
+}
+
+/// Today's evening fight hour: `answer_window_hours` past `corner_from`.
+fn evening_due(world: &World, w: &WarCfg) -> Tick {
+    let from = cfg(world).map_or(1080, |c| c.corner_from);
+    let start = world.tick - Tick::from(world.tick_of_day());
+    let due = start + Tick::from(from) + hours(w.answer_window_hours);
+    if due <= world.tick {
+        world.tick + hours(w.answer_window_hours)
+    } else {
+        due
+    }
+}
+
+/// A corner fight scheduled on cell `k` (`side` on it, `by` at it): the
+/// moving side's leader decides it (his line), its people muster.
+fn open_fight(world: &mut World, k: u32, kind: FightKind, side: EntityId, by: EntityId, due: Tick) {
+    let Some(w) = war_cfg(world).cloned() else { return };
+    let now = world.tick;
+    let Some(cell) = world.turf.cells.get_mut(&k) else { return };
+    if cell.fight.is_some() {
+        return;
+    }
+    cell.fight = Some(Fight { kind, side, by, opened: now, due });
+    cell.heat.retain(|e| e.0 != by);
+    world.turf.open.push((k, side, by));
+    crate::systems::ownership::jobs2_row(world).turf_answers += 1;
+    let (mover, other) = match kind {
+        FightKind::Answer => (side, by),
+        FightKind::Front | FightKind::Retake => (by, side),
+    };
+    let n = muster_pool(world, &w, k, mover).len();
+    let at = corner_name(world, k);
+    let (lead, on) = (who_leads(world, mover), gname(world, other));
+    let theirs = match n {
+        0 => "nobody of theirs".to_string(),
+        1 => "the one of theirs".to_string(),
+        n => format!("{n} of theirs"),
+    };
+    let when = if due.saturating_sub(now) > 6 * TICKS_PER_HOUR { " tonight" } else { "" };
+    let text = match kind {
+        _ if n == 0 => format!("{} had nobody about the blocks to send to {at}: {on} are on it", gname(world, mover)),
+        FightKind::Answer => format!("{lead} called {theirs} about the blocks to {at}{when}: {on} were on their turf"),
+        FightKind::Front => format!("{lead} called {theirs} about the blocks to {at}{when}: {on} claim the blocks too"),
+        FightKind::Retake => {
+            format!("{lead} sent {theirs} about the blocks back to {at}{when}: {on} took the blocks from them")
+        }
+    };
+    if kind == FightKind::Answer {
+        crate::systems::gang::push_shock(world, side, Shock::Trespass { by: Some(by) });
+    }
+    let mut actors: Vec<EntityId> = leader_of(world, mover).into_iter().collect();
+    actors.extend([mover, other]);
+    actors.extend(world.turf.cells.get(&k).and_then(|x| x.landmark));
+    world.push_event(EventKind::Turf, &actors, text);
+}
+
+/// `g`'s presence over the window in cell `k` and the cells around it.
+fn local_presence(world: &World, w: &WarCfg, k: u32, g: EntityId) -> f32 {
+    let mut cells = vec![k];
+    if w.muster_cells > 0 {
+        cells.extend(neighbours(world, k));
+    }
+    cells
+        .iter()
+        .filter_map(|c| world.turf.cells.get(c))
+        .flat_map(|x| x.days.iter().flat_map(|d| d.iter().filter(|p| p.gang == g).map(|p| p.p)))
+        .sum()
+}
+
+/// A side's fighters at corner `t` of cell `k`: its adult bodies within
+/// `muster_reach_tiles` of the corner, then (off screen) its Statistical
+/// members living about the cell, nearest first, to `n` (at most
+/// `side_max`). The Statistical ones are stood at the corner (promoted to
+/// Coarse on screen). Nobody under 18 (`can_fight`).
+fn fighters(world: &mut World, w: &WarCfg, k: u32, g: EntityId, t: TilePos, n: usize) -> Vec<EntityId> {
+    let members = world.comp::<Gang>(g).map(|x| x.members.clone()).unwrap_or_default();
+    let mut bodies: Vec<EntityId> = Vec::new();
+    let mut far: Vec<(u32, EntityId)> = Vec::new();
+    for m in members {
+        if !can_fight(world, m) {
+            continue;
+        }
+        let stat = world.comp::<Brain>(m).is_some_and(|b| b.lod == Lod::Statistical);
+        if !stat {
+            if world.comp::<Position>(m).is_some_and(|p| p.tile.manhattan(t) <= w.muster_reach_tiles) {
+                bodies.push(m);
+            }
+        } else if home_cell(world, m).is_some_and(|h| cell_dist(world, h, k) <= w.muster_cells) {
+            far.push((home_door(world, m).map_or(u32::MAX, |d| d.manhattan(t)), m));
+        }
+    }
+    crate::systems::raid::by_strength(world, &mut bodies);
+    bodies.truncate(w.side_max);
+    far.sort_unstable();
+    let want = n.min(w.side_max);
+    let tick = world.tick;
+    let shown = crate::systems::lod::on_screen(world, t);
+    for (_, m) in far {
+        if bodies.len() >= want {
+            break;
+        }
+        if shown {
+            crate::systems::lod::set_lod(world, m, Lod::Coarse);
+        }
+        world.remove_from_building(m);
+        if let Some(p) = world.comp_mut::<Position>(m) {
+            p.tile = t;
+            p.building = None;
+            p.entered = tick;
+        }
+        bodies.push(m);
+    }
+    bodies
+}
+
+/// Names, up to three ("A, B and 2 more").
+fn names(world: &World, v: &[EntityId]) -> String {
+    let shown: Vec<String> = v.iter().take(3).map(|&m| world.name_of(m)).collect();
+    let more = v.len().saturating_sub(shown.len());
+    match (shown.len(), more) {
+        (0, _) => String::new(),
+        (1, 0) => shown[0].clone(),
+        (_, 0) => format!("{} and {}", shown[..shown.len() - 1].join(", "), shown[shown.len() - 1]),
+        _ => format!("{} and {more} more", shown.join(", ")),
+    }
+}
+
+/// The hour (from [`hourly`]): the corner's trespassers heat the cells
+/// their holders' bodies watch; the corner fights due are fought.
+fn war_hourly(world: &mut World, trespass: &[(u32, EntityId, EntityId)], eyes: &BTreeMap<(u32, EntityId), EntityId>) {
+    let Some(w) = war_cfg(world).cloned() else { return };
+    let night = night_of(world);
+    for &(k, y, m) in trespass {
+        let Some(h) = world.turf.cells.get(&k).and_then(|x| x.status.holder()) else { continue };
+        let Some(&seer) = eyes.get(&(k, h)) else { continue };
+        // His mark by the corner, once a night (told first), then the hour.
+        if world.turf.tagged.get(&m) != Some(&night) {
+            world.turf.tagged.insert(m, night);
+            provoke(world, k, h, y, w.heat_tag, Some(m), Some(seer), Provoke::Tag);
+        }
+        provoke(world, k, h, y, w.heat_corner_hour, Some(m), Some(seer), Provoke::Corner);
+    }
+    if world.turf.open.is_empty() {
+        return;
+    }
+    let now = world.tick;
+    let due: Vec<u32> = world
+        .turf
+        .open
+        .iter()
+        .filter(|&&(k, _, _)| world.turf.cells.get(&k).and_then(|x| x.fight).is_none_or(|f| f.due <= now))
+        .map(|x| x.0)
+        .collect();
+    for k in due {
+        resolve(world, k);
+    }
+}
+
+/// The war between `a` and `b` (started over cell `k` when new: told).
+fn war_entry(world: &mut World, a: EntityId, b: EntityId, k: u32) {
+    let key = pair(a, b);
+    let now = world.tick;
+    if let Some(x) = world.turf.wars.get_mut(&key) {
+        x.last = now;
+        return;
+    }
+    let size = [fit(world, key.0), fit(world, key.1)];
+    world.turf.wars.insert(key, War { started: now, last: now, cell: k, size, ..Default::default() });
+    crate::systems::ownership::jobs2_row(world).turf_wars += 1;
+    let side = |world: &World, g: EntityId| {
+        let n = if key.0 == g { size[0] } else { size[1] };
+        match leader_of(world, g) {
+            Some(l) => format!("{} leads {n} of {}", world.name_of(l), gname(world, g)),
+            None => format!("{n} of {}", gname(world, g)),
+        }
+    };
+    let text = format!(
+        "{} and {} are at war over {} ({}; {})",
+        gname(world, a),
+        gname(world, b),
+        around(world, k),
+        side(world, a),
+        side(world, b)
+    );
+    let mut actors = vec![a, b];
+    actors.extend(leader_of(world, a));
+    actors.extend(leader_of(world, b));
+    actors.extend(world.turf.cells.get(&k).and_then(|x| x.landmark));
+    world.push_event(EventKind::Turf, &actors, text);
+}
+
+/// The fight scheduled on cell `k`, fought: the hold or the flip, the war's
+/// tally, the law's attention.
+fn resolve(world: &mut World, k: u32) {
+    world.turf.open.retain(|x| x.0 != k);
+    let Some(f) = world.turf.cells.get_mut(&k).and_then(|x| x.fight.take()) else { return };
+    let Some(w) = war_cfg(world).cloned() else { return };
+    let (side, by) = (f.side, f.by);
+    if !world.has::<Gang>(side) || !world.has::<Gang>(by) || in_truce(world, side, by) || cracked(world, k) {
+        return;
+    }
+    let status = world.turf.cells.get(&k).map_or(Status::Open, |x| x.status);
+    if !status.involves(side) {
+        return;
+    }
+    let now = world.tick;
+    let t = corner_tile(world, k);
+    let at = corner_name(world, k);
+    // The aggressor: the holder pushing back an answer's trespassers, else
+    // the side coming at the cell.
+    let (ag, dg) = if f.kind == FightKind::Answer { (side, by) } else { (by, side) };
+    let (pa, pd) = (local_presence(world, &w, k, ag), local_presence(world, &w, k, dg));
+    let top = pa.max(pd).max(1e-3);
+    let n = |p: f32| ((w.side_max as f32 * p / top).round() as usize).clamp(1, w.side_max.max(1));
+    let (na, nd) = (n(pa), n(pd));
+    let mut agg = fighters(world, &w, k, ag, t, na);
+    let mut def = fighters(world, &w, k, dg, t, nd);
+    let landmark = world.turf.cells.get(&k).and_then(|x| x.landmark);
+    if agg.is_empty() || def.is_empty() {
+        if agg.is_empty() && def.is_empty() {
+            return;
+        }
+        crate::systems::ownership::jobs2_row(world).turf_unopposed += 1;
+        let (here, here_g, gone_g) = if agg.is_empty() { (def, dg, ag) } else { (agg, ag, dg) };
+        let mut actors = vec![here_g, gone_g];
+        actors.extend(here.iter().copied());
+        actors.extend(landmark);
+        let text = format!(
+            "{} came to {at} ({}): nobody of {} there",
+            gname(world, here_g),
+            names(world, &here),
+            poss(&gname(world, gone_g))
+        );
+        world.push_event(EventKind::Turf, &actors, text);
+        // An answer nobody of the holder's came to: the trespassers stand on
+        // it (contested); a cell nobody defends is walked onto.
+        let now_status = world.turf.cells.get(&k).map_or(Status::Open, |x| x.status);
+        let next = match f.kind {
+            FightKind::Answer if here_g == by => Some(Status::Contested(side, by)),
+            FightKind::Answer => None,
+            _ if here_g == by => Some(Status::Held(by)),
+            _ => None,
+        };
+        if let Some(next) = next.filter(|&x| x != now_status) {
+            take(world, &w, k, now_status, next, here_g, gone_g);
+        }
+        if let Some(x) = world.turf.cells.get_mut(&k) {
+            x.heat.clear();
+        }
+        return;
+    }
+    world.turf.fighting = true;
+    crate::systems::raid::by_strength(world, &mut agg);
+    crate::systems::raid::by_strength(world, &mut def);
+    let (agg0, def0) = (agg.clone(), def.clone());
+    let _tally = crate::systems::raid::fight_out(world, &mut agg, &mut def, t, &at, 1.0, None);
+    world.turf.fighting = false;
+    let (winner, loser) = if def.is_empty() { (ag, dg) } else { (dg, ag) };
+    let dead: Vec<EntityId> =
+        agg0.iter().chain(def0.iter()).copied().filter(|&m| !crate::systems::law::living(world, m)).collect();
+    {
+        let row = crate::systems::ownership::jobs2_row(world);
+        row.turf_fights += 1;
+        row.turf_war_deaths += dead.len() as u32;
+    }
+    war_entry(world, ag, dg, k);
+    // The war's men, and its losses: each side's fallen in this fight
+    // (beaten or dead), then its men's later deaths, jailings, leavings.
+    let key = pair(ag, dg);
+    if let Some(x) = world.turf.wars.get_mut(&key) {
+        x.fights += 1;
+        x.deaths += dead.len() as u32;
+        for (g, before, after) in [(ag, &agg0, &agg), (dg, &def0, &def)] {
+            let i = usize::from(key.0 != g);
+            for &m in before {
+                if after.contains(&m) {
+                    x.men[i].insert(m);
+                } else {
+                    x.men[i].remove(&m);
+                    x.losses[i].push_back(now);
+                }
+            }
+        }
+    }
+    let old = world.turf.cells.get(&k).map_or(Status::Open, |x| x.status);
+    let retaken = world.turf.cells.get(&k).and_then(|x| x.lost).is_some_and(|(g, u)| g == winner && u > now);
+    let flips = old != Status::Held(winner);
+    let (wn, ln) = (gname(world, winner), gname(world, loser));
+    let tail = if dead.is_empty() { String::new() } else { format!("; {} dead", names(world, &dead)) };
+    let count = format!("{} against {}", agg0.len(), def0.len());
+    let text = match (f.kind, winner == ag) {
+        (FightKind::Answer, true) => format!("{wn} pushed {ln} off {at}, {count}{tail}"),
+        (FightKind::Answer, false) => format!("{wn} beat {ln} back on {at}, {count}, and hold it now{tail}"),
+        (FightKind::Front, true) => format!("{wn} took {at} from {ln}, {count}{tail}"),
+        (FightKind::Front, false) => format!("{wn} drove {ln} off {at}, {count}{tail}"),
+        (FightKind::Retake, true) => format!("{wn} came back for {at} and took it back from {ln}, {count}{tail}"),
+        (FightKind::Retake, false) => format!("{wn} held {at} when {ln} came back for it, {count}{tail}"),
+    };
+    let mut actors = vec![winner, loser];
+    actors.extend(agg0.iter().chain(def0.iter()).copied());
+    actors.extend(landmark);
+    world.push_event(EventKind::Turf, &actors, text);
+    if flips {
+        take(world, &w, k, old, Status::Held(winner), winner, loser);
+        if retaken {
+            crate::systems::ownership::jobs2_row(world).turf_retaken += 1;
+        }
+    }
+    if let Some(x) = world.turf.cells.get_mut(&k) {
+        x.won = Some((winner, now + days(w.hold_lock_days)));
+        x.heat.clear();
+        x.law_heat += 1.0 + dead.len() as f32 * w.crackdown_death_w;
+    }
+    if world.turf.cells.get(&k).is_some_and(|x| x.law_heat >= w.crackdown_heat) {
+        crackdown(world, &w, k, ag, dg);
+    }
+}
+
+/// Cell `k` passes from `old` to `new` in the war (`set_status`, told): the
+/// winner's lock, the loser's window to come back, the war's flip.
+fn take(world: &mut World, w: &WarCfg, k: u32, old: Status, new: Status, winner: EntityId, loser: EntityId) {
+    let now = world.tick;
+    set_status(world, k, old, new, true, now);
+    if let Some(x) = world.turf.cells.get_mut(&k) {
+        if new == Status::Held(winner) {
+            x.won = Some((winner, now + days(w.hold_lock_days)));
+            x.lost = old.involves(loser).then_some((loser, now + days(w.retake_days)));
+        }
+    }
+    if new.holder().is_some() {
+        crate::systems::ownership::jobs2_row(world).turf_flips += 1;
+        if let Some(x) = world.turf.wars.get_mut(&pair(winner, loser)) {
+            x.flips += 1;
+        }
+    }
+    reindex(world);
+}
+
+/// The law's crackdown on cell `k` (its fights past `crackdown_heat`): no
+/// corner held there for `crackdown_days`, the fights off, the district's
+/// beat walks its Homes ([`crackdown_beat`]).
+fn crackdown(world: &mut World, w: &WarCfg, k: u32, a: EntityId, b: EntityId) {
+    if world.law().is_none() {
+        return;
+    }
+    let now = world.tick;
+    if let Some(x) = world.turf.cells.get_mut(&k) {
+        x.crackdown_until = now + days(w.crackdown_days);
+        x.law_heat = 0.0;
+        x.heat.clear();
+        x.fight = None;
+    }
+    world.turf.open.retain(|x| x.0 != k);
+    crate::systems::ownership::jobs2_row(world).turf_crackdowns += 1;
+    let text = format!(
+        "The law cracked down on {}: {} and {} kept off the corner, the beat walks its Homes for {} days",
+        around(world, k),
+        gname(world, a),
+        gname(world, b),
+        w.crackdown_days
+    );
+    let mut actors = vec![a, b];
+    actors.extend(leader_of(world, a));
+    actors.extend(leader_of(world, b));
+    actors.extend(world.turf.cells.get(&k).and_then(|x| x.landmark));
+    world.push_event(EventKind::Turf, &actors, text);
+}
+
+/// `law::district_route`: a cell of district `d` the law cracks down on
+/// gives the beat its Homes (the nearest the corner, up to five).
+pub fn crackdown_beat(world: &World, d: DistrictId) -> Option<Vec<EntityId>> {
+    if !on(world) {
+        return None;
+    }
+    let now = world.tick;
+    let k = world
+        .turf
+        .cells
+        .iter()
+        .find(|(&k, x)| x.crackdown_until > now && world.district_of(centre(world, k)) == d)
+        .map(|(&k, _)| k)?;
+    let t = corner_tile(world, k);
+    let mut homes: Vec<(u32, EntityId)> = world
+        .district(d)
+        .homes
+        .iter()
+        .copied()
+        .filter_map(|h| world.comp::<Building>(h).map(|b| (h, b)))
+        .filter(|(_, b)| !b.demolished && cell_of(world, b.door) == Some(k))
+        .map(|(h, b)| (b.door.manhattan(t), h))
+        .collect();
+    homes.sort_unstable();
+    let v: Vec<EntityId> = homes.into_iter().take(5).map(|(_, h)| h).collect();
+    (!v.is_empty()).then_some(v)
+}
+
+/// From `gang::on_member_killed`, `on_member_arrested`, `leave`: a war
+/// side's loss (an adult's: a child is never a combatant).
+pub fn note_loss(world: &mut World, gang: EntityId, id: EntityId) {
+    if world.turf.wars.is_empty() || crate::systems::ages::is_protected(world, id) {
+        return;
+    }
+    let now = world.tick;
+    for ((a, b), war) in world.turf.wars.iter_mut() {
+        let i = if *a == gang {
+            0
+        } else if *b == gang {
+            1
+        } else {
+            continue;
+        };
+        if war.men[i].remove(&id) {
+            war.losses[i].push_back(now);
+        }
+    }
+}
+
+/// From `raid::settle`: a raid won or a Hideout sacked moves `loser`'s cells
+/// within `raid_cells` of its Hideout to `winner`.
+pub fn raid_moves(world: &mut World, winner: EntityId, loser: EntityId) {
+    let Some(w) = war_cfg(world).cloned() else { return };
+    let Some(hk) = world.hideout_of(loser).and_then(|h| door_of(world, h)).and_then(|t| cell_of(world, t)) else {
+        return;
+    };
+    let cells: Vec<(u32, Status)> = world
+        .turf
+        .cells
+        .iter()
+        .filter(|(&k, x)| x.status.involves(loser) && cell_dist(world, k, hk) <= w.raid_cells)
+        .map(|(&k, x)| (k, x.status))
+        .collect();
+    if cells.is_empty() {
+        return;
+    }
+    war_entry(world, winner, loser, cells[0].0);
+    for (k, old) in cells {
+        take(world, &w, k, old, Status::Held(winner), winner, loser);
+        crate::systems::ownership::jobs2_row(world).turf_raid_moves += 1;
+    }
+}
+
+/// Midnight (after the holders): the heat cooled, the wars' exhaustion,
+/// truces and quiet, the off-screen rolls (a night's trespass on a border,
+/// a contested cell's front, the loser's counter-attack).
+fn war_daily(world: &mut World) {
+    let Some(w) = war_cfg(world).cloned() else { return };
+    let now = world.tick;
+    for x in world.turf.cells.values_mut() {
+        for e in &mut x.heat {
+            e.1 *= w.heat_keep_day;
+        }
+        x.heat.retain(|e| e.1 >= 0.05);
+        x.law_heat *= w.crackdown_keep_day;
+        if x.law_heat < 0.05 {
+            x.law_heat = 0.0;
+        }
+        if x.won.is_some_and(|(_, t)| t <= now) {
+            x.won = None;
+        }
+        if x.lost.is_some_and(|(_, t)| t <= now) {
+            x.lost = None;
+        }
+    }
+    world.turf.truces.retain(|_, t| *t > now);
+    world.turf.lie_low.retain(|_, t| *t > now);
+    let night = night_of(world);
+    world.turf.tagged.retain(|_, n| *n + 1 >= night);
+    world.turf.trespass_told.retain(|_, n| *n + 1 >= night);
+    let cells = &world.turf.cells;
+    world.turf.open.retain(|&(k, _, _)| cells.get(&k).is_some_and(|x| x.fight.is_some()));
+    // The wars: the spent, the truce, the quiet.
+    let window = days(w.exhaust_days);
+    let keys: Vec<(EntityId, EntityId)> = world.turf.wars.keys().copied().collect();
+    for key in keys {
+        let (a, b) = key;
+        if !world.has::<Gang>(a) || !world.has::<Gang>(b) {
+            world.turf.wars.remove(&key);
+            continue;
+        }
+        let Some(war) = world.turf.wars.get_mut(&key) else { continue };
+        let mut spent: Vec<(usize, usize)> = Vec::new();
+        for i in 0..2 {
+            while war.losses[i].front().is_some_and(|&t| t + window < now) {
+                war.losses[i].pop_front();
+            }
+            let mark = (w.exhaust_share * f32::from(war.size[i])).ceil().max(f32::from(w.exhaust_min)) as usize;
+            if war.exhausted[i].is_none_or(|t| t + window < now) && war.losses[i].len() >= mark {
+                war.exhausted[i] = Some(now);
+                spent.push((i, war.losses[i].len()));
+            }
+        }
+        let both = war.exhausted.iter().all(|e| e.is_some_and(|t| t + window >= now));
+        let quiet = war.last + days(w.war_quiet_days) <= now;
+        let (size, started, fights, flips, deaths) = (war.size, war.started, war.fights, war.flips, war.deaths);
+        for (i, lost) in spent {
+            let (g, o) = if i == 0 { (a, b) } else { (b, a) };
+            spend(world, &w, g, o, lost, size[i], started);
+        }
+        if both {
+            truce(world, &w, key);
+            world.turf.wars.remove(&key);
+        } else if quiet {
+            let since = started / crate::time::TICKS_PER_DAY;
+            let text = format!(
+                "The war between {} and {} went quiet (since day {since}: {fights} corner fights, {deaths} dead, \
+                 {flips} cells changed hands)",
+                gname(world, a),
+                gname(world, b)
+            );
+            world.push_event(EventKind::Turf, &[a, b], text);
+            world.turf.wars.remove(&key);
+        }
+    }
+    rolls(world, &w);
+    reindex(world);
+}
+
+/// A side spent: its leader calls it off the corners, it lies low.
+fn spend(world: &mut World, w: &WarCfg, g: EntityId, other: EntityId, lost: usize, size: u16, started: Tick) {
+    let now = world.tick;
+    world.turf.lie_low.insert(g, now + days(w.lielow_days));
+    crate::systems::ownership::jobs2_row(world).turf_exhausted += 1;
+    let since = started / crate::time::TICKS_PER_DAY;
+    let gn = gname(world, g);
+    let what = format!(
+        "{lost} of their {size} beaten, dead, jailed or gone since the war with {} began on day {since}",
+        gname(world, other)
+    );
+    let text = match leader_of(world, g) {
+        Some(l) => format!("{} called {gn} off the corners to lie low: {what}", world.name_of(l)),
+        None => format!("{gn} are spent and lie low: {what}"),
+    };
+    let mut actors = vec![g, other];
+    actors.extend(leader_of(world, g));
+    world.push_event(EventKind::Turf, &actors, text);
+}
+
+/// Two spent sides' leaders strike a truce: the contested cells between
+/// them go to the side ahead, the line between them held `truce_days`, the
+/// fights between them called off.
+fn truce(world: &mut World, w: &WarCfg, key: (EntityId, EntityId)) {
+    let (a, b) = key;
+    let now = world.tick;
+    let until = now + days(w.truce_days);
+    world.turf.truces.insert(key, until);
+    crate::systems::ownership::jobs2_row(world).turf_truces += 1;
+    let split: Vec<(u32, Status, EntityId)> = world
+        .turf
+        .cells
+        .iter()
+        .filter_map(|(&k, x)| match x.status {
+            Status::Contested(p, q) if pair(p, q) == key => Some((k, x.status, p)),
+            _ => None,
+        })
+        .collect();
+    for &(k, old, first) in &split {
+        set_status(world, k, old, Status::Held(first), false, now);
+    }
+    // The line: every cell either holds that borders the other's, held.
+    let mut line: Vec<u32> = Vec::new();
+    for (&k, x) in &world.turf.cells {
+        let Some(h) = x.status.holder().filter(|&h| h == a || h == b) else { continue };
+        let o = if h == a { b } else { a };
+        if neighbours(world, k).iter().any(|n| world.turf.cells.get(n).is_some_and(|y| y.status == Status::Held(o))) {
+            line.push(k);
+        }
+    }
+    for &k in &line {
+        if let Some(x) = world.turf.cells.get_mut(&k) {
+            if let Some(h) = x.status.holder() {
+                x.won = Some((h, until));
+            }
+            if x.fight.is_some_and(|f| pair(f.side, f.by) == key) {
+                x.fight = None;
+            }
+            x.heat.retain(|e| e.0 != a && e.0 != b);
+        }
+    }
+    let cells = &world.turf.cells;
+    world.turf.open.retain(|&(k, _, _)| cells.get(&k).is_some_and(|x| x.fight.is_some()));
+    let held = |g: EntityId| world.turf.cells.values().filter(|x| x.status == Status::Held(g)).count();
+    let (ha, hb) = (held(a), held(b));
+    let named = |world: &World, g: EntityId| {
+        leader_of(world, g).map_or_else(|| gname(world, g), |l| format!("{} of {}", world.name_of(l), gname(world, g)))
+    };
+    let (la, lb) = (named(world, a), named(world, b));
+    let border = match line.len() {
+        0 => String::new(),
+        n => format!(", {n} on the border"),
+    };
+    let text = format!(
+        "{la} and {lb} struck a truce: the line runs where it stands ({ha} blocks and {hb}{border}), held {} days",
+        w.truce_days
+    );
+    let mut actors = vec![a, b];
+    actors.extend(leader_of(world, a));
+    actors.extend(leader_of(world, b));
+    world.push_event(EventKind::Turf, &actors, text);
+}
+
+/// The day's off-screen rolls: a gang trespasses on a held cell it borders
+/// (`provoke_p_day`, the heat of a night), a contested cell is fought over
+/// (`front_p_day`), a gang comes back for a cell it lost (`retake_p_day`).
+fn rolls(world: &mut World, w: &WarCfg) {
+    let now = world.tick;
+    let mut plan: Vec<(u32, FightKind, EntityId, EntityId)> = Vec::new();
+    let mut provokes: Vec<(u32, EntityId, EntityId)> = Vec::new();
+    let quiet =
+        |world: &World, g: EntityId| lies_low(world, g) || order_of(world, g).is_none_or(|o| o == Order::LieLow);
+    for (&k, x) in &world.turf.cells {
+        if x.fight.is_some() || x.crackdown_until > now {
+            continue;
+        }
+        match x.status {
+            Status::Held(h) => {
+                if let Some((l, until)) = x.lost {
+                    if until > now
+                        && l != h
+                        && world.has::<Gang>(l)
+                        && !in_truce(world, h, l)
+                        && !quiet(world, l)
+                        && draw(world, 1, u64::from(k), u64::from(l.index)) < w.retake_p_day
+                    {
+                        plan.push((k, FightKind::Retake, h, l));
+                        continue;
+                    }
+                }
+                let ys: BTreeSet<EntityId> = neighbours(world, k)
+                    .iter()
+                    .filter_map(|n| world.turf.cells.get(n).and_then(|y| y.status.holder()))
+                    .filter(|&y| y != h && world.has::<Gang>(y))
+                    .collect();
+                for y in ys {
+                    if in_truce(world, h, y) || quiet(world, y) {
+                        continue;
+                    }
+                    let hot = matches!(order_of(world, y), Some(Order::Contest | Order::Expand | Order::Retaliate));
+                    let p = w.provoke_p_day * if hot { w.provoke_order_mult } else { 1.0 };
+                    if draw(world, 2, u64::from(k), u64::from(y.index)) < p {
+                        provokes.push((k, h, y));
+                        break;
+                    }
+                }
+            }
+            Status::Contested(a, b) => {
+                if !in_truce(world, a, b)
+                    && !quiet(world, a)
+                    && !quiet(world, b)
+                    && draw(world, 3, u64::from(k), 0) < w.front_p_day
+                {
+                    plan.push((k, FightKind::Front, a, b));
+                }
+            }
+            Status::Open => {}
+        }
+    }
+    for (k, h, y) in provokes {
+        provoke(world, k, h, y, w.heat_stat, None, None, Provoke::Night);
+    }
+    let due = evening_due(world, w);
+    for (k, kind, side, by) in plan {
+        open_fight(world, k, kind, side, by, due);
     }
 }

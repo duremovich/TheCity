@@ -1315,6 +1315,8 @@ fn settle(world: &mut World, gid: EntityId, rival: EntityId, outcome: Outcome) {
                 crate::systems::stims::loot_goods(world, h, gid);
             }
             gang::push_shock(world, rival, Shock::Raided);
+            // Round 6 V5 (TURF § 3): a raid won moves the cells about the Hideout.
+            crate::systems::turf::raid_moves(world, gid, rival);
         }
         Outcome::Sacked => {
             let Some((loot, rival_hideout, rival_name)) =
@@ -1350,6 +1352,8 @@ fn settle(world: &mut World, gid: EntityId, rival: EntityId, outcome: Outcome) {
                 world.stand_at_door(o, rival_hideout);
             }
             gang::push_shock(world, rival, Shock::Sacked);
+            // Round 6 V5: and a Hideout sacked.
+            crate::systems::turf::raid_moves(world, gid, rival);
             let gname = world.comp::<Gang>(gid).map_or_else(String::new, |g| g.name.clone());
             world.push_event(
                 EventKind::Sacked,

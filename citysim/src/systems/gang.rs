@@ -453,6 +453,8 @@ pub fn enlist(world: &mut World, id: EntityId, gang: EntityId) {
 /// Leave the gang (betrayal, emigration; death goes through `on_member_killed`).
 pub fn leave(world: &mut World, id: EntityId, reason: &str) {
     let Some(gm) = world.remove::<GangMember>(id) else { return };
+    // Round 6 V5: a war side's loss (a desister, a leaver).
+    crate::systems::turf::note_loss(world, gm.gang, id);
     let tick = world.tick;
     let gname = world.comp::<Gang>(gm.gang).map_or_else(|| "the gang".to_string(), |g| g.name.clone());
     if let Some(g) = world.comp_mut::<Gang>(gm.gang) {
@@ -666,6 +668,8 @@ fn log_heat(world: &mut World, gang: EntityId, member: EntityId) {
 /// `law::sentence` jailed a member: heat, a shock, and maybe a new leader.
 pub fn on_member_arrested(world: &mut World, id: EntityId) {
     let Some(gang) = world.gang_of(id) else { return };
+    // Round 6 V5: a war side's loss.
+    crate::systems::turf::note_loss(world, gang, id);
     log_heat(world, gang, id);
     push_shock(world, gang, Shock::MemberArrested);
     recompute_leader_after(world, gang, Some(id));
@@ -677,6 +681,9 @@ pub fn on_member_arrested(world: &mut World, id: EntityId) {
 /// the gang logs the heat and the shock (`by_rival` when a rival member did it).
 pub fn on_member_killed(world: &mut World, id: EntityId, killer: Option<EntityId>) {
     let Some(gang) = world.gang_of(id) else { return };
+    // Round 6 V5: a war side's loss.
+    crate::systems::turf::note_loss(world, gang, id);
+    crate::systems::ownership::jobs2_row(world).gang_deaths += 1;
     let by_rival = killer.and_then(|k| world.gang_of(k)).is_some_and(|k| k != gang);
     let tick = world.tick;
     if let Some(g) = world.comp_mut::<Gang>(gang) {
@@ -870,6 +877,12 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
     // Round 6 V2 (TURF § 1): the day's order work first (a pimp's round any
     // hour), else, in the evening, his corner: the target is himself (as a
     // corner dealer's), the plan `turf::corner_plan`.
+    // Round 6 V5 (TURF § 3): a muster to the corner outranks the day's work.
+    if crate::systems::turf::muster_corner(world, id).is_some()
+        && crate::systems::turf::corner_hold(world, id).is_some()
+    {
+        return Some((id, following_order(world, id)));
+    }
     let done = crate::systems::turf::on(world)
         && world.comp::<Brain>(id).is_some_and(|b| b.gang_task_day == Some(world.day()));
     if !done || crate::systems::vice::pimp_target(world, id).is_some() {
@@ -1103,6 +1116,11 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
     if !law::living(world, actor) || !world.has::<Wallet>(actor) {
         return 0;
     }
+    // Round 6 V5 (TURF § 3): a shakedown on another gang's held cell, seen
+    // by its holders there, provokes them.
+    if let Some(door) = world.comp::<Building>(home).map(|b| b.door) {
+        crate::systems::turf::provoke_at(world, actor, door, crate::systems::turf::Provoke::Shakedown);
+    }
     let mut amount = world.config.social.extort_amount;
     // M15 W31: a Purist tithes.
     if world.gang_of(actor).is_some_and(|g| crate::systems::creeds::is_purist(world, g)) {
@@ -1319,6 +1337,10 @@ pub fn stat_extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
     // Round 6 V2: nor off screen.
     if !law::living(world, actor) || !world.has::<Wallet>(actor) {
         return 0;
+    }
+    // Round 6 V5: off screen the shakedown on another's held cell provokes.
+    if let Some(door) = world.comp::<Building>(home).map(|b| b.door) {
+        crate::systems::turf::provoke_at(world, actor, door, crate::systems::turf::Provoke::Shakedown);
     }
     let mut amount = world.config.social.extort_amount;
     let gang = world.gang_of(actor);

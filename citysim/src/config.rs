@@ -1728,6 +1728,115 @@ pub struct TurfCfg {
     /// A district's pimp lives in a cell its gang holds within this many
     /// cells of one of the district's street pitches.
     pub pimp_cells: u8,
+    /// Round 6 V5 (docs/TURF.md § 3): the war over a held cell. `None` (the
+    /// key absent): cells change hands by presence alone (V2).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub war: Option<WarCfg>,
+}
+
+/// Round 6 V5 (docs/TURF.md § 3): `[turf.war]`, the war over a held cell:
+/// provocation heat, the holder's answer at the corner, hold or flip, the
+/// loser's counter-attack, and peace (exhaustion, a truce, the law's
+/// crackdown). Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WarCfg {
+    /// Heat a provocation adds to a held cell, for its holder: a rival's body
+    /// an hour on the corner, a tag (once a night), a deal in the cell, a
+    /// shakedown of a door there, a beating of a holder's member there ...
+    pub heat_corner_hour: f32,
+    pub heat_tag: f32,
+    pub heat_deal: f32,
+    pub heat_shakedown: f32,
+    pub heat_beating: f32,
+    /// ... and an off-screen night of trespass (the daily roll).
+    pub heat_stat: f32,
+    /// A cell's heat keeps this share a day.
+    pub heat_keep_day: f32,
+    /// Past this the holder answers.
+    pub answer_heat: f32,
+    /// The answer's fight comes this long after the heat passes (the muster
+    /// walks to the corner in it).
+    pub answer_window_hours: u16,
+    /// The members of the cell and of cells within this many cells muster.
+    pub muster_cells: u32,
+    /// A body counts at the fight within this of the corner.
+    pub muster_reach_tiles: u32,
+    /// A muster's corner arm scores this flat over the evening's corner.
+    pub muster_flat: f32,
+    /// A side fights with at most this many.
+    pub side_max: usize,
+    /// The off-screen roll: a day's chance a gang provokes a held cell it
+    /// borders (x `provoke_order_mult` under Contest, Expand or Retaliate;
+    /// never under LieLow) ...
+    pub provoke_p_day: f32,
+    pub provoke_order_mult: f32,
+    /// ... the chance a contested cell is fought over a day ...
+    pub front_p_day: f32,
+    /// ... and the chance a gang that lost a cell comes back for it a day,
+    /// within `retake_days` of the loss.
+    pub retake_p_day: f32,
+    pub retake_days: u16,
+    /// A cell won in a fight holds this many days whatever the presence says.
+    pub hold_lock_days: u16,
+    /// A raid won or a Hideout sacked moves the loser's cells within this
+    /// many cells of its Hideout to the raider.
+    pub raid_cells: u32,
+    /// A war goes quiet after this many days without a fight.
+    pub war_quiet_days: u16,
+    /// Exhaustion: members dead, jailed or gone in the war over
+    /// `exhaust_days` past `exhaust_share` of the side at the war's start
+    /// (and at least `exhaust_min`) turn it to LieLow for `lielow_days`.
+    pub exhaust_days: u16,
+    pub exhaust_share: f32,
+    pub exhaust_min: u16,
+    pub lielow_days: u16,
+    /// Two exhausted leaders strike a truce held this many days.
+    pub truce_days: u16,
+    /// The law's crackdown on a cell: each fight there adds 1 and each death
+    /// `crackdown_death_w`; the heat keeps `crackdown_keep_day` a day; past
+    /// `crackdown_heat` the cell is patrolled and cooled `crackdown_days`.
+    pub crackdown_death_w: f32,
+    pub crackdown_keep_day: f32,
+    pub crackdown_heat: f32,
+    pub crackdown_days: u16,
+}
+
+impl Default for WarCfg {
+    fn default() -> Self {
+        WarCfg {
+            heat_corner_hour: 0.25,
+            heat_tag: 0.25,
+            heat_deal: 0.5,
+            heat_shakedown: 0.5,
+            heat_beating: 1.0,
+            heat_stat: 1.0,
+            heat_keep_day: 0.5,
+            answer_heat: 1.0,
+            answer_window_hours: 3,
+            muster_cells: 1,
+            muster_reach_tiles: 6,
+            muster_flat: 0.5,
+            side_max: 6,
+            provoke_p_day: 0.004,
+            provoke_order_mult: 3.0,
+            front_p_day: 0.05,
+            retake_p_day: 0.12,
+            retake_days: 5,
+            hold_lock_days: 5,
+            raid_cells: 1,
+            war_quiet_days: 7,
+            exhaust_days: 14,
+            exhaust_share: 0.2,
+            exhaust_min: 2,
+            lielow_days: 5,
+            truce_days: 21,
+            crackdown_death_w: 1.0,
+            crackdown_keep_day: 0.8,
+            crackdown_heat: 3.0,
+            crackdown_days: 7,
+        }
+    }
 }
 
 impl Default for TurfCfg {
@@ -1756,6 +1865,7 @@ impl Default for TurfCfg {
             family_moves_per_1000: 0.2,
             family_move_tiles: 120,
             pimp_cells: 1,
+            war: None,
         }
     }
 }

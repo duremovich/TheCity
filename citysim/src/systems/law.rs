@@ -1256,6 +1256,11 @@ pub fn resolve_fight_mods(world: &mut World, a: EntityId, b: EntityId, mods: Fig
         return (a, b, false);
     }
     let out = fight_inner(world, a, b, mods);
+    // Round 6 V5 (TURF § 3): a holder's member beaten on his own blocks by
+    // another gang's provokes the holder (not inside a corner fight).
+    if world.config.turf.as_ref().is_some_and(|c| c.war.is_some()) {
+        crate::systems::turf::beaten(world, out.0, out.1);
+    }
     // M14 V12: a body jacked in and attacked is dumped from its run.
     if !world.runner_of.is_empty() {
         for x in [a, b] {
@@ -3035,6 +3040,11 @@ pub fn district_route(
         if world.has::<crate::components::Gang>(g) {
             return crackdown_route(world, g, Some(d));
         }
+    }
+    // Round 6 V5 (TURF § 3): the law's crackdown on a turf cell of the
+    // district: the beat walks the cell's Homes.
+    if let Some(route) = crate::systems::turf::crackdown_beat(world, d) {
+        return route;
     }
     let standing = |w: &World, b: EntityId| w.comp::<Building>(b).is_some_and(|bd| !bd.demolished);
     let of_kind = |w: &World, k: BuildingKind| -> Vec<EntityId> {

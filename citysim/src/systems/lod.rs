@@ -152,6 +152,18 @@ pub fn is_held(world: &World, id: EntityId) -> bool {
     world.has::<Sentence>(id) && world.comp::<Brain>(id).is_some_and(|b| b.lod == Lod::Statistical)
 }
 
+/// Round 6 V5 (TURF § 3): tile `t` lies in the camera's view (with the
+/// margin): an off-screen corner fight's Statistical fighters there are
+/// promoted (`turf::fighters`). No view (a headless run): nothing is.
+pub fn on_screen(world: &World, t: TilePos) -> bool {
+    let Some(r) = world.view_rect else { return false };
+    let (x, y) = (i32::from(t.x), i32::from(t.y));
+    x >= i32::from(r.x) - VIEW_MARGIN
+        && x < i32::from(r.x) + i32::from(r.w) + VIEW_MARGIN
+        && y >= i32::from(r.y) - VIEW_MARGIN
+        && y < i32::from(r.y) + i32::from(r.h) + VIEW_MARGIN
+}
+
 /// L2 (L21, L22): a gang's raid window: a raid order whose muster is
 /// within `raid_promote_hours` (or past), until the raid resolves and
 /// clears `raid_at`.
