@@ -646,7 +646,13 @@ fn strike_off(world: &mut World) {
         .collect();
     for a in docs {
         world.jobs2.gray.struck_off.insert(a);
-        crate::systems::economy::quit_job(world, a, "struck off");
+        // Round 6 V6 (OPEN-217): the line says why (V14 `ripperdoc_11838 d26`:
+        // "struck off" and gone, nothing told): the draw is his lawlessness.
+        crate::systems::economy::quit_job(
+            world,
+            a,
+            "struck off the register: the licence board found a lawless practice",
+        );
         ownership::jobs2_row(world).struck_off += 1;
     }
 }

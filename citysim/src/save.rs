@@ -461,7 +461,10 @@ use crate::world::World;
 /// `truces`, `lie_low`, `open`, `tagged`, `trespass_told`, `turf::Cell`'s `heat`, `fight`, `won`, `lost`,
 /// `law_heat`, `crackdown_until`, the `[turf.war]` keys and the `Jobs2Cols` `turf_provocations` ...
 /// `turf_crackdowns` columns (serde defaults).
-pub const SAVE_VERSION: u8 = 101;
+/// 102 (pressure pass round 6, V6, empty rooms beside full ones; renumbered at the merge): `ViceState.bouts`
+/// (the pit's book of who fought when), `Misery.drank_at`, the `[care] orderly_opens`, `clinic_spill`,
+/// `on_call_spread`, `[customers] door_broke`, `door_stat_drink` and `[leisure] bout_card_per` keys (serde defaults).
+pub const SAVE_VERSION: u8 = 102;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

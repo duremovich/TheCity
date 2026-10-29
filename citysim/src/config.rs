@@ -1231,6 +1231,16 @@ pub struct CustomersCfg {
     pub door_dress_min: u8,
     /// A visitor carrying a weapon is a cause.
     pub door_armed: bool,
+    /// Round 6 V6 (OPEN-217): a visitor short of the door's price now (his
+    /// coins in hand under `leisure::price_of`) is a cause, turned away
+    /// every time ("broke"), both tiers; the off-screen visitor meets the
+    /// door before his purse does (`leisure::stat_visit`).
+    #[serde(default)]
+    pub door_broke: bool,
+    /// Round 6 V6: an off-screen drink leaves the mark the door reads
+    /// (`Misery.drank_at`; the Statistical memory keeps no drink).
+    #[serde(default)]
+    pub door_stat_drink: bool,
     pub door_p: f32,
     /// A turned-away drunk or brawler swings at the bouncer on
     /// `door_swing_p × (1 − lawfulness)`; the turned-away holds `door_grudge`.
@@ -2358,6 +2368,18 @@ pub struct CareCfg {
     /// Clinic's off-screen colleagues, present by the clock, took the pair
     /// hash).
     pub clinic_body_first: bool,
+    // --- round 6 V6 (OPEN-217): empty rooms beside full ones
+    /// A Clinic is open for a patch-up with any of its patient staff on
+    /// duty (an orderly on the night's split shift), not its Ripperdoc
+    /// alone (a sale, an install, a treatment still wait for him).
+    pub orderly_opens: bool,
+    /// A patient goes to the nearest Clinic (or back room) whose doctor on
+    /// duty has room this hour, else the nearest open (the nearest alone
+    /// took every patient whatever the queue).
+    pub clinic_spill: bool,
+    /// A back room's doc on call is the pair hash of the patient among the
+    /// free docs with room, not the first found.
+    pub on_call_spread: bool,
     /// The off-screen chrome bought at midnight is booked for an hour from
     /// the first to the last of these (hours of the day, inclusive; the
     /// Ripperdoc's day shift), kept when the doctor is at the counter.
@@ -2459,6 +2481,9 @@ impl Default for CareCfg {
             cover_purse_days: 3,
             cover_lawful: 0.3,
             clinic_body_first: true,
+            orderly_opens: true,
+            clinic_spill: true,
+            on_call_spread: true,
             book_hours: [9, 17],
             wash_min_tox: 0.4,
             p_wash: 0.05,
@@ -10519,6 +10544,10 @@ pub struct LeisureCfg {
     /// A win above this posts `Gambled`.
     pub big_win: i64,
     pub bout_hour: u16,
+    /// Round 6 V6 (OPEN-217): a pit's card is one bout a night for every
+    /// this many Fighters on shift in it (at least one): the bout went to
+    /// the two longest since their last, one a night whatever the roster.
+    pub bout_card_per: u16,
     /// A Club's door Host refuses a visitor with `rep.heat` at least this
     /// when the Host's courage beats the heat.
     pub door_heat: f32,
@@ -10573,6 +10602,7 @@ impl Default for LeisureCfg {
             stake_cap: 20,
             big_win: 40,
             bout_hour: 23,
+            bout_card_per: 4,
             door_heat: 0.6,
             class_mult: [1.3, 1.0, 0.8],
             hangout_ticks: 60,

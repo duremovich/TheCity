@@ -364,6 +364,10 @@ fn under_the_influence(world: &World, c: &MiseryCfg, id: EntityId) -> Option<&'s
         return Some("high");
     }
     let since = world.tick.saturating_sub(u64::from(c.drink_hours) * TICKS_PER_HOUR);
+    // Round 6 V6 (OPEN-217): an off-screen drink's mark (`Misery.drank_at`).
+    if world.comp::<Misery>(id).is_some_and(|m| m.drank_at > 0 && m.drank_at >= since) {
+        return Some("drunk");
+    }
     world
         .comp::<crate::components::Memory>(id)
         // A drink's `Socialised` names nobody (a chat's names the partner)
