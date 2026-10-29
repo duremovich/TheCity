@@ -1296,6 +1296,14 @@ fn probe_working_couple_moves_near_work() {
             if w.comp::<Building>(employer).is_some_and(|b| b.kind.is_leisure()) {
                 return None;
             }
+            // Round 6 V1 re-pin (the premise: a pair whose posts last the day):
+            // not an agent's own business, whose till can lay them off before
+            // the midnight (`underwater::layoff`: the city diverged on the
+            // household's shelf and the longest couple was a Back Room's two
+            // Brokers, let go at 7c against 10c of wages).
+            if w.owner_of(employer).is_some_and(|o| w.has::<Brain>(o)) {
+                return None;
+            }
             // Both hired today (F1's city: the commute pressure's `hire_now`
             // reads a fresh hire; the longest couple's post was days old).
             for m in [a, s] {

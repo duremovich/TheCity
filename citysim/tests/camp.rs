@@ -132,6 +132,9 @@ fn family_home(w: &mut World) -> (EntityId, EntityId) {
 }
 
 /// Empty the Block's pantry and its adults' wallets (the broke home).
+/// Round 6 V1 re-pin (the premise: no food for the child): and their
+/// pockets (a parent's carried food goes on the shelf for his child's meal,
+/// `shelf::pocket_to_shelf`).
 fn starve_home(w: &mut World, h: EntityId) {
     if let Some(b) = w.comp_mut::<Building>(h) {
         b.stock_food = 0;
@@ -139,6 +142,11 @@ fn starve_home(w: &mut World, h: EntityId) {
     for r in w.residents_of(h).to_vec() {
         if let Some(x) = w.comp_mut::<Wallet>(r) {
             x.coins = 0;
+        }
+        if let Some(i) = w.comp_mut::<citysim::components::Inventory>(r) {
+            i.food = 0;
+            i.stolen_food = 0;
+            i.synth = 0;
         }
     }
 }
@@ -200,7 +208,19 @@ fn test_unfed_child_taken_at_take_days_before_death() {
     assert!(w.comp::<Child>(c).is_some_and(|k| k.warned_day.is_some()), "the warning");
     assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::Custody && e.actors.contains(&c)));
     let grace = u64::from(w.config.camp.warn_grace_days);
-    run_days_starving(&mut w, grace, Some(h2));
+    // Round 6 V1 re-pin (the premise: the broke family stays unfed): the
+    // Home the child lives in is starved each day, up to the grace and a
+    // fresh `take_days` (a parent's death sent the child to the other
+    // parent's door, `camp::follow_parents`, and the unfed count starts
+    // again at a new door).
+    let take = u64::from(w.config.camp.take_days);
+    for _ in 0..grace + take {
+        if home_of(&w, c) == Some(camp_b) {
+            break;
+        }
+        let at = home_of(&w, c);
+        run_days_starving(&mut w, 1, at);
+    }
     assert_eq!(home_of(&w, c), Some(camp_b), "unfed again past the grace: taken");
     assert!(camp::children_of(&w, camp_b).contains(&c));
     assert_eq!(w.comp::<Position>(c).and_then(|p| p.building), Some(camp_b));

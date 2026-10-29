@@ -182,7 +182,7 @@ fn at_home(world: &World, id: EntityId) -> bool {
 fn home_pantry(world: &World, id: EntityId) -> u32 {
     // Round 4 T1 (OPEN-231): the adults' share (the children's food kept
     // back on the service's warning).
-    world.comp::<Household>(id).and_then(|h| h.home).map_or(0, |h| crate::systems::camp::adults_share(world, h))
+    world.comp::<Household>(id).and_then(|h| h.home).map_or(0, |h| crate::systems::camp::adults_share(world, id, h))
 }
 
 /// On shift, at the employer, and this shift not yet worked.
@@ -729,12 +729,14 @@ pub fn on_complete(
             let Some(home) = world.comp::<Household>(id).and_then(|h| h.home) else {
                 return StepResult::Failed(FailReason::NoSuchPlace);
             };
-            let share = crate::systems::camp::adults_share(world, home);
+            let share = crate::systems::camp::adults_share(world, id, home);
             let Some(b) = world.comp_mut::<Building>(home) else { return StepResult::Failed(FailReason::NoSuchPlace) };
             if b.stock_food == 0 || share == 0 {
                 return StepResult::Failed(FailReason::StockGone);
             }
             let meal = crate::systems::health::eat_pantry_unit(b);
+            // Round 6 V1 (OPEN-231): off his household's stake first.
+            crate::systems::shelf::ate(world, id, home, 1.0);
             world.release_all(id);
             if let Some(n) = world.comp_mut::<Needs>(id) {
                 needs::eat(n, &cfg);
@@ -749,7 +751,8 @@ pub fn on_complete(
                 return StepResult::Failed(FailReason::NoSuchPlace);
             };
             let cap = world.config.buildings.home.stock_cap;
-            let room = world.comp::<Building>(home).map_or(0, |b| cap.saturating_sub(b.stock_food));
+            // Round 6 V1 (OPEN-231): his household's room, and his stake.
+            let room = crate::systems::shelf::room(world, id, home, cap);
             let Some(inv) = world.comp_mut::<Inventory>(id) else { return StepResult::Failed(FailReason::StockGone) };
             let movable = (inv.food - inv.stolen_food).min(room);
             // Hunger as sickness § 1: the synth meals go in with the rest.
@@ -761,6 +764,7 @@ pub fn on_complete(
                 b.synth_food = b.synth_food.min(b.stock_food) + synth;
                 b.stock_food += movable;
             }
+            crate::systems::shelf::stored(world, id, movable);
             StepResult::Done
         }
         ActionKind::BuyFood => {
@@ -886,12 +890,14 @@ pub fn on_complete(
             let Some(home) = world.comp::<Household>(id).and_then(|h| h.home) else {
                 return StepResult::Failed(FailReason::NoSuchPlace);
             };
-            let share = crate::systems::camp::adults_share(world, home);
+            let share = crate::systems::camp::adults_share(world, id, home);
             let Some(b) = world.comp_mut::<Building>(home) else { return StepResult::Failed(FailReason::NoSuchPlace) };
             if b.stock_food == 0 || share == 0 {
                 return StepResult::Failed(FailReason::StockGone);
             }
             let meal = crate::systems::health::eat_pantry_unit(b);
+            // Round 6 V1 (OPEN-231): off his household's stake first.
+            crate::systems::shelf::ate(world, id, home, 1.0);
             world.release_all(id);
             let Some(inv) = world.comp_mut::<Inventory>(id) else { return StepResult::Failed(FailReason::StockGone) };
             let synth = inv.synth_held();

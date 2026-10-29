@@ -442,7 +442,11 @@ use crate::world::World;
 /// `[trade_verbs]` `pimp_book_draws`, `pimp_quits`, `pimp_trip_ticks` keys, `[verbs] wait_at_work_ticks` and the
 /// `Jobs2Cols` `pimp_booked`, `clinic_booked`, `clinic_kept`, `clinic_body`, `clinic_washes` columns
 /// (serde defaults).
-pub const SAVE_VERSION: u8 = 96;
+/// 97 (pressure pass round 6, V1, the household's shelf and children out of care):
+/// `Household.pantry_stake`, `Household.kin`, `Child.slipped` (written while set),
+/// `CampMove::FetchedBack`, the `[camp] warn_stale_days` key and the `Jobs2Cols` `ch_warned_old`,
+/// `camp_fetched`, `camp_off_street`, `camp_take_street`, `camp_pocket` columns (serde defaults).
+pub const SAVE_VERSION: u8 = 97;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

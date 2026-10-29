@@ -833,6 +833,20 @@ pub struct Jobs2Cols {
     pub camp_take_repeat: u32,
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub camp_take_no_parent: u32,
+    /// Round 6 V1 (OPEN-242): slipped-out children fetched back
+    /// (`camp_fetched`); street children gone to live with a free parent
+    /// with a Home (`camp_off_street`) or taken with no free parent or on
+    /// an open warning (`camp_take_street`).
+    #[serde(default)]
+    pub camp_fetched: u32,
+    #[serde(default)]
+    pub camp_off_street: u32,
+    #[serde(default)]
+    pub camp_take_street: u32,
+    /// Round 6 V1 (OPEN-231): food units a parent carried put on the shelf
+    /// for his children's meal (`shelf::pocket_to_shelf`).
+    #[serde(default)]
+    pub camp_pocket: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub notices: u32,
     #[serde(skip_serializing_if = "is_zero_i64")]
@@ -1663,6 +1677,10 @@ impl Jobs2Cols {
                 "camp_followed",
                 "camp_take_repeat",
                 "camp_take_no_parent",
+                "camp_fetched",
+                "camp_off_street",
+                "camp_take_street",
+                "camp_pocket",
                 "notices",
                 "door_rent",
                 "super_stops",
@@ -2171,6 +2189,10 @@ impl Jobs2Cols {
             self.camp_followed.to_string(),
             self.camp_take_repeat.to_string(),
             self.camp_take_no_parent.to_string(),
+            self.camp_fetched.to_string(),
+            self.camp_off_street.to_string(),
+            self.camp_take_street.to_string(),
+            self.camp_pocket.to_string(),
             self.notices.to_string(),
             self.door_rent.to_string(),
             self.super_stops.to_string(),

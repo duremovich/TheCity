@@ -322,6 +322,8 @@ pub enum CampMove {
     BrokenOut,
     /// Came of age.
     CameOfAge,
+    /// Round 6 V1 (OPEN-242): slipped out and fetched back by the service.
+    FetchedBack,
 }
 
 impl CampState {

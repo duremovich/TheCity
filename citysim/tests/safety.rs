@@ -376,6 +376,16 @@ fn test_school_meals_off_with_no_net() {
         let b = x.comp_mut::<Building>(home).expect("home");
         b.stock_food = 0;
         b.child_food_debt = 0.9;
+        // Round 6 V1 re-pin (the premise: no food for the child but the
+        // school meal): the residents' pockets empty too (a parent's carried
+        // food goes on the shelf for his child, `shelf::pocket_to_shelf`).
+        for r in x.residents_of(home).to_vec() {
+            if let Some(i) = x.comp_mut::<citysim::components::Inventory>(r) {
+                i.food = 0;
+                i.stolen_food = 0;
+                i.synth = 0;
+            }
+        }
         x.run_ticks(1);
         unfed.push(x.comp::<Child>(kid).map_or(0, |c| c.hunger_days));
     }

@@ -2371,11 +2371,19 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                     format!("{} ({yrs} y) {at}{ward}", nm(world, c))
                 })
                 .collect();
-            let pantry = world
-                .comp::<citysim::Household>(id)
-                .and_then(|h| h.home)
-                .and_then(|h| world.comp::<Building>(h))
-                .map_or(String::new(), |b| format!("; the pantry holds {}", b.stock_food));
+            // Round 6 V1 (OPEN-231): in a shared Home, the household's share.
+            let pantry = world.comp::<citysim::Household>(id).and_then(|h| h.home).map_or(String::new(), |h| {
+                let stock = world.comp::<Building>(h).map_or(0, |b| b.stock_food);
+                let k = citysim::systems::shelf::key(world, id);
+                match citysim::systems::shelf::claim(world, h, k) {
+                    Some(c) => format!(
+                        "; the pantry holds {stock}, {:.0} of it ours ({} households under the roof)",
+                        c.floor(),
+                        citysim::systems::shelf::household_count(world, h)
+                    ),
+                    None => format!("; the pantry holds {stock}"),
+                }
+            });
             t.log(now, "family", format!("my children: {}{pantry}", parts.join(", ")));
         }
     }

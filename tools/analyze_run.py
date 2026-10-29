@@ -1159,7 +1159,10 @@ def lives(rows, events, out):
                                         ("absconders caught", "camp_caught"),
                                         ("followed a parent", "camp_followed"),
                                         ("taken on a second warning", "camp_take_repeat"),
-                                        ("taken, no free parent", "camp_take_no_parent"))}
+                                        ("taken, no free parent", "camp_take_no_parent"),
+                                        ("fetched back", "camp_fetched"), ("off the street", "camp_off_street"),
+                                        ("street taken (no free parent / warned)", "camp_take_street"),
+                                        ("pocket units to the shelf", "camp_pocket"))}
     L["civic"] = {k: tot(c) for k, c in (("taught days", "taught_days"), ("notices", "notices"),
                                          ("door rent", "door_rent"), ("super stops", "super_stops"),
                                          ("tied move-ins", "tied_housed"))}

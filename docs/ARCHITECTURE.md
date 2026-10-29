@@ -64,7 +64,7 @@ read it before moving one.
 | 26-27 | `systems::leverage::run`, `systems::captives::run` | daily; 23:59 snapshot |
 | 28 | `systems::wounded::run` | per tick bleed-out; daily: `trauma_daily`, `care_daily` |
 | 29-31 | `governance::run`, `tags::run`, `attention::run` | hourly gate (and `on()`); governance daily votes, tags 10:00 and 21:00 |
-| 32 | `systems::demography::run` | daily: ageing, births, deaths, `camp::take_daily`, `ambient::daily`, `life::spire_homes` then `relocate`, migration; weekly immigration |
+| 32 | `systems::demography::run` | daily: ageing, `shelf::daily` (the households under each roof), the children's meal, births, deaths, `camp::take_daily`, `ambient::daily`, `life::spire_homes` then `relocate`, migration; weekly immigration |
 | 33 | `systems::stats::run` | at 23:59: writes every adult's `Trace` entry, rolls `DailyStats`, `world_market::close_day` |
 | — | `self.tick += 1` | |
 
@@ -280,7 +280,7 @@ Each file's `//!` header names its spec section.
 | `braindance.rs` | braindance studios and recorders (`[vice] bd`) | `grudges.rs` | grudges, inheritance, vendettas, guarding the body | `stats.rs` | the end-of-day snapshot and `Trace`; `misery.rs`: misery acts (absenteeism, firing, quitting, brawls, the pressure pass phase 1); `customers.rs`: the dead trades' customers (the door, clients, care, the cab's hail, the scav's round; phase 2) |
 | `braindance.rs` | braindance studios and recorders (`[vice] bd`) | `grudges.rs` | grudges, inheritance, vendettas, guarding the body | `stats.rs` | the end-of-day snapshot and `Trace`; `misery.rs`: misery acts (absenteeism, firing, quitting, brawls, the pressure pass phase 1); `underwater.rs`: a business under water (the owner's choices, loans and collectors, fire sales and fronts, shut businesses reopened, the stiffed worker's confrontation; phase 6); `consequence.rs`: what happens next (witness reactions and blackmail, an unfilled hit's escalation, the cells and the release, the creeds' weekly service; phase 5a) |
 | `budget.rs` | the Treasury budget band | `health.rs` | malnutrition and toxicity meters, sick days | `stims.rs` | stims, addiction, dealing; Lives at work 4b: the corner (`deal_site`/`deal_corner`, `corner_plan`, `corner_buy_plan`, `World.corner_dealers`/`corner_log`), `sell` (the `Buyer` encounter, a regular's buy first, the lookout's `witness_lookout_mult` through `law::raise_crime_mult`) |
-| `camp.rs` | child protective service and work camps | `hitmarket.rs` | organic demand for Hits and Beats | `street.rs` | the street rung: hotel, squat, rough sleep |
+| `camp.rs` | child protective service and work camps (the ladder, the street child found a parent or taken, the slipped child fetched back) | `hitmarket.rs` | organic demand for Hits and Beats | `street.rs` | the street rung: hotel, squat, rough sleep |
 | `captives.rs` | captives, the private prison, hostage coercion | `hunt.rs` | the Hunt goal's state | `streetwork.rs` | pitches, the labour corner, couriers, cabs; Lives at work 4a: `cab_roll`/`pay_ride` (one roll for both tiers), `full_cab` (a Full commuter's cab at the commute GoTo), the driver's body (`fare_plan`: a booked `CabRide` driven leg by leg, else standing by at the Garage; `standing_by`, `fare_leg`), the named `Parcel`s (`name_parcels`, `courier_stop`, `parcels_back`) |
 | `charity.rs` | Missions, kitchens, cots, donations | `industry.rs` | industries, civic jobs, the Hq (`[jobs2]`) | `succession.rs` | gang succession and civil war |
 | `chrome.rs` | chrome at the Clinic, sanity, cyberpsychotic episodes, stripping | `jobs.rs` | L2 venues and staffing | `tags.rs` | tags, scanners, patrols |
@@ -319,7 +319,7 @@ Outside `systems/`: `needs.rs`, `mood.rs`, `personality.rs` (agent internals), `
 | `[economy]` | `systems/economy.rs`, `treasury.rs`, `exec/actions.rs` | `[db]` | `systems/gossip.rs`, `virt.rs` (unverified: few reads) | `[economy2]` | `systems/wages.rs`, `demography.rs` |
 | `[crime]` | `systems/law.rs`, `gang.rs`, `utility/goals.rs` | `[gossip]` | `systems/gossip.rs` | `[world_market]` | `systems/world_market.rs` |
 | `[social]` | `systems/social.rs` (phase 4, OPEN-210: `weak_affinity`, `weak_prune_days`, `acquaintance_cap` in `daily`), `gang.rs` | `[reputation]` | `systems/reputation.rs` | `[charity]` | `systems/charity.rs` |
-| `[gangs]`, `[gangs.order_flat]` | `systems/gang.rs`, `raid.rs`; `order_flat` in `faction.rs` | `[taste]` | `systems/reputation.rs`, `social.rs`, `moves.rs` | `[camp]` | `systems/camp.rs` |
+| `[gangs]`, `[gangs.order_flat]` | `systems/gang.rs`, `raid.rs`; `order_flat` in `faction.rs` | `[taste]` | `systems/reputation.rs`, `social.rs`, `moves.rs` | `[camp]` | `systems/camp.rs`, `shelf.rs` (the household's shelf in a shared Home: stakes, claims, the children's meal, the grocery reads; round 6 V1) |
 | `[law]`, `[law.stance_flat]`, `[law.posture_flat]` | `systems/law.rs`, `law_brain.rs` (both `_flat` tables) | `[creeds]` | `systems/creeds.rs` | `[treasury]` | `systems/treasury.rs`, `econ.rs` |
 | `[demography]` | `systems/demography.rs` | `[grudges]` | `systems/grudges.rs` | `[floors]` | `systems/founding.rs`, `industry.rs`, `life.rs`, `wages.rs` |
 | `[brain]` | `systems/plan.rs`, `think.rs`, `exec/mod.rs`, `world.rs` (memory cap), `memory.rs` | `[hunt]` | `systems/hunt.rs` | `[[trades]]` | `systems/trades.rs` (and `TradeId` resolution in `components.rs`) |

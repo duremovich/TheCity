@@ -456,6 +456,12 @@ pub fn at_school_now(world: &World, c: &Child) -> bool {
 /// CHILD_FOOD_PER_DAY × the children at home × child_pantry_days)` (a Camp
 /// or Street child eats elsewhere); 0 off.
 pub fn children_food_need(world: &World, home: EntityId) -> u32 {
+    children_food_need_of(world, home, None)
+}
+
+/// Round 6 V1 (OPEN-231): `children_food_need` over the children of
+/// household `kin` only (`shelf::key`); `None`: every child at home.
+pub fn children_food_need_of(world: &World, home: EntityId, kin: Option<EntityId>) -> u32 {
     if !on(world) {
         return 0;
     }
@@ -463,6 +469,7 @@ pub fn children_food_need(world: &World, home: EntityId) -> u32 {
         .residents_of(home)
         .iter()
         .filter(|&&r| world.comp::<Child>(r).is_some_and(|c| !matches!(c.routine, Routine::Camp | Routine::Street)))
+        .filter(|&&r| kin.is_none_or(|k| crate::systems::shelf::key(world, r) == k))
         .count() as f32;
     (crate::systems::demography::CHILD_FOOD_PER_DAY * kids * world.config.ages.child_pantry_days).ceil() as u32
 }
