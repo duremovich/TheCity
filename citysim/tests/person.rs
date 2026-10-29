@@ -1843,6 +1843,14 @@ fn probe_worker_makes_one_grocery_run_to_the_nearest_detour_market() {
         b.stock_food = 0;
         b.synth_food = 0;
     }
+    // Round 6 fix: the shelf's stakes go with its stock (V1 `shelf.rs`): the
+    // neighbours' old stakes against an emptied shelf scaled the worker's
+    // stored meals to a claim of 0 and the run repeated.
+    for r in w.residents_of(h).to_vec() {
+        if let Some(hh) = w.comp_mut::<Household>(r) {
+            hh.pantry_stake = 0.0;
+        }
+    }
     w.comp_mut::<Wallet>(a).expect("wallet").coins = 80;
     // The other residents are broke (the shortfall is this worker's alone to fill).
     fn broke(w: &mut World, h: EntityId, a: EntityId) {
