@@ -471,7 +471,19 @@ fn openings(world: &mut World) {
         // home door in any district under its cap, and none past `[distance]
         // job_cap_ticks` (a vendor whose midnight found him in the Sump
         // pitched 670 tiles from his Mid-Levels home, 9 h a way).
-        let (spot, d) = if let (Some(cap), Some(f)) = (crate::systems::distance::job_cap(world), from) {
+        // Pressure pass round 6, V2 (TURF § 2): a Street pitch opens in a held
+        // cell where the holder's members live (its corner, else a spot of
+        // the cell), the nearest the opener's Home within the job cap, so the
+        // pimp named among them walks to it; none: as before.
+        let turf_spot = (kind == PitchKind::Street)
+            .then(|| turf_pitch(world, from, &used, &count, cfg.pitches_per_district))
+            .flatten();
+        if turf_spot.is_some() {
+            ownership::jobs2_row(world).turf_pitches += 1;
+        }
+        let (spot, d) = if let Some((t, d)) = turf_spot {
+            (Some(t), d)
+        } else if let (Some(cap), Some(f)) = (crate::systems::distance::job_cap(world), from) {
             let near = world
                 .spots
                 .iter()
@@ -520,6 +532,51 @@ fn openings(world: &mut World) {
         let (who, at) = (world.name_of(a), world.district_name(d).to_string());
         world.push_event(EventKind::PitchOpened, &[a], format!("{who} opened a {what} pitch in {at}"));
     }
+}
+
+/// Round 6 V2 (TURF § 2): the Street pitch's tile in the turf: the corner or
+/// a spot of a held cell where the holder's members live, free, in a
+/// district under its cap, the nearest `from` within `[distance]
+/// job_cap_ticks` (no cap without `[distance]`); `None` off or none.
+fn turf_pitch(
+    world: &World,
+    from: Option<TilePos>,
+    used: &[TilePos],
+    count: &[u16],
+    per_district: u16,
+) -> Option<(TilePos, crate::components::DistrictId)> {
+    if !crate::systems::turf::on(world) {
+        return None;
+    }
+    let f = from?;
+    let mut cands: Vec<TilePos> = Vec::new();
+    for (&g, cells) in &world.turf.held {
+        for &k in cells {
+            let Some(cell) = world.turf.cells.get(&k) else { continue };
+            if cell.residents(g) == 0 {
+                continue;
+            }
+            cands.extend(cell.corner);
+            let d = world.district_of(crate::systems::turf::centre(world, k));
+            if let Some(v) = world.spots.get(d.index()) {
+                cands.extend(
+                    v.iter()
+                        .filter(|s| !matches!(s.kind, crate::living::SpotKind::Hideout(_)))
+                        .map(|s| s.tile)
+                        .filter(|&t| crate::systems::turf::cell_of(world, t) == Some(k)),
+                );
+            }
+        }
+    }
+    let cap = crate::systems::distance::job_cap(world);
+    cands
+        .into_iter()
+        .filter(|t| !used.contains(t))
+        .filter(|&t| count.get(world.district_of(t).index()).is_some_and(|&c| c < per_district))
+        .map(|t| (f.manhattan(t), t.x, t.y, t))
+        .filter(|&(_, _, _, t)| cap.is_none_or(|c| crate::systems::distance::travel(world, f, t) <= c))
+        .min()
+        .map(|(_, _, _, t)| (t, world.district_of(t)))
 }
 
 // ---------------------------------------------------------------------------

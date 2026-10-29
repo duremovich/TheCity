@@ -2843,3 +2843,114 @@ freed within the hour.
 **Deviations.** The brief's "cache or index": both (a grid index of the chromed, a per-tick guard grid) plus the
 duplicate pick removed. Not taken: `holder_of` stays a walk over the gangs (0.9 s in a 20k day once the Purist
 walk was gone); `goal::Unwind` is now the top goal (`OPEN-229`'s next read). No test (doctrine 2).
+
+### V2, turf you hold (`docs/TURF.md` § 1-2; `OPEN-241`, `OPEN-217`; `systems/turf.rs`, `[turf]`)
+
+- **Cells and the holder** (`turf::daily`, at the gangs' midnight slot before the faction brain): the map in squares
+  of `cell_tiles` (24); a gang's day of presence in a cell is `w_held_home` a Home or squat it holds (claim at 3),
+  `w_resident` a member living there, `w_hideout`, `w_front`, and its bodies' hours sampled hourly (`turf::hourly`:
+  `w_street_hour` on the cell's street or in a venue there, `w_corner_hour` on its corner); a Statistical member's
+  day credits `stat_street_hours` to his corner's cell (his Home's without one): the off-screen mirror. Over
+  `presence_days` (7): held past `hold_min` (30) and `hold_margin` (0.25) ahead of the next, contested when the next
+  is within the margin at `keep_share` of `hold_min`, else open; a holder keeps its cell at `keep_share` unpassed.
+  Jailed, dead and under-18 members count for nothing. The first pass seeds silently.
+- **The holder change** is one place, `turf::set_status` (V5 flips through it): a `Turf` event naming the gangs,
+  up to three members of each living there (else on that corner) and the landmark ("The Unplugged 10 hold the
+  blocks around Street Market#4423 now, taken from The Unplugged 5: 1 of their people on the corner most nights";
+  "The Drowned Choir 10 are on The Drowned Choir 9's corner: the blocks around Block#631 are contested (43 of
+  theirs about the blocks, 40 of The Drowned Choir 9's)"), and for a cell taken from a gang `Shock::LostTurf { by }`
+  (a grudge, severity 0.5 as a lost district). "On the corner most nights" is the window's median of distinct
+  members on the corner a night; with none, "about the blocks" or "their Hideout's blocks".
+- **The corner**: the outside door of the cell's Bar, Market, Club or NoodleBar nearest the mean of its Home doors,
+  else the stoop of its fullest Home (**deviation**: the spec's "busiest street tile a member can reach" read as
+  the venue door, stable and visible; the busiest by footfall would wander nightly). A member's corner is his Home
+  cell's when his gang holds it, else the nearest held cell whose corner is within `corner_reach_tiles` (60) of his
+  door. **Hold the corner** is a GangWork arm (`gang::gang_work_target` falls to it when the day's order work is
+  done or there is none; `turf::corner_hold`, `corner_plan`: `GoTo(Spot) -> HangOut`), scored as the scav round is
+  (`goals.rs`: "the corner" gate, loyalty, energy, hunger), between `corner_from`/`corner_to` (18:00-02:00), at most
+  `corner_ticks_day` (240) a night, never on shift, under LieLow, inside or under 18. A Full body holding it is told
+  once a night ("Beatrix Draper holds The Unplugged 2's corner by Club#5049 (3 more of theirs on it)").
+- **The neighbour** (`World::rival_of` reads `turf::rival`): the gang holding the most cells bordering ours (a
+  contest counts its other side), ties by its held cells, then the lower id; the old rule (most territory) for a
+  gang holding no cell or bordering nobody. **District control from cells** (`districts::presence`): a standing
+  Home counts `held_home` for its cell's holder, not its claimant (squats still by claim).
+- **Turf that pays**: `turf::tribute` replaces the per-Home tribute: each Home of a held cell pays its holder
+  (`tribute_held` 2 a Home it holds, `tribute_home` 1 any other), a held Home outside held cells pays its claimant 2
+  as before, adults only, members of the payee exempt, `Flow::Coerced`, into the week's Collect. Protection by cell
+  (`leverage::protection_target`, `turf::leans`, `protection::ground`): a gang leans only on businesses in cells it
+  holds or contests; a business already paying one gang is squeezed by the other side only in a contested cell.
+  **Deviation**: "or shuts early" not built (the squeeze's punishments already shut a till). The deal spot is the
+  corner (`stims::member_site_trip`: with the corner on, the held cells' corners replace the districts' one; a venue
+  or the arms Bar as before); the preacher preaches on his gang's busiest corner in reach (`leisure::busiest_spot`).
+- **The pimp's pitch** (`streetwork::turf_pitch`, `vice::name_pimps`): a Street pitch opens at the corner or a spot
+  of a held cell where the holder's members live, nearest the opener's Home within the job cap (else as before); a
+  district's street is the gang's holding the cells its street pitches stand in (then most cells held there), and
+  its pimp is named among the members whose Home cell it holds within `pimp_cells` (1) of a pitch's cell: this
+  replaces U6's `pimp_trip_ticks` as the naming bound (the key stays for `round_pitch`'s walk). A street lost with
+  the pimp's own blocks contested says so.
+- **Recruits from the turf** (`gang::recruit_gang_any`): the holder of the recruit's Home cell takes him on a tie
+  `recruit_affinity_cut` (0.1) weaker and before any other gang's, and first among the desperate's gangs; the join
+  line says "asked on the corner of the gang's blocks, where the recruit lives".
+- **The residents read the colours**: after dark a spot or venue in a contested cell is passed over by anyone not
+  of its two sides (`leisure::spot_ok`, `nearest_venue`, both tiers' evenings); a Full body is told once a night when
+  a contested spot lay within `avoid_tiles` (40) ("Cutter Greaves kept off the blocks around Street Market#4423 after
+  dark (The Unplugged 5 and The Unplugged 4 at odds there)"). A family with children in a contested cell moves out
+  (`turf::family_moves`, `family_moves_per_1000` 0.2 a day, the nearest Home with room it can pay outside any
+  contested cell within `family_move_tiles` 120: "Zara Hawthorne moved the children out of the blocks around
+  Block#713 (The Drowned Choir 9 and The Drowned Choir 10 at odds there), into Block#869"), and the commute
+  relocation moves no family into one (`life::relocate_up_to_with`). **Deviation**: "a held cell is quiet" is not a
+  mechanism of its own; it is the contested cell's avoidance and the holder's exclusive door (below).
+- **V14's contradictions at their cause**: (1) a dead extorter collects nothing: `gang::extort` and `stat_extort`
+  stop for a body no longer living or without a purse, also after the Intimidate (its backlash can kill); not
+  re-shadowed (the V14 repro is a 100k pick). (2) One door, three gangs: Expand's door (`gang::free_door`, both
+  tiers) is no other gang's: not in a cell another holds, not under another standing gang's claim (a door one gang
+  works is that gang's); Contest still takes the rival's. Extortion 812 -> 588 and TerritoryFlipped 37 -> 13 in
+  30 days follow (flips are V5's war now). (3) `BountyPaid` once a sighting: `contracts::on_sighting` pays every
+  live Locate the observer sees and tells one line with the sum ("sold a sighting of Cato Volkov for 30 (2
+  buyers)"; `pay_sighting_quiet`, `tell_sighting`).
+- **The under-18 rule** (`ages::is_protected`): `gang::contested` makes no enemy of or for a protected member or
+  actor (the gap the codemap found); the squat-eviction fight neither fights nor evicts a protected squatter, nor
+  does a protected claimant fight (`squat_claim_with`, the second gap); no protected member counts for presence,
+  holds a corner, or is named on a holder line; the pimp's `fit` (U6's) and the pitch opener's `free_adult` stand;
+  `enlist` refuses a minor, so a turf recruit is an adult; tribute is paid by adults only; a family move is the
+  children's protection.
+- **For V5** (the war): `turf::set_status(world, cell, old, new, tell, now)` is the flip (event, `LostTurf`); the
+  provocation hook is `turf::hourly`'s loop (a member on a cell's corner whose holder is another gang: today credited
+  as presence only), `gang::claim` / `extort` on a door of another's held cell under Contest, and `turf::State`
+  (`cells[k].status`, `.corner`, `.days` per gang, `held`, `rival`); `Shock::LostTurf { by }` is the grudge for
+  Retaliate; `turf::neighbours`, `cell_dist`, `centre`, `cell_of` the geometry. The Statistical mirror is
+  `daily`'s `stat_street_hours` credit.
+- **Shadow** (20k `isle_m_k2`, seed 42, d22-27, `target/v2_shadow/`; picks `gang_member_6371`, `_10106`,
+  `gang_leader_15212`, `dealer_7910`, `pimp_21916`): a member on his corner: `gang_member_6371 d22 19:00` above, and
+  `gang_member_10106 d27 23:00` "Tank Kaneda holds The Unplugged 2's corner by Block#713 (9 more of theirs on it)";
+  a holder change told: `gang_member_6371 d27 00:05` "The Unplugged 2 hold the blocks around Block#713 now, taken
+  from The Drowned Choir 10: 2 of their people on the corner most nights"; the pitch in the turf with its pimp:
+  `pimp_21916` (Piers Underhill, Drowned Choir 9, Home Block#631 in its held cell) works his round from d22 00:16, 12
+  collections in d22-23 ("sent Hale Mbeki (63 y) to the pitch of Tristan Sato (21 y) (5c) and took the cut"), holds
+  the corner on his own blocks `d22 19:00` and, his cell contested at `d24 00:05`, the next held one `d24 21:00`
+  (Block#652). A resident avoiding a contested cell: no non-member was picked; the 20k run's line is above.
+- **Reads wrong** (the next pass): the pimp lost the street at `d24 00:07` when his own cell turned contested (to a
+  member on a still-held cell: a contest of a week can strip a street overnight; the reason now says so); gangs are
+  big and sprawl (60 members in The Drowned Choir 9; "43 of theirs about the blocks" in one contested cell), so
+  turf reads more as where members live than as a block held at a corner; `dealer_7910`'s Purist gang lay low all
+  week (no corner, no deal); the leader `gang_leader_15212` (18 y, The Drowned Choir 9's) has no turf line of his
+  own; a cell with no building is named by its coordinates ("the blocks at (588, 732)"). The corner deals
+  multiplied (9 -> 2,835 in 30 days) and the stims trade with them (21.7 -> 606 coins a day): the corner made the
+  dealer reach his buyers, a number moved for a known reason (`FINDING`, not tuned). Turf takes about four days to
+  seed and gangs recruit through the first week: 0 cells held to d3, 30 by d5, 152 by d22, 221 by d29.
+- Numbers (prints; 20k seed 42 x 30, `--scaled --ambient-flats 50`; before main `794bc6d` `target/v2_base/`, after
+  `target/v2_after/`): cells held (last day) 221 by 36 gangs, 6.1 a gang, 25 contested (mean 93 held, 6.7 contested);
+  holder changes 320, cells taken 60, contests 72; corner holds 7,038, corner body-hours 23,260; pimps a day 0.10 ->
+  0.97 (about 2 from d10), pimp collections 12 -> 115, street visits 84 -> 264, street take 420 -> 1,320c, pimps' cut
+  14 -> 150c; turf tribute 15,900c in 30 days (coerced flow 341 -> 727 a day), gang treasury median 116 -> 156, max
+  1,238 -> 2,404; protection leans 45 -> 42; recruits from the turf 122; families moved 82; contested cells passed
+  over (told) 90; Street pitches in the turf 16; Murders 50 -> 57, Assaults 1,145 -> 1,221, Extortion 812 -> 588,
+  DistrictControl changes 10 -> 4; ticks/s 164 -> 122 (the 100k run on the box at once; a print). 100k x 30
+  (`target/v2_100k/`): pimps a day 0.2 (round 5, `target/r5_100k/`) -> 1.17, pimp collections 3 -> 104, street visits 150 -> 848, street take 750 -> 4,240c; cells held (last day) 342 by 105 gangs, 3.3 a gang, 48 contested; holder changes 515, taken 140; corner deals 6,031; turf tribute 27,300c; families moved 572; turf recruits 600; Street pitches in the turf 95; Murders 236 -> 237, Extortion 2,516 -> 1,337; ticks/s 17 (the change tier on the box at once; a print).
+- No test (doctrine 2). `SAVE_VERSION` 97 (renumbered at the merge): `World.turf`, `Shock::LostTurf`,
+  `EventKind::Turf`, `[turf]`, the `Jobs2Cols` `turf_*` columns (printed on `analyze_run.py`'s turf lines). Probes
+  re-pinned with "Round 6 V2" in place: `districts::test_gang_holding_most_homes_controls`,
+  `test_control_first_computation_is_silent`, `test_gang_owned_home_weighs_as_a_home` (the claim rule, `[turf]` off),
+  `leverage::test_protection_never_on_own_front` (the staged racket holds no cell, `[turf]` off),
+  `person::probe_pimp_purse_grows_on_a_pitch_night` (the hand-named pimp, `[turf]` off),
+  `factions::test_contest_keeps_working_a_home_after_the_first_blow` (the next blow is the next day's work).

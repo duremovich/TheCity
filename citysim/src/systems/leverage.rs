@@ -692,17 +692,31 @@ pub(crate) fn answers_for(world: &World, owner: EntityId) -> Option<EntityId> {
 /// closed, not paying anyone already, not tried by this gang lately, and
 /// taking at least the weekly levy.
 pub fn protection_target(world: &World, gang: EntityId, d: crate::components::DistrictId) -> Option<EntityId> {
-    let paying: std::collections::BTreeSet<EntityId> = world
-        .coercions
-        .values()
-        .filter(|c| c.is_active() && c.why == CoercionWhy::Protection)
-        .filter_map(|c| c.building)
-        .collect();
+    // Round 6 V2 (TURF § 2): who pays whom; a business pays one gang unless
+    // its cell is contested, where both sides squeeze it.
+    let mut paying: std::collections::BTreeMap<EntityId, Vec<EntityId>> = std::collections::BTreeMap::new();
+    for c in world.coercions.values().filter(|c| c.is_active() && c.why == CoercionWhy::Protection) {
+        if let Some(b) = c.building {
+            paying.entry(b).or_default().extend(c.holder);
+        }
+    }
+    let turf = crate::systems::turf::on(world);
     let weekly = world.config.leverage.protection_weekly;
     let mut best: Option<(i64, EntityId)> = None;
     for kind in PROTECTED {
         for &b in world.buildings_of_kind(kind) {
-            if world.district_of_building(b) != d || paying.contains(&b) {
+            if world.district_of_building(b) != d {
+                continue;
+            }
+            if let Some(to) = paying.get(&b) {
+                // A second gang squeezes it only in a cell they contest.
+                let squeeze = turf && !to.contains(&gang) && crate::systems::turf::contested_by(world, gang, b);
+                if !squeeze {
+                    continue;
+                }
+            }
+            // Round 6 V2: the holder of its cell (or a side of its contest).
+            if !crate::systems::turf::leans(world, gang, b) {
                 continue;
             }
             let Some(bd) = world.comp::<Building>(b) else { continue };

@@ -442,7 +442,10 @@ use crate::world::World;
 /// `[trade_verbs]` `pimp_book_draws`, `pimp_quits`, `pimp_trip_ticks` keys, `[verbs] wait_at_work_ticks` and the
 /// `Jobs2Cols` `pimp_booked`, `clinic_booked`, `clinic_kept`, `clinic_body`, `clinic_washes` columns
 /// (serde defaults).
-pub const SAVE_VERSION: u8 = 96;
+/// 97 (pressure pass round 6, V2, turf you hold): `World.turf` (`turf::State`: the cells, their status, corner,
+/// landmark and window of presence, the held lists, the neighbours, the night's corner ticks), `Shock::LostTurf`,
+/// `EventKind::Turf`, the `[turf]` section and the `Jobs2Cols` `turf_*` columns (serde defaults).
+pub const SAVE_VERSION: u8 = 97;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

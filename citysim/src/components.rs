@@ -1315,6 +1315,11 @@ pub enum Shock {
     Trespass {
         by: Option<EntityId>,
     },
+    /// Pressure pass round 6, V2 (TURF § 1): a turf cell we held was taken by
+    /// `by` (a grudge: V5's counter-attack scores Retaliate on it).
+    LostTurf {
+        by: Option<EntityId>,
+    },
 }
 
 impl Shock {
@@ -1337,6 +1342,8 @@ impl Shock {
             Shock::Split => 0.8,
             Shock::Hacked { .. } => 0.5,
             Shock::Trespass { .. } => 0.4,
+            // As a lost district (a cell is a few blocks of one).
+            Shock::LostTurf { .. } => 0.5,
         }
     }
 
@@ -1359,6 +1366,8 @@ impl Shock {
                 | Shock::Hacked { by: Some(_) }
                 // M16a C24: a strike by a named faction.
                 | Shock::Trespass { by: Some(_) }
+                // Round 6 V2: a cell taken by a named gang.
+                | Shock::LostTurf { by: Some(_) }
         )
     }
 }

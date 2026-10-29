@@ -5341,3 +5341,40 @@ crowd = 2                          # a door is no searcher's next while this man
                                    # (the first read sent a dozen to one Bar's one post)
 day_start_min = 30                 # the dawn's hand works from this many minutes after [jobs2] corner_hour to the day shift's end
                                    # (V12's hand rested three hours at the Yard for a 09:00 shift)
+
+# Pressure pass round 6, V2 (docs/TURF.md § 1-2; OPEN-241, OPEN-217's street): turf you hold (systems/turf.rs; absent:
+# territory is Homes alone, as round 5 left it). The city is cut into square cells; a gang's daily presence in a cell,
+# summed over presence_days, decides who holds it; the holder's corner, tribute, protection, pimp's pitch and recruits
+# read the cell. Placeholders.
+[turf]
+cell_tiles = 24                    # a cell's side in tiles (a few street blocks; the view colours them later)
+presence_days = 7                  # the days of presence a hold reads (a week on the corner)
+hold_min = 30.0                    # a gang holds a cell with this much presence over the window ...
+hold_margin = 0.25                 # ... ahead of the next gang by this share of the next's; else, the next at keep_share of
+                                   # hold_min or more, the cell is contested (two gangs close)
+keep_share = 0.5                   # a holder keeps its cell while its presence is at least this share of hold_min and
+                                   # nobody passes it by the margin (a quiet week does not hand the street away)
+w_held_home = 2.0                  # a day's presence: a Home (or squat) the gang holds in the cell (claim at 3) ...
+w_resident = 1.0                   # ... a member living there (a jailed or under-18 member counts for nothing) ...
+w_hideout = 6.0                    # ... the gang's Hideout ...
+w_front = 3.0                      # ... a front it owns ...
+w_street_hour = 1.0                # ... a member's hour on the cell's street or in a venue there (a body, sampled hourly) ...
+w_corner_hour = 2.0                # ... an hour on the cell's corner ...
+stat_street_hours = 3.0            # ... and a Statistical member's day on the street, credited to his corner's cell (his
+                                   # Home's when his gang holds none in reach): the off-screen city holds turf the same way
+corner_from = 1080                 # members hold the corner from 18:00 ...
+corner_to = 120                    # ... to 02:00 (ticks of the day, wrapping): the evening the player sees a gang
+corner_ticks_day = 240             # a member holds the corner at most this many minutes a night (an hour a HangOut)
+corner_reach_tiles = 60            # a member's corner: his Home's cell when his gang holds it, else the nearest held cell
+                                   # whose corner is within this of his Home door; none past it (no walk across the island)
+tribute_held = 2                   # a day's tribute to the cell's holder: a Home the gang holds pays this (round 5's 2c) ...
+tribute_home = 1                   # ... any other Home in a held cell this (the turf pays; the adults with a coin pay)
+recruit_affinity_cut = 0.1         # JoinGang: the holder of a recruit's Home cell takes him on a tie this much weaker than
+                                   # [social] join_gang_affinity, before any other gang (the corner is where you are asked)
+avoid_tiles = 40                   # after dark a resident passes over spots and venues in a contested cell; a body is told
+                                   # it when a contested corner is within this of where he sets out
+family_moves_per_1000 = 0.2        # families with children moved out of a contested cell a day, per 1,000 residents ...
+family_move_tiles = 120            # ... into the nearest Home with room they can pay outside any contested cell, within this
+pimp_cells = 1                     # a district's pimp lives in a cell his gang holds within this many cells of one of its
+                                   # street pitches (replaces round 5's [trade_verbs] pimp_trip_ticks as the naming bound;
+                                   # a Street pitch opens in a held cell where the holder's members live)

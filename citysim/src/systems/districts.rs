@@ -977,8 +977,14 @@ pub fn presence(world: &World, d: DistrictId) -> Vec<(Controller, f32)> {
         }
         let is_home = bd.kind == BuildingKind::Home;
         // A held Home, or a held squat of any kind (fix pass: a gang may squat
-        // a derelict Bar or Hotel).
-        if is_home || bd.derelict {
+        // a derelict Bar or Hotel). Pressure pass round 6, V2 (TURF § 1): with
+        // `[turf]`, a standing Home counts for the holder of its cell (control
+        // from the cells, not the claims); a squat still by its claim.
+        if is_home && !bd.derelict && crate::systems::turf::on(world) {
+            if let Some(g) = crate::systems::turf::holder_at(world, bd.door).filter(|&g| world.has::<Gang>(g)) {
+                add(&mut out, Controller::Gang(g), wts.held_home);
+            }
+        } else if is_home || bd.derelict {
             if let Some(c) = bd.claim.filter(|c| c.count >= held && world.has::<Gang>(c.gang)) {
                 add(&mut out, Controller::Gang(c.gang), wts.held_home);
             }

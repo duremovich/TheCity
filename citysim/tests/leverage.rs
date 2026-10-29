@@ -387,6 +387,10 @@ fn test_protection_pays_weekly_and_stops_when_district_lost() {
 #[test]
 fn test_protection_never_on_own_front() {
     let mut w = gang_world();
+    // Round 6 V2: the pick among the district's businesses (never the gang's
+    // own front) is under test; `[turf]` adds the cell's holder, and the
+    // staged racket holds no cell.
+    w.config.turf = None;
     let (g, _, b, _) = racket(&mut w);
     let d = w.district_of_building(b);
     // Shadow V4: the racket's business the district's best (on the moved

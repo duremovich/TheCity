@@ -1057,6 +1057,20 @@ def jobs2(rows, events, out):
         J["vice_share_of_gang_income"] = t["pimp_cut"] / gi if gi else 0
         J["sweeps_a_day"] = t["solicitation"] / days
         J["solicit_arrests_a_day"] = t["solicit_arrests"] / days
+    # Pressure pass round 6, V2 (systems/turf.rs): turf you hold.
+    if "turf_cells_held" in rows[0]:
+        held = col(rows, "turf_cells_held")
+        holding = col(rows, "turf_gangs_holding")
+        last = rows[-1]
+        J["turf_totals"] = {k: sum(col(rows, k)) for k in (
+            "turf_changes", "turf_lost", "turf_contests", "turf_corner_holds", "turf_corner_hours", "turf_avoided",
+            "turf_family_moves", "turf_recruits", "turf_pitches", "turf_tribute") if k in rows[0]}
+        J["turf_last"] = {"cells_held": last.get("turf_cells_held", 0), "contested": last.get("turf_cells_contested", 0),
+                          "gangs_holding": last.get("turf_gangs_holding", 0),
+                          "held_per_gang": (last.get("turf_cells_held", 0) / last["turf_gangs_holding"])
+                          if last.get("turf_gangs_holding") else 0}
+        J["turf_mean"] = {"cells_held": mean(held), "contested": mean(col(rows, "turf_cells_contested")),
+                          "gangs_holding": mean(holding)}
     if "dollhouses" in rows[0]:
         J["chip_totals"] = {k: sum(col(rows, k)) for k in CHIP_TOTALS}
         J["chip_mean"] = {k: mean(col(rows, k)) for k in CHIP_SNAP}
@@ -1435,6 +1449,9 @@ def fmt(o):
             L.append("vice and fashion, daily mean: " + f(w["vice_mean"]) + f"; tips / vice revenue "
                      f"{w['tips_share_of_vice']:.1%}; pimps' cut / gang income {w['vice_share_of_gang_income']:.2%}; "
                      f"Solicitation reports a day {w['sweeps_a_day']:.2f}, arrests a day {w['solicit_arrests_a_day']:.2f}")
+        if "turf_totals" in w:
+            L.append("turf (cells, the corner, the pay), run totals: " + f(w["turf_totals"]))
+            L.append("turf, last day: " + f(w["turf_last"]) + "; daily mean: " + f(w["turf_mean"]))
         if "chip_totals" in w:
             L.append("chip and braindance, run totals: " + f(w["chip_totals"]))
             L.append("chip and braindance, daily mean: " + f(w["chip_mean"]) + f"; BD units legal / black "

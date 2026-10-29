@@ -527,10 +527,15 @@ pub enum EventKind {
     /// soup line: a starving body setting out for a far kitchen, waiting in
     /// the line for the next hour's bowls, turned away when the pot ran dry.
     SoupLine,
+    /// Pressure pass round 6, V2 (`systems::turf`): `[gang, members.., other
+    /// gang?, members.., landmark?]` a cell held, taken, contested or let go;
+    /// `[member, gang]` a member on his gang's corner; `[resident]` a
+    /// contested cell passed over after dark.
+    Turf,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 242] = [
+    pub const ALL: [EventKind; 243] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -773,6 +778,7 @@ impl EventKind {
         EventKind::Custody,
         EventKind::JobSearch,
         EventKind::SoupLine,
+        EventKind::Turf,
     ];
 }
 

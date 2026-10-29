@@ -62,7 +62,12 @@ fn recruit_gang_any(world: &World, id: EntityId) -> Option<EntityId> {
     let open: Vec<bool> = gangs.iter().map(|&g| world.comp::<Gang>(g).is_some_and(|g| recruiting(world, g))).collect();
     // The pressure pass phase 1 (OPEN-178): the miserable need a weaker tie.
     let min_affinity = cfg.join_gang_affinity - crate::systems::misery::join_affinity_cut(world, id);
-    let mut best: Option<(f32, usize, usize, EntityId)> = None;
+    // Pressure pass round 6, V2 (TURF § 2): the holder of the recruit's Home
+    // cell asks first (the corner is where you are asked): its members' ties
+    // count `recruit_affinity_cut` weaker and win over any other gang's.
+    let holder = crate::systems::turf::home_holder(world, id);
+    let turf_cut = crate::systems::turf::cfg(world).map_or(0.0, |c| c.recruit_affinity_cut);
+    let mut best: Option<(bool, f32, usize, usize, EntityId)> = None;
     if open.contains(&true) {
         // The perf pass phase 6 (the slope): an agent's edges grow with the
         // days (co-workers and off-screen meetings), the open gangs' rosters
@@ -94,15 +99,18 @@ fn recruit_gang_any(world: &World, id: EntityId) -> Option<EntityId> {
                 return;
             }
             let Some(e) = world.edge(id, m) else { return };
-            if e.affinity < min_affinity {
+            let own = holder == Some(gid);
+            if e.affinity < min_affinity - if own { turf_cut } else { 0.0 } {
                 return;
             }
-            let better = best.is_none_or(|(a, bg, bm, _)| e.affinity > a || (e.affinity == a && (gi, mi) < (bg, bm)));
+            let better = best.is_none_or(|(o, a, bg, bm, _)| {
+                (own && !o) || (own == o && (e.affinity > a || (e.affinity == a && (gi, mi) < (bg, bm))))
+            });
             if better && reach_on && !*in_reach[gi].get_or_insert_with(|| tryout_place(world, id, gid).is_some()) {
                 return;
             }
             if better {
-                best = Some((e.affinity, gi, mi, gid));
+                best = Some((own, e.affinity, gi, mi, gid));
             }
         };
         if roster_len < known.map_or(0, |s| s.len()) {
@@ -134,7 +142,7 @@ fn recruit_gang_any(world: &World, id: EntityId) -> Option<EntityId> {
             }
         }
     }
-    if let Some((_, _, _, gid)) = best {
+    if let Some((_, _, _, _, gid)) = best {
         return Some(gid);
     }
     // M11 D36: a fresh, lawless evictee is desperate too (the spiral's first link).
@@ -167,10 +175,13 @@ fn recruit_gang_any(world: &World, id: EntityId) -> Option<EntityId> {
                 || (arrested && g.members.is_empty() && world.config.gangs.max_members > 0)
         })
         .filter_map(|(gid, g)| {
-            world.comp::<Building>(g.hideout).map(|b| (b.door.manhattan(from), g.hideout.index, gid))
+            // Round 6 V2: the holder of his cell before the nearest Hideout.
+            world
+                .comp::<Building>(g.hideout)
+                .map(|b| (holder != Some(gid), b.door.manhattan(from), g.hideout.index, gid))
         })
         .min()
-        .map(|(_, _, gid)| gid)
+        .map(|(_, _, _, gid)| gid)
 }
 
 /// M12 D40: no instant hydra. A gang whose roster emptied after having
@@ -424,12 +435,17 @@ pub fn enlist(world: &mut World, id: EntityId, gang: EntityId) {
     if misery.is_some() {
         crate::systems::ownership::jobs2_row(world).misery_joins += 1;
     }
-    let text = match (cites, misery) {
+    let mut text = match (cites, misery) {
         (Some(n), Some(m)) => format!("{name} joined {gname} (cites mem#{n}; {m})"),
         (Some(n), None) => format!("{name} joined {gname} (cites mem#{n})"),
         (None, Some(m)) => format!("{name} joined {gname} ({m})"),
         (None, None) => format!("{name} joined {gname}"),
     };
+    // Round 6 V2 (TURF § 2): a recruit from the gang's own blocks says so.
+    if crate::systems::turf::home_holder(world, id) == Some(gang) {
+        crate::systems::ownership::jobs2_row(world).turf_recruits += 1;
+        text.push_str(": asked on the corner of the gang's blocks, where the recruit lives");
+    }
     world.push_event(EventKind::GangJoin, &[id, gang], text);
     recompute_leader(world, gang);
 }
@@ -691,6 +707,18 @@ pub fn holder_of(world: &World, home: EntityId) -> Option<EntityId> {
         .find(|&g| world.comp::<Gang>(g).is_some_and(|gg| gg.territory.binary_search(&home).is_ok()))
 }
 
+/// Round 6 V2 (TURF § 2): Home `h` is open to `gang`'s Expand: with `[turf]`,
+/// not in a cell another gang holds and not under another standing gang's
+/// claim (a door one gang is working is that gang's); always off.
+pub fn free_door(world: &World, gang: EntityId, h: EntityId) -> bool {
+    if !crate::systems::turf::on(world) {
+        return true;
+    }
+    let Some(b) = world.comp::<Building>(h) else { return false };
+    crate::systems::turf::open_to(world, gang, b.door)
+        && b.claim.is_none_or(|c| c.gang == gang || !world.has::<Gang>(c.gang))
+}
+
 /// The order a loyal member's GangWork serves right now, or `None` while
 /// freelancing (below `freelance_loyalty`) or under an order with no
 /// extortion in it. Cheap: no Home scan.
@@ -807,6 +835,11 @@ pub fn squat_claim_with(world: &mut World, actor: EntityId, b: EntityId, fights:
     let squatters: Vec<EntityId> =
         world.squatters_of(b).iter().copied().filter(|s| members.binary_search(s).is_err()).collect();
     for s in squatters {
+        // Round 6 V2 (the under-18 rule, TURF): a child squatter is neither
+        // fought nor put out (nor does the claimant fight if he is one).
+        if crate::systems::ages::is_protected(world, s) || crate::systems::ages::is_protected(world, actor) {
+            continue;
+        }
         let brave = world.comp::<Personality>(s).is_some_and(|p| p.courage > 0.6);
         if brave && !fights {
             continue;
@@ -834,6 +867,21 @@ pub fn squat_claim_with(world: &mut World, actor: EntityId, b: EntityId, fights:
 /// definition `claim` flips on, so a contested Home whose claim has been
 /// reset still reads as the rival's until the third blow lands.
 pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option<Order>)> {
+    // Round 6 V2 (TURF § 1): the day's order work first (a pimp's round any
+    // hour), else, in the evening, his corner: the target is himself (as a
+    // corner dealer's), the plan `turf::corner_plan`.
+    let done = crate::systems::turf::on(world)
+        && world.comp::<Brain>(id).is_some_and(|b| b.gang_task_day == Some(world.day()));
+    if !done || crate::systems::vice::pimp_target(world, id).is_some() {
+        if let Some(t) = gang_work_reach(world, id) {
+            return Some(t);
+        }
+    }
+    crate::systems::turf::corner_hold(world, id).map(|_| (id, following_order(world, id)))
+}
+
+/// [`gang_work_target`] before the corner.
+fn gang_work_reach(world: &World, id: EntityId) -> Option<(EntityId, Option<Order>)> {
     // Pressure pass round 3, S1 (OPEN-221): the order's Home (a shakedown, a
     // claim) or derelict lies within `[distance.choice] gang_work_ticks` of
     // where the member stands, else no GangWork (V11 at 20k: a dealer off his
@@ -941,9 +989,12 @@ fn gang_work_pick(world: &World, id: EntityId) -> Option<(EntityId, Option<Order
         Some(_) => return None,
     };
     // Unclaimed (no gang holds it), or under Contest in the rival's list.
+    // Round 6 V2 (TURF § 2): unclaimed is also no other gang's door: not in a
+    // cell another gang holds (the holder protects his own), and no claim of
+    // another standing gang on it (V14's `Block#478` paid three in 15 hours).
     let pick = |h: EntityId| match theirs {
         Some(t) => t.binary_search(&h).is_ok(),
-        None => holder_of(world, h).is_none(),
+        None => holder_of(world, h).is_none() && free_door(world, gang, h),
     };
     let r = world.config.crime.sight_day_crime;
     // L1: an order's Home is near the Hideout and near the member.
@@ -1047,6 +1098,11 @@ pub fn note_gang_work(world: &mut World, id: EntityId) {
 /// into the actor's wallet; the Home's claim advances (`claim`); victims
 /// remember WasRobbed and become enemies.
 pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
+    // Round 6 V2 (V14 `gang_member_6572 d22 14:24`): a man dead or down
+    // collects nothing (his step ran out after the blow that killed him).
+    if !law::living(world, actor) || !world.has::<Wallet>(actor) {
+        return 0;
+    }
     let mut amount = world.config.social.extort_amount;
     // M15 W31: a Purist tithes.
     if world.gang_of(actor).is_some_and(|g| crate::systems::creeds::is_purist(world, g)) {
@@ -1084,6 +1140,10 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
     // M15 W27: with moves on, the shakedown is an Intimidate against the
     // strongest occupant; a refusal takes nothing and advances no claim.
     if !occupants.is_empty() && !intimidate(world, actor, home, &occupants, amount) {
+        return 0;
+    }
+    // Round 6 V2: the Intimidate's backlash may have killed him.
+    if !law::living(world, actor) || !world.has::<Wallet>(actor) {
         return 0;
     }
     let total: i64 = occupants.iter().map(|&o| world.comp::<Wallet>(o).map_or(0, |w| w.coins.max(0))).sum();
@@ -1234,7 +1294,7 @@ pub fn stat_extort_target(world: &World, id: EntityId, o: Order) -> Option<Entit
         }
         let ok = match theirs {
             Some(t) => t.binary_search(&h).is_ok(),
-            None => holder_of(world, h).is_none(),
+            None => holder_of(world, h).is_none() && free_door(world, gang, h),
         };
         if !ok || guards.iter().any(|&gt| law::chebyshev(gt, b.door) <= r) {
             continue;
@@ -1256,6 +1316,10 @@ pub fn stat_extort_target(world: &World, id: EntityId, o: Order) -> Option<Entit
 /// gang treasury (the SplitLoot a body walks to the Hideout for). Returns
 /// the coins taken.
 pub fn stat_extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
+    // Round 6 V2: nor off screen.
+    if !law::living(world, actor) || !world.has::<Wallet>(actor) {
+        return 0;
+    }
     let mut amount = world.config.social.extort_amount;
     let gang = world.gang_of(actor);
     if gang.is_some_and(|g| crate::systems::creeds::is_purist(world, g)) {
@@ -1447,8 +1511,13 @@ fn contested(world: &mut World, actor: EntityId, gang: EntityId, h: EntityId, ho
     let r = if world.is_dark() { cfg.sight_night_crime } else { cfg.sight_day_crime };
     let members = world.comp::<Gang>(h).map(|g| g.members.clone()).unwrap_or_default();
     let mut made: Vec<EntityId> = Vec::new();
+    // Round 6 V2 (the under-18 rule, TURF): no one under 18 is made an enemy
+    // over a claim, on either side.
+    if crate::systems::ages::is_protected(world, actor) {
+        return;
+    }
     for m in members {
-        if m == actor {
+        if m == actor || crate::systems::ages::is_protected(world, m) {
             continue;
         }
         let sees =
@@ -1554,6 +1623,13 @@ pub fn run(world: &mut World) {
     let daily = crate::systems::midnight::due(world, crate::systems::midnight::Mid::Gang);
     let hysteresis = world.config.gangs.hysteresis;
     let threshold = world.config.gangs.shock_severity_rethink;
+    // Pressure pass round 6, V2 (TURF § 1): the members' hours on the street
+    // and the corner, then at the gangs' midnight the cells' holders (before
+    // the brains read `rival_of`, the neighbour).
+    crate::systems::turf::hourly(world);
+    if daily {
+        crate::prof::timed!("gang::turf_daily", crate::systems::turf::daily(world));
+    }
     for gang in world.gangs() {
         // M12 D36: a decapitation this tick may split the gang. M17 phase
         // 4b: the succession first (a promotion, or a civil war instead of
@@ -1748,9 +1824,16 @@ fn daily_economy(world: &mut World) {
     }
     let stipend = world.config.social.gang_stipend;
     let now = world.tick;
+    // Pressure pass round 6, V2 (TURF § 2): with `[turf]` the cells' Homes
+    // pay their holder (`turf::tribute`), not the claimed Homes alone.
+    let turf = crate::systems::turf::on(world);
+    if turf {
+        crate::systems::turf::tribute(world);
+    }
     for gang in world.gangs() {
         // Territory tribute: 2 coins/day per Home when the occupants can pay.
-        let territory = world.comp::<Gang>(gang).map(|g| g.territory.clone()).unwrap_or_default();
+        let territory =
+            if turf { Vec::new() } else { world.comp::<Gang>(gang).map(|g| g.territory.clone()).unwrap_or_default() };
         for home in territory {
             // The pressure pass S6 (Dylan 2026-10-27): nobody under 18 is a victim.
             let residents: Vec<EntityId> = world

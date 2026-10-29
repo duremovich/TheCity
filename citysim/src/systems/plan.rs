@@ -285,11 +285,18 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
         GoalKind::GangWork => crate::systems::vice::pimp_plan(world, id)
             .or_else(|| crate::systems::leisure::preach_plan(world, id))
             .or_else(|| crate::systems::stims::corner_plan(world, id))
+            // Round 6 V2 (TURF § 1): holding the corner.
+            .or_else(|| crate::systems::turf::corner_plan(world, id))
             .or_else(|| crate::systems::customers::scav_plan(world, id)),
         GoalKind::GetHigh => crate::systems::stims::corner_buy_plan(world, id),
         _ => None,
     };
-    if scripted.is_none() && goal == GoalKind::GangWork && crate::systems::stims::corner_target(world, id).is_some() {
+    if scripted.is_none()
+        && goal == GoalKind::GangWork
+        && (crate::systems::stims::corner_target(world, id).is_some()
+            || (crate::systems::turf::corner_hold(world, id).is_some()
+                && crate::systems::gang::gang_work_target(world, id).is_some_and(|t| t.0 == id)))
+    {
         // A corner dealer's GangWork targets himself: never the planner's.
         world.cool_goal(id, goal);
         return 0;

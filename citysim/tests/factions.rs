@@ -756,11 +756,19 @@ fn test_contest_keeps_working_a_home_after_the_first_blow() {
     assert_eq!(gang::gang_work_target(&w, a), Some((home, Some(Order::Contest))));
     gang::extort(&mut w, a, home);
     assert_eq!(w.comp::<Building>(home).expect("b").claim, Some(Claim { gang: g0, count: 1 }));
+    // Round 6 V2: the next blow is the next day's work (with `[turf]` a member
+    // whose day's task is done has only his corner).
+    if let Some(br) = w.comp_mut::<citysim::Brain>(a) {
+        br.gang_task_day = None;
+    }
     assert_eq!(gang::gang_work_target(&w, a), Some((home, Some(Order::Contest))), "still the rival's until it flips");
     gang::extort(&mut w, a, home);
     gang::extort(&mut w, a, home);
     assert_eq!(gang::holder_of(&w, home), Some(g0));
-    assert!(gang::gang_work_target(&w, a).is_none(), "nothing of the rival's left to contest");
+    if let Some(br) = w.comp_mut::<citysim::Brain>(a) {
+        br.gang_task_day = None;
+    }
+    assert!(gang::gang_work_target(&w, a).is_none_or(|t| t.0 == a), "nothing of the rival's left to contest");
 }
 
 // ---------------------------------------------------------------------------
