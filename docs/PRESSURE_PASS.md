@@ -2875,20 +2875,22 @@ El unless the rider holds `cab_flush_coins` (80): `fabber_84414` paid 7c a leg o
 **The wrong district (OPEN-240).** Two causes. (1) `streetwork::carry` moved a body ride's rider with his driver on
 every driver step, whatever the driver's plan: a driver pre-empted mid-fare took his rider wherever he went
 (`exec_73953 d24 01:16`: a paid cab to a D4 kitchen, 167 min later on a street in D5). A driver whose plan leaves
-the Work goal now hands the rider to the off-screen cab from where he stands (`release`; `fares_dropped`, 11 in 30
-days). (2) A paid cab was cut by the rider's own next think (`exec_16679 d26 17:02` in the first after-shadow: an
+the Work goal with the rider aboard now hands him to the off-screen cab from where he stands (`release`;
+`fares_dropped`, 3 in 30 days); a rider still waiting at his door waits for a driver finishing another plan. (2) A paid cab was cut by the rider's own next think (`exec_16679 d26 17:02` in the first after-shadow: an
 87-min ride cut 3 min short, Shop 0.07 -> Unwind 0.81). `Jobs2State.riding` holds a cab under way (its landing tick,
-`Tick::MAX` while a body carries him) and `fixes::committed` holds it against any goal but an emergency.
+`Tick::MAX` while a body carries him, aboard) and `fixes::committed` holds it against any goal but an emergency;
+the hold reads the cab's own leg (the same landing tick), so an entry a plan reset left behind holds nothing.
 
 **Numbers** (20k `isle_m_k2`, seed 42 x 30, `--scaled --ambient-flats 50`, one run each; before is main `794bc6d`
 plus the counters commit, identical in every main column to a run of `794bc6d` itself; `target/v4_before`,
-`target/v4_after`): door refusals 1,058 -> 235, **of the drunk 892 -> 31**; door brawls (`Brawl`) 312 -> 101;
-**rider fares to a driver 0 -> 1,264, to an owner 4,040 -> 709**; cab trips 4,452 -> 2,460 (the wage share) and cab
-hails 428 -> 516; **workers past a 3-h commute** at the midnight read d15 589 -> 519, d30 435 -> 375 (mean 1,213 ->
-1,148); retirements 908 -> 620 (`kin_spouse_far`: 1,214 nights a retirement to kin was passed over) and elders taken
-in 2,229 -> 1,845. FINDING, not explained within the cap: the after-run grows its gangs sooner (members d7 2 -> 28,
-d30 934 -> 1,138; Extortion 812 -> 1,278, Assault 1,145 -> 1,617, GangJoin 1,122 -> 1,372, gang income +32 %), with
-employment within 0.5 % and ~150 more elders at work; the gangs' founding tips on day 7 in one run and not the other.
+`target/v4_after/run5.csv`): door refusals 1,058 -> 122, **of the drunk 892 -> 25**; door brawls (`Brawl`) 312 -> 86;
+**rider fares to a driver 0 -> 1,402, to an owner 4,040 -> 583**; cab trips 4,452 -> 2,378 (the wage share) and cab
+hails 428 -> 490; **workers past a 3-h commute** at the midnight read d15 589 -> 497, d30 435 -> 400 (mean 1,213 ->
+1,130); retirements 908 -> 623 (`kin_spouse_far`: 1,283 nights a retirement to kin was passed over) and elders taken
+in 2,229 -> 1,839. FINDING, not explained within the cap: the after-runs grow their gangs sooner (members d30 934 ->
+1,003, and 1,138 in the after-run before the last two narrowings; Extortion 812 -> 999, Assault 1,145 -> 1,382,
+GangJoin 1,122 -> 1,213), with employment within 0.5 % and ~150 more elders at work; the gangs' founding tips on day
+7 in one run and not the other, and the spread between the two after-runs reads as divergence, not a mechanism.
 
 **Shadow** (20k, seed 42, days 21-27, `office_worker:6,night_shift:2,fabber:3,exec:2,cabbie:2`; `target/v4_shadow`,
 before `target/v4_base/shadow` with the brief's picks). The night out gets in: `office_worker_18570 d24 21:55`
@@ -2902,15 +2904,17 @@ to Fixer#4805", "-> Fixer#4805 ... 60 min, 127 tiles (done)". The driver's side 
 case at 20k in these picks; it is read from the counter (`kin_spouse_far`) and the code.
 
 **Reads wrong (next pass).** An off-screen ride from a Garage whose drivers are all bodies still pays the owner
-(709 of 1,973; "CabFare -22 to corp Zetatech 7"); the fix is a ride that does not happen (no driver, no cab) or the
+(583 of 1,985; "CabFare -22 to corp Zetatech 7"); the fix is a ride that does not happen (no driver, no cab) or the
 nearest Garage with an off-screen driver. The cabbie still stands by most of a shift (the commuter cab halved).
 `office_worker_18570 d27 07:25` "ACTION Drink @ street ... (ended)": the diary prints where an interrupted step's
 body stood when it ended (it left the Den at 07:30). Under-18: nothing here picks a victim or a fight; a minor at a
 kept door is turned away "under age" as T4 built, unchanged.
 
 **Deviations.** No new test. Two `tests/street.rs` probes re-pinned on their premise (Round 6 V4): the tier-blind
-roll's `pay_ride` takes the driver (`None`), and the body ride is paid at the pick-up to the driver, who keeps his
-cut, the owner taking the house's share (it asserted payment on arrival, to the owner). New config: `[life]
+roll's `pay_ride` takes the driver (`None`), and the body ride is paid at the pick-up, to the driver (`cab_paid_driver`),
+the owner taking the house's share (it asserted payment on arrival, to the owner); and
+`person.rs`'s `probe_pimp_purse_grows_on_a_pitch_night` reads the meeting as it happens (the pimp's regulars keep 8
+faces and his busier gang day on the V4 city pushed the worker off by the window's end). New config: `[life]
 commute_long_ticks`, `[jobs2] cab_wage_share`, `cab_flush_coins` (serde defaults). New `Jobs2Cols`: `door_drunk`,
 `cab_paid_driver`, `cab_paid_other`, `commute_long`, `kin_spouse_far`, `fares_dropped`; `analyze_run.py` prints
 them in "the street". `SAVE_VERSION` 96 -> 97 (the keys, the columns, `Jobs2State.riding`).

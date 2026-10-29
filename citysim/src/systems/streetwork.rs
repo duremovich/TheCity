@@ -2309,10 +2309,11 @@ pub fn carry(world: &mut World, driver: EntityId) {
     // off-screen cab from where the rider stands, paid then (`release`):
     // the rider rode along wherever the driver went instead
     // (`exec_73953 d24 01:16`: a paid cab to a D4 kitchen, 167 min later on
-    // a street in D5).
+    // a street in D5). Only a rider aboard (stage 1): a driver booked while
+    // finishing another plan comes for the waiting rider after it.
     let off_fare = world.comp::<Brain>(driver).and_then(|b| b.plan_goal()).is_some_and(|g| g != GoalKind::Work);
     if off_fare {
-        if let Some(i) = world.jobs2.cab_rides.iter().position(|r| r.driver == driver && r.body) {
+        if let Some(i) = world.jobs2.cab_rides.iter().position(|r| r.driver == driver && r.body && r.stage >= 1) {
             let r = world.jobs2.cab_rides.remove(i);
             ownership::jobs2_row(world).fares_dropped += 1;
             release(world, &r, false);
@@ -2360,7 +2361,11 @@ pub fn riding(world: &World, id: EntityId) -> bool {
         && world.comp::<Brain>(id).is_some_and(
             |b| matches!(b.exec, crate::exec::ExecState::GotoTimed { arrive_tick, .. } if arrive_tick == t),
         )
-        && (t != Tick::MAX || world.jobs2.passengers.contains_key(&id))
+        // A body ride holds once he is aboard (stage 1): waiting at his door
+        // for a driver who is late, his next think may still give it up.
+        && (t != Tick::MAX
+            || (world.jobs2.passengers.contains_key(&id)
+                && world.jobs2.cab_rides.iter().any(|r| r.rider == id && r.body && r.stage >= 1)))
 }
 
 /// The `fares` shape: the day's end (`daily`): every rider still waiting or

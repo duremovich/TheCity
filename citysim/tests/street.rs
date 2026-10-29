@@ -1029,7 +1029,6 @@ mod lives_street {
         b.exec = state;
         let mut together = 0;
         let mut arrived = false;
-        let driver0 = coins(&w, driver);
         for _ in 0..(2 * TICKS_PER_DAY) {
             if w.comp::<Brain>(driver).is_some_and(|b| b.plan.is_none()) {
                 let p = sw::fare_plan(&mut w, driver).expect("the driver's plan");
@@ -1066,7 +1065,7 @@ mod lives_street {
         assert!(j.served[ServeKind::Fare as usize] > j0.served[ServeKind::Fare as usize], "the pick-up's encounter");
         let fare = before - coins(&w, a);
         assert!(fare > 0, "the fare paid");
-        assert!(coins(&w, driver) > driver0, "the driver kept his cut");
+        assert!(j.cab_paid_driver > j0.cab_paid_driver, "the rider paid the driver");
         if owner.is_some() {
             assert!(till(&w) > till0, "the Garage's owner took the house's share");
         }
