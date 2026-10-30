@@ -118,13 +118,15 @@ fn test_deal_pays_gang_and_dealer() {
     let income = w.stats.current.gang_income_dealing;
     assert_eq!(stims::buy_stims(&mut w, buyer, bar), 2, "two doses");
     assert_eq!(coins(&w, buyer), 90);
-    assert_eq!(treasury(&w, g), 8, "the gang keeps 5 x 2 less the cut");
-    assert_eq!(coins(&w, dealer) - dealer_coins, 2, "the dealer's cut, 1 a dose");
+    // Round 7 W5: the dealer's cut is the stand's, paid at its end (`end_deal`).
+    assert_eq!(treasury(&w, g), 10, "the gang holds the 5 x 2 while the stand runs");
     assert_eq!(stims_of(&w, dealer), 8);
     assert_eq!(stims_of(&w, buyer), 2);
     assert_eq!(w.stats.current.stims_dealt, 2);
     assert_eq!(w.stats.current.gang_income_dealing - income, 10, "dealing income, gross");
     stims::end_deal(&mut w, dealer);
+    assert_eq!(treasury(&w, g), 8, "the gang keeps 5 x 2 less the cut");
+    assert_eq!(coins(&w, dealer) - dealer_coins, 2, "the dealer's cut, 1 a dose");
     assert!(w.dealers.is_empty(), "unregistered");
     assert_eq!(stims::stim_source(&w, buyer), None);
 }

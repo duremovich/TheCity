@@ -3821,3 +3821,79 @@ grocery run's eat step applies to any hungry adult's idle run, not only the chil
 Under-18: nothing here touches a victim pick, a fight, a fine or a punishment; nothing calls `law`. The children's
 food is bought and kept back for them; an unfed day still counts only toward the service's take. No test
 (doctrine 2). No save change (the `[camp]` keys are config, serde defaults).
+
+### W5, contradictions (V15 item 6, `OPEN-237`; `household::breakout`, `Crime::CampEscape`, `vice::set_done`, `vice::on_set`, `consequence::paid_awake`, `law::raise_crime_core`, `stims::Stand`, `ages::pick_school`, `social::propose_allowed`, `lod::stat_flirt`, `search::hourly`, `search::on_ask`, `[crime] sentence_days_ext.camp_escape`)
+
+20k island seed 42 x 30 (`--scaled --ambient-flats 50`), one run each: before = main `bdb3d66`, after = the branch;
+counts from the event log by name. Shadow `target/w5_shadow` (the branch before the last two fixes) and
+`target/w5_shadow2` (the branch): camp_parent x2, dancer x3, ceo x2, dealer x2, school_parent x3, jobless x3,
+gang_member x2, d20-27.
+
+1. **The father jailed 20 days for "Abduction"** (`camp_parent_51134 d22 19:18`). The break-out raised and filed
+   `Abduction` (`household::breakout`), the term of a chrome harvest. A parent taking his own child back is now
+   `Crime::CampEscape` ("Camp Escape", the warden's matter: just above Theft, `[crime] sentence_days_ext.camp_escape`
+   2 days), raised at the door and filed by the warden; a failed try is filed before the cuffs, so the arrest names
+   the charge (it had read "arrested X" with no report). **The flipped witness lines are no flip**: Sprocket
+   Abernathy#102760 was at the Camp at 19:18 (he saw the break-out and ran), was sighted there by `ceo_61159` at
+   19:35, and at 20:36 he "committed Abduction" seen by Cipher (stealing at the Street Market seven tiles off) and by
+   `ceo_61159` at the same Market: a second parent's break-out at the same Camp the same evening, both labelled
+   Abduction. With the label right the two lines read as two escapes. 20k: one break-out a run (before and after),
+   now "the city reported Kenji Fletcher for Camp Escape" and no 20-day term.
+2. **The barred man back in the room** (`dancer_74279 d21 20:32`). The bar holds (no change to the door or
+   `vice::barred`). The set's tally carried him: the 20:32 tip was taken in a set the Flee cut, the cut block never
+   reached `vice::set_done`, and its tippers rode into the 23:31 set's line. Two holes, both closed in
+   `vice::set_done` / `vice::on_set`: a stations block cut short closes its set (`exec::actions::on_abort` calls
+   `set_done`; a block that is no set clears the tally), and a set counts only the room and tips taken while the
+   dancer is on the stage (`ClerkWork` in progress; the 20k `dancer_17424 d23 18:00`: the client barred during her
+   rest before the set was named a tipper "at" the 18:05 set). Sets naming a client barred earlier that night 12 -> 9;
+   all 9 left are sets in progress when the rough happened (he tipped in that set, then was thrown out), none later.
+3. **The CEO robbed and never reacting** (`ceo_20314 d23`). W2's waking covers the asleep half, but the sleeper
+   still *witnessed* the shakedown: the witness roll took bodies asleep (`ceo_16592 d21 01:03`, 20k: "Static Adeyemi
+   saw Hale Tanaka commit Shakedown" asleep in his block, a SawCrime at the minute, then W2's waking line). A sleeper
+   sees nothing now (`law::raise_crime_core`). The awake half (`d23 08:26`, `d27 10:59`: robbed at home by one man
+   twice, nothing but the money line) had no line at all: the payer's hue needs the street. `consequence::paid_awake`
+   gives the awake payer W2's line: he means to tell the law (the word owed, as the woken sleeper's) or tells nobody
+   and why (`law::keeps_from_law`), "again" when the same man robbed him inside `tell_days`. 20k: 443 such lines (227
+   tell nobody, 23 "again"); woken-sleeper lines 237 -> 327.
+4. **The stand's five Witness and money lines** (`dealer_101293 d22 19:01`). Each sale raised Dealing and every
+   witness its own line, and each sale paid the dealer's cut. A stand (`stims::Stand`, `World.stands`, the `Deal`
+   step at a Bar or on a corner) now folds them: a sale's witness at an open stand goes into its tally (memories,
+   reports and reactions unchanged), and at the stand's end (`end_deal`: done, abort, death, arrest) one line ("20
+   saw Rhoswen Coldwater deal stims on the corner by Block#759 (12:57-13:33, 5 sales): ...") and one money line, the
+   cut paid in one sum. Per-witness Dealing lines 1,054 -> 0, stand lines 361.
+5. **"Beyond the purse" with 10c in it** (`school_parent_48165 d22 09:30`). The midnight pick read
+   `leisure::spendable` (the coins less the rent's week and the meals); the line at 09:30 read as the morning's purse
+   (the night shift's wage in it). `Child.school_purse` keeps the pick's coins and what was kept back, and the line
+   says it: "the 2c fee at School#4559 was beyond the purse at midnight (4c in hand, 4c of it kept for the rent and
+   meals)". The rule (rent before the fee) is unchanged.
+6. **A marriage while the groom is in a cell** (`sick_65180 d26 21:40`). The off-screen flirt (`lod::stat_flirt`)
+   proposed from or to a body under a `Sentence`. Nobody held proposes or is proposed to (`social::propose_allowed`,
+   both tiers), and nobody courts from a cell. Marriages with a party under a sentence, by name, 55 -> 25; `marry` is
+   reached only through `propose_allowed`, so the 25 are name collisions in the 20k log (a Kira Inchbald married
+   inside a 10-day term with no release line; names repeat at 20k).
+7. **The told lead dropped** (`jobless_6217 d24`). Two causes. The friends were asked eight minutes into a six-hour
+   sleep (`search::hourly` took sleepers): a sleeper asks nobody and is given no door until his first hour up. And
+   the lead's door was a Market, a board: `on_ask` read the board and never said what came of the lead. A lead's door
+   that is a board now says it first: "asked at Street Market#4300 about work (Solene Oyelaran told of it): the post
+   was gone; the board there: a Club Staff post at Club#5005". 20k: leads told 54 -> 67; their outcomes 40 hires, 19
+   "the post was gone"; no lead's door was a board in the after run (that line is read from the code).
+
+**Numbers moved for known reasons** (FINDING, not claimed): the sleeper is no witness, so Witness lines 12,100 ->
+9,957 (with the stand fold), Reports 1,681 -> 1,627, arrests 1,315 -> 1,200, jailed mean 151.9 -> 137.9.
+
+**Reads wrong / open** (the next pass): 5,033 marriages in 30 days at 20k (a quarter of the city; the off-screen
+flirt's rate, outside this phase); the stand's line comes at the `Deal` step's end, which can be an hour after its
+last sale ("15:38 ... (14:03-14:11, 3 sales)"); a sale's witness learns it at the minute but his diary line comes at
+the stand's end; no awake CEO shakedown met a pick in the final shadow (the line is quoted from the first shadow's
+payers); "commit Camp Escape" is the generic witness wording; a set's "room" now counts only arrivals during the
+set, so more sets read as empty rooms (W6's).
+
+**Under 18.** No pick widened. The break-out was a parent's adult act already (the child is in no fight); the
+Camp-escape charge lands on the parent only. `paid_awake` speaks for payers the shakedown already filtered to adults,
+and `keeps_from_law` names no protected suspect. The sleeper filter and the stand fold only remove lines.
+
+Re-pinned in place with "Round 7 W5": `civic::test_breakout_is_a_contest_at_the_door_and_files_abduction` (a Camp
+escape is filed, not an Abduction) and `contracts::test_conspiracy_ranks_below_murder` (CampEscape moved every rank
+above Theft up one), `stims::test_deal_pays_gang_and_dealer` (the cut is paid at the stand's end). No test
+added (doctrine 2). `SAVE_VERSION` 106 (renumbered at the merge): `Crime::CampEscape`,
+`[crime] sentence_days_ext.camp_escape`, `World.stands`, `Child.school_purse` (serde defaults).

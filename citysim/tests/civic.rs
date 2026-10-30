@@ -386,8 +386,9 @@ fn test_buyout_returns_the_child_and_moves_the_fee() {
 }
 
 /// § 3.5 (break-out): a contest at the Camp door against the wardens
-/// present; won, the child comes home and an `Abduction` is filed on the
-/// parent.
+/// present; won, the child comes home and a `CampEscape` is filed on the
+/// parent (Round 7 W5: a parent taking his own child back is a Camp escape,
+/// the warden's matter, never an Abduction).
 #[test]
 fn test_breakout_is_a_contest_at_the_door_and_files_abduction() {
     let mut w = city();
@@ -413,8 +414,8 @@ fn test_breakout_is_a_contest_at_the_door_and_files_abduction() {
         assert_eq!(home(&w, child), Some(cmp), "lost: the child stays");
     }
     assert!(
-        w.crime_reports().iter().any(|r| r.crime == Crime::Abduction && r.suspect == a),
-        "an Abduction filed on the parent either way"
+        w.crime_reports().iter().any(|r| r.crime == Crime::CampEscape && r.suspect == a),
+        "a Camp escape filed on the parent either way (Round 7 W5)"
     );
 }
 

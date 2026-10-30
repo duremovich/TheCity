@@ -187,7 +187,7 @@ sight_day_crime = 8
 sight_night_crime = 4
 sentence_days = [3, 6, 10, 30]
 # M13 D47: the crimes appended after Vagrancy (GrandTheft and Manslaughter land in phase 2).
-sentence_days_ext = { grand_theft = 6, dealing = 5, abduction = 20, manslaughter = 10, intrusion = 2, data_theft = 5, fraud = 2, blackmail = 3, arms_dealing = 6, smuggling = 8 }   # M14 V18: intrusion, data_theft; M16b: fraud, blackmail; Jobs & lives phase 3: arms_dealing, smuggling (UnlicensedArms is a night in the cells)
+sentence_days_ext = { grand_theft = 6, dealing = 5, abduction = 20, manslaughter = 10, intrusion = 2, data_theft = 5, fraud = 2, blackmail = 3, arms_dealing = 6, smuggling = 8, camp_escape = 2 }   # M14 V18: intrusion, data_theft; M16b: fraud, blackmail; Jobs & lives phase 3: arms_dealing, smuggling (UnlicensedArms is a night in the cells); round 7 W5: camp_escape, a parent who broke his own child out of a work Camp (the warden's matter, not an Abduction)
 # jail capacity is buildings.jail.capacity
 fight_death_p = 0.03
 stat_theft_caught_p = 0.25

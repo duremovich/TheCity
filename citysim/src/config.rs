@@ -6184,6 +6184,9 @@ pub struct SentenceDaysExt {
     /// Jobs & lives phase 3 (§ 4): a dealer's weapon sale, a seized crate.
     pub arms_dealing: u32,
     pub smuggling: u32,
+    /// Pressure pass round 7, W5 (`OPEN-237`): a parent's break-out of his
+    /// own child from a work Camp (`Crime::CampEscape`).
+    pub camp_escape: u32,
 }
 
 impl Default for SentenceDaysExt {
@@ -6199,6 +6202,7 @@ impl Default for SentenceDaysExt {
             blackmail: 3,
             arms_dealing: 6,
             smuggling: 8,
+            camp_escape: 2,
         }
     }
 }

@@ -47,7 +47,9 @@ pub fn deed_of_crime(crime: Crime) -> Option<Deed> {
         | Crime::Solicitation
         | Crime::Trafficking
         | Crime::Forgery
-        | Crime::BlackMarket => None,
+        | Crime::BlackMarket
+        // Round 7 W5: a parent's break-out is no deed of the word.
+        | Crime::CampEscape => None,
     }
 }
 

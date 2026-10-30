@@ -1024,11 +1024,14 @@ fn child_home(world: &mut World, id: EntityId, child: EntityId, camp: EntityId, 
 /// § 3.5 (break-out): the parent and his gang's free members at the door
 /// (a body's within `raid_gather_radius`; a Statistical parent's the first
 /// `breakout_crew`) against the wardens present and the Camp's robots,
-/// `raid::fight_out`. Won: the child home and an `Abduction` raised on the
+/// `raid::fight_out`. Won: the child home and a `CampEscape` raised on the
 /// parent at the door; lost: the strongest warden standing arrests a body
-/// (`law::arrest` takes any arrester adjacent), else the Abduction is
+/// (`law::arrest` takes any arrester adjacent), else the escape is
 /// filed with the parent as suspect and the warrant runs (deviation: a
-/// Statistical parent has no body at the door).
+/// Statistical parent has no body at the door). Round 7 W5 (`OPEN-237`):
+/// a parent taking his own child back is a Camp escape, the warden's
+/// matter (`[crime] sentence_days_ext.camp_escape`), never an Abduction
+/// (`camp_parent_51134 d22 19:18`: 20 days for a 75-y father).
 fn breakout(world: &mut World, id: EntityId, child: EntityId, camp: EntityId, walked: bool, weighed: &str) {
     let Some(door) = world.comp::<Building>(camp).map(|b| b.door) else { return };
     let cfg = world.config.service.clone();
@@ -1054,8 +1057,8 @@ fn breakout(world: &mut World, id: EntityId, child: EntityId, camp: EntityId, wa
         let what = format!("broke {{child}} out of {{camp}} ({weighed})");
         child_home(world, id, child, camp, EventKind::CampBreakout, &what);
         if crate::systems::law::living(world, id) {
-            crate::systems::law::raise_crime_on(world, id, None, Some(child), Crime::Abduction, door);
-            crate::systems::law::file_report(world, Crime::Abduction, id, witness);
+            crate::systems::law::raise_crime_on(world, id, None, Some(child), Crime::CampEscape, door);
+            crate::systems::law::file_report(world, Crime::CampEscape, id, witness);
         }
         ownership::jobs2_row(world).camp_breakouts += 1;
         return;
@@ -1076,10 +1079,11 @@ fn breakout(world: &mut World, id: EntityId, child: EntityId, camp: EntityId, wa
     let mut actors = vec![id, child, camp];
     actors.extend(defenders.iter().take(3).copied());
     world.push_event(EventKind::Custody, &actors, text);
-    let cuffed =
-        walked && defenders.iter().any(|&w| world.has::<Brain>(w) && crate::systems::law::arrest(world, w, id));
-    if !cuffed {
-        crate::systems::law::file_report(world, Crime::Abduction, id, defenders.first().copied());
+    // Round 7 W5: the warden's report first, so the cuffs name the charge
+    // (an arrest with no report read "arrested X" and booked nothing).
+    crate::systems::law::file_report(world, Crime::CampEscape, id, defenders.first().copied());
+    if walked {
+        let _ = defenders.iter().any(|&w| world.has::<Brain>(w) && crate::systems::law::arrest(world, w, id));
     }
 }
 

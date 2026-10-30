@@ -30,6 +30,67 @@ use crate::systems::ownership::{self, Flow, OwnerKind};
 use crate::time::{TICKS_PER_DAY, TICKS_PER_HOUR};
 use crate::world::World;
 
+/// Round 7 W5 (`OPEN-237`): a dealer's stand in progress (a `Deal` step,
+/// at a Bar or on a corner): its sales, the witnesses its sales drew and the
+/// dealer's cut, told and paid once at its end ([`end_deal`]). V15
+/// `dealer_101293 d22 19:01-19:05`: five Witness lines and five money lines
+/// for one stand, the `BountyPaid` fold (round 6 V2) never reached Dealing.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Stand {
+    pub since: crate::time::Tick,
+    pub last: crate::time::Tick,
+    pub place: Option<EntityId>,
+    pub tile: TilePos,
+    pub gang: EntityId,
+    pub sales: u32,
+    /// The dealer's cut owed by the gang, paid at the stand's end.
+    pub cut: i64,
+    /// The witnesses, first seen first (at most `STAND_FACES`), and all of them.
+    pub seen: Vec<EntityId>,
+    pub seen_n: u32,
+}
+
+/// The names a stand's line keeps (the line names `[verbs] night_names`).
+const STAND_FACES: usize = 12;
+
+/// Round 7 W5: `law::raise_crime_core`'s witness of a sale at `dealer`'s
+/// stand: folded into its line (`true`), none open (`false`, the line as
+/// before).
+pub fn stand_seen(world: &mut World, dealer: EntityId, w: EntityId) -> bool {
+    let Some(s) = world.stands.get_mut(&dealer) else { return false };
+    s.seen_n += 1;
+    if s.seen.len() < STAND_FACES && !s.seen.contains(&w) {
+        s.seen.push(w);
+    }
+    true
+}
+
+/// Round 7 W5: the stand's end: the cut paid in one sum, the witnesses in
+/// one line ("6 saw Juniper Ostrowski deal stims on the corner by Club#5154
+/// (19:02-19:05, 4 sales): ...").
+fn close_stand(world: &mut World, dealer: EntityId) {
+    let Some(s) = world.stands.remove(&dealer) else { return };
+    if s.cut > 0 && crate::systems::law::living(world, dealer) && world.has::<Wallet>(dealer) {
+        ownership::pay(world, Some(s.gang), Some(dealer), s.cut, Flow::Stims);
+    }
+    if s.seen.is_empty() {
+        return;
+    }
+    let at = match s.place {
+        Some(b) => format!("at {}", world.name_of(b)),
+        None => crate::systems::turf::corner_name_at(world, s.tile)
+            .map_or_else(|| "on the street".to_string(), |c| format!("on {c}")),
+    };
+    let span = |t: crate::time::Tick| format!("{:02}:{:02}", (t % TICKS_PER_DAY) / 60, t % 60);
+    let when = if s.last > s.since { format!("{}-{}", span(s.since), span(s.last)) } else { span(s.since) };
+    let sales = if s.sales == 1 { "1 sale".to_string() } else { format!("{} sales", s.sales) };
+    let names = crate::systems::vice::named(world, &s.seen, s.seen_n as usize);
+    let text = format!("{} saw {} deal stims {at} ({when}, {sales}): {names}", s.seen_n, world.name_of(dealer));
+    let mut actors = vec![dealer];
+    actors.extend(s.seen.iter().copied());
+    world.push_event(EventKind::Witness, &actors, text);
+}
+
 /// Phase 4 is on with `[assets] enabled` (plan D50).
 pub fn on(world: &World) -> bool {
     world.config.assets.enabled
@@ -592,7 +653,11 @@ pub fn start_deal(world: &mut World, dealer: EntityId, bar: EntityId) {
 }
 
 /// `Deal` ends (completion, abort, death, arrest): unregistered everywhere.
+/// Round 7 W5: the stand told and its cut paid (`close_stand`).
 pub fn end_deal(world: &mut World, dealer: EntityId) {
+    if !world.stands.is_empty() {
+        close_stand(world, dealer);
+    }
     if !world.corner_dealers.is_empty() {
         for list in world.corner_dealers.values_mut() {
             list.retain(|&d| d != dealer);
@@ -786,7 +851,27 @@ fn sell(world: &mut World, buyer: EntityId, dealer: EntityId, place: Option<Enti
     }
     let n = i64::from(units);
     let paid = ownership::pay(world, Some(buyer), Some(gang), n * price, Flow::Stims);
-    ownership::pay(world, Some(gang), Some(dealer), n * world.config.stims.dealer_cut, Flow::Stims);
+    // Round 7 W5 (`OPEN-237`): the cut is the stand's, paid at its end
+    // (`close_stand`); a stand left open a day (an end never called) is
+    // closed before the next opens.
+    let now = world.tick;
+    if world.stands.get(&dealer).is_some_and(|s| now.saturating_sub(s.since) > TICKS_PER_DAY) {
+        close_stand(world, dealer);
+    }
+    let s = world.stands.entry(dealer).or_insert_with(|| Stand {
+        since: now,
+        last: now,
+        place,
+        tile,
+        gang,
+        sales: 0,
+        cut: 0,
+        seen: Vec::new(),
+        seen_n: 0,
+    });
+    s.last = now;
+    s.sales += 1;
+    s.cut += n * world.config.stims.dealer_cut;
     world.stats.current.stims_dealt += units;
     // Round 6 V5 (TURF § 3): a deal on another gang's held cell provokes it.
     crate::systems::turf::provoke_at(world, dealer, tile, crate::systems::turf::Provoke::Deal);

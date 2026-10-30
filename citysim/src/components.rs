@@ -817,6 +817,10 @@ pub enum Crime {
     /// Jobs & lives phase 6 (§ 7, D16): a black clinic found by the law,
     /// filed on its staff; just above Dealing.
     BlackMarket,
+    /// Pressure pass round 7, W5 (`OPEN-237`): a parent who broke his own
+    /// child out of a work Camp; the warden's matter, not an Abduction.
+    /// Just above Theft.
+    CampEscape,
 }
 
 impl Crime {
@@ -845,6 +849,7 @@ impl Crime {
             Crime::Trafficking => "Trafficking",
             Crime::Forgery => "Forgery",
             Crime::BlackMarket => "Black Market",
+            Crime::CampEscape => "Camp Escape",
         }
     }
 
@@ -869,31 +874,34 @@ impl Crime {
             // Jail); everything from Theft to BlackMarket moves up one.
             Crime::UnlicensedArms => 3,
             Crime::Theft => 4,
+            // Round 7 W5: a Camp escape just above Theft; everything above
+            // moves up one.
+            Crime::CampEscape => 5,
             // M16b: Fraud just above Theft, Blackmail just above Shakedown;
             // everything above each moves up (the order is all that is read).
-            Crime::Fraud => 5,
+            Crime::Fraud => 6,
             // Jobs & lives phase 6 (§ 7): Forgery just above Fraud,
             // BlackMarket just above Dealing; everything above moves up.
-            Crime::Forgery => 6,
-            Crime::Intrusion => 7,
-            Crime::GrandTheft => 8,
-            Crime::DataTheft => 9,
-            Crime::Dealing => 10,
-            Crime::BlackMarket => 11,
+            Crime::Forgery => 7,
+            Crime::Intrusion => 8,
+            Crime::GrandTheft => 9,
+            Crime::DataTheft => 10,
+            Crime::Dealing => 11,
+            Crime::BlackMarket => 12,
             // Jobs & lives phase 3 (§ 4): the other arms crimes between
             // Dealing and Shakedown.
-            Crime::ArmsDealing => 12,
-            Crime::Smuggling => 13,
-            Crime::Extortion => 14,
-            Crime::Blackmail => 15,
-            Crime::Assault => 16,
-            Crime::Manslaughter => 17,
-            Crime::Abduction => 18,
+            Crime::ArmsDealing => 13,
+            Crime::Smuggling => 14,
+            Crime::Extortion => 15,
+            Crime::Blackmail => 16,
+            Crime::Assault => 17,
+            Crime::Manslaughter => 18,
+            Crime::Abduction => 19,
             // Jobs & lives phase 5 (§ 5.2): just above Abduction; everything
             // above moves up one.
-            Crime::Trafficking => 19,
-            Crime::Conspiracy => 20,
-            Crime::Murder => 21,
+            Crime::Trafficking => 20,
+            Crime::Conspiracy => 21,
+            Crime::Murder => 22,
         }
     }
 }
@@ -2064,6 +2072,12 @@ pub struct Child {
     /// (`camp::fetch_daily`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slipped: Option<(crate::entity::EntityId, u32)>,
+    /// Round 7 W5 (`OPEN-237`): on a `Purse` miss, the payer's coins in hand
+    /// at the midnight pick and what of them was kept back (the rent's week
+    /// and the meals, `leisure::spendable`); the `[family]` line reads the
+    /// purse the pick read, not the one the morning's wage refilled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub school_purse: Option<(i64, i64)>,
 }
 
 /// Round 4 T2 (OPEN-232): a school-age child kept home on a school day.

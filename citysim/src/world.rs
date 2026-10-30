@@ -578,6 +578,11 @@ pub struct World {
     /// Statistical buyers' pass reads it beside `deal_log`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub corner_log: BTreeMap<TilePos, (EntityId, u64)>,
+    /// Pressure pass round 7, W5 (`OPEN-237`): dealer -> his stand in
+    /// progress (`stims::Stand`: the sales' witnesses and his cut, told and
+    /// paid at the stand's end). Written while it holds one.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub stands: BTreeMap<EntityId, crate::systems::stims::Stand>,
     /// M13 D42: robot -> the Security corp that sold it (a robot in service
     /// counts in its seller's Security share as a contract does).
     #[serde(default)]
@@ -1921,6 +1926,7 @@ impl World {
             deal_log: BTreeMap::new(),
             corner_dealers: BTreeMap::new(),
             corner_log: BTreeMap::new(),
+            stands: BTreeMap::new(),
             robot_sellers: BTreeMap::new(),
             edges: crate::edge_map::EdgeMap::new(),
             crime_reports: Vec::new(),

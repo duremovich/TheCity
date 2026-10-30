@@ -462,6 +462,41 @@ pub fn slept_through(world: &mut World, sleeper: EntityId, extorter: EntityId, c
     world.consequence.slept_through.push((sleeper, extorter, now, coins));
 }
 
+/// Round 7 W5 (`OPEN-237`): `w` holds a `WasRobbed` of `actor` from the
+/// last `[crime.case] tell_days`.
+pub fn robbed_by_within(world: &World, w: EntityId, actor: EntityId) -> bool {
+    let since = world.tick.saturating_sub(world.config.crime.case.tell_days * crate::time::TICKS_PER_DAY);
+    world.comp::<crate::components::Memory>(w).is_some_and(|m| {
+        m.entries.iter().any(|e| e.kind == MemoryKind::WasRobbed && e.subject == Some(actor) && e.tick >= since)
+    })
+}
+
+/// Round 7 W5 (`OPEN-237`; `gang::extort`): a payer awake at the door
+/// paid `coins` to `actor`'s shakedown of `home`: his line, as the woken
+/// sleeper's (`woke`): he means to tell the law (the word owed, read by
+/// `word_given`) or he tells nobody and why (`law::keeps_from_law`). V15
+/// `ceo_20314 d23 08:26`: shaken down at home twice by one man in four days
+/// with 570c in the purse, and nothing in the diary but the money line.
+pub fn paid_awake(world: &mut World, w: EntityId, actor: EntityId, home: EntityId, coins: i64, again: bool) {
+    if !living(world, w) || !world.has::<Brain>(w) {
+        return;
+    }
+    let now = world.tick;
+    let (wn, an, at) = (world.name_of(w), world.name_of(actor), world.name_of(home));
+    let again = if again { ", again" } else { "" };
+    let text = if crate::systems::law::tells_the_law(world, w, actor) {
+        let until = now + world.config.crime.case.tell_days * crate::time::TICKS_PER_DAY;
+        world.consequence.owed_word.retain(|x| x.2 > now);
+        world.consequence.owed_word.push((w, actor, until));
+        let he = pro(world, w).0;
+        format!("{wn} paid {an}'s shakedown at {at}{again} ({coins}c); {he} means to tell the law")
+    } else {
+        let why = crate::systems::law::keeps_from_law(world, w, actor).unwrap_or_default();
+        format!("{wn} paid {an}'s shakedown at {at}{again} ({coins}c); tells nobody: {why}")
+    };
+    world.push_event(EventKind::WitnessReacted, &[w, actor], text);
+}
+
 /// Round 7 W2 (`OPEN-238`), every `[crime.case] find_every_ticks` (with
 /// the find pass): a sleeper robbed in his sleep and awake now finds his
 /// purse short. He learns who from the block (the shakedown was at his
