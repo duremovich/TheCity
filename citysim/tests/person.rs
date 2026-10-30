@@ -2186,6 +2186,11 @@ fn widow(strong: bool) -> (World, EntityId, EntityId) {
         set_skill_and_nerve(&mut w, killer, 0.3, 0.5, 0.3);
     }
     set_skill_and_nerve(&mut w, brother, 0.5, 0.5, 0.0);
+    // Round 7 W2: the premise is a killer at large. On the moved city the
+    // widow finds the body at the killing and the case's scene roll names
+    // him (jailed for 30 days that evening), so the law names nobody here.
+    w.config.crime.case.lead_p = 0.0;
+    w.config.crime.case.tie_lead_p = 0.0;
     w.kill_by(husband, citysim::DeathCause::Violence, Some(killer));
     // Round 7 W3 (`OPEN-244`): the premise is a killer the law has not got.
     // The body's case named him (Round 6 V3) and the guards now make the
@@ -3102,6 +3107,11 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
     // by the pitch, and the midnight unseated the probe's subject. The round
     // is under test, not the naming (read in the V2 shadow).
     cfg.turf = None;
+    // Round 7 W2: a shakedown's payer now tells the beat of it (his sighting
+    // is a victim's); on this city a payer of the pimp's first-evening Extort
+    // told a guard and he was jailed before his first pitch night. The round
+    // is under test, not the street's word: nobody tells the beat here.
+    cfg.crime.case.tell_lawful_min = 2.0;
     let mut w = World::new(42, cfg);
     let start = 12 * TICKS_PER_DAY + 17 * TICKS_PER_HOUR;
     w.run_ticks(start);

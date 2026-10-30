@@ -61,6 +61,12 @@ fn test_scav_prey_ranked_past_cover() {
     let (covered, bare) = (ds[0], ds[1]);
     w.districts[covered].coverage = 3.0;
     w.districts[bare].coverage = 0.0;
+    // Round 7 W2: the cover is the coverage alone. The street's word on
+    // shakedowns (a payer's tell) moved the seed-42 city: the bare district's
+    // law stance read full cover (a crackdown or cordon), as the covered one.
+    for d in [covered, bare] {
+        w.districts[d].stance = citysim::components::Stance::Patrol;
+    }
     let tile_in = |w: &World, d: usize| {
         let h = w.districts[d].homes[0];
         w.comp::<citysim::Building>(h).map(|b| b.door).expect("door")

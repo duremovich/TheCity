@@ -1815,9 +1815,14 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
             continue;
         }
         *t.event_kinds.entry(format!("{:?}", e.kind)).or_insert(0) += 1;
-        let others: Vec<EntityId> = e.actors.iter().copied().filter(|&a| a != id && world.has::<Identity>(a)).collect();
-        for o in others {
-            t.contact(world, o);
+        // Round 7 W2 (OPEN-241): a war line's actors include the gang's men who
+        // hear it, not people the pick met.
+        if e.kind != EventKind::Turf {
+            let others: Vec<EntityId> =
+                e.actors.iter().copied().filter(|&a| a != id && world.has::<Identity>(a)).collect();
+            for o in others {
+                t.contact(world, o);
+            }
         }
         let text = format!("{:?}: {}", e.kind, e.text);
         // Round 4 T7 (OPEN-233): a petty crime the pick saw (a guard inside
@@ -4138,7 +4143,10 @@ fn write_diary(world: &World, t: &mut Track, dir: &std::path::Path, end: Tick) -
         money(out_of(&["Rent"]))
     );
     let _ = writeln!(md, "- HangOuts: {}, distinct known contacts met there: {}", t.hangouts, t.hang_known.len());
-    let _ = writeln!(md, "- tribute received (Flow::Tribute): {}", money(t.tribute_in));
+    // Round 7 W2: a tribute line that would read 0c is not printed (V15 street: 22 of 22).
+    if t.tribute_in != 0 {
+        let _ = writeln!(md, "- tribute received (Flow::Tribute): {}", money(t.tribute_in));
+    }
     let _ = writeln!(md, "- gossip told about me: {} telling(s)", t.gossip_about);
     contracts_section(world, t.id, &mut md);
     if t.held_settles > 0 || t.stat_minutes > 0 || !t.stat_notes.is_empty() {

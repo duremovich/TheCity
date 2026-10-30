@@ -3624,3 +3624,98 @@ a guard caps it at 10 an hour.
 No test (doctrine 2); `probe_widow_commissions_a_hit_at_the_fixer` re-pinned on its premise (the killer the law has not got: the body counts as found, so no case opens; the guards now arrested him 54 min after the find). `SAVE_VERSION` 104 (W4 took 103; renumbered at the merge): `fares::State.busy`,
 `Wounded.tried`, the W3 keys and the `law_open_warrants`, `law_door_taken`, `law_door_arrests` columns (serde
 defaults).
+### W2, the war and the case in the diaries (`OPEN-241`, `OPEN-238`; `raid::wait_for_crew`, `raid::muster_point`, `contracts::mission_muster`, `crew::march_released`, `turf::hearers`, `turf::muster_wait`, `turf::waits_for_called`, `law::tells_the_law`, `law::keeps_from_law`, `consequence::woke`, `demography::found`, `[crew] march_wait_ticks`, `[crime.case] fear_courage_max`)
+
+20k island seed 42 x 30 (`--scaled --ambient-flats 50`), one run each: before = main `795943c` with this phase's
+counters only (the run matched the plain main run to the digit), after = the branch. The new `Jobs2Cols` counters
+print on `analyze_run.py`'s "the war and the case in the diaries" line.
+
+1. **The muster walks off.** Two causes. (a) *The column split at the door*: the first marcher at the door held the
+   Brawl only until three stood there, then went in. The rest of the column, a Coarse body's timed walk or a Full
+   body's steps behind, found it over and was released mid-walk with no line. A diagnosis run found the missing
+   marchers at the brawl 30-100 tiles out on `GoTo(RaidTarget)`, 31 of 38 of them Coarse. Now the first at the door also
+   holds for any marcher on `GoTo(RaidTarget)` due there within `[crew] march_wait_ticks` (60). The arrival is a timed
+   walk's `arrive_tick` or a Full body's tiles at the walking pace, and the hold still ends in the march window's last
+   hour, as before. (b) *The march across the island* (`cultist_62792 d21`, 100k: 293 tiles to the Hideout, then 220
+   toward a Precinct, asleep at energy 0.03 when the raid was over): with no held Home within `muster_near_tiles` of
+   the target, the muster was the Hideout, however far. Now it is the held Home nearer the target than the Hideout
+   (`raid::muster_point`). A contract mission mustered at the Fixer's office wherever it stood (`gang_member_11411 d25`,
+   20k: muster in D3, then 343 tiles toward the Sump for six hours, "the crew never reached the door"). Now
+   `contracts::mission_muster` takes the first of its places within `muster_near_tiles` of the door, else the nearest
+   of them. A marcher still on the way when the raid is over says so (`crew::march_released`: "X was still on the way
+   when G went in at P (...), and turned back" / "... when G's raid was off, and turned back"). One already in the
+   brawl from within reach of the door is not counted as missed.
+   **The corner muster** (`turf::muster_wait`, `muster_holds`, `waits_for_called`): a called member on his corner
+   waits there until the fight. The HangOut lasts until it, and the empty-spot leave and every goal but danger or
+   starving give way. A fight that is due waits up to `march_wait_ticks` for the mover's called men on their way. The
+   diagnosis says the corner was no walk-off: of the called bodies missing at the fight, about a third were asleep
+   (fights at 01:00-05:00 from beatings), a third were on shift and a tenth were still walking. Not changed: a call
+   does not wake a sleeper.
+2. **A member hears his gang's war** (`turf::hearers`, `war_line`): every war line (the call, the war's start, the
+   fight held or flipped, nobody came, lying low, the truce, the crackdown, the war gone quiet) now carries the gang's
+   free adults who live in the cell or within `muster_cells` of it. Lying low, the truce and the quiet carry all its
+   adults. The shadow's contact list skips a Turf line's actors (the men who hear a line are not people the pick met).
+3. **The victim's side.** (a) *The sleeper*: a shakedown's payer who is asleep is no longer the Intimidate's target
+   (V15 rolled "Intimidate ... SUCCESS" on a sleeping man) and learns nothing at the minute. On waking
+   (`consequence::woke`, every `find_every_ticks`) he finds the purse short: a WasRobbed, the soured edge and a victim's
+   first-hand sighting of each extorter. His line says he means to tell the law (an on-duty guard in earshot takes it
+   at once, else the hourly tell or ReportCrime) or that he tells nobody, with his reason (`law::keeps_from_law`: his
+   gang, the suspect's gang on his block, the sale, his own warrant, not one for the law). (b) *Every payer*: the
+   shakedown's parties held a sighting with no object, so the tell (`o == Some(w)`) never read a robbed payer. A
+   party's sighting now names himself (victim-like). (c) *Fear* (`[crime.case] fear_courage_max` 0.5, inside
+   `tells_the_law`, so it reaches the hue, the tell and the new paths): a victim or witness under that courage does not
+   name a man whose gang holds the block he lives on. (d) *The witness who finds the body* (`demography::found`): if
+   he holds a first-hand Murder sighting of the killer, he names him ("the law opened a case and has a name: X saw it
+   done", a Murder report with him as the witness), or the case line says he kept quiet and why. (e) The summary's
+   "tribute received" line prints only when it is not 0c.
+
+**Numbers** (20k x 30, before -> after): raid marchers at the door when it went in 172 of 235 (73 %) -> 204 of 238
+(86 %); marchers released on the way 88 -> 90 (both runs still counted a marcher in the brawl from within reach;
+the committed count no longer does); raid results 15 -> 18, called off at the door 6 -> 10, fizzled 3 -> 1. Corner
+fights: called bodies at the corner 391 of 955 (41 %) -> 359 of 875 (41 %), unmoved for the reasons above. Gang members
+(not leaders) on a war line 536 -> 4,202. Sleepers robbed asleep 339 -> 331. Found it on waking 0 -> 285: 128 mean to
+tell; 157 tell nobody (their gang 73, not one for the law 29, afraid of the holders 25, wanted 24, the sale 6). A
+robbed sleeper's word reaching the law within `tell_days` 7 -> 18. Shakedown tells on the street 0 -> 36; Shakedown
+reports 87 -> 100. Found bodies whose finder saw the Murder 6 -> 1 (he kept quiet, with the reason printed). Moved
+for known reasons, not claimed: provocations 1,547 -> 1,238, corner fights 64 -> 67, flips 34 -> 40.
+
+**Shadow** (20k, seed 42, d20-27, `target/w2_after/shadow/`, gang_member x8, gang_leader x4, cultist x3, courier x3,
+worker x3). A member called while asleep, then on the corner for the fight: `gang_member_10582 d25 00:00` "Roxy
+Kowalczyk, The Unplugged 2's leader, called 19 of theirs about the blocks to the corner by Block#335", `03:12` GOAL
+GangWork, GoTo(Spot) 20 tiles, `03:20` "HANGOUT ... 7 other(s) there", `04:00` "The Unplugged 2 pushed The Drowned
+Choir 8 off the corner by Block#335, 6 against 2". Members' war lines: `gang_member_19576` and `_20109 d22 00:05` "Wire
+Novak called The Ash Rats off the corners to lie low: 6 of their 21 beaten, dead, jailed or gone since the war with The
+Static Rats began on day 21"; `cultist_9090 d22 00:05` the truce, "Matthias Jarrow of The Drowned Choir 9 and Echo
+Wexford of The Drowned Choir 10 struck a truce ..."; `gang_member_14191 d20 23:00` "The Unplugged came to the corner by
+Club#4865 (...): nobody of The Neon Wolves' there". The sleeper: `cultist_10709 d22 01:20` "Zoe Chrome woke at
+Block#199 to find 4c gone from the purse: Vivienne Haas shook the block down in the night; tells nobody: she runs with
+The Drowned Choir 6, and the law is not their way". From the after run's log (no pick met these): "Seraphine Wexford
+woke at Block#714 to find 5c gone from the purse: Dmitri Garland shook the block down in the night; she means to tell
+the law" (d7 16:30), "Seraphine Wexford told Ulysses Oyelaran on the street: Dmitri Garland, for Shakedown" (d9
+01:00), "Dmitri Garland (71 y) resisted arrest and fought off the guard ..." (d10); "Mirabel Abernathy found the body
+of Perrin Oyelaran at Parts Fab#4899; the law's case is open on the killer already wanted (Mirabel Abernathy saw it
+done and said nothing: she runs with The Red Lanterns, and the law is not their way)" (d15).
+
+**Reads wrong / open** (the next pass): a member on the corner at the fight who is not one of the six reads as absent
+(the line gives the count, not him); a called member who is asleep sleeps through the call; 128 sleepers meant to
+tell and only 18 did inside two days (the tell needs a guard on the street within 12 tiles, and ReportCrime's Hall is
+out of reach); no raid walk-off or released line met a 20k pick, and the 100k cultist case is read from the code only
+(the brief named no 100k run); the war's start reaches only the members around its cell, so a member far off hears
+only lying low, the truce and the quiet.
+
+**Under 18.** `turf::hearers` takes no protected member. The corner muster and the fight were already gated by
+`ages::is_protected` (`corner_hold`, `can_fight`), and the raid's tail check skips a protected marcher. The case never
+names a protected killer, and `keeps_from_law` names no protected suspect ("says nothing"). A sleeper's waking line
+names the extorters who took his coins (the shakedown's victims were already adults only).
+
+Probes re-pinned in place with "Round 7 W2" (green on main, red on the branch on their premise): `person::probe_widow_commissions_a_hit_at_the_fixer`
+(the widow found her husband's body at the killing and the case's scene roll named the killer, jailed that evening: the
+probe holds `lead_p`/`tie_lead_p` at 0, a killer at large), `person::probe_pimp_purse_grows_on_a_pitch_night` (a payer of
+the pimp's first Extort told the beat and he was jailed before his pitch night: nobody tells the beat in the probe),
+`factions::test_muster_point_is_held_home_nearest_target` (the rule moved: a held Home past `muster_near_tiles` nearer the
+target than the Hideout is the muster), `scavs::test_scav_prey_ranked_past_cover` (the bare district's law stance read full
+cover on the moved city: both districts set to Patrol, the cover the coverage alone).
+
+No test (doctrine 2). `SAVE_VERSION` 104 (renumbered at the merge): `consequence::State` `slept_through`,
+`owed_word`, `[crew] march_wait_ticks`, `[crime.case] fear_courage_max`, the `Jobs2Cols` `war_called` ...
+`witness_quiet` columns (serde defaults).

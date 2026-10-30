@@ -1202,13 +1202,21 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
     }
     // Shadow V4 bug 9: the robbed are those who paid (9 of 17 shakedowns
     // took 0 coins and still made Enemies, memories and claims).
+    // Round 7 W2 (`OPEN-238`): a payer asleep through it learns it when he
+    // wakes (`consequence::woke`): no memory, edge or sighting now.
     let mut paid = Vec::new();
     for (i, &o) in occupants.iter().enumerate() {
-        if world.comp::<Wallet>(o).is_some_and(|w| w.coins < held[i]) {
-            world.remember(o, MemoryKind::WasRobbed, Some(actor), 0.7, -0.7, false);
-            social::robbed_by(world, o, actor);
-            paid.push(o);
+        let lost = held[i] - world.comp::<Wallet>(o).map_or(held[i], |w| w.coins);
+        if lost <= 0 {
+            continue;
         }
+        if crate::systems::presence::asleep(world, o) {
+            crate::systems::consequence::slept_through(world, o, actor, lost);
+            continue;
+        }
+        world.remember(o, MemoryKind::WasRobbed, Some(actor), 0.7, -0.7, false);
+        social::robbed_by(world, o, actor);
+        paid.push(o);
     }
     let today = world.day();
     if let Some(b) = world.comp_mut::<Brain>(actor) {
@@ -1436,9 +1444,13 @@ pub fn stat_extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
 fn intimidate(world: &mut World, actor: EntityId, home: EntityId, occupants: &[EntityId], amount: i64) -> bool {
     use crate::systems::moves;
     // The pressure pass S6 (Dylan 2026-10-27): nobody under 18 is a victim.
+    // Round 7 W2 (`OPEN-238`): a sleeper is not stood over; with everyone
+    // asleep the purses are taken from the sleeping (V15 `courier_50890 d23
+    // 03:56`: "Intimidate from Dmitri Kemp ... SUCCESS" on a man asleep).
     let target = occupants
         .iter()
         .filter(|&&o| !crate::systems::ages::is_protected(world, o))
+        .filter(|&&o| !crate::systems::presence::asleep(world, o))
         .map(|&o| (moves::might(world, o), o))
         .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)))
         .map(|(_, o)| o);

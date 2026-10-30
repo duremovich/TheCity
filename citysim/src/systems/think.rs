@@ -324,6 +324,11 @@ fn apply(world: &mut World, id: EntityId, scheduled: bool, s: Scored) -> bool {
         if old == Some(GoalKind::Arrest) {
             crate::systems::law::chase_dropped(world, id, Some(winner));
         }
+        // Round 7 W2 (`OPEN-241`): a marcher still on the way when his raid
+        // was over says so.
+        if old == Some(GoalKind::Raid) && march_over {
+            crate::systems::crew::march_released(world, id);
+        }
         crate::prof::timed!("think::abort", world.abort_plan(id));
         if let Some(old) = old {
             world.push_event(EventKind::PlanAborted, &[id], format!("{old:?} -> {winner:?}"));

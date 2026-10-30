@@ -470,7 +470,10 @@ use crate::world::World;
 /// `Wounded.tried`, the `[fares] handle_minutes`, `book_age`, `[care] call_radius`, `call_term`, `call_flat`,
 /// `[justice] chase_overtime_hours`, `door_from_hour`, `door_to_hour` keys and the `Jobs2Cols`
 /// `law_open_warrants`, `law_door_taken`, `law_door_arrests` columns (serde defaults).
-pub const SAVE_VERSION: u8 = 104;
+/// 105 (pressure pass round 7, W2, the war and the case in the diaries; renumbered at the merge):
+/// `consequence::State`'s `slept_through` and `owed_word`, the `[crew] march_wait_ticks` and `[crime.case]
+/// fear_courage_max` keys and the `Jobs2Cols` `war_called` ... `witness_quiet` columns (serde defaults).
+pub const SAVE_VERSION: u8 = 105;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

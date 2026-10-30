@@ -248,9 +248,13 @@ pub fn muster_point(world: &World, agent: EntityId) -> Option<MusterAt> {
                         .filter_map(|&h| {
                             world.comp::<Building>(h).filter(|b| !b.demolished).map(|b| (b.door.manhattan(t), h, b))
                         })
-                        .filter(|&(d, _, _)| d <= near)
                         .min_by_key(|&(d, h, _)| (d, h));
-                    if let Some((_, _, b)) = best {
+                    // Round 7 W2 (`OPEN-241`): past `muster_near_tiles`, the
+                    // held Home nearer the target than the Hideout (V15
+                    // `cultist_62792 d21`: 293 tiles to the Hideout, then 220
+                    // more toward a Precinct across the island, cut asleep).
+                    let hideout_d = hideout.and_then(|h| world.comp::<Building>(h)).map(|b| b.door.manhattan(t));
+                    if let Some((_, _, b)) = best.filter(|&(d, _, _)| d <= near || hideout_d.is_some_and(|x| d < x)) {
                         return Some(MusterAt::Door(world.outside_door(b)));
                     }
                 }
@@ -426,6 +430,12 @@ pub fn resolve(world: &mut World, actor: EntityId) -> Option<Outcome> {
         let door = gang_target(world, gid).and_then(|b| world.comp::<Building>(b)).map(|b| b.door);
         let present = door.map_or_else(Vec::new, |d| raiders_at(world, gid, actor, d));
         crate::systems::crew::mustered(world, gid, &present);
+        // Round 7 W2 (`OPEN-241`): the column when it went in.
+        let pool = world.comp::<Gang>(gid).map(|g| g.members.clone()).unwrap_or_default();
+        let marching = marchers(world, &pool).max(present.len());
+        let row = crate::systems::ownership::jobs2_row(world);
+        row.raid_marchers += marching as u32;
+        row.raid_at_door += present.len() as u32;
     }
     let head = if raiding && crate::systems::careers::lieutenants_on(world) {
         let door = gang_target(world, gid).and_then(|b| world.comp::<Building>(b)).map(|b| b.door);
@@ -474,16 +484,60 @@ pub fn wait_for_crew(world: &World, actor: EntityId) -> bool {
         return false;
     }
     let Some(door) = target.and_then(|b| world.comp::<Building>(b)).map(|b| b.door) else { return false };
-    let marching = pool
-        .iter()
+    let marching = marchers(world, &pool);
+    let present = gathered(world, &pool, actor, door);
+    if present.len() < cap.min(marching) {
+        return true;
+    }
+    // Round 7 W2 (`OPEN-241`): a gang's column waits for its tail, a
+    // marcher on the march to the door due there within `[crew]
+    // march_wait_ticks` (V15: the first three went in; the rest of the
+    // column, a Coarse body's timed walk or a Full body's steps behind,
+    // found it over and walked off).
+    let Some(Expedition::Gang(_)) = expedition_of(world, actor) else { return false };
+    let Some(wait) = crate::systems::crew::cfg(world).map(|c| c.march_wait_ticks).filter(|&t| t > 0) else {
+        return false;
+    };
+    pool.iter().any(|&m| {
+        !present.contains(&m)
+            && law::living(world, m)
+            && !world.has::<Sentence>(m)
+            && !crate::systems::ages::is_protected(world, m)
+            && march_eta(world, m, door).is_some_and(|eta| eta <= wait)
+    })
+}
+
+/// Round 7 W2: the ticks until `m`, on his Raid plan's march to the door
+/// (`GoTo(RaidTarget)`), is there: a timed walk's arrival, a Full body's
+/// tiles at the walking pace; `None` off the march.
+fn march_eta(world: &World, m: EntityId, door: TilePos) -> Option<Tick> {
+    let b = world.comp::<Brain>(m)?;
+    if b.current_goal != Some(GoalKind::Raid) {
+        return None;
+    }
+    let step = b.plan.as_ref()?.steps.get(usize::from(b.plan_step))?.action;
+    if step != crate::goap::ActionKind::GoTo(crate::goap::LocationKey::RaidTarget) {
+        return None;
+    }
+    match &b.exec {
+        crate::exec::ExecState::GotoTimed { arrive_tick, .. } => Some(arrive_tick.saturating_sub(world.tick)),
+        crate::exec::ExecState::Goto { .. } => {
+            let p = world.comp::<Position>(m)?;
+            Some(Tick::from(p.tile.manhattan(door)) * world.config.exec.move_ticks_full)
+        }
+        _ => None,
+    }
+}
+
+/// Of `pool`, the free living agents whose goal is Raid (the column).
+fn marchers(world: &World, pool: &[EntityId]) -> usize {
+    pool.iter()
         .filter(|&&m| {
             law::living(world, m)
                 && !world.has::<Sentence>(m)
                 && world.comp::<Brain>(m).is_some_and(|b| b.current_goal == Some(GoalKind::Raid))
         })
-        .count();
-    let present = gathered(world, &pool, actor, door).len();
-    present < cap.min(marching)
+        .count()
 }
 
 /// The raiders present at a door: the actor, plus every fit member of the

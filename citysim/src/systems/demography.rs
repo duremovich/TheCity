@@ -701,10 +701,28 @@ pub fn found(world: &mut World, c: EntityId, finder: EntityId) {
         let p = (p * crate::systems::competence::law_mult(world)).clamp(0.0, 1.0);
         world.rng.world().random::<f32>() < p
     });
+    // Round 7 W2 (`OPEN-238`): a finder who saw the killing names the
+    // killer to the law, or keeps quiet for a reason his line gives (his
+    // gang, the killer's gang on his block, his nature: `law::keeps_from_law`)
+    // and the case reads from that. V15 `gang_member_6731 d24 02:54`: saw
+    // the Murder, found the body a minute later, "no suspect", no word why.
+    let saw = killer.is_some_and(|x| saw_murder(world, finder, x));
+    let tells = saw && nameable.is_some_and(|x| crate::systems::law::tells_the_law(world, finder, x));
+    let quiet =
+        if saw && !tells { killer.and_then(|x| crate::systems::law::keeps_from_law(world, finder, x)) } else { None };
+    let named = if tells { nameable } else { named };
+    if saw {
+        let row = crate::systems::ownership::jobs2_row(world);
+        row.witness_finds += 1;
+        row.witness_named += u32::from(tells);
+        row.witness_quiet += u32::from(quiet.is_some());
+    }
+    let hush = quiet.as_ref().map_or(String::new(), |why| format!(" ({fname} saw it done and said nothing: {why})"));
     let case = match (named, wanted) {
-        (Some(_), _) => "; the law opened a case and has a name",
-        (None, true) => "; the law's case is open on the killer already wanted",
-        (None, false) => "; the law opened a case: no suspect",
+        (Some(_), _) if tells => format!("; the law opened a case and has a name: {fname} saw it done"),
+        (Some(_), _) => format!("; the law opened a case and has a name{hush}"),
+        (None, true) => format!("; the law's case is open on the killer already wanted{hush}"),
+        (None, false) => format!("; the law opened a case: no suspect{hush}"),
     };
     world.push_event(
         EventKind::CorpseFound,
@@ -712,17 +730,34 @@ pub fn found(world: &mut World, c: EntityId, finder: EntityId) {
         format!("{fname} found the body of {dname} at {place}{lay}{case}"),
     );
     if let Some(x) = named {
-        let how = if k.tied { "who knew the dead" } else { "from the scene" };
-        let text =
-            format!("the law named {} for the Murder of {dname} ({how}; the body found by {fname})", world.name_of(x));
+        let text = if tells {
+            format!("{fname} told the law {} did it: the Murder of {dname}", world.name_of(x))
+        } else {
+            let how = if k.tied { "who knew the dead" } else { "from the scene" };
+            format!("the law named {} for the Murder of {dname} ({how}; the body found by {fname})", world.name_of(x))
+        };
+        let witness = tells.then_some(finder);
         crate::systems::law::file_report_as(
             world,
             crate::components::Crime::Murder,
             x,
-            None,
+            witness,
             Some((text, &[c, finder])),
         );
     }
+}
+
+/// Round 7 W2 (`OPEN-238`): `w` holds a first-hand sighting of `killer`
+/// committing a Murder.
+fn saw_murder(world: &World, w: EntityId, killer: EntityId) -> bool {
+    world.comp::<crate::components::Memory>(w).is_some_and(|m| {
+        m.entries.iter().any(|e| {
+            e.kind == MemoryKind::SawCrime
+                && !e.second_hand
+                && e.subject == Some(killer)
+                && e.crime == Some(crate::components::Crime::Murder)
+        })
+    })
 }
 
 /// The Gravedigger is told of every unburied corpse daily so Bury can fire.

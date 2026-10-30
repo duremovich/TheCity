@@ -53,6 +53,7 @@ use crate::entity::EntityId;
 use crate::events::EventKind;
 use crate::systems::household::{PendingVisit, VisitWhy};
 use crate::systems::ownership::{self, Flow};
+use crate::time::Tick;
 use crate::word::{Creed, GrudgeCause, HuntPhase, HuntState, HuntWhy};
 use crate::world::World;
 
@@ -140,6 +141,14 @@ pub struct State {
     /// Prisoners in the cells: prisoner -> the run.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inside: Vec<(EntityId, Inside)>,
+    /// Round 7 W2 (`OPEN-238`): a shakedown's payers asleep when it took
+    /// their coins, `(sleeper, extorter, tick, coins)`: found on waking.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slept_through: Vec<(EntityId, EntityId, Tick, i64)>,
+    /// Round 7 W2: a robbed sleeper's word the law may get, `(victim,
+    /// suspect, until)` (`sleeper_reports` counts it when filed).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub owed_word: Vec<(EntityId, EntityId, Tick)>,
 }
 
 impl State {
@@ -149,6 +158,8 @@ impl State {
             && self.services.is_empty()
             && self.guests.is_empty()
             && self.inside.is_empty()
+            && self.slept_through.is_empty()
+            && self.owed_word.is_empty()
     }
 
     fn inside_mut(&mut self, id: EntityId) -> Option<&mut Inside> {
@@ -210,7 +221,7 @@ fn gang_name(world: &World, g: EntityId) -> String {
 }
 
 /// (he, him, his) for `id`.
-fn pro(world: &World, id: EntityId) -> (&'static str, &'static str, &'static str) {
+pub(crate) fn pro(world: &World, id: EntityId) -> (&'static str, &'static str, &'static str) {
     match world.comp::<Identity>(id).map(|i| i.sex) {
         Some(crate::components::Sex::Female) => ("she", "her", "her"),
         _ => ("he", "him", "his"),
@@ -441,6 +452,115 @@ fn tell(
         }
     }
     told
+}
+
+/// Round 7 W2 (`OPEN-238`): `sleeper` paid `coins` to `extorter`'s
+/// shakedown asleep (`gang::extort`).
+pub fn slept_through(world: &mut World, sleeper: EntityId, extorter: EntityId, coins: i64) {
+    crate::systems::ownership::jobs2_row(world).sleeper_paid += 1;
+    let now = world.tick;
+    world.consequence.slept_through.push((sleeper, extorter, now, coins));
+}
+
+/// Round 7 W2 (`OPEN-238`), every `[crime.case] find_every_ticks` (with
+/// the find pass): a sleeper robbed in his sleep and awake now finds his
+/// purse short. He learns who from the block (the shakedown was at his
+/// door): `WasRobbed`, the soured edge and a victim's first-hand sighting
+/// for each (what the hue, the tell and ReportCrime read), and a line: he
+/// means to tell the law (an on-duty guard in earshot takes it at once),
+/// or why he tells nobody (`law::keeps_from_law`). V15 `courier_50890
+/// d21-23`: robbed four times asleep in three days, and told nobody.
+pub fn woke(world: &mut World) {
+    if world.consequence.slept_through.is_empty() {
+        return;
+    }
+    let now = world.tick;
+    let mut ready: Vec<(EntityId, EntityId, Tick, i64)> = Vec::new();
+    let mut keep: Vec<(EntityId, EntityId, Tick, i64)> = Vec::new();
+    for x in std::mem::take(&mut world.consequence.slept_through) {
+        let gone = !living(world, x.0) || world.has::<Sentence>(x.0);
+        let up = !crate::systems::presence::asleep(world, x.0);
+        // A day asleep (the stand-in's night, a coma) is forgotten.
+        let stale = now.saturating_sub(x.2) > crate::time::TICKS_PER_DAY;
+        if gone || stale {
+            continue;
+        }
+        if up {
+            ready.push(x);
+        } else {
+            keep.push(x);
+        }
+    }
+    world.consequence.slept_through = keep;
+    let mut sleepers: Vec<EntityId> = ready.iter().map(|x| x.0).collect();
+    sleepers.sort_unstable();
+    sleepers.dedup();
+    let until = now + world.config.crime.case.tell_days * crate::time::TICKS_PER_DAY;
+    for k in sleepers {
+        let mine: Vec<(EntityId, EntityId, Tick, i64)> = ready.iter().copied().filter(|x| x.0 == k).collect();
+        let coins: i64 = mine.iter().map(|x| x.3).sum();
+        let mut by: Vec<EntityId> = Vec::new();
+        for x in &mine {
+            if !by.contains(&x.1) {
+                by.push(x.1);
+            }
+        }
+        for &a in &by {
+            world.remember(k, MemoryKind::WasRobbed, Some(a), 0.7, -0.7, false);
+            crate::systems::social::robbed_by(world, k, a);
+            if living(world, a) {
+                world.remember_crime(k, a, Crime::Extortion, 0.6, Some(k));
+            }
+        }
+        crate::systems::ownership::jobs2_row(world).sleeper_found += 1;
+        let (_, place) = place_of(world, k);
+        let who = match by.len() {
+            1 => format!("{} shook the block down in the night", world.name_of(by[0])),
+            _ => format!(
+                "{} and {} shook the block down in the night",
+                by[..by.len() - 1].iter().map(|&a| world.name_of(a)).collect::<Vec<_>>().join(", "),
+                world.name_of(by[by.len() - 1])
+            ),
+        };
+        let kn = world.name_of(k);
+        // The one he tells of: the first of them he would name.
+        let teller = by.iter().copied().find(|&a| crate::systems::law::tells_the_law(world, k, a));
+        let text = match teller {
+            Some(a) => {
+                world.consequence.owed_word.retain(|x| x.2 > now);
+                world.consequence.owed_word.push((k, a, until));
+                let he = pro(world, k).0;
+                format!("{kn} woke {place} to find {coins}c gone from the purse: {who}; {he} means to tell the law")
+            }
+            None => {
+                crate::systems::ownership::jobs2_row(world).sleeper_quiet += 1;
+                let why = crate::systems::law::keeps_from_law(world, k, by[0]).unwrap_or_default();
+                format!("{kn} woke {place} to find {coins}c gone from the purse: {who}; tells nobody: {why}")
+            }
+        };
+        let mut actors = vec![k];
+        actors.extend(by.iter().copied());
+        world.push_event(EventKind::WitnessReacted, &actors, text);
+        // An on-duty guard in earshot on the street takes it now.
+        if let (Some(a), Some(tile)) = (teller, world.comp::<Position>(k).map(|p| p.tile)) {
+            crate::systems::law::hue_and_cry(world, k, a, Crime::Extortion, tile);
+        }
+    }
+}
+
+/// Round 7 W2: a report filed (`law::file_report_as`): a robbed sleeper's
+/// word reached the law (`sleeper_reports`).
+pub fn word_given(world: &mut World, crime: Crime, suspect: EntityId, witness: EntityId) {
+    if crime != Crime::Extortion || world.consequence.owed_word.is_empty() {
+        return;
+    }
+    let now = world.tick;
+    let before = world.consequence.owed_word.len();
+    world.consequence.owed_word.retain(|&(v, s, until)| !(v == witness && s == suspect && until >= now));
+    let n = before - world.consequence.owed_word.len();
+    if n > 0 {
+        crate::systems::ownership::jobs2_row(world).sleeper_reports += n as u32;
+    }
 }
 
 /// ReportCrime's reader: `w` is keeping `culprit`'s crime to sell.

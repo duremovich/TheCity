@@ -104,7 +104,11 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         // L2 L14 (plan 2.1): the leisure steps.
         ActionKind::Enjoy => 90,
         ActionKind::Gamble | ActionKind::EatOut | ActionKind::Preach => 30,
-        ActionKind::HangOut => world.config.leisure.hangout_ticks,
+        // Round 7 W2 (OPEN-241): on the corner he was called to, until the fight.
+        ActionKind::HangOut => {
+            let base = world.config.leisure.hangout_ticks;
+            crate::systems::turf::muster_wait(world, id).map_or(base, |w| w.max(base))
+        }
         // Lives at work phase 4b (§ 2.3): a pimp's collection is the hour at the pitch.
         ActionKind::Collect => crate::systems::vice::collect_ticks(world, id).unwrap_or(10),
         // M16a (plan C10, C15).
@@ -689,7 +693,11 @@ pub fn finishes_early(world: &World, id: EntityId, kind: ActionKind, started: Ti
         // The order changed: the muster breaks up (on_complete then fails the step).
         ActionKind::Muster => crate::systems::raid::raid_done(world, id),
         // Lives at work phase 2 (§ 3.3): nobody came: leave early (false off).
-        ActionKind::HangOut => crate::systems::household::empty_leave(world, id, started),
+        // Round 7 W2 (OPEN-241): a mustered member waits on his corner for the fight.
+        ActionKind::HangOut => {
+            crate::systems::turf::muster_wait(world, id).is_none()
+                && crate::systems::household::empty_leave(world, id, started)
+        }
         // M15 W22: the target came into reach; W35: the body is gone or buried.
         ActionKind::StakeOut => {
             let guard = world

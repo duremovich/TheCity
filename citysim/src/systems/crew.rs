@@ -1187,6 +1187,31 @@ pub fn late_to_raid(world: &mut World, actor: EntityId, gang: EntityId) {
     world.push_event(EventKind::Raid, &[actor, gang], text);
 }
 
+/// Round 7 W2 (`OPEN-241`): `id` was still on the way to his gang's muster
+/// or its door when the raid was over (fought without him, called off,
+/// fizzled): the walk is released (`think::apply`).
+pub fn march_released(world: &mut World, id: EntityId) {
+    let Some(gang) = world.gang_of(id) else { return };
+    let recent = world.crew.last_raid.get(&gang).filter(|x| world.tick.saturating_sub(x.0) <= 2 * TICKS_PER_HOUR);
+    // In the brawl from within reach of the door: not missed.
+    if recent.is_some_and(|x| x.2.contains(&id)) {
+        return;
+    }
+    crate::systems::ownership::jobs2_row(world).raid_missed += 1;
+    if !on(world) {
+        return;
+    }
+    let gname = world.comp::<Gang>(gang).map_or_else(String::new, |g| g.name.clone());
+    let name = world.name_of(id);
+    let text = match world.crew.last_raid.get(&gang) {
+        Some((t, what, _)) if world.tick.saturating_sub(*t) <= 2 * TICKS_PER_HOUR => {
+            format!("{name} was still on the way when {gname} went in at {what}, and turned back")
+        }
+        _ => format!("{name} was still on the way when {gname}'s raid was off, and turned back"),
+    };
+    world.push_event(EventKind::Raid, &[id, gang], text);
+}
+
 // ---------------------------------------------------------------------------
 // Court's quorum and the gang that cannot muster
 // ---------------------------------------------------------------------------

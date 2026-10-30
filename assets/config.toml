@@ -219,6 +219,8 @@ tie_lead_p = 0.6                   # ... or this when killer and dead knew each 
 hue_reach = 12                     # a victim's shout reaches an on-duty guard outdoors this far (tiles, Chebyshev; sight 4-8)
 tell_lawful_min = 0.3              # the hourly tell: a victim (or a murder's witness) this lawful tells a guard he meets ...
 tell_days = 2                      # ... of a first-hand sighting this fresh (ReportCrime's window)
+fear_courage_max = 0.5             # round 7 W2 (OPEN-238): a victim or witness under this courage keeps quiet about a man
+                                   # whose gang holds the block he lives on ([turf]; the holders are there tomorrow)
 
 [social]
 edge_create_ticks = 30
@@ -5232,6 +5234,8 @@ raid_target_reach_ticks = 240      # a corp raid's prize lies within this travel
                                    # 6 h; 5b: every corp raid marched to one Street Market across the island)
 court_work_excused = true          # a court summons missed at work takes standing, not the colours (R5's judgement of 5b's
                                    # attrition: after the stall fixes the daily court rota was 2/3 of the misses behind a loss)
+march_wait_ticks = 60              # round 7 W2 (OPEN-241): the first at a raid's door hold the brawl for the column's tail, a
+                                   # marcher due at the door within this many ticks (V15: three went in, the rest behind)
 
 [fares]
 # Pressure pass round 2, R1 (docs/PRESSURE_PASS.md § R1, OPEN-213; systems/fares.rs): fare evasion is never a cell.
