@@ -1,86 +1,88 @@
 # Handoff: now
 
 Rewritten at every session end; never appended. The session logs are `docs/history/SESSIONS.md`. Last rewrite:
-**2026-10-30, the twenty-seventh session: pressure pass round 7 from Shadow V15 (six phases W1-W6 in two waves, one
-fix round), Shadow V16 read against V15, the 100k counters.**
+**2026-10-30, the twenty-eighth session: pressure pass round 8 from Shadow V16 (six phases X1-X6 in two waves,
+planned and built in one session), Shadow V17 read against V16, the 100k counters.**
 
 ## Main
 
-Main holds **pressure pass round 7** (`docs/PRESSURE_PASS.md` § "Round 7 from Shadow V15", every phase's entry under
-"Implemented: deviations"). The change tier is green at `8d0d499` (3m05s, the whole round merged); tests still 1,470
-(none added; probes whose premises the phases moved re-pinned in place with "Round 7" reasons, one by the fix round
-`664e773`). `SAVE_VERSION` 107.
+Main holds **pressure pass round 8** (`docs/PRESSURE_PASS.md` § "Round 8 from Shadow V16", every phase's entry under
+"Implemented: deviations"). The change tier is green over the whole round (3m12s on the X5 merge; one line in
+`events::harm_line` added after it, built, not re-tiered); tests still 1,470 (none added; probes whose premises moved
+re-pinned in place with "Round 8" reasons, one by the orchestrator at the wave-1 merge). `SAVE_VERSION` 113.
 
 | phase | what it added |
 |---|---|
-| W1 the household buys for its children (`shelf::kids_short`, `own_held`, `feeds_household`, `[camp]` W1 keys) | while the household's own units are short of its children's food any free adult of it shops, hungry or fed, both tiers; an adult who can buy keeps the children's share back; a warning scores the run first; the `[family]` line says fed or unfed |
-| W2 the war and the case in the diaries (`turf::hearers`, `raid::wait_for_crew`, `consequence::woke`, `law::keeps_from_law`, `[crew] march_wait_ticks`, `[crime.case] fear_courage_max`) | the raid waits for its tail, members hear the war, a called member holds his corner; the sleeper wakes to the short purse and tells or says why not; the finder who saw the murder names the killer or keeps quiet for a reason |
-| W3 the guard makes the arrest (`plan::arrest_chain`, `law::serve_at_door`, `[justice]`, `[fares]`, `[care]` W3 keys) | the arrest planned straight to the suspect, the cuffs at the step's start, the unseen warrant served at the door at night, a chase past the shift; the fare one dodger at a time, the broke old and frail booked; a call for help reaches a guard, the doctor's staff or a passer-by |
-| W4 the right person in the role (`careers::can_foreman`, `service::install_server`, `[[trades]] no_foreman`, `[care] install_rows`, `install_cut`) | no hire picked by a hand's trade; a chrome install cut and paid by a ripperdoc or black doc on duty |
-| W5 contradictions (`Crime::CampEscape`, `vice::set_done`/`on_set`, `consequence::paid_awake`, `stims::Stand`, `Child.school_purse`) | a parent's break-out is Camp Escape; a set counts only the set; sleepers do not witness; the awake payer's line; a stand's witnesses in one line; the fee reads the midnight purse; nobody held marries; a lead says what came of it |
-| W6 the dull rooms (`[customers] door_trouble_heat`, `door_stat_barred_p`, `[leisure] bout_purse*`, `bout_hurt*`, `[care] book_slack_ticks`, `[noise] gossip_lines_day`) | the door's gang is the cell's holder, trouble and barred off screen; the bout's purse and the loser's hurt; a named pimp out of the pooled hire; bookings spread to the least-booked clinic; gossip retellings folded |
+| X1 the promise to tell the law (`law::keep_word`, `word_plan`, `cell_case`, `held_apart`, `Corpse.defended`, `[crime.case]` X1 keys) | a promise is a goal walked to the nearest open desk within a day or dropped with a reason line; the held do not witness the street or get hit across the cell wall; no asleep blackmail; a crime in the cells is a case; a death resisting arrest names no killer |
+| X2 the target and the bereaved (`systems/grief.rs`, `[grief]`, `contracts::react`, `stalled_runs`, `[search] need_*`) | a death in the house mourned 2-5 days (leave, a funeral, the children's line, a hot hunt); a hit's target hears and takes a guard, a counter-grudge or lies low; a stalled hit let go with a line; the needy sacked search; shadow picks `bereaved`, `marked` |
+| X3 the wrong person in the role II (`careers::record_ok`, `Misery.record_at`, `reads_record`, `[misery] employed_steal_misery`) | the law's posts and the books read a record; the employed steal a vehicle only broke or miserable; no Fighter foreman |
+| X4 gangs (`turf::rouse`, `raid::pick_muster`, `War.last`, `[gangs] leader_keep_margin`, `Deed::TookOver`) | the lie-low names the right enemy; every leader change a Succession line; the muster where most members reach; the call wakes a sleeper off shift |
+| X5 the pit, the ages, marriages (`[leisure] bout_beating`, `Flow::Purse`, `social::suitor`, `World.courting`, `[social] court_*`) | a loser hurt only on a beating, the purse 14c from the pit's owner; bout, arrest, witness and cell lines print ages; no kin or minor courts, a marriage needs a courtship |
+| X6 the cell's day, the walk-in, the picks (`law::serve_meals`, `consequence` yard, `household` cell visits, `care::walk_in_clinic`, `shadow.rs` doer ranks) | the meal, the yard, kin visits, the release line; walk-ins to the least busy open Clinic; the pickers rank doers, an empty pick is an error |
 
-**Shadow V16** (`docs/SHADOW_V16.md`, `docs/shadow_v16/`, V15's window): better than V15 in every group where round 7
-aimed (wars end and members hear them, guards arrest, crimes get their case, the pit has stakes, the gossip flood
-gone, the orderly's installs and the fee line fixed); the desk and half the street are still dull; W1 fires but is
-nearly invisible in the diaries. **The under-18 rule held** in 227 diaries; `harm_blocked` 0 over 30 days.
+**Shadow V17** (`docs/SHADOW_V17.md`, `docs/shadow_v17/`, V16's window): better than V16 where round 8 aimed (the
+law keeps its word, the cells have a day, the bereaved mourn, the marked react, marriages flat by week, Succession
+lines), corp and the desk unmoved, and **the city hungrier**: starvation 13 -> 45 at 100k, the diaries put it in
+Eat losing to Earn, a Pitch or Idle within the half hour (`OPEN-249`). **The under-18 rule held** in 117 diaries;
+`harm_blocked` 0 over 30 days.
 
-FINDINGs (100k seed 42 x 30, `target/r7_100k/` against `target/r6_100k/`): ChildTaken 4,103 -> 3,703, warnings past
-14 days 72 -> 18, starvation 18 -> 13; Murder 284 -> 256, Arrests 12.1k -> 11.2k (W5's sleepers off the witness
-roll), Raids 216 -> 317; members' war lines 16.3k; sleepers woke to it 455, reported 76; door refusals 7,113 -> 8,927;
-bout purses 1,723; street visits 466 -> 784; Marriage 23,267 (16.7k in days 0-6, r6 the same); ticks/s 17.
+FINDINGs (100k seed 42 x 30, `target/r8_100k/` against `target/r7_100k/`): starvation 13 -> 45, Starving 7.3k ->
+11.4k, ChildTaken 3,703 -> 4,229, school days 15.2 -> 12.3 %, births 274 -> 158 (fewer marriages); Marriage 23,267 ->
+8,494 (flat by week); promises 282, kept 197, dropped with a line 82; Arrests 11.2k -> 13.9k; losers hurt 1,724 ->
+509; Clinic-days with no patient 853 -> 560; vehicle thefts 2,354 -> 729; JobSearch 84k -> 223k; `sold_dealer` 8 ->
+0; ticks/s 18.
 
 ## Decided
 
-- **The neglect ladder's size at 100k stays as built** (Dylan 2026-10-30: "Lets not worry about the amount of kids
-  taken right now"): ~3,700 children taken in 30 days, nearly all from households that cannot pay one night's food
-  (`OPEN-231`). Round 8 does not touch the ladder.
+- **The neglect ladder's size at 100k stays as built** (Dylan 2026-10-30, `OPEN-231`). Round 8 did not touch it;
+  ChildTaken rose with the hunger, the ladder's input.
 
 ## In flight
 
 - No agents are running; no worktrees.
-- `target/shadow_v16/`, `target/r7_100k/` hold the runs.
+- `target/shadow_v17/`, `target/r8_100k/` hold the runs.
 
 ## Next, in order
 
-1. **Pressure pass round 8 from V16** (`docs/PRESSURE_PASS.md` § "Round 8 from Shadow V16", planned 2026-10-30): the promise to
-   tell the law and the held and asleep who still act (`OPEN-246`); the target and the bereaved who do not react, the
-   wrong hire and the doctor who steals (`OPEN-247`); gangs (`OPEN-241`: the lie-low's enemy, a silent succession, no
-   raid lands); the pit and the missing ages on lines (`OPEN-217`); marriages (`OPEN-248`). Same loop.
-2. The 100k map re-import (`OPEN-204`, `OPEN-182`; home-to-post walking, `OPEN-221`; the far posts and V16's 4-6 h
-   commutes, the guard's patrol start, the cab's Spot legs, "moved nearer work" farther, `OPEN-240`).
+1. **Pressure pass round 9 from V17** (`docs/SHADOW_V17.md` § "Round 9's input", not yet planned): hunger loses to
+   everything (`OPEN-249`, first: why Eat at hunger 1.0 loses to Idle at 0.05); round 8's contradictions
+   (`OPEN-250`); the marriage move-in that ignores the post (`OPEN-240`); the law's force (`OPEN-251`: no second
+   guard, the fare beat gossiped as assault, bylines); gangs (`OPEN-241`: no raid lands in the diaries, the chair
+   churns); the Camp's count; the dull (arms dealers sell nothing, the rich who never work). Same loop.
+2. The 100k map re-import (`OPEN-204`, `OPEN-182`; far travel `OPEN-221`, `OPEN-240`: guards' patrol walks, the old
+   leaders' 14-20 h days, cabbies' Spot legs, gang members 5-7 h from their corner).
 3. The vertical city (`OPEN-187`, `OPEN-191`), the view milestone, M18.
 
-Carried, still open: `OPEN-220`, `OPEN-212`, `OPEN-150`, `OPEN-179`, `OPEN-229`; standing `OPEN-062`, `OPEN-039`,
-`OPEN-057`, `OPEN-059`, `OPEN-077`, `OPEN-069`, `OPEN-070`. Closed this round: `OPEN-244` (W3), `OPEN-245` (W4).
-Opened: `OPEN-246` to `OPEN-248`.
+Carried, still open: `OPEN-217`, `OPEN-220`, `OPEN-212`, `OPEN-150`, `OPEN-179`, `OPEN-229`, `OPEN-231`; standing
+`OPEN-062`, `OPEN-039`, `OPEN-057`, `OPEN-059`, `OPEN-077`, `OPEN-069`, `OPEN-070`. Closed this round: `OPEN-246`
+(X1), `OPEN-247` (X2, X3), `OPEN-248` (X5). Opened: `OPEN-249` to `OPEN-251`.
 
 ## Process notes from this round
 
-- **Subagents cannot write to the orchestrator's scratchpad** (the harness refuses: "Subagents should return
-  findings as text"); the report is the final reply. Briefs no longer name a report file.
-- Two red combinations, both seeded premises: the widow probe after W3 + W4 (cleared by W2's own re-pin when W2
-  merged next, no fix round), the chip probe after wave 1 (a Sonnet fix round, $1). Merging the next green phase
-  before spawning a fix round saved one.
-- Starting wave 2 per dependency held again: W6 (no W1 files) started when W2-W4 merged, W5 (the Camp, the fee) after
-  W1.
-- Each merge's change tier ran on main, 4-5.5 min on a shared box (over the 4-min budget only under load).
-- The shadow and the 30-day counters ran at once (41 and 44 min); seven critics read in ~15 min.
+- **Merging wave 1 as one set, one tier** worked: the four branches merged in arrival order (each conflict was
+  `SAVE_VERSION`, the appended `Jobs2Cols` columns and the docs), then one change tier over the set instead of one per
+  merge. It caught one red (a seeded premise), cleared without a fix round.
+- **Re-pin a butterflied probe at the killer, not the latest round**: the farm worker probe had been re-pinned three
+  times by turning off whichever section moved the city; this time it turns off the organ gangs that kill its pick.
+- **Ages on lines are matched by text** (`events::harm_line`): a phase that renames a harm line ("in the cells of" ->
+  "in the yard of") must update the matcher; caught at the X5 merge.
+- Coders ran 3-5 min tiers on a box shared by four agents; X1 and X4 breached the budget under load only.
+- The shadow and the 30-day counters ran at once (39 and 41 min); seven Sonnet critics read in ~15 min.
 
-## Cost (API-rate $ equivalent, `tools/session_cost.py --session 515f8b34`)
+## Cost (API-rate $ equivalent, `tools/session_cost.py --session e89ef89d`)
 
 | part | agent | turns | median ctx | $ |
 |---|---|---|---|---|
-| W1 the household buys (one 100k x 30) | Opus | 232 | 195k | 33 |
-| W2 the war and the case | Opus | 457 | 287k | **64** |
-| W3 the guard's arrest | Opus | 341 | 220k | 45 |
-| W4 the right person in the role | Opus | 195 | 144k | 12 |
-| W5 contradictions | Opus | 286 | 207k | 22 |
-| W6 the dull rooms | Opus | 300 | 225k | 26 |
-| fix round (the chip probe) | Sonnet | 22 | 54k | 1 |
-| Shadow V16 critics (7) | Sonnet | 400 | 81-133k | 12 |
-| orchestrator (plan, briefs, merges, runs, synthesis) | Opus | ~250 | 196k | ~18 |
+| X1 the promise to tell the law | Opus | 444 | 241k | 59 |
+| X2 the target and the bereaved | Opus | 389 | 280k | **76** |
+| X3 the wrong person in the role II | Opus | 228 | 155k | 16 |
+| X4 gangs | Opus | 314 | 234k | 32 |
+| X5 the pit, the ages, marriages | Opus | 335 | 198k | 32 |
+| X6 the cell's day, the walk-in, the picks | Opus | 233 | 236k | 21 |
+| Shadow V17 critics (7) | Sonnet | 322 | 77-105k | 9 |
+| orchestrator (plan, briefs, merges, runs, synthesis) | Opus | ~200 | 160k | ~13 |
 
-Round 7 ≈ $232 for six phases and a shadow read (round 6: ≈ $316, round 5: ≈ $369).
+Round 8 ≈ $258 for six phases and a shadow read (round 7: ≈ $232, round 6: ≈ $316). X1 and X2 blew the 300-turn
+brief (444, 389): both built a new system end to end (the promise's desk walk, grief).
 
 The standing decisions, the doctrine and the agent rules are in `CLAUDE.md`; the tiers in `docs/TESTING.md`.

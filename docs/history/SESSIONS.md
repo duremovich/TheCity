@@ -1017,3 +1017,20 @@ write report files to the scratchpad; the final reply is the report. Shadow V16 
 every group where round 7 aimed, no minor harmed in 227 diaries (`harm_blocked` 0); left the promise to tell the law
 broken and the held still acting, the target and the bereaved who do not react, far travel, a marriage burst
 (`OPEN-246` to `OPEN-248`). `OPEN-244`, `OPEN-245` closed. Cost ≈ $232 (HANDOFF § Cost).
+
+## The twenty-eighth session (2026-10-30): pressure pass round 8, Shadow V17
+
+Round 8 from Shadow V16 (`docs/PRESSURE_PASS.md` § Round 8), planned and run in one session: wave 1 X1 the promise to
+tell the law and the held who act, X2 the target and the bereaved react, X3 the wrong person in the role II, X4 gangs;
+wave 2 X5 the pit, the lines' ages and marriages, X6 the cell's day, the walk-in and the shadow's picks (both started
+when wave 1 merged). X1 found the promise only a counter and a Station that was no Hall to the planner; X2 a taken hit
+nobody watched and a death that wrote only a memory; X3 no criminal record anywhere and StealVehicle as a wage-holder's
+only Earn plan; X4 a dead man counted in two wars and a chair passed back and forth silently; X5 1,190 parent and
+grown-child weddings in 20k's first week (the elder parent's seeded link one flirt from a proposal) and a fresh city
+75 % single; X6 a pile-on in the cell fight's pick. Wave 1 merged as one set (conflicts in `save.rs`, `stats.rs`,
+`analyze_run.py`, the docs), one tier on the set: red on a farm worker probe whose pick an organ gang harvested (the
+third butterfly on that ground; re-pinned by the orchestrator with organ gangs off, no fix round). No test added
+(1,470), `SAVE_VERSION` 113. Shadow V17 at 100k in V16's window: better where round 8 aimed, no minor harmed in 117
+diaries (`harm_blocked` 0), and the city hungrier (starvation 13 -> 45: Eat loses to Earn, a Pitch or Idle within the
+half hour). `OPEN-249` to `OPEN-251` opened; `OPEN-246` to `OPEN-248` closed. Cost ≈ $258 (HANDOFF § Cost).
+
