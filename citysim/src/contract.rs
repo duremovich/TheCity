@@ -614,6 +614,13 @@ pub struct ContractRun {
     pub deceived: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub liar: Option<EntityId>,
+    /// Round 8 X2 (OPEN-247): the tick of the taker's last stakeout at the
+    /// mark's door (0: none yet; `[hitmarket] stall_hours` reads it) and the
+    /// times he set out (the plans made).
+    #[serde(default)]
+    pub worked: Tick,
+    #[serde(default)]
+    pub tries: u16,
 }
 
 /// The one entry point's argument (`contracts::post`).

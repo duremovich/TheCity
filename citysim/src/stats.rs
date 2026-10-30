@@ -1027,6 +1027,26 @@ pub struct Jobs2Cols {
     pub clinic_doc_days: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub clinic_idle_days: u32,
+    // Round 8 X2 (OPEN-247): the mourners' shifts on the employer's leave
+    // and past it, the funerals held; the target's answer to word of a Hit or
+    // Beat (a guard on himself, a counter-grudge, lying low) and the shifts
+    // he lay low; the search days of the needy past `[search] search_days`.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub grief_leave: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub grief_absent: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub grief_funerals: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub hit_guarded: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub hit_countered: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub hit_low: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub hit_low_shifts: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub search_need_days: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub licences_named: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
@@ -1917,6 +1937,14 @@ impl Jobs2Cols {
                 "pimp_round_days",
                 "clinic_doc_days",
                 "clinic_idle_days",
+                "grief_leave",
+                "grief_absent",
+                "grief_funerals",
+                "hit_guarded",
+                "hit_countered",
+                "hit_low",
+                "hit_low_shifts",
+                "search_need_days",
                 "licences_named",
                 "bribes_named",
                 "band_refusals",
@@ -2489,6 +2517,14 @@ impl Jobs2Cols {
             self.pimp_round_days.to_string(),
             self.clinic_doc_days.to_string(),
             self.clinic_idle_days.to_string(),
+            self.grief_leave.to_string(),
+            self.grief_absent.to_string(),
+            self.grief_funerals.to_string(),
+            self.hit_guarded.to_string(),
+            self.hit_countered.to_string(),
+            self.hit_low.to_string(),
+            self.hit_low_shifts.to_string(),
+            self.search_need_days.to_string(),
             self.licences_named.to_string(),
             self.bribes_named.to_string(),
             self.band_refusals.to_string(),

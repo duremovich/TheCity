@@ -30,6 +30,8 @@ pub fn run(world: &mut World) {
     // The pressure pass phase 1 (OPEN-178): the miserable and drunk brawl
     // (nothing with `[misery]` absent).
     crate::prof::timed!("living::misery::hourly", crate::systems::misery::hourly(world));
+    // Round 8 X2 (OPEN-247): the funerals (nothing with none due).
+    crate::prof::timed!("living::grief::hourly", crate::systems::grief::hourly(world));
     // Lives at work phase 1 (§ 1.2): the service encounter's hourly pass.
     crate::prof::timed!("service", crate::systems::service::hourly(world));
     // Lives at work phase 2 (§ 3.5): a Statistical visitor credited at its hour.
@@ -85,6 +87,8 @@ fn early(world: &mut World) {
     // The pressure pass phase 1 (OPEN-178): the miserable skip, are fired,
     // quit; off screen they brawl and join (nothing with `[misery]` absent).
     crate::prof::timed!("mid::misery::daily", crate::systems::misery::daily(world));
+    // Round 8 X2 (OPEN-247): the mourners' and the lying-low's shifts struck.
+    crate::prof::timed!("mid::grief::daily", crate::systems::grief::daily(world));
     // Real economy (plan E6-E10): the World's book, appetite, refill and the
     // midnight Parts and Data sales.
     crate::prof::timed!("mid::world_market::daily", crate::systems::world_market::daily(world));

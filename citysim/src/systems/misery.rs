@@ -749,7 +749,11 @@ pub fn note_left(world: &mut World, id: EntityId, employer: Option<EntityId>, fi
     let jitter = ((hash(world, PURPOSE_IDLE, id, day) * (c.idle_jitter_days + 1) as f32) as u64)
         .min(u64::from(c.idle_jitter_days));
     let base = u64::from(if fired { c.fired_idle_days } else { c.quit_idle_days });
-    let idle = now + (base + jitter) * crate::time::TICKS_PER_DAY;
+    // Round 8 X2 (`OPEN-247`): one who needs the wage is at the doors after
+    // `[search] need_idle_days`, not the idle days (V16 `cabbie_80901`).
+    let need = crate::systems::search::needs_wage(world, id)
+        .then(|| world.config.search.as_ref().map_or(base, |s| u64::from(s.need_idle_days)));
+    let idle = now + need.unwrap_or(base + jitter) * crate::time::TICKS_PER_DAY;
     let stain = now + u64::from(c.stain_days) * crate::time::TICKS_PER_DAY;
     let p = if fired { c.stain_fired_p } else { c.stain_quit_p };
     let block = now + u64::from(c.fired_block_days) * crate::time::TICKS_PER_DAY;

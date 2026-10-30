@@ -462,6 +462,8 @@ pub fn on_death(world: &mut World, id: EntityId) -> crate::components::Loot {
             i.spouse_died_tick = Some(tick);
         }
     }
+    // Round 8 X2 (`OPEN-247`): the household mourns (`[grief]`).
+    crate::systems::grief::on_death(world, id);
     // M11 D45: owned buildings pass to the spouse, a child, else the city.
     crate::systems::ownership::on_owner_gone(world, id);
     // M13 D45: so do parked vehicles and posted robots (carried and

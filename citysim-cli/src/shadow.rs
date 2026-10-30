@@ -117,7 +117,8 @@ pub struct ShadowArgs {
     /// worker_friday, super, bouncer, dancer, night_shift, orderly, camp_warden, fixer, gun, sick,
     /// buyer, and (Jobs & lives, diaries only) joytoy, street_worker, pimp, vendor, day_labourer,
     /// cabbie, courier, office_worker, arms_dealer, forger, elder, loader, builder, foreman, madam,
-    /// companion, black_doc, cultist, teacher, scav (a child is unpinnable: no Brain). `arch:N`
+    /// companion, black_doc, cultist, teacher, scav, bereaved, marked (a child is unpinnable: no
+    /// Brain). `arch:N`
     /// picks N of that archetype instead of `--count` (Shadow V7).
     #[arg(long)]
     pub pick: Option<String>,
@@ -159,7 +160,7 @@ pub struct ShadowArgs {
     pub map: Option<PathBuf>,
 }
 
-const ARCHETYPES: [&str; 59] = [
+const ARCHETYPES: [&str; 61] = [
     "gang_member",
     // The pressure pass phase 5b: a member of a gang whose standing order
     // marches (a raid, a retaliation, a breakout) at the start day.
@@ -249,6 +250,10 @@ const ARCHETYPES: [&str; 59] = [
     // Round 4 T5 (OPEN-217): a jobless adult inside the search at the start day (a post lost
     // in the last `[search] search_days`), the freshest first (not shuffled).
     "jobless",
+    // Round 8 X2 (OPEN-247): an adult mourning a death in the household at the start day (the
+    // freshest first), and an adult with a taken Hit or Beat on him (lying low first).
+    "bereaved",
+    "marked",
 ];
 
 /// Activity classes of the time-use table, in print order.
@@ -481,6 +486,26 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
             .filter(|&a| world.gang_of(a).is_some_and(|g| citysim::systems::gray::organ_targets(world, g)))
             .collect(),
         // Round 4 T5: the searching jobless, the freshest post lost first (then id).
+        "bereaved" => {
+            let mut v: Vec<(std::cmp::Reverse<u64>, EntityId)> = adults()
+                .filter_map(|a| citysim::systems::grief::mourning(world, a).map(|m| (std::cmp::Reverse(m.since), a)))
+                .collect();
+            v.sort();
+            v.into_iter().map(|(_, a)| a).collect()
+        }
+        "marked" => {
+            let mut v: Vec<(bool, EntityId)> = world
+                .contracts
+                .values()
+                .filter(|c| c.status == citysim::contract::ContractStatus::Taken && c.kind.violent())
+                .filter_map(|c| c.target_agent())
+                .filter(|&t| adult_alive(world, t))
+                .map(|t| (!citysim::systems::grief::lying_low(world, t), t))
+                .collect();
+            v.sort();
+            v.dedup();
+            v.into_iter().map(|(_, a)| a).collect()
+        }
         "jobless" => {
             let mut v: Vec<(u64, EntityId)> = adults()
                 .filter(|&a| citysim::systems::search::searching(world, a))
@@ -2451,7 +2476,10 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                         }
                         v
                     });
-                    format!("{} ({yrs} y) {at}{ward}", nm(world, c))
+                    // Round 8 X2 (OPEN-247): a death in the household.
+                    let grief =
+                        citysim::systems::grief::family_note(world, c).map_or(String::new(), |g| format!(", {g}"));
+                    format!("{} ({yrs} y) {at}{ward}{grief}", nm(world, c))
                 })
                 .collect();
             // Round 6 V1 (OPEN-231): in a shared Home, the household's share.

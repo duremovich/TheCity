@@ -481,6 +481,12 @@ fn test_prebound_witness_offset_matches_ordinary_hole() {
 fn test_ledger_kill_names_nobody_before_bind() {
     let mut w = dole_world();
     w.config.missions.strike_k = 100.0;
+    // Re-pinned, round 8 X2 (OPEN-247): word of the take may have the target
+    // swear on the taker (`contracts::react`), a grudge his widow inherits;
+    // the premise is the deed naming nobody, so the target never swears.
+    if let Some(v) = w.config.verbs.as_mut() {
+        v.hit_counter_courage = 2.0;
+    }
     let [buyer, t, taker, spouse] = strangers(&w, 4)[..] else { unreachable!() };
     w.set_spouse(t, spouse);
     gun(&mut w, taker);
@@ -1608,6 +1614,8 @@ fn test_ledger_record_with_busy_taker_is_rescheduled() {
             stakeout_until: None,
             deceived: false,
             liar: None,
+            worked: 0,
+            tries: 0,
         },
     );
     // As `contracts::run` does: pop the due entry, then resolve.

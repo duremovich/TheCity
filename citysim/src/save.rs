@@ -480,7 +480,11 @@ use crate::world::World;
 /// `ViceState.collected`, `care::State.seen`, the `[customers] door_trouble_heat`, `door_stat_barred_p`, `[leisure]
 /// bout_purse` ... `bout_hurt_bad`, `[care] book_slack_ticks`, `book_cands`, `[noise] gossip_lines_day` keys and the
 /// `Jobs2Cols` `door_stat_broke` ... `clinic_idle_days` columns (serde defaults).
-pub const SAVE_VERSION: u8 = 107;
+/// 108 (pressure pass round 8, X2, the target and the bereaved react): `World.grief` (`grief::State`, written
+/// while it holds anything), `ContractRun.worked`, `EventKind::Bereaved`, the `[grief]` section, the `[verbs]
+/// hit_guard_wealth` ... `hit_low_days`, `[search] need_wealth`, `need_idle_days`, `[hitmarket] stall_hours` keys and the
+/// `Jobs2Cols` `grief_leave` ... `search_need_days` columns (serde defaults).
+pub const SAVE_VERSION: u8 = 108;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

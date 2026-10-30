@@ -427,6 +427,11 @@ pub fn propose_allowed(world: &World, proposer: EntityId, target: EntityId) -> b
         && !world.has::<Sentence>(target)
         && aff >= world.config.social.propose_affinity
         && trust >= world.config.social.propose_trust
+        // Round 8 X2 (`OPEN-247`): nobody marries a widow(er) inside
+        // `[grief] wed_after_days` (20k: "Zoe Santoro married Wendell
+        // Singh" 22 hours after his husband's death).
+        && !crate::systems::grief::widowed_lately(world, proposer)
+        && !crate::systems::grief::widowed_lately(world, target)
 }
 
 pub fn propose(world: &mut World, proposer: EntityId, target: EntityId) -> bool {

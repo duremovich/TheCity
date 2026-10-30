@@ -2209,6 +2209,9 @@ debt_hit_days = 30                   # Debt: a Hit when the Beat is this old and
 reach_premium = 0.5                  # an agent's direct record with too few asks goes to the nearest Fixer at its price x 1.5
 lawful_wait = 0.6                    # a revenge buyer above this lawfulness waits while the target is wanted or held
 queue_hours = 24                     # a taken organic Hit/Beat queued this long for a live slot goes to the ledger
+stall_hours = 36                     # round 8 X2 (OPEN-247): a solo taker's live Hit/Beat not planned this long is let go
+                                     # (an attempt failed with the line, back on the board; 20k seed 42: a hit taken by a gun
+                                     # hired as Club Staff the next midnight sat seven days unsaid); 0 off
 
 # M16b leverage (docs/M16_CONTRACTS.md § 4, phase 1): coercions are records on a struct and one seeded
 # Intimidate roll (moves::resolve_with) between fictional agents. Every value a placeholder.
@@ -5392,6 +5395,15 @@ door_rough_p = 0.03                # a client served by a tipped worker at a doo
 door_ban_days = 14                 # (1 - lawfulness): the bouncer throws him out, barred from the venue this many days
 hit_heard_p = 0.5                  # a Hit, Beat or Abduct taken on someone reaches him on this (an exec: his security, always)
 hit_heard_safety = 0.3             # ... his safety falls by this (Threatened, the line in his diary and his guards')
+hit_guard_wealth = 1.0             # round 8 X2 (OPEN-247): the word acted on: one at this wealth whose purse holds the quote,
+                                   # or a corp's exec whose corp's treasury does, puts a guard on himself (a Guard record at
+                                   # his nearest Fixer; V16 ceo_20314 slept on a 1,453c hit) ...
+hit_counter_courage = 0.6          # ... one at least this brave ...
+hit_counter_lawful = 0.4           # ... and at most this lawful swears on the taker's lead (a Hired grudge of this weight,
+hit_counter_w = 0.6                # which the Hunt and the hire read: a counter-hit when he is weak and can pay; never on an
+                                   # under-18) ...
+hit_low_days = 3                   # ... and one who does neither lies low at home this many days (his shifts struck and
+                                   # counted as absences, his free hours indoors) until the record closes; 0 off
 # Round 4 T4 (docs/PRESSURE_PASS.md § T4, OPEN-217): the trades' inside, the door and the yard. Placeholders.
 door_body_first = true             # the door's arrivals, refusals and rough clients go to the bouncer standing it: a body
                                    # among the present door staff first (an off-screen colleague counted present by the
@@ -5444,6 +5456,31 @@ crowd = 2                          # a door is no searcher's next while this man
                                    # (the first read sent a dozen to one Bar's one post)
 day_start_min = 30                 # the dawn's hand works from this many minutes after [jobs2] corner_hour to the day shift's end
                                    # (V12's hand rested three hours at the Yard for a 09:00 shift)
+need_wealth = 0.5                  # round 8 X2 (OPEN-247): past search_days a jobless adult under this wealth keeps searching
+                                   # every day (V16 day_labourer_11600, 0c, read no board all week) ...
+need_idle_days = 1                 # ... and a quit or a firing leaves him out of hires this many days, not [misery]'s idle
+                                   # days (V16 cabbie_80901, fired d22, sat out the week); the stain stays. A "no need of the
+                                   # wage" quitter does not search inside [life] quit_rehire_days (V16 gun_44357 d27); one who
+                                   # takes worse work walks to the nearest board within far_ticks when none is within reach
+
+# Pressure pass round 8, X2 (docs/PRESSURE_PASS.md § X2; OPEN-247): a death in the household is grief that takes days
+# (systems/grief.rs; absent: the Grief memory alone). Placeholders.
+[grief]
+mourn_days_min = 2                 # an adult of the dead's household (the spouse, a parent, a grown child or a sibling under
+mourn_days_max = 5                 # his roof) mourns from this many days at affinity 0 to this many at 1, to the midnight
+                                   # (V16 school_parent_87579: widowed at 21:00, at work at 06:09 the next morning) ...
+leave_days = 3                     # ... each shift inside it struck (no work, no wage): this many are the employer's leave,
+                                   # the rest absences on [misery]'s count (the firing at fire_absences); a household
+                                   # business gives any; his free hours are spent at home
+wake_tick = 1080                   # the funeral: the day after the death at this tick of the day (18:00), at the Home ...
+wake_reach_tiles = 60              # ... the dead's Friends whose own Home is within this many tiles of it are asked (a body
+                                   # among them makes it his evening), and the line names who came ...
+wake_names = 4                     # ... this many names (the rest "and N more")
+hunt_hot_flat = 0.3                # a mourner's Hunt on the one who killed his kin scores + this ...
+hot_days = 7                       # ... for this many days after the death (V16's widow's Hunt, 0.097, lost to her shift)
+wed_after_days = 14                # nobody proposes to a widow(er), nor a widow(er) to anyone, inside this many days of the
+                                   # death (the Court goal's 14-day grief, now on both sides of every proposal: 20k, a widower
+                                   # remarried 22 hours after)
 
 # Pressure pass round 6, V2 (docs/TURF.md § 1-2; OPEN-241, OPEN-217's street): turf you hold (systems/turf.rs; absent:
 # territory is Homes alone, as round 5 left it). The city is cut into square cells; a gang's daily presence in a cell,
