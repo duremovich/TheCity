@@ -1667,6 +1667,7 @@ fn run(args: RunArgs) -> Result<(), String> {
     let mut made_at = (world.edges_made, world.coworker_pairs);
     let mut next_lever = 0;
     let mut last_event_tick: Option<u64> = None;
+    let mut role_tally: std::collections::BTreeMap<(String, String), u32> = std::collections::BTreeMap::new();
     // M12 fix pass (throughput): `--events` writes through one buffer flushed
     // once a day; an unbuffered line per event (1,000-1,500 a day, mostly
     // PlanAborted) cost a fifth of a day's ticks and made the dip days.
@@ -1734,6 +1735,26 @@ fn run(args: RunArgs) -> Result<(), String> {
                 let mut both = fresh_of(&world.events);
                 both.extend(fresh_of(&world.debug_events));
                 both.sort_by_key(|e| std::cmp::Reverse(e.tick));
+                // Round 7 W4 (OPEN-245): the install's doer and the hire's
+                // foreman by role (diagnostic; the `#role` lines).
+                for e in &both {
+                    let who = match e.kind {
+                        citysim::EventKind::Installed if e.text.contains(" installed at ") => {
+                            Some(e.actors.get(3).copied())
+                        }
+                        citysim::EventKind::Hire => Some(e.actors.get(2).copied()),
+                        _ => None,
+                    };
+                    if let Some(who) = who {
+                        let label = match who {
+                            None => "none".to_string(),
+                            Some(w) => world
+                                .comp::<citysim::components::Job>(w)
+                                .map_or_else(|| "no job".to_string(), |j| j.role.label().to_string()),
+                        };
+                        *role_tally.entry((format!("{:?}", e.kind), label)).or_insert(0u32) += 1;
+                    }
+                }
                 let fresh: Vec<_> = both.iter().map(|e| (e.tick, e.kind, e.text.clone())).collect();
                 for (tick, kind, text) in fresh.into_iter().rev() {
                     let _ = writeln!(events_out, "{tick}	{kind:?}	{text}");
@@ -1775,6 +1796,9 @@ fn run(args: RunArgs) -> Result<(), String> {
     citysim::prof::dump();
     // The pressure pass phase 5b: where the gangs' coins went (diagnostic).
     if args.report {
+        for ((kind, role), n) in &role_tally {
+            let _ = writeln!(events_out, "#role	{kind}	{role}	{n}");
+        }
         for (k, v) in &world.probe.gang_in {
             let _ = writeln!(events_out, "#gang_flow	in	{k}	{v}");
         }

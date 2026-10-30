@@ -3475,3 +3475,69 @@ a walk back in; the street take and the moves are the service's protection; the 
 
   No test (doctrine 2). `SAVE_VERSION` 102 (101 on the branch, renumbered at the merge after V5):
   `ViceState.bouts`, `Misery.drank_at` and the V6 keys (serde defaults).
+
+### W4, the right person in the role (`OPEN-245`; `careers::can_foreman`, `service::install_server`, `service::arrive_by`, `care::pay_install`, `chrome::installed_now`, `[[trades]] no_foreman`, `[care] install_rows`, `install_cut`)
+
+- **The causes** (20k `isle_m_k2` seed 42, main `795943c`). (1) **The foreman was whoever had served longest**:
+  `careers::foreman_where` (and `industry::foreman`, careers off) ranks every adult on the staff by tenure and skill,
+  any role; U7 added only "on hand" (not sick, not held). A Fixer's office whose senior hand is its forger has the
+  forger pick its Fixers; a Clinic whose Ripperdoc post is vacant has the orderly pick its Ripperdoc; a Club its
+  dancer, a Market its night stocker. At 00:11 nobody is at a desk: the midnight hire is the post's paperwork, so
+  "at work" stays U7's (not sick, not held) and the role is the gate. `forger_7536`'s office was also shut by the
+  law all week (`routine::law_shut`: every day a "rest day"), which is why he "never works". (2) **The install's
+  doctor was the patient queue's server**: `chrome::installed_now` named `service::server_for(Patient)`, and the
+  orderly's `[[serves]]` row is the same Patient queue (the triage); U6's `clinic_body_first` hands a patient to a
+  body first, so a Clinic with an off-screen Ripperdoc at the counter (the sale opens only with him,
+  `assets::seller_open`) and an on-screen orderly gave the orderly every install (V15's 36). Nothing paid anyone for
+  an install: the price went to the owner's till (`Flow::Asset`), and the encounter went to the queue's next server
+  again (`service::arrive`).
+- **Built.** A trade row can say `no_foreman = true` (`TradeCfg.no_foreman`): its holder is never the foreman who
+  picks a hire, names a layoff or takes the midnight `Job.foreman` premium (`careers::can_foreman`, read in
+  `foreman_where` and both `industry` fallbacks). Flagged: orderly, forger, organ broker, bouncer, dancer, night
+  stocker, night porter, barkeep, brothel worker, companion, BD actor, cab driver, day labourer (the hands under a
+  doctor, a fixer, a house, a yard). A building with no foreman-able hand on hand hires with no foreman named ("X
+  hired as Ripperdoc"). An install is cut by a `[care] install_rows` server (`Ripperdoc`, `black_doc`): one on duty
+  with room this hour first, by the pair's hash, else one on duty, else a cutting row's holder on a working shift by
+  the clock (`service::install_server`), never the patient himself. He is named, takes the encounter
+  (`service::arrive_by`, his hour's room) and `install_cut` (0.1) of the implant's value from the owner's till
+  (`care::pay_install`, `Flow::Treatment`, the place's revenue debited, nothing to an owner-doctor): "... installed
+  at Ripperdoc#5839 by Delia Zhou (6c to the doctor)".
+- **Deviations.** The spec's "needs a ripperdoc at work" was already the sale's gate (`seller_open`); no new refusal
+  was added. The 78 installs with nobody named are sales that end after the doctor left (a body's `BuyAsset` is
+  checked at the walk's start and lands past the shift: `orderly_21272 d26 19:03`, her own chrome at her own Clinic).
+  A gang's house still picks through the gang's man on the staff whatever his trade (round 4 T6): a forger "for The
+  Pale Hounds" is the gang picking, not a foreman (2 such hires by no_foreman trades in 30 days after).
+- **Under-18**: nothing here picks a victim, a fight or a fine; the hire's own `is_protected` backstop is untouched.
+- **Shadow** (20k, seed 42, d20-26, picks orderly:3, forger:2, ripperdoc:3, foreman:3, the final build). The install
+  done and paid by the doctor (`ripperdoc_16969`, Delia Zhou, Ripperdoc#5839): `d21 16:29` "Joss Quarry had Legs
+  implant T1 installed at Ripperdoc#5839 by Delia Zhou (6c to the doctor)", her money line "+6c (Treatment) ...
+  flows: Treatment +6 from corp Zetatech 5"; 7 installs in the week, `d22 14:47` a gang's arm "(gang: The Static
+  Rats)". No orderly installs anything: `orderly_21272` (Slate Oakes) 30 Treated, all her own work, "patched X up at
+  Ripperdoc#4936 for 12c (3c of it to the doctor)". Hires named by a real foreman: `foreman_13755` (Wire Greaves, a
+  Builder at Construction Yard#5705) `d25 00:11` "Corwin Dunmore hired as Builder (picked by Wire Greaves, the
+  foreman)"; `ripperdoc_11516` (Kasimir Ostrowski) `d20 00:11` "Omar Novak hired as Manager (picked by Kasimir
+  Ostrowski, the foreman)". The forger's office: `forger_21249` `d25 00:11` "Undine Kaneda hired as Forger" (no
+  forger picks; nobody named). An earlier build had a ripperdoc cut her own chrome ("Lavinia Northcott ... installed
+  ... by Lavinia Northcott (6c to the doctor)"); the patient is now left out of the pick.
+- **Reads wrong** (the next pass): a doctor's own chrome, or a sale that ends after the doctor's shift, is installed
+  by nobody named (78 in 30 days); `ripperdoc_16969 d21 14:05` one install with no cut (the owner's till dry at the
+  hour); the hire at Fixer#6013 names no foreman though its Fixer (Ivo Stroud) brokers there (not diagnosed: the
+  careers age floor or the office's staff list); the forger's quit and search churn (`forger_11197`) is the hire's,
+  not the picker's.
+- Numbers (prints; 20k seed 42 x 30, `--scaled --ambient-flats 50`, one run each; before = this build with main's
+  `assets/config.toml` through `CITYSIM_ASSETS` (empty `install_rows` and no `no_foreman` row is main's pick, line
+  for line), after = the final build; the `#role` lines `--report --events` now prints: the doer's or the picker's
+  role at the event):
+
+  | | before | after |
+  |---|---|---|
+  | chrome installs by the doer's role: Ripperdoc / Orderly / none | 1,056 / 578 / 83 | 1,608 / 0 / 78 |
+  | chrome installs (all) | 1,717 | 1,686 |
+  | coins to the doctor (`care_doc_cut`: patch, treatment, install) | 2,508 | 11,400 |
+  | hires named by a no_foreman trade | 409 (orderly 65, BD actor 82, dancer 68, night stocker 49, bouncer 48, brothel worker 40, cab driver 36, barkeep 15, forger 3, night porter 3) | 2 (brothel worker: the gang's man) |
+  | hires named by a Ripperdoc / BD Editor | 94 / 73 | 136 / 141 |
+  | hires with no foreman named | 1,716 | 1,823 |
+  | hires (all) | 13,832 | 13,787 |
+
+  No test (doctrine 2). `SAVE_VERSION` 103 (renumbered at the merge): the `[care] install_rows`, `install_cut` and
+  `[[trades]] no_foreman` keys (serde defaults).

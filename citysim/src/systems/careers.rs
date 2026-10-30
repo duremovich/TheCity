@@ -173,6 +173,13 @@ pub fn on_hand(world: &World, s: EntityId) -> bool {
     !crate::systems::health::sick(world, s) && !world.has::<crate::components::Sentence>(s)
 }
 
+/// Round 7 W4 (OPEN-245): `s` holds a post that can be the foreman: a
+/// bespoke role, or a trade whose row is not `no_foreman` (V15: the forger
+/// at a Fixer's office picked its Fixers, an orderly the Clinic's Ripperdoc).
+pub fn can_foreman(world: &World, s: EntityId) -> bool {
+    world.comp::<Job>(s).is_none_or(|j| crate::systems::trades::row_of(world, j.role).is_none_or(|r| !r.no_foreman))
+}
+
 fn foreman_where(
     world: &World,
     b: EntityId,
@@ -184,7 +191,7 @@ fn foreman_where(
         .staff_of(b)
         .iter()
         .copied()
-        .filter(|&s| Some(s) != exclude && years(world, s) >= min && keep(s))
+        .filter(|&s| Some(s) != exclude && years(world, s) >= min && can_foreman(world, s) && keep(s))
         .filter_map(|s| {
             let j = world.comp::<Job>(s)?;
             let skill = crate::systems::competence::role_skill(world, s, j.role).map_or(0.0, |(v, _, _)| v);

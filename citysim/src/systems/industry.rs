@@ -280,7 +280,7 @@ pub fn foreman(world: &World, b: EntityId, exclude: Option<EntityId>) -> Option<
         .staff_of(b)
         .iter()
         .copied()
-        .filter(|&s| Some(s) != exclude)
+        .filter(|&s| Some(s) != exclude && crate::systems::careers::can_foreman(world, s))
         .filter_map(|s| world.comp::<Job>(s).map(|j| (j.hired_tick, s)))
         .min()
         .map(|(_, s)| s)
@@ -296,7 +296,11 @@ pub fn foreman_on_hand(world: &World, b: EntityId, exclude: Option<EntityId>) ->
         .staff_of(b)
         .iter()
         .copied()
-        .filter(|&s| Some(s) != exclude && crate::systems::careers::on_hand(world, s))
+        .filter(|&s| {
+            Some(s) != exclude
+                && crate::systems::careers::on_hand(world, s)
+                && crate::systems::careers::can_foreman(world, s)
+        })
         .filter_map(|s| world.comp::<Job>(s).map(|j| (j.hired_tick, s)))
         .min()
         .map(|(_, s)| s)

@@ -2618,6 +2618,7 @@ tied_housing = true                # Lives at work phase 3 (§ 2.2): housed rent
 
 [[trades]]
 id = "night_stocker"
+no_foreman = true                  # round 7 W4 (OPEN-245): never the foreman who picks a hire or names a layoff
 label = "Night Stocker"
 workplace = ["Market"]
 staff_per_floor = 4
@@ -2629,6 +2630,7 @@ shape = "haul"                     # the pre-view pass phase 3: crates from the 
 
 [[trades]]
 id = "night_porter"
+no_foreman = true                  # round 7 W4 (OPEN-245): never the foreman who picks a hire or names a layoff
 label = "Night Porter"
 workplace = ["Hotel"]
 staff_per_floor = 1
@@ -2639,6 +2641,7 @@ model = "service"
 
 [[trades]]
 id = "bouncer"
+no_foreman = true                  # round 7 W4 (OPEN-245): never the foreman who picks a hire or names a layoff
 label = "Bouncer"
 min_age = 18                     # Lives at work phase 6 (§ 4.1): the hiring age band ([careers]; 0 none)
 max_age = 60
@@ -2652,6 +2655,7 @@ shape = "counter"                  # the pre-view pass phase 3 (OPEN-121): the d
 
 [[trades]]
 id = "dancer"
+no_foreman = true                  # round 7 W4 (OPEN-245): never the foreman who picks a hire or names a layoff
 label = "Dancer"
 min_age = 18                     # Lives at work phase 6 (§ 4.1): the hiring age band ([careers]; 0 none)
 max_age = 45
@@ -2665,6 +2669,7 @@ tipped = true
 
 [[trades]]
 id = "orderly"
+no_foreman = true                  # round 7 W4 (OPEN-245): never the foreman who picks a hire or names a layoff
 label = "Orderly"
 workplace = ["Clinic"]
 staff_per_floor = 2
@@ -2921,6 +2926,7 @@ street = true
 
 [[trades]]
 id = "cab_driver"
+no_foreman = true                  # round 7 W4 (OPEN-245): never the foreman who picks a hire or names a layoff
 label = "Cab Driver"
 workplace = ["Garage"]
 staff_per_floor = 2
@@ -2936,6 +2942,7 @@ street = true
 # is ever posted for them).
 [[trades]]
 id = "day_labourer"
+no_foreman = true                  # round 7 W4 (OPEN-245): never the foreman who picks a hire or names a layoff
 label = "Day Labourer"
 min_age = 18                     # Lives at work phase 6 (§ 4.1): the hiring age band ([careers]; 0 none)
 max_age = 60
@@ -2955,6 +2962,7 @@ street = true
 # `tipped`: the on-duty worker takes a visit's tip ([vice] tip_share). Display names are these labels.
 [[trades]]
 id = "barkeep"
+no_foreman = true                  # round 7 W4 (OPEN-245): never the foreman who picks a hire or names a layoff
 label = "Barkeep"
 workplace = ["StripClub", "Brothel"]
 staff_per_floor = 1
@@ -2968,6 +2976,7 @@ vice = true
 
 [[trades]]
 id = "brothel_worker"
+no_foreman = true                  # round 7 W4 (OPEN-245): never the foreman who picks a hire or names a layoff
 label = "Brothel Worker"
 workplace = ["Brothel"]
 staff_per_floor = 4
@@ -2996,6 +3005,7 @@ vice = true
 
 [[trades]]
 id = "companion"
+no_foreman = true                  # round 7 W4 (OPEN-245): never the foreman who picks a hire or names a layoff
 label = "Companion"
 min_age = 18                     # Lives at work phase 6 (§ 4.1): the hiring age band ([careers]; 0 none)
 max_age = 45
@@ -3029,6 +3039,7 @@ chip = true
 # Jobs & lives phase 5 (§ 5.3): the BdStudio's staff (`produce`: units, [vice] bd_rate).
 [[trades]]
 id = "bd_actor"
+no_foreman = true                  # round 7 W4 (OPEN-245): never the foreman who picks a hire or names a layoff
 label = "BD Actor"
 workplace = ["BdStudio"]
 staff_per_floor = 3
@@ -3072,6 +3083,7 @@ ages = true
 
 [[trades]]
 id = "forger"
+no_foreman = true                  # round 7 W4 (OPEN-245): never the foreman who picks a hire or names a layoff
 label = "Forger"
 workplace = ["Fixer"]
 staff_per_floor = 1
@@ -3097,6 +3109,7 @@ struck_off = true
 
 [[trades]]
 id = "organ_broker"
+no_foreman = true                  # round 7 W4 (OPEN-245): never the foreman who picks a hire or names a layoff
 label = "Broker"
 workplace = ["BlackClinic"]
 staff_per_floor = 1
@@ -5309,6 +5322,11 @@ wash_frac = 0.5                    # ... which takes this share of his toxicity 
                                    # trade, a median 5 patients a week at 20k; 8,259 of 20k over 0.4). The toxic are the
                                    # synth-fed poor: at 15c over 20c kept and 0.01 a day, 8 washes in 30 days at 20k;
                                    # p_wash 0 off
+install_rows = ["Ripperdoc", "black_doc"]  # round 7 W4 (OPEN-245): the [[serves]] keys who cut chrome; an install is
+                                   # done, named and paid by one of them on duty (V15: the U6 body-first pick handed 36
+                                   # installs a week to an orderly at the triage, unpaid); empty: the patient queue's server
+install_cut = 0.1                  # ... and the doctor who cut it takes this share of the implant's value from the owner's
+                                   # till (Flow::Treatment); 0 none
 # Pressure pass round 2, R6b (docs/PRESSURE_PASS.md § R6b, OPEN-217, OPEN-207): the trades' verbs II. Every value a
 # placeholder.
 [verbs]

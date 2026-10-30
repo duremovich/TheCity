@@ -2393,6 +2393,14 @@ pub struct CareCfg {
     pub wash_keep: i64,
     /// ... which takes this share of his toxicity out. `p_wash` 0 off.
     pub wash_frac: f32,
+    // --- round 7 W4 (OPEN-245): the install's doer
+    /// The `[[serves]]` keys of a Clinic's (or back room's) patient staff who
+    /// cut chrome: an install is done (named, paid) by one of them on duty,
+    /// never the orderly at the triage. Empty: the patient queue's server.
+    pub install_rows: Vec<String>,
+    /// The doctor who cut it takes this share of the implant's value from
+    /// the owner's till into his wallet (`Flow::Treatment`).
+    pub install_cut: f32,
 }
 
 /// Pressure pass round 2, R6a `[trade_verbs]` (docs/PRESSURE_PASS.md §
@@ -2490,6 +2498,8 @@ impl Default for CareCfg {
             wash_price: 8,
             wash_keep: 10,
             wash_frac: 0.5,
+            install_rows: Vec::new(),
+            install_cut: 0.0,
         }
     }
 }
@@ -5200,6 +5210,11 @@ pub struct TradeCfg {
     pub min_age: u32,
     #[serde(default, skip_serializing_if = "is_zero_u32_cfg")]
     pub max_age: u32,
+    /// Round 7 W4 (OPEN-245): a holder of this trade is never the foreman
+    /// who picks a hire or names a layoff (the orderly under the doctor, the
+    /// forger under the fixer, the door under the house).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_foreman: bool,
 }
 
 fn is_zero_usize_cfg(v: &usize) -> bool {
