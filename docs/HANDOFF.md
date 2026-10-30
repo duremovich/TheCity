@@ -30,12 +30,11 @@ FINDINGs (100k seed 42 x 30, `target/r7_100k/` against `target/r6_100k/`): Child
 roll), Raids 216 -> 317; members' war lines 16.3k; sleepers woke to it 455, reported 76; door refusals 7,113 -> 8,927;
 bout purses 1,723; street visits 466 -> 784; Marriage 23,267 (16.7k in days 0-6, r6 the same); ticks/s 17.
 
-## Decision for Dylan
+## Decided
 
-- **The neglect ladder's size at 100k** (`OPEN-231`): ~3,700 children taken in 30 days; of W1's 3,430
-  second-warning takes, 3,274 are households that cannot pay one night's food. Families with coins now feed theirs;
-  what is left is U2's ladder (warn first, a repeat takes) on the broke. Keep it, or soften it (a grace for the
-  broke, the Camp feeding the child at home, a charity that reaches the family)?
+- **The neglect ladder's size at 100k stays as built** (Dylan 2026-10-30: "Lets not worry about the amount of kids
+  taken right now"): ~3,700 children taken in 30 days, nearly all from households that cannot pay one night's food
+  (`OPEN-231`). Round 8 does not touch the ladder.
 
 ## In flight
 
