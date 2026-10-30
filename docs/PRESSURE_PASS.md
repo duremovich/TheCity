@@ -4411,3 +4411,114 @@ No test (doctrine 2); no probe re-pinned. `SAVE_VERSION` 108 (renumber at the me
   `SAVE_VERSION` 108 (the orchestrator renumbers at the merge): `World.grief`,
   `ContractRun.worked`/`tries`, `EventKind::Bereaved`, `[grief]`, the X2 keys and the `Jobs2Cols` `grief_leave` ...
   `search_need_days` columns (serde defaults).
+
+### X6, the cell's day, the clinic's walk-in and the shadow's picks (`OPEN-217`, `OPEN-232`; `consequence::hourly`, `consequence::yard_walk`, `consequence::cell_day`, `consequence::held_witness`, `consequence::cell_visit`, `consequence::on_released`, `consequence::note_line`, `law::jail_meals`, `law::serve_meals`, `household::visits_due`, `care::walk_in_clinic`, `citysim-cli/src/shadow.rs` `doer_rank`, `arms_dealt`, `EMPTY_PICK`, `[consequence] cell_yard_hour`, `cell_yard_affinity`, `[justice] meal_hour`, `[household] cell_visit_days`, `[care] walk_slack_ticks`)
+
+20k island seed 42 x 30 (`--scaled --ambient-flats 50`), one run each: before = main `8b76500`, after = the branch
+(before the yard's pairing and the line fixes below, which move no counter here). Jail-days are counted the same way
+on both from `events.tsv` (a prisoner's whole day inside, named by any line that day); the branch also counts them
+in the sim (`cell_days`, `cell_days_lined`, on `analyze_run.py`'s "the cells' day and the clinic's walk-in" line).
+
+1. **The cell's day.** Jail days were an empty column (V16 `jailed_101685`: nine days of needs lines and a gang
+   order). Now a day in the cells has its hours, tier-blind (the held Statistical prisoners get the same lines):
+   - *The meal* at `[justice] meal_hour` 7 (`law::jail_meals`; it was fed at midnight with no line): "Ghost Singh ate
+     the meal in the cells of Precinct#4460 (food from Street Market#4414)", or "went without" off a bare kitchen. The
+     midnight keeps the hold's rest (energy 1.0 for the held). `meal_hour` 0 is the old midnight meal.
+   - *The yard* at `[consequence] cell_yard_hour` 15 (`consequence::hourly`). The day's one cell event (`cell_day`: a
+     fight, an offer, a Fixer's name, a loan) now happens there, not at midnight. A prisoner with nothing on walks with
+     the cellmate he likes best not yet walking (an edge at or above 0; their affinity up `cell_yard_affinity` 0.02):
+     one line a pair, "Brenna Oakes walked the yard of Precinct#4460 with Juniper Sallow (in for Dealing, out d24)";
+     with nobody, "... alone: 174 in the cells, none he would walk with". A Station's night cells have no yard ("the
+     cells of Station#n").
+   - *The fight* (X1's left item): the midnight's `find_map` gave every hater the same first disliked cellmate (base
+     run: Wire Sallow gone for 15 times in 30 days, Mateo Lockridge 11). Now a cellmate in a fight (or a walk) is
+     taken for the day, and the one he goes for is drawn among those he dislikes. After: the most any prisoner was
+     gone for in 30 days is 3, never twice in a day. The line names the yard; X1's `raise_crime_on` gives the case.
+   - *The held witness* (X1's left item, `jailed_10485 d24 06:18` "ran"): `consequence::held_witness`. A prisoner who
+     sees a cellmate's crime has no door to run for and nobody outside to tell. He tells the jailer (the report: no
+     line, the case is `cell_case`'s) or, a violent crime, keeps clear: "Moth Singh saw Fenn Underhill's Assault in
+     the cells of Precinct#4460 and kept to the far wall, away from him" (an Enemy, safety to 0.5, not 0).
+   - *A visit from kin* (`household::visits_due`, `[household] cell_visit_days` 3): a kin or spouse in the cells unmet
+     3 days, within `[distance.choice] visit_ticks` of the visitor, is visited (a Hurt visit to the Precinct or the
+     Station, off the visitor's shift as a Camp answer is; one visitor a prisoner a day). The credit
+     (`consequence::cell_visit`) gives both sides the belonging and carries the news from outside: "Xia Thorne came
+     to the cells of Precinct#4460 to see Brenna Oakes; 28 days left for her"; "Viktor Ostrowski came to the cells of
+     Precinct#4460 to see Marek Jessop and told him the post as Guard at Precinct#4460 is gone".
+   - *The release* (`on_released`) always says what waits outside, kept or lost. `Inside` now records the Home and the
+     gang going in: "Tank Nightingale came out to the life he left: the post as Vat Tech at Vat Farm#4364 still his;
+     no Home to go to; The Ash Rats still his"; "Greta Ostrowski came out to a changed life: the post as Forger at
+     Fixer#5271 gone; a grudge on Zane Zhou, who reported her; the Home at Block#1510 still hers; Ninefold still hers".
+     `released_changed` still counts the changed ones only.
+2. **The clinic's walk-in** (`care::walk_in_clinic`, `[care] walk_slack_ticks` 30): a patch-up reads the Clinics open
+   for it near him as W6's bookings do: the `book_cands` nearest within 30 ticks of travel more than the nearest, those
+   with a doctor's hour free first, the fewest patients today (seen and booked) per Ripperdoc, the nearest on ties.
+   Both tiers (`care_choice_any`). The number did not move (below), and the cause is demand, not routing: at 20k the
+   Clinics patch ~10 walk-ins a day (282 -> 301 in 30 days; the back rooms take ~2,100), and the idle doctor-days sit
+   at Clinics with no other Clinic's patients within the slack. Six Clinics in the Spire and the Mid-Levels' corp
+   blocks see 5-20 patients in 30 days (Ripperdoc#4937 5, #5052 5, #4978 16 -> 6; the shadow's `ripperdoc_13043` at
+   #4978: no patient all week). Their trade is the wash and the chrome, booked from the Sump's homes, and the Sump is
+   past the slack. Within reach the spread acts: #4795 40 -> 82, #4936 73 -> 38, #4644 48 -> 15.
+3. **The shadow's pickers** (`citysim-cli/src/shadow.rs`). A pick is someone who does the archetype's thing.
+   - `gun`: a taker or crew of a violent record (a Hit or a Beat) taken now or fulfilled in the 7 days before. V16's
+     corp techs held a Tag and a Steal. `doer_rank` puts a record taken now first, then the armed.
+   - `runner`: unchanged candidates (a run in the 7 days before, or seated now). Ranked gang members first, then the
+     most runs.
+   - `arms_dealer`: also a dealer who sold a weapon in the 7 days before (a weapon's provenance `Dealt` by him; the
+     hideout-to-hideout lot names the gang's dealer or its leader), ranked first. The old filter (a registered dealer
+     whose gang has a surplus) found nobody for five rounds while the trade ran on gang-to-gang lots.
+   - `jailed`: the most of the term left first (a week inside to read).
+   - An archetype with no candidate is an `error:` line, and `shadow` ends in an error once the other diaries are
+     written (a tool asserts its preconditions). X2's `bereaved` and `marked` stand.
+
+**Under 18** (CLAUDE.md). The yard fight keeps X1's gate: the pick skips a protected cellmate and a protected
+starter, and `resolve_fight_mods` is the backstop. A child is never held, so the meal, the yard walk, the held
+witness and the release touch adults only. A cell visitor is an adult (`visits_due` takes adults); the visit harms
+nobody. The walk-in clinic pick moves a patient, never a harm.
+
+**Numbers** (20k x 30, before -> after):
+
+- Jail-days with a line (from `events.tsv`): 1,646 of 2,659 (61.9 %) -> 2,885 of 2,885 (100 %). The sim's own count
+  after: 3,575 of 3,575 (`cell_days`; it also counts the Stations' nights). Of the after lines: 3,758 meals, 3,392
+  yard walks (before the pairing; a pair now writes one), 436 cell visits, 57 cell fights (49 before), 14 held
+  witnesses who kept clear.
+- The most times one prisoner was gone for in the cells in 30 days: 15 -> 3.
+- Clinic-days with a Ripperdoc / no patient: 761 / 341 (44.8 %) -> 796 / 374 (47.0 %): unmoved (2 above).
+
+**Shadow** (20k, seed 42, d20-27; jailed, ripperdoc, orderly, gun, runner, arms_dealer, two of each; the final build).
+
+- The cell's day: `jailed_6150` (Moth Singh) eats at 07:00 and walks the yard at 15:00 each day. `d24 06:21` he
+  "saw Fenn Underhill's Assault in the cells of Precinct#4460 and kept to the far wall, away from him". At `15:00`
+  "Moth Singh went for Fenn Underhill in the yard of Precinct#4460 (bad blood); Moth Singh won", and "the law added 3
+  days to Moth Singh's sentence for the Assault on Fenn Underhill in the cells of Precinct#4460 (held now to day 51)".
+  The first build's `jailed_7481 d21 18:00`: "Xia Thorne came to the cells of Precinct#4460 to see Brenna Oakes; 28
+  days left for her"; `d22 15:00` "Sprocket Singh lent Brenna Oakes 10c in the cells".
+- gun: both picks are crew on their gang's Job records and act on them: `gun_23931 d20 03:00` "Priya Coldwater (43
+  y) attacked Lena Chrome (38 y) at Block#4628", then "hit on Lena Chrome: failed (The Unplugged's crew hit Lena
+  Chrome at Block#4628: lost (1 vs 1, 0 dead))"; `gun_11362` five tries on three records.
+- runner: both picks are gang members. `runner_15565 d20 21:57` "Ada Mbeki jacked in at Hideout#4466 (a ledger on the
+  Treasury)", `22:07` "Precinct#4460's ICE fried Ada Mbeki", "the city's ICE traced Ada Mbeki to Hideout#4466".
+- arms_dealer: `arms_dealer_12977 d26 00:07` "The Iron Knives sold The Drowned Choir 6 a weapon for 68 (68 each):
+  Perrin Pembroke dealt with Freya Thorne; the lot moved hideout to hideout"; the first build's `arms_dealer_17832`
+  dealt two lots (`d23 00:07`, `d24 00:07`).
+- The clinic: `orderly_19863` (Ripperdoc#5947, the Sump) 2 patch-ups and 3 washes in the week; `ripperdoc_9238`
+  (#5790) 3 washes.
+
+**Reads wrong / open** (the next pass):
+
+- The idle Clinic is demand, not the walk: the corp districts' Clinics see nobody (2 above). A Clinic's own trade
+  where it stands (a corp's staff chrome, a check-up) or fewer Clinics there is the next step.
+- Kin past `visit_ticks` never come and nothing says so (`jailed_12426` Ghost Singh: a spouse and three parents in
+  the Sump, the Precinct in the Civic Core, no visit in seven days).
+- A visitor repeats the same news each visit (Viktor Ostrowski told Marek Jessop twice that the post is gone).
+- The yard line names the partner's term, not the walker's ("with Brenna Oakes (in for Murder, out d49)" in her own
+  diary reads her own term back).
+- One gun pick of each pair, one runner and one arms_dealer did nothing of the kind in the week: the rank puts the
+  likeliest first, but the 20k city has few (the arms trade is ~1 lot a day, gang to gang; `sold_dealer` 1 in 30
+  days). The gun crews' tries mostly fail at the door ("the crew never reached the door", four times for
+  `gun_11362`): the crew's march, not the picker.
+- 56 cellmates saw Moth Singh's yard fight and one reported it ("56 saw Moth Singh commit Assault"): the whole cells
+  is the yard's audience (X1's witnesses).
+
+No new test (doctrine 2). Re-pinned in place: `civic::test_jailer_meal_is_an_inmate_encounter` runs the Law pass at
+`[justice] meal_hour`, not the midnight (the meal moved). `SAVE_VERSION` 112 (renumber at the merge): `consequence::Inside.home`, `Inside.gang`,
+the X6 keys and the `Jobs2Cols` `cell_days` ... `wr_held_clear` columns (serde defaults).

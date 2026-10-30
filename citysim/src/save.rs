@@ -494,7 +494,11 @@ use crate::world::World;
 /// while it holds anything), `ContractRun.worked`, `EventKind::Bereaved`, the `[grief]` section, the `[verbs]
 /// hit_guard_wealth` ... `hit_low_days`, `[search] need_wealth`, `need_idle_days`, `[hitmarket] stall_hours` keys and the
 /// `Jobs2Cols` `grief_leave` ... `search_need_days` columns (serde defaults).
-pub const SAVE_VERSION: u8 = 111;
+/// 112 (pressure pass round 8, X6, the cell's day and the clinic's walk-in; renumber at the merge):
+/// `consequence::Inside.home`, `Inside.gang`, the `[consequence] cell_yard_hour`, `cell_yard_affinity`, `[justice]
+/// meal_hour`, `[household] cell_visit_days`, `[care] walk_slack_ticks` keys and the `Jobs2Cols` `cell_days` ...
+/// `wr_held_clear` columns (serde defaults).
+pub const SAVE_VERSION: u8 = 112;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

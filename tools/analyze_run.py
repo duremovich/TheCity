@@ -1091,6 +1091,12 @@ def jobs2(rows, events, out):
         J["x1_totals"] = {k: sum(col(rows, k)) for k in (
             "word_meant", "word_kept", "word_dropped", "witness_unfree", "held_hit", "asleep_acts",
             "cell_cases") if k in rows[0]}
+    # Pressure pass round 8, X6 (OPEN-217): the cells' day (the jail-days a line named, the yard, the meal, the
+    # visits, the held witness who kept clear).
+    if "cell_days" in rows[0]:
+        J["x6_totals"] = {k: sum(col(rows, k)) for k in (
+            "cell_days", "cell_days_lined", "cell_yard_walks", "cell_meals", "cell_visits", "wr_held_clear",
+            "cell_fights", "cell_cases", "clinic_doc_days", "clinic_idle_days") if k in rows[0]}
     if "dollhouses" in rows[0]:
         J["chip_totals"] = {k: sum(col(rows, k)) for k in CHIP_TOTALS}
         J["chip_mean"] = {k: mean(col(rows, k)) for k in CHIP_SNAP}
@@ -1497,6 +1503,10 @@ def fmt(o):
         if "x1_totals" in w:
             L.append("the word to the law and the held who act (meant/kept/dropped; unfree witnesses, held hits, "
                      "asleep acts: 0 is right; cell cases), run totals: " + f(w["x1_totals"]))
+        if "x6_totals" in w:
+            L.append("the cells' day and the clinic's walk-in (jail-days, with a line; yard walks, meals, visits, held "
+                     "witnesses who kept clear; fights, cases; doctor-days, of them no patient), run totals: "
+                     + f(w["x6_totals"]))
         if "chip_totals" in w:
             L.append("chip and braindance, run totals: " + f(w["chip_totals"]))
             L.append("chip and braindance, daily mean: " + f(w["chip_mean"]) + f"; BD units legal / black "

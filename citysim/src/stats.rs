@@ -1607,6 +1607,24 @@ pub struct Jobs2Cols {
     /// ... and within reach of the old rule's (the held Home nearest the target)
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub raid_reach_old: u32,
+    /// Round 8 X6 (`OPEN-217`): a prisoner's whole day in the cells (counted at the midnight after) ...
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub cell_days: u32,
+    /// ... and of them, the days a line named him (any event, `consequence::note_line`)
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub cell_days_lined: u32,
+    /// Round 8 X6: a prisoner's hour in the yard with nothing else on (a walk with a cellmate, or alone)
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub cell_yard_walks: u32,
+    /// Round 8 X6: a cells' meal served at `[justice] meal_hour` with its line
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub cell_meals: u32,
+    /// Round 8 X6: a kin's (or Friend's) visit to a prisoner in the cells, credited
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub cell_visits: u32,
+    /// Round 8 X6: a held witness of a cellmate's violent crime kept clear of him (no running in the cells)
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub wr_held_clear: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -2210,6 +2228,12 @@ impl Jobs2Cols {
                 "raid_at_target",
                 "raid_reach_new",
                 "raid_reach_old",
+                "cell_days",
+                "cell_days_lined",
+                "cell_yard_walks",
+                "cell_meals",
+                "cell_visits",
+                "wr_held_clear",
             ]
             .into_iter()
             .map(str::to_string),
@@ -2807,6 +2831,12 @@ impl Jobs2Cols {
             self.raid_at_target.to_string(),
             self.raid_reach_new.to_string(),
             self.raid_reach_old.to_string(),
+            self.cell_days.to_string(),
+            self.cell_days_lined.to_string(),
+            self.cell_yard_walks.to_string(),
+            self.cell_meals.to_string(),
+            self.cell_visits.to_string(),
+            self.wr_held_clear.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

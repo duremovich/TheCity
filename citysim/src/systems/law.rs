@@ -2670,6 +2670,8 @@ pub fn run(world: &mut World) {
     // line: riots on 42-47 read 0.17 a seed against 2.67 with the budget off).
     if world.tick.is_multiple_of(crate::time::TICKS_PER_HOUR) {
         crate::prof::timed!("law::held_hourly", held_hourly(world));
+        // Round 8 X6 (`OPEN-217`): the cells' meal at its hour.
+        crate::prof::timed!("law::jail_meals", jail_meals(world));
         // Lives at work phase 7 (§ 5.2): the van, at `transfer_hour`.
         crate::prof::timed!("law::stations::van", crate::systems::stations::van(world));
     }
@@ -3116,6 +3118,36 @@ fn expire_warrants(world: &mut World) {
 /// a body on screen), and the night's sleep is the off-screen hold's alone
 /// (a body sleeps at lights-out, `in_lights_out`).
 fn jail_upkeep(world: &mut World) {
+    let lights = world.config.justice.is_some();
+    // Round 8 X6 (`OPEN-217`): the meal at `[justice] meal_hour` (`jail_meals`);
+    // 0 (or no `[justice]`) at midnight, as before.
+    if world.config.justice.as_ref().is_none_or(|c| c.meal_hour == 0) {
+        serve_meals(world, false);
+    }
+    for who in world.with::<Sentence>() {
+        if lights && !crate::systems::lod::is_held(world, who) {
+            continue;
+        }
+        if let Some(n) = world.comp_mut::<Needs>(who) {
+            n.energy = 1.0;
+        }
+    }
+}
+
+/// Round 8 X6 (`OPEN-217`), hourly: the cells' meal at `[justice] meal_hour`
+/// (not 0), every prisoner's line its own ("ate the cells' meal"; V16's jail
+/// days had no line at all).
+fn jail_meals(world: &mut World) {
+    let Some(h) = world.config.justice.as_ref().map(|c| c.meal_hour).filter(|&h| h > 0 && h < 24) else { return };
+    if world.tick_of_day() / crate::time::TICKS_PER_HOUR as u16 != u16::from(h) {
+        return;
+    }
+    serve_meals(world, true);
+}
+
+/// The cells' meal for every prisoner (`jail_meal`); `lined`: each fed
+/// prisoner's line too (the kitchen it came from).
+fn serve_meals(world: &mut World, lined: bool) {
     let price = world.mean_price();
     let kitchens = jail_kitchens(world);
     let cfg = world.config.needs.clone();
@@ -3124,25 +3156,25 @@ fn jail_upkeep(world: &mut World) {
     // jailer's: a fed prisoner is an `Inmate` encounter (civic only).
     let jail = world.building_of_kind(BuildingKind::Jail).filter(|_| crate::systems::service::civic_on(world));
     for who in world.with::<Sentence>() {
-        if jail_meal(world, who, &kitchens, price, &cfg) {
+        if let Some(market) = jail_meal(world, who, &kitchens, price, &cfg) {
             // Lives at work phase 7: a Station's held are fed, but the
             // Precinct's jailer serves only the Precinct's.
-            let in_station = world
-                .comp::<Position>(who)
-                .and_then(|p| p.building)
-                .is_some_and(|b| crate::systems::stations::is_station(world, b));
+            let cell = world.comp::<Position>(who).and_then(|p| p.building);
+            let in_station = cell.is_some_and(|b| crate::systems::stations::is_station(world, b));
             if let Some(j) = jail.filter(|_| !in_station) {
                 crate::systems::service::arrive(world, who, j, crate::components::ServeKind::Inmate, 0);
             }
-        } else if lights && !crate::systems::lod::is_held(world, who) {
+            if lined {
+                let at = cell.map_or_else(|| "the cells".to_string(), |b| format!("the cells of {}", world.name_of(b)));
+                let text = format!("{} ate the meal in {at} (food from {})", world.name_of(who), world.name_of(market));
+                let mut actors = vec![who];
+                actors.extend(cell);
+                world.push_event(EventKind::Cells, &actors, text);
+                crate::systems::ownership::jobs2_row(world).cell_meals += 1;
+            }
+        } else if lights && (lined || !crate::systems::lod::is_held(world, who)) {
             let text = format!("{} went without: the cells' kitchen had no food", world.name_of(who));
             world.push_event(EventKind::Cells, &[who], text);
-        }
-        if lights && !crate::systems::lod::is_held(world, who) {
-            continue;
-        }
-        if let Some(n) = world.comp_mut::<Needs>(who) {
-            n.energy = 1.0;
         }
     }
 }
@@ -3189,19 +3221,16 @@ fn jail_kitchens(world: &World) -> Vec<EntityId> {
 }
 
 /// One Jail meal for a prisoner from the first of `kitchens` with food on
-/// the shelf, the Treasury paying (`Flow::JailFood`). False when every
-/// shelf is empty.
+/// the shelf, the Treasury paying (`Flow::JailFood`): the Market it came
+/// from. `None` when every shelf is empty.
 fn jail_meal(
     world: &mut World,
     who: EntityId,
     kitchens: &[EntityId],
     price: i64,
     cfg: &crate::config::NeedsCfg,
-) -> bool {
-    let Some(market) = kitchens.iter().copied().find(|&m| world.comp::<Building>(m).is_some_and(|b| b.stock_food > 0))
-    else {
-        return false;
-    };
+) -> Option<EntityId> {
+    let market = kitchens.iter().copied().find(|&m| world.comp::<Building>(m).is_some_and(|b| b.stock_food > 0))?;
     if let Some(b) = world.comp_mut::<Building>(market) {
         b.stock_food -= 1;
     }
@@ -3215,7 +3244,7 @@ fn jail_meal(
         crate::needs::eat(n, cfg);
     }
     world.mark_day(who, crate::components::trace_flags::ATE);
-    true
+    Some(market)
 }
 
 /// L2 (L21): the held prisoners' day, at midnight before `jail_upkeep`

@@ -455,14 +455,22 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
             yards.into_iter().filter_map(|y| citysim::systems::industry::foreman(world, y, None)).collect()
         }
         // A gang dealer whose gang keeps weapons in its Hideout (the dealer over goods).
+        // Round 8 X6 (OPEN-217): and a dealer who sold a weapon in the 7 days
+        // before today (a weapon whose provenance is his deal; `pick` puts
+        // them first): V12-V16 had no arms_dealer diary while `sold_dealer`
+        // counted the trade.
         "arms_dealer" => {
             let mut dealers: BTreeSet<EntityId> = world.dealers.values().flatten().copied().collect();
             dealers.extend(world.deal_log.values().map(|&(a, _)| a));
+            let dealt = arms_dealt(world);
             adults()
-                .filter(|a| dealers.contains(a))
+                .filter(|a| dealt.contains(a) || dealers.contains(a))
                 // Shadow V4 bug 23: a surplus to sell (the armoury's target
                 // kept back), not any stock.
-                .filter(|&a| world.gang_of(a).is_some_and(|g| citysim::systems::weapons::has_surplus(world, g)))
+                .filter(|&a| {
+                    dealt.contains(&a)
+                        || world.gang_of(a).is_some_and(|g| citysim::systems::weapons::has_surplus(world, g))
+                })
                 .collect()
         }
         "elder" => {
@@ -568,10 +576,13 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
         }
         // M16a 5.3: an agent holding a taken contract (its taker or a crew member) or one that
         // fulfilled a contract in the 7 days before today (closed records stay 30 days).
+        // Round 8 X6 (OPEN-217): a gun's contract is violence (a Hit or a Beat; V16's two
+        // picks were corp techs on a Tag and a Steal, no weapon); `pick` puts a record taken
+        // now first, then the armed.
         "gun" => {
             let from = world.tick.saturating_sub(7 * TICKS_PER_DAY);
             let mut guns: BTreeSet<EntityId> = BTreeSet::new();
-            for c in world.contracts.values() {
+            for c in world.contracts.values().filter(|c| c.kind.violent()) {
                 let held = c.status == citysim::contract::ContractStatus::Taken;
                 let done =
                     c.status == citysim::contract::ContractStatus::Fulfilled && c.closed.is_some_and(|t| t >= from);
@@ -4330,6 +4341,10 @@ pub fn shadow(args: ShadowArgs) -> Result<(), String> {
     }
 
     let picked = pick(&world, args.seed, args.start_day, args.pick.as_deref(), args.count, &args.agents);
+    // Round 8 X6 (OPEN-217): the archetypes nobody does (an error once the rest are written).
+    type Picks = Vec<(String, EntityId)>;
+    let (empty, picked): (Picks, Picks) = picked.into_iter().partition(|(a, _)| a.starts_with(EMPTY_PICK));
+    let empty: Vec<String> = empty.into_iter().map(|(a, _)| a[EMPTY_PICK.len()..].to_string()).collect();
     if picked.is_empty() {
         return Err("nothing to shadow: no --pick candidates and no live --agent".into());
     }
@@ -4355,7 +4370,70 @@ pub fn shadow(args: ShadowArgs) -> Result<(), String> {
     let tp = dir.join("camera.tsv");
     std::fs::write(&tp, &tsv).map_err(|e| format!("{}: {e}", tp.display()))?;
     println!("wrote {} diaries to {} ({} KB)", tracks.len(), dir.display(), total / 1024);
+    if !empty.is_empty() {
+        return Err(format!("no candidates for: {} (see the error lines above)", empty.join(", ")));
+    }
     Ok(())
+}
+
+/// Round 8 X6 (OPEN-217): `pick`'s mark for an archetype with no candidate.
+const EMPTY_PICK: &str = "!empty:";
+
+/// Round 8 X6 (OPEN-217): the dealers who sold a weapon in the 7 days before
+/// today (a weapon's provenance `Dealt` by him).
+fn arms_dealt(world: &World) -> BTreeSet<EntityId> {
+    let from = world.tick.saturating_sub(7 * TICKS_PER_DAY);
+    world
+        .with::<citysim::components::Asset>()
+        .into_iter()
+        .filter_map(|a| world.comp::<citysim::components::Asset>(a).and_then(|x| x.prov))
+        .filter(|p| p.how == citysim::components::ProvKind::Dealt && p.at >= from)
+        .filter_map(|p| p.by)
+        .collect()
+}
+
+/// Round 8 X6 (OPEN-217): the archetypes whose picks are ranked by how much
+/// they do its thing (lower first). `gun`: on a taken record now, then armed;
+/// `runner`: a gang member, then the most runs in the 7 days before today;
+/// `arms_dealer`: a weapon dealt in those 7 days, then a gang member;
+/// `jailed`: the most of the term left (a week inside to read).
+#[allow(clippy::type_complexity)]
+fn doer_rank<'a>(world: &'a World, arch: &str) -> Option<Box<dyn Fn(EntityId) -> (u8, u8, i64) + 'a>> {
+    match arch {
+        "gun" => {
+            let live: BTreeSet<EntityId> = world
+                .contracts
+                .values()
+                .filter(|c| c.kind.violent() && c.status == citysim::contract::ContractStatus::Taken)
+                .flat_map(|c| c.taker.into_iter().chain(c.crew.iter().copied()))
+                .collect();
+            Some(Box::new(move |a| {
+                let armed = citysim::systems::weapons::tier(world, a) > 0;
+                (u8::from(!live.contains(&a)), u8::from(!armed), 0)
+            }))
+        }
+        "runner" => {
+            let from = world.tick.saturating_sub(7 * TICKS_PER_DAY);
+            let mut runs: std::collections::BTreeMap<EntityId, i64> = std::collections::BTreeMap::new();
+            for e in world.events.iter().rev().take_while(|e| e.tick >= from) {
+                if e.kind == EventKind::JackedIn {
+                    if let Some(&a) = e.actors.first() {
+                        *runs.entry(a).or_default() += 1;
+                    }
+                }
+            }
+            Some(Box::new(move |a| (u8::from(!world.has::<GangMember>(a)), 0, -runs.get(&a).copied().unwrap_or(0))))
+        }
+        "arms_dealer" => {
+            let dealt = arms_dealt(world);
+            Some(Box::new(move |a| (u8::from(!dealt.contains(&a)), u8::from(!world.has::<GangMember>(a)), 0)))
+        }
+        "jailed" => Some(Box::new(move |a| {
+            let left = world.comp::<Sentence>(a).map_or(0, |s| s.until_tick.saturating_sub(world.tick));
+            (0, 0, -i64::try_from(left).unwrap_or(i64::MAX))
+        })),
+        _ => None,
+    }
 }
 
 /// The world of `seed` run normally to the start of `start_day`. Shadow V6:
@@ -4409,7 +4487,13 @@ fn pick(
             };
             match candidates(world, arch) {
                 Err(e) => eprintln!("note: {e}"),
-                Ok(c) if c.is_empty() => eprintln!("note: no {arch} candidates on seed {seed} at day {start_day}"),
+                // Round 8 X6 (OPEN-217): a tool asserts its preconditions: an empty
+                // pick is an error line, and the run ends in an error once the
+                // other diaries are written (`shadow`).
+                Ok(c) if c.is_empty() => {
+                    eprintln!("error: no {arch} candidates on seed {seed} at day {start_day} (nobody does its thing)");
+                    picked.push((format!("{EMPTY_PICK}{arch}"), EntityId::NONE));
+                }
                 Ok(_) if arch == "child" => {
                     eprintln!("note: child is unpinnable (no Brain, no Full LOD); not picked (see --list)")
                 }
@@ -4456,6 +4540,12 @@ fn pick(
                         c
                     } else if arch == "jobless" {
                         // Round 4 T5: the candidates' order (the freshest post lost first).
+                        c
+                    } else if let Some(rank) = doer_rank(world, arch) {
+                        // Round 8 X6 (OPEN-217): the ones who do the archetype's thing
+                        // most first (shuffled within a rank).
+                        let mut c = shuffled(c, seed, arch);
+                        c.sort_by_key(|&a| rank(a));
                         c
                     } else {
                         shuffled(c, seed, arch)
