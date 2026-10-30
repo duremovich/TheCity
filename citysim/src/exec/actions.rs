@@ -530,6 +530,16 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
         k if k.is_leisure_step() => crate::systems::leisure::on_start(world, id, k, target),
         // M16a (plan C32): the guard is on post.
         ActionKind::Guard => crate::systems::contracts::on_guard_start(world, id, target),
+        // Pressure pass round 7, W3 (`OPEN-244`): the cuffs go on as the guard
+        // lays hands on him (the step starts only beside the suspect); the
+        // step's minutes are the cuffing. On completion the suspect walked
+        // off the tile: 1,143 Arrests in 20k x 30 failed `PreconditionLost`
+        // against 1,121 made.
+        ActionKind::Arrest => {
+            if let Some(s) = target {
+                crate::systems::law::arrest(world, id, s);
+            }
+        }
         // Hunger as sickness § 4: the diver holds the bin for the dive.
         ActionKind::DumpsterDive => {
             let until = world.tick + duration(world, id, kind);
@@ -1091,7 +1101,9 @@ pub fn on_complete(
         }
         ActionKind::Arrest => {
             let Some(suspect) = target else { return StepResult::Failed(FailReason::NoSuchPlace) };
-            if crate::systems::law::arrest(world, id, suspect) {
+            // Round 7 W3: cuffed at the start (`on_start`); a suspect who
+            // fought free there is gone.
+            if world.comp::<Brain>(id).is_some_and(|b| b.escorting == Some(suspect)) {
                 StepResult::Done
             } else {
                 StepResult::Failed(FailReason::PreconditionLost)

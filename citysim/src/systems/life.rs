@@ -398,11 +398,17 @@ pub fn arrive_at_suspect(world: &mut World, guard: EntityId, suspect: EntityId) 
     // left and failed `PreconditionLost`).
     let now = world.tick;
     let here = world.comp::<Position>(guard).map(|p| p.tile);
+    // Pressure pass round 7, W3 (`OPEN-244`): a radioed sighting past his
+    // pursuit radius is not his to walk to (a guard chased one 259 tiles
+    // across the city, 4 h 46, on a rest day): the chase drops and is handed
+    // to a guard near it (`law::chase_dropped`).
+    let reach = crate::systems::law::pursuit_radius_for(world, guard);
     let radioed = free
-        && world
-            .last_seen()
-            .get(&suspect)
-            .is_some_and(|&(t, at)| now.saturating_sub(at) <= world.config.life.chase_radio_ticks && Some(t) != here);
+        && world.last_seen().get(&suspect).is_some_and(|&(t, at)| {
+            now.saturating_sub(at) <= world.config.life.chase_radio_ticks
+                && Some(t) != here
+                && here.is_some_and(|h| h.manhattan(t) <= reach)
+        });
     if (visible || radioed) && hops < world.config.life.chase_hops {
         if visible {
             let tile = world.comp::<Position>(suspect).map(|p| p.tile).unwrap_or_default();
@@ -424,6 +430,16 @@ pub fn arrive_at_suspect(world: &mut World, guard: EntityId, suspect: EntityId) 
             }
         }
         return true;
+    }
+    // Round 7 W3: a fresh sighting elsewhere (past his reach) stands for the
+    // guard near it.
+    let elsewhere = free
+        && world
+            .last_seen()
+            .get(&suspect)
+            .is_some_and(|&(t, at)| now.saturating_sub(at) <= world.config.life.chase_radio_ticks && Some(t) != here);
+    if elsewhere {
+        return false;
     }
     // Stale: nobody chases this sighting again.
     world.remove_last_seen(&suspect);

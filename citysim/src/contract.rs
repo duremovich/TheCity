@@ -940,6 +940,10 @@ pub struct Wounded {
     /// called, who comes from any distance it can make in time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub called: Option<EntityId>,
+    /// Pressure pass round 7, W3 (`OPEN-244`): the callees who never came,
+    /// passed over at the next call.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tried: Vec<EntityId>,
     /// Pressure pass R3: a helper bound the wound (`[care] aid_min` added once).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub aided: bool,

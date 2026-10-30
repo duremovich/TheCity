@@ -100,6 +100,12 @@ pub fn bind_target(world: &World, id: EntityId, goal: GoalKind) -> Option<Entity
         }
         // Arrest binds the located warrant suspect nearest the guard.
         GoalKind::Arrest => {
+            // Pressure pass round 7, W3 (`OPEN-244`): the prisoner in his
+            // hands first (a cuffed suspect is no located warrant, so the
+            // escorting guard bound another and planned past his own).
+            if let Some(s) = world.comp::<crate::components::Brain>(id).and_then(|b| b.escorting) {
+                return Some(s);
+            }
             // Pressure pass round 3, S3: his own collar first (the crime he saw).
             if let Some(s) = crate::systems::law::collar_of(world, id) {
                 return Some(s);
@@ -452,6 +458,14 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
     // expansions and the dealer's PickUp chain 267-485 (with BuyStims gone,
     // its old 140-312 shortcut through another dealer); without the chains
     // ~70 GangWork plans a day failed at the cap.
+    // Pressure pass round 7, W3 (`OPEN-244`): the arrest's chain is built
+    // directly, `[GoTo(SuspectTile)] -> Arrest -> Escort`: the planner's search
+    // over every action failed 648 Arrest plans in 20k x 30 (340
+    // `Unreachable`, 308 `ExpansionCap`) and cooled the goal two hours each.
+    // A chain that cannot be built names why.
+    if goal == GoalKind::Arrest {
+        return arrest_chain(world, id, goal, target, &ctx, &start, tick);
+    }
     if goal == GoalKind::GangWork {
         if let Some(kinds) = dealer_chain(&ctx, &start).or_else(|| claim_chain(&ctx, &start)) {
             let steps = kinds.iter().map(|k| k.instance(&ctx)).collect();
@@ -507,6 +521,70 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
             used
         }
     }
+}
+
+/// Round 7 W3: the Arrest plan, `[GoTo(SuspectTile)] -> Arrest -> Escort`
+/// (a prisoner in hand: `Escort` alone), installed; or the reason it cannot
+/// be built, as the `PlanAborted` line, and the goal cooled.
+fn arrest_chain(
+    world: &mut World,
+    id: EntityId,
+    goal: GoalKind,
+    target: Option<EntityId>,
+    ctx: &crate::goap::PlanCtx,
+    start: &crate::goap::WorldState,
+    tick: crate::time::Tick,
+) -> usize {
+    use crate::goap::LocationKey;
+    let jail = ctx.dist.contains_key(&LocationKey::Jail);
+    let at_suspect = start.at == LocationKey::SuspectTile;
+    // No warrant to bind at plan time: the think's (queued for the plan, or
+    // scored ahead) was claimed by another guard or went cold meanwhile (all
+    // of the 648 failed searches). Not a failure to cool for two hours: the
+    // goal rests one think and he re-chooses.
+    if target.is_none() {
+        let until = tick + world.config.brain.think_interval_ticks.max(1);
+        if let Some(b) = world.comp_mut::<Brain>(id) {
+            let c = b.cooldowns.entry(goal).or_insert(0);
+            *c = (*c).max(until);
+        }
+        world.push_event(
+            crate::events::EventKind::PlanAborted,
+            &[id],
+            format!("{goal:?} dropped: the warrant was taken by another guard or went cold"),
+        );
+        return 0;
+    }
+    let why = if !jail {
+        Some("no Jail to take him to")
+    } else if start.suspect_cuffed {
+        None
+    } else if !ctx.suspect_located {
+        Some("the suspect is not located")
+    } else if !at_suspect && !ctx.dist.contains_key(&LocationKey::SuspectTile) {
+        Some("no sighting to walk to")
+    } else {
+        None
+    };
+    if let Some(why) = why {
+        world.stats.current.budget.aborts += 1;
+        world.push_event(crate::events::EventKind::PlanAborted, &[id], format!("{goal:?} unplannable: {why}"));
+        world.cool_goal(id, goal);
+        return 0;
+    }
+    let mut kinds = Vec::with_capacity(3);
+    if !start.suspect_cuffed {
+        if !at_suspect {
+            kinds.push(ActionKind::GoTo(LocationKey::SuspectTile));
+        }
+        kinds.push(ActionKind::Arrest);
+    }
+    kinds.push(ActionKind::Escort);
+    let steps = kinds.iter().map(|k| k.instance(ctx)).collect();
+    let plan = Plan { goal, target, steps, started_tick: tick };
+    reserve_for(world, id, &plan);
+    install(world, id, plan);
+    kinds.len()
 }
 
 /// A dealer's GangWork chain (D38): `[GoTo(Hideout)] -> PickUp` unless it

@@ -2245,6 +2245,16 @@ pub struct FaresCfg {
     /// caught dodger is not beaten again: the guard turns him off the
     /// platform and he walks (0: every catch past the fine is a beating).
     pub beat_cooldown_days: u64,
+    /// Pressure pass round 7, W3 (`OPEN-244`): a guard handles one dodger at
+    /// a time: a catch holds him this many minutes (the fine counted, the
+    /// beating or the booking), and a gate jumped in front of him meanwhile
+    /// goes through (0: every dodger he sees is caught at once; a guard beat
+    /// 18 in 11 minutes).
+    pub handle_minutes: u64,
+    /// Round 7 W3: a broke dodger this old or more (or sick, or wounded) is
+    /// booked, not beaten: the catch on his record toward the ban, no blow
+    /// (0: the old are beaten like anyone).
+    pub book_age: u32,
 }
 
 impl Default for FaresCfg {
@@ -2261,6 +2271,8 @@ impl Default for FaresCfg {
             ban_break_lawfulness: 0.1,
             wary_hours: 24,
             beat_cooldown_days: 3,
+            handle_minutes: 6,
+            book_age: 60,
         }
     }
 }
@@ -2288,11 +2300,32 @@ pub struct JusticeCfg {
     /// ... and his Arrest goal carries this flat while he has one (a guard
     /// who saw a murder on his commute walked on to the desk: Work 0.99).
     pub collar_flat: f32,
+    /// Pressure pass round 7, W3 (`OPEN-244`): a chase begun this many hours
+    /// ago or less is finished past the shift's end (0: the shift's end drops it).
+    pub chase_overtime_hours: u64,
+    /// Round 7 W3: the warrant at the door. From `door_from_hour` to
+    /// `door_to_hour` (across midnight when from > to; equal: off), a warrant
+    /// whose suspect no guard has seen within `[crime] suspect_seen_ticks`
+    /// and who is inside his own Home is taken by the nearest free city
+    /// guard on shift within his pursuit radius: the address is the
+    /// sighting, the arrest is made at home (a warrant the street never saw
+    /// was never served).
+    pub door_from_hour: u8,
+    pub door_to_hour: u8,
 }
 
 impl Default for JusticeCfg {
     fn default() -> Self {
-        JusticeCfg { kitchen_markets: 4, lights_out_hour: 22, wake_hour: 6, collar_hours: 2, collar_flat: 0.5 }
+        JusticeCfg {
+            kitchen_markets: 4,
+            lights_out_hour: 22,
+            wake_hour: 6,
+            collar_hours: 2,
+            collar_flat: 0.5,
+            chase_overtime_hours: 2,
+            door_from_hour: 22,
+            door_to_hour: 6,
+        }
     }
 }
 
@@ -2321,6 +2354,17 @@ pub struct CareCfg {
     /// colleague) who can reach it and a doctor before it bleeds out; again
     /// every this many minutes while nobody has come.
     pub call_every_min: u32,
+    /// Pressure pass round 7, W3 (`OPEN-244`): a callee who has not come by
+    /// the next call is passed over; with no tied body able, the call reaches
+    /// the nearest stranger who can: a city guard on shift or the doctor's
+    /// own staff on duty within this many tiles, or a passer-by within
+    /// `help_radius` (0: tied bodies only, as before).
+    pub call_radius: u32,
+    /// Round 7 W3: the Rescue tie's term for a called stranger ...
+    pub call_term: f32,
+    /// ... and the flat the callee's Rescue carries (a colleague called three
+    /// times by a bleeding 61-y went on with his shift).
+    pub call_flat: f32,
     /// A back room stabilises a carried downed body for this (the nearest
     /// staffed doctor, a Clinic or a back room, is the carrier's).
     pub back_stabilise_price: i64,
@@ -2467,6 +2511,9 @@ impl Default for CareCfg {
             aid_min: 180,
             beat_term: 0.9,
             call_every_min: 30,
+            call_radius: 40,
+            call_term: 0.8,
+            call_flat: 0.3,
             back_stabilise_price: 30,
             doctor_cut: 0.25,
             slate_down: 10,

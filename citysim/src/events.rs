@@ -794,7 +794,7 @@ impl EventKind {
 fn harm_line(kind: EventKind, text: &str) -> bool {
     use EventKind as E;
     matches!(kind, E::Assault | E::Murder | E::Assaulted | E::Brawl | E::Crossfire | E::Punished | E::Wounded)
-        || (kind == E::Fare && text.contains(" beat "))
+        || (kind == E::Fare && (text.contains(" beat ") || text.contains(" booked ") || text.contains(" fined ")))
 }
 
 /// `" (17 y)"` already at the start of `s`.

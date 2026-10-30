@@ -759,7 +759,22 @@ pub fn considerations_with(
             // L2 shadow fixes item 10: the shift is a workday's.
             let working =
                 job.on_shift(tod) && crate::exec::routine::workday_of(world, id, job, job.shift_key_at(world.tick));
-            let on = if working || escorting || collar.is_some() { 1.0 } else { world.config.life.arrest_off_shift };
+            // Pressure pass round 7, W3 (`OPEN-244`): a chase begun within
+            // `[justice] chase_overtime_hours` is finished past the shift's
+            // end (a guard on a suspect at 05:48 gave him up at 06:18 for
+            // Unwind: "the shift is over", 73 such ends in 20k x 30).
+            let overtime =
+                world.config.justice.as_ref().map_or(0, |c| c.chase_overtime_hours) * crate::time::TICKS_PER_HOUR;
+            let in_hand = chasing.is_some()
+                && world
+                    .comp::<Brain>(id)
+                    .and_then(|b| b.plan.as_ref())
+                    .is_some_and(|p| p.started_tick + overtime > world.tick);
+            let on = if working || escorting || collar.is_some() || in_hand {
+                1.0
+            } else {
+                world.config.life.arrest_off_shift
+            };
             return Some((
                 vec![
                     Consideration::new("warrant located", can(nearest.is_some()), GATE),
