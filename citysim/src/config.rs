@@ -6173,6 +6173,10 @@ pub struct CaseCfg {
     /// (`distance::trip_to`; a passing sighting's is `[distance.reach]
     /// report_ticks`).
     pub word_reach_ticks: u64,
+    /// Round 8 X1: a crime in the cells (the held on a cellmate) adds this
+    /// share of its term to the sentence (`law::cell_case`; a Murder adds
+    /// its whole term).
+    pub cell_term_share: f32,
 }
 
 impl Default for CaseCfg {
@@ -6188,6 +6192,7 @@ impl Default for CaseCfg {
             word_hours: 24,
             word_flat: 0.35,
             word_reach_ticks: 240,
+            cell_term_share: 0.3,
         }
     }
 }

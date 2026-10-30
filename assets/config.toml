@@ -232,6 +232,9 @@ word_flat = 0.35                   # ReportCrime's flat bonus while the promise 
 word_reach_ticks = 240             # the desk a promise is walked to, in travel ticks (distance::trip_to, the walk or the
                                    # El): a robbed man goes further than a passer-by ([distance.reach] report_ticks 120;
                                    # at 120, 11 of the first 18 dropped promises at 20k had no desk in reach)
+cell_term_share = 0.3              # round 8 X1: a crime in the cells (the held on a cellmate) is the law's case at once,
+                                   # this share of its term added to the sentence (a Murder: its whole term); at the
+                                   # whole term a cell Assault added 10 days and the 20k cells grew 289 -> 363 by d30
 
 [social]
 edge_create_ticks = 30

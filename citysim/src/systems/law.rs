@@ -579,7 +579,8 @@ pub fn cells_of(world: &World, id: EntityId) -> Option<EntityId> {
 /// Round 8 X1 (`OPEN-246`): a crime in the cells (`raise_crime_core`, the
 /// held actor in his cells) is the law's case at once: the cells are
 /// watched, the man is already inside. His reports are settled, his
-/// sentence runs on by the crime's term (`sentence_ticks`), a Murder's body
+/// sentence runs on (`[crime.case] cell_term_share` of the crime's
+/// `sentence_ticks`, a Murder's whole term), a Murder's body
 /// is the law's (found: no second case) and the line names the place, the
 /// parties and the days. V16 `pimp_14518 d26 06:18`, `black_doc_79637 d27
 /// 07:16`: an Assault and a Murder in the Precinct with no place, no
@@ -589,7 +590,14 @@ fn cell_case(world: &mut World, actor: EntityId, other: Option<EntityId>, crime:
     if is_petty(crime) || crate::systems::ages::is_protected(world, actor) {
         return;
     }
-    let add = sentence_ticks(world, crime);
+    // A scuffle in the cells is the warden's discipline (`[crime.case]
+    // cell_term_share` of the term); a Murder there is a Murder's term.
+    let full = sentence_ticks(world, crime);
+    let add = if crime == Crime::Murder {
+        full
+    } else {
+        ((full as f32 * world.config.crime.case.cell_term_share).ceil() as Tick).max(TICKS_PER_DAY)
+    };
     resolve_reports(world, actor);
     let Some(until) = world.comp_mut::<Sentence>(actor).map(|s| {
         s.until_tick += add;
