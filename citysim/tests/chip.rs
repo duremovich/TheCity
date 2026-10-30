@@ -296,6 +296,13 @@ fn test_black_unit_once_an_agent_day() {
     let a = idle(&w)[0];
     set_coins(&mut w, a, 500);
     let sold = |w: &World| w.stats.current.jobs2.as_ref().map_or(0, |j| j.black_sold);
+    // Round 7 fix: the world run before this leaves idle()[0] a day behind on
+    // rent (arrears 1), and `leisure::spendable` is 0 for a tenant in arrears
+    // (the rent comes before the drink), so the roll never reached a buyer;
+    // the premise is a buyer who can pay, so clear the arrears.
+    if let Some(h) = w.comp_mut::<citysim::Household>(a) {
+        h.arrears = 0;
+    }
     braindance::bar_visit(&mut w, a, bar, true);
     assert_eq!(sold(&w), 1, "the first drink's roll buys");
     braindance::bar_visit(&mut w, a, bar, true);
