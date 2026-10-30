@@ -298,6 +298,9 @@ pub fn arrivals(world: &mut World) {
         if here.is_none() || here != there {
             continue;
         }
+        if crate::systems::presence::asleep(world, id) {
+            ownership::jobs2_row(world).asleep_acts += 1;
+        }
         world.visits.remove(&id);
         match v.why {
             VisitWhy::Service => attended(world, id, v.kin, true),
@@ -488,6 +491,7 @@ pub fn paid_awake(world: &mut World, w: EntityId, actor: EntityId, home: EntityI
         let until = now + world.config.crime.case.tell_days * crate::time::TICKS_PER_DAY;
         world.consequence.owed_word.retain(|x| x.2 > now);
         world.consequence.owed_word.push((w, actor, until));
+        ownership::jobs2_row(world).word_meant += 1;
         let he = pro(world, w).0;
         format!("{wn} paid {an}'s shakedown at {at}{again} ({coins}c); {he} means to tell the law")
     } else {
@@ -564,6 +568,7 @@ pub fn woke(world: &mut World) {
             Some(a) => {
                 world.consequence.owed_word.retain(|x| x.2 > now);
                 world.consequence.owed_word.push((k, a, until));
+                crate::systems::ownership::jobs2_row(world).word_meant += 1;
                 let he = pro(world, k).0;
                 format!("{kn} woke {place} to find {coins}c gone from the purse: {who}; {he} means to tell the law")
             }
@@ -594,7 +599,9 @@ pub fn word_given(world: &mut World, crime: Crime, suspect: EntityId, witness: E
     world.consequence.owed_word.retain(|&(v, s, until)| !(v == witness && s == suspect && until >= now));
     let n = before - world.consequence.owed_word.len();
     if n > 0 {
-        crate::systems::ownership::jobs2_row(world).sleeper_reports += n as u32;
+        let row = crate::systems::ownership::jobs2_row(world);
+        row.sleeper_reports += n as u32;
+        row.word_kept += n as u32;
     }
 }
 

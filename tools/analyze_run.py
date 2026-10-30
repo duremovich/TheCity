@@ -1084,6 +1084,12 @@ def jobs2(rows, events, out):
             "war_called", "war_came", "war_member_lines", "raid_marchers", "raid_at_door", "raid_missed",
             "sleeper_paid", "sleeper_found", "sleeper_reports", "sleeper_quiet", "witness_finds", "witness_named",
             "witness_quiet") if k in rows[0]}
+    # Pressure pass round 8, X1 (OPEN-246): the word promised to the law and kept or dropped, the held and the
+    # asleep who acted (0 is right), the cells' cases.
+    if "word_meant" in rows[0]:
+        J["x1_totals"] = {k: sum(col(rows, k)) for k in (
+            "word_meant", "word_kept", "word_dropped", "witness_unfree", "held_hit", "asleep_acts",
+            "cell_cases") if k in rows[0]}
     if "dollhouses" in rows[0]:
         J["chip_totals"] = {k: sum(col(rows, k)) for k in CHIP_TOTALS}
         J["chip_mean"] = {k: mean(col(rows, k)) for k in CHIP_SNAP}
@@ -1487,6 +1493,9 @@ def fmt(o):
         if "w2_totals" in w:
             L.append("the war and the case in the diaries (called/came, marchers/at the door, sleepers, witnesses), "
                      "run totals: " + f(w["w2_totals"]))
+        if "x1_totals" in w:
+            L.append("the word to the law and the held who act (meant/kept/dropped; unfree witnesses, held hits, "
+                     "asleep acts: 0 is right; cell cases), run totals: " + f(w["x1_totals"]))
         if "chip_totals" in w:
             L.append("chip and braindance, run totals: " + f(w["chip_totals"]))
             L.append("chip and braindance, daily mean: " + f(w["chip_mean"]) + f"; BD units legal / black "

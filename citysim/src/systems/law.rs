@@ -33,6 +33,18 @@ pub fn near(world: &World, a: EntityId, b: EntityId, r: u32) -> bool {
     (pa.building.is_some() && pa.building == pb.building) || chebyshev(pa.tile, pb.tile) <= r
 }
 
+/// Round 8 X1 (`OPEN-246`): a wall of the cells stands between `a` and `b`:
+/// one of them is held (a `Sentence`) and they are not in the same building
+/// (a cellmate is within reach; the victim at the Precinct's door, the
+/// street, a passer-by are not).
+pub fn held_apart(world: &World, a: EntityId, b: EntityId) -> bool {
+    if !world.has::<Sentence>(a) && !world.has::<Sentence>(b) {
+        return false;
+    }
+    let here = |x: EntityId| world.comp::<Position>(x).and_then(|p| p.building);
+    here(a).is_none() || here(a) != here(b)
+}
+
 /// Round 5 U4 (`OPEN-236`): is the spot `(tile, building)` in the open?
 /// Outside any building, on a building's door tile (the threshold sees both
 /// ways), or inside a wall-less kind (`[crime] open_air`).
@@ -421,6 +433,13 @@ fn raise_crime_core(
             continue;
         }
         recorded += 1;
+        // Round 8 X1 (`OPEN-246`): the held outside the scene's cells and the
+        // asleep see nothing (0 is right).
+        let held_out = world.has::<Sentence>(w)
+            && (actor_building.is_none() || world.comp::<Position>(w).and_then(|p| p.building) != actor_building);
+        if held_out || crate::systems::presence::asleep(world, w) {
+            crate::systems::ownership::jobs2_row(world).witness_unfree += 1;
+        }
         world.remember_crime(w, actor, crime, salience, object);
         crate::systems::social::witnessed_crime_of(world, w, actor);
         if let Some(n) = world.comp_mut::<Needs>(w) {

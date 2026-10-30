@@ -1485,6 +1485,9 @@ pub fn on_complete(
             if !crate::systems::law::living(world, victim) || !crate::systems::law::near(world, id, victim, 4) {
                 return StepResult::Failed(FailReason::PartnerLeft);
             }
+            if crate::systems::law::held_apart(world, id, victim) {
+                crate::systems::ownership::jobs2_row(world).held_hit += 1;
+            }
             // M16a (plan C32): a Guard taker on post beside the client meets
             // the attack first; a guard's win ends it (the attacker's Assault).
             if let Some(g) = crate::systems::contracts::guard_for(world, id, victim) {
