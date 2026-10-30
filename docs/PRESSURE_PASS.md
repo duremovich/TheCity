@@ -558,6 +558,92 @@ pick; find why. GOSSIP ABOUT ME lines 60 -> 259 in the vice diaries: fold or rat
 fighter, pimp, ripperdoc, dancer (20k). Moves a number: off-screen door refusals by reason, bout purses, pimps running
 a round, patients per clinic (median, min), 20k seed 42 x 30 before and after.
 
+### Round 8 from Shadow V16 (`SHADOW_V16.md` § "Round 8's input", opened 2026-10-30)
+
+Dylan's calls carried: the neglect ladder's size at 100k is left as built (`OPEN-231`; no phase touches it), and far
+travel (V16 item 2: `OPEN-240`, `OPEN-221`) waits for the 100k map re-import. The under-18 rule holds in every phase
+(CLAUDE.md): a brief that touches a victim pick, a fight, a fine or a punishment says how `ages::is_protected` gates
+it. **Cost rule** (rounds 5-7): a phase's 100k work is at most one run, named in its brief. Wave 1 is X1, X2, X3, X4
+(the law's promise and the held; the target and the bereaved; the hire and the earner's crime; the gang). X1 and X3
+both touch who acts while held or employed, X2 and X3 both touch `search.rs` and `careers.rs`: each brief names the
+other. Wave 2 is X5 (the pit, the lines' ages, marriages) and X6 (the cell's day, the clinics' walk-ins, the shadow's
+pickers), X6 started when X1 has merged (the cell). Iterate at 20k (`--population 20000 --map
+assets/maps/isle_m_k2.txt`, `run` also `--scaled --ambient-flats 50`); V16's repro picks are 100k seed 42 days 21-27
+(`target/shadow_v16/isle100k_s42_d21/`).
+
+#### X1, the promise to tell the law, and the held and the asleep who act (`OPEN-246`)
+
+W2's sleeper wakes to the short purse and "means to tell the law", and 5 of 7 never do (`foreman_21236 d23, d27`,
+`courier_45596 d24-25`, `gun_44357` three times, then attacks instead; `cook_25080`, `dancer_104874`; 100k: 455 woke,
+76 reported). A promise in a line is a goal the person carries: the report is made (a Hall, a guard on the beat, the
+Precinct) within a day, or the diary says why it was dropped (the thief found and dealt with himself, fear, the
+reach). The held and the asleep do not act: a man in a cell witnesses 14 crimes after his sentence
+(`ripperdoc_10662`); a victim beats the thief while the thief is held in the Precinct (`street_worker_35520 d22
+18:16`); an orderly blackmails while asleep (`orderly_20962 d26 12:50`); a fight in the cells and a Murder there
+print no place, parties or case (`pimp_14518 d26 06:18`, `black_doc_79637 d27 07:16`). Find each at its cause (the
+witness roll, the attack's target pick, the blackmail's actor, the cell's crime lines) and fix it there; a crime in
+the cells is a crime with a place, its parties and a case. A murder after a pit brawl names the bystander who
+reported it as the killer (`miserable_103693 d26 20:15`): the suspect is a party to the crime. Shadow: foreman,
+courier, gun, ripperdoc, street_worker, orderly, jailed (20k). Moves a number: woke-and-meant / reported, witnesses
+who are held or asleep (should be 0), 20k seed 42 x 30 before and after.
+
+#### X2, the target and the bereaved react (`OPEN-247`, the first half)
+
+A 1,453c hit taken on a sleeping CEO who idles on (`ceo_20314 d27 18:00`, V15's, unchanged in kind): find what
+becomes of a taken hit (the hitter's plan, its failure, its timeout) and make it land, fail with a line, or reach the
+target as word he can act on (guards, lying low, leaving town, a counter-hit), each with a line. A widow's hunt cools
+in 16 minutes and she is at work the next morning, no funeral, no missed shift, her children no line
+(`school_parent_87579 d25 21:00`): a death in the household is grief that takes days (a funeral, missed shifts with
+the employer's leave or a sacking, the children's line, a hunt that holds while the grudge is hot). A fired cabbie
+and a day labourer never search all week; "Quit (no need of the wage)" then four job searches the same day
+(`gun_44357 d27`, 255c): the jobless who need the wage search, the one who quit for want of need does not. Shadow:
+ceo, school_parent, cabbie, day_labourer, gun (20k). Moves a number: hits taken / landed / failed / dropped, days off
+after a death in the household, searches by the sacked, 20k seed 42 x 30 before and after.
+
+#### X3, the wrong person in the role, II (`OPEN-247`, the second half; `OPEN-245`'s follow-up)
+
+A man three days out of a theft sentence hired as a Guard (`camp_jobless_66381 d27 11:30`): the law's posts (and
+the doors and the vaults, where the trade says so in `[[trades]]`) read a record. A 61-y ripperdoc and a teacher
+steal motorcycles to earn (`ripperdoc_10662 d24 04:34`, `teacher_14781 d25`): the Earn crime plan wins at 0.05 for
+someone with a wage; find why it wins (no legal Earn option scored, a fallback) and fix it there, so the employed earn
+by their post and crime comes from need, misery and low lawfulness (phase 1's rule). A Fighter named foreman of a
+Fighter hire (the `no_foreman` list misses Fighter, or the pit's hire reads another list). Shadow: camp_jobless,
+ripperdoc, teacher, fighter, guard, foreman (20k). Moves a number: Earn crimes by the employed, hires with a record
+by trade, 20k seed 42 x 30 before and after.
+
+#### X4, gangs (`OPEN-241`)
+
+The lie-low line names a different enemy than the war (`cultist_80865 d26 00:05`); leaders change with no Succession
+line (`raider_29990`, `scav_99001`): a new leader is told to the members and the city's rumour. No raid lands in 16
+diaries: the muster point ignores who is near and members sit out "3 h 08 from home"; corner turnout 1,586 of 3,297
+at 100k (the call wakes nobody, W2's left-open): the muster takes the members within reach of it, the call rouses a
+sleeping member off shift, and a raid that musters marches to its door. Under 18 never mustered, called or picked.
+Shadow: gang_member, gang_leader, cultist, raider, scav (20k). Moves a number: raids that reach the door, corner
+turnout, Succession lines, 20k seed 42 x 30 before and after; one 100k x 30 for raids landing if 20k cannot show it.
+
+#### X5, the pit, the lines' ages and marriages (`OPEN-217`, `OPEN-248`), wave 2
+
+Every bout hurts its loser (1,724 of 1,724 at 100k) and the patch-up (6-12c) costs more than the purse (5c): a loser
+is hurt on a beating (the margin), not on every loss, and the purse pays more than a patch-up; the purse is the
+house's money (a `Flow` from the venue's till), not `GambleWin` from the City. Bout, arrest, cell-fight and witness
+lines print no ages, so the minor rule cannot be read on them: print the ages the other harm lines print
+(`events::with_ages`). Marriages: 23,267 in 30 days at 100k, 16.7k in days 0-6 (r6 the same): find the seeding burst
+(the founding's couples, `lod::stat_flirt`'s rate on a fresh city) and fix it at the cause, so a marriage is a
+courtship's end and the first week reads like the fourth. Shadow: fighter, bouncer, madam, guard, worker (20k).
+Moves a number: bouts, losers hurt, purse against patch-up, Marriage by week, 20k seed 42 x 30 before and after.
+
+#### X6, the cell's day, the clinic's walk-in and the shadow's picks (`OPEN-217`, `OPEN-232`), wave 2 after X1
+
+Jail days are empty: a held person's day in the cells has its routine and its lines (the meal, the yard, a visit from
+kin, a fight that X1 gives a place and a case), and his release says what waits outside (the job gone, the Home, the
+gang). Walk-in patch-ups still go to the nearest clinic (853 of 1,861 doctor-days with no patient at 100k): the
+walk-in reads the staffed clinics near him as the bookings do (W6's `book_clinic`). The shadow's archetype pickers:
+both `gun` picks are corp techs with no weapon, the `runner` picks are not gang members, no `arms_dealer` diary for
+the fifth round (`citysim-cli/src/shadow.rs`): a pick is someone who does the archetype's thing in the window (a tool
+asserts its preconditions: an empty pick is an error line, not a silent miss). Shadow: jailed, ripperdoc, orderly,
+gun, runner, arms_dealer (20k). Moves a number: doctor-days with no patient, jail-days with a line, 20k seed 42 x 30
+before and after.
+
 ## Implemented: deviations
 
 (Per phase, as they land.)

@@ -43,7 +43,7 @@ bout purses 1,723; street visits 466 -> 784; Marriage 23,267 (16.7k in days 0-6,
 
 ## Next, in order
 
-1. **Pressure pass round 8 from V16** (`docs/SHADOW_V16.md` § "Round 8's input", not yet planned): the promise to
+1. **Pressure pass round 8 from V16** (`docs/PRESSURE_PASS.md` § "Round 8 from Shadow V16", planned 2026-10-30): the promise to
    tell the law and the held and asleep who still act (`OPEN-246`); the target and the bereaved who do not react, the
    wrong hire and the doctor who steals (`OPEN-247`); gangs (`OPEN-241`: the lie-low's enemy, a silent succession, no
    raid lands); the pit and the missing ages on lines (`OPEN-217`); marriages (`OPEN-248`). Same loop.
