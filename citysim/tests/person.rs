@@ -345,6 +345,13 @@ fn probe_laid_off_farm_worker_finds_work_within_14_days() {
         // the needy's longer search move the city, and the pick was abducted
         // and killed on day 27 (a butterfly); `[grief]` off keeps the ground.
         c.grief = None;
+        // Re-pinned, round 8 merge (X1-X4): the merged wave moves the city
+        // again and an organ gang abducted and harvested the pick at tick
+        // 44204 (the third butterfly on this ground); no gang hunts organs
+        // here, so the next round's moves do not kill the pick the same way.
+        for t in &mut c.gray.gang_types {
+            t.organ_targets = false;
+        }
         c
     });
     // Day 20, a minute to midnight: the layoff lands just before the
