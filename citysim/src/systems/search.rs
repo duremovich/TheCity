@@ -73,6 +73,9 @@ fn jobless(world: &World, id: EntityId) -> bool {
         || world.has::<crate::components::Retired>(id)
         || world.comp::<Misery>(id).is_some_and(|m| m.idle_until > world.tick)
         || world.comp::<crate::components::Needs>(id).is_some_and(|n| n.wealth >= 1.0)
+        || secure_quit(world, id)
+        // Round 8 X2 (`OPEN-247`): a mourner or a man lying low keeps home.
+        || crate::systems::grief::holed_up(world, id)
     {
         return false;
     }
@@ -83,6 +86,23 @@ fn jobless(world: &World, id: EntityId) -> bool {
     crate::systems::demography::is_adult(world, id)
         && world.comp::<Brain>(id).is_some_and(|b| !b.emigrating)
         && !crate::systems::founding::is_exec(world, id)
+}
+
+/// Round 8 X2 (`OPEN-247`): `id` quit "no need of the wage" within `[life]
+/// quit_rehire_days` (`life::note_secure_quit`): he does not look for work
+/// (V16 `gun_44357 d27`: the quit at 00:07, four searches from 09:00).
+fn secure_quit(world: &World, id: EntityId) -> bool {
+    world
+        .comp::<Brain>(id)
+        .and_then(|b| b.quit_from)
+        .is_some_and(|(e, until)| e == EntityId::NONE && until > world.tick)
+}
+
+/// Round 8 X2 (`OPEN-247`): `id` needs the wage (`Needs.wealth` under
+/// `[search] need_wealth`): he searches past `search_days`, and a quit or a
+/// firing idles him `need_idle_days` (`misery::note_left`).
+pub fn needs_wage(world: &World, id: EntityId) -> bool {
+    cfg(world).is_some_and(|c| world.comp::<crate::components::Needs>(id).is_some_and(|n| n.wealth < c.need_wealth))
 }
 
 /// Today's search day of `id`, if one was begun.
@@ -107,7 +127,10 @@ fn today_mut(world: &mut World, id: EntityId) -> Option<&mut SearchDay> {
 /// post, or sent home from the shape-up this morning.
 pub fn searching(world: &World, id: EntityId) -> bool {
     let Some(c) = cfg(world) else { return false };
-    jobless(world, id) && (idle_days(world, id) < c.search_days || today_of(world, id).is_some_and(|s| s.sent_home))
+    jobless(world, id)
+        && (idle_days(world, id) < c.search_days
+            || today_of(world, id).is_some_and(|s| s.sent_home)
+            || needs_wage(world, id))
 }
 
 /// `id` takes worse work: jobless `worse_after_days` or more.
@@ -216,17 +239,22 @@ fn nearest_door(
 /// The nearest standing building of `board_kinds` within `reach_ticks` of
 /// `from`, not asked today (`skip`).
 fn nearest_board(world: &World, from: TilePos, c: &SearchCfg, skip: &[EntityId]) -> Option<EntityId> {
+    nearest_board_in(world, from, c, skip, c.reach_ticks)
+}
+
+/// [`nearest_board`] within `cap` of travel.
+fn nearest_board_in(world: &World, from: TilePos, c: &SearchCfg, skip: &[EntityId], cap: Tick) -> Option<EntityId> {
     c.board_kinds
         .iter()
         .flat_map(|&k| world.buildings_of_kind(k).iter().copied())
         .filter(|b| !skip.contains(b))
         .filter_map(|b| {
             let door = world.comp::<Building>(b).filter(|bd| !bd.demolished && !bd.derelict).map(|bd| bd.door)?;
-            if u64::from(from.manhattan(door)) > 2 * c.reach_ticks {
+            if u64::from(from.manhattan(door)) > 2 * cap {
                 return None;
             }
             let t = crate::systems::distance::travel(world, from, door);
-            (t <= c.reach_ticks).then_some((t, b))
+            (t <= cap).then_some((t, b))
         })
         .min()
         .map(|(_, b)| b)
@@ -297,9 +325,14 @@ pub fn hourly(world: &mut World) {
         let mut skip = s.tried.clone();
         skip.extend(crowded(world, &heading));
         // No open post within reach: the nearest hiring board.
+        // Round 8 X2 (`OPEN-247`): one who takes worse work walks to the
+        // nearest board within `far_ticks` when none stands within reach (a
+        // laid-off builder in D4 found no board within 120 ticks and sat home
+        // four days, searching with nowhere to ask).
         let next = nearest_door(world, id, from, c.reach_ticks, &skip, None)
             .map(|(_, b)| b)
-            .or_else(|| nearest_board(world, from, &c, &skip));
+            .or_else(|| nearest_board(world, from, &c, &skip))
+            .or_else(|| worse_work(world, id).then(|| nearest_board_in(world, from, &c, &skip, c.far_ticks)).flatten());
         if let Some(b) = next {
             *heading.entry(b).or_insert(0) += 1;
         }
@@ -344,8 +377,10 @@ fn ask_friends(world: &mut World, id: EntityId, from: TilePos, c: &SearchCfg, fu
             s.lead = Some(f);
         }
     }
+    let past = cfg(world).is_some_and(|c| idle_days(world, id) >= c.search_days);
     let row = ownership::jobs2_row(world);
     row.search_days += 1;
+    row.search_need_days += u32::from(past);
     row.search_leads += u32::from(lead.is_some());
     // "Nobody knew" is told once a jobless spell (the asked tell him when
     // they hear of one: a later day's line is a word of a post).

@@ -536,10 +536,15 @@ pub enum EventKind {
     /// `[member, gang]` a member on his gang's corner; `[resident]` a
     /// contested cell passed over after dark.
     Turf,
+    /// Round 8 X2 (OPEN-247, `systems::grief`): `[mourner, dead]` a death in
+    /// the household and the days mourned; `[child, dead, carer?]` the
+    /// child's loss; `[mourner, employer]` a shift on the employer's leave;
+    /// `[household.., friends.., home]` the funeral.
+    Bereaved,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 244] = [
+    pub const ALL: [EventKind; 245] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -784,6 +789,7 @@ impl EventKind {
         EventKind::SoupLine,
         EventKind::CorpseFound,
         EventKind::Turf,
+        EventKind::Bereaved,
     ];
 }
 

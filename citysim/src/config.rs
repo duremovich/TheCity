@@ -407,6 +407,11 @@ pub struct Config {
     /// `None` (not written into a save) with the key absent: as T4 left them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub search: Option<SearchCfg>,
+    /// Pressure pass round 8, X2 (OPEN-247): a death in the household is
+    /// grief that takes days (`systems/grief.rs`). `None` (not written into
+    /// a save) with the key absent: the Grief memory alone, as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grief: Option<GriefCfg>,
     /// Pressure pass round 2, R6a (docs/PRESSURE_PASS.md § R6a; OPEN-217):
     /// the trades' verbs on a followed body (the cab's pool, the pimp's
     /// round, the pit's bettors, the madam's bookings, the joytoy's lonely).
@@ -529,6 +534,20 @@ pub struct VerbsCfg {
     /// ... his safety falls by this (a `Threatened` memory, the event in
     /// his diary and his guards').
     pub hit_heard_safety: f32,
+    /// Round 8 X2 (OPEN-247): the word acted on (`contracts::react`). A
+    /// target at this `Needs.wealth` or more whose purse holds the quote
+    /// hires a guard on himself (a Guard record, brokered at his nearest
+    /// Fixer): V16 `ceo_20314`, a 1,453c hit taken, slept on and idled ...
+    pub hit_guard_wealth: f32,
+    /// ... one at least this brave and at most this lawful swears on the
+    /// taker's lead (a `Hired` grudge of `hit_counter_w`, which the Hunt
+    /// and the hire read: a counter-hit when he is weak and can pay) ...
+    pub hit_counter_courage: f32,
+    pub hit_counter_lawful: f32,
+    pub hit_counter_w: f32,
+    /// ... and one who does neither lies low at home this many days (his
+    /// shifts struck and counted as absences, his free hours indoors). 0 off.
+    pub hit_low_days: u32,
     /// Round 4 T4 (OPEN-217): the door's arrivals, refusals and rough
     /// clients go to the bouncer standing the door: a body among the present
     /// door staff first (the hash of the visitor and the hour among them),
@@ -598,6 +617,11 @@ impl Default for VerbsCfg {
             door_ban_days: 14,
             hit_heard_p: 0.5,
             hit_heard_safety: 0.3,
+            hit_guard_wealth: 1.0,
+            hit_counter_courage: 0.6,
+            hit_counter_lawful: 0.4,
+            hit_counter_w: 0.6,
+            hit_low_days: 3,
             door_body_first: true,
             night_rows: vec!["dancer".to_string(), "Host".to_string()],
             set_rows: vec!["dancer".to_string()],
@@ -651,6 +675,62 @@ pub struct SearchCfg {
     /// corner_hour`, to the day shift's end: V12's hand rested three hours
     /// at the Yard for a 09:00 shift.
     pub day_start_min: u16,
+    /// Round 8 X2 (OPEN-247): past `search_days` a jobless adult under this
+    /// `Needs.wealth` keeps searching every day (V16 `day_labourer_11600`,
+    /// 0c and no post, read no board all week: the search stopped at day 7).
+    pub need_wealth: f32,
+    /// ... and a quit or a firing leaves one under `need_wealth` out of every
+    /// hire this many days, not `[misery]`'s idle days (V16 `cabbie_80901`,
+    /// fired on d22 with the rent short, sat out the week); the stain stays.
+    pub need_idle_days: u32,
+}
+
+/// `[grief]` (the pressure pass round 8, X2; OPEN-247).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GriefCfg {
+    /// An adult of the dead's household (the spouse, a parent or a grown
+    /// child under his roof) mourns from `mourn_days_min` days at affinity 0
+    /// to `mourn_days_max` at 1 (V16 `school_parent_87579`: widowed at
+    /// 21:00, at work at 06:09 the next morning) ...
+    pub mourn_days_min: u32,
+    pub mourn_days_max: u32,
+    /// ... each shift inside it struck (no work, no wage); the employer's
+    /// leave is this many shifts, the rest absences on `[misery]`'s count
+    /// (the firing at `fire_absences`). A household business gives any leave.
+    pub leave_days: u32,
+    /// The wake: the tick of the day after the death the household holds it
+    /// at the Home, the dead's Friends in reach there ...
+    pub wake_tick: u16,
+    /// ... a Friend whose own Home is within this many tiles walks round (the
+    /// wake's line names the ones who came) ...
+    pub wake_reach_tiles: u32,
+    /// ... names the line gives (the rest "and N more").
+    pub wake_names: u8,
+    /// A mourner's Hunt on the one who killed his kin scores + this for
+    /// `hot_days` after the death (the grudge is hot; V16's widow's Hunt
+    /// scored 0.097 and lost to her shift the next morning).
+    pub hunt_hot_flat: f32,
+    pub hot_days: u32,
+    /// Nobody proposes to a widow(er), nor a widow(er) to anyone, inside
+    /// this many days of the death (20k: remarried 22 hours after).
+    pub wed_after_days: u32,
+}
+
+impl Default for GriefCfg {
+    fn default() -> Self {
+        GriefCfg {
+            mourn_days_min: 2,
+            mourn_days_max: 5,
+            leave_days: 3,
+            wake_tick: 1080,
+            wake_reach_tiles: 60,
+            wake_names: 4,
+            hunt_hot_flat: 0.3,
+            hot_days: 7,
+            wed_after_days: 14,
+        }
+    }
 }
 
 impl Default for SearchCfg {
@@ -675,6 +755,8 @@ impl Default for SearchCfg {
             friend_names: 3,
             crowd: 2,
             day_start_min: 30,
+            need_wealth: 0.5,
+            need_idle_days: 1,
         }
     }
 }
@@ -12214,6 +12296,13 @@ pub struct HitMarketCfg {
     /// a live slot (`[missions] max_missions`) this many hours after the take
     /// is worked on the ledger.
     pub queue_hours: u32,
+    /// Round 8 X2 (OPEN-247): a solo taker's live run not planned this many
+    /// hours (the taker took a post, or the goal always lost) is let go: an
+    /// attempt failed with the line, the record back on the board (20k seed
+    /// 42: a hit taken on d1 by a gun hired as Club Staff the next midnight
+    /// sat seven days unsaid until its buyer was gone). 0 off.
+    #[serde(default)]
+    pub stall_hours: u32,
 }
 
 impl Default for HitMarketCfg {
@@ -12252,6 +12341,7 @@ impl Default for HitMarketCfg {
             reach_premium: 0.5,
             lawful_wait: 0.6,
             queue_hours: 24,
+            stall_hours: 36,
         }
     }
 }

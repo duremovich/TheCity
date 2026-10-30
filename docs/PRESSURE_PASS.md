@@ -4321,3 +4321,93 @@ the war's losses skip one (`note_loss`).
 No test (doctrine 2); no probe re-pinned. `SAVE_VERSION` 108 (renumber at the merge): `Gang.raid_muster`,
 `turf::State.roused`, `Deed::TookOver`, the X4 keys and the `Jobs2Cols` `leader_changes` ... `raid_reach_old` columns
 (serde defaults).
+
+
+### X2, the target and the bereaved react (`OPEN-247`, the first half; `systems/grief.rs`, `contracts::react`, `contracts::stalled_runs`, `search::jobless`, `search::needs_wage`, `misery::note_left`, `leisure::choice`, `hunt::considerations`, `social::propose_allowed`, `[grief]`, `[verbs]`, `[search]`, `[hitmarket]` X2 keys)
+
+- **The causes** (20k `isle_m_k2` seed 42 x 30, main `527f53b`; a temporary probe on the live runs and one on the
+  searchers, both removed). (1) **The taken hit that does nothing**: a solo taker's live run is planned when his
+  Contract goal wins, and nothing else watches it. `Cerys Eastwick` took the hit on `Moth Penhallow` on d1 18:00, was
+  hired as Club Staff at the next midnight, planned the run once a day and had it cut every time by her shift or her
+  sleep (the probe: a plan a day, never a stakeout), and the record sat seven days unsaid until its buyer was gone. A
+  taken record's lapse said only "expired". The target's word (round 3 S5's `heard_of`: the exec's security, or the
+  street's tip) was a `Threatened` memory and a line; nothing read it (V16 `ceo_20314`). (2) **The widow at work next
+  morning**: a death wrote a Grief memory (`social::grieve`) and the Court goal's 14-day gate, nothing else; her Hunt
+  (might gap 0.10) scored 0.097 and lost to her shift. A child has no Brain and was never anyone's line. (3) **The
+  sacked who never search**: the search ran `search_days` (7) from the last post, and F3's idle days after a firing
+  (5 + up to 3) ate most of it (V16 `cabbie_80901`, fired d22, nothing all week); a jobless man past day 7 never
+  searched again (V16 `day_labourer_11600`, 0c); a laid-off builder in D4 with no board within `reach_ticks` (120)
+  sat home four days "searching" with nowhere to ask. "No need of the wage" quits on a midnight `Needs.wealth >= 1`
+  and the search read the same need hours later, under it (V16 `gun_44357 d27`).
+- **Built.** *The target*: on the word, `contracts::react` (each with a line): one at `[verbs] hit_guard_wealth` (1.0)
+  whose purse holds the quote, or a corp's exec whose corp's treasury does, puts a guard on himself (a Guard record at
+  his nearest Fixer, the existing bodyguard: "Moth Penhallow put a guard on himself for 44c, Nutrix 3 paying: word of
+  the hit on his head"); one at `hit_counter_courage` (0.6) or braver and `hit_counter_lawful` (0.4) or less swears on
+  the taker's lead (a `Hired` grudge of `hit_counter_w` 0.6, which the Hunt and the hire read: a counter-hit when he
+  is weak and can pay); one who does neither, and has no guard on him already, lies low at home `hit_low_days` (3; his
+  shifts struck and counted as absences, his free hours indoors, `grief::lie_low`) until the record closes ("heard the
+  beat on his head was carried out: no more lying low"). *The hit*: a solo taker's live Hit or Beat with no stakeout
+  at the mark's door in `[hitmarket] stall_hours` (36) and not under way is let go (`stalled_runs`: "Cerys Eastwick
+  let it go: set out 2 times and never stood at Moth Penhallow's door in 36 h, kept to her post as Club Staff"; an
+  attempt failed, the record back on the board); a taken record's lapse names its taker ("never struck before the
+  deadline"). *The bereaved* (`[grief]`, `systems/grief.rs`): the dead's household (the spouse wherever he sleeps; a
+  parent, a child or a sibling under the same roof) mourns `mourn_days_min..mourn_days_max` (2..5) days by affinity,
+  to the midnight; each shift inside it is struck at the skip's moment (`[misery] skip_lead_ticks`), the first
+  `leave_days` (3) the employer's leave, the rest absences on `[misery]`'s count (the firing at `fire_absences`); a
+  household business gives any; a shift under way at the news is left. The mourner's free hours are at home, he takes
+  no contract and does not search; nobody proposes to a widow(er) or is proposed to by one inside `wed_after_days`
+  (14; 20k: remarried 22 hours after). A child under 18 gets "(10 y) lost her father ...; at home with her mother ..."
+  and the `[family]` line's "mourning his mother ...". The funeral the day after at `wake_tick` (18:00) at the Home: the
+  dead's Friends whose Home is within `wake_reach_tiles` (60) are asked, a body among them makes it his Unwind, and the
+  line names the household and who came (an off-screen mourner or Friend off shift by the clock). A mourner's Hunt on
+  his kin's killer scores `+ hunt_hot_flat` (0.3) for `hot_days` (7). *The search*: past `search_days` a jobless adult
+  under `[search] need_wealth` (0.5) keeps searching; a quit or a firing leaves him out of hires `need_idle_days` (1),
+  not F3's idle days (the stain stays); one who takes worse work walks to the nearest board within `far_ticks` when none
+  is within reach; a "no need of the wage" quitter does not search inside `[life] quit_rehire_days`.
+- **Numbers** (20k seed 42 x 30, one run each, base `527f53b` against the branch). Hits and Beats posted 8+19 -> 9+18;
+  taken 4+6 -> 2+11; of the taken: landed 4 -> 3, failed with the taker's line 1 -> 9, expired after the take with
+  "expired" alone 3 -> 0, cancelled 1 -> 0, live at the end 2 -> 1 (one of them seven days unsaid -> none); attempts
+  failed 2 -> 8. Word reached the target 8 -> 17: a guard 2, a counter-grudge 2, lying low 11 (12 shifts lain low).
+  Deaths 99 -> 101; adult mourners 0 -> 81 (26 children told), 61 with a post, shifts off 0 -> 216 (152 on leave, 64
+  absences past it), 3.5 a mourner with a post; 6 fired with the mourning's absences on the count (the first pass,
+  `leave_days` 2 and the strike at midnight, fired 23 of 49: harsh as a rule, not a story); funerals 70, 40 with a
+  Friend who came. The sacked not rehired by the next day 323 -> 329: who searched 39 -> 91, their searches 188 -> 785,
+  days to the first search 6.8 -> 2.8; search days 3,558 -> 6,457 (2,431 past `search_days` on the need), doors asked
+  4,919 -> 10,543, search hires 349 -> 422; "no need of the wage" quitters who searched after 13 of 20 -> 4 of 26 (past
+  the rehire days). Misery firings 141 -> 149. Ticks/s a print: the base 150 then 114 rerun on the same box, the branch 118.
+- **Deviations.** "Leaving town" is not built: the city's only away state is the abroad mission (`abroad::is_away`), a
+  corp's ledger; a target who leaves would be the emigration, which ends a life. The CEO's guard is a Guard record his
+  corp pays for (his own purse is his pocket: 20k `ceo_16592`, 1c in hand, lay low through 8-hour meetings in the first
+  pass); lying low strikes Job shifts only, so an exec's meetings go on (an exec gets the guard). The live gang mission
+  (`ceo_20314`'s crew of four) keeps its own timeline (`missions::check`, the muster and the march; V3's lines); only a
+  solo run is let go on the stall. The funeral is at the Home (the city has no chapel kind) and the off-screen are there
+  by the clock. The kin are the dead's household, not every relative in the city. `[misery] skip_lead_ticks` is reused
+  as the strike's moment (one shift, one strike, at the hour before it).
+- **Under-18** (`ages::is_protected`): a target is an adult (`target_ok` refuses a protected mark); the counter-grudge
+  is never sworn on a protected lead (`react`: `is_adult` and `!is_protected`), and the Hunt it feeds needs an adult
+  hunter (`hunter_ok`) and refuses a protected mark as ever. A grieving child gets a line and the `[family]` note,
+  never a shift, a hunt, a contract or a harm; a mourner's leave and absences are adults' (`is_adult`).
+- **Shadow** (20k, seed 42, d21-27, picks bereaved:3, marked:3, ceo:2, school_parent:2, cabbie:2, day_labourer:2,
+  gun:2; `bereaved` and `marked` are new picks: an adult mourning at the start day, the freshest first; an adult with
+  a taken Hit or Beat on him, lying low first). Working: `bereaved_24712` (Dmitri Lindqvist) `d21 20:00` "stays home
+  from the shift as Plant Operator at Utility Plant#5420: mourning his husband Ronin Quarry (leave, 1 of 3)" through
+  `d23` "(leave, 3 of 3)", `d21 20:00` "The funeral of Ronin Quarry at Block#3290: Garrick Lockridge, Knox Oakes, Kuro
+  Ambrose, Smoke Ferreira came", `d26 00:44` "stopped waiting: the hit on Kuro Santoro failed, so he went after Kuro
+  Santoro himself"; `bereaved_12650` (Cato Ferreira) `d21 20:00` "dismissed as Vat Tech (absent 3 times in 14 days)",
+  `d22 08:56` "attacked Winifred Zhou ... avenged", then the boards from `d23 07:00`; the shadow before it
+  (`bereaved_19053`) `d21 09:30` "[family] Kuro Vance (14 y) at home ..., mourning his mother Hesper Greaves, Cordelia
+  Vance (3 y) ..., mourning her mother"; `ceo_16592` (Static Adeyemi) `d26 18:00` word of the beat, `d27 01:59` "the
+  crew hit Static Adeyemi at Block#275: won (3 vs 1)", "heard the beat on his head was carried out: no more lying low";
+  `day_labourer_22236` `d22 00:07` laid off, `d22 09:36` at the boards the same morning, `d23 06:00` picked at the gate.
+  Read wrong (fixed after the read, not shadowed again): the CEO lay low through his meetings (now his corp pays his
+  guard); Dmitri took a tag at 18:00 on the day of the funeral and was not at it (now a mourner takes no contract); a
+  jobless widow read three boards a day while mourning (now a mourner does not search). Read wrong, left: the hunt of
+  a weak mourner cools on reach every two hours with the planner's generic line ("could not plan or plan failed
+  twice"), and her day is idle at home; the funeral of a Block of 48 households counts a Friend upstairs as come; the
+  absence line of a mourner prints the misery numbers ("mood +0.30, misery 0.00").
+- No test (doctrine 2). Two re-pinned on their premise: `contracts::test_ledger_kill_names_nobody_before_bind` (the
+  target now swears on the taker at the word, a grudge his widow inherits; the target never swears there) and
+  `person::probe_laid_off_farm_worker_finds_work_within_14_days` (the moved city killed the pick on d27; `[grief]` off).
+  `SAVE_VERSION` 108 (the orchestrator renumbers at the merge): `World.grief`,
+  `ContractRun.worked`/`tries`, `EventKind::Bereaved`, `[grief]`, the X2 keys and the `Jobs2Cols` `grief_leave` ...
+  `search_need_days` columns (serde defaults).

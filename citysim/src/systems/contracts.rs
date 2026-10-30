@@ -914,6 +914,11 @@ pub fn eligible(world: &World, c: &Contract, cand: EntityId) -> bool {
     if !free_adult(world, cand) || crate::systems::ages::is_protected(world, cand) {
         return false;
     }
+    // Round 8 X2 (`OPEN-247`): a mourner or a man lying low takes no job
+    // (20k: a widower took a tag at 18:00 and missed his husband's funeral).
+    if crate::systems::grief::holed_up(world, cand) {
+        return false;
+    }
     // C31: a corruption record is a bribe: only a city guard under
     // `corrupt_lawfulness` takes it (plan deviation: the spec lets the usual
     // direct viewers see it, and its buyer's friends took it as a week of
@@ -1453,6 +1458,8 @@ fn start_live(world: &mut World, id: ContractId) -> bool {
             stakeout_until: None,
             deceived: false,
             liar: None,
+            worked: 0,
+            tries: 0,
         },
     );
     if world.comp::<Brain>(taker).is_some_and(|b| b.lod == Lod::Statistical) {
@@ -1618,6 +1625,106 @@ fn heard_of(world: &mut World, id: ContractId, taker: EntityId) {
     let mut actors = vec![target];
     actors.extend(guards.iter().take(3).copied());
     world.push_event(EventKind::Contract, &actors, text);
+    react(world, id, target, taker);
+}
+
+/// A live Guard record on agent `t` (his own bodyguard, standing or asked for).
+fn guarded(world: &World, t: EntityId) -> bool {
+    world.by_party.get(&t).is_some_and(|l| {
+        l.iter().any(|id| {
+            world.contracts.get(id).is_some_and(|c| {
+                c.is_live()
+                    && matches!(c.kind, ContractKind::Guard | ContractKind::Escort)
+                    && c.target == Target::Agent(t)
+            })
+        })
+    })
+}
+
+/// Round 8 X2 (`OPEN-247`): the word of a Hit or Beat taken on `target`
+/// acted on, each with a line (V16 `ceo_20314`: a 1,453c hit taken by a
+/// crew of four, his security warned him, he slept 295 min and idled). One
+/// at `[verbs] hit_guard_wealth` whose purse holds the quote, or a corp's
+/// exec whose corp's treasury does, hires a guard on himself (a Guard record
+/// at his nearest Fixer, the existing bodyguard); one brave and lawless enough (`hit_counter_courage`,
+/// `hit_counter_lawful`) swears on the taker's lead (a `Hired` grudge the
+/// Hunt and the hire read: a counter-hit when he is weak and can pay; never
+/// on an under-18, `ages::is_protected`); one who does neither lies low at
+/// home `hit_low_days` (`grief::lie_low`: his shifts struck and counted,
+/// his free hours indoors). The target is an adult (`target_ok`).
+fn react(world: &mut World, id: ContractId, target: EntityId, taker: EntityId) {
+    let Some(v) = world.config.verbs.clone() else { return };
+    let Some(c) = world.contracts.get(&id).cloned() else { return };
+    let who = world.name_of(target);
+    let his = crate::systems::grief::his(world, target);
+    let him = if his == "his" { "himself" } else { "herself" };
+    // A guard already on him keeps close (no second post, no lying low).
+    let mut acted = guarded(world, target);
+    // A corp's exec has his corp pay (his purse is his pocket; the corp's
+    // treasury keeps him: 20k `ceo_16592`, 1c in hand, lay low instead).
+    let corp = world
+        .corp_slice()
+        .iter()
+        .copied()
+        .find(|&k| world.comp::<crate::components::Corp>(k).and_then(|x| x.exec) == Some(target));
+    let wealth = world.comp::<Needs>(target).map_or(0.0, |n| n.wealth);
+    if (corp.is_some() || wealth >= v.hit_guard_wealth) && !guarded(world, target) {
+        let tgt = Target::Agent(target);
+        let fixer = nearest_fixer(world, target);
+        let price = quote(world, ContractKind::Guard, &tgt, fixer);
+        let payer = corp.unwrap_or(target);
+        if world.purse(Some(payer)) >= price {
+            let posting = Posting {
+                buyer: Some(payer),
+                agent: Some(target),
+                kind: ContractKind::Guard,
+                target: tgt,
+                broker: fixer,
+                deadline_days: world.config.contracts.deadline_days.get(ContractKind::Guard),
+                origin: Origin::Hunt,
+                price: None,
+            };
+            if post(world, posting).is_ok() {
+                let at = fixer.map(|f| format!(" at {}", world.name_of(f))).unwrap_or_default();
+                let by = corp.map(|k| format!(", {} paying", world.owner_label(Some(k)))).unwrap_or_default();
+                let text = format!(
+                    "{who} put a guard on {him} for {price}c{at}{by}: word of the {} on {his} head",
+                    c.kind.label()
+                );
+                world.push_event(EventKind::Contract, &[target], text);
+                ownership::jobs2_row(world).hit_guarded += 1;
+                acted = true;
+            }
+        }
+    }
+    let lead = if is_gang(world, taker) { c.crew.first().copied() } else { Some(taker) };
+    let bold = world
+        .comp::<Personality>(target)
+        .is_some_and(|p| p.courage >= v.hit_counter_courage && p.lawfulness <= v.hit_counter_lawful);
+    if let Some(l) = lead.filter(|&l| {
+        bold && crate::systems::law::living(world, l)
+            && crate::systems::demography::is_adult(world, l)
+            && !crate::systems::ages::is_protected(world, l)
+    }) {
+        crate::systems::grudges::add(world, target, l, crate::word::GrudgeCause::Hired, v.hit_counter_w, 0);
+        let text = format!(
+            "{who} swore to get {} first: {} took the {} on {who}",
+            world.name_of(l),
+            world.owner_label(Some(taker)),
+            c.kind.label()
+        );
+        world.push_event(EventKind::Contract, &[target, l], text);
+        ownership::jobs2_row(world).hit_countered += 1;
+        acted = true;
+    }
+    if !acted && v.hit_low_days > 0 {
+        let until = (world.tick / TICKS_PER_DAY + 1 + u64::from(v.hit_low_days)) * TICKS_PER_DAY;
+        let why = format!("word of the {} on {his} head", c.kind.label());
+        let text = format!("{who} lies low at home for {} days: {why}", v.hit_low_days);
+        world.push_event(EventKind::Contract, &[target], text);
+        crate::systems::grief::lie_low(world, target, until, why);
+        ownership::jobs2_row(world).hit_low += 1;
+    }
 }
 
 /// C12: one record's offers: its candidates by `fit` descending (ties the
@@ -1935,6 +2042,15 @@ pub fn set_status(world: &mut World, id: ContractId, status: ContractStatus, why
             format!("{} on {tname}: done by {} ({why})", kind.label(), world.owner_label(c.taker)),
         ),
         ContractStatus::Failed => (EventKind::ContractFailed, format!("{} on {tname}: failed ({why})", kind.label())),
+        // Round 8 X2 (`OPEN-247`): a taken record's lapse says whose it was.
+        ContractStatus::Expired if c.taker.is_some() && c.kind.violent() => (
+            EventKind::ContractExpired,
+            format!(
+                "{} on {tname}: expired ({} never struck before the deadline)",
+                kind.label(),
+                world.owner_label(c.taker)
+            ),
+        ),
         ContractStatus::Expired => (EventKind::ContractExpired, format!("{} on {tname}: expired", kind.label())),
         ContractStatus::Cancelled => {
             (EventKind::ContractFailed, format!("{} on {tname}: cancelled ({why})", kind.label()))
@@ -1980,6 +2096,22 @@ pub fn set_status(world: &mut World, id: ContractId, status: ContractStatus, why
     }
     world.push_event(ev, &actors, text.clone());
     log(world, id, text);
+    // Round 8 X2 (`OPEN-247`): a man lying low over it hears it is off.
+    if c.kind.violent() && crate::systems::grief::lying_low(world, target) && crate::systems::law::living(world, target)
+    {
+        crate::systems::grief::end_low(world, target);
+        let how = match status {
+            ContractStatus::Fulfilled => "was carried out",
+            ContractStatus::Expired => "has lapsed",
+            _ => "is off",
+        };
+        let text = format!(
+            "{tname} heard the {} on {} head {how}: no more lying low",
+            kind.label(),
+            crate::systems::grief::his(world, target)
+        );
+        world.push_event(EventKind::Contract, &[target], text);
+    }
     // The pressure pass phase 5a: an unfilled bought Hit or Beat: the buyer
     // reposts it higher, goes himself, or lets it go.
     if !c.motive.is_none() && matches!(status, ContractStatus::Expired | ContractStatus::Failed) {
@@ -3048,6 +3180,10 @@ pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
     let phase = next.phase;
     crate::systems::hunt::set_chase(world, id, next);
     crate::systems::hunt::reindex(world);
+    // Round 8 X2 (`OPEN-247`): one more setting-out (`stalled_runs` says it).
+    if let Some(x) = world.contract_runs.get_mut(&id) {
+        x.tries = x.tries.saturating_add(1);
+    }
     let tt = Some(t);
     let mut steps = vec![step(ActionKind::GoTo(LocationKey::Intel), None)];
     if phase == HuntPhase::Ask {
@@ -3341,6 +3477,7 @@ pub fn run(world: &mut World) {
 /// runs are under `max_missions`.
 fn start_queued(world: &mut World) {
     ledger_stale_queue(world);
+    stalled_runs(world);
     let mut queued: Vec<(i64, ContractId)> = world
         .contracts
         .values()
@@ -3423,6 +3560,49 @@ fn ledger_stale_queue(world: &mut World) {
         world.ledger_due.insert((due, id));
         let hours = world.config.hitmarket.queue_hours;
         log(world, id, format!("no live slot in {hours} h: worked off-screen"));
+    }
+}
+
+/// Round 8 X2 (`OPEN-247`), hourly: a solo taker's live Hit or Beat run
+/// with no stakeout at the mark's door in `[hitmarket] stall_hours` (since
+/// the take, or since the last stakeout) and not under way now is let go:
+/// an attempt failed with the line (how often he set out, the post he kept
+/// to), the record back on the board. 20k seed 42: a hit taken on d1 by a
+/// gun hired as Club Staff at the next midnight was planned daily, cut by
+/// her shift and her sleep every time, and sat unsaid until its buyer was
+/// gone on d9.
+fn stalled_runs(world: &mut World) {
+    let hours = world.config.hitmarket.stall_hours;
+    if hours == 0 || world.contract_runs.is_empty() {
+        return;
+    }
+    let now = world.tick;
+    let wait = u64::from(hours) * TICKS_PER_HOUR;
+    // scan-ok: the live runs only (≤ `max_missions`).
+    let stale: Vec<(EntityId, ContractId)> = world
+        .contract_runs
+        .iter()
+        .filter(|(_, r)| now.saturating_sub(r.since.max(r.worked)) >= wait)
+        .filter(|(&t, _)| world.comp::<Brain>(t).and_then(|b| b.plan_goal()) != Some(GoalKind::Contract))
+        .filter(|(_, r)| {
+            world.contracts.get(&r.contract).is_some_and(|c| c.kind.violent() && c.status == ContractStatus::Taken)
+        })
+        .map(|(&t, r)| (t, r.contract))
+        .collect();
+    for (t, id) in stale {
+        let who = world.name_of(t);
+        let tries = world.contract_runs.get(&t).map_or(0, |r| r.tries);
+        let mark = world.contracts.get(&id).map(|c| world.name_of(c.target.id())).unwrap_or_default();
+        let went = match tries {
+            0 => "never set out".to_string(),
+            1 => format!("set out once and never stood at {mark}'s door"),
+            n => format!("set out {n} times and never stood at {mark}'s door"),
+        };
+        let post = world
+            .comp::<Job>(t)
+            .map(|j| format!(", kept to {} post as {}", crate::systems::grief::his(world, t), j.role.label()))
+            .unwrap_or_default();
+        fail_attempt(world, id, &format!("{who} let it go: {went} in {hours} h{post}"));
     }
 }
 

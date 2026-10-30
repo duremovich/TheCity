@@ -116,7 +116,9 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
         Consideration::new("1-heat", 1.0 - heat, Curve::Linear { m: 0.4, b: 0.6 }),
         Consideration::new("1-dread x fear", 1.0 - dread * (1.0 - p.courage), Curve::Linear { m: 0.5, b: 0.5 }),
     ];
-    Some((cs, world.config.hunt.hunt_flat))
+    // Round 8 X2 (`OPEN-247`): the mourner's Hunt on the killer holds while
+    // the grudge is hot (`[grief] hunt_hot_flat`).
+    Some((cs, world.config.hunt.hunt_flat + crate::systems::grief::hunt_flat(world, id, target)))
 }
 
 /// M16a (plan C20): the Hunt's considerations on `target` at `weight`
@@ -572,6 +574,12 @@ pub fn start_stakeout(world: &mut World, hunter: EntityId, until: Tick) {
     if let Some(mut s) = chase(world, hunter) {
         s.stakeout_until = Some(until);
         set_chase(world, hunter, s);
+    }
+    // Round 8 X2 (`OPEN-247`): a contract run at its mark's door is worked
+    // (`contracts::stalled_runs` reads it).
+    let now = world.tick;
+    if let Some(r) = world.contract_runs.get_mut(&hunter) {
+        r.worked = now;
     }
 }
 

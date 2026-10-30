@@ -913,6 +913,36 @@ fn origin(world: &World, id: EntityId) -> Option<TilePos> {
 /// the contacts, at plan time); unscored picks the nearest spot (think).
 pub fn choice(world: &World, id: EntityId, scored: bool) -> Option<UnwindPick> {
     let from = origin(world, id)?;
+    // Round 8 X2 (`OPEN-247`): a funeral he is asked to is the evening; a
+    // mourner or a man lying low keeps to his Home.
+    if let Some((h, door)) = crate::systems::grief::wake_pick(world, id) {
+        let score =
+            world.config.leisure.gain.hangout_hour * world.config.leisure.hangout_ticks as f32 / TICKS_PER_HOUR as f32;
+        return Some(UnwindPick {
+            rung: Rung::Free,
+            act: ActionKind::HangOut,
+            venue: Some(h),
+            spot: Some(door),
+            score,
+            stay_in: false,
+        });
+    }
+    if crate::systems::grief::holed_up(world, id) {
+        let (h, door) = home_of(world, id)
+            .and_then(|h| world.comp::<Building>(h).filter(|b| !b.demolished).map(|b| (h, world.outside_door(b))))?;
+        let hours = world.config.leisure.hangout_ticks as f32 / TICKS_PER_HOUR as f32;
+        let score = crate::systems::distance::stay_in(world)
+            .map_or(world.config.leisure.gain.hangout_hour, |c| c.fun_hour)
+            * hours;
+        return Some(UnwindPick {
+            rung: Rung::Free,
+            act: ActionKind::HangOut,
+            venue: Some(h),
+            spot: Some(door),
+            score,
+            stay_in: true,
+        });
+    }
     let purse = spendable(world, id);
     let reach = world.config.leisure.venue_walk_cap_ticks;
     let mut cands = paid_candidates(world, id, Origin::At(from), purse, None, Some(reach));

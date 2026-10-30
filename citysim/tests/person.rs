@@ -341,6 +341,10 @@ fn probe_laid_off_farm_worker_finds_work_within_14_days() {
         // pick was abducted and killed on day 26 before the search ended (a
         // butterfly); `[care]` off keeps the probe's ground.
         c.care = None;
+        // Re-pinned, round 8 X2 (OPEN-247): the mourners' struck shifts and
+        // the needy's longer search move the city, and the pick was abducted
+        // and killed on day 27 (a butterfly); `[grief]` off keeps the ground.
+        c.grief = None;
         c
     });
     // Day 20, a minute to midnight: the layoff lands just before the

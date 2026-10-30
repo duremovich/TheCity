@@ -490,7 +490,11 @@ use crate::world::World;
 /// `Deed::TookOver` (the `took_over` deed keys), the `[gangs] leader_keep_margin`, `muster_candidates`, `[turf.war]
 /// rouse_hours`, `rouse_min_energy` keys and the `Jobs2Cols` `leader_changes` ... `raid_at_target` columns (serde
 /// defaults).
-pub const SAVE_VERSION: u8 = 110;
+/// 111 (pressure pass round 8, X2, the target and the bereaved react): `World.grief` (`grief::State`, written
+/// while it holds anything), `ContractRun.worked`, `EventKind::Bereaved`, the `[grief]` section, the `[verbs]
+/// hit_guard_wealth` ... `hit_low_days`, `[search] need_wealth`, `need_idle_days`, `[hitmarket] stall_hours` keys and the
+/// `Jobs2Cols` `grief_leave` ... `search_need_days` columns (serde defaults).
+pub const SAVE_VERSION: u8 = 111;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
