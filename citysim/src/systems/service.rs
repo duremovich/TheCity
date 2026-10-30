@@ -290,6 +290,74 @@ pub fn server_for(world: &World, place: EntityId, kind: ServeKind, served: Entit
     pick_server(world, place, kind, served)
 }
 
+/// Round 7 W4 (OPEN-245; `[care] install_rows`): who cuts `served`'s chrome
+/// at `place`: a server of a cutting row (`install_rows`, the Ripperdoc, the
+/// back room's doc) on duty there, one with room this hour first, the pair's
+/// lowest hash; else a cutting row's holder on a working shift there by the
+/// clock (the counter `assets::seller_open` opened on); never the patient
+/// himself (a doctor's own chrome is a colleague's, or nobody's named). Empty rows: the
+/// patient queue's server ([`server_for`]). V15: U6's body-first pick handed
+/// a Clinic's installs to the orderly at the triage (36 a week, unpaid).
+pub fn install_server(world: &World, place: EntityId, served: EntityId) -> Option<EntityId> {
+    if !on(world) {
+        return None;
+    }
+    let rows = crate::systems::care::cfg(world).map(|c| c.install_rows.as_slice()).unwrap_or_default();
+    if rows.is_empty() {
+        return pick_server(world, place, ServeKind::Patient, served);
+    }
+    // Never his own chrome (a doctor's own install is a colleague's work).
+    let cuts = |s: EntityId| s != served && row_of_agent(world, s).is_some_and(|r| rows.iter().any(|k| k == &r.key));
+    let by_hash = |pool: Vec<EntityId>| {
+        pool.into_iter()
+            .map(|s| (hash(world, PURPOSE_SERVE, key(place) ^ key(served), key(s)), s))
+            .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+            .map(|(_, s)| s)
+    };
+    let on_duty: Vec<EntityId> =
+        world.staff_of(place).iter().copied().filter(|&s| cuts(s) && present(world, s, place)).collect();
+    let roomy: Vec<EntityId> = on_duty.iter().copied().filter(|&s| has_room(world, s)).collect();
+    if let Some(s) = by_hash(roomy).or_else(|| by_hash(on_duty)) {
+        return Some(s);
+    }
+    let tod = world.tick_of_day();
+    let clock: Vec<EntityId> = world
+        .staff_of(place)
+        .iter()
+        .copied()
+        .filter(|&s| {
+            cuts(s)
+                && !world.has::<Sentence>(s)
+                && crate::systems::law::living(world, s)
+                && world.comp::<Job>(s).is_some_and(|j| {
+                    j.employer == Some(place)
+                        && j.on_shift(tod)
+                        && crate::exec::routine::workday_of(world, s, j, j.shift_key_at(world.tick))
+                })
+        })
+        .collect();
+    by_hash(clock)
+}
+
+/// Round 7 W4: `served` is served at `place` by `server` (the one who did
+/// the work, named already), taking one of his hour's room: [`arrive`] with
+/// the server fixed.
+pub fn arrive_by(world: &mut World, server: EntityId, served: EntityId, place: EntityId, kind: ServeKind, coins: i64) {
+    if !on(world) || served == EntityId::NONE || !world.has::<Building>(place) {
+        return;
+    }
+    let hour = world.tick / TICKS_PER_HOUR;
+    let r = world.service_room.entry(server).or_default();
+    if r.hour != hour {
+        *r = Room { hour, taken: 0 };
+    }
+    r.taken = r.taken.saturating_add(1);
+    if kind == ServeKind::Patient && crate::systems::presence::is_body(world, server) {
+        ownership::jobs2_row(world).clinic_body += 1;
+    }
+    serve(world, server, served, place, kind, coins);
+}
+
 /// The on-duty server of `place` with room this hour whose pair hash with
 /// `served` is lowest (D6, OPEN-111). Round 4 T4 (OPEN-217; `[verbs]
 /// door_body_first`): a visit goes to a body of `[verbs] night_rows` on the

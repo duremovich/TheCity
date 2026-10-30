@@ -278,6 +278,25 @@ pub fn pay_fee(world: &mut World, payer: EntityId, place: EntityId, doc: Option<
     (to_doc + to_owner, to_doc)
 }
 
+/// Round 7 W4 (OPEN-245; `[care] install_cut`): the doctor who cut an
+/// implant worth `value` at `place` takes `install_cut` of it from the
+/// owner's till (`Flow::Treatment`; nothing when he owns the place or the
+/// till is dry). V15: 36 installs a week and no coin to the one named.
+pub fn pay_install(world: &mut World, place: EntityId, doc: EntityId, value: i64) -> i64 {
+    let Some(share) = cfg(world).map(|c| c.install_cut.clamp(0.0, 1.0)) else { return 0 };
+    let cut = ((value.max(0) as f32) * share).round() as i64;
+    let owner = world.owner_of(place);
+    if cut <= 0 || owner.is_none() || owner == Some(doc) || !crate::systems::law::living(world, doc) {
+        return 0;
+    }
+    let paid = ownership::pay(world, owner, Some(doc), cut, Flow::Treatment);
+    ownership::credit(world, place, -paid);
+    if paid > 0 {
+        ownership::jobs2_row(world).care_doc_cut += paid;
+    }
+    paid
+}
+
 // ---------------------------------------------------------------------------
 // The short: the pawn, the slate
 // ---------------------------------------------------------------------------

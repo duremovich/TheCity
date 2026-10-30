@@ -148,9 +148,21 @@ fn installed_now(world: &mut World, agent: EntityId, clinic: Option<EntityId>, i
     let gang = world.gang_of(agent).and_then(|g| world.comp::<Gang>(g)).map(|g| g.name.clone());
     // Round 3 S4 (OPEN-216): the doctor at the table named, an actor (the
     // encounter's server: his diary had "treated X (a patient)" and no line).
-    let doc = clinic
-        .and_then(|c| crate::systems::service::server_for(world, c, crate::components::ServeKind::Patient, agent));
-    let by = doc.map_or_else(String::new, |d| format!(" by {}", world.name_of(d)));
+    // Round 7 W4 (OPEN-245): the doctor who cuts it (`[care] install_rows`,
+    // never the orderly at the triage), paid his `install_cut`.
+    let doc = clinic.and_then(|c| crate::systems::service::install_server(world, c, agent));
+    let paid = match (clinic, doc) {
+        (Some(c), Some(d)) => {
+            let value = world.comp::<Asset>(implant).map_or(0, |x| x.value);
+            crate::systems::care::pay_install(world, c, d, value)
+        }
+        _ => 0,
+    };
+    let by = match doc {
+        Some(d) if paid > 0 => format!(" by {} ({paid}c to the doctor)", world.name_of(d)),
+        Some(d) => format!(" by {}", world.name_of(d)),
+        None => String::new(),
+    };
     let text = match gang {
         Some(g) => format!("{who} had {what} installed at {at}{by} (gang: {g})"),
         None => format!("{who} had {what} installed at {at}{by}"),
@@ -158,8 +170,13 @@ fn installed_now(world: &mut World, agent: EntityId, clinic: Option<EntityId>, i
     let actors: Vec<EntityId> = [Some(agent), clinic, Some(implant), doc].into_iter().flatten().collect();
     world.push_event(EventKind::Installed, &actors, text);
     // Lives at work phase 1 (§ 2.2): the install is the doctor's encounter.
-    if let Some(c) = clinic {
-        crate::systems::service::arrive(world, agent, c, crate::components::ServeKind::Patient, 0);
+    // Round 7 W4: his encounter, not the queue's next server's.
+    match (clinic, doc) {
+        (Some(c), Some(d)) => {
+            crate::systems::service::arrive_by(world, d, agent, c, crate::components::ServeKind::Patient, 0)
+        }
+        (Some(c), None) => crate::systems::service::arrive(world, agent, c, crate::components::ServeKind::Patient, 0),
+        _ => {}
     }
     // M15 W31: a Purist member now above tolerance is cast out.
     crate::systems::creeds::on_install(world, agent);

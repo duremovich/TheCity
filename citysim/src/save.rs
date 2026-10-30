@@ -464,7 +464,9 @@ use crate::world::World;
 /// 102 (pressure pass round 6, V6, empty rooms beside full ones; renumbered at the merge): `ViceState.bouts`
 /// (the pit's book of who fought when), `Misery.drank_at`, the `[care] orderly_opens`, `clinic_spill`,
 /// `on_call_spread`, `[customers] door_broke`, `door_stat_drink` and `[leisure] bout_card_per` keys (serde defaults).
-pub const SAVE_VERSION: u8 = 102;
+/// 103 (pressure pass round 7, W4, the right person in the role; renumbered at the merge): the `[care]
+/// install_rows`, `install_cut` and `[[trades]] no_foreman` keys (serde defaults).
+pub const SAVE_VERSION: u8 = 103;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
