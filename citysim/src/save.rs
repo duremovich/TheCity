@@ -483,7 +483,10 @@ use crate::world::World;
 /// 108 (pressure pass round 8, X3, the wrong person in the role II): `Misery.record_at`, the `[careers]
 /// record_min_days`, `record_days`, `[roles.<Name>] no_foreman`, `reads_record`, `[[trades]] reads_record` and
 /// `[misery] employed_steal_misery` keys (serde defaults).
-pub const SAVE_VERSION: u8 = 108;
+/// 109 (pressure pass round 8, X1, the word to the law and the held who act; renumbered at the merge):
+/// `Corpse.defended`, the `[crime.case] word_hours`, `word_flat`, `word_reach_ticks`, `cell_term_share` keys and the `Jobs2Cols` `word_meant` ...
+/// `cell_cases` columns (serde defaults).
+pub const SAVE_VERSION: u8 = 109;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

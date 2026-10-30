@@ -654,6 +654,20 @@ pub fn considerations_with(
             ]
         }
         GoalKind::ReportCrime => {
+            // Round 8 X1 (`OPEN-246`): a promise to tell the law is a goal he
+            // carries to the nearest open desk (`law::word_plan`); V16: 455
+            // woke and meant to tell, 76 did.
+            if crate::systems::law::word_owed(world, id).is_some() {
+                let (_, trip) = crate::systems::law::law_desk(world, id)?;
+                return Some((
+                    vec![Consideration::raw(
+                        "travel",
+                        trip as f32 / 60.0,
+                        crate::systems::life::travel_factor(world, trip),
+                    )],
+                    world.config.crime.case.word_flat,
+                ));
+            }
             let p = pers?;
             let mem = world.comp::<Memory>(id)?;
             let two_days = world.tick.saturating_sub(2 * time::TICKS_PER_DAY);
@@ -1256,6 +1270,11 @@ fn fight_target_within(world: &World, id: EntityId, r: u32) -> Option<EntityId> 
             world.has::<Brain>(o)
                 && crate::systems::law::near(world, id, o, r)
                 && !crate::systems::wounded::is_down(world, o)
+                // Round 8 X1 (`OPEN-246`): the cells' wall stands between
+                // (a cellmate is in reach), and a man he means to tell the
+                // law of is left to the law.
+                && !crate::systems::law::held_apart(world, id, o)
+                && !crate::systems::law::owes_word_on(world, id, o)
                 && !fought(o)
                 && wronged_by(world, id, o)
         })

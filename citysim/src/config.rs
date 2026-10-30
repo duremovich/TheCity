@@ -6185,6 +6185,22 @@ pub struct CaseCfg {
     /// keeps quiet about a man whose gang holds the block he lives on (fear:
     /// the holders are still there tomorrow).
     pub fear_courage_max: f32,
+    /// Round 8 X1 (`OPEN-246`): a promise to tell the law ("means to tell")
+    /// stands this many hours: given at the nearest open desk (a Hall, the
+    /// Precinct, a Station within `word_reach_ticks`), to a
+    /// guard on the street or in a shout, or dropped with the reason.
+    pub word_hours: u64,
+    /// ... and ReportCrime's flat bonus while it stands (on the trip's
+    /// travel factor: a promise outranks the evening's leisure).
+    pub word_flat: f32,
+    /// ... and the desk it is walked to lies within this many travel ticks
+    /// (`distance::trip_to`; a passing sighting's is `[distance.reach]
+    /// report_ticks`).
+    pub word_reach_ticks: u64,
+    /// Round 8 X1: a crime in the cells (the held on a cellmate) adds this
+    /// share of its term to the sentence (`law::cell_case`; a Murder adds
+    /// its whole term).
+    pub cell_term_share: f32,
 }
 
 impl Default for CaseCfg {
@@ -6197,6 +6213,10 @@ impl Default for CaseCfg {
             tell_lawful_min: 0.3,
             tell_days: 2,
             fear_courage_max: 0.5,
+            word_hours: 24,
+            word_flat: 0.35,
+            word_reach_ticks: 240,
+            cell_term_share: 0.3,
         }
     }
 }

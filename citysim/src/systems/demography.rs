@@ -645,6 +645,9 @@ pub fn find_bodies(world: &mut World) {
                         && !matches!(b.exec, crate::exec::ExecState::Use { kind: crate::goap::ActionKind::Sleep, .. })
                 })
                 && !crate::systems::wounded::is_down(world, o)
+                // Round 8 X1 (`OPEN-246`): the held find only a body in their own cells.
+                && (!world.has::<crate::components::Sentence>(o)
+                    || (building.is_some() && world.comp::<Position>(o).and_then(|p| p.building) == building))
                 && world
                     .comp::<Position>(o)
                     .is_some_and(|p| crate::systems::law::sees_scene(world, p, tile, building, out, sight))
@@ -688,6 +691,18 @@ pub fn found(world: &mut World, c: EntityId, finder: EntityId) {
     let hours = world.tick.saturating_sub(k.died_tick) / crate::time::TICKS_PER_HOUR;
     let (fname, dname) = (world.name_of(finder), world.name_of(c));
     let lay = if hours > 0 { format!(", dead {hours} h") } else { String::new() };
+    // Round 8 X1 (`OPEN-246`): the dead went for the man who killed him (or
+    // fought the guard at his arrest): no Murder, nobody named. V16
+    // `miserable_103693 d26 20:15` named the one who had reported him.
+    if k.defended {
+        let by = k.killer.map_or_else(|| "the one he went for".to_string(), |x| world.name_of(x));
+        let text = format!(
+            "{fname} found the body of {dname} at {place}{lay}; the law closed it: {dname} died fighting {by}, who \
+             is charged with nothing"
+        );
+        world.push_event(EventKind::CorpseFound, &[finder, c], text);
+        return;
+    }
     let killer = k.killer.filter(|&x| crate::systems::law::living(world, x));
     let wanted = killer.is_some_and(|x| {
         world
@@ -744,6 +759,14 @@ pub fn found(world: &mut World, c: EntityId, finder: EntityId) {
             witness,
             Some((text, &[c, finder])),
         );
+    }
+}
+
+/// Round 8 X1 (`OPEN-246`): `dead` struck first and fell to the one he went
+/// for, or died resisting arrest: his body's case names nobody (`found`).
+pub fn defended(world: &mut World, dead: EntityId) {
+    if let Some(k) = world.comp_mut::<Corpse>(dead) {
+        k.defended = true;
     }
 }
 

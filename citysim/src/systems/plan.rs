@@ -237,6 +237,8 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
         // (planned once; a hungry agent's Eat goes to the planner).
         // Round 7 W1 (OPEN-243): hungry too while the children's food is short.
         GoalKind::Eat if routine::eat_is_grocery(world, id) => routine::grocery_plan(world, id),
+        // Round 8 X1 (`OPEN-246`): a promise to tell the law, at the nearest open desk.
+        GoalKind::ReportCrime => crate::systems::law::word_plan(world, id),
         _ => None,
     };
     if let Some(plan) = bypass {

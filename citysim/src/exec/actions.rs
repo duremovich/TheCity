@@ -1092,7 +1092,7 @@ pub fn on_complete(
             StepResult::Done
         }
         ActionKind::Wander => StepResult::Done,
-        ActionKind::ReportCrime => report_crime(world, id),
+        ActionKind::ReportCrime => report_crime(world, id, target),
         ActionKind::PatrolLeg => {
             let legs_per_shift = world.config.crime.patrol_legs_per_shift;
             let legs = world.comp_mut::<Brain>(id).map(|b| {
@@ -1485,10 +1485,21 @@ pub fn on_complete(
             if !crate::systems::law::living(world, victim) || !crate::systems::law::near(world, id, victim, 4) {
                 return StepResult::Failed(FailReason::PartnerLeft);
             }
+            // Round 8 X1 (`OPEN-246`): the cells' wall: nobody outside lays a
+            // hand on the held, nor the held on anyone outside (V16
+            // `street_worker_35520 d22 18:16`: the victim beat the thief held
+            // in the Precinct). A cellmate is within reach.
+            if crate::systems::law::held_apart(world, id, victim) {
+                crate::systems::ownership::jobs2_row(world).held_hit += 1;
+                return StepResult::Failed(FailReason::PartnerLeft);
+            }
             // M16a (plan C32): a Guard taker on post beside the client meets
             // the attack first; a guard's win ends it (the attacker's Assault).
             if let Some(g) = crate::systems::contracts::guard_for(world, id, victim) {
                 let (winner, _, died) = crate::systems::law::resolve_fight(world, id, g);
+                if died && winner != id {
+                    crate::systems::demography::defended(world, id);
+                }
                 let tile = world.comp::<Position>(id).map_or(TilePos::default(), |p| p.tile);
                 let text =
                     format!("{} attacked {}'s guard {}", world.name_of(id), world.name_of(victim), world.name_of(g));
@@ -1519,11 +1530,19 @@ pub fn on_complete(
             let crime = if murder { crate::components::Crime::Murder } else { crate::components::Crime::Assault };
             let tile = world.comp::<Position>(id).map_or(TilePos::default(), |p| p.tile);
             let name = world.name_of(id);
+            // Round 8 X1 (`OPEN-246`): a fight in the cells says where (V16
+            // `pimp_14518 d26 06:18`: no place, no case).
+            let cells = crate::systems::law::cells_of(world, id)
+                .filter(|_| crate::systems::law::cells_of(world, victim).is_some())
+                .map_or_else(String::new, |j| format!(" in the cells of {}", world.name_of(j)));
             let text = if died && loser == id {
-                format!("{name} attacked {} and died", world.name_of(victim))
+                format!("{name} attacked {}{cells} and died", world.name_of(victim))
             } else {
-                format!("{name} attacked {}", world.name_of(victim))
+                format!("{name} attacked {}{cells}", world.name_of(victim))
             };
+            if died && loser == id {
+                crate::systems::demography::defended(world, id);
+            }
             world.push_event(
                 if murder { crate::events::EventKind::Murder } else { crate::events::EventKind::Assault },
                 &[id, victim],
@@ -1534,6 +1553,13 @@ pub fn on_complete(
                 // Lives at work phase 1 (§ 2.1): an Assault inside a kept
                 // venue may end with the attacker thrown out by the bouncer.
                 crate::systems::service::maybe_eject(world, id);
+            }
+            // Round 8 X1: he meant to tell the law of the man, and went for
+            // him himself (V16 `gun_44357 d22 17:32`).
+            if crate::systems::law::owes_word_on(world, id, victim) {
+                let (he, him, _) = crate::systems::consequence::pro(world, id);
+                let why = format!("{he} went for {} {him}self instead", world.name_of(victim));
+                crate::systems::law::drop_word(world, id, victim, &why);
             }
             // M15 W22: the Hunt's strike (after the crime: street silence reads the Hunt).
             crate::systems::hunt::on_strike(world, id, victim, winner, died);
@@ -1818,7 +1844,13 @@ pub fn on_arrive(world: &mut World, id: EntityId, step: &crate::components::Acti
 
 /// `ReportCrime` at the Hall: file the most salient unreported first-hand
 /// SawCrime as a report.
-fn report_crime(world: &mut World, id: EntityId) -> StepResult {
+fn report_crime(world: &mut World, id: EntityId, target: Option<EntityId>) -> StepResult {
+    // Round 8 X1 (`OPEN-246`): the promise kept at the desk (`law::word_plan`).
+    if let Some(s) = target.filter(|&s| crate::systems::law::owes_word_on(world, id, s)) {
+        let desk = world.comp::<Position>(id).and_then(|p| p.building);
+        crate::systems::law::told_at_desk(world, id, s, desk, false);
+        return StepResult::Done;
+    }
     let betraying = world.comp::<Brain>(id).is_some_and(|b| b.betraying);
     let leader = world.gang_of(id).and_then(|g| world.comp::<crate::components::Gang>(g)).and_then(|g| g.leader);
     let Some(mem) = world.comp::<crate::components::Memory>(id) else {

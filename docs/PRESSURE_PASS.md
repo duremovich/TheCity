@@ -4143,3 +4143,110 @@ added (doctrine 2). `SAVE_VERSION` 106 (renumbered at the merge): `Crime::CampEs
   **FINDING:** the city's vehicle thefts fall by two-thirds (the employed's were 85 % of them): the pressure comes back
   through features (doctrine 5), not by loosening the gate. No test (doctrine 2). `SAVE_VERSION` 108 (renumbered at
   the merge): `Misery.record_at` and the X3 keys (serde defaults).
+
+
+### X1, the promise to tell the law, and the held and the asleep who act (`OPEN-246`; `law::word_owed`, `law::law_desk`, `law::word_plan`, `law::keep_word`, `law::told_at_desk`, `law::held_apart`, `law::cells_of`, `law::cell_case`, `consequence::promise`, `consequence::arrivals`, `demography::defended`, `Corpse.defended`, `exec::actions` ReportCrime and Attack, `goals` ReportCrime and `fight_target`, `plan::plan_for`, `World::capacity_exempt`, `[crime.case] word_hours`, `word_flat`, `word_reach_ticks`, `cell_term_share`)
+
+20k island seed 42 x 30 (`--scaled --ambient-flats 50`), one run each: before = main `527f53b` with this phase's
+counters only (`214c151`), after = the branch. The counters print on `analyze_run.py`'s "the word to the law and the
+held who act" line.
+
+1. **The promise was a line, not a goal.** Three causes, in the order found. (a) Nothing carried it. `owed_word` fed
+   only `word_given` (a counter). The promiser told the law only if he met an on-duty guard within 12 tiles on the
+   hour, or if he won the plain ReportCrime goal, whose one desk is the Hall within `report_ticks` 120. (b) Most
+   promisers are Statistical (no think). (c) A first fix's goal won (0.77 over Idle) and its plan walked to the
+   Station. The step then failed `PreconditionLost` at the counter, because the planner's `at(Hall)` symbol reads
+   the building's kind.
+   Now a promise (`consequence::promise`) stands `word_hours` 24. A pair holds one promise, and a second robbery
+   renews it. ReportCrime scores the promise first (`law::word_owed`): the nearest open desk (`law::law_desk` by
+   `distance::trip_to`, within `word_reach_ticks` 240; the Halls by day, the Precinct and the Stations always), flat
+   `word_flat` 0.35 on the trip's travel factor (over Unwind and a tired Sleep, under Work). `plan::plan_for` scripts
+   it (`law::word_plan`: `GoTo` the desk, then `ReportCrime` on the suspect; the step checks its own start), and
+   `law::told_at_desk` files it ("X went to Station#n and told the law: S, for Shakedown"). A desk at its cap does
+   not turn a reporter away (`capacity_exempt`).
+   Off screen, `law::keep_word` (hourly, after the beat's tell) gives a Statistical promiser's word at his first free
+   waking hour with a desk in reach ("... (off screen)"). Otherwise it drops the promise with the reason on his line
+   ("X never told the law of S: ..."). The reasons: S dead or in the cells already; he taken in first;
+   `keeps_from_law`'s (his gang, fear of the holders, his warrant); asleep or hurt when the day ran out; the law out
+   of reach; the day gone by.
+   A promiser who goes for the man himself drops the promise ("... never told the law of S: she went for S herself
+   instead"). The Fight goal's `fight_target` leaves a man he means to tell of to the law (V16 `gun_44357` attacked
+   twice instead). A payer or sleeper whose extorter a robot already detained says "the law has S already" and
+   promises nothing.
+2. **The held and the asleep who act.** (a) *The held witness* (`ripperdoc_10662`, 100k). At 100k the cells overflow
+   their interior, and `enter_building` stands the rest on the Precinct's door tile, which `outdoors` reads as the
+   street. So the cells saw the El gate. The witness roll and the body finder now skip a held man unless the scene is
+   in his own cells. Not reproduced at 20k (the cells never overflow there: 0 before, 0 after). (b) *The victim who
+   beat the held thief* (`street_worker_35520 d22 18:16`). `law::near` is 4 tiles of Chebyshev, and the door tile is
+   the street. `law::held_apart` (one side held, the two not in the same building) now fails the Attack and filters
+   `fight_target`. A cellmate is still in reach. (c) *The blackmail paid asleep* (`orderly_20962 d26 12:50`).
+   `consequence::arrivals` credited a Blackmail visit whenever the two shared a building, awake or not. It now waits
+   while the visitor or the culprit sleeps, or while the visitor is held.
+3. **A crime in the cells had no case.** The midnight cell fight printed its line and nothing else. An Attack between
+   cellmates printed "X attacked Y" with no place. Now `raise_crime_core` passes a crime by a man held when he did it
+   to `law::cell_case`. His reports are settled, and his sentence runs on by `cell_term_share` 0.3 of the crime's
+   term (a Murder: the whole term, and its body is marked found, so no second case). The line names the place, the
+   parties and the days: "the law added 3 days to Solene Wexford's sentence for the Assault on Lena Upton in the cells
+   of Station#4653 (held now to day 22)". The cell fight now goes through `raise_crime_on` (the witnesses are the
+   cellmates and the guards inside), so X6 can read it. An Attack between cellmates reads "attacked Y in the cells of
+   P". At the whole term, a cell Assault added 10 days, and on d30 the 20k cells held 363 against the base's 289.
+4. **The murder that named the wrong man** (`miserable_103693 d26 20:15`). The dead had died resisting arrest.
+   `arrest` kills with the guard as `killer`, so the find pass named the guard (who had reported him) as the one "who
+   knew the dead". A man who struck first and fell went the same way (20k base: "Zara Bartlett attacked Vale Jarrow
+   and died", and Vale was named for her Murder). `demography::defended` now sets `Corpse.defended` where the dead
+   struck first (Attack, the guard's contest, the brawl on and off screen, the cell fight, the blackmail's silence) or
+   died resisting arrest. That death now prints a line: "Zelda Draper (71 y) died resisting arrest by the guard Undine
+   Hawthorne (43 y) (wanted for Theft)". The find then reads "the law closed it: Zelda Draper died fighting Undine
+   Hawthorne, who is charged with nothing".
+
+**Under 18** (CLAUDE.md). The cell fight's pick skips a protected cellmate (`resolve_fight_mods` stays the
+backstop). `cell_case` adds no term to a protected actor (a child is never held). `tells_the_law` still refuses a
+protected suspect, so no promise names a child. `held_apart` only removes targets.
+
+**Numbers** (20k x 30, before -> after):
+
+- Promises made (`word_meant`): 255 -> 303.
+- Promises kept: 33 (13 %) -> 278 (92 %). Of these, 172 were at a desk, on screen or off ("told the law:" lines
+  0 -> 172); the rest went to a guard on the street or in a shout.
+- Promises dropped with the reason: 0 -> 25. Out of reach 10, afraid of the holders 6, the man in the cells already
+  3, asleep when the day ran out 3, the day gone by 2, his gang 1.
+- Promises that vanish silently: 0 (303 = 278 + 25).
+- Witnesses held outside their cells or asleep: 0 -> 0 (20k has no overflow; see 2a).
+- Attacks across the cells' wall: 0 -> 0.
+- Demands by a sleeper: 12 -> 0.
+- Cell crimes with a case: 0 -> 81.
+- Bodies closed as a fight the dead started: 0 -> 10.
+- Deaths resisting arrest printed: 0 -> 7.
+- "The law named": 19 -> 18.
+
+Moved for the reasons above, not claimed: reports 1,676 -> 1,906, arrests 1,360 -> 1,397, held on d30 289 -> 334
+(more words given), Blackmail lines 385 -> 458.
+
+**Shadow** (20k, seed 42, d20-27; foreman, courier, gun, ripperdoc, street_worker, orderly and jailed, two of each).
+
+- The promise kept: `orderly_16791 d20 06:40` "Cass Oakes woke at Block#3242 to find 5c gone from the purse: Sprocket
+  Jarrow shook the block down in the night; she means to tell the law". At `06:51`, "GOAL ReportCrime (was Unwind):
+  score 0.872; runners-up: Unwind 0.782", then "GoTo(Hall) ... -> Station#5844, 120 min, 109 tiles". At `09:02`, "Cass
+  Oakes went to Station#5844 and told the law: Sprocket Jarrow, for Shakedown".
+- A second: `ripperdoc_12868 d23 07:35` woke 3c short; at `09:52`, "Smoke Kimura went to Station#5844 and told the
+  law: Rhoswen Whitlock, for Shakedown".
+- The held: `jailed_10485`, held in the Precinct from d23 16:15, has no street Witness line after the sentence, only
+  two Assaults by cellmates (`d24 06:18`, `d26 18:24`).
+- From the after run's log: "Maren Mbeki never told the law of Adela Bellamy: the law is out of reach (no desk of it
+  within a walk)"; "Orrin Fairweather woke at Block#354 to find 5c gone from the purse: Katrin Draper shook the block
+  down in the night; the law has Katrin Draper already"; "Adela Singh found the body of Zelda Draper at Street
+  Market#4422; the law closed it: Zelda Draper died fighting Undine Hawthorne, who is charged with nothing".
+
+**Reads wrong / open** (the next pass):
+
+- Cass Oakes walked 2 h each way for 5c on her free morning: a promise outranks Unwind. The human way is a guard on
+  the street nearer to hand (X6 or later).
+- A held man who sees a cellmate's Assault "ran" (`jailed_10485 d24 06:18`). The cell's reactions are X6's.
+- The midnight cell fight piles every hater onto the first disliked cellmate (Solene Volkov was gone for eleven
+  times in one night: `cell_day`'s `find_map`). X6.
+- The cells' door-tile overflow at 100k is not changed: the held now see only their cells, and a fuller fix seats
+  the overflow inside. The 100k witness count was not measured (no 100k run).
+- No Attack between cellmates in the 30-day log (the held are Statistical; the cell fights are the scripted midnight
+  ones), so "attacked Y in the cells of P" was read from the code only.
+- No promiser in the 30-day log went for the man himself (the `fight_target` filter holds), so that drop line was
+  read from the code only.

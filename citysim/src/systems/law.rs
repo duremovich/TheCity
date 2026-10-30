@@ -33,6 +33,18 @@ pub fn near(world: &World, a: EntityId, b: EntityId, r: u32) -> bool {
     (pa.building.is_some() && pa.building == pb.building) || chebyshev(pa.tile, pb.tile) <= r
 }
 
+/// Round 8 X1 (`OPEN-246`): a wall of the cells stands between `a` and `b`:
+/// one of them is held (a `Sentence`) and they are not in the same building
+/// (a cellmate is within reach; the victim at the Precinct's door, the
+/// street, a passer-by are not).
+pub fn held_apart(world: &World, a: EntityId, b: EntityId) -> bool {
+    if !world.has::<Sentence>(a) && !world.has::<Sentence>(b) {
+        return false;
+    }
+    let here = |x: EntityId| world.comp::<Position>(x).and_then(|p| p.building);
+    here(a).is_none() || here(a) != here(b)
+}
+
 /// Round 5 U4 (`OPEN-236`): is the spot `(tile, building)` in the open?
 /// Outside any building, on a building's door tile (the threshold sees both
 /// ways), or inside a wall-less kind (`[crime] open_air`).
@@ -247,6 +259,7 @@ fn raise_crime_core(
     parties: &[EntityId],
     witness_mult: f32,
 ) {
+    let held_in = cells_of(world, actor);
     // L2 phase 4 (plan L25): the ledger's on-screen victims.
     if let Some(v) = victim {
         let kind = match crime {
@@ -344,6 +357,14 @@ fn raise_crime_core(
         // 20k: "saw Hale Tanaka commit Shakedown" asleep in the block he shook
         // down, W2's sleeper who finds the purse short on waking).
         .filter(|&w| !crate::systems::presence::asleep(world, w))
+        // Round 8 X1 (`OPEN-246`): nor a man held in the cells, but for a
+        // scene in his own cells (V16 `ripperdoc_10662`: 14 Witness lines of
+        // the El gate after his sentence; at 100k the cells' overflow stands
+        // on the Precinct's door tile, which reads as the street).
+        .filter(|&w| {
+            !world.has::<Sentence>(w)
+                || (actor_building.is_some() && world.comp::<Position>(w).and_then(|p| p.building) == actor_building)
+        })
         .filter(|&w| {
             // M13 D32: a witness with Eyes sees `Kit.sight` tiles further.
             let reach = r + world.comp::<Kit>(w).map_or(0, |k| u32::from(k.sight));
@@ -421,6 +442,13 @@ fn raise_crime_core(
             continue;
         }
         recorded += 1;
+        // Round 8 X1 (`OPEN-246`): the held outside the scene's cells and the
+        // asleep see nothing (0 is right).
+        let held_out = world.has::<Sentence>(w)
+            && (actor_building.is_none() || world.comp::<Position>(w).and_then(|p| p.building) != actor_building);
+        if held_out || crate::systems::presence::asleep(world, w) {
+            crate::systems::ownership::jobs2_row(world).witness_unfree += 1;
+        }
         world.remember_crime(w, actor, crime, salience, object);
         crate::systems::social::witnessed_crime_of(world, w, actor);
         if let Some(n) = world.comp_mut::<Needs>(w) {
@@ -532,6 +560,73 @@ fn raise_crime_core(
             crate::systems::gossip::post_deed(world, d, deed, Some(actor), object);
         }
     }
+    // Round 8 X1 (`OPEN-246`): a crime in the cells is the law's case (held
+    // when he did it: a robot's detention above books him on its own).
+    if let Some(j) = held_in {
+        cell_case(world, actor, object.or(victim), crime, j);
+    }
+}
+
+/// Round 8 X1 (`OPEN-246`): the cells `id` is held in (a `Sentence`, inside
+/// a building), `None` for the free.
+pub fn cells_of(world: &World, id: EntityId) -> Option<EntityId> {
+    if !world.has::<Sentence>(id) {
+        return None;
+    }
+    world.comp::<Position>(id).and_then(|p| p.building)
+}
+
+/// Round 8 X1 (`OPEN-246`): a crime in the cells (`raise_crime_core`, the
+/// held actor in his cells) is the law's case at once: the cells are
+/// watched, the man is already inside. His reports are settled, his
+/// sentence runs on (`[crime.case] cell_term_share` of the crime's
+/// `sentence_ticks`, a Murder's whole term), a Murder's body
+/// is the law's (found: no second case) and the line names the place, the
+/// parties and the days. V16 `pimp_14518 d26 06:18`, `black_doc_79637 d27
+/// 07:16`: an Assault and a Murder in the Precinct with no place, no
+/// parties and no case. The under-18 rule: a child is never held (no
+/// arrest force on a child), and no term is ever added to one.
+fn cell_case(world: &mut World, actor: EntityId, other: Option<EntityId>, crime: Crime, jail: EntityId) {
+    if is_petty(crime) || crate::systems::ages::is_protected(world, actor) {
+        return;
+    }
+    // A scuffle in the cells is the warden's discipline (`[crime.case]
+    // cell_term_share` of the term); a Murder there is a Murder's term.
+    let full = sentence_ticks(world, crime);
+    let add = if crime == Crime::Murder {
+        full
+    } else {
+        ((full as f32 * world.config.crime.case.cell_term_share).ceil() as Tick).max(TICKS_PER_DAY)
+    };
+    resolve_reports(world, actor);
+    let Some(until) = world.comp_mut::<Sentence>(actor).map(|s| {
+        s.until_tick += add;
+        s.until_tick
+    }) else {
+        return;
+    };
+    if crime == Crime::Murder {
+        if let Some(k) = other.and_then(|o| world.comp_mut::<crate::components::Corpse>(o)) {
+            k.found = true;
+        }
+    }
+    let on = other.map_or_else(String::new, |o| {
+        let of = if crime == Crime::Murder { "of" } else { "on" };
+        format!(" {of} {}", world.name_of(o))
+    });
+    let days = add.div_ceil(TICKS_PER_DAY);
+    let text = format!(
+        "the law added {days} days to {}'s sentence for the {}{on} in the cells of {} (held now to day {})",
+        world.name_of(actor),
+        crime.label(),
+        world.name_of(jail),
+        until / TICKS_PER_DAY
+    );
+    let mut actors = vec![actor];
+    actors.extend(other);
+    actors.push(jail);
+    world.push_event(EventKind::Sentence, &actors, text);
+    crate::systems::ownership::jobs2_row(world).cell_cases += 1;
 }
 
 /// Round 6 V3 (`OPEN-238`): would `w` take what it saw of `suspect` to the
@@ -699,6 +794,174 @@ fn tell_the_beat(world: &mut World) {
             let text = format!("{wn} told {gn} on the street: {sn}, for {}", crime.label());
             tellers.insert(w);
             file_report_as(world, crime, s, Some(w), Some((text, &[w, g])));
+        }
+    }
+}
+
+/// Round 8 X1 (`OPEN-246`): the law's desks open now: the Halls by day
+/// (Morning, Work, Evening: ReportCrime's hours), the Precinct and the
+/// Stations around the clock (a desk sergeant at each).
+fn desks_open(world: &World) -> Vec<EntityId> {
+    use crate::time::DayPhase;
+    let mut v: Vec<EntityId> = Vec::new();
+    if matches!(world.phase(), DayPhase::Morning | DayPhase::Work | DayPhase::Evening) {
+        v.extend(world.buildings_of_kind(BuildingKind::Hall).iter().copied());
+    }
+    v.extend(world.buildings_of_kind(BuildingKind::Jail).iter().copied());
+    v.extend(world.buildings_of_kind(BuildingKind::Station).iter().copied());
+    v.retain(|&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished));
+    v
+}
+
+/// Round 8 X1: the nearest open desk by the trip from where `id` sets out
+/// (`distance::trip_to`; ties the lower id), with that trip; `None` past
+/// `[crime.case] word_reach_ticks`.
+pub fn law_desk(world: &World, id: EntityId) -> Option<(EntityId, Tick)> {
+    let (t, b) = desks_open(world)
+        .into_iter()
+        .filter_map(|b| crate::systems::distance::trip_to(world, id, b).map(|t| (t, b)))
+        .min()?;
+    (t <= world.config.crime.case.word_reach_ticks).then_some((b, t))
+}
+
+/// Round 8 X1: the promise `w` carries: the first standing word owed
+/// (`consequence::owed_word`) on a suspect he would still name now.
+pub fn word_owed(world: &World, w: EntityId) -> Option<EntityId> {
+    let now = world.tick;
+    world
+        .consequence
+        .owed_word
+        .iter()
+        .find(|&&(v, s, until)| v == w && until > now && !world.has::<Sentence>(s) && tells_the_law(world, w, s))
+        .map(|&(_, s, _)| s)
+}
+
+/// Round 8 X1: `w` gave his word to tell the law of `s` and it stands
+/// (the Fight goal leaves him to the law).
+pub fn owes_word_on(world: &World, w: EntityId, s: EntityId) -> bool {
+    let now = world.tick;
+    world.consequence.owed_word.iter().any(|&(v, x, until)| v == w && x == s && until > now)
+}
+
+/// Round 8 X1: the promise's plan: the nearest open desk, the report there
+/// (`ReportCrime` on the suspect: `exec::actions::report_crime` files it).
+pub fn word_plan(world: &World, w: EntityId) -> Option<crate::goap::Plan> {
+    use crate::components::{ActionInstance, GoalKind};
+    let s = word_owed(world, w)?;
+    let (desk, _) = law_desk(world, w)?;
+    let steps = vec![
+        ActionInstance { action: ActionKind::GoTo(crate::goap::LocationKey::Hall), target: Some(desk), tile: None },
+        ActionInstance { action: ActionKind::ReportCrime, target: Some(s), tile: None },
+    ];
+    Some(crate::goap::Plan { goal: GoalKind::ReportCrime, target: Some(s), steps, started_tick: world.tick })
+}
+
+/// Round 8 X1: `w` gives the law his word on `s` at `desk` (the ReportCrime
+/// step at the desk, or `off`: a Statistical promiser's hour at it): the
+/// report in his name (his freshest first-hand sighting of `s`, else the
+/// shakedown). A refreshed warrant files no new report: the word is given
+/// all the same (`file_report_as` reads `consequence::word_given` first).
+pub fn told_at_desk(world: &mut World, w: EntityId, s: EntityId, desk: Option<EntityId>, off: bool) {
+    let crime = world
+        .comp::<crate::components::Memory>(w)
+        .and_then(|m| {
+            m.entries
+                .iter()
+                .filter(|e| e.kind == MemoryKind::SawCrime && !e.second_hand && e.subject == Some(s))
+                .max_by_key(|e| e.tick)
+                .and_then(|e| e.crime)
+        })
+        .unwrap_or(Crime::Extortion);
+    let at = desk.map_or_else(|| "the law".to_string(), |d| world.name_of(d));
+    let off = if off { " (off screen)" } else { "" };
+    let text =
+        format!("{} went to {at} and told the law: {}, for {}{off}", world.name_of(w), world.name_of(s), crime.label());
+    let mut actors = vec![w];
+    actors.extend(desk);
+    file_report_as(world, crime, s, Some(w), Some((text, &actors)));
+    if let Some(p) = world.comp_mut::<Personality>(w) {
+        p.drift(Drift::ReportedCrime);
+    }
+}
+
+/// Round 8 X1: a Statistical promiser is up and off his shift this hour
+/// (`presence::stat_home`'s schedule: not the night 00:00-06:00, not on a
+/// shift he works).
+fn stat_free(world: &World, w: EntityId) -> bool {
+    if u64::from(world.tick_of_day()) < 6 * crate::time::TICKS_PER_HOUR {
+        return false;
+    }
+    world.comp::<Job>(w).is_none_or(|j| {
+        !(j.employer.is_some()
+            && j.on_shift(world.tick_of_day())
+            && crate::exec::routine::workday_of(world, w, j, j.shift_key_at(world.tick)))
+    })
+}
+
+/// Round 8 X1: `w` drops the word owed on `s`, the reason on his line.
+pub fn drop_word(world: &mut World, w: EntityId, s: EntityId, why: &str) {
+    let before = world.consequence.owed_word.len();
+    world.consequence.owed_word.retain(|&(v, x, _)| !(v == w && x == s));
+    if world.consequence.owed_word.len() == before {
+        return;
+    }
+    crate::systems::ownership::jobs2_row(world).word_dropped += 1;
+    let text = format!("{} never told the law of {}: {why}", world.name_of(w), world.name_of(s));
+    world.push_event(EventKind::WitnessReacted, &[w, s], text);
+}
+
+/// Round 8 X1 (`OPEN-246`), hourly: each standing promise is kept (the
+/// ReportCrime goal, the tell, the hue), waits (asleep, down) or is dropped
+/// with the reason: the man taken in, the suspect held or dead, the teller
+/// taken in himself, his gang, fear, his own warrant, the hours gone by with
+/// no desk in reach. V16: 5 of 7 "means to tell" in the diaries never did.
+fn keep_word(world: &mut World) {
+    if world.consequence.owed_word.is_empty() {
+        return;
+    }
+    let now = world.tick;
+    let words = world.consequence.owed_word.clone();
+    for (v, s, until) in words {
+        if !living(world, v) {
+            world.consequence.owed_word.retain(|&(x, y, _)| !(x == v && y == s));
+            continue;
+        }
+        let (he, _, _) = crate::systems::consequence::pro(world, v);
+        let why = if !living(world, s) {
+            Some(format!("{} is dead", world.name_of(s)))
+        } else if world.has::<Sentence>(s) {
+            Some(format!("{} is in the cells already", world.name_of(s)))
+        } else if world.has::<Sentence>(v) {
+            Some(format!("{he} was taken in first"))
+        } else if crate::systems::presence::asleep(world, v) || crate::systems::wounded::is_down(world, v) {
+            // He tells when he is up (or the word runs out below).
+            (until <= now).then(|| {
+                format!(
+                    "{he} lay {} and the day went by",
+                    if crate::systems::presence::asleep(world, v) { "asleep" } else { "hurt" }
+                )
+            })
+        } else if !tells_the_law(world, v, s) {
+            keeps_from_law(world, v, s)
+        } else if world.comp::<Brain>(v).is_some_and(|b| b.lod == crate::components::Lod::Statistical)
+            && stat_free(world, v)
+            && law_desk(world, v).is_some()
+        {
+            // Off screen, no brain to carry the goal: his first free waking
+            // hour with a desk open in reach is the walk to it.
+            let desk = law_desk(world, v).map(|(d, _)| d);
+            told_at_desk(world, v, s, desk, true);
+            None
+        } else if until <= now {
+            Some(match law_desk(world, v) {
+                None => "the law is out of reach (no desk of it within a walk)".to_string(),
+                Some((d, _)) => format!("the day went by and {he} never got to {}", world.name_of(d)),
+            })
+        } else {
+            None
+        };
+        if let Some(why) = why {
+            drop_word(world, v, s, &why);
         }
     }
 }
@@ -1675,6 +1938,20 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
         if died {
             if loser == suspect {
                 // The suspect died resisting: nothing left to prosecute.
+                // Round 8 X1 (`OPEN-246`): the line says so, and the body's
+                // case names nobody (V16 `miserable_103693 d26 20:15`: the
+                // law named for the Murder the guard who had reported him).
+                let charge = wanted_for(world, suspect).map_or_else(
+                    || "an open warrant".to_string(),
+                    |c| format!("wanted for {}", charge_label(world, suspect, c)),
+                );
+                let text = format!(
+                    "{} died resisting arrest by the guard {} ({charge})",
+                    world.name_of(suspect),
+                    world.name_of(guard)
+                );
+                world.push_event(EventKind::Assault, &[suspect, guard], text);
+                crate::systems::demography::defended(world, suspect);
                 resolve_reports(world, suspect);
                 if berserk {
                     crate::systems::chrome::ended_by_law(world, suspect, "killed by the law");
@@ -2380,6 +2657,8 @@ pub fn run(world: &mut World) {
     }
     if world.tick.is_multiple_of(crate::time::TICKS_PER_HOUR) {
         crate::prof::timed!("law::tell_the_beat", tell_the_beat(world));
+        // Round 8 X1 (`OPEN-246`): the promises to tell the law, kept or dropped.
+        crate::prof::timed!("law::keep_word", keep_word(world));
         // Round 7 W3 (`OPEN-244`): the warrant the street never saw, at the door.
         crate::prof::timed!("law::serve_at_door", serve_at_door(world));
     }

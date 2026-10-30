@@ -221,6 +221,20 @@ tell_lawful_min = 0.3              # the hourly tell: a victim (or a murder's wi
 tell_days = 2                      # ... of a first-hand sighting this fresh (ReportCrime's window)
 fear_courage_max = 0.5             # round 7 W2 (OPEN-238): a victim or witness under this courage keeps quiet about a man
                                    # whose gang holds the block he lives on ([turf]; the holders are there tomorrow)
+# Round 8 X1 (OPEN-246): "means to tell the law" is a promise he carries (V16: 455 woke and meant, 76 told).
+word_hours = 24                    # the promise stands this long: the word is given (the nearest open desk, a Hall,
+                                   # the Precinct or a Station within word_reach_ticks; a guard on the street; a
+                                   # shout) or dropped with the reason on his line (dealt with it himself, afraid,
+                                   # wanted, taken in, the law out of reach, the man in the cells already)
+word_flat = 0.35                   # ReportCrime's flat bonus while the promise stands, on the trip's travel factor (0.6-0.85
+                                   # a goal: over Unwind ~0.46 and a tired Sleep ~0.48 in the 20k diaries, under Work
+                                   # ~0.92; at 0.5 x the factor, no flat, 1 desk report in 335 promises)
+word_reach_ticks = 240             # the desk a promise is walked to, in travel ticks (distance::trip_to, the walk or the
+                                   # El): a robbed man goes further than a passer-by ([distance.reach] report_ticks 120;
+                                   # at 120, 11 of the first 18 dropped promises at 20k had no desk in reach)
+cell_term_share = 0.3              # round 8 X1: a crime in the cells (the held on a cellmate) is the law's case at once,
+                                   # this share of its term added to the sentence (a Murder: its whole term); at the
+                                   # whole term a cell Assault added 10 days and the 20k cells grew 289 -> 363 by d30
 
 [social]
 edge_create_ticks = 30

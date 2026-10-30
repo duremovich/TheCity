@@ -4571,6 +4571,7 @@ impl World {
                 killer,
                 tied,
                 found: false,
+                defended: false,
             },
         );
         systems::assets::on_corpse(self, id);

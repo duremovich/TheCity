@@ -1536,6 +1536,27 @@ pub struct Jobs2Cols {
     /// ... or kept quiet (the reason his line)
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub witness_quiet: u32,
+    /// Round 8 X1 (`OPEN-246`): a word promised to the law (a robbed sleeper woke, an awake payer: "means to tell") ...
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub word_meant: u32,
+    /// ... kept (a report in his name: a desk, a guard on the street, a shout) ...
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub word_kept: u32,
+    /// ... or dropped, the reason on his line (dealt with it himself, afraid, the law out of reach, taken in)
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub word_dropped: u32,
+    /// Round 8 X1: a witness recorded while held outside the scene's cells, or asleep (0 is right)
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub witness_unfree: u32,
+    /// Round 8 X1: an Attack across the cells' walls (one side held, the other not in the same cells; 0 is right)
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub held_hit: u32,
+    /// Round 8 X1: a blackmail or service visit credited to a visitor asleep (0 is right)
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub asleep_acts: u32,
+    /// Round 8 X1: a crime in the cells (the held on the held) given its case (the warden's report, days added)
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub cell_cases: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -2114,6 +2135,13 @@ impl Jobs2Cols {
                 "witness_finds",
                 "witness_named",
                 "witness_quiet",
+                "word_meant",
+                "word_kept",
+                "word_dropped",
+                "witness_unfree",
+                "held_hit",
+                "asleep_acts",
+                "cell_cases",
             ]
             .into_iter()
             .map(str::to_string),
@@ -2686,6 +2714,13 @@ impl Jobs2Cols {
             self.witness_finds.to_string(),
             self.witness_named.to_string(),
             self.witness_quiet.to_string(),
+            self.word_meant.to_string(),
+            self.word_kept.to_string(),
+            self.word_dropped.to_string(),
+            self.witness_unfree.to_string(),
+            self.held_hit.to_string(),
+            self.asleep_acts.to_string(),
+            self.cell_cases.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")
