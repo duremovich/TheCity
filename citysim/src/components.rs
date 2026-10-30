@@ -4601,6 +4601,11 @@ pub struct Misery {
     /// keeps no `Socialised` memory (`misery::influence`); 0 none.
     #[serde(default)]
     pub drank_at: Tick,
+    /// Round 7 W6 (OPEN-217): the tick a lost bout hurt him (a wound to
+    /// have seen to, `customers::hurt`, as a lost fight's `Lost`; a bout is
+    /// sanctioned, so no `Lost` memory); 0 none.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub hurt_at: Tick,
     /// Round 4 T5 (`systems::search`): the day's search (a body's): the day
     /// it is for, the doors asked, the door he is making for and the Friend
     /// who told him of it; `None` once no search has been made.

@@ -2103,11 +2103,17 @@ pub fn bouts(world: &mut World) {
         for k in 0..card {
             let (a, b) = (fighters[2 * k].1, fighters[2 * k + 1].1);
             let (fa, fb) = (fighters[2 * k].0, fighters[2 * k + 1].0);
-            let a_wins = fight_bout(world, &mut rng, a, b, fa, fb);
+            let (a_wins, hurt) = fight_bout(world, &mut rng, a, b, fa, fb);
             let (winner, loser) = if a_wins { (a, b) } else { (b, a) };
+            // Round 7 W6 (OPEN-217): the stakes: the winner's purse from the
+            // house (the main event's with its share of the stakes), the
+            // loser's hurt (V15: no purse, no hurt, no loser's line).
+            let stakes: i64 = if k == 0 { bets.iter().map(|&(_, s, _)| s).sum() } else { 0 };
+            let purse = bout_purse(world, pit, winner, stakes);
+            let stake_line = stakes_line(world, loser, purse, hurt);
             if k > 0 {
                 let text = format!(
-                    "{} beat {} at {} on the undercard",
+                    "{} beat {} at {} on the undercard{stake_line}",
                     world.name_of(winner),
                     world.name_of(loser),
                     world.name_of(pit)
@@ -2126,7 +2132,7 @@ pub fn bouts(world: &mut World) {
                 }
             }
             let text = format!(
-                "{} beat {} at {} (bets paid {paid_out})",
+                "{} beat {} at {} (bets paid {paid_out}){stake_line}",
                 world.name_of(winner),
                 world.name_of(loser),
                 world.name_of(pit)
@@ -2142,15 +2148,36 @@ pub fn bouts(world: &mut World) {
 /// the fighting and the courage; the loser's energy and safety, both
 /// memories, the winner's skill, the pit's book (round 6 V6). Returns
 /// whether `a` won.
-fn fight_bout(world: &mut World, rng: &mut impl Rng, a: EntityId, b: EntityId, fa: f32, fb: f32) -> bool {
+fn fight_bout(world: &mut World, rng: &mut impl Rng, a: EntityId, b: EntityId, fa: f32, fb: f32) -> (bool, f32) {
     let (ca, cb) = (crate::systems::law::courage(world, a), crate::systems::law::courage(world, b));
     let p_win = (0.5 + 0.4 * (fa - fb) + 0.1 * (ca - cb)).clamp(0.1, 0.9);
     let a_wins = rng.random::<f32>() < p_win;
     let (winner, loser) = if a_wins { (a, b) } else { (b, a) };
+    // Round 7 W6 (OPEN-217): the loser's hurt, scaled by the winner's margin
+    // in fighting (`[leisure] bout_hurt`, `bout_hurt_margin`), and a wound to
+    // have seen to (`Misery.hurt_at`, read by `customers::hurt`: the patch-up,
+    // both tiers). Fighters are adults (the card's `ages::is_protected`
+    // gate); the backstop here.
+    let cfg = &world.config.leisure;
+    let margin = if a_wins { fa - fb } else { fb - fa }.max(0.0);
+    let wound = cfg.bout_hurt > 0.0 || cfg.bout_hurt_margin > 0.0;
+    let hurt = if wound { (cfg.bout_hurt + cfg.bout_hurt_margin * margin).clamp(0.0, 1.0) } else { 0.3 };
+    let hurt = if crate::systems::ages::is_protected(world, loser) { 0.0 } else { hurt };
     if let Some(n) = world.comp_mut::<Needs>(loser) {
-        n.energy = (n.energy - 0.3).max(0.0);
-        n.safety = (n.safety - 0.3).max(0.0);
+        n.energy = (n.energy - hurt).max(0.0);
+        n.safety = (n.safety - hurt).max(0.0);
     }
+    if wound && hurt > 0.0 {
+        let now = world.tick;
+        if !world.has::<crate::components::Misery>(loser) {
+            world.insert(loser, crate::components::Misery::default());
+        }
+        if let Some(m) = world.comp_mut::<crate::components::Misery>(loser) {
+            m.hurt_at = now;
+        }
+        ownership::jobs2_row(world).bout_hurt += 1;
+    }
+    let hurt = if wound { hurt } else { 0.0 };
     // L2 shadow fixes item 9: a bout is sanctioned, not an assault (its
     // `Lost` was read as Assaulted: rumours, news Stories, dread 0.82,
     // a best friend turned Enemy).
@@ -2161,7 +2188,42 @@ fn fight_bout(world: &mut World, rng: &mut impl Rng, a: EntityId, b: EntityId, f
     }
     crate::systems::vice::note_bout(world, a);
     crate::systems::vice::note_bout(world, b);
-    a_wins
+    (a_wins, hurt)
+}
+
+/// Round 7 W6 (OPEN-217): the bout's purse to `winner`: `[leisure]
+/// bout_purse` plus `bout_purse_share` of the main event's `stakes`, paid by
+/// the house (`Flow::GambleWin`: a corp or the city in full, an agent or a
+/// gang what it holds). Returns the coins paid.
+fn bout_purse(world: &mut World, pit: EntityId, winner: EntityId, stakes: i64) -> i64 {
+    let cfg = &world.config.leisure;
+    let want = cfg.bout_purse + (cfg.bout_purse_share * stakes as f32).round() as i64;
+    if want <= 0 || !world.has::<Wallet>(winner) {
+        return 0;
+    }
+    let owner = world.owner_of(pit);
+    let paid = ownership::charge(world, owner, Some(winner), want, Flow::GambleWin);
+    if paid > 0 {
+        ownership::credit(world, pit, -paid);
+        let row = ownership::jobs2_row(world);
+        row.bout_purses += 1;
+        row.bout_purse_coins += paid as u32;
+    }
+    paid
+}
+
+/// Round 7 W6: the bout line's stakes: the purse and the loser's hurt
+/// ("; purse 6c; Y hurt, to have it seen to"), empty with neither.
+fn stakes_line(world: &World, loser: EntityId, purse: i64, hurt: f32) -> String {
+    let mut s = String::new();
+    if purse > 0 {
+        s.push_str(&format!("; purse {purse}c"));
+    }
+    if hurt > 0.0 {
+        let how = if hurt >= world.config.leisure.bout_hurt_bad { "badly hurt" } else { "hurt" };
+        s.push_str(&format!("; {} {how}, to have it seen to", world.name_of(loser)));
+    }
+    s
 }
 
 // ---------------------------------------------------------------------------
@@ -2325,6 +2387,8 @@ pub struct CounterVisit {
 }
 
 const PURPOSE_COUNTER: u64 = 0x4c45_0018;
+/// Round 7 W6: the barred off-screen face back at the door.
+const PURPOSE_BARRED_BACK: u64 = 0x4c45_0019;
 
 /// The pre-view pass phase 3 (OPEN-145, P3): `b`'s counter bodies, the
 /// staff of a `counter` shape that are bodies (not Statistical), living,
@@ -2548,6 +2612,29 @@ fn stat_learned_evening(world: &mut World, ids: &[EntityId], pv: &std::collectio
 /// Full tier makes on its own hour's purse, not one the evening's earlier
 /// visits priced out), else from the purse now; the coins come out of the
 /// purse now.
+/// Round 7 W6 (OPEN-217): does the off-screen face barred from `b` try its
+/// door tonight anyway? Drunk, yes; else on `[customers] door_stat_barred_p`
+/// (a hash of him, the venue and the day). A face turned away there inside
+/// `[exec] refused_ticks` (`Brain.refused`) has had his answer.
+fn barred_returns(world: &World, id: EntityId, b: EntityId) -> bool {
+    let Some(p) = crate::systems::customers::cfg(world).map(|c| c.door_stat_barred_p) else { return false };
+    if p <= 0.0 {
+        return false;
+    }
+    let turned = world
+        .comp::<Brain>(id)
+        .and_then(|br| br.refused)
+        .is_some_and(|(r, t)| r == b && world.tick.saturating_sub(t) < world.config.exec.refused_ticks.max(1));
+    if turned {
+        return false;
+    }
+    if crate::systems::misery::influence(world, id) == Some("drunk") {
+        return true;
+    }
+    let key = u64::from(b.index) ^ world.day().rotate_left(23);
+    crate::systems::econ::hash_unit(world.seed(), PURPOSE_BARRED_BACK, u64::from(id.index), key) < p
+}
+
 fn stat_visit(
     world: &mut World,
     id: EntityId,
@@ -2570,6 +2657,13 @@ fn stat_visit(
     // (the evening's later visits rolled before the refusal: the 100k
     // shadow's broke came back and were barred for the return).
     if door_first && !door_seen(world, id, b) {
+        // Round 7 W6 (OPEN-217): a face the house barred comes back to its
+        // door anyway on `[customers] door_stat_barred_p` (drunk, always)
+        // and is turned away "barred" (V15: the 100k door's only reason
+        // was "broke"); else he stays away (round 4 T7).
+        if crate::systems::vice::barred(world, id, b) && barred_returns(world, id, b) {
+            crate::systems::service::refused(world, id, b);
+        }
         return false;
     }
     if door_first && !door_ok(world, id, b) {

@@ -66,11 +66,21 @@ pub fn kept_kind(world: &World, kind: BuildingKind) -> bool {
     })
 }
 
-/// The venue's gang: its owner when a gang, else the holder of its district.
+/// The venue's gang: its owner when a gang, else (round 7 W6, `[turf]`) the
+/// gang holding the cell its door stands in, else the holder of it as a Home.
+/// Round 7 W6 (OPEN-217): `gang::holder_of` reads a gang's held Homes, and a
+/// venue is never one, so only a front's door ever saw a rival's colours
+/// (20k seed 42 x 30: 0 colours refusals); the held cell is V2's turf.
 fn venue_gang(world: &World, b: EntityId) -> Option<EntityId> {
     let owner = world.owner_of(b);
     if let Some(o) = owner.filter(|&o| world.comp::<crate::components::Gang>(o).is_some()) {
         return Some(o);
+    }
+    if crate::systems::turf::on(world) {
+        let door = world.comp::<Building>(b).map(|bd| bd.door)?;
+        if let Some(g) = crate::systems::turf::holder_at(world, door) {
+            return Some(g);
+        }
     }
     crate::systems::gang::holder_of(world, b)
 }
@@ -102,6 +112,12 @@ pub fn cause(world: &World, id: EntityId, b: EntityId) -> Option<&'static str> {
     let day = world.day() as u32;
     if crate::systems::misery::last_brawl(world, id).is_some_and(|d| day.saturating_sub(d) < c.door_brawl_days) {
         return Some("a brawler");
+    }
+    // Round 7 W6 (OPEN-217): a name that runs hot (the word's heat: the
+    // deeds told of him, both tiers) is trouble the door knows by sight; the
+    // off-screen visitor carries his name where he carries no drink or piece.
+    if c.door_trouble_heat > 0.0 && crate::systems::reputation::rep(world, id).heat >= c.door_trouble_heat {
+        return Some("trouble");
     }
     // Carrying (a weapon on the body): the door takes no piece in.
     if c.door_armed && world.comp::<crate::components::Kit>(id).is_some_and(|k| k.weapon > 0) {
@@ -397,6 +413,13 @@ pub fn hurt(world: &World, id: EntityId) -> bool {
     let Some(c) = cfg(world) else { return false };
     let since = world.tick.saturating_sub(u64::from(c.hurt_hours) * TICKS_PER_HOUR);
     let seen = world.comp::<crate::components::Misery>(id).map_or(0, |m| m.patched_at);
+    // Round 7 W6 (OPEN-217): a lost bout's hurt (the pit's, no `Lost`).
+    if world
+        .comp::<crate::components::Misery>(id)
+        .is_some_and(|m| m.hurt_at > 0 && m.hurt_at >= since && m.hurt_at > seen)
+    {
+        return true;
+    }
     world.comp::<crate::components::Memory>(id).is_some_and(|m| {
         m.entries.iter().any(|e| {
             e.kind == crate::components::MemoryKind::Lost && e.salience >= 0.6 && e.tick >= since && e.tick > seen

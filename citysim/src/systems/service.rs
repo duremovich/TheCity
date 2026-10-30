@@ -439,6 +439,10 @@ pub fn arrive(world: &mut World, served: EntityId, place: EntityId, kind: ServeK
         // Round 4 T4 (OPEN-217): the room of the serving bodies on duty.
         crate::systems::vice::night_room(world, place);
     }
+    // Round 7 W6 (OPEN-217): the Clinic's day of patients.
+    if kind == ServeKind::Patient {
+        crate::systems::care::note_seen(world, place);
+    }
     let hour = world.tick / TICKS_PER_HOUR;
     // OPEN-111: the hash is the pair's, not the hour's, so a patron gets
     // the same server whenever that server is on duty with room (a regular
@@ -1163,6 +1167,18 @@ pub fn refused(world: &mut World, id: EntityId, b: EntityId) {
     }
     if why == Some("drunk") {
         ownership::jobs2_row(world).door_drunk += 1;
+    }
+    // Round 7 W6 (OPEN-217): the off-screen visitor's refusals by cause (V15:
+    // "broke" the only one a 100k door ever gave).
+    if world.comp::<crate::components::Brain>(id).is_some_and(|b| b.lod == crate::components::Lod::Statistical) {
+        let row = ownership::jobs2_row(world);
+        match why {
+            Some("broke") => row.door_stat_broke += 1,
+            Some("barred") => row.door_stat_barred += 1,
+            Some("drunk" | "high" | "a brawler" | "carrying" | "trouble") => row.door_stat_trouble += 1,
+            Some("a rival's colours") => row.door_stat_colours += 1,
+            _ => row.door_stat_other += 1,
+        }
     }
     if world.config.verbs.is_some() {
         let c = why.unwrap_or("no cause").to_string();
