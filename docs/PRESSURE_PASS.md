@@ -473,6 +473,91 @@ fighter has a bout (no Bout line in a week, the pit door 18-59 a night). Shadow:
 bouncer, fighter (20k). Moves a number: patients per clinic (median and max), door refusals, bouts, 20k seed 42 x 30
 before and after.
 
+### Round 7 from Shadow V15 (`SHADOW_V15.md` § "Round 7's input", opened 2026-10-30)
+
+No calls pending for Dylan; the order is V15's ranking. The far posts (`OPEN-240`, `OPEN-221`, V15's item 5) wait for
+the 100k map re-import. The under-18 rule holds in every phase (CLAUDE.md): a brief that touches a victim pick, a
+fight, a fine or a punishment says how `ages::is_protected` gates it. **Cost rule** (rounds 5 and 6): a phase's 100k
+work is at most one run, named in its brief. Wave 1 is W1, W2, W3, W4 (the household's purse; the gang, the war and
+the case; the guard's arrest, the fare and the rescue; the hire and the post's credit). W2 and W3 both touch
+`law.rs` (W2 the victim's and the witness's side of a case, W3 the arrest and the beat): each brief names the other.
+Wave 2 is W5 (contradictions, across everything) and W6 (the dull rooms: vice, leisure, care), started when wave 1
+has merged. Iterate at 20k (`--population 20000 --map assets/maps/isle_m_k2.txt`, `run` also `--scaled
+--ambient-flats 50`); V15's repro picks are 100k seed 42 days 21-27 (`target/shadow_v15/isle100k_s42_d21/`).
+
+#### W1, the household buys for its children (`OPEN-243`, `OPEN-231`)
+
+V1 split the shelf by household, so the ladder now fires at 100k, and it takes children from families who could feed
+them: a hungry worker's Eat buys for himself, and the grocery run stands in only for a fed worker's Eat
+(`grocery_due`), so a household with coins lets its children go unfed until the warning and the second spell takes
+them (100k ChildTaken 624 -> 4,103, 500 a day at d19-21; `ceo_20314`'s 500c household with a 17-y "2 days unfed";
+20k: 37 of 63 second-warning takes covered by the purse). The fix is the shopping, not the ladder: a parent's
+grocery run buys the children's share whenever the household's claim is short of it, hungry or fed, Full and
+Statistical; a warning moves the household's purse first (the run that day, ahead of the adults' own wants); a
+household that truly cannot buy still meets the ladder as U2 built it (`camp_parent_106052`'s 4-y on the warning
+since d18 all week is that case: say why it hangs). Shadow: neglect_parent (a pick with coins), camp_parent,
+school_parent, ceo, camp_jobless (20k). Moves a number: ChildTaken, ch_camp mean, warnings standing past 14 days,
+starvation deaths, school days, 20k seed 42 x 30 before and after; one 100k x 30 counter run after (r6's are
+`target/r6_100k/`).
+
+#### W2, the war and the case in the diaries (`OPEN-241`, `OPEN-238`)
+
+The war and the case reach only the counters. The muster walks off (`cultist_62792 d21 18:32-d22 00:09`: 5.5 h
+walking, asleep at energy 0.03, no Brawl; V14's bug unchanged): find why the walk does not end at the corner, and
+fix it there. A member hears his gang's war: the call to the corner, the cell held or lost, the truce, the
+crackdown on his block, each a line in a member's diary (today the leader's only, `gang_leader_68028 d24 00:05`).
+The victim's and the witness's side of a case: a sleeper robbed four times in three days finds it when he wakes and
+tells a guard or files a report, or says why not (`courier_50890 d21-23`); a witness who finds the body of a murder he
+saw keeps quiet for a reason the diary says (his gang, fear of the killer) and the case's "no suspect" reads from
+that (`gang_member_6731 d24 02:54`); tribute lines that read 0c pay something or are not printed (street). The
+under-18 rule: no muster, corner fight or war pick names a minor. Shadow: gang_member, gang_leader, cultist, courier,
+raider (20k). Moves a number: musters that end in a corner fight, members with a war line, 20k seed 42 x 30 before
+and after.
+
+#### W3, the guard makes the arrest (`OPEN-244`)
+
+One arrest a guard a week: `Arrest unplannable: Unreachable` and "no guard on shift near; the warrant stays open"
+(`guard_27438`). Find why the arrest is unreachable (the target's place, the guard's district route, a held or
+indoor target) and fix it there, so a warrant a guard holds is served or handed on. The fare: `guard_8327 d27
+14:12-14:23` beats 18 fare evaders in 11 minutes, some 61 and 67: the beat takes a fine first (a fare evader with
+coins pays, the broke one is beaten or booked), a guard handles one evader at a time at a pace a person keeps, and the
+old and frail are booked, not beaten; under 18 is never beaten (`ages::is_protected`, S3's rule). The rescue: a
+bleeding 61-y calls for help three times and no one comes (`camp_warden_8656 d22 13:55`): a call for help reaches a
+guard, an orderly or a passer-by within reach and someone answers (Rescued) or the diary says why not. Shadow: guard,
+camp_warden, cabbie, sick (20k). Moves a number: arrests a guard a week, warrants served and still open at day 30,
+fare beatings and fines, Rescued, 20k seed 42 x 30 before and after.
+
+#### W4, the right person in the role (`OPEN-245`)
+
+The midnight hire names the wrong foreman: a forger (`forger_7536 d21 00:11`, who never works all week) and an
+orderly (`orderly_21547 d23 00:11`). The foreman of a hire is someone who works at that post's workplace in a
+foreman-able role (round 5 U7 put him at work and not sick; now the role). A post's work is credited to the person
+in the post: the orderly is credited with 36 chrome installs while the Ripperdoc post is vacant and paid nothing for
+them (`orderly_13875` the same); a chrome install needs a ripperdoc (or a black doc) at work, and the work done pays
+the one who did it. Shadow: orderly, forger, ripperdoc, foreman (20k). Moves a number: installs by the doer's role,
+hires by the foreman's role, 20k seed 42 x 30 before and after.
+
+#### W5, contradictions (V15 item 6; `OPEN-237`'s leftovers), wave 2
+
+At their cause, each: a father jailed 20 days for "Abduction" for breaking his own 14-y out of the Camp, the witness
+lines swapping actor and witness (`camp_parent_51134 d22 19:18`): a parent taking his own child back is a Camp
+escape, not an abduction; a barred man back in the room the same night (`dancer_74279 d21 20:32`); a CEO shaken down
+asleep and robbed again, never reacting (`ceo_20314 d23`); the `BountyPaid` fold missed Dealing (five Witness and
+money lines a stand, `dealer_101293 d22 19:01`); the "fee beyond the purse" with 10c in it (`school_parent_48165 d22
+09:30`, V14's); a marriage while the groom is in a cell; a told job lead dropped (`jobless_6217 d24`). Shadow: the
+picks' archetypes (20k). No number moves; one 20k shadow.
+
+#### W6, the dull rooms (V15 item 7), wave 2
+
+The door's only off-screen reason is "broke" (the Statistical tier carries drink and coins only): give the off-screen
+visitor the reasons the door reads on screen (barred, trouble, the gang's colours on a held cell). The bout has stakes
+for the fighter: a purse to the winner, a hurt (`wounded`) and a loser's line; fighters are adults (the pit's picker
+gates on `ages::is_protected`). Two of four pimps are gang men who run no round: a pimp named runs his round, or is
+not named. The clinic with a doctor on shift and no patient (`ripperdoc_9880`, V14's): V6's spill never binds in a
+pick; find why. GOSSIP ABOUT ME lines 60 -> 259 in the vice diaries: fold or rate them (`[noise]`). Shadow: bouncer,
+fighter, pimp, ripperdoc, dancer (20k). Moves a number: off-screen door refusals by reason, bout purses, pimps running
+a round, patients per clinic (median, min), 20k seed 42 x 30 before and after.
+
 ## Implemented: deviations
 
 (Per phase, as they land.)
