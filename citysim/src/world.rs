@@ -1292,6 +1292,11 @@ pub struct World {
     /// funerals due, the men lying low. Saved while it holds anything.
     #[serde(default, skip_serializing_if = "crate::systems::grief::State::is_empty")]
     pub grief: crate::systems::grief::State,
+    /// Pressure pass round 8, X5 (`OPEN-248`): the live courtships, `(lo,
+    /// hi)` (`social::dated`; a proposal waits for one's end,
+    /// `social::courtship_ripe`). Pruned at the Social midnight.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub courting: BTreeMap<(EntityId, EntityId), crate::systems::social::Courtship>,
     /// L2 L15: the HangOut spots per district (`leisure::spots`, midnight).
     /// Saved (deviation: the plan's `serde(skip)` would rebuild them on load
     /// from a later state than the midnight's).
@@ -2099,6 +2104,7 @@ impl World {
             fares: Default::default(),
             care: Default::default(),
             grief: Default::default(),
+            courting: BTreeMap::new(),
             spots: Vec::new(),
             last_met: BTreeMap::new(),
             told: BTreeMap::new(),
@@ -2264,6 +2270,9 @@ impl World {
         // the households are settled (keyed streams, no world draw; nothing
         // with `[ages]` off).
         crate::prof::timed!("new::ages::seed_children", systems::ages::seed_children(&mut w));
+        // Round 8 X5 (OPEN-248): the courtships in progress when the story
+        // starts (pure hashes, no RNG), once the kin are linked.
+        crate::prof::timed!("new::social::seed_courting", systems::social::seed_courting(&mut w));
         // Round 5 U1 (OPEN-232): the Schools topped up to the school-age
         // count, by reach, their teachers hired (no RNG, no coins).
         crate::prof::timed!("new::ages::seed_by_children", systems::ages::seed_by_children(&mut w));

@@ -2177,24 +2177,36 @@ pub fn bouts(world: &mut World) {
 /// One bout of the card (plan L18's draw): `a` beats `b` on `p_win` from
 /// the fighting and the courage; the loser's energy and safety, both
 /// memories, the winner's skill, the pit's book (round 6 V6). Returns
-/// whether `a` won.
+/// whether `a` won and the loser's hurt (0: on points, or no wound).
 fn fight_bout(world: &mut World, rng: &mut impl Rng, a: EntityId, b: EntityId, fa: f32, fb: f32) -> (bool, f32) {
     let (ca, cb) = (crate::systems::law::courage(world, a), crate::systems::law::courage(world, b));
     let p_win = (0.5 + 0.4 * (fa - fb) + 0.1 * (ca - cb)).clamp(0.1, 0.9);
-    let a_wins = rng.random::<f32>() < p_win;
+    let roll = rng.random::<f32>();
+    let a_wins = roll < p_win;
     let (winner, loser) = if a_wins { (a, b) } else { (b, a) };
-    // Round 7 W6 (OPEN-217): the loser's hurt, scaled by the winner's margin
-    // in fighting (`[leisure] bout_hurt`, `bout_hurt_margin`), and a wound to
-    // have seen to (`Misery.hurt_at`, read by `customers::hurt`: the patch-up,
-    // both tiers). Fighters are adults (the card's `ages::is_protected`
-    // gate); the backstop here.
+    // Round 8 X5 (OPEN-217): the bout's margin, how far inside the winner's
+    // chance the draw fell (the favourite's win can be a rout, the
+    // underdog's is narrow). At `[leisure] bout_beating` or over it the
+    // loser is beaten: hurt by `bout_hurt` + `bout_hurt_margin` x the margin
+    // past it, a wound to have seen to (`Misery.hurt_at`, read by
+    // `customers::hurt`: the patch-up, both tiers). Under it he loses on
+    // points (`bout_points_tired` of energy, no wound). W6 hurt every loser
+    // (V16: 1,724 of 1,724). Fighters are adults (the card's
+    // `ages::is_protected` gate); the backstop here.
     let cfg = &world.config.leisure;
-    let margin = if a_wins { fa - fb } else { fb - fa }.max(0.0);
+    let margin = if a_wins { p_win - roll } else { roll - p_win }.max(0.0);
     let wound = cfg.bout_hurt > 0.0 || cfg.bout_hurt_margin > 0.0;
-    let hurt = if wound { (cfg.bout_hurt + cfg.bout_hurt_margin * margin).clamp(0.0, 1.0) } else { 0.3 };
-    let hurt = if crate::systems::ages::is_protected(world, loser) { 0.0 } else { hurt };
+    let (energy, hurt) = if !wound {
+        (0.3, 0.3)
+    } else if margin >= cfg.bout_beating {
+        let h = (cfg.bout_hurt + cfg.bout_hurt_margin * (margin - cfg.bout_beating)).clamp(0.0, 1.0);
+        (h, h)
+    } else {
+        (cfg.bout_points_tired, 0.0)
+    };
+    let (energy, hurt) = if crate::systems::ages::is_protected(world, loser) { (0.0, 0.0) } else { (energy, hurt) };
     if let Some(n) = world.comp_mut::<Needs>(loser) {
-        n.energy = (n.energy - hurt).max(0.0);
+        n.energy = (n.energy - energy).max(0.0);
         n.safety = (n.safety - hurt).max(0.0);
     }
     if wound && hurt > 0.0 {
@@ -2222,9 +2234,11 @@ fn fight_bout(world: &mut World, rng: &mut impl Rng, a: EntityId, b: EntityId, f
 }
 
 /// Round 7 W6 (OPEN-217): the bout's purse to `winner`: `[leisure]
-/// bout_purse` plus `bout_purse_share` of the main event's `stakes`, paid by
-/// the house (`Flow::GambleWin`: a corp or the city in full, an agent or a
-/// gang what it holds). Returns the coins paid.
+/// bout_purse` plus `bout_purse_share` of the main event's `stakes`. Round 8
+/// X5: the house's money, not a gambling win: the pit's owner pays it
+/// (`Flow::Purse`: a corp or the city in full, an agent or a gang what it
+/// holds) off the table's take (`book_take`: a front's week to its gang is
+/// short by it). Returns the coins paid.
 fn bout_purse(world: &mut World, pit: EntityId, winner: EntityId, stakes: i64) -> i64 {
     let cfg = &world.config.leisure;
     let want = cfg.bout_purse + (cfg.bout_purse_share * stakes as f32).round() as i64;
@@ -2232,8 +2246,9 @@ fn bout_purse(world: &mut World, pit: EntityId, winner: EntityId, stakes: i64) -
         return 0;
     }
     let owner = world.owner_of(pit);
-    let paid = ownership::charge(world, owner, Some(winner), want, Flow::GambleWin);
+    let paid = ownership::charge(world, owner, Some(winner), want, Flow::Purse);
     if paid > 0 {
+        book_take(world, pit, -paid, true);
         ownership::credit(world, pit, -paid);
         let row = ownership::jobs2_row(world);
         row.bout_purses += 1;
@@ -2243,15 +2258,19 @@ fn bout_purse(world: &mut World, pit: EntityId, winner: EntityId, stakes: i64) -
 }
 
 /// Round 7 W6: the bout line's stakes: the purse and the loser's hurt
-/// ("; purse 6c; Y hurt, to have it seen to"), empty with neither.
+/// ("; purse 14c; Y hurt, to have it seen to"); round 8 X5: a loss that was
+/// no beating "; Y lost on points".
 fn stakes_line(world: &World, loser: EntityId, purse: i64, hurt: f32) -> String {
     let mut s = String::new();
     if purse > 0 {
         s.push_str(&format!("; purse {purse}c"));
     }
+    let cfg = &world.config.leisure;
     if hurt > 0.0 {
-        let how = if hurt >= world.config.leisure.bout_hurt_bad { "badly hurt" } else { "hurt" };
+        let how = if hurt >= cfg.bout_hurt_bad { "badly hurt" } else { "hurt" };
         s.push_str(&format!("; {} {how}, to have it seen to", world.name_of(loser)));
+    } else if cfg.bout_hurt > 0.0 || cfg.bout_hurt_margin > 0.0 {
+        s.push_str(&format!("; {} lost on points", world.name_of(loser)));
     }
     s
 }

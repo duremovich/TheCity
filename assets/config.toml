@@ -244,6 +244,18 @@ rival_threshold = -0.3
 enemy_threshold = -0.6
 propose_affinity = 0.6
 propose_trust = 0.5
+# Round 8 X5 (OPEN-248): a marriage ends a courtship. V16: a proposal needed only affinity 0.6 and trust 0.5, which a
+# coworker reached in two days of shared shifts with no date at all, and an elder parent's link (0.5, 0.6) one flirt
+# from it: 23,267 marriages in 30 days at 100k, 16.7k in days 0-6; 20k seed 42: 3,887 of 4,992 in week 1, a third of
+# them a parent and a grown child. Kin and minors are never courted (social::suitor). Placeholders.
+court_dates = 3                    # a proposal waits for this many dates (an accepted flirt, one a day, either tier) ...
+court_days_min = 2                 # ... the first at least the pair's pace ago: from this many days ...
+court_days_max = 60                # ... to this many (a hash of the pair and the seed: some marry in a week, some court
+                                   # for two months, so a fresh city's courtships do not all end in one week)
+court_lapse_days = 10              # a courtship with no date for this many days is over
+court_seed_share = 0.35            # the founding's courtships: this share of the unmarried adult housemate pairs court
+                                   # already, part of their pace run (a fresh city with none married nobody in week 1
+                                   # and ~40 a day from week 3 at 20k)
 gang_stipend = 4
 extort_amount = 5
 join_gang_affinity = 0.4
@@ -1826,10 +1838,18 @@ bout_hour = 23
 bout_card_per = 4                    # round 6 V6 (OPEN-217): a pit's card is a bout a night for every this many Fighters on
                                      # shift in it, at least one, the longest since their last first (the pit's own book,
                                      # not a memory: V14's 100k fighters had none in a week); 20k pits hold four
-bout_purse = 5                       # round 7 W6 (OPEN-217): the bout's winner takes a purse from the house (GambleWin): this
-bout_purse_share = 0.25              # ... plus this share of the main event's stakes (V15: no purse, no hurt, no loser's line)
-bout_hurt = 0.3                      # the loser is hurt, a wound to have seen to (the patch-up, both tiers): energy and
-bout_hurt_margin = 0.5               # safety fall by bout_hurt + this x the winner's margin in fighting ...
+bout_purse = 14                      # round 7 W6 (OPEN-217): the bout's winner takes a purse from the house: this ...
+bout_purse_share = 0.25              # ... plus this share of the main event's stakes (V15: no purse, no hurt, no loser's line).
+                                     # Round 8 X5: the house's money (Flow::Purse from the pit's owner, off the table's take),
+                                     # not GambleWin; 5 -> 14, over a Clinic's patch-up ([care] patch_price 12): at 5 a
+                                     # fighter who lost one in two was down on the week (V16: 6-12c patch against 5c)
+bout_beating = 0.35                  # round 8 X5: a beating, not every loss: the bout's margin (how far inside the winner's
+                                     # chance the night's draw fell, 0..0.9) at or over this hurts the loser; under it he
+                                     # loses on points (V16: 1,724 of 1,724 losers hurt). An even bout is a beating 30 % of nights
+bout_points_tired = 0.1              # round 8 X5: the loser on points loses this energy, no wound, no patch-up
+bout_hurt = 0.3                      # the beaten loser is hurt, a wound to have seen to (the patch-up, both tiers): energy and
+bout_hurt_margin = 0.5               # safety fall by bout_hurt + this x the margin past bout_beating (X5; W6: the winner's
+                                     # margin in fighting, every loss) ...
 bout_hurt_bad = 0.45                 # ... and at this fall or more the line reads "badly hurt" (0 and 0: the base 0.3, no wound)
 door_heat = 0.6
 class_mult = [1.3, 1.0, 0.8]         # Corp, Street, Dreg

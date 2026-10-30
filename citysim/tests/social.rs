@@ -85,6 +85,10 @@ fn test_propose_requires_thresholds() {
         e.affinity = 0.6;
         e.trust = 0.5;
     }
+    // Round 8 X5 re-pin (OPEN-248): a proposal ends a courtship; the pair's
+    // is ripe (its dates done, its pace run).
+    let key = if a < b { (a, b) } else { (b, a) };
+    w.courting.insert(key, social::Courtship { since: 0, last: 0, dates: 3, head: 60 });
     assert!(social::propose_allowed(&w, a, b));
     {
         let e = w.edge_entry(a, b);

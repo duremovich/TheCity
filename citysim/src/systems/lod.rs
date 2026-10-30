@@ -1230,6 +1230,8 @@ fn stat_flirt(world: &mut World, id: EntityId) {
             world.remember(who, MemoryKind::Courted, Some(if who == id { partner } else { id }), 0.4, 0.3, false);
         }
         social::adjust(world, id, partner, 0.1, 0.02);
+        // Round 8 X5 (`OPEN-248`): a date in the pair's courtship.
+        social::dated(world, id, partner);
     } else {
         world.remember(id, MemoryKind::Rejected, Some(partner), 0.4, -0.3, false);
     }

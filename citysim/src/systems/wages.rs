@@ -435,7 +435,10 @@ pub fn gross_mean(world: &World) -> f32 {
 /// and a repaid loan are counted at their sites), `pop_inflow_other`.
 pub fn note_inflow(world: &mut World, to: Option<EntityId>, flow: Flow, net: i64) {
     if net <= 0
-        || !matches!(flow, Flow::Tribute | Flow::GambleWin | Flow::Scavenge | Flow::Payout | Flow::StreetDice)
+        || !matches!(
+            flow,
+            Flow::Tribute | Flow::GambleWin | Flow::Purse | Flow::Scavenge | Flow::Payout | Flow::StreetDice
+        )
         || !matches!(ownership::owner_kind(world, to), OwnerKind::Agent(_))
     {
         return;
