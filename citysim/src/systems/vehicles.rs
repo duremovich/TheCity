@@ -995,11 +995,30 @@ pub fn steal_target(world: &World, agent: EntityId) -> Option<EntityId> {
 }
 
 /// D26: would this agent plan a vehicle theft at all (an Earn binding)?
+///
+/// Round 8 X3 (`OPEN-247`): crime from need, misery and low lawfulness
+/// (the pressure pass phase 1's rule). The lawfulness gate widens with
+/// misery as the planner's does (`misery::steal_cut`; it bound no vehicle
+/// past 0.4 before), and a wage-holder steals only broke or past `[misery]
+/// employed_steal_misery`: off shift and fed, the theft was Earn's only
+/// plan, so a low-wage worker's `U(wealth)` stole a motorcycle at 0.05 over
+/// Idle (V16 `ripperdoc_10662 d24 04:34`, `teacher_14781 d25 05:36`, mood +0.3).
 pub fn would_steal(world: &World, agent: EntityId) -> bool {
+    let lawful_cut = crate::systems::misery::steal_cut(world, agent).1;
     world.config.assets.enabled
         && !crate::systems::law::is_guard(world, agent)
-        && world.comp::<crate::components::Personality>(agent).is_some_and(|p| p.lawfulness < 0.4)
+        && world.comp::<crate::components::Personality>(agent).is_some_and(|p| p.lawfulness < 0.4 + lawful_cut)
         && crate::systems::demography::is_adult(world, agent)
+        && earner_may_steal(world, agent)
+}
+
+/// Round 8 X3: the jobless, or a wage-holder broke or miserable enough.
+fn earner_may_steal(world: &World, agent: EntityId) -> bool {
+    if !world.has::<crate::components::Job>(agent) || crate::systems::life::broke(world, agent) {
+        return true;
+    }
+    let m = crate::systems::misery::misery(world, agent);
+    m > 0.0 && crate::systems::misery::cfg(world).is_some_and(|c| m >= c.employed_steal_misery)
 }
 
 /// D26: the Earn goal has a theft to plan: an eligible thief, a vehicle in

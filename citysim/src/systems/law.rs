@@ -2195,6 +2195,10 @@ pub fn sentence(world: &mut World, who: EntityId, crime: Crime, until: Tick, jai
     world.leave_building(who);
     world.enter_building(who, jail);
     world.insert(who, Sentence { until_tick: until, crime });
+    // Round 8 X3 (`OPEN-247`): a sentence of `record_min_days` is a record.
+    if until.saturating_sub(world.tick) >= u64::from(world.config.careers.record_min_days) * TICKS_PER_DAY {
+        crate::systems::misery::note_record(world, who);
+    }
     world.remember(who, MemoryKind::WasArrested, None, 0.7, -0.5, false);
     if let Some(p) = world.comp_mut::<Personality>(who) {
         p.drift(Drift::Arrested);
@@ -2562,6 +2566,8 @@ pub fn reconcile_guards(world: &mut World) {
             .filter(|&id| !crate::systems::misery::pool_out(world, id))
             // Lives at work phase 6 (§ 4.1, § 4.4): the Guard's band, the retired.
             .filter(|&id| crate::systems::careers::age_ok(world, id, Role::Guard))
+            // Round 8 X3 (`OPEN-247`): the law's post reads a record.
+            .filter(|&id| crate::systems::careers::record_ok(world, id, Role::Guard))
             .filter_map(|id| world.comp::<Personality>(id).map(|p| (ordered_float::OrderedFloat(p.lawfulness), id)))
             .filter(|&(l, _)| l.0 >= 0.4)
             .collect();

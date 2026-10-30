@@ -233,6 +233,7 @@ pub fn nearer_job(world: &mut World, a: EntityId, home_door: TilePos, d: Tick) -
     if !crate::systems::trades::skill_ok(world, a, role)
         || !crate::systems::fashion::dress_ok(world, a, role)
         || !crate::systems::gray::hire_ok(world, a, role)
+        || !crate::systems::careers::record_ok(world, a, role)
         || !crate::systems::dollhouse::hire_ok(world, role)
     {
         return false;

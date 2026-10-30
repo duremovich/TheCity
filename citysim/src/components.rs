@@ -4620,6 +4620,11 @@ pub struct Misery {
     /// sanctioned, so no `Lost` memory); 0 none.
     #[serde(default, skip_serializing_if = "is_zero_u64")]
     pub hurt_at: Tick,
+    /// Round 8 X3 (`OPEN-247`): the tick of the last sentence of `[careers]
+    /// record_min_days` or more (the record a post that reads one reads,
+    /// `careers::record_ok`); 0 none.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub record_at: Tick,
     /// Round 4 T5 (`systems::search`): the day's search (a body's): the day
     /// it is for, the doors asked, the door he is making for and the Friend
     /// who told him of it; `None` once no search has been made.

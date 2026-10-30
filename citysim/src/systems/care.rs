@@ -1070,6 +1070,8 @@ fn cover_pick(world: &World, c: &CareCfg, emp: EntityId, role: crate::components
         .filter(|&a| world.gang_of(a).is_none() && !crate::systems::wounded::is_down(world, a))
         .filter(|&a| world.comp::<crate::components::Personality>(a).is_some_and(|p| p.lawfulness >= c.cover_lawful))
         .filter(|&a| crate::systems::careers::admits(world, a, band))
+        // Round 8 X3 (`OPEN-247`): a post that reads a record.
+        .filter(|&a| crate::systems::careers::record_ok(world, a, role))
         .filter(|&a| !world.has::<crate::components::Child>(a))
         .filter_map(|a| world.comp::<crate::components::Position>(a).map(|p| (p.tile.manhattan(door), a)))
         .min()

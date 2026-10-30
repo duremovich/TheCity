@@ -1743,8 +1743,24 @@ fn run(args: RunArgs) -> Result<(), String> {
                             Some(e.actors.get(3).copied())
                         }
                         citysim::EventKind::Hire => Some(e.actors.get(2).copied()),
+                        // Round 8 X3 (OPEN-247): the thief's role (a body's
+                        // theft; the gang's off-screen one names nobody).
+                        citysim::EventKind::VehicleStolen => {
+                            e.actors.first().copied().filter(|&t| t != citysim::EntityId::NONE).map(Some)
+                        }
                         _ => None,
                     };
+                    // Round 8 X3: a hire with a record (`Misery.record_at`),
+                    // by the post's role.
+                    if e.kind == citysim::EventKind::Hire {
+                        let h = e.actors.first().copied().unwrap_or(citysim::EntityId::NONE);
+                        if world.comp::<citysim::components::Misery>(h).is_some_and(|m| m.record_at > 0) {
+                            let label = world
+                                .comp::<citysim::components::Job>(h)
+                                .map_or_else(|| "no job".to_string(), |j| j.role.label().to_string());
+                            *role_tally.entry(("HireWithRecord".to_string(), label)).or_insert(0u32) += 1;
+                        }
+                    }
                     if let Some(who) = who {
                         let label = match who {
                             None => "none".to_string(),

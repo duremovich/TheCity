@@ -321,6 +321,8 @@ impl Graded {
             || !crate::systems::fashion::dress_ok(world, id, role)
             || !crate::systems::dollhouse::hire_ok(world, role)
             || !crate::systems::gray::hire_ok(world, id, role)
+            // Round 8 X3 (`OPEN-247`): a post that reads a record.
+            || !crate::systems::careers::record_ok(world, id, role)
             // Lives at work phase 6 (§ 4.1, § 4.4): the age band, the retired.
             || !crate::systems::careers::admits(world, id, self.band)
         {

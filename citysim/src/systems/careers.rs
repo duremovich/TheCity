@@ -176,8 +176,47 @@ pub fn on_hand(world: &World, s: EntityId) -> bool {
 /// Round 7 W4 (OPEN-245): `s` holds a post that can be the foreman: a
 /// bespoke role, or a trade whose row is not `no_foreman` (V15: the forger
 /// at a Fixer's office picked its Fixers, an orderly the Clinic's Ripperdoc).
+///
+/// Round 8 X3 (`OPEN-247`): a legacy role's `[roles.<Name>] no_foreman`
+/// too (V16: a Fighter picked the pit's Fighters, `fighter_40359 d23 00:00`).
 pub fn can_foreman(world: &World, s: EntityId) -> bool {
-    world.comp::<Job>(s).is_none_or(|j| crate::systems::trades::row_of(world, j.role).is_none_or(|r| !r.no_foreman))
+    world.comp::<Job>(s).is_none_or(|j| match crate::systems::trades::row_of(world, j.role) {
+        Some(r) => !r.no_foreman,
+        None => !role_cfg(&world.config, j.role).is_some_and(|r| r.no_foreman),
+    })
+}
+
+/// A legacy role's `[roles.<Name>]` table (`None` for a trade).
+fn role_cfg(cfg: &crate::config::Config, role: Role) -> Option<&crate::config::RoleCfg> {
+    if role.is_trade() {
+        return None;
+    }
+    cfg.roles.get(&format!("{role:?}"))
+}
+
+/// Round 8 X3 (`OPEN-247`): the post of `role` reads a record (its trade
+/// row's or its `[roles.<Name>]` `reads_record`).
+pub fn reads_record(world: &World, role: Role) -> bool {
+    match role.trade().and_then(|t| world.config.trade(t)) {
+        Some(r) => r.reads_record,
+        None => role_cfg(&world.config, role).is_some_and(|r| r.reads_record),
+    }
+}
+
+/// Round 8 X3: `id` may be hired into `role` on his record: a post that
+/// reads one turns away anyone sentenced within `[careers] record_days`
+/// (V16: a thief three days out of the cells taken on as a Guard,
+/// `camp_jobless_66381 d27 11:30`). Careers off: always.
+pub fn record_ok(world: &World, id: EntityId, role: Role) -> bool {
+    if !on(world) || !reads_record(world, role) {
+        return true;
+    }
+    let at = crate::systems::misery::record_at(world, id);
+    if at == 0 {
+        return true;
+    }
+    let days = u64::from(world.config.careers.record_days);
+    days > 0 && world.tick >= at + days * TICKS_PER_DAY
 }
 
 fn foreman_where(

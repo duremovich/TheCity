@@ -2612,6 +2612,7 @@ floors_max = { Farm = 3, Fab = 3, Home = 6, Club = 2, Arcade = 2, NoodleBar = 2,
 # (J14); wages and skills are placeholders.
 [[trades]]
 id = "super"
+reads_record = true                # round 8 X3 (OPEN-247): the hire reads a record ([careers] record_days): the keys to a landlord's Blocks
 label = "Super"
 workplace = ["Home"]
 staff_per_floor = 1
@@ -2641,6 +2642,7 @@ shape = "haul"                     # the pre-view pass phase 3: crates from the 
 
 [[trades]]
 id = "night_porter"
+reads_record = true                # round 8 X3 (OPEN-247): the hire reads a record ([careers] record_days): a Hotel's door at night
 no_foreman = true                  # round 7 W4 (OPEN-245): never the foreman who picks a hire or names a layoff
 label = "Night Porter"
 workplace = ["Hotel"]
@@ -2691,6 +2693,7 @@ model = "service"
 
 [[trades]]
 id = "camp_warden"
+reads_record = true                # round 8 X3 (OPEN-247): the hire reads a record ([careers] record_days): the custody of the taken children
 label = "Camp Warden"
 min_age = 25                     # Lives at work phase 6 (§ 4.1): the hiring age band ([careers]; 0 none)
 max_age = 65
@@ -2733,6 +2736,7 @@ corp_only = true
 
 [[trades]]
 id = "accountant"
+reads_record = true                # round 8 X3 (OPEN-247): the hire reads a record ([careers] record_days): the books
 label = "Accountant"
 workplace = ["Market", "Hotel", "Clinic", "SecurityOffice", "Hq"]
 staff_per_floor = 1
@@ -2746,6 +2750,7 @@ corp_only = true
 
 [[trades]]
 id = "broker"
+reads_record = true                # round 8 X3 (OPEN-247): the hire reads a record ([careers] record_days): the money
 label = "Broker"
 workplace = ["Market", "Lab", "Hq"]
 staff_per_floor = 1
@@ -2830,6 +2835,7 @@ jobs2 = true
 
 [[trades]]
 id = "civic_clerk"
+reads_record = true                # round 8 X3 (OPEN-247): the hire reads a record ([careers] record_days): the Hall's desk (the licences)
 label = "Civic Clerk"
 workplace = ["Hall"]
 staff_per_floor = 0                # civic: places are the Treasury's allocation ([jobs2] clerks_max)
@@ -2853,6 +2859,7 @@ jobs2 = true
 
 [[trades]]
 id = "jailer"
+reads_record = true                # round 8 X3 (OPEN-247): the hire reads a record ([careers] record_days): the cells
 label = "Jailer"
 workplace = ["Jail"]
 staff_per_floor = 0                # civic (one per [jobs2] held_per_jailer held)
@@ -4402,15 +4409,22 @@ retire_days = 60                   # ... the household's coins >= this x its dai
                                    # residents + the Home's rent a day)
 frail_exit_mult = 0.6              # § 4.4: a worker whose [ages] work_mult falls under this is let go "too frail"
 unretire_coins = 20                # § 4.4: a retired agent under this many coins is retired no more (the street ladder)
+record_min_days = 2                # round 8 X3 (OPEN-247): a sentence this many days or longer is a record (a Theft's 3 is;
+                                   # a night in the cells for vagrancy or an unlicensed gun is not)
+record_days = 365                  # round 8 X3: a post that reads a record ([roles.<Name>] / [[trades]] reads_record)
+                                   # turns away anyone sentenced within this many days (0: for good). V16: a thief
+                                   # three days out of the cells was taken on as a Guard (camp_jobless_66381 d27 11:30)
 
 # § 4.1: the legacy roles' hiring age bands (min_age / max_age in years, 0 none).
 [roles.Guard]
 min_age = 18
 max_age = 60
+reads_record = true                # round 8 X3 (OPEN-247): the law's post reads a record ([careers] record_days)
 
 [roles.Fighter]
 min_age = 18
 max_age = 60
+no_foreman = true                  # round 8 X3 (OPEN-247): a Fighter never picks the pit's Fighters (V16 fighter_40359 d23)
 
 [roles.Ripperdoc]
 min_age = 25
@@ -4895,6 +4909,9 @@ quit_p = 0.35                      # a day's quit chance once the days are reach
 steal_cost_cut = 8.0               # petty crime: the planner's steal costs (food, a vehicle) - this x misery (the
                                    # lawfulness term is 20 x lawfulness: misery 1 is lawfulness -0.4)
 steal_lawful_cut = 0.3             # the vehicle theft's lawfulness gate (< 0.4) widened by this x misery
+employed_steal_misery = 0.2        # round 8 X3 (OPEN-247): a wage-holder plans Earn's vehicle theft only broke or this
+                                   # miserable (mood under about -0.25); V16's 61-y ripperdoc and a teacher (mood +0.3,
+                                   # a 5c wage) stole motorcycles off shift because the theft was Earn's only plan
 stat_steal_mult = 2.0              # off screen: the hour's p_steal (the broke adult's) x (1 + this x misery)
 brawl_min = 0.3                    # fights: a body past this misery in a Bar or a leisure venue (drinking there), or on
 brawl_p = 0.25                     # the street drunk or high, picks a fight on this x misery an hour (one a day at most)

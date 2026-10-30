@@ -4079,3 +4079,67 @@ added (doctrine 2). `SAVE_VERSION` 106 (renumbered at the merge): `Crime::CampEs
   before it). `SAVE_VERSION` 106 (the orchestrator renumbers at the merge): `Misery.hurt_at`,
   `ViceState.collected`, `care::State.seen`, the W6 keys and the `Jobs2Cols` `door_stat_broke` ... `clinic_idle_days`
   columns (serde defaults).
+### X3, the wrong person in the role, II (`OPEN-247`, the second half; `careers::record_ok`, `careers::reads_record`, `careers::can_foreman`, `misery::note_record`, `vehicles::would_steal`, `[careers] record_min_days`, `record_days`, `[roles.<Name>] no_foreman`, `reads_record`, `[[trades]] reads_record`, `[misery] employed_steal_misery`)
+
+- **The causes** (20k `isle_m_k2` seed 42, main `527f53b`). (1) **Nothing kept a record.** A `Sentence` is removed at
+  release and the `WasArrested` memory fades; the hire's gates (age band, dress, skill, struck-off, the Guard's
+  lawfulness 0.4) read nothing of the past, so a thief of lawfulness 0.4+ walked out of the cells into a Guard's post
+  (V16 `camp_jobless_66381`). (2) **The theft was Earn's only plan for a wage-holder.** `goals` Earn is "done" for
+  an employed body off shift and fed (`life::broke` false) unless `vehicles::theft_plannable`: so for anyone under
+  lawfulness 0.4 with a motorcycle in reach and a gang's Hideout to fence at, Earn stayed a candidate whose one plan
+  was StealVehicle, and on a low wage `U(wealth)` (0.8-0.96) carried it past Idle at 0.05 (`ripperdoc_10662`, mood
+  +0.26, wealth 0.09; `teacher_14781`, mood +0.32). Need, misery and lawfulness did not enter: 774 of 914 bodies'
+  vehicle thefts in 30 days were by the employed. Separately `would_steal` held the lawfulness gate at 0.4 while the
+  planner's widened by `steal_lawful_cut x misery` (phase 1), so a miserable thief between 0.4 and 0.46 never bound a
+  vehicle. (3) **A Fighter is a legacy role, not a trade**: `can_foreman` read only `[[trades]] no_foreman`, so a
+  pit's senior Fighter (staff: Fighters, a bouncer and a barkeep, both no_foreman) picked every pit hire.
+- **Built.** A sentence of `[careers] record_min_days` (2) or more stamps `Misery.record_at` (`law::sentence` ->
+  `misery::note_record`; a night in the cells for vagrancy or an unlicensed gun is none). A post that reads a record
+  (`[roles.Guard] reads_record`; `[[trades]] reads_record` on jailer, camp warden, civic clerk, night porter, super,
+  accountant, broker: the law's and the city's posts, the doors, the books) turns away anyone sentenced within
+  `record_days` (365; 0 for good): `careers::record_ok`, read beside `gray::hire_ok` at every hire (the midnight pick
+  and its pool groups, `can_take` for the walk-in and the board, `classpay`'s graded pick, `commute`'s transfer,
+  `care`'s cover, `law::reconcile_guards`, `competence::try_poach`). The bouncer does not read one (a pit's door hires
+  hard men). The search's board and leads already pick only doors he can take, so the record is silent in the diary
+  (he never makes for the Precinct). A wage-holder plans Earn's vehicle theft only broke or at `[misery]
+  employed_steal_misery` (0.2, mood under about -0.25) (`vehicles::earner_may_steal` in `would_steal`, which also
+  reads the done-check `theft_plannable` and the plan's binding), and `would_steal`'s lawfulness gate widens with
+  misery as the planner's does. The jobless are as before. `[roles.Fighter] no_foreman = true` (`RoleCfg.no_foreman`,
+  read by `can_foreman` for a legacy role).
+- **Deviations.** No refusal line for the record (the board never offers a barred door; a told lead is picked by the
+  same `can_take`). The spec's "fix it there" for the Earn: the fallback is not a missing legal Earn option (the
+  employed off shift have none: the wage comes from the shift), it is the theft keeping Earn alive; the fix is the
+  theft's gate, not a new legal plan. The `--report --events` `#role` lines gain `VehicleStolen` (the thief's role at
+  the event, a body's theft) and `HireWithRecord` (a hire with `Misery.record_at`, by the post).
+- **Under-18**: the theft's thief is an adult (`demography::is_adult` in `would_steal`, unchanged) and a vehicle has
+  no victim pick (the owner's vehicle on the street, no body touched); the hire's own `is_protected` backstop is
+  untouched. Nothing here picks a victim, a fight or a fine.
+- **Shadow** (20k, seed 42, d20-26, picks camp_jobless:2, ripperdoc:2, teacher:2, fighter:3, guard:2, foreman:2,
+  jailed:3). Working: `jailed_12334` (Idris Novak, lawfulness 0.00) `d24 16:07` "released from the Precinct", `d25
+  00:11` "hired as Bartender (picked by Ursula Sato, the foreman)" (a post that reads no record), then `d26 03:38`
+  "stole Tristan Vasquez's Motorcycle T1 in D4 Mid-Levels (miserable, mood -0.31)": the employed thief is a miserable
+  one. `ripperdoc_15274` (lawfulness 0.11, wage 16) broke at `d21 02:51` plans "Earn [Wander > Scavenge]" (need, the
+  street), then works d22-26 with no Earn goal at all. The teachers' Earn is the wage: `teacher_10321 d23 09:01` "PLAN
+  Earn [GoTo(Workplace) > ClerkWork > GoTo(Hall) > CollectWage]". The pits' hires name nobody ("Sable Sallow hired as
+  Fighter"); the Fighters' diaries carry no Hire line. Reads wrong (the next pass): `jailed_11829` (jobless, a
+  Motorcycle bound) "PLAN Earn on Motorcycle T1 [Wander > Scavenge]" 23 times: the binding names a vehicle the plan
+  does not touch (pre-existing, the jobless' binding); `jailed_18712` and `jailed_11829` read the same three boards
+  "nothing going" every morning for a week (`OPEN-247`'s search half, X2's); `camp_jobless_22961` sentenced 10 days
+  for Assault on d22 and inside all week (no record-gate moment in the picks: the camp_jobless of V16 is a 100k pick).
+- Numbers (prints; 20k seed 42 x 30, `--scaled --ambient-flats 50`, one run each; before = main `527f53b` with the
+  `VehicleStolen` `#role` tally only, after = the branch; "with a record" before is by name, a sentence of 2+ days
+  earlier in the run, an upper bound: the 20k city repeats names; after is the exact `HireWithRecord` tally):
+
+  | | before | after |
+  |---|---|---|
+  | vehicle thefts by bodies: all / by the employed / by the jobless | 914 / 774 / 140 | 267 / 71 / 196 |
+  | vehicle thefts (all, the gangs' off-screen ones too) / with "(miserable" | 994 / 91 | 317 / 99 |
+  | hires with a record, all (by name) / exact | 536 / - | 408 / 360 |
+  | hires with a record at a post that reads one (by name) / exact | 39 (Guard 17, Super 9, Accountant 5, Broker 4, Civic Clerk 2, Night Porter 2) / - | 8 / 1 (Broker: a poach, closed after the run in `competence::try_poach`) |
+  | hires picked by a Fighter | 102 | 0 |
+  | food thefts (`Theft` events) / arrests / jailed mean | 1,054 / 1,331 / 172 | 1,178 / 1,226 / 130 |
+  | hires (all) | 13,842 | 13,591 |
+
+  **FINDING:** the city's vehicle thefts fall by two-thirds (the employed's were 85 % of them): the pressure comes back
+  through features (doctrine 5), not by loosening the gate. No test (doctrine 2). `SAVE_VERSION` 108 (renumbered at
+  the merge): `Misery.record_at` and the X3 keys (serde defaults).

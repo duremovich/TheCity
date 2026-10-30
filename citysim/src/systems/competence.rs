@@ -421,6 +421,10 @@ pub fn try_poach(world: &mut World, corp: EntityId, vacancy: EntityId, role: Rol
         if a == exec || !law::living(world, a) || world.has::<crate::components::Sentence>(a) {
             continue;
         }
+        // Round 8 X3 (`OPEN-247`): the new post reads a record too.
+        if !crate::systems::careers::record_ok(world, a, role) {
+            continue;
+        }
         let Some((v, _, _)) = role_skill(world, a, role) else { continue };
         if v < cfg.poach_min {
             continue;
