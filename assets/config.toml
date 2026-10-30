@@ -4405,6 +4405,10 @@ visit_hour_from = 10               # § 3.5: the visit's hour of the day, hashed
 visit_hour_to = 20
 visit_flat = 0.2                   # § 3.5: the Visit goal's flat bonus (a hurt kin's reason 1.0, an elder's 0.6)
 visit_belonging = 0.2              # § 3.5: the visitor's belonging gain (both tiers)
+cell_visit_days = 3                # round 8 X6 (OPEN-217): a kin or spouse in the cells unmet this many days is
+                                   # visited there (a hurt kin's visit to the Precinct or the Station, within [distance.choice]
+                                   # visit_ticks; one visitor a prisoner a day; the prisoner's belonging too); 0 off (V16
+                                   # jailed_101685: nine days in the cells, nobody came)
 
 # § 3.5 (review fix 8): the Visit goal's "the reason" by purpose, through Linear { m: curve[0], b: curve[1] }.
 # Not written into a save at these values.
@@ -5222,6 +5226,11 @@ cell_loan_p = 0.1                  # ... a broke prisoner borrows from a cellmat
 cell_loan_coins = 10               # ... this many coins (an edge debt, called in as any) ...
 cell_loan_broke = 5                # ... when holding fewer than this
 cell_events_max = 20               # at most this many cell events a jail a day
+cell_yard_hour = 15                # round 8 X6 (OPEN-217): the yard. At this hour the day's one cell event above happens (a
+                                   # fight in the yard, at most one a cellmate a day: V16's midnight fight put eleven haters on
+                                   # the first disliked cellmate); else he walks with the cellmate he likes best or keeps to
+                                   # himself, a line either way (V16: jail days an empty column); 24 off (the midnight pass)
+cell_yard_affinity = 0.02          # ... a walk in the yard moves the pair's affinity up this much
 svc_hour_from = 18                 # a creed's place (a cult's or the Purists' chapel, a church) holds a service a week,
 svc_hour_to = 21                   # the day and the hour hashed on the place within these hours ...
 svc_lead_hours = 1                 # ... the congregation called this many hours before (a Visit) ...
@@ -5332,6 +5341,8 @@ door_from_hour = 22                # round 7 W3: the warrant at the door. From t
 door_to_hour = 6                   # equal: off) a warrant whose suspect no guard has seen within [crime] suspect_seen_ticks and
                                    # who is inside his own Home goes to the nearest free city guard on shift within his pursuit
                                    # radius: the address is the sighting, the arrest is made at home (the street never saw him)
+meal_hour = 7                      # round 8 X6 (OPEN-217): the cells' meal is served at this hour (the jailer's count, a line
+                                   # a prisoner: the kitchen, or "went without"); 0: at midnight with the hold's rest
 # The pressure pass round 2, R4 (OPEN-218, OPEN-219): the diary's folds and the Camp answer's hour.
 [noise]
 contest_names = 3                  # a blow on a rival's hold names this many of the holders who saw it (the rest "and N more")
@@ -5413,6 +5424,10 @@ book_slack_ticks = 30              # round 7 W6 (OPEN-217): a booked visit (a wa
                                    # pick was the nearest: a Clinic ringed by nearer ones saw nobody, V15 ripperdoc_9880);
                                    # 0: the nearest
 book_cands = 6                     # ... weighing this many staffed Clinics nearest his Home (by tiles)
+walk_slack_ticks = 30              # round 8 X6 (OPEN-217): a walk-in patch-up goes to the Clinic open for it with the fewest
+                                   # patients today (seen and booked) per doctor among the book_cands nearest within this many
+                                   # ticks of travel more than the nearest, the nearest on ties (V16: 853 of 1,861 doctor-days
+                                   # at 100k saw no patient; the walk-in went to the nearest); 0: the nearest with room
 # Pressure pass round 2, R6b (docs/PRESSURE_PASS.md § R6b, OPEN-217, OPEN-207): the trades' verbs II. Every value a
 # placeholder.
 [verbs]

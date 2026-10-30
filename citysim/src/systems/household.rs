@@ -633,6 +633,11 @@ pub fn visits_due(world: &mut World) {
     // Lives at work phase 3 (§ 3.5): the parents' answers to their Camp
     // children due today (and the neglect tally).
     let camp_due = camp_answers_due(world);
+    // Round 8 X6 (`OPEN-217`): a kin in the cells unmet `cell_visit_days`
+    // is visited there, one visitor a prisoner a day (V16
+    // `jailed_101685`: nine days inside, nobody came).
+    let cell_days = u64::from(world.config.household.cell_visit_days);
+    let mut cell_seen: std::collections::BTreeSet<EntityId> = std::collections::BTreeSet::new();
     // scan-ok: daily: the visits due
     for id in world.citizens() {
         if !world.has::<Brain>(id)
@@ -680,7 +685,21 @@ pub fn visits_due(world: &mut World) {
                 });
             if hurt {
                 pick = Some((k, VisitWhy::Hurt));
+                cell_seen.insert(k);
                 break;
+            }
+            if cell_days > 0 && world.has::<crate::components::Sentence>(k) && !cell_seen.contains(&k) {
+                let unmet = world.last_met.get(&pair(id, k)).is_none_or(|&d| day.saturating_sub(d) >= cell_days);
+                let cell = world.comp::<Position>(k).and_then(|p| p.building);
+                let reach = cell.is_some_and(|c| {
+                    let cap = crate::systems::distance::choice(world).map_or(Tick::MAX, |x| x.visit_ticks);
+                    crate::systems::distance::trip_to(world, id, c).is_some_and(|t| t <= cap)
+                });
+                if unmet && reach {
+                    pick = Some((k, VisitWhy::Hurt));
+                    cell_seen.insert(k);
+                    break;
+                }
             }
             if rel == RelKind::Parent && pick.is_none() {
                 let elder = world.comp::<Identity>(k).is_some_and(|i| i.age_days >= frail)
@@ -696,7 +715,8 @@ pub fn visits_due(world: &mut World) {
             let span = u32::from(cfg.visit_hour_to.saturating_sub(cfg.visit_hour_from)).max(1);
             let u = hash(world, PURPOSE_VISIT_HOUR, key(id), day);
             let mut hour = cfg.visit_hour_from + ((u * span as f32) as u8).min(span as u8 - 1);
-            if matches!(why, VisitWhy::Camp(_)) {
+            // X6: a visit to the cells, off his shift as a Camp answer is.
+            if matches!(why, VisitWhy::Camp(_)) || world.has::<crate::components::Sentence>(kin) {
                 hour = camp_hour(world, id, hour, day);
             }
             due.push((id, PendingVisit { kin, why, hour }));
@@ -1314,6 +1334,13 @@ fn credit(world: &mut World, id: EntityId, v: PendingVisit, walked: bool) {
     let gain = world.config.household.visit_belonging;
     if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
         n.belonging = (n.belonging + gain).min(1.0);
+    }
+    // Round 8 X6 (`OPEN-217`): a kin in the cells: the visit's own line
+    // (both sides' belonging; what he brings from outside).
+    if world.has::<crate::components::Sentence>(v.kin) {
+        ownership::jobs2_row(world).kin_visits += 1;
+        crate::systems::consequence::cell_visit(world, id, v.kin, gain);
+        return;
     }
     let row = ownership::jobs2_row(world);
     match v.why {

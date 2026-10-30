@@ -122,6 +122,12 @@ pub struct Inside {
     pub fixer: Option<EntityId>,
     pub fights: u8,
     pub missed: u8,
+    /// Round 8 X6 (`OPEN-217`): the Home and the gang going in (the
+    /// release says what waits outside).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home: Option<EntityId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gang: Option<EntityId>,
 }
 
 /// `World.consequence`: saved while it holds anything.
@@ -149,6 +155,10 @@ pub struct State {
     /// suspect, until)` (`sleeper_reports` counts it when filed).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub owed_word: Vec<(EntityId, EntityId, Tick)>,
+    /// Round 8 X6 (`OPEN-217`): the prisoners a line named today (`note_line`,
+    /// read and cleared at midnight: `cell_days_lined`). Not saved.
+    #[serde(skip)]
+    pub lined: std::collections::BTreeSet<EntityId>,
 }
 
 impl State {
@@ -348,6 +358,15 @@ pub fn witnessed(world: &mut World, w: EntityId, actor: EntityId, crime: Crime, 
     }
     let t = traits(world, w);
     let violent = matches!(crime, Crime::Murder | Crime::Assault | Crime::Abduction | Crime::Manslaughter);
+    // Round 8 X6 (`OPEN-217`): a held witness (a cellmate's crime: X1's
+    // `sees_scene` keeps the held to their own cells) has no door to run
+    // for and nobody outside to tell: he tells the jailer (the report, the
+    // case is `law::cell_case`'s) or keeps clear of the man (V16 and X1's
+    // 20k `jailed_10485 d24 06:18`: "saw ...'s Assault and ran").
+    if world.has::<Sentence>(w) {
+        held_witness(world, &c, w, actor, crime, violent, t);
+        return;
+    }
     let deed = crate::systems::gossip::deed_of_crime(crime);
     let bm_ok = t.lawful <= c.bm_lawful_max
         && world.purse(Some(w)) <= c.bm_broke_coins
@@ -407,6 +426,40 @@ pub fn witnessed(world: &mut World, w: EntityId, actor: EntityId, crime: Crime, 
     if hash(world, P_LEARN, actor, world.tick ^ key(w)) < c.learn_p {
         crate::systems::social::adjust(world, actor, w, -0.1, 0.0);
         ownership::jobs2_row(world).wr_learned += 1;
+    }
+}
+
+/// X6: the held witness's reaction (`witnessed`): the report (no line; the
+/// case is the cells'), or, a violent crime, he keeps clear of the actor
+/// (an Enemy, his safety down to half): one weighted draw as outside.
+fn held_witness(
+    world: &mut World,
+    c: &ConsequenceCfg,
+    w: EntityId,
+    actor: EntityId,
+    crime: Crime,
+    violent: bool,
+    t: Traits,
+) {
+    let weights = [c.w_report * t.lawful, if violent { c.w_flee * (1.0 - t.courage) } else { 0.0 }];
+    let u = hash(world, P_REACT, w, world.tick ^ (key(actor) << 7));
+    if pick(&weights, u) == Some(1) {
+        crate::systems::social::make_enemy(world, w, actor, c.flee_affinity);
+        if let Some(n) = world.comp_mut::<Needs>(w) {
+            n.safety = n.safety.min(0.5);
+        }
+        let place = world.comp::<Position>(w).and_then(|p| p.building).map_or_else(String::new, |b| world.name_of(b));
+        let text = format!(
+            "{} saw {}'s {} in the cells of {place} and kept to the far wall, away from {}",
+            world.name_of(w),
+            world.name_of(actor),
+            crime.label(),
+            pro(world, actor).1
+        );
+        world.push_event(EventKind::WitnessReacted, &[w, actor], text);
+        ownership::jobs2_row(world).wr_held_clear += 1;
+    } else {
+        ownership::jobs2_row(world).wr_report += 1;
     }
 }
 
@@ -914,8 +967,10 @@ pub fn on_sentenced(world: &mut World, who: EntityId, crime: Crime) {
         .find(|&w| w != who && person(world, w) && !crate::systems::law::is_guard(world, w));
     let job = world.comp::<Job>(who).filter(|j| j.employer.is_some()).map(|j| (j.role.label().to_string(), j.employer));
     let day = world.day();
+    let home = world.comp::<crate::components::Household>(who).and_then(|h| h.home);
+    let gang = world.gang_of(who);
     world.consequence.inside.retain(|(p, _)| *p != who);
-    world.consequence.inside.push((who, Inside { since: day, job, reporter, ..Default::default() }));
+    world.consequence.inside.push((who, Inside { since: day, job, reporter, home, gang, ..Default::default() }));
     if let Some(r) = reporter {
         crate::systems::grudges::add(world, who, r, GrudgeCause::Betrayed, c.snitch_grudge, 0);
         let him = pro(world, who).1;
@@ -938,11 +993,37 @@ pub fn on_released(world: &mut World, who: EntityId) {
     let Some(i) = world.consequence.inside.iter().position(|(p, _)| *p == who) else { return };
     let (_, x) = world.consequence.inside.remove(i);
     let mut parts: Vec<String> = Vec::new();
+    // Round 8 X6 (`OPEN-217`): what waits outside, kept or not (the post,
+    // the Home, the gang); `changed` the old line's count.
+    let mut kept: Vec<String> = Vec::new();
+    // "still his" / "still hers": the possessive standing alone.
+    let his = if pro(world, who).2 == "her" { "hers" } else { "his" };
     if let Some((role, employer)) = &x.job {
         let still = world.comp::<Job>(who).is_some_and(|j| j.employer == *employer);
-        if !still {
-            let at = employer.map(|e| format!(" at {}", world.name_of(e))).unwrap_or_default();
+        let at = employer.map(|e| format!(" at {}", world.name_of(e))).unwrap_or_default();
+        if still {
+            kept.push(format!("the post as {role}{at} still {his}"));
+        } else {
             parts.push(format!("the post as {role}{at} gone"));
+        }
+    }
+    let home_now = world.comp::<crate::components::Household>(who).and_then(|h| h.home);
+    match (x.home, home_now) {
+        (Some(h), Some(n)) if h == n => kept.push(format!("the Home at {} still {his}", world.name_of(h))),
+        (Some(h), Some(n)) => {
+            parts.push(format!("the Home at {} gone, {} {his} now", world.name_of(h), world.name_of(n)))
+        }
+        (Some(h), None) => parts.push(format!("the Home at {} gone: nowhere to sleep", world.name_of(h))),
+        (None, Some(n)) => parts.push(format!("a Home at {} now", world.name_of(n))),
+        (None, None) => kept.push("no Home to go to".to_string()),
+    }
+    if let Some(g) = x.gang.filter(|&g| Some(g) != x.joined) {
+        if world.gang_of(who) == Some(g) {
+            kept.push(format!("{} still {his}", gang_name(world, g)));
+        } else if world.comp::<Gang>(g).is_some() {
+            parts.push(format!("{} done with {}", gang_name(world, g), pro(world, who).1));
+        } else {
+            parts.push(format!("{} gone", gang_name(world, g)));
         }
     }
     for &(l, n) in &x.owed {
@@ -964,12 +1045,17 @@ pub fn on_released(world: &mut World, who: EntityId) {
         let n = x.fights;
         parts.push(format!("{n} fight{} in the cells behind {}", if n == 1 { "" } else { "s" }, pro(world, who).1));
     }
-    if parts.is_empty() {
-        return;
-    }
-    let text = format!("{} came out to a changed life: {}", world.name_of(who), parts.join("; "));
+    let changed = !parts.is_empty();
+    let text = if changed {
+        let and = if kept.is_empty() { String::new() } else { format!("; {}", kept.join("; ")) };
+        format!("{} came out to a changed life: {}{and}", world.name_of(who), parts.join("; "))
+    } else {
+        format!("{} came out to the life {} left: {}", world.name_of(who), pro(world, who).0, kept.join("; "))
+    };
     world.push_event(EventKind::Cells, &[who], text);
-    ownership::jobs2_row(world).released_changed += 1;
+    if changed {
+        ownership::jobs2_row(world).released_changed += 1;
+    }
 }
 
 /// A Fixer `m` knows: one he owns, works at, or is a regular of.
@@ -998,6 +1084,40 @@ fn cells_daily(world: &mut World, c: &ConsequenceCfg) {
             world.consequence.inside.retain(|x| x.0 != p);
         }
     }
+    // Round 8 X6 (`OPEN-217`): yesterday's prisoner-days in the cells, and
+    // those a line named (`note_line`), before today's lines start.
+    let lined = std::mem::take(&mut world.consequence.lined);
+    let (mut days, mut with_line) = (0u32, 0u32);
+    for (p, x) in &world.consequence.inside {
+        if x.since < today && world.has::<Sentence>(*p) {
+            days += 1;
+            with_line += u32::from(lined.contains(p));
+        }
+    }
+    let row = ownership::jobs2_row(world);
+    row.cell_days += days;
+    row.cell_days_lined += with_line;
+    let yard = c.cell_yard_hour < 24;
+    for (jail, prisoners) in cells_now(world) {
+        let mut events = 0u16;
+        let mut fought = std::collections::BTreeSet::new();
+        for &p in &prisoners {
+            if !living(world, p) || !world.has::<Sentence>(p) {
+                continue;
+            }
+            jail_absence(world, p);
+            if yard || events >= c.cell_events_max || prisoners.len() < 2 {
+                continue;
+            }
+            if cell_day(world, c, jail, p, &prisoners, today, &mut fought) {
+                events += 1;
+            }
+        }
+    }
+}
+
+/// The prisoners in the cells now, by the building they are held in.
+fn cells_now(world: &World) -> std::collections::BTreeMap<EntityId, Vec<EntityId>> {
     let mut cells: std::collections::BTreeMap<EntityId, Vec<EntityId>> = std::collections::BTreeMap::new();
     for &p in world.sentenced() {
         if !person(world, p) {
@@ -1007,21 +1127,145 @@ fn cells_daily(world: &mut World, c: &ConsequenceCfg) {
             cells.entry(b).or_default().push(p);
         }
     }
-    for (jail, prisoners) in cells {
-        let mut events = 0u16;
-        for &p in &prisoners {
-            if !living(world, p) || !world.has::<Sentence>(p) {
-                continue;
-            }
-            jail_absence(world, p);
-            if events >= c.cell_events_max || prisoners.len() < 2 {
-                continue;
-            }
-            if cell_day(world, c, jail, p, &prisoners, today) {
-                events += 1;
-            }
+    cells
+}
+
+/// Round 8 X6 (`OPEN-217`): `visitor` came to `prisoner` in the cells
+/// (`household::credit`, a body's walk or the Statistical hour): the
+/// prisoner's belonging up `gain` too, and the news he brings from outside
+/// (the post gone, the Home gone), else how long is left.
+pub fn cell_visit(world: &mut World, visitor: EntityId, prisoner: EntityId, gain: f32) {
+    if let Some(n) = world.comp_mut::<Needs>(prisoner) {
+        n.belonging = (n.belonging + gain).min(1.0);
+    }
+    let cell = world.comp::<Position>(prisoner).and_then(|p| p.building);
+    let at = cell.map_or_else(|| "the cells".to_string(), |b| format!("the cells of {}", world.name_of(b)));
+    let him = pro(world, prisoner).1;
+    let x = world.consequence.inside.iter().find(|(p, _)| *p == prisoner).map(|(_, x)| x.clone());
+    let mut news: Vec<String> = Vec::new();
+    if let Some((role, employer)) = x.as_ref().and_then(|x| x.job.clone()) {
+        if !world.comp::<Job>(prisoner).is_some_and(|j| j.employer == employer) {
+            let place = employer.map(|e| format!(" at {}", world.name_of(e))).unwrap_or_default();
+            news.push(format!("the post as {role}{place} is gone"));
         }
     }
+    if let Some(h) = x.as_ref().and_then(|x| x.home) {
+        if world.comp::<crate::components::Household>(prisoner).and_then(|hh| hh.home) != Some(h) {
+            news.push(format!("the Home at {} is gone", world.name_of(h)));
+        }
+    }
+    let told = if news.is_empty() {
+        let left = world
+            .comp::<Sentence>(prisoner)
+            .map_or(0, |s| s.until_tick.saturating_sub(world.tick).div_ceil(crate::time::TICKS_PER_DAY));
+        format!("; {left} day{} left for {him}", if left == 1 { "" } else { "s" })
+    } else {
+        format!(" and told {him} {}", news.join(" and "))
+    };
+    let text = format!("{} came to {at} to see {}{told}", world.name_of(visitor), world.name_of(prisoner));
+    let mut actors = vec![visitor, prisoner];
+    actors.extend(cell);
+    world.push_event(EventKind::Visited, &actors, text);
+    ownership::jobs2_row(world).cell_visits += 1;
+}
+
+/// Round 8 X6 (`OPEN-217`): a line named `actors` (`World::push_event`): a
+/// prisoner among them has a line today.
+pub fn note_line(world: &mut World, actors: &[EntityId]) {
+    for &a in actors {
+        if world.has::<Sentence>(a) {
+            world.consequence.lined.insert(a);
+        }
+    }
+}
+
+/// Round 8 X6 (`OPEN-217`), hourly (from `living::run`): the yard at
+/// `[consequence] cell_yard_hour`. Each prisoner's day among his cellmates
+/// (`cell_day`: at most one thing, `cell_events_max` a jail), else a walk
+/// with the cellmate he likes best or his own company, a line either way.
+/// Tier-blind (the held walk it as the bodies do). Under 18: a child is
+/// never held, and `cell_day`'s pick skips the protected.
+pub fn hourly(world: &mut World) {
+    let Some(c) = cfg(world).cloned() else { return };
+    if c.cell_yard_hour >= 24 || !world.tick.is_multiple_of(crate::time::TICKS_PER_HOUR) {
+        return;
+    }
+    if world.tick_of_day() / crate::time::TICKS_PER_HOUR as u16 != u16::from(c.cell_yard_hour) {
+        return;
+    }
+    let today = world.day();
+    for (jail, prisoners) in cells_now(world) {
+        let mut events = 0u16;
+        let mut fought = std::collections::BTreeSet::new();
+        for &p in &prisoners {
+            // `fought`: the day's taken (a fight's two, a walk's pair): one
+            // thing a prisoner a day, one line a walk.
+            if !living(world, p) || !world.has::<Sentence>(p) || fought.contains(&p) {
+                continue;
+            }
+            if events < c.cell_events_max
+                && prisoners.len() >= 2
+                && cell_day(world, &c, jail, p, &prisoners, today, &mut fought)
+            {
+                events += 1;
+                continue;
+            }
+            if fought.contains(&p) || !living(world, p) {
+                continue;
+            }
+            yard_walk(world, &c, jail, p, &prisoners, &mut fought);
+        }
+    }
+}
+
+/// X6: the Precinct's yard; a Station's night cells have none.
+fn yard_of(world: &World, jail: EntityId) -> String {
+    if crate::systems::stations::is_station(world, jail) {
+        format!("the cells of {}", world.name_of(jail))
+    } else {
+        format!("the yard of {}", world.name_of(jail))
+    }
+}
+
+/// X6: `p`'s hour in the yard with nothing on: a walk with the cellmate he
+/// likes best not yet walking (an edge at or above 0; their affinity up
+/// `cell_yard_affinity`; the pair `taken`, one line for the two) and what
+/// that one is in for, else his own company.
+fn yard_walk(
+    world: &mut World,
+    c: &ConsequenceCfg,
+    jail: EntityId,
+    p: EntityId,
+    mates: &[EntityId],
+    taken: &mut std::collections::BTreeSet<EntityId>,
+) {
+    let best = mates
+        .iter()
+        .copied()
+        .filter(|&m| m != p && !taken.contains(&m) && living(world, m) && world.has::<Sentence>(m))
+        .filter_map(|m| world.edge(p, m).filter(|e| e.affinity >= 0.0).map(|e| (e.affinity, m)))
+        .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)));
+    let pn = world.name_of(p);
+    let text = match best {
+        Some((_, m)) => {
+            crate::systems::social::adjust(world, p, m, c.cell_yard_affinity, 0.0);
+            let what = world
+                .comp::<Sentence>(m)
+                .map(|s| format!(" (in for {}, out d{})", s.crime.label(), s.until_tick / crate::time::TICKS_PER_DAY))
+                .unwrap_or_default();
+            format!("{pn} walked {} with {}{what}", yard_of(world, jail), world.name_of(m))
+        }
+        None => {
+            let n = mates.len().saturating_sub(1);
+            let he = pro(world, p).0;
+            format!("{pn} walked {} alone: {n} in the cells, none {he} would walk with", yard_of(world, jail))
+        }
+    };
+    let mut actors = vec![p, jail];
+    actors.extend(best.map(|b| b.1));
+    taken.extend(actors.iter().copied().filter(|&a| a != jail));
+    world.push_event(EventKind::Cells, &actors, text);
+    ownership::jobs2_row(world).cell_yard_walks += 1;
 }
 
 /// A jailed worker's workday: an absence on phase 1's count.
@@ -1052,7 +1296,16 @@ fn jail_absence(world: &mut World, p: EntityId) {
 }
 
 /// One prisoner's day among his cellmates: at most one thing happens.
-fn cell_day(world: &mut World, c: &ConsequenceCfg, jail: EntityId, p: EntityId, mates: &[EntityId], day: u64) -> bool {
+#[allow(clippy::too_many_arguments)]
+fn cell_day(
+    world: &mut World,
+    c: &ConsequenceCfg,
+    jail: EntityId,
+    p: EntityId,
+    mates: &[EntityId],
+    day: u64,
+    fought: &mut std::collections::BTreeSet<EntityId>,
+) -> bool {
     let t = traits(world, p);
     let others: Vec<EntityId> = mates.iter().copied().filter(|&m| m != p && living(world, m)).collect();
     if others.is_empty() {
@@ -1072,16 +1325,26 @@ fn cell_day(world: &mut World, c: &ConsequenceCfg, jail: EntityId, p: EntityId, 
         }
         world.edge(p, m).filter(|e| e.affinity < c.cell_fight_affinity).map(|_| "bad blood")
     };
-    if roll(world, 1) < c.cell_fight_p * (0.5 + t.pride) {
+    if !fought.contains(&p) && roll(world, 1) < c.cell_fight_p * (0.5 + t.pride) {
         // Round 8 X1: the under-18 rule at the pick (a child is never held;
-        // `resolve_fight_mods` is the backstop).
-        let pick = others
+        // `resolve_fight_mods` is the backstop). Round 8 X6 (`OPEN-217`): a
+        // cellmate in a fight today is in no second one, and the one he
+        // goes for is drawn among those he dislikes, not the first of the
+        // list (V16's midnight: eleven haters on one cellmate in a night).
+        let disliked: Vec<(EntityId, &'static str)> = others
             .iter()
-            .filter(|&&m| {
-                !crate::systems::ages::is_protected(world, m) && !crate::systems::ages::is_protected(world, p)
-            })
-            .find_map(|&m| dislike(world, m).map(|w| (m, w)));
+            .copied()
+            .filter(|m| !fought.contains(m))
+            .filter(|&m| !crate::systems::ages::is_protected(world, m) && !crate::systems::ages::is_protected(world, p))
+            .filter_map(|m| dislike(world, m).map(|w| (m, w)))
+            .collect();
+        let pick = (!disliked.is_empty()).then(|| {
+            let i = ((roll(world, 5) * disliked.len() as f32) as usize).min(disliked.len() - 1);
+            disliked[i]
+        });
         if let Some((m, why)) = pick {
+            fought.insert(p);
+            fought.insert(m);
             let mods = crate::systems::law::FightMods { kill_mult: c.cell_kill_mult, ..Default::default() };
             let (winner, loser, died) = crate::systems::law::resolve_fight_mods(world, p, m, mods);
             if died && loser == p {
@@ -1091,12 +1354,13 @@ fn cell_day(world: &mut World, c: &ConsequenceCfg, jail: EntityId, p: EntityId, 
                 crate::systems::grudges::add(world, loser, winner, GrudgeCause::Assaulted, 0.4, 0);
             }
             let end = if died { format!(", {} died", world.name_of(loser)) } else { String::new() };
-            let text = format!(
-                "{pn} went for {} in the cells of {} ({why}); {} won{end}",
-                world.name_of(m),
-                world.name_of(jail),
-                world.name_of(winner)
-            );
+            let place = if c.cell_yard_hour < 24 {
+                yard_of(world, jail)
+            } else {
+                format!("the cells of {}", world.name_of(jail))
+            };
+            let text =
+                format!("{pn} went for {} in {place} ({why}); {} won{end}", world.name_of(m), world.name_of(winner));
             world.push_event(EventKind::Cells, &[p, m, jail], text);
             // Round 8 X1 (`OPEN-246`): a crime in the cells, through the
             // crime path (the cellmates and the guards inside see it; the

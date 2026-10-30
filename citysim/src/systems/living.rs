@@ -38,6 +38,8 @@ pub fn run(world: &mut World) {
     crate::prof::timed!("living::household::hourly", crate::systems::household::hourly(world));
     // The pressure pass phase 5a: a body arrived at its service or its blackmail.
     crate::prof::timed!("living::consequence::arrivals", crate::systems::consequence::arrivals(world));
+    // Round 8 X6 (OPEN-217): the cells' yard at its hour.
+    crate::prof::timed!("living::consequence::hourly", crate::systems::consequence::hourly(world));
     // Jobs & lives phase 5: an episode under a chip ends the contract
     // (nothing with `[vice] chip` off).
     crate::prof::timed!("living::dollhouse::hourly", crate::systems::dollhouse::hourly(world));

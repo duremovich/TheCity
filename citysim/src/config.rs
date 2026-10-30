@@ -2081,6 +2081,14 @@ pub struct ConsequenceCfg {
     pub cell_loan_broke: i64,
     /// At most this many cell events a jail a day.
     pub cell_events_max: u16,
+    /// Round 8 X6 (`OPEN-217`): the cells' day. At this hour the prisoners
+    /// walk the yard: the day's one thing (a fight, an offer, a name, a
+    /// loan) happens there, else he walks with the cellmate he likes best
+    /// (their affinity up by `cell_yard_affinity`) or keeps to himself, a
+    /// line either way; a cellmate in a fight is in no second one that day.
+    /// 24 or more: the midnight pass, no yard line (as before).
+    pub cell_yard_hour: u8,
+    pub cell_yard_affinity: f32,
     /// The service: a creed's place (a cult's or the Purists' chapel, a church's Mission)
     /// holds one a week, its day and hour hashed on the place within `svc_hour_from..to`;
     /// the congregation is called `svc_lead_hours` before (a `Visit`), at most `svc_cap`.
@@ -2153,6 +2161,8 @@ impl Default for ConsequenceCfg {
             cell_loan_coins: 10,
             cell_loan_broke: 5,
             cell_events_max: 20,
+            cell_yard_hour: 24,
+            cell_yard_affinity: 0.02,
             svc_hour_from: 18,
             svc_hour_to: 21,
             svc_lead_hours: 1,
@@ -2436,6 +2446,10 @@ pub struct JusticeCfg {
     /// was never served).
     pub door_from_hour: u8,
     pub door_to_hour: u8,
+    /// Round 8 X6 (`OPEN-217`): the cells' meal is served at this hour (the
+    /// jailer's count, a line a prisoner); 0: at midnight with the hold's
+    /// rest (as before).
+    pub meal_hour: u8,
 }
 
 impl Default for JusticeCfg {
@@ -2449,6 +2463,7 @@ impl Default for JusticeCfg {
             chase_overtime_hours: 2,
             door_from_hour: 22,
             door_to_hour: 6,
+            meal_hour: 0,
         }
     }
 }
@@ -2577,6 +2592,11 @@ pub struct CareCfg {
     pub book_slack_ticks: u64,
     /// ... weighing this many staffed Clinics nearest his Home (by tiles).
     pub book_cands: usize,
+    /// Round 8 X6 (`OPEN-217`): a walk-in patch-up goes to the Clinic open
+    /// for it with the fewest patients today (seen and booked) per doctor
+    /// among the `book_cands` nearest within this many ticks of travel more
+    /// than the nearest (the nearest on ties); 0: the nearest with room.
+    pub walk_slack_ticks: u64,
 }
 
 /// Pressure pass round 2, R6a `[trade_verbs]` (docs/PRESSURE_PASS.md §
@@ -2681,6 +2701,7 @@ impl Default for CareCfg {
             install_cut: 0.0,
             book_slack_ticks: 0,
             book_cands: 6,
+            walk_slack_ticks: 0,
         }
     }
 }
@@ -3006,6 +3027,11 @@ pub struct HouseholdCfg {
     pub visit_hour_to: u8,
     pub visit_flat: f32,
     pub visit_belonging: f32,
+    /// Round 8 X6 (`OPEN-217`): a kin or spouse in the cells unmet this
+    /// many days is visited there (a `Hurt` visit to the Precinct or the
+    /// Station: the day's one visit, one visitor a prisoner a day); 0 off
+    /// (the default is the shipped value: `is_default` reads an off section).
+    pub cell_visit_days: u8,
     /// § 3.5 (review fix 8, doctrine 3): the Visit goal's reason by purpose
     /// and its curve. Left out of a save at its defaults (the shipped values).
     #[serde(default, skip_serializing_if = "VisitUrgencyCfg::is_default")]
@@ -3062,6 +3088,7 @@ impl Default for HouseholdCfg {
             night_to: 6,
             abandon_days: 7,
             elder_visit_days: 7,
+            cell_visit_days: 3,
             visit_hour_from: 10,
             visit_hour_to: 20,
             visit_flat: 0.2,

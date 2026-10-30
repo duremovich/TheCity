@@ -653,6 +653,9 @@ pub fn room_at(world: &World, place: EntityId, patient: EntityId) -> bool {
 /// The nearest open alone took every patient, queue or none, and every
 /// Clinic was shut from 21:00 to 09:00 with its orderly on.
 pub fn patch_clinic(world: &World, from: crate::components::TilePos, patient: EntityId) -> Option<EntityId> {
+    if let Some(b) = walk_in_clinic(world, from, patient) {
+        return Some(b);
+    }
     let table = world.near_table(BuildingKind::Clinic);
     if cfg(world).is_some_and(|c| c.clinic_spill) {
         let roomy = table.nearest_passing(from, |b| open_for_patch(world, b) && room_at(world, b, patient));
@@ -661,6 +664,62 @@ pub fn patch_clinic(world: &World, from: crate::components::TilePos, patient: En
         }
     }
     table.nearest_passing(from, |b| open_for_patch(world, b))
+}
+
+/// Round 8 X6 (`OPEN-217`; `[care] walk_slack_ticks`): the walk-in reads
+/// the Clinics near him as the bookings do (`book_clinic`): among the
+/// `book_cands` nearest (by tiles) open for a patch-up within
+/// `walk_slack_ticks` of travel more than the nearest such, those whose
+/// doctor has room this hour first (`clinic_spill`), the fewest patients
+/// today (seen and booked) per doctor on staff (the nearest on ties).
+/// `None` with the key 0 (the nearest with room, as before) or no Clinic
+/// open. V16: 853 of 1,861 doctor-days at 100k saw no patient while the
+/// nearest took every walk-in.
+fn walk_in_clinic(world: &World, from: crate::components::TilePos, patient: EntityId) -> Option<EntityId> {
+    let (slack, take, spill) =
+        cfg(world).map(|c| (c.walk_slack_ticks, c.book_cands, c.clinic_spill)).filter(|&(s, _, _)| s > 0)?;
+    let mut by_tiles: Vec<(u32, EntityId)> = world
+        .buildings_of_kind(BuildingKind::Clinic)
+        .iter()
+        .copied()
+        .filter_map(|b| world.comp::<Building>(b).map(|bd| (bd.door.manhattan(from), b)))
+        .collect();
+    by_tiles.sort_unstable();
+    let cands: Vec<(u64, EntityId)> = by_tiles
+        .into_iter()
+        .filter(|&(_, b)| open_for_patch(world, b))
+        .take(take.max(1))
+        .filter_map(|(_, b)| {
+            let door = world.comp::<Building>(b)?.door;
+            Some((crate::systems::distance::travel(world, from, door), b))
+        })
+        .collect();
+    let near = cands.iter().map(|c| c.0).min()?;
+    let cands: Vec<(u64, EntityId)> = cands.into_iter().filter(|c| c.0 <= near + slack).collect();
+    let roomy: Vec<(u64, EntityId)> =
+        if spill { cands.iter().copied().filter(|&(_, b)| room_at(world, b, patient)).collect() } else { Vec::new() };
+    let pool = if roomy.is_empty() { cands } else { roomy };
+    let docs = |b: EntityId| {
+        world
+            .staff_of(b)
+            .iter()
+            .filter(|&&o| {
+                crate::systems::law::living(world, o)
+                    && !world.has::<crate::components::Sentence>(o)
+                    && world.comp::<Job>(o).is_some_and(|j| j.role == crate::components::Role::Ripperdoc)
+            })
+            .count()
+            .max(1)
+    };
+    let load = |b: EntityId| {
+        world.care.seen.get(&b).copied().unwrap_or(0) as usize
+            + world.care.booked.iter().filter(|x| x.clinic == b).count()
+    };
+    pool.into_iter()
+        .map(|(t, b)| (t, docs(b), load(b), b))
+        // fewest per doctor: load / n compared as load x n' < load' x n
+        .min_by(|x, y| (x.2 * y.1).cmp(&(y.2 * x.1)).then(x.0.cmp(&y.0)).then(x.3.cmp(&y.3)))
+        .map(|x| x.3)
 }
 
 /// The nearest staffed doctor's door to `tile` for a downed body: a Clinic

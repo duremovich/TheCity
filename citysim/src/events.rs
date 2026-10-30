@@ -862,6 +862,10 @@ impl World {
         }
         let event = Event { id, tick: self.tick, kind, actors: SmallVec::from_slice(actors), text };
         record_life(self, &event);
+        // Round 8 X6 (`OPEN-217`): a prisoner named has a line today.
+        if self.config.consequence.is_some() {
+            crate::systems::consequence::note_line(self, actors);
+        }
         // OPEN-140: a move's body, for the midnight's one writer and the walk home.
         if kind == EventKind::Housed {
             crate::systems::life::on_housed(self, actors.first().copied(), actors.get(1).copied());
