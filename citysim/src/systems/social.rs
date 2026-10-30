@@ -416,11 +416,15 @@ pub fn rejected_recently_by(world: &World, id: EntityId) -> smallvec::SmallVec<[
 
 /// Propose: both unmarried, affinity >= 0.6, trust >= 0.5; roll
 /// `rng < 0.5 + 0.5 × affinity`. Returns whether they married.
-/// Both unmarried, affinity >= 0.6, trust >= 0.5.
+/// Both unmarried, affinity >= 0.6, trust >= 0.5. Round 7 W5 (`OPEN-237`):
+/// and neither held in the cells (`sick_65180 d26 21:40`: a groom married
+/// five hours into a three-day term, off screen).
 pub fn propose_allowed(world: &World, proposer: EntityId, target: EntityId) -> bool {
     let (aff, trust) = world.edge(proposer, target).map_or((0.0, 0.0), |e| (e.affinity, e.trust));
     !has_spouse(world, proposer)
         && !has_spouse(world, target)
+        && !world.has::<Sentence>(proposer)
+        && !world.has::<Sentence>(target)
         && aff >= world.config.social.propose_affinity
         && trust >= world.config.social.propose_trust
 }

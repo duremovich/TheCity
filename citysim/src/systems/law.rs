@@ -122,6 +122,8 @@ pub fn crime_salience(crime: Crime) -> f32 {
         // Jobs & lives phase 6.
         Crime::Forgery => 0.4,
         Crime::BlackMarket => 0.5,
+        // Round 7 W5: a parent's break-out of his own child.
+        Crime::CampEscape => 0.5,
     }
 }
 
@@ -292,7 +294,9 @@ fn raise_crime_core(
         | Crime::Trafficking
         // Jobs & lives phase 6: filed at an arrest or a raid.
         | Crime::Forgery
-        | Crime::BlackMarket => {}
+        | Crime::BlackMarket
+        // Round 7 W5: a parent's break-out leaves the fight's litter only.
+        | Crime::CampEscape => {}
         Crime::Abduction => crate::systems::litter::deposit_near(world, tile, actor_building, 12, 1),
     }
 
@@ -336,6 +340,10 @@ fn raise_crime_core(
         .filter(|&w| !accomplice(world, w, actor))
         // M14 V12: a body jacked in sees nothing.
         .filter(|w| world.runner_of.is_empty() || !world.runner_of.contains_key(w))
+        // Round 7 W5 (`OPEN-237`): nor does a sleeper (`ceo_16592 d21 01:03`,
+        // 20k: "saw Hale Tanaka commit Shakedown" asleep in the block he shook
+        // down, W2's sleeper who finds the purse short on waking).
+        .filter(|&w| !crate::systems::presence::asleep(world, w))
         .filter(|&w| {
             // M13 D32: a witness with Eyes sees `Kit.sight` tiles further.
             let reach = r + world.comp::<Kit>(w).map_or(0, |k| u32::from(k.sight));
@@ -418,11 +426,15 @@ fn raise_crime_core(
         if let Some(n) = world.comp_mut::<Needs>(w) {
             n.safety = (n.safety - 0.2).max(0.0);
         }
-        world.push_event(
-            EventKind::Witness,
-            &[w, actor],
-            format!("{} saw {} commit {}", world.name_of(w), world.name_of(actor), crime.label()),
-        );
+        // Round 7 W5 (`OPEN-237`): a sale's witness at a stand in progress
+        // is the stand's one line at its end (`stims::stand_seen`).
+        if !(crime == Crime::Dealing && crate::systems::stims::stand_seen(world, actor, w)) {
+            world.push_event(
+                EventKind::Witness,
+                &[w, actor],
+                format!("{} saw {} commit {}", world.name_of(w), world.name_of(actor), crime.label()),
+            );
+        }
         // M16a (plan C31): a guard on the take keeps the memory, files nothing.
         // Pressure pass F2: nor does one off shift for a petty offence (a
         // commuting guard filed 113 fare dodges from his train seat and the
@@ -490,7 +502,8 @@ fn raise_crime_core(
             | Crime::Smuggling
             | Crime::Solicitation
             | Crime::Forgery
-            | Crime::BlackMarket => MemoryKind::WasRobbed,
+            | Crime::BlackMarket
+            | Crime::CampEscape => MemoryKind::WasRobbed,
         };
         world.remember(v, kind, Some(actor), 0.6, -0.6, false);
         crate::systems::social::robbed_by(world, v, actor);
@@ -1339,6 +1352,8 @@ pub fn sentence_ticks(world: &World, crime: Crime) -> Tick {
         // Jobs & lives phase 3 (§ 4).
         Crime::ArmsDealing => ext.arms_dealing,
         Crime::Smuggling => ext.smuggling,
+        // Pressure pass round 7, W5 (`OPEN-237`).
+        Crime::CampEscape => ext.camp_escape,
         _ => world.config.crime.sentence_days[crime as usize],
     } as f32;
     let days = (base * world.levers.sentence_mult).ceil().max(1.0) as u64;

@@ -606,6 +606,9 @@ pub fn on_abort(world: &mut World, id: EntityId, kind: ActionKind, started: Tick
         }
         // M13 D38: a dealer who leaves the Bar is no longer dealing there.
         ActionKind::Deal => crate::systems::stims::end_deal(world, id),
+        // Round 7 W5 (`OPEN-237`): a dancer's set cut short is still a set
+        // (its tally closed, never carried into the next).
+        ActionKind::ClerkWork => crate::systems::vice::set_done(world, id, started),
         // Hunger as sickness § 4: the bin is let go.
         ActionKind::DumpsterDive => {
             let b = world.comp::<Brain>(id).and_then(|b| b.current_step()).and_then(|s| s.target);

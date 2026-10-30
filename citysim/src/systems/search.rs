@@ -277,6 +277,12 @@ pub fn hourly(world: &mut World) {
     };
     for id in bodies {
         let Some(from) = from_of(world, id) else { continue };
+        // Round 7 W5 (`OPEN-237`): a sleeper asks nobody and is given no
+        // door; his day starts with the first hour he is up (`jobless_6217
+        // d24 07:00`: told of a post eight minutes into a six-hour sleep).
+        if crate::systems::presence::asleep(world, id) {
+            continue;
+        }
         let asked = today_of(world, id).is_some_and(|s| s.asked);
         if !asked {
             let full = crowded(world, &heading);
@@ -446,6 +452,12 @@ pub fn on_ask(world: &mut World, id: EntityId) {
             ownership::jobs2_row(world).search_hires += 1;
         }
         None => {
+            let why = if world.vacancies.contains_key(&b) { "turned away" } else { "the post was gone" };
+            // Round 7 W5 (`OPEN-237`): a told lead's door that is also a
+            // board says what came of the lead before the board (`jobless_6217
+            // d24`: told of a Clerk post at a Market, she read its board as if
+            // nobody had told her of anything).
+            let lead_said = if lead.is_some() { format!("{told}: {why}; ") } else { String::new() };
             let c = cfg(world).cloned();
             if let Some(c) = c.filter(|c| is_board(world, c, b)) {
                 // The hiring board: the nearest open post he can take within
@@ -455,20 +467,31 @@ pub fn on_ask(world: &mut World, id: EntityId) {
                 let mut skip = today_of(world, id).map(|s| s.tried.clone()).unwrap_or_default();
                 skip.extend(crowded_doors(world, &c));
                 let next = nearest_door(world, id, from, c.lead_ticks, &skip, None).map(|(_, n)| n);
-                let text = match next {
-                    Some(n) => {
+                let text = match (next, lead_said.is_empty()) {
+                    (Some(n), true) => {
                         let role = open_role(world, id, n).map_or("a", |r| r.label());
                         format!("{name} read the board at {place}: a {role} post at {}", world.name_of(n))
                     }
-                    None => format!("{name} read the board at {place}: nothing going"),
+                    (None, true) => format!("{name} read the board at {place}: nothing going"),
+                    (Some(n), false) => {
+                        let role = open_role(world, id, n).map_or("a", |r| r.label());
+                        format!(
+                            "{name} asked at {place} about work{lead_said}the board there: a {role} post at {}",
+                            world.name_of(n)
+                        )
+                    }
+                    (None, false) => {
+                        format!("{name} asked at {place} about work{lead_said}the board there: nothing going")
+                    }
                 };
                 if let Some(s) = today_mut(world, id) {
                     s.board = next;
                 }
-                world.push_event(EventKind::JobSearch, &[id, b], text);
+                let mut actors = vec![id, b];
+                actors.extend(lead);
+                world.push_event(EventKind::JobSearch, &actors, text);
                 return;
             }
-            let why = if world.vacancies.contains_key(&b) { "turned away" } else { "the post was gone" };
             world.push_event(
                 EventKind::JobSearch,
                 &[id, b],

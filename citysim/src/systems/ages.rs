@@ -330,6 +330,8 @@ pub fn teacher_idle(world: &World, job: &Job, shift_key: i64) -> bool {
 struct Pick {
     school: Option<EntityId>,
     miss: Option<SchoolMiss>,
+    /// Round 7 W5: a `Purse` miss's coins in hand and kept back.
+    purse: Option<(i64, i64)>,
 }
 
 fn pick_school(
@@ -343,7 +345,12 @@ fn pick_school(
     let fee = if world.levers.public_school { 0 } else { cfg.school_fee };
     let el_fare = world.config.transit.fare * cfg.school_el_fares;
     let purse = head.map_or(0, |p| crate::systems::leisure::spendable(world, p));
-    let mut miss = Pick { school: None, miss: Some(if cands.is_empty() { SchoolMiss::Far } else { SchoolMiss::Full }) };
+    let held = head.map_or(0, |p| world.comp::<crate::components::Wallet>(p).map_or(0, |w| w.coins.max(0)));
+    let mut miss = Pick {
+        school: None,
+        miss: Some(if cands.is_empty() { SchoolMiss::Far } else { SchoolMiss::Full }),
+        purse: None,
+    };
     for &(_, el, s) in cands {
         let cap = *caps.entry(s).or_insert_with(|| roll_cap(world, s));
         let on_roll = rolls.get(&s).copied().unwrap_or(0);
@@ -356,7 +363,8 @@ fn pick_school(
         let cost = fee + if el { el_fare } else { 0 };
         if cost > 0 && (head.is_none() || purse < cost) {
             if miss.miss != Some(SchoolMiss::Purse) {
-                miss = Pick { school: Some(s), miss: Some(SchoolMiss::Purse) };
+                let kept = (held - purse).clamp(0, held);
+                miss = Pick { school: Some(s), miss: Some(SchoolMiss::Purse), purse: Some((held, kept)) };
             }
             continue;
         }
@@ -372,7 +380,7 @@ fn pick_school(
             ownership::jobs2_row(world).school_fees += moved;
         }
         *rolls.entry(s).or_insert(0) += 1;
-        return Pick { school: Some(s), miss: None };
+        return Pick { school: Some(s), miss: None, purse: None };
     }
     miss
 }
@@ -507,7 +515,7 @@ fn children(world: &mut World) {
         }
         let home = world.comp::<Household>(k).and_then(|h| h.home);
         let in_camp = home.is_some_and(|h| world.comp::<Building>(h).is_some_and(|b| b.kind == BuildingKind::Camp));
-        let mut pick = Pick { school: None, miss: None };
+        let mut pick = Pick { school: None, miss: None, purse: None };
         let routine = if in_camp {
             Routine::Camp
         } else if let Some(h) = home {
@@ -549,6 +557,7 @@ fn children(world: &mut World) {
             c.routine = routine;
             c.school = pick.school;
             c.school_miss = pick.miss;
+            c.school_purse = pick.purse;
             if routine == Routine::School {
                 c.edu_days = c.edu_days.saturating_add(1);
             }

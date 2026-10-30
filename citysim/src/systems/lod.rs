@@ -1203,13 +1203,18 @@ pub fn stat_hit(world: &mut World, id: EntityId, kind: HoleKind, src: Option<&cr
 /// sociability`, rolled on the agent's stream.
 fn stat_flirt(world: &mut World, id: EntityId) {
     use crate::systems::{demography, social};
-    if !demography::is_adult(world, id) || social::has_spouse(world, id) {
+    // Round 7 W5 (`OPEN-237`): nobody courts from a cell, or one in it.
+    let held = |w: &World, o: EntityId| w.has::<crate::components::Sentence>(o);
+    if !demography::is_adult(world, id) || social::has_spouse(world, id) || held(world, id) {
         return;
     }
     // The same candidate rule `calibrate` conditions `p_flirt` on.
     let Some(partner) = social::known_candidate(world, id, 0.3).filter(|&o| demography::is_adult(world, o)) else {
         return;
     };
+    if held(world, partner) {
+        return;
+    }
     if social::propose_allowed(world, id, partner) {
         social::propose(world, id, partner);
         return;

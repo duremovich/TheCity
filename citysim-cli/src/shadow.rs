@@ -737,10 +737,20 @@ fn school_why(world: &World, c: EntityId, now: u64) -> String {
             let fee = if world.levers.public_school { 0 } else { cfg.school_fee };
             let fares = if el == Some(true) { world.config.transit.fare * cfg.school_el_fares } else { 0 };
             let at = s.map_or("School".to_string(), |s| nm(world, s));
+            // Round 7 W5 (`OPEN-237`): the purse the midnight pick read
+            // (`school_parent_48165 d22 09:30`: "beyond the purse" with the
+            // morning's 10c in it; at midnight 4c, the rent's week kept).
+            let purse = match k.school_purse {
+                Some((held, kept)) if kept > 0 => {
+                    format!("the purse at midnight ({held}c in hand, {kept}c of it kept for the rent and meals)")
+                }
+                Some((held, _)) => format!("the purse at midnight ({held}c in hand)"),
+                None => "the purse".to_string(),
+            };
             match (fee, fares) {
-                (_, 0) => format!(": the {fee}c fee at {at} is beyond the purse"),
-                (0, f) => format!(": the El's {f}c of fares to {at} are beyond the purse"),
-                (fee, f) => format!(": the {fee}c fee and the El's {f}c of fares to {at} are beyond the purse"),
+                (_, 0) => format!(": the {fee}c fee at {at} was beyond {purse}"),
+                (0, f) => format!(": the El's {f}c of fares to {at} were beyond {purse}"),
+                (fee, f) => format!(": the {fee}c fee and the El's {f}c of fares to {at} were beyond {purse}"),
             }
         }
         (_, None) => {

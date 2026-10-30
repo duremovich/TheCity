@@ -228,11 +228,22 @@ pub fn night_room(world: &mut World, b: EntityId) {
         })
         .collect();
     for s in on {
+        let set = on_set(world, s);
         night_note(world, s, b, |n| {
             n.room += 1;
-            n.set_room += 1;
+            n.set_room += u32::from(set);
         });
     }
+}
+
+/// Round 7 W5 (`OPEN-237`): `id` is on the stage now (a stations block,
+/// `ClerkWork`, in progress): a set's room and tips are those taken in it,
+/// not the rest before it (`dancer_17424 d23 18:00`, 20k: the client barred
+/// at 18:00, during her rest before the set, was a tipper "at" the 18:05 set).
+fn on_set(world: &World, id: EntityId) -> bool {
+    world
+        .comp::<Brain>(id)
+        .is_some_and(|b| matches!(b.exec, crate::exec::ExecState::Use { kind: crate::goap::ActionKind::ClerkWork, .. }))
 }
 
 /// Round 4 T4 (`service::encounter_row`): `server` served `served` at `b`
@@ -258,9 +269,13 @@ pub fn night_tip(world: &mut World, worker: EntityId, from: EntityId, b: EntityI
     if paid <= 0 || world.config.verbs.is_none() || !night_body(world, worker, b) {
         return;
     }
+    let set = on_set(world, worker);
     night_note(world, worker, b, |n| {
         n.tips += 1;
         n.coins += paid;
+        if !set {
+            return;
+        }
         n.set_tips += 1;
         n.set_coins += paid;
         if n.set_faces.len() < NIGHT_FACES && !n.set_faces.contains(&from) {
@@ -290,14 +305,26 @@ pub fn named(world: &World, ids: &[EntityId], more: usize) -> String {
 /// Round 4 T4 (`exec::actions`, a stations block's end): a body of `[verbs]
 /// set_rows` (the dancer) closed a block begun at `started` at her venue:
 /// a set on the stage, one line (the room, the tips, the tippers), the set
-/// folded into the night.
+/// folded into the night. Round 7 W5 (`OPEN-237`): also a block cut short
+/// (`exec::actions::on_abort`); a block that is no set here clears the set's
+/// tally, so it never carries into the next set (`dancer_74279 d21 20:32`: the
+/// rough client barred at 20:32 tipped "at" the 23:31 set, his tip from the set
+/// the Flee cut).
 pub fn set_done(world: &mut World, id: EntityId, started: crate::time::Tick) {
     let Some(b) = world.comp::<Job>(id).and_then(|j| j.employer) else { return };
-    if world.config.verbs.is_none()
-        || !night_body(world, id, b)
+    if world.config.verbs.is_none() {
+        return;
+    }
+    if !night_body(world, id, b)
         || !crate::systems::service::night_row(world, id, true)
         || world.comp::<Position>(id).is_none_or(|p| p.building != Some(b))
     {
+        if let Some(s) = world.jobs2.vice.serve_nights.get_mut(&key(id)) {
+            s.set_room = 0;
+            s.set_tips = 0;
+            s.set_coins = 0;
+            s.set_faces.clear();
+        }
         return;
     }
     let mins = world.tick.saturating_sub(started);

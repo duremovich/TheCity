@@ -1349,6 +1349,11 @@ fn corner_tile(world: &World, k: u32) -> TilePos {
     world.turf.cells.get(&k).and_then(|x| x.corner).unwrap_or_else(|| centre(world, k))
 }
 
+/// Round 7 W5: [`corner_name`] of the cell holding `t` (`None` off).
+pub fn corner_name_at(world: &World, t: TilePos) -> Option<String> {
+    cell_of(world, t).map(|k| corner_name(world, k))
+}
+
 /// "the corner by Bar#12" (else "the corner of the blocks near ...").
 fn corner_name(world: &World, k: u32) -> String {
     match world.turf.cells.get(&k).and_then(|x| x.landmark) {

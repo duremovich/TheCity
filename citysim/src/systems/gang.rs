@@ -1205,6 +1205,7 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
     // Round 7 W2 (`OPEN-238`): a payer asleep through it learns it when he
     // wakes (`consequence::woke`): no memory, edge or sighting now.
     let mut paid = Vec::new();
+    let mut awake: Vec<(EntityId, i64, bool)> = Vec::new();
     for (i, &o) in occupants.iter().enumerate() {
         let lost = held[i] - world.comp::<Wallet>(o).map_or(held[i], |w| w.coins);
         if lost <= 0 {
@@ -1214,9 +1215,12 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
             crate::systems::consequence::slept_through(world, o, actor, lost);
             continue;
         }
+        // Round 7 W5: robbed by him before inside the week (the line's "again").
+        let again = crate::systems::consequence::robbed_by_within(world, o, actor);
         world.remember(o, MemoryKind::WasRobbed, Some(actor), 0.7, -0.7, false);
         social::robbed_by(world, o, actor);
         paid.push(o);
+        awake.push((o, lost, again));
     }
     let today = world.day();
     if let Some(b) = world.comp_mut::<Brain>(actor) {
@@ -1258,6 +1262,12 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
     // Round 5 U7 (`OPEN-237`): the payers are the deed's parties, not its
     // witnesses (they know who did it all the same).
     law::raise_crime_parties(world, actor, None, None, crate::components::Crime::Extortion, tile, &paid);
+    // Round 7 W5 (`OPEN-237`): the payer awake says what he does about it,
+    // as W2's woken sleeper does (`ceo_20314 d23 08:26`, `d27 10:59`: robbed at
+    // home twice by one man, and no line but the money's).
+    for (o, lost, again) in awake {
+        crate::systems::consequence::paid_awake(world, o, actor, home, lost, again);
+    }
     crate::systems::fviolence::note_act(world, actor, crate::ledger::ActKind::Extort);
     taken
 }
