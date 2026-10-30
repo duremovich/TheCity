@@ -237,6 +237,17 @@ pub fn muster_point(world: &World, agent: EntityId) -> Option<MusterAt> {
             world.comp::<Building>(r.muster).map(|b| MusterAt::Door(world.outside_door(b)))
         }
         Expedition::Gang(gid) => {
+            // Round 8 X4 (`OPEN-241`): the place chosen when the raid was
+            // ordered, while it stands.
+            if let Some(b) = world.comp::<Gang>(gid).and_then(|g| g.raid_muster) {
+                if let Some(bd) = world.comp::<Building>(b).filter(|bd| !bd.demolished) {
+                    return Some(if world.hideout_of(gid) == Some(b) {
+                        MusterAt::Inside(b)
+                    } else {
+                        MusterAt::Door(world.outside_door(bd))
+                    });
+                }
+            }
             let hideout = world.hideout_of(gid);
             let near = world.config.gangs.muster_near_tiles;
             if near > 0 {
@@ -264,6 +275,75 @@ pub fn muster_point(world: &World, agent: EntityId) -> Option<MusterAt> {
         // M16a (plan C22): outside the mission's muster.
         Expedition::Mission(id) => world.missions.get(&id).map(|m| MusterAt::Door(m.muster)),
     }
+}
+
+/// Round 8 X4 (`OPEN-241`): where gang `gid`'s raid ordered now musters.
+/// Of its held Homes within `muster_near_tiles` of the target's door (the
+/// `[gangs] muster_candidates` nearest it) and its Hideout (when within it
+/// too, or with no such Home), the place the
+/// most of its fit adults can reach from home within `[crew]
+/// duty_reach_ticks` (each one's own trip, `raid::muster_trip`'s), ties to
+/// the nearer the door. V16 (100k): the muster was the held Home nearest the
+/// target whoever lived near it, and the members sat it out "3 h 08 from
+/// home" (`gang_leader_61823 d26 00:07`). `None` with `[crew]` or the
+/// candidates off (the old rule). With the pick: its members within reach,
+/// and those within reach of the old rule's place (the counters).
+pub fn pick_muster(world: &World, gid: EntityId) -> Option<(EntityId, usize, usize)> {
+    let reach = crate::systems::crew::cfg(world)?.duty_reach_ticks;
+    let n = world.config.gangs.muster_candidates;
+    let near = world.config.gangs.muster_near_tiles;
+    if n == 0 {
+        return None;
+    }
+    let g = world.comp::<Gang>(gid)?;
+    let t = gang_target(world, gid).and_then(|b| world.comp::<Building>(b)).map(|b| b.door)?;
+    // The old rule's place (the held Home nearest the door within
+    // `muster_near_tiles` or nearer than the Hideout, else the Hideout).
+    let hideout_at =
+        world.hideout_of(gid).and_then(|h| world.comp::<Building>(h).map(|b| (b.door.manhattan(t), b.door)));
+    let old = g
+        .territory
+        .iter()
+        .filter_map(|&h| world.comp::<Building>(h).filter(|b| !b.demolished).map(|b| (b.door.manhattan(t), h, b.door)))
+        .min_by_key(|&(d, h, _)| (d, h))
+        .filter(|&(d, _, _)| d <= near || hideout_at.is_some_and(|x| d < x.0))
+        .map(|x| x.2)
+        .or(hideout_at.map(|x| x.1));
+    let mut cands: Vec<(u32, EntityId, TilePos)> = g
+        .territory
+        .iter()
+        .filter_map(|&h| world.comp::<Building>(h).filter(|b| !b.demolished).map(|b| (b.door.manhattan(t), h, b.door)))
+        .filter(|&(d, _, _)| d <= near)
+        .collect();
+    cands.sort_unstable_by_key(|&(d, h, _)| (d, h));
+    cands.truncate(n);
+    // The Hideout, within `muster_near_tiles` of the door or with no held
+    // Home there (the march from it must make the door in its window).
+    if let Some(h) = world.hideout_of(gid) {
+        let at = world.comp::<Building>(h).map(|b| (b.door.manhattan(t), h, b.door));
+        cands.extend(at.filter(|&(d, _, _)| d <= near || cands.is_empty()));
+    }
+    // The fit adults' Home doors (a minor never marches: the under-18 rule).
+    let homes: Vec<(EntityId, TilePos)> = g
+        .members
+        .iter()
+        .copied()
+        .filter(|&m| {
+            law::living(world, m)
+                && world.has::<Brain>(m)
+                && !world.has::<Sentence>(m)
+                && !crate::systems::ages::is_protected(world, m)
+        })
+        .filter_map(|m| crate::systems::contracts::home_door(world, m).map(|d| (m, d)))
+        .collect();
+    let within = |door: TilePos| {
+        homes.iter().filter(|&&(m, from)| crate::systems::distance::trip_ahead(world, m, from, door) <= reach).count()
+    };
+    let (n_pick, _, pick) = cands
+        .into_iter()
+        .map(|(d, h, door)| (within(door), d, h))
+        .max_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)).then(b.2.cmp(&a.2)))?;
+    Some((pick, n_pick, old.map_or(0, within)))
 }
 
 /// Pressure pass round 3, S1 (OPEN-221): the trip from where `agent` sets
@@ -369,6 +449,7 @@ pub fn depart(world: &mut World, agent: EntityId) -> bool {
     // M14 V37: the stream (and the V32 door-then-departure log).
     if first {
         crate::systems::virt::on_raid_departed(world, gid);
+        crate::systems::ownership::jobs2_row(world).raid_departed += 1;
     }
     // Jobs & lives phase 3 (section 4): the member draws from the armoury.
     crate::systems::weapons::issue(world, agent);
@@ -402,6 +483,7 @@ pub fn resolve(world: &mut World, actor: EntityId) -> Option<Outcome> {
         let door = gang_target(world, gid).and_then(|b| world.comp::<Building>(b)).map(|b| b.door);
         let present = door.map_or(0, |d| raiders_at(world, gid, actor, d).len());
         if present < min {
+            crate::systems::ownership::jobs2_row(world).raid_at_target += 1;
             let gname = world.comp::<Gang>(gid).map_or_else(String::new, |g| g.name.clone());
             if let Some(g) = world.comp_mut::<Gang>(gid) {
                 g.raid_at = None;
@@ -436,6 +518,7 @@ pub fn resolve(world: &mut World, actor: EntityId) -> Option<Outcome> {
         let row = crate::systems::ownership::jobs2_row(world);
         row.raid_marchers += marching as u32;
         row.raid_at_door += present.len() as u32;
+        row.raid_at_target += 1;
     }
     let head = if raiding && crate::systems::careers::lieutenants_on(world) {
         let door = gang_target(world, gid).and_then(|b| world.comp::<Building>(b)).map(|b| b.door);

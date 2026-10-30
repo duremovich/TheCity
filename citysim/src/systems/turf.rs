@@ -220,6 +220,10 @@ pub struct State {
     /// V5: a corner fight resolving (its blows provoke nothing).
     #[serde(skip)]
     pub fighting: bool,
+    /// Round 8 X4: member -> the due tick of the fight he was roused for
+    /// (once a fight).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub roused: BTreeMap<EntityId, Tick>,
 }
 
 impl State {
@@ -1437,10 +1441,18 @@ fn muster_fight(world: &World, id: EntityId) -> Option<(TilePos, Tick)> {
 pub fn muster_wait(world: &World, id: EntityId) -> Option<Tick> {
     let (t, due) = muster_fight(world, id)?;
     let reach = war_cfg(world)?.muster_reach_tiles;
+    // Round 8 X4 (`OPEN-241`): the wait runs to the latest the fight is held
+    // for the called on their way (`waits_for_called`, `[crew]
+    // march_wait_ticks` past its hour); once it is fought `muster_wait` is
+    // None and the empty-spot leave ends the HangOut (20k shadow:
+    // `cultist_12260 d25`, roused at 01:00, on the corner 01:37-03:01 for a
+    // fight due 03:00, held for the late, then Sleep 1.021 over the corner
+    // 1.004 at 03:03 and home before it was fought at 04:00).
+    let end = due + crate::systems::crew::cfg(world).map_or(0, |c| c.march_wait_ticks);
     world
         .comp::<Position>(id)
         .filter(|p| p.building.is_none() && p.tile.manhattan(t) <= reach)
-        .map(|_| due.saturating_sub(world.tick) + 1)
+        .map(|_| end.saturating_sub(world.tick) + 1)
 }
 
 /// Round 7 W2 (`fixes::committed`): a mustered member's corner plan holds
@@ -1778,6 +1790,7 @@ fn war_hourly(world: &mut World, trespass: &[(u32, EntityId, EntityId)], eyes: &
     if world.turf.open.is_empty() {
         return;
     }
+    rouse(world, &w);
     let now = world.tick;
     let due: Vec<u32> = world
         .turf
@@ -1789,6 +1802,72 @@ fn war_hourly(world: &mut World, trespass: &[(u32, EntityId, EntityId)], eyes: &
         .collect();
     for k in due {
         resolve(world, k);
+    }
+}
+
+/// Round 8 X4 (`OPEN-241`): a corner fight due within `rouse_hours` rouses
+/// both sides' called members (`muster_pool`) asleep in or about the cell
+/// (their body within `muster_cells` of it, Full or Coarse), off shift now
+/// and at the fight, above `rouse_min_energy`: the Sleep ends (a wake line)
+/// and the brain, free of it, weighs the corner's muster. Once a fight.
+/// V16 (100k): called bodies at the corner 1,586 of 3,297; W2's diagnosis, a
+/// third asleep (fights at 01:00-05:00 from beatings). The pool is adults
+/// only (`can_fight`: the under-18 rule), and a man inside, cuffed or down is
+/// none of it.
+fn rouse(world: &mut World, w: &WarCfg) {
+    if w.rouse_hours == 0 {
+        return;
+    }
+    let now = world.tick;
+    world.turf.roused.retain(|_, due| *due + TICKS_PER_HOUR > now);
+    let lead = hours(w.rouse_hours);
+    let fights: Vec<(u32, Fight)> = world
+        .turf
+        .open
+        .iter()
+        .filter_map(|&(k, _, _)| world.turf.cells.get(&k).and_then(|x| x.fight).map(|f| (k, f)))
+        .filter(|(_, f)| f.due > now && f.due <= now + lead)
+        .collect();
+    let due_tod = |due: Tick| (due % crate::time::TICKS_PER_DAY) as u16;
+    for (k, f) in fights {
+        let at = corner_name(world, k);
+        for g in [f.side, f.by] {
+            let gn = gname(world, g);
+            for m in muster_pool(world, w, k, g) {
+                if world.turf.roused.contains_key(&m) || !crate::systems::presence::asleep(world, m) {
+                    continue;
+                }
+                let Some(b) = world.comp::<Brain>(m) else { continue };
+                if b.lod == Lod::Statistical {
+                    continue;
+                }
+                if world.comp::<crate::components::Needs>(m).is_none_or(|n| n.energy < w.rouse_min_energy) {
+                    continue;
+                }
+                let tod = world.tick_of_day();
+                if world.comp::<Job>(m).is_some_and(|j| j.on_shift(tod) || j.on_shift(due_tod(f.due))) {
+                    continue;
+                }
+                let near = world
+                    .comp::<Position>(m)
+                    .and_then(|p| cell_of(world, p.tile))
+                    .is_some_and(|c| cell_dist(world, c, k) <= w.muster_cells);
+                if !near {
+                    continue;
+                }
+                world.turf.roused.insert(m, f.due);
+                world.abort_plan(m);
+                // Awake: the next tick's think weighs the call (not the
+                // Sleep he was in, replanned without one).
+                if let Some(b) = world.comp_mut::<Brain>(m) {
+                    b.current_goal = None;
+                    b.last_urgent_think_tick = 0;
+                }
+                crate::systems::ownership::jobs2_row(world).war_roused += 1;
+                let text = format!("{} was woken: {gn} are called to {at} for the fight", world.name_of(m));
+                world.push_event(EventKind::Turf, &[m, g], text);
+            }
+        }
     }
 }
 
@@ -1857,8 +1936,11 @@ fn war_entry(world: &mut World, a: EntityId, b: EntityId, k: u32) {
     actors.extend(leader_of(world, a));
     actors.extend(leader_of(world, b));
     actors.extend(world.turf.cells.get(&k).and_then(|x| x.landmark));
-    actors.extend(hearers(world, a, Some(k)));
-    actors.extend(hearers(world, b, Some(k)));
+    // Round 8 X4 (`OPEN-241`): the war's start reaches all of each side's
+    // adults, as its end does (V16 `cultist_80865`: a member far from the
+    // cell heard only the lie-low line of a war he never heard begin).
+    actors.extend(hearers(world, a, None));
+    actors.extend(hearers(world, b, None));
     war_line(world, actors, text);
 }
 
@@ -1893,13 +1975,16 @@ fn resolve(world: &mut World, k: u32) {
             .into_iter()
             .filter(|&m| world.comp::<Brain>(m).is_some_and(|b| b.lod != Lod::Statistical))
             .collect();
-        let came = called
+        let came: Vec<EntityId> = called
             .iter()
-            .filter(|&&m| world.comp::<Position>(m).is_some_and(|p| p.tile.manhattan(t) <= w.muster_reach_tiles))
-            .count() as u32;
+            .copied()
+            .filter(|&m| world.comp::<Position>(m).is_some_and(|p| p.tile.manhattan(t) <= w.muster_reach_tiles))
+            .collect();
+        let roused = came.iter().filter(|m| world.turf.roused.contains_key(m)).count() as u32;
         let row = crate::systems::ownership::jobs2_row(world);
         row.war_called += called.len() as u32;
-        row.war_came += came;
+        row.war_came += came.len() as u32;
+        row.war_roused_came += roused;
     }
     let mut agg = fighters(world, &w, k, ag, t, na);
     let mut def = fighters(world, &w, k, dg, t, nd);
@@ -1969,6 +2054,25 @@ fn resolve(world: &mut World, k: u32) {
                     x.men[i].remove(&m);
                     x.losses[i].push_back(now);
                 }
+            }
+        }
+    }
+    // Round 8 X4 (`OPEN-241`): the fallen are this war's loss only; his
+    // gang's other wars let him go (his later death or jailing is not a
+    // second loss there).
+    let fallen: Vec<(EntityId, EntityId)> = [(ag, &agg0, &agg), (dg, &def0, &def)]
+        .iter()
+        .flat_map(|(g, before, after)| before.iter().filter(|m| !after.contains(m)).map(move |&m| (*g, m)))
+        .collect();
+    for (other, war) in world.turf.wars.iter_mut() {
+        if *other == key {
+            continue;
+        }
+        for &(g, m) in &fallen {
+            if other.0 == g {
+                war.men[0].remove(&m);
+            } else if other.1 == g {
+                war.men[1].remove(&m);
             }
         }
     }
@@ -2090,21 +2194,35 @@ pub fn crackdown_beat(world: &World, d: DistrictId) -> Option<Vec<EntityId>> {
 }
 
 /// From `gang::on_member_killed`, `on_member_arrested`, `leave`: a war
-/// side's loss (an adult's: a child is never a combatant).
+/// side's loss (an adult's: a child is never a combatant). Round 8 X4
+/// (`OPEN-241`): a man who stood in two of his gang's wars is one loss, to
+/// the war he fought last (V16 `cultist_80865 d26 00:05`: a death in the
+/// war with the Unplugged 4 also counted in the war with the Unplugged 5,
+/// and the lie-low line named the war he did not fall in).
 pub fn note_loss(world: &mut World, gang: EntityId, id: EntityId) {
     if world.turf.wars.is_empty() || crate::systems::ages::is_protected(world, id) {
         return;
     }
     let now = world.tick;
-    for ((a, b), war) in world.turf.wars.iter_mut() {
-        let i = if *a == gang {
-            0
-        } else if *b == gang {
-            1
+    let side = |key: &(EntityId, EntityId)| {
+        if key.0 == gang {
+            Some(0)
+        } else if key.1 == gang {
+            Some(1)
         } else {
-            continue;
-        };
-        if war.men[i].remove(&id) {
+            None
+        }
+    };
+    let last = world
+        .turf
+        .wars
+        .iter()
+        .filter_map(|(key, war)| side(key).filter(|&i| war.men[i].contains(&id)).map(|_| (war.last, *key)))
+        .max()
+        .map(|x| x.1);
+    for (key, war) in world.turf.wars.iter_mut() {
+        let Some(i) = side(key) else { continue };
+        if war.men[i].remove(&id) && Some(*key) == last {
             war.losses[i].push_back(now);
         }
     }
@@ -2158,6 +2276,7 @@ fn war_daily(world: &mut World) {
     }
     world.turf.truces.retain(|_, t| *t > now);
     world.turf.lie_low.retain(|_, t| *t > now);
+    world.turf.roused.retain(|_, due| *due + TICKS_PER_HOUR > now);
     let night = night_of(world);
     world.turf.tagged.retain(|_, n| *n + 1 >= night);
     world.turf.trespass_told.retain(|_, n| *n + 1 >= night);

@@ -486,7 +486,11 @@ use crate::world::World;
 /// 109 (pressure pass round 8, X1, the word to the law and the held who act; renumbered at the merge):
 /// `Corpse.defended`, the `[crime.case] word_hours`, `word_flat`, `word_reach_ticks`, `cell_term_share` keys and the `Jobs2Cols` `word_meant` ...
 /// `cell_cases` columns (serde defaults).
-pub const SAVE_VERSION: u8 = 109;
+/// 110 (pressure pass round 8, X4, gangs; renumber at the merge): `Gang.raid_muster`, `turf::State.roused`,
+/// `Deed::TookOver` (the `took_over` deed keys), the `[gangs] leader_keep_margin`, `muster_candidates`, `[turf.war]
+/// rouse_hours`, `rouse_min_energy` keys and the `Jobs2Cols` `leader_changes` ... `raid_at_target` columns (serde
+/// defaults).
+pub const SAVE_VERSION: u8 = 110;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

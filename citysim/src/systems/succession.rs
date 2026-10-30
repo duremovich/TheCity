@@ -107,6 +107,16 @@ pub fn decide(world: &mut World, gang: EntityId, fallen: EntityId) -> bool {
         .comp::<Sentence>(fallen)
         .is_some_and(|s| s.crime == Crime::Vagrancy || s.until_tick <= now + crate::time::TICKS_PER_DAY)
     {
+        // Round 8 X4 (`OPEN-241`): the stand-in for the night is told (V16:
+        // the war lines named a leader the members never heard of).
+        if heir != fallen {
+            let text = format!(
+                "{} stands in for {} at the head of {gname}: a night in the cells",
+                world.name_of(heir),
+                world.name_of(fallen)
+            );
+            tell(world, gang, heir, fallen, text);
+        }
         return false;
     }
     let dead = !crate::systems::law::living(world, fallen);
@@ -136,8 +146,22 @@ pub fn decide(world: &mut World, gang: EntityId, fallen: EntityId) -> bool {
     } else {
         format!("{hn} runs {gname} while {fnm} sits inside")
     };
-    world.push_event(EventKind::Succession, &[heir, gang, fallen], text);
+    tell(world, gang, heir, fallen, text);
     false
+}
+
+/// Round 8 X4 (`OPEN-241`): a `Succession` line, its members told (adults
+/// only, `gang::members_told`) and the street's word (`gang::tell_street`).
+fn tell(world: &mut World, gang: EntityId, heir: EntityId, fallen: EntityId, text: String) {
+    let mut actors = vec![heir, gang, fallen];
+    for m in gang::members_told(world, gang) {
+        if !actors.contains(&m) {
+            actors.push(m);
+        }
+    }
+    world.push_event(EventKind::Succession, &actors, text);
+    crate::systems::ownership::jobs2_row(world).leader_told += 1;
+    gang::tell_street(world, gang, heir);
 }
 
 /// Open the civil war between `heir` (who holds the chair while it runs)
@@ -344,5 +368,14 @@ fn end(world: &mut World, gang: EntityId, winner: EntityId, loser: EntityId, fat
     // a loser jailed while it still held the chair the gang's jailed boss;
     // the war's recompute knows the claimant lost it (no boss, no split).
     gang::recompute_leader_after_war(world, gang);
-    world.push_event(EventKind::CivilWarEnded, &[winner, loser, gang], text);
+    // Round 8 X4 (`OPEN-241`): the members hear who won the chair.
+    let mut actors = vec![winner, loser, gang];
+    for m in gang::members_told(world, gang) {
+        if !actors.contains(&m) {
+            actors.push(m);
+        }
+    }
+    world.push_event(EventKind::CivilWarEnded, &actors, text);
+    crate::systems::ownership::jobs2_row(world).leader_told += 1;
+    gang::tell_street(world, gang, winner);
 }

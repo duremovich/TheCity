@@ -3310,6 +3310,11 @@ pub struct Gang {
     /// rival Hideout (M8).
     #[serde(default)]
     pub raid_target: Option<EntityId>,
+    /// Pressure pass round 8 X4 (`OPEN-241`): the place the standing raid
+    /// musters at, chosen when it was ordered (`raid::pick_muster`); `None`
+    /// = `raid::muster_point`'s rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raid_muster: Option<EntityId>,
     /// M12 D40: the roster emptied after having members (a dead gang, not a
     /// fresh one); cleared by the next recruit.
     #[serde(default)]
@@ -3437,6 +3442,7 @@ impl Gang {
             governance: Governance::Dictator,
             split_check: None,
             raid_target: None,
+            raid_muster: None,
             emptied: false,
             claims_cleared: false,
             split_from: None,

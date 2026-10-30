@@ -311,8 +311,10 @@ fn muster_reach(world: &mut World, c: &CrewCfg, m: EntityId, gang: EntityId) -> 
     }
     let Some((t, at)) = crate::systems::raid::muster_trip(world, m, true) else { return true };
     if t <= c.duty_reach_ticks {
+        ownership::jobs2_row(world).raid_posted += 1;
         return true;
     }
+    ownership::jobs2_row(world).raid_sat_out += 1;
     let text = format!(
         "{} sat out {}'s raid: the muster at {at} is {} from home",
         world.name_of(m),
@@ -322,6 +324,16 @@ fn muster_reach(world: &mut World, c: &CrewCfg, m: EntityId, gang: EntityId) -> 
     world.push_event(EventKind::Crew, &[m, gang], text);
     ownership::jobs2_row(world).choice_muster_out += 1;
     false
+}
+
+/// Round 8 X4 (`OPEN-241`): the place a gang's raid duty names, its muster
+/// (`raid::pick_muster`) when one was chosen, else the Hideout.
+fn muster_at(world: &World, gang: EntityId, hideout: EntityId) -> EntityId {
+    world
+        .comp::<Gang>(gang)
+        .and_then(|g| g.raid_muster)
+        .filter(|&b| world.comp::<crate::components::Building>(b).is_some_and(|bd| !bd.demolished))
+        .unwrap_or(hideout)
 }
 
 /// The order's watch place for `m`: the nearest to his Home within reach of
@@ -734,7 +746,7 @@ fn post_gang(world: &mut World, c: &CrewCfg, gang: EntityId) {
         }
         for m in std::mem::take(&mut free) {
             if muster_reach(world, c, m, gang) {
-                post(world, c, m, gang, DutyKind::Muster, hideout, hour);
+                post(world, c, m, gang, DutyKind::Muster, muster_at(world, gang, hideout), hour);
             }
         }
     } else {
@@ -798,7 +810,7 @@ pub fn raid_ordered(world: &mut World, gang: EntityId) {
         if !muster_reach(world, &c, m, gang) {
             continue;
         }
-        post(world, &c, m, gang, DutyKind::Muster, hideout, hour);
+        post(world, &c, m, gang, DutyKind::Muster, muster_at(world, gang, hideout), hour);
     }
 }
 

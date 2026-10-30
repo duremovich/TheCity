@@ -1083,7 +1083,8 @@ def jobs2(rows, events, out):
         J["w2_totals"] = {k: sum(col(rows, k)) for k in (
             "war_called", "war_came", "war_member_lines", "raid_marchers", "raid_at_door", "raid_missed",
             "sleeper_paid", "sleeper_found", "sleeper_reports", "sleeper_quiet", "witness_finds", "witness_named",
-            "witness_quiet") if k in rows[0]}
+            "witness_quiet", "leader_changes", "leader_told", "war_roused", "war_roused_came", "raid_posted", "raid_sat_out",
+            "raid_departed", "raid_at_target", "raid_reach_new", "raid_reach_old") if k in rows[0]}
     # Pressure pass round 8, X1 (OPEN-246): the word promised to the law and kept or dropped, the held and the
     # asleep who acted (0 is right), the cells' cases.
     if "word_meant" in rows[0]:
