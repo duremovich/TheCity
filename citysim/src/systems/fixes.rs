@@ -522,7 +522,10 @@ pub fn deal_hours(world: &World) -> bool {
 /// arrive by the muster `arrive_by` (`transit::estimate_by`, the deadline's
 /// trip), not at "now" (`walk_estimate` moves with the timetable).
 pub fn muster_walk(world: &World, gang: EntityId, arrive_by: Tick) -> Tick {
-    let Some(door) = world.hideout_of(gang).and_then(|h| world.comp::<Building>(h)).map(|b| b.door) else {
+    // Round 8 X4 (`OPEN-241`): to the raid's muster (`raid::pick_muster`),
+    // else the Hideout.
+    let at = world.comp::<crate::components::Gang>(gang).and_then(|g| g.raid_muster).or_else(|| world.hideout_of(gang));
+    let Some(door) = at.and_then(|h| world.comp::<Building>(h)).map(|b| b.door) else {
         return 0;
     };
     let far = crate::systems::leisure::members(world, gang)

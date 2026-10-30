@@ -4079,3 +4079,73 @@ added (doctrine 2). `SAVE_VERSION` 106 (renumbered at the merge): `Crime::CampEs
   before it). `SAVE_VERSION` 106 (the orchestrator renumbers at the merge): `Misery.hurt_at`,
   `ViceState.collected`, `care::State.seen`, the W6 keys and the `Jobs2Cols` `door_stat_broke` ... `clinic_idle_days`
   columns (serde defaults).
+### X4, gangs (`OPEN-241`; `turf::note_loss`, `turf::war_entry`, `turf::rouse`, `turf::muster_wait`, `gang::recompute_leader_back`, `gang::told_leader`, `succession::tell`, `raid::pick_muster`, `crew::muster_at`, `fixes::muster_walk`, `Deed::TookOver`, `[gangs] leader_keep_margin`, `muster_candidates`, `[turf.war] rouse_hours`, `rouse_min_energy`)
+
+20k island seed 42 x 30 (`--scaled --ambient-flats 50`), one run each: before = main `527f53b`, after = the branch.
+The new `Jobs2Cols` columns print on `analyze_run.py`'s "the war and the case in the diaries" line.
+
+1. **The lie-low line names a different enemy** (`cultist_80865 d26 00:05`). Two causes. (a) A man who stood in two
+   of his gang's wars was a loss in both: the fight's fallen went to that war's losses, and his later death or jailing
+   (`note_loss`) went to every war whose `men` still held him. The Choir 9's dead of the Unplugged 4 fight spent it in
+   the war with the Unplugged 5, and the lie-low line named that war. Now the fallen leave the gang's other wars' men,
+   and a later loss goes to the one war he fought last (`War.last`). (b) The war's start reached only the members
+   about its cell, so a member far off heard the lie-low line of a war he never heard begin. The start now reaches all
+   of each side's adults, as its end does.
+2. **Leaders change with no Succession line** (`raider_29990`, `scav_99001`). The leader was the ranking's top every
+   recompute (`loyalty + days / 100 + raids + duty standing`), and the duty standing moved daily, so the chair passed
+   back and forth with no line; only a decapitation (`succession::decide`) was told, and to three actors. Now the
+   sitting leader, free in the gang, keeps the chair until a member of a higher tenure class, or one
+   `[gangs] leader_keep_margin` (0.5) ahead on the score, passes him; the boss out of the cells walks back into it.
+   Every change no other line tells is told (`gang::told_leader`: "X pushed Y aside and runs G: the old hands follow
+   him, not a newcomer" / "the members follow her now (1.27 to 0.59)", "X is out of the cells and runs G again (Y stood
+   in for him)", "X took over G after Y left it", "X runs G while Y sits inside"), a night's stand-in too ("X stands in
+   for Y at the head of G: a night in the cells"). The decide, stand-in and civil-war-ended lines carry the gang's
+   adult members, and each change posts a `TookOver` deed (`[gossip]` `took_over` keys) in the Hideout's district.
+3. **No raid lands; the muster ignores who is near** (100k V16 `gang_leader_61823 d26 00:07`, 3 h 08). When a raid
+   is ordered, `raid::pick_muster` weighs the held Homes within `muster_near_tiles` of the target (the
+   `[gangs] muster_candidates` (12) nearest) and the Hideout (when within it too, or with no such Home) and takes the
+   one the most fit adults reach from home within `[crew] duty_reach_ticks` (`Gang.raid_muster`); the muster duty
+   names it (it named the Hideout whatever the muster was) and `fixes::muster_walk` times the farthest walk to it.
+   **Finding:** it moves nothing at 20k. On the same orders the pick reaches 379 members and the old rule 378: the
+   members who sit out live 3 to 9 h from every place their gang holds (31 of the Drowned Choir's for one raid). The
+   march itself lands: raids that left the muster 22, at the target 21; marchers at the door 193 of 207. No 100k run
+   (20k shows raids landing; V16's 16 diaries met none of 317). **The call wakes nobody** (W2's left-open):
+   `turf::rouse`, hourly, a fight due within `[turf.war] rouse_hours` (2) ends the Sleep of both sides' called
+   members (`muster_pool`) asleep in or about the cell, Full or Coarse, off shift now and at the fight, energy over
+   `rouse_min_energy` (0.2), once a fight; the brain then weighs the corner (the goal cleared, an urgent think). A
+   diagnosis run found the woken replanning Sleep untouched (the goal stood) until that, and a roused man on his
+   corner leaving at the fight's hour when it was held for the late (`cultist_12260 d25`: Sleep 1.021 over the corner
+   1.004 at 03:03, the fight at 04:00): `muster_wait` now runs to the hold's end (`[crew] march_wait_ticks` past the
+   hour), the empty-spot leave ending it once fought. The called who are absent at the fight are mostly on shift (a
+   15-day diagnosis: 55 of 92 absent on shift, 19 asleep, the rest elsewhere).
+
+**Numbers** (20k x 30, before -> after): corner turnout (called bodies at the corner) 363 of 838 (43 %) -> 419 of 813
+(52 %), roused 203, of whom 59 stood at the mover's corner; Succession and civil-war-ended lines 50 -> 113 (leader
+changes counted 113, all told); leader switches visible in the war lines 35 (17 after a line naming the gang) -> 33
+(33); raids ordered 29 -> 27, results 17 -> 15, called off at the door 8 -> 6, fizzled 3 -> 2; members sat out 96 ->
+198 (posted 334; one big gang's raids, the reach above unmoved). Moved, not claimed: provocations 1,346 -> 2,060, corner
+fights 59 -> 70, wars 38 -> 43 (bodies roused onto the corners at night trespass more).
+
+**Shadow** (20k, seed 42, d20-27, `target/x4/shadow/`, gang_member x3, gang_leader x3, cultist x2, raider x2, scav x2).
+Reads right: `gang_leader_7455 d23 02:00` "Cass Ravensworth was woken: The Ash Wolves are called to the corner by Street
+Market#4415 for the fight", `04:00` "The Ash Wolves came to the corner by Street Market#4415 (Ysolde Novak and Cass
+Ravensworth): nobody of The Iron Knives' there"; the march to the door, `cultist_7507 d20 23:40` PLAN Raid
+[GoTo(MusterPoint) > Muster > GoTo(RaidTarget) > Brawl], 80 min to the muster, `d21 01:03` 79 min on, `02:22` the
+Brawl held for the column, `04:21` "Raid on the Unplugged 3 Hideout: The Drowned Choir 9 won (16 raiders, 15
+defenders)"; the chair told, `gang_leader_7455 d23 20:27` "Hana Ironside is out of the cells and runs The Ash Wolves
+again (Cass Ravensworth stood in for her)", `gang_leader_9727 d26 02:09` "Katrin Chrome pushed Ada Ironside aside and
+runs The Glass Teeth: the members follow her now (1.27 to 0.59)", every member pick hearing his gang's
+"runs ... while ... sits inside". Reads wrong (the next pass): The Pale Hounds open four wars in three days
+(`raider_22897 d24-26`) and the Choir 9 three in two (the big gang's many wars, unchanged); the Unplugged 10's chair
+passed four times in four days in a first shadow at margin 0.3 (a stand-in, a veteran's push, a stand-in, a push), and "X
+is out of the cells and runs G again" can name a boss jailed before the window, whom the diary never saw go in;
+a woken man too tired goes back to bed (`cultist_12260 d26 02:01`, Sleep 1.075 over the corner 0.994).
+
+**Under 18.** The muster duty is posted to free adults only (`crew::free_for_duty`), `pick_muster` counts no
+protected member, the corner call and the rouse take `muster_pool` (`can_fight`: `ages::is_protected`), the fight
+`fighters` (the same), the war lines `hearers` and the leader lines `gang::members_told` skip a protected member, and
+the war's losses skip one (`note_loss`).
+
+No test (doctrine 2); no probe re-pinned. `SAVE_VERSION` 108 (renumber at the merge): `Gang.raid_muster`,
+`turf::State.roused`, `Deed::TookOver`, the X4 keys and the `Jobs2Cols` `leader_changes` ... `raid_reach_old` columns
+(serde defaults).

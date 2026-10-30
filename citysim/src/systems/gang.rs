@@ -550,15 +550,43 @@ pub fn recompute_leader_after_war(world: &mut World, gang: EntityId) {
 }
 
 fn recompute_leader_inner(world: &mut World, gang: EntityId, fallen: Option<EntityId>, war_lost: bool) {
+    recompute_leader_back(world, gang, fallen, war_lost, None);
+}
+
+/// [`recompute_leader_inner`], `back` the boss just out of the cells (he
+/// walks back into the chair).
+fn recompute_leader_back(
+    world: &mut World,
+    gang: EntityId,
+    fallen: Option<EntityId>,
+    war_lost: bool,
+    back: Option<EntityId>,
+) {
     let Some(g) = world.comp::<Gang>(gang) else { return };
-    let (members, old, crowned) = (g.members.clone(), g.leader, g.crowned);
-    let ranking = leader_ranking(world, gang);
+    let (members, old, crowned, at_war) = (g.members.clone(), g.leader, g.crowned, g.war.is_some());
+    let scores = leader_scores(world, gang);
+    let ranking: Vec<EntityId> = scores.iter().map(|x| x.0).collect();
     // The war's heir, then its winner (or a splinter's founder), leads while
     // a free member. M17 review: the crown stays while its holder lives in
     // the gang (a night in the cells leaves an acting leader, not a new king).
     let kept = crowned.filter(|&c| crate::systems::law::living(world, c) && world.gang_of(c) == Some(gang));
     let crowned = kept.filter(|c| ranking.contains(c));
-    let leader = crowned.or_else(|| ranking.first().copied());
+    // Round 8 X4 (`OPEN-241`): the boss out of the cells walks back into the
+    // chair; the sitting leader, free in the gang, keeps it until a member of
+    // a higher tenure class, or of his and `leader_keep_margin` ahead on the
+    // ranking score, passes him.
+    let margin = world.config.gangs.leader_keep_margin;
+    let score = |m: EntityId| scores.iter().find(|x| x.0 == m).map_or(0.0, |x| x.1);
+    let top = ranking.first().copied();
+    let sitting = old.filter(|o| margin > 0.0 && ranking.contains(o)).map(|o| match top {
+        Some(t)
+            if t != o && ((leader_veteran(world, t) && !leader_veteran(world, o)) || score(t) - score(o) > margin) =>
+        {
+            t
+        }
+        _ => o,
+    });
+    let leader = crowned.or_else(|| back.filter(|b| ranking.contains(b))).or(sitting).or(top);
     // Lives at work phase 6 (§ 4.5): rank 1 to the top `1 + members /
     // lieutenant_per` of the ranking after the leader (none off).
     let lieutenants: Vec<EntityId> = if crate::systems::careers::lieutenants_on(world) {
@@ -599,6 +627,17 @@ fn recompute_leader_inner(world: &mut World, gang: EntityId, fallen: Option<Enti
     if old.is_some() && leader != old {
         push_shock(world, gang, Shock::LeaderChanged);
     }
+    // Round 8 X4 (`OPEN-241`): a change no other line tells (a decapitation
+    // is `succession::decide`'s, a civil war's its own) is told here.
+    if let (Some(o), Some(n)) = (old, leader) {
+        if o != n {
+            crate::systems::ownership::jobs2_row(world).leader_changes += 1;
+            if !decapitated && !war_lost && !at_war && crowned.is_none() {
+                let (sn, so) = (score(n), score(o));
+                told_leader(world, gang, o, n, back == Some(n), sn, so);
+            }
+        }
+    }
     // Round 3 S2 (OPEN-222): a Lead walk for a post lost turns back.
     if crate::systems::leaders::on(world) {
         crate::systems::leaders::posts_changed(world, gang);
@@ -609,15 +648,77 @@ fn recompute_leader_inner(world: &mut World, gang: EntityId, fallen: Option<Enti
 /// they are nobody's boss any more and may lead again.
 pub fn on_member_released(world: &mut World, id: EntityId) {
     let Some(gang) = world.gang_of(id) else { return };
+    let mut back = None;
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         if g.boss == Some(id) {
             g.boss = None;
+            back = Some(id);
         }
     }
-    recompute_leader(world, gang);
+    // Round 8 X4: the boss walks back into the chair.
+    recompute_leader_back(world, gang, None, false, back);
     // The pressure pass phase 5b: the gang meets him (a welcome, or a
     // beating for the one who talked).
     crate::systems::crew::on_released(world, id);
+}
+
+/// Round 8 X4 (`OPEN-241`): the gang's members who hear a change at its
+/// head: its living adults with a Brain (the ones inside too). Never a minor
+/// (CLAUDE.md, the under-18 rule).
+pub fn members_told(world: &World, gang: EntityId) -> Vec<EntityId> {
+    world.comp::<Gang>(gang).map_or_else(Vec::new, |g| {
+        g.members
+            .iter()
+            .copied()
+            .filter(|&m| {
+                crate::systems::law::living(world, m)
+                    && world.has::<Brain>(m)
+                    && !crate::systems::ages::is_protected(world, m)
+            })
+            .collect()
+    })
+}
+
+/// Round 8 X4 (`OPEN-241`): the new leader `n` of `gang` after `o`, told to
+/// its members (a `Succession` line) and to the street (a `TookOver` deed in
+/// the Hideout's district). V16: `raider_29990` read "Rhys Garland leads 23"
+/// one night and "Jasper Marlow leads 23" the next, with Rhys still about.
+pub fn told_leader(world: &mut World, gang: EntityId, o: EntityId, n: EntityId, back: bool, sn: f32, so: f32) {
+    let gname = world.comp::<Gang>(gang).map_or_else(|| "the gang".to_string(), |g| g.name.clone());
+    let (nn, on) = (world.name_of(n), world.name_of(o));
+    let him = crate::systems::consequence::pro(world, n).1;
+    let text = if back {
+        format!("{nn} is out of the cells and runs {gname} again ({on} stood in for {him})")
+    } else if !crate::systems::law::living(world, o) {
+        format!("{nn} took over {gname} after {on} died")
+    } else if world.has::<Sentence>(o) {
+        format!("{nn} runs {gname} while {on} sits inside")
+    } else if world.gang_of(o) != Some(gang) {
+        format!("{nn} took over {gname} after {on} left it")
+    } else {
+        let why = if leader_veteran(world, n) && !leader_veteran(world, o) {
+            format!("the old hands follow {him}, not a newcomer")
+        } else {
+            format!("the members follow {him} now ({sn:.2} to {so:.2})")
+        };
+        format!("{nn} pushed {on} aside and runs {gname}: {why}")
+    };
+    let mut actors = vec![n, gang, o];
+    actors.extend(members_told(world, gang));
+    let mut seen = std::collections::BTreeSet::new();
+    actors.retain(|&a| seen.insert(a));
+    world.push_event(EventKind::Succession, &actors, text);
+    crate::systems::ownership::jobs2_row(world).leader_told += 1;
+    tell_street(world, gang, n);
+}
+
+/// Round 8 X4: the street hears who runs `gang` now (a `TookOver` deed in
+/// its Hideout's district).
+pub fn tell_street(world: &mut World, gang: EntityId, n: EntityId) {
+    let door = world.hideout_of(gang).and_then(|h| world.comp::<crate::components::Building>(h)).map(|b| b.door);
+    if let Some(d) = door.map(|t| world.district_of(t)) {
+        crate::systems::gossip::post_deed(world, d, crate::word::Deed::TookOver, Some(n), Some(gang));
+    }
 }
 
 /// Members serving a sentence (a Vagrancy night excluded).

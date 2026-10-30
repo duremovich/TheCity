@@ -480,7 +480,11 @@ use crate::world::World;
 /// `ViceState.collected`, `care::State.seen`, the `[customers] door_trouble_heat`, `door_stat_barred_p`, `[leisure]
 /// bout_purse` ... `bout_hurt_bad`, `[care] book_slack_ticks`, `book_cands`, `[noise] gossip_lines_day` keys and the
 /// `Jobs2Cols` `door_stat_broke` ... `clinic_idle_days` columns (serde defaults).
-pub const SAVE_VERSION: u8 = 107;
+/// 108 (pressure pass round 8, X4, gangs; renumber at the merge): `Gang.raid_muster`, `turf::State.roused`,
+/// `Deed::TookOver` (the `took_over` deed keys), the `[gangs] leader_keep_margin`, `muster_candidates`, `[turf.war]
+/// rouse_hours`, `rouse_min_energy` keys and the `Jobs2Cols` `leader_changes` ... `raid_at_target` columns (serde
+/// defaults).
+pub const SAVE_VERSION: u8 = 108;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

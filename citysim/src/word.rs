@@ -58,10 +58,13 @@ pub enum Deed {
     /// Lives at work phase 5 (§ 3.6, § 2.4): `actor` (an exec) decided
     /// `object`'s (the corp's) order at the table.
     Decided,
+    /// Pressure pass round 8 X4 (`OPEN-241`): `actor` took over `object` (a
+    /// gang): its new leader, the word on the street.
+    TookOver,
 }
 
 impl Deed {
-    pub const ALL: [Deed; 23] = [
+    pub const ALL: [Deed; 24] = [
         Deed::Killed,
         Deed::Assaulted,
         Deed::Robbed,
@@ -85,6 +88,7 @@ impl Deed {
         Deed::LaidOff,
         Deed::Born,
         Deed::Decided,
+        Deed::TookOver,
     ];
 
     /// Position in [`Deed::ALL`].
@@ -118,6 +122,7 @@ impl Deed {
             Deed::LaidOff => "laid_off",
             Deed::Born => "born",
             Deed::Decided => "decided",
+            Deed::TookOver => "took_over",
         }
     }
 

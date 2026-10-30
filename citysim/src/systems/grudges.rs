@@ -101,7 +101,8 @@ fn cause_of(deed: Deed, rel: Rel, object: Option<EntityId>) -> GrudgeCause {
         | Deed::Employed
         | Deed::LaidOff
         | Deed::Born
-        | Deed::Decided => GrudgeCause::Assaulted,
+        | Deed::Decided
+        | Deed::TookOver => GrudgeCause::Assaulted,
     }
 }
 

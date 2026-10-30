@@ -1797,6 +1797,12 @@ pub struct WarCfg {
     pub muster_reach_tiles: u32,
     /// A muster's corner arm scores this flat over the evening's corner.
     pub muster_flat: f32,
+    /// Round 8 X4 (`OPEN-241`): a fight due within this many hours rouses
+    /// the called members asleep about the cell, off shift (0 = the call
+    /// wakes nobody) ...
+    pub rouse_hours: u16,
+    /// ... above this energy (the spent sleep through it).
+    pub rouse_min_energy: f32,
     /// A side fights with at most this many.
     pub side_max: usize,
     /// The off-screen roll: a day's chance a gang provokes a held cell it
@@ -1850,6 +1856,8 @@ impl Default for WarCfg {
             muster_cells: 1,
             muster_reach_tiles: 6,
             muster_flat: 0.5,
+            rouse_hours: 0,
+            rouse_min_energy: 0.2,
             side_max: 6,
             provoke_p_day: 0.004,
             provoke_order_mult: 3.0,
@@ -6322,6 +6330,12 @@ pub struct GangsCfg {
     /// target door when one lies within this many tiles; 0 = the Hideout (M8).
     #[serde(default)]
     pub muster_near_tiles: u32,
+    /// Round 8 X4 (`OPEN-241`): a raid ordered weighs the Hideout and this
+    /// many of the held Homes nearest the target (within `muster_near_tiles`)
+    /// for the muster most members reach (`raid::pick_muster`; 0 = the old
+    /// rule, `raid::muster_point`).
+    #[serde(default)]
+    pub muster_candidates: usize,
     /// M12 D40: a gang empty this many days loses its claims (0 = only the 30-day disband).
     #[serde(default)]
     pub empty_claims_days: u64,
@@ -6332,6 +6346,12 @@ pub struct GangsCfg {
     /// one for the lead (0 = loyalty and tenure alone).
     #[serde(default)]
     pub leader_min_days: u32,
+    /// Round 8 X4 (`OPEN-241`): the sitting leader, free and in the gang,
+    /// keeps the post until a member's ranking score passes his by more than
+    /// this (0 = the ranking's top leads, as before). V16: the lead passed
+    /// back and forth on a day's duty score with no line (`raider_29990`).
+    #[serde(default)]
+    pub leader_keep_margin: f32,
     /// ... and only while its Hideout's district coverage is below this.
     #[serde(default = "GangsCfg::default_reform_max_coverage")]
     pub reform_max_coverage: f32,
@@ -9453,6 +9473,10 @@ pub struct DeedTable {
     /// save at 0; zeroed by the tower's off switches).
     #[serde(skip_serializing_if = "is_zero_f32_deed")]
     pub decided: f32,
+    /// Pressure pass round 8 X4 (`OPEN-241`): a gang's new leader (left out
+    /// of a save at 0).
+    #[serde(skip_serializing_if = "is_zero_f32_deed")]
+    pub took_over: f32,
 }
 
 fn is_zero_f32_deed(v: &f32) -> bool {
@@ -9495,6 +9519,7 @@ impl DeedTable {
             Deed::LaidOff => self.laid_off,
             Deed::Born => self.born,
             Deed::Decided => self.decided,
+            Deed::TookOver => self.took_over,
         }
     }
 
@@ -9526,6 +9551,7 @@ impl DeedTable {
             laid_off: 0.0,
             born: 0.0,
             decided: 0.0,
+            took_over: 0.0,
         }
     }
 }

@@ -301,9 +301,17 @@ breakout_max_freed = 3
 # arrived after the window. Raids with >= 3 at the door, seeds 42 / 43 / 44 (with raid_min_members):
 # 48 -> 50 / 33 / 42 % (without it), 180 -> 78 / 94 / 79 %.
 muster_near_tiles = 180
+muster_candidates = 12             # round 8 X4 (OPEN-241): a raid ordered musters at whichever of the Hideout and this many
+                                   # held Homes nearest the target (within muster_near_tiles) the most fit members reach from
+                                   # home within [crew] duty_reach_ticks, ties the nearer the door (0 = the held Home nearest the
+                                   # target; V16: members sat the raid out "3 h 08 from home")
 empty_claims_days = 3              # an empty gang loses its claims after this many days
 reform_days = 14                   # an emptied gang re-forms no sooner ...
 leader_min_days = 7                # Shadow V4 bug 8: a member this many days in outranks a newer one for the lead (a clinic owner led the Choir 3 days after joining)
+leader_keep_margin = 0.5           # round 8 X4 (OPEN-241): the sitting leader keeps the post until a member's ranking score
+                                   # (loyalty + days / 100 + raids + duty standing) passes his by more than this; every change
+                                   # of leader is told to the members (a Succession line) and to the street (V16: the lead
+                                   # changed hands on a day's duty score with no line, raider_29990 d21-22)
 reform_max_coverage = 1.2          # ... and only while its Hideout's district coverage is below this
 split_strength_ratio = 0.8
 split_loyalty = 0.66               # M12 phase 5: 0.6 -> 0.66 (mean gang loyalty sits at 0.61-0.71 at a decapitation; at 0.6 seeds 42-44 never split with the phase 5 stat table)
@@ -1372,8 +1380,8 @@ rumour_cap_statistical = 3
 relay_conf = 0.8
 # M15 phase 5: repaid 0.1 -> 0.3. A Security contract kept a week is now told as Repaid (the seller), so
 # honour moves on kept contracts; at 0.1 the pool entry fell under reach_min before anyone heard it.
-reach0 = { killed = 1.0, assaulted = 0.5, robbed = 0.3, extorted = 0.2, stripped = 0.5, arrested = 0.6, married = 0.3, evicted = 0.4, struck = 0.8, raided = 0.9, founded = 0.4, avenged = 1.0, betrayed = 0.6, repaid = 0.3, poached = 0.3, hired = 0.3, gave = 0.2, blackmailed = 0.2, rescued = 0.5, employed = 0.2, laid_off = 0.3, born = 0.3, decided = 0.3 }  # M16a C21: hired; Real economy E29: gave; M16b: blackmailed; Lives at work phase 2: employed, laid_off, born; phase 5: decided
-deed_sal = { killed = 0.9, assaulted = 0.6, robbed = 0.5, extorted = 0.4, stripped = 0.6, arrested = 0.5, married = 0.3, evicted = 0.5, struck = 0.6, raided = 0.8, founded = 0.4, avenged = 0.9, betrayed = 0.7, repaid = 0.3, poached = 0.4, hired = 0.7, gave = 0.3, blackmailed = 0.5, rescued = 0.6, employed = 0.2, laid_off = 0.3, born = 0.3, decided = 0.3 }  # M16a C21: hired; Real economy E29: gave; M16b: blackmailed
+reach0 = { killed = 1.0, assaulted = 0.5, robbed = 0.3, extorted = 0.2, stripped = 0.5, arrested = 0.6, married = 0.3, evicted = 0.4, struck = 0.8, raided = 0.9, founded = 0.4, avenged = 1.0, betrayed = 0.6, repaid = 0.3, poached = 0.3, hired = 0.3, gave = 0.2, blackmailed = 0.2, rescued = 0.5, employed = 0.2, laid_off = 0.3, born = 0.3, decided = 0.3, took_over = 0.5 }  # M16a C21: hired; Real economy E29: gave; M16b: blackmailed; Lives at work phase 2: employed, laid_off, born; phase 5: decided; round 8 X4: took_over (a gang's new leader)
+deed_sal = { killed = 0.9, assaulted = 0.6, robbed = 0.5, extorted = 0.4, stripped = 0.6, arrested = 0.5, married = 0.3, evicted = 0.5, struck = 0.6, raided = 0.8, founded = 0.4, avenged = 0.9, betrayed = 0.7, repaid = 0.3, poached = 0.4, hired = 0.7, gave = 0.3, blackmailed = 0.5, rescued = 0.6, employed = 0.2, laid_off = 0.3, born = 0.3, decided = 0.3, took_over = 0.5 }  # M16a C21: hired; Real economy E29: gave; M16b: blackmailed; round 8 X4: took_over
 # M15 phase 5: robbed 0.3 -> 0.6 (with [grudges] grudge_min 0.35 and rel_w.own 0.6): a robbery of a
 # dole wallet forms the victim's grudge (0.36), a beating no longer does (0.30). Grudges formed on
 # seed 42: 20,728 (16,851 from beatings, 30,870 grudge hits from friends hearing of one) -> 5,236
@@ -5501,6 +5509,10 @@ muster_cells = 1                   # the members living in the cell and within t
                                    # is no gate, [crew] raid_target_reach_ticks stays for the Hideout raid)
 muster_reach_tiles = 6             # a body stands in the corner fight within this of the corner
 muster_flat = 0.5                  # a mustered member's corner arm scores this flat over the evening's corner
+rouse_hours = 2                    # round 8 X4 (OPEN-241): a fight due within this many hours rouses its called members asleep
+                                   # about the cell and off shift (a wake line; 0 = the call wakes nobody: V16, 1,586 of 3,297
+                                   # called bodies at the corner at 100k, a third asleep) ...
+rouse_min_energy = 0.2             # ... above this energy (the spent sleep through it)
 side_max = 6                       # a side fights with at most this many (scaled by its presence in the cell)
 provoke_p_day = 0.004              # off screen, a day's chance a gang provokes a held cell it borders ...
 provoke_order_mult = 3.0           # ... times this under Contest, Expand or Retaliate (never under LieLow) ...

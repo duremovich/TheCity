@@ -921,21 +921,36 @@ pub fn apply_order(world: &mut World, gang: EntityId, p: PendingOrder, note: Opt
     let cfg = world.config.gangs.clone();
     let PendingOrder { order, corp_target, retaliate_on, why, .. } = p;
     let mut muster = order.is_raid().then(|| next_muster(now, cfg.raid_muster_hour));
-    // L2 shadow fixes item 15: the muster waits for the farthest member's
-    // walk (a Purist walked 291 min to a Muster and missed it by 14).
-    if let Some(m) = muster {
-        muster = Some(m.max(now + crate::systems::fixes::muster_walk(world, gang, m)));
-    }
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.order = order;
         g.order_since = now;
         g.raid_at = muster;
         g.raid_target = corp_target;
+        g.raid_muster = None;
         g.retaliate_on = retaliate_on;
         if order == Order::Retaliate {
             g.retaliate_until = Some(now + cfg.retaliate_days * TICKS_PER_DAY);
         }
         g.pending_order = None;
+    }
+    // Round 8 X4 (`OPEN-241`): the muster where the members can reach it
+    // (the order and its target set first: `raid::gang_target` reads them).
+    // L2 shadow fixes item 15: the muster waits for the farthest member's
+    // walk to it (a Purist walked 291 min to a Muster and missed it by 14).
+    if let Some(m) = muster {
+        let at = crate::systems::raid::pick_muster(world, gang);
+        if let Some(g) = world.comp_mut::<Gang>(gang) {
+            g.raid_muster = at.map(|x| x.0);
+        }
+        if let Some((_, new, old)) = at {
+            let row = crate::systems::ownership::jobs2_row(world);
+            row.raid_reach_new += new as u32;
+            row.raid_reach_old += old as u32;
+        }
+        muster = Some(m.max(now + crate::systems::fixes::muster_walk(world, gang, m)));
+        if let Some(g) = world.comp_mut::<Gang>(gang) {
+            g.raid_at = muster;
+        }
     }
     // Pressure pass round 2, R5 (OPEN-214): a raid ordered after midnight's
     // duties calls its muster now.

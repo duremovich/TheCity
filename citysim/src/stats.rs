@@ -1536,6 +1536,36 @@ pub struct Jobs2Cols {
     /// ... or kept quiet (the reason his line)
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub witness_quiet: u32,
+    /// Round 8 X4 (`OPEN-241`): a gang's leader changed (any way) ...
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub leader_changes: u32,
+    /// ... and a Succession line told it to the members (here or `succession::decide`)
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub leader_told: u32,
+    /// Round 8 X4: a called member asleep near his corner roused for the fight
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub war_roused: u32,
+    /// ... and of the mover's called at the corner when it was fought, those roused
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub war_roused_came: u32,
+    /// Round 8 X4: a gang raid's members posted to its muster (within reach of it) ...
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub raid_posted: u32,
+    /// ... and those who sat it out (the muster past `[crew] duty_reach_ticks` from home)
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub raid_sat_out: u32,
+    /// Round 8 X4: gang raids that left the muster (the first out the door) ...
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub raid_departed: u32,
+    /// ... and of them, those whose column reached the door and went in or was called off there
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub raid_at_target: u32,
+    /// Round 8 X4: a raid ordered: its fit members within reach of the muster picked ...
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub raid_reach_new: u32,
+    /// ... and within reach of the old rule's (the held Home nearest the target)
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub raid_reach_old: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -2114,6 +2144,16 @@ impl Jobs2Cols {
                 "witness_finds",
                 "witness_named",
                 "witness_quiet",
+                "leader_changes",
+                "leader_told",
+                "war_roused",
+                "war_roused_came",
+                "raid_posted",
+                "raid_sat_out",
+                "raid_departed",
+                "raid_at_target",
+                "raid_reach_new",
+                "raid_reach_old",
             ]
             .into_iter()
             .map(str::to_string),
@@ -2686,6 +2726,16 @@ impl Jobs2Cols {
             self.witness_finds.to_string(),
             self.witness_named.to_string(),
             self.witness_quiet.to_string(),
+            self.leader_changes.to_string(),
+            self.leader_told.to_string(),
+            self.war_roused.to_string(),
+            self.war_roused_came.to_string(),
+            self.raid_posted.to_string(),
+            self.raid_sat_out.to_string(),
+            self.raid_departed.to_string(),
+            self.raid_at_target.to_string(),
+            self.raid_reach_new.to_string(),
+            self.raid_reach_old.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")
