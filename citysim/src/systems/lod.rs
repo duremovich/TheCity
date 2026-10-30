@@ -829,6 +829,10 @@ pub fn run_statistical(world: &mut World) {
                 n.hunger = (n.hunger + (before - n.hunger) * 0.5 * sleep_share).min(1.0);
             }
         }
+        // Diet parity (hunger fix item 11's off-screen side): the grocery
+        // run. Round 7 W1 (OPEN-243): before the hour's leisure (the
+        // household's food ahead of the adults' own wants).
+        crate::prof::timed!("stat::stat_grocery", stat_grocery(world, id));
         if let Some(execs) = &fun_execs {
             crate::prof::timed!("stat::leisure::stat_hour", crate::systems::leisure::stat_hour(world, id, execs));
         }
@@ -859,8 +863,6 @@ pub fn run_statistical(world: &mut World) {
                 continue;
             }
         }
-        // Diet parity (hunger fix item 11's off-screen side): the grocery run.
-        crate::prof::timed!("stat::stat_grocery", stat_grocery(world, id));
         // 3. One outcome. A Full agent eats when hungry, not by lottery, so a
         // hungry Statistical agent eats if it can and the draw covers the
         // discretionary meals of the fed.
@@ -1458,15 +1460,29 @@ fn stat_grocery(world: &mut World, id: EntityId) {
                 world.stat_table.as_ref().and_then(|t| t.pantry_per_resident).map_or(need_one as f32, |p| p.max(0.0));
             (((per * residents as f32).round() as u32).min(need_one * residents) + kids).min(cap)
         }
-        None if kids > 0 && world.phase() != DayPhase::Night && crate::systems::ages::feeds_children(world, id) => {
+        // Round 7 W1 (OPEN-243): or any free adult of the household while
+        // its claim is short of the children's food (the household's purse).
+        None if kids > 0
+            && world.phase() != DayPhase::Night
+            && (crate::systems::ages::feeds_children(world, id)
+                || crate::systems::shelf::feeds_household(world, id)) =>
+        {
             kids.min(cap)
         }
         None => return,
     };
-    let pantry = crate::systems::shelf::held_by(world, id, home);
+    // Round 7 W1 (OPEN-243): short of the children's food on the
+    // household's own units (`shelf::kids_short`), the run reads those.
+    let kids_short = crate::systems::shelf::kids_short(world, id, home) > 0;
+    let pantry = if kids_short {
+        crate::systems::shelf::own_held(world, id, home)
+    } else {
+        crate::systems::shelf::held_by(world, id, home)
+    };
     // Round 4 T1 (OPEN-231): on the service's warning the pantry alone
     // holds the children's food (the Full run's `routine::run_level`).
-    let carried = if crate::systems::camp::household_on_warning(world, id, home) {
+    // Round 7 W1 (OPEN-243): so does a claim short of the children's food.
+    let carried = if crate::systems::camp::household_on_warning(world, id, home) || kids_short {
         0
     } else {
         world.comp::<crate::components::Inventory>(id).map_or(0, |i| i.food.saturating_sub(i.stolen_food))

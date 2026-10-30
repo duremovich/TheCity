@@ -348,12 +348,25 @@ pub fn considerations_with(
             // Hunger fix item 11 (b): fed, the goal is the grocery run, at
             // `[life] grocery_score` (an errand: below a real need).
             if n.hunger >= crate::goap::world_state::HUNGER_SATISFIED {
-                let mut s = world.config.life.grocery_score.clamp(0.01, 1.0);
+                // Round 7 W1 (OPEN-243): the children's run goes ahead of
+                // an errand, and on the service's warning ahead of the
+                // adults' own wants.
+                let home = world.comp::<Household>(id).and_then(|h| h.home);
+                let kids = crate::systems::shelf::shops_for_kids(world, id);
+                let warned = kids && home.is_some_and(|h| crate::systems::camp::household_on_warning(world, id, h));
+                let (label, base) = if warned {
+                    ("the children on the service's warning", world.config.camp.warned_grocery_score)
+                } else if kids {
+                    ("the children's food short", world.config.camp.kids_grocery_score)
+                } else {
+                    ("pantry under a shift's meals", world.config.life.grocery_score)
+                };
+                let mut s = base.clamp(0.01, 1.0);
                 // Hunger fix item 12 (P5j): past a work night's bedtime.
-                if crate::exec::routine::past_bedtime(world, id) {
+                if !warned && crate::exec::routine::past_bedtime(world, id) {
                     s *= world.config.life.work_night_unwind_mult.clamp(0.01, 1.0);
                 }
-                return Some((vec![Consideration::raw("pantry under a shift's meals", s, s)], 0.0));
+                return Some((vec![Consideration::raw(label, s, s)], 0.0));
             }
             let can_eat = eat_obtainable(world, id);
             let mut cs = vec![

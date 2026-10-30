@@ -370,8 +370,18 @@ fn household_need(world: &World, id: EntityId, home: EntityId, job: Option<&Job>
 /// `household_need`. Round 4 T1 (OPEN-231): a Home on the service's
 /// warning (`camp::home_on_warning`) holds only its pantry (food carried
 /// for a shift feeds no child) and needs at least the children's food.
+///
+/// Round 7 W1 (OPEN-243): so does a household whose claim is short of its
+/// children's food (`shelf::kids_short`), warned or not: a worker's packed
+/// meals held the run back while his children went unfed.
 fn run_level(world: &World, id: EntityId, home: EntityId, job: Option<&Job>) -> (u32, u32) {
     let need = household_need(world, id, home, job);
+    // Round 7 W1: short of the children's food on the household's own units.
+    if crate::systems::shelf::kids_short(world, id, home) > 0 {
+        let pantry = crate::systems::shelf::own_held(world, id, home);
+        let kids = crate::systems::shelf::kids_need(world, id, home).min(world.config.buildings.home.stock_cap);
+        return (pantry, need.max(kids));
+    }
     if crate::systems::camp::household_on_warning(world, id, home) {
         let pantry = crate::systems::shelf::held_by(world, id, home);
         let kids = crate::systems::shelf::kids_need(world, id, home).min(world.config.buildings.home.stock_cap);
@@ -382,11 +392,14 @@ fn run_level(world: &World, id: EntityId, home: EntityId, job: Option<&Job>) -> 
 
 /// S6 (OPEN-224): the shopper's post for the grocery run: a worker's Job
 /// (with an employer), else `None` for a jobless parent whose child lives
-/// at home (`ages::feeds_children`); `Err` when neither shops.
+/// at home (`ages::feeds_children`); `Err` when neither shops. Round 7 W1
+/// (OPEN-243): or any free adult of a household whose claim is short of
+/// its children's food (`shelf::shops_for_kids`: the household's purse).
 fn shopper_job(world: &World, id: EntityId) -> Result<Option<&Job>, ()> {
     match world.comp::<Job>(id).filter(|j| j.employer.is_some()) {
         Some(j) => Ok(Some(j)),
         None if crate::systems::ages::feeds_children(world, id) => Ok(None),
+        None if crate::systems::shelf::shops_for_kids(world, id) => Ok(None),
         None => Err(()),
     }
 }
@@ -397,15 +410,17 @@ fn shopper_job(world: &World, id: EntityId) -> Result<Option<&Job>, ()> {
 /// and pay for it, rather than three meals and back again.
 pub fn grocery_cap(world: &World, id: EntityId) -> Option<u32> {
     let brain = world.comp::<crate::components::Brain>(id)?;
-    let plan = brain.plan.as_ref().filter(|p| p.goal == GoalKind::Eat && p.steps.len() == 4)?;
-    if plan.steps[1].action != ActionKind::BuyFood || plan.steps[3].action != ActionKind::StoreFood {
+    let plan = brain.plan.as_ref().filter(|p| p.goal == GoalKind::Eat && matches!(p.steps.len(), 4 | 5))?;
+    if plan.steps[1].action != ActionKind::BuyFood || plan.steps.last()?.action != ActionKind::StoreFood {
         return None;
     }
+    // Round 7 W1: a hungry shopper's run eats one at the shop.
+    let eats = u32::from(plan.steps[2].action == ActionKind::EatFromInventory);
     let home = world.comp::<Household>(id).and_then(|h| h.home)?;
     let job = shopper_job(world, id).ok()?;
     let (held, need) = run_level(world, id, home, job);
     let short = need.saturating_sub(held);
-    Some(short.max(1))
+    Some(short.max(1) + eats)
 }
 
 /// Hunger fix item 11 (b): an off-shift worker's grocery run, `[GoTo(Market)
@@ -426,9 +441,13 @@ pub fn grocery_plan(world: &World, id: EntityId) -> Option<Plan> {
     }
     // S6 (OPEN-224): a jobless parent shops for the children's food, by day.
     let job = shopper_job(world, id).ok()?;
+    // Round 7 W1 (OPEN-243): the children's food short (a day worker off
+    // shift from 18:00, asleep by 18:02 under the energy line, had no other
+    // hour for it: the small hours are his, and a lower energy line).
+    let kids = crate::systems::shelf::shops_for_kids(world, id);
     match job {
         // Shadow V4 bug 2: no run out of bed in a day worker's small hours.
-        Some(job) if job.on_shift(world.tick_of_day()) || day_worker_night(world, id) => return None,
+        Some(job) if job.on_shift(world.tick_of_day()) || (!kids && day_worker_night(world, id)) => return None,
         None if world.phase() == crate::time::DayPhase::Night => return None,
         _ => {}
     }
@@ -439,6 +458,8 @@ pub fn grocery_plan(world: &World, id: EntityId) -> Option<Plan> {
     if held >= need || must_leave_for_work(world, id) {
         return None;
     }
+    // Round 7 W1 (OPEN-243): on the service's warning.
+    let warned = kids && crate::systems::camp::household_on_warning(world, id, home);
     // The market: least detour among the stocked ones it can buy at.
     let here = crate::exec::walk_origin(world, id)?;
     let short = need - held;
@@ -464,7 +485,7 @@ pub fn grocery_plan(world: &World, id: EntityId) -> Option<Plan> {
     }
     let (detour, m, can) = best?;
     // One run cannot fill the household's pantry: the worker's own shift's meals.
-    if job.is_some_and(|job| can < short && held >= shift_meals_needed(world, job)) {
+    if !kids && job.is_some_and(|job| can < short && held >= shift_meals_needed(world, job)) {
         return None;
     }
     let trip = detour + 20;
@@ -472,8 +493,9 @@ pub fn grocery_plan(world: &World, id: EntityId) -> Option<Plan> {
     // A worker who cannot pay for that many (and for less than the pantry
     // wants) stays home; one with food in the larder does not walk the
     // hours for a meal or two; one with an empty larder does.
+    // Round 7 W1: a parent walks for his children's meal, however short.
     let per = world.config.life.grocery_ticks_per_meal;
-    if per > 0 {
+    if per > 0 && !kids {
         let want = trip.div_ceil(per) as u32;
         if can < want.min(short) || (held > 0 && short < want) {
             return None;
@@ -488,8 +510,9 @@ pub fn grocery_plan(world: &World, id: EntityId) -> Option<Plan> {
             return None;
         }
     }
-    // ... before bedtime (home by the time the night's sleep must begin) ...
-    if let Some(b) = ticks_to_bedtime(world, id) {
+    // ... before bedtime (home by the time the night's sleep must begin;
+    // Round 7 W1: on the service's warning the run is made first) ...
+    if let Some(b) = ticks_to_bedtime(world, id).filter(|_| !warned) {
         let walk_home = if world.comp::<Position>(id).is_some_and(|p| p.building == Some(home)) {
             0
         } else {
@@ -502,15 +525,21 @@ pub fn grocery_plan(world: &World, id: EntityId) -> Option<Plan> {
     // ... and before the body is tired enough that Sleep wins mid-walk.
     let decay = world.config.needs.energy_decay_per_tick;
     let energy = world.comp::<crate::components::Needs>(id).map_or(1.0, |n| n.energy);
-    if energy - decay * (trip as f32) < world.config.life.grocery_energy_floor {
+    let floor = if kids { world.config.camp.kids_grocery_energy_floor } else { world.config.life.grocery_energy_floor };
+    if energy - decay * (trip as f32) < floor {
         return None;
     }
-    let steps = vec![
+    let mut steps = vec![
         step(ActionKind::GoTo(LocationKey::Market), Some(m)),
         step(ActionKind::BuyFood, Some(m)),
         step(ActionKind::GoTo(LocationKey::Home), Some(home)),
         step(ActionKind::StoreFood, None),
     ];
+    // Round 7 W1 (OPEN-243): a hungry shopper (the children's run, which
+    // no longer waits for him to be fed) eats one at the shop.
+    if !fed(world, id) {
+        steps.insert(2, step(ActionKind::EatFromInventory, None));
+    }
     Some(plan(GoalKind::Eat, Some(m), steps, world.tick))
 }
 
@@ -519,6 +548,14 @@ pub fn grocery_plan(world: &World, id: EntityId) -> Option<Plan> {
 pub fn fed(world: &World, id: EntityId) -> bool {
     use crate::goap::world_state::HUNGER_SATISFIED;
     world.comp::<crate::components::Needs>(id).is_some_and(|n| n.hunger >= HUNGER_SATISFIED)
+}
+
+/// Round 7 W1 (OPEN-243): an Eat goal is the grocery run: fed, or hungry
+/// while his household's claim is short of its children's food (a hungry
+/// worker's Eat bought for himself and his children went unfed until the
+/// service's second warning took them).
+pub fn eat_is_grocery(world: &World, id: EntityId) -> bool {
+    fed(world, id) || crate::systems::shelf::shops_for_kids(world, id)
 }
 
 /// Hunger fix item 11 (b): a fed worker's Eat goal stands for the grocery

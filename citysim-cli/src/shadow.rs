@@ -2371,6 +2371,14 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                             k.warned_day.filter(|&w| day.saturating_sub(w) <= u32::from(camp_cfg.warn_repeat_days))
                         {
                             v.push_str(&format!(", on the service's warning since d{w}"));
+                            // Round 7 W1 (OPEN-243): a warning standing is
+                            // not a hang (`camp_parent_106052`'s 4-y): the
+                            // child ate, or how long it has not.
+                            if k.hunger_days == 0 {
+                                v.push_str(" (fed last night)");
+                            } else {
+                                v.push_str(&format!(" (unfed {} nights)", k.hunger_days));
+                            }
                         }
                         if k.home_fed_days > 0 {
                             v.push_str(&format!(

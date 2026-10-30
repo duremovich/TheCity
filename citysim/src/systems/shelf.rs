@@ -166,6 +166,71 @@ pub fn kids_need(world: &World, id: EntityId, home: EntityId) -> u32 {
     crate::systems::ages::children_food_need_of(world, home, Some(k))
 }
 
+/// Round 7 W1 (OPEN-243): the units `id`'s household's claim on `home`'s
+/// pantry (`held_by`, the pantry alone: food carried feeds no child) is
+/// short of its children's food (`kids_need`, capped at a pantry's
+/// `stock_cap`); 0 when it holds it, or no child of it lives there.
+///
+/// In a shared Home the household's own units (`own_held`), not the common
+/// ones: every household's claim reads the whole common pool, and in a
+/// Block of ninety households three common units held back every stakeless
+/// family's run (r7 20k diagnostic, Block#1226 d6: 94 households, the
+/// common units eaten by the evening, a dozen children unfed on a claim of
+/// 0 with a parent holding 10-79c).
+pub fn kids_short(world: &World, id: EntityId, home: EntityId) -> u32 {
+    let kids = kids_need(world, id, home).min(world.config.buildings.home.stock_cap);
+    if kids == 0 {
+        return 0;
+    }
+    kids.saturating_sub(own_held(world, id, home))
+}
+
+/// Round 7 W1: the units on `home`'s shelf that are `id`'s household's own
+/// in a shared Home (its stake, scaled to the stock when the stakes are
+/// above it; the common units left out), else the whole stock (`held_by`).
+pub fn own_held(world: &World, id: EntityId, home: EntityId) -> u32 {
+    let hs = households(world, home);
+    let total: f32 = hs.iter().map(|h| h.1).sum();
+    if hs.len() < 2 || total <= 0.0 {
+        return world.comp::<Building>(home).map_or(0, |b| b.stock_food);
+    }
+    let stock = world.comp::<Building>(home).map_or(0, |b| b.stock_food) as f32;
+    let k = key(world, id);
+    let mine = hs.iter().find(|h| h.0 == k).map_or(0.0, |h| h.1);
+    let own = if total <= stock { mine } else { stock * mine / total };
+    (own + 1e-3).floor() as u32
+}
+
+/// Round 7 W1 (OPEN-243): `id` is a free adult (`camp::free_parent`'s
+/// test) living with a child of his household (`key`) at home: a parent,
+/// a grandparent, an adult son; the household's purse shops for its
+/// children (a family with coins in the grandmother's purse let its
+/// children go unfed while the broke father was its only shopper).
+pub fn feeds_household(world: &World, id: EntityId) -> bool {
+    use crate::components::{Child, Routine};
+    if !crate::systems::ages::on(world) {
+        return false;
+    }
+    let Some(home) = world.comp::<Household>(id).and_then(|h| h.home) else { return false };
+    if world.has::<Child>(id) || !crate::systems::camp::free_parent(world, id) {
+        return false;
+    }
+    let k = key(world, id);
+    world.residents_of(home).iter().any(|&r| {
+        r != id
+            && key(world, r) == k
+            && world.comp::<Child>(r).is_some_and(|c| !matches!(c.routine, Routine::Camp | Routine::Street))
+    })
+}
+
+/// Round 7 W1 (OPEN-243): `id` shops for his household's children now:
+/// he feeds the household (`feeds_household`) and its claim is short of
+/// their food (`kids_short`).
+pub fn shops_for_kids(world: &World, id: EntityId) -> bool {
+    let Some(home) = world.comp::<Household>(id).and_then(|h| h.home) else { return false };
+    feeds_household(world, id) && kids_short(world, id, home) > 0
+}
+
 /// The room on `id`'s household's shelf at `home` under a pantry's `cap`:
 /// the Home's room, or in a shared Home its own `cap` less its stake (the
 /// Block's shelf holds `cap` a household).
