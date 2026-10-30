@@ -1804,6 +1804,11 @@ bout_hour = 23
 bout_card_per = 4                    # round 6 V6 (OPEN-217): a pit's card is a bout a night for every this many Fighters on
                                      # shift in it, at least one, the longest since their last first (the pit's own book,
                                      # not a memory: V14's 100k fighters had none in a week); 20k pits hold four
+bout_purse = 5                       # round 7 W6 (OPEN-217): the bout's winner takes a purse from the house (GambleWin): this
+bout_purse_share = 0.25              # ... plus this share of the main event's stakes (V15: no purse, no hurt, no loser's line)
+bout_hurt = 0.3                      # the loser is hurt, a wound to have seen to (the patch-up, both tiers): energy and
+bout_hurt_margin = 0.5               # safety fall by bout_hurt + this x the winner's margin in fighting ...
+bout_hurt_bad = 0.45                 # ... and at this fall or more the line reads "badly hurt" (0 and 0: the base 0.3, no wound)
 door_heat = 0.6
 class_mult = [1.3, 1.0, 0.8]         # Corp, Street, Dreg
 hangout_ticks = 60
@@ -5006,6 +5011,11 @@ door_broke = true                  # round 6 V6 (OPEN-217): ... and a purse shor
 door_stat_drink = true             # ... and an off-screen drink leaves the mark the door reads as drunk ([misery]
                                    # drink_hours): the off-screen memory keeps no drink (20k: 9,264 off-screen arrivals at
                                    # kept doors in 8 days, none drunk, none with any cause)
+door_trouble_heat = 0.6            # round 7 W6 (OPEN-217): ... and a name that runs hot (the word's heat at or above this:
+                                   # the deeds told of him, both tiers) is "trouble" (V15: the 100k door's one reason off
+                                   # screen was "broke"; the off-screen visitor carries his name, not his drink); 0 off
+door_stat_barred_p = 0.3           # ... and an off-screen face barred from the house tries its door anyway on this (a hash
+                                   # of him, the venue and the day; drunk, always), turned away "barred"; else he stays away
 door_p = 0.85                      # a bouncer on duty turns a visitor with a cause away on this (a hash of the visitor,
                                    # the venue and the hour)
 door_swing_p = 0.4                 # a turned-away drunk, high or brawler swings at the bouncer on this x (1 - lawfulness)
@@ -5291,6 +5301,10 @@ raid_names = 4                     # round 3 S7 (OPEN-225): a raid's result line
 petty_rewitness_days = 7           # a civilian who saw the same actor's same petty crime (a fare dodge, vagrancy) within
                                    # this many days takes no new record: no Witness line, memory or affinity hit (0 off;
                                    # the law's eye always acts)
+gossip_lines_day = 2               # round 7 W6 (OPEN-217): a shadow diary's word about its agent (GOSSIP ABOUT ME) gives at
+                                   # most this many rumours a day a role (doer, object) their own folded line, and only one
+                                   # reaching new ears; the rest one "other rumours" line a day a role (V15's 100k vice
+                                   # diaries: 259 lines, "told 22 times today (22 heard already)"); 0 no cap
 # Pressure pass round 2, R3 (docs/PRESSURE_PASS.md § R3, OPEN-216): the wounded and the sick (systems/care.rs).
 # Every value a placeholder.
 [care]
@@ -5351,6 +5365,12 @@ install_rows = ["Ripperdoc", "black_doc"]  # round 7 W4 (OPEN-245): the [[serves
                                    # installs a week to an orderly at the triage, unpaid); empty: the patient queue's server
 install_cut = 0.1                  # ... and the doctor who cut it takes this share of the implant's value from the owner's
                                    # till (Flow::Treatment); 0 none
+book_slack_ticks = 30              # round 7 W6 (OPEN-217): a booked visit (a wash, a new implant) goes to the Clinic with a
+                                   # Ripperdoc on staff and the fewest bookings today per Ripperdoc among those within this
+                                   # many ticks of travel more than the nearest from his Home, the nearest on ties (every
+                                   # pick was the nearest: a Clinic ringed by nearer ones saw nobody, V15 ripperdoc_9880);
+                                   # 0: the nearest
+book_cands = 6                     # ... weighing this many staffed Clinics nearest his Home (by tiles)
 # Pressure pass round 2, R6b (docs/PRESSURE_PASS.md § R6b, OPEN-217, OPEN-207): the trades' verbs II. Every value a
 # placeholder.
 [verbs]

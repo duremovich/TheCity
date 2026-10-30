@@ -1216,6 +1216,15 @@ def lives(rows, events, out):
                                           ("clinic kept", "clinic_kept"), ("clinic by a body", "clinic_body"),
                                           ("clinic washes", "clinic_washes"),
                                           ("corner deals", "corner_deals"), ("dealer regulars", "dealer_regulars"))}
+    # Round 7 W6 (OPEN-217): the dull rooms.
+    L["rooms"] = {k: tot(c) for k, c in (("off-screen door broke", "door_stat_broke"),
+                                         ("barred", "door_stat_barred"), ("trouble", "door_stat_trouble"),
+                                         ("colours", "door_stat_colours"), ("other", "door_stat_other"),
+                                         ("bout purses", "bout_purses"), ("purse coins", "bout_purse_coins"),
+                                         ("losers hurt", "bout_hurt"), ("named pimp-days", "pimp_named_days"),
+                                         ("with a round", "pimp_round_days"),
+                                         ("Clinic-days with a Ripperdoc", "clinic_doc_days"),
+                                         ("of them no patient", "clinic_idle_days"))}
     L["tower"] = {k: tot(c) for k, c in (("Meeting hours", "meetings_held"), ("attendees", "meeting_attendees"),
                                          ("decisions", "decisions"), ("bylines", "bylines"),
                                          ("interviews", "interviews"), ("walk-ins served", "walk_ins_served"),
@@ -1521,6 +1530,7 @@ def fmt(o):
         L.append("visits by purpose (run): " + f(w["visits_by_purpose"]) + "; the Camp: " + f(w["camp"]))
         L.append("civic (run): " + f(w["civic"]))
         L.append("the street (run): " + f(w["street"]))
+        L.append("the dull rooms (run): " + f(w["rooms"]))
         L.append("the tower (run): " + f(w["tower"]))
         L.append("careers (run): " + f(w["careers"]))
         L.append("leaders: " + f(w["leaders"]))

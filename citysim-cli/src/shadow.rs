@@ -2002,6 +2002,59 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                     }
                     _ => None,
                 };
+                // Round 7 W6 (OPEN-217; `[noise] gossip_lines_day`): past the
+                // day's cap of rumours a role a rumour opens no line of its
+                // own: it folds into the day's one "other rumours" line
+                // (V15's 100k vice diaries: 259 lines, "told 22 times today
+                // (22 heard already)").
+                let cap = usize::from(world.config.noise.gossip_lines_day);
+                let more_key = format!("gossip:{role}:more");
+                let opened = t
+                    .day_folds
+                    .values()
+                    .filter(|f| f.day == day && f.key.starts_with(&format!("gossip:{role}:")) && f.key != more_key)
+                    .count();
+                // A retelling to ears that knew it opens nothing (the word
+                // reaching nobody new is no news; a rumour's line counts them).
+                if refold.is_none() && cap > 0 && !*heard {
+                    continue;
+                }
+                let overflow = refold.is_none() && cap > 0 && opened >= cap;
+                if overflow {
+                    let deed = format!("{:?}", r.deed);
+                    let text = |f: &DayFold| {
+                        format!(
+                            "GOSSIP ABOUT ME ({role}): {} retelling{} today of {} other rumour{} ({})",
+                            f.count,
+                            if f.count == 1 { "" } else { "s" },
+                            f.names.len(),
+                            if f.names.len() == 1 { "" } else { "s" },
+                            f.tally_text()
+                        )
+                    };
+                    match t.day_folds.get_mut(&more_key) {
+                        Some(f) if f.day == day => {
+                            f.count += 1;
+                            f.note(what);
+                            f.note(&deed);
+                            f.name(&key);
+                            let (entry, line) = (f.entry, text(f));
+                            t.refold_line(entry, None, &line);
+                        }
+                        _ => {
+                            let entry = t.entries.len();
+                            let mut f = DayFold::new(more_key.clone(), day, entry, None, String::new());
+                            f.note(what);
+                            f.note(&deed);
+                            f.name(&key);
+                            let line = text(&f);
+                            f.base = line.clone();
+                            t.log(*tick, "gossip", line);
+                            t.day_folds.insert(more_key, f);
+                        }
+                    }
+                    continue;
+                }
                 match refold {
                     Some((entry, text)) => t.refold_line(entry, None, &text),
                     None => {

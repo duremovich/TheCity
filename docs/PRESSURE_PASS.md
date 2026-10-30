@@ -3897,3 +3897,99 @@ escape is filed, not an Abduction) and `contracts::test_conspiracy_ranks_below_m
 above Theft up one), `stims::test_deal_pays_gang_and_dealer` (the cut is paid at the stand's end). No test
 added (doctrine 2). `SAVE_VERSION` 106 (renumbered at the merge): `Crime::CampEscape`,
 `[crime] sentence_days_ext.camp_escape`, `World.stands`, `Child.school_purse` (serde defaults).
+
+### W6, the dull rooms (`OPEN-217`; `customers::venue_gang`, `customers::cause` "trouble", `leisure::barred_returns`, `leisure::bout_purse`, `leisure::fight_bout`, `customers::hurt`, `demography::pool_member`, `care::book_clinic`, `care::tally_clinics`, `citysim-cli/src/shadow.rs` the gossip fold, `[customers]`, `[leisure]`, `[care]`, `[noise]` W6 keys)
+
+- **The causes** (20k `isle_m_k2` seed 42, main `bed8e38`; a temporary probe on the off-screen door, removed).
+  (1) **The door's colours never saw a held cell**: `customers::venue_gang` fell back on `gang::holder_of`, which reads
+  a gang's held Homes, and a venue is never a Home, so only a front's door ever read a rival's colours (2 refusals in
+  30 days). Off-screen gang members (past `[lod] gang_quota`) do reach the doors (350 of 36,950 off-screen arrivals at
+  kept doors, 266 of them at a rival-held cell); the drink and the purse were the only other state the door read off
+  screen. A visitor's name (the word's `Reputation.heat`) is carried by both tiers and was never read at a kept door.
+  The barred off screen always stayed away (round 4 T7's `door_seen`), so "barred" never came off screen. (2) **The
+  bout had no stakes**: `fight_bout` took 0.3 energy and safety from the loser and printed nothing more; no coin moved.
+  (3) **The pimp who runs no round**: U6 kept a named pimp out of `pick_candidate`, but the midnight hire is pooled
+  (`HirePool`; `pool_member` had no such filter): a pimp quit "to run the street" at 00:07 and the pool hired him back
+  at 00:11 (Ottilie Vasquez five nights running, d6-d12; Percival Northcott twice), then lost the street "holding a day
+  post" or "away from every pitch 3 days" (V15's `pimp_62797`: "chose the shift as Vat Tech"). (4) **The clinic with a
+  doctor and no patient**: every pick of a Clinic is the nearest (the wash and the off-screen chrome booked at the
+  Clinic nearest the Home, the patch-up at the nearest open), and V6's spill moves a patient only when the nearest
+  doctor's hour is full (`[[serves]] per_hour` 4, an orderly 6), which the city's few patients an hour never fill: a
+  Clinic ringed by nearer ones sees nobody (20k `ripperdoc_11516`, Ripperdoc#5892, 0 patients in the base shadow
+  week, no wash in 30 days). (5) **GOSSIP ABOUT ME** folded a day per rumour, so a madam with a new rumour about her
+  every few hours and the old ones retold to ears that knew them printed a line each (V15 `madam_35331 d27 04:17` "told
+  22 times today (22 heard already)").
+- **Built.** The venue's gang is the turf holder of the cell its door stands in (V2) before the old Home reading, both
+  tiers. A name at or above `[customers] door_trouble_heat` (0.6) is "trouble" at a kept door (on `door_p`, a grudge,
+  no swing). An off-screen face barred from a house tries its door anyway on `door_stat_barred_p` (0.3, a hash of him,
+  the venue and the day; drunk, always) and is turned away "barred" (`leisure::barred_returns`); the bar holds (W5's
+  side). Off-screen refusals are counted by cause (`door_stat_*`). The bout: the winner takes a purse from the house
+  (`Flow::GambleWin`), `[leisure] bout_purse` (5) plus `bout_purse_share` (0.25) of the main event's stakes; the loser
+  is hurt by `bout_hurt` (0.3) + `bout_hurt_margin` (0.5) x the winner's margin in fighting, a wound to have seen to
+  (`Misery.hurt_at`, read by `customers::hurt`, so the patch-up or the back room follows, both tiers; no `Lost` memory,
+  the bout stays sanctioned); the line reads "X beat Y at Z (bets paid N); purse 6c; Y hurt, to have it seen to"
+  ("badly hurt" at `bout_hurt_bad` 0.45). A named pimp is out of the pooled hire (`pool_member`). A booked visit (a
+  wash, a new implant; a used implant stays with its Clinic's stock) goes to the Clinic with a Ripperdoc on staff and
+  the fewest bookings today per Ripperdoc among the `[care] book_cands` (6) nearest, within `book_slack_ticks` (30) of
+  the nearest (`care::book_clinic`); Clinic-days with a Ripperdoc on staff and those with no patient are counted
+  (`care::tally_clinics`). The shadow's GOSSIP ABOUT ME gives at most `[noise] gossip_lines_day` (2) rumours a day a
+  role their own line, a rumour opens one only when it reaches new ears, the rest fold into one "N retellings today of
+  K other rumours" line a day a role.
+- **Deviations.** "The bout's hurt (`wounded`, scaled)" is the care system's wound, not `wounded::down`: a downed body
+  bleeds out as a murder by its `by` (`Wounded.murder`), which a sanctioned bout is not; the scale is the hurt's size
+  and the line's word. "Trouble" is the name's heat, on screen too (a body with a hot name meets the same door). The
+  patch-up keeps the nearest Clinic (a wound walks to the nearest door; the spill stays as V6 built it); only the
+  booked trade spreads. The 20k city does not reproduce V15's gossip flood (9 lines in 9 base diaries), so the cap
+  never bound here; it is for 100k.
+- **Under-18** (`ages::is_protected`): the bout card's gate is V6's (`!is_protected` on the roster) and `fight_bout`
+  backstops it (no hurt on a protected loser); the purse goes to the adult winner. The door's new causes come after
+  "under age" (a minor is turned away "under age" first, no scene, no grudge); the barred return and "trouble" pick no
+  victim. A pimp's pick is U6's (`fit`: never a protected member). The booked patients are adults (`book_washes`'
+  filter, the chrome's buyers).
+- **Shadow** (20k, seed 42, d20-27, picks bouncer:2, fighter:2, ripperdoc:2, dancer:2; pimp:2 from d25, no pimp being
+  named on d20 in the moved city). The door (`bouncer_17958`, Zane Yates, Club#4896): `d22 19:47` "turned Silvio
+  Garland away at the door of Club#4896 (trouble)", `d23 00:00` "8 let in, 2 turned away (high 1, trouble 1)", `d24
+  18:49` "turned Greta Stroud away ... (a rival's colours) (turned away 2 times today: a rival's colours x2; barred
+  through d25)", `d25 00:00` "20 let in, 3 turned away (a rival's colours 3)" (the base bouncers: drunk, broke,
+  carrying). The pit (`fighter_11655`, Odessa Okafor, Fight Pit#5578): `d21 23:00` "Raven Dunmore beat Odessa Okafor
+  at Fight Pit#5578 (bets paid 0); purse 5c; Odessa Okafor hurt, to have it seen to", `d22 11:56` "Echo Greaves patched
+  Odessa Okafor up in the back room of Back Room#1971 for 6c", `d23 23:00` "Odessa Okafor beat Raven Dunmore ...; purse
+  5c" with `[money] +5c (GambleWin)`, `d25 23:00` lost again, `d26 11:37` "Lavinia Northcott patched Odessa Okafor up
+  at Ripperdoc#5566 for 12c"; `fighter_8049` (Tess Duarte) the same rivalry with Ulric Vasquez, purses 6-9c. The pimp
+  (`pimp_22006`, Ivo Voss, The Drowned Choir 9): rounds at `d25 00:51`, `03:08`, `23:41`, `d26 01:29`, `03:54` ("came
+  round the pitch of Adela Vasquez (60 y) and took the cut: 2c of 5c since the last round (1 client)"), no day post.
+  The clinic: `ripperdoc_10289` (Lavinia Northcott, Ripperdoc#5566) 27 patients in the week (installs, washes,
+  patch-ups); the base's empty Ripperdoc#5892 7 patients in the week, 65 in 30 days (base 24).
+- **Reads wrong** (the next pass): the loser's patch-up (12c at a Clinic, 6c in a back room) eats more than the 5c
+  purse, so a fighter who loses two of three is down on the week (harsh, plausible; the purse is a placeholder);
+  `pimp_21304` (Kasimir Jarrow) was named d23 in a district whose pitches were closing and lost the street d25 "living
+  off the gang's blocks" with no round, then took a Vat Tech post (named on a dying street); the colours refusals are
+  now the door's commonest (369 of 577 lines; Vale Delacroix 11 times in 30 days, the return bar holding him a day at a
+  time); off-screen "barred" is 1 in 30 days (few off-screen faces are barred); 291 of 757 Clinic-days with a
+  Ripperdoc on staff saw no patient (the booked trade spreads, the walk-in patch-up does not); the dancers' rooms of
+  1-2 (`dancer_18200`) are the venue's traffic, not this phase's; Ivo Voss's 14.7-19.5 h of travel a day after he
+  takes his gang (d26-27).
+- Numbers (prints; 20k seed 42 x 30, `--scaled --ambient-flats 50`, one run each; base main `bed8e38`):
+
+  | | base | after |
+  |---|---|---|
+  | door refusals (`door_refusals`) | 195 | 641 |
+  | refusal lines by cause | drunk 59, broke 52, high 16, carrying 10, brawler 7, dress 4, colours 2 | colours 369, drunk 81, trouble 55, broke 46, brawler 13, high 11, barred 1, dress 1 |
+  | off-screen refusals by cause (no base column; the base off screen read the purse and the drink) | | broke 46, trouble 97, colours 97, barred 1, other 1 |
+  | bouts / purses paid (coins) / losers hurt | 512 / 0 / 0 | 515 / 515 (3,937c) / 515 (2 badly) |
+  | patched (all) | 1,685 | 2,125 |
+  | named pimp-days / with a collection (no base column) | | 30 / 19 |
+  | a pimp's "quit ... to run the street" / lost the street "holding a day post" | 8 / 2 | 5 / 0 |
+  | pimp collections (`pimp_collections`; a moved city) | 59 | 49 |
+  | Ottilie Vasquez's street (D4): days, collections | d6-d13, 8 | d6-d17, 25 |
+  | patients per Clinic, d21-27: median, min, max, Clinics with none | 4, 0, 100, 8 of 34 | 6.5, 0, 77, 2 of 36 |
+  | patients per Clinic, 30 d: median, min, max | 34.5, 1, 398 | 47, 2, 359 |
+  | Clinic-days with a Ripperdoc on staff / no patient (no base column) | | 757 / 291 |
+  | washes | 551 | 554 |
+  | GOSSIP ABOUT ME lines a diary-week (20k shadow; different picks) | 1.0 (9 in 9) | 2.5 (20 in 8; one bouncer assaulted three times) |
+
+  No test (doctrine 2). One probe re-pinned on its premise: `person::probe_sixty_four_with_savings_retires` (on the
+  moved city the 600c bought a 500c Legs implant at 17:52, before the midnight roll; the savings now land ten minutes
+  before it). `SAVE_VERSION` 106 (the orchestrator renumbers at the merge): `Misery.hurt_at`,
+  `ViceState.collected`, `care::State.seen`, the W6 keys and the `Jobs2Cols` `door_stat_broke` ... `clinic_idle_days`
+  columns (serde defaults).

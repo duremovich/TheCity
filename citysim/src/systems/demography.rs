@@ -1196,6 +1196,12 @@ fn pool_member(world: &World, id: EntityId, execs: &std::collections::BTreeSet<E
         && !world.has::<Sentence>(id)
         && is_adult(world, id)
         && !execs.contains(&id)
+        // Round 7 W6 (OPEN-217): a named pimp's round is his work, in the
+        // pooled hire too (U6 kept him out of `pick_candidate` only: 20k
+        // seed 42, a named pimp quit "to run the street" at 00:07 and was
+        // hired back by the pool at 00:11, five nights running, then lost
+        // the street "holding a day post" or "away from every pitch").
+        && crate::systems::vice::pimp_district(world, id).is_none()
 }
 
 /// [`pick_candidate`]'s skill-ranked roles (the key has no distance).

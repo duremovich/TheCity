@@ -998,6 +998,35 @@ pub struct Jobs2Cols {
     pub clinic_body: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub clinic_washes: u32,
+    /// Round 7 W6 (OPEN-217): off-screen door refusals by cause (broke,
+    /// barred, trouble: drunk, high, a brawler, carrying, a hot name; a
+    /// rival's colours; the rest); bout purses paid (count, coins) and
+    /// losers hurt; named pimp-days and those with a collection; Clinic-days
+    /// with a Ripperdoc on staff at work and those with no patient.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub door_stat_broke: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub door_stat_barred: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub door_stat_trouble: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub door_stat_colours: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub door_stat_other: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub bout_purses: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub bout_purse_coins: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub bout_hurt: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub pimp_named_days: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub pimp_round_days: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub clinic_doc_days: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub clinic_idle_days: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub licences_named: u32,
     #[serde(skip_serializing_if = "is_zero_u32")]
@@ -1876,6 +1905,18 @@ impl Jobs2Cols {
                 "clinic_kept",
                 "clinic_body",
                 "clinic_washes",
+                "door_stat_broke",
+                "door_stat_barred",
+                "door_stat_trouble",
+                "door_stat_colours",
+                "door_stat_other",
+                "bout_purses",
+                "bout_purse_coins",
+                "bout_hurt",
+                "pimp_named_days",
+                "pimp_round_days",
+                "clinic_doc_days",
+                "clinic_idle_days",
                 "licences_named",
                 "bribes_named",
                 "band_refusals",
@@ -2436,6 +2477,18 @@ impl Jobs2Cols {
             self.clinic_kept.to_string(),
             self.clinic_body.to_string(),
             self.clinic_washes.to_string(),
+            self.door_stat_broke.to_string(),
+            self.door_stat_barred.to_string(),
+            self.door_stat_trouble.to_string(),
+            self.door_stat_colours.to_string(),
+            self.door_stat_other.to_string(),
+            self.bout_purses.to_string(),
+            self.bout_purse_coins.to_string(),
+            self.bout_hurt.to_string(),
+            self.pimp_named_days.to_string(),
+            self.pimp_round_days.to_string(),
+            self.clinic_doc_days.to_string(),
+            self.clinic_idle_days.to_string(),
             self.licences_named.to_string(),
             self.bribes_named.to_string(),
             self.band_refusals.to_string(),

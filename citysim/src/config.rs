@@ -698,11 +698,23 @@ pub struct NoiseCfg {
     /// within this many days takes no new record of it (`law::raise_crime_on`;
     /// 0 off).
     pub petty_rewitness_days: u16,
+    /// Round 7 W6 (OPEN-217): a shadow diary gives the word about its agent
+    /// (GOSSIP ABOUT ME) at most this many rumours a day a role (the doer,
+    /// the object), each its own folded line, and only a rumour reaching new
+    /// ears opens one; the rest fold into one line a day a role (0: no cap).
+    pub gossip_lines_day: u8,
 }
 
 impl Default for NoiseCfg {
     fn default() -> Self {
-        NoiseCfg { contest_names: 3, notice_names: 3, camp_visit_last_hour: 22, raid_names: 4, petty_rewitness_days: 7 }
+        NoiseCfg {
+            contest_names: 3,
+            notice_names: 3,
+            camp_visit_last_hour: 22,
+            raid_names: 4,
+            petty_rewitness_days: 7,
+            gossip_lines_day: 0,
+        }
     }
 }
 
@@ -1241,6 +1253,17 @@ pub struct CustomersCfg {
     /// (`Misery.drank_at`; the Statistical memory keeps no drink).
     #[serde(default)]
     pub door_stat_drink: bool,
+    /// Round 7 W6 (OPEN-217): a visitor whose name runs hot (`Reputation.heat`
+    /// at or above this: the deeds the word carries, both tiers) is trouble
+    /// at a kept door ("trouble", on `door_p`); 0 off.
+    #[serde(default)]
+    pub door_trouble_heat: f32,
+    /// Round 7 W6: an off-screen face barred from a house comes back to its
+    /// door anyway on this (a hash of him, the venue and the day; drunk,
+    /// always) and is turned away "barred"; else he stays away (round 4 T7's
+    /// `door_seen`). 0: the barred off screen always stay away.
+    #[serde(default)]
+    pub door_stat_barred_p: f32,
     pub door_p: f32,
     /// A turned-away drunk or brawler swings at the bouncer on
     /// `door_swing_p × (1 − lawfulness)`; the turned-away holds `door_grudge`.
@@ -2451,6 +2474,14 @@ pub struct CareCfg {
     /// The doctor who cut it takes this share of the implant's value from
     /// the owner's till into his wallet (`Flow::Treatment`).
     pub install_cut: f32,
+    // --- round 7 W6 (OPEN-217): the booked trade spreads by the book
+    /// A booked visit (a wash, the off-screen chrome) goes to the Clinic
+    /// with a Ripperdoc on staff and the fewest bookings today per doctor
+    /// among those within this many ticks of travel more than the nearest
+    /// from the patient's Home (the nearest on ties); 0: the nearest.
+    pub book_slack_ticks: u64,
+    /// ... weighing this many staffed Clinics nearest his Home (by tiles).
+    pub book_cands: usize,
 }
 
 /// Pressure pass round 2, R6a `[trade_verbs]` (docs/PRESSURE_PASS.md §
@@ -2553,6 +2584,8 @@ impl Default for CareCfg {
             wash_frac: 0.5,
             install_rows: Vec::new(),
             install_cut: 0.0,
+            book_slack_ticks: 0,
+            book_cands: 6,
         }
     }
 }
@@ -10625,6 +10658,19 @@ pub struct LeisureCfg {
     /// this many Fighters on shift in it (at least one): the bout went to
     /// the two longest since their last, one a night whatever the roster.
     pub bout_card_per: u16,
+    /// Round 7 W6 (OPEN-217): the bout's winner takes a purse from the
+    /// house (`Flow::GambleWin`): this many coins ...
+    pub bout_purse: i64,
+    /// ... plus this share of the main event's stakes (0 and 0: no purse).
+    pub bout_purse_share: f32,
+    /// The loser is hurt (a wound to have seen to, `customers::hurt`): his
+    /// energy and safety fall by this ...
+    pub bout_hurt: f32,
+    /// ... plus this x the winner's margin in fighting (0 and 0: the base
+    /// 0.3 and no wound) ...
+    pub bout_hurt_margin: f32,
+    /// ... and at this fall or more the line reads "badly hurt".
+    pub bout_hurt_bad: f32,
     /// A Club's door Host refuses a visitor with `rep.heat` at least this
     /// when the Host's courage beats the heat.
     pub door_heat: f32,
@@ -10680,6 +10726,11 @@ impl Default for LeisureCfg {
             big_win: 40,
             bout_hour: 23,
             bout_card_per: 4,
+            bout_purse: 0,
+            bout_purse_share: 0.0,
+            bout_hurt: 0.0,
+            bout_hurt_margin: 0.0,
+            bout_hurt_bad: 1.0,
             door_heat: 0.6,
             class_mult: [1.3, 1.0, 0.8],
             hangout_ticks: 60,

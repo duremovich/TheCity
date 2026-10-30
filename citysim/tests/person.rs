@@ -3642,9 +3642,14 @@ fn probe_sixty_four_with_savings_retires() {
     let cost = 60 * (w.mean_price() * 2 + home(&w, a).map_or(0, |h| citysim::systems::ownership::rent_for(&w, h)));
     for savings in [600i64, 20] {
         let mut w = w.clone();
+        pin(&mut w, a);
+        // Round 7 W6: the savings land just before the midnight roll (on the
+        // moved city the 600c bought a 500c Legs implant at 17:52, before the
+        // roll: the premise is the savings at the retirement, not the shop's).
+        let eve = (w.tick / TICKS_PER_DAY + 1) * TICKS_PER_DAY - 10;
+        run_to(&mut w, a, eve, |_| {});
         w.comp_mut::<Identity>(a).unwrap().age_days = 64 * citysim::time::DAYS_PER_YEAR as u32 + 10;
         w.comp_mut::<Wallet>(a).unwrap().coins = savings;
-        pin(&mut w, a);
         let start = w.tick;
         // Read at the tick the mark lands (a retired man's week may hold a
         // wedding and a clinic bought on the savings, then a post again).

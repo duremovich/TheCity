@@ -69,11 +69,19 @@ pub struct State {
     /// Round 5 U6 (OPEN-217): the off-screen chrome booked at midnight for
     /// an hour of the clinic's day (`book`, kept by `keep_bookings`).
     pub booked: Vec<Booking>,
+    /// Round 7 W6 (OPEN-217): a Clinic -> its patients since midnight (the
+    /// day's idle count, `clinic_idle_days`).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub seen: BTreeMap<EntityId, u32>,
 }
 
 impl State {
     pub fn is_empty(&self) -> bool {
-        self.asked.is_empty() && self.covers.is_empty() && self.refused.is_empty() && self.booked.is_empty()
+        self.asked.is_empty()
+            && self.covers.is_empty()
+            && self.refused.is_empty()
+            && self.booked.is_empty()
+            && self.seen.is_empty()
     }
 }
 
@@ -116,6 +124,13 @@ fn book_visit(world: &mut World, patient: EntityId, clinic: EntityId, visit: Vis
     if world.care.booked.iter().any(|b| b.patient == patient) {
         return true;
     }
+    // Round 7 W6 (OPEN-217): a visit the clinic's own stock does not tie
+    // (a wash, a new implant) goes where the book is lightest nearby.
+    let free = match &visit {
+        Visit::Wash => true,
+        Visit::Install(pick) => pick.used.is_none(),
+    };
+    let clinic = if free { book_clinic(world, patient, clinic) } else { clinic };
     let span = u64::from(to - from) + 1;
     let day = world.day();
     let h = u64::from(from) + ((hash(world, PURPOSE_BOOK, patient, day) * span as f32) as u64).min(span - 1);
@@ -123,6 +138,91 @@ fn book_visit(world: &mut World, patient: EntityId, clinic: EntityId, visit: Vis
     world.care.booked.push(Booking { patient, clinic, visit, at });
     ownership::jobs2_row(world).clinic_booked += 1;
     true
+}
+
+/// Round 7 W6 (OPEN-217; `[care] book_slack_ticks`): the Clinic a booked
+/// visit goes to: among the standing Clinics with a Ripperdoc on staff
+/// within `book_slack_ticks` of travel more than the nearest such from the
+/// patient's Home, the fewest bookings today per Ripperdoc (the nearest on
+/// ties); `proposed` (the nearest seller) without a Home or the key. Every
+/// pick was the nearest: a Clinic with nearer ones all round saw nobody
+/// (V15 `ripperdoc_9880` a week; 20k `ripperdoc_11516`, Ripperdoc#5892, no
+/// wash in 30 days), and V6's spill on a doctor's hour (`[[serves]]
+/// per_hour` 4) never binds at the city's few patients an hour.
+fn book_clinic(world: &World, patient: EntityId, proposed: EntityId) -> EntityId {
+    let Some((slack, take)) = cfg(world).map(|c| (c.book_slack_ticks, c.book_cands)).filter(|&(s, _)| s > 0) else {
+        return proposed;
+    };
+    let Some(from) = crate::systems::contracts::home_door(world, patient) else { return proposed };
+    let docs = |b: EntityId| {
+        world
+            .staff_of(b)
+            .iter()
+            .filter(|&&o| {
+                crate::systems::law::living(world, o)
+                    && !world.has::<crate::components::Sentence>(o)
+                    && world.comp::<Job>(o).is_some_and(|j| j.role == crate::components::Role::Ripperdoc)
+            })
+            .count()
+    };
+    // The nearest few by the door's tiles, then by travel (a pick a booking).
+    let mut by_tiles: Vec<(u32, EntityId)> = world
+        .buildings_of_kind(BuildingKind::Clinic)
+        .iter()
+        .copied()
+        .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished && !bd.derelict))
+        .filter(|&b| !world.is_closed(b))
+        .filter_map(|b| world.comp::<Building>(b).map(|bd| (bd.door.manhattan(from), b)))
+        .collect();
+    by_tiles.sort_unstable();
+    let cands: Vec<(u64, usize, EntityId)> = by_tiles
+        .into_iter()
+        .filter_map(|(_, b)| {
+            let n = docs(b);
+            let door = world.comp::<Building>(b)?.door;
+            (n > 0).then(|| (crate::systems::distance::travel(world, from, door), n, b))
+        })
+        .take(take.max(1))
+        .collect();
+    let Some(near) = cands.iter().map(|c| c.0).min() else { return proposed };
+    let load = |b: EntityId| world.care.booked.iter().filter(|x| x.clinic == b).count();
+    cands
+        .into_iter()
+        .filter(|c| c.0 <= near + slack)
+        // fewest booked per doctor: load / n compared as load x n' < load' x n
+        .min_by(|x, y| (load(x.2) * y.1).cmp(&(load(y.2) * x.1)).then(x.0.cmp(&y.0)).then(x.2.cmp(&y.2)))
+        .map_or(proposed, |c| c.2)
+}
+
+/// Round 7 W6 (OPEN-217): a patient arrived at `place` (`service::arrive`).
+pub fn note_seen(world: &mut World, place: EntityId) {
+    if cfg(world).is_none() || !world.comp::<Building>(place).is_some_and(|b| b.kind == BuildingKind::Clinic) {
+        return;
+    }
+    *world.care.seen.entry(place).or_default() += 1;
+}
+
+/// Round 7 W6: midnight's tally of the day's Clinics: standing and open
+/// with a Ripperdoc on staff (`clinic_doc_days`), and of those, the ones
+/// that saw no patient (`clinic_idle_days`).
+fn tally_clinics(world: &mut World) {
+    let seen = std::mem::take(&mut world.care.seen);
+    let (mut doc, mut idle) = (0u32, 0u32);
+    for &b in world.buildings_of_kind(BuildingKind::Clinic) {
+        if !world.comp::<Building>(b).is_some_and(|bd| !bd.demolished && !bd.derelict) || world.is_closed(b) {
+            continue;
+        }
+        if !staffed(world, b) {
+            continue;
+        }
+        doc += 1;
+        if seen.get(&b).copied().unwrap_or(0) == 0 {
+            idle += 1;
+        }
+    }
+    let row = ownership::jobs2_row(world);
+    row.clinic_doc_days += doc;
+    row.clinic_idle_days += idle;
 }
 
 /// Round 5 U6: the hour's bookings kept (from `hourly`): one due this hour
@@ -768,6 +868,7 @@ pub fn call_for_help(world: &mut World, w: EntityId) -> Option<EntityId> {
 /// or the absence written.
 pub fn daily(world: &mut World) {
     let Some(c) = cfg(world).cloned() else { return };
+    tally_clinics(world);
     asks(world, &c);
     covers(world, &c);
     book_washes(world, &c);

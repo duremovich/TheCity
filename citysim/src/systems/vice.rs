@@ -121,6 +121,10 @@ pub struct ViceState {
     /// at the bout to the living Fighters.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub bouts: BTreeMap<u64, u64>,
+    /// Round 7 W6 (OPEN-217): the pimps (`key`) who made a collection since
+    /// the last midnight (the named pimp-day's count, `pimp_round_days`).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub collected: std::collections::BTreeSet<u64>,
 }
 
 /// Round 6 V6: the tick of `fighter`'s last bout on the card (0: none).
@@ -983,6 +987,7 @@ pub fn pimp_collect(world: &mut World, id: EntityId, target: Option<EntityId>) -
 
 fn collection(world: &mut World, pimp: EntityId, worker: EntityId, d: DistrictId) {
     ownership::jobs2_row(world).pimp_collections += 1;
+    world.jobs2.vice.collected.insert(key(pimp));
     let kind = crate::components::ServeKind::Staff;
     crate::systems::service::encounter_post(world, "pimp", pimp, worker, None, d, kind, 0);
     let booked = book_client(world, pimp, worker, d);
@@ -1378,6 +1383,13 @@ pub fn daily(world: &mut World) {
     // R6a: the round's marks last a night.
     let since = world.tick.saturating_sub(TICKS_PER_DAY);
     world.jobs2.vice.pimp_visits.retain(|_, t| *t >= since);
+    // Round 7 W6 (OPEN-217): the day's named pimps and those who collected.
+    let named: Vec<EntityId> = world.jobs2.vice.pimps.values().copied().collect();
+    let collected = std::mem::take(&mut world.jobs2.vice.collected);
+    let ran = named.iter().filter(|&&p| collected.contains(&key(p))).count() as u32;
+    let row = ownership::jobs2_row(world);
+    row.pimp_named_days += named.len() as u32;
+    row.pimp_round_days += ran;
     name_pimps(world);
     close_brothels(world);
 }
