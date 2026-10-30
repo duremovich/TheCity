@@ -229,7 +229,8 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
         GoalKind::Found => crate::systems::founding::found_plan(world, id),
         // Hunger fix item 11 (b): a fed worker's Eat is the grocery run
         // (planned once; a hungry agent's Eat goes to the planner).
-        GoalKind::Eat if routine::fed(world, id) => routine::grocery_plan(world, id),
+        // Round 7 W1 (OPEN-243): hungry too while the children's food is short.
+        GoalKind::Eat if routine::eat_is_grocery(world, id) => routine::grocery_plan(world, id),
         _ => None,
     };
     if let Some(plan) = bypass {

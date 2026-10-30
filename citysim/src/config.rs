@@ -12657,6 +12657,19 @@ pub struct CampCfg {
     /// counts the children out of a Camp on a warning older than this many
     /// days (a warning standing; the ladder never reads it).
     pub warn_stale_days: u8,
+    /// Round 7 W1 (OPEN-243): a fed adult's Eat goal (the grocery run)
+    /// scores this while his household's claim on the pantry is short of
+    /// its children's food (`shelf::kids_short`), above `[life]
+    /// grocery_score`: the run for the children's share goes ahead of an
+    /// errand.
+    pub kids_grocery_score: f32,
+    /// ... and this on the service's warning (the household's purse first:
+    /// the run that day, ahead of the adults' own wants; no bedtime cut).
+    pub warned_grocery_score: f32,
+    /// ... and that run starts down to this energy at home (`[life]
+    /// grocery_energy_floor` is the errand's), in a day worker's small
+    /// hours too.
+    pub kids_grocery_energy_floor: f32,
 }
 
 impl Default for CampCfg {
@@ -12686,6 +12699,9 @@ impl Default for CampCfg {
             abscond_hours: [9, 17],
             p_abscond_caught: 0.75,
             warn_stale_days: 14,
+            kids_grocery_score: 0.7,
+            warned_grocery_score: 0.9,
+            kids_grocery_energy_floor: 0.15,
         }
     }
 }

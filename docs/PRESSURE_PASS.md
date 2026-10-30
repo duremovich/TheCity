@@ -3475,3 +3475,106 @@ a walk back in; the street take and the moves are the service's protection; the 
 
   No test (doctrine 2). `SAVE_VERSION` 102 (101 on the branch, renumbered at the merge after V5):
   `ViceState.bouts`, `Misery.drank_at` and the V6 keys (serde defaults).
+
+### W1, the household buys for its children (`OPEN-243`, `OPEN-231`; `shelf::kids_short`, `shelf::own_held`, `shelf::feeds_household`, `camp::adults_share`, `routine::grocery_plan`, `routine::run_level`, `lod::stat_grocery`, `goals` Eat, `[camp]` W1 keys)
+
+**The causes** (20k `isle_m_k2` seed 42 x 20, main `795943c`; a temporary probe at the children's meal printing each
+unfed household-night with its adults' tier, job, coins, carried food and claim, then traces of one Block's runs):
+1,008 household-nights unfed in 20 days, 628 with a free parent holding 6c or more and 201 more with the coins in
+another adult of the household; at 20k 500 agents are Full, so the off-screen run is most of it. Four causes, in
+the order the probe found them:
+- **The adults ate the children's food.** A jobless mother bought the children's two units by day (`stat_grocery`)
+  and the household's adults ate them by the evening: `camp::adults_share` kept the children's food back from the
+  adults only on a warning.
+- **The common units fooled every household.** In a shared Home each household's claim is its stake and the common
+  units, so every household reads the whole common pool: in Block#1226 (94 households) three common units held
+  back every stakeless family's run, the units were eaten by the evening, and at midnight a dozen children went
+  unfed on a claim of 0 beside parents holding 10-79c.
+- **Food carried counted against the children.** A worker's packed meals filled `meals_held` (Full) and `carried`
+  (off screen) toward the run's level; only a warning read the pantry alone.
+- **The Full worker never had an hour.** A day worker off shift at 18:00 under the energy line (`[life]
+  grocery_energy_floor` 0.4) slept at 18:02 and was up only in the small hours, which `day_worker_night` keeps from
+  the run (`agent_15943`, a gunsmith, 47c); his wife's run at 22:53 was dropped at midnight by the same rule and
+  she wandered the street till her shift. A hungry worker's Eat went to the planner and bought for himself.
+
+**Built:**
+- **The children's share is short** (`shelf::kids_short`): the household's own units (`shelf::own_held`: its stake,
+  scaled to the stock when the stakes are above it; the common units left out; the whole stock on a common shelf)
+  under its children's food (`[ages] child_pantry_days`). While it is short the run reads the pantry alone (Full
+  `run_level`, off screen `stat_grocery`: carried food feeds no child), the "worth the walk" and "one run cannot fill
+  it" gates do not apply (a parent walks for his children's meal however short), and the run starts down to `[camp]
+  kids_grocery_energy_floor` 0.15, in a day worker's small hours too.
+- **The household's purse** (`shelf::feeds_household`): any free adult living with a child of his household (a
+  parent, a grandparent, an adult son) shops for its children while their share is short, Full (`shopper_job`) and
+  off screen (`stat_grocery`'s jobless branch, by day as before).
+- **Hungry or fed** (`routine::eat_is_grocery`): a hungry adult's Eat is the grocery run while the children's share
+  is short; the run eats one at the shop (`[GoTo(Market) > BuyFood > EatFromInventory > GoTo(Home) > StoreFood]`,
+  `grocery_cap` buys the shortfall and one). A fed adult's Eat scores `[camp] kids_grocery_score` 0.7 ("the
+  children's food short", above the errand's 0.5).
+- **A warning moves the purse first:** on the service's warning the run scores `[camp] warned_grocery_score` 0.9
+  ("the children on the service's warning") with no bedtime cut, and off screen the hour's run comes before the
+  hour's leisure (`lod::run_statistical`: the grocery run moved ahead of `leisure::stat_hour`, for everyone).
+- **An adult with a meal's coins does not eat the children's share** (`camp::adults_share` keeps it back from an
+  adult who `life::can_buy_meal`, warned or not); the broke still eat it, so a household that truly cannot buy
+  meets the ladder as U2 built it.
+- **The `[family]` line** says whether a warned child ate: "on the service's warning since d20 (fed last night)" or
+  "(unfed N nights)". `camp_parent_106052`'s 4-y (V15, 100k) was not a hang: the father, 2-3c in his purse, bought one
+  unit a run (`d22 07:11`, `d23 21:33`: a unit is two of the child's nights) and the child ate its half unit each night (the line floors the claim, so "0 of it
+  ours" beside a fed child); the warning stands its 30 days (`warn_repeat_days`, Dylan's) while the child is fed,
+  and no second spell comes.
+
+**Numbers** (20k island seed 42 x 30, `--scaled --ambient-flats 50`, before = main `795943c`, one run each):
+
+| | before | after |
+|---|---|---|
+| ChildTaken | 90 | 41 |
+| taken on a second warning | 42 | 17 |
+| ... of those, the purse covered the food at the warning (the Custody line's "covers" or "covered") | 30 | 7 |
+| warnings | 316 | 154 |
+| ch_camp daily mean | 22.8 | 11.3 |
+| warnings standing past 14 days (`ch_warned_old` mean) | 24.2 | 7.3 |
+| street takes | 32 | 8 |
+| starvation deaths | 0 | 0 |
+| school days / child-days | 9.4 % | 9.1 % |
+| pocket units to the shelf | 780 | 396 |
+| evictions; thefts | 1,377; 1,248 | 1,369; 1,167 |
+
+The probe's unfed household-nights (20 days): 1,008 -> 617; the nights that bring the warning (a second unfed
+night) with a free adult holding the coins 110 -> 25, the broke ones 25 -> 25. School days do not move: at 20k
+school is the far, full and unpaid seat (`school_far` 17k child-days), not the Camp's headcount.
+
+**100k x 30** (seed 42, `isle_m_k2_100k`, after only, against round 6's `target/r6_100k/analyze.txt`; 63 min):
+ChildTaken 4,103 -> 3,879, taken on a second warning 3,639 -> 3,430, warnings 5,140 -> 4,583, ch_camp mean 1,188 ->
+1,085, warnings standing past 14 days mean 72.2 -> 19.0, starvation deaths 18 -> 9, school days 15.2 -> 15.1 %. **The
+100k number is not the purse.** Of the second-warning takes, the household's purse covered the grace's food at the
+warning in 331 of 3,639 (r6) -> 131 of 3,430 (W1), and one night of it in 29 -> 25; the other 3,279 -> 3,274 are
+households that could not pay one night's food at the warning ("Joss Moreau has 14c of the 20c of food and no friend
+to ask" for three children; "Nerys Kimura has 0c of the 3c"): a unit costs 1-4c (the meal price the warning reads),
+and the families are poorer. V15's reading (a tenth of the children in Camps from families with coins) holds for the
+diaries it quoted (`ceo_20314`, `ceo_61159`) and for 20k, not for the 100k count: at 100k U2's ladder takes the
+children of the broke, about 3,300 in 30 days, which is the size Dylan's ladder makes of this city's poverty (a call
+for Dylan, not this bug: no safety net, `[policy]` school meals off).
+
+**Shadow** (20k seed 42 days 20-27, `target/w1_shadow`: neglect_parent, camp_parent, school_parent, ceo,
+camp_jobless x2): the warning moves the purse (`neglect_parent_17209 d20 00:10` "Rook Fletcher (9 y), Hesper
+Fletcher (8 y), Taz Fletcher (1 y) went 2 days unfed ... (24c between them covers the 5c of food)", `d20 18:10`
+"GOAL Eat (was Unwind): score 0.900 ... because the children on the service's warning", `19:30` "-12c (Food), purse
+3c", inventory food 8 -> 11, home at 01:38, and every morning after "on the service's warning since d20 (fed last
+night)"); a fed parent shops for the children (`school_parent_20680 d22 04:30` "GOAL Eat (was Sleep): score 0.700
+... because the children's food short", BuyFood -6c, purse 1c). No ChildTaken in the ten diaries. The household
+that cannot buy meets the ladder (the run's events): "came to the door of Block#535: Moth Inchbald (17 y), Hiro
+Inchbald (15 y) went 2 days unfed ... Static Inchbald has 1c of the 3c of food and asked friends for the rest:
+Corwin Whitlock had nothing to spare; Ivo Varley had nothing to spare; Hana Upton had nothing to spare: still 2c
+short" (d19), then d22 "took Moth Inchbald from Block#535 ...: unfed 3 days again, inside the warning of d19".
+
+**Reads wrong / open** (the next pass): a run started late is cut by Sleep or a Contract on the walk home
+(`neglect_parent_17209 d20 22:19` "plan interrupted: Eat -> Contract"; `agent_15943 d3 20:13` "Eat -> Sleep") and
+the food reaches the shelf only through the midnight pocket or the next Idle's StoreFood; a far Market (79 and 159
+min each way at night from the street) is still the least-detour pick. 7 of 17 second-warning takes still had the
+purse at the warning (coins spent before the run, or a Full worker's hours). 330 single unfed nights with a
+parent's coins remain (no warning: a child's first night home, a run that ended after midnight). The hungry
+grocery run's eat step applies to any hungry adult's idle run, not only the children's.
+
+Under-18: nothing here touches a victim pick, a fight, a fine or a punishment; nothing calls `law`. The children's
+food is bought and kept back for them; an unfed day still counts only toward the service's take. No test
+(doctrine 2). No save change (the `[camp]` keys are config, serde defaults).

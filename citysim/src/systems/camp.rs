@@ -896,19 +896,31 @@ pub fn household_on_warning(world: &World, id: EntityId, home: EntityId) -> bool
 /// food a family bought for its children, 186 of 372 second-warning takes
 /// at 20k x 30 in households whose purse covered the food), less his own
 /// household's children's food on its warning.
+///
+/// Round 7 W1 (OPEN-243): an adult who holds a meal's coins
+/// (`life::can_buy_meal`) keeps the children's food back too, warned or
+/// not: he buys his own meal rather than eat his children's (a jobless
+/// father bought the children's two units by day and the household's
+/// adults ate them by the evening, 628 of 1,008 unfed household-nights at
+/// 20k x 20 had a free parent holding 6c or more). The broke still eat it.
 pub fn adults_share(world: &World, id: EntityId, home: EntityId) -> u32 {
     if let Some(c) = crate::systems::shelf::adult_reach(world, id, home) {
         let mine = (c + 1e-3).floor() as u32;
-        if !household_on_warning(world, id, home) {
+        if !household_on_warning(world, id, home) && !keeps_back(world, id) {
             return mine;
         }
         return mine.saturating_sub(crate::systems::shelf::kids_need(world, id, home));
     }
     let stock = world.comp::<Building>(home).map_or(0, |b| b.stock_food);
-    if !home_on_warning(world, home) {
+    if !home_on_warning(world, home) && !keeps_back(world, id) {
         return stock;
     }
     stock.saturating_sub(crate::systems::ages::children_food_need(world, home))
+}
+
+/// Round 7 W1: `id` buys his own meal rather than eat the children's food.
+fn keeps_back(world: &World, id: EntityId) -> bool {
+    crate::systems::ages::on(world) && crate::systems::life::can_buy_meal(world, id)
 }
 
 /// Round 4 T1 (OPEN-231): `p` can have his Camp children home: alive,
