@@ -298,8 +298,16 @@ pub fn arrivals(world: &mut World) {
         if here.is_none() || here != there {
             continue;
         }
-        if crate::systems::presence::asleep(world, id) {
-            ownership::jobs2_row(world).asleep_acts += 1;
+        // Round 8 X1 (`OPEN-246`): the asleep make no demand and attend no
+        // service; nor is a sleeping culprit asked (V16 `orderly_20962 d26
+        // 12:50`: blackmail paid while the blackmailer slept in the same
+        // Block). The visit waits for both to be up.
+        let sleeping = |x: EntityId| crate::systems::presence::asleep(world, x);
+        if sleeping(id) || (v.why == VisitWhy::Blackmail && sleeping(v.kin)) {
+            continue;
+        }
+        if world.has::<Sentence>(id) {
+            continue;
         }
         world.visits.remove(&id);
         match v.why {
@@ -474,6 +482,19 @@ pub fn robbed_by_within(world: &World, w: EntityId, actor: EntityId) -> bool {
     })
 }
 
+/// Round 8 X1 (`OPEN-246`): `w` means to tell the law of `actor`: the
+/// promise stands `[crime.case] word_hours` (one per pair, a second robbery
+/// renews it); `law::keep_word` keeps or drops it with his line.
+fn promise(world: &mut World, w: EntityId, actor: EntityId) {
+    let until = world.tick + world.config.crime.case.word_hours * crate::time::TICKS_PER_HOUR;
+    if let Some(x) = world.consequence.owed_word.iter_mut().find(|x| x.0 == w && x.1 == actor) {
+        x.2 = x.2.max(until);
+        return;
+    }
+    world.consequence.owed_word.push((w, actor, until));
+    ownership::jobs2_row(world).word_meant += 1;
+}
+
 /// Round 7 W5 (`OPEN-237`; `gang::extort`): a payer awake at the door
 /// paid `coins` to `actor`'s shakedown of `home`: his line, as the woken
 /// sleeper's (`woke`): he means to tell the law (the word owed, read by
@@ -487,11 +508,12 @@ pub fn paid_awake(world: &mut World, w: EntityId, actor: EntityId, home: EntityI
     let now = world.tick;
     let (wn, an, at) = (world.name_of(w), world.name_of(actor), world.name_of(home));
     let again = if again { ", again" } else { "" };
-    let text = if crate::systems::law::tells_the_law(world, w, actor) {
-        let until = now + world.config.crime.case.tell_days * crate::time::TICKS_PER_DAY;
-        world.consequence.owed_word.retain(|x| x.2 > now);
-        world.consequence.owed_word.push((w, actor, until));
-        ownership::jobs2_row(world).word_meant += 1;
+    let _ = now;
+    // Round 8 X1: a robot at the door detained him: nothing left to tell.
+    let text = if world.has::<Sentence>(actor) {
+        format!("{wn} paid {an}'s shakedown at {at}{again} ({coins}c); the law has {an} already")
+    } else if crate::systems::law::tells_the_law(world, w, actor) {
+        promise(world, w, actor);
         let he = pro(world, w).0;
         format!("{wn} paid {an}'s shakedown at {at}{again} ({coins}c); {he} means to tell the law")
     } else {
@@ -534,7 +556,6 @@ pub fn woke(world: &mut World) {
     let mut sleepers: Vec<EntityId> = ready.iter().map(|x| x.0).collect();
     sleepers.sort_unstable();
     sleepers.dedup();
-    let until = now + world.config.crime.case.tell_days * crate::time::TICKS_PER_DAY;
     for k in sleepers {
         let mine: Vec<(EntityId, EntityId, Tick, i64)> = ready.iter().copied().filter(|x| x.0 == k).collect();
         let coins: i64 = mine.iter().map(|x| x.3).sum();
@@ -563,16 +584,20 @@ pub fn woke(world: &mut World) {
         };
         let kn = world.name_of(k);
         // The one he tells of: the first of them he would name.
-        let teller = by.iter().copied().find(|&a| crate::systems::law::tells_the_law(world, k, a));
-        let text = match teller {
-            Some(a) => {
-                world.consequence.owed_word.retain(|x| x.2 > now);
-                world.consequence.owed_word.push((k, a, until));
-                crate::systems::ownership::jobs2_row(world).word_meant += 1;
+        let teller =
+            by.iter().copied().find(|&a| !world.has::<Sentence>(a) && crate::systems::law::tells_the_law(world, k, a));
+        let held = by.iter().copied().find(|&a| world.has::<Sentence>(a));
+        let text = match (teller, held) {
+            (Some(a), _) => {
+                promise(world, k, a);
                 let he = pro(world, k).0;
                 format!("{kn} woke {place} to find {coins}c gone from the purse: {who}; {he} means to tell the law")
             }
-            None => {
+            (None, Some(a)) => {
+                let an = world.name_of(a);
+                format!("{kn} woke {place} to find {coins}c gone from the purse: {who}; the law has {an} already")
+            }
+            (None, None) => {
                 crate::systems::ownership::jobs2_row(world).sleeper_quiet += 1;
                 let why = crate::systems::law::keeps_from_law(world, k, by[0]).unwrap_or_default();
                 format!("{kn} woke {place} to find {coins}c gone from the purse: {who}; tells nobody: {why}")
@@ -591,12 +616,14 @@ pub fn woke(world: &mut World) {
 /// Round 7 W2: a report filed (`law::file_report_as`): a robbed sleeper's
 /// word reached the law (`sleeper_reports`).
 pub fn word_given(world: &mut World, crime: Crime, suspect: EntityId, witness: EntityId) {
-    if crime != Crime::Extortion || world.consequence.owed_word.is_empty() {
+    // Round 8 X1: any crime of the man he promised to name keeps the word
+    // (the tell names the freshest sighting, not always the shakedown).
+    let _ = crime;
+    if world.consequence.owed_word.is_empty() {
         return;
     }
-    let now = world.tick;
     let before = world.consequence.owed_word.len();
-    world.consequence.owed_word.retain(|&(v, s, until)| !(v == witness && s == suspect && until >= now));
+    world.consequence.owed_word.retain(|&(v, s, _)| !(v == witness && s == suspect));
     let n = before - world.consequence.owed_word.len();
     if n > 0 {
         let row = crate::systems::ownership::jobs2_row(world);
@@ -657,6 +684,10 @@ pub fn blackmailed(world: &mut World, w: EntityId, culprit: EntityId, walked: bo
         return;
     };
     let b = world.consequence.blackmail[i].clone();
+    // Round 8 X1: a demand by a sleeper (0 is right; `arrivals` waits).
+    if walked && crate::systems::presence::asleep(world, w) {
+        ownership::jobs2_row(world).asleep_acts += 1;
+    }
     let purse = world.purse(Some(culprit)).max(0);
     let demand = ((purse as f32 * c.bm_demand_share).round() as i64).clamp(c.bm_demand_min, c.bm_demand_max);
     let (here, place) = place_of(world, culprit);
@@ -697,6 +728,9 @@ pub fn blackmailed(world: &mut World, w: EntityId, culprit: EntityId, walked: bo
         let tile = world.comp::<Position>(w).map_or_else(Default::default, |p| p.tile);
         let mods = crate::systems::law::FightMods { kill_mult: c.bm_kill_mult, ..Default::default() };
         let (winner, loser, died) = crate::systems::law::resolve_fight_mods(world, culprit, w, mods);
+        if died && loser == culprit {
+            crate::systems::demography::defended(world, culprit);
+        }
         let end = if died {
             format!(", {} died", world.name_of(loser))
         } else if winner == w {
@@ -1039,9 +1073,20 @@ fn cell_day(world: &mut World, c: &ConsequenceCfg, jail: EntityId, p: EntityId, 
         world.edge(p, m).filter(|e| e.affinity < c.cell_fight_affinity).map(|_| "bad blood")
     };
     if roll(world, 1) < c.cell_fight_p * (0.5 + t.pride) {
-        if let Some((m, why)) = others.iter().find_map(|&m| dislike(world, m).map(|w| (m, w))) {
+        // Round 8 X1: the under-18 rule at the pick (a child is never held;
+        // `resolve_fight_mods` is the backstop).
+        let pick = others
+            .iter()
+            .filter(|&&m| {
+                !crate::systems::ages::is_protected(world, m) && !crate::systems::ages::is_protected(world, p)
+            })
+            .find_map(|&m| dislike(world, m).map(|w| (m, w)));
+        if let Some((m, why)) = pick {
             let mods = crate::systems::law::FightMods { kill_mult: c.cell_kill_mult, ..Default::default() };
             let (winner, loser, died) = crate::systems::law::resolve_fight_mods(world, p, m, mods);
+            if died && loser == p {
+                crate::systems::demography::defended(world, p);
+            }
             if living(world, loser) {
                 crate::systems::grudges::add(world, loser, winner, GrudgeCause::Assaulted, 0.4, 0);
             }
@@ -1053,6 +1098,16 @@ fn cell_day(world: &mut World, c: &ConsequenceCfg, jail: EntityId, p: EntityId, 
                 world.name_of(winner)
             );
             world.push_event(EventKind::Cells, &[p, m, jail], text);
+            // Round 8 X1 (`OPEN-246`): a crime in the cells, through the
+            // crime path (the cellmates and the guards inside see it; the
+            // case is `law::cell_case`'s); the starter who fell is charged
+            // with nothing.
+            if living(world, p) {
+                let murder = died && loser == m;
+                let crime = if murder { Crime::Murder } else { Crime::Assault };
+                let tile = world.comp::<Position>(p).map_or_else(Default::default, |x| x.tile);
+                crate::systems::law::raise_crime_on(world, p, (!murder).then_some(m), Some(m), crime, tile);
+            }
             for x in [p, m] {
                 if let Some(r) = world.consequence.inside_mut(x) {
                     r.fights = r.fights.saturating_add(1);

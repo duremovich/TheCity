@@ -1076,8 +1076,13 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
             // R5: so is a try-out at a front (the planner's `at(Hideout)`
             // reads the building's kind).
             let tryout = goal == Some(crate::components::GoalKind::JoinGang) && crate::systems::crew::on(world);
+            // Round 8 X1 (`OPEN-246`): a promise's ReportCrime at a Station or
+            // the Precinct (the planner's `at(Hall)` reads the building's kind).
+            let word = kind == ActionKind::ReportCrime
+                && step.target.is_some_and(|s| crate::systems::law::owes_word_on(world, id, s));
             if scav_round
                 || tryout
+                || word
                 || (goal == Some(crate::components::GoalKind::Work)
                     && (crate::systems::shift::scripted(world, id) || crate::systems::jobs::sweep_round_on(world, id)))
             {
@@ -2056,6 +2061,18 @@ impl World {
         let guard_at_jail = self.comp::<Building>(b).is_some_and(|bd| {
             matches!(bd.kind, crate::components::BuildingKind::Jail | crate::components::BuildingKind::Station)
         }) && crate::systems::law::is_guard(self, agent);
+        // Round 8 X1 (`OPEN-246`): a witness come to the desk to give his
+        // word (ten minutes at the counter): a Station or a Hall at its
+        // cap does not turn a reporter away (a ReportCrime plan, any witness).
+        let at_desk = self.comp::<Building>(b).is_some_and(|bd| {
+            matches!(
+                bd.kind,
+                crate::components::BuildingKind::Jail
+                    | crate::components::BuildingKind::Station
+                    | crate::components::BuildingKind::Hall
+            )
+        }) && self.comp::<Brain>(agent).and_then(|x| x.plan_goal())
+            == Some(crate::components::GoalKind::ReportCrime);
         // Residents always get into their own Home (births may exceed the cap).
         let own_home = self.comp::<Household>(agent).and_then(|h| h.home) == Some(b);
         // M12: a booked guest gets into their Hotel, a squatter into the
@@ -2072,6 +2089,7 @@ impl World {
         // Jobs and room J13: a trade's staff into their workplace, a Super
         // into the Blocks of his round.
         guard_at_jail
+            || at_desk
             || own_home
             || own_bed
             || sweeper

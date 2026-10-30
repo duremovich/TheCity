@@ -507,6 +507,10 @@ fn brawl(
     let tile = world.comp::<Position>(a).map_or_else(Default::default, |p| p.tile);
     let mods = crate::systems::law::FightMods { kill_mult: c.brawl_kill_mult, ..Default::default() };
     let (winner, loser, died) = crate::systems::law::resolve_fight_mods(world, a, b, mods);
+    // Round 8 X1 (`OPEN-246`): the starter who fell started it (no Murder case).
+    if died && loser == a {
+        crate::systems::demography::defended(world, a);
+    }
     let place = ground.map_or_else(|| "on the street".to_string(), |g| format!("at {}", world.name_of(g)));
     let text = format!(
         "{} started a brawl with {} {place} (miserable {:+.2} and {state}; {why}); {} won{}",
@@ -561,6 +565,9 @@ fn stat_brawl(world: &mut World, c: &MiseryCfg, a: EntityId, m: f32) {
     }
     let mods = crate::systems::law::FightMods { kill_mult: c.brawl_kill_mult, ..Default::default() };
     let (winner, _, died) = crate::systems::law::resolve_fight_mods(world, a, b, mods);
+    if died && winner != a {
+        crate::systems::demography::defended(world, a);
+    }
     let text = format!(
         "{} started a brawl with {} (off screen; miserable {:+.2}); {} won{}",
         world.name_of(a),

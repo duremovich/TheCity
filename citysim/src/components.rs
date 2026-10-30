@@ -3021,6 +3021,11 @@ pub struct Corpse {
     /// (`demography::find_bodies`); off for a death nobody has come upon.
     #[serde(default)]
     pub found: bool,
+    /// Round 8 X1 (`OPEN-246`): the dead struck first and fell to the one he
+    /// went for (self-defence), or died resisting arrest at a guard's hands:
+    /// the found body's case names nobody for a Murder.
+    #[serde(default)]
+    pub defended: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
