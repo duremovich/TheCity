@@ -819,6 +819,8 @@ fn chaseable(world: &World, s: EntityId, seen: (TilePos, Tick), by: Option<Pursu
             // suspect another guard is after is theirs.
             && crate::systems::life::sighting_fresh_at(world, seen, p.tile)
             && !claimed.contains(s)
+            // Round 7 W3: a warrant handed to another guard (his collar) is his.
+            && !handed_to_other(world, p.guard, s)
             // M16a (plan C31): never the buyer of a guard on the take.
             && !crate::systems::contracts::on_take_of(world, p.guard, s)
             // Shadow V4 bug 11: a corp guard's warrants on its beat only.
@@ -826,6 +828,18 @@ fn chaseable(world: &World, s: EntityId, seen: (TilePos, Tick), by: Option<Pursu
     };
     // The cheap reach test first (the same conjunction, reordered).
     by.is_none_or(near) && located(world, s)
+}
+
+/// Round 7 W3 (`OPEN-244`): `s` is a guard other than `guard`'s collar by
+/// hand-on (`handoffs`, inside `[justice] collar_hours`): a warrant taken to
+/// the door was served by whichever guard stood nearer.
+fn handed_to_other(world: &World, guard: EntityId, s: EntityId) -> bool {
+    if world.handoffs.is_empty() {
+        return false;
+    }
+    let hours = world.config.justice.as_ref().map_or(0, |c| c.collar_hours);
+    let since = world.tick.saturating_sub(hours * crate::time::TICKS_PER_HOUR);
+    world.handoffs.iter().any(|(&g, &(x, t))| g != guard && x == s && t >= since && living(world, g))
 }
 
 /// The L1 claim set for a pursuer (empty for the whole city). The perf
@@ -1014,6 +1028,108 @@ pub fn chase_dropped(world: &mut World, guard: EntityId, winner: Option<GoalKind
     let mut actors = vec![guard, s];
     actors.extend(receiver.map(|(r, _)| r));
     world.push_event(EventKind::Pursuit, &actors, text);
+}
+
+/// Pressure pass round 7, W3 (`OPEN-244`; `[justice] door_from_hour`..
+/// `door_to_hour`): on the hour at night, each open warrant whose suspect no
+/// guard has seen within `[crime] suspect_seen_ticks` (the chase never starts
+/// without a sighting: 296 warrants stood at day 30 of 20k x 30, a guard made
+/// 0.65 arrests a week) and who is inside his own Home goes to the nearest
+/// free city guard on shift within his pursuit radius (`handoff_guard`'s
+/// tests, one warrant a guard): the address is the sighting
+/// (`World::set_last_seen` at the door, he is in) and the warrant his collar
+/// (`handoffs`), so the arrest is made at home. Never a minor
+/// (`ages::is_protected`), nor a warrant for sleeping rough alone.
+fn serve_at_door(world: &mut World) {
+    let Some((from, to)) = world.config.justice.as_ref().map(|c| (c.door_from_hour, c.door_to_hour)) else { return };
+    if from == to {
+        return;
+    }
+    let hour = (world.tick_of_day() / crate::time::TICKS_PER_HOUR as u16) as u8;
+    let open = if from < to { hour >= from && hour < to } else { hour >= from || hour < to };
+    if !open {
+        return;
+    }
+    let now = world.tick;
+    let window = world.config.crime.suspect_seen_ticks;
+    let hours = world.config.justice.as_ref().map_or(0, |c| c.collar_hours);
+    let since = now.saturating_sub(hours * crate::time::TICKS_PER_HOUR);
+    let tod = world.tick_of_day();
+    // The free city guards on shift, with bodies, holding no warrant now.
+    let mut free: Vec<(EntityId, TilePos)> = world
+        .guards()
+        .iter()
+        .copied()
+        .filter(|&g| is_city_guard(world, g) && living(world, g) && !world.has::<Sentence>(g))
+        .filter(|&g| !world.handoffs.get(&g).is_some_and(|&(_, t)| t >= since))
+        .filter(|&g| {
+            world.comp::<Brain>(g).is_some_and(|b| {
+                b.lod != crate::components::Lod::Statistical
+                    && b.cuffed_by.is_none()
+                    && b.escorting.is_none()
+                    && b.plan_goal() != Some(GoalKind::Arrest)
+            })
+        })
+        .filter(|&g| {
+            world
+                .comp::<Job>(g)
+                .is_some_and(|j| j.on_shift(tod) && crate::exec::routine::workday_of(world, g, j, j.shift_key_at(now)))
+        })
+        .filter_map(|g| world.comp::<Position>(g).map(|p| (g, p.tile)))
+        .collect();
+    if free.is_empty() {
+        return;
+    }
+    let suspects: Vec<EntityId> = world.open_suspects().collect();
+    for s in suspects {
+        if free.is_empty() {
+            break;
+        }
+        if !living(world, s)
+            || world.has::<Sentence>(s)
+            || crate::systems::ages::is_protected(world, s)
+            || world.comp::<Brain>(s).is_none_or(|b| b.cuffed_by.is_some())
+            || world.last_seen().get(&s).is_some_and(|&(_, t)| now.saturating_sub(t) <= window)
+            || world.wanted_only_for_vagrancy(s)
+            || world.claimed_by_other(EntityId::NONE, s)
+        {
+            continue;
+        }
+        let Some(home) = world.comp::<crate::components::Household>(s).and_then(|h| h.home) else { continue };
+        if world.comp::<Position>(s).and_then(|p| p.building) != Some(home) {
+            continue;
+        }
+        let Some(door) = world.comp::<Building>(home).map(|b| b.door) else { continue };
+        let Some(i) = free
+            .iter()
+            .enumerate()
+            .filter(|&(_, &(g, t))| {
+                g != s
+                    && t.manhattan(door) <= pursuit_radius_for(world, g)
+                    && !crate::systems::contracts::on_take_of(world, g, s)
+            })
+            .min_by_key(|&(_, &(g, t))| (t.manhattan(door), g))
+            .map(|(i, _)| i)
+        else {
+            continue;
+        };
+        let (g, gt) = free.swap_remove(i);
+        if world.comp::<Brain>(s).is_some_and(|b| b.lod == crate::components::Lod::Statistical) {
+            crate::systems::lod::set_lod(world, s, crate::components::Lod::Coarse);
+        }
+        world.set_last_seen(s, (door, now));
+        world.handoffs.insert(g, (s, now));
+        crate::systems::ownership::jobs2_row(world).law_door_taken += 1;
+        let charge = wanted_for(world, s).map_or_else(String::new, |c| format!(" for {}", charge_label(world, s, c)));
+        let text = format!(
+            "{} took the warrant on {}{charge} to the door of {}, {} tiles off: home tonight, never seen on the street",
+            world.name_of(g),
+            world.name_of(s),
+            world.name_of(home),
+            gt.manhattan(door)
+        );
+        world.push_event(EventKind::Pursuit, &[g, s], text);
+    }
 }
 
 /// `chase_dropped`'s hand-on: the nearest guard to `at` (the suspect's last
@@ -1555,10 +1671,20 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
     }
     let charge =
         wanted_for(world, suspect).map_or_else(String::new, |c| format!(" for {}", charge_label(world, suspect, c)));
+    // Round 7 W3: the arrest at home (the warrant taken to his door).
+    let home = world.comp::<crate::components::Household>(suspect).and_then(|h| h.home);
+    let at_home = home.is_some() && world.comp::<Position>(suspect).and_then(|p| p.building) == home;
+    let place = match home.filter(|_| at_home) {
+        Some(h) => {
+            crate::systems::ownership::jobs2_row(world).law_door_arrests += 1;
+            format!(" at home in {}", world.name_of(h))
+        }
+        None => String::new(),
+    };
     world.push_event(
         EventKind::Arrest,
         &[guard, suspect],
-        format!("{} arrested {}{charge}", world.name_of(guard), world.name_of(suspect)),
+        format!("{} arrested {}{charge}{place}", world.name_of(guard), world.name_of(suspect)),
     );
     true
 }
@@ -2174,6 +2300,8 @@ pub fn run(world: &mut World) {
     crate::prof::timed!("law::find_bodies", crate::systems::demography::find_bodies(world));
     if world.tick.is_multiple_of(crate::time::TICKS_PER_HOUR) {
         crate::prof::timed!("law::tell_the_beat", tell_the_beat(world));
+        // Round 7 W3 (`OPEN-244`): the warrant the street never saw, at the door.
+        crate::prof::timed!("law::serve_at_door", serve_at_door(world));
     }
     // The island pass phase 7: the transfer vans at the Precinct.
     crate::prof::timed!("law::stations::van_tick", crate::systems::stations::van_tick(world));
@@ -2188,6 +2316,9 @@ pub fn run(world: &mut World) {
     }
     if crate::systems::midnight::due(world, crate::systems::midnight::Mid::Law) {
         crate::prof::timed!("law::expire_warrants", expire_warrants(world));
+        // Round 7 W3: the warrants standing (a print).
+        let open = world.open_suspects().count() as u32;
+        crate::systems::ownership::jobs2_row(world).law_open_warrants = open;
         // L2 (L21): the held prisoners' day (meetings, the pitch), before their meal.
         crate::prof::timed!("law::held_daily", held_daily(world));
         crate::prof::timed!("law::jail_upkeep", jail_upkeep(world));

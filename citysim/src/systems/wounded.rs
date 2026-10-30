@@ -131,6 +131,7 @@ pub fn down(world: &mut World, id: EntityId, by: Option<EntityId>) {
             clinic: clinic_near(world, tile),
             care_by: None,
             called: None,
+            tried: Vec::new(),
             aided: false,
         },
     );
@@ -310,8 +311,17 @@ pub fn gang_abandons(world: &World, gang: EntityId) -> bool {
 /// What `a` is to the downed `w` for a rescue: the term (`rel_w` for kin,
 /// the gang's temperament, 1.0 for a colleague, a fellow city guard or the
 /// Trauma corp's guard) and whether it is a Trauma call (any distance).
-/// `None`: no tie that carries.
+/// `None`: no tie that carries. Pressure pass round 7, W3 (`OPEN-244`): the
+/// one the downed called (`care::call_for_help`, a stranger when no tied body
+/// could come) answers on `[care] call_term` when nothing else ties him.
 fn tie(world: &World, a: EntityId, w: EntityId, rec: &Wounded) -> Option<(f32, bool, Tie)> {
+    tie_of(world, a, w, rec).or_else(|| {
+        let c = crate::systems::care::cfg(world)?;
+        (rec.called == Some(a) && c.call_radius > 0).then_some((c.call_term, false, Tie::Stranger))
+    })
+}
+
+fn tie_of(world: &World, a: EntityId, w: EntityId, rec: &Wounded) -> Option<(f32, bool, Tie)> {
     if let Some(c) = rec.trauma {
         let guard_of = world
             .comp::<Job>(a)
@@ -401,6 +411,17 @@ fn pick(world: &World, a: EntityId) -> Option<(EntityId, f32, bool, Tie)> {
         if w == a || rec.stable || rec.rescuer.is_some_and(|x| x != a) {
             continue;
         }
+        // Pressure pass round 7, W3 (`OPEN-244`): a rescue in hand holds (his
+        // own claim, the body on his back): the reach and the clock were read
+        // when he took it up, and a carrier who dropped a body mid-carry when
+        // the clinic read too far (or his stranger's tie lapsed) left it to
+        // call again.
+        if rec.rescuer == Some(a) {
+            let term = tie(world, a, w, rec).unwrap_or_else(|| {
+                (crate::systems::care::cfg(world).map_or(0.5, |c| c.call_term), false, Tie::Stranger)
+            });
+            return Some((w, term.0, term.1, term.2));
+        }
         let Some((term, trauma, how)) = tie(world, a, w, rec) else { continue };
         let at = world.comp::<Position>(w).map_or(rec.tile, |p| p.tile);
         let d = me.manhattan(at);
@@ -449,7 +470,11 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
         Consideration::new("1-danger", if danger { 0.0 } else { 1.0 }, Curve::Linear { m: 0.5, b: 0.5 }),
     ];
     let cfg = &world.config.wounded;
-    Some((cs, cfg.rescue_flat + if trauma { cfg.trauma_flat } else { 0.0 }))
+    // Round 7 W3: the callee's Rescue carries `[care] call_flat` (a colleague
+    // called three times went on with his shift).
+    let called =
+        if rec.called == Some(id) { crate::systems::care::cfg(world).map_or(0.0, |c| c.call_flat) } else { 0.0 };
+    Some((cs, cfg.rescue_flat + called + if trauma { cfg.trauma_flat } else { 0.0 }))
 }
 
 /// The Rescue's scripted plan: `GoTo(downed) → CarryWounded → GoTo(Clinic)

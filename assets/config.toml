@@ -5250,6 +5250,10 @@ ban_break_lawfulness = 0.1         # a banned rider under this lawfulness boards
 wary_hours = 24                    # caught this recently, he jumps no gate (pays or walks): the ban takes three bad days, not one bad hour
 beat_cooldown_days = 3             # round 3 S3 (OPEN-223): beaten this recently, a caught dodger is turned off the platform and walks,
                                    # not beaten again (a banned rider who boarded anyway was beaten at the El 6 days of 7)
+handle_minutes = 6                 # round 7 W3 (OPEN-244): a guard handles one dodger at a time: a catch holds him this long,
+                                   # and a gate jumped in front of him meanwhile goes through (a guard beat 18 in 11 minutes)
+book_age = 60                      # round 7 W3: a broke dodger this old or more (or sick, or wounded) is booked, not beaten:
+                                   # the catch on his record toward the ban, no blow (0: the old are beaten like anyone)
 # Pressure pass round 3, S3 (docs/PRESSURE_PASS.md § S3, OPEN-223): justice that reads right. The cells keep the body
 # alive and the watch acts on what it sees. Placeholders.
 [justice]
@@ -5262,6 +5266,12 @@ collar_hours = 2                   # a guard who saw a crime past petty himself 
                                    # witnessed 132 crimes in a week and arrested none; [life] arrest_off_shift 0 shut him out)
 collar_flat = 0.5                  # ... and his Arrest goal carries this flat while he has one (a guard who saw a murder on
                                    # his commute walked on to the desk: Work scored 0.99)
+chase_overtime_hours = 2           # round 7 W3 (OPEN-244): a chase begun this many hours ago or less is finished past the
+                                   # shift's end (a guard on a suspect at 05:48 gave him up at 06:18: "the shift is over")
+door_from_hour = 22                # round 7 W3: the warrant at the door. From this hour to door_to_hour (across midnight;
+door_to_hour = 6                   # equal: off) a warrant whose suspect no guard has seen within [crime] suspect_seen_ticks and
+                                   # who is inside his own Home goes to the nearest free city guard on shift within his pursuit
+                                   # radius: the address is the sighting, the arrest is made at home (the street never saw him)
 # The pressure pass round 2, R4 (OPEN-218, OPEN-219): the diary's folds and the Camp answer's hour.
 [noise]
 contest_names = 3                  # a blow on a rival's hold names this many of the holders who saw it (the rest "and N more")
@@ -5283,6 +5293,12 @@ aid_min = 180                      # the first helper binds the wound as he lift
 beat_term = 0.9                    # a city guard on shift within [wounded] rescue_radius carries anyone down (the beat)
 call_every_min = 30                # the downed calls one tied body (kin, Friend, loyal gang-mate, colleague) able to reach it
                                    # and a doctor before it bleeds out; again this often while nobody has come
+call_radius = 40                   # round 7 W3 (OPEN-244): a callee not come by the next call is passed over; with no tied body
+                                   # able, the call reaches the nearest who can: a city guard on shift or the doctor's own staff
+                                   # on duty within this many tiles, or a passer-by within help_radius (0: tied bodies only)
+call_term = 0.8                    # ... the Rescue tie's term for a called stranger ...
+call_flat = 0.3                    # ... and the flat the callee's Rescue carries (a colleague called three times by a bleeding
+                                   # 61-y went on with his shift)
 back_stabilise_price = 30          # a back room stabilises a carried downed body for this ([wounded] stabilise_price 80)
 doctor_cut = 0.25                  # the fee: the doctor on the table takes this share of a Clinic's fee into his wallet
 slate_down = 10                    # the short: the doctor treats (or patches) a pool short of the fee for this down ...

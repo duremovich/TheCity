@@ -512,10 +512,12 @@ pub fn wake_bystanders(world: &mut World, w: EntityId, tile: crate::components::
 pub fn bystander(world: &World, id: EntityId) -> bool {
     let Some(c) = cfg(world) else { return false };
     let Some(p) = world.comp::<crate::components::Position>(id) else { return false };
-    world
-        .wounded
-        .iter()
-        .any(|(&w, r)| w != id && !r.stable && crate::systems::law::chebyshev(r.tile, p.tile) <= c.help_radius)
+    // Round 7 W3: the one it called, wherever he is.
+    world.wounded.iter().any(|(&w, r)| {
+        w != id
+            && !r.stable
+            && (r.called == Some(id) || crate::systems::law::chebyshev(r.tile, p.tile) <= c.help_radius)
+    })
 }
 
 /// A guard on the beat for any downed body: a city guard on shift.
@@ -597,21 +599,74 @@ pub fn staffed(world: &World, place: EntityId) -> bool {
 /// the best tied body (kin, a Friend, a gang-mate, a colleague; the highest
 /// affinity) who can reach it and the doctor before it bleeds out (a tile a
 /// tick), not already on a Rescue. Returns the callee.
+///
+/// Pressure pass round 7, W3 (`OPEN-244`): a callee who has not come by the
+/// next call is passed over (`Wounded.tried`; a bleeding 61-y called the same
+/// colleague three times while he worked on). With no tied body able, the
+/// call reaches the nearest stranger who can make it in time: a city guard on
+/// shift or the doctor's own staff on duty within `call_radius`, or an adult
+/// passer-by within `help_radius`. When nobody can, the line says why, once
+/// a turn of the calls (the first call, or the one after a callee failed).
 pub fn call_for_help(world: &mut World, w: EntityId) -> Option<EntityId> {
-    let every = Tick::from(cfg(world)?.call_every_min.max(1));
+    let c = cfg(world)?.clone();
+    let every = Tick::from(c.call_every_min.max(1));
     let rec = world.wounded.get(&w)?.clone();
     if rec.stable || rec.rescuer.is_some() || world.tick.saturating_sub(rec.since) % every != 0 {
         return None;
     }
-    let at = world.comp::<crate::components::Position>(w).map_or(rec.tile, |p| p.tile);
-    let doc = rec.clinic?;
+    // Round 7 W3: on someone's back (a carrier whose claim lapsed) he calls nobody.
+    if world.comp::<Brain>(w).and_then(|b| b.cuffed_by).is_some_and(|c| c != w) {
+        return None;
+    }
+    let first = world.tick.saturating_sub(rec.since) < every;
+    let wpos = world.comp::<crate::components::Position>(w).cloned();
+    let at = wpos.as_ref().map_or(rec.tile, |p| p.tile);
+    let Some(doc) = rec.clinic else {
+        if first {
+            let wn = world.name_of(w);
+            world.push_event(
+                EventKind::Wounded,
+                &[w],
+                format!("{wn}, bleeding, called for help: no doctor open in reach"),
+            );
+        }
+        return None;
+    };
     let to_doc = world.comp::<Building>(doc).map_or(u32::MAX, |b| b.door.manhattan(at));
     let left = rec.bleed_until.saturating_sub(world.tick);
+    // Round 7 W3: the last callee did not come (no claim): passed over now.
+    let mut tried = rec.tried.clone();
+    let failed = rec.called;
+    if let Some(f) = failed {
+        if !tried.contains(&f) {
+            tried.push(f);
+        }
+    }
     let gang = world.gang_of(w);
     let employer = world.comp::<Job>(w).and_then(|j| j.employer);
+    // Free to answer: alive, on its feet, not held, not already on a Rescue,
+    // not the attacker, not passed over. An off-screen callee is given a body
+    // below (at 20k most of the street within reach was Statistical: the
+    // first call found nobody).
+    let free = |world: &World, o: EntityId| {
+        o != w
+            && Some(o) != rec.by
+            && !tried.contains(&o)
+            && !crate::systems::wounded::is_down(world, o)
+            && crate::systems::law::living(world, o)
+            && !world.has::<crate::components::Sentence>(o)
+            && world
+                .comp::<Brain>(o)
+                .is_some_and(|b| b.cuffed_by.is_none() && b.plan_goal() != Some(crate::components::GoalKind::Rescue))
+    };
+    let reach_of = |world: &World, o: EntityId| {
+        world
+            .comp::<crate::components::Position>(o)
+            .map(|p| (p.tile.manhattan(at), Tick::from(p.tile.manhattan(at)) + Tick::from(to_doc)))
+    };
     let mut best: Option<(f32, EntityId)> = None;
     for o in world.neighbours(w) {
-        if Some(o) == rec.by || crate::systems::wounded::is_down(world, o) || !crate::systems::law::living(world, o) {
+        if !free(world, o) {
             continue;
         }
         let Some(e) = world.edge(w, o) else { continue };
@@ -621,16 +676,7 @@ pub fn call_for_help(world: &mut World, w: EntityId) -> Option<EntityId> {
         if !tied || e.affinity < 0.0 {
             continue;
         }
-        if world.comp::<Brain>(o).is_none_or(|b| {
-            b.lod == Lod::Statistical
-                || b.cuffed_by.is_some()
-                || b.plan_goal() == Some(crate::components::GoalKind::Rescue)
-        }) || world.has::<crate::components::Sentence>(o)
-        {
-            continue;
-        }
-        let Some(p) = world.comp::<crate::components::Position>(o) else { continue };
-        let reach = Tick::from(p.tile.manhattan(at)) + Tick::from(to_doc);
+        let Some((_, reach)) = reach_of(world, o) else { continue };
         if reach > left {
             continue;
         }
@@ -638,12 +684,77 @@ pub fn call_for_help(world: &mut World, w: EntityId) -> Option<EntityId> {
             best = Some((e.affinity, o));
         }
     }
-    let (_, o) = best?;
+    // Round 7 W3: no tied body able: the nearest stranger who can come.
+    let mut stranger: Option<(&'static str, u32)> = None;
+    if best.is_none() && c.call_radius > 0 {
+        let tod = world.tick_of_day();
+        let r = c.call_radius.max(c.help_radius);
+        let building = wpos.as_ref().and_then(|p| p.building);
+        let near = world.agents_near(at, r, building);
+        let mut pick: Option<(u32, EntityId, &'static str)> = None;
+        for o in near {
+            if !free(world, o) || !crate::systems::demography::is_adult(world, o) {
+                continue;
+            }
+            if world.edge(w, o).is_some_and(|e| e.affinity < 0.0 || e.kind == RelKind::Enemy) {
+                continue;
+            }
+            let Some(p) = world.comp::<crate::components::Position>(o) else { continue };
+            let cheb = crate::systems::law::chebyshev(p.tile, at);
+            let what = if crate::systems::law::is_city_guard(world, o) && crate::systems::law::on_duty(world, o) {
+                (cheb <= c.call_radius).then_some("a guard on the beat")
+            } else if world.comp::<Job>(o).is_some_and(|j| j.employer == Some(doc) && j.on_shift(tod)) {
+                (cheb <= c.call_radius).then_some("the doctor's own staff")
+            } else if cheb <= c.help_radius || (building.is_some() && p.building == building) {
+                Some("a passer-by")
+            } else {
+                None
+            };
+            let Some(what) = what else { continue };
+            let Some((d, reach)) = reach_of(world, o) else { continue };
+            if reach > left {
+                continue;
+            }
+            if pick.is_none_or(|(bd, bo, _)| (d, o) < (bd, bo)) {
+                pick = Some((d, o, what));
+            }
+        }
+        if let Some((d, o, what)) = pick {
+            best = Some((0.0, o));
+            stranger = Some((what, d));
+        }
+    }
+    let wn = world.name_of(w);
+    let gone = failed.map(|f| format!(" ({} never came)", world.name_of(f))).unwrap_or_default();
+    let Some((_, o)) = best else {
+        if let Some(x) = world.wounded.get_mut(&w) {
+            x.called = None;
+            x.tried = tried;
+        }
+        // Once a turn: the first call, or the one after a callee failed.
+        if first || failed.is_some() {
+            world.push_event(
+                EventKind::Wounded,
+                &[w],
+                format!("{wn}, bleeding, called for help{gone}: nobody in reach could get them to a doctor in the {left} min left"),
+            );
+        }
+        return None;
+    };
     if let Some(x) = world.wounded.get_mut(&w) {
         x.called = Some(o);
+        x.tried = tried;
     }
-    let (wn, on) = (world.name_of(w), world.name_of(o));
-    world.push_event(EventKind::Wounded, &[w, o], format!("{wn}, bleeding, called {on} for help"));
+    // The callee keeps a body while the call stands (`bystander`).
+    if world.comp::<Brain>(o).is_some_and(|b| b.lod == Lod::Statistical) {
+        crate::systems::lod::set_lod(world, o, Lod::Coarse);
+    }
+    let on = world.name_of(o);
+    let text = match stranger {
+        Some((what, d)) => format!("{wn}, bleeding, called for help{gone}: {on}, {what} {d} tiles off, heard"),
+        None => format!("{wn}, bleeding, called {on} for help{gone}"),
+    };
+    world.push_event(EventKind::Wounded, &[w, o], text);
     ownership::jobs2_row(world).care_calls += 1;
     Some(o)
 }

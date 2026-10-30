@@ -1341,6 +1341,16 @@ pub struct Jobs2Cols {
     /// Round 3 S3: arrests by the guard who saw the crime (his collar).
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub law_collars: u32,
+    /// Round 7 W3 (`OPEN-244`): suspects with an open warrant at the day's
+    /// first tick (a snapshot).
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub law_open_warrants: u32,
+    /// Round 7 W3: warrants taken to the suspect's door, and the arrests made
+    /// at home.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub law_door_taken: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub law_door_arrests: u32,
     // Pressure pass round 2, R3 (`systems::care`).
     #[serde(skip_serializing_if = "is_zero_i64")]
     pub care_doc_cut: i64,
@@ -1960,6 +1970,9 @@ impl Jobs2Cols {
                 "fare_ban_walks",
                 "fare_turned_off",
                 "law_collars",
+                "law_open_warrants",
+                "law_door_taken",
+                "law_door_arrests",
                 "care_doc_cut",
                 "care_pawns",
                 "care_slates",
@@ -2504,6 +2517,9 @@ impl Jobs2Cols {
             self.fare_ban_walks.to_string(),
             self.fare_turned_off.to_string(),
             self.law_collars.to_string(),
+            self.law_open_warrants.to_string(),
+            self.law_door_taken.to_string(),
+            self.law_door_arrests.to_string(),
             self.care_doc_cut.to_string(),
             self.care_pawns.to_string(),
             self.care_slates.to_string(),

@@ -2187,6 +2187,14 @@ fn widow(strong: bool) -> (World, EntityId, EntityId) {
     }
     set_skill_and_nerve(&mut w, brother, 0.5, 0.5, 0.0);
     w.kill_by(husband, citysim::DeathCause::Violence, Some(killer));
+    // Round 7 W3 (`OPEN-244`): the premise is a killer the law has not got.
+    // The body's case named him (Round 6 V3) and the guards now make the
+    // arrest (the chain plan, the cuffs at the step's start): he sat 30 days
+    // in the cells 54 minutes after the find and nobody commissioned a Hit.
+    // The body counts as found already, so no case opens on him.
+    if let Some(c) = w.comp_mut::<citysim::Corpse>(husband) {
+        c.found = true;
+    }
     grudges::add(&mut w, her, killer, GrudgeCause::KilledKin(husband), 0.95, 0);
     grudges::add(&mut w, brother, killer, GrudgeCause::KilledKin(husband), 0.6, 0);
     w.comp_mut::<Wallet>(her).expect("wallet").coins = 40;

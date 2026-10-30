@@ -3541,3 +3541,86 @@ a walk back in; the street take and the moves are the service's protection; the 
 
   No test (doctrine 2). `SAVE_VERSION` 103 (renumbered at the merge): the `[care] install_rows`, `install_cut` and
   `[[trades]] no_foreman` keys (serde defaults).
+### W3, the guard makes the arrest (`OPEN-244`; `plan::arrest_chain`, `exec::actions` the cuffs, `law::serve_at_door`, `law::handed_to_other`, `life::arrive_at_suspect`, `goals` Arrest's chase in hand, `fares::caught`, `care::call_for_help`, `wounded::pick`, `[justice]`, `[fares]`, `[care]` W3 keys)
+
+Each at its cause (20k island seed 42 x 30, `--scaled --ambient-flats 50`, before = main `795943c`, after = the
+branch, one run each; counts from the event log, the new columns from the CSV):
+
+1. **The arrest.** Three causes, none of them the suspect's place. (a) *The bind came too late:* the guard's think
+   is scored ahead and his plan queued; by the plan the warrant was claimed by another guard or had gone cold, the
+   bind found nobody, and the planner's search over every action failed (`Unreachable` 340, `ExpansionCap` 308: all
+   648 were an unbound target) and cooled Arrest two hours. The plan is now the chain `[GoTo(SuspectTile)] -> Arrest
+   -> Escort` built directly (`plan::arrest_chain`; a prisoner in hand binds first: `Escort` alone); no warrant at
+   plan time rests the goal one think ("Arrest dropped: the warrant was taken by another guard or went cold"). (b)
+   *The cuffs:* `law::arrest` ran at the end of the 10-minute step, so a suspect beside the guard at its start had
+   walked off by its end (1,143 `failed at Arrest: PreconditionLost` against 1,121 arrests); the cuffs go on at the
+   step's start (it starts only beside him), the minutes are the cuffing. (c) *A warrant the street never saw:* the
+   chase starts only from a guard's sighting, so a suspect who went home stood wanted until the warrant expired.
+   `law::serve_at_door` (hourly, `[justice] door_from_hour` 22 .. `door_to_hour` 6): a warrant unseen within
+   `suspect_seen_ticks` whose suspect is inside his own Home goes to the nearest free city guard on shift within his
+   pursuit radius (his collar by hand-on, the door the sighting; never a minor, never sleeping rough alone), and the
+   arrest line says "at home". A hand-on is now that guard's (`handed_to_other` in `chaseable`). Also: a chase begun
+   within `[justice] chase_overtime_hours` (2) is finished past the shift's end; a radioed sighting past the guard's
+   pursuit radius drops the chase "out of reach" and hands it to a guard near it (a guard walked 259 tiles, 4 h 46,
+   on a rest day), and no longer erases that fresh sighting.
+2. **The fare.** A guard handles one dodger at a time (`[fares] handle_minutes` 6, `fares::State.busy`; a gate jumped
+   meanwhile goes through). The fine already came first; the broke dodger `book_age` (60) or older, sick or wounded is
+   *booked*, not beaten (the catch on his record toward the ban, turned off the platform). The minor's rung (turned
+   off, untouched) is unchanged and first; `beat`'s `is_protected` backstop stays. Fined and booked lines now carry
+   ages (`events::harm_line`).
+3. **The rescue.** The callee of the last call who has not come is passed over (`Wounded.tried`, the line names him);
+   with no tied body able, the call reaches the nearest who can make it in time: a city guard on shift or the doctor's
+   own staff on duty within `[care] call_radius` (40), or an adult passer-by within `help_radius`; an off-screen callee
+   gets a body (`lod::set_lod`) and keeps it while called (`care::bystander`); the callee's Rescue carries `call_flat`
+   (0.3) and a stranger callee ties on `call_term` (0.8). A rescue in hand holds (`wounded::pick`: his own claim, the
+   reach and the clock read when he took it up). Nobody able: "called for help: nobody in reach could get them to a
+   doctor in the N min left", once a turn of the calls. A body on someone's back calls nobody.
+
+**Numbers** (20k x 30, before -> after):
+
+| | before | after |
+|---|---|---|
+| Arrests (events) / a guard a week (400 guards) | 1,121 / 0.65 | 1,325 / 0.77 |
+| Reports filed / arrests per report | 1,579 / 0.71 | 1,651 / 0.80 |
+| Arrest searches failed (`Unreachable` + `ExpansionCap`) | 340 + 308 | 0 (577 rests of one think) |
+| `failed at Arrest: PreconditionLost` | 1,143 | 1,024 (now the suspect gone from the sighting) |
+| warrants taken to the door / arrests at home | - | 297 / 463 |
+| warrants open at day 30 (`law_open_warrants`; before: reports - arrests) | (458) | 270 |
+| chases handed on / "no guard on shift near" / "the shift is over" | 33 / 142 / 73 | 79 / 127 / 34 |
+| fare: caught / fined / beaten / booked | 1,632 / 707 / 873 / - | 1,620 / 705 / 637 / 244 |
+| fare beatings of a 60+ | 240 | 0 |
+| downed / stabilised / bled out | 43 / 28 / 7 | 48 / 36 / 3 |
+| calls / to a stranger / after a no-show / nobody able | 51 / - / - / - | 57 / 15 / 17 / 11 |
+| lifted / carried in time | 30 / 28 | 37 / 36 |
+
+The arrest a guard a week at 20k is bounded by the reports (0.96 a guard a week after): the reach was the bug, the
+rate is the city's crime. The after run predates one guard (a carried body calls nobody), which moves only the call
+lines.
+
+**Shadow** (20k seed 42 days 20-27; `target/w3/shadow1` .. `shadow3`, guard, camp_warden, cabbie, sick):
+`guard_24230` "d22 22:00 Pursuit: Axel Voss took the warrant on Ottilie Ashcombe for Theft to the door of
+Block#2679, 57 tiles off: home tonight, never seen on the street" -> "d22 23:47 Arrest: Axel Voss arrested Ottilie
+Ashcombe for Theft at home in Block#2679"; `guard_9691` "d26 09:41 ACTION Arrest @ Block#3621, 11 min (done)" ->
+"Arrest: Zelda Sato arrested Rin Ostrowski for Unlicensed Arms at home in Block#3621" -> Escort to the Precinct;
+`guard_7839` "d25 16:14 Fare: Zara Voss (32 y) booked Percival Upton (67 y) at the El in D4 Mid-Levels for Fare
+Evasion: no fare, no fine, too frail to beat; caught 2 of 3 toward a ban". The run's log: "Lux Mercer (34 y) fined
+Emeric Jarrow (74 y) 5 coins at the El"; "Ignatius Carrow (70 y), bleeding, called for help: Kestrel Blackwood (36
+y), a passer-by 1 tiles off, heard" -> "Kestrel Blackwood carried Ignatius Carrow to Ripperdoc#4824 in time"; "Vale
+Marlow (73 y), bleeding, called for help (Ivo Stroud never came): Casimir Kettering (53 y), a guard on the beat 5
+tiles off, heard"; "Liesl Wexford gave up the chase of Ghost Blackwood (out of reach): handed to Katrin Okafor on
+shift, 45 tiles off". No camp_warden, cabbie or sick pick met a wound, a fare or an arrest in the week.
+
+**Under 18.** The door pass skips a protected suspect; the fare's minor rung is first and unchanged; the call's
+stranger is an adult (a callee carries, no harm); no fight or punishment path widened.
+
+**Reads wrong / open** (the next pass's input): guards idle 5-11 h on some shift days once their patrol legs are
+walked (`guard_9691` work 1.8 h, idle 10-14 h d20-22), and a patrol leg can be 222-675 tiles (4-5 h) from where an
+escort or a chase left him (`law::district_route` is built per shift, not from where he stands); a door taken by one
+guard is sometimes served by a nearer one who planned first; 1,024 chases still end at an empty sighting (the suspect
+walked on: the night's door picks them up); 11 calls found nobody able (a sparse street at 20k: no guard on shift
+within 40 tiles, nobody within 6). The 100k spree (V15's 18 in 11 minutes) was not re-run: one dodger per 6 minutes
+a guard caps it at 10 an hour.
+
+No test (doctrine 2); `probe_widow_commissions_a_hit_at_the_fixer` re-pinned on its premise (the killer the law has not got: the body counts as found, so no case opens; the guards now arrested him 54 min after the find). `SAVE_VERSION` 104 (W4 took 103; renumbered at the merge): `fares::State.busy`,
+`Wounded.tried`, the W3 keys and the `law_open_warrants`, `law_door_taken`, `law_door_arrests` columns (serde
+defaults).

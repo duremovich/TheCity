@@ -17,6 +17,12 @@
 //! (his trip is over, he walks) and a ban he broke stands as it was (a
 //! banned rider was beaten at the El six days of seven, banned afresh each).
 //!
+//! Pressure pass round 7, W3 (`OPEN-244`): a guard handles one dodger at a
+//! time: a catch holds him `handle_minutes` (`State::busy`), and a gate jumped
+//! in front of him meanwhile goes through (a guard on her break by the El beat
+//! 18 in 11 minutes). A broke dodger `book_age` or older, sick or wounded, is
+//! booked, not beaten: the catch stands on his record toward the ban.
+//!
 //! Off screen (`transit::stat_commute`, `stat_errand`) the same rule, coarse:
 //! a jumped leg caught at the Full city's rate is fined, else beaten (the
 //! memory and the mood, no body, no guard), and counts toward the ban.
@@ -49,12 +55,28 @@ pub struct State {
     /// Beaten dodgers down on the platform: (who, on his feet at).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub down: Vec<(EntityId, Tick)>,
+    /// Round 7 W3: guards handling a dodger: (guard, free again at).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub busy: BTreeMap<EntityId, Tick>,
 }
 
 impl State {
     pub fn is_empty(&self) -> bool {
-        self.book.is_empty() && self.down.is_empty()
+        self.book.is_empty() && self.down.is_empty() && self.busy.is_empty()
     }
+}
+
+/// Round 7 W3: is `guard` handling another dodger now (`handle_minutes`)?
+pub fn busy(world: &World, guard: EntityId) -> bool {
+    world.fares.busy.get(&guard).is_some_and(|&t| t > world.tick)
+}
+
+/// Round 7 W3: a broke dodger the guard books instead of beating: `book_age`
+/// or older, sick, or wounded (never a minor: `caught` turns a minor off first).
+fn frail(world: &World, c: &FaresCfg, id: EntityId) -> bool {
+    (c.book_age > 0 && crate::systems::ages::years(world, id) >= c.book_age)
+        || crate::systems::health::sick(world, id)
+        || world.wounded.contains_key(&id)
 }
 
 /// One dodger's record: the catches inside the window, the ban.
@@ -119,6 +141,16 @@ pub fn caught(world: &mut World, guard: Option<EntityId>, dodger: EntityId, tile
         return;
     }
     let now = world.tick;
+    // Round 7 W3: one dodger at a time. A guard handling another lets this
+    // gate go (nobody's catch, no record); the catch below holds him.
+    if let Some(g) = guard {
+        if busy(world, g) {
+            return;
+        }
+        if c.handle_minutes > 0 {
+            world.fares.busy.insert(g, now + c.handle_minutes);
+        }
+    }
     // Round 3 V12 fix (no child is harmed): a minor caught at the gate is
     // turned off the platform, the mildest rung: no beating, no fine, no
     // record toward a ban.
@@ -183,12 +215,17 @@ pub fn caught(world: &mut World, guard: Option<EntityId>, dodger: EntityId, tile
         return;
     }
     if was_banned {
-        beat(world, &c, guard, dodger);
+        // Round 7 W3: the old and the frail are booked, not beaten.
+        let booked = frail(world, &c, dodger);
+        if !booked {
+            beat(world, &c, guard, dodger);
+        }
         ban(world, &c, dodger);
         ownership::jobs2_row(world).fare_ban_broken += 1;
         let him = him(world, dodger);
+        let what = if booked { format!("booked {him}") } else { format!("beat {him}") };
         let text = format!(
-            "{gname} caught {dname} on the El in {place} inside the ban and beat {him} for Fare Evasion; banned {} days afresh",
+            "{gname} caught {dname} on the El in {place} inside the ban and {what} for Fare Evasion; banned {} days afresh",
             c.ban_days
         );
         world.push_event(EventKind::Fare, &actors, text);
@@ -200,6 +237,19 @@ pub fn caught(world: &mut World, guard: Option<EntityId>, dodger: EntityId, tile
         ownership::jobs2_row(world).fare_fined += 1;
         let text = format!("{gname} fined {dname} {} coins at the El in {place} for Fare Evasion", c.fine);
         world.push_event(EventKind::Fare, &actors, text);
+    } else if frail(world, &c, dodger) {
+        // Round 7 W3: broke and old (or sick, or hurt): booked, not beaten;
+        // the catch stands toward the ban and his trip is over.
+        let him = him(world, dodger);
+        world.remember(dodger, MemoryKind::Lost, guard, 0.3, -0.3, false);
+        let text = format!(
+            "{gname} booked {dname} at the El in {place} for Fare Evasion: no fare, no fine, too frail to beat; caught {times} of {} toward a ban, turned {him} off the platform",
+            c.ban_after
+        );
+        world.push_event(EventKind::Fare, &actors, text);
+        if world.comp::<Brain>(dodger).is_some_and(|b| b.lod != Lod::Statistical) {
+            world.abort_plan(dodger);
+        }
     } else {
         let laid = beat(world, &c, guard, dodger);
         ownership::jobs2_row(world).fare_beaten += 1;
@@ -276,8 +326,12 @@ fn beat(world: &mut World, c: &FaresCfg, guard: Option<EntityId>, dodger: Entity
     true
 }
 
-/// Every tick: the beaten get up; at the tail of midnight the stale records go.
+/// Every tick: the guards done with a dodger free again (round 7 W3), the beaten get up; at the tail of midnight the stale records go.
 pub fn run(world: &mut World) {
+    if !world.fares.busy.is_empty() {
+        let now = world.tick;
+        world.fares.busy.retain(|_, &mut t| t > now);
+    }
     if !world.fares.down.is_empty() {
         let now = world.tick;
         let (up, lying): (Vec<_>, Vec<_>) = world.fares.down.iter().copied().partition(|&(_, t)| t <= now);
