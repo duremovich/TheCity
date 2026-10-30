@@ -1404,6 +1404,11 @@ fn muster_pool(world: &World, w: &WarCfg, k: u32, g: EntityId) -> Vec<EntityId> 
 /// The corner `id` is mustered to: a fight his gang stands in, due within
 /// `answer_window_hours`, on a cell within `muster_cells` of his Home's.
 pub fn muster_corner(world: &World, id: EntityId) -> Option<TilePos> {
+    muster_fight(world, id).map(|x| x.0)
+}
+
+/// [`muster_corner`] with the tick the fight is due.
+fn muster_fight(world: &World, id: EntityId) -> Option<(TilePos, Tick)> {
     if world.turf.open.is_empty() {
         return None;
     }
@@ -1413,8 +1418,32 @@ pub fn muster_corner(world: &World, id: EntityId) -> Option<TilePos> {
     let home = home_cell(world, id)?;
     world.turf.open.iter().filter(|&&(_, a, b)| a == g || b == g).find_map(|&(k, _, _)| {
         let f = world.turf.cells.get(&k)?.fight?;
-        (f.due <= world.tick + lead && cell_dist(world, home, k) <= w.muster_cells).then(|| corner_tile(world, k))
+        (f.due <= world.tick + lead && cell_dist(world, home, k) <= w.muster_cells)
+            .then(|| (corner_tile(world, k), f.due))
     })
+}
+
+/// Round 7 W2 (`OPEN-241`): a mustered member standing on the corner he
+/// was called to waits there for the fight: the ticks until it is due
+/// (`exec::actions::duration`'s HangOut; the empty-spot leave and other
+/// goals but danger or starving give way, `muster_holds`). V15: the called
+/// reached the corner, hung out an hour alone (or left the empty spot) and
+/// walked off before the fight; 391 of 955 called bodies at it at 20k.
+pub fn muster_wait(world: &World, id: EntityId) -> Option<Tick> {
+    let (t, due) = muster_fight(world, id)?;
+    let reach = war_cfg(world)?.muster_reach_tiles;
+    world
+        .comp::<Position>(id)
+        .filter(|p| p.building.is_none() && p.tile.manhattan(t) <= reach)
+        .map(|_| due.saturating_sub(world.tick) + 1)
+}
+
+/// Round 7 W2 (`fixes::committed`): a mustered member's corner plan holds
+/// while his fight is pending, as the raid's muster does (`crew::holds`).
+pub fn muster_holds(world: &World, id: EntityId, plan: &Plan) -> bool {
+    plan.goal == GoalKind::GangWork
+        && plan.steps.iter().any(|s| s.action == ActionKind::HangOut)
+        && world.unwind.get(&id).is_some_and(|u| u.spot.is_some() && u.spot == muster_corner(world, id))
 }
 
 /// A provocation's kind.
@@ -1611,7 +1640,9 @@ fn open_fight(world: &mut World, k: u32, kind: FightKind, side: EntityId, by: En
     let mut actors: Vec<EntityId> = leader_of(world, mover).into_iter().collect();
     actors.extend([mover, other]);
     actors.extend(world.turf.cells.get(&k).and_then(|x| x.landmark));
-    world.push_event(EventKind::Turf, &actors, text);
+    // Round 7 W2: the men called hear the call.
+    actors.extend(hearers(world, mover, Some(k)));
+    war_line(world, actors, text);
 }
 
 /// `g`'s presence over the window in cell `k` and the cells around it.
@@ -1673,6 +1704,45 @@ fn fighters(world: &mut World, w: &WarCfg, k: u32, g: EntityId, t: TilePos, n: u
     bodies
 }
 
+/// Round 7 W2 (`OPEN-241`): gang `g`'s members who hear a war line: its
+/// free, living adults living in cell `k` or within `muster_cells` of it
+/// (with `k` None, all of them: the gang's own order, lying low or a
+/// truce). V15: only the leader's diary heard his gang's war. Never a minor
+/// (CLAUDE.md, the under-18 rule: no war line reaches a child as one of its
+/// men).
+fn hearers(world: &World, g: EntityId, k: Option<u32>) -> Vec<EntityId> {
+    let Some(w) = war_cfg(world) else { return Vec::new() };
+    let Some(x) = world.comp::<Gang>(g) else { return Vec::new() };
+    x.members
+        .iter()
+        .copied()
+        .filter(|&m| {
+            crate::systems::law::living(world, m)
+                && world.has::<Brain>(m)
+                && !world.has::<Sentence>(m)
+                && !crate::systems::ages::is_protected(world, m)
+                && k.is_none_or(|k| home_cell(world, m).is_some_and(|h| cell_dist(world, h, k) <= w.muster_cells))
+        })
+        .collect()
+}
+
+/// Round 7 W2 (`OPEN-241`): a war line (the call, the fight, the war,
+/// lying low, the truce, the crackdown, the quiet), its actors once each;
+/// the gang members on it who do not lead their gang are counted
+/// (`war_member_lines`).
+fn war_line(world: &mut World, actors: Vec<EntityId>, text: String) {
+    let mut seen: BTreeSet<EntityId> = BTreeSet::new();
+    let actors: Vec<EntityId> = actors.into_iter().filter(|&a| seen.insert(a)).collect();
+    let members = actors
+        .iter()
+        .filter(|&&a| world.gang_of(a).is_some_and(|g| world.comp::<Gang>(g).is_some_and(|x| x.leader != Some(a))))
+        .count() as u32;
+    if members > 0 {
+        crate::systems::ownership::jobs2_row(world).war_member_lines += members;
+    }
+    world.push_event(EventKind::Turf, &actors, text);
+}
+
 /// Names, up to three ("A, B and 2 more").
 fn names(world: &World, v: &[EntityId]) -> String {
     let shown: Vec<String> = v.iter().take(3).map(|&m| world.name_of(m)).collect();
@@ -1709,11 +1779,47 @@ fn war_hourly(world: &mut World, trespass: &[(u32, EntityId, EntityId)], eyes: &
         .open
         .iter()
         .filter(|&&(k, _, _)| world.turf.cells.get(&k).and_then(|x| x.fight).is_none_or(|f| f.due <= now))
+        .filter(|&&(k, _, _)| !waits_for_called(world, k))
         .map(|x| x.0)
         .collect();
     for k in due {
         resolve(world, k);
     }
+}
+
+/// Round 7 W2 (`OPEN-241`): a corner fight due waits one hour for the
+/// mover's called men on their way to the corner, due there within `[crew]
+/// march_wait_ticks` (as a raid's column waits for its tail), at most
+/// `march_wait_ticks` past its hour.
+fn waits_for_called(world: &World, k: u32) -> bool {
+    let Some(f) = world.turf.cells.get(&k).and_then(|x| x.fight) else { return false };
+    let Some(wait) = crate::systems::crew::cfg(world).map(|c| c.march_wait_ticks).filter(|&t| t > 0) else {
+        return false;
+    };
+    if world.tick >= f.due + wait {
+        return false;
+    }
+    let mover = if f.kind == FightKind::Answer { f.side } else { f.by };
+    let t = corner_tile(world, k);
+    let Some(w) = war_cfg(world) else { return false };
+    let reach = w.muster_reach_tiles;
+    muster_pool(world, w, k, mover).into_iter().any(|m| {
+        let Some(b) = world.comp::<Brain>(m) else { return false };
+        let on_way = b.plan.as_ref().is_some_and(|p| {
+            p.goal == GoalKind::GangWork
+                && p.steps.get(usize::from(b.plan_step)).map(|s| s.action) == Some(ActionKind::GoTo(LocationKey::Spot))
+        }) && world.unwind.get(&m).is_some_and(|u| u.spot == Some(t));
+        if !on_way {
+            return false;
+        }
+        let eta = match &b.exec {
+            crate::exec::ExecState::GotoTimed { arrive_tick, .. } => arrive_tick.saturating_sub(world.tick),
+            _ => world.comp::<Position>(m).map_or(Tick::MAX, |p| {
+                Tick::from(p.tile.manhattan(t).saturating_sub(reach)) * world.config.exec.move_ticks_full
+            }),
+        };
+        eta <= wait
+    })
 }
 
 /// The war between `a` and `b` (started over cell `k` when new: told).
@@ -1746,7 +1852,9 @@ fn war_entry(world: &mut World, a: EntityId, b: EntityId, k: u32) {
     actors.extend(leader_of(world, a));
     actors.extend(leader_of(world, b));
     actors.extend(world.turf.cells.get(&k).and_then(|x| x.landmark));
-    world.push_event(EventKind::Turf, &actors, text);
+    actors.extend(hearers(world, a, Some(k)));
+    actors.extend(hearers(world, b, Some(k)));
+    war_line(world, actors, text);
 }
 
 /// The fight scheduled on cell `k`, fought: the hold or the flip, the war's
@@ -1773,6 +1881,21 @@ fn resolve(world: &mut World, k: u32) {
     let top = pa.max(pd).max(1e-3);
     let n = |p: f32| ((w.side_max as f32 * p / top).round() as usize).clamp(1, w.side_max.max(1));
     let (na, nd) = (n(pa), n(pd));
+    // Round 7 W2 (`OPEN-241`): the mover's called bodies, and those at the
+    // corner now (before the off-screen men are stood there).
+    {
+        let called: Vec<EntityId> = muster_pool(world, &w, k, ag)
+            .into_iter()
+            .filter(|&m| world.comp::<Brain>(m).is_some_and(|b| b.lod != Lod::Statistical))
+            .collect();
+        let came = called
+            .iter()
+            .filter(|&&m| world.comp::<Position>(m).is_some_and(|p| p.tile.manhattan(t) <= w.muster_reach_tiles))
+            .count() as u32;
+        let row = crate::systems::ownership::jobs2_row(world);
+        row.war_called += called.len() as u32;
+        row.war_came += came;
+    }
     let mut agg = fighters(world, &w, k, ag, t, na);
     let mut def = fighters(world, &w, k, dg, t, nd);
     let landmark = world.turf.cells.get(&k).and_then(|x| x.landmark);
@@ -1791,7 +1914,9 @@ fn resolve(world: &mut World, k: u32) {
             names(world, &here),
             poss(&gname(world, gone_g))
         );
-        world.push_event(EventKind::Turf, &actors, text);
+        actors.extend(hearers(world, here_g, Some(k)));
+        actors.extend(hearers(world, gone_g, Some(k)));
+        war_line(world, actors, text);
         // An answer nobody of the holder's came to: the trespassers stand on
         // it (contested); a cell nobody defends is walked onto.
         let now_status = world.turf.cells.get(&k).map_or(Status::Open, |x| x.status);
@@ -1859,7 +1984,9 @@ fn resolve(world: &mut World, k: u32) {
     let mut actors = vec![winner, loser];
     actors.extend(agg0.iter().chain(def0.iter()).copied());
     actors.extend(landmark);
-    world.push_event(EventKind::Turf, &actors, text);
+    actors.extend(hearers(world, winner, Some(k)));
+    actors.extend(hearers(world, loser, Some(k)));
+    war_line(world, actors, text);
     if flips {
         take(world, &w, k, old, Status::Held(winner), winner, loser);
         if retaken {
@@ -1923,7 +2050,10 @@ fn crackdown(world: &mut World, w: &WarCfg, k: u32, a: EntityId, b: EntityId) {
     actors.extend(leader_of(world, a));
     actors.extend(leader_of(world, b));
     actors.extend(world.turf.cells.get(&k).and_then(|x| x.landmark));
-    world.push_event(EventKind::Turf, &actors, text);
+    // Round 7 W2: the men living on the blocks hear the law came for them.
+    actors.extend(hearers(world, a, Some(k)));
+    actors.extend(hearers(world, b, Some(k)));
+    war_line(world, actors, text);
 }
 
 /// `law::district_route`: a cell of district `d` the law cracks down on
@@ -2067,7 +2197,10 @@ fn war_daily(world: &mut World) {
                 gname(world, a),
                 gname(world, b)
             );
-            world.push_event(EventKind::Turf, &[a, b], text);
+            let mut actors = vec![a, b];
+            actors.extend(hearers(world, a, None));
+            actors.extend(hearers(world, b, None));
+            war_line(world, actors, text);
             world.turf.wars.remove(&key);
         }
     }
@@ -2092,7 +2225,8 @@ fn spend(world: &mut World, w: &WarCfg, g: EntityId, other: EntityId, lost: usiz
     };
     let mut actors = vec![g, other];
     actors.extend(leader_of(world, g));
-    world.push_event(EventKind::Turf, &actors, text);
+    actors.extend(hearers(world, g, None));
+    war_line(world, actors, text);
 }
 
 /// Two spent sides' leaders strike a truce: the contested cells between
@@ -2155,7 +2289,9 @@ fn truce(world: &mut World, w: &WarCfg, key: (EntityId, EntityId)) {
     let mut actors = vec![a, b];
     actors.extend(leader_of(world, a));
     actors.extend(leader_of(world, b));
-    world.push_event(EventKind::Turf, &actors, text);
+    actors.extend(hearers(world, a, None));
+    actors.extend(hearers(world, b, None));
+    war_line(world, actors, text);
 }
 
 /// The day's off-screen rolls: a gang trespasses on a held cell it borders

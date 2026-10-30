@@ -453,7 +453,11 @@ fn raise_crime_core(
             if crate::systems::robots::is_robot(world, k) || !living(world, k) || !world.has::<Brain>(k) {
                 continue;
             }
-            world.remember_crime(k, actor, crime, salience, object);
+            // Round 7 W2 (`OPEN-238`): a party with no object of its own
+            // (a shakedown's payer) was robbed himself: his sighting is a
+            // victim's, which the tell reads (`tell_the_beat`).
+            let obj = if victim == Some(k) { object } else { object.or(Some(k)) };
+            world.remember_crime(k, actor, crime, salience, obj);
             noticed += 1;
             if on_duty(world, k) && !is_petty(crime) && !crate::systems::contracts::on_take_of(world, k, actor) {
                 file_report(world, crime, actor, Some(k));
@@ -523,7 +527,7 @@ fn raise_crime_core(
 /// tell_lawful_min` lawful, no gang
 /// member (unless betraying), not keeping it to sell, and never on a minor
 /// (CLAUDE.md, the under-18 rule: no warrant, so no arrest force, on a child).
-fn tells_the_law(world: &World, w: EntityId, suspect: EntityId) -> bool {
+pub fn tells_the_law(world: &World, w: EntityId, suspect: EntityId) -> bool {
     let min = world.config.crime.case.tell_lawful_min;
     living(world, w)
         && living(world, suspect)
@@ -539,6 +543,55 @@ fn tells_the_law(world: &World, w: EntityId, suspect: EntityId) -> bool {
             .comp::<Brain>(w)
             .is_some_and(|b| !matches!(b.exec, crate::exec::ExecState::Use { kind: ActionKind::Sleep, .. }))
         && !crate::systems::consequence::keeps_quiet(world, w, suspect)
+        && fears(world, w, suspect).is_none()
+}
+
+/// Round 7 W2 (`OPEN-238`): `suspect`'s gang holds the block `w` lives on
+/// and `w` is under `[crime.case] fear_courage_max` brave: the gang, feared.
+fn fears(world: &World, w: EntityId, suspect: EntityId) -> Option<EntityId> {
+    let g = world.gang_of(suspect)?;
+    if courage(world, w) >= world.config.crime.case.fear_courage_max || world.gang_of(w) == Some(g) {
+        return None;
+    }
+    (crate::systems::turf::home_holder(world, w) == Some(g)).then_some(g)
+}
+
+/// Round 7 W2 (`OPEN-238`): why `w` keeps what he knows of `suspect` from
+/// the law (`tells_the_law` false), for his line: his gang, the suspect's
+/// gang on his block, the sale, his own warrant, his nature; `None` when he
+/// would tell.
+pub fn keeps_from_law(world: &World, w: EntityId, suspect: EntityId) -> Option<String> {
+    if tells_the_law(world, w, suspect) {
+        return None;
+    }
+    let (he, him, his) = crate::systems::consequence::pro(world, w);
+    // The under-18 rule: a child is never named a culprit, not even here.
+    if crate::systems::ages::is_protected(world, suspect) {
+        return Some(format!("{he} says nothing"));
+    }
+    let gname = |g: EntityId| world.comp::<crate::components::Gang>(g).map_or_else(String::new, |x| x.name.clone());
+    let betraying = world.comp::<Brain>(w).is_some_and(|b| b.betraying);
+    if let Some(g) = world.gang_of(w).filter(|_| !betraying) {
+        return Some(if world.gang_of(suspect) == Some(g) {
+            format!("{} runs with {}, {his} own crew", world.name_of(suspect), gname(g))
+        } else {
+            format!("{he} runs with {}, and the law is not their way", gname(g))
+        });
+    }
+    if let Some(g) = fears(world, w, suspect) {
+        return Some(format!("afraid: {} hold the block {he} lives on", gname(g)));
+    }
+    if crate::systems::consequence::keeps_quiet(world, w, suspect) {
+        return Some(format!("it is worth something to {him}"));
+    }
+    if wanted(world, w) {
+        return Some(format!("{he} is wanted {him}self"));
+    }
+    let min = world.config.crime.case.tell_lawful_min;
+    if world.comp::<crate::components::Personality>(w).is_some_and(|p| p.lawfulness < min) {
+        return Some(format!("{he} is not one to go to the law"));
+    }
+    Some(format!("{he} says nothing"))
 }
 
 /// Round 6 V3 (`OPEN-238`): the nearest on-duty city guard outdoors within
@@ -674,6 +727,10 @@ pub fn file_report_as(
         return false;
     }
     let tick = world.tick;
+    // Round 7 W2 (`OPEN-238`): a robbed sleeper's word reached the law.
+    if let Some(w) = witness {
+        crate::systems::consequence::word_given(world, crime, suspect, w);
+    }
     if world.refresh_open_report(crime, suspect, witness) {
         return false;
     }
@@ -2172,6 +2229,10 @@ pub fn run(world: &mut World) {
     // Round 6 V3 (`OPEN-238`): bodies found, the case opened; victims who
     // tell the beat.
     crate::prof::timed!("law::find_bodies", crate::systems::demography::find_bodies(world));
+    // Round 7 W2 (`OPEN-238`): a sleeper robbed in his sleep wakes to it.
+    if world.tick.is_multiple_of(world.config.crime.case.find_every_ticks.max(1)) {
+        crate::systems::consequence::woke(world);
+    }
     if world.tick.is_multiple_of(crate::time::TICKS_PER_HOUR) {
         crate::prof::timed!("law::tell_the_beat", tell_the_beat(world));
     }

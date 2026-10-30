@@ -1458,6 +1458,45 @@ pub struct Jobs2Cols {
     /// Gang members killed (any cause of violence, any tier).
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub gang_deaths: u32,
+    /// Round 7 W2 (`OPEN-241`): a corner fight's called men (the mover's bodies living about the cell) ...
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub war_called: u32,
+    /// ... and of them, those at the corner when it was fought
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub war_came: u32,
+    /// Round 7 W2: the gang members (not leaders) on a war line (the call, the fight, the war, lying low, the truce, the crackdown)
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub war_member_lines: u32,
+    /// Round 7 W2: a gang raid's marchers when it went in (on the march or at the door) ...
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub raid_marchers: u32,
+    /// ... and of them, those at the door
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub raid_at_door: u32,
+    /// Round 7 W2: marchers still on the way when their raid was over (the walk released)
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub raid_missed: u32,
+    /// Round 7 W2 (`OPEN-238`): a shakedown's payers asleep when it took their coins ...
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub sleeper_paid: u32,
+    /// ... who woke to find it ...
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub sleeper_found: u32,
+    /// ... and of those, reported to the law (a tell, a hue, a filed report) inside `[crime.case] tell_days`
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub sleeper_reports: u32,
+    /// Round 7 W2: a sleeper robbed who woke and told nobody (his gang, the block's holders, not one for the law)
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub sleeper_quiet: u32,
+    /// Round 7 W2: a found body's finder who saw the murder ...
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub witness_finds: u32,
+    /// ... and named the killer to the law ...
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub witness_named: u32,
+    /// ... or kept quiet (the reason his line)
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub witness_quiet: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -2008,6 +2047,19 @@ impl Jobs2Cols {
                 "turf_truces",
                 "turf_crackdowns",
                 "gang_deaths",
+                "war_called",
+                "war_came",
+                "war_member_lines",
+                "raid_marchers",
+                "raid_at_door",
+                "raid_missed",
+                "sleeper_paid",
+                "sleeper_found",
+                "sleeper_reports",
+                "sleeper_quiet",
+                "witness_finds",
+                "witness_named",
+                "witness_quiet",
             ]
             .into_iter()
             .map(str::to_string),
@@ -2552,6 +2604,19 @@ impl Jobs2Cols {
             self.turf_truces.to_string(),
             self.turf_crackdowns.to_string(),
             self.gang_deaths.to_string(),
+            self.war_called.to_string(),
+            self.war_came.to_string(),
+            self.war_member_lines.to_string(),
+            self.raid_marchers.to_string(),
+            self.raid_at_door.to_string(),
+            self.raid_missed.to_string(),
+            self.sleeper_paid.to_string(),
+            self.sleeper_found.to_string(),
+            self.sleeper_reports.to_string(),
+            self.sleeper_quiet.to_string(),
+            self.witness_finds.to_string(),
+            self.witness_named.to_string(),
+            self.witness_quiet.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

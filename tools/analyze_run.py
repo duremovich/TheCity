@@ -1077,6 +1077,13 @@ def jobs2(rows, events, out):
             "turf_provocations", "turf_answers", "turf_unopposed", "turf_fights", "turf_flips", "turf_retaken",
             "turf_raid_moves", "turf_wars", "turf_war_deaths", "turf_exhausted", "turf_truces", "turf_crackdowns",
             "gang_deaths") if k in rows[0]}
+    # Pressure pass round 7, W2: the war and the case in the diaries (the muster at the door, the members' lines,
+    # the sleeper robbed, the witness who found the body).
+    if "war_called" in rows[0]:
+        J["w2_totals"] = {k: sum(col(rows, k)) for k in (
+            "war_called", "war_came", "war_member_lines", "raid_marchers", "raid_at_door", "raid_missed",
+            "sleeper_paid", "sleeper_found", "sleeper_reports", "sleeper_quiet", "witness_finds", "witness_named",
+            "witness_quiet") if k in rows[0]}
     if "dollhouses" in rows[0]:
         J["chip_totals"] = {k: sum(col(rows, k)) for k in CHIP_TOTALS}
         J["chip_mean"] = {k: mean(col(rows, k)) for k in CHIP_SNAP}
@@ -1468,6 +1475,9 @@ def fmt(o):
         if "war_totals" in w:
             L.append("turf war (provoked, answered, fought, flipped, taken back, ended), run totals: "
                      + f(w["war_totals"]))
+        if "w2_totals" in w:
+            L.append("the war and the case in the diaries (called/came, marchers/at the door, sleepers, witnesses), "
+                     "run totals: " + f(w["w2_totals"]))
         if "chip_totals" in w:
             L.append("chip and braindance, run totals: " + f(w["chip_totals"]))
             L.append("chip and braindance, daily mean: " + f(w["chip_mean"]) + f"; BD units legal / black "

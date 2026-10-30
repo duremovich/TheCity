@@ -235,6 +235,10 @@ pub fn committed(world: &World, id: EntityId, brain: &Brain, winner: GoalKind) -
     if crate::systems::crew::holds(world, id, plan, winner) {
         return true;
     }
+    // Round 7 W2 (OPEN-241): a mustered member's walk to his corner and the wait there.
+    if crate::systems::turf::muster_holds(world, id, plan) {
+        return true;
+    }
     // Item 15: a Lead holds until its Collect runs or fails.
     plan.goal == GoalKind::Lead
 }

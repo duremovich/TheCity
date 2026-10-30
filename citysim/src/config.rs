@@ -2163,6 +2163,11 @@ pub struct CrewCfg {
     /// the stalls: two thirds of the misses behind a lost colour were the
     /// daily court rota).
     pub court_work_excused: bool,
+    /// Round 7 W2 (`OPEN-241`): the first marchers at a raid's door hold the
+    /// brawl for the column's tail, a marcher due at the door within this
+    /// many ticks (V15: the first three went in and the rest, a Coarse
+    /// body's timed walk behind, found it over; 88 released on the way at 20k).
+    pub march_wait_ticks: u64,
 }
 
 impl Default for CrewCfg {
@@ -2210,6 +2215,7 @@ impl Default for CrewCfg {
             muster_flat: 0.5,
             raid_target_reach_ticks: 240,
             court_work_excused: true,
+            march_wait_ticks: 60,
         }
     }
 }
@@ -6056,6 +6062,10 @@ pub struct CaseCfg {
     pub tell_lawful_min: f32,
     /// ... of a sighting no older than this many days (ReportCrime's two).
     pub tell_days: u64,
+    /// Round 7 W2 (`OPEN-238`): a victim or witness under this courage
+    /// keeps quiet about a man whose gang holds the block he lives on (fear:
+    /// the holders are still there tomorrow).
+    pub fear_courage_max: f32,
 }
 
 impl Default for CaseCfg {
@@ -6067,6 +6077,7 @@ impl Default for CaseCfg {
             hue_reach: 12,
             tell_lawful_min: 0.3,
             tell_days: 2,
+            fear_courage_max: 0.5,
         }
     }
 }

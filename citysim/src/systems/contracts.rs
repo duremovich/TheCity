@@ -4876,6 +4876,11 @@ pub fn mission_door(world: &World, id: ContractId, at: Tick) -> (TilePos, Option
 /// lead stands.
 fn mission_muster(world: &World, c: &Contract, door: TilePos) -> TilePos {
     let near = world.config.gangs.muster_near_tiles;
+    // Round 7 W2 (`OPEN-241`): each place in the order, the first within
+    // `muster_near_tiles` of the door; none: the one nearest the door (V15
+    // `gang_member_11411 d25`: a muster at the Fixer's in D3, then 343 tiles
+    // toward a door in the Sump, six hours, "the crew never reached the door").
+    let mut places: Vec<TilePos> = Vec::new();
     if let Some(g) = missions::taker_gang(world, c).and_then(|g| world.comp::<crate::components::Gang>(g)) {
         let best = g
             .territory
@@ -4883,22 +4888,21 @@ fn mission_muster(world: &World, c: &Contract, door: TilePos) -> TilePos {
             .filter_map(|&h| {
                 world.comp::<Building>(h).filter(|b| !b.demolished).map(|b| (b.door.manhattan(door), h, b))
             })
-            .filter(|&(d, _, _)| d <= near)
             .min_by_key(|&(d, h, _)| (d, h));
         if let Some((_, _, b)) = best {
-            return world.outside_door(b);
+            places.push(world.outside_door(b));
         }
     }
-    if let Some(d) = c.broker.and_then(|b| missions::door_of(world, b)) {
-        return d;
-    }
+    places.extend(c.broker.and_then(|b| missions::door_of(world, b)));
     let taker = c.taker.unwrap_or(EntityId::NONE);
     let home = if is_gang(world, taker) { world.hideout_of(taker) } else { missions::home_of(world, taker) };
-    if let Some(d) = home.and_then(|h| missions::door_of(world, h)) {
-        return d;
-    }
+    places.extend(home.and_then(|h| missions::door_of(world, h)));
     let lead = c.crew.first().copied().unwrap_or(taker);
-    world.comp::<Position>(lead).map_or(door, |p| p.tile)
+    places.extend(world.comp::<Position>(lead).map(|p| p.tile));
+    if let Some(&t) = places.iter().find(|t| t.manhattan(door) <= near) {
+        return t;
+    }
+    places.iter().copied().min_by_key(|t| t.manhattan(door)).unwrap_or(door)
 }
 
 /// C22: open record `id`'s mission (a squad's or a gang's): the crew (an

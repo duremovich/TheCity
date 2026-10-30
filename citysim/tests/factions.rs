@@ -842,10 +842,17 @@ fn test_muster_point_is_held_home_nearest_target() {
     w.comp_mut::<Brain>(a).expect("b").current_goal = Some(GoalKind::Raid);
     let ws = citysim::WorldState::observe(&w, a, None);
     assert_eq!(ws.at, citysim::LocationKey::MusterPoint);
-    // Only a Home past muster_near_tiles: the Hideout, as in M8.
+    // Only a Home past muster_near_tiles: the Hideout, as in M8, unless
+    // (Round 7 W2) that Home stands nearer the target than the Hideout.
     hold(&mut w, g0, &[far]);
     let hq = w.hideout_of(g0).expect("hq");
-    assert_eq!(raid::muster_point(&w, a), Some(raid::MusterAt::Inside(hq)));
+    let to_target = |w: &World, h: EntityId| w.comp::<Building>(h).map(|b| b.door.manhattan(target)).expect("door");
+    let want = if to_target(&w, far) < to_target(&w, hq) {
+        raid::MusterAt::Door(door(&w, far))
+    } else {
+        raid::MusterAt::Inside(hq)
+    };
+    assert_eq!(raid::muster_point(&w, a), Some(want));
     // muster_near_tiles = 0 is the M8 muster.
     hold(&mut w, g0, &[near]);
     w.config.gangs.muster_near_tiles = 0;
