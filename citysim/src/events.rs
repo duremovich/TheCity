@@ -797,9 +797,27 @@ impl EventKind {
 /// a brawl, a crossfire, a gang's punishment, a wound, the fare's beating)
 /// names each person in it with the age, so a shadow can check the under-18
 /// rule (CLAUDE.md) on every such line; V12's victim lines printed none.
+/// Round 8 X5 (`OPEN-248`): the bout, the arrest (a robot's too), the
+/// witness's line, the fight in the cells and the law's case for it (X1's
+/// `consequence` cell fight, X6's "in the yard of", and `law::cell_case`) too (V16: none of them
+/// printed an age; X1's "died resisting arrest" is an `Assault`, aged
+/// already).
 fn harm_line(kind: EventKind, text: &str) -> bool {
     use EventKind as E;
-    matches!(kind, E::Assault | E::Murder | E::Assaulted | E::Brawl | E::Crossfire | E::Punished | E::Wounded)
+    matches!(
+        kind,
+        E::Assault
+            | E::Murder
+            | E::Assaulted
+            | E::Brawl
+            | E::Crossfire
+            | E::Punished
+            | E::Wounded
+            | E::Bout
+            | E::Arrest
+            | E::Witness
+    ) || (matches!(kind, E::Sentence | E::Cells)
+        && (text.contains(" in the cells of ") || text.contains(" in the yard of ")))
         || (kind == E::Fare && (text.contains(" beat ") || text.contains(" booked ") || text.contains(" fined ")))
 }
 

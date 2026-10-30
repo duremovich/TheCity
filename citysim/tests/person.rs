@@ -1243,6 +1243,40 @@ fn probe_working_couple_moves_near_work() {
         c.ages.school_by_reach = false;
         c
     });
+    // Round 8 X5 re-pin (OPEN-248: a marriage ends a courtship): the probe's
+    // childless couples were the first two days' weddings, two shifts and no
+    // date (the mover's work far from the new Home); a few such weddings are
+    // made here by hand: an unmarried worker marries an unmarried adult (never
+    // kin) whose Home is past twice the cap from that work, and moves in.
+    let cap = w.config.life.commute_move_ticks;
+    let single: Vec<EntityId> = civilians(&w)
+        .into_iter()
+        .filter(|&a| w.spouse_of(a).is_none() && demography::is_adult(&w, a) && home(&w, a).is_some())
+        .collect();
+    let mut wed = 0;
+    for &x in &single {
+        if wed >= 40 || w.spouse_of(x).is_some() {
+            continue;
+        }
+        let Some(work) = w.comp::<Job>(x).and_then(|j| j.employer).and_then(|e| w.comp::<Building>(e)).map(|b| b.door)
+        else {
+            continue;
+        };
+        let far = single.iter().copied().find(|&y| {
+            y != x
+                && w.spouse_of(y).is_none()
+                && social::suitor(&w, x, y)
+                && demography::children_of_agent(&w, y).is_empty()
+                && demography::children_of_agent(&w, x).is_empty()
+                && home(&w, y)
+                    .and_then(|h| w.comp::<Building>(h))
+                    .is_some_and(|b| commute_cost(&w, b.door, work) > 2 * cap)
+        });
+        if let Some(y) = far {
+            social::marry(&mut w, y, x);
+            wed += 1;
+        }
+    }
     w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
     let cap = w.config.life.commute_move_ticks;
     let work_of = |w: &World, a: EntityId| {

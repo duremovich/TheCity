@@ -6426,6 +6426,24 @@ pub struct SocialCfg {
     /// spouses, Rivals, Enemies and an edge holding a debt are never
     /// dropped or counted.
     pub acquaintance_cap: usize,
+    /// Round 8 X5 (`OPEN-248`): a proposal ends a courtship of at least
+    /// this many dates (accepted flirts, one a day) ...
+    #[serde(default)]
+    pub court_dates: u16,
+    /// ... the first of them at least the pair's pace ago, from this many
+    /// days ...
+    #[serde(default)]
+    pub court_days_min: u64,
+    /// ... to this many (a hash of the pair, `social::court_pace_days`).
+    #[serde(default)]
+    pub court_days_max: u64,
+    /// A courtship with no date for this many days is over.
+    #[serde(default)]
+    pub court_lapse_days: u64,
+    /// The share of the founding's unmarried adult housemate pairs courting
+    /// already when the story starts (`social::seed_courting`; 0: none).
+    #[serde(default)]
+    pub court_seed_share: f32,
 }
 
 /// Several gangs and their faction brain (M8, `docs/M8_FACTIONS.md`).
@@ -10838,15 +10856,22 @@ pub struct LeisureCfg {
     /// the two longest since their last, one a night whatever the roster.
     pub bout_card_per: u16,
     /// Round 7 W6 (OPEN-217): the bout's winner takes a purse from the
-    /// house (`Flow::GambleWin`): this many coins ...
+    /// house (round 8 X5: `Flow::Purse`, the pit's owner, off the table's
+    /// take): this many coins ...
     pub bout_purse: i64,
     /// ... plus this share of the main event's stakes (0 and 0: no purse).
     pub bout_purse_share: f32,
-    /// The loser is hurt (a wound to have seen to, `customers::hurt`): his
-    /// energy and safety fall by this ...
+    /// Round 8 X5 (OPEN-217): the bout's margin (how far inside the
+    /// winner's chance the night's draw fell) at or over which the loser is
+    /// beaten (hurt, a wound); under it he loses on points.
+    pub bout_beating: f32,
+    /// Round 8 X5: the energy a loser on points loses (no wound).
+    pub bout_points_tired: f32,
+    /// The beaten loser is hurt (a wound to have seen to,
+    /// `customers::hurt`): his energy and safety fall by this ...
     pub bout_hurt: f32,
-    /// ... plus this x the winner's margin in fighting (0 and 0: the base
-    /// 0.3 and no wound) ...
+    /// ... plus this x the bout's margin past `bout_beating` (0 and 0: the
+    /// base 0.3 on every loss and no wound) ...
     pub bout_hurt_margin: f32,
     /// ... and at this fall or more the line reads "badly hurt".
     pub bout_hurt_bad: f32,
@@ -10907,6 +10932,8 @@ impl Default for LeisureCfg {
             bout_card_per: 4,
             bout_purse: 0,
             bout_purse_share: 0.0,
+            bout_beating: 0.0,
+            bout_points_tired: 0.0,
             bout_hurt: 0.0,
             bout_hurt_margin: 0.0,
             bout_hurt_bad: 1.0,

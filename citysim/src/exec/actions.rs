@@ -1178,7 +1178,7 @@ pub fn on_complete(
             let accept = {
                 use rand::Rng;
                 let roll: f32 = world.rng.world().random();
-                !crate::systems::social::has_spouse(world, partner)
+                crate::systems::social::suitor(world, id, partner)
                     && !world.rejected_recently(id, partner)
                     && roll < 0.3 + aff + 0.2 * sociable
             };
@@ -1197,6 +1197,8 @@ pub fn on_complete(
                     );
                 }
                 crate::systems::social::adjust(world, id, partner, 0.1, 0.02);
+                // Round 8 X5 (`OPEN-248`): a date in the pair's courtship.
+                crate::systems::social::dated(world, id, partner);
             } else {
                 world.remember(id, MemoryKind::Rejected, Some(partner), 0.4, -0.3, false);
             }

@@ -310,6 +310,10 @@ pub enum Flow {
     /// other way and the rider's line named the owner (`fabber_84414`: a
     /// stranger or a corp each leg, never a cabbie).
     CabTake,
+    /// Round 8 X5 (`OPEN-217`): a bout's purse, the pit's owner -> the
+    /// winner, off the table's take (untaxed; `flow_other`, counted in
+    /// `Jobs2Cols.bout_purse_coins`). W6 booked it as `GambleWin`.
+    Purse,
 }
 
 impl Flow {
@@ -448,7 +452,7 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
             row.flow_other += coins;
             row.jobs2.get_or_insert_with(Default::default).flow_buyout += coins;
         }
-        Flow::CabFare | Flow::StreetCut | Flow::Gray => row.flow_other += coins,
+        Flow::CabFare | Flow::StreetCut | Flow::Gray | Flow::Purse => row.flow_other += coins,
         // Round 6 V4: the fare's second hand (driver -> house) is no new flow of coins.
         Flow::CabTake => {}
     }

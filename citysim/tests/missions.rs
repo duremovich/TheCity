@@ -17,7 +17,12 @@ use citysim::{
 use rand::Rng;
 
 fn world() -> World {
-    World::new(42, Config::load().dole_city())
+    let mut cfg = Config::load().dole_city();
+    // Round 8 X5 (OPEN-248): the founding's courtships off (a housemate at a
+    // courtship's affinity stands at the mark's door: the defenders and the
+    // political term moved on this ground, a butterfly).
+    cfg.social.court_seed_share = 0.0;
+    World::new(42, cfg)
 }
 
 fn adults(w: &World) -> Vec<EntityId> {
@@ -408,6 +413,8 @@ fn test_no_mission_no_draw() {
     let mut a = world();
     let mut cfg = Config::load().dole_city();
     cfg.contracts.max_open = 0;
+    // Round 8 X5: the twin of `world()`, the founding's courtships off too.
+    cfg.social.court_seed_share = 0.0;
     let mut b = World::new(42, cfg);
     let agents: Vec<EntityId> = a.citizens().into_iter().take(64).collect();
     for _ in 0..TICKS_PER_DAY {

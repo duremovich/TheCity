@@ -265,7 +265,7 @@ pub fn best_colocated_partner_in(
         .iter()
         .copied()
         .filter(|&o| o != id && world.has::<Brain>(o) && !world.has::<Sentence>(o))
-        .filter(|&o| !unmarried || !has_spouse(world, o))
+        .filter(|&o| !unmarried || suitor(world, id, o))
         .filter(|o| !reserved.contains(o))
         .map(|o| (o, world.edge(id, o).map_or(0.0, |e| e.affinity)))
         .filter(|&(_, a)| a >= min_affinity)
@@ -294,9 +294,154 @@ pub fn known_candidate(world: &World, id: EntityId, min: f32) -> Option<EntityId
         .neighbours(id)
         .map(|o| (o, world.edge(id, o).map_or(0.0, |e| e.affinity)))
         .filter(|&(_, a)| a >= min)
-        .filter(|&(o, _)| world.has::<Brain>(o) && !has_spouse(world, o) && !rejected.contains(&o))
+        .filter(|&(o, _)| world.has::<Brain>(o) && suitor(world, id, o) && !rejected.contains(&o))
         .max_by(|x, y| x.1.total_cmp(&y.1).then(y.0.cmp(&x.0)))
         .map(|(o, _)| o)
+}
+
+/// Round 8 X5 (`OPEN-248`): `o` is someone `id` may court: an unmarried
+/// adult who is not kin (a Parent or Family edge). V16's seed-42 city
+/// married 1,190 parents to their grown children in eight days (the elder
+/// parent's link, affinity 0.5 and trust 0.6, one flirt from a proposal);
+/// the under-18 rule (CLAUDE.md) keeps every minor out of a courtship.
+pub fn suitor(world: &World, id: EntityId, o: EntityId) -> bool {
+    !has_spouse(world, o)
+        && crate::systems::demography::is_adult(world, o)
+        && !world.edge(id, o).is_some_and(|e| matches!(e.kind, RelKind::Parent | RelKind::Family))
+}
+
+/// Round 8 X5 (`OPEN-248`): a courtship in `World.courting`, keyed `(lo,
+/// hi)`: the first date, the last, and the dates (an accepted flirt, at most
+/// one a day, either tier), and the days a courtship the founding seeded had
+/// run before day 0 (`seed_courting`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Courtship {
+    pub since: Tick,
+    pub last: Tick,
+    pub dates: u16,
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub head: u16,
+}
+
+fn is_zero_u16(v: &u16) -> bool {
+    *v == 0
+}
+
+impl Courtship {
+    /// The days courted by `now` (a seeded courtship's days before day 0 too).
+    pub fn days(&self, now: Tick) -> u64 {
+        now.saturating_sub(self.since) / TICKS_PER_DAY + u64::from(self.head)
+    }
+}
+
+fn pair_key(a: EntityId, b: EntityId) -> (EntityId, EntityId) {
+    if a < b {
+        (a, b)
+    } else {
+        (b, a)
+    }
+}
+
+/// Round 8 X5: an accepted flirt is a date in the pair's courtship (the
+/// first opens it; one counts a day).
+pub fn dated(world: &mut World, a: EntityId, b: EntityId) {
+    let now = world.tick;
+    let c = world.courting.entry(pair_key(a, b)).or_insert(Courtship { since: now, last: now, dates: 0, head: 0 });
+    if c.dates == 0 || c.last / TICKS_PER_DAY < now / TICKS_PER_DAY {
+        c.dates = c.dates.saturating_add(1);
+        c.last = now;
+    }
+}
+
+/// Round 8 X5: the pair's own pace, the days from the first date to a
+/// proposal: `[social] court_days_min` to `court_days_max`, spread by a
+/// hash of the pair and the seed (some marry in a week, some court for
+/// two months).
+pub fn court_pace_days(world: &World, a: EntityId, b: EntityId) -> u64 {
+    let s = &world.config.social;
+    let (lo, hi) = pair_key(a, b);
+    let h = crate::rng::splitmix64(world.seed() ^ (u64::from(lo.index) << 32) ^ u64::from(hi.index));
+    let span = s.court_days_max.saturating_sub(s.court_days_min) + 1;
+    s.court_days_min + h % span
+}
+
+/// Round 8 X5 (`OPEN-248`): a marriage ends a courtship: `[social]
+/// court_dates` dates or more, the first at least the pair's pace ago
+/// (`court_pace_days`). V16: a marriage was a coworker's edge at affinity
+/// 0.6 and trust 0.5, reached in two days of shared shifts, no date at all
+/// (16.7k of 23.3k marriages at 100k in days 0-6).
+pub fn courtship_ripe(world: &World, a: EntityId, b: EntityId) -> bool {
+    let Some(c) = world.courting.get(&pair_key(a, b)) else { return false };
+    let courted = world.tick.saturating_sub(c.since) + u64::from(c.head) * TICKS_PER_DAY;
+    c.dates >= world.config.social.court_dates && courted >= court_pace_days(world, a, b) * TICKS_PER_DAY
+}
+
+/// Round 8 X5 (`OPEN-248`): the founding's courtships. A fresh city held no
+/// courtship, so either every pair that qualified married in the first week
+/// (V16) or, with a courtship to end, nobody married before its pace ran.
+/// The city's story starts mid-life: `[social] court_seed_share` of the
+/// unmarried adult housemates (the founding's households, paired in id
+/// order, never kin) are courting already, the edge at the proposal's
+/// affinity and trust, the dates done, `head` days of the pair's pace run
+/// (a hash of the pair, uniform below the pace), so their weddings fall
+/// through the first weeks as the city's own courtships ramp up. No RNG.
+pub fn seed_courting(world: &mut World) -> u32 {
+    let share = world.config.social.court_seed_share;
+    if share <= 0.0 {
+        return 0;
+    }
+    let mut by_home: std::collections::BTreeMap<EntityId, Vec<EntityId>> = std::collections::BTreeMap::new();
+    for id in world.brained() {
+        if has_spouse(world, id) || !crate::systems::demography::is_adult(world, id) {
+            continue;
+        }
+        if let Some(h) = world.comp::<Household>(id).and_then(|h| h.home) {
+            by_home.entry(h).or_default().push(id);
+        }
+    }
+    let (aff, trust) = (world.config.social.propose_affinity, world.config.social.propose_trust);
+    let dates = world.config.social.court_dates;
+    let mut n = 0;
+    for (_, ids) in by_home {
+        for &[a, b] in ids.as_chunks::<2>().0 {
+            if !suitor(world, a, b) {
+                continue;
+            }
+            let h = crate::rng::splitmix64(
+                world.seed() ^ (0xC0_u64 << 56) ^ (u64::from(a.index) << 32) ^ u64::from(b.index),
+            );
+            if (h >> 11) as f64 / (1u64 << 53) as f64 >= f64::from(share) {
+                continue;
+            }
+            let pace = court_pace_days(world, a, b);
+            let head = (crate::rng::splitmix64(h) % pace.max(1)) as u16;
+            let e = world.edge_entry(a, b);
+            e.affinity = e.affinity.max(aff);
+            e.trust = e.trust.max(trust);
+            promote(e);
+            world.courting.insert(pair_key(a, b), Courtship { since: 0, last: 0, dates, head });
+            n += 1;
+        }
+    }
+    n
+}
+
+/// Round 8 X5: the courtship's days and dates for the wedding's line.
+fn courtship_of(world: &World, a: EntityId, b: EntityId) -> Option<Courtship> {
+    world.courting.get(&pair_key(a, b)).copied()
+}
+
+/// Round 8 X5: the book keeps the live courtships: both unmarried and
+/// alive, a date within `[social] court_lapse_days`.
+fn prune_courting(world: &mut World) {
+    let lapse = world.config.social.court_lapse_days * TICKS_PER_DAY;
+    let now = world.tick;
+    let book = std::mem::take(&mut world.courting);
+    let live = |w: &World, x: EntityId| w.has::<Brain>(x) && !has_spouse(w, x);
+    world.courting = book
+        .into_iter()
+        .filter(|&((a, b), c)| now.saturating_sub(c.last) <= lapse && live(world, a) && live(world, b))
+        .collect();
 }
 
 /// The best known candidate who is at a Bar or Market right now: somewhere a
@@ -363,7 +508,7 @@ pub fn candidate_at_venue_in(
     };
     candidates
         .filter(|&o| o != id && world.has::<Brain>(o) && !world.has::<Sentence>(o))
-        .filter(|&o| !has_spouse(world, o) && !rejected.contains(&o) && !reserved.contains(&o))
+        .filter(|&o| suitor(world, id, o) && !rejected.contains(&o) && !reserved.contains(&o))
         .map(|o| (o, world.edge(id, o).map_or(0.0, |e| e.affinity)))
         .filter(|&(_, a)| a >= min)
         .max_by(|x, y| x.1.total_cmp(&y.1).then(y.0.cmp(&x.0)))
@@ -432,6 +577,10 @@ pub fn propose_allowed(world: &World, proposer: EntityId, target: EntityId) -> b
         // Singh" 22 hours after his husband's death).
         && !crate::systems::grief::widowed_lately(world, proposer)
         && !crate::systems::grief::widowed_lately(world, target)
+        // Round 8 X5 (`OPEN-248`): two adults, not kin, at a courtship's end.
+        && crate::systems::demography::is_adult(world, proposer)
+        && suitor(world, proposer, target)
+        && courtship_ripe(world, proposer, target)
 }
 
 pub fn propose(world: &mut World, proposer: EntityId, target: EntityId) -> bool {
@@ -481,7 +630,11 @@ pub fn marry(world: &mut World, a: EntityId, b: EntityId) {
         }
     }
     let (na, nb) = (world.name_of(a), world.name_of(b));
-    world.push_event(EventKind::Marriage, &[a, b], format!("{na} married {nb}"));
+    // Round 8 X5: the line says how long they courted.
+    let courted = courtship_of(world, a, b)
+        .map_or_else(String::new, |c| format!(" after {} days of courting ({} dates)", c.days(world.tick), c.dates));
+    world.courting.remove(&pair_key(a, b));
+    world.push_event(EventKind::Marriage, &[a, b], format!("{na} married {nb}{courted}"));
     let d = crate::systems::gossip::talk_district(world, a);
     crate::systems::gossip::post_deed(world, d, crate::word::Deed::Married, Some(a), Some(b));
 }
@@ -717,6 +870,7 @@ pub fn first_meeting(world: &mut World, a: EntityId, b: EntityId, affinity: f32)
 }
 
 fn daily(world: &mut World) {
+    prune_courting(world);
     let tick = world.tick;
     let week = 7 * TICKS_PER_DAY;
     // The pressure pass phase 4 (OPEN-210): the weak prune's wait and

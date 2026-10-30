@@ -33,6 +33,8 @@ fn city() -> World {
         cfg.trade_verbs = None;
         // The pressure pass S6 (OPEN-224): the seeded children off (they move this scene's ground: a butterfly).
         cfg.ages.seed_child_slots = 0;
+        // Round 8 X5 (OPEN-248): nor the founding's courtships (their edges move this scene's ground: a butterfly).
+        cfg.social.court_seed_share = 0.0;
         let mut w = World::new(42, cfg);
         w.run_ticks(10 * TICKS_PER_HOUR);
         for _ in 0..30 {

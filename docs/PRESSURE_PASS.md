@@ -4522,3 +4522,77 @@ nobody. The walk-in clinic pick moves a patient, never a harm.
 No new test (doctrine 2). Re-pinned in place: `civic::test_jailer_meal_is_an_inmate_encounter` runs the Law pass at
 `[justice] meal_hour`, not the midnight (the meal moved). `SAVE_VERSION` 112 (renumber at the merge): `consequence::Inside.home`, `Inside.gang`,
 the X6 keys and the `Jobs2Cols` `cell_days` ... `wr_held_clear` columns (serde defaults).
+
+### X5, the pit, the lines' ages and marriages (`OPEN-217`, `OPEN-248`; `leisure::fight_bout`, `leisure::bout_purse`, `leisure::stakes_line`, `Flow::Purse`, `events::harm_line`, `social::suitor`, `social::dated`, `social::courtship_ripe`, `social::court_pace_days`, `social::seed_courting`, `World.courting`, `[leisure] bout_beating`, `bout_points_tired`, `[social] court_dates` ... `court_seed_share`)
+
+- **The causes** (20k `isle_m_k2` seed 42, main `8b76500`; a temporary probe on `social::marry` and the Social
+  midnight, removed). (1) **The pit**: W6's hurt fired on every loss (the margin only scaled it), and the purse was 5c
+  against a 6-12c patch-up, booked as `GambleWin` (the gambling column) though no bet was won. (2) **The lines'
+  ages**: `events::harm_line` named Assault, Murder, Brawl and the rest, not `Bout`, `Arrest`, `Witness`, nor X1's
+  cell fight (`Cells` "went for ... in the cells of") or its case (`Sentence` "... in the cells of"); X1's "died
+  resisting arrest" is an `Assault`, aged already. (3) **Marriages**: 4,063 in the first 8 days. **1,190 of them a
+  parent and a grown child** (the edge `Parent`, the age gap 20-35 years): the elder parent's link (`ages`, affinity
+  0.5, trust 0.6) is one accepted flirt from `propose_affinity` 0.6, and no candidate pick read kin. **~2,600 a
+  coworker** with no date at all: an hour of a shared shift is `interacted` (+0.05 affinity, +0.02 trust), so two
+  shifts reach the proposal's 0.6/0.5, and `stat_flirt` proposes before it flirts. The fresh city holds 15,132 single
+  adults of 20,000 (24 % married at the founding): the qualifying pairs married in the first week (singles 15,132 ->
+  7,740 by d7) and the rate fell with the stock (week 4: 89).
+- **Built.** The bout's margin is how far inside the winner's chance the night's draw fell (`p_win - roll`: a
+  favourite's win can be a rout, an underdog's is narrow): at `[leisure] bout_beating` (0.35) or over it the loser is
+  beaten, hurt by `bout_hurt` + `bout_hurt_margin` x the margin past it (a wound, the patch-up as W6); under it he
+  "lost on points" (`bout_points_tired` 0.1 energy, no wound). An even bout is a beating 30 % of nights. The purse
+  (`bout_purse` 5 -> 14, over the Clinic's `patch_price` 12) is `Flow::Purse` from the pit's owner off the table's
+  take (`book_take`: a front's week to its gang is short by it; `flow_other`, `pop_inflow_other`). `harm_line` ages
+  the Bout, Arrest and Witness lines and the cell fight and its case. Marriage: kin (a `Parent` or `Family` edge) and
+  minors are never courted (`social::suitor`, in every candidate pick, the Full flirt's accept and `propose_allowed`);
+  an accepted flirt is a date in the pair's courtship (`World.courting`, either tier, one a day); a proposal waits for
+  the courtship's end: `[social] court_dates` (3) dates, the first at least the pair's pace ago (`court_days_min` 2 to
+  `court_days_max` 60, a hash of the pair and the seed); a courtship with no date in `court_lapse_days` (10) is over;
+  the line reads "X married Y after 14 days of courting (5 dates)". The founding seeds the courtships in progress
+  (`seed_courting`, no RNG): `court_seed_share` (0.35) of the unmarried adult housemate pairs (id order, never kin)
+  court already, the edge at the proposal's affinity and trust, `head` days of their pace run (uniform below it), so
+  their weddings fall through the first weeks while the city's own courtships ramp up. X2's `[grief] wed_after_days`
+  stays in `propose_allowed`.
+- **Deviations.** "The house's money (a `Flow` from the venue's till)": a venue has no till of its own; the purse is
+  the owner's purse booked against the table's take, so a pit on the city's deed still pays "from the City" (the City
+  is that house). The beating's margin is the bout's (the draw), not W6's fighting margin (which would hurt the same
+  pairs every time). The first week is fixed by the founding's courtships, not a slower flirt: with a courtship to
+  end and none seeded the city married 12 in week 1 and 261 in week 4 (the burst moved, not gone).
+- **Under-18** (`ages::is_protected`): the card's gate is V6's and `fight_bout` backstops it (no fall, no wound on a
+  protected loser); the purse goes to the adult winner. `suitor` keeps every minor out of a flirt, a courtship and a
+  proposal (the Full Court picks read no age before; none fired in the probe; 0 of 1,760 marriages after). No Bout,
+  Arrest, Witness or Assault line of the 30-day run names anyone under 18.
+- **Shadow** (20k, seed 42, d20-27, picks fighter:2, bouncer:1, madam:1, guard:2, worker:2). Working: `fighter_11655`
+  `d21 23:00` "Raven Dunmore (38 y) beat Odessa Okafor (25 y) at Fight Pit#5578 (bets paid 20); purse 18c; Odessa
+  Okafor hurt, to have it seen to", `d22 10:54` patched in Back Room#1971 for 6c, `d23 23:00` she wins, "purse 15c",
+  `[money] +15c (Purse)`, `d25 23:00` "... purse 14c; Odessa Okafor lost on points" (no patch-up after);
+  `fighter_8049` (Tess Duarte) two bouts with Ulric Vasquez, both "lost on points", purses 22c and 18c. Ages:
+  `guard_24149` `d22 17:15` "Nadia Yates (37 y) arrested Taz Delacroix (53 y) for Shakedown", `worker_13165` "Witness:
+  2 saw Katrin Kemp (35 y) commit Fare Evasion (Hex Zhou (45 y), Quinn Fletcher (59 y))", the run's "Smoke Thorne (58
+  y) went for Cutter Ito (23 y) in the cells of Precinct#4460 (an old grudge)". Marriage: no pick married in the
+  window; the run's lines read "Brenna Bellamy married Roderick Wexford after 14 days of courting (5 dates)".
+- **Reads wrong** (the next pass): the purse reads "from the City" on a city-deeded pit; "the law added 3 days to
+  Smoke Thorne (58 y)'s sentence" (the age before the possessive); `bouncer_17697` "1 turned away (no cause 1)" and a
+  196-minute commute to her door; lonely visits 9,965 -> 17,770 (the singles stay single longer: a knock-on to read,
+  not tuned); day 0 has no wedding (a seeded courtship's pace runs at least a day).
+- Numbers (prints; 20k seed 42 x 30, `--scaled --ambient-flats 50`, one run each; base main `8b76500`):
+
+  | | base | after |
+  |---|---|---|
+  | bouts | 493 | 512 |
+  | losers hurt | 493 (100 %) | 155 (30 %; 357 "lost on points") |
+  | purses / coins / mean | 493 / 3,815c / 7.7c (`GambleWin`) | 512 / 8,758c / 17.1c (`Purse`) |
+  | patched (all) | 1,816 | 1,624 |
+  | Marriage by week (d0-6, 7-13, 14-20, 21-27, 28-29) | 3,887 / 776 / 208 / 89 / 32 | 347 / 414 / 473 / 404 / 122 |
+  | Marriage, 30 d | 4,992 | 1,760 |
+  | of them a parent and a grown child (d0-7, probe) | 1,190 of 4,063 | 0 |
+  | courtships seeded at the founding / live on d15 (probe) | | 2,232 / 6,848 |
+  | lonely visits | 9,965 | 17,770 |
+
+  No test (doctrine 2). Re-pinned on their premises: `social::test_propose_requires_thresholds` (a ripe courtship
+  inserted), `person::probe_working_couple_moves_near_work` (its childless far couples were the first days' dateless
+  weddings: a few made by hand, a worker and a non-kin adult living past twice the cap from that work, no children);
+  the founding's courtships off (`court_seed_share` 0, a butterfly on their ground) in `leaders::city`,
+  `missions::world` and its twin in `test_no_mission_no_draw`, `leisure::test_hangout_picks_spot_where_friend_habit_is`.
+  `SAVE_VERSION` 112 (the orchestrator renumbers at the merge): `World.courting`, `Flow::Purse`, the X5 keys (serde
+  defaults).
