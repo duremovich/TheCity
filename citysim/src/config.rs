@@ -1361,6 +1361,11 @@ pub struct MiseryCfg {
     /// the vehicle theft's lawfulness gate `+ steal_lawful_cut × misery`.
     pub steal_cost_cut: f32,
     pub steal_lawful_cut: f32,
+    /// Round 8 X3 (`OPEN-247`): a wage-holder plans a vehicle theft for
+    /// Earn only broke (`life::broke`) or this miserable (any misery at 0);
+    /// the jobless as before.
+    #[serde(default)]
+    pub employed_steal_misery: f32,
     /// Off screen: the hour's `p_steal × (1 + stat_steal_mult × misery)`.
     pub stat_steal_mult: f32,
     /// Fights: misery past `brawl_min`, drunk or high, an hour's chance at
@@ -2821,6 +2826,13 @@ pub struct CareersCfg {
     pub frail_exit_mult: f32,
     /// § 4.4: a retired agent under this many coins is retired no more.
     pub unretire_coins: i64,
+    /// Round 8 X3 (`OPEN-247`): a sentence this many days or longer is a
+    /// record (`Misery.record_at`); a night in the cells is none.
+    pub record_min_days: u32,
+    /// Round 8 X3: a post that reads a record (`[[trades]] reads_record`,
+    /// `[roles.<Name>] reads_record`) turns away anyone sentenced within
+    /// this many days (0: for good).
+    pub record_days: u32,
 }
 
 impl Default for CareersCfg {
@@ -2836,6 +2848,8 @@ impl Default for CareersCfg {
             retire_days: 60,
             frail_exit_mult: 0.6,
             unretire_coins: 20,
+            record_min_days: 2,
+            record_days: 365,
         }
     }
 }
@@ -2854,6 +2868,12 @@ impl CareersCfg {
 pub struct RoleCfg {
     pub min_age: u32,
     pub max_age: u32,
+    /// Round 8 X3 (`OPEN-247`): the `[[trades]] no_foreman` of a legacy role
+    /// (the Fighter under the pit).
+    pub no_foreman: bool,
+    /// Round 8 X3: the hire reads a record (`[careers] record_days`): the
+    /// law's posts.
+    pub reads_record: bool,
 }
 
 /// Lives at work phase 2 `[household]` (docs/LIVES_AT_WORK.md § 3): the
@@ -5301,6 +5321,10 @@ pub struct TradeCfg {
     /// forger under the fixer, the door under the house).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub no_foreman: bool,
+    /// Round 8 X3 (`OPEN-247`): the hire reads a record (`[careers]
+    /// record_days`): the law's and the city's posts, the doors, the books.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reads_record: bool,
 }
 
 fn is_zero_usize_cfg(v: &usize) -> bool {

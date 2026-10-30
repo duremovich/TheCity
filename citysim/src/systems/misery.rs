@@ -120,6 +120,19 @@ fn misery_mut(world: &mut World, id: EntityId) -> Option<&mut Misery> {
     world.comp_mut::<Misery>(id)
 }
 
+/// Round 8 X3 (`OPEN-247`): `id` was sentenced now (a record, `law::sentence`).
+pub fn note_record(world: &mut World, id: EntityId) {
+    let now = world.tick;
+    if let Some(x) = misery_mut(world, id) {
+        x.record_at = now;
+    }
+}
+
+/// Round 8 X3: the tick of `id`'s last sentence on record (0 none).
+pub fn record_at(world: &World, id: EntityId) -> crate::time::Tick {
+    world.comp::<Misery>(id).map_or(0, |x| x.record_at)
+}
+
 /// Is `id`'s job at its own household's business (his or his spouse's)?
 /// Nobody fires the owner, and an owner does not quit his own business (F3).
 fn own_business(world: &World, id: EntityId, job: &Job) -> bool {

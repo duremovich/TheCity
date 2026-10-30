@@ -480,7 +480,10 @@ use crate::world::World;
 /// `ViceState.collected`, `care::State.seen`, the `[customers] door_trouble_heat`, `door_stat_barred_p`, `[leisure]
 /// bout_purse` ... `bout_hurt_bad`, `[care] book_slack_ticks`, `book_cands`, `[noise] gossip_lines_day` keys and the
 /// `Jobs2Cols` `door_stat_broke` ... `clinic_idle_days` columns (serde defaults).
-pub const SAVE_VERSION: u8 = 107;
+/// 108 (pressure pass round 8, X3, the wrong person in the role II): `Misery.record_at`, the `[careers]
+/// record_min_days`, `record_days`, `[roles.<Name>] no_foreman`, `reads_record`, `[[trades]] reads_record` and
+/// `[misery] employed_steal_misery` keys (serde defaults).
+pub const SAVE_VERSION: u8 = 108;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

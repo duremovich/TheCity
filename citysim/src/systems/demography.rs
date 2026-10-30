@@ -1105,6 +1105,8 @@ fn pick_candidate(
         .filter(|_| crate::systems::dollhouse::hire_ok(world, role))
         // Jobs & lives phase 6: the struck-off at a black clinic only.
         .filter(|&id| crate::systems::gray::hire_ok(world, id, role))
+        // Round 8 X3 (`OPEN-247`): a post that reads a record.
+        .filter(|&id| crate::systems::careers::record_ok(world, id, role))
         // Lives at work phase 6 (§ 4.1, § 4.4): the age band, the retired.
         .filter(|&id| crate::systems::careers::admits(world, id, band))
         .map(|id| -> (u64, EntityId) {
@@ -1450,6 +1452,7 @@ impl HirePool {
                 && crate::systems::trades::skill_ok(world, id, role)
                 && crate::systems::dollhouse::hire_ok(world, role)
                 && crate::systems::gray::hire_ok(world, id, role)
+                && crate::systems::careers::record_ok(world, id, role)
         };
         // Lives at work phase 6 (§ 4.1, § 4.4): the age band and the retired
         // (every candidate admitted off); an age refusal is counted.
@@ -1511,7 +1514,8 @@ impl HirePool {
                     && crate::systems::fashion::dress_ok(world, id, role)
                     && crate::systems::trades::skill_ok(world, id, role)
                     && crate::systems::dollhouse::hire_ok(world, role)
-                    && crate::systems::gray::hire_ok(world, id, role);
+                    && crate::systems::gray::hire_ok(world, id, role)
+                    && crate::systems::careers::record_ok(world, id, role);
                 if !fixed {
                     continue;
                 }
@@ -1610,6 +1614,8 @@ pub fn can_take(world: &World, id: EntityId, employer: EntityId, role: Role) -> 
         && crate::systems::trades::skill_ok(world, id, role)
         && crate::systems::dollhouse::hire_ok(world, role)
         && crate::systems::gray::hire_ok(world, id, role)
+        // Round 8 X3 (`OPEN-247`): a post that reads a record.
+        && crate::systems::careers::record_ok(world, id, role)
         && crate::systems::careers::admits(world, id, crate::systems::careers::hire_band(world, role))
 }
 
