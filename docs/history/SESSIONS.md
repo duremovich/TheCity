@@ -1000,3 +1000,20 @@ driver, a body found, no child on the street, no minor harmed in 114 diaries (`h
 (ChildTaken 624 -> 4,103: families with coins let children go unfed till the warning, `OPEN-243`), and the war and
 the case reach the counters more than the diaries. `OPEN-243` to `OPEN-245` opened, `OPEN-239` and `OPEN-242`
 closed. Cost ≈ $316 (HANDOFF § Cost).
+
+## The twenty-seventh session (2026-10-30): pressure pass round 7, Shadow V16
+
+Round 7 from Shadow V15 (`docs/PRESSURE_PASS.md` § Round 7), no calls pending for Dylan: wave 1 W1 the household buys
+for its children, W2 the war and the case in the diaries, W3 the guard makes the arrest, W4 the right person in the
+role; wave 2 W6 the dull rooms (started when W2-W4 merged) and W5 contradictions (after W1). W1 found four causes of
+children unfed beside a purse (the adults ate the children's units, a shared Block's common pool read as every
+household's, carried food counted, a day worker had no hour), and at 100k the takes left are the broke (3,274 of
+3,430): the ladder's size is Dylan's call. W2 found the raid's march splitting up (three at the door and in) and the
+muster across the island; W3 the arrest searched after another guard claimed the warrant and the cuffs at the step's
+end; W4 the foreman by tenure whatever the trade and the install named by the Patient queue's server; W6 the door's
+gang read from Homes only and the pooled hire rehiring named pimps. Two red combinations, both seeded premises (one
+cleared by the next merge, one a Sonnet fix round); no test added (1,470), `SAVE_VERSION` 107. Subagents could not
+write report files to the scratchpad; the final reply is the report. Shadow V16 at 100k in V15's window: better in
+every group where round 7 aimed, no minor harmed in 227 diaries (`harm_blocked` 0); left the promise to tell the law
+broken and the held still acting, the target and the bereaved who do not react, far travel, a marriage burst
+(`OPEN-246` to `OPEN-248`). `OPEN-244`, `OPEN-245` closed. Cost ≈ $232 (HANDOFF § Cost).
