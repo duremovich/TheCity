@@ -648,7 +648,8 @@ before and after.
 
 **The pressure pass's last round, and its exit** (Dylan 2026-10-30, after a big-picture check: eight rounds each
 returned 7-8 ranked items, so the list measures the reading, not the distance left). Round 9 fixes broken systems
-only, in three phases; the narration polish goes to one cheap batch (Y3); far travel, the gangs' raids that do not
+only, in three phases and a fourth found while planning the city milestone (Y4, the walking pace); the narration
+polish goes to one cheap batch (Y3); far travel, the gangs' raids that do not
 land (`OPEN-241`) and the marriage move-in far from the post (`OPEN-240`) go to the map re-import with the vertical
 city, which follows. The dull rooms (arms dealers, the rich who never work, the corp-district Clinic) stay on
 `OPEN-217`, unbuilt. The under-18 rule holds in every phase (CLAUDE.md). A phase's 100k work is at most one run.
@@ -705,6 +706,30 @@ in five days (`camp_warden_56621 d21-26`): make the line count what came in, and
 it rather than fix it; cover shifts printed as Hires; the `day_labourer` shadow pick empty at 100k (the picker's
 rank). Y2 also touches event lines: keep to the line text, not who acts. Shadow: reporter, camp_warden, the hit's
 buyer or target (`marked`), day_labourer (20k).
+
+#### Y4, the walking pace (Dylan 2026-10-30; `OPEN-215`, `OPEN-221`, `OPEN-240`, `OPEN-241`'s far musters)
+
+Found by the city milestone's planning (`docs/CITY_MILESTONE.md`): `[exec] move_ticks_full = 1` is one 4 m tile a
+tick, a tick a game minute: 0.24 km/h, 1/21 of a human walk. A 1 km leg takes ~4 game hours. It is the root under six
+rounds of far travel (members 5-7 h from the muster, 14-20 h walking days, 9-12 h patrols, raids that never land,
+Clinics nobody reaches, the bin walk's length) and the one most broken system left. Dylan: fix it now, before V18.
+Make a walk real walking speed: `[exec]` gains a tiles-a-tick pace (a person at ~5 km/h walks ~21 of the island's 4 m
+tiles a minute; documented beside `move_ticks_full`, which it replaces or generalises), the Full executor steps that
+many path tiles a tick (sub-tick steps: the interrupt, door, queue and arrival checks still fire at the tile they
+happen on, not skipped), and every reader of the pace moves with it: `transit::commute_ticks` and every travel
+estimate, the Coarse `timed_walk` and `walk_place`, the vehicles' `[vehicles] mult`/`timed_mult` (shares of the walk:
+re-read so a car or a cab is faster than a walk by a sane factor, not 20x a 20x walk), the El's choice against the
+walk, `bigpath`'s segment length (`[exec]` walk segments), `plan_timeout_ticks`. Then **the knobs written in ticks
+that meant distance at the slow pace**: grep `assets/config.toml` for comments that cite `move_ticks_full` or "tiles
+at" or "before R2" and for reach caps in ticks (`[distance.reach]`, `[distance.choice]`, `school_trip_ticks`,
+`commute_long_ticks`, `beat_ticks`, the muster and hire caps, `[presence]`): a cap that is a time a person would
+travel stays a time (a School within 1 h is now 5 km, which is right) unless its comment says it was inflated to
+make up for the crawl, then it comes back to a sane time; list every knob touched with old -> new and why in the
+deviations. No literal speeds in systems. Under-18: nothing here picks a target. Shadow: guard (the patrol), gang_member
+and gang_leader (the muster, a raid that lands), cabbie, exec, night_shift, homeless (the bin walk), courier (20k);
+then one 100k run in V17's window for the raid and the far-travel lines. Moves a number: legs over 120 min, workers
+past a 3 h commute, home-to-post median minutes, raids that reach the door, corner turnout, Starving, ticks/s,
+20k seed 42 x 30 before and after, plus the one 100k run (ticks/s at 100k printed against V17's 18).
 
 ## Implemented: deviations
 
