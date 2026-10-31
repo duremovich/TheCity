@@ -27,10 +27,24 @@ pub fn dole_world() -> World {
 
 /// The pressure pass R2 (`[exec] move_ticks_full` 2 -> 1): a scene whose
 /// pick or premise the halved walk moved (another body picked, a far
-/// worker now near) is pinned to the v1 pace it was written for.
+/// worker now near) is pinned to the v1 pace it was written for. Round 9
+/// Y4: one tile every two ticks (`walk_tiles_per_tick` 1) at the M13
+/// quarter-tick resolution (`step_res` 4).
 #[allow(dead_code)]
 pub fn v1_pace(cfg: &mut Config) {
     cfg.exec.move_ticks_full = 2;
+    cfg.exec.walk_tiles_per_tick = 1;
+    cfg.exec.step_res = 4;
+}
+
+/// Round 9 Y4 (`[exec] walk_tiles_per_tick` 1 -> 21): a scene whose pick
+/// or premise the real walking pace moved is pinned to the R2 pace it was
+/// written for (one tile a tick, the quarter-tick resolution).
+#[allow(dead_code)]
+pub fn r2_pace(cfg: &mut Config) {
+    cfg.exec.move_ticks_full = 1;
+    cfg.exec.walk_tiles_per_tick = 1;
+    cfg.exec.step_res = 4;
 }
 
 /// The shipped config with one edit applied before the world is built.

@@ -336,6 +336,8 @@ fn probe_laid_off_farm_worker_finds_work_within_14_days() {
     let mut w = World::new(42, {
         let mut c = Config::load();
         c.exec.move_ticks_full = 2;
+        c.exec.walk_tiles_per_tick = 1; // round 9 Y4: the v1 pace's tile, at its quarter ticks
+        c.exec.step_res = 4;
         // Re-pinned, round 3 S4 (OPEN-216): the off-screen patients seen at
         // the Clinics and the super's legs move the seed-42 city, and the
         // pick was abducted and killed on day 26 before the search ended (a
@@ -1035,6 +1037,8 @@ fn probe_far_worker_with_one_rent_moves_near_work() {
     // The pressure pass R2: the v1 pace (2 ticks a tile), whose far workers
     // this probe's city has (at 1 a tile they are near, or married).
     cfg.exec.move_ticks_full = 2;
+    cfg.exec.walk_tiles_per_tick = 1; // round 9 Y4: the v1 pace's tile, at its quarter ticks
+    cfg.exec.step_res = 4;
     // Pressure pass round 3, S1 (OPEN-221): the hire's hard cap
     // (`[distance.choice] hire_max_ticks`) hires no Farmer past 240 ticks, so
     // at the v1 pace the seeded city has no far Farmer to move; pinned off.
@@ -1194,6 +1198,8 @@ fn probe_city_grows_homes_toward_jobs() {
     // The pressure pass R2: the v1 pace (2 ticks a tile), whose far workers
     // this probe's city has (at 1 a tile they are near, or married).
     cfg.exec.move_ticks_full = 2;
+    cfg.exec.walk_tiles_per_tick = 1; // round 9 Y4: the v1 pace's tile, at its quarter ticks
+    cfg.exec.step_res = 4;
     let mut w = World::new(42, cfg);
     let cap = w.config.life.commute_move_ticks;
     let door_of = |w: &World, b: EntityId| w.comp::<Building>(b).map(|b| b.door);
@@ -1773,6 +1779,8 @@ fn probe_trade_respects_rent_and_the_evictor() {
     // The pressure pass R2: the v1 pace (2 ticks a tile), whose far workers
     // this probe's city has (at 1 a tile they are near, or married).
     cfg.exec.move_ticks_full = 2;
+    cfg.exec.walk_tiles_per_tick = 1; // round 9 Y4: the v1 pace's tile, at its quarter ticks
+    cfg.exec.step_res = 4;
     // Pressure pass round 3, S1 (OPEN-221): no far Farmer under the hire's
     // hard cap at the v1 pace (as `probe_far_worker_with_one_rent_moves_near_work`).
     if let Some(d) = cfg.distance.as_mut() {
@@ -2717,6 +2725,8 @@ fn probe_married_pick_is_home_by_nine_with_the_spouse() {
     // The pressure pass R2: the v1 pace (2 ticks a tile); at 1 a tile the
     // pick is another married day worker.
     cfg.exec.move_ticks_full = 2;
+    cfg.exec.walk_tiles_per_tick = 1; // round 9 Y4: the v1 pace's tile, at its quarter ticks
+    cfg.exec.step_res = 4;
     let mut w = World::new(42, cfg);
     w.run_ticks(TICKS_PER_DAY + 19 * TICKS_PER_HOUR);
     let (a, s, h) = married_day_worker(&w).expect("a married day worker");
@@ -2798,6 +2808,8 @@ fn world_at_day2() -> World {
     let mut c = Config::load();
     c.commute_pressure = None;
     c.exec.move_ticks_full = 2;
+    c.exec.walk_tiles_per_tick = 1; // round 9 Y4: the v1 pace's tile, at its quarter ticks
+    c.exec.step_res = 4;
     // The pressure pass S6 (OPEN-224): the seeded children off (they move this scene's ground: a butterfly).
     c.ages.seed_child_slots = 0;
     let mut w = World::new(42, c);

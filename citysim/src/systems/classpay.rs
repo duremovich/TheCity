@@ -397,11 +397,14 @@ pub fn pick_graded_in(world: &World, employer: EntityId, role: Role, ix: &Graded
     let mut best: Option<(f32, EntityId)> = None;
     for i in ix.grid.near_discs(&crate::systems::transit::reach_discs(world, door, cap)) {
         let id = ix.ids[i as usize];
-        if !g.eligible(world, id) || travel(i) > cap {
+        if !g.eligible(world, id) {
             continue;
         }
+        // Round 9 Y4: the travel only for one who would beat the best (the
+        // same pick: at the real pace the cap's discs hold the whole
+        // island, and every candidate's El estimate was 22 ms a vacancy).
         let m = merit(world, id, employer, role);
-        if best.is_none_or(|(bm, bid)| m > bm || (m == bm && id < bid)) {
+        if best.is_none_or(|(bm, bid)| m > bm || (m == bm && id < bid)) && travel(i) <= cap {
             best = Some((m, id));
         }
     }
@@ -410,8 +413,7 @@ pub fn pick_graded_in(world: &World, employer: EntityId, role: Role, ix: &Graded
     }
     let _t = crate::prof::scope!("graded::far");
     // Every travel is at most the walk, and every walk on the map at most this.
-    let step = world.config.exec.move_ticks_full;
-    let span = (world.map.w() as Tick + world.map.h() as Tick) * step;
+    let span = world.config.exec.walk_ticks(world.map.w() as Tick + world.map.h() as Tick);
     let mut reach = cap;
     loop {
         reach = reach.saturating_mul(2).max(1);

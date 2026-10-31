@@ -253,6 +253,16 @@ impl TileGrid {
 
     /// A floor under the Manhattan distance from `t` to any tile of a cell
     /// in ring `k` of `t`'s cell: `(k − 1) × cell + 1` (0 for ring 0).
+    /// Round 9 Y4: the cells rings `0..k` around the box `lo..=hi` cover
+    /// (clipped to the grid).
+    pub fn ring_area(&self, lo: TilePos, hi: TilePos, k: usize) -> usize {
+        let (ax, ay) = self.cxy(lo);
+        let (bx, by) = self.cxy(hi);
+        let (x0, x1) = (ax.min(bx).saturating_sub(k.saturating_sub(1)), (ax.max(bx) + k).min(self.gw));
+        let (y0, y1) = (ay.min(by).saturating_sub(k.saturating_sub(1)), (ay.max(by) + k).min(self.gh));
+        x1.saturating_sub(x0) * y1.saturating_sub(y0)
+    }
+
     pub fn ring_floor(&self, k: usize) -> u32 {
         if k == 0 {
             0
@@ -341,6 +351,25 @@ impl BuildingGrid {
             }
             if !more {
                 return None;
+            }
+            // Round 9 Y4: a reach of whole districts (an hour's walk is
+            // 1,260 tiles at the real pace) over a sparse kind read
+            // thousands of empty cells a query (the Statistical evening at
+            // 21:00: 1.5-3 s a tick at 20k). Once the rings read have
+            // covered more cells than the grid holds doors, the rest is a
+            // sort: every door at least `floor` away (all nearer ones are
+            // tested above) and within `max_d`, in `(dist, id)` order, the
+            // sequence the rings would have handed on.
+            if self.grid.ring_area(lo, hi, k) > self.ids.len() {
+                let mut rest: Vec<(u32, crate::entity::EntityId)> = self
+                    .doors
+                    .iter()
+                    .zip(&self.ids)
+                    .map(|(&door, &id)| (dist(door), id))
+                    .filter(|&(d, _)| d >= floor && d <= max_d)
+                    .collect();
+                rest.sort_unstable();
+                return rest.into_iter().find(|&(d, b)| test(d, b));
             }
         }
     }

@@ -506,7 +506,10 @@ use crate::world::World;
 /// `leave_arrests` ... `backup_cuffed` columns (serde defaults).
 /// 115 (pressure pass round 9, Y1, hunger in the brain): `Brain.food_tried`, the `[brain]
 /// food_tried_ticks`, `food_tries`, `starving_steal_lawfulness` and `[wounded] care_feed_hunger` keys (serde defaults).
-pub const SAVE_VERSION: u8 = 115;
+/// 116 (pressure pass round 9, Y4, the walking pace): `ExecState::Goto.carry_q` widened to `u32` step units, the
+/// `[exec] walk_tiles_per_tick`, `step_res` keys (serde defaults: the pace before Y4), `[vehicles]
+/// max_steps_per_tick` widened to `u16`, the `Jobs2Cols` `commute_med` column.
+pub const SAVE_VERSION: u8 = 116;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

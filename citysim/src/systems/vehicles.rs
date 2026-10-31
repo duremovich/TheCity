@@ -109,12 +109,13 @@ fn column(world: &World, tile: TilePos) -> usize {
     }
 }
 
-/// D19: the quarter ticks a step onto `tile` costs: `max(1, round(4 ×
-/// move_ticks_full × mult))`, `mult` the road vehicle's column when
-/// driving, else `Kit.walk_mult`. An unchromed walker is exactly `4 ×
-/// move_ticks_full` (8): today's arithmetic. Litter is added by the caller.
+/// D19: the step units a step onto `tile` costs: `max(1, round(step_units
+/// × mult))` (`[exec] step_units`, `step_res × move_ticks_full`; round 9
+/// Y4, the quarter ticks `4 × move_ticks_full` before it), `mult` the road
+/// vehicle's column when driving, else `Kit.walk_mult`. An unchromed
+/// walker is exactly `step_units`. Litter is added by the caller.
 pub fn step_q(world: &World, agent: EntityId, tile: TilePos) -> u32 {
-    let base = 4 * world.config.exec.move_ticks_full as u32;
+    let base = world.config.exec.step_units() as u32;
     let Some(k) = world.comp::<Kit>(agent) else { return base };
     let mult = match k.driving {
         Some(kind) if kind.is_road_vehicle() => world.config.vehicles.mult_of(kind, column(world, tile)),
@@ -160,26 +161,26 @@ pub fn timed_mult_of(world: &World, kind: AssetKind) -> f32 {
 
 /// The pressure pass R2 (`OPEN-215`): a drive of `road` tiles measured
 /// along the road (`motion::road_len`) at a Full Car's road pace: [`step_q`]'s
-/// quarters a Road tile (`[vehicles] mult` road column), at most `[vehicles]
-/// max_steps_per_tick` tiles a tick, at least 1 tick: the escort's van and
-/// the transfer van. [`car_ticks`]' Coarse blend (`road_share`) prices a
-/// Manhattan line's off-road share, which a road-measured way has not: the
-/// island's escorts drove ~2x their road time (`guard_26314`, 935 min).
+/// units a Road tile (`[vehicles] mult` road column) over `[exec]
+/// units_per_tick` a tick, at most `[vehicles] max_steps_per_tick` tiles a
+/// tick, at least 1 tick: the escort's van and the transfer van. [`car_ticks`]'
+/// Coarse blend (`road_share`) prices a Manhattan line's off-road share,
+/// which a road-measured way has not: the island's escorts drove ~2x their
+/// road time (`guard_26314`, 935 min).
 pub fn road_ticks(world: &World, road: u32) -> crate::time::Tick {
     let c = &world.config.vehicles;
     let road = crate::time::Tick::from(road);
-    let q = ((4 * world.config.exec.move_ticks_full) as f32 * c.mult_of(AssetKind::Car, 0)).round().max(1.0)
-        as crate::time::Tick;
+    let q =
+        (world.config.exec.step_units() as f32 * c.mult_of(AssetKind::Car, 0)).round().max(1.0) as crate::time::Tick;
     let per_tick = crate::time::Tick::from(c.max_steps_per_tick.max(1));
-    (road * q).div_ceil(4).max(road.div_ceil(per_tick)).max(1)
+    (road * q).div_ceil(world.config.exec.units_per_tick()).max(road.div_ceil(per_tick)).max(1)
 }
 
 /// A drive of `tiles` (Manhattan) at the Car's timed speed: the escort's
 /// van (P12) and the transfer van (the island pass phase 7), at least 1.
 pub fn car_ticks(world: &World, tiles: u32) -> crate::time::Tick {
     let m = timed_mult_of(world, AssetKind::Car);
-    ((crate::time::Tick::from(tiles) * world.config.exec.move_ticks_full) as f32 * m).round().max(1.0)
-        as crate::time::Tick
+    world.config.exec.walk_ticks_f(u64::from(tiles), m).max(1)
 }
 
 /// D22: the flyer takes off from the street outside its building and lands

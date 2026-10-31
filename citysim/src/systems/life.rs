@@ -13,10 +13,11 @@ use crate::time::{Tick, TICKS_PER_DAY};
 use crate::utility::Consideration;
 use crate::world::World;
 
-/// Ticks to walk `tiles` (Manhattan) on foot: `move_ticks_full` a tile,
-/// padded by half for the detours a road grid forces (as the commute gate).
+/// Ticks to walk `tiles` (Manhattan) on foot at the pace (`[exec]
+/// walk_ticks`), padded by half for the detours a road grid forces (as the
+/// commute gate).
 pub fn walk_ticks(world: &World, tiles: u32) -> u64 {
-    u64::from(tiles) * world.config.exec.move_ticks_full * 3 / 2
+    world.config.exec.walk_ticks(u64::from(tiles) * 3 / 2)
 }
 
 /// Where a walk starts: outside the current building, or the agent's tile.
@@ -36,7 +37,7 @@ pub fn tiles_to(world: &World, id: EntityId, b: EntityId) -> Option<u32> {
 /// The pre-view pass phase 5 (OPEN-140's remainder, `[legs] bed_by_ride`):
 /// the trip home in walking tiles' worth: the walk, or the ride where it is
 /// shorter (the El's `transit::commute_ticks`, the exec's car home:
-/// `streetwork::ride_home_ticks`), over `[exec] move_ticks_full`. The walk's
+/// `streetwork::ride_home_ticks`), at the pace (`[exec] walk_tiles`). The walk's
 /// tiles exactly with `[legs]` off.
 pub fn home_reach(world: &World, id: EntityId, home: EntityId) -> Option<u32> {
     let tiles = tiles_to(world, id, home)?;
@@ -48,8 +49,7 @@ pub fn home_reach(world: &World, id: EntityId, home: EntityId) -> Option<u32> {
     if let Some(c) = crate::systems::streetwork::ride_home_ticks(world, id, from, door) {
         ticks = ticks.min(c);
     }
-    let step = world.config.exec.move_ticks_full.max(1);
-    Some(u32::try_from(ticks / step).unwrap_or(u32::MAX).min(tiles))
+    Some(u32::try_from(world.config.exec.walk_tiles(ticks)).unwrap_or(u32::MAX).min(tiles))
 }
 
 /// Tiles from the agent to a street tile.
@@ -963,6 +963,8 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool, daily: bool)
         .into_iter()
         .filter_map(|c| world.comp::<Corp>(c).and_then(|cc| cc.exec).map(|e| (e, c)))
         .collect();
+    // Round 9 Y4: the read's commutes, for the day's median (a print).
+    let mut commutes: Vec<u64> = Vec::new();
     {
         let _scan = crate::prof::scope!("reloc::scan");
         for a in world.citizens() {
@@ -1000,6 +1002,9 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool, daily: bool)
             };
             let Some(hd) = world.comp::<Building>(home).map(|b| b.door) else { continue };
             let d = cost(world, hd, work);
+            if daily {
+                commutes.push(d);
+            }
             // Round 6 V4 (OPEN-240): the report's long commutes.
             if d > world.config.life.commute_long_ticks {
                 crate::systems::ownership::jobs2_row(world).commute_long += 1;
@@ -1014,6 +1019,11 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool, daily: bool)
                 movers.push((std::cmp::Reverse(d), a, home, work));
             }
         }
+    }
+    if !commutes.is_empty() {
+        let mid = commutes.len() / 2;
+        let (_, &mut med, _) = commutes.select_nth_unstable(mid);
+        crate::systems::ownership::jobs2_row(world).commute_med = u32::try_from(med).unwrap_or(u32::MAX);
     }
     movers.sort_unstable();
     // The island pass phase 4: the company beds standing (the pick takes

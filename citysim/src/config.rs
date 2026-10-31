@@ -7152,8 +7152,20 @@ fn default_starving_steal_lawfulness() -> f32 {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ExecCfg {
-    /// One tile per this many ticks for Full agents.
+    /// The walking pace's time side: a walker crosses `walk_tiles_per_tick`
+    /// tiles every `move_ticks_full` ticks (round 9 Y4; before it, one tile
+    /// per this many ticks).
     pub move_ticks_full: u64,
+    /// Round 9 Y4 (Dylan 2026-10-30): the walking pace's distance side, the
+    /// tiles a walker crosses in `move_ticks_full` ticks (21 of the island's
+    /// 4 m tiles a minute is ~5 km/h). Absent: 1, the pace before Y4.
+    #[serde(default = "default_walk_tiles_per_tick")]
+    pub walk_tiles_per_tick: u64,
+    /// Round 9 Y4: the Full executor's sub-tick resolution, units of one
+    /// walker's step (a vehicle's `[vehicles] mult` resolves to 1 /
+    /// `step_res` of it). Absent: 4, the M13 quarter ticks.
+    #[serde(default = "default_step_res")]
+    pub step_res: u64,
     pub interrupt_check_ticks: u64,
     pub door_capacity_per_tick: u8,
     pub door_queue_max_ticks: u64,
@@ -7185,6 +7197,51 @@ pub struct ExecCfg {
     /// never lock the shift out (false: the trades and the sweepers only).
     #[serde(default)]
     pub staff_door: bool,
+}
+
+fn default_walk_tiles_per_tick() -> u64 {
+    1
+}
+
+fn default_step_res() -> u64 {
+    4
+}
+
+impl ExecCfg {
+    /// Round 9 Y4: the ticks to walk `tiles` on foot at the pace, rounded
+    /// up: `ceil(tiles x move_ticks_full / walk_tiles_per_tick)` (0 for 0
+    /// tiles, at least 1 for any step). The one walk estimate every reader
+    /// of the pace goes through; [`ExecCfg::walk_tiles`] is its inverse.
+    pub fn walk_ticks(&self, tiles: u64) -> crate::time::Tick {
+        tiles.saturating_mul(self.move_ticks_full).div_ceil(self.walk_tiles_per_tick.max(1))
+    }
+
+    /// Round 9 Y4: [`ExecCfg::walk_ticks`] scaled by `mult` (a vehicle's
+    /// share of the walk, litter, chrome legs), rounded to the nearest tick
+    /// as the M12/M13 arithmetic was (at the pace before Y4 exactly
+    /// `round(tiles x move_ticks_full x mult)`).
+    pub fn walk_ticks_f(&self, tiles: u64, mult: f32) -> crate::time::Tick {
+        let t = tiles as f64 * self.move_ticks_full as f64 * f64::from(mult) / self.walk_tiles_per_tick.max(1) as f64;
+        t.round().max(0.0) as crate::time::Tick
+    }
+
+    /// Round 9 Y4: the tiles walked in `ticks` at the pace (floor): a tile
+    /// is within `ticks` on foot exactly when `walk_ticks(tiles) <= ticks`.
+    pub fn walk_tiles(&self, ticks: crate::time::Tick) -> u64 {
+        ticks.saturating_mul(self.walk_tiles_per_tick.max(1)) / self.move_ticks_full.max(1)
+    }
+
+    /// Round 9 Y4: the Full executor's step units in one tick
+    /// (`step_res x walk_tiles_per_tick`).
+    pub fn units_per_tick(&self) -> u64 {
+        self.step_res.max(1) * self.walk_tiles_per_tick.max(1)
+    }
+
+    /// Round 9 Y4: an unchromed walker's step in units (`step_res x
+    /// move_ticks_full`): `units_per_tick / step_units` steps a tick.
+    pub fn step_units(&self) -> u64 {
+        self.step_res.max(1) * self.move_ticks_full.max(1)
+    }
 }
 
 fn default_flow_cache() -> usize {
@@ -8222,7 +8279,7 @@ pub struct LitterCfg {
     pub enabled: bool,
     /// Lost by every tile in 1..=254 at midnight.
     pub decay: u8,
-    /// Ticks added to a Full mover's next step per band (clean, littered, trashed, heaped).
+    /// Walker steps (at `move_ticks_full` 1; ticks before round 9 Y4) added to a Full mover's next step per band (clean, littered, trashed, heaped).
     pub step_ticks: [u8; 4],
     /// A Coarse walk is `1 + timed_mult × district litter` longer.
     pub timed_mult: f32,
@@ -8792,7 +8849,7 @@ pub struct VehiclesCfg {
     /// The road share a Coarse trip's `timed_mult` assumes (D21).
     pub road_share: f32,
     /// A Full driver's steps per executor call (D19).
-    pub max_steps_per_tick: u8,
+    pub max_steps_per_tick: u16,
     /// A flyer's ticks per Chebyshev tile (D22).
     pub flyer_ticks_per_tile: f32,
     /// Step multipliers `[road, ground, farmland]` per road vehicle (a Door

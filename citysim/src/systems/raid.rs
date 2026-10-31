@@ -606,7 +606,7 @@ fn march_eta(world: &World, m: EntityId, door: TilePos) -> Option<Tick> {
         crate::exec::ExecState::GotoTimed { arrive_tick, .. } => Some(arrive_tick.saturating_sub(world.tick)),
         crate::exec::ExecState::Goto { .. } => {
             let p = world.comp::<Position>(m)?;
-            Some(Tick::from(p.tile.manhattan(door)) * world.config.exec.move_ticks_full)
+            Some(world.config.exec.walk_ticks(Tick::from(p.tile.manhattan(door))))
         }
         _ => None,
     }

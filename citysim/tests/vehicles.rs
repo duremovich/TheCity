@@ -23,8 +23,13 @@ fn city() -> World {
 /// The pressure pass R2 (`[exec] move_ticks_full` 2 -> 1): these scenes pin
 /// M12/M13's step arithmetic at the v1 pace (an unchromed walker's 8
 /// quarters a step, a car's 2 on the road), which they were written for.
+/// Round 9 Y4: and the flyer's 0.3 ticks a tile (`[vehicles]
+/// flyer_ticks_per_tile` 0.3 -> 0.004 with the real walk).
 fn v1_pace(mut cfg: Config) -> Config {
     cfg.exec.move_ticks_full = 2;
+    cfg.exec.walk_tiles_per_tick = 1; // round 9 Y4: the v1 pace's tile, at its quarter ticks
+    cfg.exec.step_res = 4;
+    cfg.vehicles.flyer_ticks_per_tile = 0.3;
     cfg
 }
 
@@ -126,7 +131,7 @@ fn exec_tick(w: &mut World) {
     w.tick += 1;
 }
 
-fn goto_state(w: &World, id: EntityId) -> Option<(u64, u8)> {
+fn goto_state(w: &World, id: EntityId) -> Option<(u64, u32)> {
     match &w.comp::<Brain>(id)?.exec {
         ExecState::Goto { next_move_tick, carry_q, .. } => Some((*next_move_tick, *carry_q)),
         _ => None,

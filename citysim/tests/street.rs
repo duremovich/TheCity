@@ -204,7 +204,13 @@ fn test_deposit_skips_building_tiles_and_saturates_at_254() {
 
 #[test]
 fn test_littered_step_delays_next_move_and_keeps_flow_fields() {
-    let mut w = city();
+    // Round 9 Y4: the M12 step arithmetic this pins is R2's (one tile a
+    // tick, the quarter-tick units); at the real pace a walker takes 21
+    // steps a tick and a heaped tile's delay is two steps' units.
+    let mut cfg = street_cfg();
+    cfg.exec.walk_tiles_per_tick = 1;
+    cfg.exec.step_res = 4;
+    let mut w = World::new(7, cfg);
     let market = w.buildings_of_kind(BuildingKind::Market)[0];
     let a = civilians(&w)[0];
     lod::set_lod(&mut w, a, Lod::Full);
@@ -220,7 +226,7 @@ fn test_littered_step_delays_next_move_and_keeps_flow_fields() {
     let fields = w.flow_fields.len();
     let i = idx(&w, first);
     w.litter[i] = 200; // heaped: band 3
-    assert_eq!(citysim::exec::litter_delay(&w, first), 2);
+    assert_eq!(citysim::exec::litter_delay(&w, first), 2 * w.config.exec.step_res);
     assert_eq!(citysim::exec::litter_delay(&w, start), 0, "a clean tile delays nothing");
     let now = w.tick;
     {

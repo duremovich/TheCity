@@ -1173,9 +1173,12 @@ fn pick_candidate(
             // commute (`life::commute_cost`, the ride when it wins) in walking
             // tiles, so a Sump resident by a stop ranks as near the Vats.
             let d = if crate::systems::transit::enabled(world) {
-                let step = world.config.exec.move_ticks_full.max(1);
-                u32::try_from(crate::systems::life::commute_cost(world, from, workplace_door) / step)
-                    .unwrap_or(u32::MAX)
+                u32::try_from(world.config.exec.walk_tiles(crate::systems::life::commute_cost(
+                    world,
+                    from,
+                    workplace_door,
+                )))
+                .unwrap_or(u32::MAX)
             } else {
                 from.manhattan(workplace_door)
             };
@@ -1317,10 +1320,7 @@ fn hire_base(world: &World, from: TilePos, workplace_door: TilePos, near_cap: Op
         .then(|| crate::systems::life::commute_cost(world, from, workplace_door));
     let past = |cap: Option<u64>| cap.zip(cost).is_some_and(|(c, cost)| cost > c);
     let d = match cost.filter(|_| transit) {
-        Some(cost) => {
-            let step = world.config.exec.move_ticks_full.max(1);
-            u32::try_from(cost / step).unwrap_or(u32::MAX)
-        }
+        Some(cost) => u32::try_from(world.config.exec.walk_tiles(cost)).unwrap_or(u32::MAX),
         None => from.manhattan(workplace_door),
     };
     let band = if past(near_cap) { 1024 } else { 0 } + if past(job_cap) { PAST_CAP_BAND } else { 0 };

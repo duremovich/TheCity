@@ -254,6 +254,8 @@ fn test_negative_rate_pays_a_wage_credit_from_the_surplus() {
     // written for (at 1 the paid worker works other hours).
     let mut cfg = config();
     cfg.exec.move_ticks_full = 2;
+    cfg.exec.walk_tiles_per_tick = 1; // round 9 Y4: the v1 pace's tile, at its quarter ticks
+    cfg.exec.step_res = 4;
     let mut w = World::new(42, cfg);
     // The wage alone (no rent settled from it).
     w.config.rent.pay_from_income = false;

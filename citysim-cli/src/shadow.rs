@@ -3511,12 +3511,13 @@ fn exec_name(e: &ExecState) -> &'static str {
     }
 }
 
-/// Chebyshev tiles a tick in this exec state may cover: a walk 1 (a
-/// walker's step is 8 or fewer quarter ticks), a drive `[vehicles]
+/// Chebyshev tiles a tick in this exec state may cover: a walk the pace's
+/// tiles a tick (round 9 Y4: `[exec] walk_tiles`, a walker's step is
+/// `step_units` or fewer), a drive `[vehicles]
 /// max_steps_per_tick`, a flyer `1 / flyer_ticks_per_tile`, the El `1 /
 /// ride_ticks_per_tile` (the track is no shorter than the Chebyshev
-/// distance), a Coarse timed walk 1 (generous: it is timed at 1.5 walk
-/// ticks a Manhattan tile); anything else 0.
+/// distance), a Coarse timed walk the same (generous: it is timed at the
+/// pace a Manhattan tile); anything else 0.
 fn exec_speed(world: &World, id: EntityId, e: &ExecState) -> f32 {
     if let Some(v) = pass_vehicle(world, id) {
         return v;
@@ -3525,7 +3526,7 @@ fn exec_speed(world: &World, id: EntityId, e: &ExecState) -> f32 {
         ExecState::Goto { .. } if world.comp::<Kit>(id).is_some_and(|k| k.driving.is_some()) => {
             f32::from(world.config.vehicles.max_steps_per_tick.max(1))
         }
-        ExecState::Goto { .. } | ExecState::GotoTimed { .. } => 1.0,
+        ExecState::Goto { .. } | ExecState::GotoTimed { .. } => world.config.exec.walk_tiles(1).max(1) as f32,
         ExecState::Fly { .. } => 1.0 / world.config.vehicles.flyer_ticks_per_tile.max(0.01),
         ExecState::Ride { .. } => 1.0 / world.config.transit.ride_ticks_per_tile.max(0.01),
         _ => 0.0,
@@ -3538,7 +3539,7 @@ fn exec_speed(world: &World, id: EntityId, e: &ExecState) -> f32 {
 /// rides along), a cab driver's fare leg (`GotoTimed` on a fare,
 /// `exec::fare_segment`) and a rider aboard a body cab (`Jobs2State.
 /// passengers`, the ride under way). Returns the leg's tiles a tick, the
-/// cab's timed speed (`streetwork::cab_ticks`: `move_ticks_full` x the
+/// cab's timed speed (`streetwork::cab_ticks`: the walk's pace over the
 /// Car's `timed_mult` a Manhattan tile). `None`: not one of these.
 fn pass_vehicle(world: &World, id: EntityId) -> Option<f32> {
     let b = world.comp::<Brain>(id)?;
@@ -3561,7 +3562,8 @@ fn pass_vehicle(world: &World, id: EntityId) -> Option<f32> {
     // (`vehicles::road_ticks`), faster than the cab's Coarse blend.
     let car = citysim::components::AssetKind::Car;
     let m = citysim::systems::vehicles::timed_mult_of(world, car).min(world.config.vehicles.mult_of(car, 0));
-    Some(1.0 / (world.config.exec.move_ticks_full.max(1) as f32 * m).max(0.01))
+    let e = &world.config.exec;
+    Some(e.walk_tiles_per_tick.max(1) as f32 / (e.move_ticks_full.max(1) as f32 * m).max(0.01))
 }
 
 /// Shadow V8: a vehicle in motion's own move over the last two ticks (its

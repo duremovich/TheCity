@@ -1202,6 +1202,8 @@ fn test_rehire_bonus_picks_the_laid_off_worker_over_a_nearer_stranger() {
             // The pressure pass R2: the v1 pace (2 ticks a tile) the
             // ranking's tiles were written for.
             c.exec.move_ticks_full = 2;
+            c.exec.walk_tiles_per_tick = 1; // round 9 Y4: the v1 pace's tile, at its quarter ticks
+            c.exec.step_res = 4;
         });
         let farm = w.buildings_by_kind().get(&BuildingKind::Farm).and_then(|v| v.first().copied()).expect("a Farm");
         let door = w.comp::<Building>(farm).map(|b| b.door).expect("door");
@@ -1257,6 +1259,8 @@ fn test_hiring_key_weighs_the_roles_skill() {
     let mut w = round_city(|c| {
         c.economy2.skill_w = 0.5;
         c.exec.move_ticks_full = 2;
+        c.exec.walk_tiles_per_tick = 1; // round 9 Y4: the v1 pace's tile, at its quarter ticks
+        c.exec.step_res = 4;
     });
     let farm = w.buildings_by_kind().get(&BuildingKind::Farm).and_then(|v| v.first().copied()).expect("a Farm");
     let door = w.comp::<Building>(farm).map(|b| b.door).expect("door");
