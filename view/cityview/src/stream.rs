@@ -63,11 +63,7 @@ pub struct GenMassing(pub Key);
 /// The placed lots' massing shows while their chunk's kits are not in (a streamed chunk out of the kit radius,
 /// or loading); without a kit stream every kit is in (P6: all at startup) and it never shows. The M key hides it
 /// with the rest of the massing.
-pub fn gen_massing_visibility(
-    view: Res<View>,
-    ks: Option<Res<glclient::kit::KitStream>>,
-    mut q: Query<(&GenMassing, &mut Visibility)>,
-) {
+pub fn gen_massing_visibility(view: Res<View>, ks: Option<Res<glclient::kit::KitStream>>, mut q: Query<(&GenMassing, &mut Visibility)>) {
     for (g, mut v) in q.iter_mut() {
         let show = !view.hide_mass && ks.as_ref().is_some_and(|k| !k.chunk_ready(g.0));
         v.set_if_neq(if show { Visibility::Inherited } else { Visibility::Hidden });
@@ -191,12 +187,7 @@ fn build(dir: PathBuf, rec: ChunkRec, lod: u8, with_mass: bool, tile: f32, apron
 }
 
 /// Chunk keys + LOD the view wants; `keep` = the larger set loaded chunks may stay in (hysteresis).
-fn wanted(
-    s: &Stream,
-    view: &View,
-    cam: &Transform,
-    aspect: f32,
-) -> (HashMap<Key, u8>, HashMap<Key, u8>) {
+fn wanted(s: &Stream, view: &View, cam: &Transform, aspect: f32) -> (HashMap<Key, u8>, HashMap<Key, u8>) {
     let mut want = HashMap::new();
     let mut keep = HashMap::new();
     match view.mode {
@@ -322,21 +313,40 @@ pub fn update_stream(
         let origin = mesh::bv(k.0 as f32 * cm, k.1 as f32 * cm, 0.0);
         let ground = b.ground.map(|(m, n)| {
             let e = commands
-                .spawn((Mesh3d(meshes.add(m)), MeshMaterial3d(s.ground_mat.clone()), Transform::from_translation(origin), Name::new(format!("ground_{}_{}", k.0, k.1))))
+                .spawn((
+                    Mesh3d(meshes.add(m)),
+                    MeshMaterial3d(s.ground_mat.clone()),
+                    Transform::from_translation(origin),
+                    Name::new(format!("ground_{}_{}", k.0, k.1)),
+                ))
                 .id();
             (e, n)
         });
         let built_mass = b.mass.map(|(m, n)| {
             let vis = if view.hide_mass { Visibility::Hidden } else { Visibility::Inherited };
             let e = commands
-                .spawn((Mesh3d(meshes.add(m)), MeshMaterial3d(s.window_mat.clone()), Transform::from_translation(origin), Name::new(format!("mass_{}_{}", k.0, k.1)), Massing, vis))
+                .spawn((
+                    Mesh3d(meshes.add(m)),
+                    MeshMaterial3d(s.window_mat.clone()),
+                    Transform::from_translation(origin),
+                    Name::new(format!("mass_{}_{}", k.0, k.1)),
+                    Massing,
+                    vis,
+                ))
                 .id();
             (e, n)
         });
         // hidden until gen_massing_visibility runs (a kit-ready chunk must not flash its stand-in)
         let built_gen = b.standin.map(|(m, n)| {
             let e = commands
-                .spawn((Mesh3d(meshes.add(m)), MeshMaterial3d(s.window_mat.clone()), Transform::from_translation(origin), Name::new(format!("gen_{}_{}", k.0, k.1)), GenMassing(k), Visibility::Hidden))
+                .spawn((
+                    Mesh3d(meshes.add(m)),
+                    MeshMaterial3d(s.window_mat.clone()),
+                    Transform::from_translation(origin),
+                    Name::new(format!("gen_{}_{}", k.0, k.1)),
+                    GenMassing(k),
+                    Visibility::Hidden,
+                ))
                 .id();
             (e, n)
         });

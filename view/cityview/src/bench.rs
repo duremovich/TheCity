@@ -116,7 +116,15 @@ impl Bench {
                 day,
                 hide_mass: false,
             };
-            let g = |name: &str, at: Vec2, zoom: f32, day: bool| Shot { name: name.into(), mode: Mode::Game, at, zoom, orbit: None, day, hide_mass: false };
+            let g = |name: &str, at: Vec2, zoom: f32, day: bool| Shot {
+                name: name.into(),
+                mode: Mode::Game,
+                at,
+                zoom,
+                orbit: None,
+                day,
+                hide_mass: false,
+            };
             let q = std::f32::consts::FRAC_PI_4;
             // the whole island in frame: the centre pulled S and E (the E end ran off the frame: review p3 r4)
             let c2 = centre + Vec3::new(350.0, -350.0, 0.0);
@@ -240,7 +248,18 @@ pub fn run_bench(
             Phase::Run => {
                 let st = &s.stats;
                 let t = b.samples.last().map_or(0.0, |x| x.t) + wall_ms / 1000.0;
-                b.samples.push(Sample { ms: wall_ms, t, inserted: st.inserted, insert_ms: st.insert_ms, pending: st.pending, loaded: st.loaded, tris: st.tris, kit: kit_stream.as_ref().map_or(0, |k| k.stats.spawned_frame), meshes: meshes.len(), kit_ms: kit_stream.as_ref().map_or(0.0, |k| k.stats.main_ms) });
+                b.samples.push(Sample {
+                    ms: wall_ms,
+                    t,
+                    inserted: st.inserted,
+                    insert_ms: st.insert_ms,
+                    pending: st.pending,
+                    loaded: st.loaded,
+                    tris: st.tris,
+                    kit: kit_stream.as_ref().map_or(0, |k| k.stats.spawned_frame),
+                    meshes: meshes.len(),
+                    kit_ms: kit_stream.as_ref().map_or(0.0, |k| k.stats.main_ms),
+                });
                 if b.kind == "overview" {
                     b.t += dt;
                     view.yaw += dt * std::f32::consts::TAU / 20.0;
@@ -279,9 +298,8 @@ pub fn run_bench(
                 let st = &s.stats;
                 // streaming's own cost: frames that inserted chunks (or follow one: the upload renders a frame
                 // later) vs the rest; the box's stalls (an empty-scene control has them too) hit both alike
-                let ins: Vec<bool> = (0..b.samples.len())
-                    .map(|i| b.samples[i].inserted > 0 || (i > 0 && b.samples[i - 1].inserted > 0))
-                    .collect();
+                let ins: Vec<bool> =
+                    (0..b.samples.len()).map(|i| b.samples[i].inserted > 0 || (i > 0 && b.samples[i - 1].inserted > 0)).collect();
                 let split = |want: bool| -> serde_json::Value {
                     let v: Vec<f32> = b.samples.iter().zip(&ins).filter(|(_, f)| **f == want).map(|(x, _)| x.ms).collect();
                     serde_json::json!({"frames": v.len(), "p50": pct(&v, 0.5), "p95": pct(&v, 0.95), "p99": pct(&v, 0.99),
@@ -290,7 +308,14 @@ pub fn run_bench(
                 // the kit stream's cost: frames that spawned kit buildings (or follow one) vs frames that did neither
                 let kitf: Vec<bool> = (0..b.samples.len()).map(|i| b.samples[i].kit > 0 || (i > 0 && b.samples[i - 1].kit > 0)).collect();
                 let split_kit = |want: bool| -> serde_json::Value {
-                    let v: Vec<f32> = b.samples.iter().zip(&kitf).zip(&ins).filter(|((_, k), c)| **k == want && (want || !**c)).map(|((x, _), _)| x.ms).collect();
+                    let v: Vec<f32> = b
+                        .samples
+                        .iter()
+                        .zip(&kitf)
+                        .zip(&ins)
+                        .filter(|((_, k), c)| **k == want && (want || !**c))
+                        .map(|((x, _), _)| x.ms)
+                        .collect();
                     serde_json::json!({"frames": v.len(), "p50": pct(&v, 0.5), "p95": pct(&v, 0.95), "p99": pct(&v, 0.99),
                                        "max": pct(&v, 1.0), "over_33ms": v.iter().filter(|m| **m > 33.3).count()})
                 };

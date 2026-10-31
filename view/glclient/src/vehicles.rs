@@ -44,7 +44,9 @@ pub struct FleetFile {
 pub enum Role {
     Body,
     /// A wheel: spins about its axle (the part's local +Z after the axis fix, the glTF X)
-    Wheel { front: bool },
+    Wheel {
+        front: bool,
+    },
     Thruster,
 }
 
@@ -69,8 +71,16 @@ impl Model {
     }
 
     /// `spawn_parts` with each part's material passed through `mat` (a parked car's lamps switched off).
-    pub fn spawn_parts_with(&self, commands: &mut Commands, root: Entity, mat: impl Fn(&Handle<StandardMaterial>) -> Handle<StandardMaterial>) -> Vec<Entity> {
-        self.parts.iter().map(|p| commands.spawn((Mesh3d(p.mesh.clone()), MeshMaterial3d(mat(&p.mat)), p.aabb, p.tf, ChildOf(root))).id()).collect()
+    pub fn spawn_parts_with(
+        &self,
+        commands: &mut Commands,
+        root: Entity,
+        mat: impl Fn(&Handle<StandardMaterial>) -> Handle<StandardMaterial>,
+    ) -> Vec<Entity> {
+        self.parts
+            .iter()
+            .map(|p| commands.spawn((Mesh3d(p.mesh.clone()), MeshMaterial3d(mat(&p.mat)), p.aabb, p.tf, ChildOf(root))).id())
+            .collect()
     }
 }
 
@@ -167,7 +177,15 @@ fn start(mut commands: Commands, city: Option<Res<crate::city::City>>, fleet: Op
         // the hand-built hero sedan (pipeline/blender/handbuilt/export_sedan.py): not a traffic kind (its disc pods
         // reach 2.9 m, past the lane graph's 1.9 m body), parked next to the player
         if city.root.join(HERO_GLB).exists() {
-            let m = ModelRec { id: "hero_sedan".into(), model: "hover_sedan_02".into(), kind: "hero".into(), weight: 0.0, glb: HERO_GLB.into(), size: [0.0; 3], hover: 0.45 };
+            let m = ModelRec {
+                id: "hero_sedan".into(),
+                model: "hover_sedan_02".into(),
+                kind: "hero".into(),
+                weight: 0.0,
+                glb: HERO_GLB.into(),
+                size: [0.0; 3],
+                hover: 0.45,
+            };
             let h = assets.load::<Gltf>(m.glb.clone());
             f.pending.push((m, h));
         }
@@ -200,7 +218,8 @@ fn finish(
             warn!("fleet: {} failed to load: {e}", rec.glb);
         }
     }
-    if !fleet.pending.iter().all(|(_, h)| gltfs.contains(h) || matches!(assets.get_load_state(h), Some(bevy::asset::LoadState::Failed(_)))) {
+    if !fleet.pending.iter().all(|(_, h)| gltfs.contains(h) || matches!(assets.get_load_state(h), Some(bevy::asset::LoadState::Failed(_))))
+    {
         return;
     }
     let pending = std::mem::take(&mut fleet.pending);
@@ -242,7 +261,11 @@ fn finish(
                     let (mat, slot) = by_name
                         .entry(name.clone())
                         .or_insert_with(|| {
-                            let (m, slot) = if name.starts_with("pal_") || extras.is_none() { material(&name, gmat) } else { recipe(&name, gmat, extras.as_ref().unwrap()) };
+                            let (m, slot) = if name.starts_with("pal_") || extras.is_none() {
+                                material(&name, gmat)
+                            } else {
+                                recipe(&name, gmat, extras.as_ref().unwrap())
+                            };
                             (mats.add(m), slot)
                         })
                         .clone();
@@ -257,7 +280,12 @@ fn finish(
             }
         }
         // stable order (the node walk is a stack)
-        parts.sort_by(|a, b| format!("{:?}{}", a.role, a.slot).cmp(&format!("{:?}{}", b.role, b.slot)).then(a.tf.translation.x.total_cmp(&b.tf.translation.x)).then(a.tf.translation.z.total_cmp(&b.tf.translation.z)));
+        parts.sort_by(|a, b| {
+            format!("{:?}{}", a.role, a.slot)
+                .cmp(&format!("{:?}{}", b.role, b.slot))
+                .then(a.tf.translation.x.total_cmp(&b.tf.translation.x))
+                .then(a.tf.translation.z.total_cmp(&b.tf.translation.z))
+        });
         if parts.is_empty() {
             warn!("fleet: {} has no meshes", rec.id);
             continue;
@@ -279,13 +307,18 @@ fn finish(
             parts
                 .iter()
                 .filter(|p| p.role == Role::Body && !matches!(p.slot.as_str(), "base" | "glass" | "window_warm" | "neon_red"))
-                .min_by(|a, b| a.tf.transform_point(Vec3::from(a.aabb.center)).distance(u).total_cmp(&b.tf.transform_point(Vec3::from(b.aabb.center)).distance(u)))
+                .min_by(|a, b| {
+                    a.tf.transform_point(Vec3::from(a.aabb.center))
+                        .distance(u)
+                        .total_cmp(&b.tf.transform_point(Vec3::from(b.aabb.center)).distance(u))
+                })
                 .and_then(|p| mats.get(&p.mat).map(|m| Color::from(m.emissive)))
         });
         fleet.models.push(Model { rec, parts, head, under, under_color });
     }
     // brake lamps: the tail material x 3
-    let tails: Vec<Handle<StandardMaterial>> = fleet.models.iter().flat_map(|m| m.parts.iter()).filter(|p| p.slot == "neon_red").map(|p| p.mat.clone()).collect();
+    let tails: Vec<Handle<StandardMaterial>> =
+        fleet.models.iter().flat_map(|m| m.parts.iter()).filter(|p| p.slot == "neon_red").map(|p| p.mat.clone()).collect();
     for t in tails {
         if fleet.brake.contains_key(&t.id()) {
             continue;
@@ -295,18 +328,32 @@ fn finish(
         fleet.brake.insert(t.id(), b);
     }
     // lamps off (parked): head lenses a dull grey, tail lenses a faint red (lit at 4 %)
-    let lamps: Vec<(Handle<StandardMaterial>, bool)> = fleet.models.iter().flat_map(|m| m.parts.iter()).filter(|p| matches!(p.slot.as_str(), "window_warm" | "neon_red")).map(|p| (p.mat.clone(), p.slot == "neon_red")).collect();
+    let lamps: Vec<(Handle<StandardMaterial>, bool)> = fleet
+        .models
+        .iter()
+        .flat_map(|m| m.parts.iter())
+        .filter(|p| matches!(p.slot.as_str(), "window_warm" | "neon_red"))
+        .map(|p| (p.mat.clone(), p.slot == "neon_red"))
+        .collect();
     for (l, tail) in lamps {
         if fleet.dark.contains_key(&l.id()) {
             continue;
         }
         let Some(m) = mats.get(&l).cloned() else { continue };
-        let d = if tail { StandardMaterial { emissive: m.emissive * 0.04, ..m } } else { StandardMaterial { base_color: Color::srgb(0.12, 0.12, 0.13), emissive: LinearRgba::BLACK, ..m } };
+        let d = if tail {
+            StandardMaterial { emissive: m.emissive * 0.04, ..m }
+        } else {
+            StandardMaterial { base_color: Color::srgb(0.12, 0.12, 0.13), emissive: LinearRgba::BLACK, ..m }
+        };
         fleet.dark.insert(l.id(), mats.add(d));
     }
     fleet.ready = true;
     info!("fleet check: {} ok, {} bad", fleet.models.len() - fleet.bad, fleet.bad);
-    let tris: usize = fleet.models.iter().map(|m| m.parts.iter().filter_map(|p| meshes.get(&p.mesh)).map(|m| m.indices().map_or(0, |i| i.len() / 3)).sum::<usize>()).sum();
+    let tris: usize = fleet
+        .models
+        .iter()
+        .map(|m| m.parts.iter().filter_map(|p| meshes.get(&p.mesh)).map(|m| m.indices().map_or(0, |i| i.len() / 3)).sum::<usize>())
+        .sum();
     info!("fleet: {} variants ready ({} materials, {} tris over all variants)", fleet.models.len(), by_name.len(), tris);
 }
 
@@ -349,7 +396,11 @@ pub fn extent(parts: &[Part]) -> (Vec3, Vec3) {
     for p in parts {
         let (c, h) = (Vec3::from(p.aabb.center), Vec3::from(p.aabb.half_extents));
         for k in 0..8 {
-            let corner = c + h * Vec3::new(if k & 1 == 0 { -1.0 } else { 1.0 }, if k & 2 == 0 { -1.0 } else { 1.0 }, if k & 4 == 0 { -1.0 } else { 1.0 });
+            let corner = c + h * Vec3::new(
+                if k & 1 == 0 { -1.0 } else { 1.0 },
+                if k & 2 == 0 { -1.0 } else { 1.0 },
+                if k & 4 == 0 { -1.0 } else { 1.0 },
+            );
             let w = p.tf.transform_point(corner);
             lo = lo.min(w);
             hi = hi.max(w);
@@ -362,10 +413,20 @@ pub fn extent(parts: &[Part]) -> (Vec3, Vec3) {
 /// gl_emit, gl_alpha) + the glTF material's texture. Two-sided (the export's doubleSided; s27: bevy_gltf).
 fn recipe(name: &str, g: Option<&GltfMaterial>, x: &serde_json::Value) -> (StandardMaterial, String) {
     let f = |k: &str, d: f32| x.get(k).and_then(|v| v.as_f64()).map_or(d, |v| v as f32);
-    let rgb = |k: &str| x.get(k).and_then(|v| v.as_array()).map(|a| LinearRgba::rgb(a[0].as_f64().unwrap_or(0.0) as f32, a[1].as_f64().unwrap_or(0.0) as f32, a[2].as_f64().unwrap_or(0.0) as f32));
+    let rgb = |k: &str| {
+        x.get(k).and_then(|v| v.as_array()).map(|a| {
+            LinearRgba::rgb(a[0].as_f64().unwrap_or(0.0) as f32, a[1].as_f64().unwrap_or(0.0) as f32, a[2].as_f64().unwrap_or(0.0) as f32)
+        })
+    };
     let kind = x.get("gl_kind").and_then(|v| v.as_str()).unwrap_or("flat");
     let tex = g.and_then(|g| g.base_color_texture.clone());
-    let mut m = StandardMaterial { perceptual_roughness: f("gl_rough", 0.6), metallic: f("gl_metal", 0.0), double_sided: true, cull_mode: None, ..default() };
+    let mut m = StandardMaterial {
+        perceptual_roughness: f("gl_rough", 0.6),
+        metallic: f("gl_metal", 0.0),
+        double_sided: true,
+        cull_mode: None,
+        ..default()
+    };
     match kind {
         "emit" => {
             let e = rgb("gl_emit").unwrap_or(LinearRgba::WHITE);
@@ -378,7 +439,13 @@ fn recipe(name: &str, g: Option<&GltfMaterial>, x: &serde_json::Value) -> (Stand
             } / mx;
             m.base_color = Color::BLACK;
             m.emissive = LinearRgba::rgb(e.red * k, e.green * k, e.blue * k);
-            let slot = if name.starts_with("head_") { "window_warm" } else if name == "tail_red" { "neon_red" } else { name };
+            let slot = if name.starts_with("head_") {
+                "window_warm"
+            } else if name == "tail_red" {
+                "neon_red"
+            } else {
+                name
+            };
             return (m, slot.into());
         }
         "glass" => {
@@ -462,7 +529,13 @@ pub struct ParkedCar;
 /// The share of parked cars with their lamps lit (idling); the rest are switched off (checkpoint V).
 const LIT_SHARE: f32 = 0.1;
 
-fn parked(mut commands: Commands, street: Option<Res<crate::street::Street>>, fleet: Option<Res<Fleet>>, focus: Option<Res<crate::frame::Focus>>, mut pk: Option<ResMut<ParkedCars>>) {
+fn parked(
+    mut commands: Commands,
+    street: Option<Res<crate::street::Street>>,
+    fleet: Option<Res<Fleet>>,
+    focus: Option<Res<crate::frame::Focus>>,
+    mut pk: Option<ResMut<ParkedCars>>,
+) {
     let (Some(st), Some(fleet)) = (street, fleet) else { return };
     if !fleet.ready || fleet.models.is_empty() {
         return;
@@ -471,7 +544,10 @@ fn parked(mut commands: Commands, street: Option<Res<crate::street::Street>>, fl
         let mut p = ParkedCars::default();
         if std::env::var("CV_NO_PARKED").is_err() {
             let path = st.dir.join("parked.json");
-            if let Some(f) = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<ParkedFile>(&t).map_err(|e| warn!("{}: {e}", path.display())).ok()) {
+            if let Some(f) = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|t| serde_json::from_str::<ParkedFile>(&t).map_err(|e| warn!("{}: {e}", path.display())).ok())
+            {
                 p.cars = f.cars.into_iter().map(|(x, y, z, h, k, id)| (Vec3::new(x, y, z), h, k, id)).collect();
                 let heroes: Vec<(Vec3, f32, String)> = f.hero.into_iter().map(|(x, y, z, h, _, id)| (Vec3::new(x, y, z), h, id)).collect();
                 // the hero sedan: the car slot nearest where the view starts (CV_NO_HERO: none)
@@ -507,7 +583,8 @@ fn parked(mut commands: Commands, street: Option<Res<crate::street::Street>>, fl
                 let root = commands.spawn((tf, Visibility::Inherited, ParkedCar, Name::new(id.clone()))).id();
                 // lamps: off on most parked cars, LIT_SHARE of them idling (the hero always lit)
                 if hero.is_none() && (key >> 33) % 1000 >= (LIT_SHARE * 1000.0) as u64 {
-                    fleet.models[mi].spawn_parts_with(&mut commands, root, |m| fleet.dark.get(&m.id()).cloned().unwrap_or_else(|| m.clone()));
+                    fleet.models[mi]
+                        .spawn_parts_with(&mut commands, root, |m| fleet.dark.get(&m.id()).cloned().unwrap_or_else(|| m.clone()));
                 } else {
                     fleet.models[mi].spawn_parts(&mut commands, root);
                 }
@@ -532,7 +609,15 @@ mod tests {
     use super::*;
 
     fn part(slot: &str, c: Vec3, h: Vec3, tf: Transform) -> Part {
-        Part { mesh: Handle::default(), mat: Handle::default(), aabb: Aabb { center: c.into(), half_extents: h.into() }, tf, role: Role::Body, radius: 0.0, slot: slot.into() }
+        Part {
+            mesh: Handle::default(),
+            mat: Handle::default(),
+            aabb: Aabb { center: c.into(), half_extents: h.into() },
+            tf,
+            role: Role::Body,
+            radius: 0.0,
+            slot: slot.into(),
+        }
     }
 
     fn car(tf: Transform) -> Vec<Part> {
@@ -545,7 +630,15 @@ mod tests {
 
     #[test]
     fn check_passes_and_controls_fail() {
-        let rec = ModelRec { id: "t".into(), model: "t".into(), kind: "car".into(), weight: 1.0, glb: String::new(), size: [4.0, 1.8, 1.4], hover: 0.0 };
+        let rec = ModelRec {
+            id: "t".into(),
+            model: "t".into(),
+            kind: "car".into(),
+            weight: 1.0,
+            glb: String::new(),
+            size: [4.0, 1.8, 1.4],
+            hover: 0.0,
+        };
         assert!(check(&rec, &car(Transform::IDENTITY)).is_empty());
         // control: turned round (the head lamps behind)
         assert!(!check(&rec, &car(Transform::from_rotation(Quat::from_rotation_y(std::f32::consts::PI)))).is_empty());

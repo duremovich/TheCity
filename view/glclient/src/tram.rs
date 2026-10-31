@@ -103,10 +103,13 @@ fn car_parts(d: &CarDims) -> Vec<(Part, Vec3, Vec3)> {
     // windows: panes proud of both sides (the lower deck's leave the doors' bays dark), the end windows
     let panes = |n: usize, z0: f32, z1: f32, skip: &[usize]| -> Vec<(f32, f32, f32, f32)> {
         let pitch = (d.len - 1.6) / n as f32;
-        (0..n).filter(|i| !skip.contains(i)).map(|i| {
-            let x0 = -hl + 0.8 + i as f32 * pitch + 0.1;
-            (x0, x0 + pitch - 0.2, z0, z1)
-        }).collect()
+        (0..n)
+            .filter(|i| !skip.contains(i))
+            .map(|i| {
+                let x0 = -hl + 0.8 + i as f32 * pitch + 0.1;
+                (x0, x0 + pitch - 0.2, z0, z1)
+            })
+            .collect()
     };
     for (x0, x1, z0, z1) in panes(6, 1.2, 2.15, &[1, 4]).into_iter().chain(panes(7, 3.0, 3.85, &[])) {
         put(Part::Window, b(x0, -hw - 0.02, z0, x1, -hw, z1));
@@ -172,7 +175,10 @@ fn setup(
         return;
     }
     let path = st.dir.join("tram.json");
-    let Some(f) = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<TramFile>(&t).map_err(|e| warn!("{}: {e}", path.display())).ok()) else {
+    let Some(f) = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<TramFile>(&t).map_err(|e| warn!("{}: {e}", path.display())).ok())
+    else {
         return;
     };
     let emit = |c: &str, k: f32| LinearRgba::from(hex(c)) * k;
@@ -211,22 +217,41 @@ fn setup(
                 roof_z = m.rec.size[2];
             } else {
                 for (p, m, a) in &per {
-                let mat = match p {
-                    Part::Body => bodies[k % bodies.len()].clone(),
-                    Part::Cream => cream.clone(),
-                    Part::Under => under.clone(),
-                    Part::Roof => roof.clone(),
-                    Part::Window => window.clone(),
-                    Part::Board => board.clone(),
-                    Part::Head => head.clone(),
-                };
-                commands.spawn((Mesh3d(m.clone()), MeshMaterial3d(mat), *a, Transform::IDENTITY, ChildOf(root)));
+                    let mat = match p {
+                        Part::Body => bodies[k % bodies.len()].clone(),
+                        Part::Cream => cream.clone(),
+                        Part::Under => under.clone(),
+                        Part::Roof => roof.clone(),
+                        Part::Window => window.clone(),
+                        Part::Board => board.clone(),
+                        Part::Head => head.clone(),
+                    };
+                    commands.spawn((Mesh3d(m.clone()), MeshMaterial3d(mat), *a, Transform::IDENTITY, ChildOf(root)));
                 }
             }
-            commands.spawn((Mesh3d(strut.clone()), MeshMaterial3d(metal.clone()), Transform::from_translation(to_bevy(Vec3::new(PANTO_AT, 0.0, roof_z))), Panto { bar: false, base: roof_z }, ChildOf(root)));
-            commands.spawn((Mesh3d(bar.clone()), MeshMaterial3d(metal.clone()), Transform::from_translation(to_bevy(Vec3::new(PANTO_AT, 0.0, roof_z + 1.0))), Panto { bar: true, base: roof_z }, ChildOf(root)));
+            commands.spawn((
+                Mesh3d(strut.clone()),
+                MeshMaterial3d(metal.clone()),
+                Transform::from_translation(to_bevy(Vec3::new(PANTO_AT, 0.0, roof_z))),
+                Panto { bar: false, base: roof_z },
+                ChildOf(root),
+            ));
+            commands.spawn((
+                Mesh3d(bar.clone()),
+                MeshMaterial3d(metal.clone()),
+                Transform::from_translation(to_bevy(Vec3::new(PANTO_AT, 0.0, roof_z + 1.0))),
+                Panto { bar: true, base: roof_z },
+                ChildOf(root),
+            ));
         }
-        info!("tram {}: {} cars ({}), period {:.0} s, loop {:.0} m", ln.way, ln.cars, if fleet.of_kind("tram").is_empty() { "boxes" } else { "fleet models" }, ln.period, ln.u.last().unwrap_or(&0.0));
+        info!(
+            "tram {}: {} cars ({}), period {:.0} s, loop {:.0} m",
+            ln.way,
+            ln.cars,
+            if fleet.of_kind("tram").is_empty() { "boxes" } else { "fleet models" },
+            ln.period,
+            ln.u.last().unwrap_or(&0.0)
+        );
     }
     trams.lines = f.lines;
 }

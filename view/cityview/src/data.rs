@@ -93,9 +93,8 @@ impl KitPlacedRec {
 
 /// Every out/bldg/kitplaced_*.json of the city (sorted by file name).
 pub fn kit_placed(city_dir: &Path) -> Vec<KitPlacedRec> {
-    let mut files: Vec<_> = std::fs::read_dir(city_dir.join("out/bldg"))
-        .map(|d| d.filter_map(|e| e.ok()).map(|e| e.path()).collect())
-        .unwrap_or_default();
+    let mut files: Vec<_> =
+        std::fs::read_dir(city_dir.join("out/bldg")).map(|d| d.filter_map(|e| e.ok()).map(|e| e.path()).collect()).unwrap_or_default();
     files.retain(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("kitplaced_") && n.ends_with(".json")));
     files.sort();
     let mut out = vec![];

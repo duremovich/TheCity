@@ -1,0 +1,5 @@
+# The view crates' own format (rustfmt reads the nearest rustfmt.toml per file): wider than the sim's 120, the
+# width the client was written at in TheCityGraphics, so the join's formatting commit stayed small. Edition 2024
+# comes from the crates' manifests. Checked by `python tools/test.py view` (cargo fmt -p glclient -p cityview).
+max_width = 140
+use_small_heuristics = "Max"

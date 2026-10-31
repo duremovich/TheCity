@@ -241,7 +241,13 @@ pub fn setup_sim(mut sim: ResMut<Sim>, mut meshes: ResMut<Assets<Mesh>>, mut mat
 }
 
 /// Advance the playback and place every placeholder: frame i and i + 1 lerped for the ids in both.
-pub fn update_sim(mut commands: Commands, time: Res<Time>, stream: Res<Stream>, mut sim: ResMut<Sim>, mut q: Query<(&mut Transform, &mut Visibility)>) {
+pub fn update_sim(
+    mut commands: Commands,
+    time: Res<Time>,
+    stream: Res<Stream>,
+    mut sim: ResMut<Sim>,
+    mut q: Query<(&mut Transform, &mut Visibility)>,
+) {
     let n = sim.frames.len();
     let rate = sim.rate;
     sim.t = (sim.t + time.delta_secs() * rate) % n as f32;
@@ -251,22 +257,23 @@ pub fn update_sim(mut commands: Commands, time: Res<Time>, stream: Res<Stream>, 
     let next_a: HashMap<u64, [f32; 2]> = sim.frames[j].agents.iter().map(|a| (a.id, a.t)).collect();
     let next_v: HashMap<u64, [f32; 2]> = sim.frames[j].vehicles.iter().map(|v| (v.id, v.t)).collect();
     let mut seen: Vec<(u8, u64)> = vec![];
-    let mut place = |commands: &mut Commands, sim: &mut Sim, k: (u8, u64), mesh: Handle<Mesh>, mat: Handle<StandardMaterial>, at: Vec3, yaw: f32| {
-        seen.push(k);
-        let tf = Transform::from_translation(at).with_rotation(Quat::from_rotation_y(yaw));
-        match sim.ents.get(&k).copied() {
-            Some(e) => {
-                if let Ok((mut t, mut v)) = q.get_mut(e) {
-                    *t = tf;
-                    v.set_if_neq(Visibility::Inherited);
+    let mut place =
+        |commands: &mut Commands, sim: &mut Sim, k: (u8, u64), mesh: Handle<Mesh>, mat: Handle<StandardMaterial>, at: Vec3, yaw: f32| {
+            seen.push(k);
+            let tf = Transform::from_translation(at).with_rotation(Quat::from_rotation_y(yaw));
+            match sim.ents.get(&k).copied() {
+                Some(e) => {
+                    if let Ok((mut t, mut v)) = q.get_mut(e) {
+                        *t = tf;
+                        v.set_if_neq(Visibility::Inherited);
+                    }
+                }
+                None => {
+                    let e = commands.spawn((Mesh3d(mesh), MeshMaterial3d(mat), tf, Name::new("sim"))).id();
+                    sim.ents.insert(k, e);
                 }
             }
-            None => {
-                let e = commands.spawn((Mesh3d(mesh), MeshMaterial3d(mat), tf, Name::new("sim"))).id();
-                sim.ents.insert(k, e);
-            }
-        }
-    };
+        };
     let (mut street, mut indoors, mut aboard, mut lods) = (0, 0, 0, [0usize; 3]);
     let fr_agents = sim.frames[i].agents.clone();
     for a in &fr_agents {
@@ -324,6 +331,17 @@ pub fn update_sim(mut commands: Commands, time: Res<Time>, stream: Res<Stream>, 
     let f = &sim.frames[i];
     sim.hud = format!(
         "sim tick {} {}  agents {} (street {street}, indoors {indoors}, aboard {aboard}; Full {} Coarse {} Stat {})  vehicles car {} van {} train {} flyer {} foot {} ({riders} aboard)  events {}",
-        f.tick, f.clock, f.agents.len(), lods[0], lods[1], lods[2], by_ride[0], by_ride[1], by_ride[2], by_ride[3], by_ride[4], f.events
+        f.tick,
+        f.clock,
+        f.agents.len(),
+        lods[0],
+        lods[1],
+        lods[2],
+        by_ride[0],
+        by_ride[1],
+        by_ride[2],
+        by_ride[3],
+        by_ride[4],
+        f.events
     );
 }

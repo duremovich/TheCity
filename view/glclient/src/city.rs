@@ -339,12 +339,7 @@ pub fn setup_city(
 
     // night: a weak blue moon (Blender sun 0.08 W/m2 ~ 55 lux), near-zero world ambient (#0A0A14 x 0.05)
     commands.spawn((
-        DirectionalLight {
-            illuminance: 55.0,
-            color: Color::srgb_u8(0x6E, 0x7B, 0xFF),
-            shadow_maps_enabled: false,
-            ..default()
-        },
+        DirectionalLight { illuminance: 55.0, color: Color::srgb_u8(0x6E, 0x7B, 0xFF), shadow_maps_enabled: false, ..default() },
         Transform::from_xyz(0.0, 30.0, 0.0).looking_at(Vec3::new(-16.0, 0.0, 16.0), Vec3::Y),
     ));
     commands.insert_resource(GlobalAmbientLight { color: Color::srgb_u8(0x0A, 0x0A, 0x14), brightness: 20.0, ..default() });
@@ -726,7 +721,12 @@ fn on_building_ready(
 
 /// The cutaway rule (GAME_DATA.md): normal view = main + hide_on_cut; cut at C: floors < C normal, C = main +
 /// cut_only, floors > C hidden. LOD1 / LOD2 and the nav / collision data meshes never render here.
-pub fn apply_cutaway(city: Res<City>, mut nodes: Query<(&GlNode, &mut Visibility)>, added: Query<(), Added<GlNode>>, mut last_gen: Local<u32>) {
+pub fn apply_cutaway(
+    city: Res<City>,
+    mut nodes: Query<(&GlNode, &mut Visibility)>,
+    added: Query<(), Added<GlNode>>,
+    mut last_gen: Local<u32>,
+) {
     if added.is_empty() && *last_gen == city.cut_gen {
         return;
     }
@@ -765,7 +765,13 @@ pub fn camera_controls(keys: Res<ButtonInput<KeyCode>>, time: Res<Time>, mut foc
         focus.at += d * 12.0 * time.delta_secs();
     }
     if keys.just_pressed(KeyCode::KeyZ) {
-        focus.zoom = if focus.zoom < 30.0 { 60.0 } else if focus.zoom < 100.0 { 140.0 } else { 26.0 };
+        focus.zoom = if focus.zoom < 30.0 {
+            60.0
+        } else if focus.zoom < 100.0 {
+            140.0
+        } else {
+            26.0
+        };
     }
     if keys.just_pressed(KeyCode::PageUp) {
         let x = focus.at.x;

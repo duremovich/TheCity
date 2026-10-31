@@ -243,7 +243,9 @@ pub fn occ_cast(
             }
             if tris.iter().any(|t| ray_tri(r.origin, r.dir, t, max_t).is_some()) {
                 r.hit = true;
-                if !r.wide && let Ok(mut f) = fades.get_mut(*e) {
+                if !r.wide
+                    && let Ok(mut f) = fades.get_mut(*e)
+                {
                     f.hit = true;
                 }
             }

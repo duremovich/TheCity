@@ -27,7 +27,6 @@ pub const MASSING: OccFlags = OccFlags { keep_up: false, fade: false, cut: true,
 pub const DECKS: OccFlags = OccFlags { keep_up: false, fade: true, cut: false, gated: false };
 pub const PYLONS: OccFlags = OccFlags { keep_up: false, fade: false, cut: true, gated: false };
 
-
 /// The haze reaches its maximum this far under the reference height (m), which sits this far over the ground
 /// under the view centre: the street gets ~0.3 of it, roofs at 60 m none.
 const HAZE_RANGE: f32 = 160.0;
@@ -165,7 +164,7 @@ pub fn material(strength: f32) -> WindowMaterial {
             // fed more saturated than the palette tokens: AgX desaturates them back toward #FFD9A0 / #E8F4FF
             // (review p3 r2 measured warm at #C8BDA8, 0.16 saturation, cold neutral grey)
             warm: lin(0xFFB060).extend(strength),
-            cold: lin(0x8CD2FF).extend(1.0),          // review p3 r3: #D8F0FF came out grey paper
+            cold: lin(0x8CD2FF).extend(1.0), // review p3 r3: #D8F0FF came out grey paper
             glass: lin(0x0E1218).extend(0.15),
             misc: Vec4::new(0.0, 1.0, 1.0, 0.0),
             key: lin(0xFF2E88).extend(2.5),

@@ -419,19 +419,26 @@ impl Plugin for OcclusionPlugin {
         embedded_asset!(app, "occ_std.wgsl");
         embedded_asset!(app, "occ_prepass.wgsl");
         embedded_asset!(app, "silhouette.wgsl");
-        app.add_plugins((MaterialPlugin::<OccStd>::default(), MaterialPlugin::<OccStdBlend>::default(), MaterialPlugin::<SilhouetteMaterial>::default()))
-            .init_resource::<OccCast>()
-            // after transform propagation: the uniform and the rays use this frame's camera and bodies (the cut's
-            // camera test compares positions, so a frame-old camera would switch the cut off while panning)
-            .configure_sets(PostUpdate, (OccSet::Prepare, OccSet::Cast, OccSet::Apply).chain().after(TransformSystems::Propagate))
-            .add_systems(Startup, setup_silhouette)
-            .add_systems(
-                PostUpdate,
-                (occ_prepare.in_set(OccSet::Prepare), (occ_apply, occ_std_materials, tag_kept_buildings, floor_cut).chain().in_set(OccSet::Apply)),
-            )
-            .add_observer(swap_building_materials::<WorldInstanceReady>)
-            .add_observer(swap_building_materials::<crate::kit::KitReady>)
-            .add_observer(make_silhouettes);
+        app.add_plugins((
+            MaterialPlugin::<OccStd>::default(),
+            MaterialPlugin::<OccStdBlend>::default(),
+            MaterialPlugin::<SilhouetteMaterial>::default(),
+        ))
+        .init_resource::<OccCast>()
+        // after transform propagation: the uniform and the rays use this frame's camera and bodies (the cut's
+        // camera test compares positions, so a frame-old camera would switch the cut off while panning)
+        .configure_sets(PostUpdate, (OccSet::Prepare, OccSet::Cast, OccSet::Apply).chain().after(TransformSystems::Propagate))
+        .add_systems(Startup, setup_silhouette)
+        .add_systems(
+            PostUpdate,
+            (
+                occ_prepare.in_set(OccSet::Prepare),
+                (occ_apply, occ_std_materials, tag_kept_buildings, floor_cut).chain().in_set(OccSet::Apply),
+            ),
+        )
+        .add_observer(swap_building_materials::<WorldInstanceReady>)
+        .add_observer(swap_building_materials::<crate::kit::KitReady>)
+        .add_observer(make_silhouettes);
         if !app.world().contains_resource::<Occlusion>() {
             app.insert_resource(Occlusion::new(OccSettings::from_env()));
         }
@@ -863,7 +870,14 @@ fn make_silhouettes(
     }
     for e in children.iter_descendants(ev.entity).collect::<Vec<_>>() {
         let Ok((m, skin, layers)) = meshes.get(e) else { continue };
-        let mut c = commands.spawn((Mesh3d(m.0.clone()), MeshMaterial3d(sil.0.clone()), Transform::default(), NotShadowCaster, SilhouetteTwin, ChildOf(e)));
+        let mut c = commands.spawn((
+            Mesh3d(m.0.clone()),
+            MeshMaterial3d(sil.0.clone()),
+            Transform::default(),
+            NotShadowCaster,
+            SilhouetteTwin,
+            ChildOf(e),
+        ));
         if let Some(s) = skin {
             c.insert(s.clone());
         }

@@ -231,7 +231,9 @@ fn gpu_passes(d: &DiagnosticsStore) -> BTreeMap<String, f64> {
     let mut items = vec![];
     for diag in d.iter() {
         let parts: Vec<&str> = diag.path().as_str().split('/').collect();
-        if parts.len() == 3 && parts[0] == "render" && parts[2] == "elapsed_gpu"
+        if parts.len() == 3
+            && parts[0] == "render"
+            && parts[2] == "elapsed_gpu"
             && let Some(m) = diag.measurement()
         {
             latest = latest.max(Some(m.time));
@@ -296,7 +298,12 @@ pub fn setup_probes(
         commands.entity(e).insert(RenderLayers::from_layers(&[0, 2]));
     }
     commands
-        .spawn((WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(PLAYER_GLB))), Transform::default(), FlatBody, Name::new("flat_body")))
+        .spawn((
+            WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(PLAYER_GLB))),
+            Transform::default(),
+            FlatBody,
+            Name::new("flat_body"),
+        ))
         .observe(flat_ready);
 }
 
@@ -312,11 +319,21 @@ fn flat_ready(
 ) {
     let green = mats.add(StandardMaterial { base_color: Color::srgb(0.0, 1.0, 0.0), unlit: true, ..default() });
     // the silhouette rule (glclient's margin) in the probe colour, opaque, no edge boost
-    let sil = sils.add(glclient::occlusion::SilhouetteMaterial { colour: Vec4::new(0.0, 1.0, 0.0, 1.0), misc: Vec4::new(glclient::occlusion::SIL_MARGIN, 0.0, 0.0, 0.0), rim: Vec4::ZERO });
+    let sil = sils.add(glclient::occlusion::SilhouetteMaterial {
+        colour: Vec4::new(0.0, 1.0, 0.0, 1.0),
+        misc: Vec4::new(glclient::occlusion::SIL_MARGIN, 0.0, 0.0, 0.0),
+        rim: Vec4::ZERO,
+    });
     for e in children.iter_descendants(ev.entity).collect::<Vec<_>>() {
         if let Ok((m, skin)) = meshes.get(e) {
             commands.entity(e).insert((MeshMaterial3d(green.clone()), RenderLayers::layer(1)));
-            let mut t = commands.spawn((Mesh3d(m.0.clone()), MeshMaterial3d(sil.clone()), Transform::default(), RenderLayers::layer(3), ChildOf(e)));
+            let mut t = commands.spawn((
+                Mesh3d(m.0.clone()),
+                MeshMaterial3d(sil.clone()),
+                Transform::default(),
+                RenderLayers::layer(3),
+                ChildOf(e),
+            ));
             if let Some(sk) = skin {
                 t.insert(sk.clone());
             }
@@ -539,7 +556,8 @@ fn summarise(b: &OccBench) -> serde_json::Value {
     let gpu_mean: BTreeMap<String, f64> = gpu.iter().map(|(k, v)| (k.clone(), v.iter().sum::<f64>() / v.len().max(1) as f64)).collect();
     let fmin = fw.iter().map(|x| x.0).fold(f32::INFINITY, f32::min);
     // readable = visible or drawn as a silhouette (§CAM requirement 1)
-    let rd: Vec<f32> = walk.iter().filter(|x| x.t >= SETTLE_S && x.alone > 50).map(|x| (x.readable as f32 / x.alone as f32).min(1.0)).collect();
+    let rd: Vec<f32> =
+        walk.iter().filter(|x| x.t >= SETTLE_S && x.alone > 50).map(|x| (x.readable as f32 / x.alone as f32).min(1.0)).collect();
     serde_json::json!({
         "name": p.name, "desc": p.desc, "walk_m": b.length(), "frames": b.samples.len(),
         "occluded_share": walk.iter().filter(|x| x.occluded).count() as f32 / walk.len().max(1) as f32,

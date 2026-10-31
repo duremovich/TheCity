@@ -106,14 +106,20 @@ impl Args {
         while i < v.len() {
             let next = |i: usize| v.get(i + 1).cloned().unwrap_or_else(|| panic!("{} needs a value", v[i]));
             match v[i].as_str() {
-                "--city" => { a.city = next(i); i += 1; }
+                "--city" => {
+                    a.city = next(i);
+                    i += 1;
+                }
                 "--at" => {
                     let s = next(i);
                     let (x, y) = s.split_once(',').expect("--at X,Y");
                     a.at = Some(Vec2::new(x.parse().unwrap(), y.parse().unwrap()));
                     i += 1;
                 }
-                "--zoom" => { a.zoom = next(i).parse().unwrap(); i += 1; }
+                "--zoom" => {
+                    a.zoom = next(i).parse().unwrap();
+                    i += 1;
+                }
                 "--overview" => a.overview = true,
                 "--day" => a.day = true,
                 "--hide-mass" => a.hide_mass = true,
@@ -123,23 +129,62 @@ impl Args {
                     a.res = (w.parse().unwrap(), h.parse().unwrap());
                     i += 1;
                 }
-                "--bench" => { a.bench = Some(next(i)); i += 1; }
-                "--speed" => { a.speed = next(i).parse().unwrap(); i += 1; }
-                "--tag" => { a.tag = next(i); i += 1; }
-                "--out" => { a.out = Some(PathBuf::from(next(i))); i += 1; }
+                "--bench" => {
+                    a.bench = Some(next(i));
+                    i += 1;
+                }
+                "--speed" => {
+                    a.speed = next(i).parse().unwrap();
+                    i += 1;
+                }
+                "--tag" => {
+                    a.tag = next(i);
+                    i += 1;
+                }
+                "--out" => {
+                    a.out = Some(PathBuf::from(next(i)));
+                    i += 1;
+                }
                 "--no-player" => a.player = Some(false),
                 "--player" => a.player = Some(true),
-                "--squad" => { a.squad = next(i).parse().unwrap(); i += 1; }
-                "--path" => { a.paths = Some(next(i).split(',').map(String::from).collect()); i += 1; }
-                "--occ" => { a.occ_on = next(i) != "off"; i += 1; }
+                "--squad" => {
+                    a.squad = next(i).parse().unwrap();
+                    i += 1;
+                }
+                "--path" => {
+                    a.paths = Some(next(i).split(',').map(String::from).collect());
+                    i += 1;
+                }
+                "--occ" => {
+                    a.occ_on = next(i) != "off";
+                    i += 1;
+                }
                 "--no-probes" => a.probes = false,
                 "--gpu" => a.gpu = true,
-                "--record" => { a.record = Some(PathBuf::from(next(i))); i += 1; }
-                "--traffic-trace" => { a.traffic_trace = Some(PathBuf::from(next(i))); i += 1; }
-                "--sim" => { a.sim = Some(PathBuf::from(next(i))); i += 1; }
-                "--sim-rate" => { a.sim_rate = next(i).parse().unwrap(); i += 1; }
-                "--sim-frame" => { a.sim_frame = next(i).parse().unwrap(); i += 1; }
-                "--trace-secs" => { a.trace_secs = next(i).parse().unwrap(); i += 1; }
+                "--record" => {
+                    a.record = Some(PathBuf::from(next(i)));
+                    i += 1;
+                }
+                "--traffic-trace" => {
+                    a.traffic_trace = Some(PathBuf::from(next(i)));
+                    i += 1;
+                }
+                "--sim" => {
+                    a.sim = Some(PathBuf::from(next(i)));
+                    i += 1;
+                }
+                "--sim-rate" => {
+                    a.sim_rate = next(i).parse().unwrap();
+                    i += 1;
+                }
+                "--sim-frame" => {
+                    a.sim_frame = next(i).parse().unwrap();
+                    i += 1;
+                }
+                "--trace-secs" => {
+                    a.trace_secs = next(i).parse().unwrap();
+                    i += 1;
+                }
                 o => panic!("unknown arg {o}"),
             }
             i += 1;
@@ -221,7 +266,9 @@ fn main() {
         kits.retain(|k| k.lot.starts_with(&pre));
     }
     let kit_lots: std::collections::HashSet<String> = kits.iter().map(|k| k.lot.clone()).collect();
-    let tf_of = |at: [f32; 3], yaw: f32| Transform::from_translation(mesh::bv(at[0], at[1], at[2])).with_rotation(Quat::from_rotation_y(yaw.to_radians()));
+    let tf_of = |at: [f32; 3], yaw: f32| {
+        Transform::from_translation(mesh::bv(at[0], at[1], at[2])).with_rotation(Quat::from_rotation_y(yaw.to_radians()))
+    };
     // lazy interiors (P6): interiors inside the 3 x 3 chunk ring around the focus, shells outside (glclient
     // KitRing re-stamps as the focus moves); CV_KIT_RING=off keeps every interior
     let ring = std::env::var("CV_KIT_RING").map_or(true, |v| v != "off");
@@ -272,43 +319,51 @@ fn main() {
     let out = args.out.clone().unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("results"));
     // the P3 benches / shots run without the player (their views are the city, not a player)
     let player_on = args.player.unwrap_or(!matches!(args.bench.as_deref(), Some("stream" | "overview" | "shots" | "one")));
-    app.insert_resource(occ::Player { pos: start.extend(3.0), facing: 0.0, on: player_on, occ_on: true, squad: args.squad, scripted: false, light: std::env::var("CV_NO_PLAYER_LIGHT").is_err() })
-        .init_resource::<occ::LayerOccluders>()
-        .insert_resource(city)
-        .insert_resource(Focus { at: mesh::bv(start.x, start.y, 3.0), zoom: args.zoom })
-        // no volumetric street fog at city scale (glclient's volume spans its bench street)
-        // CV_SHADOWS=none: no shadow maps (a cost split for benches)
-        .insert_resource(LightSettings {
-            volumetric: false,
-            shadows: if std::env::var("CV_SHADOWS").is_ok_and(|v| v == "none") {
-                glclient::lighting::ShadowPolicy::None
-            } else {
-                LightSettings::default().shadows
-            },
-            ..default()
-        })
-        .insert_resource(view)
-        .add_plugins((GlClientPlugin, OcclusionPlugin))
-        .add_systems(Startup, (cam::setup_camera, setup_world, bench::setup_hud, occ::spawn_bodies))
-        .add_systems(
-            PostUpdate,
-            (occ::occ_switch.before(OccSet::Prepare), occ::occ_cast.in_set(OccSet::Cast), windows::update_occ.after(OccSet::Apply)),
-        )
-        .add_systems(
-            Update,
-            (
-                cam::controls,
-                occ::player_controls.after(cam::controls).before(stream::update_stream),
-                occ::place_bodies.after(occ::player_controls),
-                stream::update_stream.after(cam::controls),
-                cam::apply_view.after(stream::update_stream),
-                bench::update_hud,
-                windows::update_haze.after(stream::update_stream),
-                stream::massing_visibility,
-                stream::gen_massing_visibility.after(stream::update_stream),
-                bench::screenshot_key,
-            ),
-        );
+    app.insert_resource(occ::Player {
+        pos: start.extend(3.0),
+        facing: 0.0,
+        on: player_on,
+        occ_on: true,
+        squad: args.squad,
+        scripted: false,
+        light: std::env::var("CV_NO_PLAYER_LIGHT").is_err(),
+    })
+    .init_resource::<occ::LayerOccluders>()
+    .insert_resource(city)
+    .insert_resource(Focus { at: mesh::bv(start.x, start.y, 3.0), zoom: args.zoom })
+    // no volumetric street fog at city scale (glclient's volume spans its bench street)
+    // CV_SHADOWS=none: no shadow maps (a cost split for benches)
+    .insert_resource(LightSettings {
+        volumetric: false,
+        shadows: if std::env::var("CV_SHADOWS").is_ok_and(|v| v == "none") {
+            glclient::lighting::ShadowPolicy::None
+        } else {
+            LightSettings::default().shadows
+        },
+        ..default()
+    })
+    .insert_resource(view)
+    .add_plugins((GlClientPlugin, OcclusionPlugin))
+    .add_systems(Startup, (cam::setup_camera, setup_world, bench::setup_hud, occ::spawn_bodies))
+    .add_systems(
+        PostUpdate,
+        (occ::occ_switch.before(OccSet::Prepare), occ::occ_cast.in_set(OccSet::Cast), windows::update_occ.after(OccSet::Apply)),
+    )
+    .add_systems(
+        Update,
+        (
+            cam::controls,
+            occ::player_controls.after(cam::controls).before(stream::update_stream),
+            occ::place_bodies.after(occ::player_controls),
+            stream::update_stream.after(cam::controls),
+            cam::apply_view.after(stream::update_stream),
+            bench::update_hud,
+            windows::update_haze.after(stream::update_stream),
+            stream::massing_visibility,
+            stream::gen_massing_visibility.after(stream::update_stream),
+            bench::screenshot_key,
+        ),
+    );
     app.insert_resource(Pending { dir: dir.clone(), out: out.clone(), args: args.clone() });
     if let Some(p) = &args.sim {
         app.insert_resource(sim::Sim::load(p, args.sim_rate, args.sim_frame, &dir))
@@ -411,7 +466,11 @@ fn setup_world(
         // south of the trunk hid it): the S leg's point nearest x 4300 and the SE curve
         let xw = layers.elements.iter().find(|e| e.kind == "expressway").map(|e| {
             let near = |x: f32, y: f32| {
-                let p = e.pts.iter().min_by(|a, b| ((a[0] - x).powi(2) + (a[1] - y).powi(2)).total_cmp(&((b[0] - x).powi(2) + (b[1] - y).powi(2)))).unwrap();
+                let p = e
+                    .pts
+                    .iter()
+                    .min_by(|a, b| ((a[0] - x).powi(2) + (a[1] - y).powi(2)).total_cmp(&((b[0] - x).powi(2) + (b[1] - y).powi(2))))
+                    .unwrap();
                 Vec2::new(p[0], p[1])
             };
             (near(4300.0, 392.0), near(5850.0, 750.0))

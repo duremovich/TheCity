@@ -22,10 +22,10 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 use crate::block::hex;
-use crate::frame::to_bevy;
-use crate::street::{Acc, Street};
 use crate::city::{GlLight, LM_PER_W, Role as LightRole};
+use crate::frame::to_bevy;
 use crate::lighting::MovingLight;
+use crate::street::{Acc, Street};
 use crate::vehicles::{Fleet, Role};
 
 #[derive(Deserialize, Clone, Debug)]
@@ -133,7 +133,8 @@ impl Kind {
 }
 
 /// P8: couriers (bikes) take 0.08 of the cars' share; a bike keeps its lane like a car (no splitting)
-const KINDS: [(Kind, f32); 6] = [(Kind::Car, 0.37), (Kind::Taxi, 0.25), (Kind::Van, 0.12), (Kind::Minibus, 0.1), (Kind::Bus, 0.08), (Kind::Bike, 0.08)];
+const KINDS: [(Kind, f32); 6] =
+    [(Kind::Car, 0.37), (Kind::Taxi, 0.25), (Kind::Van, 0.12), (Kind::Minibus, 0.1), (Kind::Bus, 0.08), (Kind::Bike, 0.08)];
 /// m from a car's front to the next car's tail it stops at
 pub const GAP: f32 = 2.0;
 /// m before a connector a car reserves it
@@ -504,9 +505,11 @@ impl Sim {
                         let room = free(out) + own >= len + GAP && self_room > GAP;
                         if !mine && !room && self.cars[i].stopped > REPLAN && to_end < 3.0 {
                             // the exit stays full: another exit with room (a queue around a block gridlocks)
-                            let alt = self.segs[cseg].next.iter().copied().find(|k| {
-                                *k != nx && (!big || self.segs[*k].big) && free(self.segs[*k].next[0]) >= len + GAP
-                            });
+                            let alt = self.segs[cseg]
+                                .next
+                                .iter()
+                                .copied()
+                                .find(|k| *k != nx && (!big || self.segs[*k].big) && free(self.segs[*k].next[0]) >= len + GAP);
                             if let Some(k) = alt {
                                 self.cars[i].plan = Some(k);
                                 self.cars[i].stopped = 0.0;
@@ -896,7 +899,11 @@ fn run(
                     if let Ok(mut wt) = wq.get_mut(*we) {
                         // the axle is the pivot's local X (glTF X); the steer turns about the car's up (+Y)
                         let st = if *front { Quat::from_rotation_y(steer) } else { Quat::IDENTITY };
-                        *wt = Transform { translation: base.translation, rotation: st * base.rotation * Quat::from_rotation_x(-e.roll), scale: base.scale };
+                        *wt = Transform {
+                            translation: base.translation,
+                            rotation: st * base.rotation * Quat::from_rotation_x(-e.roll),
+                            scale: base.scale,
+                        };
                     }
                 }
             }
@@ -915,7 +922,19 @@ fn run(
         }
         let model = fleet.pick(c.kind.name(), c.id);
         let root = commands.spawn((tf, Visibility::Inherited, TrafficCar, Name::new(format!("{}_{}", c.kind.name(), c.id)))).id();
-        let mut ent = CarEnt { root, model, wheels: vec![], hover: 0.0, roll: 0.0, heading: h, wheelbase: c.kind.dims().0 * 0.6, tails: vec![], braking: false, last_v: c.v, lights: vec![] };
+        let mut ent = CarEnt {
+            root,
+            model,
+            wheels: vec![],
+            hover: 0.0,
+            roll: 0.0,
+            heading: h,
+            wheelbase: c.kind.dims().0 * 0.6,
+            tails: vec![],
+            braking: false,
+            last_v: c.v,
+            lights: vec![],
+        };
         if let Some(mi) = model {
             let m = &fleet.models[mi];
             ent.hover = m.rec.hover;
@@ -967,7 +986,12 @@ fn run(
         }
         // at the cap a car in the top HEAD_N takes the lights of the worst-ranked holder (a kept one, rank >= HEAD_N)
         if lit >= HEAD_N + 2 {
-            let worst = tr.entities.iter().filter(|(_, e)| !e.lights.is_empty()).max_by_key(|(i, _)| rank.get(*i).copied().unwrap_or(usize::MAX)).map(|(i, _)| *i);
+            let worst = tr
+                .entities
+                .iter()
+                .filter(|(_, e)| !e.lights.is_empty())
+                .max_by_key(|(i, _)| rank.get(*i).copied().unwrap_or(usize::MAX))
+                .map(|(i, _)| *i);
             let Some(w) = worst.filter(|w| rank.get(w).copied().unwrap_or(usize::MAX) >= HEAD_N) else { break };
             for l in tr.entities.get_mut(&w).unwrap().lights.drain(..) {
                 commands.entity(l).despawn();
@@ -984,7 +1008,16 @@ fn run(
             let lm = HEAD_W * LM_PER_W;
             let l = commands
                 .spawn((
-                    SpotLight { color: colour, intensity: lm, range: HEAD_RANGE, radius: 0.1, outer_angle: outer, inner_angle: inner, shadow_maps_enabled: false, ..default() },
+                    SpotLight {
+                        color: colour,
+                        intensity: lm,
+                        range: HEAD_RANGE,
+                        radius: 0.1,
+                        outer_angle: outer,
+                        inner_angle: inner,
+                        shadow_maps_enabled: false,
+                        ..default()
+                    },
                     Transform::from_translation(at).looking_at(at + Vec3::new(10.0, -2.0, 0.0), Vec3::Y),
                     head_gl(&format!("car_head_{id}"), colour, lm, HEAD_RANGE, Some((inner, outer)), HEAD_W),
                     MovingLight,
@@ -1014,7 +1047,10 @@ fn run(
     let bucket = time.elapsed_secs() as u32 / 10 + 1;
     if bucket != stats.logged {
         stats.logged = bucket;
-        info!("traffic: {} cars ({} fleet models, {} lights) around ({:.0}, {:.0}), {} spawned, {} junction crossings", stats.cars, stats.fleet, stats.lights, tr.sim.centre.x, tr.sim.centre.y, tr.sim.spawned, tr.sim.crossed);
+        info!(
+            "traffic: {} cars ({} fleet models, {} lights) around ({:.0}, {:.0}), {} spawned, {} junction crossings",
+            stats.cars, stats.fleet, stats.lights, tr.sim.centre.x, tr.sim.centre.y, tr.sim.spawned, tr.sim.crossed
+        );
     }
 }
 
@@ -1041,7 +1077,8 @@ fn head_gl(name: &str, color: Color, lm: f32, range: f32, spot: Option<(f32, f32
 }
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<TrafficStats>().add_systems(Update, (setup, run).chain().after(crate::street::update_street).before(crate::lighting::apply_lights));
+    app.init_resource::<TrafficStats>()
+        .add_systems(Update, (setup, run).chain().after(crate::street::update_street).before(crate::lighting::apply_lights));
 }
 
 // ------------------------------------------------------------------------------------------------ trace
@@ -1071,9 +1108,15 @@ pub fn trace(path_in: &std::path::Path, out: &std::path::Path, centre: Vec2, hal
             })
             .collect();
         // the junction state (debugging a jam): connector -> holders, connector -> the waiting car it is wanted by
-        let held: Vec<serde_json::Value> = sim.held.iter().enumerate().filter(|(_, h)| !h.is_empty())
-            .map(|(k, h)| serde_json::json!([k - sim.lanes, h.iter().map(|x| x.0).collect::<Vec<_>>()])).collect();
-        let want: Vec<serde_json::Value> = sim.want.iter().enumerate().filter_map(|(k, w)| w.map(|w| serde_json::json!([k - sim.lanes, w.0]))).collect();
+        let held: Vec<serde_json::Value> = sim
+            .held
+            .iter()
+            .enumerate()
+            .filter(|(_, h)| !h.is_empty())
+            .map(|(k, h)| serde_json::json!([k - sim.lanes, h.iter().map(|x| x.0).collect::<Vec<_>>()]))
+            .collect();
+        let want: Vec<serde_json::Value> =
+            sim.want.iter().enumerate().filter_map(|(k, w)| w.map(|w| serde_json::json!([k - sim.lanes, w.0]))).collect();
         frames.push(serde_json::json!({"t": s + 1, "cars": cars, "held": held, "want": want}));
     }
     let doc = serde_json::json!({

@@ -268,7 +268,16 @@ pub fn massing_mesh(m: &ChunkMass, boxes: &[BoxRec], origin: Vec2) -> Mb {
         let d = [b.base, b.ground];
         // UV_0 = (window style, crown band: a landmark's lit crown)
         // (2 = no windows: roof plant rooms)
-        mb.cur_uv0 = [b.style as f32, if b.landmark && part == "crown" { 1.0 } else if part == "plant" { 2.0 } else { 0.0 }];
+        mb.cur_uv0 = [
+            b.style as f32,
+            if b.landmark && part == "crown" {
+                1.0
+            } else if part == "plant" {
+                2.0
+            } else {
+                0.0
+            },
+        ];
         let (x0, x1, y0, y1) = (x0 - origin.x, x1 - origin.x, y0 - origin.y, y1 - origin.y);
         // Bevy: x = x, y = z, z = -y -> min corner (x0, z0, -y1), max (x1, z1, -y0)
         mb.bx(Vec3::new(x0, *z0, -y1), Vec3::new(x1, *z1, -y0), c, d);

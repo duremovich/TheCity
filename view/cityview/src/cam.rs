@@ -117,12 +117,9 @@ impl View {
                 far: BACK * 2.5,
                 ..OrthographicProjection::default_3d()
             }),
-            Mode::Overview => Projection::Perspective(PerspectiveProjection {
-                fov: 40f32.to_radians(),
-                near: 2.0,
-                far: 30000.0,
-                ..default()
-            }),
+            Mode::Overview => {
+                Projection::Perspective(PerspectiveProjection { fov: 40f32.to_radians(), near: 2.0, far: 30000.0, ..default() })
+            }
         }
     }
 }
@@ -183,12 +180,7 @@ pub fn setup_camera(mut commands: Commands, view: Res<View>, street: Option<Res<
     commands.insert_resource(ClearColor(Color::srgb(0.005, 0.005, 0.012)));
 }
 
-pub fn controls(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut wheel: MessageReader<MouseWheel>,
-    time: Res<Time>,
-    mut view: ResMut<View>,
-) {
+pub fn controls(keys: Res<ButtonInput<KeyCode>>, mut wheel: MessageReader<MouseWheel>, time: Res<Time>, mut view: ResMut<View>) {
     let scroll: f32 = wheel.read().map(|e| e.y.signum()).sum();
     if view.scripted {
         return;
@@ -310,7 +302,10 @@ pub fn apply_view(
             commands.entity(ent).remove::<DistanceFog>();
         }
         let np = view.projection();
-        let same = matches!((&*p, &np), (Projection::Orthographic(_), Projection::Orthographic(_)) | (Projection::Perspective(_), Projection::Perspective(_)));
+        let same = matches!(
+            (&*p, &np),
+            (Projection::Orthographic(_), Projection::Orthographic(_)) | (Projection::Perspective(_), Projection::Perspective(_))
+        );
         if !same {
             *p = np;
         } else if let (Projection::Orthographic(o), Mode::Game) = (p.as_mut(), view.mode) {

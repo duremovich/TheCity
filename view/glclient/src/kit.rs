@@ -543,10 +543,8 @@ fn stamp(path: &Path, info: &BlockJson, interiors: bool) -> Result<Built, String
     let s = read_stream(path)?;
     let keys: Vec<String> = s.h["mats"].as_array().ok_or("no mats")?.iter().map(|k| k.as_str().unwrap_or("").to_string()).collect();
     // per material key: kind, atlas rect (px, top-down) or none (glass), textured (a sign image)
-    let mk: Vec<(MatKind, Option<[f32; 4]>, bool)> = keys
-        .iter()
-        .map(|k| info.mats.get(k).map_or((MatKind::Opaque, None, false), |m| (kind_of(&m.kind), m.rect, m.image)))
-        .collect();
+    let mk: Vec<(MatKind, Option<[f32; 4]>, bool)> =
+        keys.iter().map(|k| info.mats.get(k).map_or((MatKind::Opaque, None, false), |m| (kind_of(&m.kind), m.rect, m.image))).collect();
     let mut groups: HashMap<(i32, CutKind, MatKind), Acc> = HashMap::new();
     let mut faces = 0;
     let mut tris = vec![];
@@ -578,7 +576,11 @@ fn stamp(path: &Path, info: &BlockJson, interiors: bool) -> Result<Built, String
                 nb += Vec3::new((a.y - b.y) * (a.z + b.z), (a.z - b.z) * (a.x + b.x), (a.x - b.x) * (a.y + b.y));
             }
             let nb = nb.normalize_or_zero();
-            let acc = groups.entry((floor, cut, kind)).or_insert_with(|| Acc { lo: Vec3::splat(f32::MAX), hi: Vec3::splat(f32::MIN), ..default() });
+            let acc = groups.entry((floor, cut, kind)).or_insert_with(|| Acc {
+                lo: Vec3::splat(f32::MAX),
+                hi: Vec3::splat(f32::MIN),
+                ..default()
+            });
             let base = acc.pos.len() as u32;
             let nv = to_bevy(nb).to_array();
             for (j, p) in pb.iter().enumerate() {
@@ -626,7 +628,9 @@ fn stamp(path: &Path, info: &BlockJson, interiors: bool) -> Result<Built, String
         let f = |k: &str| l[k].as_f64().unwrap_or(0.0) as f32;
         let v3 = |k: &str| {
             let a = l[k].as_array();
-            a.map_or(Vec3::ZERO, |a| Vec3::new(a[0].as_f64().unwrap_or(0.0) as f32, a[1].as_f64().unwrap_or(0.0) as f32, a[2].as_f64().unwrap_or(0.0) as f32))
+            a.map_or(Vec3::ZERO, |a| {
+                Vec3::new(a[0].as_f64().unwrap_or(0.0) as f32, a[1].as_f64().unwrap_or(0.0) as f32, a[2].as_f64().unwrap_or(0.0) as f32)
+            })
         };
         let pair = |k: &str| l[k].as_array().and_then(|a| Some((a.first()?.as_f64()? as f32, a.get(1)?.as_f64()? as f32)));
         let c = v3("color");
@@ -762,7 +766,12 @@ pub fn poll_kits(
             ready.0 += 1;
             let kits = city.kinds.iter().filter(|k| k.kit.is_some()).count();
             if stats.buildings == kits {
-                info!("kit: {kits} buildings ready at {:.2} s (wall since start), {} faces, {} meshes", real.elapsed_secs(), stats.faces, stats.meshes);
+                info!(
+                    "kit: {kits} buildings ready at {:.2} s (wall since start), {} faces, {} meshes",
+                    real.elapsed_secs(),
+                    stats.faces,
+                    stats.meshes
+                );
             }
         }
         commands.trigger(KitReady { entity: root });
@@ -782,48 +791,48 @@ pub struct KitLightNode;
 
 fn spawn_lights(commands: &mut Commands, root: Entity, idx: usize, lights: &[KitLight]) {
     for l in lights.iter().cloned() {
-            let up = if l.dir.normalize_or_zero().y.abs() > 0.99 { Vec3::Z } else { Vec3::Y };
-            let node = commands
-                .spawn((Transform::from_translation(l.at).looking_to(l.dir, up), Visibility::default(), KitLightNode, ChildOf(root)))
-                .id();
-            let intensity = l.energy_w * LM_PER_W;
-            let gl = GlLight {
-                bldg: idx,
-                name: l.name,
-                role: l.role,
-                export_shadow: l.shadow,
-                floor: l.floor,
-                interior_floor: l.interior_floor,
-                energy_w: l.energy_w,
-                color: l.color,
-                intensity,
-                range: l.range,
-                radius: l.radius,
-                spot: l.spot,
-                priority: l.priority,
-                down: l.down,
-                cone: l.cone,
-            };
-            let mut e = commands.spawn((Transform::IDENTITY, Visibility::default(), ChildOf(node)));
-            match l.spot {
-                Some((inner, outer)) => e.insert((
-                    SpotLight {
-                        color: l.color,
-                        intensity,
-                        range: l.range,
-                        radius: l.radius,
-                        inner_angle: inner,
-                        outer_angle: outer,
-                        shadow_maps_enabled: false,
-                        ..default()
-                    },
-                    gl,
-                )),
-                None => e.insert((
-                    PointLight { color: l.color, intensity, range: l.range, radius: l.radius, shadow_maps_enabled: false, ..default() },
-                    gl,
-                )),
-            };
+        let up = if l.dir.normalize_or_zero().y.abs() > 0.99 { Vec3::Z } else { Vec3::Y };
+        let node = commands
+            .spawn((Transform::from_translation(l.at).looking_to(l.dir, up), Visibility::default(), KitLightNode, ChildOf(root)))
+            .id();
+        let intensity = l.energy_w * LM_PER_W;
+        let gl = GlLight {
+            bldg: idx,
+            name: l.name,
+            role: l.role,
+            export_shadow: l.shadow,
+            floor: l.floor,
+            interior_floor: l.interior_floor,
+            energy_w: l.energy_w,
+            color: l.color,
+            intensity,
+            range: l.range,
+            radius: l.radius,
+            spot: l.spot,
+            priority: l.priority,
+            down: l.down,
+            cone: l.cone,
+        };
+        let mut e = commands.spawn((Transform::IDENTITY, Visibility::default(), ChildOf(node)));
+        match l.spot {
+            Some((inner, outer)) => e.insert((
+                SpotLight {
+                    color: l.color,
+                    intensity,
+                    range: l.range,
+                    radius: l.radius,
+                    inner_angle: inner,
+                    outer_angle: outer,
+                    shadow_maps_enabled: false,
+                    ..default()
+                },
+                gl,
+            )),
+            None => e.insert((
+                PointLight { color: l.color, intensity, range: l.range, radius: l.radius, shadow_maps_enabled: false, ..default() },
+                gl,
+            )),
+        };
     }
 }
 
@@ -834,7 +843,10 @@ fn dump_lights(
     city: Res<City>,
     ready: Res<ReadyBuildings>,
     stream: Option<Res<KitStream>>,
-    q: Query<(&GlLight, &GlobalTransform, Option<&PointLight>, Option<&SpotLight>, &Visibility, Option<&crate::lighting::Twin>), Without<crate::lighting::MovingLight>>,
+    q: Query<
+        (&GlLight, &GlobalTransform, Option<&PointLight>, Option<&SpotLight>, &Visibility, Option<&crate::lighting::Twin>),
+        Without<crate::lighting::MovingLight>,
+    >,
     twins: Query<(&GlobalTransform, &SpotLight, &Visibility)>,
     mut frames: Local<u32>,
     mut done: Local<bool>,
@@ -871,8 +883,14 @@ fn dump_lights(
         })
         .collect();
     rows.sort();
-    std::fs::write(&path, rows.join("
-")).ok();
+    std::fs::write(
+        &path,
+        rows.join(
+            "
+",
+        ),
+    )
+    .ok();
     info!("dumped {} lights to {path}", rows.len());
 }
 
@@ -883,7 +901,10 @@ pub fn plugin(app: &mut App) {
         .init_resource::<KitBlocks>()
         .init_resource::<KitStats>()
         // before the cutaway: nodes spawned this frame get their cut visibility this frame (no flash of the Cut stubs)
-        .add_systems(Update, (kit_stream, kit_ring.after(kit_stream), poll_kits.after(kit_ring).before(crate::city::apply_cutaway), dump_lights));
+        .add_systems(
+            Update,
+            (kit_stream, kit_ring.after(kit_stream), poll_kits.after(kit_ring).before(crate::city::apply_cutaway), dump_lights),
+        );
 }
 
 /// Finished stamps spawned per frame at most while streaming (mesh uploads + entity spawns on the main thread).
@@ -990,7 +1011,13 @@ pub fn spawn_building(
     k: &KitRef,
 ) -> Entity {
     let root = commands
-        .spawn((transform, Visibility::default(), Bldg { idx }, Name::new(name), KitState { interiors: k.interiors, pending: true, spawned: false, lights: false, failed: false }))
+        .spawn((
+            transform,
+            Visibility::default(),
+            Bldg { idx },
+            Name::new(name),
+            KitState { interiors: k.interiors, pending: true, spawned: false, lights: false, failed: false },
+        ))
         .id();
     let t = start(asset_server, materials, blocks, root_dir, k);
     tasks.0.push((root, idx, k.interiors, t));

@@ -347,9 +347,15 @@ fn materials(mats: &mut Assets<StandardMaterial>) -> HashMap<Mat, Handle<Standar
         (Mat::SignGreen, mats.add(StandardMaterial { base_color: Color::srgb(0.04, 0.3, 0.14), perceptual_roughness: 0.5, ..default() })),
         (Mat::SignName, mats.add(StandardMaterial { base_color: Color::srgb(0.06, 0.12, 0.42), perceptual_roughness: 0.5, ..default() })),
         (Mat::VendBody, mats.add(StandardMaterial { base_color: Color::srgb(0.1, 0.11, 0.13), perceptual_roughness: 0.4, ..default() })),
-        (Mat::Vend, mats.add(StandardMaterial { base_color: Color::BLACK, emissive: LinearRgba::from(hex("#22E4FF")) * 600.0, ..default() })),
+        (
+            Mat::Vend,
+            mats.add(StandardMaterial { base_color: Color::BLACK, emissive: LinearRgba::from(hex("#22E4FF")) * 600.0, ..default() }),
+        ),
         // the tram: polished rail heads, the dark contact wire, the island's concrete
-        (Mat::RailSteel, mats.add(StandardMaterial { base_color: Color::srgb(0.5, 0.5, 0.52), metallic: 0.8, perceptual_roughness: 0.3, ..default() })),
+        (
+            Mat::RailSteel,
+            mats.add(StandardMaterial { base_color: Color::srgb(0.5, 0.5, 0.52), metallic: 0.8, perceptual_roughness: 0.3, ..default() }),
+        ),
         (Mat::Wire, mats.add(StandardMaterial { base_color: Color::srgb(0.05, 0.05, 0.05), perceptual_roughness: 0.6, ..default() })),
         (Mat::Platform, mats.add(StandardMaterial { base_color: Color::srgb(0.32, 0.31, 0.3), perceptual_roughness: 0.85, ..default() })),
     ])
@@ -381,10 +387,8 @@ pub fn update_street(
     let fr = (f.y / st.chunk_m).floor() as i32;
     st.focus = Vec2::new((fc as f32 + 0.5) * st.chunk_m, (fr as f32 + 0.5) * st.chunk_m);
     let ring = st.ring;
-    let want: HashSet<Key> = (-ring..=ring)
-        .flat_map(|i| (-ring..=ring).map(move |j| (fc + i, fr + j)))
-        .filter(|k| st.chunks.contains(k))
-        .collect();
+    let want: HashSet<Key> =
+        (-ring..=ring).flat_map(|i| (-ring..=ring).map(move |j| (fc + i, fr + j))).filter(|k| st.chunks.contains(k)).collect();
     // unload past the ring + 1 (hysteresis); its lights go with it
     let gone: Vec<Key> = st.loaded.keys().filter(|k| (k.0 - fc).abs() > ring + 1 || (k.1 - fr).abs() > ring + 1).copied().collect();
     for k in gone {
@@ -419,7 +423,9 @@ pub fn update_street(
         st.tasks.remove(&k);
         let mut ents = vec![];
         for (mk, m, aabb) in b.meshes {
-            ents.push(commands.spawn((Mesh3d(meshes.add(m)), MeshMaterial3d(st.mats[&mk].clone()), aabb, Transform::IDENTITY, StreetMesh)).id());
+            ents.push(
+                commands.spawn((Mesh3d(meshes.add(m)), MeshMaterial3d(st.mats[&mk].clone()), aabb, Transform::IDENTITY, StreetMesh)).id(),
+            );
         }
         st.loaded.insert(k, Loaded { entities: ents, lamps: b.lamps });
     }

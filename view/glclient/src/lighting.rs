@@ -211,7 +211,16 @@ pub fn apply_lights(
     cap: Option<Res<ViewCap>>,
     mut stats: ResMut<LightStats>,
     mut points: Query<
-        (Entity, &GlLight, &GlobalTransform, Option<&Twin>, Option<&Applied>, Option<&mut PointLight>, Option<&mut SpotLight>, &mut Visibility),
+        (
+            Entity,
+            &GlLight,
+            &GlobalTransform,
+            Option<&Twin>,
+            Option<&Applied>,
+            Option<&mut PointLight>,
+            Option<&mut SpotLight>,
+            &mut Visibility,
+        ),
         Without<TwinSpot>,
     >,
     mut twins: Query<(&mut SpotLight, &mut Visibility), With<TwinSpot>>,
@@ -275,10 +284,8 @@ pub fn apply_lights(
             // score = power falling off with distance from the focus (8 m scale); hysteresis keeps the
             // current set unless a newcomer beats it by 25 % (no shadow popping while panning)
             let score = |w: f32, p: Vec3| w / (1.0 + (p - focus.at).length_squared() / 64.0);
-            let mut v: Vec<(Entity, f32)> = lit_lights
-                .iter()
-                .map(|&(e, _, w, p, _)| (e, score(w, p) * if alloc_set.contains(&e) { 1.25 } else { 1.0 }))
-                .collect();
+            let mut v: Vec<(Entity, f32)> =
+                lit_lights.iter().map(|&(e, _, w, p, _)| (e, score(w, p) * if alloc_set.contains(&e) { 1.25 } else { 1.0 })).collect();
             // ties (twin buildings, mirrored lights) break by the light's name (GL_BLD_<building>_...: unique), not by
             // entity id or building index: the shadow set must not depend on load order or on how the host numbered
             // its buildings (P6: kit buildings spawn in another order, and after the glbs, than the baked ones)
