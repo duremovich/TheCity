@@ -426,6 +426,7 @@ pub fn take_daily(world: &mut World) {
     // Round 6 V1 (OPEN-242): children out of care are found and returned.
     fetch_daily(world, day);
     street_daily(world, day, window);
+    jailed_households(world);
     // Round 5 U2 (OPEN-231, Dylan 2026-10-28): a warning with no free parent
     // at home takes at once: a child on an open warning whose every parent
     // is jailed, held, downed or gone (fed or not tonight).
@@ -503,6 +504,45 @@ pub fn take_daily(world: &mut World) {
     }
     for ((h, _), kids) in warns {
         warn(world, h, &kids, day);
+    }
+}
+
+/// Round 9 Z3 (OPEN-258, Dylan 2026-10-31: "kids who have both parents
+/// jailed should go to camp"): midnight, a child under 18 living at a Home
+/// whose every adult is in the cells (a `Sentence`) is taken the same day,
+/// by the neglect ladder's take, with no unfed grace. The adults are the
+/// child's living parents, else the adults of the household the Home names
+/// (the guardians). Nobody to hold (no adult at all) is not this rule.
+fn jailed_households(world: &mut World) {
+    let mut kids: Vec<(EntityId, EntityId)> = world
+        .with::<Child>()
+        .into_iter()
+        .filter_map(|c| {
+            let h = world.comp::<Household>(c).and_then(|h| h.home)?;
+            world.comp::<Building>(h).is_some_and(|b| b.kind == BuildingKind::Home).then_some((c, h))
+        })
+        .collect();
+    kids.sort_unstable();
+    for (c, h) in kids {
+        let mut adults: Vec<EntityId> =
+            parents_of(world, c).into_iter().filter(|&p| crate::systems::demography::is_adult(world, p)).collect();
+        if adults.is_empty() {
+            adults = world
+                .residents_of(h)
+                .iter()
+                .copied()
+                .filter(|&r| {
+                    r != c
+                        && world.has::<Identity>(r)
+                        && crate::systems::law::living(world, r)
+                        && crate::systems::demography::is_adult(world, r)
+                })
+                .collect();
+        }
+        if adults.is_empty() || !adults.iter().all(|&p| world.has::<crate::components::Sentence>(p)) {
+            continue;
+        }
+        take_why(world, c, "both parents in the cells");
     }
 }
 
