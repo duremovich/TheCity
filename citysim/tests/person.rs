@@ -3165,9 +3165,20 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
     // told a guard and he was jailed before his first pitch night. The round
     // is under test, not the street's word: nobody tells the beat here.
     cfg.crime.case.tell_lawful_min = 2.0;
+    // Round 9 (the Y1-Y3 set's city): the subject's first-evening Extort for his
+    // gang fell in a robot-guarded Block (Block#196, d12 19:56) and the robot
+    // detained him before his first pitch night. The round is under test, not
+    // the door's robot: the city's robots are bricked when the window opens.
     let mut w = World::new(42, cfg);
     let start = 12 * TICKS_PER_DAY + 17 * TICKS_PER_HOUR;
     w.run_ticks(start);
+    for a in citysim::systems::assets::all_assets(&w) {
+        if let Some(x) = w.comp_mut::<citysim::components::Asset>(a) {
+            if x.kind == citysim::components::AssetKind::Robot {
+                x.bricked = true;
+            }
+        }
+    }
     // The gang with the most loyal members; its pimp, `name_pimps`' first pick.
     let follows = |w: &World, g: EntityId| {
         w.comp::<citysim::Gang>(g)
