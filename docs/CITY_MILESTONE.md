@@ -180,6 +180,69 @@ same at 20k seed 42 x 30. Also printed: the units the export offers per district
 input C6 needs. Nothing retuned (doctrine 1). **Camera:** the follow-cam on a commuter riding a new line. **Shadow:**
 cabbie, office_worker, worker_friday (20k), each with an El leg quoted.
 
+**C5 as built (2026-10-31).** As above, with these deviations: (1) **The `B` order is not new.** C3 and C4 left
+`lots.json` and every 0.1 field byte-identical, so the re-import's buildings, tiles and districts are phase 10's
+byte for byte (6,104 cuts at both sizes); the maps differ in their `L` lines and `#` comments only. The El lines
+are new: Terrace, Hillside (24 waypoints, y 616-661), Mid-Levels (x 823, was the authored 780), Vats (x 1422, was
+1387) from `rail.json` in its order, then the tram (`tram.json`, once), then the Funicular, still `L+` from
+`elevated.json` (it is not in `rail.json`; with `[legs]` on an `L+` line runs like an `L`). `--lines` and
+`isle_m_k2_lines.txt` are gone. (2) **`SAVE_VERSION` stays 118:** the save format did not change, and a save
+carries its own map and lines, so an old save loads as the old world; nothing to bump. (3) **0.2 carried, not
+mapped:** the importer reads `z_m`, `levels` (units by kind, `plate`), `cores` and `walkways_sim.json`'s portals
+into its own structs, checks them against the export's `totals` (all agree: 164,750 levels, flats 332,862, shops
+10,156, workshops 5,542, offices 4,030, 14,514 flight and 6,800 lift cores; 253 portals, 9,065 m) and counts them
+in the report; the map format is unchanged (C6a writes `in=`/`span=`, C7 the `P` lines). (4) **The source:**
+TheCityGraphics `b447d8d` (`c2df6ff` plus a DECISIONS-only commit; the export is C4's, seed 19), read by `git -C
+<--src> rev-parse` into `# inputs:`. (5) **Not read:** `rail.json`'s service (headways, the rack lines' 8 m/s):
+the sim's `[transit]` runs every line at one speed (nothing retuned). (6) **The camera's commuter is not a shadow
+pick:** no cabbie, office_worker or worker_friday diary rides the El (below), so the follow-cam is `loader`
+#19811 from a plain run's save (day 19 18:00): the tram from (575,795) at 19:44, off at Tai Ning East (1422,795)
+20:16, the Vats Line aboard at 20:22 (1422,780), off at 20:28 (1422,496), at the Freight Yard 20:32.
+
+**The numbers** (seed 42 x 30, `--scaled --ambient-flats 50`, 8 threads, one run each; before is main `872d382`
+on phase 10's maps; the 100k before shared the box with builds and the shadow, the 100k after ran alone):
+
+| | 100k before | 100k after | 20k before | 20k after |
+|---|---|---|---|---|
+| cuts / Lots / Farms / Markets, Bars | 6,104 / 1,415 of 8,000 / 600 / 150, 150 | same | 6,104 / 1,600 / 120 / 30, 30 | same |
+| Home slots (beds) | 20,047 (100,235) | same | 5,790 (28,950) | same |
+| employed d30 (of the population) | 46,237 (0.418) | 45,674 (0.413) | 11,947 (0.531) | 12,123 (0.537) |
+| homeless d30 | 12,361 | 12,690 | 254 | 248 |
+| legs over 120 min (30 d, `--legs-min 120`) | 12 | 30 | 4 | 4 |
+| workers past 3 h (`commute_long`) | 0 | 0 | 0 | 0 |
+| El boardings a day (all tiers) | 5,398 | 5,267 | 1,781 | 1,785 |
+| bodied El legs in 30 days | 2,297 | 2,051 | 125 | 39 |
+| ticks/s days 25-30 | 13/13/13/13/13/12 | 14/13/13/13/12/12 | 134/131/120/125/120/130 | 127/128/123/122/125/123 |
+| longest tick days 25-30 | 2.96 s @00:00 | 3.12 s @00:00 | 0.26 s @21:00 | 0.28 s @21:00 |
+| build wall | 58 s | 65 s | 7 s | 8 s |
+
+The re-import moves nothing beyond noise: the buildings are the same, and the El is a Statistical carrier (20k:
+1,780 of 1,785 boardings a day are `rides_stat`; ~13,000 refusals a day as `slow`), so routing the three lines
+along the arterials changes only the few bodied legs (20k 125 -> 39). Against phase 10's committed column (employed
+55,368, 0.553; homeless 3,431; 28 ticks/s; longest tick 0.9 s at 21:00) the 100k city is main's since: the
+pressure pass (`OPEN-220`) and Y4's walking pace (`OPEN-255`: ~13 ticks/s), and midnight now holds the longest
+tick (2-3 s). **The units the export offers** (C6's input; `import-graphics` prints it) against 100k's wants
+(8,000 Lots, 9,100 employers at 91 per 1,000):
+
+| district | flats | shops | workshops | offices | works lots | sites | Lots dealt at 100k | employers dealt |
+|---|---|---|---|---|---|---|---|---|
+| D1 The Sump | 54,049 | 4,455 | 3,241 | 0 | 0 | 7,696 | 0 | 162 |
+| D2 Civic Core | 0 | 342 | 0 | 4,030 | 0 | 4,372 | 0 | 24 |
+| D3 Neon Quarter | 53,182 | 1,424 | 1,260 | 0 | 0 | 2,684 | 560 | 653 |
+| D4 Mid-Levels | 207,142 | 3,935 | 1,041 | 0 | 0 | 4,976 | 745 | 1,126 |
+| D5 The Spire | 16,548 | 0 | 0 | 0 | 0 | 0 | 87 | 286 |
+| D6 The Vats | 0 | 0 | 0 | 0 | 743 | 743 | 23 | 267 |
+| D7 The Stack | 1,941 | 0 | 0 | 0 | 0 | 0 | 0 | 1 |
+| all | 332,862 | 10,156 | 5,542 | 4,030 | 743 | 20,471 | 1,415 | 2,519 |
+
+The sites are where the people are not: the Spire offers no work unit and the Vats 743 works lots for its 600
+Farms; D2's 4,030 offices are C4's placeholder density. **Shadow** (20k days 21-27, cabbie x 4, office_worker x 6,
+worker_friday x 4, `target/c5/shadow`): **no pick rides the El** (14 diaries, 0 `Ride` steps); the commutes are
+walks of minutes (`office_worker_15375`: "Home door (770, 726) to work door (1184, 657): 483 tiles, travel 23
+min", under the Hillside Line the whole way; `cabbie_12984`: 251 tiles, 12 min). That is `OPEN-254` (the El nearly
+dead for bodies at a walking city), not the import. What reads wrong: in the view the rider at 20:22 is drawn on the
+train's roof and at 20:25 standing on the Vats deck with no train under him.
+
 ### C6a, floors as tenancies: the map and the store (TheCity; `map.rs`, `import_graphics.rs`, `components.rs` `Building`, `world.rs`, `company.rs`, `lod.rs`, `view.rs`)
 
 A cut stays one structure on the tile map; its uses become tenancies. **A tenancy is a `Building`** (every system

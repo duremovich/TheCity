@@ -8,7 +8,8 @@ test time. An adapter writes the sim's own map format once; the committed result
 ```
 citysim-cli import-graphics --src D:/TheCityGraphics/assets/city/isle_m/out --out assets/maps/isle_m_k4.txt \
     --downsample 4 --residents 5000 [--crop x0,y0,x1,y1]
-citysim-cli import-graphics --src D:/TheCityGraphics/assets/city/isle_m/out --out assets/maps/isle_m_k2.txt     --downsample 2 --residents 20000 --lines assets/maps/isle_m_k2_lines.txt   # the island for 20,000 (Track B, OPEN-136; the authored El lines, pre-view pass phase 5)
+citysim-cli import-graphics --src D:/TheCityGraphics/assets/city/isle_m/out --out assets/maps/isle_m_k2.txt     --downsample 2 --residents 20000    # the island for 20,000 (Track B, OPEN-136)
+citysim-cli import-graphics --src D:/TheCityGraphics/assets/city/isle_m/out --out assets/maps/isle_m_k2_100k.txt --downsample 2 --residents 100000   # the 100k game city (perf pass phase 10; C5)
 ```
 
 - `--downsample k`: a sim tile is k x k of theirs (k = 1: their 2 m tiles; 4: 8 m tiles).
@@ -20,9 +21,20 @@ citysim-cli import-graphics --src D:/TheCityGraphics/assets/city/isle_m/out --ou
 - A missing file or field fails with the file, the record and the field (`lots.json lots[0] (l0): missing field
   "rect_m"`, `sim/lots_sim.json lots.l3: missing field "use"`), never a panic. Optional inputs (`terrain.json`,
   `street/tram.json`, `street/names.json`, a lot's `sim_layout.toml`) are warnings when absent. An unknown sim
-  export `schema` (anything but `city-sim/0.1`) is a warning, and the file is read anyway; an unknown `use`,
+  export `schema` (anything but `city-sim/0.2`, C5) is a warning, and the file is read anyway; an unknown `use`,
   `ground` or `source` value is a counted warning (an unknown use reads as vacant). The written map is parsed by
   the sim's own loader before the command returns.
+
+**City milestone C5 (2026-10-31): schema `city-sim/0.2`, TheCityGraphics `b447d8d` (C4's export, seed 19).** Every
+El line comes from `sim/rail.json` (Terrace, Hillside, Mid-Levels, Vats: C3 routed the authored lines along the
+arterials), so `--lines` and `isle_m_k2_lines.txt` are retired; the tram is imported once from `street/tram.json`
+and the Funicular stays an `L+` line from `elevated.json`. 0.2's new fields are read, checked against the export's
+`totals` and counted in the report, not written to the map yet: a lot's `z_m`, `levels` (units by kind) and
+`cores` (C6a's tenancies, C7's climbs), and `sim/walkways_sim.json`'s 253 portals (C7). The report prints the
+units each district's lots offer (flats, shops, workshops, offices, `works` grounds) beside the Lots and employers
+the import dealt there (C6's input). Each map's `# inputs:` names the TheCityGraphics commit (`git -C --src
+rev-parse`) and the export's seed. The rail service block (headways, the rack lines' 8 m/s) is not read: the sim's
+`[transit]` runs every line.
 
 **The sim export (S3c).** Their `out/sim/` (SIM_NOTES "The sim export", schema `city-sim/0.1`, 2026-10-12) answers
 asks 1-5 and 8 below. The adapter prefers it file by file and says which inputs it used (`input:` lines in the

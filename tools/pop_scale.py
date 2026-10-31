@@ -22,7 +22,7 @@ kept in the run's stderr log for `--prof-table`.
 The gate's 100k map is committed (the perf pass phase 10, the P9 re-import): --map assets/maps/isle_m_k2_100k.txt.
 A map per size (the committed isle_m_k2 houses only 28,950):
   citysim-cli import-graphics --src D:/TheCityGraphics/assets/city/isle_m/out --out <dir>/isle_N.txt \
-      --downsample 2 --residents N --lines assets/maps/isle_m_k2_lines.txt
+      --downsample 2 --residents N
 then --map "<dir>/isle_{n}.txt".
 
 Must run from the repo root (the CLI reads assets/config.toml there). Logs stay
