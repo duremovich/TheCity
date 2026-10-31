@@ -1,0 +1,23 @@
+[package]
+name = "cityview"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "City view (CITY_SPEC P3): streams the generated city's chunks (ground, massing, elevated layers) under the game camera and a free overview (Bevy)"
+
+[dependencies]
+bevy = { version = "0.19.1", features = ["area_light_luts"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+glclient = { path = "../glclient" }
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+# the vendored Bevy 0.19.1 fixes glclient builds with (engine/lighttest/README.md "Bevy patches")
+[patch.crates-io]
+bevy_pbr = { path = "../lighttest/vendor/bevy_pbr" }
+bevy_render = { path = "../lighttest/vendor/bevy_render" }
