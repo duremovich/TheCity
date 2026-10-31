@@ -4835,3 +4835,39 @@ the X6 keys and the `Jobs2Cols` `cell_days` ... `wr_held_clear` columns (serde d
   -> 277k (Court at Flirt 11k -> 44k, GetHigh at BuyStims 1.4k -> 26k: the walks now arrive); ticks/s 183 -> 162
   (days 25-30 153 -> 132). 100k (the one run, the shadow d21-27 before the build fix): 3,084 s wall, 13.1 ticks/s
   against V17's 18 (its shadow 2,330 s); after the fix the 100k build and day 1 take 119 s (day 1 at 21 ticks/s).
+
+### Z2, the taker (the exit's story 4; `contracts::walk_in_pick`, `contracts::take_at_desk`, `contracts::accept_at`, `contracts::on_take_job`, `contracts::match_day`, `contracts::heard_of`, `contracts::hear`, `contracts::heard_at_door`, `contracts::asked_after`, `service::desk_server`, `ActionKind::TakeJob`, `Contract.heard`, `Contract.claimed`, `[fixers] board_size`, `walk_in_flat`, `take_job_mins`, `walk_in_hold_mins`)
+
+- **The walk-in.** A body (not Statistical) through the gun gate who is a Fixer's regular, or the leader of a gang
+  networked there (`Broker.gangs`), reads the board of each such open Fixer whose desk is manned
+  (`service::desk_server`: a server on duty with room this hour, else the owner in): the book in the match's rank, the
+  top `board_size`. He weighs the best record he would take by mode A (price against his week wage, risk against his
+  skill and the target's defenders, the buyer's honour, his lawfulness and nerve); an individual's take is `eligible`,
+  `hunt_in_reach` and at least `accept_min`, a crew's is `gang_eligible` with `leader_accepts` (the match's own rule),
+  weighed against the crew's odds. The pick feeds the Contract goal (the gate "work on a fixer's board", mode A's
+  considerations, the walk's `travel`, flat `walk_in_flat`); the plan is `GoTo(Fixer) > TakeJob`; at the desk the
+  job is re-read and taken (`accept_at`, the line "X came to Fixer#N in person and took the beat on Y for 364c (LIVE,
+  crew ...), from H" in the walker's, the target's and the desk's diaries; a crew's take names the gang and its
+  crew). A first visit's `Network` reads the board at the door too (quiet when there is nothing). The fixer holds a
+  record for the walker on his way `walk_in_hold_mins` (`Contract.claimed`): without it seven regulars walked to one
+  Street Market guard at 09:00 and six found "the job was gone" (74 such lines in 30 days -> 3).
+- **The tick is the mirror.** `match_day` offers a Fixer's book to its Statistical regulars and to gangs whose leader
+  is no body, and skips a record held for a walker. Deviation: the direct records (no Fixer, `direct_candidates`),
+  the Hit market's hires (`hire_pass`, the 00:0x takes) and a Security corp's conversion (`corp_take`) stay on their
+  ticks: a direct record has no board to read, it is asked of the buyer's own. A bribe for the law (`is_corruption`)
+  is no walk-in's (the guard's shift takes it).
+- **The target hears** (V18 `marked_30280`: a beat taken twice by two crews, no "got word"). Cause: the street's tip
+  was one hash of (record, target), so a record taken again rolled the same miss every time, and nothing else carried
+  word. Now a mark hears once per record (`Contract.heard`), by the first of: his security (as before); word from
+  someone he knows among the taker, the crew and the one behind the desk (an edge that is no Rival or Enemy); the
+  street's tip drawn per take (record, taker, attempt); a crew that came to his door and found him out
+  (`heard_at_door`, from `missions`' "found no X"); a hunter asking after him of a Friend or kin (`asked_after`, from
+  `hunt::ask_around`). Each hearing is acted on by X2's `react`. Under-18: `ages::is_protected` gates the walker; the
+  crew and squad through `eligible`; a minor is never a target (`target_ok` at the post).
+- No test added; `test_matching_is_deterministic` re-pinned (its candidates Statistical: the match offers to them only).
+- **Numbers**: 20k `isle_m_k2` seed 42 x 30, before -> after, one run each (events): ContractTaken 628 -> 809;
+  in person 0 -> 250 (locate 121, guard 97, beat 22, hit 9, escort 1); brokered at the match tick 208 -> 118; direct,
+  hire and corp takes at their ticks 420 -> 441; take hours 2 (18:00 561, 00:xx 67) -> 11 (09:00 113, 10-17 h 137,
+  18:00 504, 00:xx 55), 31 % of takes outside 18:00 and 00:xx (0 %); walk-ins finding the job gone 1. Targets of a
+  taken Hit, Beat or Abduct who heard 14 of 32 -> 21 of 31 (street 16 -> 18, security 14 -> 4, door 0 -> 3, asked
+  0 -> 1); fulfilled 211 -> 259, failed 345 -> 371; contract killings 2 -> 2; ticks/s mean 151 -> 149.
