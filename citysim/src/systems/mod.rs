@@ -57,6 +57,7 @@ pub mod faith;
 pub mod fares;
 pub mod fashion;
 pub mod fixes;
+pub mod floors;
 pub mod founding;
 pub mod fviolence;
 pub mod gang;

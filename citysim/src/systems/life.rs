@@ -738,6 +738,7 @@ pub fn preroll_housing(world: &mut World) -> (u32, u32) {
         if let Some(p) = world.comp_mut::<Position>(a) {
             p.tile = door;
             p.building = None;
+            p.floor = 0;
             p.entered = tick;
         }
         world.enter_building(a, to);
@@ -1299,6 +1300,7 @@ fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool, daily: bool)
             if let Some(p) = world.comp_mut::<Position>(c) {
                 p.tile = door;
                 p.building = None;
+                p.floor = 0;
                 p.entered = tick;
             }
             world.enter_building(c, to);
@@ -1827,6 +1829,7 @@ pub fn house_exec(world: &mut World, exec: EntityId) {
         if let Some(p) = world.comp_mut::<Position>(c) {
             p.tile = door;
             p.building = None;
+            p.floor = 0;
             p.entered = tick;
         }
         world.enter_building(c, to);

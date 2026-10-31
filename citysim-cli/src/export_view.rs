@@ -125,6 +125,7 @@ pub fn frame_json(f: &ViewFrame) -> Value {
                 "id": id(a.id),
                 "t": tp(a.t),
                 "b": a.b.map(id),
+                "floor": a.floor,
                 "lod": a.lod.map_or("Statistical".to_string(), |l| format!("{l:?}")),
                 "act": a.act.word(),
                 "x": act_x(&a.act),
@@ -288,7 +289,7 @@ pub fn export_view(args: ExportViewArgs) -> Result<(), String> {
             json!({
                 "id": id(b.id), "kind": format!("{:?}", b.kind), "rect": rect(&b.rect), "door": tp(b.door),
                 "floors": b.floors, "tier": b.tier, "capacity": b.capacity, "owner": b.owner.map(id),
-                "within": b.within.map(id), "label": b.label,
+                "within": b.within.map(id), "span": b.span.map(|(lo, hi)| [lo, hi]), "label": b.label,
             })
         })
         .collect();

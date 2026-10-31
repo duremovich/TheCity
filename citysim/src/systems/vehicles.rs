@@ -191,6 +191,7 @@ pub fn fly(world: &mut World, agent: EntityId, target: GotoTarget) -> ExecState 
     if let Some(p) = world.comp_mut::<Position>(agent) {
         p.tile = from;
         p.building = None;
+        p.floor = 0;
     }
     let d = crate::systems::law::chebyshev(from, target.tile) as f32;
     // Less a hair, so 30 tiles at 0.3 is 9 ticks, not f32's 9.0000003 → 10.

@@ -180,11 +180,13 @@ pub fn build_on_lot(
     if b.kind != BuildingKind::Lot || b.demolished {
         return Err(format!("{} is not a vacant Lot", world.name_of(lot)));
     }
-    let (rect, door) = (b.rect, b.door);
+    let (rect, door, tenancy) = (b.rect, b.door, b.within.is_some());
+    // The city milestone C6a: a tenancy Lot builds inside its host's walls
+    // (no tile changes), and a host keeps its tenancies' doors.
     for y in rect.y..rect.y + rect.h {
         for x in rect.x..rect.x + rect.w {
             let t = TilePos { x, y };
-            if t != door && rect.on_perimeter(t) {
+            if !tenancy && t != door && rect.on_perimeter(t) && world.map.tile_at(t) != TileKind::Door {
                 world.map.set_tile(t, TileKind::Wall);
             }
         }

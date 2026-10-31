@@ -145,7 +145,8 @@ comment on or above the line.
   `run --prof-midnight` (with `prof`) prints each midnight tick's PROF lines under `PROFDAY <day>`.
 - `map.rs` (tile map from `assets/map.txt`; an import's `B` lines carry `flats=`, `storeys=` and, from the perf pass
   phase 10, `lot=<id>`, the source city's lot under the door, for the view: on `MapBuilding`, saved when present,
-  read by no system), `mapgen.rs` (generated maps, `--map gen:<N>`), `time.rs` (ticks, days,
+  read by no system; the city milestone C6a: `span=<lo>-<hi>`, `units=<n>`, and a tenancy's `in=<host line>`
+  and `door=<x>,<y>`), `mapgen.rs` (generated maps, `--map gen:<N>`), `time.rs` (ticks, days,
   `DayPhase`, `Season`; `TICKS_PER_DAY`, `TICKS_PER_HOUR`).
 
 The tier lists: `World.by_tier: [Vec<EntityId>; 3]` (indexed `Lod as usize`, ascending) and `World.stat_slots` (the
@@ -161,7 +162,13 @@ What each thing is:
   frees an emigrant.
 - **Building**: an entity with `Building` (`kind: BuildingKind`, `rect`, `door`, `owner`, `occupants`, `tier`,
   `rent_per_day`, stock, …); a Market also carries `Market`, the Jail `Law`; the city's `Treasury` is a component on the Hall building (`World::treasury()` reads `building_of_kind(BuildingKind::Hall)`). Per-kind numbers: `Config::buildings.for_kind(kind)`
-  (`[buildings.*]`).
+  (`[buildings.*]`). **Tenancies** (the city milestone C6a, `systems/floors.rs`): an imported cut is one structure on
+  the tile map, its **host** (`within: None`); each other use on its floors is a `Building` with `within:
+  Some(host)`, the host's rect, its own kind, owner, capacity and door (its lot's street door on the host's wall, else
+  the host's), and a `span` of storeys; a host carries its work `units` (the vacant ones are `floors::vacant_units`,
+  not entities). Company floors (3b) are the tenancies `World.company_homes` names. A body indoors stands on a
+  storey (`Position.floor`, set by `enter_building` through `floors::floor_in`), a household in a flat of its
+  Home's span (`Household.flat`, dealt by `set_home` / the first entry, kin sharing one). The 2k city has no spans.
 - **Corp**: its own entity carrying `Corp` (treasury, orders, niches). `World::corps()`.
 - **Gang**: its own entity carrying `Gang`. `World::gangs()`.
 - **Asset**: its own entity carrying only `Asset`; indexed in `assets_at` / `assets_by_owner`. `Kit` is derived per

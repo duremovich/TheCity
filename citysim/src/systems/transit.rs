@@ -990,6 +990,7 @@ fn transfer(world: &mut World, id: EntityId, mut ride: Ride, lod: Lod) {
     if let Some(p) = world.comp_mut::<Position>(id) {
         p.tile = tile;
         p.building = None;
+        p.floor = 0;
     }
     let ready = world.tick + Tick::from(world.config.transit.transfer_ticks);
     let depart = departure_at(world, leg.line, leg.forward, leg.from, ready).filter(|_| !line_cut(world, leg.line));
@@ -1715,6 +1716,7 @@ fn alight(world: &mut World, id: EntityId, ride: &Ride, lod: Lod) {
     if let Some(p) = world.comp_mut::<Position>(id) {
         p.tile = tile;
         p.building = None;
+        p.floor = 0;
     }
     if world.commute_start.contains_key(&id) {
         world.transit.rode.insert(id);

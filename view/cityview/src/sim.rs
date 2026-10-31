@@ -4,8 +4,9 @@
 //! (default 0.7: one tick ~1.4 s, the sim's 2-tick, 4 m step at a 1.4 m/s walk; 0 holds `--sim-frame`).
 //!
 //! Colours (CV_SIM_COLOUR=lod switches): by action, walk green, use amber, idle slate, wait violet, ride / aboard
-//! cyan, timed (a Coarse jump) magenta, fly white; by LOD, Full green, Coarse amber, Statistical red. Agents inside a
-//! building are not drawn (the sim has no floor for them: the contract's missing `floor`); the HUD counts them.
+//! cyan, timed (a Coarse jump) magenta, fly white; by LOD, Full green, Coarse amber, Statistical red. An agent inside
+//! a building is drawn on its storey (the city milestone C6a: the frame's `floor`, a 4 m ground and 3 m storeys over
+//! the ground at its building's tile), seen where the occlusion cuts the building away; the HUD counts them.
 //! Positions are tile centres plus a per-id jitter inside the 4 m tile, on the streamed ground; a train sits on the
 //! rail deck (layers.json), the tram and the lines with no track here on the street (OPEN-158: drawn red, raised).
 //!
@@ -29,6 +30,8 @@ pub struct Agent {
     /// The way to the next frame's place (C2; empty: a straight lerp)
     pub ahead: Vec<[f32; 2]>,
     pub indoors: bool,
+    /// C6a: the storey it stands on indoors (0 the ground)
+    pub floor: u8,
     pub lod: u8,
     pub act: u8,
     /// The vehicle it is aboard (its key)
@@ -102,6 +105,7 @@ impl SimFrame {
                 t: tf(a.t),
                 ahead: a.ahead.iter().map(|t| tf(*t)).collect(),
                 indoors: a.b.is_some(),
+                floor: a.floor,
                 lod: match a.lod {
                     Some(citysim::Lod::Full) => 0,
                     Some(citysim::Lod::Coarse) => 1,
@@ -235,6 +239,7 @@ impl Sim {
                         t: t2(&a["t"]),
                         ahead: a["ahead"].as_array().map_or(vec![], |w| w.iter().map(t2).collect()),
                         indoors: !a["b"].is_null(),
+                        floor: a["floor"].as_u64().map_or(0, |f| f.min(255) as u8),
                         lod: match a["lod"].as_str() {
                             Some("Full") => 0,
                             Some("Coarse") => 1,
@@ -364,6 +369,11 @@ impl Sim {
         p
     }
 
+    /// C6a: a storey's floor over the ground, metres: the export's 4 m ground and 3 m storeys above it.
+    fn storey_z(floor: u8) -> f32 {
+        if floor == 0 { 0.0 } else { 4.0 + 3.0 * f32::from(floor - 1) }
+    }
+
     fn rail_z(&self, p: Vec2) -> Option<f32> {
         self.rail
             .iter()
@@ -457,15 +467,21 @@ pub fn update_sim(
     for a in &fr_agents {
         lods[a.lod as usize] += 1;
         if Some(a.id) == subject {
-            // the follow-cam: aboard at its vehicle (below), indoors at its building's tile (not drawn), else its body
+            // the follow-cam: aboard at its vehicle (below), indoors on its storey at its building's tile, else its body
             subject_in = a.aboard;
             let t = prev_a.get(&a.id).map_or(a.t, |(p, ah)| along(*p, ah, a.t, u));
-            let p = sim.metres(t, a.id, !a.indoors);
-            let z = stream.ground_z(p.x, p.y).unwrap_or(0.0);
+            let p = sim.metres(t, a.id, true);
+            let z = stream.ground_z(p.x, p.y).unwrap_or(0.0) + if a.indoors { Sim::storey_z(a.floor) } else { 0.0 };
             subject_at = Some((Vec3::new(p.x, p.y, z), a.facing.map_or(0.0, |h| -h.to_radians())));
         }
         if a.indoors {
+            // C6a: on its floor (the occlusion's cutaway shows the ones by the subject)
             indoors += 1;
+            let p = sim.metres(a.t, a.id, true);
+            let z = stream.ground_z(p.x, p.y).unwrap_or(0.0) + Sim::storey_z(a.floor);
+            let mat = if sim.by_lod { sim.mats[ACTS.len() + a.lod as usize].clone() } else { sim.mats[a.act as usize].clone() };
+            let cap = sim.capsule.clone();
+            place(&mut commands, &mut sim, (0, a.id), cap, mat, bv(p.x, p.y, z + 0.85 * 1.4), 0.0);
             continue;
         }
         if a.aboard.is_some() {

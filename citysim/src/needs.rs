@@ -301,6 +301,7 @@ mod tests {
         if let Some(p) = w.comp_mut::<Position>(guards[2]) {
             p.tile = TilePos { x: 3, y: 3 };
             p.building = None;
+            p.floor = 0;
         }
         near += check(&w, "a guard moved");
         for _ in 0..6 {

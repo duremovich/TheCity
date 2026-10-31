@@ -1844,6 +1844,7 @@ fn put_out(world: &mut World, who: EntityId, home: EntityId, outside: crate::com
         if let Some(p) = world.comp_mut::<Position>(who) {
             p.tile = outside;
             p.building = None;
+            p.floor = 0;
             p.entered = tick;
         }
     }
@@ -2051,6 +2052,7 @@ fn rehouse(world: &mut World) {
                 p.building = Some(home);
                 p.entered = tick;
             }
+            crate::systems::floors::settle(world, c);
         }
     }
 }

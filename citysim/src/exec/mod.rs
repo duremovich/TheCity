@@ -180,7 +180,9 @@ pub fn run(world: &mut World) {
 
 /// The carried corpse takes its bearer's tile and building.
 fn follow_bearer(world: &mut World, bearer: EntityId, corpse: EntityId) {
-    let Some((tile, building)) = world.comp::<Position>(bearer).map(|p| (p.tile, p.building)) else { return };
+    let Some((tile, building, floor)) = world.comp::<Position>(bearer).map(|p| (p.tile, p.building, p.floor)) else {
+        return;
+    };
     if !world.has::<crate::components::Corpse>(corpse) {
         if let Some(b) = world.comp_mut::<Brain>(bearer) {
             b.carrying_corpse = None;
@@ -190,6 +192,7 @@ fn follow_bearer(world: &mut World, bearer: EntityId, corpse: EntityId) {
     if let Some(p) = world.comp_mut::<Position>(corpse) {
         p.tile = tile;
         p.building = building;
+        p.floor = floor;
     }
 }
 
@@ -1511,7 +1514,7 @@ pub fn walk_route(world: &World, id: EntityId) -> Option<(Vec<TilePos>, Tick, Ti
 pub fn walk_place(world: &World, id: EntityId) -> Option<Position> {
     if let Some((way, depart, arrive)) = walk_route(world, id) {
         let tile = crate::systems::motion::timed_pos(&way, depart, arrive, world.tick);
-        return Some(Position { tile, building: None, entered: depart });
+        return Some(Position { tile, building: None, entered: depart, floor: 0 });
     }
     world.comp::<Position>(id).cloned()
 }
@@ -1535,6 +1538,7 @@ pub fn settle_walk(world: &mut World, id: EntityId) {
     if let Some(p) = world.comp_mut::<Position>(id) {
         p.tile = tile;
         p.building = None;
+        p.floor = 0;
     }
     if let Some(b) = world.comp_mut::<Brain>(id) {
         if let ExecState::GotoTimed { walk, .. } = &mut b.exec {
@@ -2103,6 +2107,7 @@ impl World {
         if let Some(p) = self.comp_mut::<Position>(agent) {
             p.tile = door;
             p.building = None;
+            p.floor = 0;
             p.entered = tick;
         }
     }
@@ -2179,10 +2184,15 @@ impl World {
             }
         }
         let tick = self.tick;
+        // The city milestone C6a: his flat at home (dealt on the first
+        // entry), the storey he stands on.
+        crate::systems::floors::assign_flat(self, agent);
+        let floor = crate::systems::floors::floor_in(self, agent, b);
         if let Some(p) = self.comp_mut::<Position>(agent) {
             p.tile = slot;
             p.building = Some(b);
             p.entered = tick;
+            p.floor = floor;
         }
         // OPEN-140: home at last.
         if self.moving_in.get(&agent) == Some(&b) {
@@ -2198,6 +2208,7 @@ impl World {
         if let (Some(p), Some(out)) = (self.comp_mut::<Position>(agent), outside) {
             p.tile = out;
             p.building = None;
+            p.floor = 0;
         }
     }
 

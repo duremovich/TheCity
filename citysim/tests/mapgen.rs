@@ -214,6 +214,7 @@ fn test_map_text_round_trips() {
             flats: Some(12),
             storeys: Some(9),
             lot: Some("sb00_01_r0c5_p0_l0".into()),
+            ..Default::default()
         }],
     };
     for rle in [false, true] {
@@ -283,14 +284,17 @@ fn test_graphics_import_20k_holds_20k() {
     assert_eq!(m.count_kind(BuildingKind::Farm), 120);
     assert_eq!(unreachable_doors(&m), 0, "every door on one street network");
     let mut named = std::collections::BTreeSet::new();
-    for b in &m.buildings {
+    // The city milestone C6a: a tenancy names its unit's lot, which its host
+    // or another unit of the lot may share; the hosts' lots stay unique.
+    for b in m.buildings.iter().filter(|b| b.within.is_none()) {
         match b.lot.as_deref() {
             Some(lot) => assert!(named.insert(lot), "{:?} at {:?} shares its lot {lot}", b.kind, b.door),
             None => assert!(matches!(b.kind, BuildingKind::Home | BuildingKind::Lot), "{:?} names no lot", b.kind),
         }
     }
-    let pieces = m.buildings.len() - named.len();
-    assert!(pieces * 50 < m.buildings.len(), "{pieces} of {} buildings name no lot", m.buildings.len());
+    let hosts = m.buildings.iter().filter(|b| b.within.is_none()).count();
+    let pieces = hosts - named.len();
+    assert!(pieces * 50 < hosts, "{pieces} of {hosts} buildings name no lot");
 }
 
 /// The committed TheCityGraphics import (`assets/maps/isle_m_k4.txt`: the
