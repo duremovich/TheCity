@@ -262,7 +262,7 @@ fn prosthetics(world: &mut World) {
 /// `(ticks, by the El)`. The child rides on the fares its household pays
 /// (`school_el_fares`), never on a dodge: no gate, no guard, no beating.
 pub fn school_trip(world: &World, from: TilePos, to: TilePos) -> (Tick, bool) {
-    let walk = Tick::from(from.manhattan(to)) * world.config.exec.move_ticks_full;
+    let walk = world.config.exec.walk_ticks(Tick::from(from.manhattan(to)));
     let el = crate::systems::distance::travel(world, from, to);
     if el < walk {
         (el, true)
@@ -867,8 +867,8 @@ impl HomeGrid {
 
     /// U1: the grid of `(door, weight)` (a door may repeat).
     fn of(world: &World, doors: impl IntoIterator<Item = (TilePos, u32)>) -> Self {
-        let step = world.config.exec.move_ticks_full.max(1);
-        let radius = (world.config.ages.school_trip_ticks / step).min(u64::from(u32::MAX / 4)) as u32;
+        let radius =
+            world.config.exec.walk_tiles(world.config.ages.school_trip_ticks).min(u64::from(u32::MAX / 4)) as u32;
         let mut cells: HomeCells = BTreeMap::new();
         for (d, n) in doors {
             if n == 0 {

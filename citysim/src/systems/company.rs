@@ -442,8 +442,8 @@ fn next_site(
         return Some(l);
     }
     let (pw, ph) = (usize::from(cfg.plot_w.max(3)), usize::from(cfg.plot_h.max(3)));
-    let step = world.config.exec.move_ticks_full.max(1);
-    let reach = usize::try_from(cfg.lot_cap_ticks / step).unwrap_or(usize::MAX).min(occ.w.max(occ.h));
+    let reach =
+        usize::try_from(world.config.exec.walk_tiles(cfg.lot_cap_ticks)).unwrap_or(usize::MAX).min(occ.w.max(occ.h));
     let (cx, cy) = (usize::from(wdoor.x), usize::from(wdoor.y));
     let mut best: Option<(Tick, usize, usize, TilePos)> = None;
     let ylo = cy.saturating_sub(reach + ph).max(1);

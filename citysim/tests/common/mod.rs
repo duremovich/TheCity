@@ -27,10 +27,71 @@ pub fn dole_world() -> World {
 
 /// The pressure pass R2 (`[exec] move_ticks_full` 2 -> 1): a scene whose
 /// pick or premise the halved walk moved (another body picked, a far
-/// worker now near) is pinned to the v1 pace it was written for.
+/// worker now near) is pinned to the v1 pace it was written for. Round 9
+/// Y4: one tile every two ticks (`walk_tiles_per_tick` 1) at the M13
+/// quarter-tick resolution (`step_res` 4).
 #[allow(dead_code)]
 pub fn v1_pace(cfg: &mut Config) {
     cfg.exec.move_ticks_full = 2;
+    cfg.exec.walk_tiles_per_tick = 1;
+    cfg.exec.step_res = 4;
+}
+
+/// Round 9 Y4 (`[exec] walk_tiles_per_tick` 1 -> 21): a scene whose pick
+/// or premise the real walking pace moved is pinned to the R2 pace it was
+/// written for (one tile a tick, the quarter-tick resolution).
+#[allow(dead_code)]
+pub fn r2_pace(cfg: &mut Config) {
+    cfg.exec.move_ticks_full = 1;
+    cfg.exec.walk_tiles_per_tick = 1;
+    cfg.exec.step_res = 4;
+}
+
+/// Round 9 Y4: the scene was written on the 2k toy map (256 x 192 tiles, a
+/// kilometre across) at R2's pace, where a walk was long enough for the El
+/// to beat it, for a leg to reach the segment length, for a commute to be
+/// far: at the real pace (21 tiles a minute) every leg there is minutes and
+/// the premise is gone. The scene runs at R2's pace with the knobs Y4 moved
+/// for it ([exec], [vehicles], [transit], the walk-written tile caps).
+pub fn r2(mut cfg: Config) -> Config {
+    r2_pace(&mut cfg);
+    cfg.vehicles.max_steps_per_tick = 4;
+    cfg.vehicles.flyer_ticks_per_tile = 0.3;
+    cfg.transit.ride_ticks_per_tile = 0.25;
+    cfg.transit.dwell_ticks = 1;
+    cfg.transit.stop_spacing = 16;
+    cfg.gangs.raid_gather_hours = 8;
+    cfg.life.muster_walk_cap_ticks = 480;
+    cfg.life.rough_min_tiles = 45;
+    cfg.life.bed_margin_tiles = 20;
+    cfg.corps.shop_price_tiles = 12;
+    cfg.jobs2.cab_min_tiles = 60;
+    if let Some(c) = cfg.customers.as_mut() {
+        c.hail_min_tiles = 50;
+    }
+    if let Some(h) = cfg.shift.as_mut().and_then(|s| s.haul.as_mut()) {
+        h.haul_reach = 30;
+    }
+    if let Some(p) = cfg.presence.as_mut() {
+        p.round_reach_tiles = 20;
+    }
+    if let Some(l) = cfg.legs.as_mut() {
+        l.leg_replan_tiles = 40;
+        l.escort_walk_tiles = 40;
+    }
+    cfg
+}
+
+/// [`world`] at R2's pace ([`r2`]).
+pub fn world_r2() -> World {
+    World::new(42, r2(Config::load()))
+}
+
+/// [`world_with`] at R2's pace ([`r2`]).
+pub fn world_with_r2(edit: impl FnOnce(&mut Config)) -> World {
+    let mut cfg = r2(Config::load());
+    edit(&mut cfg);
+    World::new(42, cfg)
 }
 
 /// The shipped config with one edit applied before the world is built.

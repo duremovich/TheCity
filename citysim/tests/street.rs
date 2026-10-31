@@ -12,8 +12,8 @@ use citysim::{
 /// The v1 city cut into three Mid districts by x, the district law on, and
 /// litter and the street on with nothing seeded (the tests seed by hand).
 fn street_cfg() -> Config {
-    let assets = Config::load().dole_city();
-    let mut c = Config::load().dole_city().v1_profile();
+    let assets = common::r2(Config::load()).dole_city();
+    let mut c = common::r2(Config::load()).dole_city().v1_profile();
     c.districts = DistrictsCfg {
         names: vec!["West".into(), "Centre".into(), "East".into()],
         zones: vec!["M".into(), "M".into(), "M".into()],
@@ -204,7 +204,13 @@ fn test_deposit_skips_building_tiles_and_saturates_at_254() {
 
 #[test]
 fn test_littered_step_delays_next_move_and_keeps_flow_fields() {
-    let mut w = city();
+    // Round 9 Y4: the M12 step arithmetic this pins is R2's (one tile a
+    // tick, the quarter-tick units); at the real pace a walker takes 21
+    // steps a tick and a heaped tile's delay is two steps' units.
+    let mut cfg = street_cfg();
+    cfg.exec.walk_tiles_per_tick = 1;
+    cfg.exec.step_res = 4;
+    let mut w = World::new(7, cfg);
     let market = w.buildings_of_kind(BuildingKind::Market)[0];
     let a = civilians(&w)[0];
     lod::set_lod(&mut w, a, Lod::Full);
@@ -220,7 +226,7 @@ fn test_littered_step_delays_next_move_and_keeps_flow_fields() {
     let fields = w.flow_fields.len();
     let i = idx(&w, first);
     w.litter[i] = 200; // heaped: band 3
-    assert_eq!(citysim::exec::litter_delay(&w, first), 2);
+    assert_eq!(citysim::exec::litter_delay(&w, first), 2 * w.config.exec.step_res);
     assert_eq!(citysim::exec::litter_delay(&w, start), 0, "a clean tile delays nothing");
     let now = w.tick;
     {
@@ -386,7 +392,7 @@ fn test_bankruptcy_below_floor_leaves_derelict() {
 
 #[test]
 fn test_seed_derelicts_spread_over_sump() {
-    let mut cfg = Config::load().dole_city();
+    let mut cfg = common::r2(Config::load()).dole_city();
     cfg.street.seed_derelict_blocks = 8;
     // M15 W31: The Unplugged's Chapel would take one of the eight.
     cfg.creeds.seed_purist = false;
@@ -765,7 +771,7 @@ mod lives_street {
     const DAY2_EIGHT: u64 = 2 * TICKS_PER_DAY + 8 * TICKS_PER_HOUR;
 
     fn city_with(edit: impl FnOnce(&mut Config)) -> World {
-        let mut w = common::world_with(edit);
+        let mut w = common::world_with_r2(edit);
         assert!(service::street_on(&w), "the shipped config has the street switch on");
         w.run_ticks(DAY2_EIGHT);
         w
@@ -1077,7 +1083,7 @@ mod lives_street {
     /// Statistical tier as before (Jobs & lives phase 2's `cab_trips`).
     #[test]
     fn test_off_city_writes_nothing() {
-        let mut off = common::world_with(|c| c.strip_street());
+        let mut off = common::world_with_r2(|c| c.strip_street());
         assert!(!service::street_on(&off));
         assert!(off.config.serves.iter().all(|r| !r.street) && off.config.service.cab_wait_ticks == 0);
         assert!(!off.config.stims.deal_corner);
@@ -1282,7 +1288,7 @@ mod lives_street {
                 .get_or_init(|| {
                     // Lives at work phase 6: careers and lieutenants off (the
                     // pimp's night needs a free gang member on day 1).
-                    let mut w = common::world_with(|c| {
+                    let mut w = common::world_with_r2(|c| {
                         c.strip_careers();
                         c.gangs.strip_lieutenants();
                     });
@@ -1291,7 +1297,7 @@ mod lives_street {
                 })
                 .clone()
         } else {
-            let mut w = common::world_with(|c| c.strip_street());
+            let mut w = common::world_with_r2(|c| c.strip_street());
             w.run_ticks(TICKS_PER_DAY + 1);
             w
         };

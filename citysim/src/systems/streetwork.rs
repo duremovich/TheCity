@@ -1577,7 +1577,7 @@ fn roll(world: &World, id: EntityId, job: &Job, home_bound: bool) -> Option<Ride
     // not shorten (`transit::commute_ticks` is the walk) takes the cab
     // without the roll, both tiers (the one source).
     if !rolled {
-        let walk = Tick::from(tiles) * world.config.exec.move_ticks_full;
+        let walk = world.config.exec.walk_ticks(Tick::from(tiles));
         if crate::systems::transit::commute_ticks(world, home, work) < walk {
             return None;
         }
@@ -1761,9 +1761,8 @@ pub fn pay_ride(world: &mut World, id: EntityId, ride: &Ride, driver: Option<Ent
 /// The ticks a cab takes from `from` to `to`: the walk's ticks × the Car's
 /// `timed_mult` (`[vehicles] mult`), at least one.
 pub fn cab_ticks(world: &World, from: TilePos, to: TilePos) -> Tick {
-    let base = Tick::from(from.manhattan(to)) * world.config.exec.move_ticks_full;
     let m = crate::systems::vehicles::timed_mult_of(world, crate::components::AssetKind::Car);
-    ((base as f32 * m).round() as Tick).max(1)
+    world.config.exec.walk_ticks_f(Tick::from(from.manhattan(to)), m).max(1)
 }
 
 /// The on-duty cab drivers of `garage` with a body (Full or Coarse) and no
@@ -1852,7 +1851,7 @@ pub fn hail_cab(world: &mut World, id: EntityId, target: &crate::exec::GotoTarge
         return None;
     }
     // Late for a shift: the walk is longer than the time left before it.
-    let walk = Tick::from(tiles) * world.config.exec.move_ticks_full;
+    let walk = world.config.exec.walk_ticks(Tick::from(tiles));
     let late = world
         .comp::<Job>(id)
         .is_some_and(|j| j.employer == Some(to_b) && Tick::from(j.ticks_until_shift(world.tick_of_day())) < walk);

@@ -7,13 +7,15 @@
 //! `SetCivicAuto`. The budget moves no coins (the posts are paid at shift
 //! end), so the coin identity holds.
 
+mod common;
+
 use citysim::components::Role;
 use citysim::systems::{econ, treasury};
 use citysim::{Config, EventKind, PlayerCommand, World, TICKS_PER_DAY};
 
 /// The wages + no-net city.
 fn config() -> Config {
-    let mut cfg = Config::load().dole_city();
+    let mut cfg = common::r2(Config::load()).dole_city();
     cfg.policy = citysim::config::PolicyCfg::default();
     cfg
 }
@@ -149,7 +151,7 @@ fn test_civic_pin_and_release() {
     assert!(w.econ.civic_pinned, "SetSanitation pins too");
 
     // Under the levy (the dole city: no band): no pin, and the release is refused.
-    let mut twin = World::new(42, Config::load().dole_city());
+    let mut twin = World::new(42, common::r2(Config::load()).dole_city());
     assert!(!treasury::on(&twin));
     twin.push_command(PlayerCommand::SetGuardCount(12));
     twin.push_command(PlayerCommand::SetCivicAuto);

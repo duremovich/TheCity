@@ -166,7 +166,7 @@ pub fn rider(world: &World, id: EntityId) -> bool {
 /// win), `now` `None` for a trip planned ahead.
 pub fn trip_by(world: &World, from: TilePos, to: TilePos, rides: impl FnOnce() -> bool, now: Option<Tick>) -> Tick {
     let t = travel(world, from, to);
-    let walk = Tick::from(from.manhattan(to)) * world.config.exec.move_ticks_full;
+    let walk = world.config.exec.walk_ticks(Tick::from(from.manhattan(to)));
     if choice(world).is_none() || t >= walk {
         return t;
     }

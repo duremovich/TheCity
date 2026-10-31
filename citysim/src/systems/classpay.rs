@@ -228,17 +228,23 @@ pub fn merit(world: &World, id: EntityId, employer: EntityId, role: Role) -> f32
         && world.comp::<Job>(id).and_then(|j| j.employer).and_then(|e| world.corp_of_building(e)) == corp;
     let tenure = if same { (tenure_days(world, id) as f32 / cfg.tenure_full_days.max(1) as f32).min(1.0) } else { 0.0 };
     let door = world.comp::<Building>(employer).map(|b| b.door);
+    let tiles = merit_tiles(world, id, door);
+    cfg.merit_edu * edu + cfg.merit_skill * skill + cfg.merit_tenure * tenure - cfg.commute_w * tiles
+}
+
+/// [`merit`]'s commute: the Manhattan tiles from `id`'s Home door (else
+/// its tile) to `door` (0 without either).
+fn merit_tiles(world: &World, id: EntityId, door: Option<crate::components::TilePos>) -> f32 {
     let from = world
         .comp::<Household>(id)
         .and_then(|h| h.home)
         .and_then(|h| world.comp::<Building>(h))
         .map(|b| b.door)
         .or_else(|| world.comp::<crate::components::Position>(id).map(|p| p.tile));
-    let tiles = match (from, door) {
+    match (from, door) {
         (Some(a), Some(b)) => a.manhattan(b) as f32,
         _ => 0.0,
-    };
-    cfg.merit_edu * edu + cfg.merit_skill * skill + cfg.merit_tenure * tenure - cfg.commute_w * tiles
+    }
 }
 
 /// Graded hiring (grade >= 2): the candidate a `role` vacancy at `employer`
@@ -250,7 +256,35 @@ pub fn pick_graded(world: &World, employer: EntityId, role: Role) -> Option<Enti
     let g = Graded::new(world, employer, role)?;
     let mut best: Option<(f32, EntityId)> = None;
     let mut nearest: Option<(Tick, EntityId)> = None;
+    // Round 9 Y4: as `pick_graded_in`, a candidate whose merit ceiling is
+    // under the best so far is passed over first, and once one within the
+    // cap is held (the nearest fallback no longer matters) the travel is read
+    // only for one who would beat it. The same pick.
+    let cfg = &world.config.classpay;
+    let ceiling = cfg.merit_edu.max(0.0) + cfg.merit_skill.max(0.0) + cfg.merit_tenure.max(0.0);
+    let prune = cfg.commute_w >= 0.0;
     for id in world.citizens() {
+        if let Some((bm, bid)) = best {
+            if prune && ceiling - cfg.commute_w * merit_tiles(world, id, g.door) < bm {
+                continue;
+            }
+            if !g.eligible(world, id) {
+                continue;
+            }
+            let m = merit(world, id, employer, role);
+            if !(m > bm || (m == bm && id < bid)) {
+                continue;
+            }
+            if let (Some(cap), Some(door)) = (g.cap, g.door) {
+                let t = crate::systems::distance::set_out(world, id)
+                    .map_or(Tick::MAX, |from| crate::systems::distance::travel(world, from, door));
+                if t > cap {
+                    continue;
+                }
+            }
+            best = Some((m, id));
+            continue;
+        }
         if !g.eligible(world, id) {
             continue;
         }
@@ -395,13 +429,29 @@ pub fn pick_graded_in(world: &World, employer: EntityId, role: Role, ix: &Graded
     };
     let travel = |i: u32| crate::systems::distance::travel(world, ix.froms[i as usize], door);
     let mut best: Option<(f32, EntityId)> = None;
+    // Round 9 Y4: at the real pace the cap's discs hold the whole island
+    // (17-22 ms a vacancy at 20k, 944 of them at the world's build). Merit
+    // is at most the weights' sum (education, skill and tenure each in
+    // 0..=1) less the commute's: a candidate whose ceiling is under the best
+    // so far cannot win and is passed over before the checks, and the
+    // travel is read only for one who would beat the best. The same pick.
+    let cfg = &world.config.classpay;
+    let ceiling = cfg.merit_edu.max(0.0) + cfg.merit_skill.max(0.0) + cfg.merit_tenure.max(0.0);
+    let prune = cfg.commute_w >= 0.0;
     for i in ix.grid.near_discs(&crate::systems::transit::reach_discs(world, door, cap)) {
         let id = ix.ids[i as usize];
-        if !g.eligible(world, id) || travel(i) > cap {
+        if prune {
+            if let Some((bm, _)) = best {
+                if ceiling - cfg.commute_w * merit_tiles(world, id, Some(door)) < bm {
+                    continue;
+                }
+            }
+        }
+        if !g.eligible(world, id) {
             continue;
         }
         let m = merit(world, id, employer, role);
-        if best.is_none_or(|(bm, bid)| m > bm || (m == bm && id < bid)) {
+        if best.is_none_or(|(bm, bid)| m > bm || (m == bm && id < bid)) && travel(i) <= cap {
             best = Some((m, id));
         }
     }
@@ -410,8 +460,7 @@ pub fn pick_graded_in(world: &World, employer: EntityId, role: Role, ix: &Graded
     }
     let _t = crate::prof::scope!("graded::far");
     // Every travel is at most the walk, and every walk on the map at most this.
-    let step = world.config.exec.move_ticks_full;
-    let span = (world.map.w() as Tick + world.map.h() as Tick) * step;
+    let span = world.config.exec.walk_ticks(world.map.w() as Tick + world.map.h() as Tick);
     let mut reach = cap;
     loop {
         reach = reach.saturating_mul(2).max(1);

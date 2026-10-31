@@ -190,6 +190,8 @@ fn test_civic_cut_spares_public_works_hires() {
     // The pressure pass R2: the v1 pace, 2 ticks a tile (a works hire lost
     // his post in the halved walk's butterfly).
     cfg.exec.move_ticks_full = 2;
+    cfg.exec.walk_tiles_per_tick = 1; // round 9 Y4: the v1 pace's tile, at its quarter ticks
+    cfg.exec.step_res = 4;
     let mut w = World::new(42, cfg);
     w.run_ticks(2 * TICKS_PER_DAY);
     w.push_command(PlayerCommand::SetSafetyNet(true));

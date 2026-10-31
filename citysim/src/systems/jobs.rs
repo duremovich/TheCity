@@ -799,7 +799,7 @@ pub fn sweep_route(world: &World, id: EntityId, key: i64, from: TilePos, left: u
         // up to 1,000 tiles: its dirtiest tile anywhere was a 3-4 h walk
         // out and a ride back, the shift a commute). None there: the post's.
         let reach = crate::systems::distance::reach(world)
-            .map(|r| (from, (r.beat_ticks / world.config.exec.move_ticks_full.max(1)) as u32, false));
+            .map(|r| (from, u32::try_from(world.config.exec.walk_tiles(r.beat_ticks)).unwrap_or(u32::MAX), false));
         let r = sweep_route_in(world, id, key, d, reach);
         if !r.is_empty() && fits(&r) {
             return r;
@@ -814,7 +814,7 @@ pub fn sweep_route(world: &World, id: EntityId, key: i64, from: TilePos, left: u
 }
 
 /// The walk of a round (`from`, the stops, the post's door: the tiles at
-/// `move_ticks_full` x `sweep_walk_factor`, the street not being a straight
+/// the pace (`[exec] walk_ticks`) x `sweep_walk_factor`, the street not being a straight
 /// line) and its stops' minutes, in ticks.
 pub fn round_ticks(world: &World, from: TilePos, stops: &[TilePos], door: TilePos) -> u64 {
     let Some(cfg) = world.config.presence.as_ref() else { return 0 };
@@ -824,7 +824,9 @@ pub fn round_ticks(world: &World, from: TilePos, stops: &[TilePos], door: TilePo
         tiles += at.manhattan(s);
         at = s;
     }
-    let step = world.config.exec.move_ticks_full.max(1) as f64 * f64::from(cfg.sweep_walk_factor);
+    // Round 9 Y4: a tile's minutes at the pace (`[exec] walk_tiles_per_tick`).
+    let e = &world.config.exec;
+    let step = e.move_ticks_full.max(1) as f64 / e.walk_tiles_per_tick.max(1) as f64 * f64::from(cfg.sweep_walk_factor);
     let stops_ticks = stops.len() as u64 * u64::from(cfg.sweep_stop_min);
     // The pre-view pass phase 5 (OPEN-156, `[legs] sweep_by_ride`): the way
     // back to the post may ride (the El's `transit::commute_ticks`).

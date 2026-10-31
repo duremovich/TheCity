@@ -14,7 +14,7 @@ use citysim::{Brain, BuildingKind, Config, EntityId, EventKind, GoalKind, Job, R
 use common::{jobless_housed, set_coins};
 
 fn world_with(f: impl FnOnce(&mut Config)) -> World {
-    let mut c = Config::load();
+    let mut c = common::r2(Config::load());
     c.jobs2.enabled = true;
     c.jobs2.street = true;
     f(&mut c);

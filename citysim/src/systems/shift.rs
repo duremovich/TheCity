@@ -150,7 +150,7 @@ fn segment_start(job: &Job, tick: Tick) -> Option<Tick> {
 /// move_ticks_full`, at least one tick, at most `[shift] station_move_max`.
 pub fn move_ticks(world: &World, from: TilePos, to: TilePos) -> Tick {
     let max = world.config.shift.as_ref().map_or(1, |c| Tick::from(c.station_move_max.max(1)));
-    (Tick::from(from.manhattan(to)) * world.config.exec.move_ticks_full).clamp(1, max)
+    world.config.exec.walk_ticks(Tick::from(from.manhattan(to))).clamp(1, max)
 }
 
 fn step(action: ActionKind, target: Option<EntityId>, tile: Option<TilePos>) -> ActionInstance {
@@ -422,7 +422,6 @@ fn haul_plan(
     };
     // The trip's estimate: to the post (when out), the load, the carry out
     // and back, the unload.
-    let mt = world.config.exec.move_ticks_full.max(1);
     let back = if inside { 0 } else { crate::systems::fixes::walk_estimate(world, id, post_door) };
     let haul_travel = world.config.island_trades.as_ref().is_some_and(|c| c.haul_travel);
     let trip = dest.map(|(b, _, _)| {
@@ -432,7 +431,7 @@ fn haul_plan(
             if haul_travel && b != post {
                 crate::systems::distance::travel(world, post_door, x.door)
             } else {
-                Tick::from(x.door.manhattan(post_door)) * mt
+                world.config.exec.walk_ticks(Tick::from(x.door.manhattan(post_door)))
             }
         });
         // A quarter over: a street walk is longer than the doors' distance.
@@ -788,7 +787,7 @@ fn food_venue(world: &World, id: EntityId) -> Option<(EntityId, BuildingKind)> {
     let walk_max = world.config.shift.as_ref().map_or(0, |c| Tick::from(c.break_walk_max));
     let from = crate::exec::walk_origin(world, id)?;
     let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins);
-    let reach = walk_max / world.config.exec.move_ticks_full.max(1);
+    let reach = world.config.exec.walk_tiles(walk_max);
     let mut best: Option<(Tick, u32, EntityId, BuildingKind)> = None;
     for kind in [BuildingKind::Market, BuildingKind::NoodleBar] {
         for &m in world.buildings_by_kind().get(&kind).map_or(&[][..], |v| v.as_slice()) {

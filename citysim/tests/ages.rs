@@ -13,7 +13,7 @@ use citysim::systems::ages;
 use citysim::{Brain, BuildingKind, Config, EntityId, Household, Identity, Job, Wallet, World, TICKS_PER_DAY};
 
 fn on_world() -> World {
-    World::new(42, Config::load())
+    World::new(42, common::r2(Config::load()))
 }
 
 /// Free jobless adults outside any gang (ascending).
@@ -111,7 +111,7 @@ fn test_fired_elder_moves_in_with_his_daughter() {
     let run = |daughter: bool| -> bool {
         // The pressure pass S6 (OPEN-224): the seeded children off (they
         // fill the daughter's Home past the take-in's room rule).
-        let mut cfg = Config::load();
+        let mut cfg = common::r2(Config::load());
         cfg.ages.seed_child_slots = 0;
         let mut w = World::new(42, cfg);
         let pool = idle(&w);
@@ -158,7 +158,7 @@ fn test_fired_elder_moves_in_with_his_daughter() {
 /// prosthetic in the slot clears it.
 #[test]
 fn test_maimed_then_prosthetic() {
-    let mut c = Config::load();
+    let mut c = common::r2(Config::load());
     c.ages.p_maimed = 1.0;
     let mut w = World::new(42, c);
     let a = idle(&w)[0];
@@ -179,7 +179,7 @@ fn test_seeded_ages_off() {
     let oldest =
         |w: &World| w.citizens().into_iter().filter_map(|a| w.comp::<Identity>(a)).map(|i| i.age_years()).max();
     assert!(oldest(&w).is_some_and(|y| y >= 61), "elders seeded");
-    let mut c = Config::load();
+    let mut c = common::r2(Config::load());
     c.ages.enabled = false;
     let off = World::new(42, c);
     assert!(oldest(&off).is_some_and(|y| y < 60), "to 60 off");

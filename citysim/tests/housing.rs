@@ -19,7 +19,7 @@ fn base() -> World {
         // diverges and the table's transfer edge counts half a headway
         // more, so the hand-picked far and near Homes land on the other
         // side of the thresholds these scenes are built on.
-        let mut cfg = Config::load();
+        let mut cfg = common::r2(Config::load());
         // The pressure pass S6 (OPEN-224): the seeded children off (they crowd the Homes this scene's room rule reads).
         cfg.ages.seed_child_slots = 0;
         if let Some(m) = cfg.motion.as_mut() {
@@ -1332,7 +1332,7 @@ fn env<T: std::str::FromStr>(k: &str) -> Option<T> {
 fn housing_churn_rows() {
     let seed: u64 = env("CITYSIM_HD_SEED").unwrap_or(42);
     let days: u64 = env("CITYSIM_HD_DAYS").unwrap_or(30);
-    let mut c = Config::load();
+    let mut c = common::r2(Config::load());
     if let Some(pop) = env::<u32>("CITYSIM_HD_POP") {
         c = c.scaled_to(pop);
     }

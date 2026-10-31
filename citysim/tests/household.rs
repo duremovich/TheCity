@@ -15,7 +15,7 @@ const EVENING: u64 = TICKS_PER_DAY + 19 * TICKS_PER_HOUR;
 
 fn city() -> World {
     // The pressure pass S6 (OPEN-224): the seeded children off (they crowd the Homes this scene's room rule reads).
-    let mut w = common::world_with(|c| c.ages.seed_child_slots = 0);
+    let mut w = common::world_with_r2(|c| c.ages.seed_child_slots = 0);
     assert!(household::on(&w), "the shipped config has the household on");
     w.tick = EVENING;
     w
@@ -59,7 +59,7 @@ fn test_best_spot_is_the_home_when_the_spouse_is_in() {
     assert_eq!(spot.kind, SpotKind::Home(h), "the Home with the spouse in (social {social:.2})");
     assert!(social >= w.config.household.home_w, "the household term counts the spouse ({social:.2})");
     // Off: the corner.
-    let mut off = common::world_with(|c| c.household.enabled = false);
+    let mut off = common::world_with_r2(|c| c.household.enabled = false);
     off.tick = EVENING;
     leisure::spots_daily(&mut off);
     off.enter_building(s, h);
@@ -326,7 +326,7 @@ fn test_visit_to_an_elder_parent() {
 /// config holds no `[household]` section nor the phase's deed keys.
 #[test]
 fn test_off_city_writes_nothing() {
-    let mut w = common::world_with(|c| {
+    let mut w = common::world_with_r2(|c| {
         c.household.enabled = false;
         c.without_household_deeds();
     });
@@ -349,7 +349,7 @@ fn test_off_city_writes_nothing() {
     let deeds = ron::to_string(&w.config.gossip.reach0).expect("table");
     assert!(!deeds.contains("employed") && !deeds.contains("born"), "the phase's deed keys left out: {deeds}");
     // The on config holds them.
-    let on = Config::load();
+    let on = common::r2(Config::load());
     assert!(on.household.enabled && on.gossip.reach0.born > 0.0);
 }
 
@@ -357,7 +357,7 @@ fn test_off_city_writes_nothing() {
 /// left early, and a visit or a reunion if the city gave one.
 #[test]
 fn test_on_city_lives_at_home_within_two_days() {
-    let mut w = common::world();
+    let mut w = common::world_r2();
     w.run_ticks(2 * TICKS_PER_DAY);
     let j = w.stats.history.iter().fold((0u32, 0u32, 0u32), |a, r| {
         r.jobs2.as_ref().map_or(a, |j| (a.0 + j.home_hangouts, a.1 + j.empty_leaves, a.2 + j.elder_visits))
@@ -374,7 +374,7 @@ fn test_on_city_lives_at_home_within_two_days() {
 /// night after a foreman hired him).
 #[test]
 fn test_a_homeless_worker_pays_the_first_rent_before_moving_in() {
-    let mut w = common::world();
+    let mut w = common::world_r2();
     let days = i64::from(w.config.service.move_in_rent_days);
     assert!(days > 1, "the shipped config takes more than a day up front");
     let a = common::day_workers(&w)
@@ -518,7 +518,7 @@ fn stayer(w: &mut World, id: EntityId) -> EntityId {
 #[test]
 fn test_stay_in_unwinds_at_home_with_no_spot_in_reach() {
     // The pressure pass R2: the v1 pace (`common::v1_pace`).
-    let mut w = common::world_with(common::v1_pace);
+    let mut w = common::world_with_r2(common::v1_pace);
     w.tick = EVENING;
     w.spots = vec![Vec::new(); w.districts.len()];
     let alone = common::free_adults(&w)
@@ -547,7 +547,7 @@ fn test_stay_in_unwinds_at_home_with_no_spot_in_reach() {
     assert!(!household::company_only(&w, alone), "not remembered as an empty spot");
     assert_eq!(jobs2(&w).stay_in_hangouts, 1);
     // Off: no fallback, no pick.
-    let mut off = common::world_with(|c| {
+    let mut off = common::world_with_r2(|c| {
         if let Some(f) = c.distance.as_mut().and_then(|d| d.free.as_mut()) {
             f.stay_in = None;
         }

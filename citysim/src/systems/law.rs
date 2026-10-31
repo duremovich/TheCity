@@ -3860,7 +3860,7 @@ pub fn district_route(
         near.sort();
         // R2: within the patrol's reach of the loop's anchor (walked), the
         // nearest always (the Spire's 60 nearest towers spanned 200 tiles).
-        let tiles = patrol_cap.map(|c| c / world.config.exec.move_ticks_full.max(1));
+        let tiles = patrol_cap.map(|c| world.config.exec.walk_tiles(c));
         let first = near.first().map(|&(t, _)| t).unwrap_or(0);
         homes = near
             .into_iter()

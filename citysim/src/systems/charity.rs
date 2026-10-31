@@ -1069,7 +1069,7 @@ fn found_far(world: &mut World, far: &[TilePos]) {
     if min == 0 || per_day == 0 || far.len() < min {
         return;
     }
-    let walk = u32::try_from(cfg.starving_reach_ticks / world.config.exec.move_ticks_full.max(1)).unwrap_or(u32::MAX);
+    let walk = u32::try_from(world.config.exec.walk_tiles(cfg.starving_reach_ticks)).unwrap_or(u32::MAX);
     let cost = meal_cost(world);
     let pot = i64::from(pot_units(world)) * cost;
     let keep = world.config.charity.share_keep_days * pot;

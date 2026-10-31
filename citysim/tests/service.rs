@@ -20,7 +20,7 @@ const ALL_DAY: (u16, u16) = (1, 1440);
 /// The shipped city at 20:00 on day 0 with the encounter on (no tick run:
 /// the seeded state).
 fn city() -> World {
-    let mut w = common::world();
+    let mut w = common::world_r2();
     assert!(service::on(&w), "the shipped config has the encounter on");
     w.tick = EVENING;
     w
@@ -328,7 +328,7 @@ fn test_cook_takes_a_staff_meal_at_shift_end() {
     let j = w.stats.current.jobs2.as_ref().expect("row");
     assert_eq!((j.staff_meals, j.serve_shifts), (1, 1));
     // Off: the shelf untouched.
-    let mut off = common::world_with(|c| c.lives.enabled = false);
+    let mut off = common::world_with_r2(|c| c.lives.enabled = false);
     off.tick = EVENING;
     off.comp_mut::<Building>(bar).expect("bar").stock_food = 5;
     service::shift_end(&mut off, cook);
@@ -341,7 +341,7 @@ fn test_cook_takes_a_staff_meal_at_shift_end() {
 /// counted and printed.
 #[test]
 fn test_bouncer_ejects_and_refuses() {
-    let mut w = common::world_with(|c| c.service.p_eject = 10.0);
+    let mut w = common::world_with_r2(|c| c.service.p_eject = 10.0);
     w.tick = EVENING;
     let role = w.config.trade_role("bouncer").expect("bouncer");
     let (club, bouncers) = staffed(&w, BuildingKind::Club, role, 1);
@@ -360,7 +360,7 @@ fn test_bouncer_ejects_and_refuses() {
     assert_eq!((j.ejections, j.door_refusals), (1, 1));
     assert!(w.events.iter().any(|e| e.kind == EventKind::Served && e.text.contains("turned")));
     // The attacker's plan would survive a bouncer weaker than him.
-    let mut w2 = common::world_with(|c| c.service.p_eject = 10.0);
+    let mut w2 = common::world_with_r2(|c| c.service.p_eject = 10.0);
     w2.tick = EVENING;
     on_duty(&mut w2, bouncer, club);
     w2.comp_mut::<citysim::Skills>(bouncer).expect("skills").fighting = 0.0;
@@ -404,7 +404,7 @@ fn test_club_tips_go_round_the_dancers() {
 /// nothing, remembers nothing and prints no `Served` in three days.
 #[test]
 fn test_off_city_writes_nothing() {
-    let mut w = common::world_with(|c| c.lives.enabled = false);
+    let mut w = common::world_with_r2(|c| c.lives.enabled = false);
     assert!(!service::on(&w));
     w.run_ticks(3 * TICKS_PER_DAY);
     assert!(w.regulars.is_empty() && w.service_room.is_empty());
@@ -412,7 +412,7 @@ fn test_off_city_writes_nothing() {
     // Fixer's stamps, are counted on both sides): the on save of the same
     // day holds exactly one more.
     let off_keys = citysim::save::to_ron(&w).matches("regulars:{").count();
-    let mut on = common::world();
+    let mut on = common::world_r2();
     on.run_ticks(TICKS_PER_DAY);
     assert!(!on.regulars.is_empty());
     let on_keys = citysim::save::to_ron(&on).matches("regulars:{").count();
@@ -428,7 +428,7 @@ fn test_off_city_writes_nothing() {
         assert!(served_memories(&w, id).is_empty());
     }
     // The env device clears the sections too (the byte identity's half).
-    let mut on = Config::load();
+    let mut on = common::r2(Config::load());
     assert!(on.lives.enabled && on.service.venues && !on.serves.is_empty());
     on.lives = Default::default();
     on.service = Default::default();
@@ -441,7 +441,7 @@ fn test_off_city_writes_nothing() {
 /// memories on bodies, and the madam's house among the places.
 #[test]
 fn test_on_city_serves_within_a_day() {
-    let mut w = common::world();
+    let mut w = common::world_r2();
     w.run_ticks(TICKS_PER_DAY);
     let j = w.stats.history.back().and_then(|r| r.jobs2.clone()).expect("jobs2 on");
     assert!(j.served_total() > 0, "encounters on day 0: {:?}", j.served);
@@ -457,7 +457,7 @@ fn test_on_city_serves_within_a_day() {
 /// tie). Failed on the base (OPEN-111 put every one on the evening).
 #[test]
 fn test_venue_staff_cover_the_day_and_the_evening() {
-    let mut w = common::world();
+    let mut w = common::world_r2();
     let (day, eve) = (w.config.world.shift_day.clone(), w.config.leisure.evening_shift.clone());
     let roles = w.config.service.evening_staff.clone();
     assert!(!roles.is_empty(), "the shipped config names venue staff");
@@ -515,7 +515,7 @@ fn test_venue_staff_cover_the_day_and_the_evening() {
 #[ignore = "tier: diag"]
 fn service_probe() {
     use std::collections::BTreeMap;
-    let mut w = common::world();
+    let mut w = common::world_r2();
     // kind -> (building-hours, covered), (kind, hour of day) -> uncovered, why -> count
     let mut cover: BTreeMap<String, (u32, u32)> = BTreeMap::new();
     let mut dark: BTreeMap<(String, u16), u32> = BTreeMap::new();

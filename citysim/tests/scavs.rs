@@ -6,6 +6,8 @@
 //! by a second. Each test is the shipped seed-42 city and one mechanism,
 //! driven directly.
 
+mod common;
+
 use citysim::components::{Controller, GoalKind, Position};
 use citysim::systems::{chrome, gray};
 use citysim::{Brain, Config, EntityId, Gang, Job, Kit, Needs, World, TICKS_PER_DAY};
@@ -14,7 +16,7 @@ fn city_with_gangs() -> World {
     // R3 (OPEN-216): `[care]` off: its covers and asks move the seed-42 city
     // and the covered/bare pair below stopped standing on the gang's ground
     // (a butterfly; the premise is the scav's ranking, not care).
-    let mut cfg = Config::load();
+    let mut cfg = common::r2(Config::load());
     cfg.care = None;
     let mut w = World::new(42, cfg);
     for _ in 0..30 {
@@ -208,7 +210,7 @@ fn test_abduct_refuses_a_victim_in_other_hands() {
 /// gray market and the second abductor took the victim).
 #[test]
 fn test_abduct_guard_with_gray_off() {
-    let mut c = Config::load();
+    let mut c = common::r2(Config::load());
     c.gray.enabled = false;
     let mut w = World::new(42, c);
     for _ in 0..30 {

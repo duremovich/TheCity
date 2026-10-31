@@ -645,7 +645,7 @@ pub fn deal_beats(world: &World, patrol: &[EntityId], counts: &[u16]) -> Option<
     // Home, then each guard still undealt to his nearest district, slot
     // or none (a far district's empty slots stay empty: the island's
     // Precinct guards were dealt the Vats 700 tiles from home).
-    let reach = crate::systems::distance::job_cap(world).map(|c| c / world.config.exec.move_ticks_full.max(1));
+    let reach = crate::systems::distance::job_cap(world).map(|c| world.config.exec.walk_tiles(c));
     let undealt = deal(&rest, reach, &mut left, &mut out);
     for g in undealt {
         let from = home_of(g);

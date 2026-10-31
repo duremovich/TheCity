@@ -1899,7 +1899,7 @@ fn waits_for_called(world: &World, k: u32) -> bool {
         let eta = match &b.exec {
             crate::exec::ExecState::GotoTimed { arrive_tick, .. } => arrive_tick.saturating_sub(world.tick),
             _ => world.comp::<Position>(m).map_or(Tick::MAX, |p| {
-                Tick::from(p.tile.manhattan(t).saturating_sub(reach)) * world.config.exec.move_ticks_full
+                world.config.exec.walk_ticks(Tick::from(p.tile.manhattan(t).saturating_sub(reach)))
             }),
         };
         eta <= wait

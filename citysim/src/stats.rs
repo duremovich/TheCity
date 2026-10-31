@@ -905,6 +905,10 @@ pub struct Jobs2Cols {
     /// Home-to-post commute is past `[life] commute_long_ticks`.
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub commute_long: u32,
+    /// Round 9 Y4: the same midnight read's median Home-to-post commute
+    /// (`life::commute_cost`, travel minutes) over the workers it read.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub commute_med: u32,
     /// Round 6 V4 (OPEN-240): a retirement to kin passed over because the
     /// working spouse's commute from the child's Home would be too long.
     #[serde(skip_serializing_if = "is_zero_u32")]
@@ -1969,6 +1973,7 @@ impl Jobs2Cols {
                 "cab_paid_driver",
                 "cab_paid_other",
                 "commute_long",
+                "commute_med",
                 "kin_spouse_far",
                 "shape_up_home",
                 "foreman_gate",
@@ -2577,6 +2582,7 @@ impl Jobs2Cols {
             self.cab_paid_driver.to_string(),
             self.cab_paid_other.to_string(),
             self.commute_long.to_string(),
+            self.commute_med.to_string(),
             self.kin_spouse_far.to_string(),
             self.shape_up_home.to_string(),
             self.foreman_gate.to_string(),

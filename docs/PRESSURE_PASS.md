@@ -4726,3 +4726,78 @@ the X6 keys and the `Jobs2Cols` `cell_days` ... `wr_held_clear` columns (serde d
 - **Deviations.** The fare beat's word is the existing `Arrested` deed (no new deed kind: the gossip tables key on
   `Deed::ALL`). The backup's second guard fights in the same minute (no walk to the scene: the one at hand is within
   six tiles); the called guard walks (the collar). `SAVE_VERSION` 114 (renumber at the merge).
+
+### Y4, the walking pace (Dylan 2026-10-30; `OPEN-215`, `OPEN-221`, `OPEN-240`, `OPEN-241`'s far musters; `ExecCfg::walk_ticks`, `exec::advance_goto`, `vehicles::step_q`, `spatial::BuildingGrid::first_by_distance`)
+
+- **The pace.** `[exec] walk_tiles_per_tick` 21 beside `move_ticks_full` 1 (a walker crosses that many tiles every
+  `move_ticks_full` ticks: 5.04 km/h on 4 m tiles), and `step_res` 20 (the executor's sub-step units of one walker's
+  step). Both default to the pace before Y4 (1, the M13 quarter ticks 4), so a config without them and the tests'
+  `v1_pace` (`walk_tiles_per_tick` 1, `step_res` 4, the vehicles' flyer 0.3) keep the M12/M13 arithmetic exactly; a
+  new `common::r2_pace` pins R2's one tile a tick. Every reader goes through `ExecCfg::walk_ticks(tiles)` (ceil),
+  `walk_ticks_f(tiles, mult)` (a vehicle's share, litter, chrome legs: rounded, as the M12 formula) and
+  `walk_tiles(ticks)` (its inverse, a tick cap's tile reach): `exec::timed_walk` and `walk_reach_tiles`,
+  `transit::commute_ticks`, `reach_discs` and the evacuation, `distance::travel`, `life::walk_ticks`, `home_reach`,
+  `shift::move_ticks` and the haul estimate, `jobs::round_ticks` and the beat, `streetwork` (the cab roll, the hail,
+  `cab_ticks`), `vehicles::car_ticks`, `road_ticks`, `raid`, `turf`, `law` (the patrol cap), `stations`, `charity`
+  (the starving's kitchen reach), `ages` (the School grid), `classpay`, `company` (the lot reach), `demography` (the
+  hire band's walking tiles), `care` (a rescuer's walk to the body and the doctor against the bleed-out: it read one
+  tile a tick with no reference to the pace). No literal speed is left in a system.
+- **Multi-tile steps.** `advance_goto` counts step units, `units_per_tick` (`step_res x walk_tiles_per_tick`, 420) a
+  tick, a walker's step `step_units` (`step_res x move_ticks_full`, 20) over `Kit.walk_mult`, a driver's the vehicle's
+  `[vehicles] mult` column of the tile (`step_q`); `ExecState::Goto.carry_q` holds the remainder (u32 now). Each step
+  inside the tick is taken tile by tile: the litter delay of the tile stepped onto (`[litter] step_ticks` read as
+  walker steps, `step_res` units each: the same relative slowing as R2's ticks), a driver's step count, Road tiles and
+  crash tile (`note_step`), the big map's path re-find (`big_step`). The burst stops at the tile before a target's door
+  (the door, its capacity and queue are `try_enter`'s on the next call, as before) and at the end of a street path
+  (arrival the next call): the checks fire at the tile they happen on, at most a minute later than the walk's last
+  step. Stepping out of a building is one step and the walk goes on in the same tick (it cost a whole tick before).
+  A walker is bounded only by the units; a driver by `[vehicles] max_steps_per_tick` (u16 now).
+- **Perf.** The pace made a time cap's tile reach 21x: an hour is 1,260 tiles. `BuildingGrid::first_by_distance` read
+  thousands of empty cells a query for a sparse kind (the Statistical evening's district-first venue search at
+  21:00 took 1.5-3 s a tick at 20k); once its rings have covered more cells than the grid holds doors it sorts the
+  doors left instead (the same `(dist, id)` sequence). `classpay::pick_graded_in` reads a candidate's travel only when
+  his merit could beat the best (a merit ceiling, the weights' sum less the commute, passes the rest over first; the
+  same pick), and `transit::reach_discs` returns the walk disc alone when it holds the map (the stops' discs inside it
+  were read over and over): the 20k world build 20.3 -> 5.6 s (944 graded picks at 17 ms each). What is left is the walk
+  itself: Full bodies step 21 tiles a tick and walk to farther places (the caps admit them), so `exec` and
+  `big_path` cost more (20k days 19-22, prof: `tick::exec` 3.4 -> 6.3 s, `big_path` 0.46 -> 2.15 s), and trips
+  that end sooner leave more decisions (`think` calls +10 %, PlanAborted +59 %: below).
+- **Knobs** (old -> new, why). Times a person would travel stay times (a School within an hour is now 5 km):
+  `[distance]`, `[distance.reach]`, `[distance.choice]`, `[crew]` reaches, `school_trip_ticks`, `commute_move_ticks`,
+  `commute_long_ticks`, `commute_hire_ticks`, `[commute] far_ticks`, `patrol_ticks`, `beat_ticks`, `word_reach_ticks`,
+  `starving_reach_ticks`, `venue_walk_cap_ticks`, `shift_lead_ticks`, `plan_timeout_ticks` 900 (a plan's run with its
+  shift's Use; spared legs in motion stay spared), `[lod] raid_promote_hours`, the cab and fare waits. Changed:
+  `[vehicles] max_steps_per_tick` 4 -> 120 (4 held a car to a fifth of the walk; 120 bounds the Car's road 0.2, 105
+  tiles a tick, 25 km/h); `flyer_ticks_per_tile` 0.3 -> 0.004 (60 km/h; 0.3 was a sixth of the walk);
+  `[transit] ride_ticks_per_tile` 0.25 -> 0.008 (30 km/h between stops), `dwell_ticks` 1 -> 0 (each stretch is
+  ceil'd to a minute: at a minute a stop the island's lines ran no faster than the walk), `stop_spacing` 16 -> 100
+  (400 m; the line's waypoints and shared tiles still stop); `[gangs] raid_gather_hours` 8 -> 3 (M10's value: the 8
+  made room for a 6 h walk at the crawl and now set members out at 14:00 for 22:00); `[life] muster_walk_cap_ticks`
+  480 -> 120 (the island's corner-to-corner walk is ~2 h). Tile caps written as a walk's minutes at the slow pace
+  keep the minutes: `[shift.haul] haul_reach` 30 -> 630 (half an hour), `[presence] round_reach_tiles` 20 -> 420
+  (20 min), `[legs] leg_replan_tiles` 40 -> 420 (20 min; 40 re-planned every other minute), `escort_walk_tiles` 40 ->
+  400 (the walk while no longer than the van's 15-min call and drive), `[corps] shop_price_tiles` 12 -> 252 (12 min a
+  coin), `[life] rough_min_tiles` 45 -> 315 (an exhausted body walks a quarter hour to a bed), `bed_margin_tiles` 20
+  -> 210 (10 min saved), `[jobs2] cab_min_tiles` 60 -> 420 and `[customers] hail_min_tiles` 50 -> 420 (a cab past a
+  20-min walk). Kept, comment noted: `muster_near_tiles` 180 (a 9-min staging ground), `exec_ride_min_tiles` 40 (an
+  exec is driven). Kept unread: the spatial tile radii (witnesses, vendors, cells, corners, `dive_reach_tiles`,
+  `hole_up_max_tiles`, `corner_reach`, `[classpay] commute_w` per tile) are places, not walks.
+- **Deviations.** `assets/stat_table.toml` is not regenerated: calibrate's 2k all-Full city now commutes inside band 0
+  (under 30 min), and the off-screen bands read from `life::commute_cost` fall there too, so the Statistical day
+  reads the near-commute rows; a regen belongs to the close (it redraws rare rates). `Jobs2Cols.commute_med` (the
+  relocation read's median Home-to-post travel) is new, a print. The shadow lens's jump allowance reads the pace (and
+  chrome legs, and an Idle body whose step is a walk). `SAVE_VERSION` 116. The test scenes written on the 2k map
+  at R2's pace (the El beating a walk, a leg past the segment length, a far commute, 73 of them over 19 binaries)
+  run at it through `common::r2` (the pace and every knob above), file by file, with the Y4 reason: on a kilometre-wide
+  map at 21 tiles a minute every leg is minutes and the premise is gone. `probe_worker_finishes_the_shift_before_an_errand`
+  reads the purse's peak (paid, then the meal bought by 18:15).
+- **Numbers** (20k `isle_m_k2` seed 42 x 30, before -> after, one run each, `--legs --legs-min 0`): legs of 120 min
+  or more 32,908 -> 4 (walk 20,213 -> 3; 240+ 6,906 -> 3); workers past a 3 h commute (`commute_long`, a day) 1,054
+  -> 0; the Work GoTo(Workplace) leg median 26 -> 4 min (29 -> 79 tiles; p90 121 -> 19 min), `commute_med` (new) 9
+  min; walk 0.95 -> 18.7 tiles a minute; Patrol legs median 44 -> 11 min; Raid legs median 90 -> 21 min (over 2 h 110
+  -> 0); raids departed / at the target 21 / 17 -> 64 / 65, marchers at the door 163 of 167 -> 560 of 571; corner
+  turnout (`war_came` of `war_called`) 322 of 628 -> 543 of 919; Starving 25 -> 4, starvation deaths 1 -> 2; violent
+  deaths 93 -> 172 (the raids land); El rides a day 5,649 -> 1,790, El legs of bodies 32,268 -> 68; PlanAborted 174k
+  -> 277k (Court at Flirt 11k -> 44k, GetHigh at BuyStims 1.4k -> 26k: the walks now arrive); ticks/s 183 -> 162
+  (days 25-30 153 -> 132). 100k (the one run, the shadow d21-27 before the build fix): 3,084 s wall, 13.1 ticks/s
+  against V17's 18 (its shadow 2,330 s); after the fix the 100k build and day 1 take 119 s (day 1 at 21 ticks/s).

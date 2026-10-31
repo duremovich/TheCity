@@ -1021,7 +1021,6 @@ fn evacuate(world: &mut World, line: u8) {
     }
     let Some(trains) = world.transit.trains.get(usize::from(line)).cloned() else { return };
     let now = world.tick;
-    let step = world.config.exec.move_ticks_full.max(1);
     for (j, v) in trains.into_iter().enumerate() {
         let Some(riders) = world.motions.get(&v).map(|m| m.riders.clone()) else { continue };
         if riders.is_empty() {
@@ -1052,7 +1051,7 @@ fn evacuate(world: &mut World, line: u8) {
             }
             crate::systems::motion::alight_now(world, r);
             let Some(target) = world.rides.get(&r).map(|x| x.target.clone()) else { continue };
-            let arrive = now + (tiles * step).max(1);
+            let arrive = now + world.config.exec.walk_ticks(tiles).max(1);
             if let Some(b) = world.comp_mut::<crate::components::Brain>(r) {
                 b.exec = ExecState::Ride { target, depart: now, arrive_tick: arrive };
             }
@@ -1296,7 +1295,7 @@ pub fn choose(world: &World, who: EntityId, from: TilePos, to: TilePos, t: Tick)
 // ---------------------------------------------------------------------------
 
 /// The one measure of a commute between two doors, in travel ticks: the
-/// walk (Manhattan × `[exec] move_ticks_full`, `life::commute_cost`'s
+/// walk (Manhattan at the pace, `[exec] walk_ticks`, `life::commute_cost`'s
 /// formula), or with the El on the best ride over the doors' nearest stops
 /// (`stop_candidates` each, the walks at the same rate, half a `headway`
 /// of wait, the table's ride) when it saves `min_saving_ticks` plus a
@@ -1306,9 +1305,9 @@ pub fn choose(world: &World, who: EntityId, from: TilePos, to: TilePos, t: Tick)
 /// skipped); a riot's or a curfew's do not (they pass). With transit off it
 /// is the walk exactly.
 pub fn commute_ticks(world: &World, from: TilePos, to: TilePos) -> Tick {
-    let step = world.config.exec.move_ticks_full;
+    let e = &world.config.exec;
     let tiles = from.manhattan(to);
-    let walk = Tick::from(tiles) * step;
+    let walk = e.walk_ticks(Tick::from(tiles));
     let c = &world.config.transit;
     if !c.enabled || tiles < c.min_ride_tiles {
         return walk;
@@ -1319,7 +1318,7 @@ pub fn commute_ticks(world: &World, from: TilePos, to: TilePos) -> Tick {
     let mut best = UNREACHABLE as Tick;
     let near_to = net.near(to);
     for &s in net.near(from).iter().filter(|&&s| !shut(s)).take(k) {
-        let w1 = Tick::from(net.stops[usize::from(s)].manhattan(from)) * step;
+        let w1 = e.walk_ticks(Tick::from(net.stops[usize::from(s)].manhattan(from)));
         if !access_ok(world, w1) {
             continue;
         }
@@ -1331,7 +1330,7 @@ pub fn commute_ticks(world: &World, from: TilePos, to: TilePos) -> Tick {
             if hop.ticks == UNREACHABLE {
                 continue;
             }
-            let w2 = Tick::from(net.stops[usize::from(e)].manhattan(to)) * step;
+            let w2 = world.config.exec.walk_ticks(Tick::from(net.stops[usize::from(e)].manhattan(to)));
             if !access_ok(world, w2) {
                 continue;
             }
@@ -1357,11 +1356,20 @@ pub fn commute_ticks(world: &World, from: TilePos, to: TilePos) -> Tick {
 /// ones nearest `to`) and the walk from it, so the walk to `s` is at most
 /// what is left (closures, `passes` and the access cap only drop rides).
 pub fn reach_discs(world: &World, to: TilePos, limit: Tick) -> Vec<(TilePos, u32)> {
-    let step = world.config.exec.move_ticks_full;
-    let tiles = |t: Tick| t.checked_div(step).map_or(u32::MAX, |v| u32::try_from(v).unwrap_or(u32::MAX));
+    let e = &world.config.exec;
+    let tiles = |t: Tick| u32::try_from(e.walk_tiles(t)).unwrap_or(u32::MAX);
     let mut out = vec![(to, tiles(limit))];
     let c = &world.config.transit;
     if !c.enabled {
+        return out;
+    }
+    // Round 9 Y4: at the real pace a 2 h cap's walk disc holds the whole map
+    // from most doors; the stops' discs inside it add nothing but cells read
+    // over and over (the seeded staff's graded picks: 17 ms a vacancy at 20k).
+    let (w, h) = (world.map.w() as u32, world.map.h() as u32);
+    let far = u32::from(to.x).max(w.saturating_sub(1 + u32::from(to.x)))
+        + u32::from(to.y).max(h.saturating_sub(1 + u32::from(to.y)));
+    if tiles(limit) >= far {
         return out;
     }
     let net = &world.transit.net;
@@ -1372,7 +1380,7 @@ pub fn reach_discs(world: &World, to: TilePos, limit: Tick) -> Vec<(TilePos, u32
         .iter()
         .filter(|&&e| !shut(e))
         .take(k)
-        .map(|&e| (e, Tick::from(net.stops[usize::from(e)].manhattan(to)) * step))
+        .map(|&s| (s, e.walk_ticks(Tick::from(net.stops[usize::from(s)].manhattan(to)))))
         .collect();
     if alight.is_empty() {
         return out;

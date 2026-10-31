@@ -15,7 +15,7 @@ mod common;
 /// The shipped 2k city with the El off (every long leg a walk) and the
 /// street's cab roll off (no cab).
 fn city() -> World {
-    common::world_with(|cfg| {
+    common::world_with_r2(|cfg| {
         cfg.transit.enabled = false;
         cfg.jobs2.p_cab = 0.0;
         if let Some(l) = cfg.legs.as_mut() {
@@ -288,10 +288,10 @@ fn test_in_flight_lines_go_with_legs() {
     let flight = map.lines.iter().filter(|l| l.in_flight).count();
     let plain = map.lines.len() - flight;
     assert!(flight >= 1 && plain >= 2, "the island's export lines and the phase's");
-    let mut on = Config::load();
+    let mut on = common::r2(Config::load());
     map.apply_to(&mut on);
     assert_eq!(on.transit.lines.len(), map.lines.len());
-    let mut off = Config::load();
+    let mut off = common::r2(Config::load());
     off.legs = None;
     map.apply_to(&mut off);
     assert_eq!(off.transit.lines.len(), plain);

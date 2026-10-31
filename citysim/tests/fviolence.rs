@@ -16,7 +16,7 @@ use citysim::{
 use common::civilians;
 
 fn world(seed: u64) -> World {
-    World::new(seed, Config::load().dole_city().scaled_to(300))
+    World::new(seed, common::r2(Config::load()).dole_city().scaled_to(300))
 }
 
 /// The first gang, eight civilians enlisted in it, and one of them.
@@ -255,7 +255,7 @@ fn test_harvest_cell_abducts() {
     use citysim::{AssetKind, Kit, Slot};
     // The Harvest cell of `fviolence::daily` (M13's own abduction roll is gone).
     let build = || -> (World, EntityId, EntityId) {
-        let cfg = Config::load().dole_city().scaled_to(300);
+        let cfg = common::r2(Config::load()).dole_city().scaled_to(300);
         let mut w = World::new(47, cfg);
         w.run_ticks(TICKS_PER_HOUR + 1);
         let (g, _) = gang_and_member(&mut w);
@@ -788,7 +788,7 @@ fn test_riot_of_bodies_strikes_nobody_off_screen() {
 
 #[test]
 fn test_vendetta_norm_scales_with_the_city() {
-    let c = Config::load();
+    let c = common::r2(Config::load());
     assert!(c.fviolence.hands.is_some());
     let n = c.world.population;
     let norm = c.grudges.vendetta_norm;

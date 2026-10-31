@@ -29,7 +29,7 @@ fn loader(w: &World) -> Role {
 /// legacy role's band is its `[roles]` table's.
 #[test]
 fn test_band_refuses_a_hire_outside_the_row() {
-    let mut w = common::world();
+    let mut w = common::world_r2();
     assert!(careers::on(&w), "the shipped config has careers on");
     let role = loader(&w);
     assert_eq!(careers::band_cfg(&w.config, role), (18, 60));
@@ -68,7 +68,7 @@ fn test_band_refuses_a_hire_outside_the_row() {
 /// one under 30 is passed over.
 #[test]
 fn test_seniority_is_seeded_and_experience_orders_the_foreman() {
-    let mut w = common::world();
+    let mut w = common::world_r2();
     let cap = u16::try_from(w.config.careers.seniority_cap_years as u64 * DAYS_PER_YEAR).unwrap();
     let seeded: Vec<u16> = w.citizens().iter().filter_map(|&a| w.comp::<Job>(a).map(|j| j.seniority_days)).collect();
     assert!(seeded.iter().filter(|&&d| d > 0).count() > seeded.len() / 2, "most seeded jobs have seniority");
@@ -114,7 +114,7 @@ fn test_profession_survives_a_layoff_and_ranks_the_rehire() {
     // phase 1's `[distance]` (its cap ranks a within-cap candidate first
     // whatever it holds, and the seed-42 city has no other jobless
     // loader-age adult within the yard's cap).
-    let mut w = common::world_with(|c| {
+    let mut w = common::world_with_r2(|c| {
         c.distance = None;
         // The pressure pass R2: the v1 pace (`common::v1_pace`).
         common::v1_pace(c);
@@ -198,7 +198,7 @@ fn gang_of_five(w: &mut World) -> (EntityId, EntityId, Vec<EntityId>) {
 /// A member's is `Some` throughout. The lieutenants are ranked 1.
 #[test]
 fn test_leader_delegates_with_five_fit_members() {
-    let mut w = common::world();
+    let mut w = common::world_r2();
     let (gid, leader, members) = gang_of_five(&mut w);
     let fit = gang::fit_headcount(&w, gid);
     assert!(fit >= 5);
@@ -225,7 +225,7 @@ fn test_leader_delegates_with_five_fit_members() {
     assert_eq!(gang::fit_headcount(&w, gid), 4);
     assert_eq!(gang::following_order(&w, leader), Some(Order::Expand), "four fit: the leader works the order");
     // Lieutenants off: no delegation, no rank 1.
-    let mut off = common::world_with(|c| c.gangs.strip_lieutenants());
+    let mut off = common::world_with_r2(|c| c.gangs.strip_lieutenants());
     let (gid2, leader2, members2) = gang_of_five(&mut off);
     assert!(gang::fit_headcount(&off, gid2) >= 5);
     assert_eq!(gang::following_order(&off, leader2), Some(Order::Expand));
@@ -236,7 +236,7 @@ fn test_leader_delegates_with_five_fit_members() {
 /// the lieutenants 10 % shared, then the equal shares.
 #[test]
 fn test_payout_cut_comes_first() {
-    let mut w = common::world();
+    let mut w = common::world_r2();
     let (gid, leader, members) = gang_of_five(&mut w);
     let lts: Vec<EntityId> =
         members.iter().copied().filter(|&m| w.comp::<GangMember>(m).is_some_and(|g| g.rank == 1)).collect();
@@ -284,7 +284,7 @@ fn test_off_cities_write_nothing() {
     ];
     // The three cities side by side (the change tier's budget, 2026-10-19).
     let case = |k: usize, edit: fn(&mut Config)| {
-        let mut w = common::world_with(edit);
+        let mut w = common::world_with_r2(edit);
         let (car, lts) = (k != 1, k != 0);
         w.run_ticks(3 * TICKS_PER_DAY);
         for r in &w.stats.history {
@@ -332,7 +332,7 @@ fn test_off_cities_write_nothing() {
         }
     });
     // The on config holds them.
-    let on = Config::load();
+    let on = common::r2(Config::load());
     assert!(on.careers.enabled && on.gangs.lieutenants && !on.roles.is_empty());
 }
 
@@ -345,7 +345,7 @@ fn diag_physical_trades_ages() {
     let physical = ["loader", "builder", "packer", "day_labourer", "bouncer"];
     for seed in [42u64, 43, 44] {
         for on in [false, true] {
-            let mut cfg = Config::load();
+            let mut cfg = common::r2(Config::load());
             if !on {
                 cfg.strip_careers();
             }
@@ -397,7 +397,7 @@ fn diag_physical_trades_ages() {
 /// base `f795548` (the retiree moved alone and the spouse stayed for good).
 #[test]
 fn test_retiring_to_kin_moves_the_couple() {
-    let mut w = common::world_with(|c| c.ages.kin_take_in_p = 1.0);
+    let mut w = common::world_with_r2(|c| c.ages.kin_take_in_p = 1.0);
     let home = |w: &World, id: EntityId| w.comp::<citysim::Household>(id).and_then(|h| h.home);
     // A worker with a co-resident spouse and a grown child housed elsewhere.
     let (a, s, kid_home) = w
@@ -443,7 +443,7 @@ fn test_retiring_to_kin_moves_the_couple() {
 /// (day 0 counted every shift end).
 #[test]
 fn test_day_zero_counts_one_profession_day() {
-    let mut w = common::world();
+    let mut w = common::world_r2();
     assert_eq!(w.day(), 0);
     let id = w.citizens().into_iter().find(|&a| w.has::<Job>(a)).expect("a worker");
     w.remove::<Profession>(id);

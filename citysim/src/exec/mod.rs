@@ -52,10 +52,11 @@ pub enum ExecState {
         next_move_tick: Tick,
         /// When the agent first found the door or building full.
         blocked_since: Option<Tick>,
-        /// M13 D19: quarter ticks carried past `next_move_tick` (a driver's
-        /// step can cost less than a tick).
+        /// M13 D19: step units (round 9 Y4: `[exec] units_per_tick` a tick,
+        /// quarter ticks before it) carried past `next_move_tick` (a step
+        /// can cost less than a tick).
         #[serde(default)]
-        carry_q: u8,
+        carry_q: u32,
     },
     /// Coarse LOD.
     GotoTimed {
@@ -1554,21 +1555,24 @@ pub fn settle_interrupted(world: &mut World, id: EntityId) {
 /// The ticks of a timed walk from `from` to `to` (`timed_goto`'s; the L2
 /// shadow fixes' commute estimate, `fixes::walk_estimate`).
 pub fn timed_walk(world: &World, id: EntityId, from: TilePos, to: TilePos) -> Tick {
-    let base = Tick::from(from.manhattan(to)) * world.config.exec.move_ticks_full;
+    let tiles = Tick::from(from.manhattan(to));
     let m = crate::systems::vehicles::timed_mult(world, id);
     let mut litter = 1.0;
     if crate::systems::litter::enabled(world) {
         let dirt = world.district(world.district_of(to)).litter;
         litter = 1.0 + world.config.litter.timed_mult * dirt;
     }
+    // Round 9 Y4: the walk at the pace (`[exec] walk_ticks`), scaled
+    // before the rounding, so a car's share is not lost to a short walk's
+    // few ticks.
     if m == 1.0 {
         if litter > 1.0 {
-            (base as f32 * litter).round() as Tick
+            world.config.exec.walk_ticks_f(tiles, litter)
         } else {
-            base
+            world.config.exec.walk_ticks(tiles)
         }
     } else {
-        (base as f32 * m * litter.max(1.0)).round() as Tick
+        world.config.exec.walk_ticks_f(tiles, m * litter.max(1.0))
     }
 }
 
@@ -1582,11 +1586,10 @@ pub fn timed_walk(world: &World, id: EntityId, from: TilePos, to: TilePos) -> Ti
 pub fn walk_reach_tiles(world: &World, id: EntityId, cap: Tick, limit: u32) -> u32 {
     let m = crate::systems::vehicles::timed_mult(world, id);
     let floor = |d: u32| {
-        let base = Tick::from(d) * world.config.exec.move_ticks_full;
         if m == 1.0 {
-            base
+            world.config.exec.walk_ticks(Tick::from(d))
         } else {
-            (base as f32 * m).round() as Tick
+            world.config.exec.walk_ticks_f(Tick::from(d), m)
         }
     };
     if floor(limit) <= cap {
@@ -1605,15 +1608,17 @@ pub fn walk_reach_tiles(world: &World, id: EntityId, cap: Tick, limit: u32) -> u
     lo
 }
 
-/// M12 D18: the extra ticks before a Full mover's next step off `tile`,
-/// by the tile's litter band (`[litter] step_ticks`). One byte read on a
-/// step already taken; flow fields never change.
+/// M12 D18: the extra step units before a Full mover's next step off
+/// `tile`, by the tile's litter band (`[litter] step_ticks`, a walker's
+/// step at `move_ticks_full` 1 each: `step_res` units; round 9 Y4, ticks
+/// before it, when a step was a tick). One byte read on a step already
+/// taken; flow fields never change.
 pub fn litter_delay(world: &World, tile: TilePos) -> Tick {
     if !crate::systems::litter::enabled(world) {
         return 0;
     }
     let band = crate::systems::litter::band(crate::systems::litter::at(world, tile));
-    Tick::from(world.config.litter.step_ticks.get(band).copied().unwrap_or(0))
+    Tick::from(world.config.litter.step_ticks.get(band).copied().unwrap_or(0)) * world.config.exec.step_res.max(1)
 }
 
 /// A Full Goto: flow field for buildings, A* otherwise. `None` if unreachable.
@@ -1639,14 +1644,21 @@ pub fn walking_goto(world: &World, id: EntityId, target: GotoTarget) -> Option<E
     Some(ExecState::Goto { target, path, next_move_tick: world.tick, blocked_since: None, carry_q: 0 })
 }
 
-/// One tick of Full-LOD movement. M13 D19: steps are counted in quarter
-/// ticks, `next_q = next_move_tick × 4 + carry_q` (never earlier than now);
-/// the call keeps stepping while `next_q` is inside this tick, up to
-/// `[vehicles] max_steps_per_tick` steps, stopping before the door (the
-/// door is entered by `try_enter` on the next call, never in a burst) and
-/// at the path's end. An unchromed walker's step is 8 quarters, so it takes
-/// one step and moves on `tick + 2`: the M12 arithmetic exactly. Leaving a
-/// building keeps `tick + move_ticks`.
+/// One tick of Full-LOD movement. M13 D19, round 9 Y4: steps are counted
+/// in step units, `next_q = next_move_tick × units_per_tick + carry_q`
+/// (never earlier than now; `[exec] units_per_tick` is `step_res ×
+/// walk_tiles_per_tick`): the call keeps stepping while `next_q` is inside
+/// this tick, a walker's step `step_units` (`step_res × move_ticks_full`),
+/// so a walker crosses `walk_tiles_per_tick` tiles every `move_ticks_full`
+/// ticks, a driver up to `[vehicles] max_steps_per_tick` steps. Every
+/// sub-tick step is taken tile by tile: the litter on the tile stepped
+/// onto, a driver's step count and crash tile (`vehicles::note_step`), the
+/// path's re-find on a big map (`big_step`) all read the tile they happen
+/// on. The burst stops before the door (the door and its queue are
+/// `try_enter`'s on the next call, never in a burst) and at the path's end
+/// (the arrival is the next call's). Stepping out of a building costs one
+/// step and the walk goes on in the same tick. At the pace before Y4 (one
+/// tile a tick, `step_res` 4) this is the M12/M13 arithmetic exactly.
 fn advance_goto(
     world: &mut World,
     id: EntityId,
@@ -1654,31 +1666,39 @@ fn advance_goto(
     mut path: Vec<TilePos>,
     next_move_tick: Tick,
     blocked_since: Option<Tick>,
-    carry_q: u8,
+    carry_q: u32,
 ) -> StepResult {
     let tick = world.tick;
     if tick < next_move_tick {
         return StepResult::Running;
     }
-    let move_ticks = world.config.exec.move_ticks_full;
+    let upt = world.config.exec.units_per_tick();
     let Some(pos) = world.comp::<Position>(id).cloned() else { return StepResult::Failed(FailReason::NoSuchPlace) };
+    let mut next_q = (next_move_tick * upt + u64::from(carry_q)).max(tick * upt);
+    let end_q = (tick + 1) * upt;
 
-    // Inside some other building: step out onto the street first.
+    // Inside some other building: step out onto the street first (one step).
     if let Some(here) = pos.building {
         if Some(here) == target.building {
             return StepResult::Done;
         }
         world.leave_building(id);
-        return set_goto(world, id, target, path, tick + move_ticks, None, 0);
+        next_q += world.config.exec.step_units();
+        if next_q >= end_q {
+            return set_goto(world, id, target, path, next_q / upt, None, (next_q % upt) as u32);
+        }
     }
+    let Some(mut here) = world.comp::<Position>(id).map(|p| p.tile) else {
+        return StepResult::Failed(FailReason::NoSuchPlace);
+    };
 
     let driving = world.comp::<crate::components::Kit>(id).is_some_and(|k| k.driving.is_some());
-    let max_steps = if driving { world.config.vehicles.max_steps_per_tick.max(1) } else { 1 };
+    let max_steps = if driving { u32::from(world.config.vehicles.max_steps_per_tick.max(1)) } else { u32::MAX };
+    // A walker's step is the same on every tile (its `Kit.walk_mult`); a
+    // driver's reads the tile's column.
+    let walk_q = (!driving).then(|| crate::systems::vehicles::step_q(world, id, here));
     let big = target.building.is_some() && world.big_paths();
-    let mut next_q = (next_move_tick * 4 + Tick::from(carry_q)).max(tick * 4);
-    let end_q = (tick + 1) * 4;
-    let mut here = pos.tile;
-    let mut steps = 0u8;
+    let mut steps = 0u32;
     loop {
         let next = match target.building {
             Some(b) => {
@@ -1720,13 +1740,14 @@ fn advance_goto(
         if driving {
             crate::systems::vehicles::note_step(world, id, next);
         }
-        next_q += u64::from(crate::systems::vehicles::step_q(world, id, next)) + 4 * litter_delay(world, next);
+        let q = walk_q.unwrap_or_else(|| crate::systems::vehicles::step_q(world, id, next));
+        next_q += u64::from(q) + litter_delay(world, next);
         if next_q >= end_q || steps >= max_steps || (target.building.is_none() && path.is_empty()) {
             break;
         }
     }
-    let carry = (next_q % 4) as u8;
-    set_goto(world, id, target, path, next_q / 4, None, carry)
+    let carry = (next_q % upt) as u32;
+    set_goto(world, id, target, path, next_q / upt, None, carry)
 }
 
 /// Scale S3a: the next tile toward `door` on a big map, off the walk's own
@@ -1816,7 +1837,7 @@ fn set_goto(
     path: Vec<TilePos>,
     next_move_tick: Tick,
     blocked_since: Option<Tick>,
-    carry_q: u8,
+    carry_q: u32,
 ) -> StepResult {
     if let Some(brain) = world.comp_mut::<Brain>(id) {
         brain.exec = ExecState::Goto { target, path, next_move_tick, blocked_since, carry_q };

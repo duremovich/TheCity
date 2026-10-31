@@ -821,7 +821,12 @@ pub fn call_for_help(world: &mut World, w: EntityId) -> Option<EntityId> {
     let reach_of = |world: &World, o: EntityId| {
         world
             .comp::<crate::components::Position>(o)
-            .map(|p| (p.tile.manhattan(at), Tick::from(p.tile.manhattan(at)) + Tick::from(to_doc)))
+            // Round 9 Y4: the walk to the body and on to the doctor at the
+            // pace (one tile a tick before it).
+            .map(|p| {
+                let tiles = Tick::from(p.tile.manhattan(at)) + Tick::from(to_doc);
+                (p.tile.manhattan(at), world.config.exec.walk_ticks(tiles))
+            })
     };
     let mut best: Option<(f32, EntityId)> = None;
     for o in world.neighbours(w) {
