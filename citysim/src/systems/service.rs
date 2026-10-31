@@ -1585,6 +1585,13 @@ fn owner_present(world: &World, fixer: EntityId) -> Option<EntityId> {
     here.then_some(o)
 }
 
+/// Round 9 Z2: the one behind `fixer`'s desk for `served` now (a server on
+/// duty with room this hour, else the owner in), `None` with the desk empty:
+/// a walk-in takes his job from him.
+pub fn desk_server(world: &World, fixer: EntityId, served: EntityId) -> Option<EntityId> {
+    fixer_server(world, fixer, served)
+}
+
 /// § 2.4 (fixer): who serves `served` at `fixer` now: the on-duty `Client`
 /// servers (the Fixer's staff, the forger) with room this hour by the
 /// lowest `hash(PURPOSE_FIXER, …)` (D6), else the owner present. `None`:

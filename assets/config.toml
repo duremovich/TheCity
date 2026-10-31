@@ -2226,6 +2226,17 @@ network_flat = -0.1                # plan C13 mode B
 hire_reach_tiles = 64              # plan C20: a Fixer within reach of the holder's Home door
 bribe_min = 0.5                    # plan C30 (phase 3)
 guard_hours = 8                    # plan C15: a Guard taker's daily post
+# Round 9 Z2 (the taker): a body takes a brokered record in person. A would-be taker (a gun through the gun gate who
+# is a regular of the Fixer, or the leader of a gang networked there) reads its board (the book ranked as the match
+# ranks it, the top board_size), weighs the best record he would take (mode A: price, risk against his skill or his
+# crew and the target's guard, the buyer's honour) and the walk under the Contract goal at walk_in_flat, walks to
+# the Fixer and takes it at the desk while someone is behind it (take_job_mins there). The daily match at match_hour
+# offers to Statistical takers only (the mirror); the corps' and the direct hires stay on their ticks. The fixer holds
+# a record for the walk-in on his way walk_in_hold_mins (the others reading the board pass it over meanwhile).
+board_size = 8
+walk_in_flat = 0.0
+take_job_mins = 15
+walk_in_hold_mins = 180
 
 [missions]
 max_missions = 12

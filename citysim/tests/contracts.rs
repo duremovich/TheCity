@@ -290,6 +290,9 @@ fn test_matching_is_deterministic() {
         let now = w.tick;
         for &c in &cands {
             gun(&mut w, c);
+            // Round 9 (Z2): the match offers to Statistical regulars only; a
+            // body takes off the board in person (`contracts::walk_in_pick`).
+            lod::set_lod(&mut w, c, Lod::Statistical);
         }
         let mut order = cands.clone();
         if rev {

@@ -173,6 +173,10 @@ pub enum ActionKind {
     /// Commission goal's scripted step; never in `PLANNABLE`, started by
     /// `contracts::can_start`).
     Commission,
+    /// Round 9 Z2: at an open Fixer's desk, a record off its board taken in
+    /// person (the Contract goal's walk-in; never in `PLANNABLE`, started
+    /// by `contracts::can_start`).
+    TakeJob,
     /// M16b phase 2: at the holding building with an abductee in tow, the
     /// captive handed over (an Abduct plan's scripted step; never in
     /// `PLANNABLE`, started by `contracts::can_start`).
@@ -432,6 +436,7 @@ impl ActionKind {
                 | ActionKind::Collect
                 | ActionKind::Preach
                 | ActionKind::Network
+                | ActionKind::TakeJob
                 | ActionKind::Guard
                 | ActionKind::HandOver
                 | ActionKind::CarryWounded
@@ -452,7 +457,14 @@ impl ActionKind {
     /// M16a (plan C10, C15): a Contract plan's own scripted step (never
     /// planned; started by `contracts::can_start`).
     pub fn is_contract_step(self) -> bool {
-        matches!(self, ActionKind::Network | ActionKind::Guard | ActionKind::Commission | ActionKind::HandOver)
+        matches!(
+            self,
+            ActionKind::Network
+                | ActionKind::TakeJob
+                | ActionKind::Guard
+                | ActionKind::Commission
+                | ActionKind::HandOver
+        )
     }
 
     /// Real economy E27, E28: a charity plan's scripted step (never
@@ -1917,6 +1929,7 @@ impl ActionKind {
             | ActionKind::Preach => 60.0,
             // M16a (plan C10, C15): scripted, never planned.
             ActionKind::Network
+            | ActionKind::TakeJob
             | ActionKind::Commission
             | ActionKind::HandOver
             | ActionKind::CarryWounded

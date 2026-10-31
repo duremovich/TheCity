@@ -419,6 +419,16 @@ pub struct Contract {
     /// outcome told to its fixer names it); 0 direct or unpaid.
     #[serde(default, skip_serializing_if = "is_zero_i64")]
     pub cut: i64,
+    /// Round 9 Z2: its agent target has heard of it (the street's tip at a
+    /// take, word from a party he knows, or a crew at his door): he hears
+    /// once and acts once (`contracts::heard_of`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub heard: bool,
+    /// Round 9 Z2: a walk-in on his way to take it and since when (the
+    /// fixer holds it for him `[fixers] walk_in_hold_mins`; the others
+    /// reading the board pass it over meanwhile).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claimed: Option<(EntityId, Tick)>,
 }
 
 fn is_zero_i64(v: &i64) -> bool {

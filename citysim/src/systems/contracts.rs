@@ -604,6 +604,8 @@ fn record_of(
         motive: Motive::None,
         hold: None,
         cut: 0,
+        heard: false,
+        claimed: None,
     }
 }
 
@@ -1473,6 +1475,13 @@ fn start_live(world: &mut World, id: ContractId) -> bool {
 /// and the `Hired` first-hand copies, the render, a ledger `due` (drawn on
 /// `ContractNs::Due`) or the live run. `ContractTaken`.
 pub fn accept(world: &mut World, id: ContractId, taker: EntityId, crew: &[EntityId]) -> bool {
+    accept_at(world, id, taker, crew, None)
+}
+
+/// [`accept`], `walker` the body who came to the Fixer's desk and took it in
+/// person (round 9 Z2: the taker, or a crew's leader for its gang): the line
+/// says so and names the price and the one behind the desk.
+fn accept_at(world: &mut World, id: ContractId, taker: EntityId, crew: &[EntityId], walker: Option<EntityId>) -> bool {
     let Some(c) = world.contracts.get(&id) else { return false };
     if c.status != ContractStatus::Open {
         return false;
@@ -1542,38 +1551,60 @@ pub fn accept(world: &mut World, id: ContractId, taker: EntityId, crew: &[Entity
     let crew_txt = if crew.is_empty() { String::new() } else { format!(", crew {}", crew.len()) };
     // Round 5 U5 (OPEN-217): a brokered take is the fixer's pick from his
     // regulars: he and the crew are named, and his diary holds it.
-    let hand = world
-        .contracts
-        .get(&id)
-        .and_then(|c| c.broker)
-        .and_then(|b| crate::systems::service::fixer_hand(world, b).map(|h| (h, b)));
-    let from = match hand {
-        Some((h, b)) => {
-            let names: Vec<String> = crew.iter().map(|&m| world.name_of(m)).collect();
-            let with = if names.is_empty() { String::new() } else { format!(" with {}", names.join(", ")) };
-            format!(", put on it{with} by {} at {}", world.name_of(h), world.name_of(b))
+    // Round 9 Z2: a walk-in's is the one behind the desk.
+    let broker = world.contracts.get(&id).and_then(|c| c.broker);
+    let hand = broker.and_then(|b| {
+        walker
+            .and_then(|w| crate::systems::service::desk_server(world, b, w))
+            .or_else(|| crate::systems::service::fixer_hand(world, b))
+            .map(|h| (h, b))
+    });
+    let names: Vec<String> = crew.iter().map(|&m| world.name_of(m)).collect();
+    let text = match (walker, hand) {
+        (Some(w), _) => {
+            let price = world.contracts.get(&id).map_or(0, |c| c.price);
+            let at = broker.map(|b| world.name_of(b)).unwrap_or_default();
+            let gang = if w == taker { String::new() } else { format!(" for {}", world.owner_label(Some(taker))) };
+            let with = if names.is_empty() { String::new() } else { format!(", crew {}", names.join(", ")) };
+            let from = hand.map(|(h, _)| format!(", from {}", world.name_of(h))).unwrap_or_default();
+            format!(
+                "{} came to {at} in person and took the {} on {} for {price}c{gang} ({tag}{with}){from}",
+                world.name_of(w),
+                kind.label(),
+                world.name_of(target)
+            )
         }
-        None => String::new(),
+        (None, Some((h, b))) => {
+            let with = if names.is_empty() { String::new() } else { format!(" with {}", names.join(", ")) };
+            format!(
+                "{} took the {} on {} ({tag}{crew_txt}), put on it{with} by {} at {}",
+                world.owner_label(Some(taker)),
+                kind.label(),
+                world.name_of(target),
+                world.name_of(h),
+                world.name_of(b)
+            )
+        }
+        (None, None) => format!(
+            "{} took the {} on {} ({tag}{crew_txt})",
+            world.owner_label(Some(taker)),
+            kind.label(),
+            world.name_of(target)
+        ),
     };
-    let text = format!(
-        "{} took the {} on {} ({tag}{crew_txt}){from}",
-        world.owner_label(Some(taker)),
-        kind.label(),
-        world.name_of(target)
-    );
     let mut actors: SmallVec<[EntityId; 6]> = SmallVec::from_slice(&[taker, target]);
-    if let Some((h, _)) = hand {
-        if !actors.contains(&h) {
-            actors.push(h);
+    for x in walker.into_iter().chain(hand.map(|(h, _)| h)) {
+        if !actors.contains(&x) {
+            actors.push(x);
         }
     }
     world.push_event(EventKind::ContractTaken, &actors, text.clone());
     log(world, id, text);
     heard_of(world, id, taker);
     // Lives at work phase 5 (§ 2.4): a brokered take is the taker's
-    // encounter with the fixer on duty.
+    // encounter with the fixer on duty (round 9 Z2: the walker's, in person).
     if let Some(b) = world.contracts.get(&id).and_then(|c| c.broker) {
-        crate::systems::service::contract_party(world, taker, b);
+        crate::systems::service::contract_party(world, walker.unwrap_or(taker), b);
     }
     true
 }
@@ -1586,12 +1617,22 @@ pub fn accept(world: &mut World, id: ContractId, taker: EntityId, crew: &[Entity
 /// him and his guards (their diaries hold it). The client is not named.
 /// A beat on a CEO was in his file and invisible to him (`ceo_88522 d24`:
 /// a club, a hotel, twelve hours' sleep). Nothing with `[verbs]` absent.
+/// Round 9 Z2: V18's `marked_30280` (a beat taken twice, by two crews) and
+/// both guns' marks never heard: the tip was one hash of the record and the
+/// target, so a record taken again rolled the same miss every time, and
+/// nothing else carried word. Now a target hears once per record (`heard`),
+/// by the first of: his security; word from someone he knows among the
+/// taker, the crew and the one behind the desk (an edge that is no Rival or
+/// Enemy); the street's tip drawn per take (the record, the taker and the
+/// attempt); and a crew at his door that found him out ([`heard_at_door`]).
 fn heard_of(world: &mut World, id: ContractId, taker: EntityId) {
     const PURPOSE_HEARD: u64 = 0xc0_7e_a7_d1;
     let Some(v) = world.config.verbs.clone() else { return };
-    let Some((kind, target)) = world.contracts.get(&id).and_then(|c| match c.target {
-        Target::Agent(t) if matches!(c.kind, ContractKind::Hit | ContractKind::Beat | ContractKind::Abduct) => {
-            Some((c.kind, t))
+    let Some((kind, target, attempts, crew, broker)) = world.contracts.get(&id).and_then(|c| match c.target {
+        Target::Agent(t)
+            if !c.heard && matches!(c.kind, ContractKind::Hit | ContractKind::Beat | ContractKind::Abduct) =>
+        {
+            Some((c.kind, t, c.attempts, c.crew.clone(), c.broker))
         }
         _ => None,
     }) else {
@@ -1601,19 +1642,20 @@ fn heard_of(world: &mut World, id: ContractId, taker: EntityId) {
         return;
     }
     let guards = missions::exec_guards(world, target);
-    let tipped =
-        crate::systems::econ::hash_unit(world.seed(), PURPOSE_HEARD, id, u64::from(target.index)) < v.hit_heard_p;
-    if guards.is_empty() && !tipped {
-        return;
-    }
-    if let Some(n) = world.comp_mut::<crate::components::Needs>(target) {
-        n.safety = (n.safety - v.hit_heard_safety).max(0.0);
-    }
-    world.remember(target, crate::components::MemoryKind::Threatened, Some(taker), 0.6, -0.5, false);
-    ownership::jobs2_row(world).hit_heard += 1;
     let (who, by) = (world.name_of(target), world.owner_label(Some(taker)));
     let text = if guards.is_empty() {
-        format!("{who} got word on the street: {by} took the {} on {who}", kind.label())
+        let hand = broker.and_then(|b| crate::systems::service::fixer_hand(world, b));
+        let knows = |p: EntityId| {
+            p != target && world.edge(target, p).is_some_and(|e| !matches!(e.kind, RelKind::Rival | RelKind::Enemy))
+        };
+        let tie = std::iter::once(taker).chain(crew.iter().copied()).chain(hand).find(|&p| knows(p));
+        let key = (u64::from(taker.index) << 32 | u64::from(target.index)) ^ (u64::from(attempts) << 56);
+        let tipped = crate::systems::econ::hash_unit(world.seed(), PURPOSE_HEARD, id, key) < v.hit_heard_p;
+        match tie {
+            Some(p) => format!("{who} got word from {}: {by} took the {} on {who}", world.name_of(p), kind.label()),
+            None if tipped => format!("{who} got word on the street: {by} took the {} on {who}", kind.label()),
+            None => return,
+        }
     } else {
         let names: Vec<String> = guards.iter().take(3).map(|&g| world.name_of(g)).collect();
         format!(
@@ -1624,8 +1666,94 @@ fn heard_of(world: &mut World, id: ContractId, taker: EntityId) {
     };
     let mut actors = vec![target];
     actors.extend(guards.iter().take(3).copied());
-    world.push_event(EventKind::Contract, &actors, text);
+    hear(world, id, target, taker, &actors, text);
+}
+
+/// Round 9 Z2: target `target` has heard of record `id` (`taker` its
+/// taker): his safety falls by `hit_heard_safety`, a `Threatened` memory of
+/// the taker, the line (`actors` hold it), and he acts on it ([`react`]).
+fn hear(world: &mut World, id: ContractId, target: EntityId, taker: EntityId, actors: &[EntityId], text: String) {
+    let Some(v) = world.config.verbs.clone() else { return };
+    if let Some(c) = world.contracts.get_mut(&id) {
+        c.heard = true;
+    }
+    if let Some(n) = world.comp_mut::<crate::components::Needs>(target) {
+        n.safety = (n.safety - v.hit_heard_safety).max(0.0);
+    }
+    world.remember(target, crate::components::MemoryKind::Threatened, Some(taker), 0.6, -0.5, false);
+    ownership::jobs2_row(world).hit_heard += 1;
+    world.push_event(EventKind::Contract, actors, text);
     react(world, id, target, taker);
+}
+
+/// Round 9 Z2: `hunter`, working a taken record on his mark, asked after him
+/// of `r` at `venue` (`hunt::ask_around`): one close to the mark (a Friend,
+/// kin or spouse) tells him. Once per record, as [`heard_of`].
+pub fn asked_after(world: &mut World, hunter: EntityId, r: EntityId, venue: Option<EntityId>) {
+    if world.config.verbs.is_none() {
+        return;
+    }
+    let Some(id) = world.contract_runs.get(&hunter).map(|x| x.contract) else { return };
+    let Some((kind, target, taker)) = world.contracts.get(&id).and_then(|c| match (c.target, c.taker) {
+        (Target::Agent(t), Some(k))
+            if !c.heard
+                && c.status == ContractStatus::Taken
+                && matches!(c.kind, ContractKind::Hit | ContractKind::Beat | ContractKind::Abduct) =>
+        {
+            Some((c.kind, t, k))
+        }
+        _ => None,
+    }) else {
+        return;
+    };
+    let close = world
+        .edge(r, target)
+        .is_some_and(|e| matches!(e.kind, RelKind::Friend | RelKind::Family | RelKind::Spouse | RelKind::Parent));
+    if !close || r == target || !crate::systems::law::living(world, target) {
+        return;
+    }
+    let who = world.name_of(target);
+    let at = venue.map(|v| format!(" at {}", world.name_of(v))).unwrap_or_default();
+    let him = if crate::systems::grief::his(world, target) == "his" { "him" } else { "her" };
+    let text = format!(
+        "{who} got word from {}: {} was asking after {him}{at} (the {} on {who})",
+        world.name_of(r),
+        world.name_of(hunter),
+        kind.label()
+    );
+    hear(world, id, target, taker, &[target, r], text);
+}
+
+/// Round 9 Z2: a crew that came to `place` for record `id`'s mark and found
+/// him out (`missions`' "found no X"): the mark hears of it from whoever was
+/// at his door (V18 `marked_30280`: two crews at Block#201 in two nights,
+/// no word). Once per record, as [`heard_of`].
+pub fn heard_at_door(world: &mut World, id: ContractId, place: &str) {
+    if world.config.verbs.is_none() {
+        return;
+    }
+    let Some((kind, target, taker)) = world.contracts.get(&id).and_then(|c| match (c.target, c.taker) {
+        (Target::Agent(t), Some(k))
+            if !c.heard && matches!(c.kind, ContractKind::Hit | ContractKind::Beat | ContractKind::Abduct) =>
+        {
+            Some((c.kind, t, k))
+        }
+        _ => None,
+    }) else {
+        return;
+    };
+    if !crate::systems::law::living(world, target) || crate::systems::ages::is_protected(world, target) {
+        return;
+    }
+    let who = world.name_of(target);
+    let him = crate::systems::grief::his(world, target);
+    let him = if him == "his" { "him" } else { "her" };
+    let text = format!(
+        "{who} heard a crew came to {place} for {him}: {} holds the {} on {who}",
+        world.owner_label(Some(taker)),
+        kind.label()
+    );
+    hear(world, id, target, taker, &[target], text);
 }
 
 /// A live Guard record on agent `t` (his own bodyguard, standing or asked for).
@@ -1785,32 +1913,35 @@ fn offer(
 /// lower id) and works the top `offers_per_day` against its regulars; (2)
 /// every Open direct record (by id) against its viewers; (3) public
 /// Locates are never matched (a stream, C27). Gangs and Security corps as
-/// candidates are phases 2 and 3.
+/// candidates are phases 2 and 3. Round 9 Z2: a Fixer's book is offered to
+/// its Statistical regulars and to the gangs whose leader is no body (the
+/// mirror); a body takes off the board in person (`walk_in_pick`).
 pub fn match_day(world: &mut World) {
-    let now = world.tick;
     let mut taken_today = std::collections::BTreeSet::new();
     for f in open_fixers(world) {
         let Some(k) = world.comp::<Broker>(f) else { continue };
-        let regulars: Vec<EntityId> = k.regulars.keys().copied().collect();
-        let mut book: Vec<(f64, ContractId)> = k
-            .book
+        // Round 9 Z2: a body takes a brokered record in person (the walk-in,
+        // `walk_in_pick`); the match offers to the Statistical regulars and
+        // to the gangs whose leader is no body (the mirror).
+        let regulars: Vec<EntityId> =
+            k.regulars.keys().copied().filter(|&r| !crate::systems::presence::is_body(world, r)).collect();
+        let gangs: Vec<EntityId> = k
+            .gangs
             .iter()
-            .filter_map(|id| world.contracts.get(id))
-            .filter(|c| c.is_open())
-            // Round 5 U5 (OPEN-217): the fixer puts nobody on a job whose
-            // mark is held past its deadline (the cells, abroad, leaving):
-            // it stays on the book (20k: three Locates taken at 18:00 on
-            // marks in the cells till d36, each let go within the hour).
-            .filter(|c| !mark_gone_past_deadline(world, c))
-            .map(|c| {
-                let age = now.saturating_sub(c.posted) as f64 / TICKS_PER_DAY as f64;
-                let days = (c.deadline.saturating_sub(c.posted) as f64 / TICKS_PER_DAY as f64).max(1.0);
-                (c.price as f64 * (1.0 + age / days), c.id)
+            .copied()
+            .filter(|&g| {
+                !world
+                    .comp::<crate::components::Gang>(g)
+                    .and_then(|x| x.leader)
+                    .is_some_and(|l| crate::systems::presence::is_body(world, l))
             })
             .collect();
-        book.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
-        let gangs: Vec<EntityId> = k.gangs.iter().copied().collect();
-        for &(_, id) in book.iter().take(usize::from(world.config.fixers.offers_per_day)) {
+        let book = ranked_book(world, f);
+        for &id in book.iter().take(usize::from(world.config.fixers.offers_per_day)) {
+            // Round 9 Z2: held for a walk-in on his way.
+            if world.contracts.get(&id).is_some_and(|c| held_for_other(world, c, EntityId::NONE)) {
+                continue;
+            }
             // C32: a Security corp converts a Guard on a building first.
             if corp_take(world, id) {
                 continue;
@@ -1841,6 +1972,201 @@ pub fn match_day(world: &mut World) {
             .into_iter()
             .collect();
         offer(world, id, cands, gangs, &mut taken_today);
+    }
+}
+
+/// C12's board order: Fixer `f`'s Open records by `price × (1 + age_days ÷
+/// deadline_days)` descending (ties the lower id), a mark held past the
+/// deadline left off (round 5 U5, OPEN-217: the fixer puts nobody on a job
+/// whose mark is in the cells, abroad or leaving till after it; 20k: three
+/// Locates taken at 18:00 on marks in the cells till d36, each let go
+/// within the hour). The daily match offers its top `offers_per_day`; a
+/// walk-in reads its top `board_size` (round 9 Z2).
+fn ranked_book(world: &World, f: EntityId) -> Vec<ContractId> {
+    let now = world.tick;
+    let Some(k) = world.comp::<Broker>(f) else { return Vec::new() };
+    let mut book: Vec<(f64, ContractId)> = k
+        .book
+        .iter()
+        .filter_map(|id| world.contracts.get(id))
+        .filter(|c| c.is_open())
+        .filter(|c| !mark_gone_past_deadline(world, c))
+        .map(|c| {
+            let age = now.saturating_sub(c.posted) as f64 / TICKS_PER_DAY as f64;
+            let days = (c.deadline.saturating_sub(c.posted) as f64 / TICKS_PER_DAY as f64).max(1.0);
+            (c.price as f64 * (1.0 + age / days), c.id)
+        })
+        .collect();
+    book.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+    book.into_iter().map(|(_, id)| id).collect()
+}
+
+// ---------------------------------------------------------------------------
+// Round 9 Z2: the walk-in (the take as a body's act)
+// ---------------------------------------------------------------------------
+
+/// Round 9 Z2: a would-be taker's pick off a Fixer's board.
+#[derive(Clone, Debug)]
+pub struct WalkIn {
+    pub fixer: EntityId,
+    pub id: ContractId,
+    /// `Some(gang)`: a crew's take, the walker its leader.
+    pub gang: Option<EntityId>,
+    /// Mode A's raw product for the walker (the take's weight).
+    pub score: f32,
+    /// Mode A's considerations (the Contract goal's walk-in reads them).
+    pub cs: Vec<Consideration>,
+}
+
+/// Round 9 Z2: the record `who` (a body) would walk to a Fixer and take now,
+/// the best by mode A's product (ties the first found: Fixers ascending,
+/// each board in its rank): he reads the board of each open Fixer whose
+/// desk is manned (`service::desk_server`) and that knows him: a gun
+/// through the gun gate who is its regular (the fixer's word reaches his
+/// regulars; a first visit's `Network` reads it at the door), or the leader
+/// of a gang networked there (a crew's take is its leader's walk). An
+/// individual's take is `eligible` and `hunt_in_reach` with mode A at least
+/// `accept_min` (risk against his skill and the target's guard, the buyer's
+/// honour); a crew's is `gang_eligible` with `leader_accepts` (the match's
+/// rule), weighed by mode A against the crew's odds. A bribe for the law is
+/// no walk-in's (the guard's shift takes it at the match). `at` limits the
+/// read to one Fixer (the desk he stands at). Never a minor's
+/// (`ages::is_protected`, also in `eligible` and the crew's gates).
+pub fn walk_in_pick(world: &World, who: EntityId, at: Option<EntityId>) -> Option<WalkIn> {
+    if !crate::systems::presence::is_body(world, who)
+        || !free_adult(world, who)
+        || crate::systems::ages::is_protected(world, who)
+        || world.contract_runs.contains_key(&who)
+        || world.mission_of.contains_key(&who)
+    {
+        return None;
+    }
+    let fixers = world.buildings_of_kind(BuildingKind::Fixer);
+    if fixers.is_empty() {
+        return None;
+    }
+    let gang =
+        world.gang_of(who).filter(|&g| world.comp::<crate::components::Gang>(g).is_some_and(|x| x.leader == Some(who)));
+    let gun = gun_gate(world, who);
+    if gang.is_none() && !gun {
+        return None;
+    }
+    if holds_taken(world, who) {
+        return None;
+    }
+    let cfg = &world.config;
+    let keep = Tick::from(cfg.fixers.regular_days) * TICKS_PER_DAY;
+    let now = world.tick;
+    let min = cfg.contracts.accept_min;
+    let mut best: Option<WalkIn> = None;
+    let take = |w: WalkIn, best: &mut Option<WalkIn>| {
+        if best.as_ref().is_none_or(|b| w.score > b.score) {
+            *best = Some(w);
+        }
+    };
+    for &f in fixers {
+        if at.is_some_and(|a| a != f) || !fixer_open(world, f) {
+            continue;
+        }
+        let Some(k) = world.comp::<Broker>(f) else { continue };
+        let regular = gun && k.regulars.get(&who).is_some_and(|&t| t + keep > now);
+        let crew_of = gang.filter(|g| k.gangs.contains(g));
+        if !regular && crew_of.is_none() {
+            continue;
+        }
+        if crate::systems::service::desk_server(world, f, who).is_none() {
+            continue;
+        }
+        for id in ranked_book(world, f).into_iter().take(usize::from(cfg.fixers.board_size)) {
+            let Some(c) = world.contracts.get(&id) else { continue };
+            if is_corruption(world, c) || held_for_other(world, c, who) {
+                continue;
+            }
+            // The under-18 rule: a minor is no mark (`target_ok` at the post; again at the take).
+            if !matches!(c.kind, ContractKind::Guard | ContractKind::Escort)
+                && c.target_agent().is_some_and(|t| crate::systems::ages::is_protected(world, t))
+            {
+                continue;
+            }
+            if regular && eligible(world, c, who) && hunt_in_reach(world, c, who) {
+                let s_def = missions::defender_strength(world, &c.target);
+                let cs = mode_a(world, who, c, risk_against(world, c.kind, who, s_def), 1.0);
+                let score: f32 = cs.iter().map(|x| x.output).product();
+                if score >= min {
+                    take(WalkIn { fixer: f, id, gang: None, score, cs }, &mut best);
+                }
+            }
+            if let Some(g) = crew_of {
+                if gang_eligible(world, c, g) && leader_accepts(world, g, missions::buyer_faction(world, c)) {
+                    let crew = job_crew(world, c, g);
+                    let risk = 1.0 - missions::estimate(world, &crew, &c.target);
+                    let cs = mode_a(world, who, c, risk, 1.0);
+                    let score: f32 = cs.iter().map(|x| x.output).product();
+                    take(WalkIn { fixer: f, id, gang: Some(g), score, cs }, &mut best);
+                }
+            }
+        }
+    }
+    best
+}
+
+/// Round 9 Z2: record `c` is held for another walk-in on his way (claimed
+/// within `[fixers] walk_in_hold_mins`).
+fn held_for_other(world: &World, c: &Contract, who: EntityId) -> bool {
+    let hold = Tick::from(world.config.fixers.walk_in_hold_mins);
+    c.claimed.is_some_and(|(w, at)| w != who && world.tick < at + hold)
+}
+
+/// Round 9 Z2: `who` at Fixer `f`'s desk takes the best record off its board
+/// in person ([`walk_in_pick`] at `f`): his own (a weak gun brings a squad,
+/// C25) or his gang's job. `said`: a walk-in who finds the job gone says
+/// so (a first visit's `Network` reads the board quietly). `true` taken.
+fn take_at_desk(world: &mut World, who: EntityId, f: EntityId, said: bool) -> bool {
+    let Some(w) = walk_in_pick(world, who, Some(f)) else {
+        if said {
+            let text = format!("{} came to {} for work: the job was gone", world.name_of(who), world.name_of(f));
+            let mut actors: SmallVec<[EntityId; 2]> = SmallVec::from_slice(&[who]);
+            if let Some(h) = crate::systems::service::desk_server(world, f, who) {
+                actors.push(h);
+            }
+            world.push_event(EventKind::Contract, &actors, text);
+        }
+        return false;
+    };
+    let Some(c) = world.contracts.get(&w.id).cloned() else { return false };
+    match w.gang {
+        Some(g) => {
+            let crew = job_crew(world, &c, g);
+            !crew.is_empty() && accept_at(world, w.id, g, &crew, Some(who))
+        }
+        None => {
+            let crew = squad_crew(world, &c, who);
+            accept_at(world, w.id, who, &crew, Some(who))
+        }
+    }
+}
+
+/// Round 9 Z2: `TakeJob` completes at Fixer `fixer`'s desk: his stamp as a
+/// regular renewed, the job off its board taken in person ([`take_at_desk`]).
+pub fn on_take_job(world: &mut World, id: EntityId, fixer: Option<EntityId>) -> StepResult {
+    let Some(f) = fixer.filter(|&f| fixer_open(world, f)) else {
+        return StepResult::Failed(FailReason::PreconditionLost);
+    };
+    stamp_regular(world, id, f);
+    take_at_desk(world, id, f, true);
+    StepResult::Done
+}
+
+/// C10: `id` a regular of Fixer `f` from now (a gang member's gang networked
+/// there too).
+fn stamp_regular(world: &mut World, id: EntityId, f: EntityId) {
+    let now = world.tick;
+    let gang = world.gang_of(id);
+    if let Some(k) = world.comp_mut::<Broker>(f) {
+        k.regulars.insert(id, now);
+        if let Some(g) = gang {
+            k.gangs.insert(g);
+        }
     }
 }
 
@@ -3076,6 +3402,15 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
         cs.extend(mode_a(world, id, c, risk, urgency_v));
         return Some((cs, world.config.contracts.contract_flat));
     }
+    // Round 9 Z2: work on a board he knows, weighed against his day: the
+    // record's mode A and the walk to the desk.
+    if let Some(w) = walk_in_pick(world, id, None) {
+        let tiles = crate::systems::life::tiles_to(world, id, w.fixer).unwrap_or(0);
+        let mut cs = vec![Consideration::new("work on a fixer's board", can(true), GATE)];
+        cs.extend(w.cs);
+        cs.push(crate::systems::life::travel(world, tiles));
+        return Some((cs, world.config.fixers.walk_in_flat));
+    }
     if world.buildings_of_kind(BuildingKind::Fixer).is_empty() || !gun_gate(world, id) {
         return None;
     }
@@ -3107,6 +3442,16 @@ pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
     let step = |action, target| ActionInstance { action, target, tile: None };
     let now = world.tick;
     let Some(r) = world.contract_runs.get(&id).cloned() else {
+        // Round 9 Z2: the walk to the Fixer whose board has his job.
+        if let Some(w) = walk_in_pick(world, id, None) {
+            let f = w.fixer;
+            // The fixer holds it for him while he comes.
+            if let Some(c) = world.contracts.get_mut(&w.id) {
+                c.claimed = Some((id, now));
+            }
+            let steps = vec![step(ActionKind::GoTo(LocationKey::Seller), Some(f)), step(ActionKind::TakeJob, Some(f))];
+            return Some(Plan { goal: GoalKind::Contract, target: Some(f), steps, started_tick: now });
+        }
         let f = nearest_fixer(world, id)?;
         let steps = vec![step(ActionKind::GoTo(LocationKey::Seller), Some(f)), step(ActionKind::Network, Some(f))];
         return Some(Plan { goal: GoalKind::Contract, target: Some(f), steps, started_tick: now });
@@ -3342,6 +3687,12 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         ActionKind::Network | ActionKind::Commission => {
             target.is_some_and(|f| fixer_open(world, f) && at_building(world, id, f))
         }
+        // Round 9 Z2: the walk-in at a manned desk.
+        ActionKind::TakeJob => target.is_some_and(|f| {
+            fixer_open(world, f)
+                && at_building(world, id, f)
+                && crate::systems::service::desk_server(world, f, id).is_some()
+        }),
         ActionKind::Guard => {
             let Some(r) = world.contract_runs.get(&id) else { return false };
             let taken = world.contracts.get(&r.contract).is_some_and(|c| c.status == ContractStatus::Taken);
@@ -3391,14 +3742,10 @@ pub fn on_network(world: &mut World, id: EntityId, fixer: Option<EntityId>) -> S
     let Some(f) = fixer.filter(|&f| fixer_open(world, f)) else {
         return StepResult::Failed(FailReason::PreconditionLost);
     };
-    let now = world.tick;
-    let gang = world.gang_of(id);
-    if let Some(k) = world.comp_mut::<Broker>(f) {
-        k.regulars.insert(id, now);
-        if let Some(g) = gang {
-            k.gangs.insert(g);
-        }
-    }
+    stamp_regular(world, id, f);
+    // Round 9 Z2: a new regular reads the board at the door and takes what
+    // he would (quiet when there is nothing for him).
+    take_at_desk(world, id, f, false);
     StepResult::Done
 }
 

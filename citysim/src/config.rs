@@ -12278,6 +12278,17 @@ pub struct FixersCfg {
     pub bribe_min: f32,
     /// C15 (plan key, placeholder): a Guard taker's daily post, in hours.
     pub guard_hours: u32,
+    /// Round 9 Z2: the records a walk-in reads on a Fixer's board (its book
+    /// ranked as the daily match ranks it, the top this many).
+    pub board_size: u8,
+    /// Round 9 Z2: the Contract goal's flat for a walk-in (a would-be taker
+    /// going to the Fixer to take a record off its board).
+    pub walk_in_flat: f32,
+    /// Round 9 Z2: the minutes a walk-in spends at the desk taking the job.
+    pub take_job_mins: u64,
+    /// Round 9 Z2: the minutes a Fixer holds a record for a walk-in on his
+    /// way (the others reading the board pass it over meanwhile).
+    pub walk_in_hold_mins: u32,
 }
 
 impl Default for FixersCfg {
@@ -12298,6 +12309,10 @@ impl Default for FixersCfg {
             hire_reach_tiles: 64,
             bribe_min: 0.5,
             guard_hours: 8,
+            board_size: 8,
+            walk_in_flat: 0.0,
+            take_job_mins: 15,
+            walk_in_hold_mins: 180,
         }
     }
 }
