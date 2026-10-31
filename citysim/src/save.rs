@@ -509,9 +509,11 @@ use crate::world::World;
 /// 116 (pressure pass round 9, Y4, the walking pace): `ExecState::Goto.carry_q` widened to `u32` step units, the
 /// `[exec] walk_tiles_per_tick`, `step_res` keys (serde defaults: the pace before Y4), `[vehicles]
 /// max_steps_per_tick` widened to `u16`, the `Jobs2Cols` `commute_med` column.
-/// 117 (pressure pass round 9, Z2, the taker; renumber at the merge): `Contract.heard`, `claimed`, `ActionKind::TakeJob`,
+/// 117 (pressure pass round 9, Z2, the taker): `Contract.heard`, `claimed`, `ActionKind::TakeJob`,
 /// the `[fixers] board_size`, `walk_in_flat`, `take_job_mins`, `walk_in_hold_mins` keys (serde defaults).
-pub const SAVE_VERSION: u8 = 117;
+/// 118 (pressure pass round 9, Z1, the avenger): `Grudge.noted`, `EventKind::Hunt`, the `[hunt]` Z1 keys and the
+/// `hunts_ended` ... `hunted_heard` columns (serde defaults).
+pub const SAVE_VERSION: u8 = 118;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

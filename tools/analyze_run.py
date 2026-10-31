@@ -122,10 +122,10 @@ ASSAULT_PER_DAY_FLAG = 42.7  # the scenario gate's assault bound (M8 gate, HANDO
 WORD_TOTALS = ["rumours_heard", "distorted", "grudges", "grudges_inherited", "hunts", "avenged", "revenge_kills",
                "stories", "planted", "buried", "poached", "talent_lost", "extort_tries", "extort_success", "rep_flips",
                "contradicted", "silenced", "hunts_failed", "hunts_abandoned", "guard_body", "expelled",
-               "contracts_lost_honour"]
+               "contracts_lost_honour", "hunts_ended", "hunts_handed", "hunts_waiting", "hunted_heard"]
 WORD_SNAPSHOT = ["hunts_active", "vendettas_open", "chain_max", "rumour_hops_max", "second_hand_share",
                  "known_by_killers_median", "pool_reach", "skill_rare_share", "law_competence"]
-WORD_EVENTS = ["GrudgeFormed", "HuntStarted", "HuntAbandoned", "Avenged", "Vendetta", "VendettaEnded", "Deceived",
+WORD_EVENTS = ["GrudgeFormed", "HuntStarted", "HuntAbandoned", "Avenged", "Hunt", "Vendetta", "VendettaEnded", "Deceived",
                "Story", "Planted", "Buried", "Poached", "TalentLost", "Expelled", "Refused", "ContractLost"]
 CONTRACT_KINDS = ["hit", "beat", "guard", "locate"]
 CONTRACT_TOTALS = ["contracts_posted", "contracts_fulfilled", "contracts_failed", "contracts_expired",

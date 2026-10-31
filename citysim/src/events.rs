@@ -193,6 +193,9 @@ pub enum EventKind {
     HuntAbandoned,
     /// `[hunter, target]`.
     Avenged,
+    /// Round 9 Z1: `[whose turn, ...]` (the target only when he knows): a hunt's turn (the killer held,
+    /// word asked, a hand-off, the hunted hears, how it ended).
+    Hunt,
     /// `[a, b]`.
     Vendetta,
     /// `[a, b]`.
@@ -544,7 +547,7 @@ pub enum EventKind {
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 245] = [
+    pub const ALL: [EventKind; 246] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -647,6 +650,7 @@ impl EventKind {
         EventKind::HuntStarted,
         EventKind::HuntAbandoned,
         EventKind::Avenged,
+        EventKind::Hunt,
         EventKind::Vendetta,
         EventKind::VendettaEnded,
         EventKind::ContractLost,

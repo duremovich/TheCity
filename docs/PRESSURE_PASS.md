@@ -4881,3 +4881,53 @@ the X6 keys and the `Jobs2Cols` `cell_days` ... `wr_held_clear` columns (serde d
   18:00 504, 00:xx 55), 31 % of takes outside 18:00 and 00:xx (0 %); walk-ins finding the job gone 1. Targets of a
   taken Hit, Beat or Abduct who heard 14 of 32 -> 21 of 31 (street 16 -> 18, security 14 -> 4, door 0 -> 3, asked
   0 -> 1); fulfilled 211 -> 259, failed 345 -> 371; contract killings 2 -> 2; ticks/s mean 151 -> 149.
+
+### Z1, the avenger (the exit's story 1; `hunt.rs` `min_for`, `crowded`, `hand_off`, `hand_on`, `tell_law`, `heard`, `asked_own`, `haunt_in_reach`, `wait_for_word`, `end_words`, `answered`, `held_pass`, `hand_inside`, `inside_mark`, `cell_strike`; `consequence::cell_day`; `exec::try_enter`/`arrive` at a full Intel; `Grudge.noted`; `EventKind::Hunt`; `[hunt]` Z1 keys)
+
+- **The cause.** Three things, in order of weight. (1) The law takes nearly every named killer within minutes and
+  holds him 30 days (20k seed 42 x 30: 72 of 87 Murders sentenced to 30 days, the arrest 3-10 ticks after the
+  killing), and the grudges form a day later off the news: of the killing grudges alive on a day, 60-70 % sit on a
+  held man (`target_ok` false), and nothing said so. (2) A friend's grudge (`0.6 x (0.5 + 0.5 x affinity) x conf`,
+  0.55-0.60 at best) sat under `hunt_min` 0.75 and could never hunt: 439 of 518 killing grudges were friends'. (3) A
+  holder who would hire (`hitmarket::hires`: weak or cowardly) and was lawful left a wanted killer to the law in
+  silence (`waits_for_law`: a 3-day cool, V18's `bereaved_30486` "cooled until d24", Dmitri 71 y), and one who could
+  not pay (100k: `hm_unaffordable` 395, `hm_posted_revenge` 7) went himself or not at all. And a Hunt at a full Bar or
+  stake-out failed `GoTo(Intel): BuildingFull` every try (20k `bereaved_21178`, six times in three days, each a cool).
+- **What a hunt does now.** A grudge over a killing (kin or friend, and one handed on, `Inherited`) hunts from
+  `killed_hunt_min` 0.5; at most `hunters_per_target` 2 hunt one man at once and the rest "leave X to A and B, already
+  after him". Before a Bar it asks its own people (a kin or friend's Sighting within `fresh_sighting_hours`: "asked Y
+  after X: seen at ..."); past reach it watches his Home or post in reach, else the hunt is kept and waits
+  `wait_hours` 12 for word (one line), not cooled away. A full ask venue or stake-out is waited at from its door. A
+  holder who would hire: leaves a wanted man to the law (a line), else pays a fixer through the posting path ("will
+  pay to have it done: off to Fixer#N"; the take is Z2's), else asks the strongest of his own who will go (kin, a
+  friend, a gang mate: not of the target's gang, no warm edge to him; an `Inherited` grudge at `hand_w` 0.9, "too old to
+  fight / without the nerve / no match for him, asked Z to go after X over D"), else tells the law of the killing (a
+  report, `law::tells_the_law`). A killer held is told once (`held_pass`, daily): handed inside to a cellmate of the
+  holder's own when one is in the same cells ("put word inside Precinct#N: Z, held there with X, will see to it"), else
+  "the grudge over D waits: X is in the cells of Precinct#N till dNN"; out again, "heard X is out of the cells" and the
+  Hunt is free at once. In the yard a cellmate with a grudge over a killing on a cellmate goes for him on
+  `inside_fight_p` a day ("a killing to answer"; a loss holds him off `hunt_cooldown_days`), and a win is `Avenged` "in
+  Precinct#N". Every end says how: Avenged, "went for X and lost; the grudge heavier", "gave up on X after 10 days of
+  looking", "the law took X first (...); will wait for him", "X was dead before he found him", "ended in the cells",
+  "left the city", and the others hunting the same man over the same dead let it go when a beating answers it. The
+  hunted gets word on `heard_p` 0.5: his safety falls, and he swears to get the hunter first (a grudge at
+  `heard_counter_w` 0.8, over `hunt_min`: he can hunt the hunter) when brave and lawless enough, else lies low at home
+  `heard_low_days` 2 (`grief::lie_low`). The under-18 rule: `hunter_ok` and `target_ok` refuse `ages::is_protected`,
+  and every hand-off and yard pick skips them.
+- **Lines.** `EventKind::Hunt` (new) names only who knows: the hunter's turns his own diary, the hunted's word his.
+  `Grudge.noted` (bits, serde default) keeps each told line to one; `SAVE_VERSION` 117. `WordCols` gains
+  `hunts_ended`, `hunts_handed`, `hunts_waiting`, `hunted_heard` (prints).
+- **Deviations.** No fixer's Locate for a lost man (the ask along edges, the haunts and the wait cover it; a Locate
+  is a contract and Z2's file). The gang hand-off is a gang mate's, not the leader's order. A held killer's case runs
+  as before: most killing grudges in a 30-day run end at "waits" (the killer's 30 days outlast the window).
+- **Numbers** (20k `isle_m_k2` seed 42 x 30, one run each, before -> after): killing-kin/friend grudge pairs 518 ->
+  645 (friends' now counted at 0.5); HuntStarted 84 -> 116 (on a killing grudge 24 -> 47, 4.6 -> 7.3 % of the
+  pairs); Avenged 24 -> 38 (by a killing grudge's holder 10 -> 21, 1.9 -> 3.3 %; 16 in the cells); hunts ended with a
+  line saying how 24 -> 118; hunts handed 0 -> 214 (inside 149, the law 5, kin or the gang 23, a fixer's hire 10 (2 of them a walk to him), left to
+  the hunters on him 27); grudges told the killer is held 0 -> 215; the hunted who heard 63; killing grudges with any
+  hunt line, a Hunt or an Avenged 24 -> 404 (5 -> 63 %). Murders 87 -> 93. The 100k shadow in V17's window (seed 42,
+  d21-27, bereaved / marked / gang_member / jailed / elder x 3; 2,935 s): `bereaved_32861` carries her father's killing
+  from the grudge through the mourning, "put word inside Precinct#4485: Mina Pembroke, held there with Mako Singh, will
+  see to it over Orrin Quarry" (d23), to the hunt the day he is out, the stake-out at his Hideout and the fight she
+  loses (d25 19:15, "went for Mako Singh over a killing and lost"). Read wrong: the dead's name is gone once the
+  mourning ends ("over a killing"); "is out of the cells" comes at midnight, after a hunter who already has word.

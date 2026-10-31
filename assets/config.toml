@@ -1543,6 +1543,21 @@ hunt_days = 10
 street_silence = true
 hold_score = 0.6                   # W20
 stat_hunt_min = 0.45               # W23 (spec-plan 0.2; see hunt_min)
+# Round 9 Z1, the avenger (docs/PRESSURE_PASS.md § Z1): a grudge over a killing becomes a hunt that ends.
+# V18 at 100k: 2,361 killed-kin/friend grudges, 150 HuntStarted, 63 Avenged. A friend's grudge (0.6 x
+# (0.5 + 0.5 x affinity) x conf, 0.55-0.60 at best) sat under hunt_min and never hunted; most killers sit
+# 30 days in the cells within minutes of the killing, and the grudge said nothing.
+killed_hunt_min = 0.5              # a grudge over a killing (kin or friend) hunts from this weight (0: hunt_min)
+hunters_per_target = 2             # at most this many hunt one man at once; the rest leave it to them (0: no cap)
+wait_hours = 12                    # a hunt with no word and nowhere near to ask waits this long, kept (0: cools)
+hand_w = 0.9                       # a weak or cowardly hunter who cannot pay hands the grudge on at this share (0: off)
+inside_fight_p = 0.5               # a cellmate handed the grudge goes for the held man in the yard, a day (0: off)
+heard_p = 0.5                      # the hunted gets word of the hunt (a hash of the pair; 0: off)
+heard_safety = 0.3                 # ... off his safety need
+heard_counter_courage = 0.6        # ... this brave
+heard_counter_lawful = 0.4         # ... and this lawless swears to get the hunter first,
+heard_counter_w = 0.8              # ... a grudge at this weight (over hunt_min: he can hunt the hunter);
+heard_low_days = 2                 # ... anyone else lies low at home this many days
 
 [skills]
 skill_scale = 1.0

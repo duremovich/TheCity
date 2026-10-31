@@ -410,6 +410,14 @@ pub struct Grudge {
     pub chain: u8,
     /// Target dead or avenged; kept `settle_keep_days` for the biography.
     pub settled: Option<Tick>,
+    /// Round 9 Z1: the hunt's lines already said on this grudge
+    /// (`hunt::NOTED_*`: the killer held, left to the law, the wait).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub noted: u8,
+}
+
+fn is_zero(x: &u8) -> bool {
+    *x == 0
 }
 
 /// Component, cap 4 (lowest unsettled weight out).

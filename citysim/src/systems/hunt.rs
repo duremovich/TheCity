@@ -32,18 +32,22 @@ use crate::word::{
 };
 use crate::world::World;
 
-/// May `h` hunt at all: a living adult, free, not leaving.
+/// May `h` hunt at all: a living adult, free, not leaving. Round 9 Z1:
+/// never one under 18 (`ages::is_protected`, the hard rule).
 pub fn hunter_ok(world: &World, h: EntityId) -> bool {
     crate::systems::law::living(world, h)
         && crate::systems::demography::is_adult(world, h)
+        && !crate::systems::ages::is_protected(world, h)
         && !world.has::<Sentence>(h)
         && world.comp::<Brain>(h).is_some_and(|b| b.cuffed_by.is_none() && !b.emigrating)
         && !crate::systems::abroad::is_away(world, h)
 }
 
-/// Can `t` be hunted: a living agent, free, not leaving.
+/// Can `t` be hunted: a living agent, free, not leaving. Round 9 Z1:
+/// never one under 18 (`ages::is_protected`, the hard rule).
 pub fn target_ok(world: &World, t: EntityId) -> bool {
     crate::systems::law::living(world, t)
+        && !crate::systems::ages::is_protected(world, t)
         && !world.has::<Sentence>(t)
         && world.comp::<Brain>(t).is_some_and(|b| b.cuffed_by.is_none() && !b.emigrating)
         && !crate::systems::abroad::is_away(world, t)
@@ -52,12 +56,13 @@ pub fn target_ok(world: &World, t: EntityId) -> bool {
 /// W20: the heaviest unsettled grudge of `holder` on a huntable agent with
 /// `weight ≥ hunt_min` (ties the lower target id): `(target, weight, chain)`.
 pub fn heaviest_eligible(world: &World, holder: EntityId) -> Option<(EntityId, f32, u8)> {
-    let min = world.config.hunt.hunt_min;
     world
         .comp::<Grudges>(holder)?
         .list
         .iter()
-        .filter(|x| x.settled.is_none() && x.weight >= min && x.target != holder)
+        .filter(|x| x.settled.is_none() && x.weight >= min_for(world, x.cause) && x.target != holder)
+        // Round 9 Z1: no third hunter on one man (`hunters_per_target`).
+        .filter(|x| !crowded(world, holder, x.target))
         // The Hit market (gaps pass): a stiffed gun's grudge waits out the
         // debt's grace (`hitmarket::stiff_sweep`).
         // Only the betrayal waits (fix round): a grudge of another cause on
@@ -70,6 +75,139 @@ pub fn heaviest_eligible(world: &World, holder: EntityId) -> Option<(EntityId, f
         .filter(|x| world.has::<crate::components::Identity>(x.target) && target_ok(world, x.target))
         .max_by(|a, b| a.weight.total_cmp(&b.weight).then(b.target.cmp(&a.target)))
         .map(|x| (x.target, x.weight, x.chain))
+}
+
+/// Round 9 Z1: the lines said on a grudge (`Grudge::noted`): the killer
+/// held (the wait), left to the law, no word near (the wait for word).
+pub const NOTED_HELD: u8 = 1;
+pub const NOTED_LAW: u8 = 2;
+pub const NOTED_WORD: u8 = 4;
+/// Z1: left to the hunters already after him (`hunters_per_target`).
+pub const NOTED_LEFT: u8 = 8;
+
+/// Z1: the dead a grudge is over (a killing of kin or a friend).
+pub fn killing(cause: GrudgeCause) -> Option<EntityId> {
+    match cause {
+        GrudgeCause::KilledKin(v) | GrudgeCause::KilledFriend(v) => Some(v),
+        _ => None,
+    }
+}
+
+/// Z1: a killing, or a killing handed on (`Inherited`).
+fn blood(cause: GrudgeCause) -> bool {
+    killing(cause).is_some() || matches!(cause, GrudgeCause::Inherited(_))
+}
+
+/// Z1: the weight a grudge of `cause` hunts from: a killing (and one handed
+/// on) at `killed_hunt_min`, anything else at `hunt_min`.
+pub fn min_for(world: &World, cause: GrudgeCause) -> f32 {
+    let h = &world.config.hunt;
+    if blood(cause) && h.killed_hunt_min > 0.0 {
+        h.killed_hunt_min.min(h.hunt_min)
+    } else {
+        h.hunt_min
+    }
+}
+
+/// Z1: `target` is hunted by `hunters_per_target` others already (the
+/// holder's own Hunt on him not counted). Bounded by `max_hunts`.
+fn crowded(world: &World, holder: EntityId, target: EntityId) -> bool {
+    let cap = world.config.hunt.hunters_per_target;
+    cap > 0
+        && !world.hunts.is_empty()
+        && world.hunts.iter().filter(|(&h, s)| h != holder && s.target == target).count() >= cap
+}
+
+/// Z1: whom a grudge is for ("Joss Inchbald", "Moth Wexford's feud").
+fn for_whom(world: &World, cause: Option<GrudgeCause>) -> String {
+    // The dead's name while its entity stands; once the body is gone
+    // (`name_of` reads `#id`) the deed alone (as `hitmarket::revenge_why`).
+    // A mourner still holds the name (`grief::Mourning`).
+    let named = |v: EntityId| world.has::<crate::components::Identity>(v);
+    let mourned = |v: EntityId| world.grief.mourners.values().find(|m| m.of == v).map(|m| m.name.clone());
+    match cause {
+        Some(GrudgeCause::KilledKin(v) | GrudgeCause::KilledFriend(v) | GrudgeCause::Stripped(v)) if named(v) => {
+            world.name_of(v)
+        }
+        Some(GrudgeCause::KilledKin(v) | GrudgeCause::KilledFriend(v)) => {
+            mourned(v).unwrap_or_else(|| "a killing".to_string())
+        }
+        Some(GrudgeCause::Inherited(v)) if named(v) => format!("{}'s feud", world.name_of(v)),
+        Some(GrudgeCause::Inherited(_)) => "a feud handed down".to_string(),
+        _ => "themself".to_string(),
+    }
+}
+
+/// Z1: " over Joss Inchbald" for a grudge over a killing, else "".
+fn over(world: &World, holder: EntityId, target: EntityId) -> String {
+    let cause = crate::systems::grudges::grudge_on(world, holder, target).map(|g| g.cause);
+    if cause.is_some_and(blood) {
+        format!(" over {}", for_whom(world, cause))
+    } else {
+        String::new()
+    }
+}
+
+/// Z1: set `bit` on `holder`'s unsettled grudge on `target`.
+fn mark(world: &mut World, holder: EntityId, target: EntityId, bit: u8) {
+    if let Some(g) = world.comp_mut::<Grudges>(holder) {
+        if let Some(x) = g.list.iter_mut().find(|x| x.target == target && x.settled.is_none()) {
+            x.noted |= bit;
+        }
+    }
+}
+
+fn noted(world: &World, holder: EntityId, target: EntityId, bit: u8) -> bool {
+    crate::systems::grudges::grudge_on(world, holder, target).is_some_and(|g| g.noted & bit != 0)
+}
+
+/// Z1: a hunt's line (`EventKind::Hunt`).
+fn line(world: &mut World, actors: &[EntityId], text: String) {
+    world.push_event(EventKind::Hunt, actors, text);
+}
+
+/// Z1: a hunt that ends, with the line that says how.
+fn ended(world: &mut World, hunter: EntityId, text: String) {
+    line(world, &[hunter], text);
+    world.stats.current.word.hunts_ended += 1;
+}
+
+/// Z1: where a held man is and till when ("the cells of Precinct#4460 till
+/// d43"), or the law's cuffs.
+fn held_where(world: &World, t: EntityId) -> String {
+    match world.comp::<Sentence>(t) {
+        Some(s) => {
+            let at = crate::systems::law::cells_of(world, t)
+                .map_or_else(|| "the cells".to_string(), |b| format!("the cells of {}", world.name_of(b)));
+            format!("{at} till d{}", s.until_tick / TICKS_PER_DAY)
+        }
+        None => "the law's cuffs".to_string(),
+    }
+}
+
+/// Z1: may `o` take up a grudge on `target` handed him: not of the
+/// target's gang, and no kin, friend or warm edge of his (V18's 20k
+/// `gang_member_6252`: a member took his leader's feud on his own Friend).
+fn takes_against(world: &World, o: EntityId, target: EntityId) -> bool {
+    let theirs = world.gang_of(target);
+    (theirs.is_none() || world.gang_of(o) != theirs)
+        && world.edge(o, target).is_none_or(|e| {
+            e.affinity <= 0.0
+                && !matches!(e.kind, RelKind::Spouse | RelKind::Parent | RelKind::Family | RelKind::Friend)
+        })
+}
+
+/// Z1: in the cells or in cuffs.
+fn held(world: &World, t: EntityId) -> bool {
+    world.has::<Sentence>(t) || world.comp::<Brain>(t).is_some_and(|b| b.cuffed_by.is_some())
+}
+
+fn pro(world: &World, id: EntityId) -> (&'static str, &'static str) {
+    if crate::systems::grief::his(world, id) == "his" {
+        ("he", "him")
+    } else {
+        ("she", "her")
+    }
 }
 
 fn cooled(world: &World, id: EntityId) -> bool {
@@ -246,8 +384,9 @@ pub fn adopt(world: &mut World, id: EntityId, why: HuntWhy) -> bool {
         return false;
     }
     // M16a (plan C20): a holder too weak to win who can pay hires instead
-    // (a Goal or Stat Hunt; never a god's).
-    if why != HuntWhy::God && crate::systems::contracts::try_hire(world, id, target, weight) {
+    // (a Goal or Stat Hunt; never a god's). Round 9 Z1: one who cannot pay
+    // hands the grudge on (`hand_off`).
+    if why != HuntWhy::God && hand_off(world, id, target, weight, chain) {
         return false;
     }
     let now = world.tick;
@@ -277,7 +416,223 @@ pub fn adopt(world: &mut World, id: EntityId, why: HuntWhy) -> bool {
     w.chain_max = w.chain_max.max(u32::from(chain) + 1);
     let text = format!("{} went looking for {}", world.name_of(id), world.name_of(target));
     world.push_event(EventKind::HuntStarted, &[id, target], text);
+    heard(world, id, target);
     true
+}
+
+/// Round 9 Z1: a holder who would hire rather than go (too weak or too
+/// cowardly, `hitmarket::hires`) hands the grudge on, each with a line: a
+/// lawful one leaves a wanted man to the law (`hitmarket::waits_for_law`);
+/// one who can pay hires through a fixer (`contracts::try_hire`, the posting
+/// path; the take is the market's); one who cannot asks the strongest of
+/// his own people who will go (`hand_on`), else tells the law of a killing
+/// (`tell_law`). True when handed (no Hunt taken up). The under-18 rule:
+/// a minor neither holds a Hunt nor takes one (`hunter_ok`).
+fn hand_off(world: &mut World, id: EntityId, target: EntityId, weight: f32, chain: u8) -> bool {
+    let hires = crate::systems::hitmarket::hires(world, id, target);
+    let law_wait = crate::systems::hitmarket::waits_for_law(world, id, target);
+    if hires && law_wait && !noted(world, id, target, NOTED_LAW) {
+        let what = crate::systems::law::wanted_for(world, target)
+            .map_or_else(|| "the law has the name".to_string(), |c| format!("wanted for {}", c.label()));
+        let text = format!(
+            "{} leaves {} to the law{}: {what}",
+            world.name_of(id),
+            world.name_of(target),
+            over(world, id, target)
+        );
+        line(world, &[id], text);
+        mark(world, id, target, NOTED_LAW);
+        world.stats.current.word.hunts_handed += 1;
+    }
+    let wanting = world.wants.contains_key(&id);
+    if crate::systems::contracts::try_hire(world, id, target, weight) {
+        if !law_wait {
+            world.stats.current.word.hunts_handed += 1;
+            // The walk to the fixer is the errand (H9); a direct post has
+            // its own line.
+            if let Some(f) = world.wants.get(&id).filter(|w| !wanting && w.target == target).map(|w| w.fixer) {
+                let text = format!(
+                    "{}, {}, will pay to have it done{}: off to {}",
+                    world.name_of(id),
+                    unfit(world, id, target),
+                    over(world, id, target),
+                    world.name_of(f)
+                );
+                line(world, &[id, f], text);
+            }
+        }
+        return true;
+    }
+    if !hires {
+        return false;
+    }
+    hand_on(world, id, target, weight, chain) || tell_law(world, id, target)
+}
+
+/// Z1: why `id` does not go himself, in words.
+fn unfit(world: &World, id: EntityId, target: EntityId) -> String {
+    let old = u64::from(world.config.ages.frail_from_years) * crate::time::DAYS_PER_YEAR;
+    if world.comp::<crate::components::Identity>(id).is_some_and(|i| u64::from(i.age_days) >= old) {
+        "too old to fight".to_string()
+    } else if world.comp::<Personality>(id).is_some_and(|p| p.courage < world.config.hitmarket.hire_courage) {
+        "without the nerve".to_string()
+    } else {
+        format!("no match for {}", pro(world, target).1)
+    }
+}
+
+/// Z1: the Hunt held off `days` (a grudge handed on is not hunted twice).
+fn hold_off(world: &mut World, id: EntityId, days: u32) {
+    let until = world.tick + Tick::from(days) * TICKS_PER_DAY;
+    if let Some(b) = world.comp_mut::<Brain>(id) {
+        let t = b.cooldowns.entry(GoalKind::Hunt).or_insert(until);
+        *t = (*t).max(until);
+    }
+}
+
+/// Z1: a grudge over a killing handed to the strongest of `id`'s own who
+/// will go himself (kin, a friend, a gang mate: a free adult not hunting,
+/// not of the target's gang, who would not hire): an `Inherited` grudge at
+/// `hand_w` of the weight, the line, and `id`'s Hunt held off `hunt_days`.
+fn hand_on(world: &mut World, id: EntityId, target: EntityId, weight: f32, chain: u8) -> bool {
+    let share = world.config.hunt.hand_w;
+    if share <= 0.0 {
+        return false;
+    }
+    if !crate::systems::grudges::grudge_on(world, id, target).is_some_and(|g| blood(g.cause)) {
+        return false;
+    }
+    let w = (weight * share).min(1.0);
+    if w < min_for(world, GrudgeCause::Inherited(id)) {
+        return false;
+    }
+    let mut cands: Vec<EntityId> = world
+        .neighbours
+        .get(&id)
+        .map(|n| {
+            n.iter()
+                .copied()
+                .filter(|&o| {
+                    world.edge(id, o).is_some_and(|e| {
+                        matches!(e.kind, RelKind::Spouse | RelKind::Parent | RelKind::Family | RelKind::Friend)
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if let Some(g) = world.gang_of(id).and_then(|g| world.comp::<crate::components::Gang>(g)) {
+        cands.extend(g.members.iter().copied());
+    }
+    let Some((_, o)) = cands
+        .into_iter()
+        .filter(|&o| o != id && o != target && hunter_ok(world, o) && !world.hunts.contains_key(&o))
+        .filter(|&o| takes_against(world, o, target))
+        .filter(|&o| !crate::systems::hitmarket::hires(world, o, target))
+        .map(|o| (might_gap(world, o, target), o))
+        .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)))
+    else {
+        return false;
+    };
+    let text = format!(
+        "{}, {}, asked {} to go after {}{}",
+        world.name_of(id),
+        unfit(world, id, target),
+        world.name_of(o),
+        world.name_of(target),
+        over(world, id, target)
+    );
+    line(world, &[id, o], text);
+    crate::systems::grudges::add(world, o, target, GrudgeCause::Inherited(id), w, chain);
+    world.stats.current.word.hunts_handed += 1;
+    let days = world.config.hunt.hunt_days;
+    hold_off(world, id, days);
+    true
+}
+
+/// Z1: a killing told to the law by a holder who tells it
+/// (`law::tells_the_law`) when the killer is not wanted already: a report
+/// naming him, its line, the Hunt held off `hunt_cooldown_days`.
+fn tell_law(world: &mut World, id: EntityId, target: EntityId) -> bool {
+    if world.config.hunt.hand_w <= 0.0 || noted(world, id, target, NOTED_LAW) {
+        return false;
+    }
+    let Some(dead) = crate::systems::grudges::grudge_on(world, id, target).and_then(|g| killing(g.cause)) else {
+        return false;
+    };
+    if crate::systems::law::wanted(world, target) || !crate::systems::law::tells_the_law(world, id, target) {
+        return false;
+    }
+    let text = format!(
+        "{}, {}, told the law {} killed {}",
+        world.name_of(id),
+        unfit(world, id, target),
+        world.name_of(target),
+        if world.has::<crate::components::Identity>(dead) {
+            world.name_of(dead)
+        } else {
+            format!("one of {} own", crate::systems::grief::his(world, id))
+        }
+    );
+    let actors = [id, target];
+    if !crate::systems::law::file_report_as(
+        world,
+        crate::components::Crime::Murder,
+        target,
+        Some(id),
+        Some((text, &actors)),
+    ) {
+        return false;
+    }
+    mark(world, id, target, NOTED_LAW);
+    world.stats.current.word.hunts_handed += 1;
+    let days = world.config.hunt.hunt_cooldown_days;
+    hold_off(world, id, days);
+    true
+}
+
+/// Z1: the hunted gets word (`heard_p`, a hash of the pair): his safety
+/// falls, he remembers the threat, and he acts with a line: one brave and
+/// lawless enough swears to get the hunter first (a grudge at
+/// `heard_counter_w`), anyone else lies low at home `heard_low_days`
+/// (`grief::lie_low`). Never on a minor (`target_ok`, `hunter_ok`).
+fn heard(world: &mut World, hunter: EntityId, target: EntityId) {
+    const PURPOSE_HUNTED: u64 = 0x2a_4e_7d_31;
+    let c = world.config.hunt.clone();
+    if c.heard_p <= 0.0 || !target_ok(world, target) || !world.has::<crate::components::Identity>(target) {
+        return;
+    }
+    let roll = crate::systems::econ::hash_unit(
+        world.seed(),
+        PURPOSE_HUNTED,
+        u64::from(hunter.index),
+        (u64::from(target.index) << 20) ^ time::day(world.tick),
+    );
+    if roll >= c.heard_p {
+        return;
+    }
+    if let Some(n) = world.comp_mut::<crate::components::Needs>(target) {
+        n.safety = (n.safety - c.heard_safety).max(0.0);
+    }
+    world.remember(target, MemoryKind::Threatened, Some(hunter), 0.6, -0.5, false);
+    world.stats.current.word.hunted_heard += 1;
+    let (tn, hn) = (world.name_of(target), world.name_of(hunter));
+    let (he, him) = pro(world, target);
+    let why = over(world, hunter, target);
+    let bold = world
+        .comp::<Personality>(target)
+        .is_some_and(|p| p.courage >= c.heard_counter_courage && p.lawfulness <= c.heard_counter_lawful);
+    if bold && c.heard_counter_w > 0.0 && hunter_ok(world, hunter) {
+        crate::systems::grudges::add(world, target, hunter, GrudgeCause::Assaulted, c.heard_counter_w, 0);
+        line(world, &[target], format!("{tn} got word {hn} is looking for {him}{why}, and swore to get {hn} first"));
+    } else if c.heard_low_days > 0 {
+        let until = (world.tick / TICKS_PER_DAY + 1 + u64::from(c.heard_low_days)) * TICKS_PER_DAY;
+        let text =
+            format!("{tn} got word {hn} is looking for {him}{why}: {he} lies low at home {} days", c.heard_low_days);
+        line(world, &[target], text);
+        crate::systems::grief::lie_low(world, target, until, format!("word {hn} is looking for {him}"));
+    } else {
+        line(world, &[target], format!("{tn} got word {hn} is looking for {him}{why}"));
+    }
 }
 
 /// The busiest Bar of a district (most occupants, ties the lower id).
@@ -411,10 +766,16 @@ pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
         return None;
     }
     let mut next = s.clone();
+    let mut told = None;
     if next.phase == HuntPhase::Ask {
         if let Some(i) = fresh_intel(world, id, s.target) {
             next.phase = HuntPhase::Watch;
             next.intel = Some(i);
+        } else if let Some((o, i)) = asked_own(world, id, s.target) {
+            // Round 9 Z1: word along his own people before a Bar's.
+            next.phase = HuntPhase::Watch;
+            next.intel = Some(i);
+            told = Some(o);
         } else {
             match last_known_district(world, id, s.target).and_then(|d| busiest_bar(world, d)) {
                 Some(v) => next.venue = Some(v),
@@ -429,7 +790,22 @@ pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
         next.intel = Some(habit(world, s.target, world.tick));
     }
     if !within_reach(world, id, next.phase, &mut next.venue, next.intel) {
-        return None;
+        // Round 9 Z1: past reach, his known haunts in reach (his Home, his
+        // post), else the hunt waits for word (kept, not cooled away).
+        match haunt_in_reach(world, id, s.target) {
+            Some(i) => {
+                next.phase = HuntPhase::Watch;
+                next.intel = Some(i);
+                next.venue = None;
+            }
+            None => return wait_for_word(world, id, next),
+        }
+    }
+    if let (Some(o), Some(i)) = (told, next.intel) {
+        let place = i.building.map_or_else(|| "on the street".to_string(), |b| format!("at {}", world.name_of(b)));
+        let text =
+            format!("{} asked {} after {}: seen {place}", world.name_of(id), world.name_of(o), world.name_of(s.target));
+        line(world, &[id, o], text);
     }
     let phase = next.phase;
     world.hunts.insert(id, next);
@@ -444,6 +820,70 @@ pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
     steps.push(step(ActionKind::StakeOut, t));
     steps.push(step(ActionKind::Attack, t));
     Some(Plan { goal: GoalKind::Hunt, target: t, steps, started_tick: world.tick })
+}
+
+/// Round 9 Z1: word along the hunter's own people: the freshest Sighting
+/// of `target` (within `fresh_sighting_hours`) held by his kin or a
+/// friend: `(who told, intel)`.
+fn asked_own(world: &World, hunter: EntityId, target: EntityId) -> Option<(EntityId, Intel)> {
+    let horizon = world.tick.saturating_sub(Tick::from(world.config.hunt.fresh_sighting_hours) * TICKS_PER_HOUR);
+    let n = world.neighbours.get(&hunter)?;
+    n.iter()
+        .copied()
+        .filter(|&o| o != target && crate::systems::law::living(world, o))
+        .filter(|&o| {
+            world.edge(hunter, o).is_some_and(|e| {
+                matches!(e.kind, RelKind::Spouse | RelKind::Parent | RelKind::Family | RelKind::Friend)
+            })
+        })
+        .filter_map(|o| sightings_of(world, o, target).filter(|x| x.0 >= horizon).map(|x| (x, o)))
+        .max_by(|a, b| a.0 .0.cmp(&b.0 .0).then(b.1.cmp(&a.1)))
+        .map(|((_, b, tile), o)| (o, Intel { building: b, tile, source: IntelSource::Asked }))
+}
+
+/// Z1: the man's known haunts (his Home, his post) the first within reach.
+fn haunt_in_reach(world: &World, hunter: EntityId, target: EntityId) -> Option<Intel> {
+    let home = world.comp::<Household>(target).and_then(|h| h.home).and_then(|h| intel_at(world, h, IntelSource::Home));
+    let post = world.comp::<Job>(target).and_then(|j| j.employer).and_then(|e| intel_at(world, e, IntelSource::Habit));
+    [home, post].into_iter().flatten().find(|&i| {
+        let mut v = None;
+        within_reach(world, hunter, HuntPhase::Watch, &mut v, Some(i))
+    })
+}
+
+/// Z1: no word of the man and nowhere near to ask: the hunt is kept, asking
+/// again after `wait_hours` (the goal held off that long), with the line
+/// once a grudge. `None` (the plan's), `wait_hours` 0 as before.
+fn wait_for_word(world: &mut World, id: EntityId, mut next: HuntState) -> Option<Plan> {
+    let hours = world.config.hunt.wait_hours;
+    if hours == 0 {
+        return None;
+    }
+    let t = next.target;
+    next.phase = HuntPhase::Ask;
+    next.venue = None;
+    next.intel = None;
+    next.stakeout_until = None;
+    world.hunts.insert(id, next);
+    reindex(world);
+    let until = world.tick + Tick::from(hours) * TICKS_PER_HOUR;
+    if let Some(b) = world.comp_mut::<Brain>(id) {
+        let c = b.cooldowns.entry(GoalKind::Hunt).or_insert(until);
+        *c = (*c).max(until);
+    }
+    if !noted(world, id, t, NOTED_WORD) {
+        mark(world, id, t, NOTED_WORD);
+        let (_, him) = pro(world, t);
+        let (he, _) = pro(world, id);
+        let text = format!(
+            "{} asked after {}{}: nobody near had word of {him}; {he} waits for word",
+            world.name_of(id),
+            world.name_of(t),
+            over(world, id, t)
+        );
+        line(world, &[id], text);
+    }
+    None
 }
 
 /// The pressure pass phase 4 (OPEN-194): `next`'s first `GoTo(Intel)` is
@@ -780,13 +1220,7 @@ pub fn on_strike(world: &mut World, hunter: EntityId, target: EntityId, winner: 
             };
             crate::systems::memory::hear_entry(world, target, e);
         }
-        let for_whom = match grudge.map(|g| g.cause) {
-            Some(GrudgeCause::KilledKin(v) | GrudgeCause::KilledFriend(v) | GrudgeCause::Stripped(v)) => {
-                world.name_of(v)
-            }
-            Some(GrudgeCause::Inherited(v)) => format!("{}'s feud", world.name_of(v)),
-            _ => "themself".to_string(),
-        };
+        let for_whom = for_whom(world, grudge.as_ref().map(|g| g.cause));
         let text = format!(
             "{} avenged {for_whom} on {}{}",
             world.name_of(hunter),
@@ -802,9 +1236,11 @@ pub fn on_strike(world: &mut World, hunter: EntityId, target: EntityId, winner: 
             }
         } else {
             crate::systems::grudges::answer_beating(world, hunter, target);
+            answered(world, hunter, target, grudge.as_ref().and_then(|g| killing(g.cause)));
         }
         let w = &mut world.stats.current.word;
         w.avenged += 1;
+        w.hunts_ended += 1;
         if died {
             w.revenge_kills += 1;
         }
@@ -816,7 +1252,84 @@ pub fn on_strike(world: &mut World, hunter: EntityId, target: EntityId, winner: 
         }
         cool(world, hunter);
         world.stats.current.word.hunts_failed += 1;
+        // Round 9 Z1: the end says how.
+        if crate::systems::law::living(world, hunter) {
+            let (he, _) = pro(world, hunter);
+            let text = format!(
+                "{} went for {}{} and lost; {he} nurses it, the grudge heavier",
+                world.name_of(hunter),
+                world.name_of(target),
+                over(world, hunter, target)
+            );
+            ended(world, hunter, text);
+        }
     }
+}
+
+/// Round 9 Z1: `by` beat `target` over `dead`: the others who hold a
+/// grudge on him over the same dead take it as answered (`answer_beating`);
+/// a Hunt of theirs on him whose grudge falls under its weight ends with
+/// the line. A killing settles them all already (`grudges::on_death`).
+fn answered(world: &mut World, by: EntityId, target: EntityId, dead: Option<EntityId>) {
+    let Some(dead) = dead else { return };
+    // scan-ok: per Avenged beating, the grudge store.
+    let others: Vec<EntityId> = world
+        .with::<Grudges>()
+        .into_iter()
+        .filter(|&o| o != by)
+        .filter(|&o| {
+            world.comp::<Grudges>(o).is_some_and(|g| {
+                g.list.iter().any(|x| x.target == target && x.settled.is_none() && killing(x.cause) == Some(dead))
+            })
+        })
+        .collect();
+    for o in others {
+        crate::systems::grudges::answer_beating(world, o, target);
+        let hunting = world.hunts.get(&o).is_some_and(|s| s.target == target);
+        let w = crate::systems::grudges::grudge_on(world, o, target);
+        if hunting && w.is_none_or(|g| g.settled.is_some() || g.weight < min_for(world, g.cause)) {
+            end(world, o);
+            reindex(world);
+            let text = format!(
+                "{} heard {} beat {} over {}: answered, {} let it go",
+                world.name_of(o),
+                world.name_of(by),
+                world.name_of(target),
+                for_whom(world, Some(GrudgeCause::KilledFriend(dead))),
+                pro(world, o).0
+            );
+            ended(world, o, text);
+        }
+    }
+}
+
+/// Round 9 Z1: why a Hunt ends without a strike, in words (`None`: the
+/// hunter is dead, nothing to say). A man held first is the wait's (the
+/// grudge marked `NOTED_HELD`, `hunts_waiting`).
+fn end_words(world: &mut World, h: EntityId, t: EntityId) -> Option<String> {
+    if !crate::systems::law::living(world, h) {
+        return None;
+    }
+    let (hn, tn) = (world.name_of(h), world.name_of(t));
+    let why = over(world, h, t);
+    let (_, him) = pro(world, t);
+    let (he, _) = pro(world, h);
+    if !hunter_ok(world, h) {
+        return Some(if held(world, h) {
+            format!("{hn}'s hunt for {tn}{why} ended in {}", held_where(world, h))
+        } else {
+            format!("{hn} gave up on {tn}{why}: {he} is leaving")
+        });
+    }
+    if !crate::systems::law::living(world, t) {
+        return Some(format!("{tn} was dead before {hn} found {him}{why}"));
+    }
+    if held(world, t) {
+        mark(world, h, t, NOTED_HELD);
+        world.stats.current.word.hunts_waiting += 1;
+        return Some(format!("the law took {tn} first ({}); {hn} will wait for {him}{why}", held_where(world, t)));
+    }
+    Some(format!("{tn} left the city before {hn} found {him}{why}"))
 }
 
 fn cool(world: &mut World, hunter: EntityId) {
@@ -863,7 +1376,13 @@ pub fn tick(world: &mut World) {
         return;
     }
     for h in dead {
+        // Round 9 Z1: the end says how.
+        let t = world.hunts.get(&h).map(|s| s.target);
+        let words = t.and_then(|t| end_words(world, h, t));
         end(world, h);
+        if let Some(text) = words {
+            ended(world, h, text);
+        }
     }
     reindex(world);
 }
@@ -878,6 +1397,14 @@ pub fn daily(world: &mut World) {
         world.hunts.iter().filter(|(_, s)| now.saturating_sub(s.since) >= limit).map(|(&h, s)| (h, s.target)).collect();
     for (h, t) in stale {
         end(world, h);
+        // Round 9 Z1: the words before the weight falls (`over`).
+        let text = format!(
+            "{} gave up on {}{} after {} days of looking",
+            world.name_of(h),
+            world.name_of(t),
+            over(world, h, t),
+            world.config.hunt.hunt_days
+        );
         if let Some(g) = world.comp_mut::<Grudges>(h) {
             if let Some(x) = g.list.iter_mut().find(|x| x.target == t && x.settled.is_none()) {
                 x.weight *= 0.7;
@@ -885,11 +1412,201 @@ pub fn daily(world: &mut World) {
         }
         cool(world, h);
         world.stats.current.word.hunts_abandoned += 1;
-        let text = format!("{} gave up on {}", world.name_of(h), world.name_of(t));
+        world.stats.current.word.hunts_ended += 1;
         world.push_event(EventKind::HuntAbandoned, &[h, t], text);
     }
     reindex(world);
+    held_pass(world);
     stat_pass(world);
+}
+
+/// Round 9 Z1, daily over the grudge store: a grudge over a killing heavy
+/// enough to hunt whose killer is held (in the cells), not yet told, is
+/// told once: handed inside to a cellmate of the holder's own when one is
+/// there (`hand_inside`), else the wait's line (`hunts_waiting`). A told
+/// grudge whose man is out again is told that (the holder's Hunt free at
+/// once, `NOTED_HELD` cleared). A holder under 18 never: `hunter_ok`.
+fn held_pass(world: &mut World) {
+    if world.config.hunt.killed_hunt_min <= 0.0 {
+        return;
+    }
+    #[derive(PartialEq)]
+    enum Turn {
+        Held,
+        Out,
+        Left,
+    }
+    let mut todo: Vec<(EntityId, EntityId, Turn)> = Vec::new();
+    // scan-ok: daily, the grudge store.
+    for id in world.with::<Grudges>() {
+        let Some(g) = world.comp::<Grudges>(id) else { continue };
+        for x in g.list.iter().filter(|x| x.settled.is_none() && killing(x.cause).is_some()) {
+            if x.noted & NOTED_HELD != 0 {
+                if !held(world, x.target) && crate::systems::law::living(world, x.target) {
+                    todo.push((id, x.target, Turn::Out));
+                }
+            } else if x.weight >= min_for(world, x.cause) && world.has::<Sentence>(x.target) {
+                todo.push((id, x.target, Turn::Held));
+            } else if x.weight >= min_for(world, x.cause)
+                && x.noted & NOTED_LEFT == 0
+                && !world.hunts.contains_key(&id)
+                && crowded(world, id, x.target)
+            {
+                todo.push((id, x.target, Turn::Left));
+            }
+        }
+    }
+    for (id, t, turn) in todo {
+        if !hunter_ok(world, id) || !crate::systems::law::living(world, t) {
+            continue;
+        }
+        let why = over(world, id, t);
+        let (hn, tn) = (world.name_of(id), world.name_of(t));
+        if turn == Turn::Left {
+            // Z1: the man has hunters enough (`hunters_per_target`).
+            mark(world, id, t, NOTED_LEFT);
+            let names: Vec<String> =
+                world.hunts.iter().filter(|(_, s)| s.target == t).map(|(&h, _)| world.name_of(h)).take(2).collect();
+            let (_, him) = pro(world, t);
+            let text = format!("{hn} leaves {tn}{why} to {}, already after {him}", names.join(" and "));
+            line(world, &[id], text);
+            world.stats.current.word.hunts_handed += 1;
+            continue;
+        }
+        if turn == Turn::Held {
+            mark(world, id, t, NOTED_HELD);
+            if hand_inside(world, id, t) {
+                continue;
+            }
+            world.stats.current.word.hunts_waiting += 1;
+            line(world, &[id], format!("{hn}'s grudge{why} waits: {tn} is in {}", held_where(world, t)));
+        } else {
+            if let Some(g) = world.comp_mut::<Grudges>(id) {
+                if let Some(x) = g.list.iter_mut().find(|x| x.target == t && x.settled.is_none()) {
+                    x.noted &= !NOTED_HELD;
+                }
+            }
+            if let Some(b) = world.comp_mut::<Brain>(id) {
+                b.cooldowns.remove(&GoalKind::Hunt);
+            }
+            line(world, &[id], format!("{hn} heard {tn} is out of the cells{why}"));
+        }
+    }
+}
+
+/// Z1: a held killer's cellmate of the holder's own (kin, a friend, a gang
+/// mate; an adult held in the same cells, never one under 18) takes the
+/// grudge inside: an `Inherited` grudge at `hand_w`, the line; the yard
+/// does the rest (`inside_mark`). Bounded by the holder's edges and gang.
+fn hand_inside(world: &mut World, id: EntityId, t: EntityId) -> bool {
+    let c = world.config.hunt.clone();
+    if c.inside_fight_p <= 0.0 || c.hand_w <= 0.0 {
+        return false;
+    }
+    let Some(jail) = crate::systems::law::cells_of(world, t) else { return false };
+    let Some(g) = crate::systems::grudges::grudge_on(world, id, t) else { return false };
+    let w = (g.weight * c.hand_w).min(1.0);
+    if w < min_for(world, GrudgeCause::Inherited(id)) {
+        return false;
+    }
+    let mut cands: Vec<EntityId> = world.neighbours.get(&id).map(|n| n.iter().copied().collect()).unwrap_or_default();
+    cands.retain(|&o| {
+        world
+            .edge(id, o)
+            .is_some_and(|e| matches!(e.kind, RelKind::Spouse | RelKind::Parent | RelKind::Family | RelKind::Friend))
+    });
+    if let Some(gang) = world.gang_of(id).and_then(|g| world.comp::<crate::components::Gang>(g)) {
+        cands.extend(gang.members.iter().copied());
+    }
+    let Some((_, o)) = cands
+        .into_iter()
+        .filter(|&o| o != id && o != t && crate::systems::law::living(world, o))
+        .filter(|&o| crate::systems::law::cells_of(world, o) == Some(jail))
+        .filter(|&o| crate::systems::demography::is_adult(world, o) && !crate::systems::ages::is_protected(world, o))
+        .filter(|&o| takes_against(world, o, t))
+        .map(|o| (might_gap(world, o, t), o))
+        .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)))
+    else {
+        return false;
+    };
+    let text = format!(
+        "{} put word inside {}: {}, held there with {}, will see to it{}",
+        world.name_of(id),
+        world.name_of(jail),
+        world.name_of(o),
+        world.name_of(t),
+        over(world, id, t)
+    );
+    line(world, &[id, o, jail], text);
+    let chain = g.chain;
+    crate::systems::grudges::add(world, o, t, GrudgeCause::Inherited(id), w, chain);
+    world.stats.current.word.hunts_handed += 1;
+    true
+}
+
+/// Z1, from `consequence::cell_day`: the cellmate `p` goes for (a held
+/// man he holds a grudge over a killing on, or one handed him, heavy
+/// enough to hunt; never one under 18), on `inside_fight_p` a day (`roll`).
+pub fn inside_mark(world: &World, p: EntityId, mates: &[EntityId], roll: f32) -> Option<EntityId> {
+    let c = world.config.hunt.inside_fight_p;
+    if c <= 0.0 || roll >= c || crate::systems::ages::is_protected(world, p) || cooled(world, p) {
+        return None;
+    }
+    world
+        .comp::<Grudges>(p)?
+        .list
+        .iter()
+        .filter(|x| x.settled.is_none() && blood(x.cause) && x.weight >= min_for(world, x.cause))
+        .filter(|x| mates.contains(&x.target) && !crate::systems::ages::is_protected(world, x.target))
+        .max_by(|a, b| a.weight.total_cmp(&b.weight).then(b.target.cmp(&a.target)))
+        .map(|x| x.target)
+}
+
+/// Z1, from `consequence::cell_day` after a yard fight `p` started on `m`:
+/// a win on a grudge over a killing (or one handed him) is the hunt's end
+/// inside: the `Avenged` deed and line, the grudge settled (a death) or
+/// answered (a beating), the chain.
+pub fn cell_strike(world: &mut World, p: EntityId, m: EntityId, winner: EntityId, died: bool, jail: EntityId) {
+    // A killing settled the grudge already (`grudges::on_death`).
+    let Some(g) = world.comp::<Grudges>(p).and_then(|gs| {
+        gs.list.iter().rev().find(|x| x.target == m && blood(x.cause) && (died || x.settled.is_none())).cloned()
+    }) else {
+        return;
+    };
+    if winner != p {
+        // A loss holds him off as a lost Hunt does (no fight a day on it).
+        cool(world, p);
+        return;
+    }
+    let now = world.tick;
+    world.kill_chain.insert(m, (g.chain.saturating_add(1), now));
+    let d = world.district_of_building(jail);
+    crate::systems::gossip::post_deed(world, d, Deed::Avenged, Some(p), Some(m));
+    let text = format!(
+        "{} avenged {} on {} in {}{}",
+        world.name_of(p),
+        for_whom(world, Some(g.cause)),
+        world.name_of(m),
+        world.name_of(jail),
+        if died { " (killed)" } else { "" }
+    );
+    world.push_event(EventKind::Avenged, &[p, m, jail], text);
+    if died {
+        if let Some(gs) = world.comp_mut::<Grudges>(p) {
+            if let Some(x) = gs.list.iter_mut().find(|x| x.target == m && x.settled.is_none()) {
+                x.settled = Some(now);
+            }
+        }
+    } else {
+        crate::systems::grudges::answer_beating(world, p, m);
+        answered(world, p, m, killing(g.cause));
+    }
+    let w = &mut world.stats.current.word;
+    w.avenged += 1;
+    w.hunts_ended += 1;
+    if died {
+        w.revenge_kills += 1;
+    }
 }
 
 /// W23: Statistical adults with an eligible grudge (the grudge store, not
