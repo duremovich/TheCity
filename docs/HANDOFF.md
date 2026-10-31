@@ -1,95 +1,96 @@
 # Handoff: now
 
 Rewritten at every session end; never appended. The session logs are `docs/history/SESSIONS.md`. Last rewrite:
-**2026-10-30, the twenty-eighth session: pressure pass round 8 from Shadow V16 (six phases X1-X6 in two waves,
-planned and built in one session), Shadow V17 read against V16, the 100k counters.**
+**2026-10-31, the twenty-ninth session: the big-picture check, pressure pass round 9 (the last: Y1-Y4, Z1-Z3),
+Shadow V18 (the exit read), the pressure pass closed, the city milestone planned.**
 
 ## Main
 
-Main holds **pressure pass round 8** (`docs/PRESSURE_PASS.md` § "Round 8 from Shadow V16", every phase's entry under
-"Implemented: deviations"). The change tier is green over the whole round (3m12s on the X5 merge; one line in
-`events::harm_line` added after it, built, not re-tiered); tests still 1,470 (none added; probes whose premises moved
-re-pinned in place with "Round 8" reasons, one by the orchestrator at the wave-1 merge). `SAVE_VERSION` 113.
+Main holds **the closed pressure pass** (`docs/PRESSURE_PASS.md`, § "Round 9 from Shadow V17" and every phase's
+entry under "Implemented: deviations"). Change tier green over the Z set (3m03s on `33b8a17`); tests 1,470 (none
+added; 73 pinned to the old pace through `common::r2`, `OPEN-252`). `SAVE_VERSION` 118.
 
 | phase | what it added |
 |---|---|
-| X1 the promise to tell the law (`law::keep_word`, `word_plan`, `cell_case`, `held_apart`, `Corpse.defended`, `[crime.case]` X1 keys) | a promise is a goal walked to the nearest open desk within a day or dropped with a reason line; the held do not witness the street or get hit across the cell wall; no asleep blackmail; a crime in the cells is a case; a death resisting arrest names no killer |
-| X2 the target and the bereaved (`systems/grief.rs`, `[grief]`, `contracts::react`, `stalled_runs`, `[search] need_*`) | a death in the house mourned 2-5 days (leave, a funeral, the children's line, a hot hunt); a hit's target hears and takes a guard, a counter-grudge or lies low; a stalled hit let go with a line; the needy sacked search; shadow picks `bereaved`, `marked` |
-| X3 the wrong person in the role II (`careers::record_ok`, `Misery.record_at`, `reads_record`, `[misery] employed_steal_misery`) | the law's posts and the books read a record; the employed steal a vehicle only broke or miserable; no Fighter foreman |
-| X4 gangs (`turf::rouse`, `raid::pick_muster`, `War.last`, `[gangs] leader_keep_margin`, `Deed::TookOver`) | the lie-low names the right enemy; every leader change a Succession line; the muster where most members reach; the call wakes a sleeper off shift |
-| X5 the pit, the ages, marriages (`[leisure] bout_beating`, `Flow::Purse`, `social::suitor`, `World.courting`, `[social] court_*`) | a loser hurt only on a beating, the purse 14c from the pit's owner; bout, arrest, witness and cell lines print ages; no kin or minor courts, a marriage needs a courtship |
-| X6 the cell's day, the walk-in, the picks (`law::serve_meals`, `consequence` yard, `household` cell visits, `care::walk_in_clinic`, `shadow.rs` doer ranks) | the meal, the yard, kin visits, the release line; walk-ins to the least busy open Clinic; the pickers rank doers, an empty pick is an error |
+| Y1 hunger in the brain (`fixes::eat_holds`, `[brain] food_tried_*`, `[wounded] care_feed_hunger`) | a started Eat holds, survival first when starving, a failed source tries the next (bin, kitchen, Market, Home, a theft for the less lawful); a laid-up patient is fed |
+| Y2 contradictions that are state (`law::on_leave`, `call_backup`, `[justice] backup_*`, `[careers] evicted_days`) | no arrests on leave, the boss inside named, a holed-up leader leads nothing, the second guard, a fare beat is word of the law's force |
+| Y3 the narration | a byline, the Camp's count past 64 names, cover shifts, the day_labourer pick |
+| **Y4 the walking pace** (`[exec] walk_tiles_per_tick` 21, `step_res`, `ExecCfg::walk_ticks`) | people walk 5 km/h (was 0.24 km/h); every pace reader moved; cars 5x, the El 30 km/h; tile caps that were minutes kept as minutes |
+| Z1 the avenger (`hunt.rs`, `[hunt]` Z1 keys, `EventKind::Hunt`) | a killing's grudge hunts (friends too), asks around, waits, hands off when weak, reaches into the cells; every end says how; the killer hears |
+| Z2 the taker (`contracts::walk_in_pick`, `ActionKind::TakeJob`, `[fixers]` Z2 keys) | a body takes a contract in person at the Fixer's desk; the mark hears by five routes |
+| Z3 the children of the jailed (`camp::jailed_households`) | a child whose adults are all held goes to the Camp the same day (Dylan's call) |
 
-**Shadow V17** (`docs/SHADOW_V17.md`, `docs/shadow_v17/`, V16's window): better than V16 where round 8 aimed (the
-law keeps its word, the cells have a day, the bereaved mourn, the marked react, marriages flat by week, Succession
-lines), corp and the desk unmoved, and **the city hungrier**: starvation 13 -> 45 at 100k, the diaries put it in
-Eat losing to Earn, a Pitch or Idle within the half hour (`OPEN-249`). **The under-18 rule held** in 117 diaries;
-`harm_blocked` 0 over 30 days.
+**Shadow V18** (`docs/SHADOW_V18.md`, `docs/shadow_v18/`): the exit's five stories all shown (1 and 4 after Z1, Z2),
+nobody starving while Eat loses, frozen days only in the cells, no minor harmed in 237 diaries. 100k seed 42 x 30
+(`target/r9_100k/` against `target/r8_100k/`, FINDINGs): starvation 45 -> 0, Starving 11.4k -> 1.1k, raids land
+(441), violent deaths 464 -> 756, Murder 244 -> 389, Arrests 13.9k -> 23.1k, jailed mean 1,373 -> 3,133 (max 6,747,
+~6 % of the city), ticks/s 18.2 -> 14.2 (on main before Z1-Z3).
 
-FINDINGs (100k seed 42 x 30, `target/r8_100k/` against `target/r7_100k/`): starvation 13 -> 45, Starving 7.3k ->
-11.4k, ChildTaken 3,703 -> 4,229, school days 15.2 -> 12.3 %, births 274 -> 158 (fewer marriages); Marriage 23,267 ->
-8,494 (flat by week); promises 282, kept 197, dropped with a line 82; Arrests 11.2k -> 13.9k; losers hurt 1,724 ->
-509; Clinic-days with no patient 853 -> 560; vehicle thefts 2,354 -> 729; JobSearch 84k -> 223k; `sold_dealer` 8 ->
-0; ticks/s 18.
+## Decided (Dylan, 2026-10-30/31)
 
-## Decided
-
-- **The pressure pass ends at round 9** (Dylan 2026-10-30, roadmap addendum 22): round 9 is broken systems only
-  (Y1 hunger in the brain, Y2 contradictions that are state, Y3 one Sonnet narration batch;
-  `docs/PRESSURE_PASS.md` § Round 9), and Shadow V18 is the exit read: VISION's five stories quoted from the
-  diaries, nobody starving while Eat loses to a non-survival goal, no frozen loop, no minor harmed.
-- **Then the map re-import with the vertical city, then graphics** (Dylan 2026-10-30: "Lets move towards
-  integrating graphics"; "vertical city is important, so might as well bring it in"): one milestone, planned
-  against TheCityGraphics; the view milestone after it, then M18. Dylan's calls (addendum 22): the Bevy client joins
-  the workspace as the milestone's first phase; the vertical city is pathed levels (floors as tenancies, a z,
-  stairs and elevators as portals, footbridges; no below ground yet); agents here may write TheCityGraphics.
-- **The neglect ladder's size at 100k stays as built** (Dylan 2026-10-30, `OPEN-231`). Round 8 did not touch it;
-  ChildTaken rose with the hunger, the ladder's input.
+- **The pressure pass is over** (roadmap addendum 22): it had an exit and met it. Do not open a round 10 from a ranked
+  list; what reads wrong goes to `OPEN.md`.
+- **The city milestone is next** (`docs/CITY_MILESTONE.md`, Dylan's answers in it): the Bevy client joins the
+  workspace FIRST (CLAUDE.md's standing decision rewritten); the vertical city is pathed levels (floors as tenancies,
+  a z, stairs and lifts as portals, lifts a place too, footbridges; no below ground); `k = 2`; a landlord rents floors;
+  agents here may write TheCityGraphics on its own branches.
+- **The pace is real walking speed now**, to be tuned visually once the follow-cam stands; the cells' load
+  (`OPEN-256`) waits for that.
+- **Children:** a child whose parents are all jailed goes to the Camp (Z3); a homeless child may be fine if he can
+  fend for himself (a later feature, `OPEN-258`); the neglect ladder's size stays (`OPEN-231`).
 
 ## In flight
 
 - No agents are running; no worktrees.
-- `target/shadow_v17/`, `target/r8_100k/` hold the runs.
+- `target/shadow_v18/`, `target/r9_100k/`, `target/z1/` hold the runs.
 
 ## Next, in order
 
-1. **Pressure pass round 9** (`docs/PRESSURE_PASS.md` § Round 9, planned 2026-10-30): Y1 hunger in the brain
-   (`OPEN-249`), Y2 contradictions that are state (`OPEN-250`, `OPEN-251`), Y3 the narration batch (Sonnet).
-2. **Shadow V18, the pressure pass's exit** (the five stories; one targeted phase per missing story, then close).
-3. **The city milestone: the 100k map re-import with the vertical city** (`OPEN-204`, `OPEN-182`, `OPEN-221`,
-   `OPEN-240`, `OPEN-241`'s far musters, `OPEN-187`, `OPEN-191`), planned against TheCityGraphics.
-4. The view milestone (the Bevy client joins the workspace), then M18.
+1. **The city milestone, wave 1** (`docs/CITY_MILESTONE.md` § Phases): C1 the workspace join (TheCity + TheCityGraphics
+   `engine/`) beside C3 the El on rail and the duplicate tram (TheCityGraphics). Then wave 2: C2 the follow-cam on a
+   save beside C4 the export for 100k and levels. Then C5 the re-import, C6a/C6b tenancies, C7 levels and lifts, C8
+   the vertical gangs, C9 far travel re-read. One Opus coder per phase; WORKSPACE_JOIN.md is stale in the ways the
+   planner listed (in the spec's "What exists").
+2. At the city milestone's first close: regenerate `assets/stat_table.toml` and read 100k ticks/s on the full Z build
+   (`OPEN-255`); the merge and milestone tiers as prints (not run at the pressure pass's close).
+3. After it: the view milestone (the camera ring `OPEN-149`, the pace tuned by eye, then `OPEN-256`), M18.
 
-Carried, still open: `OPEN-217`, `OPEN-220`, `OPEN-212`, `OPEN-150`, `OPEN-179`, `OPEN-229`, `OPEN-231`; standing
-`OPEN-062`, `OPEN-039`, `OPEN-057`, `OPEN-059`, `OPEN-077`, `OPEN-069`, `OPEN-070`. Closed this round: `OPEN-246`
-(X1), `OPEN-247` (X2, X3), `OPEN-248` (X5). Opened: `OPEN-249` to `OPEN-251`.
+Open from this session: `OPEN-252` (the R2-pinned tests and four behavioural probes), `OPEN-253` (arrival churn,
+PlanAborted 277k at 20k), `OPEN-254` (the El and cabs at a walking city), `OPEN-255`, `OPEN-256` (the cells),
+`OPEN-257` (the wrong person named), `OPEN-258` (street children), `OPEN-259` (V18's dull and wrong rooms). Carried:
+`OPEN-217`, `OPEN-220`, `OPEN-212`, `OPEN-150`, `OPEN-179`, `OPEN-229`, `OPEN-231`; standing `OPEN-062`, `OPEN-039`,
+`OPEN-057`, `OPEN-059`, `OPEN-077`, `OPEN-069`, `OPEN-070`.
 
-## Process notes from this round
+## Process notes from this session
 
-- **Merging wave 1 as one set, one tier** worked: the four branches merged in arrival order (each conflict was
-  `SAVE_VERSION`, the appended `Jobs2Cols` columns and the docs), then one change tier over the set instead of one per
-  merge. It caught one red (a seeded premise), cleared without a fix round.
-- **Re-pin a butterflied probe at the killer, not the latest round**: the farm worker probe had been re-pinned three
-  times by turning off whichever section moved the city; this time it turns off the organ gangs that kill its pick.
-- **Ages on lines are matched by text** (`events::harm_line`): a phase that renames a harm line ("in the cells of" ->
-  "in the yard of") must update the matcher; caught at the X5 merge.
-- Coders ran 3-5 min tiers on a box shared by four agents; X1 and X4 breached the budget under load only.
-- The shadow and the 30-day counters ran at once (39 and 41 min); seven Sonnet critics read in ~15 min.
+- **A big-picture check paid for itself**: the city milestone's planner, not a shadow critic, found the pace (a
+  constant read in every system); eight rounds of diary reads had patched its symptoms. When a class of bug recurs
+  across rounds, look for the constant under it.
+- **An exit turns a loop into a pass**: V18 graded five named stories instead of ranking seven items, and two
+  targeted phases closed it.
+- **A stories critic across every diary and the event log** read the exit better than the group critics (who called
+  story 1 "found" on an attack with no hunt behind it); keep one for any story-shaped exit.
+- **A pace change butterflies a third of the suite**; Y4 pinned 73 tests to the old pace in one helper rather than at
+  their killers (the budget): fine once, but re-pin or delete each file as phases touch it (`OPEN-252`).
+- Deleting a worktree's `target/` while its agent still has a background job running kills that job; wait for the
+  final notification.
 
-## Cost (API-rate $ equivalent, `tools/session_cost.py --session e89ef89d`)
+## Cost (API-rate $ equivalent, `tools/session_cost.py --last 1`)
 
 | part | agent | turns | median ctx | $ |
 |---|---|---|---|---|
-| X1 the promise to tell the law | Opus | 444 | 241k | 59 |
-| X2 the target and the bereaved | Opus | 389 | 280k | **76** |
-| X3 the wrong person in the role II | Opus | 228 | 155k | 16 |
-| X4 gangs | Opus | 314 | 234k | 32 |
-| X5 the pit, the ages, marriages | Opus | 335 | 198k | 32 |
-| X6 the cell's day, the walk-in, the picks | Opus | 233 | 236k | 21 |
-| Shadow V17 critics (7) | Sonnet | 322 | 77-105k | 9 |
-| orchestrator (plan, briefs, merges, runs, synthesis) | Opus | ~200 | 160k | ~13 |
+| Y1 hunger in the brain | Opus | 246 | 165k | 18 |
+| Y2 contradictions that are state | Opus | 332 | 209k | 22 |
+| Y3 the narration | Sonnet | 68 | 75k | 2 |
+| Y4 the walking pace | Opus | 486 | 278k | **60** |
+| Z1 the avenger | Opus | 353 | 246k | 32 |
+| Z2 the taker | Opus | 261 | 215k | 19 |
+| Z3 the children of the jailed | Sonnet | 34 | 64k | 1 |
+| the city milestone planner | Opus | 105 | 132k | 6 |
+| Shadow V18 critics (8) | Sonnet | 610 | 98-149k | 24 |
+| orchestrator (the check, plans, merges, runs, synthesis) | Opus | 282 | 194k | 25 |
 
-Round 8 ≈ $258 for six phases and a shadow read (round 7: ≈ $232, round 6: ≈ $316). X1 and X2 blew the 300-turn
-brief (444, 389): both built a new system end to end (the promise's desk walk, grief).
+Round 9 and the close ≈ $209 for seven phases, the exit read and the city plan (round 8 ≈ $258). Y4 blew the
+300-turn brief (486): a pace touches every system and a third of the suite.
 
 The standing decisions, the doctrine and the agent rules are in `CLAUDE.md`; the tiers in `docs/TESTING.md`.

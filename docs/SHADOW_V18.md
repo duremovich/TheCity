@@ -67,3 +67,20 @@ Murders under 18.
 - **Corp**: a guard idles a whole shift (`guard_29797 d26`) and arrests his own dealer; the reporter with no work.
 - **The shadow tool**: the JUMP audit flags escorts (arrest transport 73-85 tiles in a minute: a jump or a real
   teleport); the `pimp` pick empty at 100k.
+
+## The close (2026-10-31)
+
+Z1, Z2 and Z3 merged (`33b8a17`, change tier green over the set). Stories 1 and 4 read in the coders' own 100k runs in
+V17's window (not a second critic pass; the exit rule closes the pass after the targeted phases):
+
+- **Story 1, shown**: `target/z1/sh100k/bereaved_32861.md` (Cerys Tanner, her father Orrin Quarry killed by Mako
+  Singh): `d21 20:00` mourning leave; `d23 00:02` "put word inside Precinct#4485: Mina Pembroke, held there with Mako
+  Singh, will see to it"; `d25 18:17` "went looking for Mako Singh" (out of the cells), a stake-out at Hideout#4532, an
+  Attack; `d25 19:15` "went for Mako Singh over a killing and lost; she nurses it, the grudge heavier". 20k: killing
+  grudges with a hunt line 5 -> 63 %, Avenged 24 -> 38.
+- **Story 4, shown**: `fixer_66801` (100k) `d23 01:19` a beat posted on Dante Draper for 349 (revenge for a
+  betrayal); `11:45` "Aldo Penhallow came to Fixer#5202 in person and took the beat ... for The Red Dogs"; `d24
+  22:22` done by The Cinder Teeth. 20k: takes in person 0 -> 250, take hours 2 -> 11.
+
+**The pressure pass is closed.** What V18 and the Z phases left reading wrong is on `OPEN.md` (`OPEN-252` to
+`OPEN-259`, `OPEN-217`) with no round of its own.

@@ -1034,3 +1034,22 @@ third butterfly on that ground; re-pinned by the orchestrator with organ gangs o
 diaries (`harm_blocked` 0), and the city hungrier (starvation 13 -> 45: Eat loses to Earn, a Pitch or Idle within the
 half hour). `OPEN-249` to `OPEN-251` opened; `OPEN-246` to `OPEN-248` closed. Cost ≈ $258 (HANDOFF § Cost).
 
+
+## The twenty-ninth session (2026-10-30/31): the big-picture check, round 9 (the last), Shadow V18, the pass closed
+
+A big-picture check at the start (Dylan: "We have spend a few rounds in a row chasing details"): V10-V17 had each
+returned 7-8 ranked items and the pressure pass had no exit; Dylan agreed to an exit (VISION's five stories in the
+100k diaries, nobody starving while Eat loses to a non-survival goal, no frozen loop, no minor harmed), a short round
+9 of broken systems only, then the city milestone with the Bevy client joining first, the vertical city as pathed
+levels, and agents here writing TheCityGraphics (roadmap addendum 22; CLAUDE.md's standing decision rewritten). Round
+9: Y1 hunger in the brain (Eat's gate re-read every think dropped a started Eat; a hold, survival first, a source
+ladder), Y2 contradictions that are state (`law::on_leave`, the second guard, the fare beat as word of the law), Y3 the
+narration (the Camp's count was a 64-name cap). The city milestone's planner found the pace: `move_ticks_full` 1 was
+0.24 km/h, 1/21 of a walk, the root of six rounds of far travel; Dylan: fix it now, so Y4 the walking pace (21 tiles a
+tick; 20k legs over 2 h 32,908 -> 4; 73 tests pinned to the old pace via `common::r2`, `OPEN-252`). The Y1-Y3 set's
+tier went red on the pimp probe (a robot detained the subject; re-pinned by the orchestrator). Shadow V18 at 100k,
+eight Sonnet critics with a stories critic: stories 2, 3, 5 shown, 1 and 4 mechanism only, the checks held;
+starvation 45 -> 0, raids land, the cells at 6 % of the city. Z1 the avenger (killers jailed in minutes, friends
+under the hunt line), Z2 the taker (a body takes a contract in person at the Fixer's desk; the mark hears), Z3 the
+children of the jailed (Dylan's call) closed the pass; the Z set's tier green. `SAVE_VERSION` 118, tests 1,470 (none
+added). `OPEN-249` to `OPEN-251`, `OPEN-215` closed; `OPEN-252` to `OPEN-259` opened. Cost ≈ $209 (HANDOFF § Cost).

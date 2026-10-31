@@ -1,4 +1,4 @@
-# The pressure pass (opened 2026-10-26)
+# The pressure pass (opened 2026-10-26, closed 2026-10-31 at Shadow V18 and round 9's Z1-Z3)
 
 The first pass under the reset doctrine (CLAUDE.md § The doctrine). Its purpose is mechanism, not balance: a city
 where misery, debt, fear and turf push people into the choices that make story (skipping work, stealing, fighting,
