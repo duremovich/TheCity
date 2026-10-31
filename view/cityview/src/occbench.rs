@@ -289,7 +289,7 @@ pub fn setup_probes(
         let c = counts.clone();
         commands.spawn(Readback::texture(img)).observe(move |ev: On<ReadbackComplete>| {
             // the flat player is pure green (unlit, no tonemapping, sRGB 0 / 255 / 0)
-            let n = ev.data.chunks_exact(4).filter(|p| p[1] > 240 && p[0] < 16 && p[2] < 16).count() as u32;
+            let n = ev.data.as_chunks::<4>().0.iter().filter(|p| p[1] > 240 && p[0] < 16 && p[2] < 16).count() as u32;
             c.0.lock().unwrap()[k] = n;
         });
     }
@@ -538,7 +538,7 @@ fn summarise(b: &OccBench) -> serde_json::Value {
     let below: Vec<&(f32, &Sample)> = fw.iter().filter(|(f, _)| *f < 0.6).collect();
     let full_r = b.samples.iter().map(|x| x.radius).fold(0.0, f32::max);
     let below_steady = below.iter().filter(|(_, x)| !(x.occluded && x.radius < full_r * 0.99)).count();
-    let fs: Vec<f32> = stand.iter().filter_map(|x| frac(x)).collect();
+    let fs: Vec<f32> = stand.iter().filter_map(frac).collect();
     // flicker: target flips while standing, after the settle
     let settled: Vec<&&Sample> = stand.iter().collect();
     let flips = match (settled.first(), settled.last()) {

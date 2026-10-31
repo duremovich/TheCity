@@ -305,7 +305,7 @@ pub fn update_sim(
         let t = next_v.get(&v.id).map_or(v.t, |n| [v.t[0] + (n[0] - v.t[0]) * u, v.t[1] + (n[1] - v.t[1]) * u]);
         let p = sim.metres(t, v.id, false);
         let ahead = next_v.get(&v.id).map(|n| sim.metres(*n, v.id, false) - sim.metres(v.t, v.id, false)).filter(|d| d.length() > 0.01);
-        let yaw = ahead.map_or(0.0, |d| d.x.atan2(d.y) * -1.0);
+        let yaw = ahead.map_or(0.0, |d| -d.x.atan2(d.y));
         let track = v.line.and_then(|l| sim.line_track.get(l as usize).copied());
         let ground = stream.ground_z(p.x, p.y).unwrap_or(0.0);
         let (z, red) = match (v.ride, track) {

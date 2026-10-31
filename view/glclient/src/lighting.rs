@@ -242,7 +242,7 @@ pub fn apply_lights(
         && added.is_empty()
         && added_lights.is_empty()
         && *last_gen == city.cut_gen
-        && !(alloc && (focus.is_changed() || *frame % 10 == 0))
+        && !(alloc && (focus.is_changed() || (*frame).is_multiple_of(10)))
     {
         return;
     }
@@ -290,7 +290,7 @@ pub fn apply_lights(
             // entity id or building index: the shadow set must not depend on load order or on how the host numbered
             // its buildings (P6: kit buildings spawn in another order, and after the glbs, than the baked ones)
             let key: HashMap<Entity, &str> = points.iter().map(|(e, l, ..)| (e, l.name.as_str())).collect();
-            v.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| key[&a.0].cmp(&key[&b.0])).then(a.0.cmp(&b.0)));
+            v.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| key[&a.0].cmp(key[&b.0])).then(a.0.cmp(&b.0)));
             // greedy fill of the view budget: a cube (6 views) only if it still fits
             let mut left = n;
             alloc_set.clear();

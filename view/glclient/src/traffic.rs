@@ -11,6 +11,7 @@
 //! - cars spawn on the ring's lanes at a density per class (filled when a lane comes into the ring, topped up at
 //!   lane starts: sources and lanes entering from outside) and vanish past the ring or at a sink (a dead end);
 //! - buses and minibuses keep to arterial / tram lanes and take only arcs of BIG_R m or more (their width).
+//!
 //! `Sim` is plain data (no Bevy): cityview's headless `--traffic-trace` runs it for the gates (checks_traffic).
 //! Bodies: the city fleet's glbs (vehicles.rs, P8) picked per car id from its kind's variants; wheels spin with
 //! the distance driven and the front pair steers with the heading rate, hover cars float at their hover height;

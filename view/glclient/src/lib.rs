@@ -17,6 +17,10 @@
 //!
 //! Insert a `city::City` and a `frame::Focus` before Startup, add `GlClientPlugin`.
 
+// Bevy systems take their params as arguments and query tuples as types: the two lints every Bevy crate allows.
+// The traffic sim and the kit decoder walk parallel arrays by index (needless_range_loop would split them).
+#![allow(clippy::too_many_arguments, clippy::type_complexity, clippy::needless_range_loop)]
+
 pub mod block;
 pub mod city;
 pub mod frame;

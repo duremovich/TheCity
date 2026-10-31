@@ -61,10 +61,10 @@ pub fn occ_prepass_shader() -> ShaderRef {
 /// Every occluder material's `specialize`: the pre-P4 baseline compiles `occ_apply` out (OCC_OFF: no discard in
 /// the main pass, so early-Z is what it was before P4).
 pub fn occ_specialize(descriptor: &mut RenderPipelineDescriptor) {
-    if !built() {
-        if let Some(f) = descriptor.fragment.as_mut() {
-            f.shader_defs.push("OCC_OFF".into());
-        }
+    if !built()
+        && let Some(f) = descriptor.fragment.as_mut()
+    {
+        f.shader_defs.push("OCC_OFF".into());
     }
 }
 

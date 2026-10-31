@@ -17,6 +17,9 @@
 //! --sim FILE [--sim-rate TICKS_PER_S] [--sim-frame N]: a sim replay (city-simview/0.1 from engine/simsnap) drawn as
 //! placeholders on the city (sim.rs; spec/integration/SIM_VIEW_CONTRACT.md).
 
+// Bevy systems take their params as arguments and query tuples as types: the two lints every Bevy crate allows.
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
+
 mod bench;
 mod cam;
 mod data;

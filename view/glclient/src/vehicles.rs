@@ -261,10 +261,9 @@ fn finish(
                     let (mat, slot) = by_name
                         .entry(name.clone())
                         .or_insert_with(|| {
-                            let (m, slot) = if name.starts_with("pal_") || extras.is_none() {
-                                material(&name, gmat)
-                            } else {
-                                recipe(&name, gmat, extras.as_ref().unwrap())
+                            let (m, slot) = match extras.as_ref() {
+                                Some(ex) if !name.starts_with("pal_") => recipe(&name, gmat, ex),
+                                _ => material(&name, gmat),
                             };
                             (mats.add(m), slot)
                         })
@@ -377,15 +376,15 @@ pub fn check(rec: &ModelRec, parts: &[Part]) -> Vec<String> {
         out.push(format!("lowest point y {:.3}, not on the ground", lo.y));
     }
     let mid = (lo.x + hi.x) * 0.5;
-    if let Some(x) = head {
-        if x <= mid {
-            out.push(format!("head lamps at x {x:.2} behind the middle {mid:.2}"));
-        }
+    if let Some(x) = head
+        && x <= mid
+    {
+        out.push(format!("head lamps at x {x:.2} behind the middle {mid:.2}"));
     }
-    if let Some(x) = tail {
-        if x >= mid {
-            out.push(format!("tail lamps at x {x:.2} ahead of the middle {mid:.2}"));
-        }
+    if let Some(x) = tail
+        && x >= mid
+    {
+        out.push(format!("tail lamps at x {x:.2} ahead of the middle {mid:.2}"));
     }
     out
 }

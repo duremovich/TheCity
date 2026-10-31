@@ -372,14 +372,16 @@ fn read_stream(path: &Path) -> Result<Stream, String> {
         Ok(&blob[off..end])
     };
     let fsize = arr("fsize")?.to_vec();
-    let u16s = |b: &[u8]| -> Vec<u16> { b.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect() };
-    let f32s = |b: &[u8]| -> Vec<f32> { b.chunks_exact(4).map(|c| f32::from_le_bytes(c.try_into().unwrap())).collect() };
+    let u16s = |b: &[u8]| -> Vec<u16> { b.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect() };
+    let f32s = |b: &[u8]| -> Vec<f32> { b.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect() };
     let fmat = u16s(arr("fmat")?);
     let q = h["quantum"].as_f64().unwrap_or(8192.0);
     // i32 running differences of round(p * Q) -> points (f64: the module points are placed before the f32 cast)
     let undelta = |b: &[u8]| -> Vec<[f64; 3]> {
         let mut acc = [0i64; 3];
-        b.chunks_exact(12)
+        b.as_chunks::<12>()
+            .0
+            .iter()
             .map(|c| {
                 let mut p = [0f64; 3];
                 for k in 0..3 {
@@ -393,9 +395,9 @@ fn read_stream(path: &Path) -> Result<Stream, String> {
     let pos: Vec<[f32; 3]> = if v2 {
         undelta(arr("posq")?).iter().map(|p| [p[0] as f32, p[1] as f32, p[2] as f32]).collect()
     } else {
-        f32s(arr("pos")?).chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect()
+        f32s(arr("pos")?).as_chunks::<3>().0.to_vec()
     };
-    let uv: Vec<[f32; 2]> = f32s(arr("uv")?).chunks_exact(2).map(|c| [c[0], c[1]]).collect();
+    let uv: Vec<[f32; 2]> = f32s(arr("uv")?).as_chunks::<2>().0.to_vec();
     let starts = |sizes: &[u8]| -> Vec<u32> {
         let mut at = 0u32;
         sizes
@@ -407,7 +409,7 @@ fn read_stream(path: &Path) -> Result<Stream, String> {
             })
             .collect()
     };
-    let fv0 = if v2 { starts(&fsize) } else { arr("fv0")?.chunks_exact(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect() };
+    let fv0 = if v2 { starts(&fsize) } else { arr("fv0")?.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect() };
     if h.get("modules").is_none() {
         return Ok(Stream { h, fsize, fmat, fv0, pos, uv });
     }
@@ -416,7 +418,7 @@ fn read_stream(path: &Path) -> Result<Stream, String> {
     let mmat = u16s(arr("mmat")?);
     let mpos = undelta(arr("mposq")?);
     let mv0 = starts(&msize);
-    let imod: Vec<u32> = arr("imod")?.chunks_exact(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect();
+    let imod: Vec<u32> = arr("imod")?.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect();
     let ipos = f32s(arr("ipos")?);
     let iyaw = f32s(arr("iyaw")?);
     let mods: Vec<(usize, usize)> = h["modules"]
@@ -952,7 +954,7 @@ fn kit_ring(
 ) {
     let Some(ring) = ring else { return };
     *frame = frame.wrapping_add(1);
-    if *frame % 15 != 0 {
+    if !(*frame).is_multiple_of(15) {
         return;
     }
     let chunk = |p: Vec3| {
