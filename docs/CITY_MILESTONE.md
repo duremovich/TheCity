@@ -307,6 +307,12 @@ wrong goes to OPEN; the view milestone (`OPEN-149`, `OPEN-180`'s rest) follows, 
    gang, cut (a landlord who stops paying the power, a sabotage) and fought in. C7 builds the lift as a place with
    capacity and a queue; C8 adds holding and cutting it as turf and raid moves.
 
+6. **Wave 1-2's calls (Dylan 2026-10-31, "Sounds good"):** C3's rack lines (Mid-Levels and Hillside at up to 18 % /
+   16 %, platforms on the grade), Hillside stacked over Mid-Levels for ~70 m on link_4, and Mid-Levels ending at Wing
+   Lun Road are kept; C4's D2 office density (one per 500 m2 of plate, 4,030 offices) is kept as a placeholder until a
+   D2 layout pass. The view's base speed is real time (walk-matched, 1/60 ticks/s: a game minute is a real minute,
+   an RPG's 1x; faster speeds are for watching). The view tier's budget is 7 min (a cold run rebuilds the sim).
+
 ## The questions as asked
 
 

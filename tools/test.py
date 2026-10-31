@@ -44,7 +44,7 @@ OPEN_MD = ROOT / "docs" / "OPEN.md"
 
 # Budgets in seconds (wall, after compile, the tier alone on this box). Change
 # only with a line in the commit message.
-BUDGETS = {"change": 240, "merge": 480, "milestone": 1200, "view": 180}
+BUDGETS = {"change": 240, "merge": 480, "milestone": 1200, "view": 420}
 
 # Caps checked by `lint` (docs/TESTING.md § caps).
 CAP_GOD_SCENARIOS = 20      # excluding the *_control tests
