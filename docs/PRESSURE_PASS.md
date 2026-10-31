@@ -644,6 +644,68 @@ asserts its preconditions: an empty pick is an error line, not a silent miss). S
 gun, runner, arms_dealer (20k). Moves a number: doctor-days with no patient, jail-days with a line, 20k seed 42 x 30
 before and after.
 
+### Round 9 from Shadow V17 (`SHADOW_V17.md` § "Round 9's input", opened 2026-10-30): the last round
+
+**The pressure pass's last round, and its exit** (Dylan 2026-10-30, after a big-picture check: eight rounds each
+returned 7-8 ranked items, so the list measures the reading, not the distance left). Round 9 fixes broken systems
+only, in three phases; the narration polish goes to one cheap batch (Y3); far travel, the gangs' raids that do not
+land (`OPEN-241`) and the marriage move-in far from the post (`OPEN-240`) go to the map re-import with the vertical
+city, which follows. The dull rooms (arms dealers, the rich who never work, the corp-district Clinic) stay on
+`OPEN-217`, unbuilt. The under-18 rule holds in every phase (CLAUDE.md). A phase's 100k work is at most one run.
+Iterate at 20k (`--population 20000 --map assets/maps/isle_m_k2.txt`; `run` also `--scaled --ambient-flats 50`);
+V17's repro picks are 100k seed 42 days 21-27 (`target/shadow_v17/`). Y1, Y2, Y3 run at once; Y2 and Y3 both touch
+event lines and each brief names the other.
+
+**The exit: Shadow V18.** One read at 100k seed 42 in V17's window after round 9 merges. The pressure pass closes
+when the critics quote, from the diaries, each of VISION's five stories happening: (1) a friend killed and the friend
+who goes after the killer; (2) word of a killing getting around and someone acting on it; (3) a hit as an ordinary
+business (a buyer, a price, a hitter, an outcome); (4) an open contract an NPC takes that a player could have taken;
+(5) a life that makes sense on inspection (a diary whose week follows from its past). And: nobody starves while Eat
+loses to a goal that is not survival or danger, no frozen identical-day loop, no minor harmed. The counters are
+printed, not banded. A story that does not show gets one targeted phase for that story alone, then the pass closes;
+everything else V18 finds goes to `OPEN.md` with no round of its own.
+
+#### Y1, hunger in the brain (`OPEN-249`)
+
+A starving person's Eat is dropped within the half hour for Earn, a Pitch (X2's "a door to ask about work") or Idle
+at 0.05, fed only by the midnight soup line (`neglect_parent_35940 d23 13:30-14:00`, `jobless_6204 d21 11:45`, `d22`,
+`sick_49012 d21`, `homeless_86438 d21`); the bin walk is cut at its first step and replanned away; Eat cools after a
+failed dumpster dive; the home meal is at one fixed minute; a wounded target starves 72 h in a clinic while kin visit
+four times with no food (`marked_22051`). Starvation at 100k 13 -> 45, Starving 7.3k -> 11.4k, PlanAborted 887k ->
+1.16M. Find why Eat at hunger 1.0 loses to Idle at 0.05 (the score, an unplannable Eat falling back, the switch in
+`think::apply`, `fixes::committed`, the cooling after a failure) and fix it in the brain, not per goal: past a
+starving threshold survival outranks every goal but danger, a started Eat plan holds until fed or failed with a
+reason line, and a failure tries the next source (home, the bin, the soup line, a theft of food, kin) rather than
+cooling. A patient laid up is fed by the clinic or by kin who bring food. Anchors: `systems/think.rs` `apply`,
+`systems/fixes.rs` `committed`, `utility/goals.rs` Eat, `systems/plan.rs` Eat and "unplannable", `systems/charity.rs`,
+`wounded.rs`. Shadow: homeless, jobless, sick, neglect_parent, marked, miserable (20k). Moves a number: starvation
+deaths, Starving events, PlanAborted and its top ten "A -> B" transitions, 20k seed 42 x 30 before and after.
+
+#### Y2, contradictions that are state (`OPEN-250`, `OPEN-251`)
+
+Each is a system acting on stale or wrong state; fix each at its cause. A guard on mourning leave makes arrests
+(`bereaved_6559 d21 09:19`, `d23`); a successor takes over a gang from the cells (`pimp_9933 d24 03:43`); "out of the
+cells and runs it again" names a different man (`purist_32297`, `purist_9284`, `dealer_105046`); "lies low at home"
+then an 875-min walk to collect (`fixer_23959 d23 09:19`); "never told: out of reach" then a report the same day
+(`night_shift_24245`); a cell murder with no victim, Death or case line (crime group); one hit across the cell wall at
+100k; a man with cancer or fresh off an eviction hired as Guard (`sick_49012 d26`, `neglect_parent_80351 d27`); the
+funeral's "no friend near to ask" with a Friend in the Block. The law's force: a joytoy with no kit fights off a guard
+five times in one evening and no second guard comes (`joytoy_123639 d27 15:32-23:49`): a guard who loses calls for a
+second, and a resisting suspect faces more than one; a sanctioned fare beat is gossiped as "Assaulted by" and a grudge
+sworn on the guard (`guard_8429 d22-26`): a lawful beating is word of the law's force, not an assault. Shadow:
+bereaved, gang_leader, purist, fixer, night_shift, joytoy, guard, jailed (20k). Moves a number: arrests by guards on
+leave (0), takeovers from the cells (0), hits across the cell wall (0), second guards called, 20k seed 42 x 30 before
+and after.
+
+#### Y3, the narration batch (Sonnet; V17 items 2, 4, 6, 7, `OPEN-219`)
+
+Lines only, no mechanism: a hit's Assault line names the victim twice; bylines read as the reporter's crime
+(`reporter_59309 d23 00:01`); the Camp's Custody line says "64 brought in" a day while Camp#5132 grows 2,644 -> 3,656
+in five days (`camp_warden_56621 d21-26`): make the line count what came in, and if the count itself is wrong, report
+it rather than fix it; cover shifts printed as Hires; the `day_labourer` shadow pick empty at 100k (the picker's
+rank). Y2 also touches event lines: keep to the line text, not who acts. Shadow: reporter, camp_warden, the hit's
+buyer or target (`marked`), day_labourer (20k).
+
 ## Implemented: deviations
 
 (Per phase, as they land.)

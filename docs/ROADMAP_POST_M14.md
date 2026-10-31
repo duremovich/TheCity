@@ -495,3 +495,19 @@ After the island pass closed and the 100k decision (`OPEN-184`).
   perspective, we can always add room for infrastructure above (or below)."
 - **The tiers stay at 2k and 20k**; 100k is read at gates and shadow passes. Parallel scoring is in the perf pass;
   the co-worker crew cap goes to the pressure pass (`OPEN-205`).
+
+## Addendum 22 (2026-10-30, Dylan): the pressure pass gets an exit; the city and the view next
+
+After round 8, a big-picture check: eight shadow reads (V10-V17) each returned 7-8 ranked items, the pressure pass
+had no exit, and far travel recurred in every read from V12 as a map problem patched locally.
+
+- **Round 9 is the pressure pass's last round**, broken systems only (`docs/PRESSURE_PASS.md` § Round 9): hunger in
+  the brain (`OPEN-249`), the contradictions that are state (`OPEN-250`, `OPEN-251`), one narration batch.
+- **The exit is Shadow V18**: VISION's five stories each quoted from the 100k diaries, nobody starving while Eat
+  loses to a non-survival goal, no frozen loop, no minor harmed. A missing story gets one targeted phase; everything
+  else goes to OPEN. Dylan: "I think that's a fine exit."
+- **Then the map re-import with the vertical city, and graphics integration.** Dylan: "Lets move towards integrating
+  graphics ... I think vertical city is important, so might as well bring it in." The 100k map re-import (`OPEN-204`,
+  `OPEN-182`, `OPEN-221`, `OPEN-240`) and the vertical city (`OPEN-187`, `OPEN-191`) are one milestone, planned
+  against TheCityGraphics so the island the sim reads is the island the client draws; the view milestone (the Bevy
+  client joins the workspace, a follow-cam on an NPC, no input) follows, then M18.

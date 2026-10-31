@@ -34,6 +34,13 @@ FINDINGs (100k seed 42 x 30, `target/r8_100k/` against `target/r7_100k/`): starv
 
 ## Decided
 
+- **The pressure pass ends at round 9** (Dylan 2026-10-30, roadmap addendum 22): round 9 is broken systems only
+  (Y1 hunger in the brain, Y2 contradictions that are state, Y3 one Sonnet narration batch;
+  `docs/PRESSURE_PASS.md` § Round 9), and Shadow V18 is the exit read: VISION's five stories quoted from the
+  diaries, nobody starving while Eat loses to a non-survival goal, no frozen loop, no minor harmed.
+- **Then the map re-import with the vertical city, then graphics** (Dylan 2026-10-30: "Lets move towards
+  integrating graphics"; "vertical city is important, so might as well bring it in"): one milestone, planned
+  against TheCityGraphics; the view milestone after it, then M18.
 - **The neglect ladder's size at 100k stays as built** (Dylan 2026-10-30, `OPEN-231`). Round 8 did not touch it;
   ChildTaken rose with the hunger, the ladder's input.
 
@@ -44,14 +51,12 @@ FINDINGs (100k seed 42 x 30, `target/r8_100k/` against `target/r7_100k/`): starv
 
 ## Next, in order
 
-1. **Pressure pass round 9 from V17** (`docs/SHADOW_V17.md` § "Round 9's input", not yet planned): hunger loses to
-   everything (`OPEN-249`, first: why Eat at hunger 1.0 loses to Idle at 0.05); round 8's contradictions
-   (`OPEN-250`); the marriage move-in that ignores the post (`OPEN-240`); the law's force (`OPEN-251`: no second
-   guard, the fare beat gossiped as assault, bylines); gangs (`OPEN-241`: no raid lands in the diaries, the chair
-   churns); the Camp's count; the dull (arms dealers sell nothing, the rich who never work). Same loop.
-2. The 100k map re-import (`OPEN-204`, `OPEN-182`; far travel `OPEN-221`, `OPEN-240`: guards' patrol walks, the old
-   leaders' 14-20 h days, cabbies' Spot legs, gang members 5-7 h from their corner).
-3. The vertical city (`OPEN-187`, `OPEN-191`), the view milestone, M18.
+1. **Pressure pass round 9** (`docs/PRESSURE_PASS.md` § Round 9, planned 2026-10-30): Y1 hunger in the brain
+   (`OPEN-249`), Y2 contradictions that are state (`OPEN-250`, `OPEN-251`), Y3 the narration batch (Sonnet).
+2. **Shadow V18, the pressure pass's exit** (the five stories; one targeted phase per missing story, then close).
+3. **The city milestone: the 100k map re-import with the vertical city** (`OPEN-204`, `OPEN-182`, `OPEN-221`,
+   `OPEN-240`, `OPEN-241`'s far musters, `OPEN-187`, `OPEN-191`), planned against TheCityGraphics.
+4. The view milestone (the Bevy client joins the workspace), then M18.
 
 Carried, still open: `OPEN-217`, `OPEN-220`, `OPEN-212`, `OPEN-150`, `OPEN-179`, `OPEN-229`, `OPEN-231`; standing
 `OPEN-062`, `OPEN-039`, `OPEN-057`, `OPEN-059`, `OPEN-077`, `OPEN-069`, `OPEN-070`. Closed this round: `OPEN-246`
