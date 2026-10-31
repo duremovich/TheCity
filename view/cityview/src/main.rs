@@ -198,7 +198,7 @@ impl Args {
 
 /// TheCity's workspace root (view/cityview/../..).
 fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+    Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).expect("view/cityview sits two below the root").to_path_buf()
 }
 
 /// TheCityGraphics' assets/ directory (the AssetPlugin root: building glbs, block files, the city outputs), generated
@@ -208,7 +208,10 @@ fn workspace_root() -> PathBuf {
 fn asset_root() -> PathBuf {
     let (root, from) = match std::env::var_os("CITYVIEW_ASSETS") {
         Some(p) => (PathBuf::from(p), "CITYVIEW_ASSETS"),
-        None => (workspace_root().join("../TheCityGraphics/assets"), "the default (CITYVIEW_ASSETS unset)"),
+        None => match workspace_root().parent() {
+            Some(up) => (up.join("TheCityGraphics").join("assets"), "the default: CITYVIEW_ASSETS is unset"),
+            None => (PathBuf::from("TheCityGraphics/assets"), "the default: CITYVIEW_ASSETS is unset"),
+        },
     };
     if !root.is_dir() {
         eprintln!("cityview: no asset root at {} ({from}); set CITYVIEW_ASSETS to TheCityGraphics/assets", root.display());

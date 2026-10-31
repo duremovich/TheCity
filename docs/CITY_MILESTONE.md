@@ -77,6 +77,26 @@ TheCity draws the city from a fixture `simsnap` wrote (the bridge's 20k day-1 re
 wall before and after (no Bevy line in its log), the view tier's first walls into TESTING.md. Moves no sim number.
 No test.
 
+**C1 as built (2026-10-31).** As above, with these deviations: (1) **Bevy without `audio`** in both view crates
+(`default-features = false`, `2d` + `3d` + `ui` + `area_light_luts`): `bevy_audio`'s `alsa-sys` and citysim-app's
+macroquad (`quad-alsa-sys`) both declare `links = "alsa"`, and one lock may hold one package per `links` value, so
+the join did not resolve with Bevy's defaults. The view plays no sound; a sound phase re-opens it (an audio crate
+without `alsa`, or macroquad's audio off). (2) The dev profile: `opt-level = 1` by package for cityview and glclient
+(`[profile.dev.package.<name>]`), not a root `[profile.dev]`, so the sim's own crates keep the dev default;
+`"*" = 3` at the root as planned; `[profile.release] debug = 1` holds for the view too (the cold build is 3m07s, the
+relink 27 s: no `debug = 0` needed). (3) **A formatting commit after all:** the client was never rustfmt'd, so no
+`view/rustfmt.toml` makes it clean; at `max_width = 140`, small heuristics Max (the narrowest pass) it is 83 hunks
+in one commit of formatting only. (4) **Clippy:** 34+ lints under rustc 1.99; `too_many_arguments`,
+`type_complexity` (Bevy systems) and glclient's `needless_range_loop` (parallel arrays) are allowed crate-wide, the
+rest fixed in place with behaviour unchanged. (5) Dropped in the move: cityview's own `Cargo.lock` and
+`.cargo/config.toml` (`target-dir = ../lighttest/target`). (6) `--out` already existed; its default moved from the
+crate's `results/` to `<TheCity>/target/cityview`. (7) The fixture is the bridge's own frame (150 KB, committed, not
+generated): `view/cityview/fixtures/day1_20k_s42.simview.json`, recipe in TESTING.md. **The lock:** +337
+packages, every old (name, version) kept; `cargo tree -p citysim` (and the app and CLI) identical before and after.
+**TheCityGraphics** (branch `city-c1-join`): the two crates removed, `engine/README.md` points here, lighttest
+reads glclient from the sibling checkout (`../../../TheCity/view/glclient`) with its own vendor copy, simsnap
+unchanged (both `cargo check` green against this branch), `test_occlusion.py` runs cityview from here.
+
 ### C2, the follow-cam on a save (TheCity: `citysim/src/view.rs`, `citysim-cli` `export-view`, `view/cityview` `sim.rs`, the `SimThread`)
 
 `citysim::view` is `simsnap`'s `frame()` moved in as structs, no I/O: `snapshot(&World, ring) -> ViewFrame`
