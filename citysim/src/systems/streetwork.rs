@@ -870,7 +870,7 @@ fn corner_near(corners: &[(DistrictId, TilePos)], from: TilePos, reach: u32) -> 
 }
 
 /// One who may stand at the corner: a free jobless adult, broke, lawful enough.
-fn corner_ok(world: &World, id: EntityId) -> bool {
+pub fn corner_ok(world: &World, id: EntityId) -> bool {
     let cfg = &world.config.jobs2;
     free_adult(world, id)
         && !world.has::<Job>(id)

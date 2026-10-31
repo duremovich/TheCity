@@ -1085,6 +1085,12 @@ fn covers(world: &mut World, c: &CareCfg) {
             continue;
         };
         crate::systems::demography::hire(world, cv, emp, job.role);
+        // Y3: the hire line reads as the day's cover, not a post.
+        if let Some(e) = world.events.back_mut() {
+            if e.kind == EventKind::Hire && e.actors.first() == Some(&cv) {
+                e.text = e.text.replacen(" hired as ", " put on a one-day cover shift as ", 1);
+            }
+        }
         let until = now + TICKS_PER_DAY;
         if let Some(j) = world.comp_mut::<Job>(cv) {
             j.until = Some(until);

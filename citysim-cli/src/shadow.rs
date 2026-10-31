@@ -434,6 +434,29 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
                         .filter(|e| e.kind == EventKind::Hire && !label.is_empty() && e.text.contains(&label))
                         .filter_map(|e| e.actors.first().copied()),
                 );
+                // Y3: at 100k the event ring holds under a day of Hires, so the
+                // window finds nobody; the corner's own pool (the free, jobless,
+                // broke adults the dawn pick queues, on screen) stands in.
+                if v.is_empty() {
+                    v.extend(
+                        world
+                            .citizens()
+                            .into_iter()
+                            .filter(|&a| citysim::systems::streetwork::corner_ok(world, a))
+                            .filter(|&a| {
+                                world
+                                    .comp::<citysim::components::Brain>(a)
+                                    .is_some_and(|b| b.lod != citysim::components::Lod::Statistical)
+                            })
+                            .filter(|&a| {
+                                citysim::systems::careers::admits(
+                                    world,
+                                    a,
+                                    citysim::systems::careers::hire_band(world, role),
+                                )
+                            }),
+                    );
+                }
                 v.sort_unstable();
                 v.dedup();
             }
@@ -3054,6 +3077,11 @@ struct Fold {
 impl Fold {
     fn text(&self) -> String {
         let n = self.names.len();
+        // Y3: one name every time is one target hit n times (a hit's pairings
+        // all land on the mark): the attacker and the victim, once each.
+        if n > 1 && self.sum == 0 && self.names.iter().all(|x| *x == self.names[0]) {
+            return format!("{:?}: {}{} {n} times{}", self.kind, self.shape.before, self.names[0], self.shape.after);
+        }
         let shown: Vec<&str> = self.names.iter().take(FOLD_NAMES).map(String::as_str).collect();
         let more = n.saturating_sub(shown.len());
         let tail = if more > 0 { format!(" and {more} more") } else { String::new() };

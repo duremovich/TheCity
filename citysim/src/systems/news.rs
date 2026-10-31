@@ -913,7 +913,7 @@ fn run_stories(world: &mut World, plants: Vec<Plant>) {
                 let obj =
                     r.object.map_or_else(String::new, |o| format!(" {}", crate::systems::grudges::label(world, o)));
                 let paid = payer.map_or_else(String::new, |p| format!(" (paid by {})", world.owner_label(Some(p))));
-                let by = byline.map_or_else(String::new, |b| format!(" by {}", world.name_of(b)));
+                let by = byline.map_or_else(String::new, |b| format!(", story by {}", world.name_of(b)));
                 let text = format!(
                     "{fname}: {} {}{obj}{paid}{by}",
                     crate::systems::grudges::label(world, actor),
