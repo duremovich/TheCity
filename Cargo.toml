@@ -1,11 +1,34 @@
 [workspace]
 resolver = "2"
-members = ["citysim", "citysim-app", "citysim-cli"]
+# The view (view/glclient, view/cityview: the Bevy 0.19.1 client, edition 2024, from TheCityGraphics at the city
+# milestone's C1) is a member outside default-members: a bare cargo build / clippy / test builds the sim alone and
+# never compiles Bevy. tools/test.py's sim tiers never pass --workspace or --all; `python tools/test.py view`
+# builds and smokes the view (docs/TESTING.md).
+members = ["citysim", "citysim-app", "citysim-cli", "view/glclient", "view/cityview"]
+default-members = ["citysim", "citysim-app", "citysim-cli"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
 
+# The vendored Bevy 0.19.1 fixes the view builds with (cargo reads patches at the workspace root only): the shadow
+# views of hidden / culled lights, ortho volumetric fog, the shadow-view schedule cost, GPU timestamp spans
+# (TheCityGraphics engine/lighttest/README.md "Bevy patches"). A Bevy upgrade re-derives them.
+[patch.crates-io]
+bevy_pbr = { path = "view/vendor/bevy_pbr" }
+bevy_render = { path = "view/vendor/bevy_render" }
+
 [profile.release]
 debug = 1
+
+# The view's dev profile (a member's own [profile] is ignored): the client at opt-level 1, its dependencies (Bevy)
+# at 3. The sim's own crates keep the dev default; its tiers build in release.
+[profile.dev.package.cityview]
+opt-level = 1
+
+[profile.dev.package.glclient]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

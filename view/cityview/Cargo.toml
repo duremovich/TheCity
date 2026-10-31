@@ -1,0 +1,16 @@
+[package]
+name = "cityview"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "City view (CITY_SPEC P3): streams the generated city's chunks (ground, massing, elevated layers) under the game camera and a free overview (Bevy)"
+
+# Built in TheCity's workspace (a member outside default-members): its profiles and the vendored Bevy 0.19.1 fixes
+# ([patch.crates-io], view/vendor) are the root manifest's. `cargo build --release -p cityview`.
+[dependencies]
+# Bevy's defaults minus `audio`: bevy_audio's alsa-sys and macroquad's quad-alsa-sys (citysim-app) both link
+# `alsa`, and one lock may hold one package per `links` value (a resolve error at the join). The view plays no sound.
+bevy = { version = "0.19.1", default-features = false, features = ["2d", "3d", "ui", "area_light_luts"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+glclient = { path = "../glclient" }

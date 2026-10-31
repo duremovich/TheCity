@@ -21,9 +21,10 @@ python tools/test.py merge       # + the year, the behaviour tier, the god scena
 python tools/test.py milestone   # + the 20k city (budget 20): at a close
 python tools/test.py lint        # ignore reasons, caps, the test-count ratchet, OPEN.md ids
 python tools/test.py report      # the close-of-milestone table
+python tools/test.py view        # the Bevy client (view/): fmt, clippy, release build, the smoke PNG; outside the other tiers
 ```
 
-Each prints a line per binary, the FAIL and FINDING lines, and the wall time against the tier's budget; full output is under `target/test-logs/`. `--only <test-binary>` runs one. Numbers come from a run, not a gate: `cargo run --release -p citysim-cli -- run --days 120 --seed 42 --report --events > run.csv 2> events.tsv`, then `python tools/analyze_run.py run.csv events.tsv`. The CLI must run from the repo root (`assets/config.toml`). Ticks/s on this box are a print, never a tune (Blender renders, parallel builds).
+Each prints a line per binary, the FAIL and FINDING lines, and the wall time against the tier's budget; full output is under `target/test-logs/`. `--only <test-binary>` runs one. **The workspace:** the sim is `citysim`, `citysim-app`, `citysim-cli` (the `default-members`); the Bevy client (`view/glclient`, `view/cityview`, edition 2024, its own `view/rustfmt.toml`, the vendored Bevy fixes in `view/vendor`) is a member outside them, so a bare `cargo build`/`test`/`clippy` never compiles Bevy, and no sim tier may pass `--workspace` or `--all`. cityview reads TheCityGraphics' generated assets from `CITYVIEW_ASSETS` (default `../TheCityGraphics/assets`; a worktree sets it); `cargo build --release -p cityview`. Numbers come from a run, not a gate: `cargo run --release -p citysim-cli -- run --days 120 --seed 42 --report --events > run.csv 2> events.tsv`, then `python tools/analyze_run.py run.csv events.tsv`. The CLI must run from the repo root (`assets/config.toml`). Ticks/s on this box are a print, never a tune (Blender renders, parallel builds).
 
 Install the commit hook once: `git config core.hooksPath tools/hooks` (fmt check only).
 
