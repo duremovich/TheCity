@@ -1,0 +1,63 @@
+# Shadow V18: the gangs (critic report)
+
+Group: gang_member, gang_leader, purist, cultist, scav, dealer, runner, raider (two picks each, 16 diaries). 100k island, seed 42, d21-d27. Cites are `<arch>_<id> dDD HH:MM` under `target/shadow_v18/isle100k_s42_d21/`. Ids differ from V17, so comparison is by archetype.
+
+## 1. Verdict
+
+- **Better as a city, worse as a week.** A raid finally lands in a member's diary, walks and musters are minutes, and a gang life has real chains (witness, enemy, fight, report, cells). But **8 of 16 picks sit 5+ days in the cells** (V17: 5), and the revolving-door leader (7-8 Successions a gang in 6 days) is unchanged.
+- **Raid: yes, it lands in a diary** (`runner_41936 d23 22:37`, bug 4). Hunt/revenge: no. Zero Hunt, Revenge or Avenge goals fire in all 16 diaries (GOAL census: Unwind 115, Idle 86, Sleep 72, Eat 68, Earn 66, Court 50, GangWork 47; Raid 2, Fight 1).
+- Under-18 rule: no Assault, Arrest, Fare, Cells or Witness line in these 16 prints an age under 18. One neglect line to look at (bug 6).
+
+## 2. The exit's five stories
+
+1. **A friend killed, a friend who goes after the killer: partial, no pursuit.** `purist_12613` (36 y, Unplugged): Friend Mina Garland#24215 in the header; `d21 00:00` "GRUDGE against Idris Hawthorne#14336 (KilledFriend, weight 0.60)", Enemy -0.60. Seven days of Court, Pitch, Unwind, a Fight Pit visit (`d26 08:53`). No Hunt, no Fight at him. She only retells it: `d24 20:04` "told Idris Garland: Killed by Idris Hawthorne on #24215", `d25 20:58` "told Mei Bartlett".
+2. **Word of a killing getting around: word yes, acting on it no.** Same chain, plus `gang_member_32478 d26 00:01` "heard a rumour: Killed by Agathe Kemp on Rafe Osgood (hops 1)". Gossip spreads (53 tellings of the Roxy contract in one day, `gang_leader_56987 d23 00:14`); no listener does anything.
+3. **A hit as ordinary business: seen, half-told.** `gang_leader_56987 d21 00:06` "Nutrix 20 posted a locate on Roxy Crane for 41 at Fixer#5202, on Ines Blackwood's book" and "a tag on Roxy Crane for 305"; `d21 18:00` "Bertram Tanaka took the locate ... Annika Delacroix took the tag"; `d22 09:39` "Pursuit: Bertram Tanaka holds the locate on Roxy Crane and waits: she is in the cells till d27 00:49". Buyer, price, hitter, why they wait: all there. Outcome: not seen. Both hitters vanish from her diary after `d26 00:39`; she walks out `d27 00:49` into 23 quiet hours and never reacts to being marked (no guard, no Flee, no Fixer visit).
+4. **An open contract an NPC takes that a player could have taken: seen** (the two ContractTaken lines, "LIVE", at the Fixer#5202 book). The diary never shows the offer text a player would read.
+5. **A life that makes sense on inspection: yes, three.**
+   - `raider_101991` (56 y, homeless, cancer stage 0.56): `d27 02:00` sees Hollis Sato (59 y) assault someone, "saw ... and ran", Enemy -0.60; `05:51` "GOAL Fight ... enemy near, odds 0.96" at her own block, `06:06` she wins, 4 witnesses, `22:17` arrested, `22:37` 10 days ("Piers Fairweather reported her").
+   - `gang_member_32478` (40 y): `d22 02:08` 5 days for Dealing; `d23 00:05` "The Static Brothers paid 25c bail"; `00:11` re-hired as Sanitation; `00:18` back to Deal; `01:17` 15 witnesses, arrested, 5 more days. A man who cannot stop, and a gang that keeps paying.
+   - `dealer_18028` (21 y): out `d26 00:40` "a grudge on Fiora Northcott, who reported him"; Gamble, a 62 y man starts a brawl and wins (`01:00`), Treat at a back-room doctor for 6c (`02:21`), Court fails twice, `07:30` beaten by Idris Oakes and "thrown out of The Neon Knives (talked to the law)", `d27 14:58` Theft arrest. Two new grudges, neither acted on.
+
+## 3. The exit's three checks
+
+- **Starving while Eat loses: yes, once.** `raider_101991` (homeless, hunger 0.11-0.20). `d21 12:37` bin "another diver"; `12:51` the same Market#4300 bin again; `13:03` "bin was emptied first"; `13:04` "goal Eat cooled until d21 15:04"; `13:09` "GOAL Pitch (was Eat): score 0.086; hunger 0.18", then Idle 0.050 (`13:42`), Pitch 0.066 (`14:14`), Earn 0.718 (`14:21`, "U(hunger) 0.84"). Again `d22 06:25` bin emptied, `06:26` "GOAL Idle (was Eat): score 0.050", two 30-min Wanders at hunger 0.17. The soup line starts only after the third bin failure (`d22 10:59` "starving, no bin nearer"). Y1's "a failed source tries the next" does not hold here: it retries the same bin, then cools Eat for two hours and idles; no Market theft until `d26 13:59`. Elsewhere Eat wins (68 Eat goals at 0.5-0.9); no other pick drops below 0.32 fullness; the jailed are fed at 07:00.
+- **Frozen identical days: jail, plus one laid-up.** Nine picks have 4-6 identical jail days (`dealer_58848` all 7: "sleep 8.0h, jail 16.0h"). `gang_member_92195` d23 and d24 are both "idle 24.0h" at Back Room#1008, a wounded week (`d22 02:30` "went down, bleeding", `d25 03:12` "Recovered"), visited `d23 12:00` and `d24 20:50`. Reads as an injury, not a loop, but nothing is printed for 54 hours. No working-life loop: `cultist_58712` and `scav_13385` run a 9.6 h shift 5 days but sleep, travel and leisure vary.
+- **Minor harmed: no.** Zero sub-18 ages in any harm line. See bug 6 for the neglect line.
+
+## 4. Per archetype (V17's word in brackets)
+
+- **gang_member: alive (thin).** `_92195` (24 y): hurt `d22 02:30`, carried to the back room `03:12`, "back on their feet" `d25 03:12`, at the Vat Farm 9.6 h by `d25`, friends at the bedside. `_32478`: the bail story above.
+- **gang_leader: thin (alive).** `_56987` (61 y): marked `d21 00:06`, jailed 6 days, out `d27 00:49` to "the post as Vat Tech gone". `_18259` (37 y): sentenced `d21 00:55`, out `d27 00:55`; her d27 is Scavenge x4 and a Capsule Hotel (311 min) with a 512c treasury and 60 men; "Lead" fires twice all week. Both leaders spend 6 of 7 days inside.
+- **purist: alive (alive).** `_8736` (46 y Night Stocker): `d22 19:14` "chose the shift over The Unplugged's muster at Hideout#4914 (17% the gang's way)", `d23 00:07` "missed the muster (at work) (1 in 10 days)", arrested `d23 09:02` Shakedown, 6 days. `_12613`: the KilledFriend grudge, Theft arrest `d21 15:10`, 3 days, then Court/Visit loops.
+- **cultist: alive (thin).** `_58712` (37 y Vat Tech): a creed event most nights: `d21 00:19`, `d23 01:18`, `d24 01:43`, `d25 01:34`, `d26 01:39`, `d27 01:32` "ACTION Preach @ street (D3 Neon Quarter), 31 min" at (877,809) then (840,809). A rite, but the same spot and hour. `_11723`: 10 days for Assault on Wisp Sato `d23 09:27`, then the cells.
+- **scav: thin (thin).** `_13385` (65 y, homeless): hired Vat Tech `d21 07:25`, sleeps at Capsule Hotels, malnutrition 0.45; 8 Scavenge actions, and every Served line says "picked over the bins ... nothing worth selling". `_27733` (29 y bartender) is a bartender.
+- **dealer: alive (dead).** `_18028` above; `_58848` an inmate all week. Only 4 Deal actions in the group, all the stims corner (`gang_member_32478 d22 01:21`).
+- **runner: alive (thin).** `_41936` (54 y Lab manager, Red Teeth): `d23 19:09` "gang standing order is now Raid", `19:12` Hack, `20:03` JackedIn on a robot at Lab#5777, `20:59` GOAL Raid, `22:37` the raid. `_19481` (40 y Garage mechanic, hacking 0.82, Unplugged): 8.5 h at the garage daily, never hacks.
+- **raider: alive (thin).** `_101991` above, a witness-fight-jail week with soup lines. `_11425` (26 y Vat Tech): `d23 09:36` "arrested for Shakedown at home in Block#181", 6 days; a worker with a "BreakOut" order who never breaks out before the cell.
+
+## 5. The pace
+
+- **At human scale.** Header commute 1091 tiles = 52 min (`gang_leader_18259`); `runner_41936 d23 19:12` "GoTo(Chair) 503 tiles, 29 min", `22:00` "GoTo(RaidTarget) 398 tiles, 24 min", `22:56` FleeToHome 17 min. Muster: a 61 min wait at the Hideout, 24 min to the target, a 16 min Brawl; the raid is over 1 h 38 after the call. V17's 14-20 h leader walks and 6 h 51 musters are gone.
+- **Two absurd bits.** (1) `raider_101991 d25 19:21` "Muster ... 159 min" from a bed, energy 0.16 falling to 0.02, "PLAN FAILED: Raid failed at Muster: PreconditionLost" at `22:00` because the order flipped to Retaliate at `21:56`. The raid never leaves; a cancer patient lost the night's sleep. (2) Arrest transport is instant: `gang_leader_18259 d21 00:55` "JUMP 73 tiles in 1 min ... LOD Full -> Coarse, sentenced"; `scav_13385 d27 22:19` 85 tiles in 1 min.
+- **Noise, not a sim bug:** the camera JUMP detector still has "allowance 2" tiles a minute, so every walking minute is a jump: "21 tiles in 1 min (allowance 2): street -> street" (`gang_member_32478 d23 01:30-01:35`, 20 lines in that diary; `purist_12613` 16; `cultist_11723` 14). Raise the allowance to the 21-tile pace or the column is useless.
+
+## 6. Bugs, ranked by what the player sees first
+
+1. **The cells swallow the week: 8 of 16 picks are inside 5+ days.** Both leaders (`gang_leader_18259 d21 00:55`, `_56987 d21 00:49`, 6 days for Shakedown), `gang_member_32478` (d22-d27), `cultist_11723`, `dealer_18028`, `dealer_58848`, `purist_8736`, `raider_11425`. V17 had 5 of 16. Likely the pace: guards and witnesses reach a corner in minutes. V17 dull spot 1: **worse**.
+2. **Succession churn and a header that disagrees.** `raider_101991`'s Static Lanterns: 8 Succession lines in 6 days (`d21 02:09`, `10:01`, `d22 15:04`, `21:30`, `d23 00:47`, `d24 13:45`, `d26 09:34`, `19:42`); `gang_member_32478`'s Static Brothers: 7. `gang_leader_56987` is printed LEADER, but `d21 03:27` "Anselm Adeyemi is out of the cells and runs The Static Rats again", `d27 00:49` "The Static Rats still hers", `13:48` "Maren Upton runs while Anselm Adeyemi sits inside". Who leads? V17 bug 1 (who comes out): **better** (the chain is named); the rate: **unchanged**.
+3. **Starving person idles and retries one bin** (check 1). `raider_101991 d21 13:04-15:04`, `d22 06:26-10:59`.
+4. **A raid called from sleep waits 159 min at the muster and dies on an order change** (section 5). The raid that landed, `runner_41936 d23 22:37`: "Militech 9's Lab#5777 held (19 raiders, 126 defenders); nothing taken; 10 hurt: Tristan Marlow, Benedikt Vance, Bram Varley, Ivo Okafor and 6 more". The hurt list prints no ages, so the under-18 rule cannot be checked from it; print ages as Assault does.
+5. **A mark with no consequence.** The 305c tag on Roxy Crane waits for her release and never arrives (`gang_leader_56987 d27`), and she shows no sign of knowing though 53 people tell it (`d23 00:14`). V17: not seen.
+6. **Neglect line says two things.** `purist_8736 d22 00:10` "Custody: the child protective service came to the door of Block#1006: Juniper Blackwood (15 y), Bram Blackwood (14 y) went 2 days unfed; Brenna Sato heard it: 3 days' grace, and unfed again before d52 the service takes them". "3 days' grace" and "d52" cannot both hold (d25 vs d52). Two minors unfed 2 days is also the neglect mechanic's own harm; check it against the hard rule.
+7. **Quiet feeding.** `gang_member_92195`'s hunger jumps 0.58 to 0.98 at `d23 02:00` and 0.75 to 0.98 at `d24 02:00` with no Meal line: Y1's laid-up feeding works but prints nothing, so a reader sees 54 h of "None" and a need that refills on its own.
+8. **Gang sizes still do not reconcile.** `gang_member_92195`: header "42 members", war line "Benedikt Ashcombe leads 12 of The Unplugged 8" (`d21 04:00`). V17 bug 4: **unchanged**.
+9. **`cultist_11723` household count 9 to 83.** `d25 09:30` "the pantry holds 4 ... 9 households under the roof"; `d26 09:30` "pantry holds 120 ... 83 households". One building, one night.
+
+V17 bugs: 2 (old leader walks 14-20 h) **fixed** (max leader travel 2.1 h, `gang_leader_18259 d27`); 3 (muster unreachable) **better** (reachable; see bug 4); 5 (held man acts) **not re-checked**; 6 (old starved bodies fight) **unchanged** (`raider_101991` 56 y with cancer attacks a 59 y man; a 62 y man starts a brawl, `dealer_18028 d26 01:00`); 7 (runners outside a crew) **better** (`runner_41936` is a crew member and raids).
+
+## 7. Dull spots and too much
+
+- **Dull:** Scavenge always "nothing worth selling" (no find line in the group); Court fails at Flirt PreconditionLost every time (`dealer_18028 d26 05:21, 05:28, 10:15, 10:28`; `runner_41936 d23 18:42, 18:56`; 50 Court goals); a gang leader as bin-scavenger (`gang_leader_18259 d27 18:23`, 512c treasury); `runner_19481` a 0.82 hacker who never hacks; a creed that is one nightly Preach. Gang calls are told, not asked (`raider_101991 d24 20:36` "order is now Raid", she sleeps through it).
+- **Too much:** nine identical jail weeks; gossip lines mostly "(already known / dropped)" bury the three that matter.
+- **Not broken:** bail paid by the gang, the re-hire on release, cell yard and meal lines, the "changed life" release line, the Preach, shakedown business.

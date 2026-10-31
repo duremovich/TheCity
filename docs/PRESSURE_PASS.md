@@ -731,6 +731,40 @@ then one 100k run in V17's window for the raid and the far-travel lines. Moves a
 past a 3 h commute, home-to-post median minutes, raids that reach the door, corner turnout, Starving, ticks/s,
 20k seed 42 x 30 before and after, plus the one 100k run (ticks/s at 100k printed against V17's 18).
 
+#### Z1, the avenger (the exit's story 1; Shadow V18)
+
+V18's exit read found story 1 as mechanism only: 2,361 grudges over a killed kin or friend in 30 days at 100k, 150
+HuntStarted, 63 Avenged, and in the diaries the hunt stops at the grudge (`bereaved_30486 d21 00:09` "goal Hunt
+cooled until d24 00:09 (could not plan or plan failed twice)"; `purist_12613`, `joytoy_47077`, `foreman_21236`,
+`elder_58897` swear and never hunt). The full chain exists once in events (`38862`-`38995`, Moth Wexford avenging
+his wife) and is in no diary. Find why a hot grudge over a killing so rarely becomes a hunt and why a hunt dies on
+its first unplannable step (the target's place unknown, the planner's reach, the cooldown), and fix it at the cause:
+a hunt that cannot find its man asks for him (word along edges, the sightings, a fixer's Locate, the killer's known
+haunts: his Home, his post, his corner) and waits rather than cools; a hunter too weak or too old to fight takes the
+grudge to someone who can (a beat or a hit through a fixer, the gang, kin, or the law, each with a line); a hunt
+that ends says how (avenged, gave it up, the killer jailed or dead first). The killer hears he is hunted (word) and
+can act on it. Under-18: a minor never hunts and is never hunted (`ages::is_protected`; a child's grief is a line,
+not a hunt). Shadow: bereaved, marked, gang_member, jailed (a killer), elder (20k, then the one 100k run in V17's
+window): quote a diary that carries a grudge to an end. Moves a number: HuntStarted and Avenged per killed-kin/friend
+grudge, hunts handed to a fixer, the gang or the law, hunts that end with a reason, 20k seed 42 x 30 before and after.
+
+#### Z2, the taker (the exit's story 4; Shadow V18)
+
+V18's exit read found story 4 as mechanism only: 1,499 contracts taken in 30 days at 100k (592 done, 784 failed),
+but a take is one line at the 18:00 or 00:01 contract tick (`fixer_26141 d23 18:00` "Cordelia Mbeki took the
+beat"): no taker reads a board, weighs it or walks to the fixer, so nothing a player could stand beside. Make the take
+a body's act: a would-be taker (a gun, a crew's leader, a broke fighter, a seller of sightings) learns of open work
+(the fixer's board, read at the Fixer's door; word along edges), scores taking it against his day (price, risk
+against his skill and the target's guard, the buyer's honour), walks to the fixer and takes it there in person, with
+a line in his own diary and the fixer's ("took the beat on X for 364 at Fixer#5840"), at any hour the Fixer is open;
+the off-screen and ledger takes stay as they are (the Statistical mirror: the daily tick). A crew's take is its
+leader's walk. And the target hears: V18's `marked_30280` and both guns' failed hits print no "got word" (X2's
+`contracts::react` at 100k): find why and fix it there. Under-18: a minor never takes or is the target of a contract
+(`ages::is_protected`, the hard rule). Z1 also touches `contracts.rs` (a hunter hiring): each keeps to its half.
+Shadow: gun, fixer, gang_leader, fighter, day_labourer, marked (20k, then the one 100k run): quote a taker's walk to
+the fixer and the job after it. Moves a number: takes made in person / at the tick, take hour spread, targets who
+heard, 20k seed 42 x 30 before and after.
+
 ## Implemented: deviations
 
 (Per phase, as they land.)
