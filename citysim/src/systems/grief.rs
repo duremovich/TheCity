@@ -176,6 +176,7 @@ pub fn on_death(world: &mut World, dead: EntityId) {
         );
         // A shift under way or due today goes at once (the news, then home).
         strike_due(world, &c, o, TICKS_PER_DAY);
+        go_home(world, o);
     }
     for &k in &children {
         let rel = rel_word(world, k, dead).to_string();
@@ -201,12 +202,18 @@ pub fn on_death(world: &mut World, dead: EntityId) {
         world.push_event(EventKind::Bereaved, &actors, text);
     }
     // The funeral: tomorrow at `wake_tick`, at the Home, the near Friends asked.
+    // Pressure pass round 9, Y2 (`OPEN-250`): the dead's Friends and the
+    // grown mourners' own (V17 `bereaved_6559 d21 20:00`: "no friend near to
+    // ask" while two Friends of the widow's sat in her Block).
     let Some(h) = home else { return };
     let Some(door) = world.comp::<Building>(h).map(|b| b.door) else { return };
-    let mut invited: Vec<EntityId> = world
-        .neighbours(dead)
-        .filter(|&o| !kin.contains(&o) && living(world, o))
-        .filter(|&o| world.edge(dead, o).is_some_and(|e| e.kind == RelKind::Friend && e.affinity > 0.0))
+    let friend_of =
+        |a: EntityId, o: EntityId| world.edge(a, o).is_some_and(|e| e.kind == RelKind::Friend && e.affinity > 0.0);
+    let askers: Vec<EntityId> = std::iter::once(dead).chain(adults.iter().copied()).collect();
+    let mut invited: Vec<EntityId> = askers
+        .iter()
+        .flat_map(|&a| world.neighbours(a).filter(move |&o| friend_of(a, o)).collect::<Vec<_>>())
+        .filter(|&o| o != dead && !kin.contains(&o) && living(world, o))
         .filter(|&o| crate::systems::demography::is_adult(world, o) && !world.has::<Sentence>(o))
         .filter(|&o| {
             world
@@ -217,6 +224,7 @@ pub fn on_death(world: &mut World, dead: EntityId) {
         })
         .collect();
     invited.sort();
+    invited.dedup();
     let at = now / TICKS_PER_DAY * TICKS_PER_DAY + TICKS_PER_DAY + Tick::from(c.wake_tick);
     world.grief.wakes.push(Wake { home: h, name: dead_name, at, household: kin, invited, came: Vec::new() });
 }
@@ -264,6 +272,28 @@ pub fn lie_low(world: &mut World, id: EntityId, until: Tick, why: String) {
     }
     let low = world.grief.low.get(&id).map(|x| x.1.clone()).unwrap_or_default();
     strike_low(world, id, &low, TICKS_PER_DAY);
+    go_home(world, id);
+}
+
+/// Pressure pass round 9, Y2 (`OPEN-250`): `id` keeps to his Home from now
+/// (`holed_up`): a walk the post or the gang sent him on is dropped (a
+/// leader's round or order, a guard's beat or chase; a man already in his
+/// cuffs is walked in). V17 `fixer_23959 d23 09:19`: "lies low at home",
+/// then a 14-hour walk to collect at a Gambling Den; `bereaved_6559 d21
+/// 09:19`: on leave, an arrest.
+fn go_home(world: &mut World, id: EntityId) {
+    use crate::components::GoalKind;
+    let drop = world.comp::<Brain>(id).is_some_and(|b| {
+        b.lod != Lod::Statistical
+            && b.plan.as_ref().is_some_and(|p| match p.goal {
+                GoalKind::Lead | GoalKind::Patrol => true,
+                GoalKind::Arrest => b.escorting.is_none(),
+                _ => false,
+            })
+    });
+    if drop {
+        world.abort_plan(id);
+    }
 }
 
 /// The contract he lay low over is closed: he goes about his days.

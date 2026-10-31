@@ -726,6 +726,8 @@ pub fn considerations_with(
             // L2 shadow fixes item 10: no patrol on the rest day (unpaid:
             // `law::credit_guard_shifts` reads the workday).
             on_duty &= crate::exec::routine::workday_of(world, id, job, key);
+            // Pressure pass round 9, Y2 (`OPEN-250`): nor on leave.
+            on_duty &= !crate::systems::law::on_leave(world, id);
             // The same reach as Arrest's gate (M10 phase 5c review): a
             // located warrant across the city scaled every guard's Patrol by
             // 0.3 while only the guards in range could Arrest, so the rest
@@ -758,6 +760,12 @@ pub fn considerations_with(
             let here = world.comp::<crate::components::Position>(id).map(|p| p.tile).unwrap_or_default();
             let by = crate::systems::law::Pursuer { tile: here, guard: id };
             let escorting = world.comp::<Brain>(id).is_some_and(|b| b.escorting.is_some());
+            // Pressure pass round 9, Y2 (`OPEN-250`): a guard on leave (a
+            // mourner, a man lying low, his shift struck) makes no arrest,
+            // his collar included; a man already in his hands is walked in.
+            if !escorting && crate::systems::law::on_leave(world, id) {
+                return None;
+            }
             // L1: on shift only, tired guards less, the nearest warrant
             // weighed by its walk (unclaimed: one guard per suspect).
             let n = needs?;

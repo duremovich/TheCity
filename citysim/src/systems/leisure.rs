@@ -3095,6 +3095,12 @@ pub fn lead_considerations(world: &World, id: EntityId) -> Option<(Vec<Considera
 
 /// `already_satisfied(Lead)`.
 pub fn lead_satisfied(world: &World, id: EntityId) -> bool {
+    // Pressure pass round 9, Y2 (`OPEN-250`): a leader mourning or lying low
+    // keeps to his Home: no round, no order walked, no court (V17
+    // `fixer_23959 d23 09:19`: "lies low at home", then 875 min to collect).
+    if crate::systems::grief::holed_up(world, id) {
+        return true;
+    }
     if crate::systems::leaders::attend_due(world, id) {
         return false;
     }

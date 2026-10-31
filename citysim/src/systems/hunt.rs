@@ -562,9 +562,14 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
                 None => false,
             }
         }
-        ActionKind::Attack => {
-            target.is_some_and(|t| crate::systems::law::living(world, t) && crate::systems::law::near(world, id, t, 4))
-        }
+        // Pressure pass round 9, Y2 (`OPEN-250`): nor across the cells' wall
+        // (the mark taken in while the hunter closed: V17's one blocked hit
+        // at 100k reached the swing itself).
+        ActionKind::Attack => target.is_some_and(|t| {
+            crate::systems::law::living(world, t)
+                && crate::systems::law::near(world, id, t, 4)
+                && !crate::systems::law::held_apart(world, id, t)
+        }),
         _ => crate::exec::actions::can_start(world, id, kind, target),
     }
 }

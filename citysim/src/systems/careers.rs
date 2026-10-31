@@ -208,8 +208,23 @@ pub fn reads_record(world: &World, role: Role) -> bool {
 /// (V16: a thief three days out of the cells taken on as a Guard,
 /// `camp_jobless_66381 d27 11:30`). Careers off: always.
 pub fn record_ok(world: &World, id: EntityId, role: Role) -> bool {
-    if !on(world) || !reads_record(world, role) {
+    if !on(world) {
         return true;
+    }
+    // Pressure pass round 9, Y2 (`OPEN-250`): a post that reads the body
+    // turns away the sick (V17 `sick_49012 d26 00:11`: a diagnosed cancer
+    // hired as Guard, off sick the next day).
+    if role_cfg(&world.config, role).is_some_and(|r| r.reads_body) && !body_ok(world, id) {
+        return false;
+    }
+    if !reads_record(world, role) {
+        return true;
+    }
+    // Round 9 Y2: a fresh eviction is on the record (`neglect_parent_80351
+    // d27 00:11`: put out on d22, a Guard beating fare dodgers on d27).
+    let ev = u64::from(world.config.careers.evicted_days);
+    if ev > 0 && evicted_within(world, id, ev * TICKS_PER_DAY) {
+        return false;
     }
     let at = crate::systems::misery::record_at(world, id);
     if at == 0 {
@@ -217,6 +232,22 @@ pub fn record_ok(world: &World, id: EntityId, role: Role) -> bool {
     }
     let days = u64::from(world.config.careers.record_days);
     days > 0 && world.tick >= at + days * TICKS_PER_DAY
+}
+
+/// Round 9 Y2: `id` is fit for a post that reads the body: no diagnosed
+/// cancer, not off sick today.
+fn body_ok(world: &World, id: EntityId) -> bool {
+    !crate::systems::health::sick(world, id)
+        && !world.comp::<crate::components::Health>(id).and_then(|h| h.cancer).is_some_and(|c| c.diagnosed)
+}
+
+/// Round 9 Y2: `id` was put out of a Home within `ticks` (his `Evicted`
+/// memory).
+fn evicted_within(world: &World, id: EntityId, ticks: crate::time::Tick) -> bool {
+    let since = world.tick.saturating_sub(ticks);
+    world
+        .comp::<crate::components::Memory>(id)
+        .is_some_and(|m| m.entries.iter().any(|e| e.kind == crate::components::MemoryKind::Evicted && e.tick >= since))
 }
 
 fn foreman_where(

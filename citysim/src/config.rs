@@ -2358,7 +2358,8 @@ pub struct FaresCfg {
     /// A dodger who cannot pay is beaten by the guard who caught him: down
     /// on the platform this many minutes (he neither thinks nor walks) ...
     pub beat_down_minutes: u64,
-    /// ... with this grudge on the guard ...
+    /// ... with this grudge on the guard's faction (the Law, or a private
+    /// guard's corp; round 9 Y2: never the guard) ...
     pub beat_grudge: f32,
     /// ... and this off his mood and his safety.
     pub beat_mood: f32,
@@ -2450,6 +2451,12 @@ pub struct JusticeCfg {
     /// jailer's count, a line a prisoner); 0: at midnight with the hold's
     /// rest (as before).
     pub meal_hour: u8,
+    /// Pressure pass round 9, Y2 (`OPEN-251`): a suspect who fights the
+    /// cuffs faces the on-duty city guards within this Chebyshev radius of
+    /// him too, each in turn (0: the arresting guard alone) ...
+    pub backup_reach: u32,
+    /// ... up to this many guards at the cuffs, the arresting one included.
+    pub backup_max: usize,
 }
 
 impl Default for JusticeCfg {
@@ -2464,6 +2471,8 @@ impl Default for JusticeCfg {
             door_from_hour: 22,
             door_to_hour: 6,
             meal_hour: 0,
+            backup_reach: 6,
+            backup_max: 2,
         }
     }
 }
@@ -2944,6 +2953,9 @@ pub struct CareersCfg {
     /// `[roles.<Name>] reads_record`) turns away anyone sentenced within
     /// this many days (0: for good).
     pub record_days: u32,
+    /// Pressure pass round 9, Y2 (`OPEN-250`): ... and anyone put out of
+    /// his Home within this many days (the arrears on the record; 0 off).
+    pub evicted_days: u32,
 }
 
 impl Default for CareersCfg {
@@ -2961,6 +2973,7 @@ impl Default for CareersCfg {
             unretire_coins: 20,
             record_min_days: 2,
             record_days: 365,
+            evicted_days: 14,
         }
     }
 }
@@ -2985,6 +2998,9 @@ pub struct RoleCfg {
     /// Round 8 X3: the hire reads a record (`[careers] record_days`): the
     /// law's posts.
     pub reads_record: bool,
+    /// Pressure pass round 9, Y2 (`OPEN-250`): the hire reads the body: a
+    /// diagnosed cancer or a man off sick today is turned away (the Guard).
+    pub reads_body: bool,
 }
 
 /// Lives at work phase 2 `[household]` (docs/LIVES_AT_WORK.md § 3): the

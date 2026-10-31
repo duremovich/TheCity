@@ -3366,6 +3366,7 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         ActionKind::Abduct => target.is_some_and(|v| {
             crate::systems::law::living(world, v)
                 && crate::systems::law::near(world, id, v, 4)
+                && !crate::systems::law::held_apart(world, id, v)
                 && world.comp::<Brain>(v).is_some_and(|b| b.cuffed_by.is_none())
         }),
         ActionKind::HandOver => {

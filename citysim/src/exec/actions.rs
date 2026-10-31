@@ -265,6 +265,9 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
             can_work_now(world, id, job) && crate::exec::routine::work_action(world, job.role) == k
         }
         ActionKind::Wander => true,
+        // Pressure pass round 9, Y2 (`OPEN-250`): a swing across the cells'
+        // wall does not start (the planner's foe taken in mid-plan).
+        ActionKind::Attack => target.is_none_or(|t| !crate::systems::law::held_apart(world, id, t)),
         // The pre-view pass phase 2 (P7): the break is outside the door.
         ActionKind::Break => crate::systems::shift::can_break(world, id),
         // The pre-view pass phase 3: inside the trip's destination.
@@ -430,7 +433,6 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         | ActionKind::Extort
         | ActionKind::SplitLoot
         | ActionKind::Fence
-        | ActionKind::Attack
         | ActionKind::Muster
         | ActionKind::Brawl => true,
         _ => false,

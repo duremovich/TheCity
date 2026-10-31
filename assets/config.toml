@@ -4463,12 +4463,16 @@ record_min_days = 2                # round 8 X3 (OPEN-247): a sentence this many
 record_days = 365                  # round 8 X3: a post that reads a record ([roles.<Name>] / [[trades]] reads_record)
                                    # turns away anyone sentenced within this many days (0: for good). V16: a thief
                                    # three days out of the cells was taken on as a Guard (camp_jobless_66381 d27 11:30)
+evicted_days = 14                  # round 9 Y2 (OPEN-250): ... and anyone put out of his Home within this many days (the
+                                   # arrears on the record; 0 off). V17: evicted d22, a Guard d27 (neglect_parent_80351)
 
 # § 4.1: the legacy roles' hiring age bands (min_age / max_age in years, 0 none).
 [roles.Guard]
 min_age = 18
 max_age = 60
 reads_record = true                # round 8 X3 (OPEN-247): the law's post reads a record ([careers] record_days)
+reads_body = true                  # round 9 Y2 (OPEN-250): ... and the body: a diagnosed cancer or a man off sick today is
+                                   # turned away (V17 sick_49012 d26: a cancer hired as Guard, off sick the next day)
 
 [roles.Fighter]
 min_age = 18
@@ -5329,7 +5333,7 @@ march_wait_ticks = 60              # round 7 W2 (OPEN-241): the first at a raid'
 # coarse (the fine, else the beating's memory and mood, no body). Placeholders.
 fine = 5                           # the fine on the platform when the wallet holds it (to the city)
 beat_down_minutes = 30             # can't pay: the guard beats him; down on the platform this long (neither thinks nor walks) ...
-beat_grudge = 0.4                  # ... with this grudge on the guard ...
+beat_grudge = 0.4                  # ... with this grudge on the guard's faction (the Law, a private guard's corp: round 9 Y2) ...
 beat_mood = 0.3                    # ... and this off his mood ...
 beat_safety = 0.4                  # ... and his safety
 ban_after = 3                      # caught this many times inside ban_window_days: banned from the El for ban_days; he walks
@@ -5363,6 +5367,11 @@ door_to_hour = 6                   # equal: off) a warrant whose suspect no guar
                                    # radius: the address is the sighting, the arrest is made at home (the street never saw him)
 meal_hour = 7                      # round 8 X6 (OPEN-217): the cells' meal is served at this hour (the jailer's count, a line
                                    # a prisoner: the kitchen, or "went without"); 0: at midnight with the hold's rest
+backup_reach = 6                   # round 9 Y2 (OPEN-251): a suspect who fights the cuffs faces the on-duty city guards within
+                                   # this many tiles of him too, each in turn (0: the arresting guard alone); a guard fought off
+                                   # with none at hand calls the nearest free one on shift (the chase's hand-on, his collar)
+backup_max = 2                     # ... up to this many guards at the cuffs, the arresting one included. V17 joytoy_123639
+                                   # d27: a joytoy with no kit fought off five guards one at a time in eight hours
 # The pressure pass round 2, R4 (OPEN-218, OPEN-219): the diary's folds and the Camp answer's hour.
 [noise]
 contest_names = 3                  # a blow on a rival's hold names this many of the holders who saw it (the rest "and N more")

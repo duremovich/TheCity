@@ -6,7 +6,7 @@
 //! `law::file_report` files no Fare Evasion while `[fares]` is set). Then the
 //! ladder, on the spot: the fine if the wallet holds it, else the guard beats
 //! him (down on the platform `beat_down_minutes`, a `Lost` memory, a grudge on
-//! the guard); caught `ban_after` times inside `ban_window_days` he is banned
+//! the guard's faction: round 9 Y2); caught `ban_after` times inside `ban_window_days` he is banned
 //! from the El for `ban_days` and walks (`transit::pays_or_dodges` refuses
 //! him the ride). A banned rider under `ban_break_lawfulness` boards anyway;
 //! caught, he is beaten whatever his wallet holds and banned afresh.
@@ -287,9 +287,16 @@ fn ban(world: &mut World, c: &FaresCfg, dodger: EntityId) {
     world.fares.book.entry(dodger).or_default().banned_until = Some(until);
 }
 
-/// The beating: a `Lost` memory (the street hears "assaulted by" the guard),
-/// a grudge on the guard, the mood and the safety; a body lies on the
-/// platform `beat_down_minutes`. True when the body was laid down.
+/// The beating: a `Lost` memory, the mood and the safety; a body lies on
+/// the platform `beat_down_minutes`. True when the body was laid down.
+/// Pressure pass round 9, Y2 (`OPEN-251`): a sanctioned beating is the
+/// law's force, not an assault: the loss is no `Assaulted` deed on the
+/// guard (the memory's object is the dodger himself, as a fight he
+/// started), the street hears the law dealt with him (an `Arrested` deed,
+/// the dodger its actor), and the grudge is sworn on the guard's faction
+/// (the Law for a city guard, the corp for a private one), never the man.
+/// V17 `guard_8429 d22-26`: five fare beats gossiped "Assaulted by" her and
+/// a grudge sworn on her, "a beating, 0.50".
 fn beat(world: &mut World, c: &FaresCfg, guard: Option<EntityId>, dodger: EntityId) -> bool {
     // Round 3 V12 fix: the backstop; `caught` turns a minor off first.
     if crate::systems::ages::is_protected(world, dodger) {
@@ -298,10 +305,30 @@ fn beat(world: &mut World, c: &FaresCfg, guard: Option<EntityId>, dodger: Entity
     }
     let now = world.tick;
     world.fares.book.entry(dodger).or_default().beaten = Some(now);
-    world.remember(dodger, MemoryKind::Lost, guard, 0.6, -0.6, false);
+    let lost = crate::components::MemoryEntry {
+        subject: guard,
+        object: Some(dodger),
+        salience: 0.6,
+        valence: -0.6,
+        ..crate::components::MemoryEntry::blank(MemoryKind::Lost, now)
+    };
+    world.remember_entry(dodger, lost);
     if let Some(g) = guard {
         world.remember(g, MemoryKind::Won, Some(dodger), 0.3, 0.2, false);
-        crate::systems::grudges::add(world, dodger, g, crate::word::GrudgeCause::Assaulted, c.beat_grudge, 0);
+        let side = if law::is_city_guard(world, g) {
+            world
+                .building_of_kind(crate::components::BuildingKind::Jail)
+                .filter(|&j| world.has::<crate::components::Law>(j))
+        } else {
+            world.corp_of_agent(g)
+        };
+        if let Some(f) = side {
+            crate::systems::grudges::add(world, dodger, f, crate::word::GrudgeCause::Assaulted, c.beat_grudge, 0);
+        }
+    }
+    if let Some(t) = world.comp::<crate::components::Position>(dodger).map(|p| p.tile) {
+        let d = world.district_of(t);
+        crate::systems::gossip::post_deed(world, d, crate::word::Deed::Arrested, Some(dodger), None);
     }
     if let Some(n) = world.comp_mut::<Needs>(dodger) {
         n.safety = (n.safety - c.beat_safety).max(0.0);

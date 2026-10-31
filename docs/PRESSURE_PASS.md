@@ -4658,3 +4658,46 @@ the X6 keys and the `Jobs2Cols` `cell_days` ... `wr_held_clear` columns (serde d
   `missions::world` and its twin in `test_no_mission_no_draw`, `leisure::test_hangout_picks_spot_where_friend_habit_is`.
   `SAVE_VERSION` 112 (the orchestrator renumbers at the merge): `World.courting`, `Flow::Purse`, the X5 keys (serde
   defaults).
+
+### Y2, contradictions that are state (`OPEN-250`, `OPEN-251`; `law::on_leave`, `law::on_duty`, `law::keep_word`, `law::beat_until`, `law::raise_crime_core`, `law::cell_case`, `law::arrest`, `law::backup_at_hand`, `law::call_backup`, `law::handoff_guard`, `goals` Arrest and Patrol, `grief::go_home`, `grief::on_death`, `leisure::lead_satisfied`, `gang::inside_line`, `succession::decide`, `hunt::can_start`, `contracts::can_start`, `exec::actions::can_start`, `careers::record_ok`, `fares::beat`, `[careers] evicted_days`, `[roles.<Name>] reads_body`, `[justice] backup_reach`, `backup_max`)
+
+- **The causes and the fixes**, one each. (1) A guard on leave arrests: the leave struck the Work shift
+  (`struck_shift`), but Arrest's `working`, its collar, `law::on_duty` and the hand-on and door picks read the clock
+  only. `law::on_leave` (mourning or lying low, or today's shift struck) now closes Arrest (a man already in the
+  cuffs is walked in), Patrol, `on_duty`, `handoff_guard` and the door pick; a plan under way at the news is dropped
+  (`grief::go_home`). (2) "Out of the cells and runs it again" names another man: the state was right (the boss
+  jailed first keeps the chair; the acting leader jailed after him is nobody's boss), the jail line hid it: the
+  "sits inside" line names the boss too (`gang::inside_line`: "... while Hilde Carrow sits inside, as Orrin Ostrowski
+  has since before her"). (3) A successor from the cells: none by the code (`leader_scores` skips a `Sentence`); the
+  critic's `pimp_9933 d24` reads a pimp line's "(in the cells)" (the old pimp's) and five Rosalind Duartes at 100k;
+  counted (`cell_takeovers`, 0). (4) "Lies low at home", then 875 min to collect: `holed_up` gated leisure, search
+  and contracts, not Lead: `lead_satisfied` is true for a leader holed up, and `go_home` drops a Lead walk at the
+  word. (5) "Never told: out of reach", then a report: the promise dropped at `word_hours` while the beat
+  (`tell_the_beat`, the street's way to the law where no desk is in reach) still took the word; a word with no desk
+  in reach now waits on the beat for as long as the sighting is fresh to it (`[crime.case] tell_days`, `beat_until`)
+  and drops then ("... and no guard on the beat came by"). (6) A cell murder with no victim or case: the case line
+  went to the parties only; the cellmates who saw it are its actors now, and a Witness line of a Murder or an
+  Assault names whom it fell on. (7) A hit across the cell wall: the swing reached `exec` and was refused there
+  (`held_hit`); the Attack (and Abduct) step's start check reads `held_apart` (hunt, contract and planner paths), so
+  the plan fails at the wall's near side. (8) The sick and the fresh-evicted hired as Guard: `record_ok` reads
+  `[roles.Guard] reads_body` (a diagnosed cancer or off sick today) and, for every record post, an eviction within
+  `[careers] evicted_days` (14). (9) The funeral's "no friend near": the invitation read the dead's Friends only; it
+  reads the grown mourners' Friends too. (10) The law's force: a resisting suspect faces the on-duty city guards
+  within `[justice] backup_reach` (6) of him, each in turn, up to `backup_max` (2); the arresting guard cuffs him
+  when one wins ("Axel Thorne arrested Cutter Ambrose for Assault, Silas Sato holding him"; the second walks him in
+  when the first is laid out); a guard fought off calls the nearest free guard on shift who can chase him
+  (`call_backup` through `handoff_guard`, his collar). (11) A sanctioned fare beat gossiped "Assaulted by" the guard:
+  the beating's `Lost` carries the dodger as its object (no `Assaulted` deed on the guard), the street gets an
+  `Arrested` deed (the dodger its actor), and `beat_grudge` goes on the guard's faction (the Law, or a private
+  guard's corp), never the guard.
+- **Under 18** (CLAUDE.md). `law::arrest` turns a protected suspect away first (`harm_blocked`, the backstop: no
+  warrant names a child); `backup_at_hand` and `call_backup` skip a protected guard or suspect; the fights for the
+  cuffs go through `resolve_fight_mods`, which refuses any blow with a minor on either side.
+- **Numbers** (20k `isle_m_k2` seed 42 x 30, before -> after, one run each): arrests by guards on leave 4 -> 0;
+  takeovers from the cells 0 -> 0; hits across the cell wall (`held_hit`) 0 -> 0 (V17's 1 was at 100k); second
+  guards called 0 -> 73, suspects facing two 0 -> 25, of them cuffed 0 -> 8; "resisted arrest and fought off" lines
+  211 -> 183; words to the law kept 228 of 282 -> 298 of 350 (dropped 54 -> 47); arrests 1,183 -> 1,333 (thefts 1,389
+  -> 1,467); funerals with "no friend near to ask" 7 of 26 -> 6 of 25.
+- **Deviations.** The fare beat's word is the existing `Arrested` deed (no new deed kind: the gossip tables key on
+  `Deed::ALL`). The backup's second guard fights in the same minute (no walk to the scene: the one at hand is within
+  six tiles); the called guard walks (the collar). `SAVE_VERSION` 114 (renumber at the merge).
