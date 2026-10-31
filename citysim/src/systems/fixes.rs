@@ -195,6 +195,10 @@ pub fn committed(world: &World, id: EntityId, brain: &Brain, winner: GoalKind) -
     if brain.current_goal == Some(winner) || emergency(world, id, winner) {
         return false;
     }
+    // Round 9 Y1 (`OPEN-249`): a hungry body's Eat runs until fed or failed.
+    if eat_holds(world, id, brain) && !danger(winner) {
+        return true;
+    }
     // The pre-view pass phase 2 (OPEN-137): between a stations shift's
     // shape plans the shift holds as its one block did.
     if brain.plan.is_none() && brain.current_goal == Some(GoalKind::Work) && crate::systems::shift::holds(world, id) {
@@ -547,4 +551,72 @@ pub fn told_key(from: EntityId, to: EntityId, r: &crate::word::DeedRef, day: u64
     let o = r.object.map_or(u64::from(u32::MAX), |x| u64::from(x.index));
     let h = crate::rng::splitmix64((r.deed as u64) ^ (a << 8) ^ (o << 36) ^ day.rotate_left(20));
     (from, to, h)
+}
+
+// ---------------------------------------------------------------------------
+// Round 9 Y1 (`OPEN-249`): hunger in the brain
+// ---------------------------------------------------------------------------
+
+/// Starving: hunger under `[life] starving_hunger`, where survival outranks
+/// every goal but danger (`utility::think_scored`).
+pub fn starving(world: &World, id: EntityId) -> bool {
+    world.comp::<Needs>(id).is_some_and(|n| n.hunger < world.config.life.starving_hunger)
+}
+
+/// The danger a starving body still gives way to: [`emergency`]'s winners
+/// that are not Eat.
+pub fn danger(goal: GoalKind) -> bool {
+    matches!(goal, GoalKind::Flee | GoalKind::Fight | GoalKind::Arrest)
+}
+
+/// A started Eat plan of a hungry body (not a fed body's grocery run): it
+/// holds against anything but danger until it feeds or fails (V17: the bin
+/// walk cut at its first step for Earn or Idle at 0.05 when another diver
+/// emptied the bin; the step's own failure is the reason line).
+pub fn eat_holds(world: &World, id: EntityId, brain: &Brain) -> bool {
+    brain.plan.as_ref().is_some_and(|p| p.goal == GoalKind::Eat)
+        && world.comp::<Needs>(id).is_some_and(|n| n.hunger < crate::goap::world_state::HUNGER_SATISFIED)
+}
+
+/// Has `src` (a bin's building, a kitchen, a Market, a Home) failed `id`'s
+/// Eat within `[brain] food_tried_ticks`?
+pub fn food_tried(world: &World, id: EntityId, src: EntityId) -> bool {
+    let now = world.tick;
+    world.comp::<Brain>(id).is_some_and(|b| b.food_tried.iter().any(|&(s, until)| s == src && until > now))
+}
+
+/// A starving body's Eat step failed at `src`: the source is passed over
+/// for `[brain] food_tried_ticks` and the goal is not cooled while fewer
+/// than `[brain] food_tries` sources are passed over, so the next think
+/// tries the next one (the bin, the soup line, home, a theft) instead of
+/// standing Idle for two hours. True when it was taken (the caller skips
+/// `goal_failed`).
+pub fn food_failed(world: &mut World, id: EntityId, src: Option<EntityId>) -> bool {
+    let tries = world.config.brain.food_tries as usize;
+    let Some(src) = src else { return false };
+    if tries == 0 || !starving(world, id) {
+        return false;
+    }
+    let now = world.tick;
+    let until = now + world.config.brain.food_tried_ticks;
+    let Some(b) = world.comp_mut::<Brain>(id) else { return false };
+    b.food_tried.retain(|&(s, t)| t > now && s != src);
+    if b.food_tried.len() >= tries {
+        return false;
+    }
+    b.food_tried.push((src, until));
+    b.last_plan_failure = None;
+    true
+}
+
+/// A starving adult's last source: a meal stolen, under `[brain]
+/// starving_steal_lawfulness` (the fed thief's line is 0.3). Never a minor
+/// (the under-18 rule: no theft path that can end in a beating).
+pub fn starving_thief(world: &World, id: EntityId) -> bool {
+    starving(world, id)
+        && crate::systems::demography::is_adult(world, id)
+        && !crate::systems::ages::is_protected(world, id)
+        && world
+            .comp::<crate::components::Personality>(id)
+            .is_some_and(|p| p.lawfulness < world.config.brain.starving_steal_lawfulness)
 }

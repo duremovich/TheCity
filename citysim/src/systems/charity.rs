@@ -107,9 +107,15 @@ pub fn mission_in_reach(world: &World, from: TilePos) -> Option<EntityId> {
 
 /// The nearest standing, stocked, open Mission within `reach` tiles of `from`.
 pub fn mission_within(world: &World, from: TilePos, reach: u32) -> Option<EntityId> {
+    mission_within_but(world, from, reach, |_| false)
+}
+
+/// [`mission_within`], passing over the kitchens `skip` names (round 9 Y1:
+/// those a starving body found without a bowl lately).
+fn mission_within_but(world: &World, from: TilePos, reach: u32, skip: impl Fn(EntityId) -> bool) -> Option<EntityId> {
     missions(world)
         .into_iter()
-        .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.stock_food > 0) && !world.is_closed(b))
+        .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.stock_food > 0) && !world.is_closed(b) && !skip(b))
         .filter_map(|b| door(world, b).map(|d| (d.manhattan(from), b)))
         .filter(|&(d, _)| d <= reach)
         .min()
@@ -152,7 +158,9 @@ fn kitchens_by_trip(world: &World, id: EntityId, from: TilePos, fed: bool) -> Ve
     let rides = std::cell::OnceCell::new();
     let mut v: Vec<(crate::time::Tick, EntityId)> = missions(world)
         .into_iter()
-        .filter(|&m| !world.is_closed(m) && (!fed || has_meal(world, m)))
+        .filter(|&m| {
+            !world.is_closed(m) && (!fed || (has_meal(world, m) && !crate::systems::fixes::food_tried(world, id, m)))
+        })
         .filter_map(|m| {
             let d = door(world, m)?;
             let rider = || *rides.get_or_init(|| crate::systems::distance::rider(world, id));
@@ -681,7 +689,10 @@ fn alms_eligible(world: &World, id: EntityId) -> Option<Option<EntityId>> {
 pub fn near_target(world: &World, id: EntityId) -> Option<EntityId> {
     match alms_eligible(world, id)? {
         Some(m) if world.comp::<Building>(m).is_some_and(|bd| bd.stock_food > 0) => Some(m),
-        _ => mission_in_reach(world, origin(world, id)?),
+        // Round 9 Y1 (`OPEN-249`): a kitchen that failed him lately is passed over.
+        _ => mission_within_but(world, origin(world, id)?, world.config.charity.reach_tiles, |m| {
+            crate::systems::fixes::food_tried(world, id, m)
+        }),
     }
 }
 

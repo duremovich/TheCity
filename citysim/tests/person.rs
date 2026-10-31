@@ -2363,6 +2363,14 @@ fn probe_suspect_buys_a_beat_on_a_known_witness() {
         w.remove_last_seen(&s);
         pin(&mut w, s);
         w.run_ticks(1);
+        // Round 9 (Y1): the means held until he deals with her: the diverged
+        // city's pick spent the 200c on his first afternoon (178c -> 56c
+        // before the midnight pass) and could buy nothing all week. A
+        // suspect with means is the probe's premise, not his spending.
+        if posted.is_none() {
+            let c = &mut w.comp_mut::<Wallet>(s).expect("wallet").coins;
+            *c = (*c).max(200);
+        }
         if posted.is_none() && bought_by(&w, s).iter().any(|c| c.target == Target::Agent(wit)) {
             posted = Some(w.tick);
         }

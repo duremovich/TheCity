@@ -7110,6 +7110,28 @@ pub struct BrainCfg {
     pub path_budget_per_tick: usize,
     pub mood_w_need: f32,
     pub mood_w_memory: f32,
+    /// Round 9 Y1 (`OPEN-249`): a starving body's food source that failed
+    /// (a bin emptied before it got there, a kitchen out of bowls) is passed
+    /// over this long while it tries the next.
+    #[serde(default = "default_food_tried_ticks")]
+    pub food_tried_ticks: u64,
+    /// Round 9 Y1: the failed sources a starving body moves past before its
+    /// Eat cools as any goal's (0: cools at once, the old rule).
+    #[serde(default = "default_food_tries")]
+    pub food_tries: u32,
+    /// Round 9 Y1: a starving adult with no other source steals a meal
+    /// when its lawfulness is under this (the fed thief's line is `0.3`).
+    #[serde(default = "default_starving_steal_lawfulness")]
+    pub starving_steal_lawfulness: f32,
+}
+fn default_food_tried_ticks() -> u64 {
+    240
+}
+fn default_food_tries() -> u32 {
+    4
+}
+fn default_starving_steal_lawfulness() -> f32 {
+    0.7
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -13529,6 +13551,10 @@ pub struct WoundedCfg {
     /// Review finding 6: a stabilised patient's daily meal (off a Market's
     /// shelf, as a captive's), paid by its carer, else itself.
     pub care_food: i64,
+    /// Round 9 Y1 (`OPEN-249`): a stabilised patient under this hunger is
+    /// fed within the hour (its carer, itself, its kin, else the clinic's
+    /// owner pays `care_food`), not only at midnight.
+    pub care_feed_hunger: f32,
 }
 
 impl Default for WoundedCfg {
@@ -13546,6 +13572,7 @@ impl Default for WoundedCfg {
             rescue_flat: 0.0,
             trauma_flat: 0.5,
             care_food: 3,
+            care_feed_hunger: 0.25,
         }
     }
 }

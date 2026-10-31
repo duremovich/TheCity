@@ -287,6 +287,9 @@ pub fn eat_obtainable(world: &World, id: EntityId) -> bool {
         || (crate::systems::fixes::mission_gate(world) && crate::systems::charity::alms_target(world, id).is_some())
         // Hunger as sickness § 4: a stocked bin in reach.
         || crate::systems::bins::dive_target(world, id).is_some()
+        // Round 9 Y1 (`OPEN-249`): the starving adult's last source, a
+        // Market's meal stolen (the planner's `StealFood`).
+        || (price < i64::MAX && crate::systems::fixes::starving_thief(world, id))
 }
 
 /// Considerations and flat bonus for one goal, or `None` if the agent lacks a

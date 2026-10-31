@@ -228,6 +228,22 @@ pub fn think_scored(
     }
     // Highest score wins; ties break by table order (stable sort).
     scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    // Round 9 Y1 (`OPEN-249`): starving, survival outranks every goal but
+    // danger: Eat (when it has a meal to plan) goes ahead of the first goal
+    // that is not Flee, Fight or Arrest (V17: Earn, a Pitch and the night's
+    // Sleep each outscored a starving body's Eat on their own hunger and
+    // phase terms).
+    if crate::systems::fixes::starving(world, id) {
+        if let Some(i) = scored.iter().position(|s| s.goal == GoalKind::Eat) {
+            let at = scored.iter().position(|s| !crate::systems::fixes::danger(s.goal)).unwrap_or(0);
+            if i > at {
+                let mut eat = scored.remove(i);
+                eat.score = eat.score.max(scored[at].score);
+                eat.considerations.push(Consideration::raw("starving: survival first", 1.0, 1.0));
+                scored.insert(at, eat);
+            }
+        }
+    }
     let winner = scored.first()?.goal;
     scored.truncate(TRACE_TOP_N);
     Some((winner, ThinkTrace { tick, goals: scored }, shop))

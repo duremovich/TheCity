@@ -2496,6 +2496,11 @@ pub struct Brain {
     /// longer (`[brain] cool_backoff`).
     #[serde(default)]
     pub cool_streak: BTreeMap<GoalKind, (u8, Tick)>,
+    /// Round 9 Y1 (`OPEN-249`): the food sources (a bin's building, a
+    /// kitchen, a Market, a Home) a starving body's Eat failed at, each
+    /// passed over until its tick while it tries the next.
+    #[serde(default)]
+    pub food_tried: Vec<(EntityId, Tick)>,
     /// Waiting in `World::plan_queue`.
     #[serde(default)]
     pub plan_queued: bool,
@@ -2674,6 +2679,7 @@ impl Default for Brain {
             last_urgent_think_tick: 0,
             last_plan_failure: None,
             cool_streak: BTreeMap::new(),
+            food_tried: Vec::new(),
             plan_queued: false,
             cuffed_by: None,
             escorting: None,

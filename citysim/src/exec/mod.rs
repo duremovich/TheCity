@@ -470,6 +470,17 @@ fn step_agent(world: &mut World, id: EntityId) {
             if goal == Some(crate::components::GoalKind::Arrest) {
                 crate::systems::law::chase_dropped(world, id, None);
             }
+            // Round 9 Y1 (`OPEN-249`): a starving body's failed food source
+            // is passed over and the next think tries the next one; Eat is
+            // not cooled (V17 `jobless_6204 d21 10:05`: two emptied bins
+            // cooled Eat two hours at hunger 0.04).
+            if goal == Some(crate::components::GoalKind::Eat) {
+                let src = step.target.or_else(|| world.comp::<Brain>(id).and_then(|b| b.plan.as_ref()?.target));
+                if crate::systems::fixes::food_failed(world, id, src) {
+                    world.abort_plan(id);
+                    return;
+                }
+            }
             world.fail_plan(id);
         }
     }
@@ -566,6 +577,10 @@ fn abort_detail(world: &World, id: EntityId, step: &crate::components::ActionIns
     if matches!(step.action, ActionKind::Collect | ActionKind::Court) {
         return crate::systems::leaders::door_why(world, id, step.action, step.target)
             .map_or_else(String::new, |w| format!(" [{w}]"));
+    }
+    // Round 9 Y1 (`OPEN-249`): a dive's failure names the bin's state.
+    if step.action == ActionKind::DumpsterDive {
+        return step.target.map_or_else(String::new, |b| format!(" [{}]", crate::systems::bins::why_not(world, id, b)));
     }
     if !matches!(step.action, ActionKind::Sleep | ActionKind::CheckIn) {
         return String::new();

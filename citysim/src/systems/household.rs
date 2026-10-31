@@ -1383,6 +1383,9 @@ fn credit(world: &mut World, id: EntityId, v: PendingVisit, walked: bool) {
             ) => "",
         }
     );
+    // Round 9 Y1 (`OPEN-249`): a laid-up kin is brought a meal.
+    let fed = v.why == VisitWhy::Hurt && crate::systems::wounded::visit_meal(world, id, v.kin);
+    let text = if fed { format!("{text}, and brought a meal") } else { text };
     let actors: Vec<EntityId> = [Some(id), Some(v.kin), place].into_iter().flatten().collect();
     world.push_event(EventKind::Visited, &actors, text);
 }

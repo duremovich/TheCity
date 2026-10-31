@@ -534,6 +534,15 @@ plan_age_promote_ticks = 45         # Shadow V4 bug 20: a plan request this old 
 path_budget_per_tick = 20
 mood_w_need = 0.7
 mood_w_memory = 0.3
+# Round 9 Y1 (OPEN-249), hunger in the brain: past [life] starving_hunger survival outranks every goal
+# but danger, a started Eat plan holds until fed or failed, and a failed source is passed over for
+# food_tried_ticks while the starving try the next (home, the bin, the soup line, a theft) instead of
+# cooling Eat; after food_tries failed sources the goal cools as before. A starving adult with no
+# other meal steals one under starving_steal_lawfulness (V17: jobless_6204 cooled Eat after
+# two emptied bins and stood Idle at 0.05 at hunger 0.00).
+food_tried_ticks = 240
+food_tries = 4
+starving_steal_lawfulness = 0.7
 
 [exec]
 # The walking pace: ticks (minutes) a tile on foot, the one pace every walk, commute estimate and vehicle mult reads
@@ -2317,6 +2326,7 @@ rescue_radius = 12
 rescue_loyalty = 0.5
 wounded_quota = 12                   # spec [lod] wounded_quota: downed at once (per capita, up only)
 care_food = 3                        # a stabilised patient's daily meal (paid by its carer, else itself)
+care_feed_hunger = 0.25              # Round 9 Y1 (OPEN-249): a patient under this is fed within the hour by its carer, itself, its kin, else the clinic's owner (V17 marked_22051 starved 72 h on a Ripperdoc's floor)
 stat_saved = 0.16                    # plan key: off screen a killing survives as an assault with wound_share x stat_saved (calibrated once: 58 stabilised of 366 downed, 42-47 x 120)
 rescue_flat = 0.0                    # plan key: the Rescue goal's flat
 trauma_flat = 0.5                    # plan key: a Trauma crew's call adds this

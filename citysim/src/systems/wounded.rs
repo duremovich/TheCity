@@ -211,6 +211,9 @@ pub fn run(world: &mut World) {
     }
     if !world.wounded.is_empty() {
         tick_down(world);
+        if world.tick.is_multiple_of(TICKS_PER_HOUR) {
+            care_hourly(world);
+        }
     }
     // Pressure pass R3: the sick workers' day covers end.
     crate::systems::care::hourly(world);
@@ -647,8 +650,6 @@ pub fn on_stabilise(world: &mut World, id: EntityId, target: Option<EntityId>) -
 /// `Flow::Upkeep`, as a captive's meal), paid by its carer, else itself;
 /// nobody able, it goes unfed. It rests (energy 1).
 fn care_daily(world: &mut World) {
-    let cfg = world.config.needs.clone();
-    let price = world.config.wounded.care_food;
     let stable: Vec<(EntityId, Wounded)> =
         world.wounded.iter().filter(|(_, w)| w.stable).map(|(&k, v)| (k, v.clone())).collect();
     for (k, w) in stable {
@@ -658,22 +659,88 @@ fn care_daily(world: &mut World) {
         if let Some(n) = world.comp_mut::<Needs>(k) {
             n.energy = 1.0;
         }
-        let at = world.comp::<Position>(k).map_or(w.tile, |p| p.tile);
-        let market = world.nearest_of_kind(BuildingKind::Market, at);
-        let stocked = market.and_then(|m| world.comp::<Building>(m)).is_some_and(|b| b.stock_food > 0);
-        let payer = [w.care_by, Some(k)].into_iter().flatten().find(|&p| world.purse(Some(p)) >= price);
-        let (Some(m), Some(p), true) = (market, payer, stocked) else { continue };
-        if let Some(b) = world.comp_mut::<Building>(m) {
-            b.stock_food -= 1;
-        }
-        let owner = world.owner_of(m);
-        let paid = ownership::pay(world, Some(p), owner, price, Flow::Upkeep);
-        ownership::credit(world, m, paid);
-        if let Some(n) = world.comp_mut::<Needs>(k) {
-            crate::needs::eat(n, &cfg);
-        }
-        world.mark_day(k, crate::components::trace_flags::ATE);
+        feed_patient(world, k, &w);
     }
+}
+
+/// Round 9 Y1 (`OPEN-249`), hourly: a stabilised patient under `[wounded]
+/// care_feed_hunger` is fed within the hour, not left to the midnight meal
+/// (V17 `marked_22051`: 72 h on a Ripperdoc's floor, `Starving` at d22
+/// 23:59, kin visiting four times with no food).
+fn care_hourly(world: &mut World) {
+    let line = world.config.wounded.care_feed_hunger;
+    let hungry: Vec<(EntityId, Wounded)> = world
+        .wounded
+        .iter()
+        .filter(|(&k, w)| w.stable && world.comp::<Needs>(k).is_some_and(|n| n.hunger < line))
+        .map(|(&k, v)| (k, v.clone()))
+        .collect();
+    for (k, w) in hungry {
+        if law::living(world, k) {
+            feed_patient(world, k, &w);
+        }
+    }
+}
+
+/// Review finding 6: a patient's meal off the nearest Market's shelf
+/// (`care_food` to its owner, `Flow::Upkeep`, as a captive's meal), paid by
+/// its carer, else itself; round 9 Y1: else its kin (`gossip::kin_of`, the
+/// grown), else the owner of the clinic it lies in. True when it ate.
+fn feed_patient(world: &mut World, k: EntityId, w: &Wounded) -> bool {
+    let price = world.config.wounded.care_food;
+    let at = world.comp::<Position>(k).map_or(w.tile, |p| p.tile);
+    let market = world.nearest_of_kind(BuildingKind::Market, at);
+    let stocked = market.and_then(|m| world.comp::<Building>(m)).is_some_and(|b| b.stock_food > 0);
+    let (Some(m), true) = (market, stocked) else { return false };
+    let kin = crate::systems::gossip::kin_of(world, k);
+    let clinic = world.comp::<Position>(k).and_then(|p| p.building).and_then(|b| world.owner_of(b));
+    let payer = [w.care_by, Some(k)]
+        .into_iter()
+        .flatten()
+        .chain(kin.into_iter().filter(|&p| law::living(world, p) && !crate::systems::ages::is_protected(world, p)))
+        .chain(clinic)
+        .find(|&p| world.purse(Some(p)) >= price);
+    let Some(p) = payer else { return false };
+    feed(world, k, m, p);
+    true
+}
+
+/// `k` eats a meal off `m`'s shelf, `payer` paying `care_food` to its owner.
+fn feed(world: &mut World, k: EntityId, m: EntityId, payer: EntityId) {
+    let price = world.config.wounded.care_food;
+    let cfg = world.config.needs.clone();
+    if let Some(b) = world.comp_mut::<Building>(m) {
+        b.stock_food -= 1;
+    }
+    let owner = world.owner_of(m);
+    let paid = ownership::pay(world, Some(payer), owner, price, Flow::Upkeep);
+    ownership::credit(world, m, paid);
+    if let Some(n) = world.comp_mut::<Needs>(k) {
+        crate::needs::eat(n, &cfg);
+    }
+    world.mark_day(k, crate::components::trace_flags::ATE);
+}
+
+/// Round 9 Y1 (`OPEN-249`): a visitor at a laid-up patient's side brings a
+/// meal when the patient is hungry (under `HUNGER_SATISFIED`) and the
+/// visitor can pay `care_food`: off the nearest Market's shelf, as the
+/// clinic's. True when the patient ate (the visit's line says so).
+pub fn visit_meal(world: &mut World, visitor: EntityId, patient: EntityId) -> bool {
+    if !laid_up(world, patient)
+        || crate::systems::ages::is_protected(world, visitor)
+        || !world.comp::<Needs>(patient).is_some_and(|n| n.hunger < crate::goap::world_state::HUNGER_SATISFIED)
+        || world.purse(Some(visitor)) < world.config.wounded.care_food
+    {
+        return false;
+    }
+    let Some(w) = world.wounded.get(&patient).cloned() else { return false };
+    let at = world.comp::<Position>(patient).map_or(w.tile, |p| p.tile);
+    let Some(m) = world.nearest_of_kind(BuildingKind::Market, at) else { return false };
+    if !world.comp::<Building>(m).is_some_and(|b| b.stock_food > 0) {
+        return false;
+    }
+    feed(world, patient, m, visitor);
+    true
 }
 
 // ---------------------------------------------------------------------------
