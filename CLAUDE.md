@@ -56,7 +56,7 @@ Rewritten 2026-10-26 (Dylan: "I would rather move fast and break things than spe
 - **M18 waits for the 3D view and a solid sim** (2026-10-20): the order is the pre-view fix pass (Shadow V6), the island holding 20k, the view milestone, then M18 rewritten against the 3D client. Getting the full city to feel natural and alive comes first.
 - **Nothing in camera range is Statistical** (2026-10-20): Statistical LOD exists only off camera; everyone the camera (later the player) can see is Full (`OPEN-149`).
 - **The player never starts on day 0** (2026-10-20): the world is pre-run or, preferred, built from a starting-condition seed that prepopulates it, for control over the city you get (`OPEN-150`).
-- **TheCityGraphics stays a separate repo until the view milestone** (2026-10-20); then its Bevy client joins this workspace outside `default-members` with its own test tier, and the Python/Blender pipeline and the assets stay there, read as a generated-assets path (no LFS, ~1.1 GB of PNGs, Bevy's build would break the change tier).
+- **TheCityGraphics' Bevy client joins this workspace as the city milestone's first phase** (Dylan 2026-10-30, roadmap addendum 22; was "at the view milestone", 2026-10-20): outside `default-members` with its own test tier, and agents here may write TheCityGraphics on its own branches; and the Python/Blender pipeline and the assets stay there, read as a generated-assets path (no LFS, ~1.1 GB of PNGs, Bevy's build would break the change tier).
 
 ## Agent rules (orchestrated work)
 

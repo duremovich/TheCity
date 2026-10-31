@@ -511,3 +511,11 @@ had no exit, and far travel recurred in every read from V12 as a map problem pat
   `OPEN-182`, `OPEN-221`, `OPEN-240`) and the vertical city (`OPEN-187`, `OPEN-191`) are one milestone, planned
   against TheCityGraphics so the island the sim reads is the island the client draws; the view milestone (the Bevy
   client joins the workspace, a follow-cam on an NPC, no input) follows, then M18.
+- **Dylan's three calls for the city milestone** (2026-10-30): (1) **the client joins first**: the milestone's first
+  phase joins the Bevy client to the workspace (outside `default-members`, its own view tier,
+  TheCityGraphics `spec/integration/WORKSPACE_JOIN.md`) with a follow-cam that replays a save, so every later phase
+  is watched as well as read; this replaces "TheCityGraphics stays separate until the view milestone". (2) **The
+  vertical city is pathed levels**: floors as tenancies (`OPEN-187`) and a z on positions, stairs and elevators as
+  real portals, footbridges between towers; below ground is not in this milestone. (3) **This session's agents may
+  write TheCityGraphics** (its own branches, its HANDOFF and DECISIONS) for the El on rail, the duplicate tram and the
+  100k export, so the milestone runs end to end from TheCity.

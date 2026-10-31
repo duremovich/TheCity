@@ -40,7 +40,9 @@ FINDINGs (100k seed 42 x 30, `target/r8_100k/` against `target/r7_100k/`): starv
   diaries, nobody starving while Eat loses to a non-survival goal, no frozen loop, no minor harmed.
 - **Then the map re-import with the vertical city, then graphics** (Dylan 2026-10-30: "Lets move towards
   integrating graphics"; "vertical city is important, so might as well bring it in"): one milestone, planned
-  against TheCityGraphics; the view milestone after it, then M18.
+  against TheCityGraphics; the view milestone after it, then M18. Dylan's calls (addendum 22): the Bevy client joins
+  the workspace as the milestone's first phase; the vertical city is pathed levels (floors as tenancies, a z,
+  stairs and elevators as portals, footbridges; no below ground yet); agents here may write TheCityGraphics.
 - **The neglect ladder's size at 100k stays as built** (Dylan 2026-10-30, `OPEN-231`). Round 8 did not touch it;
   ChildTaken rose with the hunger, the ladder's input.
 
