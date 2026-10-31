@@ -206,7 +206,10 @@ pub fn dive_target(world: &World, id: EntityId) -> Option<EntityId> {
         .bins
         .iter()
         .copied()
-        .filter(|&b| !held_by_other(world, b, id) && !world.is_closed(b))
+        // Round 9 Y1 (`OPEN-249`): a bin found empty lately is passed over.
+        .filter(|&b| {
+            !held_by_other(world, b, id) && !world.is_closed(b) && !crate::systems::fixes::food_tried(world, id, b)
+        })
         .filter_map(|b| bin_tile(world, b).map(|t| (t.manhattan(from), b)))
         .filter(|&(d, _)| d <= reach)
         .min()
@@ -226,6 +229,21 @@ pub fn can_start(world: &World, id: EntityId, target: Option<EntityId>) -> bool 
     let Some(b) = target else { return false };
     let at = world.comp::<Position>(id).is_some_and(|p| p.building.is_none() && Some(p.tile) == bin_tile(world, b));
     at && world.comp::<Building>(b).is_some_and(|bd| bd.bin > 0) && !held_by_other(world, b, id)
+}
+
+/// Round 9 Y1 (`OPEN-249`): why a dive at `b` cannot start, for its
+/// failure line.
+pub fn why_not(world: &World, id: EntityId, b: EntityId) -> &'static str {
+    let at = world.comp::<Position>(id).is_some_and(|p| p.building.is_none() && Some(p.tile) == bin_tile(world, b));
+    if !at {
+        "not at the bin"
+    } else if held_by_other(world, b, id) {
+        "another diver at the bin"
+    } else if world.comp::<Building>(b).is_none_or(|bd| bd.bin == 0) {
+        "the bin was emptied first"
+    } else {
+        "no scraps for this diver"
+    }
 }
 
 /// At start: the diver holds the bin for the dive (one at a time).
