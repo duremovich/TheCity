@@ -248,7 +248,8 @@ wrong goes to OPEN; the view milestone (`OPEN-149`, `OPEN-180`'s rest) follows, 
 
 1. **The pace is fixed now, not kept**: pressure pass round 9 Y4 makes a walk real walking speed (several tiles a
    tick, ~21 at 5 km/h on 4 m tiles) before Shadow V18, so every phase here is built at the real pace. The
-   walk-matched view is then about real time (an RPG's 1x); faster speeds are for watching. C7's climb numbers and
+   walk-matched view is then about real time (an RPG's 1x); faster speeds are for watching. Dylan 2026-10-31: the
+   pace will be tuned visually once the follow-cam stands (C2), and the cells' load (`OPEN-256`) waits for that. C7's climb numbers and
    C9's read are at that pace.
 2. **`k = 2`** with tenancies.
 3. **The landlord**: a tower's owner rents floors (a floor rent flow, evictions by the floor); buyouts by the

@@ -765,6 +765,16 @@ Shadow: gun, fixer, gang_leader, fighter, day_labourer, marked (20k, then the on
 the fixer and the job after it. Moves a number: takes made in person / at the tick, take hour spread, targets who
 heard, 20k seed 42 x 30 before and after.
 
+#### Z3, the children of the jailed (Dylan 2026-10-31, `OPEN-258`; Sonnet)
+
+Dylan: "kids who have both parents jailed should go to camp." An 11-y-old 2 days unfed while both parents were held
+(`forger_90429 d27 00:10`; 100k). A child under 18 whose every adult of the household (parents, else the guardians
+the household names) is held (a `Sentence`, in the cells) is taken by the service to the Camp the same day it
+happens, by the path the neglect ladder already uses (`camp.rs`, the ChildTaken line), with its own reason ("both
+parents in the cells") and no unfed grace; when a parent comes out, the existing buy-out and visit paths apply. No
+harm, no fine, no new path. Shadow: jailed, forger, neglect_parent, camp_warden (20k). Moves a number: children taken
+for a jailed household, 20k seed 42 x 30 before and after.
+
 ## Implemented: deviations
 
 (Per phase, as they land.)
