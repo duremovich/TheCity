@@ -34,6 +34,11 @@ pub mod vehicles;
 
 use bevy::prelude::*;
 
+/// A simulation drives the street (TheCity's `cityview --save`, the city milestone C2): glclient's own tram
+/// timetable (`tram.rs`) and ambient traffic (`traffic.rs`) stay off; the sim's trains and vehicles are the street's.
+#[derive(Resource)]
+pub struct SimDrives;
+
 pub struct GlClientPlugin;
 
 impl Plugin for GlClientPlugin {

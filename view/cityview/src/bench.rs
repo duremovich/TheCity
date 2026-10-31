@@ -30,6 +30,14 @@ pub struct Shot {
     pub day: bool,
     /// Debug: massing hidden (the ground and the pinned block alone)
     pub hide_mass: bool,
+    /// C2 (`--save --shots`): the sim tick the shot waits for (the sim thread holds there)
+    pub tick: Option<u64>,
+}
+
+/// C2: the follow-cam's shots (`--bench one --save .. --shots T1,T2,..`): the sim thread's buffer and hold.
+#[derive(Resource)]
+pub struct Shots {
+    pub shared: std::sync::Arc<crate::simthread::Shared>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -103,7 +111,16 @@ impl Bench {
         let mut shots = vec![];
         if kind == "one" {
             // a single shot of the view the args set up (--at, --zoom, --overview, --day): debugging
-            shots.push(Shot { name: tag.into(), mode: Mode::Game, at: Vec2::ZERO, zoom, orbit: None, day: false, hide_mass: false });
+            shots.push(Shot {
+                name: tag.into(),
+                mode: Mode::Game,
+                at: Vec2::ZERO,
+                zoom,
+                orbit: None,
+                day: false,
+                hide_mass: false,
+                tick: None,
+            });
         }
         if kind == "shots" {
             let centre = Vec3::new(s.index.size_m[0] / 2.0, s.index.size_m[1] / 2.0, 60.0);
@@ -115,6 +132,7 @@ impl Bench {
                 orbit: Some((c, yaw, pitch, dist)),
                 day,
                 hide_mass: false,
+                tick: None,
             };
             let g = |name: &str, at: Vec2, zoom: f32, day: bool| Shot {
                 name: name.into(),
@@ -124,6 +142,7 @@ impl Bench {
                 orbit: None,
                 day,
                 hide_mass: false,
+                tick: None,
             };
             let q = std::f32::consts::FRAC_PI_4;
             // the whole island in frame: the centre pulled S and E (the E end ran off the frame: review p3 r4)
@@ -179,6 +198,21 @@ impl Bench {
         }
     }
 
+    /// C2: one shot per sim tick in place of the single one (`<tag>_d<D>_<HHMM>.png`).
+    pub fn at_ticks(&mut self, ticks: &[u64]) {
+        if ticks.is_empty() || self.kind != "one" {
+            return;
+        }
+        let one = self.shots[0].clone();
+        self.shots = ticks
+            .iter()
+            .map(|&t| {
+                let (d, m) = (t / citysim::TICKS_PER_DAY, t % citysim::TICKS_PER_DAY);
+                Shot { name: format!("{}_d{d}_{:02}{:02}", one.name, m / 60, m % 60), tick: Some(t), ..one.clone() }
+            })
+            .collect();
+    }
+
     fn apply_shot(&self, view: &mut View) {
         if self.kind == "one" {
             return;
@@ -220,6 +254,8 @@ pub fn run_bench(
     meshes: Res<Assets<Mesh>>,
     mut exit: MessageWriter<AppExit>,
     mut last: Local<Option<std::time::Instant>>,
+    sim_shots: Option<Res<Shots>>,
+    sim: Option<Res<crate::sim::Sim>>,
 ) {
     let now = std::time::Instant::now();
     let wall_ms = last.map_or(0.0, |l| (now - l).as_secs_f32() * 1000.0);
@@ -367,10 +403,21 @@ pub fn run_bench(
             match b.phase {
                 Phase::Warm => {
                     b.apply_shot(&mut view);
+                    // C2: the sim thread runs to the shot's tick and holds there
+                    if let (Some(t), Some(sh)) = (b.shots[b.shot].tick, sim_shots.as_ref()) {
+                        sh.shared.hold.store(t, std::sync::atomic::Ordering::Relaxed);
+                    }
                     b.phase = Phase::Run;
                     b.frames = 0;
                 }
                 Phase::Run => {
+                    // C2: not before the sim's newest frame is the shot's tick (the wait and its timeout start then)
+                    if let (Some(t), Some(sh)) = (b.shots[b.shot].tick, sim_shots.as_ref())
+                        && sh.shared.pair().1.is_none_or(|p| p.frame.tick < t)
+                    {
+                        b.frames = 0;
+                        return;
+                    }
                     // wait: streaming idle, the pinned glbs in, the camera settled on the ground
                     let glbs = glclient::kit::buildings_ready(&city, &ready, kit_stream.as_deref());
                     // CV_SHOT_MIN_FRAMES (default 60): a longer wait lets the camera's ease finish (glb vs kit
@@ -387,6 +434,10 @@ pub fn run_bench(
                         std::fs::create_dir_all(&b.out).ok();
                         let p = b.out.join(format!("{}.png", b.shots[b.shot].name));
                         info!("shot {} (idle {}, {} frames)", p.display(), s.idle(), b.frames);
+                        if let Some(sim) = sim.as_ref() {
+                            // the caption in the log too (the report quotes it beside the PNG)
+                            info!("shot {}: {}", b.shots[b.shot].name, sim.hud.replace('\n', " | "));
+                        }
                         let state = b.shot_state.clone();
                         state.store(0, std::sync::atomic::Ordering::SeqCst);
                         let mut save = save_to_disk(p);

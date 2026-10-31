@@ -16,6 +16,10 @@
 //! (F player on / off, G occlusion on / off).
 //! --sim FILE [--sim-rate TICKS_PER_S] [--sim-frame N]: a sim replay (city-simview/0.1 from engine/simsnap) drawn as
 //! placeholders on the city (sim.rs; spec/integration/SIM_VIEW_CONTRACT.md).
+//! --save FILE --follow INDEX [--rate TICKS_PER_S] [--from TICK] [--shots T1,T2,..]: the follow-cam (the city milestone
+//! C2, simthread.rs): a sim thread runs the save (`citysim`, in process) and the camera follows entity INDEX; --rate
+//! defaults to walk-matched (`[view] walk_m_s` over the `[exec]` pace). A tick is a number or `D:HH:MM`. With
+//! `--bench one`, --shots takes one PNG at each tick (`<tag>_<tick>.png`). glclient's tram and traffic are off.
 
 // Bevy systems take their params as arguments and query tuples as types: the two lints every Bevy crate allows.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -28,6 +32,7 @@ mod occ;
 mod occbench;
 mod shadowbench;
 mod sim;
+mod simthread;
 mod stream;
 mod windows;
 
@@ -75,6 +80,25 @@ struct Args {
     sim: Option<PathBuf>,
     sim_rate: f32,
     sim_frame: usize,
+    /// --save FILE --follow INDEX: the follow-cam (simthread.rs)
+    save: Option<PathBuf>,
+    follow: Option<u32>,
+    rate: Option<f64>,
+    from: Option<u64>,
+    shots: Vec<u64>,
+}
+
+/// A tick: a number, or `D:HH:MM` (day, hour, minute).
+fn parse_tick(s: &str) -> u64 {
+    let parts: Vec<u64> = s.split(':').map(|p| p.trim().parse().unwrap_or_else(|_| panic!("'{s}' is not a tick or D:HH:MM"))).collect();
+    match parts[..] {
+        [t] => t,
+        [d, h, m] => {
+            assert!(h < 24 && m < 60, "'{s}': hour or minute out of range");
+            d * citysim::TICKS_PER_DAY + h * citysim::TICKS_PER_HOUR + m
+        }
+        _ => panic!("'{s}' is not a tick or D:HH:MM"),
+    }
 }
 
 impl Args {
@@ -103,6 +127,11 @@ impl Args {
             sim: None,
             sim_rate: 0.7,
             sim_frame: 0,
+            save: None,
+            follow: None,
+            rate: None,
+            from: None,
+            shots: vec![],
         };
         let v: Vec<String> = std::env::args().skip(1).collect();
         let mut i = 0;
@@ -184,6 +213,29 @@ impl Args {
                     a.sim_frame = next(i).parse().unwrap();
                     i += 1;
                 }
+                "--save" => {
+                    a.save = Some(PathBuf::from(next(i)));
+                    i += 1;
+                }
+                "--follow" => {
+                    a.follow = Some(next(i).parse().expect("--follow INDEX"));
+                    i += 1;
+                }
+                "--rate" => {
+                    let r: f64 = next(i).parse().expect("--rate TICKS_PER_S");
+                    assert!(r >= 0.0, "--rate must be 0 or more");
+                    a.rate = Some(r);
+                    i += 1;
+                }
+                "--from" => {
+                    a.from = Some(parse_tick(&next(i)));
+                    i += 1;
+                }
+                "--shots" => {
+                    a.shots = next(i).split(',').map(parse_tick).collect();
+                    assert!(a.shots.windows(2).all(|w| w[0] < w[1]), "--shots: ticks in rising order");
+                    i += 1;
+                }
                 "--trace-secs" => {
                     a.trace_secs = next(i).parse().unwrap();
                     i += 1;
@@ -192,6 +244,10 @@ impl Args {
             }
             i += 1;
         }
+        assert!(a.save.is_some() == a.follow.is_some(), "--save and --follow go together");
+        assert!(a.save.is_none() || a.sim.is_none(), "--save and --sim are exclusive");
+        assert!(a.shots.is_empty() || a.bench.as_deref() == Some("one"), "--shots needs --bench one");
+        assert!(a.shots.is_empty() || a.save.is_some(), "--shots needs --save");
         a
     }
 }
@@ -263,6 +319,11 @@ fn main() {
     let mut view = cam::View::new(start, args.zoom, Vec2::from(index.size_m));
     if args.overview {
         view.mode = cam::Mode::Overview;
+        // C3's shot: --at frames the overview's orbit centre, --zoom its distance (m)
+        if let Some(a) = args.at {
+            view.orbit_at = Vec3::new(a.x, a.y, 60.0);
+            view.dist = args.zoom.max(150.0);
+        }
     }
     view.day = args.day;
     view.hide_mass = args.hide_mass;
@@ -341,7 +402,8 @@ fn main() {
     // bench and screenshot output: --out DIR, default <TheCity>/target/cityview (gitignored)
     let out = args.out.clone().unwrap_or_else(|| workspace_root().join("target/cityview"));
     // the P3 benches / shots run without the player (their views are the city, not a player)
-    let player_on = args.player.unwrap_or(!matches!(args.bench.as_deref(), Some("stream" | "overview" | "shots" | "one")));
+    let player_on =
+        args.player.unwrap_or(args.follow.is_some() || !matches!(args.bench.as_deref(), Some("stream" | "overview" | "shots" | "one")));
     app.insert_resource(occ::Player {
         pos: start.extend(3.0),
         facing: 0.0,
@@ -392,6 +454,25 @@ fn main() {
         app.insert_resource(sim::Sim::load(p, args.sim_rate, args.sim_frame, &dir))
             .add_systems(Startup, sim::setup_sim)
             .add_systems(Update, sim::update_sim.after(stream::update_stream));
+    }
+    if let (Some(save), Some(follow)) = (&args.save, args.follow) {
+        // the save reloads its name tables from TheCity's assets/ (CITYSIM_ASSETS wins when set)
+        if std::env::var_os("CITYSIM_ASSETS").is_none() {
+            // SAFETY: main, before any thread of ours starts (the sim thread and Bevy's come after)
+            unsafe { std::env::set_var("CITYSIM_ASSETS", workspace_root().join("assets")) };
+        }
+        let shared = simthread::spawn(simthread::SimArgs {
+            save: save.clone(),
+            follow,
+            rate: args.rate,
+            from: args.from,
+            shots: args.shots.clone(),
+        });
+        app.insert_resource(sim::Sim::live(shared.clone(), &dir))
+            .insert_resource(glclient::SimDrives)
+            .insert_resource(bench::Shots { shared })
+            .add_systems(Startup, sim::setup_sim)
+            .add_systems(Update, (sim::follow_subject.before(occ::player_controls), sim::update_sim.after(stream::update_stream)));
     }
     if args.bench.as_deref() == Some("occ") {
         let oa = occbench::OccArgs {
@@ -498,7 +579,9 @@ fn setup_world(
             };
             (near(4300.0, 392.0), near(5850.0, 750.0))
         });
-        commands.insert_resource(bench::Bench::new(kind, &a.tag, pending.out.clone(), a.speed, a.zoom, &s, xw));
+        let mut b = bench::Bench::new(kind, &a.tag, pending.out.clone(), a.speed, a.zoom, &s, xw);
+        b.at_ticks(&a.shots);
+        commands.insert_resource(b);
     }
     commands.insert_resource(s);
 }

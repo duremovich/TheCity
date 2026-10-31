@@ -781,6 +781,7 @@ fn kind_boxes(k: Kind) -> Vec<(usize, Vec3, Vec3)> {
 
 fn setup(
     mut commands: Commands,
+    driven: Option<Res<crate::SimDrives>>,
     street: Option<Res<Street>>,
     traffic: Option<Res<Traffic>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -792,7 +793,7 @@ fn setup(
     }
     let Some(st) = street else { return };
     *done = true;
-    if std::env::var("CV_NO_TRAFFIC").is_ok() {
+    if std::env::var("CV_NO_TRAFFIC").is_ok() || driven.is_some() {
         return;
     }
     let Some(f) = load(&st.dir.join("traffic.json")) else { return };

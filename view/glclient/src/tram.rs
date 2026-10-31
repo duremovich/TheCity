@@ -160,6 +160,7 @@ pub struct Trams {
 
 fn setup(
     mut commands: Commands,
+    driven: Option<Res<crate::SimDrives>>,
     street: Option<Res<Street>>,
     fleet: Option<Res<Fleet>>,
     mut trams: ResMut<Trams>,
@@ -171,7 +172,7 @@ fn setup(
         return;
     }
     trams.loaded = true;
-    if std::env::var("CV_NO_TRAM").is_ok() {
+    if std::env::var("CV_NO_TRAM").is_ok() || driven.is_some() {
         return;
     }
     let path = st.dir.join("tram.json");

@@ -116,6 +116,33 @@ followed for an hour each, a `--bench one` PNG at each quoted line's tick, paths
 test** (`test-add: the view snapshot drops bodies silently`): `view::snapshot` on the seeded 2k world holds every
 Full and Coarse body in the ring and every motion's riders aboard, ids that resolve. Moves no sim number.
 
+**C2 as built (2026-10-31).** As above, with these deviations: (1) **Walk-matched is real time now.** `--rate` defaults
+to `view::walk_matched_rate`: `[view] walk_m_s` (1.4) over the pace (`[view] tile_m` 4 x `[exec] walk_tiles_per_tick`
+21 / `move_ticks_full` 1 = 84 m a tick), **1/60 ticks a second**, not R2's 0.35: since Y4 the sim walks 5 km/h, so a
+walk-matched game minute is a real minute and a game day 24 real hours (contract Q1 is open again for Dylan; `--rate`
+takes any value). (2) **`[view]`** in config (`tile_m`, `north_m`, `walk_m_s`, `ring_half_tiles` 48, `pin_margin_tiles`
+8, `way_margin_tiles` 64), read by the view only; no `SAVE_VERSION` bump (a serde default). (3) **`ahead`** on each
+body and vehicle (the Full walker's next path tiles, a timed walk's or vehicle's corners to the next tick, a train's
+next place), so the view lerps along the street; the file form also carries `ring` per frame and `source.subject`.
+cityview draws the newer frame's bodies lerped from the older (at a held tick exactly the newer). (4) A Coarse walker
+is placed on his way (`exec::walk_route`, one road search) only when his start-to-target box grown by
+`way_margin_tiles` meets the ring. (5) The ring's pins (`view::pin_ring`) are set on entry and dropped past the ring +
+`pin_margin_tiles`, only the ones the view set. (6) A frame is `World.tick` after the tick ran: the diary's minute
+`HH:MM` is the frame `HH:MM + 1`. (7) cityview: `--from TICK`, `--shots T1,..` (with `--bench one`, a PNG per tick,
+`<tag>_d<D>_<HHMM>.png`, the sim held at each; ticks as numbers or `D:HH:MM`), the caption and "most on a tile" in
+the HUD and the log; C3's `--overview --at --zoom` and its train-on-any-deck patch ported; glclient's tram and
+traffic off under a `glclient::SimDrives` resource. The subject is the occlusion's player stand-in (the camera and the
+cut follow it). cityview depends on `citysim` (one lock line). (8) `shadow --save-at D1,D2` (days) writes
+`<out>/saves/<seed>-<tick>.ron` at each day's start, the picks pinned and `max_full` grown as in the window. (9) The
+test boards three riders by hand (the 2k city's commute hour rides nothing). (10) The fixture is `export-view`'s
+(147 KB, recipe in TESTING.md). **Read** (`target/c2/`, 20k seed 42 day 7, report in the session scratchpad): the
+replay keeps to the diaries line by line (commuter, gang member, cabbie); the old 78-Coarse stack is gone; what reads
+wrong: a street spot is one tile (123 bodies vending and wandering on one 4 m tile at 07:30, 69 wandering at 00:20,
+all Full: one blob in the view); a cab rank at (847, 520) has no streamed ground (the body under the city's geometry,
+the reconcile drift C5 fixes); the ring holds Statistical bodies until the hourly assignment (32-272 a frame,
+`OPEN-149`); every train at a stop at 07:30 with no riders, on the old `L` lines (C5); an escorted prisoner shows no
+goal or step for the walk to the Precinct.
+
 ### C3, the El on rail and the duplicate tram (TheCityGraphics branch; `pipeline/city/rail.py`, `layers.py`, `elevated.json`, `street/tram.json`, `simdata.rail`)
 
 Route the three authored lines (`OPEN-158`: Mid-Levels 780,795 to 780,470; Hillside 561,600 to 1387,600; Vats

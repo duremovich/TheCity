@@ -14,8 +14,8 @@ rendering, no `std::time`, no `HashMap`/`HashSet` iteration (`lib.rs` header). T
 Config)` (`world.rs`) and `citysim::tick(&mut World)` (`lib.rs`), which calls `World::tick`. `World::run_ticks(n)` is
 the convenience loop tests use.
 
-**`citysim-cli`** (`citysim-cli/src/main.rs`, `shadow.rs`, `import_graphics.rs`): the headless runner. Subcommands
-`run`, `calibrate`, `shadow`, `gen-map`, `import-graphics` (section 11). Must run from the repo root so `Config::load`
+**`citysim-cli`** (`citysim-cli/src/main.rs`, `shadow.rs`, `import_graphics.rs`, `export_view.rs`): the headless runner.
+Subcommands `run`, `calibrate`, `shadow`, `gen-map`, `import-graphics`, `export-view` (section 11). Must run from the repo root so `Config::load`
 finds `assets/config.toml` (or set `CITYSIM_ASSETS`).
 
 **`citysim-app`** (`citysim-app/src/`): the macroquad viewer: `render.rs`, `camera.rs`, `input.rs`, the overlays
@@ -25,7 +25,8 @@ advances it with `World::run_ticks` and sends `PlayerCommand`s; it never writes 
 
 **`view/`** (city milestone C1, moved from TheCityGraphics `855d0aa`): the Bevy 0.19.1 client, `glclient` (the
 block, kit, street, traffic, tram, occlusion and light rules) and `cityview` (the city view binary and its benches;
-`--sim FILE` draws a `city-simview/0.1` frame), edition 2024, its own `view/rustfmt.toml`; `view/vendor` holds the
+`--sim FILE` draws a `city-simview/0.1` frame; C2's follow-cam `--save FILE --follow INDEX` runs `citysim` in process on a
+sim thread, `simthread.rs`, reading `citysim::view::snapshot` frames from a two-slot buffer), edition 2024, its own `view/rustfmt.toml`; `view/vendor` holds the
 patched `bevy_pbr` / `bevy_render` the root `[patch.crates-io]` wires. Members outside `default-members`: the sim's
 builds and tiers never compile it; `python tools/test.py view` does. It reads TheCityGraphics' generated assets
 (`CITYVIEW_ASSETS`), never the sim's `assets/`.
@@ -307,7 +308,7 @@ Each file's `//!` header names its spec section.
 | `faction.rs` | the gang brain's standing orders | `parents.rs` | outside parent accounts, remittance |  |  |
 | `faith.rs` | churches and followers (`[faith]`) | `plan.rs` | the plan queue (section 5) |  |  |
 
-Outside `systems/`: `needs.rs`, `mood.rs`, `personality.rs` (agent internals), `word.rs`, `contract.rs`, `virt.rs`,
+Outside `systems/`: `view.rs` (C2: the camera ring's snapshot for the 3D client, `[view]`; reads, never writes), `needs.rs`, `mood.rs`, `personality.rs` (agent internals), `word.rs`, `contract.rs`, `virt.rs`,
 `living.rs`, `econ.rs`, `ambient.rs`, `outside.rs`, `ledger.rs` (the milestones' types; logic in the matching
 `systems/` file), `levers.rs` (player commands and lever values), `story.rs` (biographies), `stats.rs` (`DailyStats`,
 `DayRow`), `prof.rs` (the `timed!` profiler, `prof` feature only), `util.rs`.
@@ -492,6 +493,9 @@ The config is part of the saved `World`: a save resumes under the config it was 
   Served-able shifts per archetype; with `--population N` one window of the generated city). Draws no RNG; its only
   sim hook is `World::shadow_notes`.
 - `gen-map --residents N --out FILE`, `import-graphics --src DIR --out FILE` (`docs/IMPORT_GRAPHICS.md`).
+- `export-view --save FILE --out FILE [--ticks N] [--keep N] [--at X,Y | --follow INDEX]` (city milestone C2): the camera
+  ring's `city-simview/0.1` frames from a save (`citysim::view`, `[view]`); it writes the view tier's fixture.
+  `shadow --save-at D1,D2` writes the window's saves the follow-cam replays.
 
 Output analysis: `python tools/analyze_run.py run.csv events.tsv`.
 

@@ -341,7 +341,7 @@ def cmd_tier(tier, args):
 # --- the view tier (city milestone C1) ---------------------------------------
 
 # The smoke's fixture: one city-simview/0.1 frame of the 20k day-1 city (seed 42, tick 2611, the bridge's
-# render ring at 1920,550 m); docs/TESTING.md § the view tier has its recipe. C2's export-view replaces it.
+# render ring at 1920,550 m), written by `citysim-cli export-view` (C2); docs/TESTING.md § the view tier has its recipe.
 VIEW_FIXTURE = ROOT / "view" / "cityview" / "fixtures" / "day1_20k_s42.simview.json"
 VIEW_SMOKE_ARGS = ["--sim-rate", "0", "--bench", "one", "--no-player", "--hide-mass", "--at", "1935,560",
                    "--zoom", "160", "--tag", "view_smoke"]

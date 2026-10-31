@@ -8,6 +8,11 @@
 //! building are not drawn (the sim has no floor for them: the contract's missing `floor`); the HUD counts them.
 //! Positions are tile centres plus a per-id jitter inside the 4 m tile, on the streamed ground; a train sits on the
 //! rail deck (layers.json), the tram and the lines with no track here on the street (OPEN-158: drawn red, raised).
+//!
+//! C2, the follow-cam (`--save FILE --follow INDEX`, simthread.rs): the frames come live from the sim thread's
+//! two-slot buffer instead of a file (`Sim::live`), lerped from the older to the newer over one tick at the rate; a
+//! body or vehicle with an `ahead` (the way to the next tick's place) is lerped along it, not through the block; the
+//! subject's place drives the player stand-in, so the camera and the occlusion follow it (`follow_subject`).
 
 use crate::data::Layers;
 use crate::mesh::bv;
@@ -17,21 +22,25 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct Agent {
     pub id: u64,
     pub t: [f32; 2],
+    /// The way to the next frame's place (C2; empty: a straight lerp)
+    pub ahead: Vec<[f32; 2]>,
     pub indoors: bool,
     pub lod: u8,
     pub act: u8,
-    pub aboard: bool,
+    /// The vehicle it is aboard (its key)
+    pub aboard: Option<u64>,
     pub facing: Option<f32>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct Vehicle {
     pub id: u64,
     pub t: [f32; 2],
+    pub ahead: Vec<[f32; 2]>,
     /// 0 car / cab / exec, 1 van, 2 train, 3 flyer, 4 foot escort
     pub ride: u8,
     pub line: Option<u8>,
@@ -63,6 +72,116 @@ pub struct Sim {
     pub capsule: Handle<Mesh>,
     pub boxes: [Handle<Mesh>; 5],
     pub hud: String,
+    /// C2: the sim thread's buffer (`--save`), the last frame pair's sequence number, the subject's key and caption
+    pub live: Option<std::sync::Arc<crate::simthread::Shared>>,
+    pub live_seq: u64,
+    pub subject: Option<u64>,
+    pub caption: String,
+    /// The subject's place this frame (feet, metres) and heading (rad, the player's convention) for the follow-cam
+    pub subject_at: Option<(Vec3, f32)>,
+}
+
+fn ekey(e: citysim::EntityId) -> u64 {
+    (u64::from(e.generation) << 32) | u64::from(e.index)
+}
+
+fn tf(t: citysim::TilePos) -> [f32; 2] {
+    [f32::from(t.x), f32::from(t.y)]
+}
+
+impl SimFrame {
+    /// A live `ViewFrame` (C2) as the placeholders read it.
+    pub fn from_view(f: &citysim::view::ViewFrame) -> SimFrame {
+        use citysim::systems::motion::RideKind;
+        use citysim::view::ViewAct;
+        let agents = f
+            .agents
+            .iter()
+            .map(|a| Agent {
+                id: ekey(a.id),
+                t: tf(a.t),
+                ahead: a.ahead.iter().map(|t| tf(*t)).collect(),
+                indoors: a.b.is_some(),
+                lod: match a.lod {
+                    Some(citysim::Lod::Full) => 0,
+                    Some(citysim::Lod::Coarse) => 1,
+                    _ => 2,
+                },
+                act: match a.act {
+                    ViewAct::Walk { .. } => 0,
+                    ViewAct::Use { .. } => 1,
+                    ViewAct::Idle => 2,
+                    ViewAct::Wait { .. } => 3,
+                    ViewAct::Ride { .. } => 4,
+                    ViewAct::Timed { .. } => 5,
+                    ViewAct::Fly { .. } => 6,
+                    ViewAct::JackedIn { .. } => 7,
+                    ViewAct::Child => 8,
+                },
+                aboard: a.aboard.map(ekey),
+                facing: a.facing,
+            })
+            .collect();
+        let vehicles = f
+            .vehicles
+            .iter()
+            .map(|v| Vehicle {
+                id: ekey(v.id),
+                t: tf(v.t),
+                ahead: v.ahead.iter().map(|t| tf(*t)).collect(),
+                ride: match v.ride {
+                    RideKind::Van => 1,
+                    RideKind::Train => 2,
+                    RideKind::Flyer => 3,
+                    RideKind::Foot => 4,
+                    _ => 0,
+                },
+                line: match v.route {
+                    citysim::view::ViewRoute::Line { line, .. } => Some(line),
+                    _ => None,
+                },
+                riders: v.riders.len() as u16,
+            })
+            .collect();
+        SimFrame { tick: f.tick, clock: f.clock.clone(), agents, vehicles, events: f.events.len() }
+    }
+}
+
+/// The place `u` (0..1) of the way from `from` to `to`: along `ahead` when it reaches `to` (the street's corners),
+/// else straight.
+fn along(from: [f32; 2], ahead: &[[f32; 2]], to: [f32; 2], u: f32) -> [f32; 2] {
+    let lerp = |a: [f32; 2], b: [f32; 2], k: f32| [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
+    let Some(end) = ahead.iter().position(|p| *p == to) else { return lerp(from, to, u) };
+    let pts: Vec<[f32; 2]> = std::iter::once(from).chain(ahead[..=end].iter().copied()).collect();
+    let len = |a: [f32; 2], b: [f32; 2]| ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
+    let total: f32 = pts.windows(2).map(|w| len(w[0], w[1])).sum();
+    if total <= 0.0 {
+        return to;
+    }
+    let mut left = total * u.clamp(0.0, 1.0);
+    for w in pts.windows(2) {
+        let l = len(w[0], w[1]);
+        if left <= l && l > 0.0 {
+            return lerp(w[0], w[1], left / l);
+        }
+        left -= l;
+    }
+    to
+}
+
+fn line_track_of(names: &[String]) -> Vec<u8> {
+    names
+        .iter()
+        .map(|n| {
+            if n == "Terrace Line" {
+                TRACK_RAIL
+            } else if n.starts_with("Tram") {
+                TRACK_STREET
+            } else {
+                TRACK_NONE
+            }
+        })
+        .collect()
 }
 
 const ACTS: [&str; 9] = ["walk", "use", "idle", "wait", "ride", "timed", "fly", "jacked_in", "child"];
@@ -98,23 +217,9 @@ impl Sim {
         let d: Value = serde_json::from_str(&txt).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
         assert_eq!(d["schema"], "city-simview/0.1", "{}: not a city-simview/0.1 file", path.display());
         let fr = &d["frame"];
-        let line_track = d["lines"]
-            .as_array()
-            .map(|ls| {
-                ls.iter()
-                    .map(|l| {
-                        let n = l["name"].as_str().unwrap_or("");
-                        if n == "Terrace Line" {
-                            TRACK_RAIL
-                        } else if n.starts_with("Tram") {
-                            TRACK_STREET
-                        } else {
-                            TRACK_NONE
-                        }
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+        let names: Vec<String> =
+            d["lines"].as_array().map(|ls| ls.iter().map(|l| l["name"].as_str().unwrap_or("").to_string()).collect()).unwrap_or_default();
+        let line_track = line_track_of(&names);
         let rail = Layers::load(chunk_dir).elements.into_iter().filter(|e| e.kind == "rail").flat_map(|e| e.pts).collect();
         let mut frames = vec![];
         for f in d["frames"].as_array().expect("frames") {
@@ -128,6 +233,7 @@ impl Sim {
                     Agent {
                         id: key(&a["id"]),
                         t: t2(&a["t"]),
+                        ahead: a["ahead"].as_array().map_or(vec![], |w| w.iter().map(t2).collect()),
                         indoors: !a["b"].is_null(),
                         lod: match a["lod"].as_str() {
                             Some("Full") => 0,
@@ -135,7 +241,7 @@ impl Sim {
                             _ => 2,
                         },
                         act: ACTS.iter().position(|s| *s == act).unwrap_or(2) as u8,
-                        aboard: !a["aboard"].is_null(),
+                        aboard: (!a["aboard"].is_null()).then(|| key(&a["aboard"])),
                         facing: a["facing"].as_f64().map(|h| h as f32),
                     }
                 })
@@ -147,6 +253,7 @@ impl Sim {
                 .map(|v| Vehicle {
                     id: key(&v["id"]),
                     t: t2(&v["t"]),
+                    ahead: v["ahead"].as_array().map_or(vec![], |w| w.iter().map(t2).collect()),
                     ride: match v["ride"].as_str() {
                         Some("Van") => 1,
                         Some("Train") => 2,
@@ -183,7 +290,66 @@ impl Sim {
             capsule: Handle::default(),
             boxes: Default::default(),
             hud: String::new(),
+            live: None,
+            live_seq: 0,
+            subject: None,
+            caption: String::new(),
+            subject_at: None,
         }
+    }
+
+    /// C2: frames from the sim thread (`--save`); the frame (tile_m, y1) and the lines arrive with the first frame.
+    pub fn live(shared: std::sync::Arc<crate::simthread::Shared>, chunk_dir: &Path) -> Sim {
+        let rail = Layers::load(chunk_dir).elements.into_iter().filter(|e| e.kind == "rail").flat_map(|e| e.pts).collect();
+        Sim {
+            tile_m: 4.0,
+            x0: 0.0,
+            y1: 3750.0,
+            frames: vec![],
+            line_track: vec![],
+            rail,
+            t: 0.0,
+            rate: 0.0,
+            by_lod: std::env::var("CV_SIM_COLOUR").is_ok_and(|v| v == "lod"),
+            ents: HashMap::new(),
+            mats: vec![],
+            capsule: Handle::default(),
+            boxes: Default::default(),
+            hud: "sim: loading the save".into(),
+            live: Some(shared),
+            live_seq: 0,
+            subject: None,
+            caption: String::new(),
+            subject_at: None,
+        }
+    }
+
+    /// C2: the newest frame pair from the sim thread; the lerp's `u` (0..1) from the real time since the newer one
+    /// and the rate (1 while a bench holds the sim: the shot's tick exactly). `None` until the first frame.
+    fn pull_live(&mut self) -> Option<f32> {
+        let live = self.live.clone()?;
+        let (prev, latest) = live.pair();
+        let Some(latest) = latest else {
+            self.hud = format!("sim: loading / running to the first frame (tick {})", live.tick.load(std::sync::atomic::Ordering::Relaxed));
+            return None;
+        };
+        if self.live_seq != latest.seq {
+            if self.line_track.is_empty()
+                && let Some(st) = live.stat.lock().unwrap().clone()
+            {
+                self.line_track = line_track_of(&st.lines);
+                self.tile_m = st.tile_m;
+                self.y1 = st.north_m;
+            }
+            let older = prev.as_ref().unwrap_or(&latest);
+            self.frames = vec![SimFrame::from_view(&older.frame), SimFrame::from_view(&latest.frame)];
+            self.live_seq = latest.seq;
+            self.subject = Some(ekey(latest.subject));
+            self.caption = latest.caption.clone();
+        }
+        self.rate = live.rate();
+        let held = live.hold.load(std::sync::atomic::Ordering::Relaxed) != u64::MAX;
+        Some(if held { 1.0 } else { (latest.at.elapsed().as_secs_f32() * self.rate).clamp(0.0, 1.0) })
     }
 
     /// A tile's centre in city metres, plus a jitter inside the tile fixed per id (bodies on one tile spread out).
@@ -248,14 +414,24 @@ pub fn update_sim(
     mut sim: ResMut<Sim>,
     mut q: Query<(&mut Transform, &mut Visibility)>,
 ) {
-    let n = sim.frames.len();
-    let rate = sim.rate;
-    sim.t = (sim.t + time.delta_secs() * rate) % n as f32;
-    let i = sim.t.floor() as usize;
-    let j = (i + 1).min(n - 1);
-    let u = if rate == 0.0 { 0.0 } else { sim.t - i as f32 };
-    let next_a: HashMap<u64, [f32; 2]> = sim.frames[j].agents.iter().map(|a| (a.id, a.t)).collect();
-    let next_v: HashMap<u64, [f32; 2]> = sim.frames[j].vehicles.iter().map(|v| (v.id, v.t)).collect();
+    let (i, j, u) = if sim.live.is_some() {
+        let Some(u) = sim.pull_live() else { return };
+        (0, 1, u)
+    } else {
+        let n = sim.frames.len();
+        let rate = sim.rate;
+        sim.t = (sim.t + time.delta_secs() * rate) % n as f32;
+        let i = sim.t.floor() as usize;
+        let j = if rate == 0.0 { i } else { (i + 1).min(n - 1) };
+        (i, j, if rate == 0.0 { 0.0 } else { sim.t - i as f32 })
+    };
+    let subject = sim.subject;
+    let mut subject_at: Option<(Vec3, f32)> = None;
+    let mut subject_in: Option<u64> = None;
+    // the newer frame's bodies, each lerped from its place in the older one along the older's way ahead (at u = 1
+    // exactly the newer frame: a bench's shot shows its tick)
+    let prev_a: HashMap<u64, ([f32; 2], Vec<[f32; 2]>)> = sim.frames[i].agents.iter().map(|a| (a.id, (a.t, a.ahead.clone()))).collect();
+    let prev_v: HashMap<u64, ([f32; 2], Vec<[f32; 2]>)> = sim.frames[i].vehicles.iter().map(|v| (v.id, (v.t, v.ahead.clone()))).collect();
     let mut seen: Vec<(u8, u64)> = vec![];
     let mut place =
         |commands: &mut Commands, sim: &mut Sim, k: (u8, u64), mesh: Handle<Mesh>, mat: Handle<StandardMaterial>, at: Vec3, yaw: f32| {
@@ -275,20 +451,31 @@ pub fn update_sim(
             }
         };
     let (mut street, mut indoors, mut aboard, mut lods) = (0, 0, 0, [0usize; 3]);
-    let fr_agents = sim.frames[i].agents.clone();
+    // the most bodies standing on one street tile (a Coarse stack reads as one blob)
+    let mut on_tile: HashMap<(i32, i32), usize> = HashMap::new();
+    let fr_agents = sim.frames[j].agents.clone();
     for a in &fr_agents {
         lods[a.lod as usize] += 1;
+        if Some(a.id) == subject {
+            // the follow-cam: aboard at its vehicle (below), indoors at its building's tile (not drawn), else its body
+            subject_in = a.aboard;
+            let t = prev_a.get(&a.id).map_or(a.t, |(p, ah)| along(*p, ah, a.t, u));
+            let p = sim.metres(t, a.id, !a.indoors);
+            let z = stream.ground_z(p.x, p.y).unwrap_or(0.0);
+            subject_at = Some((Vec3::new(p.x, p.y, z), a.facing.map_or(0.0, |h| -h.to_radians())));
+        }
         if a.indoors {
             indoors += 1;
             continue;
         }
-        if a.aboard {
+        if a.aboard.is_some() {
             // drawn inside its vehicle
             aboard += 1;
             continue;
         }
         street += 1;
-        let t = next_a.get(&a.id).map_or(a.t, |n| [a.t[0] + (n[0] - a.t[0]) * u, a.t[1] + (n[1] - a.t[1]) * u]);
+        *on_tile.entry((a.t[0] as i32, a.t[1] as i32)).or_default() += 1;
+        let t = prev_a.get(&a.id).map_or(a.t, |(p, ah)| along(*p, ah, a.t, u));
         let p = sim.metres(t, a.id, true);
         let z = stream.ground_z(p.x, p.y).unwrap_or(0.0);
         let mat = if sim.by_lod { sim.mats[ACTS.len() + a.lod as usize].clone() } else { sim.mats[a.act as usize].clone() };
@@ -297,25 +484,34 @@ pub fn update_sim(
         let cap = sim.capsule.clone();
         place(&mut commands, &mut sim, (0, a.id), cap, mat, bv(p.x, p.y, z + 0.85 * 1.4), yaw);
     }
-    let fr_veh: Vec<Vehicle> = sim.frames[i].vehicles.clone();
+    let fr_veh: Vec<Vehicle> = sim.frames[j].vehicles.clone();
     let (mut by_ride, mut riders) = ([0usize; 5], 0usize);
     for v in &fr_veh {
         by_ride[v.ride as usize] += 1;
         riders += usize::from(v.riders);
-        let t = next_v.get(&v.id).map_or(v.t, |n| [v.t[0] + (n[0] - v.t[0]) * u, v.t[1] + (n[1] - v.t[1]) * u]);
+        let t = prev_v.get(&v.id).map_or(v.t, |(q, ah)| along(*q, ah, v.t, u));
         let p = sim.metres(t, v.id, false);
-        let ahead = next_v.get(&v.id).map(|n| sim.metres(*n, v.id, false) - sim.metres(v.t, v.id, false)).filter(|d| d.length() > 0.01);
+        // heading: from the older place to the newer, else along the newer's way ahead
+        let to = |a: [f32; 2]| sim.metres(a, v.id, false);
+        let ahead = prev_v
+            .get(&v.id)
+            .map(|(q, _)| to(v.t) - to(*q))
+            .filter(|d| d.length() > 0.01)
+            .or_else(|| v.ahead.first().map(|n| to(*n) - to(v.t)).filter(|d| d.length() > 0.01));
         let yaw = ahead.map_or(0.0, |d| -d.x.atan2(d.y));
         let track = v.line.and_then(|l| sim.line_track.get(l as usize).copied());
         let ground = stream.ground_z(p.x, p.y).unwrap_or(0.0);
         let (z, red) = match (v.ride, track) {
             (2, Some(TRACK_RAIL)) => (sim.rail_z(p).map_or(ground + 12.0, |z| z + 2.6), false),
             (2, Some(TRACK_STREET)) => (ground + 1.8, false),
-            // a line with no track here (OPEN-158): raised and red
-            (2, _) => (ground + 10.0, true),
+            // C3: a routed El line on its deck (rail.json); a line with no track here (OPEN-158): raised and red
+            (2, _) => sim.rail_z(p).map_or((ground + 10.0, true), |z| (z + 2.6, false)),
             _ => (ground + 0.9, false),
         };
         let mat = sim.mats[ACTS.len() + LOD_RGB.len() + usize::from(red)].clone();
+        if subject_in == Some(v.id) {
+            subject_at = Some((Vec3::new(p.x, p.y, z), yaw));
+        }
         let mesh = sim.boxes[v.ride as usize].clone();
         place(&mut commands, &mut sim, (1, v.id), mesh, mat, bv(p.x, p.y, z), yaw);
     }
@@ -328,9 +524,12 @@ pub fn update_sim(
             v.set_if_neq(Visibility::Hidden);
         }
     }
-    let f = &sim.frames[i];
+    sim.subject_at = subject_at;
+    let stack = on_tile.values().copied().max().unwrap_or(0);
+    let f = &sim.frames[j];
+    let follow = if sim.live.is_some() { format!("\nfollowing {}", sim.caption) } else { String::new() };
     sim.hud = format!(
-        "sim tick {} {}  agents {} (street {street}, indoors {indoors}, aboard {aboard}; Full {} Coarse {} Stat {})  vehicles car {} van {} train {} flyer {} foot {} ({riders} aboard)  events {}",
+        "sim tick {} {}  agents {} (street {street}, most on a tile {stack}, indoors {indoors}, aboard {aboard}; Full {} Coarse {} Stat {})  vehicles car {} van {} train {} flyer {} foot {} ({riders} aboard)  events {}",
         f.tick,
         f.clock,
         f.agents.len(),
@@ -343,5 +542,16 @@ pub fn update_sim(
         by_ride[3],
         by_ride[4],
         f.events
-    );
+    ) + &follow;
+}
+
+/// C2: the follow-cam: the player stand-in (the camera's and the occlusion's focus, occ.rs) stands where the subject
+/// is drawn. Before `occ::player_controls`, which moves the view to it.
+pub fn follow_subject(sim: Res<Sim>, mut player: ResMut<crate::occ::Player>) {
+    if let Some((p, yaw)) = sim.subject_at {
+        player.on = true;
+        player.scripted = true;
+        player.pos = p;
+        player.facing = yaw;
+    }
 }
