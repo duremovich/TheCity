@@ -4756,7 +4756,9 @@ the X6 keys and the `Jobs2Cols` `cell_days` ... `wr_held_clear` columns (serde d
   thousands of empty cells a query for a sparse kind (the Statistical evening's district-first venue search at
   21:00 took 1.5-3 s a tick at 20k); once its rings have covered more cells than the grid holds doors it sorts the
   doors left instead (the same `(dist, id)` sequence). `classpay::pick_graded_in` reads a candidate's travel only when
-  his merit would beat the best (the same pick; the cap's discs now hold the island). What is left is the walk
+  his merit could beat the best (a merit ceiling, the weights' sum less the commute, passes the rest over first; the
+  same pick), and `transit::reach_discs` returns the walk disc alone when it holds the map (the stops' discs inside it
+  were read over and over): the 20k world build 20.3 -> 5.6 s (944 graded picks at 17 ms each). What is left is the walk
   itself: Full bodies step 21 tiles a tick and walk to farther places (the caps admit them), so `exec` and
   `big_path` cost more (20k days 19-22, prof: `tick::exec` 3.4 -> 6.3 s, `big_path` 0.46 -> 2.15 s), and trips
   that end sooner leave more decisions (`think` calls +10 %, PlanAborted +59 %: below).
@@ -4784,4 +4786,18 @@ the X6 keys and the `Jobs2Cols` `cell_days` ... `wr_held_clear` columns (serde d
   (under 30 min), and the off-screen bands read from `life::commute_cost` fall there too, so the Statistical day
   reads the near-commute rows; a regen belongs to the close (it redraws rare rates). `Jobs2Cols.commute_med` (the
   relocation read's median Home-to-post travel) is new, a print. The shadow lens's jump allowance reads the pace (and
-  chrome legs, and an Idle body whose step is a walk). `SAVE_VERSION` 116.
+  chrome legs, and an Idle body whose step is a walk). `SAVE_VERSION` 116. The test scenes written on the 2k map
+  at R2's pace (the El beating a walk, a leg past the segment length, a far commute, 73 of them over 19 binaries)
+  run at it through `common::r2` (the pace and every knob above), file by file, with the Y4 reason: on a kilometre-wide
+  map at 21 tiles a minute every leg is minutes and the premise is gone. `probe_worker_finishes_the_shift_before_an_errand`
+  reads the purse's peak (paid, then the meal bought by 18:15).
+- **Numbers** (20k `isle_m_k2` seed 42 x 30, before -> after, one run each, `--legs --legs-min 0`): legs of 120 min
+  or more 32,908 -> 4 (walk 20,213 -> 3; 240+ 6,906 -> 3); workers past a 3 h commute (`commute_long`, a day) 1,054
+  -> 0; the Work GoTo(Workplace) leg median 26 -> 4 min (29 -> 79 tiles; p90 121 -> 19 min), `commute_med` (new) 9
+  min; walk 0.95 -> 18.7 tiles a minute; Patrol legs median 44 -> 11 min; Raid legs median 90 -> 21 min (over 2 h 110
+  -> 0); raids departed / at the target 21 / 17 -> 64 / 65, marchers at the door 163 of 167 -> 560 of 571; corner
+  turnout (`war_came` of `war_called`) 322 of 628 -> 543 of 919; Starving 25 -> 4, starvation deaths 1 -> 2; violent
+  deaths 93 -> 172 (the raids land); El rides a day 5,649 -> 1,790, El legs of bodies 32,268 -> 68; PlanAborted 174k
+  -> 277k (Court at Flirt 11k -> 44k, GetHigh at BuyStims 1.4k -> 26k: the walks now arrive); ticks/s 183 -> 162
+  (days 25-30 153 -> 132). 100k (the one run, the shadow d21-27 before the build fix): 3,084 s wall, 13.1 ticks/s
+  against V17's 18 (its shadow 2,330 s); after the fix the 100k build and day 1 take 119 s (day 1 at 21 ticks/s).
