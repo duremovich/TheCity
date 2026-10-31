@@ -509,7 +509,7 @@ use crate::world::World;
 /// 116 (pressure pass round 9, Y4, the walking pace): `ExecState::Goto.carry_q` widened to `u32` step units, the
 /// `[exec] walk_tiles_per_tick`, `step_res` keys (serde defaults: the pace before Y4), `[vehicles]
 /// max_steps_per_tick` widened to `u16`, the `Jobs2Cols` `commute_med` column.
-pub const SAVE_VERSION: u8 = 116;
+pub const SAVE_VERSION: u8 = 117;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

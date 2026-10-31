@@ -257,7 +257,7 @@ pub fn add(world: &mut World, holder: EntityId, target: EntityId, cause: GrudgeC
                 None => return false,
             }
         }
-        g.list.push(Grudge { target, cause, weight: w, since: now, chain, settled: None });
+        g.list.push(Grudge { target, cause, weight: w, since: now, chain, settled: None, noted: 0 });
         fresh = true;
     }
     if world.has::<Identity>(target) && crate::systems::law::living(world, target) {

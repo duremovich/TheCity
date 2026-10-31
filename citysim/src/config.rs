@@ -10092,6 +10092,31 @@ pub struct HuntCfg {
     pub hold_score: f32,
     /// W23.
     pub stat_hunt_min: f32,
+    /// Round 9 Z1 (the avenger): a grudge over a killing (kin or friend)
+    /// hunts from this weight (0: `hunt_min`, as before).
+    pub killed_hunt_min: f32,
+    /// Z1: at most this many hunt one man at once (0: no cap).
+    pub hunters_per_target: usize,
+    /// Z1: a hunt with no word of its man and nowhere near to ask waits
+    /// this long, the hunt kept (0: the goal cools as any unplannable goal).
+    pub wait_hours: u32,
+    /// Z1: a weak or cowardly hunter who cannot pay hands the grudge to
+    /// the strongest of his own people at this share of its weight (0: off).
+    pub hand_w: f32,
+    /// Z1: a held man's cellmate handed the grudge goes for him in the
+    /// yard on this daily chance (0: off).
+    pub inside_fight_p: f32,
+    /// Z1: the hunted gets word of the hunt on this chance (0: off).
+    pub heard_p: f32,
+    /// Z1: word of the hunt takes this off his safety need.
+    pub heard_safety: f32,
+    /// Z1: a hunted man this brave and lawless swears to get the hunter
+    /// first (a grudge at `heard_counter_w`) ...
+    pub heard_counter_courage: f32,
+    pub heard_counter_lawful: f32,
+    pub heard_counter_w: f32,
+    /// ... any other lies low at home this many days.
+    pub heard_low_days: u32,
 }
 
 impl Default for HuntCfg {
@@ -10110,6 +10135,17 @@ impl Default for HuntCfg {
             street_silence: true,
             hold_score: 0.6,
             stat_hunt_min: 0.2,
+            killed_hunt_min: 0.0,
+            hunters_per_target: 0,
+            wait_hours: 0,
+            hand_w: 0.0,
+            inside_fight_p: 0.0,
+            heard_p: 0.0,
+            heard_safety: 0.0,
+            heard_counter_courage: 1.1,
+            heard_counter_lawful: 0.0,
+            heard_counter_w: 0.0,
+            heard_low_days: 0,
         }
     }
 }

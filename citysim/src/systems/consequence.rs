@@ -1325,7 +1325,15 @@ fn cell_day(
         }
         world.edge(p, m).filter(|e| e.affinity < c.cell_fight_affinity).map(|_| "bad blood")
     };
-    if !fought.contains(&p) && roll(world, 1) < c.cell_fight_p * (0.5 + t.pride) {
+    // Pressure pass round 9, Z1: a grudge over a killing (or one handed
+    // inside) on a cellmate: he goes for him on `[hunt] inside_fight_p`.
+    let blood_mark = if fought.contains(&p) {
+        None
+    } else {
+        let free: Vec<EntityId> = others.iter().copied().filter(|m| !fought.contains(m)).collect();
+        crate::systems::hunt::inside_mark(world, p, &free, roll(world, 6))
+    };
+    if !fought.contains(&p) && (blood_mark.is_some() || roll(world, 1) < c.cell_fight_p * (0.5 + t.pride)) {
         // Round 8 X1: the under-18 rule at the pick (a child is never held;
         // `resolve_fight_mods` is the backstop). Round 8 X6 (`OPEN-217`): a
         // cellmate in a fight today is in no second one, and the one he
@@ -1338,9 +1346,11 @@ fn cell_day(
             .filter(|&m| !crate::systems::ages::is_protected(world, m) && !crate::systems::ages::is_protected(world, p))
             .filter_map(|m| dislike(world, m).map(|w| (m, w)))
             .collect();
-        let pick = (!disliked.is_empty()).then(|| {
-            let i = ((roll(world, 5) * disliked.len() as f32) as usize).min(disliked.len() - 1);
-            disliked[i]
+        let pick = blood_mark.map(|m| (m, "a killing to answer")).or_else(|| {
+            (!disliked.is_empty()).then(|| {
+                let i = ((roll(world, 5) * disliked.len() as f32) as usize).min(disliked.len() - 1);
+                disliked[i]
+            })
         });
         if let Some((m, why)) = pick {
             fought.insert(p);
@@ -1362,6 +1372,8 @@ fn cell_day(
             let text =
                 format!("{pn} went for {} in {place} ({why}); {} won{end}", world.name_of(m), world.name_of(winner));
             world.push_event(EventKind::Cells, &[p, m, jail], text);
+            // Round 9 Z1: a grudge over a killing answered inside.
+            crate::systems::hunt::cell_strike(world, p, m, winner, died, jail);
             // Round 8 X1 (`OPEN-246`): a crime in the cells, through the
             // crime path (the cellmates and the guards inside see it; the
             // case is `law::cell_case`'s); the starter who fell is charged

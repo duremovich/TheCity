@@ -1807,6 +1807,13 @@ fn try_enter(
         world.enter_building(id, b);
         return StepResult::Done;
     }
+    // Pressure pass round 9, Z1: a hunter (or a contract's taker) at a full
+    // ask venue or stake-out waits at its door (`hunt::can_start` reads the
+    // door): V18's 20k `bereaved_21178` failed BuildingFull at the Bar six
+    // times in three days and the hunt cooled each time.
+    if full && target.dest == LocationKey::Intel {
+        return StepResult::Done;
+    }
     let since = blocked_since.unwrap_or(tick);
     if tick - since >= world.config.exec.door_queue_max_ticks {
         if full {
@@ -1884,6 +1891,16 @@ fn arrive(world: &mut World, id: EntityId, target: GotoTarget, blocked_since: Op
                 return StepResult::Done;
             }
             if world.comp::<Building>(b).is_some_and(|bd| bd.is_full()) && !world.capacity_exempt(id, b) {
+                // Round 9 Z1: a full ask venue or stake-out is waited at
+                // from its door (as on foot, `try_enter`).
+                if target.dest == LocationKey::Intel {
+                    let outside = world.comp::<Building>(b).map(|bd| world.outside_door(bd));
+                    world.leave_building(id);
+                    if let (Some(t), Some(p)) = (outside, world.comp_mut::<Position>(id)) {
+                        p.tile = t;
+                    }
+                    return StepResult::Done;
+                }
                 let since = blocked_since.unwrap_or(tick);
                 if tick - since >= world.config.exec.door_queue_max_ticks {
                     note_refused(world, id, b);
