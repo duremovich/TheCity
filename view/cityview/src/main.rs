@@ -6,7 +6,7 @@
 //! Camera occlusion (P4, occ.rs + glclient::occlusion): a player stand-in the camera follows; massing, pylons and
 //! deck pieces dissolve around it when they hide it.
 //!
-//! cargo run --release -- [--city city/isle_m] [--at X,Y] [--zoom W] [--overview] [--res WxH] [--no-player | --player]
+//! cargo run --release -p cityview -- [--city city/isle_m] [--at X,Y] [--zoom W] [--overview] [--res WxH] [--no-player | --player]
 //!                        [--squad N] [--day] [--bench stream|overview|shots|one] [--speed M_S] [--tag T] [--out DIR]
 //! (--bench one: a single screenshot of the view the args set up, named --tag)
 //! --bench occ [--path a,b] [--occ off] [--no-probes] [--gpu] [--record FILE.mp4]: the P4 acceptance paths
@@ -193,9 +193,25 @@ impl Args {
     }
 }
 
-/// The repo's assets/ directory (the AssetPlugin root: building glbs, block files, the city outputs).
+/// TheCity's workspace root (view/cityview/../..).
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+/// TheCityGraphics' assets/ directory (the AssetPlugin root: building glbs, block files, the city outputs), generated
+/// there and read here: `CITYVIEW_ASSETS`, default `<TheCity>/../TheCityGraphics/assets` (the two repos are siblings
+/// on this box; a worktree sets the variable). A machine path, not a sim number: it stays out of assets/config.toml.
+/// A missing root fails at startup with the path it tried.
 fn asset_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets")
+    let (root, from) = match std::env::var_os("CITYVIEW_ASSETS") {
+        Some(p) => (PathBuf::from(p), "CITYVIEW_ASSETS"),
+        None => (workspace_root().join("../TheCityGraphics/assets"), "the default (CITYVIEW_ASSETS unset)"),
+    };
+    if !root.is_dir() {
+        eprintln!("cityview: no asset root at {} ({from}); set CITYVIEW_ASSETS to TheCityGraphics/assets", root.display());
+        std::process::exit(2);
+    }
+    root
 }
 
 fn main() {
@@ -316,7 +332,8 @@ fn main() {
     {
         app.insert_resource(st);
     }
-    let out = args.out.clone().unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("results"));
+    // bench and screenshot output: --out DIR, default <TheCity>/target/cityview (gitignored)
+    let out = args.out.clone().unwrap_or_else(|| workspace_root().join("target/cityview"));
     // the P3 benches / shots run without the player (their views are the city, not a player)
     let player_on = args.player.unwrap_or(!matches!(args.bench.as_deref(), Some("stream" | "overview" | "shots" | "one")));
     app.insert_resource(occ::Player {

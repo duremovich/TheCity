@@ -4,7 +4,7 @@
 set -u
 cd "$(dirname "$0")"
 tag=${1:-run}
-exe=../lighttest/target/release/cityview.exe
+exe=../../target/release/cityview.exe  # cargo build --release -p cityview (CITYVIEW_ASSETS: the asset root)
 mkdir -p results
 for z in 60 140; do
   timeout 900 $exe --bench stream --zoom $z --speed 30 --tag ${tag}_z$z --out results > results/${tag}_z${z}.log 2>&1

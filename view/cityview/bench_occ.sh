@@ -5,7 +5,7 @@ set -u
 cd "$(dirname "$0")"
 tag=${1:-run}
 out=${2:-results}
-exe=../lighttest/target/release/cityview.exe
+exe=../../target/release/cityview.exe  # cargo build --release -p cityview (CITYVIEW_ASSETS: the asset root)
 mkdir -p "$out"
 run() { local name=$1; shift; timeout 1800 env "$@" > "$out/${tag}_${name}.log" 2>&1; echo "$name: exit $?"; }
 run on        $exe --bench occ --tag ${tag}_on --out "$out"

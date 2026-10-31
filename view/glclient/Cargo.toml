@@ -5,10 +5,12 @@ edition = "2024"
 publish = false
 description = "Gutterlight client rules: blocks of building glbs on a street, the cutaway, the block nav, the session-16 light rules (Bevy)"
 
-# Build through a root crate that carries the vendored Bevy 0.19.1 fixes (engine/lighttest's [patch.crates-io]):
-# shadow views of hidden / culled lights leak, ortho volumetric fog, shadow-view schedule cost.
+# Build through a root that carries the vendored Bevy 0.19.1 fixes (TheCity's root [patch.crates-io], view/vendor;
+# TheCityGraphics' lighttest its own copy): shadow views of hidden / culled lights leak, ortho volumetric fog,
+# shadow-view schedule cost.
 [dependencies]
-bevy = { version = "0.19.1", features = ["area_light_luts"] }
+# Bevy's defaults minus `audio` (bevy_audio and citysim-app's macroquad both link `alsa`: see cityview's manifest)
+bevy = { version = "0.19.1", default-features = false, features = ["2d", "3d", "ui", "area_light_luts"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"

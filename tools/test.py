@@ -7,6 +7,12 @@
     python tools/test.py diag        list the diag-tier tests; --only NAME runs one
     python tools/test.py lint        ignore reasons, caps, OPEN.md ids
     python tools/test.py report      the close-of-milestone table [--since SHA]
+    python tools/test.py view        the Bevy client (view/): fmt, clippy, the release build, the smoke
+
+The sim's tiers name the default members only (`SIM`, never `--workspace` or
+`--all`): the view crates are workspace members outside `default-members`,
+and nothing in change / merge / milestone compiles Bevy. The view tier runs
+outside them (city milestone C1).
 
 Each tier runs its cargo commands one at a time, except the change tier's
 tests step, which runs the built test binaries itself, `--jobs` (default
@@ -38,7 +44,7 @@ OPEN_MD = ROOT / "docs" / "OPEN.md"
 
 # Budgets in seconds (wall, after compile, the tier alone on this box). Change
 # only with a line in the commit message.
-BUDGETS = {"change": 240, "merge": 480, "milestone": 1200}
+BUDGETS = {"change": 240, "merge": 480, "milestone": 1200, "view": 180}
 
 # Caps checked by `lint` (docs/TESTING.md § caps).
 CAP_GOD_SCENARIOS = 20      # excluding the *_control tests
@@ -47,11 +53,17 @@ WARN_FILE_LINES = 1500
 PASS_NAMED = re.compile(r"(_review|_fixes|shadow_v\d|_probe)\.rs$")
 
 CARGO = ["cargo"]
+# The sim's packages (the root manifest's default-members). cargo's build, clippy
+# and test take the default members when no package is named; `cargo fmt` has
+# no default-members, so it names them. Never `--workspace` / `--all` here:
+# that compiles the view (Bevy) into the change tier.
+SIM = ["citysim", "citysim-app", "citysim-cli"]
+VIEW = ["glclient", "cityview"]
 TIERS = {
     "change": [
-        ("fmt", CARGO + ["fmt", "--all", "--", "--check"]),
-        ("clippy", CARGO + ["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"]),
-        ("tests", CARGO + ["test", "--workspace", "--release", "--no-fail-fast", "--", "--nocapture"]),
+        ("fmt", CARGO + ["fmt", *(a for p in SIM for a in ("-p", p)), "--", "--check"]),
+        ("clippy", CARGO + ["clippy", "--all-targets", "--", "-D", "warnings"]),
+        ("tests", CARGO + ["test", "--release", "--no-fail-fast", "--", "--nocapture"]),
     ],
     # The ignored tiers run the test binaries the `--no-run` build left in
     # target/release/deps directly: `cargo test -p <one package>` resolves
@@ -186,7 +198,7 @@ def test_executables():
     """Every test binary of the workspace's release build: (label, exe, its
     package's directory). `cargo test --no-run` is a no-op when built; it
     builds what is stale, as the `cargo test` step did."""
-    r = subprocess.run(CARGO + ["test", "--workspace", "--release", "--no-run", "--message-format=json"], cwd=ROOT,
+    r = subprocess.run(CARGO + ["test", "--release", "--no-run", "--message-format=json"], cwd=ROOT,
                        capture_output=True, text=True, encoding="utf-8", errors="replace")
     if r.returncode != 0:
         return None, r.stderr
@@ -284,7 +296,7 @@ def cmd_tier(tier, args):
     out.mkdir(parents=True, exist_ok=True)
     if not args.no_build:
         print(f"[{tier}] building (release, all targets)...")
-        b = subprocess.run(CARGO + ["test", "--workspace", "--release", "--no-run"], cwd=ROOT,
+        b = subprocess.run(CARGO + ["test", "--release", "--no-run"], cwd=ROOT,
                            capture_output=True, text=True, encoding="utf-8", errors="replace")
         (out / "0-build.log").write_text(b.stdout + b.stderr, encoding="utf-8")
         if b.returncode != 0:
@@ -310,7 +322,7 @@ def cmd_tier(tier, args):
             results.append({"step": name, "ok": False, "secs": 0.0, "binaries": [], "log": ""})
             continue
         if name == "tests" and args.only:
-            cmd = CARGO + ["test", "--workspace", "--release", "--no-fail-fast", "--test", args.only, "--", "--nocapture"]
+            cmd = CARGO + ["test", "--release", "--no-fail-fast", "--test", args.only, "--", "--nocapture"]
         print(f"- {name}")
         results.append(run_step(name, cmd, out / f"{i}-{name}.log"))
     results += beside_results
@@ -324,6 +336,95 @@ def cmd_tier(tier, args):
     (out / "summary.json").write_text(json.dumps({"tier": tier, "stamp": stamp, "wall": round(wall, 1), "budget": budget,
                                                   "green": not failed, "steps": results}, indent=1), encoding="utf-8")
     return 0 if not failed else 1
+
+
+# --- the view tier (city milestone C1) ---------------------------------------
+
+# The smoke's fixture: one city-simview/0.1 frame of the 20k day-1 city (seed 42, tick 2611, the bridge's
+# render ring at 1920,550 m); docs/TESTING.md § the view tier has its recipe. C2's export-view replaces it.
+VIEW_FIXTURE = ROOT / "view" / "cityview" / "fixtures" / "day1_20k_s42.simview.json"
+VIEW_SMOKE_ARGS = ["--sim-rate", "0", "--bench", "one", "--no-player", "--hide-mass", "--at", "1935,560",
+                   "--zoom", "160", "--tag", "view_smoke"]
+VIEW_SMOKE_TIMEOUT = 600
+
+
+def cmd_view(args):
+    """fmt, clippy -D warnings, the release build of cityview, and the smoke: cityview draws the fixture's frame on
+    the city (TheCityGraphics' assets, CITYVIEW_ASSETS) and writes its PNG. Outside change / merge / milestone."""
+    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    out = LOGS / f"view-{stamp}"
+    out.mkdir(parents=True, exist_ok=True)
+    pkgs = [a for p in VIEW for a in ("-p", p)]
+    steps = [
+        ("fmt", CARGO + ["fmt", *pkgs, "--", "--check"]),
+        ("clippy", CARGO + ["clippy", *pkgs, "--all-targets", "--", "-D", "warnings"]),
+        ("build", CARGO + ["build", "--release", "-p", "cityview"]),
+    ]
+    if args.only:
+        names = [s[0] for s in steps] + ["smoke"]
+        if args.only not in names:
+            print(f"--only {args.only!r} names no view step; the steps are: {', '.join(names)}")
+            return 2
+        steps = [s for s in steps if s[0] == args.only]
+    print(f"[view] logs in {out.relative_to(ROOT)}")
+    start = time.time()
+    results = []
+    for i, (name, cmd) in enumerate(steps, 1):
+        print(f"- {name}")
+        r = run_step(name, cmd, out / f"{i}-{name}.log", allow_empty=True)
+        if name not in ("fmt", "clippy"):
+            print(f"  {r['secs']:6.1f}s  {name:<24} {'ok' if r['ok'] else 'FAILED'}")
+            if not r["ok"]:
+                print(f"    see {r['log']}")
+        results.append(r)
+    if not args.only or args.only == "smoke":
+        results.append(view_smoke(out))
+    wall = time.time() - start
+    budget = BUDGETS["view"]
+    failed = [r for r in results if not r["ok"]]
+    verdict = "GREEN" if not failed else "RED (" + ", ".join(r["step"] for r in failed) + ")"
+    budget_line = (f"BUDGET OK {fmt_secs(wall)} of {fmt_secs(budget)}" if wall <= budget
+                   else f"BUDGET BREACHED {fmt_secs(wall)} of {fmt_secs(budget)} (a cold Bevy build is minutes: "
+                        "a first build in a worktree breaches it, a warm one should not)")
+    print(f"[view] {verdict}; {budget_line}")
+    (out / "summary.json").write_text(json.dumps({"tier": "view", "stamp": stamp, "wall": round(wall, 1), "budget": budget,
+                                                  "green": not failed, "steps": results}, indent=1), encoding="utf-8")
+    return 0 if not failed else 1
+
+
+def view_smoke(out):
+    """cityview --sim <fixture> --bench one: exits 0 and writes a non-empty PNG."""
+    exe = ROOT / "target" / "release" / ("cityview.exe" if os.name == "nt" else "cityview")
+    log_path = out / "4-smoke.log"
+    png = out / "view_smoke.png"
+    print("- smoke")
+    if not exe.is_file() or not VIEW_FIXTURE.is_file():
+        missing = exe if not exe.is_file() else VIEW_FIXTURE
+        print(f"    smoke: no {missing.relative_to(ROOT)}: RED")
+        return {"step": "smoke", "ok": False, "secs": 0.0, "binaries": [], "log": ""}
+    cmd = [str(exe), "--sim", str(VIEW_FIXTURE), *VIEW_SMOKE_ARGS, "--out", str(out)]
+    start = time.time()
+    with open(log_path, "w", encoding="utf-8") as log:
+        log.write(" ".join(cmd) + "\n\n")
+        log.flush()
+        try:
+            code = subprocess.run(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, timeout=VIEW_SMOKE_TIMEOUT).returncode
+        except subprocess.TimeoutExpired:
+            code = None
+    secs = time.time() - start
+    size = png.stat().st_size if png.is_file() else 0
+    ok = code == 0 and size > 0
+    why = "" if ok else (f" (timed out after {VIEW_SMOKE_TIMEOUT}s)" if code is None else f" (exit {code}, png {size} bytes)")
+    print(f"  {secs:6.1f}s  {'smoke':<24} {'ok' if ok else 'FAILED'}{why}")
+    if ok:
+        print(f"    {png.relative_to(ROOT)} ({size // 1024} KB)")
+    else:
+        print(f"    see {log_path.relative_to(ROOT)}")
+        for l in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if LOUD.search(l) or "asset root" in l:
+                print("    " + l[:200])
+    return {"step": "smoke", "ok": ok, "secs": round(secs, 1), "binaries": [], "log": str(log_path.relative_to(ROOT)),
+            "png": str(png.relative_to(ROOT)) if size else ""}
 
 
 # --- the source scans -------------------------------------------------------
@@ -513,7 +614,7 @@ def cmd_report(args):
     print()
     print("| tier | last run | wall | budget | |")
     print("|---|---|---|---|---|")
-    for tier in TIERS:
+    for tier in [*TIERS, "view"]:
         s = last_summary(tier)
         if s is None:
             print(f"| {tier} | never | | {fmt_secs(BUDGETS[tier])} | run it |")
@@ -579,8 +680,8 @@ def cmd_diag(args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("tier", choices=list(TIERS) + ["diag", "lint", "report"])
-    ap.add_argument("--only", help="one test binary (change) or step (merge/milestone) or diag test name")
+    ap.add_argument("tier", choices=list(TIERS) + ["view", "diag", "lint", "report"])
+    ap.add_argument("--only", help="one test binary (change) or step (merge/milestone/view) or diag test name")
     ap.add_argument("--no-build", action="store_true", help="skip the --no-run build step")
     ap.add_argument("--jobs", type=int, default=CHANGE_JOBS, help="change: test binaries run at a time")
     ap.add_argument("--since", help="report: a base sha for the test-growth lines")
@@ -592,6 +693,8 @@ def main():
         return cmd_report(args)
     if args.tier == "diag":
         return cmd_diag(args)
+    if args.tier == "view":
+        return cmd_view(args)
     return cmd_tier(args.tier, args)
 
 

@@ -9,6 +9,8 @@ The full v1 build spec lives in [docs/SPEC.md](docs/SPEC.md).
 - `citysim` — headless simulation library
 - `citysim-app` — macroquad renderer and debug UI
 - `citysim-cli` — headless runner and calibration
+- `view/glclient`, `view/cityview` — the Bevy client (from TheCityGraphics, city milestone C1): workspace members
+  outside `default-members`, built with `cargo build --release -p cityview`, checked by `python tools/test.py view`
 
 ## Running
 
@@ -88,9 +90,10 @@ The tiers, what each asserts and when to run it: [docs/TESTING.md](docs/TESTING.
 ```
 # every change (~1.5 min after compile): unit tests, determinism, saves, the person probes and core_sanity
 # (seeds 42-44 x 120 days: coin identity, collapse bounds, mechanism existence, the ticks/s floor)
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --release
+# (the default members only: never --workspace / --all, which compiles the Bevy client; python tools/test.py change)
+cargo fmt -p citysim -p citysim-app -p citysim-cli -- --check
+cargo clippy --all-targets -- -D warnings
+cargo test --release
 # every merge, one at a time: the year (seed 42 x 365 days, ~2 min), the behaviour tier (the archetypes'
 # diary metrics, ~30 s) and the 17 god scenarios (~2 min)
 cargo test --release -p citysim --test core -- --ignored core_year --nocapture
