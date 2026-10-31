@@ -17,6 +17,13 @@
 //! the hills become walkable Mountain), `rail.json` (the Terrace Line and its
 //! named stations). Without it the S3b inputs stand; the report says which
 //! were read.
+//!
+//! The city milestone C5: schema `city-sim/0.2`. `rail.json` holds every El
+//! line (the Terrace, Hillside, Mid-Levels and Vats lines; the authored
+//! `--lines` file retired), the tram is imported once from `tram.json`, and
+//! 0.2's new fields (a lot's `z_m`, `levels`, `cores`; `walkways_sim.json`'s
+//! portals) are read, checked and counted in the report, not yet written to
+//! the map (C6a's tenancies and C7's portals use them).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -28,7 +35,7 @@ use citysim::config::TransitLineCfg;
 use citysim::map::{BuildingExtra, MapDistrict, MapText};
 
 /// The sim export's schema this adapter reads (`<src>/sim/*.json`).
-pub const SIM_SCHEMA: &str = "city-sim/0.1";
+pub const SIM_SCHEMA: &str = "city-sim/0.2";
 
 /// Residents a Home's floor slot (a household) holds: the 2k city's
 /// `[world] residents_per_home`, the generator's convention.
@@ -52,11 +59,6 @@ pub struct ImportArgs {
     /// `x0,y0,x1,y1`.
     #[arg(long)]
     pub crop: Option<String>,
-    /// The pre-view pass phase 5 (P11): authored El lines in this map's tile
-    /// frame, one a row (`x,y x,y [...] name`, `#` comments), written as
-    /// `L+` lines (in flight) after the export's.
-    #[arg(long)]
-    pub lines: Option<PathBuf>,
 }
 
 /// What the import read, wrote and could not map.
@@ -107,6 +109,24 @@ pub struct Report {
     pub sea_tiles: usize,
     /// S3c: buildings by kind and their cut's `use` (`-` without the export).
     pub kind_use: BTreeMap<(BuildingKind, String), usize>,
+    /// C5 (`city-sim/0.2`): the lots' levels read, plate floors among them,
+    /// and their units by kind: flats, shops, workshops, offices.
+    pub levels: usize,
+    pub plate_levels: usize,
+    pub level_units: [u64; 4],
+    /// C5: stair (`flight`) and `lift` cores read.
+    pub cores_flight: usize,
+    pub cores_lift: usize,
+    /// C5: `walkways_sim.json` portals by kind, and their metres.
+    pub portals: BTreeMap<String, usize>,
+    pub portal_m: f64,
+    /// C5 (for C6): the units each district's lots offer (flats, shops,
+    /// workshops, offices, `works` grounds), by its `districts.json` id and
+    /// name, beside the buildings this import dealt there by kind.
+    pub units_by_district: BTreeMap<String, [u64; 5]>,
+    pub dealt_by_district: BTreeMap<String, BTreeMap<BuildingKind, usize>>,
+    /// C5: `lots_sim.json`'s `seed` (TheCityGraphics' city seed).
+    pub export_seed: Option<u64>,
 }
 
 /// The generator's per-1,000 mix (docs/SCALE_20K.md § S3b), for the report.
@@ -215,6 +235,58 @@ impl Report {
             "terrain: {} Mountain tiles, {} sea tiles before the blocks and roads",
             self.mountain_tiles, self.sea_tiles
         );
+        if self.levels > 0 {
+            let [fl, sh, ws, of] = self.level_units;
+            println!(
+                "levels (city-sim/0.2, carried, not yet mapped): {} levels ({} tower plate floors); units flats {fl}, shops {sh}, workshops {ws}, offices {of}; cores {} flight, {} lift",
+                self.levels, self.plate_levels, self.cores_flight, self.cores_lift
+            );
+        }
+        if !self.portals.is_empty() {
+            let by: Vec<String> = self.portals.iter().map(|(k, n)| format!("{k} {n}")).collect();
+            println!(
+                "walkways (sim/walkways_sim.json, carried, not yet mapped): {} portals, {:.0} m: {}",
+                self.portals.values().sum::<usize>(),
+                self.portal_m,
+                by.join(", ")
+            );
+        }
+        if !self.units_by_district.is_empty() {
+            let per_k = f64::from(self.residents) / 1000.0;
+            let lot_mix = GEN_MIX.iter().find(|m| m.0 == BuildingKind::Lot).map_or(0.0, |m| m.1);
+            let all_mix: f64 = GEN_MIX.iter().filter(|m| m.0 != BuildingKind::Home).map(|m| m.1).sum();
+            println!(
+                "units offered by district (C6's input) against what {} residents want: {:.0} Lots ({lot_mix} per 1,000), {:.0} employers in all ({all_mix} per 1,000)",
+                self.residents,
+                lot_mix * per_k,
+                all_mix * per_k
+            );
+            println!(
+                "  {:<22} {:>8} {:>6} {:>9} {:>7} {:>6} {:>7}   {:>6} {:>9}",
+                "district", "flats", "shops", "workshops", "offices", "works", "sites", "Lots", "employers"
+            );
+            let mut tot = [0u64; 7];
+            for (d, u) in &self.units_by_district {
+                let sites = u[1] + u[2] + u[3] + u[4];
+                let dealt = self.dealt_by_district.get(d);
+                let lots = dealt.and_then(|m| m.get(&BuildingKind::Lot)).copied().unwrap_or(0) as u64;
+                let emp = dealt
+                    .map_or(0, |m| m.iter().filter(|(k, _)| **k != BuildingKind::Home).map(|(_, n)| *n).sum::<usize>())
+                    as u64;
+                for (t, v) in tot.iter_mut().zip([u[0], u[1], u[2], u[3], u[4], sites, lots]) {
+                    *t += v;
+                }
+                println!(
+                    "  {d:<22} {:>8} {:>6} {:>9} {:>7} {:>6} {sites:>7}   {lots:>6} {emp:>9}",
+                    u[0], u[1], u[2], u[3], u[4]
+                );
+            }
+            let emp_all: usize = self.kinds.iter().filter(|(k, _)| **k != BuildingKind::Home).map(|(_, n)| *n).sum();
+            println!(
+                "  {:<22} {:>8} {:>6} {:>9} {:>7} {:>6} {:>7}   {:>6} {emp_all:>9}",
+                "all", tot[0], tot[1], tot[2], tot[3], tot[4], tot[5], tot[6]
+            );
+        }
         for (k, n) in &self.kinds {
             println!("  {:<15} {n:>6}", format!("{k:?}"));
         }
@@ -361,12 +433,119 @@ struct SimLot {
     use_: Use,
     /// `ground == "workshop"` (an alley-only lot's ground floor).
     workshop: bool,
+    /// C5: `ground == "works"` (an industrial lot's works floor: one site).
+    works: bool,
     flats: u32,
     shops: usize,
     /// Each door's `out` point: the centre of the road tile outside it.
     doors_out: Vec<(f64, f64)>,
     layout: bool,
     civic: Option<String>,
+    /// C5 (`city-sim/0.2`): the walking surface at the lot (metres over
+    /// the sea; 0 in a 0.1 export), its levels and its cores. Carried for
+    /// C6a (tenancies by floor) and C7 (climbs); the map does not hold them yet.
+    #[allow(dead_code)]
+    z_m: f64,
+    levels: Vec<SimLevel>,
+    cores: Vec<SimCore>,
+}
+
+/// C5: one of a lot's `levels` (SIM_NOTES "The sim export", 0.2).
+#[derive(Clone, Debug)]
+#[allow(dead_code)] // carried for C6a / C7: z, height, area and use are read by nothing yet
+struct SimLevel {
+    i: u32,
+    z: f64,
+    h: f64,
+    area_m2: f64,
+    use_: String,
+    /// Flats, shops, workshops, offices.
+    units: [u32; 4],
+    /// A tower's plate floor.
+    plate: bool,
+}
+
+/// C5: one of a lot's `cores`: a `flight` (stairs) or `lift` chain.
+#[derive(Clone, Debug)]
+#[allow(dead_code)] // carried for C7's climbs: floors, stops and roof are read by nothing yet
+struct SimCore {
+    lift: bool,
+    floors: (u32, u32),
+    stops: u32,
+    roof: bool,
+}
+
+/// C5: a lot's `levels` and `cores` (absent in a 0.1 export: empty).
+fn read_levels(r: &Value, ctx: &str) -> Result<(Vec<SimLevel>, Vec<SimCore>), String> {
+    let mut levels = Vec::new();
+    if let Some(ls) = r.get("levels") {
+        let ls = ls.as_array().ok_or_else(|| format!("{ctx}: \"levels\" is not a list"))?;
+        for (j, l) in ls.iter().enumerate() {
+            let c = format!("{ctx} levels[{j}]");
+            let units = get(l, "units", &c)?;
+            let unit =
+                |k: &str| units.get(k).and_then(Value::as_u64).map_or(0, |n| u32::try_from(n).unwrap_or(u32::MAX));
+            levels.push(SimLevel {
+                i: u32::try_from(uint(l, "i", &c)?).unwrap_or(u32::MAX),
+                z: num(get(l, "z", &c)?, &format!("{c} \"z\""))?,
+                h: num(get(l, "h", &c)?, &format!("{c} \"h\""))?,
+                area_m2: num(get(l, "area_m2", &c)?, &format!("{c} \"area_m2\""))?,
+                use_: text(l, "use", &c)?.to_string(),
+                units: [unit("flats"), unit("shops"), unit("workshops"), unit("offices")],
+                plate: l.get("plate").and_then(Value::as_bool).unwrap_or(false),
+            });
+        }
+    }
+    let mut cores = Vec::new();
+    if let Some(cs) = r.get("cores") {
+        let cs = cs.as_array().ok_or_else(|| format!("{ctx}: \"cores\" is not a list"))?;
+        for (j, k) in cs.iter().enumerate() {
+            let c = format!("{ctx} cores[{j}]");
+            let kind = text(k, "kind", &c)?;
+            if kind != "flight" && kind != "lift" {
+                return Err(format!("{c}: kind {kind:?} is not flight or lift"));
+            }
+            let fl = arr(k, "floors", &c)?;
+            if fl.len() != 2 {
+                return Err(format!("{c}: \"floors\" is not [lo, hi]"));
+            }
+            let f = |v: &Value| num(v, &c).map(|x| x.max(0.0) as u32);
+            cores.push(SimCore {
+                lift: kind == "lift",
+                floors: (f(&fl[0])?, f(&fl[1])?),
+                stops: u32::try_from(uint(k, "stops", &c)?).unwrap_or(u32::MAX),
+                roof: k.get("roof").and_then(Value::as_bool).unwrap_or(false),
+            });
+        }
+    }
+    Ok((levels, cores))
+}
+
+/// C5: `sim/walkways_sim.json`'s portals by kind and their summed length
+/// (each end's `kind`, `at` and `level` are checked; the map holds no portal
+/// until C7).
+fn read_walkways(dir: &Path, rep: &mut Report) -> Result<usize, String> {
+    const F: &str = "sim/walkways_sim.json";
+    let v = read_json(dir, "walkways_sim.json")?;
+    check_schema(&v, F, rep)?;
+    let ps = arr(&v, "portals", F)?;
+    for (i, p) in ps.iter().enumerate() {
+        let ctx = format!("{F} portals[{i}]");
+        let kind = text(p, "kind", &ctx)?;
+        text(p, "id", &ctx)?;
+        for end in ["a", "b"] {
+            let e = get(p, end, &ctx)?;
+            let c = format!("{ctx} {end}");
+            text(e, "kind", &c)?;
+            uint(e, "level", &c)?;
+            if arr(e, "at", &c)?.len() != 3 {
+                return Err(format!("{c}: \"at\" is not [x, y, z]"));
+            }
+        }
+        rep.portal_m += num(get(p, "length_m", &ctx)?, &format!("{ctx} \"length_m\""))?;
+        *rep.portals.entry(kind.to_string()).or_default() += 1;
+    }
+    Ok(ps.len())
 }
 
 /// `sim/lots_sim.json`'s lots by id.
@@ -374,6 +553,7 @@ fn read_sim_lots(dir: &Path, rep: &mut Report) -> Result<BTreeMap<String, SimLot
     const F: &str = "sim/lots_sim.json";
     let v = read_json(dir, "lots_sim.json")?;
     check_schema(&v, F, rep)?;
+    rep.export_seed = v.get("seed").and_then(Value::as_u64);
     let lots = get(&v, "lots", F)?.as_object().ok_or_else(|| format!("{F}: \"lots\" is not an object"))?;
     let mut out = BTreeMap::new();
     let mut odd: BTreeMap<String, usize> = BTreeMap::new();
@@ -403,10 +583,19 @@ fn read_sim_lots(dir: &Path, rep: &mut Report) -> Result<BTreeMap<String, SimLot
             Some(Value::String(s)) => Some(s.clone()),
             Some(_) => return Err(format!("{ctx}: \"civic\" is not a string")),
         };
+        let (levels, cores) = read_levels(r, &ctx)?;
+        let z_m = match r.get("z_m") {
+            None => 0.0,
+            Some(z) => num(z, &format!("{ctx} \"z_m\""))?,
+        };
         let rec = SimLot {
+            z_m,
+            levels,
+            cores,
             floors: u32::try_from(uint(r, "floors", &ctx)?).unwrap_or(u32::MAX),
             use_,
             workshop: ground == "workshop",
+            works: ground == "works",
             flats: u32::try_from(uint(r, "flats", &ctx)?).unwrap_or(u32::MAX),
             shops: usize::try_from(uint(r, "shop_units", &ctx)?).unwrap_or(usize::MAX),
             doors_out,
@@ -417,6 +606,30 @@ fn read_sim_lots(dir: &Path, rep: &mut Report) -> Result<BTreeMap<String, SimLot
     }
     for (what, n) in odd {
         rep.warnings.push(format!("{F}: {n} lot(s) with an unknown {what}"));
+    }
+    // C5: 0.2's `totals` against the levels and cores read.
+    if let Some(t) = v.get("totals") {
+        let n = |p: &[&str]| p.iter().try_fold(t, |v, k| v.get(*k)).and_then(Value::as_u64).unwrap_or(0);
+        let sum = |f: &dyn Fn(&SimLot) -> u64| out.values().map(f).sum::<u64>();
+        let unit = |k: usize| sum(&|l: &SimLot| l.levels.iter().map(|x| u64::from(x.units[k])).sum());
+        let checks = [
+            ("levels", n(&["levels"]), sum(&|l: &SimLot| l.levels.len() as u64)),
+            ("units.flats", n(&["units", "flats"]), unit(0)),
+            ("units.shops", n(&["units", "shops"]), unit(1)),
+            ("units.workshops", n(&["units", "workshops"]), unit(2)),
+            ("units.offices", n(&["units", "offices"]), unit(3)),
+            (
+                "cores.flight",
+                n(&["cores", "flight"]),
+                sum(&|l: &SimLot| l.cores.iter().filter(|c| !c.lift).count() as u64),
+            ),
+            ("cores.lift", n(&["cores", "lift"]), sum(&|l: &SimLot| l.cores.iter().filter(|c| c.lift).count() as u64)),
+        ];
+        for (what, want, got) in checks {
+            if want != got {
+                rep.warnings.push(format!("{F}: totals.{what} {want}, the lots hold {got}"));
+            }
+        }
     }
     Ok(out)
 }
@@ -809,6 +1022,30 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
         rep.inputs.push("rail: elevated.json rail elements (no sim/rail.json: the S3b fallback)".into());
         None
     };
+    if sim_dir.join("walkways_sim.json").is_file() {
+        let n = read_walkways(&sim_dir, &mut rep)?;
+        rep.inputs.push(format!("walkways: sim/walkways_sim.json ({n} portals; counted, not yet mapped)"));
+    }
+    // C5: where the export came from: TheCityGraphics' commit (its `out/`
+    // is generated and gitignored, so the commit is the code that made it)
+    // and the export's seed.
+    let sha = std::process::Command::new("git")
+        .arg("-C")
+        .arg(src)
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    let seed = rep.export_seed;
+    rep.inputs.insert(
+        0,
+        format!(
+            "TheCityGraphics {}, export seed {}",
+            sha.as_deref().unwrap_or("(no git commit at --src)"),
+            seed.map_or("(none)".to_string(), |s| s.to_string())
+        ),
+    );
 
     let districts_json = read_json(src, "districts.json")?;
     let blocks_json = read_json(src, "blocks.json")?;
@@ -1098,6 +1335,14 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
     // --- lots and layouts ---------------------------------------------------------
     let lots_list = arr(&lots_json, "lots", "lots.json")?;
     let mut lots_by_block: BTreeMap<String, Vec<Lot>> = BTreeMap::new();
+    // C5: each block's district (`D4 The Stacks`), for the units-by-district table.
+    let mut block_d: BTreeMap<String, String> = BTreeMap::new();
+    for b in arr(&blocks_json, "blocks", "blocks.json")? {
+        if let (Some(id), Some(d)) = (b.get("id").and_then(Value::as_str), b.get("district").and_then(Value::as_str)) {
+            let name = drow.get(d).map_or(String::new(), |(n, _)| format!(" {n}"));
+            block_d.insert(id.to_string(), format!("{d}{name}"));
+        }
+    }
     for (i, l) in lots_list.iter().enumerate() {
         let ctx = format!("lots.json lots[{i}]");
         let id = text(l, "id", &ctx)?;
@@ -1119,6 +1364,22 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
             }
             rep.flats += rec.flats as usize;
             rep.shop_units += rec.shops;
+            // C5: 0.2's levels and cores, counted (C6a and C7 map them).
+            rep.levels += rec.levels.len();
+            rep.plate_levels += rec.levels.iter().filter(|x| x.plate).count();
+            rep.cores_lift += rec.cores.iter().filter(|c| c.lift).count();
+            rep.cores_flight += rec.cores.iter().filter(|c| !c.lift).count();
+            let d = block_d.get(&block).cloned().unwrap_or_else(|| "-".into());
+            let row = rep.units_by_district.entry(d).or_default();
+            for lv in &rec.levels {
+                for (k, &n) in lv.units.iter().enumerate() {
+                    rep.level_units[k] += u64::from(n);
+                    row[k] += u64::from(n);
+                }
+            }
+            if rec.works {
+                row[4] += 1;
+            }
             let lot = Lot {
                 id: id.to_string(),
                 rect,
@@ -1861,6 +2122,8 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
         *rep.kinds.entry(kd).or_default() += 1;
         let u = sg.use_.map_or("-".to_string(), |u| format!("{u:?}"));
         *rep.kind_use.entry((kd, u)).or_default() += 1;
+        let dname = districts.get(sg.district).map_or_else(|| "-".to_string(), |d| d.name.clone());
+        *rep.dealt_by_district.entry(dname).or_default().entry(kd).or_default() += 1;
         out_b.push((kd, sg.rect, tier_of(z), floors, extra.clone()));
         doors.push(sg.door);
     }
@@ -1933,10 +2196,11 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
             match line_waypoints(&f, &pts, &keep) {
                 Some(wp) => {
                     comments.push(format!(
-                        "El line {name}: stations {} (sim/rail.json; headway {} s, {} s at night there; the sim's [transit] timetable runs it)",
+                        "El line {name}: stations {} (sim/rail.json; headway {} s, {} s at night, {} m/s there; the sim's [transit] timetable runs it)",
                         names.join(", "),
                         l.get("headway_s").and_then(Value::as_f64).unwrap_or(0.0),
-                        l.get("night_headway_s").and_then(Value::as_f64).unwrap_or(0.0)
+                        l.get("night_headway_s").and_then(Value::as_f64).unwrap_or(0.0),
+                        l.get("speed_mps").and_then(Value::as_f64).unwrap_or(0.0)
                     ));
                     lines.push(TransitLineCfg { name: name.to_string(), waypoints: wp, in_flight: false });
                 }
@@ -2057,36 +2321,6 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
         }
     }
     lines.append(&mut flight);
-    // The pre-view pass phase 5 (P11): the authored lines (`--lines`), each
-    // waypoint inside the map.
-    if let Some(path) = &args.lines {
-        let t = std::fs::read_to_string(path).map_err(|e| format!("--lines {}: {e}", path.display()))?;
-        for (n, row) in t.lines().enumerate() {
-            let row = row.trim();
-            if row.is_empty() || row.starts_with('#') {
-                continue;
-            }
-            let parts: Vec<&str> = row.split_whitespace().collect();
-            let mut wp: Vec<[u16; 2]> = Vec::new();
-            let mut k = 0;
-            while let Some((x, y)) = parts.get(k).and_then(|p| p.split_once(',')) {
-                let (x, y) = (x.parse::<u16>(), y.parse::<u16>());
-                let (Ok(x), Ok(y)) = (x, y) else {
-                    return Err(format!("--lines {} row {}: bad waypoint {}", path.display(), n + 1, parts[k]));
-                };
-                if usize::from(x) >= w || usize::from(y) >= h {
-                    return Err(format!("--lines {} row {}: {x},{y} is off the {w} x {h} map", path.display(), n + 1));
-                }
-                wp.push([x, y]);
-                k += 1;
-            }
-            if wp.len() < 2 || k >= parts.len() {
-                return Err(format!("--lines {} row {}: two waypoints and a name", path.display(), n + 1));
-            }
-            let name = parts[k..].join(" ");
-            lines.push(TransitLineCfg { name, waypoints: wp, in_flight: true });
-        }
-    }
     rep.lines = lines.iter().map(|l| format!("{} ({} waypoints)", l.name, l.waypoints.len())).collect();
 
     // --- what the sim does not read ---------------------------------------------
@@ -2167,14 +2401,7 @@ mod tests {
     }
 
     fn args(src: &Path) -> ImportArgs {
-        ImportArgs {
-            src: src.to_path_buf(),
-            out: src.join("out.txt"),
-            downsample: 1,
-            residents: 1_000,
-            crop: None,
-            lines: None,
-        }
+        ImportArgs { src: src.to_path_buf(), out: src.join("out.txt"), downsample: 1, residents: 1_000, crop: None }
     }
 
     /// A tiny city in their format: one Sump superblock, one block with two
