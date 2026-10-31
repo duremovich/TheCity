@@ -295,6 +295,10 @@ pub struct CampState {
     /// last headcount (`service::civic_hour` reads and clears them).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub since_count: Vec<(EntityId, CampMove)>,
+    /// Y3: the moves past the names kept in `since_count`, tallied by kind so
+    /// the headcount counts every one (the names are a sample, the count is not).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub since_over: Vec<(CampMove, u32)>,
     /// Round 4 T1: tonight's meals the Reserve made up (`camp::feed`).
     #[serde(skip_serializing_if = "is_zero_u32_camp")]
     pub reserve_today: u32,

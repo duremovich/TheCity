@@ -95,14 +95,18 @@ fn state_mut(world: &mut World, camp: EntityId) -> Option<&mut CampState> {
 /// headcount (the last `MOVES_KEPT`).
 fn note_move(world: &mut World, camp: EntityId, child: EntityId, m: CampMove) {
     if let Some(s) = state_mut(world, camp) {
-        s.since_count.push((child, m));
-        if s.since_count.len() > MOVES_KEPT {
-            s.since_count.remove(0);
+        if s.since_count.len() < MOVES_KEPT {
+            s.since_count.push((child, m));
+        } else if let Some(t) = s.since_over.iter_mut().find(|(k, _)| *k == m) {
+            t.1 += 1;
+        } else {
+            s.since_over.push((m, 1));
         }
     }
 }
 
-/// The comings and goings a Camp keeps between two headcounts.
+/// The comings and goings a Camp names between two headcounts (the rest are
+/// only counted, `CampState::since_over`).
 const MOVES_KEPT: usize = 64;
 
 /// E42 (the Rescue hook): the children housed at `camp`.
@@ -1212,8 +1216,13 @@ pub fn headcount(world: &mut World, camp: EntityId, wardens: &[EntityId]) {
         return;
     }
     let n = children_of(world, camp).len();
-    let (moves, unfed, reserve) = match state_mut(world, camp) {
-        Some(s) => (std::mem::take(&mut s.since_count), s.unfed_days.back().copied().unwrap_or(0), s.reserve_today),
+    let (moves, over, unfed, reserve) = match state_mut(world, camp) {
+        Some(s) => (
+            std::mem::take(&mut s.since_count),
+            std::mem::take(&mut s.since_over),
+            s.unfed_days.back().copied().unwrap_or(0),
+            s.reserve_today,
+        ),
         None => return,
     };
     let kinds = [
@@ -1229,14 +1238,16 @@ pub fn headcount(world: &mut World, camp: EntityId, wardens: &[EntityId]) {
     let mut bits: Vec<String> = Vec::new();
     for (m, label) in kinds {
         let who: Vec<EntityId> = moves.iter().filter(|(_, x)| *x == m).map(|(c, _)| *c).collect();
-        if who.is_empty() {
+        let extra = over.iter().find(|(k, _)| *k == m).map_or(0, |t| t.1 as usize);
+        if who.is_empty() && extra == 0 {
             continue;
         }
+        let total = who.len() + extra;
         let mut names: Vec<String> = who.iter().take(3).map(|&c| world.name_of(c)).collect();
-        if who.len() > 3 {
-            names.push(format!("{} more", who.len() - 3));
+        if total > 3 {
+            names.push(format!("{} more", total - 3));
         }
-        bits.push(format!("{} {label} ({})", who.len(), names.join(", ")));
+        bits.push(format!("{total} {label} ({})", names.join(", ")));
     }
     let since = if bits.is_empty() {
         "; nobody in or out since the last count".to_string()
