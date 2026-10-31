@@ -2109,6 +2109,7 @@ name = "cityview"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "citysim",
  "glclient",
  "serde",
  "serde_json",

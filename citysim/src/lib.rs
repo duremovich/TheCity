@@ -36,6 +36,7 @@ pub mod systems;
 pub mod time;
 pub mod util;
 pub mod utility;
+pub mod view;
 pub mod virt;
 pub mod word;
 pub mod world;

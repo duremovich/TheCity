@@ -5716,3 +5716,16 @@ crackdown_death_w = 1.0            # the law's attention on a cell: each corner 
 crackdown_keep_day = 0.8           # ... keeping this share a day ...
 crackdown_heat = 3.0               # ... and past this the law cracks down on the cell (both sides off its corner, the
 crackdown_days = 7                 # district's beat walks its Homes) for this many days
+
+[view]
+# The city milestone C2 (docs/CITY_MILESTONE.md): the camera ring the 3D client draws (`citysim::view::snapshot`,
+# `citysim-cli export-view`, cityview `--save`). Read by the view only: no system of the city reads it.
+tile_m = 4.0                       # a tile's side on the island maps, metres (2 m x k, k = 2)
+north_m = 3750.0                   # the city's north edge, metres (the import's y1: TheCityGraphics terrain.json size_m)
+walk_m_s = 1.4                     # the walk a walk-matched view shows: rate = walk_m_s / (tile_m x [exec]
+                                   # walk_tiles_per_tick / move_ticks_full) ticks a second; since Y4's 21 tiles a minute
+                                   # (84 m, 5.04 km/h) that is 1/60: a game minute is a real minute
+ring_half_tiles = 48               # the ring's half side (192 m: simsnap's ring, ~400 m across at the game zoom)
+pin_margin_tiles = 8               # a pinned body stays pinned this far past the ring (lod.rs VIEW_MARGIN's 8)
+way_margin_tiles = 64              # a Coarse walk is placed on its way (one road search) only when its start-to-target box
+                                   # grown by this many tiles (a road's detour) meets the ring

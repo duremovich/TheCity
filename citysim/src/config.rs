@@ -480,6 +480,43 @@ pub struct Config {
     /// without it reads 0, the base.
     #[serde(default, skip_serializing_if = "PerfCfg::host_only")]
     pub perf: PerfCfg,
+    /// The city milestone C2: `[view]`, the camera ring the 3D client reads
+    /// (`citysim::view`). Read by the view only; no system of the city reads
+    /// it. Absent: the defaults.
+    #[serde(default)]
+    pub view: ViewCfg,
+}
+
+/// `[view]` (the city milestone C2): the view's snapshot and its rate.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ViewCfg {
+    /// A tile's side in metres on the island maps (2 m x `k`, `k` = 2).
+    pub tile_m: f64,
+    /// The city's north edge in metres (the import's y1: terrain.json `size_m`).
+    pub north_m: f64,
+    /// The human walk a walk-matched view shows, m/s (`view::walk_matched_rate`).
+    pub walk_m_s: f64,
+    /// The camera ring's half side in tiles.
+    pub ring_half_tiles: u16,
+    /// Tiles past the ring a body stays pinned (the view's margin: no pin flaps at the edge).
+    pub pin_margin_tiles: u16,
+    /// A Coarse walk is placed on its way (one road search) only when its
+    /// start-to-target box grown by this many tiles meets the ring.
+    pub way_margin_tiles: u16,
+}
+
+impl Default for ViewCfg {
+    fn default() -> Self {
+        ViewCfg {
+            tile_m: 4.0,
+            north_m: 3750.0,
+            walk_m_s: 1.4,
+            ring_half_tiles: 48,
+            pin_margin_tiles: 8,
+            way_margin_tiles: 64,
+        }
+    }
 }
 
 /// `[verbs]` (the pressure pass round 2, R6b; OPEN-217, OPEN-207).

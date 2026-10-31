@@ -9,6 +9,7 @@
 //!                       [--out assets/stat_table.toml] [--straight-lines]
 //! citysim-cli gen-map --residents N [--seed S] --out FILE
 //! citysim-cli import-graphics --src DIR --out FILE [--downsample k] [--residents N] [--crop x0,y0,x1,y1]
+//! citysim-cli export-view --save FILE --out FILE [--ticks 60] [--keep N] [--at X,Y | --follow INDEX] [--half T] [--no-pin]
 //! ```
 //!
 //! `--map` overrides `[world] map` (the M10 256 x 192 map by default; Scale
@@ -23,6 +24,7 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
+mod export_view;
 mod import_graphics;
 mod shadow;
 
@@ -49,6 +51,8 @@ enum Command {
     GenMap(GenMapArgs),
     /// Import TheCityGraphics' generated city into the sim's map format (Scale S3b).
     ImportGraphics(import_graphics::ImportArgs),
+    /// Write the camera ring's view frames from a save (`city-simview/0.1`, the city milestone C2).
+    ExportView(export_view::ExportViewArgs),
 }
 
 #[derive(clap::Args)]
@@ -2865,6 +2869,7 @@ fn main() {
         Command::Shadow(args) => shadow::shadow(args),
         Command::GenMap(args) => gen_map(args),
         Command::ImportGraphics(args) => import_graphics::import(args),
+        Command::ExportView(args) => export_view::export_view(args),
     };
     if let Err(e) = result {
         eprintln!("error: {e}");

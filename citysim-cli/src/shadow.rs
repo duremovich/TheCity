@@ -158,6 +158,11 @@ pub struct ShadowArgs {
     /// `--lives --population N` (Shadow V7: the island's window).
     #[arg(long, value_name = "FILE")]
     pub map: Option<PathBuf>,
+    /// The city milestone C2: write the world's save at the start of each of these days
+    /// (comma-separated, inside `--start-day ..= --start-day + --days`) to `<out>/saves/<seed>-<tick>.ron`,
+    /// so the follow-cam (`cityview --save FILE --follow INDEX`) watches the diary's world.
+    #[arg(long, value_name = "DAYS", value_delimiter = ',')]
+    pub save_at: Vec<u64>,
 }
 
 const ARCHETYPES: [&str; 61] = [
@@ -4402,7 +4407,16 @@ pub fn shadow(args: ShadowArgs) -> Result<(), String> {
     if !args.no_pin {
         world.config.lod.max_full += picked.len();
     }
-    let mut tracks = follow(&mut world, &picked, args.days, !args.no_pin, true);
+    let end_day = args.start_day + args.days;
+    if let Some(d) = args.save_at.iter().find(|&&d| d < args.start_day || d > end_day) {
+        return Err(format!("--save-at {d} is outside the window's days {}..={end_day}", args.start_day));
+    }
+    let saves = (!args.save_at.is_empty()).then(|| Saves {
+        ticks: args.save_at.iter().map(|d| d * TICKS_PER_DAY).collect(),
+        dir: dir.join("saves"),
+        seed: args.seed,
+    });
+    let mut tracks = follow_saving(&mut world, &picked, args.days, !args.no_pin, true, saves.as_ref())?;
     let end = world.tick;
     let mut total = 0u64;
     let mut tsv = format!("{CAMERA_TSV_HEADER}\n");
@@ -4632,7 +4646,26 @@ fn pick(
 
 /// Follow the picks for `days` from the world's tick, pinned unless
 /// `pin` is false; the tracks come back closed (the last day flushed).
+/// The city milestone C2: the window's saves (`--save-at`): at each of `ticks` the world goes to
+/// `dir/<seed>-<tick>.ron` before the tick runs (the picks pinned, as the diary's world).
+struct Saves {
+    ticks: Vec<Tick>,
+    dir: PathBuf,
+    seed: u64,
+}
+
 fn follow(world: &mut World, picked: &[(String, EntityId)], days: u64, pin: bool, verbose: bool) -> Vec<Track> {
+    follow_saving(world, picked, days, pin, verbose, None).expect("no saves, no I/O")
+}
+
+fn follow_saving(
+    world: &mut World,
+    picked: &[(String, EntityId)],
+    days: u64,
+    pin: bool,
+    verbose: bool,
+    saves: Option<&Saves>,
+) -> Result<Vec<Track>, String> {
     let start_tick = world.tick;
     world.shadow_notes = Some(Vec::new());
     let mut tracks: Vec<Track> = Vec::new();
@@ -4649,6 +4682,14 @@ fn follow(world: &mut World, picked: &[(String, EntityId)], days: u64, pin: bool
         tracks.push(t);
     }
     let end_tick = start_tick + days * TICKS_PER_DAY;
+    let save_now = |world: &World| -> Result<(), String> {
+        if let Some(s) = saves.filter(|s| s.ticks.contains(&world.tick)) {
+            let path = citysim::save::save_path(&s.dir, s.seed, world.tick);
+            citysim::save::save_to_file(world, &path).map_err(|e| format!("save {}: {e}", path.display()))?;
+            eprintln!("saved {}", path.display());
+        }
+        Ok(())
+    };
     while world.tick < end_tick {
         if pin {
             for t in &tracks {
@@ -4657,6 +4698,7 @@ fn follow(world: &mut World, picked: &[(String, EntityId)], days: u64, pin: bool
                 }
             }
         }
+        save_now(world)?;
         let cursor = world.next_event_id;
         if let Some(n) = world.shadow_notes.as_mut() {
             n.clear();
@@ -4671,6 +4713,7 @@ fn follow(world: &mut World, picked: &[(String, EntityId)], days: u64, pin: bool
             observe(world, t, now, &events, &dbg, &notes);
         }
     }
+    save_now(world)?;
     let end = world.tick;
     for t in &mut tracks {
         // The last day's summary and any open action.
@@ -4679,7 +4722,7 @@ fn follow(world: &mut World, picked: &[(String, EntityId)], days: u64, pin: bool
         end_sleep_block(t, end);
         close_still(t, end);
     }
-    tracks
+    Ok(tracks)
 }
 
 // ---------------------------------------------------------------------------
@@ -5710,6 +5753,7 @@ mod tests {
             lives: false,
             population: None,
             map: None,
+            save_at: vec![],
         };
         shadow(args).expect("shadow runs");
         let md = std::fs::read_dir(&dir)
