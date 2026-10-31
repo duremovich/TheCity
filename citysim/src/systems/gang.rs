@@ -627,6 +627,11 @@ fn recompute_leader_back(
     if old.is_some() && leader != old {
         push_shock(world, gang, Shock::LeaderChanged);
     }
+    // Pressure pass round 9, Y2 (`OPEN-250`): nobody takes the chair from
+    // the cells (0 is right).
+    if leader != old && leader.is_some_and(|n| world.has::<Sentence>(n)) {
+        crate::systems::ownership::jobs2_row(world).cell_takeovers += 1;
+    }
     // Round 8 X4 (`OPEN-241`): a change no other line tells (a decapitation
     // is `succession::decide`'s, a civil war's its own) is told here.
     if let (Some(o), Some(n)) = (old, leader) {

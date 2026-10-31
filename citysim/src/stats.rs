@@ -1625,6 +1625,21 @@ pub struct Jobs2Cols {
     /// Round 8 X6: a held witness of a cellmate's violent crime kept clear of him (no running in the cells)
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub wr_held_clear: u32,
+    /// Round 9 Y2 (`OPEN-250`): an arrest made by a guard on leave (mourning, lying low or his shift struck; 0 is right)
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub leave_arrests: u32,
+    /// Round 9 Y2: a gang's new leader who is in the cells as he takes the chair (0 is right)
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub cell_takeovers: u32,
+    /// Round 9 Y2 (`OPEN-251`): a guard fought off by a suspect called a second guard (one answered) ...
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub backup_called: u32,
+    /// ... and a resisting suspect faced more than one guard at the cuffs ...
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub backup_fights: u32,
+    /// ... and of those, the suspect cuffed all the same
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub backup_cuffed: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -2234,6 +2249,11 @@ impl Jobs2Cols {
                 "cell_meals",
                 "cell_visits",
                 "wr_held_clear",
+                "leave_arrests",
+                "cell_takeovers",
+                "backup_called",
+                "backup_fights",
+                "backup_cuffed",
             ]
             .into_iter()
             .map(str::to_string),
@@ -2837,6 +2857,11 @@ impl Jobs2Cols {
             self.cell_meals.to_string(),
             self.cell_visits.to_string(),
             self.wr_held_clear.to_string(),
+            self.leave_arrests.to_string(),
+            self.cell_takeovers.to_string(),
+            self.backup_called.to_string(),
+            self.backup_fights.to_string(),
+            self.backup_cuffed.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

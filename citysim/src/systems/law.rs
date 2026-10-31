@@ -82,6 +82,15 @@ pub fn is_guard(world: &World, id: EntityId) -> bool {
     world.comp::<Job>(id).is_some_and(|j| j.role == Role::Guard)
 }
 
+/// Pressure pass round 9, Y2 (`OPEN-250`): `id` is on leave from the post
+/// now: mourning or lying low (`grief::holed_up`), or today's shift struck
+/// (the employer's leave, an absence, a strike: `classes::walk_out`). V17
+/// `bereaved_6559 d21 09:19`: a guard a day widowed, on leave, made arrests.
+pub fn on_leave(world: &World, id: EntityId) -> bool {
+    crate::systems::grief::holed_up(world, id)
+        || world.comp::<Job>(id).is_some_and(|j| j.struck_shift.is_some_and(|k| k == j.shift_key_at(world.tick)))
+}
+
 /// Pressure pass F2: a guard on shift now (the law at work, whose sighting
 /// of a crime is a report).
 pub fn on_duty(world: &World, id: EntityId) -> bool {
@@ -2030,6 +2039,9 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
         }
         None => String::new(),
     };
+    if on_leave(world, guard) {
+        crate::systems::ownership::jobs2_row(world).leave_arrests += 1;
+    }
     world.push_event(
         EventKind::Arrest,
         &[guard, suspect],
