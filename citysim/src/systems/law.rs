@@ -95,6 +95,7 @@ pub fn on_leave(world: &World, id: EntityId) -> bool {
 /// of a crime is a report).
 pub fn on_duty(world: &World, id: EntityId) -> bool {
     world.comp::<Job>(id).is_some_and(|j| j.role == Role::Guard && j.on_shift(world.tick_of_day()))
+        && !on_leave(world, id)
 }
 
 /// Guards (any LOD) within `r` tiles of `id`, excluding `id`.
@@ -386,6 +387,9 @@ fn raise_crime_core(
 
     let mut noticed = 0usize;
     let mut recorded = 0u32;
+    // Pressure pass round 9, Y2 (`OPEN-250`): who took it in (a crime in
+    // the cells: the case's line is theirs too).
+    let mut seen_by: Vec<EntityId> = Vec::new();
     let cap = cfg.witness_cap;
     // M15 W28: a guard notices × the law's competence multiplier (1 when off).
     let law_mult = crate::systems::competence::law_mult(world);
@@ -459,6 +463,9 @@ fn raise_crime_core(
             crate::systems::ownership::jobs2_row(world).witness_unfree += 1;
         }
         world.remember_crime(w, actor, crime, salience, object);
+        if held_in.is_some() {
+            seen_by.push(w);
+        }
         crate::systems::social::witnessed_crime_of(world, w, actor);
         if let Some(n) = world.comp_mut::<Needs>(w) {
             n.safety = (n.safety - 0.2).max(0.0);
@@ -466,10 +473,16 @@ fn raise_crime_core(
         // Round 7 W5 (`OPEN-237`): a sale's witness at a stand in progress
         // is the stand's one line at its end (`stims::stand_seen`).
         if !(crime == Crime::Dealing && crate::systems::stims::stand_seen(world, actor, w)) {
+            // Round 9 Y2 (`OPEN-250`): a blow names whom it fell on (V17
+            // `pimp_9933 d23 07:00`: a Murder in the cells with no victim).
+            let on = object
+                .filter(|_| matches!(crime, Crime::Murder | Crime::Assault))
+                .filter(|&o| world.has::<crate::components::Identity>(o))
+                .map_or_else(String::new, |o| format!(" on {}", world.name_of(o)));
             world.push_event(
                 EventKind::Witness,
                 &[w, actor],
-                format!("{} saw {} commit {}", world.name_of(w), world.name_of(actor), crime.label()),
+                format!("{} saw {} commit {}{on}", world.name_of(w), world.name_of(actor), crime.label()),
             );
         }
         // M16a (plan C31): a guard on the take keeps the memory, files nothing.
@@ -572,7 +585,7 @@ fn raise_crime_core(
     // Round 8 X1 (`OPEN-246`): a crime in the cells is the law's case (held
     // when he did it: a robot's detention above books him on its own).
     if let Some(j) = held_in {
-        cell_case(world, actor, object.or(victim), crime, j);
+        cell_case(world, actor, object.or(victim), crime, j, &seen_by);
     }
 }
 
@@ -595,7 +608,14 @@ pub fn cells_of(world: &World, id: EntityId) -> Option<EntityId> {
 /// 07:16`: an Assault and a Murder in the Precinct with no place, no
 /// parties and no case. The under-18 rule: a child is never held (no
 /// arrest force on a child), and no term is ever added to one.
-fn cell_case(world: &mut World, actor: EntityId, other: Option<EntityId>, crime: Crime, jail: EntityId) {
+fn cell_case(
+    world: &mut World,
+    actor: EntityId,
+    other: Option<EntityId>,
+    crime: Crime,
+    jail: EntityId,
+    seen_by: &[EntityId],
+) {
     if is_petty(crime) || crate::systems::ages::is_protected(world, actor) {
         return;
     }
@@ -634,6 +654,13 @@ fn cell_case(world: &mut World, actor: EntityId, other: Option<EntityId>, crime:
     let mut actors = vec![actor];
     actors.extend(other);
     actors.push(jail);
+    // Round 9 Y2 (`OPEN-250`): the cellmates who saw it read the case (V17
+    // `pimp_9933 d23 07:00`: a Murder seen, then no victim, Death or case).
+    for &w in seen_by {
+        if !actors.contains(&w) {
+            actors.push(w);
+        }
+    }
     world.push_event(EventKind::Sentence, &actors, text);
     crate::systems::ownership::jobs2_row(world).cell_cases += 1;
 }
@@ -907,6 +934,24 @@ fn stat_free(world: &World, w: EntityId) -> bool {
     })
 }
 
+/// Pressure pass round 9, Y2 (`OPEN-250`): the tick `w`'s freshest
+/// first-hand sighting of `s` goes stale to the beat (`tell_the_beat`'s
+/// `[crime.case] tell_days` window); `None` with no such sighting.
+fn beat_until(world: &World, w: EntityId, s: EntityId) -> Option<Tick> {
+    let days = world.config.crime.case.tell_days;
+    if days == 0 {
+        return None;
+    }
+    let seen = world
+        .comp::<crate::components::Memory>(w)?
+        .entries
+        .iter()
+        .filter(|e| e.kind == MemoryKind::SawCrime && !e.second_hand && e.subject == Some(s))
+        .map(|e| e.tick)
+        .max()?;
+    Some(seen + days * TICKS_PER_DAY)
+}
+
 /// Round 8 X1: `w` drops the word owed on `s`, the reason on his line.
 pub fn drop_word(world: &mut World, w: EntityId, s: EntityId, why: &str) {
     let before = world.consequence.owed_word.len();
@@ -962,10 +1007,27 @@ fn keep_word(world: &mut World) {
             told_at_desk(world, v, s, desk, true);
             None
         } else if until <= now {
-            Some(match law_desk(world, v) {
-                None => "the law is out of reach (no desk of it within a walk)".to_string(),
-                Some((d, _)) => format!("the day went by and {he} never got to {}", world.name_of(d)),
-            })
+            match law_desk(world, v) {
+                // Pressure pass round 9, Y2 (`OPEN-250`): no desk within a
+                // walk, the word waits on the beat (`tell_the_beat`, the
+                // street's way to the law) for as long as the sighting is
+                // fresh to it (`[crime.case] tell_days`); dropped then. V17
+                // `night_shift_24245 d22`: "never told: the law is out of
+                // reach" at 07:00, then a guard on the street told at 23:00.
+                None => match beat_until(world, v, s).filter(|&t| t > now) {
+                    Some(t) => {
+                        if let Some(x) = world.consequence.owed_word.iter_mut().find(|x| x.0 == v && x.1 == s) {
+                            x.2 = t;
+                        }
+                        None
+                    }
+                    None => Some(
+                        "the law is out of reach (no desk of it within a walk, and no guard on the beat came by)"
+                            .to_string(),
+                    ),
+                },
+                Some((d, _)) => Some(format!("the day went by and {he} never got to {}", world.name_of(d))),
+            }
         } else {
             None
         };
@@ -1416,6 +1478,7 @@ fn serve_at_door(world: &mut World) {
             world
                 .comp::<Job>(g)
                 .is_some_and(|j| j.on_shift(tod) && crate::exec::routine::workday_of(world, g, j, j.shift_key_at(now)))
+                && !on_leave(world, g)
         })
         .filter_map(|g| world.comp::<Position>(g).map(|p| (g, p.tile)))
         .collect();
@@ -1500,7 +1563,7 @@ fn handoff_guard(world: &World, from: EntityId, s: EntityId, at: TilePos) -> Opt
         .filter(|&g| {
             world.comp::<Job>(g).is_some_and(|j| {
                 j.on_shift(tod) && crate::exec::routine::workday_of(world, g, j, j.shift_key_at(world.tick))
-            })
+            }) && !on_leave(world, g)
         })
         .filter_map(|g| world.comp::<Position>(g).map(|p| (g, p.tile)))
         .filter(|&(g, t)| {
@@ -1910,6 +1973,13 @@ fn resolve_robot_fight(world: &mut World, a: EntityId, b: EntityId, mods: FightM
 /// building). A suspect with courage > 0.7 contests it. Returns whether the
 /// suspect is now cuffed.
 pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
+    // Pressure pass round 9, Y2: the under-18 rule (CLAUDE.md): a child is
+    // never a target of the cuffs, the fight for them or a second guard (no
+    // warrant names one; this is the backstop).
+    if crate::systems::ages::is_protected(world, suspect) {
+        crate::systems::ownership::jobs2_row(world).harm_blocked += 1;
+        return false;
+    }
     if guard == suspect
         || !living(world, suspect)
         || !living(world, guard)
@@ -1927,6 +1997,8 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
     let berserk = crate::systems::chrome::in_episode(world, suspect);
     // M14 V12: a runner dazed by a lost contest cannot contest the cuffs.
     let dazed = world.comp::<Brain>(suspect).and_then(|b| b.dazed_until).is_some_and(|t| t > world.tick);
+    // Round 9 Y2 (`OPEN-251`): the second guard who held him, when one did.
+    let mut helper: Option<EntityId> = None;
     if (courage > 0.7 || berserk) && !dazed {
         let mods = if berserk {
             FightMods {
@@ -1943,7 +2015,27 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
         // Shadow V4 bug 10: a suspect who loses the scuffle for the cuffs is
         // arrested, not assaulted (`FightMods::arrest`: a Lost memory
         // gossiped "Assaulted by <guard>" and fed dread and grudges).
-        let (winner, loser, died) = resolve_fight_mods(world, guard, suspect, mods);
+        let (mut winner, mut loser, mut died) = resolve_fight_mods(world, guard, suspect, mods);
+        // Pressure pass round 9, Y2 (`OPEN-251`): the guards at hand take
+        // their turn at him (`[justice] backup_reach`, `backup_max`); the
+        // arresting guard cuffs him when one of them wins. V17
+        // `joytoy_123639 d27 15:32-23:49`: five guards fought off one at a
+        // time, none with a second.
+        let mut fought = vec![guard];
+        if !died && winner != guard {
+            for p in backup_at_hand(world, guard, suspect) {
+                crate::systems::ownership::jobs2_row(world).backup_fights += 1;
+                fought.push(p);
+                let (w2, l2, d2) = resolve_fight_mods(world, p, suspect, mods);
+                (winner, loser, died) = (w2, l2, d2);
+                if died || winner == p {
+                    break;
+                }
+            }
+        }
+        // The guard in the fight that ended it (the arresting one, or the
+        // second who took his turn).
+        let fighter = *fought.last().unwrap_or(&guard);
         if died {
             if loser == suspect {
                 // The suspect died resisting: nothing left to prosecute.
@@ -1957,9 +2049,9 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
                 let text = format!(
                     "{} died resisting arrest by the guard {} ({charge})",
                     world.name_of(suspect),
-                    world.name_of(guard)
+                    world.name_of(fighter)
                 );
-                world.push_event(EventKind::Assault, &[suspect, guard], text);
+                world.push_event(EventKind::Assault, &[suspect, fighter], text);
                 crate::systems::demography::defended(world, suspect);
                 resolve_reports(world, suspect);
                 if berserk {
@@ -1969,11 +2061,11 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
                 // The suspect killed the guard: a Murder, witnessed by whoever is near.
                 let tile = world.comp::<Position>(suspect).map_or(TilePos::default(), |p| p.tile);
                 file_report(world, Crime::Murder, suspect, None);
-                raise_crime_on(world, suspect, None, Some(guard), Crime::Murder, tile);
+                raise_crime_on(world, suspect, None, Some(fighter), Crime::Murder, tile);
             }
             return false;
         }
-        if winner != guard {
+        if winner == suspect {
             if let Some(n) = world.comp_mut::<Needs>(suspect) {
                 n.safety = (n.safety - 0.3).max(0.0);
             }
@@ -1984,19 +2076,33 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
                 || "an open warrant".to_string(),
                 |c| format!("wanted for {}", charge_label(world, suspect, c)),
             );
+            let who = match fought.as_slice() {
+                [g] => format!("the guard {}", world.name_of(*g)),
+                gs => format!("the guards {}", gs.iter().map(|&g| world.name_of(g)).collect::<Vec<_>>().join(" and ")),
+            };
             world.push_event(
                 EventKind::Assault,
-                &[suspect, guard],
-                format!(
-                    "{} resisted arrest and fought off the guard {} ({charge})",
-                    world.name_of(suspect),
-                    world.name_of(guard)
-                ),
+                &fought.iter().copied().chain(std::iter::once(suspect)).rev().collect::<Vec<_>>(),
+                format!("{} resisted arrest and fought off {who} ({charge})", world.name_of(suspect)),
             );
             crate::systems::law_brain::push_shock(world, LawShock::GuardBeaten);
+            // Round 9 Y2 (`OPEN-251`): a guard fought off calls for a second
+            // (the nearest free guard on shift who can chase him: the
+            // chase's hand-on, his collar), so the next try is two.
+            call_backup(world, guard, suspect);
             return false;
         }
+        if fought.len() > 1 {
+            crate::systems::ownership::jobs2_row(world).backup_cuffed += 1;
+            helper = Some(fighter);
+        }
     }
+    // Round 9 Y2: the arresting guard laid out, the second who held him
+    // walks him in (the first's step fails; the second replans to escort).
+    let cuffer = match helper {
+        Some(h) if !living(world, guard) || crate::systems::wounded::is_down(world, guard) => h,
+        _ => guard,
+    };
     // M14 V15: cuffed in the chair its newest trace named (the gate's
     // "arrest at the chair"; `jail_suspect` counts the rest).
     let at_chair = world.last_trace.get(&suspect).map(|&(chair, _)| chair).is_some_and(|chair| {
@@ -2011,18 +2117,21 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
     }
     world.abort_plan(suspect);
     if let Some(b) = world.comp_mut::<Brain>(suspect) {
-        b.cuffed_by = Some(guard);
+        b.cuffed_by = Some(cuffer);
         b.current_goal = None;
     }
     // M13 D33: the cuffs end an episode.
     if berserk {
         crate::systems::chrome::ended_by_law(world, suspect, "arrested");
     }
-    if let Some(b) = world.comp_mut::<Brain>(guard) {
+    if cuffer != guard {
+        world.abort_plan(cuffer);
+    }
+    if let Some(b) = world.comp_mut::<Brain>(cuffer) {
         b.escorting = Some(suspect);
     }
     // Lives at work phase 7 (§ 5.2): the nearest Station full: sent on.
-    crate::systems::stations::on_arrest(world, guard);
+    crate::systems::stations::on_arrest(world, cuffer);
     // S3: the arrest names its charge; the witness's own arrest is his collar.
     if world.crime_reports().iter().any(|r| !r.resolved && r.suspect == suspect && r.witness == Some(guard)) {
         crate::systems::ownership::jobs2_row(world).law_collars += 1;
@@ -2042,12 +2151,85 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
     if on_leave(world, guard) {
         crate::systems::ownership::jobs2_row(world).leave_arrests += 1;
     }
+    let (held, mut actors) = match helper {
+        Some(h) if h == cuffer => (format!(", {} laid out", world.name_of(guard)), vec![cuffer, suspect, guard]),
+        Some(h) => (
+            format!(", {} holding {}", world.name_of(h), crate::systems::consequence::pro(world, suspect).1),
+            vec![guard, suspect, h],
+        ),
+        None => (String::new(), vec![guard, suspect]),
+    };
+    actors.dedup();
     world.push_event(
         EventKind::Arrest,
-        &[guard, suspect],
-        format!("{} arrested {}{charge}{place}", world.name_of(guard), world.name_of(suspect)),
+        &actors,
+        format!("{} arrested {}{charge}{place}{held}", world.name_of(cuffer), world.name_of(suspect)),
     );
-    true
+    cuffer == guard
+}
+
+/// Pressure pass round 9, Y2 (`OPEN-251`): the on-duty city guards at
+/// hand for `guard`'s arrest of `suspect` (`[justice] backup_reach` of the
+/// suspect, nearest first, up to `backup_max` − 1): on their feet, free of
+/// a prisoner, not on the suspect's take, never a minor (CLAUDE.md, the
+/// under-18 rule; the suspect is never one: `arrest`'s backstop).
+fn backup_at_hand(world: &World, guard: EntityId, suspect: EntityId) -> Vec<EntityId> {
+    let Some(c) = world.config.justice.as_ref() else { return Vec::new() };
+    let (reach, max) = (c.backup_reach, c.backup_max.saturating_sub(1));
+    if reach == 0 || max == 0 {
+        return Vec::new();
+    }
+    let Some(sp) = world.comp::<Position>(suspect).map(|p| (p.tile, p.building)) else { return Vec::new() };
+    let mut near: Vec<(u32, EntityId)> = world
+        .guards()
+        .iter()
+        .copied()
+        .filter(|&g| g != guard && g != suspect && living(world, g) && !world.has::<Sentence>(g))
+        .filter(|&g| on_duty(world, g) && is_city_guard(world, g) && !crate::systems::ages::is_protected(world, g))
+        .filter(|&g| {
+            world.comp::<Brain>(g).is_some_and(|b| {
+                b.lod != crate::components::Lod::Statistical && b.cuffed_by.is_none() && b.escorting.is_none()
+            }) && !crate::systems::wounded::is_down(world, g)
+        })
+        .filter(|&g| !crate::systems::contracts::on_take_of(world, g, suspect))
+        .filter_map(|g| {
+            let p = world.comp::<Position>(g)?;
+            let d = chebyshev(p.tile, sp.0);
+            // In the room with him, or on the street within reach (at his
+            // door: the one at the door comes in).
+            (d <= reach && (p.building == sp.1 || outdoors(world, p.tile, p.building))).then_some((d, g))
+        })
+        .collect();
+    near.sort();
+    near.into_iter().take(max).map(|(_, g)| g).collect()
+}
+
+/// Pressure pass round 9, Y2 (`OPEN-251`): `guard`, fought off by
+/// `suspect`, calls for a second: the nearest free guard on shift who can
+/// chase him (`handoff_guard`) takes him as his collar for `[justice]
+/// collar_hours` (`handoffs`); the sighting is fresh (the guard just saw
+/// him). Never on a minor (the under-18 rule: `arrest`'s backstop).
+fn call_backup(world: &mut World, guard: EntityId, suspect: EntityId) {
+    if crate::systems::ages::is_protected(world, suspect) || !living(world, suspect) {
+        return;
+    }
+    let Some(at) = world.comp::<Position>(suspect).map(|p| p.tile) else { return };
+    let now = world.tick;
+    world.set_last_seen(suspect, (at, now));
+    let Some(r) = handoff_guard(world, guard, suspect, at) else { return };
+    let hours = world.config.justice.as_ref().map_or(0, |c| c.collar_hours);
+    let since = now.saturating_sub(hours * crate::time::TICKS_PER_HOUR);
+    world.handoffs.retain(|_, &mut (_, t)| t >= since);
+    world.handoffs.insert(r, (suspect, now));
+    let far = world.comp::<Position>(r).map_or(0, |p| p.tile.manhattan(at));
+    let text = format!(
+        "{} called for a second on {}: {} on shift, {far} tiles off, comes",
+        world.name_of(guard),
+        world.name_of(suspect),
+        world.name_of(r)
+    );
+    world.push_event(EventKind::Pursuit, &[guard, suspect, r], text);
+    crate::systems::ownership::jobs2_row(world).backup_called += 1;
 }
 
 /// The escorting guard moved: the cuffed suspect comes along.

@@ -144,7 +144,7 @@ pub fn decide(world: &mut World, gang: EntityId, fallen: EntityId) -> bool {
         let ahead = rival.map_or_else(String::new, |(c, gap)| format!(", ahead of {} by {gap:.3}", world.name_of(c)));
         format!("{hn} took over {gname} after {fnm} died{ahead}")
     } else {
-        format!("{hn} runs {gname} while {fnm} sits inside")
+        gang::inside_line(world, gang, heir, fallen)
     };
     tell(world, gang, heir, fallen, text);
     false

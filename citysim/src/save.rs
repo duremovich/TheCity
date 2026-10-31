@@ -501,7 +501,10 @@ use crate::world::World;
 /// 113 (pressure pass round 8, X5, the pit, the lines' ages and marriages; renumber at the merge): `World.courting`
 /// (`social::Courtship`, written while it holds anything), `Flow::Purse`, the `[leisure] bout_beating`,
 /// `bout_points_tired` and `[social] court_dates` ... `court_lapse_days` keys (serde defaults).
-pub const SAVE_VERSION: u8 = 113;
+/// 114 (pressure pass round 9, Y2, contradictions that are state; renumber at the merge): the `[careers]
+/// evicted_days`, `[roles.<Name>] reads_body`, `[justice] backup_reach`, `backup_max` keys and the `Jobs2Cols`
+/// `leave_arrests` ... `backup_cuffed` columns (serde defaults).
+pub const SAVE_VERSION: u8 = 114;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

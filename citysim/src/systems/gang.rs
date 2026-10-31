@@ -684,6 +684,28 @@ pub fn members_told(world: &World, gang: EntityId) -> Vec<EntityId> {
     })
 }
 
+/// Pressure pass round 9, Y2 (`OPEN-250`): `n` runs `gang` while `o` sits
+/// inside, and the boss whose chair it is (`Gang.boss`, jailed before `o`,
+/// who walks back into it on release) is named too: V17 `purist_32297 d24
+/// 11:43` read "Smoke Wozniak is out of the cells and runs it again" after
+/// "Annika Achebe runs it while Alaric Fairweather sits inside", Smoke in
+/// the cells since day 18 and never named.
+pub fn inside_line(world: &World, gang: EntityId, n: EntityId, o: EntityId) -> String {
+    let gname = world.comp::<Gang>(gang).map_or_else(|| "the gang".to_string(), |g| g.name.clone());
+    let (nn, on) = (world.name_of(n), world.name_of(o));
+    let boss = world
+        .comp::<Gang>(gang)
+        .and_then(|g| g.boss)
+        .filter(|&b| b != o && b != n && world.has::<Sentence>(b) && world.gang_of(b) == Some(gang));
+    match boss {
+        Some(b) => {
+            let him = crate::systems::consequence::pro(world, o).1;
+            format!("{nn} runs {gname} while {on} sits inside, as {} has since before {him}", world.name_of(b))
+        }
+        None => format!("{nn} runs {gname} while {on} sits inside"),
+    }
+}
+
 /// Round 8 X4 (`OPEN-241`): the new leader `n` of `gang` after `o`, told to
 /// its members (a `Succession` line) and to the street (a `TookOver` deed in
 /// the Hideout's district). V16: `raider_29990` read "Rhys Garland leads 23"
@@ -697,7 +719,7 @@ pub fn told_leader(world: &mut World, gang: EntityId, o: EntityId, n: EntityId, 
     } else if !crate::systems::law::living(world, o) {
         format!("{nn} took over {gname} after {on} died")
     } else if world.has::<Sentence>(o) {
-        format!("{nn} runs {gname} while {on} sits inside")
+        inside_line(world, gang, n, o)
     } else if world.gang_of(o) != Some(gang) {
         format!("{nn} took over {gname} after {on} left it")
     } else {
