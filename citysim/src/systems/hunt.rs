@@ -661,6 +661,11 @@ pub fn ask_around(world: &mut World, hunter: EntityId) -> StepResult {
     let now = world.tick;
     let venue = s.venue.or_else(|| world.comp::<Position>(hunter).and_then(|p| p.building));
     let r = venue.and_then(|v| respondent(world, hunter, target, v));
+    // Round 9 Z2: a taker asking after his mark asks someone close to him,
+    // who tells him.
+    if let Some(r) = r {
+        crate::systems::contracts::asked_after(world, hunter, r, venue);
+    }
     let mut deceived_by = None;
     let intel = match r {
         None => habit(world, target, now),

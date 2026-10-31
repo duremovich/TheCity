@@ -113,6 +113,8 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::Collect => crate::systems::vice::collect_ticks(world, id).unwrap_or(10),
         // M16a (plan C10, C15).
         ActionKind::Network => 30,
+        // Round 9 Z2: the walk-in's minutes at the desk.
+        ActionKind::TakeJob => world.config.fixers.take_job_mins,
         // The Hit market (H9).
         ActionKind::Commission => world.config.hitmarket.commission_mins,
         ActionKind::HandOver => 5,
@@ -892,6 +894,8 @@ pub fn on_complete(
         }
         // M16a (plan C10, C15): a regular's stamp; a Guard's day kept.
         ActionKind::Network => crate::systems::contracts::on_network(world, id, target),
+        // Round 9 Z2: a record off the board taken in person.
+        ActionKind::TakeJob => crate::systems::contracts::on_take_job(world, id, target),
         // The Hit market (H9): the want posted at the Fixer.
         ActionKind::Commission => crate::systems::hitmarket::on_commission(world, id, target),
         // M16b phase 2: the abductee handed over at the holding building.

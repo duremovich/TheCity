@@ -599,6 +599,8 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<raid::Outcome> {
     }
     if !defs.contains(&t) {
         let text = format!("{crew_name} found no {tname} at {place}");
+        // Round 9 Z2: the mark hears of the crew at his door.
+        contracts::heard_at_door(world, id, &place);
         contracts::fail_attempt(world, id, &text);
         return Some(raid::Outcome::Lost);
     }
