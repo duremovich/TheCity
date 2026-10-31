@@ -1942,6 +1942,17 @@ mod tests {
         // The two maps side by side (the change tier's budget, 2026-10-19).
         let one = |map: &str| {
             let mut c = crate::config::Config::load();
+            // Round 9 Y4: R2's pace, at which the 2k and 4k cities' commutes
+            // were far enough to move and hire people (at 21 tiles a minute
+            // nobody there is past `commute_move_ticks`: 2 Housed events).
+            c.exec.walk_tiles_per_tick = 1;
+            c.exec.step_res = 4;
+            // ... and the El at R2's speed (Y4's 30 km/h El shortens the
+            // commutes the moves read).
+            c.transit.ride_ticks_per_tile = 0.25;
+            c.transit.dwell_ticks = 1;
+            c.transit.stop_spacing = 16;
+            c.life.bed_margin_tiles = 20;
             if !map.is_empty() {
                 c = c.scaled_to(4_000);
                 c.world.map = map.into();
@@ -1983,6 +1994,17 @@ mod tests {
     fn test_indexed_build_matches_the_scans() {
         let one = |map: &str| {
             let mut c = crate::config::Config::load();
+            // Round 9 Y4: R2's pace, at which the 2k and 4k cities' commutes
+            // were far enough to move and hire people (at 21 tiles a minute
+            // nobody there is past `commute_move_ticks`: 2 Housed events).
+            c.exec.walk_tiles_per_tick = 1;
+            c.exec.step_res = 4;
+            // ... and the El at R2's speed (Y4's 30 km/h El shortens the
+            // commutes the moves read).
+            c.transit.ride_ticks_per_tile = 0.25;
+            c.transit.dwell_ticks = 1;
+            c.transit.stop_spacing = 16;
+            c.life.bed_margin_tiles = 20;
             if !map.is_empty() {
                 c = c.scaled_to(4_000);
                 c.world.map = map.into();

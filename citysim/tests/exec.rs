@@ -1,5 +1,7 @@
 //! M1: pathfinding, flow fields, movement and the daily routine.
 
+mod common;
+
 use rand::{Rng, SeedableRng};
 
 use citysim::exec::flowfield::FlowField;
@@ -9,7 +11,7 @@ use citysim::{
 };
 
 fn world(seed: u64) -> World {
-    World::new(seed, Config::load().dole_city().v1_profile())
+    World::new(seed, common::r2(Config::load()).dole_city().v1_profile())
 }
 
 fn random_walkable(w: &World, rng: &mut rand_chacha::ChaCha8Rng) -> TilePos {
@@ -162,7 +164,7 @@ fn test_night_guard_works_both_halves_of_the_shift() {
     // Lives at work phase 6: pinned to `[careers]` off (its seeded jobs move
     // which night guard the scene picks and his evening; the subject is the
     // night shift's two halves).
-    let mut cfg = Config::load().dole_city().v1_profile();
+    let mut cfg = common::r2(Config::load()).dole_city().v1_profile();
     cfg.strip_careers();
     let mut w = World::new(8, cfg);
     let guard = w
@@ -284,7 +286,7 @@ fn test_idle_agent_leaves_the_hall() {
 /// every door.
 #[test]
 fn test_flowfield_radix_build_matches_binary_heap() {
-    let assets = Config::load().dole_city().assets_dir;
+    let assets = common::r2(Config::load()).dole_city().assets_dir;
     for file in ["map_v1.txt", "map.txt"] {
         let map = citysim::Map::load(&assets.join(file));
         for b in &map.buildings {
@@ -307,7 +309,7 @@ fn test_flowfield_radix_build_matches_binary_heap() {
 fn test_rest_is_one_block_not_a_loop() {
     use citysim::exec::actions::finishes_early;
     use citysim::{ActionKind, ExecState, Health, Needs};
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, common::r2(Config::load()));
     w.config.lod.force = Some(Lod::Full);
     let home_of = |w: &World, id| citysim::systems::missions::home_of(w, id);
     let id = w

@@ -12,7 +12,7 @@ use citysim::{
 use common::{beside, day_workers, free_adults, jobless_housed, set_coins};
 
 fn world(seed: u64) -> World {
-    World::new(seed, Config::load().dole_city().v1_profile())
+    World::new(seed, common::r2(Config::load()).dole_city().v1_profile())
 }
 
 fn set_needs(w: &mut World, id: citysim::EntityId, f: impl FnOnce(&mut Needs)) {
@@ -254,7 +254,7 @@ fn test_mood_in_range() {
 /// meals it is done; with a dole the old line (broke) stands.
 #[test]
 fn test_bug1_jobless_with_a_meal_still_earns_without_the_dole() {
-    let mut w = common::world();
+    let mut w = common::world_r2();
     w.levers.dole_per_day = 0;
     let a = *jobless_housed(&w).first().expect("a jobless housed adult");
     // The local Market's price (Earn's savings line's), at least a meal.
@@ -285,7 +285,7 @@ fn fight_score(w: &World, a: EntityId) -> Option<f32> {
 /// settle a grudge.
 #[test]
 fn test_bug3_fight_weighs_the_law_the_odds_and_the_body() {
-    let mut w = common::world();
+    let mut w = common::world_r2();
     let ad = free_adults(&w);
     let (v, r) = (ad[0], ad[1]);
     beside(&mut w, v, r);
@@ -327,7 +327,7 @@ fn test_bug3_fight_weighs_the_law_the_odds_and_the_body() {
 #[test]
 fn test_bug19_hungry_worker_takes_a_meal_break() {
     use citysim::systems::fixes;
-    let mut w = common::world();
+    let mut w = common::world_r2();
     let a = day_workers(&w)[0];
     set_coins(&mut w, a, 15);
     let work_fed = |w: &World| {

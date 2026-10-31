@@ -1363,6 +1363,15 @@ pub fn reach_discs(world: &World, to: TilePos, limit: Tick) -> Vec<(TilePos, u32
     if !c.enabled {
         return out;
     }
+    // Round 9 Y4: at the real pace a 2 h cap's walk disc holds the whole map
+    // from most doors; the stops' discs inside it add nothing but cells read
+    // over and over (the seeded staff's graded picks: 17 ms a vacancy at 20k).
+    let (w, h) = (world.map.w() as u32, world.map.h() as u32);
+    let far = u32::from(to.x).max(w.saturating_sub(1 + u32::from(to.x)))
+        + u32::from(to.y).max(h.saturating_sub(1 + u32::from(to.y)));
+    if tiles(limit) >= far {
+        return out;
+    }
     let net = &world.transit.net;
     let k = c.stop_candidates.max(1);
     let shut = |s: u16| world.transit.stop_closed.get(&s).is_some_and(|&until| until > world.tick);

@@ -3,6 +3,8 @@
 //! rides, fares and fare dodging, closures, power, saves, and the
 //! switched-off city.
 
+mod common;
+
 use citysim::components::ActionInstance;
 use citysim::exec::ExecState;
 use citysim::goap::{ActionKind, LocationKey, Plan};
@@ -15,7 +17,7 @@ use citysim::{
 
 /// The shipped city with the El switched on.
 fn city_on() -> World {
-    let mut cfg = Config::load();
+    let mut cfg = common::r2(Config::load());
     cfg.transit.enabled = true;
     World::new(42, cfg)
 }
@@ -218,7 +220,7 @@ fn test_closures_cut_lines_and_stops() {
 /// the route planned.
 #[test]
 fn test_loop_line_departs_from_the_call_it_boards() {
-    let mut cfg = Config::load();
+    let mut cfg = common::r2(Config::load());
     cfg.transit.enabled = true;
     let mut lines = cfg.transit.lines.clone();
     lines.truncate(1);
@@ -258,7 +260,7 @@ fn test_loop_line_departs_from_the_call_it_boards() {
 /// agent is Statistical here, so no body's ride rebuilds it by chance.
 #[test]
 fn test_cut_line_expiry_rebuilds_the_table_at_once() {
-    let mut cfg = Config::load();
+    let mut cfg = common::r2(Config::load());
     cfg.transit.enabled = true;
     cfg.lod.force = Some(Lod::Statistical);
     let mut w = World::new(42, cfg);
@@ -950,7 +952,7 @@ fn test_attendance_reads_the_commute_band() {
 /// the one a world built before transit existed would write).
 #[test]
 fn test_switched_off_city_is_untouched() {
-    let mut cfg = Config::load();
+    let mut cfg = common::r2(Config::load());
     cfg.transit.enabled = false;
     let mut w = World::new(42, cfg);
     assert!(w.transit.net.stops.is_empty());
@@ -979,7 +981,7 @@ fn median(v: &mut [u32]) -> u32 {
 
 /// One run: rides, commute medians by mode, ticks/s.
 fn measure(on: bool, full: bool, days: u64) -> String {
-    let mut cfg = Config::load();
+    let mut cfg = common::r2(Config::load());
     cfg.transit.enabled = on;
     if full {
         cfg.lod.force = Some(Lod::Full);
@@ -1117,7 +1119,7 @@ fn pct(v: &mut [u32], p: f32) -> u32 {
 /// the city's vital signs (printed findings).
 fn measure_tail(seed: u64, on: bool, days: u64) -> String {
     use citysim::EventKind;
-    let mut cfg = Config::load();
+    let mut cfg = common::r2(Config::load());
     cfg.transit.enabled = on;
     // Experiments (printed findings): `TRANSIT_POOR_TPC` overrides `poor_ticks_per_coin`,
     // `TRANSIT_POWER` `power_per_line_day`.
@@ -1233,7 +1235,7 @@ fn measure_transit_tail() {
 /// `seed` x `days`, the money circuit (printed findings).
 fn measure_crews(name: &str, seed: u64, cap: u16, credit: f32, days: u64) -> String {
     use citysim::EventKind;
-    let mut cfg = Config::load();
+    let mut cfg = common::r2(Config::load());
     cfg.transit.staff_per_line = cap;
     cfg.treasury.credit_max = credit;
     let mut w = World::new(seed, cfg);
@@ -1344,7 +1346,7 @@ fn test_civic_receipts_count_the_fares_left_after_power_and_crews() {
 fn test_missing_staff_per_line_is_uncapped() {
     let cfg: citysim::config::TransitCfg = toml::from_str("enabled = true\nfare = 1\n").expect("a [transit] table");
     assert_eq!(cfg.staff_per_line, u16::MAX, "an old config keeps its crews");
-    assert_eq!(citysim::Config::load().transit.staff_per_line, 4, "the shipped city caps them");
+    assert_eq!(common::r2(citysim::Config::load()).transit.staff_per_line, 4, "the shipped city caps them");
 }
 
 // ---------------------------------------------------------------------------

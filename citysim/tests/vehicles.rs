@@ -4,6 +4,8 @@
 //! review's carry-overs (all-or-nothing payments, the death ordering, the
 //! lender at death, the trip-then-rekit order, `seller_open`).
 
+mod common;
+
 use rand::SeedableRng;
 
 use citysim::components::ActionInstance;
@@ -17,7 +19,7 @@ use citysim::{
 };
 
 fn city() -> World {
-    World::new(42, v1_pace(Config::load().dole_city()))
+    World::new(42, v1_pace(common::r2(Config::load()).dole_city()))
 }
 
 /// The pressure pass R2 (`[exec] move_ticks_full` 2 -> 1): these scenes pin
@@ -203,7 +205,7 @@ fn test_car_cuts_road_trip_and_keeps_flow_fields() {
 
 #[test]
 fn test_max_steps_per_tick_bounds_burst() {
-    let mut cfg = Config::load().dole_city();
+    let mut cfg = common::r2(Config::load()).dole_city();
     cfg.vehicles.mult.car = vec![0.01, 0.01, 0.01];
     cfg.vehicles.max_steps_per_tick = 3;
     let mut w = World::new(42, cfg);
@@ -369,7 +371,7 @@ fn test_truck_hauls_six_batches_and_returns() {
 
 #[test]
 fn test_fleeing_driver_hits_body_in_radius() {
-    let mut cfg = Config::load().dole_city();
+    let mut cfg = common::r2(Config::load()).dole_city();
     cfg.vehicles.crash_per_tile = 1.0;
     cfg.vehicles.p_crash_kill = 0.0;
     let mut w = World::new(42, cfg);
@@ -401,7 +403,7 @@ fn test_fleeing_driver_hits_body_in_radius() {
     let mut dodged = [0usize; 2];
     for (i, reflex) in [0.9f32, 0.2].into_iter().enumerate() {
         let mut w = World::new(42, {
-            let mut c = Config::load().dole_city();
+            let mut c = common::r2(Config::load()).dole_city();
             c.vehicles.p_crash_kill = 0.0;
             c
         });
@@ -481,7 +483,7 @@ fn test_stolen_vehicle_chopped_into_parts() {
 
 #[test]
 fn test_street_parked_theft_roll_binds_to_controlling_gang() {
-    let mut cfg = Config::load().dole_city();
+    let mut cfg = common::r2(Config::load()).dole_city();
     cfg.vehicles.vehicle_theft_base = 1.0;
     let mut w = World::new(42, cfg);
     let gang = w.gangs()[0];
@@ -1285,7 +1287,7 @@ fn test_a_flyer_carries_its_pilot_across() {
 /// it moves, and the vehicle is gone with the ride.
 #[test]
 fn test_an_off_screen_cab_carries_its_fare() {
-    let mut cfg = Config::load();
+    let mut cfg = common::r2(Config::load());
     cfg.jobs2.p_cab = 1.0;
     cfg.jobs2.cab_min_tiles = 40;
     if let Some(l) = cfg.legs.as_mut() {
@@ -1408,7 +1410,7 @@ fn test_a_full_driver_steers_and_a_demotion_runs_on_timed() {
 
 /// The shipped city with the El on (the 2k fixture).
 fn el_city() -> World {
-    let mut cfg = Config::load();
+    let mut cfg = common::r2(Config::load());
     cfg.transit.enabled = true;
     World::new(42, cfg)
 }

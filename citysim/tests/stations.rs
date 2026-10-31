@@ -19,7 +19,7 @@ fn station_world() -> World {
     // centroids; at 2k every guard then lives nearer the Precinct than a Station
     // with a share (none posted) and the farthest Station's district has no
     // jobless adult. The Schools stay at S6's centroids here.
-    common::world_with(|c| {
+    common::world_with_r2(|c| {
         c.law.station_min_tiles = 1;
         c.ages.school_by_reach = false;
     })
@@ -66,7 +66,7 @@ fn guard_and_thief(w: &mut World, tile: citysim::components::TilePos) -> (Entity
 /// district one at `station_min_tiles = 1` where the spacing allows.
 #[test]
 fn test_stations_seeded_by_distance() {
-    let w = common::world();
+    let w = common::world_r2();
     assert!(stations::on(&w), "the shipped config has stations on");
     let n0 = stations::stations(&w).len();
     let w1 = station_world();
@@ -210,7 +210,7 @@ fn test_van_transfers_the_long_sentence() {
 /// of the tier nearest his corp's Hq, not the emptiest.
 #[test]
 fn test_exec_lives_in_the_spire_without_evictions() {
-    let mut w = common::world();
+    let mut w = common::world_r2();
     let tier = life::exec_home_tier(&w);
     assert_eq!(tier, 2, "the shipped config's exec tier");
     let (execs, housed, beds, free, want) = life::spire_supply(&w);
@@ -296,7 +296,7 @@ fn test_off_cities_write_nothing() {
     ];
     // The three cities side by side (the change tier's budget, 2026-10-19).
     let case = |k: usize, edit: fn(&mut Config)| {
-        let mut w = common::world_with(|c| {
+        let mut w = common::world_with_r2(|c| {
             c.law.station_min_tiles = 1;
             edit(c);
         });
@@ -330,7 +330,7 @@ fn test_off_cities_write_nothing() {
             h.join().expect("an off city");
         }
     });
-    let on = ron::to_string(&Config::load()).expect("config");
+    let on = ron::to_string(&common::r2(Config::load())).expect("config");
     assert!(on.contains("station_cells") && on.contains("exec_home_tier"), "the on config holds them");
 }
 
@@ -343,7 +343,7 @@ fn test_off_cities_write_nothing() {
 fn diag_spire_homes_20k() {
     let days: u64 = std::env::var("PROBE_DAYS").ok().and_then(|v| v.parse().ok()).unwrap_or(30);
     let cfg = |on: bool| {
-        let mut c = Config::load().scaled_to(20_000);
+        let mut c = common::r2(Config::load()).scaled_to(20_000);
         c.world.map = "gen:20000".into();
         c.ambient.flats_per_slot = 50.0;
         if !on {
@@ -614,7 +614,7 @@ fn escort(w: &mut World, guard: EntityId, thief: EntityId, max: u64) -> Escorted
 /// on the arrest tile for the whole leg, then landed in the Precinct.
 #[test]
 fn test_the_arrest_hand_off_rides_the_van_to_the_cells() {
-    let mut w = common::world();
+    let mut w = common::world_r2();
     let call = w.config.legs.as_ref().expect("[legs]").van_call_ticks;
     let tile = road_from_precinct(&w, 100, 140);
     let (guard, thief) = cuffed_at(&mut w, tile, Lod::Full);
@@ -653,7 +653,7 @@ fn test_the_arrest_hand_off_rides_the_van_to_the_cells() {
 /// the arrest tile for the whole leg, then in the cells.
 #[test]
 fn test_a_coarse_escort_walks_the_suspect_in() {
-    let mut w = common::world();
+    let mut w = common::world_r2();
     let walk = w.config.legs.as_ref().expect("[legs]").escort_walk_tiles;
     let tile = road_from_precinct(&w, walk / 2, walk - 2);
     let (guard, thief) = cuffed_at(&mut w, tile, Lod::Coarse);

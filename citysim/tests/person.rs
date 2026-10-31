@@ -4,6 +4,8 @@
 //! from its own state. A probe that exposes a gap is `#[ignore]`d with the
 //! gap in a comment (the gap is a behaviour fix for a later round).
 
+mod common;
+
 use citysim::contract::{Broker, ContractId, ContractKind, ContractStatus, Origin, Posting, Target};
 use citysim::exec::routine;
 use citysim::systems::life::commute_cost;
@@ -17,7 +19,7 @@ use citysim::{
 /// cloned (the change tier's budget, 2026-10-19: ~40 probes each built it).
 fn world() -> World {
     static BASE: std::sync::OnceLock<World> = std::sync::OnceLock::new();
-    BASE.get_or_init(|| World::new(42, Config::load())).clone()
+    BASE.get_or_init(|| World::new(42, common::r2(Config::load()))).clone()
 }
 
 /// The island pass phase 4: the shipped city without `[commute_pressure]`
@@ -25,7 +27,7 @@ fn world() -> World {
 fn world_no_pressure() -> World {
     static BASE: std::sync::OnceLock<World> = std::sync::OnceLock::new();
     BASE.get_or_init(|| {
-        let mut c = Config::load();
+        let mut c = common::r2(Config::load());
         c.commute_pressure = None;
         World::new(42, c)
     })
@@ -258,14 +260,19 @@ fn probe_worker_finishes_the_shift_before_an_errand() {
     w.comp_mut::<Needs>(a).expect("needs").hunger = 0.3;
     let before = coins(&w, a);
     let mut left_early = None;
+    // Round 9 Y4: the purse's peak, not its 18:15 count: at the real pace the
+    // paid worker is at a counter and has spent the meal by 18:15 (119 ->
+    // 112 at the end), which R2's walk never reached in a quarter hour.
+    let mut peak = before;
     run_to(&mut w, a, TICKS_PER_DAY + 18 * TICKS_PER_HOUR + 15, |w| {
         if w.tick < TICKS_PER_DAY + 18 * TICKS_PER_HOUR && building(w, a) != Some(employer) && left_early.is_none() {
             left_early = Some(w.tick % TICKS_PER_DAY);
         }
+        peak = peak.max(coins(w, a));
     });
-    eprintln!("worker: {before} -> {} coins, left early {left_early:?}", coins(&w, a));
+    eprintln!("worker: {before} -> {} coins (peak {peak}), left early {left_early:?}", coins(&w, a));
     assert_eq!(left_early, None, "left the workplace before 18:00");
-    assert!(coins(&w, a) > before, "paid at the shift's end ({before} -> {})", coins(&w, a));
+    assert!(peak > before, "paid at the shift's end ({before} -> peak {peak})");
 }
 
 /// An immigrant arrives with nothing (no coins, no food): within five days a
@@ -334,7 +341,7 @@ fn probe_laid_off_farm_worker_finds_work_within_14_days() {
     // The pressure pass R2: the v1 pace, 2 ticks a tile (in the halved
     // walk's city the pick was abducted and killed before the search).
     let mut w = World::new(42, {
-        let mut c = Config::load();
+        let mut c = common::r2(Config::load());
         c.exec.move_ticks_full = 2;
         c.exec.walk_tiles_per_tick = 1; // round 9 Y4: the v1 pace's tile, at its quarter ticks
         c.exec.step_res = 4;
@@ -408,7 +415,7 @@ fn probe_laid_off_farm_worker_finds_work_within_14_days() {
 /// flip (J31).
 #[test]
 fn probe_offer_migrant_reaches_the_first_shift() {
-    let mut cfg = Config::load();
+    let mut cfg = common::r2(Config::load());
     cfg.demography.p_spouse = 0.0;
     let mut w = World::new(42, cfg);
     // Day 14's midnight, when the week's offers spawn.
@@ -458,7 +465,7 @@ fn probe_night_porter_on_shift_at_two_is_paid_by_eight() {
     // another porter, one founding a business at the Hall at midnight and
     // walking home to bed before the shift (no household mechanism in her
     // night); this pins the city the probe was written for.
-    let mut cfg = Config::load();
+    let mut cfg = common::r2(Config::load());
     cfg.household.enabled = false;
     let mut w = World::new(42, cfg);
     let porter_role = w.config.trade_role("night_porter").expect("the night_porter trade is configured");
@@ -568,7 +575,7 @@ fn probe_gun_never_takes_a_hit_on_kin() {
         // Lives at work phase 2: with the household on, the day-2 city's first
         // married civilian (#590) is killed on day 3 before the hit resolves;
         // this pins the city the probe was written for.
-        let mut cfg = Config::load();
+        let mut cfg = common::r2(Config::load());
         cfg.household.enabled = false;
         let mut w = World::new(42, cfg);
         w.run_ticks(2 * TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
@@ -1017,7 +1024,7 @@ fn probe_dry_beg_is_an_honest_hour() {
 /// those holding 21x the rent.
 #[test]
 fn probe_far_worker_with_one_rent_moves_near_work() {
-    let mut cfg = Config::load();
+    let mut cfg = common::r2(Config::load());
     // Transit phase 3: the relocation premise is a far walker; with the El on
     // `commute_cost` rides and no single farmer reads far (the El case is
     // `probe_el_*` and `tests/transit.rs`).
@@ -1189,7 +1196,7 @@ fn probe_near_candidate_hired_before_a_far_skilled_one() {
 /// farmers and the median commute stayed 116 tiles.
 #[test]
 fn probe_city_grows_homes_toward_jobs() {
-    let mut cfg = Config::load();
+    let mut cfg = common::r2(Config::load());
     // The runtime rule, on the city without the pre-roll: the pre-roll
     // builds until no employer has far workers past its free beds in range
     // while a Lot or floor is left there (its most-far employer is then the
@@ -1245,7 +1252,7 @@ fn probe_working_couple_moves_near_work() {
     // Round 4 T2 re-pin (the Lot layout): the Schools seeded by reach take the Lots near the couples' work, so no long-commute couple has room built near it. The Schools stay at S6's
     // district centroids here (`[ages] school_by_reach = false`).
     let mut w = World::new(42, {
-        let mut c = Config::load();
+        let mut c = common::r2(Config::load());
         c.ages.school_by_reach = false;
         c
     });
@@ -1468,7 +1475,7 @@ fn probe_worker_eats_before_the_shift_not_during_it() {
     // Round 4 T2 re-pin (the Lot layout): the Schools seeded by reach moved the Lots and the day's picks; the subject is the meal before the shift, not the School. The Schools stay at S6's
     // district centroids here (`[ages] school_by_reach = false`).
     let mut w = World::new(42, {
-        let mut c = Config::load();
+        let mut c = common::r2(Config::load());
         c.ages.school_by_reach = false;
         c
     });
@@ -1621,7 +1628,7 @@ fn probe_worker_sleeps_the_night_before_a_shift() {
     // home spot) and walks five hours home to a 02:49 bedtime, then naps at
     // 08:23 (mean energy 0.83, one on Sleep); this pins the city the bound
     // was written for.
-    let mut cfg = Config::load();
+    let mut cfg = common::r2(Config::load());
     cfg.household.enabled = false;
     let mut w = World::new(42, cfg);
     w.run_ticks(3 * TICKS_PER_DAY + 18 * TICKS_PER_HOUR);
@@ -1677,7 +1684,7 @@ fn probe_worker_sleeps_the_night_before_a_shift() {
 #[test]
 fn probe_sweeper_stays_near_its_beat() {
     let beat_walk = |near: bool| -> (f64, usize) {
-        let mut cfg = Config::load();
+        let mut cfg = common::r2(Config::load());
         cfg.life.hf_hire_near = near;
         cfg.life.hf_relocate = near;
         cfg.life.hf_grow_housing = near;
@@ -1771,7 +1778,7 @@ fn probe_evicted_worker_rehouses_on_the_first_rent() {
 /// it (nor anywhere it cannot pay the first rent of).
 #[test]
 fn probe_trade_respects_rent_and_the_evictor() {
-    let mut cfg = Config::load();
+    let mut cfg = common::r2(Config::load());
     // Transit phase 3: the relocation premise is a far walker; with the El on
     // `commute_cost` rides and no single farmer reads far (the El case is
     // `probe_el_*` and `tests/transit.rs`).
@@ -1855,7 +1862,7 @@ fn probe_worker_makes_one_grocery_run_to_the_nearest_detour_market() {
     // Lives at work phase 3: on the civic city the pick makes two grocery
     // runs in the window; this pins the city the probe was written for.
     // Lives at work phase 6: so does the careers city (two runs); pinned off.
-    let mut cfg = Config::load();
+    let mut cfg = common::r2(Config::load());
     cfg.strip_civic();
     cfg.strip_careers();
     let mut w = World::new(42, cfg);
@@ -2148,7 +2155,7 @@ fn widow_pick() -> WidowPick {
     // Round 4 wave 2: no job search (the subject is the Hit market, not work;
     // with it the city moved and the pick, a jobless thief, was arrested and
     // sentenced on the way to the Fixer).
-    let mut cfg = Config::load();
+    let mut cfg = common::r2(Config::load());
     cfg.search = None;
     // Round 6 V5 (premise moved): with the turf war on, the 2k city's corner
     // fights moved the day-10 city and no widow's Fixer took the Hit inside
@@ -2421,7 +2428,7 @@ use citysim::systems::transit;
 /// day worker (09:00-18:00, a workday) with no vehicle whose commute the El
 /// wins by 40+ ticks at 07:00: (world, worker, employer, the walk's ticks).
 fn el_commuter() -> (World, EntityId, EntityId, u64) {
-    let mut cfg = Config::load();
+    let mut cfg = common::r2(Config::load());
     cfg.transit.enabled = true;
     // Lives at work phase 6: careers off (on its city the cut-line commuter
     // does not reach work by noon; the subject is the El, not the ages).
@@ -2716,7 +2723,7 @@ fn probe_married_pick_is_home_by_nine_with_the_spouse() {
     // probe was written for. Lives at work phase 6: the careers city's pick
     // is a Wanderer at 21:00 again (its seeded jobs move the evening);
     // pinned off as well.
-    let mut cfg = Config::load();
+    let mut cfg = common::r2(Config::load());
     cfg.strip_civic();
     cfg.strip_careers();
     // The island pass phase 1: `[distance]` off too (its seeded staff pick
@@ -2805,7 +2812,7 @@ fn world_at_day2() -> World {
     // with no move of its own); the probes on it read the base relocation.
     // The pressure pass R2: at the v1 pace, 2 ticks a tile (the halved
     // walk's city never bought its child out).
-    let mut c = Config::load();
+    let mut c = common::r2(Config::load());
     c.commute_pressure = None;
     c.exec.move_ticks_full = 2;
     c.exec.walk_tiles_per_tick = 1; // round 9 Y4: the v1 pace's tile, at its quarter ticks
@@ -3060,12 +3067,12 @@ fn probe_super_walks_under_four_hours_a_shift() {
         // control), OPEN-169's round; re-read at OPEN-169 (the perf pass
         // phase 0 retired the switch and re-read it, 2026-10-24).
         let on = sc.spawn(|| {
-            let mut cfg = Config::load();
+            let mut cfg = common::r2(Config::load());
             cfg.distance = None;
             walked(World::new(42, cfg), "civic on")
         });
         let off = sc.spawn(|| {
-            let mut cfg = Config::load();
+            let mut cfg = common::r2(Config::load());
             cfg.distance = None;
             cfg.strip_civic();
             walked(World::new(42, cfg), "civic off (control)")
@@ -3088,7 +3095,7 @@ fn probe_super_walks_under_four_hours_a_shift() {
 #[test]
 fn probe_cabbie_drives_a_fare_on_his_shift() {
     fn fares(p_cab: f32) -> (u32, u32) {
-        let mut cfg = Config::load();
+        let mut cfg = common::r2(Config::load());
         cfg.jobs2.p_cab = p_cab;
         // The pre-view pass phase 5: the roll alone books a ride here (the
         // El-missed commute's cab is the `fares` shape's own demand).
@@ -3160,7 +3167,7 @@ fn probe_cabbie_drives_a_fare_on_his_shift() {
 #[test]
 fn probe_pimp_purse_grows_on_a_pitch_night() {
     use citysim::systems::gang;
-    let mut cfg = Config::load();
+    let mut cfg = common::r2(Config::load());
     cfg.vice.p_street_visit = 1.0;
     cfg.vice.street_intimacy = 1.0;
     // Round 4 wave 2: the probe holds the pimp out of the labour market, so
@@ -3478,7 +3485,7 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
 #[test]
 fn probe_ceo_meets_a_named_employee_in_a_week() {
     fn met(tower: bool) -> usize {
-        let mut cfg = Config::load();
+        let mut cfg = common::r2(Config::load());
         if !tower {
             cfg.strip_tower();
         }
@@ -3537,7 +3544,7 @@ fn probe_ceo_meets_a_named_employee_in_a_week() {
 #[test]
 fn probe_reporter_stands_at_the_scene_on_his_shift() {
     fn at_scene(tower: bool) -> bool {
-        let mut cfg = Config::load();
+        let mut cfg = common::r2(Config::load());
         if !tower {
             cfg.strip_tower();
         }

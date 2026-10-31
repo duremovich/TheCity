@@ -3526,9 +3526,24 @@ fn exec_speed(world: &World, id: EntityId, e: &ExecState) -> f32 {
         ExecState::Goto { .. } if world.comp::<Kit>(id).is_some_and(|k| k.driving.is_some()) => {
             f32::from(world.config.vehicles.max_steps_per_tick.max(1))
         }
-        ExecState::Goto { .. } | ExecState::GotoTimed { .. } => world.config.exec.walk_tiles(1).max(1) as f32,
+        // Round 9 Y4: chromed legs (`Kit.walk_mult` under 1) step faster.
+        ExecState::Goto { .. } | ExecState::GotoTimed { .. } => {
+            let m = world.comp::<Kit>(id).map_or(1.0, |k| k.walk_mult).clamp(0.05, 1.0);
+            (world.config.exec.walk_tiles(1).max(1) as f32 / m).ceil()
+        }
         ExecState::Fly { .. } => 1.0 / world.config.vehicles.flyer_ticks_per_tile.max(0.01),
         ExecState::Ride { .. } => 1.0 / world.config.transit.ride_ticks_per_tile.max(0.01),
+        // Round 9 Y4: an Idle body whose step is a walk (a segment's end
+        // re-starting it, a plan's first step) walks the next minute at the
+        // pace (it stepped one tile before, inside the slack).
+        ExecState::Idle
+            if world.comp::<Brain>(id).and_then(|b| b.current_step()).is_some_and(|s| {
+                matches!(s.action, ActionKind::GoTo(_) | ActionKind::FleeToHome | ActionKind::Escort)
+            }) =>
+        {
+            let m = world.comp::<Kit>(id).map_or(1.0, |k| k.walk_mult).clamp(0.05, 1.0);
+            (world.config.exec.walk_tiles(1).max(1) as f32 / m).ceil()
+        }
         _ => 0.0,
     }
 }

@@ -16,7 +16,13 @@ use citysim::{
     ActionKind, BuildingKind, Config, DeathCause, EntityId, GangMember, Job, Lod, MemoryKind, Personality, Position,
     RelKind, Role, Skills, World, TICKS_PER_DAY, TICKS_PER_HOUR,
 };
-use common::{adults, dole_world};
+use common::adults;
+
+/// Round 9 Y4: the dole city at R2's pace (`common::r2`): the chase scenes
+/// were written on the 2k map at one tile a minute.
+fn dole_world() -> World {
+    World::new(42, common::r2(Config::load()).dole_city())
+}
 
 /// `n` free adults with no edge between any two, no gang, no guard's job.
 fn strangers(w: &World, n: usize) -> Vec<EntityId> {
@@ -814,7 +820,7 @@ fn test_chase_reads_hunt_state_without_a_contract_run() {
     // intel readers answer from it; a god Hunt over three days runs the
     // same twice.
     let run = || {
-        let mut w = World::new(42, Config::load().dole_city());
+        let mut w = World::new(42, common::r2(Config::load()).dole_city());
         let [h, t] = strangers(&w, 2)[..] else { unreachable!() };
         hunt::god_hunt(&mut w, h, t).expect("a god Hunt");
         let mut seen = Vec::new();
@@ -1696,7 +1702,7 @@ fn test_busted_fixer_not_busted_again_on_reopening() {
 /// target to come home rather than kill it abroad.
 #[test]
 fn test_an_away_target_is_neither_posted_nor_struck() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, common::r2(Config::load()));
     w.config.missions.strike_k = 100.0;
     let [buyer, t, taker] = strangers(&w, 3)[..] else { unreachable!() };
     gun(&mut w, taker);
@@ -1729,7 +1735,7 @@ fn test_an_away_target_is_neither_posted_nor_struck() {
 /// days got 0 c); the taker's (`on_contact`, the ledger's report) still do.
 #[test]
 fn test_bug15_taken_locate_pays_the_taker_only() {
-    let mut w = common::world();
+    let mut w = common::world_r2();
     w.config.bounty.min_gap_hours = 0;
     let corp = w.corps()[0];
     w.comp_mut::<citysim::Corp>(corp).expect("corp").treasury = 100_000;
