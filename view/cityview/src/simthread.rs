@@ -84,6 +84,10 @@ fn grow(r: Rect, m: u16) -> Rect {
 
 /// The subject's place: its vehicle's, else its walk's (a Coarse walker on his way), else its `Position`.
 fn subject_tile(world: &World, e: EntityId) -> Option<TilePos> {
+    // C6b: a building as the subject (a shop-house's units): the camera stands at its door
+    if let Some(b) = world.comp::<citysim::Building>(e) {
+        return Some(b.door);
+    }
     if let Some(v) = citysim::systems::motion::vehicle_of(world, e)
         && let Some(m) = world.motions.get(&v)
     {
@@ -93,6 +97,9 @@ fn subject_tile(world: &World, e: EntityId) -> Option<TilePos> {
 }
 
 fn caption(world: &World, e: EntityId) -> String {
+    if world.has::<citysim::Building>(e) {
+        return format!("{} (its door)", world.name_of(e));
+    }
     let name = world.comp::<Identity>(e).map_or("?".into(), |i| i.name.clone());
     let b = world.comp::<Brain>(e);
     let goal = b.and_then(|b| b.current_goal).map_or("-".into(), |g| format!("{g:?}"));
@@ -133,8 +140,9 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         .entities()
         .find(|e| e.index == a.follow)
         .unwrap_or_else(|| fatal(format!("--follow {}: no living entity with that index at tick {}", a.follow, world.tick)));
-    if !world.has::<Identity>(subject) || subject_tile(&world, subject).is_none() {
-        fatal(format!("--follow {}: {subject:?} is no body with a place", a.follow));
+    let building = world.has::<citysim::Building>(subject);
+    if !(world.has::<Identity>(subject) || building) || subject_tile(&world, subject).is_none() {
+        fatal(format!("--follow {}: {subject:?} is no body with a place nor a building", a.follow));
     }
     if let Some(&t) = a.shots.iter().chain(a.from.iter()).find(|&&t| t < world.tick) {
         fatal(format!("tick {t} (--shots / --from) is before the save's tick {}", world.tick));

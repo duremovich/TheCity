@@ -4857,6 +4857,52 @@ reserve = true                     # the corp pays only from what it holds above
 bunks_per_floor = 30               # the converted block's beds a floor, the interior allowing (= beds_per_floor)
 build_fallback = true              # nothing for sale in reach: build on the nearest vacant Lot within cap_ticks
 
+# The city milestone C6b (docs/CITY_MILESTONE.md § C6b, Dylan's answer 3, 2026-10-30; systems/floors.rs): floors as
+# tenancies, the economy of floors. The host's owner is the landlord: each tenancy (a use on some floors of its host,
+# C6a) pays him floor rent at midnight (Flow::FloorRent; a city-owned host's to the Treasury); a corp or the city pays in
+# full, a person or a gang from what it holds. evict_days short in a row and the landlord takes the floor back: a
+# business of a unit_kinds kind to a vacant unit (its staff let go, a tenancy Lot), any other kind's lease (a Home, a
+# Mission, a Fixer) to the landlord with whoever lives or works there; a gang's Hideout is never put out. A founder's
+# Register takes a vacant unit within found_reach_ticks of his Home door first, then a Lot. A company buyout
+# ([company_housing.buyout]) leases the top storeys of a Home host instead of buying the block. A tenancy's hours are
+# its own (Building.hours, an owner's call later) or its kind's row below; the view lights a unit's sign while open.
+# Without this table: no floor rent, founding takes a Lot, a buyout buys the block. Placeholders.
+[tenancy]
+floor_rent = [1, 2, 4]             # a tenancy's floor rent a day per storey of its span by tier (Sump, Mid, Spire): [rent]
+                                   # base's Home rent a storey (x a corp landlord's Housing level, the Home rent's rule)
+revenue_share = 0.05               # ... plus this share of its mean daily revenue over the last seven days (a percentage rent)
+evict_days = 7                     # a week of floor rent short in a row and the landlord takes the floor back (= [rent] evict_days)
+found_reach_ticks = 20             # a founder takes a vacant unit within this walk of his Home door (20 min) before a Lot
+unit_kinds = ["Bar", "NoodleBar", "Clinic", "Garage", "Den", "Arcade", "Club", "Lounge", "StripClub", "Brothel",
+              "Boutique", "Dollhouse", "BlackClinic", "Gunsmith", "Feed", "BdStudio", "Lab"]
+                                   # the kinds a unit takes (a shop front, a workshop, an office): not a Hotel's beds, a
+                                   # Home, a FightPit's ring, a Fixer's or a Mission's purse (their leases pass whole)
+lease_mult = 0.5                   # a buyout's lease of storeys: this x their value x [company_housing.buyout] price_mult,
+                                   # paid once to the landlord; the storeys then pay floor rent
+default_hours = [480, 1320]        # a kind with no row below is open 08:00-22:00 ([from, to) minutes)
+hours = [                          # per kind, [from, to) minutes of the day; to below from runs past midnight
+    { kind = "Bar", open = [1080, 240] },           # 18:00-04:00
+    { kind = "NoodleBar", open = [600, 120] },      # 10:00-02:00
+    { kind = "Club", open = [1260, 300] },          # 21:00-05:00
+    { kind = "Den", open = [1200, 360] },
+    { kind = "Arcade", open = [720, 120] },
+    { kind = "Lounge", open = [1140, 180] },
+    { kind = "StripClub", open = [1200, 300] },
+    { kind = "Brothel", open = [1200, 360] },
+    { kind = "Dollhouse", open = [1200, 360] },
+    { kind = "BlackClinic", open = [1260, 360] },   # the back room opens after dark
+    { kind = "Fixer", open = [1200, 240] },
+    { kind = "Market", open = [420, 1260] },        # 07:00-21:00
+    { kind = "Clinic", open = [480, 1200] },
+    { kind = "Garage", open = [480, 1200] },
+    { kind = "Boutique", open = [600, 1200] },
+    { kind = "Gunsmith", open = [600, 1140] },
+    { kind = "Mission", open = [360, 1320] },
+    { kind = "Hideout", open = [0, 1440] },         # always
+    { kind = "SecurityOffice", open = [0, 1440] },
+    { kind = "Feed", open = [0, 1440] },
+]
+
 # The island pass phase 4 (docs/ISLAND_PASS.md I2, Dylan 2026-10-22; systems/commute.rs): a far job is a pressure that
 # resolves over weeks. Each midnight a worker whose commute (distance::travel, the Home door to the work tile) is past
 # far_ticks builds a day of pressure (a nearer one drops it). Past move_days the household looks for a Home nearer work

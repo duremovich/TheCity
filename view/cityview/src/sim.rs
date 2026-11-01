@@ -50,12 +50,29 @@ pub struct Vehicle {
     pub riders: u16,
 }
 
+/// C6b: a business on its host's floors, its sign on the facade (live frames only).
+#[derive(Clone)]
+pub struct Unit {
+    pub id: u64,
+    /// The host's rect, tiles `[x, y, w, h]`, and the door the sign hangs by
+    pub rect: [f32; 4],
+    pub door: [f32; 2],
+    pub floor: u8,
+    /// The sign's colour (a hash of the kind)
+    pub hue: u8,
+    pub lit: bool,
+    pub fresh: bool,
+}
+
 pub struct SimFrame {
     pub tick: u64,
     pub clock: String,
     pub agents: Vec<Agent>,
     pub vehicles: Vec<Vehicle>,
     pub events: usize,
+    pub units: Vec<Unit>,
+    /// C6b: the ring's centre (tiles): the follow-cam's place for a building subject (no body in the frame)
+    pub centre: Option<[f32; 2]>,
 }
 
 #[derive(Resource)]
@@ -74,6 +91,8 @@ pub struct Sim {
     pub mats: Vec<Handle<StandardMaterial>>,
     pub capsule: Handle<Mesh>,
     pub boxes: [Handle<Mesh>; 5],
+    /// C6b: a unit's sign
+    pub sign: Handle<Mesh>,
     pub hud: String,
     /// C2: the sim thread's buffer (`--save`), the last frame pair's sequence number, the subject's key and caption
     pub live: Option<std::sync::Arc<crate::simthread::Shared>>,
@@ -147,7 +166,24 @@ impl SimFrame {
                 riders: v.riders.len() as u16,
             })
             .collect();
-        SimFrame { tick: f.tick, clock: f.clock.clone(), agents, vehicles, events: f.events.len() }
+        let units = f
+            .buildings
+            .iter()
+            .filter_map(|b| {
+                let u = b.unit.as_ref()?;
+                Some(Unit {
+                    id: ekey(b.id),
+                    rect: [f32::from(u.rect.x), f32::from(u.rect.y), f32::from(u.rect.w), f32::from(u.rect.h)],
+                    door: tf(u.door),
+                    floor: u.floor,
+                    hue: (u.kind as u8).wrapping_mul(5) % SIGN_RGB.len() as u8,
+                    lit: u.lit,
+                    fresh: u.fresh,
+                })
+            })
+            .collect();
+        let centre = Some([f32::from(f.ring.x) + f32::from(f.ring.w) / 2.0, f32::from(f.ring.y) + f32::from(f.ring.h) / 2.0]);
+        SimFrame { tick: f.tick, clock: f.clock.clone(), agents, vehicles, events: f.events.len(), units, centre }
     }
 }
 
@@ -201,6 +237,17 @@ const ACT_RGB: [[f32; 3]; 9] = [
     [0.9, 0.9, 0.5],
 ];
 const LOD_RGB: [[f32; 3]; 3] = [[0.25, 1.0, 0.35], [1.0, 0.7, 0.15], [1.0, 0.15, 0.1]];
+/// C6b: the signs' colours (a kind's hue), lit while open, dim when shut; a unit founded today burns white.
+const SIGN_RGB: [[f32; 3]; 8] = [
+    [1.0, 0.2, 0.6],
+    [0.2, 0.9, 1.0],
+    [1.0, 0.8, 0.1],
+    [0.5, 1.0, 0.2],
+    [0.7, 0.3, 1.0],
+    [1.0, 0.45, 0.1],
+    [0.1, 0.5, 1.0],
+    [1.0, 0.15, 0.15],
+];
 const VEH_RGB: [[f32; 3]; 2] = [[0.55, 0.75, 1.0], [1.0, 0.15, 0.1]];
 const TRACK_RAIL: u8 = 0;
 const TRACK_STREET: u8 = 1;
@@ -276,6 +323,8 @@ impl Sim {
                 agents,
                 vehicles,
                 events: f["events"].as_array().map_or(0, |e| e.len()),
+                units: vec![],
+                centre: None,
             });
         }
         assert!(!frames.is_empty(), "{}: no frames", path.display());
@@ -293,6 +342,7 @@ impl Sim {
             ents: HashMap::new(),
             mats: vec![],
             capsule: Handle::default(),
+            sign: Handle::default(),
             boxes: Default::default(),
             hud: String::new(),
             live: None,
@@ -319,6 +369,7 @@ impl Sim {
             ents: HashMap::new(),
             mats: vec![],
             capsule: Handle::default(),
+            sign: Handle::default(),
             boxes: Default::default(),
             hud: "sim: loading the save".into(),
             live: Some(shared),
@@ -413,7 +464,17 @@ pub fn setup_sim(mut sim: ResMut<Sim>, mut meshes: ResMut<Assets<Mesh>>, mut mat
     for c in VEH_RGB.iter() {
         m.push(unlit(&mut mats, *c, 0.35));
     }
+    // C6b: the signs, lit then dim per hue, then the fresh unit's white
+    for c in SIGN_RGB.iter() {
+        m.push(unlit(&mut mats, *c, 2.2));
+    }
+    for c in SIGN_RGB.iter() {
+        m.push(unlit(&mut mats, [c[0] * 0.25, c[1] * 0.25, c[2] * 0.25], 0.05));
+    }
+    m.push(unlit(&mut mats, [1.0, 1.0, 0.9], 10.0));
     sim.mats = m;
+    // a shop sign: 3.2 m wide, 1.5 m tall, 0.3 m deep (its face along the wall)
+    sim.sign = meshes.add(Cuboid::new(3.2, 1.5, 0.3));
 }
 
 /// Advance the playback and place every placeholder: frame i and i + 1 lerped for the ids in both.
@@ -531,6 +592,49 @@ pub fn update_sim(
         let mesh = sim.boxes[v.ride as usize].clone();
         place(&mut commands, &mut sim, (1, v.id), mesh, mat, bv(p.x, p.y, z), yaw);
     }
+    // C6b: a sign per unit on its host's facade by its door, on its storey; units sharing a door and a storey
+    // spread along the wall. Lit while open, dim when shut, white the day it was founded.
+    let units: Vec<Unit> = sim.frames[j].units.clone();
+    let mut by_spot: HashMap<(i32, i32, u8), Vec<u64>> = HashMap::new();
+    for un in &units {
+        by_spot.entry((un.door[0] as i32, un.door[1] as i32, un.floor)).or_default().push(un.id);
+    }
+    let (mut signs, mut lit_n, mut fresh_n) = (0usize, 0usize, 0usize);
+    let base = ACTS.len() + LOD_RGB.len() + VEH_RGB.len();
+    for un in &units {
+        let [x, y, w, _] = un.rect;
+        // the wall the door is on: its outward normal in tiles (west, east, north, south)
+        let (nx, ny) = if un.door[0] <= x {
+            (-1.0, 0.0)
+        } else if un.door[0] >= x + w - 1.0 {
+            (1.0, 0.0)
+        } else if un.door[1] <= y {
+            (0.0, -1.0)
+        } else {
+            (0.0, 1.0)
+        };
+        let spot = &by_spot[&(un.door[0] as i32, un.door[1] as i32, un.floor)];
+        let k = spot.iter().position(|&i| i == un.id).unwrap_or(0) as f32 - (spot.len() as f32 - 1.0) / 2.0;
+        let along = 3.6 / sim.tile_m;
+        // tiles: out of the wall by half a tile, along it by the unit's slot (tile y runs south)
+        let t = [un.door[0] + nx * 0.55 - ny * k * along, un.door[1] + ny * 0.55 + nx * k * along];
+        let p = sim.metres(t, un.id, false);
+        let z = stream.ground_z(p.x, p.y).unwrap_or(0.0) + Sim::storey_z(un.floor) + if un.floor == 0 { 3.0 } else { 1.6 };
+        let yaw = if nx != 0.0 { std::f32::consts::FRAC_PI_2 } else { 0.0 };
+        // a placeholder keeps the material it spawned with: each state (lit, dim, founded today) is its own entity
+        let (state, mat) = if un.fresh {
+            fresh_n += 1;
+            (4, sim.mats[base + 2 * SIGN_RGB.len()].clone())
+        } else if un.lit {
+            lit_n += 1;
+            (2, sim.mats[base + un.hue as usize].clone())
+        } else {
+            (3, sim.mats[base + SIGN_RGB.len() + un.hue as usize].clone())
+        };
+        signs += 1;
+        let mesh = sim.sign.clone();
+        place(&mut commands, &mut sim, (state, un.id), mesh, mat, bv(p.x, p.y, z), yaw);
+    }
     // hide what this frame does not hold
     let seen: std::collections::HashSet<(u8, u64)> = seen.into_iter().collect();
     for (k, e) in sim.ents.iter() {
@@ -540,10 +644,20 @@ pub fn update_sim(
             v.set_if_neq(Visibility::Hidden);
         }
     }
+    // C6b: a building subject (`--follow` a building): no body matched, the camera stands at the ring's centre
+    if subject_at.is_none()
+        && subject.is_some()
+        && let Some(c) = sim.frames[j].centre
+        && sim.frames[j].agents.iter().all(|a| Some(a.id) != subject)
+    {
+        let p = sim.metres(c, 0, false);
+        subject_at = Some((Vec3::new(p.x, p.y, stream.ground_z(p.x, p.y).unwrap_or(0.0)), 0.0));
+    }
     sim.subject_at = subject_at;
     let stack = on_tile.values().copied().max().unwrap_or(0);
     let f = &sim.frames[j];
     let follow = if sim.live.is_some() { format!("\nfollowing {}", sim.caption) } else { String::new() };
+    let follow = if signs > 0 { format!("{follow}\nsigns {signs} (lit {lit_n}, founded today {fresh_n})") } else { follow };
     sim.hud = format!(
         "sim tick {} {}  agents {} (street {street}, most on a tile {stack}, indoors {indoors}, aboard {aboard}; Full {} Coarse {} Stat {})  vehicles car {} van {} train {} flyer {} foot {} ({riders} aboard)  events {}",
         f.tick,

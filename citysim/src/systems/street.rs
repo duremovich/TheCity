@@ -432,7 +432,7 @@ pub fn can_go_derelict(kind: BuildingKind) -> bool {
 
 /// Put everyone living in or standing inside `b` out at its door, homeless
 /// (no event, no `evicted_by`): the re-housing wait runs from now.
-fn empty_building(world: &mut World, b: EntityId) {
+pub(crate) fn empty_building(world: &mut World, b: EntityId) {
     let Some(outside) = world.comp::<Building>(b).map(|bd| world.outside_door(bd)) else { return };
     let tick = world.tick;
     let residents: Vec<EntityId> = world.residents_of(b).to_vec();

@@ -435,6 +435,14 @@ pub struct Config {
     /// the relocation and the company move-in are the base ones.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commute_pressure: Option<CommutePressureCfg>,
+    /// The city milestone C6b (docs/CITY_MILESTONE.md § C6b): floors as
+    /// tenancies, the economy of floors (`systems/floors.rs`): a tenancy's
+    /// floor rent to its host's owner, the evictions by the floor, founding
+    /// into a vacant unit, a buyout's lease of floors, a tenancy's hours.
+    /// `None` (not written into a save) with the key absent: tenancies pay
+    /// no floor rent and founding takes a Lot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenancy: Option<TenancyCfg>,
     /// The island pass phase 5 (docs/ISLAND_PASS.md I3; OPEN-165): a vehicle
     /// in motion is an entity with its own position, its riders aboard
     /// (`systems/motion.rs`). `None` (not written into a save) with
@@ -987,6 +995,52 @@ pub struct CompanyHousingCfg {
     /// save) with the key absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub buyout: Option<CompanyBuyoutCfg>,
+}
+
+/// The city milestone C6b `[tenancy]`: the landlord, founding into a unit,
+/// a lease of floors, a tenancy's hours. Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TenancyCfg {
+    /// A tenancy's floor rent a day per storey of its span, by its tier
+    /// (Sump, Mid, Spire): a city-owned host's as is, a corp landlord's x its
+    /// Housing level (the Home rent's rule), an agent's or a gang's as is.
+    pub floor_rent: [i64; 3],
+    /// And this share of the tenancy's mean daily revenue over its last
+    /// seven days (a percentage rent), added to the base.
+    pub revenue_share: f32,
+    /// Days of floor rent short in a row before the landlord takes the
+    /// floor back: a business to a vacant unit, a Home's lease to the
+    /// landlord (its households stay, as his tenants).
+    pub evict_days: u8,
+    /// Founding takes a vacant unit within this walking travel (ticks) of
+    /// the founder's Home door first, then a Lot.
+    pub found_reach_ticks: u64,
+    /// The kinds a unit takes (a shop front, a workshop, an office); the
+    /// rest need a Lot.
+    pub unit_kinds: Vec<BuildingKind>,
+    /// A company buyout's lease of floors: x the storeys' value
+    /// (`[company_housing.buyout] price_mult` applies on top), paid once to
+    /// the landlord; the floors then pay floor rent.
+    pub lease_mult: f32,
+    /// The hours of a kind with no `hours` row, `[from, to)` minutes.
+    pub default_hours: (u16, u16),
+    /// Per kind: its opening hours (`to` below `from` runs past midnight).
+    #[serde(default)]
+    pub hours: Vec<TenancyHoursCfg>,
+}
+
+/// One `[tenancy] hours` row.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TenancyHoursCfg {
+    pub kind: BuildingKind,
+    pub open: (u16, u16),
+}
+
+impl TenancyCfg {
+    /// `kind`'s opening hours: its row, else `default_hours`.
+    pub fn hours_of(&self, kind: BuildingKind) -> (u16, u16) {
+        self.hours.iter().find(|r| r.kind == kind).map_or(self.default_hours, |r| r.open)
+    }
 }
 
 /// The island pass phase 3b `[company_housing.inside]` (I6): the seeded

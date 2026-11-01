@@ -1819,6 +1819,10 @@ fn run(args: RunArgs) -> Result<(), String> {
         for ((kind, role), n) in &role_tally {
             let _ = writeln!(events_out, "#role	{kind}	{role}	{n}");
         }
+        // The city milestone C6b: the vacant units by district at the run's end.
+        for line in citysim::systems::floors::report(&world) {
+            let _ = writeln!(events_out, "{line}");
+        }
         for (k, v) in &world.probe.gang_in {
             let _ = writeln!(events_out, "#gang_flow	in	{k}	{v}");
         }

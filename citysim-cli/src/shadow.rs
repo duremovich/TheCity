@@ -1592,7 +1592,8 @@ fn header(world: &World, t: &Track) -> String {
         .flatten()
         .copied()
         .filter(|&b| world.comp::<Building>(b).is_some_and(|bl| bl.owner == Some(id)))
-        .map(|b| bname(world, b))
+        // The city milestone C6b: a tenancy's floors and floor rent.
+        .map(|b| citysim::systems::floors::lease_text(world, b).unwrap_or_else(|| bname(world, b)))
         .collect();
     if !owned.is_empty() {
         let _ = writeln!(h, "- **Owns**: {}", owned.join(", "));
@@ -2187,6 +2188,12 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                 }
                 if *to == Some(id) && *refund {
                     t.refunds += 1;
+                }
+                // The city milestone C6b: a floor rent paid or taken is a line of its own.
+                if matches!(flow, F::FloorRent) {
+                    let dir =
+                        if *from == Some(id) { format!("paid -{coins}c to") } else { format!("took +{coins}c from") };
+                    t.log(*tick, "rent", format!("FLOOR RENT {dir} {who}"));
                 }
                 if matches!(flow, citysim::systems::ownership::Flow::Tribute) && *to == Some(id) {
                     t.tribute_in += *coins;

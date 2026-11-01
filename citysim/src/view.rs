@@ -146,6 +146,20 @@ pub struct ViewBuilding {
     pub derelict: bool,
     /// Looted shut or under construction now.
     pub closed: bool,
+    /// C6b: a business's unit (a tenancy that is no Home or vacant Lot): its sign.
+    pub unit: Option<ViewUnit>,
+}
+
+/// C6b: a business on its host's floors, for its sign on the facade: the host's rect, the door its sign hangs by,
+/// its storey, its kind (the sign's colour), lit while open (`floors::open_at`), and founded within the last day.
+#[derive(Clone, Debug)]
+pub struct ViewUnit {
+    pub kind: BuildingKind,
+    pub rect: Rect,
+    pub door: TilePos,
+    pub floor: u8,
+    pub lit: bool,
+    pub fresh: bool,
 }
 
 /// A building's fixed facts (the file form's header; the client reads them once).
@@ -418,6 +432,7 @@ pub fn snapshot(world: &World, ring: Rect) -> ViewFrame {
             demolished: bd.demolished,
             derelict: bd.derelict,
             closed: bd.closed_until.is_some_and(|t| t > tick) || bd.under_construction_until.is_some_and(|t| t > tick),
+            unit: view_unit(world, b, bd),
         });
     }
 
@@ -466,6 +481,25 @@ pub fn snapshot(world: &World, ring: Rect) -> ViewFrame {
         corpses,
         events,
     }
+}
+
+/// C6b: `b`'s sign, when it is a business on its host's floors.
+fn view_unit(world: &World, b: EntityId, bd: &Building) -> Option<ViewUnit> {
+    bd.within?;
+    if bd.demolished || bd.derelict || matches!(bd.kind, BuildingKind::Home | BuildingKind::Lot) {
+        return None;
+    }
+    let tod = world.tick_of_day();
+    let fresh =
+        world.floor_index.founded.get(&b).is_some_and(|&t| world.tick.saturating_sub(t) < crate::time::TICKS_PER_DAY);
+    Some(ViewUnit {
+        kind: bd.kind,
+        rect: bd.rect,
+        door: bd.door,
+        floor: bd.span.map_or(0, |(lo, _)| lo),
+        lit: crate::systems::floors::open_at(world, b, tod),
+        fresh,
+    })
 }
 
 /// The ring's buildings' fixed facts (the file form's header).

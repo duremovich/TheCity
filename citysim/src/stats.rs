@@ -1644,6 +1644,25 @@ pub struct Jobs2Cols {
     /// ... and of those, the suspect cuffed all the same
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub backup_cuffed: u32,
+    /// The city milestone C6b (`systems::floors`): the floor rent paid to
+    /// the landlords today (`Flow::FloorRent`), the tenancies short on it,
+    /// the floors taken back to a vacant unit and the leases passed to the
+    /// landlord, the foundings into a unit, the company buyouts' leases of
+    /// floors, and the vacant units at midnight.
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub flow_floor_rent: i64,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub floor_short: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub floor_evicted: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub floor_taken: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub unit_foundings: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub floor_leases: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub units_vacant: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -2259,6 +2278,13 @@ impl Jobs2Cols {
                 "backup_called",
                 "backup_fights",
                 "backup_cuffed",
+                "flow_floor_rent",
+                "floor_short",
+                "floor_evicted",
+                "floor_taken",
+                "unit_foundings",
+                "floor_leases",
+                "units_vacant",
             ]
             .into_iter()
             .map(str::to_string),
@@ -2868,6 +2894,13 @@ impl Jobs2Cols {
             self.backup_called.to_string(),
             self.backup_fights.to_string(),
             self.backup_cuffed.to_string(),
+            self.flow_floor_rent.to_string(),
+            self.floor_short.to_string(),
+            self.floor_evicted.to_string(),
+            self.floor_taken.to_string(),
+            self.unit_foundings.to_string(),
+            self.floor_leases.to_string(),
+            self.units_vacant.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

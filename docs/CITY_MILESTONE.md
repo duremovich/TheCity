@@ -344,6 +344,94 @@ shop-house with a different sign per unit; a founding's new unit lit. **Shadow:*
 black_doc, forger (20k): a founding into a unit, a rent paid or an eviction. **Numbers:** foundings a week, vacant
 units by district, Lots of 8,000 (by now sites of 8,000), employed share d30, home-to-post median, money in rent.
 
+**C6b as built (2026-10-31).** As above (`systems/floors.rs` holds the economy's half, `[tenancy]` its keys), with
+these deviations: (1) **The site is picked at the desk:** `found_plan` still walks the founder to the nearest
+registry (F1) and `Register` picks the site, as it picked the Lot: a vacant unit within `found_reach_ticks` (20) of
+his Home door by the walk (`distance::trip_by`, no El; the leisure tier rule kept), else the nearest Lot as before,
+else a refit. Most foundings land in the founder's own block (51 of 60 at 20k into a unit, nearly all "his own
+block", floor 0): the HK shop-house. **Corps' `Grow` still builds on Lots** (the tenancy Lots included): the Lot cap
+stops binding for people, not for corps. (2) **Vacant units stay non-entities**, materialised by a founding (a new
+tenancy `Building`, one storey, `founding::convert`'s seats, staff and venue); a unit records no kind (shop, office,
+works floor), so any `unit_kinds` business takes any unit, on the storey `floors::unit_floor` picks (under a Home's
+flats the least taken shop storey, else the lowest storey no use stands on). A floor taken back from a `unit_kinds`
+business stays an entity: a **tenancy Lot** (counted as used; founding's Lot path and `Grow` build on it).
+`World.floor_index` (host -> tenancies, the vacant units, the units founded this run) is not saved, rebuilt at the
+seed, the load, every founding, lease or vacated floor and each rent pass. (3) **Who pays and who is put out:** a
+corp or the city pays in full (`charge`, as upkeep: its bankruptcy path is the consequence), a person or a gang
+what it holds (`pay`); only a person's floor is taken back, after `evict_days` (7) short in a row. A gang's
+Hideout is never put out (nobody evicts a gang; its arrears stand: most gang purses pay 0). A kind no unit takes (a
+Home, a Fixer, a Mission, a Hotel, a FightPit) is not emptied: its lease passes to the landlord with whoever lives or
+works there (`Floor` "took back the lease"), so no household is put out and no new harm route opens; a `unit_kinds`
+business goes back to a vacant unit (its staff let go, the customers put out at the door, `Floor` "put ... out").
+(4) **The rent:** `floor_rent[tier]` (1, 2, 4: the Home rent's base) a storey of its span, x a corp landlord's
+Housing level, plus `revenue_share` (0.05) of its last seven days' mean revenue (a percentage rent), set and paid at
+the midnight pass (`rent_pass`, before the upkeep), not accrued as a Home's `rent_due`. (5) **A buyout leases
+floors** (`company::lease_floors`): with `[tenancy]` on, the block for sale with two storeys or more gives its top
+storeys (the want's bunks, `floors_max` at most, the host keeping one) as a Home tenancy of company bunks, the lease
+paid once to the landlord (`block_value` of the storeys x `price_mult` x `lease_mult` 0.5, `Flow::Sale`), the host's
+span shrunk; nobody is given notice (the leased storeys were the Ambient tier's flats). A host with no span (the 2k
+city) is bought whole as before. **No buyout fired in the 20k run, before or after** (company_buyouts 0 in both);
+forced once on a scratch config (`period_days` 1, `min_want` 1, 20k x 3 days) 19 leases stood ("Militech 5 leased
+floor 33 of Block#1532 from Stackwell 3 for 240: company housing for Construction Yard#6471's staff (30 bunks)"), the
+far staff moved in ("Volt Sallow moved into Block#30321, Greenline 8's company housing for Vat Farm#5679's staff")
+and the identity held. (6) **Hours:** `Building.hours` (`None`: the kind's
+`[tenancy] hours` row, `default_hours` 08:00-22:00); nothing in the sim's behaviour reads them yet (an owner's call
+later): the view's signs do (`ViewUnit.lit`). (7) **Statistical mirror:** the rent pass is building-level, blind to
+tier; a founder is a body (`lod` promotes an agent who can found, `founding::can_found`, now O(1) on the index), so a
+founding into a unit is as a founding on a Lot on either tier. (8) **Camera:** cityview draws a sign per unit (a
+3.2 x 1.5 m slab on the host's facade by its door, on its storey, units on one door spread along the wall; the
+colour its kind's, lit while open, dim when shut, white the day it was founded; a placeholder keeps its spawn
+material, so each state is its own entity), and `--follow` takes a building (the camera at its door). (9)
+`SAVE_VERSION` 120; `EventKind::Floor`, `Flow::FloorRent` (taxed as rent), the `Jobs2Cols` `flow_floor_rent`,
+`floor_short`, `floor_evicted`, `floor_taken`, `unit_foundings`, `floor_leases`, `units_vacant` columns and
+`run --report`'s `#floors` lines (vacant units by district). No test added.
+
+**The numbers** (seed 42 x 30, `--scaled --ambient-flats 50`, 8 threads, one run each; before is main `a8c08c9`, the
+100k before C6a's after; the 20k runs shared the box with builds, the 100k after ran mostly alone):
+
+| | 20k before | 20k after | 100k before (C6a's after) | 100k after |
+|---|---|---|---|---|
+| foundings (a week) / into a unit | 62 (14.5) / 0 | 60 (14.0) / 51 | (not printed) | 336 (78.4) / 247 |
+| vacant units, the city (day 1 -> day 30) | 18,441 (day 1) | 18,437 -> 18,293 | (not printed) | 9,875 -> 9,691 |
+| vacant units d30, D1 / D2 / D3 / D4 / D6 | 6,829 / 4,106 / 2,462 / 4,562 / 482 (day 1) | 6,826 / 4,106 / 2,345 / 4,534 / 482 | (not printed) | 3,966 / 2,997 / 1,228 / 994 / 495 |
+| vacant Lots d30 (of the generator's 1,600 / 8,000) | (not printed) | 930 | (not printed) | 4,924 |
+| employed d30 (share) | 11,839 (0.525) | 11,896 (0.527) | 57,458 (0.513) | 56,942 (0.509) |
+| homeless d30 | 314 | 284 | 2,249 | 2,359 |
+| home-to-post median d30 | 9 min | 9 min | 4 min | 4 min |
+| legs over 120 min (30 d) | | | 19 | 28 |
+| Home rent / floor rent a day (mean) | 5,732 / 0 | 5,732 / 4,421 | (not printed) / 0 | 6,170 / 28,677 |
+| floor rent short (tenancy-days) / to vacant / leases to the landlord / leases of floors | | 305 / 5 / 4 / 0 | | 2,699 / 53 / 19 / 20 |
+| coin identity (every day) | 1,258,977 | 1,258,977 | | 6,443,772 |
+| ticks/s days 25-30 | 155/148/161/156/162/155 | 172/169/168/164/167/166 | 12/12/11/12/11 | 12/12/12/12/12/11 |
+| peak working set | | | 1,966 MB | 1,954 MB |
+
+The 20k city is flat past one run's noise (employed 0.525 -> 0.527, homeless 314 -> 284, not diagnosed); 51 of its
+60 foundings took a unit (30 Noodle Bars, 12 Garages, 9 Ripperdocs; 47 in the founder's own block, 47 on floor 0). At
+100k 247 of 336 foundings took a unit and the buyouts leased floors 20 times (none fired at 20k). The floor rent is
+the new pressure, and a large one: 28.7k a day at 100k against 6.2k of Home rent (mostly the `revenue_share` on the
+corps' Markets and venues, paid in full), a print for the calibration pass, not retuned. The 100k run's 134
+bankruptcies include 61 at tick 0 (Stackwell, Militech and Zetatech copies with no buildings: the seeding's, not
+C6b's). Nothing retuned.
+
+**Camera** (`c6b/cam`, from the shadow's day-22 world saved at 08:10, `--hide-mass`, `CV_NO_GEN=1`): `c6b_5749_d22_2200.png`,
+Bar#5749's stack in D3 with its twelve tenancies (a Bar, Dens, Arcades, Noodle Bars) a sign each along the facade, a
+hue per kind, lit at 22:00; `c6b_1516_d22_1200.png` a Mid-Levels shop-house its residents founded into (two Garages
+on the ground, a Ripperdoc above); `c6b_1368_d22_0800.png` / `_1200.png` Block#1368 before and after Seraphine Park
+registered Ripperdoc#13378 in its vacant unit at 08:05 (the new sign burns white). **Shadow** (20k days 20-23,
+owner_broke x 2, vendor, madam, black_doc, forger, `target/c6b/shadow`): `owner_broke_9710` (Anselm Fletcher, a
+guard who owns a Ripperdoc in his own block) "Owns: Ripperdoc#6162, floor 0 of Block#690 (floor rent 7 a day to
+Habitat 7)", "d20 00:00 Floor: Anselm Fletcher came up short on the floor rent of Ripperdoc#6162 (floor 0, Block#690)
+to Habitat 7: paid 2 of 7", "d21 00:00 FLOOR RENT paid -6c to corp Habitat 7"; `owner_broke_7453` (Flux Vasquez)
+"Owns: Noodle Bar#33574, floor 0 of Block#4083 (floor rent 1 a day to the city, 1 days short)", her flat on floor 6 of
+the same block, sold in a fire sale at d20 00:07. The madam's Brothel, the forger's Fixer and the black doc's Back
+Room stand on floors (the madam's "floor 0 of Block#1614"); none of the six founded or was put out in the window
+(the run's lines: "Nyx Coldwater registered Noodle Bar#33847 in a vacant unit on floor 0 of Block#5305 (his own block, 2 more vacant there) for 120" on day 16, ten days later "the city put Nyx Coldwater out of Noodle Bar#33847 (floor 0,
+Block#5305; the floor rent unpaid): the unit stands vacant"). What reads wrong: a gang's Hideout pays nothing (most
+gang purses are empty: "The Drowned Choir 10 came up short ... paid 0 of 2") and nothing follows; a Fixer whose
+lease passes stands as a housing corp's ("Habitat 7 took back the lease of Fixer#6185"); a Garage's percentage rent
+reads its gross fares (32 a day); the diary's `[money]` line names the day's largest flow beside the net ("+9c
+(FloorRent)" on a day the rent went out).
+
 ### C7, levels, portals and pathing (TheCity; `components.rs` `Position`, `exec/bigpath.rs`, `exec/mod.rs`, `motion.rs`, `map.rs`, `import_graphics.rs`, `[levels]`)
 
 **A z on positions:** `Position.floor: u8` (0 the street), on the street too, for a body on a deck. **Cores:** each

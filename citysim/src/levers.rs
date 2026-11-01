@@ -2692,6 +2692,9 @@ impl World {
                 within: None,
                 span: None,
                 units: 0,
+                floor_rent: 0,
+                floor_arrears: 0,
+                hours: None,
             },
         );
         self.buildings_by_kind_mut().entry(BuildingKind::Home).or_default().push(id);
