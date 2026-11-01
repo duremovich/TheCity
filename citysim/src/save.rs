@@ -526,7 +526,9 @@ use crate::world::World;
 /// 122 (the city milestone C8, the vertical gangs): `Gang.district_hideouts`, `Gang.raid_climb`,
 /// `LiftState.cut_until`, the `[vertical]` keys and the `Jobs2Cols` `hideouts_founded` ... `raid_heard` columns (serde
 /// defaults).
-pub const SAVE_VERSION: u8 = 122;
+/// 123 (the city milestone C8b, the Spire's storeys): no format change; both island maps re-imported from
+/// TheCityGraphics `6390473` (D5's towers), a new `B` order (a C8 save is another world).
+pub const SAVE_VERSION: u8 = 123;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
