@@ -289,6 +289,9 @@ pub enum Origin {
     Board,
     /// M17 phase 3: an outside parent's order (a Retake, a Hit on a raider).
     Parent,
+    /// The city milestone C9b: a landlord's muscle on a gang that will not
+    /// pay its floor rent (`vertical::landlord_pass`).
+    Landlord,
 }
 
 /// How a taken record is resolved: a ledger draw at `due` (no bodies), a

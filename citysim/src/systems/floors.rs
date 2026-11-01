@@ -23,7 +23,8 @@
 //! gang from what it holds. `evict_days` short in a row and the landlord takes the floor back ([`vacate`]): a
 //! business of a `unit_kinds` kind goes back to a vacant unit (a tenancy Lot), a Home's lease (and any other kind)
 //! passes to the landlord with whoever lives or works there; a gang's Hideout is never put out (nobody evicts a
-//! gang: its arrears stand). **Founding takes a unit** ([`unit_near`], [`found_unit`]): the founder's Register
+//! gang: its arrears stand; the city milestone C9b: its landlord answers, `vertical::landlord_pass`, run at the
+//! end of the rent pass, and a debt he swallowed is rent 0). **Founding takes a unit** ([`unit_near`], [`found_unit`]): the founder's Register
 //! takes a vacant unit within `found_reach_ticks` of his Home door's walk first, then a Lot. **A buyout leases
 //! floors** (`company::buyouts`): the top storeys of a Home host as a Home tenancy of company bunks, the lease paid
 //! once, the floors then on floor rent. **Hours** ([`hours_of`]): a tenancy's own `Building.hours`, else its kind's
@@ -364,7 +365,8 @@ pub fn floor_rent_for(world: &World, t: EntityId) -> i64 {
         return 0;
     }
     let landlord = world.owner_of(host);
-    if landlord == b.owner {
+    // C9b: a gang's floor rent its landlord swallowed as protection.
+    if landlord == b.owner || crate::systems::vertical::rent_waived(world, t) {
         return 0;
     }
     let storeys = b.span.map_or(1, |(lo, hi)| i64::from(hi.saturating_sub(lo)) + 1);
@@ -440,6 +442,8 @@ pub fn rent_pass(world: &mut World) {
     }
     let total = world.floor_index.total;
     ownership::jobs2_row(world).units_vacant = total;
+    // C9b: the landlord's answer to a gang that will not pay.
+    crate::systems::vertical::landlord_pass(world);
 }
 
 /// C6b: the landlord takes tenancy `t` back. A business of a `[tenancy] unit_kinds` kind goes back to a vacant

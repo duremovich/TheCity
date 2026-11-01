@@ -4951,6 +4951,32 @@ hear_cap = 12                      # tenants a raid's climb is told to, at most
 split_min_storeys = 12             # a claim on another gang's Home of 12 storeys or more takes its upper half (a Home
                                    # tenancy carved from the span, its households with it): two gangs' floors in a tower
 
+# The city milestone C9b (docs/CITY_MILESTONE.md "C9b as built"; systems/vertical.rs): a raid lands on the rival's
+# Hideout nearest the raiders' own, not the seat; the seat keeps a standing guard. Absent: every raid on the seat.
+[vertical.raids]
+seat_guard = 2                     # two posted to the seat at [crew] guard_hour (tonight's watch first), every order, out of
+                                   # the muster, holding the night there
+seat_ratio = 1.5                   # the seat (the chest, the stash) when nearest, or when the raiders' fit adults are 1.5x
+                                   # the rival's
+take_frac = 0.25                   # a district Hideout won or sacked gives up a quarter of the rival's chest
+
+# C9b: the landlord's answer to a gang that will not pay its floor rent (C6b: nobody evicts a gang). Past answer_days
+# short in a row he moves by who he is and what he has, the next rung every again_days while it stays short: the city
+# calls the law; a fearful person whose door cell the gang holds swallows it as protection (the rent waived, a standing
+# arrangement); a lawful one calls the law (the Precinct up to the floor: reports on the adults found there), else hires
+# muscle (a Beat on the floor's boss through the nearest Fixer), cuts the power to the lift, or sells the tower to a
+# buyer who will deal with the gang (its rival, else a Housing corp). A corp: the law if its exec is lawful, else the
+# muscle, then the lift, then the sale. Nobody under 18 is named. Absent: the arrears stand.
+[vertical.landlord]
+answer_days = 3                    # three midnights short in a row and the landlord answers ...
+again_days = 7                     # ... and still short a week on, the next move on his ladder
+swallow_courage = 0.4              # a person this fearful, the gang holding his door, swallows the debt as protection
+law_lawfulness = 0.6               # a landlord (or a corp's exec) this lawful calls the law first
+muscle_reserve = 20                # the muscle when his purse holds the Beat's quote and this much more
+cut_days = 3                       # the power to the lift off three days
+sell_mult = 0.6                    # the tower sold at 60 % of its value (a floor with a gang on it sells cheap)
+grudge = 0.4                       # the gang leader's grudge on the landlord for a move against it (not a swallow)
+
 # The island pass phase 4 (docs/ISLAND_PASS.md I2, Dylan 2026-10-22; systems/commute.rs): a far job is a pressure that
 # resolves over weeks. Each midnight a worker whose commute (distance::travel, the Home door to the work tile) is past
 # far_ticks builds a day of pressure (a nearer one drops it). Past move_days the household looks for a Home nearer work

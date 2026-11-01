@@ -1716,6 +1716,29 @@ pub struct Jobs2Cols {
     /// C8: claims that took a held tower's upper floors (`vertical::split_claim`).
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub floor_claims: u32,
+    /// The city milestone C9b (`systems::vertical`): the landlords' answers
+    /// to a gang's unpaid floor rent today, by move; the gang Hideouts short
+    /// on their floor rent at midnight (not swallowed); the gang raids landed
+    /// today on a rival's seat and on one of its district Hideouts; the seat
+    /// guards posted today.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub landlord_swallow: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub landlord_law: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub landlord_muscle: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub landlord_cut: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub landlord_sell: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub gang_rent_debts: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub raids_seat: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub raids_nearest: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub seat_guards_posted: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -2358,6 +2381,15 @@ impl Jobs2Cols {
                 "raid_climb_lift",
                 "raid_heard",
                 "floor_claims",
+                "landlord_swallow",
+                "landlord_law",
+                "landlord_muscle",
+                "landlord_cut",
+                "landlord_sell",
+                "gang_rent_debts",
+                "raids_seat",
+                "raids_nearest",
+                "seat_guards_posted",
             ]
             .into_iter()
             .map(str::to_string),
@@ -2994,6 +3026,15 @@ impl Jobs2Cols {
             self.raid_climb_lift.to_string(),
             self.raid_heard.to_string(),
             self.floor_claims.to_string(),
+            self.landlord_swallow.to_string(),
+            self.landlord_law.to_string(),
+            self.landlord_muscle.to_string(),
+            self.landlord_cut.to_string(),
+            self.landlord_sell.to_string(),
+            self.gang_rent_debts.to_string(),
+            self.raids_seat.to_string(),
+            self.raids_nearest.to_string(),
+            self.seat_guards_posted.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

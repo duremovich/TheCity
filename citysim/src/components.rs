@@ -3432,6 +3432,11 @@ pub struct Gang {
     /// = `raid::muster_point`'s rule.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raid_muster: Option<EntityId>,
+    /// The city milestone C9b: the rival's Hideout the standing gang raid
+    /// lands on, chosen when it was ordered (`vertical::raid_pick`: the
+    /// nearest to the raiders' own, or the seat); `None` = the seat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raid_hideout: Option<EntityId>,
     /// The city milestone C8: the standing raid's column climbing to its
     /// target's floor (`vertical::climb_column`), while it climbs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3565,6 +3570,7 @@ impl Gang {
             split_check: None,
             raid_target: None,
             raid_muster: None,
+            raid_hideout: None,
             raid_climb: None,
             emptied: false,
             claims_cleared: false,

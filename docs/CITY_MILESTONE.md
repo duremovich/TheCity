@@ -687,6 +687,78 @@ Lots in towers of up to 59 storeys (the zone's Lots by fewest flats, one floor o
 centre is a Home with `flats=0` and no span or lift (`exec_7467` lives on the ground of a 59-storey piece,
 Block#1189); every Spire lift call is alone in the lobby.
 
+**C9b as built (2026-11-01): C8's gang leftovers** (Dylan's answers 8; `systems/vertical.rs`, `[vertical.raids]`,
+`[vertical.landlord]`). (1) **The landlord answers** (`vertical::landlord_pass`, at the end of `floors::rent_pass`): a
+gang Hideout `answer_days` (3) midnights short in a row gets its landlord's next move, and the next rung every
+`again_days` (7) while it stays short (the record is forgotten two rungs after the floor pays up; a gang with no
+members is skipped). The ladder is by who he is (`ladder`): the city calls the law, then cuts the lift, then sells; a
+person whose door cell the gang holds and whose courage is under `swallow_courage` swallows it (`rent_waived`: the
+floor rent 0 while that landlord and that gang stand, "their men keep the thieves and the rivals off the tower; a
+standing arrangement now"); a lawful (`law_lawfulness`) person or corp exec calls the law first, else the muscle, then
+the lift, then the sale; a gang landlord its muscle, the lift, the sale. A move he cannot make (no purse for the Beat's
+quote + `muscle_reserve`, no lift above the ground, no buyer) is passed over; with the ladder spent he lets it stand
+(the swallow). **The law** is the existing response, not a new raid: Extortion reports (`law::file_report_as`, the
+landlord or his exec the witness) on the adults found on the floor (6 at most), else on the floor's boss; the law brain
+and the pursuit take it from there (the Precinct climbs only when a guard's chase does). **The muscle** is a Beat on
+the floor's boss (the strongest free adult inside, else whose own Hideout it is, else the head) through the nearest
+Fixer (`contracts::brain_post_with`, new `Origin::Landlord`). **The lift**: `cut_lift` for `cut_days` (3). **The sale**:
+`corps::acquire` of the host at a Home's value x the storeys x `sell_mult` (0.6) to the gang's rival when it can pay,
+else the richest Housing corp; the new landlord starts his own ladder. Each move is a `Floor` line to the landlord (and
+his exec), the gang, its leader and the members whose own Hideout it is; every move but the swallow is the leader's
+grudge on the landlord (`GrudgeCause::Evicted`, `grudge` 0.4: the gang's answer). Under 18 nobody is reported, beaten
+or grudged (the picks filter `ages::is_protected`). (2) **The raid on the nearest Hideout** (`vertical::raid_pick`, at
+`faction::apply_order` before the muster is picked; `Gang.raid_hideout`, `raid::rival_target`): the rival's Hideout
+nearest any of the raiders' own; the seat when it is the nearest or the raiders' fit adults are `seat_ratio` (1.5) x
+the rival's. A district Hideout won or sacked gives up `take_frac` (0.25) of the chest, its own food and goods, the
+cells about it (`turf::raid_moves_at`) and its lift; the gang is not sacked (no `sacked_until`, a `Raided` shock, the
+node stays at the seat). The raid's lines name where ("at its nearest Hideout, floor 24 of Block#1762"; the fight's
+place "the Static Rats Hideout in Block#1762"). (3) **The seat's standing guard** (`crew::post_gang`): `seat_guard` (2)
+members within reach of the seat, tonight's watch first (`gang::on_watch_night`), posted a Guard there at `[crew]
+guard_hour` under every order (lying low too), kept out of the muster (`crew::seat_guard_today`, `raid::raid_pending`)
+and holding the night there (`gang::holes_up_at`; the guard counts until 06:00). (4) **The walk-in line**: a raid result
+against 0 defenders reads "walked in, nobody held it", one with no raider beaten "sacked it". (5) `SAVE_VERSION` 124
+(`World.floor_answers`, `Gang.raid_hideout`, `Origin::Landlord`, the keys, the `Jobs2Cols` `landlord_swallow` ...
+`seat_guards_posted` columns; serde defaults; renumber at the merge). No re-import, no test added.
+
+**The numbers** (seed 42 x 30, `--population 20000 --scaled --ambient-flats 50 --map assets/maps/isle_m_k2.txt`, one
+run each; before is main `a4892c2`):
+
+| | before | after |
+|---|---|---|
+| landlord moves: swallow / law / muscle / cut / sell | (none) | 0 / 7 / 1 / 0 / 0 |
+| gang rent debts open d30 (gang Hideouts short) | ~30 Hideouts came up short in 30 d, all standing | 1 |
+| raids departed / gang raids landed (seat; nearest) / corp+Jail | 50 / 11 (all seat) / 22 | 52 / 7 (6; 1) / 21 |
+| gang raids: raiders / defenders a raid; Won-Sacked-Lost | 7.9 / 1.73; 4-5-2 | 7.3 / 1.29; 2-4-1 |
+| seat guards posted / "stood guard" lines kept | 0 / 9 | 832 / 455 |
+| wars (`turf_wars`) / Succession lines | 78 / 395 | 65 / 399 |
+| `harm_blocked` | 0 | 0 |
+| ticks/s days 25-30 | 122/127/140/133/132/124 | 122/130/133/123/132/130 |
+
+The gang rent is 1-2c a day and most gangs pay most days, so few floors reach three days short and the ladder seldom
+climbs past its first rung; at 20k no person landlord held a gang floor, so the swallow and the sale did not fire (an
+earlier build of this phase cut lifts 7 times and sold one tower, Vatra 3 to Militech 8, before the ground-floor and
+empty-gang fixes). Most raids still land on a seat: the rival held only its seat (5 of 8 picks in a debug run) or its
+seat was the nearest, and the raids go at dying gangs (The Cinder Crows of 1, The Hollow of 1): defenders a raid
+stay ~1.3-1.8, within one run's noise of before, and every 0-defender raid was a gang with nobody to post. Where a
+gang has men the guard holds: The Cinder Brothers' seat raid by The Hollow was Lost against 4 defenders. Nothing retuned.
+
+**Camera:** not shot: the law's move is reports (no column climbs on the landlord's word) and the one Beat posted
+was not taken in the run's window. **Shadow** (20k days 21-27 unpinned, gang_leader x 40, gang_member x 60, guard x 3,
+`target/c9b/shadow`; no landlord archetype exists): `gang_member_16543` (Wren Adeyemi) "d21 20:00 Crew: Wren Adeyemi
+stood guard at Hideout#5786 for The Cinder Brothers with Silas Lindqvist, Adela Reyes (unpaid: the gang is broke)",
+"d22 00:00 Floor: The city sent the Precinct up to floor 11 of Block#5023: The Cinder Brothers will not pay the floor
+rent (3c owed); 2 found up there and reported for extortion: Adela Reyes, Rosalind Pembroke"; `gang_leader_8604` (Zelda
+Novak) "d23 00:07 Adela Reyes talked in the cells: named Zelda Novak of The Cinder Brothers for Extortion", "d23 12:47
+GRUDGE against Adela Reyes (Betrayed)"; `gang_leader_14667` "d21 00:00 Floor: Kessler 10 hired muscle through
+Fixer#7240: a beating for Bex Park of The Unplugged 4, who runs floor 8 of Block#5425 and will not pay the floor rent
+(6c owed; 357c on the board)", "GRUDGE against corp Kessler 10 (Evicted, weight 0.40)"; `gang_member_13886` (Solene
+Wexford, on floor 24 of Block#1762) "d27 22:45 Raid on the Static Rats Hideout in Block#1762: The Unplugged 10 won (12
+raiders, 1 defenders) ... 2 hurt: Solene Wexford, Bram Reyes", then "CLIMB down by the stairs in Block#1762: floor 24
+to 0" to the back room. What reads wrong: "nobody up there; X reported for extortion" names the boss the Precinct never
+saw; a seat guard who misses his post takes a miss toward the colours ("Bex Park missed The Unplugged 4's guard"); the
+member's raid line does not say seat or nearest (only the gang's line does); "1 defenders"; the seat is still the
+usual target (rivals with one Hideout); the muscle's Beat sat on the board.
+
 ### C9, far travel re-read on the new city (TheCity; `distance.rs`, `careers.rs`, `household.rs`, `social.rs`, `relocation`; `OPEN-221`, `OPEN-240`)
 
 First a read, then the fix for what is left. One 100k run in V17's window with the travel archetypes' diaries

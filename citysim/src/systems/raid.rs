@@ -101,7 +101,9 @@ pub fn raid_pending(world: &World, agent: EntityId) -> bool {
                     .is_some_and(|o| matches!(o.why, crate::virt::RunWhy::Prelude | crate::virt::RunWhy::Overwatch));
             // Lives at work phase 6 (§ 4.5): a delegating leader stays home
             // (the march is his lieutenants').
+            // The city milestone C9b: the seat's standing guard stays home.
             !seated
+                && !crate::systems::crew::seat_guard_today(world, agent)
                 && g.order.is_raid()
                 && g.raid_at.is_some_and(|t| t <= world.tick + window)
                 && !crate::systems::careers::delegating(world, agent)
@@ -157,11 +159,25 @@ pub fn raid_rival(world: &World, gang: EntityId) -> Option<EntityId> {
     named.or_else(|| world.rival_of(gang))
 }
 
+/// The city milestone C9b: the rival Hideout `gang`'s standing raid on
+/// `rival` lands on: the one chosen when it was ordered (`Gang.raid_hideout`,
+/// `vertical::raid_pick`) while it stands and is `rival`'s, else the seat.
+pub fn rival_target(world: &World, gang: EntityId, rival: EntityId) -> Option<EntityId> {
+    world
+        .comp::<Gang>(gang)
+        .and_then(|g| g.raid_hideout)
+        .filter(|&h| {
+            world.comp::<Building>(h).is_some_and(|b| !b.demolished)
+                && crate::systems::vertical::is_hideout_of(world, rival, h)
+        })
+        .or_else(|| world.hideout_of(rival))
+}
+
 /// The street tile outside the rival Hideout's door.
 pub fn rival_hideout_tile(world: &World, agent: EntityId) -> Option<TilePos> {
     let gang = world.gang_of(agent)?;
     let rival = raid_rival(world, gang)?;
-    let hideout = world.hideout_of(rival)?;
+    let hideout = rival_target(world, gang, rival)?;
     world.comp::<Building>(hideout).map(|b| world.outside_door(b))
 }
 
@@ -202,7 +218,7 @@ pub fn gang_target(world: &World, gang: EntityId) -> Option<EntityId> {
     if g.order.target_is_jail() {
         return world.building_of_kind(BuildingKind::Jail);
     }
-    corp_target(world, gang).or_else(|| raid_rival(world, gang).and_then(|r| world.hideout_of(r)))
+    corp_target(world, gang).or_else(|| raid_rival(world, gang).and_then(|r| rival_target(world, gang, r)))
 }
 
 /// The building this agent's expedition ends at (the plan's bound target).
@@ -1083,7 +1099,10 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
     if world.comp::<Gang>(gid).is_none_or(|g| g.raid_at.is_none()) {
         return None;
     }
-    let (rival_hideout, rival_name) = world.comp::<Gang>(rival).map(|g| (g.hideout, g.name.clone()))?;
+    // The city milestone C9b: the rival's Hideout the raid was sent to (its
+    // nearest, or the seat).
+    let rival_hideout = rival_target(world, gid, rival)?;
+    let rival_name = world.comp::<Gang>(rival).map(|g| g.name.clone())?;
     let door = world.comp::<Building>(rival_hideout)?.door;
     let gname = world.comp::<Gang>(gid).map(|g| g.name.clone())?;
 
@@ -1102,6 +1121,14 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
     let (n_raiders, n_defenders) = (raiders.len(), defenders.len());
     // Round 3 S7: "the The Static Rats Hideout" read twice.
     let place = format!("the {} Hideout", rival_name.strip_prefix("The ").unwrap_or(&rival_name));
+    let seat = crate::systems::vertical::is_seat(world, rival, rival_hideout);
+    let place = if seat || !crate::systems::vertical::on(world) {
+        place
+    } else {
+        let host = world.comp::<Building>(rival_hideout).and_then(|b| b.within).unwrap_or(rival_hideout);
+        format!("{place} in {}", world.name_of(host))
+    };
+    let at = crate::systems::vertical::raid_where(world, rival, rival_hideout);
     crate::systems::gossip::post_raid(world, Some(gid), Some(rival), door);
     // The pressure pass phase 5b: who stood at the door, and what the Hideout held.
     let (raiders0, defenders0) = (raiders.clone(), defenders.clone());
@@ -1116,7 +1143,15 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
     } else {
         Outcome::Lost
     };
-    settle(world, gid, rival, outcome);
+    settle(world, gid, rival, outcome, rival_hideout);
+    {
+        let row = crate::systems::ownership::jobs2_row(world);
+        if seat {
+            row.raids_seat += 1;
+        } else {
+            row.raids_nearest += 1;
+        }
+    }
     let coins = chest0 - world.comp::<Gang>(rival).map_or(0, |g| g.treasury);
     let food = food0.saturating_sub(world.comp::<Building>(rival_hideout).map_or(0, |b| b.stock_food));
     crate::systems::crew::raid_result(
@@ -1139,7 +1174,7 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
         EventKind::Raid,
         &[gid, rival, actor],
         format!(
-            "{gname} raided {rival_name}: {outcome:?} ({n_raiders} raiders vs {n_defenders} defenders, {deaths} dead)"
+            "{gname} raided {rival_name}: {outcome:?} ({n_raiders} raiders vs {n_defenders} defenders, {deaths} dead; at {at})"
         ),
     );
     Some(outcome)
@@ -1453,7 +1488,7 @@ pub fn share_food(world: &mut World, to: &[EntityId], units: u32) {
 
 /// Move the prize, mark the sack, shock the loser, and let the attacker
 /// rethink at once.
-fn settle(world: &mut World, gid: EntityId, rival: EntityId, outcome: Outcome) {
+fn settle(world: &mut World, gid: EntityId, rival: EntityId, outcome: Outcome, at: EntityId) {
     let now = world.tick;
     let cfg = world.config.gangs.clone();
     // A retaliation is satisfied by being launched, win or lose (spec): a lost
@@ -1466,30 +1501,31 @@ fn settle(world: &mut World, gid: EntityId, rival: EntityId, outcome: Outcome) {
             }
         }
         Outcome::Won => {
-            let prize = world
-                .comp::<Gang>(rival)
-                .map_or(0, |g| (g.treasury.max(0) as f32 * cfg.raid_prize_frac).floor() as i64);
+            // The city milestone C9b: a district Hideout holds a share of the chest.
+            let frac = crate::systems::vertical::take_frac(world, rival, at).unwrap_or(cfg.raid_prize_frac);
+            let prize = world.comp::<Gang>(rival).map_or(0, |g| (g.treasury.max(0) as f32 * frac).floor() as i64);
             if let Some(g) = world.comp_mut::<Gang>(rival) {
                 g.treasury -= prize;
             }
             *world.probe.gang_out.entry("raid prize (direct)".to_string()).or_insert(0) += prize;
             world.gang_credit(gid, prize);
-            // M13 D38: the loser Hideout's Stims and Parts.
-            if let Some(h) = world.hideout_of(rival) {
-                crate::systems::stims::loot_goods(world, h, gid);
-            }
+            // M13 D38: the loser Hideout's Stims and Parts (C9b: the one raided).
+            crate::systems::stims::loot_goods(world, at, gid);
             gang::push_shock(world, rival, Shock::Raided);
             // Round 6 V5 (TURF § 3): a raid won moves the cells about the Hideout.
-            crate::systems::turf::raid_moves(world, gid, rival);
+            crate::systems::turf::raid_moves_at(world, gid, rival, at);
             // The city milestone C8: the loser's lift cut on the way out.
-            if let Some(h) = world.hideout_of(rival) {
-                crate::systems::vertical::raid_cut(world, gid, rival, h);
-            }
+            crate::systems::vertical::raid_cut(world, gid, rival, at);
         }
         Outcome::Sacked => {
-            let Some((loot, rival_hideout, rival_name)) =
-                world.comp::<Gang>(rival).map(|g| (g.treasury.max(0), g.hideout, g.name.clone()))
-            else {
+            // The city milestone C9b: a district Hideout sacked gives up its
+            // floor (a share of the chest, its food and goods, the bodies put
+            // out); the seat stands, so the gang is not sacked.
+            let district = crate::systems::vertical::take_frac(world, rival, at);
+            let Some((loot, rival_hideout, rival_name)) = world.comp::<Gang>(rival).map(|g| {
+                let all = g.treasury.max(0);
+                (district.map_or(all, |f| (all as f32 * f).floor() as i64), at, g.name.clone())
+            }) else {
                 return;
             };
             let food = world.comp::<Building>(rival_hideout).map_or(0, |b| b.stock_food);
@@ -1502,7 +1538,9 @@ fn settle(world: &mut World, gid: EntityId, rival: EntityId, outcome: Outcome) {
             }
             if let Some(g) = world.comp_mut::<Gang>(rival) {
                 g.treasury -= loot;
-                g.sacked_until = Some(now + cfg.sacked_days * TICKS_PER_DAY);
+                if district.is_none() {
+                    g.sacked_until = Some(now + cfg.sacked_days * TICKS_PER_DAY);
+                }
                 // The grudge outlives the sack: the Sacked shock is consumed
                 // while Retaliate is still gated, so the brain reads the
                 // grievance from retaliate_until once it can muster again.
@@ -1512,23 +1550,32 @@ fn settle(world: &mut World, gid: EntityId, rival: EntityId, outcome: Outcome) {
             world.gang_credit(gid, loot);
             // M13 D38: the sacked Hideout's Stims and Parts.
             crate::systems::stims::loot_goods(world, rival_hideout, gid);
-            // M14 V19: its Data moves to the winner's Hideout node (not wiped).
-            crate::systems::virt::move_store(world, rival_hideout, gid);
+            // M14 V19: its Data moves to the winner's Hideout node (not wiped;
+            // C9b: the node is at the seat).
+            if district.is_none() {
+                crate::systems::virt::move_store(world, rival_hideout, gid);
+            }
             // Everyone inside is put out on the street.
             let inside = world.comp::<Building>(rival_hideout).map(|b| b.occupants.clone()).unwrap_or_default();
             for o in inside {
                 world.stand_at_door(o, rival_hideout);
             }
-            gang::push_shock(world, rival, Shock::Sacked);
+            gang::push_shock(world, rival, if district.is_some() { Shock::Raided } else { Shock::Sacked });
             // Round 6 V5: and a Hideout sacked.
-            crate::systems::turf::raid_moves(world, gid, rival);
+            crate::systems::turf::raid_moves_at(world, gid, rival, rival_hideout);
             // The city milestone C8: the loser's lift cut on the way out.
             crate::systems::vertical::raid_cut(world, gid, rival, rival_hideout);
             let gname = world.comp::<Gang>(gid).map_or_else(String::new, |g| g.name.clone());
+            let which = if district.is_some() {
+                let host = world.comp::<Building>(rival_hideout).and_then(|b| b.within).unwrap_or(rival_hideout);
+                format!("Hideout in {}", world.name_of(host))
+            } else {
+                "Hideout".to_string()
+            };
             world.push_event(
                 EventKind::Sacked,
                 &[rival, gid, rival_hideout],
-                format!("{rival_name}'s Hideout sacked by {gname}: {loot} coins and {food} food taken"),
+                format!("{rival_name}'s {which} sacked by {gname}: {loot} coins and {food} food taken"),
             );
         }
     }
