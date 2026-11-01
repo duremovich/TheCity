@@ -22,6 +22,8 @@
 //! than twice the baseline's (days 30-45) standard deviation. What it did is
 //! printed, and written up in docs/history/GOD_SCENARIOS_V1.md.
 
+mod common;
+
 use std::sync::OnceLock;
 
 use citysim::{Config, EntityId, EventKind, Gang, Order, PlayerCommand, Posture, World, TICKS_PER_DAY};
@@ -465,21 +467,29 @@ fn leader(w: &World, i: usize) -> Option<EntityId> {
 #[test]
 #[ignore = "tier: merge"]
 fn god_decapitate_gang() {
-    // The target is the first gang whose leader the control keeps through the
-    // whole window: the premise of "differs from the control" is that the
-    // control has no succession of its own on the shock day. On seed 42 gang 0
-    // stopped qualifying once the El ran as trains (its boss is jailed on day
-    // 45 in the control too, same successor), so the gang is chosen, not fixed.
+    // The target is the gang whose leader the control keeps longest from the
+    // shock day: the premise of "differs from the control" is that the
+    // control has no succession of its own on the day the run's is read. On
+    // seed 42 gang 0 stopped qualifying once the El ran as trains (its boss is
+    // jailed on day 45 in the control too, same successor), so the gang is
+    // chosen, not fixed. The city milestone close: the boss out of the cells
+    // walks back into the chair (round 8 X4) and the control's chairs change
+    // every 2-3 days in every gang, so no gang keeps one leader for the 14
+    // days; the succession is read inside the control's stable stretch.
     let c = control();
     let (from, to) = (SHOCK_DAY, SHOCK_DAY + 14);
-    let stable = |i: usize| {
+    let held = |i: usize| -> u64 {
         let at = |day: u64| c.days.iter().find(|d| d.day == day).and_then(|d| d.leaders.get(i).copied().flatten());
         let l = at(SHOCK_DAY - 1);
-        l.is_some() && c.window(from, to).all(|d| d.leaders.get(i).copied().flatten() == l)
+        if l.is_none() {
+            return 0;
+        }
+        c.window(from, to).take_while(|d| d.leaders.get(i).copied().flatten() == l).count() as u64
     };
     let n = c.days[0].leaders.len();
-    let t = (0..n).find(|&i| stable(i)).expect("a gang whose leader the control keeps through the window");
-    eprintln!("decapitating gang {t} (the first whose control leader is stable over the window)");
+    let (t, kept) = (0..n).map(|i| (i, held(i))).fold((0, 0), |b, x| if x.1 > b.1 { x } else { b });
+    assert!(kept > 0, "a gang whose leader the control keeps over the shock day");
+    eprintln!("decapitating gang {t} (its control leader holds days {from}-{})", from + kept - 1);
     let r = run("god_decapitate_gang", move |w| {
         let g = w.comp::<Gang>(gang(w, t)).expect("target gang");
         let l = g.leader.or(g.boss).expect("the target gang has a leader or a jailed boss at the shock");
@@ -499,8 +509,8 @@ fn god_decapitate_gang() {
     let before = |run: &Run| run.days.iter().find(|d| d.day == SHOCK_DAY - 1).and_then(|d| d.leaders[t]);
     let old = before(&r);
     let succession = r
-        .window(from, to)
-        .zip(c.window(from, to))
+        .window(from, from + kept)
+        .zip(c.window(from, from + kept))
         .find(|(d, x)| d.leaders[t].is_some() && d.leaders[t] != old && d.leaders[t] != x.leaders[t]);
     let splits = |run: &Run| {
         run.story.iter().filter(|(t, k, _)| *k == EventKind::Split && (from..to).contains(&(t / TICKS_PER_DAY))).count()
@@ -2054,7 +2064,10 @@ fn god_line_cut() {
     const CUT: u64 = 20;
     const DAYS: u32 = 10;
     const END: u64 = 45;
-    let mut cfg = Config::load();
+    // Round 9 Y4: at the real pace (21 tiles a minute) the 2k map is a
+    // kilometre walked in minutes and the El never saves its fare's time
+    // (fares 0 in every window): the scene runs at R2's pace.
+    let mut cfg = common::r2(Config::load());
     cfg.transit.enabled = true;
     let mut w = World::new(SEED, cfg);
     let mut vat_riders: std::collections::BTreeSet<EntityId> = std::collections::BTreeSet::new();
@@ -2404,7 +2417,10 @@ fn god_child_camp_sweep() {
             .filter(|(d, _, _)| (from..60).contains(d))
             .filter(|(_, k, t)| {
                 matches!(k, EventKind::CampBuyout | EventKind::CampBreakout)
-                    || (*k == EventKind::Visited && t.contains("(a Camp child)"))
+                    // Round 4 T1 (the warden's day) put the gate in the text
+                    // ("(a Camp child, let in by ...)"), and a parent sees
+                    // every child of his there ("(Camp children, ...)").
+                    || (*k == EventKind::Visited && (t.contains("(a Camp child") || t.contains("(Camp children")))
             })
             .filter(|(_, _, t)| t.contains(name))
             .count()

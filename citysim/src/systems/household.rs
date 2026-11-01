@@ -947,8 +947,23 @@ fn camp_answer(world: &mut World, id: EntityId, child: EntityId, answer: CampAns
 
 /// § 3.5 (visit): a `Served` memory with the warden on duty, if any (the
 /// visit is not queued at his counter: his row serves children), the
-/// counter, the event.
+/// counter, the event. The city milestone close (`god_child_camp_sweep`):
+/// the parent sees every child of his held at `camp`, not only the one the
+/// week's answer was for (the lower id: a younger sibling was never seen,
+/// never had a `last_met`, and was tallied neglected every day).
 fn camp_visit(world: &mut World, id: EntityId, child: EntityId, camp: EntityId, weighed: &str) {
+    let mut seen: Vec<EntityId> = crate::systems::camp::children_of(world, camp)
+        .iter()
+        .copied()
+        .filter(|&k| k == child || crate::systems::camp::parents_of(world, k).contains(&id))
+        .collect();
+    if !seen.contains(&child) {
+        seen.insert(0, child);
+    }
+    let today = world.day();
+    for &k in &seen {
+        world.last_met.insert(pair(id, k), today);
+    }
     let salience = world.config.service.served_salience;
     let warden = crate::systems::service::servers_on_duty(world, camp, ServeKind::Inmate).first().copied();
     if let Some(w) = warden {
@@ -961,13 +976,16 @@ fn camp_visit(world: &mut World, id: EntityId, child: EntityId, camp: EntityId, 
     let gate =
         warden.map_or_else(|| ", nobody on the gate".to_string(), |w| format!(", let in by {}", world.name_of(w)));
     let side = if weighed.is_empty() { String::new() } else { format!("; {weighed}") };
-    let text = format!(
-        "{} visited {} at {} (a Camp child{gate}){side}",
-        world.name_of(id),
-        world.name_of(child),
-        world.name_of(camp)
-    );
-    let mut actors = vec![id, child, camp];
+    let names: Vec<String> = seen.iter().map(|&k| world.name_of(k)).collect();
+    let (whom, what) = match names.as_slice() {
+        [one] => (one.clone(), "a Camp child"),
+        [rest @ .., last] => (format!("{} and {last}", rest.join(", ")), "Camp children"),
+        [] => (world.name_of(child), "a Camp child"),
+    };
+    let text = format!("{} visited {whom} at {} ({what}{gate}){side}", world.name_of(id), world.name_of(camp));
+    let mut actors = vec![id];
+    actors.extend(seen.iter().copied());
+    actors.push(camp);
     actors.extend(warden);
     world.push_event(EventKind::Visited, &actors, text);
 }
