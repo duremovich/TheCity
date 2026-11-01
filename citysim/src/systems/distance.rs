@@ -153,7 +153,21 @@ pub fn trip_ahead(world: &World, id: EntityId, from: TilePos, to: TilePos) -> Ti
 }
 
 fn trip_when(world: &World, id: EntityId, from: TilePos, to: TilePos, now: Option<Tick>) -> Tick {
-    trip_by(world, from, to, || rider(world, id), now)
+    // C9a: he boards when the ride saves what the fare is worth to him
+    // (`transit::saves_enough`, `choose`'s rule): the estimate assumed a
+    // coin's worth to a rider with coins, and the poor walked (a loader's
+    // 62-min walk to an hour's HangOut "within" the 60-min cap).
+    trip_by(
+        world,
+        from,
+        to,
+        || {
+            let t = travel(world, from, to);
+            let walk = world.config.exec.walk_ticks(Tick::from(from.manhattan(to)));
+            crate::systems::transit::saves_enough(world, id, walk, t) == Some(true)
+        },
+        now,
+    )
 }
 
 /// S1: `id` would board the El now (`transit::pays_or_dodges`), for a
