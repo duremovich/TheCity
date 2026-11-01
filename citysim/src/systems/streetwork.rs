@@ -2281,12 +2281,17 @@ fn can_drive(world: &World, id: EntityId) -> bool {
 }
 
 /// Review fix 2 (`hourly`): drop the booked rides whose driver can no
-/// longer drive them (the shift over, the post lost, jailed or dead).
+/// longer drive them (the shift over, the post lost, jailed or dead), and
+/// (C9a) a body ride whose driver has not come in `cab_no_show_ticks`.
 fn drop_stale_rides(world: &mut World) {
     if world.jobs2.cab_rides.is_empty() {
         return;
     }
-    let keep: Vec<bool> = world.jobs2.cab_rides.iter().map(|r| can_drive(world, r.driver)).collect();
+    // C9a: a driver's body booked `cab_no_show_ticks` ago and not yet at the
+    // rider's door (his plan held him) is a no-show: the off-screen cab.
+    let no_show = Tick::from(world.config.service.cab_no_show_ticks);
+    let late = |r: &CabRide| no_show > 0 && r.body && r.stage == 0 && world.tick > r.tick + no_show;
+    let keep: Vec<bool> = world.jobs2.cab_rides.iter().map(|r| can_drive(world, r.driver) && !late(r)).collect();
     let gone: Vec<CabRide> = world.jobs2.cab_rides.iter().zip(&keep).filter(|(_, &k)| !k).map(|(r, _)| *r).collect();
     let mut k = keep.into_iter();
     world.jobs2.cab_rides.retain(|_| k.next().unwrap_or(true));

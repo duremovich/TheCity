@@ -531,7 +531,10 @@ use crate::world::World;
 /// 124 (the city milestone C9b, the gang leftovers; renumber at the merge): `World.floor_answers` (the landlord's
 /// answer to a gang's unpaid floor rent), `Gang.raid_hideout`, `Origin::Landlord`, the `[vertical.raids]` and
 /// `[vertical.landlord]` keys and the `Jobs2Cols` `landlord_swallow` ... `seat_guards_posted` columns (serde defaults).
-pub const SAVE_VERSION: u8 = 124;
+/// 125 (the city milestone C9a, far travel): no format change; both island maps re-imported from TheCityGraphics
+/// `c471ffd` (the Vats cut by stretches, the Spire's lobbies as units, a piece standing its lots' storeys), a new
+/// `B` order (a C8b save is another world).
+pub const SAVE_VERSION: u8 = 125;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

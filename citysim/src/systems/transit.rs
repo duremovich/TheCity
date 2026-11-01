@@ -1257,6 +1257,21 @@ pub fn pays_or_dodges(world: &World, who: EntityId) -> Option<bool> {
 }
 
 /// T8: walk or ride, for `who` from `from` to `to` leaving at `t`. Pure.
+/// C9a: `who` would take a ride of `ride` ticks over a walk of `walk` by
+/// [`choose`]'s time-vs-fare rule (the fare, or none when he dodges; a coin
+/// worth `poor_ticks_per_coin` to the poor), the route aside. `None` when
+/// he would not board at all (`pays_or_dodges`).
+pub fn saves_enough(world: &World, who: EntityId, walk: Tick, ride: Tick) -> Option<bool> {
+    let c = &world.config.transit;
+    let dodge = pays_or_dodges(world, who)?;
+    let fare = if dodge { 0 } else { c.fare };
+    let coins = world.comp::<Wallet>(who).map_or(0, |w| w.coins);
+    let poor = coins < c.poor_meals.saturating_mul(meal_price(world));
+    let per_coin = if poor { c.poor_ticks_per_coin } else { c.ticks_per_coin };
+    let need = u64::from(c.min_saving_ticks) + fare.max(0) as u64 * u64::from(per_coin);
+    Some(walk >= ride && walk - ride >= need)
+}
+
 pub fn choose(world: &World, who: EntityId, from: TilePos, to: TilePos, t: Tick) -> Result<Route, Refusal> {
     let c = &world.config.transit;
     if from.manhattan(to) < c.min_ride_tiles {

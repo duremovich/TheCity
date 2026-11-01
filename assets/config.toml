@@ -4042,6 +4042,9 @@ breakout_crew = 3                  # phase 3 § 3.5: a gang member breaks out wi
 neglect_days = 14                  # phase 3 § 3.5: a parent of a Camp child unmet for this long is counted neglecting (printed only, Q4)
 teacher_floor = 0.5                # phase 3 § 2.2 (teacher): a taught School day adds floor + (1 - floor) x knowledge to Child.edu_taught
 cab_wait_ticks = 30                # phase 4 § 2.3 (cab): a rider waits this long at the door for a driver's body; farther, the Garage's off-screen cab (the leg timed)
+cab_no_show_ticks = 60             # C9a: a driver's body booked this long ago and not at the door yet (his plan held him) leaves
+                                   # the ride to the Garage's off-screen cab, checked hourly (C8b 20k: a 364-min cab, the rider
+                                   # at his door from 10:32 to the driver's shift end; 0 waits all shift). A placeholder
 cab_shifts = [[360, 960], [960, 1440]]  # phase 4 § 2.3 (cab): a `split` fare trade's shift under the street switch, one a driver in turn by id (06-16, 16-24: the commutes; `split`'s day/night pair is on duty at neither)
 client_tiles = 12                  # phase 4 § 2.3 (street worker): a client is a body out walking within this many tiles of the pitch, before the district's hashed draw
 pimp_tiles = 12                    # phase 4 § 2.3 (pimp): a pitch is protected by a pimp's body within this many tiles (a Statistical pimp credited by the clock)
@@ -4791,6 +4794,9 @@ visit_ticks = 240                  # a Visit (the weekly Camp answer, a hurt kin
                                    # collection, a dun; not a gang duty, [crew] duty_reach_ticks): the place past this
                                    # from where the visitor sets out is not walked to (V11: a Camp answer 1,150 tiles
                                    # off; 20k: a 610-min walk to a Fixer; a weekly trip earns more than an errand's 120)
+stim_ticks = 60                    # C9a: a dose's source (the nearest Bar with a dealer, else a legal Market) from where the
+                                   # body stands: past it there is none (the corner's dealer, else the craving waits). 100k
+                                   # Shadow C9a: a night-shift clerk left his post at 00:05 for a Club 630 tiles off, 64 min
 
 # The island pass phase 3a (docs/ISLAND_PASS.md I6; OPEN-163; systems/company.rs): seeded company housing. At world
 # build, after the staffing and the housing pre-roll, each workplace of these kinds whose far posts outnumber

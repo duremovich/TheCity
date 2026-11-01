@@ -1752,15 +1752,17 @@ fn contested(world: &mut World, actor: EntityId, gang: EntityId, h: EntityId, ho
 
 /// SplitLoot at the Hideout: half the day's haul into the gang treasury.
 pub fn split_loot(world: &mut World, actor: EntityId) -> i64 {
+    // C9a: a member thrown out mid-split (`ulric_2230`, 2k seed 44 d70:
+    // thrown out at 10:39, the split at 10:40) keeps his share: debited with
+    // no gang to credit, the coin left the world (the coin identity broke).
+    let Some(g) = world.gang_of(actor) else { return 0 };
     let loot = world.comp::<Brain>(actor).map_or(0, |b| b.loot_today);
     let share = (loot as f32 * 0.5).floor() as i64;
     let share = share.min(world.comp::<Wallet>(actor).map_or(0, |w| w.coins)).max(0);
     if let Some(w) = world.comp_mut::<Wallet>(actor) {
         w.coins -= share;
     }
-    if let Some(g) = world.gang_of(actor) {
-        world.gang_credit(g, share);
-    }
+    world.gang_credit(g, share);
     if let Some(b) = world.comp_mut::<Brain>(actor) {
         b.loot_today = 0;
     }
