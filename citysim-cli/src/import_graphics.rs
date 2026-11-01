@@ -22,8 +22,13 @@
 //! line (the Terrace, Hillside, Mid-Levels and Vats lines; the authored
 //! `--lines` file retired), the tram is imported once from `tram.json`, and
 //! 0.2's new fields (a lot's `z_m`, `levels`, `cores`; `walkways_sim.json`'s
-//! portals) are read, checked and counted in the report, not yet written to
-//! the map (C6a's tenancies and C7's portals use them).
+//! portals) are read, checked and counted in the report.
+//!
+//! The city milestone C6a: the levels' units hold the uses. The employers,
+//! venues and Hideouts are dealt into a cut's units (shops, workshops,
+//! offices, a works floor), each a tenancy `B` line on the cut's host (`in=`,
+//! `span=`, its own `door=` where its lot's street door is on the cut's
+//! wall), so the cuts they took go back to Homes (docs/IMPORT_GRAPHICS.md).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -127,6 +132,11 @@ pub struct Report {
     pub dealt_by_district: BTreeMap<String, BTreeMap<BuildingKind, usize>>,
     /// C5: `lots_sim.json`'s `seed` (TheCityGraphics' city seed).
     pub export_seed: Option<u64>,
+    /// The city milestone C6a: cuts that host tenancies, the tenancies, and
+    /// the tenancies through their own lot's street door.
+    pub hosts: usize,
+    pub tenancies: usize,
+    pub tenancy_doors: usize,
 }
 
 /// The generator's per-1,000 mix (docs/SCALE_20K.md § S3b), for the report.
@@ -176,15 +186,17 @@ fn largest_remainder(weights: &BTreeMap<usize, u64>, n: usize) -> Vec<(usize, us
 }
 
 /// Make `n` of the free cuts passing `ok` a `want`, the fewest flats first
-/// (ties by position); returns how many it made.
+/// (ties by position); returns how many it made. C6a: a cut with a use dealt
+/// into its units is not free.
 fn fewest_flats(
     kind: &mut [Option<BuildingKind>],
+    uses: &[Vec<(BuildingKind, Unit)>],
     segs: &[Seg],
     want: BuildingKind,
     n: usize,
     ok: &dyn Fn(usize) -> bool,
 ) -> usize {
-    let mut c: Vec<usize> = (0..segs.len()).filter(|&i| kind[i].is_none() && ok(i)).collect();
+    let mut c: Vec<usize> = (0..segs.len()).filter(|&i| kind[i].is_none() && uses[i].is_empty() && ok(i)).collect();
     c.sort_by_key(|&i| (segs[i].flats, segs[i].rect.y, segs[i].rect.x));
     let m = n.min(c.len());
     for &i in &c[..m] {
@@ -238,7 +250,7 @@ impl Report {
         if self.levels > 0 {
             let [fl, sh, ws, of] = self.level_units;
             println!(
-                "levels (city-sim/0.2, carried, not yet mapped): {} levels ({} tower plate floors); units flats {fl}, shops {sh}, workshops {ws}, offices {of}; cores {} flight, {} lift",
+                "levels (city-sim/0.2; their units hold the tenancies, the cores carried for C7): {} levels ({} tower plate floors); units flats {fl}, shops {sh}, workshops {ws}, offices {of}; cores {} flight, {} lift",
                 self.levels, self.plate_levels, self.cores_flight, self.cores_lift
             );
         }
@@ -287,6 +299,14 @@ impl Report {
                 "all", tot[0], tot[1], tot[2], tot[3], tot[4], tot[5], tot[6]
             );
         }
+        println!(
+            "tenancies (C6a): {} uses on {} host cuts ({} through their own lot's street door); {} buildings in all on {} cuts",
+            self.tenancies,
+            self.hosts,
+            self.tenancy_doors,
+            self.segments + self.tenancies,
+            self.segments
+        );
         for (k, n) in &self.kinds {
             println!("  {:<15} {n:>6}", format!("{k:?}"));
         }
@@ -853,6 +873,51 @@ struct Seg {
     /// The perf pass phase 10: the cut holds a lot centre (it has members);
     /// one that does not is a piece of a lot another cut holds.
     own_lot: bool,
+    /// The city milestone C6a: the members' work units (from 0.2's levels),
+    /// ground first, and the storeys holding their flats.
+    units: Vec<Unit>,
+    flat_span: Option<(u8, u8)>,
+    /// C6a: each member lot's street doors' `out` tiles (sim tiles), by the
+    /// member's index in `lots`.
+    lot_outs: Vec<Vec<(usize, usize)>>,
+}
+
+/// The city milestone C6a: one work unit of a cut, a use's place: its storey,
+/// its kind (`UNIT_SHOP`, `UNIT_WORKSHOP`, `UNIT_OFFICE`, `UNIT_WORKS`) and
+/// its member lot (an index into `Seg.lots`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+struct Unit {
+    level: u8,
+    kind: u8,
+    lot: usize,
+}
+
+/// A `B` line before it is written: kind, rect, tier, floors and the keyed fields.
+type OutB = (BuildingKind, Rect, u8, u8, BuildingExtra);
+
+const UNIT_SHOP: u8 = 0;
+const UNIT_WORKSHOP: u8 = 1;
+const UNIT_OFFICE: u8 = 2;
+const UNIT_WORKS: u8 = 3;
+
+/// C6a: the unit kinds a use takes, in its order of preference: a venue a
+/// shop front, a Hideout the alley's workshop, a Security Office or a Lot
+/// an office stack first.
+fn unit_order(kind: BuildingKind) -> [u8; 4] {
+    match kind {
+        BuildingKind::Market | BuildingKind::Bar => [UNIT_SHOP, UNIT_WORKSHOP, UNIT_OFFICE, UNIT_WORKS],
+        BuildingKind::Hideout => [UNIT_WORKSHOP, UNIT_SHOP, UNIT_OFFICE, UNIT_WORKS],
+        _ => [UNIT_OFFICE, UNIT_WORKS, UNIT_WORKSHOP, UNIT_SHOP],
+    }
+}
+
+/// C6a: take the unit `kind` prefers from `free` (its kind order, then the
+/// lowest storey, then file order).
+fn take_unit(free: &mut Vec<Unit>, kind: BuildingKind) -> Option<Unit> {
+    let order = unit_order(kind);
+    let rank = |u: &Unit| (order.iter().position(|&k| k == u.kind).unwrap_or(4), u.level);
+    let j = (0..free.len()).min_by_key(|&j| (rank(&free[j]), j))?;
+    Some(free.remove(j))
 }
 
 /// The perf pass phase 10 (OPEN-182, MAP_RECONCILE "TheCity" 2): the lot
@@ -1723,7 +1788,37 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                         .max_by_key(|(u, c)| (**c, std::cmp::Reverse(**u)))
                         .map_or(Some(Use::Civic), |(u, _)| Some(*u))
                 };
+                // C6a: the members' units by storey (0.2's levels; none in a
+                // 0.1 export), ground first, and their flats' storeys.
+                let mut units: Vec<Unit> = Vec::new();
+                let mut flat_span: Option<(u8, u8)> = None;
+                let mut lot_outs: Vec<Vec<(usize, usize)>> = Vec::new();
+                for (j, l) in members.iter().enumerate() {
+                    let Some(r) = l.sim.as_ref() else {
+                        lot_outs.push(Vec::new());
+                        continue;
+                    };
+                    lot_outs.push(r.doors_out.iter().filter_map(|&(x, y)| f.tile(x, y)).collect());
+                    for lv in &r.levels {
+                        let level = u8::try_from(lv.i).unwrap_or(u8::MAX);
+                        for (kind, n) in
+                            [(UNIT_SHOP, lv.units[1]), (UNIT_WORKSHOP, lv.units[2]), (UNIT_OFFICE, lv.units[3])]
+                        {
+                            units.extend(std::iter::repeat_n(Unit { level, kind, lot: j }, n as usize));
+                        }
+                        if lv.units[0] > 0 {
+                            flat_span = Some(flat_span.map_or((level, level), |(a, b)| (a.min(level), b.max(level))));
+                        }
+                    }
+                    if r.works {
+                        units.push(Unit { level: 0, kind: UNIT_WORKS, lot: j });
+                    }
+                }
+                units.sort_by_key(|u| (u.level, u.kind, u.lot));
                 segs.push(Seg {
+                    units,
+                    flat_span,
+                    lot_outs,
                     rect,
                     door,
                     district: usize::from(dgrid[at(cx, cy)]),
@@ -1825,6 +1920,46 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
             rep.shortfall.push(format!("{want:?}: {got} of {n}"));
         }
     };
+    // The city milestone C6a: a use dealt into a unit of a cut, not a whole
+    // cut (`free` holds each cut's units left, `uses` what stands on them).
+    // As `pick` (stages, the preferred zones first, spread by stride), one a
+    // cut a round, rounds until `n` or no candidate has a unit left; a cut
+    // dealt whole (`kind`) takes none. Returns how many it dealt.
+    let mut free: Vec<Vec<Unit>> = segs.iter().map(|sg| sg.units.clone()).collect();
+    let mut uses: Vec<Vec<(BuildingKind, Unit)>> = vec![Vec::new(); segs.len()];
+    let pick_units = |kind: &Vec<Option<BuildingKind>>,
+                      free: &mut Vec<Vec<Unit>>,
+                      uses: &mut Vec<Vec<(BuildingKind, Unit)>>,
+                      want: BuildingKind,
+                      n: usize,
+                      prefer: &[Zone],
+                      stages: &[&dyn Fn(usize) -> bool]|
+     -> usize {
+        let mut got = 0;
+        for ok in stages {
+            let mut tiers: Vec<Vec<usize>> =
+                prefer.iter().map(|z| (0..segs.len()).filter(|&i| zone(i) == *z && ok(i)).collect()).collect();
+            tiers.push((0..segs.len()).filter(|&i| !prefer.contains(&zone(i)) && ok(i)).collect());
+            for mut c in tiers {
+                c.sort_by_key(|&i| pos(i));
+                while got < n {
+                    c.retain(|&i| kind[i].is_none() && !free[i].is_empty());
+                    if c.is_empty() {
+                        break;
+                    }
+                    let m = (n - got).min(c.len());
+                    let picks: Vec<usize> = (0..m).map(|j| c[j * c.len() / m]).collect();
+                    for i in picks {
+                        if let Some(u) = take_unit(&mut free[i], want) {
+                            uses[i].push((want, u));
+                            got += 1;
+                        }
+                    }
+                }
+            }
+        }
+        got
+    };
     use BuildingKind as K;
     use Zone as Z;
     let any = |_: usize| true;
@@ -1911,41 +2046,63 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
         }
         let farm_vat = |i: usize| vat(i) && farm_ok(i);
         let farm_ind = |i: usize| industrial(i) && farm_ok(i);
-        // Then a cut nobody lives in (commercial, civic), before any Block.
-        let farm_open =
-            |i: usize| farm_ok(i) && !segs[i].use_.is_some_and(|u| matches!(u, Use::Residential | Use::ShopHouse));
+        // Then a cut nobody lives in (commercial, civic), before any Block;
+        // C6a: not an office stack (its offices are units the Lots take: at
+        // 100k the Farms had taken D2's towers whole).
+        let farm_open = |i: usize| {
+            farm_ok(i)
+                && !segs[i].use_.is_some_and(|u| matches!(u, Use::Residential | Use::ShopHouse))
+                && !segs[i].units.iter().any(|u| u.kind == UNIT_OFFICE)
+        };
+        let farm_desk = |i: usize| farm_ok(i) && !segs[i].units.iter().any(|u| u.kind == UNIT_OFFICE);
         pick(
             &mut kind,
             &mut rep,
             K::Farm,
             target(6.0),
             &[Z::Vats],
-            &[&farm_vat, &farm_ind, &farm_open, &farm_ok],
+            &[&farm_vat, &farm_ind, &farm_open, &farm_desk, &farm_ok],
             true,
         );
-        let have_so = kind.iter().filter(|x| **x == Some(K::SecurityOffice)).count();
-        let n_so = target(1.0).saturating_sub(have_so);
+        // C6a: from here the uses go into units (a Security Office in an
+        // office or a works floor, a Hideout in the alley's workshop, the
+        // venues on the shop fronts, the Lots in the office stacks), so the
+        // cuts they took before stay Homes; a use with no unit left in its
+        // stage takes a whole cut as before (the fewest flats first).
+        let n_uses = |kind: &Vec<Option<BuildingKind>>, uses: &Vec<Vec<(BuildingKind, Unit)>>, k: BuildingKind| {
+            kind.iter().filter(|x| **x == Some(k)).count()
+                + uses.iter().map(|u| u.iter().filter(|x| x.0 == k).count()).sum::<usize>()
+        };
+        let n_so = target(1.0).saturating_sub(n_uses(&kind, &uses, K::SecurityOffice));
         if n_so > 0 {
-            pick(
-                &mut kind,
-                &mut rep,
+            let got = pick_units(
+                &kind,
+                &mut free,
+                &mut uses,
                 K::SecurityOffice,
                 n_so,
                 &[Z::Vats],
                 &[&factory, &godown, &industrial, &any],
-                false,
             );
+            if got < n_so {
+                pick(&mut kind, &mut rep, K::SecurityOffice, n_so - got, &[Z::Vats], &[&industrial, &any], false);
+            }
         }
         let alley = |i: usize| shop_house(i) && segs[i].workshop;
         let shopfront = |i: usize| shop_house(i) && !segs[i].workshop;
-        pick(&mut kind, &mut rep, K::Hideout, target(1.0), &[Z::Sump], &[&alley, &shop_house, &any], false);
+        let n_hide = target(1.0);
+        let got = pick_units(&kind, &mut free, &mut uses, K::Hideout, n_hide, &[Z::Sump], &[&alley, &shop_house, &any]);
+        if got < n_hide {
+            pick(&mut kind, &mut rep, K::Hideout, n_hide - got, &[Z::Sump], &[&alley, &shop_house, &any], false);
+        }
         // Track B (OPEN-136): the Markets go where the households live, as the
         // generator puts a borough's food beside its homes: one a district
         // first, the rest by the district's household slots (largest
         // remainder; a cut's slots are its flats' share of the households, at
         // least one, as dealt below); within a district shop fronts,
-        // commercial cuts, shop-houses, then the cuts with the fewest flats.
-        // What a district cannot place goes by the S3c rule.
+        // commercial cuts, shop-houses, then (C6a) any unit there, then the
+        // cuts with the fewest flats. What a district cannot place goes by
+        // the S3c rule.
         let n_markets = target(1.5);
         let lives = |i: usize| {
             kind[i].is_none()
@@ -1965,7 +2122,6 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
         for (d, n) in largest_remainder(&slots_of_d, rest_n) {
             *deal.entry(d).or_default() += n;
         }
-        let mark = rep.shortfall.len();
         for (d, n) in deal.into_iter().filter(|&(_, n)| n > 0) {
             let in_d = |i: usize| segs[i].district == d;
             let (sf, cm, sh) = (
@@ -1973,84 +2129,162 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                 |i: usize| in_d(i) && commercial(i),
                 |i: usize| in_d(i) && shop_house(i),
             );
-            pick(&mut kind, &mut rep, K::Market, n, &[], &[&sf, &cm, &sh], false);
-            let have = (0..segs.len()).filter(|&i| in_d(i) && kind[i] == Some(K::Market)).count();
-            fewest_flats(&mut kind, segs, K::Market, n.saturating_sub(have), &|i| in_d(i) && segs[i].flats > 0);
+            let got = pick_units(&kind, &mut free, &mut uses, K::Market, n, &[], &[&sf, &cm, &sh, &in_d]);
+            fewest_flats(&mut kind, &uses, segs, K::Market, n.saturating_sub(got), &|i| in_d(i) && segs[i].flats > 0);
         }
-        rep.shortfall.truncate(mark);
-        let have_markets = kind.iter().filter(|x| **x == Some(K::Market)).count();
-        pick(
-            &mut kind,
-            &mut rep,
+        let have_markets = n_uses(&kind, &uses, K::Market);
+        let more = n_markets.saturating_sub(have_markets);
+        let got = pick_units(
+            &kind,
+            &mut free,
+            &mut uses,
             K::Market,
-            n_markets.saturating_sub(have_markets),
+            more,
             &[Z::Sump, Z::Mid],
             &[&shopfront, &commercial, &any],
-            false,
         );
-        pick(&mut kind, &mut rep, K::Bar, target(1.5), &[Z::Mid, Z::Sump], &[&commercial, &shopfront, &any], false);
-        // Lots: the leftover industrial, civic and vacant cuts, then (to the
-        // mix's count) commercial cuts without flats, commercial, shop-houses.
+        if got < more {
+            pick(
+                &mut kind,
+                &mut rep,
+                K::Market,
+                more - got,
+                &[Z::Sump, Z::Mid],
+                &[&shopfront, &commercial, &any],
+                false,
+            );
+        }
+        let n_bars = target(1.5);
+        let got = pick_units(
+            &kind,
+            &mut free,
+            &mut uses,
+            K::Bar,
+            n_bars,
+            &[Z::Mid, Z::Sump],
+            &[&commercial, &shopfront, &any],
+        );
+        if got < n_bars {
+            pick(
+                &mut kind,
+                &mut rep,
+                K::Bar,
+                n_bars - got,
+                &[Z::Mid, Z::Sump],
+                &[&commercial, &shopfront, &any],
+                false,
+            );
+        }
+        // Lots: the leftover industrial, civic and vacant cuts nothing stands
+        // on, whole; then (C6a) the generator's Lots into units, zone by zone.
         for (i, sg) in segs.iter().enumerate() {
-            if kind[i].is_none() && sg.use_.is_some_and(|u| u.industrial() || matches!(u, Use::Civic | Use::Vacant)) {
+            if kind[i].is_none()
+                && uses[i].is_empty()
+                && sg.use_.is_some_and(|u| u.industrial() || matches!(u, Use::Civic | Use::Vacant))
+            {
                 kind[i] = Some(K::Lot);
             }
         }
-        // Never past the generator's Lots to Blocks (80 to 200): a coarse
-        // import has too few cuts for both, and the Blocks come first.
-        let have_lots = kind.iter().filter(|x| **x == Some(K::Lot)).count();
+        // Whole-cut Lots never past the generator's Lots to Blocks (80 to
+        // 200): a coarse import has too few cuts for both, and the Blocks
+        // come first. A Lot in a unit takes no Block (C6a).
+        let whole_lots = kind.iter().filter(|x| **x == Some(K::Lot)).count();
         let housing = (0..segs.len())
             .filter(|&i| {
                 kind[i].is_none()
                     && segs[i].use_.is_some_and(|u| matches!(u, Use::Residential | Use::ShopHouse | Use::Commercial))
             })
             .count();
-        let room = (housing as f64 * 0.4 - have_lots as f64) / 1.4;
-        let want = target(80.0).saturating_sub(have_lots);
-        let n_lots = want.min(room.max(0.0).floor() as usize);
-        if n_lots < want {
-            rep.shortfall.push(format!(
-                "Lot: {} of {} (more would take Blocks past the generator's 80 Lots to 200 Blocks)",
-                have_lots + n_lots,
-                have_lots + want
-            ));
-        }
+        let mut room = ((housing as f64 * 0.4 - whole_lots as f64) / 1.4).max(0.0).floor() as usize;
+        let want_lots = target(80.0);
+        let mut budget = want_lots.saturating_sub(n_uses(&kind, &uses, K::Lot));
         let no_flats = |i: usize| commercial(i) && segs[i].flats == 0;
         // Track B (OPEN-136): first each zone's share of the generator's Lots
         // (`GEN_LOTS_BY_ZONE`, less the leftovers already there), so the
         // Spire has the Lots its Hqs and Lounges need (`founding::tier_ok`)
-        // and the Mid its Gunsmiths and Schools: in the zone commercial cuts
-        // without flats, commercial, shop-houses, then the cuts with the
-        // fewest flats (the households follow the flats, so a small tower
-        // gives up its slot, not its people). The rest as before, anywhere.
-        let mut budget = n_lots;
-        let mark = rep.shortfall.len();
+        // and the Mid its Gunsmiths and Schools: in the zone (C6a) the units
+        // of commercial cuts without flats, commercial, shop-houses, any;
+        // then the whole cuts with the fewest flats (the households follow
+        // the flats, so a small tower gives up its slot, not its people),
+        // within the room. The rest as before, anywhere.
+        let in_zone_lots = |kind: &Vec<Option<BuildingKind>>, uses: &Vec<Vec<(BuildingKind, Unit)>>, zs: &[Zone]| {
+            (0..segs.len())
+                .filter(|&i| zs.contains(&zone(i)))
+                .map(|i| usize::from(kind[i] == Some(K::Lot)) + uses[i].iter().filter(|x| x.0 == K::Lot).count())
+                .sum::<usize>()
+        };
+        // C6a: a zone's Lots are dealt over its districts by their units
+        // (the sites: D2's office stacks are the Civic Core's work, the Vats'
+        // works floors theirs), a zone with none (the Spire) by its
+        // household slots; the rest of the Lots anywhere by the household
+        // slots (as the Markets: the work goes where the people live).
+        let deal_lots = |kind: &mut Vec<Option<BuildingKind>>,
+                         free: &mut Vec<Vec<Unit>>,
+                         uses: &mut Vec<Vec<(BuildingKind, Unit)>>,
+                         room: &mut usize,
+                         zs: Option<&[Zone]>,
+                         n: usize|
+         -> usize {
+            let in_z = |i: usize| zs.is_none_or(|zs| zs.contains(&zone(i)));
+            let mut w: BTreeMap<usize, u64> = BTreeMap::new();
+            if zs.is_some() {
+                for i in (0..segs.len()).filter(|&i| in_z(i) && kind[i].is_none()) {
+                    *w.entry(segs[i].district).or_default() += free[i].len() as u64;
+                }
+            }
+            if w.values().all(|&v| v == 0) {
+                w = slots_of_d
+                    .iter()
+                    .filter(|(&d, _)| zone_of_d.get(d).is_some_and(|z| zs.is_none_or(|zs| zs.contains(z))))
+                    .map(|(&d, &n)| (d, n))
+                    .collect();
+            }
+            let mut got = 0;
+            for (d, nd) in largest_remainder(&w, n) {
+                let in_d = |i: usize| segs[i].district == d && in_z(i);
+                let (nf, cm, sh) = (
+                    |i: usize| in_d(i) && no_flats(i),
+                    |i: usize| in_d(i) && commercial(i),
+                    |i: usize| in_d(i) && shop_house(i),
+                );
+                let g = pick_units(kind, free, uses, K::Lot, nd, &[], &[&sh, &cm, &nf, &in_d]);
+                let homes = |i: usize| {
+                    in_d(i)
+                        && segs[i]
+                            .use_
+                            .is_some_and(|u| matches!(u, Use::Residential | Use::ShopHouse | Use::Commercial))
+                };
+                let more = fewest_flats(kind, uses, segs, K::Lot, (nd - g).min(*room), &homes);
+                *room -= more;
+                got += g + more;
+            }
+            got
+        };
         for &(zs, per) in GEN_LOTS_BY_ZONE {
-            let in_z = |i: usize| zs.contains(&zone(i));
-            let have = (0..segs.len()).filter(|&i| in_z(i) && kind[i] == Some(K::Lot)).count();
-            // No per-zone 80-to-200 room: capped so, the k = 2 Spire held 88
-            // Lots, the seeded industries spilled onto them from the short
-            // Vats and `grow_hq` never fired (20 Hqs at d29 against the
-            // generator city's 49; docs/IMPORT_GRAPHICS.md, Track B).
+            let have = in_zone_lots(&kind, &uses, zs);
             let n = target(per).saturating_sub(have).min(budget);
-            let (nf, cm, sh) = (
-                |i: usize| in_z(i) && no_flats(i),
-                |i: usize| in_z(i) && commercial(i),
-                |i: usize| in_z(i) && shop_house(i),
-            );
-            let before = kind.iter().filter(|x| **x == Some(K::Lot)).count();
-            pick(&mut kind, &mut rep, K::Lot, n, &[], &[&nf, &cm, &sh], false);
-            let got = kind.iter().filter(|x| **x == Some(K::Lot)).count() - before;
-            let homes = |i: usize| {
-                in_z(i)
-                    && segs[i].use_.is_some_and(|u| matches!(u, Use::Residential | Use::ShopHouse | Use::Commercial))
-            };
-            let more = fewest_flats(&mut kind, segs, K::Lot, n - got, &homes);
-            budget -= got + more;
+            budget -= deal_lots(&mut kind, &mut free, &mut uses, &mut room, Some(zs), n);
         }
-        rep.shortfall.truncate(mark);
         if budget > 0 {
-            pick(&mut kind, &mut rep, K::Lot, budget, &[], &[&no_flats, &commercial, &shop_house], false);
+            budget -= deal_lots(&mut kind, &mut free, &mut uses, &mut room, None, budget);
+        }
+        if budget > 0 {
+            let got = pick_units(
+                &kind,
+                &mut free,
+                &mut uses,
+                K::Lot,
+                budget,
+                &[],
+                &[&shop_house, &commercial, &no_flats, &any],
+            );
+            budget -= got;
+        }
+        if budget > 0 {
+            rep.shortfall.push(format!(
+                "Lot: {} of {want_lots} (no unit left, and more whole cuts would take Blocks past the generator's 80 Lots to 200 Blocks)",
+                want_lots - budget
+            ));
         }
     }
     // The rest: Blocks where people live, open Lots elsewhere (S3b: in the
@@ -2062,7 +2296,31 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
         Some(Use::Commercial) if segs[i].flats > 0 => K::Home,
         Some(_) => K::Lot,
     };
-    let kinds: Vec<BuildingKind> = (0..segs.len()).map(|i| kind[i].unwrap_or_else(|| rest(i))).collect();
+    // The city milestone C6a: each cut's host and its tenancies. A cut dealt
+    // whole stands as its kind; one where people live (the S3c rule's Home)
+    // is a Home on its flats' storeys holding the uses dealt into its units
+    // as tenancies; one where nobody lives, its lowest use the host and the
+    // rest tenancies on it.
+    let mut kinds: Vec<BuildingKind> = Vec::with_capacity(segs.len());
+    let mut host_span: Vec<Option<(u8, u8)>> = Vec::with_capacity(segs.len());
+    let mut tenancies: Vec<Vec<(BuildingKind, Unit)>> = Vec::with_capacity(segs.len());
+    for i in 0..segs.len() {
+        let mut ts = std::mem::take(&mut uses[i]);
+        let (k, span) = match kind[i] {
+            Some(k) => (k, (k == K::Home).then_some(segs[i].flat_span).flatten()),
+            None if ts.is_empty() || rest(i) == K::Home => {
+                let k = rest(i);
+                (k, (k == K::Home).then_some(segs[i].flat_span).flatten())
+            }
+            None => {
+                let (k, u) = ts.remove(0);
+                (k, Some((u.level, u.level)))
+            }
+        };
+        kinds.push(k);
+        host_span.push(span);
+        tenancies.push(ts);
+    }
     // Home floor slots (a household each, `RESIDENTS_PER_SLOT` residents).
     // S3b: a Home's floors. S3c: the `--residents` households (one a slot)
     // dealt over the Homes by their flats (largest remainder), at least one
@@ -2098,8 +2356,11 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
         rep.slots_capped = homes.iter().filter(|&&i| slots[i] > 255).count();
     }
 
-    let mut out_b: Vec<(BuildingKind, Rect, u8, u8, BuildingExtra)> = Vec::new();
+    let mut out_b: Vec<OutB> = Vec::new();
     let mut doors: Vec<(usize, usize)> = Vec::new();
+    // C6a: per entry, its cut and whether it is a tenancy (its host is the
+    // cut's host entry, the first of the cut's entries).
+    let mut entry_of: Vec<(usize, bool)> = Vec::new();
     for (i, sg) in segs.iter().enumerate() {
         let z = zone(i);
         let kd = kinds[i];
@@ -2107,11 +2368,15 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
         if kd == K::Home {
             rep.home_floors += usize::from(floors);
         }
+        let n_units = u16::try_from(sg.units.len()).unwrap_or(u16::MAX);
         let extra = if by_use {
             BuildingExtra {
                 flats: (kd == K::Home).then_some(sg.flats),
                 storeys: Some(u16::try_from(sg.floors).unwrap_or(u16::MAX)),
                 lot: door_lot(&f, sg),
+                span: host_span[i],
+                units: (n_units > 0).then_some(n_units),
+                ..BuildingExtra::default()
             }
         } else {
             BuildingExtra { lot: door_lot(&f, sg), ..BuildingExtra::default() }
@@ -2119,39 +2384,104 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
         if extra.lot.is_some() {
             rep.lots_named += 1;
         }
-        *rep.kinds.entry(kd).or_default() += 1;
-        let u = sg.use_.map_or("-".to_string(), |u| format!("{u:?}"));
-        *rep.kind_use.entry((kd, u)).or_default() += 1;
         let dname = districts.get(sg.district).map_or_else(|| "-".to_string(), |d| d.name.clone());
-        *rep.dealt_by_district.entry(dname).or_default().entry(kd).or_default() += 1;
+        let u = sg.use_.map_or("-".to_string(), |u| format!("{u:?}"));
+        let count = |kd: BuildingKind, rep: &mut Report| {
+            *rep.kinds.entry(kd).or_default() += 1;
+            *rep.kind_use.entry((kd, u.clone())).or_default() += 1;
+            *rep.dealt_by_district.entry(dname.clone()).or_default().entry(kd).or_default() += 1;
+        };
+        count(kd, &mut rep);
+        rep.hosts += usize::from(!tenancies[i].is_empty());
         out_b.push((kd, sg.rect, tier_of(z), floors, extra.clone()));
         doors.push(sg.door);
+        entry_of.push((i, false));
+        // Its tenancies: each on its unit's storey, through its lot's street
+        // door where that is a wall tile of the cut facing an open road (not
+        // the host's), else the host's door.
+        let (x0, y0) = (usize::from(sg.rect.x), usize::from(sg.rect.y));
+        let walls: Vec<((usize, usize), (usize, usize))> =
+            wall_doors((x0, y0, x0 + usize::from(sg.rect.w), y0 + usize::from(sg.rect.h)), w, h)
+                .into_iter()
+                .filter(|&(d, (ox, oy))| d != sg.door && road(&tiles, ox, oy) && !occupied[at(ox, oy)])
+                .collect();
+        for &(tk, unit) in &tenancies[i] {
+            let own = sg
+                .lot_outs
+                .get(unit.lot)
+                .and_then(|outs| outs.iter().find_map(|o| walls.iter().find(|c| c.1 == *o).map(|c| c.0)));
+            let lot = sg.lots.get(unit.lot).map(|l| l.0.clone());
+            count(tk, &mut rep);
+            rep.tenancies += 1;
+            rep.tenancy_doors += usize::from(own.is_some());
+            out_b.push((
+                tk,
+                sg.rect,
+                tier_of(z),
+                1,
+                BuildingExtra {
+                    storeys: Some(u16::try_from(sg.floors).unwrap_or(u16::MAX)),
+                    lot,
+                    span: Some((unit.level, unit.level)),
+                    door: own.map(|(x, y)| (x as u16, y as u16)),
+                    // the host's index, set once the order is known
+                    within: Some(0),
+                    ..BuildingExtra::default()
+                },
+            ));
+            doors.push(own.unwrap_or(sg.door));
+            entry_of.push((i, true));
+        }
     }
 
     // --- stamp ------------------------------------------------------------------
-    for ((kd, r, ..), &(dx, dy)) in out_b.iter().zip(&doors) {
-        let (x0, y0, x1, y1) = (
-            usize::from(r.x),
-            usize::from(r.y),
-            usize::from(r.x) + usize::from(r.w),
-            usize::from(r.y) + usize::from(r.h),
-        );
-        for y in y0..y1 {
-            for x in x0..x1 {
-                let edge = y == y0 || y + 1 == y1 || x == x0 || x + 1 == x1;
-                tiles[at(x, y)] = match (kd, edge) {
-                    (K::Lot, _) => '.',
-                    (_, true) => '#',
-                    (K::Farm, false) => 'f',
-                    _ => '.',
-                };
+    let hosting: Vec<bool> = (0..segs.len()).map(|i| !tenancies[i].is_empty()).collect();
+    for (((kd, r, ..), &(dx, dy)), &(i, tenancy)) in out_b.iter().zip(&doors).zip(&entry_of) {
+        if !tenancy {
+            let (x0, y0, x1, y1) = (
+                usize::from(r.x),
+                usize::from(r.y),
+                usize::from(r.x) + usize::from(r.w),
+                usize::from(r.y) + usize::from(r.h),
+            );
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let edge = y == y0 || y + 1 == y1 || x == x0 || x + 1 == x1;
+                    tiles[at(x, y)] = match (kd, edge) {
+                        // C6a: a Lot that hosts tenancies is a walled structure.
+                        (K::Lot, true) if hosting[i] => '#',
+                        (K::Lot, _) => '.',
+                        (_, true) => '#',
+                        (K::Farm, false) => 'f',
+                        _ => '.',
+                    };
+                }
             }
         }
         tiles[at(dx, dy)] = 'D';
     }
-    // File order: kind, then row, then column (the shipped map's order).
+    // File order: kind, then row, then column (the shipped map's order); a
+    // cut's entries keep their order among equals (stable).
     let korder = |kd: BuildingKind| BuildingKind::ALL.iter().position(|&x| x == kd).unwrap_or(usize::MAX);
-    out_b.sort_by_key(|&(kd, r, ..)| (korder(kd), r.y, r.x));
+    let mut order: Vec<usize> = (0..out_b.len()).collect();
+    order.sort_by_key(|&e| (korder(out_b[e].0), out_b[e].1.y, out_b[e].1.x));
+    let mut at_line = vec![0u32; out_b.len()];
+    for (line, &e) in order.iter().enumerate() {
+        at_line[e] = line as u32;
+    }
+    let mut host_line = vec![0u32; segs.len()];
+    for (e, &(i, tenancy)) in entry_of.iter().enumerate() {
+        if !tenancy {
+            host_line[i] = at_line[e];
+        }
+    }
+    for (e, &(i, tenancy)) in entry_of.iter().enumerate() {
+        if tenancy {
+            out_b[e].4.within = Some(host_line[i]);
+        }
+    }
+    let mut sorted: Vec<Option<OutB>> = out_b.into_iter().map(Some).collect();
+    let out_b: Vec<OutB> = order.iter().map(|&e| sorted[e].take().expect("each entry once")).collect();
 
     // --- El lines ---------------------------------------------------------------
     let mut lines: Vec<TransitLineCfg> = Vec::new();
@@ -2334,7 +2664,7 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
     );
     if sim_lots.is_some() {
         rep.unmapped.push(
-            "lots_sim.json shop_units: Markets and Bars follow use and ground, not the unit count; workplaces keep one floor (their storeys are written as storeys=)".into(),
+            "lots_sim.json levels: a use dealt into a unit is a tenancy on its storey (C6a); the vacant units are the host's units= count, not entities; a workplace keeps one floor of places (its storeys are written as storeys=)".into(),
         );
     } else {
         rep.unmapped.push("lots.json floors: the district's range, not the lot's massing (a seeded pick in it)".into());

@@ -2258,6 +2258,7 @@ pub fn follow_guard(world: &mut World, guard: EntityId) {
     if let Some(p) = world.comp_mut::<Position>(suspect) {
         p.tile = gp.tile;
         p.building = gp.building;
+        p.floor = gp.floor;
     }
 }
 

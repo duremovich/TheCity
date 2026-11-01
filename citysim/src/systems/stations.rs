@@ -474,6 +474,7 @@ pub fn send_on(world: &mut World, s: EntityId, suspect: EntityId) {
     if let Some(p) = world.comp_mut::<Position>(suspect) {
         p.tile = from;
         p.building = None;
+        p.floor = 0;
     }
     send_vans(world, s, precinct, vec![suspect]);
 }

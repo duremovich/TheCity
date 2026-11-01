@@ -36,6 +36,17 @@ the import dealt there (C6's input). Each map's `# inputs:` names the TheCityGra
 rev-parse`) and the export's seed. The rail service block (headways, the rack lines' 8 m/s) is not read: the sim's
 `[transit]` runs every line.
 
+**City milestone C6a (2026-10-31): floors as tenancies.** The employers, venues and Hideouts are dealt into the
+cuts' units (0.2's `levels`: shops, workshops, offices, a works floor one), not whole cuts: a Security Office an
+office or a works floor first, a Hideout the alley's workshop, a Market or a Bar a shop front, a Lot an office
+stack; a zone's Lots over its districts by their units (the Spire, with none, by its households: whole cuts as
+before), the rest by the districts' household slots. Each use is a `B` line `in=<host> span=<f>-<f>` (and
+`door=<x>,<y>` where its lot's street door is a wall tile of the cut facing an open road), on its cut's host: a
+Home on its flats' storeys where people live, else its lowest use. So the cuts the uses took go back to Homes, and
+the 80-Lots-to-200-Blocks cap binds only the whole-cut Lots. Farms and the civic sites stay whole cuts; a Farm no
+longer takes an office stack (`farm_desk`). At 20k: 7,408 buildings on 6,104 cuts (1,304 tenancies); at 100k:
+14,470 (8,366 tenancies), every one of the 8,000 Lots placed.
+
 **The sim export (S3c).** Their `out/sim/` (SIM_NOTES "The sim export", schema `city-sim/0.1`, 2026-10-12) answers
 asks 1-5 and 8 below. The adapter prefers it file by file and says which inputs it used (`input:` lines in the
 report, and a `# inputs:` comment in the map):

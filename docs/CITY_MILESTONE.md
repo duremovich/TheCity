@@ -261,6 +261,76 @@ cutaway (`OPEN-180`'s floor and flat, the first half). **Shadow:** worker, cook,
 a post and a home on named floors. **Numbers** (20k, one 100k): Buildings 6,104 -> n (hosts, tenancies), employed
 share, homeless, legs over 120 min, home-to-post median, ticks/s, peak working set.
 
+**C6a as built (2026-10-31).** As above (`systems/floors.rs` holds the store's half), with these deviations: (1)
+**The host is the cut's main use by a rule:** a cut where people live (the S3c rule's Home) is a Home on its flats'
+storeys (`span` the levels holding flats) and every use dealt into its units is a tenancy on it; a cut nobody lives
+in (D2's office stacks, a factory) is hosted by its lowest use, the rest tenancies on it; Farms and the civic sites
+stay whole cuts with no tenancies. No Home is a tenancy yet (a founded Home on a tenancy Lot would be one). (2)
+**What is dealt into units:** the Security Offices (an office or a works floor first), the Hideouts (the alley's
+workshop), the Markets and Bars (a shop front) and the Lots (an office stack, a works floor, a workshop, a shop),
+each one unit on one storey (`span=f-f`); a use with no unit left in its stage takes a whole cut as before (the
+fewest flats first), and only whole-cut Lots count against the generator's 80 Lots to 200 Blocks. A zone's share of
+the Lots (`GEN_LOTS_BY_ZONE`) is dealt over its districts by their units (the sites; the Spire, with none, by its
+households: whole cuts as before), the rest anywhere by the districts' household slots. (3) **A Farm no longer
+takes an office stack** (`farm_desk`, a stage before the last resort): at 100k the 600 Farms had taken D2's 22
+office towers whole, so D2's 4,030 offices held nothing; now D2 holds 1,223 of 100k's Lots (234 at 20k). (4) **The
+map:** `span=<lo>-<hi>`, `units=<n>` (a host's work units, the input of `floors::vacant_units`: units less the
+uses on the host, Ambient's rule, C6b's founding), and a tenancy's `in=<host's B line>` (0-based, file order; the
+rect repeated) and `door=<x>,<y>`. A tenancy's own door is its unit's lot's street door when that `out` tile is a
+wall tile of the cut facing an open road (not the host's door): 309 of 1,304 at 20k, 2,973 of 8,366 at 100k; the
+rest share the host's. `Map::place_doors` finds the doors once every line is read; a Lot that hosts tenancies is
+walled. A host's interior is reachable through each of its doors, so a path may cross a two-door structure (none
+measured). (5) **The flat** (`Household.flat`, `(Home, index)`) is one of the Home's household slots, dealt at
+`set_home` and on the first entry (kin under the roof share one; `World::new` deals them afresh once the kin are
+linked); its storey (`floors::flat_floor`) deals the slots up the span from a storey fixed per Home (a hash of its
+id), since at the sim's scale most Homes hold one or two slots (20k: 6,629 slots on 5,584 Homes) and every
+household otherwise lived on its tower's lowest flat floor (the first shadow read so). **The floor**
+(`Position.floor`): at his own Home his flat's storey, at his post one of its floors (fixed per body), anyone else
+the span's lowest (a visitor, a customer); 0 on the street and in a building with no span; every
+`p.building = None` sets it 0. Nothing in the sim reads it yet (C7's climb will). (6) **Statistical mirror:** the
+tenancy is the agent's building as before; the floor is drawn from it on promotion (the promoted body enters
+through `enter_building`, which sets it). (7) **One-building-per-cut fixes:** `build_on_lot` builds a tenancy Lot
+inside its host's walls (no tile changes) and keeps a host's tenancy doors when it walls a Lot host;
+`DemolishHome` with the street off (it razes the tiles) refuses a structure with tenancies; `mood`'s company-floors
+crowding reads `company_homes`, not `within`; the 8 `company_homes` sites, `lod.rs` (promotion stands at the door,
+then enters) and the door lookups needed nothing. (8) **The 2k city** (`mapgen`) has no spans: no floors, no flats;
+the change tier's 1,471 tests ran unchanged (`test_graphics_import_20k_holds_20k` reads the hosts' `lot=` as
+unique, a tenancy naming its unit's lot). (9) `SAVE_VERSION` 119; both island maps re-imported (the `B` order new);
+the view fixture regenerated (185 KB; 218 of its 621 buildings are tenancies).
+
+**The numbers** (seed 42 x 30, `--scaled --ambient-flats 50`, 8 threads, one run each; before is main `bdcdb22`;
+the 20k runs shared the box with builds, the 100k after ran alone):
+
+| | 20k before | 20k after | 100k before (C5's after) | 100k after |
+|---|---|---|---|---|
+| buildings (hosts with tenancies, tenancies) | 6,104 (0, 0) | 7,408 (1,036, 1,304) | 6,104 (0, 0) | 14,470 (4,265, 8,366) |
+| Lots of the generator's want / Homes / Home slots | 1,600 of 1,600 / 4,280 / 5,790 | 1,600 / 5,584 / 6,629 | 1,415 of 8,000 / 3,585 / 20,047 | 8,000 of 8,000 / 5,366 / 20,088 |
+| employed d30 (of the population) | 12,123 (0.537) | 11,839 (0.525) | 45,674 (0.413) | 57,458 (0.513) |
+| homeless d30 | 248 | 314 | 12,690 | 2,249 |
+| legs over 120 min (30 d) | 4 | 5 | 30 | 19 |
+| home-to-post median (`commute_med`, d30) | 10 min | 9 min | (not printed) | 4 min |
+| ticks/s days 25-30 | 113/131/127/117/136/137 | 148/137/134/130/142/133 | 14/13/13/13/12/12 | 12/12/12/11/12/11 |
+| peak working set | 543 MB | 541 MB | (not printed) | 1,966 MB |
+
+The 100k city is where the floors pay: 8,000 of 8,000 Lots stand (1,415 before) in the units of the cuts people live in and of D2's office stacks, so the employed share rises 0.413 -> 0.513 and the homeless fall 12,690 -> 2,249 (the cuts the Lots had taken went back to Homes beside them), legs over 120 min 30 -> 19, and the home-to-post median is 4 min. At 20k, where the Lots already stood, nothing moves past one run's noise (employed 0.537 -> 0.525, homeless 248 -> 314, both not diagnosed). The store grows 2.4x at 100k (14,470 buildings) for ~1 tick/s (13 -> 12; the 100k after ran alone, as C5's after did) and a 1.97 GB peak; the drop is a print for C7's perf read, not a knob. Nothing retuned.
+
+**Camera** (`target/c6a/cam`, from the shadow's day-22 save): `c6a_croupier_d22_1715.png`, the follow-cam on
+`club_staff_14197` with the occlusion's cut open on his tower: his body drawn inside it on floor 18 (z 68 m), the
+storeys around him cut away; `c6a_croupier_d22_0005.png` the same tower at 00:05, the bodies indoors drawn on their
+storeys up the facade. What reads wrong: the replay leaves the diary by 17:15 (the diary has him at the Gambling Den
+on floor 0 at 17:12, the follow-cam asleep at home on floor 18). **Shadow** (20k days 21-23, worker, cook,
+club_staff, dancer, super x 2, `target/c6a/shadow`): every pick has a flat on a named floor and every post in a unit
+names its floor and host: `club_staff_14197` "Home: Block#3288 (D3 Neon Quarter), flat 1 on floor 18, floors 1-21"
+and "Job: Croupier at Gambling Den#6844 (D3 Neon Quarter), floor 0 of Block#3288", his evening "d22 17:12 now at
+Gambling Den#6844, floor 0 of Block#3288" and his night "d22 00:03 now at Block#3288, floor 18 (from Gambling
+Den#6844, floor 0 of Block#3288)": home and post in one tower, the HK way; `cook_17235` home on floor 9 of Block#1350
+(floors 2-23), the Noodle Bar on floor 0 of Block#602, 8 min; `dancer_19911` the Club on floor 1 of Bar#5748 in D2;
+`super_24671` floor 16 of Block#4881, his round's Block#4882 on floor 12. What reads wrong: a visitor stands on the
+Home's lowest flat floor whoever he visits (`worker_13521` at Block#697 floor 2); a Super's post is a whole Block
+(his floor a hash of his id, not the floor his round is on); most Homes hold one household slot, so a flat is "flat
+1" everywhere and the tower's other flats are the Ambient tier's; the worker's Corp HQ and the Vat Farm are whole
+cuts with no floors.
+
 ### C6b, floors as tenancies: the economy of floors (TheCity; `founding.rs`, `ownership.rs` `Flow`, `living.rs`, rent, `company.rs` buyouts, `shift.rs`)
 
 The host's owner is the **landlord**: each tenancy pays floor rent to it (`Flow::FloorRent`; a city-owned host's

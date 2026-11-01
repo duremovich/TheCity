@@ -1331,6 +1331,7 @@ pub fn send_home(world: &mut World, child: EntityId, parent: EntityId) -> Option
         p.building = Some(h);
         p.entered = tick;
     }
+    crate::systems::floors::settle(world, child);
     // Round 5 U2: at home from tonight (the midnight pick sets tomorrow's).
     if let Some(c) = world.comp_mut::<Child>(child) {
         if c.routine == crate::components::Routine::Camp {

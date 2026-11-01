@@ -367,7 +367,8 @@ pub fn spawn_child(world: &mut World, mother: EntityId, father: EntityId, home: 
     crate::systems::assets::give_body(world, id, body);
     // In the Home, but not an occupant: a birth may exceed the capacity of 6.
     let door = world.comp::<Building>(home).map_or(TilePos::default(), |b| b.door);
-    world.insert(id, Position { tile: door, building: Some(home), entered: tick });
+    world.insert(id, Position { tile: door, building: Some(home), entered: tick, floor: 0 });
+    crate::systems::floors::born(world, id, mother);
     // Siblings: the parents' other children.
     let mut siblings: Vec<EntityId> = Vec::new();
     for parent in [mother, father] {
@@ -2009,7 +2010,7 @@ fn arrive(world: &mut World, a: Arrival, with: Option<EntityId>) -> EntityId {
     world.insert(id, Mood::default());
     world.insert(id, Memory::default());
     world.insert(id, Brain { lod: Lod::Coarse, ..Brain::default() });
-    world.insert(id, Position { tile, building: None, entered: tick });
+    world.insert(id, Position { tile, building: None, entered: tick, floor: 0 });
     // M13 D4: a keyed Body (the world stream is untouched).
     let body = crate::systems::assets::new_body(world, id);
     crate::systems::assets::give_body(world, id, body);
@@ -2350,7 +2351,8 @@ pub fn spawn_child_aged(
     let body = crate::systems::assets::child_body(world, id, mother, father);
     crate::systems::assets::give_body(world, id, body);
     let door = world.comp::<Building>(home).map_or(TilePos::default(), |b| b.door);
-    world.insert(id, Position { tile: door, building: Some(home), entered: tick });
+    world.insert(id, Position { tile: door, building: Some(home), entered: tick, floor: 0 });
+    crate::systems::floors::born(world, id, mother);
     let siblings: Vec<EntityId> = children_of_agent(world, mother).into_iter().filter(|&o| o != id).collect();
     for parent in [mother, father] {
         let e = world.edge_entry(parent, id);

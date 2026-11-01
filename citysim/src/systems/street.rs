@@ -451,6 +451,7 @@ fn empty_building(world: &mut World, b: EntityId) {
         if let Some(p) = world.comp_mut::<Position>(a) {
             p.tile = outside;
             p.building = None;
+            p.floor = 0;
             p.entered = tick;
         }
     }
@@ -460,6 +461,7 @@ fn empty_building(world: &mut World, b: EntityId) {
             if let Some(p) = world.comp_mut::<Position>(r) {
                 p.tile = outside;
                 p.building = None;
+                p.floor = 0;
                 p.entered = tick;
             }
         }

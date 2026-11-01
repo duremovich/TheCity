@@ -855,8 +855,30 @@ fn place_of_building(world: &World, b: EntityId) -> String {
     format!("{} ({})", bname(world, b), world.district_name(d))
 }
 
+/// The city milestone C6a: where on its structure a building stands: ", floors 1-30", ", floor 0 of Block#77" (a
+/// tenancy); "" for a building with no span (the 2k city).
+fn floors_of(world: &World, b: EntityId) -> String {
+    let s = citysim::systems::floors::span_text(world, b);
+    if s.is_empty() {
+        return s;
+    }
+    match world.comp::<Building>(b).and_then(|bd| bd.within) {
+        Some(h) => format!(", {s} of {}", bname(world, h)),
+        None => format!(", {s}"),
+    }
+}
+
 fn place(world: &World, id: EntityId) -> String {
     match world.comp::<Position>(id) {
+        // C6a: the storey he stands on, in a building with floors.
+        Some(p) if p.building.is_some_and(|b| world.comp::<Building>(b).is_some_and(|bd| bd.span.is_some())) => {
+            let b = p.building.unwrap_or(EntityId::NONE);
+            let host = world
+                .comp::<Building>(b)
+                .and_then(|bd| bd.within)
+                .map_or(String::new(), |h| format!(" of {}", bname(world, h)));
+            format!("{}, floor {}{host}", place_of_building(world, b), p.floor)
+        }
         Some(p) => match p.building {
             Some(b) => place_of_building(world, b),
             None => format!("street ({})", world.district_name(world.district_of(p.tile))),
@@ -1523,16 +1545,25 @@ fn header(world: &World, t: &Track) -> String {
         h,
         "- **Home**: {}",
         match home {
-            Some(b) => place_of_building(world, b),
+            // C6a: his flat and its storey, the Home's floors.
+            Some(b) => {
+                let flat = citysim::systems::floors::flat_of(world, id)
+                    .zip(world.comp::<Building>(b))
+                    .map_or(String::new(), |(f, bd)| {
+                        format!(", flat {} on floor {}", f + 1, citysim::systems::floors::flat_floor(bd, b, f))
+                    });
+                format!("{}{flat}{}", place_of_building(world, b), floors_of(world, b))
+            }
             None => "none (homeless)".into(),
         }
     );
     if let Some(j) = world.comp::<Job>(id) {
         let _ = writeln!(
             h,
-            "- **Job**: {} at {} (wage {}/day, shifts {:?})",
+            "- **Job**: {} at {}{} (wage {}/day, shifts {:?})",
             j.role.label(),
             j.employer.map_or("?".into(), |e| nm(world, e)),
+            j.employer.map_or(String::new(), |e| floors_of(world, e)),
             j.wage_per_day,
             j.shifts
         );

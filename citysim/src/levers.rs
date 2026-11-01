@@ -2505,6 +2505,12 @@ impl World {
         if b.demolished {
             return Err("already demolished".into());
         }
+        // The city milestone C6a: a structure's floors go with it; the
+        // street-off razing would clear a host's tenancies' tiles too.
+        let razes = !self.config.street.enabled;
+        if razes && (b.within.is_some() || !crate::systems::floors::tenancies_of(self, home).is_empty()) {
+            return Err("its structure holds other tenancies".into());
+        }
         // M11 D44: only the city's own Blocks.
         if b.owner.is_some() {
             return Err(format!("owned by {}; nationalise it first", self.owner_label(b.owner)));
@@ -2535,6 +2541,7 @@ impl World {
             if let Some(p) = self.comp_mut::<Position>(o) {
                 p.tile = outside;
                 p.building = None;
+                p.floor = 0;
             }
         }
         let residents: Vec<EntityId> = self.residents_of(home).to_vec();
@@ -2545,6 +2552,7 @@ impl World {
                 if let Some(p) = self.comp_mut::<Position>(r) {
                     p.tile = outside;
                     p.building = None;
+                    p.floor = 0;
                 }
             }
             let name = self.name_of(r);
@@ -2682,6 +2690,8 @@ impl World {
                 under_construction_until: None,
                 stock_x: [0; 3],
                 within: None,
+                span: None,
+                units: 0,
             },
         );
         self.buildings_by_kind_mut().entry(BuildingKind::Home).or_default().push(id);

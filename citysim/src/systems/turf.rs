@@ -1258,6 +1258,7 @@ fn family_moves(world: &mut World, c: &TurfCfg, index: &BTreeMap<u32, Vec<Entity
                 if let Some(p) = world.comp_mut::<Position>(ch) {
                     p.tile = tdoor;
                     p.building = None;
+                    p.floor = 0;
                     p.entered = tick;
                 }
                 world.enter_building(ch, to);
@@ -1714,6 +1715,7 @@ fn fighters(world: &mut World, w: &WarCfg, k: u32, g: EntityId, t: TilePos, n: u
         if let Some(p) = world.comp_mut::<Position>(m) {
             p.tile = t;
             p.building = None;
+            p.floor = 0;
             p.entered = tick;
         }
         bodies.push(m);

@@ -2276,6 +2276,10 @@ impl World {
         // Round 5 U1 (OPEN-232): the Schools topped up to the school-age
         // count, by reach, their teachers hired (no RNG, no coins).
         crate::prof::timed!("new::ages::seed_by_children", systems::ages::seed_by_children(&mut w));
+        // The city milestone C6a: the seeded households' flats dealt again
+        // once the kin are linked (kin share a flat), and every body indoors
+        // on its storey (nothing on a map without spans).
+        crate::prof::timed!("new::floors::seed", systems::floors::seed(&mut w));
         // OPEN-140: the seed city's housing is not the first midnight's move.
         w.housed_now.1.clear();
         w
@@ -2291,6 +2295,10 @@ impl World {
 
     fn spawn_buildings(&mut self) {
         let defs = self.map.buildings.clone();
+        // C6a: each line's entity, for the tenancies' `in=` (a host may
+        // follow its tenancy in file order).
+        let mut ids: Vec<EntityId> = Vec::with_capacity(defs.len());
+        let mut hosted: Vec<(EntityId, u32)> = Vec::new();
         for def in defs {
             let cfg = self.config.buildings.for_kind(def.kind);
             let stock_food = match def.kind {
@@ -2302,6 +2310,10 @@ impl World {
             // Jobs and room J7: a map building's seats × its floors.
             let capacity = crate::systems::founding::with_floors(self, def.kind, cfg.capacity, def.floors);
             let id = self.spawn();
+            ids.push(id);
+            if let Some(h) = def.within {
+                hosted.push((id, h));
+            }
             self.insert(
                 id,
                 Building {
@@ -2349,6 +2361,8 @@ impl World {
                     under_construction_until: None,
                     stock_x: [0; 3],
                     within: None,
+                    span: def.span,
+                    units: def.units,
                 },
             );
             match def.kind {
@@ -2364,6 +2378,12 @@ impl World {
                 _ => {}
             }
             self.buildings_by_kind_mut().entry(def.kind).or_default().push(id);
+        }
+        for (id, h) in hosted {
+            let host = ids.get(h as usize).copied();
+            if let Some(b) = self.comp_mut::<Building>(id) {
+                b.within = host;
+            }
         }
     }
 
@@ -2480,7 +2500,7 @@ impl World {
             let door = self.comp::<Building>(home).map(|b| b.door).unwrap_or_default();
             for &id in chunk {
                 self.insert(id, Household::new(Some(home)));
-                self.insert(id, Position { tile: door, building: None, entered: 0 });
+                self.insert(id, Position { tile: door, building: None, entered: 0, floor: 0 });
                 self.enter_building(id, home); // an interior slot each
             }
             if chunk.len() >= 2 && self.rng.world().random_bool(wc.spouse_p) {
@@ -2535,7 +2555,7 @@ impl World {
             .unwrap_or(market_door.1);
         for &id in &ids {
             if !self.has::<Position>(id) {
-                self.insert(id, Position { tile: street, building: None, entered: 0 });
+                self.insert(id, Position { tile: street, building: None, entered: 0, floor: 0 });
             }
         }
 
@@ -2829,9 +2849,14 @@ impl World {
             if h.home != home {
                 h.pantry_stake = 0.0;
                 h.kin = None;
+                h.flat = None;
             }
             h.home = home;
             self.index_household(id);
+        }
+        // The city milestone C6a: a flat in the new Home's span.
+        if home.is_some() {
+            crate::systems::floors::assign_flat(self, id);
         }
         // OPEN-140: a walk home to a Home no longer his ends.
         if self.moving_in.get(&id).is_some_and(|&h| Some(h) != home) {

@@ -85,6 +85,9 @@ pub struct ViewAgent {
     pub t: TilePos,
     /// Inside this building (`Position.building`); `None` for a placed walker or a rider.
     pub b: Option<EntityId>,
+    /// The storey it stands on inside `b` (`Position.floor`, C6a; 0 on the street): the view draws a body indoors
+    /// on its floor in the cutaway.
+    pub floor: u8,
     /// `None`: a child (no Brain).
     pub lod: Option<Lod>,
     pub act: ViewAct,
@@ -156,7 +159,10 @@ pub struct ViewBuildingInfo {
     pub tier: u8,
     pub capacity: u16,
     pub owner: Option<EntityId>,
+    /// C6a: a tenancy's host (the structure it stands in), else `None`.
     pub within: Option<EntityId>,
+    /// C6a: the storeys it stands on, `lo..=hi` (`Building.span`).
+    pub span: Option<(u8, u8)>,
     pub label: Option<String>,
 }
 
@@ -380,6 +386,7 @@ pub fn snapshot(world: &World, ring: Rect) -> ViewFrame {
             id: e,
             t,
             b,
+            floor: if b.is_some() { p.floor } else { 0 },
             lod: brain.map(|br| br.lod),
             act,
             goal: brain.and_then(|br| br.current_goal),
@@ -478,6 +485,7 @@ pub fn buildings_in(world: &World, ring: Rect) -> Vec<ViewBuildingInfo> {
                 capacity: bd.capacity,
                 owner: bd.owner,
                 within: bd.within,
+                span: bd.span,
                 label: bd.label.clone(),
             })
         })

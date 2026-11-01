@@ -124,7 +124,10 @@ pub fn housing_bias(world: &World, id: EntityId) -> f32 {
     let plain = f32::from(world.config.buildings.for_kind(crate::components::BuildingKind::Home).capacity.max(1));
     let excess = (per_floor / plain - 1.0).clamp(0.0, cfg.crowd_max);
     if excess > 0.0 {
-        let below = b.within.and_then(|w| world.comp::<crate::components::Building>(w)).map(|wb| {
+        // C6a: company floors are the Homes `company_homes` names (a plain
+        // tenancy Home is not one).
+        let inside = b.within.filter(|_| crate::systems::company::of(world, home).is_some());
+        let below = inside.and_then(|w| world.comp::<crate::components::Building>(w)).map(|wb| {
             world.config.company_housing.as_ref().and_then(|c| c.inside.as_ref()).is_some_and(|i| i.room(wb.kind).1)
         });
         let factor = match below {

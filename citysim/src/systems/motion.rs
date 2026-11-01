@@ -268,6 +268,7 @@ fn seat(world: &mut World, rider: EntityId, v: EntityId, at: TilePos) {
     if let Some(p) = world.comp_mut::<Position>(rider) {
         p.tile = at;
         p.building = None;
+        p.floor = 0;
     }
     world.aboard.insert(rider, v);
     if let Some(m) = world.motions.get_mut(&v) {

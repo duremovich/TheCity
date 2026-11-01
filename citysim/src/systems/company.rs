@@ -344,6 +344,8 @@ fn floors_within(
         under_construction_until: None,
         stock_x: [0; 3],
         within: Some(w),
+        span: world.comp::<Building>(w).and_then(|b| b.span),
+        units: 0,
     };
     let id = world.spawn();
     world.insert(id, home);
@@ -678,6 +680,7 @@ fn wake_in(world: &mut World, m: EntityId, to: EntityId) {
     if let Some(p) = world.comp_mut::<crate::components::Position>(m) {
         p.tile = d;
         p.building = None;
+        p.floor = 0;
         p.entered = tick;
     }
     world.enter_building(m, to);
@@ -837,6 +840,7 @@ fn close_floors(world: &mut World, h: EntityId, w: EntityId) {
         if let Some(p) = world.comp_mut::<crate::components::Position>(a) {
             p.tile = outside;
             p.building = None;
+            p.floor = 0;
             p.entered = tick;
         }
     }

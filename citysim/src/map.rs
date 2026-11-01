@@ -35,6 +35,16 @@
 //!   view can tell which of a multi-lot cut's buildings is the Bar or the
 //!   Market. The sim carries it and never reads it (SAVE_VERSION 68).
 //!
+//! The city milestone C6a (floors as tenancies), also optional, after the
+//! floors field:
+//! - `span=<lo>-<hi>`: the storeys the building stands on (0 the ground);
+//! - `in=<n>`: a **tenancy**, a use on some floors of the `n`th `B` line
+//!   (0-based, file order), its **host**: the same rect (repeated), one
+//!   structure on the tile map; its own door with `door=<x>,<y>` (a Door
+//!   tile on the host's wall, facing a road: its lot's street door), else
+//!   the host's. A host's wall carries its tenancies' doors beside its own;
+//!   a Lot that hosts tenancies is walled. A tenancy hosts nothing.
+//!
 //! A save packs the grids as run-length strings (SAVE_VERSION 13); an older
 //! save's one-enum-per-tile lists still load.
 
@@ -68,6 +78,19 @@ pub struct MapBuilding {
     /// door (`lot=`); `None` without. Carried for the view, never read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lot: Option<String>,
+    /// The city milestone C6a: a tenancy's host, its `B` index (`in=`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub within: Option<u32>,
+    /// C6a: the storeys it stands on, `lo..=hi` (`span=`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span: Option<(u8, u8)>,
+    /// C6a: a host's work units (`units=`; 0 without).
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub units: u16,
+}
+
+fn is_zero_u16(v: &u16) -> bool {
+    *v == 0
 }
 
 /// Scale S3c: a `B` line's optional `key=value` fields ([`MapText::extra`]).
@@ -77,6 +100,13 @@ pub struct BuildingExtra {
     pub storeys: Option<u16>,
     /// The perf pass phase 10: the door's lot id (`lot=`).
     pub lot: Option<String>,
+    /// The city milestone C6a: the host's `B` index (`in=`), the storeys
+    /// (`span=`) and a tenancy's own door (`door=`).
+    pub within: Option<u32>,
+    pub span: Option<(u8, u8)>,
+    pub door: Option<(u16, u16)>,
+    /// C6a: a host's work units (`units=`).
+    pub units: Option<u16>,
 }
 
 /// Scale S3b: one `D <zone> <x_from> <x_to> <name...>` line, a `[districts]`
@@ -427,6 +457,18 @@ impl MapText {
             if let Some(id) = &extra.lot {
                 out.push_str(&format!(" lot={id}"));
             }
+            if let Some((lo, hi)) = extra.span {
+                out.push_str(&format!(" span={lo}-{hi}"));
+            }
+            if let Some(n) = extra.within {
+                out.push_str(&format!(" in={n}"));
+            }
+            if let Some((x, y)) = extra.door {
+                out.push_str(&format!(" door={x},{y}"));
+            }
+            if let Some(n) = extra.units {
+                out.push_str(&format!(" units={n}"));
+            }
             out.push('\n');
         }
         for d in &self.districts {
@@ -539,6 +581,8 @@ impl Map {
             tile_edits: 0,
         };
         let mut n = at;
+        // C6a: each `B` line's file line and whether it named its own door.
+        let mut pending: Vec<(usize, bool)> = Vec::new();
         while n < lines.len() {
             let line = lines[n].trim();
             if line.is_empty() || line.starts_with('#') {
@@ -585,6 +629,7 @@ impl Map {
                     let floors = parts.get(7).map_or(1, |s| num(s));
                     assert!(floors >= 1, "line {}: floors must be at least 1", n + 1);
                     let (mut flats, mut storeys, mut lot) = (None, None, None);
+                    let (mut within, mut span, mut own_door, mut units) = (None, None, None, 0u16);
                     for kv in keyed {
                         let (k, v) = kv.split_once('=').unwrap_or((kv, ""));
                         let bad = || -> ! { panic!("line {}: bad field {kv}", n + 1) };
@@ -592,15 +637,55 @@ impl Map {
                             "flats" => flats = Some(v.parse().unwrap_or_else(|_| bad())),
                             "storeys" => storeys = Some(v.parse().unwrap_or_else(|_| bad())),
                             "lot" if !v.is_empty() => lot = Some(v.to_string()),
-                            _ => panic!("line {}: unknown field {k:?} (flats, storeys, lot)", n + 1),
+                            "in" => within = Some(v.parse::<u32>().unwrap_or_else(|_| bad())),
+                            "units" => units = v.parse().unwrap_or_else(|_| bad()),
+                            "span" => {
+                                let (a, b) = v.split_once('-').unwrap_or_else(|| bad());
+                                let (a, b): (u8, u8) =
+                                    (a.parse().unwrap_or_else(|_| bad()), b.parse().unwrap_or_else(|_| bad()));
+                                assert!(a <= b, "line {}: span {a}-{b} runs down", n + 1);
+                                span = Some((a, b));
+                            }
+                            "door" => {
+                                let (x, y) = v.split_once(',').unwrap_or_else(|| bad());
+                                own_door = Some(TilePos::new(
+                                    x.parse().unwrap_or_else(|_| bad()),
+                                    y.parse().unwrap_or_else(|_| bad()),
+                                ));
+                            }
+                            _ => panic!(
+                                "line {}: unknown field {k:?} (flats, storeys, lot, span, in, door, units)",
+                                n + 1
+                            ),
                         }
                     }
-                    let door = map.validate_building(kind, rect);
-                    map.buildings.push(MapBuilding { kind, rect, door, tier, floors, flats, storeys, lot });
+                    assert!(
+                        own_door.is_none() || within.is_some(),
+                        "line {}: door= on a building that is no tenancy",
+                        n + 1
+                    );
+                    // C6a: doors are found once every line is read (a host's
+                    // wall carries its tenancies' doors).
+                    let door = own_door.unwrap_or(TilePos::new(u16::MAX, u16::MAX));
+                    pending.push((n + 1, own_door.is_some()));
+                    map.buildings.push(MapBuilding {
+                        kind,
+                        rect,
+                        door,
+                        tier,
+                        floors,
+                        flats,
+                        storeys,
+                        lot,
+                        within,
+                        span,
+                        units,
+                    });
                 }
             }
             n += 1;
         }
+        map.place_doors(&pending);
 
         map.validate_orphans();
         map.validate_districts();
@@ -636,8 +721,58 @@ impl Map {
         }
     }
 
-    /// Check one building rect and return its door tile.
-    fn validate_building(&self, kind: BuildingKind, rect: Rect) -> TilePos {
+    /// C6a: every `B` line's door, once all are read: a tenancy's own door
+    /// (`door=`) is a Door tile on its host's wall facing a road, else it
+    /// takes the host's; a host's door is the one Door tile on its wall
+    /// that no tenancy names. `pending` is each line's file line and
+    /// whether it named its own door.
+    fn place_doors(&mut self, pending: &[(usize, bool)]) {
+        let n = self.buildings.len();
+        let mut extra: Vec<BTreeSet<TilePos>> = vec![BTreeSet::new(); n];
+        let mut hosts = vec![false; n];
+        for (i, b) in self.buildings.iter().enumerate() {
+            let Some(h) = b.within else { continue };
+            let line = pending[i].0;
+            let h = h as usize;
+            assert!(h < n && h != i, "line {line}: in={h} names no other `B` line");
+            let hb = &self.buildings[h];
+            assert!(hb.within.is_none(), "line {line}: in={h} is itself a tenancy");
+            assert!(hb.rect == b.rect, "line {line}: a tenancy's rect must be its host's");
+            hosts[h] = true;
+            if pending[i].1 {
+                let d = b.door;
+                assert!(
+                    b.rect.on_perimeter(d) && self.tile_at(d) == TileKind::Door && self.door_faces_road(b.rect, d),
+                    "line {line}: door {d} is not a Door on the host's wall facing a road"
+                );
+                extra[h].insert(d);
+            }
+        }
+        for i in 0..n {
+            if self.buildings[i].within.is_some() {
+                continue;
+            }
+            let (kind, rect) = (self.buildings[i].kind, self.buildings[i].rect);
+            let door = self.validate_building(kind, rect, &extra[i], hosts[i]);
+            self.buildings[i].door = door;
+        }
+        for (i, &(_, own)) in pending.iter().enumerate().take(n) {
+            if let Some(h) = self.buildings[i].within.filter(|_| !own) {
+                self.buildings[i].door = self.buildings[h as usize].door;
+            }
+        }
+    }
+
+    /// Check one building rect and return its door tile. C6a: the Door
+    /// tiles in `tenancy_doors` are its tenancies' (not its own), and a
+    /// Lot that hosts tenancies (`host`) is walled.
+    fn validate_building(
+        &self,
+        kind: BuildingKind,
+        rect: Rect,
+        tenancy_doors: &BTreeSet<TilePos>,
+        host: bool,
+    ) -> TilePos {
         assert!(rect.w >= 3 && rect.h >= 3, "{kind} at {},{}: rect too small", rect.x, rect.y);
         assert!(
             usize::from(rect.x) + usize::from(rect.w) <= self.w()
@@ -655,6 +790,8 @@ impl Map {
                 let t = self.tile_at(p);
                 if rect.on_perimeter(p) {
                     match (t, lot) {
+                        (TileKind::Door, _) if tenancy_doors.contains(&p) => {}
+                        (TileKind::Wall, true) if host => {}
                         (TileKind::Door, _) => {
                             assert!(door.is_none(), "{kind} at {},{}: more than one door", rect.x, rect.y);
                             door = Some(p);

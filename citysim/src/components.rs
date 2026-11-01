@@ -2011,6 +2011,12 @@ pub struct Position {
     /// The tick the agent entered `building` (co-location is measured from here).
     #[serde(default)]
     pub entered: Tick,
+    /// The city milestone C6a: the storey the body stands on inside
+    /// `building` (0 the ground, the street's; `World::floor_in` sets it on
+    /// entry from the tenancy's `span`, his flat's floor at home). 0 on
+    /// the street until C7 gives the street a z.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub floor: u8,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -2418,6 +2424,13 @@ pub struct Household {
     /// living here, `shelf::daily` at midnight); `None`: on his own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kin: Option<EntityId>,
+    /// The city milestone C6a: his flat, a unit of his Home's span: `(the
+    /// Home, the flat's index)`, `0..` the Home's household slots (its
+    /// `floors` field), shared with the kin under his roof
+    /// (`World::assign_flat`, at the move-in or the first entry); its
+    /// storey is `floors::flat_floor`. A flat naming another Home is stale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flat: Option<(EntityId, u16)>,
 }
 
 fn is_zero_f32_hh(v: &f32) -> bool {
@@ -2439,6 +2452,7 @@ impl Household {
             homeless_since: None,
             pantry_stake: 0.0,
             kin: None,
+            flat: None,
         }
     }
 
@@ -3181,8 +3195,23 @@ pub struct Building {
     /// this workplace (the same rect and door; `World.company_homes` names
     /// it too, and `[company_housing.inside] rooms` the floors' name and
     /// whether they are a basement). The view draws the workplace as both.
+    /// The city milestone C6a generalises it: a **tenancy**, a use on some
+    /// floors of its **host** (the cut's main use, one structure on the
+    /// tile map): the same rect, its own kind, owner, rent, capacity and
+    /// door (its lot's street door on the host's wall, else the host's).
+    /// Company floors are the tenancies `World.company_homes` names.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub within: Option<EntityId>,
+    /// The city milestone C6a: the storeys this building stands on, `lo..=hi`
+    /// (0 the ground): a tenancy's floors, a host's own (a Home's flat
+    /// floors). `None`: the whole building from the ground (the 2k city, a
+    /// building the importer gave no levels).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span: Option<(u8, u8)>,
+    /// C6a: a host's work units (shops, workshops, offices; a works floor
+    /// one), the map's `units=`: `floors::vacant_units` less the uses on it.
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub units: u16,
 }
 
 fn is_zero_stock_x(v: &[u32; 3]) -> bool {

@@ -426,7 +426,7 @@ fn spawn_adult(world: &mut World, b: EntityId, k: u32, a: u32, sex: Sex, last: &
         bd.capacity = bd.capacity.saturating_add(1);
     }
     world.insert(id, Household::new(Some(b)));
-    world.insert(id, Position { tile: door, building: None, entered: tick });
+    world.insert(id, Position { tile: door, building: None, entered: tick, floor: 0 });
     world.enter_building(id, b);
     crate::systems::classpay::on_arrival_keyed(world, id, Some(b), key);
     if coins > 0 {

@@ -513,7 +513,10 @@ use crate::world::World;
 /// the `[fixers] board_size`, `walk_in_flat`, `take_job_mins`, `walk_in_hold_mins` keys (serde defaults).
 /// 118 (pressure pass round 9, Z1, the avenger): `Grudge.noted`, `EventKind::Hunt`, the `[hunt]` Z1 keys and the
 /// `hunts_ended` ... `hunted_heard` columns (serde defaults).
-pub const SAVE_VERSION: u8 = 118;
+/// 119 (the city milestone C6a, floors as tenancies): `Building.span`, `units`, `within` generalised (a tenancy on
+/// its host's floors), `Position.floor`, `Household.flat`, the map's `MapBuilding.within`, `span`, `units`; both
+/// island maps re-imported with tenancies (a new `B` order: a C5 save is another world).
+pub const SAVE_VERSION: u8 = 119;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
