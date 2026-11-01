@@ -221,6 +221,16 @@ fn turf_centre(world: &World, gang: EntityId, d: crate::components::DistrictId) 
 
 /// The front under a host's upper floors: a business on its ground storey (a venue first), the host's own when
 /// it is one.
+/// A front `gang` runs on `host` (`leisure::front_gang`: a venue fronting for it), the lowest id.
+fn own_front(world: &World, host: EntityId, gang: EntityId) -> Option<EntityId> {
+    crate::systems::floors::tenancies_of(world, host)
+        .into_iter()
+        .chain(std::iter::once(host))
+        .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished))
+        .filter(|&b| crate::systems::leisure::front_gang(world, b) == Some(gang))
+        .min()
+}
+
 fn front_of(world: &World, host: EntityId) -> Option<EntityId> {
     let ground = |b: EntityId| {
         world.comp::<Building>(b).filter(|bd| !bd.demolished && bd.span.is_none_or(|(lo, _)| lo == 0)).map(|bd| bd.kind)
@@ -254,10 +264,10 @@ fn pick_host(world: &World, gang: EntityId, d: crate::components::DistrictId, c:
             }
             upper_storey(world, h, None)?;
             let tall = b.span.map_or(b.floors, |(_, hi)| hi.max(b.floors)) >= c.min_storeys;
-            Some((!tall, front_of(world, h).is_none(), b.door.manhattan(at), h))
+            Some((own_front(world, h, gang).is_none(), !tall, front_of(world, h).is_none(), b.door.manhattan(at), h))
         })
         .min()
-        .map(|x| x.3)
+        .map(|x| x.4)
 }
 
 /// Found `gang`'s Hideout on `host`: a tenancy on its upper storey, the key money paid to the landlord, a line.
@@ -276,7 +286,10 @@ fn found(world: &mut World, gang: EntityId, host: EntityId, c: &VerticalCfg) -> 
     crate::systems::virt::mark_dirty(world);
     let gname = world.comp::<Gang>(gang).map_or_else(String::new, |g| g.name.clone());
     let d = world.district_of_building(host);
-    let over = front_of(world, host).map_or_else(String::new, |fr| format!(" over {}", world.name_of(fr)));
+    let over = match own_front(world, host, gang) {
+        Some(fr) => format!(" over its front {}", world.name_of(fr)),
+        None => front_of(world, host).map_or_else(String::new, |fr| format!(" over {}", world.name_of(fr))),
+    };
     let price = if paid >= c.found_cost {
         format!("{paid} key money to {}", world.owner_label(landlord))
     } else {
@@ -321,7 +334,7 @@ pub fn split_claim(world: &mut World, home: EntityId, gang: EntityId, holder: En
         return None;
     }
     let host = crate::systems::floors::host_of(world, home);
-    // The households upstairs move with their floors (by the storey their flat stands on now).
+    // The residents upstairs move with their floors (by the storey their flat stands on now).
     let mut movers: Vec<EntityId> = {
         let orig = world.comp::<Building>(home)?;
         world
@@ -375,7 +388,7 @@ pub fn split_claim(world: &mut World, home: EntityId, gang: EntityId, holder: En
         EventKind::TerritoryFlipped,
         &actors,
         format!(
-            "{gn} took floors {mid}-{hi} of Block#{} from {hn} ({} households upstairs): floors {lo}-{} stay {}",
+            "{gn} took floors {mid}-{hi} of Block#{} from {hn} ({} living up there): floors {lo}-{} stay {}",
             home.index,
             movers.len(),
             mid - 1,
@@ -740,7 +753,14 @@ fn hear(world: &mut World, h: &ClimbHeard) {
     let mut near: Vec<(u8, EntityId)> = Vec::new();
     for b in bs {
         let Some(bd) = world.comp::<Building>(b) else { continue };
-        for &o in &bd.occupants {
+        // The bodies inside and the residents at home (an off-screen resident is in no occupants list).
+        let home: Vec<EntityId> = world
+            .residents_of(b)
+            .iter()
+            .copied()
+            .filter(|&r| world.comp::<Position>(r).is_some_and(|p| p.building == Some(b)))
+            .collect();
+        for &o in bd.occupants.iter().chain(home.iter()) {
             if h.column.contains(&o) || world.gang_of(o) == Some(h.gang) {
                 continue;
             }
