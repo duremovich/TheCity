@@ -9,13 +9,19 @@
 //! over the `[exec]` pace; 1/60 since Y4's 21 tiles a minute). `--from TICK` runs flat out to that tick first.
 //! A bench (`--bench one --shots T1,T2,..`) holds the sim at each shot's tick (`Shared::hold`): the thread runs flat
 //! out to it, publishes its last two ticks and waits for the bench to move the hold on.
+//!
+//! Config hot-reload (the view milestone V1, `OPEN-262`): between two ticks the thread reloads `--config` (default
+//! `assets/config.toml`) on the R key (`Shared::reload_req`), when the file's mtime moves (looked at every `[view]
+//! reload_poll_s` real seconds) and at `--reload-at TICK`; `citysim::reload` applies the live keys and keeps the
+//! build-time ones. The reload's line goes to the log and the HUD (`Shared::reload_line`); the walk-matched rate
+//! follows a pace change unless `--rate` pinned it.
 
 use citysim::components::{Brain, Identity, Rect, TilePos};
 use citysim::view::{self, ViewFrame};
 use citysim::{EntityId, World, save};
 use std::collections::BTreeSet;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -55,6 +61,10 @@ pub struct Shared {
     pub stat: Mutex<Option<Static>>,
     /// The world's tick now (the HUD while it fast-forwards).
     pub tick: AtomicU64,
+    /// V1: reload the config at the next tick boundary (the R key).
+    pub reload_req: AtomicBool,
+    /// V1: the last reload's line (empty before the first), for the HUD.
+    pub reload_line: Mutex<String>,
 }
 
 impl Shared {
@@ -74,6 +84,10 @@ pub struct SimArgs {
     pub rate: Option<f64>,
     pub from: Option<u64>,
     pub shots: Vec<u64>,
+    /// V1: the config file a reload reads (`--config`; `None`: the default was not found, nothing to reload).
+    pub config: Option<PathBuf>,
+    /// V1: reload at this tick (`--reload-at`).
+    pub reload_at: Option<u64>,
 }
 
 /// The ring grown by `m` tiles on every side (clipped at the map's top-left; the far edge is past the map anyway).
@@ -121,10 +135,17 @@ pub fn spawn(a: SimArgs) -> Arc<Shared> {
         rate_bits: AtomicU64::new(0f64.to_bits()),
         stat: Mutex::new(None),
         tick: AtomicU64::new(0),
+        reload_req: AtomicBool::new(false),
+        reload_line: Mutex::new(String::new()),
     });
     let sh = shared.clone();
     std::thread::Builder::new().name("sim".into()).spawn(move || run(a, sh)).expect("spawn the sim thread");
     shared
+}
+
+/// V1: the config file's mtime (`None`: unreadable now; a reappearing file reads as a change).
+fn mtime(p: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(p).and_then(|m| m.modified()).ok()
 }
 
 fn fatal(msg: String) -> ! {
@@ -144,10 +165,10 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
     if !(world.has::<Identity>(subject) || building) || subject_tile(&world, subject).is_none() {
         fatal(format!("--follow {}: {subject:?} is no body with a place nor a building", a.follow));
     }
-    if let Some(&t) = a.shots.iter().chain(a.from.iter()).find(|&&t| t < world.tick) {
-        fatal(format!("tick {t} (--shots / --from) is before the save's tick {}", world.tick));
+    if let Some(&t) = a.shots.iter().chain(a.from.iter()).chain(a.reload_at.iter()).find(|&&t| t < world.tick) {
+        fatal(format!("tick {t} (--shots / --from / --reload-at) is before the save's tick {}", world.tick));
     }
-    let rate = a.rate.unwrap_or_else(|| view::walk_matched_rate(&world));
+    let mut rate = a.rate.unwrap_or_else(|| view::walk_matched_rate(&world));
     sh.rate_bits.store(rate.to_bits(), Ordering::Relaxed);
     *sh.stat.lock().unwrap() = Some(Static {
         lines: world.map.lines.iter().map(|l| l.name.clone()).collect(),
@@ -158,13 +179,53 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
     if let Some(b) = world.comp_mut::<Brain>(subject) {
         b.pinned = true;
     }
-    let cfg = world.config.view.clone();
+    let mut cfg = world.config.view.clone();
+    let mut watch = a.config.as_deref().map(|p| (mtime(p), Instant::now()));
     let (w, h) = (world.map.w(), world.map.h());
     let mut pinned = BTreeSet::new();
     let mut seq = 0u64;
     let from = a.from.unwrap_or(world.tick);
     let mut next_at = Instant::now();
+    let mut reloaded_at = false;
     loop {
+        // V1: a reload between two ticks: the R key, --reload-at, the file's mtime moved
+        let mut why = None;
+        if sh.reload_req.swap(false, Ordering::Relaxed) {
+            why = Some("the R key");
+        } else if a.reload_at == Some(world.tick) && !reloaded_at {
+            reloaded_at = true;
+            why = Some("--reload-at");
+        } else if let (Some(p), Some((seen, at))) = (a.config.as_deref(), watch.as_mut())
+            && at.elapsed().as_secs_f64() >= cfg.reload_poll_s
+        {
+            *at = Instant::now();
+            let now = mtime(p);
+            if now != *seen {
+                *seen = now;
+                why = Some("the file changed");
+            }
+        }
+        if let Some(why) = why {
+            let line = match a.config.as_deref() {
+                None => "reload: no config file (--config PATH; assets/config.toml is not here)".to_string(),
+                Some(p) => match std::fs::read_to_string(p) {
+                    Err(e) => format!("reload: {}: {e}; the old config stays", p.display()),
+                    Ok(text) => match citysim::reload::reload(&mut world, &text) {
+                        Err(e) => format!("reload: {}: {e}; the old config stays", p.display()),
+                        Ok(r) => {
+                            cfg = world.config.view.clone();
+                            if a.rate.is_none() {
+                                rate = view::walk_matched_rate(&world);
+                                sh.rate_bits.store(rate.to_bits(), Ordering::Relaxed);
+                            }
+                            r.line()
+                        }
+                    },
+                },
+            };
+            eprintln!("cityview: tick {} ({why}): {line}; rate {rate:.4} ticks/s", world.tick);
+            *sh.reload_line.lock().unwrap() = line;
+        }
         let hold = sh.hold.load(Ordering::Relaxed);
         if world.tick >= hold {
             std::thread::sleep(Duration::from_millis(5));
@@ -173,9 +234,11 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         // paced: free running past --from; flat out to --from and to a bench's hold
         let paced = hold == u64::MAX && world.tick >= from;
         if paced && rate > 0.0 {
+            // V1: the wait in slices (a tick is a real minute walk-matched), so a reload is seen between them
             let now = Instant::now();
             if now < next_at {
-                std::thread::sleep(next_at - now);
+                std::thread::sleep((next_at - now).min(Duration::from_millis(20)));
+                continue;
             }
             next_at = next_at.max(now) + Duration::from_secs_f64(1.0 / rate);
         } else if paced {
@@ -193,6 +256,9 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         let target = if hold == u64::MAX { from } else { hold };
         if paced || world.tick + 1 >= target {
             let at = subject_tile(&world, subject).unwrap_or(at);
+            if !paced {
+                eprintln!("cityview: tick {} subject at ({}, {})", world.tick, at.x, at.y);
+            }
             let frame = view::snapshot(&world, view::ring_about(at, cfg.ring_half_tiles, w, h));
             seq += 1;
             let p = Arc::new(Published { frame, subject, caption: caption(&world, subject), at: Instant::now(), seq });
