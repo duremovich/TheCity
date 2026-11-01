@@ -59,8 +59,8 @@ God scenarios 20 of cap 20; asserted bullets 60 of 60; ignores 56. Every cap met
    one 100k run to re-read the El, Murder and violence (`OPEN-255`, `OPEN-254`).
 3. Then M18 against the 3D client.
 
-Open from this session: `OPEN-260` to `OPEN-271` (`OPEN-264` the raid's body, `265` perf, `266` the lift a constant,
-`267` corp lives, `268` contradictions and loops, `269` the vertical city's leftovers, `270`/`271` the camera). Closed:
+Open from this session: `OPEN-260` to `OPEN-272` (`OPEN-264` the raid's body, `265` perf, `266` the lift a constant,
+`267` corp lives, `268` contradictions and loops, `269` the vertical city's leftovers, `270`/`271` the camera, `272` a Camp infant at the fence). Closed:
 `OPEN-158`, `187`, `191`, `204`, `240`, `241`. Carried: `OPEN-221`, `254`, `255`, `256`, `257`, `252`, `253`, `258`,
 `259`, `217`, `220`, `212`, `150`, `179`, `229`, `231`; standing `OPEN-062`, `039`, `057`, `059`, `077`, `069`, `070`.
 
