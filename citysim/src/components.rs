@@ -3212,6 +3212,21 @@ pub struct Building {
     /// one), the map's `units=`: `floors::vacant_units` less the uses on it.
     #[serde(default, skip_serializing_if = "is_zero_u16")]
     pub units: u16,
+    /// The city milestone C6b: a tenancy's floor rent a day to its host's
+    /// owner, the landlord (`Flow::FloorRent`), set at the rent pass
+    /// (`floors::rent_pass`); 0 for a host, a vacant unit, a tenancy its
+    /// landlord owns.
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub floor_rent: i64,
+    /// C6b: consecutive midnights its floor rent went short; at `[tenancy]
+    /// evict_days` the landlord takes the floor back (`floors::vacate`).
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub floor_arrears: u8,
+    /// C6b: its own opening hours, `[from, to)` minutes of the day (`to`
+    /// below `from` runs past midnight); `None` reads its kind's row of
+    /// `[tenancy] hours` (`floors::hours_of`), an owner's call later.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hours: Option<(u16, u16)>,
 }
 
 fn is_zero_stock_x(v: &[u32; 3]) -> bool {
@@ -3268,6 +3283,62 @@ pub fn is_one_u8(v: &u8) -> bool {
 }
 
 impl Building {
+    /// C6b: a fresh building of `kind` on `rect` (no owner, no stock, no
+    /// staff): the founding of a unit's base, as the map's spawn.
+    pub fn blank(kind: BuildingKind, rect: Rect, door: TilePos, tier: u8) -> Building {
+        Building {
+            kind,
+            production_accum: 0.0,
+            claim: None,
+            child_food_debt: 0.0,
+            rect,
+            door,
+            stock_food: 0,
+            capacity: 0,
+            owner: None,
+            occupants: Vec::new(),
+            demolished: false,
+            tier,
+            rent_per_day: 0,
+            revenue_today: 0,
+            revenue: VecDeque::new(),
+            secured_by: None,
+            derelict: false,
+            full_capacity: None,
+            empty_since: None,
+            closed_until: None,
+            stock_goods: [0; 2],
+            asset_sales_today: 0,
+            asset_sales: VecDeque::new(),
+            security: Default::default(),
+            focus: None,
+            hacked: None,
+            last_door_open: None,
+            label: None,
+            feed: None,
+            venue: None,
+            charity: None,
+            camp: None,
+            input_accum: 0.0,
+            floors: 1,
+            floor_days: 0,
+            synth_food: 0,
+            bin: 0,
+            bin_accum: 0.0,
+            spoil_carry: 0.0,
+            bin_diver: None,
+            bin_regular: None,
+            under_construction_until: None,
+            stock_x: [0; 3],
+            within: None,
+            span: None,
+            units: 0,
+            floor_rent: 0,
+            floor_arrears: 0,
+            hours: None,
+        }
+    }
+
     /// Interior tiles (everything inside the perimeter), row-major.
     pub fn interior(&self) -> impl Iterator<Item = TilePos> + '_ {
         let r = self.rect;

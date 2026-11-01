@@ -516,7 +516,10 @@ use crate::world::World;
 /// 119 (the city milestone C6a, floors as tenancies): `Building.span`, `units`, `within` generalised (a tenancy on
 /// its host's floors), `Position.floor`, `Household.flat`, the map's `MapBuilding.within`, `span`, `units`; both
 /// island maps re-imported with tenancies (a new `B` order: a C5 save is another world).
-pub const SAVE_VERSION: u8 = 119;
+/// 120 (the city milestone C6b, the economy of floors): `Building.floor_rent`, `floor_arrears`, `hours`,
+/// `Flow::FloorRent`, `EventKind::Floor`, the `[tenancy]` keys and the `Jobs2Cols` `flow_floor_rent` ...
+/// `units_vacant` columns (serde defaults); `World.floor_index` is rebuilt on load.
+pub const SAVE_VERSION: u8 = 120;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

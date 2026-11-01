@@ -346,6 +346,9 @@ fn floors_within(
         within: Some(w),
         span: world.comp::<Building>(w).and_then(|b| b.span),
         units: 0,
+        floor_rent: 0,
+        floor_arrears: 0,
+        hours: None,
     };
     let id = world.spawn();
     world.insert(id, home);
@@ -1042,6 +1045,87 @@ fn build_block(
     Some(lot)
 }
 
+/// The city milestone C6b: may a buyout lease floors of Home host `h`
+/// (`[tenancy]` on, a span of two storeys or more: the host keeps one)?
+fn leasable(world: &World, h: EntityId) -> bool {
+    crate::systems::floors::on(world) && world.comp::<Building>(h).and_then(|b| b.span).is_some_and(|(lo, hi)| hi > lo)
+}
+
+/// The city milestone C6b (Dylan's answer 3, a buyout by the lease): `corp`
+/// leases the top storeys of Home host `h` for `w`'s far staff: as many as
+/// the want's bunks ask (`bunks_per_floor` a storey, the interior allowing),
+/// at most `floors_max` and all but the host's lowest. The lease is paid
+/// once to the landlord (`block_value` of the storeys x `price_mult` x
+/// `[tenancy] lease_mult`, `Flow::Sale`; nothing to itself), from what the
+/// corp holds above `treasury_ref` with `reserve`; the storeys become a Home
+/// tenancy of company bunks (`within` the host, a `Floor` line) on floor
+/// rent from the next midnight, and the host's flats keep the storeys below.
+/// Nobody is put out: the leased storeys were the Ambient tier's flats.
+fn lease_floors(
+    world: &mut World,
+    cfg: &crate::config::CompanyHousingCfg,
+    buy: &crate::config::CompanyBuyoutCfg,
+    corp: EntityId,
+    w: EntityId,
+    h: EntityId,
+    want: u32,
+) -> Option<EntityId> {
+    let lease_mult = world.config.tenancy.as_ref()?.lease_mult;
+    let (rect, door, tier, (lo, hi)) =
+        world.comp::<Building>(h).and_then(|b| Some((b.rect, b.door, b.tier, b.span?)))?;
+    let per = (usize::from(rect.w.saturating_sub(2)) * usize::from(rect.h.saturating_sub(2)))
+        .min(usize::from(buy.bunks_per_floor))
+        .max(1) as u32;
+    let most = (hi - lo).min(cfg.floors_max.max(1));
+    let n = u8::try_from(want.div_ceil(per)).unwrap_or(u8::MAX).clamp(1, most.max(1));
+    let landlord = world.owner_of(h);
+    let price = (block_value(world, n) as f32 * buy.price_mult * lease_mult).round() as i64;
+    if landlord != Some(corp) {
+        if spendable(world, corp, buy.reserve) < price {
+            return None;
+        }
+        crate::systems::ownership::pay(world, Some(corp), landlord, price, crate::systems::ownership::Flow::Sale);
+    }
+    let mut b = Building::blank(BuildingKind::Home, rect, door, tier);
+    b.within = Some(h);
+    b.span = Some((hi + 1 - n, hi));
+    b.floors = n;
+    b.capacity = crate::systems::founding::with_floors(world, BuildingKind::Home, per as u16, n);
+    b.stock_food = world.config.world.home_pantry_initial;
+    let cap = b.capacity;
+    let id = world.spawn();
+    world.insert(id, b);
+    let list = world.buildings_by_kind_mut().entry(BuildingKind::Home).or_default();
+    if let Err(i) = list.binary_search(&id) {
+        list.insert(i, id);
+    }
+    if let Some(hb) = world.comp_mut::<Building>(h) {
+        hb.span = Some((lo, hi - n));
+    }
+    crate::systems::ownership::transfer_building(world, id, Some(corp));
+    world.company_homes.insert(id, w);
+    let rent = rent_tenths(world, id) / 10;
+    if let Some(b) = world.comp_mut::<Building>(id) {
+        b.rent_per_day = rent;
+    }
+    crate::systems::floors::reindex(world);
+    crate::systems::districts::rebuild(world);
+    let (label, place, from, what) =
+        (world.owner_label(Some(corp)), world.name_of(h), world.owner_label(landlord), world.name_of(w));
+    let floors = crate::systems::floors::span_text(world, id);
+    let mut actors = vec![corp, id, h, w];
+    actors.extend(landlord);
+    world.push_event(
+        EventKind::Floor,
+        &actors,
+        format!(
+            "{label} leased {floors} of {place} from {from} for {price}: company housing for {what}'s staff ({cap} bunks)"
+        ),
+    );
+    crate::systems::ownership::jobs2_row(world).floor_leases += 1;
+    Some(id)
+}
+
 /// Phase 3b (I6, `[company_housing.buyout]`), the midnight pass on days
 /// divisible by `period_days`, after [`evictions`] and before [`move_in`]:
 /// each corp's workplaces of the kinds first move their far staff into the
@@ -1101,6 +1185,8 @@ pub fn buyouts(world: &mut World) {
             let Some(wdoor) = door(world, w) else { continue };
             let what = world.name_of(w);
             let got = match for_sale(world, &buy, wdoor) {
+                // The city milestone C6b: a buyout leases floors, not a block.
+                Some(h) if leasable(world, h) => lease_floors(world, &cfg, &buy, corp, w, h, n),
                 Some(h) => {
                     let owner = world.owner_of(h);
                     let floors = world.comp::<Building>(h).map_or(1, |b| b.floors);

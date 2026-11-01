@@ -735,8 +735,14 @@ pub fn can_found(world: &World, agent: EntityId) -> bool {
     if any_vacant_lot(world) {
         return kind().is_some();
     }
+    // The city milestone C6b: no Lot left, a vacant unit for a kind a unit takes
+    // (reach is the Register's: a founder with none near walks for nothing).
+    let k = kind();
+    if crate::systems::floors::any_vacant(world) && k.is_some_and(|k| crate::systems::floors::unit_kind(world, k)) {
+        return true;
+    }
     // L2 L6: no Lot left: only a leisure kind, refitted from a derelict.
-    refit_room(world) && kind().is_some_and(|k| k.is_leisure())
+    refit_room(world) && k.is_some_and(|k| k.is_leisure())
 }
 
 /// L2 L6: with jobs on, a derelict Block may take a refit when no Lot is left.
@@ -786,6 +792,37 @@ pub fn register(world: &mut World, agent: EntityId) -> Result<EntityId, String> 
         .map(|b| b.door)
         .or_else(|| world.comp::<Position>(agent).map(|p| p.tile))
         .ok_or("nowhere")?;
+    // The city milestone C6b: a vacant unit within the founder's walk of
+    // his Home door first (`[tenancy] found_reach_ticks`), then a Lot.
+    if let Some((host, walk)) = crate::systems::floors::unit_near(world, kind, from) {
+        if let Some(b) = crate::systems::floors::found_unit(world, host, kind, Some(agent)) {
+            let paid = crate::systems::industry::pay_build(world, Some(agent), cost, Some(b), true);
+            debug_assert_eq!(paid, cost, "can_found checked the wallet");
+            let today = world.day();
+            if let Some(br) = world.comp_mut::<Brain>(agent) {
+                br.last_found_day = Some(today);
+            }
+            let (name, what, on) = (world.name_of(agent), world.name_of(b), world.name_of(host));
+            let floor = crate::systems::floors::span_text(world, b);
+            let left = crate::systems::floors::vacant_units(world, host);
+            let home = world.comp::<Household>(agent).and_then(|h| h.home);
+            let near = if home.is_some_and(|h| crate::systems::floors::host_of(world, h) == host) {
+                format!("{} own block", crate::systems::grief::his(world, agent))
+            } else {
+                format!("{walk} min's walk from home")
+            };
+            world.push_event(
+                EventKind::Founded,
+                &[agent, b, host],
+                format!("{name} registered {what} in a vacant unit on {floor} of {on} ({near}, {left} more vacant there) for {cost}"),
+            );
+            world.stats.current.foundings += 1;
+            let d = world.district_of_building(b);
+            crate::systems::gossip::post_deed(world, d, crate::word::Deed::Founded, Some(agent), Some(b));
+            maybe_incorporate(world, agent);
+            return Ok(b);
+        }
+    }
     // L2 L6: no Lot left (or a kind no Lot takes): a derelict Block is
     // refitted at `refit_frac` of the cost instead.
     // Review fix: a leisure kind takes only a Lot its tier allows (a

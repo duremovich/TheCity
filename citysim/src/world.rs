@@ -1450,6 +1450,11 @@ pub struct World {
     /// block -> the workplace whose staff its beds are reserved for.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub company_homes: BTreeMap<EntityId, EntityId>,
+    /// The city milestone C6b (`systems/floors.rs`): host -> its tenancies
+    /// and the vacant units on it; not saved, rebuilt at the seed, the load
+    /// and every founding or vacated floor (`floors::reindex`).
+    #[serde(skip)]
+    pub floor_index: crate::systems::floors::FloorIndex,
     /// The island pass phase 3a: a company block's resident whose job at
     /// its workplace ended -> the tick it ended (evicted `grace_days` on).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -2147,6 +2152,7 @@ impl World {
             laid_off: BTreeMap::new(),
             housing_demand: BTreeMap::new(),
             company_homes: BTreeMap::new(),
+            floor_index: Default::default(),
             company_lapsed: BTreeMap::new(),
             company_notice: BTreeSet::new(),
             commute_pressure: BTreeMap::new(),
@@ -2363,6 +2369,9 @@ impl World {
                     within: None,
                     span: def.span,
                     units: def.units,
+                    floor_rent: 0,
+                    floor_arrears: 0,
+                    hours: None,
                 },
             );
             match def.kind {
@@ -4392,6 +4401,8 @@ impl World {
         systems::leisure::rebuild_hangouts(self);
         // M16a (plan C2): the record indices.
         systems::contracts::rebuild_index(self);
+        // The city milestone C6b: the tenancies by host, the vacant units.
+        systems::floors::reindex(self);
     }
 
     /// Everyone `id` has an edge with, ascending.

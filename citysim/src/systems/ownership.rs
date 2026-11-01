@@ -314,6 +314,11 @@ pub enum Flow {
     /// winner, off the table's take (untaxed; `flow_other`, counted in
     /// `Jobs2Cols.bout_purse_coins`). W6 booked it as `GambleWin`.
     Purse,
+    /// The city milestone C6b (`systems::floors::rent_pass`): a tenancy's
+    /// floor rent, its owner -> its host's owner, the landlord (the
+    /// Treasury for a city-owned host); taxed as rent, its column
+    /// `Jobs2Cols.flow_floor_rent`.
+    FloorRent,
 }
 
 impl Flow {
@@ -335,6 +340,7 @@ impl Flow {
             Flow::Food
                 | Flow::Drink
                 | Flow::Rent
+                | Flow::FloorRent
                 | Flow::Contract
                 | Flow::Wholesale
                 | Flow::Hotel
@@ -455,6 +461,8 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         Flow::CabFare | Flow::StreetCut | Flow::Gray | Flow::Purse => row.flow_other += coins,
         // Round 6 V4: the fare's second hand (driver -> house) is no new flow of coins.
         Flow::CabTake => {}
+        // The city milestone C6b: the floor rent's column.
+        Flow::FloorRent => row.jobs2.get_or_insert_with(Default::default).flow_floor_rent += coins,
     }
 }
 
@@ -1588,6 +1596,8 @@ pub fn run(world: &mut World) {
             cc.closing = cc.treasury;
         }
     }
+    // The city milestone C6b: the tenancies' floor rent to their landlords.
+    crate::prof::timed!("own::floors::rent_pass", crate::systems::floors::rent_pass(world));
     crate::prof::timed!("own::upkeep", upkeep(world));
     crate::prof::timed!("own::exec_wages", exec_wages(world));
     // D27: an agent owning enough buildings becomes a corp (inheritance,

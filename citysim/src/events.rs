@@ -544,10 +544,16 @@ pub enum EventKind {
     /// child's loss; `[mourner, employer]` a shift on the employer's leave;
     /// `[household.., friends.., home]` the funeral.
     Bereaved,
+    /// The city milestone C6b (`systems::floors`): a floor's lease. `[owner?,
+    /// tenancy, host]` the floor rent short; `[owner?, tenancy, host,
+    /// landlord?]` the floor taken back (a vacant unit, or the lease passed
+    /// to the landlord); `[corp, tenancy, host, workplace]` a company's
+    /// lease of floors.
+    Floor,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 246] = [
+    pub const ALL: [EventKind; 247] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -794,6 +800,7 @@ impl EventKind {
         EventKind::CorpseFound,
         EventKind::Turf,
         EventKind::Bereaved,
+        EventKind::Floor,
     ];
 }
 
