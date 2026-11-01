@@ -3538,6 +3538,7 @@ fn exec_code(e: &ExecState) -> u8 {
         ExecState::Fly { .. } => 5,
         ExecState::Ride { .. } => 6,
         ExecState::JackedIn { .. } => 7,
+        ExecState::Climb { .. } => 8,
     }
 }
 
@@ -3551,6 +3552,7 @@ fn exec_name(e: &ExecState) -> &'static str {
         ExecState::Fly { .. } => "Fly",
         ExecState::Ride { .. } => "Ride (the El)",
         ExecState::JackedIn { .. } => "JackedIn",
+        ExecState::Climb { .. } => "Climb (the stairs or the lift)",
     }
 }
 

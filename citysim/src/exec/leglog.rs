@@ -367,12 +367,20 @@ pub fn walk_tick(world: &mut World) {
     let mut now: Vec<WalkerNow> = Vec::new();
     for &id in world.tier(Lod::Coarse) {
         let Some(b) = world.comp::<crate::components::Brain>(id) else { continue };
-        let ExecState::GotoTimed { target, arrive_tick, walk, .. } = &b.exec else { continue };
+        let ExecState::GotoTimed { target, arrive_tick, walk, climb, .. } = &b.exec else { continue };
         if world.aboard.contains_key(&id) || *arrive_tick == Tick::MAX {
             continue;
         }
         let Some(p) = world.comp::<crate::components::Position>(id) else { continue };
-        now.push((id, target.tile, *arrive_tick, p.clone(), walk.map(|w| (w.depart, *arrive_tick))));
+        // C7: the walk between the climbs (`exec::walk_route`'s, the kept way's key).
+        let (down, up) = climb.map_or((0, 0), |c| (c.down_ticks(), c.up_ticks()));
+        now.push((
+            id,
+            target.tile,
+            *arrive_tick,
+            p.clone(),
+            walk.map(|w| (w.depart + down, arrive_tick.saturating_sub(up))),
+        ));
     }
     // The ways not yet kept (one road search a walk).
     let need: Vec<EntityId> = now

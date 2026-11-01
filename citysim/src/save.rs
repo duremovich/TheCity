@@ -519,7 +519,11 @@ use crate::world::World;
 /// 120 (the city milestone C6b, the economy of floors): `Building.floor_rent`, `floor_arrears`, `hours`,
 /// `Flow::FloorRent`, `EventKind::Floor`, the `[tenancy]` keys and the `Jobs2Cols` `flow_floor_rent` ...
 /// `units_vacant` columns (serde defaults); `World.floor_index` is rebuilt on load.
-pub const SAVE_VERSION: u8 = 120;
+/// 121 (the city milestone C7, levels, portals and pathing): `ExecState::Climb`, `Goto.levels` (a path's level per
+/// step), `GotoTimed.climb`, `Building.lift`, `World.lifts` (the lobbies' calls), the map's `MapPortal`s and
+/// `MapBuilding.lift`, the `[levels]` keys and the `Jobs2Cols` `climbs` ... `deck_entries` columns (serde defaults);
+/// the portal graph is rebuilt on load; both island maps re-imported with `P` lines and `lift=`.
+pub const SAVE_VERSION: u8 = 121;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
@@ -536,6 +540,8 @@ pub fn from_ron(text: &str) -> Result<World, ron::error::SpannedError> {
     world.flow_fields.set_landmark_base(base);
     world.resize_stores();
     world.rebuild_indices();
+    // The city milestone C7: the portal graph (not saved).
+    crate::systems::levels::init_portals(&mut world);
     // M12 D1: the district grid and adjacency are not saved.
     crate::systems::districts::rebuild(&mut world);
     // Transit: the derived network (not saved).

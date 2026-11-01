@@ -30,8 +30,9 @@ pub struct Agent {
     /// The way to the next frame's place (C2; empty: a straight lerp)
     pub ahead: Vec<[f32; 2]>,
     pub indoors: bool,
-    /// C6a: the storey it stands on indoors (0 the ground)
-    pub floor: u8,
+    /// C6a: the storey it stands on indoors (0 the ground); C7: on the street its walkway deck's level, on a climb
+    /// the storey reached (lerped between frames)
+    pub floor: f32,
     pub lod: u8,
     pub act: u8,
     /// The vehicle it is aboard (its key)
@@ -84,6 +85,8 @@ pub struct Sim {
     /// Line index -> on the rail deck (the Terrace Line), on the street (the tram), or no track here.
     pub line_track: Vec<u8>,
     pub rail: Vec<[f32; 3]>,
+    /// C7: the walkway decks' points (footbridges, the escalator, the stations): a body on a deck stands at their z
+    pub deck: Vec<[f32; 3]>,
     pub t: f32,
     pub rate: f32,
     pub by_lod: bool,
@@ -124,7 +127,7 @@ impl SimFrame {
                 t: tf(a.t),
                 ahead: a.ahead.iter().map(|t| tf(*t)).collect(),
                 indoors: a.b.is_some(),
-                floor: a.floor,
+                floor: f32::from(a.floor),
                 lod: match a.lod {
                     Some(citysim::Lod::Full) => 0,
                     Some(citysim::Lod::Coarse) => 1,
@@ -140,6 +143,7 @@ impl SimFrame {
                     ViewAct::Fly { .. } => 6,
                     ViewAct::JackedIn { .. } => 7,
                     ViewAct::Child => 8,
+                    ViewAct::Climb { .. } => 9,
                 },
                 aboard: a.aboard.map(ekey),
                 facing: a.facing,
@@ -224,8 +228,8 @@ fn line_track_of(names: &[String]) -> Vec<u8> {
         .collect()
 }
 
-const ACTS: [&str; 9] = ["walk", "use", "idle", "wait", "ride", "timed", "fly", "jacked_in", "child"];
-const ACT_RGB: [[f32; 3]; 9] = [
+const ACTS: [&str; 10] = ["walk", "use", "idle", "wait", "ride", "timed", "fly", "jacked_in", "child", "climb"];
+const ACT_RGB: [[f32; 3]; 10] = [
     [0.25, 1.0, 0.35],
     [1.0, 0.7, 0.15],
     [0.45, 0.55, 0.7],
@@ -235,6 +239,8 @@ const ACT_RGB: [[f32; 3]; 9] = [
     [1.0, 1.0, 1.0],
     [0.3, 0.3, 1.0],
     [0.9, 0.9, 0.5],
+    // C7: a climb (the stairs, the lift, its lobby)
+    [1.0, 1.0, 0.1],
 ];
 const LOD_RGB: [[f32; 3]; 3] = [[0.25, 1.0, 0.35], [1.0, 0.7, 0.15], [1.0, 0.15, 0.1]];
 /// C6b: the signs' colours (a kind's hue), lit while open, dim when shut; a unit founded today burns white.
@@ -271,7 +277,7 @@ impl Sim {
         let names: Vec<String> =
             d["lines"].as_array().map(|ls| ls.iter().map(|l| l["name"].as_str().unwrap_or("").to_string()).collect()).unwrap_or_default();
         let line_track = line_track_of(&names);
-        let rail = Layers::load(chunk_dir).elements.into_iter().filter(|e| e.kind == "rail").flat_map(|e| e.pts).collect();
+        let (rail, deck) = rail_and_deck(chunk_dir);
         let mut frames = vec![];
         for f in d["frames"].as_array().expect("frames") {
             let agents = f["agents"]
@@ -286,7 +292,7 @@ impl Sim {
                         t: t2(&a["t"]),
                         ahead: a["ahead"].as_array().map_or(vec![], |w| w.iter().map(t2).collect()),
                         indoors: !a["b"].is_null(),
-                        floor: a["floor"].as_u64().map_or(0, |f| f.min(255) as u8),
+                        floor: a["floor"].as_u64().map_or(0.0, |f| f.min(255) as f32),
                         lod: match a["lod"].as_str() {
                             Some("Full") => 0,
                             Some("Coarse") => 1,
@@ -337,6 +343,7 @@ impl Sim {
             frames,
             line_track,
             rail,
+            deck,
             rate,
             by_lod: std::env::var("CV_SIM_COLOUR").is_ok_and(|v| v == "lod"),
             ents: HashMap::new(),
@@ -355,7 +362,7 @@ impl Sim {
 
     /// C2: frames from the sim thread (`--save`); the frame (tile_m, y1) and the lines arrive with the first frame.
     pub fn live(shared: std::sync::Arc<crate::simthread::Shared>, chunk_dir: &Path) -> Sim {
-        let rail = Layers::load(chunk_dir).elements.into_iter().filter(|e| e.kind == "rail").flat_map(|e| e.pts).collect();
+        let (rail, deck) = rail_and_deck(chunk_dir);
         Sim {
             tile_m: 4.0,
             x0: 0.0,
@@ -363,6 +370,7 @@ impl Sim {
             frames: vec![],
             line_track: vec![],
             rail,
+            deck,
             t: 0.0,
             rate: 0.0,
             by_lod: std::env::var("CV_SIM_COLOUR").is_ok_and(|v| v == "lod"),
@@ -420,9 +428,20 @@ impl Sim {
         p
     }
 
-    /// C6a: a storey's floor over the ground, metres: the export's 4 m ground and 3 m storeys above it.
-    fn storey_z(floor: u8) -> f32 {
-        if floor == 0 { 0.0 } else { 4.0 + 3.0 * f32::from(floor - 1) }
+    /// C6a: a storey's floor over the ground, metres: the export's 4 m ground and 3 m storeys above it (C7: a
+    /// climb's storey a fraction, the ground's first 4 m in proportion).
+    fn storey_z(floor: f32) -> f32 {
+        if floor <= 1.0 { 4.0 * floor.max(0.0) } else { 4.0 + 3.0 * (floor - 1.0) }
+    }
+
+    /// C7: a walkway deck's z at `p` (its nearest point within 12 m), else `None`.
+    fn deck_z(&self, p: Vec2) -> Option<f32> {
+        self.deck
+            .iter()
+            .map(|q| ((Vec2::new(q[0], q[1]) - p).length_squared(), q[2]))
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .filter(|(d2, _)| *d2 < 144.0)
+            .map(|(_, z)| z)
     }
 
     fn rail_z(&self, p: Vec2) -> Option<f32> {
@@ -433,6 +452,19 @@ impl Sim {
             .filter(|(d2, _)| *d2 < 400.0)
             .map(|(_, z)| z)
     }
+}
+
+/// The rail deck's points (`rail_z`) and (C7) the walkway decks' (footbridges, the escalator, the stations: `deck_z`).
+fn rail_and_deck(chunk_dir: &Path) -> (Vec<[f32; 3]>, Vec<[f32; 3]>) {
+    let (mut rail, mut deck) = (vec![], vec![]);
+    for e in Layers::load(chunk_dir).elements {
+        match e.kind.as_str() {
+            "rail" => rail.extend(e.pts),
+            "walkway" | "escalator" | "station" => deck.extend(e.pts),
+            _ => {}
+        }
+    }
+    (rail, deck)
 }
 
 fn unlit(mats: &mut Assets<StandardMaterial>, c: [f32; 3], k: f32) -> Handle<StandardMaterial> {
@@ -502,6 +534,9 @@ pub fn update_sim(
     // the newer frame's bodies, each lerped from its place in the older one along the older's way ahead (at u = 1
     // exactly the newer frame: a bench's shot shows its tick)
     let prev_a: HashMap<u64, ([f32; 2], Vec<[f32; 2]>)> = sim.frames[i].agents.iter().map(|a| (a.id, (a.t, a.ahead.clone()))).collect();
+    // C7: a climbing body's storey lerped from the older frame's
+    let prev_floor: HashMap<u64, f32> = sim.frames[i].agents.iter().map(|a| (a.id, a.floor)).collect();
+    let floor_of = |a: &Agent| prev_floor.get(&a.id).map_or(a.floor, |f| f + (a.floor - f) * u);
     let prev_v: HashMap<u64, ([f32; 2], Vec<[f32; 2]>)> = sim.frames[i].vehicles.iter().map(|v| (v.id, (v.t, v.ahead.clone()))).collect();
     let mut seen: Vec<(u8, u64)> = vec![];
     let mut place =
@@ -532,14 +567,21 @@ pub fn update_sim(
             subject_in = a.aboard;
             let t = prev_a.get(&a.id).map_or(a.t, |(p, ah)| along(*p, ah, a.t, u));
             let p = sim.metres(t, a.id, true);
-            let z = stream.ground_z(p.x, p.y).unwrap_or(0.0) + if a.indoors { Sim::storey_z(a.floor) } else { 0.0 };
+            let g = stream.ground_z(p.x, p.y).unwrap_or(0.0);
+            let z = if a.indoors {
+                g + Sim::storey_z(floor_of(a))
+            } else if a.floor > 0.0 {
+                sim.deck_z(p).unwrap_or(g + Sim::storey_z(a.floor))
+            } else {
+                g
+            };
             subject_at = Some((Vec3::new(p.x, p.y, z), a.facing.map_or(0.0, |h| -h.to_radians())));
         }
         if a.indoors {
             // C6a: on its floor (the occlusion's cutaway shows the ones by the subject)
             indoors += 1;
             let p = sim.metres(a.t, a.id, true);
-            let z = stream.ground_z(p.x, p.y).unwrap_or(0.0) + Sim::storey_z(a.floor);
+            let z = stream.ground_z(p.x, p.y).unwrap_or(0.0) + Sim::storey_z(floor_of(a));
             let mat = if sim.by_lod { sim.mats[ACTS.len() + a.lod as usize].clone() } else { sim.mats[a.act as usize].clone() };
             let cap = sim.capsule.clone();
             place(&mut commands, &mut sim, (0, a.id), cap, mat, bv(p.x, p.y, z + 0.85 * 1.4), 0.0);
@@ -554,7 +596,9 @@ pub fn update_sim(
         *on_tile.entry((a.t[0] as i32, a.t[1] as i32)).or_default() += 1;
         let t = prev_a.get(&a.id).map_or(a.t, |(p, ah)| along(*p, ah, a.t, u));
         let p = sim.metres(t, a.id, true);
-        let z = stream.ground_z(p.x, p.y).unwrap_or(0.0);
+        let g = stream.ground_z(p.x, p.y).unwrap_or(0.0);
+        // C7: a body on a walkway deck stands on it
+        let z = if a.floor > 0.0 { sim.deck_z(p).unwrap_or(g + Sim::storey_z(a.floor)) } else { g };
         let mat = if sim.by_lod { sim.mats[ACTS.len() + a.lod as usize].clone() } else { sim.mats[a.act as usize].clone() };
         // compass degrees (clockwise from north) -> Bevy yaw about +y (heading 0 = -z)
         let yaw = a.facing.map_or(0.0, |h| -h.to_radians());
@@ -619,7 +663,7 @@ pub fn update_sim(
         // tiles: out of the wall by half a tile, along it by the unit's slot (tile y runs south)
         let t = [un.door[0] + nx * 0.55 - ny * k * along, un.door[1] + ny * 0.55 + nx * k * along];
         let p = sim.metres(t, un.id, false);
-        let z = stream.ground_z(p.x, p.y).unwrap_or(0.0) + Sim::storey_z(un.floor) + if un.floor == 0 { 3.0 } else { 1.6 };
+        let z = stream.ground_z(p.x, p.y).unwrap_or(0.0) + Sim::storey_z(f32::from(un.floor)) + if un.floor == 0 { 3.0 } else { 1.6 };
         let yaw = if nx != 0.0 { std::f32::consts::FRAC_PI_2 } else { 0.0 };
         // a placeholder keeps the material it spawned with: each state (lit, dim, founded today) is its own entity
         let (state, mat) = if un.fresh {

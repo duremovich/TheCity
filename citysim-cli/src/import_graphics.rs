@@ -125,6 +125,13 @@ pub struct Report {
     /// C5: `walkways_sim.json` portals by kind, and their metres.
     pub portals: BTreeMap<String, usize>,
     pub portal_m: f64,
+    /// C7: the portals mapped (`P` lines) by kind, the pieces a long deck
+    /// segment was cut into, and the portals not mapped by why.
+    pub portals_mapped: BTreeMap<String, usize>,
+    pub portal_lines: usize,
+    pub portals_skipped: BTreeMap<String, usize>,
+    /// C7: the hosts given a `lift=`.
+    pub lift_hosts: usize,
     /// C5 (for C6): the units each district's lots offer (flats, shops,
     /// workshops, offices, `works` grounds), by its `districts.json` id and
     /// name, beside the buildings this import dealt there by kind.
@@ -257,11 +264,23 @@ impl Report {
         if !self.portals.is_empty() {
             let by: Vec<String> = self.portals.iter().map(|(k, n)| format!("{k} {n}")).collect();
             println!(
-                "walkways (sim/walkways_sim.json, carried, not yet mapped): {} portals, {:.0} m: {}",
+                "walkways (sim/walkways_sim.json): {} portals, {:.0} m: {}",
                 self.portals.values().sum::<usize>(),
                 self.portal_m,
                 by.join(", ")
             );
+            let by: Vec<String> = self.portals_mapped.iter().map(|(k, n)| format!("{k} {n}")).collect();
+            let skip: Vec<String> = self.portals_skipped.iter().map(|(k, n)| format!("{k} {n}")).collect();
+            println!(
+                "walkways mapped (C7): {} portals as {} P lines (deck segments cut at {PIECE_TILES} tiles): {}; not mapped: {}",
+                self.portals_mapped.values().sum::<usize>(),
+                self.portal_lines,
+                by.join(", "),
+                if skip.is_empty() { "none".to_string() } else { skip.join(", ") }
+            );
+        }
+        if self.lift_hosts > 0 {
+            println!("lifts (C7): {} hosts carry lift= (their lots' lift cores)", self.lift_hosts);
         }
         if !self.units_by_district.is_empty() {
             let per_k = f64::from(self.residents) / 1000.0;
@@ -541,31 +560,193 @@ fn read_levels(r: &Value, ctx: &str) -> Result<(Vec<SimLevel>, Vec<SimCore>), St
     Ok((levels, cores))
 }
 
+/// C7: one end of a `walkways_sim.json` portal.
+#[derive(Clone, Debug)]
+struct RawEnd {
+    kind: String,
+    id: String,
+    at: (f64, f64),
+    level: u8,
+}
+
+/// C7: one `walkways_sim.json` portal as read.
+#[derive(Clone, Debug)]
+struct RawPortal {
+    kind: String,
+    a: RawEnd,
+    b: RawEnd,
+    length_m: f64,
+    vehicle: bool,
+    /// `(from hour, to hour, a to b)`.
+    hours: Vec<(u8, u8, bool)>,
+}
+
 /// C5: `sim/walkways_sim.json`'s portals by kind and their summed length
-/// (each end's `kind`, `at` and `level` are checked; the map holds no portal
-/// until C7).
-fn read_walkways(dir: &Path, rep: &mut Report) -> Result<usize, String> {
+/// (each end's `kind`, `at` and `level` are checked); C7: the portals read,
+/// for the map's `P` lines (`map_portals`).
+fn read_walkways(dir: &Path, rep: &mut Report) -> Result<Vec<RawPortal>, String> {
     const F: &str = "sim/walkways_sim.json";
     let v = read_json(dir, "walkways_sim.json")?;
     check_schema(&v, F, rep)?;
     let ps = arr(&v, "portals", F)?;
+    let mut out = Vec::with_capacity(ps.len());
     for (i, p) in ps.iter().enumerate() {
         let ctx = format!("{F} portals[{i}]");
         let kind = text(p, "kind", &ctx)?;
         text(p, "id", &ctx)?;
+        let mut ends = Vec::with_capacity(2);
         for end in ["a", "b"] {
             let e = get(p, end, &ctx)?;
             let c = format!("{ctx} {end}");
-            text(e, "kind", &c)?;
-            uint(e, "level", &c)?;
-            if arr(e, "at", &c)?.len() != 3 {
+            let ek = text(e, "kind", &c)?.to_string();
+            let level = u8::try_from(uint(e, "level", &c)?).unwrap_or(u8::MAX);
+            let at = arr(e, "at", &c)?;
+            if at.len() != 3 {
                 return Err(format!("{c}: \"at\" is not [x, y, z]"));
             }
+            let id = e.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+            ends.push(RawEnd { kind: ek, id, at: (num(&at[0], &c)?, num(&at[1], &c)?), level });
         }
-        rep.portal_m += num(get(p, "length_m", &ctx)?, &format!("{ctx} \"length_m\""))?;
+        let length_m = num(get(p, "length_m", &ctx)?, &format!("{ctx} \"length_m\""))?;
+        rep.portal_m += length_m;
         *rep.portals.entry(kind.to_string()).or_default() += 1;
+        let mut hours = Vec::new();
+        if let Some(hs) = p.get("hours").and_then(Value::as_array) {
+            for h in hs {
+                let w = h
+                    .as_array()
+                    .filter(|w| w.len() == 3)
+                    .ok_or_else(|| format!("{ctx}: an hours window is not [h0, h1, dir]"))?;
+                let (h0, h1) = (num(&w[0], &ctx)?, num(&w[1], &ctx)?);
+                let ab = match w[2].as_str() {
+                    Some("ab") => true,
+                    Some("ba") => false,
+                    _ => return Err(format!("{ctx}: an hours window's direction is not ab or ba")),
+                };
+                hours.push((h0.round().clamp(0.0, 24.0) as u8, h1.round().clamp(0.0, 24.0) as u8, ab));
+            }
+        }
+        let b = ends.pop().ok_or_else(|| format!("{ctx}: no end b"))?;
+        let a = ends.pop().ok_or_else(|| format!("{ctx}: no end a"))?;
+        out.push(RawPortal {
+            kind: kind.to_string(),
+            a,
+            b,
+            length_m,
+            vehicle: p.get("vehicle").and_then(Value::as_bool).unwrap_or(false),
+            hours,
+        });
     }
-    Ok(ps.len())
+    Ok(out)
+}
+
+/// C7: a deck segment longer than this many tiles is cut into pieces of at
+/// most this many (deck nodes between), so a walker's hop along it is a
+/// step of a few tiles like any other (the escalator's 378 m is 24 hops).
+const PIECE_TILES: u16 = 4;
+
+/// C7: the nearest walkable tile (`. = D m`) to `t` within `r` tiles (the
+/// lowest index on a tie), `None` past it.
+fn snap_walkable(tiles: &[char], w: usize, h: usize, t: (usize, usize), r: usize) -> Option<(usize, usize)> {
+    let walk = |x: usize, y: usize| matches!(tiles[y * w + x], '.' | '=' | 'D' | 'm');
+    let mut best: Option<(usize, usize, usize)> = None;
+    for y in t.1.saturating_sub(r)..=(t.1 + r).min(h - 1) {
+        for x in t.0.saturating_sub(r)..=(t.0 + r).min(w - 1) {
+            if walk(x, y) {
+                let d = x.abs_diff(t.0) + y.abs_diff(t.1);
+                if d <= r && best.is_none_or(|(bd, by, bx)| (d, y, x) < (bd, by, bx)) {
+                    best = Some((d, y, x));
+                }
+            }
+        }
+    }
+    best.map(|(_, y, x)| (x, y))
+}
+
+/// C7: `walkways_sim.json`'s portals as the map's `P` lines: an end on a way
+/// (or a deck at level 0) the walkable tile at or nearest its point; an end
+/// on a lot (a landing, its floor's level) the street outside the lot's
+/// door, at level 0, the walk to it added to the run (the climb down through
+/// the lot is the sim's, by the levels); a deck's or a station's end the
+/// tile under its point at its level. The vehicle ramps are not mapped; a
+/// deck-to-deck segment past [`PIECE_TILES`] is cut into pieces.
+fn map_portals(
+    f: &Frame,
+    tiles: &[char],
+    raw: &[RawPortal],
+    sim_lots: Option<&BTreeMap<String, SimLot>>,
+    rep: &mut Report,
+) -> Vec<citysim::map::MapPortal> {
+    use citysim::map::{MapPortal, PortalKind};
+    let (w, h) = (f.w, f.h);
+    let mut out: Vec<MapPortal> = Vec::new();
+    let skip = |rep: &mut Report, why: &str| *rep.portals_skipped.entry(why.to_string()).or_default() += 1;
+    for p in raw {
+        if p.vehicle {
+            skip(rep, "vehicle ramp");
+            continue;
+        }
+        let Some(kind) = PortalKind::parse(&p.kind) else {
+            skip(rep, &format!("kind {}", p.kind));
+            continue;
+        };
+        // An end: its tile, its level, the extra run to it (tiles).
+        let end = |e: &RawEnd| -> Option<((usize, usize), u8, u16)> {
+            let t = f.tile(e.at.0, e.at.1)?;
+            match e.kind.as_str() {
+                "lot" => {
+                    let rec = sim_lots.and_then(|s| s.get(&e.id));
+                    let door = rec
+                        .and_then(|r| {
+                            r.doors_out
+                                .iter()
+                                .filter_map(|&(x, y)| f.tile(x, y))
+                                .min_by_key(|d| d.0.abs_diff(t.0) + d.1.abs_diff(t.1))
+                        })
+                        .and_then(|d| snap_walkable(tiles, w, h, d, 2))
+                        .or_else(|| snap_walkable(tiles, w, h, t, 6))?;
+                    let run = u16::try_from(door.0.abs_diff(t.0) + door.1.abs_diff(t.1)).unwrap_or(u16::MAX);
+                    Some((door, 0, run))
+                }
+                _ if e.kind == "way" || e.level == 0 => snap_walkable(tiles, w, h, t, 3).map(|s| (s, 0, 0)),
+                _ => Some((t, e.level, 0)),
+            }
+        };
+        let (Some(a), Some(b)) = (end(&p.a), end(&p.b)) else {
+            skip(rep, &format!("{} end off the map or no street near", p.kind));
+            continue;
+        };
+        if a.0 == b.0 && a.1 == b.1 {
+            skip(rep, &format!("{} ends on one tile", p.kind));
+            continue;
+        }
+        *rep.portals_mapped.entry(p.kind.clone()).or_default() += 1;
+        let run = ((p.length_m / f.s).ceil() as u16).saturating_add(a.2).saturating_add(b.2).max(1);
+        let tp = |t: (usize, usize)| citysim::TilePos::new(t.0 as u16, t.1 as u16);
+        let deck = a.1 > 0 && b.1 > 0;
+        let n = if deck { run.div_ceil(PIECE_TILES).max(1) } else { 1 };
+        let mut prev = (tp(a.0), a.1);
+        let mut left = run;
+        for k in 1..=n {
+            let u = f64::from(k) / f64::from(n);
+            let next = if k == n {
+                (tp(b.0), b.1)
+            } else {
+                let x = a.0 .0 as f64 + (b.0 .0 as f64 - a.0 .0 as f64) * u;
+                let y = a.0 .1 as f64 + (b.0 .1 as f64 - a.0 .1 as f64) * u;
+                let l = f64::from(a.1) + (f64::from(b.1) - f64::from(a.1)) * u;
+                (citysim::TilePos::new(x.round() as u16, y.round() as u16), l.round().max(1.0) as u8)
+            };
+            let piece = if k == n { left } else { (run / n).max(1) };
+            left = left.saturating_sub(piece);
+            if next != prev {
+                out.push(MapPortal { kind, a: prev, b: next, tiles: piece.max(1), hours: p.hours.clone() });
+            }
+            prev = next;
+        }
+    }
+    rep.portal_lines = out.len();
+    out
 }
 
 /// `sim/lots_sim.json`'s lots by id.
@@ -877,6 +1058,9 @@ struct Seg {
     /// ground first, and the storeys holding their flats.
     units: Vec<Unit>,
     flat_span: Option<(u8, u8)>,
+    /// C7: the members' lift cores: their count and the highest storey one
+    /// serves (`lift=` on the cut's host).
+    lift: Option<(u8, u8)>,
     /// C6a: each member lot's street doors' `out` tiles (sim tiles), by the
     /// member's index in `lots`.
     lot_outs: Vec<Vec<(usize, usize)>>,
@@ -1087,9 +1271,13 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
         rep.inputs.push("rail: elevated.json rail elements (no sim/rail.json: the S3b fallback)".into());
         None
     };
+    let mut raw_portals: Vec<RawPortal> = Vec::new();
     if sim_dir.join("walkways_sim.json").is_file() {
-        let n = read_walkways(&sim_dir, &mut rep)?;
-        rep.inputs.push(format!("walkways: sim/walkways_sim.json ({n} portals; counted, not yet mapped)"));
+        raw_portals = read_walkways(&sim_dir, &mut rep)?;
+        rep.inputs.push(format!(
+            "walkways: sim/walkways_sim.json ({} portals; the P lines, C7: not the vehicle ramps)",
+            raw_portals.len()
+        ));
     }
     // C5: where the export came from: TheCityGraphics' commit (its `out/`
     // is generated and gitignored, so the commit is the code that made it)
@@ -1815,9 +2003,20 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                     }
                 }
                 units.sort_by_key(|u| (u.level, u.kind, u.lot));
+                // C7: the members' lifts (the export's lift cores, from the ground).
+                let lifts: Vec<u32> = members
+                    .iter()
+                    .filter_map(|l| l.sim.as_ref())
+                    .flat_map(|r| r.cores.iter().filter(|c| c.lift).map(|c| c.floors.1))
+                    .collect();
+                let lift = lifts
+                    .iter()
+                    .max()
+                    .map(|&top| (u8::try_from(lifts.len()).unwrap_or(u8::MAX), u8::try_from(top).unwrap_or(u8::MAX)));
                 segs.push(Seg {
                     units,
                     flat_span,
+                    lift,
                     lot_outs,
                     rect,
                     door,
@@ -2376,6 +2575,7 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                 lot: door_lot(&f, sg),
                 span: host_span[i],
                 units: (n_units > 0).then_some(n_units),
+                lift: sg.lift,
                 ..BuildingExtra::default()
             }
         } else {
@@ -2498,7 +2698,9 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
     let mut unmapped_el: BTreeMap<String, usize> = BTreeMap::new();
     for (i, e) in elements.iter().enumerate() {
         let kd = text(e, "kind", &format!("elevated.json elements[{i}]"))?;
-        if kd != "rail" && kd != "station" && kd != "funicular" {
+        // C7: the walkways and the escalator are the P lines (walkways_sim.json) when it is read.
+        let portal = !raw_portals.is_empty() && (kd == "walkway" || kd == "escalator");
+        if kd != "rail" && kd != "station" && kd != "funicular" && !portal {
             *unmapped_el.entry(kd.to_string()).or_default() += 1;
         }
     }
@@ -2683,6 +2885,9 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
         dgrid.iter().map(|&d| zone_of_d.get(usize::from(d)).copied().unwrap_or(Z::Mid).letter()).collect();
     let grid: Vec<u8> = dgrid.iter().map(|&d| d as u8).collect();
     let extra: Vec<BuildingExtra> = out_b.iter().map(|b| b.4.clone()).collect();
+    rep.lift_hosts = extra.iter().filter(|e| e.lift.is_some()).count();
+    // C7: the walkways as portals, on the final tiles.
+    let portals = map_portals(&f, &tiles, &raw_portals, sim_lots.as_ref(), &mut rep);
     let text_out = MapText {
         w,
         h,
@@ -2692,6 +2897,7 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
         districts,
         district_grid: grid,
         lines,
+        portals,
         comments,
         extra,
     }

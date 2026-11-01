@@ -1455,6 +1455,10 @@ pub struct World {
     /// and every founding or vacated floor (`floors::reindex`).
     #[serde(skip)]
     pub floor_index: crate::systems::floors::FloorIndex,
+    /// The city milestone C7 (`systems/levels.rs`): a lift core -> its
+    /// lobby's calls and C8's hooks (cut, held).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub lifts: BTreeMap<EntityId, crate::systems::levels::LiftState>,
     /// The island pass phase 3a: a company block's resident whose job at
     /// its workplace ended -> the tick it ended (evicted `grace_days` on).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -2153,6 +2157,7 @@ impl World {
             housing_demand: BTreeMap::new(),
             company_homes: BTreeMap::new(),
             floor_index: Default::default(),
+            lifts: Default::default(),
             company_lapsed: BTreeMap::new(),
             company_notice: BTreeSet::new(),
             commute_pressure: BTreeMap::new(),
@@ -2160,6 +2165,8 @@ impl World {
             jobs2: Default::default(),
         };
         crate::prof::timed!("new::spawn_buildings", w.spawn_buildings());
+        // The city milestone C7: the walkway portals as a graph (before any path).
+        systems::levels::init_portals(&mut w);
         w.litter = vec![0; w.map.w() * w.map.h()];
         crate::prof::timed!("new::districts::rebuild", systems::districts::rebuild(&mut w));
         // Transit: the El's network from the config and the map (no RNG;
@@ -2372,6 +2379,7 @@ impl World {
                     floor_rent: 0,
                     floor_arrears: 0,
                     hours: None,
+                    lift: def.lift,
                 },
             );
             match def.kind {

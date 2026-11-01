@@ -57,6 +57,11 @@ pub enum ExecState {
         /// can cost less than a tick).
         #[serde(default)]
         carry_q: u32,
+        /// The city milestone C7: each `path` step's level (reversed alike;
+        /// above 0 a deck node of the walkways); empty: every step on the
+        /// ground.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        levels: Vec<u8>,
     },
     /// Coarse LOD.
     GotoTimed {
@@ -71,6 +76,37 @@ pub enum ExecState {
         /// (a ride, the door queue's retry, `[motion.walks]` off).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         walk: Option<Walk>,
+        /// The city milestone C7: the climbs the timed leg holds (down out of
+        /// the building left, then up to the target's storey), placed by
+        /// `walk_place`; `None`: none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        climb: Option<TimedClimb>,
+    },
+    /// The city milestone C7: a Full body's climb inside a structure, at
+    /// its door: up from the door to the storey of the building just
+    /// entered (`out` false; the GoTo done at `arrive_tick`), or down from
+    /// its storey to the door of the building being left (`out` true; then
+    /// the walk on, `path` and `levels` the walk's). By the stairs, or by
+    /// the lift (`lift`): the lobby (the lower end) until `board`, aboard
+    /// until `arrive_tick` (`systems::levels`). The body stays in the
+    /// building, on `from` until the climb ends.
+    Climb {
+        target: GotoTarget,
+        /// The structure whose core is climbed (`levels::core_of`).
+        core: EntityId,
+        from: u8,
+        to: u8,
+        depart: Tick,
+        board: Tick,
+        arrive_tick: Tick,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        lift: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        out: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        path: Vec<TilePos>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        levels: Vec<u8>,
     },
     Use {
         kind: ActionKind,
@@ -114,6 +150,48 @@ pub enum ExecState {
 pub struct Walk {
     pub from: TilePos,
     pub depart: Tick,
+}
+
+/// The city milestone C7: a Coarse timed leg's climbs (`GotoTimed.climb`):
+/// down out of the building left first (its core, the storey left, the
+/// ticks, by the lift?), then the walk, then up to the target's storey (the
+/// last `up` ticks before the arrival). `booked`: the lift calls and the
+/// day's counters taken (`levels::book`, on the leg's first step).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimedClimb {
+    pub down: Option<ClimbLeg>,
+    pub up: Option<ClimbLeg>,
+    #[serde(default)]
+    pub booked: bool,
+    /// The leg's start.
+    pub depart: Tick,
+    /// A move inside one structure: no walk, the one climb (`up`) between
+    /// the storeys.
+    #[serde(default)]
+    pub inside: bool,
+}
+
+/// One climb of a [`TimedClimb`]: the structure, the storey off the ground
+/// (the one left going down, the one reached going up), the plan.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClimbLeg {
+    pub core: EntityId,
+    pub building: EntityId,
+    pub from: u8,
+    pub to: u8,
+    pub plan: crate::systems::levels::ClimbPlan,
+}
+
+impl TimedClimb {
+    /// The ticks before the walk (the climb down).
+    pub fn down_ticks(&self) -> Tick {
+        self.down.map_or(0, |c| c.plan.ticks)
+    }
+
+    /// The ticks after the walk (the climb up).
+    pub fn up_ticks(&self) -> Tick {
+        self.up.map_or(0, |c| c.plan.ticks)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -207,14 +285,29 @@ fn emigrate_step(world: &mut World, id: EntityId) {
     let lod = brain.lod;
     let state = brain.exec.clone();
     let result = match state {
-        ExecState::Goto { target, path, next_move_tick, blocked_since, carry_q } => {
-            advance_goto(world, id, target, path, next_move_tick, blocked_since, carry_q)
+        ExecState::Goto { target, path, next_move_tick, blocked_since, carry_q, levels } => {
+            advance_goto(world, id, target, path, levels, next_move_tick, blocked_since, carry_q)
         }
         ExecState::GotoTimed { target, arrive_tick, blocked_since, .. } => {
             if tick < arrive_tick {
                 StepResult::Running
             } else {
                 arrive(world, id, target, blocked_since)
+            }
+        }
+        ExecState::Climb { target, arrive_tick, path, levels, .. } => {
+            if tick < arrive_tick {
+                StepResult::Running
+            } else {
+                if let Some(p) = world.comp_mut::<Position>(id) {
+                    p.floor = 0;
+                }
+                let state =
+                    ExecState::Goto { target, path, next_move_tick: tick, blocked_since: None, carry_q: 0, levels };
+                if let Some(b) = world.comp_mut::<Brain>(id) {
+                    b.exec = state;
+                }
+                StepResult::Running
             }
         }
         // M13 D22: an emigrant in the air lands as a timed walk does.
@@ -251,6 +344,12 @@ fn emigrate_step(world: &mut World, id: EntityId) {
 /// Run the current step's state machine for one tick.
 fn step_agent(world: &mut World, id: EntityId) {
     let Some(brain) = world.comp::<Brain>(id) else { return };
+    // The city milestone C7: a timed leg's climbs are booked on its first
+    // step (the lift's lobby, the day's counters).
+    if matches!(&brain.exec, ExecState::GotoTimed { climb: Some(c), .. } if !c.booked) {
+        book_timed(world, id);
+    }
+    let Some(brain) = world.comp::<Brain>(id) else { return };
     let tick = world.tick;
     // A walk between moves (or a timed walk not yet arrived) is `Running` and
     // touches nothing: skip the step and path clones (perf). The plan
@@ -262,7 +361,8 @@ fn step_agent(world: &mut World, id: EntityId) {
         ExecState::Goto { next_move_tick, .. } => tick < *next_move_tick,
         ExecState::GotoTimed { arrive_tick, .. }
         | ExecState::Fly { arrive_tick, .. }
-        | ExecState::Ride { arrive_tick, .. } => tick < *arrive_tick,
+        | ExecState::Ride { arrive_tick, .. }
+        | ExecState::Climb { arrive_tick, .. } => tick < *arrive_tick,
         _ => false,
     };
     if between_moves {
@@ -312,7 +412,8 @@ fn step_agent(world: &mut World, id: EntityId) {
         && match &state {
             ExecState::GotoTimed { arrive_tick, .. }
             | ExecState::Fly { arrive_tick, .. }
-            | ExecState::Ride { arrive_tick, .. } => tick <= *arrive_tick,
+            | ExecState::Ride { arrive_tick, .. }
+            | ExecState::Climb { arrive_tick, .. } => tick <= *arrive_tick,
             ExecState::Goto { blocked_since, .. } => blocked_since.is_none(),
             ExecState::Idle => world.segments.get(&id).is_some_and(|&k| legs::plan_key(world, id) == Some(k)),
             _ => false,
@@ -325,8 +426,25 @@ fn step_agent(world: &mut World, id: EntityId) {
 
     let result = match state {
         ExecState::Idle => start_step(world, id, &step, lod),
-        ExecState::Goto { target, path, next_move_tick, blocked_since, carry_q } => {
-            advance_goto(world, id, target, path, next_move_tick, blocked_since, carry_q)
+        ExecState::Goto { target, path, next_move_tick, blocked_since, carry_q, levels } => {
+            advance_goto(world, id, target, path, levels, next_move_tick, blocked_since, carry_q)
+        }
+        // The city milestone C7: the climb at the door, then the GoTo done
+        // (up to the storey) or the walk on (down to the door).
+        ExecState::Climb { target, arrive_tick, to, out, path, levels, .. } => {
+            if tick < arrive_tick {
+                StepResult::Running
+            } else if out {
+                if let Some(p) = world.comp_mut::<Position>(id) {
+                    p.floor = 0;
+                }
+                advance_goto(world, id, target, path, levels, tick, None, 0)
+            } else {
+                if let Some(p) = world.comp_mut::<Position>(id) {
+                    p.floor = to;
+                }
+                StepResult::Done
+            }
         }
         ExecState::GotoTimed { target, arrive_tick, blocked_since, .. } => {
             if tick < arrive_tick {
@@ -888,7 +1006,13 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                         let arrive_tick = tick + crate::systems::shift::move_ticks(world, from, tile);
                         let target = GotoTarget { dest: key, tile, building: Some(b) };
                         if let Some(br) = world.comp_mut::<Brain>(id) {
-                            br.exec = ExecState::GotoTimed { target, arrive_tick, blocked_since: None, walk: None };
+                            br.exec = ExecState::GotoTimed {
+                                target,
+                                arrive_tick,
+                                blocked_since: None,
+                                walk: None,
+                                climb: None,
+                            };
                         }
                         return StepResult::Running;
                     }
@@ -1289,6 +1413,7 @@ fn escort_leg(world: &mut World, id: EntityId, target: &GotoTarget, lod: Lod) ->
                 arrive_tick: world.tick + ticks,
                 blocked_since: None,
                 walk: None,
+                climb: None,
             },
             ticks,
         )
@@ -1410,6 +1535,7 @@ fn fare_segment(world: &mut World, id: EntityId, target: &GotoTarget) -> Option<
         arrive_tick,
         blocked_since: None,
         walk: None,
+        climb: None,
     })
 }
 
@@ -1421,7 +1547,8 @@ fn segment(world: &mut World, id: EntityId, target: &GotoTarget, lod: Lod) -> Op
     let from = walk_origin(world, id)?;
     let key = legs::plan_key(world, id)?;
     let state = if lod == Lod::Full && !world.config.exec.straight_line_paths {
-        full_segment(world, from, target)?
+        let (lvl, foot) = (street_level(world, id), on_foot(world, id));
+        full_segment(world, from, lvl, foot, target)?
     } else {
         let end = legs::segment_end(world, from, target.tile)?;
         timed_goto(world, id, GotoTarget { dest: LocationKey::Street, tile: end, building: None })
@@ -1438,8 +1565,9 @@ fn segment(world: &mut World, id: EntityId, target: &GotoTarget, lod: Lod) -> Op
 /// patrol leg left the street its beat passed down, and the thief that
 /// beat sighted was never seen again (`law::test_theft_witnessed…`).
 /// `None`: the route is no longer than a segment, or there is none.
-fn full_segment(world: &mut World, from: TilePos, target: &GotoTarget) -> Option<ExecState> {
+fn full_segment(world: &mut World, from: TilePos, lvl: u8, foot: bool, target: &GotoTarget) -> Option<ExecState> {
     let len = world.config.legs.as_ref()?.leg_replan_tiles.max(1) as usize;
+    let mut route_levels: Vec<u8> = Vec::new();
     let route: Vec<TilePos> = match target.building {
         Some(b) if !world.big_paths() => {
             let door = world.comp::<Building>(b)?.door;
@@ -1453,19 +1581,46 @@ fn full_segment(world: &mut World, from: TilePos, target: &GotoTarget) -> Option
         }
         Some(b) => {
             let door = world.comp::<Building>(b)?.door;
-            world.big_path(from, door)?
+            let (r, l) = world.big_route(from, lvl, door, foot)?;
+            route_levels = l;
+            r
         }
-        None if world.big_paths() => world.big_path(from, target.tile)?,
+        None if world.big_paths() => {
+            let (r, l) = world.big_route(from, lvl, target.tile, foot)?;
+            route_levels = l;
+            r
+        }
         None => pathfind::astar(&world.map, from, target.tile, world.config.exec.astar_max_expansions)?,
     };
+    // C7: a segment ends on the ground (never on a deck).
+    let mut len = len;
+    while route_levels.get(len.saturating_sub(1)).is_some_and(|&l| l > 0) {
+        len += 1;
+    }
     if route.len() <= len {
         return None;
     }
     let end = route[len - 1];
     let mut path = route[..len].to_vec();
     path.reverse();
+    let mut levels: Vec<u8> = route_levels.get(..len).map(<[u8]>::to_vec).unwrap_or_default();
+    if levels.iter().all(|&l| l == 0) {
+        levels.clear();
+    }
+    levels.reverse();
     let leg = GotoTarget { dest: LocationKey::Street, tile: end, building: None };
-    Some(ExecState::Goto { target: leg, path, next_move_tick: world.tick, blocked_since: None, carry_q: 0 })
+    Some(ExecState::Goto { target: leg, path, next_move_tick: world.tick, blocked_since: None, carry_q: 0, levels })
+}
+
+/// C7: the level `id` stands on in the street (a walkway's deck above 0;
+/// 0 indoors, where the walk starts from the door).
+pub fn street_level(world: &World, id: EntityId) -> u8 {
+    world.comp::<Position>(id).filter(|p| p.building.is_none()).map_or(0, |p| p.floor)
+}
+
+/// C7: is `id` on foot (not at a wheel)? A walker's path takes the portals.
+pub fn on_foot(world: &World, id: EntityId) -> bool {
+    !world.comp::<crate::components::Kit>(id).is_some_and(|k| k.driving.is_some())
 }
 
 /// A Coarse Goto: arrive after Manhattan distance × move ticks; M12 D18: ×
@@ -1474,12 +1629,123 @@ fn full_segment(world: &mut World, from: TilePos, target: &GotoTarget) -> Option
 /// exactly 1.0 the integer formula runs unchanged (a branch, not a multiply).
 pub fn timed_goto(world: &World, id: EntityId, target: GotoTarget) -> ExecState {
     let from = walk_origin(world, id).unwrap_or(target.tile);
-    let ticks = timed_walk(world, id, from, target.tile);
+    let mut ticks = timed_walk(world, id, from, target.tile);
+    // The city milestone C7: the climbs down out of the building left and
+    // up to the target's storey (a move inside one structure only climbs).
+    let climb = timed_climbs(world, id, &target, ticks);
+    if climb.as_ref().is_some_and(|c| c.inside) {
+        ticks = 0;
+    }
+    let walk_ticks = ticks;
+    if let Some(c) = &climb {
+        ticks += c.down_ticks() + c.up_ticks();
+    }
     let arrive_tick = world.tick + ticks;
     // The island pass phase 9 (OPEN-181): the walk keeps its start, so its
     // body has a place on its way at every tick (`walk_place`).
-    let walk = (walks_on(world) && from != target.tile && ticks > 0).then_some(Walk { from, depart: world.tick });
-    ExecState::GotoTimed { target, arrive_tick, blocked_since: None, walk }
+    let walk = (walks_on(world) && from != target.tile && walk_ticks > 0).then_some(Walk { from, depart: world.tick });
+    ExecState::GotoTimed { target, arrive_tick, blocked_since: None, walk, climb }
+}
+
+/// C7: a timed leg's climbs ([`TimedClimb`]): down from the storey `id`
+/// stands on to the door of the building he is leaving, and up from the
+/// target's door to the storey he will stand on there (`floors::floor_in`),
+/// the lift's queue read at the tick he reaches its lobby; a move between
+/// two buildings of one structure (a span on either) climbs straight between
+/// the storeys. `None`: no climb (`[levels]` off, on the ground both ends).
+fn timed_climbs(world: &World, id: EntityId, target: &GotoTarget, walk_ticks: Tick) -> Option<TimedClimb> {
+    use crate::systems::levels;
+    if !levels::on(world) {
+        return None;
+    }
+    let p = world.comp::<Position>(id)?;
+    let tick = world.tick;
+    if let (Some(h), Some(t)) = (p.building, target.building) {
+        if h == t {
+            return None;
+        }
+        let core = levels::core_of(world, h);
+        let spans = [h, t].iter().any(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.span.is_some()));
+        if spans && levels::core_of(world, t) == core {
+            let to = crate::systems::floors::floor_in(world, id, t);
+            let plan = levels::plan(world, core, p.floor, to, tick)?;
+            let up = ClimbLeg { core, building: t, from: p.floor, to, plan };
+            return Some(TimedClimb { down: None, up: Some(up), booked: false, depart: tick, inside: true });
+        }
+    }
+    let down = p.building.filter(|_| p.floor > 0).and_then(|h| {
+        let core = levels::core_of(world, h);
+        levels::plan(world, core, p.floor, 0, tick).map(|plan| ClimbLeg {
+            core,
+            building: h,
+            from: p.floor,
+            to: 0,
+            plan,
+        })
+    });
+    let reach = tick + down.map_or(0, |d| d.plan.ticks) + walk_ticks;
+    let up = target.building.and_then(|t| {
+        let to = crate::systems::floors::floor_in(world, id, t);
+        if to == 0 {
+            return None;
+        }
+        let core = levels::core_of(world, t);
+        levels::plan(world, core, 0, to, reach).map(|plan| ClimbLeg { core, building: t, from: 0, to, plan })
+    });
+    (down.is_some() || up.is_some()).then_some(TimedClimb { down, up, booked: false, depart: tick, inside: false })
+}
+
+/// C7: book a timed leg's climbs (`levels::book`): the climb down at its
+/// start, the climb up at the tick it reaches the lobby.
+fn book_timed(world: &mut World, id: EntityId) {
+    let Some(ExecState::GotoTimed { climb: Some(c), arrive_tick, .. }) =
+        world.comp::<Brain>(id).map(|b| b.exec.clone())
+    else {
+        return;
+    };
+    if let Some(d) = c.down {
+        crate::systems::levels::book(world, d.core, d.plan, d.from.max(d.to), c.depart);
+    }
+    if let Some(u) = c.up {
+        crate::systems::levels::book(world, u.core, u.plan, u.from.max(u.to), arrive_tick.saturating_sub(u.plan.ticks));
+    }
+    if let Some(ExecState::GotoTimed { climb: Some(c), .. }) = world.comp_mut::<Brain>(id).map(|b| &mut b.exec) {
+        c.booked = true;
+    }
+}
+
+/// C7: where a body on a climb is (its building, the tile it stands on and
+/// its storey as a fraction): a Full body's `ExecState::Climb`, a Coarse
+/// timed leg's climb down (before its walk) or up (after it). `None`: on no
+/// climb now.
+pub fn climb_place(world: &World, id: EntityId) -> Option<(TilePos, EntityId, f32)> {
+    use crate::systems::levels::storey_at;
+    let b = world.comp::<Brain>(id)?;
+    let tick = world.tick;
+    match &b.exec {
+        ExecState::Climb { from, to, depart, board, arrive_tick, .. } => {
+            let p = world.comp::<Position>(id)?;
+            Some((p.tile, p.building?, storey_at(*from, *to, *depart, *board, *arrive_tick, tick)))
+        }
+        ExecState::GotoTimed { target, arrive_tick, climb: Some(c), .. } => {
+            if let Some(d) = c.down {
+                let end = c.depart + d.plan.ticks;
+                if tick < end {
+                    let p = world.comp::<Position>(id)?;
+                    let f = storey_at(d.from, d.to, c.depart, c.depart + d.plan.wait, end, tick);
+                    return Some((p.tile, d.building, f));
+                }
+            }
+            let u = c.up?;
+            let start = arrive_tick.saturating_sub(u.plan.ticks);
+            if tick < start || tick >= *arrive_tick {
+                return None;
+            }
+            let f = storey_at(u.from, u.to, start, start + u.plan.wait, *arrive_tick, tick);
+            Some((target.tile, u.building, f))
+        }
+        _ => None,
+    }
 }
 
 /// `[motion.walks]` on (the island pass phase 9).
@@ -1496,13 +1762,18 @@ pub fn walks_on(world: &World) -> bool {
 /// `(id, depart)`, as it is fixed for the walk.
 pub fn walk_route(world: &World, id: EntityId) -> Option<(Vec<TilePos>, Tick, Tick)> {
     let b = world.comp::<Brain>(id)?;
-    let ExecState::GotoTimed { target, arrive_tick, walk: Some(w), .. } = &b.exec else { return None };
+    let ExecState::GotoTimed { target, arrive_tick, walk: Some(w), climb, .. } = &b.exec else { return None };
     if crate::systems::motion::vehicle_of(world, id).is_some() {
         return None;
     }
     let road = world.config.motion.as_ref().and_then(|m| m.walks.as_ref()).is_some_and(|w| w.road_route);
     let way = crate::systems::motion::walk_way(world, w.from, target.tile, road);
-    Some((way, w.depart, *arrive_tick))
+    // C7: the walk between the climbs.
+    let (depart, arrive) = match climb {
+        Some(c) => (w.depart + c.down_ticks(), arrive_tick.saturating_sub(c.up_ticks())),
+        None => (w.depart, *arrive_tick),
+    };
+    Some((way, depart, arrive.max(depart)))
 }
 
 /// The island pass phase 9 (OPEN-181): where a body is now, for the view
@@ -1512,6 +1783,10 @@ pub fn walk_route(world: &World, id: EntityId) -> Option<(Vec<TilePos>, Tick, Ti
 /// walk's start until he arrives (or a promotion or an interrupt sets him
 /// down on his way, `settle_walk`): nothing is moved per tick.
 pub fn walk_place(world: &World, id: EntityId) -> Option<Position> {
+    // C7: on a climb, at the door of the building climbed, on the storey reached.
+    if let Some((tile, b, f)) = climb_place(world, id) {
+        return Some(Position { tile, building: Some(b), entered: world.tick, floor: f.round() as u8 });
+    }
     if let Some((way, depart, arrive)) = walk_route(world, id) {
         let tile = crate::systems::motion::timed_pos(&way, depart, arrive, world.tick);
         return Some(Position { tile, building: None, entered: depart, floor: 0 });
@@ -1528,6 +1803,12 @@ pub fn settle_walk(world: &mut World, id: EntityId) {
     let Some(b) = world.comp::<Brain>(id) else { return };
     let ExecState::GotoTimed { walk: Some(w), arrive_tick, .. } = &b.exec else { return };
     if world.tick <= w.depart || world.tick >= *arrive_tick || b.cuffed_by.is_some() {
+        return;
+    }
+    // C7: still on the climb down, he is still in the building he left.
+    if climb_place(world, id)
+        .is_some_and(|(_, bd, _)| world.comp::<Position>(id).is_some_and(|p| p.building == Some(bd)))
+    {
         return;
     }
     let Some((way, depart, arrive)) = walk_route(world, id) else { return };
@@ -1632,20 +1913,21 @@ pub fn walking_goto(world: &World, id: EntityId, target: GotoTarget) -> Option<E
     }
     // Scale S3a: on a big map a building's path is found on the first step
     // (`advance_goto`, from outside the building being left).
-    let path = if target.building.is_some() {
-        Vec::new()
+    let (path, levels) = if target.building.is_some() {
+        (Vec::new(), Vec::new())
     } else if world.big_paths() {
         let from = walk_origin(world, id)?;
-        let mut p = world.big_path(from, target.tile)?;
+        let (mut p, mut l) = world.big_route(from, street_level(world, id), target.tile, on_foot(world, id))?;
         p.reverse();
-        p
+        l.reverse();
+        (p, l)
     } else {
         let from = walk_origin(world, id)?;
         let mut p = pathfind::astar(&world.map, from, target.tile, world.config.exec.astar_max_expansions)?;
         p.reverse();
-        p
+        (p, Vec::new())
     };
-    Some(ExecState::Goto { target, path, next_move_tick: world.tick, blocked_since: None, carry_q: 0 })
+    Some(ExecState::Goto { target, path, next_move_tick: world.tick, blocked_since: None, carry_q: 0, levels })
 }
 
 /// One tick of Full-LOD movement. M13 D19, round 9 Y4: steps are counted
@@ -1663,11 +1945,13 @@ pub fn walking_goto(world: &World, id: EntityId, target: GotoTarget) -> Option<E
 /// (the arrival is the next call's). Stepping out of a building costs one
 /// step and the walk goes on in the same tick. At the pace before Y4 (one
 /// tile a tick, `step_res` 4) this is the M12/M13 arithmetic exactly.
+#[allow(clippy::too_many_arguments)]
 fn advance_goto(
     world: &mut World,
     id: EntityId,
     target: GotoTarget,
     mut path: Vec<TilePos>,
+    mut levels: Vec<u8>,
     next_move_tick: Tick,
     blocked_since: Option<Tick>,
     carry_q: u32,
@@ -1686,13 +1970,20 @@ fn advance_goto(
         if Some(here) == target.building {
             return StepResult::Done;
         }
+        // The city milestone C7: down to the door first, or straight to the
+        // target's storey inside the same structure.
+        if let Some(r) = climb_out(world, id, &target, here, pos.floor, &path, &levels) {
+            return r;
+        }
         world.leave_building(id);
         next_q += world.config.exec.step_units();
         if next_q >= end_q {
-            return set_goto(world, id, target, path, next_q / upt, None, (next_q % upt) as u32);
+            return set_goto(world, id, target, path, levels, next_q / upt, None, (next_q % upt) as u32);
         }
     }
-    let Some(mut here) = world.comp::<Position>(id).map(|p| p.tile) else {
+    let Some((mut here, mut lvl)) =
+        world.comp::<Position>(id).map(|p| (p.tile, if p.building.is_some() { 0 } else { p.floor }))
+    else {
         return StepResult::Failed(FailReason::NoSuchPlace);
     };
 
@@ -1701,76 +1992,246 @@ fn advance_goto(
     // A walker's step is the same on every tile (its `Kit.walk_mult`); a
     // driver's reads the tile's column.
     let walk_q = (!driving).then(|| crate::systems::vehicles::step_q(world, id, here));
-    let big = target.building.is_some() && world.big_paths();
+    let big_map = world.big_paths();
+    let big = target.building.is_some() && big_map;
     let mut steps = 0u32;
     loop {
-        let next = match target.building {
+        let (next, nl) = match target.building {
             Some(b) => {
                 let door = world.comp::<Building>(b).map(|bd| bd.door);
-                if door == Some(here) {
+                if door == Some(here) && lvl == 0 {
                     if steps == 0 {
-                        return try_enter(world, id, target, path, blocked_since);
+                        return try_enter(world, id, target, path, levels, blocked_since);
                     }
                     break;
                 }
                 let step = match (big, door) {
-                    (false, _) => world.flow_step(b, here),
+                    (false, _) => world.flow_step(b, here).map(|n| (n, 0)),
                     (true, None) => None,
-                    (true, Some(d)) => big_step(world, &mut path, here, d),
+                    (true, Some(d)) => big_step(world, id, &mut path, &mut levels, (here, lvl), d, true),
                 };
                 match step {
-                    Some(n) if door == Some(n) => {
+                    Some((n, 0)) if door == Some(n) => {
                         if steps == 0 {
-                            return try_enter(world, id, target, path, blocked_since);
+                            return try_enter(world, id, target, path, levels, blocked_since);
                         }
                         break;
                     }
-                    Some(n) => n,
+                    Some(s) => s,
                     // The field never reached this tile: there is no way there.
                     None if steps == 0 => return StepResult::Failed(FailReason::NoSuchPlace),
                     None => break,
                 }
             }
-            None => match path.pop() {
-                Some(n) => n,
-                None if steps == 0 && here == target.tile => return StepResult::Done,
-                None if steps == 0 => return StepResult::Failed(FailReason::NoSuchPlace),
-                None => break,
-            },
+            None => {
+                // C7: a walk over the walkways re-checks its next hop.
+                let s = if big_map && (!levels.is_empty() || lvl > 0) {
+                    big_step(world, id, &mut path, &mut levels, (here, lvl), target.tile, false)
+                } else {
+                    path.pop().map(|n| (n, 0))
+                };
+                match s {
+                    Some(n) => n,
+                    None if steps == 0 && here == target.tile => return StepResult::Done,
+                    None if steps == 0 => return StepResult::Failed(FailReason::NoSuchPlace),
+                    None => break,
+                }
+            }
         };
+        // C7: a step onto or along a deck, or a jump across one, is a portal's hop.
+        let hop =
+            if nl != lvl || next.manhattan(here) != 1 { world.portal_edge((here, lvl), (next, nl)) } else { None };
         move_to(world, id, next);
+        if let Some(p) = world.comp_mut::<Position>(id) {
+            p.floor = nl;
+        }
+        if let Some(e) = &hop {
+            note_hop(world, e, lvl, nl);
+        }
         here = next;
+        lvl = nl;
         steps += 1;
         if driving {
             crate::systems::vehicles::note_step(world, id, next);
         }
         let q = walk_q.unwrap_or_else(|| crate::systems::vehicles::step_q(world, id, next));
-        next_q += u64::from(q) + litter_delay(world, next);
+        next_q += match &hop {
+            Some(e) => u64::from(q) * u64::from(e.steps.max(1)),
+            None => u64::from(q) + litter_delay(world, next),
+        };
         if next_q >= end_q || steps >= max_steps || (target.building.is_none() && path.is_empty()) {
             break;
         }
     }
     let carry = (next_q % upt) as u32;
-    set_goto(world, id, target, path, next_q / upt, None, carry)
+    set_goto(world, id, target, path, levels, next_q / upt, None, carry)
 }
 
-/// Scale S3a: the next tile toward `door` on a big map, off the walk's own
-/// path (reversed, the door its first element: the door stays on it until
-/// `try_enter` lets the walker in). The path is found here when the walk
-/// has none, or when its next tile is no longer a step away or no longer
-/// walkable (a wall went up, rubble fell, the body was moved).
-fn big_step(world: &World, path: &mut Vec<TilePos>, here: TilePos, door: TilePos) -> Option<TilePos> {
-    let usable = path.last().is_some_and(|&n| n.manhattan(here) == 1 && world.map.walkable(n));
+/// C7: count a walker's portal hop (the day's crossings).
+fn note_hop(world: &mut World, e: &bigpath::Edge, from_level: u8, to_level: u8) {
+    use crate::map::PortalKind as K;
+    let kind = world.flow_fields.portals().kind(e);
+    let row = crate::systems::ownership::jobs2_row(world);
+    match kind {
+        Some(k) if k.footbridge() => row.hops_footbridge += 1,
+        Some(K::Escalator) => row.hops_escalator += 1,
+        Some(_) => row.hops_stairs += 1,
+        None => {}
+    }
+    if from_level == 0 && to_level > 0 {
+        row.deck_entries += 1;
+    }
+}
+
+/// Scale S3a: the next step toward `goal` on a big map, off the walk's own
+/// path (reversed, the door its first element when `keep_goal`: the door
+/// stays on it until `try_enter` lets the walker in). The path is found
+/// here when the walk has none, or when its next step is no longer a step
+/// away or no longer walkable (a wall went up, rubble fell, the body was
+/// moved), or (C7) no longer a portal's hop that runs now (the escalator
+/// turned). C7: each step carries its level (`levels`, reversed alike;
+/// empty on the ground).
+fn big_step(
+    world: &World,
+    id: EntityId,
+    path: &mut Vec<TilePos>,
+    levels: &mut Vec<u8>,
+    here: (TilePos, u8),
+    goal: TilePos,
+    keep_goal: bool,
+) -> Option<(TilePos, u8)> {
+    let next_level = |levels: &Vec<u8>| levels.last().copied().unwrap_or(0);
+    let usable = path.last().is_some_and(|&n| {
+        let nl = next_level(levels);
+        if nl == 0 && here.1 == 0 && n.manhattan(here.0) == 1 {
+            world.map.walkable(n)
+        } else {
+            world.portal_edge(here, (n, nl)).is_some()
+        }
+    });
     if !usable {
-        let mut p = world.big_path(here, door)?;
+        let (mut p, mut l) = world.big_route(here.0, here.1, goal, on_foot(world, id))?;
         p.reverse();
+        l.reverse();
         *path = p;
+        *levels = l;
     }
     let n = *path.last()?;
-    if n != door {
+    let nl = next_level(levels);
+    if !(keep_goal && n == goal && nl == 0) {
         path.pop();
+        levels.pop();
     }
-    Some(n)
+    Some((n, nl))
+}
+
+/// C7: a Full body leaving `here` from storey `floor`: inside the same
+/// structure (a span on either, the target not full) it moves to the
+/// target's storey by one climb (or at once on the same storey) and the GoTo
+/// is done at its end; else from a storey above the ground it climbs down to
+/// the door first (`ExecState::Climb` with `out`, the walk on after it).
+/// `None`: walk out now.
+fn climb_out(
+    world: &mut World,
+    id: EntityId,
+    target: &GotoTarget,
+    here: EntityId,
+    floor: u8,
+    path: &[TilePos],
+    levels: &[u8],
+) -> Option<StepResult> {
+    use crate::systems::levels;
+    if !levels::on(world) {
+        return None;
+    }
+    let tick = world.tick;
+    let core = levels::core_of(world, here);
+    if let Some(t) = target.building {
+        let spans = [here, t].iter().any(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.span.is_some()));
+        let full = world.comp::<Building>(t).is_some_and(|bd| bd.is_full()) && !world.capacity_exempt(id, t);
+        if spans && !full && levels::core_of(world, t) == core {
+            world.leave_building(id);
+            world.enter_building(id, t);
+            let to = world.comp::<Position>(id).map_or(0, |p| p.floor);
+            let Some(p) = levels::climb(world, core, floor, to) else { return Some(StepResult::Done) };
+            if let Some(pos) = world.comp_mut::<Position>(id) {
+                pos.floor = floor;
+            }
+            let state = ExecState::Climb {
+                target: target.clone(),
+                core,
+                from: floor,
+                to,
+                depart: tick,
+                board: tick + p.wait,
+                arrive_tick: tick + p.ticks,
+                lift: p.lift,
+                out: false,
+                path: Vec::new(),
+                levels: Vec::new(),
+            };
+            if let Some(b) = world.comp_mut::<Brain>(id) {
+                b.exec = state;
+            }
+            return Some(StepResult::Running);
+        }
+    }
+    if floor == 0 {
+        return None;
+    }
+    let p = levels::climb(world, core, floor, 0)?;
+    let state = ExecState::Climb {
+        target: target.clone(),
+        core,
+        from: floor,
+        to: 0,
+        depart: tick,
+        board: tick + p.wait,
+        arrive_tick: tick + p.ticks,
+        lift: p.lift,
+        out: true,
+        path: path.to_vec(),
+        levels: levels.to_vec(),
+    };
+    if let Some(b) = world.comp_mut::<Brain>(id) {
+        b.exec = state;
+    }
+    Some(StepResult::Running)
+}
+
+/// C7: a Full body just in `b` at its door: up to the storey it entered on
+/// (`Position.floor`, set by `enter_building`) by a climb (`ExecState::Climb`,
+/// the GoTo done at its end), standing in the lobby on the ground until then.
+/// `Done` at once on the ground (or with `[levels]` off).
+fn climb_in(world: &mut World, id: EntityId, target: &GotoTarget, b: EntityId) -> StepResult {
+    use crate::systems::levels;
+    let floor = world.comp::<Position>(id).map_or(0, |p| p.floor);
+    if floor == 0 || !levels::on(world) {
+        return StepResult::Done;
+    }
+    let core = levels::core_of(world, b);
+    let Some(p) = levels::climb(world, core, 0, floor) else { return StepResult::Done };
+    let tick = world.tick;
+    if let Some(pos) = world.comp_mut::<Position>(id) {
+        pos.floor = 0;
+    }
+    let state = ExecState::Climb {
+        target: target.clone(),
+        core,
+        from: 0,
+        to: floor,
+        depart: tick,
+        board: tick + p.wait,
+        arrive_tick: tick + p.ticks,
+        lift: p.lift,
+        out: false,
+        path: Vec::new(),
+        levels: Vec::new(),
+    };
+    if let Some(br) = world.comp_mut::<Brain>(id) {
+        br.exec = state;
+    }
+    StepResult::Running
 }
 
 fn move_to(world: &mut World, id: EntityId, tile: TilePos) {
@@ -1785,6 +2246,7 @@ fn try_enter(
     id: EntityId,
     target: GotoTarget,
     path: Vec<TilePos>,
+    levels: Vec<u8>,
     blocked_since: Option<Tick>,
 ) -> StepResult {
     let tick = world.tick;
@@ -1804,12 +2266,12 @@ fn try_enter(
         world.config.exec.staff_door && world.comp::<crate::components::Job>(id).is_some_and(|j| j.employer == Some(b));
     if staff && !full {
         world.enter_building(id, b);
-        return StepResult::Done;
+        return climb_in(world, id, &target, b);
     }
     if slots < cap && !full {
         *world.door_queue.entry(door).or_insert(0) += 1;
         world.enter_building(id, b);
-        return StepResult::Done;
+        return climb_in(world, id, &target, b);
     }
     // Pressure pass round 9, Z1: a hunter (or a contract's taker) at a full
     // ask venue or stake-out waits at its door (`hunt::can_start` reads the
@@ -1826,7 +2288,7 @@ fn try_enter(
         }
         return StepResult::Failed(FailReason::Timeout);
     }
-    set_goto(world, id, target, path, tick + 1, Some(since), 0)
+    set_goto(world, id, target, path, levels, tick + 1, Some(since), 0)
 }
 
 /// Workplace room: remember the full building that refused `id` (`[exec]
@@ -1841,17 +2303,19 @@ fn note_refused(world: &mut World, id: EntityId, b: EntityId) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn set_goto(
     world: &mut World,
     id: EntityId,
     target: GotoTarget,
     path: Vec<TilePos>,
+    levels: Vec<u8>,
     next_move_tick: Tick,
     blocked_since: Option<Tick>,
     carry_q: u32,
 ) -> StepResult {
     if let Some(brain) = world.comp_mut::<Brain>(id) {
-        brain.exec = ExecState::Goto { target, path, next_move_tick, blocked_since, carry_q };
+        brain.exec = ExecState::Goto { target, path, next_move_tick, blocked_since, carry_q, levels };
     }
     StepResult::Running
 }
@@ -1911,8 +2375,13 @@ fn arrive(world: &mut World, id: EntityId, target: GotoTarget, blocked_since: Op
                     return StepResult::Failed(FailReason::BuildingFull);
                 }
                 if let Some(brain) = world.comp_mut::<Brain>(id) {
-                    brain.exec =
-                        ExecState::GotoTimed { target, arrive_tick: tick + 1, blocked_since: Some(since), walk: None };
+                    brain.exec = ExecState::GotoTimed {
+                        target,
+                        arrive_tick: tick + 1,
+                        blocked_since: Some(since),
+                        walk: None,
+                        climb: None,
+                    };
                 }
                 return StepResult::Running;
             }
@@ -2236,9 +2705,35 @@ impl World {
     /// Scale S3a: the shortest path from `from` (exclusive) to `to`
     /// (inclusive), forward, or `None` with no way there.
     pub fn big_path(&self, from: TilePos, to: TilePos) -> Option<Vec<TilePos>> {
+        self.big_route(from, 0, to, true).map(|(p, _)| p)
+    }
+
+    /// The city milestone C7: [`World::big_path`] from `from` at `level` (a
+    /// walkway's deck above 0), over the walkway portals when on `foot` (the
+    /// escalator's direction at this tick), with each step's level (empty:
+    /// every step on the ground).
+    pub fn big_route(&self, from: TilePos, level: u8, to: TilePos, foot: bool) -> Option<(Vec<TilePos>, Vec<u8>)> {
         let labels = self.flow_fields.labels(&self.map);
         let marks = self.flow_fields.landmarks(&self.map);
-        crate::prof::timed!("exec::big_path", bigpath::find(&self.map, &labels, &marks, from, to))
+        let portals = self.flow_fields.portals();
+        let none = bigpath::Portals::none();
+        let p = if foot { &*portals } else { &none };
+        let minute = (self.tick % crate::time::TICKS_PER_DAY) as u32;
+        crate::prof::timed!(
+            "exec::big_path",
+            bigpath::find_with(&self.map, &labels, &marks, p, from, level, to, minute)
+        )
+    }
+
+    /// C7: the walkway portal's edge a walker hops from `from` to `to` (tile
+    /// and level each) that runs at this tick, if any.
+    pub fn portal_edge(&self, from: (TilePos, u8), to: (TilePos, u8)) -> Option<bigpath::Edge> {
+        let portals = self.flow_fields.portals();
+        if portals.is_empty() {
+            return None;
+        }
+        let minute = (self.tick % crate::time::TICKS_PER_DAY) as u32;
+        portals.edge(&self.map, from, to, minute).copied()
     }
 
     /// Next tile toward building `b` from `from`.
