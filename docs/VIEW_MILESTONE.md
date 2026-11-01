@@ -61,6 +61,8 @@ class, a stable pick from the rounds by entity id), the walk and idle clips from
 (skinned near the subject, a static pose or impostor past a distance) for ~2,000 bodies in the ring. Bodies indoors
 are not drawn on facades (check what the floating capsules are: indoor bodies at their floor's z, or a z bug).
 **Camera:** the 08:00 street and an evening venue, before and after.
+Dylan 2026-11-01: agents use TheCityGraphics' branches as needed and bring the parts the client needs into this repo
+(`view/`) where they fit; the bulk assets stay behind `CITYVIEW_ASSETS`.
 
 ### V4, riders and climbs (`OPEN-271` the rest)
 

@@ -58,6 +58,7 @@ Rewritten 2026-10-26 (Dylan: "I would rather move fast and break things than spe
 - **Nothing in camera range is Statistical** (2026-10-20): Statistical LOD exists only off camera; everyone the camera (later the player) can see is Full (`OPEN-149`).
 - **The player never starts on day 0** (2026-10-20): the world is pre-run or, preferred, built from a starting-condition seed that prepopulates it, for control over the city you get (`OPEN-150`).
 - **TheCityGraphics' Bevy client joins this workspace as the city milestone's first phase** (Dylan 2026-10-30, roadmap addendum 22; was "at the view milestone", 2026-10-20): outside `default-members` with its own test tier, and agents here may write TheCityGraphics on its own branches; and the Python/Blender pipeline and the assets stay there, read as a generated-assets path (no LFS, ~1.1 GB of PNGs, Bevy's build would break the change tier).
+- **Agents use TheCityGraphics freely and bring parts of it into this repo where they fit** (Dylan 2026-11-01, the view milestone): its own branches as needed; code or small data the client needs (character loading, export glue, specs) may move here into `view/`. The bulk assets stay there behind `CITYVIEW_ASSETS` (the size reason above holds).
 
 ## Agent rules (orchestrated work)
 
