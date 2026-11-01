@@ -337,7 +337,7 @@ struct Scratch {
     /// parent in `hop`); 0 at the start.
     from: Vec<u8>,
     /// C7: a node reached by a portal -> its parent.
-    hop: std::collections::HashMap<u32, u32>,
+    hop: std::collections::BTreeMap<u32, u32>,
     query: u32,
     /// `(Reverse(f), g, Reverse(index))`: the lowest `f`, then the deepest,
     /// then the lowest index.
@@ -663,9 +663,9 @@ pub struct Edge {
 pub struct Portals {
     /// Deck node `k` (node `w × h + k`): its tile and level.
     pub nodes: Vec<(TilePos, u8)>,
-    node_of: std::collections::HashMap<(TilePos, u8), u32>,
+    node_of: std::collections::BTreeMap<(TilePos, u8), u32>,
     /// Node -> its edges' range in `edges`.
-    at: std::collections::HashMap<u32, (u32, u32)>,
+    at: std::collections::BTreeMap<u32, (u32, u32)>,
     edges: Vec<Edge>,
     /// One bit a node: has it a portal?
     bits: Vec<u64>,
@@ -712,7 +712,7 @@ impl Portals {
                 continue;
             }
             let steps = steps(mp).max(1);
-            let m = u32::from(mp.a.0.manhattan(mp.b.0));
+            let m = mp.a.0.manhattan(mp.b.0);
             let cost =
                 if mp.kind == PortalKind::Escalator { steps * MIN_STEP } else { (steps * MIN_STEP).max(m * MIN_STEP) };
             p.saving += (m * MIN_STEP).saturating_sub(cost);

@@ -678,7 +678,7 @@ fn agent_colour(world: &World, id: citysim::EntityId) -> Color {
     let Some(brain) = world.comp::<Brain>(id) else { return hex(C_AGENT_IDLE) };
     let kind = match &brain.exec {
         E::Use { kind, .. } => *kind,
-        E::Goto { .. } | E::GotoTimed { .. } | E::Fly { .. } | E::Ride { .. } => {
+        E::Goto { .. } | E::GotoTimed { .. } | E::Fly { .. } | E::Ride { .. } | E::Climb { .. } => {
             match brain.current_step().map(|s| s.action) {
                 // en route: colour by the step after the walk, so a guard heading to an arrest reads as guarding
                 Some(_) => brain

@@ -955,6 +955,10 @@ struct Track {
     open: Option<OpenAction>,
     last_place: String,
     last_building: Option<EntityId>,
+    /// The city milestone C7: the last climb logged (its key) and the deck
+    /// level the body last stood on in the street.
+    last_climb: Option<u64>,
+    last_deck: u8,
     cooldowns: BTreeMap<GoalKind, Tick>,
     wallet: Option<i64>,
     inv: Option<(u32, u32, u16, u16)>,
@@ -1322,6 +1326,8 @@ impl Track {
             open: None,
             last_place: String::new(),
             last_building: None,
+            last_climb: None,
+            last_deck: 0,
             cooldowns: BTreeMap::new(),
             wallet: None,
             tally: None,
@@ -2263,6 +2269,32 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
         t.last_place = here.clone();
     }
     t.last_building = bld;
+    // The city milestone C7: a climb (a Full body's at the door, a Coarse
+    // leg's), once; a step onto the walkways' decks.
+    if let Some((key, line)) = climb_line(world, id) {
+        if t.last_climb != Some(key) {
+            t.last_climb = Some(key);
+            t.log(now, "climb", line);
+        }
+    }
+    let deck = world.comp::<Position>(id).filter(|p| p.building.is_none()).map_or(0, |p| p.floor);
+    if deck != t.last_deck {
+        if let Some(p) = world.comp::<Position>(id).filter(|_| deck > 0) {
+            let kind = world.map.portals.iter().find(|q| q.a == (p.tile, deck) || q.b == (p.tile, deck)).map_or(
+                "a deck",
+                |q| match q.kind {
+                    citysim::map::PortalKind::Escalator => "the escalator",
+                    citysim::map::PortalKind::Platform => "a station platform",
+                    _ => "a footbridge",
+                },
+            );
+            t.log(now, "deck", format!("DECK on {kind} at ({}, {}), level {deck}", p.tile.x, p.tile.y));
+        } else if t.last_deck > 0 {
+            let p = world.comp::<Position>(id).map(|p| p.tile).unwrap_or_default();
+            t.log(now, "deck", format!("DECK off the walkways at ({}, {}) (from level {})", p.x, p.y, t.last_deck));
+        }
+        t.last_deck = deck;
+    }
     let act = activity(world, id);
     *t.day_use.entry(act).or_insert(0) += 1;
     *t.total_use.entry(act).or_insert(0) += 1;
@@ -3524,6 +3556,55 @@ fn cam_place(world: &World, id: EntityId, act: &str) -> usize {
         CAM_WORK
     } else {
         CAM_BUILDING
+    }
+}
+
+/// The city milestone C7: the diary's line for the climb `id` is on (a Full
+/// body's `ExecState::Climb`, a Coarse timed leg's climbs) and its key (the
+/// climb's start), `None` off one.
+fn climb_line(world: &World, id: EntityId) -> Option<(u64, String)> {
+    use citysim::exec::ClimbLeg;
+    let b = world.comp::<Brain>(id)?;
+    let way = |lift: bool| if lift { "the lift" } else { "the stairs" };
+    let leg = |c: &ClimbLeg| {
+        let dir = if c.to > c.from { "up" } else { "down" };
+        let wait = if c.plan.lift { format!(", {} min for the car", c.plan.wait) } else { String::new() };
+        format!(
+            "{dir} by {} in {}: floor {} to {}{wait}, {} min",
+            way(c.plan.lift),
+            place_of_building(world, c.core),
+            c.from,
+            c.to,
+            c.plan.ticks
+        )
+    };
+    match &b.exec {
+        ExecState::Climb { core, from, to, depart, board, arrive_tick, lift, .. } => {
+            let dir = if to > from { "up" } else { "down" };
+            let q = citysim::systems::levels::queue(world, *core, *depart);
+            let wait = if *lift {
+                format!(
+                    ", {} min waiting in the lobby ({q:.0} called the car, this call too)",
+                    board.saturating_sub(*depart)
+                )
+            } else {
+                String::new()
+            };
+            Some((
+                *depart * 2,
+                format!(
+                    "CLIMB {dir} by {} in {}: floor {from} to {to}{wait}, {} min in all",
+                    way(*lift),
+                    place_of_building(world, *core),
+                    arrive_tick.saturating_sub(*depart)
+                ),
+            ))
+        }
+        ExecState::GotoTimed { climb: Some(c), .. } => {
+            let parts: Vec<String> = c.down.iter().chain(c.up.iter()).map(leg).collect();
+            Some((c.depart * 2 + 1, format!("CLIMB (timed leg) {}", parts.join("; then "))))
+        }
+        _ => None,
     }
 }
 

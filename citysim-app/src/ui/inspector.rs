@@ -833,6 +833,11 @@ fn plan(ui: &mut Ui, world: &World, b: &Brain) {
             }
             ExecState::Use { kind, until, .. } => format!("Use {kind:?} {} left", until.saturating_sub(world.tick)),
             ExecState::Wait { until } => format!("Wait {}", until.saturating_sub(world.tick)),
+            ExecState::Climb { from, to, lift, arrive_tick, .. } => format!(
+                "Climbing by the {} from floor {from} to {to}, {} left",
+                if *lift { "lift" } else { "stairs" },
+                arrive_tick.saturating_sub(world.tick)
+            ),
             ExecState::JackedIn { run, since } => {
                 format!("Jacked in (run {run}) for {} ticks", world.tick.saturating_sub(*since))
             }
