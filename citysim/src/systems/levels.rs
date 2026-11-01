@@ -23,8 +23,9 @@
 //!   ahead of it, so the evening rush in a 40-storey tower waits, and once
 //!   the stairs are quicker the crowd takes them. A call is booked at the
 //!   tick it is made (a Coarse body's at its walk's start, for the tick it
-//!   reaches the lobby). **C8's hooks:** `LiftState.cut` (no car runs: the
-//!   stairs) and `held_by` (a gang holding the lobby; nothing reads it yet).
+//!   reaches the lobby). **C8** (`systems::vertical`): `LiftState.cut` (no
+//!   car runs: the stairs, until `cut_until`) and `held_by` (a gang holding
+//!   the lobby: its members ride first, anyone else waits more).
 //! - **Statistical mirror:** none (a Statistical agent does not walk or
 //!   climb; promoted, he stands on his floor, `floors::floor_in`).
 
@@ -53,9 +54,14 @@ pub struct LiftState {
     /// no car runs, every climb takes the stairs.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cut: bool,
-    /// C8's hook: the gang holding the lobby (nothing reads it yet).
+    /// C8: the gang holding the lobby (`vertical::lift_holds`): its members
+    /// ride first, anyone else waits `[vertical] held_wait_ticks` more.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub held_by: Option<EntityId>,
+    /// C8: the cut runs until this tick (`vertical::cut_lift`), then the cars
+    /// run again; `None` with `cut`: until someone mends it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cut_until: Option<Tick>,
 }
 
 /// A climb planned: its ticks in all, the lift's wait among them (0 by the
@@ -110,9 +116,24 @@ pub fn queue(world: &World, core: EntityId, at: Tick) -> f64 {
     world.lifts.get(&core).map_or(0.0, |s| queue_at(&s.calls, at, rate))
 }
 
-/// The climb from storey `from` to `to` inside `core` for a call at `at`
-/// (pure: nothing booked). `None`: no climb (the same storey, `[levels]` off).
-pub fn plan(world: &World, core: EntityId, from: u8, to: u8, at: Tick) -> Option<ClimbPlan> {
+/// The climb from storey `from` to `to` by the stairs (C8: the raid's column
+/// past the lift's choke). `None`: no climb.
+pub fn stairs(world: &World, from: u8, to: u8) -> Option<ClimbPlan> {
+    let c = world.config.levels.as_ref()?;
+    if from == to {
+        return None;
+    }
+    let rate = f64::from(c.stair_ticks_per_floor) * if to > from { 1.0 } else { f64::from(c.stair_down_mult) };
+    let t = f64::from(from.abs_diff(to)) * rate;
+    Some(ClimbPlan { ticks: (t.ceil() as Tick).max(1), wait: 0, lift: false })
+}
+
+/// The climb from storey `from` to `to` inside `core` for a call at `at` by
+/// `who` (pure: nothing booked). `None`: no climb (the same storey,
+/// `[levels]` off). C8: a lift a gang holds (`LiftState.held_by`) lets its
+/// members ride first and makes anyone else wait `[vertical]
+/// held_wait_ticks` more (`vertical::held_wait`).
+pub fn plan(world: &World, core: EntityId, from: u8, to: u8, at: Tick, who: Option<EntityId>) -> Option<ClimbPlan> {
     let c = world.config.levels.as_ref()?;
     if from == to {
         return None;
@@ -136,8 +157,11 @@ pub fn plan(world: &World, core: EntityId, from: u8, to: u8, at: Tick) -> Option
     let cyc = cycle(c, top);
     let cap = f64::from(c.lift_capacity.max(1));
     let rate = f64::from(cars.max(1)) * cap / cyc;
-    let ahead = world.lifts.get(&core).map_or(0.0, |s| queue_at(&s.calls, at, rate));
-    let wait = f64::from(c.lift_wait_ticks) + (ahead / cap).floor() * cyc / f64::from(cars.max(1));
+    let held = crate::systems::vertical::held_wait(world, core, who);
+    let ahead =
+        if held == Some(0.0) { 0.0 } else { world.lifts.get(&core).map_or(0.0, |s| queue_at(&s.calls, at, rate)) };
+    let wait =
+        f64::from(c.lift_wait_ticks) + (ahead / cap).floor() * cyc / f64::from(cars.max(1)) + held.unwrap_or(0.0);
     let ride = lifted * f64::from(c.lift_ticks_per_floor) + (floors - lifted) * stair_rate;
     if wait + ride >= stairs {
         return Some(by_stairs);
@@ -179,10 +203,10 @@ pub fn book(world: &mut World, core: EntityId, p: ClimbPlan, to: u8, at: Tick) {
 /// A storey from which a climb counts as a high floor's (the report's).
 pub const HIGH_FLOOR: u8 = 20;
 
-/// `plan` then `book` at the world's tick.
-pub fn climb(world: &mut World, core: EntityId, from: u8, to: u8) -> Option<ClimbPlan> {
+/// `plan` then `book` at the world's tick, for `who`.
+pub fn climb(world: &mut World, core: EntityId, from: u8, to: u8, who: EntityId) -> Option<ClimbPlan> {
     let at = world.tick;
-    let p = plan(world, core, from, to, at)?;
+    let p = plan(world, core, from, to, at, Some(who))?;
     book(world, core, p, to, at);
     Some(p)
 }

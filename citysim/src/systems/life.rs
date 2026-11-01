@@ -148,7 +148,8 @@ pub fn hideout_bed(world: &World, id: EntityId) -> Option<EntityId> {
     if g.is_sacked(world.tick) {
         return None;
     }
-    let h = g.hideout;
+    // The city milestone C8: his own Hideout (the nearest of the gang's to his Home).
+    let h = crate::systems::vertical::own_hideout(world, id)?;
     let b = world.comp::<Building>(h)?;
     if b.is_full() && !b.occupants.contains(&id) {
         return None;

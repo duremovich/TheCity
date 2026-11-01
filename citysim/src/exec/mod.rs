@@ -709,12 +709,12 @@ fn abort_detail(world: &World, id: EntityId, step: &crate::components::ActionIns
     }
     let here = world.comp::<Position>(id).and_then(|p| p.building);
     let home = world.comp::<Household>(id).and_then(|h| h.home);
-    let hideout = world.gang_of(id).and_then(|g| world.hideout_of(g));
+    let gang = world.gang_of(id);
     let squat = world.comp::<crate::components::Squatter>(id).map(|s| s.building);
     let bed = match here {
         None => "street".to_string(),
         Some(b) if Some(b) == home => "Home".to_string(),
-        Some(b) if Some(b) == hideout => "Hideout".to_string(),
+        Some(b) if gang.is_some_and(|g| crate::systems::vertical::is_hideout_of(world, g, b)) => "Hideout".to_string(),
         Some(b) if street::is_hotel(world, b) => "Hotel".to_string(),
         Some(b) if Some(b) == squat => "Squat".to_string(),
         Some(b) => world.comp::<Building>(b).map_or("gone".to_string(), |bd| format!("{:?}", bd.kind)),
@@ -1668,14 +1668,14 @@ fn timed_climbs(world: &World, id: EntityId, target: &GotoTarget, walk_ticks: Ti
         let spans = [h, t].iter().any(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.span.is_some()));
         if spans && levels::core_of(world, t) == core {
             let to = crate::systems::floors::floor_in(world, id, t);
-            let plan = levels::plan(world, core, p.floor, to, tick)?;
+            let plan = levels::plan(world, core, p.floor, to, tick, Some(id))?;
             let up = ClimbLeg { core, building: t, from: p.floor, to, plan };
             return Some(TimedClimb { down: None, up: Some(up), booked: false, depart: tick, inside: true });
         }
     }
     let down = p.building.filter(|_| p.floor > 0).and_then(|h| {
         let core = levels::core_of(world, h);
-        levels::plan(world, core, p.floor, 0, tick).map(|plan| ClimbLeg {
+        levels::plan(world, core, p.floor, 0, tick, Some(id)).map(|plan| ClimbLeg {
             core,
             building: h,
             from: p.floor,
@@ -1690,7 +1690,7 @@ fn timed_climbs(world: &World, id: EntityId, target: &GotoTarget, walk_ticks: Ti
             return None;
         }
         let core = levels::core_of(world, t);
-        levels::plan(world, core, 0, to, reach).map(|plan| ClimbLeg { core, building: t, from: 0, to, plan })
+        levels::plan(world, core, 0, to, reach, Some(id)).map(|plan| ClimbLeg { core, building: t, from: 0, to, plan })
     });
     (down.is_some() || up.is_some()).then_some(TimedClimb { down, up, booked: false, depart: tick, inside: false })
 }
@@ -1744,7 +1744,8 @@ pub fn climb_place(world: &World, id: EntityId) -> Option<(TilePos, EntityId, f3
             let f = storey_at(u.from, u.to, start, start + u.plan.wait, *arrive_tick, tick);
             Some((target.tile, u.building, f))
         }
-        _ => None,
+        // C8: a raider on his column's climb to the target's floor.
+        _ => crate::systems::vertical::column_place(world, id),
     }
 }
 
@@ -2153,7 +2154,7 @@ fn climb_out(
             world.leave_building(id);
             world.enter_building(id, t);
             let to = world.comp::<Position>(id).map_or(0, |p| p.floor);
-            let Some(p) = levels::climb(world, core, floor, to) else { return Some(StepResult::Done) };
+            let Some(p) = levels::climb(world, core, floor, to, id) else { return Some(StepResult::Done) };
             if let Some(pos) = world.comp_mut::<Position>(id) {
                 pos.floor = floor;
             }
@@ -2179,7 +2180,7 @@ fn climb_out(
     if floor == 0 {
         return None;
     }
-    let p = levels::climb(world, core, floor, 0)?;
+    let p = levels::climb(world, core, floor, 0, id)?;
     let state = ExecState::Climb {
         target: target.clone(),
         core,
@@ -2210,7 +2211,7 @@ fn climb_in(world: &mut World, id: EntityId, target: &GotoTarget, b: EntityId) -
         return StepResult::Done;
     }
     let core = levels::core_of(world, b);
-    let Some(p) = levels::climb(world, core, 0, floor) else { return StepResult::Done };
+    let Some(p) = levels::climb(world, core, 0, floor, id) else { return StepResult::Done };
     let tick = world.tick;
     if let Some(pos) = world.comp_mut::<Position>(id) {
         pos.floor = 0;

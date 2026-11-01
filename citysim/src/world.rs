@@ -2292,6 +2292,8 @@ impl World {
         // The city milestone C6a: the seeded households' flats dealt again
         // once the kin are linked (kin share a flat), and every body indoors
         // on its storey (nothing on a map without spans).
+        // The city milestone C8: the gangs' seats up to their hosts' top storeys first.
+        crate::prof::timed!("new::vertical::seed", systems::vertical::seed(&mut w));
         crate::prof::timed!("new::floors::seed", systems::floors::seed(&mut w));
         // OPEN-140: the seed city's housing is not the first midnight's move.
         w.housed_now.1.clear();

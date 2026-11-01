@@ -26,7 +26,8 @@ pub fn member_district(world: &World, id: EntityId) -> Option<DistrictId> {
     if let Some(h) = world.comp::<Household>(id).and_then(|h| h.home) {
         return Some(world.district_of_building(h));
     }
-    world.gang_of(id).and_then(|g| world.hideout_of(g)).map(|h| world.district_of_building(h))
+    // The city milestone C8: his own Hideout (the nearest of the gang's).
+    crate::systems::vertical::own_hideout(world, id).map(|h| world.district_of_building(h))
 }
 
 /// L25 (actor side): a body member following its gang's order did one of

@@ -451,6 +451,14 @@ pub struct Config {
     /// portal costs only its run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub levels: Option<LevelsCfg>,
+    /// The city milestone C8 (docs/CITY_MILESTONE.md § C8): the vertical
+    /// gangs (`systems/vertical.rs`): a Hideout per district a gang holds
+    /// turf in, on upper floors; the lift as turf (held, cut); the raid's
+    /// climb. `None` (not written into a save) with the key absent: one
+    /// Hideout a gang, on the floor the map gives it, no lift held or cut by
+    /// a gang, the raid fights at the door.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vertical: Option<VerticalCfg>,
     /// The island pass phase 5 (docs/ISLAND_PASS.md I3; OPEN-165): a vehicle
     /// in motion is an entity with its own position, its riders aboard
     /// (`systems/motion.rs`). `None` (not written into a save) with
@@ -1038,6 +1046,50 @@ pub struct LevelsCfg {
     /// stair moves under the walker; the sim's ground is flat, so its lift
     /// up the hill is not the advantage, its speed is).
     pub escalator_speed: f32,
+}
+
+/// The city milestone C8 `[vertical]`: the vertical gangs. Every value a
+/// placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VerticalCfg {
+    /// At the world's build a gang's seat (its first Hideout, the map's) moves
+    /// up to the top storey of its host (the flats under it keep their
+    /// storeys less that one): the upper floors over the shop.
+    pub seat_up: bool,
+    /// Hideouts a gang founds a day at most, one per district it holds turf
+    /// in (a held cell) and has none.
+    pub found_per_day: u8,
+    /// The key money a district Hideout costs the gang's treasury, paid to
+    /// the landlord (`Flow::Sale`); a gang holding less moves in on what it
+    /// has (nobody evicts a gang).
+    pub found_cost: i64,
+    /// A district Hideout is founded only in a host of at least this many
+    /// storeys (the upper floors over a front), else any host with a vacant
+    /// unit in the district.
+    pub min_storeys: u8,
+    /// A gang holds the lift of a host its Hideout stands in while it holds
+    /// the cell of the host's door: its members ride first, anyone else
+    /// waits `held_wait_ticks` more in the lobby (or takes the stairs).
+    pub hold_lifts: bool,
+    pub held_wait_ticks: f32,
+    /// A raid won or a Hideout sacked cuts the lift of the loser's host for
+    /// this many days (the cables cut on the way out); 0: never.
+    pub raid_cut_days: u16,
+    /// A landlord short on a host's power cuts its lift for this many days
+    /// (the power off to the cars); 0: never.
+    pub power_cut_days: u16,
+    /// A raid's column takes the lift up to its target's floor only with this
+    /// many raiders or fewer (the lobby is the choke), the lift running and
+    /// not held by the target; else the stairs.
+    pub lift_max_raiders: u16,
+    /// Tenants on the floors a raid's column climbs past who hear it (the
+    /// noise is word), at most this many a raid.
+    pub hear_cap: u16,
+    /// Vertical turf: a gang's claim that would take a Home another gang
+    /// holds, on a Home of this many storeys or more, takes its upper half
+    /// instead (a Home tenancy carved from the span, its households with it):
+    /// one tower holds two gangs' floors. 0: the whole Home, as before.
+    pub split_min_storeys: u8,
 }
 
 /// The city milestone C6b `[tenancy]`: the landlord, founding into a unit,
