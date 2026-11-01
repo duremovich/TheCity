@@ -728,6 +728,15 @@ wrong goes to OPEN; the view milestone (`OPEN-149`, `OPEN-180`'s rest) follows, 
    C9 reads it at 100k, and if no body rides cross-island there it is a feature (the El as the way to a far job,
    `OPEN-254`), not a knob.
 
+8. **C6b-C8's calls (Dylan 2026-11-01, "These look good"):** C7's stairs stay at a person's pace (30 s a storey,
+   the 40th floor 20 min); the Spire gets real tower storeys in TheCityGraphics' export (D5's estimates), re-imported
+   before C9; C9 also takes a landlord's answer to a gang that will not pay floor rent and a raid on the rival's
+   nearest Hideout with a standing guard at the seat. **Not now:** a cost to cross the street (the empty D2
+   footbridges): "I worry about going too far with traffic and walking until we have a 3d world to look at. Things
+   like crossing the street become more complex when there are ground vehicles that need to stop, traffic lights,
+   etc." (`OPEN-260`, the view milestone). C9 fixes choices (move-ins, "nearer work", leisure and errands), not the
+   walk. Floor rent at 4.6x Home rent stays as pressure until calibration; corps founding into units is `OPEN-261`.
+
 ## The questions as asked
 
 
