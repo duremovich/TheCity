@@ -446,6 +446,12 @@ wrong goes to OPEN; the view milestone (`OPEN-149`, `OPEN-180`'s rest) follows, 
    D2 layout pass. The view's base speed is real time (walk-matched, 1/60 ticks/s: a game minute is a real minute,
    an RPG's 1x; faster speeds are for watching). The view tier's budget is 7 min (a cold run rebuilds the sim).
 
+7. **C5-C6a's calls (Dylan 2026-10-31, "Seems good"):** D2's offices hold work (1,223 Lots at 100k; commutes into
+   the Civic Core) and `farm_desk` keeps Farms off office stacks, both kept. Bodied riders barely use the El at 20k
+   (~1,780 of ~1,785 boardings Statistical, at the real pace a few blocks walk faster): leave the ride choice alone;
+   C9 reads it at 100k, and if no body rides cross-island there it is a feature (the El as the way to a far job,
+   `OPEN-254`), not a knob.
+
 ## The questions as asked
 
 
