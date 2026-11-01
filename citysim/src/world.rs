@@ -1459,6 +1459,10 @@ pub struct World {
     /// lobby's calls and C8's hooks (cut, held).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub lifts: BTreeMap<EntityId, crate::systems::levels::LiftState>,
+    /// The city milestone C9b (`systems/vertical.rs`): a gang's Hideout
+    /// short on its floor rent -> the landlord's answer so far.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub floor_answers: BTreeMap<EntityId, crate::systems::vertical::FloorAnswer>,
     /// The island pass phase 3a: a company block's resident whose job at
     /// its workplace ended -> the tick it ended (evicted `grace_days` on).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -2158,6 +2162,7 @@ impl World {
             company_homes: BTreeMap::new(),
             floor_index: Default::default(),
             lifts: Default::default(),
+            floor_answers: Default::default(),
             company_lapsed: BTreeMap::new(),
             company_notice: BTreeSet::new(),
             commute_pressure: BTreeMap::new(),

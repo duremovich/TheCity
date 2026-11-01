@@ -1090,6 +1090,57 @@ pub struct VerticalCfg {
     /// instead (a Home tenancy carved from the span, its households with it):
     /// one tower holds two gangs' floors. 0: the whole Home, as before.
     pub split_min_storeys: u8,
+    /// C9b: the raid on the rival's nearest Hideout, a standing guard at the
+    /// seat (absent: every raid on the seat, no guard).
+    #[serde(default)]
+    pub raids: Option<VerticalRaidsCfg>,
+    /// C9b: the landlord's answer to a gang that will not pay its floor rent
+    /// (absent: the arrears stand and nothing follows).
+    #[serde(default)]
+    pub landlord: Option<LandlordCfg>,
+}
+
+/// C9b `[vertical.raids]`: where a raid lands. Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VerticalRaidsCfg {
+    /// The seat's standing guard: this many of tonight's watch (the members
+    /// living within a walk of the seat) posted to it at `[crew] guard_hour`
+    /// under any order but LieLow, kept out of a raid's muster.
+    pub seat_guard: u8,
+    /// A raid's target is the rival's Hideout nearest the raiders' own; the
+    /// seat (the chest, the stash) when it is the nearest, or when the
+    /// raiders' fit adults are this many times the rival's.
+    pub seat_ratio: f32,
+    /// A district Hideout won or sacked gives up this share of the rival's
+    /// chest (the seat's: `[gangs] raid_prize_frac` won, all of it sacked).
+    pub take_frac: f32,
+}
+
+/// C9b `[vertical.landlord]`: the landlord's answer to a gang's unpaid
+/// floor rent. Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LandlordCfg {
+    /// A gang's Hideout this many midnights short in a row gets the
+    /// landlord's answer ...
+    pub answer_days: u8,
+    /// ... and, still short, the next move on his ladder this many days on.
+    pub again_days: u16,
+    /// A person landlord this fearful (courage below it) whose tower's door
+    /// cell the gang holds swallows the debt as protection.
+    pub swallow_courage: f32,
+    /// A landlord this lawful or more (a person's, a corp exec's) calls the
+    /// law first; the city always does.
+    pub law_lawfulness: f32,
+    /// The muscle: a Beat on the floor's boss through the nearest Fixer, when
+    /// the landlord's purse holds the quote and this much more.
+    pub muscle_reserve: i64,
+    /// The power to the lift cut this many days (the host's lift; 0: never).
+    pub cut_days: u16,
+    /// The tower sold to a buyer who will deal with the gang (its rival gang,
+    /// else the richest Housing corp) at this share of its value.
+    pub sell_mult: f32,
+    /// The gang leader's grudge on the landlord for each move but the swallow.
+    pub grudge: f32,
 }
 
 /// The city milestone C6b `[tenancy]`: the landlord, founding into a unit,

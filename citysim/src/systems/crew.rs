@@ -734,6 +734,26 @@ fn post_gang(world: &mut World, c: &CrewCfg, gang: EntityId) {
             }
         }
     }
+    // The city milestone C9b: the seat's standing guard, tonight's watch first
+    // (then the rota), of those within reach of the seat, under every order
+    // (lying low too); kept out of the muster, holding the night there.
+    let n = crate::systems::vertical::seat_guard_n(world);
+    if n > 0 {
+        let tonight = world.day() + 1;
+        let mut cands: Vec<(bool, usize, EntityId)> = free
+            .iter()
+            .enumerate()
+            .filter(|&(_, &m)| in_reach(world, c, m, hideout))
+            .map(|(i, &m)| (!crate::systems::gang::on_watch_night(world, m, tonight), i, m))
+            .collect();
+        cands.sort_unstable();
+        cands.truncate(n);
+        for &(_, _, m) in &cands {
+            free.retain(|&x| x != m);
+            post(world, c, m, gang, DutyKind::Guard, hideout, c.guard_hour);
+        }
+        ownership::jobs2_row(world).seat_guards_posted += cands.len() as u32;
+    }
     // The order's duty.
     let window_end = world.tick + TICKS_PER_DAY;
     let raid_today = order.is_raid() && raid_at.is_some_and(|t| t < window_end);
@@ -782,6 +802,20 @@ fn post_gang(world: &mut World, c: &CrewCfg, gang: EntityId) {
         let Some(p) = crew_place(world, c, gang, m) else { continue };
         post(world, c, m, gang, DutyKind::Crew, p, c.crew_hour);
     }
+}
+
+/// The city milestone C9b: `m` stands today's guard at his gang's seat (a
+/// Guard duty there he did not trade for the shift): he stays out of the raid.
+pub fn seat_guard_today(world: &World, m: EntityId) -> bool {
+    let (today, small_hours) = (world.day(), world.tick_of_day() < 6 * TICKS_PER_HOUR as u16);
+    world.crew.duties.get(&m).is_some_and(|d| {
+        d.kind == DutyKind::Guard
+            && !d.chose_job
+            && (d.day == today || (small_hours && d.day + 1 == today))
+            && world.gang_of(m) == Some(d.gang)
+            && world.hideout_of(d.gang) == Some(d.place)
+            && crate::systems::vertical::seat_guard_n(world) > 0
+    })
 }
 
 /// R5 (OPEN-214): a raid ordered after midnight's duties were posted, its
@@ -1162,7 +1196,13 @@ pub fn raid_result(world: &mut World, r: RaidLeft) {
     if let Some(rv) = r.rival {
         nexts.push(next(world, rv));
     }
-    let verdict = if r.won { format!("{gname} won") } else { format!("{rname} held") };
+    // The city milestone C9b: a door nobody held is a walk-in, not a win.
+    let verdict = match (r.won, r.defenders.is_empty(), r.freed.is_some()) {
+        (true, true, false) => format!("{gname} walked in, nobody held it"),
+        (true, false, false) if beaten_raid.is_empty() => format!("{gname} sacked it"),
+        (true, _, _) => format!("{gname} won"),
+        (false, _, _) => format!("{rname} held"),
+    };
     let text = format!(
         "Raid on {}: {verdict} ({} raiders, {} defenders){took}{wounded_text}{dead_text}; {}",
         r.place,

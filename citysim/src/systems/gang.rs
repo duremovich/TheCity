@@ -239,6 +239,13 @@ pub fn hideout_with(world: &World, id: EntityId, recruit: impl FnOnce() -> Optio
 /// so the duty goes round. The night is keyed on the day it starts: a watch
 /// that began at 22:00 is the same watch at 02:00.
 pub fn on_watch(world: &World, id: EntityId) -> bool {
+    on_watch_night(world, id, (world.tick + TICKS_PER_DAY / 2) / TICKS_PER_DAY)
+}
+
+/// [`on_watch`] on the night keyed `night` (the night that starts on the
+/// evening of day `night - 1`; the city milestone C9b reads tonight's at the
+/// midnight before it, `crew::post_gang`'s seat guard).
+pub fn on_watch_night(world: &World, id: EntityId, night: u64) -> bool {
     let Some(g) = world.gang_of(id).and_then(|g| world.comp::<Gang>(g)) else { return false };
     // Jailed members cannot stand watch: only the free roster counts.
     let mut roster: Vec<(Tick, EntityId)> = g
@@ -271,7 +278,6 @@ pub fn on_watch(world: &World, id: EntityId) -> bool {
         return false;
     }
     roster.sort_by(|a, b| b.cmp(a));
-    let night = (world.tick + TICKS_PER_DAY / 2) / TICKS_PER_DAY;
     let start = (night % n as u64) as usize;
     (0..watch).any(|i| roster[(start + i) % n].1 == id)
 }
@@ -284,7 +290,8 @@ pub fn holes_up_at(world: &World, id: EntityId) -> Option<EntityId> {
     let gang = world.gang_of(id)?;
     let g = world.comp::<Gang>(gang)?;
     let homeless = world.comp::<Household>(id).is_none_or(|h| h.home.is_none());
-    let watch = on_watch(world, id);
+    // The city milestone C9b: the seat's standing guard holds the night there.
+    let watch = on_watch(world, id) || crate::systems::crew::seat_guard_today(world, id);
     if g.is_sacked(world.tick) || !(g.order == Order::LieLow || homeless || watch) {
         return None;
     }
