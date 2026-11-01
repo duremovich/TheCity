@@ -20,6 +20,9 @@
 //! C2, simthread.rs): a sim thread runs the save (`citysim`, in process) and the camera follows entity INDEX; --rate
 //! defaults to walk-matched (`[view] walk_m_s` over the `[exec]` pace). A tick is a number or `D:HH:MM`. With
 //! `--bench one`, --shots takes one PNG at each tick (`<tag>_<tick>.png`). glclient's tram and traffic are off.
+//! [--config PATH] [--reload-at TICK]: config hot-reload (the view milestone V1, OPEN-262, simthread.rs): the R key,
+//! a change of the file (default `assets/config.toml`) or the tick reloads it into the running world at a tick
+//! boundary (`citysim::reload`: the live keys applied, the build-time keys kept and reported in the log and the HUD).
 
 // Bevy systems take their params as arguments and query tuples as types: the two lints every Bevy crate allows.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -86,6 +89,10 @@ struct Args {
     rate: Option<f64>,
     from: Option<u64>,
     shots: Vec<u64>,
+    /// --config PATH: the file a reload reads (V1; `None`: `assets/config.toml` when it is there)
+    config: Option<PathBuf>,
+    /// --reload-at TICK: reload the config at that tick (V1; the bench's proof)
+    reload_at: Option<u64>,
 }
 
 /// A tick: a number, or `D:HH:MM` (day, hour, minute).
@@ -132,6 +139,8 @@ impl Args {
             rate: None,
             from: None,
             shots: vec![],
+            config: None,
+            reload_at: None,
         };
         let v: Vec<String> = std::env::args().skip(1).collect();
         let mut i = 0;
@@ -236,6 +245,14 @@ impl Args {
                     assert!(a.shots.windows(2).all(|w| w[0] < w[1]), "--shots: ticks in rising order");
                     i += 1;
                 }
+                "--config" => {
+                    a.config = Some(PathBuf::from(next(i)));
+                    i += 1;
+                }
+                "--reload-at" => {
+                    a.reload_at = Some(parse_tick(&next(i)));
+                    i += 1;
+                }
                 "--trace-secs" => {
                     a.trace_secs = next(i).parse().unwrap();
                     i += 1;
@@ -248,6 +265,10 @@ impl Args {
         assert!(a.save.is_none() || a.sim.is_none(), "--save and --sim are exclusive");
         assert!(a.shots.is_empty() || a.bench.as_deref() == Some("one"), "--shots needs --bench one");
         assert!(a.shots.is_empty() || a.save.is_some(), "--shots needs --save");
+        assert!((a.config.is_none() && a.reload_at.is_none()) || a.save.is_some(), "--config and --reload-at need --save");
+        if let Some(p) = &a.config {
+            assert!(p.is_file(), "--config {}: no such file", p.display());
+        }
         a
     }
 }
@@ -467,12 +488,18 @@ fn main() {
             rate: args.rate,
             from: args.from,
             shots: args.shots.clone(),
+            // V1: the default is the repo root's config (the CLI runs from there), when it is there
+            config: args.config.clone().or_else(|| Some(PathBuf::from("assets/config.toml")).filter(|p| p.is_file())),
+            reload_at: args.reload_at,
         });
         app.insert_resource(sim::Sim::live(shared.clone(), &dir))
             .insert_resource(glclient::SimDrives)
             .insert_resource(bench::Shots { shared })
             .add_systems(Startup, sim::setup_sim)
-            .add_systems(Update, (sim::follow_subject.before(occ::player_controls), sim::update_sim.after(stream::update_stream)));
+            .add_systems(
+                Update,
+                (sim::follow_subject.before(occ::player_controls), sim::update_sim.after(stream::update_stream), sim::reload_key),
+            );
     }
     if args.bench.as_deref() == Some("occ") {
         let oa = occbench::OccArgs {

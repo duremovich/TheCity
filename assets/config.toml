@@ -5855,3 +5855,7 @@ ring_half_tiles = 48               # the ring's half side (192 m: simsnap's ring
 pin_margin_tiles = 8               # a pinned body stays pinned this far past the ring (lod.rs VIEW_MARGIN's 8)
 way_margin_tiles = 64              # a Coarse walk is placed on its way (one road search) only when its start-to-target box
                                    # grown by this many tiles (a road's detour) meets the ring
+# The view milestone V1 (OPEN-262): cityview reloads its --config file on the R key and on a change of the file (an
+# mtime look on the sim thread between ticks, every reload_poll_s real seconds); the live keys swap in at a tick
+# boundary, the build-time ones (Config::BUILD_TIME) are kept and reported.
+reload_poll_s = 1.0

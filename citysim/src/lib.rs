@@ -27,6 +27,7 @@ pub mod needs;
 pub mod outside;
 pub mod personality;
 pub mod prof;
+pub mod reload;
 pub mod rng;
 pub mod save;
 pub mod spatial;

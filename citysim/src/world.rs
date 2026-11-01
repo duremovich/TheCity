@@ -4251,6 +4251,21 @@ impl World {
     }
 
     /// After a load: the tables are not saved.
+    /// The view milestone V1 (OPEN-262): every memo emptied after a config reload (each a pure function of the
+    /// world and its config, built again on its next read).
+    pub fn drop_memos(&mut self) {
+        *self.located_memo.slot() = None;
+        *self.building_memo.slot() = None;
+        *self.chromed_memo.slot() = None;
+        *self.guard_memo.slot() = None;
+        *self.kind_memo.slot() = None;
+        *self.shop_memo.slot() = None;
+        *self.near_memo.slot() = None;
+        *self.claims.slot() = None;
+        *self.district_geo.slot() = None;
+        self.mean_price_cache = None;
+    }
+
     pub fn reload_names(&mut self) {
         self.names = NameTables::load(&self.config);
         let (table, legacy) = load_stat_table(&self.config);

@@ -323,7 +323,7 @@ Each file's `//!` header names its spec section.
 | `faction.rs` | the gang brain's standing orders | `parents.rs` | outside parent accounts, remittance |  |  |
 | `faith.rs` | churches and followers (`[faith]`) | `plan.rs` | the plan queue (section 5) |  |  |
 
-Outside `systems/`: `view.rs` (C2: the camera ring's snapshot for the 3D client, `[view]`; reads, never writes), `needs.rs`, `mood.rs`, `personality.rs` (agent internals), `word.rs`, `contract.rs`, `virt.rs`,
+Outside `systems/`: `view.rs` (C2: the camera ring's snapshot for the 3D client, `[view]`; reads, never writes), `reload.rs` (the view milestone V1, OPEN-262: a config file swapped into a running world at a tick boundary, the build-time keys `Config::BUILD_TIME` kept and reported; cityview's R key, file watch and `--reload-at`), `needs.rs`, `mood.rs`, `personality.rs` (agent internals), `word.rs`, `contract.rs`, `virt.rs`,
 `living.rs`, `econ.rs`, `ambient.rs`, `outside.rs`, `ledger.rs` (the milestones' types; logic in the matching
 `systems/` file), `levers.rs` (player commands and lever values), `story.rs` (biographies), `stats.rs` (`DailyStats`,
 `DayRow`), `prof.rs` (the `timed!` profiler, `prof` feature only), `util.rs`.

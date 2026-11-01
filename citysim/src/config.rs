@@ -511,6 +511,69 @@ pub struct Config {
     pub view: ViewCfg,
 }
 
+impl Config {
+    /// The view milestone V1 (`OPEN-262`, `citysim::reload`): the config a reload may not change in a running
+    /// world, as dotted paths (a section, or a key inside one; a path covers everything under it). Every other key
+    /// is live: a reload swaps it in at a tick boundary and the next system to read it reads the new value (a key
+    /// read only at a seeding, e.g. `[buildings.<kind>] capacity`, moves the next building that seeds). A reload
+    /// keeps the world's value for these and reports the change as ignored. Build-time is what a world build or a
+    /// cache derives once:
+    /// - `world`: the map, the population, the opening jobs, stocks, coins and the names file (the build's);
+    /// - `scale`: the reference city the build fitted from (and its `fitted`, `lot_copies`);
+    /// - `districts`: the map's rows; the district grid and adjacency derive from them at the load;
+    /// - `trades`: `Role::Trade` indexes the rows (the trade cache, a save's `Trade("key")`s); `faith.creeds` and
+    ///   `gray.gang_types` likewise index rows the opening dealt;
+    /// - `levers`, `policy`: seed `World::levers` once (`Levers::from_config`); a live lever moves by a command;
+    /// - `ambient`: the Ambient flats are built once;
+    /// - `transit`: the El's net (its stops and offsets, derived at the load) and its trains, spawned by slot once;
+    /// - `perf`: the host's threads; the midnight stagger's slots (a change mid-day runs a pass twice or skips it);
+    /// - the names and the opening roster: `gangs.names`, `gangs.splinter_names`, `gangs.treasury_initial`, the
+    ///   corps' rows, `tech.seed`, `governance.boards`, `outside.parents` (the parents' accounts, seeded once);
+    /// - `view.tile_m`, `view.north_m`: the frame the client draws the city in.
+    ///
+    /// The caches a live key feeds are rebuilt by the reload: the walkway portals' costs (`[exec]`'s pace and
+    /// `[levels]`: `levels::init_portals`), the stat policy (`[lod] policy`: `World::reload_names`) and the
+    /// world's memos.
+    pub const BUILD_TIME: &'static [&'static str] = &[
+        "world",
+        "scale",
+        "districts",
+        "trades",
+        "faith.creeds",
+        "gray.gang_types",
+        "levers",
+        "policy",
+        "ambient",
+        "transit",
+        "perf",
+        "gangs.names",
+        "gangs.splinter_names",
+        "gangs.treasury_initial",
+        "corps.names",
+        "corps.niches",
+        "corps.farms",
+        "corps.markets",
+        "corps.blocks",
+        "corps.offices",
+        "corps.treasury_initial",
+        "corps.fab_rows",
+        "corps.noodle_first_row",
+        "corps.seed_labs",
+        "corps.seed_feeds",
+        "tech.seed",
+        "governance.boards",
+        "outside.parents",
+        "view.tile_m",
+        "view.north_m",
+    ];
+
+    /// Whether the dotted config path `path` (`"exec.walk_tiles_per_tick"`) is build-time ([`Config::BUILD_TIME`]):
+    /// it is one of the list's paths or lies under one.
+    pub fn is_build_time(path: &str) -> bool {
+        Config::BUILD_TIME.iter().any(|b| path == *b || path.strip_prefix(b).is_some_and(|r| r.starts_with('.')))
+    }
+}
+
 /// `[view]` (the city milestone C2): the view's snapshot and its rate.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -528,6 +591,9 @@ pub struct ViewCfg {
     /// A Coarse walk is placed on its way (one road search) only when its
     /// start-to-target box grown by this many tiles meets the ring.
     pub way_margin_tiles: u16,
+    /// The view milestone V1 (OPEN-262): real seconds between two looks at the config file's mtime (cityview's
+    /// reload on a file change).
+    pub reload_poll_s: f64,
 }
 
 impl Default for ViewCfg {
@@ -539,6 +605,7 @@ impl Default for ViewCfg {
             ring_half_tiles: 48,
             pin_margin_tiles: 8,
             way_margin_tiles: 64,
+            reload_poll_s: 1.0,
         }
     }
 }
@@ -11593,7 +11660,23 @@ impl Config {
     pub fn load_from(assets_dir: &Path) -> Config {
         let path = assets_dir.join("config.toml");
         let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
-        let mut cfg: Config = toml::from_str(&text).unwrap_or_else(|e| panic!("bad config {}: {e}", path.display()));
+        Config::from_toml(&text, assets_dir).unwrap_or_else(|e| panic!("bad config {}: {e}", path.display()))
+    }
+
+    /// `config.toml`'s text parsed as [`Config::load_from`] reads it (the
+    /// switches' strips included), its assets at `assets_dir`; a parse error
+    /// or a broken bound is an `Err` (the view's reload, OPEN-262, keeps the
+    /// old config on one). Not fitted or scaled: the world's build does that.
+    pub fn from_toml(text: &str, assets_dir: &Path) -> Result<Config, String> {
+        // one line (the view's log and HUD): the message and where
+        let mut cfg: Config = toml::from_str(text).map_err(|e| match e.span() {
+            Some(s) => {
+                let before = &text[..s.start.min(text.len())];
+                let col = before.len() - before.rfind('\n').map_or(0, |i| i + 1) + 1;
+                format!("line {}, column {col}: {}", before.matches('\n').count() + 1, e.message().trim())
+            }
+            None => e.message().trim().to_string(),
+        })?;
         cfg.assets_dir = assets_dir.to_path_buf();
         // The pre-view pass's env switches retired at the island pass
         // phase 0 (OPEN-174), as the earlier milestones' did (OPEN-094);
@@ -11610,12 +11693,14 @@ impl Config {
         // The perf pass's four in-flight switches (`CITYSIM_REST_OFF`, `_DWELL_OFF`, `_EXEC_HOME_OFF`,
         // `_STAGGER_OFF`) retired at its close; the config paths stay. The last midnight slot stays inside
         // the night's first hour.
-        assert!(
-            u64::from(cfg.perf.stagger_midnight) * u64::from(crate::systems::midnight::LAST_SLOT)
-                < crate::time::TICKS_PER_HOUR,
-            "[perf] stagger_midnight {} puts the last midnight slot past 00:59",
-            cfg.perf.stagger_midnight
-        );
+        if u64::from(cfg.perf.stagger_midnight) * u64::from(crate::systems::midnight::LAST_SLOT)
+            >= crate::time::TICKS_PER_HOUR
+        {
+            return Err(format!(
+                "[perf] stagger_midnight {} puts the last midnight slot past 00:59",
+                cfg.perf.stagger_midnight
+            ));
+        }
         // Lives at work (D13): a config with `[lives] enabled = false` by any
         // path clears the milestone's sections, so the off save holds no
         // `[lives]`, `[service]` or `[[serves]]`. The milestone's env
@@ -11662,7 +11747,7 @@ impl Config {
             cfg.without_household_deeds();
         }
         cfg.districts.row_count();
-        cfg
+        Ok(cfg)
     }
 
     /// A role's config wage: a bespoke role's `[economy] wage_*`, a trade's
@@ -11746,6 +11831,12 @@ impl Config {
     /// Drop the trade cache (after editing `trades` in place).
     pub fn reset_trade_cache(&mut self) {
         self.trade_cache = TradeCache::default();
+    }
+
+    /// The view milestone V1 (OPEN-262): the keys a save's `Trade("key")` resolves against set back to these
+    /// trades (a parse of another file set them to its rows: `trades_de`).
+    pub fn set_trade_keys(&self) {
+        crate::components::TradeId::set_keys(trade_ids_of(&self.trades));
     }
 
     fn trade_cache_data(&self) -> &TradeCacheData {

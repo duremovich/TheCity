@@ -700,7 +700,12 @@ pub fn update_sim(
     sim.subject_at = subject_at;
     let stack = on_tile.values().copied().max().unwrap_or(0);
     let f = &sim.frames[j];
-    let follow = if sim.live.is_some() { format!("\nfollowing {}", sim.caption) } else { String::new() };
+    let follow = if sim.live.is_some() { format!("\nfollowing {}  (R reload config)", sim.caption) } else { String::new() };
+    // V1: the last config reload's line
+    let follow = match sim.live.as_ref().map(|l| l.reload_line.lock().unwrap().clone()).filter(|l| !l.is_empty()) {
+        Some(l) => format!("{follow}\n{l}"),
+        None => follow,
+    };
     let follow = if signs > 0 { format!("{follow}\nsigns {signs} (lit {lit_n}, founded today {fresh_n})") } else { follow };
     sim.hud = format!(
         "sim tick {} {}  agents {} (street {street}, most on a tile {stack}, indoors {indoors}, aboard {aboard}; Full {} Coarse {} Stat {})  vehicles car {} van {} train {} flyer {} foot {} ({riders} aboard)  events {}",
@@ -717,6 +722,15 @@ pub fn update_sim(
         by_ride[4],
         f.events
     ) + &follow;
+}
+
+/// V1 (OPEN-262): the R key asks the sim thread for a config reload at its next tick boundary.
+pub fn reload_key(keys: Res<ButtonInput<KeyCode>>, sim: Res<Sim>) {
+    if keys.just_pressed(KeyCode::KeyR)
+        && let Some(live) = sim.live.as_ref()
+    {
+        live.reload_req.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 /// C2: the follow-cam: the player stand-in (the camera's and the occlusion's focus, occ.rs) stands where the subject
