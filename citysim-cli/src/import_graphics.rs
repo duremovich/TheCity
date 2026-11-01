@@ -1079,6 +1079,10 @@ struct Unit {
 /// A `B` line before it is written: kind, rect, tier, floors and the keyed fields.
 type OutB = (BuildingKind, Rect, u8, u8, BuildingExtra);
 
+/// C9a: the zones whose homes a Farm takes past the cuts nobody lives in,
+/// in order (the Spire's towers never: they are the execs' homes).
+const FARM_HOME_ZONES: [Zone; 4] = [Zone::Vats, Zone::Sump, Zone::Mid, Zone::Civic];
+
 const UNIT_SHOP: u8 = 0;
 const UNIT_WORKSHOP: u8 = 1;
 const UNIT_OFFICE: u8 = 2;
@@ -1778,16 +1782,26 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                         (y0, y1)
                     }
                 };
-                let farm_sized = |l: &Lot| {
-                    let (a, b) = span(l);
-                    (b.saturating_sub(a)).saturating_sub(2) * depth.saturating_sub(2) >= 60
-                };
+                // C9a: a stretch is cut off once it is big enough for a
+                // Farm and the rest of the part still is (the lots of a
+                // stretch together, not each alone: at 4 m tiles most of the
+                // Vats' works lots are under a Farm, so the 100k city's 600
+                // Farms found 227 Vats cuts and took the Spire's towers).
+                let farm_sized = |len: usize| len.saturating_sub(2) * depth.saturating_sub(2) >= 60;
+                let mut last = a0;
                 edges.retain(|&e| {
                     let before: Vec<&&Lot> = lots.iter().filter(|l| span(l).1 == e).collect();
                     let after: Vec<&&Lot> = lots.iter().filter(|l| span(l).0 == e).collect();
-                    !before.is_empty()
+                    let keep = !before.is_empty()
                         && !after.is_empty()
-                        && before.iter().chain(&after).all(|l| l.sim.is_some() && farm_sized(l))
+                        && before.iter().chain(&after).all(|l| l.sim.is_some())
+                        && e >= last
+                        && farm_sized(e - last)
+                        && farm_sized(a1.saturating_sub(e));
+                    if keep {
+                        last = e;
+                    }
+                    keep
                 });
             }
             for e in edges {
@@ -1843,6 +1857,25 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                         }
                     })
                     .collect();
+                // C9a: a piece (no lot centre in it) is a slice of the lots
+                // whose span it overlaps along the cut, each by its share of
+                // the lot's length: it stands their storeys (flats by that
+                // share, the flats' storeys, their lifts), not a ground floor
+                // with no flat (C8b: `exec_7467` on the ground of a 59-storey
+                // piece). The owning cut keeps its flats (a few hundred
+                // counted twice at 100k; the households follow the flats).
+                let cover: Vec<(&Lot, f64)> = if members.is_empty() {
+                    lots.iter()
+                        .filter_map(|l| {
+                            let (lx0, ly0, lx1, ly1) = f.round(l.rect);
+                            let (a, b) = if along_x { (lx0, lx1) } else { (ly0, ly1) };
+                            let over = b.min(s1).saturating_sub(a.max(s0));
+                            (over > 0 && b > a).then(|| (*l, over as f64 / (b - a) as f64))
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
                 if x1 < x0 + 3 || y1 < y0 + 3 {
                     rep.dropped_small += 1;
                     rep.lots_dropped += members.len();
@@ -1950,7 +1983,13 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                     }
                 }
                 let floors = if members.is_empty() {
-                    lots.iter().map(|l| l.floors).max().unwrap_or(1)
+                    // C9a: the storeys of the lots it is a slice of.
+                    cover
+                        .iter()
+                        .map(|(l, _)| l.floors)
+                        .max()
+                        .or_else(|| lots.iter().map(|l| l.floors).max())
+                        .unwrap_or(1)
                 } else {
                     let sum: u32 = members.iter().map(|l| l.floors).sum();
                     (f64::from(sum) / members.len() as f64).round() as u32
@@ -1994,6 +2033,14 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                         {
                             units.extend(std::iter::repeat_n(Unit { level, kind, lot: j }, n as usize));
                         }
+                        // C9a: a tower's lobby (the Spire's ground, the
+                        // export's `use: lobby`) is a unit, where the Spire's
+                        // Lots stand (its Hqs and Lounges) under the flats;
+                        // before, the Spire had no unit and its Lots took the
+                        // towers whole (20k: 218 of its 286 cuts).
+                        if lv.use_ == "lobby" {
+                            units.push(Unit { level, kind: UNIT_OFFICE, lot: j });
+                        }
                         if lv.units[0] > 0 {
                             flat_span = Some(flat_span.map_or((level, level), |(a, b)| (a.min(level), b.max(level))));
                         }
@@ -2003,9 +2050,19 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                     }
                 }
                 units.sort_by_key(|u| (u.level, u.kind, u.lot));
-                // C7: the members' lifts (the export's lift cores, from the ground).
+                // C9a: a piece's flats' storeys are its cover's.
+                for r in cover.iter().filter_map(|(l, _)| l.sim.as_ref()) {
+                    for lv in r.levels.iter().filter(|lv| lv.units[0] > 0) {
+                        let level = u8::try_from(lv.i).unwrap_or(u8::MAX);
+                        flat_span = Some(flat_span.map_or((level, level), |(a, b)| (a.min(level), b.max(level))));
+                    }
+                }
+                // C7: the members' lifts (the export's lift cores, from the
+                // ground); C9a: a piece's, its cover's.
                 let lifts: Vec<u32> = members
                     .iter()
+                    .map(|l| **l)
+                    .chain(cover.iter().map(|(l, _)| *l))
                     .filter_map(|l| l.sim.as_ref())
                     .flat_map(|r| r.cores.iter().filter(|c| c.lift).map(|c| c.floors.1))
                     .collect();
@@ -2026,7 +2083,8 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                     residential: members.iter().all(|l| l.residential),
                     use_,
                     workshop: !recs.is_empty() && recs.iter().filter(|r| r.workshop).count() * 2 >= recs.len(),
-                    flats: members.iter().map(|l| l.flats as u32).sum(),
+                    flats: members.iter().map(|l| l.flats as u32).sum::<u32>()
+                        + cover.iter().map(|(l, share)| (l.flats as f64 * share).round() as u32).sum::<u32>(),
                     civic,
                     lots: members.iter().map(|l| (l.id.clone(), l.rect)).collect(),
                     own_lot: !members.is_empty(),
@@ -2254,15 +2312,28 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                 && !segs[i].units.iter().any(|u| u.kind == UNIT_OFFICE)
         };
         let farm_desk = |i: usize| farm_ok(i) && !segs[i].units.iter().any(|u| u.kind == UNIT_OFFICE);
-        pick(
-            &mut kind,
-            &mut rep,
-            K::Farm,
-            target(6.0),
-            &[Z::Vats],
-            &[&farm_vat, &farm_ind, &farm_open, &farm_desk, &farm_ok],
-            true,
-        );
+        let n_farms = target(6.0);
+        // The cuts nobody lives in first, the largest first (the shortfall,
+        // if any, is the last stage's to report).
+        let mut quiet = Report::default();
+        pick(&mut kind, &mut quiet, K::Farm, n_farms, &[Z::Vats], &[&farm_vat, &farm_ind, &farm_open], true);
+        let mut farms = kind.iter().filter(|x| **x == Some(K::Farm)).count();
+        // C9a: past the cuts nobody lives in, a Farm takes the homes that
+        // give up the fewest flats, zone by zone where the farms belong (the
+        // Vats, the Sump, the Mid; `FARM_HOME_ZONES`), never the Spire's
+        // towers (at 100k the largest-first stages had taken 218 of D5's
+        // cuts, the largest lots on the island, and the Spire housed nobody).
+        for z in FARM_HOME_ZONES {
+            farms += fewest_flats(&mut kind, &uses, segs, K::Farm, n_farms.saturating_sub(farms), &|i| {
+                zone(i) == z && farm_desk(i)
+            });
+        }
+        // No last resort: a Farm takes no office stack, no tower lobby and no
+        // Spire home; what the island cannot place is a shortfall (100k).
+        if farms < n_farms {
+            rep.shortfall
+                .push(format!("Farm: {farms} of {n_farms} (the farm-sized cuts off the Spire and the office stacks)"));
+        }
         // C6a: from here the uses go into units (a Security Office in an
         // office or a works floor, a Hideout in the alley's workshop, the
         // venues on the shop fronts, the Lots in the office stacks), so the

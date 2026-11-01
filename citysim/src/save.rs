@@ -528,7 +528,10 @@ use crate::world::World;
 /// defaults).
 /// 123 (the city milestone C8b, the Spire's storeys): no format change; both island maps re-imported from
 /// TheCityGraphics `6390473` (D5's towers), a new `B` order (a C8 save is another world).
-pub const SAVE_VERSION: u8 = 123;
+/// 124 (the city milestone C9a, far travel): no format change; both island maps re-imported from TheCityGraphics
+/// `c471ffd` (the Vats cut by stretches, the Spire's lobbies as units, a piece standing its lots' storeys), a new
+/// `B` order (a C8b save is another world).
+pub const SAVE_VERSION: u8 = 124;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
