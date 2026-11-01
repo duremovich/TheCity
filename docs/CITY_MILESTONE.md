@@ -658,6 +658,35 @@ the Squat order claims empty Homes); the same few Bar landlords' lifts stop ever
 (an off-screen resident is rarely at home on the floors passed at 22:00); the raid's text says "won" against 0
 defenders (the Sacked outcome's line).
 
+**C8b as built (2026-11-01): the Spire's storeys** (Dylan's answers 8; TheCityGraphics `city-spire` `6390473`, export
+seed 19, DECISIONS "City milestone C8b"). Deviations from "the export's estimates": (1) **the massing raises them, not
+the export alone**: the estimates already read the massing's floors (519 villas of 2-4 and the 150-floor arcology), and
+a sim-only number would stand a body on floor 40 over a villa in the view. `massing.py`: D5's lots under the crest's
+highest 30 % by platform z (`SPIRE_VILLAS`; the crest keeps its 156 villas round the arcology, byte-identical) are
+30-60-floor towers (`SPIRE_TOWER_FLOORS`, invented: over D4's 20-45, under the arcology) on a two-storey podium; the
+city regen differs in D5's chunks only (city `--checks` 30/30, `simdata --check --control` ALL PASS). (2) **A Spire
+flat is a luxury flat** (`simdata.FLAT_M2`: 300 m2 of plate a flat, at least one a floor; invented): the laid-out
+density on these towers gave 127k flats, a third of the island, and the importer deals households by flats. (3)
+`SAVE_VERSION` 123: the `B` order is new (a C8 save is another world); the view fixture regenerated. **D5**, before
+(`b447d8d`) -> after: export storeys min/median/max 2/3/150 -> 2/37/150, levels 1,689 -> 16,775, flats 16,548 ->
+21,202 (5.0 -> 6.3 % of 337,516), lift cores 1 -> 364 (island levels 164,750 -> 179,836, lift cores 6,800 -> 7,163,
+`lift=` hosts 4,295 -> 4,533); 20k map: host storeys 2/3/77 -> 2/35.5/103, hosts with `lift=` 1 -> 239, Homes (slots)
+64 (108) -> 65 (124), every one a tower now (the arcology `span=0-149`), whole-cut Lots 219 -> 218 of 286 cuts; 100k
+map: 0 Homes, 218 Farms, 65 -> 64 Lots (unchanged, below). The importer's units table moves D5's flats only; Lots /
+employers 20k D5 219/222 -> 218/221, 100k 65/286 -> 64/286. **20k seed 42 x 30** (before: C8's column; employed and
+homeless C7's): employed d30 11,747 -> 11,918 (0.529), homeless 327 -> 344, legs over 120 min 3 -> 5 (a 364-min cab
+to a Seller in D5, four aborted Coarse walks "slow:", one from D5), ticks/s days 25-30 132/127/127/126/127/124 ->
+129/126/120/117/119/119. **Shadow** (20k days 21-22, exec x 8, office_worker x 8, `target/c8b/shadow`): 7 of 8 execs
+live in a Spire tower; `exec_9210` (Pixel Crane, Zetatech 8) "Home: Block#714 (D5 The Spire), flat 1 on floor 105,
+floors 0-149", "d21 00:01 CLIMB up by the lift in Block#714 (D5 The Spire): floor 0 to 105, 1 min waiting in the lobby
+(1 called the car, this call too), 7 min in all", down at 06:11; `exec_13978` floor 43 of 48 by the lift, 4 min;
+`exec_22102` floor 36, `exec_17984` 34, `exec_17743` 22, `exec_26155` 19, `exec_25361` 11. What reads wrong: **at
+100k the Spire houses nobody** (218 of its 286 cuts are Farms: the Farm deal's last stages take the largest cuts
+city-wide, and D5's lots are the largest; pre-existing, C9's or a Farm fix); at 20k 218 of 286 D5 cuts are whole-cut
+Lots in towers of up to 59 storeys (the zone's Lots by fewest flats, one floor of places); a cut piece holding no lot
+centre is a Home with `flats=0` and no span or lift (`exec_7467` lives on the ground of a 59-storey piece,
+Block#1189); every Spire lift call is alone in the lobby.
+
 ### C9, far travel re-read on the new city (TheCity; `distance.rs`, `careers.rs`, `household.rs`, `social.rs`, `relocation`; `OPEN-221`, `OPEN-240`)
 
 First a read, then the fix for what is left. One 100k run in V17's window with the travel archetypes' diaries
