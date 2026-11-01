@@ -489,7 +489,7 @@ fn view_unit(world: &World, b: EntityId, bd: &Building) -> Option<ViewUnit> {
     if bd.demolished || bd.derelict || matches!(bd.kind, BuildingKind::Home | BuildingKind::Lot) {
         return None;
     }
-    let tod = u16::try_from(world.tick_of_day()).unwrap_or(0);
+    let tod = world.tick_of_day();
     let fresh =
         world.floor_index.founded.get(&b).is_some_and(|&t| world.tick.saturating_sub(t) < crate::time::TICKS_PER_DAY);
     Some(ViewUnit {
