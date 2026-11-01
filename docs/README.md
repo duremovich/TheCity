@@ -16,6 +16,7 @@ One line per live document: what it is and when to read it. Everything supersede
 - `VISION.md`: the end state (revenge chains, fixers, contracts, the player's life paths). The why behind every spec.
 - `ROADMAP_POST_M14.md`: the milestones after M14 and the addenda (Dylan's directives, dated).
 - `LIVES_AT_WORK.md`: the next milestone (work has a counterpart, evenings and households, ages and leaders lead, 20k scale). Dylan's answers recorded.
+- `VIEW_MILESTONE.md`: the live milestone (2026-11-01): config hot-reload, the 21:00 tick, people drawn as people, riders, the ring, the replay, crossings; exit Shadow V20 and a watch.
 - `M18_PLAYER.md`: the player character after it.
 
 ## Milestone specs (closed; the why and the "Implemented: deviations" of each)
