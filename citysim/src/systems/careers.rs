@@ -504,7 +504,7 @@ fn retire(world: &mut World) {
 /// commute within `[life] commute_long_ticks`, or no longer than the one
 /// she has (the move-in read no distance; the relocation's "nearer work"
 /// does). No post, or a sweeper's beat: any Home.
-fn spouse_commute_ok(world: &World, s: EntityId, h: EntityId) -> bool {
+pub(crate) fn spouse_commute_ok(world: &World, s: EntityId, h: EntityId) -> bool {
     let Some(work) = world
         .comp::<crate::components::Job>(s)
         .and_then(|j| j.employer)

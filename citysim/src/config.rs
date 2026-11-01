@@ -1349,6 +1349,12 @@ pub struct ChoiceCfg {
     /// gang duty): the place past this from where the visitor sets out is
     /// not walked to.
     pub visit_ticks: u64,
+    /// C9a: a stims source (`stims::stim_source`, the nearest Bar with a
+    /// dealer, else a legal Market): past this from where the body stands
+    /// (his own trip) it is no source, and the craving waits for a nearer
+    /// one or the corner. 0: any distance.
+    #[serde(default)]
+    pub stim_ticks: u64,
 }
 
 /// The pressure pass phase 4 `[distance.reach]` (docs/PRESSURE_PASS.md;
@@ -3386,6 +3392,11 @@ pub struct ServiceCfg {
     /// farther, the Garage's off-screen cab takes the ride (the leg timed).
     #[serde(skip_serializing_if = "is_zero_u32_cfg")]
     pub cab_wait_ticks: u32,
+    /// C9a: a driver's body booked this long ago and not yet at the door
+    /// leaves the ride to the Garage's off-screen cab (the hourly pass);
+    /// 0 waits for him all shift (C8b: a 364-min cab, the rider at his door).
+    #[serde(default, skip_serializing_if = "is_zero_u32_cfg")]
+    pub cab_no_show_ticks: u32,
     /// § 2.3 (street worker): a client is a body out walking within this
     /// many tiles of the pitch before the district's hashed draw.
     #[serde(skip_serializing_if = "is_zero_u32_cfg")]
@@ -3553,6 +3564,7 @@ impl Default for ServiceCfg {
             neglect_days: 0,
             teacher_floor: 0.0,
             cab_wait_ticks: 0,
+            cab_no_show_ticks: 0,
             client_tiles: 0,
             pimp_tiles: 0,
             pimp_pass_up: 0.0,
@@ -3600,6 +3612,7 @@ impl ServiceCfg {
         let d = ServiceCfg::default();
         self.street = false;
         self.cab_wait_ticks = d.cab_wait_ticks;
+        self.cab_no_show_ticks = d.cab_no_show_ticks;
         self.client_tiles = d.client_tiles;
         self.pimp_tiles = d.pimp_tiles;
         self.pimp_pass_up = d.pimp_pass_up;

@@ -74,6 +74,9 @@ pub struct LegLog {
     pub el_trips: Vec<[u32; 2]>,
     /// Every El leg done: its estimate at the start and its ticks.
     pub el_fit: Vec<(Tick, Tick)>,
+    /// C9a (OPEN-254's read): every El leg done by its start and end
+    /// districts: (count, tiles summed, the longest's tiles).
+    pub el_od: BTreeMap<(String, String), (u32, u64, u32)>,
     /// The island pass phase 9 (OPEN-181's device, `walk_tick`): each
     /// Coarse walker last tick.
     pub walk_track: BTreeMap<EntityId, WalkSeen>,
@@ -573,6 +576,17 @@ pub fn end(world: &mut World, id: EntityId, outcome: &'static str) {
     if s.mode == "el" && outcome == "done" {
         log.el_fit.push((s.est, ticks));
     }
+    let od = (s.mode == "el" && outcome == "done").then(|| {
+        let d = |t: TilePos| world.district_name(world.district_of(t)).to_string();
+        ((d(s.from), d(s.to)), s.from.manhattan(s.to))
+    });
+    let Some(log) = world.leg_log.as_mut() else { return };
+    if let Some((k, tiles)) = od {
+        let e = log.el_od.entry(k).or_default();
+        e.0 += 1;
+        e.1 += u64::from(tiles);
+        e.2 = e.2.max(tiles);
+    }
     let e = log.by_mode.entry(s.mode).or_default();
     e.0 += 1;
     e.1 += ticks;
@@ -652,6 +666,12 @@ pub fn tsv(world: &World) -> String {
             "#leader	{n}	{}	{}	{}	{}	{}
 ",
             id.index, r[0], r[1], r[2], r[3]
+        ));
+    }
+    for ((a, b), (n, t, max)) in &log.el_od {
+        out.push_str(&format!(
+            "#el_od	{a}	{b}	{n}	{t}	{max}
+"
         ));
     }
     for (m, (n, t)) in &log.by_mode {

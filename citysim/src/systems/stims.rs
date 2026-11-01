@@ -573,6 +573,16 @@ pub fn corner_source(world: &World, agent: EntityId) -> Option<TilePos> {
         .map(|t| (t.manhattan(from), t))
         .min()
         .map(|(_, t)| t)
+        .filter(|&t| within_stim_reach(world, agent, from, t))
+}
+
+/// C9a (`[distance.choice] stim_ticks`): a dose's source at `to` is within
+/// the body's own trip from `from` (always with the cap 0 or off).
+fn within_stim_reach(world: &World, agent: EntityId, from: TilePos, to: TilePos) -> bool {
+    let cap = crate::systems::distance::choice(world).map_or(0, |c| c.stim_ticks);
+    cap == 0
+        || world.config.exec.walk_ticks(crate::time::Tick::from(from.manhattan(to))) <= cap
+        || crate::systems::distance::trip(world, agent, from, to) <= cap
 }
 
 /// GetHigh's scripted plan when the nearer source is a corner: `GoTo(Spot)`,
@@ -720,6 +730,11 @@ pub fn stim_source(world: &World, agent: EntityId) -> Option<EntityId> {
     }
     let from = world.comp::<Position>(agent)?.tile;
     let door = |b: EntityId| world.comp::<Building>(b).map(|bd| bd.door.manhattan(from));
+    // C9a (`[distance.choice] stim_ticks`): the nearest source past the
+    // body's own trip cap is none (the craving was walked an hour across
+    // the island, mid-shift).
+    let within =
+        |b: EntityId| world.comp::<Building>(b).is_some_and(|bd| within_stim_reach(world, agent, from, bd.door));
     let bar = world
         .dealers
         .keys()
@@ -729,7 +744,7 @@ pub fn stim_source(world: &World, agent: EntityId) -> Option<EntityId> {
         .min()
         .map(|(_, b)| b);
     if bar.is_some() || !world.levers.stims_legal {
-        return bar;
+        return bar.filter(|&b| within(b));
     }
     world
         .buildings_of_kind(BuildingKind::Market)
@@ -739,6 +754,7 @@ pub fn stim_source(world: &World, agent: EntityId) -> Option<EntityId> {
         .filter_map(|b| door(b).map(|d| (d, b)))
         .min()
         .map(|(_, b)| b)
+        .filter(|&b| within(b))
 }
 
 /// The agent's source is a legal Market (GetHigh's lawfulness term is

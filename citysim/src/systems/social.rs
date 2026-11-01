@@ -622,8 +622,36 @@ pub fn marry(world: &mut World, a: EntityId, b: EntityId) {
         h.and_then(|h| w.comp::<Building>(h).map(|bd| w.residents_of(h).len() < usize::from(bd.capacity)))
             .unwrap_or(false)
     };
+    // C9a (OPEN-240, `companion_87767`: a marriage move-in 8 h from the
+    // post): with `[distance]` on, the move-in weighs the commutes. A Home
+    // is an option when it has room and the mover keeps his post's commute
+    // (`careers::spouse_commute_ok`: within `[life] commute_long_ticks`, or
+    // no longer than now); of the options the lower of the two commutes
+    // summed, ties the proposer's. No option: each keeps his own Home (the
+    // relocation brings a far couple together nearer work later).
+    let mut moved: Option<(EntityId, EntityId, EntityId, crate::time::Tick)> = None;
+    let mut apart = false;
     if home_a != home_b {
-        if room(world, home_a) {
+        if crate::systems::distance::on(world) {
+            let mut best: Option<(crate::time::Tick, usize, EntityId, EntityId, EntityId)> = None;
+            for (j, (h, mover, stayer)) in [(home_a, b, a), (home_b, a, b)].into_iter().enumerate() {
+                let Some(h) = h.filter(|&h| room(world, Some(h))) else { continue };
+                if !crate::systems::careers::spouse_commute_ok(world, mover, h) {
+                    continue;
+                }
+                let t = commute_from(world, mover, h) + commute_from(world, stayer, h);
+                if best.is_none_or(|(bt, bj, ..)| (t, j) < (bt, bj)) {
+                    best = Some((t, j, h, mover, stayer));
+                }
+            }
+            match best {
+                Some((_, _, h, mover, stayer)) => {
+                    world.set_home(mover, Some(h));
+                    moved = Some((mover, stayer, h, commute_from(world, mover, h)));
+                }
+                None => apart = room(world, home_a) || room(world, home_b),
+            }
+        } else if room(world, home_a) {
             world.set_home(b, home_a);
         } else if room(world, home_b) {
             world.set_home(a, home_b);
@@ -635,8 +663,40 @@ pub fn marry(world: &mut World, a: EntityId, b: EntityId) {
         .map_or_else(String::new, |c| format!(" after {} days of courting ({} dates)", c.days(world.tick), c.dates));
     world.courting.remove(&pair_key(a, b));
     world.push_event(EventKind::Marriage, &[a, b], format!("{na} married {nb}{courted}"));
+    // C9a: the move-in's line says what it weighed.
+    if let Some((mover, stayer, h, t)) = moved {
+        let work = if world.comp::<Job>(mover).and_then(|j| j.employer).is_some() {
+            format!(", {} from work", crate::systems::distance::hours(t))
+        } else {
+            String::new()
+        };
+        let text = format!(
+            "{} moved in with {} at {}{work} (the nearer of the two Homes to their work)",
+            world.name_of(mover),
+            world.name_of(stayer),
+            world.name_of(h)
+        );
+        world.push_event(EventKind::Housed, &[mover, stayer, h], text);
+    } else if apart {
+        world.push_event(
+            EventKind::Housed,
+            &[a, b],
+            format!("{na} and {nb} kept their own Homes: either would put one of them too far from work"),
+        );
+    }
     let d = crate::systems::gossip::talk_district(world, a);
     crate::systems::gossip::post_deed(world, d, crate::word::Deed::Married, Some(a), Some(b));
+}
+
+/// C9a: `id`'s commute from Home `h` to his post (`life::commute_cost`), 0
+/// with no post.
+fn commute_from(world: &World, id: EntityId, h: EntityId) -> crate::time::Tick {
+    let Some(work) =
+        world.comp::<Job>(id).and_then(|j| j.employer).and_then(|e| crate::systems::life::work_tile(world, id, e))
+    else {
+        return 0;
+    };
+    world.comp::<Building>(h).map_or(0, |b| crate::systems::life::commute_cost(world, b.door, work))
 }
 
 /// Chat completion's draw: one of the speaker's own SawCrime/WasRobbed

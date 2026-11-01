@@ -4542,6 +4542,12 @@ impl World {
         systems::vehicles::end_trip(self, id, false);
         systems::transit::end_ride(self, id);
         systems::motion::alight_now(self, id);
+        // C9a (measurement only): a leg ends at its walker's death (the log
+        // held it open until the corpse went: C8b's "aborted Coarse walks"
+        // of 2-3 days were the dead on their way, `elowen_17441 d22 10:45`).
+        if self.leg_log.is_some() {
+            crate::exec::leglog::end(self, id, "died");
+        }
         // M13 D38: a dead dealer deals no more.
         systems::stims::end_deal(self, id);
         // L2 L15 (review fix): nor hangs out at a spot.
