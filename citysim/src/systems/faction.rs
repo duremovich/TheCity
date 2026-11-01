@@ -457,8 +457,10 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
     let cfg = &world.config.gangs;
     let rival = world.rival_of(gang);
     let rg = rival.and_then(|r| world.comp::<Gang>(r));
-    let own_door = world.comp::<Building>(g.hideout).map(|b| b.door);
     let rival_door = rg.and_then(|r| world.comp::<Building>(r.hideout)).map(|b| b.door);
+    // The city milestone C8: the raid departs from the gang's Hideout nearest the rival's.
+    let own = rival_door.and_then(|t| crate::systems::vertical::nearest_to(world, gang, t)).unwrap_or(g.hideout);
+    let own_door = world.comp::<Building>(own).map(|b| b.door);
 
     // Inhabited Homes on our side of the midline, and how many are still unclaimed.
     // The perf pass phase 6: a Home is inhabited when a citizen (an

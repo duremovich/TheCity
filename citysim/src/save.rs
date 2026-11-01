@@ -523,7 +523,10 @@ use crate::world::World;
 /// step), `GotoTimed.climb`, `Building.lift`, `World.lifts` (the lobbies' calls), the map's `MapPortal`s and
 /// `MapBuilding.lift`, the `[levels]` keys and the `Jobs2Cols` `climbs` ... `deck_entries` columns (serde defaults);
 /// the portal graph is rebuilt on load; both island maps re-imported with `P` lines and `lift=`.
-pub const SAVE_VERSION: u8 = 121;
+/// 122 (the city milestone C8, the vertical gangs): `Gang.district_hideouts`, `Gang.raid_climb`,
+/// `LiftState.cut_until`, the `[vertical]` keys and the `Jobs2Cols` `hideouts_founded` ... `raid_heard` columns (serde
+/// defaults).
+pub const SAVE_VERSION: u8 = 122;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

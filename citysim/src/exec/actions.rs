@@ -329,10 +329,13 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
             in_open_clinic(world, id) && world.comp::<crate::components::Kit>(id).is_some_and(|k| k.chrome)
         }
         // M13 D38: inside the gang's Hideout with doses in its stock.
+        // C8: in any of its Hideouts, the stash the seat's (the cribs draw on it).
         ActionKind::PickUp => {
-            let hideout = world.gang_of(id).and_then(|g| world.hideout_of(g));
+            let gang = world.gang_of(id);
+            let hideout = gang.and_then(|g| world.hideout_of(g));
+            let here = world.comp::<Position>(id).and_then(|p| p.building);
             hideout.is_some()
-                && world.comp::<Position>(id).and_then(|p| p.building) == hideout
+                && here.is_some_and(|b| gang.is_some_and(|g| crate::systems::vertical::is_hideout_of(world, g, b)))
                 && hideout.is_some_and(|h| world.stock(h, crate::components::Good::Stims) > 0)
         }
         // M13 D38: inside the bound deal Bar with doses to sell.
@@ -380,8 +383,10 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         }),
         // M13 D35/D36: beside a body with chrome, or home with the one in tow.
         ActionKind::Rip => target.is_some_and(|b| {
-            let home = world.gang_of(id).and_then(|g| world.hideout_of(g));
-            let at_home = home.is_some() && world.comp::<Position>(id).and_then(|p| p.building) == home;
+            let here = world.comp::<Position>(id).and_then(|p| p.building);
+            let at_home = here.is_some_and(|b| {
+                world.gang_of(id).is_some_and(|g| crate::systems::vertical::is_hideout_of(world, g, b))
+            });
             let towed = crate::systems::chrome::dragging(world, id) == Some(b)
                 || world.comp::<Brain>(id).and_then(|x| x.carrying_corpse) == Some(b);
             (towed && at_home)
@@ -808,7 +813,9 @@ pub fn on_complete(
             let hideout_home = here.is_some()
                 && (crate::systems::gang::holes_up_at(world, id) == here
                     // L1: a member bedding down at the Hideout as its nearer bed.
-                    || (world.gang_of(id).and_then(|g| world.hideout_of(g)) == here));
+                    || here.is_some_and(|b| {
+                        world.gang_of(id).is_some_and(|g| crate::systems::vertical::is_hideout_of(world, g, b))
+                    }));
             // M12 D21: a booked Hotel bed is a bed (and marks HOTEL).
             let hotel = here.is_some() && crate::systems::street::booked_hotel(world, id) == here;
             let squat = here.is_some() && world.comp::<crate::components::Squatter>(id).map(|s| s.building) == here;
@@ -1483,6 +1490,10 @@ pub fn on_complete(
         ActionKind::Brawl => {
             // M12 phase 4: the first at the door waits for the crew.
             if crate::systems::raid::wait_for_crew(world, id) {
+                return StepResult::Running;
+            }
+            // The city milestone C8: the column climbs to the target's floor first.
+            if crate::systems::vertical::climb_column(world, id) {
                 return StepResult::Running;
             }
             crate::systems::raid::resolve(world, id);

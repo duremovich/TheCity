@@ -222,6 +222,10 @@ pub fn hideout_for(world: &World, id: EntityId) -> Option<EntityId> {
 /// [`hideout_for`] with `recruit_gang`'s answer supplied by the caller
 /// (Scale S4 perf: a plan context reads it for `eligible` too).
 pub fn hideout_with(world: &World, id: EntityId, recruit: impl FnOnce() -> Option<EntityId>) -> Option<EntityId> {
+    // The city milestone C8: a member's own Hideout, the nearest of his gang's.
+    if world.gang_of(id).is_some() {
+        return crate::systems::vertical::own_hideout(world, id);
+    }
     world
         .gang_of(id)
         .or_else(recruit)
@@ -246,6 +250,7 @@ pub fn on_watch(world: &World, id: EntityId) -> bool {
     // L1: the watch is stood by members who live within a walk of the
     // Hideout (or have no Home): a Spire member walked 5.5 h each way to it.
     let reach = 2 * world.config.life.commute_cap_tiles;
+    // C8: the watch is stood at the seat (the stash and the chest), by those within a walk of it.
     let door = world.comp::<Building>(g.hideout).map(|b| b.door);
     let near: Vec<(Tick, EntityId)> = roster
         .iter()
@@ -283,7 +288,14 @@ pub fn holes_up_at(world: &World, id: EntityId) -> Option<EntityId> {
     if g.is_sacked(world.tick) || !(g.order == Order::LieLow || homeless || watch) {
         return None;
     }
-    let b = world.comp::<Building>(g.hideout)?;
+    // The city milestone C8: his own Hideout (the nearest of the gang's to his
+    // Home) lying low or homeless; the watch at the seat (the stash and the chest).
+    let hq = if watch && g.order != Order::LieLow && !homeless {
+        g.hideout
+    } else {
+        crate::systems::vertical::own_hideout(world, id)?
+    };
+    let b = world.comp::<Building>(hq)?;
     // Shadow V4 bug 11: lying low or homeless, not a bed past `[gangs]
     // hole_up_max_tiles` (a sweeper walked 901 min to his Hideout bed at
     // 20k; the watch is already stood from within a walk, `on_watch`).
@@ -294,8 +306,8 @@ pub fn holes_up_at(world: &World, id: EntityId) -> Option<EntityId> {
         && world.comp::<crate::components::Position>(id).is_some_and(|p| p.tile.manhattan(b.door) > max);
     // The island fix round F2 (OPEN-191, D2 = A): a housed member, the
     // watch included, only within the walk and tomorrow's commute.
-    let far = far || (!homeless && crate::systems::beds::hideout_ok(world, id, g.hideout) == Some(false));
-    (!far && (!b.is_full() || b.occupants.contains(&id))).then_some(g.hideout)
+    let far = far || (!homeless && crate::systems::beds::hideout_ok(world, id, hq) == Some(false));
+    (!far && (!b.is_full() || b.occupants.contains(&id))).then_some(hq)
 }
 
 /// JoinGang at the Hideout: join the gang `recruit_gang` names.
@@ -1646,6 +1658,13 @@ fn claim(world: &mut World, actor: EntityId, home: EntityId) -> Option<String> {
     if count < CLAIM_HELD {
         return None;
     }
+    // The city milestone C8 (vertical turf): a tall Home another gang holds
+    // is taken floor by floor, the upper half carved off as its own Home.
+    if let Some(&h0) = holders.first() {
+        if let Some(upper) = crate::systems::vertical::split_claim(world, home, gang, h0) {
+            return Some(upper);
+        }
+    }
     let mut suffix = None;
     for h in holders {
         if let Some(g) = world.comp_mut::<Gang>(h) {
@@ -1801,6 +1820,8 @@ pub fn run(world: &mut World) {
     crate::systems::turf::hourly(world);
     if daily {
         crate::prof::timed!("gang::turf_daily", crate::systems::turf::daily(world));
+        // The city milestone C8: the district Hideouts, the lifts held.
+        crate::prof::timed!("gang::vertical_daily", crate::systems::vertical::daily(world));
     }
     for gang in world.gangs() {
         // M12 D36: a decapitation this tick may split the gang. M17 phase

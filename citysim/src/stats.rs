@@ -1692,6 +1692,30 @@ pub struct Jobs2Cols {
     pub hops_stairs: u32,
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub deck_entries: u32,
+    /// The city milestone C8 (`systems::vertical`): district Hideouts
+    /// founded today and standing at midnight, lifts a gang took hold of
+    /// today and held at midnight, lifts cut today, raids that climbed to
+    /// their target's floor (by the lift among them) and the bodies on the
+    /// floors passed who heard one.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub hideouts_founded: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub hideouts_standing: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub lift_holds: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub lifts_held: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub lift_cuts: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub raid_climbs: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub raid_climb_lift: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub raid_heard: u32,
+    /// C8: claims that took a held tower's upper floors (`vertical::split_claim`).
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub floor_claims: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -2325,6 +2349,15 @@ impl Jobs2Cols {
                 "hops_escalator",
                 "hops_stairs",
                 "deck_entries",
+                "hideouts_founded",
+                "hideouts_standing",
+                "lift_holds",
+                "lifts_held",
+                "lift_cuts",
+                "raid_climbs",
+                "raid_climb_lift",
+                "raid_heard",
+                "floor_claims",
             ]
             .into_iter()
             .map(str::to_string),
@@ -2952,6 +2985,15 @@ impl Jobs2Cols {
             self.hops_escalator.to_string(),
             self.hops_stairs.to_string(),
             self.deck_entries.to_string(),
+            self.hideouts_founded.to_string(),
+            self.hideouts_standing.to_string(),
+            self.lift_holds.to_string(),
+            self.lifts_held.to_string(),
+            self.lift_cuts.to_string(),
+            self.raid_climbs.to_string(),
+            self.raid_climb_lift.to_string(),
+            self.raid_heard.to_string(),
+            self.floor_claims.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

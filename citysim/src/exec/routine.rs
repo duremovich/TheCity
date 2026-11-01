@@ -662,7 +662,7 @@ fn idle_near(world: &World, id: EntityId, home: Option<EntityId>) -> Option<Plan
         return None;
     }
     let margin = world.config.life.bed_margin_tiles;
-    if let Some(h) = world.gang_of(id).and_then(|g| world.hideout_of(g)) {
+    if let Some(h) = crate::systems::vertical::own_hideout(world, id) {
         if life::tiles_to(world, id, h).is_some_and(|t| t + margin <= home_t) {
             let steps = vec![step(ActionKind::GoTo(LocationKey::Hideout), Some(h)), step(ActionKind::Rest, None)];
             return Some(plan(GoalKind::Idle, Some(h), steps, world.tick));

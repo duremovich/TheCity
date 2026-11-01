@@ -559,6 +559,105 @@ over the front's sign. **Shadow:** gang_leader, gang_member, raider, pimp, guard
 100k run: a raid that lands, quoted from a member's diary. **Numbers:** Hideouts per gang, Hideout legs 4 h+ (F2's
 119), musters reached, raids landed, wars, Succession lines, `harm_blocked`.
 
+**C8 as built (2026-11-01).** As above (`systems/vertical.rs`, `[vertical]` its keys), with these deviations: (1) **The
+seat and the district Hideouts.** A gang's map Hideout stays its **seat** (`Gang.hideout`: the stash, the armoury, the
+node, the chest, the raid's target, the try-out); at the build it moves up to its host's top storey (`seat_up`: the
+shop-house's flats keep the rest of the span, so the 20 seats stand on floors 6-9 over the ground units they held).
+Each midnight a gang founds **one** Hideout (`found_per_day`) in a district where it holds a turf cell and has none
+(`Gang.district_hideouts`, saved): a vacant unit of a host there (C6b's index), on its highest free storey (a Home
+host's top flat storey when every other is used, its span shrunk under it): over a front the gang runs first
+(`leisure::front_gang`), then hosts of `min_storeys` 3 or more, then over any **front** (a venue, a `unit_kinds` shop
+or a Market on the ground), then nearest the mean of its held
+cells there. The key money (`found_cost` 120, the Register's price) goes to the landlord as `Flow::Sale`; a gang
+holding less pays what it has and moves in (nobody evicts a gang). A Hideout is never given up when the turf goes
+(a finding). A member's **own Hideout** is the nearest of his gang's to his Home door (`vertical::own_hideout`):
+`LocationKey::Hideout`, `life::hideout_bed`, the idle Rest, the lie-low and the homeless's bed
+(`gang::holes_up_at`); **the watch stays at the seat** (members within a walk of it: the stash is there). PickUp
+works in any of the gang's Hideouts, drawing the seat's stash. (2) **The raid's departure:** `raid::muster_point`'s
+fallback and `pick_muster`'s candidates take the gang's Hideouts (each within `muster_near_tiles` of the target, else
+the nearest), and the brain's rival-in-reach reads from the gang's Hideout nearest the rival's seat. The raid's
+**target stays the rival's seat** (where the chest and the stash are); a corp prize's reach is still read from the
+seat. (3) **Vertical turf, claims:** a claim's third blow on a Home another gang holds, of `split_min_storeys` (12)
+or more, takes its **upper half** instead (`vertical::split_claim`): a Home tenancy carved from the span (the share of
+its slots and storeys, its rent and owner), the residents whose flats stood there moved into it (`set_home`), the
+claim held on it; the lower floors stay the holder's (a `TerritoryFlipped` line "took floors 10-18 of Block#468 from
+The Unplugged 10 ... floors 2-9 stay The Unplugged 10's"). The turf cell is still presence on the street. Ambient
+flats stay on the host. (4) **The lift as turf:** a gang holds the lift of a host its Hideout stands in while it
+holds the cell of the host's door (`hold_lifts`, at the midnight pass; `LiftState.held_by`): `levels::plan` takes
+the climber (`who`), its members' calls skip the queue, anyone else waits `held_wait_ticks` (4) more and takes the
+stairs when they are quicker. A raid won or a Hideout sacked cuts the loser's lift (`raid_cut_days` 3, "cut the
+lift of Block#3399: the cables of The Red Brothers' tower cut on the way out of the raid"); a landlord short on a
+lift host's power (`industry::power`, a person's purse) stops its cars (`power_cut_days` 2: "The lift of Bar#5756
+stopped: its landlord Garrick Singh came up short on the power (1 of 3)"); `LiftState.cut_until` ends a cut at the
+midnight pass ("runs again"). Each hold, release and cut is a line to the gang, the tower and the members whose own
+Hideout climbs it. **No sabotage cut and no landlord's answer to a gang's unpaid floor rent** (the brief's
+mid-phase addition did not arrive). (5) **The raid climbs:** the Brawl step, after `wait_for_crew`, holds while the
+column climbs (`vertical::climb_column`, `Gang.raid_climb`): the gathered raiders (fewer than `raid_min_members`: no
+climb, `resolve` calls it off at the door) by the lift with `lift_max_raiders` (6) or fewer and a lift running and
+not held by another gang, else the stairs (`levels::stairs`), booked as one climb; the line names how and why ("went
+up the stairs of Block#3758 to the Glass Teeth Hideout on floor 8 (no lift), 4 min up"); the fight resolves at its
+end as before. The bodies inside the structure on the floors passed (by the lift: the lobby) hear it (`hear_cap` 12,
+a `Witness` line and a sighting of the column's head; the residents at home counted, an off-screen body being in no occupants list). The view places a raider on the climb at the target's door on
+the storey reached (`exec::climb_place`). **The law climbs** in a corp raid only (`vertical::climbing_guards`: the
+answering guards whose walk plus the stairs to the floor is past the answer's reach stay out, with a line); a gang
+raid has no law at the door to climb. (6) **The hard rule:** the column and the defenders are the raid's as before
+(`ages::is_protected` out); hearing, holding and cutting a lift harm nobody; a split claim moves residents into a Home
+of the same tower. `harm_blocked` 0 in every run. (7) **Statistical mirror:** `fviolence::member_district` files a
+homeless member under his own Hideout's district, as it filed him under the one Hideout's. (8) `SAVE_VERSION` 122
+(`Gang.district_hideouts`, `Gang.raid_climb`, `LiftState.cut_until`, the `[vertical]` keys, the `Jobs2Cols`
+`hideouts_founded` ... `floor_claims` columns; serde defaults); `run --report`'s `#vertical` line. The map is
+unchanged (no re-import, no fixture regenerated). No test added.
+
+**The numbers** (seed 42 x 30, `--scaled --ambient-flats 50`, 8 threads, `--legs`, one run each; the 20k before is
+main `ff55c7c`, the 100k before C7's after; the 100k after is one commit short of the branch head (the front
+preference and the hearers at home came after it) and shared the box with the 100k shadow for most of its days):
+
+| | 20k before | 20k after | 100k before (C7) | 100k after |
+|---|---|---|---|---|
+| Hideouts per living gang (upstairs) | 1.00 (seats on floor 0) | 2.08: 83 for 40 (72) | 1.00 | 1.58: 317 for 200 (283) |
+| district Hideouts founded (over a front; over its own) | 0 | 43 (41; 3) | 0 | 117 (116; not printed) |
+| Hideout legs 2 h+ / 4 h+ (F2's island 119 at 4 h+) | 0 / 0 | 0 / 0 | | 1 / 1 (one stuck Coarse walk, 1,061 tiles, aborted) |
+| legs over 120 min (30 d) | 8 | 3 | 32 | 32 |
+| raids departed / marchers / at the door | 59 / 613 / 602 | 49 / 472 / 466 | | 228 / 2,392 / 2,346 |
+| raids landed (corp or Jail; gang) | 54 (39; 15) | 45 (33; 12) | | 209 (147; 62) |
+| gang raids: raiders / defenders a raid; Won-Sacked-Lost | 8.2 / 3.6; 6-4-5 | 6.8 / 0.8; 4-8-0 | | 11.5 / 1.0; 16-43-3 |
+| raids called off at the door | 10 | 11 | | 25 |
+| raid climbs (by the lift) / heard by tenants | 0 | 11 (0) / 3 | 0 | 63 (1) / 38 |
+| wars (`turf_wars`) / Succession lines | 57 / 427 | 70 / 429 | | 242 / 1,961 |
+| lift holds taken (held d30) / cuts (power; raid) | 0 / 0 | 59 (30) / 14 (9; 5) | 0 | 179 (81) / 33 |
+| floors claimed from a holder (`floor_claims`) | 0 | 14 | 0 | 18 |
+| `harm_blocked` | 0 | 0 | | 0 |
+| ticks/s days 25-30 | 120/129/131/126/124/119 | 132/127/127/126/127/124 | ~11.5 | 11/11/10/10/11/11 (shared) |
+
+The mechanism fires and reads in the diaries; the gang numbers move within one run's noise (raids landed 54 -> 45,
+wars 57 -> 70) except one: **a seat holds fewer defenders** (3.6 -> 0.8 a gang raid at 20k, 1.0 at 100k; sacks 4 ->
+8, losses 5 -> 0): the members sleep and idle at their own Hideout nearer home, so the seat a raid hits is near empty
+(the watch stays at the seat, `night_watch` of the members within a walk). A finding for the next pass, not a knob.
+No raid took the lift (1 of 63 at 100k): the target's own gang holds its lift, or the shop-house has none. Ticks/s at
+20k are flat; at 100k the run is C7's within the shared box. Nothing retuned.
+
+**Camera** (`c8/cam` in the session scratchpad, `cityview --save --follow --bench one --shots`, from `run --save-at`):
+`c8_climb_26977_d20_2218.png` / `_2222.png` (`--hide-mass`) and `c8_climb_mass_26977_d20_2218` / `_2222` / `_2224`,
+Hesper Haas of The Cinder Crows at the Glass Teeth's door in Block#3758 at 22:18 (z 3.5 m, the ground) and on the
+stairs at 22:22 (z 17 m, the cutaway round her in the tower), the column's capsules with her;
+`c8_hideout_2964_z160_d20_2101.png`, Block#2964 at 21:00: The Drowned Choir 8's Hideout sign lit on floor 9 (green,
+high on the facade) over the Noodle Bar#6784 sign at the door (yellow). **Shadow** (20k days 20-23 pinned:
+gang_leader x 2, gang_member x 3, guard, cultist, no pimp in the pick; then unpinned gang_member x 40, gang_leader x 10
+for the raid; 100k days 20-22 unpinned, the same): `gang_member_26977` (Hesper Haas) "d20 19:07 GOAL Raid ... GoTo
+(MusterPoint) -> Hideout#5773 (D1 The Sump), floor 6 of Block#3049, 34 min", "d20 22:20 Raid: The Cinder Crows'
+raiders (11) went up the stairs of Block#3758 to the Glass Teeth Hideout on floor 8 (no lift), 4 min up", "d20 22:24
+Raid on the Glass Teeth Hideout: The Cinder Crows won (10 raiders, 2 defenders); ... 135c"; `gang_member_7515` works
+the Brothel on floor 0 of Block#601 and climbs to his gang's Hideout on floor 37 of it ("GoTo(Hideout) @ Brothel#6139
+... -> Hideout#33300, floor 37 of Block#601, 2 tiles", "CLIMB up by the lift ... floor 0 to 37") and hears "The
+Drowned Choir 7 took the lift of Block#601"; 100k `gang_leader_85572` (Razor Kaneda) "d20 22:21 The Static Teeth
+Splinter 180's raiders (9) went up the stairs of Block#1685 to the Static Rats Hideout on floor 6 (the lift held by
+The Static Rats), 3 min up", "d20 22:24 ... won (9 raiders, 0 defenders); 92c and 3 food". What reads wrong: the
+seat a raid hits is near empty (above); creed and splinter Hideouts built on Lots stay on the ground (no climb at
+them); a Hideout is never given up when its turf goes; most floors claimed are empty towers ("0 living up there":
+the Squat order claims empty Homes); the same few Bar landlords' lifts stop every few days; few tenants hear a climb
+(an off-screen resident is rarely at home on the floors passed at 22:00); the raid's text says "won" against 0
+defenders (the Sacked outcome's line).
+
 ### C9, far travel re-read on the new city (TheCity; `distance.rs`, `careers.rs`, `household.rs`, `social.rs`, `relocation`; `OPEN-221`, `OPEN-240`)
 
 First a read, then the fix for what is left. One 100k run in V17's window with the travel archetypes' diaries

@@ -995,7 +995,11 @@ pub fn presence(world: &World, d: DistrictId) -> Vec<(Controller, f32)> {
         }
         if bd.kind == BuildingKind::Hideout && hideouts.contains(&b) {
             // A gang's own Hideout is its presence, whoever holds the deed.
-            if let Some(&g) = world.gang_list().iter().find(|&&g| world.comp::<Gang>(g).is_some_and(|x| x.hideout == b))
+            // C8: a district Hideout as the seat.
+            if let Some(&g) = world
+                .gang_list()
+                .iter()
+                .find(|&&g| world.comp::<Gang>(g).is_some_and(|x| x.hideout == b || x.district_hideouts.contains(&b)))
             {
                 add(&mut out, Controller::Gang(g), wts.owned_other);
             }

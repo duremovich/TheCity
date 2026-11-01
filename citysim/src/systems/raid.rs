@@ -241,14 +241,19 @@ pub fn muster_point(world: &World, agent: EntityId) -> Option<MusterAt> {
             // ordered, while it stands.
             if let Some(b) = world.comp::<Gang>(gid).and_then(|g| g.raid_muster) {
                 if let Some(bd) = world.comp::<Building>(b).filter(|bd| !bd.demolished) {
-                    return Some(if world.hideout_of(gid) == Some(b) {
+                    return Some(if crate::systems::vertical::is_hideout_of(world, gid, b) {
                         MusterAt::Inside(b)
                     } else {
                         MusterAt::Door(world.outside_door(bd))
                     });
                 }
             }
-            let hideout = world.hideout_of(gid);
+            // The city milestone C8: the gang's Hideout nearest the target (its departure).
+            let target_door = gang_target(world, gid).and_then(|b| world.comp::<Building>(b)).map(|b| b.door);
+            let hideout = match target_door {
+                Some(t) => crate::systems::vertical::nearest_to(world, gid, t),
+                None => world.hideout_of(gid),
+            };
             let near = world.config.gangs.muster_near_tiles;
             if near > 0 {
                 if let Some(t) = gang_target(world, gid).and_then(|b| world.comp::<Building>(b)).map(|b| b.door) {
@@ -318,11 +323,21 @@ pub fn pick_muster(world: &World, gid: EntityId) -> Option<(EntityId, usize, usi
     cands.sort_unstable_by_key(|&(d, h, _)| (d, h));
     cands.truncate(n);
     // The Hideout, within `muster_near_tiles` of the door or with no held
-    // Home there (the march from it must make the door in its window).
-    if let Some(h) = world.hideout_of(gid) {
-        let at = world.comp::<Building>(h).map(|b| (b.door.manhattan(t), h, b.door));
-        cands.extend(at.filter(|&(d, _, _)| d <= near || cands.is_empty()));
+    // Home there (the march from it must make the door in its window). The
+    // city milestone C8: each of the gang's Hideouts within it, else its
+    // nearest to the door.
+    let hs: Vec<(u32, EntityId, TilePos)> = crate::systems::vertical::hideouts_of(world, gid)
+        .into_iter()
+        .filter_map(|h| world.comp::<Building>(h).map(|b| (b.door.manhattan(t), h, b.door)))
+        .collect();
+    let none_near = cands.is_empty();
+    let mut within: Vec<(u32, EntityId, TilePos)> = hs.iter().copied().filter(|&(d, _, _)| d <= near).collect();
+    if within.is_empty() && none_near {
+        within.extend(
+            crate::systems::vertical::nearest_to(world, gid, t).and_then(|h| hs.iter().copied().find(|x| x.1 == h)),
+        );
     }
+    cands.extend(within);
     // The fit adults' Home doors (a minor never marches: the under-18 rule).
     let homes: Vec<(EntityId, TilePos)> = g
         .members
@@ -1301,7 +1316,19 @@ pub fn corp_brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
         }
     }
     let posted_n = summoned.len();
-    for g in answering_guards(world, d, door, &defenders) {
+    // The city milestone C8: the answer climbs to the target's floor too.
+    let mut answering = answering_guards(world, d, door, &defenders);
+    let stayed = crate::systems::vertical::climbing_guards(world, target, &mut answering);
+    if stayed > 0 {
+        let floor = world.comp::<Building>(target).and_then(|b| b.span).map_or(0, |(lo, _)| lo);
+        let text = format!(
+            "The beat's guards climbed to {} on floor {floor}: {} made it up, {stayed} too far to come in time",
+            world.name_of(target),
+            answering.len()
+        );
+        world.push_event(EventKind::Raid, &[target], text);
+    }
+    for g in answering {
         summoned.push(g);
         defenders.push(g);
     }
@@ -1454,6 +1481,10 @@ fn settle(world: &mut World, gid: EntityId, rival: EntityId, outcome: Outcome) {
             gang::push_shock(world, rival, Shock::Raided);
             // Round 6 V5 (TURF § 3): a raid won moves the cells about the Hideout.
             crate::systems::turf::raid_moves(world, gid, rival);
+            // The city milestone C8: the loser's lift cut on the way out.
+            if let Some(h) = world.hideout_of(rival) {
+                crate::systems::vertical::raid_cut(world, gid, rival, h);
+            }
         }
         Outcome::Sacked => {
             let Some((loot, rival_hideout, rival_name)) =
@@ -1491,6 +1522,8 @@ fn settle(world: &mut World, gid: EntityId, rival: EntityId, outcome: Outcome) {
             gang::push_shock(world, rival, Shock::Sacked);
             // Round 6 V5: and a Hideout sacked.
             crate::systems::turf::raid_moves(world, gid, rival);
+            // The city milestone C8: the loser's lift cut on the way out.
+            crate::systems::vertical::raid_cut(world, gid, rival, rival_hideout);
             let gname = world.comp::<Gang>(gid).map_or_else(String::new, |g| g.name.clone());
             world.push_event(
                 EventKind::Sacked,

@@ -122,6 +122,7 @@ pub mod treasury;
 pub mod turf;
 pub mod underwater;
 pub mod vehicles;
+pub mod vertical;
 pub mod vice;
 pub mod virt;
 pub mod wages;

@@ -3371,6 +3371,11 @@ pub struct Gang {
     /// This gang's Hideout building.
     #[serde(default = "EntityId::none")]
     pub hideout: EntityId,
+    /// The city milestone C8 (`systems::vertical`): its Hideouts beyond the
+    /// seat (`hideout`, which keeps the stash, the armoury and the node), one
+    /// per district it held turf in when founded, ascending.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub district_hideouts: Vec<EntityId>,
     /// Standing order from the faction brain.
     #[serde(default)]
     pub order: Order,
@@ -3427,6 +3432,10 @@ pub struct Gang {
     /// = `raid::muster_point`'s rule.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raid_muster: Option<EntityId>,
+    /// The city milestone C8: the standing raid's column climbing to its
+    /// target's floor (`vertical::climb_column`), while it climbs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raid_climb: Option<crate::systems::vertical::RaidClimb>,
     /// M12 D40: the roster emptied after having members (a dead gang, not a
     /// fresh one); cleared by the next recruit.
     #[serde(default)]
@@ -3538,6 +3547,7 @@ impl Gang {
             leader: None,
             empty_since: Some(0),
             hideout,
+            district_hideouts: Vec::new(),
             order: Order::Expand,
             order_since: 0,
             order_trace: Vec::new(),
@@ -3555,6 +3565,7 @@ impl Gang {
             split_check: None,
             raid_target: None,
             raid_muster: None,
+            raid_climb: None,
             emptied: false,
             claims_cleared: false,
             split_from: None,

@@ -4927,6 +4927,30 @@ portal_lift_wait_ticks = 1.0       # a station lift's call; the ride at lift_tic
 escalator_speed = 1.5              # walking on the moving stair: 1.4 m/s walked + ~0.7 m/s of the stair (the path search's
                                    # Manhattan step drops to the escalator's cost a tile, so its bound stays admissible)
 
+# The city milestone C8 (docs/CITY_MILESTONE.md § C8, Dylan's answer 5, 2026-10-30; systems/vertical.rs): the vertical
+# gangs. A gang's seat (the map's Hideout) moves up to the top storey of its host; each midnight a gang founds a Hideout
+# in each district where it holds a turf cell and has none (a vacant unit on the top storey of a host there, over a front
+# when one stands: a venue on the ground), the key money to the landlord. bed_of, the watch, the lie-low, the muster and
+# the raid's departure take the member's nearest Hideout (the stash, the armoury and the node stay at the seat). The
+# lift is turf: a gang holds the lift of a host its Hideout stands in while it holds the door's cell (its members ride
+# first, anyone else waits held_wait_ticks more or takes the stairs); a raid won cuts the loser's lift, a landlord short on
+# the power cuts his host's. A raid climbs to its target's floor: by the lift with lift_max_raiders or fewer and a lift
+# running and not held by the target, else the stairs; the floors it passes hear it; the answering guards climb too.
+# Without this table: one Hideout a gang on the map's floor, no lift held or cut, the raid fights at the door. Placeholders.
+[vertical]
+seat_up = true                     # the seat's Hideout on its host's top storey (the flats keep the rest)
+found_per_day = 1                  # district Hideouts a gang founds a midnight at most
+found_cost = 120                   # the key money (a founding's Register price); a poorer gang moves in on what it has
+min_storeys = 3                    # a host of three storeys or more first (the upper floors over a front)
+hold_lifts = true                  # a gang holds the lift of a host its Hideout stands in while it holds the door's cell
+held_wait_ticks = 4.0              # a non-member waits four minutes more in a held lobby (the gang's ride first)
+raid_cut_days = 3                  # a raid won cuts the loser's lift for three days
+power_cut_days = 2                 # a landlord short on the power: his host's lift stops two days
+lift_max_raiders = 6               # half a car: more than six raiders take the stairs (the lobby is the choke)
+hear_cap = 12                      # tenants a raid's climb is told to, at most
+split_min_storeys = 12             # a claim on another gang's Home of 12 storeys or more takes its upper half (a Home
+                                   # tenancy carved from the span, its households with it): two gangs' floors in a tower
+
 # The island pass phase 4 (docs/ISLAND_PASS.md I2, Dylan 2026-10-22; systems/commute.rs): a far job is a pressure that
 # resolves over weeks. Each midnight a worker whose commute (distance::travel, the Home door to the work tile) is past
 # far_ticks builds a day of pressure (a nearer one drops it). Past move_days the household looks for a Home nearer work

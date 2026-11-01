@@ -600,6 +600,8 @@ pub fn power(world: &mut World, b: EntityId, owner: Option<EntityId>, p: i64) {
     let to = world.owner_of(plant);
     let paid = ownership::charge(world, owner, to, p, Flow::Power);
     ownership::credit(world, plant, paid);
+    // The city milestone C8: a landlord short on a lift host's power, the cars stop.
+    crate::systems::vertical::power_cut(world, b, owner, paid, p);
     // A plant powering its own owner's building moves no coins, but it
     // burns the fuel all the same.
     let fuel = (p as f32 * world.config.jobs2.fuel_share).round() as i64;
