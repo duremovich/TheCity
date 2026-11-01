@@ -1,96 +1,98 @@
 # Handoff: now
 
 Rewritten at every session end; never appended. The session logs are `docs/history/SESSIONS.md`. Last rewrite:
-**2026-10-31, the twenty-ninth session: the big-picture check, pressure pass round 9 (the last: Y1-Y4, Z1-Z3),
-Shadow V18 (the exit read), the pressure pass closed, the city milestone planned.**
+**2026-11-01, the thirtieth session: the city milestone (C1-C9a) built and closed, Shadow V19.**
 
 ## Main
 
-Main holds **the closed pressure pass** (`docs/PRESSURE_PASS.md`, § "Round 9 from Shadow V17" and every phase's
-entry under "Implemented: deviations"). Change tier green over the Z set (3m03s on `33b8a17`); tests 1,470 (none
-added; 73 pinned to the old pace through `common::r2`, `OPEN-252`). `SAVE_VERSION` 118.
+Main holds **the closed city milestone** (`docs/CITY_MILESTONE.md`, each phase's "as built" and § "Closed
+(2026-11-01)"): the Bevy client in the workspace, the follow-cam on a save, the El on rail, floors as tenancies, levels
+and lifts, vertical gangs, the Spire's storeys, far travel re-read. Change tier green on main after the close's fix
+round (`[change] GREEN; BUDGET OK 3m37s of 4m00s`, on `d41f927`); tests 1,472; `SAVE_VERSION` 125;
+`assets/stat_table.toml` is the pre-regen table (the 2k regen was reverted, `OPEN-255`).
 
 | phase | what it added |
 |---|---|
-| Y1 hunger in the brain (`fixes::eat_holds`, `[brain] food_tried_*`, `[wounded] care_feed_hunger`) | a started Eat holds, survival first when starving, a failed source tries the next (bin, kitchen, Market, Home, a theft for the less lawful); a laid-up patient is fed |
-| Y2 contradictions that are state (`law::on_leave`, `call_backup`, `[justice] backup_*`, `[careers] evicted_days`) | no arrests on leave, the boss inside named, a holed-up leader leads nothing, the second guard, a fare beat is word of the law's force |
-| Y3 the narration | a byline, the Camp's count past 64 names, cover shifts, the day_labourer pick |
-| **Y4 the walking pace** (`[exec] walk_tiles_per_tick` 21, `step_res`, `ExecCfg::walk_ticks`) | people walk 5 km/h (was 0.24 km/h); every pace reader moved; cars 5x, the El 30 km/h; tile caps that were minutes kept as minutes |
-| Z1 the avenger (`hunt.rs`, `[hunt]` Z1 keys, `EventKind::Hunt`) | a killing's grudge hunts (friends too), asks around, waits, hands off when weak, reaches into the cells; every end says how; the killer hears |
-| Z2 the taker (`contracts::walk_in_pick`, `ActionKind::TakeJob`, `[fixers]` Z2 keys) | a body takes a contract in person at the Fixer's desk; the mark hears by five routes |
-| Z3 the children of the jailed (`camp::jailed_households`) | a child whose adults are all held goes to the Camp the same day (Dylan's call) |
+| C1 the workspace join | `view/glclient`, `view/cityview` (Bevy 0.19.1) as members outside `default-members`; `test.py view` (budget 7 min) |
+| C2 the follow-cam | `citysim::view::snapshot`, `export-view`, `cityview --save --follow --shots`, `SimThread`, `shadow --save-at` |
+| C3, C4 (TheCityGraphics) | the El on rail (4 lines, 20 stations, the duplicate tram cut); export `city-sim/0.2` (levels, cores, portals) |
+| C5 the re-import | both maps from rail.json and the 0.2 export |
+| C6a, C6b floors as tenancies | a tenancy is a `Building` `within` a host (`span`, `units`); 100k Lots 1,415 -> 8,000; floor rent (`Flow::FloorRent`), founding into units |
+| C7 levels and lifts | `ExecState::Climb`, `World.lifts`, walkway portals; stairs at a person's pace |
+| C8, C8b, C9b vertical gangs | Hideouts on floors, raids climb, lifts held and cut, the Spire 30-60 storeys, the landlord's answer ladder, nearest-Hideout raids |
+| C9a far travel | the Farm deal, the body's own trip and fare, a move-in weighs both commutes; 100k legs over 120 min 33 -> 0 |
+| the close's god fix | three god scenarios re-read against Y4 and X4; `household::camp_visit` sees every child of the parent held |
 
-**Shadow V18** (`docs/SHADOW_V18.md`, `docs/shadow_v18/`): the exit's five stories all shown (1 and 4 after Z1, Z2),
-nobody starving while Eat loses, frozen days only in the cells, no minor harmed in 237 diaries. 100k seed 42 x 30
-(`target/r9_100k/` against `target/r8_100k/`, FINDINGs): starvation 45 -> 0, Starving 11.4k -> 1.1k, raids land
-(441), violent deaths 464 -> 756, Murder 244 -> 389, Arrests 13.9k -> 23.1k, jailed mean 1,373 -> 3,133 (max 6,747,
-~6 % of the city), ticks/s 18.2 -> 14.2 (on main before Z1-Z3).
+**Shadow V19** (`docs/SHADOW_V19.md`, `docs/shadow_v19/`): exit 1, 3, 5 met; 2 met with a gap (the raid's climb is the
+event's line, not the member's body, `OPEN-264`); 4 partial (a climb and a lift ride on camera; the replay drifts
+from the diary within hours, `OPEN-270`; riders drawn on a white slab, `OPEN-271`); **6 missed: 100k 11 ticks/s and
+one 14.5 s tick at 21:00 every day** (`OPEN-265`). No minor harmed, `harm_blocked` 0. Housing cut the city's violence
+(Murder 389 -> 272, evictions 7,242 -> 192) on a run that carried the 2k-calibrated table: re-read on the next 100k run.
 
-## Decided (Dylan, 2026-10-30/31)
+## The close's tiers and report
 
-- **The pressure pass is over** (roadmap addendum 22): it had an exit and met it. Do not open a round 10 from a ranked
-  list; what reads wrong goes to `OPEN.md`.
-- **The city milestone is next** (`docs/CITY_MILESTONE.md`, Dylan's answers in it): the Bevy client joins the
-  workspace FIRST (CLAUDE.md's standing decision rewritten); the vertical city is pathed levels (floors as tenancies,
-  a z, stairs and lifts as portals, lifts a place too, footbridges; no below ground); `k = 2`; a landlord rents floors;
-  agents here may write TheCityGraphics on its own branches.
-- **The pace is real walking speed now**, to be tuned visually once the follow-cam stands; the cells' load
-  (`OPEN-256`) waits for that.
-- **Children:** a child whose parents are all jailed goes to the Camp (Z3); a homeless child may be fine if he can
-  fend for himself (a later feature, `OPEN-258`); the neglect ladder's size stays (`OPEN-231`).
+Merge `[merge] RED (god); BUDGET OK 7m33s of 8m00s` (three god scenarios, fixed in `100c7cd`, merged `d41f927`);
+milestone `[milestone] GREEN; BUDGET OK 11m36s of 20m00s`; lint 0 problems, 10 warnings (files over 1,500 lines).
 
-## In flight
+| tier | last run | wall | budget | |
+|---|---|---|---|---|
+| change | main `d41f927` green | 3m37s | 4m00s | ok |
+| merge | 20261101-151324 RED (fixed after) | 7m33s | 8m00s | ok |
+| milestone | 20261101-152639 green | 11m36s | 20m00s | ok |
+| view | C9a's branch green | 6m44s | 7m00s | ok |
 
-- No agents are running; no worktrees.
-- `target/shadow_v18/`, `target/r9_100k/`, `target/z1/` hold the runs.
+God scenarios 20 of cap 20; asserted bullets 60 of 60; ignores 56. Every cap met.
+
+## Decided (Dylan, this session)
+
+- The planners' calls in three batches (in the spec's "Dylan's answers" 6-8): the El's routes, D2 offices at one per
+  500 m^2 (a placeholder), the view at real time, the Spire's storeys, the landlord's answer, nearest-Hideout raids.
+- **No street-crossing cost until there is a 3D world to look at** (traffic, lights): `OPEN-260`, the view milestone.
+- **No Lua**: config hot-reload in the view instead (`OPEN-262`).
 
 ## Next, in order
 
-1. **The city milestone, wave 1** (`docs/CITY_MILESTONE.md` § Phases): C1 the workspace join (TheCity + TheCityGraphics
-   `engine/`) beside C3 the El on rail and the duplicate tram (TheCityGraphics). Then wave 2: C2 the follow-cam on a
-   save beside C4 the export for 100k and levels. Then C5 the re-import, C6a/C6b tenancies, C7 levels and lifts, C8
-   the vertical gangs, C9 far travel re-read. One Opus coder per phase; WORKSPACE_JOIN.md is stale in the ways the
-   planner listed (in the spec's "What exists").
-2. At the city milestone's first close: regenerate `assets/stat_table.toml` and read 100k ticks/s on the full Z build
-   (`OPEN-255`); the merge and milestone tiers as prints (not run at the pressure pass's close).
-3. After it: the view milestone (the camera ring `OPEN-149`, the pace tuned by eye, then `OPEN-256`), M18.
+1. **The view milestone.** First phase: config hot-reload (`OPEN-262`). Then a perf phase on the 21:00 tick and 100k
+   ticks/s (`OPEN-265`), the camera's replay and drawing (`OPEN-270`, `OPEN-271`), the ring (`OPEN-149`), the pace
+   tuned by eye, street crossing (`OPEN-260`), the cells (`OPEN-256`).
+2. **Calibrate the stat table where bodies ride** (20k or the 100k island; `calibrate` reads the 2k map today), then
+   one 100k run to re-read the El, Murder and violence (`OPEN-255`, `OPEN-254`).
+3. Then M18 against the 3D client.
 
-Open from this session: `OPEN-252` (the R2-pinned tests and four behavioural probes), `OPEN-253` (arrival churn,
-PlanAborted 277k at 20k), `OPEN-254` (the El and cabs at a walking city), `OPEN-255`, `OPEN-256` (the cells),
-`OPEN-257` (the wrong person named), `OPEN-258` (street children), `OPEN-259` (V18's dull and wrong rooms). Carried:
-`OPEN-217`, `OPEN-220`, `OPEN-212`, `OPEN-150`, `OPEN-179`, `OPEN-229`, `OPEN-231`; standing `OPEN-062`, `OPEN-039`,
-`OPEN-057`, `OPEN-059`, `OPEN-077`, `OPEN-069`, `OPEN-070`.
+Open from this session: `OPEN-260` to `OPEN-271` (`OPEN-264` the raid's body, `265` perf, `266` the lift a constant,
+`267` corp lives, `268` contradictions and loops, `269` the vertical city's leftovers, `270`/`271` the camera). Closed:
+`OPEN-158`, `187`, `191`, `204`, `240`, `241`. Carried: `OPEN-221`, `254`, `255`, `256`, `257`, `252`, `253`, `258`,
+`259`, `217`, `220`, `212`, `150`, `179`, `229`, `231`; standing `OPEN-062`, `039`, `057`, `059`, `077`, `069`, `070`.
 
 ## Process notes from this session
 
-- **A big-picture check paid for itself**: the city milestone's planner, not a shadow critic, found the pace (a
-  constant read in every system); eight rounds of diary reads had patched its symptoms. When a class of bug recurs
-  across rounds, look for the constant under it.
-- **An exit turns a loop into a pass**: V18 graded five named stories instead of ranking seven items, and two
-  targeted phases closed it.
-- **A stories critic across every diary and the event log** read the exit better than the group critics (who called
-  story 1 "found" on an attack with no hunt behind it); keep one for any story-shaped exit.
-- **A pace change butterflies a third of the suite**; Y4 pinned 73 tests to the old pace in one helper rather than at
-  their killers (the budget): fine once, but re-pin or delete each file as phases touch it (`OPEN-252`).
-- Deleting a worktree's `target/` while its agent still has a background job running kills that job; wait for the
-  final notification.
+- **Calibrate where the mechanism lives.** The stat table regen ran on the 2k map, where nobody rides at the real pace;
+  it zeroed every Statistical ride, killed the El at 100k and broke the change tier. Read a regenerated table's
+  diff before committing it.
+- **A close-only merge tier finds stale scenarios late** (two of three were Y4 and X4): cheap at the close ($7).
+- **The follow-cam is not yet a proof tool**: without determinism, a replay from a save parts from the shadow's diary
+  within hours. Record the shadow's frames rather than reintroduce a determinism gate (`OPEN-270`).
+- C7 and C9a blew the 300-turn brief (501, 550 turns): split such phases at planning.
 
-## Cost (API-rate $ equivalent, `tools/session_cost.py --last 1`)
+## Cost (API-rate $ equivalent, `tools/session_cost.py --last 1`, this session's part)
 
 | part | agent | turns | median ctx | $ |
 |---|---|---|---|---|
-| Y1 hunger in the brain | Opus | 246 | 165k | 18 |
-| Y2 contradictions that are state | Opus | 332 | 209k | 22 |
-| Y3 the narration | Sonnet | 68 | 75k | 2 |
-| Y4 the walking pace | Opus | 486 | 278k | **60** |
-| Z1 the avenger | Opus | 353 | 246k | 32 |
-| Z2 the taker | Opus | 261 | 215k | 19 |
-| Z3 the children of the jailed | Sonnet | 34 | 64k | 1 |
-| the city milestone planner | Opus | 105 | 132k | 6 |
-| Shadow V18 critics (8) | Sonnet | 610 | 98-149k | 24 |
-| orchestrator (the check, plans, merges, runs, synthesis) | Opus | 282 | 194k | 25 |
+| C1 the workspace join | Opus | 278 | 149k | 11 |
+| C3 the El on rail | Opus | 230 | 248k | 14 |
+| C4 the export | Opus | 104 | 183k | 6 |
+| C2 the follow-cam | Opus | 249 | 218k | 20 |
+| C5 the re-import | Opus | 258 | 171k | 24 |
+| C6a tenancies: the map and store | Opus | 345 | 293k | 39 |
+| C6b tenancies: the economy | Opus | 442 | 297k | 50 |
+| C7 levels and lifts | Opus | 501 | 361k | **62** |
+| C8 the vertical gangs | Opus | 400 | 289k | 38 |
+| C8b the Spire's storeys | Opus | 223 | 160k | 14 |
+| C9b gang leftovers | Opus | 232 | 205k | 25 |
+| C9a far travel | Opus | 550 | 271k | **73** |
+| the close's god fix | Opus | 117 | 96k | 7 |
+| Shadow V19 critics (8) and the watch | Sonnet | 655 | 103-119k | 22 |
+| orchestrator (merges, briefs, runs, synthesis) | Opus | ~360 | 151k | ~30 |
 
-Round 9 and the close ≈ $209 for seven phases, the exit read and the city plan (round 8 ≈ $258). Y4 blew the
-300-turn brief (486): a pace touches every system and a third of the suite.
-
-The standing decisions, the doctrine and the agent rules are in `CLAUDE.md`; the tiers in `docs/TESTING.md`.
+The city milestone ≈ $435 for twelve phases, the exit read and the close. No agents or worktrees are left; the
+runs are in `target/v19/` (the day-21 save, diaries, counters, tier prints).

@@ -1053,3 +1053,24 @@ starvation 45 -> 0, raids land, the cells at 6 % of the city. Z1 the avenger (ki
 under the hunt line), Z2 the taker (a body takes a contract in person at the Fixer's desk; the mark hears), Z3 the
 children of the jailed (Dylan's call) closed the pass; the Z set's tier green. `SAVE_VERSION` 118, tests 1,470 (none
 added). `OPEN-249` to `OPEN-251`, `OPEN-215` closed; `OPEN-252` to `OPEN-259` opened. Cost ≈ $209 (HANDOFF § Cost).
+
+
+## The thirtieth session (2026-10-31/11-01): the city milestone C1-C9a, Shadow V19, the milestone closed
+
+The city milestone (`docs/CITY_MILESTONE.md`) ran one Opus coder per phase: C1 joined the Bevy client to the workspace
+(the change tier stayed Bevy-free, 3m22s), C3 and C4 in TheCityGraphics put the El on rail (4 lines, 20 stations) and
+exported schema 0.2 (164,750 levels), C2 built the follow-cam on a save, C5 re-imported both maps, C6a/C6b made floors
+tenancies (100k Lots 1,415 -> 8,000, homeless 12,690 -> 2,249, floor rent to a landlord), C7 climbs and lifts, C8 the
+vertical gangs (raids climb, lifts held and cut), C8b the Spire's real storeys, C9b the landlord's answer ladder and
+nearest-Hideout raids, C9a far travel on the new city (100k legs over 120 min 33 -> 0; a coin lost in
+`gang::split_loot` found by core_sanity seed 44). Dylan approved the planners' calls in three batches, deferred any
+street-crossing cost until there is a 3D world to look at (`OPEN-260`), and chose config hot-reload in the view over a
+Lua layer (`OPEN-262`). `SAVE_VERSION` 119 -> 125 (collisions renumbered at merge), tests 1,472. The close: the stat
+table regenerated on the 2k map zeroed every Statistical ride (the El dead at 100k, the change tier red) and was
+reverted; the merge tier red on three god scenarios (two stale against Y4 and X4, one a real Camp-visit gap), fixed
+in one short Opus round; the milestone tier green. Shadow V19 at 100k (eight Sonnet critics and a follow-cam
+watch): the vertical city reads (a home, post and evening in one block in 11 of 118 picks; gangs hold floors over
+fronts; 42 raids climb; the landlord hires a beating on a gang leader), the avenger shown in a diary for the first
+time, no minor harmed; the lift never queues, the camera's replay drifts from the diary within hours, and 100k runs
+at 11 ticks/s with a 14.5 s tick at 21:00 every day. `OPEN-158`, `187`, `191`, `204`, `240`, `241` closed; `OPEN-260`
+to `OPEN-271` opened. Cost ≈ $435 (HANDOFF § Cost).

@@ -851,6 +851,35 @@ and one tram, with the PNGs in the report; (5) no minor harmed, `harm_blocked` p
 25-30 at or above ~25, the change tier within 4 min with no Bevy in it, the view tier green and timed. What reads
 wrong goes to OPEN; the view milestone (`OPEN-149`, `OPEN-180`'s rest) follows, then M18.
 
+## Closed (2026-11-01): the exit read and the deviations
+
+**Shadow V19** (`docs/SHADOW_V19.md`, `docs/shadow_v19/`) read the exit on main `41c31b2` with the stat table
+regenerated (`f630f5f`): (1) **met** (a home, post and evening in one block in 11 of 118 picks; no leg past 120 min in
+816 pick-days, C5's 33 -> 0); (2) **met, with a gap** (gangs hold floors over fronts and lifts, 42 raids climb, the
+landlord answers a gang; the member's own body does not climb with the raid, `OPEN-264`); (3) **met** (longest
+Hideout leg 64 min); (4) **partial** (a climb and a lift ride on camera; the footbridge, escalator and El ride not
+verified because the camera's replay drifts from the diary within hours, `OPEN-270`; riders drawn on a white slab,
+`OPEN-271`; no tram rider in the diaries); (5) **met** (`harm_blocked` 0 every day); (6) **missed on ticks/s** (100k
+11 ticks/s on days 24-29 against ~25, one 14.5 s tick at 21:00 every day, `OPEN-265`); the change tier 2m58s without
+Bevy and the view tier 6m44s green (both on C9a's branch).
+
+**Deviations from the plan, with their rows:**
+- C9 was split (C9b the landlord's ladder and nearest-Hideout raids; C9a far travel) and C8b (Spire towers of 30-60
+  real storeys, TheCityGraphics `6390473`) was added on Dylan's call; each phase's "as built" says what it built.
+- D2's offices are a placeholder density (one per 500 m^2 of upper-floor plate, C4), Dylan's call, to revisit once the
+  view shows them.
+- Street crossing costs nothing (the D2 footbridges carry ~4 a day): deferred to the view milestone by Dylan
+  (`OPEN-260`); C9 changed choices only, not walking.
+- Corps grow onto Lots, not into units (`OPEN-261`); the 100k Farm shortfall (502 of 600, `OPEN-263`).
+- The stat-table regen on the 2k map zeroed every Statistical ride and was reverted (`6875a4a`, `OPEN-255` open: calibrate where bodies ride); housing cut the city's
+  violence (Murders 389 -> 272, evictions 7,242 -> 192): printed, to come back through features (doctrine 5).
+- The lift never queues off a gang hold (`OPEN-266`); the vertical city's leftovers (company housing with no flat,
+  floorless HQs and Farms, gang rent as pocket change) are `OPEN-269`.
+- The merge tier at the close: RED on three god scenarios (two stale against Y4 and X4, one a real gap: a Camp visit saw only the lower-id child), fixed in `100c7cd`; the milestone tier green (11m36s).
+
+**Next:** the view milestone, config hot-reload first (`OPEN-262`), a perf phase on the 21:00 tick (`OPEN-265`), the
+camera's replay and drawing (`OPEN-270`, `OPEN-271`), the ring (`OPEN-149`), the pace tuned by eye, then M18.
+
 ## Risks and costs
 
 - **Build and disk:** a cold Bevy build is minutes and ~5 GB of `target/` in each worktree that builds the view
