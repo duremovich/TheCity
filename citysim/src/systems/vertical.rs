@@ -22,6 +22,20 @@
 //!   (`ages::is_protected` out), and hearing harms nobody.
 //! - **Statistical mirror:** the order-rates ledger files a homeless member under his own Hideout's district
 //!   (`fviolence::member_district`), as it filed him under the one Hideout's; a Statistical body does not climb.
+//! - **C9b, the raid on the nearest Hideout** ([`raid_pick`], `[vertical.raids]`): a gang raid ordered on a rival
+//!   lands on the rival's Hideout nearest the raiders' own (`Gang.raid_hideout`, `raid::rival_target`), the seat
+//!   when it is that one or the raiders are `seat_ratio` times the rival; a district Hideout won or sacked gives up
+//!   `take_frac` of the chest, its food and goods, the cells about it and its lift, and the gang is not sacked
+//!   (the seat stands). **The seat keeps a standing guard**: `seat_guard` members (tonight's watch first) posted
+//!   there at `[crew] guard_hour` under every order (`crew::post_gang`), kept out of the muster
+//!   (`crew::seat_guard_today`, `raid::raid_pending`) and holding the night there (`gang::holes_up_at`).
+//! - **C9b, the landlord's answer** ([`landlord_pass`], `[vertical.landlord]`): a gang Hideout `answer_days` short
+//!   on its floor rent gets its landlord's next move ([`LandlordMove`]) by who he is and what he has: swallow it as
+//!   protection (the rent waived, [`rent_waived`]), send the Precinct up (Extortion reports on the adults on the
+//!   floor), hire muscle (a Beat on the floor's boss through the nearest Fixer, `Origin::Landlord`), cut the power to
+//!   the lift ([`cut_lift`]), sell the tower to a buyer who will deal with the gang (`corps::acquire`); the gang's
+//!   leader holds a grudge on him (`GrudgeCause::Evicted`). Under 18 nobody is reported, beaten or grudged.
+//!   Statistical mirror: building-level, blind to tier; a report on a Statistical member is the same warrant.
 
 use serde::{Deserialize, Serialize};
 
@@ -859,4 +873,487 @@ pub fn report(world: &World) -> Vec<String> {
         gangs.len(),
         total as f64 / gangs.len().max(1) as f64
     )]
+}
+
+// ---------------------------------------------------------------------------
+// C9b: the raid on the nearest Hideout, the seat's standing guard
+// ---------------------------------------------------------------------------
+
+/// `gang`'s fit adults: living, free, over 18 (a minor never marches).
+fn fit_adults(world: &World, gang: EntityId) -> usize {
+    world.comp::<Gang>(gang).map_or(0, |g| {
+        g.members
+            .iter()
+            .filter(|&&m| {
+                crate::systems::law::living(world, m)
+                    && !world.has::<crate::components::Sentence>(m)
+                    && !crate::systems::ages::is_protected(world, m)
+            })
+            .count()
+    })
+}
+
+/// C9b: the rival Hideout a raid of `gang` on `rival` lands on, chosen when the raid is ordered: the rival's
+/// Hideout nearest any of the raiders' own (by the door; ties the seat, then the lower id), or the seat (the
+/// chest and the stash) when it is that one or the raiders' fit adults are `[vertical.raids] seat_ratio` times
+/// the rival's. `None` off (the seat, `raid::rival_target`).
+pub fn raid_pick(world: &World, gang: EntityId, rival: EntityId) -> Option<EntityId> {
+    let c = cfg(world)?.raids.as_ref()?;
+    let seat = world.hideout_of(rival)?;
+    let theirs = hideouts_of(world, rival);
+    if theirs.len() <= 1 {
+        return Some(seat);
+    }
+    let ours: Vec<TilePos> =
+        hideouts_of(world, gang).into_iter().filter_map(|h| world.comp::<Building>(h).map(|b| b.door)).collect();
+    let nearest = theirs
+        .iter()
+        .filter_map(|&h| {
+            let door = world.comp::<Building>(h)?.door;
+            let d = ours.iter().map(|o| o.manhattan(door)).min()?;
+            Some((d, h != seat, h))
+        })
+        .min()
+        .map_or(seat, |x| x.2);
+    if nearest == seat || fit_adults(world, gang) as f32 >= c.seat_ratio * fit_adults(world, rival) as f32 {
+        return Some(seat);
+    }
+    Some(nearest)
+}
+
+/// `b` is `gang`'s seat (the map's Hideout: the chest, the stash, the node).
+pub fn is_seat(world: &World, gang: EntityId, b: EntityId) -> bool {
+    world.comp::<Gang>(gang).is_some_and(|g| g.hideout == b)
+}
+
+/// C9b: of tonight's watch, the members `[vertical.raids] seat_guard` posts to the seat; 0 off.
+pub fn seat_guard_n(world: &World) -> usize {
+    cfg(world).and_then(|c| c.raids.as_ref()).map_or(0, |r| usize::from(r.seat_guard))
+}
+
+/// C9b: the share of the rival's chest a raid on Hideout `at` takes: `None` at the seat (the old rule), else
+/// `[vertical.raids] take_frac`.
+pub fn take_frac(world: &World, rival: EntityId, at: EntityId) -> Option<f32> {
+    let c = cfg(world)?.raids.as_ref()?;
+    (!is_seat(world, rival, at)).then_some(c.take_frac)
+}
+
+/// The label of a raid's target Hideout `at` of `rival` for the raid's lines: "the seat, floor 8 of Block#3758"
+/// or "its nearest Hideout, floor 9 of Block#2964".
+pub fn raid_where(world: &World, rival: EntityId, at: EntityId) -> String {
+    let host = world.comp::<Building>(at).and_then(|b| b.within);
+    let floors = crate::systems::floors::span_text(world, at);
+    let place = match (host, floors.is_empty()) {
+        (Some(h), false) => format!("{floors} of {}", world.name_of(h)),
+        (Some(h), true) => world.name_of(h),
+        (None, _) => world.name_of(at),
+    };
+    if is_seat(world, rival, at) {
+        format!("the seat, {place}")
+    } else {
+        format!("its nearest Hideout, {place}")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// C9b: the landlord's answer to a gang that will not pay its floor rent
+// ---------------------------------------------------------------------------
+
+/// A landlord's move on a gang's unpaid floor rent.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LandlordMove {
+    /// The debt swallowed as protection: the rent waived, a standing arrangement.
+    Swallow,
+    /// The Precinct sent up to the floor: the adults found there reported.
+    Law,
+    /// A Beat on the floor's boss through the nearest Fixer.
+    Muscle,
+    /// The power to the lift cut.
+    Cut,
+    /// The tower sold to a buyer who will deal with the gang.
+    Sell,
+}
+
+/// `World.floor_answers`: a gang's Hideout short on its floor rent, the landlord's answer so far.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FloorAnswer {
+    /// The landlord who answered (a new one starts his own ladder).
+    pub landlord: Option<EntityId>,
+    /// The gang the moves were on.
+    pub gang: EntityId,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tried: Vec<LandlordMove>,
+    pub last_day: u64,
+    /// The debt swallowed: the floor rent waived while this landlord and this gang stand.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub swallowed: bool,
+}
+
+/// C9b: tenancy `t`'s floor rent is swallowed by its landlord (`floors::floor_rent_for` reads 0).
+pub fn rent_waived(world: &World, t: EntityId) -> bool {
+    world.floor_answers.get(&t).is_some_and(|a| {
+        a.swallowed
+            && world.comp::<Building>(t).is_some_and(|b| b.owner == Some(a.gang))
+            && world.comp::<Building>(t).and_then(|b| b.within).and_then(|h| world.owner_of(h)) == a.landlord
+    })
+}
+
+/// Who decides for landlord `l`: a person himself, a corp's exec, a gang's leader; the city nobody.
+fn landlord_head(world: &World, l: Option<EntityId>) -> Option<EntityId> {
+    match ownership::owner_kind(world, l) {
+        ownership::OwnerKind::City => None,
+        ownership::OwnerKind::Agent(a) => Some(a),
+        ownership::OwnerKind::Corp(c) => world.comp::<crate::components::Corp>(c).and_then(|c| c.exec),
+        ownership::OwnerKind::Gang(g) => world.comp::<Gang>(g).and_then(|g| g.leader),
+    }
+}
+
+/// The landlord's ladder of moves, by who he is: the city calls the law; a fearful person whose door cell the
+/// gang holds swallows it; a lawful one (a person, a corp's exec) calls the law first, else the muscle; then the
+/// lift, then the sale. A gang landlord: its muscle, the lift, the sale.
+fn ladder(
+    world: &World,
+    c: &crate::config::LandlordCfg,
+    landlord: Option<EntityId>,
+    gang: EntityId,
+    host: EntityId,
+) -> Vec<LandlordMove> {
+    use LandlordMove::*;
+    let kind = ownership::owner_kind(world, landlord);
+    let (courage, lawful) = landlord_head(world, landlord)
+        .and_then(|w| world.comp::<crate::components::Personality>(w))
+        .map_or((0.5, 0.5), |p| (p.courage, p.lawfulness));
+    match kind {
+        ownership::OwnerKind::City => vec![Law, Cut, Sell],
+        ownership::OwnerKind::Gang(_) => vec![Muscle, Cut, Sell],
+        _ => {
+            let door = world.comp::<Building>(host).map(|b| b.door);
+            let held = door.and_then(|d| crate::systems::turf::holder_at(world, d)) == Some(gang);
+            if matches!(kind, ownership::OwnerKind::Agent(_)) && held && courage < c.swallow_courage {
+                return vec![Swallow];
+            }
+            if lawful >= c.law_lawfulness {
+                vec![Law, Muscle, Cut, Sell]
+            } else {
+                vec![Muscle, Law, Cut, Sell]
+            }
+        }
+    }
+}
+
+/// A free adult of `gang` (the hard rule: a minor is nobody's target).
+fn adult_member(world: &World, m: EntityId) -> bool {
+    crate::systems::law::living(world, m)
+        && !world.has::<crate::components::Sentence>(m)
+        && !crate::systems::ages::is_protected(world, m)
+}
+
+/// The floor's boss: of `gang`'s free adults inside `t`, else whose own Hideout it is, the strongest; else the
+/// gang's head. Never a minor.
+fn floor_boss(world: &World, gang: EntityId, t: EntityId) -> Option<EntityId> {
+    let g = world.comp::<Gang>(gang)?;
+    let inside: Vec<EntityId> = g
+        .members
+        .iter()
+        .copied()
+        .filter(|&m| adult_member(world, m) && world.comp::<Position>(m).is_some_and(|p| p.building == Some(t)))
+        .collect();
+    let pool: Vec<EntityId> = if inside.is_empty() {
+        g.members.iter().copied().filter(|&m| adult_member(world, m) && own_hideout(world, m) == Some(t)).collect()
+    } else {
+        inside
+    };
+    let best = pool
+        .into_iter()
+        .map(|m| (crate::systems::raid::strength(world, m), m))
+        .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)));
+    best.map(|x| x.1).or_else(|| g.leader.filter(|&l| adult_member(world, l)))
+}
+
+/// The buyer who will deal with `gang` on a tower for sale at `price`: its rival gang, else the richest corp in
+/// Housing; never the seller or the gang.
+fn buyer_for(world: &World, gang: EntityId, seller: Option<EntityId>, price: i64) -> Option<EntityId> {
+    if let Some(r) = world.rival_of(gang).filter(|&r| Some(r) != seller && world.purse(Some(r)) >= price) {
+        return Some(r);
+    }
+    world
+        .corps()
+        .into_iter()
+        .filter(|&c| Some(c) != seller)
+        .filter(|&c| {
+            world
+                .comp::<crate::components::Corp>(c)
+                .is_some_and(|x| x.niches.contains(&crate::components::Niche::Housing))
+        })
+        .map(|c| (world.purse(Some(c)), c))
+        .filter(|&(p, _)| p >= price)
+        .max_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)))
+        .map(|x| x.1)
+}
+
+/// The tower's price: a Home's value and `[floors] floor_cost_frac` a storey past the first, x `sell_mult`.
+fn tower_price(world: &World, c: &crate::config::LandlordCfg, host: EntityId) -> i64 {
+    let floors = world.comp::<Building>(host).map_or(1, |b| b.floors.max(1));
+    let v = ownership::value(world, BuildingKind::Home) as f32;
+    let extra = f32::from(floors - 1) * world.config.floors.floor_cost_frac;
+    (v * (1.0 + extra) * c.sell_mult).round() as i64
+}
+
+/// The midnight (after the rent pass, `floors::rent_pass`): each gang Hideout `[vertical.landlord] answer_days`
+/// short in a row gets its landlord's next move ([`ladder`]), and again every `again_days` while it stays
+/// short; a swallow ends it. Each move is a `Floor` line to the landlord, the gang, its leader and the members
+/// whose own Hideout it is; every move but the swallow is a grudge of the leader's on the landlord (the gang's
+/// answer). Under 18 nobody is named, reported or beaten.
+pub fn landlord_pass(world: &mut World) {
+    let Some(c) = cfg(world).and_then(|v| v.landlord.clone()) else { return };
+    let today = world.day();
+    let mut short: Vec<(EntityId, EntityId, EntityId, Option<EntityId>, u8, i64)> = Vec::new();
+    for gang in world.gangs() {
+        // A gang nobody belongs to (a creed before its first convert) is nobody to answer.
+        if world.comp::<Gang>(gang).is_none_or(|g| g.members.is_empty()) {
+            continue;
+        }
+        for t in hideouts_of(world, gang) {
+            let Some(b) = world.comp::<Building>(t) else { continue };
+            let Some(host) = b.within else { continue };
+            if b.owner != Some(gang) || b.floor_arrears == 0 {
+                continue;
+            }
+            short.push((t, gang, host, world.owner_of(host), b.floor_arrears, b.floor_rent));
+        }
+    }
+    // The answers whose floor paid up (two rungs' time ago: a day paid in full is not the debt cleared),
+    // changed hands or fell: let go.
+    let live: std::collections::BTreeSet<EntityId> = short.iter().map(|x| x.0).collect();
+    let forget = 2 * u64::from(c.again_days);
+    let stale: Vec<EntityId> = world
+        .floor_answers
+        .iter()
+        .filter(|(t, a)| {
+            !live.contains(t) && !rent_waived(world, **t) && (a.last_day + forget <= today || !standing(world, **t))
+        })
+        .map(|(&t, _)| t)
+        .collect();
+    for t in stale {
+        world.floor_answers.remove(&t);
+    }
+    ownership::jobs2_row(world).gang_rent_debts = short.len() as u32;
+    for (t, gang, host, landlord, arrears, rent) in short {
+        if arrears < c.answer_days || landlord == Some(gang) {
+            continue;
+        }
+        let rec = world.floor_answers.get(&t).filter(|a| a.landlord == landlord && a.gang == gang).cloned();
+        if rec.as_ref().is_some_and(|a| a.swallowed || a.last_day + u64::from(c.again_days) > today) {
+            continue;
+        }
+        let mut rec =
+            rec.unwrap_or(FloorAnswer { landlord, gang, tried: Vec::new(), last_day: today, swallowed: false });
+        let debt = rent * i64::from(arrears);
+        let moves: Vec<LandlordMove> =
+            ladder(world, &c, landlord, gang, host).into_iter().filter(|m| !rec.tried.contains(m)).collect();
+        let mut done = None;
+        for m in moves {
+            if answer(world, &c, m, t, gang, host, landlord, debt) {
+                done = Some(m);
+                break;
+            }
+            rec.tried.push(m);
+        }
+        // Nothing left on the ladder: he lets it stand.
+        let m = match done {
+            Some(m) => m,
+            None => {
+                answer(world, &c, LandlordMove::Swallow, t, gang, host, landlord, debt);
+                LandlordMove::Swallow
+            }
+        };
+        if !rec.tried.contains(&m) {
+            rec.tried.push(m);
+        }
+        rec.last_day = today;
+        rec.swallowed = m == LandlordMove::Swallow;
+        if m == LandlordMove::Sell {
+            // The new landlord answers in his own time.
+            world.floor_answers.remove(&t);
+        } else {
+            world.floor_answers.insert(t, rec);
+        }
+        if m == LandlordMove::Swallow {
+            if let Some(b) = world.comp_mut::<Building>(t) {
+                b.floor_arrears = 0;
+                b.floor_rent = 0;
+            }
+        }
+        let row = ownership::jobs2_row(world);
+        match m {
+            LandlordMove::Swallow => row.landlord_swallow += 1,
+            LandlordMove::Law => row.landlord_law += 1,
+            LandlordMove::Muscle => row.landlord_muscle += 1,
+            LandlordMove::Cut => row.landlord_cut += 1,
+            LandlordMove::Sell => row.landlord_sell += 1,
+        }
+    }
+}
+
+/// The members of `gang` whose own Hideout is `t` (a line's actors: their diaries), 12 at most.
+fn floor_members(world: &World, gang: EntityId, t: EntityId) -> Vec<EntityId> {
+    let Some(g) = world.comp::<Gang>(gang) else { return Vec::new() };
+    g.members.iter().copied().filter(|&m| own_hideout(world, m) == Some(t)).take(12).collect()
+}
+
+/// One landlord's move on tenancy `t` of `gang`; false when he cannot make it (no lift, no purse, no buyer).
+#[allow(clippy::too_many_arguments)]
+fn answer(
+    world: &mut World,
+    c: &crate::config::LandlordCfg,
+    m: LandlordMove,
+    t: EntityId,
+    gang: EntityId,
+    host: EntityId,
+    landlord: Option<EntityId>,
+    debt: i64,
+) -> bool {
+    let who = world.owner_label(landlord);
+    let gname = world.comp::<Gang>(gang).map_or_else(String::new, |g| g.name.clone());
+    let leader = world.comp::<Gang>(gang).and_then(|g| g.leader);
+    let head = landlord_head(world, landlord);
+    let (floors, tower) = (crate::systems::floors::span_text(world, t), world.name_of(host));
+    let mut actors: Vec<EntityId> = landlord.into_iter().collect();
+    actors.extend(head);
+    actors.push(gang);
+    actors.extend(leader);
+    actors.extend(floor_members(world, gang, t));
+    actors.extend([t, host]);
+    let text = match m {
+        LandlordMove::Swallow => format!(
+            "{who} let {gname}'s floor rent on {floors} of {tower} stand ({debt}c owed): their men keep the thieves and the rivals off the tower; a standing arrangement now"
+        ),
+        LandlordMove::Law => {
+            if world.law().is_none() {
+                return false;
+            }
+            let Some(g) = world.comp::<Gang>(gang) else { return false };
+            // The hard rule: a minor found on the floor is named to nobody.
+            let mut named: Vec<EntityId> = g
+                .members
+                .iter()
+                .copied()
+                .filter(|&x| adult_member(world, x) && world.comp::<Position>(x).is_some_and(|p| p.building == Some(t)))
+                .take(6)
+                .collect();
+            let found = named.len();
+            if named.is_empty() {
+                named.extend(floor_boss(world, gang, t));
+            }
+            if named.is_empty() {
+                return false;
+            }
+            let witness = head.filter(|_| landlord.is_some());
+            let names = named.iter().map(|&x| world.name_of(x)).collect::<Vec<_>>().join(", ");
+            let up = if found > 0 {
+                format!("{found} found up there and reported for extortion: {names}")
+            } else {
+                format!("nobody up there; {names} reported for extortion")
+            };
+            let text = format!(
+                "{who} sent the Precinct up to {floors} of {tower}: {gname} will not pay the floor rent ({debt}c owed); {up}"
+            );
+            for &x in &named {
+                crate::systems::law::file_report_as(world, crate::components::Crime::Extortion, x, witness, None);
+            }
+            actors.extend(named);
+            text
+        }
+        LandlordMove::Muscle => {
+            if landlord.is_none() {
+                return false;
+            }
+            let Some(boss) = floor_boss(world, gang, t) else { return false };
+            let target = crate::contract::Target::Agent(boss);
+            let door = world.comp::<Building>(host).map(|b| b.door).unwrap_or_default();
+            let broker = crate::systems::contracts::nearest_fixer_to(world, door);
+            let quote = crate::systems::contracts::quote(world, crate::contract::ContractKind::Beat, &target, broker);
+            if world.purse(landlord) < quote + c.muscle_reserve {
+                return false;
+            }
+            let r = crate::systems::contracts::brain_post_with(
+                world,
+                landlord,
+                head,
+                crate::contract::ContractKind::Beat,
+                target,
+                broker,
+                crate::contract::Origin::Landlord,
+                None,
+                crate::contract::PostExtra::default(),
+            );
+            if r.is_err() {
+                return false;
+            }
+            let via = broker.map_or_else(|| "direct".to_string(), |f| format!("through {}", world.name_of(f)));
+            actors.push(boss);
+            actors.extend(broker);
+            format!(
+                "{who} hired muscle {via}: a beating for {} of {gname}, who runs {floors} of {tower} and will not pay the floor rent ({debt}c owed; {quote}c on the board)",
+                world.name_of(boss)
+            )
+        }
+        LandlordMove::Cut => {
+            let core = levels::core_of(world, t);
+            let lift = world.comp::<Building>(core).is_some_and(|b| b.lift.is_some());
+            // A floor on the ground climbs no lift.
+            let up = world.comp::<Building>(t).and_then(|b| b.span).is_some_and(|(lo, _)| lo > 0);
+            if c.cut_days == 0 || !lift || !up || world.lifts.get(&core).is_some_and(|s| s.cut) {
+                return false;
+            }
+            let text = capital(&format!(
+                "{who} cut the power to the lift of {}: {gname} will not pay the floor rent on {floors} ({debt}c owed)",
+                world.name_of(core)
+            ));
+            actors.sort_unstable();
+            actors.dedup();
+            if !cut_lift(world, core, c.cut_days, &text, &actors) {
+                return false;
+            }
+            grudge(world, c, leader, landlord);
+            return true;
+        }
+        LandlordMove::Sell => {
+            let price = tower_price(world, c, host);
+            let Some(buyer) = buyer_for(world, gang, landlord, price) else { return false };
+            let why = format!("{gname} on {floors} and {debt}c owed: let them deal with it");
+            if !crate::systems::corps::acquire(world, buyer, host, price, &why) {
+                return false;
+            }
+            crate::systems::floors::reindex(world);
+            actors.push(buyer);
+            format!(
+                "{who} sold {tower} to {} for {price}: {gname} will not pay the floor rent on {floors} ({debt}c owed), the buyer will deal with them",
+                world.owner_label(Some(buyer))
+            )
+        }
+    };
+    actors.sort_unstable();
+    actors.dedup();
+    world.push_event(EventKind::Floor, &actors, capital(&text));
+    if m != LandlordMove::Swallow {
+        grudge(world, c, leader, landlord);
+    }
+    true
+}
+
+/// The gang's answer in turn: its leader's grudge on the landlord (a person, a corp, a gang; the city none).
+/// Never on a minor (an heir's tower).
+fn grudge(world: &mut World, c: &crate::config::LandlordCfg, leader: Option<EntityId>, landlord: Option<EntityId>) {
+    let (Some(l), Some(on)) = (leader, landlord) else { return };
+    if crate::systems::ages::is_protected(world, on) || c.grudge <= 0.0 {
+        return;
+    }
+    crate::systems::grudges::add(world, l, on, crate::word::GrudgeCause::Evicted, c.grudge, 0);
+}
+
+/// `s` with its first letter upper-case ("the city sent ..." opens a line as "The city sent ...").
+fn capital(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map_or_else(String::new, |f| f.to_uppercase().chain(c).collect())
 }

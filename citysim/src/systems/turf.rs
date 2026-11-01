@@ -2231,10 +2231,11 @@ pub fn note_loss(world: &mut World, gang: EntityId, id: EntityId) {
 }
 
 /// From `raid::settle`: a raid won or a Hideout sacked moves `loser`'s cells
-/// within `raid_cells` of its Hideout to `winner`.
-pub fn raid_moves(world: &mut World, winner: EntityId, loser: EntityId) {
+/// within `raid_cells` of the Hideout `at` raided (the city milestone C9b: its
+/// seat or the district Hideout the raid landed on) to `winner`.
+pub fn raid_moves_at(world: &mut World, winner: EntityId, loser: EntityId, at: EntityId) {
     let Some(w) = war_cfg(world).cloned() else { return };
-    let Some(hk) = world.hideout_of(loser).and_then(|h| door_of(world, h)).and_then(|t| cell_of(world, t)) else {
+    let Some(hk) = door_of(world, at).and_then(|t| cell_of(world, t)) else {
         return;
     };
     let cells: Vec<(u32, Status)> = world

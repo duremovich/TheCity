@@ -133,13 +133,16 @@ pub fn target_cover(world: &World, gang: EntityId, order: Order) -> f32 {
     let target = if order.target_is_jail() {
         world.building_of_kind(BuildingKind::Jail)
     } else if order == Order::Raid {
+        // The city milestone C9b: the rival Hideout the raid was sent to.
         crate::systems::raid::corp_target(world, gang)
-            .or_else(|| world.rival_of(gang).and_then(|r| world.hideout_of(r)))
+            .or_else(|| world.rival_of(gang).and_then(|r| crate::systems::raid::rival_target(world, gang, r)))
     } else {
         // M14 V34: a standing Retaliate's named gang (`raid::raid_rival`);
         // M15 W18: or its vendetta's corp building.
-        crate::systems::raid::corp_target(world, gang)
-            .or_else(|| crate::systems::raid::raid_rival(world, gang).and_then(|r| world.hideout_of(r)))
+        crate::systems::raid::corp_target(world, gang).or_else(|| {
+            crate::systems::raid::raid_rival(world, gang)
+                .and_then(|r| crate::systems::raid::rival_target(world, gang, r))
+        })
     };
     target.map_or(0.0, |t| cover_of(world, gang, t))
 }
@@ -929,11 +932,22 @@ pub fn apply_order(world: &mut World, gang: EntityId, p: PendingOrder, note: Opt
         g.raid_at = muster;
         g.raid_target = corp_target;
         g.raid_muster = None;
+        g.raid_hideout = None;
         g.retaliate_on = retaliate_on;
         if order == Order::Retaliate {
             g.retaliate_until = Some(now + cfg.retaliate_days * TICKS_PER_DAY);
         }
         g.pending_order = None;
+    }
+    // The city milestone C9b: a gang raid lands on the rival's Hideout nearest
+    // the raiders' own (or the seat, the bigger prize, when strong enough);
+    // chosen before the muster, which is picked near it.
+    if order.is_raid() && !order.target_is_jail() && corp_target.is_none() {
+        let pick = crate::systems::raid::raid_rival(world, gang)
+            .and_then(|r| crate::systems::vertical::raid_pick(world, gang, r));
+        if let Some(g) = world.comp_mut::<Gang>(gang) {
+            g.raid_hideout = pick;
+        }
     }
     // Round 8 X4 (`OPEN-241`): the muster where the members can reach it
     // (the order and its target set first: `raid::gang_target` reads them).
