@@ -168,7 +168,13 @@ fn test_the_plan_timeout_spares_a_leg_in_motion() {
             let door = w.comp::<Building>(far).expect("far").door;
             let target = citysim::exec::GotoTarget { dest: LocationKey::TargetHome, tile: door, building: Some(far) };
             let b = w.comp_mut::<Brain>(who).expect("brain");
-            b.exec = ExecState::GotoTimed { target, arrive_tick: tick + timeout + 30, blocked_since: None, walk: None };
+            b.exec = ExecState::GotoTimed {
+                target,
+                arrive_tick: tick + timeout + 30,
+                blocked_since: None,
+                walk: None,
+                climb: None,
+            };
         }
         let (legs, arrived, _) = walk_segments(&mut w, who, far, timeout + 2 * TICKS_PER_DAY / 3);
         (arrived, legs.len())

@@ -454,6 +454,95 @@ super or sweeper on a high floor, courier (20k). **Numbers:** climb ticks a day 
 over 120 min, footbridge and escalator crossings a day, `bigpath::expanded` per walk, landmark build, ticks/s at
 100k days 25-30 against C6b's run (the accepted floor is ~25, `OPEN-226`).
 
+**C7 as built (2026-11-01).** As above (`systems/levels.rs` holds the climb and the lift, `exec/bigpath.rs` the
+portals' graph, `[levels]` its keys), with these deviations: (1) **The pace.** At the real pace (Y4: 21 tiles a
+minute) "a flight is ~2 tiles walked" is 6 s, so the stairs are set as a person climbs, not as tiles:
+`stair_ticks_per_floor` 0.5 (30 s a storey up, an ordinary adult's sustained climb; down at `stair_down_mult` 0.5),
+**the 40th floor is 20 min by the stairs, not "most of an hour"** (that figure was the pre-Y4 arithmetic of two tiles
+a flight at a tile a minute); the lift `lift_wait_ticks` 1 + `lift_ticks_per_floor` 0.05 (the 40th floor 3 min with
+the wait), taken past `lift_min_floors` 3 when its wait and ride beat the stairs. Ticks are fractions, a climb rounds
+up. (2) **The lift as a place is a booked fluid queue, not an entity per car:** `World.lifts` (saved) holds each lift
+core's calls by the tick; the queue at a tick is `max_s (calls in (s, t] − rate × (t − s))` at the cars' rate
+(`lift_capacity` 13 a car a cycle, the cycle up to the lift's top and back plus two `lift_dwell_ticks`), and a call
+waits `lift_wait_ticks` plus a cycle (over the cars) for every full car ahead; a crowd that makes the lift slower than
+the stairs takes the stairs. A Full call is booked at the door, a Coarse leg's at its first step for the tick it will
+reach the lobby. **C8's hooks:** `LiftState.cut` (no car runs: every climb takes the stairs; `levels::plan` reads
+it) and `held_by` (read by nothing yet). The bodies in the lobby are the Full bodies in their `ExecState::Climb`
+before `board` (at the door, on the ground). (3) **The cores:** a host carries `lift=<cars>:<top>` (its member lots'
+lift cores: their count and the highest storey; 4,295 hosts), a tenancy climbs its host's; every structure has its
+stairs (the export's rule). (4) **The Full climb** is an `ExecState::Climb` arm: up after `try_enter` lets the body in
+(`climb_in`: in the lobby on the ground until it ends, then the GoTo is done), down before the walk out of a building
+(`climb_out` in `advance_goto`, the walk's path kept and walked on after it); a move between two buildings of one
+structure (a span on either) is one climb between the storeys, through no door. **The Coarse climb** is
+`GotoTimed.climb` (`TimedClimb`: down, then the walk, then up; `exec::walk_route` returns the walk between them),
+placed by `walk_place` / `climb_place` at the door with the storey interpolated. Rides, cabs and flyers do not climb
+(their door legs are not walks): a finding for C9. (5) **The `P` line** is `P <kind> <x>,<y>,<level> <x>,<y>,<level>
+<tiles> [hours=6-10ba,10-24ab]`: the run in **tiles**, not ticks (at the real pace a 15 m walkway is 0.2 min); the sim
+adds the climb from `[levels]` (`portal_stair_ticks_per_floor` a storey of the ends' levels for stairs, exits and
+landings; a station lift `portal_lift_wait_ticks` + its ride; the escalator its run at `escalator_speed` 1.5). A lot end
+(a landing) is the street outside the lot's nearest door at level 0, the walk to it added to the run; a deck segment
+past 4 tiles is cut into pieces (249 portals as 529 lines, 403 deck nodes) so a walker's hop is a few tiles like any
+step. (6) **The search:** deck nodes are numbered after the tiles; an edge costs its steps at the Road rate (at least
+7 × the ends' Manhattan) plus the entry of the tile it reaches, the tile steps' shape, so the landmarks' second bound
+still holds; the escalator is the exception (a moving stair is quicker than the street, and on the flat ground its
+lift up the hill is no advantage, so at 7 × Manhattan it never paid: the escalator test caught it), and the Manhattan
+bound is less the most every portal under it saves together (`Portals::saving`, ~200 tenths): admissible, not
+consistent across the escalator, where a node may be reopened. Drivers search without the portals. A walker's hop is
+checked at the hop (the escalator's direction at that minute; a stale hop re-finds), `Position.floor` is the deck's
+level in the street. (7) **Commute estimates stay Manhattan** (`timed_walk` untouched; the climbs are added in
+`timed_goto` only). (8) `SAVE_VERSION` 121; both maps re-imported (`lift=` and the `P` lines; the `B` order is
+unchanged); the view fixture regenerated (185 KB). **Statistical mirror:** none: a Statistical agent does not walk or
+climb, and promoted he stands on his floor (`floors::floor_in`). **One test** (`test-add`): on the 20k map the walk
+from the escalator's foot to its head rides it at noon and not at 07:00 (it runs down), and the search's cost over
+the portals equals the Manhattan-only search's.
+
+**The numbers** (seed 42 x 30, `--scaled --ambient-flats 50`, 8 threads, `--legs`, one run each; the before is this
+branch's binary with `[levels]` out of the config and the pre-C7 map, so the search is the old one with no portals; the 100k after shared days 8-13 with the view tier's build, days 25-30 ran alone):
+
+| | 20k before | 20k after | 100k before (C6b's after) | 100k after |
+|---|---|---|---|---|
+| climbs a day (mean min) | 0 | 11,517 (1.8) | 0 | 59,659 (2.0) |
+| climbs to floor 20+ a day (mean min) | 0 | 2,184 (3.0) | 0 | 14,914 (3.0) |
+| lift rides a day / mean wait / worst lobby queue | 0 | 6,265 / 1.0 min / 7 | 0 | 40,768 / 1.0 min / 45 |
+| footbridge / escalator / stairs-lift-platform hops a day (Full walkers) | 0 | 4 / 838 / 52 | 0 | 22 / 3,570 / 234 |
+| deck entries a day | 0 | 27 | 0 | 122 |
+| legs over 120 min (30 d) | 2 | 8 | 28 | 32 |
+| `bigpath` searches / expanded per search | 661,703 / 567 | 682,999 / 910 | (not printed) | 3,526,971 / 706 |
+| searches that found no path (labels connected through a portal) | 0 | 19 | | 142 |
+| landmark build | 138 ms | 149 ms | (not printed) | 213 ms |
+| employed d30 / homeless d30 / home-to-post median | 11,896 / 284 / 9 min | 11,747 / 327 / 9 min | 56,942 / 2,359 / 4 min | 56,813 / 2,439 / 3 min |
+| ticks/s days 25-30 | 147/144/145/138/144/143 | 130/133/132/125/127/125 | 12/12/12/12/12/11 | 12/12/11/11/12/11 |
+| peak working set | | | 1,954 MB | 1,998 MB |
+
+The climb is cheap to the sim and visible in a life: 11.5k climbs a day at 20k (1.8 min mean; to the 20th floor or
+higher 3.0 min), 6.3k of them by a lift with no queue (the worst lobby 7 calls, under a car); the lift is the norm in
+the Mid-Levels towers and the stairs in the Sump's walk-ups. At 100k the lobbies queue (45 calls at the worst),
+still mostly within a car. **The walkways barely carry anyone:** the escalator 840 hops a day at 20k (a ride is ~50
+hops: ~15 riders a day, up after 10:00, down 06:00-10:00), the footbridges 4: on the flat ground with no traffic at
+grade a footbridge is never shorter than the crossing under it, so only a podium's cut through a block pays (the
+spec's "they shorten little"); no crowd on the D2 bridges forms at the evening rush (the camera found the decks empty).
+The search costs more: `bigpath` expanded per walk 567 -> 910 at 20k (finds +3 %), of which a third is the portals in
+the landmarks and the rest the climbs' shift of who walks when (measured apart on day 1: 583 -> 678 with the portals only,
+-> 871 with the climbs); ticks/s 20k -11 % (144 -> 128 days 25-30: at the ~10 % line, a finding for a perf phase, not a knob). At 100k the run is C6b's within noise: 12 -> ~11.5 ticks/s days 25-30 (~4 %, under the ~25 floor already, `OPEN-226`), 1,998 MB at the peak, legs over 120 min 28 -> 32 (the open leg records of 2-3 days the leg log keeps, none a climb), expanded per search 706. Nothing retuned.
+
+**Camera** (`target/c7/cam`, from the shadow's day-22 save, `cityview --save --follow --bench one --shots`):
+`c7_climb_8408_d22_0619.png` / `_0620` / `_0621`, `office_worker_8408` (Slate Singh) home at 06:18: in Block#1439's
+lobby at 06:19 (the camera at z 49 m, the ground), in the lift at 06:20 (z 83) and on floor 22 at 06:21;
+`c7_escalator_22263_d22_1008.png` / `_1010.png`, Ottilie Volkov riding the escalator up at 10:08-10:12 (the hop log of
+the follow-cam's own world: 52 hops from (505,704) to (505,506)), drawn on its deck over the road (z 63.9 m);
+`c7_d2bridges_5759_d22_1745.png`, Bar#5759 under the D2 footbridges at the evening rush: nobody on the decks (above).
+**Shadow** (20k days 21-22, exec x 4, office_worker x 3, super x 2, sweeper x 2, courier x 2, `target/c7/shadow`;
+the diary's `[climb]` and `[deck]` lines are new): `office_worker_8408` "d21 08:09 CLIMB down by the lift in Block#1439
+(D4 Mid-Levels): floor 22 to 0, 1 min waiting in the lobby, 3 min in all" and back "d21 18:25 CLIMB up by the lift ...
+floor 0 to 22"; `courier_12172` in a D1 walk-up "d21 00:01 CLIMB up by the stairs in Block#2518 (D1 The Sump): floor
+0 to 8, 4 min in all", down 2 min at 06:37; `sweeper_20564` "d21 02:16 CLIMB up by the lift in Block#1009 (D4
+Mid-Levels): floor 0 to 19, 1 min waiting in the lobby (2 in the queue), 2 min in all"; `super_16201` his own floor 7
+by the lift, his round's buildings by the stairs to floor 1. What reads wrong: **the Spire's execs live on floors 0-3**
+(D5's estimates are four storeys: no exec climbs a Spire tower; `exec_25360` "CLIMB down by the stairs in Block#341 (D5
+The Spire): floor 1 to 0, 1 min"); a visitor and a Super on his round climb to the span's lowest floor (C6a's rule); no
+pick crossed a footbridge or the escalator in the window (no `[deck]` line; the escalator's riders are found in the hop
+log); the Corp HQ and other whole cuts have no floors, so an office worker climbs at home and not at work.
+
 ### C8, the vertical gangs (TheCity; `turf.rs`, `raid.rs`, `crew.rs`, `gang.rs`, `plan.rs` `bed_of`, `founding.rs`; `OPEN-191`, `OPEN-241`, `OPEN-187`)
 
 **A Hideout per district:** a gang holds a Hideout tenancy (upper floors, often over a front it runs: a restaurant,

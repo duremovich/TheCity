@@ -349,6 +349,7 @@ fn floors_within(
         floor_rent: 0,
         floor_arrears: 0,
         hours: None,
+        lift: None,
     };
     let id = world.spawn();
     world.insert(id, home);

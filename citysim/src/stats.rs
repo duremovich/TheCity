@@ -1663,6 +1663,35 @@ pub struct Jobs2Cols {
     pub floor_leases: u32,
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub units_vacant: u32,
+    /// The city milestone C7 (`systems::levels`): the climbs inside a
+    /// structure today (booked: a Full body's at the door, a Coarse one's at
+    /// its walk's start) and their ticks, those to a storey of 20 or more
+    /// and theirs, the lift rides among them and their waits, the longest
+    /// lobby queue a call found; the walkway portals' hops today by a Full
+    /// walker (a footbridge's own segments, the escalator's, the stairs,
+    /// lifts, exits and platforms) and the hops from a tile onto a deck.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub climbs: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub climb_ticks: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub climbs_high: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub climb_ticks_high: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub lift_rides: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub lift_wait_ticks: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub lift_queue_max: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub hops_footbridge: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub hops_escalator: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub hops_stairs: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub deck_entries: u32,
 }
 
 fn served_is_zero(v: &[u32; 15]) -> bool {
@@ -2285,6 +2314,17 @@ impl Jobs2Cols {
                 "unit_foundings",
                 "floor_leases",
                 "units_vacant",
+                "climbs",
+                "climb_ticks",
+                "climbs_high",
+                "climb_ticks_high",
+                "lift_rides",
+                "lift_wait_ticks",
+                "lift_queue_max",
+                "hops_footbridge",
+                "hops_escalator",
+                "hops_stairs",
+                "deck_entries",
             ]
             .into_iter()
             .map(str::to_string),
@@ -2901,6 +2941,17 @@ impl Jobs2Cols {
             self.unit_foundings.to_string(),
             self.floor_leases.to_string(),
             self.units_vacant.to_string(),
+            self.climbs.to_string(),
+            self.climb_ticks.to_string(),
+            self.climbs_high.to_string(),
+            self.climb_ticks_high.to_string(),
+            self.lift_rides.to_string(),
+            self.lift_wait_ticks.to_string(),
+            self.lift_queue_max.to_string(),
+            self.hops_footbridge.to_string(),
+            self.hops_escalator.to_string(),
+            self.hops_stairs.to_string(),
+            self.deck_entries.to_string(),
         ])
         .collect::<Vec<String>>()
         .join(",")

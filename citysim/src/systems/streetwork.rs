@@ -1942,6 +1942,7 @@ fn take_ride(
             arrive_tick: Tick::MAX,
             blocked_since: None,
             walk: None,
+            climb: None,
         });
     }
     if fares_on(world) {
@@ -1978,6 +1979,7 @@ fn take_ride(
         arrive_tick: arrive,
         blocked_since: None,
         walk: None,
+        climb: None,
     })
 }
 
@@ -2097,6 +2099,7 @@ pub fn exec_ride(world: &mut World, id: EntityId, target: &crate::exec::GotoTarg
         arrive_tick: arrive,
         blocked_since: None,
         walk: None,
+        climb: None,
     })
 }
 
@@ -2335,7 +2338,13 @@ fn release(world: &mut World, r: &CabRide, arrived: bool) {
     let to = target.tile;
     world.jobs2.riding.insert(r.rider, arrive);
     if let Some(b) = world.comp_mut::<Brain>(r.rider) {
-        b.exec = crate::exec::ExecState::GotoTimed { target, arrive_tick: arrive, blocked_since: None, walk: None };
+        b.exec = crate::exec::ExecState::GotoTimed {
+            target,
+            arrive_tick: arrive,
+            blocked_since: None,
+            walk: None,
+            climb: None,
+        };
     }
     // The island pass phase 5 (I3): the off-screen cab takes him on in the
     // vehicle he is aboard (else one comes to his door), from where it is.
@@ -2465,7 +2474,13 @@ pub fn fare_leg(world: &World, id: EntityId, target: &crate::exec::GotoTarget) -
     }
     let here = crate::exec::walk_origin(world, id)?;
     let arrive_tick = world.tick + cab_ticks(world, here, target.tile);
-    Some(crate::exec::ExecState::GotoTimed { target: target.clone(), arrive_tick, blocked_since: None, walk: None })
+    Some(crate::exec::ExecState::GotoTimed {
+        target: target.clone(),
+        arrive_tick,
+        blocked_since: None,
+        walk: None,
+        climb: None,
+    })
 }
 
 /// The pressure pass R6a (OPEN-217): a cab driver on shift heading back to

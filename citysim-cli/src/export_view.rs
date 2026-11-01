@@ -112,6 +112,9 @@ fn act_x(a: &ViewAct) -> Value {
         ViewAct::Fly { from, depart, arrive } => json!({"from": tp(*from), "depart": depart, "arrive": arrive}),
         ViewAct::Ride { depart, arrive } => json!({"depart": depart, "arrive": arrive}),
         ViewAct::JackedIn { since } => json!({"since": since}),
+        ViewAct::Climb { from, to, lift, board, arrive } => {
+            json!({"from": from, "to": to, "lift": lift, "board": board, "arrive": arrive})
+        }
     }
 }
 

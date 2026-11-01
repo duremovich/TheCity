@@ -45,6 +45,20 @@
 //!   the host's. A host's wall carries its tenancies' doors beside its own;
 //!   a Lot that hosts tenancies is walled. A tenancy hosts nothing.
 //!
+//! The city milestone C7 (levels, portals and pathing), also optional:
+//! - after the floors field, `lift=<cars>:<top>`: the host's lift cores (the
+//!   export's `lift` cores: their count and the highest storey they serve,
+//!   from the ground); a host without one has only its stairs;
+//! - `P <kind> <x>,<y>,<level> <x>,<y>,<level> <tiles> [hours=<h0>-<h1><ab|ba>,...]`:
+//!   a walkway portal (TheCityGraphics' `walkways_sim.json`: a footbridge's
+//!   segment, the escalator's, a station platform's, the stairs, lifts,
+//!   landings, podiums and joins between them and the ways), between two
+//!   ends: a tile at level 0 (a way, the street outside a lot's door) or a
+//!   deck point above a tile (`level` its storey, the export's 4 m + 3 m
+//!   rule); `tiles` the run walked; `hours` the escalator's one-way windows
+//!   (`ab` runs from the first end to the second), outside every window it
+//!   does not run. The vehicle ramps are not portals.
+//!
 //! A save packs the grids as run-length strings (SAVE_VERSION 13); an older
 //! save's one-enum-per-tile lists still load.
 
@@ -87,6 +101,119 @@ pub struct MapBuilding {
     /// C6a: a host's work units (`units=`; 0 without).
     #[serde(default, skip_serializing_if = "is_zero_u16")]
     pub units: u16,
+    /// C7: the host's lifts, `(cars, top storey)` (`lift=`); `None`: stairs only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lift: Option<(u8, u8)>,
+}
+
+/// The city milestone C7: a walkway portal's kind (`walkways_sim.json`'s).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum PortalKind {
+    /// Along a footbridge's deck between two of its points.
+    Walkway,
+    /// Along a station platform.
+    Platform,
+    /// Along the escalator (one-way by the hour).
+    Escalator,
+    /// A deck point to a way below (or a footbridge to a platform).
+    Stairs,
+    /// A station's lift down to the way.
+    Lift,
+    /// The escalator's side exits to the terrace ways.
+    Exit,
+    /// A footbridge onto a lot it joins, down through it to its street door.
+    Landing,
+    /// Two footbridges joined through a block's podium.
+    Podium,
+    /// A bridge onto the spine.
+    Join,
+}
+
+impl PortalKind {
+    pub const ALL: [PortalKind; 9] = [
+        PortalKind::Walkway,
+        PortalKind::Platform,
+        PortalKind::Escalator,
+        PortalKind::Stairs,
+        PortalKind::Lift,
+        PortalKind::Exit,
+        PortalKind::Landing,
+        PortalKind::Podium,
+        PortalKind::Join,
+    ];
+
+    /// The map file's (and the export's) word.
+    pub fn word(self) -> &'static str {
+        match self {
+            PortalKind::Walkway => "walkway",
+            PortalKind::Platform => "platform",
+            PortalKind::Escalator => "escalator",
+            PortalKind::Stairs => "stairs",
+            PortalKind::Lift => "lift",
+            PortalKind::Exit => "exit",
+            PortalKind::Landing => "landing",
+            PortalKind::Podium => "podium",
+            PortalKind::Join => "join",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<PortalKind> {
+        PortalKind::ALL.into_iter().find(|k| k.word() == s)
+    }
+
+    /// A footbridge's own segment (the crossings a day count these).
+    pub fn footbridge(self) -> bool {
+        matches!(self, PortalKind::Walkway | PortalKind::Podium | PortalKind::Join | PortalKind::Landing)
+    }
+}
+
+/// The city milestone C7: one `P` line, a walkway portal between two ends,
+/// each a tile and a level (0: the tile itself, a way; above: a deck point
+/// over the tile).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MapPortal {
+    pub kind: PortalKind,
+    pub a: (TilePos, u8),
+    pub b: (TilePos, u8),
+    /// The run walked, tiles (at least 1).
+    pub tiles: u16,
+    /// The escalator's windows: `(from hour, to hour, a to b)`; empty: always,
+    /// both ways.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hours: Vec<(u8, u8, bool)>,
+}
+
+impl MapPortal {
+    /// The `P` line (no newline).
+    pub fn line(&self) -> String {
+        let mut s = format!(
+            "P {} {},{},{} {},{},{} {}",
+            self.kind.word(),
+            self.a.0.x,
+            self.a.0.y,
+            self.a.1,
+            self.b.0.x,
+            self.b.0.y,
+            self.b.1,
+            self.tiles
+        );
+        if !self.hours.is_empty() {
+            let w: Vec<String> =
+                self.hours.iter().map(|&(h0, h1, ab)| format!("{h0}-{h1}{}", if ab { "ab" } else { "ba" })).collect();
+            s.push_str(&format!(" hours={}", w.join(",")));
+        }
+        s
+    }
+
+    /// Does it run from `a` to `b` (`forward`) or back at minute `minute`
+    /// of the day? Always, without hours.
+    pub fn runs(&self, forward: bool, minute: u32) -> bool {
+        if self.hours.is_empty() {
+            return true;
+        }
+        let h = minute / 60;
+        self.hours.iter().any(|&(h0, h1, ab)| u32::from(h0) <= h && h < u32::from(h1) && ab == forward)
+    }
 }
 
 fn is_zero_u16(v: &u16) -> bool {
@@ -107,6 +234,8 @@ pub struct BuildingExtra {
     pub door: Option<(u16, u16)>,
     /// C6a: a host's work units (`units=`).
     pub units: Option<u16>,
+    /// C7: the host's lifts, `(cars, top storey)` (`lift=`).
+    pub lift: Option<(u8, u8)>,
 }
 
 /// Scale S3b: one `D <zone> <x_from> <x_to> <name...>` line, a `[districts]`
@@ -153,6 +282,8 @@ pub struct Map {
     district_grid: Vec<u8>,
     /// Scale S3b: the map's El lines (`L` lines); empty: the config's.
     pub lines: Vec<TransitLineCfg>,
+    /// The city milestone C7: the walkway portals (`P` lines).
+    pub portals: Vec<MapPortal>,
     /// The perf pass phase 7: bumped by every `set_tile` (the key of
     /// `districts::rebuild`'s grid memo; not saved: a loaded map counts
     /// from 0 and a loaded world's memo is empty).
@@ -186,6 +317,8 @@ struct MapRepr {
     district_rle: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     lines: Vec<TransitLineCfg>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    portals: Vec<MapPortal>,
 }
 
 impl From<Map> for MapRepr {
@@ -202,6 +335,7 @@ impl From<Map> for MapRepr {
             districts: m.districts,
             district_rle: rle_encode(m.district_grid.iter().map(|&d| district_char(d))),
             lines: m.lines,
+            portals: m.portals,
         }
     }
 }
@@ -250,6 +384,7 @@ impl TryFrom<MapRepr> for Map {
             districts: r.districts,
             district_grid,
             lines: r.lines,
+            portals: r.portals,
             tile_edits: 0,
         })
     }
@@ -410,6 +545,8 @@ pub struct MapText {
     /// Row-major district ids; empty for none (the rows decide).
     pub district_grid: Vec<u8>,
     pub lines: Vec<TransitLineCfg>,
+    /// The city milestone C7: the walkway portals (`P` lines).
+    pub portals: Vec<MapPortal>,
     /// `#` lines written before the buildings.
     pub comments: Vec<String>,
     /// Scale S3c: per building (aligned with `buildings`; empty for none),
@@ -469,6 +606,9 @@ impl MapText {
             if let Some(n) = extra.units {
                 out.push_str(&format!(" units={n}"));
             }
+            if let Some((cars, top)) = extra.lift {
+                out.push_str(&format!(" lift={cars}:{top}"));
+            }
             out.push('\n');
         }
         for d in &self.districts {
@@ -484,6 +624,10 @@ impl MapText {
                 out.push_str(&format!(" {x},{y}"));
             }
             out.push_str(&format!(" {}\n", l.name));
+        }
+        for p in &self.portals {
+            out.push_str(&p.line());
+            out.push('\n');
         }
         out
     }
@@ -551,6 +695,7 @@ impl Map {
                 || t.starts_with("D ")
                 || t.starts_with("L ")
                 || t.starts_with("L+ ")
+                || t.starts_with("P ")
                 || t.starts_with('#')
                 || t == "districts"
         };
@@ -578,6 +723,7 @@ impl Map {
             districts: Vec::new(),
             district_grid: Vec::new(),
             lines: Vec::new(),
+            portals: Vec::new(),
             tile_edits: 0,
         };
         let mut n = at;
@@ -607,6 +753,7 @@ impl Map {
             match parts[0] {
                 "D" => map.districts.push(parse_district(&parts, n + 1)),
                 "L" | "L+" => map.lines.push(parse_line(&parts, n + 1, w, h)),
+                "P" => map.portals.push(parse_portal(&parts, n + 1, w, h)),
                 _ => {
                     // S3c: `key=value` fields follow the floors field.
                     let keyed = parts.iter().position(|p| p.contains('=')).unwrap_or(parts.len());
@@ -630,6 +777,7 @@ impl Map {
                     assert!(floors >= 1, "line {}: floors must be at least 1", n + 1);
                     let (mut flats, mut storeys, mut lot) = (None, None, None);
                     let (mut within, mut span, mut own_door, mut units) = (None, None, None, 0u16);
+                    let mut lift = None;
                     for kv in keyed {
                         let (k, v) = kv.split_once('=').unwrap_or((kv, ""));
                         let bad = || -> ! { panic!("line {}: bad field {kv}", n + 1) };
@@ -639,6 +787,12 @@ impl Map {
                             "lot" if !v.is_empty() => lot = Some(v.to_string()),
                             "in" => within = Some(v.parse::<u32>().unwrap_or_else(|_| bad())),
                             "units" => units = v.parse().unwrap_or_else(|_| bad()),
+                            "lift" => {
+                                let (a, b) = v.split_once(':').unwrap_or_else(|| bad());
+                                let (a, b): (u8, u8) =
+                                    (a.parse().unwrap_or_else(|_| bad()), b.parse().unwrap_or_else(|_| bad()));
+                                lift = Some((a.max(1), b));
+                            }
                             "span" => {
                                 let (a, b) = v.split_once('-').unwrap_or_else(|| bad());
                                 let (a, b): (u8, u8) =
@@ -654,7 +808,7 @@ impl Map {
                                 ));
                             }
                             _ => panic!(
-                                "line {}: unknown field {k:?} (flats, storeys, lot, span, in, door, units)",
+                                "line {}: unknown field {k:?} (flats, storeys, lot, span, in, door, units, lift)",
                                 n + 1
                             ),
                         }
@@ -680,6 +834,7 @@ impl Map {
                         within,
                         span,
                         units,
+                        lift,
                     });
                 }
             }
@@ -994,6 +1149,43 @@ fn parse_district(parts: &[&str], line: usize) -> MapDistrict {
 }
 
 /// `L <x>,<y> <x>,<y> [...] <name...>`.
+/// C7: `P <kind> <x>,<y>,<level> <x>,<y>,<level> <tiles> [hours=...]`.
+fn parse_portal(parts: &[&str], line: usize, w: usize, h: usize) -> MapPortal {
+    assert!(
+        (5..=6).contains(&parts.len()),
+        "line {line}: expected `P <kind> <x>,<y>,<level> <x>,<y>,<level> <tiles> [hours=...]`"
+    );
+    let kind = PortalKind::parse(parts[1]).unwrap_or_else(|| panic!("line {line}: unknown portal kind {}", parts[1]));
+    let end = |s: &str| -> (TilePos, u8) {
+        let v: Vec<&str> = s.split(',').collect();
+        assert!(v.len() == 3, "line {line}: bad portal end {s}");
+        let n = |t: &str| -> u16 { t.parse().unwrap_or_else(|_| panic!("line {line}: bad number {t}")) };
+        let (x, y) = (n(v[0]), n(v[1]));
+        assert!(usize::from(x) < w && usize::from(y) < h, "line {line}: portal end {x},{y} off the map");
+        let level: u8 = v[2].parse().unwrap_or_else(|_| panic!("line {line}: bad level {}", v[2]));
+        (TilePos::new(x, y), level)
+    };
+    let tiles: u16 = parts[4].parse().unwrap_or_else(|_| panic!("line {line}: bad tiles {}", parts[4]));
+    let mut hours = Vec::new();
+    if let Some(hs) = parts.get(5) {
+        let v = hs.strip_prefix("hours=").unwrap_or_else(|| panic!("line {line}: bad field {hs}"));
+        for w in v.split(',') {
+            let (span, dir) = w.split_at(w.len().saturating_sub(2));
+            let ab = match dir {
+                "ab" => true,
+                "ba" => false,
+                _ => panic!("line {line}: hours window {w} needs ab or ba"),
+            };
+            let (a, b) = span.split_once('-').unwrap_or_else(|| panic!("line {line}: bad hours window {w}"));
+            let h0: u8 = a.parse().unwrap_or_else(|_| panic!("line {line}: bad hour {a}"));
+            let h1: u8 = b.parse().unwrap_or_else(|_| panic!("line {line}: bad hour {b}"));
+            assert!(h0 < h1 && h1 <= 24, "line {line}: hours window {w} runs down");
+            hours.push((h0, h1, ab));
+        }
+    }
+    MapPortal { kind, a: end(parts[2]), b: end(parts[3]), tiles: tiles.max(1), hours }
+}
+
 fn parse_line(parts: &[&str], line: usize, w: usize, h: usize) -> TransitLineCfg {
     let mut waypoints = Vec::new();
     let mut k = 1;

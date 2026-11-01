@@ -2695,6 +2695,7 @@ impl World {
                 floor_rent: 0,
                 floor_arrears: 0,
                 hours: None,
+                lift: None,
             },
         );
         self.buildings_by_kind_mut().entry(BuildingKind::Home).or_default().push(id);

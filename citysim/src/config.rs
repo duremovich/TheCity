@@ -443,6 +443,14 @@ pub struct Config {
     /// no floor rent and founding takes a Lot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tenancy: Option<TenancyCfg>,
+    /// The city milestone C7 (docs/CITY_MILESTONE.md § C7): levels, portals
+    /// and pathing (`systems/levels.rs`): the climb inside a structure by
+    /// its stairs or its lift (a place with a queue), and the walkway
+    /// portals' climbs. `None` (not written into a save) with the key
+    /// absent: no climb (a body is on its floor the tick it enters) and a
+    /// portal costs only its run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub levels: Option<LevelsCfg>,
     /// The island pass phase 5 (docs/ISLAND_PASS.md I3; OPEN-165): a vehicle
     /// in motion is an entity with its own position, its riders aboard
     /// (`systems/motion.rs`). `None` (not written into a save) with
@@ -995,6 +1003,41 @@ pub struct CompanyHousingCfg {
     /// save) with the key absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub buyout: Option<CompanyBuyoutCfg>,
+}
+
+/// The city milestone C7 `[levels]`: the climb inside a structure and on the
+/// walkways. Ticks are game minutes, fractions allowed (a climb rounds up to
+/// whole ticks, one at least for any storey). Every value a placeholder at
+/// the real pace (`[exec] walk_tiles_per_tick`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LevelsCfg {
+    /// Minutes a storey climbed up by the stairs.
+    pub stair_ticks_per_floor: f32,
+    /// A storey down by the stairs is this share of one up.
+    pub stair_down_mult: f32,
+    /// Minutes for a car to come to an empty lobby (the call, the doors).
+    pub lift_wait_ticks: f32,
+    /// Minutes a storey ridden (the ride, its stops spread over it).
+    pub lift_ticks_per_floor: f32,
+    /// Minutes the car stands at each end of its round trip: a car's cycle
+    /// is up to the lift's top floor and back plus twice this.
+    pub lift_dwell_ticks: f32,
+    /// Bodies a car holds.
+    pub lift_capacity: u16,
+    /// A climb of more storeys than this takes the lift, when the host has
+    /// one, it is not cut, and its wait and ride beat the stairs.
+    pub lift_min_floors: u8,
+    /// Minutes a storey of a walkway portal's stairs (a footbridge's, a
+    /// station's, a landing into a lot) costs over its run, up or down alike
+    /// (the path search's costs are symmetric).
+    pub portal_stair_ticks_per_floor: f32,
+    /// A station lift portal: the call, then `lift_ticks_per_floor` a storey;
+    /// no queue (the station's own lifts).
+    pub portal_lift_wait_ticks: f32,
+    /// The escalator walked is this many times the walk on the street (the
+    /// stair moves under the walker; the sim's ground is flat, so its lift
+    /// up the hill is not the advantage, its speed is).
+    pub escalator_speed: f32,
 }
 
 /// The city milestone C6b `[tenancy]`: the landlord, founding into a unit,

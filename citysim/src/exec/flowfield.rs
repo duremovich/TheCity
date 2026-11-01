@@ -317,6 +317,10 @@ pub struct FlowCache {
     /// Review finding 10: the tiles the next landmarks are measured on
     /// when not the map's (a loaded world's `landmark_base`).
     base: Option<Arc<Vec<crate::components::TileKind>>>,
+    /// The city milestone C7: the map's walkway portals as a graph
+    /// (`World::init_portals`, at the build and the load); the labels and
+    /// landmarks are measured with them.
+    portals: Arc<crate::exec::bigpath::Portals>,
 }
 
 impl FlowCache {
@@ -335,7 +339,7 @@ impl FlowCache {
     /// The big-map component labels for `map`, built on first use after a
     /// wall change.
     pub fn labels(&self, map: &Map) -> Arc<Vec<u32>> {
-        self.labels.get_or_init(|| Arc::new(crate::exec::bigpath::labels(map))).clone()
+        self.labels.get_or_init(|| Arc::new(crate::exec::bigpath::labels_with(map, &self.portals))).clone()
     }
 
     /// The big-map landmarks, built on first use after a tile change
@@ -346,12 +350,28 @@ impl FlowCache {
                 Arc::new(crate::prof::timed!(
                     "exec::landmarks",
                     match &self.base {
-                        Some(t) => crate::exec::bigpath::Landmarks::build_on(map, t.clone()),
-                        None => crate::exec::bigpath::Landmarks::build(map),
+                        Some(t) => crate::exec::bigpath::Landmarks::build_with(map, t.clone(), &self.portals),
+                        None => crate::exec::bigpath::Landmarks::build_with(
+                            map,
+                            Arc::new(map.tiles().to_vec()),
+                            &self.portals
+                        ),
                     }
                 ))
             })
             .clone()
+    }
+
+    /// C7: the walkway portals the paths, labels and landmarks use.
+    pub fn portals(&self) -> Arc<crate::exec::bigpath::Portals> {
+        self.portals.clone()
+    }
+
+    /// C7: set the portals (the labels and landmarks measured again on next use).
+    pub fn set_portals(&mut self, portals: crate::exec::bigpath::Portals) {
+        self.portals = Arc::new(portals);
+        self.labels = OnceLock::new();
+        self.landmarks = OnceLock::new();
     }
 
     /// The tiles the landmarks were (or, loaded, will be) measured on.

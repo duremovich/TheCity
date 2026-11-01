@@ -209,6 +209,7 @@ fn test_map_text_round_trips() {
             waypoints: vec![[0, 4], [11, 4]],
             in_flight: false,
         }],
+        portals: Vec::new(),
         comments: vec!["a test".into()],
         extra: vec![citysim::map::BuildingExtra {
             flats: Some(12),

@@ -38,6 +38,21 @@
 //!   and their tile snapshot (1): [`BYTES_PER_TILE`], ~160 MB at 3,000 ×
 //!   1,875.
 //!
+//! - **Portals (the city milestone C7).** The map's walkway portals (`P`
+//!   lines: footbridges, the escalator, station platforms, their stairs and
+//!   lifts) are [`Portals`]: each end a tile (level 0) or a deck node above
+//!   one (numbered after the tiles, `w × h + k`), each portal two directed
+//!   edges. An edge costs `s + enter(to)` (`s` its run and climb in tenths
+//!   at the Road rate, at least 7 × the ends' Manhattan, so 7 × Manhattan
+//!   stays admissible; a deck node's entry 0), the tile steps' shape, so a
+//!   path walked back still costs `d(L, n) − enter(n) + enter(L)` and the
+//!   landmarks' second bound holds. [`labels`] merges components through
+//!   them, the landmarks are measured over tiles plus portals (the
+//!   escalator both ways: every hour's graph is a subgraph, so the bounds
+//!   stay lower bounds), and [`find_with`] adds a node's portals as its
+//!   neighbours, the escalator's direction read at the search's minute. A
+//!   path carries the level of every step (0 on a tile).
+//!
 //! The commute estimates (`transit::commute_ticks`, `exec::timed_walk`, the
 //! hiring and relocation distances) stay Manhattan, as below the threshold.
 
@@ -47,7 +62,7 @@ use std::collections::BinaryHeap;
 use std::sync::Arc;
 
 use crate::components::{TileKind, TilePos};
-use crate::map::Map;
+use crate::map::{Map, MapPortal, PortalKind};
 
 /// A tile's entry cost in tenths of a step; `u32::MAX` where nobody walks.
 pub fn cost_tenths(kind: TileKind) -> u32 {
@@ -81,30 +96,44 @@ pub const BYTES_PER_TILE: usize = 32;
 /// elsewhere. Components are numbered in row-major order of their first
 /// tile, so the labelling is a pure function of the map.
 pub fn labels(map: &Map) -> Vec<u32> {
+    labels_with(map, &Portals::none())
+}
+
+/// [`labels`] over the tiles and `portals`' deck nodes (`w × h` and on),
+/// the components merged through the portals (both ways, at every hour).
+pub fn labels_with(map: &Map, portals: &Portals) -> Vec<u32> {
     let (w, h) = (map.w(), map.h());
+    let wh = w * h;
     let mut walk: Vec<bool> = map.tiles().iter().map(|t| t.walkable()).collect();
     for &p in &map.blocked {
         if let Some(b) = walk.get_mut(usize::from(p.y) * w + usize::from(p.x)) {
             *b = false;
         }
     }
-    let mut out = vec![NO_LABEL; w * h];
+    walk.resize(wh + portals.nodes.len(), true);
+    let mut out = vec![NO_LABEL; wh + portals.nodes.len()];
     let mut next = 0u32;
     let mut stack: Vec<usize> = Vec::new();
-    for s in 0..w * h {
+    for s in 0..walk.len() {
         if !walk[s] || out[s] != NO_LABEL {
             continue;
         }
         out[s] = next;
         stack.push(s);
         while let Some(i) = stack.pop() {
-            let (x, y) = (i % w, i / w);
             let mut visit = |j: usize| {
                 if walk[j] && out[j] == NO_LABEL {
                     out[j] = next;
                     stack.push(j);
                 }
             };
+            for e in portals.edges_of(i as u32) {
+                visit(e.to as usize);
+            }
+            if i >= wh {
+                continue;
+            }
+            let (x, y) = (i % w, i / w);
             if x > 0 {
                 visit(i - 1);
             }
@@ -151,6 +180,19 @@ impl Landmarks {
     /// [`Landmarks::build`] on `tiles` (`map`'s size): a loaded world's
     /// landmarks measured before a closure (review finding 10).
     pub fn build_on(map: &Map, tiles: Arc<Vec<TileKind>>) -> Landmarks {
+        Landmarks::build_with(map, tiles, &Portals::none())
+    }
+
+    /// C7: [`Landmarks::build_on`] over the tiles plus `portals` (their deck
+    /// nodes measured too, the escalator both ways).
+    pub fn build_with(map: &Map, tiles: Arc<Vec<TileKind>>, portals: &Portals) -> Landmarks {
+        let t0 = std::time::Instant::now();
+        let out = Landmarks::measure(map, tiles, portals);
+        LANDMARK_US.fetch_add(t0.elapsed().as_micros() as u64, std::sync::atomic::Ordering::Relaxed);
+        out
+    }
+
+    fn measure(map: &Map, tiles: Arc<Vec<TileKind>>, portals: &Portals) -> Landmarks {
         let (w, h) = (map.w(), map.h());
         assert_eq!(tiles.len(), w * h, "landmark tiles of another map");
         let (mx, my) = ((w - 1) as i64, (h - 1) as i64);
@@ -164,10 +206,11 @@ impl Landmarks {
                 points.push(TilePos::new((i % w) as u16, (i / w) as u16));
             }
         }
-        let mut dist = vec![FAR; w * h * LANDMARKS];
+        let n = w * h + portals.nodes.len();
+        let mut dist = vec![FAR; n * LANDMARKS];
         let mut d = Vec::new();
         for (k, &p) in points.iter().enumerate() {
-            dial(&tiles, w, h, map.index(p), &mut d);
+            dial(&tiles, w, h, portals, map.index(p), &mut d);
             for (i, &v) in d.iter().enumerate() {
                 dist[i * LANDMARKS + k] = u16::try_from(v).unwrap_or(FAR);
             }
@@ -221,23 +264,41 @@ impl<'de> serde::Deserialize<'de> for BaseTiles {
     }
 }
 
-/// Dijkstra from `src` over `tiles` (rubble ignored) by entry cost, into
-/// `d` (`u32::MAX` unreached): Dial's buckets, the costs being 7-15 (each
-/// under `B`, so a push never lands in the bucket being popped).
-fn dial(tiles: &[TileKind], w: usize, h: usize, src: usize, d: &mut Vec<u32>) {
-    const B: usize = 16;
+/// Dijkstra from `src` over `tiles` (rubble ignored) by entry cost and
+/// `portals`' edges (both ways), into `d` (`u32::MAX` unreached): Dial's
+/// buckets, `B` past the dearest edge (7-15 a tile step, a portal's own), so
+/// a push never lands in the bucket being popped.
+fn dial(tiles: &[TileKind], w: usize, h: usize, portals: &Portals, src: usize, d: &mut Vec<u32>) {
+    let wh = w * h;
+    let b = (portals.max_cost + 16).next_power_of_two().max(16) as usize;
     d.clear();
-    d.resize(w * h, u32::MAX);
-    let mut buckets: Vec<Vec<u32>> = vec![Vec::new(); B];
+    d.resize(wh + portals.nodes.len(), u32::MAX);
+    let mut buckets: Vec<Vec<u32>> = vec![Vec::new(); b];
     d[src] = 0;
     buckets[0].push(src as u32);
     let (mut cur, mut pending) = (0u32, 1usize);
     while pending > 0 {
-        let slot = cur as usize % B;
+        let slot = cur as usize % b;
         while let Some(i) = buckets[slot].pop() {
             pending -= 1;
             let i = i as usize;
             if d[i] != cur {
+                continue;
+            }
+            for e in portals.edges_of(i as u32) {
+                let j = e.to as usize;
+                let enter = if j < wh { cost_tenths(tiles[j]) } else { 0 };
+                if enter == u32::MAX {
+                    continue;
+                }
+                let c = e.cost + enter;
+                if cur + c < d[j] {
+                    d[j] = cur + c;
+                    buckets[(cur + c) as usize % b].push(j as u32);
+                    pending += 1;
+                }
+            }
+            if i >= wh {
                 continue;
             }
             let (x, y) = (i % w, i / w);
@@ -245,7 +306,7 @@ fn dial(tiles: &[TileKind], w: usize, h: usize, src: usize, d: &mut Vec<u32>) {
                 let c = cost_tenths(tiles[j]);
                 if c != u32::MAX && cur + c < d[j] {
                     d[j] = cur + c;
-                    buckets[(cur + c) as usize % B].push(j as u32);
+                    buckets[(cur + c) as usize % b].push(j as u32);
                     pending += 1;
                 }
             };
@@ -272,8 +333,11 @@ fn dial(tiles: &[TileKind], w: usize, h: usize, src: usize, d: &mut Vec<u32>) {
 struct Scratch {
     stamp: Vec<u32>,
     g: Vec<u32>,
-    /// 1..=4: the step from the parent (W, E, N, S); 0 at the start.
+    /// 1..=4: the step from the parent (W, E, N, S); 5 a portal (the
+    /// parent in `hop`); 0 at the start.
     from: Vec<u8>,
+    /// C7: a node reached by a portal -> its parent.
+    hop: std::collections::BTreeMap<u32, u32>,
     query: u32,
     /// `(Reverse(f), g, Reverse(index))`: the lowest `f`, then the deepest,
     /// then the lowest index.
@@ -294,6 +358,7 @@ impl Scratch {
             self.query = 1;
         }
         self.open.clear();
+        self.hop.clear();
     }
 
     fn bytes(&self) -> usize {
@@ -308,6 +373,33 @@ thread_local! {
     static SCRATCH: RefCell<Scratch> = RefCell::new(Scratch::default());
     static RECORD: RefCell<Option<Vec<(TilePos, TilePos)>>> = const { RefCell::new(None) };
     static EXPANDED: Cell<u64> = const { Cell::new(0) };
+}
+
+/// C7: every [`find_with`] on every thread so far, and the nodes they
+/// expanded (the run report's per-walk read).
+static FINDS_ALL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static EXPANDED_ALL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static FAILED_ALL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static FAILED_EXPANDED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// C7: the searches that found no path (after a search: the labels said connected) and their expansions.
+pub fn failed() -> (u64, u64) {
+    use std::sync::atomic::Ordering::Relaxed;
+    (FAILED_ALL.load(Relaxed), FAILED_EXPANDED.load(Relaxed))
+}
+
+/// C7: the microseconds spent measuring landmarks so far (the run report's).
+static LANDMARK_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// C7: the wall time spent measuring landmarks so far, microseconds.
+pub fn landmark_us() -> u64 {
+    LANDMARK_US.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// C7: `(searches, nodes expanded)` by [`find_with`] on every thread so far.
+pub fn searched() -> (u64, u64) {
+    use std::sync::atomic::Ordering::Relaxed;
+    (FINDS_ALL.load(Relaxed), EXPANDED_ALL.load(Relaxed))
 }
 
 /// This thread's search scratch, in bytes (the memory test's and the bench's read).
@@ -339,25 +431,49 @@ pub fn take_recorded() -> Vec<(TilePos, TilePos)> {
 /// closed, or [`Landmarks::none`]). `start` itself need not be walkable (a
 /// body on fresh rubble walks off it).
 pub fn find(map: &Map, labels: &[u32], marks: &Landmarks, start: TilePos, goal: TilePos) -> Option<Vec<TilePos>> {
+    find_with(map, labels, marks, &Portals::none(), start, 0, goal, 0).map(|(p, _)| p)
+}
+
+/// C7: [`find`] over the tiles and `portals` (`labels` and `marks` measured
+/// with them), from `start` at `start_level` (a deck node when above 0 and
+/// one stands there, else the tile) at minute `minute` of the day (the
+/// escalator's direction): the path's tiles and, when any step is on a deck,
+/// each step's level (empty: every step on the ground).
+#[allow(clippy::too_many_arguments)]
+pub fn find_with(
+    map: &Map,
+    labels: &[u32],
+    marks: &Landmarks,
+    portals: &Portals,
+    start: TilePos,
+    start_level: u8,
+    goal: TilePos,
+    minute: u32,
+) -> Option<(Vec<TilePos>, Vec<u8>)> {
     RECORD.with(|r| {
         if let Some(v) = r.borrow_mut().as_mut() {
             v.push((start, goal));
         }
     });
-    if start == goal {
-        return Some(Vec::new());
-    }
     let (w, h) = (map.w(), map.h());
+    let wh = w * h;
+    let si = portals.node(map, start, start_level) as usize;
     let gi = map.index(goal);
+    if si == gi {
+        return Some((Vec::new(), Vec::new()));
+    }
     let goal_label = *labels.get(gi)?;
     if goal_label == NO_LABEL || !map.walkable(goal) {
         return None;
     }
-    let si = map.index(start);
     let connected = labels.get(si) == Some(&goal_label)
-        || map.neighbours4(start).any(|n| labels.get(map.index(n)) == Some(&goal_label));
+        || (si < wh && map.neighbours4(start).any(|n| labels.get(map.index(n)) == Some(&goal_label)));
     if !connected {
         return None;
+    }
+    {
+        use std::sync::atomic::Ordering::Relaxed;
+        FINDS_ALL.fetch_add(1, Relaxed);
     }
     let tiles = map.tiles();
     let blocked = !map.blocked.is_empty();
@@ -369,7 +485,9 @@ pub fn find(map: &Map, labels: &[u32], marks: &Landmarks, start: TilePos, goal: 
             c
         }
     };
-    let alt = marks.dist.len() == w * h * LANDMARKS;
+    let alt = marks.dist.len() >= (wh + portals.nodes.len()) * LANDMARKS;
+    // C7: the Manhattan bound less the most any portal can save under it (the escalator's moving stair).
+    let saving = portals.saving();
     let goal_marks: [u16; LANDMARKS] =
         if alt { std::array::from_fn(|k| marks.dist[gi * LANDMARKS + k]) } else { [FAR; LANDMARKS] };
     // On the landmarks' tiles: d(n, L) = d(L, n) − enter(n) + enter(L) (the
@@ -378,11 +496,16 @@ pub fn find(map: &Map, labels: &[u32], marks: &Landmarks, start: TilePos, goal: 
     let goal_enter = if alt { cost_tenths(marks.tiles[gi]) } else { u32::MAX };
     let (gx, gy) = (i64::from(goal.x), i64::from(goal.y));
     let heur = |i: usize| -> u32 {
-        let (x, y) = ((i % w) as i64, (i / w) as i64);
-        let mut best = ((x - gx).unsigned_abs() + (y - gy).unsigned_abs()) as u32 * MIN_STEP;
+        let (x, y) = if i < wh {
+            ((i % w) as i64, (i / w) as i64)
+        } else {
+            let t = portals.nodes[i - wh].0;
+            (i64::from(t.x), i64::from(t.y))
+        };
+        let mut best = (((x - gx).unsigned_abs() + (y - gy).unsigned_abs()) as u32 * MIN_STEP).saturating_sub(saving);
         if alt {
             let here = &marks.dist[i * LANDMARKS..(i + 1) * LANDMARKS];
-            let e = cost_tenths(marks.tiles[i]);
+            let e = if i < wh { cost_tenths(marks.tiles[i]) } else { 0 };
             for (&a, &b) in goal_marks.iter().zip(here) {
                 if a == FAR || b == FAR {
                     continue;
@@ -402,7 +525,7 @@ pub fn find(map: &Map, labels: &[u32], marks: &Landmarks, start: TilePos, goal: 
     let path = SCRATCH.with(|cell| {
         let mut s = cell.borrow_mut();
         let s = &mut *s;
-        s.fit(w * h);
+        s.fit(wh + portals.nodes.len());
         let q = s.query;
         s.stamp[si] = q;
         s.g[si] = 0;
@@ -414,9 +537,33 @@ pub fn find(map: &Map, labels: &[u32], marks: &Landmarks, start: TilePos, goal: 
                 continue; // a stale entry
             }
             if ci == gi {
-                return Some(walk_back(s, w, si, gi));
+                return Some(walk_back(s, w, portals, si, gi));
             }
             expanded += 1;
+            // C7: the node's portals (a deck node has nothing else).
+            if portals.any_at(ci) {
+                for e in portals.edges_of(ci as u32) {
+                    if !portals.runs(e, minute) {
+                        continue;
+                    }
+                    let ni = e.to as usize;
+                    let c = if ni < wh { enter(ni) } else { 0 };
+                    if c == u32::MAX {
+                        continue;
+                    }
+                    let ng = g + e.cost + c;
+                    if s.stamp[ni] != q || ng < s.g[ni] {
+                        s.stamp[ni] = q;
+                        s.g[ni] = ng;
+                        s.from[ni] = 5;
+                        s.hop.insert(ni as u32, ci as u32);
+                        s.open.push((Reverse(ng + heur(ni)), ng, Reverse(ni as u32)));
+                    }
+                }
+            }
+            if ci >= wh {
+                continue;
+            }
             let (x, y) = (ci % w, ci / w);
             // W, E, N, S: `Map::neighbours4`'s order; the byte is the step taken.
             let mut relax = |ni: usize, byte: u8| {
@@ -448,23 +595,198 @@ pub fn find(map: &Map, labels: &[u32], marks: &Landmarks, start: TilePos, goal: 
         None
     });
     EXPANDED.with(|e| e.set(e.get() + expanded));
+    {
+        use std::sync::atomic::Ordering::Relaxed;
+        EXPANDED_ALL.fetch_add(expanded, Relaxed);
+        if path.is_none() {
+            FAILED_ALL.fetch_add(1, Relaxed);
+            FAILED_EXPANDED.fetch_add(expanded, Relaxed);
+        }
+    }
     path
 }
 
-/// The path from the start (exclusive) to `gi` (inclusive), by the parent bytes.
-fn walk_back(s: &Scratch, w: usize, si: usize, gi: usize) -> Vec<TilePos> {
+/// The path from the start (exclusive) to `gi` (inclusive), by the parent
+/// bytes: its tiles and (when a step is on a deck) its levels.
+fn walk_back(s: &Scratch, w: usize, portals: &Portals, si: usize, gi: usize) -> (Vec<TilePos>, Vec<u8>) {
+    let wh = s.stamp.len() - portals.nodes.len();
     let mut out = Vec::new();
+    let mut levels = Vec::new();
+    let mut deck = false;
     let mut i = gi;
     while i != si {
-        out.push(TilePos::new((i % w) as u16, (i / w) as u16));
+        let (t, l) = if i < wh { (TilePos::new((i % w) as u16, (i / w) as u16), 0) } else { portals.nodes[i - wh] };
+        deck |= l > 0;
+        out.push(t);
+        levels.push(l);
         i = match s.from[i] {
             1 => i + 1,
             2 => i - 1,
             3 => i + w,
             4 => i - w,
+            5 => match s.hop.get(&(i as u32)) {
+                Some(&p) => p as usize,
+                None => break,
+            },
             _ => break,
         };
     }
     out.reverse();
-    out
+    if deck {
+        levels.reverse();
+    } else {
+        levels.clear();
+    }
+    (out, levels)
+}
+
+/// C7: one directed edge of a portal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Edge {
+    /// The node it leads to (a tile index, or `w × h + k` for deck node `k`).
+    pub to: u32,
+    /// Its cost in tenths before the entry of `to` (symmetric: the edge back
+    /// costs the same).
+    pub cost: u32,
+    /// The walker's steps it takes (its run and its climb at the pace).
+    pub steps: u32,
+    /// The map portal (`Map::portals`' index) and whether this edge runs
+    /// from its first end to its second.
+    pub portal: u32,
+    pub forward: bool,
+}
+
+/// C7: the map's walkway portals as a graph over the tiles and the deck
+/// nodes above them (see the module doc). Built once a world from its map
+/// and `[levels]`; not saved.
+#[derive(Clone, Debug, Default)]
+pub struct Portals {
+    /// Deck node `k` (node `w × h + k`): its tile and level.
+    pub nodes: Vec<(TilePos, u8)>,
+    node_of: std::collections::BTreeMap<(TilePos, u8), u32>,
+    /// Node -> its edges' range in `edges`.
+    at: std::collections::BTreeMap<u32, (u32, u32)>,
+    edges: Vec<Edge>,
+    /// One bit a node: has it a portal?
+    bits: Vec<u64>,
+    /// The map's portals, their kinds and hours.
+    pub list: Vec<MapPortal>,
+    /// The dearest edge's cost (the landmarks' buckets).
+    pub max_cost: u32,
+    /// The most tenths every portal together saves under 7 × the Manhattan
+    /// of its ends (the escalator's), the Manhattan bound's slack.
+    saving: u32,
+}
+
+impl Portals {
+    /// No portals: the tiles alone.
+    pub fn none() -> Portals {
+        Portals::default()
+    }
+
+    /// The map's `P` lines as edges: each portal's steps are its run plus its
+    /// climb (`steps(portal)`, its run included), its cost those steps at the
+    /// Road rate, at least 7 × the ends' Manhattan but on the escalator (a
+    /// moving stair is quicker than the street: the search's Manhattan bound
+    /// is less the most every portal under it saves together, `saving`, so
+    /// it stays admissible; not consistent across the escalator, where a
+    /// node may be reopened, which the search allows).
+    pub fn build(map: &Map, steps: &dyn Fn(&MapPortal) -> u32) -> Portals {
+        let (w, h) = (map.w(), map.h());
+        let wh = w * h;
+        let mut p = Portals { list: map.portals.clone(), ..Portals::default() };
+        let mut out: Vec<(u32, Edge)> = Vec::new();
+        for (k, mp) in map.portals.iter().enumerate() {
+            let mut end = |(t, l): (TilePos, u8)| -> u32 {
+                if l == 0 {
+                    return map.index(t) as u32;
+                }
+                let n = p.nodes.len() as u32;
+                *p.node_of.entry((t, l)).or_insert_with(|| {
+                    p.nodes.push((t, l));
+                    wh as u32 + n
+                })
+            };
+            let (a, b) = (end(mp.a), end(mp.b));
+            if a == b {
+                continue;
+            }
+            let steps = steps(mp).max(1);
+            let m = mp.a.0.manhattan(mp.b.0);
+            let cost =
+                if mp.kind == PortalKind::Escalator { steps * MIN_STEP } else { (steps * MIN_STEP).max(m * MIN_STEP) };
+            p.saving += (m * MIN_STEP).saturating_sub(cost);
+            p.max_cost = p.max_cost.max(cost + 15);
+            out.push((a, Edge { to: b, cost, steps, portal: k as u32, forward: true }));
+            out.push((b, Edge { to: a, cost, steps, portal: k as u32, forward: false }));
+        }
+        out.sort_by_key(|&(n, e)| (n, e.portal, e.forward));
+        p.bits = vec![0; (wh + p.nodes.len()).div_ceil(64)];
+        let mut i = 0;
+        while i < out.len() {
+            let n = out[i].0;
+            let j = out[i..].iter().position(|&(m, _)| m != n).map_or(out.len(), |d| i + d);
+            p.at.insert(n, (p.edges.len() as u32, (j - i) as u32));
+            p.edges.extend(out[i..j].iter().map(|&(_, e)| e));
+            p.bits[n as usize / 64] |= 1 << (n % 64);
+            i = j;
+        }
+        let _ = h;
+        p
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.edges.is_empty()
+    }
+
+    /// The Manhattan bound's slack in tenths (see `saving`).
+    pub fn saving(&self) -> u32 {
+        self.saving
+    }
+
+    /// Has node `i` any portal? One bit read.
+    pub fn any_at(&self, i: usize) -> bool {
+        self.bits.get(i / 64).is_some_and(|b| b >> (i % 64) & 1 == 1)
+    }
+
+    /// Node `i`'s edges (none for most).
+    pub fn edges_of(&self, i: u32) -> &[Edge] {
+        if !self.any_at(i as usize) {
+            return &[];
+        }
+        match self.at.get(&i) {
+            Some(&(s, n)) => &self.edges[s as usize..(s + n) as usize],
+            None => &[],
+        }
+    }
+
+    /// The node of `tile` at `level`: a deck node when one stands there,
+    /// else the tile.
+    pub fn node(&self, map: &Map, tile: TilePos, level: u8) -> u32 {
+        if level > 0 {
+            if let Some(&n) = self.node_of.get(&(tile, level)) {
+                return n;
+            }
+        }
+        map.index(tile) as u32
+    }
+
+    /// Does edge `e` run at minute `minute` of the day (the escalator's
+    /// hours; every other portal always)?
+    pub fn runs(&self, e: &Edge, minute: u32) -> bool {
+        self.list.get(e.portal as usize).is_none_or(|p| p.runs(e.forward, minute % crate::time::TICKS_PER_DAY as u32))
+    }
+
+    /// The edge from `(from, from_level)` to `(to, to_level)` that runs at
+    /// `minute`, if any (a walker's hop on its path).
+    pub fn edge(&self, map: &Map, from: (TilePos, u8), to: (TilePos, u8), minute: u32) -> Option<&Edge> {
+        let a = self.node(map, from.0, from.1);
+        let b = self.node(map, to.0, to.1);
+        self.edges_of(a).iter().find(|e| e.to == b && self.runs(e, minute))
+    }
+
+    /// Portal `e`'s kind.
+    pub fn kind(&self, e: &Edge) -> Option<PortalKind> {
+        self.list.get(e.portal as usize).map(|p| p.kind)
+    }
 }

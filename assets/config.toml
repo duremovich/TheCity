@@ -4903,6 +4903,30 @@ hours = [                          # per kind, [from, to) minutes of the day; to
     { kind = "Feed", open = [0, 1440] },
 ]
 
+# The city milestone C7 (docs/CITY_MILESTONE.md § C7; systems/levels.rs, exec): levels, portals and pathing. A body
+# entering a building on a floor above the ground climbs to it from the door (a Full body in an ExecState::Climb arm at
+# the door, a Coarse one's timed walk lengthened by it), and leaving one climbs down first: by the stairs, or by the
+# host's lift past lift_min_floors when the wait and the ride beat the stairs. The lift is a place: each lift host keeps
+# its lobby's queue (bodies, as a fluid: the cars serve lift_capacity a car each cycle, up to the top and back), so the
+# wait grows when a crowd calls it (the evening rush in a 40-storey tower) and the crowd takes the stairs once the
+# stairs are quicker. The walkways (the map's P lines from walkways_sim.json) cost their run walked at [exec]
+# walk_tiles_per_tick plus their stairs' storeys. Ticks are game minutes, fractions allowed (a climb rounds up).
+# Absent: no climb, a portal costs its run. Placeholders at the real pace (Y4: 21 tiles a minute).
+[levels]
+stair_ticks_per_floor = 0.5        # 30 s a storey up the stairs, an ordinary adult's sustained climb with the landings:
+                                   # the 40th floor is 20 min, the 6th of a walk-up 3 min (C7; the spec's "most of an
+                                   # hour" was the pre-Y4 pace's two tiles a flight at a tile a minute)
+stair_down_mult = 0.5              # down is twice as quick (15 s a storey)
+lift_wait_ticks = 1.0              # a minute for the car to come to an empty lobby
+lift_ticks_per_floor = 0.05        # 3 s a storey ridden, its stops spread over it: the 40th floor is 2 min aboard
+lift_dwell_ticks = 0.5             # 30 s at each end of the car's round trip: a 45-storey lift cycles in 5.5 min
+lift_capacity = 13                 # a 1,000 kg car
+lift_min_floors = 3                # three storeys or fewer: the stairs (a lift climb is more)
+portal_stair_ticks_per_floor = 0.5 # a footbridge's or a station's stairs: a storey (3 m) of rise at the stairs' rate
+portal_lift_wait_ticks = 1.0       # a station lift's call; the ride at lift_ticks_per_floor
+escalator_speed = 1.5              # walking on the moving stair: 1.4 m/s walked + ~0.7 m/s of the stair (the path search's
+                                   # Manhattan step drops to the escalator's cost a tile, so its bound stays admissible)
+
 # The island pass phase 4 (docs/ISLAND_PASS.md I2, Dylan 2026-10-22; systems/commute.rs): a far job is a pressure that
 # resolves over weeks. Each midnight a worker whose commute (distance::travel, the Home door to the work tile) is past
 # far_ticks builds a day of pressure (a nearer one drops it). Past move_days the household looks for a Home nearer work

@@ -201,13 +201,18 @@ These are listed by the adapter's report too. Suggestions are for Dylan, who may
    door (the sim's buildings have one).
 5. ~~Land, sea and mountain~~: `terrain_sim.json` (S3c): the hills are walkable Mountain.
 6. **Height.** Platforms' z, retaining walls, `under_deck` lots, pylons, `ladder` (266) and `stair_boulevard` (23)
-   ways (stairs read as flat Road), the escalator, the funicular and the 23 footbridges (`walkway`) are not mapped:
-   the sim's ground is one flat layer, and the hills cost a flat 1.5 a step whatever their slope. Per-tile move
-   costs from `terrain_height.png` and level portals (stairs, lifts) are later work on the sim's side.
+   ways (stairs read as flat Road) are not mapped: the sim's ground is one flat layer, and the hills cost a flat 1.5
+   a step whatever their slope. Per-tile move costs from `terrain_height.png` are later work on the sim's side.
+   ~~The escalator and the footbridges~~ (the city milestone C7): `walkways_sim.json`'s portals are the map's `P`
+   lines (all but the 4 vehicle ramps: 249 portals as 529 lines, a deck segment past 4 tiles cut into pieces); an
+   end on a way snaps to the walkable tile within 3, a lot end (a landing) is the street outside the lot's nearest
+   door at level 0 (the walk to it added to the run; the climb down through the lot is the sim's, by the levels), a
+   deck or station end the tile under its point at its level; the escalator's `hours` are carried. A host's lift
+   cores are `lift=<cars>:<top>` (4,295 hosts).
 7. **Vehicles.** The expressway, its ramps, `roads.json` nodes/edges and `street/traffic.json` lanes: the sim does
    not simulate vehicles on roads yet (SIM_NOTES: "geometry is the pipeline's, state is the sim's").
 8. ~~Funicular~~ (the pre-view pass phase 5, P11): `elevated.json`'s funicular is an El line between its two ends
-   (`L+`); the escalator is not mapped (a moving walkway at a walk's pace; the ground is flat).
+   (`L+`); the escalator is a set of `P escalator` lines since C7 (item 6).
 9. ~~Rail service~~: `rail.json` (S3c): the line's name and stations are read; its service (240 s headway, 480 s
    at night, 05:30-01:00, 14 m/s, 30 s dwell, 4 trains) is not: the sim's `[transit]` headway, dwell and ride
    speed run every line (Dylan: the sim owns its timetable). The tram's 150 s headway and timetable (`tt`) are

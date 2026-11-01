@@ -56,6 +56,17 @@ pub enum ViewAct {
     JackedIn {
         since: Tick,
     },
+    /// The city milestone C7: a climb inside a structure from storey `from`
+    /// to `to` (a Full body's `ExecState::Climb`, a Coarse leg's climb): by
+    /// the lift (`lift`), waiting at the lower end until `board`; the
+    /// storey reached now is the agent's `floor`.
+    Climb {
+        from: u8,
+        to: u8,
+        lift: bool,
+        board: Tick,
+        arrive: Tick,
+    },
     /// A child: no Brain, no exec (Statistical by construction).
     Child,
 }
@@ -72,6 +83,7 @@ impl ViewAct {
             ViewAct::Fly { .. } => "fly".into(),
             ViewAct::Ride { .. } => "ride".into(),
             ViewAct::JackedIn { .. } => "jacked_in".into(),
+            ViewAct::Climb { .. } => "climb".into(),
             ViewAct::Child => "child".into(),
         }
     }
@@ -85,8 +97,9 @@ pub struct ViewAgent {
     pub t: TilePos,
     /// Inside this building (`Position.building`); `None` for a placed walker or a rider.
     pub b: Option<EntityId>,
-    /// The storey it stands on inside `b` (`Position.floor`, C6a; 0 on the street): the view draws a body indoors
-    /// on its floor in the cutaway.
+    /// The storey it stands on inside `b` (`Position.floor`, C6a), on the street its walkway deck's level (C7; 0
+    /// the ground), on a climb the storey it has reached (rounded; `act` holds the climb): the view draws a body
+    /// indoors on its floor in the cutaway, on a deck at the deck's height.
     pub floor: u8,
     /// `None`: a child (no Brain).
     pub lod: Option<Lod>,
@@ -301,6 +314,9 @@ fn act_of(b: &Brain) -> ViewAct {
         }
         ExecState::Ride { depart, arrive_tick, .. } => ViewAct::Ride { depart: *depart, arrive: *arrive_tick },
         ExecState::JackedIn { since, .. } => ViewAct::JackedIn { since: *since },
+        ExecState::Climb { from, to, lift, board, arrive_tick, .. } => {
+            ViewAct::Climb { from: *from, to: *to, lift: *lift, board: *board, arrive: *arrive_tick }
+        }
     }
 }
 
@@ -371,7 +387,31 @@ pub fn snapshot(world: &World, ring: Rect) -> ViewFrame {
         // the place: aboard -> the vehicle's; a Coarse walker -> his way's; else his Position
         let mut b = p.building;
         let mut ahead = vec![];
-        let t = if let Some(v) = aboard.and_then(|v| world.motions.get(&v).map(|_| v)) {
+        let mut floor = p.floor;
+        let mut act_climb = None;
+        let t = if let Some((t, cb, f)) = crate::exec::climb_place(world, e) {
+            // C7: on a climb at the door of the building climbed
+            b = Some(cb);
+            floor = f.round() as u8;
+            if let Some(ExecState::GotoTimed { climb: Some(c), arrive_tick, .. }) = brain.map(|br| &br.exec) {
+                let leg = if c.down.is_some() && tick < c.depart + c.down_ticks() { c.down } else { c.up };
+                if let Some(l) = leg {
+                    let (s, e) = if l.to == 0 && l.from > 0 && c.down == Some(l) {
+                        (c.depart, c.depart + l.plan.ticks)
+                    } else {
+                        (arrive_tick.saturating_sub(l.plan.ticks), *arrive_tick)
+                    };
+                    act_climb = Some(ViewAct::Climb {
+                        from: l.from,
+                        to: l.to,
+                        lift: l.plan.lift,
+                        board: s + l.plan.wait,
+                        arrive: e,
+                    });
+                }
+            }
+            t
+        } else if let Some(v) = aboard.and_then(|v| world.motions.get(&v).map(|_| v)) {
             b = None;
             match vehicles.iter().find(|x| x.id == v) {
                 Some(x) => x.t,
@@ -388,7 +428,7 @@ pub fn snapshot(world: &World, ring: Rect) -> ViewFrame {
         if !ring.contains(t) {
             continue;
         }
-        let act = brain.map_or(ViewAct::Child, act_of);
+        let act = act_climb.unwrap_or_else(|| brain.map_or(ViewAct::Child, act_of));
         if let (Some(br), true) = (brain, ahead.is_empty() && b.is_none()) {
             if let ExecState::Goto { path, .. } = &br.exec {
                 ahead = path.iter().rev().take(steps).copied().collect();
@@ -400,7 +440,13 @@ pub fn snapshot(world: &World, ring: Rect) -> ViewFrame {
             id: e,
             t,
             b,
-            floor: if b.is_some() { p.floor } else { 0 },
+            floor: if b.is_some() {
+                floor
+            } else if p.building.is_none() && aboard.is_none() {
+                p.floor
+            } else {
+                0
+            },
             lod: brain.map(|br| br.lod),
             act,
             goal: brain.and_then(|br| br.current_goal),

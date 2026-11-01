@@ -388,3 +388,61 @@ fn measure_flow_field_vs_big_path() {
         }
     }
 }
+
+/// The city milestone C7: the escalator (the island's `P escalator` lines,
+/// one-way by the hour) carries a walk from its foot to its head after 10:00
+/// and none before (it runs down 06:00-10:00), and the landmarks measured over
+/// the portals keep the search exact (its cost equals the Manhattan-only
+/// search's). A broken-system signal: a portal no path ever takes fails
+/// silently otherwise.
+#[test]
+fn test_escalator_portal_carries_the_walk_up_by_the_hour() {
+    use citysim::map::PortalKind;
+    let path = format!("{}/../assets/maps/isle_m_k2.txt", env!("CARGO_MANIFEST_DIR"));
+    let map = Map::load(std::path::Path::new(&path));
+    let portals = bigpath::Portals::build(&map, &|p| {
+        (f64::from(p.tiles) / if p.kind == PortalKind::Escalator { 1.5 } else { 1.0 }).round() as u32
+    });
+    let labels = bigpath::labels_with(&map, &portals);
+    let marks = bigpath::Landmarks::build_with(&map, std::sync::Arc::new(map.tiles().to_vec()), &portals);
+    // The escalator's deck points, and its stairs and exits down to the ways: the foot the southmost (the largest
+    // tile y), the head the northmost.
+    let deck: std::collections::BTreeSet<(TilePos, u8)> =
+        map.portals.iter().filter(|p| p.kind == PortalKind::Escalator).flat_map(|p| [p.a, p.b]).collect();
+    let ground: Vec<TilePos> = map
+        .portals
+        .iter()
+        .filter(|p| matches!(p.kind, PortalKind::Stairs | PortalKind::Exit))
+        .filter_map(|p| match (deck.contains(&p.a), deck.contains(&p.b)) {
+            (true, false) if p.b.1 == 0 => Some(p.b.0),
+            (false, true) if p.a.1 == 0 => Some(p.a.0),
+            _ => None,
+        })
+        .collect();
+    let foot = *ground.iter().max_by_key(|t| (t.y, t.x)).expect("the escalator's foot");
+    let head = *ground.iter().min_by_key(|t| (t.y, t.x)).expect("the escalator's head");
+    let cost = |p: &(Vec<TilePos>, Vec<u8>), minute: u32| -> u64 {
+        let mut here = (foot, 0u8);
+        let mut c = 0u64;
+        for (i, &t) in p.0.iter().enumerate() {
+            let next = (t, p.1.get(i).copied().unwrap_or(0));
+            let enter = if next.1 == 0 { u64::from(bigpath::cost_tenths(map.tile_at(t))) } else { 0 };
+            c += match portals.edge(&map, here, next, minute) {
+                Some(e) if next.1 != here.1 || t.manhattan(here.0) != 1 => u64::from(e.cost) + enter,
+                _ => enter,
+            };
+            here = next;
+        }
+        c
+    };
+    let up = |minute: u32, marks: &bigpath::Landmarks| {
+        bigpath::find_with(&map, &labels, marks, &portals, foot, 0, head, minute).expect("the head is reachable")
+    };
+    let rides = |p: &(Vec<TilePos>, Vec<u8>)| p.0.iter().zip(&p.1).filter(|(t, &l)| deck.contains(&(**t, l))).count();
+    let noon = up(12 * 60, &marks);
+    assert!(rides(&noon) > 10, "at noon the walk from the foot {foot:?} to the head {head:?} rides the escalator up");
+    let morning = up(7 * 60, &marks);
+    assert_eq!(rides(&morning), 0, "at 07:00 it runs down: the walk up takes the streets");
+    let plain = up(12 * 60, &bigpath::Landmarks::none());
+    assert_eq!(cost(&noon, 12 * 60), cost(&plain, 12 * 60), "the landmarks over the portals keep the search exact");
+}

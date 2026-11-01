@@ -3227,6 +3227,11 @@ pub struct Building {
     /// `[tenancy] hours` (`floors::hours_of`), an owner's call later.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hours: Option<(u16, u16)>,
+    /// The city milestone C7: a host's lifts, `(cars, top storey)` from the
+    /// map's `lift=` (the export's lift cores); `None`: its stairs only (a
+    /// tenancy climbs its host's, `levels::core_of`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lift: Option<(u8, u8)>,
 }
 
 fn is_zero_stock_x(v: &[u32; 3]) -> bool {
@@ -3336,6 +3341,7 @@ impl Building {
             floor_rent: 0,
             floor_arrears: 0,
             hours: None,
+            lift: None,
         }
     }
 
