@@ -770,6 +770,77 @@ walk, the patrol's start. The pace itself was fixed in round 9 Y4 (Dylan's answe
 farthest commuter left. **Numbers:** legs over 120 min, workers past 3 h, home-to-post median, the top ten causes,
 20k before and after plus the read's 100k run.
 
+**C9a as built (2026-11-01): the Farm deal, the read, the choices** (Dylan's answers 7 and 8: choices, not the walk;
+`import_graphics.rs`, `social.rs`, `streetwork.rs`, `stims.rs`, `leisure.rs`, `distance.rs`, `transit.rs`,
+`leglog.rs`). **Step 1, the Farm deal at its cause** (both maps from TheCityGraphics `c471ffd`, export seed 19;
+`SAVE_VERSION` 125; the view fixture regenerated): (1) **the Vats are cut by stretches**: a stretch of lots is cut off
+once it is Farm-sized and the rest of the part still is (before, only between two lots each Farm-sized alone; at 4 m
+tiles most works lots are not): Vats cuts 267 -> 305; (2) **a tower's lobby is a unit** (the export's `use: lobby`, D5
+only, read as an office unit): the Spire's Lots stand in its towers' lobbies as tenancies, not on whole towers; (3)
+**a Farm past the cuts nobody lives in** takes the homes giving up the fewest flats, the Vats, the Sump, the Mid, then
+the Civic (`FARM_HOME_ZONES`), never a Spire home or an office stack, and no last resort: **100k Farms 502 of 600, a
+printed shortfall** (`OPEN-262`; the island has ~500 Farm-sized cuts off the Spire); (4) **a cut piece** (no lot
+centre) stands the storeys, lifts and a length share of the flats of the lots it is a slice of (Homes with `flats=0`
+47 -> 4; the owning cut keeps its flats). D5 by cut centre (313 cuts):
+
+| D5 | 100k before | 100k after | 20k before | 20k after |
+|---|---|---|---|---|
+| Homes (whole cuts) | 27 | 312 | 92 | 312 |
+| Farms | 218 | 0 | 0 | 0 |
+| Lots: whole cuts / lobby tenancies | 64 / 0 | 0 / 502 | 218 / 0 | 0 / 216 |
+
+Island Farms at 100k: D4 154 -> 201, Vats 227 -> 301, D5 218 -> 0, the Stack 1 -> 0 (a Home). 20k: 120, all in the Vats.
+
+**Step 2, the read** (100k seed 42 x 30, 8 threads, on the step-1 maps; the shadow days 21-27, 24 diaries): 33 legs
+over 120 min, by cause: **23 the dead on their way** (1,750-6,665 min, "aborted", goal "-": the leg log held a dead
+walker's leg open until the corpse went; read in diaries at 20k, `agent_17441` "GoTo(Market) ... (agent died)" d22
+10:41, killed resisting arrest at 10:45, logged 3,689 min; this was C8b's "aborted Coarse walks" and C8's "stuck
+72-hour Coarse walk"); **8 cab rides** (132-423 min): a booked driver's body held by his own plan never came, the
+rider waited at his door until the driver's shift ended (`exec_76985 d21 06:22` hailed a cab on floor 44, rode at
+16:00: "GoTo(Hall) ... 588 min, 495 tiles"; C8b's 364-min cab); **2 goals that ignore distance** (a concierge's Lead to
+a Seller 1,718 tiles, a Raid's march 1,704 tiles: gang code); **0** the post, the move-in, the patrol, the muster.
+Workers past 3 h 0, the home-to-post median 3 min (20k 10), "moved nearer work" 2 in 30 days (no far commuter to
+move). **The El at 100k:** bodies do ride it cross-island: after, 295 bodied El legs in 30 days (`#el_od`, new), the
+Sump to the Vats 10 (to 1,529 tiles), between the Sump and the Mid-Levels 43 (to 1,841 tiles); ~2 a day against
+~9,000 Statistical boardings. Left to `OPEN-254` (Dylan's call 7).
+
+**Step 3, the choices** (no walk mechanics, nothing retuned; new numbers in config): (1) **the marriage move-in weighs
+the commutes** (`OPEN-240`): the Home with room that keeps the mover's post within `[life] commute_long_ticks` (or no
+longer than now), the lower sum of the two commutes, ties the proposer's; none: each keeps his own Home and a line
+says so (20k: 708 move-ins, 0 apart); (2) **a cab no-show**: a driver's body booked `[service] cab_no_show_ticks` (60)
+ago and not at the door leaves the ride to the Garage's off-screen cab, hourly; (3) **a dose's source** past
+`[distance.choice] stim_ticks` (60) of the body's own trip is none (`worker_friday_26279 d22 00:05` left his night
+shift for a Club 630 tiles off, 64 min); 20k stims dealt 12,940 -> 11,608, 100k 49,720 -> 47,592 (FINDING); (4)
+**leisure within a walk**: the HangOut spot's cap, score and ties and the Socialise Bar's cap read the body's own trip,
+not the El's estimate, and the trip boards the El only when the ride saves what the fare is worth to that body
+(`transit::saves_enough`, `choose`'s rule: the poor's coin at `poor_ticks_per_coin`; `loader_27477 d21 06:27` walked
+62 min, 1,038 tiles, to an hour's HangOut "within" the 60-min cap); (5) **the leg log ends a leg at its walker's
+death** (measurement). **Skipped, the read showed none:** "moved nearer work" (already travel ticks in
+`life::relocate`; no far commuter), the patrol's start (20k: two guards' 1,086-tile Coarse legs from the crest,
+121-129 min against a 52-min Manhattan estimate: the path, not the choice; `OPEN-221`). Also: `gang::split_loot`
+debited a member thrown out mid-split with no gang to credit (a coin left the world; core_sanity seed 44 day 70,
+exposed by the new choices): he keeps his share.
+
+| seed 42 x 30 | 20k before | 20k after | 100k before (the read) | 100k after |
+|---|---|---|---|---|
+| legs over 120 min | 4 | 2 | 33 | 0 |
+| workers past 3 h (d30) | 0 | 0 | 0 | 0 |
+| home-to-post median (d30) | 10 min | 10 min | 3 min | 3 min |
+| employed / homeless d30 | 12,035 / 337 | 11,920 / 318 | 56,175 / 2,845 | 56,368 / 2,939 |
+| bodied El legs (30 d) | 51 | 66 | 278 | 340 |
+| ticks/s days 25-30 (shared box) | 74-108 | 105-114 | 8-9 | 6-9 |
+
+The 20k after's two legs are the crest patrol above. The afters are the merged tree (C9b in it; the split_loot fix
+not). **Camera** (20k, `run --save-at 33500`, `cityview --save --follow 8283 --bench one --shots`): the farthest
+commuter left on foot, Beatrix Northcott, a farmer from the Sump to Vat Farm#5830 across the island, 1,575 tiles, 85
+min ("slow" to the El), `c9a_farmer_8283_d23_0705/0740/0810/0827.png`; and the Spire's skyline, `cityview --overview
+--at 3439,1688 --zoom 1800 --bench one`, `c9a_spire.png`. **Shadow** (20k days 21-27, the 12 travel archetypes x 2):
+`gang_member_7799 d26 07:32` "Zara Brandt moved in with Dmitri Mbeki at Block#4437, 0 h 01 from work (the nearer of
+the two Homes to their work)". What reads wrong: an hour's HangOut still costs up to ~1,100 tiles each way under
+`spot_cap_ticks` 60 (`builder_23976 d22 06:06`, 60 min, 1,117 tiles; a number, Dylan's); a hit Contract's stakeout
+walks a farmer 79 min each way at 04:37 (`agent_8283 d23`, under `stakeout_ticks` 180); a guard patrols 4-6 h a day
+on foot; the D4 Farms are shop-houses (201, the Mid's Farm-sized cuts).
+
 ## The exit
 
 One read at 100k seed 42 (Shadow V19, the city) and one watch: (1) a diary whose home, post and evening fall within
