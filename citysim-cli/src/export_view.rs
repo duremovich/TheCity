@@ -1,13 +1,12 @@
 //! `citysim-cli export-view` (the city milestone C2): a save in, `city-simview/0.1` frames out
 //! (TheCityGraphics `spec/integration/SIM_VIEW_CONTRACT.md` § 2's file form; `citysim::view` is the snapshot, this is
 //! its JSON). The bridge converter `engine/simsnap` moved in: it loads the save, sets the view to the camera ring
-//! (`PlayerCommand::SetView`), pins every body in it (`view::pin_ring`, OPEN-149's stopgap) unless `--no-pin`, runs
-//! `--ticks` ticks and writes a frame a tick (the last `--keep` of them). `--follow INDEX` re-centres the ring on
+//! (`PlayerCommand::SetView`; the sim's camera ring, `citysim::systems::ring`, holds its bodies Full and a band
+//! Coarse, the view milestone V5, OPEN-149; `--no-pin` sets its budget to 0), runs `--ticks` ticks and writes a frame a tick (the last `--keep` of them). `--follow INDEX` re-centres the ring on
 //! that body every tick; `--at X,Y` (city metres) holds it; neither: the 256 m cell with the most bodies on the
 //! street. It makes the view tier's fixture (`view/cityview/fixtures/`, docs/TESTING.md). Run from the repo root
 //! (the save reloads its name tables from `assets/`).
 
-use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use citysim::components::{Position, Rect, TilePos};
@@ -38,7 +37,8 @@ pub struct ExportViewArgs {
     /// The ring's half side in tiles (default `[view] ring_half_tiles`).
     #[arg(long)]
     half: Option<u16>,
-    /// Pin nobody (the ring's bodies keep the tier the city gives them).
+    /// The camera ring holds nobody (`[lod] ring_full_max` and `ring_coarse_max` 0: the ring's bodies keep the tier
+    /// the city gives them).
     #[arg(long)]
     no_pin: bool,
 }
@@ -254,7 +254,10 @@ pub fn export_view(args: ExportViewArgs) -> Result<(), String> {
         }
     };
     let first = view::ring_about(ring_now(&world), half, w, h);
-    let mut pinned = BTreeSet::new();
+    if args.no_pin {
+        world.config.lod.ring_full_max = 0;
+        world.config.lod.ring_coarse_max = 0;
+    }
     if let Some(e) = subject {
         if let Some(b) = world.comp_mut::<citysim::Brain>(e) {
             b.pinned = true;
@@ -265,10 +268,8 @@ pub fn export_view(args: ExportViewArgs) -> Result<(), String> {
     for _ in 0..args.ticks {
         let ring = view::ring_about(ring_now(&world), half, w, h);
         world.set_view(Some(ring));
-        if !args.no_pin {
-            pins += view::pin_ring(&mut world, ring, grow(ring, cfg.pin_margin_tiles), &mut pinned);
-        }
         citysim::tick(&mut world);
+        pins += world.ring.counts.taken;
         let ring = view::ring_about(ring_now(&world), half, w, h);
         frames.push(view::snapshot(&world, ring));
     }
@@ -282,7 +283,7 @@ pub fn export_view(args: ExportViewArgs) -> Result<(), String> {
         c
     };
     eprintln!(
-        "ring {first:?} ({pins} pinned over the run); first frame lods {:?}, last {:?}",
+        "ring {first:?} ({pins} taken by the camera ring over the run); first frame lods {:?}, last {:?}",
         lods(&frames[0]),
         lods(&frames[keep - 1])
     );

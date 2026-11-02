@@ -572,40 +572,6 @@ pub fn buildings_in(world: &World, ring: Rect) -> Vec<ViewBuildingInfo> {
         .collect()
 }
 
-/// Pin every Brain standing in `ring` (OPEN-149's rule, "nothing in camera range is Statistical", emulated with
-/// `Brain.pinned`, simsnap's stopgap); unpin the ones `pinned` holds that have left `keep` (the ring grown by the
-/// view's margin). `pinned` is the caller's set of the pins it set (a body pinned by anyone else is left pinned).
-/// Returns how many it pinned.
-pub fn pin_ring(world: &mut World, ring: Rect, keep: Rect, pinned: &mut std::collections::BTreeSet<EntityId>) -> usize {
-    let mut n = 0;
-    let gone: Vec<EntityId> = pinned
-        .iter()
-        .copied()
-        .filter(|&e| !world.comp::<Position>(e).is_some_and(|p| keep.contains(p.tile)) || !world.is_alive(e))
-        .collect();
-    for e in gone {
-        pinned.remove(&e);
-        if let Some(b) = world.comp_mut::<Brain>(e) {
-            b.pinned = false;
-        }
-    }
-    // scan-ok: the view, once a published frame
-    let inside: Vec<EntityId> = world
-        .entities()
-        .filter(|&e| world.comp::<Position>(e).is_some_and(|p| ring.contains(p.tile)) && world.has::<Brain>(e))
-        .collect();
-    for e in inside {
-        if let Some(b) = world.comp_mut::<Brain>(e) {
-            if !b.pinned {
-                b.pinned = true;
-                pinned.insert(e);
-                n += 1;
-            }
-        }
-    }
-    n
-}
-
 /// The walk-matched rate: game ticks a real second at which a walker on screen walks `[view] walk_m_s` (the pace
 /// is `[exec] walk_tiles_per_tick` tiles every `move_ticks_full` ticks, a tile `[view] tile_m`).
 pub fn walk_matched_rate(world: &World) -> f64 {

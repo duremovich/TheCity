@@ -586,8 +586,6 @@ pub struct ViewCfg {
     pub walk_m_s: f64,
     /// The camera ring's half side in tiles.
     pub ring_half_tiles: u16,
-    /// Tiles past the ring a body stays pinned (the view's margin: no pin flaps at the edge).
-    pub pin_margin_tiles: u16,
     /// A Coarse walk is placed on its way (one road search) only when its
     /// start-to-target box grown by this many tiles meets the ring.
     pub way_margin_tiles: u16,
@@ -603,7 +601,6 @@ impl Default for ViewCfg {
             north_m: 3750.0,
             walk_m_s: 1.4,
             ring_half_tiles: 48,
-            pin_margin_tiles: 8,
             way_margin_tiles: 64,
             reload_poll_s: 1.0,
         }
@@ -7637,11 +7634,49 @@ pub struct LodCfg {
     /// at most `coworker_crew + 1` is every co-worker either way.
     #[serde(default)]
     pub coworker_crew: usize,
+    /// The view milestone V5 (OPEN-149): the camera ring's own budget, outside `max_full` / `max_coarse`: bodies
+    /// held Full in the ring (the view + `lod::VIEW_MARGIN`), nearest the camera first; the rest of the ring Coarse.
+    #[serde(default = "LodCfg::default_ring_full_max")]
+    pub ring_full_max: usize,
+    /// Bodies held Coarse in the band around the ring (and the ring's overflow).
+    #[serde(default = "LodCfg::default_ring_coarse_max")]
+    pub ring_coarse_max: usize,
+    /// The band's width in tiles past the ring.
+    #[serde(default = "LodCfg::default_ring_band_tiles")]
+    pub ring_band_tiles: u16,
+    /// A held body keeps its ring tier this many tiles past the ring (Full) or the band (Coarse): no flap at the edge.
+    #[serde(default = "LodCfg::default_ring_hold_tiles")]
+    pub ring_hold_tiles: u16,
+    /// A view wider than this (tiles) is a map overview, not a camera: the ring holds nothing.
+    #[serde(default = "LodCfg::default_ring_max_side_tiles")]
+    pub ring_max_side_tiles: u16,
+    /// The ring reaches ahead by the camera's last move (the frame is drawn after the tick, where the subject is
+    /// then); a move past this many tiles is a cut, no lead.
+    #[serde(default = "LodCfg::default_ring_lead_max_tiles")]
+    pub ring_lead_max_tiles: u16,
 }
 
 impl LodCfg {
     fn default_true() -> bool {
         true
+    }
+    fn default_ring_full_max() -> usize {
+        3000
+    }
+    fn default_ring_coarse_max() -> usize {
+        4000
+    }
+    fn default_ring_band_tiles() -> u16 {
+        24
+    }
+    fn default_ring_hold_tiles() -> u16 {
+        8
+    }
+    fn default_ring_max_side_tiles() -> u16 {
+        256
+    }
+    fn default_ring_lead_max_tiles() -> u16 {
+        96
     }
     fn default_contract_quota() -> usize {
         24

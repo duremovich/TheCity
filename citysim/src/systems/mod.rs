@@ -98,6 +98,7 @@ pub mod presence;
 pub mod protection;
 pub mod raid;
 pub mod reputation;
+pub mod ring;
 pub mod riot;
 pub mod robots;
 pub mod search;

@@ -810,6 +810,9 @@ pub struct World {
     pub vacancies: BTreeMap<EntityId, Vec<Role>>,
     pub edge_roads: Vec<TilePos>,
     pub view_rect: Option<Rect>,
+    /// The view milestone V5 (OPEN-149): the camera ring's held bodies (`systems::ring`); not saved.
+    #[serde(skip)]
+    pub ring: crate::systems::ring::Ring,
     pub command_queue: Vec<PlayerCommand>,
     pub command_log: Vec<(Tick, PlayerCommand)>,
     /// `None` until `citysim-cli calibrate` has produced `assets/stat_table.toml`.
@@ -1997,6 +2000,7 @@ impl World {
             vacancies: BTreeMap::new(),
             edge_roads,
             view_rect: None,
+            ring: Default::default(),
             command_queue: Vec::new(),
             command_log: Vec::new(),
             stat_table,

@@ -2,8 +2,12 @@
 //! A thread owns a `citysim::World` loaded from the save, ticks it at the view's rate and, after each tick,
 //! publishes the camera ring's `ViewFrame` (`citysim::view::snapshot`) behind an `Arc` into a two-slot buffer; the
 //! render thread lerps between the two (sim.rs). Each tick the ring is re-centred on the subject, the sim's view is
-//! set to it (`PlayerCommand::SetView`) and every body standing in it is pinned (`view::pin_ring`: OPEN-149's
-//! stopgap, as simsnap's; the ring budget and promotion before visibility stay the view milestone's).
+//! set to it (`PlayerCommand::SetView`); the sim's camera ring (`citysim::systems::ring`, the view milestone V5,
+//! OPEN-149) holds everyone in it Full and a band around it Coarse on its own budget, each tick. The subject is
+//! pinned. The ring's counts (in camera Full / Coarse / Stat, held, over budget) go to the HUD's caption and, at a
+//! bench's holds, to the log with the sim's ticks/s since the last hold. `CV_RING_DEBUG=1` also logs, at each
+//! published frame, the Statistical bodies in the camera (with why the ring left them) and bodies the ring promoted
+//! and placed inside their workplace (their schedule's building beside their home and shift).
 //!
 //! The rate (`--rate`, ticks a real second) defaults to walk-matched (`view::walk_matched_rate`: `[view] walk_m_s`
 //! over the `[exec]` pace; 1/60 since Y4's 21 tiles a minute). `--from TICK` runs flat out to that tick first.
@@ -16,10 +20,9 @@
 //! build-time ones. The reload's line goes to the log and the HUD (`Shared::reload_line`); the walk-matched rate
 //! follows a pace change unless `--rate` pinned it.
 
-use citysim::components::{Brain, Identity, Rect, TilePos};
+use citysim::components::{Brain, Identity, TilePos};
 use citysim::view::{self, ViewFrame};
 use citysim::{EntityId, World, save};
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -90,10 +93,35 @@ pub struct SimArgs {
     pub reload_at: Option<u64>,
 }
 
-/// The ring grown by `m` tiles on every side (clipped at the map's top-left; the far edge is past the map anyway).
-fn grow(r: Rect, m: u16) -> Rect {
-    let (x, y) = (r.x.saturating_sub(m), r.y.saturating_sub(m));
-    Rect { x, y, w: r.w.saturating_add(r.x - x).saturating_add(m), h: r.h.saturating_add(r.y - y).saturating_add(m) }
+/// V5: the frame's bodies per tier (the camera's: Full, Coarse, Statistical, children) and the sim's ring counts.
+fn ring_line(world: &World, frame: &ViewFrame) -> String {
+    let mut n = [0usize; 4];
+    for a in &frame.agents {
+        n[match a.lod {
+            Some(citysim::Lod::Full) => 0,
+            Some(citysim::Lod::Coarse) => 1,
+            Some(citysim::Lod::Statistical) => 2,
+            None => 3,
+        }] += 1;
+    }
+    let c = &world.ring.counts;
+    format!(
+        "ring: in camera Full {} Coarse {} Stat {} (child {}); held Full {} Coarse {} (over budget {} / {}); this tick taken {} let go {} moved {} replaced {}, lead {} tiles, {:.1} ms",
+        n[0],
+        n[1],
+        n[2],
+        n[3],
+        c.full,
+        c.coarse,
+        c.over_full,
+        c.over_coarse,
+        c.taken,
+        c.released,
+        c.moved,
+        c.replaced,
+        c.lead,
+        c.micros as f64 / 1000.0
+    )
 }
 
 /// The subject's place: its vehicle's, else its walk's (a Coarse walker on his way), else its `Position`.
@@ -182,7 +210,8 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
     let mut cfg = world.config.view.clone();
     let mut watch = a.config.as_deref().map(|p| (mtime(p), Instant::now()));
     let (w, h) = (world.map.w(), world.map.h());
-    let mut pinned = BTreeSet::new();
+    // V5: ticks run and their wall time since the last hold (the bench's sim ticks/s)
+    let mut acc = (0u64, 0f64);
     let mut seq = 0u64;
     let from = a.from.unwrap_or(world.tick);
     let mut next_at = Instant::now();
@@ -249,19 +278,86 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         let Some(at) = subject_tile(&world, subject) else { fatal(format!("the subject {subject:?} is gone at tick {}", world.tick)) };
         let ring = view::ring_about(at, cfg.ring_half_tiles, w, h);
         world.set_view(Some(ring));
-        view::pin_ring(&mut world, ring, grow(ring, cfg.pin_margin_tiles), &mut pinned);
+        let t_tick = Instant::now();
         citysim::tick(&mut world);
+        acc = (acc.0 + 1, acc.1 + t_tick.elapsed().as_secs_f64());
         sh.tick.store(world.tick, Ordering::Relaxed);
         // publish every paced tick; flat out, only the two ticks before the hold (or --from) the lerp needs
         let target = if hold == u64::MAX { from } else { hold };
         if paced || world.tick + 1 >= target {
             let at = subject_tile(&world, subject).unwrap_or(at);
-            if !paced {
-                eprintln!("cityview: tick {} subject at ({}, {})", world.tick, at.x, at.y);
-            }
             let frame = view::snapshot(&world, view::ring_about(at, cfg.ring_half_tiles, w, h));
+            let line = ring_line(&world, &frame);
+            if std::env::var_os("CV_RING_DEBUG").is_some() {
+                // promoted this tick from Statistical: where it stands and what its schedule says
+                let fresh = world
+                    .ring
+                    .held
+                    .iter()
+                    .filter(|(id, h)| {
+                        h.base == citysim::Lod::Statistical
+                            && world
+                                .comp::<Brain>(**id)
+                                .is_some_and(|b| world.comp::<citysim::Position>(**id).is_some_and(|p| p.entered == b.lod_since))
+                    })
+                    .filter(|(id, _)| {
+                        // the ones placed at work (a home placement reads the same way)
+                        let work = world.comp::<citysim::components::Job>(**id).and_then(|j| j.employer);
+                        let at_work = work.is_some() && work == world.comp::<citysim::Position>(**id).and_then(|p| p.building);
+                        at_work
+                    })
+                    .take(6)
+                    .map(|(id, _)| *id)
+                    .collect::<Vec<_>>();
+                let kind = |b: Option<EntityId>| {
+                    b.and_then(|b| world.comp::<citysim::Building>(b).map(|x| format!("{:?}#{} door {:?}", x.kind, b.index, x.door)))
+                };
+                for id in fresh {
+                    let p = world.comp::<citysim::Position>(id);
+                    let job = world.comp::<citysim::components::Job>(id);
+                    eprintln!(
+                        "ring-promoted (lod since {:?}) {} {:?} at {:?} in {:?} floor {:?}; home {:?}; work {:?} on shift {:?}; schedule {:?}",
+                        world.comp::<Brain>(id).map(|b| b.lod_since),
+                        world.name_of(id),
+                        id,
+                        p.map(|p| p.tile),
+                        kind(p.and_then(|p| p.building)),
+                        p.map(|p| p.floor),
+                        kind(world.comp::<citysim::components::Household>(id).and_then(|h| h.home)),
+                        kind(job.and_then(|j| j.employer)),
+                        job.map(|j| j.shifts.clone()),
+                        kind(citysim::systems::ring::schedule_door(&world, id))
+                    );
+                }
+                for ag in frame.agents.iter().filter(|a| a.lod == Some(citysim::Lod::Statistical)).take(8) {
+                    let p = world.comp::<citysim::Position>(ag.id);
+                    eprintln!(
+                        "ring-debug {:?} t {:?} pos {:?} held {:?} sentence {} sched {:?} brain lod_since {:?}",
+                        ag.id,
+                        ag.t,
+                        p.map(|p| (p.tile, p.building)),
+                        world.ring.held.get(&ag.id),
+                        world.has::<citysim::components::Sentence>(ag.id),
+                        citysim::systems::ring::schedule_door(&world, ag.id)
+                            .map(|b| (b, world.comp::<citysim::Building>(b).map(|x| x.door))),
+                        world.comp::<Brain>(ag.id).map(|b| b.lod_since)
+                    );
+                }
+            }
+            if !paced {
+                let (n, secs) = acc;
+                let tps = n as f64 / secs.max(1e-9);
+                eprintln!(
+                    "cityview: tick {} subject at ({}, {}); {line}; sim {} ticks in {secs:.1} s ({tps:.1} ticks/s)",
+                    world.tick, at.x, at.y, n
+                );
+                if world.tick >= target {
+                    acc = (0, 0.0);
+                }
+            }
             seq += 1;
-            let p = Arc::new(Published { frame, subject, caption: caption(&world, subject), at: Instant::now(), seq });
+            let caption = format!("{}\n{line}", caption(&world, subject));
+            let p = Arc::new(Published { frame, subject, caption, at: Instant::now(), seq });
             let mut s = sh.slots.lock().unwrap();
             s.prev = s.latest.take();
             s.latest = Some(p);
