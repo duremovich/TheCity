@@ -272,10 +272,7 @@ pub fn door_ok(world: &World, id: EntityId, b: EntityId) -> bool {
         return false;
     }
     match kind_of(world, b) {
-        Some(BuildingKind::Lounge) => {
-            crate::systems::classes::class_of(world, id) != Class::Dreg
-                && crate::systems::reputation::appearance_of(world, id).dress >= 2
-        }
+        Some(BuildingKind::Lounge) => lounge_admits(world, id),
         // Jobs & lives phase 5: open while a contracted worker is on shift.
         Some(BuildingKind::Dollhouse) => crate::systems::dollhouse::staffed_now(world, b),
         Some(BuildingKind::Club) => {
@@ -301,6 +298,32 @@ pub fn door_ok(world: &World, id: EntityId, b: EntityId) -> bool {
     }
 }
 
+/// Plan L19: a Lounge's door policy, the visitor's alone (no Dreg, a dress
+/// of 2 or better): the same answer at every Lounge.
+fn lounge_admits(world: &World, id: EntityId) -> bool {
+    crate::systems::classes::class_of(world, id) != Class::Dreg
+        && crate::systems::reputation::appearance_of(world, id).dress >= 2
+}
+
+/// [`door_seen`]: is a venue of `kind` a door the bouncer calls at the door
+/// (`[shift.counter]` on and a kept kind), not one the patron reads?
+/// The pressure pass phase 2: every door a bouncer keeps is his call at the
+/// door (`[customers]`), not the Club's alone.
+fn door_called_at(world: &World, kind: BuildingKind) -> bool {
+    crate::systems::shift::counter_on(world)
+        && (kind == BuildingKind::Club
+            || (crate::systems::customers::cfg(world).is_some() && crate::systems::customers::kept_kind(world, kind)))
+}
+
+/// The view milestone V2 (OPEN-265): does [`door_seen`] turn `id` away from
+/// every venue of `kind` on a rule of the visitor's alone (a Lounge's class
+/// and dress)? The ladder's searches skip the kind then, the same pick (none)
+/// without walking every venue of it in reach: the 100k Statistical evening
+/// at 21:00 asked a Lounge's door 1.86 M times, 14 s a day.
+fn door_bars_kind(world: &World, id: EntityId, kind: BuildingKind) -> bool {
+    kind == BuildingKind::Lounge && !door_called_at(world, kind) && !lounge_admits(world, id)
+}
+
 /// The pre-view pass phase 3 (OPEN-121): the door as a patron choosing a
 /// venue knows it. With `[shift.counter]` on, a Club's door is the
 /// bouncer's call made at the door (`door_ok` there, `service::refused`),
@@ -309,13 +332,7 @@ pub fn door_ok(world: &World, id: EntityId, b: EntityId) -> bool {
 /// within `[exec] refused_ticks`. Off: `door_ok` (the bouncer's verdict
 /// read at the pick, so the door never refused anyone).
 pub fn door_seen(world: &World, id: EntityId, b: EntityId) -> bool {
-    // The pressure pass phase 2: every door a bouncer keeps is his call at
-    // the door (`[customers]`), not the Club's alone.
-    let kept = kind_of(world, b).is_some_and(|k| {
-        k == BuildingKind::Club
-            || (crate::systems::customers::cfg(world).is_some() && crate::systems::customers::kept_kind(world, k))
-    });
-    if !crate::systems::shift::counter_on(world) || !kept {
+    if !kind_of(world, b).is_some_and(|k| door_called_at(world, k)) {
         return door_ok(world, id, b);
     }
     let turned = world
@@ -795,6 +812,9 @@ fn nearest_venue(
     // Shadow V4 bug 18: not the agent's own workplace (staff spent their
     // evening at their own Brothel or pit, then waited up to 10 h there for
     // the shift).
+    if door_bars_kind(world, id, kind) {
+        return None;
+    }
     let own = world.comp::<crate::components::Job>(id).and_then(|j| j.employer);
     venue_by_distance(world, kind, from, max_d, |_, b| {
         Some(b) != own
@@ -2320,7 +2340,11 @@ fn evening_day(world: &World, id: EntityId) -> Option<(Origin, DistrictId)> {
 /// is open, lets the agent in (the door policy, the room, a Den's table) and
 /// is affordable, the high rung only for those who reach it.
 fn evening_venues(world: &World, id: EntityId) -> Vec<(BuildingKind, EntityId)> {
-    let purse = spendable(world, id);
+    evening_venues_for(world, id, spendable(world, id))
+}
+
+/// [`evening_venues`] on `purse`, the agent's `spendable` read by the caller.
+fn evening_venues_for(world: &World, id: EntityId, purse: i64) -> Vec<(BuildingKind, EntityId)> {
     if purse < 1 {
         return Vec::new();
     }
@@ -2330,6 +2354,9 @@ fn evening_venues(world: &World, id: EntityId) -> Vec<(BuildingKind, EntityId)> 
     let mut out = Vec::new();
     let max_d = reach_tiles(world, id, Some(cap));
     for kind in LADDER {
+        if door_bars_kind(world, id, kind) {
+            continue;
+        }
         // The perf pass phase 2: the lowest `(other district, door distance,
         // id)` over the venues that pass, as the old sort of them all had it:
         // the nearest that passes in the Home's district, else the nearest
@@ -2586,12 +2613,34 @@ type EveningPlan = (EntityId, i64, Vec<(BuildingKind, EntityId)>);
 fn stat_learned_evening(world: &mut World, ids: &[EntityId], pv: &std::collections::BTreeMap<String, f32>) {
     let day = world.day();
     let free = world.config.leisure.gain.free_stat;
-    let plan: Vec<EveningPlan> = ids
-        .iter()
-        .copied()
-        .filter(|&id| crate::systems::demography::is_adult(world, id))
-        .map(|id| (id, spendable(world, id), evening_venues(world, id)))
-        .collect();
+    let adults: Vec<EntityId> =
+        ids.iter().copied().filter(|&id| crate::systems::demography::is_adult(world, id)).collect();
+    // The view milestone V2 (OPEN-265): the plan reads the world and writes
+    // nothing, so it is read on the think slice's pool (`[perf] threads`),
+    // in the adults' order: the 100k evening's ~750,000 venue queries were
+    // one 21:00 tick of 4 s on one thread.
+    let plan_of = |id: EntityId| {
+        let purse = spendable(world, id);
+        (id, purse, evening_venues_for(world, id, purse))
+    };
+    let threads = world.config.perf.threads.max(1);
+    let plan: Vec<EveningPlan> = if threads == 1 {
+        adults.iter().map(|&id| plan_of(id)).collect()
+    } else {
+        use rayon::prelude::*;
+        #[cfg(test)]
+        let scans = crate::spatial::scans();
+        crate::systems::think::pool(threads).install(|| {
+            adults
+                .par_iter()
+                .map(|&id| {
+                    #[cfg(test)]
+                    crate::spatial::SCANS.with(|s| s.set(scans));
+                    plan_of(id)
+                })
+                .collect()
+        })
+    };
     let adults = plan.len() as f32;
     let mut eligible = [0u32; LADDER.len()];
     for (_, _, venues) in &plan {

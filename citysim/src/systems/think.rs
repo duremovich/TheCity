@@ -224,8 +224,9 @@ fn likely_wide(world: &World, id: EntityId, s: &Scored) -> bool {
     brain.plan.is_some() && brain.current_goal != Some(*winner)
 }
 
-/// One pool per thread count, built on first use and kept for the process.
-fn pool(threads: usize) -> std::sync::Arc<rayon::ThreadPool> {
+/// One pool per thread count, built on first use and kept for the process
+/// (the view milestone V2: the Statistical evening's plan reads on it too).
+pub(crate) fn pool(threads: usize) -> std::sync::Arc<rayon::ThreadPool> {
     use std::collections::BTreeMap;
     use std::sync::{Arc, Mutex};
     static POOLS: Mutex<BTreeMap<usize, Arc<rayon::ThreadPool>>> = Mutex::new(BTreeMap::new());

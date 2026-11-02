@@ -185,6 +185,16 @@ struct RunArgs {
     /// alone; the run's own profile then holds only the last of them).
     #[arg(long)]
     prof_midnight: bool,
+    /// With the `prof` feature: profile this tick of day alone, each day, a
+    /// `PROFDAY <day> <tick of day>` line then its `PROF` lines (the view
+    /// milestone V2: the 21:00 tick is `--prof-tick 1260`).
+    #[arg(long, value_name = "TICK_OF_DAY")]
+    prof_tick: Option<u64>,
+    /// The view milestone V2: a `SLOW <day> <tick of day> <ms>` line on
+    /// stderr for every `citysim::tick` longer than this many wall ms (the
+    /// view stalls on one; `max_tick_ms` shows only the day's longest).
+    #[arg(long, value_name = "MS")]
+    slow_ticks: Option<f64>,
     /// The perf pass phase 8: threads scoring the think slice, overriding
     /// `[perf] threads` (a host setting, not saved: kept with `--load`).
     #[arg(long, value_name = "N")]
@@ -1624,6 +1634,13 @@ fn run(args: RunArgs) -> Result<(), String> {
         }
     };
     let _ = args.speed;
+    if args.prof_tick.is_some_and(|t| t >= TICKS_PER_DAY) {
+        return Err(format!(
+            "--prof-tick {} is past the day's last tick {}",
+            args.prof_tick.unwrap_or(0),
+            TICKS_PER_DAY - 1
+        ));
+    }
     if args.legs.is_some() {
         world.leg_log = Some(citysim::exec::leglog::LegLog { min_ticks: args.legs_min, ..Default::default() });
     }
@@ -1703,10 +1720,11 @@ fn run(args: RunArgs) -> Result<(), String> {
                 next_lever += 1;
             }
             let tick_of_day = world.tick % TICKS_PER_DAY;
-            let tick_start = args.report.then(Instant::now);
+            let tick_start = (args.report || args.slow_ticks.is_some()).then(Instant::now);
             // The perf pass phase 7b: each tick of the staggered midnight alone
             // (tick 0 alone with the stagger off), its tick of day after the day.
-            let prof_this = args.prof_midnight && tick_of_day < citysim::systems::midnight::window(&world);
+            let prof_this = (args.prof_midnight && tick_of_day < citysim::systems::midnight::window(&world))
+                || args.prof_tick == Some(tick_of_day);
             if prof_this {
                 citysim::prof::reset();
             }
@@ -1717,6 +1735,9 @@ fn run(args: RunArgs) -> Result<(), String> {
             }
             if let Some(t) = tick_start {
                 let ms = t.elapsed().as_secs_f64() * 1e3;
+                if args.slow_ticks.is_some_and(|s| ms > s) {
+                    eprintln!("SLOW {} {tick_of_day} {ms:.0}", world.tick / TICKS_PER_DAY + 1);
+                }
                 if ms > max_tick.0 {
                     max_tick = (ms, tick_of_day);
                 }

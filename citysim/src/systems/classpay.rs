@@ -347,6 +347,18 @@ impl Graded {
     /// Every rule but the job's cap.
     fn eligible(&self, world: &World, id: EntityId) -> bool {
         let (employer, role) = (self.employer, self.role);
+        // The view milestone V2 (OPEN-265): the held post first (a read of
+        // the Job; most of the island already holds as good a post, or one
+        // too new to leave), before the rules that read more (the same
+        // answer: every rule is a pure test, all must pass).
+        if let Some(j) = world.comp::<Job>(id) {
+            if j.grade >= self.grade || (j.employer == Some(employer) && j.role == role) {
+                return false;
+            }
+            if !self.seeding && tenure_days(world, id) < self.promote {
+                return false;
+            }
+        }
         if !crate::systems::demography::is_adult(world, id)
             || self.execs.contains(&id)
             || world.has::<crate::components::Sentence>(id)
@@ -361,14 +373,6 @@ impl Graded {
             || !crate::systems::careers::admits(world, id, self.band)
         {
             return false;
-        }
-        if let Some(j) = world.comp::<Job>(id) {
-            if j.grade >= self.grade || (j.employer == Some(employer) && j.role == role) {
-                return false;
-            }
-            if !self.seeding && tenure_days(world, id) < self.promote {
-                return false;
-            }
         }
         true
     }
@@ -386,6 +390,10 @@ pub struct GradedIndex {
     grid: crate::spatial::TileGrid,
     /// The citizens with neither a Home nor a tile, ascending.
     nowhere: Vec<EntityId>,
+    /// The view milestone V2 (OPEN-265): each citizen's `merit_edu x
+    /// education`, by `ids`' index (a pass changes nobody's schooling), so
+    /// a candidate's merit ceiling is read off the index, not the world.
+    edu: Vec<f32>,
 }
 
 impl GradedIndex {
@@ -394,12 +402,15 @@ impl GradedIndex {
         let mut ids = Vec::new();
         let mut froms = Vec::new();
         let mut nowhere = Vec::new();
+        let mut edu = Vec::new();
+        let me = world.config.classpay.merit_edu;
         // scan-ok: once a job-search pass, the graded picks' index
         for id in world.citizens() {
             match crate::systems::distance::set_out(world, id) {
                 Some(f) => {
                     ids.push(id);
                     froms.push(f);
+                    edu.push(me * schooling(world, id).education);
                 }
                 None => nowhere.push(id),
             }
@@ -410,7 +421,7 @@ impl GradedIndex {
             crate::spatial::BUILDING_CELL,
             froms.iter().copied(),
         );
-        GradedIndex { ids, froms, grid, nowhere }
+        GradedIndex { ids, froms, grid, nowhere, edu }
     }
 }
 
@@ -435,14 +446,21 @@ pub fn pick_graded_in(world: &World, employer: EntityId, role: Role, ix: &Graded
     // 0..=1) less the commute's: a candidate whose ceiling is under the best
     // so far cannot win and is passed over before the checks, and the
     // travel is read only for one who would beat the best. The same pick.
+    // The view milestone V2 (OPEN-265): the ceiling is the candidate's own
+    // education term (off the index) plus the skill's and tenure's most,
+    // summed in `merit`'s order less the same commute, so `merit` never
+    // exceeds it: the 100k midnight's picks read the island's citizens'
+    // rules for every candidate under the weights' sum, 26 ms a pick, 3 s
+    // in one tick. The same pick.
     let cfg = &world.config.classpay;
-    let ceiling = cfg.merit_edu.max(0.0) + cfg.merit_skill.max(0.0) + cfg.merit_tenure.max(0.0);
     let prune = cfg.commute_w >= 0.0;
     for i in ix.grid.near_discs(&crate::systems::transit::reach_discs(world, door, cap)) {
         let id = ix.ids[i as usize];
         if prune {
             if let Some((bm, _)) = best {
-                if ceiling - cfg.commute_w * merit_tiles(world, id, Some(door)) < bm {
+                let tiles = ix.froms[i as usize].manhattan(door) as f32;
+                let ceiling = ix.edu[i as usize] + cfg.merit_skill.max(0.0) + cfg.merit_tenure.max(0.0);
+                if ceiling - cfg.commute_w * tiles < bm {
                     continue;
                 }
             }
