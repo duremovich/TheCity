@@ -550,10 +550,13 @@ pub enum EventKind {
     /// to the landlord); `[corp, tenancy, host, workplace]` a company's
     /// lease of floors.
     Floor,
+    /// M18 W (docs/M18_PLAYER.md § W, `systems::workbeats`): a beat of a
+    /// shift. `[body, counterpart, workplace]`.
+    WorkBeat,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 247] = [
+    pub const ALL: [EventKind; 248] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -801,6 +804,7 @@ impl EventKind {
         EventKind::Turf,
         EventKind::Bereaved,
         EventKind::Floor,
+        EventKind::WorkBeat,
     ];
 }
 

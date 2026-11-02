@@ -2654,6 +2654,13 @@ pub struct PlayerControlled {
     /// HUD; cleared by a goal, a walk or Stop.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub doing: Option<String>,
+    /// M18 W: the shift key the human sent the body to work ("Go to work"):
+    /// each of the shift's plans that ends is followed by the next (the
+    /// commute, the blocks, the break, the second half) to the shift's
+    /// close, as an NPC's think would (`player::shift_next`); cleared by any
+    /// other command, Stop, or the shift's end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shift: Option<i64>,
 }
 
 /// The pre-view pass phase 2 (docs/PREVIEW_PASS.md § 1): one shift's

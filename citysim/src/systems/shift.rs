@@ -385,6 +385,7 @@ fn haul_plan(
         s.blocks.clear();
         s.plan_tick = now;
         crate::systems::ownership::jobs2_row(world).shift_breaks += 1;
+        crate::systems::workbeats::shift_seam(world, id, crate::config::BeatAt::Break);
         return Some(Plan { goal: GoalKind::Work, target: Some(post), steps, started_tick: now });
     }
     // Before the break, the first half; after it (or past mid-shift with
@@ -635,6 +636,7 @@ fn stations_plan(
         s.plan_tick = now;
         let row = crate::systems::ownership::jobs2_row(world);
         row.shift_breaks += 1;
+        crate::systems::workbeats::shift_seam(world, id, crate::config::BeatAt::Break);
         return Some(Plan { goal: GoalKind::Work, target: Some(post), steps, started_tick: now });
     }
     // The blocks to mid-shift (the first half) or to the shift's end; a
@@ -876,6 +878,10 @@ pub fn block_done(world: &mut World, id: EntityId, started: Tick) -> bool {
         if let Some(k) = spot.filter(|&k| k < 8) {
             s.worked |= 1 << k;
         }
+    }
+    // M18 W: a block's end inside the shift is a seam a work beat may fill.
+    if mid_shift {
+        crate::systems::workbeats::shift_seam(world, id, crate::config::BeatAt::Block);
     }
     mid_shift
 }

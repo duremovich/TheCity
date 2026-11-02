@@ -540,7 +540,9 @@ use crate::world::World;
 /// from TheCityGraphics `2bcd2c0` with only the `carriage` grid and the `X` lines new.
 /// 127 (hygiene, 2026-11-02): no format change; `SAVE_VERSION` and `World.save_version` widen from u8 to u16 (126
 /// of 255 were spent). RON writes the number either way, so the field reads the same; an older save need not load.
-pub const SAVE_VERSION: u16 = 127;
+/// 128 (M18 W, the work beats): `World.shift_beats`, `PlayerControlled.shift`, `EventKind::WorkBeat`, the
+/// `[work_beat]` section and the `[[work_beats]]` deck (serde defaults: a 127 save loads with no deck, so no beats).
+pub const SAVE_VERSION: u16 = 128;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
