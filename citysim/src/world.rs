@@ -4644,6 +4644,9 @@ impl World {
         let tick = self.tick;
         let name = self.name_of(id);
         let child = self.has::<Child>(id);
+        // OPEN-282: every Death line prints the age and index (a starving
+        // death's too), so a shadow can rule out a child.
+        let age = systems::ages::years(self, id);
         // M13 D20 (phase 1 review): the trip ends before the heirs are dealt,
         // so a vehicle being driven is parked and inherited, not lost with
         // the corpse.
@@ -4773,7 +4776,7 @@ impl World {
         self.push_event(
             crate::events::EventKind::Death,
             &actors,
-            format!("{name} died of {cause:?}{}", if child { " (child)" } else { "" }),
+            format!("{name} #{} ({age} y) died of {cause:?}{}", id.index, if child { " (child)" } else { "" }),
         );
     }
 

@@ -474,6 +474,12 @@ fn retire(world: &mut World) {
             ownership::jobs2_row(world).kin_spouse_far += 1;
         }
         let kin = kin.filter(|_| !far);
+        // OPEN-281 (the standing decision: no pension, work till the body
+        // quits): a child's roof is a retirement only when that household
+        // can keep him; else he works on to the frailty exit (Shadow V20
+        // `camp_parent_44777`: retired to kin at 62, no income, 884 min on
+        // the street the next day).
+        let kin = kin.filter(|&h| kin_keeps(world, h, a, spouse, cfg.retire_days));
         let (coins, cost) = household_cover(world, a);
         let saved = coins >= i64::from(cfg.retire_days) * cost;
         if kin.is_none() && !saved {
@@ -534,6 +540,19 @@ fn co_resident_spouse(world: &World, a: EntityId) -> Option<EntityId> {
         crate::systems::law::living(world, s)
             && world.comp::<crate::components::Household>(s).and_then(|h| h.home) == Some(home)
     })
+}
+
+/// OPEN-281: the kin Home `h` keeps `a` (and the spouse moving along):
+/// its residents' coins and theirs cover `retire_days` of the grown
+/// household's costs (`mean price × 2 meals × every mouth + h's rent a day`,
+/// `household_cover`'s rule).
+fn kin_keeps(world: &World, h: EntityId, a: EntityId, spouse: Option<EntityId>, days: u32) -> bool {
+    let movers = std::iter::once(a).chain(spouse);
+    let residents = world.residents_of(h);
+    let coins: i64 = residents.iter().copied().chain(movers.clone()).map(|e| world.purse(Some(e))).sum();
+    let mouths = i64::try_from(residents.len() + movers.count()).unwrap_or(i64::MAX);
+    let cost = world.mean_price().max(1) * 2 * mouths + ownership::rent_for(world, h);
+    coins >= i64::from(days) * cost
 }
 
 /// Review fix 4: the Home `h` has room for `n` more residents.

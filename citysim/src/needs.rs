@@ -211,8 +211,9 @@ pub fn starvation(world: &mut World, id: EntityId) {
     let started = n.starving_since.is_none();
     let since = *n.starving_since.get_or_insert(tick);
     if started {
-        let name = world.name_of(id);
-        world.push_event(EventKind::Starving, &[id], format!("{name} is starving"));
+        // OPEN-282: the age and index, so a shadow can rule out a child.
+        let (name, age) = (world.name_of(id), crate::systems::ages::years(world, id));
+        world.push_event(EventKind::Starving, &[id], format!("{name} #{} ({age} y) is starving", id.index));
         // Real economy (plan E34): by the agent's Home district, else its tile's.
         let d = match world.comp::<crate::components::Household>(id).and_then(|h| h.home) {
             Some(h) => world.district_of_building(h),

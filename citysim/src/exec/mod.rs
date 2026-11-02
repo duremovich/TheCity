@@ -613,6 +613,18 @@ fn step_agent(world: &mut World, id: EntityId) {
                     return;
                 }
             }
+            // OPEN-280: a patrol stop that cannot be reached or entered (a
+            // full Block) is passed over for the next one, not the whole
+            // Patrol cooled two hours mid-shift (the loop runs to the end).
+            if goal == Some(crate::components::GoalKind::Patrol)
+                && step.action == crate::goap::ActionKind::GoTo(crate::goap::LocationKey::PatrolWaypoint)
+            {
+                if let Some(b) = world.comp_mut::<Brain>(id) {
+                    b.patrol_legs = b.patrol_legs.wrapping_add(1);
+                }
+                world.abort_plan(id);
+                return;
+            }
             world.fail_plan(id);
         }
     }
