@@ -1960,7 +1960,7 @@ mod tests {
             // ... and the El at R2's speed (Y4's 30 km/h El shortens the
             // commutes the moves read).
             c.transit.ride_ticks_per_tile = 0.25;
-            c.transit.dwell_ticks = 1;
+            c.transit.dwell_ticks = 1.0;
             c.transit.stop_spacing = 16;
             c.life.bed_margin_tiles = 20;
             if !map.is_empty() {
@@ -2012,7 +2012,7 @@ mod tests {
             // ... and the El at R2's speed (Y4's 30 km/h El shortens the
             // commutes the moves read).
             c.transit.ride_ticks_per_tile = 0.25;
-            c.transit.dwell_ticks = 1;
+            c.transit.dwell_ticks = 1.0;
             c.transit.stop_spacing = 16;
             c.life.bed_margin_tiles = 20;
             if !map.is_empty() {

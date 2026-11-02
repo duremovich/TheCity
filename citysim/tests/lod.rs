@@ -357,6 +357,9 @@ fn test_no_net_need_theft_follows_lawfulness() {
         }
         if let Some(t) = w.stat_table.as_mut() {
             t.p_desperate = Some([1.0, 0.0, 0.0]);
+            // The view milestone V9 (premise moved): the island's table dives
+            // a bin 0.59 of the eligible hours, and a dive fed him first.
+            t.p_dive = Some([0.0; citysim::STAT_ROWS]);
         }
         let start = w.events.back().map_or(0, |e| e.id + 1);
         stat_hour(&mut w);

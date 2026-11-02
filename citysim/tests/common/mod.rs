@@ -58,8 +58,11 @@ pub fn r2(mut cfg: Config) -> Config {
     cfg.vehicles.max_steps_per_tick = 4;
     cfg.vehicles.flyer_ticks_per_tile = 0.3;
     cfg.transit.ride_ticks_per_tile = 0.25;
-    cfg.transit.dwell_ticks = 1;
+    cfg.transit.dwell_ticks = 1.0;
     cfg.transit.stop_spacing = 16;
+    // The view milestone V9: the scenes' walk-or-ride was minute for minute
+    // (at R2's pace a foot weight of 2 puts the El in every commute).
+    cfg.transit.foot_weight = 1.0;
     cfg.gangs.raid_gather_hours = 8;
     cfg.life.muster_walk_cap_ticks = 480;
     cfg.life.rough_min_tiles = 45;

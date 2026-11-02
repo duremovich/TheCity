@@ -751,6 +751,73 @@ fn clock(tick: Tick) -> String {
     format!("d{} {:02}:{:02}", tick / TICKS_PER_DAY, t / TICKS_PER_HOUR, t % TICKS_PER_HOUR)
 }
 
+/// The view milestone V9 (OPEN-255): the El lines of `id` this tick, against
+/// the ride seen last: the ride filed (the walk to the platform), each leg
+/// boarded, the alighting.
+fn el_lines(
+    world: &World,
+    id: EntityId,
+    seen: &mut Option<((Tick, u8), u8, bool, citysim::components::TilePos)>,
+    now: Tick,
+) -> Vec<String> {
+    let net = &world.transit.net;
+    let stop = |s: u16| {
+        let tile = net.stops[usize::from(s)];
+        format!("the stop at ({}, {}) in {}", tile.x, tile.y, world.district(world.district_of(tile)).name)
+    };
+    let line_name = |l: u8| net.lines.get(usize::from(l)).map_or("?".to_string(), |l| l.name.clone());
+    let mut out = Vec::new();
+    let Some(ride) = world.rides.get(&id) else {
+        if let Some((_, _, true, tile)) = seen.take() {
+            let d = world.district(world.district_of(tile)).name.clone();
+            out.push(format!("EL off at the stop at ({}, {}) in {d}, walking on", tile.x, tile.y));
+        }
+        return out;
+    };
+    let key = (ride.plan_started, ride.plan_step);
+    let aboard = matches!(
+        world.comp::<Brain>(id).map(|b| &b.exec),
+        Some(ExecState::Ride { depart, .. }) if now >= *depart
+    );
+    if seen.is_none_or(|s| s.0 != key) {
+        let legs = ride.legs.len().max(1);
+        out.push(format!(
+            "EL ride to {}: on foot to {}, the {} at {}, off at {} at {} ({legs} leg{}, {})",
+            place_of_target(world, &ride.target),
+            stop(ride.board),
+            line_name(ride.line),
+            hm(ride.depart),
+            stop(ride.alight),
+            hm(ride.arrive),
+            if legs == 1 { "" } else { "s" },
+            if ride.dodge { "jumping the gate" } else { "paying the fare" }
+        ));
+        *seen = Some((key, u8::MAX, false, net.stops[usize::from(ride.alight)]));
+    }
+    if let Some(s) = seen.as_mut() {
+        if aboard && (!s.2 || s.1 != ride.leg) {
+            let stops = ride.legs.get(usize::from(ride.leg)).map(|l| l.from.abs_diff(l.to));
+            out.push(format!(
+                "EL aboard the {} at {}{}",
+                line_name(ride.line),
+                stop(ride.board),
+                stops.map_or(String::new(), |n| format!(", {n} stop{} on", if n == 1 { "" } else { "s" }))
+            ));
+        }
+        s.1 = ride.leg;
+        s.2 = s.2 || aboard;
+    }
+    out
+}
+
+/// A `GoTo` target as the diary names it: its building, else its tile.
+fn place_of_target(world: &World, target: &citysim::exec::GotoTarget) -> String {
+    match target.building {
+        Some(b) => bname(world, b),
+        None => format!("({}, {})", target.tile.x, target.tile.y),
+    }
+}
+
 fn hm(tick: Tick) -> String {
     let t = tick % TICKS_PER_DAY;
     format!("{:02}:{:02}", t / TICKS_PER_HOUR, t % TICKS_PER_HOUR)
@@ -976,6 +1043,9 @@ struct Track {
     last_deck: u8,
     /// V7: the entries of `World::crossing_watch` already logged.
     cross_seen: usize,
+    /// The view milestone V9 (OPEN-255): the El ride seen last (its plan
+    /// key, the leg, aboard) and its alight stop's tile.
+    el_seen: Option<((Tick, u8), u8, bool, citysim::components::TilePos)>,
     cooldowns: BTreeMap<GoalKind, Tick>,
     wallet: Option<i64>,
     inv: Option<(u32, u32, u16, u16)>,
@@ -1346,6 +1416,7 @@ impl Track {
             last_climb: None,
             last_deck: 0,
             cross_seen: 0,
+            el_seen: None,
             cooldowns: BTreeMap::new(),
             wallet: None,
             tally: None,
@@ -2294,6 +2365,11 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
             t.last_climb = Some(key);
             t.log(now, "climb", line);
         }
+    }
+    // The view milestone V9 (OPEN-255): an El ride, its legs aboard and
+    // the alighting.
+    for line in el_lines(world, id, &mut t.el_seen, now) {
+        t.log(now, "el", line);
     }
     // The view milestone V7: a step onto a marked crossing (and the kerb's
     // wait for the walk phase) or onto a carriageway off one.

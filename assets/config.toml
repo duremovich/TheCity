@@ -3422,15 +3422,22 @@ fare = 1                       # coins per ride, transfers free
 headway = 10                   # ticks between departures from each terminus
 ride_ticks_per_tile = 0.008    # round 9 Y4: 0.25 -> 0.008 (125 tiles a minute, 30 km/h between stops; 0.25 was 4 tiles a
                                # minute, "~8x walking" at the v1 pace and a fifth of [exec] walk_tiles_per_tick 21)
-dwell_ticks = 0                # per stop passed. Round 9 Y4: 1 -> 0: a stop's half minute is inside the stretch's minute
-                               # (each stretch is ceil'd to a whole tick); at 1 a minute a stop the island's lines
-                               # (stops 60-200 tiles apart) ran at 30-60 tiles a minute, no faster than the walk
+dwell_ticks = 0.5              # per stop passed (TheCityGraphics' rail.json dwell_s 30). Round 9 Y4: 1 -> 0, each stretch
+                               # ceil'd to a whole tick. The view milestone V9 (OPEN-255): the ride and the dwells are
+                               # summed unrounded and each offset is their ceiling, and a map line's stops are its
+                               # stations (`L` waypoints marked `*`), not its bends: the island's lines had a stop every
+                               # ~35 tiles at a minute each (the Terrace Line's 1,169 tiles in 28 min, twice the walk)
 transfer_ticks = 5             # per transfer (half a headway)
-stop_spacing = 100             # track tiles between stops (besides the line's waypoints and shared tiles). Round 9 Y4:
+stop_spacing = 100             # track tiles between stops on a line without stations (besides its waypoints and shared
+                               # tiles; a line with stations stops at them, its ends and shared tiles only). Round 9 Y4:
                                # 16 -> 100 (400 m; 16 tiles is 64 m, a stop a block: a minute a stop made the El a walk)
 stop_candidates = 3            # nearest stops tried at each end
 min_ride_tiles = 24            # no ride under this Manhattan distance
 min_saving_ticks = 15
+foot_weight = 2.0              # the view milestone V9 (OPEN-255): a minute walked or waited on the platform weighs two
+                               # minutes aboard in the walk-or-ride choice (the out-of-vehicle weight, ~2 in the travel
+                               # literature: Wardman 2004, WebTAG). At 1 a 60-min walk the El cut to 30 (10 of them on
+                               # foot and the platform) saved 30 < 35 and the island's bodies never boarded
 ticks_per_coin = 20            # what a coin of fare must save in time
 poor_ticks_per_coin = 60       # ... for a wallet under poor_meals meals
 poor_meals = 2

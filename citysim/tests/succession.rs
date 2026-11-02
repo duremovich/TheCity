@@ -331,7 +331,7 @@ fn hollow(w: &World) -> EntityId {
     f.parent.as_ref().expect("p").branches[0]
 }
 
-/// `city()` run on until The Hollow has a leader and `brothers_gutted_below`
+/// `city()` run on until The Hollow has a leader and `brothers_gutted_below` - 1
 /// members (Shadow V4 batch 1: on the moved city its roster was empty on
 /// day 4; the brothers' tests need a gang to lose).
 fn hollow_city() -> World {
@@ -343,7 +343,11 @@ fn hollow_city() -> World {
 fn build_hollow_city() -> World {
     let mut w = city();
     let g = hollow(&w);
-    let want = w.config.outside.parents.brothers_gutted_below;
+    // Re-pinned, the view milestone V9 (premise moved): on the island's
+    // stat table the Hollow peaked at 5 (day 14) and was wiped on day 16, so
+    // one short of `brothers_gutted_below` is enough: the gutting test keeps
+    // `brothers_gutted_below - 2` of them.
+    let want = w.config.outside.parents.brothers_gutted_below - 1;
     for _ in 0..30 {
         if w.comp::<Gang>(g).is_some_and(|x| x.leader.is_some() && x.members.len() >= want) {
             break;

@@ -574,11 +574,14 @@ fn probe_gun_never_takes_a_hit_on_kin() {
     let run = |kin: bool| -> (bool, Option<ContractStatus>) {
         // Lives at work phase 2: with the household on, the day-2 city's first
         // married civilian (#590) is killed on day 3 before the hit resolves;
-        // this pins the city the probe was written for.
+        // this pins the city the probe was written for. Re-pinned, the view
+        // milestone V9 (premise moved): on the island's stat table the gun
+        // set up on day 2 never took the control's Hit in 3 days; on day 3 he
+        // does.
         let mut cfg = common::r2(Config::load());
         cfg.household.enabled = false;
         let mut w = World::new(42, cfg);
-        w.run_ticks(2 * TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
+        w.run_ticks(3 * TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
         let civ = civilians(&w);
         let a = civ
             .iter()

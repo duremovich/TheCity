@@ -447,6 +447,7 @@ pub fn generate(residents: u32, seed: u64) -> GenMap {
                 name: label,
                 waypoints: vec![[7, (y0 + ly) as u16], [xe as u16, (y0 + ly) as u16]],
                 in_flight: false,
+                stations: Vec::new(),
             });
         }
     }
@@ -459,6 +460,7 @@ pub fn generate(residents: u32, seed: u64) -> GenMap {
                 name: label,
                 waypoints: vec![[(x0 + lx) as u16, yn], [(x0 + lx) as u16, ys]],
                 in_flight: false,
+                stations: Vec::new(),
             });
         }
     }
