@@ -16,6 +16,14 @@
 //! two-slot buffer instead of a file (`Sim::live`), lerped from the older to the newer over one tick at the rate; a
 //! body or vehicle with an `ahead` (the way to the next tick's place) is lerped along it, not through the block; the
 //! subject's place drives the player stand-in, so the camera and the occlusion follow it (`follow_subject`).
+//!
+//! The view milestone V4 (riders and climbs, `[view] el_*`, `lift_*`, `stair_radius_m`, `crowd_*`): an El train on a
+//! rail deck is `el_cars` cars laid along the deck's centre line on its left track (`car_meshes`), its riders standing
+//! along the walls (a slot per rider by its id), the subject's train roofless; a body indoors stands on the export's
+//! lot at its storey's z (lots.rs: no more ground-plus-formula), a lift rider in a glass car in a shaft at the lot's
+//! middle, a stairs climber walking round the core a turn a storey; the HUD says what the subject is doing (climb,
+//! ride, storey, z, lot); a crowd standing on one street tile spreads over the walkable ground round it (`Sim::spread`).
+//! `--watch-vehicle INDEX` (0: the fullest train) puts the camera on a vehicle while the subject drives the ring.
 
 use crate::data::Layers;
 use crate::mesh::bv;
@@ -48,6 +56,8 @@ pub struct Agent {
     pub gang: bool,
     /// V3: indoors, its building's rect (tiles `[x, y, w, h]`): drawn inside it, not at the door tile it stands on
     pub rect: Option<[f32; 4]>,
+    /// V4: on a climb, (from, to, by the lift)
+    pub climb: Option<(u8, u8, bool)>,
 }
 
 #[derive(Clone)]
@@ -59,6 +69,8 @@ pub struct Vehicle {
     pub ride: u8,
     pub line: Option<u8>,
     pub riders: u16,
+    /// V4: the riders' keys (drawn inside the car)
+    pub rider_ids: Vec<u64>,
 }
 
 /// C6b: a business on its host's floors, its sign on the facade (live frames only).
@@ -121,6 +133,34 @@ pub struct Sim {
     pub yaw_of: HashMap<u64, f32>,
     pub capsules: bool,
     pub indoor_cut_m: f32,
+    /// V4: the rail decks' centre lines (per element: its points, the cumulative plan length) a train's cars are laid
+    /// along; the export's storeys per lot (lots.rs); `[view]` (TheCity's config at startup)
+    pub rails: Vec<(Vec<[f32; 3]>, Vec<f32>)>,
+    pub lots: crate::lots::Lots,
+    pub cfg: citysim::config::ViewCfg,
+    /// V4: the way each train last ran along its rail (+1 / -1); the lines' names; `--watch-vehicle` (the camera on a
+    /// vehicle, not the subject: a proof of the El's riders when the subject never rides)
+    pub dir_of: HashMap<u64, f32>,
+    pub line_names: Vec<String>,
+    pub watch_vehicle: Option<u32>,
+    /// V4: the El car's body, lit floor and roof; the lift's plate, post and glass
+    pub car: [Handle<Mesh>; 3],
+    pub car_mats: [Handle<StandardMaterial>; 3],
+    pub cab: [Handle<Mesh>; 3],
+    pub cab_mats: [Handle<StandardMaterial>; 2],
+}
+
+/// A 64-bit mix (splitmix64's finaliser): the per-id picks.
+fn mix64(mut x: u64) -> u64 {
+    x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    x ^ (x >> 31)
+}
+
+/// Two numbers in -0.5..0.5 fixed per id (V3's indoor place).
+fn unit2(id: u64) -> (f32, f32) {
+    let k = id.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    (((k >> 16) & 0xFFFF) as f32 / 65535.0 - 0.5, ((k >> 40) & 0xFFFF) as f32 / 65535.0 - 0.5)
 }
 
 fn ekey(e: citysim::EntityId) -> u64 {
@@ -170,6 +210,10 @@ impl SimFrame {
                 dress: a.dress.unwrap_or(1),
                 gang: a.colours.is_some(),
                 rect: a.rect.map(|r| [f32::from(r.x), f32::from(r.y), f32::from(r.w), f32::from(r.h)]),
+                climb: match a.act {
+                    ViewAct::Climb { from, to, lift, .. } => Some((from, to, lift)),
+                    _ => None,
+                },
             })
             .collect();
         let vehicles = f
@@ -191,6 +235,7 @@ impl SimFrame {
                     _ => None,
                 },
                 riders: v.riders.len() as u16,
+                rider_ids: v.riders.iter().map(|r| ekey(*r)).collect(),
             })
             .collect();
         let units = f
@@ -300,7 +345,7 @@ impl Sim {
         let names: Vec<String> =
             d["lines"].as_array().map(|ls| ls.iter().map(|l| l["name"].as_str().unwrap_or("").to_string()).collect()).unwrap_or_default();
         let line_track = line_track_of(&names);
-        let (rail, deck) = rail_and_deck(chunk_dir);
+        let (rail, deck, rails) = rail_and_deck(chunk_dir);
         let mut frames = vec![];
         for f in d["frames"].as_array().expect("frames") {
             let agents = f["agents"]
@@ -330,6 +375,11 @@ impl Sim {
                         dress: a["dress"].as_u64().map_or(1, |v| v as u8),
                         gang: !a["colours"].is_null(),
                         rect: None,
+                        climb: (act == "climb").then(|| {
+                            let x = &a["x"];
+                            let n = |k: &str| x[k].as_u64().unwrap_or(0).min(255) as u8;
+                            (n("from"), n("to"), x["lift"].as_bool().unwrap_or(false))
+                        }),
                     }
                 })
                 .collect();
@@ -350,6 +400,7 @@ impl Sim {
                     },
                     line: v["route"]["line"].as_u64().map(|l| l as u8),
                     riders: v["riders"].as_array().map_or(0, |r| r.len() as u16),
+                    rider_ids: v["riders"].as_array().map_or(vec![], |r| r.iter().map(key).collect()),
                 })
                 .collect();
             frames.push(SimFrame {
@@ -371,6 +422,7 @@ impl Sim {
             t: start.min(frames.len() - 1) as f32,
             frames,
             line_track,
+            line_names: names,
             rail,
             deck,
             rate,
@@ -391,12 +443,21 @@ impl Sim {
             yaw_of: HashMap::new(),
             capsules: false,
             indoor_cut_m: 6.0,
+            rails,
+            lots: crate::lots::Lots::load(chunk_dir),
+            cfg: citysim::config::ViewCfg::default(),
+            dir_of: HashMap::new(),
+            watch_vehicle: None,
+            car: Default::default(),
+            car_mats: Default::default(),
+            cab: Default::default(),
+            cab_mats: Default::default(),
         }
     }
 
     /// C2: frames from the sim thread (`--save`); the frame (tile_m, y1) and the lines arrive with the first frame.
     pub fn live(shared: std::sync::Arc<crate::simthread::Shared>, chunk_dir: &Path) -> Sim {
-        let (rail, deck) = rail_and_deck(chunk_dir);
+        let (rail, deck, rails) = rail_and_deck(chunk_dir);
         Sim {
             tile_m: 4.0,
             x0: 0.0,
@@ -424,6 +485,16 @@ impl Sim {
             yaw_of: HashMap::new(),
             capsules: false,
             indoor_cut_m: 6.0,
+            rails,
+            lots: crate::lots::Lots::load(chunk_dir),
+            cfg: citysim::config::ViewCfg::default(),
+            dir_of: HashMap::new(),
+            line_names: vec![],
+            watch_vehicle: None,
+            car: Default::default(),
+            car_mats: Default::default(),
+            cab: Default::default(),
+            cab_mats: Default::default(),
         }
     }
 
@@ -441,6 +512,7 @@ impl Sim {
                 && let Some(st) = live.stat.lock().unwrap().clone()
             {
                 self.line_track = line_track_of(&st.lines);
+                self.line_names = st.lines.clone();
                 self.tile_m = st.tile_m;
                 self.y1 = st.north_m;
             }
@@ -477,6 +549,86 @@ impl Sim {
         self.metres([x + w / 2.0 - 0.5 + u * w * 0.6, y + h / 2.0 - 0.5 + v * h * 0.6], a.id, false)
     }
 
+    /// V4: a rect in tiles `[x, y, w, h]` as city metres `[x0, y0, x1, y1]`.
+    fn rect_m(&self, r: [f32; 4]) -> [f32; 4] {
+        let x0 = self.x0 + r[0] * self.tile_m;
+        let y1 = self.y1 - r[1] * self.tile_m;
+        [x0, y1 - r[3] * self.tile_m, x0 + r[2] * self.tile_m, y1]
+    }
+
+    /// V4: where a body inside its building stands on storey `floor` (a climb's fraction): on the export's lot that
+    /// has the storey (lots.rs), at that storey's z, a place fixed per id in the middle 60 % of the lot's part of the
+    /// building; `core` stands it at that part's middle (the lift and the stairs). No lot (an old asset tree, a
+    /// building off every lot): V3's place in the rect, the ground under it plus the 4 m + 3 m formula.
+    fn indoor_place(&self, a: &Agent, floor: f32, core: bool, stream: &Stream) -> (Vec2, f32, Option<crate::lots::Placed>) {
+        if let Some(r) = a.rect
+            && let Some(pl) = self.lots.place(self.rect_m(r), floor)
+        {
+            let [x0, y0, x1, y1] = pl.area;
+            let (u, v) = if core { (0.0, 0.0) } else { unit2(a.id) };
+            let p = Vec2::new((x0 + x1) / 2.0 + u * (x1 - x0) * 0.6, (y0 + y1) / 2.0 + v * (y1 - y0) * 0.6);
+            return (p, pl.z, Some(pl));
+        }
+        let p = self.indoor_xy(a);
+        (p, stream.ground_z(p.x, p.y).unwrap_or(0.0) + Sim::storey_z(floor), None)
+    }
+
+    /// V4: the rail deck nearest `p` within 20 m: (its index, the plan distance along it).
+    fn rail_frame(&self, p: Vec2) -> Option<(usize, f32)> {
+        let mut best: Option<(f32, usize, f32)> = None;
+        for (i, (pts, acc)) in self.rails.iter().enumerate() {
+            for (k, w) in pts.windows(2).enumerate() {
+                let (a, b) = (Vec2::new(w[0][0], w[0][1]), Vec2::new(w[1][0], w[1][1]));
+                let ab = b - a;
+                let l2 = ab.length_squared();
+                let t = if l2 > 0.0 { ((p - a).dot(ab) / l2).clamp(0.0, 1.0) } else { 0.0 };
+                let d2 = (a + ab * t - p).length_squared();
+                if d2 < 400.0 && best.is_none_or(|x| d2 < x.0) {
+                    best = Some((d2, i, acc[k] + (acc[k + 1] - acc[k]) * t));
+                }
+            }
+        }
+        best.map(|(_, i, s)| (i, s))
+    }
+
+    /// V4: the point (with the deck's z) and the unit plan tangent `s` metres along rail deck `i` (clamped to it).
+    fn rail_point(&self, i: usize, s: f32) -> (Vec3, Vec2) {
+        let (pts, acc) = &self.rails[i];
+        let s = s.clamp(0.0, *acc.last().unwrap());
+        let k = acc.partition_point(|x| *x <= s).clamp(1, acc.len() - 1);
+        let (a, b) = (pts[k - 1], pts[k]);
+        let l = acc[k] - acc[k - 1];
+        let t = if l > 0.0 { (s - acc[k - 1]) / l } else { 0.0 };
+        let p = Vec3::new(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t);
+        (p, Vec2::new(b[0] - a[0], b[1] - a[1]).normalize_or(Vec2::X))
+    }
+
+    /// V4: a body standing on a tile shared with `n - 1` others: a place fixed per id in a disc round the tile's
+    /// centre (`[view] crowd_gap_m` apart, at most `crowd_spread_m` out) on walkable ground at the centre's level
+    /// (sidewalk, ped, open, stairs; not a carriageway, a lot's platform or a wall), the disc widening on a miss;
+    /// `None`: no such place found.
+    fn spread(&self, stream: &Stream, c: Vec2, id: u64, n: usize) -> Option<Vec2> {
+        let gz = stream.ground_z(c.x, c.y)?;
+        // a disc about 2.5 times the crowd's own area (some of it is wall or road), growing on each miss
+        let r0 = self.cfg.crowd_gap_m * (n as f32 * 2.5 / std::f32::consts::PI).sqrt();
+        let cap = self.cfg.crowd_spread_m.max(self.tile_m * 0.5);
+        for k in 0..16u64 {
+            let r = (r0 * (1.0 + k as f32 / 4.0)).clamp(self.tile_m * 0.5, cap);
+            let h = mix64(id ^ k.wrapping_mul(0xA24B_AED4_963E_E407));
+            let ang = (h & 0xFFFF) as f32 / 65536.0 * std::f32::consts::TAU;
+            let rad = r * (((h >> 16) & 0xFFFF) as f32 / 65535.0).sqrt();
+            let q = c + Vec2::new(ang.cos(), ang.sin()) * rad;
+            let walkable = matches!(
+                stream.ground_class(q.x, q.y),
+                Some(crate::data::SIDEWALK | crate::data::PED | crate::data::OPEN | crate::data::STAIRS)
+            );
+            if walkable && stream.ground_z(q.x, q.y).is_some_and(|z| (z - gz).abs() < 1.0) {
+                return Some(q);
+            }
+        }
+        None
+    }
+
     /// C6a: a storey's floor over the ground, metres: the export's 4 m ground and 3 m storeys above it (C7: a
     /// climb's storey a fraction, the ground's first 4 m in proportion).
     fn storey_z(floor: f32) -> f32 {
@@ -503,17 +655,27 @@ impl Sim {
     }
 }
 
-/// The rail deck's points (`rail_z`) and (C7) the walkway decks' (footbridges, the escalator, the stations: `deck_z`).
-fn rail_and_deck(chunk_dir: &Path) -> (Vec<[f32; 3]>, Vec<[f32; 3]>) {
-    let (mut rail, mut deck) = (vec![], vec![]);
+/// The rail deck's points (`rail_z`), (C7) the walkway decks' (footbridges, the escalator, the stations: `deck_z`)
+/// and (V4) each rail deck's centre line with its cumulative plan length (a train's cars laid along it).
+type Polyline = (Vec<[f32; 3]>, Vec<f32>);
+fn rail_and_deck(chunk_dir: &Path) -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<Polyline>) {
+    let (mut rail, mut deck, mut rails) = (vec![], vec![], vec![]);
     for e in Layers::load(chunk_dir).elements {
         match e.kind.as_str() {
-            "rail" => rail.extend(e.pts),
+            "rail" => {
+                let mut acc = vec![0.0f32];
+                for w in e.pts.windows(2) {
+                    let d = ((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2)).sqrt();
+                    acc.push(acc.last().unwrap() + d);
+                }
+                rail.extend(e.pts.iter().copied());
+                rails.push((e.pts, acc));
+            }
             "walkway" | "escalator" | "station" => deck.extend(e.pts),
             _ => {}
         }
     }
-    (rail, deck)
+    (rail, deck, rails)
 }
 
 fn unlit(mats: &mut Assets<StandardMaterial>, c: [f32; 3], k: f32) -> Handle<StandardMaterial> {
@@ -556,6 +718,85 @@ pub fn setup_sim(mut sim: ResMut<Sim>, mut meshes: ResMut<Assets<Mesh>>, mut mat
     sim.mats = m;
     // a shop sign: 3.2 m wide, 1.5 m tall, 0.3 m deep (its face along the wall)
     sim.sign = meshes.add(Cuboid::new(3.2, 1.5, 0.3));
+    // V4: the El car (`[view] el_car_*`): dark steel with a faint blue glow, a warm lit floor, the roof
+    let [body, floor, roof] = car_meshes(&sim.cfg);
+    sim.car = [meshes.add(body), meshes.add(floor), meshes.add(roof)];
+    let steel = |glow: [f32; 3]| StandardMaterial {
+        base_color: Color::srgb(0.20, 0.22, 0.26),
+        emissive: LinearRgba::rgb(glow[0], glow[1], glow[2]),
+        metallic: 0.5,
+        perceptual_roughness: 0.5,
+        ..default()
+    };
+    sim.car_mats = [
+        mats.add(steel([0.02, 0.05, 0.09])),
+        mats.add(StandardMaterial {
+            base_color: Color::srgb(0.3, 0.27, 0.22),
+            emissive: LinearRgba::rgb(0.3, 0.25, 0.16),
+            perceptual_roughness: 0.8,
+            ..default()
+        }),
+        mats.add(steel([0.01, 0.02, 0.04])),
+    ];
+    // V4: the lift: a unit plate, a unit post (scaled: the car's corners, the shaft's), a unit glass box
+    sim.cab = [meshes.add(Cuboid::new(1.0, 0.1, 1.0)), meshes.add(Cuboid::new(0.08, 1.0, 0.08)), meshes.add(Cuboid::new(1.0, 1.0, 1.0))];
+    sim.cab_mats = [
+        mats.add(steel([0.6, 0.4, 0.12])),
+        mats.add(StandardMaterial {
+            base_color: Color::srgba(0.6, 0.8, 1.0, 0.15),
+            emissive: LinearRgba::rgb(0.03, 0.05, 0.08),
+            alpha_mode: AlphaMode::Blend,
+            perceptual_roughness: 0.1,
+            ..default()
+        }),
+    ];
+}
+
+/// V4: an El car's meshes (local: x across, y up from the car's floor, z along): the body (the sills to 1 m, the
+/// window pillars, the band over the windows, the end walls), the floor (lit: the riders read at night), the roof.
+fn car_meshes(c: &citysim::config::ViewCfg) -> [Mesh; 3] {
+    let (w, h, l) = (c.el_car_w_m, c.el_car_h_m.max(2.2), c.el_car_m.max(4.0));
+    let cub = |s: Vec3, at: Vec3| Mesh::from(Cuboid::new(s.x, s.y, s.z)).transformed_by(Transform::from_translation(at));
+    let t = 0.12;
+    let mut body = cub(Vec3::new(w, h, t), Vec3::new(0.0, h / 2.0, l / 2.0 - t / 2.0));
+    let mut add = |m: Mesh| body.merge(&m).expect("cuboids share their attributes");
+    add(cub(Vec3::new(w, h, t), Vec3::new(0.0, h / 2.0, -l / 2.0 + t / 2.0)));
+    let pillars = (l / 2.5).floor().max(1.0) as i32;
+    for side in [-1.0f32, 1.0] {
+        let x = side * (w / 2.0 - t / 2.0);
+        add(cub(Vec3::new(t, 1.0, l), Vec3::new(x, 0.5, 0.0)));
+        add(cub(Vec3::new(t, 0.6, l), Vec3::new(x, h - 0.3, 0.0)));
+        for k in 1..pillars {
+            let z = -l / 2.0 + k as f32 * l / pillars as f32;
+            add(cub(Vec3::new(t, h - 1.6, 0.25), Vec3::new(x, 1.0 + (h - 1.6) / 2.0, z)));
+        }
+    }
+    let floor = cub(Vec3::new(w, 0.25, l), Vec3::new(0.0, -0.125, 0.0));
+    let roof = cub(Vec3::new(w + 0.1, 0.15, l + 0.05), Vec3::new(0.0, h + 0.075, 0.0));
+    [body, floor, roof]
+}
+
+/// What the HUD says the subject is doing (V4: "@ street" read through a climb).
+fn subject_line(a: &Agent, f: f32, z: f32, pl: Option<crate::lots::Placed>, lots: &crate::lots::Lots) -> String {
+    let lot = pl.map_or(" (no export lot: the 4 m + 3 m formula)".to_string(), |p| {
+        let l = &lots.lots[p.lot];
+        format!(
+            " (lot {}: platform {:.1}, {} storeys, roof {:.1}{})",
+            l.id,
+            l.z_m,
+            l.floors(),
+            l.roof(),
+            if p.over { "; the sim's storey is past the lot's top" } else { "" }
+        )
+    });
+    match a.climb {
+        Some((from, to, lift)) => format!(
+            "subject: climbing {} by the {}, floor {f:.1} ({from} -> {to}), z {z:.1}{lot}",
+            if to >= from { "up" } else { "down" },
+            if lift { "lift" } else { "stairs" }
+        ),
+        None => format!("subject: inside, floor {:.0}, z {z:.1}{lot}", f.round()),
+    }
 }
 
 /// Advance the playback and place every placeholder: frame i and i + 1 lerped for the ids in both.
@@ -581,6 +822,7 @@ pub fn update_sim(
     let subject = sim.subject;
     let mut subject_at: Option<(Vec3, f32)> = None;
     let mut subject_in: Option<u64> = None;
+    let mut subj_line = String::new();
     // the newer frame's bodies, each lerped from its place in the older one along the older's way ahead (at u = 1
     // exactly the newer frame: a bench's shot shows its tick)
     let prev_a: HashMap<u64, ([f32; 2], Vec<[f32; 2]>)> = sim.frames[i].agents.iter().map(|a| (a.id, (a.t, a.ahead.clone()))).collect();
@@ -590,9 +832,8 @@ pub fn update_sim(
     let prev_v: HashMap<u64, ([f32; 2], Vec<[f32; 2]>)> = sim.frames[i].vehicles.iter().map(|v| (v.id, (v.t, v.ahead.clone()))).collect();
     let mut seen: Vec<(u8, u64)> = vec![];
     let mut place =
-        |commands: &mut Commands, sim: &mut Sim, k: (u8, u64), mesh: Handle<Mesh>, mat: Handle<StandardMaterial>, at: Vec3, yaw: f32| {
+        |commands: &mut Commands, sim: &mut Sim, k: (u8, u64), mesh: Handle<Mesh>, mat: Handle<StandardMaterial>, tf: Transform| {
             seen.push(k);
-            let tf = Transform::from_translation(at).with_rotation(Quat::from_rotation_y(yaw));
             match sim.ents.get(&k).copied() {
                 Some(e) => {
                     if let Ok((mut t, mut v)) = q.get_mut(e) {
@@ -606,21 +847,35 @@ pub fn update_sim(
                 }
             }
         };
+    let at_yaw = |p: Vec3, yaw: f32| Transform::from_translation(p).with_rotation(Quat::from_rotation_y(yaw));
     let (mut street, mut indoors, mut aboard, mut lods) = (0, 0, 0, [0usize; 3]);
     // the most bodies standing on one street tile (a Coarse stack reads as one blob)
     let mut on_tile: HashMap<(i32, i32), usize> = HashMap::new();
     let fr_agents = sim.frames[j].agents.clone();
+    let still = |a: &Agent| prev_a.get(&a.id).is_some_and(|(p, _)| *p == a.t);
+    // V4: the bodies standing on each ground-level street tile: a crowd on one tile spreads out (`Sim::spread`)
+    let mut standing: HashMap<(i32, i32), usize> = HashMap::new();
+    for a in fr_agents.iter().filter(|a| !a.indoors && a.aboard.is_none() && a.floor == 0.0 && still(a)) {
+        *standing.entry((a.t[0] as i32, a.t[1] as i32)).or_default() += 1;
+    }
     // V3: a body indoors is drawn only where the occlusion cuts the walls away: the subject's storey of the subject's
     // building, within the cut's radius of it (`[view] indoor_cut_m`). Every other indoor body stays hidden: drawn on
     // its storey at its jittered tile, it stood on (or through) the facades from the outside (the floating capsules).
-    let subj = fr_agents.iter().find(|a| Some(a.id) == subject).map(|a| (a.b, floor_of(a).round(), sim.indoor_xy(a)));
+    // V4: the subject indoors stands on the export's lot at its storey's z (lots.rs); on a climb at the lot's core.
+    let subj = fr_agents.iter().find(|a| Some(a.id) == subject && a.indoors).map(|a| {
+        let f = floor_of(a);
+        let (p, z, pl) = sim.indoor_place(a, f, a.climb.is_some(), &stream);
+        (a.b, f.round(), p, z, pl)
+    });
     // the cut as it is now (it eases in once the walls block the subject; a kit building never opens round a body
     // inside it: then no indoor body shows), capped at `indoor_cut_m`
     let cut = occ.filter(|o| o.enabled).and_then(|o| o.vols.first().map(|v| v.radius)).unwrap_or(0.0).min(sim.indoor_cut_m);
     let cut2 = if cut >= 1.0 { cut * cut } else { -1.0 };
     let mut people = vec![];
     let mut subject_body = None;
-    let (mut hidden_in, mut deck_miss) = (0usize, 0usize);
+    // V4: the subject's lift car (its place, z, lot)
+    let mut cab: Option<(Vec2, f32, Option<crate::lots::Placed>)> = None;
+    let (mut hidden_in, mut deck_miss, mut spread_n) = (0usize, 0usize, 0usize);
     for a in &fr_agents {
         lods[a.lod as usize] += 1;
         // the way ahead's heading (compass degrees -> Bevy yaw about +y, heading 0 = -z), else the last one drawn
@@ -635,72 +890,148 @@ pub fn update_sim(
                     (a.id.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as f32 / (1u64 << 24) as f32 * std::f32::consts::TAU
                 }),
             };
-        let walking = matches!(a.act, 0 | 5 | 9) || prev_a.get(&a.id).is_some_and(|(p, _)| *p != a.t);
-        let draw =
-            |at: Vec3| crate::people::BodyDraw { id: a.id, at, yaw, walking, female: a.female, age: a.age, dress: a.dress, gang: a.gang };
+        // a lift rider stands in the car; a stairs climber walks
+        let lift = a.climb.is_some_and(|c| c.2);
+        let walking = matches!(a.act, 0 | 5) || (a.act == 9 && !lift) || prev_a.get(&a.id).is_some_and(|(p, _)| *p != a.t);
+        let draw = |at: Vec3, yaw: f32| crate::people::BodyDraw {
+            id: a.id,
+            at,
+            yaw,
+            walking,
+            female: a.female,
+            age: a.age,
+            dress: a.dress,
+            gang: a.gang,
+        };
         let is_subject = Some(a.id) == subject;
         if is_subject {
-            // the follow-cam: aboard at its vehicle (below), indoors on its storey at its building's tile, else its body
             subject_in = a.aboard;
-            let t = prev_a.get(&a.id).map_or(a.t, |(p, ah)| along(*p, ah, a.t, u));
-            let p = if a.indoors { sim.indoor_xy(a) } else { sim.metres(t, a.id, true) };
-            let g = stream.ground_z(p.x, p.y).unwrap_or(0.0);
-            let z = if a.indoors {
-                g + Sim::storey_z(floor_of(a))
-            } else if a.floor > 0.0 {
-                sim.deck_z(p).unwrap_or(g + Sim::storey_z(a.floor))
-            } else {
-                g
-            };
-            subject_at = Some((Vec3::new(p.x, p.y, z), yaw));
-            subject_body = Some(draw(Vec3::new(p.x, p.y, z)));
         }
         if a.indoors {
             // C6a: on its floor, seen only in the cut (above)
             indoors += 1;
-            let p = sim.indoor_xy(a);
-            let shown = is_subject
-                || subj.is_some_and(|(b, f, sp)| b.is_some() && b == a.b && floor_of(a).round() == f && p.distance_squared(sp) <= cut2);
-            if !shown {
-                hidden_in += 1;
-                continue;
+            let f = floor_of(a);
+            let (mut p, z, mut yaw) = match (&subj, is_subject) {
+                (Some(s), true) => (s.2, s.3, yaw),
+                (Some(s), false) if s.0.is_some() && s.0 == a.b && f.round() == s.1 => {
+                    let (p, z, _) = sim.indoor_place(a, f, false, &stream);
+                    if p.distance_squared(s.2) > cut2 {
+                        hidden_in += 1;
+                        continue;
+                    }
+                    (p, z, yaw)
+                }
+                _ => {
+                    hidden_in += 1;
+                    continue;
+                }
+            };
+            if is_subject {
+                let pl = subj.as_ref().and_then(|s| s.4);
+                if let Some((from, to, lift)) = a.climb {
+                    if lift {
+                        cab = Some((p, z, pl));
+                    } else {
+                        // the stairs: round the core, a turn a storey, facing the way round
+                        let ang = f * std::f32::consts::TAU;
+                        let sign = if to >= from { 1.0 } else { -1.0 };
+                        p += Vec2::new(ang.cos(), ang.sin()) * sim.cfg.stair_radius_m;
+                        let d = Vec2::new(-ang.sin(), ang.cos()) * sign;
+                        yaw = -d.x.atan2(d.y);
+                    }
+                }
+                subj_line = subject_line(a, f, z, pl, &sim.lots);
+                subject_at = Some((Vec3::new(p.x, p.y, z), yaw));
+                subject_body = Some(draw(Vec3::new(p.x, p.y, z), yaw));
             }
-            let z = stream.ground_z(p.x, p.y).unwrap_or(0.0) + Sim::storey_z(floor_of(a));
             if sim.capsules {
                 let mat = if sim.by_lod { sim.mats[ACTS.len() + a.lod as usize].clone() } else { sim.mats[a.act as usize].clone() };
                 let cap = sim.capsule.clone();
-                place(&mut commands, &mut sim, (0, a.id), cap, mat, bv(p.x, p.y, z + 0.85 * 1.4), 0.0);
+                place(&mut commands, &mut sim, (0, a.id), cap, mat, at_yaw(bv(p.x, p.y, z + 0.85 * 1.4), 0.0));
             } else if !is_subject {
-                people.push(draw(Vec3::new(p.x, p.y, z)));
+                people.push(draw(Vec3::new(p.x, p.y, z), yaw));
             }
             continue;
         }
         if a.aboard.is_some() {
-            // drawn inside its vehicle
+            // drawn inside its vehicle (below)
             aboard += 1;
             continue;
         }
         street += 1;
         *on_tile.entry((a.t[0] as i32, a.t[1] as i32)).or_default() += 1;
         let t = prev_a.get(&a.id).map_or(a.t, |(p, ah)| along(*p, ah, a.t, u));
-        let p = sim.metres(t, a.id, true);
+        let mut p = sim.metres(t, a.id, true);
+        // V4: a crowd standing on one tile spreads over the walkable ground round it, a place fixed per id
+        let n = standing.get(&(a.t[0] as i32, a.t[1] as i32)).copied().unwrap_or(0);
+        if n >= 2
+            && a.floor == 0.0
+            && still(a)
+            && let Some(sp) = sim.spread(&stream, sim.metres(a.t, a.id, false), a.id, n)
+        {
+            p = sp;
+            spread_n += 1;
+        }
         let g = stream.ground_z(p.x, p.y).unwrap_or(0.0);
         // C7: a body on a walkway deck stands on it (no deck point within 12 m: at the storey's height, counted)
         let deck = if a.floor > 0.0 { sim.deck_z(p) } else { None };
         deck_miss += usize::from(a.floor > 0.0 && deck.is_none());
         let z = if a.floor > 0.0 { deck.unwrap_or(g + Sim::storey_z(a.floor)) } else { g };
+        if is_subject {
+            subject_at = Some((Vec3::new(p.x, p.y, z), yaw));
+            subject_body = Some(draw(Vec3::new(p.x, p.y, z), yaw));
+            subj_line = if a.floor > 0.0 {
+                format!("subject: on a deck (level {:.0}), z {z:.1}", a.floor)
+            } else {
+                format!("subject: on the street, z {z:.1}")
+            };
+        }
         if sim.capsules {
             let mat = if sim.by_lod { sim.mats[ACTS.len() + a.lod as usize].clone() } else { sim.mats[a.act as usize].clone() };
             let cap = sim.capsule.clone();
-            place(&mut commands, &mut sim, (0, a.id), cap, mat, bv(p.x, p.y, z + 0.85 * 1.4), yaw);
+            place(&mut commands, &mut sim, (0, a.id), cap, mat, at_yaw(bv(p.x, p.y, z + 0.85 * 1.4), yaw));
         } else if !is_subject {
-            people.push(draw(Vec3::new(p.x, p.y, z)));
+            people.push(draw(Vec3::new(p.x, p.y, z), yaw));
         }
     }
-    sim.people = people;
-    sim.subject_body = subject_body;
+    // V4: the subject's lift car in its shaft (the lot's middle, platform to roof): two plates, four posts, glass
+    if let Some((p, z, pl)) = cab {
+        let (s, h) = (sim.cfg.lift_cab_m, sim.cfg.lift_cab_h_m);
+        let [plate, post, glass] = sim.cab.clone();
+        let [steel, glass_m] = sim.cab_mats.clone();
+        let sc = |m: Vec3, at: Vec3| Transform::from_translation(at).with_scale(m);
+        place(&mut commands, &mut sim, (8, 0), plate.clone(), steel.clone(), sc(Vec3::new(s, 1.0, s), bv(p.x, p.y, z - 0.05)));
+        place(&mut commands, &mut sim, (8, 1), plate, steel.clone(), sc(Vec3::new(s, 1.0, s), bv(p.x, p.y, z + h)));
+        place(&mut commands, &mut sim, (8, 2), glass, glass_m, sc(Vec3::new(s, h, s), bv(p.x, p.y, z + h / 2.0)));
+        for (k, (dx, dy)) in [(-1.0f32, -1.0f32), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].into_iter().enumerate() {
+            let c = Vec2::new(p.x + dx * s / 2.0, p.y + dy * s / 2.0);
+            place(
+                &mut commands,
+                &mut sim,
+                (8, 3 + k as u64),
+                post.clone(),
+                steel.clone(),
+                sc(Vec3::new(1.0, h, 1.0), bv(c.x, c.y, z + h / 2.0)),
+            );
+            if let Some(pl) = pl {
+                let l = &sim.lots.lots[pl.lot];
+                let (z0, z1) = (l.z_m, l.roof());
+                let c = Vec2::new(p.x + dx * (s / 2.0 + 0.2), p.y + dy * (s / 2.0 + 0.2));
+                let m = sc(Vec3::new(1.0, (z1 - z0).max(0.1), 1.0), bv(c.x, c.y, (z0 + z1) / 2.0));
+                place(&mut commands, &mut sim, (9, k as u64), post.clone(), steel.clone(), m);
+            }
+        }
+    }
     let fr_veh: Vec<Vehicle> = sim.frames[j].vehicles.clone();
-    let (mut by_ride, mut riders) = ([0usize; 5], 0usize);
+    // V4: the riders' looks (a rider whose vehicle is outside the ring is not in the frame: a look by its id)
+    let looks: HashMap<u64, Agent> = fr_agents.iter().filter(|a| a.aboard.is_some()).map(|a| (a.id, a.clone())).collect();
+    // `--watch-vehicle 0`: the train with the most riders now
+    let watch = sim.watch_vehicle.and_then(|w| match w {
+        0 => fr_veh.iter().filter(|v| v.ride == 2 && v.riders > 0).max_by_key(|v| (v.riders, std::cmp::Reverse(v.id))).map(|v| v.id),
+        w => fr_veh.iter().find(|v| (v.id & 0xFFFF_FFFF) as u32 == w).map(|v| v.id),
+    });
+    let mut watch_at: Option<(Vec3, f32)> = None;
+    let (mut by_ride, mut riders, mut riders_drawn) = ([0usize; 5], 0usize, 0usize);
     for v in &fr_veh {
         by_ride[v.ride as usize] += 1;
         riders += usize::from(v.riders);
@@ -708,13 +1039,116 @@ pub fn update_sim(
         let p = sim.metres(t, v.id, false);
         // heading: from the older place to the newer, else along the newer's way ahead
         let to = |a: [f32; 2]| sim.metres(a, v.id, false);
-        let ahead = prev_v
-            .get(&v.id)
-            .map(|(q, _)| to(v.t) - to(*q))
-            .filter(|d| d.length() > 0.01)
-            .or_else(|| v.ahead.first().map(|n| to(*n) - to(v.t)).filter(|d| d.length() > 0.01));
+        let motion = prev_v.get(&v.id).map(|(q, _)| to(v.t) - to(*q)).filter(|d| d.length() > 0.01);
+        let ahead = motion.or_else(|| v.ahead.first().map(|n| to(*n) - to(v.t)).filter(|d| d.length() > 0.01));
         let yaw = ahead.map_or(0.0, |d| -d.x.atan2(d.y));
         let track = v.line.and_then(|l| sim.line_track.get(l as usize).copied());
+        // V4: an El train on a rail deck: `el_cars` cars laid along the deck's centre line on its left track, riders
+        // inside along the walls; the subject's (and the watched) train roofless so the camera sees in
+        if v.ride == 2
+            && track != Some(TRACK_STREET)
+            && let Some((ri, s)) = sim.rail_frame(p)
+        {
+            let (_, tan) = sim.rail_point(ri, s);
+            let sign = match motion {
+                Some(m) => {
+                    if m.dot(tan) >= 0.0 {
+                        1.0
+                    } else {
+                        -1.0
+                    }
+                }
+                None => sim.dir_of.get(&v.id).copied().unwrap_or(1.0),
+            };
+            sim.dir_of.insert(v.id, sign);
+            let open = subject_in == Some(v.id) || watch == Some(v.id);
+            let c = sim.cfg.clone();
+            let n = usize::from(c.el_cars.max(1));
+            let pitch = c.el_car_m + c.el_car_gap_m;
+            let [body, floor, roof] = sim.car.clone();
+            let [body_m, floor_m, roof_m] = sim.car_mats.clone();
+            let mut cars: Vec<(Vec2, f32, Vec2)> = vec![];
+            for k in 0..n {
+                let (q, tk) = sim.rail_point(ri, s + (k as f32 - (n as f32 - 1.0) / 2.0) * pitch * sign);
+                let at = q.truncate() + Vec2::new(-tk.y, tk.x) * sign * c.el_track_m;
+                let z = q.z + c.el_floor_m;
+                cars.push((at, z, tk));
+                let tf = at_yaw(bv(at.x, at.y, z), tk.x.atan2(-tk.y));
+                let key = v.id ^ ((k as u64 + 1) << 56);
+                place(&mut commands, &mut sim, (5, key), body.clone(), body_m.clone(), tf);
+                place(&mut commands, &mut sim, (6, key), floor.clone(), floor_m.clone(), tf);
+                if !open {
+                    place(&mut commands, &mut sim, (7, key), roof.clone(), roof_m.clone(), tf);
+                }
+            }
+            // the riders' places: along both walls of every car, a slot per rider picked by its id (probing past a
+            // taken one), the overflow in the aisle
+            let rows = ((c.el_car_m - 3.0) / c.el_slot_m.max(0.3)).floor().max(1.0) as usize;
+            let per = 2 * rows;
+            let total = per * n;
+            let mut taken = vec![false; total];
+            let mut ids = v.rider_ids.clone();
+            ids.sort_unstable();
+            for id in ids {
+                let h = mix64(id);
+                let mut k = (h % total as u64) as usize;
+                let mut tries = 0;
+                while taken[k] && tries < total {
+                    k = (k + 1) % total;
+                    tries += 1;
+                }
+                let (car, lane, row) = if tries < total {
+                    taken[k] = true;
+                    (k / per, (k % per) / rows, k % rows)
+                } else {
+                    ((h >> 8) as usize % n, 2, (h >> 24) as usize % rows)
+                };
+                let (at, z, tk) = cars[car];
+                let nrm = Vec2::new(-tk.y, tk.x);
+                let x = match lane {
+                    0 => -(c.el_car_w_m / 2.0 - 0.55),
+                    1 => c.el_car_w_m / 2.0 - 0.55,
+                    _ => 0.0,
+                };
+                let along_m = -c.el_car_m / 2.0 + 1.5 + (row as f32 + 0.5) * (c.el_car_m - 3.0) / rows as f32;
+                let pos = at + nrm * x + tk * along_m;
+                // facing in across the car; in the aisle along it
+                let face = if lane == 2 { tk } else { nrm * -x.signum() };
+                let yaw_b = -face.x.atan2(face.y);
+                let look = looks.get(&id);
+                let bd = crate::people::BodyDraw {
+                    id,
+                    at: pos.extend(z),
+                    yaw: yaw_b,
+                    walking: false,
+                    female: look.map_or(h & 1 == 0, |a| a.female),
+                    age: look.map_or(30, |a| a.age),
+                    dress: look.map_or(1, |a| a.dress),
+                    gang: look.is_some_and(|a| a.gang),
+                };
+                riders_drawn += 1;
+                if Some(id) == subject {
+                    subject_at = Some((pos.extend(z), yaw_b));
+                    subject_body = Some(bd);
+                    let line = v.line.and_then(|l| sim.line_names.get(usize::from(l))).map_or("El", |s| s.as_str());
+                    subj_line = format!(
+                        "subject: aboard the {line} (train #{}), car {} of {n}, {} riders, floor z {z:.1}",
+                        v.id & 0xFFFF_FFFF,
+                        car + 1,
+                        v.riders
+                    );
+                } else if !sim.capsules {
+                    people.push(bd);
+                }
+            }
+            if watch == Some(v.id) {
+                let (at, z, tk) = cars[n / 2];
+                watch_at = Some((at.extend(z), -tk.x.atan2(tk.y)));
+                let line = v.line.and_then(|l| sim.line_names.get(usize::from(l))).map_or("El", |s| s.as_str());
+                subj_line = format!("watching the {line} train #{} ({} riders), floor z {z:.1}", v.id & 0xFFFF_FFFF, v.riders);
+            }
+            continue;
+        }
         let ground = stream.ground_z(p.x, p.y).unwrap_or(0.0);
         let (z, red) = match (v.ride, track) {
             (2, Some(TRACK_RAIL)) => (sim.rail_z(p).map_or(ground + 12.0, |z| z + 2.6), false),
@@ -725,10 +1159,21 @@ pub fn update_sim(
         };
         let mat = sim.mats[ACTS.len() + LOD_RGB.len() + usize::from(red)].clone();
         if subject_in == Some(v.id) {
-            subject_at = Some((Vec3::new(p.x, p.y, z), yaw));
+            // a road vehicle: the subject sits low in its box
+            subject_at = Some((Vec3::new(p.x, p.y, ground + 0.2), yaw));
+            subj_line = format!("subject: aboard a vehicle (ride {}), {} riders", v.ride, v.riders);
+        }
+        if watch == Some(v.id) {
+            watch_at = Some((Vec3::new(p.x, p.y, z), yaw));
         }
         let mesh = sim.boxes[v.ride as usize].clone();
-        place(&mut commands, &mut sim, (1, v.id), mesh, mat, bv(p.x, p.y, z), yaw);
+        place(&mut commands, &mut sim, (1, v.id), mesh, mat, at_yaw(bv(p.x, p.y, z), yaw));
+    }
+    sim.people = people;
+    sim.subject_body = subject_body;
+    // `--watch-vehicle`: the camera on that vehicle (the subject still drives the ring)
+    if watch_at.is_some() {
+        subject_at = watch_at;
     }
     // C6b: a sign per unit on its host's facade by its door, on its storey; units sharing a door and a storey
     // spread along the wall. Lit while open, dim when shut, white the day it was founded.
@@ -771,7 +1216,7 @@ pub fn update_sim(
         };
         signs += 1;
         let mesh = sim.sign.clone();
-        place(&mut commands, &mut sim, (state, un.id), mesh, mat, bv(p.x, p.y, z), yaw);
+        place(&mut commands, &mut sim, (state, un.id), mesh, mat, at_yaw(bv(p.x, p.y, z), yaw));
     }
     // hide what this frame does not hold
     let seen: std::collections::HashSet<(u8, u64)> = seen.into_iter().collect();
@@ -801,6 +1246,9 @@ pub fn update_sim(
         None => follow,
     };
     let follow = if signs > 0 { format!("{follow}\nsigns {signs} (lit {lit_n}, founded today {fresh_n})") } else { follow };
+    // V4: what the subject is doing (a climb, a ride, its storey's z), the riders drawn, the crowd spread
+    let follow = if subj_line.is_empty() { follow } else { format!("{follow}\n{subj_line}") };
+    let follow = format!("{follow}\nriders drawn {riders_drawn}, bodies spread off a shared tile {spread_n}");
     sim.hud = format!(
         "sim tick {} {}  agents {} (street {street}, most on a tile {stack}, indoors {indoors} ({hidden_in} hidden), aboard {aboard}, off a deck {deck_miss}; Full {} Coarse {} Stat {})  vehicles car {} van {} train {} flyer {} foot {} ({riders} aboard)  events {}",
         f.tick,

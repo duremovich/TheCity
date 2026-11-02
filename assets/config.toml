@@ -5870,3 +5870,21 @@ indoor_cut_m = 6.0                 # a body indoors is drawn only on the subject
 child_scale_min = 0.5              # a child's drawn height over an adult's at age 0 (no child mesh: the adult scaled) ...
 child_full_age = 17                # ... growing linearly to 1 at this age
 people_glow = 0.5                  # the look's atlas as emission, this strong (an unlit body is lost on the night street)
+# The view milestone V4 (cityview sim.rs): riders and climbs. An El train is el_cars cars of el_car_m (rail.json's
+# 4 x 20 m), el_car_gap_m apart, el_car_w_m wide and el_car_h_m tall, laid along the rail deck's centre line; its floor
+# stands el_floor_m over the deck top, on the track el_track_m left of the centre line (the 10 m deck's two tracks,
+# left-hand running). Riders stand along the car's walls every el_slot_m, facing in; the subject's train has no roof.
+el_cars = 4
+el_car_m = 20.0
+el_car_gap_m = 1.0
+el_car_w_m = 3.0
+el_car_h_m = 3.2
+el_floor_m = 0.4
+el_track_m = 2.5
+el_slot_m = 1.4
+lift_cab_m = 2.0                   # a lift rider's car (side and height, m), in a shaft at the lot's middle, roof to platform
+lift_cab_h_m = 2.6
+stair_radius_m = 1.5               # a stairs climber walks round the core at this radius, a turn a storey
+crowd_spread_m = 10.0              # bodies standing on one tile spread over the walkable ground (sidewalk, ped, open, stairs)
+crowd_gap_m = 0.9                  # within this radius, about this far apart (a disc 2.5 x the crowd's area, widening
+                                   # where it meets a wall or a road); stable per body (a hash of its id)

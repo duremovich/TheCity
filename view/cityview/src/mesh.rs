@@ -257,6 +257,17 @@ pub fn ground_z(g: &Ground, tile: f32, x: f32, y: f32) -> Option<f32> {
     Some(c.iter().copied().fold(f32::MAX, f32::min).max(0.0))
 }
 
+/// V4: the class of the ground tile under (x, y) (data.rs's classes).
+pub fn ground_class(g: &Ground, tile: f32, x: f32, y: f32) -> Option<u8> {
+    let cm = g.n as f32 * tile;
+    let i = ((x - g.cx as f32 * cm) / tile).floor() as i32;
+    let j = ((y - g.cy as f32 * cm) / tile).floor() as i32;
+    if i < 0 || j < 0 || i >= g.n || j >= g.n {
+        return None;
+    }
+    g.class.get(g.at(i, j)).copied()
+}
+
 /// Massing boxes -> one mesh for the window material. Per vertex: COLOR = (lit share, warm share, pattern seed,
 /// upper floor height), UV_1 = (base z, ground floor height). `origin` = the chunk's SW corner (world m).
 /// `boxes`: the chunk's `boxes` or its placed lots' `gen` (both index `m.buildings`).
