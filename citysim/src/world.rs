@@ -476,6 +476,10 @@ fn load_stat_mlp(config: &Config) -> Option<crate::systems::stat_policy::StatMlp
     }
 }
 
+/// The view milestone V7: one watched step onto a crossing (`World::crossing_watch`): the tick, the tile,
+/// its junction, the ms waited at the kerb (`u32::MAX`: a jaywalk onto a carriageway).
+pub type CrossingSeen = (Tick, TilePos, TilePos, u32);
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct World {
     pub tick: Tick,
@@ -634,7 +638,7 @@ pub struct World {
     /// junction, the ms waited at the kerb) or onto a carriageway off one
     /// (`u32::MAX` waited: a jaywalk), drained by the reader.
     #[serde(skip)]
-    pub crossing_watch: Option<std::collections::BTreeMap<EntityId, Vec<(Tick, TilePos, TilePos, u32)>>>,
+    pub crossing_watch: Option<std::collections::BTreeMap<EntityId, Vec<CrossingSeen>>>,
     // graph + blackboard
     pub edges: crate::edge_map::EdgeMap,
     /// Private so every write goes through `reports_mut`, which drops the

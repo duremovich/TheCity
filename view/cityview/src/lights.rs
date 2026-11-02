@@ -48,7 +48,7 @@ pub fn graft(world: &mut citysim::World, config: Option<&Path>) {
         let here = saved.file_name().map(|n| Path::new("assets/maps").join(n));
         let grafted = here.into_iter().chain([saved.clone()]).filter(|p| p.is_file()).find_map(|p| {
             let m = citysim::map::Map::load(&p);
-            world.map.graft_crossings(&m).then(|| (p, m.crossings.len()))
+            world.map.graft_crossings(&m).then_some((p, m.crossings.len()))
         });
         match grafted {
             Some((p, n)) => {
