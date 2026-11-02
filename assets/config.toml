@@ -5990,6 +5990,8 @@ el_slot_m = 1.4
 lift_cab_m = 2.0                   # a lift rider's car (side and height, m), in a shaft at the lot's middle, roof to platform
 lift_cab_h_m = 2.6
 stair_radius_m = 1.5               # a stairs climber walks round the core at this radius, a turn a storey
+storey_slab_m = 0.5                # V10: a body indoors stands on its lot's massing box whose height holds its storey's floor +
+                                   # this (a tower storey on the tower's plate, not anywhere on the lot: the wall line)
 crowd_spread_m = 10.0              # bodies standing on one tile spread over the walkable ground (sidewalk, ped, open, stairs)
 crowd_gap_m = 0.9                  # within this radius, about this far apart (a disc 2.5 x the crowd's area, widening
                                    # where it meets a wall or a road); stable per body (a hash of its id)

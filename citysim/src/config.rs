@@ -675,6 +675,9 @@ pub struct ViewCfg {
     pub lift_cab_h_m: f32,
     /// V4: a stairs climber walks round the core at this radius, a turn a storey.
     pub stair_radius_m: f32,
+    /// V10: a storey whose floor is at z stands on the lot's massing box whose height holds z + this (its slab):
+    /// a tower storey on the tower's plate, not on the whole lot.
+    pub storey_slab_m: f32,
     /// V4: bodies standing on one tile spread over the walkable ground
     /// within this many metres, about `crowd_gap_m` apart.
     pub crowd_spread_m: f32,
@@ -733,6 +736,7 @@ impl Default for ViewCfg {
             lift_cab_m: 2.0,
             lift_cab_h_m: 2.6,
             stair_radius_m: 1.5,
+            storey_slab_m: 0.5,
             crowd_spread_m: 10.0,
             crowd_gap_m: 0.9,
             record_half_tiles: 48,
