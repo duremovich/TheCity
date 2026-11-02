@@ -197,6 +197,15 @@ not agents at all.
   `[lod] force` overrides all of it (`--force-lod`). Every tier change goes through `lod::set_lod`, which converts the
   exec state and, on promotion, queues the agent's open holes for the binder. `Brain.pinned` keeps an agent Full (the
   shadow tool uses it).
+- **The camera ring** (`systems/ring.rs`, the view milestone V5, OPEN-149): with a view set (`World::view_rect`;
+  cityview's follow-cam, export-view, the 2D app) `ring::run` (from `lod::run`, each tick, after the hour's assignment)
+  holds every body whose place is in the view + `lod::VIEW_MARGIN` Full and a band of `[lod] ring_band_tiles` Coarse,
+  on its own budget (`ring_full_max`, `ring_coarse_max`; outside `max_full`/`max_coarse`, which `assign` fills with the
+  rest: it skips the held), ranked by camera distance, reaching ahead by the camera's last move (`ring_lead_max_tiles`).
+  Only bodies entering or leaving change tier (`Hold::base` is the tier a body goes back to, `ring_hold_tiles` past the
+  edge). A Statistical body's place is its schedule's (`ring::schedule_door`: the workplace on a worked shift, else
+  Home), found through a door grid and `residents_of`/`staff_of`; it is promoted inside that building
+  (`lod::set_lod_at`) and a stale snapshot in the band is moved to that door. No view: nothing runs.
 - **Full**: everything: needs per tick, think, plan, exec with tile-by-tile walking (`exec::walking_goto`, flow fields
   in `exec/flowfield.rs`, paths in `exec/pathfind.rs`, `exec/bigpath.rs`).
 - **Coarse**: the same brain and plans, but a `GoTo` is a timed arrival (`exec::timed_goto`), no per-tile walk. The

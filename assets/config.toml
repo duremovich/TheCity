@@ -628,6 +628,20 @@ watch_on_shift_only = false
 # ~25M pairs a day, ~13 % of the day). Statistical-only: calibrate's all-Full city never reads it (0 and 32
 # regenerate the same stat table). 2k seeds 42-44 x 120 against 0: Friend edges at day 120 -10 %, edges -2 %.
 coworker_crew = 32
+# The view milestone V5 (OPEN-149; standing decision: nothing in camera range is Statistical): with a view set (the
+# camera, later the player) the ring (the view + 8 tiles) is Full, a band ring_band_tiles wide around it Coarse (same
+# brain, timed legs, so a step into the ring is a plausible promotion), Statistical beyond; re-assigned each tick,
+# ranked by camera distance, on its own budget outside max_full / max_coarse (not scaled: the ring's area is the
+# camera's, not the city's). A body is let go ring_hold_tiles past its tier's edge, back to the tier it had. A
+# Statistical body enters where its schedule has it (systems::ring::schedule_door). No view (a run, a shadow):
+# nothing. A view wider than ring_max_side_tiles (the 2D app zoomed out over the map) holds nothing either.
+ring_full_max = 3000
+ring_coarse_max = 4000
+ring_band_tiles = 24
+ring_hold_tiles = 8
+ring_max_side_tiles = 256
+ring_lead_max_tiles = 96             # the ring reaches ahead by the camera's last move (a walker 21 tiles a tick, a rider
+                                     # ~50: the frame is drawn after the tick); a longer move is a cut, no lead
 
 # M10 holes and the binder (docs/M10_SCALE.md § 3). Weight per candidate:
 # (1 - lawfulness)^lawfulness_power x (1 + gang_claim_mult*gang*claims) x (1 + enemy_mult*enemy) x (1 + statistical_mult*stat),
@@ -5852,7 +5866,6 @@ walk_m_s = 1.4                     # the walk a walk-matched view shows: rate = 
                                    # walk_tiles_per_tick / move_ticks_full) ticks a second; since Y4's 21 tiles a minute
                                    # (84 m, 5.04 km/h) that is 1/60: a game minute is a real minute
 ring_half_tiles = 48               # the ring's half side (192 m: simsnap's ring, ~400 m across at the game zoom)
-pin_margin_tiles = 8               # a pinned body stays pinned this far past the ring (lod.rs VIEW_MARGIN's 8)
 way_margin_tiles = 64              # a Coarse walk is placed on its way (one road search) only when its start-to-target box
                                    # grown by this many tiles (a road's detour) meets the ring
 # The view milestone V1 (OPEN-262): cityview reloads its --config file on the R key and on a change of the file (an

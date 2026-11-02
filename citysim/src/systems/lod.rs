@@ -25,8 +25,8 @@ use crate::systems::{bind, economy};
 use crate::time::{DayPhase, Tick, TICKS_PER_HOUR};
 use crate::world::{StatRow, World};
 
-/// Tiles beyond the view rect that still count as on screen.
-const VIEW_MARGIN: i32 = 8;
+/// Tiles beyond the view rect that still count as on screen (and the camera ring's margin, `systems::ring`).
+pub const VIEW_MARGIN: i32 = 8;
 /// Ranks past a boundary within which an incumbent keeps its tier.
 const HYSTERESIS_BAND: usize = 10;
 
@@ -80,6 +80,8 @@ pub fn run(world: &mut World) {
             }
         }
     }
+    // The view milestone V5 (OPEN-149): the camera ring's tiers, each tick, after the hour's assignment.
+    crate::prof::timed!("lod::ring", crate::systems::ring::run(world));
     crate::prof::timed!("lod::run_statistical", run_statistical(world));
     // Promotions this tick queued their victims' open holes (M10 D32).
     bind::drain_queue(world);
@@ -344,6 +346,10 @@ fn assign(world: &mut World) {
     // scan-ok: hourly: assign
     for id in world.citizens() {
         let (Some(pos), Some(brain)) = (world.comp::<Position>(id), world.comp::<Brain>(id)) else { continue };
+        // The view milestone V5 (OPEN-149): the camera ring holds its bodies outside the budget.
+        if world.ring.holds(id) {
+            continue;
+        }
         // M17 phase 5: away abroad, no body.
         if crate::systems::abroad::is_away(world, id) {
             set_lod(world, id, Lod::Statistical);
@@ -556,6 +562,12 @@ fn class_with(world: &World, id: EntityId, harvest: &[EntityId], sets: Option<&B
 /// remaining duration; a demotion to Statistical abandons the plan and snaps
 /// the agent to the door its day phase implies; a promotion places it there.
 pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
+    set_lod_at(world, id, lod, None);
+}
+
+/// `set_lod`, with a promotion out of Statistical placed inside `place` and a demotion to Statistical at its door
+/// (the camera ring's: the building its schedule has it in now, `ring::schedule_door`) instead of its phase's door.
+pub fn set_lod_at(world: &mut World, id: EntityId, lod: Lod, place: Option<EntityId>) {
     let Some(brain) = world.comp::<Brain>(id) else { return };
     let from = brain.lod;
     if from == lod {
@@ -615,7 +627,10 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
             let now = world.tick;
             world.held_since.insert(id, now);
         } else {
-            snap_to_phase_door(world, id, false);
+            match place {
+                Some(b) => world.stand_at_door(id, b),
+                None => snap_to_phase_door(world, id, false),
+            }
         }
         // M15 W2: off screen the heard store holds 3 rumours and no sighting.
         crate::systems::gossip::on_demoted(world, id);
@@ -638,7 +653,13 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
         world.retier(id);
         // L2 (L21): a prisoner promoted out of the hold is still inside.
         if !(held_on(world) && world.has::<Sentence>(id)) {
-            snap_to_phase_door(world, id, true);
+            match place {
+                Some(b) => {
+                    world.stand_at_door(id, b);
+                    world.enter_building(id, b);
+                }
+                None => snap_to_phase_door(world, id, true),
+            }
         }
         // The island pass phase 7: a prisoner on a transfer run gets his
         // body aboard its van.
