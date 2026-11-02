@@ -959,6 +959,8 @@ struct Track {
     /// level the body last stood on in the street.
     last_climb: Option<u64>,
     last_deck: u8,
+    /// V7: the entries of `World::crossing_watch` already logged.
+    cross_seen: usize,
     cooldowns: BTreeMap<GoalKind, Tick>,
     wallet: Option<i64>,
     inv: Option<(u32, u32, u16, u16)>,
@@ -1328,6 +1330,7 @@ impl Track {
             last_building: None,
             last_climb: None,
             last_deck: 0,
+            cross_seen: 0,
             cooldowns: BTreeMap::new(),
             wallet: None,
             tally: None,
@@ -2276,6 +2279,31 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
             t.last_climb = Some(key);
             t.log(now, "climb", line);
         }
+    }
+    // The view milestone V7: a step onto a marked crossing (and the kerb's
+    // wait for the walk phase) or onto a carriageway off one.
+    if let Some(v) = world.crossing_watch.as_ref().and_then(|w| w.get(&id)) {
+        for &(tick, tile, junction, wait) in v.iter().skip(t.cross_seen) {
+            let line = if wait == u32::MAX {
+                format!("CROSS jaywalking the carriageway at ({}, {}), no crossing", tile.x, tile.y)
+            } else if wait == 0 {
+                format!(
+                    "CROSS at the lights at ({}, {}) (junction {},{}), on the green man",
+                    tile.x, tile.y, junction.x, junction.y
+                )
+            } else {
+                format!(
+                    "CROSS at the lights at ({}, {}) (junction {},{}), {} s at the kerb for the green man",
+                    tile.x,
+                    tile.y,
+                    junction.x,
+                    junction.y,
+                    wait.div_ceil(1000)
+                )
+            };
+            t.log(tick, "cross", line);
+        }
+        t.cross_seen = v.len();
     }
     let deck = world.comp::<Position>(id).filter(|p| p.building.is_none()).map_or(0, |p| p.floor);
     if deck != t.last_deck {
@@ -4789,6 +4817,8 @@ fn follow_saving(
 ) -> Result<Vec<Track>, String> {
     let start_tick = world.tick;
     world.shadow_notes = Some(Vec::new());
+    // The view milestone V7: the picks' crossings and jaywalks (`[cross]` lines).
+    world.crossing_watch = Some(picked.iter().map(|(_, id)| (*id, Vec::new())).collect());
     let mut tracks: Vec<Track> = Vec::new();
     for (arch, id) in picked {
         let name = world.comp::<Identity>(*id).map_or("?".into(), |i| i.name.clone());

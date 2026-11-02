@@ -1692,6 +1692,22 @@ pub struct Jobs2Cols {
     pub hops_stairs: u32,
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub deck_entries: u32,
+    /// The view milestone V7 (`signals`): Full walkers' steps onto a marked
+    /// crossing, the minutes they waited at its kerb for the walk phase
+    /// (tenths), their steps onto a carriageway off every crossing (a
+    /// jaywalk begun), and the tiles they walked (the timed walks' crossing
+    /// rate: crossings a tile).
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub crossings_walked: u32,
+    /// V7: Full walkers' steps from the street up onto a footbridge (its riders).
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub footbridge_entries: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub crossing_wait_tenths: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub jaywalks: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub walk_steps: u32,
     /// The city milestone C8 (`systems::vertical`): district Hideouts
     /// founded today and standing at midnight, lifts a gang took hold of
     /// today and held at midnight, lifts cut today, raids that climbed to
@@ -2372,6 +2388,11 @@ impl Jobs2Cols {
                 "hops_escalator",
                 "hops_stairs",
                 "deck_entries",
+                "crossings_walked",
+                "footbridge_entries",
+                "crossing_wait_tenths",
+                "jaywalks",
+                "walk_steps",
                 "hideouts_founded",
                 "hideouts_standing",
                 "lift_holds",
@@ -3017,6 +3038,11 @@ impl Jobs2Cols {
             self.hops_escalator.to_string(),
             self.hops_stairs.to_string(),
             self.deck_entries.to_string(),
+            self.crossings_walked.to_string(),
+            self.footbridge_entries.to_string(),
+            self.crossing_wait_tenths.to_string(),
+            self.jaywalks.to_string(),
+            self.walk_steps.to_string(),
             self.hideouts_founded.to_string(),
             self.hideouts_standing.to_string(),
             self.lift_holds.to_string(),

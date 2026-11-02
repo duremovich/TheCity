@@ -33,6 +33,7 @@
 mod bench;
 mod cam;
 mod data;
+mod lights;
 mod mesh;
 mod occ;
 mod people;
@@ -530,6 +531,8 @@ fn main() {
                 Update,
                 (sim::follow_subject.before(occ::player_controls), sim::update_sim.after(stream::update_stream), sim::reload_key),
             );
+        // V7: the junctions' signal heads around the subject
+        lights::add(&mut app);
     }
     // V3: people drawn as people (people.rs)
     if args.sim.is_some() || args.save.is_some() {

@@ -278,11 +278,19 @@ pub fn report(world: &World) -> Vec<String> {
 
 /// Build the world's portal graph from its map (at the build and the load).
 pub fn init_portals(world: &mut World) {
-    let portals = if world.map.portals.is_empty() {
+    let mut portals = if world.map.portals.is_empty() {
         crate::exec::bigpath::Portals::none()
     } else {
         let w: &World = world;
         crate::exec::bigpath::Portals::build(&w.map, &|p| portal_steps(w, p))
     };
+    // The view milestone V7: a walker's price of the carriageways and the
+    // crossings (the signal's expected wait at the walking pace).
+    if let Some(c) = &world.config.crossings {
+        let e = &world.config.exec;
+        let step_s = 60.0 * e.move_ticks_full as f64 / e.walk_tiles_per_tick.max(1) as f64;
+        portals.ped =
+            crate::exec::bigpath::PedCosts::build(&world.map, c.jaywalk_tenths, crate::signals::wait_tenths(c, step_s));
+    }
     world.flow_fields.set_portals(portals);
 }

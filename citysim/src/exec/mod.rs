@@ -1848,18 +1848,25 @@ pub fn timed_walk(world: &World, id: EntityId, from: TilePos, to: TilePos) -> Ti
         let dirt = world.district(world.district_of(to)).litter;
         litter = 1.0 + world.config.litter.timed_mult * dirt;
     }
+    // The view milestone V7: on foot, the signals' expected waits at the
+    // crossings the walk is likely to make (`[crossings]`), rounded.
+    let signals = match &world.config.crossings {
+        Some(c) if on_foot(world, id) => crate::signals::timed_wait_ticks(c, tiles).round() as Tick,
+        _ => 0,
+    };
     // Round 9 Y4: the walk at the pace (`[exec] walk_ticks`), scaled
     // before the rounding, so a car's share is not lost to a short walk's
     // few ticks.
-    if m == 1.0 {
-        if litter > 1.0 {
-            world.config.exec.walk_ticks_f(tiles, litter)
+    signals
+        + if m == 1.0 {
+            if litter > 1.0 {
+                world.config.exec.walk_ticks_f(tiles, litter)
+            } else {
+                world.config.exec.walk_ticks(tiles)
+            }
         } else {
-            world.config.exec.walk_ticks(tiles)
+            world.config.exec.walk_ticks_f(tiles, m * litter.max(1.0))
         }
-    } else {
-        world.config.exec.walk_ticks_f(tiles, m * litter.max(1.0))
-    }
 }
 
 /// The perf pass phase 2: the most Manhattan tiles apart two tiles can be
@@ -2042,6 +2049,21 @@ fn advance_goto(
         // C7: a step onto or along a deck, or a jump across one, is a portal's hop.
         let hop =
             if nl != lvl || next.manhattan(here) != 1 { world.portal_edge((here, lvl), (next, nl)) } else { None };
+        // The view milestone V7: a walker reaching a marked crossing waits at
+        // its kerb for the walk phase (the signal at its sub-tick time); a
+        // wait past this tick stands it at the kerb, the step the next call's.
+        if !driving && big_map && hop.is_none() && nl == 0 && lvl == 0 {
+            if let Some(wait) = crossing_wait_q(world, id, here, next, next_q, upt) {
+                next_q += wait;
+                if next_q >= end_q {
+                    path.push(next);
+                    if !levels.is_empty() {
+                        levels.push(nl);
+                    }
+                    break;
+                }
+            }
+        }
         move_to(world, id, next);
         if let Some(p) = world.comp_mut::<Position>(id) {
             p.floor = nl;
@@ -2068,6 +2090,53 @@ fn advance_goto(
     set_goto(world, id, target, path, levels, next_q / upt, None, carry)
 }
 
+/// The view milestone V7: a Full walker stepping from `here` onto `next`
+/// at step unit `q` (`upt` a tick): stepping onto a marked crossing from
+/// off it, the units it waits at the kerb for its junction's walk phase
+/// (`signals::wait_ms`, rounded up so the step lands in the walk phase),
+/// counted with the day's crossings; a step onto a carriageway off every
+/// crossing from off one counted as a jaywalk. `None`: no wait.
+fn crossing_wait_q(world: &mut World, id: EntityId, here: TilePos, next: TilePos, q: u64, upt: u64) -> Option<u64> {
+    let cfg = world.config.crossings.clone()?;
+    let portals = world.flow_fields.portals();
+    let ped = &portals.ped;
+    if ped.is_empty() {
+        return None;
+    }
+    let (hi, ni) = (world.map.index(here), world.map.index(next));
+    let row = crate::systems::ownership::jobs2_row(world);
+    row.walk_steps += 1;
+    if ped.jaywalk_at(ni) && !ped.jaywalk_at(hi) && ped.crossing_at(hi).is_none() {
+        row.jaywalks += 1;
+        let tick = world.tick;
+        if let Some(v) = world.crossing_watch.as_mut().and_then(|w| w.get_mut(&id)) {
+            v.push((tick, next, next, u32::MAX));
+        }
+        return None;
+    }
+    let k = ped.crossing_at(ni)?;
+    if ped.crossing_at(hi).is_some() {
+        return None;
+    }
+    let junction = world.map.crossings.get(usize::from(k))?.junction;
+    let t_ms = q * crate::signals::MS_PER_TICK / upt.max(1);
+    let wait_ms = crate::signals::wait_ms(&cfg, junction, t_ms);
+    let wait = (wait_ms * upt).div_ceil(crate::signals::MS_PER_TICK);
+    // A walker stood at the kerb past the last tick steps on at the walk
+    // phase's first sub-tick unit: counted when its wait began, not again.
+    if wait == 0 && crate::signals::phase_ms(&cfg, junction, t_ms) <= crate::signals::MS_PER_TICK / upt.max(1) + 2 {
+        return None;
+    }
+    let row = crate::systems::ownership::jobs2_row(world);
+    row.crossings_walked += 1;
+    row.crossing_wait_tenths += (wait_ms / 6_000) as u32;
+    let tick = world.tick;
+    if let Some(v) = world.crossing_watch.as_mut().and_then(|w| w.get_mut(&id)) {
+        v.push((tick, next, junction, wait_ms as u32));
+    }
+    (wait > 0).then_some(wait)
+}
+
 /// C7: count a walker's portal hop (the day's crossings).
 fn note_hop(world: &mut World, e: &bigpath::Edge, from_level: u8, to_level: u8) {
     use crate::map::PortalKind as K;
@@ -2081,6 +2150,9 @@ fn note_hop(world: &mut World, e: &bigpath::Edge, from_level: u8, to_level: u8) 
     }
     if from_level == 0 && to_level > 0 {
         row.deck_entries += 1;
+        if kind.is_some_and(|k| k.footbridge()) {
+            row.footbridge_entries += 1;
+        }
     }
 }
 
@@ -2715,7 +2787,9 @@ impl World {
     /// every step on the ground).
     pub fn big_route(&self, from: TilePos, level: u8, to: TilePos, foot: bool) -> Option<(Vec<TilePos>, Vec<u8>)> {
         let labels = self.flow_fields.labels(&self.map);
-        let marks = self.flow_fields.landmarks(&self.map);
+        // V7: a driver's search has its own landmarks (the walkers' crossing costs are not its).
+        let marks =
+            if foot { self.flow_fields.landmarks(&self.map) } else { self.flow_fields.landmarks_drive(&self.map) };
         let portals = self.flow_fields.portals();
         let none = bigpath::Portals::none();
         let p = if foot { &*portals } else { &none };

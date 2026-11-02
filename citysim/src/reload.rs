@@ -228,7 +228,7 @@ pub fn reload(world: &mut World, text: &str) -> Result<Report, String> {
     }
     world.config = cfg;
     world.drop_memos();
-    if report.touched("exec") || report.touched("levels") {
+    if report.touched("exec") || report.touched("levels") || report.touched("crossings") {
         crate::systems::levels::init_portals(world);
     }
     if report.touched("lod.policy") {

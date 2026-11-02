@@ -53,8 +53,21 @@
 //!   neighbours, the escalator's direction read at the search's minute. A
 //!   path carries the level of every step (0 on a tile).
 //!
+//! - **Crossings (the view milestone V7, OPEN-260).** A walker's search
+//!   (the foot graph, [`Portals`] with its [`PedCosts`]) pays more to step
+//!   onto a carriageway tile (the map's `carriage` grid): `[crossings]
+//!   jaywalk_tenths`, or on a marked crossing's tile (`X` lines) the Road
+//!   step plus the signal's expected wait shared over the crossing's depth
+//!   (`signals::expected_wait_s`). Every such cost is at least the tile's
+//!   own, so 7 × Manhattan stays admissible, and the foot landmarks are
+//!   measured over them (the entry cost a node's own, so the reverse-path
+//!   bound holds as on the tiles). A driver searches the tiles alone with
+//!   landmarks measured without the walkers' graph
+//!   (`FlowCache::landmarks_drive`, built on a driver's first search).
+//!
 //! The commute estimates (`transit::commute_ticks`, `exec::timed_walk`, the
-//! hiring and relocation distances) stay Manhattan, as below the threshold.
+//! hiring and relocation distances) stay Manhattan, as below the threshold
+//! (V7: a timed walk on foot adds `signals::timed_wait_ticks`).
 
 use std::cell::{Cell, RefCell};
 use std::cmp::Reverse;
@@ -270,7 +283,7 @@ impl<'de> serde::Deserialize<'de> for BaseTiles {
 /// a push never lands in the bucket being popped.
 fn dial(tiles: &[TileKind], w: usize, h: usize, portals: &Portals, src: usize, d: &mut Vec<u32>) {
     let wh = w * h;
-    let b = (portals.max_cost + 16).next_power_of_two().max(16) as usize;
+    let b = (portals.max_cost.max(portals.ped.max_cost) + 16).next_power_of_two().max(16) as usize;
     d.clear();
     d.resize(wh + portals.nodes.len(), u32::MAX);
     let mut buckets: Vec<Vec<u32>> = vec![Vec::new(); b];
@@ -287,7 +300,7 @@ fn dial(tiles: &[TileKind], w: usize, h: usize, portals: &Portals, src: usize, d
             }
             for e in portals.edges_of(i as u32) {
                 let j = e.to as usize;
-                let enter = if j < wh { cost_tenths(tiles[j]) } else { 0 };
+                let enter = if j < wh { portals.enter(tiles, j) } else { 0 };
                 if enter == u32::MAX {
                     continue;
                 }
@@ -303,7 +316,7 @@ fn dial(tiles: &[TileKind], w: usize, h: usize, portals: &Portals, src: usize, d
             }
             let (x, y) = (i % w, i / w);
             let mut relax = |j: usize| {
-                let c = cost_tenths(tiles[j]);
+                let c = portals.enter(tiles, j);
                 if c != u32::MAX && cur + c < d[j] {
                     d[j] = cur + c;
                     buckets[(cur + c) as usize % b].push(j as u32);
@@ -478,7 +491,7 @@ pub fn find_with(
     let tiles = map.tiles();
     let blocked = !map.blocked.is_empty();
     let enter = |i: usize| -> u32 {
-        let c = cost_tenths(tiles[i]);
+        let c = portals.enter(tiles, i);
         if blocked && c != u32::MAX && map.is_blocked(TilePos::new((i % w) as u16, (i / w) as u16)) {
             u32::MAX
         } else {
@@ -493,7 +506,7 @@ pub fn find_with(
     // On the landmarks' tiles: d(n, L) = d(L, n) − enter(n) + enter(L) (the
     // same optimal path walked the other way pays for L, not for n), so
     // d(n, L) − d(goal, L) = d(L, n) + enter(goal) − d(L, goal) − enter(n).
-    let goal_enter = if alt { cost_tenths(marks.tiles[gi]) } else { u32::MAX };
+    let goal_enter = if alt { portals.enter(&marks.tiles, gi) } else { u32::MAX };
     let (gx, gy) = (i64::from(goal.x), i64::from(goal.y));
     let heur = |i: usize| -> u32 {
         let (x, y) = if i < wh {
@@ -505,7 +518,7 @@ pub fn find_with(
         let mut best = (((x - gx).unsigned_abs() + (y - gy).unsigned_abs()) as u32 * MIN_STEP).saturating_sub(saving);
         if alt {
             let here = &marks.dist[i * LANDMARKS..(i + 1) * LANDMARKS];
-            let e = if i < wh { cost_tenths(marks.tiles[i]) } else { 0 };
+            let e = if i < wh { portals.enter(&marks.tiles, i) } else { 0 };
             for (&a, &b) in goal_marks.iter().zip(here) {
                 if a == FAR || b == FAR {
                     continue;
@@ -656,11 +669,81 @@ pub struct Edge {
     pub forward: bool,
 }
 
+/// V7: a walker's entry costs over the carriageways and the marked
+/// crossings (see the module doc), from the map's `carriage` grid and `X`
+/// lines and `[crossings]`. Empty (every tile its own cost) without them or
+/// with `[crossings]` off.
+#[derive(Clone, Debug, Default)]
+pub struct PedCosts {
+    /// Per tile: 0 its own cost, 1 a carriageway, `1 + d` a crossing `d`
+    /// tiles deep; empty: none.
+    code: Vec<u8>,
+    /// The entry cost by code (at least the tile's own at use).
+    cost: [u32; 16],
+    /// A crossing tile -> its crossing (`Map::crossings`' index).
+    at: std::collections::BTreeMap<u32, u16>,
+    /// The dearest code's cost (the landmarks' buckets).
+    pub max_cost: u32,
+}
+
+impl PedCosts {
+    /// The costs of `map`'s carriageways and crossings: a carriageway
+    /// `jaywalk` tenths, a crossing's tile the Road step plus `wait` tenths
+    /// over its depth (rounded up).
+    pub fn build(map: &Map, jaywalk: u32, wait: u32) -> PedCosts {
+        let carriage = map.carriage();
+        if carriage.is_empty() {
+            return PedCosts::default();
+        }
+        let mut p = PedCosts { code: carriage.iter().map(|&c| u8::from(c)).collect(), ..PedCosts::default() };
+        p.cost[0] = 0;
+        p.cost[1] = jaywalk.max(MIN_STEP);
+        for d in 1..15u32 {
+            p.cost[1 + d as usize] = MIN_STEP + wait.div_ceil(d);
+        }
+        for (k, c) in map.crossings.iter().enumerate() {
+            let depth = if c.walk_x { c.b.x - c.a.x + 1 } else { c.b.y - c.a.y + 1 };
+            let code = 1 + depth.clamp(1, 14) as u8;
+            for y in c.a.y..=c.b.y {
+                for x in c.a.x..=c.b.x {
+                    let i = map.index(TilePos::new(x, y));
+                    if p.code[i] == 1 {
+                        p.code[i] = code;
+                        p.at.insert(i as u32, k as u16);
+                    }
+                }
+            }
+        }
+        p.max_cost = p.cost.iter().copied().max().unwrap_or(0);
+        p
+    }
+
+    /// The crossing (`Map::crossings`' index) tile `i` belongs to, if any.
+    pub fn crossing_at(&self, i: usize) -> Option<u16> {
+        if self.code.get(i).is_none_or(|&c| c < 2) {
+            return None;
+        }
+        self.at.get(&(i as u32)).copied()
+    }
+
+    /// Is tile `i` a carriageway off every crossing?
+    pub fn jaywalk_at(&self, i: usize) -> bool {
+        self.code.get(i) == Some(&1)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.code.is_empty()
+    }
+}
+
 /// C7: the map's walkway portals as a graph over the tiles and the deck
 /// nodes above them (see the module doc). Built once a world from its map
-/// and `[levels]`; not saved.
+/// and `[levels]`; not saved. V7: with a walker's entry costs over the
+/// carriageways and crossings (`ped`; empty in the drivers' graph).
 #[derive(Clone, Debug, Default)]
 pub struct Portals {
+    /// V7: a walker's entry costs over the carriageways and crossings.
+    pub ped: PedCosts,
     /// Deck node `k` (node `w × h + k`): its tile and level.
     pub nodes: Vec<(TilePos, u8)>,
     node_of: std::collections::BTreeMap<(TilePos, u8), u32>,
@@ -788,5 +871,19 @@ impl Portals {
     /// Portal `e`'s kind.
     pub fn kind(&self, e: &Edge) -> Option<PortalKind> {
         self.list.get(e.portal as usize).map(|p| p.kind)
+    }
+
+    /// V7: tile `i`'s entry cost in this graph: its own (`cost_tenths`), or
+    /// a walker's over a carriageway or a crossing (never below its own).
+    #[inline]
+    pub fn enter(&self, tiles: &[TileKind], i: usize) -> u32 {
+        let c = cost_tenths(tiles[i]);
+        if c == u32::MAX || self.ped.code.is_empty() {
+            return c;
+        }
+        match self.ped.code[i] {
+            0 => c,
+            k => self.ped.cost[usize::from(k)].max(c),
+        }
     }
 }

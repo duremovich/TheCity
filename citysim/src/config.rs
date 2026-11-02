@@ -451,6 +451,16 @@ pub struct Config {
     /// portal costs only its run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub levels: Option<LevelsCfg>,
+    /// The view milestone V7 (docs/VIEW_MILESTONE.md § V7, OPEN-260):
+    /// signals at the junctions and the marked crossings (`signals`, the
+    /// map's `carriage` grid and `X` lines): a walker's path pays to step
+    /// onto a carriageway off a crossing, a crossing costs its signal's
+    /// expected wait, a Full walker waits at the kerb for the walk phase and
+    /// a timed walk on foot adds the expected waits of the crossings it is
+    /// likely to make. `None` (not written into a save) with the key absent:
+    /// crossing a street costs nothing anywhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crossings: Option<CrossingsCfg>,
     /// The city milestone C8 (docs/CITY_MILESTONE.md § C8): the vertical
     /// gangs (`systems/vertical.rs`): a Hideout per district a gang holds
     /// turf in, on upper floors; the lift as turf (held, cut); the raid's
@@ -1185,6 +1195,28 @@ pub struct LevelsCfg {
     /// stair moves under the walker; the sim's ground is flat, so its lift
     /// up the hill is not the advantage, its speed is).
     pub escalator_speed: f32,
+}
+
+/// The view milestone V7 `[crossings]`: the junctions' signals and the
+/// price of crossing a street on foot. Every value a placeholder at the real
+/// pace (`[exec] walk_tiles_per_tick`; a tick a game minute).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CrossingsCfg {
+    /// Seconds of one signal cycle at every junction (the walk phase first,
+    /// each junction's cycle offset by its tile: `signals::offset_ms`).
+    pub cycle_s: f32,
+    /// The share of the cycle the walkers cross on (the walk phase; the
+    /// rest don't-walk, the main road's traffic moving).
+    pub walk_share: f32,
+    /// Tenths of a step a walker's path pays to step onto a carriageway tile
+    /// off every crossing (a Road step is 7): near-forbidden, never a wall,
+    /// so a street without a crossing nearby is still crossed.
+    pub jaywalk_tenths: u32,
+    /// A timed (Coarse) walk on foot crosses this many signalled crossings a
+    /// Manhattan tile, each at the expected wait (`signals::timed_wait_ticks`;
+    /// the Full walkers' measured rate is the run report's
+    /// `crossings_walked / walk_steps`).
+    pub timed_crossings_per_tile: f32,
 }
 
 /// The city milestone C8 `[vertical]`: the vertical gangs. Every value a

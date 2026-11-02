@@ -628,6 +628,13 @@ pub struct World {
     /// pre-view pass phase 5's GoTo leg log (`exec::leglog`, `run --legs`).
     #[serde(skip)]
     pub leg_log: Option<crate::exec::leglog::LegLog>,
+    /// Measurement only (never saved, read by nothing in the sim): the view
+    /// milestone V7's crossings of the watched bodies (the shadow's picks):
+    /// by body, each step onto a marked crossing (tick, its tile, its
+    /// junction, the ms waited at the kerb) or onto a carriageway off one
+    /// (`u32::MAX` waited: a jaywalk), drained by the reader.
+    #[serde(skip)]
+    pub crossing_watch: Option<std::collections::BTreeMap<EntityId, Vec<(Tick, TilePos, TilePos, u32)>>>,
     // graph + blackboard
     pub edges: crate::edge_map::EdgeMap,
     /// Private so every write goes through `reports_mut`, which drops the
@@ -1947,6 +1954,7 @@ impl World {
             van_runs: BTreeMap::new(),
             commute_log: None,
             leg_log: None,
+            crossing_watch: None,
             dealers: BTreeMap::new(),
             deal_log: BTreeMap::new(),
             corner_dealers: BTreeMap::new(),
