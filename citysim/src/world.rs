@@ -1328,6 +1328,10 @@ pub struct World {
     /// deed, keyed `(teller, listener, deed hash)` (`fixes::told_key`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub told: BTreeMap<(EntityId, EntityId, u64), Tick>,
+    /// M18 W (`systems::workbeats`): each body's beats in its current shift
+    /// (an exec's: its day), one entry a body, overwritten at the next shift.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub shift_beats: BTreeMap<EntityId, crate::systems::workbeats::ShiftBeats>,
     /// L2 L14: the 90th-percentile wallet at the last midnight (the Lounge
     /// rung's "top wealth decile").
     #[serde(default, skip_serializing_if = "is_zero_i64")]
@@ -2147,6 +2151,7 @@ impl World {
             spots: Vec::new(),
             last_met: BTreeMap::new(),
             told: BTreeMap::new(),
+            shift_beats: BTreeMap::new(),
             wealth_p90: 0,
             contracts: BTreeMap::new(),
             missions: BTreeMap::new(),

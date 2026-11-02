@@ -526,6 +526,136 @@ pub struct Config {
     /// it. Absent: the defaults.
     #[serde(default)]
     pub view: ViewCfg,
+    /// M18 W (work beats, docs/M18_PLAYER.md § W): `[work_beat]`, when a
+    /// shift's block seam draws a beat (`systems::workbeats`). `None` (not
+    /// written into a save) with the key absent: no beats.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_beat: Option<WorkBeatCfg>,
+    /// M18 W: the `[[work_beats]]` deck, one row a beat (who it reaches, when,
+    /// its counterpart, its effect, its line).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub work_beats: Vec<WorkBeatRow>,
+}
+
+/// M18 W (docs/M18_PLAYER.md § W): `[work_beat]`, the draw of the
+/// `[[work_beats]]` deck at a shift's seams (`systems::workbeats`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorkBeatCfg {
+    /// A station block's end (not the shift's last) draws a beat on this.
+    pub p_block: f32,
+    /// The shift's break draws a beat on this (`at = "break"` rows).
+    pub p_break: f32,
+    /// A corp exec's office hour (`service::meeting_hour`) draws on this.
+    pub p_hour: f32,
+    /// At most this many beats a body a shift (an exec a day).
+    pub max_per_shift: u8,
+    /// A beat memory's salience, both sides.
+    pub salience: f32,
+}
+
+impl Default for WorkBeatCfg {
+    fn default() -> Self {
+        WorkBeatCfg { p_block: 0.5, p_break: 0.8, p_hour: 0.5, max_per_shift: 6, salience: 0.3 }
+    }
+}
+
+/// M18 W: where in the day a `[[work_beats]]` row is drawn.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BeatAt {
+    /// A station block's end (`shift::block_done`).
+    #[default]
+    Block,
+    /// The shift's break (`shift::stations_plan`, `haul_plan`).
+    Break,
+    /// A corp exec's office hour (`service::meeting_hour`).
+    Hour,
+}
+
+/// M18 W: whom a beat reaches (all on shift, adults, not the body itself).
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BeatWho {
+    /// A coworker present (`service::present`), picked by a keyed hash.
+    #[default]
+    Colleague,
+    /// The coworker present with the warmest edge to the body (ties the
+    /// lower id); none with an edge, a hashed colleague.
+    Partner,
+    /// The foreman present, else the present coworker of the highest grade
+    /// above the body's.
+    Superior,
+    /// The workplace's person owner, else its corp's exec, else the foreman.
+    Boss,
+    /// An exec's beat: a staffer present at the Hq, hashed.
+    Staff,
+}
+
+/// M18 W: what a beat does (only through `social`, memories and gossip).
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BeatEffect {
+    /// The co-work drift (`social::interacted`) plus the row's deltas.
+    #[default]
+    Drift,
+    /// The row's affinity and trust deltas only (`social::adjust`).
+    Nudge,
+    /// The deltas and a tick of the body's trade skill (`skill_gain`).
+    Skill,
+    /// The counterpart tells the body one deed it holds (`gossip::tell`);
+    /// nothing to tell, no beat.
+    Rumour,
+}
+
+/// M18 W: one `[[work_beats]]` row.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorkBeatRow {
+    pub id: String,
+    /// The jobs it reaches: `[[trades]]` ids, built-in `Role` names,
+    /// `"exec"` (a corp exec at the Hq), `"*"` (every shaped shift).
+    pub jobs: Vec<String>,
+    pub at: BeatAt,
+    /// `[from, to)` minutes of the day (`from > to` wraps midnight).
+    pub hours: (u16, u16),
+    /// The row's weight among the rows open at the seam.
+    pub weight: f32,
+    pub who: BeatWho,
+    pub effect: BeatEffect,
+    /// The edge's affinity and trust step (both ways: edges are undirected).
+    pub affinity: f32,
+    pub trust: f32,
+    /// The memory both sides keep, its valence.
+    pub memory: crate::components::MemoryKind,
+    pub valence: f32,
+    /// `Skill`: the trade skill's tick.
+    pub skill_gain: f32,
+    /// At most once a shift.
+    pub once: bool,
+    /// The line: `{me}`, `{them}`, `{at}` (the workplace), `{about}` (a rumour's deed).
+    pub text: String,
+}
+
+impl Default for WorkBeatRow {
+    fn default() -> Self {
+        WorkBeatRow {
+            id: String::new(),
+            jobs: Vec::new(),
+            at: BeatAt::Block,
+            hours: (0, 1440),
+            weight: 1.0,
+            who: BeatWho::Colleague,
+            effect: BeatEffect::Drift,
+            affinity: 0.0,
+            trust: 0.0,
+            memory: crate::components::MemoryKind::Socialised,
+            valence: 0.1,
+            skill_gain: 0.0,
+            once: false,
+            text: String::new(),
+        }
+    }
 }
 
 impl Config {
@@ -5620,6 +5750,14 @@ impl Config {
             let gang_post = s.key == "pimp" || s.key == "dealer" || s.key == "exec";
             if !trade && !legacy && !gang_post {
                 out.push(format!("[[serves]] key {:?} is neither a trade id nor a Role", s.key));
+            }
+        }
+        // M18 W: a `[[work_beats]]` role is a trade id, a Role's name, "exec" or "*".
+        for r in self.work_beats.iter().flat_map(|b| b.jobs.iter()) {
+            let trade = self.trades.iter().any(|t| &t.id == r);
+            let legacy = Role::ALL.iter().any(|x| format!("{x:?}") == *r);
+            if !trade && !legacy && r != "exec" && r != "*" {
+                out.push(format!("[[work_beats]] job {r:?} is neither a trade id nor a Role"));
             }
         }
         // Lives at work phase 6 (§ 4.1): a `[roles.<Name>]` key is a legacy role's name.

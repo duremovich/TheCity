@@ -22,6 +22,9 @@ fn base() -> World {
         let mut cfg = common::r2(Config::load());
         // The pressure pass S6 (OPEN-224): the seeded children off (they crowd the Homes this scene's room rule reads).
         cfg.ages.seed_child_slots = 0;
+        // M18 W: the work beats off (their edges and memories move the
+        // 34-hour city off the hand-picked scenes, as the trains did).
+        cfg.work_beat = None;
         if let Some(m) = cfg.motion.as_mut() {
             m.trains = None;
         }

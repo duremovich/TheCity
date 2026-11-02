@@ -93,6 +93,7 @@ fn take_wheel(world: &mut World, id: EntityId) {
     if let Some(p) = world.comp_mut::<Brain>(id).and_then(|b| b.player.as_mut()) {
         p.autopilot = false;
         p.doing = None;
+        p.shift = None;
     }
 }
 
@@ -158,6 +159,48 @@ pub fn goal(world: &mut World, id: EntityId, goal: GoalKind) {
         }
         None => refuse(world, id, &format!("{goal:?}"), "no plan for it here and now"),
     }
+}
+
+/// M18 W (`exec`'s plan end, a body the human drives): a directed shift's
+/// plan ended; the next part of the shift is planned (`plan::plan_for`, the
+/// Work goal's bypass: the commute, the blocks, the break), until the shift
+/// closes (`Job.last_shift_day`), ends or no plan is left for it.
+pub fn shift_next(world: &mut World, id: EntityId) {
+    let Some(b) = world.comp::<Brain>(id) else { return };
+    if !b.possessed() || b.plan.is_some() {
+        return;
+    }
+    let Some(key) = b.player.as_ref().and_then(|p| p.shift) else { return };
+    let tick = world.tick;
+    let going = world.comp::<Job>(id).is_some_and(|j| {
+        j.next_shift_key(tick) == key && j.on_shift(world.tick_of_day()) && j.last_shift_day != Some(key)
+    }) && think::held(world, id).is_none();
+    let name = world.name_of(id);
+    if going {
+        if let Some(b) = world.comp_mut::<Brain>(id) {
+            b.current_goal = Some(GoalKind::Work);
+        }
+        plan::plan_for(world, id, GoalKind::Work);
+        if let Some(line) = world
+            .comp::<Brain>(id)
+            .and_then(|b| b.plan.as_ref())
+            .filter(|p| p.goal == GoalKind::Work)
+            .map(|p| steps_line(&p.steps))
+        {
+            world.push_event(EventKind::PlayerAction, &[id], format!("{name}: the shift goes on [{line}]"));
+            return;
+        }
+    }
+    if let Some(b) = world.comp_mut::<Brain>(id) {
+        if b.current_goal == Some(GoalKind::Work) {
+            b.current_goal = None;
+        }
+        if let Some(p) = b.player.as_mut() {
+            p.shift = None;
+            p.doing = None;
+        }
+    }
+    world.push_event(EventKind::PlayerAction, &[id], format!("{name}: the shift is over (standing)"));
 }
 
 /// Stop: the plan dropped, the body stands where it is.
@@ -842,8 +885,13 @@ pub fn act(world: &mut World, id: EntityId, verb: Verb) {
     };
     if verb == Verb::Work {
         goal(world, id, GoalKind::Work);
+        // M18 W: the directed Work runs the shift, plan after plan, to its
+        // close or a Stop (`shift_next`), as an NPC's shift does.
+        let key = world.comp::<Job>(id).map(|j| j.next_shift_key(world.tick));
+        let planned = world.comp::<Brain>(id).is_some_and(|b| b.plan_goal() == Some(GoalKind::Work));
         if let Some(p) = world.comp_mut::<Brain>(id).and_then(|b| b.player.as_mut()) {
             p.doing = Some(label);
+            p.shift = key.filter(|_| planned);
         }
         return;
     }

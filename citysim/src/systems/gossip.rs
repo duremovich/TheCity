@@ -376,7 +376,7 @@ pub fn knowledge(world: &World, id: EntityId) -> f32 {
 /// speaker), with the distortion roll; on the Exchange stream keyed by
 /// `(tick, from, to)`.
 pub fn exchange(world: &mut World, from: EntityId, to: EntityId, venue: Venue) {
-    exchange_one(world, from, to);
+    let _ = exchange_one(world, from, to);
     // M16a (plan C21): at a Drink, a Fixer talks to its regulars after the
     // ordinary exchange.
     if venue == Venue::Drink {
@@ -415,11 +415,17 @@ fn keeps_quiet(world: &World, teller: EntityId, e: &MemoryEntry, r: &DeedRef) ->
 }
 
 /// The ordinary exchange (W8), `exchange` without the venue's extras.
-fn exchange_one(world: &mut World, from: EntityId, to: EntityId) {
+/// M18 W (`workbeats`): `from` tells `to` one deed (the ordinary exchange);
+/// the deed when the listener took it in (a new or a contradicting rumour).
+pub fn tell(world: &mut World, from: EntityId, to: EntityId) -> Option<DeedRef> {
+    exchange_one(world, from, to)
+}
+
+fn exchange_one(world: &mut World, from: EntityId, to: EntityId) -> Option<DeedRef> {
     if from == to {
-        return;
+        return None;
     }
-    let (Some(ms), Some(ml)) = (world.comp::<Memory>(from), world.comp::<Memory>(to)) else { return };
+    let (Some(ms), Some(ml)) = (world.comp::<Memory>(from), world.comp::<Memory>(to)) else { return None };
     let g = &world.config.gossip;
     let now = world.tick;
     let half_life = world.config.brain.memory_half_life_days;
@@ -455,7 +461,7 @@ fn exchange_one(world: &mut World, from: EntityId, to: EntityId) {
             best = Some((score, key, e.tick, e.clone(), r));
         }
     }
-    let Some((_, _, _, src, mut r)) = best else { return };
+    let (_, _, _, src, mut r) = best?;
     let trust = world.edge(to, from).map_or(0.0, |e| e.trust);
     let hop_salience = g.hop_salience;
     let key = crate::systems::fixes::told_key(from, to, &r, time::day(src.tick));
@@ -499,7 +505,9 @@ fn exchange_one(world: &mut World, from: EntityId, to: EntityId) {
                 crate::systems::social::adjust(world, to, a, -0.1 * sev, 0.0);
             }
         }
+        return Some(r);
     }
+    None
 }
 
 /// W7: at Drink completion, the co-drinker in the Bar with an edge to the

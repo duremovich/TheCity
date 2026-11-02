@@ -4637,6 +4637,214 @@ counter_settle_window = 15         # an off-screen visit to a venue with a count
                                    # served then (OPEN-145: the 21:00 Statistical evening served only the evening staff)
 roles = ["Cook", "Bartender"]      # the built-in roles that stand the counter (over [shift.roles]; OPEN-145)
 
+# M18 W, the work beats (docs/M18_PLAYER.md § W; BIG_PICTURE_2026-11-02 § 1; systems/workbeats.rs): a shift's seams
+# draw a beat with a real coworker on shift as its counterpart (a body inside, or a Statistical one named in the line;
+# never anyone under 18). Effects only through social, memories and gossip. Placeholders (no fine-tuning, 2026-10-07).
+[work_beat]
+p_block = 0.5                      # a station block's end before the shift's last draws a beat on this (a 9 h shift of
+                                   # 30-90 min blocks has ~6 such seams: ~3 beats, the brief's 3-6 a shift)
+p_break = 0.8                      # the mid-shift break draws an `at = "break"` row on this (the lunch partner)
+p_hour = 0.5                       # a corp exec's office hour at the Hq ([life] exec_shift, service::meeting_hour) draws an
+                                   # `at = "hour"` row on this (the exec has no blocks: one Meeting the day long)
+max_per_shift = 6                  # at most this many beats a body a shift (an exec a day)
+salience = 0.3                     # a beat memory's salience, both sides (a Served memory's [service] served_salience scale)
+
+# The deck: `jobs` a `[[trades]]` id, a built-in Role's name, "exec" (a corp exec at the Hq) or "*" (every shaped
+# shift); `at` block | break | hour; `hours` [from, to) minutes of the day (from > to wraps midnight); `weight` among the
+# rows open at the seam; `who` colleague (hashed, present) | partner (the warmest edge present, so a lunch partner
+# recurs; none: hashed) | superior (the foreman present, else a higher grade) | boss (the person owner, else the corp's
+# exec, else the foreman) | staff (a staffer present at the exec's Hq); `effect` drift (social::interacted, the co-work
+# hour's step) | nudge (the row's deltas only) | skill (the deltas and the body's trade skill + skill_gain) | rumour
+# (the counterpart tells one deed it holds, gossip::tell; nothing to tell, no beat); `affinity`, `trust` the edge's step;
+# `memory`, `valence` the memory both keep; `once` at most once a shift (a `partner` row's marks the counterpart's
+# shift too, and a break already shared draws nothing); `text` with {me}, {them}, {at}, {about}.
+[[work_beats]]
+id = "task"
+jobs = ["*"]
+weight = 2.0
+who = "superior"
+effect = "skill"
+trust = 0.02                       # a task handed down is a little trust
+skill_gain = 0.002                 # [[serves]]' skill_gain scale (a served encounter's 0.001-0.003)
+valence = 0.0
+once = true                        # one task a shift (two read as the same line twice: shadow 2026-11-02)
+text = "{them} hands {me} a job that has to be done before the shift is out"
+
+[[work_beats]]
+id = "stop_by"
+jobs = ["*"]
+weight = 3.0
+who = "colleague"
+effect = "drift"
+valence = 0.1
+text = "{them} stops by {me}'s spot at {at} to complain about the pay"
+
+[[work_beats]]
+id = "rumour"
+jobs = ["*"]
+weight = 2.0
+who = "colleague"
+effect = "rumour"
+valence = 0.05
+text = "{them} leans in at {at}: word is {about}"
+
+[[work_beats]]
+id = "walkthrough"
+jobs = ["*"]
+hours = [600, 1020]                # the boss's walk is a day-hours thing (10:00-17:00)
+weight = 1.0
+who = "boss"
+effect = "nudge"
+trust = 0.01
+memory = "Socialised"              # seen by the boss (not Served: that kind is the Lives at work encounters')
+valence = 0.0
+once = true
+text = "{them} walks the floor at {at}; {me} keeps their head down until it passes"
+
+[[work_beats]]
+id = "chewed_out"
+jobs = ["*"]
+weight = 0.7
+who = "superior"
+effect = "nudge"
+affinity = -0.03                   # a dressing-down costs the edge a little ...
+trust = -0.03
+memory = "Rejected"
+valence = -0.2                     # ... and stings
+once = true
+text = "{them} tells {me} to pick up the pace, loud enough for the room"
+
+[[work_beats]]
+id = "lunch"
+jobs = ["*"]
+at = "break"
+weight = 3.0
+who = "partner"
+effect = "drift"
+affinity = 0.02                    # a shared break on top of the co-work drift: the partner pulls ahead of the room
+valence = 0.2
+once = true                        # one lunch a shift, the partner's too (a partner row marks both: no second lunch line)
+text = "{me} and {them} take the break together, eating out of the same paper bag"
+
+[[work_beats]]
+id = "break_alone"
+jobs = ["*"]
+at = "break"
+weight = 1.0
+who = "colleague"
+effect = "nudge"
+valence = 0.0
+once = true
+text = "{me} takes the break alone; {them} doesn't look up"
+
+# Desks: the clerks, the office trades, the Lab and the Feed.
+[[work_beats]]
+id = "rush_file"
+jobs = ["office_worker", "accountant", "civic_clerk", "Clerk", "manager", "broker", "engineer", "Researcher", "Reporter"]
+hours = [540, 960]                 # a rush file comes before 16:00
+weight = 2.0
+who = "superior"
+effect = "skill"
+trust = 0.02
+skill_gain = 0.003
+valence = -0.05
+once = true                        # one rush file a shift (shadow 2026-11-02: three in one afternoon)
+text = "{them} drops a rush file on {me}'s desk at {at}: due by close"
+
+[[work_beats]]
+id = "wrong_figure"
+jobs = ["office_worker", "accountant", "civic_clerk", "Clerk", "manager", "broker", "engineer", "Researcher", "Reporter"]
+weight = 0.8
+who = "colleague"
+effect = "nudge"
+affinity = 0.04                    # covered for: the colleague is owed one
+trust = 0.05
+memory = "Socialised"
+valence = 0.1
+once = true
+text = "{me} keys a figure wrong and {them} quietly fixes it before anyone upstairs sees"
+
+[[work_beats]]
+id = "partition"
+jobs = ["office_worker", "accountant", "civic_clerk", "Clerk", "manager", "broker", "engineer", "Researcher", "Reporter"]
+weight = 2.0
+who = "colleague"
+effect = "drift"
+valence = 0.1
+text = "{them} talks over {me}'s partition about last night's feed until the floor boss looks over"
+
+# The floor: the plant, the yards, the shops.
+[[work_beats]]
+id = "jammed"
+jobs = ["packer", "plant_operator", "loader", "depot_hand", "night_stocker", "driver", "builder", "Mechanic", "Fabber", "Farmer", "Sanitation"]
+weight = 2.0
+who = "colleague"
+effect = "drift"
+trust = 0.02
+valence = 0.1
+text = "{them} shouts {me} over to help clear a jam at {at}"
+
+[[work_beats]]
+id = "dropped"
+jobs = ["packer", "plant_operator", "loader", "depot_hand", "night_stocker", "driver", "builder", "Mechanic", "Fabber", "Farmer", "Sanitation"]
+weight = 0.8
+who = "colleague"
+effect = "nudge"
+affinity = -0.02
+memory = "Rejected"
+valence = -0.1
+once = true
+text = "{me} drops a load and {them} won't let it go for an hour"
+
+# The exec at the Hq (no blocks: the office hour).
+[[work_beats]]
+id = "exec_problem"
+jobs = ["exec"]
+at = "hour"
+weight = 3.0
+who = "staff"
+effect = "drift"
+trust = 0.02
+valence = 0.05
+text = "{them} brings {me} a problem from the floor and leaves with a decision"
+
+[[work_beats]]
+id = "exec_tears"
+jobs = ["exec"]
+at = "hour"
+weight = 1.0
+who = "staff"
+effect = "nudge"
+affinity = -0.05                   # a public dressing-down from the top
+trust = -0.03
+memory = "Rejected"
+valence = -0.3
+once = true
+text = "{me} tears into {them} over a missed number in front of the room"
+
+[[work_beats]]
+id = "exec_rumour"
+jobs = ["exec"]
+at = "hour"
+weight = 1.5
+who = "staff"
+effect = "rumour"
+valence = 0.05
+text = "{them} lingers after the briefing to tell {me}: {about}"
+
+[[work_beats]]
+id = "exec_lunch"
+jobs = ["exec"]
+at = "hour"
+hours = [720, 840]                 # 12:00-14:00
+weight = 4.0
+who = "partner"
+effect = "drift"
+affinity = 0.02
+valence = 0.15
+once = true
+text = "{me} has lunch sent up and eats it with {them}"
+
 # The pre-view pass phase 4 (docs/PREVIEW_PASS.md § 0 P3, P8; systems/presence.rs; OPEN-119, OPEN-120,
 # OPEN-154): an encounter posts when, and only when, both bodies are present, else it waits or is narrated off
 # screen. Without it encounters settle by link. Placeholders.

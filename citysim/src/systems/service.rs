@@ -858,7 +858,7 @@ fn staff_hour(world: &mut World) {
 }
 
 /// The skill a row trains.
-fn train(world: &mut World, server: EntityId, skill: TradeSkill, gain: f32) {
+pub(crate) fn train(world: &mut World, server: EntityId, skill: TradeSkill, gain: f32) {
     if gain <= 0.0 {
         return;
     }
@@ -1433,6 +1433,11 @@ fn meeting_hour(world: &mut World) {
         let Some(hq) = crate::systems::life::office_of(world, corp, exec) else { continue };
         if !exec_present(world, exec, hq) {
             continue;
+        }
+        // M18 W: the exec's office hour is a seam a work beat may fill.
+        if crate::systems::workbeats::on(world) {
+            let day = world.day() as i64;
+            crate::systems::workbeats::seam(world, exec, hq, None, crate::config::BeatAt::Hour, day);
         }
         let mut staff: Vec<(f32, EntityId)> = world
             .staff_of(hq)

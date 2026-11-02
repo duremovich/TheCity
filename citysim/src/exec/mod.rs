@@ -392,6 +392,10 @@ fn step_agent(world: &mut World, id: EntityId) {
             b.last_plan_failure = None;
         }
         world.release_all(id);
+        // M18 W: a directed shift goes on to its next part.
+        if world.comp::<Brain>(id).is_some_and(|b| b.player.as_ref().is_some_and(|p| p.shift.is_some())) {
+            crate::systems::player::shift_next(world, id);
+        }
         return;
     };
     let lod = brain.lod;

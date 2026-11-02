@@ -90,6 +90,14 @@ picked by edge, an overheard rumour, the boss's walk-through. Effects only throu
 **Proof.** A diary read (this phase changes NPC behaviour): the desk archetypes (`office_worker`, a trade worker,
 `exec`) at 20k show 3-6 named beat lines a shift and a recurring face in a week; quote them, and report what reads
 wrong. Plus one player shift.
+**As built** (`systems/workbeats.rs`). The seams are a station block's end before the shift's last
+(`shift::block_done`), the break (`stations_plan`, `haul_plan`) and, for a corp exec (no Job, one Meeting the day
+long), the office hour (`service::meeting_hour`). The counterpart is a coworker `service::present` reads at work: a
+body inside the workplace, else (none inside) a Statistical one named in the line; **no promotion** (the camera ring
+already makes the player's room Full; promoting a body for one line would churn the hourly tiers). The lunch partner
+is the warmest edge present, so it recurs. The line is a `WorkBeat` event `[body, counterpart, workplace]`; a
+rumour beat is `gossip::tell` (the ordinary exchange) and fires only when a deed was told. The player's "Go to work"
+now runs the whole shift (`PlayerControlled.shift`, `player::shift_next` at each plan's end), not one plan.
 **Out of scope.** Per-trade verbs beyond the deck's lines; the gang's own day (review 1 option B), which comes only
 if P3-P4 show gang life matters to the player.
 

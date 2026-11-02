@@ -131,5 +131,6 @@ pub mod virt;
 pub mod wages;
 pub mod weapons;
 pub mod word;
+pub mod workbeats;
 pub mod world_market;
 pub mod wounded;
