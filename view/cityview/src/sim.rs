@@ -566,15 +566,20 @@ impl Sim {
 
     /// V4: where a body inside its building stands on storey `floor` (a climb's fraction): on the export's lot that
     /// has the storey (lots.rs), at that storey's z, a place fixed per id in the middle 60 % of the lot's part of the
-    /// building; `core` stands it at that part's middle (the lift and the stairs). No lot (an old asset tree, a
+    /// building (V10: the part that storey's massing box covers, a tower's plate); `core` stands it at the core (the
+    /// lift and the stairs: the top storey's middle). No lot (an old asset tree, a
     /// building off every lot): V3's place in the rect, the ground under it plus the 4 m + 3 m formula.
     fn indoor_place(&self, a: &Agent, floor: f32, core: bool, stream: &Stream) -> (Vec2, f32, Option<crate::lots::Placed>) {
         if let Some(r) = a.rect
-            && let Some(pl) = self.lots.place(self.rect_m(r), floor)
+            && let Some(pl) = self.lots.place(self.rect_m(r), floor, self.cfg.storey_slab_m)
         {
             let [x0, y0, x1, y1] = pl.area;
-            let (u, v) = if core { (0.0, 0.0) } else { unit2(a.id) };
-            let p = Vec2::new((x0 + x1) / 2.0 + u * (x1 - x0) * 0.6, (y0 + y1) / 2.0 + v * (y1 - y0) * 0.6);
+            let p = if core {
+                Vec2::from(pl.core)
+            } else {
+                let (u, v) = unit2(a.id);
+                Vec2::new((x0 + x1) / 2.0 + u * (x1 - x0) * 0.6, (y0 + y1) / 2.0 + v * (y1 - y0) * 0.6)
+            };
             return (p, pl.z, Some(pl));
         }
         let p = self.indoor_xy(a);
@@ -871,6 +876,8 @@ pub fn update_sim(
     // building while the cutaway runs (the subject indoors: its building is cut at its ceiling, the whole storey
     // shows), else inside the cut box. Every other indoor body stays hidden: drawn on its storey at its jittered tile, it stood on
     // (or through) the facades from the outside (the floating capsules).
+    // V10: the kit's own cut (the building the feet are in, the floor it is cut to) for the HUD's subject line
+    let own_cut = occ.as_ref().and_then(|o| o.own);
     let cut = occ.filter(|o| o.active());
     let opened = |p: Vec2| cut.as_ref().is_some_and(|c| c.indoors.is_some() || c.in_box(bv(p.x, p.y, 0.0)));
     let mut subject_indoors = None;
@@ -952,6 +959,7 @@ pub fn update_sim(
                     }
                 }
                 subj_line = subject_line(a, f, z, pl, &sim.lots);
+                subj_line += &own_cut.map_or(", kit cut: none".to_string(), |(b, fl)| format!(", kit cut: building {b} at its floor {fl}"));
                 subject_at = Some((Vec3::new(p.x, p.y, z), yaw));
                 subject_body = Some(draw(Vec3::new(p.x, p.y, z), yaw));
             }
