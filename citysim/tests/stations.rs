@@ -22,6 +22,8 @@ fn station_world() -> World {
     common::world_with_r2(|c| {
         c.law.station_min_tiles = 1;
         c.ages.school_by_reach = false;
+        // V8 (`OPEN-256`): the booked thief serves his night (no fine from the purse).
+        c.cells = None;
     })
 }
 

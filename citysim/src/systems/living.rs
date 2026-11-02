@@ -40,6 +40,7 @@ pub fn run(world: &mut World) {
     crate::prof::timed!("living::consequence::arrivals", crate::systems::consequence::arrivals(world));
     // Round 8 X6 (OPEN-217): the cells' yard at its hour.
     crate::prof::timed!("living::consequence::hourly", crate::systems::consequence::hourly(world));
+    crate::prof::timed!("living::cells::hourly", crate::systems::cells::hourly(world));
     // Jobs & lives phase 5: an episode under a chip ends the contract
     // (nothing with `[vice] chip` off).
     crate::prof::timed!("living::dollhouse::hourly", crate::systems::dollhouse::hourly(world));
@@ -129,6 +130,9 @@ fn early(world: &mut World) {
     // services called, the cells' day (after the visits due; nothing with
     // `[consequence]` absent).
     crate::prof::timed!("mid::consequence::daily", crate::systems::consequence::daily(world));
+    // V8 (`OPEN-256`): the cells' week: the kin's bail (after the gangs'),
+    // the crowded Precinct's early releases (nothing with `[cells]` absent).
+    crate::prof::timed!("mid::cells::daily", crate::systems::cells::daily(world));
     // The pressure pass phase 5b: the gangs' duty, the talk inside, the
     // reckonings, the gangs that cannot muster (after the visits due;
     // nothing with `[crew]` absent).

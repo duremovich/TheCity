@@ -4990,6 +4990,10 @@ lift_max_raiders = 6               # half a car: more than six raiders take the 
 hear_cap = 12                      # tenants a raid's climb is told to, at most
 split_min_storeys = 12             # a claim on another gang's Home of 12 storeys or more takes its upper half (a Home
                                    # tenancy carved from the span, its households with it): two gangs' floors in a tower
+stair_age_from = 40                # V8 (OPEN-264): a raid's column is its bodies, each climbing himself (the stairs at his
+stair_age_slow = 0.02              # own pace: past 40 each year adds 2 % of the stair time; the lift one car for all)
+found_walkers = 3                  # V8: a Hideout founded on a floor is walked into by the 3 members it is now nearest
+found_hour = 10                    # ... at 10:00 (a Visit: the walk and the climb theirs; the line on arrival)
 
 # The city milestone C9b (docs/CITY_MILESTONE.md "C9b as built"; systems/vertical.rs): a raid lands on the rival's
 # Hideout nearest the raiders' own, not the seat; the seat keeps a standing guard. Absent: every raid on the seat.
@@ -5604,6 +5608,30 @@ backup_reach = 6                   # round 9 Y2 (OPEN-251): a suspect who fights
                                    # with none at hand calls the nearest free one on shift (the chase's hand-on, his collar)
 backup_max = 2                     # ... up to this many guards at the cuffs, the arresting one included. V17 joytoy_123639
                                    # d27: a joytoy with no kit fought off five guards one at a time in eight hours
+# V8 (docs/VIEW_MILESTONE.md § V8, OPEN-256; systems/cells.rs): the cells' week. The Precinct swallowed the week at the
+# walking pace (20k seed 42: 1,100 held by d20, 5.5 % of the city; at 100k 2,755 mean): every short term served, the
+# beds per capita never full, a cell day the same as the last. Dylan: a feature, not a knob. A short term is bought out
+# from the purse, bail buys the last days, a crowded Precinct lets its least dangerous go, the day varies (the work
+# detail, cards in the yard, besides the meal, the walk, the fights and the visits). Absent: as round 9 left them.
+[cells]
+fine_max_days = 3                  # a term of 3 days or fewer (Theft, Fraud, an Intrusion) is bought out at booking ...
+fine_per_day = 15                  # ... for 15c a day of it (Theft 45c), from the convict's purse, then his kin's (a spouse,
+                                   # a parent, a grown child; never a child's), to the city (Flow::Fine); a line naming who paid
+bail_max_days = 4                  # at midnight a prisoner with 4 days or fewer left ...
+bail_term_max_days = 10            # ... on a term of 10 days or fewer (a killer is never bailed) ...
+bail_per_day = 12                  # ... is bailed for 12c a day left, from the same purses (his gang's first: [protection])
+keep_coins = 20                    # a purse pays a fine or bail only above this (the week's food)
+crowd_from = 0.15                  # past 15 % of the Precinct's beds held at midnight ([buildings] jail capacity, per capita:
+crowd_to = 0.12                    # 8 % of the city: 1.2 %) the pettiest, soonest out first go early until 12 %, a line each
+work_hour = 9                      # the work detail at 09:00 ...
+work_p = 0.5                       # ... half the prisoners a day (a draw a prisoner a day) ...
+work_pay = 2                       # ... for 2c from the city (Flow::Wage) ...
+work_details = ["the laundry", "the kitchen", "the sweep of the yard", "the workshop's sacks"]   # ... at one of these
+cards_p = 0.3                      # in the yard ([consequence] cell_yard_hour) with nothing else on: cards with a cellmate on
+cards_stake = 2                    # this, 2c changing hands (Flow::Gamble), the better hand a draw
+breakout_reach = true              # a BreakOut its gang cannot march (fewer than [gangs] raid_min_members of its free adults
+                                   # within [crew] duty_reach_ticks of the Precinct) is dropped as it is chosen, a line why
+
 # The pressure pass round 2, R4 (OPEN-218, OPEN-219): the diary's folds and the Camp answer's hour.
 [noise]
 contest_names = 3                  # a blow on a rival's hold names this many of the holders who saw it (the rest "and N more")

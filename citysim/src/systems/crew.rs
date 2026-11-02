@@ -102,6 +102,9 @@ pub enum DutyKind {
     Crew,
     /// Out of the cells, back to the Hideout (no miss).
     Welcome,
+    /// V8 (`OPEN-264`): a Hideout founded on a floor, walked into by the
+    /// members it is nearest (`vertical::found`; no miss).
+    MoveIn,
 }
 
 impl DutyKind {
@@ -113,6 +116,7 @@ impl DutyKind {
             DutyKind::Court => "court summons",
             DutyKind::Crew => "night with the crew",
             DutyKind::Welcome => "welcome back",
+            DutyKind::MoveIn => "move into the new Hideout",
         }
     }
 
@@ -411,6 +415,21 @@ fn set_out(world: &World, m: EntityId, place: EntityId, hour: u8) -> u8 {
     hour.saturating_sub(u8::try_from(lead).unwrap_or(hour))
 }
 
+/// V8 (`OPEN-264`): `m` walks into his gang's new Hideout `place` (founded on a
+/// floor tonight) at `hour`: a Visit (the walk and the climb his), no miss.
+/// False when he is not free for it.
+pub fn post_move_in(world: &mut World, m: EntityId, gang: EntityId, place: EntityId, hour: u8) -> bool {
+    if !on(world) || !free_for_duty(world, m) || world.crew.duties.contains_key(&m) {
+        return false;
+    }
+    let day = world.day();
+    let hour = set_out(world, m, place, hour);
+    let duty = Duty { gang, kind: DutyKind::MoveIn, place, hour, day, chose_job: false, kept: false };
+    world.visits.insert(m, PendingVisit { kin: place, why: VisitWhy::Crew, hour });
+    world.crew.duties.insert(m, duty);
+    true
+}
+
 /// Post one duty: the choice against the shift, then the Visit.
 fn post(world: &mut World, c: &CrewCfg, m: EntityId, gang: EntityId, kind: DutyKind, place: EntityId, hour: u8) {
     let day = world.day();
@@ -476,6 +495,13 @@ pub fn daily(world: &mut World) {
     // 2. Yesterday's duties (a reckoning sent now walks today).
     let old = std::mem::take(&mut world.crew.duties);
     for (m, d) in old {
+        // V8: a move-in posted by tonight's founding (`vertical::found`) is today's.
+        if d.kind == DutyKind::MoveIn && d.day == today {
+            // The visits due (`household::visits_due`) cleared its walk: posted again.
+            world.visits.entry(m).or_insert(PendingVisit { kin: d.place, why: VisitWhy::Crew, hour: d.hour });
+            world.crew.duties.insert(m, d);
+            continue;
+        }
         if !d.kind.owed() {
             continue;
         }
@@ -986,6 +1012,21 @@ pub fn arrived(world: &mut World, id: EntityId, place: EntityId, walked: bool) {
             ownership::jobs2_row(world).crew_rest_nights += 1;
         }
         DutyKind::Welcome => welcome(world, &c, id, d.gang, place, &crew, walked),
+        DutyKind::MoveIn => {
+            // The Hideout's storey (an off-screen body is credited at the door).
+            let floor = world.comp::<Building>(place).and_then(|b| b.span).map_or(0, |(lo, _)| lo);
+            let host = crate::systems::floors::host_of(world, place);
+            let with = if crew.is_empty() { String::new() } else { format!(" ({names} there)") };
+            let text = format!(
+                "{} walked into {gname}'s new Hideout {pname} on floor {floor} of {}{with}",
+                world.name_of(id),
+                world.name_of(host)
+            );
+            let mut actors = vec![id, d.gang, place];
+            actors.extend(crew.iter().copied());
+            world.push_event(EventKind::Crew, &actors, text);
+            ownership::jobs2_row(world).found_walkins += 1;
+        }
         DutyKind::Muster => {}
     }
 }
@@ -1104,8 +1145,21 @@ pub struct RaidLeft<'a> {
 
 /// `ids` named up to `[noise] raid_names`, the rest "and N more".
 fn names_capped(world: &World, ids: &[EntityId]) -> String {
+    names_with(world, ids, |x| world.name_of(x))
+}
+
+/// V8 (`OPEN-264`): [`names_capped`] with each name's age ("Name (34 y)"), for
+/// the raid's hurt and dead (the under-18 rule read off the line).
+fn names_aged(world: &World, ids: &[EntityId]) -> String {
+    names_with(world, ids, |x| {
+        let age = world.comp::<crate::components::Identity>(x).map_or(0, |i| i.age_years());
+        format!("{} ({age} y)", world.name_of(x))
+    })
+}
+
+fn names_with(world: &World, ids: &[EntityId], name: impl Fn(EntityId) -> String) -> String {
     let cap = usize::from(world.config.noise.raid_names);
-    let shown: Vec<String> = ids.iter().take(cap).map(|&x| world.name_of(x)).collect();
+    let shown: Vec<String> = ids.iter().take(cap).map(|&x| name(x)).collect();
     let more = ids.len().saturating_sub(shown.len());
     let tail = if more > 0 { format!(" and {more} more") } else { String::new() };
     format!("{}{tail}", shown.join(", "))
@@ -1174,10 +1228,10 @@ pub fn raid_result(world: &mut World, r: RaidLeft) {
     let wounded_text = if wounded.is_empty() {
         String::new()
     } else {
-        format!("; {} hurt: {}", wounded.len(), names_capped(world, &wounded))
+        format!("; {} hurt: {}", wounded.len(), names_aged(world, &wounded))
     };
     let dead_text =
-        if dead.is_empty() { String::new() } else { format!("; {} dead: {}", dead.len(), names_capped(world, &dead)) };
+        if dead.is_empty() { String::new() } else { format!("; {} dead: {}", dead.len(), names_aged(world, &dead)) };
     let took = match (r.won, r.rival.is_some(), r.freed) {
         (true, _, Some([])) => "; nobody inside to free".to_string(),
         (true, _, Some(f)) => format!("; {} freed: {}", f.len(), names_capped(world, f)),

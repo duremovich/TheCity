@@ -35,6 +35,8 @@ fn city() -> World {
         cfg.ages.seed_child_slots = 0;
         // Round 8 X5 (OPEN-248): nor the founding's courtships (their edges move this scene's ground: a butterfly).
         cfg.social.court_seed_share = 0.0;
+        // V8 (OPEN-256): nor the cells' week (bail and the crowded Precinct move this scene's ground: a butterfly).
+        cfg.cells = None;
         let mut w = World::new(42, cfg);
         w.run_ticks(10 * TICKS_PER_HOUR);
         for _ in 0..30 {

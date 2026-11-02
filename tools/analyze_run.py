@@ -1097,6 +1097,13 @@ def jobs2(rows, events, out):
         J["x6_totals"] = {k: sum(col(rows, k)) for k in (
             "cell_days", "cell_days_lined", "cell_yard_walks", "cell_meals", "cell_visits", "wr_held_clear",
             "cell_fights", "cell_cases", "clinic_doc_days", "clinic_idle_days") if k in rows[0]}
+    # V8 (OPEN-256, OPEN-264): the cells' week (fines and bail from the purse, the crowded Precinct's early
+    # releases, the work detail, cards, the BreakOuts dropped or fizzled) and the raid's bodies on the climb.
+    if "cells_fined" in rows[0]:
+        J["v8_totals"] = {k: sum(col(rows, k)) for k in (
+            "cells_fined", "cells_fine_coins", "cells_bailed", "cells_bail_coins", "cells_early", "cell_work",
+            "cell_cards", "breakout_dropped", "breakout_fizzled", "raid_climbs", "raid_climb_bodies",
+            "found_walkins") if k in rows[0]}
     # Pressure pass round 9, Y2 (OPEN-250, OPEN-251): state the systems acted on (0 is right for the first three)
     # and the law's force (a second guard called, a suspect who faced two).
     if "leave_arrests" in rows[0]:
@@ -1513,6 +1520,10 @@ def fmt(o):
             L.append("state the systems acted on and the law's force (arrests by guards on leave, takeovers from the "
                      "cells, hits across the cell wall: 0 is right; second guards called, suspects facing two, of "
                      "them cuffed), run totals: " + f(w["y2_totals"]))
+        if "v8_totals" in w:
+            L.append("the cells' week and the raid's climb (fined at booking, coins; bailed, coins; let out early from a "
+                     "crowded Precinct; work details, card hands; BreakOuts dropped, fizzled; raid climbs, bodies "
+                     "climbing, founders walked in), run totals: " + f(w["v8_totals"]))
         if "x6_totals" in w:
             L.append("the cells' day and the clinic's walk-in (jail-days, with a line; yard walks, meals, visits, held "
                      "witnesses who kept clear; fights, cases; doctor-days, of them no patient), run totals: "

@@ -443,7 +443,17 @@ fn step_agent(world: &mut World, id: EntityId) {
                 if let Some(p) = world.comp_mut::<Position>(id) {
                     p.floor = to;
                 }
-                StepResult::Done
+                // V8 (`OPEN-264`): a raider's own climb to the target's floor
+                // (`vertical::climb_column`) ends in the Brawl it was begun
+                // from, on the floor: the step goes on, not past it.
+                if step.action == ActionKind::Brawl {
+                    if let Some(b) = world.comp_mut::<Brain>(id) {
+                        b.exec = ExecState::Use { kind: ActionKind::Brawl, until: tick, started: tick };
+                    }
+                    StepResult::Running
+                } else {
+                    StepResult::Done
+                }
             }
         }
         ExecState::GotoTimed { target, arrive_tick, blocked_since, .. } => {
@@ -1744,8 +1754,8 @@ pub fn climb_place(world: &World, id: EntityId) -> Option<(TilePos, EntityId, f3
             let f = storey_at(u.from, u.to, start, start + u.plan.wait, *arrive_tick, tick);
             Some((target.tile, u.building, f))
         }
-        // C8: a raider on his column's climb to the target's floor.
-        _ => crate::systems::vertical::column_place(world, id),
+        // V8 (`OPEN-264`): a raider's climb is his own `Climb` above.
+        _ => None,
     }
 }
 
