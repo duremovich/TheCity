@@ -2100,6 +2100,7 @@ version = "0.1.0"
 dependencies = [
  "citysim",
  "clap",
+ "flate2",
  "serde_json",
  "toml",
 ]
@@ -2110,6 +2111,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "citysim",
+ "flate2",
  "glclient",
  "serde",
  "serde_json",

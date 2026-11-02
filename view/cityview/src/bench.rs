@@ -403,9 +403,10 @@ pub fn run_bench(
             match b.phase {
                 Phase::Warm => {
                     b.apply_shot(&mut view);
-                    // C2: the sim thread runs to the shot's tick and holds there
+                    // C2: the sim thread runs to the shot's tick and holds there; V6: the shot at diary minute t is
+                    // frame t + 1 (the state minute t left, citysim::view's module doc)
                     if let (Some(t), Some(sh)) = (b.shots[b.shot].tick, sim_shots.as_ref()) {
-                        sh.shared.hold.store(t, std::sync::atomic::Ordering::Relaxed);
+                        sh.shared.hold.store(t + 1, std::sync::atomic::Ordering::Relaxed);
                     }
                     b.phase = Phase::Run;
                     b.frames = 0;
@@ -413,7 +414,7 @@ pub fn run_bench(
                 Phase::Run => {
                     // C2: not before the sim's newest frame is the shot's tick (the wait and its timeout start then)
                     if let (Some(t), Some(sh)) = (b.shots[b.shot].tick, sim_shots.as_ref())
-                        && sh.shared.pair().1.is_none_or(|p| p.frame.tick < t)
+                        && sh.shared.pair().1.is_none_or(|p| p.frame.tick < t + 1)
                     {
                         b.frames = 0;
                         return;

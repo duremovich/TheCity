@@ -5883,3 +5883,8 @@ indoor_cut_m = 6.0                 # a body indoors is drawn only on the subject
 child_scale_min = 0.5              # a child's drawn height over an adult's at age 0 (no child mesh: the adult scaled) ...
 child_full_age = 17                # ... growing linearly to 1 at this age
 people_glow = 0.5                  # the look's atlas as emission, this strong (an unlit body is lost on the night street)
+# The view milestone V6 (OPEN-270): `citysim-cli shadow --record` writes each pick's ring a tick (`citysim::view`'s
+# recording, city-simrec/0.1: one gzip'd JSON-lines file per pick per diary day, a frame a tick as a delta on the last)
+# for cityview `--sim FILE` to play. The ring is the pick's surroundings as the shadow's world has them (no view set).
+record_half_tiles = 48             # the recorded ring's half side, tiles (the follow-cam's ring_half_tiles: what a shot shows)
+record_gzip_level = 6              # the files' gzip level, 0-9

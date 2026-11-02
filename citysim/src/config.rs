@@ -608,6 +608,11 @@ pub struct ViewCfg {
     /// The people's atlas as emission, this strong (the night street: an
     /// unlit body is lost in the dark).
     pub people_glow: f32,
+    /// The view milestone V6 (`OPEN-270`): `shadow --record`'s ring half side in tiles (each pick's surroundings
+    /// a tick, as the shadow's world has them).
+    pub record_half_tiles: u16,
+    /// The recording's gzip level (0-9; flate2's `Compression`).
+    pub record_gzip_level: u32,
 }
 
 impl Default for ViewCfg {
@@ -625,6 +630,8 @@ impl Default for ViewCfg {
             child_scale_min: 0.5,
             child_full_age: 17,
             people_glow: 0.5,
+            record_half_tiles: 48,
+            record_gzip_level: 6,
         }
     }
 }
