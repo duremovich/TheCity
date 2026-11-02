@@ -156,7 +156,19 @@ pub fn raid_rival(world: &World, gang: EntityId) -> Option<EntityId> {
         .filter(|g| g.order == Order::Retaliate)
         .and_then(|g| g.retaliate_on)
         .filter(|&r| r != gang && world.has::<Gang>(r));
-    named.or_else(|| world.rival_of(gang))
+    // V8 (`OPEN-264`): a raid under way fights the gang it was ordered on, the
+    // one whose Hideout it picked (`Gang.raid_hideout`), while that stands
+    // (V19: the neighbour changed under the march, and the plan named one
+    // Hideout while the climb went up another).
+    let ordered = || {
+        let g = world.comp::<Gang>(gang)?;
+        let h = g.raid_hideout.filter(|_| g.raid_at.is_some())?;
+        if world.comp::<Building>(h).is_none_or(|b| b.demolished) {
+            return None;
+        }
+        world.gang_list().iter().copied().find(|&o| o != gang && crate::systems::vertical::is_hideout_of(world, o, h))
+    };
+    named.or_else(ordered).or_else(|| world.rival_of(gang))
 }
 
 /// The city milestone C9b: the rival Hideout `gang`'s standing raid on
@@ -679,7 +691,12 @@ pub fn gathered_for(world: &World, pool: &[EntityId], actor: EntityId, door: Til
         .filter(|&m| !crate::systems::ages::is_protected(world, m))
         .filter(|&m| {
             m == actor
-                || (world.comp::<Position>(m).is_some_and(|p| law::chebyshev(p.tile, door) <= radius)
+                // V8 (`OPEN-264`): or inside the building at the door (on
+                // his climb to the target's floor, or on it).
+                || (world.comp::<Position>(m).is_some_and(|p| {
+                    law::chebyshev(p.tile, door) <= radius
+                        || p.building.and_then(|b| world.comp::<Building>(b)).is_some_and(|bd| bd.door == door)
+                })
                     && world.comp::<Brain>(m).is_some_and(|b| b.current_goal == Some(goal)))
         })
         .collect();

@@ -818,11 +818,22 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
             return false; // marching
         }
         let name = world.comp::<Gang>(gang).map_or_else(String::new, |g| g.name.clone());
+        // V8 (`OPEN-256`): a break-out's march says it was the Jail's door.
+        let jail = world.comp::<Gang>(gang).is_some_and(|g| g.order.target_is_jail());
         if let Some(g) = world.comp_mut::<Gang>(gang) {
             g.raid_at = None;
             g.retaliate_until = None;
         }
-        world.push_event(EventKind::Raid, &[gang], format!("{name}'s raid fizzled: nobody reached the rival door"));
+        let text = if jail {
+            crate::systems::ownership::jobs2_row(world).breakout_fizzled += 1;
+            let at = world
+                .building_of_kind(crate::components::BuildingKind::Jail)
+                .map_or_else(|| "the Jail".to_string(), |j| world.name_of(j));
+            format!("{name}'s break-out fizzled: nobody reached the door of {at}")
+        } else {
+            format!("{name}'s raid fizzled: nobody reached the rival door")
+        };
+        world.push_event(EventKind::Raid, &[gang], text);
     }
     let Some(inputs) = gather_inputs(world, gang) else {
         // Leaderless, or the leader is in the Jail: nothing new is issued and
@@ -925,6 +936,18 @@ pub fn apply_order(world: &mut World, gang: EntityId, p: PendingOrder, note: Opt
     let Some((current, name)) = world.comp::<Gang>(gang).map(|g| (g.order, g.name.clone())) else { return };
     let cfg = world.config.gangs.clone();
     let PendingOrder { order, corp_target, retaliate_on, why, .. } = p;
+    // V8 (`OPEN-256`): a BreakOut its gang cannot march is dropped as it is
+    // chosen, the line why (V19: BreakOut orders that never acted).
+    if order == Order::BreakOut && current != Order::BreakOut {
+        if let Some(why_not) = crate::systems::cells::breakout_reach(world, gang) {
+            if let Some(g) = world.comp_mut::<Gang>(gang) {
+                g.pending_order = None;
+            }
+            crate::systems::ownership::jobs2_row(world).breakout_dropped += 1;
+            world.push_event(EventKind::OrderChanged, &[gang], format!("{name} {why_not} (stays {current:?})"));
+            return;
+        }
+    }
     let mut muster = order.is_raid().then(|| next_muster(now, cfg.raid_muster_hour));
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.order = order;

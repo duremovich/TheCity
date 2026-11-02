@@ -1620,6 +1620,33 @@ pub struct Jobs2Cols {
     /// Round 8 X6: a prisoner's hour in the yard with nothing else on (a walk with a cellmate, or alone)
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub cell_yard_walks: u32,
+    /// V8 (`OPEN-256`): short terms bought out at booking from the purse
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub cells_fined: u32,
+    /// V8: the coins of those fines
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub cells_fine_coins: u32,
+    /// V8: prisoners bailed at midnight from their own or their kin's purse
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub cells_bailed: u32,
+    /// V8: the coins of that bail
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub cells_bail_coins: u32,
+    /// V8: prisoners let out early from a crowded Precinct
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub cells_early: u32,
+    /// V8: a prisoner's morning on the work detail
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub cell_work: u32,
+    /// V8: a hand of cards in the yard (two prisoners)
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub cell_cards: u32,
+    /// V8: BreakOut orders dropped as chosen (too few within reach of the Precinct)
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub breakout_dropped: u32,
+    /// V8: BreakOut marches that reached no Jail door
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub breakout_fizzled: u32,
     /// Round 8 X6: a cells' meal served at `[justice] meal_hour` with its line
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub cell_meals: u32,
@@ -1711,6 +1738,12 @@ pub struct Jobs2Cols {
     pub raid_climbs: u32,
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub raid_climb_lift: u32,
+    /// V8 (`OPEN-264`): raiders whose own body climbed to the target's floor.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub raid_climb_bodies: u32,
+    /// V8: founders who walked into a district Hideout founded on a floor.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub found_walkins: u32,
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub raid_heard: u32,
     /// C8: claims that took a held tower's upper floors (`vertical::split_claim`).
@@ -2346,6 +2379,15 @@ impl Jobs2Cols {
                 "cell_days",
                 "cell_days_lined",
                 "cell_yard_walks",
+                "cells_fined",
+                "cells_fine_coins",
+                "cells_bailed",
+                "cells_bail_coins",
+                "cells_early",
+                "cell_work",
+                "cell_cards",
+                "breakout_dropped",
+                "breakout_fizzled",
                 "cell_meals",
                 "cell_visits",
                 "wr_held_clear",
@@ -2379,6 +2421,8 @@ impl Jobs2Cols {
                 "lift_cuts",
                 "raid_climbs",
                 "raid_climb_lift",
+                "raid_climb_bodies",
+                "found_walkins",
                 "raid_heard",
                 "floor_claims",
                 "landlord_swallow",
@@ -2991,6 +3035,15 @@ impl Jobs2Cols {
             self.cell_days.to_string(),
             self.cell_days_lined.to_string(),
             self.cell_yard_walks.to_string(),
+            self.cells_fined.to_string(),
+            self.cells_fine_coins.to_string(),
+            self.cells_bailed.to_string(),
+            self.cells_bail_coins.to_string(),
+            self.cells_early.to_string(),
+            self.cell_work.to_string(),
+            self.cell_cards.to_string(),
+            self.breakout_dropped.to_string(),
+            self.breakout_fizzled.to_string(),
             self.cell_meals.to_string(),
             self.cell_visits.to_string(),
             self.wr_held_clear.to_string(),
@@ -3024,6 +3077,8 @@ impl Jobs2Cols {
             self.lift_cuts.to_string(),
             self.raid_climbs.to_string(),
             self.raid_climb_lift.to_string(),
+            self.raid_climb_bodies.to_string(),
+            self.found_walkins.to_string(),
             self.raid_heard.to_string(),
             self.floor_claims.to_string(),
             self.landlord_swallow.to_string(),

@@ -313,11 +313,41 @@ fn found(world: &mut World, gang: EntityId, host: EntityId, c: &VerticalCfg) -> 
     // The members who live in the district hear of it (their nearest Hideout now).
     let members = world.comp::<Gang>(gang).map(|g| g.members.clone()).unwrap_or_default();
     actors.extend(members.into_iter().filter(|&m| own_hideout(world, m) == Some(t)).take(24));
+    // V8 (`OPEN-264`): on a floor, its founders walk in (the members it is now nearest, free adults, nearest
+    // first): a Visit at `found_hour`, the climb theirs, the line on arrival.
+    let mut walkers: Vec<EntityId> = Vec::new();
+    if f > 0 && c.found_walkers > 0 {
+        let door = world.comp::<Building>(t).map(|b| b.door);
+        let mut near: Vec<(u32, EntityId)> = actors[3..]
+            .iter()
+            .copied()
+            .filter(|&m| crate::systems::contracts::free_adult(world, m))
+            .filter_map(|m| {
+                let home = crate::systems::contracts::home_door(world, m)?;
+                Some((home.manhattan(door?), m))
+            })
+            .collect();
+        near.sort_unstable();
+        for (_, m) in near {
+            if walkers.len() >= usize::from(c.found_walkers) {
+                break;
+            }
+            if crate::systems::crew::post_move_in(world, m, gang, t, c.found_hour) {
+                walkers.push(m);
+            }
+        }
+    }
+    let walk = if walkers.is_empty() {
+        String::new()
+    } else {
+        let names: Vec<String> = walkers.iter().map(|&m| world.name_of(m)).collect();
+        format!("; {} to move in at {:02}:00", names.join(", "), c.found_hour)
+    };
     world.push_event(
         EventKind::Floor,
         &actors,
         format!(
-            "{gname} took floor {f} of {}{over} as a Hideout in {} (its turf there): {price}",
+            "{gname} took floor {f} of {}{over} as a Hideout in {} (its turf there): {price}{walk}",
             world.name_of(host),
             world.district_name(d)
         ),
@@ -633,9 +663,14 @@ fn place_of(world: &World, target: EntityId) -> String {
     world.name_of(target)
 }
 
-/// The raid's climb at the target's door (the Brawl step, after `raid::wait_for_crew`): true while the column
-/// climbs (the step holds); false at once on the ground, off, or when it has reached the floor (the fight then
-/// resolves). The first call starts it: by the lift or the stairs, the lobby and the floors passed told.
+/// The raid's climb at the target's door (the Brawl step, after `raid::wait_for_crew`): true while this raider's
+/// own body climbs, or waits on the floor for the column's tail (the step holds); false at once on the ground, off,
+/// or once the column is on the floor (the fight then resolves there). V8 (`OPEN-264`): the column is bodies, not a
+/// timer. The first at the door starts it (the lift or the stairs chosen for the column, the line, the floors passed
+/// told); every raider then walks into the building and climbs himself (`ExecState::Climb`, the Brawl going on at
+/// the top): by the stairs at his own pace (`stair_age_from`, `stair_age_slow`), by the lift as one car (the column's
+/// wait and ride). A raider reaching the door after the column set off climbs after it; the fight waits for the last
+/// of them (`RaidClimb.arrive`). Under 18 nobody marches (`raid::gathered`).
 pub fn climb_column(world: &mut World, actor: EntityId) -> bool {
     let Some(c) = cfg(world).cloned() else { return false };
     if !levels::on(world) {
@@ -657,13 +692,27 @@ pub fn climb_column(world: &mut World, actor: EntityId) -> bool {
     let now = world.tick;
     if let Some(rc) = world.comp::<Gang>(gid).and_then(|g| g.raid_climb.clone()) {
         if rc.target == target {
-            if now < rc.arrive {
-                return true;
+            if on_floor(world, actor, target, floor) {
+                if now < rc.arrive {
+                    return true;
+                }
+                if let Some(g) = world.comp_mut::<Gang>(gid) {
+                    g.raid_climb = None;
+                }
+                return false;
             }
-            if let Some(g) = world.comp_mut::<Gang>(gid) {
-                g.raid_climb = None;
+            // The tail: at the door after the column set off, he climbs after it.
+            let Some(plan) = body_plan(world, &c, target, floor, actor, rc.lift) else { return false };
+            levels::book(world, rc.core, plan, floor, now);
+            start_climb(world, actor, target, rc.core, floor, plan);
+            if let Some(gg) = world.comp_mut::<Gang>(gid).and_then(|g| g.raid_climb.as_mut()) {
+                gg.arrive = gg.arrive.max(now + plan.ticks);
+                if !gg.column.contains(&actor) {
+                    gg.column.push(actor);
+                }
             }
-            return false;
+            ownership::jobs2_row(world).raid_climb_bodies += 1;
+            return true;
         }
     }
     let members = world.comp::<Gang>(gid).map(|g| g.members.clone()).unwrap_or_default();
@@ -690,56 +739,149 @@ pub fn climb_column(world: &mut World, actor: EntityId) -> bool {
     } else {
         None
     };
-    let plan = if stairs_why.is_none() {
-        levels::plan(world, core, 0, floor, now, Some(actor))
-    } else {
-        levels::stairs(world, 0, floor)
-    };
-    let Some(plan) = plan else { return false };
+    let car = if stairs_why.is_none() { levels::plan(world, core, 0, floor, now, Some(actor)) } else { None };
+    let lift = car.is_some_and(|p| p.lift);
     let (g, r) = (gname(gid), rival.map(gname));
-    levels::book(world, core, plan, floor, now);
+    // Each body's own climb: the car's one ride for all, else the stairs at his pace.
+    let mut arrive = now;
+    let mut slowest = 0;
+    for &m in &column {
+        let plan = if lift { car } else { body_plan(world, &c, target, floor, m, false) };
+        let Some(plan) = plan else { continue };
+        levels::book(world, core, plan, floor, now);
+        start_climb(world, m, target, core, floor, plan);
+        arrive = arrive.max(now + plan.ticks);
+        slowest = slowest.max(plan.ticks);
+    }
+    if arrive == now {
+        return false;
+    }
     let place = place_of(world, target);
     let host = crate::systems::floors::host_of(world, target);
     let tower = world.name_of(host);
     let row = ownership::jobs2_row(world);
     row.raid_climbs += 1;
-    if plan.lift {
+    row.raid_climb_bodies += n as u32;
+    if lift {
         row.raid_climb_lift += 1;
     }
+    let first = car.map_or(slowest, |p| p.ticks);
     if let Some(gg) = world.comp_mut::<Gang>(gid) {
         gg.raid_climb = Some(RaidClimb {
             target,
             core,
             floor,
             start: now,
-            board: now + plan.wait,
-            arrive: now + plan.ticks,
-            lift: plan.lift,
+            board: now + car.map_or(0, |p| p.wait),
+            arrive,
+            lift,
             column: column.clone(),
         });
     }
-    let how = if plan.lift {
+    let how = if lift {
         format!(
-            "rode the lift of {} up to {place} on floor {floor}",
+            "rode the lift of {} up to {place} on floor {floor}, {first} min up",
             if host == target { "the building" } else { &tower }
         )
     } else {
         let why = stairs_why.unwrap_or_else(|| "the stairs quicker".to_string());
         let of = if host == target { place.clone() } else { tower.clone() };
         format!(
-            "went up the stairs of {of} to {} on floor {floor} ({why})",
+            "went up the stairs of {of} to {} on floor {floor} ({why}), the last up in {slowest} min",
             if host == target { "its top" } else { &place }
         )
     };
     let mut actors = vec![gid];
     actors.extend(rival);
     actors.extend(column.iter().copied());
-    world.push_event(EventKind::Raid, &actors, format!("{} raiders ({n}) {how}, {} min up", poss(&g), plan.ticks));
-    hear(
-        world,
-        &ClimbHeard { gang: gid, rival, head: actor, host, door, floor, lift: plan.lift, column: &column, g: &g, r },
-    );
+    world.push_event(EventKind::Raid, &actors, format!("{} raiders ({n}) {how}", poss(&g)));
+    hear(world, &ClimbHeard { gang: gid, rival, head: actor, host, door, floor, lift, column: &column, g: &g, r });
     true
+}
+
+/// V8: `m`'s body on `floor` of `target`, his climb over.
+fn on_floor(world: &World, m: EntityId, target: EntityId, floor: u8) -> bool {
+    world.comp::<Position>(m).is_some_and(|p| p.building == Some(target) && p.floor == floor)
+        && !matches!(
+            world.comp::<crate::components::Brain>(m).map(|b| &b.exec),
+            Some(crate::exec::ExecState::Climb { .. })
+        )
+}
+
+/// V8: `m`'s own climb from the ground to `floor` of `target`: the stairs at his pace (`stair_age_slow` a year
+/// past `stair_age_from`), or the lift's plan when the column rides (`lift`).
+fn body_plan(
+    world: &World,
+    c: &VerticalCfg,
+    target: EntityId,
+    floor: u8,
+    m: EntityId,
+    lift: bool,
+) -> Option<levels::ClimbPlan> {
+    if lift {
+        let p = levels::plan(world, levels::core_of(world, target), 0, floor, world.tick, Some(m))?;
+        if p.lift {
+            return Some(p);
+        }
+    }
+    let mut p = levels::stairs(world, 0, floor)?;
+    let age = world.comp::<crate::components::Identity>(m).map_or(0, |i| i.age_years());
+    let past = age.saturating_sub(u32::from(c.stair_age_from)) as f32;
+    if c.stair_age_from > 0 && past > 0.0 {
+        p.ticks = ((p.ticks as f32) * (1.0 + c.stair_age_slow * past)).ceil() as Tick;
+    }
+    Some(p)
+}
+
+/// V8: `m` steps in at `target`'s door and climbs (`ExecState::Climb`, the Brawl step going on at its end; the
+/// lobby on the ground until then).
+fn start_climb(world: &mut World, m: EntityId, target: EntityId, core: EntityId, floor: u8, p: levels::ClimbPlan) {
+    let now = world.tick;
+    let Some(door) = world.comp::<Building>(target).map(|b| b.door) else { return };
+    if crate::systems::lod::is_held(world, m) {
+        return;
+    }
+    // A marcher still on his last steps to the door: the march is over, the Brawl next.
+    if let Some(b) = world.comp_mut::<crate::components::Brain>(m) {
+        let at = usize::from(b.plan_step);
+        let march = b.plan.as_ref().is_some_and(|p| {
+            p.steps
+                .get(at)
+                .is_some_and(|s| s.action == crate::goap::ActionKind::GoTo(crate::goap::LocationKey::RaidTarget))
+                && p.steps.get(at + 1).is_some_and(|s| s.action == crate::goap::ActionKind::Brawl)
+        });
+        if march {
+            b.plan_step = b.plan_step.saturating_add(1);
+        }
+    }
+    if world.comp::<Position>(m).and_then(|p| p.building) != Some(target) {
+        world.leave_building(m);
+        world.enter_building(m, target);
+    }
+    if let Some(pos) = world.comp_mut::<Position>(m) {
+        pos.floor = 0;
+    }
+    let state = crate::exec::ExecState::Climb {
+        target: crate::exec::GotoTarget {
+            dest: crate::goap::LocationKey::RaidTarget,
+            tile: door,
+            building: Some(target),
+        },
+        core,
+        from: 0,
+        to: floor,
+        depart: now,
+        board: now + p.wait,
+        arrive_tick: now + p.ticks,
+        lift: p.lift,
+        out: false,
+        path: Vec::new(),
+        levels: Vec::new(),
+    };
+    if let Some(b) = world.comp_mut::<crate::components::Brain>(m) {
+        b.exec = state;
+        b.action_until = now + p.ticks;
+    }
 }
 
 struct ClimbHeard<'a> {
@@ -817,18 +959,6 @@ fn hear(world: &mut World, h: &ClimbHeard) {
     for o in ids {
         crate::systems::gossip::maybe_sight(world, o, h.head, Some(h.host), h.door);
     }
-}
-
-/// Where a raider on his column's climb is (the view's): the target's door, the storey reached. `None`: on no
-/// climb.
-pub fn column_place(world: &World, id: EntityId) -> Option<(TilePos, EntityId, f32)> {
-    let g = world.comp::<Gang>(world.gang_of(id)?)?;
-    let rc = g.raid_climb.as_ref()?;
-    if g.raid_at.is_none() || world.tick >= rc.arrive || !rc.column.contains(&id) {
-        return None;
-    }
-    let door = world.comp::<Building>(rc.target)?.door;
-    Some((door, rc.target, levels::storey_at(0, rc.floor, rc.start, rc.board, rc.arrive, world.tick)))
 }
 
 /// The guards answering an alarm at a target on `floor` climb to it: the walk to the door plus the climb by the

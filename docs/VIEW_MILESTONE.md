@@ -132,6 +132,15 @@ builds the crossings and signals only.
 The raid's climb is the member's body (`OPEN-264`); the cells' week (`OPEN-256`: bail, fines, overcrowding, a
 varied cell day). Split or moved at planning by what V1-V7 leave.
 
+**As built (V8):** the raid's column is bodies (`vertical::climb_column`): the first at the door picks the lift or
+the stairs, every raider steps in and climbs himself (`ExecState::Climb`, his own pace on the stairs past
+`[vertical] stair_age_from`), the Brawl goes on at the top and the fight waits for the last body; a tail marcher
+climbs after; the raid keeps the rival it was ordered on (`raid::raid_rival`); a floor Hideout is walked into by its
+founders (`found_walkers`); the hurt and the dead print ages. The cells' week is `[cells]` (`systems/cells.rs`):
+fines at booking and bail from the purse (`Flow::Fine`), the crowded Precinct's early releases, the work detail and
+cards, the BreakOut dropped with a reason. Deviation: no shadow diary shows the climb, as no gang raid reaches a
+rival's door on the current maps (`OPEN-276`); the climb was read on the 2k city with a seat lifted to floor 6.
+
 ## The exit
 
 1. A resident followed live at 100k for a game day at real time and at x60 with no sim stall (no tick over ~2 s).

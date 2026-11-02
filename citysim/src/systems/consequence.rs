@@ -1213,6 +1213,11 @@ pub fn hourly(world: &mut World) {
             if fought.contains(&p) || !living(world, p) {
                 continue;
             }
+            // V8 (`OPEN-256`): cards with a cellmate, else the walk.
+            let yard = yard_of(world, jail);
+            if crate::systems::cells::cards(world, &yard, jail, p, &prisoners, &mut fought) {
+                continue;
+            }
             yard_walk(world, &c, jail, p, &prisoners, &mut fought);
         }
     }

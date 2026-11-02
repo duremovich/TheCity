@@ -387,6 +387,13 @@ pub struct Config {
     /// the key absent: the cells and the watch as round 2 left them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub justice: Option<JusticeCfg>,
+    /// V8 (`OPEN-256`): the cells' week (`systems/cells.rs`): a short term
+    /// bought out at booking or bailed from the purse (the prisoner's, his
+    /// kin's), the crowded Precinct letting its least dangerous go, the work
+    /// detail and cards in the yard. `None` with the key absent: the cells as
+    /// round 9 left them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cells: Option<CellsCfg>,
     /// The pressure pass round 2, R4 (OPEN-218, OPEN-219): `[noise]`, the
     /// diary's folds and the Camp answer's hour. Absent: the defaults.
     #[serde(default)]
@@ -1271,6 +1278,20 @@ pub struct VerticalCfg {
     /// instead (a Home tenancy carved from the span, its households with it):
     /// one tower holds two gangs' floors. 0: the whole Home, as before.
     pub split_min_storeys: u8,
+    /// V8 (`OPEN-264`): a raider climbs the stairs at his own pace: past this
+    /// age each year adds `stair_age_slow` of the stair time (0: every body
+    /// at `[levels] stair_ticks_per_floor`).
+    #[serde(default)]
+    pub stair_age_from: u8,
+    #[serde(default)]
+    pub stair_age_slow: f32,
+    /// V8: a district Hideout founded on a floor is walked into by this many
+    /// of the members it is now nearest (free adults, nearest first), at
+    /// `found_hour` (a Visit, the climb theirs); 0: the founding is a line.
+    #[serde(default)]
+    pub found_walkers: u8,
+    #[serde(default)]
+    pub found_hour: u8,
     /// C9b: the raid on the rival's nearest Hideout, a standing guard at the
     /// seat (absent: every raid on the seat, no guard).
     #[serde(default)]
@@ -2838,6 +2859,48 @@ impl Default for FaresCfg {
 
 /// Pressure pass round 3, S3 `[justice]` (docs/PRESSURE_PASS.md § S3;
 /// `OPEN-223`): the cells keep the body alive, the watch acts on what it
+/// V8 (`OPEN-256`) `[cells]`: the cells' week. Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CellsCfg {
+    /// A sentence of this many days or fewer is bought out at booking for
+    /// `fine_per_day` coins a day of it, paid from the purse (the convict's,
+    /// then his kin's: a spouse, a parent, a grown child), to the city
+    /// (`Flow::Fine`); 0: none.
+    pub fine_max_days: u32,
+    pub fine_per_day: i64,
+    /// A prisoner with this many days or fewer left on a term of
+    /// `bail_term_max_days` or fewer is bailed out at midnight for
+    /// `bail_per_day` coins a day left, from the same purses (a gang's
+    /// member is its gang's first, `[protection] bail_*`); 0: none.
+    pub bail_max_days: u32,
+    pub bail_term_max_days: u32,
+    pub bail_per_day: i64,
+    /// A purse pays a fine or bail only above this (the week's food).
+    pub keep_coins: i64,
+    /// Overcrowding: past this share of the Precinct's beds (`[buildings]
+    /// jail capacity`) held at midnight, the least dangerous (the pettiest
+    /// crime, then the soonest out) go early until `crowd_to` of them; a
+    /// line each. 0: never.
+    pub crowd_from: f32,
+    pub crowd_to: f32,
+    /// The work detail: at this hour a prisoner works on `work_p` (a draw a
+    /// prisoner a day) one of `work_details` for `work_pay` coins from the
+    /// city (`Flow::Wage`); 24: off.
+    pub work_hour: u8,
+    pub work_p: f32,
+    pub work_pay: i64,
+    pub work_details: Vec<String>,
+    /// Cards in the yard (`[consequence] cell_yard_hour`): a prisoner with
+    /// nothing else on plays a cellmate on `cards_p`, `cards_stake` coins
+    /// changing hands (`Flow::Gamble`), the better hand by a draw.
+    pub cards_p: f32,
+    pub cards_stake: i64,
+    /// BreakOut: an order a gang cannot march (fewer than `[gangs]
+    /// raid_min_members` of its free adults within `[crew] duty_reach_ticks`
+    /// of the Precinct) is dropped as it is chosen, a line saying why.
+    pub breakout_reach: bool,
+}
+
 /// sees. Every value a placeholder.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -12050,6 +12113,10 @@ impl Config {
         self.scale = ScaleCfg::off();
         // Transit: the v1 map has no lines (a unit test builds its own).
         self.transit = TransitCfg::default();
+        // V8 (`OPEN-256`): the hand-built unit worlds keep round 9's cells
+        // (every term served, no bail, no crowding); a test reading the
+        // cells' week sets its own `[cells]`.
+        self.cells = None;
         self.world.jobs = JobsCfg { farmer: 24, guard: 10, clerk: 3, bartender: 2, gravedigger: 1, sanitation: 0 };
         self.world.market_initial = 600;
         self.world.warehouse_initial = 1500;
@@ -12142,6 +12209,9 @@ impl Config {
         // The island pass phase 4: no commute pressure (the old default's
         // relocation, which the pinned tests read).
         self.commute_pressure = None;
+        // V8 (`OPEN-256`): the old default's cells (every term served: the
+        // pinned tests book a thief with coins and read his sentence).
+        self.cells = None;
         self
     }
 

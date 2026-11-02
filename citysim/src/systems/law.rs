@@ -2441,6 +2441,16 @@ fn jail_suspect_at(world: &mut World, guard: EntityId, suspect: EntityId) {
         }
     }
 
+    // V8 (`OPEN-256`): a short term bought out from the purse (the
+    // convict's, his kin's): booked, no cell.
+    if crate::systems::cells::fine_out(world, suspect, crime, sentence_ticks(world, crime)) {
+        world.remember(suspect, MemoryKind::Paid, None, 0.4, -0.4, false);
+        resolve_reports(world, suspect);
+        world.stats.current.arrests += 1;
+        booked(world, guard, suspect, crime, jail);
+        release_at_jail_door(world, suspect, "fined");
+        return;
+    }
     let until = world.tick + sentence_ticks(world, crime);
     sentence(world, suspect, crime, until, jail);
     resolve_reports(world, suspect);
