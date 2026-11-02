@@ -30,6 +30,7 @@ mod data;
 mod mesh;
 mod occ;
 mod occbench;
+mod people;
 mod shadowbench;
 mod sim;
 mod simthread;
@@ -86,6 +87,8 @@ struct Args {
     rate: Option<f64>,
     from: Option<u64>,
     shots: Vec<u64>,
+    /// V3: --capsules draws the old placeholders, not the people (people.rs)
+    capsules: bool,
 }
 
 /// A tick: a number, or `D:HH:MM` (day, hour, minute).
@@ -132,6 +135,7 @@ impl Args {
             rate: None,
             from: None,
             shots: vec![],
+            capsules: false,
         };
         let v: Vec<String> = std::env::args().skip(1).collect();
         let mut i = 0;
@@ -213,6 +217,7 @@ impl Args {
                     a.sim_frame = next(i).parse().unwrap();
                     i += 1;
                 }
+                "--capsules" => a.capsules = true,
                 "--save" => {
                     a.save = Some(PathBuf::from(next(i)));
                     i += 1;
@@ -473,6 +478,10 @@ fn main() {
             .insert_resource(bench::Shots { shared })
             .add_systems(Startup, sim::setup_sim)
             .add_systems(Update, (sim::follow_subject.before(occ::player_controls), sim::update_sim.after(stream::update_stream)));
+    }
+    // V3: people drawn as people (people.rs)
+    if args.sim.is_some() || args.save.is_some() {
+        people::add(&mut app, args.capsules);
     }
     if args.bench.as_deref() == Some("occ") {
         let oa = occbench::OccArgs {

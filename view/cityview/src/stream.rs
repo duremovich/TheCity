@@ -232,6 +232,17 @@ fn wanted(s: &Stream, view: &View, cam: &Transform, aspect: f32) -> (HashMap<Key
                     keep.insert(*k, lod);
                 }
             }
+            // V3: the chunks about the focus always (its ground gives the camera its z: at a close zoom the frustum,
+            // cast from z 0 before that ground is in, missed a street 100 m up and the follow-cam stayed at z 0)
+            let (fx, fy) = ((view.at.x / cm).floor() as i32, (view.at.y / cm).floor() as i32);
+            for dx in -1..=1 {
+                for dy in -1..=1 {
+                    if s.recs.contains_key(&(fx + dx, fy + dy)) {
+                        want.insert((fx + dx, fy + dy), lod);
+                        keep.insert((fx + dx, fy + dy), lod);
+                    }
+                }
+            }
         }
     }
     (want, keep)

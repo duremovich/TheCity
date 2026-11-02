@@ -122,6 +122,8 @@ pub struct ViewAgent {
     pub weapon: u8,
     pub deck: u8,
     pub food: Option<u32>,
+    /// The view milestone V3: `b`'s rect (a body indoors stands at its door tile; the view draws it inside the rect).
+    pub rect: Option<Rect>,
 }
 
 /// A vehicle's route, as the view reads it.
@@ -463,6 +465,7 @@ pub fn snapshot(world: &World, ring: Rect) -> ViewFrame {
             weapon: kit.weapon,
             deck: kit.deck_tier,
             food: world.comp::<Inventory>(e).map(|i| i.food),
+            rect: b.and_then(|b| world.comp::<Building>(b)).map(|bd| bd.rect),
         });
     }
 

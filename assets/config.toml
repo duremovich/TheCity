@@ -5855,3 +5855,14 @@ ring_half_tiles = 48               # the ring's half side (192 m: simsnap's ring
 pin_margin_tiles = 8               # a pinned body stays pinned this far past the ring (lod.rs VIEW_MARGIN's 8)
 way_margin_tiles = 64              # a Coarse walk is placed on its way (one road search) only when its start-to-target box
                                    # grown by this many tiles (a road's detour) meets the ring
+# The view milestone V3 (cityview people.rs): residents drawn as TheCityGraphics' street NPCs, the walk and idle
+# clips from the Mixamo set. Read from this file by the view at startup (a save's copy of [view] predates them).
+people_anim_m = 40.0               # within this many metres of the subject a body is skinned and animated; past it a
+                                   # static posed mesh (the idle or a mid-stride frame, instanced per look)
+people_anim_max = 48               # the most bodies animated at once (the nearest to the subject)
+indoor_cut_m = 6.0                 # a body indoors is drawn only on the subject's floor of the subject's building, this near
+                                   # it while the occlusion cut is open (its eased radius, capped here; OccSettings::radius 6 m);
+                                   # every other indoor body hidden (drawn on its storey it stood on the facades)
+child_scale_min = 0.5              # a child's drawn height over an adult's at age 0 (no child mesh: the adult scaled) ...
+child_full_age = 17                # ... growing linearly to 1 at this age
+people_glow = 0.5                  # the look's atlas as emission, this strong (an unlit body is lost on the night street)

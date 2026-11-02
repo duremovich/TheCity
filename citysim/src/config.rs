@@ -528,6 +528,22 @@ pub struct ViewCfg {
     /// A Coarse walk is placed on its way (one road search) only when its
     /// start-to-target box grown by this many tiles meets the ring.
     pub way_margin_tiles: u16,
+    /// The view milestone V3 (cityview `people.rs`): a body within this many
+    /// metres of the subject is drawn skinned and animated (walk / idle);
+    /// past it, a static posed mesh.
+    pub people_anim_m: f32,
+    /// The most bodies drawn skinned and animated at once (the nearest).
+    pub people_anim_max: u16,
+    /// A body indoors is drawn only on the subject's floor of the subject's
+    /// building, within this many metres of it (the occlusion cut's radius).
+    pub indoor_cut_m: f32,
+    /// A child's drawn height over an adult's at age 0; it grows linearly to
+    /// 1 at `child_full_age`.
+    pub child_scale_min: f32,
+    pub child_full_age: u32,
+    /// The people's atlas as emission, this strong (the night street: an
+    /// unlit body is lost in the dark).
+    pub people_glow: f32,
 }
 
 impl Default for ViewCfg {
@@ -539,6 +555,12 @@ impl Default for ViewCfg {
             ring_half_tiles: 48,
             pin_margin_tiles: 8,
             way_margin_tiles: 64,
+            people_anim_m: 40.0,
+            people_anim_max: 48,
+            indoor_cut_m: 6.0,
+            child_scale_min: 0.5,
+            child_full_age: 17,
+            people_glow: 0.5,
         }
     }
 }
