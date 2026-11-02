@@ -181,7 +181,8 @@ and the march clock (`[gangs] raid_march_hours`, which replaces the `faction::RA
 missions read it too) starts at the departure (`Gang.raid_left`; latecomers go to the muster until it has left).
 Short of the column at the hold's end, it breaks up at the muster with a line naming who came and where the rest of
 the free adults were (at work, asleep, in the cells); a muster nobody reached says so when the window closes. New
-columns `raid_held`, `raid_broke`. The diary: `raider_15729` (the Iron Knives, 20k seed 42, `shadow --start-day 11`)
+columns `raid_held`, `raid_broke`. 100k seed 42 x 26: called off at the door 16 -> 2, broken up at the muster 0 -> 16,
+landed 57 -> 57. The diary: `raider_15729` (the Iron Knives, 20k seed 42, `shadow --start-day 11`)
 is called at 19:09, takes the lift down, crosses at the lights, climbs to the muster on floor 8 of Block#3059, musters
 137 min, leaves at 22:00, holds at the rival's door 16 min for the column, climbs the stairs of Block#4062 floor 0 to
 9 in 8 min (his gang-mates 5 and 7), and the raid resolves on floor 9: "sacked it (20 raiders, 1 defenders)".
