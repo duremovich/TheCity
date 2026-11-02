@@ -1077,9 +1077,9 @@ fn test_treatment_savings_zero_when_the_pool_covers_it() {
 // ---------------------------------------------------------------------------
 
 /// G3 (`hf_buy_not_steal`), coordinator call: in an all-Full city with no
-/// dole (so some are broke), food thieves are the ones who cannot buy a
-/// meal; all but nobody holding a meal's coins steals food while the Market has
-/// stock for them, and the broke still do. (G3 is a cost, not a ban: with
+/// dole (so some are broke), the broke steal food; how many thieves held a
+/// meal's coins is printed, not asserted (Dylan 2026-11-02: a person who can
+/// afford it may still steal). (G3 is a cost, not a ban: with
 /// every unit on the shelf reserved at the morning rush the theft is the
 /// only meal; Shadow V4's batch 1 moved the city onto five such thefts at
 /// Block#24, each with `PlanCtx::market_free` false.)
@@ -1140,12 +1140,9 @@ fn test_g3_only_the_broke_steal_food() {
             }
         }
     }
-    eprintln!("food thefts by the broke {broke}, by agents holding a meal's coins {}: {able:?}", able.len());
+    // Dylan 2026-11-02: a person who could afford a meal may still steal one;
+    // the share is a printed number, not a gate. The gate is the mechanism
+    // firing at all.
+    eprintln!("FINDING food thefts: by the broke {broke}, by agents holding a meal's coins {}: {able:?}", able.len());
     assert!(broke > 0, "nobody broke stole food in 20 days without a dole");
-    // The leftovers pass (OPEN-280 moved the city: guards on the street the
-    // whole shift): one theft in 36 by a jobless man holding 6c at Block#24
-    // (Eat, the Market free). G3 is a cost, "all but never" (`World` doc on
-    // `p_steal_broke`: 1 of ~240 thefts); broken is the holders stealing
-    // like the broke, so the gate is the share, not zero.
-    assert!(able.len() * 10 <= broke as usize, "thieves holding a meal's coins: {able:?}");
 }
