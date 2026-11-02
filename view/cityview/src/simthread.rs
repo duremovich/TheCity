@@ -27,6 +27,7 @@
 //! speed (a multiple of the rate, `[view] play_speeds`) are atomics read at the pacing.
 
 use citysim::components::{Brain, GoalKind, Identity, TilePos};
+use citysim::systems::player::{self as pl, Verb};
 use citysim::view::{self, ViewFrame};
 use citysim::{EntityId, World, save};
 use std::path::{Path, PathBuf};
@@ -87,6 +88,8 @@ pub struct Shared {
     pub speed_bits: AtomicU64,
     /// M18 P1: the possessed body's state for the HUD (`None`: nobody possessed).
     pub player: Mutex<Option<PlayerHud>>,
+    /// M18 P2: the last click's menu (`None`: none asked yet; the render thread closes it on its side).
+    pub menu: Mutex<Option<MenuPub>>,
 }
 
 /// M18 P1: an order from the render thread (a click, a key, a HUD button, a `--play` line).
@@ -98,6 +101,20 @@ pub enum UiCmd {
     Goal(GoalKind),
     Stop,
     Autopilot(bool),
+    /// M18 P2: a click on a body (its entity): the people menu.
+    Body(EntityId),
+    /// M18 P2: a menu row picked.
+    Act(Verb),
+}
+
+/// M18 P2: a menu the sim built for a click (a building's or a body's), only its legal rows, for the render thread.
+#[derive(Clone, Debug, Default)]
+pub struct MenuPub {
+    /// Rises with each menu (the render thread places a new one at the click).
+    pub seq: u64,
+    pub title: String,
+    /// The row's label, its verb, the will terms it waives (`Verb::waived`, the row's hover).
+    pub rows: Vec<(String, Verb, Vec<String>)>,
 }
 
 /// M18 P1: what the HUD shows of the possessed body.
@@ -117,6 +134,12 @@ pub struct PlayerHud {
     pub plan: String,
     /// The last failure or refusal: its clock and line.
     pub failure: Option<String>,
+    /// M18 P2: the menu row the plan came from (`PlayerControlled::doing`).
+    pub doing: Option<String>,
+    /// M18 P2: the HUD's own rows (`player::menu_self`: eat, sleep, work where the body stands), only the legal ones.
+    pub rows: Vec<(String, Verb, Vec<String>)>,
+    /// M18 P2: carried food.
+    pub food: u32,
 }
 
 impl Shared {
@@ -224,6 +247,7 @@ impl Shared {
             paused: AtomicBool::new(false),
             speed_bits: AtomicU64::new(1f64.to_bits()),
             player: Mutex::new(None),
+            menu: Mutex::new(None),
         }
     }
 }
@@ -302,6 +326,8 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
     let mut reloaded_at = false;
     let mut possessed = false;
     let mut last_logged = (String::new(), None, false);
+    let mut menu_seq = 0u64;
+    let mut last_event = world.events.back().map_or(0, |e| e.id);
     loop {
         // M18 P1: possessed at --from (the city pre-run to it); the render thread's orders, between two ticks
         if a.possess && !possessed && world.tick >= from {
@@ -312,13 +338,23 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         let cmds = std::mem::take(&mut *sh.cmds.lock().unwrap());
         for c in cmds {
             let cmd = match c {
+                // M18 P2: a click on a building (a roof, a wall, a floor in the cutaway) opens its menu; the
+                // street walks there (P1's walk, never into a building: the doors are the menu's)
                 UiCmd::Click(t, roof) => {
                     let snap = world.config.view.pick_snap_tiles;
-                    let steps = citysim::systems::player::walk_to(&world, t, roof, snap);
-                    let to = steps[0].target.map_or(format!("the street at ({}, {})", t.x, t.y), |b| world.name_of(b));
-                    eprintln!("cityview: tick {} click ({}, {}): walk to {to}", world.tick, t.x, t.y);
+                    if let Some(m) = pl::menu_at(&world, subject, t, roof, snap) {
+                        publish_menu(&sh, &world, m, &mut menu_seq);
+                        continue;
+                    }
+                    let steps = pl::walk_to(&world, t, false, snap);
+                    eprintln!("cityview: tick {} click ({}, {}): walk to the street", world.tick, t.x, t.y);
                     citysim::PlayerCommand::Steps { agent: subject, steps }
                 }
+                UiCmd::Body(o) => {
+                    publish_menu(&sh, &world, pl::menu_body(&world, subject, o), &mut menu_seq);
+                    continue;
+                }
+                UiCmd::Act(v) => citysim::PlayerCommand::Act { agent: subject, verb: v },
                 UiCmd::Goal(g) => citysim::PlayerCommand::Goal { agent: subject, goal: g },
                 UiCmd::Stop => citysim::PlayerCommand::Stop(subject),
                 UiCmd::Autopilot(on) => citysim::PlayerCommand::SetAutopilot(subject, on),
@@ -400,6 +436,16 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         let t_tick = Instant::now();
         citysim::tick(&mut world);
         crate::lights::log_crossings(&mut world, subject);
+        // M18 P2: the possessed body's events to the log (the play session's record: a hire, a theft, an arrest)
+        if possessed {
+            let new: Vec<&citysim::events::Event> =
+                world.events.iter().rev().take_while(|e| e.id > last_event).filter(|e| e.actors.contains(&subject)).collect();
+            for e in new.iter().rev() {
+                let (d, c) = (e.tick / citysim::TICKS_PER_DAY, citysim::time::clock(e.tick));
+                eprintln!("event d{d} {c}: [{:?}] {}", e.kind, e.text);
+            }
+        }
+        last_event = world.events.back().map_or(last_event, |e| e.id);
         acc = (acc.0 + 1, acc.1 + t_tick.elapsed().as_secs_f64());
         sh.tick.store(world.tick, Ordering::Relaxed);
         // publish every paced tick; flat out, only the two ticks before the hold (or --from) the lerp needs
@@ -523,7 +569,29 @@ fn player_hud(world: &World, id: EntityId) -> PlayerHud {
         failure: pc
             .and_then(|p| p.last_failure.as_ref())
             .map(|(t, l)| format!("d{} {}: {l}", t / citysim::TICKS_PER_DAY, citysim::time::clock(*t))),
+        doing: pc.and_then(|p| p.doing.clone()),
+        rows: menu_rows(&pl::menu_self(world, id)),
+        food: world.comp::<citysim::components::Inventory>(id).map_or(0, |i| i.food),
     }
+}
+
+fn menu_rows(m: &pl::Menu) -> Vec<(String, Verb, Vec<String>)> {
+    m.rows.iter().map(|r| (r.label.clone(), r.verb, r.verb.waived().iter().map(|s| s.to_string()).collect())).collect()
+}
+
+/// M18 P2: a click's menu to the render thread, and to the log (the play session's record).
+fn publish_menu(sh: &Shared, world: &World, m: pl::Menu, seq: &mut u64) {
+    *seq += 1;
+    let rows = menu_rows(&m);
+    let labels: Vec<&str> = rows.iter().map(|r| r.0.as_str()).collect();
+    eprintln!(
+        "player d{} {}: menu {}: [{}]",
+        world.tick / citysim::TICKS_PER_DAY,
+        citysim::time::clock(world.tick),
+        m.title,
+        labels.join(" | ")
+    );
+    *sh.menu.lock().unwrap() = Some(MenuPub { seq: *seq, title: m.title, rows });
 }
 
 /// M18 P1: the possessed body's plan, failures and autopilot to the log when they change (the play session's record).
@@ -531,8 +599,15 @@ fn log_player(hud: &PlayerHud, last: &mut (String, Option<String>, bool)) {
     let at = format!("d{} {}", hud.day, hud.clock);
     if hud.plan != last.0 {
         eprintln!(
-            "player {at}: plan {} | {} | coins {} hunger {:.2} energy {:.2}",
-            hud.plan, hud.place, hud.coins, hud.needs[0], hud.needs[1]
+            "player {at}: plan {}{} | {} | coins {} food {} hunger {:.2} energy {:.2} | {}",
+            hud.plan,
+            hud.doing.as_ref().map_or(String::new(), |d| format!(" ({d})")),
+            hud.place,
+            hud.coins,
+            hud.food,
+            hud.needs[0],
+            hud.needs[1],
+            hud.job
         );
         last.0 = hud.plan.clone();
     }

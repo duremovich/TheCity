@@ -2947,6 +2947,11 @@ pub fn vend_ticks(world: &World, id: EntityId) -> Tick {
     if world.jobs2.pitches.contains_key(&id) {
         return TICKS_PER_HOUR;
     }
+    // M18 P2: an ask at a bound door (a directed plan's) is the door ask's.
+    let bound = world.comp::<Brain>(id).and_then(|b| b.current_step()).is_some_and(|s| s.target.is_some());
+    if bound {
+        return crate::systems::search::door_ask_ticks(world);
+    }
     // Round 4 T5: a searcher's ask at a door (never in the dawn window).
     if corner_for(world, id).is_none() {
         if let Some(t) = crate::systems::search::ask_ticks(world, id) {

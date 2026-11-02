@@ -472,6 +472,53 @@ pub fn on_ask(world: &mut World, id: EntityId) {
         s.board = None;
         s.lead = None;
     }
+    settle(world, id, b, lead);
+}
+
+/// M18 P2 (docs/M18_PLAYER.md, the verbs): what `id` would get asking at
+/// `b`'s door now, for the menu row (`None`: nothing to ask there): the
+/// open post he can take (`demography::can_take`, every gate of ability and
+/// circumstance kept), else the hiring board. The searcher's own gates are
+/// will and are not read: `searching` (jobless days, `need_wealth`, the
+/// idle days after a quit), the search hours, the day's `tries` and the
+/// crowd at a door.
+pub fn door_offer(world: &World, id: EntityId, b: EntityId) -> Option<String> {
+    if let Some(role) = open_role(world, id, b) {
+        return Some(format!("Ask about work (a {} post is open)", role.label()));
+    }
+    let c = cfg(world)?;
+    (is_board(world, c, b) && !world.has::<Job>(id)).then(|| "Read the hiring board".to_string())
+}
+
+/// M18 P2: a directed ask's door: on the street within `[jobs2]
+/// pitch_reach` of `b`'s door, or inside it.
+pub fn at_door(world: &World, id: EntityId, b: EntityId) -> bool {
+    let Some(door) = world.comp::<Building>(b).filter(|bd| !bd.demolished).map(|bd| world.outside_door(bd)) else {
+        return false;
+    };
+    world.comp::<Position>(id).is_some_and(|p| {
+        p.building == Some(b) || (p.building.is_none() && p.tile.manhattan(door) <= world.config.jobs2.pitch_reach)
+    })
+}
+
+/// M18 P2: a directed ask's minutes at the door (`ask_ticks`).
+pub fn door_ask_ticks(world: &World) -> Tick {
+    Tick::from(cfg(world).map_or(1, |c| c.ask_ticks.max(1)))
+}
+
+/// M18 P2: a directed ask at `b`'s door settled (the `Vend` step with its
+/// door bound): as [`on_ask`] at that door, with no lead.
+pub fn ask_at(world: &mut World, id: EntityId, b: EntityId) {
+    if let Some(s) = today_mut(world, id) {
+        s.tried.push(b);
+        s.board = None;
+        s.lead = None;
+    }
+    settle(world, id, b, None);
+}
+
+/// The ask at `b` settled: taken on, turned away, or the board read.
+fn settle(world: &mut World, id: EntityId, b: EntityId, lead: Option<EntityId>) {
     ownership::jobs2_row(world).search_asks += 1;
     let (name, place) = (world.name_of(id), world.name_of(b));
     let told = lead.map(|f| format!(" ({} told of it)", world.name_of(f))).unwrap_or_default();

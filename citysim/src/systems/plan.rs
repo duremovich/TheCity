@@ -668,7 +668,7 @@ pub(crate) fn install(world: &mut World, id: EntityId, plan: Plan) {
 }
 
 /// Reserve the shared resources a plan consumes, for `reservation_ttl` ticks.
-fn reserve_for(world: &mut World, id: EntityId, plan: &Plan) {
+pub(crate) fn reserve_for(world: &mut World, id: EntityId, plan: &Plan) {
     let expires = world.tick + world.config.exec.reservation_ttl;
     // The plan's Market: the one the agent is in, else the nearest (M10 D21).
     let market = world.local(id, BuildingKind::Market);

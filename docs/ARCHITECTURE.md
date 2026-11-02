@@ -27,7 +27,7 @@ advances it with `World::run_ticks` and sends `PlayerCommand`s; it never writes 
 block, kit, street, traffic, tram, light rules and the cutaway, `occlusion.rs`) and `cityview` (the city view binary
 and its benches; the view milestone V4b's orbit follow-cam in `cam.rs`, both read `[view] cam_*` / `cut_*`;
 `--sim FILE` draws a `city-simview/0.1` frame or plays a shadow's `city-simrec/0.1` recording through the follow-cam, V6's `recplay.rs`; C2's follow-cam `--save FILE --follow INDEX` runs `citysim` in process on a
-sim thread, `simthread.rs`, reading `citysim::view::snapshot` frames from a two-slot buffer; M18 P1's `--possess INDEX` drives the subject: `play.rs`'s egui HUD, click and keys send orders the sim thread drains between ticks), edition 2024, its own `view/rustfmt.toml`; `view/vendor` holds the
+sim thread, `simthread.rs`, reading `citysim::view::snapshot` frames from a two-slot buffer; M18 P1's `--possess INDEX` drives the subject: `play.rs`'s egui HUD, click and keys send orders the sim thread drains between ticks; P2: a click on a body or a building opens the sim's menu of legal verbs), edition 2024, its own `view/rustfmt.toml`; `view/vendor` holds the
 patched `bevy_pbr` / `bevy_render` the root `[patch.crates-io]` wires. Members outside `default-members`: the sim's
 builds and tiers never compile it; `python tools/test.py view` does. It reads TheCityGraphics' generated assets
 (`CITYVIEW_ASSETS`), never the sim's `assets/`.
@@ -332,7 +332,7 @@ Each file's `//!` header names its spec section.
 | `econ.rs` | the wage law, the pure hashes (`hash_unit`, `hash_normal`), the coin identity | `outside.rs` | the World account's hourly ambient sales | `world_market.rs` | the World account's book per good |
 | `economy.rs` | prices, spoilage, restock, and the wage/trade/haul primitives exec calls | `ownership.rs` | purses, **the one transfer path** (section 8), corp seeding, rent and evictions | `wounded.rs` | the wounded, Rescue, the Trauma Team |
 | `faction.rs` | the gang brain's standing orders | `parents.rs` | outside parent accounts, remittance |  |  |
-| `faith.rs` | churches and followers (`[faith]`) | `plan.rs` | the plan queue (section 5) | `player.rs` | M18 P1: the possessed body (`Brain.player`), the `PlayerCommand`s `Possess` / `Steps` / `Goal` / `Stop` / `SetAutopilot`; think and the plan queue skip it unless autopilot |
+| `faith.rs` | churches and followers (`[faith]`) | `plan.rs` | the plan queue (section 5) | `player.rs` | M18 P1: the possessed body (`Brain.player`), the `PlayerCommand`s `Possess` / `Steps` / `Goal` / `Stop` / `SetAutopilot`; think and the plan queue skip it unless autopilot; P2: the menus (`menu_self` / `menu_building` / `menu_body`, only rows `plan_of` would make: preconditions on a `PlanCtx`), `Verb`s mapped to existing `ActionKind`s, `PlayerCommand::Act`, the will-waivers (`waive`, `Verb::waived`; exec applies them to a body the human drives), the doors (`[view] play_public_kinds`) |
 
 Outside `systems/`: `view.rs` (C2: the camera ring's snapshot for the 3D client, `[view]`; reads, never writes), `reload.rs` (the view milestone V1, OPEN-262: a config file swapped into a running world at a tick boundary, the build-time keys `Config::BUILD_TIME` kept and reported; cityview's R key, file watch and `--reload-at`), `needs.rs`, `mood.rs`, `personality.rs` (agent internals), `word.rs`, `contract.rs`, `virt.rs`,
 `living.rs`, `econ.rs`, `ambient.rs`, `outside.rs`, `ledger.rs` (the milestones' types; logic in the matching

@@ -720,6 +720,16 @@ pub struct ViewCfg {
     /// nearest the hit within this many tiles (the lots and the rects
     /// disagree at their edges).
     pub pick_snap_tiles: u16,
+    /// M18 P2 (`systems/player.rs`): the kinds whose door opens to anyone
+    /// from a click (the player's own home, workplace, squat, booked bed and
+    /// gang's Hideout open too); any other door is walked to, not through.
+    pub play_public_kinds: Vec<BuildingKind>,
+    /// M18 P2: a click within this many pixels of a drawn body (its chest
+    /// projected to the screen) picks the body, not what is behind it.
+    pub pick_body_px: f32,
+    /// M18 P2: the HUD's width, pixels (bottom right, out of the far
+    /// field's clicks at the top of the frame).
+    pub hud_width_px: f32,
 }
 
 impl Default for ViewCfg {
@@ -789,6 +799,33 @@ impl Default for ViewCfg {
             pick_reach_m: 3000.0,
             pick_step_m: 0.5,
             pick_snap_tiles: 2,
+            play_public_kinds: {
+                use BuildingKind as K;
+                vec![
+                    K::Market,
+                    K::Bar,
+                    K::Hotel,
+                    K::Clinic,
+                    K::Hall,
+                    K::Club,
+                    K::Arcade,
+                    K::NoodleBar,
+                    K::FightPit,
+                    K::Den,
+                    K::Lounge,
+                    K::Fixer,
+                    K::Mission,
+                    K::Garage,
+                    K::Gunsmith,
+                    K::StripClub,
+                    K::Brothel,
+                    K::Boutique,
+                    K::Cemetery,
+                    K::Station,
+                ]
+            },
+            pick_body_px: 14.0,
+            hud_width_px: 300.0,
         }
     }
 }

@@ -1296,8 +1296,13 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                     // Round 3 S5 (OPEN-217): the cab's wait at its rank (the street).
                     || (kind == ActionKind::Rest && crate::systems::streetwork::at_rank(world, id));
                 let symbols = corner || {
-                    let ctx = step_ctx(world, id, kind);
-                    let ws = crate::goap::WorldState::observe(world, id, ctx.target);
+                    let mut ctx = step_ctx(world, id, kind);
+                    let mut ws = crate::goap::WorldState::observe(world, id, ctx.target);
+                    // M18 P2: the human at the wheel supplies the will; the
+                    // verb's willingness terms are waived (`player::waive`).
+                    if crate::systems::player::drives(world, id) {
+                        crate::systems::player::waive(world, id, kind, &mut ws, &mut ctx);
+                    }
                     kind.preconditions(&ws, &ctx)
                 };
                 if !symbols || !actions::can_start(world, id, kind, step.target) {

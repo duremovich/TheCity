@@ -33,7 +33,7 @@
 //! [--config PATH] [--reload-at TICK]: config hot-reload (the view milestone V1, OPEN-262, simthread.rs): the R key,
 //! a change of the file (default `assets/config.toml`) or the tick reloads it into the running world at a tick
 //! boundary (`citysim::reload`: the live keys applied, the build-time keys kept and reported in the log and the HUD).
-//! --save FILE --possess INDEX [--from TICK] [--play "T action; .."]: M18 P1 (play.rs): a human drives that adult
+//! --save FILE --possess INDEX [--from TICK] [--play "T action; .." | @FILE]: M18 P1 (play.rs): a human drives that adult
 //! (the follow-cam's subject, possessed at --from): the egui HUD, a left click walks there, T autopilot, Space pause,
 //! `,` / `.` the play speed, Backspace stop; --play scripts a session through the same paths (screenshots, quit).
 
@@ -287,7 +287,12 @@ impl Args {
                     i += 1;
                 }
                 "--play" => {
-                    a.play = Some(next(i));
+                    // M18 P2: `@FILE` reads the script from a file (a long session)
+                    let s = next(i);
+                    a.play = Some(match s.strip_prefix('@') {
+                        Some(f) => std::fs::read_to_string(f).unwrap_or_else(|e| panic!("--play @{f}: {e}")),
+                        None => s,
+                    });
                     i += 1;
                 }
                 "--trace-secs" => {
