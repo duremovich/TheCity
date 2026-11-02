@@ -239,6 +239,23 @@ impl<'a> LazyReserved<'a> {
     }
 }
 
+/// `best_colocated_partner(world, id, -1.0, false).is_some()` without
+/// ranking the room: the first who would rank ends it (the view milestone
+/// V2b, OPEN-265: a body stands among ~185 at 100k, and Socialise's gates
+/// ranked them all to ask whether anyone was there).
+pub fn has_colocated_partner(world: &World, id: EntityId) -> bool {
+    let Some(here) = world.comp::<crate::components::Position>(id).and_then(|p| p.building) else { return false };
+    let Some(b) = world.comp::<Building>(here) else { return false };
+    let reserved = LazyReserved::new(world, id);
+    b.occupants.iter().copied().any(|o| {
+        o != id
+            && world.has::<Brain>(o)
+            && !world.has::<Sentence>(o)
+            && !reserved.contains(&o)
+            && world.edge(id, o).map_or(0.0, |e| e.affinity) >= -1.0
+    })
+}
+
 /// The co-located agent with the highest affinity who is reservable.
 pub fn best_colocated_partner(world: &World, id: EntityId, min_affinity: f32, unmarried: bool) -> Option<EntityId> {
     // Alone (the usual case at home): no reservation scan (perf).
@@ -261,14 +278,27 @@ pub fn best_colocated_partner_in(
 ) -> Option<EntityId> {
     let here = world.comp::<crate::components::Position>(id)?.building?;
     let b = world.comp::<Building>(here)?;
-    b.occupants
-        .iter()
-        .copied()
-        .filter(|&o| o != id && world.has::<Brain>(o) && !world.has::<Sentence>(o))
-        .filter(|&o| !unmarried || suitor(world, id, o))
-        .filter(|o| !reserved.contains(o))
+    // The view milestone V2b (OPEN-265): with `min_affinity` above 0 only
+    // an occupant with an edge to `id` can pass (no edge reads affinity 0),
+    // so the shorter of `id`'s neighbours (each looked up in the ascending
+    // occupant list) and the occupants is read: the same pick. A tower's
+    // Homes hold hundreds at home at 100k, and Court read every one of
+    // them each think.
+    let known = world.neighbours.get(&id).map_or(0, |s| s.len());
+    let candidates: Box<dyn Iterator<Item = EntityId> + '_> = if min_affinity > 0.0 && known < b.occupants.len() {
+        Box::new(world.neighbours(id).filter(|o| b.occupants.binary_search(o).is_ok()))
+    } else {
+        Box::new(b.occupants.iter().copied())
+    };
+    // The view milestone V2b: the affinity (one edge read) before the
+    // rules that read more (each a pure test, all must pass: the same pick).
+    candidates
+        .filter(|&o| o != id)
         .map(|o| (o, world.edge(id, o).map_or(0.0, |e| e.affinity)))
         .filter(|&(_, a)| a >= min_affinity)
+        .filter(|&(o, _)| world.has::<Brain>(o) && !world.has::<Sentence>(o))
+        .filter(|&(o, _)| !unmarried || suitor(world, id, o))
+        .filter(|(o, _)| !reserved.contains(o))
         .max_by(|x, y| x.1.total_cmp(&y.1).then(y.0.cmp(&x.0)))
         .map(|(o, _)| o)
 }
@@ -480,21 +510,23 @@ pub fn candidate_at_venue_in(
     // occupant's Position names the building it is in; the occupant list is
     // ascending) instead of every occupant of every Bar and Market: the same
     // candidate. The shorter of the two lists is read (both run ~200 at 20k).
-    let occupants: usize = venues
-        .iter()
-        .filter_map(|k| world.buildings_by_kind().get(k))
-        .flatten()
-        .filter_map(|&b| world.comp::<Building>(b))
-        .map(|bd| bd.occupants.len())
-        .sum();
     let known = world.neighbours.get(&id).map_or(0, |s| s.len());
+    // The view milestone V2b (OPEN-265): the city milestone's Lots made the
+    // Bars and Markets many (283 at 100k), and every Court think summed
+    // their occupants and then read each neighbour's Position and Building
+    // (~65 of them): ~400 scattered reads a think. The venues' occupants
+    // are read once a `(shop_gen, kinds_gen)` (`World::venue_occupants`): their
+    // count decides, and a neighbour not on the list is passed over before
+    // the reads (the reads still decide for one on it: the same candidates).
+    let (occupants, on_list) = world.venue_occupants();
     let candidates: Box<dyn Iterator<Item = EntityId> + '_> = if min > 0.0 && known < occupants {
         Box::new(world.neighbours(id).filter(move |&o| {
-            world.comp::<Position>(o).and_then(|p| p.building).is_some_and(|b| {
-                world
-                    .comp::<Building>(b)
-                    .is_some_and(|bd| venues.contains(&bd.kind) && bd.occupants.binary_search(&o).is_ok())
-            })
+            on_list.binary_search(&o).is_ok()
+                && world.comp::<Position>(o).and_then(|p| p.building).is_some_and(|b| {
+                    world
+                        .comp::<Building>(b)
+                        .is_some_and(|bd| venues.contains(&bd.kind) && bd.occupants.binary_search(&o).is_ok())
+                })
         }))
     } else {
         Box::new(
@@ -506,11 +538,13 @@ pub fn candidate_at_venue_in(
                 .flat_map(|bd| bd.occupants.iter().copied()),
         )
     };
+    // The view milestone V2b: the affinity first, as above.
     candidates
-        .filter(|&o| o != id && world.has::<Brain>(o) && !world.has::<Sentence>(o))
-        .filter(|&o| suitor(world, id, o) && !rejected.contains(&o) && !reserved.contains(&o))
+        .filter(|&o| o != id)
         .map(|o| (o, world.edge(id, o).map_or(0.0, |e| e.affinity)))
         .filter(|&(_, a)| a >= min)
+        .filter(|&(o, _)| world.has::<Brain>(o) && !world.has::<Sentence>(o))
+        .filter(|&(o, _)| suitor(world, id, o) && !rejected.contains(&o) && !reserved.contains(&o))
         .max_by(|x, y| x.1.total_cmp(&y.1).then(y.0.cmp(&x.0)))
         .map(|(o, _)| o)
 }

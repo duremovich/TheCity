@@ -55,6 +55,106 @@ fn households(world: &World, home: EntityId) -> Vec<(EntityId, f32, u32)> {
     out
 }
 
+/// The view milestone V2b (OPEN-265): `home`'s shelf read in one pass over
+/// its residents, for the off-screen grocery run (`lod::stat_grocery`),
+/// which asked the households four to six times a call (`kids_need`,
+/// `members`, `kids_short`, `own_held`, `held_by`, the warning), each a
+/// walk of a Block's residents. Each read below is the free function's of
+/// the same name, on the same sums in the same order.
+pub struct Shelf {
+    /// `(key, stake, members, children)` ascending key (`households`; the
+    /// children `ages::children_food_need_of` counts).
+    hs: Vec<(EntityId, f32, u32, u32)>,
+    total: f32,
+    stock: u32,
+    residents: u32,
+    kids_all: u32,
+}
+
+impl Shelf {
+    pub fn of(world: &World, home: EntityId) -> Shelf {
+        use crate::components::{Child, Routine};
+        let mut hs: Vec<(EntityId, f32, u32, u32)> = Vec::new();
+        let residents = world.residents_of(home);
+        let mut kids_all = 0;
+        for &r in residents {
+            // `key` and `stake` off one read of the Household.
+            let h = world.comp::<Household>(r);
+            let (k, s) = (h.and_then(|h| h.kin).unwrap_or(r), h.map_or(0.0, |h| h.pantry_stake.max(0.0)));
+            let kid = u32::from(
+                world.comp::<Child>(r).is_some_and(|c| !matches!(c.routine, Routine::Camp | Routine::Street)),
+            );
+            kids_all += kid;
+            match hs.binary_search_by_key(&k, |h| h.0) {
+                Ok(i) => {
+                    hs[i].1 += s;
+                    hs[i].2 += 1;
+                    hs[i].3 += kid;
+                }
+                Err(i) => hs.insert(i, (k, s, 1, kid)),
+            }
+        }
+        let total: f32 = hs.iter().map(|h| h.1).sum();
+        let stock = world.comp::<Building>(home).map_or(0, |b| b.stock_food);
+        Shelf { hs, total, stock, residents: residents.len() as u32, kids_all }
+    }
+
+    /// `read`'s `Some`: two households or more and a stake on the shelf.
+    pub fn shared(&self) -> bool {
+        self.hs.len() >= 2 && self.total > 0.0
+    }
+
+    fn mine(&self, k: EntityId) -> (f32, u32, u32) {
+        self.hs.iter().find(|h| h.0 == k).map_or((0.0, 0, 0), |h| (h.1, h.2, h.3))
+    }
+
+    /// [`kids_need`] for household `k`.
+    pub fn kids_need(&self, world: &World, k: EntityId) -> u32 {
+        if !crate::systems::ages::on(world) {
+            return 0;
+        }
+        let kids = if self.shared() { self.mine(k).2 } else { self.kids_all } as f32;
+        (crate::systems::demography::CHILD_FOOD_PER_DAY * kids * world.config.ages.child_pantry_days).ceil() as u32
+    }
+
+    /// [`members`] for household `k`.
+    pub fn members(&self, k: EntityId) -> u32 {
+        if self.shared() {
+            self.mine(k).1.max(1)
+        } else {
+            self.residents.max(1)
+        }
+    }
+
+    /// [`held_by`] for household `k`.
+    pub fn held_by(&self, k: EntityId) -> u32 {
+        if self.shared() {
+            (claim_of(self.mine(k).0, self.total, self.stock as f32) + 1e-3).floor() as u32
+        } else {
+            self.stock
+        }
+    }
+
+    /// [`own_held`] for household `k`.
+    pub fn own_held(&self, k: EntityId) -> u32 {
+        if !self.shared() {
+            return self.stock;
+        }
+        let (stock, mine) = (self.stock as f32, self.mine(k).0);
+        let own = if self.total <= stock { mine } else { stock * mine / self.total };
+        (own + 1e-3).floor() as u32
+    }
+
+    /// [`kids_short`] for household `k`.
+    pub fn kids_short(&self, world: &World, k: EntityId) -> u32 {
+        let kids = self.kids_need(world, k).min(world.config.buildings.home.stock_cap);
+        if kids == 0 {
+            return 0;
+        }
+        kids.saturating_sub(self.own_held(k))
+    }
+}
+
 /// A household's claim from its stake, every stake and the stock: its
 /// stake and the common units; with the stakes above the stock (taken
 /// since midnight), its share of the stock.

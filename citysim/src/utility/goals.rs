@@ -116,8 +116,7 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
             // coins, or the Bar is visibly full). Otherwise it wins every think
             // and churns through plan failures.
             // Satisfied, or nothing to do for it: no Chat partner here and no drink possible.
-            let chat_possible = chat_venue(world, id)
-                && crate::systems::social::best_colocated_partner(world, id, -1.0, false).is_some();
+            let chat_possible = chat_venue(world, id) && crate::systems::social::has_colocated_partner(world, id);
             // L2 L16: a HangOut spot in reach is something to do.
             needs.is_some_and(|n| n.belonging >= BELONGING_SATISFIED)
                 || (!chat_possible
@@ -507,8 +506,7 @@ pub fn considerations_with(
             ];
             // L1: a drink two hours' walk off is not worth the walk; company
             // here is free.
-            let here = chat_venue(world, id)
-                && crate::systems::social::best_colocated_partner(world, id, -1.0, false).is_some();
+            let here = chat_venue(world, id) && crate::systems::social::has_colocated_partner(world, id);
             let tiles = if here {
                 0
             } else {

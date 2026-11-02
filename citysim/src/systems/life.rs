@@ -334,7 +334,13 @@ pub fn broke(world: &World, id: EntityId) -> bool {
 /// meals' coins at the local Market's price (Earn's savings line's; one
 /// meal's coins stopped the hustle: 46-65 idle hours a week).
 pub fn earn_short(world: &World, id: EntityId) -> bool {
-    if broke(world, id) {
+    earn_short_if(world, id, broke(world, id))
+}
+
+/// [`earn_short`] with `broke` read by the caller (the view milestone V2b:
+/// the off-screen hour read it twice, each a Market search).
+pub fn earn_short_if(world: &World, id: EntityId, broke: bool) -> bool {
+    if broke {
         return true;
     }
     if world.levers.dole_per_day > 0 || world.has::<Job>(id) || exec_corp(world, id).is_some() {

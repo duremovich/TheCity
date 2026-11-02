@@ -1452,15 +1452,19 @@ fn stat_grocery(world: &mut World, id: EntityId) {
     // for it by day, as the Full parent's run (`routine::grocery_plan`).
     // Round 6 V1 (OPEN-231): his household's children, residents and claim
     // in a shared Home (`shelf.rs`), as the Full run reads them.
-    let kids = crate::systems::shelf::kids_need(world, id, home);
+    // The view milestone V2b (OPEN-265): the shelf read once (`shelf::Shelf`),
+    // and not at all for a worker on shift.
+    if world.comp::<Job>(id).is_some_and(|job| job.on_shift(world.tick_of_day())) {
+        return;
+    }
+    let shelf = crate::systems::shelf::Shelf::of(world, home);
+    let k = crate::systems::shelf::key(world, id);
+    let kids = shelf.kids_need(world, k);
     let cap = world.config.buildings.home.stock_cap;
     let need = match world.comp::<Job>(id) {
         Some(job) => {
-            if job.on_shift(world.tick_of_day()) {
-                return;
-            }
             let need_one = crate::exec::routine::shift_meals_needed(world, job);
-            let residents = crate::systems::shelf::members(world, id, home);
+            let residents = shelf.members(k);
             // The level: the Full city's learned pantry per resident (a run does
             // not always win the evening), else a shift's worth each.
             let per =
@@ -1480,16 +1484,12 @@ fn stat_grocery(world: &mut World, id: EntityId) {
     };
     // Round 7 W1 (OPEN-243): short of the children's food on the
     // household's own units (`shelf::kids_short`), the run reads those.
-    let kids_short = crate::systems::shelf::kids_short(world, id, home) > 0;
-    let pantry = if kids_short {
-        crate::systems::shelf::own_held(world, id, home)
-    } else {
-        crate::systems::shelf::held_by(world, id, home)
-    };
+    let kids_short = shelf.kids_short(world, k) > 0;
+    let pantry = if kids_short { shelf.own_held(k) } else { shelf.held_by(k) };
     // Round 4 T1 (OPEN-231): on the service's warning the pantry alone
     // holds the children's food (the Full run's `routine::run_level`).
     // Round 7 W1 (OPEN-243): so does a claim short of the children's food.
-    let carried = if crate::systems::camp::household_on_warning(world, id, home) || kids_short {
+    let carried = if crate::systems::camp::household_on_warning_in(world, id, home, shelf.shared()) || kids_short {
         0
     } else {
         world.comp::<crate::components::Inventory>(id).map_or(0, |i| i.food.saturating_sub(i.stolen_food))
@@ -1553,13 +1553,18 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
         // broke Full agent collects on ~97 % of days, and each day a broke
         // Statistical agent lost the lottery became a desperation theft.
         let day = world.day();
-        let price = world.local(id, BuildingKind::Market).map_or(1, |m| world.price_for(m, id));
-        let coins = world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins);
-        let saving = coins >= crate::goap::world_state::SAVINGS_DAYS.saturating_mul(price);
         // L1: the dole accrues from the last collection (`life::dole_days`),
         // so a day decided without a visit is marked apart from it.
         let undecided = world.comp::<Brain>(id).is_some_and(|b| b.stat_dole_day != Some(day));
-        if phase == DayPhase::Work && !saving && undecided && crate::systems::demography::is_adult(world, id) {
+        // The view milestone V2b (OPEN-265): the Market's price is read only
+        // on the hour the dole is decided (every jobless hour read it).
+        let saving = || {
+            let price = world.local(id, BuildingKind::Market).map_or(1, |m| world.price_for(m, id));
+            let coins = world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins);
+            (coins >= crate::goap::world_state::SAVINGS_DAYS.saturating_mul(price), coins, price)
+        };
+        let decide = phase == DayPhase::Work && undecided && crate::systems::demography::is_adult(world, id);
+        if let Some((false, coins, price)) = decide.then(saving) {
             let p = world.stat_table.as_ref().map_or(1.0, |t| t.p_dole_day);
             let u: f32 = world.rng.agent(id).random();
             if u < p || coins < price {
@@ -1877,7 +1882,7 @@ fn stat_earn(world: &mut World, id: EntityId, row: usize) {
     // with no dole the Full jobless under `earn_meals_no_net` meals earn on
     // (`life::earn_short`), at the near-broke's own learned rates (one rate
     // over the wider gate is the same spread).
-    if !broke && !crate::systems::life::earn_short(world, id) {
+    if !broke && !crate::systems::life::earn_short_if(world, id, false) {
         return;
     }
     let u: f32 = world.rng.agent(id).random();

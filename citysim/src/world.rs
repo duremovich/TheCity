@@ -792,6 +792,11 @@ pub struct World {
     /// (not saved, not cloned).
     #[serde(skip)]
     pub(crate) shop_memo: Memo<ShopMemo>,
+    /// The view milestone V2b (OPEN-265): `World::venue_occupants`, keyed
+    /// by the `(shop_gen, kinds_gen)` it was read at (an occupant list is a
+    /// Building write; not saved, not cloned).
+    #[serde(skip)]
+    venue_memo: Memo<VenueOccupants>,
     /// The perf pass phase 4: one [`crate::spatial::NearTable`] per kind
     /// (`World::near_table`), keyed by `(building_gen, kinds_gen)` as
     /// `kind_memo` is (not saved, not cloned).
@@ -1607,6 +1612,10 @@ type KindGrids = ((u64, u64), BTreeMap<BuildingKind, std::sync::Arc<crate::spati
 /// The perf pass phase 4: `((building_gen, kinds_gen), each kind's table)`.
 type NearTables = ((u64, u64), BTreeMap<BuildingKind, std::sync::Arc<crate::spatial::NearTable>>);
 
+/// The view milestone V2b: `((shop_gen, kinds_gen), (the Bars' and Markets'
+/// occupant lists' summed length, their occupants ascending))`.
+type VenueOccupants = ((u64, u64), (usize, std::sync::Arc<Vec<EntityId>>));
+
 /// The perf pass phase 4: what `shop_memo` holds for one `(shop_gen,
 /// kinds_gen)`: each seller kind's lowest price level once read, and the
 /// mean food price once read.
@@ -1991,6 +2000,7 @@ impl World {
             kind_memo: Memo::default(),
             shop_gen: 0,
             shop_memo: Memo::default(),
+            venue_memo: Memo::default(),
             near_memo: Memo::default(),
             claims: Memo::default(),
             district_geo: Memo::default(),
@@ -3406,6 +3416,34 @@ impl World {
             .clone()
     }
 
+    /// The view milestone V2b (OPEN-265): the Bars' and Markets' occupant
+    /// lists' summed length and every occupant on them, ascending (Court's
+    /// candidates at a venue, `social::candidate_at_venue_in`), read once a
+    /// `(shop_gen, kinds_gen)`: an occupant list is written only through a
+    /// Building write, which bumps `shop_gen`.
+    pub fn venue_occupants(&self) -> (usize, std::sync::Arc<Vec<EntityId>>) {
+        let key = (self.shop_gen, self.kinds_gen);
+        let mut memo = self.venue_memo.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((k, v)) = memo.as_ref() {
+            if *k == key {
+                return v.clone();
+            }
+        }
+        let mut list: Vec<EntityId> = [BuildingKind::Bar, BuildingKind::Market]
+            .iter()
+            .filter_map(|k| self.buildings_by_kind().get(k))
+            .flatten()
+            .filter_map(|&b| self.comp::<Building>(b))
+            .flat_map(|bd| bd.occupants.iter().copied())
+            .collect();
+        let total = list.len();
+        list.sort_unstable();
+        list.dedup();
+        let v = (total, std::sync::Arc::new(list));
+        *memo = Some((key, v.clone()));
+        v
+    }
+
     /// The perf pass phase 4: `f` over `shop_memo` once it is current for
     /// `(shop_gen, kinds_gen)` (emptied first when it is not).
     pub(crate) fn with_shop_memo<R>(&self, f: impl FnOnce(&mut ShopMemo) -> R) -> R {
@@ -3506,12 +3544,46 @@ impl World {
     pub fn market_by_price(&self, from: TilePos) -> Option<EntityId> {
         let per_coin = self.config.corps.shop_price_tiles;
         if per_coin >= 0 && !crate::spatial::scans() {
-            let found = self.near_table(BuildingKind::Market).min_cost(from, 10, |m, d| {
-                let b = self.comp::<Building>(m).filter(|b| !b.demolished && !self.is_closed(m))?;
-                Some((b.stock_food == 0, 10 * i64::from(d) + per_coin * self.price_tenths_at(m)))
-            });
+            let table = self.near_table(BuildingKind::Market);
+            // A price is at least a coin (ten tenths), so the bucket's list
+            // can settle the pick only when its box distance outruns a
+            // coin's tiles (`per_coin`); at 252 tiles a coin it never did
+            // on the 100k island (the view milestone V2b, 18M misses in two
+            // days), and the list's Buildings were read for nothing.
+            let rest = table.bucket(from).1;
+            let found = (rest == u32::MAX || i64::from(rest) > per_coin)
+                .then(|| {
+                    table.min_cost(from, 10, |m, d| {
+                        let b = self.comp::<Building>(m).filter(|b| !b.demolished && !self.is_closed(m))?;
+                        Some((b.stock_food == 0, 10 * i64::from(d) + per_coin * self.price_tenths_at(m)))
+                    })
+                })
+                .flatten();
             if let Some(m) = found {
                 return m;
+            }
+            // The view milestone V2b (OPEN-265): since round 9 Y4 a coin is
+            // worth 252 tiles, so the price term outruns any bucket's list and
+            // every query fell to the scan, which read each Market's Building
+            // (100k: 5 us a query, three or four a Statistical hour). The
+            // cost from the table's door and the Market's price first; the
+            // Building (closed, demolished, an empty shelf) only for a Market
+            // whose `(cost, id)` beats the best stocked one so far: the scan's
+            // pick whenever a stocked Market is open (none: the scan).
+            let mut best: Option<(i64, EntityId)> = None;
+            for (m, door) in table.entries() {
+                let cost = 10 * i64::from(door.manhattan(from)) + per_coin * self.price_tenths_at(m);
+                if best.is_some_and(|b| (cost, m) >= b) {
+                    continue;
+                }
+                let stocked =
+                    self.comp::<Building>(m).is_some_and(|b| !b.demolished && !self.is_closed(m) && b.stock_food > 0);
+                if stocked {
+                    best = Some((cost, m));
+                }
+            }
+            if let Some((_, m)) = best {
+                return Some(m);
             }
         }
         self.market_by_price_scan(from)
