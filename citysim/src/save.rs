@@ -538,7 +538,9 @@ use crate::world::World;
 /// `MapCrossing`s, the `[crossings]` keys and the `Jobs2Cols` `crossings_walked` ... `walk_steps` columns (serde
 /// defaults: a C9a save has no crossings; cityview's graft gives it the map file's); both island maps re-imported
 /// from TheCityGraphics `2bcd2c0` with only the `carriage` grid and the `X` lines new.
-pub const SAVE_VERSION: u8 = 126;
+/// 127 (hygiene, 2026-11-02): no format change; `SAVE_VERSION` and `World.save_version` widen from u8 to u16 (126
+/// of 255 were spent). RON writes the number either way, so the field reads the same; an older save need not load.
+pub const SAVE_VERSION: u16 = 127;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

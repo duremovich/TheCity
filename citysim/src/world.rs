@@ -1155,7 +1155,7 @@ pub struct World {
     /// `save::from_ron` reads to pick the migrations to run, rather than a
     /// sentinel on the data.
     #[serde(default)]
-    pub save_version: u8,
+    pub save_version: u16,
     // --- Life pass L2 phase 1 (plan L4, L10, L11): every field below is
     // written only behind an L2 `on()`; at its default it is not saved.
     /// L2 L10: the Treasury band's state.

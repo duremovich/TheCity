@@ -10,7 +10,7 @@
 
 ## The tiers
 
-One command each (`python tools/test.py <tier>`); each runs its cargo steps one at a time (the change tier's tests step runs the built test binaries itself, six at a time, longest first by the last run, its long poles, `core_sanity` and the seven slow binaries' longest tests, as jobs of their own: `CHANGE_JOBS` and `CHANGE_BESIDE` in `tools/test.py`, since the perf pass phase 0; serial `cargo test` paid 0.3-0.5 s a launch for ~107 binaries and idled the box behind each binary's one long test), logs everything under `target/test-logs/`, and prints one line per binary, the FAIL and FINDING lines, and the wall time against the budget.
+One command each (`python tools/test.py <tier>`); each runs its cargo steps one at a time (the change tier's tests step runs the built test binaries itself, eight at a time (six until 2026-11-02), longest first by the last run, its long poles, `core_sanity`'s three seeds (`core_sanity_42`, `_43`, `_44`, one test a seed since 2026-11-02; the last to finish judges the bullets over the three, their tallies meeting under the run's stamp, `CITYSIM_CORE_SANITY_RUN`) and the slow binaries' longest tests, as jobs of their own: `CHANGE_JOBS` and `CHANGE_BESIDE` in `tools/test.py`, since the perf pass phase 0; serial `cargo test` paid 0.3-0.5 s a launch for ~107 binaries and idled the box behind each binary's one long test), logs everything under `target/test-logs/`, and prints one line per binary, the FAIL and FINDING lines, and the wall time against the budget.
 
 | tier | command | what | asserts | budget | measured 2026-10-18 (2026-10-19) |
 |---|---|---|---|---|---|
@@ -28,7 +28,7 @@ Plus the human judge at every milestone: a shadow pass (`citysim-cli shadow --as
 
 ## The caps (`test.py lint`)
 
-- **Test functions: 1472** is the ratchet baseline (2026-10-26, doctrine 2; C2 +1, `view.rs`; C7 +1, `paths.rs`: the escalator portal carries a walk by the hour). `test.py lint` fails when the count of `#[test]` under `citysim/` and `citysim-cli/` rises above it. To add a test: the brief names it, the commit raises this number and its message says `test-add: <reason>`. When the count falls, lower the number (a warning says so).
+- **Test functions: 1474** is the ratchet baseline (2026-10-26, doctrine 2; C2 +1, `view.rs`; C7 +1, `paths.rs`: the escalator portal carries a walk by the hour; hygiene 2026-11-02 +2, `core.rs`: `core_sanity` split into `core_sanity_42`, `_43`, `_44`, one job a seed). `test.py lint` fails when the count of `#[test]` under `citysim/` and `citysim-cli/` rises above it. To add a test: the brief names it, the commit raises this number and its message says `test-add: <reason>`. When the count falls, lower the number (a warning says so).
 - **God scenarios ≤ 20** plus controls, one per reaction class (below). A phase's scenario is a spec-time device: it runs at the phase's acceptance and at the close it replaces its class's scenario or is deleted, write-up to `docs/history/`.
 - **Asserted `core_sanity` bullets ≤ 60** (`mechanisms()` + `jobs2_mechanisms()` + `transit_mechanisms()` in `core.rs`). A new bullet replaces one or names the milestone that earns a row. Printed lists (`printed_mechanisms`, `jobs2_printed`) are uncapped: they cost nothing.
 - **Every `#[ignore]` has a reason**: `tier: merge`, `tier: milestone`, `tier: diag`, or `gap: OPEN-nnn` (an open row in `docs/OPEN.md`). A `gap:` older than two milestones is fixed or deleted at the next close.

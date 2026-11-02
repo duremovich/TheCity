@@ -16,7 +16,7 @@ A Rust city simulator: ~2,000 (or 20,000) residents in a cyberpunk corporate dys
 Tests run through one script. **The change tier is the only per-merge gate**; the merge and milestone tiers run at a milestone close (or overnight), as prints.
 
 ```
-python tools/test.py change      # fmt, clippy, every non-ignored test   (~1.5 min, six binaries at a time; budget 4)
+python tools/test.py change      # fmt, clippy, every non-ignored test   (~3 min, eight jobs at a time; budget 4)
 python tools/test.py merge       # + the year, the behaviour tier, the god scenarios, serial (budget 8): at a close
 python tools/test.py milestone   # + the 20k city (budget 20): at a close
 python tools/test.py lint        # ignore reasons, caps, the test-count ratchet, OPEN.md ids

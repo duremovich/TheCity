@@ -83,14 +83,19 @@ TIERS = {
 }
 
 # The change tier's long poles (island pass phase 0, OPEN-175): `core_sanity`
-# (three seeds x 120 days on three threads, ~45-55 s) and the single test that
+# (seeds 42-44 x 120 days, one test a seed since hygiene 2026-11-02: the one
+# test of three threads had grown to ~152 s of a ~160 s tests step; each seed's
+# job leaves its tally under the run's stamp, `CITYSIM_CORE_SANITY_RUN`, and the
+# last of the three judges the bullets over all three) and the single test that
 # sets each slow binary's wall (a seeded world run for weeks, 5-15 s, while the
 # binary's other tests end in a few). Each is a job of its own in the tests
 # step's pool, and its binary's job skips it; every test still runs in this
 # tier. ("<binary stem>", "<exact test name>"); the name must be unique across
 # the workspace (it is the `--skip` filter too).
 CHANGE_BESIDE = [
-    ("core", "core_sanity"),
+    ("core", "core_sanity_42"),
+    ("core", "core_sanity_43"),
+    ("core", "core_sanity_44"),
     ("person", "probe_laid_off_farm_worker_finds_work_within_14_days"),
     ("person", "probe_buyer_nobody_heard_of_is_never_charged"),
     ("wages", "test_emigrate_cost_keeps_the_identity"),
@@ -110,7 +115,11 @@ CHANGE_BESIDE = [
 # Measured on a quiet box (24 threads), the tests step: serial 223 s
 # (a08d383), 3 jobs 133 s, 4 jobs 110 s, 6 jobs 87 s; at 6 `core_sanity`
 # (68 s alone, 82 s in the pool) is the wall, so more jobs only slow it.
-CHANGE_JOBS = 6
+# 8 since hygiene 2026-11-02: `core_sanity`'s three seeds are three jobs of one
+# thread each (`[perf] threads` 1 in the test), so 6 left three slots for the
+# other ~770 job-seconds; at 8 the tests step read 177 s with another agent's
+# rustc beside it (main at 6, one job for the three seeds: 160 s).
+CHANGE_JOBS = 8
 
 
 def built_binary(stem):
@@ -240,6 +249,8 @@ def run_pool(out, beside, jobs):
     logs = out / "3-tests"
     logs.mkdir(exist_ok=True)
     by_label = {label: (exe, cwd) for label, exe, cwd in exes}
+    # The core_sanity seeds (one job each) meet under this run's stamp.
+    os.environ["CITYSIM_CORE_SANITY_RUN"] = f"{out.name}-{os.getpid()}"
     skips = [a for (_, t) in beside for a in ("--skip", t)]
     known = last_secs()
     work = []  # (expected secs, kind, name, cmd, cwd)
