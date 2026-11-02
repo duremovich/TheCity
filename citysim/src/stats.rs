@@ -1647,6 +1647,12 @@ pub struct Jobs2Cols {
     /// V8: BreakOut marches that reached no Jail door
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub breakout_fizzled: u32,
+    /// V8b (`OPEN-276`): a gang raid's muster held past its hour for its column, then left
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub raid_held: u32,
+    /// V8b: a gang raid's muster broke up short of `raid_min_members` (or nobody came to it)
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub raid_broke: u32,
     /// Round 8 X6: a cells' meal served at `[justice] meal_hour` with its line
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub cell_meals: u32,
@@ -2404,6 +2410,8 @@ impl Jobs2Cols {
                 "cell_cards",
                 "breakout_dropped",
                 "breakout_fizzled",
+                "raid_held",
+                "raid_broke",
                 "cell_meals",
                 "cell_visits",
                 "wr_held_clear",
@@ -3065,6 +3073,8 @@ impl Jobs2Cols {
             self.cell_cards.to_string(),
             self.breakout_dropped.to_string(),
             self.breakout_fizzled.to_string(),
+            self.raid_held.to_string(),
+            self.raid_broke.to_string(),
             self.cell_meals.to_string(),
             self.cell_visits.to_string(),
             self.wr_held_clear.to_string(),

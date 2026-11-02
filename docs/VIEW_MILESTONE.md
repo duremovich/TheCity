@@ -193,6 +193,23 @@ turn over), Statistical 2,003 -> 2,005 (now from the island's table, p_commute_r
 Coarse 0, 1 -> 150, 236, Statistical 7,856, 7,984 -> 3,556, 3,754. The cityview follow-cam from a day-2 shadow save:
 the Hillside Line train #30592 with 32 riders drawn.
 
+### V8b, the raid reaches the door (`OPEN-276`)
+
+**As built (V8b):** `OPEN-276` did not hold on main: V8 measured on its pre-V7 branch, and on `53dd37b` gang raids
+depart, climb and land at 20k and at 100k (the numbers are in the row). What was left was the lone marcher: the muster
+left at its hour whoever stood there, and the one who came walked to the rival's door and called it off "1 at the
+door". Now a gang raid's muster holds past its hour for its column (`raid::depart` returns `Departure::Hold`; `[crew]
+muster_hold_ticks`) until `[gangs] raid_min_members` fit adults stand at it on the Raid goal; the column leaves then
+and the march clock (`[gangs] raid_march_hours`, which replaces the `faction::RAID_MARCH_TICKS` literal; riots and
+missions read it too) starts at the departure (`Gang.raid_left`; latecomers go to the muster until it has left).
+Short of the column at the hold's end, it breaks up at the muster with a line naming who came and where the rest of
+the free adults were (at work, asleep, in the cells); a muster nobody reached says so when the window closes. New
+columns `raid_held`, `raid_broke`. 100k seed 42 x 26: called off at the door 16 -> 2, broken up at the muster 0 -> 16,
+landed 57 -> 57. The diary: `raider_15729` (the Iron Knives, 20k seed 42, `shadow --start-day 11`)
+is called at 19:09, takes the lift down, crosses at the lights, climbs to the muster on floor 8 of Block#3059, musters
+137 min, leaves at 22:00, holds at the rival's door 16 min for the column, climbs the stairs of Block#4062 floor 0 to
+9 in 8 min (his gang-mates 5 and 7), and the raid resolves on floor 9: "sacked it (20 raiders, 1 defenders)".
+
 ## The exit
 
 1. A resident followed live at 100k for a game day at real time and at x60 with no sim stall (no tick over ~2 s).

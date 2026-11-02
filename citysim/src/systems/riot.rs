@@ -48,14 +48,14 @@ pub fn cordon_target(world: &World, d: DistrictId) -> Option<EntityId> {
         .map(|r| r.target)
 }
 
-/// Per tick: a riot not resolved by `muster_at + RAID_MARCH_TICKS` fizzles.
+/// Per tick: a riot not resolved by `muster_at + faction::march_ticks` fizzles.
 pub fn run(world: &mut World) {
     if world.riots.is_empty() {
         return;
     }
     let now = world.tick;
     let stale: Vec<u32> =
-        world.riots.iter().filter(|r| now >= r.muster_at + faction::RAID_MARCH_TICKS).map(|r| r.id).collect();
+        world.riots.iter().filter(|r| now >= r.muster_at + faction::march_ticks(world)).map(|r| r.id).collect();
     for id in stale {
         finish(world, id, "fizzled", 0, 0, 0, None);
     }
