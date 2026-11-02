@@ -221,7 +221,8 @@ impl Bench {
         view.mode = s.mode;
         view.at = s.at;
         view.zoom = s.zoom;
-        view.day = s.day;
+        // V10: a day shot forces the day; the rest follow the sim's clock (no sim: night)
+        view.day = s.day.then_some(true);
         view.hide_mass = s.hide_mass;
         if let Some((c, yaw, pitch, dist)) = s.orbit {
             view.orbit_at = c;
@@ -514,7 +515,7 @@ pub fn update_hud(
         }
         let st = &s.stats;
         t.0 = format!(
-            "{} {:.1} ms ({:.0} fps)  {:?} zoom {:.0} yaw {:.0} pitch {:.0}  at ({:.0}, {:.0}) z {:.1}\nchunks {} loaded / {} wanted / {} building, {:.2} Mtris  builds {} (mean {:.1} ms, max {:.1})  insert {:.2} ms\n{}",
+            "{} {:.1} ms ({:.0} fps)  {:?} zoom {:.0} yaw {:.0} pitch {:.0}  light {}  at ({:.0}, {:.0}) z {:.1}\nchunks {} loaded / {} wanted / {} building, {:.2} Mtris  builds {} (mean {:.1} ms, max {:.1})  insert {:.2} ms\n{}",
             s.index.city,
             *avg,
             1000.0 / avg.max(0.01),
@@ -522,6 +523,12 @@ pub fn update_hud(
             view.zoom,
             view.game_yaw.to_degrees(),
             view.game_pitch.to_degrees(),
+            // V10: L's override or the clock's day fraction
+            match view.day {
+                Some(true) => "day (L)".to_string(),
+                Some(false) => "night (L)".to_string(),
+                None => format!("clock {:.2}", view.daylight),
+            },
             view.at.x,
             view.at.y,
             view.ground_z,
@@ -533,7 +540,7 @@ pub fn update_hud(
             st.build_ms_sum / st.built.max(1) as f64,
             st.build_ms_max,
             st.insert_ms,
-            "WASD pan  Q/E rotate  Z/X pitch  wheel -/= zoom  RMB drag orbit  Tab overview  G cut  L day  M massing  H hud  P shot",
+            "WASD pan  Q/E rotate  Z/X pitch  wheel -/= zoom  RMB drag orbit  Tab overview  G cut  L light  M massing  H hud  P shot",
         );
         if let Some(sim) = sim.as_ref() {
             t.0.push('\n');

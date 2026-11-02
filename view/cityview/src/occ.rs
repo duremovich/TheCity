@@ -174,7 +174,7 @@ pub fn place_bodies(
 ) {
     for (mut t, mut vis) in light.iter_mut() {
         // night only, game view (the day rig does not need it)
-        let on = player.on && player.light && !view.day && view.mode == Mode::Game;
+        let on = player.on && player.light && view.light_t() < 0.5 && view.mode == Mode::Game;
         vis.set_if_neq(if on { Visibility::Inherited } else { Visibility::Hidden });
         let p = player.pos + LIGHT_AT;
         t.translation = bv(p.x, p.y, p.z);

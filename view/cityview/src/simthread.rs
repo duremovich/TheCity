@@ -72,6 +72,8 @@ pub struct Shared {
     pub reload_line: Mutex<String>,
     /// V7: the world's `[crossings]` (the signals' cycle; follows a reload), for lights.rs.
     pub signals: Mutex<Option<citysim::config::CrossingsCfg>>,
+    /// V10: a reload's `[view]`, taken by the render thread (sim.rs `clock_light`: the camera's and the light's numbers).
+    pub view_cfg: Mutex<Option<citysim::config::ViewCfg>>,
 }
 
 impl Shared {
@@ -161,6 +163,7 @@ impl Shared {
             reload_req: AtomicBool::new(false),
             reload_line: Mutex::new(String::new()),
             signals: Mutex::new(None),
+            view_cfg: Mutex::new(None),
         }
     }
 }
@@ -260,6 +263,7 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                         Ok(r) => {
                             cfg = world.config.view.clone();
                             *sh.signals.lock().unwrap() = world.config.crossings.clone();
+                            *sh.view_cfg.lock().unwrap() = Some(cfg.clone());
                             if a.rate.is_none() {
                                 rate = view::walk_matched_rate(&world);
                                 sh.rate_bits.store(rate.to_bits(), Ordering::Relaxed);

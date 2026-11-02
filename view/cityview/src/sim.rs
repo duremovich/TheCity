@@ -150,6 +150,8 @@ pub struct Sim {
     /// V4b: the subject indoors, its building's rect (world metres x0, y0, x1, y1): the cutaway cuts it at the
     /// subject's ceiling (occ.rs, glclient::occlusion)
     pub subject_indoors: Option<Vec4>,
+    /// V10: the newest frame's tick (the light follows its hour: `clock_light`)
+    pub clock_tick: Option<u64>,
 }
 
 /// A 64-bit mix (splitmix64's finaliser): the per-id picks.
@@ -445,6 +447,7 @@ impl Sim {
             yaw_of: HashMap::new(),
             capsules: false,
             subject_indoors: None,
+            clock_tick: None,
             rails,
             lots: crate::lots::Lots::load(chunk_dir),
             cfg: citysim::config::ViewCfg::default(),
@@ -487,6 +490,7 @@ impl Sim {
             yaw_of: HashMap::new(),
             capsules: false,
             subject_indoors: None,
+            clock_tick: None,
             rails,
             lots: crate::lots::Lots::load(chunk_dir),
             cfg: citysim::config::ViewCfg::default(),
@@ -1269,6 +1273,7 @@ pub fn update_sim(
     // V4: what the subject is doing (a climb, a ride, its storey's z), the riders drawn, the crowd spread
     let follow = if subj_line.is_empty() { follow } else { format!("{follow}\n{subj_line}") };
     let follow = format!("{follow}\nriders drawn {riders_drawn}, bodies spread off a shared tile {spread_n}");
+    let tick_now = f.tick;
     sim.hud = format!(
         "sim tick {} {}  agents {} (street {street}, most on a tile {stack}, indoors {indoors} ({hidden_in} hidden), aboard {aboard}, off a deck {deck_miss}; Full {} Coarse {} Stat {})  vehicles car {} van {} train {} flyer {} foot {} ({riders} aboard)  events {}",
         f.tick,
@@ -1284,6 +1289,20 @@ pub fn update_sim(
         by_ride[4],
         f.events
     ) + &follow;
+    sim.clock_tick = Some(tick_now);
+}
+
+/// V10: the light follows the sim's clock (cam.rs `View::daylight`, `[view] light_*`); a config reload's `[view]`
+/// reaches the camera here (the light's and the camera's numbers live).
+pub fn clock_light(sim: Res<Sim>, mut view: ResMut<crate::cam::View>) {
+    if let Some(c) = sim.live.as_ref().and_then(|l| l.view_cfg.lock().unwrap().take()) {
+        view.cfg = crate::cam::CamCfg::from_view(&c);
+    }
+    let tpd = citysim::TICKS_PER_DAY;
+    let d = sim.clock_tick.map_or(0.0, |t| view.cfg.light.daylight((t % tpd) as f32 * 24.0 / tpd as f32));
+    if (view.daylight - d).abs() > 1e-4 {
+        view.daylight = d;
+    }
 }
 
 /// V1 (OPEN-262): the R key asks the sim thread for a config reload at its next tick boundary.
