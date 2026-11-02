@@ -50,7 +50,6 @@ God scenarios 20 of cap 20; asserted bullets 60 of 60; ignores 56; no test files
 - **The orbit camera and the cutaway** replace locked iso and the portal (CLAUDE.md standing decisions).
 - **Lights and marked crossings** for street crossing; **no filler traffic**: vehicles on screen are citizens' and
   self-driving sim bodies, added later (`OPEN-275`).
-- Agents use TheCityGraphics freely and bring client parts into `view/`; bulk assets stay behind `CITYVIEW_ASSETS`.
 
 ## Next, in order
 
@@ -74,9 +73,6 @@ Open from this session: `OPEN-273` to `OPEN-287` (less `276`, `277` closed). Clo
   re-read on main before it becomes a phase.
 - **Two phases re-pinning fixtures on separate branches** (V8, V9) merged clean, but one change-tier run on main after
   them was the cheap check (green, 3m33s).
-- **The harness refused a worktree** when a stale merged one sat in the way; remove worktrees at each merge's cleanup,
-  not at the close.
-- Every phase stayed under ~450 turns; the dearest were V8 ($53) and V7 and V2b ($42 each).
 
 ## Cost (API-rate $ equivalent, `tools/session_cost.py`)
 
