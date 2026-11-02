@@ -14,18 +14,13 @@ use bevy::{
     shader::ShaderRef,
 };
 
-use glclient::occlusion::{OccFlags, OccUniform, Occlusion};
+use glclient::occlusion::{Cutaway, OccUniform};
 
 use crate::cam::{Mode, View};
 
 pub type WindowMaterial = ExtendedMaterial<StandardMaterial, Windows>;
 pub type GroundMaterial = ExtendedMaterial<StandardMaterial, GroundHaze>;
 pub type LayerMaterial = ExtendedMaterial<StandardMaterial, LayerOcc>;
-
-/// The massing cuts (L2); deck pieces fade as wholes (L3); pylons / beams cut.
-pub const MASSING: OccFlags = OccFlags { keep_up: false, fade: false, cut: true, gated: false };
-pub const DECKS: OccFlags = OccFlags { keep_up: false, fade: true, cut: false, gated: false };
-pub const PYLONS: OccFlags = OccFlags { keep_up: false, fade: false, cut: true, gated: false };
 
 /// The haze reaches its maximum this far under the reference height (m), which sits this far over the ground
 /// under the view centre: the street gets ~0.3 of it, roofs at 60 m none.
@@ -77,6 +72,10 @@ impl MaterialExtension for Windows {
         _key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
         glclient::occlusion::occ_specialize(descriptor);
+        // V4b: double-sided while the cut is built: a cut box shows its inside (the floor plate, the walls)
+        if glclient::occlusion::built() {
+            descriptor.primitive.cull_mode = None;
+        }
         Ok(())
     }
 }
@@ -87,6 +86,9 @@ pub struct GroundHaze {
     pub haze: Vec4,
     #[uniform(100)]
     pub haze_z: Vec4,
+    /// V4b: the cutaway's uniform (the ground under the subject's own building is painted as its floor plate)
+    #[uniform(101)]
+    pub occ: OccUniform,
 }
 
 impl MaterialExtension for GroundHaze {
@@ -104,9 +106,6 @@ pub struct LayerOcc {
     pub haze_z: Vec4,
     #[uniform(101)]
     pub occ: OccUniform,
-    /// Which occlusion this instance does (decks / pylons); not a shader field
-    #[reflect(ignore)]
-    pub flags: Option<OccFlags>,
 }
 
 impl MaterialExtension for LayerOcc {
@@ -178,32 +177,27 @@ pub fn material(strength: f32) -> WindowMaterial {
 pub fn ground_material(roughness: f32) -> GroundMaterial {
     ExtendedMaterial {
         base: StandardMaterial { base_color: Color::WHITE, perceptual_roughness: roughness, ..default() },
-        extension: GroundHaze { haze: haze_colour().extend(0.0), haze_z: Vec4::new(0.0, HAZE_RANGE, 0.0, 0.0) },
+        extension: GroundHaze { haze: haze_colour().extend(0.0), haze_z: Vec4::new(0.0, HAZE_RANGE, 0.0, 0.0), occ: OccUniform::default() },
     }
 }
 
-pub fn layer_material(roughness: f32, flags: OccFlags) -> LayerMaterial {
+pub fn layer_material(roughness: f32) -> LayerMaterial {
     ExtendedMaterial {
         base: StandardMaterial { base_color: Color::WHITE, perceptual_roughness: roughness, ..default() },
-        extension: LayerOcc {
-            haze: haze_colour().extend(0.0),
-            haze_z: Vec4::new(0.0, HAZE_RANGE, 0.0, 0.0),
-            occ: OccUniform::default(),
-            flags: Some(flags),
-        },
+        extension: LayerOcc { haze: haze_colour().extend(0.0), haze_z: Vec4::new(0.0, HAZE_RANGE, 0.0, 0.0), occ: OccUniform::default() },
     }
 }
 
-/// The occlusion state -> the occluder materials (a handful of assets: one window material, two layer ones).
-/// Only when the uniform changed or a material was added (`Occlusion` is written every frame: its change flag says
-/// nothing, and a touched material re-uploads its bind group).
+/// The cutaway's uniform -> the occluder materials (a handful of assets: one window material, two layer ones).
+/// Only when the uniform changed or a material was added (a touched material re-uploads its bind group).
 pub fn update_occ(
-    occ: Res<Occlusion>,
+    occ: Res<Cutaway>,
     mut wm: ResMut<Assets<WindowMaterial>>,
     mut lm: ResMut<Assets<LayerMaterial>>,
+    mut gm: ResMut<Assets<GroundMaterial>>,
     mut last: Local<Option<(OccUniform, usize)>>,
 ) {
-    let key = Some((occ.uniform, wm.len() + lm.len()));
+    let key = Some((occ.uniform, wm.len() + lm.len() + gm.len()));
     if *last == key {
         return;
     }
@@ -211,14 +205,19 @@ pub fn update_occ(
     let ids: Vec<_> = wm.ids().collect();
     for id in ids {
         if let Some(mut m) = wm.get_mut(id) {
-            m.extension.occ = occ.uniform(MASSING);
+            m.extension.occ = occ.uniform;
         }
     }
     let ids: Vec<_> = lm.ids().collect();
     for id in ids {
         if let Some(mut m) = lm.get_mut(id) {
-            let f = m.extension.flags.unwrap_or(PYLONS);
-            m.extension.occ = occ.uniform(f);
+            m.extension.occ = occ.uniform;
+        }
+    }
+    let ids: Vec<_> = gm.ids().collect();
+    for id in ids {
+        if let Some(mut m) = gm.get_mut(id) {
+            m.extension.occ = occ.uniform;
         }
     }
 }

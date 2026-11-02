@@ -496,7 +496,6 @@ pub fn update_hud(
     s: Res<Stream>,
     view: Res<View>,
     bench: Option<Res<Bench>>,
-    occ_bench: Option<Res<crate::occbench::OccBench>>,
     sim: Option<Res<crate::sim::Sim>>,
     mut hud: Query<(&mut Text, &mut Visibility), With<Hud>>,
     mut avg: Local<f32>,
@@ -512,19 +511,16 @@ pub fn update_hud(
         if bench.as_ref().is_some_and(|b| b.kind == "shots" || (b.kind == "one" && sim.is_none())) {
             *v = Visibility::Hidden;
         }
-        if let Some(ob) = occ_bench.as_ref() {
-            // the recording's caption
-            t.0 = crate::occbench::caption(ob);
-            continue;
-        }
         let st = &s.stats;
         t.0 = format!(
-            "{} {:.1} ms ({:.0} fps)  {:?} zoom {:.0}  at ({:.0}, {:.0}) z {:.1}\nchunks {} loaded / {} wanted / {} building, {:.2} Mtris  builds {} (mean {:.1} ms, max {:.1})  insert {:.2} ms\n{}",
+            "{} {:.1} ms ({:.0} fps)  {:?} zoom {:.0} yaw {:.0} pitch {:.0}  at ({:.0}, {:.0}) z {:.1}\nchunks {} loaded / {} wanted / {} building, {:.2} Mtris  builds {} (mean {:.1} ms, max {:.1})  insert {:.2} ms\n{}",
             s.index.city,
             *avg,
             1000.0 / avg.max(0.01),
             view.mode,
             view.zoom,
+            view.game_yaw.to_degrees(),
+            view.game_pitch.to_degrees(),
             view.at.x,
             view.at.y,
             view.ground_z,
@@ -536,7 +532,7 @@ pub fn update_hud(
             st.build_ms_sum / st.built.max(1) as f64,
             st.build_ms_max,
             st.insert_ms,
-            "WASD pan  Q/E zoom  Tab overview  L day  M massing  H hud  P shot",
+            "WASD pan  Q/E rotate  Z/X pitch  wheel -/= zoom  RMB drag orbit  Tab overview  G cut  L day  M massing  H hud  P shot",
         );
         if let Some(sim) = sim.as_ref() {
             t.0.push('\n');

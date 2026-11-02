@@ -297,16 +297,12 @@ fn layer_colour(kind: &str) -> [f32; 4] {
     }
 }
 
-/// A deck piece (L3 fades it as a whole): its mesh, its running-surface and underside triangles (world, Bevy) for
-/// the occlusion rays, and their box.
+/// A deck piece (culled as a whole).
 pub struct DeckPiece {
     pub mb: Mb,
-    pub tris: Vec<[Vec3; 3]>,
-    pub lo: Vec3,
-    pub hi: Vec3,
 }
 
-/// Pieces of a deck ribbon are cut at vertices once they reach this length (m): a slab-sized fade would pop.
+/// Pieces of a deck ribbon are cut at vertices once they reach this length (m).
 pub const PIECE_M: f32 = 48.0;
 
 /// The elevated layers: deck ribbons (top, underside, both sides) in pieces of <= ~PIECE_M, and one mesh of the
@@ -334,7 +330,7 @@ pub fn layer_parts(l: &Layers) -> (Vec<DeckPiece>, Mb) {
             let p = Vec2::new(pts[k][0], pts[k][1]);
             sides.push((p + nrm * hw, p - nrm * hw, pts[k][2]));
         }
-        let mut cur = DeckPiece { mb: Mb::default(), tris: vec![], lo: Vec3::MAX, hi: Vec3::MIN };
+        let mut cur = DeckPiece { mb: Mb::default() };
         let mut run = 0.0;
         let nseg = pts.len().saturating_sub(1);
         for k in 0..nseg {
@@ -353,14 +349,6 @@ pub fn layer_parts(l: &Layers) -> (Vec<DeckPiece>, Mb) {
             };
             side(l0, l1, nl, mb);
             side(r0, r1, -nl, mb);
-            for q in [top, bot] {
-                cur.tris.push([q[0], q[1], q[2]]);
-                cur.tris.push([q[0], q[2], q[3]]);
-                for v in q {
-                    cur.lo = cur.lo.min(v);
-                    cur.hi = cur.hi.max(v);
-                }
-            }
             // deck ends
             for (kk, at_end) in [(0usize, k == 0), (pts.len() - 1, k + 1 == nseg)] {
                 if !at_end {
@@ -375,7 +363,7 @@ pub fn layer_parts(l: &Layers) -> (Vec<DeckPiece>, Mb) {
             }
             run += Vec2::new(pts[k + 1][0] - pts[k][0], pts[k + 1][1] - pts[k][1]).length();
             if run >= PIECE_M || k + 1 == nseg {
-                let next = DeckPiece { mb: Mb::default(), tris: vec![], lo: Vec3::MAX, hi: Vec3::MIN };
+                let next = DeckPiece { mb: Mb::default() };
                 pieces.push(std::mem::replace(&mut cur, next));
                 run = 0.0;
             }
@@ -401,47 +389,7 @@ pub fn layer_parts(l: &Layers) -> (Vec<DeckPiece>, Mb) {
     (pieces.into_iter().filter(|p| !p.mb.is_empty()).collect(), solid)
 }
 
-/// Pylon and beam boxes (world, Bevy min / max): occluders for the rays.
-pub fn layer_boxes(l: &Layers) -> Vec<(Vec3, Vec3)> {
-    let mut v = vec![];
-    for el in &l.elements {
-        for p in &el.pylons {
-            let [x0, y0, x1, y1] = p.rect;
-            v.push((Vec3::new(x0, p.z0, -y1), Vec3::new(x1, p.z1, -y0)));
-        }
-        for b in &el.beams {
-            let (x0, x1) = (b.a[0].min(b.b[0]) - b.w / 2.0, b.a[0].max(b.b[0]) + b.w / 2.0);
-            let (y0, y1) = (b.a[1].min(b.b[1]) - b.w / 2.0, b.a[1].max(b.b[1]) + b.w / 2.0);
-            v.push((Vec3::new(x0, b.z0, -y1), Vec3::new(x1, b.z1, -y0)));
-        }
-    }
-    v
-}
-
 /// Massing boxes of a chunk (world, Bevy min / max): occluders for the rays.
 pub fn massing_boxes(boxes: &[BoxRec]) -> Vec<(Vec3, Vec3)> {
     boxes.iter().map(|(x0, y0, x1, y1, z0, z1, _, _)| (Vec3::new(*x0, *z0, -*y1), Vec3::new(*x1, *z1, -*y0))).collect()
-}
-
-/// Ray vs triangle (Moller-Trumbore), either side: distance if within (0, max_t).
-pub fn ray_tri(o: Vec3, d: Vec3, t: &[Vec3; 3], max_t: f32) -> Option<f32> {
-    let (e1, e2) = (t[1] - t[0], t[2] - t[0]);
-    let p = d.cross(e2);
-    let det = e1.dot(p);
-    if det.abs() < 1e-8 {
-        return None;
-    }
-    let inv = 1.0 / det;
-    let s = o - t[0];
-    let u = s.dot(p) * inv;
-    if !(0.0..=1.0).contains(&u) {
-        return None;
-    }
-    let q = s.cross(e1);
-    let v = d.dot(q) * inv;
-    if v < 0.0 || u + v > 1.0 {
-        return None;
-    }
-    let tt = e2.dot(q) * inv;
-    (tt > 1e-3 && tt < max_t).then_some(tt)
 }

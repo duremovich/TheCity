@@ -24,7 +24,8 @@ finds `assets/config.toml` (or set `CITYSIM_ASSETS`).
 advances it with `World::run_ticks` and sends `PlayerCommand`s; it never writes components directly.
 
 **`view/`** (city milestone C1, moved from TheCityGraphics `855d0aa`): the Bevy 0.19.1 client, `glclient` (the
-block, kit, street, traffic, tram, occlusion and light rules) and `cityview` (the city view binary and its benches;
+block, kit, street, traffic, tram, light rules and the cutaway, `occlusion.rs`) and `cityview` (the city view binary
+and its benches; the view milestone V4b's orbit follow-cam in `cam.rs`, both read `[view] cam_*` / `cut_*`;
 `--sim FILE` draws a `city-simview/0.1` frame; C2's follow-cam `--save FILE --follow INDEX` runs `citysim` in process on a
 sim thread, `simthread.rs`, reading `citysim::view::snapshot` frames from a two-slot buffer), edition 2024, its own `view/rustfmt.toml`; `view/vendor` holds the
 patched `bevy_pbr` / `bevy_render` the root `[patch.crates-io]` wires. Members outside `default-members`: the sim's

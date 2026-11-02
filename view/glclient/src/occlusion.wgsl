@@ -1,42 +1,35 @@
-// Camera occlusion (CITY_SPEC §CAM, spec/city/P4_PLAN.md A): the shared part of every occluder material.
+// The cutaway (the view milestone V4b; glclient::occlusion): the shared part of every occluder material.
 //
-// L2 see-through volume: `occ_cut` discards a fragment that is inside a view-space capsule (feet -> head) around a
-// player AND on the camera's side of the vertical plane through the player (by a margin, along the camera's
-// ground-projected forward: s28, a view-depth test also cut the upper floors of buildings *behind* the player,
-// which the tilted camera sees as nearer), with a noise-broken edge and a thin emissive rim
-// just outside it (a scan edge, not a hole). L3 whole-object fade: `occ_fade` screen-doors a mesh whose MeshTag
-// carries a fade level. Both only in the game camera's views (shadow views never cut: §CAM trap 2), and both run
-// identically in the prepass and the main pass (trap 1: a main-pass-only discard leaves the occluder's depth).
-// Walkable surfaces never cut where a material sets `keep_up`: horizontal faces at or below a player's feet
-// (+0.5 m: its floor, the treads ahead); a slab over its head (a canopy, a landing) cuts like a wall.
+// `occ_apply` discards a fragment inside the cut box: on the camera's side of the subject (from `axis.w` m behind its
+// feet onward, along the ground direction toward the camera), within `axis.z` m of the camera-to-subject line, and
+// above the cut height (`subject.w`). A screen-door dither band `misc.x` m deep softens the box's faces (a section,
+// not a sawn edge); a thin emissive rim just under the cut height marks the section line. Only in the game camera's
+// views (shadow views never cut: §CAM trap 2), identically in the prepass and the main pass (trap 1: a main-pass-only
+// discard leaves the occluder's depth).
 //
-// A material using this library declares `#[uniform(101)] occ: OccUniform` (glclient::occlusion) and returns
+// A material using this library declares `#[uniform(101)] occ: OccUniform` (glclient::occlusion), returns
 // AlphaMode::Mask from its extension (so the prepass runs a fragment shader at all), and calls
 // `glclient::occlusion::occ_specialize` from its `specialize` (OCC_OFF for the pre-P4 baseline).
 
 #define_import_path glclient::occlusion
 
 #import bevy_pbr::mesh_view_bindings::view
-#import bevy_pbr::mesh_functions::get_tag
 
 struct Occ {
-    // the game camera's view_from_world (the capsule test always runs in its space)
-    view_from_world: mat4x4<f32>,
-    // xyz the game camera's world position (a view at another position is a shadow view: no cut), w = enabled
+    // xyz the game camera's world position (a view elsewhere is a shadow view: no cut), w 1 = the cut runs
     cam: vec4<f32>,
-    // per volume: feet (world xyz), w = current radius m (0 = off)
-    feet: array<vec4<f32>, 4>,
-    // per volume: head (world xyz), w = view z of the body centre (game camera; unused by the cut since s28)
-    head: array<vec4<f32>, 4>,
-    // x depth margin m, y flags (1 = cut in every view [control], 2 = no prepass cut [control], 4 = the view-depth
-    // front test [diagnostic]), z L3 fade keep
-    // share, w rim strength
+    // xyz the subject's feet (world), w the cut's height (world y)
+    subject: vec4<f32>,
+    // xy the ground direction from the subject toward the camera (world x, z), z the box's half width, w how far
+    // behind the feet the box starts
+    axis: vec4<f32>,
+    // x the dither band m, y flags (1 = cut in every view [control], 2 = no prepass cut [control]), z the rim's
+    // strength, w its height m
     misc: vec4<f32>,
-    // rgb linear rim hue, a rim width m
+    // rgb the rim's hue (linear), w the subject's ceiling (world y: its own building is cut above it)
     rim: vec4<f32>,
-    // per material: x keep_up (1 = horizontal faces never cut), y L3 fade by MeshTag (1), z L2 cut (1), w no L2 on
-    // meshes whose MeshTag has KEEP_BIT (0x100: the scene buildings no body's ray hit; glclient::occlusion)
-    mat: vec4<f32>,
+    // the subject's own building (indoors): min x, min z, max x, max z (world); empty = none
+    own: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var<uniform> occ: Occ;
@@ -51,65 +44,8 @@ fn occ_game_view() -> bool {
     return occ_flag(1u) || distance(view.world_position, occ.cam.xyz) < 0.05;
 }
 
-fn occ_hash(p: vec3<i32>) -> f32 {
-    var h = u32(p.x) * 73856093u ^ u32(p.y) * 19349663u ^ u32(p.z) * 83492791u;
-    h = (h ^ (h >> 13u)) * 1274126177u;
-    h = h ^ (h >> 16u);
-    return f32(h & 0xffffu) / 65535.0;
-}
-
-// 3D value noise in [0, 1]
-fn occ_noise(p: vec3<f32>) -> f32 {
-    let i = vec3<i32>(floor(p));
-    let f = fract(p);
-    let u = f * f * (3.0 - 2.0 * f);
-    let a = mix(occ_hash(i), occ_hash(i + vec3<i32>(1, 0, 0)), u.x);
-    let b = mix(occ_hash(i + vec3<i32>(0, 1, 0)), occ_hash(i + vec3<i32>(1, 1, 0)), u.x);
-    let c = mix(occ_hash(i + vec3<i32>(0, 0, 1)), occ_hash(i + vec3<i32>(1, 0, 1)), u.x);
-    let d = mix(occ_hash(i + vec3<i32>(0, 1, 1)), occ_hash(i + vec3<i32>(1, 1, 1)), u.x);
-    return mix(mix(a, b, u.y), mix(c, d, u.y), u.z);
-}
-
-// Signed distance (m, view-space xy) from the fragment to the nearest cut edge: < 0 = inside a hole; a large
-// positive value when no volume applies (off, or the fragment is not in front of that player).
-fn occ_edge(wp: vec3<f32>, walkable: bool) -> f32 {
-    let vp = (occ.view_from_world * vec4<f32>(wp, 1.0)).xyz;
-    // the edge wanders +-15 % of the radius (a dissolve, not a circle), the band capped at 0.72 m (2.4 m's): a
-    // larger, context-sized portal keeps the same edge instead of shredding into shards
-    let wob_n = occ_noise(wp * (1.0 / 0.7)) - 0.5;
-    // the game camera's forward (world) projected on the ground: -(view z row); ortho, so one direction for all
-    let m = occ.view_from_world;
-    let f = normalize(-vec2<f32>(m[0].z, m[2].z));
-    var best = 1e6;
-    for (var k = 0; k < 4; k++) {
-        let r = occ.feet[k].w;
-        if (r <= 0.0) {
-            continue;
-        }
-        if (walkable && wp.y <= occ.feet[k].y + 0.5) {
-            continue;
-        }
-        // between the camera and the player: in front of the vertical plane through its feet by the margin
-        // (flag 4, a diagnostic: the pre-s28 view-depth test against the body centre)
-        if (occ_flag(4u)) {
-            if (vp.z < occ.head[k].w + occ.misc.x) {
-                continue;
-            }
-        } else if (dot(wp.xz - occ.feet[k].xz, f) > -occ.misc.x) {
-            continue;
-        }
-        let a = (occ.view_from_world * vec4<f32>(occ.feet[k].xyz, 1.0)).xy;
-        let b = (occ.view_from_world * vec4<f32>(occ.head[k].xyz, 1.0)).xy;
-        let ab = b - a;
-        let t = clamp(dot(vp.xy - a, ab) / max(dot(ab, ab), 1e-4), 0.0, 1.0);
-        let d = length(vp.xy - (a + ab * t));
-        best = min(best, d - (r + min(0.3 * r, 0.72) * wob_n));
-    }
-    return best;
-}
-
-// L2 + L3 for a fragment: discards, or returns the rim's emissive (linear rgb; zero away from an edge).
-// `face_n` = the geometric normal (from derivatives: identical in the prepass and the main pass).
+// Discards inside the cut box, or returns the rim's emissive (linear rgb; zero away from the section line).
+// `face_n` and `instance_index` are kept for the callers' signature (the P4 capsule used them).
 fn occ_apply(wp: vec3<f32>, frag_coord: vec4<f32>, face_n: vec3<f32>, instance_index: u32, prepass: bool) -> vec3<f32> {
 #ifdef OCC_OFF
     // the pre-P4 baseline (glclient::occlusion::BUILT false): no discard anywhere, so early-Z stays on
@@ -121,30 +57,62 @@ fn occ_apply(wp: vec3<f32>, frag_coord: vec4<f32>, face_n: vec3<f32>, instance_i
     if (prepass && occ_flag(2u)) {
         return vec3<f32>(0.0);
     }
-    // L3: a whole-object fade (MeshTag low byte = level 0..255), a stable 4 x 4 screen-door down to the keep share
-    if (occ.mat.y > 0.5) {
-        let lvl = f32(get_tag(instance_index) & 0xffu) / 255.0;
-        if (lvl > 0.0) {
-            let c = vec2<u32>(vec2<i32>(frag_coord.xy)) % vec2<u32>(4u);
-            let th = (f32((DITHER[c.y] >> (c.x * 8u)) & 0xffu) + 0.5) / 16.0;
-            if (th < lvl * (1.0 - occ.misc.z)) {
-                discard;
-            }
+    let d = wp.xz - occ.subject.xz;
+    let a = occ.axis.xy;
+    // metres inside each face of the box (> 0 inside): along the line past the back face, across, above the cut
+    let along = dot(d, a) + occ.axis.w;
+    let across = occ.axis.z - abs(d.x * a.y - d.y * a.x);
+    let up = wp.y - occ.subject.w;
+    let side = min(along, across);
+    // the subject's own building: inside its rect, above its ceiling
+    let o = min(min(wp.x - occ.own.x, occ.own.z - wp.x), min(wp.z - occ.own.y, occ.own.w - wp.z));
+    let e = max(min(side, up), min(o, wp.y - occ.rim.w));
+    let band = max(occ.misc.x, 1e-3);
+    if (e > 0.0) {
+        // a stable 4 x 4 screen-door through the band
+        let c = vec2<u32>(vec2<i32>(frag_coord.xy)) % vec2<u32>(4u);
+        let th = (f32((DITHER[c.y] >> (c.x * 8u)) & 0xffu) + 0.5) / 16.0;
+        if (e >= band || th < e / band) {
+            discard;
         }
     }
-    if (occ.mat.z < 0.5) {
-        return vec3<f32>(0.0);
+    // the section line: just under the cut height, inside the box's footprint
+    let rim_m = max(occ.misc.w, 1e-3);
+    if (side > 0.0 && up <= 0.0 && up > -rim_m) {
+        return occ.rim.rgb * occ.misc.z * (1.0 + up / rim_m) * smoothstep(0.0, band, side);
     }
-    if (occ.mat.w > 0.5 && (get_tag(instance_index) & 0x100u) != 0u) {
-        return vec3<f32>(0.0);
-    }
-    let e = occ_edge(wp, occ.mat.x > 0.5 && abs(face_n.y) > 0.7);
-    if (e < 0.0) {
-        discard;
-    }
-    let rim = 1.0 - smoothstep(0.0, max(occ.rim.a, 1e-3), e);
-    return occ.rim.rgb * occ.misc.w * rim;
+    return vec3<f32>(0.0);
 #endif
+}
+
+// The cut plane's paint (the host's materials): the floor plate (linear albedo, a faint warm room glow: the windows
+// say the rooms are lit, the night rig alone left a black pit) and the room's bare walls.
+const OCC_FLOOR: vec3<f32> = vec3<f32>(0.32, 0.29, 0.26);
+const OCC_FLOOR_GLOW: vec3<f32> = vec3<f32>(0.05, 0.022, 0.006);
+const OCC_WALL: vec3<f32> = vec3<f32>(0.22, 0.21, 0.22);
+const OCC_WALL_GLOW: vec3<f32> = vec3<f32>(0.025, 0.011, 0.003);
+
+// The inside of a closed occluder (a back face: only ever seen through the cut): 1 under the subject's floor (painted
+// as the floor plate the far walls stand for: the cap), 0 above it (the room's walls), -1 for a front face or no cut.
+fn occ_inside(wp: vec3<f32>, is_front: bool) -> f32 {
+    if (is_front || occ.cam.w < 0.5 || !occ_game_view()) {
+        return -1.0;
+    }
+    return select(0.0, 1.0, wp.y < occ.subject.y + 0.02);
+}
+
+// Under the subject's floor in its own building, seen through the floor's opening: the camera's ray to the fragment
+// crossed the floor's height inside the building's rect (a nested massing tier's roof, a far wall below the floor).
+// The host paints it as the floor plate the subject stands on (the cap); a facade under the floor, seen from outside,
+// crossed that height outside the rect and keeps its look.
+fn occ_under_floor(wp: vec3<f32>) -> bool {
+    let floor = occ.subject.y;
+    if (occ.cam.w < 0.5 || !occ_game_view() || occ.own.z <= occ.own.x || wp.y > floor + 0.3 || occ.cam.y <= floor) {
+        return false;
+    }
+    let t = (occ.cam.y - floor) / max(occ.cam.y - wp.y, 1e-3);
+    let q = occ.cam.xyz + (wp - occ.cam.xyz) * t;
+    return q.x > occ.own.x && q.x < occ.own.z && q.z > occ.own.y && q.z < occ.own.w;
 }
 
 fn occ_face_normal(wp: vec3<f32>) -> vec3<f32> {

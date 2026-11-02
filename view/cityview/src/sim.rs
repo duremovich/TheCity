@@ -115,12 +115,14 @@ pub struct Sim {
     /// The subject's place this frame (feet, metres) and heading (rad, the player's convention) for the follow-cam
     pub subject_at: Option<(Vec3, f32)>,
     /// V3 (people.rs): the bodies to draw this frame (the subject apart: the player stand-in wears it), the last
-    /// heading drawn per body (a standing body keeps it), `--capsules` (the old placeholders), `[view] indoor_cut_m`
+    /// heading drawn per body (a standing body keeps it), `--capsules` (the old placeholders)
     pub people: Vec<crate::people::BodyDraw>,
     pub subject_body: Option<crate::people::BodyDraw>,
     pub yaw_of: HashMap<u64, f32>,
     pub capsules: bool,
-    pub indoor_cut_m: f32,
+    /// V4b: the subject indoors, its building's rect (world metres x0, y0, x1, y1): the cutaway cuts it at the
+    /// subject's ceiling (occ.rs, glclient::occlusion)
+    pub subject_indoors: Option<Vec4>,
 }
 
 fn ekey(e: citysim::EntityId) -> u64 {
@@ -390,7 +392,7 @@ impl Sim {
             subject_body: None,
             yaw_of: HashMap::new(),
             capsules: false,
-            indoor_cut_m: 6.0,
+            subject_indoors: None,
         }
     }
 
@@ -423,7 +425,7 @@ impl Sim {
             subject_body: None,
             yaw_of: HashMap::new(),
             capsules: false,
-            indoor_cut_m: 6.0,
+            subject_indoors: None,
         }
     }
 
@@ -475,6 +477,12 @@ impl Sim {
         let u = ((k >> 16) & 0xFFFF) as f32 / 65535.0 - 0.5;
         let v = ((k >> 40) & 0xFFFF) as f32 / 65535.0 - 0.5;
         self.metres([x + w / 2.0 - 0.5 + u * w * 0.6, y + h / 2.0 - 0.5 + v * h * 0.6], a.id, false)
+    }
+
+    /// V4b: an indoor body's building rect in world metres (x0, y0, x1, y1); its tile without one.
+    fn rect_m(&self, a: &Agent) -> Vec4 {
+        let [x, y, w, h] = a.rect.unwrap_or([a.t[0], a.t[1], 1.0, 1.0]);
+        Vec4::new(self.x0 + x * self.tile_m, self.y1 - (y + h) * self.tile_m, self.x0 + (x + w) * self.tile_m, self.y1 - y * self.tile_m)
     }
 
     /// C6a: a storey's floor over the ground, metres: the export's 4 m ground and 3 m storeys above it (C7: a
@@ -565,7 +573,7 @@ pub fn update_sim(
     stream: Res<Stream>,
     mut sim: ResMut<Sim>,
     mut q: Query<(&mut Transform, &mut Visibility)>,
-    occ: Option<Res<glclient::occlusion::Occlusion>>,
+    occ: Option<Res<glclient::occlusion::Cutaway>>,
 ) {
     let (i, j, u) = if sim.live.is_some() {
         let Some(u) = sim.pull_live() else { return };
@@ -601,7 +609,8 @@ pub fn update_sim(
                     }
                 }
                 None => {
-                    let e = commands.spawn((Mesh3d(mesh), MeshMaterial3d(mat), tf, Name::new("sim"))).id();
+                    // V4b: signs and placeholders on cut storeys are cut too
+                    let e = commands.spawn((Mesh3d(mesh), MeshMaterial3d(mat), tf, Name::new("sim"), glclient::occlusion::CutProp)).id();
                     sim.ents.insert(k, e);
                 }
             }
@@ -610,14 +619,14 @@ pub fn update_sim(
     // the most bodies standing on one street tile (a Coarse stack reads as one blob)
     let mut on_tile: HashMap<(i32, i32), usize> = HashMap::new();
     let fr_agents = sim.frames[j].agents.clone();
-    // V3: a body indoors is drawn only where the occlusion cuts the walls away: the subject's storey of the subject's
-    // building, within the cut's radius of it (`[view] indoor_cut_m`). Every other indoor body stays hidden: drawn on
-    // its storey at its jittered tile, it stood on (or through) the facades from the outside (the floating capsules).
-    let subj = fr_agents.iter().find(|a| Some(a.id) == subject).map(|a| (a.b, floor_of(a).round(), sim.indoor_xy(a)));
-    // the cut as it is now (it eases in once the walls block the subject; a kit building never opens round a body
-    // inside it: then no indoor body shows), capped at `indoor_cut_m`
-    let cut = occ.filter(|o| o.enabled).and_then(|o| o.vols.first().map(|v| v.radius)).unwrap_or(0.0).min(sim.indoor_cut_m);
-    let cut2 = if cut >= 1.0 { cut * cut } else { -1.0 };
+    // V3: a body indoors is drawn only where the cut opens the walls: V4b, the subject's storey of the subject's
+    // building while the cutaway runs (the subject indoors: its building is cut at its ceiling, the whole storey
+    // shows), else inside the cut box. Every other indoor body stays hidden: drawn on its storey at its jittered tile, it stood on
+    // (or through) the facades from the outside (the floating capsules).
+    let subj = fr_agents.iter().find(|a| Some(a.id) == subject).map(|a| (a.b, floor_of(a).round()));
+    let cut = occ.filter(|o| o.active());
+    let opened = |p: Vec2| cut.as_ref().is_some_and(|c| c.indoors.is_some() || c.in_box(bv(p.x, p.y, 0.0)));
+    let mut subject_indoors = None;
     let mut people = vec![];
     let mut subject_body = None;
     let (mut hidden_in, mut deck_miss) = (0usize, 0usize);
@@ -642,6 +651,7 @@ pub fn update_sim(
         if is_subject {
             // the follow-cam: aboard at its vehicle (below), indoors on its storey at its building's tile, else its body
             subject_in = a.aboard;
+            subject_indoors = a.indoors.then(|| sim.rect_m(a));
             let t = prev_a.get(&a.id).map_or(a.t, |(p, ah)| along(*p, ah, a.t, u));
             let p = if a.indoors { sim.indoor_xy(a) } else { sim.metres(t, a.id, true) };
             let g = stream.ground_z(p.x, p.y).unwrap_or(0.0);
@@ -659,8 +669,7 @@ pub fn update_sim(
             // C6a: on its floor, seen only in the cut (above)
             indoors += 1;
             let p = sim.indoor_xy(a);
-            let shown = is_subject
-                || subj.is_some_and(|(b, f, sp)| b.is_some() && b == a.b && floor_of(a).round() == f && p.distance_squared(sp) <= cut2);
+            let shown = is_subject || subj.is_some_and(|(b, f)| b.is_some() && b == a.b && floor_of(a).round() == f && opened(p));
             if !shown {
                 hidden_in += 1;
                 continue;
@@ -699,6 +708,7 @@ pub fn update_sim(
     }
     sim.people = people;
     sim.subject_body = subject_body;
+    sim.subject_indoors = subject_indoors;
     let fr_veh: Vec<Vehicle> = sim.frames[j].vehicles.clone();
     let (mut by_ride, mut riders) = ([0usize; 5], 0usize);
     for v in &fr_veh {
@@ -835,5 +845,8 @@ pub fn follow_subject(sim: Res<Sim>, mut player: ResMut<crate::occ::Player>) {
         player.scripted = true;
         player.pos = p;
         player.facing = yaw;
+        player.indoors = sim.subject_indoors;
+    } else {
+        player.indoors = None;
     }
 }

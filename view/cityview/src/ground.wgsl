@@ -1,5 +1,6 @@
 // Ground and decks: the StandardMaterial (vertex colours) plus the city view's height haze (windows.wgsl), so
-// streets and decks share the massing's depth cue (review p3 r1).
+// streets and decks share the massing's depth cue (review p3 r1). V4b: the ground under the subject's own building,
+// seen through its floor (a ground-floor room), is painted as the cutaway's floor plate (glclient::occlusion).
 
 #import bevy_pbr::{
     pbr_fragment::pbr_input_from_standard_material,
@@ -17,6 +18,7 @@
     pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
 }
 #endif
+#import glclient::occlusion::{occ_under_floor, OCC_FLOOR, OCC_FLOOR_GLOW}
 
 struct Haze {
     haze: vec4<f32>,     // rgb linear haze (Grade A fog), a = max amount (0 = off)
@@ -32,6 +34,11 @@ fn fragment(
 ) -> FragmentOutput {
     var pbr_input = pbr_input_from_standard_material(in, is_front);
     pbr_input.material.base_color = alpha_discard(pbr_input.material, pbr_input.material.base_color);
+    if (occ_under_floor(in.world_position.xyz)) {
+        pbr_input.material.base_color = vec4<f32>(OCC_FLOOR, 1.0);
+        pbr_input.material.emissive = vec4<f32>(OCC_FLOOR_GLOW, 0.0);
+        pbr_input.material.perceptual_roughness = 0.9;
+    }
 #ifdef PREPASS_PIPELINE
     let out = deferred_output(in, pbr_input);
 #else

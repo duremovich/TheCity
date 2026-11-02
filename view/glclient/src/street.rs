@@ -424,7 +424,17 @@ pub fn update_street(
         let mut ents = vec![];
         for (mk, m, aabb) in b.meshes {
             ents.push(
-                commands.spawn((Mesh3d(meshes.add(m)), MeshMaterial3d(st.mats[&mk].clone()), aabb, Transform::IDENTITY, StreetMesh)).id(),
+                // V4b: lamps and props inside the cut box are cut with the buildings
+                commands
+                    .spawn((
+                        Mesh3d(meshes.add(m)),
+                        MeshMaterial3d(st.mats[&mk].clone()),
+                        aabb,
+                        Transform::IDENTITY,
+                        StreetMesh,
+                        crate::occlusion::CutProp,
+                    ))
+                    .id(),
             );
         }
         st.loaded.insert(k, Loaded { entities: ents, lamps: b.lamps });

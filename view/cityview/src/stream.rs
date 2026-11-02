@@ -200,9 +200,11 @@ fn wanted(s: &Stream, view: &View, cam: &Transform, aspect: f32) -> (HashMap<Key
         Mode::Game => {
             // full ground detail up to the 400 m zoom (the 8 m cells read blocky there: review p3 r2)
             let lod = if view.zoom <= 450.0 { 0 } else { 1 };
-            let (right, up, eye) = (cam.right().as_vec3(), cam.up().as_vec3(), cam.translation);
-            let hw = view.zoom / 2.0;
-            let hh = hw / aspect.max(0.1);
+            // V4b: the perspective frustum (the orbit follow-cam), out to the far plane
+            let (right, up, fwd, eye) = (cam.right().as_vec3(), cam.up().as_vec3(), cam.forward().as_vec3(), cam.translation);
+            let tan_v = (view.cfg.fov * 0.5).tan();
+            let tan_h = tan_v * aspect.max(0.1);
+            let far = view.cfg.far_m;
             let cm = s.index.chunk_m;
             for (k, r) in &s.recs {
                 // the chunk's square, grown to its boxes' extent (a lot's boxes may overhang it: /code-review s22)
@@ -211,20 +213,31 @@ fn wanted(s: &Stream, view: &View, cam: &Transform, aspect: f32) -> (HashMap<Key
                 if let Some(bb) = r.bb {
                     (x0, y0, x1, y1) = (x0.min(bb[0]), y0.min(bb[1]), x1.max(bb[2]), y1.max(bb[3]));
                 }
-                let (mut sx0, mut sx1, mut sy0, mut sy1) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+                // the box's corners in camera space (x right, y up, z forward)
+                let mut cs = [Vec3::ZERO; 8];
+                let mut n = 0;
                 for &x in &[x0, x1] {
                     for &y in &[y0, y1] {
                         for &z in &[r.zr[0] - 2.0, r.zr[1] + 2.0] {
                             let p = mesh::bv(x, y, z) - eye;
-                            let (a, b) = (p.dot(right), p.dot(up));
-                            sx0 = sx0.min(a);
-                            sx1 = sx1.max(a);
-                            sy0 = sy0.min(b);
-                            sy1 = sy1.max(b);
+                            cs[n] = Vec3::new(p.dot(right), p.dot(up), p.dot(fwd));
+                            n += 1;
                         }
                     }
                 }
-                let hit = |m: f32, pad: f32| sx1 >= -hw * m - pad && sx0 <= hw * m + pad && sy1 >= -hh * m - pad && sy0 <= hh * m + pad;
+                // outside when every corner is outside one plane (the side planes widened by m, pushed out by pad)
+                let hit = |m: f32, pad: f32| {
+                    let (th, tv) = (tan_h * m, tan_v * m);
+                    let planes: [&dyn Fn(Vec3) -> f32; 6] = [
+                        &|c| c.x + th * c.z + pad,
+                        &|c| th * c.z - c.x + pad,
+                        &|c| c.y + tv * c.z + pad,
+                        &|c| tv * c.z - c.y + pad,
+                        &|c| c.z + pad,
+                        &|c| far + pad - c.z,
+                    ];
+                    planes.iter().all(|f| cs.iter().any(|c| f(*c) >= 0.0))
+                };
                 if hit(1.15, 16.0) {
                     want.insert(*k, lod);
                 }

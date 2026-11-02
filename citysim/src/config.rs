@@ -600,9 +600,41 @@ pub struct ViewCfg {
     pub people_anim_m: f32,
     /// The most bodies drawn skinned and animated at once (the nearest).
     pub people_anim_max: u16,
-    /// A body indoors is drawn only on the subject's floor of the subject's
-    /// building, within this many metres of it (the occlusion cut's radius).
-    pub indoor_cut_m: f32,
+    /// The view milestone V4b (cityview `cam.rs`): the orbit follow-cam. Its
+    /// vertical FOV, the starting yaw (the camera's bearing from the subject,
+    /// 0 = south) and pitch, the pitch's clamp, the zoom's range (the frame's
+    /// width at the subject, metres), the aim's ease (half-life, the snap
+    /// distance, the aim's height over the feet), the controls' speeds and
+    /// the far plane (the stream's reach too).
+    pub cam_fov_deg: f32,
+    pub cam_yaw_deg: f32,
+    pub cam_pitch_deg: f32,
+    pub cam_pitch_min_deg: f32,
+    pub cam_pitch_max_deg: f32,
+    pub cam_zoom_min_m: f32,
+    pub cam_zoom_max_m: f32,
+    pub cam_follow_half_life_s: f32,
+    pub cam_snap_m: f32,
+    pub cam_look_up_m: f32,
+    pub cam_rotate_deg_s: f32,
+    pub cam_pitch_deg_s: f32,
+    pub cam_drag_deg_px: f32,
+    pub cam_zoom_step: f32,
+    pub cam_far_m: f32,
+    /// V4b (glclient `occlusion.rs`): the cutaway. A box on the camera's
+    /// side of the subject: its width across the camera-to-subject line, how
+    /// far behind the feet it starts, the height over the feet above which
+    /// it cuts, the dither band at its edges, the cut edge's glow, and the
+    /// widest zoom it runs at (an establishing shot keeps the city whole).
+    pub cut_width_m: f32,
+    pub cut_behind_m: f32,
+    pub cut_above_m: f32,
+    pub cut_band_m: f32,
+    pub cut_rim: f32,
+    pub cut_max_zoom_m: f32,
+    /// V4b: the subject indoors, its own building is cut this far over its
+    /// feet (its ceiling: the room shows).
+    pub cut_ceiling_m: f32,
     /// A child's drawn height over an adult's at age 0; it grows linearly to
     /// 1 at `child_full_age`.
     pub child_scale_min: f32,
@@ -624,7 +656,28 @@ impl Default for ViewCfg {
             reload_poll_s: 1.0,
             people_anim_m: 40.0,
             people_anim_max: 48,
-            indoor_cut_m: 6.0,
+            cam_fov_deg: 30.0,
+            cam_yaw_deg: 45.0,
+            cam_pitch_deg: 50.0,
+            cam_pitch_min_deg: 35.0,
+            cam_pitch_max_deg: 65.0,
+            cam_zoom_min_m: 12.0,
+            cam_zoom_max_m: 1000.0,
+            cam_follow_half_life_s: 0.25,
+            cam_snap_m: 40.0,
+            cam_look_up_m: 1.0,
+            cam_rotate_deg_s: 90.0,
+            cam_pitch_deg_s: 45.0,
+            cam_drag_deg_px: 0.25,
+            cam_zoom_step: 1.15,
+            cam_far_m: 3000.0,
+            cut_width_m: 36.0,
+            cut_behind_m: 1.5,
+            cut_above_m: 1.8,
+            cut_band_m: 1.2,
+            cut_rim: 0.6,
+            cut_max_zoom_m: 250.0,
+            cut_ceiling_m: 2.8,
             child_scale_min: 0.5,
             child_full_age: 17,
             people_glow: 0.5,
