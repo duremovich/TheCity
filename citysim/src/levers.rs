@@ -38,6 +38,23 @@ pub enum PlayerCommand {
     Pin(EntityId, bool),
     /// Issued by the app whenever the view rect changes; makes LOD replayable.
     SetView(Option<Rect>),
+    /// M18 P1 (`systems/player.rs`): a human takes over an adult body
+    /// (`true`, autopilot off) or lets it go for good (`false`).
+    Possess(EntityId, bool),
+    /// M18 P1: a directed plan for the possessed body (a click's walk).
+    Steps {
+        agent: EntityId,
+        steps: Vec<crate::components::ActionInstance>,
+    },
+    /// M18 P1: a goal for the possessed body, planned by `plan::plan_for`.
+    Goal {
+        agent: EntityId,
+        goal: crate::components::GoalKind,
+    },
+    /// M18 P1: the possessed body drops its plan and stands.
+    Stop(EntityId),
+    /// M18 P1: the possessed body's own brain on (`true`) or off.
+    SetAutopilot(EntityId, bool),
     /// `0..=10`, default 3.
     SetDolePerDay(u8),
     /// App-only; logged so replays know the speed, no sim effect.
@@ -1017,6 +1034,11 @@ impl World {
                     self.push_event(EventKind::PlayerActionFailed, &[*agent], "Pin: no such agent");
                 }
             }
+            PlayerCommand::Possess(agent, on) => crate::systems::player::possess(self, *agent, *on),
+            PlayerCommand::Steps { agent, steps } => crate::systems::player::steps(self, *agent, steps),
+            PlayerCommand::Goal { agent, goal } => crate::systems::player::goal(self, *agent, *goal),
+            PlayerCommand::Stop(agent) => crate::systems::player::stop(self, *agent),
+            PlayerCommand::SetAutopilot(agent, on) => crate::systems::player::set_autopilot(self, *agent, *on),
             PlayerCommand::SetView(rect) => {
                 self.view_rect = *rect;
             }

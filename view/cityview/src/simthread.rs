@@ -19,8 +19,14 @@
 //! reload_poll_s` real seconds) and at `--reload-at TICK`; `citysim::reload` applies the live keys and keeps the
 //! build-time ones. The reload's line goes to the log and the HUD (`Shared::reload_line`); the walk-matched rate
 //! follows a pace change unless `--rate` pinned it.
+//!
+//! M18 P1 (the seam, docs/M18_PLAYER.md): `--possess INDEX` drives the subject. The render thread has no world, so
+//! its orders (`UiCmd`: a click's tile, a goal, stop, autopilot) go into `Shared::cmds`; the thread drains them
+//! between two ticks into the world's command queue as `PlayerCommand`s (applied at the next tick's start, like the
+//! R key's `reload_req`), and publishes the body's HUD state (`Shared::player`) with each frame. Pause and the play
+//! speed (a multiple of the rate, `[view] play_speeds`) are atomics read at the pacing.
 
-use citysim::components::{Brain, Identity};
+use citysim::components::{Brain, GoalKind, Identity, TilePos};
 use citysim::view::{self, ViewFrame};
 use citysim::{EntityId, World, save};
 use std::path::{Path, PathBuf};
@@ -74,9 +80,55 @@ pub struct Shared {
     pub signals: Mutex<Option<citysim::config::CrossingsCfg>>,
     /// V10: a reload's `[view]`, taken by the render thread (sim.rs `clock_light`: the camera's and the light's numbers).
     pub view_cfg: Mutex<Option<citysim::config::ViewCfg>>,
+    /// M18 P1: the render thread's orders for the possessed body, drained between two ticks.
+    pub cmds: Mutex<Vec<UiCmd>>,
+    /// M18 P1: the clock stopped (Space); the play speed, f64 bits, a multiple of the rate.
+    pub paused: AtomicBool,
+    pub speed_bits: AtomicU64,
+    /// M18 P1: the possessed body's state for the HUD (`None`: nobody possessed).
+    pub player: Mutex<Option<PlayerHud>>,
+}
+
+/// M18 P1: an order from the render thread (a click, a key, a HUD button, a `--play` line).
+#[derive(Clone, Debug)]
+pub enum UiCmd {
+    /// Walk there: into the building that holds the tile (a roof or a wall hit, `true`: the nearest within `[view]
+    /// pick_snap_tiles`), else to the street tile.
+    Click(TilePos, bool),
+    Goal(GoalKind),
+    Stop,
+    Autopilot(bool),
+}
+
+/// M18 P1: what the HUD shows of the possessed body.
+#[derive(Clone, Debug, Default)]
+pub struct PlayerHud {
+    pub name: String,
+    pub index: u32,
+    pub day: u64,
+    pub clock: String,
+    pub autopilot: bool,
+    /// hunger, energy, safety, wealth, belonging (1 = met)
+    pub needs: [f32; 5],
+    pub coins: i64,
+    pub job: String,
+    pub place: String,
+    pub goal: String,
+    pub plan: String,
+    /// The last failure or refusal: its clock and line.
+    pub failure: Option<String>,
 }
 
 impl Shared {
+    /// M18 P1: an order for the possessed body, applied at the next tick.
+    pub fn send(&self, c: UiCmd) {
+        self.cmds.lock().unwrap().push(c);
+    }
+
+    pub fn speed(&self) -> f64 {
+        f64::from_bits(self.speed_bits.load(Ordering::Relaxed))
+    }
+
     pub fn rate(&self) -> f32 {
         f64::from_bits(self.rate_bits.load(Ordering::Relaxed)) as f32
     }
@@ -97,6 +149,10 @@ pub struct SimArgs {
     pub config: Option<PathBuf>,
     /// V1: reload at this tick (`--reload-at`).
     pub reload_at: Option<u64>,
+    /// M18 P1: possess the subject (`--possess`) once the world reaches `--from` (the save's tick without it).
+    pub possess: bool,
+    /// M18 P1: the first play speed (`[view] play_speeds[0]`).
+    pub speed: f64,
 }
 
 /// V5: the frame's bodies per tier (the camera's: Full, Coarse, Statistical, children) and the sim's ring counts.
@@ -164,6 +220,10 @@ impl Shared {
             reload_line: Mutex::new(String::new()),
             signals: Mutex::new(None),
             view_cfg: Mutex::new(None),
+            cmds: Mutex::new(Vec::new()),
+            paused: AtomicBool::new(false),
+            speed_bits: AtomicU64::new(1f64.to_bits()),
+            player: Mutex::new(None),
         }
     }
 }
@@ -177,6 +237,7 @@ pub fn first_hold(shots: &[u64]) -> u64 {
 /// the tool asserts its preconditions.
 pub fn spawn(a: SimArgs) -> Arc<Shared> {
     let shared = Arc::new(Shared::new(first_hold(&a.shots)));
+    shared.speed_bits.store(a.speed.to_bits(), Ordering::Relaxed);
     let sh = shared.clone();
     std::thread::Builder::new().name("sim".into()).spawn(move || run(a, sh)).expect("spawn the sim thread");
     shared
@@ -203,6 +264,10 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
     let building = world.has::<citysim::Building>(subject);
     if !(world.has::<Identity>(subject) || building) || view::subject_tile(&world, subject).is_none() {
         fatal(format!("--follow {}: {subject:?} is no body with a place nor a building", a.follow));
+    }
+    // M18 P1: nobody under 18 is ever possessed (CLAUDE.md, 2026-10-27; the sim refuses it too)
+    if a.possess && !citysim::systems::demography::is_adult(&world, subject) {
+        fatal(format!("--possess {}: {} is no adult (nobody under 18 can be possessed)", a.follow, who(&world, subject)));
     }
     if let Some(&t) = a.shots.iter().chain(a.from.iter()).chain(a.reload_at.iter()).find(|&&t| t < world.tick) {
         fatal(format!("tick {t} (--shots / --from / --reload-at) is before the save's tick {}", world.tick));
@@ -235,7 +300,32 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
     let from = a.from.unwrap_or(world.tick);
     let mut next_at = Instant::now();
     let mut reloaded_at = false;
+    let mut possessed = false;
+    let mut last_logged = (String::new(), None, false);
     loop {
+        // M18 P1: possessed at --from (the city pre-run to it); the render thread's orders, between two ticks
+        if a.possess && !possessed && world.tick >= from {
+            possessed = true;
+            world.push_command(citysim::PlayerCommand::Possess(subject, true));
+            eprintln!("cityview: tick {} possess {}", world.tick, who(&world, subject));
+        }
+        let cmds = std::mem::take(&mut *sh.cmds.lock().unwrap());
+        for c in cmds {
+            let cmd = match c {
+                UiCmd::Click(t, roof) => {
+                    let snap = world.config.view.pick_snap_tiles;
+                    let steps = citysim::systems::player::walk_to(&world, t, roof, snap);
+                    let to = steps[0].target.map_or(format!("the street at ({}, {})", t.x, t.y), |b| world.name_of(b));
+                    eprintln!("cityview: tick {} click ({}, {}): walk to {to}", world.tick, t.x, t.y);
+                    citysim::PlayerCommand::Steps { agent: subject, steps }
+                }
+                UiCmd::Goal(g) => citysim::PlayerCommand::Goal { agent: subject, goal: g },
+                UiCmd::Stop => citysim::PlayerCommand::Stop(subject),
+                UiCmd::Autopilot(on) => citysim::PlayerCommand::SetAutopilot(subject, on),
+            };
+            eprintln!("cityview: tick {} order {cmd:?}", world.tick);
+            world.push_command(cmd);
+        }
         // V1: a reload between two ticks: the R key, --reload-at, the file's mtime moved
         let mut why = None;
         if sh.reload_req.swap(false, Ordering::Relaxed) {
@@ -281,6 +371,12 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
             std::thread::sleep(Duration::from_millis(5));
             continue;
         }
+        // M18 P1: Space stops the clock (paced play only; a bench's run to its hold goes on)
+        if hold == u64::MAX && world.tick >= from && sh.paused.load(Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(20));
+            next_at = Instant::now();
+            continue;
+        }
         // paced: free running past --from; flat out to --from and to a bench's hold
         let paced = hold == u64::MAX && world.tick >= from;
         if paced && rate > 0.0 {
@@ -290,7 +386,7 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                 std::thread::sleep((next_at - now).min(Duration::from_millis(20)));
                 continue;
             }
-            next_at = next_at.max(now) + Duration::from_secs_f64(1.0 / rate);
+            next_at = next_at.max(now) + Duration::from_secs_f64(1.0 / (rate * sh.speed().max(1e-6)));
         } else if paced {
             // --rate 0: hold the frame
             std::thread::sleep(Duration::from_millis(20));
@@ -381,11 +477,73 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
             }
             seq += 1;
             let caption = format!("{}\n{line}", view::caption(&world, &frame, subject));
+            if possessed {
+                let hud = player_hud(&world, subject);
+                // the log's record of the body's day: each new plan, failure and autopilot switch
+                log_player(&hud, &mut last_logged);
+                *sh.player.lock().unwrap() = Some(hud);
+            }
             let p = Arc::new(Published { frame, subject, caption, at: Instant::now(), seq });
             let mut s = sh.slots.lock().unwrap();
             s.prev = s.latest.take();
             s.latest = Some(p);
             next_at = next_at.max(Instant::now());
         }
+    }
+}
+
+/// M18 P1: the possessed body's HUD state.
+fn player_hud(world: &World, id: EntityId) -> PlayerHud {
+    use citysim::components::{Job, Needs, Wallet};
+    let b = world.comp::<Brain>(id);
+    let n = world.comp::<Needs>(id);
+    let job = world.comp::<Job>(id).map_or("no job".to_string(), |j| {
+        let at = j.employer.map_or("-".to_string(), |e| world.name_of(e));
+        let shifts: Vec<String> =
+            j.shifts.iter().map(|(a, b)| format!("{:02}:{:02}-{:02}:{:02}", a / 60, a % 60, b / 60, b % 60)).collect();
+        format!("{:?} at {at}, {}c a day, {}", j.role, j.wage_per_day, shifts.join(" "))
+    });
+    let place = world.comp::<citysim::Position>(id).map_or("-".to_string(), |p| match p.building {
+        Some(b) => format!("in {} floor {}", world.name_of(b), p.floor),
+        None => format!("on the street at ({}, {})", p.tile.x, p.tile.y),
+    });
+    let pc = b.and_then(|b| b.player.as_ref());
+    PlayerHud {
+        name: world.name_of(id),
+        index: id.index,
+        day: world.tick / citysim::TICKS_PER_DAY,
+        clock: citysim::time::clock(world.tick),
+        autopilot: pc.is_some_and(|p| p.autopilot),
+        needs: n.map_or([0.0; 5], |n| [n.hunger, n.energy, n.safety, n.wealth, n.belonging]),
+        coins: world.comp::<Wallet>(id).map_or(0, |w| w.coins),
+        job,
+        place,
+        goal: b.and_then(|b| b.current_goal).map_or("-".to_string(), |g| format!("{g:?}")),
+        plan: citysim::systems::player::plan_line(world, id),
+        failure: pc
+            .and_then(|p| p.last_failure.as_ref())
+            .map(|(t, l)| format!("d{} {}: {l}", t / citysim::TICKS_PER_DAY, citysim::time::clock(*t))),
+    }
+}
+
+/// M18 P1: the possessed body's plan, failures and autopilot to the log when they change (the play session's record).
+fn log_player(hud: &PlayerHud, last: &mut (String, Option<String>, bool)) {
+    let at = format!("d{} {}", hud.day, hud.clock);
+    if hud.plan != last.0 {
+        eprintln!(
+            "player {at}: plan {} | {} | coins {} hunger {:.2} energy {:.2}",
+            hud.plan, hud.place, hud.coins, hud.needs[0], hud.needs[1]
+        );
+        last.0 = hud.plan.clone();
+    }
+    if hud.failure != last.1 {
+        if let Some(f) = &hud.failure {
+            eprintln!("player {at}: failed {f}");
+        }
+        last.1 = hud.failure.clone();
+    }
+    if hud.autopilot != last.2 {
+        eprintln!("player {at}: autopilot {}", if hud.autopilot { "on" } else { "off" });
+        last.2 = hud.autopilot;
     }
 }

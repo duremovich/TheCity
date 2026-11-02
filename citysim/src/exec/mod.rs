@@ -593,11 +593,12 @@ fn step_agent(world: &mut World, id: EntityId) {
             // L2 (L30, instrumentation): a bed step's abort names the bed
             // kind and the failing check.
             let detail = abort_detail(world, id, &step);
-            world.push_event(
-                EventKind::PlanAborted,
-                &[id],
-                format!("{goal:?} failed at {:?}: {reason:?}{detail}", step.action),
-            );
+            let line = format!("{goal:?} failed at {:?}: {reason:?}{detail}", step.action);
+            // M18 P1: the human reads why (the HUD).
+            if let Some(p) = world.comp_mut::<Brain>(id).and_then(|b| b.player.as_mut()) {
+                p.last_failure = Some((tick, line.clone()));
+            }
+            world.push_event(EventKind::PlanAborted, &[id], line);
             // Round 4 T3 (OPEN-222): an arrest chase that failed says so.
             if goal == Some(crate::components::GoalKind::Arrest) {
                 crate::systems::law::chase_dropped(world, id, None);
@@ -1043,7 +1044,9 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
             // Escort's target is the suspect, not the destination.
             let walk_target = if matches!(step.action, ActionKind::GoTo(_)) { step.target } else { None };
             let building = world.resolve_building(id, key, walk_target);
-            let Some(tile) = world.resolve_location(id, key, walk_target) else {
+            // M18 P1: a picked street tile is the step's own.
+            let picked = (key == LocationKey::Picked && building.is_none()).then_some(step.tile).flatten();
+            let Some(tile) = picked.or_else(|| world.resolve_location(id, key, walk_target)) else {
                 return StepResult::Failed(FailReason::NoSuchPlace);
             };
             let Some(pos) = world.comp::<Position>(id).cloned() else {
@@ -2622,7 +2625,8 @@ impl World {
             | LocationKey::Spot
             | LocationKey::Bin => None,
             // The pre-view pass phase 2: a stations spot's building.
-            LocationKey::Station => target.filter(|&t| self.has::<Building>(t)),
+            // M18 P1: a picked building.
+            LocationKey::Station | LocationKey::Picked => target.filter(|&t| self.has::<Building>(t)),
         }
     }
 

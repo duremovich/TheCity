@@ -118,6 +118,10 @@ pub enum LocationKey {
     /// cot is walked to as a cot, never as a "Hotel" (it was a Soup Kitchen
     /// or a Church under a plan named Hotel). Off, the cot stays `Hotel`.
     Cot,
+    /// M18 P1: a place a human picked for the body they drive (a click):
+    /// the step's `target` building (its door, then in), else the step's
+    /// `tile`. Directed plans only (`PlayerCommand::Steps`), never in `GOTO`.
+    Picked,
 }
 
 impl LocationKey {

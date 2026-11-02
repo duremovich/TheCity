@@ -33,6 +33,9 @@
 //! [--config PATH] [--reload-at TICK]: config hot-reload (the view milestone V1, OPEN-262, simthread.rs): the R key,
 //! a change of the file (default `assets/config.toml`) or the tick reloads it into the running world at a tick
 //! boundary (`citysim::reload`: the live keys applied, the build-time keys kept and reported in the log and the HUD).
+//! --save FILE --possess INDEX [--from TICK] [--play "T action; .."]: M18 P1 (play.rs): a human drives that adult
+//! (the follow-cam's subject, possessed at --from): the egui HUD, a left click walks there, T autopilot, Space pause,
+//! `,` / `.` the play speed, Backspace stop; --play scripts a session through the same paths (screenshots, quit).
 
 // Bevy systems take their params as arguments and query tuples as types: the two lints every Bevy crate allows.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -45,6 +48,7 @@ mod lots;
 mod mesh;
 mod occ;
 mod people;
+mod play;
 mod recplay;
 mod sim;
 mod simthread;
@@ -109,6 +113,10 @@ struct Args {
     capsules: bool,
     /// V4: --watch-vehicle INDEX: the camera on that vehicle (an El train's riders), the subject still drives the ring
     watch_vehicle: Option<u32>,
+    /// M18 P1: --possess INDEX: drive that adult (it is the subject: --follow INDEX implied)
+    possess: Option<u32>,
+    /// M18 P1: --play "T action; ..": a scripted play session (play.rs)
+    play: Option<String>,
 }
 
 /// A tick: a number, or `D:HH:MM` (day, hour, minute).
@@ -157,6 +165,8 @@ impl Args {
             reload_at: None,
             capsules: false,
             watch_vehicle: None,
+            possess: None,
+            play: None,
         };
         let v: Vec<String> = std::env::args().skip(1).collect();
         let mut i = 0;
@@ -272,6 +282,14 @@ impl Args {
                     a.reload_at = Some(parse_tick(&next(i)));
                     i += 1;
                 }
+                "--possess" => {
+                    a.possess = Some(next(i).parse().expect("--possess INDEX"));
+                    i += 1;
+                }
+                "--play" => {
+                    a.play = Some(next(i));
+                    i += 1;
+                }
                 "--trace-secs" => {
                     a.trace_secs = next(i).parse().unwrap();
                     i += 1;
@@ -280,6 +298,14 @@ impl Args {
             }
             i += 1;
         }
+        // M18 P1: the possessed body is the subject
+        if let Some(p) = a.possess {
+            assert!(a.follow.is_none_or(|f| f == p), "--possess {p} and --follow differ: the possessed body is the subject");
+            a.follow = Some(p);
+        }
+        assert!(a.possess.is_none() || a.save.is_some(), "--possess needs --save");
+        assert!(a.play.is_none() || a.possess.is_some(), "--play needs --possess");
+        assert!(a.possess.is_none() || a.bench.is_none(), "--possess plays, it is no bench (--play scripts a session)");
         // V6: a recording (`--sim REC.simrec.gz`) plays through the follow-cam: --follow, --rate, --from, --shots
         let rec = a.sim.as_deref().is_some_and(recplay::is_recording);
         assert!(a.save.is_none() || a.follow.is_some(), "--save needs --follow");
@@ -554,6 +580,8 @@ fn main() {
             // V1: the default is the repo root's config (the CLI runs from there), when it is there
             config: args.config.clone().or_else(|| Some(PathBuf::from("assets/config.toml")).filter(|p| p.is_file())),
             reload_at: args.reload_at,
+            possess: args.possess.is_some(),
+            speed: vcfg.play_speeds.first().copied().unwrap_or(1.0),
         }));
     }
     if let Some(shared) = shared {
@@ -561,7 +589,7 @@ fn main() {
         live.watch_vehicle = args.watch_vehicle;
         app.insert_resource(live)
             .insert_resource(glclient::SimDrives)
-            .insert_resource(bench::Shots { shared })
+            .insert_resource(bench::Shots { shared: shared.clone() })
             .add_systems(Startup, sim::setup_sim)
             .add_systems(
                 Update,
@@ -569,6 +597,11 @@ fn main() {
             );
         // V7: the junctions' signal heads around the subject
         lights::add(&mut app);
+        // M18 P1: the player's HUD, click and keys
+        if args.possess.is_some() {
+            let script = args.play.as_deref().map(|s| play::parse_script(s, parse_tick)).unwrap_or_default();
+            play::add(&mut app, shared.clone(), &vcfg, script, out.clone());
+        }
     }
     // V10: the light follows the sim's clock (a replay's or the live world's)
     app.add_systems(Update, sim::clock_light.after(sim::update_sim).before(cam::apply_view).run_if(resource_exists::<sim::Sim>));

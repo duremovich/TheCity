@@ -13,7 +13,7 @@ use crate::utility;
 use crate::world::World;
 
 /// Steps that a goal change must not abort.
-fn uninterruptible(brain: &Brain, now: crate::time::Tick) -> bool {
+pub(crate) fn uninterruptible(brain: &Brain, now: crate::time::Tick) -> bool {
     // M12 phase 4: a march that has left the muster is committed: the
     // marchers reach the door together instead of peeling off to bed.
     if brain.current_step().is_some_and(|s| {
@@ -67,14 +67,8 @@ fn uninterruptible(brain: &Brain, now: crate::time::Tick) -> bool {
 /// (its staggered slot, or an urgent think when its plan ended).
 fn turn(world: &World, id: EntityId, tick: crate::time::Tick, interval: u64) -> Option<bool> {
     let brain = world.comp::<Brain>(id)?;
-    if brain.lod == Lod::Statistical || world.has::<Sentence>(id) || brain.cuffed_by.is_some() || brain.emigrating {
-        return None;
-    }
-    // Round 6 V3 (`OPEN-238`): the downed never think, even in the tick a
-    // carrier's aborted plan let go of them (`wounded::tick_down` re-cuffs
-    // after): V14 `ceo_91004 d24 05:53` picked Flee while carried and
-    // carried the goal 72 h on the Ripperdoc's floor.
-    if crate::systems::wounded::is_down(world, id) {
+    // M18 P1: a body a human drives thinks only on autopilot.
+    if brain.possessed() || held(world, id).is_some() {
         return None;
     }
     let scheduled = tick % interval == u64::from(id.index) % interval;
@@ -82,6 +76,33 @@ fn turn(world: &World, id: EntityId, tick: crate::time::Tick, interval: u64) -> 
         && !brain.plan_queued
         && (brain.last_think.is_none() || tick.saturating_sub(brain.last_urgent_think_tick) >= interval);
     (scheduled || urgent).then_some(scheduled)
+}
+
+/// Why the body cannot choose what it does now (`None`: it can): Statistical,
+/// serving a sentence, cuffed, leaving the city, downed. Think skips such a
+/// body, and M18's player commands refuse it with the same words.
+pub fn held(world: &World, id: EntityId) -> Option<&'static str> {
+    let brain = world.comp::<Brain>(id)?;
+    if brain.lod == Lod::Statistical {
+        return Some("off camera (Statistical)");
+    }
+    if world.has::<Sentence>(id) {
+        return Some("serving a sentence");
+    }
+    if brain.cuffed_by.is_some() {
+        return Some("in cuffs");
+    }
+    if brain.emigrating {
+        return Some("leaving the city");
+    }
+    // Round 6 V3 (`OPEN-238`): the downed never think, even in the tick a
+    // carrier's aborted plan let go of them (`wounded::tick_down` re-cuffs
+    // after): V14 `ceo_91004 d24 05:53` picked Flee while carried and
+    // carried the goal 72 h on the Ripperdoc's floor.
+    if crate::systems::wounded::is_down(world, id) {
+        return Some("down");
+    }
+    None
 }
 
 /// The think slice: each body whose turn it is thinks, in id order.

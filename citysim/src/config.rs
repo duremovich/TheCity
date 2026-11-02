@@ -707,6 +707,19 @@ pub struct ViewCfg {
     pub record_half_tiles: u16,
     /// The recording's gzip level (0-9; flate2's `Compression`).
     pub record_gzip_level: u32,
+    /// M18 P1 (cityview's player HUD): the play speeds, multiples of the
+    /// walk-matched rate, the `,` / `.` keys step through (the first is the
+    /// start).
+    pub play_speeds: Vec<f64>,
+    /// M18 P1: a click farther than this many metres along the camera ray
+    /// hits nothing.
+    pub pick_reach_m: f32,
+    /// M18 P1: the ray's march step, metres (a thin wall is missed past it).
+    pub pick_step_m: f32,
+    /// M18 P1: a click on a roof or a wall walks into the sim's building
+    /// nearest the hit within this many tiles (the lots and the rects
+    /// disagree at their edges).
+    pub pick_snap_tiles: u16,
 }
 
 impl Default for ViewCfg {
@@ -772,6 +785,10 @@ impl Default for ViewCfg {
             crowd_gap_m: 0.9,
             record_half_tiles: 48,
             record_gzip_level: 6,
+            play_speeds: vec![1.0, 60.0, 600.0, 3600.0, 14400.0],
+            pick_reach_m: 3000.0,
+            pick_step_m: 0.5,
+            pick_snap_tiles: 2,
         }
     }
 }

@@ -37,6 +37,11 @@ pub fn run(world: &mut World) {
         if let Some(b) = world.comp_mut::<Brain>(id) {
             b.plan_queued = false;
         }
+        // M18 P1: a body a human drives (queued before it was possessed) is
+        // never planned for here; its plans come from the human's commands.
+        if world.comp::<Brain>(id).is_some_and(Brain::possessed) {
+            continue;
+        }
         if tick.saturating_sub(enqueued) > PLAN_QUEUE_MAX_AGE {
             world.plan_stale_drops += 1;
             continue; // stale: the agent idles until its next think
@@ -69,7 +74,8 @@ fn oldest_aged(world: &mut World, tick: Tick, promote: Tick) -> Option<((Urgency
 pub fn enqueue(world: &mut World, id: EntityId, urgency: f32) {
     let tick = world.tick;
     let Some(b) = world.comp_mut::<Brain>(id) else { return };
-    if b.plan_queued {
+    // M18 P1: the plan queue refuses a body a human drives (autopilot off).
+    if b.plan_queued || b.possessed() {
         return;
     }
     b.plan_queued = true;
@@ -636,7 +642,7 @@ fn claim_chain(ctx: &PlanCtx, ws: &WorldState) -> Option<Vec<ActionKind>> {
     })
 }
 
-fn install(world: &mut World, id: EntityId, plan: Plan) {
+pub(crate) fn install(world: &mut World, id: EntityId, plan: Plan) {
     // OPEN-138: a goal whose state already holds (an Earn with 7 meals of
     // savings) has nothing to plan. Its empty plan finished at once with no
     // cooldown and the goal won every think again: hours of standing still.
