@@ -4649,7 +4649,7 @@ p_hour = 0.5                       # a corp exec's office hour at the Hq ([life]
 max_per_shift = 6                  # at most this many beats a body a shift (an exec a day)
 salience = 0.3                     # a beat memory's salience, both sides (a Served memory's [service] served_salience scale)
 
-# The deck: `roles` a `[[trades]]` id, a built-in Role's name, "exec" (a corp exec at the Hq) or "*" (every shaped
+# The deck: `jobs` a `[[trades]]` id, a built-in Role's name, "exec" (a corp exec at the Hq) or "*" (every shaped
 # shift); `at` block | break | hour; `hours` [from, to) minutes of the day (from > to wraps midnight); `weight` among the
 # rows open at the seam; `who` colleague (hashed, present) | partner (the warmest edge present, so a lunch partner
 # recurs; none: hashed) | superior (the foreman present, else a higher grade) | boss (the person owner, else the corp's
@@ -4660,7 +4660,7 @@ salience = 0.3                     # a beat memory's salience, both sides (a Ser
 # shift too, and a break already shared draws nothing); `text` with {me}, {them}, {at}, {about}.
 [[work_beats]]
 id = "task"
-roles = ["*"]
+jobs = ["*"]
 weight = 2.0
 who = "superior"
 effect = "skill"
@@ -4672,16 +4672,16 @@ text = "{them} hands {me} a job that has to be done before the shift is out"
 
 [[work_beats]]
 id = "stop_by"
-roles = ["*"]
+jobs = ["*"]
 weight = 3.0
 who = "colleague"
 effect = "drift"
 valence = 0.1
-text = "{them} stops by {me}'s station at {at} to complain about the pay"
+text = "{them} stops by {me}'s spot at {at} to complain about the pay"
 
 [[work_beats]]
 id = "rumour"
-roles = ["*"]
+jobs = ["*"]
 weight = 2.0
 who = "colleague"
 effect = "rumour"
@@ -4690,20 +4690,20 @@ text = "{them} leans in at {at}: word is {about}"
 
 [[work_beats]]
 id = "walkthrough"
-roles = ["*"]
+jobs = ["*"]
 hours = [600, 1020]                # the boss's walk is a day-hours thing (10:00-17:00)
 weight = 1.0
 who = "boss"
 effect = "nudge"
 trust = 0.01
-memory = "Served"                  # seen by the boss: a Served memory, as a Meeting's attendee keeps
+memory = "Socialised"              # seen by the boss (not Served: that kind is the Lives at work encounters')
 valence = 0.0
 once = true
 text = "{them} walks the floor at {at}; {me} keeps their head down until it passes"
 
 [[work_beats]]
 id = "chewed_out"
-roles = ["*"]
+jobs = ["*"]
 weight = 0.7
 who = "superior"
 effect = "nudge"
@@ -4716,7 +4716,7 @@ text = "{them} tells {me} to pick up the pace, loud enough for the room"
 
 [[work_beats]]
 id = "lunch"
-roles = ["*"]
+jobs = ["*"]
 at = "break"
 weight = 3.0
 who = "partner"
@@ -4728,7 +4728,7 @@ text = "{me} and {them} take the break together, eating out of the same paper ba
 
 [[work_beats]]
 id = "break_alone"
-roles = ["*"]
+jobs = ["*"]
 at = "break"
 weight = 1.0
 who = "colleague"
@@ -4740,7 +4740,7 @@ text = "{me} takes the break alone; {them} doesn't look up"
 # Desks: the clerks, the office trades, the Lab and the Feed.
 [[work_beats]]
 id = "rush_file"
-roles = ["office_worker", "accountant", "civic_clerk", "Clerk", "manager", "broker", "engineer", "Researcher", "Reporter"]
+jobs = ["office_worker", "accountant", "civic_clerk", "Clerk", "manager", "broker", "engineer", "Researcher", "Reporter"]
 hours = [540, 960]                 # a rush file comes before 16:00
 weight = 2.0
 who = "superior"
@@ -4753,7 +4753,7 @@ text = "{them} drops a rush file on {me}'s desk at {at}: due by close"
 
 [[work_beats]]
 id = "wrong_figure"
-roles = ["office_worker", "accountant", "civic_clerk", "Clerk", "manager", "broker", "engineer", "Researcher", "Reporter"]
+jobs = ["office_worker", "accountant", "civic_clerk", "Clerk", "manager", "broker", "engineer", "Researcher", "Reporter"]
 weight = 0.8
 who = "colleague"
 effect = "nudge"
@@ -4766,7 +4766,7 @@ text = "{me} keys a figure wrong and {them} quietly fixes it before anyone upsta
 
 [[work_beats]]
 id = "partition"
-roles = ["office_worker", "accountant", "civic_clerk", "Clerk", "manager", "broker", "engineer", "Researcher", "Reporter"]
+jobs = ["office_worker", "accountant", "civic_clerk", "Clerk", "manager", "broker", "engineer", "Researcher", "Reporter"]
 weight = 2.0
 who = "colleague"
 effect = "drift"
@@ -4776,7 +4776,7 @@ text = "{them} talks over {me}'s partition about last night's feed until the flo
 # The floor: the plant, the yards, the shops.
 [[work_beats]]
 id = "jammed"
-roles = ["packer", "plant_operator", "loader", "depot_hand", "night_stocker", "driver", "builder", "Mechanic", "Fabber", "Farmer", "Sanitation"]
+jobs = ["packer", "plant_operator", "loader", "depot_hand", "night_stocker", "driver", "builder", "Mechanic", "Fabber", "Farmer", "Sanitation"]
 weight = 2.0
 who = "colleague"
 effect = "drift"
@@ -4786,7 +4786,7 @@ text = "{them} shouts {me} over to help clear a jam at {at}"
 
 [[work_beats]]
 id = "dropped"
-roles = ["packer", "plant_operator", "loader", "depot_hand", "night_stocker", "driver", "builder", "Mechanic", "Fabber", "Farmer", "Sanitation"]
+jobs = ["packer", "plant_operator", "loader", "depot_hand", "night_stocker", "driver", "builder", "Mechanic", "Fabber", "Farmer", "Sanitation"]
 weight = 0.8
 who = "colleague"
 effect = "nudge"
@@ -4799,7 +4799,7 @@ text = "{me} drops a load and {them} won't let it go for an hour"
 # The exec at the Hq (no blocks: the office hour).
 [[work_beats]]
 id = "exec_problem"
-roles = ["exec"]
+jobs = ["exec"]
 at = "hour"
 weight = 3.0
 who = "staff"
@@ -4810,7 +4810,7 @@ text = "{them} brings {me} a problem from the floor and leaves with a decision"
 
 [[work_beats]]
 id = "exec_tears"
-roles = ["exec"]
+jobs = ["exec"]
 at = "hour"
 weight = 1.0
 who = "staff"
@@ -4824,7 +4824,7 @@ text = "{me} tears into {them} over a missed number in front of the room"
 
 [[work_beats]]
 id = "exec_rumour"
-roles = ["exec"]
+jobs = ["exec"]
 at = "hour"
 weight = 1.5
 who = "staff"
@@ -4834,7 +4834,7 @@ text = "{them} lingers after the briefing to tell {me}: {about}"
 
 [[work_beats]]
 id = "exec_lunch"
-roles = ["exec"]
+jobs = ["exec"]
 at = "hour"
 hours = [720, 840]                 # 12:00-14:00
 weight = 4.0

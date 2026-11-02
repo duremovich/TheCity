@@ -58,7 +58,7 @@ pub fn on(world: &World) -> bool {
     world.config.work_beat.is_some() && !world.config.work_beats.is_empty()
 }
 
-/// The key a row's `roles` match: a trade's id, a built-in role's name.
+/// The key a row's `jobs` match: a trade's id, a built-in role's name.
 fn role_key(world: &World, role: Role) -> Option<String> {
     match role {
         Role::Trade(t) => world.config.trade(t).map(|c| c.id.clone()),
@@ -215,7 +215,7 @@ pub fn seam(world: &mut World, id: EntityId, post: EntityId, role: Option<Role>,
         if r.at != at || r.weight <= 0.0 || !in_band(tod, r.hours) {
             continue;
         }
-        let reaches = r.roles.iter().any(|x| Some(x) == rkey.as_ref() || (x == "*" && role.is_some()));
+        let reaches = r.jobs.iter().any(|x| Some(x) == rkey.as_ref() || (x == "*" && role.is_some()));
         if !reaches || (r.once && i < 64 && tally.fired & (1 << i) != 0) {
             continue;
         }

@@ -580,8 +580,11 @@ fn probe_gun_never_takes_a_hit_on_kin() {
         // does. Re-pinned again, the leftovers pass (OPEN-280, guards patrol
         // the whole shift): set up on day 3 he takes none in 6 days; on day
         // 4 he does.
+        // M18 W: and the work beats off (their edges and memories move the
+        // 4-day city off the gun this scene was pinned on).
         let mut cfg = common::r2(Config::load());
         cfg.household.enabled = false;
+        cfg.work_beat = None;
         let mut w = World::new(42, cfg);
         w.run_ticks(4 * TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
         let civ = civilians(&w);

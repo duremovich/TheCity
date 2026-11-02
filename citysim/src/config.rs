@@ -613,9 +613,9 @@ pub enum BeatEffect {
 #[serde(default)]
 pub struct WorkBeatRow {
     pub id: String,
-    /// The roles it reaches: `[[trades]]` ids, built-in `Role` names,
+    /// The jobs it reaches: `[[trades]]` ids, built-in `Role` names,
     /// `"exec"` (a corp exec at the Hq), `"*"` (every shaped shift).
-    pub roles: Vec<String>,
+    pub jobs: Vec<String>,
     pub at: BeatAt,
     /// `[from, to)` minutes of the day (`from > to` wraps midnight).
     pub hours: (u16, u16),
@@ -641,7 +641,7 @@ impl Default for WorkBeatRow {
     fn default() -> Self {
         WorkBeatRow {
             id: String::new(),
-            roles: Vec::new(),
+            jobs: Vec::new(),
             at: BeatAt::Block,
             hours: (0, 1440),
             weight: 1.0,
@@ -5753,11 +5753,11 @@ impl Config {
             }
         }
         // M18 W: a `[[work_beats]]` role is a trade id, a Role's name, "exec" or "*".
-        for r in self.work_beats.iter().flat_map(|b| b.roles.iter()) {
+        for r in self.work_beats.iter().flat_map(|b| b.jobs.iter()) {
             let trade = self.trades.iter().any(|t| &t.id == r);
             let legacy = Role::ALL.iter().any(|x| format!("{x:?}") == *r);
             if !trade && !legacy && r != "exec" && r != "*" {
-                out.push(format!("[[work_beats]] role {r:?} is neither a trade id nor a Role"));
+                out.push(format!("[[work_beats]] job {r:?} is neither a trade id nor a Role"));
             }
         }
         // Lives at work phase 6 (§ 4.1): a `[roles.<Name>]` key is a legacy role's name.

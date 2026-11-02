@@ -461,7 +461,7 @@ fn exchange_one(world: &mut World, from: EntityId, to: EntityId) -> Option<DeedR
             best = Some((score, key, e.tick, e.clone(), r));
         }
     }
-    let Some((_, _, _, src, mut r)) = best else { return None };
+    let (_, _, _, src, mut r) = best?;
     let trust = world.edge(to, from).map_or(0.0, |e| e.trust);
     let hop_salience = g.hop_salience;
     let key = crate::systems::fixes::told_key(from, to, &r, time::day(src.tick));
