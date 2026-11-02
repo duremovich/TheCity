@@ -58,7 +58,13 @@ pub fn class_in(world: &World, agent: EntityId, execs: &BTreeSet<EntityId>) -> C
 
 /// The agent's class (§ 7): Corp first (a homeless corp worker is Corp).
 pub fn class_of(world: &World, agent: EntityId) -> Class {
-    class_with(world, agent, &execs(world))
+    // The view milestone V2 (OPEN-265): the exec test without building the
+    // set of every corp's exec per call (a read per corp, no allocation; the
+    // Lounge's door asked it 1.86 M times at 100k's 21:00, 6 us each).
+    if world.corp_slice().iter().any(|&c| world.comp::<Corp>(c).is_some_and(|cc| cc.exec == Some(agent))) {
+        return Class::Corp;
+    }
+    class_with(world, agent, &BTreeSet::new())
 }
 
 /// The aggregate formulas of § 7 over one class's members' inputs:
