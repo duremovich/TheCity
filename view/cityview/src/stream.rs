@@ -148,6 +148,13 @@ impl Stream {
         let key = ((x / cm).floor() as i32, (y / cm).floor() as i32);
         self.grounds.get(&key).and_then(|g| mesh::ground_z(g, self.index.tile, x, y))
     }
+
+    /// V4: the ground tile's class at a point (data.rs: SIDEWALK, CARRIAGE, ...), when its chunk is loaded.
+    pub fn ground_class(&self, x: f32, y: f32) -> Option<u8> {
+        let cm = self.index.chunk_m;
+        let key = ((x / cm).floor() as i32, (y / cm).floor() as i32);
+        self.grounds.get(&key).and_then(|g| mesh::ground_class(g, self.index.tile, x, y))
+    }
 }
 
 fn build(dir: PathBuf, rec: ChunkRec, lod: u8, with_mass: bool, tile: f32, apron: i32, chunk_m: f32) -> Built {
