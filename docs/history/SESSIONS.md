@@ -1074,3 +1074,12 @@ fronts; 42 raids climb; the landlord hires a beating on a gang leader), the aven
 time, no minor harmed; the lift never queues, the camera's replay drifts from the diary within hours, and 100k runs
 at 11 ticks/s with a 14.5 s tick at 21:00 every day. `OPEN-158`, `187`, `191`, `204`, `240`, `241` closed; `OPEN-260`
 to `OPEN-271` opened. Cost ≈ $435 (HANDOFF § Cost).
+
+**2026-11-02, the thirty-first session: the view milestone (V1-V9, V8b) built and closed, Shadow V20.** Thirteen
+Opus phases: config hot-reload, the 21:00 stall and the steady-tick regressions (100k tps 13.5 -> 18.9), people drawn
+as TheCityGraphics' NPCs, riders and climbs, an orbit follow-cam with a cutaway (Dylan dropped locked iso and the
+portal), the ring's own budget, shadow recordings replayed on the diary's minute, lights and marked crossings (Dylan:
+no filler traffic, `OPEN-275`), the cells' week and the raid as bodies, the raid's muster, and the El revived (lines
+stopped at every bend). Shadow V20: exits 2, 3, 4, 6 met, 1 partial (the 00:11 hire), the pace by eye left to Dylan;
+no minor harmed; violence up with the cells' early release. `OPEN-149`, `255`, `262`, `264`, `270`, `271`, `276`,
+`277` closed; `OPEN-273` to `OPEN-283` opened. Cost ≈ $414 (HANDOFF § Cost).
