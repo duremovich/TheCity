@@ -303,8 +303,7 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                     .filter(|(id, _)| {
                         // the ones placed at work (a home placement reads the same way)
                         let work = world.comp::<citysim::components::Job>(**id).and_then(|j| j.employer);
-                        let at_work = work.is_some() && work == world.comp::<citysim::Position>(**id).and_then(|p| p.building);
-                        at_work
+                        work.is_some() && work == world.comp::<citysim::Position>(**id).and_then(|p| p.building)
                     })
                     .take(6)
                     .map(|(id, _)| *id)
