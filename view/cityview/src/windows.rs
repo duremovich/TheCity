@@ -230,7 +230,7 @@ pub fn update_haze(
     mut lm: ResMut<Assets<LayerMaterial>>,
     mut last: Local<Vec2>,
 ) {
-    let amount = if view.mode == Mode::Game && !view.day { HAZE_MAX } else { 0.0 };
+    let amount = if view.mode == Mode::Game { HAZE_MAX * (1.0 - view.light_t()) } else { 0.0 };
     let z = view.ground_z + HAZE_ABOVE;
     // only when it moved (a material change re-uploads its uniform)
     if (last.x - z).abs() < 0.5 && last.y == amount {

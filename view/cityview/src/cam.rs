@@ -10,7 +10,7 @@
 //!
 //! Keys: WASD / arrows pan (yaw-aligned; the overview's centre; with the player on, WASD walks it), Q / E rotate,
 //! Z / X pitch down / up, the wheel or - / = zoom, right- or middle-drag rotate and pitch, Tab game <-> overview,
-//! L night <-> day light (structure reading), M hide the massing (debug), P screenshot, H hud.
+//! L the light: the sim's clock (default; V10) -> day -> night -> the clock, M hide the massing (debug), P screenshot, H hud.
 
 use bevy::{
     camera::Hdr,
@@ -43,6 +43,36 @@ pub struct CamCfg {
     /// One wheel notch / key press multiplies the zoom by this (or divides)
     pub zoom_step: f32,
     pub far_m: f32,
+    /// V10: `[view] light_*`
+    pub light: LightCfg,
+}
+
+/// V10: `[view] light_*` (assets/config.toml documents each): the day and the night rigs and the hours between.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LightCfg {
+    pub dawn_h: f32,
+    pub dusk_h: f32,
+    pub twilight_h: f32,
+    pub day_sky: f32,
+    pub day_sun: f32,
+    pub day_ev100: f32,
+    pub night_sky: f32,
+    pub night_moon: f32,
+    pub night_ev100: f32,
+    pub bare_sky: f32,
+    pub bare_moon: f32,
+}
+
+impl LightCfg {
+    /// How much day it is at `hour` (0..24): 0 night, 1 day, a smoothstep over `twilight_h` centred on dawn and dusk.
+    pub fn daylight(&self, hour: f32) -> f32 {
+        let tw = self.twilight_h.max(1e-3);
+        let step = |x: f32| {
+            let x = x.clamp(0.0, 1.0);
+            x * x * (3.0 - 2.0 * x)
+        };
+        step((hour - self.dawn_h) / tw + 0.5).min(step((self.dusk_h - hour) / tw + 0.5))
+    }
 }
 
 impl CamCfg {
@@ -61,6 +91,19 @@ impl CamCfg {
             drag_px: v.cam_drag_deg_px.to_radians(),
             zoom_step: v.cam_zoom_step,
             far_m: v.cam_far_m,
+            light: LightCfg {
+                dawn_h: v.light_dawn_h,
+                dusk_h: v.light_dusk_h,
+                twilight_h: v.light_twilight_h,
+                day_sky: v.light_day_sky,
+                day_sun: v.light_day_sun,
+                day_ev100: v.light_day_ev100,
+                night_sky: v.light_night_sky,
+                night_moon: v.light_night_moon,
+                night_ev100: v.light_night_ev100,
+                bare_sky: v.light_bare_sky,
+                bare_moon: v.light_bare_moon,
+            },
         }
     }
 }
@@ -68,12 +111,21 @@ impl CamCfg {
 /// Night rig of the city view. glclient's (SPEC §LGT: world 0.05, moon 0.08) assumes a lamp-lit street; before
 /// P7 the city had no lamps, so massing and ground were black: a sky glow (an ambient in Grade A's fog hue, the
 /// light-polluted sky) and a stronger moon from the NW give the silhouettes. With the P7 street lamps loaded
-/// (`lamps`) the rig drops to 80 / 150 so their pools read (s30: at 250 / 400 the ambient flattened them).
-/// Env-tunable for look rounds (CV_SKY, CV_MOON).
-fn night(lamps: bool) -> (f32, f32) {
-    let f = |k: &str, d: f32| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
-    if lamps { (f("CV_SKY", 80.0), f("CV_MOON", 150.0)) } else { (f("CV_SKY", 250.0), f("CV_MOON", 400.0)) }
+/// (`lamps`) the rig drops (`[view] light_night_*`) so their pools read; without them `light_bare_*` (V10: from
+/// config, were the CV_SKY / CV_MOON env and literals).
+fn night(l: &LightCfg, lamps: bool) -> (f32, f32) {
+    if lamps { (l.night_sky, l.night_moon) } else { (l.bare_sky, l.bare_moon) }
 }
+/// V10: `a` toward `b` by `t` in log steps (light levels and exposures read in stops).
+fn mix_log(a: f32, b: f32, t: f32) -> f32 {
+    (a.max(1e-3).ln() * (1.0 - t) + b.max(1e-3).ln() * t).exp()
+}
+fn mix_color(a: Color, b: Color, t: f32) -> Color {
+    let (a, b) = (a.to_linear(), b.to_linear());
+    Color::LinearRgba(a * (1.0 - t) + b * t)
+}
+const DAY_SKY: Color = Color::srgb(0.75, 0.8, 0.9);
+const SUN: Color = Color::srgb(1.0, 0.96, 0.9);
 const SKY: Color = Color::srgb(0.40, 0.38, 0.48);
 const MOON: Color = Color::srgb(0.6, 0.65, 1.0);
 /// The overview's sky at the horizon: a lighter Grade A (#2A2040) so the ridge and coast silhouette. The clear
@@ -109,7 +161,10 @@ pub struct View {
     pub yaw: f32,
     pub pitch: f32,
     pub dist: f32,
-    pub day: bool,
+    /// V10: the L override (day, night); `None` follows the sim's clock (`daylight`)
+    pub day: Option<bool>,
+    /// V10: how much day the sim's clock says (0 night .. 1 day; no sim: night), sim.rs `clock_light`
+    pub daylight: f32,
     /// Debug: hide every massing mesh (M)
     pub hide_mass: bool,
     /// Bench / shots drive the view: keys off, the aim snaps (a shot shows the tick's place, not the ease)
@@ -122,6 +177,11 @@ pub struct View {
 }
 
 impl View {
+    /// V10: the light in use, 0 night .. 1 day: the L override, else the sim's clock.
+    pub fn light_t(&self) -> f32 {
+        self.day.map_or(self.daylight, |d| if d { 1.0 } else { 0.0 })
+    }
+
     pub fn new(at: Vec2, zoom: f32, island: Vec2, cfg: CamCfg, yaw_deg: f32, pitch_deg: f32, aspect: f32) -> View {
         let mut v = View {
             mode: Mode::Game,
@@ -136,7 +196,8 @@ impl View {
             yaw: std::f32::consts::FRAC_PI_4,
             pitch: 0.5,
             dist: 4800.0,
-            day: false,
+            day: None,
+            daylight: 0.0,
             hide_mass: false,
             scripted: false,
             player: false,
@@ -267,7 +328,7 @@ pub fn setup_camera(mut commands: Commands, view: Res<View>, street: Option<Res<
         cam.insert(bevy::core_pipeline::prepass::DepthPrepass);
     }
     // night (glclient / SPEC §LGT): a weak blue moon from the NW, near-zero ambient
-    let (sky, moon) = night(street.is_some());
+    let (sky, moon) = night(&view.cfg.light, street.is_some());
     commands.spawn((
         DirectionalLight { illuminance: moon, color: MOON, shadow_maps_enabled: false, ..default() },
         // from the NW (SPEC §LGT), high: lights the roofs and the NW faces a little
@@ -310,7 +371,11 @@ pub fn controls(
         view.mode = if view.mode == Mode::Game { Mode::Overview } else { Mode::Game };
     }
     if keys.just_pressed(KeyCode::KeyL) {
-        view.day = !view.day;
+        view.day = match view.day {
+            None => Some(true),
+            Some(true) => Some(false),
+            Some(false) => None,
+        };
     }
     if keys.just_pressed(KeyCode::KeyM) {
         view.hide_mass = !view.hide_mass;
@@ -434,10 +499,15 @@ pub fn apply_view(
         return;
     }
     let lamps = street.is_some();
+    // V10: the clock's (or L's) mix of the day and the night rigs
+    let lt = view.light_t();
+    let l = &view.cfg.light;
+    let (sky_n, moon_n) = night(l, lamps && view.mode == Mode::Game);
+    let dark = lt < 0.5;
     for (ent, mut t, mut p, mut e) in cam.iter_mut() {
         *t = view.transform();
         // haze only in the overview (the game view has the windows' height haze)
-        if view.mode == Mode::Overview && !view.day {
+        if view.mode == Mode::Overview && dark {
             commands.entity(ent).insert(DistanceFog {
                 color: horizon(),
                 falloff: FogFalloff::from_visibility_colors(24000.0, horizon(), horizon()),
@@ -457,25 +527,21 @@ pub fn apply_view(
         } else {
             *p = view.projection();
         }
-        // day: a debug sun to read the structure (not the look)
-        e.ev100 = if view.day { 13.0 } else { 9.1 };
+        // day: a debug sun to read the structure (not the look yet); the exposure moves in stops
+        e.ev100 = l.night_ev100 + (l.day_ev100 - l.night_ev100) * lt;
     }
+    // the moon's light turns into the sun's (one light from the NW)
     for mut m in moon.iter_mut() {
-        if view.day {
-            m.illuminance = 12000.0;
-            m.color = Color::srgb(1.0, 0.96, 0.9);
-        } else {
-            m.illuminance = night(lamps && view.mode == Mode::Game).1;
-            m.color = MOON;
-        }
+        m.illuminance = mix_log(moon_n, l.day_sun, lt);
+        m.color = mix_color(MOON, SUN, lt);
     }
     for mut g in glow_q.iter_mut() {
-        g.illuminance = if view.day { 0.0 } else { glow() };
+        g.illuminance = glow() * (1.0 - lt);
     }
-    ambient.brightness = if view.day { 1500.0 } else { night(lamps && view.mode == Mode::Game).0 };
-    ambient.color = if view.day { Color::srgb(0.75, 0.8, 0.9) } else { SKY };
+    ambient.brightness = mix_log(sky_n, l.day_sky, lt);
+    ambient.color = mix_color(SKY, DAY_SKY, lt);
     // the overview's horizon fades into the haze, not into black
-    clear.0 = if view.mode == Mode::Overview && !view.day { horizon() } else { Color::srgb(0.005, 0.005, 0.012) };
+    clear.0 = if view.mode == Mode::Overview && dark { horizon() } else { Color::srgb(0.005, 0.005, 0.012) };
     let a = view.aim.unwrap_or_else(|| view.goal());
     focus.at = bv(a.x, a.y, a.z - view.cfg.look_up_m);
     focus.zoom = view.zoom;

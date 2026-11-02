@@ -636,6 +636,26 @@ pub struct ViewCfg {
     pub cam_drag_deg_px: f32,
     pub cam_zoom_step: f32,
     pub cam_far_m: f32,
+    /// V10: the light follows the sim's clock: day from `light_dawn_h` to
+    /// `light_dusk_h`, night between, each change blended over
+    /// `light_twilight_h` hours centred on its hour (cityview `cam.rs`; L
+    /// overrides: day, night, the clock).
+    pub light_dawn_h: f32,
+    pub light_dusk_h: f32,
+    pub light_twilight_h: f32,
+    /// The day: the sky's ambient (cd/m^2-ish, Bevy's brightness), the sun
+    /// (lux) and the exposure (EV100).
+    pub light_day_sky: f32,
+    pub light_day_sun: f32,
+    pub light_day_ev100: f32,
+    /// The night with the street lamps loaded: the sky glow's ambient, the
+    /// moon (lux) and the exposure (EV100); `light_bare_*`: without lamps (an
+    /// old asset tree, the overview), brighter so the silhouettes read.
+    pub light_night_sky: f32,
+    pub light_night_moon: f32,
+    pub light_night_ev100: f32,
+    pub light_bare_sky: f32,
+    pub light_bare_moon: f32,
     /// V4b (glclient `occlusion.rs`): the cutaway. A box on the camera's
     /// side of the subject: its width across the camera-to-subject line, how
     /// far behind the feet it starts, the height over the feet above which
@@ -715,6 +735,17 @@ impl Default for ViewCfg {
             cam_drag_deg_px: 0.25,
             cam_zoom_step: 1.15,
             cam_far_m: 3000.0,
+            light_dawn_h: 6.0,
+            light_dusk_h: 19.0,
+            light_twilight_h: 1.0,
+            light_day_sky: 6000.0,
+            light_day_sun: 12000.0,
+            light_day_ev100: 13.0,
+            light_night_sky: 600.0,
+            light_night_moon: 900.0,
+            light_night_ev100: 8.8,
+            light_bare_sky: 250.0,
+            light_bare_moon: 400.0,
             cut_width_m: 36.0,
             cut_behind_m: 1.5,
             cut_above_m: 1.8,

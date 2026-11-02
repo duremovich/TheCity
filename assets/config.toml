@@ -5960,6 +5960,23 @@ cam_pitch_deg_s = 45.0             # Z / X
 cam_drag_deg_px = 0.25             # a right- or middle-drag: degrees of yaw / pitch per pixel
 cam_zoom_step = 1.15               # one wheel notch or - / = press scales the zoom by this
 cam_far_m = 3000.0                 # the far plane and the stream's reach (the skyline at the widest pitch)
+# V10 (cityview cam.rs): the light follows the sim's clock (L overrides: day, night, back to the clock). Day from
+# light_dawn_h to light_dusk_h, night between, each change blended over light_twilight_h hours centred on its hour (the
+# ambient, the sun / moon and the exposure in log steps, the colours straight). Live on a reload (R, the file watch).
+light_dawn_h = 6.0
+light_dusk_h = 19.0
+light_twilight_h = 1.0
+light_day_sky = 6000.0             # the day's sky ambient (Bevy brightness): an overcast day, the facades out of the sun read
+                                   # (V10; 1500 left them black). A debug sun, not the look yet
+light_day_sun = 12000.0            # the day's sun, lux, from the NW (the moon's direction)
+light_day_ev100 = 13.0             # the day's exposure
+light_night_sky = 600.0            # the night with the street lamps: the sky glow's ambient. V10 (Dylan: "the world feels very
+                                   # dark"): 80 / 150 / 9.1 left a 22:00 street black; 600 / 900 / 8.8 reads the bodies and the
+                                   # facades, the windows and signs still pop, the lamp pools are softer (P7 s30's trade)
+light_night_moon = 900.0           # the night's moon, lux, from the NW
+light_night_ev100 = 8.8            # the night's exposure (glclient's look was 9.1: the Blender renders' +0.6 EV over Bevy's 9.7)
+light_bare_sky = 250.0             # the night without lamps (an old asset tree, the overview): silhouettes need more sky
+light_bare_moon = 400.0
 # V4b (glclient occlusion.rs): the cutaway replaces the 6 m see-through capsule. Every building fragment on the camera's side
 # of the subject inside a box around the camera-to-subject line (from cut_behind_m behind the feet to past the camera) and
 # above the feet + cut_above_m is discarded, with a dither band at the box's edges; the subject's own building is cut to its

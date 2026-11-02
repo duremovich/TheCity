@@ -386,7 +386,7 @@ fn main() {
             view.pitch = p.to_radians();
         }
     }
-    view.day = args.day;
+    view.day = args.day.then_some(true);
     view.hide_mass = args.hide_mass;
     // a pinned block via glclient (P3: the first pin; glclient holds one City)
     // CV_NO_PIN=1: no pinned block (bench isolation)
@@ -570,6 +570,8 @@ fn main() {
         // V7: the junctions' signal heads around the subject
         lights::add(&mut app);
     }
+    // V10: the light follows the sim's clock (a replay's or the live world's)
+    app.add_systems(Update, sim::clock_light.after(sim::update_sim).before(cam::apply_view).run_if(resource_exists::<sim::Sim>));
     // V3: people drawn as people (people.rs)
     if args.sim.is_some() || args.save.is_some() {
         people::add(&mut app, args.capsules);
