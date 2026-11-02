@@ -14,10 +14,11 @@ One line per live document: what it is and when to read it. Everything supersede
 ## The vision and the order of work
 
 - `VISION.md`: the end state (revenge chains, fixers, contracts, the player's life paths). The why behind every spec.
-- `ROADMAP_POST_M14.md`: the milestones after M14 and the addenda (Dylan's directives, dated).
-- `LIVES_AT_WORK.md`: the next milestone (work has a counterpart, evenings and households, ages and leaders lead, 20k scale). Dylan's answers recorded.
+- `ROADMAP_POST_M14.md`: the milestones after M14 and the addenda (Dylan's directives, dated; addendum 23 is the player slice).
+- `BIG_PICTURE_2026-11-02.md`: the step-back review before M18 (why work and gangs read thin, the shortest path to playable, scope, code health) and Dylan's seven decisions: the player slice next, at 20k.
+- `LIVES_AT_WORK.md`: work has a counterpart, evenings and households, ages and leaders lead, 20k scale (closed 2026-10-19). Dylan's answers recorded.
 - `VIEW_MILESTONE.md`: the view milestone (closed 2026-11-02): config hot-reload, perf, people drawn as people, riders, the orbit camera and cutaway, the ring, the replay, crossings, the cells, the El; gate `SHADOW_V20.md` and `shadow_v20/` (brief `plans/shadow_v20.md`).
-- `M18_PLAYER.md`: the player character after it.
+- `M18_PLAYER.md`: **the next milestone**, the player slice (rewritten 2026-11-02): a nobody in the Sump for 14 days at 20k in cityview; P1 the seam, P2 verbs, W work beats, P3 the board and talk, P4 consequences, P5 start and loop (exit: Dylan plays 30 minutes cold), P6 founding optional. The old 494-line spec is `git show 2c2e0fd:docs/M18_PLAYER.md`.
 
 ## Milestone specs (closed; the why and the "Implemented: deviations" of each)
 

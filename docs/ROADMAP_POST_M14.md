@@ -14,7 +14,7 @@ Companion to `VISION.md`, `M10_SCALE.md` and `M11_OWNERSHIP.md`. Drafted 2026-10
 | **M15 Word and blood** | Gossip along edges, reputation from what is known, grudges, the Hunt goal, revenge chains, social stats and the social move, the psychological LOD table. |
 | **M16 Contracts** | The contract entity, Fixers and hired guns, hits, leverage moves (hostage, extortion, blackmail, threats, fraud), bounties, the law's accessory rule; the open contracts are the quest board. |
 | **M17 The outside world** | Parents outside the city at ledger LOD: megacorps, syndicates, the state; remittance, reinforcement, collapse; Virt and economic warfare as the only weapons that reach a parent. |
-| **M18 The player** | The player as one more pinned agent, founding through the NPC entry points, the dialogue layer as a renderer over social state, story LOD following the player's circle. |
+| **M18 The player** | The player as one more pinned agent, founding through the NPC entry points, the dialogue layer as a renderer over social state, story LOD following the player's circle. **Rewritten 2026-11-02 as the player slice** (addendum 23, `docs/M18_PLAYER.md`): a nobody in the Sump for 14 days at 20k in cityview; the dialogue layer and the circle are out of it. |
 
 ### Between M15 and M16, and the split (2026-10-08, addendum 16)
 
@@ -24,19 +24,46 @@ Companion to `VISION.md`, `M10_SCALE.md` and `M11_OWNERSHIP.md`. Drafted 2026-10
 | **M16a Contracts** | the contract entity, the Fixer, Hit/Beat/Guard/Locate, missions at three LODs, the accessory rule, the board (`docs/M16_CONTRACTS.md` "M16a and M16b"). |
 | **M16b Leverage** | coercion, blackmail, hostages and private prisons, the wounded and Rescue and Trauma Team, boards and votes, tags and scanners, fraud, protection, the remaining contract kinds. |
 
+### Built between M15 and the player slice (2026-10-08 to 2026-11-02; none of it was on the table above)
+
+Every row is closed; its doc holds the why and the "Implemented: deviations". M16a/b and M17 ran inside this
+stretch too (their rows above). The order is the order built.
+
+| Milestone or pass | Scope | Doc |
+| --- | --- | --- |
+| Life pass L2, the living city (2026-10-08) | the jobs economy and leisure venues, the fun need and the street, the LOD budget, off-screen faction violence, a 365-day run | `LIFE_L2.md` |
+| The Real economy (2026-10-09) | wages from revenue, the World as the market, the dole and public works gone, Missions, the child work camp | `ECONOMY_V2.md` |
+| Jobs and room, Jobs and lives (2026-10-09 to 10-14) | the trades, the labour market, vice, the street, weapons, ages, the gray market, faith, dress | `JOBS_V2.md`, `JOBS_AND_LIVES.md` |
+| Class pay (2026-10-10) | graded posts and tiered wages | `CLASS_PAY.md` |
+| Policy levers (2026-10-10) | the switches retired; the safety net as `[policy]` levers, off by default | `P10_POLICY.md` |
+| Hunger as sickness (2026-10-10) | synth food, malnutrition, the bins, clinics | `HUNGER_SICKNESS.md` |
+| The Hit market (2026-10-10) | organic paid kills, the Fixer's book | `HIT_MARKET.md` |
+| Transit (2026-10-10 to 10-12) | the El | `TRANSIT.md` |
+| Scale 20k (2026-10-11 to 10-12) | 20,000 residents on the island, the Ambient tier | `SCALE_20K.md`, `IMPORT_GRAPHICS.md` |
+| Lives at work (2026-10-17 to 10-19) | work with a counterpart, the evening and the household, careers, leaders lead | `LIVES_AT_WORK.md` |
+| The pre-view pass (2026-10-20 to 10-22) | shift shapes, encounters that need bodies, the dead trades | `PREVIEW_PASS.md` |
+| The island pass (2026-10-22 to 10-24) | the island holds 20k: distance in every pick, company housing, vehicles and trains with riders | `ISLAND_PASS.md` |
+| The perf pass (2026-10-24 to 10-26) | toward 100k: the index work, parallel scoring, the P9 re-import | `PERF_PASS.md`, `POPULATION_STUDY.md` |
+| The pressure pass (2026-10-26 to 10-31) | misery acts, the dead trades get customers, protection, reach; nine rounds, Shadow V10-V18 | `PRESSURE_PASS.md` |
+| Turf (2026-10-28, inside the pressure pass) | ground a gang holds, pays for and fights over | `TURF.md` |
+| The city milestone (2026-10-30 to 11-01) | the Bevy client joins the workspace, the 100k re-import, the vertical city as pathed levels | `CITY_MILESTONE.md` |
+| The view milestone (2026-11-01 to 11-02) | the orbit follow-cam and cutaway, people drawn as people, the ring Full, crossings, the cells, the El, the light; Shadow V20 | `VIEW_MILESTONE.md` |
+
 ### After M18 (the addenda that have no milestone yet; the order is a sketch)
+
+Status marks added 2026-11-02 (addendum 23).
 
 | Milestone | Scope | From |
 | --- | --- | --- |
 | The late calibration milestone | a knob census (51 config sections), the printed findings judged together, prices and bands reset on the wage economy, the god and shadow gaps triaged | addendum 16, `docs/history/BIG_PICTURE_2026-10-07.md` |
-| Ambient LOD and the player view | the density ledger per district and hour, promotion with real errands, travel mode and company as a unit, the local disturbance field, the camera | addendum 13 |
+| Ambient LOD and the player view (**built**: the Ambient tier at 20k and 100k, the camera ring, view milestone V5) | the density ledger per district and hour, promotion with real errands, travel mode and company as a unit, the local disturbance field, the camera | addendum 13 |
 | Goods, Power and Water | typed goods with production chains, generators by tier, a per-building powered state read by security and ICE, water as a Farm input and a need; corp scrip valued by the outside ledger | addenda 2, 9 |
-| Interiors and verticality | room templates per kind, capacity from room area, upgrades as the physical Security and Power profiles, stairs and elevators as layer portals, a `z` on tile positions | addendum 10 |
+| Interiors and verticality (**partly built**: floors as tenancies, stairs, lifts and a `z` in the city milestone; room templates after v1) | room templates per kind, capacity from room area, upgrades as the physical Security and Power profiles, stairs and elevators as layer portals, a `z` on tile positions | addendum 10 |
 | Destruction, wreckage and the news | a `Damage` tile state generalising litter, rails, projectile misses, repair as a posted job; news outlets already stand (M15) | addendum 6 |
 | The dialogue layer | the generated dialogue tree as a renderer over the social state (M18 ships the template writer) | VISION "Dialogue, leverage and the social stats" |
-| Daemons and the Blackwall | bodiless brains on Virt nodes gated by servers, rogue by cheapness, the Blackwall owned by the outside world | addendum 11 (candidate) |
-| World state and cataclysms | the `WorldState` ledger, cataclysms as a trigger-and-effect table composed from god commands, a chronicle | addendum 12 |
-| The character view | the eventual view: an isometric RPG camera following a single character, maybe a squad (corrected from "first person" 2026-10-08); the life-path playtests run against it | VISION "The view", addendum 14 |
+| Daemons and the Blackwall (**parked 2026-11-02**) | bodiless brains on Virt nodes gated by servers, rogue by cheapness, the Blackwall owned by the outside world | addendum 11 (candidate) |
+| World state and cataclysms (**parked 2026-11-02**) | the `WorldState` ledger, cataclysms as a trigger-and-effect table composed from god commands, a chronicle | addendum 12 |
+| The character view (**built**, the view milestone) | the view: an orbit perspective follow-cam on a single character with a cutaway (CLAUDE.md, 2026-11-01; was "an isometric RPG camera", itself corrected from "first person" 2026-10-08; the squad parked 2026-11-02); the life-path playtests run against it | VISION "The view", addendum 14 |
 
 ### Dependencies
 
@@ -288,6 +315,8 @@ One daily pass at `tick_of_day == 0`, after the corp and gang brains, O(parents 
 
 ## M18 The player
 
+**Superseded 2026-11-02 by the player slice** (addendum 23, `docs/M18_PLAYER.md`); kept as the original sketch. Its replay acceptance and tps floor are dropped (the 2026-10-26 doctrine), and the view is the orbit follow-cam, not isometric.
+
 **Purpose.** *Break, take over, or simply exist.* The player is one more agent with a human brain. This is the integration milestone: it adds input, a camera and the dialogue renderer, and no mechanics the city does not already use.
 
 ### Data model
@@ -306,7 +335,7 @@ pub enum PlayerCommand { /* … */ Step(PlanStep), Move(SocialMove), Coerce(Coer
 - **Input** writes `Brain.plan` steps (`Goto`, `Use`, `Wait`) through `PlayerCommand::Step`; exec runs them exactly as for an NPC (`thecity-player-character-later`). Founding is `Register` and the `JoinGang` bootstrap; jobs are `TakeContract`.
 - **Dialogue layer.** A renderer, never a source of truth. When the player is in conversation range of an NPC, the app builds a context from sim state (identity, Personality, the edge, the NPC's memories of the player and their circle, grudges, open contracts they hold, reputations) and asks a language model for a tree whose every leaf is a legal sim action: a `SocialMove`, a gossip exchange (`MemoryRef` passed), a contract offer, a coercion. The chosen leaf goes through `PlayerCommand`; the command log replays without the model. Overhearing: an NPC–NPC gossip or social move within hearing range of the player is rendered as lines from the same context.
 - **Story LOD.** Agents in the player's `Circle` (a salient interaction in the last 30 days, cap 24) are pinned at least Coarse, Full within view; a new memory of salience ≥ 0.6 in a circle member about the player or a shared edge emits a `Message` to the player, daily batched.
-- **The isometric character view** (a single character, maybe a squad; corrected from "first person" 2026-10-08) is the eventual view; this milestone ships the current app with the player agent and a following camera and leaves the view's own work to its milestone.
+- **The character view** (a single character from above; corrected from "first person" 2026-10-08, from "isometric" 2026-11-01) is the eventual view; this milestone ships the current app with the player agent and a following camera and leaves the view's own work to its milestone. (2026-11-02: the view milestone built the client first; the slice runs in it.)
 
 ### Acceptance
 
@@ -322,7 +351,7 @@ pub enum PlayerCommand { /* … */ Step(PlanStep), Move(SocialMove), Coerce(Coer
 | Where the model runs | In the app, outside the deterministic sim, producing only choices among legal actions. |
 | What the model may invent | Wording and tone. Never facts: names, deeds, prices and places come from the context. |
 
-**Out of scope:** the isometric character renderer (the view milestone after M18), voice, multiplayer, a scripted main story.
+**Out of scope:** the character renderer (built first, by the view milestone, 2026-11-02), voice, multiplayer, a scripted main story.
 
 ## Addendum (2026-10-05, Dylan): governance, missions, combat maps
 
@@ -440,9 +469,11 @@ Folded into the sketches above rather than a milestone of their own:
 
 ## Addendum 16 (2026-10-07, Dylan): the path to the player, decided after the big-picture review
 
+**Superseded in part.** The order and "the directive" (no review until M18) were overtaken by addenda 20-22 (M18 after the 3D view, story before structure, the pressure pass's exit) and by addendum 23 (a big-picture review on 2026-11-02, the player slice next). The ticks rule is CLAUDE.md's (a print, never a tune). Kept as written.
+
 `docs/history/BIG_PICTURE_2026-10-07.md` found three cracks in the base city (throughput sliding 3x over a run, the dole as the economy, no off-screen killings) and proposed a milestone on them before M16. Dylan's decision, and the standing directive from here to M18:
 
-- **The order**: M15 phase 5 (gate, god scenarios, docs, review; calibration scoped to dynamic range of the reputation axes, not band-hitting) → **Life pass L2 widened into a milestone, "the living city"** (`docs/LIFE_L2.md`: the jobs economy of addendum 15 with wages over the dole and a second production chain, Statistical violence driven by the faction layer, a forced-class LOD budget and the plan churn, a 365-day sanity run; re-shadowed afterwards) → **M16 split into 16a** (the contract entity, the Fixer, Hit/Beat/Guard/Locate, the accessory rule, the board) **and 16b** (leverage, hostages, the wounded, boards and votes, tags) → M17 → M18 → the late calibration milestone (a knob census, the printed findings judged together, prices reset on the wage economy) → the roadmap table extended past M18 (ambient LOD, interiors and verticality, destruction, goods/Power/Water, the dialogue layer, daemons, cataclysms, the isometric character view).
+- **The order**: M15 phase 5 (gate, god scenarios, docs, review; calibration scoped to dynamic range of the reputation axes, not band-hitting) → **Life pass L2 widened into a milestone, "the living city"** (`docs/LIFE_L2.md`: the jobs economy of addendum 15 with wages over the dole and a second production chain, Statistical violence driven by the faction layer, a forced-class LOD budget and the plan churn, a 365-day sanity run; re-shadowed afterwards) → **M16 split into 16a** (the contract entity, the Fixer, Hit/Beat/Guard/Locate, the accessory rule, the board) **and 16b** (leverage, hostages, the wounded, boards and votes, tags) → M17 → M18 → the late calibration milestone (a knob census, the printed findings judged together, prices reset on the wage economy) → the roadmap table extended past M18 (ambient LOD, interiors and verticality, destruction, goods/Power/Water, the dialogue layer, daemons, cataclysms, the character view).
 - **The directive**: keep pushing through the remaining phases without stopping for a review session until the Player Character (M18) is reached. Orchestrate: coders in worktrees, phases in parallel where they are independent, a spec review per phase, a `/code-review` per milestone, every gate on main before a merge.
 - **At M18**: shadow runs again, following a variety of NPCs through their days (`citysim-cli shadow`, the V2 tool notes in `docs/history/SHADOW_V1.md`), to find where the simulation must grow to feel true to a life in a cyberpunk city. Those gaps are the backlog after M18.
 - **The outside world drives demand** (M17): Dylan expects the outside ledger to buy what the city's megacorps make and sell (goods, Data, chrome, decks), so the city's economy has an export sink beyond its own 2,000 wallets. L2 should leave the hook (an export flow from a World account, priced by the outside) and M17 should fill it; this is the second half of the dole-economy fix.
@@ -453,9 +484,11 @@ Folded into the sketches above rather than a milestone of their own:
 - **The unpaid-worker dole is gone.** L2 phase 5 let a Job holder draw the dole until their first wage or while owed two days' wages, and the shadow fixes let an absentee draw it; Dylan: "a little too Utopian for our world". Removed. New hires who cannot feed themselves before the first wage starve, and that is the tone.
 - **Keep the world devoid of a social safety net.** No new mechanism may add one.
 - **Charities and churches** as a later feature: a building kind whose owner does a little work helping people (a meal, a bed, a clinic hour), funded only by **donations**, which are slim; the Purist Chapel is the existing seed of the shape. A player who donates a lot to a charity should see a neighbourhood improve (fewer starving, fewer Dregs, lower unrest in that district), which is a lever the player can feel. Lands with the leisure/roles pass after M18 or the goods milestone; a `Donate` flow and a charity's purse are the hook.
-- **Open question (Dylan to decide):** whether the city's base dole (`dole_per_day` 4 since M1, today the city's main money loop at four times the wage bill) also goes, replaced by charity and wages. That is a milestone-sized change to the economy (it needs M17's export demand or more employers first); until decided, the base dole stays.
+- *(Superseded: answered by addenda 18-19, then by CLAUDE.md's standing decision: the dole and school meals are `[policy]` levers, off by default, `P10_POLICY.md`.)* **Open question (Dylan to decide):** whether the city's base dole (`dole_per_day` 4 since M1, today the city's main money loop at four times the wage bill) also goes, replaced by charity and wages. That is a milestone-sized change to the economy (it needs M17's export demand or more employers first); until decided, the base dole stays.
 
 ## Addendum 18 (2026-10-08, Dylan): a real economy, not magic wages
+
+*The dole and public works below: superseded by CLAUDE.md's standing decision (no safety net; the dole and school meals are `[policy]` levers seeded off, `P10_POLICY.md`); the Real economy is built (`ECONOMY_V2.md`).*
 
 Dylan: "We should figure out how to build a real economy, not give people magic wages. If we need to infuse 'artificial' money to keep the system running, we can play with the levers of the global economy to change the supply and demand for the city."
 
@@ -467,7 +500,7 @@ Dylan: "We should figure out how to build a real economy, not give people magic 
 ## Addendum 19 (2026-10-08, Dylan): the Real-economy milestone goes before M16a; no school meals; the child work camp
 
 - **Sequencing**: the Real-economy milestone (`docs/ECONOMY_V2.md`) is built next, after M16a phase 1 (the board and the money, finished groundwork) merges and before M16a's phases 2-5. Then M16a, M16b, M17 (the rest of the outside world: parents, remittances, scrip), M18.
-- **No school meals.** Dylan: "Even the real world doesn't have free school lunches in the US." The last Treasury transfer to a wallet or a pantry goes with the dole.
+- *(Superseded: school meals are a `[policy]` lever, off by default; CLAUDE.md, P10 2026-10-11.)* **No school meals.** Dylan: "Even the real world doesn't have free school lunches in the US." The last Treasury transfer to a wallet or a pantry goes with the dole.
 - **The child work camp** (a dystopian answer so that there are no child deaths by starvation without a safety net): a **child protective service** takes a child whose hunger has stayed below a threshold for some days (`ChildTaken`: a Life row, a `Grief`-class memory and a grudge on the service for the parents, a story the Feeds run) and sends them to a **work camp**, a building kind owned by a corp (or the city) that feeds them from the revenue of their labour (a camp shift producing goods for the owner: Parts, food processing, Data entry at a Lab tier), houses them at the camp, and releases them at adulthood with a `CampRaised` trait (skills from the work, low affinity to the family, a grudge or a loyalty depending on how the camp fed them). A camp that cannot feed its children is a scandal the Feeds carry and the law may close; freeing children from a camp is a mission (M16b's private prisons and Rescue). The camp's labour is not magic money: it is production sold like any other.
 
 ## Addendum 20 (2026-10-20, Dylan): M18 after the 3D view; the camera's LOD; no day-0 start
@@ -519,3 +552,27 @@ had no exit, and far travel recurred in every read from V12 as a map problem pat
   real portals, footbridges between towers; below ground is not in this milestone. (3) **This session's agents may
   write TheCityGraphics** (its own branches, its HANDOFF and DECISIONS) for the El on rail, the duplicate tram and the
   100k export, so the milestone runs end to end from TheCity.
+
+## Addendum 23 (2026-11-02, Dylan): the player slice next
+
+After `docs/BIG_PICTURE_2026-11-02.md`, the first product-level review since 2026-10-07: four reviewers found the
+direction right at the top and drifting underneath (the player 0 lines of code and deferred four times, addenda 16,
+20, 21, 22; "the work and the gangs read thin" in every shadow since V10). Dylan took every recommendation, with
+decision 4 amended:
+
+| # | question | decided |
+|---|---|---|
+| 1 | The player slice next, ahead of more sim passes | yes (`docs/M18_PLAYER.md`, rewritten as the slice: P1 the seam, P2 verbs, W work beats, P3 the board and talk, P4 consequences, P5 start and loop, P6 founding optional) |
+| 2 | The slice runs at 20k; 100k stays the shipped city, read at closes | yes |
+| 3 | M18_PLAYER.md replaced by ~20 lines per phase; its gates and menus dropped | yes |
+| 4 | Whole-city shadow-and-fix rounds stop; play sessions drive the backlog | yes, amended (Dylan): shadows stay as the check that NPCs live full lives, run at major milestone closes to find weirdness (findings become OPEN rows, not the next round); a phase that changes NPC behaviour still reads its archetypes |
+| 5 | The combat model (`OPEN-179`) in the slice or after it | after P4, if fights read as a dice roll |
+| 6 | `citysim-app` (the macroquad debug app) retired once P1 lands | yes (the slice retires it in P5) |
+| 7 | The hygiene and docs phases before P1 | yes |
+
+- **Frozen until the slice reads:** `OPEN-278`, `285`, `287`, `265`, traffic (`OPEN-275`), lighting (`OPEN-284`),
+  chrome on credit (`OPEN-286`), calibration. `OPEN-280`, `281`, `282` finish and merge regardless.
+- **Parked** (VISION, marked in place): daemons, the majordomo and the squad, world state and cataclysms, combat
+  maps, the dystopia as a contest.
+- **The ledger:** the OPEN rows a player in the slice would hit are owned by `M18 slice`; stale rows were closed after
+  a per-row check.
