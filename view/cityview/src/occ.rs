@@ -192,7 +192,8 @@ pub fn place_bodies(
         let p = player.pos + LIGHT_AT;
         t.translation = bv(p.x, p.y, p.z);
     }
-    let rot = Quat::from_rotation_y(player.facing);
+    // V3: the NPC glbs face +z (Blender's -Y), south at heading 0: turned half round to face the heading
+    let rot = Quat::from_rotation_y(player.facing + std::f32::consts::PI);
     for (b, mut t, mut vis) in q.iter_mut() {
         vis.set_if_neq(if player.on { Visibility::Inherited } else { Visibility::Hidden });
         let mut p = player.pos;

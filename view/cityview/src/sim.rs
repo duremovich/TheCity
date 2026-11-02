@@ -6,7 +6,9 @@
 //! Colours (CV_SIM_COLOUR=lod switches): by action, walk green, use amber, idle slate, wait violet, ride / aboard
 //! cyan, timed (a Coarse jump) magenta, fly white; by LOD, Full green, Coarse amber, Statistical red. An agent inside
 //! a building is drawn on its storey (the city milestone C6a: the frame's `floor`, a 4 m ground and 3 m storeys over
-//! the ground at its building's tile), seen where the occlusion cuts the building away; the HUD counts them.
+//! the ground at its building's tile), seen where the occlusion cuts the building away; the HUD counts them. V3: it is
+//! drawn only there (the subject's storey of its building, inside the open cut), else hidden; the bodies go to
+//! people.rs as characters (`Sim::people`), the capsules stay behind `--capsules`.
 //! Positions are tile centres plus a per-id jitter inside the 4 m tile, on the streamed ground; a train sits on the
 //! rail deck (layers.json), the tram and the lines with no track here on the street (OPEN-158: drawn red, raised).
 //!
@@ -38,6 +40,14 @@ pub struct Agent {
     /// The vehicle it is aboard (its key)
     pub aboard: Option<u64>,
     pub facing: Option<f32>,
+    /// V3: the building it is inside (its key), and the look's keys (people.rs): sex, age (years), dress, a gang's
+    pub b: Option<u64>,
+    pub female: bool,
+    pub age: u32,
+    pub dress: u8,
+    pub gang: bool,
+    /// V3: indoors, its building's rect (tiles `[x, y, w, h]`): drawn inside it, not at the door tile it stands on
+    pub rect: Option<[f32; 4]>,
 }
 
 #[derive(Clone)]
@@ -104,6 +114,13 @@ pub struct Sim {
     pub caption: String,
     /// The subject's place this frame (feet, metres) and heading (rad, the player's convention) for the follow-cam
     pub subject_at: Option<(Vec3, f32)>,
+    /// V3 (people.rs): the bodies to draw this frame (the subject apart: the player stand-in wears it), the last
+    /// heading drawn per body (a standing body keeps it), `--capsules` (the old placeholders), `[view] indoor_cut_m`
+    pub people: Vec<crate::people::BodyDraw>,
+    pub subject_body: Option<crate::people::BodyDraw>,
+    pub yaw_of: HashMap<u64, f32>,
+    pub capsules: bool,
+    pub indoor_cut_m: f32,
 }
 
 fn ekey(e: citysim::EntityId) -> u64 {
@@ -147,6 +164,12 @@ impl SimFrame {
                 },
                 aboard: a.aboard.map(ekey),
                 facing: a.facing,
+                b: a.b.map(ekey),
+                female: a.sex == citysim::Sex::Female,
+                age: a.age,
+                dress: a.dress.unwrap_or(1),
+                gang: a.colours.is_some(),
+                rect: a.rect.map(|r| [f32::from(r.x), f32::from(r.y), f32::from(r.w), f32::from(r.h)]),
             })
             .collect();
         let vehicles = f
@@ -301,6 +324,12 @@ impl Sim {
                         act: ACTS.iter().position(|s| *s == act).unwrap_or(2) as u8,
                         aboard: (!a["aboard"].is_null()).then(|| key(&a["aboard"])),
                         facing: a["facing"].as_f64().map(|h| h as f32),
+                        b: (!a["b"].is_null()).then(|| key(&a["b"])),
+                        female: a["sex"].as_str() == Some("Female"),
+                        age: a["age"].as_u64().map_or(30, |v| v as u32),
+                        dress: a["dress"].as_u64().map_or(1, |v| v as u8),
+                        gang: !a["colours"].is_null(),
+                        rect: None,
                     }
                 })
                 .collect();
@@ -357,6 +386,11 @@ impl Sim {
             subject: None,
             caption: String::new(),
             subject_at: None,
+            people: vec![],
+            subject_body: None,
+            yaw_of: HashMap::new(),
+            capsules: false,
+            indoor_cut_m: 6.0,
         }
     }
 
@@ -385,6 +419,11 @@ impl Sim {
             subject: None,
             caption: String::new(),
             subject_at: None,
+            people: vec![],
+            subject_body: None,
+            yaw_of: HashMap::new(),
+            capsules: false,
+            indoor_cut_m: 6.0,
         }
     }
 
@@ -426,6 +465,16 @@ impl Sim {
             p += Vec2::new(u, v) * self.tile_m * 0.7;
         }
         p
+    }
+
+    /// V3: where a body indoors is drawn: inside its building's rect (a place fixed per id in its middle 60 %), not
+    /// at the door tile its Position holds (that tile is on the facade: drawn there, a body stood on the wall).
+    fn indoor_xy(&self, a: &Agent) -> Vec2 {
+        let Some([x, y, w, h]) = a.rect else { return self.metres(a.t, a.id, true) };
+        let k = a.id.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        let u = ((k >> 16) & 0xFFFF) as f32 / 65535.0 - 0.5;
+        let v = ((k >> 40) & 0xFFFF) as f32 / 65535.0 - 0.5;
+        self.metres([x + w / 2.0 - 0.5 + u * w * 0.6, y + h / 2.0 - 0.5 + v * h * 0.6], a.id, false)
     }
 
     /// C6a: a storey's floor over the ground, metres: the export's 4 m ground and 3 m storeys above it (C7: a
@@ -516,6 +565,7 @@ pub fn update_sim(
     stream: Res<Stream>,
     mut sim: ResMut<Sim>,
     mut q: Query<(&mut Transform, &mut Visibility)>,
+    occ: Option<Res<glclient::occlusion::Occlusion>>,
 ) {
     let (i, j, u) = if sim.live.is_some() {
         let Some(u) = sim.pull_live() else { return };
@@ -560,13 +610,40 @@ pub fn update_sim(
     // the most bodies standing on one street tile (a Coarse stack reads as one blob)
     let mut on_tile: HashMap<(i32, i32), usize> = HashMap::new();
     let fr_agents = sim.frames[j].agents.clone();
+    // V3: a body indoors is drawn only where the occlusion cuts the walls away: the subject's storey of the subject's
+    // building, within the cut's radius of it (`[view] indoor_cut_m`). Every other indoor body stays hidden: drawn on
+    // its storey at its jittered tile, it stood on (or through) the facades from the outside (the floating capsules).
+    let subj = fr_agents.iter().find(|a| Some(a.id) == subject).map(|a| (a.b, floor_of(a).round(), sim.indoor_xy(a)));
+    // the cut as it is now (it eases in once the walls block the subject; a kit building never opens round a body
+    // inside it: then no indoor body shows), capped at `indoor_cut_m`
+    let cut = occ.filter(|o| o.enabled).and_then(|o| o.vols.first().map(|v| v.radius)).unwrap_or(0.0).min(sim.indoor_cut_m);
+    let cut2 = if cut >= 1.0 { cut * cut } else { -1.0 };
+    let mut people = vec![];
+    let mut subject_body = None;
+    let (mut hidden_in, mut deck_miss) = (0usize, 0usize);
     for a in &fr_agents {
         lods[a.lod as usize] += 1;
-        if Some(a.id) == subject {
+        // the way ahead's heading (compass degrees -> Bevy yaw about +y, heading 0 = -z), else the last one drawn
+        let yaw =
+            match a.facing {
+                Some(h) => {
+                    sim.yaw_of.insert(a.id, -h.to_radians());
+                    -h.to_radians()
+                }
+                // never seen moving: a heading fixed per id (a crowd does not stand all one way)
+                None => sim.yaw_of.get(&a.id).copied().unwrap_or_else(|| {
+                    (a.id.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as f32 / (1u64 << 24) as f32 * std::f32::consts::TAU
+                }),
+            };
+        let walking = matches!(a.act, 0 | 5 | 9) || prev_a.get(&a.id).is_some_and(|(p, _)| *p != a.t);
+        let draw =
+            |at: Vec3| crate::people::BodyDraw { id: a.id, at, yaw, walking, female: a.female, age: a.age, dress: a.dress, gang: a.gang };
+        let is_subject = Some(a.id) == subject;
+        if is_subject {
             // the follow-cam: aboard at its vehicle (below), indoors on its storey at its building's tile, else its body
             subject_in = a.aboard;
             let t = prev_a.get(&a.id).map_or(a.t, |(p, ah)| along(*p, ah, a.t, u));
-            let p = sim.metres(t, a.id, true);
+            let p = if a.indoors { sim.indoor_xy(a) } else { sim.metres(t, a.id, true) };
             let g = stream.ground_z(p.x, p.y).unwrap_or(0.0);
             let z = if a.indoors {
                 g + Sim::storey_z(floor_of(a))
@@ -575,16 +652,27 @@ pub fn update_sim(
             } else {
                 g
             };
-            subject_at = Some((Vec3::new(p.x, p.y, z), a.facing.map_or(0.0, |h| -h.to_radians())));
+            subject_at = Some((Vec3::new(p.x, p.y, z), yaw));
+            subject_body = Some(draw(Vec3::new(p.x, p.y, z)));
         }
         if a.indoors {
-            // C6a: on its floor (the occlusion's cutaway shows the ones by the subject)
+            // C6a: on its floor, seen only in the cut (above)
             indoors += 1;
-            let p = sim.metres(a.t, a.id, true);
+            let p = sim.indoor_xy(a);
+            let shown = is_subject
+                || subj.is_some_and(|(b, f, sp)| b.is_some() && b == a.b && floor_of(a).round() == f && p.distance_squared(sp) <= cut2);
+            if !shown {
+                hidden_in += 1;
+                continue;
+            }
             let z = stream.ground_z(p.x, p.y).unwrap_or(0.0) + Sim::storey_z(floor_of(a));
-            let mat = if sim.by_lod { sim.mats[ACTS.len() + a.lod as usize].clone() } else { sim.mats[a.act as usize].clone() };
-            let cap = sim.capsule.clone();
-            place(&mut commands, &mut sim, (0, a.id), cap, mat, bv(p.x, p.y, z + 0.85 * 1.4), 0.0);
+            if sim.capsules {
+                let mat = if sim.by_lod { sim.mats[ACTS.len() + a.lod as usize].clone() } else { sim.mats[a.act as usize].clone() };
+                let cap = sim.capsule.clone();
+                place(&mut commands, &mut sim, (0, a.id), cap, mat, bv(p.x, p.y, z + 0.85 * 1.4), 0.0);
+            } else if !is_subject {
+                people.push(draw(Vec3::new(p.x, p.y, z)));
+            }
             continue;
         }
         if a.aboard.is_some() {
@@ -597,14 +685,20 @@ pub fn update_sim(
         let t = prev_a.get(&a.id).map_or(a.t, |(p, ah)| along(*p, ah, a.t, u));
         let p = sim.metres(t, a.id, true);
         let g = stream.ground_z(p.x, p.y).unwrap_or(0.0);
-        // C7: a body on a walkway deck stands on it
-        let z = if a.floor > 0.0 { sim.deck_z(p).unwrap_or(g + Sim::storey_z(a.floor)) } else { g };
-        let mat = if sim.by_lod { sim.mats[ACTS.len() + a.lod as usize].clone() } else { sim.mats[a.act as usize].clone() };
-        // compass degrees (clockwise from north) -> Bevy yaw about +y (heading 0 = -z)
-        let yaw = a.facing.map_or(0.0, |h| -h.to_radians());
-        let cap = sim.capsule.clone();
-        place(&mut commands, &mut sim, (0, a.id), cap, mat, bv(p.x, p.y, z + 0.85 * 1.4), yaw);
+        // C7: a body on a walkway deck stands on it (no deck point within 12 m: at the storey's height, counted)
+        let deck = if a.floor > 0.0 { sim.deck_z(p) } else { None };
+        deck_miss += usize::from(a.floor > 0.0 && deck.is_none());
+        let z = if a.floor > 0.0 { deck.unwrap_or(g + Sim::storey_z(a.floor)) } else { g };
+        if sim.capsules {
+            let mat = if sim.by_lod { sim.mats[ACTS.len() + a.lod as usize].clone() } else { sim.mats[a.act as usize].clone() };
+            let cap = sim.capsule.clone();
+            place(&mut commands, &mut sim, (0, a.id), cap, mat, bv(p.x, p.y, z + 0.85 * 1.4), yaw);
+        } else if !is_subject {
+            people.push(draw(Vec3::new(p.x, p.y, z)));
+        }
     }
+    sim.people = people;
+    sim.subject_body = subject_body;
     let fr_veh: Vec<Vehicle> = sim.frames[j].vehicles.clone();
     let (mut by_ride, mut riders) = ([0usize; 5], 0usize);
     for v in &fr_veh {
@@ -708,7 +802,7 @@ pub fn update_sim(
     };
     let follow = if signs > 0 { format!("{follow}\nsigns {signs} (lit {lit_n}, founded today {fresh_n})") } else { follow };
     sim.hud = format!(
-        "sim tick {} {}  agents {} (street {street}, most on a tile {stack}, indoors {indoors}, aboard {aboard}; Full {} Coarse {} Stat {})  vehicles car {} van {} train {} flyer {} foot {} ({riders} aboard)  events {}",
+        "sim tick {} {}  agents {} (street {street}, most on a tile {stack}, indoors {indoors} ({hidden_in} hidden), aboard {aboard}, off a deck {deck_miss}; Full {} Coarse {} Stat {})  vehicles car {} van {} train {} flyer {} foot {} ({riders} aboard)  events {}",
         f.tick,
         f.clock,
         f.agents.len(),
