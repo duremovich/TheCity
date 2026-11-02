@@ -81,6 +81,19 @@ subject's own building sliced at its ceiling so the room shows, buildings behind
 follows the body's z (V4's item 4 moved here) and the cut opens inside a kit building (V4's item 6). **Camera:** the
 07:00 Mahjong queue, a tower dweller at home on a high floor, an El platform, each at two yaws.
 
+**As built (2026-11-01).** The camera: `cam.rs`, a perspective orbit (FOV 30, pitch 35-65, the zoom still the frame's
+width at the subject so `--zoom` keeps its meaning; `--yaw` / `--pitch`), the aim eased toward the subject with its z
+(`[view] cam_*`); the orthographic game camera is gone (Tab's overview stays). The cutaway: one world-space clip in
+`occlusion.wgsl` from one uniform (`[view] cut_*`). Deviations: the box has no depth key, it runs from `cut_behind_m`
+behind the feet to past the camera (a depth short of the camera left towers between them standing at wide zooms), and
+it switches off past `cut_max_zoom_m` (250 m: the establishing shot keeps the city whole). The subject indoors, the
+sim's rect of its building is cut at its ceiling (`cut_ceiling_m`), so a room shows in a massing box as well as a kit;
+a kit or glb building holding the feet is also cut to its floor through its own cutaway (stubs, room lights). The cut
+plane: kits show their slabs; massing is drawn double-sided and its inside painted as the floor plate under the
+subject's floor and bare walls above (the ground under a ground-floor room too). Street props and the sim's signs
+carry `CutProp`. P4's capsule, its ray casts, hystereses, keep list and L3 deck fades are retired with `occbench`,
+`shadowbench` and `bench_occ.sh` (TheCityGraphics `test_occlusion.py` no longer has a bench to run; DECISIONS V4b).
+
 ### V5, the ring (`OPEN-149`)
 
 The ring's own LOD class and budget outside `max_full`: everyone in camera range Full, Coarse in a band around it,

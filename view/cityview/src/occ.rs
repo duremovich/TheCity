@@ -1,19 +1,19 @@
-//! Camera occlusion in the city view (CITY_SPEC §CAM, spec/city/P4_PLAN.md B): the player stand-in (a street
-//! NPC glb, static pose) and its squad, the game camera following the player, and the host's ray tests for
-//! glclient's occlusion (`OccSet::Cast`): the massing boxes of the loaded chunks, the pylons / beams and the deck
-//! pieces (a narrow-set hit on a piece fades it: L3). glclient does the rest (state machines, uniform, glbs, L1, L4).
+//! The player and the cutaway in the city view: the player stand-in (a street NPC glb, static pose) and its squad,
+//! the game camera following the player (or the followed sim subject, sim.rs), and the cutaway's switch and subject
+//! (glclient::occlusion, the view milestone V4b: the box on the camera's side of the subject, its own building cut
+//! to its floor while it is indoors).
 //!
-//! Keys (game view): F player mode on / off (WASD walks the player; off = WASD pans the camera), G occlusion on /
+//! Keys (game view): F player mode on / off (WASD walks the player; off = WASD pans the camera), G the cutaway on /
 //! off (A/B), K the player light on / off.
 //!
 //! The player light (s30, the night streets): an unshadowed point light a little above the player, nudged toward
 //! the camera, so the body reads in the dark without lifting the scene (a pool about a lamp's size, not a torch).
 
-use bevy::{mesh::MeshTag, prelude::*, world_serialization::WorldInstanceReady};
-use glclient::occlusion::{OccCast, OccFade, Occluded, Occlusion, SilhouetteSource, ray_aabb};
+use bevy::{prelude::*, world_serialization::WorldInstanceReady};
+use glclient::occlusion::{Cutaway, SilhouetteSource};
 
 use crate::cam::{Mode, View};
-use crate::mesh::{DeckPiece, bv, ray_tri};
+use crate::mesh::bv;
 use crate::stream::Stream;
 
 pub const PLAYER_GLB: &str = "characters/base_body/street/round_06/glb/npc03_courier_lod1.glb";
@@ -22,7 +22,6 @@ pub const SQUAD_GLBS: [&str; 3] = [
     "characters/base_body/street/round_06/glb/npc05_gang_heavy_lod1.glb",
     "characters/base_body/street/round_06/glb/npc04_street_medic_lod1.glb",
 ];
-pub const HEIGHT: f32 = 1.75;
 /// Squad offsets behind the player (world m, in the player's frame: x right, y forward)
 const SQUAD_AT: [Vec2; 3] = [Vec2::new(-1.2, -1.6), Vec2::new(1.2, -1.6), Vec2::new(0.0, -3.0)];
 
@@ -48,26 +47,15 @@ pub struct Player {
     pub facing: f32,
     /// The player walks and the camera follows (F); off = the free camera
     pub on: bool,
-    /// The user's occlusion switch (G); occlusion runs only in the game view
+    /// The user's cutaway switch (G); the cut runs only in the game view
     pub occ_on: bool,
+    /// The followed subject indoors (sim.rs): its building's rect (world metres x0, y0, x1, y1), cut at its ceiling
+    pub indoors: Option<Vec4>,
     pub squad: usize,
     /// Scripted (bench): keys off, z given
     pub scripted: bool,
     /// The player light (K; CV_NO_PLAYER_LIGHT=1 starts it off)
     pub light: bool,
-}
-
-/// The elevated layers' occluders: deck pieces (entity, box, triangles), pylon / beam boxes.
-#[derive(Resource, Default)]
-pub struct LayerOccluders {
-    pub decks: Vec<(Entity, Vec3, Vec3, Vec<[Vec3; 3]>)>,
-    pub boxes: Vec<(Vec3, Vec3)>,
-}
-
-impl LayerOccluders {
-    pub fn add_piece(&mut self, e: Entity, p: &DeckPiece) {
-        self.decks.push((e, p.lo, p.hi, p.tris.clone()));
-    }
 }
 
 pub fn spawn_bodies(mut commands: Commands, assets: Res<AssetServer>, player: Res<Player>) {
@@ -78,7 +66,6 @@ pub fn spawn_bodies(mut commands: Commands, assets: Res<AssetServer>, player: Re
                 WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(glb))),
                 Transform::from_translation(bv(player.pos.x, player.pos.y, player.pos.z)),
                 Body { slot },
-                Occluded { height: HEIGHT, slot: slot as u8 },
                 SilhouetteSource,
                 Name::new(format!("body{slot}")),
             ))
@@ -142,7 +129,7 @@ pub fn player_controls(
         return;
     }
     if !player.scripted {
-        let (up, right) = View::pan_axes();
+        let (up, right) = view.pan_axes();
         let held = |k: &[KeyCode]| k.iter().any(|k| keys.pressed(*k));
         let mut d = Vec2::ZERO;
         if held(&[KeyCode::KeyW, KeyCode::ArrowUp]) {
@@ -213,70 +200,26 @@ pub fn place_bodies(
     }
 }
 
-/// Occlusion runs in the game view while the player is on and the user has it on.
-pub fn occ_switch(player: Res<Player>, view: Res<View>, mut occ: ResMut<Occlusion>) {
-    // the pre-P4 baseline (CV_NO_OCC) has no cut built: the state machines stay off too
+/// The cutaway runs in the game view while the player (or the followed subject) is on and the user has it on; its
+/// subject is the player's feet, its zoom the view's.
+pub fn occ_switch(player: Res<Player>, view: Res<View>, mut cut: ResMut<Cutaway>) {
+    // the pre-P4 baseline (CV_NO_OCC) has no cut built
     let want = player.on && player.occ_on && view.mode == Mode::Game && glclient::occlusion::built();
-    if occ.enabled != want {
-        occ.enabled = want;
+    let subject = player.on.then(|| bv(player.pos.x, player.pos.y, player.pos.z));
+    // the cut follows the camera's eased aim, not the feet: a floor change eases the cut height with the camera
+    let subject = match (subject, view.aim) {
+        (Some(_), Some(a)) if view.mode == Mode::Game => Some(bv(a.x, a.y, a.z - view.cfg.look_up_m)),
+        (s, _) => s,
+    };
+    // the rect in Bevy's ground plane (x, z = -north): min x, min z, max x, max z
+    let own = player.indoors.map(|r| Vec4::new(r.x, -r.w, r.z, -r.y));
+    let c = cut.bypass_change_detection();
+    let changed = c.enabled != want || c.subject != subject || c.indoors != own || c.zoom != view.zoom;
+    if changed {
+        c.enabled = want;
+        c.subject = subject;
+        c.indoors = own;
+        c.zoom = view.zoom;
+        cut.set_changed();
     }
-}
-
-/// The host's ray tests (OccSet::Cast): massing boxes, pylons / beams, deck pieces.
-pub fn occ_cast(
-    mut cast: ResMut<OccCast>,
-    stream: Res<Stream>,
-    layers: Res<LayerOccluders>,
-    ks: Option<Res<glclient::kit::KitStream>>,
-    mut fades: Query<&mut OccFade>,
-) {
-    // the placed lots' massing occludes where it shows: chunks whose kits are not in (P8 B-A streaming)
-    let standin = stream.gen_boxes.iter().filter(|(k, _)| ks.as_ref().is_some_and(|s| !s.chunk_ready(**k))).map(|(_, v)| v);
-    if !cast.due {
-        return;
-    }
-    let max_t = cast.max_t;
-    for r in cast.rays.iter_mut() {
-        // deck pieces: every narrow hit fades its piece (even when something else already blocked the ray)
-        for (e, lo, hi, tris) in &layers.decks {
-            if ray_aabb(r.origin, r.dir, *lo - Vec3::splat(0.05), *hi + Vec3::splat(0.05), max_t).is_none() {
-                continue;
-            }
-            if tris.iter().any(|t| ray_tri(r.origin, r.dir, t, max_t).is_some()) {
-                r.hit = true;
-                if !r.wide
-                    && let Ok(mut f) = fades.get_mut(*e)
-                {
-                    f.hit = true;
-                }
-            }
-        }
-        if r.hit {
-            continue;
-        }
-        if layers.boxes.iter().any(|(lo, hi)| ray_aabb(r.origin, r.dir, *lo, *hi, max_t).is_some()) {
-            r.hit = true;
-            continue;
-        }
-        'chunks: for (lo, hi, boxes) in stream.boxes.values().chain(standin.clone()) {
-            if ray_aabb(r.origin, r.dir, *lo, *hi, max_t).is_none() {
-                continue;
-            }
-            for (a, b) in boxes.iter() {
-                // a ray starting inside a box (a body inside massing: a pinned lot never has any) does not count
-                if r.origin.cmpge(*a).all() && r.origin.cmple(*b).all() {
-                    continue;
-                }
-                if ray_aabb(r.origin, r.dir, *a, *b, max_t).is_some() {
-                    r.hit = true;
-                    break 'chunks;
-                }
-            }
-        }
-    }
-}
-
-/// A deck piece entity: its mesh, the layers' deck material, a MeshTag (the fade level) and its fade state.
-pub fn deck_bundle(mesh: Handle<Mesh>, mat: Handle<crate::windows::LayerMaterial>, i: usize) -> impl Bundle {
-    (Mesh3d(mesh), MeshMaterial3d(mat), Transform::default(), MeshTag(0), OccFade::default(), Name::new(format!("deck{i}")))
 }

@@ -1,22 +1,69 @@
-//! Cameras: the game camera (SPEC §CAM 5.1: orthographic, looking NW 30 deg down; glclient `frame::view_dir`)
-//! and a free overview (perspective orbit over the island). One camera entity; Tab swaps the projection.
+//! Cameras (the view milestone V4b, Dylan 2026-11-01: an orbit follow-cam replaces SPEC §CAM 5.1's locked
+//! orthographic NW view). The game camera is a perspective orbit at a narrow FOV around its subject (the followed
+//! body, the player stand-in, or the free view's ground point): free yaw, pitch clamped, zoom by distance. The
+//! zoom is the frame's width at the subject in metres, so `--zoom` keeps its meaning (the distance follows from
+//! it and the FOV). The aim eases toward the subject's place, z included: a body climbing to floor 30 takes the
+//! camera up. Tab swaps to a free perspective overview orbit over the island. Numbers: `[view] cam_*`.
 //!
-//! Keys: WASD / arrows pan (screen-aligned in the game view; the orbit centre in the overview), Q / E or the
-//! wheel zoom (game: 26 / 60 / 140 / 400 / 1000 m wide; overview: distance), arrows in the overview orbit,
-//! Tab game <-> overview, L night <-> day light (structure reading), M hide the massing (debug), P screenshot, H hud.
+//! Yaw is the camera's bearing from the subject (0 = south of it, 90 deg = east; 45 deg = the old view, looking
+//! NW); pitch is the angle above the horizon.
+//!
+//! Keys: WASD / arrows pan (yaw-aligned; the overview's centre; with the player on, WASD walks it), Q / E rotate,
+//! Z / X pitch down / up, the wheel or - / = zoom, right- or middle-drag rotate and pitch, Tab game <-> overview,
+//! L night <-> day light (structure reading), M hide the massing (debug), P screenshot, H hud.
 
 use bevy::{
-    camera::{Hdr, ScalingMode},
+    camera::Hdr,
     core_pipeline::tonemapping::Tonemapping,
-    input::mouse::MouseWheel,
+    input::mouse::{AccumulatedMouseMotion, MouseWheel},
     post_process::bloom::Bloom,
     prelude::*,
 };
-use glclient::frame::{Focus, view_dir};
+use glclient::frame::Focus;
 
 use crate::mesh::bv;
 
-pub const ZOOMS: [f32; 5] = [26.0, 60.0, 140.0, 400.0, 1000.0];
+/// `[view] cam_*` (assets/config.toml documents each).
+#[derive(Clone, Debug)]
+pub struct CamCfg {
+    /// Vertical FOV (rad)
+    pub fov: f32,
+    pub pitch_min: f32,
+    pub pitch_max: f32,
+    /// The zoom's range: the frame's width at the subject (m)
+    pub zoom_min: f32,
+    pub zoom_max: f32,
+    pub half_life_s: f32,
+    pub snap_m: f32,
+    pub look_up_m: f32,
+    /// Q / E (rad/s), Z / X (rad/s), a dragged pixel (rad)
+    pub rotate_s: f32,
+    pub pitch_s: f32,
+    pub drag_px: f32,
+    /// One wheel notch / key press multiplies the zoom by this (or divides)
+    pub zoom_step: f32,
+    pub far_m: f32,
+}
+
+impl CamCfg {
+    pub fn from_view(v: &citysim::config::ViewCfg) -> CamCfg {
+        CamCfg {
+            fov: v.cam_fov_deg.to_radians(),
+            pitch_min: v.cam_pitch_min_deg.to_radians(),
+            pitch_max: v.cam_pitch_max_deg.to_radians(),
+            zoom_min: v.cam_zoom_min_m,
+            zoom_max: v.cam_zoom_max_m,
+            half_life_s: v.cam_follow_half_life_s,
+            snap_m: v.cam_snap_m,
+            look_up_m: v.cam_look_up_m,
+            rotate_s: v.cam_rotate_deg_s.to_radians(),
+            pitch_s: v.cam_pitch_deg_s.to_radians(),
+            drag_px: v.cam_drag_deg_px.to_radians(),
+            zoom_step: v.cam_zoom_step,
+            far_m: v.cam_far_m,
+        }
+    }
+}
 
 /// Night rig of the city view. glclient's (SPEC §LGT: world 0.05, moon 0.08) assumes a lamp-lit street; before
 /// P7 the city had no lamps, so massing and ground were black: a sky glow (an ambient in Grade A's fog hue, the
@@ -37,8 +84,6 @@ fn horizon() -> Color {
     let c = LinearRgba::from(Color::srgb(0.17, 0.14, 0.22));
     Color::LinearRgba(LinearRgba::rgb(c.red * k, c.green * k, c.blue * k))
 }
-/// The game camera sits this far back along its view direction (ortho: only the clip range cares).
-const BACK: f32 = 4000.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
@@ -49,10 +94,16 @@ pub enum Mode {
 #[derive(Resource, Clone, Debug)]
 pub struct View {
     pub mode: Mode,
-    /// Game: the ground point at the view centre (world x, y); its z follows the ground (`ground_z`)
+    /// Game: the subject's ground point (world x, y) and its z (the followed body's own z: a storey, a deck)
     pub at: Vec2,
     pub ground_z: f32,
+    /// Game: the frame's width at the subject (m)
     pub zoom: f32,
+    /// Game: the orbit's yaw and pitch (rad)
+    pub game_yaw: f32,
+    pub game_pitch: f32,
+    /// Game: the eased aim (world), None until the first frame (it snaps there)
+    pub aim: Option<Vec3>,
     /// Overview orbit: centre (world), yaw (rad, 0 = camera south of the centre), pitch (rad), distance (m)
     pub orbit_at: Vec3,
     pub yaw: f32,
@@ -61,19 +112,25 @@ pub struct View {
     pub day: bool,
     /// Debug: hide every massing mesh (M)
     pub hide_mass: bool,
-    /// Bench / shots drive the view: keys off
+    /// Bench / shots drive the view: keys off, the aim snaps (a shot shows the tick's place, not the ease)
     pub scripted: bool,
     /// The game camera follows the player (occ.rs: WASD walks the player instead of panning)
     pub player: bool,
+    /// The window's width over its height (the zoom's distance needs the horizontal FOV)
+    pub aspect: f32,
+    pub cfg: CamCfg,
 }
 
 impl View {
-    pub fn new(at: Vec2, zoom: f32, island: Vec2) -> View {
-        View {
+    pub fn new(at: Vec2, zoom: f32, island: Vec2, cfg: CamCfg, yaw_deg: f32, pitch_deg: f32, aspect: f32) -> View {
+        let mut v = View {
             mode: Mode::Game,
             at,
             ground_z: 3.0,
-            zoom,
+            zoom: 0.0,
+            game_yaw: yaw_deg.to_radians(),
+            game_pitch: 0.0,
+            aim: None,
             orbit_at: Vec3::new(island.x / 2.0, island.y / 2.0, 60.0),
             // from the SE, like the game camera
             yaw: std::f32::consts::FRAC_PI_4,
@@ -83,21 +140,52 @@ impl View {
             hide_mass: false,
             scripted: false,
             player: false,
-        }
+            aspect,
+            cfg,
+        };
+        v.set_zoom(zoom);
+        v.set_pitch(pitch_deg.to_radians());
+        v
     }
 
-    /// Screen-up (NW) and screen-right (NE) directions on the ground (world xy) in the game view.
-    pub fn pan_axes() -> (Vec2, Vec2) {
-        let s = std::f32::consts::FRAC_1_SQRT_2;
-        (Vec2::new(-s, s), Vec2::new(s, s))
+    pub fn set_zoom(&mut self, z: f32) {
+        self.zoom = z.clamp(self.cfg.zoom_min, self.cfg.zoom_max);
+    }
+
+    pub fn set_pitch(&mut self, p: f32) {
+        self.game_pitch = p.clamp(self.cfg.pitch_min, self.cfg.pitch_max);
+    }
+
+    /// The game camera's distance from its aim: the zoom's width across the horizontal FOV.
+    pub fn game_dist(&self) -> f32 {
+        let tan_h = (self.cfg.fov * 0.5).tan() * self.aspect;
+        self.zoom * 0.5 / tan_h.max(1e-3)
+    }
+
+    /// The point the game camera eases toward (world): the subject's place, `look_up_m` over the feet.
+    pub fn goal(&self) -> Vec3 {
+        self.at.extend(self.ground_z + self.cfg.look_up_m)
+    }
+
+    /// Forward (away from the camera) and right on the ground (world xy) for the game camera's yaw.
+    pub fn pan_axes(&self) -> (Vec2, Vec2) {
+        let (s, c) = self.game_yaw.sin_cos();
+        (Vec2::new(-s, c), Vec2::new(c, s))
+    }
+
+    /// The game camera's eye and aim (world).
+    pub fn game_eye(&self) -> (Vec3, Vec3) {
+        let aim = self.aim.unwrap_or_else(|| self.goal());
+        let (s, c) = self.game_yaw.sin_cos();
+        let (ps, pc) = self.game_pitch.sin_cos();
+        (aim + Vec3::new(s * pc, -c * pc, ps) * self.game_dist(), aim)
     }
 
     pub fn transform(&self) -> Transform {
         match self.mode {
             Mode::Game => {
-                let d = view_dir();
-                let target = bv(self.at.x, self.at.y, self.ground_z);
-                Transform::from_translation(target - d * BACK).looking_to(d, Vec3::Y)
+                let (eye, aim) = self.game_eye();
+                Transform::from_translation(bv(eye.x, eye.y, eye.z)).looking_at(bv(aim.x, aim.y, aim.z), Vec3::Y)
             }
             Mode::Overview => {
                 let c = self.orbit_at;
@@ -109,18 +197,34 @@ impl View {
         }
     }
 
-    pub fn projection(&self) -> Projection {
+    /// (fov, near, far) of the mode.
+    fn lens(&self) -> (f32, f32, f32) {
         match self.mode {
-            Mode::Game => Projection::Orthographic(OrthographicProjection {
-                scaling_mode: ScalingMode::FixedHorizontal { viewport_width: self.zoom },
-                near: 1.0,
-                far: BACK * 2.5,
-                ..OrthographicProjection::default_3d()
-            }),
-            Mode::Overview => {
-                Projection::Perspective(PerspectiveProjection { fov: 40f32.to_radians(), near: 2.0, far: 30000.0, ..default() })
-            }
+            Mode::Game => (self.cfg.fov, 0.5, self.cfg.far_m),
+            Mode::Overview => (40f32.to_radians(), 2.0, 30000.0),
         }
+    }
+
+    pub fn projection(&self) -> Projection {
+        let (fov, near, far) = self.lens();
+        Projection::Perspective(PerspectiveProjection { fov, near, far, aspect_ratio: self.aspect, ..default() })
+    }
+
+    /// The aim eases toward the goal (an exponential ease of `half_life_s`); a jump past `snap_m`, the first
+    /// frame and a scripted view snap.
+    pub fn ease(&mut self, dt: f32) -> bool {
+        let goal = self.goal();
+        let next = match self.aim {
+            Some(a) if !self.scripted && a.distance(goal) < self.cfg.snap_m => {
+                let k = 1.0 - (-dt * std::f32::consts::LN_2 / self.cfg.half_life_s.max(1e-3)).exp();
+                let n = a + (goal - a) * k;
+                if n.distance(goal) < 0.005 { goal } else { n }
+            }
+            _ => goal,
+        };
+        let moved = self.aim != Some(next);
+        self.aim = Some(next);
+        moved
     }
 }
 
@@ -152,13 +256,13 @@ pub fn setup_camera(mut commands: Commands, view: Res<View>, street: Option<Res<
         bevy::camera::Exposure { ev100: 9.1 },
         Bloom::NATURAL,
         Msaa::Off,
-        // the cut runs in this camera's views only (P4)
+        // the cutaway runs in this camera's views only
         glclient::occlusion::OccCam,
         CityCam,
         // glclient's light rules (clusters, shadow resolutions) for the pinned block's lights (/code-review s22)
         glclient::frame::LightCam,
     ));
-    // the occlusion silhouettes read the depth prepass; the pre-P4 baseline (CV_NO_OCC) has none
+    // the silhouettes read the depth prepass; the pre-P4 baseline (CV_NO_OCC) has none
     if glclient::occlusion::built() {
         cam.insert(bevy::core_pipeline::prepass::DepthPrepass);
     }
@@ -180,19 +284,27 @@ pub fn setup_camera(mut commands: Commands, view: Res<View>, street: Option<Res<
     commands.insert_resource(ClearColor(Color::srgb(0.005, 0.005, 0.012)));
 }
 
-pub fn controls(keys: Res<ButtonInput<KeyCode>>, mut wheel: MessageReader<MouseWheel>, time: Res<Time>, mut view: ResMut<View>) {
+pub fn controls(
+    keys: Res<ButtonInput<KeyCode>>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    motion: Res<AccumulatedMouseMotion>,
+    mut wheel: MessageReader<MouseWheel>,
+    time: Res<Time>,
+    mut view: ResMut<View>,
+) {
     let scroll: f32 = wheel.read().map(|e| e.y.signum()).sum();
     if view.scripted {
         return;
     }
     let dt = time.delta_secs();
     let held = |k: &[KeyCode]| k.iter().any(|k| keys.pressed(*k));
-    let mut zoom_step = 0i32;
-    if keys.just_pressed(KeyCode::KeyQ) || scroll > 0.0 {
-        zoom_step -= 1;
+    // + = closer
+    let mut zoom_in = scroll;
+    if keys.just_pressed(KeyCode::Equal) || keys.just_pressed(KeyCode::NumpadAdd) {
+        zoom_in += 1.0;
     }
-    if keys.just_pressed(KeyCode::KeyE) || scroll < 0.0 {
-        zoom_step += 1;
+    if keys.just_pressed(KeyCode::Minus) || keys.just_pressed(KeyCode::NumpadSubtract) {
+        zoom_in -= 1.0;
     }
     if keys.just_pressed(KeyCode::Tab) {
         view.mode = if view.mode == Mode::Game { Mode::Overview } else { Mode::Game };
@@ -203,35 +315,58 @@ pub fn controls(keys: Res<ButtonInput<KeyCode>>, mut wheel: MessageReader<MouseW
     if keys.just_pressed(KeyCode::KeyM) {
         view.hide_mass = !view.hide_mass;
     }
+    // rotate / pitch: keys and a right- or middle-drag
+    let mut d_yaw = 0.0;
+    let mut d_pitch = 0.0;
+    if held(&[KeyCode::KeyQ]) {
+        d_yaw -= view.cfg.rotate_s * dt;
+    }
+    if held(&[KeyCode::KeyE]) {
+        d_yaw += view.cfg.rotate_s * dt;
+    }
+    if held(&[KeyCode::KeyZ]) {
+        d_pitch -= view.cfg.pitch_s * dt;
+    }
+    if held(&[KeyCode::KeyX]) {
+        d_pitch += view.cfg.pitch_s * dt;
+    }
+    if (buttons.pressed(MouseButton::Right) || buttons.pressed(MouseButton::Middle)) && motion.delta != Vec2::ZERO {
+        d_yaw += motion.delta.x * view.cfg.drag_px;
+        d_pitch += motion.delta.y * view.cfg.drag_px;
+    }
+    let step = view.cfg.zoom_step;
     match view.mode {
-        Mode::Game if view.player => {
-            if zoom_step != 0 {
-                let k = ZOOMS.iter().position(|z| (*z - view.zoom).abs() < 0.5).unwrap_or(1) as i32;
-                view.zoom = ZOOMS[(k + zoom_step).clamp(0, ZOOMS.len() as i32 - 1) as usize];
-            }
-        }
         Mode::Game => {
-            let (up, right) = View::pan_axes();
-            let mut d = Vec2::ZERO;
-            if held(&[KeyCode::KeyW, KeyCode::ArrowUp]) {
-                d += up;
+            if d_yaw != 0.0 {
+                view.game_yaw = (view.game_yaw + d_yaw).rem_euclid(std::f32::consts::TAU);
             }
-            if held(&[KeyCode::KeyS, KeyCode::ArrowDown]) {
-                d -= up;
+            if d_pitch != 0.0 {
+                let p = view.game_pitch + d_pitch;
+                view.set_pitch(p);
             }
-            if held(&[KeyCode::KeyD, KeyCode::ArrowRight]) {
-                d += right;
+            if zoom_in != 0.0 {
+                let z = view.zoom / step.powf(zoom_in);
+                view.set_zoom(z);
             }
-            if held(&[KeyCode::KeyA, KeyCode::ArrowLeft]) {
-                d -= right;
-            }
-            let speed = view.zoom * if keys.pressed(KeyCode::ShiftLeft) { 3.0 } else { 0.8 };
-            if d != Vec2::ZERO {
-                view.at += d.normalize() * speed * dt;
-            }
-            if zoom_step != 0 {
-                let k = ZOOMS.iter().position(|z| (*z - view.zoom).abs() < 0.5).unwrap_or(1) as i32;
-                view.zoom = ZOOMS[(k + zoom_step).clamp(0, ZOOMS.len() as i32 - 1) as usize];
+            if !view.player {
+                let (fwd, right) = view.pan_axes();
+                let mut d = Vec2::ZERO;
+                if held(&[KeyCode::KeyW, KeyCode::ArrowUp]) {
+                    d += fwd;
+                }
+                if held(&[KeyCode::KeyS, KeyCode::ArrowDown]) {
+                    d -= fwd;
+                }
+                if held(&[KeyCode::KeyD, KeyCode::ArrowRight]) {
+                    d += right;
+                }
+                if held(&[KeyCode::KeyA, KeyCode::ArrowLeft]) {
+                    d -= right;
+                }
+                let speed = view.zoom * if keys.pressed(KeyCode::ShiftLeft) { 3.0 } else { 0.8 };
+                if d != Vec2::ZERO {
+                    view.at += d.normalize() * speed * dt;
+                }
             }
         }
         Mode::Overview => {
@@ -247,6 +382,8 @@ pub fn controls(keys: Res<ButtonInput<KeyCode>>, mut wheel: MessageReader<MouseW
             if held(&[KeyCode::ArrowDown]) {
                 view.pitch = (view.pitch - dt * 0.5).max(0.05);
             }
+            view.yaw += d_yaw;
+            view.pitch = (view.pitch + d_pitch).clamp(0.05, 1.5);
             let (s, c) = view.yaw.sin_cos();
             // forward = from the camera toward the centre, on the ground
             let fwd = Vec2::new(-s, c);
@@ -266,10 +403,18 @@ pub fn controls(keys: Res<ButtonInput<KeyCode>>, mut wheel: MessageReader<MouseW
             }
             let sp = view.dist * 0.4 * dt;
             view.orbit_at += (d * sp).extend(0.0);
-            if zoom_step != 0 {
-                view.dist = (view.dist * if zoom_step < 0 { 0.8 } else { 1.25 }).clamp(150.0, 20000.0);
+            if zoom_in != 0.0 {
+                view.dist = (view.dist / step.powf(zoom_in)).clamp(150.0, 20000.0);
             }
         }
+    }
+}
+
+/// The game camera's aim eases toward the subject (after the subject's place and the ground z are set).
+pub fn ease_view(time: Res<Time>, mut view: ResMut<View>) {
+    let dt = time.delta_secs();
+    if view.bypass_change_detection().ease(dt) {
+        view.set_changed();
     }
 }
 
@@ -291,7 +436,7 @@ pub fn apply_view(
     let lamps = street.is_some();
     for (ent, mut t, mut p, mut e) in cam.iter_mut() {
         *t = view.transform();
-        // haze only in the perspective overview (an ortho view's fragments are all ~BACK m away)
+        // haze only in the overview (the game view has the windows' height haze)
         if view.mode == Mode::Overview && !view.day {
             commands.entity(ent).insert(DistanceFog {
                 color: horizon(),
@@ -301,15 +446,16 @@ pub fn apply_view(
         } else {
             commands.entity(ent).remove::<DistanceFog>();
         }
-        let np = view.projection();
-        let same = matches!(
-            (&*p, &np),
-            (Projection::Orthographic(_), Projection::Orthographic(_)) | (Projection::Perspective(_), Projection::Perspective(_))
-        );
-        if !same {
-            *p = np;
-        } else if let (Projection::Orthographic(o), Mode::Game) = (p.as_mut(), view.mode) {
-            o.scaling_mode = ScalingMode::FixedHorizontal { viewport_width: view.zoom };
+        // in place: Bevy keeps the aspect ratio up to date on the projection
+        let (fov, near, far) = view.lens();
+        if let Projection::Perspective(pp) = p.as_mut() {
+            if pp.fov != fov || pp.near != near || pp.far != far {
+                pp.fov = fov;
+                pp.near = near;
+                pp.far = far;
+            }
+        } else {
+            *p = view.projection();
         }
         // day: a debug sun to read the structure (not the look)
         e.ev100 = if view.day { 13.0 } else { 9.1 };
@@ -330,6 +476,7 @@ pub fn apply_view(
     ambient.color = if view.day { Color::srgb(0.75, 0.8, 0.9) } else { SKY };
     // the overview's horizon fades into the haze, not into black
     clear.0 = if view.mode == Mode::Overview && !view.day { horizon() } else { Color::srgb(0.005, 0.005, 0.012) };
-    focus.at = bv(view.at.x, view.at.y, view.ground_z);
+    let a = view.aim.unwrap_or_else(|| view.goal());
+    focus.at = bv(a.x, a.y, a.z - view.cfg.look_up_m);
     focus.zoom = view.zoom;
 }

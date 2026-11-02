@@ -7,8 +7,9 @@
 //! - `lighting`: the session-16 light rules (DECISIONS "Session 16"): a per-frame shadow allocator over a budget
 //!   of shadow views, downward fixtures as spots, room fills only on the cut floor, volumetric shafts on the
 //!   shadowed set; the other policies stay for the bench;
-//! - `occlusion`: camera occlusion (CITY_SPEC §CAM): see-through volumes, L3 fades, the L1 cut driver,
-//!   silhouettes (`OcclusionPlugin`, a host adds it and feeds its own ray tests);
+//! - `occlusion`: the cutaway (the view milestone V4b): a box on the camera's side of the subject cut above its
+//!   feet in one world-space clip, its own building cut at its ceiling and to its floor (L1), silhouettes
+//!   (`OcclusionPlugin`, a host adds it and sets `Cutaway`'s subject);
 //! - `kit`: P6 kit buildings stamped from a kit stream + the block atlas (no glb), with the glb path's components
 //!   (`GlNode`, `GlLight`), so the cutaway, light rules and occlusion apply unchanged;
 //! - `vehicles`: P8 the city fleet (generated vehicle glbs flattened into shared parts for traffic / tram);

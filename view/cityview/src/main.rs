@@ -3,17 +3,20 @@
 //! overview, at night (glclient's look); a pinned hand-built block (overrides.toml [[pin]], e.g. blk01) loads
 //! through glclient (its glbs, gl_* extras, cutaway and lights).
 //!
-//! Camera occlusion (P4, occ.rs + glclient::occlusion): a player stand-in the camera follows; massing, pylons and
-//! deck pieces dissolve around it when they hide it.
+//! The game camera (the view milestone V4b, cam.rs): a perspective orbit follow-cam around the subject; the cutaway
+//! (occ.rs + glclient::occlusion): everything on the camera's side of the subject above its feet is cut away in a
+//! box, its own building cut to its floor while it is indoors.
 //!
-//! cargo run --release -p cityview -- [--city city/isle_m] [--at X,Y] [--zoom W] [--overview] [--res WxH] [--no-player | --player]
-//!                        [--squad N] [--day] [--bench stream|overview|shots|one] [--speed M_S] [--tag T] [--out DIR]
-//! (--bench one: a single screenshot of the view the args set up, named --tag)
-//! --bench occ [--path a,b] [--occ off] [--no-probes] [--gpu] [--record FILE.mp4]: the P4 acceptance paths
-//! (occbench.rs); --bench shadow: a dissolved occluder keeps its shadow (shadowbench.rs); CV_NO_OCC=1 builds the pre-P4 pipeline (no cut, Opaque materials, no depth prepass): a baseline.
+//! cargo run --release -p cityview -- [--city city/isle_m] [--at X,Y] [--zoom W] [--yaw DEG] [--pitch DEG] [--overview]
+//!                        [--res WxH] [--no-player | --player] [--squad N] [--day] [--occ off]
+//!                        [--bench stream|overview|hold|shots|one] [--speed M_S] [--tag T] [--out DIR]
+//! (--bench one: a single screenshot of the view the args set up, named --tag; --zoom is the frame's width at the
+//! subject in metres, --yaw the camera's bearing from it (0 = south, 90 = east), --pitch its angle above the
+//! horizon; with --overview they set the overview orbit; --occ off: no cutaway, the A/B)
+//! CV_NO_OCC=1 builds the pre-P4 pipeline (no cut, Opaque materials, no depth prepass): a baseline.
 //! Generated buildings are P6 kit streams (pipeline/buildings/kit.py: out/bldg/kitplaced_*.json; interiors in the 3 x 3 chunk ring around the focus, CV_KIT_RING=off: all; CV_NO_GEN=1: massing only).
-//! Keys: see cam.rs (WASD pan / walk, Q / E zoom, Tab overview, L day light, H hud, P screenshot) and occ.rs
-//! (F player on / off, G occlusion on / off).
+//! Keys: see cam.rs (WASD pan / walk, Q / E rotate, Z / X pitch, wheel or - / = zoom, right- or middle-drag orbit,
+//! Tab overview, L day light, H hud, P screenshot) and occ.rs (F player on / off, G cutaway on / off).
 //! --sim FILE [--sim-rate TICKS_PER_S] [--sim-frame N]: a sim replay (city-simview/0.1 from engine/simsnap) drawn as
 //! placeholders on the city (sim.rs; spec/integration/SIM_VIEW_CONTRACT.md).
 //! --save FILE --follow INDEX [--rate TICKS_PER_S] [--from TICK] [--shots T1,T2,..]: the follow-cam (the city milestone
@@ -32,9 +35,7 @@ mod cam;
 mod data;
 mod mesh;
 mod occ;
-mod occbench;
 mod people;
-mod shadowbench;
 mod sim;
 mod simthread;
 mod stream;
@@ -51,7 +52,7 @@ use glclient::{
     city::City,
     frame::Focus,
     lighting::LightSettings,
-    occlusion::{OccSet, OcclusionPlugin},
+    occlusion::{CutSettings, Cutaway, OccSet, OcclusionPlugin},
 };
 use std::path::{Path, PathBuf};
 
@@ -60,6 +61,9 @@ struct Args {
     city: String,
     at: Option<Vec2>,
     zoom: f32,
+    /// --yaw / --pitch (degrees): the game camera's orbit (default `[view] cam_yaw_deg / cam_pitch_deg`)
+    yaw: Option<f32>,
+    pitch: Option<f32>,
     overview: bool,
     day: bool,
     /// Start with the massing hidden (the M key): screenshots of placed buildings behind other blocks
@@ -72,14 +76,11 @@ struct Args {
     /// None = the default (on, except in the P3 benches / shots)
     player: Option<bool>,
     squad: usize,
-    paths: Option<Vec<String>>,
     /// --traffic-trace OUT: run the traffic sim headless around --at for --trace-secs and write its trace (P7 G)
     traffic_trace: Option<PathBuf>,
     trace_secs: f32,
+    /// --occ off: no cutaway (the A/B)
     occ_on: bool,
-    probes: bool,
-    gpu: bool,
-    record: Option<PathBuf>,
     /// --sim FILE: sim frames (city-simview/0.1, engine/simsnap) drawn as placeholders (sim.rs)
     sim: Option<PathBuf>,
     sim_rate: f32,
@@ -117,6 +118,8 @@ impl Args {
             city: "city/isle_m".into(),
             at: None,
             zoom: 60.0,
+            yaw: None,
+            pitch: None,
             overview: false,
             day: false,
             hide_mass: false,
@@ -127,13 +130,9 @@ impl Args {
             out: None,
             player: None,
             squad: 0,
-            paths: None,
             traffic_trace: None,
             trace_secs: 300.0,
             occ_on: true,
-            probes: true,
-            gpu: false,
-            record: None,
             sim: None,
             sim_rate: 0.7,
             sim_frame: 0,
@@ -163,6 +162,14 @@ impl Args {
                 }
                 "--zoom" => {
                     a.zoom = next(i).parse().unwrap();
+                    i += 1;
+                }
+                "--yaw" => {
+                    a.yaw = Some(next(i).parse().expect("--yaw DEG"));
+                    i += 1;
+                }
+                "--pitch" => {
+                    a.pitch = Some(next(i).parse().expect("--pitch DEG"));
                     i += 1;
                 }
                 "--overview" => a.overview = true,
@@ -196,18 +203,8 @@ impl Args {
                     a.squad = next(i).parse().unwrap();
                     i += 1;
                 }
-                "--path" => {
-                    a.paths = Some(next(i).split(',').map(String::from).collect());
-                    i += 1;
-                }
                 "--occ" => {
                     a.occ_on = next(i) != "off";
-                    i += 1;
-                }
-                "--no-probes" => a.probes = false,
-                "--gpu" => a.gpu = true,
-                "--record" => {
-                    a.record = Some(PathBuf::from(next(i)));
                     i += 1;
                 }
                 "--traffic-trace" => {
@@ -342,13 +339,30 @@ fn main() {
     let dir = root.join(&args.city).join("out/chunks");
     let index = data::Index::load(&dir);
     let start = args.at.unwrap_or_else(|| index.views.get("D2").map(|p| Vec2::from(*p)).unwrap_or(Vec2::new(3000.0, 600.0)));
-    let mut view = cam::View::new(start, args.zoom, Vec2::from(index.size_m));
+    // `[view]` from TheCity's assets/config.toml: the camera's and the cutaway's numbers (V4b)
+    let vcfg = citysim::config::Config::find_assets_dir().map(|d| citysim::config::Config::load_from(&d).view).unwrap_or_default();
+    let aspect = args.res.0 as f32 / args.res.1.max(1) as f32;
+    let mut view = cam::View::new(
+        start,
+        args.zoom,
+        Vec2::from(index.size_m),
+        cam::CamCfg::from_view(&vcfg),
+        args.yaw.unwrap_or(vcfg.cam_yaw_deg),
+        args.pitch.unwrap_or(vcfg.cam_pitch_deg),
+        aspect,
+    );
     if args.overview {
         view.mode = cam::Mode::Overview;
-        // C3's shot: --at frames the overview's orbit centre, --zoom its distance (m)
+        // C3's shot: --at frames the overview's orbit centre, --zoom its distance (m); --yaw / --pitch its angles
         if let Some(a) = args.at {
             view.orbit_at = Vec3::new(a.x, a.y, 60.0);
             view.dist = args.zoom.max(150.0);
+        }
+        if let Some(y) = args.yaw {
+            view.yaw = y.to_radians();
+        }
+        if let Some(p) = args.pitch {
+            view.pitch = p.to_radians();
         }
     }
     view.day = args.day;
@@ -434,12 +448,25 @@ fn main() {
         pos: start.extend(3.0),
         facing: 0.0,
         on: player_on,
-        occ_on: true,
+        occ_on: args.occ_on,
+        indoors: None,
         squad: args.squad,
         scripted: false,
         light: std::env::var("CV_NO_PLAYER_LIGHT").is_err(),
     })
-    .init_resource::<occ::LayerOccluders>()
+    .insert_resource(Cutaway::new(
+        CutSettings {
+            width: vcfg.cut_width_m,
+            behind: vcfg.cut_behind_m,
+            above: vcfg.cut_above_m,
+            band: vcfg.cut_band_m,
+            rim_strength: vcfg.cut_rim,
+            ceiling: vcfg.cut_ceiling_m,
+            max_zoom: vcfg.cut_max_zoom_m,
+            ..default()
+        }
+        .with_env(),
+    ))
     .insert_resource(city)
     .insert_resource(Focus { at: mesh::bv(start.x, start.y, 3.0), zoom: args.zoom })
     // no volumetric street fog at city scale (glclient's volume spans its bench street)
@@ -456,10 +483,7 @@ fn main() {
     .insert_resource(view)
     .add_plugins((GlClientPlugin, OcclusionPlugin))
     .add_systems(Startup, (cam::setup_camera, setup_world, bench::setup_hud, occ::spawn_bodies))
-    .add_systems(
-        PostUpdate,
-        (occ::occ_switch.before(OccSet::Prepare), occ::occ_cast.in_set(OccSet::Cast), windows::update_occ.after(OccSet::Apply)),
-    )
+    .add_systems(PostUpdate, (occ::occ_switch.before(OccSet::Apply), windows::update_occ.after(OccSet::Apply)))
     .add_systems(
         Update,
         (
@@ -467,7 +491,8 @@ fn main() {
             occ::player_controls.after(cam::controls).before(stream::update_stream),
             occ::place_bodies.after(occ::player_controls),
             stream::update_stream.after(cam::controls),
-            cam::apply_view.after(stream::update_stream),
+            cam::ease_view.after(stream::update_stream).after(occ::player_controls),
+            cam::apply_view.after(cam::ease_view),
             bench::update_hud,
             windows::update_haze.after(stream::update_stream),
             stream::massing_visibility,
@@ -510,38 +535,7 @@ fn main() {
     if args.sim.is_some() || args.save.is_some() {
         people::add(&mut app, args.capsules);
     }
-    if args.bench.as_deref() == Some("occ") {
-        let oa = occbench::OccArgs {
-            paths: args.paths.clone(),
-            occ_on: args.occ_on,
-            probes: args.probes && !args.gpu,
-            gpu: args.gpu,
-            record: args.record.clone(),
-            tag: args.tag.clone(),
-            out: out.clone(),
-            res: args.res,
-        };
-        let ob = occbench::OccBench::new(&dir, &oa);
-        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(std::time::Duration::from_secs_f32(ob.dt)))
-            .insert_resource(ob)
-            .add_systems(Startup, occbench::setup_probes.after(cam::setup_camera))
-            .add_systems(
-                Update,
-                (
-                    occbench::run_occ_bench.before(cam::controls).before(occ::player_controls),
-                    occbench::sync_probes.after(cam::apply_view),
-                    occbench::body_layers.run_if(|b: Res<occbench::OccBench>| b.probes),
-                ),
-            );
-        if args.gpu {
-            app.add_plugins(bevy::render::diagnostic::RenderDiagnosticsPlugin);
-        }
-    } else if args.bench.as_deref() == Some("shadow") {
-        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(std::time::Duration::from_secs_f32(1.0 / 60.0)))
-            .insert_resource(shadowbench::ShadowBench::new(&dir, &args.tag, out.clone()))
-            .add_systems(Startup, shadowbench::setup_spot)
-            .add_systems(Update, shadowbench::run_shadow_bench.before(cam::controls).before(occ::player_controls));
-    } else if args.bench.is_some() {
+    if args.bench.is_some() {
         app.add_systems(Update, bench::run_bench.before(cam::controls).run_if(resource_exists::<bench::Bench>));
     }
     app.run();
@@ -563,26 +557,27 @@ fn setup_world(
     mut gnd_mats: ResMut<Assets<windows::GroundMaterial>>,
     mut win_mats: ResMut<Assets<windows::WindowMaterial>>,
     mut layer_mats: ResMut<Assets<windows::LayerMaterial>>,
-    mut occluders: ResMut<occ::LayerOccluders>,
 ) {
     let ground_mat = gnd_mats.add(windows::ground_material(0.75));
     let window_mat = win_mats.add(windows::material(1.0));
     let s = stream::Stream::new(pending.dir.clone(), ground_mat, window_mat);
     let layers = data::Layers::load(&pending.dir);
-    // the decks in pieces (L3 fades a piece as a whole), the pylons / beams as one mesh (L2 cuts them)
+    // the decks in pieces, the pylons / beams as one mesh (the cutaway cuts both)
     let (pieces, solid) = mesh::layer_parts(&layers);
-    let deck_mat = layer_mats.add(windows::layer_material(0.6, windows::DECKS));
+    let deck_mat = layer_mats.add(windows::layer_material(0.6));
     let tris: usize = pieces.iter().map(|p| p.mb.tris()).sum::<usize>() + solid.tris();
     info!("layers: {} elements, {} deck pieces, {} tris", layers.elements.len(), pieces.len(), tris);
     for (i, p) in pieces.into_iter().enumerate() {
-        let e = commands.spawn(occ::deck_bundle(Handle::default(), deck_mat.clone(), i)).id();
-        occluders.add_piece(e, &p);
-        commands.entity(e).insert(Mesh3d(meshes.add(p.mb.into_mesh())));
+        commands.spawn((
+            Mesh3d(meshes.add(p.mb.into_mesh())),
+            MeshMaterial3d(deck_mat.clone()),
+            Transform::default(),
+            Name::new(format!("deck{i}")),
+        ));
     }
-    occluders.boxes = mesh::layer_boxes(&layers);
     commands.spawn((
         Mesh3d(meshes.add(solid.into_mesh())),
-        MeshMaterial3d(layer_mats.add(windows::layer_material(0.6, windows::PYLONS))),
+        MeshMaterial3d(layer_mats.add(windows::layer_material(0.6))),
         Transform::default(),
         Name::new("layers_solid"),
     ));

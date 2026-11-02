@@ -5877,9 +5877,40 @@ reload_poll_s = 1.0
 people_anim_m = 40.0               # within this many metres of the subject a body is skinned and animated; past it a
                                    # static posed mesh (the idle or a mid-stride frame, instanced per look)
 people_anim_max = 48               # the most bodies animated at once (the nearest to the subject)
-indoor_cut_m = 6.0                 # a body indoors is drawn only on the subject's floor of the subject's building, this near
-                                   # it while the occlusion cut is open (its eased radius, capped here; OccSettings::radius 6 m);
-                                   # every other indoor body hidden (drawn on its storey it stood on the facades)
 child_scale_min = 0.5              # a child's drawn height over an adult's at age 0 (no child mesh: the adult scaled) ...
 child_full_age = 17                # ... growing linearly to 1 at this age
+# The view milestone V4b (Dylan 2026-11-01; cityview cam.rs): the orbit follow-cam replaces the locked orthographic NW
+# view. A perspective orbit around the subject; its aim eases toward the subject's place, z included (a body climbing a
+# tower takes the camera up). The zoom is the frame's width at the subject (--zoom; the distance follows from the FOV).
+cam_fov_deg = 30.0                 # vertical FOV: narrow, so the street keeps near-iso proportions (Dylan's ~30)
+cam_yaw_deg = 45.0                 # starting yaw: the camera's bearing from the subject, 0 = south of it, 90 = east (45: the
+                                   # old view, looking NW); --yaw DEG
+cam_pitch_deg = 50.0               # starting pitch above the horizon; --pitch DEG
+cam_pitch_min_deg = 35.0           # the pitch's clamp (Dylan's ~35-65: lower and the street's far side walls the view off,
+cam_pitch_max_deg = 65.0           # higher and the people are hats)
+cam_zoom_min_m = 12.0              # the zoom's range, the frame's width at the subject: a body's room ...
+cam_zoom_max_m = 1000.0            # ... to a district (the overview, Tab, for the island)
+cam_follow_half_life_s = 0.25      # the aim halves its gap to the subject this fast (a walk trails by ~0.5 m; a lift's floor
+                                   # change eases in over ~1 s)
+cam_snap_m = 40.0                  # a jump of the subject this far snaps (boarding, a building subject's ring centre)
+cam_look_up_m = 1.0                # the aim sits this far over the feet (the body's middle at frame centre)
+cam_rotate_deg_s = 90.0            # Q / E
+cam_pitch_deg_s = 45.0             # Z / X
+cam_drag_deg_px = 0.25             # a right- or middle-drag: degrees of yaw / pitch per pixel
+cam_zoom_step = 1.15               # one wheel notch or - / = press scales the zoom by this
+cam_far_m = 3000.0                 # the far plane and the stream's reach (the skyline at the widest pitch)
+# V4b (glclient occlusion.rs): the cutaway replaces the 6 m see-through capsule. Every building fragment on the camera's side
+# of the subject inside a box around the camera-to-subject line (from cut_behind_m behind the feet to past the camera) and
+# above the feet + cut_above_m is discarded, with a dither band at the box's edges; the subject's own building is cut to its
+# floor (the kit's cut view: the floors above hidden, its walls as stubs, its room lights on). Behind and beside: full height.
+cut_width_m = 36.0                 # the box's width across the line (a street and a frontage each side at the default zoom)
+cut_behind_m = 1.5                 # how far behind the feet (away from the camera) the box starts: the wall the body stands at
+                                   # stays, a facade that juts in front of it goes
+cut_above_m = 1.8                  # the cut's height over the feet: a body's height, so walls in front leave stubs (dithered out over
+                                   # the next cut_band_m) and the ground floor's shops show their rooms
+cut_band_m = 1.2                   # the dither band at the box's edges (a soft section, not a sawn edge)
+cut_rim = 0.6                      # the cut's top edge glows this strong (cyan, a section line; 0 off)
+cut_max_zoom_m = 250.0             # zooms wider than this cut nothing: the establishing shot shows the city whole
+cut_ceiling_m = 2.8                # the subject indoors: its building (the sim's rect of it) is cut this far over its feet, a
+                                   # 3 m storey less the next slab, so its room shows whatever the building is (kit or massing)
 people_glow = 0.5                  # the look's atlas as emission, this strong (an unlit body is lost on the night street)

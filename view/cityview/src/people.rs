@@ -559,7 +559,6 @@ pub fn add(app: &mut App, capsules: bool) {
     {
         let mut sim = app.world_mut().resource_mut::<Sim>();
         sim.capsules = capsules;
-        sim.indoor_cut_m = view.indoor_cut_m;
     }
     app.insert_resource(People::new(PeopleCfg::from_view(&view))).add_systems(Startup, setup_people).add_systems(
         Update,

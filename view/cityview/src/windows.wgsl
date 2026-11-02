@@ -27,7 +27,7 @@
     pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
 }
 #endif
-#import glclient::occlusion::{occ_apply, occ_face_normal}
+#import glclient::occlusion::{occ_apply, occ_face_normal, occ_inside, occ_under_floor, OCC_FLOOR, OCC_FLOOR_GLOW, OCC_WALL, OCC_WALL_GLOW}
 
 struct Windows {
     warm: vec4<f32>,     // rgb linear window_warm, a = strength scale
@@ -166,6 +166,24 @@ fn fragment(
 #endif
 #endif
     emissive += occ_rim;
+    // V4b: the inside of a cut box (double-sided: only seen through the cutaway): a floor plate under the subject's
+    // floor (the far walls painted as the cap they stand for), the room's bare walls above it; no windows
+    var inside = occ_inside(wp, is_front);
+    if (inside < 0.0 && occ_under_floor(wp)) {
+        inside = 1.0;
+    }
+    if (inside >= 0.0) {
+        pbr_input.material.perceptual_roughness = 0.9;
+        if (inside > 0.5) {
+            pbr_input.material.base_color = vec4<f32>(OCC_FLOOR, 1.0);
+            pbr_input.N = vec3<f32>(0.0, 1.0, 0.0);
+            emissive = OCC_FLOOR_GLOW;
+        } else {
+            pbr_input.material.base_color = vec4<f32>(OCC_WALL, 1.0);
+            pbr_input.N = -pbr_input.N;
+            emissive = OCC_WALL_GLOW;
+        }
+    }
     pbr_input.material.emissive = vec4<f32>(emissive, 0.0);
 
     pbr_input.material.base_color = alpha_discard(pbr_input.material, pbr_input.material.base_color);
