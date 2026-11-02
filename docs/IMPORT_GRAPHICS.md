@@ -124,7 +124,7 @@ the shipped map and the generator write none of S3c's, so the 2k city is byte-id
 | S3b `lots.json` `floors` `[lo, hi]` + `seed` | floors | `lo + seed % (hi - lo + 1)` (the district's range, not the lot's massing) |
 | S3b `bldg/<lot>/sim_layout.toml` | floors, flats, shop units, the door | storeys (tier not `roof`); units with a `living` room; units with a `shop`; `door_tiles` on one-lot cuts facing N or S |
 | kinds | `B` lines | the mapping below (S3c) or the generator's mix by district (S3b, no export) |
-| **S3c** `sim/rail.json` `lines` | `L` line named after it ("Terrace Line") | the track's points to tiles (Ramer-Douglas-Peucker, 1.5 tiles), each station's nearest track point (by `u`) kept as a waypoint (a waypoint is a stop); the station names go in a `#` comment; the service is not read |
+| **S3c** `sim/rail.json` `lines` | `L` line named after it ("Terrace Line") | the track's points to tiles (Ramer-Douglas-Peucker, 1.5 tiles), each station's nearest track point (by `u`) kept as a waypoint and marked a station (`x,y*`; the view milestone V9: the other waypoints are bends, not stops; the tram's stops and the funicular's ends the same); the station names go in a `#` comment; the service is not read |
 | S3b `elevated.json` element `kind = "rail"` | `L` line "El \<id\>" | each `station` element's nearest track point kept |
 | `street/tram.json` `lines` | `L` line "Tram \<street\>" ("Tram Tai Ning Road") | the loop from `u = 0` out to the far `terminus`, its stops kept as waypoints; the street's name from `street/names.json` (the way id without it) |
 | `lots.json` `district` | (unused) | the cut takes the district under its centre on the grid |

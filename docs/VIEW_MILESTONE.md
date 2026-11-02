@@ -161,6 +161,29 @@ shared the box with three other coders: a print).
 The raid's climb is the member's body (`OPEN-264`); the cells' week (`OPEN-256`: bail, fines, overcrowding, a
 varied cell day). Split or moved at planning by what V1-V7 leave.
 
+### V9, the dead El (`OPEN-255`)
+
+The El carried nobody at 100k (the V19 follow-cam: empty trains). **V9 as built (2026-11-02).** *Diagnosis:* not only
+the stat table. Full and Coarse bodies never chose the El on the island: (1) every waypoint of a map `L` line was a
+stop and the import writes the track's simplified bends as waypoints, so the lines stopped every ~35 tiles at a whole
+minute each (each stretch's ride ceil'd): the Terrace Line ran 1,169 tiles in 28 min, the Tram 1,361 in 37, twice the
+walk; (2) even at the El's speed the rule asked a ride to save `min_saving_ticks` + a coin's `ticks_per_coin` (35 min)
+of a walk the island never makes long enough (20k commutes: walk p90 23 min, p99 29). *Fix:* the import marks each
+line's stations (`x,y*` in the `L` line, `TransitLineCfg::stations`); a line with stations stops at them, its ends and
+its shared tiles only (`stop_spacing` serves the config's lines); an offset is the ceiling of the ride and dwells
+summed (`dwell_ticks` 0.5, rail.json's 30 s): Terrace 28 -> 13 min, Tram 37 -> 25. The walk-or-ride rule (`choose`,
+`commute_ticks`, `saves_enough`) compares the trips as felt (`transit::felt`): a minute on foot or on the platform
+weighs `[transit] foot_weight` 2.0 minutes aboard (the travel literature's out-of-vehicle weight); the fare's price in
+minutes is unchanged. `calibrate --ambient-flats` added (it took `--map` and `--agents` already) and the table
+regenerated on `isle_m_k2` at 20k (3 seeds x 10 days, 48 min). The shadow writes `[el]` lines (the ride planned,
+each leg boarded, the alighting).
+**Numbers** (20k seed 42 x 7, `run --population 20000 --scaled --ambient-flats 50 --map assets/maps/isle_m_k2.txt`,
+before = `b0bc359`): El rides a weekday Full 0.2 -> 44, Coarse 0 -> 123 (306 on day 0, falling as the Coarse slots
+turn over), Statistical 2,003 -> 2,005 (now from the island's table, p_commute_ride [0.05, 0.88]); refused `slow`
+9,729 -> 9,117 a day. 100k seed 42, a fresh city x 2 (`--map assets/maps/isle_m_k2_100k.txt`): Full 0 -> 156, 242,
+Coarse 0, 1 -> 150, 236, Statistical 7,856, 7,984 -> 3,556, 3,754. The cityview follow-cam from a day-2 shadow save:
+the Hillside Line train #30592 with 32 riders drawn.
+
 ## The exit
 
 1. A resident followed live at 100k for a game day at real time and at x60 with no sim stall (no tick over ~2 s).

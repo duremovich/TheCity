@@ -386,12 +386,30 @@ pub fn build(world: &mut World) {
     let mut lines = Vec::new();
     for (l, (row, t)) in cfg.lines.iter().zip(&tracks).enumerate() {
         let waypoints: BTreeSet<TilePos> = row.waypoints.iter().map(|&[x, y]| TilePos::new(x, y)).collect();
+        // The view milestone V9 (OPEN-255): a line with stations stops at
+        // them (the map's other waypoints are bends; at a minute a bend the
+        // island's lines ran at twice the walk), one without at every
+        // waypoint and every `stop_spacing` tiles.
+        let stations: BTreeSet<TilePos> = row
+            .stations
+            .iter()
+            .filter_map(|&k| row.waypoints.get(usize::from(k)))
+            .map(|&[x, y]| TilePos::new(x, y))
+            .collect();
         let mut line = NetLine { name: row.name.clone(), ..NetLine::default() };
         let mut last_pos: Option<usize> = None;
         let mut at_track: Vec<usize> = Vec::new();
+        // The ride and the dwells so far, unrounded: each offset is its
+        // ceiling (a stretch's own ceiling cost every stop a whole minute).
+        let mut exact = 0.0f64;
         for (i, &p) in t.iter().enumerate() {
             let shared = on_lines.get(&p).is_some_and(|s| s.len() > 1 || !s.contains(&l));
-            let is_stop = i % spacing == 0 || i + 1 == t.len() || waypoints.contains(&p) || shared;
+            let called = if stations.is_empty() {
+                i % spacing == 0 || waypoints.contains(&p)
+            } else {
+                i == 0 || stations.contains(&p)
+            };
+            let is_stop = called || i + 1 == t.len() || shared;
             if !is_stop {
                 continue;
             }
@@ -405,8 +423,8 @@ pub fn build(world: &mut World) {
             }
             let off = match (last_pos, line.offsets.last()) {
                 (Some(j), Some(&prev)) => {
-                    let tiles = (i - j) as f32;
-                    prev + (tiles * cfg.ride_ticks_per_tile).ceil() as u32 + cfg.dwell_ticks
+                    exact += (i - j) as f64 * f64::from(cfg.ride_ticks_per_tile) + f64::from(cfg.dwell_ticks);
+                    (exact.ceil() as u32).max(prev + 1)
                 }
                 _ => 0,
             };
@@ -801,7 +819,7 @@ pub fn train_at(world: &World, line: u8, j: u64, tick: Tick) -> Option<TrainAt> 
         return Some(TrainAt::Stop(if forward { last as u16 } else { 0 }));
     }
     let off = |k: usize| u64::from(l.offsets[k]);
-    let dwell = u64::from(world.config.transit.dwell_ticks);
+    let dwell = world.config.transit.dwell_ticks.round().max(0.0) as u64;
     let len = |k: usize| l.seg.get(k).map_or(0, |w| crate::systems::motion::way_len(w));
     // The stretch's progress: `x` of `span` ticks done from call `k`.
     let track = |k: usize, x: u64, span: u64| TrainAt::Track { seg: k as u16, done: len(k) * x / span.max(1) };
@@ -1261,7 +1279,9 @@ pub fn pays_or_dodges(world: &World, who: EntityId) -> Option<bool> {
 /// [`choose`]'s time-vs-fare rule (the fare, or none when he dodges; a coin
 /// worth `poor_ticks_per_coin` to the poor), the route aside. `None` when
 /// he would not board at all (`pays_or_dodges`).
-pub fn saves_enough(world: &World, who: EntityId, walk: Tick, ride: Tick) -> Option<bool> {
+/// V9: `aboard` of the ride's ticks are on the train (the rest on foot and
+/// on the platform, [`felt`]).
+pub fn saves_enough(world: &World, who: EntityId, walk: Tick, ride: Tick, aboard: Tick) -> Option<bool> {
     let c = &world.config.transit;
     let dodge = pays_or_dodges(world, who)?;
     let fare = if dodge { 0 } else { c.fare };
@@ -1269,7 +1289,21 @@ pub fn saves_enough(world: &World, who: EntityId, walk: Tick, ride: Tick) -> Opt
     let poor = coins < c.poor_meals.saturating_mul(meal_price(world));
     let per_coin = if poor { c.poor_ticks_per_coin } else { c.ticks_per_coin };
     let need = u64::from(c.min_saving_ticks) + fare.max(0) as u64 * u64::from(per_coin);
-    Some(walk >= ride && walk - ride >= need)
+    Some(worth_it(world, walk, ride, aboard, need))
+}
+
+/// The view milestone V9 (OPEN-255): a trip of `total` ticks, `aboard` of
+/// them on the train, as it feels: the minutes on foot and on the platform
+/// weigh `[transit] foot_weight` each (seated, a minute is a minute).
+pub fn felt(world: &World, total: Tick, aboard: Tick) -> f64 {
+    let foot = total.saturating_sub(aboard) as f64;
+    foot * f64::from(world.config.transit.foot_weight) + aboard.min(total) as f64
+}
+
+/// The walk-or-ride rule: the ride is no slower than the walk, and the walk
+/// feels `need` ticks worse than the ride ([`felt`]).
+fn worth_it(world: &World, walk: Tick, ride: Tick, aboard: Tick, need: u64) -> bool {
+    walk >= ride && felt(world, walk, 0) - felt(world, ride, aboard) >= need as f64
 }
 
 pub fn choose(world: &World, who: EntityId, from: TilePos, to: TilePos, t: Tick) -> Result<Route, Refusal> {
@@ -1287,7 +1321,7 @@ pub fn choose(world: &World, who: EntityId, from: TilePos, to: TilePos, t: Tick)
     let per_coin = if poor { c.poor_ticks_per_coin } else { c.ticks_per_coin };
     let walk = crate::exec::timed_walk(world, who, from, to);
     let need = u64::from(c.min_saving_ticks) + fare.max(0) as u64 * u64::from(per_coin);
-    if walk < r.total || walk - r.total < need {
+    if !worth_it(world, walk, r.total, r.arrive - r.depart, need) {
         return Err(Refusal::Slow);
     }
     // Danger: a night stop in a district past the rider's nerve.
@@ -1315,23 +1349,29 @@ pub fn choose(world: &World, who: EntityId, from: TilePos, to: TilePos, t: Tick)
 /// formula), or with the El on the best ride over the doors' nearest stops
 /// (`stop_candidates` each, the walks at the same rate, half a `headway`
 /// of wait, the table's ride) when it saves `min_saving_ticks` plus a
-/// fare's `ticks_per_coin`, as `choose` asks of a rider with the coins.
+/// fare's `ticks_per_coin` as it feels (V9: [`felt`]), as `choose` asks of
+/// a rider with the coins.
 /// No agent, no clock: the structural commute the hiring band, relocation
 /// and the housing demand read. God closures count (a closed stop is
 /// skipped); a riot's or a curfew's do not (they pass). With transit off it
 /// is the walk exactly.
 pub fn commute_ticks(world: &World, from: TilePos, to: TilePos) -> Tick {
+    commute_parts(world, from, to).0
+}
+
+/// V9: [`commute_ticks`] and the ticks of it aboard (0 for the walk).
+pub fn commute_parts(world: &World, from: TilePos, to: TilePos) -> (Tick, Tick) {
     let e = &world.config.exec;
     let tiles = from.manhattan(to);
     let walk = e.walk_ticks(Tick::from(tiles));
     let c = &world.config.transit;
     if !c.enabled || tiles < c.min_ride_tiles {
-        return walk;
+        return (walk, 0);
     }
     let net = &world.transit.net;
     let k = c.stop_candidates.max(1);
     let shut = |s: u16| world.transit.stop_closed.get(&s).is_some_and(|&until| until > world.tick);
-    let mut best = UNREACHABLE as Tick;
+    let (mut best, mut aboard) = (UNREACHABLE as Tick, 0);
     let near_to = net.near(to);
     for &s in net.near(from).iter().filter(|&&s| !shut(s)).take(k) {
         let w1 = e.walk_ticks(Tick::from(net.stops[usize::from(s)].manhattan(from)));
@@ -1350,14 +1390,17 @@ pub fn commute_ticks(world: &World, from: TilePos, to: TilePos) -> Tick {
             if !access_ok(world, w2) {
                 continue;
             }
-            best = best.min(w1 + Tick::from(c.headway / 2) + Tick::from(hop.ticks) + w2);
+            let ride = w1 + Tick::from(c.headway / 2) + Tick::from(hop.ticks) + w2;
+            if ride < best {
+                (best, aboard) = (ride, Tick::from(hop.ticks));
+            }
         }
     }
     let need = Tick::from(c.min_saving_ticks) + c.fare.max(0) as Tick * Tick::from(c.ticks_per_coin);
-    if best.saturating_add(need) <= walk {
-        best
+    if best < UNREACHABLE as Tick && worth_it(world, walk, best, aboard, need) {
+        (best, aboard)
     } else {
-        walk
+        (walk, 0)
     }
 }
 

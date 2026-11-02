@@ -1207,7 +1207,7 @@ fn simplify(pts: &[(f64, f64)], tol: f64, keep: &BTreeSet<usize>) -> Vec<usize> 
 
 /// A polyline in metres to tile waypoints inside the frame (the longest run
 /// of in-frame points), keeping the forced indices; `None` under two points.
-fn line_waypoints(f: &Frame, pts: &[(f64, f64)], keep: &BTreeSet<usize>) -> Option<Vec<[u16; 2]>> {
+fn line_waypoints(f: &Frame, pts: &[(f64, f64)], keep: &BTreeSet<usize>) -> Option<(Vec<[u16; 2]>, Vec<u16>)> {
     let mut best: (usize, usize) = (0, 0);
     let mut start = None;
     for i in 0..=pts.len() {
@@ -1231,13 +1231,20 @@ fn line_waypoints(f: &Frame, pts: &[(f64, f64)], keep: &BTreeSet<usize>) -> Opti
         run.iter().map(|&(x, y)| f.tile(x, y).map_or((0.0, 0.0), |(tx, ty)| (tx as f64, ty as f64))).collect();
     let keep: BTreeSet<usize> = keep.iter().filter(|&&i| i >= best.0 && i < best.1).map(|&i| i - best.0).collect();
     let mut out: Vec<[u16; 2]> = Vec::new();
+    // The view milestone V9 (OPEN-255): the kept points are the stations
+    // (`TransitLineCfg::stations`); the simplification's are bends.
+    let mut stations: Vec<u16> = Vec::new();
     for i in simplify(&tiles, 1.5, &keep) {
         let p = [tiles[i].0 as u16, tiles[i].1 as u16];
         if out.last() != Some(&p) {
             out.push(p);
         }
+        let at = u16::try_from(out.len() - 1).unwrap_or(u16::MAX);
+        if keep.contains(&i) && stations.last() != Some(&at) {
+            stations.push(at);
+        }
     }
-    (out.len() >= 2).then_some(out)
+    (out.len() >= 2).then_some((out, stations))
 }
 
 /// The import itself: the map text and the report.
@@ -2812,7 +2819,7 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                 keep.insert(at);
             }
             match line_waypoints(&f, &pts, &keep) {
-                Some(wp) => {
+                Some((wp, stations)) => {
                     comments.push(format!(
                         "El line {name}: stations {} (sim/rail.json; headway {} s, {} s at night, {} m/s there; the sim's [transit] timetable runs it)",
                         names.join(", "),
@@ -2820,7 +2827,7 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                         l.get("night_headway_s").and_then(Value::as_f64).unwrap_or(0.0),
                         l.get("speed_mps").and_then(Value::as_f64).unwrap_or(0.0)
                     ));
-                    lines.push(TransitLineCfg { name: name.to_string(), waypoints: wp, in_flight: false });
+                    lines.push(TransitLineCfg { name: name.to_string(), waypoints: wp, in_flight: false, stations });
                 }
                 None => rep.warnings.push(format!("{ctx} ({name}): under two track points in the window")),
             }
@@ -2864,7 +2871,9 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                 })
                 .collect();
             match line_waypoints(&f, &pts, &keep) {
-                Some(wp) => lines.push(TransitLineCfg { name: format!("El {id}"), waypoints: wp, in_flight: false }),
+                Some((wp, stations)) => {
+                    lines.push(TransitLineCfg { name: format!("El {id}"), waypoints: wp, in_flight: false, stations })
+                }
                 None => rep.warnings.push(format!("{ctx} ({id}): under two track points in the window")),
             }
         }
@@ -2887,7 +2896,9 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
         }
         let keep: BTreeSet<usize> = [0, pts.len() - 1].into_iter().collect();
         match line_waypoints(&f, &pts, &keep) {
-            Some(wp) => flight.push(TransitLineCfg { name: "Funicular".into(), waypoints: wp, in_flight: true }),
+            Some((wp, stations)) => {
+                flight.push(TransitLineCfg { name: "Funicular".into(), waypoints: wp, in_flight: true, stations })
+            }
             None => rep.warnings.push(format!("{ctx} (funicular): under two track points in the window")),
         }
     }
@@ -2930,9 +2941,12 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                     .map(|(su, _)| u.iter().position(|&x| x >= *su).unwrap_or(0).min(half.len() - 1))
                     .collect();
                 match line_waypoints(&f, half, &keep) {
-                    Some(wp) => {
-                        lines.push(TransitLineCfg { name: format!("Tram {street}"), waypoints: wp, in_flight: false })
-                    }
+                    Some((wp, stations)) => lines.push(TransitLineCfg {
+                        name: format!("Tram {street}"),
+                        waypoints: wp,
+                        in_flight: false,
+                        stations,
+                    }),
                     None => rep.warnings.push(format!("{ctx}: under two tram points in the window")),
                 }
             }

@@ -21,7 +21,10 @@
 //!   and x ranges (an import's districts are not x ranges);
 //! - `L <x>,<y> <x>,<y> [...] <name...>`: an El line (the map's lines
 //!   replace `[[transit.lines]]`); `L+` the same, a line in flight (the
-//!   pre-view pass phase 5's, dropped with `[legs]` off).
+//!   pre-view pass phase 5's, dropped with `[legs]` off). The view
+//!   milestone V9: a waypoint `<x>,<y>*` is a station; a line with any
+//!   stops at its stations only (the others are bends), one without at
+//!   every waypoint (`TransitLineCfg::stations`).
 //!
 //! Scale S3c (the TheCityGraphics sim export), also optional:
 //! - the tile `m`, Mountain: walkable at 1.5 a step, never built on;
@@ -683,8 +686,9 @@ impl MapText {
         }
         for l in &self.lines {
             out.push_str(if l.in_flight { "L+" } else { "L" });
-            for [x, y] in &l.waypoints {
-                out.push_str(&format!(" {x},{y}"));
+            for (i, [x, y]) in l.waypoints.iter().enumerate() {
+                let star = if l.stations.iter().any(|&s| usize::from(s) == i) { "*" } else { "" };
+                out.push_str(&format!(" {x},{y}{star}"));
             }
             out.push_str(&format!(" {}\n", l.name));
         }
@@ -1317,9 +1321,18 @@ fn parse_portal(parts: &[&str], line: usize, w: usize, h: usize) -> MapPortal {
 
 fn parse_line(parts: &[&str], line: usize, w: usize, h: usize) -> TransitLineCfg {
     let mut waypoints = Vec::new();
+    let mut stations = Vec::new();
     let mut k = 1;
     while let Some((x, y)) = parts.get(k).and_then(|s| s.split_once(',')) {
         let num = |s: &str| -> u16 { s.parse().unwrap_or_else(|_| panic!("line {line}: bad waypoint {}", parts[k])) };
+        if let Some(y) = y.strip_suffix('*') {
+            stations.push(u16::try_from(waypoints.len()).unwrap_or(u16::MAX));
+            let (x, y) = (num(x), num(y));
+            assert!(usize::from(x) < w && usize::from(y) < h, "line {line}: waypoint {x},{y} is off the map");
+            waypoints.push([x, y]);
+            k += 1;
+            continue;
+        }
         let (x, y) = (num(x), num(y));
         assert!(usize::from(x) < w && usize::from(y) < h, "line {line}: waypoint {x},{y} is off the map");
         waypoints.push([x, y]);
@@ -1327,7 +1340,7 @@ fn parse_line(parts: &[&str], line: usize, w: usize, h: usize) -> TransitLineCfg
     }
     assert!(waypoints.len() >= 2, "line {line}: an `L` line needs at least two waypoints");
     assert!(k < parts.len(), "line {line}: an `L` line needs a name after its waypoints");
-    TransitLineCfg { name: parts[k..].join(" "), waypoints, in_flight: parts[0] == "L+" }
+    TransitLineCfg { name: parts[k..].join(" "), waypoints, in_flight: parts[0] == "L+", stations }
 }
 
 #[cfg(test)]

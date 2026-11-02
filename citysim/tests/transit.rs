@@ -1506,7 +1506,7 @@ fn test_a_dropped_plan_aboard_gets_off_at_the_next_call() {
     let mut w = city_on();
     let (who, home, farm) = sump_farmer(&w);
     set_out(&mut w, who, home, farm, Lod::Full, 50, 0.6);
-    let stop_gap = u64::from(w.config.transit.stop_spacing) + u64::from(w.config.transit.dwell_ticks) + 2;
+    let stop_gap = u64::from(w.config.transit.stop_spacing) + w.config.transit.dwell_ticks as u64 + 2;
     loop {
         exec_tick(&mut w);
         assert!(w.tick < TICKS_PER_DAY * 2, "never between stops");

@@ -241,8 +241,16 @@ struct CalibrateArgs {
     /// corps' places per resident (see `Config::calibration_city`).
     #[arg(long)]
     agents: Option<u32>,
+    /// The map the table is learned on. The view milestone V9 (OPEN-255):
+    /// where bodies ride (the 20k island, `assets/maps/isle_m_k2.txt`, with
+    /// `--agents 20000`): on the 2,000 map nobody rides and the table's
+    /// ride rates came out 0.
     #[arg(long, default_value = "assets/map.txt")]
     map: PathBuf,
+    /// Ambient flats per household slot on a map without `flats=`, as
+    /// `run --ambient-flats` (`[ambient] flats_per_slot`).
+    #[arg(long, value_name = "R")]
+    ambient_flats: Option<f32>,
     #[arg(long, default_value = "assets/stat_table.toml")]
     out: PathBuf,
     /// Cities run (seeds 1000, 1001, ...), tallied together.
@@ -2120,6 +2128,9 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     let agents = args.agents.unwrap_or(loaded.world.population);
     let mut config = loaded.calibration_city(agents);
     config.world.map = map_path(&args.map)?;
+    if let Some(r) = args.ambient_flats {
+        config.ambient.flats_per_slot = r;
+    }
     config.lod.force = Some(Lod::Full);
     config.exec.straight_line_paths = args.straight_lines;
     // Only the bucket edges are read from this header.

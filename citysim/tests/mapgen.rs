@@ -208,6 +208,7 @@ fn test_map_text_round_trips() {
             name: "Test Line".into(),
             waypoints: vec![[0, 4], [11, 4]],
             in_flight: false,
+            stations: Vec::new(),
         }],
         portals: Vec::new(),
         carriage: Vec::new(),

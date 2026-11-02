@@ -698,8 +698,14 @@ fn test_refused_sale_cools_before_the_wait() {
     let found = civilians(&w).into_iter().find_map(|a| {
         set_coins(&mut w, a, 5_000);
         let o = assets::shop_choice(&w, a, true)?;
-        (o.category != assets::ShopCategory::Install && o.pick.used.is_none() && o.pick.kind != AssetKind::Weapon)
-            .then_some((a, o))
+        // The view milestone V9 (premise moved): on the island's stat table
+        // the first such offer was one the seller still made; the buyer is
+        // the first whose offer is refused.
+        (o.category != assets::ShopCategory::Install
+            && o.pick.used.is_none()
+            && o.pick.kind != AssetKind::Weapon
+            && !assets::sale_ok(&w, a, o.seller, &o.pick))
+        .then_some((a, o))
     });
     let (buyer, offer) = found.expect("a buyer with a new-asset offer");
     assert!(!assets::sale_ok(&w, buyer, offer.seller, &offer.pick), "the import budget refuses it");

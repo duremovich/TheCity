@@ -5647,8 +5647,9 @@ pub struct TransitCfg {
     /// Ticks between departures from each terminus.
     pub headway: u32,
     pub ride_ticks_per_tile: f32,
-    /// Ticks per stop passed.
-    pub dwell_ticks: u32,
+    /// Ticks per stop passed. The view milestone V9: fractional, summed
+    /// with the stretches' ride before the offset is rounded up.
+    pub dwell_ticks: f32,
     /// Ticks per transfer (the wait at a transfer, folded into the table).
     pub transfer_ticks: u32,
     /// Track tiles between stops.
@@ -5658,6 +5659,10 @@ pub struct TransitCfg {
     /// No ride under this Manhattan distance.
     pub min_ride_tiles: u32,
     pub min_saving_ticks: u32,
+    /// The view milestone V9 (OPEN-255): a minute on foot or on the
+    /// platform weighs this many minutes aboard in the walk-or-ride choice
+    /// (`transit::felt`). 1.0: a minute is a minute.
+    pub foot_weight: f32,
     /// What a coin of fare must save in ticks ...
     pub ticks_per_coin: u32,
     /// ... and for a wallet under `poor_meals` meals.
@@ -5708,6 +5713,13 @@ pub struct TransitLineCfg {
     /// dropped with `[legs]` off (`Map::apply_to`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub in_flight: bool,
+    /// The view milestone V9 (OPEN-255): the waypoints (indices) that are
+    /// stations, the line's stops; the rest are bends the train runs
+    /// through. Empty: every waypoint a stop, and a stop every
+    /// `stop_spacing` track tiles (the config's lines, a map without
+    /// stations).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stations: Vec<u16>,
 }
 
 impl Default for TransitCfg {
@@ -5717,12 +5729,13 @@ impl Default for TransitCfg {
             fare: 1,
             headway: 10,
             ride_ticks_per_tile: 0.25,
-            dwell_ticks: 1,
+            dwell_ticks: 1.0,
             transfer_ticks: 5,
             stop_spacing: 16,
             stop_candidates: 3,
             min_ride_tiles: 24,
             min_saving_ticks: 15,
+            foot_weight: 1.0,
             ticks_per_coin: 20,
             poor_ticks_per_coin: 60,
             poor_meals: 2,

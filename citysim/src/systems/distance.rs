@@ -162,9 +162,9 @@ fn trip_when(world: &World, id: EntityId, from: TilePos, to: TilePos, now: Optio
         from,
         to,
         || {
-            let t = travel(world, from, to);
+            let (t, aboard) = crate::systems::transit::commute_parts(world, from, to);
             let walk = world.config.exec.walk_ticks(Tick::from(from.manhattan(to)));
-            crate::systems::transit::saves_enough(world, id, walk, t) == Some(true)
+            crate::systems::transit::saves_enough(world, id, walk, t, aboard) == Some(true)
         },
         now,
     )
