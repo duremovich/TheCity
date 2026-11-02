@@ -550,6 +550,11 @@ impl NearTable {
         (self.ids[i as usize], self.doors[i as usize])
     }
 
+    /// Every entry's building and door, ascending by building.
+    pub fn entries(&self) -> impl Iterator<Item = (crate::entity::EntityId, TilePos)> + '_ {
+        self.ids.iter().copied().zip(self.doors.iter().copied())
+    }
+
     /// The building minimising `(flag, cost, id)` over those `f(id, door
     /// distance from `from`)` scores `Some((flag, cost))`, where a cost is at
     /// least `per_tile x` the door distance: the bucket's list is read until

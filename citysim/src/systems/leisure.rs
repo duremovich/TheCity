@@ -1573,7 +1573,7 @@ pub fn unwind_plan(world: &mut World, id: EntityId) -> Option<Plan> {
 /// when broke (< 2 coins) or when the best spot outscores the local Bar's
 /// walk-weighted 1.0. `None`: the planner as before.
 pub fn hangout_plan(world: &mut World, id: EntityId) -> Option<Plan> {
-    if crate::systems::social::best_colocated_partner(world, id, -1.0, false).is_some() {
+    if crate::systems::social::has_colocated_partner(world, id) {
         return None;
     }
     let from = origin(world, id)?;

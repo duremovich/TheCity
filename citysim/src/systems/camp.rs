@@ -912,7 +912,15 @@ pub fn home_on_warning(world: &World, home: EntityId) -> bool {
 /// Home's otherwise): his grocery run reads the pantry alone.
 pub fn household_on_warning(world: &World, id: EntityId, home: EntityId) -> bool {
     let k = crate::systems::shelf::key(world, id);
-    if crate::systems::shelf::claim(world, home, k).is_none() {
+    let shared = crate::systems::shelf::claim(world, home, k).is_some();
+    household_on_warning_in(world, id, home, shared)
+}
+
+/// [`household_on_warning`] with the shelf's sharing read by the caller
+/// (`shelf::Shelf::shared`; the view milestone V2b).
+pub fn household_on_warning_in(world: &World, id: EntityId, home: EntityId, shared: bool) -> bool {
+    let k = crate::systems::shelf::key(world, id);
+    if !shared {
         return home_on_warning(world, home);
     }
     let window = u32::from(world.config.camp.warn_repeat_days);
