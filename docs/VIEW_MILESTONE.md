@@ -70,6 +70,17 @@ El riders inside a train car, lift riders in a car in a shaft (or hidden with th
 climb and the floor, the camera follows the body's z up (it falls 79 -> 52 today). **Camera:** C7's lift ride and an
 El ride.
 
+### V4b, the orbit camera and the cutaway (Dylan 2026-11-01; `view/cityview/src/cam.rs`, `occ.rs`, `view/glclient/src/occlusion.rs`)
+
+Dylan, after V3's shots: the portal is "not the ideal experience to play the game. Too much building", and locked iso
+was chosen hoping it made graphics simpler, which it no longer does. His calls: **an orbit follow-cam** (perspective
+at a narrow FOV ~30 deg, free yaw around the subject, pitch clamped ~35-65 deg, zoom by distance; replaces the
+orthographic NW view of SPEC §CAM 5.1) and **a cutaway** in place of the 6 m capsule cut: every building on the
+camera's side of the subject within a wide box is sliced down to the subject's floor (soft dither at the edges), the
+subject's own building sliced at its ceiling so the room shows, buildings behind and beside at full height. The camera
+follows the body's z (V4's item 4 moved here) and the cut opens inside a kit building (V4's item 6). **Camera:** the
+07:00 Mahjong queue, a tower dweller at home on a high floor, an El platform, each at two yaws.
+
 ### V5, the ring (`OPEN-149`)
 
 The ring's own LOD class and budget outside `max_full`: everyone in camera range Full, Coarse in a band around it,

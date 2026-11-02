@@ -48,7 +48,7 @@ Rewritten 2026-10-26 (Dylan: "I would rather move fast and break things than spe
 - Outside extraction stays at `remit_share` 0.3 / `scrip_wage_share` 0.3 (2026-10-13).
 - Faith growth is uncapped; the equilibrium comes from interactions (predators, raids, disillusion), designed later (2026-10-17).
 - Arasaka, Militech and the rest are placeholder names (2026-10-13).
-- The view is isometric; a walking player character comes after v1 (2026-10-08).
+- **The view follows one character from above with an orbit camera** (Dylan 2026-11-01, replacing "the view is isometric", 2026-10-08): perspective at a narrow FOV, free yaw, clamped pitch, zoom by distance; locked iso bought nothing once the client was full 3D. Occlusion is a **cutaway** (camera-side buildings sliced to the subject's floor, the subject's building at its ceiling, the skyline kept), not a portal. A walking player character comes after v1.
 - Old workers keep their posts until the frailty exit (~74): no pension, work till the body quits (2026-10-19).
 - Purists reject implants only; a deck in the hand is a tool (2026-10-19).
 - Lives at work moved free time indoors (the own-Home HangOut); social-contact behaviour rows that the milestone's design moved are re-derived, and street life comes back as a feature (OPEN-109), not a knob (2026-10-19).
