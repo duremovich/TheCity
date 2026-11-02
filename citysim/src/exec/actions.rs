@@ -1480,13 +1480,12 @@ pub fn on_complete(
                 StepResult::Failed(FailReason::PreconditionLost)
             }
         }
-        ActionKind::Muster => {
-            if crate::systems::raid::depart(world, id) {
-                StepResult::Done
-            } else {
-                StepResult::Failed(FailReason::PreconditionLost)
-            }
-        }
+        ActionKind::Muster => match crate::systems::raid::depart(world, id) {
+            crate::systems::raid::Departure::Go => StepResult::Done,
+            // V8b (`OPEN-276`): the muster holds for its column.
+            crate::systems::raid::Departure::Hold => StepResult::Running,
+            crate::systems::raid::Departure::Off => StepResult::Failed(FailReason::PreconditionLost),
+        },
         ActionKind::Brawl => {
             // M12 phase 4: the first at the door waits for the crew.
             if crate::systems::raid::wait_for_crew(world, id) {

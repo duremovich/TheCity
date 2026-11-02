@@ -2773,6 +2773,12 @@ pub struct CrewCfg {
     /// many ticks (V15: the first three went in and the rest, a Coarse
     /// body's timed walk behind, found it over; 88 released on the way at 20k).
     pub march_wait_ticks: u64,
+    /// V8b (`OPEN-276`): a gang raid's muster holds past its hour for its
+    /// column, at most this many ticks, until `[gangs] raid_min_members`
+    /// stand there; short of them then, it breaks up at the muster (the lone
+    /// member marched the island to the door and called it off there).
+    /// 0 = the old rule (the muster leaves at its hour, whoever came).
+    pub muster_hold_ticks: u64,
 }
 
 impl Default for CrewCfg {
@@ -2821,6 +2827,7 @@ impl Default for CrewCfg {
             raid_target_reach_ticks: 240,
             court_work_excused: true,
             march_wait_ticks: 60,
+            muster_hold_ticks: 90,
         }
     }
 }
@@ -7102,6 +7109,11 @@ pub struct GangsCfg {
     /// for the door); 0 = any (M11).
     #[serde(default)]
     pub raid_min_members: usize,
+    /// V8b (`OPEN-276`): a raid's column has this many hours from leaving
+    /// its muster to the door before the march is written off (was
+    /// `faction::RAID_MARCH_TICKS`, 6 h; riots and missions read it too).
+    #[serde(default = "GangsCfg::default_raid_march_hours")]
+    pub raid_march_hours: u64,
     /// Shadow V4 bug 11: no Hideout bed further than this many tiles from
     /// the member (0 = any distance).
     #[serde(default)]
@@ -7141,6 +7153,9 @@ pub struct GangsCfg {
 impl GangsCfg {
     fn default_night_watch() -> usize {
         4
+    }
+    fn default_raid_march_hours() -> u64 {
+        6
     }
     fn default_breakout_cooldown_days() -> u64 {
         15

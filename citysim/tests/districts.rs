@@ -1240,7 +1240,7 @@ fn test_riot_dissolves_after_march_window() {
     hand_riot(&mut w, 5, market, &rioters, citysim::RiotResponse::Disperse);
     riot::run(&mut w);
     assert_eq!(w.riots.len(), 1, "inside the march window");
-    w.tick += citysim::systems::faction::RAID_MARCH_TICKS;
+    w.tick += citysim::systems::faction::march_ticks(&w);
     riot::run(&mut w);
     assert!(w.riots.is_empty() && w.rioter_of.is_empty());
     assert!(w.events.iter().any(|e| e.kind == EventKind::Riot && e.text.contains("fizzled")));

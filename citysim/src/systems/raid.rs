@@ -128,9 +128,123 @@ pub fn raid_done(world: &World, agent: EntityId) -> bool {
     }
 }
 
-/// The muster has departed: latecomers skip the wait.
+/// The muster has departed: latecomers skip the wait. V8b (`OPEN-276`): a
+/// gang's, once its column has left (`Gang.raid_left`), not at its hour (a
+/// held muster still gathers the late).
 pub fn mustered(world: &World, agent: EntityId) -> bool {
+    if let Some(Expedition::Gang(g)) = expedition_of(world, agent) {
+        if hold_ticks(world).is_some() {
+            return world.comp::<Gang>(g).is_some_and(left);
+        }
+    }
     departure(world, agent).is_some_and(|t| world.tick >= t)
+}
+
+/// V8b (`OPEN-276`): what a member's Muster step does at its end.
+pub enum Departure {
+    /// The column leaves: he marches.
+    Go,
+    /// The muster holds for its column (`[crew] muster_hold_ticks`).
+    Hold,
+    /// No raid: the order changed, the law holds the target, or the muster broke up.
+    Off,
+}
+
+/// V8b: `[crew] muster_hold_ticks` (`None` off or 0).
+fn hold_ticks(world: &World) -> Option<Tick> {
+    crate::systems::crew::cfg(world).map(|c| c.muster_hold_ticks).filter(|&t| t > 0)
+}
+
+/// V8b: the gang's standing raid has left its muster.
+fn left(g: &Gang) -> bool {
+    g.raid_at.is_some_and(|t| g.raid_left.is_some_and(|l| l >= t))
+}
+
+/// V8b (`OPEN-276`): the actor and the members standing at his raid's
+/// muster (inside the Hideout, or within `raid_gather_radius` of the door)
+/// on the Raid goal, fit, free and adult.
+fn at_muster(world: &World, gid: EntityId, actor: EntityId) -> Vec<EntityId> {
+    let radius = world.config.gangs.raid_gather_radius;
+    let (inside, door) = match muster_point(world, actor) {
+        Some(MusterAt::Inside(h)) => (Some(h), world.comp::<Building>(h).map(|b| b.door)),
+        Some(MusterAt::Door(t)) => (None, Some(t)),
+        None => return vec![actor],
+    };
+    let members = world.comp::<Gang>(gid).map(|g| g.members.clone()).unwrap_or_default();
+    members
+        .into_iter()
+        .filter(|&m| {
+            m == actor
+                || (law::living(world, m)
+                    && !world.has::<Sentence>(m)
+                    && !crate::systems::ages::is_protected(world, m)
+                    && world.comp::<Brain>(m).is_some_and(|b| b.current_goal == Some(GoalKind::Raid))
+                    && world.comp::<Position>(m).is_some_and(|p| {
+                        (inside.is_some() && p.building == inside)
+                            || door.is_some_and(|d| law::chebyshev(p.tile, d) <= radius)
+                    }))
+        })
+        .collect()
+}
+
+/// V8b (`OPEN-276`): the muster held its `muster_hold_ticks` and fewer than
+/// `raid_min_members` came: the raid breaks up there, with who came and
+/// where the rest of the free adults were. The ones who came kept the duty.
+fn broke_up(world: &mut World, gid: EntityId, came: &[EntityId]) {
+    let Some(g) = world.comp::<Gang>(gid) else { return };
+    let (gname, members) = (g.name.clone(), g.members.clone());
+    let what = gang_target(world, gid).map_or_else(|| "its target".to_string(), |b| world.name_of(b));
+    let place = match came.first().and_then(|&a| muster_point(world, a)) {
+        Some(MusterAt::Inside(h)) => world.name_of(h),
+        Some(MusterAt::Door(t)) => format!("a door in {}", world.district_name(world.district_of(t))),
+        None => "the muster".to_string(),
+    };
+    let (mut work, mut sleep, mut cells, mut way, mut other) = (0, 0, 0, 0, 0);
+    for &m in members.iter().filter(|m| !came.contains(m)) {
+        if !law::living(world, m) || crate::systems::ages::is_protected(world, m) {
+            continue;
+        }
+        if world.has::<Sentence>(m) {
+            cells += 1;
+            continue;
+        }
+        match world.comp::<Brain>(m).and_then(|b| b.current_goal) {
+            Some(GoalKind::Work) => work += 1,
+            Some(GoalKind::Sleep) => sleep += 1,
+            Some(GoalKind::Raid) => way += 1,
+            _ => other += 1,
+        }
+    }
+    let rest: Vec<String> = [
+        (work, "at work"),
+        (sleep, "asleep"),
+        (way, "on the way"),
+        (cells, "in the cells"),
+        (other, "about their own business"),
+    ]
+    .into_iter()
+    .filter(|&(n, _)| n > 0)
+    .map(|(n, w)| format!("{n} {w}"))
+    .collect();
+    let names: Vec<String> = came.iter().map(|&m| world.name_of(m)).collect();
+    let text = format!(
+        "{gname}'s raid on {what} broke up at the muster at {place}: {} came ({}){}",
+        came.len(),
+        names.join(", "),
+        if rest.is_empty() { String::new() } else { format!("; {}", rest.join(", ")) }
+    );
+    for &m in came {
+        crate::systems::crew::sat_muster(world, gid, m);
+    }
+    if let Some(g) = world.comp_mut::<Gang>(gid) {
+        g.raid_at = None;
+        g.raid_left = None;
+    }
+    crate::systems::ownership::jobs2_row(world).raid_broke += 1;
+    let mut actors = vec![gid];
+    actors.extend_from_slice(came);
+    world.push_event(EventKind::Raid, &actors, text);
+    faction::rethink(world, gid);
 }
 
 /// M14 V34: the newest pending `Shock::Hacked { by }` on `gang` naming
@@ -431,24 +545,27 @@ pub fn muster_in_reach(world: &World, agent: EntityId) -> bool {
     muster_trip(world, agent, false).is_none_or(|(t, _)| t <= c.duty_reach_ticks)
 }
 
-/// Muster complete: the expedition departs. False when the order changed
+/// Muster complete: the expedition departs. Off when the order changed
 /// meanwhile, or the target fell under full cover (the step fails and the
-/// member replans).
-pub fn depart(world: &mut World, agent: EntityId) -> bool {
+/// member replans). V8b (`OPEN-276`): a gang's muster holds for its column
+/// (`Hold`) and breaks up short of it.
+pub fn depart(world: &mut World, agent: EntityId) -> Departure {
     let now = world.tick;
     let gid = match expedition_of(world, agent) {
         Some(Expedition::Riot(id)) => {
-            let Some(r) = world.riots.iter_mut().find(|r| r.id == id) else { return false };
+            let Some(r) = world.riots.iter_mut().find(|r| r.id == id) else { return Departure::Off };
             if r.muster_at > now {
-                return false;
+                return Departure::Off;
             }
             r.departed.get_or_insert(now);
-            return true;
+            return Departure::Go;
         }
         Some(Expedition::Gang(g)) => g,
         // M16a (plan C22, C24): the strike decision.
-        Some(Expedition::Mission(id)) => return crate::systems::missions::depart(world, agent, id),
-        None => return false,
+        Some(Expedition::Mission(id)) => {
+            return if crate::systems::missions::depart(world, agent, id) { Departure::Go } else { Departure::Off };
+        }
+        None => return Departure::Off,
     };
     // M12 D38: no raid departs into a garrisoned Jail or a district cracking
     // down on the raider or cordoned, whatever held when the order was
@@ -471,13 +588,39 @@ pub fn depart(world: &mut World, agent: EntityId) -> bool {
                 );
                 faction::rethink(world, gid);
             }
-            return false;
+            return Departure::Off;
         }
     }
-    let Some(g) = world.comp_mut::<Gang>(gid) else { return false };
-    if g.raid_at.is_none_or(|t| t > now) {
-        return false;
+    let Some(due) = world.comp::<Gang>(gid).and_then(|g| g.raid_at).filter(|&t| t <= now) else {
+        return Departure::Off;
+    };
+    // V8b (`OPEN-276`): the column forms at the muster before it leaves: the
+    // muster holds past its hour until `raid_min_members` stand there, and
+    // breaks up short of them (20k: the lone member who came marched the
+    // island to the door and called it off "1 at the door"). The march
+    // clock starts when it leaves.
+    if world.comp::<Gang>(gid).is_some_and(|g| !left(g)) {
+        if let Some(hold) = hold_ticks(world) {
+            let came = at_muster(world, gid, agent);
+            if came.len() < world.config.gangs.raid_min_members.max(1) {
+                if now < due + hold {
+                    return Departure::Hold;
+                }
+                broke_up(world, gid, &came);
+                return Departure::Off;
+            }
+            if now > due {
+                crate::systems::ownership::jobs2_row(world).raid_held += 1;
+                if let Some(g) = world.comp_mut::<Gang>(gid) {
+                    g.raid_at = Some(now);
+                }
+            }
+        }
+        if let Some(g) = world.comp_mut::<Gang>(gid) {
+            g.raid_left = Some(now);
+        }
     }
+    let Some(g) = world.comp_mut::<Gang>(gid) else { return Departure::Off };
     // The first member out the door stamps the departure; the rest follow it.
     let mut first = false;
     if g.order.target_is_jail() {
@@ -499,7 +642,7 @@ pub fn depart(world: &mut World, agent: EntityId) -> bool {
     // Round 3 S2 (OPEN-222): he sat the muster and marched with it; his
     // duty is kept whether or not the march reaches the door.
     crate::systems::crew::sat_muster(world, gid, agent);
-    true
+    Departure::Go
 }
 
 /// `Brawl` at the expedition's door: a riot's clash, a breach of the Jail
@@ -606,7 +749,7 @@ pub fn wait_for_crew(world: &World, actor: EntityId) -> bool {
         Some(Expedition::Mission(id)) => return crate::systems::missions::wait_for_crew(world, actor, id),
         None => return false,
     };
-    if now + TICKS_PER_HOUR >= depart + faction::RAID_MARCH_TICKS {
+    if now + TICKS_PER_HOUR >= depart + faction::march_ticks(world) {
         return false;
     }
     let Some(door) = target.and_then(|b| world.comp::<Building>(b)).map(|b| b.door) else { return false };

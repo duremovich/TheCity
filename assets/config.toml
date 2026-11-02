@@ -364,6 +364,8 @@ corp_raid_break = 0.5
 # Phase 4 (plan addition): Raid and Retaliate need 3 fit members. Early gangs of 4-10 and fresh
 # splinters raided with 1-2 at the door (seed 43: 9 of 17 expeditions); a raid is a crew's job.
 raid_min_members = 3
+raid_march_hours = 6               # V8b (OPEN-276): a raid's column has this long from leaving its muster to the door (a riot's
+                                   # and a mission's march too); a held muster ([crew] muster_hold_ticks) starts it at the departure
 hole_up_max_tiles = 60             # Shadow V4 bug 11: no Hideout bed further than this from the member (a 901-min walk at 20k)
 # L2 (plan L23): the Statistical GangWork day's priors per member-day (placeholders), shrunk toward
 # the ledger's on-screen acts with stat_prior_days member-days of weight.
@@ -5561,6 +5563,10 @@ court_work_excused = true          # a court summons missed at work takes standi
                                    # attrition: after the stall fixes the daily court rota was 2/3 of the misses behind a loss)
 march_wait_ticks = 60              # round 7 W2 (OPEN-241): the first at a raid's door hold the brawl for the column's tail, a
                                    # marcher due at the door within this many ticks (V15: three went in, the rest behind)
+muster_hold_ticks = 90             # V8b (OPEN-276): a gang raid's muster waits past its hour, up to this, until [gangs]
+                                   # raid_min_members stand there, then leaves (the march clock from then); short of them it
+                                   # breaks up at the muster with who came and where the rest were (20k: a lone member walked
+                                   # to the rival's door and called it off "1 at the door")
 
 [fares]
 # Pressure pass round 2, R1 (docs/PRESSURE_PASS.md § R1, OPEN-213; systems/fares.rs): fare evasion is never a cell.

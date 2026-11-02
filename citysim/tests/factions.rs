@@ -412,6 +412,10 @@ fn test_raid_goal_opens_in_the_gather_window() {
     let (a, _) = two_civilians(&w);
     gang::enlist(&mut w, a, g0);
     temper(&mut w, a);
+    // V8b: a lone member, so the muster's hold for a column is off.
+    if let Some(c) = w.config.crew.as_mut() {
+        c.muster_hold_ticks = 0;
+    }
     w.tick = 600;
     {
         let g = w.comp_mut::<Gang>(g0).expect("g");
@@ -425,11 +429,11 @@ fn test_raid_goal_opens_in_the_gather_window() {
     assert!(!raid::mustered(&w, a));
     w.tick = 1320;
     assert!(raid::mustered(&w, a));
-    assert!(raid::depart(&mut w, a));
+    assert!(matches!(raid::depart(&mut w, a), raid::Departure::Go));
     assert_eq!(w.comp::<Gang>(g0).expect("g").last_raid_tick, Some(1320));
     w.comp_mut::<Gang>(g0).expect("g").raid_at = None;
     assert!(raid::raid_done(&w, a));
-    assert!(!raid::depart(&mut w, a), "no muster to depart from");
+    assert!(matches!(raid::depart(&mut w, a), raid::Departure::Off), "no muster to depart from");
 }
 
 /// Every guard far from the Jail door, out of any building.
@@ -902,6 +906,10 @@ fn test_raid_into_cover_is_not_chosen_or_departed() {
     let (a, _) = two_civilians(&w);
     gang::enlist(&mut w, a, g0);
     temper(&mut w, a);
+    // V8b: a lone member, so the muster's hold for a column is off.
+    if let Some(c) = w.config.crew.as_mut() {
+        c.muster_hold_ticks = 0;
+    }
     let d = w.district_of_building(w.hideout_of(g1).expect("hq"));
     w.district_mut(d).stance = citysim::Stance::Crackdown(g0);
     let i = faction::gather_inputs(&w, g0).expect("inputs");
@@ -915,7 +923,10 @@ fn test_raid_into_cover_is_not_chosen_or_departed() {
         g.order = Order::Raid;
         g.raid_at = Some(now);
     }
-    assert!(!raid::depart(&mut w, a), "no raid departs into a district cracking down on the raider");
+    assert!(
+        matches!(raid::depart(&mut w, a), raid::Departure::Off),
+        "no raid departs into a district cracking down on the raider"
+    );
     assert!(w.events.iter().any(|e| e.kind == EventKind::Raid && e.text.contains("called off")));
     w.district_mut(d).stance = citysim::Stance::Patrol;
     {
@@ -923,7 +934,7 @@ fn test_raid_into_cover_is_not_chosen_or_departed() {
         g.order = Order::Raid;
         g.raid_at = Some(now);
     }
-    assert!(raid::depart(&mut w, a));
+    assert!(matches!(raid::depart(&mut w, a), raid::Departure::Go));
 }
 
 #[test]

@@ -743,8 +743,10 @@ pub fn alertness_mult(world: &World, faction: Option<EntityId>) -> f32 {
 }
 
 /// A departed raid has this long to reach the rival door before it is
-/// written off and the brain rescores again.
-pub const RAID_MARCH_TICKS: Tick = 6 * TICKS_PER_HOUR;
+/// written off and the brain rescores again (`[gangs] raid_march_hours`).
+pub fn march_ticks(world: &World) -> Tick {
+    world.config.gangs.raid_march_hours * TICKS_PER_HOUR
+}
 
 /// Score the orders and switch when the best clears `hysteresis`. A change
 /// logs `OrderChanged`; Raid and Retaliate schedule the next muster. A raid
@@ -814,17 +816,26 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
         return true;
     }
     if let Some(t) = world.comp::<Gang>(gang).and_then(|g| g.raid_at).filter(|&t| t <= now) {
-        if now < t + RAID_MARCH_TICKS {
+        if now < t + march_ticks(world) {
             return false; // marching
         }
         let name = world.comp::<Gang>(gang).map_or_else(String::new, |g| g.name.clone());
         // V8 (`OPEN-256`): a break-out's march says it was the Jail's door.
         let jail = world.comp::<Gang>(gang).is_some_and(|g| g.order.target_is_jail());
+        // V8b (`OPEN-276`): a column that never left its muster (nobody came
+        // to hold it) says so.
+        let left = world.comp::<Gang>(gang).is_some_and(|g| g.raid_left.is_some_and(|l| l >= t));
+        let muster = world.comp::<Gang>(gang).and_then(|g| g.raid_muster).map(|b| world.name_of(b));
         if let Some(g) = world.comp_mut::<Gang>(gang) {
             g.raid_at = None;
+            g.raid_left = None;
             g.retaliate_until = None;
         }
-        let text = if jail {
+        let text = if !left && crate::systems::crew::cfg(world).is_some_and(|c| c.muster_hold_ticks > 0) {
+            crate::systems::ownership::jobs2_row(world).raid_broke += 1;
+            let at = muster.unwrap_or_else(|| "its muster".to_string());
+            format!("{name}'s raid broke up: nobody came to the muster at {at}")
+        } else if jail {
             crate::systems::ownership::jobs2_row(world).breakout_fizzled += 1;
             let at = world
                 .building_of_kind(crate::components::BuildingKind::Jail)

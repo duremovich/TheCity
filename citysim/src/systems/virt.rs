@@ -1624,7 +1624,7 @@ pub fn step(world: &mut World, id: RunId) {
                 let live = world
                     .comp::<Gang>(g)
                     .and_then(|x| x.raid_at)
-                    .is_some_and(|t| now < t + crate::systems::faction::RAID_MARCH_TICKS);
+                    .is_some_and(|t| now < t + crate::systems::faction::march_ticks(world));
                 if live {
                     r.next_at = now + TICKS_PER_HOUR;
                     world.run_queue.insert((r.next_at, id));
@@ -2720,7 +2720,7 @@ pub fn on_raid_departed(world: &mut World, gang: EntityId) {
         target: node_of_building(world, hideout).unwrap_or_default(),
         chair: hideout,
         not_before: now,
-        expires: now + crate::systems::faction::RAID_MARCH_TICKS,
+        expires: now + crate::systems::faction::march_ticks(world),
         why: RunWhy::Overwatch,
         mode: RunMode::Quiet,
     };

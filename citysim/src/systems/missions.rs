@@ -473,7 +473,7 @@ fn at_door(world: &World, m: &crate::contract::Mission, a: EntityId) -> bool {
 pub fn wait_for_crew(world: &World, actor: EntityId, id: ContractId) -> bool {
     let Some(m) = world.missions.get(&id) else { return false };
     let now = world.tick;
-    if now + TICKS_PER_HOUR >= m.raid_at + faction::RAID_MARCH_TICKS {
+    if now + TICKS_PER_HOUR >= m.raid_at + faction::march_ticks(world) {
         return false;
     }
     let marching = m
@@ -695,7 +695,7 @@ pub fn check(world: &mut World) {
             }
         }
         let Some(m) = world.missions.get(&id) else { continue };
-        if now >= m.raid_at + faction::RAID_MARCH_TICKS {
+        if now >= m.raid_at + faction::march_ticks(world) {
             contracts::fail_attempt(world, id, "the crew never reached the door");
         }
     }

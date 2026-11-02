@@ -3432,6 +3432,11 @@ pub struct Gang {
     /// = `raid::muster_point`'s rule.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raid_muster: Option<EntityId>,
+    /// V8b (`OPEN-276`): when the standing raid's column left its muster
+    /// (`raid::depart`; at or after `raid_at`, which a held muster moves to
+    /// the departure). `None`, or before `raid_at`: not yet left.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raid_left: Option<Tick>,
     /// The city milestone C9b: the rival's Hideout the standing gang raid
     /// lands on, chosen when it was ordered (`vertical::raid_pick`: the
     /// nearest to the raiders' own, or the seat); `None` = the seat.
@@ -3570,6 +3575,7 @@ impl Gang {
             split_check: None,
             raid_target: None,
             raid_muster: None,
+            raid_left: None,
             raid_hideout: None,
             raid_climb: None,
             emptied: false,
