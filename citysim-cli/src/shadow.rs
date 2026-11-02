@@ -163,6 +163,21 @@ pub struct ShadowArgs {
     /// so the follow-cam (`cityview --save FILE --follow INDEX`) watches the diary's world.
     #[arg(long, value_name = "DAYS", value_delimiter = ',')]
     pub save_at: Vec<u64>,
+    /// The view milestone V6 (OPEN-270): record the picks' rings a tick to `<out>/rec/<arch>_<index>_d<day>.simrec.gz`
+    /// (`city-simrec/0.1`, `record.rs`) for cityview `--sim FILE` to play. Bare: every pick; else `all` or
+    /// archetypes and entity indices, comma-separated.
+    #[arg(long, value_name = "PICKS", num_args = 0..=1, default_missing_value = "all")]
+    pub record: Option<String>,
+    /// V6: with one pick recorded, the shadow sets the view on it each tick (`PlayerCommand::SetView`, the
+    /// follow-cam's ring, `[view] ring_half_tiles`), so the camera ring (V5) holds its surroundings Full as the live
+    /// follow-cam does. It changes the shadow's world (the ring's bodies Full) and costs their ticks.
+    #[arg(long)]
+    pub record_view: bool,
+    /// The view milestone V6: start from this save (its world, its config) instead of building one; the window
+    /// starts at the save's day (`--start-day`, when given, must be it or later: the world runs on to it).
+    /// `--population` and `--map` are the save's.
+    #[arg(long, value_name = "FILE")]
+    pub from_save: Option<PathBuf>,
 }
 
 const ARCHETYPES: [&str; 61] = [
@@ -4484,7 +4499,28 @@ pub fn shadow(args: ShadowArgs) -> Result<(), String> {
     if !args.list && args.out.is_none() {
         return Err("--out <dir> is required (or use --list or --assert)".into());
     }
-    let mut world = start_world(args.seed, args.start_day, args.population, args.map.as_deref())?;
+    let mut args = args;
+    let mut world = match &args.from_save {
+        Some(p) => {
+            if args.population.is_some() || args.map.is_some() {
+                return Err("--from-save: --population and --map are the save's".into());
+            }
+            let t0 = std::time::Instant::now();
+            let mut w = citysim::save::load_from_file(p)?;
+            eprintln!("loaded {} at tick {} ({:.1} s)", p.display(), w.tick, t0.elapsed().as_secs_f64());
+            let day = w.tick.div_ceil(TICKS_PER_DAY);
+            if args.start_day != 0 && args.start_day < day {
+                return Err(format!("--start-day {} is before the save's day {day}", args.start_day));
+            }
+            args.start_day = args.start_day.max(day);
+            args.seed = w.seed();
+            while w.tick < args.start_day * TICKS_PER_DAY {
+                citysim::tick(&mut w);
+            }
+            w
+        }
+        None => start_world(args.seed, args.start_day, args.population, args.map.as_deref())?,
+    };
 
     if args.list {
         println!("seed {} day {}: candidates per archetype", args.seed, args.start_day);
@@ -4537,7 +4573,21 @@ pub fn shadow(args: ShadowArgs) -> Result<(), String> {
         dir: dir.join("saves"),
         seed: args.seed,
     });
-    let mut tracks = follow_saving(&mut world, &picked, args.days, !args.no_pin, true, saves.as_ref())?;
+    let mut recorder = match &args.record {
+        Some(sel) => Some(crate::record::Recorder::new(&world, &dir, &crate::record::selected(sel, &picked)?)?),
+        None if args.record_view => return Err("--record-view needs --record".into()),
+        None => None,
+    };
+    if let Some(r) = recorder.as_mut().filter(|_| args.record_view) {
+        r.set_view()?;
+    }
+    let mut tracks =
+        follow_saving(&mut world, &picked, args.days, !args.no_pin, true, saves.as_ref(), recorder.as_mut())?;
+    if let Some(r) = recorder {
+        for (path, frames, raw, bytes) in r.finish()? {
+            println!("recorded {}: {frames} frames, {} KB ({} KB of JSON)", path.display(), bytes / 1024, raw / 1024);
+        }
+    }
     let end = world.tick;
     let mut total = 0u64;
     let mut tsv = format!("{CAMERA_TSV_HEADER}\n");
@@ -4776,7 +4826,7 @@ struct Saves {
 }
 
 fn follow(world: &mut World, picked: &[(String, EntityId)], days: u64, pin: bool, verbose: bool) -> Vec<Track> {
-    follow_saving(world, picked, days, pin, verbose, None).expect("no saves, no I/O")
+    follow_saving(world, picked, days, pin, verbose, None, None).expect("no saves, no I/O")
 }
 
 fn follow_saving(
@@ -4786,6 +4836,7 @@ fn follow_saving(
     pin: bool,
     verbose: bool,
     saves: Option<&Saves>,
+    mut recorder: Option<&mut crate::record::Recorder>,
 ) -> Result<Vec<Track>, String> {
     let start_tick = world.tick;
     world.shadow_notes = Some(Vec::new());
@@ -4820,6 +4871,9 @@ fn follow_saving(
             }
         }
         save_now(world)?;
+        if let Some(r) = recorder.as_deref() {
+            r.before_tick(world);
+        }
         let cursor = world.next_event_id;
         if let Some(n) = world.shadow_notes.as_mut() {
             n.clear();
@@ -4832,6 +4886,9 @@ fn follow_saving(
         let notes: Vec<ShadowNote> = world.shadow_notes.clone().unwrap_or_default();
         for t in &mut tracks {
             observe(world, t, now, &events, &dbg, &notes);
+        }
+        if let Some(r) = recorder.as_deref_mut() {
+            r.after_tick(world)?;
         }
     }
     save_now(world)?;
@@ -5875,6 +5932,9 @@ mod tests {
             population: None,
             map: None,
             save_at: vec![],
+            record: None,
+            record_view: false,
+            from_save: None,
         };
         shadow(args).expect("shadow runs");
         let md = std::fs::read_dir(&dir)

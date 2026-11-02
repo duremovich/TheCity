@@ -10,5 +10,6 @@ prof = ["citysim/prof"]
 [dependencies]
 toml = "0.8"
 serde_json = "1"
+flate2 = "1"
 citysim = { path = "../citysim" }
 clap = { version = "4", features = ["derive"] }

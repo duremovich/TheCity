@@ -26,6 +26,7 @@ use std::time::Instant;
 
 mod export_view;
 mod import_graphics;
+mod record;
 mod shadow;
 
 use clap::{Parser, Subcommand, ValueEnum};

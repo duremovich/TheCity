@@ -5932,3 +5932,8 @@ stair_radius_m = 1.5               # a stairs climber walks round the core at th
 crowd_spread_m = 10.0              # bodies standing on one tile spread over the walkable ground (sidewalk, ped, open, stairs)
 crowd_gap_m = 0.9                  # within this radius, about this far apart (a disc 2.5 x the crowd's area, widening
                                    # where it meets a wall or a road); stable per body (a hash of its id)
+# The view milestone V6 (OPEN-270): `citysim-cli shadow --record` writes each pick's ring a tick (`citysim::view`'s
+# recording, city-simrec/0.1: one gzip'd JSON-lines file per pick per diary day, a frame a tick as a delta on the last)
+# for cityview `--sim FILE` to play. The ring is the pick's surroundings as the shadow's world has them (no view set).
+record_half_tiles = 48             # the recorded ring's half side, tiles (the follow-cam's ring_half_tiles: what a shot shows)
+record_gzip_level = 6              # the files' gzip level, 0-9

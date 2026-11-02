@@ -20,7 +20,7 @@
 //! build-time ones. The reload's line goes to the log and the HUD (`Shared::reload_line`); the walk-matched rate
 //! follows a pace change unless `--rate` pinned it.
 
-use citysim::components::{Brain, Identity, TilePos};
+use citysim::components::{Brain, Identity};
 use citysim::view::{self, ViewFrame};
 use citysim::{EntityId, World, save};
 use std::path::{Path, PathBuf};
@@ -124,48 +124,51 @@ fn ring_line(world: &World, frame: &ViewFrame) -> String {
     )
 }
 
-/// The subject's place: its vehicle's, else its walk's (a Coarse walker on his way), else its `Position`.
-fn subject_tile(world: &World, e: EntityId) -> Option<TilePos> {
-    // C6b: a building as the subject (a shop-house's units): the camera stands at its door
-    if let Some(b) = world.comp::<citysim::Building>(e) {
-        return Some(b.door);
-    }
-    if let Some(v) = citysim::systems::motion::vehicle_of(world, e)
-        && let Some(m) = world.motions.get(&v)
-    {
-        return Some(m.pos);
-    }
-    citysim::exec::walk_place(world, e).map(|p| p.tile)
+/// The subject's name for the log (the HUD's caption is `view::caption`, from each frame).
+fn who(world: &World, e: EntityId) -> String {
+    format!("{} #{}", world.name_of(e), e.index)
 }
 
-fn caption(world: &World, e: EntityId) -> String {
-    if world.has::<citysim::Building>(e) {
-        return format!("{} (its door)", world.name_of(e));
+/// V6: the frame's bodies per tier (in camera Full / Coarse / Stat / child), for a recording's HUD line (the
+/// recorded world's ring counts are not in the file).
+pub fn camera_line(frame: &ViewFrame, view: bool) -> String {
+    let mut n = [0usize; 4];
+    for a in &frame.agents {
+        n[match a.lod {
+            Some(citysim::Lod::Full) => 0,
+            Some(citysim::Lod::Coarse) => 1,
+            Some(citysim::Lod::Statistical) => 2,
+            None => 3,
+        }] += 1;
     }
-    let name = world.comp::<Identity>(e).map_or("?".into(), |i| i.name.clone());
-    let b = world.comp::<Brain>(e);
-    let goal = b.and_then(|b| b.current_goal).map_or("-".into(), |g| format!("{g:?}"));
-    let step = b.and_then(|b| b.current_step()).map_or("-".into(), |s| format!("{:?}", s.action));
-    let lod = b.map_or("child".into(), |b| format!("{:?}", b.lod));
-    let at = match world.comp::<citysim::Position>(e).and_then(|p| p.building) {
-        Some(bd) => world.comp::<citysim::Building>(bd).map_or(format!("#{}", bd.index), |b| format!("{:?}#{}", b.kind, bd.index)),
-        None => "street".into(),
-    };
-    format!("{name} #{} ({lod}): {goal} / {step} @ {at}", e.index)
+    let how = if view { "the shadow's view on the pick" } else { "no view set" };
+    format!("ring (recorded: the shadow's world, {how}): in camera Full {} Coarse {} Stat {} (child {})", n[0], n[1], n[2], n[3])
+}
+
+impl Shared {
+    /// A buffer held at `hold` (`u64::MAX`: free running).
+    pub fn new(hold: u64) -> Shared {
+        Shared {
+            slots: Mutex::new(Slots::default()),
+            hold: AtomicU64::new(hold),
+            rate_bits: AtomicU64::new(0f64.to_bits()),
+            stat: Mutex::new(None),
+            tick: AtomicU64::new(0),
+            reload_req: AtomicBool::new(false),
+            reload_line: Mutex::new(String::new()),
+        }
+    }
+}
+
+/// V6: the first hold of a shots list: the frame after the first shot's minute (`citysim::view`'s diary rule).
+pub fn first_hold(shots: &[u64]) -> u64 {
+    shots.first().map_or(u64::MAX, |t| t + 1)
 }
 
 /// Load the save and start the thread. A save that fails to load or a subject that is not alive is fatal (exit 2):
 /// the tool asserts its preconditions.
 pub fn spawn(a: SimArgs) -> Arc<Shared> {
-    let shared = Arc::new(Shared {
-        slots: Mutex::new(Slots::default()),
-        hold: AtomicU64::new(if a.shots.is_empty() { u64::MAX } else { a.shots[0] }),
-        rate_bits: AtomicU64::new(0f64.to_bits()),
-        stat: Mutex::new(None),
-        tick: AtomicU64::new(0),
-        reload_req: AtomicBool::new(false),
-        reload_line: Mutex::new(String::new()),
-    });
+    let shared = Arc::new(Shared::new(first_hold(&a.shots)));
     let sh = shared.clone();
     std::thread::Builder::new().name("sim".into()).spawn(move || run(a, sh)).expect("spawn the sim thread");
     shared
@@ -176,7 +179,7 @@ fn mtime(p: &Path) -> Option<std::time::SystemTime> {
     std::fs::metadata(p).and_then(|m| m.modified()).ok()
 }
 
-fn fatal(msg: String) -> ! {
+pub fn fatal(msg: String) -> ! {
     eprintln!("cityview: {msg}");
     std::process::exit(2);
 }
@@ -190,7 +193,7 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         .find(|e| e.index == a.follow)
         .unwrap_or_else(|| fatal(format!("--follow {}: no living entity with that index at tick {}", a.follow, world.tick)));
     let building = world.has::<citysim::Building>(subject);
-    if !(world.has::<Identity>(subject) || building) || subject_tile(&world, subject).is_none() {
+    if !(world.has::<Identity>(subject) || building) || view::subject_tile(&world, subject).is_none() {
         fatal(format!("--follow {}: {subject:?} is no body with a place nor a building", a.follow));
     }
     if let Some(&t) = a.shots.iter().chain(a.from.iter()).chain(a.reload_at.iter()).find(|&&t| t < world.tick) {
@@ -203,7 +206,7 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         tile_m: world.config.view.tile_m as f32,
         north_m: world.config.view.north_m as f32,
     });
-    eprintln!("cityview: following {} at {rate:.4} ticks/s", caption(&world, subject));
+    eprintln!("cityview: following {} at {rate:.4} ticks/s", who(&world, subject));
     if let Some(b) = world.comp_mut::<Brain>(subject) {
         b.pinned = true;
     }
@@ -213,6 +216,8 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
     // V5: ticks run and their wall time since the last hold (the bench's sim ticks/s)
     let mut acc = (0u64, 0f64);
     let mut seq = 0u64;
+    // V6: the walkers' ways kept from one published frame to the next (one road search a walk, not a frame)
+    let mut ways = view::WayCache::default();
     let from = a.from.unwrap_or(world.tick);
     let mut next_at = Instant::now();
     let mut reloaded_at = false;
@@ -275,7 +280,9 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
             std::thread::sleep(Duration::from_millis(20));
             continue;
         }
-        let Some(at) = subject_tile(&world, subject) else { fatal(format!("the subject {subject:?} is gone at tick {}", world.tick)) };
+        let Some(at) = view::subject_tile(&world, subject) else {
+            fatal(format!("the subject {subject:?} is gone at tick {}", world.tick))
+        };
         let ring = view::ring_about(at, cfg.ring_half_tiles, w, h);
         world.set_view(Some(ring));
         let t_tick = Instant::now();
@@ -285,8 +292,9 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         // publish every paced tick; flat out, only the two ticks before the hold (or --from) the lerp needs
         let target = if hold == u64::MAX { from } else { hold };
         if paced || world.tick + 1 >= target {
-            let at = subject_tile(&world, subject).unwrap_or(at);
-            let frame = view::snapshot(&world, view::ring_about(at, cfg.ring_half_tiles, w, h));
+            let at = view::subject_tile(&world, subject).unwrap_or(at);
+            let ring = view::ring_about(at, cfg.ring_half_tiles, w, h);
+            let frame = view::snapshot_many_cached(&world, &[ring], Some(&mut ways)).pop().expect("one ring, one frame");
             let line = ring_line(&world, &frame);
             if std::env::var_os("CV_RING_DEBUG").is_some() {
                 // promoted this tick from Statistical: where it stands and what its schedule says
@@ -355,7 +363,7 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                 }
             }
             seq += 1;
-            let caption = format!("{}\n{line}", caption(&world, subject));
+            let caption = format!("{}\n{line}", view::caption(&world, &frame, subject));
             let p = Arc::new(Published { frame, subject, caption, at: Instant::now(), seq });
             let mut s = sh.slots.lock().unwrap();
             s.prev = s.latest.take();

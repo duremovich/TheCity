@@ -778,7 +778,7 @@ pub fn schedule(world: &World, legs: &[TrainLeg], t: Tick) -> Option<(Tick, Tick
 }
 
 /// Where a train is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TrainAt {
     /// At the line's `k`-th call (dwelling, departing or laid over).
     Stop(u16),

@@ -26,7 +26,7 @@ advances it with `World::run_ticks` and sends `PlayerCommand`s; it never writes 
 **`view/`** (city milestone C1, moved from TheCityGraphics `855d0aa`): the Bevy 0.19.1 client, `glclient` (the
 block, kit, street, traffic, tram, light rules and the cutaway, `occlusion.rs`) and `cityview` (the city view binary
 and its benches; the view milestone V4b's orbit follow-cam in `cam.rs`, both read `[view] cam_*` / `cut_*`;
-`--sim FILE` draws a `city-simview/0.1` frame; C2's follow-cam `--save FILE --follow INDEX` runs `citysim` in process on a
+`--sim FILE` draws a `city-simview/0.1` frame or plays a shadow's `city-simrec/0.1` recording through the follow-cam, V6's `recplay.rs`; C2's follow-cam `--save FILE --follow INDEX` runs `citysim` in process on a
 sim thread, `simthread.rs`, reading `citysim::view::snapshot` frames from a two-slot buffer), edition 2024, its own `view/rustfmt.toml`; `view/vendor` holds the
 patched `bevy_pbr` / `bevy_render` the root `[patch.crates-io]` wires. Members outside `default-members`: the sim's
 builds and tiers never compile it; `python tools/test.py view` does. It reads TheCityGraphics' generated assets
@@ -522,7 +522,10 @@ The config is part of the saved `World`: a save resumes under the config it was 
 - `gen-map --residents N --out FILE`, `import-graphics --src DIR --out FILE` (`docs/IMPORT_GRAPHICS.md`).
 - `export-view --save FILE --out FILE [--ticks N] [--keep N] [--at X,Y | --follow INDEX]` (city milestone C2): the camera
   ring's `city-simview/0.1` frames from a save (`citysim::view`, `[view]`); it writes the view tier's fixture.
-  `shadow --save-at D1,D2` writes the window's saves the follow-cam replays.
+  `shadow --save-at D1,D2` writes the window's saves the follow-cam replays. `shadow --record [PICKS]` (the view
+  milestone V6, `record.rs`) writes each pick's ring a tick, `city-simrec/0.1` (`citysim::view` `RecEncoder`), one
+  gzip'd file per pick per diary day under `<out>/rec/`; cityview `--sim REC` plays it (`recplay.rs`) so a diary
+  line and the shot at its minute are the same world's (the minute rule: `citysim::view`'s module doc).
 
 Output analysis: `python tools/analyze_run.py run.csv events.tsv`.
 

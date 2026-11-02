@@ -19,6 +19,10 @@
 //! Tab overview, L day light, H hud, P screenshot) and occ.rs (F player on / off, G cutaway on / off).
 //! --sim FILE [--sim-rate TICKS_PER_S] [--sim-frame N]: a sim replay (city-simview/0.1 from engine/simsnap) drawn as
 //! placeholders on the city (sim.rs; spec/integration/SIM_VIEW_CONTRACT.md).
+//! --sim REC.simrec.gz [--follow INDEX] [--rate ..] [--from ..] [--shots ..]: a shadow's recording (the view milestone
+//! V6, OPEN-270, `citysim-cli shadow --record`, recplay.rs) played through the follow-cam: the pick's ring as the
+//! shadow's world had it, so a diary line and the shot at its minute agree. `--shots T` (live or recorded) shows the
+//! state the diary stamps T: frame T + 1 (`citysim::view`'s module doc); the HUD's caption leads with that minute.
 //! --save FILE --follow INDEX [--rate TICKS_PER_S] [--from TICK] [--shots T1,T2,..]: the follow-cam (the city milestone
 //! C2, simthread.rs): a sim thread runs the save (`citysim`, in process) and the camera follows entity INDEX; --rate
 //! defaults to walk-matched (`[view] walk_m_s` over the `[exec]` pace). A tick is a number or `D:HH:MM`. With
@@ -40,6 +44,7 @@ mod lots;
 mod mesh;
 mod occ;
 mod people;
+mod recplay;
 mod sim;
 mod simthread;
 mod stream;
@@ -274,10 +279,13 @@ impl Args {
             }
             i += 1;
         }
-        assert!(a.save.is_some() == a.follow.is_some(), "--save and --follow go together");
+        // V6: a recording (`--sim REC.simrec.gz`) plays through the follow-cam: --follow, --rate, --from, --shots
+        let rec = a.sim.as_deref().is_some_and(recplay::is_recording);
+        assert!(a.save.is_none() || a.follow.is_some(), "--save needs --follow");
+        assert!(a.follow.is_none() || a.save.is_some() || rec, "--follow needs --save or a recording (--sim REC.simrec.gz)");
         assert!(a.save.is_none() || a.sim.is_none(), "--save and --sim are exclusive");
         assert!(a.shots.is_empty() || a.bench.as_deref() == Some("one"), "--shots needs --bench one");
-        assert!(a.shots.is_empty() || a.save.is_some(), "--shots needs --save");
+        assert!(a.shots.is_empty() || a.save.is_some() || rec, "--shots needs --save or a recording");
         assert!(a.watch_vehicle.is_none() || a.save.is_some(), "--watch-vehicle needs --save");
         assert!((a.config.is_none() && a.reload_at.is_none()) || a.save.is_some(), "--config and --reload-at need --save");
         if let Some(p) = &a.config {
@@ -513,10 +521,22 @@ fn main() {
         ),
     );
     app.insert_resource(Pending { dir: dir.clone(), out: out.clone(), args: args.clone() });
+    // V6: a recording plays through the follow-cam's buffer (recplay.rs), the JSON fixture through Sim::load
+    let mut shared = None;
     if let Some(p) = &args.sim {
-        app.insert_resource(sim::Sim::load(p, args.sim_rate, args.sim_frame, &dir))
-            .add_systems(Startup, sim::setup_sim)
-            .add_systems(Update, sim::update_sim.after(stream::update_stream));
+        if recplay::is_recording(p) {
+            shared = Some(recplay::spawn(recplay::RecArgs {
+                path: p.clone(),
+                follow: args.follow,
+                rate: args.rate,
+                from: args.from,
+                shots: args.shots.clone(),
+            }));
+        } else {
+            app.insert_resource(sim::Sim::load(p, args.sim_rate, args.sim_frame, &dir))
+                .add_systems(Startup, sim::setup_sim)
+                .add_systems(Update, sim::update_sim.after(stream::update_stream));
+        }
     }
     if let (Some(save), Some(follow)) = (&args.save, args.follow) {
         // the save reloads its name tables from TheCity's assets/ (CITYSIM_ASSETS wins when set)
@@ -524,7 +544,7 @@ fn main() {
             // SAFETY: main, before any thread of ours starts (the sim thread and Bevy's come after)
             unsafe { std::env::set_var("CITYSIM_ASSETS", workspace_root().join("assets")) };
         }
-        let shared = simthread::spawn(simthread::SimArgs {
+        shared = Some(simthread::spawn(simthread::SimArgs {
             save: save.clone(),
             follow,
             rate: args.rate,
@@ -533,7 +553,9 @@ fn main() {
             // V1: the default is the repo root's config (the CLI runs from there), when it is there
             config: args.config.clone().or_else(|| Some(PathBuf::from("assets/config.toml")).filter(|p| p.is_file())),
             reload_at: args.reload_at,
-        });
+        }));
+    }
+    if let Some(shared) = shared {
         let mut live = sim::Sim::live(shared.clone(), &dir);
         live.watch_vehicle = args.watch_vehicle;
         app.insert_resource(live)

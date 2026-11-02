@@ -108,6 +108,16 @@ The follow-cam as a proof tool: `shadow` records the picks' ring frames (the `ci
 already writes), and cityview plays a recording (`--sim FILE` reads the file form today). A diary line and the shot
 at its minute agree for the whole window. Determinism stays dropped.
 
+Landed (V6): `shadow --record [PICKS]` writes `<out>/rec/<arch>_<index>_d<day>.simrec.gz` (`city-simrec/0.1`: a
+header line, then a frame a tick as a delta on the last, gzip'd JSON lines; `citysim::view` `RecEncoder` /
+`RecDecoder`, `citysim-cli/src/record.rs`), every pick's ring from one pass (`view::snapshot_many`), `[view]
+record_half_tiles` about the pick; the shadow sets no view, so the ring is the pick's surroundings at the tier the
+shadow's world gives them (the pick Full, most bystanders Statistical) and recording changes nothing in the diary's
+world. cityview `--sim REC` plays it through the follow-cam's buffer (`view/cityview/src/recplay.rs`: `--follow`,
+`--rate`, `--from`, `--bench one --shots`). The diary rule (`citysim::view`'s module doc): `--shots T` shows frame
+`T + 1`, the state the diary stamps `T`, live or recorded; the caption leads with that minute. 20k: 0.4-1.0 MB a pick
+a day.
+
 ### V7, crossing the street and the pace by eye (`OPEN-260`, the walking pace)
 
 With the 3D world to look at: ground vehicles that stop, lights or marked crossings, and a crossing cost so the D2

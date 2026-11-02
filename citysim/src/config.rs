@@ -662,6 +662,11 @@ pub struct ViewCfg {
     /// within this many metres, about `crowd_gap_m` apart.
     pub crowd_spread_m: f32,
     pub crowd_gap_m: f32,
+    /// The view milestone V6 (`OPEN-270`): `shadow --record`'s ring half side in tiles (each pick's surroundings
+    /// a tick, as the shadow's world has them).
+    pub record_half_tiles: u16,
+    /// The recording's gzip level (0-9; flate2's `Compression`).
+    pub record_gzip_level: u32,
 }
 
 impl Default for ViewCfg {
@@ -713,6 +718,8 @@ impl Default for ViewCfg {
             stair_radius_m: 1.5,
             crowd_spread_m: 10.0,
             crowd_gap_m: 0.9,
+            record_half_tiles: 48,
+            record_gzip_level: 6,
         }
     }
 }

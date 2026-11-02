@@ -10,6 +10,18 @@
 //! (`transit::train_at`); a timed vehicle along its way (`motion::timed_pos`). `ahead` is the way to the next
 //! tick's place (the Full walker's next path tiles, a timed walk's or vehicle's corners), so the view lerps along
 //! the street, not through the block between two ticks. Nothing here writes the world.
+//!
+//! **The diary minute and the frame** (the view milestone V6, `OPEN-270`; the one place this rule is written): a
+//! frame's `tick` is `World.tick` after the tick ran, so frame `T + 1` shows the state minute `T` left, and a shadow
+//! diary line stamped `T` (its `now` is the tick that ran) is that state. A shot "at" a diary minute `T`
+//! (cityview `--shots T`, live or recorded) shows frame `T + 1`, and the HUD's caption leads with the diary minute
+//! (`diary_minute`), not the frame's clock (which reads one minute on).
+//!
+//! **The recording** (V6): `citysim-cli shadow --record` writes each pick's ring a tick as `city-simrec/0.1`, one
+//! gzip'd JSON-lines file per pick per diary day: a `RecHeader`, then a `RecFrame` a tick, the frame as a delta on
+//! the one before (`RecEncoder`; the bodies, vehicles and buildings new or changed, the ids gone). cityview's
+//! `--sim FILE` plays it (`RecDecoder`) through the follow-cam's path, so a diary line and the shot at its minute
+//! are the same world's.
 
 use crate::components::{
     Appearance, Brain, Building, BuildingKind, Corpse, GoalKind, Identity, Inventory, Lod, Position, Rect, Sex, TilePos,
@@ -23,9 +35,11 @@ use crate::systems::transit::{train_at, train_tile, TrainAt};
 use crate::time::{self, Season, Tick};
 use crate::world::World;
 use crate::AssetKind;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// What a body is doing, as the view colours and times it (`ExecState`, flattened).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ViewAct {
     Idle,
     /// A Full walk: the next tile and the tick its step lands.
@@ -90,7 +104,7 @@ impl ViewAct {
 }
 
 /// A body in the ring.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ViewAgent {
     pub id: EntityId,
     /// Where the body is now (placed: see the module doc).
@@ -127,7 +141,7 @@ pub struct ViewAgent {
 }
 
 /// A vehicle's route, as the view reads it.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ViewRoute {
     Driven,
     Timed { way: Vec<TilePos>, depart: Tick, arrive: Tick },
@@ -135,7 +149,7 @@ pub enum ViewRoute {
 }
 
 /// A vehicle in motion in the ring, or an El train (every train, wherever it is).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ViewVehicle {
     pub id: EntityId,
     pub ride: RideKind,
@@ -153,7 +167,7 @@ pub struct ViewVehicle {
 }
 
 /// A building's state this tick (the ring's: its rect overlaps the ring).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ViewBuilding {
     pub id: EntityId,
     pub occupants: usize,
@@ -167,7 +181,7 @@ pub struct ViewBuilding {
 
 /// C6b: a business on its host's floors, for its sign on the facade: the host's rect, the door its sign hangs by,
 /// its storey, its kind (the sign's colour), lit while open (`floors::open_at`), and founded within the last day.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ViewUnit {
     pub kind: BuildingKind,
     pub rect: Rect,
@@ -178,7 +192,7 @@ pub struct ViewUnit {
 }
 
 /// A building's fixed facts (the file form's header; the client reads them once).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ViewBuildingInfo {
     pub id: EntityId,
     pub kind: BuildingKind,
@@ -196,7 +210,7 @@ pub struct ViewBuildingInfo {
 }
 
 /// An event of the last tick whose first placed actor stands in the ring.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ViewEvent {
     pub id: u64,
     pub tick: Tick,
@@ -207,7 +221,7 @@ pub struct ViewEvent {
 }
 
 /// One tick of the camera ring.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ViewFrame {
     /// `World.tick` after the tick ran (the frame shows the state the tick left).
     pub tick: Tick,
@@ -284,9 +298,17 @@ fn timed_place(way: &[TilePos], depart: Tick, arrive: Tick, tick: Tick) -> (Tile
 
 /// A Coarse body's walk this tick, if its box (start to target, grown by `margin`) comes near the ring: the walk's
 /// way is one road search, so a walk nowhere near the camera is not searched.
-fn walk_near(world: &World, id: EntityId, ring: &Rect, margin: u16) -> Option<(TilePos, Vec<TilePos>)> {
+/// V6: `cache` keeps each walk's way across frames (a walk's way is fixed until the walk changes; the road search
+/// was most of a recording's time).
+fn walk_near(
+    world: &World,
+    id: EntityId,
+    ring: &Rect,
+    margin: u16,
+    cache: Option<&mut WayCache>,
+) -> Option<(TilePos, Vec<TilePos>)> {
     let b = world.comp::<Brain>(id)?;
-    let ExecState::GotoTimed { target, walk: Some(w), .. } = &b.exec else { return None };
+    let ExecState::GotoTimed { target, walk: Some(w), arrive_tick, .. } = &b.exec else { return None };
     let (lo_x, hi_x) = (w.from.x.min(target.tile.x), w.from.x.max(target.tile.x));
     let (lo_y, hi_y) = (w.from.y.min(target.tile.y), w.from.y.max(target.tile.y));
     let grown = Rect {
@@ -298,8 +320,32 @@ fn walk_near(world: &World, id: EntityId, ring: &Rect, margin: u16) -> Option<(T
     if !grown.overlaps(ring) {
         return None;
     }
-    let (way, depart, arrive) = crate::exec::walk_route(world, id)?;
+    let Some(cache) = cache else {
+        let (way, depart, arrive) = crate::exec::walk_route(world, id)?;
+        return Some(timed_place(&way, depart, arrive, world.tick));
+    };
+    let key = (w.from, target.tile, w.depart, *arrive_tick);
+    let hit = cache.ways.get(&id).filter(|c| c.0 == key).map(|c| (c.1.clone(), c.2, c.3));
+    let (way, depart, arrive) = match hit {
+        Some(r) => r,
+        None => {
+            let r = crate::exec::walk_route(world, id)?;
+            cache.ways.insert(id, (key, r.0.clone(), r.1, r.2, world.tick));
+            r
+        }
+    };
+    if let Some(c) = cache.ways.get_mut(&id) {
+        c.4 = world.tick;
+    }
     Some(timed_place(&way, depart, arrive, world.tick))
+}
+
+/// V6: the Coarse walkers' ways a snapshot placed, kept for the next frame (`snapshot_many_cached`): keyed by the
+/// walk (its start, target, departure and arrival), dropped once a frame passes without it.
+#[derive(Default)]
+pub struct WayCache {
+    #[allow(clippy::type_complexity)]
+    ways: BTreeMap<EntityId, ((TilePos, TilePos, Tick, Tick), Vec<TilePos>, Tick, Tick, Tick)>,
 }
 
 fn act_of(b: &Brain) -> ViewAct {
@@ -324,13 +370,41 @@ fn act_of(b: &Brain) -> ViewAct {
 
 /// The camera ring at the world's tick (see the module doc). Pure: the same world and ring give the same frame.
 pub fn snapshot(world: &World, ring: Rect) -> ViewFrame {
+    snapshot_many(world, &[ring]).pop().expect("one ring, one frame")
+}
+
+/// The view milestone V6 (`OPEN-270`): a frame for each of `rings` from one pass over the world (the shadow's
+/// recording: one world, many picks, each pick's ring as the world has it). `snapshot` is its one-ring case.
+pub fn snapshot_many(world: &World, rings: &[Rect]) -> Vec<ViewFrame> {
+    snapshot_many_cached(world, rings, None)
+}
+
+/// `snapshot_many` with the walkers' ways kept in `cache` across calls (the recorder's, a frame a tick).
+pub fn snapshot_many_cached(world: &World, rings: &[Rect], mut cache: Option<&mut WayCache>) -> Vec<ViewFrame> {
     let tick = world.tick;
     let margin = world.config.view.way_margin_tiles;
     // A Full walker takes up to this many path tiles a tick (Y4's pace; a chromed leg more, clipped by the view).
     let steps = usize::try_from(world.config.exec.walk_tiles_per_tick.max(1) * 2).unwrap_or(usize::MAX);
+    let mut frames: Vec<ViewFrame> = rings
+        .iter()
+        .map(|&ring| ViewFrame {
+            tick,
+            day: time::day(tick),
+            clock: time::clock(tick),
+            dark: time::is_dark(tick),
+            season: time::season(tick),
+            ring,
+            agents: vec![],
+            vehicles: vec![],
+            buildings: vec![],
+            corpses: vec![],
+            events: vec![],
+        })
+        .collect();
+    let in_rings = |t: TilePos| rings.iter().any(|r| r.contains(t));
 
     // Vehicles first: a rider stands at his vehicle's place.
-    let mut vehicles = vec![];
+    let mut vehicles: BTreeMap<EntityId, ViewVehicle> = BTreeMap::new();
     for (&v, m) in &world.motions {
         let (t, ahead, route) = match &m.route {
             Route::Driven => {
@@ -359,10 +433,10 @@ pub fn snapshot(world: &World, ring: Rect) -> ViewFrame {
             }
         };
         let train = matches!(m.route, Route::Line { .. });
-        if !train && !ring.contains(t) {
+        if !train && !in_rings(t) {
             continue;
         }
-        vehicles.push(ViewVehicle {
+        let x = ViewVehicle {
             id: v,
             ride: m.ride,
             kind: m.kind,
@@ -374,10 +448,17 @@ pub fn snapshot(world: &World, ring: Rect) -> ViewFrame {
             riders: m.riders.clone(),
             route,
             van_run: world.van_runs.get(&v).map(|r| (r.prisoners.clone(), r.arrive)),
-        });
+        };
+        for (f, ring) in frames.iter_mut().zip(rings) {
+            if train || ring.contains(t) {
+                f.vehicles.push(x.clone());
+            }
+        }
+        vehicles.insert(v, x);
     }
 
-    let mut agents = vec![];
+    // every placed body's tile, for the events' places
+    let mut placed: BTreeMap<EntityId, TilePos> = BTreeMap::new();
     // scan-ok: the view, once a published frame (not once a tick of the sim) over every body
     for e in world.entities() {
         if world.has::<Corpse>(e) {
@@ -415,21 +496,22 @@ pub fn snapshot(world: &World, ring: Rect) -> ViewFrame {
             t
         } else if let Some(v) = aboard.and_then(|v| world.motions.get(&v).map(|_| v)) {
             b = None;
-            match vehicles.iter().find(|x| x.id == v) {
+            match vehicles.get(&v) {
                 Some(x) => x.t,
-                // a vehicle outside the ring: its rider is outside it too
+                // a vehicle outside the rings: its rider is outside them too
                 None => continue,
             }
-        } else if let Some((t, way)) = walk_near(world, e, &ring, margin) {
+        } else if let Some((t, way)) = rings.iter().find_map(|r| walk_near(world, e, r, margin, cache.as_deref_mut())) {
             b = None;
             ahead = way;
             t
         } else {
             p.tile
         };
-        if !ring.contains(t) {
+        if !in_rings(t) {
             continue;
         }
+        placed.insert(e, t);
         let act = act_climb.unwrap_or_else(|| brain.map_or(ViewAct::Child, act_of));
         if let (Some(br), true) = (brain, ahead.is_empty() && b.is_none()) {
             if let ExecState::Goto { path, .. } = &br.exec {
@@ -438,7 +520,7 @@ pub fn snapshot(world: &World, ring: Rect) -> ViewFrame {
         }
         let app = world.comp::<Appearance>(e);
         let kit = crate::systems::assets::kit(world, e);
-        agents.push(ViewAgent {
+        let agent = ViewAgent {
             id: e,
             t,
             b,
@@ -466,70 +548,67 @@ pub fn snapshot(world: &World, ring: Rect) -> ViewFrame {
             deck: kit.deck_tier,
             food: world.comp::<Inventory>(e).map(|i| i.food),
             rect: b.and_then(|b| world.comp::<Building>(b)).map(|bd| bd.rect),
-        });
+        };
+        for (f, ring) in frames.iter_mut().zip(rings) {
+            if ring.contains(t) {
+                f.agents.push(agent.clone());
+            }
+        }
     }
 
-    let mut buildings = vec![];
     for b in world.with::<Building>() {
         let Some(bd) = world.comp::<Building>(b) else { continue };
-        if !bd.rect.overlaps(&ring) {
+        if !rings.iter().any(|r| bd.rect.overlaps(r)) {
             continue;
         }
-        buildings.push(ViewBuilding {
+        let vb = ViewBuilding {
             id: b,
             occupants: bd.occupants.len(),
             demolished: bd.demolished,
             derelict: bd.derelict,
             closed: bd.closed_until.is_some_and(|t| t > tick) || bd.under_construction_until.is_some_and(|t| t > tick),
             unit: view_unit(world, b, bd),
-        });
+        };
+        for (f, ring) in frames.iter_mut().zip(rings) {
+            if bd.rect.overlaps(ring) {
+                f.buildings.push(vb.clone());
+            }
+        }
     }
 
-    let corpses = world
-        .with::<Corpse>()
-        .into_iter()
-        .filter_map(|c| world.comp::<Position>(c).filter(|p| ring.contains(p.tile)).map(|p| (c, p.tile)))
-        .collect();
+    for c in world.with::<Corpse>() {
+        let Some(p) = world.comp::<Position>(c) else { continue };
+        for (f, ring) in frames.iter_mut().zip(rings) {
+            if ring.contains(p.tile) {
+                f.corpses.push((c, p.tile));
+            }
+        }
+    }
 
     // the last tick's events (the tick that ran is `tick - 1`), placed at the first actor's place
-    let place = |a: EntityId| {
-        agents.iter().find(|x| x.id == a).map(|x| x.t).or_else(|| world.comp::<Position>(a).map(|p| p.tile))
-    };
-    let events = world
-        .events
-        .iter()
-        .rev()
-        .take_while(|ev| ev.tick + 1 >= tick)
-        .filter(|ev| ev.tick + 1 == tick)
-        .filter_map(|ev| {
-            let t = ev.actors.iter().find_map(|a| place(*a));
-            t.filter(|t| ring.contains(*t)).map(|t| ViewEvent {
-                id: ev.id,
-                tick: ev.tick,
-                kind: ev.kind,
-                actors: ev.actors.to_vec(),
-                t: Some(t),
-                text: ev.text.clone(),
-            })
-        })
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
-
-    ViewFrame {
-        tick,
-        day: time::day(tick),
-        clock: time::clock(tick),
-        dark: time::is_dark(tick),
-        season: time::season(tick),
-        ring,
-        agents,
-        vehicles,
-        buildings,
-        corpses,
-        events,
+    let place = |a: EntityId| placed.get(&a).copied().or_else(|| world.comp::<Position>(a).map(|p| p.tile));
+    let mut last: Vec<&crate::events::Event> =
+        world.events.iter().rev().take_while(|ev| ev.tick + 1 >= tick).filter(|ev| ev.tick + 1 == tick).collect();
+    last.reverse();
+    for ev in last {
+        let Some(t) = ev.actors.iter().find_map(|a| place(*a)) else { continue };
+        for (f, ring) in frames.iter_mut().zip(rings) {
+            if ring.contains(t) {
+                f.events.push(ViewEvent {
+                    id: ev.id,
+                    tick: ev.tick,
+                    kind: ev.kind,
+                    actors: ev.actors.to_vec(),
+                    t: Some(t),
+                    text: ev.text.clone(),
+                });
+            }
+        }
     }
+    if let Some(c) = cache {
+        c.ways.retain(|_, w| w.4 == tick);
+    }
+    frames
 }
 
 /// C6b: `b`'s sign, when it is a business on its host's floors.
@@ -581,4 +660,231 @@ pub fn walk_matched_rate(world: &World) -> f64 {
     let e = &world.config.exec;
     let m_per_tick = world.config.view.tile_m * e.walk_tiles_per_tick.max(1) as f64 / e.move_ticks_full.max(1) as f64;
     world.config.view.walk_m_s / m_per_tick
+}
+
+/// The camera's subject's place (the ring's centre): a building's door (C6b: a shop-house's units), its vehicle's
+/// (a train at its timetable's tile), else its walk's (a Coarse walker on his way, a climber at the door), else its
+/// `Position`. `None`: no place (gone).
+pub fn subject_tile(world: &World, e: EntityId) -> Option<TilePos> {
+    if let Some(b) = world.comp::<Building>(e) {
+        return Some(b.door);
+    }
+    if let Some(v) = crate::systems::motion::vehicle_of(world, e) {
+        if let Some(m) = world.motions.get(&v) {
+            if let Route::Line { line, train } = m.route {
+                let at = train_at(world, line, u64::from(train), world.tick);
+                return Some(at.and_then(|a| train_tile(world, line, a)).unwrap_or(m.pos));
+            }
+            return Some(m.pos);
+        }
+    }
+    crate::exec::walk_place(world, e).map(|p| p.tile)
+}
+
+/// The diary's minute a frame shows: `frame.tick - 1` (the module doc's rule), as the diary stamps it (`d21 08:00`).
+pub fn diary_minute(frame_tick: Tick) -> String {
+    let m = frame_tick.saturating_sub(1);
+    format!("d{} {}", time::day(m), time::clock(m))
+}
+
+/// The view milestone V6: the follow-cam's caption for `e` in `frame` (the HUD's line; a recording keeps it a
+/// tick): the diary minute the frame shows, who, the tier, what it is doing (the frame's act), its tile, the place
+/// (the building and storey, the vehicle, the street or a deck's level) and its goal and step, in the diary's words.
+pub fn caption(world: &World, frame: &ViewFrame, e: EntityId) -> String {
+    let when = diary_minute(frame.tick);
+    if world.has::<Building>(e) {
+        return format!("diary {when}: {} (its door)", world.name_of(e));
+    }
+    let Some(a) = frame.agent(e) else {
+        return format!("diary {when}: {} #{}: not in its ring", world.name_of(e), e.index);
+    };
+    let place = if let Some(v) = a.aboard {
+        let what = frame.vehicle(v).map_or("a vehicle".to_string(), |x| match &x.route {
+            ViewRoute::Line { line, .. } => {
+                let name = world.map.lines.get(usize::from(*line)).map_or("?", |l| l.name.as_str());
+                format!("the {name} train #{}", v.index)
+            }
+            _ => format!("a {:?} #{}", x.ride, v.index),
+        });
+        format!("aboard {what}")
+    } else if let Some(b) = a.b {
+        format!("in {} floor {}", world.name_of(b), a.floor)
+    } else if a.floor > 0 {
+        format!("on the street, deck level {}", a.floor)
+    } else {
+        "on the street".to_string()
+    };
+    let lod = a.lod.map_or("child".to_string(), |l| format!("{l:?}"));
+    let goal = a.goal.map_or("-".to_string(), |g| format!("{g:?}"));
+    let step = a.step.map_or("-".to_string(), |s| format!("{s:?}"));
+    format!(
+        "diary {when}: {} #{} ({lod}) {} at ({}, {}) {place}: {goal} / {step}",
+        world.name_of(e),
+        e.index,
+        a.act.word(),
+        a.t.x,
+        a.t.y
+    )
+}
+
+/// The view milestone V6 (`OPEN-270`): the recording's schema (`citysim-cli shadow --record`, cityview `--sim`).
+pub const REC_SCHEMA: &str = "city-simrec/0.1";
+
+/// A recording's first line: one pick's ring for one diary day (`citysim-cli shadow --record`), its world's fixed
+/// facts. The lines after it are `RecFrame`s, one a tick, each a delta on the one before (the first in full).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RecHeader {
+    pub schema: String,
+    pub seed: u64,
+    pub map_size: [usize; 2],
+    pub subject: EntityId,
+    pub name: String,
+    pub arch: String,
+    /// The diary day the file holds: frames `day * TICKS_PER_DAY + 1 ..= (day + 1) * TICKS_PER_DAY`.
+    pub day: u64,
+    pub tile_m: f64,
+    pub north_m: f64,
+    pub half: u16,
+    /// The walk-matched rate in the recorded world (`walk_matched_rate`), the player's default.
+    pub rate: f64,
+    /// The El lines' names, by index.
+    pub lines: Vec<String>,
+    /// The diary minute and the frame (the module doc's rule), said once in the file.
+    pub minute: String,
+    /// The shadow's view followed the pick (`shadow --record-view`: its ring Full, the camera ring's); else no
+    /// view was set and the ring's bodies are at the tier the city gave them.
+    #[serde(default)]
+    pub view: bool,
+}
+
+/// One tick of a recording: the frame's clock and ring in full, its bodies, vehicles and buildings as the ones new
+/// or changed since the tick before and the ids gone from the ring, its corpses and events in full, the caption.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RecFrame {
+    pub tick: Tick,
+    pub day: u64,
+    pub clock: String,
+    pub dark: bool,
+    pub season: Season,
+    pub ring: Rect,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agents: Vec<ViewAgent>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gone: Vec<EntityId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vehicles: Vec<ViewVehicle>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vgone: Vec<EntityId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub buildings: Vec<ViewBuilding>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bgone: Vec<EntityId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub corpses: Vec<(EntityId, TilePos)>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<ViewEvent>,
+    pub caption: String,
+}
+
+/// `now` against the last tick's `prev` (keyed by id): the new or changed and the ids gone; `prev` becomes `now`.
+fn delta<T: Clone + PartialEq>(
+    prev: &mut BTreeMap<EntityId, T>,
+    now: &[T],
+    id: impl Fn(&T) -> EntityId,
+) -> (Vec<T>, Vec<EntityId>) {
+    let mut changed = vec![];
+    let mut next = BTreeMap::new();
+    for x in now {
+        let k = id(x);
+        if prev.get(&k) != Some(x) {
+            changed.push(x.clone());
+        }
+        next.insert(k, x.clone());
+    }
+    let mut gone: Vec<EntityId> = prev.keys().filter(|k| !next.contains_key(k)).copied().collect();
+    gone.sort();
+    *prev = next;
+    (changed, gone)
+}
+
+/// A heading to the whole degree (a recording's bodies: the view draws no finer, and a fraction moved every tick).
+fn whole(h: Option<f32>) -> Option<f32> {
+    h.map(f32::round)
+}
+
+/// The writer's side: each frame as a delta on the last one it wrote (a fresh encoder writes the first in full).
+#[derive(Default)]
+pub struct RecEncoder {
+    agents: BTreeMap<EntityId, ViewAgent>,
+    vehicles: BTreeMap<EntityId, ViewVehicle>,
+    buildings: BTreeMap<EntityId, ViewBuilding>,
+}
+
+impl RecEncoder {
+    pub fn encode(&mut self, f: &ViewFrame, caption: String) -> RecFrame {
+        let agents: Vec<ViewAgent> =
+            f.agents.iter().map(|a| ViewAgent { facing: whole(a.facing), ..a.clone() }).collect();
+        let vehicles: Vec<ViewVehicle> =
+            f.vehicles.iter().map(|v| ViewVehicle { facing: whole(v.facing), ..v.clone() }).collect();
+        let (agents, gone) = delta(&mut self.agents, &agents, |a| a.id);
+        let (vehicles, vgone) = delta(&mut self.vehicles, &vehicles, |v| v.id);
+        let (buildings, bgone) = delta(&mut self.buildings, &f.buildings, |b| b.id);
+        RecFrame {
+            tick: f.tick,
+            day: f.day,
+            clock: f.clock.clone(),
+            dark: f.dark,
+            season: f.season,
+            ring: f.ring,
+            agents,
+            gone,
+            vehicles,
+            vgone,
+            buildings,
+            bgone,
+            corpses: f.corpses.clone(),
+            events: f.events.clone(),
+            caption,
+        }
+    }
+}
+
+/// The player's side: the deltas applied in order give each tick's frame (its bodies, vehicles and buildings by id).
+#[derive(Default)]
+pub struct RecDecoder {
+    agents: BTreeMap<EntityId, ViewAgent>,
+    vehicles: BTreeMap<EntityId, ViewVehicle>,
+    buildings: BTreeMap<EntityId, ViewBuilding>,
+}
+
+impl RecDecoder {
+    /// The frame `r` makes of the state so far, and its caption.
+    pub fn apply(&mut self, r: RecFrame) -> (ViewFrame, String) {
+        for k in &r.gone {
+            self.agents.remove(k);
+        }
+        for k in &r.vgone {
+            self.vehicles.remove(k);
+        }
+        for k in &r.bgone {
+            self.buildings.remove(k);
+        }
+        self.agents.extend(r.agents.into_iter().map(|a| (a.id, a)));
+        self.vehicles.extend(r.vehicles.into_iter().map(|v| (v.id, v)));
+        self.buildings.extend(r.buildings.into_iter().map(|b| (b.id, b)));
+        let f = ViewFrame {
+            tick: r.tick,
+            day: r.day,
+            clock: r.clock,
+            dark: r.dark,
+            season: r.season,
+            ring: r.ring,
+            agents: self.agents.values().cloned().collect(),
+            vehicles: self.vehicles.values().cloned().collect(),
+            buildings: self.buildings.values().cloned().collect(),
+            corpses: r.corpses,
+            events: r.events,
+        };
+        (f, r.caption)
+    }
 }
