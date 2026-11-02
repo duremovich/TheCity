@@ -4963,9 +4963,9 @@ walk_share = 0.25                  # 25 s green man of 100: an arrival at random
 jaywalk_tenths = 150               # ~21 steps' price a carriageway tile: a 16 m street (two tiles) jaywalked costs 41
                                    # steps more than walked, so a crossing (two steps and the 28 s wait, ~10 steps) up
                                    # to ~15 tiles off either way is taken
-timed_crossings_per_tile = 0.005   # V7's 20k seed 42 x 7: Full walkers made 16,520 crossings over 3.52 M Manhattan tiles
-                                   # of walk legs (0.0047; 0.0045 a step walked: the report's crossings_walked /
-                                   # walk_steps), at 0.30 min waited each
+timed_crossings_per_tile = 0.0033  # V7's 20k seed 42 x 7: Full walkers made 11,521 crossings over 3.45 M Manhattan tiles
+                                   # of walk legs (0.0032 a step walked: the report's crossings_walked / walk_steps),
+                                   # 26 s waited at each (28 s expected)
 
 # The city milestone C8 (docs/CITY_MILESTONE.md § C8, Dylan's answer 5, 2026-10-30; systems/vertical.rs): the vertical
 # gangs. A gang's seat (the map's Hideout) moves up to the top storey of its host; each midnight a gang founds a Hideout

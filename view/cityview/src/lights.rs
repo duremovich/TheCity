@@ -42,13 +42,20 @@ pub fn add(app: &mut App) {
 pub fn graft(world: &mut citysim::World, config: Option<&Path>) {
     let mut changed = false;
     if world.map.crossings.is_empty()
-        && let citysim::map::MapSource::File(p) = citysim::map::MapSource::from_config(&world.config)
-        && p.is_file()
+        && let citysim::map::MapSource::File(saved) = citysim::map::MapSource::from_config(&world.config)
     {
-        let m = citysim::map::Map::load(&p);
-        if world.map.graft_crossings(&m) {
-            eprintln!("cityview: V7 graft: {} crossings and the carriageways from {}", m.crossings.len(), p.display());
-            changed = true;
+        // this checkout's map of the same name first (a save names the absolute path it was built from)
+        let here = saved.file_name().map(|n| Path::new("assets/maps").join(n));
+        let grafted = here.into_iter().chain([saved.clone()]).filter(|p| p.is_file()).find_map(|p| {
+            let m = citysim::map::Map::load(&p);
+            world.map.graft_crossings(&m).then(|| (p, m.crossings.len()))
+        });
+        match grafted {
+            Some((p, n)) => {
+                eprintln!("cityview: V7 graft: {n} crossings and the carriageways from {}", p.display());
+                changed = true;
+            }
+            None => eprintln!("cityview: V7 graft: no map with crossings for {} (the save walks without)", saved.display()),
         }
     }
     if world.config.crossings.is_none()
@@ -265,6 +272,13 @@ fn update_lights(
                 }
             }
         }
+    }
+    if l.spawned.len() != l.shown {
+        eprintln!(
+            "cityview: V7 lights: {} crossings' poles within {RANGE_M} m of the subject, {walk_now} on the green man at {:.1} min",
+            l.spawned.len(),
+            t as f64 / 60_000.0
+        );
     }
     l.shown = l.spawned.len();
     l.walk_now = walk_now;
