@@ -30,9 +30,9 @@ The city must run on an average PC. Realism is bought with design, not CPU: ever
 
 The sim is numerical. Whether it is working is decided from data first: the CSV report, the event log, the scenario gates and the parity tests. A story that cannot be seen in the numbers is not yet in the sim. Watching it live in the app is the second check, not the first.
 
-## The view (corrected 2026-10-08, Dylan)
+## The view (corrected 2026-10-08 and 2026-11-01, Dylan)
 
-The game will ultimately **follow a single character, maybe a squad, in isometric RPG fashion**. Earlier passages said "first person"; that was misstated. Everything those passages derive from the player being one agent among the 2,000 (the dialogue range, story LOD around the player's circle, the ambient density the camera sees, combat as rolls and targeting) stands unchanged; what changes is the renderer and the camera, which follow the character from above rather than from behind its eyes.
+The game will ultimately **follow a single character from above**: an orbit follow-cam in perspective at a narrow FOV (free yaw, clamped pitch, zoom by distance), with a cutaway for occlusion (camera-side buildings sliced to the subject's floor). 2026-11-01 replaced "in isometric RPG fashion" (CLAUDE.md standing decision; the view milestone built it in `view/cityview`); "maybe a squad" is parked 2026-11-02 (see § The majordomo and the squad). Earlier passages said "first person"; that was misstated. Everything those passages derive from the player being one agent among the 2,000 (the dialogue range, story LOD around the player's circle, the ambient density the camera sees, combat as rolls and targeting) stands unchanged; what changes is the renderer and the camera, which follow the character from above rather than from behind its eyes.
 
 ## The world outside the city (added 2026-10-05, Dylan)
 
@@ -41,7 +41,7 @@ There is an economy beyond the city. **Megacorps exist as an economic idea outsi
 - **Destroying a megacorp completely is hard.** Wipe out its city holdings and the parent can send agents in from abroad to take territory back, fund a new branch, or buy up what is left. Driving it out is a campaign, not a raid.
 - **There are still ways to kill one.** Cyber attacks (Virt, M14: Data theft, ICE, decks) and economic warfare (undercutting, strikes, monopolies broken, supply cut off) hit the ledger the parent runs on. A megacorp dies when its outside resources run dry, not when its last city building falls.
 
-The same is probably true of every faction: gangs can have brothers in the next city, the law has a state behind it. Since the game will ultimately follow a single character (maybe a squad) in isometric RPG fashion, all of this is abstracted. It enters a player's game only through its effects: groups having more or fewer resources, more or fewer bodies, a branch that is or is not reinforced. Nothing outside the city is ever simulated per agent.
+The same is probably true of every faction: gangs can have brothers in the next city, the law has a state behind it. Since the game will ultimately follow a single character from above (the orbit follow-cam, § The view), all of this is abstracted. It enters a player's game only through its effects: groups having more or fewer resources, more or fewer bodies, a branch that is or is not reinforced. Nothing outside the city is ever simulated per agent.
 
 Design implications for the milestones: the M11 corp needs room for a parent (an outside treasury and a reinforcement rule), M12 districts give the parent territory to retake, M14 Virt gives the player and rival corps the only weapon that reaches the ledger directly. A later milestone (after M14) gives the outside world its own daily tick.
 
@@ -58,6 +58,8 @@ At the closest level of detail there is a **dialogue system**. A player close en
 Design implications: social stats and reputation belong to the sim before the player exists (NPCs use them on each other; the gossip and revenge systems read reputation); leverage moves are the contract entity again (buyer, target, price, deadline) with a threat instead of a payment; the dialogue layer is a renderer over the social state and never a second source of truth; the stat and reputation model lands with gossip (post-M14), the generated-dialogue layer with the player character.
 
 ## Governance, missions and the outside as combat maps (added 2026-10-05, Dylan)
+
+**Combat maps parked 2026-11-02** (`BIG_PICTURE_2026-11-02.md` § 3: a combat map is a second game). Governance and missions at LOD stand as built; missions played in person are out of the player slice (`M18_PLAYER.md`).
 
 **Governance.** Governments and corporations have a governance model. Some are dictatorships (one leader, one Personality driving the brain, as the gang leader does today); some have shared leadership, a **board**. Most of the time a board is abstracted as a corporate personality (the aggregate of its members' Personalities drives the brain). But at the closest detail (the character view) the members are agents, and a player could bribe, blackmail or threaten every member of a board to get themselves voted in as the leader of a megacorp. Super hard, not impossible for a determined player with enough power, especially one who can send agents on missions.
 
@@ -204,6 +206,8 @@ Design implications: a `Layout` per building generated from a **template per kin
 
 ## Candidate: daemons, rogue agents and the Blackwall (added 2026-10-05, Dylan's idea, to consider)
 
+**Parked 2026-11-02** (`BIG_PICTURE_2026-11-02.md` § 3: a candidate since day one, never pulled; the Blackwall as an abroad node stands, built in M17).
+
 Netrunners could have AI agents (game abstractions, not real agents) to do tasks for them. The danger is that too many are created for the simulation to function, so they could be gated behind a character's or faction's processing power (servers). Reading about the HuggingFace hack: AI agents might go rogue and solve problems in illegal ways, which might be too much. Cyberpunk's lore has an AI boogeyman, superintelligences locked behind the Blackwall, to prevent over-use of AI systems. Not sure how to make it fun for players, but worth considering.
 
 Assessment (2026-10-05): the sim already has the shape. A faction's brain is an agent that does tasks for its leader, with orders, a budget and a trace. An in-game AI agent is a **daemon**: a brain without a body, living on a Virt node (M14), with a goal (watch a camera feed, maintain ICE, scrape Data, trade, hunt a target's sightings, run a ledger), a tier, and a compute budget.
@@ -229,11 +233,15 @@ Folded into `docs/M16_CONTRACTS.md` as an addendum: `attention` as a daily facti
 
 ## The majordomo and the squad (added 2026-10-05, Dylan)
 
+**Parked 2026-11-02** (`BIG_PICTURE_2026-11-02.md` § 3: v1 is one character). The addendum it was folded into is in the old M18 spec, `git show 2c2e0fd:docs/M18_PLAYER.md`.
+
 When the player owns a faction they can hire a majordomo (a general, a lieutenant) to run the day-to-day of a bigger faction. A micromanager does not have to; a player who wants to be a CEO sets policy, hands the operation over, and goes rampaging with a smaller squad they direct personally.
 
-Folded into `docs/M18_PLAYER.md` as an addendum: the majordomo is the agent whose Personality the faction brain runs on (the M11 governance hook), under a `Policy` the player pins; without one the player issues the faction's orders directly; the squad is a crew of up to six directed on the raid machinery with the player as leader; the majordomo is an agent, so they can be poached, coerced, killed or turn (embezzle, leak, split); NPC factions name one the same way when their leader is away.
+Folded into the old `docs/M18_PLAYER.md` (before its 2026-11-02 rewrite) as an addendum: the majordomo is the agent whose Personality the faction brain runs on (the M11 governance hook), under a `Policy` the player pins; without one the player issues the faction's orders directly; the squad is a crew of up to six directed on the raid machinery with the player as leader; the majordomo is an agent, so they can be poached, coerced, killed or turn (embezzle, leak, split); NPC factions name one the same way when their leader is away.
 
 ## World state and cataclysms (added 2026-10-06, Dylan)
+
+**Parked 2026-11-02** (`BIG_PICTURE_2026-11-02.md` § 3: god commands cover the test use).
 
 Large, world-changing events, triggered by the player or organically by the factions, that remake the city: Cyberpunk's DataKrash (rogue AIs burn most of the net once any one group's AI tech runs too far ahead), the Night City Holocaust (a nuclear device takes out the city centre), and whatever the lore pass adds. An event can wipe out a large share of the population, Data, assets or buildings, or simply leave interesting history behind; it can also unlock things nobody else has (unique Data, blueprints, a technology, an ability) for whoever caused or survived it.
 
@@ -255,7 +263,7 @@ The LOD transition the player sees most is the street itself. As the camera (or 
 
 ## Life-path playtests (added 2026-10-06, Dylan)
 
-When the player phase arrives (the isometric, single-character view), the test is to **write a bunch of desired life paths and have agents play through them**. An agent is given a goal, big or small (take over a megacorp; run a successful ripperdoc business; become a drug lord; pull a heist to steal a weapon; run a strip club; complete ten fixer contracts) and plays the city through the same controls a human would. To move fast the agents get more than a player would: more resources, and either the inability to die (with everything that *would* have killed them tracked) or death with a restore, so a run never restarts from zero.
+When the player phase arrives (the single-character follow-cam view), the test is to **write a bunch of desired life paths and have agents play through them**. An agent is given a goal, big or small (take over a megacorp; run a successful ripperdoc business; become a drug lord; pull a heist to steal a weapon; run a strip club; complete ten fixer contracts) and plays the city through the same controls a human would. To move fast the agents get more than a player would: more resources, and either the inability to die (with everything that *would* have killed them tracked) or death with a restore, so a run never restarts from zero.
 
 The goal is twofold: make sure the mechanics work end to end, and find what the simulation is missing. Players must be able to live how they want and find many ways to power and glory, so each objective must have many possible solutions, and the city must keep offering interesting scenarios and opportunities on its own. A life path that can be completed only one way, or whose agent sits idle because nothing came to it, is a gap in the same sense the god scenarios' gaps are.
 
@@ -264,5 +272,7 @@ The goal is twofold: make sure the mechanics work end to end, and find what the 
 - **Everything the agent does is a command**, so a life path replays, and a death restores from the last save with the ledger of causes intact.
 
 ## The dystopia as a contest (added 2026-10-10, Dylan; recorded here 2026-10-18)
+
+**Parked 2026-11-02** (`BIG_PICTURE_2026-11-02.md` § 3: no mechanism named; the P10 levers stand).
 
 The brutal no-net city is the starting state, not a law. A player strong enough should be able to win a seat in local government (an election, or appointment by a board or council) and enact a safety net if the Treasury can fund it: the levers P10 kept (the levy, the dole, public works, school meals, the Reserve release), a tax band, transit fares, police priorities, revitalization grants for a district. The corps whose revenue it threatens push back in proportion: Lobby, smear stories through the Feeds, surveillance and tags, the Hit market, leverage and blackmail, the outside megacorps' sanctions; a compromised official is an event. Making the dystopia a utopia is the long game, and the pushback is the story. Lands with the player phase (M18+); the machinery is `docs/P10_POLICY.md`.
