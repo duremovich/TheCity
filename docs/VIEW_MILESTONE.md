@@ -111,8 +111,11 @@ at its minute agree for the whole window. Determinism stays dropped.
 ### V7, crossing the street and the pace by eye (`OPEN-260`, the walking pace)
 
 With the 3D world to look at: ground vehicles that stop, lights or marked crossings, and a crossing cost so the D2
-footbridges carry their share. The walking pace and the view rate tuned by eye through V1. Design calls for Dylan at
-the phase's planning.
+footbridges carry their share. The walking pace and the view rate tuned by eye through V1. **Dylan's calls
+(2026-11-01):** lights and marked crossings (a signal cycle per intersection off the tick; a body walks to a crossing
+and waits for the walk phase; a footbridge wins when the detour is long). **Traffic is real, no filler:** citizens
+driving their own cars, trucks and buses, plus self-driving vehicles, all sim bodies, added later (`OPEN-275`); V7
+builds the crossings and signals only.
 
 ### V8, leftovers the view exposes (`OPEN-264`, `OPEN-256`)
 
