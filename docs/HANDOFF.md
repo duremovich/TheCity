@@ -25,6 +25,7 @@ regenerated on the 20k island (V9).
 | V8 cells and raids | the raid column as bodies; `[cells]`: buy-outs, kin bail, early release, a work detail, cards |
 | V8b the muster | a raid's muster holds for a crew of three or breaks up naming who came |
 | V9 the El | stations, not bends; a minute on foot weighs two aboard; the stat table on the 20k island |
+| V10 after the close | an indoor body on its storey's massing box (the cutaway finds its floor); the light follows the sim's hour, `[view] light_*` |
 
 **Shadow V20** (`docs/SHADOW_V20.md`, `docs/shadow_v20/`): exits 2, 3, 4, 6 met; 1 partial (the 00:11 hire 2-4.2 s,
 `OPEN-265`); 5: the reload met, the pace by eye open (`OPEN-283`, Dylan's). No minor harmed. The cells' early release
@@ -53,14 +54,16 @@ God scenarios 20 of cap 20; asserted bullets 60 of 60; ignores 56; no test files
 
 ## Next, in order
 
-1. **Dylan: the pace by eye** (`OPEN-283`): `cityview --save target/v20/isle100k_s42_d21/saves/42-30240.ron --follow
+1. **Dylan: the pace by eye** (`OPEN-283`), now in daylight and a readable night (V10): `cityview --save target/v20/isle100k_s42_d21/saves/42-30240.ron --follow
    24590` (Nerys Underhill, office worker, floor 27), edit `assets/config.toml`, it reloads live.
 2. **A short leftovers pass**, one agent each: `OPEN-282` (a starving line prints age and index: the child rule must be
    checkable), `OPEN-280` (the guard paid for a half shift), `OPEN-281` (retired at 62), `OPEN-265` (the 00:11 hire),
-   `OPEN-278` (raids on empty Hideouts).
-3. **M18 rewritten against the 3D client** (the roadmap's order); real traffic (`OPEN-275`) placed by Dylan.
+   `OPEN-278` (raids on empty Hideouts), `OPEN-287` (the jail drawn as one 3,000-body crowd), `OPEN-285` (indoor
+   bodies not room-aware, sleepers standing).
+3. **M18 rewritten against the 3D client** (the roadmap's order); real traffic (`OPEN-275`) placed by Dylan; chrome on
+   the company's credit and its repossession (`OPEN-286`, Dylan's idea); the real lighting pass (`OPEN-284`).
 
-Open from this session: `OPEN-273` to `OPEN-283` (less `276`, `277` closed). Closed: `OPEN-149`, `255`, `262`, `264`,
+Open from this session: `OPEN-273` to `OPEN-287` (less `276`, `277` closed). Closed: `OPEN-149`, `255`, `262`, `264`,
 `270`, `271`, `276`, `277`. Carried: `OPEN-256`, `260`, `265`, `217`, `253`, `254`, `221`, `257`, `252`, `258`, `259`,
 `266` to `269`, `272`; standing `OPEN-062`, `039`, `057`, `059`, `077`, `069`, `070`.
 
@@ -93,8 +96,9 @@ Open from this session: `OPEN-273` to `OPEN-283` (less `276`, `277` closed). Clo
 | V9 the El | Opus | 319 | 203k | 35 |
 | V8b the muster | Opus | 279 | 190k | 30 |
 | Shadow V20 critics (3) | Sonnet | 121 | 80-96k | 4 |
-| orchestrator (merges, briefs, the close) | Opus | 437 | 148k | 26 |
+| V10 the cutaway's floor and the light | Opus | 184 | 160k | 12 |
+| orchestrator (merges, briefs, the close) | Opus | 516 | 156k | 32 |
 
-The view milestone ≈ $414 for thirteen phases, the exit read and the close. No coders or worktrees are left (one
+The view milestone ≈ $432 for fourteen phases, the exit read and the close. No coders or worktrees are left (one
 untracked leftover folder, `.claude/worktrees/agent-a2d06b9d9985759f3`, holds a locked file: delete by hand); the runs
 are in `target/v20/`.
