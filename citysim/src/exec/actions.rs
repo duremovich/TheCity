@@ -267,6 +267,9 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
             can_work_now(world, id, job) && crate::exec::routine::work_action(world, job.role) == k
         }
         ActionKind::Wander => true,
+        // M18 P2: an ask at a bound door (a directed plan's; the NPC's
+        // Pitch Vend is unbound and checked by `streetwork::can_start`).
+        ActionKind::Vend => target.is_some_and(|b| crate::systems::search::at_door(world, id, b)),
         // Pressure pass round 9, Y2 (`OPEN-250`): a swing across the cells'
         // wall does not start (the planner's foe taken in mid-plan).
         ActionKind::Attack => target.is_none_or(|t| !crate::systems::law::held_apart(world, id, t)),
@@ -916,7 +919,11 @@ pub fn on_complete(
         // Jobs & lives phase 2: the hour stood (the sales are world-side).
         // Round 4 T5 (OPEN-217): a searcher's ask at a door settled.
         ActionKind::Vend => {
-            crate::systems::search::on_ask(world, id);
+            match target {
+                // M18 P2: a directed ask at its bound door.
+                Some(b) => crate::systems::search::ask_at(world, id, b),
+                None => crate::systems::search::on_ask(world, id),
+            }
             StepResult::Done
         }
         // P5i: one pantry unit (synth first, as eaten) into the carried food.

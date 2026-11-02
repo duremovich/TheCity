@@ -55,6 +55,11 @@ pub enum PlayerCommand {
     Stop(EntityId),
     /// M18 P1: the possessed body's own brain on (`true`) or off.
     SetAutopilot(EntityId, bool),
+    /// M18 P2: a menu verb for the possessed body (`player::act`).
+    Act {
+        agent: EntityId,
+        verb: crate::systems::player::Verb,
+    },
     /// `0..=10`, default 3.
     SetDolePerDay(u8),
     /// App-only; logged so replays know the speed, no sim effect.
@@ -1039,6 +1044,7 @@ impl World {
             PlayerCommand::Goal { agent, goal } => crate::systems::player::goal(self, *agent, *goal),
             PlayerCommand::Stop(agent) => crate::systems::player::stop(self, *agent),
             PlayerCommand::SetAutopilot(agent, on) => crate::systems::player::set_autopilot(self, *agent, *on),
+            PlayerCommand::Act { agent, verb } => crate::systems::player::act(self, *agent, *verb),
             PlayerCommand::SetView(rect) => {
                 self.view_rect = *rect;
             }

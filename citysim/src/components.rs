@@ -2650,6 +2650,10 @@ pub struct PlayerControlled {
     /// The last plan failure or refusal the human should read (the tick and
     /// the line), for the HUD.
     pub last_failure: Option<(Tick, String)>,
+    /// M18 P2: the menu row the running plan came from (its label), for the
+    /// HUD; cleared by a goal, a walk or Stop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doing: Option<String>,
 }
 
 /// The pre-view pass phase 2 (docs/PREVIEW_PASS.md § 1): one shift's

@@ -6027,3 +6027,12 @@ pick_reach_m = 3000.0              # a click's ray hits nothing past this (the f
 pick_step_m = 0.5                  # the ray's march step against the ground and the lots' boxes (a thinner wall is missed)
 pick_snap_tiles = 2                # a roof or wall hit walks into the sim building nearest it within this many tiles (the
                                    # export's lots and the sim's rects disagree by a tile or two at their edges)
+# M18 P2 (the verbs, `systems/player.rs`): the doors a click walks through. Any other door (a stranger's Block, a plant,
+# the Precinct) is walked to and stops on the street; going in is a menu verb with its crime (a break-in) where the
+# city has one. The player's own home, workplace, squat, booked bed and gang Hideout open too.
+play_public_kinds = ["Market", "Bar", "Hotel", "Clinic", "Hall", "Club", "Arcade", "NoodleBar", "FightPit", "Den",
+                     "Lounge", "Fixer", "Mission", "Garage", "Gunsmith", "StripClub", "Brothel", "Boutique", "Cemetery",
+                     "Station"]
+pick_body_px = 14.0                # a click this near a drawn body's chest (pixels) picks the body (a body is ~20 px tall
+                                   # at the follow zoom)
+hud_width_px = 300.0               # the HUD's width, bottom right (P1's 380 px top right ate the far field's clicks)

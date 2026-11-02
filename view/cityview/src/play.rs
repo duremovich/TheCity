@@ -1,17 +1,26 @@
-//! M18 P1, the seam (docs/M18_PLAYER.md): a human drives the followed body (`--save FILE --possess INDEX`).
+//! M18 P1, the seam, and P2, the verbs (docs/M18_PLAYER.md): a human drives the followed body (`--save FILE
+//! --possess INDEX`).
 //!
-//! The HUD is egui (`bevy_egui`): the clock, the needs, the coins, the job, where the body is, its goal and current
-//! plan (the step under way marked `>`) and the plan's last failure, with buttons for the goals the planner makes a
-//! plan for (`PlayerCommand::Goal`, `plan::plan_for`: Eat, Sleep, Work, Shop) and Stop. A left click on the city casts
-//! the camera's ray against the ground and the lots' massing boxes (lots.rs; the cutaway's box around the subject is
-//! passed through, it is not drawn) and sends the tile it hits: the body walks there, into the building that holds it
-//! (`citysim::systems::player::walk_to`). Keys: T autopilot (the body's own brain on / off), Space pause, `,` / `.`
-//! the play speed (`[view] play_speeds`, multiples of the walk-matched rate), Backspace stop.
+//! The HUD is egui (`bevy_egui`), bottom right (`[view] hud_width_px`; P1's top-right panel ate the far field's
+//! clicks): the clock, the needs, the coins, the job, where the body is, its goal and current plan (the step under
+//! way marked `>`, the menu row it came from) and the plan's last failure, with the rows the sim says the body can
+//! do where it stands (`citysim::systems::player::menu_self`: eat what you carry, eat at home, sleep, work), Stop,
+//! autopilot, pause and the speed.
+//!
+//! A left click picks a drawn body (its chest within `[view] pick_body_px`, people.rs' bodies), else casts the camera's
+//! ray against the ground and the lots' massing boxes (lots.rs; the cutaway's box around the subject is passed
+//! through) and sends the tile it hits. The sim answers a body or a building with a menu of only its legal rows
+//! (`player::menu_body`, `menu_building`: the door, then the verbs), drawn at the click; a row's hover lists the will
+//! terms the verb waives. The street is walked to. Keys: T autopilot, Space pause, `,` / `.` the play speed
+//! (`[view] play_speeds`), Backspace stop, Escape closes the menu.
 //!
 //! `--play "T action; T action; .."` scripts a session through the same paths (a play session for a proof): at the
-//! first frame whose tick is T or later (`D:HH:MM` or a tick) it runs `click TX,TY` (the tile's ground point projected
-//! to the screen, then the click's own ray), `zoom M` (the frame's width, as the wheel), `goal NAME`, `stop`, `auto on|off`, `pause`, `speed I` (an index into the
-//! speeds), `shot NAME` (a PNG with the HUD into `--out`) or `quit`.
+//! first frame whose tick is T or later (`D:HH:MM` or a tick) it runs `click TX,TY` (the tile's top projected to the
+//! screen, then the click's own pick), `body INDEX|adult|child` (that drawn body, or the nearest adult or child to the
+//! subject: its chest projected, then the click's pick), `await` (the click's menu open), `pick TEXT` (the open
+//! menu's first row containing TEXT; it waits for the menu), `do TEXT` (a HUD row), `close` (the menu), `zoom M`, `pitch DEG`, `yaw DEG`,
+//! `goal NAME`, `stop`, `auto on|off`, `pause`, `speed I`, `shot NAME` (a PNG with the HUD and the menu into `--out`)
+//! or `quit`.
 
 use bevy::{
     app::AppExit,
@@ -34,6 +43,9 @@ pub struct Step {
     pub action: String,
 }
 
+/// A script `pick` gives up on its menu after this many frames.
+const PICK_WAIT_FRAMES: u32 = 600;
+
 #[derive(Resource)]
 pub struct Play {
     pub shared: Arc<Shared>,
@@ -50,6 +62,16 @@ pub struct Play {
     pub out: PathBuf,
     /// A quit waits this many frames (the last shot's write).
     quit_in: Option<u32>,
+    /// M18 P2: a click this near a body's chest (px) picks the body; the HUD's width.
+    pub pick_body_px: f32,
+    pub hud_width_px: f32,
+    /// M18 P2: the last click's pixel (its menu opens there) and the menu seq published before it.
+    click_px: Vec2,
+    menu_asked: u64,
+    /// M18 P2: the open menu (its seq, where it is drawn); `None` closed.
+    menu_open: Option<(u64, Vec2)>,
+    /// M18 P2: frames a script `pick` has waited for its menu.
+    wait: u32,
 }
 
 /// `"T action; T action"`: the ticks a number or `D:HH:MM`, in rising order.
@@ -83,9 +105,15 @@ pub fn add(app: &mut App, shared: Arc<Shared>, vcfg: &citysim::config::ViewCfg, 
             next: 0,
             out,
             quit_in: None,
+            pick_body_px: vcfg.pick_body_px,
+            hud_width_px: vcfg.hud_width_px,
+            click_px: Vec2::ZERO,
+            menu_asked: 0,
+            menu_open: None,
+            wait: 0,
         })
         .add_systems(Update, (keys, click, run_script))
-        .add_systems(EguiPrimaryContextPass, hud);
+        .add_systems(EguiPrimaryContextPass, (hud, menu));
 }
 
 fn set_speed(p: &mut Play, i: usize) {
@@ -116,6 +144,9 @@ fn keys(keys: Res<ButtonInput<KeyCode>>, mut p: ResMut<Play>) {
     }
     if keys.just_pressed(KeyCode::Backspace) {
         p.shared.send(UiCmd::Stop);
+    }
+    if keys.just_pressed(KeyCode::Escape) {
+        p.menu_open = None;
     }
 }
 
@@ -183,12 +214,13 @@ fn tile_of(sim: &crate::sim::Sim, q: Vec3) -> Option<TilePos> {
     (x >= 0.0 && y >= 0.0 && x < 65535.0 && y < 65535.0).then_some(TilePos { x: x as u16, y: y as u16 })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn click(
     buttons: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     cams: Query<(&Camera, &GlobalTransform), With<crate::cam::CityCam>>,
     egui: Option<Res<EguiWantsInput>>,
-    p: Res<Play>,
+    mut p: ResMut<Play>,
     sim: Res<crate::sim::Sim>,
     stream: Res<crate::stream::Stream>,
     view: Res<crate::cam::View>,
@@ -198,18 +230,50 @@ fn click(
     }
     let Some(px) = windows.single().ok().and_then(|w| w.cursor_position()) else { return };
     let Ok(cam) = cams.single() else { return };
-    send_pick(px, cam, &p, &sim, &stream, view.zoom, "click");
+    send_pick(px, cam, &mut p, &sim, &stream, view.zoom, "click");
+}
+
+/// M18 P2: the drawn body whose chest projects nearest `px`, within `[view] pick_body_px`.
+fn body_at(px: Vec2, cam: (&Camera, &GlobalTransform), p: &Play, sim: &crate::sim::Sim) -> Option<(u64, f32)> {
+    sim.people
+        .iter()
+        .filter_map(|b| {
+            let q = cam.0.world_to_viewport(cam.1, chest(b)).ok()?;
+            let d = q.distance(px);
+            (d <= p.pick_body_px).then_some((b.id, d))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+}
+
+/// A body's chest, Bevy coordinates.
+fn chest(b: &crate::people::BodyDraw) -> Vec3 {
+    crate::mesh::bv(b.at.x, b.at.y, b.at.z + 1.2)
+}
+
+/// The view's body key (sim.rs `ekey`) -> the entity.
+fn entity_of(key: u64) -> citysim::EntityId {
+    citysim::EntityId { index: (key & 0xffff_ffff) as u32, generation: (key >> 32) as u32 }
 }
 
 fn send_pick(
     px: Vec2,
     cam: (&Camera, &GlobalTransform),
-    p: &Play,
+    p: &mut Play,
     sim: &crate::sim::Sim,
     stream: &crate::stream::Stream,
     zoom: f32,
     why: &str,
 ) {
+    // a click closes the open menu; a body or a building asks for a new one, opened at the click
+    p.menu_open = None;
+    p.click_px = px;
+    p.menu_asked = p.shared.menu.lock().unwrap().as_ref().map_or(0, |m| m.seq);
+    if let Some((key, d)) = body_at(px, cam, p, sim) {
+        let e = entity_of(key);
+        info!("play {why} at px ({:.0}, {:.0}): a body #{} ({d:.0} px off)", px.x, px.y, e.index);
+        p.shared.send(UiCmd::Body(e));
+        return;
+    }
     match pick(px, cam, p, sim, stream, zoom).and_then(|(q, roof)| tile_of(sim, q).map(|t| (q, roof, t))) {
         Some((q, roof, t)) => {
             let what = if roof { "a building" } else { "the ground" };
@@ -227,6 +291,12 @@ fn goal_of(name: &str) -> Option<GoalKind> {
     serde_json::from_str(&format!("\"{name}\"")).ok()
 }
 
+/// M18 P2: the open menu's (or the HUD's) first row whose label holds `text`.
+fn row_with(rows: &[(String, citysim::systems::player::Verb, Vec<String>)], text: &str) -> Option<citysim::systems::player::Verb> {
+    rows.iter().find(|r| r.0.contains(text)).map(|r| r.1)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn run_script(
     mut commands: Commands,
     mut p: ResMut<Play>,
@@ -245,13 +315,22 @@ fn run_script(
     }
     // the frame's tick: the HUD's state was published with it
     let Some(tick) = sim.clock_tick else { return };
+    // M18 P2: the sim is held at the next line's tick (`Shared::hold`, the bench's hold): a line runs at its own tick,
+    // not wherever the sim had got to by the frame (at the fast speeds that was tens of minutes late), and the sim runs
+    // flat out between lines. Without a script the hold is never touched.
+    if !p.script.is_empty() {
+        let hold = p.script.get(p.next).map_or(u64::MAX, |s| s.tick);
+        p.shared.hold.store(hold, Ordering::Relaxed);
+    }
     if p.next >= p.script.len() || p.script[p.next].tick > tick {
         return;
     }
     let step = p.script[p.next].clone();
     p.next += 1;
     let (verb, arg) = step.action.split_once(' ').map_or((step.action.as_str(), ""), |(v, a)| (v, a.trim()));
-    info!("play script tick {} (frame {tick}): {}", step.tick, step.action);
+    if p.wait == 0 {
+        info!("play script tick {} (frame {tick}): {}", step.tick, step.action);
+    }
     match verb {
         "click" => {
             let (x, y) = arg.split_once(',').expect("click TX,TY");
@@ -275,15 +354,80 @@ fn run_script(
                 })
                 .fold(ground, f32::max);
             let Ok(cam) = cams.single() else { return };
-            match cam.0.world_to_viewport(cam.1, crate::mesh::bv(m.x, m.y, z)) {
-                Ok(px) => send_pick(px, cam, &p, &sim, &stream, view.zoom, "script click"),
+            // a pixel off the window is no click a player could make
+            let size = cam.0.logical_viewport_size().unwrap_or(Vec2::splat(f32::MAX));
+            let on = |q: &Vec2| q.x >= 0.0 && q.y >= 0.0 && q.x < size.x && q.y < size.y;
+            match cam.0.world_to_viewport(cam.1, crate::mesh::bv(m.x, m.y, z)).ok().filter(on).ok_or("off the window") {
+                Ok(px) => send_pick(px, cam, &mut p, &sim, &stream, view.zoom, "script click"),
                 Err(e) => info!("play script click ({}, {}): not on the screen ({e:?})", t[0], t[1]),
             }
         }
+        "body" => {
+            // INDEX, or `adult` / `child`: the drawn adult or child nearest the subject
+            let Ok(cam) = cams.single() else { return };
+            let feet = sim.subject_at.map_or(Vec3::ZERO, |(f, _)| f);
+            let near = |child: bool| {
+                sim.people.iter().filter(|b| (b.age < 18) == child).min_by(|a, b| a.at.distance(feet).total_cmp(&b.at.distance(feet)))
+            };
+            let body = match arg {
+                "adult" => near(false),
+                "child" => near(true),
+                n => {
+                    let index: u32 = n.parse().expect("body INDEX|adult|child");
+                    sim.people.iter().find(|b| entity_of(b.id).index == index)
+                }
+            };
+            let px = body.and_then(|b| cam.0.world_to_viewport(cam.1, chest(b)).ok());
+            match px {
+                Some(px) => send_pick(px, cam, &mut p, &sim, &stream, view.zoom, "script body"),
+                None => info!("play script body {arg}: not drawn on the screen"),
+            }
+        }
+        "pick" | "do" => {
+            let found = if verb == "do" {
+                p.shared.player.lock().unwrap().as_ref().and_then(|h| row_with(&h.rows, arg))
+            } else {
+                let m = p.shared.menu.lock().unwrap().clone();
+                m.filter(|m| p.menu_open.is_some_and(|(s, _)| s == m.seq)).and_then(|m| row_with(&m.rows, arg))
+            };
+            match found {
+                Some(v) => {
+                    info!("play script {verb} '{arg}': {v:?}");
+                    p.shared.send(UiCmd::Act(v));
+                    p.menu_open = None;
+                    p.wait = 0;
+                }
+                None if p.wait < PICK_WAIT_FRAMES => {
+                    // the menu (or the row) is a frame or two behind the click: this line again next frame
+                    p.wait += 1;
+                    p.next -= 1;
+                }
+                None => {
+                    warn!("play script {verb} '{arg}': no such row after {PICK_WAIT_FRAMES} frames");
+                    p.wait = 0;
+                }
+            }
+        }
+        // the click's menu open (a shot of it next)
+        "await" => {
+            if p.menu_open.is_none() && p.wait < PICK_WAIT_FRAMES {
+                p.wait += 1;
+                p.next -= 1;
+            } else {
+                if p.menu_open.is_none() {
+                    warn!("play script await: no menu after {PICK_WAIT_FRAMES} frames");
+                }
+                p.wait = 0;
+            }
+        }
+        "close" => p.menu_open = None,
         "zoom" => {
             let z: f32 = arg.parse().expect("zoom METRES");
             view.set_zoom(z);
         }
+        // M18 P2: the camera's pitch and yaw, degrees (Z/X and Q/E): a near top-down look clicks the lot it means
+        "pitch" => view.set_pitch(arg.parse::<f32>().expect("pitch DEG").to_radians()),
+        "yaw" => view.game_yaw = arg.parse::<f32>().expect("yaw DEG").to_radians().rem_euclid(std::f32::consts::TAU),
         "goal" => match goal_of(arg) {
             Some(g) => p.shared.send(UiCmd::Goal(g)),
             None => warn!("play script: no goal '{arg}'"),
@@ -325,8 +469,15 @@ fn run_script(
 fn bar(ui: &mut bevy_egui::egui::Ui, name: &str, v: f32) {
     ui.horizontal(|ui| {
         ui.label(format!("{name:<9}"));
-        ui.add(bevy_egui::egui::ProgressBar::new(v.clamp(0.0, 1.0)).desired_width(140.0).text(format!("{v:.2}")));
+        ui.add(bevy_egui::egui::ProgressBar::new(v.clamp(0.0, 1.0)).desired_width(110.0).text(format!("{v:.2}")));
     });
+}
+
+/// A menu row's button, its hover the will terms the verb waives.
+fn row_button(ui: &mut bevy_egui::egui::Ui, label: &str, waived: &[String]) -> bool {
+    let b = ui.button(label);
+    let b = if waived.is_empty() { b } else { b.on_hover_text(format!("waived (the human's will):\n{}", waived.join("\n"))) };
+    b.clicked()
 }
 
 fn hud(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
@@ -336,58 +487,105 @@ fn hud(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
     let paused = p.shared.paused.load(Ordering::Relaxed);
     let speed = p.speeds[p.speed_i];
     let mut speed_to = None;
-    egui::Window::new("player").anchor(egui::Align2::RIGHT_TOP, [-8.0, 8.0]).resizable(false).default_width(380.0).show(ctx, |ui| {
-        let Some(h) = h else {
-            ui.label("waiting for the city to reach --from");
-            return;
-        };
-        ui.heading(format!("{} #{}", h.name, h.index));
-        ui.label(format!(
-            "day {} {}   {}   x{speed}{}",
-            h.day,
-            h.clock,
-            if h.autopilot { "AUTOPILOT" } else { "you drive" },
-            if paused { "  PAUSED" } else { "" }
-        ));
-        ui.label(format!("{}c   {}", h.coins, h.job));
-        ui.label(&h.place);
-        ui.separator();
-        for (n, v) in ["hunger", "energy", "safety", "wealth", "belonging"].iter().zip(h.needs) {
-            bar(ui, n, v);
-        }
-        ui.separator();
-        ui.label(format!("goal: {}", h.goal));
-        ui.label(format!("plan: {}", h.plan));
-        ui.label(format!("last failure: {}", h.failure.as_deref().unwrap_or("-")));
-        ui.separator();
-        ui.horizontal(|ui| {
-            for g in [GoalKind::Eat, GoalKind::Sleep, GoalKind::Work, GoalKind::Shop] {
-                if ui.button(format!("{g:?}")).clicked() {
-                    p.shared.send(UiCmd::Goal(g));
+    let w = p.hud_width_px;
+    egui::Window::new("player").anchor(egui::Align2::RIGHT_BOTTOM, [-8.0, -8.0]).resizable(false).default_width(w).max_width(w).show(
+        ctx,
+        |ui| {
+            let Some(h) = h else {
+                ui.label("waiting for the city to reach --from");
+                return;
+            };
+            ui.strong(format!("{} #{}", h.name, h.index));
+            ui.label(format!(
+                "day {} {}   {}   x{speed}{}",
+                h.day,
+                h.clock,
+                if h.autopilot { "AUTOPILOT" } else { "you drive" },
+                if paused { "  PAUSED" } else { "" }
+            ));
+            ui.label(format!("{}c   {} food   {}", h.coins, h.food, h.job));
+            ui.label(&h.place);
+            for (n, v) in ["hunger", "energy", "safety", "wealth", "belonging"].iter().zip(h.needs) {
+                bar(ui, n, v);
+            }
+            ui.separator();
+            if let Some(d) = &h.doing {
+                ui.label(format!("doing: {d}"));
+            } else {
+                ui.label(format!("goal: {}", h.goal));
+            }
+            ui.label(format!("plan: {}", h.plan));
+            ui.label(format!("last failure: {}", h.failure.as_deref().unwrap_or("-")));
+            ui.separator();
+            for (label, v, waived) in &h.rows {
+                if row_button(ui, label, waived) {
+                    p.shared.send(UiCmd::Act(*v));
                 }
             }
-            if ui.button("Stop").clicked() {
-                p.shared.send(UiCmd::Stop);
-            }
-        });
-        ui.horizontal(|ui| {
-            if ui.button(if h.autopilot { "Take the wheel (T)" } else { "Autopilot (T)" }).clicked() {
-                p.shared.send(UiCmd::Autopilot(!h.autopilot));
-            }
-            if ui.button(if paused { "Resume (Space)" } else { "Pause (Space)" }).clicked() {
-                p.shared.paused.store(!paused, Ordering::Relaxed);
-            }
-            if ui.button("slower (,)").clicked() {
-                speed_to = Some(p.speed_i.saturating_sub(1));
-            }
-            if ui.button("faster (.)").clicked() {
-                speed_to = Some(p.speed_i + 1);
-            }
-        });
-        ui.small("left click: walk there (into the building)");
-    });
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("Stop").clicked() {
+                    p.shared.send(UiCmd::Stop);
+                }
+                if ui.button(if h.autopilot { "Take the wheel (T)" } else { "Autopilot (T)" }).clicked() {
+                    p.shared.send(UiCmd::Autopilot(!h.autopilot));
+                }
+                if ui.button(if paused { "Resume" } else { "Pause" }).clicked() {
+                    p.shared.paused.store(!paused, Ordering::Relaxed);
+                }
+                if ui.button("<<").clicked() {
+                    speed_to = Some(p.speed_i.saturating_sub(1));
+                }
+                if ui.button(">>").clicked() {
+                    speed_to = Some(p.speed_i + 1);
+                }
+            });
+            ui.small("click: a person or a building for its menu, the street to walk");
+        },
+    );
     if let Some(i) = speed_to {
         set_speed(&mut p, i);
+    }
+    Ok(())
+}
+
+/// M18 P2: the click's menu, drawn at the click (only the rows the sim found legal; none: "nothing to do here").
+fn menu(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
+    use bevy_egui::egui;
+    let ctx = contexts.ctx_mut()?;
+    let m = p.shared.menu.lock().unwrap().clone();
+    // a menu newer than the click opens at it
+    if let Some(m) = m.as_ref().filter(|m| m.seq > p.menu_asked && p.menu_open.is_none_or(|(s, _)| s < m.seq)) {
+        p.menu_open = Some((m.seq, p.click_px));
+        p.menu_asked = m.seq;
+    }
+    let (Some((seq, at)), Some(m)) = (p.menu_open, m) else { return Ok(()) };
+    if m.seq != seq {
+        return Ok(());
+    }
+    let mut picked = None;
+    let mut close = false;
+    egui::Area::new(egui::Id::new("verb_menu")).fixed_pos(egui::pos2(at.x + 6.0, at.y + 6.0)).show(ctx, |ui| {
+        egui::Frame::popup(ui.style()).show(ui, |ui| {
+            ui.strong(&m.title);
+            ui.separator();
+            if m.rows.is_empty() {
+                ui.label("nothing to do here");
+            }
+            for (label, v, waived) in &m.rows {
+                if row_button(ui, label, waived) {
+                    picked = Some(*v);
+                }
+            }
+            ui.separator();
+            close = ui.small_button("close (Esc)").clicked();
+        });
+    });
+    if let Some(v) = picked {
+        p.shared.send(UiCmd::Act(v));
+        close = true;
+    }
+    if close {
+        p.menu_open = None;
     }
     Ok(())
 }
