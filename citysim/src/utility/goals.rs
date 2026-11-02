@@ -721,9 +721,8 @@ pub fn considerations_with(
             let n = needs?;
             let key = job.next_shift_key(world.tick);
             let patrol_day = !crate::systems::law::jail_duty(world, id, key);
-            let legs_left =
-                world.comp::<Brain>(id).is_some_and(|b| b.patrol_legs < world.config.crime.patrol_legs_per_shift);
-            let mut on_duty = job.on_shift(tod) && patrol_day && job.last_shift_day != Some(key) && legs_left;
+            // OPEN-280: the legs loop to the shift's end (no leg cap).
+            let mut on_duty = job.on_shift(tod) && patrol_day && job.last_shift_day != Some(key);
             // L2 shadow fixes item 10: no patrol on the rest day (unpaid:
             // `law::credit_guard_shifts` reads the workday).
             on_duty &= crate::exec::routine::workday_of(world, id, job, key);

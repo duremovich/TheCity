@@ -424,6 +424,9 @@ fn test_retiring_to_kin_moves_the_couple() {
         }
     };
     set_age(&mut w, a, 66);
+    // OPEN-281: the child's household keeps him only with the coins to
+    // (`careers::kin_keeps`); here it can.
+    w.comp_mut::<citysim::components::Wallet>(a).expect("a wallet").coins = 100_000;
     // Room for one only: no retirement to kin (he may retire on savings: stay home).
     let mut one = w.clone();
     set_room(&mut one, 1);

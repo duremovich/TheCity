@@ -584,7 +584,7 @@ pub struct PlanCtx {
     /// L2 L14 (spec § 2): bored and broke, `U(fun)` (0 otherwise): Beg and
     /// Scavenge are cheaper by half of it (cheap fun is a reason to beg).
     pub fun_term: f32,
-    /// Guards on a Patrol shift with legs left.
+    /// Guards on a Patrol shift (the legs loop to its end, OPEN-280).
     pub patrol_pending: bool,
     pub hall_open: bool,
     /// Already had today's drink (one per day; the M1/M2 rule, kept).
@@ -1129,9 +1129,6 @@ impl PlanCtx {
                     && j.on_shift(tod)
                     && !crate::systems::law::jail_duty(world, agent, j.next_shift_key(world.tick))
                     && j.last_shift_day != Some(j.next_shift_key(world.tick))
-                    && world
-                        .comp::<crate::components::Brain>(agent)
-                        .is_some_and(|b| b.patrol_legs < world.config.crime.patrol_legs_per_shift)
             }),
             hall_open: matches!(
                 world.phase(),

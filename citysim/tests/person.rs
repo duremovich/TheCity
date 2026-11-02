@@ -577,11 +577,13 @@ fn probe_gun_never_takes_a_hit_on_kin() {
         // this pins the city the probe was written for. Re-pinned, the view
         // milestone V9 (premise moved): on the island's stat table the gun
         // set up on day 2 never took the control's Hit in 3 days; on day 3 he
-        // does.
+        // does. Re-pinned again, the leftovers pass (OPEN-280, guards patrol
+        // the whole shift): set up on day 3 he takes none in 6 days; on day
+        // 4 he does.
         let mut cfg = common::r2(Config::load());
         cfg.household.enabled = false;
         let mut w = World::new(42, cfg);
-        w.run_ticks(3 * TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
+        w.run_ticks(4 * TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
         let civ = civilians(&w);
         let a = civ
             .iter()

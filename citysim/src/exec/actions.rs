@@ -1107,15 +1107,23 @@ pub fn on_complete(
         ActionKind::Wander => StepResult::Done,
         ActionKind::ReportCrime => report_crime(world, id, target),
         ActionKind::PatrolLeg => {
-            let legs_per_shift = world.config.crime.patrol_legs_per_shift;
-            let legs = world.comp_mut::<Brain>(id).map(|b| {
-                b.patrol_legs = b.patrol_legs.saturating_add(1);
-                b.patrol_legs
-            });
-            // Five legs complete the shift; so does the clock running out mid-loop.
+            // OPEN-280: the route loops (`patrol_legs` modulo its length)
+            // until the clock ends the shift; five legs used to close it
+            // at ~12:30 of a 09:00-18:00 shift, paid in full.
+            if let Some(b) = world.comp_mut::<Brain>(id) {
+                b.patrol_legs = b.patrol_legs.wrapping_add(1);
+            }
             let shift_over = world.comp::<Job>(id).is_some_and(|j| !j.on_shift(world.tick_of_day()));
-            if legs.is_some_and(|l| l >= legs_per_shift) || shift_over {
+            if shift_over {
+                // The last leg runs past the end: `end_shift` reads the shift
+                // at `tick - 1`, which for a night guard (21:00-06:00) at
+                // 06:15 is tonight's coming shift, marked worked and paid
+                // unworked (OPEN-280); the shift closed is the patrol's.
+                let key = world.comp::<Brain>(id).and_then(|b| b.patrol_shift_key);
                 end_shift(world, id);
+                if let (Some(k), Some(j)) = (key, world.comp_mut::<Job>(id)) {
+                    j.last_shift_day = Some(k);
+                }
                 if let Some(b) = world.comp_mut::<Brain>(id) {
                     b.patrol_legs = 0;
                     b.patrol_route.clear();

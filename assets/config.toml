@@ -193,7 +193,6 @@ fight_death_p = 0.03
 stat_theft_caught_p = 0.25
 warrant_expiry_days = 30
 suspect_seen_ticks = 240
-patrol_legs_per_shift = 5
 fine_mult = 2
 # M12 review: guards answering an alarm at a door (a corp raid, a riot; the posted private guards
 # too) come only from within answer_radius tiles of it (Chebyshev); the brawl stands them at the
@@ -4545,7 +4544,9 @@ profession_w = 400                 # § 4.3: a holder of the vacancy's professio
                                    # capped with skill and the rehire bonus at 512); the knowledge floor admits him
 retire_from_years = 62             # § 4.4: a worker this old retires (midnight) when an adult child takes him in, or when ...
 retire_days = 60                   # ... the household's coins >= this x its daily costs (the mean price x 2 meals x
-                                   # residents + the Home's rent a day)
+                                   # residents + the Home's rent a day); OPEN-281: the child's household too (its
+                                   # residents' coins and his cover this many days of it grown), else he works to the
+                                   # frailty exit (no pension, work till the body quits)
 frail_exit_mult = 0.6              # § 4.4: a worker whose [ages] work_mult falls under this is let go "too frail"
 unretire_coins = 20                # § 4.4: a retired agent under this many coins is retired no more (the street ladder)
 record_min_days = 2                # round 8 X3 (OPEN-247): a sentence this many days or longer is a record (a Theft's 3 is;
