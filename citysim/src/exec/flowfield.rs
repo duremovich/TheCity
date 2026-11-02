@@ -314,6 +314,10 @@ pub struct FlowCache {
     clock: u64,
     labels: OnceLock<Arc<Vec<u32>>>,
     landmarks: OnceLock<Arc<crate::exec::bigpath::Landmarks>>,
+    /// The view milestone V7: the drivers' landmarks, measured on the tiles
+    /// alone (no walkers' graph: no portals, no crossing costs), built on a
+    /// driver's first search.
+    landmarks_drive: OnceLock<Arc<crate::exec::bigpath::Landmarks>>,
     /// Review finding 10: the tiles the next landmarks are measured on
     /// when not the map's (a loaded world's `landmark_base`).
     base: Option<Arc<Vec<crate::components::TileKind>>>,
@@ -362,6 +366,20 @@ impl FlowCache {
             .clone()
     }
 
+    /// V7: the drivers' landmarks ([`FlowCache::landmarks`] without the
+    /// walkers' graph), on the same tiles.
+    pub fn landmarks_drive(&self, map: &Map) -> Arc<crate::exec::bigpath::Landmarks> {
+        self.landmarks_drive
+            .get_or_init(|| {
+                let tiles = self.base.clone().unwrap_or_else(|| Arc::new(map.tiles().to_vec()));
+                Arc::new(crate::prof::timed!(
+                    "exec::landmarks",
+                    crate::exec::bigpath::Landmarks::build_with(map, tiles, &crate::exec::bigpath::Portals::none())
+                ))
+            })
+            .clone()
+    }
+
     /// C7: the walkway portals the paths, labels and landmarks use.
     pub fn portals(&self) -> Arc<crate::exec::bigpath::Portals> {
         self.portals.clone()
@@ -372,6 +390,7 @@ impl FlowCache {
         self.portals = Arc::new(portals);
         self.labels = OnceLock::new();
         self.landmarks = OnceLock::new();
+        self.landmarks_drive = OnceLock::new();
     }
 
     /// The tiles the landmarks were (or, loaded, will be) measured on.
@@ -388,6 +407,7 @@ impl FlowCache {
         let Some(base) = self.landmark_tiles() else { return };
         if base.as_slice() != map.tiles() && !crate::exec::bigpath::only_closed(&base, map) {
             self.landmarks = OnceLock::new();
+            self.landmarks_drive = OnceLock::new();
             self.base = None;
         }
     }
@@ -402,6 +422,7 @@ impl FlowCache {
     /// `base` (`None`: the map's tiles).
     pub fn set_landmark_base(&mut self, base: Option<Arc<Vec<crate::components::TileKind>>>) {
         self.landmarks = OnceLock::new();
+        self.landmarks_drive = OnceLock::new();
         self.base = base;
     }
 

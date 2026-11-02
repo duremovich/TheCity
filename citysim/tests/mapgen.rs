@@ -210,6 +210,8 @@ fn test_map_text_round_trips() {
             in_flight: false,
         }],
         portals: Vec::new(),
+        carriage: Vec::new(),
+        crossings: Vec::new(),
         comments: vec!["a test".into()],
         extra: vec![citysim::map::BuildingExtra {
             flats: Some(12),

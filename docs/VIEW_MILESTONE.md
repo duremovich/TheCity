@@ -127,6 +127,35 @@ and waits for the walk phase; a footbridge wins when the detour is long). **Traf
 driving their own cars, trucks and buses, plus self-driving vehicles, all sim bodies, added later (`OPEN-275`); V7
 builds the crossings and signals only.
 
+**V7 as built (2026-11-01).** *Where the crossings come from:* TheCityGraphics draws them, so the import reads them
+(`import-graphics`, `read_crossings`): the map's `carriage` grid from the client's ground raster
+(`out/chunks/*.ground.bin`: a sim tile all carriageway or median under it, with a road tile on all four sides, so the
+outermost road tile is always a walk; 68,765 tiles at k2) and the zebras of `out/street/*.json` as `X` lines (600
+after the duplicates; the 423 dropped all cross a `lane`'s 4 m carriageway, which has no carriageway tile at 4 m and is
+crossed anywhere; a `mouth`, the side street's dropped kerb, is walk). A re-import of both island maps from
+TheCityGraphics `2bcd2c0` is byte-identical but for those two sections and the commit in the comment.
+*The cost:* a walker's search (the foot `Portals`, `bigpath::PedCosts`) pays `[crossings] jaywalk_tenths` (150; a Road
+step is 7) to step onto a carriageway off a crossing and, on a crossing's tile, the Road step plus the signal's expected
+wait ((1 - `walk_share`)^2 x `cycle_s` / 2 = 28 s at 100 s and 0.25) over its depth; never a wall, so nothing becomes
+unreachable (the labels are unchanged; no test). The foot landmarks are measured over these costs; drivers search with
+their own (`FlowCache::landmarks_drive`, built on a driver's first search). A Full walker reaching a crossing's kerb
+waits there for the walk phase read at its sub-tick time (`exec::crossing_wait_q`, `signals::wait_ms`), standing at the
+kerb past the tick when the wait runs over it; a timed walk on foot adds `timed_crossings_per_tile` (0.0033, measured
+from the Full walkers) crossings a Manhattan tile at the expected wait. *Signals:* `signals.rs`, a pure function of the
+time and the junction tile (an offset hashed from it); `vehicle_go` is OPEN-275's hook (the main road moves in
+don't-walk). *The view:* the zebra paint was glclient's already; `cityview/src/lights.rs` stands a pole at each kerb of
+the crossings within 160 m of the subject, a pedestrian head (red man over green man) and a vehicle head (red, amber,
+green), lit from `signals` at the view's game time; it follows a config reload. A save from before V7 is grafted the
+checkout's map of the same name and `--config`'s `[crossings]` (`lights::graft`). Not built: a waiting body is drawn
+lerped through its tick, not standing at the kerb for the don't-walk.
+**Numbers** (20k seed 42 x 7, `run --population 20000 --scaled --ambient-flats 50 --map assets/maps/isle_m_k2.txt
+--report --legs F --legs-min 0`, before = main `bb90eb2`'s binary on the pre-V7 map): footbridge riders (steps up onto a
+footbridge) ~2 a day before (17 deck entries a day, the escalator's ~15 among them) -> 76 a day (103, 89, 90, 92, 49,
+60, 46), footbridge hops 4 -> 470 a day; mean walk leg 7.56 -> 7.75 min, mean walk leg to Work 3.93 -> 4.27 min (Full
+4.06 -> 4.27); 11,500 crossings a week by Full walkers, 26 s waited at each; 280 jaywalks a day (the Vats' freight
+roads have no zebra near: a courier jaywalks the same carriageway four times a day); ticks/s 128 -> 126 (both runs
+shared the box with three other coders: a print).
+
 ### V8, leftovers the view exposes (`OPEN-264`, `OPEN-256`)
 
 The raid's climb is the member's body (`OPEN-264`); the cells' week (`OPEN-256`: bail, fines, overcrowding, a

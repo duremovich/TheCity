@@ -209,6 +209,12 @@ These are listed by the adapter's report too. Suggestions are for Dylan, who may
    door at level 0 (the walk to it added to the run; the climb down through the lot is the sim's, by the levels), a
    deck or station end the tile under its point at its level; the escalator's `hours` are carried. A host's lift
    cores are `lift=<cars>:<top>` (4,295 hosts).
+   ~~Carriageways and crossings~~ (the view milestone V7, OPEN-260): the `carriage` grid from `chunks/*.ground.bin`
+   (a sim tile all carriageway or median under it and a road tile on all four sides: 68,765 tiles at k2) and the
+   zebras of `street/<cx>_<cy>.json` as `X` lines (1,274 read, 600 lines after the duplicates; 423 dropped, every one
+   across a `lane`'s 4 m carriageway, which has no carriageway tile at 4 m and is crossed anywhere); the junction
+   (the signal's key) is the overlap of the two ways the zebra's id names. A `mouth` (the side street's dropped kerb
+   across the main road's sidewalk) is walk in the raster and costs nothing.
 7. **Vehicles.** The expressway, its ramps, `roads.json` nodes/edges and `street/traffic.json` lanes: the sim does
    not simulate vehicles on roads yet (SIM_NOTES: "geometry is the pipeline's, state is the sim's").
 8. ~~Funicular~~ (the pre-view pass phase 5, P11): `elevated.json`'s funicular is an El line between its two ends

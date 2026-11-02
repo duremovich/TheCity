@@ -45,6 +45,8 @@ pub struct Static {
     pub lines: Vec<String>,
     pub tile_m: f32,
     pub north_m: f32,
+    /// V7: the map's marked crossings (lights.rs draws their signals)
+    pub crossings: Vec<citysim::map::MapCrossing>,
 }
 
 #[derive(Default)]
@@ -68,6 +70,8 @@ pub struct Shared {
     pub reload_req: AtomicBool,
     /// V1: the last reload's line (empty before the first), for the HUD.
     pub reload_line: Mutex<String>,
+    /// V7: the world's `[crossings]` (the signals' cycle; follows a reload), for lights.rs.
+    pub signals: Mutex<Option<citysim::config::CrossingsCfg>>,
 }
 
 impl Shared {
@@ -156,6 +160,7 @@ impl Shared {
             tick: AtomicU64::new(0),
             reload_req: AtomicBool::new(false),
             reload_line: Mutex::new(String::new()),
+            signals: Mutex::new(None),
         }
     }
 }
@@ -199,17 +204,23 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
     if let Some(&t) = a.shots.iter().chain(a.from.iter()).chain(a.reload_at.iter()).find(|&&t| t < world.tick) {
         fatal(format!("tick {t} (--shots / --from / --reload-at) is before the save's tick {}", world.tick));
     }
+    // V7: a save from before the crossings walks under the map file's and the --config's (lights.rs)
+    crate::lights::graft(&mut world, a.config.as_deref());
+    *sh.signals.lock().unwrap() = world.config.crossings.clone();
     let mut rate = a.rate.unwrap_or_else(|| view::walk_matched_rate(&world));
     sh.rate_bits.store(rate.to_bits(), Ordering::Relaxed);
     *sh.stat.lock().unwrap() = Some(Static {
         lines: world.map.lines.iter().map(|l| l.name.clone()).collect(),
         tile_m: world.config.view.tile_m as f32,
         north_m: world.config.view.north_m as f32,
+        crossings: world.map.crossings.clone(),
     });
     eprintln!("cityview: following {} at {rate:.4} ticks/s", who(&world, subject));
     if let Some(b) = world.comp_mut::<Brain>(subject) {
         b.pinned = true;
     }
+    // V7: the subject's crossings to the log (a shot's tick is found from them)
+    world.crossing_watch = Some([(subject, Vec::new())].into());
     let mut cfg = world.config.view.clone();
     let mut watch = a.config.as_deref().map(|p| (mtime(p), Instant::now()));
     let (w, h) = (world.map.w(), world.map.h());
@@ -248,6 +259,7 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                         Err(e) => format!("reload: {}: {e}; the old config stays", p.display()),
                         Ok(r) => {
                             cfg = world.config.view.clone();
+                            *sh.signals.lock().unwrap() = world.config.crossings.clone();
                             if a.rate.is_none() {
                                 rate = view::walk_matched_rate(&world);
                                 sh.rate_bits.store(rate.to_bits(), Ordering::Relaxed);
@@ -287,6 +299,7 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         world.set_view(Some(ring));
         let t_tick = Instant::now();
         citysim::tick(&mut world);
+        crate::lights::log_crossings(&mut world, subject);
         acc = (acc.0 + 1, acc.1 + t_tick.elapsed().as_secs_f64());
         sh.tick.store(world.tick, Ordering::Relaxed);
         // publish every paced tick; flat out, only the two ticks before the hold (or --from) the lerp needs

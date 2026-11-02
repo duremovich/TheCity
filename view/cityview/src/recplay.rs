@@ -78,7 +78,13 @@ fn run(a: RecArgs, sh: Arc<Shared>) {
     }
     let rate = a.rate.unwrap_or(h.rate);
     sh.rate_bits.store(rate.to_bits(), Ordering::Relaxed);
-    *sh.stat.lock().unwrap() = Some(Static { lines: h.lines.clone(), tile_m: h.tile_m as f32, north_m: h.north_m as f32 });
+    *sh.stat.lock().unwrap() = Some(Static {
+        lines: h.lines.clone(),
+        tile_m: h.tile_m as f32,
+        north_m: h.north_m as f32,
+        // a recording carries no crossings (city-simrec/0.1): no signal heads in a replay (OPEN-260's leftovers)
+        crossings: Vec::new(),
+    });
     eprintln!(
         "cityview: playing {} ({} {} #{}, diary day {}, from frame {}) at {rate:.4} ticks/s ({:.1} s)",
         a.path.display(),

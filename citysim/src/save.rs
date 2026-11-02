@@ -534,7 +534,11 @@ use crate::world::World;
 /// 125 (the city milestone C9a, far travel): no format change; both island maps re-imported from TheCityGraphics
 /// `c471ffd` (the Vats cut by stretches, the Spire's lobbies as units, a piece standing its lots' storeys), a new
 /// `B` order (a C8b save is another world).
-pub const SAVE_VERSION: u8 = 125;
+/// 126 (the view milestone V7, lights and marked crossings; renumber at the merge): the map's `carriage` grid and
+/// `MapCrossing`s, the `[crossings]` keys and the `Jobs2Cols` `crossings_walked` ... `walk_steps` columns (serde
+/// defaults: a C9a save has no crossings; cityview's graft gives it the map file's); both island maps re-imported
+/// from TheCityGraphics `2bcd2c0` with only the `carriage` grid and the `X` lines new.
+pub const SAVE_VERSION: u8 = 126;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

@@ -59,6 +59,17 @@
 //!   (`ab` runs from the first end to the second), outside every window it
 //!   does not run. The vehicle ramps are not portals.
 //!
+//! The view milestone V7 (lights and marked crossings, OPEN-260), also optional:
+//! - `carriage` followed by `h` rows of `.` and `c`: the carriageway tiles of
+//!   the vehicle ways (TheCityGraphics' ground raster, `out/chunks/*.ground.bin`:
+//!   a tile all carriageway or median, with a road tile on every side, so the
+//!   outermost road tile is always a walk); a pedestrian's path pays
+//!   `[crossings] jaywalk_tenths` to step onto one;
+//! - `X <x0>,<y0> <x1>,<y1> <x|y> <jx>,<jy>`: a marked crossing (a zebra of
+//!   `out/street/*.json`): the carriageway tiles in the inclusive rect are
+//!   its tiles, walked along `x` or `y`, under the signal of the junction at
+//!   `jx,jy` (`signals`).
+//!
 //! A save packs the grids as run-length strings (SAVE_VERSION 13); an older
 //! save's one-enum-per-tile lists still load.
 
@@ -216,6 +227,38 @@ impl MapPortal {
     }
 }
 
+/// The view milestone V7: one `X` line, a marked crossing over a carriageway.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MapCrossing {
+    /// The inclusive tile rect's corners (min, max); its carriageway tiles are the crossing.
+    pub a: TilePos,
+    pub b: TilePos,
+    /// Walked along x (true) or y.
+    pub walk_x: bool,
+    /// The junction whose signal it walks under (`signals`).
+    pub junction: TilePos,
+}
+
+impl MapCrossing {
+    /// The `X` line (no newline).
+    pub fn line(&self) -> String {
+        format!(
+            "X {},{} {},{} {} {},{}",
+            self.a.x,
+            self.a.y,
+            self.b.x,
+            self.b.y,
+            if self.walk_x { "x" } else { "y" },
+            self.junction.x,
+            self.junction.y
+        )
+    }
+
+    pub fn contains(&self, p: TilePos) -> bool {
+        self.a.x <= p.x && p.x <= self.b.x && self.a.y <= p.y && p.y <= self.b.y
+    }
+}
+
 fn is_zero_u16(v: &u16) -> bool {
     *v == 0
 }
@@ -284,6 +327,10 @@ pub struct Map {
     pub lines: Vec<TransitLineCfg>,
     /// The city milestone C7: the walkway portals (`P` lines).
     pub portals: Vec<MapPortal>,
+    /// The view milestone V7: the carriageway tiles (row-major; empty: none).
+    carriage: Vec<bool>,
+    /// The view milestone V7: the marked crossings (`X` lines).
+    pub crossings: Vec<MapCrossing>,
     /// The perf pass phase 7: bumped by every `set_tile` (the key of
     /// `districts::rebuild`'s grid memo; not saved: a loaded map counts
     /// from 0 and a loaded world's memo is empty).
@@ -319,6 +366,10 @@ struct MapRepr {
     lines: Vec<TransitLineCfg>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     portals: Vec<MapPortal>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    carriage_rle: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    crossings: Vec<MapCrossing>,
 }
 
 impl From<Map> for MapRepr {
@@ -336,6 +387,8 @@ impl From<Map> for MapRepr {
             district_rle: rle_encode(m.district_grid.iter().map(|&d| district_char(d))),
             lines: m.lines,
             portals: m.portals,
+            carriage_rle: rle_encode(m.carriage.iter().map(|&c| if c { 'c' } else { '.' })),
+            crossings: m.crossings,
         }
     }
 }
@@ -374,6 +427,10 @@ impl TryFrom<MapRepr> for Map {
         if !district_grid.is_empty() && district_grid.len() != n {
             return Err(format!("map save: {} district ids for {} x {}", district_grid.len(), r.w, r.h));
         }
+        let carriage: Vec<bool> = rle_decode(&r.carriage_rle)?.into_iter().map(|c| c == 'c').collect();
+        if !carriage.is_empty() && carriage.len() != n {
+            return Err(format!("map save: {} carriage cells for {} x {}", carriage.len(), r.w, r.h));
+        }
         Ok(Map {
             w: r.w,
             h: r.h,
@@ -385,6 +442,8 @@ impl TryFrom<MapRepr> for Map {
             district_grid,
             lines: r.lines,
             portals: r.portals,
+            carriage,
+            crossings: r.crossings,
             tile_edits: 0,
         })
     }
@@ -547,6 +606,10 @@ pub struct MapText {
     pub lines: Vec<TransitLineCfg>,
     /// The city milestone C7: the walkway portals (`P` lines).
     pub portals: Vec<MapPortal>,
+    /// The view milestone V7: the carriageway tiles (row-major; empty: none).
+    pub carriage: Vec<bool>,
+    /// The view milestone V7: the marked crossings (`X` lines).
+    pub crossings: Vec<MapCrossing>,
     /// `#` lines written before the buildings.
     pub comments: Vec<String>,
     /// Scale S3c: per building (aligned with `buildings`; empty for none),
@@ -629,6 +692,14 @@ impl MapText {
             out.push_str(&p.line());
             out.push('\n');
         }
+        if !self.carriage.is_empty() {
+            out.push_str("carriage\n");
+            grid(&mut out, &mut self.carriage.iter().map(|&c| if c { 'c' } else { '.' }));
+        }
+        for c in &self.crossings {
+            out.push_str(&c.line());
+            out.push('\n');
+        }
         out
     }
 }
@@ -696,8 +767,10 @@ impl Map {
                 || t.starts_with("L ")
                 || t.starts_with("L+ ")
                 || t.starts_with("P ")
+                || t.starts_with("X ")
                 || t.starts_with('#')
                 || t == "districts"
+                || t == "carriage"
         };
         let mut zones = Vec::new();
         if lines.get(at).is_some_and(|l| !l.trim().is_empty() && !section_line(l)) {
@@ -724,6 +797,8 @@ impl Map {
             district_grid: Vec::new(),
             lines: Vec::new(),
             portals: Vec::new(),
+            carriage: Vec::new(),
+            crossings: Vec::new(),
             tile_edits: 0,
         };
         let mut n = at;
@@ -749,11 +824,25 @@ impl Map {
                 n += h + 1;
                 continue;
             }
+            if line == "carriage" {
+                assert!(map.carriage.is_empty(), "line {}: a second carriage grid", n + 1);
+                assert!(lines.len() > n + h, "line {}: the carriage grid needs {h} rows", n + 1);
+                map.carriage.reserve(w * h);
+                for (y, row) in lines[n + 1..=n + h].iter().enumerate() {
+                    for (x, ch) in row_chars(row, "carriage", y).into_iter().enumerate() {
+                        assert!(ch == '.' || ch == 'c', "carriage row {y} col {x}: {ch:?} is not . or c");
+                        map.carriage.push(ch == 'c');
+                    }
+                }
+                n += h + 1;
+                continue;
+            }
             let parts: Vec<&str> = line.split_whitespace().collect();
             match parts[0] {
                 "D" => map.districts.push(parse_district(&parts, n + 1)),
                 "L" | "L+" => map.lines.push(parse_line(&parts, n + 1, w, h)),
                 "P" => map.portals.push(parse_portal(&parts, n + 1, w, h)),
+                "X" => map.crossings.push(parse_crossing(&parts, n + 1, w, h)),
                 _ => {
                     // S3c: `key=value` fields follow the floors field.
                     let keyed = parts.iter().position(|p| p.contains('=')).unwrap_or(parts.len());
@@ -1101,6 +1190,27 @@ impl Map {
         self.tile_at(p).walkable() && !self.is_blocked(p)
     }
 
+    /// The view milestone V7: is `p` a carriageway tile (`carriage` grid)?
+    pub fn is_carriage(&self, p: TilePos) -> bool {
+        !self.carriage.is_empty() && self.carriage[self.index(p)]
+    }
+
+    /// The view milestone V7: the carriageway grid (row-major; empty: none).
+    pub fn carriage(&self) -> &[bool] {
+        &self.carriage
+    }
+
+    /// The view milestone V7: take `from`'s carriageways and crossings (a
+    /// save written before V7 on the same map: the view's graft).
+    pub fn graft_crossings(&mut self, from: &Map) -> bool {
+        if from.w != self.w || from.h != self.h || from.carriage.is_empty() {
+            return false;
+        }
+        self.carriage = from.carriage.clone();
+        self.crossings = from.crossings.clone();
+        true
+    }
+
     /// M12 D19: a rubble tile (empty in M12 unless the hook is switched on).
     pub fn is_blocked(&self, p: TilePos) -> bool {
         !self.blocked.is_empty() && self.blocked.contains(&p)
@@ -1150,6 +1260,25 @@ fn parse_district(parts: &[&str], line: usize) -> MapDistrict {
 
 /// `L <x>,<y> <x>,<y> [...] <name...>`.
 /// C7: `P <kind> <x>,<y>,<level> <x>,<y>,<level> <tiles> [hours=...]`.
+fn parse_crossing(parts: &[&str], line: usize, w: usize, h: usize) -> MapCrossing {
+    assert!(parts.len() == 5, "line {line}: expected `X <x0>,<y0> <x1>,<y1> <x|y> <jx>,<jy>`");
+    let tile = |s: &str| -> TilePos {
+        let (x, y) = s.split_once(',').unwrap_or_else(|| panic!("line {line}: bad tile {s}"));
+        let n = |t: &str| -> u16 { t.parse().unwrap_or_else(|_| panic!("line {line}: bad number {t}")) };
+        let (x, y) = (n(x), n(y));
+        assert!(usize::from(x) < w && usize::from(y) < h, "line {line}: tile {x},{y} off the map");
+        TilePos::new(x, y)
+    };
+    let (a, b) = (tile(parts[1]), tile(parts[2]));
+    assert!(a.x <= b.x && a.y <= b.y, "line {line}: the crossing's corners are not (min, max)");
+    let walk_x = match parts[3] {
+        "x" => true,
+        "y" => false,
+        o => panic!("line {line}: walk axis {o} is not x or y"),
+    };
+    MapCrossing { a, b, walk_x, junction: tile(parts[4]) }
+}
+
 fn parse_portal(parts: &[&str], line: usize, w: usize, h: usize) -> MapPortal {
     assert!(
         (5..=6).contains(&parts.len()),

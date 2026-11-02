@@ -4947,6 +4947,26 @@ portal_lift_wait_ticks = 1.0       # a station lift's call; the ride at lift_tic
 escalator_speed = 1.5              # walking on the moving stair: 1.4 m/s walked + ~0.7 m/s of the stair (the path search's
                                    # Manhattan step drops to the escalator's cost a tile, so its bound stays admissible)
 
+# The view milestone V7 (docs/VIEW_MILESTONE.md § V7, Dylan 2026-11-01, OPEN-260; signals.rs, exec/bigpath.rs): lights and
+# marked crossings. The map's carriage grid marks the vehicle ways' carriageways (TheCityGraphics' ground raster) and its
+# X lines the zebras the client draws, each under its junction's signal: one cycle of cycle_s at every junction, offset by
+# a hash of its tile, the walk phase (walk_share of it) first. A walker's path pays jaywalk_tenths to step onto a
+# carriageway off a crossing (a Road step is 7: near-forbidden, never a wall) and a crossing its signal's expected wait,
+# (1 - walk_share)^2 x cycle_s / 2, shared over its tiles, so a walk goes to the crossings and a footbridge wins when the
+# crossing is far. A Full walker reaching a crossing's kerb waits there for the walk phase, read at its sub-tick time (a
+# cycle is under two ticks: no tick-by-tick hold); a timed (Coarse) walk on foot adds timed_crossings_per_tile crossings
+# a Manhattan tile at the expected wait. Ground vehicles stop at red later (OPEN-275, signals::vehicle_go). A lane's 4 m
+# carriageway has no carriageway tile at 4 m and is crossed anywhere. Absent: crossing a street costs nothing.
+[crossings]
+cycle_s = 100.0                    # an HK junction's cycle, the walk phase and the clearance in it
+walk_share = 0.25                  # 25 s green man of 100: an arrival at random waits 28 s on average
+jaywalk_tenths = 150               # ~21 steps' price a carriageway tile: a 16 m street (two tiles) jaywalked costs 41
+                                   # steps more than walked, so a crossing (two steps and the 28 s wait, ~10 steps) up
+                                   # to ~15 tiles off either way is taken
+timed_crossings_per_tile = 0.0033  # V7's 20k seed 42 x 7: Full walkers made 11,521 crossings over 3.45 M Manhattan tiles
+                                   # of walk legs (0.0032 a step walked: the report's crossings_walked / walk_steps),
+                                   # 26 s waited at each (28 s expected)
+
 # The city milestone C8 (docs/CITY_MILESTONE.md § C8, Dylan's answer 5, 2026-10-30; systems/vertical.rs): the vertical
 # gangs. A gang's seat (the map's Hideout) moves up to the top storey of its host; each midnight a gang founds a Hideout
 # in each district where it holds a turf cell and has none (a vacant unit on the top storey of a host there, over a front
