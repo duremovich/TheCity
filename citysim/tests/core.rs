@@ -1174,14 +1174,9 @@ const SANITY_SEEDS: [u64; 3] = [42, 43, 44];
 /// one test's threads, ~152 s of the change tier's ~160 s tests step on one
 /// job): the per-seed checks here, the bullets over the three seeds by the
 /// last to finish ([`share`]). A seed run alone judges no bullet and says so.
-/// `[perf] threads` 1: a score is the same on any thread (seed 42 read the same
-/// city at 1 and 8), and at 2,000 residents the shipped 8 cost twice the CPU
-/// for a slower run (seed 42 alone, 2026-11-02: 1 thread 72 s wall, 70 s CPU;
-/// 8 threads 78 s, 144 s). The pool runs in every other test and `core_year`.
+/// Its thread count is the tier's (`CITYSIM_THREADS`, docs/TESTING.md).
 fn core_sanity_seed(seed: u64) {
-    let mut cfg = Config::load();
-    cfg.perf.threads = 1;
-    let r = run_city(seed, 120, cfg);
+    let r = run_seed(seed, 120);
     report(&r);
     let mut failures: Vec<String> = Vec::new();
     if !r.identity_broken.is_empty() {
@@ -1302,7 +1297,8 @@ fn core_census() {
 #[ignore = "tier: merge"]
 fn core_year() {
     const DAYS: u64 = 365;
-    let r = run_seed(42, DAYS);
+    // The shipped `[perf] threads`, whatever the tier sets (the think pool over a year).
+    let r = run_city(42, DAYS, Config::load_shipped());
     report(&r);
     let mut failures: Vec<String> = Vec::new();
     if !r.identity_broken.is_empty() {
