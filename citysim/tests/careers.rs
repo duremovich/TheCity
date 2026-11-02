@@ -66,9 +66,15 @@ fn test_band_refuses_a_hire_outside_the_row() {
 /// the foreman is the most experienced worker of 30 or more: an older
 /// short-tenure worker does not outrank a long-tenure one, and a long-tenure
 /// one under 30 is passed over.
+///
+/// The change tier's one run of the think pool (hygiene 2026-11-02): the
+/// tiers set `CITYSIM_THREADS=1`, so this test loads the shipped `[perf]
+/// threads` (`Config::load_shipped`): a day of the 2,000 city on the pool,
+/// the think slice and the 21:00 evening plan (docs/TESTING.md § The tiers).
 #[test]
 fn test_seniority_is_seeded_and_experience_orders_the_foreman() {
-    let mut w = common::world_r2();
+    let mut w = World::new(42, common::r2(Config::load_shipped()));
+    assert!(w.config.perf.threads > 1, "the shipped think pool");
     let cap = u16::try_from(w.config.careers.seniority_cap_years as u64 * DAYS_PER_YEAR).unwrap();
     let seeded: Vec<u16> = w.citizens().iter().filter_map(|&a| w.comp::<Job>(a).map(|j| j.seniority_days)).collect();
     assert!(seeded.iter().filter(|&&d| d > 0).count() > seeded.len() / 2, "most seeded jobs have seniority");

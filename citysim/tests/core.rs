@@ -4,12 +4,16 @@
 //! how full the Jail is) are reports, not gates: `tools/analyze_run.py`
 //! prints them from `citysim-cli run --report`.
 //!
-//! `core_sanity`: seeds 42-44 in parallel threads, 120 days, one shared
-//! collector: the coin identity every day, the collapse bounds, and the
-//! mechanism-existence bullets over the three seeds. `core_year`: seed 42,
+//! `core_sanity_42`, `_43`, `_44` (`core_sanity`): one seed each, 120 days:
+//! the coin identity every day and the collapse bounds on that seed; the
+//! mechanism-existence bullets over the three seeds, judged by the last of
+//! the three to finish (their tallies meet in a temp directory: [`share`]),
+//! so the change tier runs each seed as a job of its own. `core_year`: seed 42,
 //! 365 days, the same bounds over 30-day windows (`#[ignore]`; run alone).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::Instant;
 
 use citysim::contract::{Broker, ContractKind};
@@ -95,7 +99,40 @@ struct SeedRun {
     employed_min: f64,
 }
 
+/// What the mechanism bullets read of a seed's run: its event kinds and
+/// marks. Written to disk by each `core_sanity` seed ([`share`]) so the last
+/// of the three judges the bullets over all three.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Tally {
+    seed: u64,
+    kinds: BTreeMap<EventKind, u32>,
+    marks: BTreeMap<String, u32>,
+    /// `SeedRun::sickness`, `SeedRun::transit`: which bullet lists apply.
+    sickness: bool,
+    transit: bool,
+}
+
+impl Tally {
+    fn kind(&self, k: EventKind) -> u32 {
+        self.kinds.get(&k).copied().unwrap_or(0)
+    }
+
+    fn mark(&self, m: &str) -> u32 {
+        self.marks.get(m).copied().unwrap_or(0)
+    }
+}
+
 impl SeedRun {
+    fn tally(&self) -> Tally {
+        Tally {
+            seed: self.seed,
+            kinds: self.kinds.clone(),
+            marks: self.marks.iter().map(|(k, v)| ((*k).to_string(), *v)).collect(),
+            sickness: self.sickness,
+            transit: self.transit,
+        }
+    }
+
     fn sum(&self, from: u64, to: u64, f: impl Fn(&DayRow) -> u32) -> f64 {
         self.rows.iter().filter(|r| r.day >= from && r.day < to).map(|r| f64::from(f(r))).sum()
     }
@@ -604,15 +641,15 @@ fn sanity(r: &SeedRun, from: u64, to: u64, assaults_max: f64, failures: &mut Vec
 }
 
 /// A mechanism bullet: its name, and how to count it on one seed.
-type Mechanism = (&'static str, Box<dyn Fn(&SeedRun) -> u32>);
+type Mechanism = (&'static str, Box<dyn Fn(&Tally) -> u32>);
 
 /// The mechanisms every seed set must show: (name, how to count it on one
 /// seed). One count >= 1 over the three seeds passes. A mechanism that fired
 /// on 2 or fewer of 6 seeds historically is not here; it has a unit test in
 /// a seeded world (the file named after it).
 fn mechanisms() -> Vec<Mechanism> {
-    let k = |kind: EventKind| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.kind(kind)) };
-    let m = |mark: &'static str| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.mark(mark)) };
+    let k = |kind: EventKind| -> Box<dyn Fn(&Tally) -> u32> { Box::new(move |r: &Tally| r.kind(kind)) };
+    let m = |mark: &'static str| -> Box<dyn Fn(&Tally) -> u32> { Box::new(move |r: &Tally| r.mark(mark)) };
     // Chosen on main 38210ce, 120 days, seeds 42-47 (each fired on 3-6 of 6 seeds); the 42-44
     // counts in brackets are the city after the off switches retired and the stat table was
     // regenerated in the full city (2026-10-09).
@@ -718,7 +755,7 @@ fn mechanisms() -> Vec<Mechanism> {
 /// bin contest, a diagnosis, a cure and a Disease death fired on 2 or fewer
 /// of 6: unit tests in `sickness.rs` instead.
 fn sickness_mechanisms() -> Vec<Mechanism> {
-    let m = |mark: &'static str| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.mark(mark)) };
+    let m = |mark: &'static str| -> Box<dyn Fn(&Tally) -> u32> { Box::new(move |r: &Tally| r.mark(mark)) };
     vec![("a synth meal", m("synth meal")), ("a bin meal", m("bin meal"))]
 }
 
@@ -736,8 +773,8 @@ fn sickness_mechanisms() -> Vec<Mechanism> {
 /// (the break fires) with its negatives `test_breach_with_nobody_inside_fizzles`
 /// and `test_breach_against_three_guards_fails_and_shocks`.
 fn printed_mechanisms() -> Vec<Mechanism> {
-    let k = |kind: EventKind| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.kind(kind)) };
-    let m = |mark: &'static str| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.mark(mark)) };
+    let k = |kind: EventKind| -> Box<dyn Fn(&Tally) -> u32> { Box::new(move |r: &Tally| r.kind(kind)) };
+    let m = |mark: &'static str| -> Box<dyn Fn(&Tally) -> u32> { Box::new(move |r: &Tally| r.mark(mark)) };
     vec![
         ("a Riot", k(EventKind::Riot)),
         ("a gang front", m("gang front")),
@@ -891,7 +928,7 @@ fn printed_mechanisms() -> Vec<Mechanism> {
 /// every one on 6 of 6 but an organ exported, 3 of 6). The rest are
 /// printed in `jobs2_printed` and unit-tested.
 fn jobs2_mechanisms() -> Vec<Mechanism> {
-    let m = |mark: &'static str| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.mark(mark)) };
+    let m = |mark: &'static str| -> Box<dyn Fn(&Tally) -> u32> { Box::new(move |r: &Tally| r.mark(mark)) };
     [
         // Phase 1: a post of the new trade models held at the day's close
         // (a day post ends with its shift and reads 0 at the close: "day post
@@ -966,7 +1003,7 @@ fn jobs2_mechanisms() -> Vec<Mechanism> {
 /// (`industry.rs::test_outage_darkens_districts_and_comes_back`). A black
 /// clinic and its BlackMarket reports: 0 of 6 (no gang builds one; open).
 fn jobs2_printed() -> Vec<Mechanism> {
-    let m = |mark: &'static str| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.mark(mark)) };
+    let m = |mark: &'static str| -> Box<dyn Fn(&Tally) -> u32> { Box::new(move |r: &Tally| r.mark(mark)) };
     [
         "resale post",         // [0, 0, 0, 0, 0, 0]
         "street child's coin", // [0, 0, 14, 7, 0, 0]
@@ -1061,7 +1098,7 @@ fn jobs2_printed() -> Vec<Mechanism> {
 /// Every mechanism's count per seed, then the bullets: one line each.
 /// Transit (docs/TRANSIT.md § 7): judged with the El on.
 fn transit_mechanisms() -> Vec<Mechanism> {
-    let m = |mark: &'static str| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.mark(mark)) };
+    let m = |mark: &'static str| -> Box<dyn Fn(&Tally) -> u32> { Box::new(move |r: &Tally| r.mark(mark)) };
     vec![("an El ride", m("El ride")), ("a fare paid to the city", m("El fare"))]
 }
 
@@ -1075,7 +1112,7 @@ fn asserted_bullets_within_cap() {
     assert!(n <= 60, "asserted mechanism bullets {n} > 60: replace one or demote to printed_mechanisms");
 }
 
-fn judge_mechanisms(runs: &[SeedRun], failures: &mut Vec<String>) {
+fn judge_mechanisms(runs: &[Tally], failures: &mut Vec<String>) {
     let jobs2 = runs.first().is_some_and(|r| r.mark("Jailer on shift") > 0 || r.mark("handling fee") > 0);
     let mut printed = printed_mechanisms();
     if jobs2 {
@@ -1129,39 +1166,98 @@ fn report(r: &SeedRun) {
     eprintln!("  marks: {}", marks.join(", "));
 }
 
-/// The core sanity run: seeds 42-44, 120 days, in parallel threads.
-#[test]
-fn core_sanity() {
-    let runs: Vec<SeedRun> = std::thread::scope(|s| {
-        let hs: Vec<_> = [42u64, 43, 44].into_iter().map(|seed| s.spawn(move || run_seed(seed, 120))).collect();
-        hs.into_iter().map(|h| h.join().expect("a core seed panicked")).collect()
-    });
+/// `core_sanity`'s seeds: 120 days each. The bullets pass on one count >= 1
+/// over the three.
+const SANITY_SEEDS: [u64; 3] = [42, 43, 44];
+
+/// The core sanity run, one seed (hygiene 2026-11-02: was seeds 42-44 in
+/// one test's threads, ~152 s of the change tier's ~160 s tests step on one
+/// job): the per-seed checks here, the bullets over the three seeds by the
+/// last to finish ([`share`]). A seed run alone judges no bullet and says so.
+/// Its thread count is the tier's (`CITYSIM_THREADS`, docs/TESTING.md).
+fn core_sanity_seed(seed: u64) {
+    let r = run_seed(seed, 120);
+    report(&r);
     let mut failures: Vec<String> = Vec::new();
-    for r in &runs {
-        report(r);
-        if !r.identity_broken.is_empty() {
-            failures.push(format!("seed {}: the coin identity moved on days {:?}", r.seed, r.identity_broken));
-        }
-        sanity(r, 0, 120, ASSAULTS_PER_DAY_MAX, &mut failures);
-        if r.held_starved > 0 {
-            failures.push(format!("seed {}: {} held prisoners starved", r.seed, r.held_starved));
-        }
-        if r.corps_alive < corps_alive_min(r) {
-            failures.push(format!("seed {}: seeded corps alive {}/{}", r.seed, r.corps_alive, r.corps_seeded));
-        }
-        for m in ["stale ride", "ride past arrival", "alertness under the floor"] {
-            if r.mark(m) > 0 {
-                failures.push(format!("seed {}: {} hours with a {m}", r.seed, r.mark(m)));
-            }
+    if !r.identity_broken.is_empty() {
+        failures.push(format!("seed {}: the coin identity moved on days {:?}", r.seed, r.identity_broken));
+    }
+    sanity(&r, 0, 120, ASSAULTS_PER_DAY_MAX, &mut failures);
+    if r.held_starved > 0 {
+        failures.push(format!("seed {}: {} held prisoners starved", r.seed, r.held_starved));
+    }
+    if r.corps_alive < corps_alive_min(&r) {
+        failures.push(format!("seed {}: seeded corps alive {}/{}", r.seed, r.corps_alive, r.corps_seeded));
+    }
+    for m in ["stale ride", "ride past arrival", "alertness under the floor"] {
+        if r.mark(m) > 0 {
+            failures.push(format!("seed {}: {} hours with a {m}", r.seed, r.mark(m)));
         }
     }
-    judge_mechanisms(&runs, &mut failures);
-    let tps42 = runs[0].tps;
-    eprintln!("ticks/s seed 42 {tps42:.0} (floor {TPS_FLOOR:.0} asserted in core_throughput; printed here)");
+    match share(&r.tally()) {
+        Some(runs) => {
+            eprintln!("seed {seed}: the last of {SANITY_SEEDS:?} to finish; the bullets over the three:");
+            judge_mechanisms(&runs, &mut failures);
+        }
+        None => eprintln!("seed {seed}: the bullets are judged by the last of {SANITY_SEEDS:?} to finish"),
+    }
+    if seed == 42 {
+        eprintln!("ticks/s seed 42 {:.0} (floor {TPS_FLOOR:.0} asserted in core_throughput; printed here)", r.tps);
+    }
     for f in &failures {
         eprintln!("FAIL {f}");
     }
-    assert!(failures.is_empty(), "core_sanity failures: {failures:?}");
+    assert!(failures.is_empty(), "core_sanity seed {seed} failures: {failures:?}");
+}
+
+/// Where the `core_sanity` seeds of one run leave their tallies: the change
+/// tier's stamp (`CITYSIM_CORE_SANITY_RUN`, set by `tools/test.py` for its
+/// jobs, one process a seed), else this process (`cargo test`: the three
+/// seeds are threads of one process).
+fn share_dir() -> &'static PathBuf {
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    DIR.get_or_init(|| {
+        let run = std::env::var("CITYSIM_CORE_SANITY_RUN").unwrap_or_else(|_| {
+            let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+            format!("pid{}-{nanos}", std::process::id())
+        });
+        std::env::temp_dir().join("citysim-core-sanity").join(run)
+    })
+}
+
+/// Leave this seed's tally (written whole, then renamed) and read the
+/// others': all three, in seed order, when this seed is the last to look.
+/// The one that reads all three judges the bullets and removes the
+/// directory; two finishing at once may both judge (the same verdict).
+fn share(t: &Tally) -> Option<Vec<Tally>> {
+    let dir = share_dir();
+    std::fs::create_dir_all(dir).expect("the core_sanity share directory");
+    let path = dir.join(format!("{}.ron", t.seed));
+    let tmp = dir.join(format!("{}.ron.tmp", t.seed));
+    std::fs::write(&tmp, ron::to_string(t).expect("a tally serialises")).expect("write the tally");
+    std::fs::rename(&tmp, &path).expect("publish the tally");
+    let mut runs = Vec::new();
+    for seed in SANITY_SEEDS {
+        let text = std::fs::read_to_string(dir.join(format!("{seed}.ron"))).ok()?;
+        runs.push(ron::from_str::<Tally>(&text).expect("a tally deserialises"));
+    }
+    let _ = std::fs::remove_dir_all(dir);
+    Some(runs)
+}
+
+#[test]
+fn core_sanity_42() {
+    core_sanity_seed(42);
+}
+
+#[test]
+fn core_sanity_43() {
+    core_sanity_seed(43);
+}
+
+#[test]
+fn core_sanity_44() {
+    core_sanity_seed(44);
 }
 
 /// The bullet census (docs/TESTING.md, "A `core_sanity` bullet"): seeds
@@ -1176,6 +1272,7 @@ fn core_census() {
         let hs: Vec<_> = (42u64..48).map(|seed| s.spawn(move || run_seed(seed, 120))).collect();
         hs.into_iter().map(|h| h.join().expect("a census seed panicked")).collect()
     });
+    let runs: Vec<Tally> = runs.iter().map(SeedRun::tally).collect();
     let lists: [(&str, Vec<Mechanism>); 6] = [
         ("asserted", mechanisms()),
         ("asserted", sickness_mechanisms()),
@@ -1200,7 +1297,8 @@ fn core_census() {
 #[ignore = "tier: merge"]
 fn core_year() {
     const DAYS: u64 = 365;
-    let r = run_seed(42, DAYS);
+    // The shipped `[perf] threads`, whatever the tier sets (the think pool over a year).
+    let r = run_city(42, DAYS, Config::load_shipped());
     report(&r);
     let mut failures: Vec<String> = Vec::new();
     if !r.identity_broken.is_empty() {

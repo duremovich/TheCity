@@ -11893,6 +11893,10 @@ impl Default for FviolenceCfg {
     }
 }
 
+/// The test tiers' thread switch: overrides `[perf] threads` in
+/// [`Config::load_from`] (set by `tools/test.py`; docs/TESTING.md).
+pub const THREADS_ENV: &str = "CITYSIM_THREADS";
+
 impl Config {
     /// Locate the assets directory and parse `config.toml`.
     ///
@@ -11967,6 +11971,34 @@ impl Config {
     }
 
     pub fn load_from(assets_dir: &Path) -> Config {
+        let mut cfg = Config::load_shipped_from(assets_dir);
+        // The test tiers' thread switch (hygiene 2026-11-02, docs/TESTING.md
+        // § The tiers): `tools/test.py` sets `CITYSIM_THREADS=1` for the
+        // tests it runs, so a 2,000 city scores its think slice on the
+        // calling thread (the same city on any thread; the shipped pool cost
+        // twice the CPU at 2k). Unset, `[perf] threads` as written.
+        if let Ok(v) = std::env::var(THREADS_ENV) {
+            cfg.perf.threads = v
+                .trim()
+                .parse::<usize>()
+                .ok()
+                .filter(|&t| t >= 1)
+                .unwrap_or_else(|| panic!("{THREADS_ENV}={v:?}: a thread count of 1 or more"));
+        }
+        cfg
+    }
+
+    /// [`Config::load`] without the tiers' `CITYSIM_THREADS`: `[perf]
+    /// threads` as `config.toml` ships it (the one change-tier test that
+    /// keeps the think pool exercised, `careers.rs`, and `core_year`).
+    pub fn load_shipped() -> Config {
+        let dir = Config::find_assets_dir()
+            .unwrap_or_else(|| panic!("assets/config.toml not found; set CITYSIM_ASSETS or run from the repo"));
+        Config::load_shipped_from(&dir)
+    }
+
+    /// `config.toml` under `assets_dir`, as written (no env switch).
+    pub fn load_shipped_from(assets_dir: &Path) -> Config {
         let path = assets_dir.join("config.toml");
         let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
         Config::from_toml(&text, assets_dir).unwrap_or_else(|e| panic!("bad config {}: {e}", path.display()))
