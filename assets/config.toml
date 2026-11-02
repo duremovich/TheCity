@@ -6018,3 +6018,12 @@ crowd_gap_m = 0.9                  # within this radius, about this far apart (a
 # for cityview `--sim FILE` to play. The ring is the pick's surroundings as the shadow's world has them (no view set).
 record_half_tiles = 48             # the recorded ring's half side, tiles (the follow-cam's ring_half_tiles: what a shot shows)
 record_gzip_level = 6              # the files' gzip level, 0-9
+# M18 P1 (docs/M18_PLAYER.md, the seam): cityview `--possess INDEX` drives one adult; the HUD's numbers. Read by the
+# view only: the player gets no number of the city's of their own.
+play_speeds = [1.0, 60.0, 600.0, 3600.0, 14400.0]  # the play speeds, x the walk-matched rate (a game minute a real
+                                   # minute; `,` / `.` step; the first is the start): 60 a game hour a real minute, 3600 an
+                                   # hour a second, 14400 about as fast as the 20k city runs on this box
+pick_reach_m = 3000.0              # a click's ray hits nothing past this (the far plane's cam_far_m)
+pick_step_m = 0.5                  # the ray's march step against the ground and the lots' boxes (a thinner wall is missed)
+pick_snap_tiles = 2                # a roof or wall hit walks into the sim building nearest it within this many tiles (the
+                                   # export's lots and the sim's rects disagree by a tile or two at their edges)

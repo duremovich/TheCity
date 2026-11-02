@@ -2632,6 +2632,24 @@ pub struct Brain {
     /// (`systems/shift.rs`). Not written while `None` (the off save).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shift: Option<Box<ShiftState>>,
+    /// M18 P1 (the seam): a human drives this body. Without autopilot its
+    /// own `think` and the plan queue skip it (`systems/think.rs` `turn`,
+    /// `systems/plan.rs`); the human's commands write its plan
+    /// (`PlayerCommand::{Steps, Goal, Stop}`) and exec runs it like any
+    /// other. Not written while `None` (an unpossessed save is unchanged).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player: Option<PlayerControlled>,
+}
+
+/// M18 P1: the body a human drives (`Brain.player`). Never on anyone under
+/// 18 (`PlayerCommand::Possess` refuses a child).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PlayerControlled {
+    /// The body's own brain thinks and plans for it (the NPC's day) while set.
+    pub autopilot: bool,
+    /// The last plan failure or refusal the human should read (the tick and
+    /// the line), for the HUD.
+    pub last_failure: Option<(Tick, String)>,
 }
 
 /// The pre-view pass phase 2 (docs/PREVIEW_PASS.md § 1): one shift's
@@ -2728,6 +2746,7 @@ impl Default for Brain {
             empty_spots: smallvec::SmallVec::new(),
             refused: None,
             shift: None,
+            player: None,
         }
     }
 }
@@ -2750,6 +2769,12 @@ impl Brain {
     /// The current plan's goal, if any.
     pub fn plan_goal(&self) -> Option<GoalKind> {
         self.plan.as_ref().map(|p| p.goal)
+    }
+
+    /// M18 P1: a human drives the body and its own brain is off (no think,
+    /// no plan queue).
+    pub fn possessed(&self) -> bool {
+        self.player.as_ref().is_some_and(|p| !p.autopilot)
     }
 }
 

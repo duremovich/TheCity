@@ -17,3 +17,5 @@ flate2 = "1"
 glclient = { path = "../glclient" }
 # C2: the follow-cam runs the sim in process (simthread.rs)
 citysim = { path = "../../citysim" }
+# M18 P1 (play.rs): the player's HUD; 0.42 is the bevy_egui for Bevy 0.19
+bevy_egui = { version = "0.42", default-features = false, features = ["render", "default_fonts"] }
