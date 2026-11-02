@@ -576,3 +576,31 @@ decision 4 amended:
   maps, the dystopia as a contest.
 - **The ledger:** the OPEN rows a player in the slice would hit are owned by `M18 slice`; stale rows were closed after
   a per-row check.
+
+## Addendum 24 (2026-11-02, Dylan): sight and the shot
+
+Two asks from the same day, watching the slice's first shots. **Sight gating:** "we can see into every building on
+the same level as our camera ... Your character probably won't be able to see out of the room they are in ...
+Depending on where they are standing they can probably partially see in to a nearby room if the door is open or the
+window is open" (Project Zomboid's line of sight as the reference). **The shot:** "imagine a player gets an
+assassination job. It would be awesome if they could sneak into a room across from the target's office and
+potentially snipe them from a building across the street ... from different heights too, if the angle makes sense.
+Like shooting into a courtyard from above." Both are `OPEN-288`; the weapon half is `OPEN-179`.
+
+- **One sight rule, for NPCs and the player** (no player-only rule). It replaces `law.rs::sees_scene` (same building
+  = sees the scene on any storey; outdoors = Chebyshev reach), so a witness on floor 40 no longer sees a theft on
+  floor 2, and the view reads the same answer: what the subject cannot see is darkened, and the bodies there hidden.
+- **Near field:** a per-storey grid shadowcast from the eye against walls, doors (open or shut) and windows: the room
+  you are in, a neighbour through an open door, the street through a window. Needs room-aware interiors (`OPEN-285`),
+  which also furnish the empty storey a slice shot shows (P2: a bar drawn as one bare slab).
+- **Far field:** sight is 3D. An on-demand ray from the eye (storey z plus eye height) against the buildings' massing
+  boxes, with window apertures on their facades; a courtyard is open sky. The geometry is static, so a per-map
+  **overlook index** (each window: the windows and open ground it sees within range), built once at import, makes
+  perches cheap to find: the player scouting a shot, and an NPC hitman choosing one, by the same index.
+- **Sound:** what is heard but not seen (a shot, a fight, a scream through a wall) reaches a witness as a heard
+  event, weaker evidence than sight; a miss is heard and seen.
+- **The shot:** a ranged attack (`OPEN-179`): distance, weapon and scope, light, the angle, cover; a hit, a wound or
+  a miss, each witnessed by the sight rule above. Today a fight is the co-located roll `law::fight_inner`.
+- **When:** the first milestone after the slice (P5), alongside the combat model if P4 shows fights read as a dice
+  roll (addendum 23, decision 5). Not inside the slice: the slice's play sessions say how much of it a nobody in the
+  Sump needs first.
