@@ -640,6 +640,28 @@ pub struct ViewCfg {
     /// The people's atlas as emission, this strong (the night street: an
     /// unlit body is lost in the dark).
     pub people_glow: f32,
+    /// The view milestone V4 (cityview `sim.rs`): an El train drawn as
+    /// `el_cars` cars of `el_car_m` (gap `el_car_gap_m`), `el_car_w_m` wide
+    /// and `el_car_h_m` tall, its floor `el_floor_m` over the rail deck, on
+    /// the track `el_track_m` left of the deck's centre line (the way it runs).
+    pub el_cars: u8,
+    pub el_car_m: f32,
+    pub el_car_gap_m: f32,
+    pub el_car_w_m: f32,
+    pub el_car_h_m: f32,
+    pub el_floor_m: f32,
+    pub el_track_m: f32,
+    /// A rider's place in a car: along the walls every this many metres.
+    pub el_slot_m: f32,
+    /// V4: the lift car a lift rider stands in (side, height), metres.
+    pub lift_cab_m: f32,
+    pub lift_cab_h_m: f32,
+    /// V4: a stairs climber walks round the core at this radius, a turn a storey.
+    pub stair_radius_m: f32,
+    /// V4: bodies standing on one tile spread over the walkable ground
+    /// within this many metres, about `crowd_gap_m` apart.
+    pub crowd_spread_m: f32,
+    pub crowd_gap_m: f32,
 }
 
 impl Default for ViewCfg {
@@ -678,6 +700,19 @@ impl Default for ViewCfg {
             child_scale_min: 0.5,
             child_full_age: 17,
             people_glow: 0.5,
+            el_cars: 4,
+            el_car_m: 20.0,
+            el_car_gap_m: 1.0,
+            el_car_w_m: 3.0,
+            el_car_h_m: 3.2,
+            el_floor_m: 0.4,
+            el_track_m: 2.5,
+            el_slot_m: 1.4,
+            lift_cab_m: 2.0,
+            lift_cab_h_m: 2.6,
+            stair_radius_m: 1.5,
+            crowd_spread_m: 10.0,
+            crowd_gap_m: 0.9,
         }
     }
 }

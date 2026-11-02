@@ -23,6 +23,9 @@
 //! C2, simthread.rs): a sim thread runs the save (`citysim`, in process) and the camera follows entity INDEX; --rate
 //! defaults to walk-matched (`[view] walk_m_s` over the `[exec]` pace). A tick is a number or `D:HH:MM`. With
 //! `--bench one`, --shots takes one PNG at each tick (`<tag>_<tick>.png`). glclient's tram and traffic are off.
+//! [--watch-vehicle INDEX]: the camera on that vehicle instead of the subject (the view milestone V4: an El train's
+//! riders seen when the subject never rides; 0: the train with the most riders now; the subject still drives the ring
+//! and its stand-in marks the camera).
 //! [--config PATH] [--reload-at TICK]: config hot-reload (the view milestone V1, OPEN-262, simthread.rs): the R key,
 //! a change of the file (default `assets/config.toml`) or the tick reloads it into the running world at a tick
 //! boundary (`citysim::reload`: the live keys applied, the build-time keys kept and reported in the log and the HUD).
@@ -33,6 +36,7 @@
 mod bench;
 mod cam;
 mod data;
+mod lots;
 mod mesh;
 mod occ;
 mod people;
@@ -97,6 +101,8 @@ struct Args {
     reload_at: Option<u64>,
     /// V3: --capsules draws the old placeholders, not the people (people.rs)
     capsules: bool,
+    /// V4: --watch-vehicle INDEX: the camera on that vehicle (an El train's riders), the subject still drives the ring
+    watch_vehicle: Option<u32>,
 }
 
 /// A tick: a number, or `D:HH:MM` (day, hour, minute).
@@ -144,6 +150,7 @@ impl Args {
             config: None,
             reload_at: None,
             capsules: false,
+            watch_vehicle: None,
         };
         let v: Vec<String> = std::env::args().skip(1).collect();
         let mut i = 0;
@@ -224,6 +231,10 @@ impl Args {
                     i += 1;
                 }
                 "--capsules" => a.capsules = true,
+                "--watch-vehicle" => {
+                    a.watch_vehicle = Some(next(i).parse().expect("--watch-vehicle INDEX"));
+                    i += 1;
+                }
                 "--save" => {
                     a.save = Some(PathBuf::from(next(i)));
                     i += 1;
@@ -267,6 +278,7 @@ impl Args {
         assert!(a.save.is_none() || a.sim.is_none(), "--save and --sim are exclusive");
         assert!(a.shots.is_empty() || a.bench.as_deref() == Some("one"), "--shots needs --bench one");
         assert!(a.shots.is_empty() || a.save.is_some(), "--shots needs --save");
+        assert!(a.watch_vehicle.is_none() || a.save.is_some(), "--watch-vehicle needs --save");
         assert!((a.config.is_none() && a.reload_at.is_none()) || a.save.is_some(), "--config and --reload-at need --save");
         if let Some(p) = &a.config {
             assert!(p.is_file(), "--config {}: no such file", p.display());
@@ -522,7 +534,9 @@ fn main() {
             config: args.config.clone().or_else(|| Some(PathBuf::from("assets/config.toml")).filter(|p| p.is_file())),
             reload_at: args.reload_at,
         });
-        app.insert_resource(sim::Sim::live(shared.clone(), &dir))
+        let mut live = sim::Sim::live(shared.clone(), &dir);
+        live.watch_vehicle = args.watch_vehicle;
+        app.insert_resource(live)
             .insert_resource(glclient::SimDrives)
             .insert_resource(bench::Shots { shared })
             .add_systems(Startup, sim::setup_sim)
