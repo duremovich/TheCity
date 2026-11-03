@@ -3326,6 +3326,21 @@ pub fn on_sighting(world: &mut World, observer: EntityId, who: EntityId, tile: T
 /// C27, a Locate tracker's `StakeOut` contact: a paid sighting, and the
 /// run goes back to asking (the tracker keeps tracking until the cap or
 /// the deadline). No-op for any other run.
+/// M18 P4 (the stakeout loop, P3's finding 3): a taken Locate's taker in the
+/// gap between paid sightings (`[bounty] min_gap_hours`) is waiting: the
+/// stakeout's contact does not end it (an unpaid contact reset the chase and
+/// the next plan staked out again, every 4 min for hours; NPC trackers made
+/// 49 two-minute stake-outs). The stake-out runs to its timeout or to a
+/// contact after the gap, which is paid.
+pub fn locate_waits(world: &World, taker: EntityId) -> bool {
+    let Some(r) = world.contract_runs.get(&taker) else { return false };
+    let Some(c) = world.contracts.get(&r.contract) else { return false };
+    let gap = Tick::from(world.config.bounty.min_gap_hours) * TICKS_PER_HOUR;
+    c.kind == ContractKind::Locate
+        && c.status == ContractStatus::Taken
+        && c.last_paid.is_some_and(|t| world.tick < t + gap)
+}
+
 pub fn on_contact(world: &mut World, taker: EntityId) {
     let Some(r) = world.contract_runs.get(&taker).cloned() else { return };
     let Some(c) = world.contracts.get(&r.contract) else { return };

@@ -157,7 +157,7 @@ pub fn label(world: &World, id: EntityId) -> String {
     world.name_of(id)
 }
 
-fn cause_label(c: GrudgeCause) -> &'static str {
+pub fn cause_label(c: GrudgeCause) -> &'static str {
     match c {
         GrudgeCause::KilledKin(_) => "killed kin",
         GrudgeCause::KilledFriend(_) => "killed a friend",

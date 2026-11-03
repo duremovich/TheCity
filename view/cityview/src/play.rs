@@ -20,8 +20,14 @@
 //! subject: its chest projected, then the click's pick), `bld INDEX` (M18 P3: a building's menu, as a click on it),
 //! `await` (the click's menu open), `pick TEXT` (the open
 //! menu's first row containing TEXT; it waits for the menu), `do TEXT` (a HUD row), `close` (the menu), `zoom M`, `pitch DEG`, `yaw DEG`,
-//! `goal NAME`, `stop`, `auto on|off`, `pause`, `speed I`, `shot NAME` (a PNG with the HUD and the menu into `--out`)
-//! or `quit`.
+//! `goal NAME`, `stop`, `auto on|off`, `pause`, `speed I`, `dismiss` (M18 P4: the day-end summary closed), `shot NAME` (a
+//! PNG with the HUD and the menu into `--out`) or `quit`.
+//!
+//! M18 P4 (consequences): the player's own log (top right: the body's events, its failures, and the city's doings to
+//! it in yellow: a grudge, a Hunt or a record on it formed, word of a deed of its reaching more people), "who knows
+//! about you" under it (`citysim::systems::player_news`: the bodies whose memories name the player, how they heard,
+//! the talk, who is after it), the day-end summary at the top centre (coins, who now knows you, who is after you, the
+//! street's read, your block) and the death screen from the body's `Life`.
 
 use bevy::{
     app::AppExit,
@@ -73,6 +79,8 @@ pub struct Play {
     menu_open: Option<(u64, Vec2)>,
     /// M18 P2: frames a script `pick` has waited for its menu.
     wait: u32,
+    /// M18 P4: the day-end summaries closed so far (the newest past it is drawn).
+    days_seen: usize,
 }
 
 /// `"T action; T action"`: the ticks a number or `D:HH:MM`, in rising order.
@@ -112,9 +120,10 @@ pub fn add(app: &mut App, shared: Arc<Shared>, vcfg: &citysim::config::ViewCfg, 
             menu_asked: 0,
             menu_open: None,
             wait: 0,
+            days_seen: 0,
         })
         .add_systems(Update, (keys, click, run_script))
-        .add_systems(EguiPrimaryContextPass, (hud, menu, board));
+        .add_systems(EguiPrimaryContextPass, (hud, menu, board, news, day_end, death));
 }
 
 fn set_speed(p: &mut Play, i: usize) {
@@ -437,6 +446,11 @@ fn run_script(
             }
         }
         "close" => p.menu_open = None,
+        // M18 P4: the day-end summary closed
+        "dismiss" => {
+            let n = p.shared.news.lock().unwrap().days.len();
+            p.days_seen = n;
+        }
         "zoom" => {
             let z: f32 = arg.parse().expect("zoom METRES");
             view.set_zoom(z);
@@ -528,6 +542,10 @@ fn hud(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
             ));
             ui.label(format!("{}c   {} food   {}", h.coins, h.food, h.job));
             ui.label(&h.place);
+            // M18 P4: held (cuffs, a sentence's days left)
+            if let Some(held) = &h.held {
+                ui.colored_label(egui::Color32::from_rgb(255, 120, 90), format!("held: {held}"));
+            }
             for (n, v) in ["hunger", "energy", "safety", "wealth", "belonging"].iter().zip(h.needs) {
                 bar(ui, n, v);
             }
@@ -647,5 +665,115 @@ fn board(mut contexts: EguiContexts, p: Res<Play>) -> Result {
             }
         },
     );
+    Ok(())
+}
+
+/// M18 P4: the player's own log (top right, newest at the bottom; the city's doings to you in yellow) and, under it,
+/// who knows about you (memories, talk, grudges naming you, with how they heard) and who is after you.
+fn news(mut contexts: EguiContexts, p: Res<Play>) -> Result {
+    use bevy_egui::egui;
+    let ctx = contexts.ctx_mut()?;
+    if p.shared.player.lock().unwrap().is_none() {
+        return Ok(());
+    }
+    let n = p.shared.news.lock().unwrap().clone();
+    let w = p.hud_width_px * 1.55;
+    egui::Window::new("your story").anchor(egui::Align2::RIGHT_TOP, [-8.0, 8.0]).resizable(false).default_width(w).max_width(w).show(
+        ctx,
+        |ui| {
+            egui::ScrollArea::vertical().max_height(230.0).stick_to_bottom(true).show(ui, |ui| {
+                if n.log.is_empty() {
+                    ui.label("nothing yet");
+                }
+                for (important, line) in &n.log {
+                    if *important {
+                        ui.colored_label(egui::Color32::from_rgb(250, 220, 120), line);
+                    } else {
+                        ui.label(line);
+                    }
+                }
+            });
+        },
+    );
+    egui::Window::new("who knows about you")
+        .anchor(egui::Align2::RIGHT_TOP, [-8.0, 290.0])
+        .resizable(false)
+        .default_width(w)
+        .max_width(w)
+        .show(ctx, |ui| {
+            egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
+                ui.strong("after you");
+                if n.after.is_empty() {
+                    ui.label("nobody");
+                }
+                for a in &n.after {
+                    ui.colored_label(egui::Color32::from_rgb(255, 120, 90), a);
+                }
+                for t in &n.talk {
+                    ui.label(format!("the talk: {t}"));
+                }
+                ui.small(&n.rep);
+                ui.separator();
+                ui.strong(format!("{} know of you ({} of a deed of yours)", n.knowing.1, n.knowing.0));
+                for (name, what, how) in &n.knowers {
+                    ui.label(format!("{name} {what}")).on_hover_text(how.as_str());
+                    ui.small(format!("    {how}"));
+                }
+            });
+        });
+    Ok(())
+}
+
+/// M18 P4: the day-end summary (top centre) until it is closed (or a script's `dismiss`).
+fn day_end(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
+    use bevy_egui::egui;
+    let ctx = contexts.ctx_mut()?;
+    let days = p.shared.news.lock().unwrap().days.clone();
+    if days.len() <= p.days_seen {
+        return Ok(());
+    }
+    let Some((day, lines)) = days.last() else { return Ok(()) };
+    let mut close = false;
+    egui::Window::new(format!("the end of day {day}"))
+        .anchor(egui::Align2::CENTER_TOP, [0.0, 8.0])
+        .resizable(false)
+        .collapsible(false)
+        .default_width(560.0)
+        .show(ctx, |ui| {
+            for l in lines {
+                if l.starts_with("after you") {
+                    ui.colored_label(egui::Color32::from_rgb(255, 120, 90), l);
+                } else {
+                    ui.label(l);
+                }
+            }
+            close = ui.button("go on").clicked();
+        });
+    if close {
+        p.days_seen = days.len();
+    }
+    Ok(())
+}
+
+/// M18 P4: the death screen, from the player's `Life` (the sim thread pauses the clock at the death).
+fn death(mut contexts: EguiContexts, p: Res<Play>) -> Result {
+    use bevy_egui::egui;
+    let ctx = contexts.ctx_mut()?;
+    let Some((line, life)) = p.shared.news.lock().unwrap().death.clone() else { return Ok(()) };
+    egui::Window::new("dead")
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .resizable(false)
+        .collapsible(false)
+        .default_width(600.0)
+        .show(ctx, |ui| {
+            ui.heading(&line);
+            ui.label("the city goes on without you");
+            ui.separator();
+            egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+                for l in &life {
+                    ui.label(l);
+                }
+            });
+        });
     Ok(())
 }

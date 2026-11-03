@@ -6258,3 +6258,12 @@ play_public_kinds = ["Market", "Bar", "Hotel", "Clinic", "Hall", "Club", "Arcade
 pick_body_px = 14.0                # a click this near a drawn body's chest (pixels) picks the body (a body is ~20 px tall
                                    # at the follow zoom)
 hud_width_px = 300.0               # the HUD's width, bottom right (P1's 380 px top right ate the far field's clicks)
+# M18 P4 (consequences, `systems/player_news.rs`): the panels of what the city knows and does about the player.
+news_scan_minutes = 10             # game minutes between two reads of who knows the player (a read scans every body's
+                                   # memory, a few ms at 20k)
+news_word_minutes = 120            # "word travels" (more people know a deed of yours) said at most once in this many
+                                   # game minutes (a scan's new knowers came every 10 min for days after a fight)
+news_log_lines = 300               # the player's own log keeps this many lines
+news_knowers_max = 40              # "who knows about you" lists at most this many bodies (the weightiest)
+block_tiles = 12                   # the day-end's "your block": events within this many tiles of the home door (where
+                                   # the body stands, homeless)

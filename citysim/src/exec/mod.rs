@@ -344,6 +344,11 @@ fn emigrate_step(world: &mut World, id: EntityId) {
 /// Run the current step's state machine for one tick.
 fn step_agent(world: &mut World, id: EntityId) {
     let Some(brain) = world.comp::<Brain>(id) else { return };
+    // M18 P4: an offer to a body the human drives that ran out says so.
+    if brain.player.as_ref().is_some_and(|p| p.offers.iter().any(|o| o.until <= world.tick)) {
+        crate::systems::player::lapse(world, id);
+    }
+    let Some(brain) = world.comp::<Brain>(id) else { return };
     // The city milestone C7: a timed leg's climbs are booked on its first
     // step (the lift's lobby, the day's counters).
     if matches!(&brain.exec, ExecState::GotoTimed { climb: Some(c), .. } if !c.booked) {
@@ -400,6 +405,8 @@ fn step_agent(world: &mut World, id: EntityId) {
         if world.comp::<Brain>(id).is_some_and(|b| b.player.as_ref().is_some_and(|p| p.contract.is_some())) {
             crate::systems::player::job_next(world, id);
         }
+        // M18 P4: nothing followed it: the HUD's "doing" goes.
+        crate::systems::player::plan_ended(world, id);
         return;
     };
     let lod = brain.lod;
@@ -808,6 +815,7 @@ impl World {
         if again {
             crate::systems::player::job_next(self, id);
         }
+        crate::systems::player::plan_ended(self, id);
     }
 
     /// A goal that cannot be planned at all: nothing will change in a tick, so
