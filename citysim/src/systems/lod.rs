@@ -1093,6 +1093,8 @@ fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {
             if u_killed >= eff {
                 world.stats.current.wounded.stat_wounds += 1;
                 stat_hit(world, id, HoleKind::Assaulted, None);
+                // The combat model C2: a killing survived leaves a Grave.
+                crate::systems::combat::stat_wounds(world, id, true);
                 return;
             }
         }
@@ -1187,6 +1189,8 @@ pub fn stat_hit(world: &mut World, id: EntityId, kind: HoleKind, src: Option<&cr
                 world.push_event(EventKind::Assaulted, &[EntityId::NONE, id], format!("{name} was beaten in {place}"));
             let hole = base(HoleKind::Assaulted, ev, consequential, 0, world);
             bind::open_hole(world, hole);
+            // The combat model C2 (docs/COMBAT.md § 2): the beating's wounds.
+            crate::systems::combat::stat_wounds(world, id, false);
             true
         }
         HoleKind::Robbed => {
@@ -1604,8 +1608,9 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
         crate::prof::timed!("work::stat_earn", stat_earn(world, id, i));
     }
     let Some(job) = job else { return };
-    // Hunger as sickness § 2: a sick day is no shift and no wage (as Full's).
-    if crate::systems::health::sick(world, id) {
+    // Hunger as sickness § 2: a sick day is no shift and no wage (as Full's);
+    // the combat model C2: nor a manual post with a bad arm or leg.
+    if crate::systems::health::sick(world, id) || crate::systems::combat::unfit(world, id, &job).is_some() {
         return;
     }
     let key = job.shift_key_at(tick);

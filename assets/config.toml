@@ -1917,13 +1917,11 @@ bout_purse_share = 0.25              # ... plus this share of the main event's s
                                      # Round 8 X5: the house's money (Flow::Purse from the pit's owner, off the table's take),
                                      # not GambleWin; 5 -> 14, over a Clinic's patch-up ([care] patch_price 12): at 5 a
                                      # fighter who lost one in two was down on the week (V16: 6-12c patch against 5c)
-bout_beating = 0.35                  # round 8 X5: a beating, not every loss: the bout's margin (how far inside the winner's
-                                     # chance the night's draw fell, 0..0.9) at or over this hurts the loser; under it he
-                                     # loses on points (V16: 1,724 of 1,724 losers hurt). An even bout is a beating 30 % of nights
+bout_beating = 0.35                  # unread since the combat model C2: the bout is combat::resolve_now's (both subdue,
+                                     # bare hands); a loser knocked out or with a Wound or worse was beaten, else on points
 bout_points_tired = 0.1              # round 8 X5: the loser on points loses this energy, no wound, no patch-up
-bout_hurt = 0.3                      # the beaten loser is hurt, a wound to have seen to (the patch-up, both tiers): energy and
-bout_hurt_margin = 0.5               # safety fall by bout_hurt + this x the margin past bout_beating (X5; W6: the winner's
-                                     # margin in fighting, every loss) ...
+bout_hurt = 0.3                      # the beaten loser's energy and safety fall by this (his wounds send him to the patch-up)
+bout_hurt_margin = 0.5               # unread since C2 (was: + this x the margin past bout_beating) ...
 bout_hurt_bad = 0.45                 # ... and at this fall or more the line reads "badly hurt" (0 and 0: the base 0.3, no wound)
 door_heat = 0.6
 class_mult = [1.3, 1.0, 0.8]         # Corp, Street, Dreg
@@ -3891,7 +3889,7 @@ blood_hit = [0.0, 0.1, 0.35]       # blood (1 full) a fresh wound takes at once,
 bleed_hour = [0.0, 0.1, 0.3]       # an hour of bleeding takes this (a torso Wound or any Grave bleeds; a blunt blow never: fists and clubs bruise and break)
 regen_hour = 0.05                  # a body not bleeding gets this back an hour
 stop_p_wound = 0.35                # a bleeding Wound stops on this roll an hour (a Grave bleeds until a Clinic stabilises it)
-heal_days = [1, 6, 20]             # C1's stub of C2's healing: a wound not bleeding is gone this many days after it was dealt
+heal_days = [1, 6, 20]             # a wound not bleeding heals this many days after it was dealt (C2: seen to, treated_heal_mult of what is left)
 arm_mult = [0.95, 0.75, 0.45]      # effects by the worst wound there: each arm x the attack skill ...
 leg_mult = [0.95, 0.7, 0.4]        # ... each leg x evasion and the flight ...
 leg_walk = [1.0, 1.4, 2.0]         # ... the worse leg x the step cost (Kit walk_mult: a limp) ...
@@ -3908,6 +3906,35 @@ shooting_draw = [0.4, 1.0]
 evasion_peak = 30.0                # evasion's seed: U([world] skill_min, skill_max) x 1 to this age, then ...
 evasion_decline = 0.012            # ... less this a year ...
 evasion_floor = 0.4                # ... to this
+# C1's wrong-reads (C2): age and a post's training.
+age_from = 45.0                    # past this age, a year: attack and evasion x (1 - age_fight), to age_fight_floor ...
+age_fight = 0.015
+age_fight_floor = 0.4
+age_morale = 0.006                 # ... morale - this ...
+age_grave = 0.03                   # ... and a hit on the old body: the grave weight x (1 + this) (bones break)
+melee_posts = { Guard = 0.35 }     # a post's training (midnight): melee and evasion up to these by role; shooting up to
+evasion_posts = { Guard = 0.3 }    # its seed for a shooting post or a gang member (one who joins later is trained)
+morale_posts = { Guard = 0.15 }    # a trained post's nerve: morale + this in a fight (C1: guards yielded or fled 1,084 of 2,295 arrests)
+# C2 (docs/COMBAT.md § 2): wounds that last.
+treated_heal_mult = 0.5            # a wound seen to (a Clinic, the back room, the Stabilise) heals in this share of its days left
+treat_from = 1                     # an untreated wound of this severity (0 graze, 1 wound, 2 grave) or worse is the Treat goal's ...
+treat_price_mult = [1.0, 2.0, 6.0] # ... at [customers] patch_price (back_price) x this by the worst ...
+treat_urgency = [0.2, 0.6, 1.0]    # ... its hurt term at least this by the worst
+untreated_note_hours = 12          # a wound not seen to this long: the body says why (the price, no doctor in reach)
+aid_tiles = 2                      # first aid: a friend, kin or gang-mate within this (or in the building) stops a bleeding Wound ...
+aid_grave_mult = 0.5               # ... and slows a Grave's bleeding to this (a Grave needs a Clinic)
+manual_posts = ["Farmer", "Gravedigger", "Sanitation", "Mechanic", "Fighter", "Fabber", "super", "night_stocker",
+    "night_porter", "bouncer", "dancer", "packer", "loader", "driver", "plant_operator", "builder", "depot_hand",
+    "rickshaw", "courier", "cab_driver", "day_labourer", "brothel_worker", "street_worker", "camp_warden"]
+                                   # ^ an arm or leg Wound or worse turns these away (the shift and its pay lost); a Grave head wound any post
+scar_p = [0.0, 0.3, 1.0]           # at the heal: a scar on this by severity ...
+maim_p = 0.5                       # ... a Grave not seen to heals badly (a maim: the region a Wound for good; [ages] maim) ...
+maim_p_treated = 0.05              # ... one seen to on this ...
+rot_p = 0.15                       # ... a Grave limb not seen to is lost instead on this
+sever_p = 0.15                     # a Grave limb hit from an edged or ranged kind takes the limb (chrome from a ripperdoc: [ages] prosthetics)
+stat_hits = [1, 3]                 # off screen: a beating writes this many hits (a keyed count) from stat_kind's damage table ...
+stat_kind = "unarmed"
+stat_grave_kind = "knife"          # ... a killing survived (the wounded split) one Grave from this kind's
 
 # C1 (docs/COMBAT.md § 4): the weapon kinds. Row 0 is the bare hand. The tier stays as quality ([combat] quality). The
 # stock maps by tier and owner class (law: guards, the Precinct; gang: gangs, members, armouries; civil: the rest): a

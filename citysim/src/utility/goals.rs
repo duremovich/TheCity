@@ -1029,7 +1029,10 @@ pub fn considerations_with(
                         crate::systems::customers::Care::Onco | crate::systems::customers::Care::Clinic => {
                             world.comp::<crate::components::Health>(id).and_then(|h| h.cancer).map_or(0.0, |c| c.stage)
                         }
-                        crate::systems::customers::Care::Patch => 1.0 - n.safety,
+                        // The combat model C2: at least the wound's urgency.
+                        crate::systems::customers::Care::Patch => {
+                            (1.0 - n.safety).max(crate::systems::combat::urgency(world, id))
+                        }
                     };
                     return Some((
                         vec![

@@ -183,6 +183,12 @@ pub fn beg_mult(world: &World, id: EntityId) -> f32 {
 
 /// Maim `id` one level (to 3) in `slot` (`why` for the event).
 pub fn maim(world: &mut World, id: EntityId, slot: Option<Slot>, why: &str) {
+    maim_to(world, id, slot, why, 1);
+}
+
+/// Maim `id` `levels` levels (to 3) in `slot` (the combat model C2: a lost
+/// limb is the top level at once).
+pub fn maim_to(world: &mut World, id: EntityId, slot: Option<Slot>, why: &str, levels: u8) {
     if !on(world) || !crate::systems::law::living(world, id) {
         return;
     }
@@ -190,7 +196,7 @@ pub fn maim(world: &mut World, id: EntityId, slot: Option<Slot>, why: &str) {
     // "prosthetic" was a behaviour chip): a maim with no slot.
     let slot = slot.filter(|&s| s != Slot::Behaviour);
     let e = world.jobs2.ages.maimed.entry(id).or_insert((0, slot));
-    e.0 = (e.0 + 1).min(3);
+    e.0 = (e.0 + levels.max(1)).min(3);
     if e.1.is_none() {
         e.1 = slot;
     }
@@ -202,7 +208,9 @@ pub fn maim(world: &mut World, id: EntityId, slot: Option<Slot>, why: &str) {
 /// `wounded::rise`: a stabilised survivor maimed on `p_maimed` (the legs or
 /// the arms by a hash).
 pub fn on_rise(world: &mut World, id: EntityId) {
-    if !on(world) {
+    // The combat model C2: a body with wounds heals by them (a scar, a maim
+    // or a lost limb at the heal, `combat::hourly`), not by this roll.
+    if !on(world) || world.has::<crate::components::Wounds>(id) {
         return;
     }
     let u = hash(world, PURPOSE_MAIM, key(id), world.tick);

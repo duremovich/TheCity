@@ -5158,6 +5158,34 @@ pub struct Wound {
     /// no guard dealt it to the one he attacked).
     #[serde(default)]
     pub murder: bool,
+    /// C2: the tick it heals (`since` + `heal_days`; treatment shortens what
+    /// is left by `treated_heal_mult`).
+    #[serde(default)]
+    pub heal_at: Tick,
+    /// C2: first aid given (a friend, kin or a gang-mate beside the body).
+    #[serde(default)]
+    pub aided: bool,
+}
+
+/// C2 (docs/COMBAT.md § 2): what a healed wound leaves on a region.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum Mark {
+    /// A scar: sim state, seen on the body; no effect.
+    Scar,
+    /// A Grave wound that healed badly: the region reads as a Wound for good.
+    Maimed,
+    /// A lost limb: the region reads as a Grave until a ripperdoc fits chrome.
+    Lost,
+}
+
+impl Mark {
+    pub fn label(self) -> &'static str {
+        match self {
+            Mark::Scar => "scarred",
+            Mark::Maimed => "maimed",
+            Mark::Lost => "lost",
+        }
+    }
 }
 
 /// C1 (docs/COMBAT.md § 2): the wounds a body carries and its blood meter
@@ -5167,18 +5195,37 @@ pub struct Wound {
 pub struct Wounds {
     pub list: Vec<Wound>,
     pub blood: f32,
+    /// C2: what healed wounds left for good (scars, maims, lost limbs); the
+    /// component stays while any is held.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub marks: Vec<(Region, Mark)>,
 }
 
 impl Default for Wounds {
     fn default() -> Self {
-        Wounds { list: Vec::new(), blood: 1.0 }
+        Wounds { list: Vec::new(), blood: 1.0, marks: Vec::new() }
     }
 }
 
 impl Wounds {
-    /// The worst severity on `region`, if any.
+    /// The worst severity on `region`, if any: its open wounds, a maim (a
+    /// Wound for good) and a lost limb (a Grave until chrome is fitted).
     pub fn worst(&self, region: Region) -> Option<Severity> {
+        let marks = self.marks.iter().filter(|m| m.0 == region).filter_map(|m| match m.1 {
+            Mark::Scar => None,
+            Mark::Maimed => Some(Severity::Wound),
+            Mark::Lost => Some(Severity::Grave),
+        });
+        self.list.iter().filter(|w| w.region == region).map(|w| w.severity).chain(marks).max()
+    }
+
+    /// The open wounds' worst on `region` (the marks apart).
+    pub fn open(&self, region: Region) -> Option<Severity> {
         self.list.iter().filter(|w| w.region == region).map(|w| w.severity).max()
+    }
+
+    pub fn has_mark(&self, region: Region, mark: Mark) -> bool {
+        self.marks.contains(&(region, mark))
     }
 }
 

@@ -1390,7 +1390,9 @@ pub struct World {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub wounded: BTreeMap<EntityId, crate::contract::Wounded>,
     /// The combat model C1: the bodies with a `Wounds` component (the
-    /// hourly bleed and heal pass reads it, not every citizen).
+    /// hourly bleed and heal pass reads it, not every citizen); C2: with an
+    /// open wound or short of blood (one with only its marks, scars, maims
+    /// and lost limbs, keeps the component out of it).
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub hurt: BTreeSet<EntityId>,
     /// C1: the last fight's outcome (`combat::resolve_now`), beside the

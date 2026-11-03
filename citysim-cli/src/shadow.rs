@@ -1654,7 +1654,9 @@ fn header(world: &World, t: &Track) -> String {
                 format!("{} {}{}", x.region.label(), x.severity.label(), if x.bleeding { ", bleeding" } else { "" })
             })
             .collect();
-        let _ = writeln!(h, "- **Wounds**: {} (blood {:.2})", list.join("; "), w.blood);
+        let marks: Vec<String> = w.marks.iter().map(|(r, m)| format!("{} {}", r.label(), m.label())).collect();
+        let marks = if marks.is_empty() { String::new() } else { format!("; marks: {}", marks.join(", ")) };
+        let _ = writeln!(h, "- **Wounds**: {} (blood {:.2}){marks}", list.join("; "), w.blood);
     }
     let home = world.comp::<Household>(id).and_then(|h| h.home);
     let _ = writeln!(

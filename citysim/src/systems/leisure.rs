@@ -2131,6 +2131,8 @@ pub fn bouts(world: &mut World) {
             .filter(|&f| crate::systems::law::living(world, f) && !world.has::<Sentence>(f))
             .filter(|&f| !crate::systems::ages::is_protected(world, f))
             .filter(|&f| present(f))
+            // The combat model C2: a fighter turned away by his wounds is off the card.
+            .filter(|&f| world.comp::<Job>(f).is_none_or(|j| crate::systems::combat::unfit(world, f, j).is_none()))
             .map(|f| (crate::systems::combat::power(world, f), f, last_bout(f)))
             .collect();
         fighters.sort_by(|a, b| a.2.cmp(&b.2).then(b.0.total_cmp(&a.0)).then(a.1.cmp(&b.1)));
@@ -2197,60 +2199,43 @@ pub fn bouts(world: &mut World) {
     crate::systems::vice::keep_bouts(world);
 }
 
-/// One bout of the card (plan L18's draw): `a` beats `b` on `p_win` from
-/// the fighting and the courage; the loser's energy and safety, both
-/// memories, the winner's skill, the pit's book (round 6 V6). Returns
-/// whether `a` won and the loser's hurt (0: on points, or no wound).
-fn fight_bout(world: &mut World, rng: &mut impl Rng, a: EntityId, b: EntityId, fa: f32, fb: f32) -> (bool, f32) {
-    let (ca, cb) = (crate::systems::law::courage(world, a), crate::systems::law::courage(world, b));
-    let p_win = (0.5 + 0.4 * (fa - fb) + 0.1 * (ca - cb)).clamp(0.1, 0.9);
-    let roll = rng.random::<f32>();
-    let a_wins = roll < p_win;
-    let (winner, loser) = if a_wins { (a, b) } else { (b, a) };
-    // Round 8 X5 (OPEN-217): the bout's margin, how far inside the winner's
-    // chance the draw fell (the favourite's win can be a rout, the
-    // underdog's is narrow). At `[leisure] bout_beating` or over it the
-    // loser is beaten: hurt by `bout_hurt` + `bout_hurt_margin` x the margin
-    // past it, a wound to have seen to (`Misery.hurt_at`, read by
-    // `customers::hurt`: the patch-up, both tiers). Under it he loses on
-    // points (`bout_points_tired` of energy, no wound). W6 hurt every loser
-    // (V16: 1,724 of 1,724). Fighters are adults (the card's
-    // `ages::is_protected` gate); the backstop here.
+/// One bout of the card: the combat model C2 (C1's wrong-read c) runs it
+/// through `combat::resolve_now` as a `Bout` (both subdue, bare hands, no
+/// fight's memories or edges): the wounds by region land on the body and
+/// the loser who was knocked out or took a Wound or worse was beaten (its
+/// energy and safety at `bout_hurt`; the wounds send it to the patch-up,
+/// `customers::hurt`), else he lost on points (`bout_points_tired`). Both
+/// remember the `Bout`; the pit's book (round 6 V6). Returns whether `a`
+/// won and the loser's hurt (0: on points). Fighters are adults (the
+/// card's `ages::is_protected` gate); `resolve_fight_mods`'s backstop here.
+fn fight_bout(world: &mut World, _rng: &mut impl Rng, a: EntityId, b: EntityId, _fa: f32, _fb: f32) -> (bool, f32) {
+    if crate::systems::ages::is_protected(world, a) || crate::systems::ages::is_protected(world, b) {
+        return (true, 0.0);
+    }
+    let mods = crate::systems::law::FightMods { why: crate::systems::combat::Purpose::Bout, ..Default::default() };
+    let out = crate::systems::combat::resolve_now(world, a, b, mods);
+    let a_wins = out.winner == a;
+    let (winner, loser) = (out.winner, out.loser);
+    let ls = if out.sides[0].id == loser { &out.sides[0] } else { &out.sides[1] };
+    let beaten = matches!(ls.end, crate::systems::combat::End::KnockedOut | crate::systems::combat::End::Downed)
+        || ls.took.iter().any(|t| t.1 >= crate::components::Severity::Wound);
     let cfg = &world.config.leisure;
-    let margin = if a_wins { p_win - roll } else { roll - p_win }.max(0.0);
-    let wound = cfg.bout_hurt > 0.0 || cfg.bout_hurt_margin > 0.0;
-    let (energy, hurt) = if !wound {
-        (0.3, 0.3)
-    } else if margin >= cfg.bout_beating {
-        let h = (cfg.bout_hurt + cfg.bout_hurt_margin * (margin - cfg.bout_beating)).clamp(0.0, 1.0);
+    let (energy, hurt) = if beaten {
+        let h = cfg.bout_hurt.clamp(0.0, 1.0);
         (h, h)
     } else {
         (cfg.bout_points_tired, 0.0)
     };
-    let (energy, hurt) = if crate::systems::ages::is_protected(world, loser) { (0.0, 0.0) } else { (energy, hurt) };
     if let Some(n) = world.comp_mut::<Needs>(loser) {
         n.energy = (n.energy - energy).max(0.0);
         n.safety = (n.safety - hurt).max(0.0);
     }
-    if wound && hurt > 0.0 {
-        let now = world.tick;
-        if !world.has::<crate::components::Misery>(loser) {
-            world.insert(loser, crate::components::Misery::default());
-        }
-        if let Some(m) = world.comp_mut::<crate::components::Misery>(loser) {
-            m.hurt_at = now;
-        }
+    if hurt > 0.0 {
         ownership::jobs2_row(world).bout_hurt += 1;
     }
-    let hurt = if wound { hurt } else { 0.0 };
-    // L2 shadow fixes item 9: a bout is sanctioned, not an assault (its
-    // `Lost` was read as Assaulted: rumours, news Stories, dread 0.82,
-    // a best friend turned Enemy).
+    // L2 shadow fixes item 9: a bout is sanctioned, not an assault.
     world.remember(winner, MemoryKind::Bout, Some(loser), 0.4, 0.3, false);
     world.remember(loser, MemoryKind::Bout, Some(winner), 0.5, -0.4, false);
-    if let Some(s) = world.comp_mut::<crate::components::Skills>(winner) {
-        s.melee = (s.melee + 0.01).min(1.0);
-    }
     crate::systems::vice::note_bout(world, a);
     crate::systems::vice::note_bout(world, b);
     (a_wins, hurt)
