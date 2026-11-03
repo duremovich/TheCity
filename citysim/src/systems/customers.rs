@@ -412,23 +412,40 @@ pub enum Care {
     Clinic,
 }
 
-/// A lost fight within `hurt_hours`, not yet seen to (a body's memory).
+/// A wound to have seen to: the combat model C2, an untreated wound of
+/// `[combat] treat_from` or worse on the body (`combat::worst_untreated`;
+/// it replaces the lost fight's `Lost` memory within `hurt_hours`); or a
+/// lost bout's hurt within `hurt_hours` from an old save.
 pub fn hurt(world: &World, id: EntityId) -> bool {
     let Some(c) = cfg(world) else { return false };
-    let since = world.tick.saturating_sub(u64::from(c.hurt_hours) * TICKS_PER_HOUR);
-    let seen = world.comp::<crate::components::Misery>(id).map_or(0, |m| m.patched_at);
-    // Round 7 W6 (OPEN-217): a lost bout's hurt (the pit's, no `Lost`).
-    if world
-        .comp::<crate::components::Misery>(id)
-        .is_some_and(|m| m.hurt_at > 0 && m.hurt_at >= since && m.hurt_at > seen)
-    {
+    if crate::systems::combat::worst_untreated(world, id).is_some() {
         return true;
     }
-    world.comp::<crate::components::Memory>(id).is_some_and(|m| {
-        m.entries.iter().any(|e| {
-            e.kind == crate::components::MemoryKind::Lost && e.salience >= 0.6 && e.tick >= since && e.tick > seen
-        })
-    })
+    let since = world.tick.saturating_sub(u64::from(c.hurt_hours) * TICKS_PER_HOUR);
+    let seen = world.comp::<crate::components::Misery>(id).map_or(0, |m| m.patched_at);
+    world.comp::<crate::components::Misery>(id).is_some_and(|m| m.hurt_at > 0 && m.hurt_at >= since && m.hurt_at > seen)
+}
+
+/// The combat model C2: why `id`'s wound goes unseen (`combat`'s note):
+/// it cannot pay the patch-up, or no doctor is in reach; `None` when a
+/// care trip is open to it (it just has not gone yet).
+pub fn untreated_why(world: &World, id: EntityId) -> Option<String> {
+    let c = cfg(world)?;
+    if care_choice_any(world, id).is_some() {
+        return None;
+    }
+    let price = wound_price(world, id, c.patch_price);
+    let held = coins(world, id);
+    if held < price {
+        return Some(format!("the Clinic's patch-up is {price}c and they have {held}c"));
+    }
+    Some("no doctor open in reach".to_string())
+}
+
+/// A patch-up's price for `id`'s wounds: `base` x `[combat]
+/// treat_price_mult` by the worst untreated one.
+fn wound_price(world: &World, id: EntityId, base: i64) -> i64 {
+    (base as f32 * crate::systems::combat::price_mult(world, id)).round() as i64
 }
 
 fn coins(world: &World, id: EntityId) -> i64 {
@@ -507,9 +524,10 @@ fn care_choice_any(world: &World, id: EntityId) -> Option<(EntityId, Care, i64)>
     }
     // The back room takes the broke too: they pay what they and theirs
     // hold (the patient, the kin, the gang), up to `back_price`.
-    if avoids_clinic(world, id, c.patch_price) {
+    let (patch_price, back_price) = (wound_price(world, id, c.patch_price), wound_price(world, id, c.back_price));
+    if avoids_clinic(world, id, patch_price) {
         if let Some(b) = back_room(world, id) {
-            return Some((b, Care::Patch, c.back_price));
+            return Some((b, Care::Patch, back_price));
         }
     }
     let from = crate::systems::life::origin(world, id)?;
@@ -517,13 +535,13 @@ fn care_choice_any(world: &World, id: EntityId) -> Option<(EntityId, Care, i64)>
     // night), the nearest with room first (`care::patch_clinic`).
     let clinic = crate::systems::care::patch_clinic(world, from, id)?;
     // Pressure pass R3: short of the patch, a pawn and the doctor's slate.
-    if coins(world, id) < c.patch_price && !crate::systems::care::slate_ok(world, id, clinic, c.patch_price) {
+    if coins(world, id) < patch_price && !crate::systems::care::slate_ok(world, id, clinic, patch_price) {
         return None;
     }
     if crate::systems::distance::out_of_reach(world, id, clinic, |r| r.clinic_ticks) {
         return None;
     }
-    Some((clinic, Care::Patch, c.patch_price))
+    Some((clinic, Care::Patch, patch_price))
 }
 
 /// Pressure pass R3: the nearest open Clinic (a diagnosed cancer walks to it
@@ -745,7 +763,8 @@ fn see_to(world: &mut World, id: EntityId, place: EntityId, what: Care, price: i
                 m.patched_at = now;
             }
             ownership::jobs2_row(world).patched += 1;
-            let text = format!("{dn} patched {who} up at {at} for {price}c{note}");
+            let seen = crate::systems::combat::treat(world, id).map_or(String::new(), |w| format!(" ({w} seen to)"));
+            let text = format!("{dn} patched {who} up at {at} for {price}c{note}{seen}");
             world.push_event(crate::events::EventKind::Treated, &[id, doc, place], text);
         }
         crate::systems::service::arrive(world, id, place, crate::components::ServeKind::Patient, s.cash);
@@ -790,10 +809,11 @@ fn see_to(world: &mut World, id: EntityId, place: EntityId, what: Care, price: i
                 m.patched_at = now;
             }
             ownership::jobs2_row(world).patched += 1;
+            let seen = crate::systems::combat::treat(world, id).map_or(String::new(), |w| format!(" ({w} seen to)"));
             if back {
-                format!("{dn} patched {who} up in the back room of {at} for {paid}c{money}, no questions asked")
+                format!("{dn} patched {who} up in the back room of {at} for {paid}c{money}, no questions asked{seen}")
             } else {
-                format!("{dn} patched {who} up at {at} for {paid}c")
+                format!("{dn} patched {who} up at {at} for {paid}c{seen}")
             }
         }
         Care::Onco | Care::Clinic => {

@@ -154,7 +154,11 @@ pub fn rest_fix(world: &World) -> bool {
 /// with `[rest]` so does the departure gate, which is false while Work
 /// refuses (it cut every Rest at a minute for a shift Work would not take).
 pub fn work_refused(world: &World, id: EntityId, job: &Job) -> bool {
-    world.has::<crate::components::Sentence>(id) || crate::systems::health::sick(world, id) || job.days_unpaid >= 7
+    world.has::<crate::components::Sentence>(id)
+        || crate::systems::health::sick(world, id)
+        || job.days_unpaid >= 7
+        // The combat model C2: a manual post turns a bad arm or leg away.
+        || crate::systems::combat::unfit(world, id, job).is_some()
 }
 
 /// The perf pass phase 1 (OPEN-195): a shift the Work goal would take now:

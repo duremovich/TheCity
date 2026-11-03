@@ -1,4 +1,5 @@
-//! The combat model C1, the beat (docs/COMBAT.md § 1-5, § 10 phase 1).
+//! The combat model C1, the beat, and C2, wounds that last (docs/COMBAT.md
+//! § 1-5, § 10 phases 1-2).
 //!
 //! A game abstraction between fictional agents of a simulated city: a fight
 //! is a handful of **beats** resolved in one call ([`resolve_now`], the body
@@ -20,16 +21,26 @@
 //!   a leg slows the dodge, the flight and the walk (`Kit.walk_mult`), the
 //!   head makes a later knockout likelier and the work worse
 //!   (`health::effects`). The hourly pass drains the blood of a bleeding
-//!   wound into the M16b downed state (`wounded::down`), stops a Wound's
-//!   bleeding on a roll and heals a wound after `heal_days` (C1's stub of
-//!   C2's healing, the Clinic and first aid).
+//!   wound into the M16b downed state (`wounded::down`) and stops a Wound's
+//!   bleeding on a roll.
+//! - **C2, wounds that last** (§ 2): a wound heals at its `heal_at`, sooner
+//!   when seen to (the Treat goal's patch-up, `customers::hurt`, priced by
+//!   the worst wound; the M16b Stabilise); first aid from a friend, kin or a
+//!   gang-mate beside the body; a manual post turns a bad arm or leg away
+//!   ([`unfit`]: the shift and its pay lost); a healed Grave may leave a
+//!   maim, a lost limb (also severed at the hit) until a ripperdoc fits
+//!   chrome ([`fitted`]), and a scar (`Wounds.marks`); the off-screen
+//!   beatings write wounds ([`stat_wounds`]). Age slows the fighter and
+//!   breaks the bone; a post trains its skills at midnight; the pit's bout
+//!   is a `Bout` here.
 //! - **The skills** `melee`, `shooting`, `evasion` grow with hits landed
 //!   and dodges; every gate reads [`power`].
 //! - **No child is ever harmed**: a fight with a minor never starts
 //!   (`law::resolve_fight_mods`), and every hit checks again.
 
 use crate::components::{
-    AssetLoc, Brain, Gang, Identity, Job, Kit, MemoryKind, Needs, Personality, Region, Severity, Skills, Wound, Wounds,
+    AssetLoc, Brain, Gang, Identity, Job, Kit, Mark, MemoryKind, Needs, Personality, Position, Region, Severity,
+    Skills, Slot, Wound, Wounds,
 };
 use crate::config::{WeaponFamily, WeaponKindCfg};
 use crate::entity::EntityId;
@@ -43,6 +54,8 @@ const PURPOSE_KIND: u64 = 0x434F_0002;
 const PURPOSE_SHOOT: u64 = 0x434F_0003;
 const PURPOSE_EVADE: u64 = 0x434F_0004;
 const PURPOSE_BLEED: u64 = 0x434F_0005;
+const PURPOSE_HEAL: u64 = 0x434F_0006;
+const PURPOSE_STAT: u64 = 0x434F_0007;
 
 fn key(id: EntityId) -> u64 {
     u64::from(id.index) << 32 | u64::from(id.generation)
@@ -97,6 +110,10 @@ pub enum Purpose {
     Raid,
     /// A visitor swinging at a door: the bouncer (`b`) subdues.
     Door,
+    /// C2, C1's wrong-read (c): a FightPit's bout. Both subdue, bare hands;
+    /// sanctioned: no memories of a fight, no edges, no weapons' tail (the
+    /// pit writes its own `Bout` memories).
+    Bout,
 }
 
 /// How a participant's fight ended.
@@ -267,6 +284,29 @@ pub fn power(world: &World, id: EntityId) -> f32 {
     f
 }
 
+/// A role's config key: a `[[trades]]` row's id, else the `Role` name.
+pub fn role_key(role: crate::components::Role) -> String {
+    match role {
+        crate::components::Role::Trade(t) => t.key().to_string(),
+        r => format!("{r:?}"),
+    }
+}
+
+/// `id`'s shooting seed: its post's base (a `shooting_posts` role, else a
+/// gang member's `shooting_gang`, else `shooting_base`) x its keyed draw;
+/// `post`: the base was a post's (a role or a gang), not a civilian's.
+fn shooting_seed(world: &World, id: EntityId) -> (f32, bool) {
+    let c = &world.config.combat;
+    let role = world.comp::<Job>(id).map(|j| role_key(j.role));
+    let (base, post) = match role.and_then(|r| c.shooting_posts.get(&r).copied()) {
+        Some(b) => (b, true),
+        None if world.gang_of(id).is_some() => (c.shooting_gang, true),
+        None => (c.shooting_base, false),
+    };
+    let [lo, hi] = c.shooting_draw;
+    (base * (lo + (hi - lo) * hash(world, PURPOSE_SHOOT, key(id), 0)), post)
+}
+
 /// Seed `id`'s shooting and evasion when unset (-1): shooting from its
 /// role's base x a keyed draw, evasion a keyed draw x the age curve.
 pub fn seed_skills(world: &mut World, id: EntityId) {
@@ -275,13 +315,7 @@ pub fn seed_skills(world: &mut World, id: EntityId) {
         return;
     }
     let c = &world.config.combat;
-    let base = match world.comp::<Job>(id).map(|j| j.role) {
-        Some(r) if c.shooting_posts.contains_key(&format!("{r:?}")) => c.shooting_posts[&format!("{r:?}")],
-        _ if world.gang_of(id).is_some() => c.shooting_gang,
-        _ => c.shooting_base,
-    };
-    let [lo, hi] = c.shooting_draw;
-    let shoot = base * (lo + (hi - lo) * hash(world, PURPOSE_SHOOT, key(id), 0));
+    let shoot = shooting_seed(world, id).0;
     let (slo, shi) = (world.config.world.skill_min, world.config.world.skill_max);
     let years = world.comp::<Identity>(id).map_or(30.0, |i| i.age_days as f32 / crate::time::DAYS_PER_YEAR as f32);
     let age = (1.0 - c.evasion_decline * (years - c.evasion_peak).max(0.0)).max(c.evasion_floor);
@@ -296,12 +330,47 @@ pub fn seed_skills(world: &mut World, id: EntityId) {
     }
 }
 
+/// C1's wrong-reads (b, d), C2: a post's training. A body on a shooting
+/// post or in a gang is brought up to its shooting seed (one who joined
+/// after the seed shot like a civilian: raiders at 0.04), and a
+/// `melee_posts` / `evasion_posts` role to those floors.
+fn train(world: &mut World, id: EntityId) {
+    let Some(s) = world.comp::<Skills>(id) else { return };
+    let (melee, evasion, shooting) = (s.melee, s.evasion, s.shooting);
+    if shooting < 0.0 {
+        return;
+    }
+    let c = &world.config.combat;
+    let role = world.comp::<Job>(id).map(|j| role_key(j.role));
+    let floor = |m: &std::collections::BTreeMap<String, f32>| role.as_ref().and_then(|r| m.get(r).copied());
+    let (fm, fe) = (floor(&c.melee_posts), floor(&c.evasion_posts));
+    let (shoot, post) = shooting_seed(world, id);
+    let up_shoot = post && shoot > shooting;
+    let up_melee = fm.is_some_and(|f| f > melee);
+    let up_evade = fe.is_some_and(|f| f > evasion);
+    if !(up_shoot || up_melee || up_evade) {
+        return;
+    }
+    if let Some(s) = world.comp_mut::<Skills>(id) {
+        if up_shoot {
+            s.shooting = shoot.clamp(0.0, 1.0);
+        }
+        if let Some(f) = fm.filter(|_| up_melee) {
+            s.melee = f.min(1.0);
+        }
+        if let Some(f) = fe.filter(|_| up_evade) {
+            s.evasion = f.min(1.0);
+        }
+    }
+}
+
 /// Every body with skills unset (`World::new`, and at midnight for the
-/// day's arrivals and those come of age).
+/// day's arrivals and those come of age); C2, the posts' training.
 pub fn seed_all(world: &mut World) {
     let ids: Vec<EntityId> = world.with::<Skills>();
     for id in ids {
         seed_skills(world, id);
+        train(world, id);
     }
 }
 
@@ -335,6 +404,12 @@ pub fn apply_effects(world: &World, w: &Wounds, e: &mut crate::systems::health::
 /// What a body carries into a fight, told in the line ("limping", "a bad arm").
 fn carried_note(world: &World, id: EntityId) -> Option<&'static str> {
     let w = world.comp::<Wounds>(id)?;
+    if w.marks.iter().any(|m| m.1 == Mark::Lost && m.0.is_arm()) {
+        return Some("one-armed");
+    }
+    if w.marks.iter().any(|m| m.1 == Mark::Lost && m.0.is_leg()) {
+        return Some("on one leg");
+    }
     let leg = w.list.iter().any(|x| x.region.is_leg() && x.severity >= Severity::Wound);
     let arm = w.list.iter().any(|x| x.region.is_arm() && x.severity >= Severity::Wound);
     match (leg, arm) {
@@ -380,6 +455,9 @@ fn stance_for(world: &World, id: EntityId, attacker: bool, mods: &crate::systems
     if crate::systems::robots::is_robot(world, id) {
         return Stance::AllOut;
     }
+    if mods.why == Purpose::Bout {
+        return Stance::Subdue;
+    }
     let p = world.comp::<Personality>(id);
     let (courage, lawful) = p.map_or((0.5, 0.5), |p| (p.courage, p.lawfulness));
     if attacker {
@@ -409,10 +487,17 @@ fn stance_for(world: &World, id: EntityId, attacker: bool, mods: &crate::systems
     }
 }
 
-fn fighter(world: &World, id: EntityId, stance: Stance, attacker: bool, bonus: f32) -> Fighter {
+/// The years `id` is past `[combat] age_from` (0 for the young and robots).
+fn over_age(world: &World, id: EntityId) -> f32 {
+    world.comp::<Identity>(id).map_or(0.0, |i| {
+        (i.age_days as f32 / crate::time::DAYS_PER_YEAR as f32 - world.config.combat.age_from).max(0.0)
+    })
+}
+
+fn fighter(world: &World, id: EntityId, stance: Stance, attacker: bool, bonus: f32, bout: bool) -> Fighter {
     let c = &world.config.combat;
     let robot = crate::systems::robots::is_robot(world, id);
-    let mut kind = kind_of(world, id);
+    let mut kind = if bout { 0 } else { kind_of(world, id) };
     let tier = crate::systems::weapons::tier(world, id);
     // Subdue strikes blunt: the first blunt armed row when armed.
     if stance == Stance::Subdue && kind > 0 && !kind_row(world, kind).is_some_and(|r| r.blunt) {
@@ -434,13 +519,22 @@ fn fighter(world: &World, id: EntityId, stance: Stance, attacker: bool, bonus: f
     let jacked = !world.runner_of.is_empty() && world.runner_of.contains_key(&id);
     let jm = if jacked { world.config.virt.jacked_fight_mult } else { 1.0 };
     let reflex = kit.map_or(0.0, |k| k.reflex);
-    let attack = (skill * fx.attack_mult - fx.frail_fight) * jm + bonus;
-    let evasion = (evasion + c.reflex_evade * reflex) * fx.evade_mult * jm;
+    // C2, C1's wrong-read (a): age slows the fist, the dodge and the nerve.
+    let over = over_age(world, id);
+    let age = (1.0 - c.age_fight * over).max(c.age_fight_floor);
+    let attack = (skill * fx.attack_mult * age - fx.frail_fight) * jm + bonus;
+    let evasion = (evasion + c.reflex_evade * reflex) * fx.evade_mult * age * jm;
     let courage = crate::systems::law::courage(world, id);
     let morale = if robot {
         f32::INFINITY
     } else {
-        c.morale_base + c.courage_w * (courage - 0.5) + c.stance_morale[stance.i()] + bonus
+        // C2 (d): a trained post holds its nerve.
+        let post = if c.morale_posts.is_empty() {
+            0.0
+        } else {
+            world.comp::<Job>(id).and_then(|j| c.morale_posts.get(&role_key(j.role)).copied()).unwrap_or(0.0)
+        };
+        c.morale_base + c.courage_w * (courage - 0.5) + c.stance_morale[stance.i()] + bonus - c.age_morale * over + post
     };
     let draw = if attacker { 0 } else { kind_row(world, kind).map_or(0, |r| r.draw) };
     Fighter {
@@ -508,8 +602,12 @@ pub fn resolve_now(world: &mut World, a: EntityId, b: EntityId, mods: crate::sys
     let lethal = mods.kill_p.is_some();
     let (sa, sb) = (stance_for(world, a, true, &mods), stance_for(world, b, false, &mods));
     let notes = [carried_note(world, a), carried_note(world, b)];
-    let mut f = [fighter(world, a, sa, true, mods.a_bonus), fighter(world, b, sb, false, 0.0)];
-    let mut dice = Dice { salt: world.rng.world().random::<u64>(), n: 0 };
+    let bout = mods.why == Purpose::Bout;
+    let mut f = [fighter(world, a, sa, true, mods.a_bonus, bout), fighter(world, b, sb, false, 0.0, bout)];
+    // A bout is keyed on the pair and the tick (the pit drew on its own
+    // `WordNs::Bout` stream before C2: the world stream stays the city's).
+    let salt = if bout { key(a) ^ key(b).rotate_left(23) ^ world.tick } else { world.rng.world().random::<u64>() };
+    let mut dice = Dice { salt, n: 0 };
     let order = if f[1].reflex > f[0].reflex { [1, 0] } else { [0, 1] };
     let max_beats = world.config.combat.max_beats.max(1);
     let mut beats = 0u8;
@@ -624,6 +722,8 @@ fn strike(
     if row.family == WeaponFamily::Melee {
         w[2] *= 1.0 + c.strength_grave * f[i].strength;
     }
+    // C2 (a): an old body breaks easier.
+    w[2] *= 1.0 + c.age_grave * over_age(world, f[j].id);
     let mut sev = [Severity::Graze, Severity::Wound, Severity::Grave][pick_weighted(dice.roll(world), &w)];
     // Armour on the region takes it down a severity (a graze stopped).
     let armour = if region == Region::Torso && f[j].vest { f[j].skin.max(c.vest_torso) } else { f[j].skin };
@@ -660,8 +760,13 @@ fn strike(
     // he set upon and is no guard.
     let murder = f[i].id == a && f[j].id == b && !crate::systems::law::is_guard(world, a);
     let blood = add_wound(world, f[j].id, region, sev, Some(f[i].id), murder, row.blunt);
+    // C2: a Grave limb hit from a blade or a gun may take the limb.
+    if sev == Severity::Grave && (region.is_arm() || region.is_leg()) && !row.blunt && dice.roll(world) < c.sever_p {
+        let how = if row.family == WeaponFamily::Ranged { "shot to ruin" } else { "hacked off" };
+        lose_limb(world, f[j].id, region, &format!("{how} by {} with a {}", world.name_of(f[i].id), row.id));
+    }
     // The wound's effects reach the next beat.
-    let base = fighter(world, f[j].id, f[j].stance, false, 0.0);
+    let base = fighter(world, f[j].id, f[j].stance, false, 0.0, mods.why == Purpose::Bout);
     f[j].attack = base.attack + if f[j].id == a { mods.a_bonus } else { 0.0 };
     f[j].evasion = base.evasion;
     if blood <= 0.0 {
@@ -683,10 +788,15 @@ pub fn add_wound(
     murder: bool,
     blunt: bool,
 ) -> f32 {
+    // No child is ever harmed (CLAUDE.md): the backstop.
+    if crate::systems::ages::is_protected(world, id) {
+        return world.comp::<Wounds>(id).map_or(1.0, |w| w.blood);
+    }
     let c = &world.config.combat;
     let bleeding = !blunt && (severity == Severity::Grave || (region == Region::Torso && severity == Severity::Wound));
     let loss = if blunt { 0.0 } else { c.blood_hit[severity.index()] };
-    let w = Wound { region, severity, bleeding, since: world.tick, treated: false, by, murder };
+    let heal_at = world.tick + Tick::from(c.heal_days[severity.index()]) * TICKS_PER_DAY;
+    let w = Wound { region, severity, bleeding, since: world.tick, treated: false, by, murder, heal_at, aided: false };
     if !world.has::<Wounds>(id) {
         world.insert(id, Wounds::default());
     }
@@ -719,6 +829,63 @@ fn finish(
 ) -> FightOutcome {
     let li = if f[0].id == loser { 0 } else { 1 };
     let loser_end = f[li].end.unwrap_or(End::Yielded);
+    let bout = mods.why == Purpose::Bout;
+    if !bout {
+        sequel(world, a, b, winner, loser, mods);
+    }
+    // Growth: hits landed and dodges (C1, replacing the winner's flat +0.01).
+    let c = world.config.combat.clone();
+    for x in &f {
+        if let Some(s) = world.comp_mut::<Skills>(x.id) {
+            s.melee = (s.melee + c.melee_gain * f32::from(x.melee_hits)).min(1.0);
+            s.shooting = (s.shooting.max(0.0) + c.shooting_gain * f32::from(x.shots)).min(1.0);
+            s.evasion = (s.evasion.max(0.0) + c.evasion_gain * f32::from(x.dodged)).min(1.0);
+        }
+    }
+    let mut died = loser_end == End::Dead;
+    let mut end = loser_end;
+    if loser_end == End::Downed {
+        let murder = loser == b && !crate::systems::law::is_guard(world, a);
+        if !go_down(world, loser, Some(winner), murder) {
+            died = true;
+            end = End::Dead;
+        }
+    }
+    if died {
+        world.kill_by(loser, crate::components::DeathCause::Violence, Some(winner));
+    }
+    if !bout {
+        let arms = crate::systems::weapons::fight_tiers(world, a, b);
+        crate::systems::weapons::after_fight(world, winner, loser, died, arms);
+        crate::systems::fashion::after_fight(world, winner, loser);
+        crate::systems::braindance::after_fight(world, winner);
+    }
+    let side = |x: &Fighter, e: End| SideOut {
+        id: x.id,
+        stance: x.stance,
+        kind: x.kind,
+        end: e,
+        took: x.took.clone(),
+        landed: x.landed,
+        dodged: x.dodged,
+    };
+    let ends = if li == 0 { [end, End::Won] } else { [End::Won, end] };
+    let out = FightOutcome { sides: [side(&f[0], ends[0]), side(&f[1], ends[1])], winner, loser, died, beats };
+    let text = line(world, &out, notes);
+    world.push_event(EventKind::Fight, &[a, b], text);
+    out
+}
+
+/// A fight's tail on the two (not a bout's): the memories, drift, safety
+/// and mood, the social edges.
+fn sequel(
+    world: &mut World,
+    a: EntityId,
+    b: EntityId,
+    winner: EntityId,
+    loser: EntityId,
+    mods: &crate::systems::law::FightMods,
+) {
     world.remember(a, MemoryKind::Fought, Some(b), 0.7, -0.5, false);
     world.remember(b, MemoryKind::Fought, Some(a), 0.7, -0.5, false);
     world.remember(winner, MemoryKind::Won, Some(loser), 0.6, 0.4, false);
@@ -746,46 +913,7 @@ fn finish(
     if let Some(m) = world.comp_mut::<crate::components::Mood>(loser) {
         m.value = (m.value - 0.3).max(-1.0);
     }
-    // Growth: hits landed and dodges (C1, replacing the winner's flat +0.01).
-    let c = world.config.combat.clone();
-    for x in &f {
-        if let Some(s) = world.comp_mut::<Skills>(x.id) {
-            s.melee = (s.melee + c.melee_gain * f32::from(x.melee_hits)).min(1.0);
-            s.shooting = (s.shooting.max(0.0) + c.shooting_gain * f32::from(x.shots)).min(1.0);
-            s.evasion = (s.evasion.max(0.0) + c.evasion_gain * f32::from(x.dodged)).min(1.0);
-        }
-    }
     crate::systems::social::fought(world, winner, loser);
-    let mut died = loser_end == End::Dead;
-    let mut end = loser_end;
-    if loser_end == End::Downed {
-        let murder = loser == b && !crate::systems::law::is_guard(world, a);
-        if !go_down(world, loser, Some(winner), murder) {
-            died = true;
-            end = End::Dead;
-        }
-    }
-    if died {
-        world.kill_by(loser, crate::components::DeathCause::Violence, Some(winner));
-    }
-    let arms = crate::systems::weapons::fight_tiers(world, a, b);
-    crate::systems::weapons::after_fight(world, winner, loser, died, arms);
-    crate::systems::fashion::after_fight(world, winner, loser);
-    crate::systems::braindance::after_fight(world, winner);
-    let side = |x: &Fighter, e: End| SideOut {
-        id: x.id,
-        stance: x.stance,
-        kind: x.kind,
-        end: e,
-        took: x.took.clone(),
-        landed: x.landed,
-        dodged: x.dodged,
-    };
-    let ends = if li == 0 { [end, End::Won] } else { [End::Won, end] };
-    let out = FightOutcome { sides: [side(&f[0], ends[0]), side(&f[1], ends[1])], winner, loser, died, beats };
-    let text = line(world, &out, notes);
-    world.push_event(EventKind::Fight, &[a, b], text);
-    out
 }
 
 /// Down by blood loss (the M16b state); at `wounded_quota` (or with
@@ -850,14 +978,259 @@ fn line(world: &World, out: &FightOutcome, notes: [Option<&'static str>; 2]) -> 
 }
 
 // ---------------------------------------------------------------------------
-// The hourly pass: bleeding and healing
+// C2: wounds that last (docs/COMBAT.md § 2)
 // ---------------------------------------------------------------------------
 
-/// Hourly (and seeding at midnight): every hurt body's bleeding drains its
-/// blood (a Wound may stop on a roll; a Grave bleeds until a Clinic
-/// stabilises it, the M16b downed state's Stabilise); at no blood it goes
-/// down; a body not bleeding gets blood back; a wound heals `heal_days`
-/// after it was dealt (C1's stub of C2's healing).
+/// The tick `x` heals (an old save's wound: `since` + its days).
+fn heal_at(x: &Wound, c: &crate::config::CombatCfg) -> Tick {
+    if x.heal_at > 0 {
+        x.heal_at
+    } else {
+        x.since + Tick::from(c.heal_days[x.severity.index()]) * TICKS_PER_DAY
+    }
+}
+
+/// Seen to: the bleeding stopped, the days left cut to `treated_heal_mult`.
+fn treat_one(x: &mut Wound, now: Tick, c: &crate::config::CombatCfg) {
+    if x.treated {
+        return;
+    }
+    let at = heal_at(x, c);
+    x.treated = true;
+    x.bleeding = false;
+    x.heal_at = if at > now { now + ((at - now) as f32 * c.treated_heal_mult.clamp(0.0, 1.0)) as Tick } else { at };
+}
+
+/// The worst untreated open wound on `id` of `[combat] treat_from` or
+/// worse: what sends it to a Clinic (`customers::hurt`).
+pub fn worst_untreated(world: &World, id: EntityId) -> Option<Severity> {
+    let w = world.comp::<Wounds>(id)?;
+    let from = world.config.combat.treat_from.min(2);
+    w.list.iter().filter(|x| !x.treated && x.severity.index() >= from).map(|x| x.severity).max()
+}
+
+/// The Treat goal's hurt term for `id`'s wounds (`treat_urgency`).
+pub fn urgency(world: &World, id: EntityId) -> f32 {
+    worst_untreated(world, id).map_or(0.0, |s| world.config.combat.treat_urgency[s.index()])
+}
+
+/// The price multiplier on a patch-up for `id`'s worst untreated wound.
+pub fn price_mult(world: &World, id: EntityId) -> f32 {
+    worst_untreated(world, id).map_or(1.0, |s| world.config.combat.treat_price_mult[s.index()])
+}
+
+/// A doctor sees to `id`'s wounds (a patch-up at a Clinic or the back
+/// room): every open wound treated. Returns what was seen to ("the left
+/// leg, the body"), `None` with nothing to treat.
+pub fn treat(world: &mut World, id: EntityId) -> Option<String> {
+    let now = world.tick;
+    let c = world.config.combat.clone();
+    let w = world.comp_mut::<Wounds>(id)?;
+    let mut seen: Vec<&'static str> = Vec::new();
+    for x in w.list.iter_mut().filter(|x| !x.treated) {
+        treat_one(x, now, &c);
+        if x.severity >= Severity::Wound && !seen.contains(&x.region.label()) {
+            seen.push(x.region.label());
+        }
+    }
+    (!seen.is_empty()).then(|| format!("the {}", seen.join(", the ")))
+}
+
+/// Why `id`'s wounds keep it from `job`'s shift: a Grave head wound from
+/// any post; an arm or leg Wound or worse from a manual one (`[combat]
+/// manual_posts`). `None`: fit to work.
+pub fn unfit(world: &World, id: EntityId, job: &Job) -> Option<&'static str> {
+    let w = world.comp::<Wounds>(id)?;
+    if w.list.is_empty() {
+        return None;
+    }
+    if w.open(Region::Head) == Some(Severity::Grave) {
+        return Some("a head wound");
+    }
+    let arm = w.list.iter().any(|x| x.region.is_arm() && x.severity >= Severity::Wound);
+    let leg = w.list.iter().any(|x| x.region.is_leg() && x.severity >= Severity::Wound);
+    if !(arm || leg) {
+        return None;
+    }
+    let role = role_key(job.role);
+    if !world.config.combat.manual_posts.contains(&role) {
+        return None;
+    }
+    Some(if leg { "a bad leg" } else { "a bad arm" })
+}
+
+fn slot_of(region: Region) -> Option<Slot> {
+    if region.is_arm() {
+        Some(Slot::Arms)
+    } else if region.is_leg() {
+        Some(Slot::Legs)
+    } else {
+        None
+    }
+}
+
+/// `id` loses the limb at `region` (`why` for the line): a `Lost` mark (the
+/// region reads as a Grave) and `[ages]`'s maim at its top level in the
+/// limb's slot, until a ripperdoc fits chrome there (`ages` prosthetics,
+/// [`fitted`]).
+pub fn lose_limb(world: &mut World, id: EntityId, region: Region, why: &str) {
+    if crate::systems::ages::is_protected(world, id) || !crate::systems::law::living(world, id) {
+        return;
+    }
+    // A chrome limb there takes it (C3: the hit wrecks the chrome).
+    if slot_of(region).is_some_and(|s| crate::systems::chrome::implant_in(world, id, s).is_some()) {
+        return;
+    }
+    if !world.has::<Wounds>(id) {
+        world.insert(id, Wounds::default());
+    }
+    let Some(w) = world.comp_mut::<Wounds>(id) else { return };
+    if w.has_mark(region, Mark::Lost) {
+        return;
+    }
+    w.marks.retain(|m| !(m.0 == region && m.1 == Mark::Maimed));
+    w.marks.push((region, Mark::Lost));
+    let text = format!("lost the {}: {why}", region.label());
+    crate::systems::ages::maim_to(world, id, slot_of(region), &text, 3);
+    if region.is_leg() {
+        crate::systems::assets::rekit(world, id);
+    }
+}
+
+/// A Grave on `region` healed badly: a `Maimed` mark (the region a Wound
+/// for good) and `[ages]`'s maim in its slot.
+fn maim_region(world: &mut World, id: EntityId, region: Region, treated: bool) {
+    if slot_of(region).is_some_and(|s| crate::systems::chrome::implant_in(world, id, s).is_some()) {
+        return;
+    }
+    let Some(w) = world.comp_mut::<Wounds>(id) else { return };
+    if w.has_mark(region, Mark::Maimed) || w.has_mark(region, Mark::Lost) {
+        return;
+    }
+    w.marks.push((region, Mark::Maimed));
+    let why = if treated {
+        format!("a {} wound that healed badly", region.label())
+    } else {
+        format!("a {} wound never seen to, healed badly", region.label())
+    };
+    crate::systems::ages::maim_to(world, id, slot_of(region), &why, 1);
+    if region.is_leg() {
+        crate::systems::assets::rekit(world, id);
+    }
+}
+
+/// A chrome implant went into `slot` (`chrome::installed_now`): a lost or
+/// maimed limb there is chrome now (its marks cleared, the line).
+pub fn fitted(world: &mut World, id: EntityId, slot: Slot) {
+    let regions: [Region; 2] = match slot {
+        Slot::Arms => [Region::ArmL, Region::ArmR],
+        Slot::Legs => [Region::LegL, Region::LegR],
+        _ => return,
+    };
+    let Some(w) = world.comp_mut::<Wounds>(id) else { return };
+    let mut was: Vec<(Region, Mark)> = Vec::new();
+    w.marks.retain(|m| {
+        let gone = regions.contains(&m.0) && m.1 != Mark::Scar;
+        if gone {
+            was.push(*m);
+        }
+        !gone
+    });
+    if was.is_empty() {
+        return;
+    }
+    if w.list.is_empty() && w.marks.is_empty() && w.blood >= 1.0 {
+        world.remove::<Wounds>(id);
+        world.hurt.remove(&id);
+    }
+    crate::systems::assets::rekit(world, id);
+    let parts: Vec<String> = was.iter().map(|(r, m)| format!("{} {}", m.label(), r.label())).collect();
+    let text = format!("{}'s {} replaced with chrome", world.name_of(id), parts.join(" and "));
+    world.push_event(EventKind::Fight, &[id], text);
+}
+
+/// Off screen (`lod::stat_hit`, docs/COMBAT.md § 2): a beating's wounds,
+/// `stat_hits` hits from `stat_kind`'s damage table on `region_weights`,
+/// and (`grave`, a killing survived) one Grave from `stat_grave_kind`'s,
+/// which may take a limb (`sever_p`). Not bleeding (the off-screen fight's
+/// blood is the split's) and not seen to: a body promoted later limps, and
+/// the walk-in care ([`worst_untreated`]) can see to it.
+pub fn stat_wounds(world: &mut World, id: EntityId, grave: bool) {
+    if crate::systems::ages::is_protected(world, id) || !crate::systems::law::living(world, id) {
+        return;
+    }
+    let c = world.config.combat.clone();
+    let row = |k: &str| world.config.weapon_kinds.iter().find(|r| r.id == k).cloned().unwrap_or_default();
+    let (beat, gravek) = (row(&c.stat_kind), row(&c.stat_grave_kind));
+    let salt = world.tick;
+    let [lo, hi] = c.stat_hits;
+    let span = hi.saturating_sub(lo) + 1;
+    let n = lo + ((hash(world, PURPOSE_STAT, key(id), salt) * span as f32) as u32).min(span - 1);
+    for k in 0..n {
+        let r = Region::ALL
+            [pick_weighted(hash(world, PURPOSE_STAT, key(id), salt ^ (u64::from(k) + 1) << 40), &c.region_weights)];
+        let sev = [Severity::Graze, Severity::Wound, Severity::Grave]
+            [pick_weighted(hash(world, PURPOSE_STAT, key(id), salt ^ (u64::from(k) + 1) << 48), &beat.damage)];
+        add_wound(world, id, r, sev, None, false, true);
+    }
+    if grave {
+        let r = Region::ALL[pick_weighted(hash(world, PURPOSE_STAT, key(id), salt ^ 0xA1), &c.region_weights)];
+        add_wound(world, id, r, Severity::Grave, None, false, true);
+        if (r.is_arm() || r.is_leg()) && !gravek.blunt && hash(world, PURPOSE_STAT, key(id), salt ^ 0xA2) < c.sever_p {
+            lose_limb(world, id, r, &format!("cut off with a {}, off the street", gravek.id));
+        }
+    }
+}
+
+/// First aid: a friend, kin or a gang-mate of `id` (an adult on its feet,
+/// free, not the one who did it) beside the body: in its building, or
+/// within `aid_tiles` on the street.
+fn aid_by(world: &World, id: EntityId, w: &Wounds) -> Option<EntityId> {
+    use crate::components::RelKind;
+    let at = world.comp::<Position>(id)?;
+    let reach = world.config.combat.aid_tiles;
+    let by: Vec<EntityId> = w.list.iter().filter_map(|x| x.by).collect();
+    let ok = |o: EntityId| {
+        o != id
+            && !by.contains(&o)
+            && crate::systems::law::living(world, o)
+            && crate::systems::demography::is_adult(world, o)
+            && !crate::systems::wounded::is_down(world, o)
+            && !world.has::<crate::components::Sentence>(o)
+            && world.comp::<Position>(o).is_some_and(|p| match (p.building, at.building) {
+                (Some(x), Some(y)) => x == y,
+                (None, None) => crate::systems::law::chebyshev(p.tile, at.tile) <= reach,
+                _ => false,
+            })
+    };
+    let tied = world.neighbours(id).filter(|&o| {
+        world
+            .edge(id, o)
+            .is_some_and(|e| matches!(e.kind, RelKind::Spouse | RelKind::Family | RelKind::Parent | RelKind::Friend))
+    });
+    let mut cands: Vec<EntityId> = tied.collect();
+    if let Some(g) = world.gang_of(id).and_then(|g| world.comp::<Gang>(g)) {
+        cands.extend(g.members.iter().copied());
+    }
+    cands.sort_unstable();
+    cands.dedup();
+    cands.into_iter().find(|&o| ok(o))
+}
+
+/// What a wound that healed leaves (decided in the pass, applied after).
+enum Left {
+    Scar(Region),
+    Maim(Region, bool),
+    Lose(Region),
+}
+
+/// Hourly (and seeding and training at midnight): every hurt body's
+/// bleeding drains its blood (first aid stops a Wound's and slows a
+/// Grave's; a Wound may stop on a roll; a Grave bleeds until a Clinic
+/// treats it); at no blood it goes down; a body not bleeding gets blood
+/// back; a wound heals at its `heal_at` (a scar, a maim, a lost limb by the
+/// rolls); a manual worker with a bad arm or leg is turned away at his
+/// shift's first hour; a wound not seen to says why.
 pub fn hourly(world: &mut World) {
     if crate::systems::midnight::due(world, crate::systems::midnight::Mid::Tail) {
         seed_all(world);
@@ -866,6 +1239,7 @@ pub fn hourly(world: &mut World) {
         return;
     }
     let now = world.tick;
+    let tod = crate::time::tick_of_day(now);
     let c = world.config.combat.clone();
     let ids: Vec<EntityId> = world.hurt.iter().copied().collect();
     for id in ids {
@@ -878,32 +1252,62 @@ pub fn hourly(world: &mut World) {
         let down = world.wounded.get(&id).map(|w| w.stable);
         let Some(mut w) = world.comp::<Wounds>(id).cloned() else { continue };
         let mut lines: Vec<String> = Vec::new();
+        let name = world.name_of(id);
+        // Held in the cells (the downed state lets go of the sentenced): the
+        // jail dresses its wounds, it does not lie down there.
+        let held = world.has::<crate::components::Sentence>(id);
+        if held && w.list.iter().any(|x| !x.treated) {
+            for x in w.list.iter_mut() {
+                treat_one(x, now, &c);
+            }
+            w.blood = w.blood.max(0.3);
+            lines.push(format!("{name}'s wounds were dressed in the cells"));
+        }
         match down {
-            // Stabilised at a Clinic: the bleeding stops (treated).
+            // Stabilised at a Clinic: every wound seen to.
             Some(true) => {
-                for x in w.list.iter_mut().filter(|x| x.bleeding) {
-                    x.bleeding = false;
-                    x.treated = true;
+                for x in w.list.iter_mut() {
+                    treat_one(x, now, &c);
                 }
                 w.blood = w.blood.max(0.3);
             }
             // Down and bleeding: the M16b timer has it.
             Some(false) => {}
             None => {
+                // First aid from a friend, kin or a gang-mate beside him.
+                if w.list.iter().any(|x| x.bleeding && !x.aided) {
+                    if let Some(h) = aid_by(world, id, &w) {
+                        let mut parts: Vec<&'static str> = Vec::new();
+                        let mut grave = false;
+                        for x in w.list.iter_mut().filter(|x| x.bleeding && !x.aided) {
+                            x.aided = true;
+                            if x.severity < Severity::Grave {
+                                x.bleeding = false;
+                            } else {
+                                grave = true;
+                            }
+                            parts.push(x.region.label());
+                        }
+                        let tail =
+                            if grave { ": the bleeding slowed, it needs a Clinic" } else { ": the bleeding stopped" };
+                        lines.push(format!("{} bound {name}'s {}{tail}", world.name_of(h), parts.join(" and ")));
+                    }
+                }
                 for (k, x) in w.list.iter_mut().enumerate() {
                     if x.bleeding && x.severity < Severity::Grave {
                         let r = hash(world, PURPOSE_BLEED, key(id), now ^ (k as u64) << 48);
                         if x.severity == Severity::Graze || r < c.stop_p_wound {
                             x.bleeding = false;
-                            lines.push(format!(
-                                "the bleeding from {}'s {} stopped",
-                                world.name_of(id),
-                                x.region.label()
-                            ));
+                            lines.push(format!("the bleeding from {name}'s {} stopped", x.region.label()));
                         }
                     }
                 }
-                let drain: f32 = w.list.iter().filter(|x| x.bleeding).map(|x| c.bleed_hour[x.severity.index()]).sum();
+                let drain: f32 = w
+                    .list
+                    .iter()
+                    .filter(|x| x.bleeding)
+                    .map(|x| c.bleed_hour[x.severity.index()] * if x.aided { c.aid_grave_mult } else { 1.0 })
+                    .sum();
                 if drain > 0.0 {
                     w.blood = (w.blood - drain).max(0.0);
                 } else {
@@ -911,27 +1315,61 @@ pub fn hourly(world: &mut World) {
                 }
             }
         }
-        // Healing (the stub): a wound not bleeding is gone after its days.
+        // Healing: a wound not bleeding is gone at its `heal_at`; a Wound or
+        // worse may leave a scar, a Grave a maim or (a limb never seen to)
+        // the limb.
         let before = w.list.len();
-        let mut healed: Vec<String> = Vec::new();
+        let lost: Vec<Region> = w.marks.iter().filter(|m| m.1 == Mark::Lost).map(|m| m.0).collect();
+        let mut left: Vec<Left> = Vec::new();
         w.list.retain(|x| {
-            let gone = !x.bleeding && now >= x.since + Tick::from(c.heal_days[x.severity.index()]) * TICKS_PER_DAY;
-            if gone && x.severity >= Severity::Wound {
-                healed.push(x.region.label().to_string());
+            let gone = !x.bleeding && now >= heal_at(x, &c);
+            if !gone || x.severity < Severity::Wound {
+                return !gone;
             }
-            !gone
+            let roll = |n: u64| hash(world, PURPOSE_HEAL, key(id), x.since ^ (n << 56) ^ (x.region as u64) << 48);
+            let limb = x.region.is_arm() || x.region.is_leg();
+            let mut how = "has healed";
+            if x.severity == Severity::Grave && !lost.contains(&x.region) {
+                if limb && !x.treated && roll(1) < c.rot_p {
+                    left.push(Left::Lose(x.region));
+                    how = "festered";
+                } else if roll(2) < if x.treated { c.maim_p_treated } else { c.maim_p } {
+                    left.push(Left::Maim(x.region, x.treated));
+                    how = "has healed, badly";
+                }
+            }
+            if roll(3) < c.scar_p[x.severity.index()] {
+                left.push(Left::Scar(x.region));
+            }
+            lines.push(format!("{name}'s {} {how}", x.region.label()));
+            false
         });
-        for r in healed {
-            lines.push(format!("{}'s {r} has healed", world.name_of(id)));
+        for l in &left {
+            if let Left::Scar(r) = *l {
+                if !w.has_mark(r, Mark::Scar) {
+                    w.marks.push((r, Mark::Scar));
+                }
+            }
         }
         let blood = w.blood;
         let cause = w.list.iter().filter(|x| x.bleeding).max_by_key(|x| x.severity).map(|x| (x.by, x.murder));
         let legs_changed = before != w.list.len();
         if w.list.is_empty() && w.blood >= 1.0 {
-            world.remove::<Wounds>(id);
             world.hurt.remove(&id);
+            if w.marks.is_empty() {
+                world.remove::<Wounds>(id);
+            } else if let Some(x) = world.comp_mut::<Wounds>(id) {
+                *x = w;
+            }
         } else if let Some(x) = world.comp_mut::<Wounds>(id) {
             *x = w;
+        }
+        for l in left {
+            match l {
+                Left::Maim(r, t) => maim_region(world, id, r, t),
+                Left::Lose(r) => lose_limb(world, id, r, "a wound never seen to festered"),
+                Left::Scar(_) => {}
+            }
         }
         if legs_changed {
             crate::systems::assets::rekit(world, id);
@@ -945,6 +1383,54 @@ pub fn hourly(world: &mut World) {
                 world.kill_by(id, crate::components::DeathCause::Violence, by);
                 world.push_event(EventKind::BledOut, &[id], format!("{} bled out from a wound", world.name_of(id)));
             }
+            continue;
         }
+        if down.is_some() {
+            continue;
+        }
+        shift_lost(world, id, tod);
+        untreated_note(world, id, now, &c);
     }
+}
+
+/// At a shift's first hour on a workday: a worker unfit by his wounds is
+/// turned away, the shift and its pay lost (the Work goal refuses it,
+/// `routine::work_refused`; off screen the wage gate).
+fn shift_lost(world: &mut World, id: EntityId, tod: u16) {
+    let Some(job) = world.comp::<Job>(id).cloned() else { return };
+    if !job.first_hour(tod) || world.has::<crate::components::Sentence>(id) {
+        return;
+    }
+    let key = job.shift_key_at(world.tick);
+    if !crate::exec::routine::workday_of(world, id, &job, key) {
+        return;
+    }
+    let Some(why) = unfit(world, id, &job) else { return };
+    let at = job.employer.map_or_else(|| "work".to_string(), |e| world.name_of(e));
+    let text = format!(
+        "{} was turned away from the shift at {at} with {why}: the day's {}c lost",
+        world.name_of(id),
+        job.wage_per_day
+    );
+    world.push_event(EventKind::Fight, &[id], text);
+}
+
+/// `untreated_note_hours` after a wound that is still not seen to: the
+/// body says why (it cannot pay, or no doctor is in reach).
+fn untreated_note(world: &mut World, id: EntityId, now: Tick, c: &crate::config::CombatCfg) {
+    let due = Tick::from(c.untreated_note_hours) * TICKS_PER_HOUR;
+    let fresh = world.comp::<Wounds>(id).is_some_and(|w| {
+        w.list.iter().any(|x| {
+            !x.treated
+                && x.severity.index() >= c.treat_from
+                && now >= x.since + due
+                && now < x.since + due + TICKS_PER_HOUR
+        })
+    });
+    if !fresh {
+        return;
+    }
+    let Some(why) = crate::systems::customers::untreated_why(world, id) else { return };
+    let text = format!("{} lives with the wound: {why}", world.name_of(id));
+    world.push_event(EventKind::Fight, &[id], text);
 }

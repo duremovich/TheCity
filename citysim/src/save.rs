@@ -545,7 +545,9 @@ use crate::world::World;
 /// 129 (the combat model C1): `Skills.fighting` renamed `melee`, `shooting` and `evasion` added; the `Wounds`
 /// store and `World.hurt`; `Asset.wkind`, `Kit.weapon_kind`; `EventKind::Fight`; `[combat]` and `[[weapon_kinds]]`
 /// (`[weapons]` lost `weapon_w` and `kill_w`). A 128 save need not load.
-pub const SAVE_VERSION: u16 = 129;
+/// 130 (the combat model C2): `Wound.heal_at` and `aided`, `Wounds.marks` (`Mark`: scars, maims, lost limbs);
+/// `[combat]`'s age, training and wounds-that-last keys (serde defaults).
+pub const SAVE_VERSION: u16 = 130;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

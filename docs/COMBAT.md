@@ -271,6 +271,53 @@ These come later: ranged (§ 7, with addendum 24) and the blast (§ 8, with netr
   `Skills` (competence, the gun gate, the think's context).
 - `[weapons] weapon_w` and `kill_w` are gone; `[crime] fight_death_p` is the robot fight's only.
 
+**C2 as built (2026-11-03; deviations, `OPEN-179`).**
+- **Healing.** `Wound.heal_at` (`since` + `heal_days`); seen to (the patch-up, the back room, the M16b Stabilise), what
+  is left x `treated_heal_mult`. At the heal a Wound or worse may leave a scar (`scar_p`), a Grave a maim
+  (`maim_p`, `maim_p_treated` seen to: the region reads as a Wound for good) and, a limb never seen to, the limb
+  (`rot_p`). Scars, maims and lost limbs are `Wounds.marks`; a body holding only marks keeps the component out of
+  `World::hurt`. A maim or lost limb also goes through `[ages]`'s maim (a level, the slot: work output, the beggar's
+  odds), and `ages::on_rise`'s random maim is skipped for a body with `Wounds`.
+- **The treatment goal is the existing Treat goal's patch-up** (`customers::care_choice`): `customers::hurt` is now an
+  untreated wound of `treat_from` or worse (it replaces the lost fight's `Lost` memory within `hurt_hours`; a robot's
+  loser, who takes no wounds, no longer walks in). The price is `[customers] patch_price` (`back_price`) x
+  `treat_price_mult` by the worst wound, paid through `care::settle` (`Flow::Treatment`, the doctor's cut, the slate,
+  the pawn); the goal's hurt term is at least `treat_urgency`. One who cannot settle it lives with the wound and says
+  so `untreated_note_hours` later. The off-screen walk-in (`customers::stat_care`) sees to a Statistical body's
+  wounds the same way.
+- **First aid**: a friend, kin or a gang-mate (an adult on its feet, not the one who did it) in the building or within
+  `aid_tiles` stops a bleeding Wound and slows a Grave (`aid_grave_mult`). **No street medic exists**: none added.
+- **Lost shifts**: `combat::unfit` in `routine::work_refused` and the Statistical wage gate; `manual_posts` (Role
+  names or `[[trades]]` ids; Guard is not one: a guard on the books keeps his post). The line comes at the shift's
+  first hour.
+- **Lost limbs**: a Grave limb hit from an edged or ranged kind takes the limb on `sever_p` (and the rot above).
+  **There is no `[[chrome]]` table**: the chrome limb is the existing `Implant(Arms)` / `Implant(Legs)`, bought by
+  `[ages]`'s midnight prosthetics at the nearest Clinic (Ripperdoc) when the coins allow (a T1 and the install fee,
+  `Flow::Asset`); `chrome::installed_now` calls `combat::fitted`, which clears the slot's lost or maimed marks.
+- **Off screen**: `lod::stat_hit`'s beating writes `stat_hits` hits from `stat_kind`'s damage table, and the
+  `stat_kill_p` split's survivor one Grave from `stat_grave_kind`'s (which may sever). Not bleeding (the split
+  decided the blood), not seen to. `fviolence` strikes through `stat_hit`, so it writes them too.
+- **C1's wrong-reads.** (a) Age: past `age_from`, attack and evasion x (1 - `age_fight` a year), morale -
+  `age_morale` a year, a hit's grave weight x (1 + `age_grave` a year). (b) A post's training at midnight
+  (`combat::seed_all`): a gang member or a `shooting_posts` role is brought up to its shooting seed; `melee_posts`
+  and `evasion_posts` floors. (c) The pit's bout is `combat::resolve_now` with `Purpose::Bout` (both subdue, bare
+  hands, no fight memories, edges or weapons' tail; a loser knocked out or with a Wound was beaten; its dice keyed on
+  the pair and the tick, so the world stream stays the city's); a Fighter unfit by his wounds is off the card.
+  `[leisure] bout_beating` and `bout_hurt_margin` are unread. (d) Guards: the training floors plus `morale_posts`
+  (a trained post's nerve) are the feature; see the numbers.
+- **A chrome limb is not lost or maimed** (the hit there wrecks the chrome in C3); C2 skips the sever and the maim.
+- **The cells dress a held body's wounds** (`combat::hourly`): the M16b downed state lets go of the sentenced, so a
+  prisoner at no blood "went down" every hour (C1's loop too: one body 153 times in a run before the fix).
+- **The numbers** (20k island, seed 42, 30 days, before -> after, one run each; printed, not tuned): Murders 117 ->
+  127, fight deaths 66 -> 62, bled out 20 -> 27, went down 95 -> 49, fights 6493 -> 5175; patch-ups 2917 (a lost
+  fight's) -> 2902 (each a wound seen to); shifts lost to wounds 0 -> 1751 (475 workers); limbs lost 0 -> 8, maims
+  0 -> 7, chrome limbs fitted 0 -> 0 (1 and 1 in two earlier runs of the phase); first aid 0 -> 18; arrests 6169 ->
+  5971, arrests fought off 955 -> 318, backup fights 328 -> 153; a 65+ side loses 53 % -> 66 % and takes a Grave
+  4.7 % -> 8.0 % (under 50: 6.3 % -> 5.1 %). Runs vary a lot on one seed (bled out 39, 10 and 27 across the phase's
+  builds).
+- **Not done:** no street medic; robot fights still deal no wounds; a lost limb leaves the post open to a manual worker
+  once the stump heals (`[ages]` maim's output cut, no refusal).
+
 ## Decisions (Dylan, 2026-11-02)
 
 | # | question | decided |

@@ -14696,6 +14696,63 @@ pub struct CombatCfg {
     pub evasion_peak: f32,
     pub evasion_decline: f32,
     pub evasion_floor: f32,
+    /// C1's wrong-read (a): the fight's age term. Past `age_from` years the
+    /// attack and evasion fall `age_fight` a year (to `age_fight_floor` x),
+    /// morale `age_morale` a year, and a hit's grave weight on the old body
+    /// rises `age_grave` a year.
+    pub age_from: f32,
+    pub age_fight: f32,
+    pub age_fight_floor: f32,
+    pub age_morale: f32,
+    pub age_grave: f32,
+    /// C1's wrong-read (b, d): a post's training. At midnight a body on a
+    /// post (a `shooting_posts` role, a gang member) is brought up to its
+    /// shooting seed (the role's base x its keyed draw); these posts (Role
+    /// names) to these floors of melee and evasion.
+    pub melee_posts: std::collections::BTreeMap<String, f32>,
+    pub evasion_posts: std::collections::BTreeMap<String, f32>,
+    /// A trained post's nerve: these roles' (Role names) morale + this in a
+    /// fight (a guard making an arrest holds where a brawler breaks).
+    pub morale_posts: std::collections::BTreeMap<String, f32>,
+    /// C2 (docs/COMBAT.md § 2, wounds that last): a treated wound heals in
+    /// this share of the days it had left.
+    pub treated_heal_mult: f32,
+    /// The Treat goal: an untreated wound of `treat_from` (a severity index)
+    /// or worse sends the body to a Clinic (or the back room); the price is
+    /// `[customers] patch_price` (`back_price`) x `treat_price_mult` by the
+    /// worst; the goal's hurt term is at least `treat_urgency` by the worst.
+    pub treat_from: usize,
+    pub treat_price_mult: [f32; 3],
+    pub treat_urgency: [f32; 3],
+    /// The hours after a wound a body that could not get it seen to says so
+    /// (the price, or no doctor in reach).
+    pub untreated_note_hours: u32,
+    /// First aid: a friend, kin or a gang-mate (an adult on its feet) within
+    /// `aid_tiles` (or in the same building) stops a bleeding Wound at once;
+    /// an aided Grave bleeds at `aid_grave_mult` (it needs a Clinic).
+    pub aid_tiles: u32,
+    pub aid_grave_mult: f32,
+    /// Manual posts (Role names or `[[trades]]` ids): an arm or leg Wound or
+    /// worse turns the worker away, the shift and its pay lost. A Grave head
+    /// wound turns any worker away.
+    pub manual_posts: Vec<String>,
+    /// At the heal: a scar on `scar_p` by severity; a Grave left untreated
+    /// heals badly (a maim on the region, a Wound for good) on `maim_p`, a
+    /// treated one on `maim_p_treated`; an untreated Grave limb is lost
+    /// instead on `rot_p`.
+    pub scar_p: [f32; 3],
+    pub maim_p: f32,
+    pub maim_p_treated: f32,
+    pub rot_p: f32,
+    /// A Grave limb hit from an edged or ranged kind takes the limb on this.
+    pub sever_p: f32,
+    /// Off screen (`lod::stat_hit`): a beating writes `stat_hits` hits (a
+    /// keyed count in the range) from the `stat_kind` row's damage table on
+    /// `region_weights`; a killing survived (`wounded::stat_kill_p`'s split)
+    /// adds one Grave from `stat_grave_kind`.
+    pub stat_hits: [u32; 2],
+    pub stat_kind: String,
+    pub stat_grave_kind: String,
 }
 
 impl Default for CombatCfg {
@@ -14750,6 +14807,30 @@ impl Default for CombatCfg {
             evasion_peak: 30.0,
             evasion_decline: 0.012,
             evasion_floor: 0.4,
+            age_from: 45.0,
+            age_fight: 0.015,
+            age_fight_floor: 0.4,
+            age_morale: 0.006,
+            age_grave: 0.03,
+            melee_posts: std::collections::BTreeMap::from([("Guard".to_string(), 0.35)]),
+            evasion_posts: std::collections::BTreeMap::from([("Guard".to_string(), 0.3)]),
+            morale_posts: std::collections::BTreeMap::from([("Guard".to_string(), 0.15)]),
+            treated_heal_mult: 0.5,
+            treat_from: 1,
+            treat_price_mult: [1.0, 2.0, 6.0],
+            treat_urgency: [0.2, 0.6, 1.0],
+            untreated_note_hours: 12,
+            aid_tiles: 2,
+            aid_grave_mult: 0.5,
+            manual_posts: Vec::new(),
+            scar_p: [0.0, 0.3, 1.0],
+            maim_p: 0.5,
+            maim_p_treated: 0.05,
+            rot_p: 0.15,
+            sever_p: 0.15,
+            stat_hits: [1, 3],
+            stat_kind: "unarmed".to_string(),
+            stat_grave_kind: "knife".to_string(),
         }
     }
 }

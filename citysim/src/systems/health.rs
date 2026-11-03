@@ -419,10 +419,9 @@ impl Effects {
 /// The debuffs on `id`: the sickness meters' (§ 2) and, C1, its wounds'.
 pub fn effects(world: &World, id: EntityId) -> Effects {
     let mut e = sick_effects(world, id);
-    if !world.hurt.is_empty() {
-        if let Some(w) = world.comp::<crate::components::Wounds>(id) {
-            crate::systems::combat::apply_effects(world, w, &mut e);
-        }
+    // C2: a body keeps its maims and lost limbs out of `World::hurt`.
+    if let Some(w) = world.comp::<crate::components::Wounds>(id) {
+        crate::systems::combat::apply_effects(world, w, &mut e);
     }
     e
 }

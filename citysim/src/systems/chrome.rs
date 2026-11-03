@@ -180,6 +180,10 @@ fn installed_now(world: &mut World, agent: EntityId, clinic: Option<EntityId>, i
     }
     // M15 W31: a Purist member now above tolerance is cast out.
     crate::systems::creeds::on_install(world, agent);
+    // The combat model C2: a lost or maimed limb in the slot is chrome now.
+    if let Some(AssetKind::Implant(slot)) = world.comp::<Asset>(implant).map(|x| x.kind) {
+        crate::systems::combat::fitted(world, agent, slot);
+    }
 }
 
 /// D34: buy `pick` (an implant, new or used) at `clinic` and install it in
