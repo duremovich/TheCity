@@ -661,6 +661,11 @@ pub fn resolve(world: &mut World, actor: EntityId) -> Option<Outcome> {
         crate::systems::crew::late_to_raid(world, actor, gid);
         return None;
     }
+    // C3a: the brawl is being fought (a live engagement): a marcher who
+    // comes to the door now is not in it.
+    if raid_fighting(world, gid) {
+        return None;
+    }
     // Shadow V4 bug 9: a crew under `raid_min_members` at the door once the
     // wait is over calls the raid off (lone raids, 1 against 6, after an
     // 8-h march).
@@ -899,52 +904,64 @@ pub fn fight_out_until(
     // first; `law::resolve_fight_mods` counts what slips past).
     raiders.retain(|&x| !crate::systems::ages::is_protected(world, x));
     defenders.retain(|&x| !crate::systems::ages::is_protected(world, x));
-    // A brawl needs two sides: a door nobody defends has no crossfire.
+    t.crossfire = open_brawl(world, raiders, defenders, door, place, riot);
+    // C3a: the pairings are an engagement's duels (`Tail::Pairs`, each one's
+    // tail `pair_end`), fought out here in one call.
+    let mods = law::FightMods { kill_mult, why: crate::systems::combat::Purpose::Raid, ..Default::default() };
+    let tail = crate::systems::combat::Tail::Pairs { door, place: place.to_string() };
+    let e = crate::systems::combat::run_now(world, [raiders.clone(), defenders.clone()], mods, tail, max_losses);
+    tally_of(&mut t, &e);
+    *raiders = e.sides[0].clone();
+    *defenders = e.sides[1].clone();
+    t
+}
+
+/// The brawl's counts from its engagement (the raiders side 0).
+fn tally_of(t: &mut Tally, e: &crate::systems::combat::Engagement) {
+    t.raider_losses = e.losses[0];
+    t.deaths = e.deaths;
+    t.defenders_beaten = e.beaten[1].len();
+    t.losers = e.beaten[0].clone();
+}
+
+/// C3a, a pairing's tail (`Tail::Pairs`, a raid's): the raider is the
+/// aggressor: Murder when the defender died, Assault otherwise; a raider who
+/// died is charged with nothing. Named before the fight (a beaten robot is
+/// wrecked, despawned, in it).
+pub(crate) fn pair_end(world: &mut World, door: TilePos, place: &str, c: &crate::systems::combat::Clash) {
+    let (r, d) = (c.a, c.b);
+    let [rn, dn] = &c.names;
+    let murder = c.died && c.loser == d;
+    let crime = if murder { Crime::Murder } else { Crime::Assault };
+    let kind = if murder { EventKind::Murder } else { EventKind::Assault };
+    let fell = if c.died && c.loser == r { " and died" } else { "" };
+    let text = format!("{rn} attacked {dn} at {place}{fell}");
+    world.push_event(kind, &[r, d], text);
+    if law::living(world, r) {
+        law::raise_crime_on(world, r, (!murder).then_some(d), Some(d), crime, door);
+    }
+}
+
+/// A brawl's opening, before the pairings: the crossfire (a door nobody
+/// defends has none) and, M12 D17, the street wrecked at the door (a riot's
+/// mess is laid by `riot::finish`, 64 r3, whether or not it fought).
+fn open_brawl(
+    world: &mut World,
+    raiders: &[EntityId],
+    defenders: &[EntityId],
+    door: TilePos,
+    place: &str,
+    riot: Option<DistrictId>,
+) -> usize {
+    let mut hits = 0;
     if let (Some(&attacker), false) = (raiders.first(), defenders.is_empty()) {
         let parties: Vec<EntityId> = raiders.iter().chain(defenders.iter()).copied().collect();
-        t.crossfire = crossfire(world, door, &parties, attacker, riot, place);
+        hits = crossfire(world, door, &parties, attacker, riot, place);
     }
-    // M12 D17: a brawl at a door (a raid, a breach) wrecks the street there;
-    // a riot's mess is laid by `riot::finish` (64 r3) whether or not it fought.
     if riot.is_none() && !defenders.is_empty() && !raiders.is_empty() {
         crate::systems::litter::deposit(world, door, 32, 2);
     }
-    while let (Some(&r), Some(&d)) = (raiders.first(), defenders.first()) {
-        if t.raider_losses >= max_losses {
-            break;
-        }
-        // Named before the fight: a beaten robot is wrecked (despawned) in it.
-        let (rn, dn) = (world.name_of(r), world.name_of(d));
-        let mods = law::FightMods { kill_mult, why: crate::systems::combat::Purpose::Raid, ..Default::default() };
-        let (_, loser, died) = law::resolve_fight_mods(world, r, d, mods);
-        if died {
-            t.deaths += 1;
-        }
-        // The raider is the aggressor: Murder when the defender died, Assault
-        // otherwise; a raider who died is charged with nothing.
-        let murder = died && loser == d;
-        let crime = if murder { Crime::Murder } else { Crime::Assault };
-        let kind = if murder { EventKind::Murder } else { EventKind::Assault };
-        let fell = if died && loser == r { " and died" } else { "" };
-        let text = format!("{rn} attacked {dn} at {place}{fell}");
-        world.push_event(kind, &[r, d], text);
-        if law::living(world, r) {
-            law::raise_crime_on(world, r, (!murder).then_some(d), Some(d), crime, door);
-        }
-        if loser == d {
-            defenders.remove(0);
-            if !died {
-                t.defenders_beaten += 1;
-            }
-        } else {
-            raiders.remove(0);
-            t.raider_losses += 1;
-            if !died {
-                t.losers.push(r);
-            }
-        }
-    }
-    t
+    hits
 }
 
 /// D35: once per brawl, before the pairings. Every body within
@@ -1295,8 +1312,72 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
     let (raiders0, defenders0) = (raiders.clone(), defenders.clone());
     let chest0 = world.comp::<Gang>(rival).map_or(0, |g| g.treasury);
     let food0 = world.comp::<Building>(rival_hideout).map_or(0, |b| b.stock_food);
-    let tally = fight_out(world, &mut raiders, &mut defenders, door, &place, 1.0, None);
-    let (raider_losses, deaths) = (tally.raider_losses, tally.deaths);
+    // C3a: the brawl is an engagement, live when every party is Full (the
+    // pairings over ticks, each one's tail `pair_end`); its end is
+    // `raid_end`, the raid's tail.
+    raiders.retain(|&x| !crate::systems::ages::is_protected(world, x));
+    defenders.retain(|&x| !crate::systems::ages::is_protected(world, x));
+    open_brawl(world, &raiders, &defenders, door, &place, None);
+    let end = RaidEnd {
+        gid,
+        rival,
+        rival_hideout,
+        door,
+        place,
+        at,
+        gname,
+        rival_name,
+        raiders0,
+        defenders0,
+        chest0,
+        food0,
+        seat,
+        actor,
+        n_raiders,
+        n_defenders,
+    };
+    let mods = law::FightMods { why: crate::systems::combat::Purpose::Raid, ..Default::default() };
+    let tail = crate::systems::combat::Tail::Raid(Box::new(end));
+    world.combat.last_raid = None;
+    match crate::systems::combat::engage(world, [raiders, defenders], mods, tail, true, usize::MAX) {
+        crate::systems::combat::Begun::Live => None,
+        crate::systems::combat::Begun::Over(_) => world.combat.last_raid.take(),
+    }
+}
+
+/// C3a: a gang raid's brawl in progress, for its end (`raid_end`).
+#[derive(Clone, Debug)]
+pub struct RaidEnd {
+    pub gid: EntityId,
+    pub rival: EntityId,
+    pub rival_hideout: EntityId,
+    pub door: TilePos,
+    pub place: String,
+    pub at: String,
+    pub gname: String,
+    pub rival_name: String,
+    pub raiders0: Vec<EntityId>,
+    pub defenders0: Vec<EntityId>,
+    pub chest0: i64,
+    pub food0: u32,
+    pub seat: bool,
+    pub actor: EntityId,
+    pub n_raiders: usize,
+    pub n_defenders: usize,
+}
+
+/// Is a raid by `gid` being fought (its brawl a live engagement)?
+fn raid_fighting(world: &World, gid: EntityId) -> bool {
+    world.combat.engagements.values().any(|e| matches!(&e.tail, crate::systems::combat::Tail::Raid(r) if r.gid == gid))
+}
+
+/// C3a, the gang raid's end (its brawl's tail): the outcome, the settle,
+/// the crew's tally, the Raid line.
+pub(crate) fn raid_end(world: &mut World, x: &RaidEnd, e: &crate::systems::combat::Engagement) {
+    let RaidEnd { gid, rival, rival_hideout, ref place, ref at, ref gname, ref rival_name, seat, actor, .. } = *x;
+    let (n_raiders, n_defenders, chest0, food0) = (x.n_raiders, x.n_defenders, x.chest0, x.food0);
+    let (raiders, defenders) = (&e.sides[0], &e.sides[1]);
+    let (raider_losses, deaths) = (e.losses[0], e.deaths);
     let outcome = if n_defenders == 0 || (defenders.is_empty() && raider_losses == 0) {
         Outcome::Sacked
     } else if defenders.is_empty() {
@@ -1320,11 +1401,11 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
         crate::systems::crew::RaidLeft {
             gang: gid,
             rival: Some(rival),
-            place: &place,
-            raiders: &raiders0,
-            defenders: &defenders0,
-            raiders_standing: &raiders,
-            defenders_standing: &defenders,
+            place,
+            raiders: &x.raiders0,
+            defenders: &x.defenders0,
+            raiders_standing: raiders,
+            defenders_standing: defenders,
             won: outcome != Outcome::Lost,
             coins: coins.max(0),
             food,
@@ -1338,7 +1419,12 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
             "{gname} raided {rival_name}: {outcome:?} ({n_raiders} raiders vs {n_defenders} defenders, {deaths} dead; at {at})"
         ),
     );
-    Some(outcome)
+    // Lives at work phase 6 (§ 4.5): the head's ladder counts a live brawl
+    // here (`resolve` credits the outcome `brawl` returns at once).
+    if e.live {
+        crate::systems::careers::credit_raid(world, actor, matches!(outcome, Outcome::Won | Outcome::Sacked));
+    }
+    world.combat.last_raid = Some(outcome);
 }
 
 /// The private guards on a building's side: guards employed by a Security

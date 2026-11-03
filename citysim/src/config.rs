@@ -14613,6 +14613,14 @@ pub struct CombatCfg {
     /// The most beats a fight runs (about 10 s each); at the end the side
     /// with the lower morale breaks.
     pub max_beats: u8,
+    /// C3a: a live engagement (every party Full) runs this many beats a tick
+    /// (`combat::step`, after exec).
+    pub beats_per_tick: u8,
+    /// C3a: a live duel's two within this many tiles (or in one building) at
+    /// its start, one moved out of it, has left the fight (it fled).
+    pub reach_tiles: u32,
+    /// C3a: the ring log's length, in beats (the view reads it in C4).
+    pub log_beats: usize,
     /// `p_hit = hit_base + attack_w x skill + accuracy x quality + stance -
     /// evade_w x evasion`, clamped to `[hit_min, hit_max]`.
     pub hit_base: f32,
@@ -14759,6 +14767,9 @@ impl Default for CombatCfg {
     fn default() -> Self {
         CombatCfg {
             max_beats: 10,
+            beats_per_tick: 6,
+            reach_tiles: 4,
+            log_beats: 24,
             hit_base: 0.4,
             attack_w: 0.6,
             evade_w: 0.5,

@@ -519,21 +519,42 @@ fn brawl(
     }
     let tile = world.comp::<Position>(a).map_or_else(Default::default, |p| p.tile);
     let mods = crate::systems::law::FightMods { kill_mult: c.brawl_kill_mult, ..Default::default() };
-    let (winner, loser, died) = crate::systems::law::resolve_fight_mods(world, a, b, mods);
-    // Round 8 X1 (`OPEN-246`): the starter who fell started it (no Murder case).
-    if died && loser == a {
-        crate::systems::demography::defended(world, a);
-    }
+    let _ = m;
     let place = ground.map_or_else(|| "on the street".to_string(), |g| format!("at {}", world.name_of(g)));
-    let text = format!(
-        "{} started a brawl with {} {place} (miserable {:+.2} and {state}; {why}); {} won{}",
+    let head = format!(
+        "{} started a brawl with {} {place} (miserable {:+.2} and {state}; {why})",
         world.name_of(a),
         world.name_of(b),
         mood(world, a),
+    );
+    // C3a: live when both are Full; the tail is `brawl_end`.
+    let tail = BrawlTail { head, tile, grudge_w: c.brawl_grudge_w, grudge_back: c.brawl_grudge_back };
+    crate::systems::combat::fight(world, a, b, mods, crate::systems::combat::Tail::Brawl(Box::new(tail)));
+}
+
+/// C3a: a brawl being fought, for its tail.
+#[derive(Clone, Debug)]
+pub struct BrawlTail {
+    pub head: String,
+    pub tile: crate::components::TilePos,
+    pub grudge_w: f32,
+    pub grudge_back: f32,
+}
+
+/// C3a, the brawl's tail: the line, the crime (Round 8 X1, `OPEN-246`: the
+/// starter who fell started it, no Murder case), the bouncer, the grudges.
+pub(crate) fn brawl_end(world: &mut World, x: &BrawlTail, c: &crate::systems::combat::Clash) {
+    let (a, b, tile) = (c.a, c.b, x.tile);
+    let (winner, loser, died) = (c.winner, c.loser, c.died);
+    if died && loser == a {
+        crate::systems::demography::defended(world, a);
+    }
+    let text = format!(
+        "{}; {} won{}",
+        x.head,
         world.name_of(winner),
         if died { format!(", {} died", world.name_of(loser)) } else { String::new() },
     );
-    let _ = m;
     world.push_event(EventKind::Brawl, &[a, b], text);
     let murder = died && loser == b;
     if crate::systems::law::living(world, a) {
@@ -547,10 +568,10 @@ fn brawl(
     }
     // The grudges: the struck on the starter; a struck winner's starter on him.
     if crate::systems::law::living(world, b) {
-        crate::systems::grudges::add(world, b, a, crate::word::GrudgeCause::Assaulted, c.brawl_grudge_w, 0);
+        crate::systems::grudges::add(world, b, a, crate::word::GrudgeCause::Assaulted, x.grudge_w, 0);
     }
     if winner == b && crate::systems::law::living(world, a) {
-        let w = c.brawl_grudge_w * c.brawl_grudge_back;
+        let w = x.grudge_w * x.grudge_back;
         crate::systems::grudges::add(world, a, b, crate::word::GrudgeCause::Assaulted, w, 0);
     }
     crate::systems::ownership::jobs2_row(world).brawls += 1;

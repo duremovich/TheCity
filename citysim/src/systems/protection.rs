@@ -243,8 +243,6 @@ pub fn punished(world: &mut World, who: EntityId, b: EntityId, walked: bool) {
     let owner_here = there(world, owner, b);
     let level = x.punished;
     let mut what;
-    let mut assault = false;
-    let mut murder = false;
     if level >= 2 {
         // A fire: the business shut for the repairs.
         let until = world.tick + u64::from(c.fire_close_days) * TICKS_PER_DAY;
@@ -261,26 +259,14 @@ pub fn punished(world: &mut World, who: EntityId, b: EntityId, walked: bool) {
         );
         world.push_event(EventKind::Punished, &[who, owner, b, gang], text);
     } else if level == 1 && owner_here {
-        // The owner beaten.
+        // The owner beaten. C3a: live when both are Full; the tail is
+        // `beating_end` (the line, then `punish_tail`).
         let mods = law::FightMods { kill_mult: c.beat_kill_mult, ..Default::default() };
-        let (winner, loser, died) = law::resolve_fight_mods(world, who, owner, mods);
         ownership::jobs2_row(world).pr_beat += 1;
-        what = "the beating";
-        assault = true;
-        murder = died && loser == owner;
-        let tail = if winner != who {
-            format!(" ({} fought back and won)", world.name_of(winner))
-        } else if murder {
-            ", to death".to_string()
-        } else {
-            String::new()
-        };
-        let text = format!(
-            "{} beat {} at {bname} for {gname}'s protection{how}{tail}",
-            world.name_of(who),
-            world.name_of(owner)
-        );
-        world.push_event(EventKind::Punished, &[who, owner, b, gang], text);
+        let head = format!("beat {} at {bname} for {gname}'s protection{how}", world.name_of(owner));
+        let tail = Beating { id: x.id, b, gang, head, tile };
+        crate::systems::combat::fight(world, who, owner, mods, crate::systems::combat::Tail::Beating(Box::new(tail)));
+        return;
     } else {
         // The till smashed (the stall kicked over): `smash_weeks` of the
         // levy, what the till holds of it.
@@ -316,6 +302,53 @@ pub fn punished(world: &mut World, who: EntityId, b: EntityId, walked: bool) {
             what = if stall { "the stall kicked over again" } else { "the till smashed again" };
         }
     }
+    punish_tail(world, &c, &x, who, level, what, false, false, tile);
+}
+
+/// C3a: the owner's beating being fought, for its tail.
+#[derive(Clone, Debug)]
+pub struct Beating {
+    pub id: CoercionId,
+    pub b: EntityId,
+    pub gang: EntityId,
+    pub head: String,
+    pub tile: crate::components::TilePos,
+}
+
+/// C3a, the beating's tail: the line, then the punishment's tail.
+pub(crate) fn beating_end(world: &mut World, y: &Beating, cl: &crate::systems::combat::Clash) {
+    let Some(c) = cfg(world).cloned() else { return };
+    let Some(x) = world.coercions.get(&y.id).cloned() else { return };
+    let (who, owner) = (cl.a, cl.b);
+    let (winner, loser, died) = (cl.winner, cl.loser, cl.died);
+    let murder = died && loser == owner;
+    let tail = if winner != who {
+        format!(" ({} fought back and won)", world.name_of(winner))
+    } else if murder {
+        ", to death".to_string()
+    } else {
+        String::new()
+    };
+    let text = format!("{} {}{tail}", world.name_of(who), y.head);
+    world.push_event(EventKind::Punished, &[who, owner, y.b, y.gang], text);
+    punish_tail(world, &c, &x, who, 1, "the beating", true, murder, y.tile);
+}
+
+/// A punishment's tail: the crime, the coercion's count, the owner's
+/// grudge, report and choice.
+#[allow(clippy::too_many_arguments)]
+fn punish_tail(
+    world: &mut World,
+    c: &ProtectionCfg,
+    x: &crate::contract::Coercion,
+    who: EntityId,
+    level: u8,
+    what: &str,
+    assault: bool,
+    murder: bool,
+    tile: crate::components::TilePos,
+) {
+    let owner = x.over;
     let kind = if murder {
         crate::components::Crime::Murder
     } else if assault {
@@ -341,7 +374,7 @@ pub fn punished(world: &mut World, who: EntityId, b: EntityId, walked: bool) {
     if level >= 1 && lawful >= c.victim_report_lawful {
         law::file_report(world, kind, who, Some(owner));
     }
-    choose(world, &c, x.id, who, what);
+    choose(world, c, x.id, who, what);
 }
 
 /// The owner's choice after a punishment (see the module).

@@ -92,6 +92,10 @@ pub fn held(world: &World, id: EntityId) -> Option<&'static str> {
     if brain.cuffed_by.is_some() {
         return Some("in cuffs");
     }
+    // C3a: a body in a live engagement neither thinks nor starts another action.
+    if crate::systems::combat::engaged(world, id) {
+        return Some("in a fight");
+    }
     if brain.emigrating {
         return Some("leaving the city");
     }

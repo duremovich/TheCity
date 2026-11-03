@@ -2,10 +2,16 @@
 //! § 1-5, § 10 phases 1-2).
 //!
 //! A game abstraction between fictional agents of a simulated city: a fight
-//! is a handful of **beats** resolved in one call ([`resolve_now`], the body
-//! of `law::fight_inner`; every caller keeps its `(winner, loser, died)`,
-//! the [`FightOutcome`] sits beside it on `World::last_fight`). No movement,
-//! no joiners and no state across ticks: the live `Engagement` is C3.
+//! is a handful of **beats** between two duellists ([`resolve_now`] runs one
+//! duel in one call; the [`FightOutcome`] sits on `World::last_fight`).
+//! - **C3a, the engagement** ([`Engagement`], [`engage`]): two sides of
+//!   members, a duel at a time (the fronts; a loser leaves his side and the
+//!   next steps up). Every party Full: it lives in `World::combat`
+//!   across ticks ([`step`], `beats_per_tick` a tick after exec; its bodies
+//!   neither think nor act), else it runs to its end in the call. Each
+//!   caller's tail is a [`Tail`], run once either way; a caller whose step
+//!   needs the answer holds it `Running` ([`take_done`]). A body that breaks
+//!   and flees runs (a flee plan); one who moves out of reach has fled.
 //!
 //! - **A beat.** Each standing side acts in reflex order: it may break
 //!   (morale under its stance's line: it flees if its legs let it, else
@@ -163,6 +169,8 @@ pub struct FightOutcome {
     pub loser: EntityId,
     pub died: bool,
     pub beats: u8,
+    /// C3a: the ticks a live duel ran past its first (0: in one tick).
+    pub ticks: u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -425,6 +433,7 @@ fn carried_note(world: &World, id: EntityId) -> Option<&'static str> {
 // The beat loop
 // ---------------------------------------------------------------------------
 
+#[derive(Clone, Debug)]
 struct Fighter {
     id: EntityId,
     stance: Stance,
@@ -525,7 +534,9 @@ fn fighter(world: &World, id: EntityId, stance: Stance, attacker: bool, bonus: f
     let attack = (skill * fx.attack_mult * age - fx.frail_fight) * jm + bonus;
     let evasion = (evasion + c.reflex_evade * reflex) * fx.evade_mult * age * jm;
     let courage = crate::systems::law::courage(world, id);
-    let morale = if robot {
+    // C3a: a berserker in its episode never breaks (it fights the cuffs to
+    // the end, M13 D33), as a robot does not.
+    let morale = if robot || crate::systems::chrome::in_episode(world, id) {
         f32::INFINITY
     } else {
         // C2 (d): a trained post holds its nerve.
@@ -563,6 +574,7 @@ fn fighter(world: &World, id: EntityId, stance: Stance, attacker: bool, bonus: f
 }
 
 /// The roll stream of one fight: a world-stream salt, hashed per draw.
+#[derive(Clone, Debug)]
 struct Dice {
     salt: u64,
     n: u64,
@@ -591,68 +603,151 @@ fn pick_weighted(r: f32, w: &[f32]) -> usize {
 }
 
 /// `a` (the starter) against `b`, run to the end in one call (docs/COMBAT.md
-/// § 1, off camera and on: C3 makes it live for Full bodies). Writes the
-/// wounds, the memories, the skills, the deaths and the downed; returns the
-/// outcome (the callers' `(winner, loser, died)` is read off it).
+/// § 1, off camera, and the pit's bout). Writes the wounds, the memories,
+/// the skills, the deaths and the downed; returns the outcome. C3a: the
+/// same duel as a live engagement's ([`duel_start`], [`duel_beats`],
+/// [`duel_end`]), its beats all at once.
 pub fn resolve_now(world: &mut World, a: EntityId, b: EntityId, mods: crate::systems::law::FightMods) -> FightOutcome {
+    let mut d = duel_start(world, a, b, &mods);
+    let mut left = u32::MAX;
+    duel_beats(world, &mut d, &mods, &mut left, None);
+    duel_end(world, d, &mods)
+}
+
+/// One duel in progress: the two fighters, the dice, the beats run.
+#[derive(Clone, Debug)]
+struct Duel {
+    f: [Fighter; 2],
+    dice: Dice,
+    order: [usize; 2],
+    beat: u8,
+    notes: [Option<&'static str>; 2],
+    /// The tick it began (a live duel's span).
+    since: Tick,
+    /// Where the two stood at the start (a live duel: one moved has left)
+    /// and whether they were within `reach_tiles` of each other then.
+    at: [(crate::components::TilePos, Option<EntityId>); 2],
+    near: bool,
+    names: [String; 2],
+}
+
+fn duel_start(world: &mut World, a: EntityId, b: EntityId, mods: &crate::systems::law::FightMods) -> Duel {
     use rand::Rng;
     for x in [a, b] {
         seed_skills(world, x);
     }
-    let lethal = mods.kill_p.is_some();
-    let (sa, sb) = (stance_for(world, a, true, &mods), stance_for(world, b, false, &mods));
+    let (sa, sb) = (stance_for(world, a, true, mods), stance_for(world, b, false, mods));
     let notes = [carried_note(world, a), carried_note(world, b)];
     let bout = mods.why == Purpose::Bout;
-    let mut f = [fighter(world, a, sa, true, mods.a_bonus, bout), fighter(world, b, sb, false, 0.0, bout)];
+    let f = [fighter(world, a, sa, true, mods.a_bonus, bout), fighter(world, b, sb, false, 0.0, bout)];
     // A bout is keyed on the pair and the tick (the pit drew on its own
     // `WordNs::Bout` stream before C2: the world stream stays the city's).
     let salt = if bout { key(a) ^ key(b).rotate_left(23) ^ world.tick } else { world.rng.world().random::<u64>() };
-    let mut dice = Dice { salt, n: 0 };
     let order = if f[1].reflex > f[0].reflex { [1, 0] } else { [0, 1] };
+    let pos = |x: EntityId| world.comp::<Position>(x).map_or((Default::default(), None), |p| (p.tile, p.building));
+    let near = crate::systems::law::near(world, a, b, world.config.combat.reach_tiles);
+    Duel {
+        f,
+        dice: Dice { salt, n: 0 },
+        order,
+        beat: 0,
+        notes,
+        at: [pos(a), pos(b)],
+        near,
+        names: [world.name_of(a), world.name_of(b)],
+        since: world.tick,
+    }
+}
+
+/// Run beats of `d`, each taken off `left`, until it ends (true) or `left`
+/// runs out (false). `log`: a live engagement's ring log.
+fn duel_beats(
+    world: &mut World,
+    d: &mut Duel,
+    mods: &crate::systems::law::FightMods,
+    left: &mut u32,
+    mut log: Option<&mut std::collections::VecDeque<BeatLog>>,
+) -> bool {
+    let lethal = mods.kill_p.is_some();
+    let (a, b) = (d.f[0].id, d.f[1].id);
     let max_beats = world.config.combat.max_beats.max(1);
-    let mut beats = 0u8;
-    'fight: for beat in 0..max_beats {
-        beats = beat + 1;
-        for &i in &order {
+    let cap = world.config.combat.log_beats;
+    let note = |log: &mut Option<&mut std::collections::VecDeque<BeatLog>>, tick, by, on, blow| {
+        if let Some(l) = log.as_deref_mut() {
+            if l.len() >= cap.max(1) {
+                l.pop_front();
+            }
+            l.push_back(BeatLog { tick, by, on, blow });
+        }
+    };
+    loop {
+        if d.f[0].end.is_some() || d.f[1].end.is_some() {
+            return true;
+        }
+        if d.beat >= max_beats {
+            // Out of beats: the lower morale gives way (flees if it can).
+            let i = if d.f[0].morale < d.f[1].morale { 0 } else { 1 };
+            let e = break_off(world, &d.f, i, lethal, &mut d.dice).unwrap_or(End::Yielded);
+            d.f[i].end = Some(e);
+            note(&mut log, world.tick, d.f[i].id, d.f[1 - i].id, Blow::Broke(e));
+            return true;
+        }
+        if *left == 0 {
+            return false;
+        }
+        *left -= 1;
+        let beat = d.beat;
+        d.beat += 1;
+        let order = d.order;
+        for i in order {
             let j = 1 - i;
-            if f[0].end.is_some() || f[1].end.is_some() {
-                break 'fight;
+            if d.f[0].end.is_some() || d.f[1].end.is_some() {
+                break;
             }
             let c = &world.config.combat;
             // The break: flee, else yield, else cornered (fights on).
-            if !f[i].cornered && f[i].morale < c.break_at + c.break_shift[f[i].stance.i()] {
-                if let Some(e) = break_off(world, &f, i, lethal, &mut dice) {
-                    f[i].end = Some(e);
-                    break 'fight;
+            if !d.f[i].cornered && d.f[i].morale < c.break_at + c.break_shift[d.f[i].stance.i()] {
+                if let Some(e) = break_off(world, &d.f, i, lethal, &mut d.dice) {
+                    d.f[i].end = Some(e);
+                    note(&mut log, world.tick, d.f[i].id, d.f[j].id, Blow::Broke(e));
+                    break;
                 }
-                f[i].cornered = true;
+                d.f[i].cornered = true;
             }
-            if f[i].stance == Stance::HoldBack && !f[i].attacked {
+            if d.f[i].stance == Stance::HoldBack && !d.f[i].attacked {
                 continue;
             }
-            if beat < f[i].ready_at {
+            if beat < d.f[i].ready_at {
                 continue;
             }
-            strike(world, &mut f, i, j, &mods, a, b, &mut dice);
+            let took = d.f[j].took.len();
+            strike(world, &mut d.f, i, j, mods, a, b, &mut d.dice);
+            let blow = if d.f[j].took.len() > took { d.f[j].took.last().map(|&(r, v)| Blow::Hit(r, v)) } else { None };
+            note(&mut log, world.tick, d.f[i].id, d.f[j].id, blow.unwrap_or(Blow::Miss));
+            if let Some(e) = d.f[j].end {
+                note(&mut log, world.tick, d.f[j].id, d.f[i].id, Blow::Broke(e));
+            }
         }
     }
-    if f[0].end.is_none() && f[1].end.is_none() {
-        // Out of beats: the lower morale gives way (flees if it can).
-        let i = if f[0].morale < f[1].morale { 0 } else { 1 };
-        let e = break_off(world, &f, i, lethal, &mut dice).unwrap_or(End::Yielded);
-        f[i].end = Some(e);
-    }
-    let li = if f[0].end.is_some() { 0 } else { 1 };
-    let (winner, loser) = (f[1 - li].id, f[li].id);
-    f[1 - li].end = Some(End::Won);
+}
+
+/// The ended duel's outcome: the winner, a lethal purpose's finish, the
+/// tail of the fight (`finish`).
+fn duel_end(world: &mut World, mut d: Duel, mods: &crate::systems::law::FightMods) -> FightOutcome {
+    let (a, b) = (d.f[0].id, d.f[1].id);
+    let lethal = mods.kill_p.is_some();
+    let li = if d.f[0].end.is_some() { 0 } else { 1 };
+    let (winner, loser) = (d.f[1 - li].id, d.f[li].id);
+    d.f[1 - li].end = Some(End::Won);
     // A lethal purpose's win (a Hunt's strike) finishes the beaten body.
-    if lethal && winner == a && f[li].end != Some(End::Dead) && !f[li].robot {
+    if lethal && winner == a && d.f[li].end != Some(End::Dead) && !d.f[li].robot {
         let p = mods.kill_p.unwrap_or(0.0) * mods.kill_mult;
-        if dice.roll(world) < p {
-            f[li].end = Some(End::Dead);
+        if d.dice.roll(world) < p {
+            d.f[li].end = Some(End::Dead);
         }
     }
-    let out = finish(world, f, winner, loser, beats, &mods, a, b, notes);
+    let ticks = world.tick.saturating_sub(d.since) as u32;
+    let out = finish(world, d.f, winner, loser, (d.beat, ticks), mods, a, b, d.notes);
     world.last_fight = Some(out.clone());
     out
 }
@@ -821,7 +916,7 @@ fn finish(
     f: [Fighter; 2],
     winner: EntityId,
     loser: EntityId,
-    beats: u8,
+    (beats, ticks): (u8, u32),
     mods: &crate::systems::law::FightMods,
     a: EntityId,
     b: EntityId,
@@ -870,7 +965,7 @@ fn finish(
         dodged: x.dodged,
     };
     let ends = if li == 0 { [end, End::Won] } else { [End::Won, end] };
-    let out = FightOutcome { sides: [side(&f[0], ends[0]), side(&f[1], ends[1])], winner, loser, died, beats };
+    let out = FightOutcome { sides: [side(&f[0], ends[0]), side(&f[1], ends[1])], winner, loser, died, beats, ticks };
     let text = line(world, &out, notes);
     world.push_event(EventKind::Fight, &[a, b], text);
     out
@@ -947,6 +1042,10 @@ fn line(world: &World, out: &FightOutcome, notes: [Option<&'static str>; 2]) -> 
     };
     let mut text =
         format!("{} fought {}, {} beats", who(&out.sides[0], notes[0]), who(&out.sides[1], notes[1]), out.beats);
+    // C3a: a live duel that ran across ticks says how long.
+    if out.ticks > 0 {
+        text.push_str(&format!(" over {} min", out.ticks + 1));
+    }
     for s in &out.sides {
         if s.took.is_empty() {
             continue;
@@ -1433,4 +1532,602 @@ fn untreated_note(world: &mut World, id: EntityId, now: Tick, c: &crate::config:
     let Some(why) = crate::systems::customers::untreated_why(world, id) else { return };
     let text = format!("{} lives with the wound: {why}", world.name_of(id));
     world.push_event(EventKind::Fight, &[id], text);
+}
+
+// ---------------------------------------------------------------------------
+// C3a: the live engagement (docs/COMBAT.md § 1)
+// ---------------------------------------------------------------------------
+
+/// What a beat did, for the ring log (the view's replay in C4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Blow {
+    Miss,
+    Hit(Region, Severity),
+    /// `by` broke off, was knocked out, went down or died.
+    Broke(End),
+}
+
+/// One entry of an engagement's ring log.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BeatLog {
+    pub tick: Tick,
+    pub by: EntityId,
+    pub on: EntityId,
+    pub blow: Blow,
+}
+
+/// One duel's result as a caller reads it: C1's `(winner, loser, died)`,
+/// the two (`a` of side 0, `b` of side 1), the loser's end, their names
+/// taken before it (a beaten robot is wrecked in it). `fought` false: no
+/// blow was struck (a child, a party gone): the starter stands, as C1's
+/// backstop read it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Clash {
+    pub a: EntityId,
+    pub b: EntityId,
+    pub winner: EntityId,
+    pub loser: EntityId,
+    pub died: bool,
+    pub end: End,
+    pub fought: bool,
+    pub names: [String; 2],
+}
+
+/// A caller's action held while its engagement runs (`Running`); the tail
+/// leaves the verdict for the action's next step ([`take_done`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Held {
+    Attack,
+    AttackGuard,
+    Abduct,
+    GuardBody,
+}
+
+/// The purpose's on-end hook: each caller's tail, run once whether the
+/// fight was live or resolved in one call (C3a: one tail per caller).
+#[derive(Clone, Debug)]
+pub enum Tail {
+    /// None: the caller reads the triple (`law::resolve_fight_mods`).
+    Bare,
+    /// The Attack action (the attacker is side 0).
+    Attack {
+        victim: EntityId,
+    },
+    /// M16a: a Guard taker on post meets the attack first.
+    AttackGuard {
+        victim: EntityId,
+        guard: EntityId,
+    },
+    /// M13 D36: the abduction (the abductor's Abduct step).
+    Abduct {
+        victim: EntityId,
+    },
+    /// W35: a guard over a corpse fights the stripper (the Strip or Rip step).
+    GuardBody {
+        stripper: EntityId,
+    },
+    /// The cuffs fought (the guard side 0, the backups after him).
+    Arrest {
+        berserk: bool,
+    },
+    /// M16b: a blackmailed culprit goes for the witness.
+    Silence(Box<crate::systems::consequence::Silence>),
+    /// A fight in the cells.
+    Cells(Box<crate::systems::consequence::CellFight>),
+    /// The crew's reckoning.
+    Reckoning(Box<crate::systems::crew::Reckon>),
+    /// A brave squatter stands against the gang's claim (the squatter side 0).
+    Squat {
+        gname: String,
+    },
+    /// The pressure pass: a miserable body's brawl.
+    Brawl(Box<crate::systems::misery::BrawlTail>),
+    /// Protection: the owner beaten.
+    Beating(Box<crate::systems::protection::Beating>),
+    /// A patrol's attack on a found adult for their chrome.
+    Scan {
+        tile: crate::components::TilePos,
+    },
+    /// Underwater: the collector's beating, the stiffed worker's swing.
+    Dun(Box<crate::systems::underwater::Dun>),
+    Confront(Box<crate::systems::underwater::Confront>),
+    /// `raid::fight_out`'s pairings (each an Assault or a Murder by side 0).
+    Pairs {
+        door: crate::components::TilePos,
+        place: String,
+    },
+    /// A gang's raid on a rival Hideout: the pairings, then the raid's end.
+    Raid(Box<crate::systems::raid::RaidEnd>),
+}
+
+/// A fight across ticks (C3a): two sides of members in order (the front
+/// fights; a loser leaves its side and the next steps up), the caller's
+/// mods and tail, the duels' results, the ring log. Not saved: a save
+/// resolves every engagement first ([`settle_all`]).
+#[derive(Clone, Debug)]
+pub struct Engagement {
+    pub sides: [Vec<EntityId>; 2],
+    pub first: [Option<EntityId>; 2],
+    pub mods: crate::systems::law::FightMods,
+    pub tail: Tail,
+    pub start: Tick,
+    pub live: bool,
+    /// Side 0 breaks at this many losses (a corp raid's crew).
+    pub max_losses: usize,
+    pub losses: [usize; 2],
+    pub deaths: usize,
+    /// Who lost a duel and lived, by side.
+    pub beaten: [Vec<EntityId>; 2],
+    pub clashes: Vec<Clash>,
+    pub beats: u32,
+    pub log: std::collections::VecDeque<BeatLog>,
+    duel: Option<Duel>,
+}
+
+impl Engagement {
+    /// The last fought duel's result, or C1's "no blow" (the starter stands).
+    pub fn result(&self) -> Clash {
+        if let Some(c) = self.clashes.iter().rev().find(|c| c.fought).or(self.clashes.last()) {
+            return c.clone();
+        }
+        let a = self.first[0].or(self.first[1]).expect("an engagement has a party");
+        let b = self.first[1].unwrap_or(a);
+        Clash { a, b, winner: a, loser: b, died: false, end: End::Yielded, fought: false, names: Default::default() }
+    }
+
+    /// Everyone still on a side.
+    pub fn members(&self) -> impl Iterator<Item = EntityId> + '_ {
+        self.sides[0].iter().chain(self.sides[1].iter()).copied()
+    }
+}
+
+/// What [`engage`] did: the fight is live (the caller's action holds), or
+/// it was resolved in the call and its tail ran (the tail's verdict).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Begun {
+    Live,
+    Over(bool),
+}
+
+/// C3a's state on the world (`World::combat`, boxed: the world's serde
+/// visitor sits near a debug test thread's stack): the live engagements by
+/// id, the bodies in them, the held steps' verdicts, the fled bodies whose
+/// flee plans wait for `step`, the last gang raid's outcome. Not saved (a
+/// save resolves the engagements first, [`settle_all`]).
+#[derive(Clone, Debug, Default)]
+pub struct Live {
+    pub engagements: std::collections::BTreeMap<u32, Engagement>,
+    pub next: u32,
+    /// A body in a live engagement -> its id.
+    pub engaged: std::collections::BTreeMap<EntityId, u32>,
+    /// A held step's engagement ended: (tick, which, the verdict).
+    pub done: std::collections::BTreeMap<EntityId, (Tick, Held, bool)>,
+    pub fleeing: Vec<EntityId>,
+    pub last_raid: Option<crate::systems::raid::Outcome>,
+}
+
+/// Is `id` in a live engagement (it neither thinks nor acts)?
+pub fn engaged(world: &World, id: EntityId) -> bool {
+    !world.combat.engaged.is_empty() && world.combat.engaged.contains_key(&id)
+}
+
+/// A caller's 1-on-1 fight: live when both are Full, else at once.
+pub fn fight(world: &mut World, a: EntityId, b: EntityId, mods: crate::systems::law::FightMods, tail: Tail) -> Begun {
+    engage(world, [vec![a], vec![b]], mods, tail, true, usize::MAX)
+}
+
+/// The fight resolved in one call with no tail: the triple's source.
+pub fn clash_now(world: &mut World, a: EntityId, b: EntityId, mods: crate::systems::law::FightMods) -> Clash {
+    run_now(world, [vec![a], vec![b]], mods, Tail::Bare, usize::MAX).result()
+}
+
+/// Sides fought out in one call (the tail runs); the ended engagement.
+pub fn run_now(
+    world: &mut World,
+    sides: [Vec<EntityId>; 2],
+    mods: crate::systems::law::FightMods,
+    tail: Tail,
+    max_losses: usize,
+) -> Engagement {
+    let mut e = build(world, sides, mods, tail, max_losses);
+    advance(world, &mut e, u32::MAX);
+    end(world, &mut e);
+    e
+}
+
+fn build(
+    world: &mut World,
+    mut sides: [Vec<EntityId>; 2],
+    mods: crate::systems::law::FightMods,
+    tail: Tail,
+    max_losses: usize,
+) -> Engagement {
+    let first = [sides[0].first().copied(), sides[1].first().copied()];
+    // No child is ever a party (CLAUDE.md): counted as C1's backstop was.
+    for s in &mut sides {
+        let n = s.len();
+        s.retain(|&x| !crate::systems::ages::is_protected(world, x));
+        if s.len() < n && n == 1 {
+            crate::systems::ownership::jobs2_row(world).harm_blocked += 1;
+        }
+    }
+    Engagement {
+        sides,
+        first,
+        mods,
+        tail,
+        start: world.tick,
+        live: false,
+        max_losses,
+        losses: [0; 2],
+        deaths: 0,
+        beaten: [Vec::new(), Vec::new()],
+        clashes: Vec::new(),
+        beats: 0,
+        log: std::collections::VecDeque::new(),
+        duel: None,
+    }
+}
+
+/// Start a fight between `sides` (C3a § 1). Live when `live_ok` and every
+/// party is Full and free (in camera range a party not Full is promoted
+/// first); else it runs to its end here, tail and all.
+pub fn engage(
+    world: &mut World,
+    sides: [Vec<EntityId>; 2],
+    mods: crate::systems::law::FightMods,
+    tail: Tail,
+    live_ok: bool,
+    max_losses: usize,
+) -> Begun {
+    let mut e = build(world, sides, mods, tail, max_losses);
+    if live_ok && go_live(world, &e) {
+        e.live = true;
+        let id = world.combat.next;
+        world.combat.next = world.combat.next.wrapping_add(1);
+        for x in e.members().collect::<Vec<_>>() {
+            world.combat.engaged.insert(x, id);
+        }
+        world.combat.engagements.insert(id, e);
+        return Begun::Live;
+    }
+    advance(world, &mut e, u32::MAX);
+    Begun::Over(end(world, &mut e))
+}
+
+/// Every party a Full body, none in another fight; one the camera holds
+/// (or the human drives) brings the rest up to Full first (`OPEN-149`).
+fn go_live(world: &mut World, e: &Engagement) -> bool {
+    use crate::components::Lod;
+    let ids: Vec<EntityId> = e.members().collect();
+    if ids.is_empty() || e.sides.iter().any(|s| s.is_empty()) {
+        return false;
+    }
+    let lod = |w: &World, x: EntityId| w.comp::<Brain>(x).map(|b| b.lod);
+    if ids.iter().any(|&x| lod(world, x).is_none() || engaged(world, x)) {
+        return false;
+    }
+    let seen = ids.iter().any(|&x| crate::systems::player::drives(world, x) || world.ring.holds(x));
+    if seen {
+        let place = ids.iter().find_map(|&x| world.comp::<Position>(x).and_then(|p| p.building));
+        for &x in &ids {
+            if lod(world, x) != Some(Lod::Full) && !world.has::<crate::components::Sentence>(x) {
+                crate::systems::lod::set_lod_at(world, x, Lod::Full, place);
+            }
+        }
+    }
+    ids.iter().all(|&x| lod(world, x) == Some(Lod::Full))
+}
+
+/// The duel's instant cases (C1's `fight_inner`): a robot on a side (one
+/// roll, `law::resolve_robot_fight`), a downed party finished where it lies.
+fn instant(world: &mut World, a: EntityId, b: EntityId, mods: &crate::systems::law::FightMods) -> Option<Clash> {
+    if crate::systems::robots::is_robot(world, a) || crate::systems::robots::is_robot(world, b) {
+        let names = [world.name_of(a), world.name_of(b)];
+        let (winner, loser, died) = crate::systems::law::resolve_robot_fight(world, a, b, *mods);
+        let end = if died { End::Dead } else { End::Yielded };
+        return Some(Clash { a, b, winner, loser, died, end, fought: true, names });
+    }
+    if !world.wounded.is_empty() {
+        let (down_a, down_b) = (world.wounded.contains_key(&a), world.wounded.contains_key(&b));
+        if down_a != down_b {
+            let names = [world.name_of(a), world.name_of(b)];
+            let (winner, loser) = if down_b { (a, b) } else { (b, a) };
+            crate::systems::wounded::finish(world, loser, winner);
+            return Some(Clash { a, b, winner, loser, died: true, end: End::Dead, fought: true, names });
+        }
+    }
+    None
+}
+
+/// Every fought duel's after-tail (C1's `resolve_fight_mods`): a beaten
+/// member on his own blocks provokes the holder; a body jacked in is
+/// dumped from its run.
+fn after_duel(world: &mut World, c: &Clash) {
+    if world.config.turf.as_ref().is_some_and(|t| t.war.is_some()) {
+        crate::systems::turf::beaten(world, c.winner, c.loser);
+    }
+    if !world.runner_of.is_empty() {
+        for x in [c.a, c.b] {
+            crate::systems::virt::dump(world, x, "attacked in the chair");
+        }
+    }
+}
+
+/// A live engagement's party who is gone: dead of something else, taken
+/// in, cuffed, or under 18.
+fn gone(world: &World, x: EntityId) -> bool {
+    !crate::systems::law::living(world, x)
+        || world.has::<crate::components::Sentence>(x)
+        || world.comp::<Brain>(x).is_some_and(|b| b.cuffed_by.is_some())
+        || crate::systems::ages::is_protected(world, x)
+}
+
+/// Run `e` until it ends (true) or `left` beats are spent (false).
+fn advance(world: &mut World, e: &mut Engagement, mut left: u32) -> bool {
+    use crate::components::Lod;
+    let not_full = |w: &World, x: EntityId| w.comp::<Brain>(x).is_some_and(|b| b.lod != Lod::Full);
+    loop {
+        if e.duel.is_none() {
+            if e.losses[0] >= e.max_losses {
+                return true;
+            }
+            if e.live {
+                // A party gone leaves its side; one no longer Full has the
+                // rest resolved at once.
+                for k in 0..2 {
+                    let out: Vec<EntityId> = e.sides[k].iter().copied().filter(|&x| gone(world, x)).collect();
+                    for x in out {
+                        e.sides[k].retain(|&y| y != x);
+                        world.combat.engaged.remove(&x);
+                    }
+                }
+                if e.members().any(|x| not_full(world, x)) {
+                    left = u32::MAX;
+                }
+            }
+            let (Some(&a), Some(&b)) = (e.sides[0].first(), e.sides[1].first()) else { return true };
+            if let Some(c) = instant(world, a, b, &e.mods) {
+                after_duel(world, &c);
+                after_clash(world, e, c);
+                continue;
+            }
+            e.duel = Some(duel_start(world, a, b, &e.mods));
+        }
+        let Some(mut d) = e.duel.take() else { continue };
+        if e.live {
+            let out: Vec<EntityId> = [d.f[0].id, d.f[1].id].into_iter().filter(|&x| gone(world, x)).collect();
+            if !out.is_empty() {
+                // The duel is off: the gone leave their sides.
+                for x in out {
+                    for s in &mut e.sides {
+                        s.retain(|&y| y != x);
+                    }
+                    world.combat.engaged.remove(&x);
+                }
+                continue;
+            }
+            if not_full(world, d.f[0].id) || not_full(world, d.f[1].id) {
+                left = u32::MAX;
+            }
+            // One moved out of reach has left the fight (C3a: he fled).
+            if d.near && d.f[0].end.is_none() && d.f[1].end.is_none() {
+                let (a, b) = (d.f[0].id, d.f[1].id);
+                if !crate::systems::law::near(world, a, b, world.config.combat.reach_tiles) {
+                    let pos = |x: EntityId| world.comp::<Position>(x).map(|p| (p.tile, p.building));
+                    let i = usize::from(pos(a) == Some(d.at[0]));
+                    d.f[i].end = Some(End::Fled);
+                }
+            }
+        }
+        let before = d.beat;
+        let log = if e.live { Some(&mut e.log) } else { None };
+        let ended = duel_beats(world, &mut d, &e.mods, &mut left, log);
+        e.beats += u32::from(d.beat.saturating_sub(before));
+        if !ended {
+            e.duel = Some(d);
+            return false;
+        }
+        let (a, b) = (d.f[0].id, d.f[1].id);
+        let names = std::mem::take(&mut d.names);
+        let out = duel_end(world, d, &e.mods);
+        let li = usize::from(out.loser == b);
+        let c = Clash {
+            a,
+            b,
+            winner: out.winner,
+            loser: out.loser,
+            died: out.died,
+            end: out.sides[li].end,
+            fought: true,
+            names,
+        };
+        after_duel(world, &c);
+        after_clash(world, e, c);
+    }
+}
+
+/// A duel ended: the loser leaves his side (counted), a body that broke and
+/// fled runs (C3a: fleeing as movement), the purpose's per-duel tail.
+fn after_clash(world: &mut World, e: &mut Engagement, c: Clash) {
+    let k = usize::from(!e.sides[0].contains(&c.loser));
+    e.sides[k].retain(|&y| y != c.loser);
+    e.losses[k] += 1;
+    if c.died {
+        e.deaths += 1;
+    } else {
+        e.beaten[k].push(c.loser);
+    }
+    if e.live {
+        world.combat.engaged.remove(&c.loser);
+    }
+    // Run at the tick's `step` (after exec: a body fleeing its own step's
+    // fight would have the step's end move its new plan on).
+    if c.end == End::Fled && e.mods.why != Purpose::Bout {
+        world.combat.fleeing.push(c.loser);
+    }
+    let tail = std::mem::replace(&mut e.tail, Tail::Bare);
+    match &tail {
+        Tail::Pairs { door, place } => crate::systems::raid::pair_end(world, *door, place, &c),
+        Tail::Raid(x) => crate::systems::raid::pair_end(world, x.door, &x.place, &c),
+        Tail::Arrest { .. } => crate::systems::law::arrest_duel(world, e, &c),
+        _ => {}
+    }
+    e.tail = tail;
+    e.clashes.push(c);
+}
+
+/// C3a: a body that broke and fled runs from the fight: the flee plan
+/// (`FleeToHome`: its Home, else the nearest refuge, `life::refuge`).
+fn flee(world: &mut World, id: EntityId) {
+    use crate::components::{ActionInstance, GoalKind, Lod};
+    let free = crate::systems::law::living(world, id)
+        && !world.has::<crate::components::Sentence>(id)
+        && !crate::systems::wounded::is_down(world, id)
+        && !crate::systems::player::drives(world, id)
+        && world.comp::<Brain>(id).is_some_and(|b| b.lod != Lod::Statistical && b.cuffed_by.is_none() && !b.emigrating);
+    if !free {
+        return;
+    }
+    world.abort_plan(id);
+    let step = ActionInstance { action: crate::goap::ActionKind::FleeToHome, target: None, tile: None };
+    let plan = crate::goap::Plan { goal: GoalKind::Flee, target: None, steps: vec![step], started_tick: world.tick };
+    crate::systems::plan::install(world, id, plan);
+    let now = world.tick;
+    if let Some(b) = world.comp_mut::<Brain>(id) {
+        b.current_goal = Some(GoalKind::Flee);
+        b.goal_since = now;
+    }
+    crate::systems::ownership::jobs2_row(world).fled_runs += 1;
+}
+
+/// The engagement is over: its members free, its tail run; a held action's
+/// verdict left for its next step. Returns the verdict.
+fn end(world: &mut World, e: &mut Engagement) -> bool {
+    if e.live {
+        for x in e.members().collect::<Vec<_>>() {
+            world.combat.engaged.remove(&x);
+        }
+        let ticks = world.tick.saturating_sub(e.start) + 1;
+        let row = crate::systems::ownership::jobs2_row(world);
+        row.live_fights += 1;
+        row.live_fight_ticks += ticks as u32;
+    }
+    let tail = std::mem::replace(&mut e.tail, Tail::Bare);
+    let c = e.result();
+    let verdict = match &tail {
+        Tail::Bare | Tail::Pairs { .. } => true,
+        Tail::Attack { victim } => {
+            crate::exec::actions::attack_end(world, c.a, *victim, &c);
+            true
+        }
+        Tail::AttackGuard { victim, guard } => crate::exec::actions::attack_guard_end(world, c.a, *victim, *guard, &c),
+        Tail::Abduct { victim } => crate::systems::chrome::abduct_end(world, c.a, *victim, &c),
+        Tail::GuardBody { stripper } => c.winner == *stripper,
+        Tail::Arrest { berserk } => crate::systems::law::arrest_end(world, e, *berserk),
+        Tail::Silence(x) => {
+            crate::systems::consequence::silence_end(world, x, &c);
+            true
+        }
+        Tail::Cells(x) => {
+            crate::systems::consequence::cell_fight_end(world, x, &c);
+            true
+        }
+        Tail::Reckoning(x) => {
+            crate::systems::crew::reckoning_end(world, x, &c);
+            true
+        }
+        Tail::Squat { gname } => {
+            crate::systems::gang::squat_end(world, gname, &c);
+            true
+        }
+        Tail::Brawl(x) => {
+            crate::systems::misery::brawl_end(world, x, &c);
+            true
+        }
+        Tail::Beating(x) => {
+            crate::systems::protection::beating_end(world, x, &c);
+            true
+        }
+        Tail::Scan { tile } => {
+            crate::systems::tags::attack_end(world, *tile, &c);
+            true
+        }
+        Tail::Dun(x) => {
+            crate::systems::underwater::dun_end(world, x, &c);
+            true
+        }
+        Tail::Confront(x) => {
+            crate::systems::underwater::confront_end(world, x, &c);
+            true
+        }
+        Tail::Raid(x) => {
+            crate::systems::raid::raid_end(world, x, e);
+            true
+        }
+    };
+    if e.live {
+        let held = match &tail {
+            Tail::Attack { .. } => e.first[0].map(|x| (x, Held::Attack)),
+            Tail::AttackGuard { .. } => e.first[0].map(|x| (x, Held::AttackGuard)),
+            Tail::Abduct { .. } => e.first[0].map(|x| (x, Held::Abduct)),
+            Tail::GuardBody { stripper } => Some((*stripper, Held::GuardBody)),
+            _ => None,
+        };
+        if let Some((x, h)) = held {
+            world.combat.done.insert(x, (world.tick, h, verdict));
+        }
+    }
+    e.tail = tail;
+    verdict
+}
+
+/// A held action's engagement ended: its verdict (taken), when it is
+/// `held`'s and fresh (an hour; a body whose plan moved on leaves a stale one).
+pub fn take_done(world: &mut World, id: EntityId, held: Held) -> Option<bool> {
+    if world.combat.done.is_empty() {
+        return None;
+    }
+    let (t, h, v) = world.combat.done.get(&id).copied()?;
+    if h != held {
+        return None;
+    }
+    world.combat.done.remove(&id);
+    (world.tick.saturating_sub(t) <= TICKS_PER_HOUR).then_some(v)
+}
+
+/// C3a, each tick after exec: every live engagement runs `[combat]
+/// beats_per_tick` beats; one that ends runs its tail.
+pub fn step(world: &mut World) {
+    if !world.combat.done.is_empty() && world.tick.is_multiple_of(TICKS_PER_HOUR) {
+        let now = world.tick;
+        world.combat.done.retain(|_, x| now.saturating_sub(x.0) <= TICKS_PER_HOUR);
+    }
+    if world.combat.engagements.is_empty() && world.combat.fleeing.is_empty() {
+        return;
+    }
+    let n = u32::from(world.config.combat.beats_per_tick.max(1));
+    let ids: Vec<u32> = world.combat.engagements.keys().copied().collect();
+    for id in ids {
+        let Some(mut e) = world.combat.engagements.remove(&id) else { continue };
+        if advance(world, &mut e, n) {
+            end(world, &mut e);
+        } else {
+            world.combat.engagements.insert(id, e);
+        }
+    }
+    for id in std::mem::take(&mut world.combat.fleeing) {
+        flee(world, id);
+    }
+}
+
+/// Every live engagement run to its end now (before a save: engagements
+/// are not saved).
+pub fn settle_all(world: &mut World) {
+    let ids: Vec<u32> = world.combat.engagements.keys().copied().collect();
+    for id in ids {
+        let Some(mut e) = world.combat.engagements.remove(&id) else { continue };
+        advance(world, &mut e, u32::MAX);
+        end(world, &mut e);
+    }
 }

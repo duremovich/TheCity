@@ -730,6 +730,91 @@ fn blackmail_daily(world: &mut World, c: &ConsequenceCfg) {
     }
 }
 
+/// C3a: a fight in the cells, for its tail.
+#[derive(Clone, Debug)]
+pub struct CellFight {
+    pub jail: EntityId,
+    pub why: String,
+    pub place: String,
+}
+
+/// C3a, a cell fight's tail: the grudge, the line, a killing answered
+/// inside, the crime in the cells (Round 8 X1, `OPEN-246`: through the
+/// crime path; the starter who fell is charged with nothing).
+pub(crate) fn cell_fight_end(world: &mut World, x: &CellFight, c: &crate::systems::combat::Clash) {
+    let (p, m, jail) = (c.a, c.b, x.jail);
+    let (winner, loser, died) = (c.winner, c.loser, c.died);
+    if died && loser == p {
+        crate::systems::demography::defended(world, p);
+    }
+    if living(world, loser) {
+        crate::systems::grudges::add(world, loser, winner, GrudgeCause::Assaulted, 0.4, 0);
+    }
+    let end = if died { format!(", {} died", world.name_of(loser)) } else { String::new() };
+    let text = format!(
+        "{} went for {} in {} ({}); {} won{end}",
+        world.name_of(p),
+        world.name_of(m),
+        x.place,
+        x.why,
+        world.name_of(winner)
+    );
+    world.push_event(EventKind::Cells, &[p, m, jail], text);
+    // Round 9 Z1: a grudge over a killing answered inside.
+    crate::systems::hunt::cell_strike(world, p, m, winner, died, jail);
+    if living(world, p) {
+        let murder = died && loser == m;
+        let crime = if murder { Crime::Murder } else { Crime::Assault };
+        let tile = world.comp::<Position>(p).map_or_else(Default::default, |x| x.tile);
+        crate::systems::law::raise_crime_on(world, p, (!murder).then_some(m), Some(m), crime, tile);
+    }
+}
+
+/// C3a: a blackmailed culprit's fight to silence the witness, for its tail.
+#[derive(Clone, Debug)]
+pub struct Silence {
+    pub w: EntityId,
+    pub culprit: EntityId,
+    pub crime: Crime,
+    pub line: String,
+    pub actors: Vec<EntityId>,
+    pub tile: crate::components::TilePos,
+}
+
+/// C3a, the silencing's tail: the line, the crime, the witness's grudge and,
+/// a witness who won, the report.
+pub(crate) fn silence_end(world: &mut World, x: &Silence, c: &crate::systems::combat::Clash) {
+    let (w, culprit) = (x.w, x.culprit);
+    let (winner, loser, died) = (c.winner, c.loser, c.died);
+    let (wn, cn) = (world.name_of(w), world.name_of(culprit));
+    if died && loser == culprit {
+        crate::systems::demography::defended(world, culprit);
+    }
+    let end = if died {
+        format!(", {} died", world.name_of(loser))
+    } else if winner == w {
+        format!("; {wn} won and went to the law")
+    } else {
+        format!("; {cn} won and {wn} will keep quiet now")
+    };
+    world.push_event(EventKind::Blackmail, &x.actors, format!("{}{end}", x.line));
+    ownership::jobs2_row(world).bm_silenced += 1;
+    if living(world, culprit) {
+        let murder = died && loser == w;
+        let kind = if murder { Crime::Murder } else { Crime::Assault };
+        if murder {
+            world.push_event(EventKind::Murder, &[culprit, w], format!("{cn} killed {wn}"));
+        }
+        crate::systems::law::raise_crime_on(world, culprit, (!murder).then_some(w), Some(w), kind, x.tile);
+    }
+    if living(world, w) {
+        crate::systems::grudges::add(world, w, culprit, GrudgeCause::Assaulted, 0.5, 0);
+        if winner == w && living(world, culprit) {
+            crate::systems::law::file_report(world, x.crime, culprit, Some(w));
+        }
+    }
+}
+
 /// The demand (a `Visit` arrived, or a Statistical one at its hour).
 pub fn blackmailed(world: &mut World, w: EntityId, culprit: EntityId, walked: bool) {
     let Some(c) = cfg(world).cloned() else { return };
@@ -780,33 +865,10 @@ pub fn blackmailed(world: &mut World, w: EntityId, culprit: EntityId, walked: bo
     if silence {
         let tile = world.comp::<Position>(w).map_or_else(Default::default, |p| p.tile);
         let mods = crate::systems::law::FightMods { kill_mult: c.bm_kill_mult, ..Default::default() };
-        let (winner, loser, died) = crate::systems::law::resolve_fight_mods(world, culprit, w, mods);
-        if died && loser == culprit {
-            crate::systems::demography::defended(world, culprit);
-        }
-        let end = if died {
-            format!(", {} died", world.name_of(loser))
-        } else if winner == w {
-            format!("; {wn} won and went to the law")
-        } else {
-            format!("; {cn} won and {wn} will keep quiet now")
-        };
-        world.push_event(EventKind::Blackmail, &actors, format!("{head}: {cn} {why} and went for {him}{end}"));
-        ownership::jobs2_row(world).bm_silenced += 1;
-        if living(world, culprit) {
-            let murder = died && loser == w;
-            let kind = if murder { Crime::Murder } else { Crime::Assault };
-            if murder {
-                world.push_event(EventKind::Murder, &[culprit, w], format!("{cn} killed {wn}"));
-            }
-            crate::systems::law::raise_crime_on(world, culprit, (!murder).then_some(w), Some(w), kind, tile);
-        }
-        if living(world, w) {
-            crate::systems::grudges::add(world, w, culprit, GrudgeCause::Assaulted, 0.5, 0);
-            if winner == w && living(world, culprit) {
-                crate::systems::law::file_report(world, b.crime, culprit, Some(w));
-            }
-        }
+        // C3a: live when both are Full; the tail is `silence_end`.
+        let line = format!("{head}: {cn} {why} and went for {him}");
+        let tail = Silence { w, culprit, crime: b.crime, line, actors, tile };
+        crate::systems::combat::fight(world, culprit, w, mods, crate::systems::combat::Tail::Silence(Box::new(tail)));
         return;
     }
     crate::systems::law::file_report(world, b.crime, culprit, Some(w));
@@ -1361,34 +1423,14 @@ fn cell_day(
             fought.insert(p);
             fought.insert(m);
             let mods = crate::systems::law::FightMods { kill_mult: c.cell_kill_mult, ..Default::default() };
-            let (winner, loser, died) = crate::systems::law::resolve_fight_mods(world, p, m, mods);
-            if died && loser == p {
-                crate::systems::demography::defended(world, p);
-            }
-            if living(world, loser) {
-                crate::systems::grudges::add(world, loser, winner, GrudgeCause::Assaulted, 0.4, 0);
-            }
-            let end = if died { format!(", {} died", world.name_of(loser)) } else { String::new() };
             let place = if c.cell_yard_hour < 24 {
                 yard_of(world, jail)
             } else {
                 format!("the cells of {}", world.name_of(jail))
             };
-            let text =
-                format!("{pn} went for {} in {place} ({why}); {} won{end}", world.name_of(m), world.name_of(winner));
-            world.push_event(EventKind::Cells, &[p, m, jail], text);
-            // Round 9 Z1: a grudge over a killing answered inside.
-            crate::systems::hunt::cell_strike(world, p, m, winner, died, jail);
-            // Round 8 X1 (`OPEN-246`): a crime in the cells, through the
-            // crime path (the cellmates and the guards inside see it; the
-            // case is `law::cell_case`'s); the starter who fell is charged
-            // with nothing.
-            if living(world, p) {
-                let murder = died && loser == m;
-                let crime = if murder { Crime::Murder } else { Crime::Assault };
-                let tile = world.comp::<Position>(p).map_or_else(Default::default, |x| x.tile);
-                crate::systems::law::raise_crime_on(world, p, (!murder).then_some(m), Some(m), crime, tile);
-            }
+            // C3a: live when both are Full; the tail is `cell_fight_end`.
+            let tail = CellFight { jail, why: why.to_string(), place };
+            crate::systems::combat::fight(world, p, m, mods, crate::systems::combat::Tail::Cells(Box::new(tail)));
             for x in [p, m] {
                 if let Some(r) = world.consequence.inside_mut(x) {
                     r.fights = r.fights.saturating_add(1);

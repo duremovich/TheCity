@@ -999,14 +999,23 @@ pub fn squat_claim_with(world: &mut World, actor: EntityId, b: EntityId, fights:
             continue;
         }
         if brave && world.has::<Brain>(s) && world.has::<Brain>(actor) {
-            let (winner, _, _) = law::resolve_fight(world, s, actor);
-            if winner == s {
-                continue;
-            }
+            // C3a: live when both are Full; the tail (`squat_end`) puts a
+            // beaten squatter out.
+            let tail = crate::systems::combat::Tail::Squat { gname: gname.clone() };
+            crate::systems::combat::fight(world, s, actor, Default::default(), tail);
+            continue;
         }
         if world.has::<crate::components::Squatter>(s) {
             crate::systems::street::evict_squatter(world, s, &format!("taken by {gname}"));
         }
+    }
+}
+
+/// C3a, a brave squatter's stand's tail: beaten, he is put out.
+pub(crate) fn squat_end(world: &mut World, gname: &str, c: &crate::systems::combat::Clash) {
+    let s = c.a;
+    if c.winner != s && world.has::<crate::components::Squatter>(s) {
+        crate::systems::street::evict_squatter(world, s, &format!("taken by {gname}"));
     }
 }
 

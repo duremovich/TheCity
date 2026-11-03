@@ -1668,8 +1668,10 @@ fn run(args: RunArgs) -> Result<(), String> {
             return Err(format!("--save-at {t} is outside this run's tick range {start_tick}..={end_tick}"));
         }
     }
-    let save_if_due = |world: &World| -> Result<(), String> {
+    let save_if_due = |world: &mut World| -> Result<(), String> {
         if args.save_at == Some(world.tick) {
+            // C3a: the live fights end before the save (engagements are not saved).
+            citysim::systems::combat::settle_all(world);
             let path = save::save_path(&args.saves_dir, world.seed(), world.tick);
             save::save_to_file(world, &path).map_err(|e| format!("save {}: {e}", path.display()))?;
             eprintln!("saved {}", path.display());
@@ -1703,7 +1705,7 @@ fn run(args: RunArgs) -> Result<(), String> {
     // PlanAborted) cost a fifth of a day's ticks and made the dip days.
     use std::io::Write;
     let mut events_out = std::io::BufWriter::with_capacity(1 << 16, std::io::stderr());
-    save_if_due(&world)?;
+    save_if_due(&mut world)?;
     while world.tick < end_tick {
         if args.prof_from.is_some_and(|d| d * TICKS_PER_DAY == world.tick) {
             citysim::prof::reset();
@@ -1811,7 +1813,7 @@ fn run(args: RunArgs) -> Result<(), String> {
                     last_event_tick = Some(tick);
                 }
             }
-            save_if_due(&world)?;
+            save_if_due(&mut world)?;
         }
         let _ = events_out.flush();
         if args.diag && args.events && world.tick % TICKS_PER_DAY == 0 {

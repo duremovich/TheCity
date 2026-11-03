@@ -418,7 +418,15 @@ fn test_guard_body_turns_strip_into_fight() {
             .is_some_and(|m| m.entries.iter().any(|e| e.kind == MemoryKind::Fought && e.subject == Some(o)))
     };
     assert!(!fought(&w, s, g) && !fought(&w, g, s));
-    let go_on = grudges::guard_contests(&mut w, s, dead);
+    // C3a: both Full, the fight is live; its beats run, then the verdict.
+    let mut go_on = grudges::guard_contests(&mut w, s, dead);
+    while go_on.is_none() && !w.combat.engagements.is_empty() {
+        citysim::systems::combat::step(&mut w);
+    }
+    if go_on.is_none() {
+        go_on = grudges::guard_contests(&mut w, s, dead);
+    }
+    let go_on = go_on.expect("the fight ended");
     // Fought on both sides (one may have died of it, losing its memory).
     assert!(fought(&w, s, g) || fought(&w, g, s), "the strip became a fight");
     let won = w
@@ -428,7 +436,7 @@ fn test_guard_body_turns_strip_into_fight() {
     assert_eq!(w.stats.current.word.guard_body, 1);
     // No guard: the strip goes on unopposed.
     let (_, _, x) = three(&w);
-    assert!(grudges::guard_contests(&mut w, x, x));
+    assert_eq!(grudges::guard_contests(&mut w, x, x), Some(true));
 }
 
 /// Fix round: one deed leaves one grudge. A noticing victim is also a

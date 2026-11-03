@@ -201,7 +201,7 @@ fn test_abduct_refuses_a_victim_in_other_hands() {
         b.cuffed_by = Some(first);
         b.abducted_by = Some(first);
     }
-    assert!(!chrome::abduct_within(&mut w, second, v, 1), "in the first's hands");
+    assert_eq!(chrome::abduct_within(&mut w, second, v, 1), Some(false), "in the first's hands");
     assert_eq!(w.comp::<Brain>(v).and_then(|b| b.abducted_by), Some(first));
 }
 
@@ -246,7 +246,7 @@ fn test_abduct_guard_with_gray_off() {
         sk.melee = 0.0;
     }
     for _ in 0..20 {
-        assert!(!chrome::abduct_within(&mut w, second, v, 1), "in the first's hands");
+        assert_eq!(chrome::abduct_within(&mut w, second, v, 1), Some(false), "in the first's hands");
         assert_eq!(w.comp::<Brain>(v).and_then(|b| b.abducted_by), Some(first));
         assert!(citysim::systems::law::living(&w, v), "untouched");
         w.tick += 1;

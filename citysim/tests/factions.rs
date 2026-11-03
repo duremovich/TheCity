@@ -291,6 +291,17 @@ fn test_sacked_gang_does_not_recruit() {
     assert_eq!(gang::recruit_gang(&w, recruit), None);
 }
 
+/// C3a: a raid's brawl between Full bodies is a live engagement; run it to
+/// its end here and read its outcome.
+fn brawl_now(w: &mut World, a: EntityId) -> Option<Outcome> {
+    let out = raid::brawl(w, a);
+    if out.is_some() || w.combat.engagements.is_empty() {
+        return out;
+    }
+    citysim::systems::combat::settle_all(w);
+    w.combat.last_raid.take()
+}
+
 // ---------------------------------------------------------------------------
 // Raids
 // ---------------------------------------------------------------------------
@@ -331,7 +342,7 @@ fn test_brawl_with_no_defenders_sacks_the_hideout() {
     let door_tile = raid::rival_hideout_tile(&w, a).expect("tile");
     stage_raider(&mut w, a, door_tile);
     w.comp_mut::<Gang>(g0).expect("g").raid_at = Some(w.tick);
-    assert_eq!(raid::brawl(&mut w, a), Some(Outcome::Sacked));
+    assert_eq!(brawl_now(&mut w, a), Some(Outcome::Sacked));
     assert_eq!(w.comp::<Gang>(g0).expect("g").treasury, 150);
     assert_eq!(w.comp::<Gang>(g1).expect("g").treasury, 0);
     assert!(w.comp::<Gang>(g1).expect("g").is_sacked(w.tick));
@@ -369,7 +380,7 @@ fn test_brawl_three_on_one_takes_the_treasury() {
         stage_raider(&mut w, r, door_tile);
     }
     w.comp_mut::<Gang>(g0).expect("g").raid_at = Some(w.tick);
-    let out = raid::brawl(&mut w, r1).expect("resolved");
+    let out = brawl_now(&mut w, r1).expect("resolved");
     assert!(matches!(out, Outcome::Won | Outcome::Sacked), "{out:?}");
     assert!(w.comp::<Gang>(g0).expect("g").treasury >= 100, "half the prize at least");
     assert!(w.comp::<Gang>(g1).expect("g").treasury <= 50);
@@ -398,7 +409,7 @@ fn test_brawl_one_on_three_loses_and_the_leader_retaliates() {
     stage_raider(&mut w, r, door_tile);
     w.tick = 700;
     w.comp_mut::<Gang>(g0).expect("g").raid_at = Some(w.tick);
-    assert_eq!(raid::brawl(&mut w, r), Some(Outcome::Lost));
+    assert_eq!(brawl_now(&mut w, r), Some(Outcome::Lost));
     assert_eq!(w.comp::<Gang>(g1).expect("g").treasury, 100);
     let g = w.comp::<Gang>(g0).expect("g");
     assert_eq!(g.order, Order::Retaliate, "a lost raid is a grudge");
@@ -1453,7 +1464,9 @@ fn test_bug9_lone_raider_calls_the_raid_off() {
         stage_raider(&mut full, m, door);
     }
     full.comp_mut::<Gang>(g0).expect("g").raid_at = Some(now);
-    assert!(raid::resolve(&mut full, crew[0]).is_some(), "three go in");
+    let out = raid::resolve(&mut full, crew[0]);
+    citysim::systems::combat::settle_all(&mut full);
+    assert!(out.or(full.combat.last_raid).is_some(), "three go in");
 }
 
 /// Bug 14: the gang's daily stipend is on the books (`Flow::Tribute`), not

@@ -301,6 +301,8 @@ fn test_patrol_scans_and_attacks_the_chromed() {
         w.tick += 1;
     }
     assert_eq!(hit, Some(a), "the chromed adult was found");
+    // C3a: the attack between Full bodies is live; its beats run here.
+    citysim::systems::combat::settle_all(&mut w);
     assert!(has_event(&w, EventKind::PatrolScan, m));
     assert!(has_event(&w, EventKind::Assault, a) || has_event(&w, EventKind::Murder, a));
     assert!(w.stats.current.gov.patrols >= 1);

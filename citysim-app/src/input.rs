@@ -150,6 +150,8 @@ pub fn handle(app: &mut App, world: &mut World) {
     // --- save / load ---------------------------------------------------------
     if is_key_pressed(KeyCode::F5) {
         let path = save::save_path(&app.saves_dir, world.seed(), world.tick);
+        // C3a: the live fights end before the save (engagements are not saved).
+        citysim::systems::combat::settle_all(world);
         match save::save_to_file(world, &path) {
             Ok(()) => app.notify(format!("Saved {}", path.display())),
             Err(e) => app.notify(format!("Save failed: {e}")),

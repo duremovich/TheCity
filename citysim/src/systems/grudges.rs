@@ -660,18 +660,25 @@ pub fn end_guard(world: &mut World, guard: EntityId, corpse: EntityId) {
 }
 
 /// W35, at a Strip or Rip's completion: the first guard standing over the
-/// body and adjacent to the stripper fights it (`resolve_fight(guard,
-/// stripper)`); true when the stripper may go on (no guard, or it won).
-pub fn guard_contests(world: &mut World, stripper: EntityId, corpse: EntityId) -> bool {
+/// body and adjacent to the stripper fights it; `Some(true)` when the
+/// stripper may go on (no guard, or it won). C3a: `None` while the fight
+/// is live (the step holds; its verdict comes back through `take_done`).
+pub fn guard_contests(world: &mut World, stripper: EntityId, corpse: EntityId) -> Option<bool> {
+    use crate::systems::combat;
+    if let Some(won) = combat::take_done(world, stripper, combat::Held::GuardBody) {
+        return Some(won);
+    }
     let guards: SmallVec<[EntityId; 2]> = world.guards_of_corpse.get(&corpse).cloned().unwrap_or_default();
     let Some(g) = guards
         .into_iter()
         .find(|&g| g != stripper && guarding(world, g, corpse) && crate::systems::law::near(world, g, stripper, 1))
     else {
-        return true;
+        return Some(true);
     };
-    let (winner, _, _) = crate::systems::law::resolve_fight(world, g, stripper);
-    winner == stripper
+    match combat::fight(world, g, stripper, Default::default(), combat::Tail::GuardBody { stripper }) {
+        combat::Begun::Live => None,
+        combat::Begun::Over(won) => Some(won),
+    }
 }
 
 /// Review fix, daily: drop the guards whose wait ended without `end_guard`
