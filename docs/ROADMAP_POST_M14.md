@@ -604,3 +604,18 @@ Like shooting into a courtyard from above." Both are `OPEN-288`; the weapon half
 - **When:** the first milestone after the slice (P5), alongside the combat model if P4 shows fights read as a dice
   roll (addendum 23, decision 5). Not inside the slice: the slice's play sessions say how much of it a nobody in the
   Sump needs first.
+
+## Addendum 25 (2026-11-02, Dylan): netrunning in the street
+
+M14 built the net as a background economy (Data, Ledgers, the Raid prelude's doors); a run never touches anything a
+body can see. Dylan: quickhacks as "a sort of techno magic system, like Cyberpunk 2077", and "more involved netrunning
+that requires a stationary rig that a player or NPC has to be locked into (and vulnerable in the real world)";
+cyberspace "a traversable plane mapped on the real world", the runner present in the squad's heist, and a squad that
+"may need to leave someone behind in real life to protect their netrunner once they get traced".
+
+The design is `docs/NETRUNNING.md` (six forks decided in its table): quickhacks reach by sight, hijacked cameras as
+eyes; a hand deck (slow, seen) or neural chrome (instant, sanity, Purists refuse, repossessable); RAM per encounter
+and trace as the bill; deep runs as a route on the overlay with a choice per guarded node, no minigame; a traced
+runner meets the owner's response (a corp's counter-runner, then a strike team); a blast model for devices, vehicles
+and decks, reactors waiting for Power. **Order:** after the slice, sight and the shot (addendum 24), then netrunning
+(seven phases), since a quickhack needs both the sight rule (`OPEN-288`) and the wounds (`OPEN-179`).

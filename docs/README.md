@@ -19,6 +19,7 @@ One line per live document: what it is and when to read it. Everything supersede
 - `LIVES_AT_WORK.md`: work has a counterpart, evenings and households, ages and leaders lead, 20k scale (closed 2026-10-19). Dylan's answers recorded.
 - `VIEW_MILESTONE.md`: the view milestone (closed 2026-11-02): config hot-reload, perf, people drawn as people, riders, the orbit camera and cutaway, the ring, the replay, crossings, the cells, the El; gate `SHADOW_V20.md` and `shadow_v20/` (brief `plans/shadow_v20.md`).
 - `M18_PLAYER.md`: **the next milestone**, the player slice (rewritten 2026-11-02): a nobody in the Sump for 14 days at 20k in cityview; P1 the seam, P2 verbs, W work beats, P3 the board and talk, P4 consequences, P5 start and loop (exit: Dylan plays 30 minutes cold), P6 founding optional. The old 494-line spec is `git show 2c2e0fd:docs/M18_PLAYER.md`.
+- `NETRUNNING.md`: netrunning in the street (designed 2026-11-02, addendum 25): quickhacks by sight, hand deck or neural chrome, RAM and trace, deep runs on the overlay, the counter-runner and the strike team, the crew's chair guard, the blast; after the slice and sight and the shot.
 
 ## Milestone specs (closed; the why and the "Implemented: deviations" of each)
 
