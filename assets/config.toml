@@ -1622,6 +1622,8 @@ again_hours = 12                   # a body asked (any move, either outcome) is 
 nobody_count = 8                   # "pick a nobody" lists at most this many adults (one per kind)
 nobody_coins = 25                  # a nobody holds at most this many coins
 nobody_age_max = 60                # a nobody is 18 up to this age (years)
+nobody_per_district = 2             # P5b: at most this many of one district on the pick list while another district has a candidate
+nobody_wage_max = 5                # a nobody has no job or one paying at most this a day, and no gang post (P5b)
 blackmail_offer_minutes = 30       # a witness's demand on the player stands this many game minutes (pay, refuse, go for
                                    # him); let lapse, it is refused (he goes to the law)
 
@@ -6565,5 +6567,6 @@ cue_s = 1.2                        # a beat's cue (a word over a body, a flash) 
 # real seconds).
 autopause = true                   # the toggle's start
 autopause_tiles = 8                # a fight this near the body (Chebyshev tiles) stops the clock
+start_speed_i = 1                  # P5b: a slice game starts at this index of play_speeds (0, a game minute a real minute, looks frozen)
 away_s = 30.0                      # the human is away after this many real seconds with no key or click
 provoke_kill_p = 1.0               # a play script's `provoke lethal` (a proof's cheat): the fight's kill chance on a loss

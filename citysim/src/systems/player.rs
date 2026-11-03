@@ -1779,12 +1779,11 @@ pub struct Nobody {
 }
 
 /// The kinds a nobody is picked by, one each, in this order.
-const NOBODY_KINDS: [&str; 8] = [
+const NOBODY_KINDS: [&str; 7] = [
     "sleeps rough",
     "squats",
     "waits at the labour corner",
     "out of work",
-    "runs for a gang",
     "works for scraps",
     "in debt",
     "sick and broke",
@@ -1821,6 +1820,9 @@ fn nobody_ok(world: &World, id: EntityId) -> bool {
         && !crate::systems::founding::is_exec(world, id)
         && !crate::systems::law::is_guard(world, id)
         && world.purse(Some(id)) <= c.nobody_coins
+        // P5b: nobodies hold no steady job and no gang post
+        && !world.has::<crate::components::GangMember>(id)
+        && world.comp::<Job>(id).is_none_or(|j| j.wage_per_day <= c.nobody_wage_max)
 }
 
 fn nobody_kind(world: &World, id: EntityId, k: usize) -> bool {
@@ -1832,9 +1834,8 @@ fn nobody_kind(world: &World, id: EntityId, k: usize) -> bool {
         1 => squat,
         2 => !job && crate::systems::streetwork::corner_ok(world, id),
         3 => !job && home.is_some(),
-        4 => world.comp::<crate::components::GangMember>(id).is_some_and(|g| g.rank == 0),
-        5 => job,
-        6 => world.neighbours(id).any(|o| owes(world, id, o) > 0),
+        4 => job,
+        5 => world.neighbours(id).any(|o| owes(world, id, o) > 0),
         _ => world.comp::<crate::components::Health>(id).is_some_and(|h| {
             h.malnutrition >= 0.5 || h.sick_days != 0 || h.cancer.as_ref().is_some_and(|c| c.stage > 0.0)
         }),
@@ -1863,54 +1864,108 @@ pub fn nobodies(world: &World) -> Vec<Nobody> {
         })
         .collect();
     cands.sort();
+    let district = |id: EntityId| nobody_tile(world, id).map(|t| world.district_of(t));
     let mut out: Vec<Nobody> = Vec::new();
     for (k, kind) in NOBODY_KINDS.iter().enumerate() {
         if out.len() >= world.config.slice.nobody_count {
             break;
         }
-        let taken = |id: EntityId| out.iter().any(|n| n.id == id);
-        if let Some(&(_, id)) = cands.iter().find(|(_, id)| !taken(*id) && nobody_kind(world, *id, k)) {
+        // P5b: a district with room on the list first (the Sump's first), else the first
+        let per = world.config.slice.nobody_per_district;
+        let fresh = |id: EntityId| out.iter().filter(|n| district(n.id) == district(id)).count() < per;
+        let open = |id: EntityId| !out.iter().any(|n| n.id == id) && nobody_kind(world, id, k);
+        let pick =
+            cands.iter().find(|(_, id)| open(*id) && fresh(*id)).or_else(|| cands.iter().find(|(_, id)| open(*id)));
+        if let Some(&(_, id)) = pick {
             out.push(Nobody { id, kind, line: nobody_line(world, id) });
         }
     }
     out
 }
 
+/// P5b: "Kowloon Steps (the Sump)" for a tile: its district, and its zone when the name does not say it.
+pub fn area_of(world: &World, t: TilePos) -> String {
+    use crate::components::Zone;
+    let zone = match world.map.zone(t) {
+        Zone::Spire => "the Spire",
+        Zone::Civic => "Civic",
+        Zone::Vats => "the Vats",
+        Zone::Mid => "the Mid",
+        Zone::Sump => "the Sump",
+    };
+    let d = world.district_name(world.district_of(t)).to_string();
+    if d.contains(zone.trim_start_matches("the ")) {
+        d
+    } else {
+        format!("{d} ({zone})")
+    }
+}
+
+/// P5b: a building in plain words: "a block in Kowloon Steps (the Sump)" (a Feed goes by its name).
+pub fn building_phrase(world: &World, b: EntityId) -> String {
+    let Some(x) = world.comp::<Building>(b) else { return world.name_of(b) };
+    if let Some(f) = x.feed.as_ref() {
+        return f.name.clone();
+    }
+    format!("a {} in {}", x.kind.label().to_lowercase(), area_of(world, x.door))
+}
+
+/// P5b: the story log's text with every `Kind#N` building name put in plain words (`building_phrase`).
+pub fn plain_buildings(world: &World, text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(h) = rest.find('#') {
+        let (pre, post) = rest.split_at(h);
+        let label_len = pre.chars().rev().take_while(|c| c.is_ascii_alphabetic()).count();
+        let (head, label) = pre.split_at(pre.len() - label_len);
+        let digits: String = post[1..].chars().take_while(char::is_ascii_digit).collect();
+        let found = if label.is_empty() || digits.is_empty() {
+            None
+        } else {
+            let n: u32 = digits.parse().unwrap_or(u32::MAX);
+            world
+                .buildings_by_kind()
+                .iter()
+                .filter(|(k, _)| k.label() == label)
+                .flat_map(|(_, v)| v.iter())
+                .find(|b| b.index == n)
+                .copied()
+        };
+        match found {
+            Some(b) => {
+                out.push_str(head);
+                out.push_str(&building_phrase(world, b));
+            }
+            None => {
+                out.push_str(pre);
+                out.push('#');
+                out.push_str(&digits);
+            }
+        }
+        rest = &post[1 + digits.len()..];
+    }
+    out.push_str(rest);
+    out
+}
+
 /// A nobody's one-line read: "Name, 34, Kowloon Steps (the Sump): 4c, no
 /// job, sleeps rough; kin: X; owes Y 12c; a grudge on Z".
 pub fn nobody_line(world: &World, id: EntityId) -> String {
-    use crate::components::{RelKind, Zone};
+    use crate::components::RelKind;
     let age = world.comp::<Identity>(id).map_or(0, |i| u64::from(i.age_days) / crate::time::DAYS_PER_YEAR);
     let at = nobody_tile(world, id);
-    let place = at.map_or_else(
-        || "nowhere".to_string(),
-        |t| {
-            let zone = match world.map.zone(t) {
-                Zone::Spire => "the Spire",
-                Zone::Civic => "Civic",
-                Zone::Vats => "the Vats",
-                Zone::Mid => "the Mid",
-                Zone::Sump => "the Sump",
-            };
-            let d = world.district_name(world.district_of(t)).to_string();
-            if d.contains(zone.trim_start_matches("the ")) {
-                d
-            } else {
-                format!("{d} ({zone})")
-            }
-        },
-    );
+    let place = at.map_or_else(|| "nowhere".to_string(), |t| area_of(world, t));
     let job = match world.comp::<Job>(id) {
         Some(j) => match j.employer {
-            Some(e) => format!("{} at {}", j.role.label(), world.name_of(e)),
+            Some(e) => format!("{} at {}", j.role.label(), building_phrase(world, e)),
             None => j.role.label().to_string(),
         },
         None => "no job".to_string(),
     };
     let bed = if let Some(s) = world.comp::<Squatter>(id) {
-        format!("squats in {}", world.name_of(s.building))
+        format!("squats in {}", building_phrase(world, s.building))
     } else if let Some(h) = world.comp::<Household>(id).and_then(|h| h.home) {
-        format!("a bed at {}", world.name_of(h))
+        format!("sleeps in {}", building_phrase(world, h))
     } else {
         "sleeps rough".to_string()
     };
