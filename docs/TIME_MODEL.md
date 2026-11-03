@@ -1,91 +1,112 @@
 # The time model (OPEN-304)
 
 Decided with Dylan 2026-11-03, after the slice's 60x walk read as a teleport. The standing decision (CLAUDE.md, "The
-game feels realtime at normal speed") asks for three things that cannot all hold: a body on screen walking at a real
-pace at 1x, a day/night cycle compressed at 1x, and the city's real distances in game time (a 1 km walk ~12 game
-minutes, the pace every commute, travel cap and walk-timed config number has been built on since round 9 Y4).
+game feels realtime at normal speed") asks for three things that cannot all hold at once: a body on screen walking at
+a real pace at 1x, a compressed day at 1x, and the city's real distances in game time (a 1 km walk ~12 game minutes,
+the pace every walk-timed number had been built on since round 9 Y4).
 
-| option | what gives | cost |
-|---|---|---|
-| A, GTA-style (a 48-min day) | distances: the sim's walk drops to 0.7 tiles a game minute | a 1 km walk is 6 game hours, the island 2.5 game days; every walk-timed number rebuilt, commutes stop fitting a day (R2's crawl again) |
-| B, fast walkers | the walk on screen: 1x runs the clock a few times real | bodies sprint (5.6 m/s at 4x): the teleport, slower |
-| **C, realtime 1x and auto-speed (picked)** | the day at 1x: a game minute is a real minute | at 1x the sky barely moves; the day compresses through where the time goes, not through the 1x clock |
+**The pick: compress the day 6x and let space give.** At 1x a game day is **4 real hours** (a game minute is 10 real
+seconds); a body walks 1.4 m/s on screen; in game time the walk is 6x slower than real, **3.5 tiles a game minute**
+(14 m, 0.84 km/h). A person's day keeps its shape in game hours (an 8-hour shift, a 2-hour commute cap, sleep at
+night); what shrinks is each life's reach in metres: you live, work and drink within a few blocks, and the El is the
+long-distance link. Dylan first took "1x is real time, the day compressed only by auto-speed" (a day of 24 real hours
+at 1x), then asked whether that was too slow: almost no game ships it (GTA V and RDR2 48-minute days, Skyrim 72,
+Stardew ~15; true realtime is MSFS and Arma). The 6x middle is the answer.
 
-**C:** the sim does not change. One tick stays one game minute, `[exec] walk_tiles_per_tick` stays 21 (84 m a minute,
-1.4 m/s), every walk-timed number stands. The time model is the view's clock: what speed it runs at, when it changes
-speed on its own, and how a walk is drawn at each speed.
+| C (compression) | day at 1x | sim walk, tiles a game min | 1 km walk | reach in 120 ticks | reach in 60 |
+|---|---|---|---|---|---|
+| 1 (before) | 24 h | 21 | 12 game min | 10 km | 5 km |
+| **6 (picked)** | **4 h** | **3.5** | **72 min** | **1.7 km** | **840 m** |
+| 30 (GTA) | 48 min | 0.7 | 6 h | 340 m | 170 m: lives break |
 
-## 1. The speeds
+**The probe** (2026-11-03, 20k seed 42 x 30, one run each, only `[exec] walk_tiles_per_tick` 21 -> 7 with
+`move_ticks_full` 1 -> 2, nothing else converted): the city held. No starvation either way, homeless share 0.7% ->
+0.8%, employed share from day 30 61.3% -> 63.0%, hunger and mood flat, ticks/s 149 -> 174. El rides a day 1,744 ->
+8,965, cab fares 7x. Fights 0.59x, murders 134 -> 71, arrests 0.59x, hunts started 0.49x, raid marchers who missed
+14 -> 92, hotel nights 0.34x. **The violence drop is a FINDING, not retuned** (Dylan: "we can tweak later"); the
+pressure comes back through features (`OPEN-109` street life and its kin).
 
-- **1x is real time**: a game minute a real minute, `[view] walk_m_s` 1.4 walk-matched (the rate it already has).
-  The game starts at 1x (`start_speed_i` 0; P5b's 60x start goes).
-- **Manual steps** (`,` / `.`, the HUD's speed row): 1x, 2x, 5x, 20x, 60x (`[view] play_speeds`). Everything speeds up
-  together, Kenshi-style; 60x is a game hour a real minute and a walker at 84 m/s, the fastest step a human picks to
-  watch the street.
-- **Auto-speed** (new, `[view] auto_speed` 3600x, an hour a real second, capped by what the sim thread manages): the
+## 1. The sim: one pace, and what it breaks
+
+The tick stays one game minute. The rule for every number:
+
+- **What a person's day is made of keeps its game time**: shift hours, the commute and job caps in ticks
+  (`[jobs2] job_cap_ticks`, `home_cap_ticks`, `bed_cap_ticks`), venue caps, sleep, hunger. A 2-hour commute cap
+  stays 2 hours; it now reaches 1.7 km, not 10 km. That is the design, not a break.
+- **What moves on screen keeps its real speed**, so its game-time pace drops 6x with the walk: every vehicle (the
+  `[vehicles]` mults are shares of the walk and follow it), the El (`[transit] ride_ticks_per_tile` is its own
+  number: x6), cabs, vans, robots, drones, a pursuit, a climb. A physical duration the camera sees (a dwell at a
+  stop, a door's queue) is a real duration, so its ticks grow 6x.
+- **A wait that exists to cover someone's travel grows with the travel** or the mechanism stops firing (a raid's
+  muster, a hit's expiry, a cab's or van's arrival, a guard's escort): scale it, or bring the parties nearer (muster
+  from closer, call the nearer post), whichever reads as people.
+- **A reach in tiles that was written as a time** ("20 min at 21 tiles a minute") is converted to keep the time or
+  kept as a place on the map; the comment says which.
+- **What the shrink breaks for real is fixed as a feature**: a body whose one place (a School, the letting desk at the
+  Civic Hall, the Precinct, the clinic) now lies beyond a day's reach rides the El or finds the nearer one; where no
+  nearer one exists the gap is an OPEN row.
+
+## 2. The view: the speeds
+
+- **1x is the walk-matched rate** (`[view] walk_m_s` 1.4: rate = walk_m_s / (tile_m x walk_tiles_per_tick /
+  move_ticks_full) = 0.1 ticks a second): a game minute 10 real seconds, a day 4 real hours. The game starts at 1x
+  (`start_speed_i` 0; P5b's 60x start goes).
+- **Manual steps** (`,` / `.`, the HUD's speed row): 1x, 2x, 5x, 20x, 60x. Everything speeds up together,
+  Kenshi-style: 5x is GTA's 48-minute day, 60x a game day in 4 real minutes.
+- **Auto-speed** (`[view] auto_speed` 600x, a game hour a real second, capped by what the sim thread manages): the
   clock runs fast on its own through stretches with nothing to watch, and comes back when something happens.
-- The HUD reads the speed as a multiple and, while auto runs, why ("asleep, 3600x"), on one line (P5b's "4 h/s"
+- The HUD reads the speed as a multiple and, while auto runs, why ("asleep, 600x"), on one line (P5b's "4 h/s"
   wrap goes).
 
-## 2. Auto-speed: when the clock runs ahead and when it comes back
+## 3. Auto-speed: when the clock runs ahead and when it comes back
 
-The possessed body is **in a stretch** when it is doing something long it does not steer:
+The possessed body is **in a stretch** when it is doing something long it does not steer: asleep (in its bed, squat,
+capsule or cell); on shift inside its workplace (a work beat's line still lands in the story log); riding (the El, a
+cab, a van); in a door's queue or a letting desk's list; serving time. A walk is **not** a stretch: the street is the
+thing to watch, and the player speeds it up by hand. An indoor activity the body chose (eating, hanging out) is a
+stretch only on autopilot with nobody within `autopause_tiles` speaking to it or coming for it.
 
-- asleep (Sleep, in its bed, squat, capsule or cell);
-- on shift inside its workplace (a work beat's line still lands in the story log; it does not stop the clock);
-- riding (the El, a cab, a van to the cells);
-- in a door's queue or a letting desk's list;
-- in the cells serving time.
-
-A walk is **not** a stretch: the street is the thing to watch. A long walk at 1x is a real walk (1 km is 12 real
-minutes); the player speeds it up by hand. An indoor activity the body chose (eating, hanging out at home or a bar)
-is a stretch only on autopilot with nobody within `autopause_tiles` speaking to it or coming for it.
-
-The clock **comes back to 1x** (ramped over `[view] auto_ramp_s` 1.0 real seconds, so the slowdown is seen) when the
+The clock **comes back** (ramped over `[view] auto_ramp_s` 1.0 real seconds, so the slowdown is seen) when the
 stretch ends (it wakes, the shift ends, the ride arrives, the queue lets it in), when the human presses a key or
-clicks, or when someone approaches or speaks to the body. The auto-pause triggers (an attack, a fight within
-`autopause_tiles`) **pause** as now, whatever the speed. A manual speed above 1x set by the human is kept after a
-stretch (auto returns to the human's speed, not to 1x); the auto toggle sits next to the auto-pause one in the Esc
-menu (`[view] auto_speed_on` true at the start).
+clicks, or when someone approaches or speaks to the body; it returns to the human's chosen speed, not always 1x. The
+auto-pause triggers (an attack, a fight within `autopause_tiles`) **pause** as now, whatever the speed. The auto
+toggle sits beside the auto-pause one in the Esc menu (`[view] auto_speed_on` true at the start).
 
-A played day is then roughly its street time: sleep and a shift go by in seconds each.
+## 4. Drawing a walk at any speed: no teleports
 
-## 3. Drawing a walk at any speed: no teleports
-
-- The view already lerps each body along its `ahead` (the way to the next tick's place) between the two newest frames
+- The view lerps each body along its `ahead` (the way to the next tick's place) between the two newest frames
   (`sim.rs` `along`). The rule: **the way between two drawn frames covers the whole path walked between them,
-  however many ticks passed**. At 20x and up the sim thread can tick more than once a drawn frame; the frame it
-  publishes must then carry the path since the last published one (concatenated `ahead`), not one tick's. Where it
-  does not reach the newer place, `along` falls back to a straight lerp, which cuts through a block: that fallback is
-  the bug to remove, not a draw mode.
-- A body going in or out of a door mid-tick is drawn to the door and through it, then hidden (not hidden at the tick's
-  start).
-- At auto-speed the camera's subject is asleep, at work or riding; the street around it blurs at 3600x, which is
-  what passing time looks like. Nothing is skipped: the sim ticks every minute at every speed.
-- OPEN-304's "a walk shorter than one tick" is read first at 1x, where a tick is a real minute: if a body still
-  jumps at 1x, it is a door or a frame-pair gap, not the speed.
+  however many ticks passed**. When the sim thread ticks more than once a drawn frame, the frame it publishes carries
+  the path since the last published one (concatenated `ahead`). Where the way does not reach the newer place, `along`
+  falls back to a straight lerp through the block: that fallback is the bug to remove, not a draw mode.
+- A body going in or out of a door mid-tick is drawn to the door and through it, then hidden.
+- At auto-speed the camera's subject is asleep, at work or riding; the street blurs, which is what passing time
+  looks like. Nothing is skipped: the sim ticks every minute at every speed.
 
-## 4. The player's body at 1x: no minute's lag
+## 5. The player's body: no tick's lag
 
-At 1x a tick is a real minute, so a click's walk would wait up to a minute for the next tick. **The possessed body
-moves at the click**: the sim thread plans the click's walk at once (one path search, between ticks), publishes the
-body's way, and the view walks it along that way at `walk_m_s` from the click; at the next tick the sim's place
-agrees, since the paces are the same (84 m a game minute is 1.4 m/s). A click's verb (buy, talk, apply) lands at the
-tick the body arrives. This is the seam WASD rides on after v1 (CLAUDE.md, a walking player character): client-side
-continuous movement at 1x, the sim reading the body's tile each tick.
+At 1x a tick is 10 real seconds, so a click's walk would wait up to 10 s for the next tick. **The possessed body moves
+at the click**: the sim thread plans the click's walk at once (between ticks), publishes the body's way, and the view
+walks it along that way at `walk_m_s` from the click; at the next tick the sim's place agrees, the paces being the
+same. A click's verb (buy, talk, apply) lands at the tick the body arrives. This is the seam WASD rides on after v1
+(client-side continuous movement, the sim reading the body's tile each tick).
 
-## 5. What does not change
+## 6. What does not change
 
-The sim's pace and every number built on it; the combat clock (`[view] beat_s`, a beat a real second while the
-possessed body fights, already slower than 1x's minute); the Statistical tier and the off-camera city; saves (the
-speed and the auto toggle are the view's, not the save's).
+The tick (a game minute); the hours of a day and every schedule in them; the combat clock (`[view] beat_s`, a beat a
+real second while the possessed body fights, slower than 1x's tick); the Statistical tier's logic (its tables regen
+from Full as ever); the 2k and 20k tiers.
 
-## The phase
+## The phases
 
-One view phase (cityview's `play.rs`, `simthread.rs`, `sim.rs`; no sim crate change beyond what § 4's plan between
-ticks needs): §§ 1-4, the `[view]` keys documented in `config.toml`, the old 60x start and its comment gone. Proof: a
-play script (`view/cityview/scripts/`) that walks the nobody across a block at 1x, sleeps through a night at auto
-and is woken by a fight, read in the story log and the smoke PNG at 1x and at 60x; no new test.
+- **T1 the pace (sim)**: § 1. The pace in config (smooth, no 2-tick bursts), every walk-, speed- and travel-timed
+  number classified by § 1's rule and converted or kept with a comment, what the shrink breaks fixed or written as an
+  OPEN row; `SAVE_VERSION` bumps and the slice save is remade. Proof: one before/after 20k s42 x 30 run (it moves
+  numbers, printed as FINDINGs) and the diaries of the commuter, the El rider, the raider, the guard on an escort,
+  the homeless body's FindHome and the schoolchild.
+- **T2 the clock (view)**: §§ 2-5 in cityview (`play.rs`, `simthread.rs`, `sim.rs`), the `[view]` keys documented.
+  Proof: a play script that walks the nobody across a block at 1x, sleeps through a night at auto and is woken by a
+  fight, read in the story log and the smoke PNG at 1x and at 60x.
 
-**Defaults picked by the orchestrator, not yet heard by Dylan:** the manual steps (1, 2, 5, 20, 60), auto at 3600x,
+**Defaults picked by the orchestrator, not yet heard by Dylan:** the manual steps (1, 2, 5, 20, 60), auto at 600x,
 walks never auto, chosen indoor activities auto only on autopilot, auto returning to the human's speed, the 1 s ramp.
