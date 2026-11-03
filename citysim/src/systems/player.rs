@@ -18,10 +18,17 @@
 //!
 //! P2 (the verbs, below): menus built from precondition checks, the verbs
 //! mapped to existing `ActionKind`s, the will-waivers per verb.
+//!
+//! P3 (the board and talk, below): the board is the records the body sees
+//! (`contracts::visible`), taken through `contracts::player_take` (the
+//! NPC's take, its gates of ability kept) and worked as the Contract goal's
+//! own plans (`job_next`); talk is Chat, a courtship's Flirt and four moves
+//! rolled through `moves::resolve` on a body beside you; the city's offers
+//! (a cover shift, a gang's draw) wait on the board where an NPC is written.
 
 use crate::components::{
-    ActionInstance, Brain, Building, BuildingKind, GoalKind, Household, Identity, Inventory, Job, PlayerControlled,
-    Position, Squatter, TilePos, Wallet,
+    ActionInstance, Brain, Building, BuildingKind, CityOffer, GoalKind, Household, Identity, Inventory, Job,
+    MemoryKind, OfferKind, PlayerControlled, Position, Squatter, TilePos, Wallet,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -94,6 +101,7 @@ fn take_wheel(world: &mut World, id: EntityId) {
         p.autopilot = false;
         p.doing = None;
         p.shift = None;
+        p.contract = None;
     }
 }
 
@@ -359,6 +367,28 @@ pub enum Verb {
     Chat(EntityId),
     /// A person: `Attack`.
     Attack(EntityId),
+    // --- M18 P3: talk (a body beside you; `talk`)
+    /// A person: walk over to stand beside them.
+    WalkOver(EntityId),
+    /// A Charm: they warm to you (the edge's affinity and trust).
+    Befriend(EntityId),
+    /// `Flirt` at a Bar or a Market: a date in a courtship (both 18+).
+    Court(EntityId),
+    /// A Persuade on Coins: a loan (a debt on the edge).
+    Loan(EntityId),
+    /// An Intimidate on Coins: their coins, by fear.
+    Threaten(EntityId),
+    /// A Charm on a Job: a word put in at their workplace (a lead), then the ask at its door.
+    AskWorkOf(EntityId),
+    // --- M18 P3: the board
+    /// Take an open record (`contracts::player_take`): at its Fixer's desk, or from its buyer.
+    Take(u64),
+    /// Walk to a Fixer's desk and get known (`Network`): its board.
+    Network(EntityId),
+    /// Go on with the record you hold (the Contract goal's plan).
+    WorkJob,
+    /// A city offer (its `made` tick): take it (`true`) or turn it down.
+    Answer(u64, bool),
 }
 
 impl Verb {
@@ -394,7 +424,26 @@ impl Verb {
                 &["cost: greed (the planner's)", "think: the Eat goal's hunger gate"]
             }
             Verb::EatCarried | Verb::EatHome => &["think: the Eat goal's hunger gate"],
-            Verb::GoIn(_) | Verb::GoToDoor(_) | Verb::Squat(_) | Verb::Work => &[],
+            Verb::Befriend(_) | Verb::Loan(_) | Verb::AskWorkOf(_) => &[
+                "think: no NPC goal makes this move unasked (the target's resistance is the roll's)",
+            ],
+            Verb::Threaten(_) => &[
+                "lawfulness: an NPC leans on a stranger only as a gang's collector (the target's courage is the roll's)",
+            ],
+            Verb::Court(_) => &["cost: sociability (the planner's)", "think: the intimacy goal's gate"],
+            Verb::Take(_) => &[
+                "mode A: accept_min (the price against the risk and the buyer's honour)",
+                "the gun gate's day-wage term (a man with a good day job takes no work)",
+                "gun_lawfulness (an illegal kind's lawfulness ceiling)",
+            ],
+            Verb::Network(_) => &["the Contract goal's gun gate wage term and its lawfulness and wealth weights"],
+            Verb::GoIn(_)
+            | Verb::GoToDoor(_)
+            | Verb::Squat(_)
+            | Verb::Work
+            | Verb::WalkOver(_)
+            | Verb::WorkJob
+            | Verb::Answer(..) => &[],
         }
     }
 }
@@ -404,6 +453,9 @@ impl Verb {
 pub struct Row {
     pub verb: Verb,
     pub label: String,
+    /// M18 P3: a row shown greyed: why it cannot be done now (cots full,
+    /// the post gone, too far to talk); `None`: it can.
+    pub why_not: Option<String>,
 }
 
 /// A menu: its title and its legal rows.
@@ -754,10 +806,28 @@ pub fn plan_of(world: &World, id: EntityId, verb: Verb) -> Result<(Plan, String)
             if !valid_person(world, id, o) {
                 return no("nobody to talk to");
             }
-            let Some(ob) = here(world, o) else { return no("they are on the street (talk happens inside)") };
+            // M18 P3: on the street, beside them (`[talk] street_tiles`)
+            let Some(ob) = here(world, o) else {
+                if !passes(world, id, ActionKind::Chat, Some(o), LocationKey::Street, |_, ctx| {
+                    ctx.partner = Some(o);
+                    ctx.street_partner = true;
+                }) {
+                    return no("not now");
+                }
+                let mut steps = vec![];
+                if !beside(world, id, o) {
+                    let t = world.comp::<Position>(o).map(|p| p.tile);
+                    steps.push(step(ActionKind::GoTo(LocationKey::Picked), None, t));
+                }
+                steps.push(step(ActionKind::Chat, Some(o), None));
+                return mk(Some(o), steps, format!("Chat with {}", world.name_of(o)));
+            };
             let key = key_in(world, id, ob, Some(o));
             if !passes(world, id, ActionKind::Chat, Some(o), key, |_, ctx| ctx.partner = Some(o)) {
-                return no("not a place to talk");
+                return no("not a place to talk (a Market, a Bar, a Farm, a home, or the street)");
+            }
+            if at != Some(ob) && !opens(world, id, ob) {
+                return no("their door is not yours to open");
             }
             let mut steps: Vec<ActionInstance> = walk(ob).into_iter().collect();
             steps.push(step(ActionKind::Chat, Some(o), None));
@@ -786,15 +856,534 @@ pub fn plan_of(world: &World, id: EntityId, verb: Verb) -> Result<(Plan, String)
             steps.push(step(ActionKind::Attack, Some(o), None));
             mk(Some(o), steps, format!("Attack {}", world.name_of(o)))
         }
+        Verb::WalkOver(o) => {
+            if !valid_person(world, id, o) {
+                return no("nobody to walk to");
+            }
+            if beside(world, id, o) {
+                return no("beside them already");
+            }
+            let s = match here(world, o) {
+                Some(ob) if opens(world, id, ob) => go_in(world, ob),
+                Some(ob) => match go_to_door(world, ob) {
+                    Some(s) => s,
+                    None => return no("no door"),
+                },
+                None => step(ActionKind::GoTo(LocationKey::Picked), None, world.comp::<Position>(o).map(|p| p.tile)),
+            };
+            mk(None, vec![s], format!("Walk over to {}", world.name_of(o)))
+        }
+        Verb::Court(o) => {
+            if !valid_person(world, id, o) {
+                return no("nobody to court");
+            }
+            if !crate::systems::social::suitor(world, id, o) || !crate::systems::social::suitor(world, o, id) {
+                return no("not free to court (married, kin)");
+            }
+            let Some(ob) = here(world, o).filter(|&b| {
+                world.comp::<Building>(b).is_some_and(|x| matches!(x.kind, BuildingKind::Bar | BuildingKind::Market))
+            }) else {
+                return no("court at a Bar or a Market");
+            };
+            if world.rejected_recently(id, o) {
+                return no("turned you down this week");
+            }
+            let key = key_in(world, id, ob, Some(o));
+            if !passes(world, id, ActionKind::Flirt, Some(o), key, |_, ctx| ctx.partner_reachable = true) {
+                return no("not now (married?)");
+            }
+            let mut steps: Vec<ActionInstance> = walk(ob).into_iter().collect();
+            steps.push(step(ActionKind::Flirt, Some(o), None));
+            mk(Some(o), steps, format!("Court {} ({:.0}%)", world.name_of(o), 100.0 * court_p(world, id, o)))
+        }
+        Verb::Befriend(o) | Verb::Loan(o) | Verb::Threaten(o) | Verb::AskWorkOf(o) => {
+            let (m, what) = talk_move(world, id, verb)?;
+            let (p, refused) = crate::systems::moves::p_of(world, &m);
+            if refused {
+                return no("they will not hear you out (your standing)");
+            }
+            talk_ready(world, id, o)?;
+            mk(Some(o), vec![], format!("{what} ({:.0}%)", 100.0 * p))
+        }
+        Verb::Take(c) => {
+            if let Some(why) = crate::systems::contracts::player_take_refusal(world, id, c) {
+                return Err(why);
+            }
+            let rec = &world.contracts[&c];
+            let label = format!("Take the {}", job_line(world, rec));
+            let Some(f) = rec.broker else { return mk(None, vec![], label) };
+            let steps = vec![
+                step(ActionKind::GoTo(LocationKey::Seller), Some(f), None),
+                step(ActionKind::TakeJob, Some(f), None),
+            ];
+            Ok((Plan { goal: GoalKind::Contract, target: Some(f), steps, started_tick: tick }, label))
+        }
+        Verb::Network(f) => {
+            if !crate::systems::contracts::fixer_open(world, f) {
+                return no("shut");
+            }
+            let best = world
+                .comp::<crate::components::Skills>(id)
+                .map_or(0.0, |s| s.fighting.max(s.stealth).max(s.hacking).max(s.persuasion).max(s.intimidation));
+            let min = world.config.fixers.gun_skill_min;
+            if best < min {
+                return Err(format!("the fixer has no use for you (best skill {best:.2} < {min:.2})"));
+            }
+            let steps = vec![
+                step(ActionKind::GoTo(LocationKey::Seller), Some(f), None),
+                step(ActionKind::Network, Some(f), None),
+            ];
+            let far =
+                world.comp::<Building>(f).zip(world.comp::<Position>(id)).map_or(0, |(b, p)| b.door.manhattan(p.tile));
+            let open = world.comp::<crate::contract::Broker>(f).map_or(0, |k| {
+                k.book
+                    .iter()
+                    .filter(|c| {
+                        world.contracts.get(c).is_some_and(|x| x.status == crate::contract::ContractStatus::Open)
+                    })
+                    .count()
+            });
+            Ok((
+                Plan { goal: GoalKind::Contract, target: Some(f), steps, started_tick: tick },
+                format!("Get known at {} (its board: {open} open; {far} tiles)", world.name_of(f)),
+            ))
+        }
+        Verb::WorkJob => {
+            let Some(c) = held_job(world, id) else { return no("no job held") };
+            let rec = &world.contracts[&c];
+            mk(None, vec![], format!("Go on with the {}", job_line(world, rec)))
+        }
+        Verb::Answer(made, take) => {
+            let Some(o) = offer_of(world, id, made) else { return no("the offer lapsed") };
+            let until = crate::time::clock(o.until);
+            let label =
+                if take { format!("Take it: {} (till {until})", o.line) } else { format!("Turn down: {}", o.line) };
+            mk(None, vec![], label)
+        }
     }
 }
 
+// ---------------------------------------------------------------------------
+// M18 P3: talk
+// ---------------------------------------------------------------------------
+
+/// `id` and `o` near enough to talk: one building, or the street within
+/// `[talk] street_tiles` (`goap::actions::street_beside`).
+pub fn beside(world: &World, id: EntityId, o: EntityId) -> bool {
+    let (a, b) = (here(world, id), here(world, o));
+    (a.is_some() && a == b) || crate::goap::actions::street_beside(world, id, o)
+}
+
+/// `id` asked `o` something within `[talk] again_hours`: `o` remembers a
+/// move of his (Persuaded, Threatened), or `id` was turned down by `o`.
+fn asked_lately(world: &World, id: EntityId, o: EntityId) -> bool {
+    let span = world.config.talk.again_hours * crate::time::TICKS_PER_HOUR;
+    let recent = |who: EntityId, by: EntityId, kinds: &[MemoryKind]| {
+        world.comp::<crate::components::Memory>(who).is_some_and(|m| {
+            m.entries
+                .iter()
+                .any(|e| e.subject == Some(by) && kinds.contains(&e.kind) && world.tick.saturating_sub(e.tick) < span)
+        })
+    };
+    recent(o, id, &[MemoryKind::Persuaded, MemoryKind::Threatened]) || recent(id, o, &[MemoryKind::Rejected])
+}
+
+/// A talk move's circumstance: the body can take an order, `o` is an adult
+/// beside him, not asked lately.
+fn talk_ready(world: &World, id: EntityId, o: EntityId) -> Result<(), String> {
+    if let Some(why) = refusal(world, id) {
+        return Err(why);
+    }
+    if !valid_person(world, id, o) {
+        return Err("nobody to talk to".into());
+    }
+    if !beside(world, id, o) {
+        return Err("not beside them (walk over first)".into());
+    }
+    if asked_lately(world, id, o) {
+        return Err("you asked them lately".into());
+    }
+    Ok(())
+}
+
+/// A talk verb's move and its line (`Err`: no move to make: nothing to lend,
+/// nothing on them, no post at their work).
+fn talk_move(world: &World, id: EntityId, verb: Verb) -> Result<(crate::word::SocialMove, String), String> {
+    use crate::word::{MoveKind, SocialMove, Stake};
+    let t = &world.config.talk;
+    let coins = |e: EntityId| world.comp::<Wallet>(e).map_or(0, |w| w.coins);
+    let mv = |target, kind, stake| SocialMove { actor: id, target, kind, stake };
+    match verb {
+        Verb::Befriend(o) => Ok((mv(o, MoveKind::Charm, Stake::Coins(0)), format!("Befriend {}", world.name_of(o)))),
+        Verb::Loan(o) => {
+            let n = t.loan_coins.min(coins(o) - t.loan_keep);
+            if n <= 0 {
+                return Err("they have nothing to spare".into());
+            }
+            Ok((mv(o, MoveKind::Persuade, Stake::Coins(n)), format!("Ask {} for a loan of {n}c", world.name_of(o))))
+        }
+        Verb::Threaten(o) => {
+            let n = t.threat_coins.min(coins(o));
+            if n <= 0 {
+                return Err("nothing on them".into());
+            }
+            Ok((mv(o, MoveKind::Intimidate, Stake::Coins(n)), format!("Lean on {} for {n}c", world.name_of(o))))
+        }
+        Verb::AskWorkOf(o) => {
+            let Some(e) = world.comp::<Job>(o).and_then(|j| j.employer) else {
+                return Err("they have no post".into());
+            };
+            let Some(role) = crate::systems::search::open_post(world, id, e) else {
+                return Err(format!("no post you could take at {}", world.name_of(e)));
+            };
+            let wage = world.config.wage(role);
+            Ok((
+                mv(o, MoveKind::Charm, Stake::Job { building: e, wage }),
+                format!("Ask {} to put in a word at {} ({})", world.name_of(o), world.name_of(e), role.label()),
+            ))
+        }
+        _ => Err("not a talk move".into()),
+    }
+}
+
+/// A Flirt's acceptance as exec rolls it (`exec::actions` Flirt).
+fn court_p(world: &World, id: EntityId, o: EntityId) -> f32 {
+    let aff = world.edge(id, o).map_or(0.0, |e| e.affinity);
+    let soc = world.comp::<crate::components::Personality>(o).map_or(0.5, |p| p.sociability);
+    (0.3 + aff + 0.2 * soc).clamp(0.0, 1.0)
+}
+
+/// A refused move: the pair cools and `id` remembers it.
+fn turned_down(world: &mut World, id: EntityId, o: EntityId) {
+    let d = world.config.talk.refused_affinity;
+    crate::systems::social::adjust(world, id, o, d, 0.0);
+    world.remember(id, MemoryKind::Rejected, Some(o), 0.4, -0.3, false);
+}
+
+/// The talk move made now, one roll (`moves::resolve`), its consequences;
+/// the line for the log (`Err`: refused before the roll).
+fn talk(world: &mut World, id: EntityId, verb: Verb) -> Result<String, String> {
+    let (m, what) = talk_move(world, id, verb)?;
+    let o = m.target;
+    talk_ready(world, id, o)?;
+    let out = crate::systems::moves::resolve(world, &m);
+    let (me, them) = (world.name_of(id), world.name_of(o));
+    let pct = format!("{:.0}%", 100.0 * out.p);
+    if out.refused {
+        turned_down(world, id, o);
+        return Ok(format!("{what}: {them} would not hear {me} out ({pct})"));
+    }
+    if !out.success {
+        turned_down(world, id, o);
+        let back = if out.backlash { format!("; {them} squares up to {me}") } else { String::new() };
+        return Ok(format!("{what}: no ({pct}){back}"));
+    }
+    let t = world.config.talk.clone();
+    let line = match (verb, m.stake) {
+        (Verb::Befriend(_), _) => {
+            crate::systems::social::adjust(world, id, o, t.befriend_affinity, t.befriend_trust);
+            world.remember(id, MemoryKind::Socialised, Some(o), 0.3, 0.3, false);
+            let aff = world.edge(id, o).map_or(0.0, |e| e.affinity);
+            format!("{them} warms to {me} (affinity {aff:+.2})")
+        }
+        (Verb::Loan(_), crate::word::Stake::Coins(n)) => {
+            let n = n.min(world.comp::<Wallet>(o).map_or(0, |w| w.coins));
+            if let Some(w) = world.comp_mut::<Wallet>(o) {
+                w.coins -= n;
+            }
+            if let Some(w) = world.comp_mut::<Wallet>(id) {
+                w.coins += n;
+            }
+            let (lo, _) = crate::components::edge_key(id, o);
+            let tick = world.tick;
+            let e = world.edge_entry(id, o);
+            e.debt += if lo == id { n as i32 } else { -(n as i32) };
+            e.debt_since.get_or_insert(tick);
+            e.last_interaction = tick;
+            world.remember(o, MemoryKind::Paid, Some(id), 0.5, 0.0, false);
+            world.remember(id, MemoryKind::Paid, Some(o), 0.5, 0.3, false);
+            format!("{them} lent {me} {n}c (a debt)")
+        }
+        (Verb::Threaten(_), crate::word::Stake::Coins(n)) => {
+            let n = n.min(world.comp::<Wallet>(o).map_or(0, |w| w.coins));
+            if let Some(w) = world.comp_mut::<Wallet>(o) {
+                w.coins -= n;
+            }
+            if let Some(w) = world.comp_mut::<Wallet>(id) {
+                w.coins += n;
+            }
+            crate::systems::social::robbed_by(world, o, id);
+            world.remember(o, MemoryKind::Threatened, Some(id), 0.6, -0.6, false);
+            let d = crate::systems::gossip::talk_district(world, o);
+            crate::systems::gossip::post_deed(world, d, crate::word::Deed::Extorted, Some(id), Some(o));
+            format!("{them} handed {me} {n}c, afraid")
+        }
+        (Verb::AskWorkOf(_), crate::word::Stake::Job { building: e, .. }) => {
+            crate::systems::search::tell_lead(world, id, e, o);
+            crate::systems::social::adjust(world, id, o, 0.0, 0.02);
+            // the ask at the door, walked to now (P2's AskWork row)
+            let at = world.name_of(e);
+            match plan_of(world, id, Verb::AskWork(e)) {
+                Ok((plan, label)) => {
+                    install_directed(world, id, plan, label);
+                    format!("{them} will put in a word for {me} at {at}: off to ask")
+                }
+                Err(why) => format!("{them} will put in a word for {me} at {at} ({why})"),
+            }
+        }
+        _ => what.clone(),
+    };
+    Ok(format!("{what} ({pct}): {line}"))
+}
+
+// ---------------------------------------------------------------------------
+// M18 P3: the board and the city's offers
+// ---------------------------------------------------------------------------
+
+/// A record as one line: the kind, the mark, the price, where, the deadline.
+fn job_line(world: &World, c: &crate::contract::Contract) -> String {
+    let from = match (c.broker, c.buyer) {
+        (Some(f), _) => format!("at {}", world.name_of(f)),
+        (None, Some(b)) => format!("from {}", world.owner_label(Some(b))),
+        (None, None) => "a public bounty".to_string(),
+    };
+    let per = if c.kind == crate::contract::ContractKind::Locate {
+        let left = if c.brokered() { format!(", {}c left", c.escrow) } else { String::new() };
+        format!(", {}c a sighting{left}", world.config.bounty.per_sighting)
+    } else {
+        String::new()
+    };
+    let away = crate::systems::contracts::mark_note(world, c).map_or(String::new(), |w| format!(" ({w})"));
+    format!(
+        "{} on {}: {}c{per}, {from}, by d{} {}{away}",
+        c.kind.label(),
+        world.name_of(c.target.id()),
+        c.price,
+        c.deadline / crate::time::TICKS_PER_DAY,
+        crate::time::clock(c.deadline)
+    )
+}
+
+/// The record `id` holds taken (taker or crew), if any.
+pub fn held_job(world: &World, id: EntityId) -> Option<u64> {
+    if let Some(r) = world.contract_runs.get(&id) {
+        return Some(r.contract);
+    }
+    world.by_party.get(&id)?.iter().copied().find(|c| {
+        world.contracts.get(c).is_some_and(|x| {
+            x.status == crate::contract::ContractStatus::Taken && (x.taker == Some(id) || x.crew.contains(&id))
+        })
+    })
+}
+
+/// The board: the record you hold, the open records you see
+/// (`contracts::visible`: a Fixer's regulars, the buyer's people, the
+/// public bounties; the ones you cannot take greyed with why), and the
+/// open Fixers nearest you where you are no regular (get known there).
+pub fn menu_board(world: &World, id: EntityId) -> Menu {
+    use crate::contract::ContractStatus;
+    let mut verbs: Vec<Verb> = Vec::new();
+    if held_job(world, id).is_some() {
+        verbs.push(Verb::WorkJob);
+    }
+    let mut open: Vec<(bool, i64, u64)> = crate::systems::contracts::visible(world, id)
+        .into_iter()
+        .filter_map(|c| world.contracts.get(&c).filter(|x| x.status == ContractStatus::Open).map(|x| (c, x.price)))
+        .map(|(c, price)| (crate::systems::contracts::player_take_refusal(world, id, c).is_some(), -price, c))
+        .collect();
+    open.sort();
+    verbs
+        .extend(open.into_iter().take(usize::from(world.config.fixers.board_size).max(8)).map(|(.., c)| Verb::Take(c)));
+    if let Some(at) = world.comp::<Position>(id).map(|p| p.tile) {
+        let mut fixers: Vec<(u32, EntityId)> = world
+            .buildings_of_kind(BuildingKind::Fixer)
+            .iter()
+            .copied()
+            .filter(|&f| crate::systems::contracts::fixer_open(world, f))
+            .filter(|&f| world.comp::<crate::contract::Broker>(f).is_some_and(|k| !k.regulars.contains_key(&id)))
+            .filter_map(|f| world.comp::<Building>(f).map(|b| (b.door.manhattan(at), f)))
+            .collect();
+        fixers.sort();
+        verbs.extend(fixers.into_iter().take(4).map(|(_, f)| Verb::Network(f)));
+    }
+    Menu { title: "the board".into(), rows: rows_with(world, id, verbs, |_| true) }
+}
+
+/// The city's offers standing for `id` (two rows each: take, turn down).
+pub fn menu_offers(world: &World, id: EntityId) -> Menu {
+    let offers = world
+        .comp::<Brain>(id)
+        .and_then(|b| b.player.as_ref())
+        .map(|p| p.offers.iter().filter(|o| o.until > world.tick).map(|o| o.made).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let verbs = offers.into_iter().flat_map(|m| [Verb::Answer(m, true), Verb::Answer(m, false)]);
+    Menu { title: "offers".into(), rows: rows_with(world, id, verbs, |_| false) }
+}
+
+fn offer_of(world: &World, id: EntityId, made: u64) -> Option<CityOffer> {
+    let p = world.comp::<Brain>(id)?.player.as_ref()?;
+    p.offers.iter().find(|o| o.made == made && o.until > world.tick).cloned()
+}
+
+/// The city offers `id` (a body the human drives) what it would write an
+/// NPC (`care::covers`, `underwater`'s draw); it stands until `until`.
+pub fn offer(world: &mut World, id: EntityId, what: OfferKind, until: crate::time::Tick, line: String) {
+    let tick = world.tick;
+    let Some(p) = world.comp_mut::<Brain>(id).and_then(|b| b.player.as_mut()) else { return };
+    p.offers.retain(|o| o.until > tick);
+    // two offers in one tick keep apart (the key is `made`)
+    let made = p.offers.iter().map(|o| o.made + 1).max().unwrap_or(tick).max(tick);
+    p.offers.push(CityOffer { made, until, what, line });
+}
+
+/// The human answers an offer: taken (the NPC's write runs), or turned down.
+fn answer(world: &mut World, id: EntityId, made: u64, take: bool) {
+    let Some(o) = offer_of(world, id, made) else { return refuse(world, id, "Answer", "the offer lapsed") };
+    if let Some(p) = world.comp_mut::<Brain>(id).and_then(|b| b.player.as_mut()) {
+        p.offers.retain(|x| x.made != made);
+    }
+    let name = world.name_of(id);
+    if !take {
+        world.push_event(EventKind::PlayerAction, &[id], format!("{name} turned down: {}", o.line));
+        return;
+    }
+    let done = match o.what {
+        OfferKind::Cover { employer, sick, until, .. } => {
+            crate::systems::care::take_cover(world, id, employer, sick, until)
+        }
+        OfferKind::Gang { gang, front } => crate::systems::underwater::take_front(world, id, gang, front),
+    };
+    match done {
+        Ok(()) => {
+            world.push_event(EventKind::PlayerAction, &[id], format!("{name} took it: {}", o.line));
+        }
+        Err(why) => refuse(world, id, "Take the offer", &why),
+    }
+}
+
+/// M18 P3 (`exec`'s plan end, a body the human drives, and the board's
+/// rows): the record the human set the body to work goes on: the Contract
+/// goal's next plan (`contracts::plan`: the walk to the mark's haunts, the
+/// asking, the stakeout, the strike), until the record closes.
+pub fn job_next(world: &mut World, id: EntityId) {
+    use crate::contract::ContractStatus;
+    let Some(b) = world.comp::<Brain>(id) else { return };
+    if !b.possessed() || b.plan.is_some() {
+        return;
+    }
+    let Some(c) = b.player.as_ref().and_then(|p| p.contract) else { return };
+    let name = world.name_of(id);
+    let rec = world.contracts.get(&c).cloned();
+    let mine = rec
+        .as_ref()
+        .is_some_and(|x| x.status == ContractStatus::Taken && (x.taker == Some(id) || x.crew.contains(&id)));
+    let end = |world: &mut World, text: String| {
+        if let Some(p) = world.comp_mut::<Brain>(id).and_then(|b| b.player.as_mut()) {
+            p.contract = None;
+            p.doing = None;
+        }
+        if let Some(b) = world.comp_mut::<Brain>(id) {
+            if b.current_goal == Some(GoalKind::Contract) {
+                b.current_goal = None;
+            }
+        }
+        world.push_event(EventKind::PlayerAction, &[id], text);
+    };
+    if !mine {
+        let how = rec.map_or("gone".to_string(), |x| match x.status {
+            ContractStatus::Open => "not taken".to_string(),
+            s => s.label().to_string(),
+        });
+        return end(world, format!("{name}: the job is over ({how})"));
+    }
+    if let Some(why) = think::held(world, id) {
+        return end(world, format!("{name}: the job waits ({why})"));
+    }
+    let tick = world.tick;
+    if let Some(b) = world.comp_mut::<Brain>(id) {
+        b.current_goal = Some(GoalKind::Contract);
+        b.goal_since = tick;
+    }
+    match crate::systems::contracts::plan(world, id) {
+        Some(plan) => {
+            let line = steps_line(&plan.steps);
+            plan::install(world, id, plan);
+            world.push_event(EventKind::PlayerAction, &[id], format!("{name}: the job goes on [{line}]"));
+        }
+        None => end(world, format!("{name}: no way to work the job now (queued, or the mark out of reach)")),
+    }
+}
+
+/// A directed plan from a row: the wheel taken, the plan installed and its
+/// shared things held (`plan::reserve_for`), the row's label on the HUD.
+fn install_directed(world: &mut World, id: EntityId, plan: Plan, label: String) {
+    take_wheel(world, id);
+    world.abort_plan(id);
+    let tick = world.tick;
+    if let Some(b) = world.comp_mut::<Brain>(id) {
+        b.current_goal = Some(plan.goal);
+        b.goal_since = tick;
+        if let Some(p) = b.player.as_mut() {
+            p.doing = Some(label.clone());
+        }
+    }
+    let line = steps_line(&plan.steps);
+    let held = Plan {
+        steps: plan.steps.iter().filter(|s| s.action != ActionKind::CheckIn).cloned().collect(),
+        ..plan.clone()
+    };
+    plan::install(world, id, plan);
+    plan::reserve_for(world, id, &held);
+    let name = world.name_of(id);
+    world.push_event(EventKind::PlayerAction, &[id], format!("{name}: {label} [{line}]"));
+}
+
 fn rows(world: &World, id: EntityId, verbs: impl IntoIterator<Item = Verb>) -> Vec<Row> {
+    rows_with(world, id, verbs, |_| false)
+}
+
+/// The legal rows of `verbs`; a verb `grey` names that cannot be done now
+/// is kept greyed with why (M18 P3), the rest dropped.
+fn rows_with(
+    world: &World,
+    id: EntityId,
+    verbs: impl IntoIterator<Item = Verb>,
+    grey: impl Fn(Verb) -> bool,
+) -> Vec<Row> {
     // a body that cannot take an order (in cuffs, sentenced, down) lists nothing
     if refusal(world, id).is_some() {
         return vec![];
     }
-    verbs.into_iter().filter_map(|v| plan_of(world, id, v).ok().map(|(_, label)| Row { verb: v, label })).collect()
+    verbs
+        .into_iter()
+        .filter_map(|v| match plan_of(world, id, v) {
+            Ok((_, label)) => Some(Row { verb: v, label, why_not: None }),
+            Err(why) if grey(v) => Some(Row { verb: v, label: name_of_verb(world, v), why_not: Some(why) }),
+            Err(_) => None,
+        })
+        .collect()
+}
+
+/// A greyed row's label: the verb's name without its numbers.
+fn name_of_verb(world: &World, v: Verb) -> String {
+    let n = |e: EntityId| world.name_of(e);
+    match v {
+        Verb::TakeBed(_) => "Take a bed here tonight".into(),
+        Verb::AskWork(_) => "Ask about work".into(),
+        Verb::Chat(o) => format!("Chat with {}", n(o)),
+        Verb::Befriend(o) => format!("Befriend {}", n(o)),
+        Verb::Court(o) => format!("Court {}", n(o)),
+        Verb::Loan(o) => format!("Ask {} for a loan", n(o)),
+        Verb::Threaten(o) => format!("Lean on {} for coins", n(o)),
+        Verb::AskWorkOf(o) => format!("Ask {} for work", n(o)),
+        // the mark's note is the greyed row's why already
+        Verb::Take(c) => world.contracts.get(&c).map_or("a job".into(), |x| {
+            let note = crate::systems::contracts::mark_note(world, x).map_or(String::new(), |w| format!(" ({w})"));
+            job_line(world, x).replace(&note, "")
+        }),
+        Verb::Network(f) => format!("Get known at {}", n(f)),
+        other => format!("{other:?}"),
+    }
 }
 
 /// The HUD's rows: what the body can do wherever it stands.
@@ -823,7 +1412,16 @@ pub fn menu_building(world: &World, id: EntityId, b: EntityId) -> Menu {
     if world.comp::<Job>(id).and_then(|j| j.employer) == Some(b) {
         verbs.push(Verb::Work);
     }
-    Menu { title: world.name_of(b), rows: rows(world, id, verbs) }
+    // M18 P3: a Hotel's or a cot house's bed and a workplace's ask stay,
+    // greyed with why, when they cannot be had (cots full, the post gone)
+    let grey = |v: Verb| match v {
+        Verb::TakeBed(h) => crate::systems::street::is_hotel(world, h),
+        Verb::AskWork(w) => {
+            world.comp::<Building>(w).is_some_and(|x| world.config.buildings.for_kind(x.kind).staff > 0)
+        }
+        _ => false,
+    };
+    Menu { title: world.name_of(b), rows: rows_with(world, id, verbs, grey) }
 }
 
 /// A click on `tile` (`on_building`: a roof or a wall, the nearest within
@@ -869,7 +1467,24 @@ pub fn menu_body(world: &World, id: EntityId, o: EntityId) -> Menu {
         let child = world.has::<Identity>(o) && !demography::is_adult(world, o);
         return Menu { title: if child { format!("{title} (a child)") } else { title }, rows: vec![] };
     }
-    Menu { title, rows: rows(world, id, [Verb::Chat(o), Verb::Attack(o)]) }
+    let verbs = [
+        Verb::WalkOver(o),
+        Verb::Chat(o),
+        Verb::Befriend(o),
+        Verb::Court(o),
+        Verb::Loan(o),
+        Verb::AskWorkOf(o),
+        Verb::Threaten(o),
+        Verb::Attack(o),
+    ];
+    // M18 P3: the talk rows stay, greyed with why (too far, nothing to lend)
+    let grey = |v: Verb| {
+        matches!(
+            v,
+            Verb::Chat(_) | Verb::Befriend(_) | Verb::Court(_) | Verb::Loan(_) | Verb::AskWorkOf(_) | Verb::Threaten(_)
+        )
+    };
+    Menu { title, rows: rows_with(world, id, verbs, grey) }
 }
 
 /// The human picked `verb`: its plan, made again now, runs as a directed
@@ -879,10 +1494,61 @@ pub fn act(world: &mut World, id: EntityId, verb: Verb) {
     if let Some(why) = refusal(world, id) {
         return refuse(world, id, &what, &why);
     }
+    match verb {
+        Verb::Befriend(_) | Verb::Loan(_) | Verb::Threaten(_) | Verb::AskWorkOf(_) => {
+            let name = world.name_of(id);
+            match talk(world, id, verb) {
+                Ok(line) => {
+                    world.push_event(EventKind::PlayerAction, &[id], format!("{name}: {line}"));
+                }
+                Err(why) => refuse(world, id, &what, &why),
+            }
+            return;
+        }
+        Verb::Answer(made, take) => return answer(world, id, made, take),
+        Verb::WorkJob => {
+            let Some(c) = held_job(world, id) else { return refuse(world, id, &what, "no job held") };
+            take_wheel(world, id);
+            world.abort_plan(id);
+            if let Some(p) = world.comp_mut::<Brain>(id).and_then(|b| b.player.as_mut()) {
+                p.contract = Some(c);
+            }
+            return job_next(world, id);
+        }
+        _ => {}
+    }
     let (plan, label) = match plan_of(world, id, verb) {
         Ok(p) => p,
         Err(why) => return refuse(world, id, &what, &why),
     };
+    if let Verb::Take(c) = verb {
+        let brokered = world.contracts.get(&c).is_some_and(|x| x.broker.is_some());
+        let now = world.tick;
+        if brokered {
+            // the fixer holds it for him while he comes (`contracts::plan`'s claim)
+            if let Some(x) = world.contracts.get_mut(&c) {
+                x.claimed = Some((id, now));
+            }
+            install_directed(world, id, plan, label);
+            if let Some(p) = world.comp_mut::<Brain>(id).and_then(|b| b.player.as_mut()) {
+                p.contract = Some(c);
+            }
+            return;
+        }
+        take_wheel(world, id);
+        world.abort_plan(id);
+        if crate::systems::contracts::player_take(world, id, c) {
+            if let Some(p) = world.comp_mut::<Brain>(id).and_then(|b| b.player.as_mut()) {
+                p.contract = Some(c);
+                p.doing = Some(label);
+            }
+            job_next(world, id);
+        }
+        return;
+    }
+    if let Verb::Network(_) = verb {
+        return install_directed(world, id, plan, label);
+    }
     if verb == Verb::Work {
         goal(world, id, GoalKind::Work);
         // M18 W: the directed Work runs the shift, plan after plan, to its

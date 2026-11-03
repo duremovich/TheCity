@@ -17,7 +17,8 @@
 //! `--play "T action; T action; .."` scripts a session through the same paths (a play session for a proof): at the
 //! first frame whose tick is T or later (`D:HH:MM` or a tick) it runs `click TX,TY` (the tile's top projected to the
 //! screen, then the click's own pick), `body INDEX|adult|child` (that drawn body, or the nearest adult or child to the
-//! subject: its chest projected, then the click's pick), `await` (the click's menu open), `pick TEXT` (the open
+//! subject: its chest projected, then the click's pick), `bld INDEX` (M18 P3: a building's menu, as a click on it),
+//! `await` (the click's menu open), `pick TEXT` (the open
 //! menu's first row containing TEXT; it waits for the menu), `do TEXT` (a HUD row), `close` (the menu), `zoom M`, `pitch DEG`, `yaw DEG`,
 //! `goal NAME`, `stop`, `auto on|off`, `pause`, `speed I`, `shot NAME` (a PNG with the HUD and the menu into `--out`)
 //! or `quit`.
@@ -113,7 +114,7 @@ pub fn add(app: &mut App, shared: Arc<Shared>, vcfg: &citysim::config::ViewCfg, 
             wait: 0,
         })
         .add_systems(Update, (keys, click, run_script))
-        .add_systems(EguiPrimaryContextPass, (hud, menu));
+        .add_systems(EguiPrimaryContextPass, (hud, menu, board));
 }
 
 fn set_speed(p: &mut Play, i: usize) {
@@ -292,8 +293,8 @@ fn goal_of(name: &str) -> Option<GoalKind> {
 }
 
 /// M18 P2: the open menu's (or the HUD's) first row whose label holds `text`.
-fn row_with(rows: &[(String, citysim::systems::player::Verb, Vec<String>)], text: &str) -> Option<citysim::systems::player::Verb> {
-    rows.iter().find(|r| r.0.contains(text)).map(|r| r.1)
+fn row_with(rows: &[crate::simthread::MenuRow], text: &str) -> Option<citysim::systems::player::Verb> {
+    rows.iter().find(|r| r.0.contains(text) && r.3.is_none()).map(|r| r.1)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -362,6 +363,15 @@ fn run_script(
                 Err(e) => info!("play script click ({}, {}): not on the screen ({e:?})", t[0], t[1]),
             }
         }
+        // M18 P3: a building's menu by its entity (the menu a click on it opens), at the screen's centre
+        "bld" => {
+            let index: u32 = arg.parse().expect("bld INDEX");
+            p.menu_open = None;
+            p.click_px = Vec2::new(480.0, 300.0);
+            let asked = p.shared.menu.lock().unwrap().as_ref().map_or(0, |m| m.seq);
+            p.menu_asked = asked;
+            p.shared.send(UiCmd::Bld(citysim::EntityId { index, generation: 0 }));
+        }
         "body" => {
             // INDEX, or `adult` / `child`: the drawn adult or child nearest the subject
             let Ok(cam) = cams.single() else { return };
@@ -385,7 +395,13 @@ fn run_script(
         }
         "pick" | "do" => {
             let found = if verb == "do" {
-                p.shared.player.lock().unwrap().as_ref().and_then(|h| row_with(&h.rows, arg))
+                // M18 P3: the HUD's rows, then the board's and the offers'
+                p.shared
+                    .player
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .and_then(|h| row_with(&h.rows, arg).or_else(|| row_with(&h.offers, arg)).or_else(|| row_with(&h.board, arg)))
             } else {
                 let m = p.shared.menu.lock().unwrap().clone();
                 m.filter(|m| p.menu_open.is_some_and(|(s, _)| s == m.seq)).and_then(|m| row_with(&m.rows, arg))
@@ -473,8 +489,15 @@ fn bar(ui: &mut bevy_egui::egui::Ui, name: &str, v: f32) {
     });
 }
 
-/// A menu row's button, its hover the will terms the verb waives.
-fn row_button(ui: &mut bevy_egui::egui::Ui, label: &str, waived: &[String]) -> bool {
+/// A menu row's button, its hover the will terms the verb waives; M18 P3: a row that cannot be done now is greyed,
+/// its reason beside it and its hover.
+fn row_button(ui: &mut bevy_egui::egui::Ui, row: &crate::simthread::MenuRow) -> bool {
+    let (label, _, waived, why_not) = row;
+    if let Some(why) = why_not {
+        let text = format!("{label}  ({why})");
+        ui.add_enabled(false, bevy_egui::egui::Button::new(text)).on_disabled_hover_text(why.as_str());
+        return false;
+    }
     let b = ui.button(label);
     let b = if waived.is_empty() { b } else { b.on_hover_text(format!("waived (the human's will):\n{}", waived.join("\n"))) };
     b.clicked()
@@ -517,10 +540,13 @@ fn hud(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
             ui.label(format!("plan: {}", h.plan));
             ui.label(format!("last failure: {}", h.failure.as_deref().unwrap_or("-")));
             ui.separator();
-            for (label, v, waived) in &h.rows {
-                if row_button(ui, label, waived) {
-                    p.shared.send(UiCmd::Act(*v));
+            for row in &h.rows {
+                if row_button(ui, row) {
+                    p.shared.send(UiCmd::Act(row.1));
                 }
+            }
+            if !h.offers.is_empty() {
+                ui.colored_label(egui::Color32::YELLOW, "an offer waits (the board)");
             }
             ui.horizontal_wrapped(|ui| {
                 if ui.button("Stop").clicked() {
@@ -571,9 +597,9 @@ fn menu(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
             if m.rows.is_empty() {
                 ui.label("nothing to do here");
             }
-            for (label, v, waived) in &m.rows {
-                if row_button(ui, label, waived) {
-                    picked = Some(*v);
+            for row in &m.rows {
+                if row_button(ui, row) {
+                    picked = Some(row.1);
                 }
             }
             ui.separator();
@@ -587,5 +613,39 @@ fn menu(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
     if close {
         p.menu_open = None;
     }
+    Ok(())
+}
+
+/// M18 P3: the board, bottom left: the city's offers (take or turn down), the job held, the open records the body sees
+/// (a Fixer's regulars, the buyer's people, the public bounties; what it cannot take greyed with why) and the Fixers
+/// to get known at. Hidden with nobody possessed.
+fn board(mut contexts: EguiContexts, p: Res<Play>) -> Result {
+    use bevy_egui::egui;
+    let ctx = contexts.ctx_mut()?;
+    let Some(h) = p.shared.player.lock().unwrap().clone() else { return Ok(()) };
+    let w = p.hud_width_px * 1.6;
+    egui::Window::new("the board").anchor(egui::Align2::LEFT_BOTTOM, [8.0, -8.0]).resizable(false).default_width(w).max_width(w).show(
+        ctx,
+        |ui| {
+            if !h.offers.is_empty() {
+                ui.strong("offers");
+                for row in &h.offers {
+                    if row_button(ui, row) {
+                        p.shared.send(UiCmd::Act(row.1));
+                    }
+                }
+                ui.separator();
+            }
+            ui.strong("jobs you see");
+            if h.board.is_empty() {
+                ui.label("nothing on any board you know");
+            }
+            for row in &h.board {
+                if row_button(ui, row) {
+                    p.shared.send(UiCmd::Act(row.1));
+                }
+            }
+        },
+    );
     Ok(())
 }

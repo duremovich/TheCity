@@ -2661,6 +2661,39 @@ pub struct PlayerControlled {
     /// other command, Stop, or the shift's end.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shift: Option<i64>,
+    /// M18 P3: the contract record the human set the body to work (taken at
+    /// a Fixer's desk, or taken and being worked): each of its plans that
+    /// ends is followed by the next (`player::job_next`), as the Contract
+    /// goal's would; cleared by any other command or the record's close.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract: Option<u64>,
+    /// M18 P3: what the city offers the body instead of writing it (a cover
+    /// shift, a gang's draw): the human takes it or lets it lapse.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub offers: Vec<CityOffer>,
+}
+
+/// M18 P3: an offer the city makes a body the human drives where it would
+/// write an NPC (`care::covers`' pick, `underwater`'s front draw): the same
+/// code decides who is offered; taking it runs the NPC's write.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CityOffer {
+    /// The tick it was made (its key in the menu).
+    pub made: Tick,
+    /// It lapses at this tick.
+    pub until: Tick,
+    pub what: OfferKind,
+    /// The menu row's line.
+    pub line: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum OfferKind {
+    /// A sick worker's post for the day (`care::covers`): the employer, the
+    /// sick body, the role, the cover's end.
+    Cover { employer: EntityId, sick: EntityId, role: Role, until: Tick },
+    /// A gang's front draws its staff (`underwater::fronts_daily`).
+    Gang { gang: EntityId, front: EntityId },
 }
 
 /// The pre-view pass phase 2 (docs/PREVIEW_PASS.md § 1): one shift's

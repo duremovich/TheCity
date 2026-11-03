@@ -46,15 +46,15 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::components::{
-    edge_key, Brain, Building, BuildingKind, Controller, Corp, Crime, Gang, GangMember, Identity, Job, Personality,
-    Position, Sentence, Wallet,
+    edge_key, Brain, Building, BuildingKind, Controller, Corp, Crime, Gang, GangMember, Identity, Job, OfferKind,
+    Personality, Position, Sentence, Wallet,
 };
 use crate::config::UnderwaterCfg;
 use crate::entity::EntityId;
 use crate::events::EventKind;
 use crate::systems::household::{PendingVisit, VisitWhy};
 use crate::systems::ownership::{self, Flow};
-use crate::time::TICKS_PER_DAY;
+use crate::time::{TICKS_PER_DAY, TICKS_PER_HOUR};
 use crate::world::World;
 
 const PURPOSE_CHOICE: u64 = 0x0b17_0001;
@@ -1216,6 +1216,25 @@ fn reopen(world: &mut World, b: EntityId) {
 // Fronts
 // ---------------------------------------------------------------------------
 
+/// M18 P3: `s` (a body the human drives) takes the front's offer: drawn
+/// into gang `g` as `fronts_daily` draws its staff. `Err`: why not now.
+pub fn take_front(world: &mut World, s: EntityId, g: EntityId, b: EntityId) -> Result<(), String> {
+    if !world.has::<Gang>(g) || world.owner_of(b) != Some(g) {
+        return Err("the gang no longer holds the front".into());
+    }
+    if world.has::<GangMember>(s) {
+        return Err("already in a gang".into());
+    }
+    if !crate::systems::demography::is_adult(world, s) || world.has::<Sentence>(s) {
+        return Err("not free to".into());
+    }
+    crate::systems::gang::enlist(world, s, g);
+    let text = format!("{} was drawn into {} working its front {}", world.name_of(s), name(world, g), world.name_of(b));
+    world.push_event(EventKind::UnderWater, &[s, g, b], text);
+    ownership::jobs2_row(world).uw_front_joins += 1;
+    Ok(())
+}
+
 fn fronts_daily(world: &mut World, c: &UnderwaterCfg) {
     let today = world.day();
     let fronts: Vec<(EntityId, EntityId)> = world.underwater.fronts.iter().map(|(&b, &g)| (b, g)).collect();
@@ -1241,6 +1260,21 @@ fn fronts_daily(world: &mut World, c: &UnderwaterCfg) {
             }
             let p = c.front_join_p * (1.0 - traits(world, s).lawful);
             if hash(world, PURPOSE_JOIN, s, today) < p {
+                // M18 P3: a body the human drives is offered the gang (the
+                // same draw); taking it is `take_front`.
+                if crate::systems::player::drives(world, s) {
+                    let line = format!("Join {} (it works its front {})", name(world, g), world.name_of(b));
+                    let lapse = world.tick + c.front_offer_hours * TICKS_PER_HOUR;
+                    crate::systems::player::offer(world, s, OfferKind::Gang { gang: g, front: b }, lapse, line);
+                    let text = format!(
+                        "{} working its front {} sounded {} out about joining",
+                        name(world, g),
+                        world.name_of(b),
+                        world.name_of(s)
+                    );
+                    world.push_event(EventKind::UnderWater, &[s, g, b], text);
+                    continue;
+                }
                 crate::systems::gang::enlist(world, s, g);
                 let text = format!(
                     "{} was drawn into {} working its front {}",

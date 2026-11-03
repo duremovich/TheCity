@@ -554,8 +554,12 @@ pub struct PlanCtx {
     pub haul_min_stock: u32,
     /// Wages owed right now (`days_unpaid >= 1`).
     pub wage_due: bool,
-    /// A co-located partner for Chat (the plan target, in the same building).
+    /// A co-located partner for Chat (the plan target, in the same building;
+    /// M18 P3: or beside the agent on the street, `street_partner`).
     pub partner: Option<EntityId>,
+    /// M18 P3: the plan target stands on the street within `[talk]
+    /// street_tiles` of the agent, both outside: Chat on the street.
+    pub street_partner: bool,
     /// The bound partner is here or at a Bar / Market the plan can walk to.
     pub partner_reachable: bool,
     pub gang_eligible: bool,
@@ -683,6 +687,15 @@ pub struct PlanCtx {
     pub beg_spot: bool,
     /// Door-to-door Manhattan distance from the agent to each reachable key.
     pub dist: BTreeMap<LocationKey, u32>,
+}
+
+/// M18 P3: `a` and `b` both stand on the street within `[talk]
+/// street_tiles` (Chebyshev) of each other: near enough to talk.
+pub fn street_beside(world: &World, a: EntityId, b: EntityId) -> bool {
+    let (Some(p), Some(q)) = (world.comp::<Position>(a), world.comp::<Position>(b)) else { return false };
+    p.building.is_none()
+        && q.building.is_none()
+        && p.tile.x.abs_diff(q.tile.x).max(p.tile.y.abs_diff(q.tile.y)) <= world.config.talk.street_tiles
 }
 
 impl PlanCtx {
@@ -1072,10 +1085,13 @@ impl PlanCtx {
             wage_due: job.is_some_and(|j| j.days_unpaid >= 1),
             partner: target.filter(|&t| {
                 world.has::<crate::components::Brain>(t)
-                    && world
+                    && (world
                         .comp::<Position>(t)
                         .is_some_and(|p| p.building.is_some() && p.building == pos.and_then(|q| q.building))
+                        || street_beside(world, agent, t))
             }),
+            street_partner: target
+                .is_some_and(|t| world.has::<crate::components::Brain>(t) && street_beside(world, agent, t)),
             partner_reachable: target.is_some_and(|t| {
                 world.has::<crate::components::Brain>(t)
                     && world.comp::<Position>(t).and_then(|p| p.building).is_some_and(|b| {
@@ -1450,8 +1466,10 @@ impl ActionKind {
             | ActionKind::Break
             | ActionKind::Unload
             | ActionKind::Court => true,
+            // M18 P3: or on the street beside the partner (`street_partner`).
             ActionKind::Chat => {
-                matches!(ws.at, LocationKey::Market | LocationKey::Bar | LocationKey::Home | LocationKey::Farm)
+                (matches!(ws.at, LocationKey::Market | LocationKey::Bar | LocationKey::Home | LocationKey::Farm)
+                    || (ws.at == LocationKey::Street && ctx.street_partner))
                     && ctx.partner.is_some()
             }
             // Flirt and Propose plan toward a partner who is here or at a Bar /

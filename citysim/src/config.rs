@@ -123,6 +123,9 @@ pub struct Config {
     /// M15 § 6 the social move (phase 2; `contradict_conf` from phase 1).
     #[serde(default)]
     pub moves: MovesCfg,
+    /// M18 P3 (the board and talk): the talk verbs' terms (`player::talk`).
+    #[serde(default)]
+    pub talk: TalkCfg,
     /// M15 § 6 competence and poaching (phase 2).
     #[serde(default)]
     pub competence: CompetenceCfg,
@@ -2276,6 +2279,9 @@ pub struct UnderwaterCfg {
     /// district hits it on `rival_hit_p` a week, taking up to `rival_take`
     /// from the gang and shutting it `rival_close_days`.
     pub front_join_p: f32,
+    /// M18 P3: a front's staff drawn who is a body a human drives is
+    /// offered the gang instead of enlisted; the offer stands this long.
+    pub front_offer_hours: u64,
     pub launder_share: f32,
     pub rival_hit_p: f32,
     pub rival_take: i64,
@@ -2354,6 +2360,7 @@ impl Default for UnderwaterCfg {
             front_lawful_max: 0.5,
             front_misery: 0.6,
             front_join_p: 0.1,
+            front_offer_hours: 24,
             launder_share: 0.3,
             rival_hit_p: 0.15,
             rival_take: 30,
@@ -3300,6 +3307,9 @@ pub struct CareCfg {
     pub cover_purse_days: i64,
     /// A cover is lawful enough to hire: lawfulness at or above this.
     pub cover_lawful: f32,
+    /// M18 P3: a cover picked who is a body a human drives is offered the
+    /// shift instead of hired; the offer stands this many hours.
+    pub cover_offer_hours: u64,
     // --- round 5 U6 (OPEN-217): the clinic's day
     /// A patient goes to a doctor's body on duty with room first (the
     /// Clinic's off-screen colleagues, present by the clock, took the pair
@@ -3441,6 +3451,7 @@ impl Default for CareCfg {
             ask_refused_days: 7,
             cover_purse_days: 3,
             cover_lawful: 0.3,
+            cover_offer_hours: 8,
             clinic_body_first: true,
             orderly_opens: true,
             clinic_spill: true,
@@ -11047,6 +11058,47 @@ impl Default for MovesCfg {
             backlash_courage: 0.6,
             backlash_fight: 0.3,
             contradict_conf: 0.3,
+        }
+    }
+}
+
+/// M18 P3 (docs/M18_PLAYER.md, the board and talk): the talk moves a body
+/// makes on another it stands beside (`player::talk`, rolled through
+/// `moves::resolve`). The Default mirrors `assets/config.toml` (the slice
+/// save was written before the section).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TalkCfg {
+    /// Two bodies on the street this near (Chebyshev tiles) can talk (Chat
+    /// and the moves); inside, the same building.
+    pub street_tiles: u16,
+    /// Befriend (a Charm): a success moves the pair's edge by these.
+    pub befriend_affinity: f32,
+    pub befriend_trust: f32,
+    /// Any refused move: the pair's affinity moves by this.
+    pub refused_affinity: f32,
+    /// Ask for a loan (a Persuade, `Stake::Coins`): this many coins, out of
+    /// what the lender holds above `loan_keep` (a debt on the edge).
+    pub loan_coins: i64,
+    pub loan_keep: i64,
+    /// Lean on them (an Intimidate, `Stake::Coins`): up to this many coins.
+    pub threat_coins: i64,
+    /// A body asked (any move, either outcome) is not asked again by the
+    /// same body for this many hours.
+    pub again_hours: u64,
+}
+
+impl Default for TalkCfg {
+    fn default() -> Self {
+        TalkCfg {
+            street_tiles: 2,
+            befriend_affinity: 0.15,
+            befriend_trust: 0.05,
+            refused_affinity: -0.05,
+            loan_coins: 5,
+            loan_keep: 10,
+            threat_coins: 8,
+            again_hours: 12,
         }
     }
 }

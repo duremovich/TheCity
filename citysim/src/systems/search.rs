@@ -509,12 +509,28 @@ pub fn door_ask_ticks(world: &World) -> Tick {
 /// M18 P2: a directed ask at `b`'s door settled (the `Vend` step with its
 /// door bound): as [`on_ask`] at that door, with no lead.
 pub fn ask_at(world: &mut World, id: EntityId, b: EntityId) {
+    // M18 P3: a door a friend told of (`tell_lead`) is asked with the lead.
+    let lead = today_of(world, id).filter(|s| s.board == Some(b)).and_then(|s| s.lead);
     if let Some(s) = today_mut(world, id) {
         s.tried.push(b);
         s.board = None;
         s.lead = None;
     }
-    settle(world, id, b, None);
+    settle(world, id, b, lead);
+}
+
+/// M18 P3 (ask for work, a talk move): `friend` told `id` of the post at
+/// `b`: today's door and its lead (the ask's line names him).
+pub fn tell_lead(world: &mut World, id: EntityId, b: EntityId, friend: EntityId) {
+    if let Some(s) = today_mut(world, id) {
+        s.board = Some(b);
+        s.lead = Some(friend);
+    }
+}
+
+/// M18 P3: the open post at `b` `id` can take (`demography::can_take`).
+pub fn open_post(world: &World, id: EntityId, b: EntityId) -> Option<Role> {
+    open_role(world, id, b)
 }
 
 /// The ask at `b` settled: taken on, turned away, or the board read.
