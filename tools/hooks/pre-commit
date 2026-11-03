@@ -4,8 +4,8 @@
 # The sim's packages only (never --all): the view crates (view/, Bevy) keep their
 # own view/rustfmt.toml and are checked by python tools/test.py view.
 # Install once: git config core.hooksPath tools/hooks
-if ! cargo fmt -p citysim -p citysim-app -p citysim-cli -- --check >/dev/null 2>&1; then
-  echo "pre-commit: cargo fmt -p citysim -p citysim-app -p citysim-cli -- --check failed; run it without --check and re-stage." >&2
+if ! cargo fmt -p citysim -p citysim-cli -- --check >/dev/null 2>&1; then
+  echo "pre-commit: cargo fmt -p citysim -p citysim-cli -- --check failed; run it without --check and re-stage." >&2
   exit 1
 fi
 exit 0

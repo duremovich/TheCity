@@ -7,7 +7,6 @@ The full v1 build spec lives in [docs/SPEC.md](docs/SPEC.md).
 ## Layout
 
 - `citysim` — headless simulation library
-- `citysim-app` — macroquad renderer and debug UI
 - `citysim-cli` — headless runner and calibration
 - `view/glclient`, `view/cityview` — the Bevy client (from TheCityGraphics, city milestone C1): workspace members
   outside `default-members`, built with `cargo build --release -p cityview`, checked by `python tools/test.py view`
@@ -16,7 +15,7 @@ The full v1 build spec lives in [docs/SPEC.md](docs/SPEC.md).
 
 ```
 cargo run -p citysim-cli -- run --days 30 --seed 42 --report
-cargo run -p citysim-app
+cargo run --release -p cityview -- --slice      # the player slice (docs/M18_PLAYER.md); needs the pre-run save
 ```
 
 `citysim-cli run` flags: `--days N --seed S` (required), `--report` (daily CSV on stdout), `--events` (events on stderr), `--population N` (override `[world] population`), `--map FILE` (override the map), `--lever "day=D:name=value"` (repeatable, e.g. `day=30:law_posture=crackdown`, `law_posture=auto` releases the pin), `--save-at T`, `--load FILE`, `--force-lod full|coarse|stat`, `--diag` (with `--events`: a daily line per Street Market and per corp), `--v1-profile` (the 300-resident v1 city).
@@ -41,9 +40,7 @@ M16a gives the city a **contract board** (`docs/M16_CONTRACTS.md`; always on): a
 
 The CSV since M16a adds, before `flow_import_out`: `contracts_open, contracts_posted, contracts_fulfilled, contracts_failed, contracts_expired, contracts_cancelled, reneged`, per kind `k_{hit,beat,guard,locate}_posted, k_…_done`, `hits_done, hits_squad, hits_solo_weak, strikes_declined_pol, sold_out, contract_murders, contract_cleared, contract_holes, contract_hole_wrong, accessory, interrogations, interrogations_won, bounties_paid, guards_on_take, fixer_runs, regulars, live_parties, live_queued, escrow_held, escrow_leak, escrow_stuck`, per Fixer slot `f{0..3}_heat` and `f{0..3}_income`, then `flow_escrow, flow_payout, flow_fixer_cut, contracts_refused_full`. `tools/analyze_run.py`'s M16a section reads them.
 
-`citysim-app` flags: `--seed`, `--load`, `--map FILE`, `--fps`, and the screenshot helpers `--start-tick T`, `--screenshot out.png` (frames the whole map unless something is selected), `--fit`, `--select INDEX`, `--select-kind Hideout` (a Rust `BuildingKind` name: `Market` is shown as Street Market, `Jail` as Precinct), `--select-name "First Last"`, `--tab story`, `--tab corp` (with `--select-kind`: open the panel of the corp owning the first building of that kind), `--no-autobind`. The City panel shows tier counts, open holes and the sim rate, one row per corp with a share bar per niche, the three classes (count, happiness, loyalty, submission, unrest) and the M11 levers (city rent per tier, rent cap, no city evictions); the event log has an "Unattributed" toggle that lists open holes and binds one on click. Clicking a corp (City panel, a building's owner, an inspector's employer) opens the Corp panel: niches with price level, share and monopoly flag, governance, exec, treasury and a 14-day cashflow sparkline, the bankruptcy countdown, the order and its trace, buildings, employees, contracts, Subsidise and Break up. Building outlines take the owner's colour (a corp's, a gang's, white for an agent, grey for the city); Lots are dashed. M14: `N` draws the Virt plane over the ghosted city (nodes coloured by ICE, Data glyphs, links, live runs as dots; a click selects a node or a run), the Node, Run and raid (Mission) panels, and the screenshot flags `--overlay virt`, `--select-node <index>`, `--select-runner` (the first jacked-in agent and its run), `--select-raid` (the first streamed raid).
 
-With `B` the app draws the eight districts (borders, a fill in the controller's colour, Contested hatched) and a click on a street tile opens the District panel (aggregates, control and its presences, the law's allocation, stance and trace, litter, unrest and riot state, the street, the district levers); `L` draws the litter heat. The City panel lists the districts (controller, guards, unrest, litter, crime) under the sanitation and riot-response levers. `citysim-app` also takes `--districts`, `--litter` and `--select-district <index>` for screenshots.
 
 The CSV (`--report`) since M11 adds rent and evictions (`evictions, rent_paid, rent_short, housed`), the money ledger per flow (`flow_food, flow_drink, flow_wages, flow_rent, flow_upkeep, flow_wholesale, flow_overflow, flow_restock, flow_contract, flow_tax, flow_dole, flow_other`), wealth (`wallets, wallet_gini, wallet_top10`), each seeded corp's `corpN_treasury, corpN_order` (slots 1-8, `0,-` once dissolved), `acquisitions, bankruptcies, monopolies, foundings, incorporations, strikes`, and the classes (`unrest_corp, unrest_street, unrest_dreg, class_corp, class_street, class_dreg, happiness_street`), all before `ticks_per_sec`. M12 adds, per district (columns `d1_` to `d8_`, d1 = Spire; the levers number districts 0-7), `d{i}_coverage, d{i}_control` (0 Contested, 1 City, 2 Gang, 3 Corp), `d{i}_litter` (share of street tiles visibly littered), `d{i}_unrest, d{i}_crime, d{i}_guards`, then `dregs, hotel_nights, squatters, derelicts, vagrancy, riots, crossfire, gangs`, also before `ticks_per_sec`.
 
@@ -91,7 +88,7 @@ The tiers, what each asserts and when to run it: [docs/TESTING.md](docs/TESTING.
 # every change (~1.5 min after compile): unit tests, determinism, saves, the person probes and core_sanity
 # (seeds 42-44 x 120 days: coin identity, collapse bounds, mechanism existence, the ticks/s floor)
 # (the default members only: never --workspace / --all, which compiles the Bevy client; python tools/test.py change)
-cargo fmt -p citysim -p citysim-app -p citysim-cli -- --check
+cargo fmt -p citysim -p citysim-cli -- --check
 cargo clippy --all-targets -- -D warnings
 cargo test --release
 # every merge, one at a time: the year (seed 42 x 365 days, ~2 min), the behaviour tier (the archetypes'

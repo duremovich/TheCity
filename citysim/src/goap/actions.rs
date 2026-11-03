@@ -560,6 +560,9 @@ pub struct PlanCtx {
     /// M18 P3: the plan target stands on the street within `[talk]
     /// street_tiles` of the agent, both outside: Chat on the street.
     pub street_partner: bool,
+    /// M18 P5 (Dylan 2026-11-03): the body is the player's on autopilot,
+    /// safe idle: no step that changes its story ([`ActionKind::safe_idle_ok`]).
+    pub safe_idle: bool,
     /// The bound partner is here or at a Bar / Market the plan can walk to.
     pub partner_reachable: bool,
     pub gang_eligible: bool,
@@ -1092,6 +1095,7 @@ impl PlanCtx {
             }),
             street_partner: target
                 .is_some_and(|t| world.has::<crate::components::Brain>(t) && street_beside(world, agent, t)),
+            safe_idle: crate::systems::player::safe_idle(world, agent),
             partner_reachable: target.is_some_and(|t| {
                 world.has::<crate::components::Brain>(t)
                     && world.comp::<Position>(t).and_then(|p| p.building).is_some_and(|b| {
@@ -1370,8 +1374,46 @@ impl ActionKind {
         }
     }
 
+    /// M18 P5 (Dylan 2026-11-03, autopilot is safe idle): a step the
+    /// player's body on autopilot may take. It eats, sleeps, works the job it
+    /// holds, begs and keeps out of trouble; it never steals, fights, joins,
+    /// deals, courts, signs or buys its way into a new life.
+    pub fn safe_idle_ok(self) -> bool {
+        !matches!(
+            self,
+            ActionKind::StealFood(_)
+                | ActionKind::StealVehicle
+                | ActionKind::Fence
+                | ActionKind::Attack
+                | ActionKind::Brawl
+                | ActionKind::Muster
+                | ActionKind::JoinGang
+                | ActionKind::Extort
+                | ActionKind::SplitLoot
+                | ActionKind::Strip
+                | ActionKind::Rip
+                | ActionKind::Abduct
+                | ActionKind::Deal
+                | ActionKind::BuyStims
+                | ActionKind::UseStim
+                | ActionKind::Flirt
+                | ActionKind::Propose
+                | ActionKind::Register
+                | ActionKind::Occupy
+                | ActionKind::BuyAsset
+                | ActionKind::Install
+                | ActionKind::JackIn
+                | ActionKind::SellData
+                | ActionKind::UpgradeDeck
+                | ActionKind::ReportCrime
+        )
+    }
+
     /// Symbolic preconditions against the observed state.
     pub fn preconditions(self, ws: &WorldState, ctx: &PlanCtx) -> bool {
+        if ctx.safe_idle && !self.safe_idle_ok() {
+            return false;
+        }
         let at = |k: LocationKey| ws.at == k;
         match self {
             ActionKind::GoTo(k) => ws.at != k && ctx.dist.contains_key(&k),

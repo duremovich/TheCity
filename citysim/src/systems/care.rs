@@ -1091,7 +1091,8 @@ fn covers(world: &mut World, c: &CareCfg) {
         };
         // M18 P3: a body the human drives is offered the shift (it lapses
         // uncovered); the foreman's pick is the same.
-        if crate::systems::player::drives(world, cv) {
+        // M18 P5: on autopilot too (safe idle takes no offer).
+        if crate::systems::player::possessed(world, cv) {
             let cn = world.name_of(cv);
             let line = format!("Cover {who}'s {role} shift at {at} for the day (the foreman's offer)");
             let lapse = now + c.cover_offer_hours * TICKS_PER_HOUR;

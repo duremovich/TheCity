@@ -1249,7 +1249,7 @@ pub fn take_front(world: &mut World, s: EntityId, g: EntityId, b: EntityId) -> R
     if !crate::systems::demography::is_adult(world, s) || world.has::<Sentence>(s) {
         return Err("not free to".into());
     }
-    crate::systems::gang::enlist(world, s, g);
+    crate::systems::gang::enlist_chosen(world, s, g);
     let text = format!("{} was drawn into {} working its front {}", world.name_of(s), name(world, g), world.name_of(b));
     world.push_event(EventKind::UnderWater, &[s, g, b], text);
     ownership::jobs2_row(world).uw_front_joins += 1;
@@ -1283,7 +1283,8 @@ fn fronts_daily(world: &mut World, c: &UnderwaterCfg) {
             if hash(world, PURPOSE_JOIN, s, today) < p {
                 // M18 P3: a body the human drives is offered the gang (the
                 // same draw); taking it is `take_front`.
-                if crate::systems::player::drives(world, s) {
+                // M18 P5: on autopilot too (safe idle takes no offer).
+                if crate::systems::player::possessed(world, s) {
                     let line = format!("Join {} (it works its front {})", name(world, g), world.name_of(b));
                     let lapse = world.tick + c.front_offer_hours * TICKS_PER_HOUR;
                     crate::systems::player::offer(world, s, OfferKind::Gang { gang: g, front: b }, lapse, line);

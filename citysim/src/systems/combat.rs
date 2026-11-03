@@ -733,7 +733,11 @@ fn fighter(world: &World, id: EntityId, stance: Stance, attacker: bool, bonus: f
         keren_used: 0,
         sandy_fired: false,
         cover: world.comp::<Position>(id).map_or(0.0, |p| cover_at(world, p.tile, p.building)),
-        want: ord.and_then(|o| o.want),
+        // M18 P5 (Dylan 2026-11-03): the player's body on autopilot breaks
+        // off at its first turn (a flight, else a yield).
+        want: ord
+            .and_then(|o| o.want)
+            .or_else(|| (!robot && crate::systems::player::safe_idle(world, id)).then_some(Want::Flee)),
         human: !robot && crate::systems::player::drives(world, id),
         shake: 0.0,
         struck: false,
@@ -977,6 +981,10 @@ fn duel_beats(
                             break;
                         }
                         note(&mut log, world.tick, d.beat, id, d.f[j].id, Blow::Stuck);
+                        // M18 P5: safe idle, cornered, gives up instead
+                        if crate::systems::player::safe_idle(world, id) {
+                            d.f[i].want = Some(Want::Yield);
+                        }
                         continue;
                     }
                     Want::Yield => {

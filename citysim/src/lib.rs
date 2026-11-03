@@ -2,7 +2,7 @@
 //!
 //! Everything deterministic lives here: the world, its components, the map,
 //! time, the seeded RNG, events, stats, save/load and the world systems.
-//! Rendering and I/O live in `citysim-app` and `citysim-cli`.
+//! Rendering and I/O live in `view/cityview` (the Bevy client) and `citysim-cli`.
 //!
 //! Rules (see `docs/SPEC.md` › Coding rules): no `HashMap`/`HashSet`, no
 //! `std::time`, every constant comes from `assets/config.toml`.

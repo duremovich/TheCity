@@ -1233,6 +1233,9 @@ fn pool_member(world: &World, id: EntityId, execs: &std::collections::BTreeSet<E
         // hired back by the pool at 00:11, five nights running, then lost
         // the street "holding a day post" or "away from every pitch").
         && crate::systems::vice::pimp_district(world, id).is_none()
+        // M18 P5: the player's body is hired only when it asks (P2's ask at
+        // the door); the pool never writes it a job.
+        && !crate::systems::player::possessed(world, id)
 }
 
 /// [`pick_candidate`]'s skill-ranked roles (the key has no distance).
@@ -1879,6 +1882,13 @@ pub fn spawn_immigrant(world: &mut World) -> EntityId {
     }
     let home = emptiest_home(world);
     arrive(world, Arrival { home, kind: ArrivalKind::Legacy, sex: None, surname: None, tile: None }, None)
+}
+
+/// M18 P5 ("arrive fresh"): one adult arrival at `tile` (else a random edge
+/// road), homeless, with an arrival's coins: the start menu's newcomer.
+pub fn arrive_at(world: &mut World, tile: Option<TilePos>) -> EntityId {
+    let kind = if crate::systems::wages::on(world) { ArrivalKind::Migrant } else { ArrivalKind::Legacy };
+    arrive(world, Arrival { home: None, kind, sex: None, surname: None, tile }, None)
 }
 
 /// Who an arrival is: M11's immigrant (any adult age, Skills 0.1) or a
