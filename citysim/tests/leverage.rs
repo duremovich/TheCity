@@ -312,7 +312,11 @@ fn test_protection_pays_weekly_and_stops_when_district_lost() {
     // Noodle Bar, incorporated, and the Hotel changed hands: the hold broke.
     // This test is the weekly payment: a purse that pays the weeks and
     // loses an estate sale to the corps' spare treasuries.
-    set_coins(&mut w, owner, 600);
+    // C3a (premise moved): with live fights the city at the test's start
+    // differs, and with 600 the owner bought a Car T1 (500) the minute the
+    // racket began and could not pay the next week. A purse under a car's
+    // price that pays the weeks.
+    set_coins(&mut w, owner, 450);
     // Shadow V4 batch 1: on the moved city the owner spent the 10,000 on a
     // founding and incorporated, so the Hotel changed hands (payer) and the
     // hold broke; she has just founded (the cooldown), and this is the

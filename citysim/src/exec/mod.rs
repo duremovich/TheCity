@@ -220,6 +220,10 @@ pub fn run(world: &mut World) {
         if brain.lod == Lod::Statistical || world.has::<crate::components::Sentence>(id) || brain.cuffed_by.is_some() {
             continue;
         }
+        // C3a: a body in a live engagement acts there (`combat::step`).
+        if !world.combat.engaged.is_empty() && world.combat.engaged.contains_key(&id) {
+            continue;
+        }
         // The island pass phase 6: a rider whose plan ended between two
         // stops rides on to the next one (`motion::alight`); he acts there.
         if !world.transit.held.is_empty() && world.transit.held.contains(&id) {

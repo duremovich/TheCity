@@ -1759,50 +1759,23 @@ pub fn resolve_fight_with(world: &mut World, a: EntityId, b: EntityId, kill_mult
 /// kills passes its owner as the killer (no crime is raised for it).
 pub fn resolve_fight_mods(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> (EntityId, EntityId, bool) {
     // Round 3 V12 fix (Dylan 2026-10-27, no child is harmed): the non-lethal
-    // backstop. No blow lands when either side is under 18: no rolls, no
-    // memories, no wounds; the attacker stands down (`(a, b, false)`). Counted
-    // like `kill_by`'s: `harm_blocked` above 0 is a pick site that missed.
-    if crate::systems::ages::is_protected(world, a) || crate::systems::ages::is_protected(world, b) {
-        crate::systems::ownership::jobs2_row(world).harm_blocked += 1;
-        return (a, b, false);
-    }
-    let out = fight_inner(world, a, b, mods);
-    // Round 6 V5 (TURF § 3): a holder's member beaten on his own blocks by
-    // another gang's provokes the holder (not inside a corner fight).
-    if world.config.turf.as_ref().is_some_and(|c| c.war.is_some()) {
-        crate::systems::turf::beaten(world, out.0, out.1);
-    }
-    // M14 V12: a body jacked in and attacked is dumped from its run.
-    if !world.runner_of.is_empty() {
-        for x in [a, b] {
-            crate::systems::virt::dump(world, x, "attacked in the chair");
-        }
-    }
-    out
-}
-
-fn fight_inner(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> (EntityId, EntityId, bool) {
-    if crate::systems::robots::is_robot(world, a) || crate::systems::robots::is_robot(world, b) {
-        return resolve_robot_fight(world, a, b, mods);
-    }
-    // M16b phase 3: a downed party is finished where it lies (no rolls).
-    if !world.wounded.is_empty() {
-        let (down_a, down_b) = (world.wounded.contains_key(&a), world.wounded.contains_key(&b));
-        if down_a != down_b {
-            let (winner, loser) = if down_b { (a, b) } else { (b, a) };
-            crate::systems::wounded::finish(world, loser, winner);
-            return (winner, loser, true);
-        }
-    }
-    // The combat model C1 (docs/COMBAT.md § 1): the beats, run to the end.
-    let out = crate::systems::combat::resolve_now(world, a, b, mods);
-    (out.winner, out.loser, out.died)
+    // backstop is the engagement's (`combat::build`): no blow lands when
+    // either side is under 18 (`(a, b, false)`, `harm_blocked` counted).
+    // C3a: a robot's one roll, a downed party finished, the beats, then
+    // `turf::beaten` and the chair's dump: `combat::instant`, `after_duel`.
+    let c = crate::systems::combat::clash_now(world, a, b, mods);
+    (c.winner, c.loser, c.died)
 }
 
 /// M13 D41: [`resolve_fight_mods`] with a robot on one side or both. The
 /// same `p_win` (the Kit terms read a robot's absent Kit as bare) and the
 /// same two world-stream rolls, the death roll only for an agent loser.
-fn resolve_robot_fight(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> (EntityId, EntityId, bool) {
+pub(crate) fn resolve_robot_fight(
+    world: &mut World,
+    a: EntityId,
+    b: EntityId,
+    mods: FightMods,
+) -> (EntityId, EntityId, bool) {
     let (fi, co) = (crate::systems::combat::power, courage);
     let (kit_a, kit_b) = (world.comp::<Kit>(a).cloned(), world.comp::<Kit>(b).cloned());
     let kitted = kit_a.as_ref().is_some_and(|k| !k.is_bare()) || kit_b.as_ref().is_some_and(|k| !k.is_bare());
@@ -1878,6 +1851,9 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
         // S3: two guards after one suspect (a collar and a claim): the
         // second to reach a cuffed suspect has nothing to do.
         || world.comp::<Brain>(suspect).and_then(|b| b.cuffed_by).is_some_and(|c| c != guard && c != suspect)
+        // C3a: a suspect already in a fight (the cuffs fought, a brawl) is
+        // taken when it ends.
+        || crate::systems::combat::engaged(world, suspect)
     {
         return false;
     }
@@ -1887,8 +1863,6 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
     let berserk = crate::systems::chrome::in_episode(world, suspect);
     // M14 V12: a runner dazed by a lost contest cannot contest the cuffs.
     let dazed = world.comp::<Brain>(suspect).and_then(|b| b.dazed_until).is_some_and(|t| t > world.tick);
-    // Round 9 Y2 (`OPEN-251`): the second guard who held him, when one did.
-    let mut helper: Option<EntityId> = None;
     if (courage > 0.7 || berserk) && !dazed {
         let mods = if berserk {
             FightMods {
@@ -1905,88 +1879,159 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
         // Shadow V4 bug 10: a suspect who loses the scuffle for the cuffs is
         // arrested, not assaulted (`FightMods::arrest`: a Lost memory
         // gossiped "Assaulted by <guard>" and fed dread and grudges).
-        let (mut winner, mut loser, mut died) = resolve_fight_mods(world, guard, suspect, mods);
-        // Pressure pass round 9, Y2 (`OPEN-251`): the guards at hand take
-        // their turn at him (`[justice] backup_reach`, `backup_max`); the
-        // arresting guard cuffs him when one of them wins. V17
-        // `joytoy_123639 d27 15:32-23:49`: five guards fought off one at a
-        // time, none with a second.
-        let mut fought = vec![guard];
-        if !died && winner != guard {
-            for p in backup_at_hand(world, guard, suspect) {
-                crate::systems::ownership::jobs2_row(world).backup_fights += 1;
-                fought.push(p);
-                let (w2, l2, d2) = resolve_fight_mods(world, p, suspect, mods);
-                (winner, loser, died) = (w2, l2, d2);
-                if died || winner == p {
-                    break;
-                }
-            }
+        // C3a: the scuffle is an engagement (live when both are Full: the
+        // guard's Arrest step waits it out); its end is `arrest_end`.
+        let tail = crate::systems::combat::Tail::Arrest { berserk };
+        let sides = [vec![guard], vec![suspect]];
+        return match crate::systems::combat::engage(world, sides, mods, tail, true, usize::MAX) {
+            crate::systems::combat::Begun::Live => false,
+            crate::systems::combat::Begun::Over(cuffed) => cuffed,
+        };
+    }
+    cuff(world, guard, suspect, None, berserk)
+}
+
+/// C3a, the arrest's per-duel tail: Pressure pass round 9, Y2
+/// (`OPEN-251`): the arresting guard fought off (alive, the suspect too),
+/// the guards at hand take their turn at him (`[justice] backup_reach`,
+/// `backup_max`): they join the guard's side in order. V17 `joytoy_123639
+/// d27 15:32-23:49`: five guards fought off one at a time, none with a
+/// second. A death on the guards' side ends it (none follow).
+pub(crate) fn arrest_duel(
+    world: &mut World,
+    e: &mut crate::systems::combat::Engagement,
+    c: &crate::systems::combat::Clash,
+) {
+    let (Some(guard), Some(suspect)) = (e.first[0], e.first[1]) else { return };
+    if c.loser == suspect {
+        return;
+    }
+    if c.died {
+        for x in std::mem::take(&mut e.sides[0]) {
+            world.combat.engaged.remove(&x);
         }
-        // The guard in the fight that ended it (the arresting one, or the
-        // second who took his turn).
-        let fighter = *fought.last().unwrap_or(&guard);
-        if died {
-            if loser == suspect {
-                // The suspect died resisting: nothing left to prosecute.
-                // Round 8 X1 (`OPEN-246`): the line says so, and the body's
-                // case names nobody (V16 `miserable_103693 d26 20:15`: the
-                // law named for the Murder the guard who had reported him).
-                let charge = wanted_for(world, suspect).map_or_else(
-                    || "an open warrant".to_string(),
-                    |c| format!("wanted for {}", charge_label(world, suspect, c)),
-                );
-                let text = format!(
-                    "{} died resisting arrest by the guard {} ({charge})",
-                    world.name_of(suspect),
-                    world.name_of(fighter)
-                );
-                world.push_event(EventKind::Assault, &[suspect, fighter], text);
-                crate::systems::demography::defended(world, suspect);
-                resolve_reports(world, suspect);
-                if berserk {
-                    crate::systems::chrome::ended_by_law(world, suspect, "killed by the law");
-                }
-            } else {
-                // The suspect killed the guard: a Murder, witnessed by whoever is near.
-                let tile = world.comp::<Position>(suspect).map_or(TilePos::default(), |p| p.tile);
-                file_report(world, Crime::Murder, suspect, None);
-                raise_crime_on(world, suspect, None, Some(fighter), Crime::Murder, tile);
-            }
-            return false;
+        return;
+    }
+    if c.a != guard {
+        return;
+    }
+    let id = world.combat.engaged.get(&suspect).copied();
+    for p in backup_at_hand(world, guard, suspect) {
+        if e.live && crate::systems::combat::engaged(world, p) {
+            continue;
         }
-        if winner == suspect {
-            if let Some(n) = world.comp_mut::<Needs>(suspect) {
-                n.safety = (n.safety - 0.3).max(0.0);
-            }
-            // Pressure pass round 3, S3 (OPEN-223): the line says it was an
-            // arrest resisted and for what ("fought off X" read as the
-            // sleeper attacked three times and booked for it).
+        e.sides[0].push(p);
+        if let (true, Some(id)) = (e.live, id) {
+            world.combat.engaged.insert(p, id);
+        }
+    }
+}
+
+/// C3a, the arrest's end (the scuffle's tail): the suspect dead resisting,
+/// the guard killed (a Murder), the guards fought off (backup called), the
+/// suspect fled on foot (no cuffs: the backup's chase), else the cuffs.
+/// Returns whether the arresting guard cuffed him.
+pub(crate) fn arrest_end(world: &mut World, e: &crate::systems::combat::Engagement, berserk: bool) -> bool {
+    let (Some(guard), Some(suspect)) = (e.first[0], e.first[1]) else { return false };
+    let c = e.result();
+    let (winner, loser, died) = (c.winner, c.loser, c.died);
+    // The guards who fought him, in turn; the one in the fight that ended it.
+    let mut fought: Vec<EntityId> = e.clashes.iter().filter(|x| x.fought).map(|x| x.a).collect();
+    fought.dedup();
+    if fought.is_empty() {
+        fought.push(guard);
+    }
+    if fought.len() > 1 {
+        crate::systems::ownership::jobs2_row(world).backup_fights += (fought.len() - 1) as u32;
+    }
+    let fighter = *fought.last().unwrap_or(&guard);
+    if !c.fought {
+        // No blow struck (a party gone): nobody is cuffed here.
+        return false;
+    }
+    if died {
+        if loser == suspect {
+            // The suspect died resisting: nothing left to prosecute.
+            // Round 8 X1 (`OPEN-246`): the line says so, and the body's
+            // case names nobody (V16 `miserable_103693 d26 20:15`: the
+            // law named for the Murder the guard who had reported him).
             let charge = wanted_for(world, suspect).map_or_else(
                 || "an open warrant".to_string(),
                 |c| format!("wanted for {}", charge_label(world, suspect, c)),
             );
-            let who = match fought.as_slice() {
-                [g] => format!("the guard {}", world.name_of(*g)),
-                gs => format!("the guards {}", gs.iter().map(|&g| world.name_of(g)).collect::<Vec<_>>().join(" and ")),
-            };
-            world.push_event(
-                EventKind::Assault,
-                &fought.iter().copied().chain(std::iter::once(suspect)).rev().collect::<Vec<_>>(),
-                format!("{} resisted arrest and fought off {who} ({charge})", world.name_of(suspect)),
+            let text = format!(
+                "{} died resisting arrest by the guard {} ({charge})",
+                world.name_of(suspect),
+                world.name_of(fighter)
             );
-            crate::systems::law_brain::push_shock(world, LawShock::GuardBeaten);
-            // Round 9 Y2 (`OPEN-251`): a guard fought off calls for a second
-            // (the nearest free guard on shift who can chase him: the
-            // chase's hand-on, his collar), so the next try is two.
-            call_backup(world, guard, suspect);
-            return false;
+            world.push_event(EventKind::Assault, &[suspect, fighter], text);
+            crate::systems::demography::defended(world, suspect);
+            resolve_reports(world, suspect);
+            if berserk {
+                crate::systems::chrome::ended_by_law(world, suspect, "killed by the law");
+            }
+        } else {
+            // The suspect killed the guard: a Murder, witnessed by whoever is near.
+            let tile = world.comp::<Position>(suspect).map_or(TilePos::default(), |p| p.tile);
+            file_report(world, Crime::Murder, suspect, None);
+            raise_crime_on(world, suspect, None, Some(fighter), Crime::Murder, tile);
         }
-        if fought.len() > 1 {
-            crate::systems::ownership::jobs2_row(world).backup_cuffed += 1;
-            helper = Some(fighter);
-        }
+        return false;
     }
+    let charge = |world: &World| {
+        wanted_for(world, suspect).map_or_else(
+            || "an open warrant".to_string(),
+            |c| format!("wanted for {}", charge_label(world, suspect, c)),
+        )
+    };
+    if winner == suspect {
+        if let Some(n) = world.comp_mut::<Needs>(suspect) {
+            n.safety = (n.safety - 0.3).max(0.0);
+        }
+        // Pressure pass round 3, S3 (OPEN-223): the line says it was an
+        // arrest resisted and for what ("fought off X" read as the
+        // sleeper attacked three times and booked for it).
+        let charge = charge(world);
+        let who = match fought.as_slice() {
+            [g] => format!("the guard {}", world.name_of(*g)),
+            gs => format!("the guards {}", gs.iter().map(|&g| world.name_of(g)).collect::<Vec<_>>().join(" and ")),
+        };
+        world.push_event(
+            EventKind::Assault,
+            &fought.iter().copied().chain(std::iter::once(suspect)).rev().collect::<Vec<_>>(),
+            format!("{} resisted arrest and fought off {who} ({charge})", world.name_of(suspect)),
+        );
+        crate::systems::law_brain::push_shock(world, LawShock::GuardBeaten);
+        // Round 9 Y2 (`OPEN-251`): a guard fought off calls for a second
+        // (the nearest free guard on shift who can chase him: the
+        // chase's hand-on, his collar), so the next try is two.
+        call_backup(world, guard, suspect);
+        return false;
+    }
+    if c.end == crate::systems::combat::End::Fled {
+        // C3a: he broke and ran (C1 cuffed him all the same): no cuffs; the
+        // second guard's chase takes him on as his collar.
+        let charge = charge(world);
+        let text =
+            format!("{} broke from the guard {} and ran ({charge})", world.name_of(suspect), world.name_of(fighter));
+        world.push_event(EventKind::Assault, &[suspect, fighter], text);
+        crate::systems::ownership::jobs2_row(world).arrest_escapes += 1;
+        call_backup(world, guard, suspect);
+        return false;
+    }
+    let helper = (fought.len() > 1).then(|| {
+        crate::systems::ownership::jobs2_row(world).backup_cuffed += 1;
+        fighter
+    });
+    if !living(world, suspect) || world.has::<Sentence>(suspect) {
+        return false;
+    }
+    cuff(world, guard, suspect, helper, berserk)
+}
+
+/// The cuffs go on: `guard` (or, laid out, `helper`, the second who held
+/// him) walks him in. Returns whether the arresting guard cuffed him.
+fn cuff(world: &mut World, guard: EntityId, suspect: EntityId, helper: Option<EntityId>, berserk: bool) -> bool {
     // Round 9 Y2: the arresting guard laid out, the second who held him
     // walks him in (the first's step fails; the second replans to escort).
     let cuffer = match helper {

@@ -862,14 +862,17 @@ pub fn gang_harvest_target(world: &World, gang: EntityId) -> Option<EntityId> {
 /// victim to the abductor (the M9 escort drag); a victim killed in the
 /// fight is carried as a corpse. Either way an Abduction is raised.
 pub fn abduct(world: &mut World, agent: EntityId, victim: EntityId) -> bool {
-    abduct_within(world, agent, victim, 1)
+    abduct_within(world, agent, victim, 1).unwrap_or(false)
 }
 
 /// [`abduct`] from up to `reach` tiles (M16b phase 2: a contract's
 /// abductor closes in from its stake-out, as an `Attack` does).
-pub fn abduct_within(world: &mut World, agent: EntityId, victim: EntityId, reach: u32) -> bool {
+/// C3a: `None` while the fight is live (the Abduct step holds; the
+/// verdict comes back through `combat::take_done`); the tail is
+/// [`abduct_end`].
+pub fn abduct_within(world: &mut World, agent: EntityId, victim: EntityId, reach: u32) -> Option<bool> {
     if !crate::systems::law::living(world, victim) || !crate::systems::law::near(world, agent, victim, reach) {
-        return false;
+        return Some(false);
     }
     // Jobs & lives phase 8 (the scavs; un-gated at the phase-8 review, a
     // bug in the general abduction code): a victim already in someone's
@@ -877,7 +880,7 @@ pub fn abduct_within(world: &mut World, agent: EntityId, victim: EntityId, reach
     // second abductor's step begun before the first won completed after
     // and took the victim from the first, whose Rip then failed).
     if world.comp::<Brain>(victim).and_then(|b| b.cuffed_by).is_some_and(|c| c != agent) {
-        return false;
+        return Some(false);
     }
     let bonus: f32 = world
         .gang_of(agent)
@@ -891,7 +894,21 @@ pub fn abduct_within(world: &mut World, agent: EntityId, victim: EntityId, reach
         .map(|m| crate::systems::combat::power(world, m))
         .sum();
     let mods = crate::systems::law::FightMods { a_bonus: bonus, ..Default::default() };
-    let (winner, _, died) = crate::systems::law::resolve_fight_mods(world, agent, victim, mods);
+    match crate::systems::combat::fight(world, agent, victim, mods, crate::systems::combat::Tail::Abduct { victim }) {
+        crate::systems::combat::Begun::Live => None,
+        crate::systems::combat::Begun::Over(taken) => Some(taken),
+    }
+}
+
+/// C3a, the abduction's tail: the Abduction raised; a win cuffs the victim
+/// to the abductor (or he carries the corpse). True: taken.
+pub(crate) fn abduct_end(
+    world: &mut World,
+    agent: EntityId,
+    victim: EntityId,
+    c: &crate::systems::combat::Clash,
+) -> bool {
+    let (winner, died) = (c.winner, c.died);
     let tile = world.comp::<Position>(agent).map_or_else(Default::default, |p| p.tile);
     if crate::systems::law::living(world, agent) {
         crate::systems::law::raise_crime(world, agent, Some(victim), crate::components::Crime::Abduction, tile);

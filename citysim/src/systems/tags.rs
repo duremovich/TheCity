@@ -361,7 +361,13 @@ pub fn patrol(world: &mut World, g: EntityId) -> Option<EntityId> {
 /// The member's attack on a found adult, as the exec's `Attack`: the
 /// fight, the Assault (or Murder) event and crime.
 fn attack(world: &mut World, m: EntityId, a: EntityId, tile: crate::components::TilePos) {
-    let (_, loser, died) = law::resolve_fight(world, m, a);
+    // C3a: live when both are Full; the tail is `attack_end`.
+    crate::systems::combat::fight(world, m, a, Default::default(), crate::systems::combat::Tail::Scan { tile });
+}
+
+/// C3a, the patrol's attack's tail: the Assault (or Murder) line and crime.
+pub(crate) fn attack_end(world: &mut World, tile: crate::components::TilePos, c: &crate::systems::combat::Clash) {
+    let (m, a, loser, died) = (c.a, c.b, c.loser, c.died);
     let murder = died && loser == a;
     let crime = if murder { crate::components::Crime::Murder } else { crate::components::Crime::Assault };
     let text = format!("{} attacked {} for their chrome", world.name_of(m), world.name_of(a));

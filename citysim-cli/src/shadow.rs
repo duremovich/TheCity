@@ -4983,8 +4983,10 @@ fn follow_saving(
         tracks.push(t);
     }
     let end_tick = start_tick + days * TICKS_PER_DAY;
-    let save_now = |world: &World| -> Result<(), String> {
+    let save_now = |world: &mut World| -> Result<(), String> {
         if let Some(s) = saves.filter(|s| s.ticks.contains(&world.tick)) {
+            // C3a: the live fights end before the save (engagements are not saved).
+            citysim::systems::combat::settle_all(world);
             let path = citysim::save::save_path(&s.dir, s.seed, world.tick);
             citysim::save::save_to_file(world, &path).map_err(|e| format!("save {}: {e}", path.display()))?;
             eprintln!("saved {}", path.display());

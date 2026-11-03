@@ -547,7 +547,10 @@ use crate::world::World;
 /// (`[weapons]` lost `weapon_w` and `kill_w`). A 128 save need not load.
 /// 130 (the combat model C2): `Wound.heal_at` and `aided`, `Wounds.marks` (`Mark`: scars, maims, lost limbs);
 /// `[combat]`'s age, training and wounds-that-last keys (serde defaults).
-pub const SAVE_VERSION: u16 = 130;
+/// 131 (the combat model C3a, the live engagement): `World.engagements` and its indices are not saved (a save
+/// resolves every live fight first, `combat::settle_all`); the `[combat]` keys `beats_per_tick`, `reach_tiles`,
+/// `log_beats` and the `Jobs2Cols` `live_fights` ... `fled_runs` columns (serde defaults).
+pub const SAVE_VERSION: u16 = 131;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

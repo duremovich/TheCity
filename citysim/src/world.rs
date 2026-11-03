@@ -1399,6 +1399,10 @@ pub struct World {
     /// `(winner, loser, died)` every caller reads. Not saved.
     #[serde(skip)]
     pub last_fight: Option<crate::systems::combat::FightOutcome>,
+    /// C3a: the live engagements and their indices (`combat::Live`); not
+    /// saved (a save resolves them first, `combat::settle_all`).
+    #[serde(skip)]
+    pub combat: Box<crate::systems::combat::Live>,
     /// M16b phase 3: client -> its Trauma corp, from the `Standing` Trauma
     /// records (rebuilt on load, `wounded::reindex`).
     #[serde(skip)]
@@ -2104,6 +2108,7 @@ impl World {
             wounds: Vec::new(),
             hurt: BTreeSet::new(),
             last_fight: None,
+            combat: Box::default(),
             bins: BTreeSet::new(),
             rumours: Vec::new(),
             regard: BTreeMap::new(),
@@ -4177,6 +4182,9 @@ impl World {
         crate::prof::timed!("tick::think", systems::think::run(self));
         crate::prof::timed!("tick::plan", systems::plan::run(self));
         crate::prof::timed!("tick::exec", crate::exec::run(self));
+        // C3a: the live engagements' beats (after exec: a fight begun by a
+        // step this tick runs its first beats now).
+        crate::prof::timed!("tick::engage", systems::combat::step(self));
         crate::prof::timed!("tick::transit", systems::transit::run(self));
         crate::prof::timed!("tick::virt", systems::virt::run(self));
         crate::prof::timed!("tick::ownership", systems::ownership::run(self));

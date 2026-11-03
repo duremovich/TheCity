@@ -629,7 +629,22 @@ fn reckoning(world: &mut World, c: &CrewCfg, enforcer: EntityId, call: Call, wal
         return;
     }
     let mods = law::FightMods { kill_mult: c.beat_kill_mult, ..Default::default() };
-    let (winner, loser, died) = law::resolve_fight_mods(world, enforcer, target, mods);
+    // C3a: live when both are Full; the tail is `reckoning_end`.
+    let tail = crate::systems::combat::Tail::Reckoning(Box::new(Reckon { call, walked }));
+    crate::systems::combat::fight(world, enforcer, target, mods, tail);
+}
+
+/// C3a: a reckoning being fought, for its tail.
+#[derive(Clone, Debug)]
+pub struct Reckon {
+    pub call: Call,
+    pub walked: bool,
+}
+
+/// C3a, the reckoning's tail: the line, the crime, the colours lost.
+pub(crate) fn reckoning_end(world: &mut World, x: &Reckon, c: &crate::systems::combat::Clash) {
+    let (enforcer, target, walked, call) = (c.a, c.b, x.walked, x.call.clone());
+    let (winner, loser, died) = (c.winner, c.loser, c.died);
     let (en, tn) = (world.name_of(enforcer), world.name_of(target));
     let how = if walked { "came for" } else { "caught up with" };
     let fight = if winner == enforcer {

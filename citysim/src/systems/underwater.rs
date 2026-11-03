@@ -928,12 +928,33 @@ pub fn dunned(world: &mut World, who: EntityId, owner: EntityId, walked: bool) {
     }
     let tile = world.comp::<Position>(owner).map_or_else(Default::default, |p| p.tile);
     let mods = crate::systems::law::FightMods { kill_mult: c.collector_kill_mult, ..Default::default() };
-    let (winner, loser, died) = crate::systems::law::resolve_fight_mods(world, who, owner, mods);
-    let text = format!(
-        "{} {how} {place} to collect on {whose}: {} had {took}c of the {arrears}c; {} gave a beating{}",
+    let head = format!(
+        "{} {how} {place} to collect on {whose}: {} had {took}c of the {arrears}c; {} gave a beating",
         world.name_of(who),
         world.name_of(owner),
         world.name_of(who),
+    );
+    // C3a: live when both are Full; the tail is `dun_end`.
+    let tail = Dun { head, lender: l.lender, tile };
+    crate::systems::combat::fight(world, who, owner, mods, crate::systems::combat::Tail::Dun(Box::new(tail)));
+}
+
+/// C3a: a collector's beating being fought, for its tail.
+#[derive(Clone, Debug)]
+pub struct Dun {
+    pub head: String,
+    pub lender: EntityId,
+    pub tile: crate::components::TilePos,
+}
+
+/// C3a, the collector's beating's tail: the line, the crime.
+pub(crate) fn dun_end(world: &mut World, x: &Dun, cl: &crate::systems::combat::Clash) {
+    let Some(c) = cfg(world).cloned() else { return };
+    let (who, owner) = (cl.a, cl.b);
+    let (winner, loser, died) = (cl.winner, cl.loser, cl.died);
+    let text = format!(
+        "{}{}",
+        x.head,
         if winner != who {
             format!(" (fought back: {} won)", world.name_of(winner))
         } else if died && loser == owner {
@@ -942,9 +963,9 @@ pub fn dunned(world: &mut World, who: EntityId, owner: EntityId, walked: bool) {
             String::new()
         }
     );
-    world.push_event(EventKind::Loan, &[who, owner, l.lender], text);
+    world.push_event(EventKind::Loan, &[who, owner, x.lender], text);
     ownership::jobs2_row(world).uw_beatings += 1;
-    crime(world, &c, who, owner, died && loser == owner, tile);
+    crime(world, &c, who, owner, died && loser == owner, x.tile);
 }
 
 /// The Assault (or the Murder) of a scene, the victim's grudge and report.
@@ -1432,15 +1453,16 @@ pub fn confronted(world: &mut World, worker: EntityId, owner: EntityId, walked: 
     if g >= c.fight_grudge {
         let tile = world.comp::<Position>(owner).map_or_else(Default::default, |p| p.tile);
         let mods = crate::systems::law::FightMods { kill_mult: c.confront_kill_mult, ..Default::default() };
-        let (winner, loser, died) = crate::systems::law::resolve_fight_mods(world, worker, owner, mods);
-        let text = format!(
-            "{head}: {on} {reason}; {wn} swung (grudge {g:.2}); {} won{}",
-            world.name_of(winner),
-            if died { format!(", {} died", world.name_of(loser)) } else { String::new() }
+        // C3a: live when both are Full; the tail is `confront_end`.
+        let line = format!("{head}: {on} {reason}; {wn} swung (grudge {g:.2})");
+        let tail = Confront { line, actors, tile };
+        crate::systems::combat::fight(
+            world,
+            worker,
+            owner,
+            mods,
+            crate::systems::combat::Tail::Confront(Box::new(tail)),
         );
-        world.push_event(EventKind::Confronted, &actors, text);
-        ownership::jobs2_row(world).uw_confront_fights += 1;
-        crime(world, &c, worker, owner, died && loser == owner, tile);
         return;
     }
     if traits(world, worker).lawful >= c.report_lawful {
@@ -1454,6 +1476,30 @@ pub fn confronted(world: &mut World, worker: EntityId, owner: EntityId, walked: 
     }
     let text = format!("{head}: {on} {reason}; {wn} left with nothing (grudge {g:.2})");
     world.push_event(EventKind::Confronted, &actors, text);
+}
+
+/// C3a: a stiffed worker's swing being fought, for its tail.
+#[derive(Clone, Debug)]
+pub struct Confront {
+    pub line: String,
+    pub actors: Vec<EntityId>,
+    pub tile: crate::components::TilePos,
+}
+
+/// C3a, the stiffed worker's swing's tail: the line, the crime.
+pub(crate) fn confront_end(world: &mut World, x: &Confront, cl: &crate::systems::combat::Clash) {
+    let Some(c) = cfg(world).cloned() else { return };
+    let (worker, owner) = (cl.a, cl.b);
+    let (winner, loser, died) = (cl.winner, cl.loser, cl.died);
+    let text = format!(
+        "{}; {} won{}",
+        x.line,
+        world.name_of(winner),
+        if died { format!(", {} died", world.name_of(loser)) } else { String::new() }
+    );
+    world.push_event(EventKind::Confronted, &x.actors, text);
+    ownership::jobs2_row(world).uw_confront_fights += 1;
+    crime(world, &c, worker, owner, died && loser == owner, x.tile);
 }
 
 /// The Visit's urgency for the two calls (0 without the section).

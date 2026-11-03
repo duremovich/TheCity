@@ -3861,6 +3861,9 @@ fence_frac = 0.4                   # the fence pays this of an item's value (int
 # leg]. Placeholders (no fine-tuning, 2026-10-07).
 [combat]
 max_beats = 10                     # beats a fight runs at most (~10 s each); then the lower morale gives way
+beats_per_tick = 6                 # C3a: a live fight (every party Full) runs this many beats a tick (combat::step, after exec)
+reach_tiles = 4                    # C3a: a live duel's two within this (or one building) at its start: one moved out has fled
+log_beats = 24                     # C3a: the engagement's ring log of beats (the view's replay in C4)
 hit_base = 0.4                     # p_hit = hit_base + attack_w x skill + accuracy x quality + the stance's attack ...
 attack_w = 0.6                     # ... (the skill: melee + Kit fighting, or shooting with a ranged kind; x the arms' wounds) ...
 evade_w = 0.5                      # ... - evade_w x (evasion + reflex_evade x Kit reflex, x the legs' wounds, + the stance's evade) ...

@@ -318,6 +318,61 @@ These come later: ranged (§ 7, with addendum 24) and the blast (§ 8, with netr
 - **Not done:** no street medic; robot fights still deal no wounds; a lost limb leaves the post open to a manual worker
   once the stump heals (`[ages]` maim's output cut, no refusal).
 
+**C3a as built (2026-11-03; deviations, `OPEN-179`).**
+- **The engagement is a chain of duels.** `combat::Engagement` holds two sides of members in order; the fronts fight
+  C1's duel (`duel_start`, `duel_beats`, `duel_end`: `resolve_now` is the same three in one call), a loser leaves his
+  side and the next steps up. One-on-one callers are a side of one each; a gang raid's brawl is its raiders against
+  its defenders, the strongest first, so `raid::fight_out`'s pairings and tally are the engagement's (`losses`,
+  `deaths`, `beaten`). C3b's joiners append to a side; nothing caps one body against many.
+- **Live or at once.** `combat::engage` (`fight` for one-on-one) makes it live when every party is a Full body in no
+  other fight; in camera range (the ring holds a party, or the human drives one) a party not Full is promoted first
+  (`lod::set_lod_at`). Else it runs to its end in the call. The live ones (`World::combat`, a boxed `combat::Live`) run `beats_per_tick` beats a tick
+  in `combat::step`, right after exec (a fight begun by a step runs its first beats that tick). A body in one
+  (`Live::engaged`) neither thinks (`think::held`: "in a fight") nor steps (exec skips it); a pending member waits
+  his turn there too. A party gone (dead of something else, cuffed, taken in, under 18) leaves his side; one demoted
+  from Full has the rest resolved at once; a duellist who moved out of `reach_tiles` of the other (they began
+  within it) has fled. The ring log (`log_beats`, `BeatLog`: miss, hit by region and severity, broke) is kept for
+  C4; a duel's Fight line is unchanged.
+- **One tail per caller** (`combat::Tail`, run by `end` whether live or not): the Attack (`actions::attack_end`) and
+  its contract guard (`attack_guard_end`), the abduction (`chrome::abduct_end`), the guard over a corpse, the arrest
+  (`law::arrest_end`, the backups as `arrest_duel`'s joiners), the blackmailed culprit's silencing
+  (`consequence::silence_end`), the cells (`cell_fight_end`), the crew's reckoning (`crew::reckoning_end`), the
+  squatter's stand (`gang::squat_end`), the brawl (`misery::brawl_end`), protection's beating
+  (`protection::beating_end`, then `punish_tail`), the patrol's chrome scan (`tags::attack_end`), the collector and
+  the stiffed worker (`underwater::dun_end`, `confront_end`), a pairing (`raid::pair_end`) and the gang raid's end
+  (`raid::raid_end`, which also credits the head's ladder). A step that needs the answer holds `Running`: the Attack,
+  the Abduct, the Strip and Rip (`grudges::guard_contests` is `Option<bool>`); the tail leaves the verdict
+  (`Live::done`, read by `combat::take_done`). A berserker in its episode never breaks (morale as a robot's: it
+  fights the cuffs to the end), so it is never an escape. The Arrest step needs nothing new: it waits the fight out
+  (exec skips the guard) and its end reads the escort as before.
+- **Still on the triple at once** (`law::resolve_fight_mods` is `combat::clash_now`, a one-call engagement with no
+  tail): the bin's shakedown (the dive needs the answer), the door's scene (it returns its line to
+  `service::refused`), a mission's Hit finisher (the contract settles after), the off-screen brawl (both
+  Statistical), the robot's sense (`law::resolve_robot_fight`, from `combat::instant`) and the pit's bout
+  (`resolve_now`). The other brawls at a door (a corp raid, the Precinct breach, a riot's clash, a mission's brawl, a
+  camp breakout, a turf corner) are `run_now` engagements with `Tail::Pairs`: their pairings' tails are hooks, their
+  callers' tails read the tally at once.
+- **Fleeing is movement.** A loser who fled gets a flee plan (`FleeToHome`: his Home, else `life::refuge`) at the
+  tick's `step` (a body fleeing its own step's fight would have the step's end move the new plan on); a body the
+  human drives, a Statistical one, the downed and the cuffed do not. **A suspect who flees the cuffs is not cuffed**:
+  "X broke from the guard Y and ran (wanted for ...)", `arrest_escapes`, and the guard calls a second
+  (`call_backup`: the nearest free guard takes him as his collar and gives chase).
+- **Save**: engagements are not saved; a save resolves them first (`combat::settle_all`, at the CLI's `--save-at`,
+  the shadow's `--save-at` and the 2D app's F5). `SAVE_VERSION` 131.
+- **The numbers** (20k island, seed 42, 30 days, before -> after, one run each; printed, not tuned): fights (the arms
+  counter) 5175 -> 6062, Fight lines 14958 -> 17860, fight deaths 62 -> 83, Murders 127 -> 122, arrests 5971 -> 6198,
+  arrests fought off 318 -> 532, escapes from arrest 0 -> 257, backup fights 153 -> 241 (cuffed 89 -> 93), flee plans
+  0 -> 2082; live engagements 1082, mean 1.62 ticks; ticks/s days 25-30 126 -> 111 (an earlier build of the phase, the
+  same engagement code: 126; the box was busy). FINDING: an escape is a second
+  arrest later (the backup's collar), so arrests, fights and arrests fought off all rise with the escapes. Headless
+  (no camera) every gang raid ran at once (its defenders off camera are not all Full; a posted robot keeps it at once
+  too). A live duel's Fight line ends "N beats over M min".
+- **The shadow's wrong-reads** (d12-18, guard, raider, gang member, homeless, worker): the flight does not hold (a
+  FleeToHome of 1-7 min, then think's next goal: safety is back up); no live gang raid was seen in a diary; off camera
+  one body takes a crowd in a minute with no fatigue between duels; no mugging caller exists yet.
+- **Not done (C3b):** joiners, the chase, chrome in the fight, robots in a live fight (a robot party keeps the fight at
+  once); a body who arrives at a live raid is not in it (`raid::resolve` returns).
+
 ## Decisions (Dylan, 2026-11-02)
 
 | # | question | decided |

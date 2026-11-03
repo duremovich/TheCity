@@ -1677,6 +1677,17 @@ pub struct Jobs2Cols {
     /// ... and of those, the suspect cuffed all the same
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub backup_cuffed: u32,
+    /// The combat model C3a (`combat::step`): live engagements ended today
+    /// and their ticks (the mean length), suspects who fled the cuffs on
+    /// foot, and bodies that broke and fled a fight on their legs (a flee plan)
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub live_fights: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub live_fight_ticks: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub arrest_escapes: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub fled_runs: u32,
     /// The city milestone C6b (`systems::floors`): the floor rent paid to
     /// the landlords today (`Flow::FloorRent`), the tenancies short on it,
     /// the floors taken back to a vacant unit and the leases passed to the
@@ -2420,6 +2431,10 @@ impl Jobs2Cols {
                 "backup_called",
                 "backup_fights",
                 "backup_cuffed",
+                "live_fights",
+                "live_fight_ticks",
+                "arrest_escapes",
+                "fled_runs",
                 "flow_floor_rent",
                 "floor_short",
                 "floor_evicted",
@@ -3083,6 +3098,10 @@ impl Jobs2Cols {
             self.backup_called.to_string(),
             self.backup_fights.to_string(),
             self.backup_cuffed.to_string(),
+            self.live_fights.to_string(),
+            self.live_fight_ticks.to_string(),
+            self.arrest_escapes.to_string(),
+            self.fled_runs.to_string(),
             self.flow_floor_rent.to_string(),
             self.floor_short.to_string(),
             self.floor_evicted.to_string(),
