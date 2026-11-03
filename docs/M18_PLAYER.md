@@ -233,6 +233,46 @@ else the menu prints the command that makes it; `CITYVIEW_ASSETS` defaults to `.
 - The sessions: `view/cityview/scripts/p5_cold.play` (pick, eat, a day on autopilot, an attack that stops the clock,
   a death, another nobody, save, quit to menu, load) and `p5_fresh.play` (arrive fresh, autopilot, save, load).
 
+## P5h housing as an errand (Dylan 2026-11-03, before the cold play)
+
+**Why.** P5's "Arrive fresh" read "sleeps rough" and was housed within the minute: `ownership::rehouse`, a daily
+pass, puts any homeless adult who holds `rehouse_coins_mult` (21) days of rent into the nearest affordable Home with
+room. The jobless pay nothing up front, and an immigrant skips the evictee's 7-day wait. Coffin racks exist only as
+company staff beds. Dylan: "let it be a task that can be completed early ... Perhaps that should be the mechanism for
+NPCs too, to keep it consistent. Auto idle won't do it for you." The errand is easy; acceptance is hard.
+**Build** (one rule for NPCs and the player; the orchestrator's defaults below are overturnable):
+
+- **Housing is a goal, not a pass.** A homeless adult's `FindHome` goal walks to a letting desk and applies; on
+  acceptance the applicant pays and moves in, with a spouse and children following as today. `rehouse` is retired.
+  Off camera, a Statistical applicant rolls the same rules daily, with no walk. The world build's day-0 allocation
+  stays.
+- **Where to apply:**
+  - the Home's super if it has one;
+  - else the owner's desk: the city's at its civic building (the Hall or whatever holds the Civic Clerk), a corp's at
+    its HQ or a lettings office, a gang's at its front or Hideout.
+- **Who gets refused, by landlord kind:**
+  - **the city:** a waiting list in days (`[housing]`), then a place;
+  - **a corp:** refuses a record (a sentence or a warrant within N days), no job, or no address history;
+  - **a gang:** asks nothing but adds protection to the rent, and the tenant is known to the gang;
+  - **a private owner:** the deposit only.
+- **The deposit is paid up front by everyone** (`move_in_rent_days` of rent), not by workers only.
+- **The first rung: a public capsule hostel** (coffin racks) in the Sump and the poor districts:
+  - paid nightly, with no deposit and no address;
+  - a nightly chance the locker is robbed;
+  - a missed night's pay puts you out.
+
+  It goes on map lots at the world build (a few per poor district, from config) or into existing buildings' lower
+  floors as tenancies (`Building.within`). The cheapest bed with a roof.
+- **The player:** an "Ask about a place" verb at a desk or super lists what is open, the price, the deposit, the
+  wait or the refusal and its reason (P3's offer shape). The hostel's "A bed for the night (Nc)" is at its door. The
+  HUD's place line names the tenure: sleeps rough, a capsule at ..., a room at ..., a flat at .... Safe-idle
+  autopilot pays a hostel night it already holds, but never signs a lease.
+- **Not this phase:** an address as a hiring gate (a corp job wanting one) waits for the play notes.
+
+**Proof:** a fresh arrival who sleeps rough, takes a hostel capsule, is refused a corp flat (no job), and joins the
+city's list; and NPC diaries (`homeless`, `day_labourer`, an evictee) showing the errand and the refusals. Homeless,
+housed a day, hostel nights, and refusals by reason, before and after, on one 20k run each (a FINDING: no tuning).
+
 ## P6 founding (optional, only if P1-P5 read)
 
 **Goal.** The player opens a bar or a Hideout through the door NPC founders use.
