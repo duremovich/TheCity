@@ -1089,33 +1089,73 @@ fn covers(world: &mut World, c: &CareCfg) {
             ownership::jobs2_row(world).care_uncovered += 1;
             continue;
         };
-        crate::systems::demography::hire(world, cv, emp, job.role);
-        // Y3: the hire line reads as the day's cover, not a post.
-        if let Some(e) = world.events.back_mut() {
-            if e.kind == EventKind::Hire && e.actors.first() == Some(&cv) {
-                e.text = e.text.replacen(" hired as ", " put on a one-day cover shift as ", 1);
-            }
+        // M18 P3: a body the human drives is offered the shift (it lapses
+        // uncovered); the foreman's pick is the same.
+        if crate::systems::player::drives(world, cv) {
+            let cn = world.name_of(cv);
+            let line = format!("Cover {who}'s {role} shift at {at} for the day (the foreman's offer)");
+            let lapse = now + c.cover_offer_hours * TICKS_PER_HOUR;
+            let what = crate::components::OfferKind::Cover {
+                employer: emp,
+                sick: id,
+                role: job.role,
+                until: now + TICKS_PER_DAY,
+            };
+            crate::systems::player::offer(world, cv, what, lapse, line);
+            world.push_event(
+                EventKind::Skipped,
+                &[id, cv, emp],
+                format!("{who} is off sick from {at} ({days} sick days in 14); {cn} is offered the {role}'s shift for the day"),
+            );
+            continue;
         }
-        let until = now + TICKS_PER_DAY;
-        if let Some(j) = world.comp_mut::<Job>(cv) {
-            j.until = Some(until);
-            j.shifts = job.shifts.clone();
-        }
-        world.care.covers.push(Cover { cover: cv, employer: emp, sick: id, until });
-        let cn = world.name_of(cv);
-        world.push_event(
-            EventKind::Skipped,
-            &[id, cv, emp],
-            format!("{who} is off sick from {at} ({days} sick days in 14); {cn} covers the {role}'s shift for the day"),
-        );
-        // Round 5 U1: a `Served` memory is the service section's (the off
-        // city remembers none, `service`'s `test_off_city_writes_nothing`;
-        // U1's seed moved a cover onto day 1 there).
-        if crate::systems::service::on(world) {
-            world.remember(cv, crate::components::MemoryKind::Served, Some(id), 0.3, 0.1, false);
-        }
-        ownership::jobs2_row(world).care_covered += 1;
+        let _ = take_cover(world, cv, emp, id, now + TICKS_PER_DAY);
     }
+}
+
+/// The cover's day hire (`covers`, or a body the human drives taking the
+/// foreman's offer, M18 P3): `cv` hired at `emp` on the sick `sick`'s
+/// shifts until `until`. `Err`: why not now (the post or the sick worker's
+/// day gone, `cv` holding a post).
+pub fn take_cover(world: &mut World, cv: EntityId, emp: EntityId, sick: EntityId, until: Tick) -> Result<(), String> {
+    let Some(job) = world.comp::<Job>(sick).cloned().filter(|j| j.employer == Some(emp)) else {
+        return Err("the sick worker's post is gone".into());
+    };
+    if world.has::<Job>(cv) {
+        return Err("you hold a post".into());
+    }
+    if world.comp::<Building>(emp).is_none_or(|b| b.demolished || b.derelict) || world.tick >= until {
+        return Err("the day is gone".into());
+    }
+    let (who, at, role) = (world.name_of(sick), world.name_of(emp), job.role.label());
+    let days = world.comp::<Health>(sick).map_or(1, |h| h.sick_days.count_ones());
+    let id = sick;
+    crate::systems::demography::hire(world, cv, emp, job.role);
+    // Y3: the hire line reads as the day's cover, not a post.
+    if let Some(e) = world.events.back_mut() {
+        if e.kind == EventKind::Hire && e.actors.first() == Some(&cv) {
+            e.text = e.text.replacen(" hired as ", " put on a one-day cover shift as ", 1);
+        }
+    }
+    if let Some(j) = world.comp_mut::<Job>(cv) {
+        j.until = Some(until);
+        j.shifts = job.shifts.clone();
+    }
+    world.care.covers.push(Cover { cover: cv, employer: emp, sick: id, until });
+    let cn = world.name_of(cv);
+    world.push_event(
+        EventKind::Skipped,
+        &[id, cv, emp],
+        format!("{who} is off sick from {at} ({days} sick days in 14); {cn} covers the {role}'s shift for the day"),
+    );
+    // Round 5 U1: a `Served` memory is the service section's (the off
+    // city remembers none, `service`'s `test_off_city_writes_nothing`;
+    // U1's seed moved a cover onto day 1 there).
+    if crate::systems::service::on(world) {
+        world.remember(cv, crate::components::MemoryKind::Served, Some(id), 0.3, 0.1, false);
+    }
+    ownership::jobs2_row(world).care_covered += 1;
+    Ok(())
 }
 
 /// The cover for a post at `emp`: a jobless, free, lawful adult body living

@@ -396,6 +396,10 @@ fn step_agent(world: &mut World, id: EntityId) {
         if world.comp::<Brain>(id).is_some_and(|b| b.player.as_ref().is_some_and(|p| p.shift.is_some())) {
             crate::systems::player::shift_next(world, id);
         }
+        // M18 P3: a directed contract goes on to its next plan.
+        if world.comp::<Brain>(id).is_some_and(|b| b.player.as_ref().is_some_and(|p| p.contract.is_some())) {
+            crate::systems::player::job_next(world, id);
+        }
         return;
     };
     let lod = brain.lod;
@@ -795,6 +799,15 @@ impl World {
             self.goal_failed(id, goal);
         }
         self.abort_plan(id);
+        // M18 P3: a directed contract is replanned once, as the goal is
+        // (a second failure in a row stops it; the board's row goes on).
+        let again = self.comp::<Brain>(id).is_some_and(|b| {
+            b.player.as_ref().is_some_and(|p| p.contract.is_some())
+                && matches!(b.last_plan_failure, Some((crate::components::GoalKind::Contract, _)))
+        });
+        if again {
+            crate::systems::player::job_next(self, id);
+        }
     }
 
     /// A goal that cannot be planned at all: nothing will change in a tick, so

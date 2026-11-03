@@ -112,6 +112,24 @@ contract's steps run as a Directed plan. Talk on a body: Chat, befriend, court, 
 **After it the player can** take a Beat or a Locate, finish it and get paid, and work a person through social moves.
 **Proof.** A play session: take a contract, finish it, get paid; befriend a bartender; the issuer remembers.
 **Out of scope.** Dialogue text beyond a menu row and its odds; posting contracts; missions played in person.
+**As built** (`systems/player.rs` § P3). The board (`menu_board`, cityview's bottom-left panel) is the open records
+`contracts::visible` gives the body (a Fixer's regulars, the buyer's people, the public bounties), each row taken
+through `contracts::player_take` (`accept_at` in person at the desk for a brokered record, the NPC's `squad_crew`):
+its gates of ability and circumstance are `player_take_refusal` (seen, open, not held for another, `ineligible` with
+the lawfulness term off, the gun gate's skill floor, the stakeout's reach, the Fixer open and its desk manned, a
+brokered Locate's escrow not spent, the mark not away past the deadline); waived are mode A, the gun gate's day-wage
+term and `gun_lawfulness`. A row that cannot be taken stays greyed with why. "Get known at" a Fixer is `Network`
+(the four nearest where the body is no regular). The taken record is worked by `job_next`: the Contract goal's own
+plans (`contracts::plan`), replanned at each plan's end and once after a failure, ended by the record's close
+(`end_run`). Talk (`menu_body`): Chat (now also on the street, two bodies within `[talk] street_tiles`:
+`PlanCtx.street_partner`, a flag only a plan bound to a person standing beside you sets, so no NPC plan changes),
+Court (`Flirt` at a Bar or a Market, both 18+, with its acceptance odds), and four moves rolled once each through
+`moves::resolve` on a body beside you: Befriend (Charm), a loan (Persuade on Coins, a debt), lean on them
+(Intimidate on Coins: an Enemy edge, an `Extorted` deed), ask for work (Charm on a Job: a lead, then P2's ask at the
+door). A body asked is not asked again for `again_hours` (its memory). The city's offers: `care::covers`' pick and
+`underwater`'s front draw offer a body the human drives (`PlayerControlled.offers`, `[care] cover_offer_hours`,
+`[underwater] front_offer_hours`) instead of writing it; the same code decides who; taking it runs the NPC's write
+(`care::take_cover`, `underwater::take_front`).
 
 ## P4 consequences
 

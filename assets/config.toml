@@ -1602,6 +1602,18 @@ backlash_courage = 0.6
 backlash_fight = 0.3
 contradict_conf = 0.3
 
+# M18 P3 (docs/M18_PLAYER.md, the board and talk): the talk moves one body makes on another beside it
+# (`player::talk`, each one roll through `moves::resolve`). Placeholders.
+[talk]
+street_tiles = 2                   # two bodies on the street this near (Chebyshev) can talk; inside, the same building
+befriend_affinity = 0.15           # befriend (a Charm): a success moves the pair's edge by this affinity ...
+befriend_trust = 0.05              # ... and this trust
+refused_affinity = -0.05           # any refused move moves the pair's affinity by this
+loan_coins = 5                     # ask for a loan (a Persuade on Coins): this many, out of what the lender holds above
+loan_keep = 10                     # this (a debt on the edge, repaid as any debt)
+threat_coins = 8                   # lean on them (an Intimidate on Coins): up to this many coins
+again_hours = 12                   # a body asked (any move, either outcome) is not asked again by the same one for this long
+
 [competence]
 exec_w = 0.4
 comp_w = 1.0
@@ -5494,6 +5506,7 @@ front_price_mult = 0.25            # ... a gang buys it as a front at this x (mu
 front_lawful_max = 0.5             # an owner over this lawfulness sells to no gang ...
 front_misery = 0.6                 # ... unless his misery is past this
 front_join_p = 0.1                 # a bought front: its staff join the gang on this x (1 - lawfulness) a day
+front_offer_hours = 24             # M18 P3: one drawn who is a body a human drives is offered the gang (this many hours)
 launder_share = 0.3                # ... this share of the gang's week's tribute is booked through its till (its weekday)
 rival_hit_p = 0.15                 # ... a rival gang with turf in the district hits it on this a week ...
 rival_take = 30                    # ... taking up to this from the gang ...
@@ -5901,6 +5914,7 @@ ask_refused_days = 7               # line); a Friend who turned him down is not 
 cover_purse_days = 3               # the sick worker's post: covered at midnight by a jobless adult of the employer's district
 cover_lawful = 0.3                 # (lawfulness at or above this; a day hire to the shift's end) when the owner holds this
                                    # many days of the role's wage; else the absence is written
+cover_offer_hours = 8              # M18 P3: a cover picked who is a body a human drives is offered the shift (this many hours)
 clinic_body_first = true           # round 5 U6 (OPEN-217): a patient goes to a doctor's body on duty with room first (the
                                    # Clinic's off-screen colleagues, present by the clock, took the pair hash: V13's 100k
                                    # ripperdocs saw 0 and 1 patients a week)

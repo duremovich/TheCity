@@ -105,7 +105,13 @@ pub enum UiCmd {
     Body(EntityId),
     /// M18 P2: a menu row picked.
     Act(Verb),
+    /// M18 P3: a building's menu by its entity (a `--play` line's `bld INDEX`: the menu a click on it opens).
+    Bld(EntityId),
 }
+
+/// A menu row for the render thread: the label, the verb, the will terms it waives (`Verb::waived`, the hover), and
+/// (M18 P3) why it cannot be done now (`Some`: drawn greyed, the reason its hover).
+pub type MenuRow = (String, Verb, Vec<String>, Option<String>);
 
 /// M18 P2: a menu the sim built for a click (a building's or a body's), only its legal rows, for the render thread.
 #[derive(Clone, Debug, Default)]
@@ -114,7 +120,7 @@ pub struct MenuPub {
     pub seq: u64,
     pub title: String,
     /// The row's label, its verb, the will terms it waives (`Verb::waived`, the row's hover).
-    pub rows: Vec<(String, Verb, Vec<String>)>,
+    pub rows: Vec<MenuRow>,
 }
 
 /// M18 P1: what the HUD shows of the possessed body.
@@ -137,7 +143,11 @@ pub struct PlayerHud {
     /// M18 P2: the menu row the plan came from (`PlayerControlled::doing`).
     pub doing: Option<String>,
     /// M18 P2: the HUD's own rows (`player::menu_self`: eat, sleep, work where the body stands), only the legal ones.
-    pub rows: Vec<(String, Verb, Vec<String>)>,
+    pub rows: Vec<MenuRow>,
+    /// M18 P3: the board (`player::menu_board`: the job held, the records the body sees, the Fixers to get known
+    /// at; the ones it cannot take greyed) and the city's offers (`player::menu_offers`).
+    pub board: Vec<MenuRow>,
+    pub offers: Vec<MenuRow>,
     /// M18 P2: carried food.
     pub food: u32,
 }
@@ -349,6 +359,14 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                     let steps = pl::walk_to(&world, t, false, snap);
                     eprintln!("cityview: tick {} click ({}, {}): walk to the street", world.tick, t.x, t.y);
                     citysim::PlayerCommand::Steps { agent: subject, steps }
+                }
+                UiCmd::Bld(b) => {
+                    let door = world.comp::<citysim::Building>(b).map(|x| x.door);
+                    let snap = world.config.view.pick_snap_tiles;
+                    if let Some(m) = door.and_then(|t| pl::menu_at(&world, subject, t, true, snap)) {
+                        publish_menu(&sh, &world, m, &mut menu_seq);
+                    }
+                    continue;
                 }
                 UiCmd::Body(o) => {
                     publish_menu(&sh, &world, pl::menu_body(&world, subject, o), &mut menu_seq);
@@ -571,19 +589,21 @@ fn player_hud(world: &World, id: EntityId) -> PlayerHud {
             .map(|(t, l)| format!("d{} {}: {l}", t / citysim::TICKS_PER_DAY, citysim::time::clock(*t))),
         doing: pc.and_then(|p| p.doing.clone()),
         rows: menu_rows(&pl::menu_self(world, id)),
+        board: menu_rows(&pl::menu_board(world, id)),
+        offers: menu_rows(&pl::menu_offers(world, id)),
         food: world.comp::<citysim::components::Inventory>(id).map_or(0, |i| i.food),
     }
 }
 
-fn menu_rows(m: &pl::Menu) -> Vec<(String, Verb, Vec<String>)> {
-    m.rows.iter().map(|r| (r.label.clone(), r.verb, r.verb.waived().iter().map(|s| s.to_string()).collect())).collect()
+fn menu_rows(m: &pl::Menu) -> Vec<MenuRow> {
+    m.rows.iter().map(|r| (r.label.clone(), r.verb, r.verb.waived().iter().map(|s| s.to_string()).collect(), r.why_not.clone())).collect()
 }
 
 /// M18 P2: a click's menu to the render thread, and to the log (the play session's record).
 fn publish_menu(sh: &Shared, world: &World, m: pl::Menu, seq: &mut u64) {
     *seq += 1;
     let rows = menu_rows(&m);
-    let labels: Vec<&str> = rows.iter().map(|r| r.0.as_str()).collect();
+    let labels: Vec<String> = rows.iter().map(|r| r.3.as_ref().map_or(r.0.clone(), |w| format!("({} -- {w})", r.0))).collect();
     eprintln!(
         "player d{} {}: menu {}: [{}]",
         world.tick / citysim::TICKS_PER_DAY,

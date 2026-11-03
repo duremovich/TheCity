@@ -1156,7 +1156,8 @@ pub fn on_complete(
         }
         ActionKind::Chat => {
             let Some(partner) = target else { return StepResult::Failed(FailReason::PartnerLeft) };
-            if !crate::systems::law::near(world, id, partner, 1)
+            if !(crate::systems::law::near(world, id, partner, 1)
+                || crate::goap::actions::street_beside(world, id, partner))
                 && world.comp::<Position>(id).and_then(|p| p.building)
                     != world.comp::<Position>(partner).and_then(|p| p.building)
             {
