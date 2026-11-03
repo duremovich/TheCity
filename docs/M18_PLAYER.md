@@ -186,6 +186,52 @@ here** (decision 6): removed from the workspace, its remaining uses moved to cit
 **After it the player can** start, die, start again, save and come back.
 **Proof.** **Dylan plays 30 minutes cold.** His notes become OPEN rows owned by the next pass.
 **Out of scope.** Modes (Mayor, Both), difficulty, templates beyond one, heirs.
+**How Dylan plays** (from the repo root, PowerShell; the pre-run save `saves/slice/20k_s42_d21.ron` must be there,
+else the menu prints the command that makes it; `CITYVIEW_ASSETS` defaults to `../TheCityGraphics/assets`):
+`cargo run --release -p cityview -- --slice`. A load (the pre-run city or a player save) takes 1.7 s at 20k; a save
+0.8 s (`saves/player/NAME.ron`, gitignored with `saves/`).
+**As built** (2026-11-03, Dylan's decisions of the day; `player.rs` § P5, cityview `play.rs` `start_menu`, `simthread.rs`).
+- **Autopilot is safe idle** (decision 1), a filter on the NPC brain, not a second brain: a possessed body's think
+  scores only `player::safe_goal` (Eat, Sleep, Work, Earn, Flee, Treat, Idle; `utility::think_scored`), and its plans
+  and exec's step re-check refuse `ActionKind::safe_idle_ok`'s list (theft, Fence, Attack, Brawl, joining, Extort, the
+  chrome and the deck, Deal and stims, Flirt and Propose, Register, Occupy, ReportCrime: `PlanCtx.safe_idle`). In a
+  fight it wants to flee at its first turn, and yields when it cannot (`combat::fighter`). The city's offers (a cover
+  shift, a gang's draw) wait for the human on autopilot too (`player::possessed`, not `drives`). Wider than the brief,
+  for the driven body as well: the midnight hire pool never takes the player's body (`demography::pool_member`; a job
+  is P2's ask at the door), the hourly job search never asks for it (`search::hourly`), and `gang::enlist` refuses a
+  possessed body that is no member (`enlist_chosen` for its own JoinGang and a taken front).
+- **The auto-pause**: the clock stops when the possessed body is attacked (on the struck side of a fight it did not
+  start, or an `Assault` on it inside a tick) or a fight starts within `[view] autopause_tiles` of it, while it is on
+  autopilot or the human has touched nothing for `[view] away_s`; a "stop the clock when someone goes for me" tick
+  box in the HUD (`[view] autopause` its start), a red "PAUSED: X went for you (Space goes on)" line and a story-log
+  line. Standing orders and chosen triggers stay `OPEN-301`.
+- **New** (decision 2): "pick a nobody" lists up to `[slice] nobody_count` broke adults of the running city
+  (`player::nobodies`: at most `nobody_coins`, 18 to `nobody_age_max`, nobody's exec, guard or player, not held), one
+  per kind, the Sump's first: sleeps rough, squats, the labour corner, out of work, runs for a gang, works for scraps,
+  in debt, sick and broke; each with a read (`nobody_line`): "Axel Moreau, 35, D1 The Sump: 5c, no job, sleeps rough;
+  kin: Annika Tanaka". Look (the camera goes there, the clock stopped) or Play. "Arrive fresh" is an arrival
+  (`demography::arrive_at`, the immigrant's draw) onto a street beside a Sump Market, Mission or Bar door, homeless
+  with the arrival's coins (25c in the session) and no edges (`player::arrive_fresh`).
+- **The menu** (egui, `--slice`): New (pick, arrive fresh), Load (the player saves newest first, and the pre-run city),
+  Quit, Resume when a game is on; Esc in play: Resume, Save (a name field, `Name_d22_0610` by default), Load, Quit to
+  menu, Quit. New after a game loads the pre-run city again. The debug overlay starts hidden (H). A save mid-fight is
+  refused ("save when it is over"; `combat::settle_all` would end the fight).
+- **Permadeath**: the death screen (P4) offers "Pick another nobody (the same city)", "Arrive fresh" and "Quit to the
+  menu"; the dead body's city goes on. Nobody under 18 is listed, arrives or is possessed.
+- **The blackmail as an offer**: `consequence::blackmailed` on a possessed culprit makes `OfferKind::Blackmail`
+  (`[slice] blackmail_offer_minutes`): "Pay X Nc to keep quiet", "Refuse X (he goes to the law)", "Go for X (shut him
+  up)" (`Verb::Resist`, the silencing fight); let lapse it is refused (`consequence::blackmail_answer`). Built, not seen
+  in a session (no witness came in the scripts' two days).
+- **`citysim-app` retired**: the crate is gone from the workspace (`Cargo.toml`, `tools/test.py`'s `SIM`, the hook,
+  README, ARCHITECTURE, CLAUDE.md); nothing needed it (C3a's "2D app's F5" save is the Esc menu's Save now).
+- **The help line** (bottom centre, in play): what a click does, Space, `,` `.`, T, Backspace, Esc, the camera, the
+  auto-pause.
+- Script lines (`play.rs`): `menu main|pick|load|esc|game`, `nobody I`, `look I`, `fresh`, `newcity`, `save NAME`,
+  `load NAME`, `provoke [lethal]` (a proof's cheat: the adult beside you with the best odds goes for you; lethal at
+  `[view] provoke_kill_p`), `unpause`, `autopause on|off`, `await idle|player`; a `*` tick is the line before's.
+- `SAVE_VERSION` 133 (`OfferKind::Blackmail`, `[slice]`, the `[view]` keys; serde defaults, a 132 save loads).
+- The sessions: `view/cityview/scripts/p5_cold.play` (pick, eat, a day on autopilot, an attack that stops the clock,
+  a death, another nobody, save, quit to menu, load) and `p5_fresh.play` (arrive fresh, autopilot, save, load).
 
 ## P6 founding (optional, only if P1-P5 read)
 

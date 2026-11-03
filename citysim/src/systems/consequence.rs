@@ -838,30 +838,69 @@ pub fn blackmailed(world: &mut World, w: EntityId, culprit: EntityId, walked: bo
     let mut actors = vec![w, culprit];
     actors.extend(here);
     ownership::jobs2_row(world).bm_demands += 1;
+    // M18 P5 (P3's offer shape): the player's body (driven or on autopilot)
+    // is asked; the human pays, refuses or goes for the witness
+    // (`blackmail_answer`), and a demand let lapse is refused.
+    if crate::systems::player::possessed(world, culprit) {
+        let until = world.tick + world.config.slice.blackmail_offer_minutes;
+        let today = world.day();
+        if let Some(x) = world.consequence.blackmail.get_mut(i) {
+            x.next_day = today + 1;
+        }
+        let line = format!("{wn} saw the {} and wants {demand}c to keep it quiet", b.crime.label());
+        world.push_event(EventKind::Blackmail, &actors, format!("{head}: the answer is {cn}'s"));
+        let what = crate::components::OfferKind::Blackmail { witness: w, demand };
+        crate::systems::player::offer(world, culprit, what, until, line);
+        return;
+    }
     let t = traits(world, culprit);
     let p_pay = (c.bm_pay_base + c.bm_pay_fear * (1.0 - t.courage) + c.bm_pay_lawful * t.lawful
         - c.bm_pay_pride * t.pride)
         .clamp(0.0, 1.0);
     let draw = world.day() ^ key(w);
     if purse >= demand && hash(world, P_PAY, culprit, draw) < p_pay {
-        let paid = ownership::pay(world, Some(culprit), Some(w), demand, Flow::Bribe);
-        let today = world.day();
-        if let Some(x) = world.consequence.blackmail.get_mut(i) {
-            x.demands += 1;
-            x.tries = 0;
-            x.paid += paid;
-            x.next_day = today + u64::from(c.bm_interval_days);
-        }
-        crate::systems::grudges::add(world, culprit, w, GrudgeCause::Robbed, 0.3, 0);
-        world.push_event(EventKind::Blackmail, &actors, format!("{head}: {cn} paid {paid}c"));
-        let row = ownership::jobs2_row(world);
-        row.bm_paid += 1;
-        row.bm_coins += paid;
-        return;
+        return bm_pay(world, &c, i, demand, &actors, &head);
     }
-    world.consequence.blackmail.remove(i);
     let why = if purse < demand { "had nothing like it".to_string() } else { format!("told {him} where to go") };
     let silence = hash(world, P_SILENCE, culprit, draw) < c.bm_silence_w * (1.0 - t.lawful) * (0.5 + t.courage);
+    bm_refuse(world, &c, i, actors, &head, &why, silence);
+}
+
+/// A demand paid: the next one in `bm_interval_days`.
+fn bm_pay(world: &mut World, c: &ConsequenceCfg, i: usize, demand: i64, actors: &[EntityId], head: &str) {
+    let b = world.consequence.blackmail[i].clone();
+    let (w, culprit) = (b.witness, b.culprit);
+    let paid = ownership::pay(world, Some(culprit), Some(w), demand, Flow::Bribe);
+    let today = world.day();
+    if let Some(x) = world.consequence.blackmail.get_mut(i) {
+        x.demands += 1;
+        x.tries = 0;
+        x.paid += paid;
+        x.next_day = today + u64::from(c.bm_interval_days);
+    }
+    crate::systems::grudges::add(world, culprit, w, GrudgeCause::Robbed, 0.3, 0);
+    let cn = world.name_of(culprit);
+    world.push_event(EventKind::Blackmail, actors, format!("{head}: {cn} paid {paid}c"));
+    let row = ownership::jobs2_row(world);
+    row.bm_paid += 1;
+    row.bm_coins += paid;
+}
+
+/// A demand refused: the culprit goes for the witness (`silence`), or the
+/// witness goes to the law.
+fn bm_refuse(
+    world: &mut World,
+    c: &ConsequenceCfg,
+    i: usize,
+    actors: Vec<EntityId>,
+    head: &str,
+    why: &str,
+    silence: bool,
+) {
+    let b = world.consequence.blackmail.remove(i);
+    let (w, culprit) = (b.witness, b.culprit);
+    let (wn, cn) = (world.name_of(w), world.name_of(culprit));
+    let (_, him, _) = pro(world, w);
     if silence {
         let tile = world.comp::<Position>(w).map_or_else(Default::default, |p| p.tile);
         let mods = crate::systems::law::FightMods { kill_mult: c.bm_kill_mult, ..Default::default() };
@@ -875,6 +914,46 @@ pub fn blackmailed(world: &mut World, w: EntityId, culprit: EntityId, walked: bo
     crate::systems::grudges::add(world, culprit, w, GrudgeCause::Betrayed, c.snitch_grudge, 0);
     world.push_event(EventKind::Blackmail, &actors, format!("{head}: {cn} {why}; {wn} went to the law"));
     ownership::jobs2_row(world).bm_reported += 1;
+}
+
+/// M18 P5: the human's answer to a witness's demand made as an offer
+/// (`blackmailed`): pay (`0`), refuse (`1`: he goes to the law; a lapsed
+/// offer too) or go for him (`2`: the silencing fight). `Err`: why not.
+pub fn blackmail_answer(
+    world: &mut World,
+    w: EntityId,
+    culprit: EntityId,
+    demand: i64,
+    answer: u8,
+) -> Result<(), String> {
+    let Some(c) = cfg(world).cloned() else { return Err("no blackmail in this city".into()) };
+    let Some(i) = world.consequence.blackmail.iter().position(|b| b.witness == w && b.culprit == culprit) else {
+        return Err("the witness is gone".into());
+    };
+    let crime = world.consequence.blackmail[i].crime;
+    let (wn, cn) = (world.name_of(w), world.name_of(culprit));
+    let head = format!("{wn} wanted {demand}c to keep {cn}'s {} quiet", crime.label());
+    let actors = vec![w, culprit];
+    match answer {
+        0 => {
+            if world.purse(Some(culprit)) < demand {
+                return Err(format!("you have less than {demand}c"));
+            }
+            bm_pay(world, &c, i, demand, &actors, &head);
+        }
+        2 => {
+            if !living(world, w) {
+                return Err("the witness is gone".into());
+            }
+            let (_, him, _) = pro(world, w);
+            bm_refuse(world, &c, i, actors, &head, &format!("told {him} where to go"), true);
+        }
+        _ => {
+            let (_, him, _) = pro(world, w);
+            bm_refuse(world, &c, i, actors, &head, &format!("told {him} where to go"), false);
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

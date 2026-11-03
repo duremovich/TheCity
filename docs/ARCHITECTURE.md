@@ -18,10 +18,8 @@ the convenience loop tests use.
 Subcommands `run`, `calibrate`, `shadow`, `gen-map`, `import-graphics`, `export-view` (section 11). Must run from the repo root so `Config::load`
 finds `assets/config.toml` (or set `CITYSIM_ASSETS`).
 
-**`citysim-app`** (`citysim-app/src/`): the macroquad viewer: `render.rs`, `camera.rs`, `input.rs`, the overlays
-(`overlay.rs`, `word_overlay.rs`, `contract_overlay.rs`), and the panels in `ui/` (`inspector.rs`, `building.rs`,
-`corp.rs`, `district.rs`, `feed.rs`, `log.rs`, …; the inspector's Story tab draws `story::lines`). It reads the world
-advances it with `World::run_ticks` and sends `PlayerCommand`s; it never writes components directly.
+**`citysim-app`** (the macroquad viewer) was retired at M18 P5 (decision 6): the player's client is cityview; the
+headless tools are the CLI's.
 
 **`view/`** (city milestone C1, moved from TheCityGraphics `855d0aa`): the Bevy 0.19.1 client, `glclient` (the
 block, kit, street, traffic, tram, light rules and the cutaway, `occlusion.rs`) and `cityview` (the city view binary

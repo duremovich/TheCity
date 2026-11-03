@@ -320,7 +320,7 @@ pub fn holes_up_at(world: &World, id: EntityId) -> Option<EntityId> {
 /// JoinGang at the Hideout: join the gang `recruit_gang` names.
 pub fn join(world: &mut World, id: EntityId) -> bool {
     let Some(gang) = recruit_gang(world, id) else { return false };
-    enlist(world, id, gang);
+    enlist_chosen(world, id, gang);
     true
 }
 
@@ -422,6 +422,17 @@ pub fn turned_away(world: &mut World, id: EntityId, place: Option<EntityId>) {
 /// Put `id` into `gang` with every side effect of joining. No eligibility
 /// check: `join` does that; tests call this directly.
 pub fn enlist(world: &mut World, id: EntityId, gang: EntityId) {
+    // M18 P5 (Dylan 2026-11-03): the player's body joins a gang only by its
+    // own pick (the JoinGang step, a front's offer taken: `enlist_chosen`);
+    // a member moved with its gang is a member already.
+    if crate::systems::player::possessed(world, id) && !world.has::<GangMember>(id) {
+        return;
+    }
+    enlist_chosen(world, id, gang);
+}
+
+/// [`enlist`] for a join the body chose (the player's own pick too).
+pub fn enlist_chosen(world: &mut World, id: EntityId, gang: EntityId) {
     // The pressure pass S6 (Dylan 2026-10-27): gangs from 18 (every caller
     // picks an adult; the backstop).
     if crate::systems::ages::is_protected(world, id) {

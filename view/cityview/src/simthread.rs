@@ -108,7 +108,37 @@ pub struct Shared {
     pub poses: Mutex<Vec<crate::play::Pose>>,
     pub down: Mutex<Vec<u64>>,
     pub fight: Mutex<Vec<u64>>,
+    /// M18 P5: the start menu's state (the nobodies, the player saves, the load's line, the auto-pause's reason).
+    pub slice: Mutex<SlicePub>,
+    /// M18 P5: the auto-pause on (the HUD's toggle; `[view] autopause` at the start), and the human's last key or
+    /// click (away past `[view] away_s`).
+    pub autopause: AtomicBool,
+    pub input_at: Mutex<Instant>,
 }
+
+/// M18 P5 (docs/M18_PLAYER.md, start and loop): what the start menu shows.
+#[derive(Clone, Debug, Default)]
+pub struct SlicePub {
+    /// Rises with each change.
+    pub seq: u64,
+    /// The last load's or save's line ("loaded ... in 9.8 s"), and a load or a save under way.
+    pub status: String,
+    pub busy: bool,
+    /// The pre-run save is missing: how to make it.
+    pub missing: Option<String>,
+    /// "Pick a nobody": (the body, its kind, the one-line read).
+    pub nobodies: Vec<(EntityId, String, String)>,
+    /// The player saves, newest first: (the file, its line).
+    pub saves: Vec<(PathBuf, String)>,
+    /// A body is possessed (the game is on); the possession's generation (the panels start again on it).
+    pub started: bool,
+    pub epoch: u64,
+    /// The auto-pause's reason while the clock it stopped is stopped.
+    pub alert: Option<String>,
+}
+
+/// M18 P5: the command that makes the slice's pre-run save (docs/M18_PLAYER.md), shown when it is missing.
+pub const PRERUN_CMD: &str = "cargo run --release -p citysim-cli -- run --days 21 --seed 42 --population 20000 --scaled --ambient-flats 50 --map assets/maps/isle_m_k2.txt --save-at 30240 --saves-dir saves/slice\n(then rename saves/slice/42-30240.ron to saves/slice/20k_s42_d21.ron)";
 
 /// C4: one tick's beats for the replay: each fight's blows in order (a beat's blows share its `group`, the beats
 /// are `beat_s` real seconds apart).
@@ -126,6 +156,8 @@ pub struct BeatsPub {
 pub struct NewsPub {
     /// Rises with each change.
     pub seq: u64,
+    /// M18 P5: the possession it belongs to (`SlicePub::epoch`).
+    pub epoch: u64,
     /// The player's own lines, oldest first (`[view] news_log_lines`): (important, "dD HH:MM text").
     pub log: Vec<(bool, String)>,
     /// Who knows about you: (name, what, how and when).
@@ -166,6 +198,19 @@ pub enum UiCmd {
     /// C4: a `--play` line's `body best friends|weak|strong`: of the adults within `[combat] join_tiles` of the
     /// subject, the one with the most likely joiners, the best odds or the worst (`combat::odds`); its menu.
     BodyBest(String),
+    /// M18 P5, the start menu: the camera on a body (not possessed, the clock stopped); take a body; a fresh arrival
+    /// in the Sump; the nobodies again (the death screen's pick); a save under a name; a player save loaded; the
+    /// pre-run city loaded again (New after a game).
+    Look(EntityId),
+    Start(EntityId),
+    Fresh,
+    Nobodies,
+    Save(String),
+    Load(PathBuf),
+    NewCity,
+    /// M18 P5, a script's: the adult near the body with the best odds goes for it (`true`: to kill, the blackmail
+    /// silencing's `bm_kill_mult`).
+    Provoke(bool),
 }
 
 /// A menu row for the render thread: the label, the verb, the will terms it waives (`Verb::waived`, the hover), and
@@ -228,6 +273,12 @@ impl Shared {
         self.cmds.lock().unwrap().push(c);
     }
 
+    /// M18 P5: a load or a save: the menu reads busy from the order on (the sim thread clears it when done).
+    pub fn send_busy(&self, c: UiCmd) {
+        self.slice.lock().unwrap().busy = true;
+        self.send(c);
+    }
+
     pub fn speed(&self) -> f64 {
         f64::from_bits(self.speed_bits.load(Ordering::Relaxed))
     }
@@ -244,7 +295,10 @@ impl Shared {
 
 pub struct SimArgs {
     pub save: PathBuf,
-    pub follow: u32,
+    /// The subject (`--follow`); `None`: the slice's (a player save's body, else a nobody to pick).
+    pub follow: Option<u32>,
+    /// M18 P5: the slice (`--slice`): the start menu, the player saves in this directory; `save` is the pre-run city.
+    pub slice: Option<PathBuf>,
     pub rate: Option<f64>,
     pub from: Option<u64>,
     pub shots: Vec<u64>,
@@ -333,6 +387,9 @@ impl Shared {
             poses: Mutex::new(Vec::new()),
             down: Mutex::new(Vec::new()),
             fight: Mutex::new(Vec::new()),
+            slice: Mutex::new(SlicePub::default()),
+            autopause: AtomicBool::new(true),
+            input_at: Mutex::new(Instant::now()),
         }
     }
 }
@@ -362,21 +419,186 @@ pub fn fatal(msg: String) -> ! {
     std::process::exit(2);
 }
 
-fn run(a: SimArgs, sh: Arc<Shared>) {
+/// M18 P5: the start menu's line (a load, a save) and whether the thread is busy with it.
+fn status(sh: &Shared, line: String, busy: bool) {
+    eprintln!("cityview: {line}");
+    let mut s = sh.slice.lock().unwrap();
+    s.status = line;
+    s.busy = busy;
+    s.seq += 1;
+}
+
+/// M18 P5: a save loaded, timed (the menu says how long).
+fn load_world(sh: &Shared, path: &Path) -> Result<World, String> {
+    status(sh, format!("loading {} ...", path.display()), true);
     let t0 = Instant::now();
-    let mut world = save::load_from_file(&a.save).unwrap_or_else(|e| fatal(format!("--save: {e}")));
-    eprintln!("cityview: loaded {} at tick {} ({:.1} s)", a.save.display(), world.tick, t0.elapsed().as_secs_f64());
-    let subject = world
-        .entities()
-        .find(|e| e.index == a.follow)
-        .unwrap_or_else(|| fatal(format!("--follow {}: no living entity with that index at tick {}", a.follow, world.tick)));
+    let w = save::load_from_file(path).inspect_err(|e| status(sh, format!("could not load {}: {e}", path.display()), false))?;
+    let secs = t0.elapsed().as_secs_f64();
+    status(
+        sh,
+        format!(
+            "loaded {} (day {} {}) in {secs:.1} s",
+            path.file_name().map_or(String::new(), |f| f.to_string_lossy().into_owned()),
+            w.tick / citysim::TICKS_PER_DAY,
+            citysim::time::clock(w.tick)
+        ),
+        false,
+    );
+    Ok(w)
+}
+
+/// M18 P5: the body a player save holds (possessed when it was saved).
+fn player_in(world: &World) -> Option<EntityId> {
+    world.entities().find(|&e| world.comp::<Brain>(e).is_some_and(|b| b.player.is_some()) && world.has::<Identity>(e))
+}
+
+/// M18 P5: the start menu's nobodies (`player::nobodies`) and the player saves (`saves_dir`, newest first).
+fn publish_lists(sh: &Shared, world: Option<&World>, dir: &Path) {
+    let nobodies = world.map(|w| pl::nobodies(w).into_iter().map(|n| (n.id, n.kind.to_string(), n.line)).collect());
+    let mut saves: Vec<(std::time::SystemTime, PathBuf, String)> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "ron"))
+        .filter_map(|p| {
+            let m = std::fs::metadata(&p).ok()?;
+            let when = m.modified().ok()?;
+            let name = p.file_stem()?.to_string_lossy().into_owned();
+            Some((when, p, format!("{name} ({:.0} MB)", m.len() as f64 / 1e6)))
+        })
+        .collect();
+    saves.sort_by_key(|a| std::cmp::Reverse(a.0));
+    let mut s = sh.slice.lock().unwrap();
+    if let Some(n) = nobodies {
+        s.nobodies = n;
+    }
+    s.saves = saves.into_iter().map(|(_, p, l)| (p, l)).collect();
+    s.seq += 1;
+}
+
+/// M18 P5: the camera (and with `possess` the human) moves from `old` (in this world; `None` after a load) to `to`.
+/// The body left behind goes back to its brain.
+fn take(world: &mut World, old: Option<EntityId>, to: EntityId, possess: bool) {
+    if let Some(old) = old.filter(|&o| o != to) {
+        if let Some(b) = world.comp_mut::<Brain>(old) {
+            b.pinned = false;
+        }
+        if world.comp::<Brain>(old).is_some_and(|b| b.player.is_some()) && world.has::<Identity>(old) {
+            pl::possess(world, old, false);
+        }
+    }
+    if let Some(b) = world.comp_mut::<Brain>(to) {
+        b.pinned = true;
+    }
+    world.crossing_watch = Some([(to, Vec::new())].into());
+    if possess {
+        if world.comp::<Brain>(to).is_some_and(|b| b.player.is_none()) {
+            pl::possess(world, to, true);
+        }
+        world.combat.stepper = Some(to);
+    } else {
+        world.combat.stepper = None;
+    }
+}
+
+/// M18 P5: a fight new this tick that should stop the clock (the auto-pause): the body attacked (on the struck side
+/// of a fight it did not start), or a fight within `[view] autopause_tiles` of it; the line.
+fn alarm(
+    world: &World,
+    subject: EntityId,
+    seen: &mut std::collections::BTreeSet<u32>,
+    by_seen: &mut std::collections::BTreeSet<EntityId>,
+    tiles: u16,
+) -> Option<String> {
+    let me = world.comp::<citysim::Position>(subject)?;
+    let near = |x: EntityId| {
+        world.comp::<citysim::Position>(x).is_some_and(|q| match (q.building, me.building) {
+            (Some(a), Some(b)) => a == b,
+            (None, None) => {
+                (i32::from(q.tile.x) - i32::from(me.tile.x)).abs() <= i32::from(tiles)
+                    && (i32::from(q.tile.y) - i32::from(me.tile.y)).abs() <= i32::from(tiles)
+            }
+            _ => false,
+        })
+    };
+    let mut out = None;
+    for (k, e) in &world.combat.engagements {
+        if !seen.insert(*k) || out.is_some() || e.sides[0].contains(&subject) {
+            continue;
+        }
+        let by = e.sides[0].first().map_or("someone".to_string(), |&x| world.name_of(x));
+        if e.sides[1].contains(&subject) {
+            by_seen.extend(e.sides[0].first().copied());
+            out = Some(format!("{by} went for you"));
+        } else if e.sides.iter().flatten().any(|&x| near(x)) {
+            let on = e.sides[1].first().map_or("someone".to_string(), |&x| world.name_of(x));
+            out = Some(format!("a fight broke out near you: {by} went for {on}"));
+        }
+    }
+    seen.retain(|k| world.combat.engagements.contains_key(k));
+    out
+}
+
+fn run(a: SimArgs, sh: Arc<Shared>) {
+    let slice = a.slice.clone();
+    // M18 P5: the slice's pre-run save; missing, the menu says how to make it and waits for a load
+    let mut world = loop {
+        if slice.is_none() || a.save.is_file() {
+            match load_world(&sh, &a.save) {
+                Ok(w) => break w,
+                Err(e) if slice.is_none() => fatal(format!("--save: {e}")),
+                Err(_) => {}
+            }
+        } else {
+            sh.slice.lock().unwrap().missing = Some(format!(
+                "There is no pre-run city at {}. Make it once from the repo root (a few minutes):\n{}",
+                a.save.display(),
+                PRERUN_CMD
+            ));
+        }
+        if let Some(dir) = slice.as_deref() {
+            publish_lists(&sh, None, dir);
+        }
+        // a player save picked from the menu instead
+        let load = loop {
+            let cmds = std::mem::take(&mut *sh.cmds.lock().unwrap());
+            if let Some(p) = cmds.into_iter().find_map(|c| if let UiCmd::Load(p) = c { Some(p) } else { None }) {
+                break p;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        if let Ok(w) = load_world(&sh, &load) {
+            sh.slice.lock().unwrap().missing = None;
+            break w;
+        }
+    };
+    // the subject: --follow; the slice: a player save's body, else the first nobody (looked at, the clock stopped)
+    let mut possessed = false;
+    let subject = match (a.follow, slice.as_ref()) {
+        (Some(i), _) => world
+            .entities()
+            .find(|e| e.index == i)
+            .unwrap_or_else(|| fatal(format!("--follow {i}: no living entity with that index at tick {}", world.tick))),
+        (None, _) => match player_in(&world) {
+            Some(p) => {
+                possessed = true;
+                p
+            }
+            None => pl::nobodies(&world)
+                .first()
+                .map(|n| n.id)
+                .unwrap_or_else(|| fatal(format!("{}: no free adult to look at", a.save.display()))),
+        },
+    };
+    let mut subject = subject;
     let building = world.has::<citysim::Building>(subject);
     if !(world.has::<Identity>(subject) || building) || view::subject_tile(&world, subject).is_none() {
-        fatal(format!("--follow {}: {subject:?} is no body with a place nor a building", a.follow));
+        fatal(format!("--follow {}: {subject:?} is no body with a place nor a building", subject.index));
     }
     // M18 P1: nobody under 18 is ever possessed (CLAUDE.md, 2026-10-27; the sim refuses it too)
     if a.possess && !citysim::systems::demography::is_adult(&world, subject) {
-        fatal(format!("--possess {}: {} is no adult (nobody under 18 can be possessed)", a.follow, who(&world, subject)));
+        fatal(format!("--possess {}: {} is no adult (nobody under 18 can be possessed)", subject.index, who(&world, subject)));
     }
     if let Some(&t) = a.shots.iter().chain(a.from.iter()).chain(a.reload_at.iter()).find(|&&t| t < world.tick) {
         fatal(format!("tick {t} (--shots / --from / --reload-at) is before the save's tick {}", world.tick));
@@ -393,23 +615,19 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         crossings: world.map.crossings.clone(),
     });
     eprintln!("cityview: following {} at {rate:.4} ticks/s", who(&world, subject));
-    if let Some(b) = world.comp_mut::<Brain>(subject) {
-        b.pinned = true;
-    }
-    // V7: the subject's crossings to the log (a shot's tick is found from them)
-    world.crossing_watch = Some([(subject, Vec::new())].into());
+    take(&mut world, None, subject, possessed);
     let mut cfg = world.config.view.clone();
+    sh.autopause.store(cfg.autopause, Ordering::Relaxed);
     let mut watch = a.config.as_deref().map(|p| (mtime(p), Instant::now()));
-    let (w, h) = (world.map.w(), world.map.h());
+    let (mut w, mut h) = (world.map.w(), world.map.h());
     // V5: ticks run and their wall time since the last hold (the bench's sim ticks/s)
     let mut acc = (0u64, 0f64);
     let mut seq = 0u64;
     // V6: the walkers' ways kept from one published frame to the next (one road search a walk, not a frame)
     let mut ways = view::WayCache::default();
-    let from = a.from.unwrap_or(world.tick);
+    let mut from = a.from.unwrap_or(world.tick);
     let mut next_at = Instant::now();
     let mut reloaded_at = false;
-    let mut possessed = false;
     let mut last_logged = (String::new(), None, false);
     let mut menu_seq = 0u64;
     let mut last_event = world.events.back().map_or(0, |e| e.id);
@@ -422,6 +640,109 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
     // told (a tick's `last_beats` repeats them)
     let mut stepped = 0u8;
     let mut told: Vec<citysim::systems::combat::BeatLog> = Vec::new();
+    // M18 P5: a frame owed with no tick (a look, a start, a load while the clock is stopped); the fights seen (the
+    // auto-pause's); the possession's generation (the render thread's panels reset on it)
+    let mut republish = true;
+    let mut seen_fights: std::collections::BTreeSet<u32> = world.combat.engagements.keys().copied().collect();
+    let mut epoch = 0u64;
+    // M18 P5: the attackers the auto-pause already told of (their assault's event at the fight's end is the same)
+    let mut alarmed_by: std::collections::BTreeSet<EntityId> = Default::default();
+    if let Some(dir) = slice.as_deref() {
+        publish_lists(&sh, Some(&world), dir);
+        sh.paused.store(!possessed, Ordering::Relaxed);
+        sh.slice.lock().unwrap().started = possessed;
+    }
+    // M18 P5: the camera (and the human) on another body: the per-body state starts again
+    macro_rules! begin {
+        ($old:expr, $to:expr, $possess:expr) => {{
+            let to: EntityId = $to;
+            take(&mut world, $old, to, $possess);
+            subject = to;
+            possessed = $possess;
+            news = None;
+            last_logged = (String::new(), None, false);
+            last_tile = view::subject_tile(&world, subject);
+            stepped = 0;
+            told.clear();
+            seen_fights = world.combat.engagements.keys().copied().collect();
+            republish = true;
+            epoch += 1;
+            *sh.news.lock().unwrap() = NewsPub { epoch, ..NewsPub::default() };
+            *sh.player.lock().unwrap() = None;
+            *sh.menu.lock().unwrap() = None;
+            {
+                let mut s = sh.slice.lock().unwrap();
+                s.epoch = epoch;
+                s.started = possessed;
+                s.alert = None;
+                s.seq += 1;
+            }
+            eprintln!("cityview: tick {} {} {}", world.tick, if possessed { "possess" } else { "look at" }, who(&world, subject));
+        }};
+    }
+    // M18 P5: a loaded world in place of the running one
+    macro_rules! swap_world {
+        ($new:expr) => {{
+            world = $new;
+            crate::lights::graft(&mut world, a.config.as_deref());
+            *sh.signals.lock().unwrap() = world.config.crossings.clone();
+            cfg = world.config.view.clone();
+            if a.rate.is_none() {
+                rate = view::walk_matched_rate(&world);
+                sh.rate_bits.store(rate.to_bits(), Ordering::Relaxed);
+            }
+            (w, h) = (world.map.w(), world.map.h());
+            ways = view::WayCache::default();
+            last_event = world.events.back().map_or(0, |e| e.id);
+            from = world.tick;
+            acc = (0, 0.0);
+            {
+                let mut s = sh.slots.lock().unwrap();
+                s.prev = None;
+                s.latest = None;
+            }
+            sh.tick.store(world.tick, Ordering::Relaxed);
+            match player_in(&world) {
+                Some(p) => {
+                    begin!(None, p, true);
+                    sh.paused.store(false, Ordering::Relaxed);
+                }
+                None => {
+                    if let Some(n) = pl::nobodies(&world).first().map(|n| n.id) {
+                        begin!(None, n, false);
+                    }
+                    sh.paused.store(true, Ordering::Relaxed);
+                }
+            }
+            if let Some(dir) = slice.as_deref() {
+                publish_lists(&sh, Some(&world), dir);
+            }
+        }};
+    }
+    // M18 P5, the auto-pause: the clock stops on `line` (the body attacked, a fight near) when the toggle is on and
+    // the body is on autopilot or the human away
+    macro_rules! autopause {
+        ($line:expr) => {{
+            let line: String = $line;
+            let auto = world.comp::<Brain>(subject).and_then(|b| b.player.as_ref()).is_some_and(|p| p.autopilot);
+            let away = sh.input_at.lock().unwrap().elapsed().as_secs_f64() >= cfg.away_s;
+            let dead = news.as_ref().is_some_and(|n| n.pubd.death.is_some());
+            if possessed && !dead && sh.autopause.load(Ordering::Relaxed) && (auto || away) {
+                let why = if auto { "on autopilot" } else { "you were away" };
+                let line = format!("the clock stopped ({why}): {line}");
+                eprintln!("autopause {}: {line}", stamp(world.tick));
+                if let Some(n) = news.as_mut() {
+                    n.push(&world, true, format!("!! {line}"));
+                    n.sent = n.pubd.seq;
+                    *sh.news.lock().unwrap() = NewsPub { epoch, ..n.pubd.clone() };
+                }
+                sh.paused.store(true, Ordering::Relaxed);
+                let mut s = sh.slice.lock().unwrap();
+                s.alert = Some(line);
+                s.seq += 1;
+            }
+        }};
+    }
     loop {
         // M18 P1: possessed at --from (the city pre-run to it); the render thread's orders, between two ticks
         if a.possess && !possessed && world.tick >= from {
@@ -434,6 +755,86 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         let cmds = std::mem::take(&mut *sh.cmds.lock().unwrap());
         for c in cmds {
             let cmd = match c {
+                // M18 P5: the start menu
+                UiCmd::Look(to) => {
+                    if !possessed && world.is_alive(to) && view::subject_tile(&world, to).is_some() {
+                        begin!(Some(subject), to, false);
+                    }
+                    continue;
+                }
+                UiCmd::Start(to) => {
+                    if world.is_alive(to) && citysim::systems::demography::is_adult(&world, to) {
+                        begin!(Some(subject), to, true);
+                        sh.paused.store(false, Ordering::Relaxed);
+                    }
+                    continue;
+                }
+                UiCmd::Fresh => {
+                    let to = pl::arrive_fresh(&mut world);
+                    eprintln!("cityview: tick {} arrive fresh: {}", world.tick, pl::nobody_line(&world, to));
+                    begin!(Some(subject), to, true);
+                    sh.paused.store(false, Ordering::Relaxed);
+                    continue;
+                }
+                UiCmd::Nobodies => {
+                    if let Some(dir) = slice.as_deref() {
+                        publish_lists(&sh, Some(&world), dir);
+                    }
+                    continue;
+                }
+                UiCmd::Save(name) => {
+                    let Some(dir) = slice.as_deref() else { continue };
+                    if citysim::systems::combat::engaged(&world, subject) {
+                        status(&sh, "not in the middle of a fight: save when it is over".into(), false);
+                        continue;
+                    }
+                    let path = dir.join(format!("{name}.ron"));
+                    status(&sh, format!("saving {} ...", path.display()), true);
+                    let t0 = Instant::now();
+                    citysim::systems::combat::settle_all(&mut world);
+                    match save::save_to_file(&world, &path) {
+                        Ok(()) => status(&sh, format!("saved {name} in {:.1} s", t0.elapsed().as_secs_f64()), false),
+                        Err(e) => status(&sh, format!("could not save {}: {e}", path.display()), false),
+                    }
+                    publish_lists(&sh, Some(&world), dir);
+                    continue;
+                }
+                UiCmd::Load(p) => {
+                    if let Ok(nw) = load_world(&sh, &p) {
+                        swap_world!(nw);
+                    }
+                    continue;
+                }
+                UiCmd::NewCity => {
+                    if let Ok(nw) = load_world(&sh, &a.save) {
+                        swap_world!(nw);
+                    }
+                    continue;
+                }
+                UiCmd::Provoke(lethal) => {
+                    if let Some(x) = best_body(&world, subject, "strong") {
+                        let (kill_p, why) = if lethal {
+                            (Some(cfg.provoke_kill_p), citysim::systems::combat::Purpose::Raid)
+                        } else {
+                            (None, citysim::systems::combat::Purpose::Brawl)
+                        };
+                        let mods = citysim::systems::law::FightMods { kill_p, why, ..Default::default() };
+                        eprintln!(
+                            "cityview: tick {} provoke: {} goes for {} (kill_p {kill_p:?})",
+                            world.tick,
+                            who(&world, x),
+                            who(&world, subject)
+                        );
+                        citysim::systems::combat::fight(
+                            &mut world,
+                            x,
+                            subject,
+                            mods,
+                            citysim::systems::combat::Tail::Attack { victim: subject },
+                        );
+                    }
+                    continue;
+                }
                 // M18 P2: a click on a building (a roof, a wall, a floor in the cutaway) opens its menu; the
                 // street walks there (P1's walk, never into a building: the doors are the menu's)
                 UiCmd::Click(t, roof) => {
@@ -476,8 +877,21 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                 UiCmd::Autopilot(on) => citysim::PlayerCommand::SetAutopilot(subject, on),
                 UiCmd::Fight(order) => citysim::PlayerCommand::Fight { agent: subject, order },
             };
+            if !possessed {
+                continue;
+            }
             eprintln!("cityview: tick {} order {cmd:?}", world.tick);
             world.push_command(cmd);
+        }
+        // M18 P5: a fight begun between two ticks (a script's provoke) stops the clock before its first beat
+        if possessed && let Some(line) = alarm(&world, subject, &mut seen_fights, &mut alarmed_by, cfg.autopause_tiles) {
+            autopause!(line);
+        }
+        // M18 P5: a frame owed with the clock stopped (the menu's look, a start, a load)
+        if std::mem::take(&mut republish)
+            && let Some(at) = view::subject_tile(&world, subject).or(last_tile)
+        {
+            publish(&world, &sh, subject, at, &cfg, &mut ways, &mut seq, possessed, news.as_mut(), &mut last_logged);
         }
         // V1: a reload between two ticks: the R key, --reload-at, the file's mtime moved
         let mut why = None;
@@ -532,8 +946,9 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         if !fighting && stepped == 0 {
             told.clear();
         }
-        // M18 P1: Space stops the clock (paced play only; a bench's run to its hold goes on)
-        if (hold == u64::MAX || fighting) && world.tick >= from && sh.paused.load(Ordering::Relaxed) {
+        // M18 P1: Space stops the clock (paced play only; a bench's run to its hold goes on). M18 P5: the slice's
+        // clock stops under a script's hold too (the menu, the auto-pause)
+        if (hold == u64::MAX || fighting || slice.is_some()) && world.tick >= from && sh.paused.load(Ordering::Relaxed) {
             std::thread::sleep(Duration::from_millis(20));
             next_at = Instant::now();
             continue;
@@ -580,8 +995,9 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         }
         // M18 P4: a dead player's corpse can go (buried, rotted): the camera stays where it fell
         let dead = news.as_ref().is_some_and(|n| n.pubd.death.is_some());
-        let Some(at) = view::subject_tile(&world, subject).or(last_tile.filter(|_| dead)) else {
-            fatal(format!("the subject {subject:?} is gone at tick {}", world.tick))
+        let at = match view::subject_tile(&world, subject).or(last_tile.filter(|_| dead || slice.is_some())) {
+            Some(at) => at,
+            None => fatal(format!("the subject {subject:?} is gone at tick {}", world.tick)),
         };
         last_tile = Some(at);
         let ring = view::ring_about(at, cfg.ring_half_tiles, w, h);
@@ -597,7 +1013,16 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         if possessed {
             let n = news.get_or_insert_with(|| News::new(&world, subject));
             let new: Vec<&citysim::events::Event> = world.events.iter().rev().take_while(|e| e.id > last_event).collect();
+            // M18 P5: an assault on the body (a fight over inside the tick leaves no engagement to see)
+            let mut assaulted = None;
             for e in new.iter().rev() {
+                if e.kind == citysim::events::EventKind::Assault
+                    && e.actors.get(1) == Some(&subject)
+                    && e.actors[0] != subject
+                    && !alarmed_by.contains(&e.actors[0])
+                {
+                    assaulted = Some(format!("{} went for you", world.name_of(e.actors[0])));
+                }
                 if e.actors.contains(&subject) {
                     let (d, c) = (e.tick / citysim::TICKS_PER_DAY, citysim::time::clock(e.tick));
                     eprintln!("event d{d} {c}: [{:?}] {}", e.kind, e.text);
@@ -674,7 +1099,13 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
             }
             if n.pubd.seq != n.sent {
                 n.sent = n.pubd.seq;
-                *sh.news.lock().unwrap() = n.pubd.clone();
+                *sh.news.lock().unwrap() = NewsPub { epoch, ..n.pubd.clone() };
+            }
+            // M18 P5, the auto-pause: attacked, or a fight near, on autopilot or with the human away (a fight the
+            // body started never stops it: `alarm` skips the attacking side)
+            let near = alarm(&world, subject, &mut seen_fights, &mut alarmed_by, cfg.autopause_tiles);
+            if let Some(line) = near.or(assaulted) {
+                autopause!(line);
             }
         }
         last_event = world.events.back().map_or(last_event, |e| e.id);
@@ -686,65 +1117,7 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         // every tick with beats of a fight in the ring)
         let target = if hold == u64::MAX { from } else { hold };
         if paced || stepping || std::mem::take(&mut shown_beats) || world.tick + 1 >= target {
-            let at = view::subject_tile(&world, subject).unwrap_or(at);
-            let ring = view::ring_about(at, cfg.ring_half_tiles, w, h);
-            let frame = view::snapshot_many_cached(&world, &[ring], Some(&mut ways)).pop().expect("one ring, one frame");
-            let line = ring_line(&world, &frame);
-            if std::env::var_os("CV_RING_DEBUG").is_some() {
-                // promoted this tick from Statistical: where it stands and what its schedule says
-                let fresh = world
-                    .ring
-                    .held
-                    .iter()
-                    .filter(|(id, h)| {
-                        h.base == citysim::Lod::Statistical
-                            && world
-                                .comp::<Brain>(**id)
-                                .is_some_and(|b| world.comp::<citysim::Position>(**id).is_some_and(|p| p.entered == b.lod_since))
-                    })
-                    .filter(|(id, _)| {
-                        // the ones placed at work (a home placement reads the same way)
-                        let work = world.comp::<citysim::components::Job>(**id).and_then(|j| j.employer);
-                        work.is_some() && work == world.comp::<citysim::Position>(**id).and_then(|p| p.building)
-                    })
-                    .take(6)
-                    .map(|(id, _)| *id)
-                    .collect::<Vec<_>>();
-                let kind = |b: Option<EntityId>| {
-                    b.and_then(|b| world.comp::<citysim::Building>(b).map(|x| format!("{:?}#{} door {:?}", x.kind, b.index, x.door)))
-                };
-                for id in fresh {
-                    let p = world.comp::<citysim::Position>(id);
-                    let job = world.comp::<citysim::components::Job>(id);
-                    eprintln!(
-                        "ring-promoted (lod since {:?}) {} {:?} at {:?} in {:?} floor {:?}; home {:?}; work {:?} on shift {:?}; schedule {:?}",
-                        world.comp::<Brain>(id).map(|b| b.lod_since),
-                        world.name_of(id),
-                        id,
-                        p.map(|p| p.tile),
-                        kind(p.and_then(|p| p.building)),
-                        p.map(|p| p.floor),
-                        kind(world.comp::<citysim::components::Household>(id).and_then(|h| h.home)),
-                        kind(job.and_then(|j| j.employer)),
-                        job.map(|j| j.shifts.clone()),
-                        kind(citysim::systems::ring::schedule_door(&world, id))
-                    );
-                }
-                for ag in frame.agents.iter().filter(|a| a.lod == Some(citysim::Lod::Statistical)).take(8) {
-                    let p = world.comp::<citysim::Position>(ag.id);
-                    eprintln!(
-                        "ring-debug {:?} t {:?} pos {:?} held {:?} sentence {} sched {:?} brain lod_since {:?}",
-                        ag.id,
-                        ag.t,
-                        p.map(|p| (p.tile, p.building)),
-                        world.ring.held.get(&ag.id),
-                        world.has::<citysim::components::Sentence>(ag.id),
-                        citysim::systems::ring::schedule_door(&world, ag.id)
-                            .map(|b| (b, world.comp::<citysim::Building>(b).map(|x| x.door))),
-                        world.comp::<Brain>(ag.id).map(|b| b.lod_since)
-                    );
-                }
-            }
+            let line = publish(&world, &sh, subject, at, &cfg, &mut ways, &mut seq, possessed, news.as_mut(), &mut last_logged);
             if !paced && !stepping {
                 let (n, secs) = acc;
                 let tps = n as f64 / secs.max(1e-9);
@@ -756,44 +1129,128 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                     acc = (0, 0.0);
                 }
             }
-            seq += 1;
-            let caption = format!("{}\n{line}", view::caption(&world, &frame, subject));
-            if possessed {
-                let hud = player_hud(&world, subject);
-                // the log's record of the body's day: each new plan, failure and autopilot switch
-                if let (Some(line), Some(n)) = (log_player(&hud, &mut last_logged), news.as_mut()) {
-                    n.push(&world, false, line);
-                    n.sent = n.pubd.seq;
-                    *sh.news.lock().unwrap() = n.pubd.clone();
-                }
-                *sh.player.lock().unwrap() = Some(hud);
-            }
-            // C5: who lies in the ring (knocked out, downed) and who is in the subject's fight
-            let key = |e: EntityId| u64::from(e.index) | (u64::from(e.generation) << 32);
-            let down: Vec<u64> = frame
-                .agents
-                .iter()
-                .map(|a| a.id)
-                .filter(|&x| citysim::systems::combat::knocked_out(&world, x) || citysim::systems::wounded::is_down(&world, x))
-                .map(key)
-                .collect();
-            *sh.down.lock().unwrap() = down;
-            let fight: Vec<u64> = world
-                .combat
-                .engaged
-                .get(&subject)
-                .and_then(|i| world.combat.engagements.get(i))
-                .map(|e| e.seen.iter().copied().map(key).collect())
-                .unwrap_or_default();
-            *sh.fight.lock().unwrap() = fight;
-            let p = Arc::new(Published { frame, subject, caption, at: Instant::now(), seq });
-            let mut s = sh.slots.lock().unwrap();
-            s.prev = s.latest.take();
-            s.latest = Some(p);
             if !stepping {
                 next_at = next_at.max(Instant::now());
             }
         }
+    }
+}
+
+/// One frame to the render thread: the ring's snapshot, the caption, the possessed body's HUD (and its log's plan
+/// lines), who lies in the ring and who is in the subject's fight. The ring's counts line, returned.
+#[allow(clippy::too_many_arguments)]
+fn publish(
+    world: &World,
+    sh: &Shared,
+    subject: EntityId,
+    at: TilePos,
+    cfg: &citysim::config::ViewCfg,
+    ways: &mut view::WayCache,
+    seq: &mut u64,
+    possessed: bool,
+    news: Option<&mut News>,
+    last_logged: &mut (String, Option<String>, bool),
+) -> String {
+    let (w, h) = (world.map.w(), world.map.h());
+    let at = view::subject_tile(world, subject).unwrap_or(at);
+    let ring = view::ring_about(at, cfg.ring_half_tiles, w, h);
+    let frame = view::snapshot_many_cached(world, &[ring], Some(ways)).pop().expect("one ring, one frame");
+    let line = ring_line(world, &frame);
+    if std::env::var_os("CV_RING_DEBUG").is_some() {
+        ring_debug(world, &frame);
+    }
+    *seq += 1;
+    let caption = format!("{}\n{line}", view::caption(world, &frame, subject));
+    if possessed {
+        let hud = player_hud(world, subject);
+        // the log's record of the body's day: each new plan, failure and autopilot switch
+        if let (Some(l), Some(n)) = (log_player(&hud, last_logged), news) {
+            n.push(world, false, l);
+            n.sent = n.pubd.seq;
+            let epoch = sh.news.lock().unwrap().epoch;
+            *sh.news.lock().unwrap() = NewsPub { epoch, ..n.pubd.clone() };
+        }
+        *sh.player.lock().unwrap() = Some(hud);
+    }
+    // C5: who lies in the ring (knocked out, downed) and who is in the subject's fight
+    let key = |e: EntityId| u64::from(e.index) | (u64::from(e.generation) << 32);
+    let down: Vec<u64> = frame
+        .agents
+        .iter()
+        .map(|a| a.id)
+        .filter(|&x| citysim::systems::combat::knocked_out(world, x) || citysim::systems::wounded::is_down(world, x))
+        .map(key)
+        .collect();
+    *sh.down.lock().unwrap() = down;
+    let fight: Vec<u64> = world
+        .combat
+        .engaged
+        .get(&subject)
+        .and_then(|i| world.combat.engagements.get(i))
+        .map(|e| e.seen.iter().copied().map(key).collect())
+        .unwrap_or_default();
+    *sh.fight.lock().unwrap() = fight;
+    let p = Arc::new(Published { frame, subject, caption, at: Instant::now(), seq: *seq });
+    let mut s = sh.slots.lock().unwrap();
+    s.prev = s.latest.take();
+    s.latest = Some(p);
+    line
+}
+
+/// V5 (`CV_RING_DEBUG=1`): the bodies promoted this tick from Statistical and placed at work, and the Statistical
+/// bodies in the camera, to the log.
+fn ring_debug(world: &World, frame: &ViewFrame) {
+    // promoted this tick from Statistical: where it stands and what its schedule says
+    let fresh = world
+        .ring
+        .held
+        .iter()
+        .filter(|(id, h)| {
+            h.base == citysim::Lod::Statistical
+                && world
+                    .comp::<Brain>(**id)
+                    .is_some_and(|b| world.comp::<citysim::Position>(**id).is_some_and(|p| p.entered == b.lod_since))
+        })
+        .filter(|(id, _)| {
+            // the ones placed at work (a home placement reads the same way)
+            let work = world.comp::<citysim::components::Job>(**id).and_then(|j| j.employer);
+            work.is_some() && work == world.comp::<citysim::Position>(**id).and_then(|p| p.building)
+        })
+        .take(6)
+        .map(|(id, _)| *id)
+        .collect::<Vec<_>>();
+    let kind = |b: Option<EntityId>| {
+        b.and_then(|b| world.comp::<citysim::Building>(b).map(|x| format!("{:?}#{} door {:?}", x.kind, b.index, x.door)))
+    };
+    for id in fresh {
+        let p = world.comp::<citysim::Position>(id);
+        let job = world.comp::<citysim::components::Job>(id);
+        eprintln!(
+            "ring-promoted (lod since {:?}) {} {:?} at {:?} in {:?} floor {:?}; home {:?}; work {:?} on shift {:?}; schedule {:?}",
+            world.comp::<Brain>(id).map(|b| b.lod_since),
+            world.name_of(id),
+            id,
+            p.map(|p| p.tile),
+            kind(p.and_then(|p| p.building)),
+            p.map(|p| p.floor),
+            kind(world.comp::<citysim::components::Household>(id).and_then(|h| h.home)),
+            kind(job.and_then(|j| j.employer)),
+            job.map(|j| j.shifts.clone()),
+            kind(citysim::systems::ring::schedule_door(world, id))
+        );
+    }
+    for ag in frame.agents.iter().filter(|a| a.lod == Some(citysim::Lod::Statistical)).take(8) {
+        let p = world.comp::<citysim::Position>(ag.id);
+        eprintln!(
+            "ring-debug {:?} t {:?} pos {:?} held {:?} sentence {} sched {:?} brain lod_since {:?}",
+            ag.id,
+            ag.t,
+            p.map(|p| (p.tile, p.building)),
+            world.ring.held.get(&ag.id),
+            world.has::<citysim::components::Sentence>(ag.id),
+            citysim::systems::ring::schedule_door(world, ag.id).map(|b| (b, world.comp::<citysim::Building>(b).map(|x| x.door))),
+            world.comp::<Brain>(ag.id).map(|b| b.lod_since)
+        );
     }
 }
 

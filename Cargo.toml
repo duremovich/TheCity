@@ -4,8 +4,8 @@ resolver = "2"
 # milestone's C1) is a member outside default-members: a bare cargo build / clippy / test builds the sim alone and
 # never compiles Bevy. tools/test.py's sim tiers never pass --workspace or --all; `python tools/test.py view`
 # builds and smokes the view (docs/TESTING.md).
-members = ["citysim", "citysim-app", "citysim-cli", "view/glclient", "view/cityview"]
-default-members = ["citysim", "citysim-app", "citysim-cli"]
+members = ["citysim", "citysim-cli", "view/glclient", "view/cityview"]
+default-members = ["citysim", "citysim-cli"]
 
 [workspace.package]
 version = "0.1.0"

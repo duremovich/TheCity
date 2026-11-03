@@ -36,6 +36,9 @@
 //! --save FILE --possess INDEX [--from TICK] [--play "T action; .." | @FILE]: M18 P1 (play.rs): a human drives that adult
 //! (the follow-cam's subject, possessed at --from): the egui HUD, a left click walks there, T autopilot, Space pause,
 //! `,` / `.` the play speed, Backspace stop; --play scripts a session through the same paths (screenshots, quit).
+//! --slice [--save FILE] [--play ..]: M18 P5, the player slice (docs/M18_PLAYER.md): the start menu over the pre-run
+//! 20k city (default `saves/slice/20k_s42_d21.ron`): pick a nobody or arrive fresh, load a save (`saves/player/`),
+//! Esc in play to save, load or quit; death ends the character and the city goes on.
 
 // Bevy systems take their params as arguments and query tuples as types: the two lints every Bevy crate allows.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -117,7 +120,13 @@ struct Args {
     possess: Option<u32>,
     /// M18 P1: --play "T action; ..": a scripted play session (play.rs)
     play: Option<String>,
+    /// M18 P5: --slice: the start menu (play.rs), the pre-run save by default
+    slice: bool,
 }
+
+/// M18 P5: the slice's pre-run city and the player saves, under the workspace root.
+const SLICE_SAVE: &str = "saves/slice/20k_s42_d21.ron";
+const PLAYER_SAVES: &str = "saves/player";
 
 /// A tick: a number, or `D:HH:MM` (day, hour, minute).
 fn parse_tick(s: &str) -> u64 {
@@ -167,6 +176,7 @@ impl Args {
             watch_vehicle: None,
             possess: None,
             play: None,
+            slice: false,
         };
         let v: Vec<String> = std::env::args().skip(1).collect();
         let mut i = 0;
@@ -295,6 +305,7 @@ impl Args {
                     });
                     i += 1;
                 }
+                "--slice" => a.slice = true,
                 "--trace-secs" => {
                     a.trace_secs = next(i).parse().unwrap();
                     i += 1;
@@ -309,11 +320,15 @@ impl Args {
             a.follow = Some(p);
         }
         assert!(a.possess.is_none() || a.save.is_some(), "--possess needs --save");
-        assert!(a.play.is_none() || a.possess.is_some(), "--play needs --possess");
+        assert!(a.play.is_none() || a.possess.is_some() || a.slice, "--play needs --possess or --slice");
+        assert!(
+            !a.slice || (a.possess.is_none() && a.follow.is_none() && a.bench.is_none()),
+            "--slice picks its own body (no --possess, --follow or --bench)"
+        );
         assert!(a.possess.is_none() || a.bench.is_none(), "--possess plays, it is no bench (--play scripts a session)");
         // V6: a recording (`--sim REC.simrec.gz`) plays through the follow-cam: --follow, --rate, --from, --shots
         let rec = a.sim.as_deref().is_some_and(recplay::is_recording);
-        assert!(a.save.is_none() || a.follow.is_some(), "--save needs --follow");
+        assert!(a.save.is_none() || a.follow.is_some() || a.slice, "--save needs --follow (or --slice)");
         assert!(a.follow.is_none() || a.save.is_some() || rec, "--follow needs --save or a recording (--sim REC.simrec.gz)");
         assert!(a.save.is_none() || a.sim.is_none(), "--save and --sim are exclusive");
         assert!(a.shots.is_empty() || a.bench.as_deref() == Some("one"), "--shots needs --bench one");
@@ -572,15 +587,22 @@ fn main() {
                 .add_systems(Update, sim::update_sim.after(stream::update_stream));
         }
     }
-    if let (Some(save), Some(follow)) = (&args.save, args.follow) {
+    // M18 P5: the slice's pre-run city by default
+    let save = match (&args.save, args.slice) {
+        (Some(s), _) => Some(s.clone()),
+        (None, true) => Some(workspace_root().join(SLICE_SAVE)),
+        (None, false) => None,
+    };
+    if let Some(save) = save.filter(|_| args.follow.is_some() || args.slice) {
         // the save reloads its name tables from TheCity's assets/ (CITYSIM_ASSETS wins when set)
         if std::env::var_os("CITYSIM_ASSETS").is_none() {
             // SAFETY: main, before any thread of ours starts (the sim thread and Bevy's come after)
             unsafe { std::env::set_var("CITYSIM_ASSETS", workspace_root().join("assets")) };
         }
         shared = Some(simthread::spawn(simthread::SimArgs {
-            save: save.clone(),
-            follow,
+            save,
+            follow: args.follow,
+            slice: args.slice.then(|| workspace_root().join(PLAYER_SAVES)),
             rate: args.rate,
             from: args.from,
             shots: args.shots.clone(),
@@ -605,15 +627,16 @@ fn main() {
         // V7: the junctions' signal heads around the subject
         lights::add(&mut app);
         // M18 P1: the player's HUD, click and keys
-        if args.possess.is_some() {
+        if args.possess.is_some() || args.slice {
             let script = args.play.as_deref().map(|s| play::parse_script(s, parse_tick)).unwrap_or_default();
-            play::add(&mut app, shared.clone(), &vcfg, script, out.clone());
+            let slice = args.slice.then(|| workspace_root().join(PLAYER_SAVES));
+            play::add(&mut app, shared.clone(), &vcfg, script, out.clone(), slice);
         }
     }
     // V10: the light follows the sim's clock (a replay's or the live world's)
     app.add_systems(Update, sim::clock_light.after(sim::update_sim).before(cam::apply_view).run_if(resource_exists::<sim::Sim>));
     // V3: people drawn as people (people.rs)
-    if args.sim.is_some() || args.save.is_some() {
+    if args.sim.is_some() || args.save.is_some() || args.slice {
         people::add(&mut app, args.capsules);
     }
     if args.bench.is_some() {

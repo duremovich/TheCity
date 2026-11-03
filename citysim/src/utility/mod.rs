@@ -128,8 +128,14 @@ pub fn think_scored(
     // C3b, the flight holds: a body that fled a fight lies low (nothing
     // takes it back out; a Treat when hurt).
     let low = crate::systems::combat::lying_low(world, id);
+    // M18 P5 (Dylan 2026-11-03): the player's body on autopilot is safe
+    // idle: only the goals that keep it alive.
+    let safe = brain.player.is_some();
     for (gi, goal) in goals::GOAL_ORDER.into_iter().enumerate() {
         if low && !crate::systems::combat::low_ok(world, id, goal) {
+            continue;
+        }
+        if safe && !crate::systems::player::safe_goal(goal) {
             continue;
         }
         // Scale S1: each goal's scoring time (the `prof` feature only).

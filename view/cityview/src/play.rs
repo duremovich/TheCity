@@ -42,6 +42,13 @@
 //! sim.rs on the existing rig: a lean and a step, `[view] lunge_s` / `lunge_m` / `lunge_deg`); the Attack rows read
 //! the duel's odds and the whole fight's; Take cover shows only with a gun in the fight, Holster only with a weapon in
 //! hand. Script: `wait SECS` (the sim runs on that long: a fight's beats a second apart).
+//!
+//! M18 P5 (start and loop, `--slice`): the egui start menu (New: pick a nobody or arrive fresh; Load; Quit), the
+//! Esc menu in play (Resume, Save, Load, Quit to menu, Quit), the death screen's "pick another nobody" into the same
+//! running city, the auto-pause's tick box and banner, and the cold-start help line. Script: `menu main|pick|load|esc|
+//! game`, `nobody I` (play the I-th nobody of the list), `look I`, `fresh`, `newcity`, `save NAME`, `load NAME`,
+//! `provoke [lethal]` (the adult near you with the best odds goes for you: a proof's cheat), `unpause`, `autopause
+//! on|off`, `await idle|player`; a line's tick `*` is the line before's (the next frame).
 
 use bevy::{
     app::AppExit,
@@ -105,6 +112,16 @@ pub struct Play {
     /// C5: the procedural poses of the beat replay (a lunge, a stagger) by body key, from `at`.
     pub poses: Vec<Pose>,
     lunge_s: f32,
+    /// M18 P5: the start menu (`--slice`), the screen up, the save's name field, the clock's state when Esc opened,
+    /// the possession whose panels show (a new one closes the old day-ends), the player saves' directory.
+    pub slice: bool,
+    pub screen: Screen,
+    save_name: String,
+    esc_was_paused: bool,
+    epoch_seen: u64,
+    /// M18 P5: a load was sent: once done, play goes on if the save held a body, else the pick.
+    pending_load: bool,
+    saves_dir: PathBuf,
 }
 
 /// C5: a body's procedural pose on the existing rig: a lunge at `toward` or a stagger away from it.
@@ -124,14 +141,23 @@ pub fn parse_script(s: &str, tick: impl Fn(&str) -> u64) -> Vec<Step> {
         .filter(|l| !l.is_empty())
         .map(|l| {
             let (t, a) = l.split_once(' ').unwrap_or_else(|| panic!("--play '{l}': 'TICK ACTION'"));
-            Step { tick: tick(t), action: a.trim().to_string() }
+            // M18 P5: `*` is the line before's tick (the next frame)
+            Step { tick: if t == "*" { u64::MAX } else { tick(t) }, action: a.trim().to_string() }
         })
         .collect();
+    let mut steps = steps;
+    let mut last = 0;
+    for st in steps.iter_mut() {
+        if st.tick == u64::MAX {
+            st.tick = last;
+        }
+        last = st.tick;
+    }
     assert!(steps.windows(2).all(|w| w[0].tick <= w[1].tick), "--play: ticks in rising order");
     steps
 }
 
-pub fn add(app: &mut App, shared: Arc<Shared>, vcfg: &citysim::config::ViewCfg, script: Vec<Step>, out: PathBuf) {
+pub fn add(app: &mut App, shared: Arc<Shared>, vcfg: &citysim::config::ViewCfg, script: Vec<Step>, out: PathBuf, slice: Option<PathBuf>) {
     let speeds = if vcfg.play_speeds.is_empty() { vec![1.0] } else { vcfg.play_speeds.clone() };
     app.add_plugins(EguiPlugin::default())
         .insert_resource(Play {
@@ -160,9 +186,17 @@ pub fn add(app: &mut App, shared: Arc<Shared>, vcfg: &citysim::config::ViewCfg, 
             wait_until: None,
             poses: Vec::new(),
             lunge_s: vcfg.lunge_s,
+            slice: slice.is_some(),
+            screen: if slice.is_some() { Screen::Main } else { Screen::Game },
+            save_name: String::new(),
+            esc_was_paused: false,
+            epoch_seen: 0,
+            pending_load: false,
+            saves_dir: slice.unwrap_or_default(),
         })
         .add_systems(Update, (keys, click, run_script))
-        .add_systems(EguiPrimaryContextPass, (hud, menu, board, news, day_end, death, fight, wounds, replay));
+        .add_systems(EguiPrimaryContextPass, (hud, menu, board, news, day_end, death, fight, wounds, replay, start_menu, help));
+    app.add_systems(Update, hide_debug.run_if(|p: Res<Play>| p.slice));
 }
 
 fn set_speed(p: &mut Play, i: usize) {
@@ -174,7 +208,25 @@ fn autopilot_now(p: &Play) -> bool {
     p.shared.player.lock().unwrap().as_ref().is_some_and(|h| h.autopilot)
 }
 
-fn keys(keys: Res<ButtonInput<KeyCode>>, mut p: ResMut<Play>) {
+fn keys(keys: Res<ButtonInput<KeyCode>>, buttons: Res<ButtonInput<MouseButton>>, mut p: ResMut<Play>) {
+    // M18 P5: the human is here (the auto-pause's "away")
+    if keys.get_just_pressed().next().is_some() || buttons.get_just_pressed().next().is_some() {
+        *p.shared.input_at.lock().unwrap() = Instant::now();
+    }
+    // M18 P5: Esc closes the click's menu, else opens or closes the Esc menu (the slice)
+    if keys.just_pressed(KeyCode::Escape) {
+        if p.menu_open.is_some() {
+            p.menu_open = None;
+        } else if p.slice && p.screen == Screen::Game && p.shared.slice.lock().unwrap().started {
+            open_esc(&mut p);
+        } else if p.screen == Screen::Esc {
+            close_esc(&mut p);
+        }
+        return;
+    }
+    if p.screen != Screen::Game {
+        return;
+    }
     if keys.just_pressed(KeyCode::KeyT) {
         let on = !autopilot_now(&p);
         p.shared.send(UiCmd::Autopilot(on));
@@ -193,9 +245,6 @@ fn keys(keys: Res<ButtonInput<KeyCode>>, mut p: ResMut<Play>) {
     }
     if keys.just_pressed(KeyCode::Backspace) {
         p.shared.send(UiCmd::Stop);
-    }
-    if keys.just_pressed(KeyCode::Escape) {
-        p.menu_open = None;
     }
 }
 
@@ -274,7 +323,7 @@ fn click(
     stream: Res<crate::stream::Stream>,
     view: Res<crate::cam::View>,
 ) {
-    if !buttons.just_pressed(MouseButton::Left) || egui.is_some_and(|e| e.wants_any_pointer_input()) {
+    if !buttons.just_pressed(MouseButton::Left) || egui.is_some_and(|e| e.wants_any_pointer_input()) || p.screen != Screen::Game {
         return;
     }
     let Some(px) = windows.single().ok().and_then(|w| w.cursor_position()) else { return };
@@ -497,6 +546,23 @@ fn run_script(
                 }
             }
         }
+        // M18 P5: `await idle` (no load or save under way), `await player` (a body possessed and its HUD up)
+        "await" if arg == "idle" || arg == "player" => {
+            let ready = if arg == "idle" {
+                !p.shared.slice.lock().unwrap().busy && p.shared.cmds.lock().unwrap().is_empty()
+            } else {
+                p.shared.player.lock().unwrap().is_some() && p.shared.slice.lock().unwrap().started
+            };
+            if !ready && p.wait < PICK_WAIT_FRAMES * 10 {
+                p.wait += 1;
+                p.next -= 1;
+            } else {
+                if !ready {
+                    warn!("play script await {arg}: not after {} frames", PICK_WAIT_FRAMES * 10);
+                }
+                p.wait = 0;
+            }
+        }
         // the click's menu open (a shot of it next)
         "await" => {
             if p.menu_open.is_none() && p.wait < PICK_WAIT_FRAMES {
@@ -600,6 +666,66 @@ fn run_script(
             p.wait_until = Some((Instant::now() + Duration::from_secs_f32(secs.max(0.0)), later));
         }
         "quit" => p.quit_in = Some(30),
+        // M18 P5: the start menu's screens, a nobody played or looked at, a fresh arrival, the pre-run city again
+        "menu" => {
+            p.screen = match arg {
+                "main" => Screen::Main,
+                "pick" => {
+                    p.shared.send(UiCmd::Nobodies);
+                    Screen::Pick
+                }
+                "load" => Screen::Load,
+                "esc" => {
+                    open_esc(&mut p);
+                    Screen::Esc
+                }
+                _ => {
+                    if p.screen == Screen::Esc {
+                        close_esc(&mut p);
+                    }
+                    Screen::Game
+                }
+            };
+        }
+        "nobody" | "look" => {
+            let i: usize = arg.parse().expect("nobody I");
+            let id = p.shared.slice.lock().unwrap().nobodies.get(i).map(|n| n.0);
+            match id {
+                Some(id) => {
+                    p.wait = 0;
+                    if verb == "nobody" {
+                        info!("play script nobody {i}: {}", p.shared.slice.lock().unwrap().nobodies[i].2);
+                        p.shared.send(UiCmd::Start(id));
+                        p.screen = Screen::Game;
+                    } else {
+                        p.shared.send(UiCmd::Look(id));
+                    }
+                }
+                None if p.wait < PICK_WAIT_FRAMES => {
+                    p.wait += 1;
+                    p.next -= 1;
+                }
+                None => {
+                    warn!("play script {verb} {i}: no such nobody");
+                    p.wait = 0;
+                }
+            }
+        }
+        "fresh" => {
+            p.shared.send(UiCmd::Fresh);
+            p.screen = Screen::Game;
+        }
+        "newcity" => p.shared.send_busy(UiCmd::NewCity),
+        "save" => p.shared.send_busy(UiCmd::Save(arg.to_string())),
+        "load" => {
+            let path = p.saves_dir.join(format!("{arg}.ron"));
+            p.shared.send_busy(UiCmd::Load(path));
+            p.pending_load = true;
+            p.screen = Screen::Game;
+        }
+        "provoke" => p.shared.send(UiCmd::Provoke(arg == "lethal")),
+        "unpause" => p.shared.paused.store(false, Ordering::Relaxed),
+        "autopause" => p.shared.autopause.store(arg == "on", Ordering::Relaxed),
         o => panic!("--play: unknown action '{o}'"),
     }
 }
@@ -628,8 +754,13 @@ fn row_button(ui: &mut bevy_egui::egui::Ui, row: &crate::simthread::MenuRow) -> 
 fn hud(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
     use bevy_egui::egui;
     let ctx = contexts.ctx_mut()?;
+    if !in_game(&p) {
+        return Ok(());
+    }
     let h = p.shared.player.lock().unwrap().clone();
     let paused = p.shared.paused.load(Ordering::Relaxed);
+    let alert = p.shared.slice.lock().unwrap().alert.clone();
+    let mut autopause = p.shared.autopause.load(Ordering::Relaxed);
     let speed = p.speeds[p.speed_i];
     let mut speed_to = None;
     let w = p.hud_width_px;
@@ -648,6 +779,10 @@ fn hud(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
                 if h.autopilot { "AUTOPILOT" } else { "you drive" },
                 if paused { "  PAUSED" } else { "" }
             ));
+            // M18 P5: the auto-pause's reason while the clock it stopped is stopped
+            if let Some(a) = &alert {
+                ui.colored_label(egui::Color32::from_rgb(255, 120, 90), format!("PAUSED: {a} (Space goes on)"));
+            }
             ui.label(format!("{}c   {} food   {}", h.coins, h.food, h.job));
             ui.label(&h.place);
             // M18 P4: held (cuffs, a sentence's days left)
@@ -711,6 +846,14 @@ fn hud(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
                     speed_to = Some(p.speed_i + 1);
                 }
             });
+            // M18 P5: the auto-pause's toggle
+            if ui
+                .checkbox(&mut autopause, "stop the clock when someone goes for me")
+                .on_hover_text("on autopilot, or when you have not touched a key for a while")
+                .changed()
+            {
+                p.shared.autopause.store(autopause, Ordering::Relaxed);
+            }
             ui.small("click: a person or a building for its menu, the street to walk");
         },
     );
@@ -768,7 +911,7 @@ fn menu(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
 fn board(mut contexts: EguiContexts, p: Res<Play>) -> Result {
     use bevy_egui::egui;
     let ctx = contexts.ctx_mut()?;
-    let Some(h) = p.shared.player.lock().unwrap().clone() else { return Ok(()) };
+    let Some(h) = hud_of(&p) else { return Ok(()) };
     let w = p.hud_width_px * 1.6;
     egui::Window::new("the board").anchor(egui::Align2::LEFT_BOTTOM, [8.0, -8.0]).resizable(false).default_width(w).max_width(w).show(
         ctx,
@@ -801,7 +944,7 @@ fn board(mut contexts: EguiContexts, p: Res<Play>) -> Result {
 fn news(mut contexts: EguiContexts, p: Res<Play>) -> Result {
     use bevy_egui::egui;
     let ctx = contexts.ctx_mut()?;
-    if p.shared.player.lock().unwrap().is_none() {
+    if hud_of(&p).is_none() {
         return Ok(());
     }
     let n = p.shared.news.lock().unwrap().clone();
@@ -856,8 +999,16 @@ fn news(mut contexts: EguiContexts, p: Res<Play>) -> Result {
 fn day_end(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
     use bevy_egui::egui;
     let ctx = contexts.ctx_mut()?;
-    let days = p.shared.news.lock().unwrap().days.clone();
-    if days.len() <= p.days_seen {
+    // M18 P5: a new possession's panels start again
+    let (days, epoch) = {
+        let n = p.shared.news.lock().unwrap();
+        (n.days.clone(), n.epoch)
+    };
+    if epoch != p.epoch_seen {
+        p.epoch_seen = epoch;
+        p.days_seen = days.len();
+    }
+    if days.len() <= p.days_seen || !in_game(&p) {
         return Ok(());
     }
     let Some((day, lines)) = days.last() else { return Ok(()) };
@@ -884,10 +1035,14 @@ fn day_end(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
 }
 
 /// M18 P4: the death screen, from the player's `Life` (the sim thread pauses the clock at the death).
-fn death(mut contexts: EguiContexts, p: Res<Play>) -> Result {
+fn death(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
     use bevy_egui::egui;
     let ctx = contexts.ctx_mut()?;
+    if !in_game(&p) {
+        return Ok(());
+    }
     let Some((line, life)) = p.shared.news.lock().unwrap().death.clone() else { return Ok(()) };
+    let mut go = None;
     egui::Window::new("dead")
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .resizable(false)
@@ -902,7 +1057,31 @@ fn death(mut contexts: EguiContexts, p: Res<Play>) -> Result {
                     ui.label(l);
                 }
             });
+            // M18 P5: permadeath: the same city goes on with another nobody
+            if p.slice {
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("Pick another nobody (the same city)").clicked() {
+                        go = Some(0);
+                    }
+                    if ui.button("Arrive fresh").clicked() {
+                        go = Some(1);
+                    }
+                    if ui.button("Quit to the menu").clicked() {
+                        go = Some(2);
+                    }
+                });
+            }
         });
+    match go {
+        Some(0) => {
+            p.shared.send(UiCmd::Nobodies);
+            p.screen = Screen::Pick;
+        }
+        Some(1) => p.shared.send(UiCmd::Fresh),
+        Some(2) => p.screen = Screen::Main,
+        _ => {}
+    }
     Ok(())
 }
 
@@ -1069,7 +1248,7 @@ pub fn fight(mut contexts: EguiContexts, p: Res<Play>) -> Result {
     use bevy_egui::egui;
     use citysim::systems::combat::{Order, Stance};
     let ctx = contexts.ctx_mut()?;
-    let Some(h) = p.shared.player.lock().unwrap().clone() else { return Ok(()) };
+    let Some(h) = hud_of(&p) else { return Ok(()) };
     let Some(f) = h.fight else { return Ok(()) };
     let w = p.hud_width_px * 1.4;
     egui::Window::new("the fight")
@@ -1158,7 +1337,7 @@ pub fn fight(mut contexts: EguiContexts, p: Res<Play>) -> Result {
 pub fn wounds(mut contexts: EguiContexts, p: Res<Play>) -> Result {
     use bevy_egui::egui;
     let ctx = contexts.ctx_mut()?;
-    let Some(h) = p.shared.player.lock().unwrap().clone() else { return Ok(()) };
+    let Some(h) = hud_of(&p) else { return Ok(()) };
     if h.fight.is_some() {
         return Ok(());
     }
@@ -1184,4 +1363,317 @@ pub fn wounds(mut contexts: EguiContexts, p: Res<Play>) -> Result {
             }
         });
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// M18 P5 (docs/M18_PLAYER.md, start and loop): the start menu, the Esc menu, the death screen's way on, the help
+// line
+// ---------------------------------------------------------------------------
+
+/// M18 P5: which screen is up (`--slice`; `--possess` plays with `Game` only).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Screen {
+    /// The city, the HUD and its panels.
+    Game,
+    /// New (pick a nobody, arrive fresh), Load, Quit.
+    Main,
+    /// "Pick a nobody": a handful of broke adults, each with its one-line read.
+    Pick,
+    /// The player saves (and the pre-run city).
+    Load,
+    /// Esc in play: Resume, Save, Load, Quit to menu, Quit.
+    Esc,
+}
+
+/// The game's panels show (the HUD, the board, the log, the fight): in play, or under the Esc menu.
+fn in_game(p: &Play) -> bool {
+    matches!(p.screen, Screen::Game | Screen::Esc)
+}
+
+/// The possessed body's HUD while the game's panels show.
+fn hud_of(p: &Play) -> Option<crate::simthread::PlayerHud> {
+    if !in_game(p) {
+        return None;
+    }
+    p.shared.player.lock().unwrap().clone()
+}
+
+/// A save's name from the body and the clock: `Name_Surname_d23_1840`.
+fn save_name(h: Option<&crate::simthread::PlayerHud>) -> String {
+    match h {
+        Some(h) => {
+            let n: String = h.name.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+            format!("{n}_d{}_{}", h.day, h.clock.replace(':', ""))
+        }
+        None => "city".into(),
+    }
+}
+
+/// M18 P5: the Esc menu opens over a stopped clock; closing it lets the clock go if it was going.
+fn open_esc(p: &mut Play) {
+    p.esc_was_paused = p.shared.paused.swap(true, Ordering::Relaxed);
+    let h = p.shared.player.lock().unwrap().clone();
+    p.save_name = save_name(h.as_ref());
+    p.screen = Screen::Esc;
+}
+
+fn close_esc(p: &mut Play) {
+    p.screen = Screen::Game;
+    if !p.esc_was_paused {
+        p.shared.paused.store(false, Ordering::Relaxed);
+    }
+}
+
+/// M18 P5: New from the main menu: a game already played in this city starts from the pre-run city again.
+fn new_city_if_played(p: &Play) {
+    if p.shared.slice.lock().unwrap().started {
+        p.shared.send_busy(UiCmd::NewCity);
+    }
+}
+
+/// M18 P5: the start menu (`--slice`): New (pick a nobody, arrive fresh), Load, Quit; "pick a nobody"; the saves; the
+/// Esc menu in play (Resume, Save, Load, Quit to menu, Quit).
+fn start_menu(mut contexts: EguiContexts, mut p: ResMut<Play>, mut exit: MessageWriter<AppExit>) -> Result {
+    use bevy_egui::egui;
+    if !p.slice {
+        return Ok(());
+    }
+    let ctx = contexts.ctx_mut()?;
+    let sl = p.shared.slice.lock().unwrap().clone();
+    // a load ends in play when the save holds a body, else at the pick
+    if p.pending_load && !sl.busy {
+        p.pending_load = false;
+        if !sl.started && p.screen == Screen::Game {
+            p.screen = Screen::Pick;
+        }
+    }
+    // the clock the auto-pause stopped goes again: its banner goes
+    if sl.alert.is_some() && !p.shared.paused.load(Ordering::Relaxed) {
+        p.shared.slice.lock().unwrap().alert = None;
+    }
+    let busy = |ui: &mut egui::Ui| {
+        if !sl.status.is_empty() {
+            if sl.busy {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(&sl.status);
+                });
+            } else {
+                ui.small(&sl.status);
+            }
+        }
+    };
+    let center = egui::Align2::CENTER_CENTER;
+    match p.screen {
+        Screen::Game => {}
+        Screen::Main => {
+            let mut go = None;
+            egui::Window::new("TheCity").anchor(center, [0.0, 0.0]).resizable(false).collapsible(false).default_width(520.0).show(
+                ctx,
+                |ui| {
+                    ui.heading("A nobody in the Sump");
+                    ui.label("A city of 20,000 that lives without you. You take one broke adult and live their days.");
+                    ui.separator();
+                    if let Some(m) = &sl.missing {
+                        ui.colored_label(egui::Color32::from_rgb(255, 140, 100), m);
+                        ui.separator();
+                    }
+                    let ready = sl.missing.is_none() && !sl.busy;
+                    let dead = p.shared.news.lock().unwrap().death.is_some();
+                    if sl.started && !dead && ui.add_enabled(ready, egui::Button::new("Resume")).clicked() {
+                        go = Some(0);
+                    }
+                    if ui
+                        .add_enabled(ready, egui::Button::new("New: pick a nobody"))
+                        .on_hover_text("a broke adult of the city, with a past")
+                        .clicked()
+                    {
+                        go = Some(1);
+                    }
+                    if ui
+                        .add_enabled(ready, egui::Button::new("New: arrive fresh"))
+                        .on_hover_text("an immigrant onto a Sump street: a few coins, nobody knows you")
+                        .clicked()
+                    {
+                        go = Some(2);
+                    }
+                    if ui.add_enabled(!sl.busy, egui::Button::new("Load")).clicked() {
+                        go = Some(3);
+                    }
+                    if ui.button("Quit").clicked() {
+                        go = Some(4);
+                    }
+                    ui.separator();
+                    busy(ui);
+                },
+            );
+            match go {
+                Some(0) => p.screen = Screen::Game,
+                Some(1) => {
+                    new_city_if_played(&p);
+                    p.shared.send(UiCmd::Nobodies);
+                    p.screen = Screen::Pick;
+                }
+                Some(2) => {
+                    new_city_if_played(&p);
+                    p.shared.send(UiCmd::Fresh);
+                    p.screen = Screen::Game;
+                }
+                Some(3) => p.screen = Screen::Load,
+                Some(4) => {
+                    exit.write(AppExit::Success);
+                }
+                _ => {}
+            }
+        }
+        Screen::Pick => {
+            let mut back = false;
+            let mut fresh = false;
+            egui::Window::new("pick a nobody").anchor(center, [0.0, 0.0]).resizable(false).collapsible(false).default_width(760.0).show(
+                ctx,
+                |ui| {
+                    ui.label("Each is a real body of the running city. Look: the camera goes to them. Play: you are them.");
+                    ui.separator();
+                    if sl.nobodies.is_empty() {
+                        ui.label(if sl.busy { "the city is loading" } else { "nobody fits (all doing well, or all held)" });
+                    }
+                    egui::ScrollArea::vertical().max_height(520.0).show(ui, |ui| {
+                        for (id, kind, line) in &sl.nobodies {
+                            ui.horizontal(|ui| {
+                                if ui.add_enabled(!sl.busy, egui::Button::new("Look")).clicked() {
+                                    p.shared.send(UiCmd::Look(*id));
+                                }
+                                if ui.add_enabled(!sl.busy, egui::Button::new("Play")).clicked() {
+                                    p.shared.send(UiCmd::Start(*id));
+                                    p.screen = Screen::Game;
+                                }
+                                ui.strong(kind);
+                            });
+                            ui.label(line);
+                            ui.add_space(4.0);
+                        }
+                    });
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        fresh = ui.add_enabled(!sl.busy, egui::Button::new("Arrive fresh instead")).clicked();
+                        back = ui.button("Back").clicked();
+                    });
+                    busy(ui);
+                },
+            );
+            if fresh {
+                p.shared.send(UiCmd::Fresh);
+                p.screen = Screen::Game;
+            }
+            if back {
+                p.screen = Screen::Main;
+            }
+        }
+        Screen::Load => {
+            let mut back = false;
+            egui::Window::new("load").anchor(center, [0.0, 0.0]).resizable(false).collapsible(false).default_width(560.0).show(ctx, |ui| {
+                if ui.add_enabled(!sl.busy && sl.missing.is_none(), egui::Button::new("the pre-run city (day 21, nobody yet)")).clicked() {
+                    p.shared.send_busy(UiCmd::NewCity);
+                    p.screen = Screen::Pick;
+                }
+                ui.separator();
+                if sl.saves.is_empty() {
+                    ui.label("no saves yet (Esc in play: Save)");
+                }
+                egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+                    for (path, line) in &sl.saves {
+                        if ui.add_enabled(!sl.busy, egui::Button::new(line)).clicked() {
+                            p.shared.send_busy(UiCmd::Load(path.clone()));
+                            p.pending_load = true;
+                            p.screen = Screen::Game;
+                        }
+                    }
+                });
+                ui.separator();
+                back = ui.button("Back").clicked();
+                busy(ui);
+            });
+            if back {
+                p.screen = if sl.started { Screen::Esc } else { Screen::Main };
+            }
+        }
+        Screen::Esc => {
+            let mut go = None;
+            let mut name = p.save_name.clone();
+            egui::Window::new("menu").anchor(center, [0.0, 0.0]).resizable(false).collapsible(false).default_width(420.0).show(ctx, |ui| {
+                if ui.button("Resume (Esc)").clicked() {
+                    go = Some(0);
+                }
+                ui.horizontal(|ui| {
+                    ui.add(egui::TextEdit::singleline(&mut name).desired_width(240.0));
+                    if ui.add_enabled(!sl.busy && !name.trim().is_empty(), egui::Button::new("Save")).clicked() {
+                        go = Some(1);
+                    }
+                });
+                if ui.add_enabled(!sl.busy, egui::Button::new("Load")).clicked() {
+                    go = Some(2);
+                }
+                if ui.button("Quit to the menu").clicked() {
+                    go = Some(3);
+                }
+                if ui.button("Quit the game").clicked() {
+                    go = Some(4);
+                }
+                ui.separator();
+                ui.small("Death is for good: the city goes on, and you pick another nobody. Save to come back.");
+                busy(ui);
+            });
+            p.save_name = name;
+            match go {
+                Some(0) => close_esc(&mut p),
+                Some(1) => {
+                    let n = p.save_name.trim().to_string();
+                    p.shared.send_busy(UiCmd::Save(n));
+                }
+                Some(2) => p.screen = Screen::Load,
+                Some(3) => {
+                    p.shared.paused.store(true, Ordering::Relaxed);
+                    p.screen = Screen::Main;
+                }
+                Some(4) => {
+                    exit.write(AppExit::Success);
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
+}
+
+/// M18 P5: the cold-start help line (bottom centre, in play): the keys, what a click does, the clock.
+fn help(mut contexts: EguiContexts, p: Res<Play>) -> Result {
+    use bevy_egui::egui;
+    if !in_game(&p) || p.shared.player.lock().unwrap().is_none() {
+        return Ok(());
+    }
+    let ctx = contexts.ctx_mut()?;
+    egui::Area::new(egui::Id::new("help_line")).anchor(egui::Align2::CENTER_BOTTOM, [0.0, -6.0]).show(ctx, |ui| {
+        egui::Frame::popup(ui.style()).show(ui, |ui| {
+            ui.small(
+                "Click a person or a building: what you can do there.  Click the street: walk there.  \
+                 Space: pause / go on.   , and . : slower / faster.   T: autopilot (keeps you alive, decides nothing).",
+            );
+            ui.small(
+                "Backspace: stop.   Esc: menu (save, load, quit).   Right-drag or Q / E: turn the camera, wheel: zoom.   \
+                 The clock stops by itself when someone goes for you (the HUD's tick box).",
+            );
+        });
+    });
+    Ok(())
+}
+
+/// M18 P5: the slice starts with the debug overlay (top left) hidden: H shows it.
+fn hide_debug(mut q: Query<&mut Visibility, With<crate::bench::Hud>>, mut done: Local<bool>) {
+    if *done {
+        return;
+    }
+    for mut v in q.iter_mut() {
+        *v = Visibility::Hidden;
+        *done = true;
+    }
 }

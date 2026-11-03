@@ -2694,6 +2694,9 @@ pub enum OfferKind {
     Cover { employer: EntityId, sick: EntityId, role: Role, until: Tick },
     /// A gang's front draws its staff (`underwater::fronts_daily`).
     Gang { gang: EntityId, front: EntityId },
+    /// M18 P5: a witness wants coins to keep the player's deed quiet
+    /// (`consequence::blackmailed`): pay, refuse, or go for him.
+    Blackmail { witness: EntityId, demand: i64 },
 }
 
 /// The pre-view pass phase 2 (docs/PREVIEW_PASS.md § 1): one shift's

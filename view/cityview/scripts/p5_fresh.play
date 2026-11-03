@@ -1,0 +1,27 @@
+0 wait 2;
+* fresh;
+* await player;
+* zoom 40;
+* wait 2;
+* shot p5f_00_arrived;
+21:00:20 shot p5f_01_street;
+* autopause off;
+* auto on;
+21:12:00 shot p5f_02_autopilot_noon;
+* auto off;
+* wait 1;
+* shot p5f_03_driven;
+* menu esc;
+* save p5_fresh;
+* await idle;
+* wait 2;
+* shot p5f_04_saved;
+* menu main;
+* wait 1;
+* load p5_fresh;
+* await idle;
+* await player;
+* wait 3;
+* shot p5f_05_loaded;
+* wait 1;
+* quit

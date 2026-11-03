@@ -291,8 +291,12 @@ pub fn hourly(world: &mut World) {
     if !in_hours(world, &c) {
         return;
     }
-    let bodies: Vec<EntityId> =
-        world.bodies().into_iter().filter(|&id| body(world, id) && searching(world, id)).collect();
+    // M18 P5: the player's body looks for work only when the human sends it (P2's ask; safe idle never does).
+    let bodies: Vec<EntityId> = world
+        .bodies()
+        .into_iter()
+        .filter(|&id| body(world, id) && searching(world, id) && !crate::systems::player::possessed(world, id))
+        .collect();
     // The doors already made for (`crowd` searchers a post open there).
     let mut heading: std::collections::BTreeMap<EntityId, u32> = Default::default();
     for &id in &bodies {

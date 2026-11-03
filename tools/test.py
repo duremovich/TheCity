@@ -57,7 +57,7 @@ CARGO = ["cargo"]
 # and test take the default members when no package is named; `cargo fmt` has
 # no default-members, so it names them. Never `--workspace` / `--all` here:
 # that compiles the view (Bevy) into the change tier.
-SIM = ["citysim", "citysim-app", "citysim-cli"]
+SIM = ["citysim", "citysim-cli"]
 VIEW = ["glclient", "cityview"]
 TIERS = {
     "change": [
@@ -471,7 +471,7 @@ def ignore_scan_files():
     for f in test_files():
         seen.add(f)
         yield f
-    for crate in ("citysim", "citysim-cli", "citysim-app"):
+    for crate in ("citysim", "citysim-cli"):
         for f in sorted((ROOT / crate / "src").rglob("*.rs")):
             if f not in seen:
                 yield f
@@ -697,7 +697,7 @@ def cmd_diag(args):
             print(f"no diag test named {name}; `test.py diag` lists them")
             return 1
         f = hits[0][0]
-        pkg = next((c for c in ("citysim-cli", "citysim-app", "citysim") if c in f.parts), "citysim")
+        pkg = next((c for c in ("citysim-cli", "citysim") if c in f.parts), "citysim")
         target = ["--test", f.stem] if f.parent.name == "tests" else (["--lib"] if pkg == "citysim" else [])
         cmd = CARGO + ["test", "--release", "-p", pkg] + target + ["--", "--ignored", name, "--nocapture"]
         print(" ".join(cmd))

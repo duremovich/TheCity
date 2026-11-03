@@ -126,6 +126,10 @@ pub struct Config {
     /// M18 P3 (the board and talk): the talk verbs' terms (`player::talk`).
     #[serde(default)]
     pub talk: TalkCfg,
+    /// M18 P5 (the slice's start and loop): the nobodies the menu offers,
+    /// a fresh arrival, the blackmail offer (`player` § P5).
+    #[serde(default)]
+    pub slice: SliceCfg,
     /// M15 § 6 competence and poaching (phase 2).
     #[serde(default)]
     pub competence: CompetenceCfg,
@@ -904,6 +908,16 @@ pub struct ViewCfg {
     /// round it this far (metres), facing it (the view's indoor place is a
     /// jitter across the room).
     pub fight_ring_m: f32,
+    /// M18 P5: the auto-pause's start (the HUD toggles it): the clock stops
+    /// when the possessed body is attacked or a fight starts within
+    /// `autopause_tiles` of it while it is on autopilot or the human is away
+    /// (no key or click for `away_s` real seconds).
+    pub autopause: bool,
+    pub autopause_tiles: u16,
+    pub away_s: f64,
+    /// M18 P5: a play script's `provoke lethal` (a proof's cheat, never the
+    /// player's): the fight's kill chance on a loss.
+    pub provoke_kill_p: f32,
 }
 
 impl Default for ViewCfg {
@@ -1011,6 +1025,10 @@ impl Default for ViewCfg {
             lunge_m: 0.45,
             lunge_deg: 18.0,
             fight_ring_m: 1.3,
+            autopause: true,
+            autopause_tiles: 8,
+            away_s: 30.0,
+            provoke_kill_p: 1.0,
         }
     }
 }
@@ -11146,6 +11164,32 @@ impl Default for TalkCfg {
             threat_coins: 8,
             again_hours: 12,
         }
+    }
+}
+
+/// M18 P5 (docs/M18_PLAYER.md, start and loop): the start menu's nobodies
+/// (`player::nobodies`), the fresh arrival (`player::arrive_fresh`) and the
+/// witness's demand as an offer (`consequence::blackmailed`). The Default
+/// mirrors `assets/config.toml` (the slice save was written before the
+/// section).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SliceCfg {
+    /// "Pick a nobody" lists at most this many adults (one per kind).
+    pub nobody_count: usize,
+    /// A nobody holds at most this many coins (broke).
+    pub nobody_coins: i64,
+    /// A nobody is 18 up to this age in years.
+    pub nobody_age_max: u32,
+    /// The witness's demand on a body the human drives (or its autopilot)
+    /// stands as an offer this many game minutes (pay, refuse, go for him);
+    /// let lapse it is refused.
+    pub blackmail_offer_minutes: u64,
+}
+
+impl Default for SliceCfg {
+    fn default() -> Self {
+        SliceCfg { nobody_count: 8, nobody_coins: 25, nobody_age_max: 60, blackmail_offer_minutes: 30 }
     }
 }
 
