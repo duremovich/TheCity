@@ -145,6 +145,22 @@ who now knows you, who is after you, what changed on your block); a death screen
 **Proof.** A 14-day play session where one deed visibly returns as a message, a visit or a hunt. If nothing comes
 back in 14 days, that is the finding: an OPEN row with the target.
 **Out of scope.** The knowledge-bound inspector, the Circle and its calls/texts/emails, overhearing.
+**As built** (`systems/player_news.rs`, cityview `simthread.rs` `News` / `play.rs` `news`, `day_end`, `death`). The
+shadow's fold stays in the CLI: the client re-renders the body's own events. `player_news::known` reads, at `[view]
+news_scan_minutes` (a scan of every body's memory, a few ms at 20k): the bodies whose memories name the player (a deed
+of its, `memory::deed_of`, before a deed done to it, before a meeting; how they heard: was there / told by a witness /
+rumour n tellings out / a Feed), the district talk (`World::rumours`), `after` (grudges, Hunts, live records with the
+player as `Target::Agent`) and the daily reputation; `death` is the `Corpse` and `story::lines`. The client's log (top
+right) is the body's events as they happen (the plan chatter stays in the stderr log), its failures, and the scans'
+diff in yellow: a grudge, Hunt or record on the player formed or over ("!! ..."), "word travels: N now know a deed of
+yours (+k)" (at most once in `[view] news_word_minutes`). "Who knows about you" sits under it. At midnight the day-end summary (top centre, "go on" or a script's
+`dismiss`): coins, who knows you (and who is new), who is after you, the talk, the street's read, your block (the
+neighbours' arrests, deaths, thefts, moves within `[view] block_tiles` of the home door; "you were inside" in the
+cells). A death pauses the clock and shows the death screen. The HUD says why a held body cannot be ordered (cuffs, a
+sentence's days left); an offer that runs out lapses with a line (`player::lapse`, from exec); "doing" goes with the
+plan (`plan_ended`). Nothing in camera range is Statistical: a Statistical party to a `service::encounter` with a body
+the human drives or the ring holds is made Full first (the Fixer's desk hand now keeps the take). A Locate's taker in
+the gap between paid sightings waits its stakeout out (`contracts::locate_waits`; it re-staked every 4 min, P3).
 
 **The combat model** (`OPEN-179`) is considered after P4 (decision 5): if the slice's fights read as one dice roll,
 it becomes the phase after P4; if not, it waits.

@@ -95,6 +95,7 @@ pub mod ownership;
 pub mod parents;
 pub mod plan;
 pub mod player;
+pub mod player_news;
 pub mod policy;
 pub mod presence;
 pub mod protection;

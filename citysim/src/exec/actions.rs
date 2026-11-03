@@ -724,7 +724,7 @@ pub fn finishes_early(world: &World, id: EntityId, kind: ActionKind, started: Ti
                     world.comp::<crate::components::Corpse>(c).is_none_or(|k| k.buried || k.stripped)
                         || !crate::systems::law::near(world, id, c, 1)
                 }),
-                None => crate::systems::hunt::contact(world, id),
+                None => crate::systems::hunt::contact(world, id) && !crate::systems::contracts::locate_waits(world, id),
             }
         }
         _ => false,
@@ -1616,7 +1616,7 @@ pub fn on_complete(
                     b.cooldowns.insert(crate::components::GoalKind::GuardBody, until);
                 }
                 StepResult::Done
-            } else if crate::systems::hunt::contact(world, id) {
+            } else if crate::systems::hunt::contact(world, id) && !crate::systems::contracts::locate_waits(world, id) {
                 // M16a (plan C27): a Locate tracker's contact is a paid sighting.
                 crate::systems::contracts::on_contact(world, id);
                 // M16a (plan C24, phase 2): a contract Hit or Beat decides its

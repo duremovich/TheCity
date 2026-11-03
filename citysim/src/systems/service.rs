@@ -997,6 +997,20 @@ fn encounter_row(
     // headcount is one `Custody` line, `camp::headcount`).
     let counted = kind == ServeKind::Inmate && world.has::<Child>(served);
     if !blank_call && !pupil && !counted {
+        // M18 P4 (OPEN-149, nothing in camera range is Statistical): a party
+        // to an encounter with a body the human drives, or one the camera
+        // ring holds, is a body here, so its memory of the meeting is kept
+        // (a Fixer's Statistical desk hand forgot the player's take, P3).
+        for (x, y) in [(server, served), (served, server)] {
+            let seen = crate::systems::player::drives(world, y) || world.ring.holds(y);
+            if seen
+                && world
+                    .comp::<crate::components::Brain>(x)
+                    .is_some_and(|b| b.lod == crate::components::Lod::Statistical)
+            {
+                crate::systems::lod::set_lod_at(world, x, crate::components::Lod::Full, place);
+            }
+        }
         world.remember(server, MemoryKind::Served, Some(served), salience, row.valence, false);
         world.remember(served, MemoryKind::Served, Some(server), salience, row.valence, false);
     }

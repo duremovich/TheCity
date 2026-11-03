@@ -1236,6 +1236,30 @@ pub fn offer(world: &mut World, id: EntityId, what: OfferKind, until: crate::tim
     p.offers.push(CityOffer { made, until, what, line });
 }
 
+/// M18 P4 (exec, each tick for a body with an offer out): the offers past
+/// their tick lapse, each with a line (P3 let them go silently).
+pub fn lapse(world: &mut World, id: EntityId) {
+    let tick = world.tick;
+    let Some(p) = world.comp_mut::<Brain>(id).and_then(|b| b.player.as_mut()) else { return };
+    let gone: Vec<CityOffer> = p.offers.iter().filter(|o| o.until <= tick).cloned().collect();
+    p.offers.retain(|o| o.until > tick);
+    let name = world.name_of(id);
+    for o in gone {
+        world.push_event(EventKind::PlayerAction, &[id], format!("{name}: the offer lapsed: {}", o.line));
+    }
+}
+
+/// M18 P4 (exec, at a plan's end or abort): a body the human drives with no
+/// plan left after its shift or job had their turn is doing nothing: the
+/// HUD's "doing" goes (it read the failed row for hours, P3).
+pub fn plan_ended(world: &mut World, id: EntityId) {
+    if let Some(b) = world.comp_mut::<Brain>(id).filter(|b| b.plan.is_none()) {
+        if let Some(p) = b.player.as_mut() {
+            p.doing = None;
+        }
+    }
+}
+
 /// The human answers an offer: taken (the NPC's write runs), or turned down.
 fn answer(world: &mut World, id: EntityId, made: u64, take: bool) {
     let Some(o) = offer_of(world, id, made) else { return refuse(world, id, "Answer", "the offer lapsed") };

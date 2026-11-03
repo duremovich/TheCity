@@ -28,6 +28,7 @@
 
 use citysim::components::{Brain, GoalKind, Identity, TilePos};
 use citysim::systems::player::{self as pl, Verb};
+use citysim::systems::player_news as pl_news;
 use citysim::view::{self, ViewFrame};
 use citysim::{EntityId, World, save};
 use std::path::{Path, PathBuf};
@@ -90,6 +91,33 @@ pub struct Shared {
     pub player: Mutex<Option<PlayerHud>>,
     /// M18 P2: the last click's menu (`None`: none asked yet; the render thread closes it on its side).
     pub menu: Mutex<Option<MenuPub>>,
+    /// M18 P4: what the city knows and does about the possessed body (the log, who knows, who is after it, the
+    /// day-end summaries, the death).
+    pub news: Mutex<NewsPub>,
+}
+
+/// M18 P4: the player's panels (`citysim::systems::player_news`, read at `[view] news_scan_minutes`; the log from
+/// the body's events as they happen).
+#[derive(Clone, Debug, Default)]
+pub struct NewsPub {
+    /// Rises with each change.
+    pub seq: u64,
+    /// The player's own lines, oldest first (`[view] news_log_lines`): (important, "dD HH:MM text").
+    pub log: Vec<(bool, String)>,
+    /// Who knows about you: (name, what, how and when).
+    pub knowers: Vec<(String, String, String)>,
+    /// Knowers of a deed of yours, of anything.
+    pub knowing: (usize, usize),
+    /// Who is after you.
+    pub after: Vec<String>,
+    /// The district talk naming you.
+    pub talk: Vec<String>,
+    /// The street's read (the daily reputation).
+    pub rep: String,
+    /// The day-end summaries, newest last: (day, lines).
+    pub days: Vec<(u64, Vec<String>)>,
+    /// The end: the line and the life, newest first.
+    pub death: Option<(String, Vec<String>)>,
 }
 
 /// M18 P1: an order from the render thread (a click, a key, a HUD button, a `--play` line).
@@ -150,6 +178,8 @@ pub struct PlayerHud {
     pub offers: Vec<MenuRow>,
     /// M18 P2: carried food.
     pub food: u32,
+    /// M18 P4: why the body cannot be ordered now, when held ("in cuffs", a sentence's days left).
+    pub held: Option<String>,
 }
 
 impl Shared {
@@ -258,6 +288,7 @@ impl Shared {
             speed_bits: AtomicU64::new(1f64.to_bits()),
             player: Mutex::new(None),
             menu: Mutex::new(None),
+            news: Mutex::new(NewsPub::default()),
         }
     }
 }
@@ -338,6 +369,9 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
     let mut last_logged = (String::new(), None, false);
     let mut menu_seq = 0u64;
     let mut last_event = world.events.back().map_or(0, |e| e.id);
+    // M18 P4: the player's panels (read from the possession on)
+    let mut news: Option<News> = None;
+    let mut last_tile = view::subject_tile(&world, subject);
     loop {
         // M18 P1: possessed at --from (the city pre-run to it); the render thread's orders, between two ticks
         if a.possess && !possessed && world.tick >= from {
@@ -446,9 +480,12 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
             std::thread::sleep(Duration::from_millis(20));
             continue;
         }
-        let Some(at) = view::subject_tile(&world, subject) else {
+        // M18 P4: a dead player's corpse can go (buried, rotted): the camera stays where it fell
+        let dead = news.as_ref().is_some_and(|n| n.pubd.death.is_some());
+        let Some(at) = view::subject_tile(&world, subject).or(last_tile.filter(|_| dead)) else {
             fatal(format!("the subject {subject:?} is gone at tick {}", world.tick))
         };
+        last_tile = Some(at);
         let ring = view::ring_about(at, cfg.ring_half_tiles, w, h);
         world.set_view(Some(ring));
         let t_tick = Instant::now();
@@ -456,11 +493,26 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         crate::lights::log_crossings(&mut world, subject);
         // M18 P2: the possessed body's events to the log (the play session's record: a hire, a theft, an arrest)
         if possessed {
-            let new: Vec<&citysim::events::Event> =
-                world.events.iter().rev().take_while(|e| e.id > last_event).filter(|e| e.actors.contains(&subject)).collect();
+            let n = news.get_or_insert_with(|| News::new(&world, subject));
+            let new: Vec<&citysim::events::Event> = world.events.iter().rev().take_while(|e| e.id > last_event).collect();
             for e in new.iter().rev() {
-                let (d, c) = (e.tick / citysim::TICKS_PER_DAY, citysim::time::clock(e.tick));
-                eprintln!("event d{d} {c}: [{:?}] {}", e.kind, e.text);
+                if e.actors.contains(&subject) {
+                    let (d, c) = (e.tick / citysim::TICKS_PER_DAY, citysim::time::clock(e.tick));
+                    eprintln!("event d{d} {c}: [{:?}] {}", e.kind, e.text);
+                    n.event(&world, e);
+                } else {
+                    n.block_event(&world, e);
+                }
+            }
+            // M18 P4: who knows, who is after you, the day's end, the death
+            n.step(&world);
+            if n.pubd.death.is_some() && !n.dead_paused {
+                n.dead_paused = true;
+                sh.paused.store(true, Ordering::Relaxed);
+            }
+            if n.pubd.seq != n.sent {
+                n.sent = n.pubd.seq;
+                *sh.news.lock().unwrap() = n.pubd.clone();
             }
         }
         last_event = world.events.back().map_or(last_event, |e| e.id);
@@ -544,7 +596,11 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
             if possessed {
                 let hud = player_hud(&world, subject);
                 // the log's record of the body's day: each new plan, failure and autopilot switch
-                log_player(&hud, &mut last_logged);
+                if let (Some(line), Some(n)) = (log_player(&hud, &mut last_logged), news.as_mut()) {
+                    n.push(&world, false, line);
+                    n.sent = n.pubd.seq;
+                    *sh.news.lock().unwrap() = n.pubd.clone();
+                }
                 *sh.player.lock().unwrap() = Some(hud);
             }
             let p = Arc::new(Published { frame, subject, caption, at: Instant::now(), seq });
@@ -592,7 +648,22 @@ fn player_hud(world: &World, id: EntityId) -> PlayerHud {
         board: menu_rows(&pl::menu_board(world, id)),
         offers: menu_rows(&pl::menu_offers(world, id)),
         food: world.comp::<citysim::components::Inventory>(id).map_or(0, |i| i.food),
+        held: held_line(world, id),
     }
+}
+
+/// M18 P4: why the body cannot be ordered now (`think::held`), a sentence with its days left (P2's "in cuffs / N
+/// days").
+fn held_line(world: &World, id: EntityId) -> Option<String> {
+    let why = citysim::systems::think::held(world, id)?;
+    Some(match world.comp::<citysim::components::Sentence>(id) {
+        Some(s) => {
+            let left = s.until_tick.saturating_sub(world.tick);
+            let (d, h) = (left / citysim::TICKS_PER_DAY, (left % citysim::TICKS_PER_DAY) / 60);
+            format!("{why} ({:?}): {d} days {h} h left", s.crime)
+        }
+        None => why.to_string(),
+    })
 }
 
 fn menu_rows(m: &pl::Menu) -> Vec<MenuRow> {
@@ -614,8 +685,10 @@ fn publish_menu(sh: &Shared, world: &World, m: pl::Menu, seq: &mut u64) {
     *sh.menu.lock().unwrap() = Some(MenuPub { seq: *seq, title: m.title, rows });
 }
 
-/// M18 P1: the possessed body's plan, failures and autopilot to the log when they change (the play session's record).
-fn log_player(hud: &PlayerHud, last: &mut (String, Option<String>, bool)) {
+/// M18 P1: the possessed body's plan, failures and autopilot to the log when they change (the play session's record);
+/// M18 P4: a new failure is the player's own log line too (returned).
+fn log_player(hud: &PlayerHud, last: &mut (String, Option<String>, bool)) -> Option<String> {
+    let mut out = None;
     let at = format!("d{} {}", hud.day, hud.clock);
     if hud.plan != last.0 {
         eprintln!(
@@ -634,6 +707,7 @@ fn log_player(hud: &PlayerHud, last: &mut (String, Option<String>, bool)) {
     if hud.failure != last.1 {
         if let Some(f) = &hud.failure {
             eprintln!("player {at}: failed {f}");
+            out = Some(format!("failed: {f}"));
         }
         last.1 = hud.failure.clone();
     }
@@ -641,4 +715,272 @@ fn log_player(hud: &PlayerHud, last: &mut (String, Option<String>, bool)) {
         eprintln!("player {at}: autopilot {}", if hud.autopilot { "on" } else { "off" });
         last.2 = hud.autopilot;
     }
+    out
+}
+
+/// M18 P4: the event kinds that make "your block" at the day's end (what happened to the neighbours).
+const BLOCK_KINDS: &[citysim::events::EventKind] = {
+    use citysim::events::EventKind as K;
+    &[
+        K::Murder,
+        K::Death,
+        K::Assault,
+        K::Theft,
+        K::Robbed,
+        K::Extortion,
+        K::Arrest,
+        K::Evicted,
+        K::Housed,
+        K::Founded,
+        K::Bankrupt,
+        K::Raid,
+        K::Riot,
+        K::Looted,
+        K::Crossfire,
+        K::Squatted,
+        K::HuntStarted,
+        K::Avenged,
+        K::Birth,
+        K::LaidOff,
+        K::Fire,
+    ]
+};
+
+/// M18 P4: the sim thread's side of the player's panels.
+struct News {
+    subject: EntityId,
+    pubd: NewsPub,
+    /// The next scan's tick, and the day the last day-end closed.
+    next_scan: u64,
+    day: u64,
+    /// The day's start: coins; the knowers then (index set); the block's lines today.
+    day_coins: i64,
+    day_knowers: std::collections::BTreeSet<u32>,
+    block: Vec<String>,
+    /// The last scan's "after" keys and deed-knower count (the log's diff).
+    after_keys: std::collections::BTreeMap<(u8, u64), String>,
+    deed_knowers: usize,
+    /// The deed knowers (index) at the last "word travels" line, and its tick.
+    knowers: std::collections::BTreeSet<u32>,
+    word_at: u64,
+    dead_paused: bool,
+    /// The last seq sent to the render thread.
+    sent: u64,
+}
+
+fn stamp(tick: u64) -> String {
+    format!("d{} {}", tick / citysim::TICKS_PER_DAY, citysim::time::clock(tick))
+}
+
+impl News {
+    fn new(world: &World, subject: EntityId) -> News {
+        let k = pl_news::known(world, subject, usize::MAX);
+        let knowers: std::collections::BTreeSet<u32> = k.knowers.iter().map(|x| x.who.index).collect();
+        let mut n = News {
+            subject,
+            pubd: NewsPub::default(),
+            next_scan: world.tick,
+            day: world.tick / citysim::TICKS_PER_DAY,
+            day_coins: coins(world, subject),
+            day_knowers: knowers.clone(),
+            block: Vec::new(),
+            after_keys: k.after.iter().map(|a| (a.key, a.line.clone())).collect(),
+            deed_knowers: k.knowers.iter().filter(|x| x.deed).count(),
+            knowers,
+            word_at: 0,
+            dead_paused: false,
+            sent: u64::MAX,
+        };
+        n.fill(world, &k);
+        n
+    }
+
+    /// A line in the player's own log (to the stderr log too when it is the panels' own).
+    fn push(&mut self, world: &World, important: bool, line: String) {
+        let cap = world.config.view.news_log_lines.max(1);
+        self.pubd.log.push((important, format!("{} {line}", stamp(world.tick))));
+        if self.pubd.log.len() > cap {
+            let cut = self.pubd.log.len() - cap;
+            self.pubd.log.drain(..cut);
+        }
+        self.pubd.seq += 1;
+    }
+
+    /// The body's own event: its line (the plan's chatter, "the job goes on", stays in the stderr log only).
+    fn event(&mut self, world: &World, e: &citysim::events::Event) {
+        use citysim::events::EventKind as K;
+        if e.kind == K::PlanAborted || (e.kind == K::PlayerAction && e.text.contains(" goes on [")) {
+            return;
+        }
+        let important = !matches!(e.kind, K::PlayerAction | K::PlayerActionFailed);
+        let line = format!("[{:?}] {}", e.kind, e.text);
+        let cap = world.config.view.news_log_lines.max(1);
+        self.pubd.log.push((important, format!("{} {line}", stamp(e.tick))));
+        if self.pubd.log.len() > cap {
+            let cut = self.pubd.log.len() - cap;
+            self.pubd.log.drain(..cut);
+        }
+        self.pubd.seq += 1;
+    }
+
+    /// Another body's event: kept for the day-end's "your block" when it happened within `[view] block_tiles` of
+    /// the player's home door (where the body stands, homeless).
+    fn block_event(&mut self, world: &World, e: &citysim::events::Event) {
+        // in the cells the block is the yard's, not the player's street
+        if !BLOCK_KINDS.contains(&e.kind) || self.block.len() >= 400 || world.has::<citysim::components::Sentence>(self.subject) {
+            return;
+        }
+        let home = world
+            .comp::<citysim::components::Household>(self.subject)
+            .and_then(|h| h.home)
+            .and_then(|b| world.comp::<citysim::Building>(b).map(|x| x.door));
+        let Some(anchor) = home.or_else(|| view::subject_tile(world, self.subject)) else { return };
+        let r = u32::from(world.config.view.block_tiles);
+        let near = e.actors.iter().filter(|a| **a != EntityId::NONE).any(|&a| {
+            let t = world.comp::<citysim::Building>(a).map(|b| b.door).or_else(|| world.comp::<citysim::Position>(a).map(|p| p.tile));
+            t.is_some_and(|t| u32::from(t.x.abs_diff(anchor.x)).max(u32::from(t.y.abs_diff(anchor.y))) <= r)
+        });
+        if near {
+            self.block.push(format!("{} [{:?}] {}", citysim::time::clock(e.tick), e.kind, e.text));
+        }
+    }
+
+    /// The scan (at `[view] news_scan_minutes`), the day's end and the death; `true` when the panels changed.
+    fn step(&mut self, world: &World) -> bool {
+        let mut changed = false;
+        if self.pubd.death.is_none() {
+            if let Some(d) = pl_news::death(world, self.subject) {
+                eprintln!("death {}: {}", stamp(world.tick), d.line);
+                for l in d.life.iter().take(12) {
+                    eprintln!("death life: {l}");
+                }
+                self.push(world, true, format!("YOU DIED: {}", d.line));
+                self.pubd.death = Some((d.line, d.life));
+                return true;
+            }
+        } else {
+            return false;
+        }
+        let day = world.tick / citysim::TICKS_PER_DAY;
+        if world.tick >= self.next_scan || day != self.day {
+            self.next_scan = world.tick + u64::from(world.config.view.news_scan_minutes.max(1));
+            let k = pl_news::known(world, self.subject, usize::MAX);
+            self.diff(world, &k);
+            if day != self.day {
+                self.day_end(world, &k);
+                self.day = day;
+            }
+            self.fill(world, &k);
+            changed = true;
+        }
+        changed
+    }
+
+    /// The log's lines for what changed since the last scan: a grudge, a Hunt or a record on you formed or ended;
+    /// word of a deed of yours reached more people.
+    fn diff(&mut self, world: &World, k: &pl_news::Known) {
+        let now: std::collections::BTreeMap<(u8, u64), String> = k.after.iter().map(|a| (a.key, a.line.clone())).collect();
+        for (key, line) in &now {
+            if !self.after_keys.contains_key(key) {
+                eprintln!("news {}: !! {line}", stamp(world.tick));
+                self.push(world, true, format!("!! {line}"));
+            }
+        }
+        for (key, line) in &self.after_keys.clone() {
+            if !now.contains_key(key) {
+                eprintln!("news {}: over: {line}", stamp(world.tick));
+                self.push(world, true, format!("over: {line}"));
+            }
+        }
+        self.after_keys = now;
+        // word travels: the deed knowers new since the last such line, at most once in `[view] news_word_minutes`
+        let deeds: Vec<&pl_news::Knower> = k.knowers.iter().filter(|x| x.deed).collect();
+        let fresh: Vec<&&pl_news::Knower> = deeds.iter().filter(|x| !self.knowers.contains(&x.who.index)).collect();
+        let due = self.word_at == 0 || world.tick >= self.word_at + u64::from(world.config.view.news_word_minutes);
+        if due && deeds.len() > self.deed_knowers && !fresh.is_empty() {
+            let names: Vec<String> = fresh.iter().take(3).map(|x| format!("{} ({}: {})", x.name, x.line, x.how.label())).collect();
+            let line = format!("word travels: {} now know a deed of yours (+{}): {}", deeds.len(), fresh.len(), names.join("; "));
+            eprintln!("news {}: {line}", stamp(world.tick));
+            self.push(world, true, line);
+            self.word_at = world.tick;
+            self.deed_knowers = deeds.len();
+            self.knowers = deeds.iter().map(|x| x.who.index).collect();
+        } else if deeds.len() < self.deed_knowers {
+            // forgetting: the base follows the count down, so the next line counts from here
+            self.deed_knowers = deeds.len();
+        }
+    }
+
+    /// The day-end summary: coins, who now knows you, who is after you, the street's read, your block.
+    fn day_end(&mut self, world: &World, k: &pl_news::Known) {
+        let mut lines = Vec::new();
+        let c = coins(world, self.subject);
+        lines.push(format!("coins {} -> {c} ({:+})", self.day_coins, c - self.day_coins));
+        let new: Vec<&pl_news::Knower> = k.knowers.iter().filter(|x| !self.day_knowers.contains(&x.who.index)).collect();
+        lines.push(format!(
+            "who knows you: {} ({} of a deed of yours); {} new today",
+            k.knowers.len(),
+            k.knowers.iter().filter(|x| x.deed).count(),
+            new.len()
+        ));
+        for x in new.iter().take(6) {
+            lines.push(format!("  {} {} ({})", x.name, x.line, x.how.label()));
+        }
+        if k.after.is_empty() {
+            lines.push("nobody is after you".into());
+        }
+        for a in &k.after {
+            lines.push(format!("after you: {}", a.line));
+        }
+        for t in k.talk.iter().take(3) {
+            lines.push(format!("the talk: {t}"));
+        }
+        lines.push(rep_line(k));
+        if self.block.is_empty() && world.has::<citysim::components::Sentence>(self.subject) {
+            lines.push("your block: you were inside".into());
+        } else if self.block.is_empty() {
+            lines.push("your block: a quiet day".into());
+        } else {
+            lines.push(format!("your block ({} things):", self.block.len()));
+            for b in self.block.iter().rev().take(8) {
+                lines.push(format!("  {b}"));
+            }
+        }
+        for l in &lines {
+            eprintln!("dayend d{}: {l}", self.day);
+        }
+        self.pubd.days.push((self.day, lines));
+        self.day_coins = c;
+        self.day_knowers = k.knowers.iter().map(|x| x.who.index).collect();
+        self.block.clear();
+    }
+
+    fn fill(&mut self, world: &World, k: &pl_news::Known) {
+        let cap = world.config.view.news_knowers_max;
+        self.pubd.knowers = k
+            .knowers
+            .iter()
+            .take(cap)
+            .map(|x| {
+                let more = if x.count > 1 { format!(", {} things", x.count) } else { String::new() };
+                (x.name.clone(), x.line.clone(), format!("{}, {}{more}", x.how.label(), stamp(x.tick)))
+            })
+            .collect();
+        self.pubd.knowing = (k.knowers.iter().filter(|x| x.deed).count(), k.knowers.len());
+        self.pubd.after = k.after.iter().map(|a| format!("{} (since {})", a.line, stamp(a.since))).collect();
+        self.pubd.talk = k.talk.clone();
+        self.pubd.rep = rep_line(k);
+        self.pubd.seq += 1;
+    }
+}
+
+fn coins(world: &World, id: EntityId) -> i64 {
+    world.comp::<citysim::components::Wallet>(id).map_or(0, |w| w.coins)
+}
+
+fn rep_line(k: &pl_news::Known) -> String {
+    format!(
+        "the street's read: dread {:.2} standing {:.2} honour {:.2} heat {:.2}, known by {}",
+        k.rep[0], k.rep[1], k.rep[2], k.rep[3], k.known_by
+    )
 }

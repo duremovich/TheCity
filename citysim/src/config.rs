@@ -863,6 +863,20 @@ pub struct ViewCfg {
     /// M18 P2: the HUD's width, pixels (bottom right, out of the far
     /// field's clicks at the top of the frame).
     pub hud_width_px: f32,
+    /// M18 P4 (consequences, `systems/player_news.rs`): the game minutes
+    /// between two reads of what the city knows of the player (a read scans
+    /// every body's memory).
+    pub news_scan_minutes: u32,
+    /// M18 P4: "word travels" (more bodies know a deed of the player's)
+    /// is said at most once in this many game minutes.
+    pub news_word_minutes: u32,
+    /// M18 P4: the player's own log keeps this many lines.
+    pub news_log_lines: usize,
+    /// M18 P4: "who knows about you" lists at most this many bodies.
+    pub news_knowers_max: usize,
+    /// M18 P4: the day-end's "your block": the events within this many
+    /// tiles of the player's home door (where it stands, homeless).
+    pub block_tiles: u16,
 }
 
 impl Default for ViewCfg {
@@ -959,6 +973,11 @@ impl Default for ViewCfg {
             },
             pick_body_px: 14.0,
             hud_width_px: 300.0,
+            news_scan_minutes: 10,
+            news_word_minutes: 120,
+            news_log_lines: 300,
+            news_knowers_max: 40,
+            block_tiles: 12,
         }
     }
 }
