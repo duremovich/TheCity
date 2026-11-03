@@ -54,6 +54,9 @@ driven (P5). P5h made the existing Capsule Hotel the hostel rather than a new bu
 
 ## Next, in order
 
+0. **The time model first** (`OPEN-304`, Dylan 2026-11-03, CLAUDE.md standing decision "The game feels realtime"):
+   a short design doc with Dylan before code: the day's length at 1x, the speed steps, what each does to the tick
+   and the walk pace, and how the view draws a walk at speed. The slice's 60x start and its walk "teleport" wait on it.
 1. **Dylan plays 30 minutes cold** (the slice's exit): `cargo run --release -p cityview -- --slice`. His notes
    become OPEN rows owned by the next pass; triage them with him before spawning anything.
 2. The slice rows that play confirms: `OPEN-298` (fist fights thin), `299` (the guard in Bar#5956 arrests
@@ -65,7 +68,7 @@ driven (P5). P5h made the existing Capsule Hotel the hostel rather than a new bu
    (`OPEN-294`), standing orders (`OPEN-301`).
 
 Frozen until the slice reads: `OPEN-278`, `285`, `287`, `265`, traffic (`275`), lighting (`284`), chrome credit
-(`286`), calibration. Opened this session: `OPEN-294` to `303`. Closed: `295` to `297`.
+(`286`), calibration. Opened this session: `OPEN-294` to `304`. Closed: `295` to `297`.
 
 ## Process notes from this session
 
