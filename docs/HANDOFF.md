@@ -54,9 +54,9 @@ driven (P5). P5h made the existing Capsule Hotel the hostel rather than a new bu
 
 ## Next, in order
 
-0. **The time model first** (`OPEN-304`, Dylan 2026-11-03, CLAUDE.md standing decision "The game feels realtime"):
-   a short design doc with Dylan before code: the day's length at 1x, the speed steps, what each does to the tick
-   and the walk pace, and how the view draws a walk at speed. The slice's 60x start and its walk "teleport" wait on it.
+0. **The time model** (`OPEN-304`): designed 2026-11-03 in `docs/TIME_MODEL.md` (Dylan picked option C: 1x is
+   real time, the sim's pace unchanged, auto-speed through sleep, shifts, rides and queues, manual steps to 60x, no
+   teleports, the player's body moves at the click). One view phase builds it before the cold play.
 1. **Dylan plays 30 minutes cold** (the slice's exit): `cargo run --release -p cityview -- --slice`. His notes
    become OPEN rows owned by the next pass; triage them with him before spawning anything.
 2. The slice rows that play confirms: `OPEN-298` (fist fights thin), `299` (the guard in Bar#5956 arrests
