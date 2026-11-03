@@ -619,3 +619,15 @@ and trace as the bill; deep runs as a route on the overlay with a choice per gua
 runner meets the owner's response (a corp's counter-runner, then a strike team); a blast model for devices, vehicles
 and decks, reactors waiting for Power. **Order:** after the slice, sight and the shot (addendum 24), then netrunning
 (seven phases), since a quickhack needs both the sight rule (`OPEN-288`) and the wounds (`OPEN-179`).
+
+## Addendum 26 (2026-11-02, Dylan): the combat model
+
+The slice's P4 found a fight reads as one dice roll (slice decision 5), so the combat model (`OPEN-179`) comes next,
+ahead of P5. The design is `docs/COMBAT.md` (four forks decided in its table): a fight is a **live engagement** across
+ticks, with beats inside each tick that the view replays, joiners, fleeing and the chase; off camera the same beats run
+to their end in one call. **Wounds by body region** (six regions, three severities, bleeding) last for days, cost
+shifts and Clinic bills, scar, and can cost a limb that a ripperdoc replaces with chrome. Three skills (**melee,
+shooting, evasion**) sit behind one `combat::power`. Weapons gain kinds, and chrome becomes stats and weapons. The
+player sets a **stance and gives orders** while the whole sim slows. **Order:** C1 the beat (synchronous), C2 wounds
+that last, C3 live, C4 the player; then P5. Ranged and the long shot come with sight (addendum 24); the blast comes
+with netrunning (addendum 25).

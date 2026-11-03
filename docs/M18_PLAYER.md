@@ -163,7 +163,7 @@ the human drives or the ring holds is made Full first (the Fixer's desk hand now
 the gap between paid sightings waits its stakeout out (`contracts::locate_waits`; it re-staked every 4 min, P3).
 
 **The combat model** (`OPEN-179`) is considered after P4 (decision 5): if the slice's fights read as one dice roll,
-it becomes the phase after P4; if not, it waits.
+it becomes the phase after P4; if not, it waits. **Decided 2026-11-02:** they did; `docs/COMBAT.md` (addendum 26), C1-C4 before P5.
 
 ## P5 start and loop
 
