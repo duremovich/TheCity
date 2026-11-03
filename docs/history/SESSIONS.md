@@ -1095,3 +1095,15 @@ knows you, the day-end, the death screen). A deed came back in P4's 14 days (a w
 hunted a nobody and a fight is one roll. Dylan asked for sight gating and the long shot (`OPEN-288`, addendum 24) and
 designed netrunning in six forks (`docs/NETRUNNING.md`, addendum 25). Main pushed (213 commits had piled up over five
 days). `OPEN-288` to `293` opened; 27 closed. Cost ≈ $190 (HANDOFF § Cost).
+
+**2026-11-03, the thirty-third session: the combat model designed and built (C1-C5), the slice's start and loop
+(P5, P5b), housing as an errand (P5h).** Dylan designed combat in four forks (`docs/COMBAT.md`, addendum 26: a live
+engagement in beats, wounds by body region that last, melee/shooting/evasion, stance and orders under a slowed clock)
+and five Opus phases built it: the beat, wounds, the live engagement, numbers with joiners, knockouts and chrome, the
+player's stances, and a feel pass. Murders went 90 -> 116 at 20k (a FINDING). He added the ladder as a note for later
+(`OPEN-294`, addendum 27: start brutal, megacorps hunt you, no cap on the power fantasy, a gang or corp the better
+route than murder). P5 built the start menu (pick a nobody or arrive fresh), autopilot as safe idle (standing orders
+later, `OPEN-301`), the auto-pause, permadeath, save and load, and retired `citysim-app`; a Sonnet polish round fixed
+the cold start. Dylan then turned housing into an errand (P5h): letting desks by landlord, refusals, deposits for
+all, the capsule bed as the first rung; homeless at d30 193 -> 146. The slice waits on Dylan's 30-minute cold play.
+`OPEN-294` to `303` opened; `295` to `297` closed. Cost ≈ $280 (HANDOFF § Cost).
