@@ -1083,3 +1083,15 @@ no filler traffic, `OPEN-275`), the cells' week and the raid as bodies, the raid
 stopped at every bend). Shadow V20: exits 2, 3, 4, 6 met, 1 partial (the 00:11 hire), the pace by eye left to Dylan;
 no minor harmed; violence up with the cells' early release. `OPEN-149`, `255`, `262`, `264`, `270`, `271`, `276`,
 `277` closed; `OPEN-273` to `OPEN-283` opened. Cost ≈ $414 (HANDOFF § Cost).
+
+**2026-11-02, the thirty-second session: the step-back review, the player slice P1-P4 (with W), netrunning designed.**
+A holistic review (four Sonnet reviewers, `docs/BIG_PICTURE_2026-11-02.md`) found the player 0 lines after four
+deferrals and the thin work and gang lives a content gap; Dylan took every recommendation (shadows kept for major
+closes). Leftovers A (`OPEN-280`, `281`, `282`), a hygiene phase (core_sanity split, one-thread tiers, `SAVE_VERSION`
+u16) and a docs phase (M18 rewritten as the slice), then five Opus slice phases: P1 the seam (a human drives one body
+in cityview), P2 the verbs (menus of only what the body can do there), W work beats (named coworkers at a shift's
+seams), P3 the board and talk (contracts as quests, talk as moves, the city's pulls as offers), P4 consequences (who
+knows you, the day-end, the death screen). A deed came back in P4's 14 days (a witness's blackmail, a grudge); nothing
+hunted a nobody and a fight is one roll. Dylan asked for sight gating and the long shot (`OPEN-288`, addendum 24) and
+designed netrunning in six forks (`docs/NETRUNNING.md`, addendum 25). Main pushed (213 commits had piled up over five
+days). `OPEN-288` to `293` opened; 27 closed. Cost ≈ $190 (HANDOFF § Cost).
