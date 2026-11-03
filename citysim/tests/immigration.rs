@@ -237,7 +237,7 @@ fn test_who_comes() {
         let age = w.comp::<Identity>(a).expect("identity").age_days;
         assert!((demography::ADULT_AGE_DAYS..45 * DAYS_PER_YEAR as u32).contains(&age), "age {age}");
         let s = w.comp::<Skills>(a).expect("skills");
-        for v in [s.stealth, s.fighting, s.farming] {
+        for v in [s.stealth, s.melee, s.farming] {
             assert!((lo..hi).contains(&v), "skill {v} in the seeding range");
         }
         farming.push(s.farming);

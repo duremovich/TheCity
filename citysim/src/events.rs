@@ -553,10 +553,14 @@ pub enum EventKind {
     /// M18 W (docs/M18_PLAYER.md § W, `systems::workbeats`): a beat of a
     /// shift. `[body, counterpart, workplace]`.
     WorkBeat,
+    /// The combat model C1 (`systems::combat`): `[a, b]`, a fight's beats told
+    /// (stances, weapons, the wounds by region, how it ended); `[body]` a
+    /// wound that stopped bleeding or healed.
+    Fight,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 248] = [
+    pub const ALL: [EventKind; 249] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -805,6 +809,7 @@ impl EventKind {
         EventKind::Bereaved,
         EventKind::Floor,
         EventKind::WorkBeat,
+        EventKind::Fight,
     ];
 }
 
@@ -828,6 +833,7 @@ fn harm_line(kind: EventKind, text: &str) -> bool {
             | E::Crossfire
             | E::Punished
             | E::Wounded
+            | E::Fight
             | E::Bout
             | E::Arrest
             | E::Witness

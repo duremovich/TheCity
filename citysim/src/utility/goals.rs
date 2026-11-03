@@ -648,7 +648,11 @@ pub fn considerations_with(
             vec![
                 Consideration::new("enemy near", can(fresh_enemy), GATE),
                 Consideration::new("courage", p.courage, IDENTITY),
-                Consideration::new("fighting", s.fighting, Curve::Linear { m: 0.5, b: 0.5 }),
+                Consideration::new(
+                    "fighting",
+                    crate::systems::combat::skill_power(world, s),
+                    Curve::Linear { m: 0.5, b: 0.5 },
+                ),
                 Consideration::new("U(safety)", urgency(n.safety), Curve::Linear { m: 0.5, b: 0.5 }),
                 Consideration::new("lawless", p.lawfulness, Curve::Linear { m: -lc.fight_lawful_damp, b: 1.0 }),
                 Consideration::new("odds", odds, Curve::Linear { m: 1.0, b: lc.fight_odds_floor }),

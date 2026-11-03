@@ -468,7 +468,7 @@ fn test_bug6_elder_opens_a_vendor_pitch_at_the_nearest_spot() {
         .find(|&&x| citysim::systems::contracts::home_door(&w, x).is_some())
         .expect("an opener with a home");
     set_coins(&mut w, a, 50);
-    w.comp_mut::<citysim::Skills>(a).expect("skills").fighting = 0.95;
+    w.comp_mut::<citysim::Skills>(a).expect("skills").melee = 0.95;
     w.comp_mut::<citysim::Skills>(a).expect("skills").knowledge = 0.0;
     let elder = (w.config.ages.frail_from_years + 6) * citysim::time::DAYS_PER_YEAR as u32;
     w.comp_mut::<citysim::Identity>(a).expect("id").age_days = elder;

@@ -952,7 +952,7 @@ fn spawn_from_abroad(world: &mut World, id: OutsideId, door: crate::components::
         p.lawfulness = (law + (u - 0.5) * 0.4).clamp(0.0, 1.0);
     }
     if let Some(s) = world.comp_mut::<Skills>(a) {
-        s.fighting = s.fighting.max(cfg.outsider_skill);
+        s.melee = s.melee.max(cfg.outsider_skill);
     }
     a
 }

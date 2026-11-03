@@ -184,8 +184,15 @@ pub fn spawn_weapon(
     let tier = tier.clamp(1, 3);
     let list = assets::list_price(world, AssetKind::Weapon, tier).unwrap_or(0);
     let a = assets::spawn_asset(world, AssetKind::Weapon, tier, owner, loc, list);
+    // The combat model C1 (§ 4): its kind, by its tier and its holder's class.
+    let class = crate::systems::combat::class_of(world, owner, loc);
+    let wkind = crate::systems::combat::map_kind(world, tier, class, key(a));
     if let Some(x) = world.comp_mut::<Asset>(a) {
         x.prov = Some(prov);
+        x.wkind = wkind;
+    }
+    if let AssetLoc::Carried(h) = loc {
+        assets::rekit(world, h);
     }
     world.jobs2.arms.index.insert(a);
     Some(a)
@@ -296,16 +303,6 @@ pub fn fight_tiers(world: &World, a: EntityId, b: EntityId) -> Option<(u8, u8)> 
     }
     let (ta, tb) = (tier(world, a), tier(world, b));
     (ta > 0 || tb > 0).then_some((ta, tb))
-}
-
-/// `weapon_w × (tier_a − tier_b)`: the term `p_win` gains.
-pub fn p_win_term(cfg: &crate::config::WeaponsCfg, ta: u8, tb: u8) -> f32 {
-    cfg.weapon_w * (f32::from(ta) - f32::from(tb))
-}
-
-/// `1 + kill_w × tier`: the loser's death chance multiplier.
-pub fn kill_mult(cfg: &crate::config::WeaponsCfg, winner_tier: u8) -> f32 {
-    1.0 + cfg.kill_w * f32::from(winner_tier)
 }
 
 /// A raid's pairing strength and a Hunt's might per tier (0 unarmed).
@@ -452,11 +449,11 @@ fn free_adult(world: &World, id: EntityId) -> bool {
 }
 
 /// The concealment contest: the guard's chance to notice a carrier whose
-/// stealth tier and pack tier hide a weapon of `weapon_tier` from a guard
-/// of `sight_tier`: `1 − contest_p(stealth + pack − (weapon − 1), sight, step)`.
-pub fn notice_p(stealth: f32, pack: u8, weapon_tier: u8, sight_tier: u8, step: f32) -> f32 {
-    let hide = f32::from(crate::systems::security::thief_tier(stealth)) + f32::from(pack)
-        - (f32::from(weapon_tier.max(1)) - 1.0);
+/// stealth tier and pack tier hide a weapon of concealment term `conceal`
+/// (its kind's, `combat::conceal_of`; C1, in place of the tier's `tier − 1`)
+/// from a guard of `sight_tier`: `1 − contest_p(stealth + pack − conceal, sight, step)`.
+pub fn notice_p(stealth: f32, pack: u8, conceal: f32, sight_tier: u8, step: f32) -> f32 {
+    let hide = f32::from(crate::systems::security::thief_tier(stealth)) + f32::from(pack) - conceal;
     1.0 - crate::systems::security::contest_p(hide, f32::from(sight_tier.max(1)), step)
 }
 
@@ -534,7 +531,8 @@ pub fn sight_carriers(world: &mut World) {
             continue;
         };
         let stealth = crate::systems::law::stealth(world, c);
-        let p = notice_p(stealth, pack_tier(world, c), t, sight_tier(world, g), step);
+        let conceal = crate::systems::combat::conceal_of(world, c, t);
+        let p = notice_p(stealth, pack_tier(world, c), conceal, sight_tier(world, g), step);
         // Jobs & lives phase 4 (§ 9): a dress-0 body in the Spire (1 off).
         let m = crate::systems::fashion::sighting_mult(world, c);
         let p = if m != 1.0 { (p * m).min(1.0) } else { p };

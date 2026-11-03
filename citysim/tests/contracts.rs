@@ -59,8 +59,10 @@ fn gun(w: &mut World, id: EntityId) {
         p.courage = 0.9;
     }
     if let Some(s) = w.comp_mut::<Skills>(id) {
-        s.fighting = 1.0;
+        s.melee = 1.0;
         s.stealth = 1.0;
+        // The combat model C1: `combat::power` reads melee alone here.
+        (s.shooting, s.evasion) = (0.0, 0.0);
     }
     w.vacate_job(id);
 }
@@ -69,7 +71,8 @@ fn gun(w: &mut World, id: EntityId) {
 /// expected allies: no Friend edges, no gang).
 fn worked_target(w: &mut World, t: EntityId) {
     if let Some(s) = w.comp_mut::<Skills>(t) {
-        s.fighting = 0.4;
+        s.melee = 0.4;
+        (s.shooting, s.evasion) = (0.0, 0.0);
     }
     if let Some(p) = w.comp_mut::<Personality>(t) {
         p.courage = 0.4;
@@ -333,14 +336,14 @@ fn test_accept_score_same_at_every_tier() {
 fn weak_holder(w: &mut World, weight: f32, coins_: i64) -> (EntityId, EntityId) {
     let [h, t] = strangers(w, 2)[..] else { unreachable!() };
     if let Some(s) = w.comp_mut::<Skills>(h) {
-        s.fighting = 0.1;
+        s.melee = 0.1;
     }
     if let Some(p) = w.comp_mut::<Personality>(h) {
         p.lawfulness = 0.1;
         p.courage = 0.9;
     }
     if let Some(s) = w.comp_mut::<Skills>(t) {
-        s.fighting = 0.9;
+        s.melee = 0.9;
     }
     grudges::add(w, h, t, GrudgeCause::Assaulted, weight, 0);
     if let Some(g) = w.comp_mut::<Grudges>(h) {
@@ -391,7 +394,7 @@ fn ledger_hit(w: &mut World) -> (EntityId, EntityId, citysim::contract::Contract
     let [buyer, t, taker] = strangers(w, 3)[..] else { unreachable!() };
     gun(w, taker);
     if let Some(s) = w.comp_mut::<Skills>(t) {
-        s.fighting = 0.0;
+        s.melee = 0.0;
     }
     set_coins(w, buyer, 5000);
     for a in [t, taker] {
@@ -500,7 +503,7 @@ fn test_ledger_kill_names_nobody_before_bind() {
     w.set_spouse(t, spouse);
     gun(&mut w, taker);
     if let Some(s) = w.comp_mut::<Skills>(t) {
-        s.fighting = 0.0;
+        s.melee = 0.0;
     }
     set_coins(&mut w, buyer, 5000);
     for a in [t, taker, spouse] {
@@ -588,7 +591,7 @@ fn test_guard_intercepts_attack_on_client() {
     let [client, g, attacker] = strangers(&w, 3)[..] else { unreachable!() };
     gun(&mut w, g);
     if let Some(s) = w.comp_mut::<Skills>(attacker) {
-        s.fighting = 0.0;
+        s.melee = 0.0;
     }
     set_coins(&mut w, client, 5000);
     for a in [client, g, attacker] {
@@ -799,7 +802,7 @@ fn test_conservation_over_every_phase_one_flow() {
     let (buyer, t, taker) = (more[9], more[10], more[11]);
     gun(&mut w, taker);
     if let Some(s) = w.comp_mut::<Skills>(t) {
-        s.fighting = 0.0;
+        s.melee = 0.0;
     }
     set_coins(&mut w, buyer, 5000);
     for x in [t, taker] {
@@ -1602,7 +1605,7 @@ fn test_ledger_record_with_busy_taker_is_rescheduled() {
     let [buyer, t, taker] = strangers(&w, 3)[..] else { unreachable!() };
     gun(&mut w, taker);
     if let Some(s) = w.comp_mut::<Skills>(t) {
-        s.fighting = 0.0;
+        s.melee = 0.0;
     }
     set_coins(&mut w, buyer, 5000);
     for a in [t, taker] {
@@ -1710,7 +1713,7 @@ fn test_an_away_target_is_neither_posted_nor_struck() {
     let [buyer, t, taker] = strangers(&w, 3)[..] else { unreachable!() };
     gun(&mut w, taker);
     if let Some(s) = w.comp_mut::<Skills>(t) {
-        s.fighting = 0.0;
+        s.melee = 0.0;
     }
     set_coins(&mut w, buyer, 5000);
     for a in [t, taker] {

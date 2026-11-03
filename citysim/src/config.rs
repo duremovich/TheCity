@@ -269,6 +269,13 @@ pub struct Config {
     /// master switch.
     #[serde(default)]
     pub weapons: WeaponsCfg,
+    /// The combat model C1 (docs/COMBAT.md): the beat loop, wounds, the
+    /// three skills, stances.
+    #[serde(default)]
+    pub combat: CombatCfg,
+    /// C1 (docs/COMBAT.md § 4): the weapon kinds; row 0 is the bare hand.
+    #[serde(default = "default_weapon_kinds")]
+    pub weapon_kinds: Vec<WeaponKindCfg>,
     /// Jobs & lives phase 4 (§ 5.1): the Vice venues, the street pitch and
     /// its levers, under the master switch.
     #[serde(default)]
@@ -4899,10 +4906,6 @@ impl Default for Jobs2Cfg {
 pub struct WeaponsCfg {
     pub enabled: bool,
     // --- The fight.
-    /// `p_win += weapon_w × (tier_a − tier_b)` when either side is armed.
-    pub weapon_w: f32,
-    /// The loser's death chance × `(1 + kill_w × the winner's tier)`.
-    pub kill_w: f32,
     /// A raid's pairing strength and a Hunt's might, per tier.
     pub might_w: f32,
     /// Condition a fight takes off the winner's weapon.
@@ -5000,8 +5003,6 @@ impl Default for WeaponsCfg {
     fn default() -> Self {
         WeaponsCfg {
             enabled: false,
-            weapon_w: 0.08,
-            kill_w: 0.5,
             might_w: 0.15,
             wear_per_fight: 2,
             armed_arrest_mult: 1.5,
@@ -14598,6 +14599,227 @@ impl Default for HostageCfg {
             abduct_share: 0.3,
         }
     }
+}
+
+/// `[combat]` (the combat model C1, docs/COMBAT.md § 1-5; `systems/combat.rs`):
+/// the synchronous beat loop (`combat::resolve_now`), wounds and the blood
+/// meter, the three skills and the stances. Tables by severity are `[graze,
+/// wound, grave]`; by stance `[all out, defensive, subdue, hold back]`; by
+/// region `[head, torso, left arm, right arm, left leg, right leg]`.
+/// Placeholders.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CombatCfg {
+    /// The most beats a fight runs (about 10 s each); at the end the side
+    /// with the lower morale breaks.
+    pub max_beats: u8,
+    /// `p_hit = hit_base + attack_w x skill + accuracy x quality + stance -
+    /// evade_w x evasion`, clamped to `[hit_min, hit_max]`.
+    pub hit_base: f32,
+    pub attack_w: f32,
+    pub evade_w: f32,
+    pub hit_min: f32,
+    pub hit_max: f32,
+    /// Kit reflex adds this x reflex to evasion (and the higher reflex acts
+    /// first in a beat).
+    pub reflex_evade: f32,
+    /// The region a hit lands on (weights, by region).
+    pub region_weights: [f32; 6],
+    /// A melee hit's grave weight x `(1 + strength_grave x Kit.strength)`.
+    pub strength_grave: f32,
+    /// Quality by the weapon's tier (1-3): accuracy x it, the grave weight
+    /// x it and the graze weight / it.
+    pub quality: [f32; 3],
+    /// A guard's vest: armour on the torso (Skin chrome covers every region
+    /// at `Kit.armour`; the better of the two holds).
+    pub vest_torso: f32,
+    /// Armour x this is the chance a hit goes down a severity (a graze stopped).
+    pub armour_w: f32,
+    /// A head hit knocks the body out on this (by severity), x
+    /// `blunt_ko_mult` from a blunt kind, plus an old head wound's term.
+    pub ko_p: [f32; 3],
+    pub blunt_ko_mult: f32,
+    /// Morale: `morale_base + courage_w x (courage - 0.5) + stance_morale +
+    /// the caller's crew bonus`; less `morale_hit` per wound taken, plus
+    /// `morale_landed` per hit landed. Below `break_at` + the stance's
+    /// `break_shift` the body breaks: it flees, else yields.
+    pub morale_base: f32,
+    pub courage_w: f32,
+    pub morale_hit: [f32; 3],
+    pub morale_landed: f32,
+    pub stance_morale: [f32; 4],
+    pub stance_attack: [f32; 4],
+    pub stance_evade: [f32; 4],
+    pub break_at: f32,
+    pub break_shift: [f32; 4],
+    /// A break flees on `(flee_p + flee_evade_w x evasion)` x the legs'
+    /// effect; a failed flight yields when the other side takes yields.
+    pub flee_p: f32,
+    pub flee_evade_w: f32,
+    /// The blood a fresh wound takes at once and an hour of bleeding takes
+    /// (by severity); a body not bleeding gets `regen_hour` back.
+    pub blood_hit: [f32; 3],
+    pub bleed_hour: [f32; 3],
+    pub regen_hour: f32,
+    /// A bleeding Wound stops on this roll each hour (first aid comes in
+    /// C2); a Graze never bleeds; a Grave bleeds until a Clinic stabilises it.
+    pub stop_p_wound: f32,
+    /// C1's stub of C2's healing: a wound is gone this many days after it
+    /// was dealt (a Grave only once it has stopped bleeding).
+    pub heal_days: [u32; 3],
+    /// Effects (`health::effects`), by the worst wound's severity there: an
+    /// arm x the attack skill (each arm), a leg x evasion and the flight
+    /// (each leg) and the worse leg x the step cost (`Kit.walk_mult`), the
+    /// head adds to a later knockout and x work.
+    pub arm_mult: [f32; 3],
+    pub leg_mult: [f32; 3],
+    pub leg_walk: [f32; 3],
+    pub head_ko: [f32; 3],
+    pub head_work: [f32; 3],
+    /// Growth: a melee hit landed `+melee_gain`, a shot `+shooting_gain`, a
+    /// dodge `+evasion_gain` (replacing the flat +0.01 to the winner).
+    pub melee_gain: f32,
+    pub shooting_gain: f32,
+    pub evasion_gain: f32,
+    /// `combat::power`: the better of melee and (with a gun carried)
+    /// shooting, plus this share of evasion.
+    pub power_evasion: f32,
+    /// Shooting's seed: a base by role (`Role` names; else a gang member
+    /// `shooting_gang`, else `shooting_base`) x a keyed draw in `shooting_draw`.
+    pub shooting_base: f32,
+    pub shooting_gang: f32,
+    pub shooting_posts: std::collections::BTreeMap<String, f32>,
+    pub shooting_draw: [f32; 2],
+    /// Evasion's seed: `U([world] skill_min, skill_max)` x the age curve (1
+    /// to `evasion_peak` years, then down `evasion_decline` a year, to
+    /// `evasion_floor`).
+    pub evasion_peak: f32,
+    pub evasion_decline: f32,
+    pub evasion_floor: f32,
+}
+
+impl Default for CombatCfg {
+    fn default() -> Self {
+        CombatCfg {
+            max_beats: 10,
+            hit_base: 0.4,
+            attack_w: 0.6,
+            evade_w: 0.5,
+            hit_min: 0.05,
+            hit_max: 0.95,
+            reflex_evade: 0.5,
+            region_weights: [0.1, 0.4, 0.125, 0.125, 0.125, 0.125],
+            strength_grave: 0.5,
+            quality: [0.85, 1.0, 1.2],
+            vest_torso: 0.4,
+            armour_w: 1.0,
+            ko_p: [0.05, 0.3, 0.6],
+            blunt_ko_mult: 1.5,
+            morale_base: 0.55,
+            courage_w: 0.5,
+            morale_hit: [0.08, 0.22, 0.4],
+            morale_landed: 0.04,
+            stance_morale: [0.15, 0.05, 0.15, -0.15],
+            stance_attack: [0.1, -0.1, 0.0, -0.05],
+            stance_evade: [-0.05, 0.15, 0.0, 0.05],
+            break_at: 0.2,
+            break_shift: [0.0, -0.1, 0.0, 0.15],
+            flee_p: 0.55,
+            flee_evade_w: 0.4,
+            blood_hit: [0.0, 0.1, 0.35],
+            bleed_hour: [0.0, 0.1, 0.3],
+            regen_hour: 0.05,
+            stop_p_wound: 0.35,
+            heal_days: [1, 6, 20],
+            arm_mult: [0.95, 0.75, 0.45],
+            leg_mult: [0.95, 0.7, 0.4],
+            leg_walk: [1.0, 1.4, 2.0],
+            head_ko: [0.0, 0.1, 0.25],
+            head_work: [1.0, 0.85, 0.6],
+            melee_gain: 0.004,
+            shooting_gain: 0.004,
+            evasion_gain: 0.003,
+            power_evasion: 0.25,
+            shooting_base: 0.05,
+            shooting_gang: 0.35,
+            shooting_posts: std::collections::BTreeMap::from([
+                ("Guard".to_string(), 0.55),
+                ("Fighter".to_string(), 0.15),
+            ]),
+            shooting_draw: [0.4, 1.0],
+            evasion_peak: 30.0,
+            evasion_decline: 0.012,
+            evasion_floor: 0.4,
+        }
+    }
+}
+
+/// A weapon kind's family: which skill it is used with.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WeaponFamily {
+    #[default]
+    Melee,
+    Ranged,
+}
+
+/// A `[[weapon_kinds]]` row (docs/COMBAT.md § 4). The tier stays as
+/// quality (`[combat] quality`). `tiers` and `classes` map the stock: a
+/// weapon of a tier owned by a class (`law`, `gang`, `civil`) takes a kind
+/// among the rows listing both (a keyed pick at the spawn).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WeaponKindCfg {
+    pub id: String,
+    pub family: WeaponFamily,
+    /// Added to the attack roll (x quality).
+    pub accuracy: f32,
+    /// Weights over `[graze, wound, grave]` for a hit.
+    pub damage: [f32; 3],
+    /// The death chance on a Grave head or torso wound.
+    pub lethality: f32,
+    /// A blunt kind knocks out more (`[combat] blunt_ko_mult`); a subdue
+    /// stance strikes with the first blunt row when armed.
+    pub blunt: bool,
+    /// The beats a defender takes to ready it (the attacker comes drawn).
+    pub draw: u8,
+    /// Its term in the concealment contest (`weapons::notice_p`), in place
+    /// of the tier's `tier - 1`.
+    pub conceal: f32,
+    pub tiers: Vec<u8>,
+    pub classes: Vec<String>,
+}
+
+type KindRow<'a> = (&'a str, WeaponFamily, f32, [f32; 3], f32, bool, u8, f32, &'a [u8], &'a [&'a str]);
+
+/// The shipped `[[weapon_kinds]]` (a config without the rows).
+pub fn default_weapon_kinds() -> Vec<WeaponKindCfg> {
+    use WeaponFamily::{Melee, Ranged};
+    let rows: [KindRow; 9] = [
+        ("unarmed", Melee, 0.0, [0.75, 0.22, 0.03], 0.08, true, 0, 0.0, &[], &[]),
+        ("knife", Melee, 0.05, [0.4, 0.42, 0.18], 0.35, false, 1, 0.0, &[1], &["gang", "civil"]),
+        ("blade", Melee, 0.05, [0.3, 0.42, 0.28], 0.45, false, 1, 1.0, &[2], &["gang"]),
+        ("club", Melee, 0.05, [0.5, 0.4, 0.1], 0.15, true, 1, 0.5, &[1], &["law", "gang", "civil"]),
+        ("pistol", Ranged, 0.12, [0.3, 0.42, 0.28], 0.5, false, 1, 0.5, &[1, 2], &["law", "gang", "civil"]),
+        ("smg", Ranged, 0.12, [0.25, 0.42, 0.33], 0.55, false, 1, 1.5, &[2, 3], &["law", "gang"]),
+        ("shotgun", Ranged, 0.15, [0.2, 0.4, 0.4], 0.65, false, 2, 2.0, &[2, 3], &["law", "civil", "gang"]),
+        ("rifle", Ranged, 0.12, [0.2, 0.38, 0.42], 0.7, false, 2, 2.5, &[3], &["law", "gang"]),
+        ("sniper", Ranged, 0.0, [0.1, 0.3, 0.6], 0.85, false, 3, 3.0, &[], &[]),
+    ];
+    rows.iter()
+        .map(|&(id, family, accuracy, damage, lethality, blunt, draw, conceal, tiers, classes)| WeaponKindCfg {
+            id: id.to_string(),
+            family,
+            accuracy,
+            damage,
+            lethality,
+            blunt,
+            draw,
+            conceal,
+            tiers: tiers.to_vec(),
+            classes: classes.iter().map(|c| c.to_string()).collect(),
+        })
+        .collect()
 }
 
 /// `[wounded]` (M16b phase 3; spec § 5, with the plan keys marked). Every

@@ -289,8 +289,12 @@ pub fn scene(world: &mut World, id: EntityId, bouncer: EntityId, b: EntityId, wh
         return None;
     }
     let tile = world.comp::<crate::components::Position>(id).map_or_else(Default::default, |p| p.tile);
-    let (winner, _, died) =
-        crate::systems::law::resolve_fight_mods(world, id, bouncer, crate::systems::law::FightMods::default());
+    let (winner, _, died) = crate::systems::law::resolve_fight_mods(
+        world,
+        id,
+        bouncer,
+        crate::systems::law::FightMods { why: crate::systems::combat::Purpose::Door, ..Default::default() },
+    );
     if crate::systems::law::living(world, id) {
         crate::systems::law::raise_crime_on(
             world,

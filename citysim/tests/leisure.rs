@@ -754,7 +754,7 @@ fn test_bug17_bouts_go_round_the_fighters() {
     for (i, &f) in crew.iter().enumerate() {
         demography::hire(&mut w, f, pit, Role::Fighter);
         w.comp_mut::<Job>(f).expect("job").shifts = vec![(0, 1440)];
-        w.comp_mut::<citysim::Skills>(f).expect("s").fighting = [0.9, 0.8, 0.1][i];
+        w.comp_mut::<citysim::Skills>(f).expect("s").melee = [0.9, 0.8, 0.1][i];
         lod::set_lod(&mut w, f, Lod::Statistical);
     }
     let mut fought = std::collections::BTreeSet::new();

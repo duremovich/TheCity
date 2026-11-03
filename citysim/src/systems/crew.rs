@@ -586,7 +586,7 @@ fn enforcer(world: &World, gang: EntityId, not: EntityId) -> Option<EntityId> {
         .copied()
         .filter(|&m| m != not && crate::systems::contracts::free_adult(world, m))
         .filter(|&m| !world.visits.contains_key(&m) && !world.crew.calls.contains_key(&m))
-        .map(|m| (std::cmp::Reverse(ordered_float::OrderedFloat(law::fighting(world, m))), m))
+        .map(|m| (std::cmp::Reverse(ordered_float::OrderedFloat(crate::systems::combat::power(world, m))), m))
         .min()
         .map(|(_, m)| m)
 }

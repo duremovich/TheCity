@@ -46,7 +46,7 @@ fn crew(w: &mut World, n: usize, fighting: f32) -> Vec<EntityId> {
         .take(n)
         .collect();
     for &a in &c {
-        w.comp_mut::<Skills>(a).expect("skills").fighting = fighting;
+        w.comp_mut::<Skills>(a).expect("skills").melee = fighting;
         w.comp_mut::<citysim::Personality>(a).expect("p").courage = fighting;
     }
     c
@@ -368,7 +368,7 @@ fn test_a_death_abroad_is_quiet_but_opens_the_succession() {
     let mut crew = vec![leader];
     crew.extend(common::free_crew(&mut w, 3, 0.0));
     for &a in &crew {
-        w.comp_mut::<Skills>(a).expect("skills").fighting = 0.0;
+        w.comp_mut::<Skills>(a).expect("skills").melee = 0.0;
     }
     god(&mut w, PlayerCommand::PostAbroad { buyer: None, on, asset: OutsideAsset::Depot, crew: crew.clone() });
     assert!(abroad::is_away(&w, leader), "the leader went");

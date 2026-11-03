@@ -405,7 +405,7 @@ fn test_breakout_is_a_contest_at_the_door_and_files_abduction() {
         p.courage = 0.9;
     }
     if let Some(s) = w.comp_mut::<citysim::Skills>(a) {
-        s.fighting = 1.0;
+        s.melee = 1.0;
     }
     // The parent at the door, as the walk leaves him.
     let door = w.comp::<Building>(cmp).expect("camp").door;

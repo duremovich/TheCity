@@ -542,7 +542,10 @@ use crate::world::World;
 /// of 255 were spent). RON writes the number either way, so the field reads the same; an older save need not load.
 /// 128 (M18 W, the work beats): `World.shift_beats`, `PlayerControlled.shift`, `EventKind::WorkBeat`, the
 /// `[work_beat]` section and the `[[work_beats]]` deck (serde defaults: a 127 save loads with no deck, so no beats).
-pub const SAVE_VERSION: u16 = 128;
+/// 129 (the combat model C1): `Skills.fighting` renamed `melee`, `shooting` and `evasion` added; the `Wounds`
+/// store and `World.hurt`; `Asset.wkind`, `Kit.weapon_kind`; `EventKind::Fight`; `[combat]` and `[[weapon_kinds]]`
+/// (`[weapons]` lost `weapon_w` and `kill_w`). A 128 save need not load.
+pub const SAVE_VERSION: u16 = 129;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

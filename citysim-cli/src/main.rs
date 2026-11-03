@@ -540,7 +540,7 @@ impl Who {
                     .iter()
                     .copied()
                     .filter(|&m| citysim::systems::law::living(world, m))
-                    .map(|m| (citysim::systems::law::fighting(world, m), m))
+                    .map(|m| (citysim::systems::combat::power(world, m), m))
                     .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)))
                     .map(|(_, m)| m)
                     .ok_or_else(|| format!("gang {i} has no living member"))

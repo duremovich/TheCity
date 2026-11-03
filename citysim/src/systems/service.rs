@@ -866,7 +866,7 @@ pub(crate) fn train(world: &mut World, server: EntityId, skill: TradeSkill, gain
     let slot = match skill {
         TradeSkill::None => return,
         TradeSkill::Farming => &mut s.farming,
-        TradeSkill::Fighting => &mut s.fighting,
+        TradeSkill::Fighting => &mut s.melee,
         TradeSkill::Persuasion => &mut s.persuasion,
         TradeSkill::Knowledge => &mut s.knowledge,
         TradeSkill::Hacking => &mut s.hacking,
@@ -1246,12 +1246,12 @@ pub fn maybe_eject(world: &mut World, attacker: EntityId) -> bool {
     let staff = door_staff(world, b);
     let Some((bouncer, strength)) = staff
         .iter()
-        .map(|&s| (s, crate::systems::law::fighting(world, s)))
+        .map(|&s| (s, crate::systems::combat::power(world, s)))
         .max_by(|x, y| x.1.total_cmp(&y.1).then(y.0.cmp(&x.0)))
     else {
         return false;
     };
-    let edge = (strength - crate::systems::law::fighting(world, attacker)).max(0.0);
+    let edge = (strength - crate::systems::combat::power(world, attacker)).max(0.0);
     let p = world.config.service.p_eject * edge;
     if hash(world, PURPOSE_EJECT, key(attacker), world.tick) >= p {
         return false;

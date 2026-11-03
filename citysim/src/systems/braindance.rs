@@ -104,7 +104,7 @@ pub fn accrue_studio(world: &mut World, worker: EntityId, b: EntityId, ticks: u6
     let s = world.comp::<Skills>(worker).map_or(0.0, |s| match skill {
         TradeSkill::Persuasion => s.persuasion,
         TradeSkill::Knowledge => s.knowledge,
-        TradeSkill::Fighting => s.fighting,
+        TradeSkill::Fighting => crate::systems::combat::skill_power(world, s),
         TradeSkill::Farming => s.farming,
         TradeSkill::Hacking => s.hacking,
         TradeSkill::None => 0.0,
@@ -281,7 +281,7 @@ fn recorders_daily(world: &mut World) {
             .iter()
             .copied()
             .filter(|&m| crate::systems::law::living(world, m) && !world.has::<Sentence>(m))
-            .map(|m| (world.comp::<Skills>(m).map_or(0.0, |s| s.fighting), m))
+            .map(|m| (world.comp::<Skills>(m).map_or(0.0, |s| crate::systems::combat::skill_power(world, s)), m))
             .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
             .map(|(_, m)| m)
         else {

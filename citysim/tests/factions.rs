@@ -309,7 +309,7 @@ fn stage_raider(w: &mut World, id: EntityId, tile: citysim::TilePos) {
 }
 
 fn set_fighter(w: &mut World, id: EntityId, fighting: f32, courage: f32) {
-    w.comp_mut::<Skills>(id).expect("s").fighting = fighting;
+    w.comp_mut::<Skills>(id).expect("s").melee = fighting;
     w.comp_mut::<Personality>(id).expect("p").courage = courage;
 }
 

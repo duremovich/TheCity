@@ -56,7 +56,7 @@ fn set_coins(w: &mut World, id: EntityId, coins: i64) {
 /// Fighting and courage (strength = fighting + 0.25 × courage, no Kit).
 fn set_fighter(w: &mut World, id: EntityId, fighting: f32, courage: f32) {
     if let Some(s) = w.comp_mut::<Skills>(id) {
-        s.fighting = fighting;
+        s.melee = fighting;
     }
     if let Some(p) = w.comp_mut::<Personality>(id) {
         p.courage = courage;

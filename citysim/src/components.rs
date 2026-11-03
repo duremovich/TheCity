@@ -2975,7 +2975,17 @@ mod heard_wire {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Skills {
     pub stealth: f32,
-    pub fighting: f32,
+    /// The combat model C1 (docs/COMBAT.md § 3): the old `fighting`, the
+    /// hand-to-hand skill (grows when the body lands a melee hit).
+    pub melee: f32,
+    /// C1: firearms, seeded from a per-role base x a keyed draw
+    /// (`combat::seed_skills`; -1 until seeded); grows when a shot lands.
+    #[serde(default = "Skills::unset_hacking")]
+    pub shooting: f32,
+    /// C1: not being hit, from a keyed draw x an age curve (-1 until
+    /// seeded); grows when the body dodges. Kit reflex adds at the fight.
+    #[serde(default = "Skills::unset_hacking")]
+    pub evasion: f32,
     pub farming: f32,
     /// M14 (plan V35): `hack_seed_scale x U(0,1)^3` from a keyed stream.
     #[serde(default = "Skills::unset_hacking")]
@@ -3007,10 +3017,12 @@ impl Skills {
 
     /// M15: a fresh `Skills` with the three v1 skills and hacking given;
     /// the social four 0 (seeded by `moves::give_social`).
-    pub fn basic(stealth: f32, fighting: f32, farming: f32, hacking: f32) -> Skills {
+    pub fn basic(stealth: f32, melee: f32, farming: f32, hacking: f32) -> Skills {
         Skills {
             stealth,
-            fighting,
+            melee,
+            shooting: -1.0,
+            evasion: -1.0,
             farming,
             hacking,
             persuasion: 0.0,
@@ -5006,6 +5018,11 @@ pub struct Asset {
     /// (`None` for every pre-milestone asset).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prov: Option<Provenance>,
+    /// The combat model C1 (docs/COMBAT.md § 4): a weapon's kind, its
+    /// `[[weapon_kinds]]` row + 1 (0: not mapped; `combat::map_kind` maps
+    /// it by tier and owner class at the spawn).
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub wkind: u8,
 }
 
 fn is_zero_u16(v: &u16) -> bool {
@@ -5056,6 +5073,113 @@ pub struct Kit {
     /// Jobs & lives phase 3 (§ 4): the carried weapon's effective tier
     /// (the best one, condition > 0), 0 unarmed.
     pub weapon: u8,
+    /// The combat model C1: that weapon's `[[weapon_kinds]]` row (0 with
+    /// `weapon` 0: read only when armed).
+    pub weapon_kind: u8,
+}
+
+/// The combat model C1 (docs/COMBAT.md § 2): a body region.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum Region {
+    Head,
+    Torso,
+    ArmL,
+    ArmR,
+    LegL,
+    LegR,
+}
+
+impl Region {
+    pub const ALL: [Region; 6] = [Region::Head, Region::Torso, Region::ArmL, Region::ArmR, Region::LegL, Region::LegR];
+
+    pub fn is_arm(self) -> bool {
+        matches!(self, Region::ArmL | Region::ArmR)
+    }
+
+    pub fn is_leg(self) -> bool {
+        matches!(self, Region::LegL | Region::LegR)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Region::Head => "head",
+            Region::Torso => "body",
+            Region::ArmL => "left arm",
+            Region::ArmR => "right arm",
+            Region::LegL => "left leg",
+            Region::LegR => "right leg",
+        }
+    }
+}
+
+/// C1: a wound's severity (`[combat]` tables are indexed by it).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum Severity {
+    Graze,
+    Wound,
+    Grave,
+}
+
+impl Severity {
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Severity::Graze => "grazed",
+            Severity::Wound => "wounded",
+            Severity::Grave => "gravely wounded",
+        }
+    }
+
+    pub fn down(self) -> Option<Severity> {
+        match self {
+            Severity::Graze => None,
+            Severity::Wound => Some(Severity::Graze),
+            Severity::Grave => Some(Severity::Wound),
+        }
+    }
+}
+
+/// C1: one wound on a body.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Wound {
+    pub region: Region,
+    pub severity: Severity,
+    /// Draining the blood meter (`combat::hourly`).
+    pub bleeding: bool,
+    pub since: Tick,
+    /// Stabilised at a Clinic (the M16b Stabilise): it stops bleeding.
+    #[serde(default)]
+    pub treated: bool,
+    pub by: Option<EntityId>,
+    /// A bleed-out from it counts as a Murder by `by` (an attacker who is
+    /// no guard dealt it to the one he attacked).
+    #[serde(default)]
+    pub murder: bool,
+}
+
+/// C1 (docs/COMBAT.md § 2): the wounds a body carries and its blood meter
+/// (1 full; at 0 the body goes down, the M16b `wounded` state). Removed
+/// when the last wound heals and the blood is full.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Wounds {
+    pub list: Vec<Wound>,
+    pub blood: f32,
+}
+
+impl Default for Wounds {
+    fn default() -> Self {
+        Wounds { list: Vec::new(), blood: 1.0 }
+    }
+}
+
+impl Wounds {
+    /// The worst severity on `region`, if any.
+    pub fn worst(&self, region: Region) -> Option<Severity> {
+        self.list.iter().filter(|w| w.region == region).map(|w| w.severity).max()
+    }
 }
 
 impl Default for Kit {
@@ -5079,6 +5203,7 @@ impl Default for Kit {
             deck: None,
             deck_tier: 0,
             weapon: 0,
+            weapon_kind: 0,
         }
     }
 }

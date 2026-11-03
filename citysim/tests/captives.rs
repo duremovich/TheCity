@@ -97,7 +97,7 @@ fn heavy(w: &mut World, id: EntityId) {
         p.courage = 1.0;
     }
     if let Some(s) = w.comp_mut::<Skills>(id) {
-        s.fighting = 1.0;
+        s.melee = 1.0;
         s.intimidation = 1.0;
         s.persuasion = 1.0;
         s.deception = 1.0;
@@ -110,7 +110,7 @@ fn soft(w: &mut World, id: EntityId) {
         p.greed = 1.0;
     }
     if let Some(s) = w.comp_mut::<Skills>(id) {
-        s.fighting = 0.0;
+        s.melee = 0.0;
         s.knowledge = 0.0;
     }
 }

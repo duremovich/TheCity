@@ -1631,9 +1631,30 @@ fn header(world: &World, t: &Track) -> String {
     if let Some(s) = world.comp::<Skills>(id) {
         let _ = writeln!(
             h,
-            "- **Skills**: stealth {:.2}, fighting {:.2}, farming {:.2}, hacking {:.2} | persuasion {:.2}, intimidation {:.2}, knowledge {:.2}, deception {:.2}",
-            s.stealth, s.fighting, s.farming, s.hacking, s.persuasion, s.intimidation, s.knowledge, s.deception
+            "- **Skills**: stealth {:.2}, melee {:.2}, shooting {:.2}, evasion {:.2} (power {:.2}), farming {:.2}, hacking {:.2} | persuasion {:.2}, intimidation {:.2}, knowledge {:.2}, deception {:.2}",
+            s.stealth,
+            s.melee,
+            s.shooting,
+            s.evasion,
+            citysim::systems::combat::power(world, id),
+            s.farming,
+            s.hacking,
+            s.persuasion,
+            s.intimidation,
+            s.knowledge,
+            s.deception
         );
+    }
+    // The combat model C1: the wounds carried at the window's start.
+    if let Some(w) = world.comp::<citysim::Wounds>(id) {
+        let list: Vec<String> = w
+            .list
+            .iter()
+            .map(|x| {
+                format!("{} {}{}", x.region.label(), x.severity.label(), if x.bleeding { ", bleeding" } else { "" })
+            })
+            .collect();
+        let _ = writeln!(h, "- **Wounds**: {} (blood {:.2})", list.join("; "), w.blood);
     }
     let home = world.comp::<Household>(id).and_then(|h| h.home);
     let _ = writeln!(

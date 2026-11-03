@@ -189,7 +189,7 @@ sentence_days = [3, 6, 10, 30]
 # M13 D47: the crimes appended after Vagrancy (GrandTheft and Manslaughter land in phase 2).
 sentence_days_ext = { grand_theft = 6, dealing = 5, abduction = 20, manslaughter = 10, intrusion = 2, data_theft = 5, fraud = 2, blackmail = 3, arms_dealing = 6, smuggling = 8, camp_escape = 2 }   # M14 V18: intrusion, data_theft; M16b: fraud, blackmail; Jobs & lives phase 3: arms_dealing, smuggling (UnlicensedArms is a night in the cells); round 7 W5: camp_escape, a parent who broke his own child out of a work Camp (the warden's matter, not an Abduction)
 # jail capacity is buildings.jail.capacity
-fight_death_p = 0.03
+fight_death_p = 0.03                 # a robot fight's death roll (the combat model C1: a body's fight kills by its wounds, [combat])
 stat_theft_caught_p = 0.25
 warrant_expiry_days = 30
 suspect_seen_ticks = 240
@@ -3807,13 +3807,10 @@ seize_after_days = 5               # a corp's Utility Plant dark on this many da
 # ---------------------------------------------------------------------------
 # Jobs & lives phase 3, weapons (docs/JOBS_AND_LIVES.md § 4; Dylan's answer 1: the generic owned-item store). A game
 # abstraction: a weapon is an owned item (an `Asset`: tier 1-3, condition, provenance), carried, kept at home or
-# stocked; a fight is the seeded roll of `law::fight_inner` with one more term from the tiers. Under [jobs2]
-# enabled. Prices are [assets] price.weapon. Placeholders; `weapon_w` is
-# the lever on lethality, and no earlier knob moves.
+# stocked; a fight reads its kind and its tier as quality ([combat], [[weapon_kinds]]; the combat model C1). Under
+# [jobs2] enabled. Prices are [assets] price.weapon. Placeholders.
 [weapons]
 enabled = true
-weapon_w = 0.08                    # p_win += this x (tier_a - tier_b) when either side is armed
-kill_w = 0.5                       # the loser's death chance x (1 + this x the winner's tier)
 might_w = 0.15                     # a raid's pairing strength and a Hunt's might per tier (the Hit's quote reads it)
 wear_per_fight = 2                 # condition off the winner's weapon a fight
 armed_arrest_mult = 1.5            # an armed suspect contesting the cuffs: the death chance x this
@@ -3854,6 +3851,170 @@ stall_rob_gap_hours = 24           # Round 6 V3 (OPEN-238): ... the nearest stal
                                    # (V14: the district's lowest owner id's till, emptied ten times in six hours)
 petty_per_1000_day = 2.0           # petty item thefts a day at most, per 1,000 residents (R3)
 fence_frac = 0.4                   # the fence pays this of an item's value (into the gang's armoury)
+
+# ---------------------------------------------------------------------------
+# The combat model C1, the beat (docs/COMBAT.md § 1-5, § 10 phase 1; systems/combat.rs): a fight is a handful of beats
+# run to the end in one call (`combat::resolve_now`, the body of `law::fight_inner`; live engagements are C3). Each
+# beat a side may break (flee, else yield) or attack: the skill for its weapon (melee, shooting) against evasion; a hit
+# lands on a region at a severity, less armour; a head hit may knock out; a Grave head or torso wound may kill (the
+# kind's lethality). Wounds stay on the body (`Wounds`, through `health::effects`), bleed into the M16b downed state
+# and heal on a stub timer (C2 brings healing, the Clinic, first aid). Tables by severity are [graze, wound, grave];
+# by stance [all out, defensive, subdue, hold back]; by region [head, torso, left arm, right arm, left leg, right
+# leg]. Placeholders (no fine-tuning, 2026-10-07).
+[combat]
+max_beats = 10                     # beats a fight runs at most (~10 s each); then the lower morale gives way
+hit_base = 0.4                     # p_hit = hit_base + attack_w x skill + accuracy x quality + the stance's attack ...
+attack_w = 0.6                     # ... (the skill: melee + Kit fighting, or shooting with a ranged kind; x the arms' wounds) ...
+evade_w = 0.5                      # ... - evade_w x (evasion + reflex_evade x Kit reflex, x the legs' wounds, + the stance's evade) ...
+hit_min = 0.05                     # ... clamped to [hit_min, hit_max]
+hit_max = 0.95
+reflex_evade = 0.5                 # Kit reflex adds this x reflex to evasion; the higher reflex acts first in a beat
+region_weights = [0.1, 0.4, 0.125, 0.125, 0.125, 0.125]   # where a hit lands
+strength_grave = 0.5               # a melee hit's grave weight x (1 + this x Kit strength)
+quality = [0.85, 1.0, 1.2]         # by the weapon's tier: accuracy x it, grave weight x it, graze weight / it
+vest_torso = 0.4                   # a guard's vest: armour on the torso (Skin chrome covers every region at Kit armour)
+armour_w = 1.0                     # a hit goes down a severity on armour x this (a graze is stopped)
+ko_p = [0.05, 0.3, 0.6]            # a head hit knocks out on this, by severity ...
+blunt_ko_mult = 1.5                # ... x this from a blunt kind (fists, a club), + an old head wound's head_ko
+morale_base = 0.55                 # morale = this + courage_w x (courage - 0.5) + stance_morale + the caller's crew bonus ...
+courage_w = 0.5
+morale_hit = [0.08, 0.22, 0.4]     # ... less this per wound taken, by severity ...
+morale_landed = 0.04               # ... plus this per hit landed
+stance_morale = [0.15, 0.05, 0.15, -0.15]   # a trained subdue (a guard, a bouncer) holds its nerve
+stance_attack = [0.1, -0.1, 0.0, -0.05]   # added to p_hit by the attacker's stance
+stance_evade = [-0.05, 0.15, 0.0, 0.05]   # added to the target's evasion by its stance
+break_at = 0.2                     # morale under this + break_shift (by stance) breaks the body: it flees, else yields
+break_shift = [0.0, -0.1, 0.0, 0.15]      # defensive breaks later, hold back flees early
+flee_p = 0.55                      # a break flees on (flee_p + flee_evade_w x evasion) x the legs' wounds; a Grave leg or
+flee_evade_w = 0.4                 # two leg Wounds cannot; else it yields, when the other side takes yields
+blood_hit = [0.0, 0.1, 0.35]       # blood (1 full) a fresh wound takes at once, by severity; at 0 the body is down (M16b)
+bleed_hour = [0.0, 0.1, 0.3]       # an hour of bleeding takes this (a torso Wound or any Grave bleeds; a blunt blow never: fists and clubs bruise and break)
+regen_hour = 0.05                  # a body not bleeding gets this back an hour
+stop_p_wound = 0.35                # a bleeding Wound stops on this roll an hour (a Grave bleeds until a Clinic stabilises it)
+heal_days = [1, 6, 20]             # C1's stub of C2's healing: a wound not bleeding is gone this many days after it was dealt
+arm_mult = [0.95, 0.75, 0.45]      # effects by the worst wound there: each arm x the attack skill ...
+leg_mult = [0.95, 0.7, 0.4]        # ... each leg x evasion and the flight ...
+leg_walk = [1.0, 1.4, 2.0]         # ... the worse leg x the step cost (Kit walk_mult: a limp) ...
+head_ko = [0.0, 0.1, 0.25]         # ... the head adds this to a later knockout ...
+head_work = [1.0, 0.85, 0.6]       # ... and x work output (health::effects work_mult)
+melee_gain = 0.004                 # growth (replacing the winner's flat +0.01): a melee hit landed ...
+shooting_gain = 0.004              # ... a shot landed ...
+evasion_gain = 0.003               # ... a dodge
+power_evasion = 0.25               # combat::power (every gate): the better of melee and (a gun carried) shooting, + this x evasion
+shooting_base = 0.05               # shooting's seed: a base by role x U(shooting_draw); nobody in particular ...
+shooting_gang = 0.35               # ... a gang member ...
+shooting_posts = { Guard = 0.55, Fighter = 0.15 }   # ... these posts (Role names)
+shooting_draw = [0.4, 1.0]
+evasion_peak = 30.0                # evasion's seed: U([world] skill_min, skill_max) x 1 to this age, then ...
+evasion_decline = 0.012            # ... less this a year ...
+evasion_floor = 0.4                # ... to this
+
+# C1 (docs/COMBAT.md § 4): the weapon kinds. Row 0 is the bare hand. The tier stays as quality ([combat] quality). The
+# stock maps by tier and owner class (law: guards, the Precinct; gang: gangs, members, armouries; civil: the rest): a
+# weapon spawned takes a keyed pick among the rows listing its tier and class. damage weights [graze, wound, grave];
+# lethality the death chance on a Grave head or torso wound; draw the beats a defender takes to ready it; conceal its
+# term in the concealment contest (in place of tier - 1); blunt strikes knock out more, and a subdue stance strikes with
+# the first blunt row (a guard's baton). Reach, noise and price come with C3 and sight (addendum 24).
+[[weapon_kinds]]
+id = "unarmed"
+family = "melee"
+accuracy = 0.0
+damage = [0.75, 0.22, 0.03]
+lethality = 0.08
+blunt = true
+draw = 0
+conceal = 0.0
+tiers = []
+classes = []
+
+[[weapon_kinds]]
+id = "knife"
+family = "melee"
+accuracy = 0.05
+damage = [0.4, 0.42, 0.18]
+lethality = 0.35
+draw = 1
+conceal = 0.0
+tiers = [1]
+classes = ["gang", "civil"]
+
+[[weapon_kinds]]
+id = "blade"
+family = "melee"
+accuracy = 0.05
+damage = [0.3, 0.42, 0.28]
+lethality = 0.45
+draw = 1
+conceal = 1.0
+tiers = [2]
+classes = ["gang"]
+
+[[weapon_kinds]]
+id = "club"
+family = "melee"
+accuracy = 0.05
+damage = [0.5, 0.4, 0.1]
+lethality = 0.15
+blunt = true
+draw = 1
+conceal = 0.5
+tiers = [1]
+classes = ["law", "gang", "civil"]
+
+[[weapon_kinds]]
+id = "pistol"
+family = "ranged"
+accuracy = 0.12
+damage = [0.3, 0.42, 0.28]
+lethality = 0.5
+draw = 1
+conceal = 0.5
+tiers = [1, 2]
+classes = ["law", "gang", "civil"]
+
+[[weapon_kinds]]
+id = "smg"
+family = "ranged"
+accuracy = 0.12
+damage = [0.25, 0.42, 0.33]
+lethality = 0.55
+draw = 1
+conceal = 1.5
+tiers = [2, 3]
+classes = ["law", "gang"]
+
+[[weapon_kinds]]
+id = "shotgun"
+family = "ranged"
+accuracy = 0.15
+damage = [0.2, 0.4, 0.4]
+lethality = 0.65
+draw = 2
+conceal = 2.0
+tiers = [2, 3]
+classes = ["law", "civil", "gang"]
+
+[[weapon_kinds]]
+id = "rifle"
+family = "ranged"
+accuracy = 0.12
+damage = [0.2, 0.38, 0.42]
+lethality = 0.7
+draw = 2
+conceal = 2.5
+tiers = [3]
+classes = ["law", "gang"]
+
+[[weapon_kinds]]
+id = "sniper"
+family = "ranged"
+accuracy = 0.0
+damage = [0.1, 0.3, 0.6]
+lethality = 0.85
+draw = 3
+conceal = 3.0
+tiers = []
+classes = []
 
 # ---------------------------------------------------------------------------
 # Jobs & lives phase 4, vice (docs/JOBS_AND_LIVES.md § 5.1): an economic and legal simulation of venues and labour

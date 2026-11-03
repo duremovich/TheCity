@@ -36,6 +36,7 @@ pub mod charity;
 pub mod chrome;
 pub mod classes;
 pub mod classpay;
+pub mod combat;
 pub mod commute;
 pub mod company;
 pub mod competence;

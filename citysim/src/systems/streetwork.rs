@@ -453,7 +453,7 @@ fn openings(world: &mut World) {
                 >= world.config.ages.frail_from_years;
         let kind = match skills {
             Some(s) if s.knowledge >= cfg.tinker_skill => PitchKind::Tinker,
-            Some(s) if s.fighting >= cfg.rickshaw_skill && !elder => PitchKind::Rickshaw,
+            Some(s) if s.melee >= cfg.rickshaw_skill && !elder => PitchKind::Rickshaw,
             _ => PitchKind::Vendor,
         };
         // Jobs & lives phase 4 (§ 5.1): with `[vice]` on, a lawless opener
@@ -998,7 +998,8 @@ fn dawn_pick(world: &mut World) {
         let band = crate::systems::careers::hire_band(world, role);
         let order = |&x: &EntityId, &y: &EntityId| {
             let known = |a: EntityId| foreman.is_some_and(|f| world.edge(a, f).is_some());
-            let f = |a: EntityId| world.comp::<Skills>(a).map_or(0.0, |s| s.fighting);
+            let f =
+                |a: EntityId| world.comp::<Skills>(a).map_or(0.0, |s| crate::systems::combat::skill_power(world, s));
             known(x).cmp(&known(y)).then(f(x).total_cmp(&f(y))).then(y.cmp(&x))
         };
         let admitted = queues[i]

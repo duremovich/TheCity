@@ -816,7 +816,7 @@ fn collector(world: &World, l: &Loan) -> Option<EntityId> {
                 if m == l.borrower || !crate::systems::contracts::free_adult(world, m) {
                     continue;
                 }
-                let key = (g.leader == Some(m), crate::systems::law::fighting(world, m), m);
+                let key = (g.leader == Some(m), crate::systems::combat::power(world, m), m);
                 let better = best.is_none_or(|b| (key.0, -key.1) < (b.0, -b.1));
                 if better {
                     best = Some(key);

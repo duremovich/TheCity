@@ -922,9 +922,13 @@ pub fn plan_of(world: &World, id: EntityId, verb: Verb) -> Result<(Plan, String)
             if !crate::systems::contracts::fixer_open(world, f) {
                 return no("shut");
             }
-            let best = world
-                .comp::<crate::components::Skills>(id)
-                .map_or(0.0, |s| s.fighting.max(s.stealth).max(s.hacking).max(s.persuasion).max(s.intimidation));
+            let best = world.comp::<crate::components::Skills>(id).map_or(0.0, |s| {
+                crate::systems::combat::skill_power(world, s)
+                    .max(s.stealth)
+                    .max(s.hacking)
+                    .max(s.persuasion)
+                    .max(s.intimidation)
+            });
             let min = world.config.fixers.gun_skill_min;
             if best < min {
                 return Err(format!("the fixer has no use for you (best skill {best:.2} < {min:.2})"));

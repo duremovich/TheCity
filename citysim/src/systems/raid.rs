@@ -915,7 +915,8 @@ pub fn fight_out_until(
         }
         // Named before the fight: a beaten robot is wrecked (despawned) in it.
         let (rn, dn) = (world.name_of(r), world.name_of(d));
-        let (_, loser, died) = law::resolve_fight_with(world, r, d, kill_mult);
+        let mods = law::FightMods { kill_mult, why: crate::systems::combat::Purpose::Raid, ..Default::default() };
+        let (_, loser, died) = law::resolve_fight_mods(world, r, d, mods);
         if died {
             t.deaths += 1;
         }
@@ -1237,7 +1238,7 @@ pub fn turned_join(world: &World, b: EntityId, gang: EntityId, raiders: &mut Vec
 
 /// `fighting + 0.25 × courage`: the brawl's pairing order.
 pub fn strength(world: &World, id: EntityId) -> f32 {
-    let s = law::fighting(world, id) + 0.25 * law::courage(world, id);
+    let s = crate::systems::combat::power(world, id) + 0.25 * law::courage(world, id);
     // Jobs & lives phase 3 (section 4): the side's tiers (a branch: 0 unarmed).
     let w = crate::systems::weapons::might(world, id);
     if w != 0.0 {

@@ -12,8 +12,8 @@ use rand::Rng;
 
 use citysim::systems::{demography, law, weapons};
 use citysim::{
-    Asset, AssetLoc, Brain, BuildingKind, Config, Crime, EntityId, EventKind, Gang, Household, Job, Kit, Personality,
-    Position, ProvKind, Provenance, Role, Skills, TilePos, Wallet, World,
+    Asset, AssetLoc, Brain, BuildingKind, Config, Crime, EntityId, EventKind, Gang, Household, Job, Kit, Position,
+    ProvKind, Provenance, Role, Skills, TilePos, Wallet, World,
 };
 
 fn on_world() -> World {
@@ -93,32 +93,22 @@ fn test_unarmed_fight_rolls_as_before() {
 }
 
 #[test]
-fn test_armed_fight_moves_p_win_by_weapon_w() {
+fn test_armed_fight_reads_the_weapon_kind() {
+    // The combat model C1 (docs/COMBAT.md § 4): a carried weapon fights as
+    // its kind (`[[weapon_kinds]]`, mapped at the spawn), its tier the quality.
     let mut w = on_world();
     let people = civilians(&w);
     let (a, b) = (people[0], people[1]);
-    for x in [a, b] {
-        w.comp_mut::<Skills>(x).expect("skills").fighting = 0.3;
-        w.comp_mut::<Personality>(x).expect("p").courage = 0.5;
-    }
-    let base = law::p_win_of(&w, a, b, 0.0, None);
-    assert!((base - 0.5).abs() < 1e-6, "an even pair: {base}");
     arm(&mut w, a, 2);
     assert_eq!(kit_weapon(&w, a), 2, "the Kit reads the carried tier");
-    let arms = weapons::fight_tiers(&w, a, b);
-    assert_eq!(arms, Some((2, 0)));
-    let armed = law::p_win_of(&w, a, b, 0.0, arms);
-    let want = 2.0 * w.config.weapons.weapon_w;
-    assert!((armed - base - want).abs() < 1e-6, "p_win {base} -> {armed}, want +{want}");
-    // The other way round: the defender's tier counts against the attacker.
-    let back = law::p_win_of(&w, b, a, 0.0, weapons::fight_tiers(&w, b, a));
-    assert!((base - back - want).abs() < 1e-6, "p_win {base} -> {back}");
-    // The loser's death chance × (1 + kill_w × the winner's tier).
-    let k = weapons::kill_mult(&w.config.weapons, 2);
-    assert!((k - (1.0 + 2.0 * w.config.weapons.kill_w)).abs() < 1e-6);
+    assert_eq!(weapons::fight_tiers(&w, a, b), Some((2, 0)));
+    let k = citysim::systems::combat::kind_of(&w, a);
+    assert!(k > 0 && k < w.config.weapon_kinds.len(), "an armed row: {k}");
+    assert_eq!(citysim::systems::combat::kind_of(&w, b), 0, "the bare hand");
     // Off, the same Kit reads unarmed.
     w.config.weapons.enabled = false;
     assert_eq!(weapons::fight_tiers(&w, a, b), None);
+    assert_eq!(citysim::systems::combat::kind_of(&w, a), 0);
 }
 
 #[test]
@@ -263,15 +253,15 @@ fn test_concealment_contest_at_each_tier() {
     let step = Config::load().weapons.conceal_step;
     // A bigger weapon is easier to notice, at every stealth.
     for stealth in [0.0f32, 0.5, 1.0] {
-        let p: Vec<f32> = (1..=3).map(|t| weapons::notice_p(stealth, 0, t, 1, step)).collect();
+        let p: Vec<f32> = (0..3).map(|t| weapons::notice_p(stealth, 0, t as f32, 1, step)).collect();
         assert!(p[0] < p[1] && p[1] < p[2], "stealth {stealth}: {p:?}");
     }
     // Stealth and a pack hide it; a guard's Eyes find it.
-    assert!(weapons::notice_p(1.0, 0, 2, 1, step) < weapons::notice_p(0.0, 0, 2, 1, step));
-    assert!(weapons::notice_p(0.0, 2, 2, 1, step) < weapons::notice_p(0.0, 0, 2, 1, step));
-    assert!(weapons::notice_p(0.0, 0, 2, 3, step) > weapons::notice_p(0.0, 0, 2, 1, step));
-    for t in 1..=3 {
-        let p = weapons::notice_p(0.5, 0, t, 1, step);
+    assert!(weapons::notice_p(1.0, 0, 1.0, 1, step) < weapons::notice_p(0.0, 0, 1.0, 1, step));
+    assert!(weapons::notice_p(0.0, 2, 1.0, 1, step) < weapons::notice_p(0.0, 0, 1.0, 1, step));
+    assert!(weapons::notice_p(0.0, 0, 1.0, 3, step) > weapons::notice_p(0.0, 0, 1.0, 1, step));
+    for t in 0..3 {
+        let p = weapons::notice_p(0.5, 0, t as f32, 1, step);
         assert!((0.05..=0.95).contains(&p), "tier {t}: {p}");
     }
 }
