@@ -186,8 +186,9 @@ back, a bouncer subdues.
 (a weapon), Take cover (the best tile within `cover_tiles`, § 6), Flee, Yield, and Help (drag the downed away, the
 existing Rescue).
 
-**The clock.** While the possessed body is in an engagement, cityview runs the sim at `[view] combat_speed`: the whole
-sim slows on one clock, so a 10 s beat plays in about a second. Space pauses the game, and normal speed comes back when
+**The clock.** While the possessed body is in an engagement, cityview steps it a beat every `[view] beat_s` between
+two ticks (C5; C4 ran the whole sim at `combat_speed` with the player's fight a beat a tick), so a 10 s beat plays in
+about a second. Space pauses the game, and normal speed comes back when
 the engagement ends. The view replays the beat log (a swing, a hit or a miss, the region, a dodge, a stagger, someone
 fleeing) as animation cues and as story-log lines.
 
@@ -524,6 +525,68 @@ These come later: ranged (§ 7, with addendum 24) and the blast (§ 8, with netr
   - (g) Cover is abstract and does nothing in a fist fight; Holster shows with bare hands.
   - (h) A non-reproducible start: possessed at the save tick or 19:00, the same seed put her in a different place each
     run (thread order). Possessing at 18:00 and walking to a fixed Bar made the scripts repeat.
+
+**C5 as built (2026-11-03, the feel pass; `OPEN-295`, `296`, `297`).**
+- **The player decides when to break.** A body the human drives (`Fighter.human`) never breaks on its nerve (P2's will
+  waivers again): under its break line it **shakes**, attack and evasion x (1 - `shake_attack` / `shake_evade` x how far
+  under, with the numbers), at least `shake_floor`, and the fight panel says so ("you're shaking: your nerve is gone
+  (blows x0.82, dodging x0.82); flee or yield when you choose"). It can still be knocked out, downed or killed. A duel
+  with the human runs to `human_max_beats` (30), not `max_beats`, before the lower morale gives way. NPCs keep their
+  breaks. The odds' mock plays the same rules.
+- **The clock: C4's deviation undone.** `[combat] human_beats_per_tick` is gone; every fight runs `beats_per_tick` (6) a
+  tick. While the possessed body is in a live engagement, cityview steps that engagement one beat every `[view] beat_s`
+  (1.0 s) between two ticks (`combat::beat`, `Live::stepper`: `step` leaves it alone; the tick's joiners at its first
+  beat, the orders, the beat, the end), then runs the tick at once. Orders land between beats; game time and outcomes
+  are an NPC's (a 20-beat fight is 4 game minutes, ~20 real seconds). `[view] combat_speed` is gone. Scripts gained
+  `wait SECS` (the sim runs on that long) and `body best brave|out`.
+- **Knockouts last** (`OPEN-295`). `Live::out` (not saved): a knocked-out body lies `ko_minutes` + `ko_head_minutes` by
+  its worst head wound; think and exec skip it (`think::held`: "knocked out"), a fight with it is over at once, it joins
+  nothing. A winner under `ko_rob_lawful` (no guard, no arrest, no bout) goes through its pockets (`combat::rob`: a
+  witnessed Theft, a robbed memory, an enemy edge). The player's `Verb::Rob` ("Go through X's pockets", within 2
+  tiles); a knocked-out body's menu is only that and Walk over. It comes to on its own: "X came to on the floor of
+  Bar#5956, knocked out by Y, 3c lighter (Y went through the pockets)". **A subdue stance goes for the knockout**: any
+  blow it lands puts the body down on `subdue_ko_p` x (1 + its fatigue) (bare fists land grazes; before it a subdue
+  fist fight was 22 beats of grazes). No passer-by robs a body yet (no theft path fits cheaply).
+- **No free yield** (`OPEN-296`): the break needs an exchange (a blow taken and a swing of its own, `struck`,
+  `swung`, carried from duel to duel) or the numbers against the body. The Attack row's odds against the timid stay
+  high (96-100 %): honest, they still run after one exchange.
+- **The fight on screen** (`OPEN-297`):
+  - A joiner in the building comes to the fight's storey and stands by the one it backs (sim); indoors the view stands
+    every body of the subject's fight round it at `[view] fight_ring_m`, facing it, always drawn (`Shared::fight`).
+  - Procedural poses on the existing rig (`play::Pose`, sim.rs): a swing lunges `lunge_m` at the struck and leans
+    `lunge_deg`, a Wound or worse staggers the struck back, over `lunge_s`; a knocked-out or downed body lies flat
+    (`Shared::down`), the player's stand-in too.
+  - The witnesses of one deed are one log line, counted up ("[Witness] 2 saw Solene Achebe commit Assault on Ilse
+    Kaneda"); the wounds list folds alike wounds ("body grazed x8").
+  - Take cover shows only with a gun in the fight; Holster only with a weapon in hand (the HUD's too).
+  - A flight whose refuge is the building it fled (or none) runs to a road tile `flee_tiles` from the door
+    (`GoTo(Picked)`), for NPCs too.
+- **Odds against a crowd**: the 0 % was honest (the whole fight); each Attack row now reads the duel with that foe and
+  the whole fight: "Attack Jasper Ferreira (the duel 40%; the fight 0%)" (`combat::duel_odds`); outside a fight, "Attack
+  Wilhelmina Haas (one on one 59%; 0.8 of theirs may jump in: 24%)".
+- `SAVE_VERSION` stays 132 (`Live` is not saved; the knockouts and the stepper with it).
+- **The numbers** (20k island, seed 42, 30 days, before -> after, one run each; printed, not tuned): Fight lines 7045 ->
+  6457; yields 44.8 % -> 39.6 %, flights 39.3 % -> 36.5 %, knockouts 14.8 % -> 22.8 % (1465 came to, 298 robbed while
+  out); fight deaths 78 -> 67; Murders 127 -> 116. A run without the subdue knockout and the exchange (the shake and the
+  KO state only): 6536 lines, 44.2 / 38.3 / 16.4 %, deaths 70, Murders 111.
+- **The play session** (20k day-21 save, Solene Achebe #27603, `--from 21:18:00`; `view/cityview/scripts/c5_flee.play`,
+  `c5_crowd.play`, `c5_subdue.play`, `c5_timid.play`):
+  - Bar#5957: "Attack Jasper Ferreira (one on one 86%; 2.6 of theirs may jump in: 4%)"; two friends jumped in. At beat 9
+    the panel read "you're shaking: your nerve is gone (blows x0.82, dodging x0.82)", "Attack Jasper Ferreira (the duel
+    93%; the fight 0%)". Flee at once: "you break and run", 13 beats over 3 min, out on the street at (519, 740) by
+    19:51 (`c5_flee`). Held on to beat 19 instead (`c5_crowd`): "you try to break away from Jasper Ferreira, and can't",
+    "Silvio Jarrow hits your head: wounded", "you are knocked out"; the HUD "held: knocked out: you come to in 33 min";
+    lying flat; "Solene Achebe came to on the floor of Bar#5957, knocked out by Jasper Ferreira" at 20:25.
+  - Bar#5956, subdue (`body best brave`): Ilse Kaneda knocked out in 9 beats, lying flat; her menu "Ilse Kaneda
+    (knocked out): Go through Ilse Kaneda's pockets"; "Solene Achebe went through Ilse Kaneda's pockets as they lay
+    there: 3c"; the guard in the bar arrested Solene at 19:46.
+  - Orrin Fletcher, 73 (96%): 10 beats, struck back ("Orrin Fletcher hits your right leg: grazed"), ran after a leg
+    Wound.
+- **What still reads wrong** (the next pass; `OPEN-298`, `299`, `300`): fists land mostly grazes and miss a lot (a 22-beat duel of grazes is
+  dull); once shaking against three the player hits almost nothing, so Flee is still the only live choice in a crowd
+  (the shake is honest, the fight is lost); the off-duty guard in Bar#5956 arrests every assault there within 1-3
+  minutes; a timid target's flight looks like a win at 100 %; the poses are a lean and a step (no swing clip); a
+  start a run apart still differs (C4's (h): the same script found other bodies in the bar).
 
 ## Decisions (Dylan, 2026-11-02)
 

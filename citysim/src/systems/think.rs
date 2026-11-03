@@ -96,6 +96,10 @@ pub fn held(world: &World, id: EntityId) -> Option<&'static str> {
     if crate::systems::combat::engaged(world, id) {
         return Some("in a fight");
     }
+    // C5 (`OPEN-295`): the knocked out lie still until they come to.
+    if crate::systems::combat::knocked_out(world, id) {
+        return Some("knocked out");
+    }
     if brain.emigrating {
         return Some("leaving the city");
     }

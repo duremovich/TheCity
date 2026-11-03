@@ -525,6 +525,16 @@ struct Fighter {
     cover: f32,
     /// C4: the human's order to break off (flee, yield), tried at its turn.
     want: Option<Want>,
+    /// C5: the human drives it: its morale break is waived (the human
+    /// decides when to break); under the line it shakes by `shake` (how far
+    /// under its break line, with the numbers).
+    human: bool,
+    shake: f32,
+    /// C5 (`OPEN-296`): a blow has landed on it in this engagement, and it
+    /// has swung (its turn's strike): the break needs that exchange, or the
+    /// numbers against it.
+    struck: bool,
+    swung: bool,
 }
 
 /// C3b: what a body carries from one duel of an engagement to the next
@@ -536,6 +546,8 @@ struct Carry {
     hurt_once: bool,
     sandy_left: u8,
     sandy_used: bool,
+    struck: bool,
+    swung: bool,
 }
 
 /// A working implant in `slot` and its effective tier.
@@ -722,6 +734,29 @@ fn fighter(world: &World, id: EntityId, stance: Stance, attacker: bool, bonus: f
         sandy_fired: false,
         cover: world.comp::<Position>(id).map_or(0.0, |p| cover_at(world, p.tile, p.building)),
         want: ord.and_then(|o| o.want),
+        human: !robot && crate::systems::player::drives(world, id),
+        shake: 0.0,
+        struck: false,
+        swung: false,
+    }
+}
+
+/// C5: a shaking body's attack or evasion multiplier (`w` x how far under
+/// its break line, at least `shake_floor`).
+fn shaken(c: &crate::config::CombatCfg, w: f32, shake: f32) -> f32 {
+    if shake <= 0.0 {
+        return 1.0;
+    }
+    (1.0 - w * shake).max(c.shake_floor)
+}
+
+/// C5: the duel's stand-off cap: `human_max_beats` with the human's body in
+/// it (the human ends a stand-off), else `max_beats`.
+fn beat_cap(c: &crate::config::CombatCfg, human: bool) -> u8 {
+    if human {
+        c.human_max_beats.max(c.max_beats).max(1)
+    } else {
+        c.max_beats.max(1)
     }
 }
 
@@ -881,7 +916,7 @@ fn duel_beats(
 ) -> bool {
     let lethal = mods.kill_p.is_some();
     let bout = mods.why == Purpose::Bout;
-    let max_beats = world.config.combat.max_beats.max(1);
+    let max_beats = beat_cap(&world.config.combat, d.f.iter().any(|x| x.human));
     let cap = world.config.combat.log_beats;
     let note = |log: &mut Option<&mut std::collections::VecDeque<BeatLog>>, tick, beat, by, on, blow| {
         if let Some(l) = log.as_deref_mut() {
@@ -958,9 +993,15 @@ fn duel_beats(
             }
             let c = &world.config.combat;
             // The break: flee, else yield, else cornered (fights on). C3b:
-            // morale reads the numbers.
+            // morale reads the numbers. C5: only once a blow has landed on
+            // it or the numbers are against it (no free yield, `OPEN-296`);
+            // the human's body never breaks on its nerve, it shakes.
             let morale = d.f[i].morale + c.numbers_morale * (heads[i] / heads[j]).ln();
-            if !d.f[i].cornered && morale < c.break_at + c.break_shift[d.f[i].stance.i()] {
+            let line = c.break_at + c.break_shift[d.f[i].stance.i()];
+            let pressed = (d.f[i].struck && d.f[i].swung) || heads[j] > heads[i];
+            if d.f[i].human {
+                d.f[i].shake = (line - morale).max(0.0);
+            } else if !d.f[i].cornered && pressed && morale < line {
                 if let Some(e) = break_off(world, &d.f, i, lethal, &mut d.dice) {
                     d.f[i].end = Some(e);
                     note(&mut log, world.tick, d.beat, d.f[i].id, d.f[j].id, Blow::Broke(e));
@@ -989,6 +1030,7 @@ fn duel_beats(
                     note(&mut log, world.tick, d.beat, d.f[j].id, d.f[i].id, Blow::Broke(e));
                 }
             }
+            d.f[i].swung = true;
             tire(&mut d.f[i], world.config.combat.tire_beat);
         }
         // C3b, numbers count: the rest of each side strike the other front
@@ -1152,8 +1194,12 @@ fn strike(
     // several in one beat (no floor under the numbers but none).
     tgt.faced = tgt.faced.saturating_add(1);
     let split = (1.0 - c.split_evade * f32::from(tgt.faced - 1)).max(0.0);
-    let attack = att.attack * (1.0 - c.tire_attack * att.fatigue);
-    let evade = (tgt.evasion + c.stance_evade[tgt.stance.i()]) * (1.0 - c.tire_evade * tgt.fatigue) * split;
+    // C5: a shaking body (the human's, under its break line) hits and dodges worse.
+    let attack = att.attack * (1.0 - c.tire_attack * att.fatigue) * shaken(&c, c.shake_attack, att.shake);
+    let evade = (tgt.evasion + c.stance_evade[tgt.stance.i()])
+        * (1.0 - c.tire_evade * tgt.fatigue)
+        * split
+        * shaken(&c, c.shake_evade, tgt.shake);
     let p = (c.hit_base + c.attack_w * attack + row.accuracy * att.quality + c.stance_attack[att.stance.i()]
         - c.evade_w * evade)
         .clamp(c.hit_min, c.hit_max);
@@ -1174,6 +1220,7 @@ fn strike(
         }
     }
     att.landed += 1;
+    tgt.struck = true;
     if row.family == WeaponFamily::Ranged {
         att.shots += 1;
     } else {
@@ -1259,6 +1306,11 @@ fn strike(
         // A knockout replaces a Grave wound where it can.
         sev = Severity::Wound;
         ko = true;
+    }
+    // C5: a subdue stance goes for the knockout: any blow landed puts the
+    // body down on `subdue_ko_p` x (1 + its fatigue).
+    if subdue && !ko {
+        ko = dice.roll(world) < c.subdue_ko_p * (1.0 + tgt.fatigue);
     }
     let mut dead = false;
     if sev == Severity::Grave && matches!(region, Region::Head | Region::Torso) && !subdue {
@@ -1428,6 +1480,10 @@ fn finish(
         FightOutcome { sides: [side(&f[0], ends[0]), side(&f[1], ends[1])], winner, loser, died, beats, ticks, crowd };
     let text = line(world, &out, notes);
     world.push_event(EventKind::Fight, &[a, b], text);
+    // C5 (`OPEN-295`): a knockout lasts; the winner may rob the body.
+    if end == End::KnockedOut && !died && !f[li].robot {
+        knock_out(world, loser, Some(winner), mods);
+    }
     // C3b: a robot beaten in the beats is wrecked (Parts at the door).
     if end == End::Wrecked {
         crate::systems::assets::wreck(world, loser, "wrecked in a fight");
@@ -2220,6 +2276,8 @@ pub struct Engagement {
     /// C4: everyone who was ever on a side (the view's replay; a loser
     /// leaves `sides`).
     pub seen: Vec<EntityId>,
+    /// C5: the tick whose joiners the view's stepped beats took ([`beat`]).
+    recruited: Option<Tick>,
 }
 
 impl Engagement {
@@ -2279,6 +2337,121 @@ pub struct Live {
     /// C4: a hunter who gave chase, and after whom (one "gave chase" line a
     /// chase).
     pub chased: std::collections::BTreeMap<EntityId, EntityId>,
+    /// C5: the body whose engagement the view steps a beat at a time inside
+    /// the tick ([`beat`]); `step` leaves that engagement alone.
+    pub stepper: Option<EntityId>,
+    /// C5 (`OPEN-295`): the knocked out, down and still until they come to.
+    pub out: std::collections::BTreeMap<EntityId, Out>,
+}
+
+/// C5: a knockout in progress: until when, who did it, what was taken.
+#[derive(Clone, Copy, Debug)]
+pub struct Out {
+    pub until: Tick,
+    pub by: Option<EntityId>,
+    pub robbed: i64,
+    pub robber: Option<EntityId>,
+}
+
+/// C5: is `id` knocked out (down and still, robbable)?
+pub fn knocked_out(world: &World, id: EntityId) -> bool {
+    !world.combat.out.is_empty() && world.combat.out.get(&id).is_some_and(|o| o.until > world.tick)
+}
+
+/// C5: the minutes `id` stays out: `ko_minutes` + `ko_head_minutes` by its
+/// worst head wound.
+fn ko_span(world: &World, id: EntityId) -> Tick {
+    let c = &world.config.combat;
+    let head = world
+        .comp::<Wounds>(id)
+        .and_then(|w| w.list.iter().filter(|x| x.region == Region::Head).map(|x| x.severity).max());
+    Tick::from(c.ko_minutes) + head.map_or(0, |s| Tick::from(c.ko_head_minutes[s.index()]))
+}
+
+/// C5: `id` knocked out by `by` (a fight's loser): down and still for
+/// [`ko_span`]; a winner who wants it goes through its pockets ([`rob`]).
+fn knock_out(world: &mut World, id: EntityId, by: Option<EntityId>, mods: &crate::systems::law::FightMods) {
+    if crate::systems::ages::is_protected(world, id) || !crate::systems::law::living(world, id) {
+        return;
+    }
+    let until = world.tick + ko_span(world, id);
+    world.abort_plan(id);
+    if let Some(b) = world.comp_mut::<Brain>(id) {
+        b.current_goal = None;
+    }
+    world.combat.out.insert(id, Out { until, by, robbed: 0, robber: None });
+    let Some(w) = by else { return };
+    let c = &world.config.combat;
+    let wants = !mods.arrest
+        && mods.why != Purpose::Bout
+        && !crate::systems::robots::is_robot(world, w)
+        && !crate::systems::law::is_guard(world, w)
+        && !crate::systems::player::drives(world, w)
+        && world.comp::<Personality>(w).is_some_and(|p| p.lawfulness < c.ko_rob_lawful);
+    if wants && crate::systems::law::living(world, w) {
+        rob(world, w, id);
+    }
+}
+
+/// C5: `robber` goes through the pockets of the knocked-out `victim`: its
+/// coins x `ko_rob_share` (a Theft, witnessed). Returns the coins taken.
+pub fn rob(world: &mut World, robber: EntityId, victim: EntityId) -> i64 {
+    let share = world.config.combat.ko_rob_share.clamp(0.0, 1.0);
+    let have = world.comp::<crate::components::Wallet>(victim).map_or(0, |w| w.coins.max(0));
+    let n = (have as f32 * share).floor() as i64;
+    let what = if n > 0 { format!("{n}c") } else { "nothing".to_string() };
+    let text =
+        format!("{} went through {}'s pockets as they lay there: {what}", world.name_of(robber), world.name_of(victim));
+    if n > 0 {
+        if let Some(w) = world.comp_mut::<crate::components::Wallet>(victim) {
+            w.coins -= n;
+        }
+        if let Some(w) = world.comp_mut::<crate::components::Wallet>(robber) {
+            w.coins += n;
+        }
+    }
+    if let Some(o) = world.combat.out.get_mut(&victim) {
+        o.robbed += n;
+        o.robber = Some(robber);
+    }
+    crate::systems::social::robbed_by(world, victim, robber);
+    world.remember(victim, MemoryKind::WasRobbed, Some(robber), 0.6, -0.6, false);
+    world.push_event(EventKind::Theft, &[robber, victim], text);
+    let tile = world.comp::<Position>(robber).map_or(Default::default(), |p| p.tile);
+    crate::systems::law::raise_crime_on(
+        world,
+        robber,
+        Some(victim),
+        Some(victim),
+        crate::components::Crime::Theft,
+        tile,
+    );
+    n
+}
+
+/// C5: the knocked out whose time is up come to (a line each).
+fn wake(world: &mut World) {
+    let now = world.tick;
+    let up: Vec<(EntityId, Out)> =
+        world.combat.out.iter().filter(|(_, o)| o.until <= now).map(|(&x, &o)| (x, o)).collect();
+    for (x, o) in up {
+        world.combat.out.remove(&x);
+        if !crate::systems::law::living(world, x) {
+            continue;
+        }
+        let place = match world.comp::<Position>(x).and_then(|p| p.building) {
+            Some(b) => format!("on the floor of {}", world.name_of(b)),
+            None => "in the street".to_string(),
+        };
+        let lost = match (o.robbed, o.robber) {
+            (n, Some(r)) if n > 0 => format!(", {n}c lighter ({} went through the pockets)", world.name_of(r)),
+            (_, Some(r)) => format!(", pockets turned out by {} (nothing in them)", world.name_of(r)),
+            _ => String::new(),
+        };
+        let by = o.by.map_or(String::new(), |b| format!(", knocked out by {}", world.name_of(b)));
+        let text = format!("{} came to {place}{by}{lost}", world.name_of(x));
+        world.push_event(EventKind::Fight, &[x], text);
+    }
 }
 
 /// Is `id` in a live engagement (it neither thinks nor acts)?
@@ -2346,6 +2519,7 @@ fn build(
         over: false,
         joined: 0,
         seen,
+        recruited: None,
     }
 }
 
@@ -2429,6 +2603,15 @@ fn recruit(world: &mut World, e: &mut Engagement, id: Option<u32>, coarse: bool)
         }
         let until = world.tick + Tick::from(c.join_cooldown_min);
         world.combat.joined.insert(x, until);
+        // C5 (`OPEN-297`): a joiner in the building comes to the fight's
+        // storey and stands by the one it backs (the view draws it there).
+        if building.is_some() {
+            let at = world.comp::<Position>(with).map(|p| (p.tile, p.floor));
+            if let (Some((t, fl)), Some(p)) = (at, world.comp_mut::<Position>(x)) {
+                p.tile = t;
+                p.floor = fl;
+            }
+        }
         if let Some(id) = id {
             world.combat.engaged.insert(x, id);
         }
@@ -2491,6 +2674,7 @@ impl JoinCtx {
             && crate::systems::demography::is_adult(world, x)
             && !crate::systems::ages::is_protected(world, x)
             && !crate::systems::wounded::is_down(world, x)
+            && !knocked_out(world, x)
             && !world.has::<crate::components::Sentence>(x)
             && !crate::systems::player::drives(world, x)
             && world.comp::<Brain>(x).is_some_and(|b| {
@@ -2605,6 +2789,15 @@ fn go_live(world: &mut World, e: &Engagement) -> bool {
 /// The duel's instant case (C1's `fight_inner`): a downed party finished
 /// where it lies. C3b: a robot fights in the beats.
 fn instant(world: &mut World, a: EntityId, b: EntityId) -> Option<Clash> {
+    // C5: a body knocked out puts up no fight (it lies there).
+    if !world.combat.out.is_empty() {
+        let (out_a, out_b) = (knocked_out(world, a), knocked_out(world, b));
+        if out_a != out_b {
+            let names = [world.name_of(a), world.name_of(b)];
+            let (winner, loser) = if out_b { (a, b) } else { (b, a) };
+            return Some(Clash { a, b, winner, loser, died: false, end: End::KnockedOut, fought: true, names });
+        }
+    }
     if !world.wounded.is_empty() {
         let (down_a, down_b) = (world.wounded.contains_key(&a), world.wounded.contains_key(&b));
         if down_a != down_b {
@@ -2684,6 +2877,8 @@ fn advance(world: &mut World, e: &mut Engagement, mut left: u32) -> bool {
                     f.hurt_once = c.hurt_once;
                     f.sandy_left = c.sandy_left;
                     f.sandy_armed &= !c.sandy_used;
+                    f.struck |= c.struck;
+                    f.swung |= c.swung;
                 }
             }
             e.duel = Some(d);
@@ -2748,6 +2943,8 @@ fn advance(world: &mut World, e: &mut Engagement, mut left: u32) -> bool {
                     hurt_once: f.hurt_once,
                     sandy_left: f.sandy_left,
                     sandy_used: used,
+                    struck: f.struck,
+                    swung: f.swung,
                 },
             );
         }
@@ -2860,7 +3057,19 @@ fn flee(world: &mut World, id: EntityId) {
         }
     }
     world.abort_plan(id);
-    let step = ActionInstance { action: crate::goap::ActionKind::FleeToHome, target: None, tile: None };
+    // C5 (`OPEN-297`): a flight whose refuge is the building it fled (or
+    // none) runs out to the street, `flee_tiles` from the door.
+    let here = world.comp::<Position>(id).and_then(|p| p.building);
+    let refuge = crate::systems::life::refuge(world, id).map(|(_, b)| b);
+    let out = here.filter(|&b| refuge.is_none_or(|r| r == b)).and_then(|b| street_tile(world, id, b));
+    let step = match out {
+        Some(t) => ActionInstance {
+            action: crate::goap::ActionKind::GoTo(crate::goap::LocationKey::Picked),
+            target: None,
+            tile: Some(t),
+        },
+        None => ActionInstance { action: crate::goap::ActionKind::FleeToHome, target: None, tile: None },
+    };
     let plan = crate::goap::Plan { goal: GoalKind::Flee, target: None, steps: vec![step], started_tick: world.tick };
     crate::systems::plan::install(world, id, plan);
     let now = world.tick;
@@ -2871,6 +3080,38 @@ fn flee(world: &mut World, id: EntityId) {
     crate::systems::ownership::jobs2_row(world).fled_runs += 1;
     let until = world.tick + Tick::from(world.config.combat.low_hours) * TICKS_PER_HOUR;
     world.combat.low.insert(id, until);
+}
+
+/// C5: a road tile about `flee_tiles` from `b`'s door (the ring's first
+/// road from a side keyed on the body): where a flight from inside runs.
+fn street_tile(world: &World, id: EntityId, b: EntityId) -> Option<crate::components::TilePos> {
+    use crate::components::{TileKind, TilePos};
+    let door = world.comp::<crate::components::Building>(b)?.door;
+    let r0 = i32::from(world.config.combat.flee_tiles.max(1));
+    let (w, h) = (world.map.w() as i32, world.map.h() as i32);
+    let spin = (key(id) % 4) as usize;
+    for r in r0..r0 + 8 {
+        let mut ring = Vec::with_capacity(8 * r as usize);
+        for k in -r..r {
+            ring.push((k, -r));
+            ring.push((r, k));
+            ring.push((-k, r));
+            ring.push((-r, -k));
+        }
+        let n = ring.len();
+        for i in 0..n {
+            let (dx, dy) = ring[(i + spin * n / 4) % n];
+            let (x, y) = (i32::from(door.x) + dx, i32::from(door.y) + dy);
+            if x < 0 || y < 0 || x >= w || y >= h {
+                continue;
+            }
+            let t = TilePos { x: x as u16, y: y as u16 };
+            if world.map.tile_at(t) == TileKind::Road {
+                return Some(t);
+            }
+        }
+    }
+    None
 }
 
 /// The engagement is over: its members free, its tail run; a held action's
@@ -2995,18 +3236,23 @@ pub fn step(world: &mut World) {
         let live = &mut world.combat;
         live.tired.retain(|_, x| x.0 - rest * now.saturating_sub(x.1) as f32 / TICKS_PER_HOUR as f32 > 0.0);
     }
+    // C5: the knocked out come to.
+    if !world.combat.out.is_empty() {
+        wake(world);
+    }
     if world.combat.engagements.is_empty() && world.combat.fleeing.is_empty() {
         return;
     }
     let n = u32::from(world.config.combat.beats_per_tick.max(1));
-    let human = u32::from(world.config.combat.human_beats_per_tick.max(1));
+    let stepper = world.combat.stepper;
     let ids: Vec<u32> = world.combat.engagements.keys().copied().collect();
     for id in ids {
+        // C5: the view steps the human's fight a beat at a time ([`beat`]),
+        // `beats_per_tick` a tick as every fight's.
+        if stepper.is_some_and(|p| world.combat.engaged.get(&p) == Some(&id)) {
+            continue;
+        }
         let Some(mut e) = world.combat.engagements.remove(&id) else { continue };
-        // C4: a fight the human is in runs `human_beats_per_tick` a tick, so
-        // an order lands at the next beat (the view runs it at combat_speed).
-        let driven = e.members().any(|x| crate::systems::player::drives(world, x));
-        let n = if driven { human } else { n };
         // C3b: joiners each tick a live fight runs.
         recruit(world, &mut e, Some(id), false);
         // C4: the human's orders, at the next beat.
@@ -3020,6 +3266,36 @@ pub fn step(world: &mut World) {
     for id in std::mem::take(&mut world.combat.fleeing) {
         flee(world, id);
     }
+}
+
+/// C5, the combat clock (§ 5): one beat of the live engagement `id` is in,
+/// stepped by the view between two ticks (`Live::stepper`; `step` leaves it
+/// alone): the tick's joiners at its first beat, the orders, the beat, the
+/// end. Returns the beat's log entries and whether the fight is over;
+/// `None`: not in one.
+pub fn beat(world: &mut World, id: EntityId) -> Option<(Vec<BeatLog>, bool)> {
+    let eid = *world.combat.engaged.get(&id)?;
+    let mut e = world.combat.engagements.remove(&eid)?;
+    let mut kept = std::mem::take(&mut e.log);
+    if e.recruited != Some(world.tick) {
+        e.recruited = Some(world.tick);
+        recruit(world, &mut e, Some(eid), false);
+    }
+    apply_orders(world, &mut e);
+    let over = advance(world, &mut e, 1);
+    let new: Vec<BeatLog> = e.log.drain(..).collect();
+    let cap = world.config.combat.log_beats.max(1);
+    kept.extend(new.iter().copied());
+    while kept.len() > cap {
+        kept.pop_front();
+    }
+    e.log = kept;
+    if over {
+        end(world, &mut e);
+    } else {
+        world.combat.engagements.insert(eid, e);
+    }
+    Some((new, over))
 }
 
 /// Every live engagement run to its end now (before a save: engagements
@@ -3452,6 +3728,29 @@ pub fn odds(world: &World, a: EntityId, b: EntityId) -> Odds {
     Odds { p: mock(world, &sides, salt), mine, theirs }
 }
 
+/// C5: the odds of the duel `a` would fight with `b` alone (as they stand
+/// in their fight, else fresh): the chain of duels' one link, beside the
+/// whole fight's [`odds`].
+pub fn duel_odds(world: &World, a: EntityId, b: EntityId) -> f32 {
+    let mods = crate::systems::law::FightMods::default();
+    let eng = world.combat.engaged.get(&a).and_then(|i| world.combat.engagements.get(i));
+    let live = |x: EntityId| {
+        eng.and_then(|e| e.duel.as_ref()).and_then(|d| d.f.iter().chain(d.aid.iter().flatten()).find(|f| f.id == x))
+    };
+    let mk = |x: EntityId, k: usize| -> Fighter {
+        let mut f = live(x).cloned().unwrap_or_else(|| {
+            let st = stance_for(world, x, k == 0, &mods);
+            fighter(world, x, st, k == 0, 0.0, false)
+        });
+        f.attacked |= k == 1;
+        f.end = None;
+        f
+    };
+    let sides = [vec![(mk(a, 0), 1.0)], vec![(mk(b, 1), 1.0)]];
+    let salt = key(a) ^ key(b).rotate_left(31) ^ (world.tick / TICKS_PER_HOUR);
+    mock(world, &sides, salt)
+}
+
 /// C4: `odds_trials` mock fights of `sides` (each member present on its
 /// chance): the share side 0 wins. The beat's rules (the break and its
 /// numbers, the stances, the split defence, the crowd's reach, the hit,
@@ -3460,7 +3759,6 @@ pub fn odds(world: &World, a: EntityId, b: EntityId) -> Odds {
 fn mock(world: &World, sides: &[Vec<(Fighter, f32)>; 2], salt: u64) -> f32 {
     let c = &world.config.combat;
     let trials = c.odds_trials.max(1);
-    let max_beats = c.max_beats.max(1);
     let reach = c.crowd_reach.max(1);
     let blood0 = |x: EntityId| world.comp::<Wounds>(x).map_or(1.0, |w| w.blood);
     let mut won = 0u32;
@@ -3483,6 +3781,7 @@ fn mock(world: &World, sides: &[Vec<(Fighter, f32)>; 2], salt: u64) -> f32 {
             let fb = s[1].iter().position(|m| m.f.end.is_none());
             let (Some(fa), Some(fb)) = (fa, fb) else { break usize::from(fb.is_some()) };
             let front = [fa, fb];
+            let max_beats = beat_cap(c, s[0][fa].f.human || s[1][fb].f.human);
             let mut beat = 0;
             loop {
                 if s[0][fa].f.end.is_some() || s[1][fb].f.end.is_some() {
@@ -3508,7 +3807,11 @@ fn mock(world: &World, sides: &[Vec<(Fighter, f32)>; 2], salt: u64) -> f32 {
                     }
                     let m = &s[i][front[i]].f;
                     let morale = m.morale + c.numbers_morale * (heads[i] / heads[j]).ln();
-                    if morale < c.break_at + c.break_shift[m.stance.i()] {
+                    let line = c.break_at + c.break_shift[m.stance.i()];
+                    // C5: the human's body shakes; the break needs a blow or the numbers
+                    if m.human {
+                        s[i][front[i]].f.shake = (line - morale).max(0.0);
+                    } else if ((m.struck && m.swung) || heads[j] > heads[i]) && morale < line {
                         let fx = crate::systems::health::effects(world, m.id);
                         let p = (c.flee_p + c.flee_evade_w * m.evasion) * fx.evade_mult;
                         let fled = !lame(world, m.id) && roll() < p;
@@ -3522,6 +3825,7 @@ fn mock(world: &World, sides: &[Vec<(Fighter, f32)>; 2], salt: u64) -> f32 {
                     }
                     let (att, tgt) = pair(&mut s, i, front[i], front[j]);
                     mock_strike(world, &mut att.f, tgt, &mut roll);
+                    att.f.swung = true;
                 }
                 for k in 0..2 {
                     let mut melee = 1;
@@ -3572,14 +3876,16 @@ fn mock_strike(world: &World, att: &mut Fighter, tgt: &mut Mock, roll: &mut impl
     t.attacked = true;
     t.faced = t.faced.saturating_add(1);
     let split = (1.0 - c.split_evade * f32::from(t.faced - 1)).max(0.0);
-    let evade = (t.evasion + c.stance_evade[t.stance.i()]) * split;
-    let p = (c.hit_base + c.attack_w * att.attack + row.accuracy * att.quality + c.stance_attack[att.stance.i()]
+    let evade = (t.evasion + c.stance_evade[t.stance.i()]) * split * shaken(c, c.shake_evade, t.shake);
+    let attack = att.attack * shaken(c, c.shake_attack, att.shake);
+    let p = (c.hit_base + c.attack_w * attack + row.accuracy * att.quality + c.stance_attack[att.stance.i()]
         - c.evade_w * evade)
         .clamp(c.hit_min, c.hit_max);
     let p = if row.family == WeaponFamily::Ranged { p * (1.0 - t.cover) } else { p };
     if roll() >= p {
         return;
     }
+    t.struck = true;
     att.morale += c.morale_landed;
     let region = Region::ALL[pick_weighted(roll(), &c.region_weights)];
     let q = att.quality.max(0.01);
@@ -3616,6 +3922,9 @@ fn mock_strike(world: &World, att: &mut Fighter, tgt: &mut Mock, roll: &mut impl
     if subdue && sev == Severity::Grave {
         sev = Severity::Wound;
         ko = true;
+    }
+    if subdue && !ko {
+        ko = roll() < c.subdue_ko_p * (1.0 + t.fatigue);
     }
     if sev == Severity::Grave && matches!(region, Region::Head | Region::Torso) && roll() < lethality * q {
         t.end = Some(End::Dead);
@@ -3677,10 +3986,17 @@ pub struct FightView {
     pub wounds: Vec<String>,
     /// The morale hints ("he's wavering", "they outnumber you").
     pub hints: Vec<String>,
+    /// C5: the player's body is under its break line (shaking).
+    pub shaking: bool,
+    /// C5: the fist fight's orders that do nothing are hidden: Take cover
+    /// (melee ignores cover: nobody on either side has a gun) and Holster
+    /// (bare hands).
+    pub guns: bool,
     /// The chrome to hand (a Sandevistan's charge, a Kerenzikov's dodges).
     pub chrome: Vec<String>,
-    /// An Attack row for each foe standing: (the foe, its name, the odds).
-    pub odds: Vec<(EntityId, String, f32)>,
+    /// An Attack row for each foe standing: (the foe, its name, the odds of
+    /// the duel with it alone, the whole fight's odds going for it).
+    pub odds: Vec<(EntityId, String, f32, f32)>,
     /// A Help row: the downed of the fight.
     pub downed: Vec<(EntityId, String)>,
     pub beats: u32,
@@ -3718,14 +4034,27 @@ pub fn wound_lines(world: &World, id: EntityId) -> Vec<String> {
     let c = &world.config.combat;
     let Some(w) = world.comp::<Wounds>(id) else { return vec![] };
     let now = world.tick;
-    let mut out: Vec<String> = w
-        .list
-        .iter()
-        .map(|x| {
-            let days = heal_at(x, c).saturating_sub(now) as f32 / TICKS_PER_DAY as f32;
-            let seen = if x.treated { "seen to" } else { "not seen to" };
-            let bleed = if x.bleeding { ", bleeding" } else { "" };
-            format!("{} {}{bleed}, {seen}: heals in {days:.1} days", x.region.label(), x.severity.label())
+    // C5: alike wounds folded ("body grazed x8"), the longest heal first, worst first
+    let mut rows: Vec<(Severity, String, f32, u32)> = Vec::new();
+    for x in &w.list {
+        let days = heal_at(x, c).saturating_sub(now) as f32 / TICKS_PER_DAY as f32;
+        let seen = if x.treated { "seen to" } else { "not seen to" };
+        let bleed = if x.bleeding { ", bleeding" } else { "" };
+        let what = format!("{} {}{bleed}, {seen}", x.region.label(), x.severity.label());
+        match rows.iter_mut().find(|r| r.1 == what) {
+            Some(r) => {
+                r.2 = r.2.max(days);
+                r.3 += 1;
+            }
+            None => rows.push((x.severity, what, days, 1)),
+        }
+    }
+    rows.sort_by_key(|a| std::cmp::Reverse(a.0));
+    let mut out: Vec<String> = rows
+        .into_iter()
+        .map(|(_, what, days, n)| {
+            let n = if n > 1 { format!(" x{n}") } else { String::new() };
+            format!("{what}{n}: heals in {days:.1} days")
         })
         .collect();
     for m in &w.marks {
@@ -3768,6 +4097,8 @@ pub fn fight_view(world: &World, id: EntityId) -> Option<FightView> {
         v.weapon.push_str(&format!(" (ready in {} beats)", f.ready_at - beat));
     }
     v.holstered = orders_of(world, id).is_some_and(|o| o.holster);
+    v.guns = e.duel.as_ref().is_some_and(|d| d.f.iter().chain(d.aid.iter().flatten()).any(|f| ranged(world, f.kind)))
+        || ranged(world, kind_of(world, id));
     v.cover =
         me.map_or_else(|| world.comp::<Position>(id).map_or(0.0, |p| cover_at(world, p.tile, p.building)), |f| f.cover);
     v.fatigue = me.map_or_else(|| fatigue_of(world, id), |f| f.fatigue);
@@ -3778,7 +4109,12 @@ pub fn fight_view(world: &World, id: EntityId) -> Option<FightView> {
     if let Some(f) = me {
         let m = margin(world, f, own, other);
         if m < 0.0 {
-            v.hints.push("your nerve is gone: you will break at your next turn".into());
+            // C5: the human's body never breaks on its nerve: it shakes.
+            let (a, e) = (shaken(c, c.shake_attack, -m), shaken(c, c.shake_evade, -m));
+            v.hints.push(format!(
+                "you're shaking: your nerve is gone (blows x{a:.2}, dodging x{e:.2}); flee or yield when you choose"
+            ));
+            v.shaking = true;
         } else if m < c.hint_waver {
             v.hints.push("you're wavering".into());
         }
@@ -3819,7 +4155,7 @@ pub fn fight_view(world: &World, id: EntityId) -> Option<FightView> {
     }
     for m in &v.sides[1 - mine] {
         let o = odds(world, id, m.id);
-        v.odds.push((m.id, m.name.clone(), o.p));
+        v.odds.push((m.id, m.name.clone(), duel_odds(world, id, m.id), o.p));
     }
     v.downed = e
         .seen

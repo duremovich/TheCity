@@ -103,6 +103,11 @@ pub struct Shared {
     pub news: Mutex<NewsPub>,
     /// C4: the last tick's beats of the fights in the ring, for the replay.
     pub beats: Mutex<BeatsPub>,
+    /// C5: the replay's procedural poses (play.rs `replay` writes, sim.rs draws), the bodies lying in the ring (knocked
+    /// out, downed) and the bodies of the subject's fight (always drawn, indoors too), by body key.
+    pub poses: Mutex<Vec<crate::play::Pose>>,
+    pub down: Mutex<Vec<u64>>,
+    pub fight: Mutex<Vec<u64>>,
 }
 
 /// C4: one tick's beats for the replay: each fight's blows in order (a beat's blows share its `group`, the beats
@@ -213,6 +218,8 @@ pub struct PlayerHud {
     pub stance: Option<citysim::systems::combat::Stance>,
     pub holstered: bool,
     pub chrome: Vec<String>,
+    /// C5: a weapon to hand (Holster shows only then)
+    pub armed: bool,
 }
 
 impl Shared {
@@ -323,6 +330,9 @@ impl Shared {
             menu: Mutex::new(None),
             news: Mutex::new(NewsPub::default()),
             beats: Mutex::new(BeatsPub::default()),
+            poses: Mutex::new(Vec::new()),
+            down: Mutex::new(Vec::new()),
+            fight: Mutex::new(Vec::new()),
         }
     }
 }
@@ -408,11 +418,17 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
     let mut last_tile = view::subject_tile(&world, subject);
     // C4: a tick's beats were published (its frame goes with them)
     let mut shown_beats = false;
+    // C5, the combat clock: the beats of the subject's fight stepped since the last tick, and the log entries already
+    // told (a tick's `last_beats` repeats them)
+    let mut stepped = 0u8;
+    let mut told: Vec<citysim::systems::combat::BeatLog> = Vec::new();
     loop {
         // M18 P1: possessed at --from (the city pre-run to it); the render thread's orders, between two ticks
         if a.possess && !possessed && world.tick >= from {
             possessed = true;
             world.push_command(citysim::PlayerCommand::Possess(subject, true));
+            // C5: the view steps the subject's fight a beat at a time (`combat::beat`); the tick leaves it alone
+            world.combat.stepper = Some(subject);
             eprintln!("cityview: tick {} possess {}", world.tick, who(&world, subject));
         }
         let cmds = std::mem::take(&mut *sh.cmds.lock().unwrap());
@@ -508,9 +524,14 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
             std::thread::sleep(Duration::from_millis(5));
             continue;
         }
-        // C4, the combat clock: the possessed body in a live fight runs the whole sim at `[view] combat_speed`, under
-        // a script's hold too (the hold still stops it)
+        // C5, the combat clock: the possessed body in a live fight has its engagement stepped a beat every `[view]
+        // beat_s` inside the tick (`combat::beat`, orders landing between beats), `beats_per_tick` of them, then the
+        // rest of the tick runs at once: the fight's game time is an NPC's. Under a script's hold too (the hold still
+        // stops it).
         let fighting = possessed && citysim::systems::combat::engaged(&world, subject);
+        if !fighting && stepped == 0 {
+            told.clear();
+        }
         // M18 P1: Space stops the clock (paced play only; a bench's run to its hold goes on)
         if (hold == u64::MAX || fighting) && world.tick >= from && sh.paused.load(Ordering::Relaxed) {
             std::thread::sleep(Duration::from_millis(20));
@@ -518,9 +539,33 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
             continue;
         }
         // paced: free running past --from; flat out to --from and to a bench's hold
-        let paced = (hold == u64::MAX || fighting) && world.tick >= from;
-        let tick_rate = if fighting { cfg.combat_speed.max(1e-3) } else { rate * sh.speed().max(1e-6) };
-        if paced && rate > 0.0 {
+        let paced = (hold == u64::MAX || fighting || stepped > 0) && world.tick >= from;
+        let beat_s = cfg.beat_s.max(0.05);
+        let bpt = world.config.combat.beats_per_tick.max(1);
+        let tick_rate = if fighting || stepped > 0 { 1.0 / beat_s } else { rate * sh.speed().max(1e-6) };
+        let mut beat_now: Option<Vec<citysim::systems::combat::BeatLog>> = None;
+        if fighting && stepped < bpt {
+            let now = Instant::now();
+            // a beat at most `beat_s` off (a flat-out stretch before the fight leaves `next_at` anywhere)
+            next_at = next_at.min(now + Duration::from_secs_f64(beat_s));
+            if now < next_at {
+                std::thread::sleep((next_at - now).min(Duration::from_millis(20)));
+                continue;
+            }
+            next_at = next_at.max(now) + Duration::from_secs_f64(beat_s);
+            if let Some((logs, over)) = citysim::systems::combat::beat(&mut world, subject) {
+                stepped = if over { bpt } else { stepped + 1 };
+                beat_now = Some(logs);
+            }
+        } else if stepped > 0 {
+            // the stepped beats' tick: after the last beat's second, at once
+            let now = Instant::now();
+            next_at = next_at.min(now + Duration::from_secs_f64(beat_s));
+            if now < next_at {
+                std::thread::sleep((next_at - now).min(Duration::from_millis(20)));
+                continue;
+            }
+        } else if paced && rate > 0.0 {
             // V1: the wait in slices (a tick is a real minute walk-matched), so a reload is seen between them
             let now = Instant::now();
             if now < next_at {
@@ -542,8 +587,12 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         let ring = view::ring_about(at, cfg.ring_half_tiles, w, h);
         world.set_view(Some(ring));
         let t_tick = Instant::now();
-        citysim::tick(&mut world);
-        crate::lights::log_crossings(&mut world, subject);
+        let stepping = beat_now.is_some();
+        if !stepping {
+            citysim::tick(&mut world);
+            crate::lights::log_crossings(&mut world, subject);
+            stepped = 0;
+        }
         // M18 P2: the possessed body's events to the log (the play session's record: a hire, a theft, an arrest)
         if possessed {
             let n = news.get_or_insert_with(|| News::new(&world, subject));
@@ -557,8 +606,22 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                     n.block_event(&world, e);
                 }
             }
-            // C4: the tick's beats: the player's fight's to the story log, every fight's in the ring to the replay
-            let beats = citysim::systems::combat::last_beats(&world);
+            // C4: the tick's beats: the player's fight's to the story log, every fight's in the ring to the replay. C5:
+            // a stepped beat's own entries at once; the tick's repeat of them dropped
+            let mut beats = match beat_now.take() {
+                Some(logs) => vec![(vec![subject], logs)],
+                None => citysim::systems::combat::last_beats(&world),
+            };
+            for (seen, log) in beats.iter_mut() {
+                if seen.contains(&subject) {
+                    if stepping {
+                        told.extend(log.iter().copied());
+                    } else {
+                        log.retain(|b| !told.contains(b));
+                    }
+                }
+            }
+            beats.retain(|(_, log)| !log.is_empty());
             if !beats.is_empty() {
                 let ring_r = i32::from(cfg.ring_half_tiles);
                 let me = view::subject_tile(&world, subject);
@@ -571,8 +634,9 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                         _ => false,
                     }
                 };
-                let bpt = f64::from(world.config.combat.beats_per_tick.max(1));
-                let beat_s = ((1.0 / tick_rate) / bpt).min(1.5) as f32;
+                // C5: another fight's tick of beats plays a beat a `beat_s` beside the subject's stepped one
+                let beat_s =
+                    if fighting || stepped > 0 || stepping { beat_s as f32 } else { ((1.0 / tick_rate) / f64::from(bpt)).min(1.5) as f32 };
                 let mut out = Vec::new();
                 for (seen, log) in &beats {
                     if !seen.iter().any(|&x| x == subject || in_ring(x)) {
@@ -614,12 +678,14 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
             }
         }
         last_event = world.events.back().map_or(last_event, |e| e.id);
-        acc = (acc.0 + 1, acc.1 + t_tick.elapsed().as_secs_f64());
+        if !stepping {
+            acc = (acc.0 + 1, acc.1 + t_tick.elapsed().as_secs_f64());
+        }
         sh.tick.store(world.tick, Ordering::Relaxed);
         // publish every paced tick; flat out, only the two ticks before the hold (or --from) the lerp needs (C4: and
         // every tick with beats of a fight in the ring)
         let target = if hold == u64::MAX { from } else { hold };
-        if paced || std::mem::take(&mut shown_beats) || world.tick + 1 >= target {
+        if paced || stepping || std::mem::take(&mut shown_beats) || world.tick + 1 >= target {
             let at = view::subject_tile(&world, subject).unwrap_or(at);
             let ring = view::ring_about(at, cfg.ring_half_tiles, w, h);
             let frame = view::snapshot_many_cached(&world, &[ring], Some(&mut ways)).pop().expect("one ring, one frame");
@@ -679,7 +745,7 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                     );
                 }
             }
-            if !paced {
+            if !paced && !stepping {
                 let (n, secs) = acc;
                 let tps = n as f64 / secs.max(1e-9);
                 eprintln!(
@@ -702,11 +768,31 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                 }
                 *sh.player.lock().unwrap() = Some(hud);
             }
+            // C5: who lies in the ring (knocked out, downed) and who is in the subject's fight
+            let key = |e: EntityId| u64::from(e.index) | (u64::from(e.generation) << 32);
+            let down: Vec<u64> = frame
+                .agents
+                .iter()
+                .map(|a| a.id)
+                .filter(|&x| citysim::systems::combat::knocked_out(&world, x) || citysim::systems::wounded::is_down(&world, x))
+                .map(key)
+                .collect();
+            *sh.down.lock().unwrap() = down;
+            let fight: Vec<u64> = world
+                .combat
+                .engaged
+                .get(&subject)
+                .and_then(|i| world.combat.engagements.get(i))
+                .map(|e| e.seen.iter().copied().map(key).collect())
+                .unwrap_or_default();
+            *sh.fight.lock().unwrap() = fight;
             let p = Arc::new(Published { frame, subject, caption, at: Instant::now(), seq });
             let mut s = sh.slots.lock().unwrap();
             s.prev = s.latest.take();
             s.latest = Some(p);
-            next_at = next_at.max(Instant::now());
+            if !stepping {
+                next_at = next_at.max(Instant::now());
+            }
         }
     }
 }
@@ -732,14 +818,26 @@ fn best_body(world: &World, me: EntityId, how: &str) -> Option<EntityId> {
         if !near || citysim::systems::wounded::is_down(world, x) || world.has::<citysim::components::Sentence>(x) {
             continue;
         }
+        // C5: `out`: a body knocked out at hand (its menu: Go through the pockets)
+        if how == "out" {
+            if citysim::systems::combat::knocked_out(world, x) {
+                eprintln!("best out: {} #{}", world.name_of(x), x.index);
+                return Some(x);
+            }
+            continue;
+        }
         rows.push((x, citysim::systems::combat::odds(world, me, x)));
     }
-    let key = |o: &citysim::systems::combat::Odds| match how {
+    // C5: `brave`: alone (no likely joiners), the odds at least even, the most courage (one who stands and is beaten)
+    let courage = |x: EntityId| citysim::systems::law::courage(world, x);
+    let key = |x: EntityId, o: &citysim::systems::combat::Odds| match how {
         "weak" => o.p,
         "strong" => -o.p,
+        "brave" if o.p >= 0.5 && o.theirs < 1.2 => courage(x),
+        "brave" => -1.0,
         _ => o.theirs - 0.5 * o.p,
     };
-    rows.sort_by(|a, b| key(&b.1).total_cmp(&key(&a.1)));
+    rows.sort_by(|a, b| key(b.0, &b.1).total_cmp(&key(a.0, &a.1)));
     for (x, o) in rows.iter().take(8) {
         eprintln!("best {how}: {} #{} odds {:.0}% theirs {:.2}", world.name_of(*x), x.index, o.p * 100.0, o.theirs);
     }
@@ -787,6 +885,7 @@ fn player_hud(world: &World, id: EntityId) -> PlayerHud {
         wounds: citysim::systems::combat::wounds_view(world, id),
         stance: citysim::systems::combat::stance_pref(world, id),
         holstered: citysim::systems::combat::holstered(world, id),
+        armed: citysim::systems::combat::kind_of(world, id) > 0,
         chrome: citysim::systems::combat::chrome_lines(world, id),
     }
 }
@@ -800,6 +899,11 @@ fn held_line(world: &World, id: EntityId) -> Option<String> {
             let left = s.until_tick.saturating_sub(world.tick);
             let (d, h) = (left / citysim::TICKS_PER_DAY, (left % citysim::TICKS_PER_DAY) / 60);
             format!("{why} ({:?}): {d} days {h} h left", s.crime)
+        }
+        // C5: knocked out, the minutes to coming to
+        None if citysim::systems::combat::knocked_out(world, id) => {
+            let left = world.combat.out.get(&id).map_or(0, |o| o.until.saturating_sub(world.tick));
+            format!("{why}: you come to in {left} min")
         }
         None => why.to_string(),
     })
@@ -905,6 +1009,8 @@ struct News {
     dead_paused: bool,
     /// The last seq sent to the render thread.
     sent: u64,
+    /// C5 (`OPEN-297`): the witnesses of one deed folded into one log line: (the tick, the deed, how many, the line).
+    witness: Option<(u64, String, u32, String)>,
 }
 
 fn stamp(tick: u64) -> String {
@@ -929,6 +1035,7 @@ impl News {
             word_at: 0,
             dead_paused: false,
             sent: u64::MAX,
+            witness: None,
         };
         n.fill(world, &k);
         n
@@ -952,6 +1059,27 @@ impl News {
             return;
         }
         let important = !matches!(e.kind, K::PlayerAction | K::PlayerActionFailed);
+        // C5: a flood of witnesses to one deed is one line ("12 saw Solene Achebe commit Assault on ..."), counted up
+        if e.kind == K::Witness
+            && let Some((_, deed)) = e.text.split_once(" saw ")
+        {
+            if let Some((t, d, n, last)) = self.witness.as_mut()
+                && *t == e.tick
+                && d == deed
+                && let Some(l) = self.pubd.log.iter_mut().rev().take(60).find(|l| l.1 == *last)
+            {
+                *n += 1;
+                l.1 = format!("{} [Witness] {n} saw {deed}", stamp(e.tick));
+                *last = l.1.clone();
+                self.pubd.seq += 1;
+                return;
+            }
+            let line = format!("{} [Witness] 1 saw {deed} ({})", stamp(e.tick), e.text.split(" saw ").next().unwrap_or(""));
+            self.witness = Some((e.tick, deed.to_string(), 1, line.clone()));
+            self.pubd.log.push((true, line));
+            self.pubd.seq += 1;
+            return;
+        }
         let line = format!("[{:?}] {}", e.kind, e.text);
         let cap = world.config.view.news_log_lines.max(1);
         self.pubd.log.push((important, format!("{} {line}", stamp(e.tick))));

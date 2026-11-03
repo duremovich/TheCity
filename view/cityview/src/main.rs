@@ -505,6 +505,8 @@ fn main() {
         squad: args.squad,
         scripted: false,
         light: std::env::var("CV_NO_PLAYER_LIGHT").is_err(),
+        tilt: Quat::IDENTITY,
+        nudge: Vec3::ZERO,
     })
     .insert_resource(Cutaway::new(
         CutSettings {

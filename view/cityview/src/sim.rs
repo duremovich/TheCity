@@ -893,6 +893,11 @@ pub fn update_sim(
     });
     let mut people = vec![];
     let mut subject_body = None;
+    // C5: the bodies lying (knocked out, downed), the subject's fight (always drawn), the replay's poses
+    let (down, fight, poses) = match sim.live.as_ref() {
+        Some(sh) => (sh.down.lock().unwrap().clone(), sh.fight.lock().unwrap().clone(), sh.poses.lock().unwrap().clone()),
+        None => (vec![], vec![], vec![]),
+    };
     // V4: the subject's lift car (its place, z, lot)
     let mut cab: Option<(Vec2, f32, Option<crate::lots::Placed>)> = None;
     let (mut hidden_in, mut deck_miss, mut spread_n) = (0usize, 0usize, 0usize);
@@ -922,6 +927,9 @@ pub fn update_sim(
             age: a.age,
             dress: a.dress,
             gang: a.gang,
+            lean: 0.0,
+            nudge: Vec2::ZERO,
+            lying: down.contains(&a.id),
         };
         let is_subject = Some(a.id) == subject;
         if is_subject {
@@ -933,6 +941,14 @@ pub fn update_sim(
             let f = floor_of(a);
             let (mut p, z, mut yaw) = match (&subj, is_subject) {
                 (Some(s), true) => (s.2, s.3, yaw),
+                // C5 (`OPEN-297`): a body in the subject's fight is always drawn (a joiner on another storey too)
+                (Some(s), false) if s.0.is_some() && s.0 == a.b && fight.contains(&a.id) => {
+                    // round the subject at `fight_ring_m`, a place fixed per id, facing it
+                    let ang = (unit2(a.id).0 + 0.5) * std::f32::consts::TAU;
+                    let p = s.2 + Vec2::new(ang.cos(), ang.sin()) * sim.cfg.fight_ring_m;
+                    let d = s.2 - p;
+                    (p, s.3, -d.x.atan2(d.y))
+                }
                 (Some(s), false) if s.0.is_some() && s.0 == a.b && f.round() == s.1 => {
                     let (p, z, _) = sim.indoor_place(a, f, false, &stream);
                     if !opened(p) {
@@ -1149,6 +1165,9 @@ pub fn update_sim(
                     age: look.map_or(30, |a| a.age),
                     dress: look.map_or(1, |a| a.dress),
                     gang: look.is_some_and(|a| a.gang),
+                    lean: 0.0,
+                    nudge: Vec2::ZERO,
+                    lying: false,
                 };
                 riders_drawn += 1;
                 if Some(id) == subject {
@@ -1192,6 +1211,47 @@ pub fn update_sim(
         }
         let mesh = sim.boxes[v.ride as usize].clone();
         place(&mut commands, &mut sim, (1, v.id), mesh, mat, at_yaw(bv(p.x, p.y, z), yaw));
+    }
+    // C5: the replay's poses: a lunge at the struck, a stagger away from the striker (and the striker faces its mark)
+    if !poses.is_empty() {
+        let now = std::time::Instant::now();
+        let (dur, reach, deg) = (sim.cfg.lunge_s.max(0.05), sim.cfg.lunge_m, sim.cfg.lunge_deg.to_radians());
+        let at_of = |k: u64, people: &Vec<crate::people::BodyDraw>, sb: &Option<crate::people::BodyDraw>| {
+            sb.as_ref().filter(|b| b.id == k).or_else(|| people.iter().find(|b| b.id == k)).map(|b| b.at)
+        };
+        for x in &poses {
+            if now < x.at {
+                continue;
+            }
+            let u = (now - x.at).as_secs_f32() / dur;
+            if u >= 1.0 {
+                continue;
+            }
+            let (Some(me), Some(them)) = (at_of(x.key, &people, &subject_body), at_of(x.toward, &people, &subject_body)) else { continue };
+            let d = (them - me).truncate();
+            if d.length_squared() < 1e-6 {
+                continue;
+            }
+            let dir = d.normalize();
+            let k = (u * std::f32::consts::PI).sin();
+            let b = if subject_body.as_ref().is_some_and(|b| b.id == x.key) {
+                subject_body.as_mut()
+            } else {
+                people.iter_mut().find(|b| b.id == x.key)
+            };
+            let Some(b) = b else { continue };
+            if b.lying {
+                continue;
+            }
+            if x.lunge {
+                b.nudge = dir * reach * k;
+                b.lean = deg * k;
+                b.yaw = -dir.x.atan2(dir.y);
+            } else {
+                b.nudge = -dir * reach * 0.8 * k;
+                b.lean = -deg * 0.8 * k;
+            }
+        }
     }
     sim.people = people;
     sim.subject_body = subject_body;
@@ -1323,6 +1383,18 @@ pub fn follow_subject(sim: Res<Sim>, mut player: ResMut<crate::occ::Player>) {
         player.pos = p;
         player.facing = yaw;
         player.indoors = sim.subject_indoors;
+        // C5: the subject's pose (a lunge, a stagger, lying knocked out)
+        match sim.subject_body.as_ref() {
+            Some(b) => {
+                player.tilt = b.tilt();
+                player.nudge = b.feet() - b.at;
+                player.facing = b.yaw;
+            }
+            None => {
+                player.tilt = Quat::IDENTITY;
+                player.nudge = Vec3::ZERO;
+            }
+        }
     } else {
         player.indoors = None;
     }

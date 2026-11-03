@@ -224,6 +224,10 @@ pub fn run(world: &mut World) {
         if !world.combat.engaged.is_empty() && world.combat.engaged.contains_key(&id) {
             continue;
         }
+        // C5: the knocked out lie still.
+        if crate::systems::combat::knocked_out(world, id) {
+            continue;
+        }
         // The island pass phase 6: a rider whose plan ended between two
         // stops rides on to the next one (`motion::alight`); he acts there.
         if !world.transit.held.is_empty() && world.transit.held.contains(&id) {

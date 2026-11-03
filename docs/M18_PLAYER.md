@@ -169,6 +169,10 @@ Attack, Draw/Holster, Take cover, Flee, Yield, Help), the player's fight a beat 
 second), the beat replay as words over the bodies and story-log lines, the fight panel (sides, stances, odds, morale
 hints, fatigue, chrome) and the wounds panel (days to heal, the price and where; Get patched up); the Attack row shows
 its odds. Its play sessions are `view/cityview/scripts/c4_outnumbered.play` and `c4_subdue.play` (`--from 21:18:00`).
+**C5 the feel pass** (2026-11-03, `COMBAT.md` "C5 as built"): the player's fight is stepped a beat every `[view] beat_s`
+between ticks at `beats_per_tick` (C4's `combat_speed` and `human_beats_per_tick` gone); the player's body shakes rather
+than breaks; knockouts last and can be robbed (`Verb::Rob`); the sessions are `c5_crowd.play`, `c5_subdue.play`,
+`c5_timid.play`.
 
 ## P5 start and loop
 
