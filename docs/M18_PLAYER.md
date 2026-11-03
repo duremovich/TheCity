@@ -164,6 +164,11 @@ the gap between paid sightings waits its stakeout out (`contracts::locate_waits`
 
 **The combat model** (`OPEN-179`) is considered after P4 (decision 5): if the slice's fights read as one dice roll,
 it becomes the phase after P4; if not, it waits. **Decided 2026-11-02:** they did; `docs/COMBAT.md` (addendum 26), C1-C4 before P5.
+**C4 the player** (2026-11-03, `COMBAT.md` "C4 as built"): the fight orders as `PlayerCommand::Fight` (four stances,
+Attack, Draw/Holster, Take cover, Flee, Yield, Help), the player's fight a beat a tick at `[view] combat_speed` (a beat a
+second), the beat replay as words over the bodies and story-log lines, the fight panel (sides, stances, odds, morale
+hints, fatigue, chrome) and the wounds panel (days to heal, the price and where; Get patched up); the Attack row shows
+its odds. Its play sessions are `view/cityview/scripts/c4_outnumbered.play` and `c4_subdue.play` (`--from 21:18:00`).
 
 ## P5 start and loop
 

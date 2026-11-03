@@ -1,0 +1,20 @@
+21:18:00 dismiss;
+21:18:01 zoom 24;
+21:18:01 order stance subdue;
+21:18:01 bld 5956;
+21:18:01 await;
+21:18:02 pick Go in (Bar#5956);
+21:19:39 body #26757;
+21:19:39 await;
+21:19:40 shot f01_odds;
+21:19:40 pick Attack;
+21:19:41 shot f02;
+21:19:42 shot f03;
+21:19:43 shot f04;
+21:19:44 shot f05;
+21:19:45 shot f06;
+21:19:46 shot f07;
+21:19:48 shot f08;
+21:19:52 shot f09;
+21:20:00 shot f10;
+21:20:01 quit

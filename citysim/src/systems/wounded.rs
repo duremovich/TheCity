@@ -498,6 +498,28 @@ pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
     Some(Plan { goal: crate::components::GoalKind::Rescue, target: Some(w), steps, started_tick: world.tick })
 }
 
+/// C4, Help (the player's order): `id` drags the downed `w` clear to its
+/// Clinic (the Rescue's steps, `id` the rescuer); `None` when `w` is not
+/// down, stable, taken by another rescuer, or has no Clinic.
+pub fn plan_for(world: &mut World, id: EntityId, w: EntityId) -> Option<Plan> {
+    let rec = world.wounded.get(&w)?;
+    if rec.stable || rec.rescuer.is_some_and(|x| x != id) || id == w {
+        return None;
+    }
+    let clinic = rec.clinic?;
+    if let Some(x) = world.wounded.get_mut(&w) {
+        x.rescuer = Some(id);
+    }
+    let step = |action, target| crate::components::ActionInstance { action, target, tile: None };
+    let steps = vec![
+        step(ActionKind::GoTo(LocationKey::Victim), Some(w)),
+        step(ActionKind::CarryWounded, Some(w)),
+        step(ActionKind::GoTo(LocationKey::Clinic), Some(clinic)),
+        step(ActionKind::Stabilise, Some(clinic)),
+    ];
+    Some(Plan { goal: crate::components::GoalKind::Rescue, target: Some(w), steps, started_tick: world.tick })
+}
+
 /// A Ripperdoc on `clinic`'s staff (plan deviation: on call; the spec's
 /// "inside" left every night's downed to bleed out at a shut door).
 fn doc_in(world: &World, clinic: EntityId) -> bool {

@@ -3863,7 +3863,8 @@ fence_frac = 0.4                   # the fence pays this of an item's value (int
 max_beats = 10                     # beats a fight runs at most (~10 s each); then the lower morale gives way
 beats_per_tick = 6                 # C3a: a live fight (every party Full) runs this many beats a tick (combat::step, after exec)
 reach_tiles = 4                    # C3a: a live duel's two within this (or one building) at its start: one moved out has fled
-log_beats = 24                     # C3a: the engagement's ring log of beats (the view's replay in C4)
+log_beats = 96                     # C3a: the engagement's ring log of beats (C4: the view replays a tick's; a crowd's tick
+                                   # is up to ~50 blows)
 hit_base = 0.4                     # p_hit = hit_base + attack_w x skill + accuracy x quality + the stance's attack ...
 attack_w = 0.6                     # ... (the skill: melee + Kit fighting, or shooting with a ranged kind; x the arms' wounds) ...
 evade_w = 0.5                      # ... - evade_w x (evasion + reflex_evade x Kit reflex, x the legs' wounds, + the stance's evade) ...
@@ -3977,6 +3978,19 @@ robot_kinds = ["club", "club", "pistol"]   # the [[weapon_kinds]] row a robot fi
 bout_stop = 1                      # the pit's referee stops a bout at its first wound of this severity (1 a Wound)
 treat_urgency_day = 0.15           # the Treat goal's hurt term + this a day the worst wound goes unseen (to 1)
 back_room_max = 1                  # the back room sees to wounds up to this severity; a Grave needs a Clinic at its price
+# C4 (docs/COMBAT.md § 5-6, "C4 as built"): the player's fight; abstract cover until the interiors (OPEN-285).
+cover_open = 0.0                   # cover (combat::cover_at; a ranged hit's chance x (1 - cover); melee ignores it): the open
+cover_door = 0.3                   # street and a road; a doorway; a street tile, for each of its sides against a wall (an
+cover_wall = 0.15                  # alley, a wall's foot); inside a building; at most cover_max. Take cover moves to the best
+cover_inside = 0.3                 # tile within cover_tiles (inside a building: no move, the interior's cover)
+cover_max = 0.5
+cover_tiles = 2
+human_beats_per_tick = 1           # a live fight with the body the human drives runs this many beats a tick (not
+                                   # beats_per_tick's 6: six beats at once ended most fights before an order could land);
+                                   # the view runs it at [view] combat_speed, a beat a second
+odds_trials = 200                  # the odds on an Attack row: this many mock fights (combat::odds: the beat's rules, the
+                                   # likely joiners at their join chance, no world writes)
+hint_waver = 0.12                  # the fight HUD says a body is wavering this close above its break line (morale + numbers)
 
 # C1 (docs/COMBAT.md § 4): the weapon kinds. Row 0 is the bare hand. The tier stays as quality ([combat] quality). The
 # stock maps by tier and owner class (law: guards, the Precinct; gang: gangs, members, armouries; civil: the rest): a
@@ -6518,3 +6532,8 @@ news_log_lines = 300               # the player's own log keeps this many lines
 news_knowers_max = 40              # "who knows about you" lists at most this many bodies (the weightiest)
 block_tiles = 12                   # the day-end's "your block": events within this many tiles of the home door (where
                                    # the body stands, homeless)
+# C4 (docs/COMBAT.md § 5, the player's fight): the combat clock and the beat replay.
+combat_speed = 1.0                 # while the possessed body is in a live fight the whole sim runs at this many ticks a real
+                                   # second (its fight runs [combat] human_beats_per_tick 1 beat a tick: a beat a second;
+                                   # x60 the walk-matched rate); Space pauses
+cue_s = 1.2                        # a beat's cue (a word over a body, a flash) floats this many real seconds
