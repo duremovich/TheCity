@@ -14752,8 +14752,6 @@ pub struct CombatCfg {
     pub maim_p: f32,
     pub maim_p_treated: f32,
     pub rot_p: f32,
-    /// A Grave limb hit from an edged or ranged kind takes the limb on this.
-    pub sever_p: f32,
     /// Off screen (`lod::stat_hit`): a beating writes `stat_hits` hits (a
     /// keyed count in the range) from the `stat_kind` row's damage table on
     /// `region_weights`; a killing survived (`wounded::stat_kill_p`'s split)
@@ -14761,6 +14759,83 @@ pub struct CombatCfg {
     pub stat_hits: [u32; 2],
     pub stat_kind: String,
     pub stat_grave_kind: String,
+    /// C3b (docs/COMBAT.md "C3b as built"), numbers count: every standing
+    /// member of a side strikes the other side's front each beat; the front
+    /// set upon by several splits its defence: its evasion against the
+    /// second and later attacks in a beat x `(1 - split_evade x (n - 1))`,
+    /// at least 0.
+    pub split_evade: f32,
+    /// Melee bodies that can reach one body in a beat (its front among
+    /// them); the rest wait their turn. Ranged helpers all shoot. Geometry,
+    /// not a cap on the body set upon (it helps the lone body).
+    pub crowd_reach: usize,
+    /// Morale reads the head count: `+ numbers_morale x ln(own standing /
+    /// theirs)` (1 against 3: -1.1 x this).
+    pub numbers_morale: f32,
+    /// Fatigue (0 fresh, 1 spent): `tire_beat` a beat fought, `tire_wound`
+    /// a wound taken (by severity), x `(1 - tire_strength x Kit strength)`
+    /// (at least 0.2); attack x `(1 - tire_attack x fatigue)`, evasion x
+    /// `(1 - tire_evade x fatigue)`; `rest_hour` back an hour out of fights.
+    /// A robot never tires.
+    pub tire_beat: f32,
+    pub tire_wound: [f32; 3],
+    pub tire_strength: f32,
+    pub tire_attack: f32,
+    pub tire_evade: f32,
+    pub rest_hour: f32,
+    /// Joiners (§ 1): a Full adult within `join_tiles` with a reason (a
+    /// gang-mate, kin, a friend at `join_bond` affinity, a guard on duty
+    /// seeing an assault: the victim's side) joins on `join_base +
+    /// join_courage_w x (courage - 0.5)` (+ `join_guard` on duty, +
+    /// `join_kin` kin), a keyed roll per fight; at most `join_max` a fight.
+    pub join_tiles: u32,
+    pub join_bond: f32,
+    pub join_base: f32,
+    pub join_courage_w: f32,
+    pub join_guard: f32,
+    pub join_kin: f32,
+    pub join_max: usize,
+    /// A joiner joins no other fight for this many minutes (ticks).
+    pub join_cooldown_min: u32,
+    /// The flight holds: a body that broke and fled lies low this many
+    /// hours (only Eat, Sleep, Flee, Idle and, hurt, Treat score).
+    pub low_hours: u32,
+    /// Chrome (§ 4) on the `Implant(kind)` tiers. Nerves: a Kerenzikov at
+    /// any tier (a dodge charge at the first attack and again when first
+    /// hurt, taken on `keren_p` by tier), a Sandevistan from `sandy_tier`
+    /// (`sandy_actions` extra strikes a beat by tier for `sandy_beats`
+    /// beats, then `sandy_cooldown_hours`, `sandy_sanity` sanity a use).
+    pub keren_p: [f32; 3],
+    pub sandy_tier: u8,
+    pub sandy_actions: [u8; 3],
+    pub sandy_beats: u8,
+    pub sandy_cooldown_hours: u32,
+    pub sandy_sanity: f32,
+    /// Arms: from `mantis_tier` the blades (the `mantis_kind` row, at the
+    /// implant's tier quality; never taken off the body, sheathed under a
+    /// subdue stance) in place of the bare hand or a melee weapon; below it
+    /// gorilla arms: the bare hand's grave weight x `gorilla_grave` and its
+    /// lethality at least `gorilla_lethality`.
+    pub mantis_tier: u8,
+    pub mantis_kind: String,
+    pub gorilla_grave: f32,
+    pub gorilla_lethality: f32,
+    /// A hit on a chrome limb (Arms, Legs) wounds no flesh: a Graze is
+    /// turned, a Wound wears the implant `chrome_wear` condition, a Grave
+    /// wrecks it (`assets::wreck`, the ripperdoc's repair).
+    pub chrome_wear: u8,
+    /// Robots in the beats: a Wound counts 1, a Grave `robot_wreck_hits`;
+    /// at `robot_wreck_hits` the robot is wrecked.
+    pub robot_wreck_hits: u8,
+    /// The `[[weapon_kinds]]` row a robot fights with, by tier.
+    pub robot_kinds: [String; 3],
+    /// C2's leftovers: the pit's referee stops a bout at the first wound of
+    /// this severity (index); the Treat goal's hurt term grows
+    /// `treat_urgency_day` a day the worst wound goes unseen (to 1); the back
+    /// room sees to wounds up to `back_room_max` (a Grave needs a Clinic).
+    pub bout_stop: usize,
+    pub treat_urgency_day: f32,
+    pub back_room_max: usize,
 }
 
 impl Default for CombatCfg {
@@ -14838,10 +14913,43 @@ impl Default for CombatCfg {
             maim_p: 0.5,
             maim_p_treated: 0.05,
             rot_p: 0.15,
-            sever_p: 0.15,
             stat_hits: [1, 3],
             stat_kind: "unarmed".to_string(),
             stat_grave_kind: "knife".to_string(),
+            split_evade: 0.2,
+            crowd_reach: 3,
+            numbers_morale: 0.15,
+            tire_beat: 0.025,
+            tire_wound: [0.02, 0.08, 0.2],
+            tire_strength: 0.5,
+            tire_attack: 0.5,
+            tire_evade: 0.6,
+            rest_hour: 0.5,
+            join_tiles: 6,
+            join_bond: 0.3,
+            join_base: 0.35,
+            join_courage_w: 0.8,
+            join_guard: 0.4,
+            join_kin: 0.2,
+            join_max: 6,
+            join_cooldown_min: 30,
+            low_hours: 6,
+            keren_p: [0.5, 0.65, 0.8],
+            sandy_tier: 2,
+            sandy_actions: [1, 1, 2],
+            sandy_beats: 3,
+            sandy_cooldown_hours: 2,
+            sandy_sanity: 0.02,
+            mantis_tier: 2,
+            mantis_kind: "mantis".to_string(),
+            gorilla_grave: 2.5,
+            gorilla_lethality: 0.3,
+            chrome_wear: 25,
+            robot_wreck_hits: 3,
+            robot_kinds: ["club".to_string(), "club".to_string(), "pistol".to_string()],
+            bout_stop: 1,
+            treat_urgency_day: 0.15,
+            back_room_max: 1,
         }
     }
 }
@@ -14880,6 +14988,9 @@ pub struct WeaponKindCfg {
     pub conceal: f32,
     pub tiers: Vec<u8>,
     pub classes: Vec<String>,
+    /// C3b: a Grave limb hit from it (edged or ranged) takes the limb on
+    /// this (C2's flat `[combat] sever_p`).
+    pub sever_p: f32,
 }
 
 type KindRow<'a> = (&'a str, WeaponFamily, f32, [f32; 3], f32, bool, u8, f32, &'a [u8], &'a [&'a str]);
@@ -14887,7 +14998,7 @@ type KindRow<'a> = (&'a str, WeaponFamily, f32, [f32; 3], f32, bool, u8, f32, &'
 /// The shipped `[[weapon_kinds]]` (a config without the rows).
 pub fn default_weapon_kinds() -> Vec<WeaponKindCfg> {
     use WeaponFamily::{Melee, Ranged};
-    let rows: [KindRow; 9] = [
+    let rows: [KindRow; 10] = [
         ("unarmed", Melee, 0.0, [0.75, 0.22, 0.03], 0.08, true, 0, 0.0, &[], &[]),
         ("knife", Melee, 0.05, [0.4, 0.42, 0.18], 0.35, false, 1, 0.0, &[1], &["gang", "civil"]),
         ("blade", Melee, 0.05, [0.3, 0.42, 0.28], 0.45, false, 1, 1.0, &[2], &["gang"]),
@@ -14897,6 +15008,7 @@ pub fn default_weapon_kinds() -> Vec<WeaponKindCfg> {
         ("shotgun", Ranged, 0.15, [0.2, 0.4, 0.4], 0.65, false, 2, 2.0, &[2, 3], &["law", "civil", "gang"]),
         ("rifle", Ranged, 0.12, [0.2, 0.38, 0.42], 0.7, false, 2, 2.5, &[3], &["law", "gang"]),
         ("sniper", Ranged, 0.0, [0.1, 0.3, 0.6], 0.85, false, 3, 3.0, &[], &[]),
+        ("mantis", Melee, 0.1, [0.2, 0.42, 0.38], 0.5, false, 0, 3.0, &[], &[]),
     ];
     rows.iter()
         .map(|&(id, family, accuracy, damage, lethality, blunt, draw, conceal, tiers, classes)| WeaponKindCfg {
@@ -14910,6 +15022,15 @@ pub fn default_weapon_kinds() -> Vec<WeaponKindCfg> {
             conceal,
             tiers: tiers.to_vec(),
             classes: classes.iter().map(|c| c.to_string()).collect(),
+            sever_p: match id {
+                "knife" | "smg" => 0.1,
+                "blade" => 0.25,
+                "pistol" => 0.08,
+                "shotgun" => 0.2,
+                "rifle" => 0.15,
+                "sniper" | "mantis" => 0.3,
+                _ => 0.0,
+            },
         })
         .collect()
 }

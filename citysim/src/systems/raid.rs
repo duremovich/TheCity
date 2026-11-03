@@ -661,9 +661,13 @@ pub fn resolve(world: &mut World, actor: EntityId) -> Option<Outcome> {
         crate::systems::crew::late_to_raid(world, actor, gid);
         return None;
     }
-    // C3a: the brawl is being fought (a live engagement): a marcher who
-    // comes to the door now is not in it.
+    // C3a: the brawl is being fought (a live engagement). C3b: a marcher
+    // who comes to the door now joins it (a body not Full stays out).
     if raid_fighting(world, gid) {
+        if crate::systems::combat::join_raid(world, gid, actor) {
+            let text = format!("{} came late to the door and joined the fight", world.name_of(actor));
+            world.push_event(EventKind::Raid, &[actor, gid], text);
+        }
         return None;
     }
     // Shadow V4 bug 9: a crew under `raid_min_members` at the door once the

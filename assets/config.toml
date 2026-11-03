@@ -3934,15 +3934,54 @@ scar_p = [0.0, 0.3, 1.0]           # at the heal: a scar on this by severity ...
 maim_p = 0.5                       # ... a Grave not seen to heals badly (a maim: the region a Wound for good; [ages] maim) ...
 maim_p_treated = 0.05              # ... one seen to on this ...
 rot_p = 0.15                       # ... a Grave limb not seen to is lost instead on this
-sever_p = 0.15                     # a Grave limb hit from an edged or ranged kind takes the limb (chrome from a ripperdoc: [ages] prosthetics)
 stat_hits = [1, 3]                 # off screen: a beating writes this many hits (a keyed count) from stat_kind's damage table ...
 stat_kind = "unarmed"
 stat_grave_kind = "knife"          # ... a killing survived (the wounded split) one Grave from this kind's
+# C3b (docs/COMBAT.md "C3b as built"): numbers, joiners, the flight, chrome, robots. No clamp caps one body against many.
+split_evade = 0.2                  # every standing member of a side strikes the other front each beat; the front's evasion
+                                   # against the 2nd and later attacks in a beat x (1 - this x (n - 1)), at least 0
+crowd_reach = 3                    # melee bodies that reach one body in a beat (the front among them; the rest wait); ranged
+                                   # helpers all shoot. Geometry: it helps the lone body, it caps nothing of his
+numbers_morale = 0.15              # morale + this x ln(own side standing / theirs): 1 against 3 is -1.1 x this
+tire_beat = 0.025                  # fatigue (0 fresh, 1 spent) a beat fought ...
+tire_wound = [0.02, 0.08, 0.2]     # ... and a wound taken, by severity; x (1 - tire_strength x Kit strength), at least 0.2 ...
+tire_strength = 0.5
+tire_attack = 0.5                  # ... the attack x (1 - this x fatigue) ...
+tire_evade = 0.6                   # ... evasion x (1 - this x fatigue); a robot never tires
+rest_hour = 0.5                    # fatigue back an hour out of fights
+join_tiles = 6                     # joiners: a Full adult within this (or in the building) with a reason: a gang-mate, kin,
+join_bond = 0.3                    # a friend at this affinity, a guard on duty seeing an assault (on the victim's side) ...
+join_base = 0.35                   # ... joins on this + join_courage_w x (courage - 0.5), a keyed roll a fight ...
+join_courage_w = 0.8
+join_guard = 0.4                   # ... + this for a guard on duty ...
+join_kin = 0.2                     # ... + this for kin
+join_max = 6                       # joiners a fight at most (the scan's bound, not the fight's)
+join_cooldown_min = 30             # a joiner joins no other fight this many minutes (one fight at a time); the law never
+                                   # joins a fight in the cells (the jail's own rules)
+low_hours = 6                      # a body that fled lies low this long: only Eat, Sleep, Flee, Idle and (hurt) Treat score
+keren_p = [0.5, 0.65, 0.8]         # Nerves chrome, a Kerenzikov at any tier: a hit turned to a dodge on this (by tier), once at
+                                   # the first attack and once more when first hurt
+sandy_tier = 2                     # Nerves from this tier is a Sandevistan too: ...
+sandy_actions = [1, 1, 2]          # ... this many extra strikes a beat (by tier) ...
+sandy_beats = 3                    # ... for this many beats, once a fight ...
+sandy_cooldown_hours = 2           # ... then this long before the next ...
+sandy_sanity = 0.02                # ... and this much sanity a use
+mantis_tier = 2                    # Arms chrome from this tier: mantis blades (the row below; never taken off the body, sheathed
+mantis_kind = "mantis"             # to subdue) in place of the bare hand or a melee weapon; below it gorilla arms: ...
+gorilla_grave = 2.5                # ... the bare hand's grave weight x this ...
+gorilla_lethality = 0.3            # ... and its lethality at least this
+chrome_wear = 25                   # a hit on a chrome limb wounds no flesh: a Graze turned, a Wound wears it this condition, a
+                                   # Grave wrecks it (the ripperdoc's repair)
+robot_wreck_hits = 3               # robots in the beats: a Wound counts 1, a Grave this many; at this many it is wrecked
+robot_kinds = ["club", "club", "pistol"]   # the [[weapon_kinds]] row a robot fights with, by tier (its quality the tier's)
+bout_stop = 1                      # the pit's referee stops a bout at its first wound of this severity (1 a Wound)
+treat_urgency_day = 0.15           # the Treat goal's hurt term + this a day the worst wound goes unseen (to 1)
+back_room_max = 1                  # the back room sees to wounds up to this severity; a Grave needs a Clinic at its price
 
 # C1 (docs/COMBAT.md § 4): the weapon kinds. Row 0 is the bare hand. The tier stays as quality ([combat] quality). The
 # stock maps by tier and owner class (law: guards, the Precinct; gang: gangs, members, armouries; civil: the rest): a
 # weapon spawned takes a keyed pick among the rows listing its tier and class. damage weights [graze, wound, grave];
-# lethality the death chance on a Grave head or torso wound; draw the beats a defender takes to ready it; conceal its
+# lethality the death chance on a Grave head or torso wound; sever_p the chance a Grave limb hit takes the limb (C3b); draw the beats a defender takes to ready it; conceal its
 # term in the concealment contest (in place of tier - 1); blunt strikes knock out more, and a subdue stance strikes with
 # the first blunt row (a guard's baton). Reach, noise and price come with C3 and sight (addendum 24).
 [[weapon_kinds]]
@@ -3956,6 +3995,7 @@ draw = 0
 conceal = 0.0
 tiers = []
 classes = []
+sever_p = 0.0
 
 [[weapon_kinds]]
 id = "knife"
@@ -3967,6 +4007,7 @@ draw = 1
 conceal = 0.0
 tiers = [1]
 classes = ["gang", "civil"]
+sever_p = 0.1
 
 [[weapon_kinds]]
 id = "blade"
@@ -3978,6 +4019,7 @@ draw = 1
 conceal = 1.0
 tiers = [2]
 classes = ["gang"]
+sever_p = 0.25
 
 [[weapon_kinds]]
 id = "club"
@@ -3990,6 +4032,7 @@ draw = 1
 conceal = 0.5
 tiers = [1]
 classes = ["law", "gang", "civil"]
+sever_p = 0.0
 
 [[weapon_kinds]]
 id = "pistol"
@@ -4001,6 +4044,7 @@ draw = 1
 conceal = 0.5
 tiers = [1, 2]
 classes = ["law", "gang", "civil"]
+sever_p = 0.08
 
 [[weapon_kinds]]
 id = "smg"
@@ -4012,6 +4056,7 @@ draw = 1
 conceal = 1.5
 tiers = [2, 3]
 classes = ["law", "gang"]
+sever_p = 0.1
 
 [[weapon_kinds]]
 id = "shotgun"
@@ -4023,6 +4068,7 @@ draw = 2
 conceal = 2.0
 tiers = [2, 3]
 classes = ["law", "civil", "gang"]
+sever_p = 0.2
 
 [[weapon_kinds]]
 id = "rifle"
@@ -4034,6 +4080,7 @@ draw = 2
 conceal = 2.5
 tiers = [3]
 classes = ["law", "gang"]
+sever_p = 0.15
 
 [[weapon_kinds]]
 id = "sniper"
@@ -4045,6 +4092,19 @@ draw = 3
 conceal = 3.0
 tiers = []
 classes = []
+sever_p = 0.3
+
+[[weapon_kinds]]
+id = "mantis"                      # C3b: an Arms implant from [combat] mantis_tier; never mapped from the stock
+family = "melee"
+accuracy = 0.1
+damage = [0.2, 0.42, 0.38]
+lethality = 0.5
+draw = 0
+conceal = 3.0
+tiers = []
+classes = []
+sever_p = 0.3
 
 # ---------------------------------------------------------------------------
 # Jobs & lives phase 4, vice (docs/JOBS_AND_LIVES.md § 5.1): an economic and legal simulation of venues and labour

@@ -5,8 +5,8 @@
 use rand::Rng;
 
 use crate::components::{
-    Brain, Building, BuildingKind, Crime, CrimeReport, DeathCause, GoalKind, Job, Kit, LawShock, MemoryKind, Needs,
-    Personality, Position, Posture, Role, Sentence, Skills, TilePos,
+    Brain, Building, BuildingKind, Crime, CrimeReport, GoalKind, Job, Kit, LawShock, MemoryKind, Needs, Personality,
+    Position, Posture, Role, Sentence, Skills, TilePos,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -1751,85 +1751,19 @@ pub fn resolve_fight_with(world: &mut World, a: EntityId, b: EntityId, kill_mult
 /// `(1 − armour)`: branches, not zero terms, so two unchromed fighters roll
 /// exactly as in M12 (`tests/chrome.rs` asserts it).
 ///
-/// M13 D41: a robot on either side (no Brain) fights at
-/// `robot_fighting[tier − 1]` with courage 1.0 (`fighting`, `courage`); the
-/// memories, drift, mood, safety, skill gain and `social::fought` are
-/// skipped for it (the agent's memories name no subject); a robot loser is
-/// wrecked (`assets::wreck`, Parts at the door), never killed; a robot that
-/// kills passes its owner as the killer (no crime is raised for it).
+/// M13 D41, C3b: a robot on either side (no Brain) fights in the beats at
+/// `robot_fighting[tier − 1]` for all three skills, never breaks, takes no
+/// wounds (`[combat] robot_wreck_hits` wreck it: `assets::wreck`, Parts at
+/// the door); the agent's memories name no subject; a robot that kills
+/// passes its owner as the killer (no crime is raised for it).
 pub fn resolve_fight_mods(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> (EntityId, EntityId, bool) {
     // Round 3 V12 fix (Dylan 2026-10-27, no child is harmed): the non-lethal
     // backstop is the engagement's (`combat::build`): no blow lands when
     // either side is under 18 (`(a, b, false)`, `harm_blocked` counted).
-    // C3a: a robot's one roll, a downed party finished, the beats, then
+    // C3a: a downed party finished, the beats (C3b: a robot's too), then
     // `turf::beaten` and the chair's dump: `combat::instant`, `after_duel`.
     let c = crate::systems::combat::clash_now(world, a, b, mods);
     (c.winner, c.loser, c.died)
-}
-
-/// M13 D41: [`resolve_fight_mods`] with a robot on one side or both. The
-/// same `p_win` (the Kit terms read a robot's absent Kit as bare) and the
-/// same two world-stream rolls, the death roll only for an agent loser.
-pub(crate) fn resolve_robot_fight(
-    world: &mut World,
-    a: EntityId,
-    b: EntityId,
-    mods: FightMods,
-) -> (EntityId, EntityId, bool) {
-    let (fi, co) = (crate::systems::combat::power, courage);
-    let (kit_a, kit_b) = (world.comp::<Kit>(a).cloned(), world.comp::<Kit>(b).cloned());
-    let kitted = kit_a.as_ref().is_some_and(|k| !k.is_bare()) || kit_b.as_ref().is_some_and(|k| !k.is_bare());
-    let fi_a = fi(world, a) + mods.a_bonus;
-    let reflex = |k: &Option<Kit>| k.as_ref().map_or(0.0, |k| k.reflex);
-    let mut p_win = 0.5 + 0.4 * (fi_a - fi(world, b)) + 0.1 * (co(world, a) - co(world, b));
-    if kitted {
-        p_win += 0.2 * (reflex(&kit_a) - reflex(&kit_b));
-    }
-    let p_win = p_win.clamp(0.1, 0.9);
-    let roll: f32 = world.rng.world().random();
-    let (winner, loser) = if roll < p_win { (a, b) } else { (b, a) };
-    let agent = |w: &World, x: EntityId| w.has::<Brain>(x);
-    if agent(world, loser) {
-        world.remember(loser, MemoryKind::Fought, None, 0.7, -0.5, false);
-        world.remember(loser, MemoryKind::Lost, None, 0.6, -0.6, false);
-        if let Some(p) = world.comp_mut::<Personality>(loser) {
-            p.drift(Drift::LostFight);
-        }
-        if let Some(n) = world.comp_mut::<Needs>(loser) {
-            n.safety = (n.safety - 0.4).max(0.0);
-        }
-        if let Some(m) = world.comp_mut::<crate::components::Mood>(loser) {
-            m.value = (m.value - 0.3).max(-1.0);
-        }
-    }
-    if agent(world, winner) {
-        world.remember(winner, MemoryKind::Fought, None, 0.7, -0.5, false);
-        world.remember(winner, MemoryKind::Won, None, 0.6, 0.4, false);
-        if let Some(p) = world.comp_mut::<Personality>(winner) {
-            p.drift(Drift::WonFight);
-        }
-        let gain = world.config.combat.melee_gain;
-        if let Some(s) = world.comp_mut::<Skills>(winner) {
-            s.melee = (s.melee + gain).min(1.0);
-        }
-    }
-    if crate::systems::robots::is_robot(world, loser) {
-        crate::systems::assets::wreck(world, loser, "beaten in a fight");
-        return (winner, loser, false);
-    }
-    let mut p_death = world.config.crime.fight_death_p as f32 * (1.0 + fi(world, winner)) * mods.kill_mult;
-    let loser_kit = if loser == a { &kit_a } else { &kit_b };
-    let armour = loser_kit.as_ref().map_or(0.0, |k| k.armour);
-    if armour > 0.0 {
-        p_death *= 1.0 - armour;
-    }
-    let roll: f32 = world.rng.world().random();
-    let died = roll < p_death;
-    if died {
-        let killer = world.comp::<crate::components::Asset>(winner).and_then(|x| x.owner);
-        world.kill_by(loser, DeathCause::Violence, killer);
-    }
-    (winner, loser, died)
 }
 
 /// `Arrest` at completion: the guard must be adjacent (or in the same

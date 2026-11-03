@@ -525,7 +525,11 @@ fn care_choice_any(world: &World, id: EntityId) -> Option<(EntityId, Care, i64)>
     // The back room takes the broke too: they pay what they and theirs
     // hold (the patient, the kin, the gang), up to `back_price`.
     let (patch_price, back_price) = (wound_price(world, id, c.patch_price), wound_price(world, id, c.back_price));
-    if avoids_clinic(world, id, patch_price) {
+    // C3b: the back room sees to wounds up to `[combat] back_room_max`; a
+    // Grave needs a Clinic, at its price (the broke live with it).
+    let back_ok = crate::systems::combat::worst_untreated(world, id)
+        .is_none_or(|s| s.index() <= world.config.combat.back_room_max);
+    if back_ok && avoids_clinic(world, id, patch_price) {
         if let Some(b) = back_room(world, id) {
             return Some((b, Care::Patch, back_price));
         }

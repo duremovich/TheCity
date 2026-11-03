@@ -550,7 +550,10 @@ use crate::world::World;
 /// 131 (the combat model C3a, the live engagement): `World.engagements` and its indices are not saved (a save
 /// resolves every live fight first, `combat::settle_all`); the `[combat]` keys `beats_per_tick`, `reach_tiles`,
 /// `log_beats` and the `Jobs2Cols` `live_fights` ... `fled_runs` columns (serde defaults).
-pub const SAVE_VERSION: u16 = 131;
+/// 132 (the combat model C3b): `[combat]` lost `sever_p` (per `[[weapon_kinds]]` row now, with a `mantis` row) and
+/// gained the numbers, joiners, flight, chrome and robot keys; `End::Wrecked`; the `Jobs2Cols` `joiners` ...
+/// `chases` columns (serde defaults). Fatigue, the Sandevistan's cooldown and the flight's hold are not saved.
+pub const SAVE_VERSION: u16 = 132;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
