@@ -125,7 +125,13 @@ pub fn think_scored(
     let has_spouse = goals::has_spouse(world, id);
     let mut scored: Vec<GoalScore> = Vec::new();
     let mut shop = None;
+    // C3b, the flight holds: a body that fled a fight lies low (nothing
+    // takes it back out; a Treat when hurt).
+    let low = crate::systems::combat::lying_low(world, id);
     for (gi, goal) in goals::GOAL_ORDER.into_iter().enumerate() {
+        if low && !crate::systems::combat::low_ok(world, id, goal) {
+            continue;
+        }
         // Scale S1: each goal's scoring time (the `prof` feature only).
         #[cfg(feature = "prof")]
         let _timer = {

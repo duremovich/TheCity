@@ -373,6 +373,79 @@ These come later: ranged (§ 7, with addendum 24) and the blast (§ 8, with netr
 - **Not done (C3b):** joiners, the chase, chrome in the fight, robots in a live fight (a robot party keeps the fight at
   once); a body who arrives at a live raid is not in it (`raid::resolve` returns).
 
+**C3b as built (2026-11-03; deviations, `OPEN-179`).**
+- **Numbers count, on the chain of duels.** The fronts still duel; every other member of each side strikes the other
+  side's front each beat (`Duel.aid`, built at each duel's start, a joiner since added at the next tick): every gun,
+  and as many melee bodies as reach one body (`crowd_reach` 3 with the front; the rest wait; geometry, and it helps
+  the lone body). The lone body strikes only its front (plus a Sandevistan's extra strikes); a body set upon by
+  several splits its defence (`split_evade` off its evasion for each attack after the first in a beat, to 0). Before
+  `crowd_reach`, 6 soft rioters beat 3 hard guards (`districts` test): every helper striking every beat was Lanchester
+  without the geometry. Morale reads the head count
+  (`numbers_morale` x ln(own standing / theirs); C1 had no head-count term, only the caller's `a_bonus`). **Fatigue**
+  (`tire_beat` a beat, `tire_wound` a wound, cut by Kit strength) cuts attack and evasion and rests off at
+  `rest_hour` out of fights (`Live.tired`, not saved); within one engagement a body also carries its morale, its
+  Kerenzikov charges and its Sandevistan's beats from duel to duel (`Carry`). A robot never tires. No clamp caps one
+  body against many: a strong, armoured, chromed body still beats a crowd one front at a time.
+- **A principal beaten ends the fight** (`ends_on`): a brawl's pairings and a gang raid fight to the last; an arrest
+  ends on the suspect (the guard's backups step up as before); every other caller ends when either `first` is beaten,
+  so the joiners stand down and the caller's tail reads its own two.
+- **Joiners** (`recruit`): at the start of every engagement and each tick of a live one. A body within `join_tiles`
+  (or in the building), adult, free, in no other fight, with a reason on one side only: a gang-mate of a member, kin
+  (Spouse, Family, Parent, affinity >= 0), a friend at `join_bond`, or a guard on duty (the victim's side, side 1; an
+  arrest's side 0; never a gang raid or a turf brawl). It joins on `join_base + join_courage_w x (courage - 0.5)` (+
+  `join_guard`, + `join_kin`), one keyed roll a fight; `join_max` a fight; never a bout. "X jumped in on Y's side
+  against Z (a friend)". **Deviation:** a live fight takes Full bodies only, but a fight fought at once off camera
+  also takes Coarse ones (headless, only 500 of 20,000 are Full: Full-only joiners were all guards). A raider who
+  comes to the door of his gang's live raid joins side 0 (`combat::join_raid`, "came late to the door and joined").
+- **The flight holds** (`lying_low`): a body that broke and fled lies low `low_hours` (`Live.low`, not saved): only
+  Eat, Sleep, Flee, Idle and, with a wound not seen to, Treat score (`utility::think_scored`). This is stronger than
+  "no goal back to the fight's tile": nothing takes it out. **The chase**: a Hunt whose target fled keeps the Hunt
+  ("X gave chase after Y", `chases`; the hunter's next Hunt goes after him); every other caller lets him go.
+- **Chrome** on the `Implant(kind)` tiers (no `[[chrome]]` table): **Nerves** at any tier is a Kerenzikov (a dodge
+  charge at the first would-be hit and a second when first hurt, taken on `keren_p[tier]`); Nerves from `sandy_tier`
+  is a Sandevistan too (`sandy_actions[tier]` extra strikes a beat for `sandy_beats` beats, once a fight, then
+  `sandy_cooldown_hours`, `sandy_sanity` off `Body.sanity`). **Arms** from `mantis_tier` are mantis blades (the
+  `mantis` `[[weapon_kinds]]` row at the implant's tier quality, in place of the bare hand or a melee weapon; never
+  taken off the body; sheathed under a subdue stance and in a bout); below it gorilla arms (the bare hand's grave
+  weight x `gorilla_grave`, lethality at least `gorilla_lethality`, knocks out as a blunt kind). **A hit on a chrome
+  limb** (Arms for either arm, Legs for either leg) wounds no flesh: a Graze turned, a Wound wears `chrome_wear`
+  condition (its value from its condition, the Kit rebuilt), a Grave (or a Wound on a worn one) wrecks it
+  (`assets::wreck`: the sanity shock, the Kit rebuilt).
+- **Robots in the beats.** `combat::instant` lost its robot roll; `law::resolve_robot_fight` is gone. A robot fights
+  as a Fighter at `robot_fighting[tier]` for all three skills with its tier's kind (`robot_kinds`: a club, a club, a
+  pistol; bare hands a robot could no longer kill), all out, never breaks or tires, takes no wounds: a
+  Wound counts 1 and a Grave `robot_wreck_hits`; at `robot_wreck_hits` it is wrecked (`End::Wrecked`, Parts at the
+  door). A robot counts as Full for a live fight. Its wound on a body is its owner's doing, never a Murder.
+- **C2's leftovers.** The pit's referee stops a bout at the first wound of `bout_stop` (the hurt one yields).
+  `sever_p` is per `[[weapon_kinds]]` row (pistol 0.08 ... sniper and mantis 0.3; `[combat] sever_p` gone). The Treat
+  goal's hurt term grows `treat_urgency_day` a day the oldest untreated wound waits (to 1). The back room sees to
+  wounds up to `back_room_max` (a Wound): a Grave goes to a Clinic at `patch_price x 6` (72c), and the broke live
+  with it ("lives with the wound: the Clinic's patch-up is 72c and they have 11c": 2 -> 158 lines). **Guards
+  bare-handed: not a bug.** A guard's draw is a keyed share of the Precinct's stock over the city guards, and the
+  stock's target is `[weapons] stock_per_guard` 0.5, so half the city's guards (and private guards whose office has
+  no stock) fight bare-handed by config; a number, left for the calibration pass.
+- **The numbers** (20k island, seed 42, 30 days, before -> after, one run each; printed, not tuned): fights (the arms
+  counter) 6062 -> 5696, fight deaths 83 -> 85, Murders 122 -> 161, bled out 32 -> 40, Arrest lines 6248 -> 5774,
+  escapes from arrest 257 -> 288, backup fights 241 -> 78 (guards on duty now join the arrest as joiners), flee plans
+  2082 -> 2074, live engagements 1082 -> 1026 (1.62 -> 1.47 ticks mean); joiners 4405 (1956 the law, 1421 friends,
+  956 gang-mates, 72 kin), about 0.8 a fight; the lone body's duels against 2: 867, won 254 (29 %); against 3 or more:
+  858, won 140 (16 %); chases 199; chrome limbs wrecked 43; robots in fights 17 (none wrecked); Fight lines with mantis
+  blades 6, gorilla arms 166; Kerenzikov dodges 7, Sandevistan uses 0 (the city's chrome is T1 by its installs: one
+  run's 30 days installed 359 Legs, 86 Arms, 41 Eyes and one Nerves, all T1); "lives with the wound" 2 -> 184; limbs
+  lost 139 -> 157; ticks/s days 25-30 124 -> 139 (a print). FINDING: Kenshi-brutal as asked: a lone body wins under a
+  third of its duels against two and one in six against three or more. FINDING: Murders +32 % (a crowd's blows on the
+  set-upon side are the starter side's, so a bleed-out from a helper's is a Murder too); left to features, not a knob.
+- **The shadow's wrong-reads** (d12-18, raider, gang member, guard, gang leader, gun, fighter; on the build before the
+  cell fix): a guard on jail duty "jumped in" on six cell fights in one minute (fixed: the law never joins a fight in
+  the cells, and a joiner joins no other fight for `join_cooldown_min`); lying low is Idle's Wander for 6 h at night,
+  not a bed; the law is the most common joiner (44 %); a robot's line reads like flesh ("body gravely wounded" before
+  "was wrecked"); a Hunt's target who keeps fleeing gives a "gave chase" line each time; no raider came late to a
+  live raid (headless, every gang raid ran at once); gorilla arms were invisible in the line until the chrome notes
+  ("gorilla arms", "Sandevistan", "a Kerenzikov dodge") were added after the shadow.
+- **Not done:** the lone body strikes only its front (a Sandevistan's extra strikes too: never a helper behind it);
+  fatigue, the Sandevistan's cooldown and the flight's hold are not saved; the view's beat replay of the helpers'
+  blows (the ring log has them) waits for C4.
+
 ## Decisions (Dylan, 2026-11-02)
 
 | # | question | decided |

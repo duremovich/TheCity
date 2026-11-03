@@ -166,6 +166,9 @@ fn test_drag_holds_gangwork() {
         b.abducted_by = Some(m);
     }
     assert_eq!(chrome::dragging(&w, m), Some(v));
+    // C3b (a butterfly: the city's fights moved the pick): a member whose
+    // wealth is met, so the drag is held against Idle, not a broke one's Earn.
+    w.comp_mut::<Needs>(m).expect("needs").wealth = 1.0;
     let (goal, trace) = citysim::utility::think(&w, m).expect("a goal");
     assert_eq!(goal, GoalKind::GangWork, "the drag holds: {trace:?}");
     w.comp_mut::<Needs>(m).expect("needs").hunger = 0.05;

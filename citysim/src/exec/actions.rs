@@ -1734,6 +1734,18 @@ pub(crate) fn attack_end(world: &mut World, id: EntityId, victim: EntityId, c: &
         let why = format!("{he} went for {} {him}self instead", world.name_of(victim));
         crate::systems::law::drop_word(world, id, victim, &why);
     }
+    // C3b, the chase follows the purpose: a Hunt whose target broke and
+    // fled keeps the Hunt (the hunter goes after him); a mugger lets him go.
+    if c.end == crate::systems::combat::End::Fled
+        && loser == victim
+        && world.hunts.get(&id).is_some_and(|h| h.target == victim)
+        && crate::systems::law::living(world, id)
+    {
+        let text = format!("{name} gave chase after {}", world.name_of(victim));
+        world.push_event(crate::events::EventKind::Fight, &[id, victim], text);
+        crate::systems::ownership::jobs2_row(world).chases += 1;
+        return;
+    }
     // M15 W22: the Hunt's strike (after the crime: street silence reads the Hunt).
     crate::systems::hunt::on_strike(world, id, victim, winner, died);
 }

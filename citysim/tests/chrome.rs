@@ -74,7 +74,10 @@ fn test_arms_raise_the_win_share() {
     let (a, b) = (people[0], people[1]);
     assets::grant(&mut w, a, AssetKind::Implant(Slot::Arms), 3).expect("arms");
     // Bare hands never kill here (the subject is the win, not the death).
+    // C3b: the Arms as stats (no blades; gorilla arms kill no more than a fist).
     w.config.weapon_kinds[0].lethality = 0.0;
+    w.config.combat.mantis_tier = 4;
+    w.config.combat.gorilla_lethality = 0.0;
     let mut wins = 0;
     for _ in 0..2000 {
         for x in [a, b] {

@@ -1688,6 +1688,30 @@ pub struct Jobs2Cols {
     pub arrest_escapes: u32,
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub fled_runs: u32,
+    /// The combat model C3b: joiners taken into fights (and raiders into a
+    /// live raid); the lone body's duels against 2 and against 3 or more
+    /// (and won); Sandevistan uses, Kerenzikov dodges, chrome limbs and
+    /// robots wrecked in the beats; Hunts that gave chase to a fled target
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub joiners: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub lone_1v2: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub lone_1v2_won: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub lone_1v3: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub lone_1v3_won: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub sandy_uses: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub keren_dodges: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub chrome_wrecked: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub robots_wrecked: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub chases: u32,
     /// The city milestone C6b (`systems::floors`): the floor rent paid to
     /// the landlords today (`Flow::FloorRent`), the tenancies short on it,
     /// the floors taken back to a vacant unit and the leases passed to the
@@ -2435,6 +2459,16 @@ impl Jobs2Cols {
                 "live_fight_ticks",
                 "arrest_escapes",
                 "fled_runs",
+                "joiners",
+                "lone_1v2",
+                "lone_1v2_won",
+                "lone_1v3",
+                "lone_1v3_won",
+                "sandy_uses",
+                "keren_dodges",
+                "chrome_wrecked",
+                "robots_wrecked",
+                "chases",
                 "flow_floor_rent",
                 "floor_short",
                 "floor_evicted",
@@ -3102,6 +3136,16 @@ impl Jobs2Cols {
             self.live_fight_ticks.to_string(),
             self.arrest_escapes.to_string(),
             self.fled_runs.to_string(),
+            self.joiners.to_string(),
+            self.lone_1v2.to_string(),
+            self.lone_1v2_won.to_string(),
+            self.lone_1v3.to_string(),
+            self.lone_1v3_won.to_string(),
+            self.sandy_uses.to_string(),
+            self.keren_dodges.to_string(),
+            self.chrome_wrecked.to_string(),
+            self.robots_wrecked.to_string(),
+            self.chases.to_string(),
             self.flow_floor_rent.to_string(),
             self.floor_short.to_string(),
             self.floor_evicted.to_string(),
