@@ -631,3 +631,14 @@ shooting, evasion**) sit behind one `combat::power`. Weapons gain kinds, and chr
 player sets a **stance and gives orders** while the whole sim slows. **Order:** C1 the beat (synchronous), C2 wounds
 that last, C3 live, C4 the player; then P5. Ranged and the long shot come with sight (addendum 24); the blast comes
 with netrunning (addendum 25).
+
+## Addendum 27 (2026-11-03, Dylan): the ladder (a note for later)
+
+"I want the game to start hard, brutal even. Much like Kenshi. But you should be able to get better and better over
+time." A nobody's theft easily ends in being shot and bleeding out, and being outnumbered is a serious danger. Later
+you can wipe out a small gang alone. But cross a megacorp or go cyberpsycho and you are "hunted down like a dog", and
+crossing the Arasaka-equivalent may mean buying a new identity and losing the reputation built under the old one. Not
+limiting the power fantasy: with the right gear and stats you can fight through the top megacorp's HQ and take out
+its leadership, after an epic grind. The ladder is long. The murder-hobo route is the hardest; amassing a gang or
+corp of your own, perhaps one that can sue for peace, is the better route. **Not scheduled.** It is `OPEN-294`, a
+design talk after the slice. The combat model keeps no hard clamp that would cap one body against many (`COMBAT.md`).
