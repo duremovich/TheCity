@@ -28,6 +28,14 @@
 //! about you" under it (`citysim::systems::player_news`: the bodies whose memories name the player, how they heard,
 //! the talk, who is after it), the day-end summary at the top centre (coins, who now knows you, who is after you, the
 //! street's read, your block) and the death screen from the body's `Life`.
+//!
+//! C4 (the player's fight, docs/COMBAT.md § 5): the fight HUD (top left, while the body is in a live fight: the sides
+//! and their stances, what their wounds show, your stance and orders as `UiCmd::Fight`, your wounds, blood and
+//! fatigue, the morale hints, the chrome to hand, an Attack row a foe with its odds, a Help row a downed body), the
+//! wounds panel in its place outside a fight (days to heal, what a patch-up costs and where, "Get patched up"), the
+//! beat replay (`replay`: each tick's beats a `beat_s` apart as words over the bodies, a flash on a telling blow)
+//! and the HUD's stance and holster for the next fight. Script: `order stance allout|defensive|subdue|holdback`,
+//! `order attack INDEX`, `order draw|holster|cover|flee|yield`, `order help INDEX`.
 
 use bevy::{
     app::AppExit,
@@ -40,6 +48,7 @@ use citysim::components::{GoalKind, TilePos};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::time::{Duration, Instant};
 
 use crate::simthread::{Shared, UiCmd};
 
@@ -81,6 +90,10 @@ pub struct Play {
     wait: u32,
     /// M18 P4: the day-end summaries closed so far (the newest past it is drawn).
     days_seen: usize,
+    /// C4: the replay's cues, the beats seq taken, how long a cue floats.
+    cues: Vec<Cue>,
+    beats_seq: u64,
+    cue_s: f32,
 }
 
 /// `"T action; T action"`: the ticks a number or `D:HH:MM`, in rising order.
@@ -121,9 +134,12 @@ pub fn add(app: &mut App, shared: Arc<Shared>, vcfg: &citysim::config::ViewCfg, 
             menu_open: None,
             wait: 0,
             days_seen: 0,
+            cues: Vec::new(),
+            beats_seq: 0,
+            cue_s: vcfg.cue_s,
         })
         .add_systems(Update, (keys, click, run_script))
-        .add_systems(EguiPrimaryContextPass, (hud, menu, board, news, day_end, death));
+        .add_systems(EguiPrimaryContextPass, (hud, menu, board, news, day_end, death, fight, wounds, replay));
 }
 
 fn set_speed(p: &mut Play, i: usize) {
@@ -381,6 +397,23 @@ fn run_script(
             p.menu_asked = asked;
             p.shared.send(UiCmd::Bld(citysim::EntityId { index, generation: 0 }));
         }
+        // C4: `body best friends|weak|strong`: a target picked by the sim's odds (simthread `best_body`)
+        "body" if arg.starts_with("best") => {
+            p.menu_open = None;
+            p.click_px = Vec2::new(480.0, 300.0);
+            let asked = p.shared.menu.lock().unwrap().as_ref().map_or(0, |m| m.seq);
+            p.menu_asked = asked;
+            p.shared.send(UiCmd::BodyBest(arg.trim_start_matches("best").trim().to_string()));
+        }
+        // C4: `body #INDEX`: that body's menu wherever it is (a target off the screen; the Attack walks there)
+        "body" if arg.starts_with('#') => {
+            let index: u32 = arg[1..].parse().expect("body #INDEX");
+            p.menu_open = None;
+            p.click_px = Vec2::new(480.0, 300.0);
+            let asked = p.shared.menu.lock().unwrap().as_ref().map_or(0, |m| m.seq);
+            p.menu_asked = asked;
+            p.shared.send(UiCmd::BodyIndex(index));
+        }
         "body" => {
             // INDEX, or `adult` / `child`: the drawn adult or child nearest the subject
             let Ok(cam) = cams.single() else { return };
@@ -462,6 +495,43 @@ fn run_script(
             Some(g) => p.shared.send(UiCmd::Goal(g)),
             None => warn!("play script: no goal '{arg}'"),
         },
+        // C4: a fight order (`order stance subdue`, `order attack INDEX`, `order flee`, `order help INDEX`)
+        "order" => {
+            use citysim::systems::combat::{Order, Stance};
+            let (what, rest) = arg.split_once(' ').map_or((arg, ""), |(a, b)| (a, b.trim()));
+            let hud = p.shared.player.lock().unwrap().clone();
+            // a body by its index: one in the fight (or downed in it), else one drawn
+            let body = |s: &str| -> Option<citysim::EntityId> {
+                let index: u32 = s.parse().ok()?;
+                let f = hud.as_ref().and_then(|h| h.fight.as_ref());
+                f.and_then(|f| f.sides.iter().flatten().map(|m| m.id).chain(f.downed.iter().map(|d| d.0)).find(|e| e.index == index))
+                    .or_else(|| sim.people.iter().map(|b| entity_of(b.id)).find(|e| e.index == index))
+            };
+            let o = match what {
+                "stance" => match rest {
+                    "allout" => Some(Order::Stance(Stance::AllOut)),
+                    "defensive" => Some(Order::Stance(Stance::Defensive)),
+                    "subdue" => Some(Order::Stance(Stance::Subdue)),
+                    "holdback" => Some(Order::Stance(Stance::HoldBack)),
+                    _ => None,
+                },
+                "attack" => body(rest).map(Order::Attack),
+                "help" => body(rest).map(Order::Help),
+                "draw" => Some(Order::Draw),
+                "holster" => Some(Order::Holster),
+                "cover" => Some(Order::Cover),
+                "flee" => Some(Order::Flee),
+                "yield" => Some(Order::Yield),
+                _ => None,
+            };
+            match o {
+                Some(o) => {
+                    info!("play script order {arg}: {o:?}");
+                    p.shared.send(UiCmd::Fight(o));
+                }
+                None => warn!("play script order '{arg}': no such order or body"),
+            }
+        }
         "stop" => p.shared.send(UiCmd::Stop),
         "auto" => p.shared.send(UiCmd::Autopilot(arg == "on")),
         "pause" => {
@@ -565,6 +635,25 @@ fn hud(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
             }
             if !h.offers.is_empty() {
                 ui.colored_label(egui::Color32::YELLOW, "an offer waits (the board)");
+            }
+            // C4: the stance and the weapon for the next fight (in one: the fight HUD)
+            if h.fight.is_none() {
+                use citysim::systems::combat::{Order, Stance};
+                ui.horizontal_wrapped(|ui| {
+                    ui.small("in a fight:");
+                    for s in Stance::ALL {
+                        if ui.selectable_label(h.stance == Some(s), s.order_label()).clicked() {
+                            p.shared.send(UiCmd::Fight(Order::Stance(s)));
+                        }
+                    }
+                    let (l, o) = if h.holstered { ("draw", Order::Draw) } else { ("holster", Order::Holster) };
+                    if ui.small_button(l).clicked() {
+                        p.shared.send(UiCmd::Fight(o));
+                    }
+                });
+                if !h.chrome.is_empty() {
+                    ui.small(h.chrome.join(", "));
+                }
             }
             ui.horizontal_wrapped(|ui| {
                 if ui.button("Stop").clicked() {
@@ -774,6 +863,246 @@ fn death(mut contexts: EguiContexts, p: Res<Play>) -> Result {
                     ui.label(l);
                 }
             });
+        });
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// C4 (docs/COMBAT.md § 5): the player's fight: the replay's cues, the fight HUD, the wounds panel
+// ---------------------------------------------------------------------------
+
+/// C4: one cue of the beat replay: a word over a body (and a flash on a telling blow), from `at` for `[view] cue_s`.
+pub struct Cue {
+    at: Instant,
+    key: u64,
+    text: String,
+    color: [u8; 3],
+    big: bool,
+    flash: bool,
+}
+
+/// The sim's body key (sim.rs `ekey`) of an entity.
+fn key_of(e: citysim::EntityId) -> u64 {
+    u64::from(e.index) | (u64::from(e.generation) << 32)
+}
+
+/// The cues of one blow: the swing over the striker, the dodge or the hit over the struck, a break, a joiner.
+fn cues_of(b: &citysim::systems::combat::BeatLog, at: Instant, out: &mut Vec<Cue>) {
+    use citysim::components::Severity;
+    use citysim::systems::combat::{Blow, End};
+    let mut cue = |e: citysim::EntityId, text: String, color: [u8; 3], big: bool, flash: bool| {
+        out.push(Cue { at, key: key_of(e), text, color, big, flash });
+    };
+    match b.blow {
+        Blow::Miss => {
+            cue(b.by, "swing".into(), [200, 200, 200], false, false);
+            cue(b.on, "dodge".into(), [140, 200, 255], false, false);
+        }
+        Blow::Hit(r, v) => {
+            cue(b.by, "swing".into(), [200, 200, 200], false, false);
+            match v {
+                Severity::Graze => cue(b.on, format!("graze: {}", r.label()), [250, 220, 90], false, false),
+                Severity::Wound => cue(b.on, format!("HIT {} (staggers)", r.label()), [255, 150, 60], true, true),
+                Severity::Grave => cue(b.on, format!("GRAVE: {}", r.label()), [255, 60, 50], true, true),
+            }
+        }
+        Blow::Broke(e) => {
+            let (t, c) = match e {
+                End::Fled => ("RUNS", [255, 255, 255]),
+                End::Yielded => ("YIELDS", [255, 255, 255]),
+                End::KnockedOut => ("KNOCKED OUT", [255, 90, 60]),
+                End::Downed => ("DOWN", [255, 60, 50]),
+                End::Dead => ("DEAD", [255, 30, 30]),
+                End::Wrecked => ("WRECKED", [255, 90, 60]),
+                End::Won => ("WINS", [120, 255, 120]),
+            };
+            cue(b.by, t.into(), c, true, true);
+        }
+        Blow::Joined => cue(b.by, "JOINS IN".into(), [210, 130, 255], true, true),
+        Blow::Cover(c) => cue(b.by, format!("cover {c}%"), [120, 230, 230], false, false),
+        Blow::Stuck => cue(b.by, "can't get away".into(), [255, 200, 120], false, false),
+        Blow::Refused => cue(b.on, "no quarter".into(), [255, 120, 90], true, false),
+        Blow::Drew(d) => cue(b.by, if d { "draws" } else { "holsters" }.into(), [200, 200, 200], false, false),
+        Blow::Stance(s) => cue(b.by, s.order_label().into(), [200, 200, 200], false, false),
+    }
+}
+
+/// C4, the beat replay: each new tick of beats (`Shared::beats`) is laid out a beat every `beat_s`, and each cue is
+/// drawn over its body (rising, fading) with a flash on a telling blow.
+pub fn replay(
+    mut contexts: EguiContexts,
+    mut p: ResMut<Play>,
+    sim: Res<crate::sim::Sim>,
+    cams: Query<(&Camera, &GlobalTransform), With<crate::cam::CityCam>>,
+) -> Result {
+    use bevy_egui::egui;
+    let bp = p.shared.beats.lock().unwrap().clone();
+    if bp.seq != p.beats_seq {
+        p.beats_seq = bp.seq;
+        let now = Instant::now();
+        let mut fresh = Vec::new();
+        for (g, b) in &bp.beats {
+            cues_of(b, now + Duration::from_secs_f32(*g as f32 * bp.beat_s), &mut fresh);
+        }
+        p.cues.extend(fresh);
+    }
+    let now = Instant::now();
+    let life = Duration::from_secs_f32(p.cue_s.max(0.1));
+    p.cues.retain(|c| now < c.at + life);
+    if p.cues.is_empty() {
+        return Ok(());
+    }
+    let Ok(cam) = cams.single() else { return Ok(()) };
+    let ctx = contexts.ctx_mut()?;
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("beat_cues")));
+    // the cues stacked per body (a swing and a hit on one body in one beat sit one above the other)
+    let mut stack: std::collections::HashMap<u64, f32> = std::collections::HashMap::new();
+    for c in p.cues.iter().filter(|c| c.at <= now) {
+        let at = if sim.subject == Some(c.key) {
+            sim.subject_at.map(|(f, _)| f)
+        } else {
+            sim.people.iter().find(|b| b.id == c.key).map(|b| b.at)
+        };
+        let Some(at) = at else { continue };
+        let Ok(px) = cam.0.world_to_viewport(cam.1, crate::mesh::bv(at.x, at.y, at.z + 2.1)) else { continue };
+        let age = (now - c.at).as_secs_f32() / life.as_secs_f32();
+        let a = (1.0 - age).clamp(0.0, 1.0);
+        let up = stack.entry(c.key).or_insert(0.0);
+        let pos = egui::pos2(px.x, px.y - 26.0 * age - *up);
+        *up += if c.big { 20.0 } else { 15.0 };
+        let col = egui::Color32::from_rgba_unmultiplied(c.color[0], c.color[1], c.color[2], (255.0 * a) as u8);
+        if c.flash {
+            let fl = egui::Color32::from_rgba_unmultiplied(c.color[0], c.color[1], c.color[2], (110.0 * a) as u8);
+            painter.circle_filled(egui::pos2(px.x, px.y + 14.0), 10.0 + 18.0 * age, fl);
+        }
+        let font = egui::FontId::proportional(if c.big { 18.0 } else { 13.0 });
+        painter.text(
+            pos + egui::vec2(1.0, 1.0),
+            egui::Align2::CENTER_BOTTOM,
+            &c.text,
+            font.clone(),
+            egui::Color32::from_black_alpha((200.0 * a) as u8),
+        );
+        painter.text(pos, egui::Align2::CENTER_BOTTOM, &c.text, font, col);
+    }
+    Ok(())
+}
+
+fn order_button(ui: &mut bevy_egui::egui::Ui, p: &Play, label: &str, o: citysim::systems::combat::Order) {
+    if ui.button(label).clicked() {
+        p.shared.send(UiCmd::Fight(o));
+    }
+}
+
+/// C4: the fight HUD (top left) while the body is in a live fight: the sides with their stances and what their
+/// wounds show, your stance and orders, your wounds exactly, the blood and fatigue, the morale hints, the chrome to
+/// hand, an Attack row a foe with its odds, a Help row a downed body.
+pub fn fight(mut contexts: EguiContexts, p: Res<Play>) -> Result {
+    use bevy_egui::egui;
+    use citysim::systems::combat::{Order, Stance};
+    let ctx = contexts.ctx_mut()?;
+    let Some(h) = p.shared.player.lock().unwrap().clone() else { return Ok(()) };
+    let Some(f) = h.fight else { return Ok(()) };
+    let w = p.hud_width_px * 1.4;
+    egui::Window::new("the fight")
+        .anchor(egui::Align2::LEFT_TOP, [8.0, 200.0])
+        .fade_in(false)
+        .resizable(false)
+        .default_width(w)
+        .max_width(w)
+        .show(ctx, |ui| {
+            ui.label(format!(
+                "beat {}   {}",
+                f.beats,
+                if p.shared.paused.load(Ordering::Relaxed) { "PAUSED (Space)" } else { "Space pauses" }
+            ));
+            let orange = egui::Color32::from_rgb(255, 170, 80);
+            for hint in &f.hints {
+                ui.colored_label(orange, hint);
+            }
+            ui.separator();
+            for (k, title) in [(f.mine, "your side"), (1 - f.mine, "their side")] {
+                ui.strong(title);
+                for m in &f.sides[k] {
+                    let front = if m.front { " [in the duel]" } else { "" };
+                    let shows = if m.shows.is_empty() { String::new() } else { format!(", {}", m.shows) };
+                    let wav = if m.wavering && k != f.mine { ", wavering" } else { "" };
+                    ui.label(format!("  {} ({}){shows}{wav}{front}", m.name, m.stance));
+                }
+            }
+            ui.separator();
+            ui.horizontal_wrapped(|ui| {
+                ui.label("stance:");
+                for s in Stance::ALL {
+                    if ui.selectable_label(f.stance == Some(s), s.order_label()).clicked() {
+                        p.shared.send(UiCmd::Fight(Order::Stance(s)));
+                    }
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                ui.label(format!("{}{}", f.weapon, if f.holstered { " (holstered)" } else { "" }));
+                if f.holstered {
+                    order_button(ui, &p, "Draw", Order::Draw);
+                } else {
+                    order_button(ui, &p, "Holster", Order::Holster);
+                }
+                order_button(ui, &p, &format!("Take cover ({:.0}% here)", f.cover * 100.0), Order::Cover);
+            });
+            ui.horizontal_wrapped(|ui| {
+                order_button(ui, &p, "Flee", Order::Flee);
+                order_button(ui, &p, "Yield", Order::Yield);
+            });
+            for (id, name, odds) in &f.odds {
+                order_button(ui, &p, &format!("Attack {name} ({:.0}%)", odds * 100.0), Order::Attack(*id));
+            }
+            for (id, name) in &f.downed {
+                order_button(ui, &p, &format!("Help {name} (drag clear)"), Order::Help(*id));
+            }
+            if !f.pending.is_empty() {
+                ui.small(format!("at the next beat: {}", f.pending.join(", ")));
+            }
+            ui.separator();
+            bar(ui, "blood", f.blood);
+            bar(ui, "fatigue", f.fatigue);
+            for wl in &f.wounds {
+                ui.small(wl);
+            }
+            for c in &f.chrome {
+                ui.colored_label(egui::Color32::from_rgb(120, 230, 230), c);
+            }
+        });
+    Ok(())
+}
+
+/// C4: the wounds panel (top left) outside a fight: each wound, its days to heal, seen to or not, the blood, what a
+/// patch-up costs and where (the Treat goal's pick, or why nobody will see to it), and the button that goes.
+pub fn wounds(mut contexts: EguiContexts, p: Res<Play>) -> Result {
+    use bevy_egui::egui;
+    let ctx = contexts.ctx_mut()?;
+    let Some(h) = p.shared.player.lock().unwrap().clone() else { return Ok(()) };
+    if h.fight.is_some() {
+        return Ok(());
+    }
+    let Some(wv) = h.wounds else { return Ok(()) };
+    let w = p.hud_width_px * 1.4;
+    egui::Window::new("your wounds")
+        .anchor(egui::Align2::LEFT_TOP, [8.0, 200.0])
+        .fade_in(false)
+        .resizable(false)
+        .default_width(w)
+        .max_width(w)
+        .show(ctx, |ui| {
+            bar(ui, "blood", wv.blood);
+            for l in &wv.wounds {
+                ui.label(l);
+            }
+            ui.separator();
+            for l in &wv.care {
+                ui.small(l);
+            }
+            if wv.untreated && ui.button("Get patched up (the Treat goal)").clicked() {
+                p.shared.send(UiCmd::Goal(GoalKind::Treat));
+            }
         });
     Ok(())
 }

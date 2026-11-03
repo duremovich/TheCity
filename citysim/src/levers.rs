@@ -55,6 +55,13 @@ pub enum PlayerCommand {
     Stop(EntityId),
     /// M18 P1: the possessed body's own brain on (`true`) or off.
     SetAutopilot(EntityId, bool),
+    /// C4 (docs/COMBAT.md § 5): a fight order for the possessed body
+    /// (`combat::order`): a stance, Attack, Draw or Holster, Take cover,
+    /// Flee, Yield, Help; applied at the next beat of its fight.
+    Fight {
+        agent: EntityId,
+        order: crate::systems::combat::Order,
+    },
     /// M18 P2: a menu verb for the possessed body (`player::act`).
     Act {
         agent: EntityId,
@@ -1045,6 +1052,7 @@ impl World {
             PlayerCommand::Stop(agent) => crate::systems::player::stop(self, *agent),
             PlayerCommand::SetAutopilot(agent, on) => crate::systems::player::set_autopilot(self, *agent, *on),
             PlayerCommand::Act { agent, verb } => crate::systems::player::act(self, *agent, *verb),
+            PlayerCommand::Fight { agent, order } => crate::systems::combat::order(self, *agent, *order),
             PlayerCommand::SetView(rect) => {
                 self.view_rect = *rect;
             }

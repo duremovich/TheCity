@@ -54,7 +54,10 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::Chat | ActionKind::Flirt | ActionKind::JoinGang => 30,
         ActionKind::Propose | ActionKind::SplitLoot => 10,
         ActionKind::Extort => 20,
-        ActionKind::Fence | ActionKind::Attack => 15,
+        ActionKind::Fence => 15,
+        // C4: the swing comes at once; the fight itself is the live engagement
+        // the step holds Running (C3a). The old 15 was a one-roll fight's.
+        ActionKind::Attack => 1,
         ActionKind::CarryCorpse => 20,
         ActionKind::BuryCorpse => 60,
         // M12 D31: until the expedition leaves (a gang's raid_at, a riot's muster_at).
@@ -1741,9 +1744,14 @@ pub(crate) fn attack_end(world: &mut World, id: EntityId, victim: EntityId, c: &
         && world.hunts.get(&id).is_some_and(|h| h.target == victim)
         && crate::systems::law::living(world, id)
     {
-        let text = format!("{name} gave chase after {}", world.name_of(victim));
-        world.push_event(crate::events::EventKind::Fight, &[id, victim], text);
-        crate::systems::ownership::jobs2_row(world).chases += 1;
+        // C4 (C3b's wrong-read): one line a chase, not one each time the
+        // target breaks and runs again (`Live::chased`, over with the Hunt).
+        if world.combat.chased.get(&id) != Some(&victim) {
+            world.combat.chased.insert(id, victim);
+            let text = format!("{name} gave chase after {}", world.name_of(victim));
+            world.push_event(crate::events::EventKind::Fight, &[id, victim], text);
+            crate::systems::ownership::jobs2_row(world).chases += 1;
+        }
         return;
     }
     // M15 W22: the Hunt's strike (after the crime: street silence reads the Hunt).

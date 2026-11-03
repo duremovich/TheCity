@@ -884,6 +884,14 @@ pub struct ViewCfg {
     /// M18 P4: the day-end's "your block": the events within this many
     /// tiles of the player's home door (where it stands, homeless).
     pub block_tiles: u16,
+    /// C4 (docs/COMBAT.md § 5, the combat clock): while the body the human
+    /// drives is in a live fight the view runs the sim at this many ticks a
+    /// real second (the whole sim on one clock), so a beat plays in about a
+    /// second; normal speed when the fight ends.
+    pub combat_speed: f64,
+    /// C4: a beat's cue (a word over a body, a flash) floats this many real
+    /// seconds.
+    pub cue_s: f32,
 }
 
 impl Default for ViewCfg {
@@ -985,6 +993,8 @@ impl Default for ViewCfg {
             news_log_lines: 300,
             news_knowers_max: 40,
             block_tiles: 12,
+            combat_speed: 1.0,
+            cue_s: 1.2,
         }
     }
 }
@@ -14836,6 +14846,26 @@ pub struct CombatCfg {
     pub bout_stop: usize,
     pub treat_urgency_day: f32,
     pub back_room_max: usize,
+    /// C4 (docs/COMBAT.md § 6): abstract cover (`combat::cover_at`), a ranged
+    /// hit's chance x (1 - cover): the open street or a road `cover_open`, a
+    /// doorway `cover_door`, a street tile `cover_wall` for each walled side,
+    /// inside a building `cover_inside`, at most `cover_max`. Take cover
+    /// moves the body to the best tile within `cover_tiles`.
+    pub cover_open: f32,
+    pub cover_door: f32,
+    pub cover_wall: f32,
+    pub cover_inside: f32,
+    pub cover_max: f32,
+    pub cover_tiles: u16,
+    /// C4: a live fight with a body the human drives runs this many beats a
+    /// tick (`beats_per_tick` otherwise), so an order lands at the next beat.
+    pub human_beats_per_tick: u8,
+    /// C4: the odds on an Attack row are this many mock fights
+    /// (`combat::odds`, the beat's rules without the world's writes).
+    pub odds_trials: u32,
+    /// C4: the fight HUD's morale hint: a body this close above its break
+    /// line is wavering.
+    pub hint_waver: f32,
 }
 
 impl Default for CombatCfg {
@@ -14844,7 +14874,7 @@ impl Default for CombatCfg {
             max_beats: 10,
             beats_per_tick: 6,
             reach_tiles: 4,
-            log_beats: 24,
+            log_beats: 96,
             hit_base: 0.4,
             attack_w: 0.6,
             evade_w: 0.5,
@@ -14950,6 +14980,15 @@ impl Default for CombatCfg {
             bout_stop: 1,
             treat_urgency_day: 0.15,
             back_room_max: 1,
+            cover_open: 0.0,
+            cover_door: 0.3,
+            cover_wall: 0.15,
+            cover_inside: 0.3,
+            cover_max: 0.5,
+            cover_tiles: 2,
+            human_beats_per_tick: 1,
+            odds_trials: 200,
+            hint_waver: 0.12,
         }
     }
 }

@@ -367,6 +367,8 @@ pub enum Verb {
     Chat(EntityId),
     /// A person: `Attack`.
     Attack(EntityId),
+    /// C4: a downed body: drag it clear to its Clinic (the M16b Rescue's steps).
+    Help(EntityId),
     // --- M18 P3: talk (a body beside you; `talk`)
     /// A person: walk over to stand beside them.
     WalkOver(EntityId),
@@ -444,6 +446,7 @@ impl Verb {
             | Verb::WalkOver(_)
             | Verb::WorkJob
             | Verb::Answer(..) => &[],
+            Verb::Help(_) => &["the Rescue's tie (kin, a friend, a colleague, a called stranger's term): the human's will"],
         }
     }
 }
@@ -854,7 +857,30 @@ pub fn plan_of(world: &World, id: EntityId, verb: Verb) -> Result<(Plan, String)
                 }
             }
             steps.push(step(ActionKind::Attack, Some(o), None));
-            mk(Some(o), steps, format!("Attack {}", world.name_of(o)))
+            // C4: the odds, as the talk rows show theirs (mock fights on the
+            // beat's rules, the likely joiners at their chance).
+            let odds = crate::systems::combat::odds(world, id, o);
+            let near = odds.theirs - 1.0;
+            let more = if near >= 0.5 { format!("; {near:.1} of theirs may jump in") } else { String::new() };
+            mk(Some(o), steps, format!("Attack {} ({:.0}%{more})", world.name_of(o), 100.0 * odds.p))
+        }
+        Verb::Help(o) => {
+            let Some(rec) = world.wounded.get(&o) else { return no("not down") };
+            if rec.stable {
+                return no("already seen to");
+            }
+            if rec.rescuer.is_some_and(|x| x != id) {
+                return no("someone has them");
+            }
+            let Some(clinic) = rec.clinic else { return no("no Clinic to take them to") };
+            let steps = vec![
+                step(ActionKind::GoTo(LocationKey::Victim), Some(o), None),
+                step(ActionKind::CarryWounded, Some(o), None),
+                step(ActionKind::GoTo(LocationKey::Clinic), Some(clinic), None),
+                step(ActionKind::Stabilise, Some(clinic), None),
+            ];
+            let label = format!("Drag {} clear to {}", world.name_of(o), world.name_of(clinic));
+            Ok((Plan { goal: GoalKind::Rescue, target: Some(o), steps, started_tick: tick }, label))
         }
         Verb::WalkOver(o) => {
             if !valid_person(world, id, o) {
@@ -1504,6 +1530,7 @@ pub fn menu_body(world: &World, id: EntityId, o: EntityId) -> Menu {
         Verb::AskWorkOf(o),
         Verb::Threaten(o),
         Verb::Attack(o),
+        Verb::Help(o),
     ];
     // M18 P3: the talk rows stay, greyed with why (too far, nothing to lend)
     let grey = |v: Verb| {
@@ -1609,6 +1636,12 @@ pub fn act(world: &mut World, id: EntityId, verb: Verb) {
     };
     plan::install(world, id, plan);
     plan::reserve_for(world, id, &held);
+    // C4: the rescuer's claim on the downed (the Rescue's own `plan`).
+    if let Verb::Help(o) = verb {
+        if let Some(x) = world.wounded.get_mut(&o) {
+            x.rescuer = Some(id);
+        }
+    }
     if let Verb::TakeBed(h) = verb {
         let until = tick + world.config.brain.plan_timeout_ticks;
         world.reserve(id, crate::exec::reservations::ReservationKind::Bed { home: h }, until);

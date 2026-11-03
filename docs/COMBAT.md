@@ -446,6 +446,85 @@ These come later: ranged (§ 7, with addendum 24) and the blast (§ 8, with netr
   fatigue, the Sandevistan's cooldown and the flight's hold are not saved; the view's beat replay of the helpers'
   blows (the ring log has them) waits for C4.
 
+**C4 as built (2026-11-03; deviations, `OPEN-179`).**
+- **Orders** are `PlayerCommand::Fight { agent, order }` (`combat::Order`: `Stance`, `Attack`, `Draw`, `Holster`,
+  `Cover`, `Flee`, `Yield`, `Help`), kept in `Live::orders` (not saved, like the rest of `Live`). In a live fight they
+  wait in `pending`, and `combat::step` applies them before the tick's beats (`apply_orders`). A stance or a draw
+  rebuilds the body's fighter (`refit`: weapon, skills, cover; morale moved by the stance's `stance_morale`), and a
+  draw readies on the kind's `draw` beats. A stance, draw or holster given outside a fight holds for the next one:
+  `stance_for` and `fighter` read it for a body the human drives, the human's pick in place of the NPC's.
+- **Deviation: the player's fight runs a beat a tick** (`[combat] human_beats_per_tick` 1, against `beats_per_tick`
+  6). At six beats a tick, the first play-test's fight ended inside its first tick (6 beats, a knockout) before any
+  order could land. Now an order lands at the next beat. The fight takes ~1 game minute a beat (a 10-beat fight is
+  10 min) and runs at `[view] combat_speed` 1.0 tick a real second, a beat a second, as § 5 asks. **The Attack
+  action's duration is 1, not 15** (`exec::actions`, for NPCs too): the 15-min stand-off belonged to the one-roll
+  fight, and the first play-test waited 14 min after picking Attack.
+- **Attack** outside a fight is P2's verb (the NPC's Attack step, `combat::fight`, live in camera range). Its row now
+  shows the odds and the likely joiners: "Attack Mina Marlow (36%; 1.3 of theirs may jump in)". In a fight, Attack puts
+  the target at the head of its side, so he faces you at the next duel (the chain of duels has no switch mid-duel), and
+  it wakes a hold-back stance.
+- **Flee and Yield** are tried at the body's turn in a beat (`Want`). A flight takes the break's roll (`flee_roll`, the
+  legs' wounds; a lame body cannot run); a failed one is retried each beat with no strike ("tries to break away, and
+  can't"). A yield works when the other side takes it; when it is lethal all out: "won't take your yield". A body behind
+  the front steps out at once. **The body's nerve is its own**: it still breaks on its morale like an NPC's, and the HUD
+  warns first ("you're wavering").
+- **Fleeing moves the player too**: the flee plan C3a gave NPCs only (`FleeToHome`). Help breaks off the same way, then
+  runs the M16b Rescue's steps on that body (`wounded::plan_for`) instead of the flight. Outside a fight Help is
+  `Verb::Help` in a downed body's menu.
+- **Cover** (§ 6; none of it existed before C4): `combat::cover_at(world, tile, building)`, the shooter's side not read
+  yet.
+  - The values: `cover_inside` inside a building; `cover_open` on a road; on a street tile, `cover_wall` for each walled
+    side or `cover_door` beside a doorway; at most `cover_max`.
+  - Every fighter carries it, NPCs too: an indoor gunfight's hits are cut by 0.3 (not measured).
+  - Take cover moves the body to the best tile within `cover_tiles` that stays within `reach_tiles` of its foe.
+- **The odds** (`combat::odds`) are `odds_trials` mock fights on the beat's rules.
+  - The mock: `mock` and `mock_strike`, with no world writes; no fatigue, Kerenzikov or Sandevistan.
+  - The likely joiners (their reasons in `JoinCtx`, shared with `recruit`) are present on their join chance; in a fight,
+    its sides as they stand. The draw is keyed on the pair and the hour.
+- **The clock and the replay** (cityview):
+  - The sim runs at `combat_speed` while the possessed body is engaged, under a script's hold too; Space pauses.
+  - The tick's beats of the fights in the ring (`combat::last_beats`: the live engagements and those that ended this
+    tick, `Live::ended`) go to the client a `beat_s` apart. `BeatLog.beat` groups a beat's blows.
+  - They are drawn as words over the bodies (swing, dodge, graze, HIT region (staggers), GRAVE, RUNS, YIELDS, KNOCKED
+    OUT, DOWN, JOINS IN, cover), with a flash on a telling blow (`play.rs` `replay`). No new animation: the clips are
+    walk and idle.
+  - The player's fight's beats are story-log lines (`combat::blow_line`).
+  - `log_beats` 24 -> 96. New ring-log entries: `Joined`, `Cover`, `Stuck`, `Refused`, `Drew`, `Stance`.
+- **The HUD**:
+  - The fight panel (`combat::fight_view`): the sides, their stances, what their wounds show; the morale hints, from
+    morale against the break line and the head count; fatigue, blood, your own wounds exactly, the chrome to hand; an
+    Attack row with the odds for each foe, a Help row for each downed body, and the orders pending.
+  - The wounds panel outside a fight (`combat::wounds_view`): days to heal, seen to or not, the Clinic's and the back
+    room's price, where the Treat goal would go or why nobody will see to it, and "Get patched up".
+  - The HUD's stance and holster for the next fight.
+  - Script lines: `order ...`, `body #INDEX`, `body best friends|weak|strong` (simthread `best_body`); the sessions are
+    `view/cityview/scripts/c4_*.play`.
+- **C3b's lines**: a robot's Fight line is in machine words ("chassis dented", "sensor head smashed"); a chase gets one
+  "gave chase" line (`Live::chased`, over with the Hunt).
+- `SAVE_VERSION` stays 132: nothing saved changed (`Live` is not saved; `PlayerCommand::Fight` is a new variant).
+- **The play session** (20k day-21 save, Solene Achebe #27603; `c4_outnumbered.play`, `c4_subdue.play`):
+  - She went into Bar#5956 at 18:00. At 19:40 the Attack row read "Attack Mina Marlow (36%; 1.3 of theirs may jump
+    in)". Two friends jumped in ("Ilse Kaneda jumped in on Mina Marlow's side against Solene Achebe (a friend)").
+  - The panel then read "they outnumber you (3 to 1)", "you're wavering", "Mina Marlow is wavering", every Attack row
+    0%.
+  - Over 3 beats she took a body Wound and three grazes, took cover (30% indoors, useless against fists), and her nerve
+    broke ("you break and run").
+  - The wounds panel offered a Clinic's patch-up at 24c or the back room's at 12c, with 7c in hand. The Treat goal took
+    her to Back Room#2994: patched for 12c, 5c put up by a friend. A guard arrested her there for the Assault.
+  - The subdue fight: Clemence Lockridge (72%), 10 beats over 10 min; she yielded at max_beats.
+- **What reads wrong** (the next pass; `OPEN-295`, `296`, `297`):
+  - (a) A knockout has no duration: the knocked-out player stands up the next minute.
+  - (b) The flight goes nowhere: `FleeToHome` ended in the bar after 2 min (C3a's wrong-read; the player was squatting).
+  - (c) A hold-back or timid target yields before a blow: its morale starts under its break line, so "Attack (100%)"
+    is a free Assault, and the 64-year-old picked as `weak` "yielded" in one beat.
+  - (d) Joiners inside a building are not drawn (the indoor rule), so their blows land from nowhere.
+  - (e) The odds read 0% the moment a crowd is in (honest: a lone body wins 16% against 3), so the Attack rows mid-fight
+    are useless. Flee and Yield are the only live choices.
+  - (f) Twenty witness lines flood the story log after one assault.
+  - (g) Cover is abstract and does nothing in a fist fight; Holster shows with bare hands.
+  - (h) A non-reproducible start: possessed at the save tick or 19:00, the same seed put her in a different place each
+    run (thread order). Possessing at 18:00 and walking to a fixed Bar made the scripts repeat.
+
 ## Decisions (Dylan, 2026-11-02)
 
 | # | question | decided |

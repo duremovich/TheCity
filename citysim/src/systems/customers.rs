@@ -442,6 +442,12 @@ pub fn untreated_why(world: &World, id: EntityId) -> Option<String> {
     Some("no doctor open in reach".to_string())
 }
 
+/// C4, the wounds panel: a Clinic's patch-up and the back room's for
+/// `id`'s wounds now (0 without `[customers]`).
+pub fn patch_prices(world: &World, id: EntityId) -> (i64, i64) {
+    cfg(world).map_or((0, 0), |c| (wound_price(world, id, c.patch_price), wound_price(world, id, c.back_price)))
+}
+
 /// A patch-up's price for `id`'s wounds: `base` x `[combat]
 /// treat_price_mult` by the worst untreated one.
 fn wound_price(world: &World, id: EntityId, base: i64) -> i64 {

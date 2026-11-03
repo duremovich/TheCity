@@ -25,6 +25,13 @@
 //! between two ticks into the world's command queue as `PlayerCommand`s (applied at the next tick's start, like the
 //! R key's `reload_req`), and publishes the body's HUD state (`Shared::player`) with each frame. Pause and the play
 //! speed (a multiple of the rate, `[view] play_speeds`) are atomics read at the pacing.
+//!
+//! C4 (docs/COMBAT.md § 5, the player's fight): while the possessed body is in a live engagement the thread runs at
+//! `[view] combat_speed` ticks a real second (the combat clock: the whole sim, a beat about a second; a script's hold
+//! still stops it), and after each tick publishes the tick's beats of the fights in the ring (`Shared::beats`,
+//! `combat::last_beats`) for the replay's cues (play.rs) and the player's fight's beats as story-log lines
+//! (`combat::blow_line`); the HUD carries the fight (`combat::fight_view`) and the wounds panel
+//! (`combat::wounds_view`).
 
 use citysim::components::{Brain, GoalKind, Identity, TilePos};
 use citysim::systems::player::{self as pl, Verb};
@@ -94,6 +101,18 @@ pub struct Shared {
     /// M18 P4: what the city knows and does about the possessed body (the log, who knows, who is after it, the
     /// day-end summaries, the death).
     pub news: Mutex<NewsPub>,
+    /// C4: the last tick's beats of the fights in the ring, for the replay.
+    pub beats: Mutex<BeatsPub>,
+}
+
+/// C4: one tick's beats for the replay: each fight's blows in order (a beat's blows share its `group`, the beats
+/// are `beat_s` real seconds apart).
+#[derive(Clone, Debug, Default)]
+pub struct BeatsPub {
+    pub seq: u64,
+    pub beat_s: f32,
+    /// (the group within its fight, the blow)
+    pub beats: Vec<(u32, citysim::systems::combat::BeatLog)>,
 }
 
 /// M18 P4: the player's panels (`citysim::systems::player_news`, read at `[view] news_scan_minutes`; the log from
@@ -135,6 +154,13 @@ pub enum UiCmd {
     Act(Verb),
     /// M18 P3: a building's menu by its entity (a `--play` line's `bld INDEX`: the menu a click on it opens).
     Bld(EntityId),
+    /// C4: a fight order (a stance, Attack, Draw or Holster, Take cover, Flee, Yield, Help).
+    Fight(citysim::systems::combat::Order),
+    /// C4: a body's menu by its index wherever it is (a `--play` line's `body #INDEX`: a target off the screen).
+    BodyIndex(u32),
+    /// C4: a `--play` line's `body best friends|weak|strong`: of the adults within `[combat] join_tiles` of the
+    /// subject, the one with the most likely joiners, the best odds or the worst (`combat::odds`); its menu.
+    BodyBest(String),
 }
 
 /// A menu row for the render thread: the label, the verb, the will terms it waives (`Verb::waived`, the hover), and
@@ -180,6 +206,13 @@ pub struct PlayerHud {
     pub food: u32,
     /// M18 P4: why the body cannot be ordered now, when held ("in cuffs", a sentence's days left).
     pub held: Option<String>,
+    /// C4: the body's live fight (`None`: not in one) and, outside one, its wounds panel.
+    pub fight: Option<citysim::systems::combat::FightView>,
+    pub wounds: Option<citysim::systems::combat::WoundsView>,
+    /// C4: the stance and the weapon held for the next fight; the chrome carried.
+    pub stance: Option<citysim::systems::combat::Stance>,
+    pub holstered: bool,
+    pub chrome: Vec<String>,
 }
 
 impl Shared {
@@ -289,6 +322,7 @@ impl Shared {
             player: Mutex::new(None),
             menu: Mutex::new(None),
             news: Mutex::new(NewsPub::default()),
+            beats: Mutex::new(BeatsPub::default()),
         }
     }
 }
@@ -372,6 +406,8 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
     // M18 P4: the player's panels (read from the possession on)
     let mut news: Option<News> = None;
     let mut last_tile = view::subject_tile(&world, subject);
+    // C4: a tick's beats were published (its frame goes with them)
+    let mut shown_beats = false;
     loop {
         // M18 P1: possessed at --from (the city pre-run to it); the render thread's orders, between two ticks
         if a.possess && !possessed && world.tick >= from {
@@ -406,10 +442,23 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                     publish_menu(&sh, &world, pl::menu_body(&world, subject, o), &mut menu_seq);
                     continue;
                 }
+                UiCmd::BodyBest(how) => {
+                    if let Some(o) = best_body(&world, subject, &how) {
+                        publish_menu(&sh, &world, pl::menu_body(&world, subject, o), &mut menu_seq);
+                    }
+                    continue;
+                }
+                UiCmd::BodyIndex(i) => {
+                    if let Some(o) = world.entities().find(|e| e.index == i) {
+                        publish_menu(&sh, &world, pl::menu_body(&world, subject, o), &mut menu_seq);
+                    }
+                    continue;
+                }
                 UiCmd::Act(v) => citysim::PlayerCommand::Act { agent: subject, verb: v },
                 UiCmd::Goal(g) => citysim::PlayerCommand::Goal { agent: subject, goal: g },
                 UiCmd::Stop => citysim::PlayerCommand::Stop(subject),
                 UiCmd::Autopilot(on) => citysim::PlayerCommand::SetAutopilot(subject, on),
+                UiCmd::Fight(order) => citysim::PlayerCommand::Fight { agent: subject, order },
             };
             eprintln!("cityview: tick {} order {cmd:?}", world.tick);
             world.push_command(cmd);
@@ -459,14 +508,18 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
             std::thread::sleep(Duration::from_millis(5));
             continue;
         }
+        // C4, the combat clock: the possessed body in a live fight runs the whole sim at `[view] combat_speed`, under
+        // a script's hold too (the hold still stops it)
+        let fighting = possessed && citysim::systems::combat::engaged(&world, subject);
         // M18 P1: Space stops the clock (paced play only; a bench's run to its hold goes on)
-        if hold == u64::MAX && world.tick >= from && sh.paused.load(Ordering::Relaxed) {
+        if (hold == u64::MAX || fighting) && world.tick >= from && sh.paused.load(Ordering::Relaxed) {
             std::thread::sleep(Duration::from_millis(20));
             next_at = Instant::now();
             continue;
         }
         // paced: free running past --from; flat out to --from and to a bench's hold
-        let paced = hold == u64::MAX && world.tick >= from;
+        let paced = (hold == u64::MAX || fighting) && world.tick >= from;
+        let tick_rate = if fighting { cfg.combat_speed.max(1e-3) } else { rate * sh.speed().max(1e-6) };
         if paced && rate > 0.0 {
             // V1: the wait in slices (a tick is a real minute walk-matched), so a reload is seen between them
             let now = Instant::now();
@@ -474,7 +527,7 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                 std::thread::sleep((next_at - now).min(Duration::from_millis(20)));
                 continue;
             }
-            next_at = next_at.max(now) + Duration::from_secs_f64(1.0 / (rate * sh.speed().max(1e-6)));
+            next_at = next_at.max(now) + Duration::from_secs_f64(1.0 / tick_rate);
         } else if paced {
             // --rate 0: hold the frame
             std::thread::sleep(Duration::from_millis(20));
@@ -504,6 +557,51 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                     n.block_event(&world, e);
                 }
             }
+            // C4: the tick's beats: the player's fight's to the story log, every fight's in the ring to the replay
+            let beats = citysim::systems::combat::last_beats(&world);
+            if !beats.is_empty() {
+                let ring_r = i32::from(cfg.ring_half_tiles);
+                let me = view::subject_tile(&world, subject);
+                let in_ring = |x: EntityId| {
+                    let t = world.comp::<citysim::Position>(x).map(|p| p.tile);
+                    match (t, me) {
+                        (Some(t), Some(m)) => {
+                            (i32::from(t.x) - i32::from(m.x)).abs() <= ring_r && (i32::from(t.y) - i32::from(m.y)).abs() <= ring_r
+                        }
+                        _ => false,
+                    }
+                };
+                let bpt = f64::from(world.config.combat.beats_per_tick.max(1));
+                let beat_s = ((1.0 / tick_rate) / bpt).min(1.5) as f32;
+                let mut out = Vec::new();
+                for (seen, log) in &beats {
+                    if !seen.iter().any(|&x| x == subject || in_ring(x)) {
+                        continue;
+                    }
+                    let mine = seen.contains(&subject);
+                    let (mut group, mut last) = (0u32, None);
+                    for b in log {
+                        if last.is_some_and(|l| l != b.beat) {
+                            group += 1;
+                        }
+                        last = Some(b.beat);
+                        out.push((group, *b));
+                        if mine {
+                            let (line, turn) = citysim::systems::combat::blow_line(&world, b, subject);
+                            eprintln!("beat {}: {line}", stamp(b.tick));
+                            n.push(&world, turn, line);
+                        }
+                    }
+                }
+                if !out.is_empty() {
+                    let mut bp = sh.beats.lock().unwrap();
+                    bp.seq += 1;
+                    bp.beat_s = beat_s;
+                    bp.beats = out;
+                    drop(bp);
+                    shown_beats = true;
+                }
+            }
             // M18 P4: who knows, who is after you, the day's end, the death
             n.step(&world);
             if n.pubd.death.is_some() && !n.dead_paused {
@@ -518,9 +616,10 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         last_event = world.events.back().map_or(last_event, |e| e.id);
         acc = (acc.0 + 1, acc.1 + t_tick.elapsed().as_secs_f64());
         sh.tick.store(world.tick, Ordering::Relaxed);
-        // publish every paced tick; flat out, only the two ticks before the hold (or --from) the lerp needs
+        // publish every paced tick; flat out, only the two ticks before the hold (or --from) the lerp needs (C4: and
+        // every tick with beats of a fight in the ring)
         let target = if hold == u64::MAX { from } else { hold };
-        if paced || world.tick + 1 >= target {
+        if paced || std::mem::take(&mut shown_beats) || world.tick + 1 >= target {
             let at = view::subject_tile(&world, subject).unwrap_or(at);
             let ring = view::ring_about(at, cfg.ring_half_tiles, w, h);
             let frame = view::snapshot_many_cached(&world, &[ring], Some(&mut ways)).pop().expect("one ring, one frame");
@@ -612,6 +711,41 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
     }
 }
 
+/// C4: a script's target: of the adults within `[combat] join_tiles` of `me` (or in its building), the one with the
+/// most likely joiners (`friends`), the best odds (`weak`) or the worst (`strong`); the table to the log.
+fn best_body(world: &World, me: EntityId, how: &str) -> Option<EntityId> {
+    let p = world.comp::<citysim::Position>(me)?;
+    let r = i32::from(world.config.combat.join_tiles as u16);
+    let mut rows = Vec::new();
+    for x in world.entities() {
+        if x == me || !world.has::<Brain>(x) || !citysim::systems::demography::is_adult(world, x) {
+            continue;
+        }
+        let Some(q) = world.comp::<citysim::Position>(x) else { continue };
+        let near = match (q.building, p.building) {
+            (Some(a), Some(b)) => a == b,
+            (None, None) => {
+                (i32::from(q.tile.x) - i32::from(p.tile.x)).abs() <= r && (i32::from(q.tile.y) - i32::from(p.tile.y)).abs() <= r
+            }
+            _ => false,
+        };
+        if !near || citysim::systems::wounded::is_down(world, x) || world.has::<citysim::components::Sentence>(x) {
+            continue;
+        }
+        rows.push((x, citysim::systems::combat::odds(world, me, x)));
+    }
+    let key = |o: &citysim::systems::combat::Odds| match how {
+        "weak" => o.p,
+        "strong" => -o.p,
+        _ => o.theirs - 0.5 * o.p,
+    };
+    rows.sort_by(|a, b| key(&b.1).total_cmp(&key(&a.1)));
+    for (x, o) in rows.iter().take(8) {
+        eprintln!("best {how}: {} #{} odds {:.0}% theirs {:.2}", world.name_of(*x), x.index, o.p * 100.0, o.theirs);
+    }
+    rows.first().map(|r| r.0)
+}
+
 /// M18 P1: the possessed body's HUD state.
 fn player_hud(world: &World, id: EntityId) -> PlayerHud {
     use citysim::components::{Job, Needs, Wallet};
@@ -649,6 +783,11 @@ fn player_hud(world: &World, id: EntityId) -> PlayerHud {
         offers: menu_rows(&pl::menu_offers(world, id)),
         food: world.comp::<citysim::components::Inventory>(id).map_or(0, |i| i.food),
         held: held_line(world, id),
+        fight: citysim::systems::combat::fight_view(world, id),
+        wounds: citysim::systems::combat::wounds_view(world, id),
+        stance: citysim::systems::combat::stance_pref(world, id),
+        holstered: citysim::systems::combat::holstered(world, id),
+        chrome: citysim::systems::combat::chrome_lines(world, id),
     }
 }
 
