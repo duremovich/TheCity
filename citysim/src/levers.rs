@@ -2867,7 +2867,7 @@ impl World {
                                     .iter()
                                     .copied()
                                     .filter(|&m| crate::systems::contracts::free_adult(self, m))
-                                    .map(|m| (crate::systems::law::fighting(self, m), m))
+                                    .map(|m| (crate::systems::combat::power(self, m), m))
                                     .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)))
                                     .map(|(_, m)| m)
                             })

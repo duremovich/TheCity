@@ -339,7 +339,7 @@ pub fn gang_arms(world: &mut World, gang: EntityId) {
             .copied()
             .filter(|&m| world.has::<Brain>(m) && !world.has::<crate::components::Sentence>(m))
             .filter(|&m| implant_in(world, m, slot).is_none() && reserved_implant(world, m).is_none())
-            .map(|m| (std::cmp::Reverse(ordered_float::OrderedFloat(crate::systems::law::fighting(world, m))), m))
+            .map(|m| (std::cmp::Reverse(ordered_float::OrderedFloat(crate::systems::combat::power(world, m))), m))
             .min()
             .map(|(_, m)| m)
     };
@@ -884,7 +884,7 @@ pub fn abduct_within(world: &mut World, agent: EntityId, victim: EntityId, reach
         .filter(|&m| {
             m != agent && crate::systems::law::living(world, m) && crate::systems::law::near(world, agent, m, 2)
         })
-        .map(|m| crate::systems::law::fighting(world, m))
+        .map(|m| crate::systems::combat::power(world, m))
         .sum();
     let mods = crate::systems::law::FightMods { a_bonus: bonus, ..Default::default() };
     let (winner, _, died) = crate::systems::law::resolve_fight_mods(world, agent, victim, mods);

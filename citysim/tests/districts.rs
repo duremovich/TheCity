@@ -1195,11 +1195,11 @@ fn test_riot_lost_jails_the_beaten_and_too_few_disperse() {
     for &g in &guards {
         let p = w.comp_mut::<Position>(g).expect("pos");
         p.tile = door;
-        w.comp_mut::<citysim::Skills>(g).expect("s").fighting = 1.0;
+        w.comp_mut::<citysim::Skills>(g).expect("s").melee = 1.0;
         w.comp_mut::<Personality>(g).expect("p").courage = 1.0;
     }
     for &a in &rioters {
-        w.comp_mut::<citysim::Skills>(a).expect("s").fighting = 0.0;
+        w.comp_mut::<citysim::Skills>(a).expect("s").melee = 0.0;
         w.comp_mut::<Personality>(a).expect("p").courage = 0.0;
     }
     hand_riot(&mut w, d, market, &rioters, citysim::RiotResponse::Contain);

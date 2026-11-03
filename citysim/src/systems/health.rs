@@ -390,6 +390,14 @@ pub struct Effects {
     /// Conception possible, and its chance x this.
     pub fertile: bool,
     pub conceive_mult: f32,
+    /// The combat model C1 (docs/COMBAT.md § 2): the wounds' terms. The
+    /// attack skill x this (the arms), evasion and the flight x this (the
+    /// legs), the step cost x this (the worse leg), a knockout's chance + this
+    /// (an old head wound).
+    pub attack_mult: f32,
+    pub evade_mult: f32,
+    pub walk_mult: f32,
+    pub ko_add: f32,
 }
 
 impl Effects {
@@ -401,10 +409,25 @@ impl Effects {
         old_mult: 1.0,
         fertile: true,
         conceive_mult: 1.0,
+        attack_mult: 1.0,
+        evade_mult: 1.0,
+        walk_mult: 1.0,
+        ko_add: 0.0,
     };
 }
 
+/// The debuffs on `id`: the sickness meters' (§ 2) and, C1, its wounds'.
 pub fn effects(world: &World, id: EntityId) -> Effects {
+    let mut e = sick_effects(world, id);
+    if !world.hurt.is_empty() {
+        if let Some(w) = world.comp::<crate::components::Wounds>(id) {
+            crate::systems::combat::apply_effects(world, w, &mut e);
+        }
+    }
+    e
+}
+
+fn sick_effects(world: &World, id: EntityId) -> Effects {
     if !on(world) {
         return Effects::NONE;
     }
@@ -422,6 +445,7 @@ pub fn effects(world: &World, id: EntityId) -> Effects {
         old_mult: 1.0 + cfg.frail_old * (m + t),
         fertile: m < cfg.fertile_mal_max && h.cancer.is_none(),
         conceive_mult: (1.0 - t).max(0.0),
+        ..Effects::NONE
     }
 }
 

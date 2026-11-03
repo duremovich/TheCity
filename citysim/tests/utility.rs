@@ -299,10 +299,10 @@ fn test_bug3_fight_weighs_the_law_the_odds_and_the_body() {
         let p = w.comp_mut::<Personality>(v).expect("pers");
         p.courage = courage;
         p.lawfulness = lawfulness;
-        w.comp_mut::<citysim::Skills>(v).expect("skills").fighting = fighting;
+        w.comp_mut::<citysim::Skills>(v).expect("skills").melee = fighting;
         w.comp_mut::<Needs>(v).expect("needs").safety = 0.3;
     };
-    w.comp_mut::<citysim::Skills>(r).expect("skills").fighting = 0.4;
+    w.comp_mut::<citysim::Skills>(r).expect("skills").melee = 0.4;
     set(&mut w, 0.25, 0.71, 0.15);
     let timid = fight_score(&w, v).expect("Fight scored");
     assert!(timid < 0.39, "the lawful, timid victim reports rather than fights: {timid}");

@@ -64,33 +64,26 @@ fn has_event(w: &World, kind: EventKind, who: EntityId) -> bool {
     w.events.iter().any(|e| e.kind == kind && e.actors.contains(&who))
 }
 
-/// Spec § 11: deaths with `wound_share > 0` never exceed deaths with it 0
-/// for the same seed, over the fight path: the same fights in two copies
-/// of the city, the death roll the same, the wound only ever replacing it.
+/// The combat model C1 (docs/COMBAT.md § 2): a Grave wound bleeds the
+/// body down into the M16b state (the hourly pass drains its blood), and a
+/// blunt blow never bleeds.
 #[test]
-fn test_wounds_never_add_deaths() {
-    let base = world();
-    let [a, b] = strangers(&base, 2)[..] else { unreachable!() };
-    let (mut d0, mut d6, mut wounds) = (0, 0, 0);
-    for t in 0..200u64 {
-        let mut w0 = base.clone();
-        let mut w6 = base.clone();
-        w0.config.wounded.wound_share = 0.0;
-        w6.config.wounded.wound_share = 0.6;
-        for w in [&mut w0, &mut w6] {
-            w.tick += t;
+fn test_a_grave_wound_bleeds_into_the_downed_state() {
+    use citysim::{Region, Severity};
+    let mut w = world();
+    let [v, by, other] = strangers(&w, 3)[..] else { unreachable!() };
+    w.tick -= w.tick % citysim::TICKS_PER_HOUR;
+    citysim::systems::combat::add_wound(&mut w, v, Region::Torso, Severity::Grave, Some(by), true, false);
+    citysim::systems::combat::add_wound(&mut w, other, Region::Torso, Severity::Grave, Some(by), true, true);
+    for _ in 0..(6 * citysim::TICKS_PER_HOUR) {
+        if wounded::is_down(&w, v) {
+            break;
         }
-        let mods = law::FightMods { kill_p: Some(0.5), ..Default::default() };
-        let r0 = law::resolve_fight_mods(&mut w0, a, b, mods);
-        let r6 = law::resolve_fight_mods(&mut w6, a, b, mods);
-        assert_eq!((r0.0, r0.1), (r6.0, r6.1), "the same fight");
-        assert!(!r6.2 || r0.2, "a death only where the woundless city had one");
-        d0 += u32::from(r0.2);
-        d6 += u32::from(r6.2);
-        wounds += w6.wounded.len();
+        w.tick += 1;
+        citysim::systems::combat::hourly(&mut w);
     }
-    assert!(d6 <= d0, "deaths {d6} with wounds vs {d0} without");
-    assert!(wounds > 0 && d6 < d0, "some deaths became wounds ({wounds})");
+    assert!(wounded::is_down(&w, v), "a Grave torso wound took the body down");
+    assert!(!wounded::is_down(&w, other), "a blunt Grave does not bleed");
 }
 
 /// A downed agent left alone dies at `bleed_until`: a Murder by its

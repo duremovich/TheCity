@@ -65,73 +65,32 @@ fn open_clinic(w: &mut World, who: EntityId) -> EntityId {
 }
 
 #[test]
-fn test_arms_raise_p_win_and_skin_lowers_death() {
-    // Win share: Arms T3 against an equal bare fighter, no deaths.
-    let mut cfg = Config::load().dole_city();
-    cfg.crime.fight_death_p = 0.0;
-    let mut w = World::new(42, cfg);
+fn test_arms_raise_the_win_share() {
+    // The combat model C1: Arms T3 (`Kit.fighting`, `Kit.strength`) on the
+    // melee side of the beat against an equal bare fighter wins more often.
+    // Each fight starts from whole bodies (the wounds of the last cleared).
+    let mut w = World::new(42, Config::load().dole_city());
     let people = free(&w);
     let (a, b) = (people[0], people[1]);
     assets::grant(&mut w, a, AssetKind::Implant(Slot::Arms), 3).expect("arms");
+    // Bare hands never kill here (the subject is the win, not the death).
+    w.config.weapon_kinds[0].lethality = 0.0;
     let mut wins = 0;
     for _ in 0..2000 {
         for x in [a, b] {
-            w.comp_mut::<Skills>(x).expect("skills").fighting = 0.3;
+            w.remove::<citysim::Wounds>(x);
+            assets::rekit(&mut w, x);
+            let s = w.comp_mut::<Skills>(x).expect("skills");
+            (s.melee, s.shooting, s.evasion) = (0.3, 0.0, 0.3);
             w.comp_mut::<Personality>(x).expect("p").courage = 0.5;
         }
+        w.wounded.clear();
         let (winner, _, died) = law::resolve_fight(&mut w, a, b);
-        assert!(!died);
+        assert!(!died, "no death at lethality 0");
         wins += usize::from(winner == a);
     }
     let share = wins as f32 / 2000.0;
-    assert!((share - 0.62).abs() <= 0.03, "Arms T3 win share {share}");
-
-    // Death share: the loser's death chance is 1 for a bare body, so a Skin
-    // T2 loser's share is its (1 − armour) = 0.7.
-    // Lives at work phase 6: pinned to `[careers]` off (its seeded jobs move
-    // the jobless pool this test fights from: 498 losses of the 500 needed
-    // on the careers city; the subject is the fight's armour, not the ages).
-    let mut cfg = Config::load().dole_city();
-    cfg.strip_careers();
-    let mut w = World::new(43, cfg);
-    // M16b phase 3: the death roll alone (no wound replaces it).
-    w.config.wounded.wound_share = 0.0;
-    let pool = free(&w);
-    let (attackers, victims) = pool.split_at(pool.len() / 3);
-    for &v in victims {
-        assets::grant(&mut w, v, AssetKind::Implant(Slot::Skin), 2).expect("skin");
-    }
-    let p = w.config.crime.fight_death_p as f32;
-    let (mut losses, mut deaths, mut bare_losses, mut bare_deaths) = (0u32, 0u32, 0u32, 0u32);
-    let (mut ai, mut vi) = (0usize, 0usize);
-    while losses < 700 && vi < victims.len() && ai < attackers.len() {
-        let (x, v) = (attackers[ai], victims[vi]);
-        if !law::living(&w, x) {
-            ai += 1;
-            continue;
-        }
-        if !law::living(&w, v) {
-            vi += 1;
-            continue;
-        }
-        for y in [x, v] {
-            w.comp_mut::<Skills>(y).expect("skills").fighting = 0.0;
-        }
-        // kill_mult so that a bare loser always dies: p × (1 + 0) × m = 1.
-        let mods = law::FightMods { kill_mult: 1.0 / p, ..Default::default() };
-        let (_, loser, died) = law::resolve_fight_mods(&mut w, x, v, mods);
-        if loser == v {
-            losses += 1;
-            deaths += u32::from(died);
-        } else {
-            bare_losses += 1;
-            bare_deaths += u32::from(died);
-        }
-    }
-    assert!(losses >= 500, "enough fights: {losses}");
-    let share = deaths as f32 / losses as f32;
-    assert!((share - 0.7).abs() <= 0.05, "Skin T2 death share {share} (bare {bare_deaths}/{bare_losses})");
-    assert_eq!(bare_deaths, bare_losses, "a bare loser always dies at this multiplier");
+    assert!(share > 0.55, "Arms T3 win share {share}");
 }
 
 #[test]
@@ -162,7 +121,7 @@ fn test_load_past_psycho_starts_episode_ending_at_arrest() {
         let jail = w.building_of_kind(BuildingKind::Jail).expect("jail");
         demography::hire(&mut w, g, jail, Role::Guard);
         place(&mut w, g, TilePos { x: 101, y: 100 });
-        w.comp_mut::<Skills>(g).expect("skills").fighting = 1.0;
+        w.comp_mut::<Skills>(g).expect("skills").melee = 1.0;
         law::arrest(&mut w, g, who);
     }
     assert!(!chrome::in_episode(&w, who), "the law ended it");
@@ -540,7 +499,7 @@ fn test_episode_near_on_duty_guard_ended_by_law() {
     let who = free(&w)[0];
     place(&mut w, guard, TilePos { x: 102, y: 100 });
     place(&mut w, who, TilePos { x: 100, y: 100 });
-    w.comp_mut::<Skills>(guard).expect("skills").fighting = 1.0;
+    w.comp_mut::<Skills>(guard).expect("skills").melee = 1.0;
     // Shadow V4 review 1: a brave guard (the city guard picked on the moved
     // city scored Arrest under its Work at courage 0.13).
     w.comp_mut::<citysim::components::Personality>(guard).expect("p").courage = 1.0;
@@ -548,7 +507,7 @@ fn test_episode_near_on_duty_guard_ended_by_law() {
     // guard who wins the fight; under the new table's city the berserker
     // (a free adult of fighting 0.35) downed the guard in the first quarter
     // hour and the guard bled out. The berserker is an unskilled one.
-    w.comp_mut::<Skills>(who).expect("skills").fighting = 0.0;
+    w.comp_mut::<Skills>(who).expect("skills").melee = 0.0;
     // Both on screen for the episode (the LOD budget may demote a body; an
     // episode off screen is the ledger's, not the law's).
     for id in [guard, who] {

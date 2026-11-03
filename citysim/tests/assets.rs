@@ -454,7 +454,7 @@ fn test_robot_defends_in_brawl_and_wrecks_on_loss() {
     let (owner, home) = homeowner(&w);
     let pool = others(&w, owner);
     let (raider, neighbour) = (pool[0], pool[1]);
-    w.comp_mut::<citysim::Skills>(raider).expect("skills").fighting = 1.0;
+    w.comp_mut::<citysim::Skills>(raider).expect("skills").melee = 1.0;
     w.comp_mut::<citysim::Personality>(raider).expect("p").courage = 1.0;
     let door = w.comp::<Building>(home).expect("home").door;
     let mut wrecked = false;
@@ -506,7 +506,7 @@ fn test_robot_detains_thief_who_loses_contest() {
         assert_eq!(robots::powered_robot(&w, home), Some(robot));
         put_in(&mut w, thief, home);
         w.comp_mut::<citysim::Skills>(thief).expect("skills").stealth = 0.0;
-        w.comp_mut::<citysim::Skills>(thief).expect("skills").fighting = 0.0;
+        w.comp_mut::<citysim::Skills>(thief).expect("skills").melee = 0.0;
         w.comp_mut::<citysim::Personality>(thief).expect("p").courage = 0.0;
         law::raise_crime(&mut w, thief, None, citysim::Crime::Theft, door);
         if w.has::<citysim::Sentence>(thief) {
@@ -661,7 +661,7 @@ fn test_thief_killed_by_robot_is_not_charged() {
         assert_eq!(robots::powered_robot(&w, home), Some(robot));
         put_in(&mut w, thief, home);
         w.comp_mut::<citysim::Skills>(thief).expect("skills").stealth = 0.0;
-        w.comp_mut::<citysim::Skills>(thief).expect("skills").fighting = 0.0;
+        w.comp_mut::<citysim::Skills>(thief).expect("skills").melee = 0.0;
         w.comp_mut::<citysim::Personality>(thief).expect("p").courage = 0.0;
         let witnessed = count(&w, EventKind::Witness);
         law::raise_crime(&mut w, thief, Some(owner), citysim::Crime::Theft, door);

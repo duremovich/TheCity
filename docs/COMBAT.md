@@ -249,6 +249,28 @@ limp that makes the next mugging easier.
 
 These come later: ranged (§ 7, with addendum 24) and the blast (§ 8, with netrunning).
 
+**C1 as built (2026-11-02; deviations, `OPEN-179`).**
+- `resolve_now` (`systems/combat.rs`) is `fight_inner`'s body; the outcome sits beside the callers' triple on
+  `World::last_fight` (C3 hands it to the on-end hooks). Two sides only; a crew's numbers are the caller's `a_bonus`
+  (attack and morale). Fled is a loss for the caller (an arrest whose suspect "fled" still cuffs him until C3 moves
+  bodies). Robots keep `law::resolve_robot_fight` (one roll, `power` for both sides, `fight_death_p`), no wounds.
+- The purpose is `FightMods.why` (`Brawl`, `Raid`, `Door`) beside `arrest`, `kill_p` and `kill_mult`: an arrest
+  subdues, a Hunt (`kill_p`), a Crush or a berserker (`kill_mult > 1`) and a raid go all out, a bouncer and a guard set
+  upon subdue; otherwise courage and lawfulness pick. No mugging purpose: no caller is a mugging yet.
+- A lethal purpose's win finishes the beaten body on `kill_p x kill_mult` (the old Hunt semantics); otherwise a body
+  dies only of a Grave head or torso hit (`lethality x quality x kill_mult`) or bleeding. The M16b second draw
+  (`wounded::wound_instead`) is no longer called by the fight; blood at 0 is the way down.
+- Healing is a stub: a wound not bleeding is gone `heal_days` after it was dealt; a Grave bleeds until the M16b Rescue
+  stabilises its body (then `treated`). No first aid, no Clinic goal, no lost shifts, no scars (C2).
+- Kit armour per region: Skin chrome on every region, a guard's vest (`vest_torso`) on the torso: no vest item yet.
+- `[[weapon_kinds]]` carry family, accuracy, damage, lethality, blunt, draw, conceal, tiers and classes; reach, noise
+  and price wait for C3 and sight (prices stay the tier's). `Asset.wkind` is mapped at the spawn by tier and the
+  holder's class; a guard's armoury draw maps by the law's rows.
+- `combat::power` is the gate's read with a body at hand; `combat::skill_power` (skills only: the better of melee
+  and shooting, plus a share of evasion) is the city means' `MEAN_FIGHTING` slot and the reads that hold only a
+  `Skills` (competence, the gun gate, the think's context).
+- `[weapons] weapon_w` and `kill_w` are gone; `[crime] fight_death_p` is the robot fight's only.
+
 ## Decisions (Dylan, 2026-11-02)
 
 | # | question | decided |

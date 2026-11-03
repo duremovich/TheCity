@@ -1038,6 +1038,10 @@ pub struct World {
     /// with `[misery]`; an empty store is not written).
     #[serde(default, skip_serializing_if = "all_none")]
     pub misery: Vec<Option<crate::components::Misery>>,
+    /// The combat model C1 (docs/COMBAT.md § 2): the wounds a body carries
+    /// (an empty store is not written; `hurt` indexes it).
+    #[serde(default, skip_serializing_if = "all_none")]
+    pub wounds: Vec<Option<crate::components::Wounds>>,
     /// Hunger as sickness § 4: buildings whose bin holds scraps (rebuilt on load).
     #[serde(skip)]
     pub bins: BTreeSet<EntityId>,
@@ -1385,6 +1389,14 @@ pub struct World {
     /// M16b phase 3: the downed, by agent.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub wounded: BTreeMap<EntityId, crate::contract::Wounded>,
+    /// The combat model C1: the bodies with a `Wounds` component (the
+    /// hourly bleed and heal pass reads it, not every citizen).
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub hurt: BTreeSet<EntityId>,
+    /// C1: the last fight's outcome (`combat::resolve_now`), beside the
+    /// `(winner, loser, died)` every caller reads. Not saved.
+    #[serde(skip)]
+    pub last_fight: Option<crate::systems::combat::FightOutcome>,
     /// M16b phase 3: client -> its Trauma corp, from the `Standing` Trauma
     /// records (rebuilt on load, `wounded::reindex`).
     #[serde(skip)]
@@ -1593,6 +1605,7 @@ components! {
     profession: crate::components::Profession,
     retired: crate::components::Retired,
     misery: crate::components::Misery,
+    wounds: crate::components::Wounds,
 }
 
 /// Scale S1: a memo cell on the world: skipped by serde and empty in a
@@ -2086,6 +2099,9 @@ impl World {
             profession: Vec::new(),
             retired: Vec::new(),
             misery: Vec::new(),
+            wounds: Vec::new(),
+            hurt: BTreeSet::new(),
+            last_fight: None,
             bins: BTreeSet::new(),
             rumours: Vec::new(),
             regard: BTreeMap::new(),
@@ -2333,6 +2349,11 @@ impl World {
         crate::prof::timed!("new::floors::seed", systems::floors::seed(&mut w));
         // OPEN-140: the seed city's housing is not the first midnight's move.
         w.housed_now.1.clear();
+        // The combat model C1: shooting and evasion, once the posts are
+        // dealt (shooting's base is by role), then the city means again.
+        systems::combat::seed_all(&mut w);
+        w.skill_means = systems::moves::compute_means(&w);
+        w.skill_quantiles = systems::moves::compute_quantiles(&w);
         w
     }
 
@@ -4174,6 +4195,7 @@ impl World {
         crate::prof::timed!("tick::leverage", systems::leverage::run(self));
         crate::prof::timed!("tick::captives", systems::captives::run(self));
         crate::prof::timed!("tick::wounded", systems::wounded::run(self));
+        crate::prof::timed!("tick::combat", systems::combat::hourly(self));
         systems::fares::run(self);
         crate::prof::timed!("tick::governance", systems::governance::run(self));
         crate::prof::timed!("tick::tags", systems::tags::run(self));
@@ -4455,6 +4477,7 @@ impl World {
         self.profession.resize_with(n.max(self.profession.len()), || None);
         self.retired.resize_with(n.max(self.retired.len()), || None);
         self.misery.resize_with(n.max(self.misery.len()), || None);
+        self.wounds.resize_with(n.max(self.wounds.len()), || None);
         self.trace.resize_with(n.max(self.trace.len()), || None);
         self.life.resize_with(n.max(self.life.len()), || None);
         self.corp.resize_with(n.max(self.corp.len()), || None);

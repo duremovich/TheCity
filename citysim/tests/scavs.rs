@@ -240,10 +240,10 @@ fn test_abduct_guard_with_gray_off() {
     assert!(citysim::systems::law::near(&w, second, v, 1), "within reach");
     // The second would win the fight: the guard, not the dice, refuses.
     if let Some(sk) = w.comp_mut::<citysim::components::Skills>(second) {
-        sk.fighting = 1.0;
+        sk.melee = 1.0;
     }
     if let Some(sk) = w.comp_mut::<citysim::components::Skills>(v) {
-        sk.fighting = 0.0;
+        sk.melee = 0.0;
     }
     for _ in 0..20 {
         assert!(!chrome::abduct_within(&mut w, second, v, 1), "in the first's hands");

@@ -442,8 +442,8 @@ fn test_bug10_edges_read_what_just_happened() {
     let pool: Vec<citysim::EntityId> = free_adults(&w).into_iter().filter(|&x| !law::is_guard(&w, x)).collect();
     // The scuffle: a brave, weak suspect against a strong guard, until he loses one.
     let s = pool[0];
-    w.comp_mut::<citysim::Skills>(guard).expect("s").fighting = 1.0;
-    w.comp_mut::<citysim::Skills>(s).expect("s").fighting = 0.0;
+    w.comp_mut::<citysim::Skills>(guard).expect("s").melee = 1.0;
+    w.comp_mut::<citysim::Skills>(s).expect("s").melee = 0.0;
     let mut lost = false;
     for _ in 0..20 {
         beside(&mut w, guard, s);

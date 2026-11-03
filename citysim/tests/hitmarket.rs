@@ -55,7 +55,7 @@ fn gun(w: &mut World, id: EntityId) {
         p.courage = 0.9;
     }
     if let Some(s) = w.comp_mut::<Skills>(id) {
-        s.fighting = 1.0;
+        s.melee = 1.0;
     }
     w.vacate_job(id);
 }
@@ -137,7 +137,7 @@ fn test_ask_is_the_acceptance_boundary() {
         x.courage = 0.0;
     }
     if let Some(s) = w.comp_mut::<Skills>(p) {
-        s.fighting = 0.0;
+        s.melee = 0.0;
     }
     assert_eq!(contracts::ask(&w, p, ContractKind::Hit, &tgt, true, Some(buyer)), None);
 }
@@ -301,10 +301,10 @@ fn test_brave_strong_holder_does_not_hire() {
         p.courage = 0.9;
     }
     if let Some(s) = w.comp_mut::<Skills>(h) {
-        s.fighting = 1.0;
+        s.melee = 1.0;
     }
     if let Some(s) = w.comp_mut::<Skills>(t) {
-        s.fighting = 0.0;
+        s.melee = 0.0;
     }
     assert!(!hitmarket::hires(&w, h, t));
 }
@@ -458,10 +458,10 @@ fn test_market_off_keeps_m16a_hire() {
     let k = sharing_kin(&mut w, h, t, 1_000);
     // A coward who is not weaker: M16a does not hire.
     if let Some(s) = w.comp_mut::<Skills>(h) {
-        s.fighting = 1.0;
+        s.melee = 1.0;
     }
     if let Some(s) = w.comp_mut::<Skills>(t) {
-        s.fighting = 0.0;
+        s.melee = 0.0;
     }
     assert!(!hitmarket::hires(&w, h, t));
     assert!(!contracts::try_hire(&mut w, h, t, 0.95));
@@ -1181,7 +1181,7 @@ fn test_direct_hit_skips_a_well_paid_viewer() {
             p.courage = 0.9;
         }
         if let Some(s) = w.comp_mut::<Skills>(v) {
-            s.fighting = 1.0;
+            s.melee = 1.0;
         }
         let wage = w.comp::<citysim::Job>(v).map(|j| j.wage_per_day).unwrap();
         w.median_wage = wage;

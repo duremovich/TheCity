@@ -37,7 +37,7 @@ fn role_slots(world: &World, role: Role, s: &Skills) -> Option<(RoleSlots, &'sta
     let p = SocialSkill::Persuasion.index();
     Some(match role {
         Role::Farmer => (smallvec![(MEAN_FARMING, s.farming)], "farming"),
-        Role::Guard => (smallvec![(MEAN_FIGHTING, s.fighting)], "fighting"),
+        Role::Guard => (smallvec![(MEAN_FIGHTING, crate::systems::combat::skill_power(world, s))], "fighting"),
         Role::Clerk | Role::Bartender | Role::Ripperdoc | Role::Mechanic => {
             (smallvec![(p, s.persuasion)], "persuasion")
         }
@@ -45,7 +45,9 @@ fn role_slots(world: &World, role: Role, s: &Skills) -> Option<(RoleSlots, &'sta
         Role::Reporter => (smallvec![(k, s.knowledge)], "knowledge"),
         // L2 L2: the door and the ring fight; the floor persuades; the Fab
         // Tech's production skill is farming (deviation: no mechanical slot).
-        Role::Host | Role::Fighter => (smallvec![(MEAN_FIGHTING, s.fighting)], "fighting"),
+        Role::Host | Role::Fighter => {
+            (smallvec![(MEAN_FIGHTING, crate::systems::combat::skill_power(world, s))], "fighting")
+        }
         Role::Attendant | Role::Cook | Role::Croupier | Role::Concierge => (smallvec![(p, s.persuasion)], "persuasion"),
         Role::Fabber => (smallvec![(MEAN_FARMING, s.farming)], "farming"),
         // M16a (plan C8): a Fixer's office trades on persuasion and knowledge.
@@ -59,7 +61,9 @@ fn role_slots(world: &World, role: Role, s: &Skills) -> Option<(RoleSlots, &'sta
             match world.config.trade(t).map_or(TradeSkill::None, |r| r.skill) {
                 TradeSkill::None => return None,
                 TradeSkill::Farming => (smallvec![(MEAN_FARMING, s.farming)], "farming"),
-                TradeSkill::Fighting => (smallvec![(MEAN_FIGHTING, s.fighting)], "fighting"),
+                TradeSkill::Fighting => {
+                    (smallvec![(MEAN_FIGHTING, crate::systems::combat::skill_power(world, s))], "fighting")
+                }
                 TradeSkill::Persuasion => (smallvec![(p, s.persuasion)], "persuasion"),
                 TradeSkill::Knowledge => (smallvec![(k, s.knowledge)], "knowledge"),
                 TradeSkill::Hacking => (smallvec![(MEAN_HACKING, s.hacking.max(0.0))], "hacking"),
@@ -159,7 +163,9 @@ pub fn law_competence(world: &World, jail: EntityId) -> f32 {
     let guards = city_guards(world);
     let f: Vec<f32> = guards
         .iter()
-        .filter_map(|&g| world.comp::<Skills>(g).map(|s| norm(world, MEAN_FIGHTING, s.fighting)))
+        .filter_map(|&g| {
+            world.comp::<Skills>(g).map(|s| norm(world, MEAN_FIGHTING, crate::systems::combat::skill_power(world, s)))
+        })
         .collect();
     let g = if f.is_empty() { 1.0 } else { f.iter().sum::<f32>() / f.len() as f32 };
     (cfg.comp_ref * (0.4 * captain + 0.6 * g)).clamp(0.0, 1.0)

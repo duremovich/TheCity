@@ -109,10 +109,10 @@ fn at_war() -> (World, EntityId, EntityId, EntityId) {
 fn heir_strong(w: &mut World, g: EntityId) {
     let war = w.comp::<Gang>(g).expect("gang").war.clone().expect("war");
     for &m in &war.heir_side {
-        w.comp_mut::<Skills>(m).expect("s").fighting = 1.0;
+        w.comp_mut::<Skills>(m).expect("s").melee = 1.0;
     }
     for &m in &war.challenger_side {
-        w.comp_mut::<Skills>(m).expect("s").fighting = 0.0;
+        w.comp_mut::<Skills>(m).expect("s").melee = 0.0;
         w.comp_mut::<Personality>(m).expect("p").courage = 0.0;
     }
 }
@@ -272,7 +272,7 @@ fn test_loser_with_a_following_leads_a_splinter() {
         x.challenger_side.extend(&movers);
     }
     for &m in &movers {
-        w.comp_mut::<Skills>(m).expect("s").fighting = 0.0;
+        w.comp_mut::<Skills>(m).expect("s").melee = 0.0;
     }
     // Homes held in the heir's district and in a district with a vacant Lot.
     let heir_home = w.comp::<citysim::Household>(heir).and_then(|h| h.home).expect("the heir's home");

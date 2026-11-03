@@ -177,7 +177,7 @@ pub fn free_crew(w: &mut World, n: usize, fighting: f32) -> Vec<EntityId> {
         .take(n)
         .collect();
     for &a in &c {
-        w.comp_mut::<Skills>(a).expect("skills").fighting = fighting;
+        w.comp_mut::<Skills>(a).expect("skills").melee = fighting;
         w.comp_mut::<Personality>(a).expect("p").courage = fighting;
     }
     c

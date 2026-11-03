@@ -288,8 +288,8 @@ pub fn door_ok(world: &World, id: EntityId, b: EntityId) -> bool {
                 .filter(|&s| world.comp::<Job>(s).is_some_and(|j| j.role == Role::Host && j.on_shift(tod)))
                 .chain(crate::systems::trades::door_staff(world, b))
                 .max_by(|&x, &y| {
-                    crate::systems::law::fighting(world, x)
-                        .total_cmp(&crate::systems::law::fighting(world, y))
+                    crate::systems::combat::power(world, x)
+                        .total_cmp(&crate::systems::combat::power(world, y))
                         .then(y.cmp(&x))
                 });
             !bouncer.is_some_and(|h| crate::systems::law::courage(world, h) > heat)
@@ -2131,7 +2131,7 @@ pub fn bouts(world: &mut World) {
             .filter(|&f| crate::systems::law::living(world, f) && !world.has::<Sentence>(f))
             .filter(|&f| !crate::systems::ages::is_protected(world, f))
             .filter(|&f| present(f))
-            .map(|f| (crate::systems::law::fighting(world, f), f, last_bout(f)))
+            .map(|f| (crate::systems::combat::power(world, f), f, last_bout(f)))
             .collect();
         fighters.sort_by(|a, b| a.2.cmp(&b.2).then(b.0.total_cmp(&a.0)).then(a.1.cmp(&b.1)));
         if fighters.len() < 2 || !open(world, pit) || !standing(world, pit) {
@@ -2249,7 +2249,7 @@ fn fight_bout(world: &mut World, rng: &mut impl Rng, a: EntityId, b: EntityId, f
     world.remember(winner, MemoryKind::Bout, Some(loser), 0.4, 0.3, false);
     world.remember(loser, MemoryKind::Bout, Some(winner), 0.5, -0.4, false);
     if let Some(s) = world.comp_mut::<crate::components::Skills>(winner) {
-        s.fighting = (s.fighting + 0.01).min(1.0);
+        s.melee = (s.melee + 0.01).min(1.0);
     }
     crate::systems::vice::note_bout(world, a);
     crate::systems::vice::note_bout(world, b);

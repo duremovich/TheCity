@@ -1184,7 +1184,7 @@ pub fn coerced_job(
         .filter(|&r| !contracts::holds_taken(world, r) && !tied(r))
         .filter(|&r| !tried_recently(world, head, r, tried::JOB))
         .filter(|&r| moves::might(world, r) < my)
-        .map(|r| (law::fighting(world, r), r))
+        .map(|r| (crate::systems::combat::power(world, r), r))
         .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)))
         .map(|(_, r)| r);
     let Some(gun) = pick else { return false };

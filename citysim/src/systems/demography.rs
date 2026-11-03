@@ -1245,7 +1245,14 @@ fn skill_key(world: &World, id: EntityId, role: Role) -> u32 {
     let skill = |f: fn(&crate::components::Skills) -> f32| world.comp::<crate::components::Skills>(id).map_or(0.0, f);
     match role {
         Role::Researcher => u32::MAX - (skill(|s| s.hacking).clamp(0.0, 1.0) * 1_000_000.0) as u32,
-        Role::Fighter => u32::MAX - (skill(|s| s.fighting).clamp(0.0, 1.0) * 1_000_000.0) as u32,
+        Role::Fighter => {
+            u32::MAX
+                - (world
+                    .comp::<crate::components::Skills>(id)
+                    .map_or(0.0, |s| crate::systems::combat::skill_power(world, s))
+                    .clamp(0.0, 1.0)
+                    * 1_000_000.0) as u32
+        }
         Role::Fixer => u32::MAX - (skill(|s| s.persuasion + s.knowledge).clamp(0.0, 2.0) * 500_000.0) as u32,
         _ => u32::MAX - (skill(|s| s.knowledge).clamp(0.0, 1.0) * 1_000_000.0) as u32,
     }
@@ -2204,7 +2211,7 @@ pub(crate) fn floor_role_skill(world: &mut World, id: EntityId, role: Role) {
     if let Some(s) = world.comp_mut::<Skills>(id) {
         match label {
             Some("farming") => s.farming = s.farming.max(floor),
-            Some("fighting") => s.fighting = s.fighting.max(floor),
+            Some("fighting") => s.melee = s.melee.max(floor),
             Some("persuasion") => s.persuasion = s.persuasion.max(floor),
             Some("knowledge") => s.knowledge = s.knowledge.max(floor),
             // Jobs and room P3: a trade whose row ranks on hacking.
@@ -2609,7 +2616,7 @@ mod tests {
         }
         if let Some(s) = w.comp_mut::<crate::components::Skills>(near) {
             s.farming = 1.0;
-            s.fighting = 1.0;
+            s.melee = 1.0;
             s.stealth = 1.0;
         }
         note_laid_off(&mut w, near, Role::Farmer);

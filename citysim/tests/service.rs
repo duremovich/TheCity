@@ -347,9 +347,9 @@ fn test_bouncer_ejects_and_refuses() {
     let (club, bouncers) = staffed(&w, BuildingKind::Club, role, 1);
     let bouncer = bouncers[0];
     on_duty(&mut w, bouncer, club);
-    w.comp_mut::<citysim::Skills>(bouncer).expect("skills").fighting = 1.0;
+    w.comp_mut::<citysim::Skills>(bouncer).expect("skills").melee = 1.0;
     let g = guests(&w, club, 1)[0];
-    w.comp_mut::<citysim::Skills>(g).expect("skills").fighting = 0.0;
+    w.comp_mut::<citysim::Skills>(g).expect("skills").melee = 0.0;
     w.enter_building(g, club);
     assert!(service::maybe_eject(&mut w, g), "thrown out at odds >= 1");
     assert_eq!(w.comp::<Position>(g).and_then(|p| p.building), None, "put at the door");
@@ -363,8 +363,8 @@ fn test_bouncer_ejects_and_refuses() {
     let mut w2 = common::world_with_r2(|c| c.service.p_eject = 10.0);
     w2.tick = EVENING;
     on_duty(&mut w2, bouncer, club);
-    w2.comp_mut::<citysim::Skills>(bouncer).expect("skills").fighting = 0.0;
-    w2.comp_mut::<citysim::Skills>(g).expect("skills").fighting = 1.0;
+    w2.comp_mut::<citysim::Skills>(bouncer).expect("skills").melee = 0.0;
+    w2.comp_mut::<citysim::Skills>(g).expect("skills").melee = 1.0;
     w2.enter_building(g, club);
     assert!(!service::maybe_eject(&mut w2, g), "a stronger attacker is not thrown out");
 }

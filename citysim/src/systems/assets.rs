@@ -394,6 +394,7 @@ pub fn spawn_asset(
             data: [0; 3],
             turned: None,
             prov: None,
+            wkind: 0,
         },
     );
     file(world, id);
@@ -595,13 +596,27 @@ pub fn compute_kit(world: &World, agent: EntityId) -> Kit {
     }
     // Jobs & lives phase 3 (§ 4): the best weapon carried (condition > 0)
     // at its effective tier. None exists with `[weapons]` off.
-    k.weapon = assets_at(world, agent)
+    // The combat model C1 (§ 4): and its kind (`Asset.wkind`, else mapped
+    // for a civilian by its tier). The best: the tier, then the lower id.
+    let best = assets_at(world, agent)
         .iter()
-        .filter_map(|&a| world.comp::<Asset>(a))
-        .filter(|x| x.kind == AssetKind::Weapon && x.loc == AssetLoc::Carried(agent) && x.condition > 0)
-        .map(|x| eff_tier_of(world, x).max(1))
-        .max()
-        .unwrap_or(0);
+        .filter_map(|&a| world.comp::<Asset>(a).map(|x| (a, x)))
+        .filter(|(_, x)| x.kind == AssetKind::Weapon && x.loc == AssetLoc::Carried(agent) && x.condition > 0)
+        .map(|(a, x)| (eff_tier_of(world, x).max(1), std::cmp::Reverse(a), x.wkind, x.tier))
+        .max();
+    if let Some((t, std::cmp::Reverse(a), wk, tier)) = best {
+        k.weapon = t;
+        k.weapon_kind = if wk > 0 {
+            wk - 1
+        } else {
+            crate::systems::combat::map_kind(world, tier, "civil", u64::from(a.index)).saturating_sub(1)
+        };
+    }
+    // C1 (§ 2): a leg wound slows the walk (x the step cost).
+    let limp = crate::systems::health::effects(world, agent).walk_mult;
+    if limp != 1.0 {
+        k.walk_mult *= limp;
+    }
     // M14 V31: else the fleet deck a corp's run order lends at its Lab chair.
     if k.deck.is_none() {
         let lent = world

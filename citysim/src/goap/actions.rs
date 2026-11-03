@@ -1034,7 +1034,7 @@ impl PlanCtx {
             courage: p.map_or(0.5, |p| p.courage),
             stealth: s.map_or(0.2, |s| s.stealth),
             farming: s.map_or(0.2, |s| s.farming),
-            fighting: s.map_or(0.2, |s| s.fighting),
+            fighting: s.map_or(0.2, |s| crate::systems::combat::skill_power(world, s)),
             hunger,
             starving: hunger < 0.15,
             dark: world.is_dark(),

@@ -1210,7 +1210,7 @@ fn best_fighter(w: &World, g: EntityId, not: &[EntityId]) -> Option<EntityId> {
         .iter()
         .copied()
         .filter(|&m| citysim::systems::law::living(w, m) && !not.contains(&m))
-        .map(|m| (citysim::systems::law::fighting(w, m), m))
+        .map(|m| (citysim::systems::combat::power(w, m), m))
         .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)))
         .map(|(_, m)| m)
 }
@@ -1834,13 +1834,13 @@ fn ten_fathers(w: &World) -> Vec<Father> {
         if house.iter().any(|h| used.contains(h)) {
             continue;
         }
-        let bar = house.iter().skip(1).map(|&h| law::fighting(w, h)).fold(0.0f32, f32::max);
+        let bar = house.iter().skip(1).map(|&h| citysim::systems::combat::power(w, h)).fold(0.0f32, f32::max);
         let killer = civ
             .iter()
             .copied()
             .filter(|x| !house.contains(x) && !used.contains(x))
             .filter(|&x| house.iter().all(|&h| w.edge(h, x).is_none()))
-            .filter(|&x| law::fighting(w, x) >= bar + STRONGER)
+            .filter(|&x| citysim::systems::combat::power(w, x) >= bar + STRONGER)
             .min_by(|&a, &b| def(a).total_cmp(&def(b)).then(a.cmp(&b)));
         let Some(killer) = killer else { continue };
         used.extend(house.iter().copied());
@@ -1946,10 +1946,10 @@ fn god_kill_ten_fathers_day_10() {
             f.father.index,
             w.name_of(f.killer),
             f.killer.index,
-            citysim::systems::law::fighting(w, f.killer),
+            citysim::systems::combat::power(w, f.killer),
             w.name_of(f.widow),
             f.widow.index,
-            citysim::systems::law::fighting(w, f.widow),
+            citysim::systems::combat::power(w, f.widow),
             w.comp::<citysim::Wallet>(f.widow).map_or(0, |x| x.coins),
             fixer.map_or("direct: no Fixer in reach".to_string(), |b| format!("at {}", w.name_of(b))),
             f.kids.iter().map(|&k| (w.name_of(k), k.index)).collect::<Vec<_>>()

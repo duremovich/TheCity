@@ -112,14 +112,14 @@ pub fn seed_population(world: &mut World) {
 }
 
 /// The values of one adult's eight `MEAN_*` slots.
-fn slots_of(s: &Skills) -> [f32; 8] {
+fn slots_of(world: &World, s: &Skills) -> [f32; 8] {
     [
         s.persuasion,
         s.intimidation,
         s.knowledge,
         s.deception,
         s.farming,
-        s.fighting,
+        crate::systems::combat::skill_power(world, s),
         s.hacking.max(0.0),
         0.5 * (s.knowledge + s.persuasion),
     ]
@@ -135,7 +135,7 @@ pub fn compute_quantiles(world: &World) -> Vec<Vec<f32>> {
             continue;
         }
         let Some(s) = world.comp::<Skills>(id) else { continue };
-        for (i, v) in slots_of(s).into_iter().enumerate() {
+        for (i, v) in slots_of(world, s).into_iter().enumerate() {
             cols[i].push(v);
         }
     }
@@ -190,7 +190,7 @@ pub fn compute_means(world: &World) -> [f32; 8] {
             s.knowledge,
             s.deception,
             s.farming,
-            s.fighting,
+            crate::systems::combat::skill_power(world, s),
             s.hacking.max(0.0),
             0.5 * (s.knowledge + s.persuasion),
         ];
@@ -275,7 +275,7 @@ pub fn might(world: &World, id: EntityId) -> f32 {
     let cfg = &world.config.moves;
     let visible = world.comp::<Kit>(id).map_or(0, |k| k.visible);
     let allies = allies_within(world, id, 8) as f32;
-    let m = law::fighting(world, id)
+    let m = crate::systems::combat::power(world, id)
         + cfg.chrome_might * f32::from(visible) / 3.0
         + (cfg.ally_might * allies).min(cfg.ally_cap);
     // Jobs & lives phase 3 (section 4): the gun credit (a branch: 0 unarmed).
@@ -335,7 +335,7 @@ fn resist(world: &World, m: &SocialMove) -> f32 {
     let p = world.comp::<Personality>(t);
     let sk = world.comp::<Skills>(t);
     match m.kind {
-        MoveKind::Intimidate => law::courage(world, t) + 0.3 * law::fighting(world, t),
+        MoveKind::Intimidate => law::courage(world, t) + 0.3 * crate::systems::combat::power(world, t),
         MoveKind::Persuade => match m.stake {
             Stake::Coins(_) => 1.0 - p.map_or(0.5, |p| p.greed),
             Stake::Info { about } => affinity(world, t, about),

@@ -1695,26 +1695,6 @@ pub fn sentence_ticks(world: &World, crime: Crime) -> Tick {
     days * TICKS_PER_DAY
 }
 
-/// The fight model's inputs, with the defaults for agents lacking the
-/// component. M13 D31: `Skills.fighting + Kit.fighting` (Arms), the Kit term
-/// added only when there is one, so a bare fighter reads as M12.
-pub fn fighting(world: &World, id: EntityId) -> f32 {
-    // M13 D41: a robot (no Skills) fights at `robot_fighting[tier − 1]`.
-    let base = match world.comp::<Skills>(id) {
-        Some(s) => s.fighting,
-        None => crate::systems::robots::fighting(world, id).unwrap_or(0.2),
-    };
-    let f = match world.comp::<Kit>(id).map(|k| k.fighting) {
-        Some(k) if k != 0.0 => base + k,
-        _ => base,
-    };
-    // M14 V12: a body jacked in fights at `jacked_fight_mult` (a branch).
-    if !world.runner_of.is_empty() && world.runner_of.contains_key(&id) {
-        return f * world.config.virt.jacked_fight_mult;
-    }
-    f
-}
-
 pub fn courage(world: &World, id: EntityId) -> f32 {
     match world.comp::<Personality>(id) {
         Some(p) => p.courage,
@@ -1738,11 +1718,19 @@ pub struct FightMods {
     /// who loses remembers `WasArrested`, not `Lost` (no Assaulted deed, so
     /// no grudge or Enemy edge on the guard from `grudges::on_learn`).
     pub arrest: bool,
+    /// The combat model C1: why the fight was started (the stances).
+    pub why: crate::systems::combat::Purpose,
 }
 
 impl Default for FightMods {
     fn default() -> Self {
-        FightMods { kill_mult: 1.0, a_bonus: 0.0, kill_p: None, arrest: false }
+        FightMods {
+            kill_mult: 1.0,
+            a_bonus: 0.0,
+            kill_p: None,
+            arrest: false,
+            why: crate::systems::combat::Purpose::Brawl,
+        }
     }
 }
 
@@ -1806,115 +1794,16 @@ fn fight_inner(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> 
             return (winner, loser, true);
         }
     }
-    let (kit_a, kit_b) = (world.comp::<Kit>(a).cloned(), world.comp::<Kit>(b).cloned());
-    // Jobs & lives phase 3 (§ 4): the tiers when either side is armed.
-    let arms = crate::systems::weapons::fight_tiers(world, a, b);
-    let p_win = p_win_of(world, a, b, mods.a_bonus, arms);
-    let roll: f32 = world.rng.world().random();
-    let (winner, loser) = if roll < p_win { (a, b) } else { (b, a) };
-    world.remember(a, MemoryKind::Fought, Some(b), 0.7, -0.5, false);
-    world.remember(b, MemoryKind::Fought, Some(a), 0.7, -0.5, false);
-    world.remember(winner, MemoryKind::Won, Some(loser), 0.6, 0.4, false);
-    // Shadow V4 review 4: taken in by the law, the loser was arrested.
-    let lost = if mods.arrest && loser == b { MemoryKind::WasArrested } else { MemoryKind::Lost };
-    // The pressure pass R4 (Shadow V10 care item 6): the attacker who lost
-    // was not assaulted by the one he attacked; his `Lost` carries himself as
-    // `object`, which `memory::deed_of` reads as no deed (V10's gossip told
-    // "Assaulted by <the defender> on <the attacker>").
-    let object = (loser == a).then_some(a);
-    let entry = crate::components::MemoryEntry {
-        subject: Some(winner),
-        salience: 0.6,
-        valence: -0.6,
-        object,
-        ..crate::components::MemoryEntry::blank(lost, world.tick)
-    };
-    world.remember_entry(loser, entry);
-    if let Some(p) = world.comp_mut::<Personality>(winner) {
-        p.drift(Drift::WonFight);
-    }
-    if let Some(p) = world.comp_mut::<Personality>(loser) {
-        p.drift(Drift::LostFight);
-    }
-    if let Some(n) = world.comp_mut::<Needs>(loser) {
-        n.safety = (n.safety - 0.4).max(0.0);
-    }
-    if let Some(m) = world.comp_mut::<crate::components::Mood>(loser) {
-        m.value = (m.value - 0.3).max(-1.0);
-    }
-    if let Some(s) = world.comp_mut::<Skills>(winner) {
-        s.fighting = (s.fighting + 0.01).min(1.0);
-    }
-    crate::systems::social::fought(world, winner, loser);
-    // Hunger as sickness § 2: a wasted body fights worse (0.0 off: exact).
-    let fi = |w: &World, x: EntityId| fighting(w, x) - crate::systems::health::effects(w, x).frail_fight;
-    let base = match mods.kill_p {
-        Some(p) if winner == a => p,
-        _ => world.config.crime.fight_death_p as f32 * (1.0 + fi(world, winner)),
-    };
-    let mut p_death = base * mods.kill_mult;
-    // Jobs & lives phase 3: the winner's tier makes the loss deadlier.
-    if let Some((ta, tb)) = arms {
-        let t = if winner == a { ta } else { tb };
-        if t > 0 {
-            p_death *= crate::systems::weapons::kill_mult(&world.config.weapons, t);
-        }
-    }
-    let loser_kit = if loser == a { &kit_a } else { &kit_b };
-    let armour = loser_kit.as_ref().map_or(0.0, |k| k.armour);
-    if armour > 0.0 {
-        p_death *= 1.0 - armour;
-    }
-    let roll: f32 = world.rng.world().random();
-    let mut died = roll < p_death;
-    // M16b phase 3 (spec § 5): a second draw makes the death a wound.
-    // A bleed-out is counted as the death would have been: a Murder when
-    // the attacked (`b`) fell to an attacker who is no guard.
-    let murder = loser == b && !is_guard(world, a);
-    if died && crate::systems::wounded::wound_instead(world, loser, winner, armour, murder) {
-        died = false;
-    }
-    if died {
-        world.kill_by(loser, DeathCause::Violence, Some(winner));
-    }
-    // Jobs & lives phase 3: the counts, the wear, the loser's weapons.
-    crate::systems::weapons::after_fight(world, winner, loser, died, arms);
-    // Jobs & lives phase 4 (§ 9): the loser's worn clothing (nothing off).
-    crate::systems::fashion::after_fight(world, winner, loser);
-    // Jobs & lives phase 5 (§ 5.3): a recorded deed (nothing off).
-    crate::systems::braindance::after_fight(world, winner);
-    (winner, loser, died)
-}
-
-/// The fight's `p_win` for the attacker `a` (M12's three terms; M13 D31's
-/// reflex term when either Kit is not bare; Jobs & lives phase 3's tier
-/// term when either side is armed: `arms` from `weapons::fight_tiers`).
-/// Each extra term is a branch, so an unchromed, unarmed pair reads as M12.
-pub fn p_win_of(world: &World, a: EntityId, b: EntityId, a_bonus: f32, arms: Option<(u8, u8)>) -> f32 {
-    // Hunger as sickness § 2: a wasted body fights worse (0.0 off: exact).
-    let fi = |w: &World, x: EntityId| fighting(w, x) - crate::systems::health::effects(w, x).frail_fight;
-    let co = courage;
-    let (kit_a, kit_b) = (world.comp::<Kit>(a), world.comp::<Kit>(b));
-    let kitted = kit_a.is_some_and(|k| !k.is_bare()) || kit_b.is_some_and(|k| !k.is_bare());
-    let fi_a = if a_bonus != 0.0 { fi(world, a) + a_bonus } else { fi(world, a) };
-    let raw = if kitted {
-        let reflex = |k: Option<&Kit>| k.map_or(0.0, |k| k.reflex);
-        0.5 + 0.4 * (fi_a - fi(world, b)) + 0.1 * (co(world, a) - co(world, b)) + 0.2 * (reflex(kit_a) - reflex(kit_b))
-    } else {
-        0.5 + 0.4 * (fi_a - fi(world, b)) + 0.1 * (co(world, a) - co(world, b))
-    };
-    let raw = match arms {
-        Some((ta, tb)) => raw + crate::systems::weapons::p_win_term(&world.config.weapons, ta, tb),
-        None => raw,
-    };
-    raw.clamp(0.1, 0.9)
+    // The combat model C1 (docs/COMBAT.md § 1): the beats, run to the end.
+    let out = crate::systems::combat::resolve_now(world, a, b, mods);
+    (out.winner, out.loser, out.died)
 }
 
 /// M13 D41: [`resolve_fight_mods`] with a robot on one side or both. The
 /// same `p_win` (the Kit terms read a robot's absent Kit as bare) and the
 /// same two world-stream rolls, the death roll only for an agent loser.
 fn resolve_robot_fight(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> (EntityId, EntityId, bool) {
-    let (fi, co) = (fighting, courage);
+    let (fi, co) = (crate::systems::combat::power, courage);
     let (kit_a, kit_b) = (world.comp::<Kit>(a).cloned(), world.comp::<Kit>(b).cloned());
     let kitted = kit_a.as_ref().is_some_and(|k| !k.is_bare()) || kit_b.as_ref().is_some_and(|k| !k.is_bare());
     let fi_a = fi(world, a) + mods.a_bonus;
@@ -1946,8 +1835,9 @@ fn resolve_robot_fight(world: &mut World, a: EntityId, b: EntityId, mods: FightM
         if let Some(p) = world.comp_mut::<Personality>(winner) {
             p.drift(Drift::WonFight);
         }
+        let gain = world.config.combat.melee_gain;
         if let Some(s) = world.comp_mut::<Skills>(winner) {
-            s.fighting = (s.fighting + 0.01).min(1.0);
+            s.melee = (s.melee + gain).min(1.0);
         }
     }
     if crate::systems::robots::is_robot(world, loser) {

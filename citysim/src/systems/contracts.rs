@@ -1006,9 +1006,13 @@ pub fn player_take_refusal(world: &World, who: EntityId, id: ContractId) -> Opti
         return Some(why.into());
     }
     if c.broker.is_some() || (c.kind.violent() && direct_gated(world, c.kind)) {
-        let best = world
-            .comp::<Skills>(who)
-            .map_or(0.0, |s| s.fighting.max(s.stealth).max(s.hacking).max(s.persuasion).max(s.intimidation));
+        let best = world.comp::<Skills>(who).map_or(0.0, |s| {
+            crate::systems::combat::skill_power(world, s)
+                .max(s.stealth)
+                .max(s.hacking)
+                .max(s.persuasion)
+                .max(s.intimidation)
+        });
         if best < world.config.fixers.gun_skill_min {
             return Some(format!("not the skills for it ({best:.2} < {:.2})", world.config.fixers.gun_skill_min));
         }
@@ -1108,19 +1112,19 @@ pub fn risk_for(world: &World, c: &Contract, cand: EntityId) -> f32 {
 
 fn skill_for(world: &World, kind: ContractKind, cand: EntityId) -> f32 {
     match kind {
-        ContractKind::Hit | ContractKind::Beat | ContractKind::Guard => crate::systems::law::fighting(world, cand),
+        ContractKind::Hit | ContractKind::Beat | ContractKind::Guard => crate::systems::combat::power(world, cand),
         ContractKind::Locate => world.comp::<Skills>(cand).map_or(0.0, |s| s.stealth),
         ContractKind::Persuade | ContractKind::Spin => world.comp::<Skills>(cand).map_or(0.0, |s| s.persuasion),
-        ContractKind::Trauma => crate::systems::law::fighting(world, cand),
+        ContractKind::Trauma => crate::systems::combat::power(world, cand),
         // M16b phase 2.
         ContractKind::Abduct | ContractKind::Rescue | ContractKind::Escort | ContractKind::Deliver => {
-            crate::systems::law::fighting(world, cand)
+            crate::systems::combat::power(world, cand)
         }
         ContractKind::Steal => world.comp::<Skills>(cand).map_or(0.0, |s| s.stealth.max(s.hacking)),
         // M16b phase 4.
         ContractKind::Tag => world.comp::<Skills>(cand).map_or(0.0, |s| s.stealth),
         ContractKind::Vote => world.comp::<Skills>(cand).map_or(0.0, |s| s.intimidation),
-        ContractKind::Retake => crate::systems::law::fighting(world, cand),
+        ContractKind::Retake => crate::systems::combat::power(world, cand),
     }
 }
 
@@ -3505,7 +3509,11 @@ pub fn hire_pass(world: &mut World) {
 pub fn gun_gate(world: &World, id: EntityId) -> bool {
     // Cheapest first: this runs in every body's think (perf).
     let Some(s) = world.comp::<Skills>(id) else { return false };
-    let best = s.fighting.max(s.stealth).max(s.hacking).max(s.persuasion).max(s.intimidation);
+    let best = crate::systems::combat::skill_power(world, s)
+        .max(s.stealth)
+        .max(s.hacking)
+        .max(s.persuasion)
+        .max(s.intimidation);
     if best < world.config.fixers.gun_skill_min {
         return false;
     }

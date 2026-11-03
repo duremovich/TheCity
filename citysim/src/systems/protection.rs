@@ -125,7 +125,7 @@ fn enforcer(world: &World, gang: EntityId, not: EntityId, hour: u8) -> Option<En
             continue;
         }
         let busy = world.comp::<crate::components::Job>(m).is_some_and(|j| j.on_shift(tod));
-        let key = (g.leader == Some(m), busy, law::fighting(world, m), m);
+        let key = (g.leader == Some(m), busy, crate::systems::combat::power(world, m), m);
         let better = best.is_none_or(|b| (key.0, key.1, -key.2, key.3) < (b.0, b.1, -b.2, b.3));
         if better {
             best = Some(key);

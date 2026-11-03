@@ -549,7 +549,7 @@ fn make_gun(w: &mut World, id: EntityId) {
         p.courage = 0.9;
     }
     if let Some(s) = w.comp_mut::<citysim::Skills>(id) {
-        s.fighting = 1.0;
+        s.melee = 1.0;
         s.stealth = 1.0;
     }
     w.vacate_job(id);
@@ -2140,7 +2140,7 @@ fn probe_homeless_night_worker_on_shift_is_not_charged_with_vagrancy() {
 
 fn set_skill_and_nerve(w: &mut World, id: EntityId, fighting: f32, courage: f32, lawfulness: f32) {
     if let Some(s) = w.comp_mut::<citysim::Skills>(id) {
-        s.fighting = fighting;
+        s.melee = fighting;
     }
     if let Some(p) = w.comp_mut::<citysim::Personality>(id) {
         p.courage = courage;
@@ -3261,7 +3261,7 @@ fn probe_pimp_purse_grows_on_a_pitch_night() {
         p.loyalty = 1.0;
     }
     if let Some(s) = w.comp_mut::<citysim::Skills>(pimp) {
-        s.fighting = 0.0;
+        s.melee = 0.0;
         s.stealth = 0.0;
         s.hacking = 0.0;
         s.persuasion = 0.0;
