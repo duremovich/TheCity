@@ -1069,7 +1069,11 @@ fn dawn_pick(world: &mut World) {
             }
         }
         // The pressure pass phase 2: the shape-up is a meeting (both diaries).
-        if let Some(f) = foreman.filter(|_| crate::systems::customers::cfg(world).is_some()) {
+        // M18 P5h: a `Served` memory is the service section's (the off city
+        // remembers none, `service`'s `test_off_city_writes_nothing`).
+        if let Some(f) =
+            foreman.filter(|_| crate::systems::customers::cfg(world).is_some() && crate::systems::service::on(world))
+        {
             let sal = world.config.service.served_salience;
             world.remember(f, crate::components::MemoryKind::Served, Some(a), sal, 0.1, false);
             world.remember(a, crate::components::MemoryKind::Served, Some(f), sal, 0.2, false);
@@ -1171,7 +1175,7 @@ fn shape_up_told(world: &mut World, mornings: &[Morning], queues: &[Vec<EntityId
             world.push_event(EventKind::DawnPick, &[a, y], text);
             // Round 4 T5 (OPEN-217): he goes on looking today.
             crate::systems::search::note_sent_home(world, a);
-            if let Some(f) = f {
+            if let Some(f) = f.filter(|_| crate::systems::service::on(world)) {
                 world.remember(a, crate::components::MemoryKind::Served, Some(f), sal, -0.2, false);
             }
             ownership::jobs2_row(world).shape_up_home += 1;

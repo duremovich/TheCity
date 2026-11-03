@@ -468,6 +468,14 @@ fn run_script(
                 Err(e) => info!("play script click ({}, {}): not on the screen ({e:?})", t[0], t[1]),
             }
         }
+        // M18 P5h: `bld near hostel|corp|city`: the nearest such desk's menu (`housing::script_target`)
+        "bld" if arg.starts_with("near") => {
+            p.menu_open = None;
+            p.click_px = Vec2::new(480.0, 300.0);
+            let asked = p.shared.menu.lock().unwrap().as_ref().map_or(0, |m| m.seq);
+            p.menu_asked = asked;
+            p.shared.send(UiCmd::BldNear(arg.trim_start_matches("near").trim().to_string()));
+        }
         // M18 P3: a building's menu by its entity (the menu a click on it opens), at the screen's centre
         "bld" => {
             let index: u32 = arg.parse().expect("bld INDEX");
@@ -644,7 +652,7 @@ fn run_script(
             let path = p.out.join(format!("{arg}.png"));
             if let Some(h) = p.shared.player.lock().unwrap().as_ref() {
                 info!(
-                    "play shot {}: d{} {} {} | goal {} | plan {} | {} | coins {} | fail {:?}",
+                    "play shot {}: d{} {} {} | goal {} | plan {} | {} | {} | coins {} | fail {:?}",
                     path.display(),
                     h.day,
                     h.clock,
@@ -652,6 +660,7 @@ fn run_script(
                     h.goal,
                     h.plan,
                     h.place,
+                    h.tenure,
                     h.coins,
                     h.failure
                 );
@@ -785,6 +794,7 @@ fn hud(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
             }
             ui.label(format!("{}c   {} food   {}", h.coins, h.food, h.job));
             ui.label(&h.place);
+            ui.label(&h.tenure);
             // M18 P4: held (cuffs, a sentence's days left)
             if let Some(held) = &h.held {
                 ui.colored_label(egui::Color32::from_rgb(255, 120, 90), format!("held: {held}"));

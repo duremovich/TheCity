@@ -2410,7 +2410,8 @@ pub fn convert_pass(world: &mut World, all: bool) {
         if !all && !(u64::from(a.index) + day).is_multiple_of(7) {
             continue;
         }
-        if world.purse(Some(a)) >= 3 * meal {
+        // M18 P5h (a probe's debug assert): a holder gone (no Wallet) is no purse to read.
+        if !world.has::<crate::components::Wallet>(a) || world.purse(Some(a)) >= 3 * meal {
             continue;
         }
         for (issuer, units) in held {

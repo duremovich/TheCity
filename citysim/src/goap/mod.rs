@@ -53,5 +53,7 @@ pub fn goal_state(goal: GoalKind) -> Option<GoalState> {
         GoalKind::Pitch => return None,
         // Lives at work phase 2 (§ 3.5): scripted (`household::plan`).
         GoalKind::Visit => return None,
+        // M18 P5h: scripted (`housing::plan`).
+        GoalKind::FindHome => return None,
     })
 }

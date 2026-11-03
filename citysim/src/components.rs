@@ -1157,6 +1157,9 @@ pub enum GoalKind {
     /// Lives at work phase 2 (§ 3.5): a visit to a hurt kin or an elder
     /// parent (a scripted plan; `systems::household`).
     Visit,
+    /// M18 P5h: a homeless adult's errand: walk to a letting desk and apply
+    /// for a place (a scripted plan; `systems::housing`).
+    FindHome,
 }
 
 impl GoalKind {

@@ -49,6 +49,8 @@ pub fn nightly(world: &mut World) {
         book_statistical(world);
         grow_hotels(world);
         assign_statistical_squats(world);
+        // M18 P5h: the capsules' lockers.
+        crate::systems::housing::lockers(world);
     }
     if world.config.law.district_beats {
         let swept = if enabled(world) { sweep_squats(world) } else { Vec::new() };
@@ -301,6 +303,13 @@ fn book(world: &mut World, a: EntityId, h: EntityId) -> bool {
     let until = checkout_after(world.tick);
     world.hotel_beds.insert(a, (h, until));
     world.stats.current.hotel_nights += 1;
+    // M18 P5h: a Capsule Hotel's bed is a capsule held (renewed at checkout
+    // while the night is paid, `housing::checkout`); a Mission's cot is a night,
+    // and so is a housed sleeper's bed far from home (`life::away_hotel`).
+    let homeless = world.comp::<crate::components::Household>(a).is_some_and(|x| x.home.is_none());
+    if crate::systems::housing::on(world) && homeless && !crate::systems::charity::is_cot_house(world, h) {
+        world.housing.capsules.insert(a, h);
+    }
     true
 }
 

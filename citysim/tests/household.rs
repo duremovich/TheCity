@@ -386,22 +386,33 @@ fn test_a_homeless_worker_pays_the_first_rent_before_moving_in() {
         })
         .expect("an unmarried, childless day worker");
     w.set_home(a, None);
-    // Midnight of day 1: re-housing runs.
-    w.tick = TICKS_PER_DAY;
-    let cheapest = w
+    // M18 P5h: the application at a private owner's or a gang's desk (the
+    // deposit only), `housing::apply` (the walk's end, or the Statistical roll).
+    use citysim::systems::housing;
+    let pick = w
         .buildings_of_kind(BuildingKind::Home)
         .iter()
-        .map(|&h| citysim::systems::ownership::rent_for(&w, h))
-        .filter(|&r| r > 0)
-        .min()
-        .expect("a Home with rent");
-    common::set_coins(&mut w, a, days * cheapest - 1);
-    citysim::systems::ownership::run(&mut w);
+        .copied()
+        .filter(|&h| citysim::systems::ownership::rent_for(&w, h) > 0)
+        .filter(|&h| {
+            matches!(
+                citysim::systems::ownership::owner_kind(&w, w.owner_of(h)),
+                citysim::systems::ownership::OwnerKind::Agent(_) | citysim::systems::ownership::OwnerKind::Gang(_)
+            ) || w.has::<citysim::components::Job>(a)
+                && matches!(
+                    citysim::systems::ownership::owner_kind(&w, w.owner_of(h)),
+                    citysim::systems::ownership::OwnerKind::Corp(_)
+                )
+        })
+        .find(|&h| w.comp::<citysim::Building>(h).is_some_and(|b| w.residents_of(h).len() < usize::from(b.capacity)))
+        .expect("a Home with rent and room");
+    let cost = days * citysim::systems::ownership::rent_for(&w, pick);
+    common::set_coins(&mut w, a, cost - 1);
+    housing::apply(&mut w, a, pick, None);
     assert_eq!(home(&w, a), None, "short of the first rent up front: sleeps rough");
     let rich = 1000;
     common::set_coins(&mut w, a, rich);
-    w.tick += TICKS_PER_DAY;
-    citysim::systems::ownership::run(&mut w);
+    housing::apply(&mut w, a, pick, None);
     let h = home(&w, a).expect("housed once he can pay");
     let rent = citysim::systems::ownership::rent_for(&w, h);
     assert_eq!(common::coins(&w, a), rich - days * rent, "the first rent paid up front");

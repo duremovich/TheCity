@@ -73,8 +73,13 @@ pub fn spendable(world: &World, id: EntityId) -> i64 {
             }
         }
         _ => {
-            // The homeless save for a Sump Block's re-housing deposit first.
-            keep += world.config.rent.rehouse_coins_mult * world.config.rent.base[0].max(1);
+            // The homeless save for a Sump Block's re-housing deposit first
+            // (M18 P5h: the deposit every mover pays, `housing::deposit`).
+            keep += if crate::systems::housing::on(world) {
+                i64::from(world.config.service.move_in_rent_days).max(1) * world.config.rent.base[0].max(1)
+            } else {
+                world.config.rent.rehouse_coins_mult * world.config.rent.base[0].max(1)
+            };
             if crate::systems::street::enabled(world) {
                 keep += world.config.street.night_price;
             }

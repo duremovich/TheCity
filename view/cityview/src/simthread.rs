@@ -193,6 +193,9 @@ pub enum UiCmd {
     Bld(EntityId),
     /// C4: a fight order (a stance, Attack, Draw or Holster, Take cover, Flee, Yield, Help).
     Fight(citysim::systems::combat::Order),
+    /// M18 P5h: a `--play` line's `bld near hostel|corp|city`: the nearest capsule hostel with a bed, corp letting
+    /// desk with a place, or Civic Hall (`housing::script_target`); its menu.
+    BldNear(String),
     /// C4: a body's menu by its index wherever it is (a `--play` line's `body #INDEX`: a target off the screen).
     BodyIndex(u32),
     /// C4: a `--play` line's `body best friends|weak|strong`: of the adults within `[combat] join_tiles` of the
@@ -240,6 +243,8 @@ pub struct PlayerHud {
     pub coins: i64,
     pub job: String,
     pub place: String,
+    /// M18 P5h: the tenure (`housing::tenure_line`: sleeps rough, a capsule at ..., a room at ..., a flat at ...).
+    pub tenure: String,
     pub goal: String,
     pub plan: String,
     /// The last failure or refusal: its clock and line.
@@ -855,6 +860,16 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                     }
                     continue;
                 }
+                UiCmd::BldNear(what) => {
+                    let b = citysim::systems::housing::script_target(&world, subject, &what);
+                    eprintln!("cityview: tick {} bld near {what}: {:?}", world.tick, b.map(|b| world.name_of(b)));
+                    let door = b.and_then(|b| world.comp::<citysim::Building>(b)).map(|x| x.door);
+                    let snap = world.config.view.pick_snap_tiles;
+                    if let Some(m) = door.and_then(|t| pl::menu_at(&world, subject, t, true, snap)) {
+                        publish_menu(&sh, &world, m, &mut menu_seq);
+                    }
+                    continue;
+                }
                 UiCmd::Body(o) => {
                     publish_menu(&sh, &world, pl::menu_body(&world, subject, o), &mut menu_seq);
                     continue;
@@ -1327,6 +1342,7 @@ fn player_hud(world: &World, id: EntityId) -> PlayerHud {
         coins: world.comp::<Wallet>(id).map_or(0, |w| w.coins),
         job,
         place,
+        tenure: citysim::systems::housing::tenure_line(world, id),
         goal: b.and_then(|b| b.current_goal).map_or("-".to_string(), |g| format!("{g:?}")),
         plan: citysim::systems::player::plan_line(world, id),
         failure: pc

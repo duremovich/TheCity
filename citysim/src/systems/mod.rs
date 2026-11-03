@@ -71,6 +71,7 @@ pub mod grudges;
 pub mod health;
 pub mod hitmarket;
 pub mod household;
+pub mod housing;
 pub mod hunt;
 pub mod industry;
 pub mod jobs;

@@ -696,6 +696,8 @@ evict_days = 7
 # 30 (8 or 16 derelicts alike). At 21 a Dreg on the dole, paying for Hotel nights, saves for weeks:
 # seed 42 2.06 % mean, 1.56-3.95 %, 120 of 120 days in 1-5 % (seed 43 2.00 %, 120/120); thefts per
 # 100 agent-days 3.16 (M11 config 2.84, x1.11), assaults 16.6/day.
+# M18 P5h: the re-housing pass is retired ([housing], the FindHome errand); this multiple now only sizes a
+# housed worker's relocation purse (life::relocate) when the hunger fix's first-rent rule is off.
 rehouse_coins_mult = 21
 refuse_days = 30
 sump_spoilage_mult = 1.5 # tier-0 pantries spoil this much faster
@@ -704,6 +706,8 @@ sump_spoilage_mult = 1.5 # tier-0 pantries spoil this much faster
 # a rung of the ladder (the survival loop), not a formality.
 # M12 D28: 3 -> 7 (spec § 4), and it now also runs for anyone put on the street without an eviction
 # (a derelict's residents, the seeded homeless).
+# M18 P5h: retired with the re-housing pass (read by nothing; an evictee may apply at once, refused for
+# refuse_days by the landlord who put him out). Kept so an old save's [rent] still reads.
 rehouse_wait_days = 7
 # M11 phase 2 (seed 42, 2,000): with rent taken only from what is left at midnight, the 89 % on the
 # 3-coin dole (price 3) reach midnight with 0 coins once their opening savings are gone (mean 12 at
@@ -1624,6 +1628,36 @@ nobody_coins = 25                  # a nobody holds at most this many coins
 nobody_age_max = 60                # a nobody is 18 up to this age (years)
 blackmail_offer_minutes = 30       # a witness's demand on the player stands this many game minutes (pay, refuse, go for
                                    # him); let lapse, it is refused (he goes to the law)
+
+[housing]
+# M18 P5h (Dylan 2026-11-03, "let it be a task that can be completed early ... the mechanism for NPCs too"):
+# a homeless adult's FindHome goal walks to a letting desk and applies; acceptance is by the landlord's kind
+# (systems::housing). The desk: the Home's super (a tied resident) at the Block, else the owner's: the city's at
+# the Civic Hall, a corp's at its office (its Hq or senior working building; a pure housing corp lets from the
+# Block's lobby), a gang's at its Hideout, a private owner's at the Block. The city keeps a list (list_days, then
+# a place); a corp refuses a record, no job or no address; a gang asks nothing but its protection rides on the rent
+# and the tenant is known to the gang; a private owner asks the deposit only. Off camera a Statistical applicant
+# rolls the same rules at midnight, with no walk. Replaces ownership::rehouse and [rent] rehouse_wait_days. Every mover
+# pays the deposit, [service] move_in_rent_days of the rent, up front (the jobless too).
+enabled = true
+list_days = 10                     # the city's waiting list: a place this many days after joining it
+corp_record_days = 30              # a corp refuses a sentence served (misery record) or an open warrant within this
+corp_address_days = 60             # a corp refuses one with no Home of his own within this many days (a capsule is no address)
+gang_protection = 0.5              # a gang's Homes' rent x (1 + this): the protection rides on the rent, to the gang
+refusal_days = 7                   # a landlord who refused is not asked again for this many days
+desk_open = 8                      # the letting desks' hours (an applicant walks to one then)
+desk_close = 18
+apply_mins = 20                    # the Apply step at the desk
+flat = 0.55                        # the FindHome goal's flat score
+curve = [0.4, 0.6]                 # Linear (m, b) over min(days homeless / urgency_days, 1)
+urgency_days = 7.0
+reach_tiles = 400                  # a desk past this many tiles is not walked to
+menu_rows = 6                      # the player's rows at a desk: at most this many places
+locker_rob_p = 0.03                # a capsule holder's nightly chance his locker is robbed (03:00) ...
+locker_rob_share = 0.5             # ... of this share of his coins, to a fellow guest of the racks (else the owner)
+hostel_residents = 6000            # the world build opens a city capsule hostel per this many residents (3 at 20k, none in the
+                                   # 2,000 test city), dealt round the districts of the zones below (the 20k island has one Sump)
+hostel_zones = ["Sump"]
 
 [competence]
 exec_w = 0.4
@@ -4377,7 +4411,7 @@ defensive = ["Hunker", "Secure", "Squeeze"]            # ... and loyalty: p(expa
 beat_stops = 4                     # phase 5 § 2.4 (reporter): the scenes of yesterday's crimes in the Feed's districts walked a shift, nearest the Feed first
 byline_promote = 10                # phase 5 § 2.4 (reporter): every this many bylines the reporter's class-pay grade rises one step
 witness_tiles = 3                  # phase 5 § 2.4 (reporter): a witness interviewed at a scene is a body within this many tiles of its door
-move_in_rent_days = 7              # 8d (OPEN-126, Shadow V5 bug 17; Dylan 2026-10-19 "deposit first"): a homeless worker (the hunger fix's first-rent rule) moves into a Home only holding this many days of its rent, paid up front to the owner (Flow::Rent; prepaid rent), so a hired homeless worker sleeps rough and saves from wages. A week, as [rent]'s M11 week up front; the jobless keep rehouse_coins_mult. 0: housed on one day's rent, nothing paid
+move_in_rent_days = 7              # 8d (OPEN-126, Shadow V5 bug 17; Dylan 2026-10-19 "deposit first"): a homeless worker (the hunger fix's first-rent rule) moves into a Home only holding this many days of its rent, paid up front to the owner (Flow::Rent; prepaid rent), so a hired homeless worker sleeps rough and saves from wages. A week, as [rent]'s M11 week up front. M18 P5h: the deposit every mover pays at a letting desk ([housing], the jobless too); read as at least 1
 exec_ride = true                   # 8d (OPEN-129; Dylan 2026-10-19 "lives in the Spire and rides in"): a corp exec homed at [life] exec_home_tier whose Hq stands in another district is driven to work, timed at the Car's speed: a corp road vehicle if the corp owns one, else the nearest Garage's off-screen cab, the fare ([jobs2] fare_base + fare_per_tile) paid by the corp
 
 # Review fix 8 (doctrine 3): the numbers the service systems read beside their rows; each a Served memory's
