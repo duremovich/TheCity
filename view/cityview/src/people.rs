@@ -96,6 +96,23 @@ pub struct BodyDraw {
     pub age: u32,
     pub dress: u8,
     pub gang: bool,
+    /// C5: the replay's procedural pose on the rig: a lean (rad, forward +), a step (city metres), lying flat (knocked
+    /// out, downed)
+    pub lean: f32,
+    pub nudge: Vec2,
+    pub lying: bool,
+}
+
+impl BodyDraw {
+    /// C5: the pose's turn on the body's own axes (after its yaw): a lean about its right-hand axis, or flat on its back.
+    pub fn tilt(&self) -> Quat {
+        if self.lying { Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2) } else { Quat::from_rotation_x(self.lean) }
+    }
+
+    /// C5: the feet with the pose's step (and a lying body raised off the floor).
+    pub fn feet(&self) -> Vec3 {
+        self.at + self.nudge.extend(if self.lying { 0.15 } else { 0.0 })
+    }
 }
 
 /// `[view]`'s V3 numbers (assets/config.toml, read at startup).
@@ -436,8 +453,9 @@ pub fn draw_people(
         let look = look_of(b);
         let s = people.scale(b.age);
         n_kids += usize::from(s < 1.0);
-        let tf = Transform::from_translation(bv(b.at.x, b.at.y, b.at.z))
-            .with_rotation(Quat::from_rotation_y(b.yaw + std::f32::consts::PI))
+        let f = b.feet();
+        let tf = Transform::from_translation(bv(f.x, f.y, f.z))
+            .with_rotation(Quat::from_rotation_y(b.yaw + std::f32::consts::PI) * b.tilt())
             .with_scale(Vec3::splat(s));
         let pose = if b.walking { WALK } else { IDLE };
         if near_now[i] {

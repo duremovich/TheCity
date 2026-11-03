@@ -56,6 +56,9 @@ pub struct Player {
     pub scripted: bool,
     /// The player light (K; CV_NO_PLAYER_LIGHT=1 starts it off)
     pub light: bool,
+    /// C5: the followed subject's pose on the rig (sim.rs `BodyDraw::tilt`, `feet`'s step): slot 0 wears it
+    pub tilt: Quat,
+    pub nudge: Vec3,
 }
 
 pub fn spawn_bodies(mut commands: Commands, assets: Res<AssetServer>, player: Res<Player>) {
@@ -194,6 +197,12 @@ pub fn place_bodies(
             // on the ground the squad stands on its own ground; on a deck / in a building at the player's level
             let z = stream.ground_z(xy.x, xy.y).filter(|z| (z - p.z).abs() < 0.6).unwrap_or(p.z);
             p = xy.extend(z);
+        }
+        if b.slot == 0 {
+            p += player.nudge;
+            t.translation = bv(p.x, p.y, p.z);
+            t.rotation = rot * player.tilt;
+            continue;
         }
         t.translation = bv(p.x, p.y, p.z);
         t.rotation = rot;

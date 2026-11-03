@@ -884,14 +884,26 @@ pub struct ViewCfg {
     /// M18 P4: the day-end's "your block": the events within this many
     /// tiles of the player's home door (where it stands, homeless).
     pub block_tiles: u16,
-    /// C4 (docs/COMBAT.md § 5, the combat clock): while the body the human
-    /// drives is in a live fight the view runs the sim at this many ticks a
-    /// real second (the whole sim on one clock), so a beat plays in about a
-    /// second; normal speed when the fight ends.
-    pub combat_speed: f64,
+    /// C5 (docs/COMBAT.md § 5, the combat clock): while the body the human
+    /// drives is in a live fight the view steps its engagement a beat every
+    /// this many real seconds inside the tick (orders land between beats),
+    /// then runs the rest of the tick: `beats_per_tick` beats a game minute,
+    /// as an NPC's fight; normal speed when the fight ends.
+    pub beat_s: f64,
     /// C4: a beat's cue (a word over a body, a flash) floats this many real
     /// seconds.
     pub cue_s: f32,
+    /// C5: the replay's procedural poses on the existing rig: a swing lunges
+    /// `lunge_m` toward the struck and leans `lunge_deg` forward, a hit of a
+    /// Wound or worse staggers the struck back as far; each over `lunge_s`
+    /// real seconds.
+    pub lunge_s: f32,
+    pub lunge_m: f32,
+    pub lunge_deg: f32,
+    /// C5 (`OPEN-297`): indoors, the bodies of the subject's fight stand
+    /// round it this far (metres), facing it (the view's indoor place is a
+    /// jitter across the room).
+    pub fight_ring_m: f32,
 }
 
 impl Default for ViewCfg {
@@ -993,8 +1005,12 @@ impl Default for ViewCfg {
             news_log_lines: 300,
             news_knowers_max: 40,
             block_tiles: 12,
-            combat_speed: 1.0,
+            beat_s: 1.0,
             cue_s: 1.2,
+            lunge_s: 0.45,
+            lunge_m: 0.45,
+            lunge_deg: 18.0,
+            fight_ring_m: 1.3,
         }
     }
 }
@@ -14857,9 +14873,30 @@ pub struct CombatCfg {
     pub cover_inside: f32,
     pub cover_max: f32,
     pub cover_tiles: u16,
-    /// C4: a live fight with a body the human drives runs this many beats a
-    /// tick (`beats_per_tick` otherwise), so an order lands at the next beat.
-    pub human_beats_per_tick: u8,
+    /// C5: the body the human drives decides when to break (its morale break
+    /// is waived); under its break line it shakes: attack and evasion x (1 -
+    /// `shake_attack` / `shake_evade` x how far under), at least `shake_floor`.
+    pub shake_attack: f32,
+    pub shake_evade: f32,
+    pub shake_floor: f32,
+    /// C5: a duel with the human's body runs to this many beats (not
+    /// `max_beats`): the human ends a stand-off, then the lower morale gives way.
+    pub human_max_beats: u8,
+    /// C5 (`OPEN-295`): a knockout lasts `ko_minutes`, + `ko_head_minutes` by
+    /// the worst head wound (graze, wound, grave): down and still, robbable.
+    pub ko_minutes: u16,
+    pub ko_head_minutes: [u16; 3],
+    /// C5: the winner of a fight goes through a knocked-out loser's pockets
+    /// when its lawfulness is under `ko_rob_lawful` (no guard, no arrest, no
+    /// bout), taking `ko_rob_share` of the coins.
+    pub ko_rob_lawful: f32,
+    pub ko_rob_share: f32,
+    /// C5: a flight whose refuge is the building it fled (or none) runs out to
+    /// a street tile this far from the door.
+    pub flee_tiles: u16,
+    /// C5: a subdue stance goes for the knockout: any blow it lands puts the
+    /// body down on this x (1 + the body's fatigue).
+    pub subdue_ko_p: f32,
     /// C4: the odds on an Attack row are this many mock fights
     /// (`combat::odds`, the beat's rules without the world's writes).
     pub odds_trials: u32,
@@ -14986,7 +15023,16 @@ impl Default for CombatCfg {
             cover_inside: 0.3,
             cover_max: 0.5,
             cover_tiles: 2,
-            human_beats_per_tick: 1,
+            shake_attack: 0.8,
+            shake_evade: 0.8,
+            shake_floor: 0.35,
+            human_max_beats: 30,
+            ko_minutes: 20,
+            ko_head_minutes: [0, 20, 60],
+            ko_rob_lawful: 0.4,
+            ko_rob_share: 1.0,
+            flee_tiles: 10,
+            subdue_ko_p: 0.08,
             odds_trials: 200,
             hint_waver: 0.12,
         }

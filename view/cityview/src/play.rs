@@ -36,6 +36,12 @@
 //! beat replay (`replay`: each tick's beats a `beat_s` apart as words over the bodies, a flash on a telling blow)
 //! and the HUD's stance and holster for the next fight. Script: `order stance allout|defensive|subdue|holdback`,
 //! `order attack INDEX`, `order draw|holster|cover|flee|yield`, `order help INDEX`.
+//!
+//! C5 (the feel pass): the fight's beats are stepped one a `[view] beat_s` (simthread), so the replay shows each beat
+//! as it lands; a swing is a lunge at the struck body and a hit a stagger away from the striker (`Pose`, drawn by
+//! sim.rs on the existing rig: a lean and a step, `[view] lunge_s` / `lunge_m` / `lunge_deg`); the Attack rows read
+//! the duel's odds and the whole fight's; Take cover shows only with a gun in the fight, Holster only with a weapon in
+//! hand. Script: `wait SECS` (the sim runs on that long: a fight's beats a second apart).
 
 use bevy::{
     app::AppExit,
@@ -94,6 +100,20 @@ pub struct Play {
     cues: Vec<Cue>,
     beats_seq: u64,
     cue_s: f32,
+    /// C5: a script's `wait SECS`: the sim runs on (a fight's beats a `beat_s` apart) until then.
+    wait_until: Option<(Instant, u64)>,
+    /// C5: the procedural poses of the beat replay (a lunge, a stagger) by body key, from `at`.
+    pub poses: Vec<Pose>,
+    lunge_s: f32,
+}
+
+/// C5: a body's procedural pose on the existing rig: a lunge at `toward` or a stagger away from it.
+#[derive(Clone, Copy, Debug)]
+pub struct Pose {
+    pub key: u64,
+    pub toward: u64,
+    pub lunge: bool,
+    pub at: Instant,
 }
 
 /// `"T action; T action"`: the ticks a number or `D:HH:MM`, in rising order.
@@ -137,6 +157,9 @@ pub fn add(app: &mut App, shared: Arc<Shared>, vcfg: &citysim::config::ViewCfg, 
             cues: Vec::new(),
             beats_seq: 0,
             cue_s: vcfg.cue_s,
+            wait_until: None,
+            poses: Vec::new(),
+            lunge_s: vcfg.lunge_s,
         })
         .add_systems(Update, (keys, click, run_script))
         .add_systems(EguiPrimaryContextPass, (hud, menu, board, news, day_end, death, fight, wounds, replay));
@@ -341,6 +364,14 @@ fn run_script(
     }
     // the frame's tick: the HUD's state was published with it
     let Some(tick) = sim.clock_tick else { return };
+    // C5: a `wait SECS`: the sim runs on to the next later line's tick (a fight's beats a `beat_s` apart) until then
+    if let Some((u, later)) = p.wait_until {
+        if Instant::now() < u {
+            p.shared.hold.store(later, Ordering::Relaxed);
+            return;
+        }
+        p.wait_until = None;
+    }
     // M18 P2: the sim is held at the next line's tick (`Shared::hold`, the bench's hold): a line runs at its own tick,
     // not wherever the sim had got to by the frame (at the fast speeds that was tens of minutes late), and the sim runs
     // flat out between lines. Without a script the hold is never touched.
@@ -397,7 +428,7 @@ fn run_script(
             p.menu_asked = asked;
             p.shared.send(UiCmd::Bld(citysim::EntityId { index, generation: 0 }));
         }
-        // C4: `body best friends|weak|strong`: a target picked by the sim's odds (simthread `best_body`)
+        // C4: `body best friends|weak|strong` (C5: `brave`, `out`): a target picked by the sim's odds (simthread `best_body`)
         "body" if arg.starts_with("best") => {
             p.menu_open = None;
             p.click_px = Vec2::new(480.0, 300.0);
@@ -561,6 +592,13 @@ fn run_script(
             }
             commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
         }
+        // C5: let the sim run on this many real seconds (a fight's beats land a `beat_s` apart)
+        "wait" => {
+            let secs: f32 = arg.parse().expect("wait SECS");
+            // the hold: the next later line's tick as the wait begins
+            let later = p.script[p.next..].iter().map(|s| s.tick).find(|&t| t > tick).unwrap_or(u64::MAX);
+            p.wait_until = Some((Instant::now() + Duration::from_secs_f32(secs.max(0.0)), later));
+        }
         "quit" => p.quit_in = Some(30),
         o => panic!("--play: unknown action '{o}'"),
     }
@@ -646,8 +684,9 @@ fn hud(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
                             p.shared.send(UiCmd::Fight(Order::Stance(s)));
                         }
                     }
+                    // C5: Holster only with a weapon to hand
                     let (l, o) = if h.holstered { ("draw", Order::Draw) } else { ("holster", Order::Holster) };
-                    if ui.small_button(l).clicked() {
+                    if (h.armed || h.holstered) && ui.small_button(l).clicked() {
                         p.shared.send(UiCmd::Fight(o));
                     }
                 });
@@ -927,6 +966,24 @@ fn cues_of(b: &citysim::systems::combat::BeatLog, at: Instant, out: &mut Vec<Cue
     }
 }
 
+/// C5: the procedural poses of one blow: the striker lunges at the struck (a swing, hit or miss), the struck staggers
+/// away on a hit of a Wound or worse.
+fn poses_of(b: &citysim::systems::combat::BeatLog, at: Instant, out: &mut Vec<Pose>) {
+    use citysim::components::Severity;
+    use citysim::systems::combat::Blow;
+    let (by, on) = (key_of(b.by), key_of(b.on));
+    match b.blow {
+        Blow::Miss => out.push(Pose { key: by, toward: on, lunge: true, at }),
+        Blow::Hit(_, v) => {
+            out.push(Pose { key: by, toward: on, lunge: true, at });
+            if v >= Severity::Wound {
+                out.push(Pose { key: on, toward: by, lunge: false, at });
+            }
+        }
+        _ => {}
+    }
+}
+
 /// C4, the beat replay: each new tick of beats (`Shared::beats`) is laid out a beat every `beat_s`, and each cue is
 /// drawn over its body (rising, fading) with a flash on a telling blow.
 pub fn replay(
@@ -941,10 +998,21 @@ pub fn replay(
         p.beats_seq = bp.seq;
         let now = Instant::now();
         let mut fresh = Vec::new();
+        let mut poses = Vec::new();
         for (g, b) in &bp.beats {
-            cues_of(b, now + Duration::from_secs_f32(*g as f32 * bp.beat_s), &mut fresh);
+            let at = now + Duration::from_secs_f32(*g as f32 * bp.beat_s);
+            cues_of(b, at, &mut fresh);
+            poses_of(b, at, &mut poses);
         }
         p.cues.extend(fresh);
+        p.poses.extend(poses);
+    }
+    let lunge = Duration::from_secs_f32(p.lunge_s.max(0.05));
+    let now = Instant::now();
+    p.poses.retain(|x| now < x.at + lunge);
+    let poses = p.poses.clone();
+    if let Ok(mut l) = p.shared.poses.lock() {
+        *l = poses;
     }
     let now = Instant::now();
     let life = Duration::from_secs_f32(p.cue_s.max(0.1));
@@ -1041,19 +1109,30 @@ pub fn fight(mut contexts: EguiContexts, p: Res<Play>) -> Result {
             });
             ui.horizontal_wrapped(|ui| {
                 ui.label(format!("{}{}", f.weapon, if f.holstered { " (holstered)" } else { "" }));
+                // C5: Holster only with something in the hand, Take cover only with a gun in the fight (melee
+                // ignores cover)
                 if f.holstered {
                     order_button(ui, &p, "Draw", Order::Draw);
-                } else {
+                } else if !f.weapon.starts_with("bare hands") {
                     order_button(ui, &p, "Holster", Order::Holster);
                 }
-                order_button(ui, &p, &format!("Take cover ({:.0}% here)", f.cover * 100.0), Order::Cover);
+                if f.guns {
+                    order_button(ui, &p, &format!("Take cover ({:.0}% here)", f.cover * 100.0), Order::Cover);
+                }
             });
             ui.horizontal_wrapped(|ui| {
                 order_button(ui, &p, "Flee", Order::Flee);
                 order_button(ui, &p, "Yield", Order::Yield);
             });
-            for (id, name, odds) in &f.odds {
-                order_button(ui, &p, &format!("Attack {name} ({:.0}%)", odds * 100.0), Order::Attack(*id));
+            // C5: the duel's odds (you and that one) and the whole fight's (their side as it stands)
+            let more = f.sides[1 - f.mine].len() > 1 || f.sides[f.mine].len() > 1;
+            for (id, name, duel, whole) in &f.odds {
+                let label = if more {
+                    format!("Attack {name} (the duel {:.0}%; the fight {:.0}%)", duel * 100.0, whole * 100.0)
+                } else {
+                    format!("Attack {name} ({:.0}%)", duel * 100.0)
+                };
+                order_button(ui, &p, &label, Order::Attack(*id));
             }
             for (id, name) in &f.downed {
                 order_button(ui, &p, &format!("Help {name} (drag clear)"), Order::Help(*id));

@@ -2990,6 +2990,10 @@ fn broke_parent_visits(mut c: World) -> (bool, bool) {
                 // day 10 and served 10 days in the cells, the visit unmade).
                 let cool = c.tick + TICKS_PER_DAY;
                 c.comp_mut::<Brain>(q).expect("brain").cooldowns.insert(citysim::GoalKind::Fight, cool);
+                // The premise kept (combat C5's city): a law-abiding parent (she
+                // stole on day 4 and smuggled on day 12, 11 of the 14 days in the
+                // cells, the visit unmade).
+                c.comp_mut::<citysim::Personality>(q).expect("personality").lawfulness = 1.0;
             }
             // F1's city: the other parent, hired near home, paid the fee;
             // the household is kept broke (the premise).

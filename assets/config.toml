@@ -3985,9 +3985,17 @@ cover_wall = 0.15                  # alley, a wall's foot); inside a building; a
 cover_inside = 0.3                 # tile within cover_tiles (inside a building: no move, the interior's cover)
 cover_max = 0.5
 cover_tiles = 2
-human_beats_per_tick = 1           # a live fight with the body the human drives runs this many beats a tick (not
-                                   # beats_per_tick's 6: six beats at once ended most fights before an order could land);
-                                   # the view runs it at [view] combat_speed, a beat a second
+# C5 (docs/COMBAT.md "C5 as built"): the feel pass.
+shake_attack = 0.8                 # the body the human drives decides when to break (its morale break is waived); under its
+shake_evade = 0.8                  # break line it shakes: attack and evasion x (1 - this x how far under the line), at
+shake_floor = 0.35                 # least shake_floor (the HUD says so)
+human_max_beats = 30               # a duel with the human's body runs to this many beats (not max_beats), then the lower morale gives way
+ko_minutes = 20                    # a knockout lasts this long (down and still, robbable), + ko_head_minutes by the worst
+ko_head_minutes = [0, 20, 60]      # head wound (graze, wound, grave); it wakes on its own ("comes to")
+ko_rob_lawful = 0.4                # the winner goes through a knocked-out loser's pockets when its lawfulness is under this
+ko_rob_share = 1.0                 # (no guard, no arrest, no bout), taking this share of the coins
+flee_tiles = 10                    # a flight whose refuge is the building it fled (or none) runs out to a street tile this far
+subdue_ko_p = 0.08                 # a subdue stance goes for the knockout: any blow it lands puts the body down on this x (1 + its fatigue)
 odds_trials = 200                  # the odds on an Attack row: this many mock fights (combat::odds: the beat's rules, the
                                    # likely joiners at their join chance, no world writes)
 hint_waver = 0.12                  # the fight HUD says a body is wavering this close above its break line (morale + numbers)
@@ -6533,7 +6541,11 @@ news_knowers_max = 40              # "who knows about you" lists at most this ma
 block_tiles = 12                   # the day-end's "your block": events within this many tiles of the home door (where
                                    # the body stands, homeless)
 # C4 (docs/COMBAT.md § 5, the player's fight): the combat clock and the beat replay.
-combat_speed = 1.0                 # while the possessed body is in a live fight the whole sim runs at this many ticks a real
-                                   # second (its fight runs [combat] human_beats_per_tick 1 beat a tick: a beat a second;
-                                   # x60 the walk-matched rate); Space pauses
+beat_s = 1.0                       # while the possessed body is in a live fight the view steps its engagement a beat every this
+                                   # many real seconds inside the tick (orders land between beats), then runs the rest of the
+                                   # tick: [combat] beats_per_tick beats a game minute, as an NPC's fight (C5)
+lunge_s = 0.45                     # C5: the replay's procedural poses on the existing rig: a swing lunges lunge_m toward the
+lunge_m = 0.45                     # struck and leans lunge_deg forward, a hit of a Wound or worse staggers the struck back as
+lunge_deg = 18.0                   # far; each over lunge_s real seconds (a knocked-out or downed body lies flat)
+fight_ring_m = 1.3                 # C5: indoors, the bodies of the subject's fight stand round it this far (metres), facing it
 cue_s = 1.2                        # a beat's cue (a word over a body, a flash) floats this many real seconds

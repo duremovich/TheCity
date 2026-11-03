@@ -369,6 +369,8 @@ pub enum Verb {
     Attack(EntityId),
     /// C4: a downed body: drag it clear to its Clinic (the M16b Rescue's steps).
     Help(EntityId),
+    /// C5: a knocked-out body beside you: go through its pockets (`combat::rob`, a Theft).
+    Rob(EntityId),
     // --- M18 P3: talk (a body beside you; `talk`)
     /// A person: walk over to stand beside them.
     WalkOver(EntityId),
@@ -447,6 +449,7 @@ impl Verb {
             | Verb::WorkJob
             | Verb::Answer(..) => &[],
             Verb::Help(_) => &["the Rescue's tie (kin, a friend, a colleague, a called stranger's term): the human's will"],
+            Verb::Rob(_) => &["lawfulness: the NPC winner robs a body it knocked out only under [combat] ko_rob_lawful"],
         }
     }
 }
@@ -861,8 +864,19 @@ pub fn plan_of(world: &World, id: EntityId, verb: Verb) -> Result<(Plan, String)
             // beat's rules, the likely joiners at their chance).
             let odds = crate::systems::combat::odds(world, id, o);
             let near = odds.theirs - 1.0;
-            let more = if near >= 0.5 { format!("; {near:.1} of theirs may jump in") } else { String::new() };
-            mk(Some(o), steps, format!("Attack {} ({:.0}%{more})", world.name_of(o), 100.0 * odds.p))
+            // C5: the duel's odds, and the whole fight's when their side may grow
+            let label = if near >= 0.5 {
+                let one = crate::systems::combat::duel_odds(world, id, o);
+                format!(
+                    "Attack {} (one on one {:.0}%; {near:.1} of theirs may jump in: {:.0}%)",
+                    world.name_of(o),
+                    100.0 * one,
+                    100.0 * odds.p
+                )
+            } else {
+                format!("Attack {} ({:.0}%)", world.name_of(o), 100.0 * odds.p)
+            };
+            mk(Some(o), steps, label)
         }
         Verb::Help(o) => {
             let Some(rec) = world.wounded.get(&o) else { return no("not down") };
@@ -881,6 +895,15 @@ pub fn plan_of(world: &World, id: EntityId, verb: Verb) -> Result<(Plan, String)
             ];
             let label = format!("Drag {} clear to {}", world.name_of(o), world.name_of(clinic));
             Ok((Plan { goal: GoalKind::Rescue, target: Some(o), steps, started_tick: tick }, label))
+        }
+        Verb::Rob(o) => {
+            if !crate::systems::combat::knocked_out(world, o) {
+                return no("not knocked out");
+            }
+            if !crate::systems::law::near(world, id, o, 2) {
+                return no("too far: walk over first");
+            }
+            mk(Some(o), vec![], format!("Go through {}'s pockets", world.name_of(o)))
         }
         Verb::WalkOver(o) => {
             if !valid_person(world, id, o) {
@@ -1521,6 +1544,11 @@ pub fn menu_body(world: &World, id: EntityId, o: EntityId) -> Menu {
         let child = world.has::<Identity>(o) && !demography::is_adult(world, o);
         return Menu { title: if child { format!("{title} (a child)") } else { title }, rows: vec![] };
     }
+    // C5: a body knocked out hears nothing: walk over, go through its pockets
+    if crate::systems::combat::knocked_out(world, o) {
+        let title = format!("{title} (knocked out)");
+        return Menu { title, rows: rows(world, id, [Verb::WalkOver(o), Verb::Rob(o)]) };
+    }
     let verbs = [
         Verb::WalkOver(o),
         Verb::Chat(o),
@@ -1531,6 +1559,7 @@ pub fn menu_body(world: &World, id: EntityId, o: EntityId) -> Menu {
         Verb::Threaten(o),
         Verb::Attack(o),
         Verb::Help(o),
+        Verb::Rob(o),
     ];
     // M18 P3: the talk rows stay, greyed with why (too far, nothing to lend)
     let grey = |v: Verb| {
@@ -1561,6 +1590,15 @@ pub fn act(world: &mut World, id: EntityId, verb: Verb) {
             return;
         }
         Verb::Answer(made, take) => return answer(world, id, made, take),
+        // C5: the pockets of a body knocked out, at once (a Theft, witnessed)
+        Verb::Rob(o) => {
+            if let Err(why) = plan_of(world, id, verb) {
+                return refuse(world, id, &what, &why);
+            }
+            take_wheel(world, id);
+            crate::systems::combat::rob(world, id, o);
+            return;
+        }
         Verb::WorkJob => {
             let Some(c) = held_job(world, id) else { return refuse(world, id, &what, "no job held") };
             take_wheel(world, id);

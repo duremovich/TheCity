@@ -286,6 +286,11 @@ fn test_statistical_leader_order_in_force_at_once() {
     // A leader on a hunt (or hunted) keeps his body (`lod::set_lod`): off it.
     w.hunts.remove(&l);
     w.hunted_by.remove(&l);
+    // C5 (premise moved): on the combat feel pass's city the leader is a
+    // party of a record worked live (`contracts::holds_body`), which keeps
+    // his body: the records are cleared.
+    w.contract_runs.clear();
+    w.missions.clear();
     lod::set_lod(&mut w, l, Lod::Statistical);
     assert!(!leaders::in_person(&w, g) && !leaders::collects(&w, g), "off camera: the old path");
     leaders::run(&mut w);

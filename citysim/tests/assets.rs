@@ -484,6 +484,8 @@ fn test_robot_defends_in_brawl_and_wrecks_on_loss() {
         // The robot won this one: the raider was beaten, the robot stands.
         assert!(raiders.is_empty() && held == vec![r]);
         assets::despawn(&mut w, r);
+        // C5: a knockout lasts; each try is a fresh raider on his feet.
+        w.combat.out.clear();
     }
     assert!(wrecked, "a T1 robot at fighting 0 loses to a fighter at 1.0 in 60 tries");
     assert!(robots::posted_robot(&w, home).is_none());
