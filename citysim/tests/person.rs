@@ -582,9 +582,12 @@ fn probe_gun_never_takes_a_hit_on_kin() {
         // 4 he does.
         // M18 W: and the work beats off (their edges and memories move the
         // 4-day city off the gun this scene was pinned on).
+        // M18 P5h: and the housing errand off (the homeless's walks to the
+        // letting desks move the city off the scene the same way).
         let mut cfg = common::r2(Config::load());
         cfg.household.enabled = false;
         cfg.work_beat = None;
+        cfg.housing.enabled = false;
         let mut w = World::new(42, cfg);
         w.run_ticks(4 * TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
         let civ = civilians(&w);

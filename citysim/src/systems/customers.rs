@@ -239,8 +239,13 @@ pub fn rough_at_door(world: &mut World, worker: EntityId, client: EntityId, b: E
     }
     let salience = world.config.service.served_salience;
     let (vb, va) = (world.config.service.tune.eject_bouncer, world.config.service.tune.ejected);
-    world.remember(bouncer, crate::components::MemoryKind::Served, Some(client), salience, vb, false);
-    world.remember(client, crate::components::MemoryKind::Served, Some(bouncer), salience, va, false);
+    // M18 P5h: a `Served` memory is the service section's (the off city
+    // remembers none, `service`'s `test_off_city_writes_nothing`; the housing
+    // errand's walks moved an ejection onto its three days), as care's cover.
+    if crate::systems::service::on(world) {
+        world.remember(bouncer, crate::components::MemoryKind::Served, Some(client), salience, vb, false);
+        world.remember(client, crate::components::MemoryKind::Served, Some(bouncer), salience, va, false);
+    }
     let row = crate::systems::ownership::jobs2_row(world);
     row.ejections += 1;
     row.door_rough += 1;

@@ -272,6 +272,58 @@ NPCs too, to keep it consistent. Auto idle won't do it for you." The errand is e
 **Proof:** a fresh arrival who sleeps rough, takes a hostel capsule, is refused a corp flat (no job), and joins the
 city's list; and NPC diaries (`homeless`, `day_labourer`, an evictee) showing the errand and the refusals. Homeless,
 housed a day, hostel nights, and refusals by reason, before and after, on one 20k run each (a FINDING: no tuning).
+**P5h as built** (2026-11-03, `systems/housing.rs`, `[housing]`; `ownership::rehouse` and `[rent] rehouse_wait_days`
+retired, the key kept for old saves' sake).
+- **The errand.** `GoalKind::FindHome` (scripted, `housing::plan`): `GoTo(desk) -> Apply(home)` for a free homeless
+  adult in the desks' hours (`desk_open`..`desk_close`) holding the cheapest deposit (`HousingState.min_deposit`,
+  midnight), off shift; flat `flat`, urgency Linear `curve` over the days homeless / `urgency_days`. The pick is the
+  nearest Home (door within `reach_tiles`, its desk too) with room for the household and the deposit in hand, the
+  evicter's `refuse_days`, the city's list still waiting and a landlord's refusal on the book (`refusal_days`)
+  skipped; a landlord's own rules (record, job, address) are learned at the desk. Off camera a Statistical applicant
+  rolls the same pick and verdict at midnight (`housing::daily`, in `rehouse`'s slot), no walk. No goal, no plan
+  failing: nothing to ask about cools the goal.
+- **The desk** (`housing::desk_of`): a Home with a super (a tied resident) lets at the Block; the city at the
+  nearest Civic Hall; a corp at its letting office, `corp_desk` (its Hq, else its senior working building in the
+  order Hq, SecurityOffice, Lab, Feed, Clinic, Hotel, Bar, Market; a pure housing corp lets from the Block's lobby);
+  a gang at its Hideout; a private owner at the Block.
+- **The verdict** (`housing::judge`; a `Listed` or `HomeRefused` event names the desk and the reason): no room,
+  the deposit short and the evicter are checked first; **the city**: the first ask puts the name on the list
+  (design call: `list_days` 10), the place is had by asking again once it is due (the errand, not a pass; the HUD
+  says when); **a corp** (design call, the record window): refuses a record (a sentence served within
+  `corp_record_days` 30, `misery::record_at`, or an open warrant), no job, or no Home of one's own within
+  `corp_address_days` 60 (`HousingState.left_home`, written by `World::set_home`; a capsule is no address);
+  **a gang** (design call, protection): its Homes' rent is `rent_for` x (1 + `gang_protection` 0.5), all to the
+  gang, and the tenant gets an edge with its leader; **a private owner**: the deposit only. Only the landlords' own
+  rules go on the refusal book; a place gone meanwhile does not. A corp's refusal is booked for every corp (one
+  key): the first shadow read had one applicant walk a dozen subsidiaries' desks (Habitat 2..10, Vatra, Stackwell
+  2..5) in an afternoon and be refused fourteen times for the same record. **The deposit** is `[service] move_in_rent_days`
+  of rent, paid by every mover (`ownership::move_in_deposit`, prepaid rent); the leisure purse saves for it.
+- **The capsule** (design call: no new building kind; the existing Capsule Hotel's booking is the tenure): a
+  booked Hotel bed (`street::book`, not a Mission cot) is a capsule held (`HousingState.capsules`), renewed at the
+  08:00 checkout by paying the night (`housing::checkout`; short: `CapsuleLost`, out), no deposit, no address; at
+  03:00 a holder's locker is robbed at `locker_rob_p` of `locker_rob_share` of his coins, to a fellow guest of the
+  racks, else the owner (`LockerRobbed`, a `WasRobbed` memory naming nobody). The world build opens a
+  city-owned rack per `hostel_residents` (6,000: three on the 20k island, whose Sump is one district, beside its
+  20 seeded private Capsule Hotels; none in the 2,000 test city) dealt round the districts of `hostel_zones` (the
+  Sump), each on the vacant lot nearest the district's centre (`housing::seed_hostels`, after
+  `street::seed_hotels`).
+- **The player**: `Verb::Apply(home)` rows at a desk (`housing::desk_places`: the places it lets, nearest first,
+  at most `menu_rows`; the Hall shows one "Put your name on the city's list" row until the place is due); a row
+  greys with why (refused N days ago and the reason, the list's days, the deposit, no room, the desk shut) and a
+  corp's names what it asks for. The Hotel's row is "A bed for the night (Nc; the capsule is yours while you pay at
+  08:00)". The HUD's tenure line (`housing::tenure_line`): sleeps rough, squats at, a cot at, a capsule at, a room
+  at (tier 0), a flat at, and the list's days. Safe idle never runs FindHome (not a `safe_goal`) and never starts
+  an Apply (`safe_idle_ok`); a held capsule's night is paid at checkout either way. Script lines: `bld near
+  hostel|corp|city`. The session: `view/cityview/scripts/p5h_fresh.play`.
+- **Numbers** (20k island, seed 42, 30 days, one run each, FINDINGs, nothing tuned): homeless at day 30 193 -> 146
+  (mean 240 -> 168); housed 16.3 -> 17.9 a day; hotel nights 116 -> 160 a day (a held capsule renews; ~58 % of the
+  23 racks' 276 opening beds); refusals 150 (no job 120, a record 30; no address 0: a corp asks the record and the
+  job first), 209 names on the city's list, 265 capsules lost to an unpaid night, 26 lockers robbed; evictions
+  132 -> 134; squatters 203 -> 114 a day. The jobless pay a week's rent down (7c for a Sump room) where the retired
+  pass wanted 21 days held, so private owners take the Dregs the corps refuse.
+- **Next pass** (the shadow read): FindHome wins a think it cannot plan once every reachable landlord has said no
+  or wants more than the purse (the goal's gate reads the cheapest deposit only): "cooled 3 times today" lines.
+- `SAVE_VERSION` 134; the slice save is remade (the city's racks are a world-build change).
 
 ## P6 founding (optional, only if P1-P5 read)
 

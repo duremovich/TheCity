@@ -395,6 +395,10 @@ pub enum Verb {
     Answer(u64, bool),
     /// M18 P5: a witness's demand (an offer, its `made` tick): go for him.
     Resist(u64),
+    /// M18 P5h: at a letting desk (a Civic Hall, a corp's office, a gang's
+    /// Hideout, a Block's super or owner): apply for this Home (the city's
+    /// list, a corp's flat, a room), the FindHome goal's `Apply`.
+    Apply(EntityId),
 }
 
 impl Verb {
@@ -453,6 +457,9 @@ impl Verb {
             | Verb::Resist(_) => &[],
             Verb::Help(_) => &["the Rescue's tie (kin, a friend, a colleague, a called stranger's term): the human's will"],
             Verb::Rob(_) => &["lawfulness: the NPC winner robs a body it knocked out only under [combat] ko_rob_lawful"],
+            Verb::Apply(_) => &[
+                "think: the FindHome goal's gates (the cheapest deposit in hand, the days homeless, off shift)",
+            ],
         }
     }
 }
@@ -720,6 +727,15 @@ pub fn plan_of(world: &World, id: EntityId, verb: Verb) -> Result<(Plan, String)
             steps.push(step(ActionKind::Sleep, None, None));
             mk(None, steps, format!("Sleep at {}", world.name_of(b)))
         }
+        Verb::Apply(home) => {
+            let Some(desk) = crate::systems::housing::desk_of(world, home) else { return no("no desk lets it") };
+            if !crate::systems::housing::desk_hours(world) {
+                let c = &world.config.housing;
+                return no(&format!("the desk is shut (open {:02}:00-{:02}:00)", c.desk_open, c.desk_close));
+            }
+            let label = crate::systems::housing::row(world, id, home)?;
+            Ok((crate::systems::housing::plan_for(world, id, home, desk), label))
+        }
         Verb::TakeBed(h) => {
             let Some(price) = bed_for(world, id, h) else { return no("no bed here you can pay for") };
             let key = key_in(world, id, h, None);
@@ -731,8 +747,13 @@ pub fn plan_of(world: &World, id: EntityId, verb: Verb) -> Result<(Plan, String)
             }
             let mut steps: Vec<ActionInstance> = walk(h).into_iter().collect();
             steps.push(step(ActionKind::CheckIn, None, None));
-            let what = if price == 0 { "a free cot".to_string() } else { format!("{price}c") };
-            mk(None, steps, format!("Take a bed here tonight ({what})"))
+            // M18 P5h: a Capsule Hotel's bed is a capsule kept while each night is paid at 08:00.
+            let label = if price == 0 {
+                "A free cot for the night".to_string()
+            } else {
+                format!("A bed for the night ({price}c; the capsule is yours while you pay at 08:00)")
+            };
+            mk(None, steps, label)
         }
         Verb::Squat(b) => {
             let ok = crate::systems::street::is_derelict(world, b)
@@ -1479,7 +1500,8 @@ fn rows_with(
 fn name_of_verb(world: &World, v: Verb) -> String {
     let n = |e: EntityId| world.name_of(e);
     match v {
-        Verb::TakeBed(_) => "Take a bed here tonight".into(),
+        Verb::TakeBed(_) => "A bed for the night".into(),
+        Verb::Apply(h) => format!("A place at {}", n(h)),
         Verb::AskWork(_) => "Ask about work".into(),
         Verb::Chat(o) => format!("Chat with {}", n(o)),
         Verb::Befriend(o) => format!("Befriend {}", n(o)),
@@ -1515,6 +1537,9 @@ pub fn menu_building(world: &World, id: EntityId, b: EntityId) -> Menu {
         _ => verbs.push(Verb::Squat(b)),
     }
     verbs.extend([Verb::TakeBed(b), Verb::AskWork(b)]);
+    // M18 P5h: a letting desk's places (the city's list at a Hall, a corp's
+    // flats at its office, a gang's at its Hideout, a Block's own).
+    verbs.extend(crate::systems::housing::desk_places(world, id, b).into_iter().map(Verb::Apply));
     let bed = crate::systems::street::booked_hotel(world, id) == Some(b)
         || world.comp::<Squatter>(id).is_some_and(|s| s.building == b);
     if bed {
@@ -1527,6 +1552,7 @@ pub fn menu_building(world: &World, id: EntityId, b: EntityId) -> Menu {
     // greyed with why, when they cannot be had (cots full, the post gone)
     let grey = |v: Verb| match v {
         Verb::TakeBed(h) => crate::systems::street::is_hotel(world, h),
+        Verb::Apply(_) => true,
         Verb::AskWork(w) => {
             world.comp::<Building>(w).is_some_and(|x| world.config.buildings.for_kind(x.kind).staff > 0)
         }

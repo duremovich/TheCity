@@ -553,6 +553,14 @@ pub enum EventKind {
     /// M18 W (docs/M18_PLAYER.md § W, `systems::workbeats`): a beat of a
     /// shift. `[body, counterpart, workplace]`.
     WorkBeat,
+    /// M18 P5h: `Listed [applicant, home, desk?]`: a name on the city's list.
+    Listed,
+    /// M18 P5h: `HomeRefused [applicant, home, desk?]`: a landlord's no, with its reason.
+    HomeRefused,
+    /// M18 P5h: `CapsuleLost [guest, hostel]`: the night unpaid at checkout.
+    CapsuleLost,
+    /// M18 P5h: `LockerRobbed [guest, hostel, thief?]`.
+    LockerRobbed,
     /// The combat model C1 (`systems::combat`): `[a, b]`, a fight's beats told
     /// (stances, weapons, the wounds by region, how it ended); `[body]` a
     /// wound that stopped bleeding or healed.
@@ -560,7 +568,7 @@ pub enum EventKind {
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 249] = [
+    pub const ALL: [EventKind; 253] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -809,6 +817,10 @@ impl EventKind {
         EventKind::Bereaved,
         EventKind::Floor,
         EventKind::WorkBeat,
+        EventKind::Listed,
+        EventKind::HomeRefused,
+        EventKind::CapsuleLost,
+        EventKind::LockerRobbed,
         EventKind::Fight,
     ];
 }

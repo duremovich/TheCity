@@ -1261,6 +1261,7 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                         | crate::components::GoalKind::Rescue
                         | crate::components::GoalKind::Pitch
                         | crate::components::GoalKind::Visit
+                        | crate::components::GoalKind::FindHome
                         | crate::components::GoalKind::Found
                 )
             });
@@ -1303,6 +1304,9 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                 } else if goal == Some(crate::components::GoalKind::Found) {
                     // The pressure pass F1: a Station's desk is no planner `Hall`.
                     actions::can_start(world, id, kind, step.target)
+                } else if goal == Some(crate::components::GoalKind::FindHome) {
+                    // M18 P5h: the walk as any walk; the Apply at the desk.
+                    crate::systems::housing::can_start(world, id, kind, step.target)
                 } else if goal == Some(crate::components::GoalKind::Visit) {
                     // Lives at work phase 2 (§ 3.5): the visit's own steps.
                     crate::systems::household::can_start(world, id, kind)

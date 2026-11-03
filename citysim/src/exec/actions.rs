@@ -120,6 +120,8 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::TakeJob => world.config.fixers.take_job_mins,
         // The Hit market (H9).
         ActionKind::Commission => world.config.hitmarket.commission_mins,
+        // M18 P5h: the application at the desk.
+        ActionKind::Apply => world.config.housing.apply_mins,
         ActionKind::HandOver => 5,
         // M16b phase 3 (spec § 5: Stabilise is dur 30).
         ActionKind::CarryWounded => 5,
@@ -911,6 +913,8 @@ pub fn on_complete(
         ActionKind::TakeJob => crate::systems::contracts::on_take_job(world, id, target),
         // The Hit market (H9): the want posted at the Fixer.
         ActionKind::Commission => crate::systems::hitmarket::on_commission(world, id, target),
+        // M18 P5h: the verdict at the letting desk.
+        ActionKind::Apply => crate::systems::housing::on_apply(world, id, target),
         // M16b phase 2: the abductee handed over at the holding building.
         ActionKind::HandOver => crate::systems::captives::on_hand_over(world, id, target),
         // M16b phase 3: the downed taken up; stabilised at the Clinic.

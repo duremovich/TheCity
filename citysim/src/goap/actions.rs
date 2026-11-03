@@ -173,6 +173,10 @@ pub enum ActionKind {
     /// Commission goal's scripted step; never in `PLANNABLE`, started by
     /// `contracts::can_start`).
     Commission,
+    /// M18 P5h: at a letting desk, the application for a place (the
+    /// FindHome goal's scripted step; never in `PLANNABLE`, started by
+    /// `housing::can_start`).
+    Apply,
     /// Round 9 Z2: at an open Fixer's desk, a record off its board taken in
     /// person (the Contract goal's walk-in; never in `PLANNABLE`, started
     /// by `contracts::can_start`).
@@ -1406,6 +1410,8 @@ impl ActionKind {
                 | ActionKind::SellData
                 | ActionKind::UpgradeDeck
                 | ActionKind::ReportCrime
+                // M18 P5h: safe idle never signs a lease.
+                | ActionKind::Apply
         )
     }
 
@@ -1988,6 +1994,7 @@ impl ActionKind {
             ActionKind::Network
             | ActionKind::TakeJob
             | ActionKind::Commission
+            | ActionKind::Apply
             | ActionKind::HandOver
             | ActionKind::CarryWounded
             | ActionKind::Stabilise => 4.0,

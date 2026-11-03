@@ -1520,7 +1520,12 @@ pub fn rent_for(world: &World, home: EntityId) -> i64 {
             let level = world.comp::<Corp>(c).map_or(1.0, |c| c.level(Niche::Housing));
             (level * base as f32).round() as i64
         }
-        OwnerKind::Agent(_) | OwnerKind::Gang(_) => base,
+        OwnerKind::Agent(_) => base,
+        // M18 P5h: a gang's protection rides on the rent (`[housing] gang_protection`).
+        OwnerKind::Gang(_) if world.config.housing.enabled => {
+            (base as f32 * (1.0 + world.config.housing.gang_protection.max(0.0))).round() as i64
+        }
+        OwnerKind::Gang(_) => base,
     };
     let rent = rent.max(0);
     world.levers.rent_cap.map_or(rent, |cap| rent.min(cap.max(0)))
@@ -1588,7 +1593,9 @@ pub fn run(world: &mut World) {
         // The island pass phase 3b: the weekly buyouts.
         crate::prof::timed!("own::company::buyouts", crate::systems::company::buyouts(world));
         crate::prof::timed!("own::company::move_in", crate::systems::company::move_in(world));
-        crate::prof::timed!("own::rehouse", rehouse(world));
+        // M18 P5h: `rehouse` retired: housing is the FindHome errand; the
+        // Statistical applicants roll it here.
+        crate::prof::timed!("own::housing::daily", crate::systems::housing::daily(world));
     }
     // Phase 5: the books close before the upkeep lump (`Corp.closing`).
     for c in world.corps() {
@@ -1921,7 +1928,7 @@ pub fn evict(world: &mut World, agent: EntityId, reason: &str) {
 /// rent up front to its owner (`Flow::Rent`, credited as `settle_rent`
 /// credits a payment) and holds it as prepaid rent (`rent_due` below 0, so
 /// the first nights accrue against it). No coin made or lost.
-fn move_in_deposit(world: &mut World, a: EntityId, home: EntityId, days: i64) {
+pub(crate) fn move_in_deposit(world: &mut World, a: EntityId, home: EntityId, days: i64) {
     let due = days * rent_for(world, home);
     if due <= 0 {
         return;
@@ -1937,133 +1944,6 @@ fn move_in_deposit(world: &mut World, a: EntityId, home: EntityId, days: i64) {
     if let Some(h) = world.comp_mut::<Household>(a) {
         h.rent_due -= paid as f32;
         h.note_rent_paid(today, paid);
-    }
-}
-
-/// Homeless adults move in where they can pay `rehouse_coins_mult × rent`,
-/// nearest door first, with a homeless spouse and their homeless children.
-fn rehouse(world: &mut World) {
-    let mult = world.config.rent.rehouse_coins_mult;
-    let deposit_days =
-        if crate::systems::service::on(world) { i64::from(world.config.service.move_in_rent_days) } else { 0 };
-    let refuse = world.config.rent.refuse_days * TICKS_PER_DAY;
-    let wait = world.config.rent.rehouse_wait_days * TICKS_PER_DAY;
-    let tick = world.tick;
-    // Phase 5: an evictee sleeps rough `rehouse_wait_days` before anyone
-    // takes them in (re-housing was the same night, so no Dreg ever existed).
-    // M12 D28: so does anyone put on the street without an eviction (a
-    // derelict's residents, the seeded homeless).
-    let waiting = |w: &World, a: EntityId| {
-        let h = w.comp::<Household>(a);
-        wait > 0
-            && (h.and_then(|h| h.evicted_by).is_some_and(|(_, t)| tick < t + wait)
-                || h.and_then(|h| h.homeless_since).is_some_and(|t| tick < t + wait))
-    };
-    let homeless: Vec<EntityId> = world
-        // scan-ok: daily: re-housing
-        .citizens()
-        .into_iter()
-        .filter(|&a| world.comp::<Household>(a).is_some_and(|h| h.home.is_none() && h.arrears == 0))
-        .filter(|&a| !waiting(world, a))
-        .filter(|&a| world.comp::<Brain>(a).is_some_and(|b| !b.emigrating))
-        .filter(|&a| !world.has::<Sentence>(a) && crate::systems::demography::is_adult(world, a))
-        .collect();
-    if homeless.is_empty() {
-        return;
-    }
-    // Each Home's own capacity (a built Home's is its interior's). The perf
-    // pass phase 7: and its rent, read once (nothing in this pass moves a
-    // rent: the owners, their Housing levels and the levers stand; a
-    // move-in pays coins only), not per homeless adult per Home.
-    type Cand = (EntityId, crate::components::TilePos, Option<EntityId>, usize, i64);
-    let homes: Vec<Cand> = world
-        .buildings_of_kind(BuildingKind::Home)
-        .iter()
-        // The island pass phase 3a (I6): a company bed is the staff's
-        // (`company::move_in`), never the city's rehouse.
-        .filter(|&&h| crate::systems::company::open_to_all(world, h))
-        .filter_map(|&h| {
-            world
-                .comp::<Building>(h)
-                .filter(|b| !b.demolished && !b.derelict)
-                .map(|b| (h, b.door, b.owner, usize::from(b.capacity), rent_for(world, h)))
-        })
-        .collect();
-    // The perf pass phase 7: the cheapest rent, so an adult who can pay
-    // none (`coins < mult x rent` for every Home, `mult` not negative)
-    // skips the walk: its pick was `None`.
-    let min_rent = homes.iter().map(|c| c.4).min();
-    for a in homeless {
-        // Housed already, as someone's spouse, earlier in this pass.
-        if world.comp::<Household>(a).is_none_or(|h| h.home.is_some()) {
-            continue;
-        }
-        let spouse = world
-            .spouse_of(a)
-            .filter(|&s| world.has::<Brain>(s) && world.comp::<Household>(s).is_some_and(|h| h.home.is_none()));
-        let kids: Vec<EntityId> = crate::systems::demography::children_of_agent(world, a)
-            .into_iter()
-            .filter(|&c| world.has::<Child>(c) && world.comp::<Household>(c).is_some_and(|h| h.home.is_none()))
-            .collect();
-        let need = 1 + usize::from(spouse.is_some()) + kids.len();
-        let coins = world.comp::<Wallet>(a).map_or(0, |w| w.coins);
-        // Hunger fix item 13: a worker pays the first rent, not the deposit.
-        let worker = crate::systems::fixes::rehouse_employed(world) && world.has::<crate::components::Job>(a);
-        // 8d (OPEN-126): that first rent is `move_in_rent_days` of rent, paid
-        // up front (below), so the worker's purse must hold it; the jobless
-        // keep the deposit rule (`rehouse_coins_mult` held, nothing paid).
-        let deposit_days = if worker { deposit_days } else { 0 };
-        let mult = if worker { deposit_days.max(1) } else { mult };
-        let refused_by = world.comp::<Household>(a).and_then(|h| h.evicted_by).filter(|&(_, t)| tick < t + refuse);
-        let from = world.comp::<Position>(a).map_or_else(Default::default, |p| p.tile);
-        if mult >= 0 && min_rent.is_some_and(|r| coins < mult * r) {
-            continue;
-        }
-        let open = |&&(h, _, owner, cap, rent): &&Cand| {
-            world.residents_of(h).len() + need <= cap
-                && coins >= mult * rent
-                && refused_by.is_none_or(|(o, _)| o != owner)
-        };
-        // The island pass phase 1 (OPEN-163): a worker's bed is scored by
-        // the commute it sets out on (`distance::travel`, Home door to work
-        // door); a Home past `[distance] home_cap_ticks` is dropped while
-        // one within it is left, else the nearest. The jobless (and off):
-        // nearest door to where the body stands.
-        let work = world.config.distance.as_ref().and(crate::systems::distance::work_door(world, a));
-        let pick = match (work, world.config.distance.as_ref()) {
-            (Some(work), Some(cfg)) => crate::systems::distance::pick(
-                homes.iter().filter(open).map(|&(h, d, _, _, _)| {
-                    let t = crate::systems::distance::travel(world, d, work);
-                    (t, t as i64, h)
-                }),
-                cfg.home_cap_ticks,
-            ),
-            _ => homes.iter().filter(open).map(|&(h, d, _, _, _)| (d.manhattan(from), h)).min().map(|(_, h)| h),
-        };
-        let Some(home) = pick else { continue };
-        if deposit_days > 0 {
-            move_in_deposit(world, a, home, deposit_days);
-        }
-        let movers: Vec<EntityId> = std::iter::once(a).chain(spouse).collect();
-        let place = world.name_of(home);
-        let label = world.owner_label(world.owner_of(home));
-        for &m in &movers {
-            // M12 D28: housed: the squat and the booking end (`set_home`).
-            world.set_home(m, Some(home));
-            let name = world.name_of(m);
-            world.push_event(EventKind::Housed, &[m, home], format!("{name} moved into {place} ({label})"));
-            world.stats.current.housed += 1;
-        }
-        let d = door(world, home);
-        for c in kids {
-            world.set_home(c, Some(home));
-            if let Some(p) = world.comp_mut::<Position>(c) {
-                p.tile = d;
-                p.building = Some(home);
-                p.entered = tick;
-            }
-            crate::systems::floors::settle(world, c);
-        }
     }
 }
 

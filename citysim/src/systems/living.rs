@@ -36,6 +36,8 @@ pub fn run(world: &mut World) {
     crate::prof::timed!("service", crate::systems::service::hourly(world));
     // Lives at work phase 2 (§ 3.5): a Statistical visitor credited at its hour.
     crate::prof::timed!("living::household::hourly", crate::systems::household::hourly(world));
+    // M18 P5h: the capsules' nightly pay at the 08:00 checkout.
+    crate::prof::timed!("living::housing::checkout", crate::systems::housing::checkout(world));
     // The pressure pass phase 5a: a body arrived at its service or its blackmail.
     crate::prof::timed!("living::consequence::arrivals", crate::systems::consequence::arrivals(world));
     // Round 8 X6 (OPEN-217): the cells' yard at its hour.

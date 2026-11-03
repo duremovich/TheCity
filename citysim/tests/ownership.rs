@@ -188,7 +188,7 @@ fn test_rent_moves_coins_and_short_rent_counts_arrears() {
 }
 
 #[test]
-fn test_eviction_frees_slot_and_evictee_rehouses_when_able() {
+fn test_eviction_frees_slot_and_the_evicter_refuses() {
     let mut w = world();
     let (_, home_co) = corps(&w);
     let (a, h1, _, _) = two_tenants(&mut w);
@@ -201,17 +201,15 @@ fn test_eviction_frees_slot_and_evictee_rehouses_when_able() {
     assert!(w.residents_of(h1).is_empty(), "the slot is free");
     assert!(w.comp::<citysim::Life>(a).expect("life").events.iter().any(|e| e.kind == LifeKind::Evicted));
     assert!(w.stats.current.evictions >= 1 || w.eviction_log.len() == 1);
-    // Broke, they stay out; with coins (M12: `rehouse_coins_mult` weeks of
-    // the dearest rent) they move in at the next midnight, and not with the
-    // landlord who evicted them.
-    midnight(&mut w);
-    assert_eq!(w.comp::<Household>(a).expect("h").home, None);
-    let deposit = w.config.rent.rehouse_coins_mult * 4;
-    set_coins(&mut w, a, deposit);
-    midnight(&mut w);
-    let home = w.comp::<Household>(a).expect("h").home.expect("re-housed");
-    assert_eq!(events(&w, EventKind::Housed, a), 1);
-    assert_ne!(w.owner_of(home), Some(home_co), "HomeCo refuses its evictee for 30 days");
+    // M18 P5h: the landlord who evicted them refuses them for `refuse_days`
+    // (the re-housing pass is retired: housing is the FindHome errand).
+    set_coins(&mut w, a, 1000);
+    assert_eq!(
+        citysim::systems::housing::judge(&w, a, h1, 1),
+        citysim::systems::housing::Verdict::Refuse(citysim::systems::housing::Refusal::Evicted),
+        "HomeCo refuses its evictee for 30 days"
+    );
+    let _ = home_co;
 }
 
 #[test]
@@ -656,26 +654,6 @@ fn test_refund_reverses_the_tax_exactly() {
 }
 
 #[test]
-fn test_rehouse_uses_each_home_capacity() {
-    let mut w = world();
-    let (a, _, _, _) = two_tenants(&mut w);
-    w.set_home(a, None);
-    set_coins(&mut w, a, 1000);
-    let homes = w.buildings_of_kind(BuildingKind::Home).to_vec();
-    for &h in &homes {
-        let n = w.residents_of(h).len() as u16;
-        w.comp_mut::<Building>(h).expect("b").capacity = n;
-    }
-    midnight(&mut w);
-    assert_eq!(w.comp::<Household>(a).expect("h").home, None, "every Home is full at its own capacity");
-    let roomy = homes[5];
-    let n = w.residents_of(roomy).len() as u16;
-    w.comp_mut::<Building>(roomy).expect("b").capacity = n + 4;
-    midnight(&mut w);
-    assert_eq!(w.comp::<Household>(a).expect("h").home, Some(roomy));
-}
-
-#[test]
 fn test_tax_remainder_of_gone_payee_dropped() {
     let mut w = world();
     let ghost = w.spawn();
@@ -740,26 +718,6 @@ fn test_full_day_of_flows_conserves_coins() {
     // book outbids the Reserve), a crossing the identity books.
     assert!(economy::haul(&mut w, farm, None) > 0);
     assert_eq!(citysim::systems::econ::identity(&w), before, "wallets + gangs + corps + Treasury unchanged");
-}
-
-#[test]
-fn test_evictee_waits_on_the_street() {
-    let mut w = world();
-    w.config.rent.rehouse_wait_days = 3;
-    let (a, _, _, _) = two_tenants(&mut w);
-    let evict_days = w.config.rent.evict_days;
-    for _ in 0..=evict_days {
-        midnight(&mut w);
-    }
-    assert_eq!(events(&w, EventKind::Evicted, a), 1);
-    set_coins(&mut w, a, 1000);
-    for night in 0..2 {
-        midnight(&mut w);
-        assert_eq!(w.comp::<Household>(a).expect("h").home, None, "night {night} on the street");
-        assert_ne!(citysim::systems::classes::class_of(&w, a), citysim::Class::Street, "homeless: a Dreg (or Corp)");
-    }
-    midnight(&mut w);
-    assert!(w.comp::<Household>(a).expect("h").home.is_some(), "re-housed once the wait is over");
 }
 
 // ---------------------------------------------------------------------------

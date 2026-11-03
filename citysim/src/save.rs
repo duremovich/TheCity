@@ -555,7 +555,11 @@ use crate::world::World;
 /// `chases` columns (serde defaults). Fatigue, the Sandevistan's cooldown and the flight's hold are not saved.
 /// 133 (M18 P5, start and loop): `OfferKind::Blackmail` (a witness's demand on the player as an offer), the
 /// `[slice]` section and `[view]`'s auto-pause keys (serde defaults: a 132 save loads, the defaults mirror the file).
-pub const SAVE_VERSION: u16 = 133;
+/// 134 (M18 P5h, housing as an errand): `World.housing` (the city's list, the refusals, the capsules, the address
+/// history), `GoalKind::FindHome`, `ActionKind::Apply`, `Verb::Apply`, the `Listed`, `HomeRefused`, `CapsuleLost`
+/// and `LockerRobbed` events and the `[housing]` section (serde defaults: a 133 save loads, the defaults mirror the
+/// file; the slice save is remade for the city's capsule hostels the world build opens).
+pub const SAVE_VERSION: u16 = 134;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

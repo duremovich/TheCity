@@ -333,12 +333,15 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
             | GoalKind::Rescue
             | GoalKind::Pitch
             | GoalKind::Visit
+            | GoalKind::FindHome
     ) {
         let plan = match goal {
             GoalKind::Hunt => crate::systems::hunt::plan(world, id),
             GoalKind::Pitch => crate::systems::streetwork::plan(world, id),
             // Lives at work phase 2 (§ 3.5).
             GoalKind::Visit => crate::systems::household::plan(world, id),
+            // M18 P5h.
+            GoalKind::FindHome => crate::systems::housing::plan(world, id),
             GoalKind::Rescue => crate::systems::wounded::plan(world, id),
             GoalKind::Contract => crate::systems::contracts::plan(world, id),
             GoalKind::Commission => crate::systems::hitmarket::commission_plan(world, id),

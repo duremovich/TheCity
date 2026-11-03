@@ -130,6 +130,10 @@ pub struct Config {
     /// a fresh arrival, the blackmail offer (`player` § P5).
     #[serde(default)]
     pub slice: SliceCfg,
+    /// M18 P5h (housing as an errand): the FindHome goal's desks and
+    /// refusals, the city's list, the capsule tenure (`systems::housing`).
+    #[serde(default)]
+    pub housing: HousingCfg,
     /// M15 § 6 competence and poaching (phase 2).
     #[serde(default)]
     pub competence: CompetenceCfg,
@@ -11204,6 +11208,77 @@ impl Default for SliceCfg {
             nobody_wage_max: 5,
             nobody_per_district: 2,
             blackmail_offer_minutes: 30,
+        }
+    }
+}
+
+/// M18 P5h (housing as an errand, `systems::housing`): a homeless adult's
+/// FindHome goal walks to a letting desk and applies; the landlord's kind
+/// decides. Every number of the errand, the refusals and the capsule tenure.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HousingCfg {
+    /// Off: no FindHome goal, no daily roll (nobody is housed off the
+    /// street but by a marriage, tied housing or the company beds).
+    pub enabled: bool,
+    /// The city's waiting list: a place this many days after joining it.
+    pub list_days: u64,
+    /// A corp refuses a record (a sentence served or a warrant) within this many days.
+    pub corp_record_days: u64,
+    /// A corp refuses an applicant who has had no Home of his own within
+    /// this many days (no address history; a capsule is no address).
+    pub corp_address_days: u64,
+    /// A gang landlord's protection rides on the rent: its Homes' rent is
+    /// times `1 + gang_protection` (the gang's cut, to the gang).
+    pub gang_protection: f32,
+    /// A landlord who refused an applicant is not asked again for this many days.
+    pub refusal_days: u64,
+    /// The desks are open from this hour to `desk_close` (an applicant walks then).
+    pub desk_open: u8,
+    pub desk_close: u8,
+    /// The Apply step's minutes at the desk.
+    pub apply_mins: u64,
+    /// The FindHome goal's flat score and its urgency's Linear curve (m, b)
+    /// over the days homeless (`days / urgency_days`, capped at 1).
+    pub flat: f32,
+    pub curve: (f32, f32),
+    pub urgency_days: f32,
+    /// An applicant walks to a desk at most this many tiles away.
+    pub reach_tiles: u32,
+    /// The player's menu at a desk lists at most this many places.
+    pub menu_rows: usize,
+    /// The capsule hostel: a nightly chance a capsule holder's locker is
+    /// robbed, and the share of his coins taken (to a fellow guest).
+    pub locker_rob_p: f32,
+    pub locker_rob_share: f32,
+    /// The public capsule hostels the world build opens: one per this many
+    /// residents (none below it), dealt round the districts of the zones in
+    /// `hostel_zones`, on vacant lots, owned by the city. 0: none.
+    pub hostel_residents: usize,
+    pub hostel_zones: Vec<crate::components::Zone>,
+}
+
+impl Default for HousingCfg {
+    fn default() -> Self {
+        HousingCfg {
+            enabled: true,
+            list_days: 10,
+            corp_record_days: 30,
+            corp_address_days: 60,
+            gang_protection: 0.5,
+            refusal_days: 7,
+            desk_open: 8,
+            desk_close: 18,
+            apply_mins: 20,
+            flat: 0.55,
+            curve: (0.4, 0.6),
+            urgency_days: 7.0,
+            reach_tiles: 400,
+            menu_rows: 6,
+            locker_rob_p: 0.03,
+            locker_rob_share: 0.5,
+            hostel_residents: 6000,
+            hostel_zones: vec![crate::components::Zone::Sump],
         }
     }
 }

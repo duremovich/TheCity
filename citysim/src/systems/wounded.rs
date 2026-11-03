@@ -868,7 +868,13 @@ fn trauma_daily(world: &mut World) {
     for id in due {
         let Some(c) = world.contracts.get(&id).cloned() else { continue };
         let client_alive = c.target_agent().is_some_and(|t| law::living(world, t));
-        let payer_ok = c.buyer.is_some_and(|b| world.purse(Some(b)) >= c.price);
+        // M18 P5h (a probe's debug assert): a buyer gone (no purse of its own) cannot pay.
+        let alive = |b: EntityId| {
+            world.has::<crate::components::Wallet>(b)
+                || world.has::<crate::components::Corp>(b)
+                || world.has::<crate::components::Gang>(b)
+        };
+        let payer_ok = c.buyer.is_some_and(|b| alive(b) && world.purse(Some(b)) >= c.price);
         if client_alive && payer_ok {
             ownership::pay(world, c.buyer, c.taker, c.price, Flow::Trauma);
             if let Some(x) = world.contracts.get_mut(&id) {

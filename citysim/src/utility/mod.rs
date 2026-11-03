@@ -277,6 +277,7 @@ const GOAL_PROF_NAMES: [&str; goals::GOAL_ORDER.len()] = [
     "goal::Contract",
     "goal::Rescue",
     "goal::Visit",
+    "goal::FindHome",
     "goal::Commission",
     "goal::ReportCrime",
     "goal::Patrol",

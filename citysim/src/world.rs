@@ -912,6 +912,11 @@ pub struct World {
     /// M12 D20: Hotel bookings, guest -> (hotel, the tick the bed is theirs until).
     #[serde(default)]
     pub hotel_beds: BTreeMap<EntityId, (EntityId, Tick)>,
+    /// M18 P5h: the housing errand's books: the city's list, the
+    /// landlords' refusals, the capsules held, the address history
+    /// (`systems::housing`).
+    #[serde(default)]
+    pub housing: crate::systems::housing::HousingState,
     /// M12 D23: each Sanitation worker's district today.
     #[serde(default)]
     pub sweep_beats: BTreeMap<EntityId, crate::components::DistrictId>,
@@ -2071,6 +2076,7 @@ impl World {
             vagrancy_places: BTreeMap::new(),
             litter: Vec::new(),
             hotel_beds: BTreeMap::new(),
+            housing: Default::default(),
             sweep_beats: BTreeMap::new(),
             squat_index: BTreeMap::new(),
             riots: Vec::new(),
@@ -2248,6 +2254,8 @@ impl World {
         // (no RNG), before any purchase can cross.
         crate::prof::timed!("new::world_market::seed", systems::world_market::seed(&mut w));
         crate::prof::timed!("new::street::seed_hotels", systems::street::seed_hotels(&mut w));
+        // M18 P5h: the city's capsule hostels in the poor districts.
+        crate::prof::timed!("new::housing::seed_hostels", systems::housing::seed_hostels(&mut w));
         // M13 D18: the Garages go up last, on the Lots the Hotels left.
         crate::prof::timed!("new::assets::seed_sellers", systems::assets::seed_sellers(&mut w));
         // M14 (Seeding table, V21, V26, V47): the corps' trees by name (no
@@ -2927,6 +2935,8 @@ impl World {
             } else {
                 h.homeless_since = None;
             }
+            // M18 P5h: a Home of his own lost is his address history (a corp reads it).
+            let left = home.is_none() && h.home.is_some();
             // Round 6 V1 (OPEN-231): a move leaves his pantry stake behind
             // (the units stay on the old shelf, common there).
             if h.home != home {
@@ -2936,6 +2946,9 @@ impl World {
             }
             h.home = home;
             self.index_household(id);
+            if left {
+                self.housing.left_home.insert(id, self.tick);
+            }
         }
         // The city milestone C6a: a flat in the new Home's span.
         if home.is_some() {
@@ -2951,6 +2964,9 @@ impl World {
         if home.is_some() {
             self.remove::<crate::components::Squatter>(id);
             self.hotel_beds.remove(&id);
+            // M18 P5h: and the capsule and the city's list.
+            self.housing.capsules.remove(&id);
+            self.housing.list.remove(&id);
         }
     }
 
@@ -4449,6 +4465,7 @@ impl World {
         // M12 D27/D20: a squatter's slot and a guest's bed are freed.
         self.remove::<Squatter>(id);
         self.hotel_beds.remove(&id);
+        self.housing.forget(id);
         self.moving_in.remove(&id);
         self.sweep_beats.remove(&id);
         crate::systems::bind::drop_victim_holes(self, id);
@@ -4768,6 +4785,7 @@ impl World {
         self.remove::<Child>(id);
         self.remove::<Squatter>(id);
         self.hotel_beds.remove(&id);
+        self.housing.forget(id);
         self.moving_in.remove(&id);
         self.sweep_beats.remove(&id);
         self.release_all(id);
