@@ -915,6 +915,9 @@ pub struct ViewCfg {
     pub autopause: bool,
     pub autopause_tiles: u16,
     pub away_s: f64,
+    /// P5b: a slice game (a new one, a load) starts at this index of `play_speeds` (the first, a game minute a real
+    /// minute, looks frozen).
+    pub start_speed_i: usize,
     /// M18 P5: a play script's `provoke lethal` (a proof's cheat, never the
     /// player's): the fight's kill chance on a loss.
     pub provoke_kill_p: f32,
@@ -1028,6 +1031,7 @@ impl Default for ViewCfg {
             autopause: true,
             autopause_tiles: 8,
             away_s: 30.0,
+            start_speed_i: 1,
             provoke_kill_p: 1.0,
         }
     }
@@ -11181,6 +11185,10 @@ pub struct SliceCfg {
     pub nobody_coins: i64,
     /// A nobody is 18 up to this age in years.
     pub nobody_age_max: u32,
+    /// P5b: a nobody has no job or one paying at most this a day, and no gang post.
+    pub nobody_wage_max: i64,
+    /// P5b: at most this many nobodies of one district on the list while another district has a candidate.
+    pub nobody_per_district: usize,
     /// The witness's demand on a body the human drives (or its autopilot)
     /// stands as an offer this many game minutes (pay, refuse, go for him);
     /// let lapse it is refused.
@@ -11189,7 +11197,14 @@ pub struct SliceCfg {
 
 impl Default for SliceCfg {
     fn default() -> Self {
-        SliceCfg { nobody_count: 8, nobody_coins: 25, nobody_age_max: 60, blackmail_offer_minutes: 30 }
+        SliceCfg {
+            nobody_count: 8,
+            nobody_coins: 25,
+            nobody_age_max: 60,
+            nobody_wage_max: 5,
+            nobody_per_district: 2,
+            blackmail_offer_minutes: 30,
+        }
     }
 }
 

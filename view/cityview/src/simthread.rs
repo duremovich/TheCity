@@ -135,6 +135,8 @@ pub struct SlicePub {
     pub epoch: u64,
     /// The auto-pause's reason while the clock it stopped is stopped.
     pub alert: Option<String>,
+    /// P5b: whose street the camera rests over while nobody is possessed (the start menu says so).
+    pub backdrop: String,
 }
 
 /// M18 P5: the command that makes the slice's pre-run save (docs/M18_PLAYER.md), shown when it is missing.
@@ -629,6 +631,8 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
     let mut next_at = Instant::now();
     let mut reloaded_at = false;
     let mut last_logged = (String::new(), None, false);
+    // P5b: an autopilot order given but not yet run (the next tick applies it): the auto-pause's reason reads it
+    let mut auto_asked: Option<bool> = None;
     let mut menu_seq = 0u64;
     let mut last_event = world.events.back().map_or(0, |e| e.id);
     // M18 P4: the player's panels (read from the possession on)
@@ -675,6 +679,10 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                 s.epoch = epoch;
                 s.started = possessed;
                 s.alert = None;
+                s.backdrop = match (possessed, last_tile) {
+                    (false, Some(t)) => format!("The street behind this menu: {}, no one's in particular.", pl::area_of(&world, t)),
+                    _ => String::new(),
+                };
                 s.seq += 1;
             }
             eprintln!("cityview: tick {} {} {}", world.tick, if possessed { "possess" } else { "look at" }, who(&world, subject));
@@ -724,7 +732,8 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
     macro_rules! autopause {
         ($line:expr) => {{
             let line: String = $line;
-            let auto = world.comp::<Brain>(subject).and_then(|b| b.player.as_ref()).is_some_and(|p| p.autopilot);
+            let auto =
+                auto_asked.unwrap_or_else(|| world.comp::<Brain>(subject).and_then(|b| b.player.as_ref()).is_some_and(|p| p.autopilot));
             let away = sh.input_at.lock().unwrap().elapsed().as_secs_f64() >= cfg.away_s;
             let dead = news.as_ref().is_some_and(|n| n.pubd.death.is_some());
             if possessed && !dead && sh.autopause.load(Ordering::Relaxed) && (auto || away) {
@@ -874,7 +883,10 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                 UiCmd::Act(v) => citysim::PlayerCommand::Act { agent: subject, verb: v },
                 UiCmd::Goal(g) => citysim::PlayerCommand::Goal { agent: subject, goal: g },
                 UiCmd::Stop => citysim::PlayerCommand::Stop(subject),
-                UiCmd::Autopilot(on) => citysim::PlayerCommand::SetAutopilot(subject, on),
+                UiCmd::Autopilot(on) => {
+                    auto_asked = Some(on);
+                    citysim::PlayerCommand::SetAutopilot(subject, on)
+                }
                 UiCmd::Fight(order) => citysim::PlayerCommand::Fight { agent: subject, order },
             };
             if !possessed {
@@ -1109,6 +1121,7 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
             }
         }
         last_event = world.events.back().map_or(last_event, |e| e.id);
+        auto_asked = None;
         if !stepping {
             acc = (acc.0 + 1, acc.1 + t_tick.elapsed().as_secs_f64());
         }
@@ -1313,8 +1326,8 @@ fn player_hud(world: &World, id: EntityId) -> PlayerHud {
         format!("{:?} at {at}, {}c a day, {}", j.role, j.wage_per_day, shifts.join(" "))
     });
     let place = world.comp::<citysim::Position>(id).map_or("-".to_string(), |p| match p.building {
-        Some(b) => format!("in {} floor {}", world.name_of(b), p.floor),
-        None => format!("on the street at ({}, {})", p.tile.x, p.tile.y),
+        Some(b) => format!("in {}, floor {}", citysim::systems::player::building_phrase(world, b), p.floor),
+        None => format!("on a street in {}", citysim::systems::player::area_of(world, p.tile)),
     });
     let pc = b.and_then(|b| b.player.as_ref());
     PlayerHud {
@@ -1407,7 +1420,7 @@ fn log_player(hud: &PlayerHud, last: &mut (String, Option<String>, bool)) -> Opt
     if hud.failure != last.1 {
         if let Some(f) = &hud.failure {
             eprintln!("player {at}: failed {f}");
-            out = Some(format!("failed: {f}"));
+            out = Some(plain_failure(f.split_once(": ").map_or(f.as_str(), |x| x.1)));
         }
         last.1 = hud.failure.clone();
     }
@@ -1416,6 +1429,85 @@ fn log_player(hud: &PlayerHud, last: &mut (String, Option<String>, bool)) -> Opt
         last.2 = hud.autopilot;
     }
     out
+}
+
+/// P5b: `EatFromInventory` as words: "eat what you carry"; a few by hand, the rest the name's camel case spaced.
+fn plain_step(raw: &str) -> String {
+    let raw = raw.trim();
+    if let Some(k) = raw.strip_prefix("GoTo(").and_then(|r| r.strip_suffix(')')) {
+        return format!("go to the {}", camel_words(k));
+    }
+    match raw {
+        "EatFromInventory" => "eat what you carry".to_string(),
+        "BuyFood" => "buy food".to_string(),
+        _ => camel_words(raw.split('(').next().unwrap_or(raw)),
+    }
+}
+
+fn camel_words(s: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if c.is_uppercase() && i > 0 {
+            out.push(' ');
+        }
+        out.extend(c.to_lowercase());
+    }
+    out
+}
+
+/// P5b: a plan failure ("Some(Treat) failed at GoTo(Clinic): BuildingFull") in plain words ("the clinic was full
+/// (going for: treat)"); a line that is not that shape (a refusal) goes through.
+pub fn plain_failure(raw: &str) -> String {
+    let Some((goal, rest)) = raw.split_once(" failed at ") else { return raw.to_string() };
+    let (step, why) = rest.split_once(": ").unwrap_or((rest, ""));
+    let reason = why.split(|c: char| !c.is_alphanumeric()).next().unwrap_or("");
+    let goal = goal.trim_start_matches("Some(").trim_end_matches(')');
+    let place = step.strip_prefix("GoTo(").and_then(|r| r.strip_suffix(')')).map(camel_words);
+    let what = place.as_ref().map_or_else(|| plain_step(step), |p| format!("the {p}"));
+    let said = match (reason, place.is_some()) {
+        ("BuildingFull", true) => format!("{what} was full"),
+        ("NoSuchPlace", true) => format!("there was no {what} to be found"),
+        ("StockGone", _) => format!("{what} had run out"),
+        ("PartnerLeft", _) => format!("{what}: they left"),
+        ("Timeout", _) => format!("{what} took too long"),
+        ("PreconditionLost", _) => format!("{what} could not be done any more"),
+        _ => format!("{what} failed"),
+    };
+    if goal == "None" { said } else { format!("{said} (going for: {})", camel_words(goal)) }
+}
+
+/// P5b: an event as one line of the player's story: its own deeds without the kind tag or the raw plan,
+/// the buildings in plain words.
+fn plain_event(world: &World, e: &citysim::events::Event) -> String {
+    use citysim::events::EventKind as K;
+    let line = if matches!(e.kind, K::PlayerAction | K::PlayerActionFailed) {
+        // "Name: the rest": the name is the player's own
+        let t = e.text.split_once(": ").map_or(e.text.as_str(), |x| x.1);
+        let list = |steps: &str| steps.split(", ").map(plain_step).collect::<Vec<_>>().join(", then ");
+        if let Some(steps) = t.strip_prefix("directed [").and_then(|r| r.strip_suffix(']')) {
+            format!("you {}", list(steps))
+        } else if let Some((goal, steps)) = t.split_once(" planned [") {
+            format!("you set about {}: {}", camel_words(goal), list(steps.trim_end_matches(']')))
+        } else if t.starts_with("possessed") {
+            "you take the wheel".to_string()
+        } else if t.starts_with("autopilot on") {
+            "autopilot on: the body looks after itself".to_string()
+        } else if t.starts_with("autopilot off") {
+            "autopilot off: it is yours".to_string()
+        } else if t == "stopped" {
+            "you stop".to_string()
+        } else if t.ends_with(']')
+            && let Some((label, _steps)) = t.rsplit_once(" [")
+        {
+            // "Eat what you carry (1) [EatFromInventory]": the label says it, the raw steps stay in the stderr log
+            label.to_string()
+        } else {
+            t.to_string()
+        }
+    } else {
+        format!("[{:?}] {}", e.kind, e.text)
+    };
+    citysim::systems::player::plain_buildings(world, &line)
 }
 
 /// M18 P4: the event kinds that make "your block" at the day's end (what happened to the neighbours).
@@ -1501,6 +1593,7 @@ impl News {
     /// A line in the player's own log (to the stderr log too when it is the panels' own).
     fn push(&mut self, world: &World, important: bool, line: String) {
         let cap = world.config.view.news_log_lines.max(1);
+        let line = citysim::systems::player::plain_buildings(world, &line);
         self.pubd.log.push((important, format!("{} {line}", stamp(world.tick))));
         if self.pubd.log.len() > cap {
             let cut = self.pubd.log.len() - cap;
@@ -1537,7 +1630,7 @@ impl News {
             self.pubd.seq += 1;
             return;
         }
-        let line = format!("[{:?}] {}", e.kind, e.text);
+        let line = plain_event(world, e);
         let cap = world.config.view.news_log_lines.max(1);
         self.pubd.log.push((important, format!("{} {line}", stamp(e.tick))));
         if self.pubd.log.len() > cap {

@@ -80,6 +80,7 @@ pub struct Play {
     pub shared: Arc<Shared>,
     pub speeds: Vec<f64>,
     pub speed_i: usize,
+    start_speed_i: usize,
     pub reach_m: f32,
     pub step_m: f32,
     /// The cutaway's box (`[view] cut_width_m`, `cut_above_m`): a click's ray passes through it.
@@ -164,6 +165,7 @@ pub fn add(app: &mut App, shared: Arc<Shared>, vcfg: &citysim::config::ViewCfg, 
             shared,
             speeds,
             speed_i: 0,
+            start_speed_i: vcfg.start_speed_i,
             reach_m: vcfg.pick_reach_m,
             step_m: vcfg.pick_step_m.max(0.05),
             cut_width_m: vcfg.cut_width_m,
@@ -730,6 +732,17 @@ fn run_script(
     }
 }
 
+/// P5b: a play speed in game time per real time (the speed is game minutes per real minute).
+fn speed_label(s: f64) -> String {
+    if s < 60.0 {
+        format!("{s:.0} min/min")
+    } else if s < 3600.0 {
+        format!("{:.0} h/min", s / 60.0)
+    } else {
+        format!("{:.0} h/s", s / 3600.0)
+    }
+}
+
 fn bar(ui: &mut bevy_egui::egui::Ui, name: &str, v: f32) {
     ui.horizontal(|ui| {
         ui.label(format!("{name:<9}"));
@@ -757,11 +770,20 @@ fn hud(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
     if !in_game(&p) {
         return Ok(());
     }
-    let h = p.shared.player.lock().unwrap().clone();
+    let mut h = p.shared.player.lock().unwrap().clone();
+    // P5b: a dead body has no wheel: no rows, no offers, no fight
+    let dead = p.shared.news.lock().unwrap().death.is_some();
+    if dead && let Some(h) = h.as_mut() {
+        h.rows.clear();
+        h.offers.clear();
+        h.fight = None;
+        h.wounds = None;
+    }
     let paused = p.shared.paused.load(Ordering::Relaxed);
     let alert = p.shared.slice.lock().unwrap().alert.clone();
     let mut autopause = p.shared.autopause.load(Ordering::Relaxed);
-    let speed = p.speeds[p.speed_i];
+    let speeds = p.speeds.clone();
+    let speed_i = p.speed_i;
     let mut speed_to = None;
     let w = p.hud_width_px;
     egui::Window::new("player").anchor(egui::Align2::RIGHT_BOTTOM, [-8.0, -8.0]).resizable(false).default_width(w).max_width(w).show(
@@ -772,13 +794,27 @@ fn hud(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
                 return;
             };
             ui.strong(format!("{} #{}", h.name, h.index));
+            // P5b: a dead body shows no wheel: the death screen has the way on
+            if dead {
+                ui.label(format!("day {} {}   dead", h.day, h.clock));
+                return;
+            }
             ui.label(format!(
-                "day {} {}   {}   x{speed}{}",
+                "day {} {}   {}{}",
                 h.day,
                 h.clock,
                 if h.autopilot { "AUTOPILOT" } else { "you drive" },
-                if paused { "  PAUSED" } else { "" }
+                if paused { "   PAUSED" } else { "" }
             ));
+            // P5b: the clock's speed, every step a button
+            ui.horizontal_wrapped(|ui| {
+                ui.label("speed:");
+                for (i, s) in speeds.iter().enumerate() {
+                    if ui.selectable_label(i == speed_i, speed_label(*s)).clicked() {
+                        speed_to = Some(i);
+                    }
+                }
+            });
             // M18 P5: the auto-pause's reason while the clock it stopped is stopped
             if let Some(a) = &alert {
                 ui.colored_label(egui::Color32::from_rgb(255, 120, 90), format!("PAUSED: {a} (Space goes on)"));
@@ -799,9 +835,12 @@ fn hud(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
                 ui.label(format!("goal: {}", h.goal));
             }
             ui.label(format!("plan: {}", h.plan));
-            ui.label(format!("last failure: {}", h.failure.as_deref().unwrap_or("-")));
+            ui.label(format!(
+                "last failure: {}",
+                h.failure.as_deref().map_or("-".to_string(), |f| crate::simthread::plain_failure(f.split_once(": ").map_or(f, |x| x.1)))
+            ));
             ui.separator();
-            for row in &h.rows {
+            for row in h.rows.iter() {
                 if row_button(ui, row) {
                     p.shared.send(UiCmd::Act(row.1));
                 }
@@ -810,7 +849,7 @@ fn hud(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
                 ui.colored_label(egui::Color32::YELLOW, "an offer waits (the board)");
             }
             // C4: the stance and the weapon for the next fight (in one: the fight HUD)
-            if h.fight.is_none() {
+            if h.fight.is_none() && !dead {
                 use citysim::systems::combat::{Order, Stance};
                 ui.horizontal_wrapped(|ui| {
                     ui.small("in a fight:");
@@ -838,12 +877,6 @@ fn hud(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
                 }
                 if ui.button(if paused { "Resume" } else { "Pause" }).clicked() {
                     p.shared.paused.store(!paused, Ordering::Relaxed);
-                }
-                if ui.button("<<").clicked() {
-                    speed_to = Some(p.speed_i.saturating_sub(1));
-                }
-                if ui.button(">>").clicked() {
-                    speed_to = Some(p.speed_i + 1);
                 }
             });
             // M18 P5: the auto-pause's toggle
@@ -1007,6 +1040,11 @@ fn day_end(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
     if epoch != p.epoch_seen {
         p.epoch_seen = epoch;
         p.days_seen = days.len();
+        // P5b: a new game starts at a speed where life visibly moves
+        if p.slice {
+            let i = p.start_speed_i;
+            set_speed(&mut p, i);
+        }
     }
     if days.len() <= p.days_seen || !in_game(&p) {
         return Ok(());
@@ -1249,6 +1287,9 @@ pub fn fight(mut contexts: EguiContexts, p: Res<Play>) -> Result {
     use citysim::systems::combat::{Order, Stance};
     let ctx = contexts.ctx_mut()?;
     let Some(h) = hud_of(&p) else { return Ok(()) };
+    if dead(&p) {
+        return Ok(());
+    }
     let Some(f) = h.fight else { return Ok(()) };
     let w = p.hud_width_px * 1.4;
     egui::Window::new("the fight")
@@ -1338,7 +1379,7 @@ pub fn wounds(mut contexts: EguiContexts, p: Res<Play>) -> Result {
     use bevy_egui::egui;
     let ctx = contexts.ctx_mut()?;
     let Some(h) = hud_of(&p) else { return Ok(()) };
-    if h.fight.is_some() {
+    if h.fight.is_some() || dead(&p) {
         return Ok(());
     }
     let Some(wv) = h.wounds else { return Ok(()) };
@@ -1396,6 +1437,11 @@ fn hud_of(p: &Play) -> Option<crate::simthread::PlayerHud> {
         return None;
     }
     p.shared.player.lock().unwrap().clone()
+}
+
+/// P5b: the possessed body is dead (the death screen is up): its fight, wounds and action panels are gone.
+fn dead(p: &Play) -> bool {
+    p.shared.news.lock().unwrap().death.is_some()
 }
 
 /// A save's name from the body and the clock: `Name_Surname_d23_1840`.
@@ -1473,6 +1519,9 @@ fn start_menu(mut contexts: EguiContexts, mut p: ResMut<Play>, mut exit: Message
                 |ui| {
                     ui.heading("A nobody in the Sump");
                     ui.label("A city of 20,000 that lives without you. You take one broke adult and live their days.");
+                    if !sl.backdrop.is_empty() {
+                        ui.small(&sl.backdrop);
+                    }
                     ui.separator();
                     if let Some(m) = &sl.missing {
                         ui.colored_label(egui::Color32::from_rgb(255, 140, 100), m);
