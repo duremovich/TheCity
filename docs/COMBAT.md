@@ -438,7 +438,7 @@ These come later: ranged (§ 7, with addendum 24) and the blast (§ 8, with netr
 - **The shadow's wrong-reads** (d12-18, raider, gang member, guard, gang leader, gun, fighter; on the build before the
   cell fix): a guard on jail duty "jumped in" on six cell fights in one minute (fixed: the law never joins a fight in
   the cells, and a joiner joins no other fight for `join_cooldown_min`); lying low is Idle's Wander for 6 h at night,
-  not a bed; the law is the most common joiner (46 %); a robot's line reads like flesh ("body gravely wounded" before
+  not a bed; the law is the most common joiner (44 %); a robot's line reads like flesh ("body gravely wounded" before
   "was wrecked"); a Hunt's target who keeps fleeing gives a "gave chase" line each time; no raider came late to a
   live raid (headless, every gang raid ran at once); gorilla arms were invisible in the line until the chrome notes
   ("gorilla arms", "Sandevistan", "a Kerenzikov dodge") were added after the shadow.
