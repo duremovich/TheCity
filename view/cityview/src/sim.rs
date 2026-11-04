@@ -339,7 +339,12 @@ fn along(from: [f32; 2], ahead: &[[f32; 2]], to: [f32; 2], u: f32, cap: f32) -> 
         return (if u < 0.5 { from } else { to }, true);
     };
     let way = &ahead[..=end];
-    let len: f32 = std::iter::once(from).chain(way.iter().copied()).collect::<Vec<_>>().windows(2).map(|w| ((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2)).sqrt()).sum();
+    let len: f32 = std::iter::once(from)
+        .chain(way.iter().copied())
+        .collect::<Vec<_>>()
+        .windows(2)
+        .map(|w| ((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2)).sqrt())
+        .sum();
     if len > cap {
         let chord = ((to[0] - from[0]).powi(2) + (to[1] - from[1]).powi(2)).sqrt();
         return if chord <= cap { (lerp(from, to, u), false) } else { (if u < 0.5 { from } else { to }, true) };
@@ -1486,29 +1491,18 @@ pub fn update_sim(
         no_way += usize::from(jump);
         // Motion V2 (S1's stride, `OPEN-317`): each frame's place is its tile plus the way through the next step, so
         // the pair covers the same ground every tick (the tiles alone ran 4, 3, 4 a tick: a 25 % surge)
-        // Motion V3: a walkway hop (S3, `OPEN-319`: the body stands at the hop's near end while `stride` runs the hop's
-        // share, a step of more than a tile and a half to the next tile) is drawn over its span, place and height both
-        // by the stride (`hop_far`: the far end's place and how far through the hop it is, lerped across the pair)
-        let mut hop: Option<([f32; 2], f32)> = None;
         if !jump {
             let off = |s: &HashMap<u64, f32>, g: Option<&Agent>| {
                 g.and_then(|g| {
                     let k = *s.get(&g.id)?;
                     let n = *g.ahead.first()?;
                     let d = [n[0] - g.t[0], n[1] - g.t[1]];
-                    let far = d[0].abs().max(d[1].abs()) > 1.5;
-                    (!far || d[0].abs().max(d[1].abs()) < sim.cfg.hop_max_tiles).then_some(([d[0] * k, d[1] * k], far.then_some((n, k))))
+                    (d[0].abs().max(d[1].abs()) <= 1.5).then_some([d[0] * k, d[1] * k])
                 })
-                .unwrap_or(([0.0, 0.0], None))
+                .unwrap_or([0.0, 0.0])
             };
-            let ((o, ho), (n, hn)) = (off(&sim.strides[0], older.get(&a.id)), off(&sim.strides[1], Some(a)));
+            let (o, n) = (off(&sim.strides[0], older.get(&a.id)), off(&sim.strides[1], Some(a)));
             t = [t[0] + o[0] + (n[0] - o[0]) * u, t[1] + o[1] + (n[1] - o[1]) * u];
-            hop = match (ho, hn) {
-                (Some((f, k0)), Some((_, k1))) => Some((f, k0 + (k1 - k0) * u)),
-                (Some((f, k0)), None) => Some((f, k0 + (1.0 - k0) * u)),
-                (None, Some((f, k1))) => Some((f, k1 * u)),
-                _ => None,
-            };
         }
         // T2 (§ 5): the subject on its click way walks it from the click, until the frames reach its end or leave it
         let mut yaw = yaw;
@@ -1606,20 +1600,6 @@ pub fn update_sim(
         deck_miss += usize::from(a.floor > 0.0 && deck.is_none());
         let z = if a.floor > 0.0 { deck.unwrap_or(g + Sim::storey_z(a.floor)) } else { g };
         let z = seat.map_or(z, |s| s.z + (z - s.z) * u);
-        // Motion V3: a hop's height from where it began to the street at its far end, by the stride
-        let z = match hop {
-            Some((far, h)) if a.floor > 0.0 || older.get(&a.id).is_some_and(|o| o.floor > 0.0) => {
-                let at_floor = |m: Vec2, fl: f32| {
-                    let gz = stream.ground_z(m.x, m.y).unwrap_or(0.0);
-                    if fl > 0.0 { sim.deck_z(m).unwrap_or(gz + Sim::storey_z(fl)) } else { gz }
-                };
-                let fm = sim.metres(far, 0, false);
-                let z0 = at_floor(p, older.get(&a.id).map_or(a.floor, |o| o.floor));
-                let z1 = at_floor(fm, a.floor);
-                z0 + (z1 - z0) * h.clamp(0.0, 1.0)
-            }
-            _ => z,
-        };
         if is_subject {
             subject_at = Some((Vec3::new(p.x, p.y, z), yaw));
             subject_body = Some(draw(Vec3::new(p.x, p.y, z), d));

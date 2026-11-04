@@ -6667,8 +6667,6 @@ run_full_x = 2.0                   # ... to this many (Flee runs at 2x) leans it
 run_lean_deg = 14.0                # forearms (run_arm_bend, 0..1) to the full: the clip's rate already follows the ground
 run_arm_bend = 0.8
 way_pair_max_tiles = 8.0           # V3: a way inside one tick pair longer than this (a repaired detour: 38 m in a tick) is drawn as its chord
-hop_max_tiles = 8.0                # V3: a walkway hop (a Full step of over 1.5 tiles: S3's lift or stairs, standing at the near end
-                                   # while `exec::stride` runs the hop) up to this far is drawn over its span, place and height
 fight_gap_m = 1.0                  # OPEN-314: the subject's fight on the street: each foe drawn this far from the subject
 fight_circle_deg_s = 8.0           # (striking range), facing it, circling it this fast; the subject faces its last mark
 fight_close_m_s = 4.0              # a fighter drawn off its sim place closes in this fast (x the square root of the play

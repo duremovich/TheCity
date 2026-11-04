@@ -160,9 +160,6 @@ pub struct ViewCfg {
     pub run_full_x: f32,
     pub run_lean_deg: f32,
     pub run_arm_bend: f32,
-    /// Motion V3: a walkway hop (a step of more than a tile and a half) of at most this many tiles is drawn over its
-    /// stride: place and height; a longer step is no hop.
-    pub hop_max_tiles: f32,
     /// Motion V3: a body's way inside one tick pair longer than this many tiles (a repaired detour) is drawn as the chord
     /// between its ends (the sim's own displacement), never at a run along the whole detour.
     pub way_pair_max_tiles: f32,
@@ -349,7 +346,6 @@ impl Default for ViewCfg {
             run_full_x: 2.0,
             run_lean_deg: 14.0,
             run_arm_bend: 0.8,
-            hop_max_tiles: 8.0,
             way_pair_max_tiles: 8.0,
             fight_gap_m: 1.0,
             fight_circle_deg_s: 8.0,
