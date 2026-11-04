@@ -471,7 +471,7 @@ def view_smoke(out):
 def test_files():
     for d in (ROOT / "citysim" / "tests", ROOT / "citysim-cli" / "tests"):
         yield from sorted(d.glob("*.rs"))
-    yield ROOT / "citysim-cli" / "src" / "shadow.rs"
+    yield ROOT / "citysim-cli" / "src" / "shadow" / "mod.rs"
 
 
 def ignore_scan_files():
@@ -616,7 +616,9 @@ def cmd_lint(args):
                         f"`Test functions:` in docs/TESTING.md in a commit whose message says `test-add: <reason>`")
     elif tests < baseline:
         warnings.append(f"test functions {tests} < baseline {baseline}: lower `Test functions:` in docs/TESTING.md")
+    sized = set()
     for f in test_files():
+        sized.add(f)
         n = len(f.read_text(encoding="utf-8", errors="replace").splitlines())
         if n > WARN_FILE_LINES:
             warnings.append(f"{f.relative_to(ROOT)} is {n} lines (> {WARN_FILE_LINES}): split by system")
@@ -625,6 +627,15 @@ def cmd_lint(args):
             live = len(re.findall(r"^\s*#\[test\]\s*$", text, re.M)) - len(re.findall(r'#\[ignore = "tier: diag"\]', text))
             if live > 0:
                 problems.append(f"{f.relative_to(ROOT)} is named after a pass, not a system, and holds {live} gate test(s): fold them")
+    # Source files too (code-layout pass, 2026-11-03): an agent reads a file whole, so a file past the cap is
+    # context it carries every turn; split it at a seam (a directory with a re-exporting mod.rs). A print, never a fail.
+    for crate in ("citysim", "citysim-cli"):
+        for f in sorted((ROOT / crate / "src").rglob("*.rs")):
+            if f in sized:
+                continue
+            n = len(f.read_text(encoding="utf-8", errors="replace").splitlines())
+            if n > WARN_FILE_LINES:
+                warnings.append(f"{f.relative_to(ROOT)} is {n} lines (> {WARN_FILE_LINES}): split at a seam")
     if open_rows is not None:
         rows, dupes = open_rows
         for d in dupes:
