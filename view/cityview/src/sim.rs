@@ -205,6 +205,9 @@ pub struct Sim {
     pub strides: [HashMap<u64, f32>; 2],
     /// Motion V2 (`OPEN-309`): where each El rider was drawn last (its seat), for the walk off the car
     pub seat_at: HashMap<u64, Vec3>,
+    /// Motion V2: S2's `[combat] stir_tiles` (`simthread::Static`): a body standing this near the subject's fight
+    /// watches it (faces it)
+    pub stir_tiles: u16,
 }
 
 /// A 64-bit mix (splitmix64's finaliser): the per-id picks.
@@ -585,6 +588,7 @@ impl Sim {
             fight_t0: None,
             strides: Default::default(),
             seat_at: HashMap::new(),
+            stir_tiles: 8,
             rails,
             lots: crate::lots::Lots::load(chunk_dir),
             cfg: citysim::config::ViewCfg::default(),
@@ -640,6 +644,7 @@ impl Sim {
             fight_t0: None,
             strides: Default::default(),
             seat_at: HashMap::new(),
+            stir_tiles: 8,
             rails,
             lots: crate::lots::Lots::load(chunk_dir),
             cfg: citysim::config::ViewCfg::default(),
@@ -670,6 +675,7 @@ impl Sim {
                 self.line_names = st.lines.clone();
                 self.tile_m = st.tile_m;
                 self.y1 = st.north_m;
+                self.stir_tiles = st.stir_tiles;
             }
             let older = prev.as_ref().unwrap_or(&latest);
             self.frames = vec![SimFrame::from_view(&older.frame), SimFrame::from_view(&latest.frame)];
@@ -1548,6 +1554,15 @@ pub fn update_sim(
                 want = *at - base;
                 yaw = *look;
                 ease = cfg.fight_close_m_s;
+                face = true;
+            }
+        } else if let Some(sb) = subj_base.filter(|_| still(a))
+            && Vec2::from(sb).distance(Vec2::from(a.t)) <= f32::from(sim.stir_tiles)
+        {
+            // Motion V2 (S2's stir): a body standing near the subject's fight watches it
+            let d = sim.metres(sb, 0, false) - (base + want);
+            if d.length() > 0.3 {
+                yaw = -d.x.atan2(d.y);
                 face = true;
             }
         }

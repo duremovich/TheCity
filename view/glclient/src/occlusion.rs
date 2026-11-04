@@ -526,11 +526,12 @@ impl PropMats {
 }
 
 fn swap(commands: &mut Commands, e: Entity, h: Result<Handle<OccStd>, Handle<OccStdBlend>>) {
-    let mut c = commands.entity(e);
-    c.remove::<MeshMaterial3d<StandardMaterial>>();
+    // Motion V2: the `try_` forms (an entity despawned before the commands apply, a film's people, panicked once)
+    let Ok(mut c) = commands.get_entity(e) else { return };
+    c.try_remove::<MeshMaterial3d<StandardMaterial>>();
     match h {
-        Ok(h) => c.insert(MeshMaterial3d(h)),
-        Err(h) => c.insert(MeshMaterial3d(h)),
+        Ok(h) => c.try_insert(MeshMaterial3d(h)),
+        Err(h) => c.try_insert(MeshMaterial3d(h)),
     };
 }
 

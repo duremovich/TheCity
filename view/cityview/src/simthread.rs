@@ -82,6 +82,8 @@ pub struct Static {
     pub north_m: f32,
     /// V7: the map's marked crossings (lights.rs draws their signals)
     pub crossings: Vec<citysim::map::MapCrossing>,
+    /// Motion V2: S2's `[combat] stir_tiles` (a fight's bystanders this near watch or run): a watcher faces the fight
+    pub stir_tiles: u16,
 }
 
 #[derive(Default)]
@@ -682,6 +684,11 @@ fn take(world: &mut World, old: Option<EntityId>, to: EntityId, possess: bool) {
     if let Some(b) = world.comp_mut::<Brain>(to) {
         b.pinned = true;
     }
+    // S2 (`OPEN-149`): the ring runs on the new subject now, so the first frame after a load or a start draws no body
+    // in the camera Statistical or Coarse (it used to be drawn before the ring ever ran)
+    if let Some(at) = view::subject_tile(world, to) {
+        world.view_now(Some(view::ring_about(at, world.config.view.ring_half_tiles, world.map.w(), world.map.h())));
+    }
     world.crossing_watch = Some([(to, Vec::new())].into());
     if possess {
         if world.comp::<Brain>(to).is_some_and(|b| b.player.is_none()) {
@@ -996,6 +1003,7 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         tile_m: world.config.view.tile_m as f32,
         north_m: world.config.view.north_m as f32,
         crossings: world.map.crossings.clone(),
+        stir_tiles: world.config.combat.stir_tiles,
     });
     eprintln!("cityview: following {} at {rate:.4} ticks/s", who(&world, subject));
     take(&mut world, None, subject, possessed);
