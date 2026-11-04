@@ -86,13 +86,34 @@ const ENTITY_FILES: &[&str] = &["systems/gray.rs", "systems/faith.rs", "systems/
 #[test]
 fn test_no_unmarked_citizen_scans_in_per_tick_systems() {
     let mut bad = Vec::new();
+    // A file split into a directory (the code-layout pass: `systems/law.rs` -> `systems/law/`) is every `.rs` in it.
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut sources: Vec<(String, std::path::PathBuf)> = Vec::new();
     for file in FILES {
-        let path = format!("{}/src/{file}", env!("CARGO_MANIFEST_DIR"));
-        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let path = src.join(file);
+        let dir = src.join(file.trim_end_matches(".rs"));
+        if !path.is_file() && dir.is_dir() {
+            let mut kids: Vec<_> = std::fs::read_dir(&dir)
+                .expect("split module dir")
+                .map(|e| e.expect("entry").path())
+                .filter(|p| p.extension().is_some_and(|x| x == "rs"))
+                .collect();
+            kids.sort();
+            for k in kids {
+                let name = format!("{}/{}", file.trim_end_matches(".rs"), k.file_name().unwrap().to_string_lossy());
+                sources.push((name, k));
+            }
+        } else {
+            sources.push((file.to_string(), path));
+        }
+    }
+    for (file, path) in &sources {
+        let file = file.as_str();
+        let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
         let lines: Vec<&str> = text.lines().collect();
         for (i, line) in lines.iter().enumerate() {
             let code = line.split("//").next().unwrap_or("");
-            let entity_scan = ENTITY_FILES.contains(file) && code.contains(".entities()");
+            let entity_scan = ENTITY_FILES.contains(&file) && code.contains(".entities()");
             if !(code.contains(".citizens()") || code.contains("with::<Brain>()") || entity_scan) {
                 continue;
             }
