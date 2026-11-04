@@ -4,7 +4,7 @@
 Usage: python tools/analyze_run.py run.csv [events.tsv] [--days N] [--json] [--jail-cap K]
 
 run.csv    per-day report from `citysim-cli run --report` (stdout). Normally has a header
-           line (stats::CSV_HEADER); columns are looked up by name, so new columns are fine.
+           line (`systems::stats::csv_header`); columns are looked up by name, so new columns are fine.
            If there is no header, the documented 25-column order is assumed.
 events.tsv per-event log from `--events` (stderr): `tick<TAB>Kind<TAB>text`. Lines that do
            not start with an integer tick (e.g. "saved ...") are ignored. 1 day = 1440 ticks.
