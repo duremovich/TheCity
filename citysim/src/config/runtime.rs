@@ -116,6 +116,32 @@ pub struct ViewCfg {
     /// within this many metres, about `crowd_gap_m` apart.
     pub crowd_spread_m: f32,
     pub crowd_gap_m: f32,
+    /// Motion V1 (cityview `sim.rs` `Sim::slots`): a crowd's slots on its tile, this many (a bigger crowd: the next
+    /// multiple); a body's slot is a hash of its id among them, so the crowd keeps its places as bodies come and go.
+    pub crowd_slots: u16,
+    /// Motion V1 (cityview `motion.rs`): a body's drawn offset (lane, crowd slot) moves at this (m/s, x the square
+    /// root of the play speed) toward a new one; a drawn place stepping past `motion_jump_k` x the faster of the
+    /// walk and its own speed a frame + `motion_jump_floor_m` stays and closes the gap at `motion_catch_k` x the
+    /// walk; past `motion_snap_m` it is drawn as the jump it is; the drawn speed eases over
+    /// `motion_speed_half_life_s`.
+    pub motion_offset_m_s: f32,
+    pub motion_jump_k: f32,
+    pub motion_jump_floor_m: f32,
+    pub motion_snap_m: f32,
+    pub motion_catch_k: f32,
+    pub motion_speed_half_life_s: f32,
+    /// Motion V1: the walk clip plays past `walk_on_m_s` drawn (the idle again under `walk_off_m_s`), at the drawn
+    /// speed over `walk_clip_m_s` (the clip's own stride at rate 1), clamped to `walk_clip_rate_min` ..
+    /// `walk_clip_rate_max`; the facing turns at `turn_deg_s` x the square root of the play speed.
+    pub walk_on_m_s: f32,
+    pub walk_off_m_s: f32,
+    pub walk_clip_m_s: f32,
+    pub walk_clip_rate_min: f32,
+    pub walk_clip_rate_max: f32,
+    pub turn_deg_s: f32,
+    /// Motion V1 (cityview `motion::rejoin`): a click's new way is walked from where the body is drawn, straight on
+    /// to the way where it passes within this many tiles of it, else to its start (the sim's place).
+    pub way_rejoin_tiles: f32,
     /// The view milestone V6 (`OPEN-270`): `shadow --record`'s ring half side in tiles (each pick's surroundings
     /// a tick, as the shadow's world has them).
     pub record_half_tiles: u16,
@@ -269,6 +295,20 @@ impl Default for ViewCfg {
             storey_slab_m: 0.5,
             crowd_spread_m: 10.0,
             crowd_gap_m: 0.9,
+            crowd_slots: 8,
+            motion_offset_m_s: 1.0,
+            motion_jump_k: 2.0,
+            motion_jump_floor_m: 0.3,
+            motion_snap_m: 16.0,
+            motion_catch_k: 0.5,
+            motion_speed_half_life_s: 0.15,
+            walk_on_m_s: 0.4,
+            walk_off_m_s: 0.15,
+            walk_clip_m_s: 1.4,
+            walk_clip_rate_min: 0.3,
+            walk_clip_rate_max: 6.0,
+            turn_deg_s: 360.0,
+            way_rejoin_tiles: 1.5,
             record_half_tiles: 48,
             record_gzip_level: 6,
             play_speeds: vec![1.0, 2.0, 5.0, 20.0, 60.0],

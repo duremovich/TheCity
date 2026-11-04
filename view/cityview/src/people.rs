@@ -92,6 +92,8 @@ pub struct BodyDraw {
     /// Bevy yaw about +y (the capsules' convention: heading 0 = north = -z)
     pub yaw: f32,
     pub walking: bool,
+    /// Motion V1 (motion.rs): the walk clip's rate (the drawn ground speed over the clip's stride; 1 idling)
+    pub clip_rate: f32,
     pub female: bool,
     pub age: u32,
     pub dress: u8,
@@ -424,15 +426,20 @@ fn skin(src: &Mesh, joints: &[Mat4]) -> Mesh {
     m
 }
 
-fn play(p: &mut AnimationPlayer, idx: &[AnimationNodeIndex; 2], want: usize, id: u64, playing: &mut Option<usize>) {
-    if *playing == Some(want) {
-        return;
+/// The clip `want` on the rig at `rate` (Motion V1: the walk's the drawn ground speed's, motion.rs).
+fn play(p: &mut AnimationPlayer, idx: &[AnimationNodeIndex; 2], want: usize, id: u64, playing: &mut Option<usize>, rate: f32) {
+    if *playing != Some(want) {
+        p.stop_all();
+        // a phase per body, so a crowd does not step in lockstep
+        let phase = (mix(id ^ 0x5EED) % 1000) as f32 / 1000.0;
+        p.play(idx[want]).repeat().seek_to(phase * if want == WALK { 1.03 } else { 8.7 });
+        *playing = Some(want);
     }
-    p.stop_all();
-    // a phase per body, so a crowd does not step in lockstep
-    let phase = (mix(id ^ 0x5EED) % 1000) as f32 / 1000.0;
-    p.play(idx[want]).repeat().seek_to(phase * if want == WALK { 1.03 } else { 8.7 });
-    *playing = Some(want);
+    if let Some(a) = p.animation_mut(idx[want])
+        && (a.speed() - rate).abs() > 1e-3
+    {
+        a.set_speed(rate);
+    }
 }
 
 /// Draw `Sim::people`: the nearest animated (the glb, walk / idle), the rest a static posed mesh per look.
@@ -492,7 +499,7 @@ pub fn draw_people(
             if let Ok(r) = rigged.get(n.e)
                 && let Ok(mut p) = players.get_mut(r.0)
             {
-                play(&mut p, &idx, pose, b.id, &mut n.playing);
+                play(&mut p, &idx, pose, b.id, &mut n.playing, b.clip_rate);
             }
             continue;
         }
@@ -585,7 +592,7 @@ pub fn dress_standin(
         if let Some(r) = rig
             && let Ok(mut p) = players.get_mut(r.0)
         {
-            play(&mut p, &idx, if b.walking { WALK } else { IDLE }, b.id, &mut playing);
+            play(&mut p, &idx, if b.walking { WALK } else { IDLE }, b.id, &mut playing, b.clip_rate);
         }
     }
 }

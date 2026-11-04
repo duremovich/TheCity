@@ -173,6 +173,8 @@ pub struct View {
     pub player: bool,
     /// The window's width over its height (the zoom's distance needs the horizontal FOV)
     pub aspect: f32,
+    /// Motion V1: the play speed now (a multiple of 1x, sim.rs `clock_light`): the follow's ease tightens with it
+    pub speed_x: f32,
     pub cfg: CamCfg,
 }
 
@@ -202,6 +204,7 @@ impl View {
             scripted: false,
             player: false,
             aspect,
+            speed_x: 1.0,
             cfg,
         };
         v.set_zoom(zoom);
@@ -272,12 +275,14 @@ impl View {
     }
 
     /// The aim eases toward the goal (an exponential ease of `half_life_s`); a jump past `snap_m`, the first
-    /// frame and a scripted view snap.
+    /// frame and a scripted view snap. Motion V1: the half-life over the play speed, so the walk trails the aim by the
+    /// same metres at every speed (P1's films: 0.25 s at 60x left the subject ~30 m behind, off the screen).
     pub fn ease(&mut self, dt: f32) -> bool {
         let goal = self.goal();
         let next = match self.aim {
             Some(a) if !self.scripted && a.distance(goal) < self.cfg.snap_m => {
-                let k = 1.0 - (-dt * std::f32::consts::LN_2 / self.cfg.half_life_s.max(1e-3)).exp();
+                let hl = self.cfg.half_life_s.max(1e-3) / self.speed_x.max(1.0);
+                let k = 1.0 - (-dt * std::f32::consts::LN_2 / hl).exp();
                 let n = a + (goal - a) * k;
                 if n.distance(goal) < 0.005 { goal } else { n }
             }
