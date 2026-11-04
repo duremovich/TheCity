@@ -57,6 +57,9 @@ pub struct Published {
     /// takes (the ticks' own pacing).
     pub from_tick: u64,
     pub span_s: f32,
+    /// Motion V1: the pair is drawn on the view's clock (`Shared::vt`, a paced tick); `false`: a flat-out frame (u 1 at
+    /// once) or a fight's beat (over `span_s` from `at`, the combat clock).
+    pub clocked: bool,
 }
 
 /// T2 (§ 5): the possessed body's way from a click, planned between two ticks (`player::way_now`): the tiles from
@@ -143,6 +146,22 @@ pub struct Shared {
     /// tick due by (f64 bits; -1 none yet).
     pub clock: Mutex<Clock>,
     pub film_ready_bits: AtomicU64,
+    /// Motion V1: the view's clock (`ViewClock`): the lerp's `u` and the sim's next tick both read it.
+    pub view_clock: Mutex<ViewClock>,
+}
+
+/// Motion V1 (docs/TIME_MODEL.md § 4): the view's game time, ticks, one clock for the lerp and the pacing: `vt` at
+/// `at` (the pacing's clock, `Shared::now`) running on at `pace` ticks a real second (0 while stopped, held or flat
+/// out). The drawn pair is (newest - 1 .. newest) at `u` = `vt` between their ticks, and the sim thread runs the next
+/// tick when `vt` reaches the newest one (the view has drawn the pair out), so a new pair starts where the last one
+/// ended: a speed change speeds the drawn walk at once (no pair cut short, no forward snap), a pause freezes the
+/// bodies mid-step, and after a hold, a load or `--from` (`vt` set to the newest tick) the next tick runs at once
+/// (P1's films: every NPC stood 10 s at 1x after a hold, then jumped).
+#[derive(Clone, Copy)]
+pub struct ViewClock {
+    pub at: Instant,
+    pub vt: f64,
+    pub pace: f64,
 }
 
 /// The film (film.rs): the clock the sim's pacing and the lerp read. Outside a film it is the wall clock (less what
@@ -341,13 +360,41 @@ impl Shared {
         f64::from_bits(self.tick_rate_bits.load(Ordering::Relaxed)) as f32
     }
 
-    /// T2 (§ 4): the lerp's `u` (0..1) from the older frame to `latest`: the real time since it was published over
-    /// its span (1 while a bench or a script holds the sim: the shot's tick exactly).
+    /// T2 (§ 4): the lerp's `u` (0..1) from the older frame to `latest`. Motion V1: a paced pair's from the view's
+    /// clock (`vt` between the pair's ticks); a flat-out frame's 1 (a bench's shot shows its tick exactly); a fight's
+    /// beat's the real time since it was published over its span.
     pub fn lerp_u(&self, latest: &Published) -> f32 {
-        if self.hold.load(Ordering::Relaxed) != u64::MAX {
+        let ticks = latest.frame.tick.saturating_sub(latest.from_tick);
+        if latest.clocked && ticks > 0 {
+            return ((self.vt() - latest.from_tick as f64) / ticks as f64).clamp(0.0, 1.0) as f32;
+        }
+        if latest.span_s <= 0.0 {
             return 1.0;
         }
-        (self.now().saturating_duration_since(latest.at).as_secs_f32() / latest.span_s.max(1e-3)).clamp(0.0, 1.0)
+        (self.now().saturating_duration_since(latest.at).as_secs_f32() / latest.span_s).clamp(0.0, 1.0)
+    }
+
+    /// Motion V1: the view's clock now, ticks (`ViewClock`).
+    pub fn vt(&self) -> f64 {
+        let now = self.now();
+        let c = *self.view_clock.lock().unwrap();
+        c.vt + now.saturating_duration_since(c.at).as_secs_f64() * c.pace
+    }
+
+    /// Motion V1: the view's clock runs on at `pace` ticks a real second from now, no further than tick `cap` (the
+    /// newest tick run: a sim slower than the pace holds the drawn bodies at their newest place, never past it).
+    pub fn vt_pace(&self, pace: f64, cap: f64) {
+        let vt = self.vt().min(cap);
+        let now = self.now();
+        *self.view_clock.lock().unwrap() = ViewClock { at: now, vt, pace };
+    }
+
+    /// Motion V1: the view's clock set to tick `vt` (a flat-out frame, a fight's beat, a load: the view is there).
+    pub fn vt_set(&self, vt: f64) {
+        let now = self.now();
+        let mut c = self.view_clock.lock().unwrap();
+        c.at = now;
+        c.vt = vt;
     }
 
     /// The film: the pacing's clock (`Clock`): the wall clock outside a film, the film's while one runs.
@@ -527,6 +574,7 @@ impl Shared {
             way: Mutex::new(None),
             clock: Mutex::new(Clock::default()),
             film_ready_bits: AtomicU64::new((-1f64).to_bits()),
+            view_clock: Mutex::new(ViewClock { at: Instant::now(), vt: 0.0, pace: 0.0 }),
         }
     }
 }
@@ -1298,7 +1346,7 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                 news.as_mut(),
                 &mut last_logged,
                 &mut trail,
-                (0.0, sh.now()),
+                (0.0, sh.now(), false),
             );
         }
         // V1: a reload between two ticks: the R key, --reload-at, the file's mtime moved
@@ -1353,6 +1401,7 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         if world.tick >= hold {
             ready();
             sh.tick_rate_bits.store(0f64.to_bits(), Ordering::Relaxed);
+            sh.vt_pace(0.0, world.tick as f64);
             std::thread::sleep(Duration::from_millis(5));
             continue;
         }
@@ -1372,6 +1421,8 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
             next_at = Instant::now();
             last_tick_at = sh.now();
             sh.tick_rate_bits.store(0f64.to_bits(), Ordering::Relaxed);
+            // Motion V1: the view's clock stops with it (the bodies freeze mid-step, and walk on at once after)
+            sh.vt_pace(0.0, world.tick as f64);
             continue;
         }
         // paced: free running past --from; flat out to --from and to a bench's hold
@@ -1383,6 +1434,8 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         let tick_rate = if fighting || stepped > 0 { 1.0 / beat_s } else { rate * eff };
         let walking_rate = if paced && !fighting && stepped == 0 { tick_rate } else { 0.0 };
         sh.tick_rate_bits.store(walking_rate.to_bits(), Ordering::Relaxed);
+        // Motion V1: the view's clock runs at the walk's pace (no further than a tick past the newest run)
+        sh.vt_pace(walking_rate, world.tick as f64 + 1.0);
         let mut beat_now: Option<Vec<citysim::systems::combat::BeatLog>> = None;
         if fighting && stepped < bpt {
             let now = Instant::now();
@@ -1408,16 +1461,23 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                 continue;
             }
         } else if paced && rate > 0.0 {
-            // V1: the wait in slices (a tick is 10 real seconds at 1x), so a reload is seen between them. T2: due a
-            // tick's interval at the speed now after the last tick began (a ramp to auto-speed shortens the wait at
-            // once); a sim slower than that runs flat out (auto-speed's cap)
+            // V1: the wait in slices (a tick is 10 real seconds at 1x), so a reload is seen between them. Motion V1:
+            // the next tick is due when the view's clock reaches the newest tick (the drawn pair is played out: a
+            // speed change paces the wait at once, a hold, a load or a pause owes no wait); a sim slower than that
+            // runs flat out (auto-speed's cap)
             let now = now_v;
-            let due = last_tick_at + Duration::from_secs_f64(1.0 / tick_rate);
-            if now < due {
+            let mut vt = sh.vt();
+            if vt < world.tick as f64 - 1.5 {
+                // the world jumped past the view (a frame not published on the clock): the view is at the newest
+                sh.vt_set(world.tick as f64);
+                vt = world.tick as f64;
+            }
+            if vt < world.tick as f64 {
                 ready();
                 // filming, the render thread steps the clock a frame at a time: look again soon
                 let slice = if film_t.is_some() { Duration::from_millis(1) } else { Duration::from_millis(20) };
-                std::thread::sleep((due - now).min(slice));
+                let wait = Duration::from_secs_f64(((world.tick as f64 - vt) / tick_rate).min(1.0));
+                std::thread::sleep(wait.min(slice));
                 continue;
             }
             if film_t.is_some() {
@@ -1427,11 +1487,7 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                     std::thread::sleep(Duration::from_millis(1));
                     continue;
                 }
-                // and runs at its due time when the frame that found it due is the first past it (no drift to the
-                // frame grid); a tick overdue by more than a frame (after a hold, a speed change, a pause) runs now,
-                // as the wall clock's loop would, its pair starting at the frame that sees it
-                let step = Duration::from_secs_f64(sh.clock.lock().unwrap().step);
-                film_tick_at = Some(if now > due + step { now } else { due });
+                film_tick_at = Some(now);
             }
             next_at = Instant::now() + Duration::from_secs_f64(1.0 / tick_rate);
         } else if paced {
@@ -1614,7 +1670,7 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                 news.as_mut(),
                 &mut last_logged,
                 &mut trail,
-                (span, if stepping { sh.now() } else { t_tick_v }),
+                (span, if stepping { sh.now() } else { t_tick_v }, paced && !stepping),
             );
             if !paced && !stepping {
                 let (n, secs) = acc;
@@ -1714,8 +1770,9 @@ fn publish(
     news: Option<&mut News>,
     last_logged: &mut (String, Option<String>, bool),
     trail: &mut Trail,
-    // the pair's lerp span (s) and when it starts on the pacing's clock (the tick's time)
-    (span_s, at_v): (f64, Instant),
+    // the pair's lerp span (s) and when it starts on the pacing's clock (the tick's time); Motion V1: drawn on the
+    // view's clock (a paced tick; else the view's clock is set to this frame's tick)
+    (span_s, at_v, clocked): (f64, Instant, bool),
 ) -> String {
     let (w, h) = (world.map.w(), world.map.h());
     let at = view::subject_tile(world, subject).unwrap_or(at);
@@ -1770,6 +1827,7 @@ fn publish(
             seq: b.seq,
             from_tick: b.from_tick,
             span_s: b.span_s,
+            clocked: b.clocked,
         })),
         b => b,
     };
@@ -1792,7 +1850,10 @@ fn publish(
         );
     }
     trail.start(&frame);
-    let p = Arc::new(Published { frame, subject, caption, at: at_v, seq: *seq, from_tick, span_s: span_s as f32 });
+    if !clocked {
+        sh.vt_set(frame.tick as f64);
+    }
+    let p = Arc::new(Published { frame, subject, caption, at: at_v, seq: *seq, from_tick, span_s: span_s as f32, clocked });
     let mut s = sh.slots.lock().unwrap();
     s.prev = prev;
     s.latest = Some(p);

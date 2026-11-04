@@ -117,8 +117,18 @@ fn run(a: RecArgs, sh: Arc<Shared>) {
             let mut s = sh.slots.lock().unwrap();
             // T2: a frame a tick at the recording's rate (its ways ahead are the recorded tick's)
             let from_tick = s.latest.as_ref().map_or(tick.saturating_sub(1), |l| l.frame.tick);
-            let span_s = (tick.saturating_sub(from_tick).max(1) as f64 / rate.max(1e-9)) as f32;
-            let p = Arc::new(Published { frame: cur.0.clone(), subject: h.subject, caption, at: Instant::now(), seq, from_tick, span_s });
+            // (flat out, span 0: the frame at once, a bench's shot its tick exactly)
+            let span_s = if paced { (tick.saturating_sub(from_tick).max(1) as f64 / rate.max(1e-9)) as f32 } else { 0.0 };
+            let p = Arc::new(Published {
+                frame: cur.0.clone(),
+                subject: h.subject,
+                caption,
+                at: Instant::now(),
+                seq,
+                from_tick,
+                span_s,
+                clocked: false,
+            });
             s.prev = s.latest.take();
             s.latest = Some(p);
             next_at = next_at.max(Instant::now());

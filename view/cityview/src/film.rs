@@ -287,7 +287,12 @@ fn film_post(
         } else if b.lean.abs() > 1e-4 || b.nudge.length_squared() > 1e-8 {
             clip = "fight_pose";
         }
-        let clip_rate = if matches!(clip, "walk" | "idle") { 1.0 } else { 0.0 };
+        // Motion V1: the rate the rig plays the clip at (the walk's from the drawn ground speed; a static pose 0)
+        let clip_rate = match clip {
+            "walk" => b.clip_rate,
+            "idle" => 1.0,
+            _ => 0.0,
+        };
         let f = b.feet();
         let (sx, sy) = screen(f);
         let tier = match a.map(|a| a.lod) {

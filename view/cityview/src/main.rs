@@ -54,6 +54,7 @@ mod film;
 mod lights;
 mod lots;
 mod mesh;
+mod motion;
 mod occ;
 mod pace;
 mod people;
@@ -653,7 +654,13 @@ fn main() {
             .add_systems(Startup, sim::setup_sim)
             .add_systems(
                 Update,
-                (sim::follow_subject.before(occ::player_controls), sim::update_sim.after(stream::update_stream), sim::reload_key),
+                (
+                    // Motion V1: the stand-in and the camera on this frame's place (before: last frame's, a frame's
+                    // walk behind the crowd, 8 m at 60x on a film)
+                    sim::follow_subject.after(sim::update_sim).before(occ::place_bodies).before(cam::ease_view),
+                    sim::update_sim.after(stream::update_stream),
+                    sim::reload_key,
+                ),
             );
         // V7: the junctions' signal heads around the subject
         lights::add(&mut app);
