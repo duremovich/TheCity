@@ -26,6 +26,9 @@ pub struct ViewCfg {
     pub people_anim_m: f32,
     /// The most bodies drawn skinned and animated at once (the nearest).
     pub people_anim_max: u16,
+    /// The film (cityview `film.rs`, docs/TESTING.md "Filming motion"): a film's motion trace (`trace.csv`) holds a
+    /// row a frame for every drawn body within this many metres of the subject (and the subject).
+    pub film_trace_m: f32,
     /// The view milestone V4b (cityview `cam.rs`): the orbit follow-cam. Its
     /// vertical FOV, the starting yaw (the camera's bearing from the subject,
     /// 0 = south) and pitch, the pitch's clamp, the zoom's range (the frame's
@@ -215,6 +218,7 @@ impl Default for ViewCfg {
             fps_cap: 30,
             people_anim_m: 40.0,
             people_anim_max: 48,
+            film_trace_m: 40.0,
             cam_fov_deg: 30.0,
             cam_yaw_deg: 45.0,
             cam_pitch_deg: 50.0,

@@ -55,6 +55,11 @@
 //! by the auto-pause's in the HUD and in the Esc menu. Script: `live SECS` (the sim runs paced at the speed for that
 //! many real seconds, auto-speed and all, where the other lines hold it to their ticks), `autospeed on|off`, `click
 //! ~DX,DY` (the tile that far from the subject's).
+//!
+//! Films (film.rs, docs/TESTING.md "Filming motion"): `film NAME SECS [FPS]` runs the sim live at the play speed for
+//! SECS film seconds, like `live`, writing FPS (10) frames a second to `<out>/NAME/frame_00001.png` .. (the `shot`
+//! capture, HUD and all) on a fixed-step clock (each frame 1/FPS of game-real time, however slow the capture), with the
+//! motion trace `trace.csv` and `meta.json`; the next line runs once the frames are written.
 
 use bevy::{
     app::AppExit,
@@ -414,6 +419,7 @@ fn run_script(
     stream: Res<crate::stream::Stream>,
     mut view: ResMut<crate::cam::View>,
     mut exit: MessageWriter<AppExit>,
+    mut film: Option<ResMut<crate::film::Film>>,
 ) {
     if let Some(n) = p.quit_in.as_mut() {
         *n = n.saturating_sub(1);
@@ -424,6 +430,11 @@ fn run_script(
     }
     // the frame's tick: the HUD's state was published with it
     let Some(tick) = sim.clock_tick else { return };
+    // a `film`: paced play on the film's clock until its frames are written
+    if film.as_ref().is_some_and(|f| f.busy()) {
+        p.shared.hold.store(u64::MAX, Ordering::Relaxed);
+        return;
+    }
     // T2: a `live SECS`: paced play (no hold) until then, auto-speed and all
     if let Some(u) = p.live_until {
         if Instant::now() < u {
@@ -767,6 +778,10 @@ fn run_script(
         "autopause" => p.shared.autopause.store(arg == "on", Ordering::Relaxed),
         // T2: auto-speed's toggle; paced play for SECS real seconds
         "autospeed" => p.shared.auto_on.store(arg == "on", Ordering::Relaxed),
+        "film" => match film.as_mut() {
+            Some(f) => f.start(crate::film::FilmReq::parse(arg), &sim),
+            None => warn!("play script film {arg}: no live sim to film"),
+        },
         "live" => {
             let secs: f32 = arg.parse().expect("live SECS");
             p.live_until = Some(Instant::now() + Duration::from_secs_f32(secs.max(0.0)));

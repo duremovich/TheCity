@@ -182,6 +182,26 @@ impl People {
         }
     }
 
+    /// The film's trace (film.rs): how body `id` is drawn now, its LOD (`skinned`, `static`, `none`) and its clip
+    /// (`walk` / `idle` playing on the rig, `unrigged` before it is, the static mesh's `walk_pose` / `idle_pose`).
+    pub fn drawn_state(&self, id: u64) -> (&'static str, &'static str) {
+        if let Some(n) = self.near.get(&id) {
+            return (
+                "skinned",
+                match n.playing {
+                    Some(WALK) => "walk",
+                    Some(_) => "idle",
+                    None => "unrigged",
+                },
+            );
+        }
+        match self.far.get(&id) {
+            Some((_, _, WALK)) => ("static", "walk_pose"),
+            Some(_) => ("static", "idle_pose"),
+            None => ("none", "none"),
+        }
+    }
+
     fn scale(&self, age: u32) -> f32 {
         let c = &self.cfg;
         if age >= c.child_full_age { 1.0 } else { c.child_scale_min + (1.0 - c.child_scale_min) * age as f32 / c.child_full_age as f32 }

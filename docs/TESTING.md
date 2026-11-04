@@ -81,6 +81,26 @@ Controls: `god_control`, `god_corps_control`, `god_districts_control` (`god_cut_
 
 **The behaviour tier** (`citysim-cli/src/shadow/behaviour.rs`, `CHECKS` + `COLLAPSE`; restructured 2026-10-22 on doctrine 1): two kinds of row. **Collapse rows assert**, against the bound in the `COLLAPSE` table (data, one rationale per kind), where only a broken mechanism lands: paid of worked and waged workdays >= 0.5, known contacts met >= 0.05 a week, walking <= 20 h a day, energy 0 <= 84 h a week, commute aborts <= 1 a day, the reporter's work >= 0.5 h a day; refunds <= 1 a week and the fighter in the pit >= 3 of 4 bouts stay absolute. 114 of the 132 rows assert today. **Every other row** (the longest nightly block: 18 rows) and every row under the n rule **print as `FINDING`**. Each `CHECKS` row also keeps its calibration bound and range (main plus a cushion, from main and seven config butterflies: `[lod] stat_violence_mult` 0.98-1.03, `max_coarse` 149/151, via `CITYSIM_ASSETS`), printed with ok or MISS on every line, so a gate read sees drift; a MISS on an asserted row prints an extra `FINDING` line and never fails. **The n rule**: a row whose pooled n (agents over the seeds) is under 10 prints and never asserts; n is on every line. **When it fails**: a collapse row is a dead mechanism; read its per-seed lines, then the diaries (`--out`). **Re-calibrating** is only for the printed ranges (so the next read of drift is honest), is never needed to merge, and is done when the city changed for a wanted reason: eight runs (~1.5 min each), each row's lowest and highest pooled value plus the cushions (walking + max(1 h, 15 %), the longest nightly block - 0.5 h, energy 0 + 2 h a week, known contacts x 0.6, aborts + 0.05 a day, paid and waged - 0.1, the reporter's work x 0.5), old and new ranges in the commit. A collapse bound moves only if the mechanism's broken signal moved.
 
+## Filming motion
+
+Still frames miss motion (a teleport, a back-snap, a body frozen mid-walk, foot sliding, a pop at a door or a stair),
+so **a phase that changes how bodies move on screen proves it with a film**: its contact sheets read (the agent opens
+the PNGs) and `tools/film.py`'s FINDING lines before and after, in the report. A film is the live view recorded on a
+fixed-step clock (cityview `film.rs`): each frame stands for 1/FPS of game-real time however slow the capture, so the
+mp4 plays at true speed. In a `--play` script, `film NAME SECS [FPS]` (FPS 10) runs the sim at the play speed like
+`live` and writes `<out>/NAME/frame_00001.png` .. (the window, HUD and all), `trace.csv` (a row a frame per drawn body
+within `[view] film_trace_m` of the subject: drawn x, y, z and yaw, the sim's tile and floor and the lerp's tick pair
+and u, walking, the clip, skinned or static, Full or Coarse, the screen point) and `meta.json`
+(`view/cityview/scripts/film_smoke.play`). Without possessing anyone: `cargo run --release -p cityview -- --save F
+--follow N [--from T] [--play-speed X] --film NAME:SECS[:FPS] --out DIR --res 1280x720`, which records, writes and
+exits. Then `python tools/film.py DIR [--crop [PX]] [--sheet N] [--strip N]`: `film.mp4` (ffmpeg) for Dylan,
+`sheet_K.png` (4x3 frames labelled with the film time and the sim clock, optionally cropped round the subject),
+`strip.png` (N consecutive cropped frames in a row), `paths.png` (every traced body's drawn path top-down, the
+subject's sim tile a tick, a mark at each finding) and the analysis: one `FINDING film <check>` line each for
+teleport, back-snap, frozen walker, slide (walk in place, idle while moving, clip rate against ground speed), stack,
+floor pop, facing snap, the clock's step, pops inside the ring and the camera's screen jump, then a per-body speed
+table. Thresholds are arguments; the lines are prints, never gates. Films go under `D:/TheCity/target/films/`.
+
 ## Profiling and the big map
 
 `--features prof` (`citysim/src/prof.rs`): `run` prints a `PROF` line per timed site; `--prof-from DAY` zeroes it at that day. A scaled city: `run --population N --scaled [--rph R] [--map FILE]`. The synthetic island: `cargo test --release -p citysim --test big_island -- --ignored --nocapture` (`CITYSIM_BENCH_POP`, `_DAYS`, `_FULL`). The stat table: `cargo run --release -p citysim-cli -- calibrate` (deterministic, ~2 min) when Full-tier hourly behaviour moves, then `core_sanity`, `core_year` and the behaviour tier again; a regen redraws rare rates, so check Murders against main first.

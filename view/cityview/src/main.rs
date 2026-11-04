@@ -40,6 +40,9 @@
 //! --slice [--save FILE] [--play ..]: M18 P5, the player slice (docs/M18_PLAYER.md): the start menu over the pre-run
 //! 20k city (default `saves/slice/20k_s42_d21.ron`): pick a nobody or arrive fresh, load a save (`saves/player/`),
 //! Esc in play to save, load or quit; death ends the character and the city goes on.
+//! --save FILE --follow INDEX [--from TICK] [--play-speed X] --film NAME:SECS[:FPS]: a film of the follow-cam (film.rs,
+//! docs/TESTING.md "Filming motion"): SECS film seconds at FPS (10) into `<out>/NAME/` (the frames, `trace.csv`,
+//! `meta.json`; `tools/film.py` makes the mp4, the sheets and the motion findings) on a fixed-step clock, then exit.
 
 // Bevy systems take their params as arguments and query tuples as types: the two lints every Bevy crate allows.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -47,6 +50,7 @@
 mod bench;
 mod cam;
 mod data;
+mod film;
 mod lights;
 mod lots;
 mod mesh;
@@ -126,6 +130,10 @@ struct Args {
     slice: bool,
     /// --fps N: the frame cap (pace.rs; default `[view] fps_cap`, 0 uncapped)
     fps: Option<u16>,
+    /// --film NAME:SECS[:FPS]: film the follow-cam (film.rs) once the sim reaches --from, then exit
+    film: Option<film::FilmReq>,
+    /// --play-speed X: the follow-cam's first play speed (x the walk-matched rate; default `[view] play_speeds[0]`)
+    play_speed: Option<f64>,
 }
 
 /// M18 P5: the slice's pre-run city and the player saves, under the workspace root.
@@ -182,6 +190,8 @@ impl Args {
             possess: None,
             play: None,
             slice: false,
+            film: None,
+            play_speed: None,
         };
         let v: Vec<String> = std::env::args().skip(1).collect();
         let mut i = 0;
@@ -315,6 +325,16 @@ impl Args {
                     i += 1;
                 }
                 "--slice" => a.slice = true,
+                "--film" => {
+                    a.film = Some(film::FilmReq::parse(&next(i)));
+                    i += 1;
+                }
+                "--play-speed" => {
+                    let x: f64 = next(i).parse().expect("--play-speed X");
+                    assert!(x > 0.0, "--play-speed must be above 0");
+                    a.play_speed = Some(x);
+                    i += 1;
+                }
                 "--trace-secs" => {
                     a.trace_secs = next(i).parse().unwrap();
                     i += 1;
@@ -343,6 +363,8 @@ impl Args {
         assert!(a.shots.is_empty() || a.bench.as_deref() == Some("one"), "--shots needs --bench one");
         assert!(a.shots.is_empty() || a.save.is_some() || rec, "--shots needs --save or a recording");
         assert!(a.watch_vehicle.is_none() || a.save.is_some(), "--watch-vehicle needs --save");
+        assert!(a.film.is_none() || (a.save.is_some() && a.follow.is_some()), "--film needs --save and --follow");
+        assert!(a.film.is_none() || (a.bench.is_none() && a.play.is_none()), "--film is its own run (a script films with `film`)");
         assert!((a.config.is_none() && a.reload_at.is_none()) || a.save.is_some(), "--config and --reload-at need --save");
         if let Some(p) = &a.config {
             assert!(p.is_file(), "--config {}: no such file", p.display());
@@ -602,7 +624,7 @@ fn main() {
         (None, true) => Some(workspace_root().join(SLICE_SAVE)),
         (None, false) => None,
     };
-    if let Some(save) = save.filter(|_| args.follow.is_some() || args.slice) {
+    if let Some(save) = save.clone().filter(|_| args.follow.is_some() || args.slice) {
         // the save reloads its name tables from TheCity's assets/ (CITYSIM_ASSETS wins when set)
         if std::env::var_os("CITYSIM_ASSETS").is_none() {
             // SAFETY: main, before any thread of ours starts (the sim thread and Bevy's come after)
@@ -619,7 +641,7 @@ fn main() {
             config: args.config.clone().or_else(|| Some(PathBuf::from("assets/config.toml")).filter(|p| p.is_file())),
             reload_at: args.reload_at,
             possess: args.possess.is_some(),
-            speed: vcfg.play_speeds.first().copied().unwrap_or(1.0),
+            speed: args.play_speed.unwrap_or_else(|| vcfg.play_speeds.first().copied().unwrap_or(1.0)),
         }));
     }
     if let Some(shared) = shared {
@@ -635,6 +657,9 @@ fn main() {
             );
         // V7: the junctions' signal heads around the subject
         lights::add(&mut app);
+        // the film (film.rs): a script's `film` or --film
+        let save_name = save.as_ref().map_or(String::new(), |p| p.display().to_string());
+        film::add(&mut app, shared.clone(), &vcfg, out.clone(), save_name, args.follow, args.film.clone(), args.from);
         // M18 P1: the player's HUD, click and keys
         if args.possess.is_some() || args.slice {
             let script = args.play.as_deref().map(|s| play::parse_script(s, parse_tick)).unwrap_or_default();
