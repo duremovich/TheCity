@@ -1,0 +1,26 @@
+0 wait 2;
+* fresh;
+* await player;
+* zoom 90;
+* autopause off;
+* autospeed off;
+* wait 1;
+* click ~8,0;
+* film audit_9_click_1x 8;
+* click ~-7,0;
+* film audit_9_reclick_1x 12;
+* wait 1;
+* speed 2;
+* click ~8,0;
+* film audit_9_click_5x 3;
+* click ~-7,0;
+* film audit_9_reclick_5x 8;
+* wait 1;
+* pitch 85;
+* zoom 220;
+* click ~35,0;
+* film audit_9_far_5x 16;
+* wait 1;
+* speed 3;
+* film audit_9_far_20x 10;
+* quit

@@ -1,0 +1,17 @@
+0 wait 2;
+* fresh;
+* await player;
+* zoom 24;
+* autopause off;
+* autospeed off;
+* wait 1;
+* provoke;
+* film audit_7_fight_1x 15;
+* order flee;
+* film audit_7_flee_1x 10;
+* order stance allout;
+* provoke lethal;
+* film audit_7_lethal_1x 20;
+* speed 2;
+* film audit_7_after_5x 10;
+* quit
