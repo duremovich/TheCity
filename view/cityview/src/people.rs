@@ -138,11 +138,13 @@ pub struct Posing {
     pub strike: f32,
     pub stagger: f32,
     pub lean: f32,
+    /// Motion V3: the run look, 0..1 (a forward lean in the spine, the forearms bent)
+    pub run: f32,
 }
 
 impl Posing {
     fn any(&self) -> bool {
-        self.sit + self.guard + self.strike + self.stagger > 1e-3
+        self.sit + self.guard + self.strike + self.stagger + self.run > 1e-3
     }
 }
 
@@ -203,6 +205,8 @@ pub struct PeopleCfg {
     pub glow: f32,
     /// Motion V2: a body sitting on the floor has its hips this high (m)
     pub sit_hips_m: f32,
+    pub run_lean: f32,
+    pub run_arm_bend: f32,
 }
 
 impl PeopleCfg {
@@ -214,6 +218,8 @@ impl PeopleCfg {
             child_full_age: v.child_full_age.max(1),
             glow: v.people_glow,
             sit_hips_m: v.sit_hips_m,
+            run_lean: v.run_lean_deg.to_radians(),
+            run_arm_bend: v.run_arm_bend,
         }
     }
 }
@@ -449,6 +455,13 @@ pub fn pose_bones(rigs: Query<(Entity, &Bones, &Posing)>, mut tfs: Query<&mut Tr
             lean(&mut local, SPINE, pose.lean.max(0.0));
             aim(&mut local, R_ARM, Vec3::new(0.12, 0.12, 1.0), pose.strike);
             aim(&mut local, R_FORE, Vec3::new(0.12, 0.12, 1.0), pose.strike);
+        }
+        // V3: the run's look: the spine forward, the forearms bent up (the clip's arms swing at the ground's rate)
+        if pose.run > 0.0 {
+            lean(&mut local, SPINE, cfg.cfg.run_lean * pose.run);
+            let b = cfg.cfg.run_arm_bend * pose.run;
+            aim(&mut local, L_FORE, Vec3::new(-0.15, 0.7, 0.9), b);
+            aim(&mut local, R_FORE, Vec3::new(0.15, 0.7, 0.9), b);
         }
         if pose.stagger > 0.0 {
             lean(&mut local, SPINE, pose.lean.min(0.0));

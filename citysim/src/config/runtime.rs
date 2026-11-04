@@ -153,6 +153,16 @@ pub struct ViewCfg {
     /// Motion V2 (Dylan 2026-11-04: procedural poses on the rig in code): a body sitting (a Use that sits, cityview
     /// `sim.rs` `SITS`) sits on the floor with its hips this high (m), legs out.
     pub sit_hips_m: f32,
+    /// Motion V3: a body drawn running (its game-real ground speed, over `walk_m_s`) from `run_from_x` to `run_full_x`
+    /// leans its spine forward by `run_lean_deg` and bends its forearms `run_arm_bend` (0..1) at full: the run look
+    /// for Flee (the sim runs it at twice the walk).
+    pub run_from_x: f32,
+    pub run_full_x: f32,
+    pub run_lean_deg: f32,
+    pub run_arm_bend: f32,
+    /// Motion V3: a body's way inside one tick pair longer than this many tiles (a repaired detour) is drawn as the chord
+    /// between its ends (the sim's own displacement), never at a run along the whole detour.
+    pub way_pair_max_tiles: f32,
     /// Motion V2 (`OPEN-314`): the subject's fight on the street: each foe drawn `fight_gap_m` from the subject
     /// (striking range), facing it, circling at `fight_circle_deg_s`; the subject faces the last body it struck or
     /// was struck by.
@@ -332,6 +342,11 @@ impl Default for ViewCfg {
             lane_gap_m: 0.7,
             lane_count: 5,
             sit_hips_m: 0.12,
+            run_from_x: 1.4,
+            run_full_x: 2.0,
+            run_lean_deg: 14.0,
+            run_arm_bend: 0.8,
+            way_pair_max_tiles: 8.0,
             fight_gap_m: 1.0,
             fight_circle_deg_s: 8.0,
             fight_close_m_s: 4.0,

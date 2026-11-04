@@ -324,7 +324,11 @@ impl SimFrame {
 /// the whole way when it ends there, a stitched frame's path over many ticks), else, a step apart, straight; else
 /// (T2, docs/TIME_MODEL.md § 4: no slide through the block) a jump at the pair's middle, the sim's own (a placement),
 /// counted in `.1`.
-fn along(from: [f32; 2], ahead: &[[f32; 2]], to: [f32; 2], u: f32) -> ([f32; 2], bool) {
+///
+/// Motion V3: a way longer than `cap` tiles inside one pair (a repaired detour: `v2_audit_4_crossing_c_5x`, a body drawn
+/// 38 m in a tick, 4.5x the walk at 5x for twelve frames) is drawn as the chord between its ends, a step the sim's
+/// own displacement says; a chord past `cap` too is the sim's jump.
+fn along(from: [f32; 2], ahead: &[[f32; 2]], to: [f32; 2], u: f32, cap: f32) -> ([f32; 2], bool) {
     let lerp = |a: [f32; 2], b: [f32; 2], k: f32| [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
     let end = if ahead.last() == Some(&to) { Some(ahead.len() - 1) } else { ahead.iter().position(|p| *p == to) };
     let Some(end) = end else {
@@ -334,7 +338,18 @@ fn along(from: [f32; 2], ahead: &[[f32; 2]], to: [f32; 2], u: f32) -> ([f32; 2],
         }
         return (if u < 0.5 { from } else { to }, true);
     };
-    (walk_along(from, &ahead[..=end], u, None), false)
+    let way = &ahead[..=end];
+    let len: f32 = std::iter::once(from)
+        .chain(way.iter().copied())
+        .collect::<Vec<_>>()
+        .windows(2)
+        .map(|w| ((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2)).sqrt())
+        .sum();
+    if len > cap {
+        let chord = ((to[0] - from[0]).powi(2) + (to[1] - from[1]).powi(2)).sqrt();
+        return if chord <= cap { (lerp(from, to, u), false) } else { (if u < 0.5 { from } else { to }, true) };
+    }
+    (walk_along(from, way, u, None), false)
 }
 
 /// Motion V2: a polyline's length and its point `s` along it (clamped).
@@ -1159,7 +1174,9 @@ pub fn update_sim(
     // the most bodies standing on one street tile (a Coarse stack reads as one blob)
     let mut on_tile: HashMap<(i32, i32), usize> = HashMap::new();
     let fr_agents = sim.frames[j].agents.clone();
-    let still = |a: &Agent| prev_a.get(&a.id).is_some_and(|(p, _)| *p == a.t);
+    // Motion V3: a body new to the pair (no older place: the film's first frames, a promotion) is standing when its act is
+    // (Use, Idle, Wait, jacked in), so it takes its crowd slot at once and is drawn there from its first frame
+    let still = |a: &Agent| prev_a.get(&a.id).map_or(matches!(a.act, 1 | 2 | 3 | 7), |(p, _)| *p == a.t);
     // V4: the bodies standing on each ground-level street tile: a crowd on one tile takes slots round it (`Sim::slots`)
     let mut standing: HashMap<(i32, i32), Vec<u64>> = HashMap::new();
     for a in fr_agents.iter().filter(|a| !a.indoors && a.aboard.is_none() && a.floor == 0.0 && still(a)) {
@@ -1243,7 +1260,7 @@ pub fn update_sim(
     let subj_base: Option<[f32; 2]> = subject
         .filter(|s| fight.iter().any(|k| k != s))
         .and_then(|s| fr_agents.iter().find(|a| a.id == s && !a.indoors && a.aboard.is_none()))
-        .map(|a| prev_a.get(&a.id).map_or(a.t, |(p, ah)| along(*p, ah, a.t, u).0));
+        .map(|a| prev_a.get(&a.id).map_or(a.t, |(p, ah)| along(*p, ah, a.t, u, cfg.way_pair_max_tiles).0));
     let circle = {
         let vt = sim.lerp.map_or(0.0, |(f, t, u)| f as f64 + f64::from(u) * t.saturating_sub(f) as f64);
         let t0 = *sim.fight_t0.get_or_insert(vt);
@@ -1265,7 +1282,7 @@ pub fn update_sim(
             .iter()
             .filter(|a| fight.contains(&a.id) && Some(a.id) != subject && !a.indoors && a.aboard.is_none())
             .filter_map(|a| {
-                let t = prev_a.get(&a.id).map_or(a.t, |(p, ah)| along(*p, ah, a.t, u).0);
+                let t = prev_a.get(&a.id).map_or(a.t, |(p, ah)| along(*p, ah, a.t, u, cfg.way_pair_max_tiles).0);
                 let d = sim.metres(t, 0, false) - s_m;
                 (d.length() < 6.0 * sim.tile_m).then(|| {
                     let ang = if d.length() > 0.2 { d.y.atan2(d.x) } else { (unit2(a.id ^ 0xF16).0 + 0.5) * std::f32::consts::TAU };
@@ -1338,6 +1355,7 @@ pub fn update_sim(
                 pose: crate::people::Posing {
                     sit: if rest && a.pose == POSE_SIT { 1.0 } else { 0.0 },
                     guard: if in_fight { 1.0 } else { 0.0 },
+                    run: if in_fight { 0.0 } else { d.run },
                     ..Default::default()
                 },
             }
@@ -1469,7 +1487,7 @@ pub fn update_sim(
         }
         street += 1;
         *on_tile.entry((a.t[0] as i32, a.t[1] as i32)).or_default() += 1;
-        let (mut t, jump) = prev_a.get(&a.id).map_or((a.t, false), |(p, ah)| along(*p, ah, a.t, u));
+        let (mut t, jump) = prev_a.get(&a.id).map_or((a.t, false), |(p, ah)| along(*p, ah, a.t, u, cfg.way_pair_max_tiles));
         no_way += usize::from(jump);
         // Motion V2 (S1's stride, `OPEN-317`): each frame's place is its tile plus the way through the next step, so
         // the pair covers the same ground every tick (the tiles alone ran 4, 3, 4 a tick: a 25 % surge)
@@ -1537,7 +1555,9 @@ pub fn update_sim(
             if is_subject {
                 want = Vec2::ZERO;
                 // its mark's staged place, else the nearest foe's (the staged ring, then where the foe is drawn)
-                let near = |k: &u64| staged.get(k).map(|s| s.0).or_else(|| sim.motion.at_of(*k));
+                // V3: only a staged foe is faced (a mark that is not in the staged ring, a body struck in passing or
+                // one that walked off, is drawn elsewhere and the subject turned its back on the fight to face it)
+                let near = |k: &u64| staged.get(k).map(|s| s.0);
                 let mark = sim.fight_mark.get(&a.id).filter(|m| !side.contains(m)).and_then(near).or_else(|| {
                     fight
                         .iter()
@@ -1656,7 +1676,7 @@ pub fn update_sim(
     for v in &fr_veh {
         by_ride[v.ride as usize] += 1;
         riders += usize::from(v.riders);
-        let (t, jump) = prev_v.get(&v.id).map_or((v.t, false), |(q, ah)| along(*q, ah, v.t, u));
+        let (t, jump) = prev_v.get(&v.id).map_or((v.t, false), |(q, ah)| along(*q, ah, v.t, u, f32::MAX));
         no_way += usize::from(jump);
         let p = sim.metres(t, v.id, false);
         // heading: from the older place to the newer, else along the newer's way ahead
