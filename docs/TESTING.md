@@ -92,7 +92,8 @@ mp4 plays at true speed. In a `--play` script, `film NAME SECS [FPS]` (FPS 10) r
 within `[view] film_trace_m` of the subject: drawn x, y, z and yaw, the sim's tile and floor and the lerp's tick pair
 and u, walking, the clip, skinned or static, Full or Coarse, the screen point) and `meta.json`
 (`view/cityview/scripts/film_smoke.play`); `film NAME SECS [FPS] &` goes on to the next lines inside the film, each
-`filmat SECS` holding the line after it until the film's clock reaches SECS (a click mid-walk on film). Without
+`filmat SECS` holding the line after it until the film's clock reaches SECS (a click mid-walk on film); `goto
+~DX,DY` (Motion V2) orders a walk to a tile off the window, which `click` refuses. Without
 possessing anyone: `cargo run --release -p cityview -- --save F
 --follow N [--from T] [--play-speed X] --film NAME:SECS[:FPS] --out DIR --res 1280x720`, which records, writes and
 exits. Then `python tools/film.py DIR [--crop [PX]] [--sheet N] [--strip N]`: `film.mp4` (ffmpeg) for Dylan,

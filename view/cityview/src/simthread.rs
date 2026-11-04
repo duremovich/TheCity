@@ -60,6 +60,9 @@ pub struct Published {
     /// Motion V1: the pair is drawn on the view's clock (`Shared::vt`, a paced tick); `false`: a flat-out frame (u 1 at
     /// once) or a fight's beat (over `span_s` from `at`, the combat clock).
     pub clocked: bool,
+    /// Motion V2 (S1's `citysim::exec::stride`, `OPEN-317`): each Full walker's way through its next step at this
+    /// frame's tick (0..1, by body key; none: not on a Full walk), drawn at `tile + stride x (next - tile)`
+    pub strides: std::collections::HashMap<u64, f32>,
 }
 
 /// T2 (§ 5): the possessed body's way from a click, planned between two ticks (`player::way_now`): the tiles from
@@ -79,6 +82,8 @@ pub struct Static {
     pub north_m: f32,
     /// V7: the map's marked crossings (lights.rs draws their signals)
     pub crossings: Vec<citysim::map::MapCrossing>,
+    /// Motion V2: S2's `[combat] stir_tiles` (a fight's bystanders this near watch or run): a watcher faces the fight
+    pub stir_tiles: u16,
 }
 
 #[derive(Default)]
@@ -125,6 +130,8 @@ pub struct Shared {
     pub poses: Mutex<Vec<crate::play::Pose>>,
     pub down: Mutex<Vec<u64>>,
     pub fight: Mutex<Vec<u64>>,
+    /// Motion V2: the subject's own side in its fight now (the rest of `fight` its foes, or gone from it)
+    pub fight_side: Mutex<Vec<u64>>,
     /// M18 P5: the start menu's state (the nobodies, the player saves, the load's line, the auto-pause's reason).
     pub slice: Mutex<SlicePub>,
     /// M18 P5: the auto-pause on (the HUD's toggle; `[view] autopause` at the start), and the human's last key or
@@ -564,6 +571,7 @@ impl Shared {
             poses: Mutex::new(Vec::new()),
             down: Mutex::new(Vec::new()),
             fight: Mutex::new(Vec::new()),
+            fight_side: Mutex::new(Vec::new()),
             slice: Mutex::new(SlicePub::default()),
             autopause: AtomicBool::new(true),
             input_at: Mutex::new(Instant::now()),
@@ -675,6 +683,11 @@ fn take(world: &mut World, old: Option<EntityId>, to: EntityId, possess: bool) {
     }
     if let Some(b) = world.comp_mut::<Brain>(to) {
         b.pinned = true;
+    }
+    // S2 (`OPEN-149`): the ring runs on the new subject now, so the first frame after a load or a start draws no body
+    // in the camera Statistical or Coarse (it used to be drawn before the ring ever ran)
+    if let Some(at) = view::subject_tile(world, to) {
+        world.view_now(Some(view::ring_about(at, world.config.view.ring_half_tiles, world.map.w(), world.map.h())));
     }
     world.crossing_watch = Some([(to, Vec::new())].into());
     if possess {
@@ -990,6 +1003,7 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         tile_m: world.config.view.tile_m as f32,
         north_m: world.config.view.north_m as f32,
         crossings: world.map.crossings.clone(),
+        stir_tiles: world.config.combat.stir_tiles,
     });
     eprintln!("cityview: following {} at {rate:.4} ticks/s", who(&world, subject));
     take(&mut world, None, subject, possessed);
@@ -1346,7 +1360,7 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                 news.as_mut(),
                 &mut last_logged,
                 &mut trail,
-                (0.0, sh.now(), false),
+                (0.0, sh.now(), false, false),
             );
         }
         // V1: a reload between two ticks: the R key, --reload-at, the file's mtime moved
@@ -1427,23 +1441,45 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
         }
         // paced: free running past --from; flat out to --from and to a bench's hold
         let paced = (hold == u64::MAX || fighting || stepped > 0) && world.tick >= from;
-        let beat_s = cfg.beat_s.max(0.05);
         let bpt = world.config.combat.beats_per_tick.max(1);
         // T2 (docs/TIME_MODEL.md § 3): the speed now, the human's or auto-speed's over a stretch, ramped
         let eff = auto_speed(&world, &sh, &cfg, &mut auto, subject, possessed && !fighting);
-        let tick_rate = if fighting || stepped > 0 { 1.0 / beat_s } else { rate * eff };
-        let walking_rate = if paced && !fighting && stepped == 0 { tick_rate } else { 0.0 };
+        // Motion V2 (OPEN-313): one clock for the fight and the street. A beat lands every `[view] beat_s` real seconds
+        // or the play speed's own beat (a tick's real time over `beats_per_tick`), the slower: at 1x a tick is 10 s and
+        // a beat 1.7 s, the street walking on at 1x; faster, the fight slows the whole clock to a tick every
+        // `beats_per_tick` x `beat_s`, the street walking on in slow motion. Never a frozen street, never a faster one.
+        let beat_s = {
+            let own = if rate * eff > 0.0 { 1.0 / (rate * eff * f64::from(bpt)) } else { 0.0 };
+            cfg.beat_s.max(0.05).max(own)
+        };
+        let fight_clock = fighting || stepped > 0;
+        let tick_rate = if fight_clock { 1.0 / beat_s } else { rate * eff };
+        let walking_rate = if paced && !fight_clock {
+            tick_rate
+        } else if paced {
+            // the real time left before the beats' tick runs (the beats to come, or the last one's wait): the view's
+            // clock reaches the newest tick as it runs, so the street's walk through the pair never stops for the fight
+            let wait = next_at.saturating_duration_since(now_v).as_secs_f64().min(beat_s);
+            let left = if fighting && stepped < bpt { f64::from(bpt - stepped) * beat_s } else { wait }.max(0.25 * beat_s);
+            let gap = (world.tick as f64 - sh.vt()).max(0.0);
+            (gap / left).min((1.0 / (beat_s * f64::from(bpt))).max(rate * eff) * 1.5)
+        } else {
+            0.0
+        };
         sh.tick_rate_bits.store(walking_rate.to_bits(), Ordering::Relaxed);
-        // Motion V1: the view's clock runs at the walk's pace (no further than a tick past the newest run)
-        sh.vt_pace(walking_rate, world.tick as f64 + 1.0);
+        // Motion V1: the view's clock runs at the walk's pace (no further than a tick past the newest run; V2: in a
+        // fight no further than the newest, whose next tick waits for the beats)
+        sh.vt_pace(walking_rate, world.tick as f64 + if fight_clock { 0.0 } else { 1.0 });
         let mut beat_now: Option<Vec<citysim::systems::combat::BeatLog>> = None;
+        // Motion V2: the beats on the pacing's clock (a film's own while one runs: a fight films at its true pace)
+        let nap = Duration::from_millis(if film_t.is_some() { 1 } else { 20 });
         if fighting && stepped < bpt {
-            let now = Instant::now();
+            let now = now_v;
             // a beat at most `beat_s` off (a flat-out stretch before the fight leaves `next_at` anywhere)
             next_at = next_at.min(now + Duration::from_secs_f64(beat_s));
             if now < next_at {
                 ready();
-                std::thread::sleep((next_at - now).min(Duration::from_millis(20)));
+                std::thread::sleep((next_at - now).min(nap));
                 continue;
             }
             next_at = next_at.max(now) + Duration::from_secs_f64(beat_s);
@@ -1453,11 +1489,11 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
             }
         } else if stepped > 0 {
             // the stepped beats' tick: after the last beat's second, at once
-            let now = Instant::now();
+            let now = now_v;
             next_at = next_at.min(now + Duration::from_secs_f64(beat_s));
             if now < next_at {
                 ready();
-                std::thread::sleep((next_at - now).min(Duration::from_millis(20)));
+                std::thread::sleep((next_at - now).min(nap));
                 continue;
             }
         } else if paced && rate > 0.0 {
@@ -1670,7 +1706,7 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                 news.as_mut(),
                 &mut last_logged,
                 &mut trail,
-                (span, if stepping { sh.now() } else { t_tick_v }, paced && !stepping),
+                (span, if stepping { sh.now() } else { t_tick_v }, paced && !stepping, stepping && paced),
             );
             if !paced && !stepping {
                 let (n, secs) = acc;
@@ -1772,7 +1808,7 @@ fn publish(
     trail: &mut Trail,
     // the pair's lerp span (s) and when it starts on the pacing's clock (the tick's time); Motion V1: drawn on the
     // view's clock (a paced tick; else the view's clock is set to this frame's tick)
-    (span_s, at_v, clocked): (f64, Instant, bool),
+    (span_s, at_v, clocked, beat): (f64, Instant, bool, bool),
 ) -> String {
     let (w, h) = (world.map.w(), world.map.h());
     let at = view::subject_tile(world, subject).unwrap_or(at);
@@ -1813,9 +1849,37 @@ fn publish(
         .map(|e| e.seen.iter().copied().map(key).collect())
         .unwrap_or_default();
     *sh.fight.lock().unwrap() = fight;
+    let side: Vec<u64> = world
+        .combat
+        .engaged
+        .get(&subject)
+        .and_then(|i| world.combat.engagements.get(i))
+        .and_then(|e| e.sides.iter().find(|s| s.contains(&subject)))
+        .map(|s| s.iter().copied().map(key).collect())
+        .unwrap_or_default();
+    *sh.fight_side.lock().unwrap() = side;
     // T2 (docs/TIME_MODEL.md § 4): the older frame's ways stitched to the whole path walked since it (the ticks the
     // render thread did not take, a walk begun inside the tick, a door left); flat out or after a gap, as it was
     let base = sh.slots.lock().unwrap().latest.clone();
+    // Motion V2 (OPEN-313): a fight's beat inside a paced tick keeps the drawn pair (the older frame and the view's
+    // clock through it): the newer frame is the beat's (the fight's state; every place is the tick's own), so the
+    // street walks on through the pair while the beats land
+    if beat && let Some(b) = base.as_ref().filter(|b| b.subject == subject && b.clocked && b.frame.tick == frame.tick) {
+        trail.start(&frame);
+        let p = Arc::new(Published {
+            frame,
+            subject,
+            caption,
+            at: b.at,
+            seq: *seq,
+            from_tick: b.from_tick,
+            span_s: b.span_s,
+            clocked: true,
+            strides: b.strides.clone(),
+        });
+        sh.slots.lock().unwrap().latest = Some(p);
+        return line;
+    }
     let stitch = span_s > 0.0 && !trail.gap && base.as_ref().is_some_and(|b| b.subject == subject);
     trail.repaired = (0, 0);
     let prev = match base {
@@ -1828,6 +1892,7 @@ fn publish(
             from_tick: b.from_tick,
             span_s: b.span_s,
             clocked: b.clocked,
+            strides: b.strides.clone(),
         })),
         b => b,
     };
@@ -1853,7 +1918,8 @@ fn publish(
     if !clocked {
         sh.vt_set(frame.tick as f64);
     }
-    let p = Arc::new(Published { frame, subject, caption, at: at_v, seq: *seq, from_tick, span_s: span_s as f32, clocked });
+    let strides = frame.agents.iter().filter_map(|a| citysim::exec::stride(world, a.id).map(|s| (key(a.id), s))).collect();
+    let p = Arc::new(Published { frame, subject, caption, at: at_v, seq: *seq, from_tick, span_s: span_s as f32, clocked, strides });
     let mut s = sh.slots.lock().unwrap();
     s.prev = prev;
     s.latest = Some(p);

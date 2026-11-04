@@ -142,6 +142,25 @@ pub struct ViewCfg {
     /// Motion V1 (cityview `motion::rejoin`): a click's new way is walked from where the body is drawn, straight on
     /// to the way where it passes within this many tiles of it, else to its start (the sim's place).
     pub way_rejoin_tiles: f32,
+    /// Motion V2 (`OPEN-315`): the click way's drawn walk runs at most this many tiles past the sim's newer tile on it
+    /// (a sim that holds the body holds the drawn one) and never behind where the frames' lerp draws it (a sim run on
+    /// ahead takes the drawn body with it).
+    pub way_lead_tiles: f32,
+    /// Motion V2: walkers on one tile going one way walk on lanes `lane_gap_m` apart across the way (at most
+    /// `lane_count`, a lane a body in id order: none shares one), the lane's offset eased like the crowd's slots.
+    pub lane_gap_m: f32,
+    pub lane_count: u16,
+    /// Motion V2 (Dylan 2026-11-04: procedural poses on the rig in code): a body sitting (a Use that sits, cityview
+    /// `sim.rs` `SITS`) sits on the floor with its hips this high (m), legs out.
+    pub sit_hips_m: f32,
+    /// Motion V2 (`OPEN-314`): the subject's fight on the street: each foe drawn `fight_gap_m` from the subject
+    /// (striking range), facing it, circling at `fight_circle_deg_s`; the subject faces the last body it struck or
+    /// was struck by.
+    pub fight_gap_m: f32,
+    pub fight_circle_deg_s: f32,
+    /// Motion V2: a fighter staged off its sim place closes in at this (m/s, x the square root of the play speed; a
+    /// joiner can stand tiles off in the sim).
+    pub fight_close_m_s: f32,
     /// The view milestone V6 (`OPEN-270`): `shadow --record`'s ring half side in tiles (each pick's surroundings
     /// a tick, as the shadow's world has them).
     pub record_half_tiles: u16,
@@ -309,6 +328,13 @@ impl Default for ViewCfg {
             walk_clip_rate_max: 6.0,
             turn_deg_s: 360.0,
             way_rejoin_tiles: 1.5,
+            way_lead_tiles: 1.0,
+            lane_gap_m: 0.7,
+            lane_count: 5,
+            sit_hips_m: 0.12,
+            fight_gap_m: 1.0,
+            fight_circle_deg_s: 8.0,
+            fight_close_m_s: 4.0,
             record_half_tiles: 48,
             record_gzip_level: 6,
             play_speeds: vec![1.0, 2.0, 5.0, 20.0, 60.0],

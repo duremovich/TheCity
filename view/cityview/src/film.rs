@@ -286,6 +286,9 @@ fn film_post(
             clip = "lying";
         } else if b.lean.abs() > 1e-4 || b.nudge.length_squared() > 1e-8 {
             clip = "fight_pose";
+        } else if b.pose.sit >= 0.5 {
+            // Motion V2: a body sitting (the idle under the rig's sit, or the static sit mesh)
+            clip = "sitting";
         }
         // Motion V1: the rate the rig plays the clip at (the walk's from the drawn ground speed; a static pose 0)
         let clip_rate = match clip {
