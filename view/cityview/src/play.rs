@@ -53,7 +53,8 @@
 //! T2 (docs/TIME_MODEL.md, the clock): the speed row reads multiples of the walk-matched rate (1x a body walks
 //! `[view] walk_m_s`), on one line, and while auto-speed runs why ("auto: asleep, 600x"); auto-speed's tick box sits
 //! by the auto-pause's in the HUD and in the Esc menu. Script: `live SECS` (the sim runs paced at the speed for that
-//! many real seconds, auto-speed and all, where the other lines hold it to their ticks), `autospeed on|off`, `click
+//! many real seconds, auto-speed and all, where the other lines hold it to their ticks), `autospeed on|off`, Motion V2's `goto TX,TY` / `goto ~DX,DY` (a street click's order for that tile wherever
+//! it lies, on the window or off it), `click
 //! ~DX,DY` (the tile that far from the subject's).
 //!
 //! Films (film.rs, docs/TESTING.md "Filming motion"): `film NAME SECS [FPS]` runs the sim live at the play speed for
@@ -539,6 +540,27 @@ fn run_script(
                 Ok(px) => send_pick(px, cam, &mut p, &sim, &stream, view.zoom, "script click"),
                 Err(e) => info!("play script click ({}, {}): not on the screen ({e:?})", t[0], t[1]),
             }
+        }
+        // Motion V2: `goto TX,TY` / `goto ~DX,DY`: a street click's order for that tile, sent as the click sends it
+        // (`UiCmd::Click`), whether or not the tile is on the window (a far walk a script could not click at zoom 40)
+        "goto" => {
+            let (rel, arg) = arg.strip_prefix('~').map_or((false, arg), |a| (true, a));
+            let (x, y) = arg.split_once(',').expect("goto TX,TY");
+            let (mut tx, mut ty): (i32, i32) = (x.trim().parse().expect("goto TX"), y.trim().parse().expect("goto TY"));
+            if rel {
+                let Some(me) = sim.subject.and_then(|k| sim.frames.last()?.agents.iter().find(|a| a.id == k).map(|a| a.t)) else {
+                    warn!("play script goto ~{arg}: no subject drawn");
+                    return;
+                };
+                (tx, ty) = (me[0] as i32 + tx, me[1] as i32 + ty);
+            }
+            let t = TilePos::new(
+                u16::try_from(tx).unwrap_or_else(|_| panic!("goto: tile x {tx} off the map")),
+                u16::try_from(ty).unwrap_or_else(|_| panic!("goto: tile y {ty} off the map")),
+            );
+            info!("play script goto: the tile ({tx}, {ty})");
+            p.menu_open = None;
+            p.shared.send(UiCmd::Click(t, false));
         }
         // M18 P5h: `bld near hostel|corp|city`: the nearest such desk's menu (`housing::script_target`)
         "bld" if arg.starts_with("near") => {

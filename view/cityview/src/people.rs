@@ -15,6 +15,11 @@
 //!   first frame, the walk's mid-stride), CPU-skinned once at startup from a posed template (`bake_poses`) and drawn
 //!   as a plain mesh, so Bevy batches every body of a look into one instanced draw. No body casts a shadow; the atlas
 //!   glows a little (`[view] people_glow`), or the night street loses the crowd.
+//! - **Poses** (Motion V2; Dylan 2026-11-04: procedural poses in code until real clips): `pose_bones` lays a `Posing`
+//!   over the clip on each rig's bones, between the animation and the transform propagation: sitting on the floor
+//!   (a sitting Use, jacked in: the hips at `[view] sit_hips_m`, legs out, hands on the thighs), the fight's guard,
+//!   a strike and a stagger; lying (asleep, knocked out, downed) is the whole body laid flat. The static LOD bakes the
+//!   sit beside the idle and the walk (`bake_poses`).
 //! - **The subject** is the occlusion's player stand-in (occ.rs: its cut and silhouette follow that entity); it
 //!   takes the subject's look (`dress_standin`) and its walk / idle, and `Sim::people` leaves it out.
 //! - The glbs face +z (south at heading 0): drawn turned half round. Which bodies are drawn at all (the indoor rule:
@@ -76,15 +81,73 @@ const NPCS: [(&str, bool, Kit); 20] = [
     ("npc20_street_medic", false, Kit::Medic),
 ];
 
-/// Poses of the static LOD: 0 the idle's first frame, 1 the walk mid-stride; the seek time into the clip (s).
-const POSE_SEEK: [f32; 2] = [0.0, 0.27];
+/// Poses of the static LOD: 0 the idle's first frame, 1 the walk mid-stride, 2 (Motion V2) sitting on the floor (the
+/// idle's first frame with `pose_bones`' sit); the clip each is seeked in and the seek time (s).
+const POSE_SEEK: [f32; 3] = [0.0, 0.27, 0.0];
+const POSE_CLIP: [usize; 3] = [IDLE, WALK, IDLE];
 /// The sim's child (under 18: no Brain, CLAUDE.md's hard rule) wears a street kid's look
 const ADULT_AGE: u32 = 18;
 const IDLE: usize = 0;
 const WALK: usize = 1;
+const SIT: usize = 2;
+
+/// Motion V2: the rig's bones the procedural poses move (`pose_bones`), and each one's parent among them (`None`: the
+/// rig node, `base_body_rig`). Mixamo's: a bone's +y runs along it; the character faces +z, its left is +x.
+const BONES: [&str; 15] = [
+    "mixamorig:Hips",
+    "mixamorig:Spine",
+    "mixamorig:Spine1",
+    "mixamorig:Spine2",
+    "mixamorig:LeftShoulder",
+    "mixamorig:LeftArm",
+    "mixamorig:LeftForeArm",
+    "mixamorig:RightShoulder",
+    "mixamorig:RightArm",
+    "mixamorig:RightForeArm",
+    "mixamorig:LeftUpLeg",
+    "mixamorig:LeftLeg",
+    "mixamorig:RightUpLeg",
+    "mixamorig:RightLeg",
+    "mixamorig:Neck",
+];
+const BONE_PARENT: [Option<usize>; 15] =
+    [None, Some(0), Some(1), Some(2), Some(3), Some(4), Some(5), Some(3), Some(7), Some(8), Some(0), Some(10), Some(0), Some(12), Some(3)];
+const HIPS: usize = 0;
+const SPINE: usize = 1;
+const L_ARM: usize = 5;
+const L_FORE: usize = 6;
+const R_ARM: usize = 8;
+const R_FORE: usize = 9;
+const L_THIGH: usize = 10;
+const L_SHIN: usize = 11;
+const R_THIGH: usize = 12;
+const R_SHIN: usize = 13;
+
+/// Motion V2: on a rigged NPC (its `base_body_rig` node): the bones `pose_bones` moves (`BONES`, found by name).
+#[derive(Component)]
+pub struct Bones([Option<Entity>; 15]);
+
+/// Motion V2 (Dylan 2026-11-04: procedural poses in code until real clips): the pose laid over the clip playing,
+/// each a weight 0..1: sitting on the floor (`[view] sit_hips_m`), the fight's guard (fists up), a strike (the right
+/// arm out, the spine leaning in by `lunge_deg`) and a stagger (the spine back, the arms thrown out). Lying is the
+/// whole body's turn (`BodyDraw::tilt`).
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+pub struct Posing {
+    pub sit: f32,
+    pub guard: f32,
+    pub strike: f32,
+    pub stagger: f32,
+    pub lean: f32,
+}
+
+impl Posing {
+    fn any(&self) -> bool {
+        self.sit + self.guard + self.strike + self.stagger > 1e-3
+    }
+}
 
 /// One body to draw this frame (sim.rs fills `Sim::people`).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct BodyDraw {
     pub id: u64,
     /// Feet, city metres (x east, y north, z up)
@@ -103,12 +166,25 @@ pub struct BodyDraw {
     pub lean: f32,
     pub nudge: Vec2,
     pub lying: bool,
+    /// Motion V2: the procedural pose on the rig's bones (`Posing`: sitting, the fight's guard, a strike, a stagger)
+    pub pose: Posing,
 }
 
 impl BodyDraw {
     /// C5: the pose's turn on the body's own axes (after its yaw): a lean about its right-hand axis, or flat on its back.
+    /// Motion V2: a static (unrigged) body's; a rigged one leans in its spine (`rig_tilt`).
     pub fn tilt(&self) -> Quat {
         if self.lying { Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2) } else { Quat::from_rotation_x(self.lean) }
+    }
+
+    /// Motion V2: a rigged body's whole turn: lying flat only (a lunge's lean is the spine's, `pose_bones`).
+    pub fn rig_tilt(&self) -> Quat {
+        if self.lying { Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2) } else { Quat::IDENTITY }
+    }
+
+    /// Motion V2: the bones' pose (`Posing`), a lying body's none (its whole turn lays it down as it stands).
+    pub fn posing(&self) -> Posing {
+        if self.lying { Posing::default() } else { Posing { lean: self.lean, ..self.pose } }
     }
 
     /// C5: the feet with the pose's step (and a lying body raised off the floor).
@@ -125,6 +201,8 @@ pub struct PeopleCfg {
     pub child_scale_min: f32,
     pub child_full_age: u32,
     pub glow: f32,
+    /// Motion V2: a body sitting on the floor has its hips this high (m)
+    pub sit_hips_m: f32,
 }
 
 impl PeopleCfg {
@@ -135,6 +213,7 @@ impl PeopleCfg {
             child_scale_min: v.child_scale_min,
             child_full_age: v.child_full_age.max(1),
             glow: v.people_glow,
+            sit_hips_m: v.sit_hips_m,
         }
     }
 }
@@ -152,7 +231,7 @@ pub struct People {
     clips: Handle<Gltf>,
     graph: Option<(Handle<AnimationGraph>, [AnimationNodeIndex; 2])>,
     /// Per look and pose: the posed static mesh; per look: its material
-    posed: Vec<[Option<Handle<Mesh>>; 2]>,
+    posed: Vec<[Option<Handle<Mesh>>; 3]>,
     mats: Vec<Option<Handle<StandardMaterial>>>,
     /// The glb's atlas material -> its glowing copy (the animated bodies swap theirs on rigging)
     glow: HashMap<AssetId<StandardMaterial>, Handle<StandardMaterial>>,
@@ -172,7 +251,7 @@ impl People {
             gltfs: vec![],
             clips: Handle::default(),
             graph: None,
-            posed: vec![[None, None]; NPCS.len()],
+            posed: vec![[None, None, None]; NPCS.len()],
             mats: vec![None; NPCS.len()],
             glow: HashMap::new(),
             templates: false,
@@ -199,6 +278,7 @@ impl People {
         }
         match self.far.get(&id) {
             Some((_, _, WALK)) => ("static", "walk_pose"),
+            Some((_, _, SIT)) => ("static", "sit_pose"),
             Some(_) => ("static", "idle_pose"),
             None => ("none", "none"),
         }
@@ -273,7 +353,11 @@ pub fn rig_on_ready(
         return;
     };
     let mut stack = vec![(rig, vec![names.get(rig).unwrap().clone()])];
+    let mut bones = [None; BONES.len()];
     while let Some((e, path)) = stack.pop() {
+        if let Some(i) = path.last().and_then(|n| BONES.iter().position(|b| *b == n.as_str())) {
+            bones[i] = Some(e);
+        }
         commands.entity(e).insert((AnimationTargetId::from_names(path.iter()), AnimatedBy(rig)));
         for c in children.get(e).into_iter().flatten() {
             if let Ok(m) = meshes.get(*c) {
@@ -289,8 +373,96 @@ pub fn rig_on_ready(
             }
         }
     }
-    commands.entity(rig).insert((AnimationPlayer::default(), AnimationGraphHandle(graph)));
+    commands.entity(rig).insert((AnimationPlayer::default(), AnimationGraphHandle(graph), Bones(bones), Posing::default()));
     commands.entity(ev.entity).insert(Rigged(rig));
+}
+
+/// Motion V2: the procedural poses (`Posing`) laid on each rig's bones after the clip has set them this frame and
+/// before the transforms propagate (PostUpdate, between `AnimationSystems` and `TransformSystems::Propagate`). Each
+/// bone is turned in the character's frame (the rig node's, +y up, facing +z) and written back as its local
+/// rotation: an aimed bone (a thigh forward, an arm out) turns its +y toward the aim by the pose's weight, a leaning
+/// one turns about the character's left-right axis. The rig's own `Transform` and the hips' bone are read as the
+/// clip left them, so the pose rides the idle's breathing and the walk's stride.
+pub fn pose_bones(rigs: Query<(Entity, &Bones, &Posing)>, mut tfs: Query<&mut Transform>, cfg: Res<People>) {
+    for (rig, bones, pose) in rigs.iter() {
+        if !pose.any() && pose.lean.abs() < 1e-4 {
+            continue;
+        }
+        let Ok(rt) = tfs.get(rig).map(|t| *t) else { continue };
+        let Some(es) = bones.0.iter().copied().collect::<Option<Vec<Entity>>>() else { continue };
+        let mut local: Vec<Transform> = es.iter().map(|e| tfs.get(*e).map(|t| *t).unwrap_or_default()).collect();
+        // the bones' rotations in the character's frame, parents first (BONES is in that order)
+        let global = |local: &[Transform]| {
+            let mut g = [Quat::IDENTITY; BONES.len()];
+            for i in 0..BONES.len() {
+                g[i] = BONE_PARENT[i].map_or(rt.rotation, |p| g[p]) * local[i].rotation;
+            }
+            g
+        };
+        let parent = |g: &[Quat; BONES.len()], i: usize| BONE_PARENT[i].map_or(rt.rotation, |p| g[p]);
+        // bone `i`'s +y turned toward `w` (the character's frame) by `k`
+        let aim = |local: &mut [Transform], i: usize, w: Vec3, k: f32| {
+            if k <= 1e-4 {
+                return;
+            }
+            let g = global(local);
+            let gi = g[i];
+            let d = gi * Vec3::Y;
+            let to = d.lerp(w.normalize(), k.min(1.0)).normalize_or(d);
+            let q = Quat::from_rotation_arc(d, to);
+            local[i].rotation = (parent(&g, i).inverse() * (q * gi)).normalize();
+        };
+        // bone `i` turned about the character's left-right axis (+: its top forward)
+        let lean = |local: &mut [Transform], i: usize, a: f32| {
+            if a.abs() <= 1e-4 {
+                return;
+            }
+            let g = global(local);
+            local[i].rotation = (parent(&g, i).inverse() * (Quat::from_rotation_x(a) * g[i])).normalize();
+        };
+        let k = pose.sit.min(1.0);
+        if k > 0.0 {
+            // the hips lowered to `sit_hips_m` (the rig node's frame: its turn and scale), the legs out in front, the
+            // knees up a little, the hands on the thighs
+            let s = rt.scale.x.max(1e-6);
+            let up = (rt.rotation * (local[HIPS].translation * s)).y;
+            let drop = (up - cfg.cfg.sit_hips_m).max(0.0) * k;
+            local[HIPS].translation += rt.rotation.inverse() * Vec3::new(0.0, -drop, 0.0) / s;
+            lean(&mut local, SPINE, -0.12 * k);
+            aim(&mut local, L_THIGH, Vec3::new(0.18, 0.28, 1.0), k);
+            aim(&mut local, R_THIGH, Vec3::new(-0.18, 0.28, 1.0), k);
+            aim(&mut local, L_SHIN, Vec3::new(0.1, -0.4, 1.0), k);
+            aim(&mut local, R_SHIN, Vec3::new(-0.1, -0.4, 1.0), k);
+            aim(&mut local, L_ARM, Vec3::new(0.25, -1.0, 0.45), k);
+            aim(&mut local, R_ARM, Vec3::new(-0.25, -1.0, 0.45), k);
+            aim(&mut local, L_FORE, Vec3::new(0.05, -0.35, 1.0), k);
+            aim(&mut local, R_FORE, Vec3::new(-0.05, -0.35, 1.0), k);
+        }
+        // the fight: the guard (fists up before the face), a strike (the right arm straight at the mark, the spine in
+        // by the lean), a stagger (the spine back, the arms thrown out)
+        let g = pose.guard.min(1.0) * (1.0 - pose.strike.min(1.0)) * (1.0 - pose.stagger.min(1.0));
+        aim(&mut local, L_ARM, Vec3::new(0.35, -0.55, 0.75), pose.guard.min(1.0) * (1.0 - pose.stagger.min(1.0)));
+        aim(&mut local, L_FORE, Vec3::new(-0.35, 0.9, 0.35), pose.guard.min(1.0) * (1.0 - pose.stagger.min(1.0)));
+        aim(&mut local, R_ARM, Vec3::new(-0.35, -0.55, 0.75), g);
+        aim(&mut local, R_FORE, Vec3::new(0.35, 0.9, 0.35), g);
+        if pose.strike > 0.0 {
+            lean(&mut local, SPINE, pose.lean.max(0.0));
+            aim(&mut local, R_ARM, Vec3::new(0.12, 0.12, 1.0), pose.strike);
+            aim(&mut local, R_FORE, Vec3::new(0.12, 0.12, 1.0), pose.strike);
+        }
+        if pose.stagger > 0.0 {
+            lean(&mut local, SPINE, pose.lean.min(0.0));
+            aim(&mut local, L_ARM, Vec3::new(1.0, -0.2, -0.3), pose.stagger);
+            aim(&mut local, R_ARM, Vec3::new(-1.0, -0.2, -0.3), pose.stagger);
+        }
+        for (e, t) in es.iter().zip(local) {
+            if let Ok(mut m) = tfs.get_mut(*e)
+                && *m != t
+            {
+                *m = t;
+            }
+        }
+    }
 }
 
 /// Once the glbs are in: the clips' graph, then a template per look and pose (off-world, under the ground).
@@ -312,7 +484,7 @@ pub fn prepare_people(
     people.graph = Some((graphs.add(graph), [idx[0], idx[1]]));
     for look in 0..NPCS.len() {
         let scene = gltfs.get(&people.gltfs[look]).unwrap().scenes[0].clone();
-        for pose in [IDLE, WALK] {
+        for pose in [IDLE, WALK, SIT] {
             commands
                 .spawn((
                     WorldAssetRoot(scene.clone()),
@@ -332,7 +504,7 @@ pub fn bake_poses(
     mut commands: Commands,
     mut people: ResMut<People>,
     mut templates: Query<(Entity, &mut Template, &Rigged, &GlobalTransform)>,
-    mut players: Query<&mut AnimationPlayer>,
+    mut players: Query<(&mut AnimationPlayer, &mut Posing)>,
     children: Query<&Children>,
     skinned: Query<(&SkinnedMesh, &Mesh3d, &MeshMaterial3d<StandardMaterial>)>,
     globals: Query<&GlobalTransform>,
@@ -346,10 +518,12 @@ pub fn bake_poses(
     let Some((_, idx)) = people.graph.clone() else { return };
     for (e, mut t, rigged, root) in templates.iter_mut() {
         t.frames += 1;
-        if let Ok(mut p) = players.get_mut(rigged.0)
-            && !p.is_playing_animation(idx[t.pose])
+        if let Ok((mut p, mut posing)) = players.get_mut(rigged.0)
+            && !p.is_playing_animation(idx[POSE_CLIP[t.pose]])
         {
-            p.play(idx[t.pose]).set_speed(0.0).seek_to(POSE_SEEK[t.pose]);
+            p.play(idx[POSE_CLIP[t.pose]]).set_speed(0.0).seek_to(POSE_SEEK[t.pose]);
+            // Motion V2: the sitting pose is the idle's frame with the bones posed (`pose_bones`)
+            posing.sit = if t.pose == SIT { 1.0 } else { 0.0 };
             t.frames = 0;
         }
         // the clip applies in PostUpdate and the transforms propagate after it: a few frames is plenty
@@ -381,9 +555,9 @@ pub fn bake_poses(
         }
         commands.entity(e).despawn();
     }
-    if people.posed.iter().all(|p| p[0].is_some() && p[1].is_some()) {
+    if people.posed.iter().all(|p| p.iter().all(Option::is_some)) {
         people.ready = true;
-        info!("people: {} looks posed (idle, walk)", NPCS.len());
+        info!("people: {} looks posed (idle, walk, sit)", NPCS.len());
     }
 }
 
@@ -450,7 +624,7 @@ pub fn draw_people(
     mut sim: ResMut<Sim>,
     gltfs: Res<Assets<Gltf>>,
     rigged: Query<&Rigged>,
-    mut players: Query<&mut AnimationPlayer>,
+    mut players: Query<(&mut AnimationPlayer, &mut Posing)>,
     mut q: Query<(&mut Transform, &mut Visibility, Option<&mut Mesh3d>), Without<Template>>,
 ) {
     if sim.capsules {
@@ -481,10 +655,12 @@ pub fn draw_people(
         let s = people.scale(b.age);
         n_kids += usize::from(s < 1.0);
         let f = b.feet();
-        let tf = Transform::from_translation(bv(f.x, f.y, f.z))
-            .with_rotation(Quat::from_rotation_y(b.yaw + std::f32::consts::PI) * b.tilt())
-            .with_scale(Vec3::splat(s));
-        let pose = if b.walking { WALK } else { IDLE };
+        let at = Transform::from_translation(bv(f.x, f.y, f.z)).with_scale(Vec3::splat(s));
+        let turn = Quat::from_rotation_y(b.yaw + std::f32::consts::PI);
+        let tf = at.with_rotation(turn * b.tilt());
+        let clip = if b.walking { WALK } else { IDLE };
+        // Motion V2: a static body sitting wears the sit's baked mesh
+        let pose = if b.pose.sit >= 0.5 && !b.walking && !b.lying { SIT } else { clip };
         if near_now[i] {
             n_near += 1;
             seen_near.push(b.id);
@@ -494,12 +670,17 @@ pub fn draw_people(
                 Near { e, playing: None }
             });
             if let Ok((mut t, _, _)) = q.get_mut(n.e) {
-                *t = tf;
+                // Motion V2: a rigged body leans in its spine (`pose_bones`), not from its feet
+                *t = at.with_rotation(turn * b.rig_tilt());
             }
             if let Ok(r) = rigged.get(n.e)
-                && let Ok(mut p) = players.get_mut(r.0)
+                && let Ok((mut p, mut posing)) = players.get_mut(r.0)
             {
-                play(&mut p, &idx, pose, b.id, &mut n.playing, b.clip_rate);
+                play(&mut p, &idx, clip, b.id, &mut n.playing, b.clip_rate);
+                let want = b.posing();
+                if *posing != want {
+                    *posing = want;
+                }
             }
             continue;
         }
@@ -564,7 +745,7 @@ pub fn dress_standin(
     sim: Res<Sim>,
     gltfs: Res<Assets<Gltf>>,
     bodies: Query<(Entity, &Body, Option<&Rigged>)>,
-    mut players: Query<&mut AnimationPlayer>,
+    mut players: Query<(&mut AnimationPlayer, &mut Posing)>,
     mut playing: Local<Option<usize>>,
     mut observed: Local<bool>,
 ) {
@@ -590,9 +771,13 @@ pub fn dress_standin(
             continue;
         }
         if let Some(r) = rig
-            && let Ok(mut p) = players.get_mut(r.0)
+            && let Ok((mut p, mut posing)) = players.get_mut(r.0)
         {
             play(&mut p, &idx, if b.walking { WALK } else { IDLE }, b.id, &mut playing, b.clip_rate);
+            let want = b.posing();
+            if *posing != want {
+                *posing = want;
+            }
         }
     }
 }
@@ -606,10 +791,16 @@ pub fn add(app: &mut App, capsules: bool) {
         sim.capsules = capsules;
         sim.cfg = view.clone();
     }
-    app.insert_resource(People::new(PeopleCfg::from_view(&view))).add_systems(Startup, setup_people).add_systems(
-        Update,
-        (prepare_people, bake_poses, (draw_people, dress_standin).after(crate::sim::update_sim), frame_stats.after(draw_people)),
-    );
+    app.insert_resource(People::new(PeopleCfg::from_view(&view)))
+        .add_systems(Startup, setup_people)
+        .add_systems(
+            Update,
+            (prepare_people, bake_poses, (draw_people, dress_standin).after(crate::sim::update_sim), frame_stats.after(draw_people)),
+        )
+        .add_systems(
+            PostUpdate,
+            pose_bones.after(bevy::app::AnimationSystems).before(bevy::transform::TransformSystems::Propagate),
+        );
 }
 
 /// The frame time's median and 90th percentile over the last 240 frames, on the sim's caption (a bench's shot line

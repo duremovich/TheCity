@@ -128,6 +128,7 @@ fn run(a: RecArgs, sh: Arc<Shared>) {
                 from_tick,
                 span_s,
                 clocked: false,
+                strides: Default::default(),
             });
             s.prev = s.latest.take();
             s.latest = Some(p);

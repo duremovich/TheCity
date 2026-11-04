@@ -6613,6 +6613,19 @@ turn_deg_s = 360.0                 # a body turns this fast at 1x (x the square 
                                    # rounds a corner in a frame or two) toward the way it walks (standing: its heading)
 way_rejoin_tiles = 1.5             # a click's way is walked from where the body is drawn (the sim's place is up to a tick
                                    # ahead), straight on to the way where it passes this near, else to its start
+# Motion V2 (the view's second motion pass; films v2_*): the click way, lanes, poses, the fight.
+way_lead_tiles = 1.0               # OPEN-315: the click way's drawn walk runs at most this many tiles past the sim's newer
+                                   # tile on it (a sim holding the body holds the drawn one) and never behind the frames'
+                                   # lerp (a sim run on ahead, flat out to a script's line, takes the drawn body with it)
+lane_gap_m = 0.7                   # walkers on one tile going one way walk on lanes this far apart across the way, a lane
+lane_count = 5                     # each in id order (at most this many lanes; none shares one): no two march in lockstep
+                                   # inside each other (V1's 7990 and 24801); the lane eases in like a crowd's slot
+sit_hips_m = 0.12                  # a body sitting (a sitting Use: rest, drink, eat, beg, jacked in) sits on the floor, its
+                                   # hips this high, legs out (a procedural pose on the rig, people.rs pose_bones; no chairs)
+fight_gap_m = 1.0                  # OPEN-314: the subject's fight on the street: each foe drawn this far from the subject
+fight_circle_deg_s = 8.0           # (striking range), facing it, circling it this fast; the subject faces its last mark
+fight_close_m_s = 4.0              # a fighter drawn off its sim place closes in this fast (x the square root of the play
+                                   # speed: a run; the sim leaves a joiner tiles off, 24 m in the v2 fight film)
 # The view milestone V6 (OPEN-270): `citysim-cli shadow --record` writes each pick's ring a tick (`citysim::view`'s
 # recording, city-simrec/0.1: one gzip'd JSON-lines file per pick per diary day, a frame a tick as a delta on the last)
 # for cityview `--sim FILE` to play. The ring is the pick's surroundings as the shadow's world has them (no view set).

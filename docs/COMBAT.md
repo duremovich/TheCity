@@ -188,7 +188,12 @@ existing Rescue).
 
 **The clock.** While the possessed body is in an engagement, cityview steps it a beat every `[view] beat_s` between
 two ticks (C5; C4 ran the whole sim at `combat_speed` with the player's fight a beat a tick), so a 10 s beat plays in
-about a second. Space pauses the game, and normal speed comes back when
+about a second. Motion V2 (`OPEN-313`): one clock for the fight and the street. A beat lands every `beat_s` or the
+play speed's own beat (a tick's real time over `beats_per_tick`: 1.7 s at 1x), whichever is slower, and the view's
+clock runs through the tick pair at that pace, so every bystander walks on (in slow motion above 1x) while the beats
+land; a beat's frame keeps the drawn pair (simthread `publish`). The fight is staged on the street round the possessed
+body (`[view] fight_gap_m`, `fight_circle_deg_s`): each foe at striking range facing it, the guard up, a swing a step
+in with the right arm out and the spine in, a hit a stagger back (people.rs `Posing`). Space pauses the game, and normal speed comes back when
 the engagement ends. The view replays the beat log (a swing, a hit or a miss, the region, a dodge, a stagger, someone
 fleeing) as animation cues and as story-log lines.
 

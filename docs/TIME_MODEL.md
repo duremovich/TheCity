@@ -100,7 +100,8 @@ same. A click's verb (buy, talk, apply) lands at the tick the body arrives. This
 ## 6. What does not change
 
 The tick (a game minute); the hours of a day and every schedule in them; the combat clock (`[view] beat_s`, a beat a
-real second while the possessed body fights, slower than 1x's tick); the Statistical tier's logic (its tables regen
+real second while the possessed body fights, or the play speed's own beat when that is slower: Motion V2, `OPEN-313`, the
+street walks on through a fight on the same clock, at 1x at 1x and faster speeds slowed with the fight); the Statistical tier's logic (its tables regen
 from Full as ever); the 2k and 20k tiers.
 
 ## The phases
