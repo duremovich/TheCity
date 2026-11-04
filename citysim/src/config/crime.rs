@@ -632,8 +632,11 @@ pub struct LitterCfg {
     pub enabled: bool,
     /// Lost by every tile in 1..=254 at midnight.
     pub decay: u8,
-    /// Whole walker steps (`[exec] step_units` each since T1; ticks before round 9 Y4) added to a Full mover's next step per band (clean, littered, trashed, heaped).
-    pub step_ticks: [u8; 4],
+    /// S1 (`OPEN-317`): the share of a walker step (`[exec] step_units`) added to a Full mover's next step per band
+    /// (clean, littered, trashed, heaped). Whole steps before (`step_ticks` [0, 0, 1, 2]): a heap's walker crawled
+    /// at a third of the pace on screen.
+    #[serde(alias = "step_ticks")]
+    pub step_share: [f32; 4],
     /// A Coarse walk is `1 + timed_mult × district litter` longer.
     pub timed_mult: f32,
     pub sleep_penalty: f32,
@@ -664,7 +667,7 @@ impl LitterCfg {
         LitterCfg {
             enabled: false,
             decay: 1,
-            step_ticks: [0, 0, 1, 2],
+            step_share: [0.0, 0.0, 0.2, 0.4],
             timed_mult: 0.5,
             sleep_penalty: 0.15,
             mood: 0.2,

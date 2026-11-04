@@ -89,10 +89,30 @@ pub struct Hop {
 
 const NO_HOP: Hop = Hop { ticks: UNREACHABLE, line: 0, forward: true, pos: 0, off: 0 };
 
+/// S1 (`OPEN-309`): a stop's waiting place on its station's deck and the
+/// way up to it from the street (derived with the stops, not saved).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Platform {
+    /// The stairs' or the lift's foot on the way (level 0).
+    pub foot: TilePos,
+    /// From the foot: the stairs' (lift's) top, then the platform's points
+    /// to the waiting place (the last), each `(tile, level)`.
+    pub way: Vec<(TilePos, u8)>,
+}
+
+impl Platform {
+    /// Where a rider waits, boards and alights: `(tile, level)`.
+    pub fn wait(&self) -> (TilePos, u8) {
+        self.way.last().copied().unwrap_or((self.foot, 0))
+    }
+}
+
 /// The derived network (not saved).
 #[derive(Clone, Debug, Default)]
 pub struct Net {
     pub stops: Vec<TilePos>,
+    /// S1: each stop's platform (`None`: the wait on the stop tile).
+    pub platforms: Vec<Option<Platform>>,
     pub lines: Vec<NetLine>,
     /// The lines open when `table` was built.
     pub open: Vec<bool>,

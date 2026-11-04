@@ -87,6 +87,31 @@ pub(super) fn emigrate_step(world: &mut World, id: EntityId) {
 
 /// Run the current step's state machine for one tick.
 pub(crate) fn step_agent(world: &mut World, id: EntityId) {
+    step_agent_at(world, id, false);
+}
+
+/// S1 (`OPEN-311`): a segment's end re-starts the step at once and walks on
+/// in the same tick, its time left carried (`resume`, step units): once a
+/// tick (`step_agent_at`'s `chained`), never a loop.
+fn chain_segment(world: &mut World, id: EntityId, resume: Option<u64>) {
+    step_agent_at(world, id, true);
+    let upt = world.config.exec.units_per_tick().max(1);
+    let tick = world.tick;
+    let Some(q) = resume else { return };
+    let Some(b) = world.comp_mut::<Brain>(id) else { return };
+    // Only a walk the re-start has just begun (a ride, a cab, a failure:
+    // as they are).
+    let ExecState::Goto { next_move_tick, carry_q, .. } = &mut b.exec else { return };
+    if *next_move_tick != tick || *carry_q != 0 {
+        return;
+    }
+    let q = q.max(tick * upt);
+    *next_move_tick = q / upt;
+    *carry_q = (q % upt) as u32;
+    step_agent_at(world, id, true);
+}
+
+fn step_agent_at(world: &mut World, id: EntityId, chained: bool) {
     let Some(brain) = world.comp::<Brain>(id) else { return };
     // M18 P4: an offer to a body the human drives that ran out says so.
     if brain.player.as_ref().is_some_and(|p| p.offers.iter().any(|o| o.until <= world.tick)) {
@@ -301,12 +326,20 @@ pub(crate) fn step_agent(world: &mut World, id: EntityId) {
     match result {
         StepResult::Running => {}
         StepResult::Done => {
-            // The pre-view pass phase 5: a segment's end re-starts the step.
-            if matches!(step.action, ActionKind::GoTo(_) | ActionKind::FleeToHome)
-                && !world.segments.is_empty()
-                && legs::segment_done(world, id)
-            {
-                return;
+            // The pre-view pass phase 5: a segment's end re-starts the step
+            // (S1, `OPEN-311`: now, walking on with the tick's time left).
+            if matches!(step.action, ActionKind::GoTo(_) | ActionKind::FleeToHome) && !world.segments.is_empty() {
+                let upt = world.config.exec.units_per_tick();
+                let resume = world.comp::<Brain>(id).and_then(|b| match &b.exec {
+                    ExecState::Goto { next_move_tick, carry_q, .. } => Some(next_move_tick * upt + u64::from(*carry_q)),
+                    _ => None,
+                });
+                if legs::segment_done(world, id) {
+                    if !chained {
+                        chain_segment(world, id, resume);
+                    }
+                    return;
+                }
             }
             // Transit T12: a leg of a ride ended (the board stop, the alight
             // stop), not the GoTo.
