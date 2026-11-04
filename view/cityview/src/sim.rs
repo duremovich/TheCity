@@ -161,6 +161,8 @@ pub struct Sim {
     /// T2 (§ 4): this frame's bodies whose way ahead did not reach their newer place (drawn as a jump, not a slide
     /// through the block), for the HUD
     pub no_way: usize,
+    /// The film (film.rs): the lerp this frame drew, the older frame's tick, the newer's and `u` between them
+    pub lerp: Option<(u64, u64, f32)>,
 }
 
 /// A 64-bit mix (splitmix64's finaliser): the per-id picks.
@@ -476,6 +478,7 @@ impl Sim {
             way: None,
             way_seen: 0,
             no_way: 0,
+            lerp: None,
             rails,
             lots: crate::lots::Lots::load(chunk_dir),
             cfg: citysim::config::ViewCfg::default(),
@@ -522,6 +525,7 @@ impl Sim {
             way: None,
             way_seen: 0,
             no_way: 0,
+            lerp: None,
             rails,
             lots: crate::lots::Lots::load(chunk_dir),
             cfg: citysim::config::ViewCfg::default(),
@@ -583,7 +587,9 @@ impl Sim {
             _ => {}
         }
         self.rate = live.rate();
-        Some(live.lerp_u(&latest))
+        let u = live.lerp_u(&latest);
+        self.lerp = Some((latest.from_tick, latest.frame.tick, u));
+        Some(u)
     }
 
     /// A tile's centre in city metres, plus a jitter inside the tile fixed per id (bodies on one tile spread out).

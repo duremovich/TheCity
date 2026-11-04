@@ -1,0 +1,19 @@
+0 wait 2;
+* fresh;
+* await player;
+* zoom 90;
+* autopause off;
+* autospeed off;
+* wait 2;
+* click ~6,0;
+* click ~8,0;
+* click ~10,0;
+* zoom 40;
+* wait 1;
+* film walk_1x 6;
+* speed 4;
+* bld near hostel;
+* await;
+* pick A bed for the night;
+* film walk_60x 6;
+* quit

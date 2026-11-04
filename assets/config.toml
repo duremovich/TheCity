@@ -6511,6 +6511,8 @@ fps_cap = 30
 people_anim_m = 40.0               # within this many metres of the subject a body is skinned and animated; past it a
                                    # static posed mesh (the idle or a mid-stride frame, instanced per look)
 people_anim_max = 48               # the most bodies animated at once (the nearest to the subject)
+film_trace_m = 40.0                # a film (cityview film.rs, docs/TESTING.md "Filming motion"): its motion trace holds every
+                                   # drawn body within this many metres of the subject (people_anim_m: the skinned ring)
 child_scale_min = 0.5              # a child's drawn height over an adult's at age 0 (no child mesh: the adult scaled) ...
 child_full_age = 17                # ... growing linearly to 1 at this age
 # The view milestone V4b (Dylan 2026-11-01; cityview cam.rs): the orbit follow-cam replaces the locked orthographic NW
