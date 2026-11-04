@@ -6,6 +6,8 @@
 //! record, Hit and Beat here is game state between fictional agents: a
 //! struct with a price, matched by a score, resolved by a seeded dice roll.
 
+mod common;
+
 use citysim::contract::{ContractKind, ContractStatus, Motive, Origin, PostExtra, Posting, Target};
 use citysim::systems::econ::identity;
 use citysim::systems::{contracts, demography, grudges, hitmarket, law, ownership};
@@ -14,6 +16,12 @@ use citysim::{Config, EntityId, EventKind, GangMember, Personality, RelKind, Ski
 
 fn world() -> World {
     World::new(42, Config::load())
+}
+
+/// The time model T1: the lobby scenes' city is the one built at Y4's pace
+/// (the 6x slower walk moves the build's hires and fixers off them).
+fn world_y4() -> World {
+    World::new(42, common::y4(Config::load()))
 }
 
 fn adults(w: &World) -> Vec<EntityId> {
@@ -632,7 +640,7 @@ fn test_old_wrong_is_forgotten() {
 /// H18: Lobby's culprit record is priced at the market and labelled.
 #[test]
 fn test_lobby_culprit_at_market_price() {
-    let mut w = world();
+    let mut w = world_y4();
     let (c, _, _) = two_corps(&w);
     set_corp_treasury(&mut w, c, 1_000_000);
     set_exec_law(&mut w, c, 0.1);
@@ -663,7 +671,7 @@ fn test_lobby_culprit_at_market_price() {
 /// again (the bribe goes ahead meanwhile).
 #[test]
 fn test_lobby_waits_before_rebuying_the_same_head() {
-    let mut w = world();
+    let mut w = world_y4();
     let (c, _, _) = two_corps(&w);
     set_corp_treasury(&mut w, c, 1_000_000);
     set_exec_law(&mut w, c, 0.1);
@@ -1252,7 +1260,7 @@ fn test_bought_beating_settles_a_light_grudge() {
 /// bribe goes ahead.
 #[test]
 fn test_lobby_culprit_under_the_brake() {
-    let mut w = world();
+    let mut w = world_y4();
     let (c, _, _) = two_corps(&w);
     set_corp_treasury(&mut w, c, 1_000_000);
     set_exec_law(&mut w, c, 0.1);

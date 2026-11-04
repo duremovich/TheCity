@@ -8038,8 +8038,10 @@ pub struct ExecCfg {
     /// per this many ticks).
     pub move_ticks_full: u64,
     /// Round 9 Y4 (Dylan 2026-10-30): the walking pace's distance side, the
-    /// tiles a walker crosses in `move_ticks_full` ticks (21 of the island's
-    /// 4 m tiles a minute is ~5 km/h). Absent: 1, the pace before Y4.
+    /// tiles a walker crosses in `move_ticks_full` ticks (Y4's 21 of the
+    /// island's 4 m tiles a minute was ~5 km/h in game time; the time model
+    /// T1 makes it 7 every 2 ticks, 3.5 a game minute, the 1.4 m/s on screen
+    /// at the 6x-compressed day). Absent: 1, the pace before Y4.
     #[serde(default = "default_walk_tiles_per_tick")]
     pub walk_tiles_per_tick: u64,
     /// Round 9 Y4: the Full executor's sub-tick resolution, units of one
@@ -9198,7 +9200,7 @@ pub struct LitterCfg {
     pub enabled: bool,
     /// Lost by every tile in 1..=254 at midnight.
     pub decay: u8,
-    /// Walker steps (at `move_ticks_full` 1; ticks before round 9 Y4) added to a Full mover's next step per band (clean, littered, trashed, heaped).
+    /// Whole walker steps (`[exec] step_units` each since T1; ticks before round 9 Y4) added to a Full mover's next step per band (clean, littered, trashed, heaped).
     pub step_ticks: [u8; 4],
     /// A Coarse walk is `1 + timed_mult × district litter` longer.
     pub timed_mult: f32,
@@ -11261,8 +11263,13 @@ pub struct HousingCfg {
     pub flat: f32,
     pub curve: (f32, f32),
     pub urgency_days: f32,
-    /// An applicant walks to a desk at most this many tiles away.
+    /// An applicant asks about a Home at most this many tiles from where he
+    /// stands (the neighbourhood he looks in: a place on the map).
     pub reach_tiles: u32,
+    /// T1 (`OPEN-304`): ... and goes to its letting desk only within this
+    /// many travel ticks (`distance::trip`: the walk, or the El where it
+    /// wins), so the city's one desk at the Civic Hall is ridden to.
+    pub desk_reach_ticks: u64,
     /// The player's menu at a desk lists at most this many places.
     pub menu_rows: usize,
     /// The capsule hostel: a nightly chance a capsule holder's locker is
@@ -11292,6 +11299,7 @@ impl Default for HousingCfg {
             curve: (0.4, 0.6),
             urgency_days: 7.0,
             reach_tiles: 400,
+            desk_reach_ticks: 120,
             menu_rows: 6,
             locker_rob_p: 0.03,
             locker_rob_share: 0.5,

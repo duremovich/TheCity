@@ -559,7 +559,10 @@ use crate::world::World;
 /// history), `GoalKind::FindHome`, `ActionKind::Apply`, `Verb::Apply`, the `Listed`, `HomeRefused`, `CapsuleLost`
 /// and `LockerRobbed` events and the `[housing]` section (serde defaults: a 133 save loads, the defaults mirror the
 /// file; the slice save is remade for the city's capsule hostels the world build opens).
-pub const SAVE_VERSION: u16 = 134;
+/// 135 (the time model T1, OPEN-304): the pace 3.5 tiles a game minute (`[exec]` 7 tiles every 2 ticks), every
+/// travel-timed number converted (`docs/TIME_MODEL.md` § 1) and `[housing] desk_reach_ticks` (serde default): a
+/// 134 save loads but its bodies are mid-walk at the old pace and its El timetable is rebuilt; remake the slice save.
+pub const SAVE_VERSION: u16 = 135;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
