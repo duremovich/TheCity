@@ -508,12 +508,16 @@ pub fn at_spot_with_company(world: &World, id: EntityId) -> bool {
 /// stand steps to the nearest street tile (ground or road, the island's
 /// streets are road; never a door or a wall) within `spot_spill_tiles`
 /// with fewer (ties by a keyed draw), so a corner's crowd stands round it, not on one tile. A
-/// no-op indoors, on a deck, with the cap 0 or no room near.
+/// no-op indoors, on a deck, with the cap 0, no room near, or no view (a
+/// headless run: the spot's tile stands, as before).
 pub fn spread_spot(world: &mut World, id: EntityId, kind: ActionKind) {
     use crate::components::TileKind;
     let (cap, r) = (world.config.life.spot_cap, world.config.life.spot_spill_tiles);
+    // a view's city only: headless, the tile is the spot (the drawn stack is what it fixes; the fixture
+    // cities' scene tests read the street's history as it was)
     if cap == 0
         || r == 0
+        || world.view_rect.is_none()
         || !matches!(
             kind,
             ActionKind::Beg | ActionKind::Scavenge | ActionKind::Sleep | ActionKind::HangOut | ActionKind::Wander

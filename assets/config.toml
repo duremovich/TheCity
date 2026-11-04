@@ -1721,7 +1721,8 @@ rough_min_tiles = 52                # the exhausted lie down where they are when
                                    # same 15 min at the 3.5 tiles a minute (a time, kept as one)
 spot_cap = 3                        # S2 (OPEN-289, OPEN-318): a Beg, Scavenge or Sleep started on a street tile where this
 spot_spill_tiles = 3                # many already stand steps to the nearest walkable tile this near with fewer (0: off,
-                                   # the crowd on one tile: 222 beggars at d21 19:20)
+                                   # the crowd on one tile: 222 beggars at d21 19:20); with a view only (headless the
+                                   # spot's tile stands)
 housed_day_sleep = 0.25             # a housed agent's Sleep phase factor by day (Evening 0.7, Night 1.0)
 bed_margin_tiles = 35              # a Hideout or Hotel bed this much nearer than Home is taken instead. Round 9 Y4: 20 -> 210
                                    # (10 min saved at 21 tiles a minute). T1 (OPEN-304): 210 -> 35, the same 10 min at 3.5
