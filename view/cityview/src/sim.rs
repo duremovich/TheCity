@@ -80,9 +80,7 @@ fn pose_of(act: &citysim::view::ViewAct) -> u8 {
     use citysim::goap::actions::ActionKind as K;
     match act {
         citysim::view::ViewAct::Use { kind: K::Sleep, .. } => POSE_LIE,
-        citysim::view::ViewAct::Use {
-            kind: K::Rest | K::Drink | K::EatAtHome | K::EatFromInventory | K::Beg | K::ServeTime, ..
-        }
+        citysim::view::ViewAct::Use { kind: K::Rest | K::Drink | K::EatAtHome | K::EatFromInventory | K::Beg | K::ServeTime, .. }
         | citysim::view::ViewAct::JackedIn { .. } => POSE_SIT,
         _ => POSE_STAND,
     }
@@ -777,7 +775,8 @@ impl Sim {
         let inner = if going_in { newer } else { older };
         let f = if going_in { 0.0 } else { inner.floor };
         let (spot, z_in, pl) = self.indoor_place(inner, f, !going_in && inner.climb.is_some(), stream);
-        let area = pl.map_or_else(|| inner.rect.map_or([spot.x - 1.0, spot.y - 1.0, spot.x + 1.0, spot.y + 1.0], |r| self.rect_m(r)), |p| p.area);
+        let area =
+            pl.map_or_else(|| inner.rect.map_or([spot.x - 1.0, spot.y - 1.0, spot.x + 1.0, spot.y + 1.0], |r| self.rect_m(r)), |p| p.area);
         // the street way, tiles: the older place, its way ahead up to the newer one
         let mut way: Vec<[f32; 2]> = vec![older.t];
         let end = older.ahead.iter().position(|p| *p == newer.t);
@@ -1283,7 +1282,9 @@ pub fn update_sim(
             let (at, look) = if side.contains(id) {
                 let at = s_m + dir * cfg.fight_gap_m * 1.4;
                 let mark = sim.fight_mark.get(id).and_then(|m| sim.motion.at_of(*m));
-                let look = mark.or_else(|| foes.iter().copied().min_by(|x, y| x.distance(at).total_cmp(&y.distance(at)))).unwrap_or(s_m + dir * 3.0);
+                let look = mark
+                    .or_else(|| foes.iter().copied().min_by(|x, y| x.distance(at).total_cmp(&y.distance(at))))
+                    .unwrap_or(s_m + dir * 3.0);
                 (at, look)
             } else {
                 (s_m + dir * cfg.fight_gap_m, s_m)
@@ -1375,7 +1376,11 @@ pub fn update_sim(
                 }
                 subject_at = Some((at, d.yaw));
                 subject_body = Some(draw(at, d));
-                subj_line = format!("subject: through a door ({}), {}", if going_in { "in" } else { "out" }, if inside { "inside" } else { "outside" });
+                subj_line = format!(
+                    "subject: through a door ({}), {}",
+                    if going_in { "in" } else { "out" },
+                    if inside { "inside" } else { "outside" }
+                );
             } else if inside && !opened(d.at) {
                 hidden_in += 1;
             } else if sim.capsules {

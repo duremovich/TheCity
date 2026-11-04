@@ -388,9 +388,9 @@ pub fn pose_bones(rigs: Query<(Entity, &Bones, &Posing)>, mut tfs: Query<&mut Tr
         if !pose.any() && pose.lean.abs() < 1e-4 {
             continue;
         }
-        let Ok(rt) = tfs.get(rig).map(|t| *t) else { continue };
+        let Ok(rt) = tfs.get(rig).copied() else { continue };
         let Some(es) = bones.0.iter().copied().collect::<Option<Vec<Entity>>>() else { continue };
-        let mut local: Vec<Transform> = es.iter().map(|e| tfs.get(*e).map(|t| *t).unwrap_or_default()).collect();
+        let mut local: Vec<Transform> = es.iter().map(|e| tfs.get(*e).copied().unwrap_or_default()).collect();
         // the bones' rotations in the character's frame, parents first (BONES is in that order)
         let global = |local: &[Transform]| {
             let mut g = [Quat::IDENTITY; BONES.len()];
@@ -797,10 +797,7 @@ pub fn add(app: &mut App, capsules: bool) {
             Update,
             (prepare_people, bake_poses, (draw_people, dress_standin).after(crate::sim::update_sim), frame_stats.after(draw_people)),
         )
-        .add_systems(
-            PostUpdate,
-            pose_bones.after(bevy::app::AnimationSystems).before(bevy::transform::TransformSystems::Propagate),
-        );
+        .add_systems(PostUpdate, pose_bones.after(bevy::app::AnimationSystems).before(bevy::transform::TransformSystems::Propagate));
 }
 
 /// The frame time's median and 90th percentile over the last 240 frames, on the sim's caption (a bench's shot line

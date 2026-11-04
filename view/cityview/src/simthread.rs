@@ -1856,9 +1856,7 @@ fn publish(
     // Motion V2 (OPEN-313): a fight's beat inside a paced tick keeps the drawn pair (the older frame and the view's
     // clock through it): the newer frame is the beat's (the fight's state; every place is the tick's own), so the
     // street walks on through the pair while the beats land
-    if beat
-        && let Some(b) = base.as_ref().filter(|b| b.subject == subject && b.clocked && b.frame.tick == frame.tick)
-    {
+    if beat && let Some(b) = base.as_ref().filter(|b| b.subject == subject && b.clocked && b.frame.tick == frame.tick) {
         trail.start(&frame);
         let p = Arc::new(Published {
             frame,
@@ -1912,11 +1910,7 @@ fn publish(
     if !clocked {
         sh.vt_set(frame.tick as f64);
     }
-    let strides = frame
-        .agents
-        .iter()
-        .filter_map(|a| citysim::exec::stride(world, a.id).map(|s| (key(a.id), s)))
-        .collect();
+    let strides = frame.agents.iter().filter_map(|a| citysim::exec::stride(world, a.id).map(|s| (key(a.id), s))).collect();
     let p = Arc::new(Published { frame, subject, caption, at: at_v, seq: *seq, from_tick, span_s: span_s as f32, clocked, strides });
     let mut s = sh.slots.lock().unwrap();
     s.prev = prev;
