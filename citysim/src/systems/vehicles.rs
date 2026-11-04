@@ -157,8 +157,12 @@ pub fn timed_mult(world: &World, agent: EntityId) -> f32 {
 
 /// S2 (`OPEN-314`): a body whose goal is Flee runs: its step on foot costs
 /// `[combat] flee_run_mult` of a walk's (0.5: twice the walk's pace); 1.0
-/// for anyone else.
+/// for anyone else, and for everyone with no view (a headless run).
 pub fn run_mult(world: &World, agent: EntityId) -> f32 {
+    // a view's city only (headless the flight walks, as before: the fixture cities' chases keep their history)
+    if world.view_rect.is_none() {
+        return 1.0;
+    }
     let fleeing = world.comp::<crate::components::Brain>(agent).is_some_and(|b| {
         b.current_goal == Some(crate::components::GoalKind::Flee)
             && b.plan.as_ref().is_some_and(|p| p.goal == crate::components::GoalKind::Flee)

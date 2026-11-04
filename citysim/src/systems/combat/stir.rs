@@ -5,7 +5,7 @@
 //! `stir_flee_tiles` off, away from the fight, at the flight's run, `flee_run_mult`), else, on a keyed draw under
 //! `stir_watch_p`, it stops where it stands and watches for `stir_watch_ticks` (its plan given up for a stand);
 //! the rest walk on. The law on duty comes in through the joiners (`recruit`), not here. At most `stir_max` a fight
-//! a tick. Nobody the human drives, no one cuffed, down, knocked out, sentenced or aboard.
+//! a tick, with a view only (headless the street walks past, as before). Nobody the human drives, no one cuffed, down, knocked out, sentenced or aboard.
 
 use super::{hash, key, Engagement};
 use crate::components::{ActionInstance, Brain, GoalKind, Lod, Personality, Position, TileKind, TilePos};
@@ -20,7 +20,8 @@ const PURPOSE_STIR: u64 = 0x434F_0009;
 /// The bystanders of `e` (engagement `eid`) react (see the module doc).
 pub(super) fn bystanders(world: &mut World, e: &Engagement, eid: u32) {
     let c = world.config.combat.clone();
-    if c.stir_tiles == 0 || c.stir_max == 0 {
+    // a view's city only: headless nobody is watching (the fixture cities' fights keep their history)
+    if c.stir_tiles == 0 || c.stir_max == 0 || world.view_rect.is_none() {
         return;
     }
     let Some(front) = e.first[0].or(e.first[1]).or_else(|| e.members().next()) else { return };
