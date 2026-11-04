@@ -264,6 +264,74 @@ pub fn plan_line(world: &World, id: EntityId) -> String {
     format!("{:?}: {}", p.goal, steps.join(", "))
 }
 
+/// T2 (docs/TIME_MODEL.md § 3, auto-speed): the stretch the body is in, a
+/// long thing it does not steer, as the HUD says it ("asleep", "at work",
+/// "riding", "in a queue", "serving time", "indoors on autopilot"); `None`
+/// on a walk or anything the human should watch. Read from what the sim
+/// holds (the exec state, the sentence, the vehicle, the autopilot), no state
+/// of its own. Whether someone is coming for the body is the caller's.
+pub fn stretch(world: &World, id: EntityId) -> Option<&'static str> {
+    if world.has::<crate::components::Sentence>(id) {
+        return Some("serving time");
+    }
+    let b = world.comp::<Brain>(id)?;
+    let pos = world.comp::<Position>(id)?;
+    if world.aboard.contains_key(&id) {
+        return Some("riding");
+    }
+    match &b.exec {
+        ExecState::Ride { .. } | ExecState::Fly { .. } => Some("riding"),
+        ExecState::Use { kind: ActionKind::Sleep, .. } => Some("asleep"),
+        // the Sleep the human just picked, begun at the next tick
+        ExecState::Idle if b.current_step().is_some_and(|s| s.action == ActionKind::Sleep) => Some("asleep"),
+        ExecState::Use { kind, .. } if kind.is_work() && pos.building.is_some() => Some("at work"),
+        ExecState::Use { kind: ActionKind::Apply | ActionKind::ServeTime, .. } => Some("in a queue"),
+        ExecState::Goto { blocked_since: Some(_), path, .. } if path.is_empty() => Some("in a queue"),
+        ExecState::Wait { .. } if pos.building.is_some() => Some("in a queue"),
+        ExecState::Use { .. } | ExecState::JackedIn { .. }
+            if pos.building.is_some() && b.player.as_ref().is_some_and(|p| p.autopilot) =>
+        {
+            Some("indoors on autopilot")
+        }
+        _ => None,
+    }
+}
+
+/// T2 (docs/TIME_MODEL.md § 5): a walk the human just ordered begins now,
+/// between two ticks: exec starts the body's GoTo step (its way planned, the
+/// first steps taken at the next tick) instead of at the next tick's exec,
+/// a tick behind the click. Only a GoTo from standing; anything else waits
+/// for the tick as before.
+pub fn start_now(world: &mut World, id: EntityId) {
+    let Some(b) = world.comp::<Brain>(id) else { return };
+    if b.player.is_none() || !matches!(b.exec, ExecState::Idle) {
+        return;
+    }
+    if b.current_step().is_some_and(|s| matches!(s.action, ActionKind::GoTo(_))) {
+        crate::exec::step_agent(world, id);
+    }
+}
+
+/// T2 (docs/TIME_MODEL.md § 5, the body moves at the click): the street way
+/// the body's current step walks, planned now, between two ticks, as exec
+/// will plan it (`exec::walking_goto` to the step's place, a building's door
+/// for a building), from the body's tile: the view walks it at once. `None`
+/// off the street (indoors, aboard), with no GoTo under way, or no way.
+pub fn way_now(world: &World, id: EntityId) -> Option<Vec<TilePos>> {
+    let pos = world.comp::<Position>(id)?;
+    if pos.building.is_some() || world.aboard.contains_key(&id) {
+        return None;
+    }
+    let step = world.comp::<Brain>(id)?.current_step()?.clone();
+    let ActionKind::GoTo(key) = step.action else { return None };
+    let building = world.resolve_building(id, key, step.target);
+    let picked = (key == LocationKey::Picked && building.is_none()).then_some(step.tile).flatten();
+    let tile = picked.or_else(|| world.resolve_location(id, key, step.target))?;
+    let target = crate::exec::GotoTarget { dest: key, tile, building: None };
+    let ExecState::Goto { path, .. } = crate::exec::walking_goto(world, id, target)? else { return None };
+    Some(std::iter::once(pos.tile).chain(path.into_iter().rev()).collect())
+}
+
 /// The standing building whose rect holds `tile` (the smallest, when a
 /// shop-house's units overlap), for a click.
 pub fn building_at(world: &World, tile: crate::components::TilePos) -> Option<EntityId> {
