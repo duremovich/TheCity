@@ -47,8 +47,12 @@ pub enum ViewAct {
         next: Option<TilePos>,
         step_at: Tick,
     },
-    /// A Coarse timed goto (a walk on its way when `exec::walk_place` places it).
+    /// A Coarse timed goto (a walk on its way when `exec::walk_place` places it). S3 (`OPEN-318`, for the view's
+    /// draw of a leg over its own time): `depart`, the leg's start (its walk's `depart`, else its climb's; with
+    /// neither, a ride or the door queue's retry, `arrive`).
     Timed {
+        #[serde(default)]
+        depart: Tick,
         arrive: Tick,
     },
     Use {
@@ -373,7 +377,10 @@ fn act_of(b: &Brain) -> ViewAct {
         ExecState::Goto { path, next_move_tick, .. } => {
             ViewAct::Walk { next: path.last().copied(), step_at: *next_move_tick }
         }
-        ExecState::GotoTimed { arrive_tick, .. } => ViewAct::Timed { arrive: *arrive_tick },
+        ExecState::GotoTimed { arrive_tick, walk, climb, .. } => ViewAct::Timed {
+            depart: walk.map(|w| w.depart).or(climb.map(|c| c.depart)).unwrap_or(*arrive_tick),
+            arrive: *arrive_tick,
+        },
         ExecState::Use { kind, until, .. } => ViewAct::Use { kind: *kind, until: *until },
         ExecState::Wait { until } => ViewAct::Wait { until: *until },
         ExecState::Fly { from, depart, arrive_tick, .. } => {

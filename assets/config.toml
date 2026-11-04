@@ -433,6 +433,14 @@ target_margin = 2
 # loop). 60 is the whole v1 city; on the 256 x 192 map a loop over all 400 Homes could not be walked
 # in a shift, so guards on patrol were never credited a shift and starved on full pay.
 patrol_beat_homes = 60
+# S3 (OPEN-318): a shift's patrol loop starts at one of this many stops nearest the guard (a keyed draw on the
+# guard and the shift; 1: the nearest, so a Station's 44 patrolmen all walked the same first leg as a knot of 18
+# on one tile).
+patrol_first_pick = 3
+# S3 (OPEN-318): a guard leaving a building on a shift's first leg sets out up to this many ticks (game minutes)
+# after the plan starts, a keyed draw on the guard and the shift: at 3.5 tiles a minute the Station's door lets
+# out a file over ~35 tiles, not a crowd on one (0: all at once).
+patrol_muster_ticks = 10
 # M10: a guard chases only warrants last seen within this many tiles (v1: no limit). On the 256 x 192
 # map, with a warrant always open somewhere among 2,000 residents, every guard spent a fifth of the
 # day walking across the city after the nearest one, was never credited a shift, and starved.
@@ -1788,6 +1796,10 @@ starving_hunger = 0.1               # the starvation that breaks a commitment
 shift_hunger_break = 0.12           # Shadow V4 bug 19: under this, with a meal in reach, a worker breaks the shift to eat (Work x 0.3) (a sweeper worked a shift at 0.11 with 15 c, 26 h after his last meal)
 sleep_wake_energy = 0.99            # ... and runs to here (it ended at 0.9: 1-6 min Sleeps all night)
 rough_sleep_on = true               # workplace room: a housed worker asleep rough near work sleeps on to here or the shift (it woke at 02:00 at the 8 h cap and walked 4.5 h home)
+sleep_cap_ticks = 720               # S3 (OPEN-302): no Sleep runs past 12 h from its start, rested or not (P5's cold start: a rough sleeper's one Sleep ran 22 h, d21 03:09 to d22 01:29; 0: no cap)
+sleep_day_wake_energy = 0.8         # S3 (OPEN-302): a sleeper on the street wakes in the day (below) once rested to this: the street wakes you (above 1: off) ...
+sleep_day_from = 420                # ... from 07:00 ...
+sleep_day_to = 1260                 # ... to 21:00 (minutes of the day)
 idle_sleep_energy = 0.9             # Idle plans Sleep only below this (0.7 left nights to 90-min Rests)
 energy_brake = 0.5                  # Unwind / Eat / Earn carry an energy term below this
 spot_walk_cap_tiles = 22            # 5: ~45 min: a farther free spot gives way to the nearest

@@ -300,11 +300,17 @@ pub fn walk_reach_tiles(world: &World, id: EntityId, cap: Tick, limit: u32) -> u
 /// `None`: not a Full walk.
 pub fn stride(world: &World, id: EntityId) -> Option<f32> {
     let b = world.comp::<Brain>(id)?;
-    let ExecState::Goto { next_move_tick, carry_q, blocked_since, .. } = &b.exec else { return None };
+    let ExecState::Goto { next_move_tick, carry_q, blocked_since, hop, .. } = &b.exec else { return None };
     if blocked_since.is_some() {
         return Some(0.0);
     }
     let upt = world.config.exec.units_per_tick();
+    // S3 (`OPEN-319`): on a walkway hop the step is the whole hop, begun at `hop`.
+    if let Some(depart) = hop {
+        let (from_q, to_q) = (depart * upt, next_move_tick * upt + u64::from(*carry_q));
+        let span = to_q.saturating_sub(from_q).max(1);
+        return Some(((world.tick * upt).saturating_sub(from_q) as f32 / span as f32).clamp(0.0, 1.0));
+    }
     let tile = world.comp::<Position>(id)?.tile;
     let step = u64::from(crate::systems::vehicles::step_q(world, id, tile)).max(1);
     let next_q = next_move_tick * upt + u64::from(*carry_q);
@@ -349,5 +355,13 @@ pub fn walking_goto(world: &World, id: EntityId, target: GotoTarget) -> Option<E
         p.reverse();
         (p, Vec::new())
     };
-    Some(ExecState::Goto { target, path, next_move_tick: world.tick, blocked_since: None, carry_q: 0, levels })
+    Some(ExecState::Goto {
+        target,
+        path,
+        next_move_tick: world.tick,
+        blocked_since: None,
+        carry_q: 0,
+        levels,
+        hop: None,
+    })
 }

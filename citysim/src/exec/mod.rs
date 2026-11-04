@@ -76,6 +76,13 @@ pub enum ExecState {
         /// ground.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         levels: Vec<u8>,
+        /// S3 (`OPEN-319`): a walkway portal's hop under way (stairs, a lift,
+        /// an escalator, a deck's run), begun at this tick: the body stands at
+        /// the hop's near end until `next_move_tick` (+ `carry_q`), its time
+        /// paid, then steps onto the far end (`path`'s last, `levels`' last).
+        /// `None`: no hop running (a hop inside one tick takes no state).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hop: Option<Tick>,
     },
     /// Coarse LOD.
     GotoTimed {

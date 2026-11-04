@@ -572,6 +572,9 @@ fn test_private_guard_arrests_at_contract_and_never_takes_jail_duty() {
     let thief =
         w.citizens().into_iter().find(|&a| w.has::<Brain>(a) && !w.has::<Job>(a) && a != guard).expect("a civilian");
     for id in [thief, guard] {
+        // S3: both bodies first (the forced tier applies at the next LOD pass, and a Statistical guard
+        // sees nothing; a promotion puts a body in its own workplace, so before the walk-in).
+        citysim::systems::lod::set_lod(&mut w, id, citysim::Lod::Full);
         w.leave_building(id);
         w.enter_building(id, market);
         w.abort_plan(id);

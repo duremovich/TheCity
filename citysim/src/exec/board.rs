@@ -259,5 +259,13 @@ pub(super) fn full_segment(
     }
     levels.reverse();
     let leg = GotoTarget { dest: LocationKey::Street, tile: end, building: None };
-    Some(ExecState::Goto { target: leg, path, next_move_tick: world.tick, blocked_since: None, carry_q: 0, levels })
+    Some(ExecState::Goto {
+        target: leg,
+        path,
+        next_move_tick: world.tick,
+        blocked_since: None,
+        carry_q: 0,
+        levels,
+        hop: None,
+    })
 }

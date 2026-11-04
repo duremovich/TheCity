@@ -694,8 +694,17 @@ pub fn finishes_early(world: &World, id: EntityId, kind: ActionKind, started: Ti
         // and the worker slept in one-minute fragments at energy 0).
         ActionKind::Sleep => {
             // L2 shadow fixes item 3: a sleep runs to `sleep_wake_energy`.
-            let wake = world.config.life.sleep_wake_energy;
-            world.comp::<Needs>(id).is_some_and(|n| n.energy >= wake)
+            let life = &world.config.life;
+            let wake = life.sleep_wake_energy;
+            let energy = world.comp::<Needs>(id).map_or(0.0, |n| n.energy);
+            // S3 (`OPEN-302`): the cap on hours, and the street's day wake.
+            let capped = life.sleep_cap_ticks > 0 && world.tick.saturating_sub(started) >= life.sleep_cap_ticks;
+            let tod = world.tick_of_day();
+            let day = tod >= life.sleep_day_from && tod < life.sleep_day_to;
+            let street = world.comp::<crate::components::Position>(id).is_some_and(|p| p.building.is_none());
+            capped
+                || (day && street && energy >= life.sleep_day_wake_energy)
+                || world.comp::<Needs>(id).is_some_and(|n| n.energy >= wake)
                 || ((crate::exec::routine::must_leave_for_work(world, id)
                     // Round 4 T4 (OPEN-217): a Yard's foreman up for the shape-up.
                     || crate::systems::streetwork::foreman_due(world, id))

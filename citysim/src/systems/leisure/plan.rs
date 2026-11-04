@@ -409,7 +409,12 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
             }
         }
         ActionKind::HangOut | ActionKind::Preach => {
-            let Some(t) = world.comp::<Position>(id).map(|p| p.tile) else { return };
+            let Some(p) = world.comp::<Position>(id) else { return };
+            // S3 (`OPEN-318`): a body spilled off its spot on arrival
+            // (`fixes::spill_on_arrival`) joins the spot's registry, not its own tile's.
+            let r = 2 * u32::from(world.config.life.spot_spill_tiles);
+            let spot = spot_of(world, id).filter(|s| p.building.is_none() && s.manhattan(p.tile) <= r);
+            let t = spot.unwrap_or(p.tile);
             let list = world.hangouts.entry(t).or_default();
             if !list.contains(&id) {
                 list.push(id);

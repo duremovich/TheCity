@@ -125,6 +125,7 @@ fn path_plan(w: &mut World, id: EntityId, path: &[TilePos]) {
         blocked_since: None,
         carry_q: 0,
         levels: Vec::new(),
+        hop: None,
     };
 }
 

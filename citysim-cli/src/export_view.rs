@@ -106,7 +106,7 @@ fn act_x(a: &ViewAct) -> Value {
     match a {
         ViewAct::Idle | ViewAct::Child => Value::Null,
         ViewAct::Walk { next, step_at } => json!({"next": next.map(tp), "step_at": step_at}),
-        ViewAct::Timed { arrive } => json!({"arrive": arrive}),
+        ViewAct::Timed { depart, arrive } => json!({"depart": depart, "arrive": arrive}),
         ViewAct::Use { until, .. } => json!({"until": until}),
         ViewAct::Wait { until } => json!({"until": until}),
         ViewAct::Fly { from, depart, arrive } => json!({"from": tp(*from), "depart": depart, "arrive": arrive}),

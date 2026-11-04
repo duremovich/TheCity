@@ -320,6 +320,17 @@ pub struct LawCfg {
     /// (60: the whole v1 city).
     #[serde(default = "default_patrol_beat_homes")]
     pub patrol_beat_homes: usize,
+    /// S3 (`OPEN-318`): a shift's patrol starts at one of this many stops
+    /// of its loop nearest the guard, picked by a keyed draw on the guard and
+    /// the shift (1: the nearest, every guard of a Station the same first
+    /// leg; 0 reads as 1).
+    #[serde(default)]
+    pub patrol_first_pick: usize,
+    /// S3 (`OPEN-318`): a guard setting out on a shift's first patrol leg
+    /// from indoors musters up to this many ticks after the plan's start, a
+    /// keyed draw on the guard and the shift (0: all out of the door at once).
+    #[serde(default)]
+    pub patrol_muster_ticks: u64,
     /// M10: a guard chases only warrants last seen within this many tiles
     /// (Manhattan). The default reaches across any map.
     #[serde(default = "default_pursuit_radius")]

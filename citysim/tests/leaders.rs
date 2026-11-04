@@ -216,6 +216,13 @@ fn test_order_waits_for_a_lieutenant_at_court() {
     assert!(w.comp::<Gang>(g).expect("gang").pending_order.is_some());
     // Court: the leader holding it at the Hideout, the lieutenant there.
     let hideout = w.hideout_of(g).expect("hideout");
+    // S3: a lieutenant now (the posts are recomputed as the city runs: the fixture's may have lost his).
+    let lt = leaders::lieutenants(&w, g).first().copied().unwrap_or(lt);
+    // S3: both bodies first (a Statistical leader holds no court, and a promotion puts a body in its own
+    // Home or work, so before the walk-in).
+    for id in [l, lt] {
+        lod::set_lod(&mut w, id, Lod::Full);
+    }
     w.enter_building(l, hideout);
     w.enter_building(lt, hideout);
     // Awake there (the island pass phase 6: the fixture city's day moved,

@@ -382,7 +382,14 @@ fn test_weak_gang_under_retaliate_takes_a_hostage() {
 fn test_corp_refused_twice_takes_a_hostage_for_the_sale() {
     let mut w = gang_world();
     let corps = w.corps();
-    let corp = corps[0];
+    // S3: a corp whose exec is free (the evolved city may hold one in the cells, and a sentenced head
+    // orders nothing: `contracts::head_of`).
+    let free_exec = |w: &World, c: EntityId| {
+        w.comp::<citysim::Corp>(c)
+            .and_then(|x| x.exec)
+            .is_some_and(|e| law::living(w, e) && !w.has::<citysim::Sentence>(e))
+    };
+    let corp = *corps.iter().find(|&&c| free_exec(&w, c)).expect("a corp with a free exec");
     // Off the buyer's payroll: a corp never abducts its own (`grudges::member_of`).
     let theirs = |w: &World, a: EntityId| {
         w.comp::<citysim::components::Job>(a).and_then(|j| j.employer).and_then(|e| w.owner_of(e)) == Some(corp)
@@ -391,12 +398,14 @@ fn test_corp_refused_twice_takes_a_hostage_for_the_sale() {
     // The seller: the first other corp with an exec, a building and a
     // spouse (or room for one) off the buyer's payroll (the evolved city
     // may leave a corp headless).
-    let seller = *corps[1..]
+    let seller = *corps
         .iter()
         .find(|&&c| {
-            w.comp::<citysim::Corp>(c).is_some_and(|x| {
-                !x.buildings.is_empty() && x.exec.is_some_and(|e| w.spouse_of(e).is_none_or(|sp| !theirs(&w, sp)))
-            })
+            c != corp
+                && free_exec(&w, c)
+                && w.comp::<citysim::Corp>(c).is_some_and(|x| {
+                    !x.buildings.is_empty() && x.exec.is_some_and(|e| w.spouse_of(e).is_none_or(|sp| !theirs(&w, sp)))
+                })
         })
         .expect("a seller corp with an exec");
     w.comp_mut::<citysim::Corp>(corp).unwrap().treasury = 50_000;

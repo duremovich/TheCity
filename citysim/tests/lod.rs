@@ -410,7 +410,12 @@ fn test_night_shift_worker_promoted_at_the_workplace() {
         w.leave_building(p);
         w.comp_mut::<Position>(p).expect("pos").tile = far;
         lod::set_lod(&mut w, p, Lod::Full);
-        assert_eq!(w.comp::<Position>(p).map(|x| x.tile), Some(door), "homeless {homeless}: at the Hotel on shift");
+        // S2/S3: a promotion to the workplace puts the body inside it (not on the street at its door).
+        assert_eq!(
+            w.comp::<Position>(p).and_then(|x| x.building),
+            Some(hotel),
+            "homeless {homeless}: in the Hotel on shift"
+        );
     }
     // Off shift at night (a day worker's hours), a homeless worker sleeps near the work.
     if let Some(j) = w.comp_mut::<Job>(p) {

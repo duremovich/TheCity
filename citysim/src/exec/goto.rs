@@ -26,6 +26,7 @@ pub(super) fn advance_goto(
     next_move_tick: Tick,
     blocked_since: Option<Tick>,
     carry_q: u32,
+    hop_run: Option<Tick>,
 ) -> StepResult {
     let tick = world.tick;
     if tick < next_move_tick {
@@ -94,6 +95,9 @@ pub(super) fn advance_goto(
     let big_map = world.big_paths();
     let big = target.building.is_some() && big_map;
     let mut steps = 0u32;
+    // S3 (`OPEN-319`): a hop begun on an earlier call, its time stood out at
+    // the near end: its far end (the path's next) is stepped onto free.
+    let mut hop_paid = hop_run.and(path.last().copied().map(|t| (t, levels.last().copied().unwrap_or(0))));
     loop {
         let (next, nl) = match target.building {
             Some(b) => {
@@ -130,7 +134,13 @@ pub(super) fn advance_goto(
                 };
                 match s {
                     Some(n) => n,
-                    None if steps == 0 && here == target.tile => return StepResult::Done,
+                    None if steps == 0 && here == target.tile => {
+                        // S3 (`OPEN-318`): at a street spot, off a crowded tile.
+                        if target.dest == LocationKey::Spot && lvl == 0 {
+                            crate::systems::fixes::spill_on_arrival(world, id);
+                        }
+                        return StepResult::Done;
+                    }
                     None if steps == 0 => return StepResult::Failed(FailReason::NoSuchPlace),
                     None => break,
                 }
@@ -154,6 +164,26 @@ pub(super) fn advance_goto(
                 }
             }
         }
+        // S3 (`OPEN-319`): a hop's time is spent at its near end (the stairs'
+        // foot, the lift's door, the deck's start), the far end reached at its
+        // end: a hop running past this tick stands the body here, the step the
+        // next call's (paid). Inside the tick it is taken at once, as before.
+        let paid = hop_paid.take() == Some((next, nl)) && hop.is_some();
+        if let (Some(e), false) = (&hop, paid) {
+            let q = u64::from(walk_q.unwrap_or_else(|| crate::systems::vehicles::step_q(world, id, here)));
+            let hop_q = q * u64::from(e.steps.max(1));
+            if next_q + hop_q > end_q {
+                path.push(next);
+                if !levels.is_empty() || nl > 0 {
+                    if levels.is_empty() {
+                        levels = vec![0; path.len() - 1];
+                    }
+                    levels.push(nl);
+                }
+                let at = next_q + hop_q;
+                return set_goto_hop(world, id, target, path, levels, at / upt, (at % upt) as u32, Some(tick));
+            }
+        }
         move_to(world, id, next);
         if let Some(p) = world.comp_mut::<Position>(id) {
             p.floor = nl;
@@ -169,6 +199,7 @@ pub(super) fn advance_goto(
         }
         let q = walk_q.unwrap_or_else(|| crate::systems::vehicles::step_q(world, id, next));
         next_q += match &hop {
+            Some(_) if paid => 0,
             Some(e) => u64::from(q) * u64::from(e.steps.max(1)),
             None => u64::from(q) + litter_delay(world, next),
         };
@@ -492,7 +523,25 @@ fn set_goto(
     carry_q: u32,
 ) -> StepResult {
     if let Some(brain) = world.comp_mut::<Brain>(id) {
-        brain.exec = ExecState::Goto { target, path, next_move_tick, blocked_since, carry_q, levels };
+        brain.exec = ExecState::Goto { target, path, next_move_tick, blocked_since, carry_q, levels, hop: None };
+    }
+    StepResult::Running
+}
+
+/// `set_goto` with no block and a hop under way since `hop` (`ExecState::Goto::hop`).
+#[allow(clippy::too_many_arguments)]
+fn set_goto_hop(
+    world: &mut World,
+    id: EntityId,
+    target: GotoTarget,
+    path: Vec<TilePos>,
+    levels: Vec<u8>,
+    next_move_tick: Tick,
+    carry_q: u32,
+    hop: Option<Tick>,
+) -> StepResult {
+    if let Some(brain) = world.comp_mut::<Brain>(id) {
+        brain.exec = ExecState::Goto { target, path, next_move_tick, blocked_since: None, carry_q, levels, hop };
     }
     StepResult::Running
 }
