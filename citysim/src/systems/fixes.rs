@@ -505,9 +505,9 @@ pub fn at_spot_with_company(world: &World, id: EntityId) -> bool {
 /// S2 (`OPEN-289`, `OPEN-318`): a body starting a street stay (`Beg`,
 /// `Scavenge`, `Sleep`, `HangOut`, `Wander`; a HangOut after it joined the
 /// spot's registry, which it keeps: `leisure::spot_tile`) on a tile where `[life] spot_cap` others already
-/// stand steps to the nearest walkable ground tile within
-/// `spot_spill_tiles` with fewer (off the road and the doors; ties by a
-/// keyed draw), so a corner's crowd stands round it, not on one tile. A
+/// stand steps to the nearest street tile (ground or road, the island's
+/// streets are road; never a door or a wall) within `spot_spill_tiles`
+/// with fewer (ties by a keyed draw), so a corner's crowd stands round it, not on one tile. A
 /// no-op indoors, on a deck, with the cap 0 or no room near.
 pub fn spread_spot(world: &mut World, id: EntityId, kind: ActionKind) {
     use crate::components::TileKind;
@@ -547,7 +547,7 @@ pub fn spread_spot(world: &mut World, id: EntityId, kind: ActionKind) {
                 continue;
             }
             let t = TilePos { x: x as u16, y: y as u16 };
-            if world.map.tile_at(t) != TileKind::Ground || n(t) >= cap {
+            if !matches!(world.map.tile_at(t), TileKind::Ground | TileKind::Road) || n(t) >= cap {
                 continue;
             }
             let key = (
