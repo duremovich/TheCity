@@ -108,5 +108,25 @@ from Full as ever); the 2k and 20k tiers.
   Proof: a play script that walks the nobody across a block at 1x, sleeps through a night at auto and is woken by a
   fight, read in the story log and the smoke PNG at 1x and at 60x.
 
+**T2 as built** (2026-11-03, cityview `simthread.rs`, `sim.rs`, `play.rs`; `player::stretch`, `way_now`, `start_now`):
+- **The slice's teleport was the lerp, not the walk.** `sim.rs` ran `u` = real time since the newer frame x the
+  walk-matched rate, without the play speed: at 60x it reached u 0.017 when the next frame came (logged with
+  `CV_LERP_DEBUG=1`), so a body crawled 1.7% of a tick's 84 m and then jumped the rest once a real second. A walk
+  begun inside a tick (the older frame had no way ahead) slid straight through the block as well. Now each published
+  frame carries its lerp span (the ticks' own real pacing) and `u` is the time over it.
+- **No teleports (§ 4):** the sim thread publishes once the render thread has taken the last frame (or after `[view]
+  trail_max_ticks`); the ticks between extend each body's and vehicle's way (`Trail`), stitched onto the older frame.
+  A way that misses the newer place is searched on the street within `trail_repair_tiles`; farther, `along` draws a
+  jump at the pair's middle (a placement), never a slide. A body going in at a door walks to it, then hides.
+- **Auto-speed (§ 3):** `player::stretch` (asleep or about to, at work inside, riding, a queue, serving time, an
+  indoor activity on autopilot); geometric ramp over `auto_ramp_s`; a key, a click, someone near naming or targeting
+  the body, or the auto-pause latches it off until the stretch changes. The HUD's line: "auto: asleep, 600x".
+- **The click (§ 5):** a walk's order is applied between ticks, its way planned (`player::way_now`) and its step begun
+  (`player::start_now`); the view walks the way at the clock's pace from the click. The drawn body leads the frames
+  by at most a tick and hands back when they reach the way's end or leave it.
+- The `[view]` keys come from the `--config` file over a save's copy; the pace (`[exec]`) stays the save's, so the
+  walk-matched rate follows T1's pace in a remade save with no view change. Script verbs: `live SECS`, `autospeed
+  on|off`, `click ~DX,DY`; the session `view/cityview/scripts/t2_clock.play`.
+
 **Defaults picked by the orchestrator, not yet heard by Dylan:** the manual steps (1, 2, 5, 20, 60), auto at 600x,
 walks never auto, chosen indoor activities auto only on autopilot, auto returning to the human's speed, the 1 s ramp.

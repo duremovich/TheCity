@@ -152,6 +152,15 @@ pub struct Sim {
     pub subject_indoors: Option<Vec4>,
     /// V10: the newest frame's tick (the light follows its hour: `clock_light`)
     pub clock_tick: Option<u64>,
+    /// T2 (docs/TIME_MODEL.md § 5): the possessed body's click way (`simthread::WayPub`): its seq, the tiles, the
+    /// tiles walked along it so far, the walk's tiles a tick; the subject walks it from the click at the clock's pace
+    /// (`Shared::tick_rate`: stopped while the clock is), ahead of the frames by at most a tick, until the frames reach
+    /// its end or leave it
+    pub way: Option<(u64, Vec<[f32; 2]>, f32, f32)>,
+    pub way_seen: u64,
+    /// T2 (§ 4): this frame's bodies whose way ahead did not reach their newer place (drawn as a jump, not a slide
+    /// through the block), for the HUD
+    pub no_way: usize,
 }
 
 /// A 64-bit mix (splitmix64's finaliser): the per-id picks.
@@ -263,18 +272,34 @@ impl SimFrame {
     }
 }
 
-/// The place `u` (0..1) of the way from `from` to `to`: along `ahead` when it reaches `to` (the street's corners),
-/// else straight.
-fn along(from: [f32; 2], ahead: &[[f32; 2]], to: [f32; 2], u: f32) -> [f32; 2] {
+/// The place `u` (0..1) of the way from `from` to `to`: along `ahead` when it reaches `to` (the street's corners; T2:
+/// the whole way when it ends there, a stitched frame's path over many ticks), else, a step apart, straight; else
+/// (T2, docs/TIME_MODEL.md § 4: no slide through the block) a jump at the pair's middle, the sim's own (a placement),
+/// counted in `.1`.
+fn along(from: [f32; 2], ahead: &[[f32; 2]], to: [f32; 2], u: f32) -> ([f32; 2], bool) {
     let lerp = |a: [f32; 2], b: [f32; 2], k: f32| [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
-    let Some(end) = ahead.iter().position(|p| *p == to) else { return lerp(from, to, u) };
-    let pts: Vec<[f32; 2]> = std::iter::once(from).chain(ahead[..=end].iter().copied()).collect();
+    let end = if ahead.last() == Some(&to) { Some(ahead.len() - 1) } else { ahead.iter().position(|p| *p == to) };
+    let Some(end) = end else {
+        let step = (to[0] - from[0]).abs().max((to[1] - from[1]).abs());
+        if step <= 1.5 {
+            return (lerp(from, to, u), false);
+        }
+        return (if u < 0.5 { from } else { to }, true);
+    };
+    (walk_along(from, &ahead[..=end], u, None), false)
+}
+
+/// The point `u` (0..1) of the way `from` then `pts` (or, with `tiles`, that many tiles along it, clamped).
+fn walk_along(from: [f32; 2], pts: &[[f32; 2]], u: f32, tiles: Option<f32>) -> [f32; 2] {
+    let lerp = |a: [f32; 2], b: [f32; 2], k: f32| [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
+    let pts: Vec<[f32; 2]> = std::iter::once(from).chain(pts.iter().copied()).collect();
     let len = |a: [f32; 2], b: [f32; 2]| ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
     let total: f32 = pts.windows(2).map(|w| len(w[0], w[1])).sum();
+    let to = *pts.last().unwrap_or(&from);
     if total <= 0.0 {
         return to;
     }
-    let mut left = total * u.clamp(0.0, 1.0);
+    let mut left = tiles.map_or(total * u.clamp(0.0, 1.0), |t| t.clamp(0.0, total));
     for w in pts.windows(2) {
         let l = len(w[0], w[1]);
         if left <= l && l > 0.0 {
@@ -448,6 +473,9 @@ impl Sim {
             capsules: false,
             subject_indoors: None,
             clock_tick: None,
+            way: None,
+            way_seen: 0,
+            no_way: 0,
             rails,
             lots: crate::lots::Lots::load(chunk_dir),
             cfg: citysim::config::ViewCfg::default(),
@@ -491,6 +519,9 @@ impl Sim {
             capsules: false,
             subject_indoors: None,
             clock_tick: None,
+            way: None,
+            way_seen: 0,
+            no_way: 0,
             rails,
             lots: crate::lots::Lots::load(chunk_dir),
             cfg: citysim::config::ViewCfg::default(),
@@ -527,10 +558,32 @@ impl Sim {
             self.live_seq = latest.seq;
             self.subject = Some(ekey(latest.subject));
             self.caption = latest.caption.clone();
+            // T2 (§ 4): the sim thread publishes the next frame once this one is taken
+            live.taken.fetch_max(latest.seq, std::sync::atomic::Ordering::Relaxed);
+            if std::env::var_os("CV_LERP_DEBUG").is_some() {
+                // OPEN-304's teleport: before T2 the lerp ran at the rate alone, `u` = elapsed x rate, whatever the speed
+                let old_u = prev.as_ref().map(|p| (latest.at - p.at).as_secs_f32() * live.rate());
+                info!(
+                    "lerp: frame {} from {} over {:.2} s; the old lerp (u = elapsed x rate) had reached u {:?} of the last pair when this one came",
+                    latest.frame.tick,
+                    latest.from_tick,
+                    latest.span_s,
+                    old_u.map(|u| (u * 1000.0).round() / 1000.0)
+                );
+            }
+        }
+        // T2 (§ 5): a click's way, begun at the view's game time now
+        let way = live.way.lock().unwrap().clone();
+        match way {
+            Some(w) if w.seq != self.way_seen => {
+                self.way_seen = w.seq;
+                self.way = Some((w.seq, w.tiles.iter().map(|t| tf(*t)).collect(), 0.0, w.tiles_per_tick));
+            }
+            None => self.way = None,
+            _ => {}
         }
         self.rate = live.rate();
-        let held = live.hold.load(std::sync::atomic::Ordering::Relaxed) != u64::MAX;
-        Some(if held { 1.0 } else { (latest.at.elapsed().as_secs_f32() * self.rate).clamp(0.0, 1.0) })
+        Some(live.lerp_u(&latest))
     }
 
     /// A tile's centre in city metres, plus a jitter inside the tile fixed per id (bodies on one tile spread out).
@@ -843,6 +896,18 @@ pub fn update_sim(
     // the newer frame's bodies, each lerped from its place in the older one along the older's way ahead (at u = 1
     // exactly the newer frame: a bench's shot shows its tick)
     let prev_a: HashMap<u64, ([f32; 2], Vec<[f32; 2]>)> = sim.frames[i].agents.iter().map(|a| (a.id, (a.t, a.ahead.clone()))).collect();
+    // T2 (docs/TIME_MODEL.md § 4): who was on the street in the older frame (a body that went in at a door between the
+    // two is drawn walking to the door, then hidden)
+    let prev_out: HashMap<u64, f32> =
+        sim.frames[i].agents.iter().filter(|a| !a.indoors && a.aboard.is_none()).map(|a| (a.id, a.floor)).collect();
+    let mut no_way = 0usize;
+    // T2 (§ 5): the view's game time (the subject's click way is walked in it), the way, and whether it ends here
+    let pace = sim.live.as_ref().map_or(0.0, |l| l.tick_rate());
+    if let Some(w) = sim.way.as_mut() {
+        w.2 += time.delta_secs() * w.3 * pace;
+    }
+    let click_way = sim.way.clone();
+    let mut way_over = false;
     // C7: a climbing body's storey lerped from the older frame's
     let prev_floor: HashMap<u64, f32> = sim.frames[i].agents.iter().map(|a| (a.id, a.floor)).collect();
     let floor_of = |a: &Agent| prev_floor.get(&a.id).map_or(a.floor, |f| f + (a.floor - f) * u);
@@ -902,6 +967,21 @@ pub fn update_sim(
     let mut cab: Option<(Vec2, f32, Option<crate::lots::Placed>)> = None;
     let (mut hidden_in, mut deck_miss, mut spread_n) = (0usize, 0usize, 0usize);
     for a in &fr_agents {
+        // T2 (§ 4): going in at a door inside the pair: on the street to the door until the newer frame, then inside
+        let entering = a.indoors && u < 1.0 && prev_out.contains_key(&a.id);
+        let walk_in;
+        let a = if entering {
+            let mut x = a.clone();
+            x.indoors = false;
+            x.b = None;
+            x.rect = None;
+            x.climb = None;
+            x.floor = prev_out[&a.id];
+            walk_in = x;
+            &walk_in
+        } else {
+            a
+        };
         lods[a.lod as usize] += 1;
         // the way ahead's heading (compass degrees -> Bevy yaw about +y, heading 0 = -z), else the last one drawn
         let yaw =
@@ -936,6 +1016,8 @@ pub fn update_sim(
             subject_in = a.aboard;
         }
         if a.indoors {
+            // T2: the click way ends at a door gone through (or a ride)
+            way_over |= is_subject;
             // C6a: on its floor, seen only in the cut (above)
             indoors += 1;
             let f = floor_of(a);
@@ -993,13 +1075,35 @@ pub fn update_sim(
             continue;
         }
         if a.aboard.is_some() {
+            way_over |= is_subject;
             // drawn inside its vehicle (below)
             aboard += 1;
             continue;
         }
         street += 1;
         *on_tile.entry((a.t[0] as i32, a.t[1] as i32)).or_default() += 1;
-        let t = prev_a.get(&a.id).map_or(a.t, |(p, ah)| along(*p, ah, a.t, u));
+        let (mut t, jump) = prev_a.get(&a.id).map_or((a.t, false), |(p, ah)| along(*p, ah, a.t, u));
+        no_way += usize::from(jump);
+        // T2 (§ 5): the subject on its click way walks it from the click, until the frames reach its end or leave it
+        let mut yaw = yaw;
+        if is_subject && let Some((_, way, walked, _)) = click_way.as_ref() {
+            let on_way = way.contains(&a.t);
+            let end = *way.last().unwrap_or(&a.t);
+            let done = (t[0] - end[0]).abs() < 0.05 && (t[1] - end[1]).abs() < 0.05;
+            if !on_way || done {
+                way_over = true;
+            } else {
+                let d = *walked;
+                let w = walk_along(way[0], &way[1..], 0.0, Some(d));
+                let ahead = walk_along(way[0], &way[1..], 0.0, Some(d + 0.5));
+                let (dx, dy) = (ahead[0] - w[0], w[1] - ahead[1]);
+                if dx.abs() + dy.abs() > 1e-3 {
+                    yaw = -dx.atan2(dy);
+                    sim.yaw_of.insert(a.id, yaw);
+                }
+                t = w;
+            }
+        }
         let mut p = sim.metres(t, a.id, true);
         // V4: a crowd standing on one tile spreads over the walkable ground round it, a place fixed per id
         let n = standing.get(&(a.t[0] as i32, a.t[1] as i32)).copied().unwrap_or(0);
@@ -1062,6 +1166,9 @@ pub fn update_sim(
         }
     }
     sim.subject_indoors = subject_indoors;
+    if way_over && sim.way.as_ref().map(|w| w.0) == click_way.as_ref().map(|w| w.0) {
+        sim.way = None;
+    }
     let fr_veh: Vec<Vehicle> = sim.frames[j].vehicles.clone();
     // V4: the riders' looks (a rider whose vehicle is outside the ring is not in the frame: a look by its id)
     let looks: HashMap<u64, Agent> = fr_agents.iter().filter(|a| a.aboard.is_some()).map(|a| (a.id, a.clone())).collect();
@@ -1075,7 +1182,8 @@ pub fn update_sim(
     for v in &fr_veh {
         by_ride[v.ride as usize] += 1;
         riders += usize::from(v.riders);
-        let t = prev_v.get(&v.id).map_or(v.t, |(q, ah)| along(*q, ah, v.t, u));
+        let (t, jump) = prev_v.get(&v.id).map_or((v.t, false), |(q, ah)| along(*q, ah, v.t, u));
+        no_way += usize::from(jump);
         let p = sim.metres(t, v.id, false);
         // heading: from the older place to the newer, else along the newer's way ahead
         let to = |a: [f32; 2]| sim.metres(a, v.id, false);
@@ -1321,6 +1429,7 @@ pub fn update_sim(
         subject_at = Some((Vec3::new(p.x, p.y, stream.ground_z(p.x, p.y).unwrap_or(0.0)), 0.0));
     }
     sim.subject_at = subject_at;
+    sim.no_way = no_way;
     let stack = on_tile.values().copied().max().unwrap_or(0);
     let f = &sim.frames[j];
     let follow = if sim.live.is_some() { format!("\nfollowing {}  (R reload config)", sim.caption) } else { String::new() };
@@ -1332,7 +1441,7 @@ pub fn update_sim(
     let follow = if signs > 0 { format!("{follow}\nsigns {signs} (lit {lit_n}, founded today {fresh_n})") } else { follow };
     // V4: what the subject is doing (a climb, a ride, its storey's z), the riders drawn, the crowd spread
     let follow = if subj_line.is_empty() { follow } else { format!("{follow}\n{subj_line}") };
-    let follow = format!("{follow}\nriders drawn {riders_drawn}, bodies spread off a shared tile {spread_n}");
+    let follow = format!("{follow}\nriders drawn {riders_drawn}, bodies spread off a shared tile {spread_n}, jumps (no way) {no_way}");
     let tick_now = f.tick;
     sim.hud = format!(
         "sim tick {} {}  agents {} (street {street}, most on a tile {stack}, indoors {indoors} ({hidden_in} hidden), aboard {aboard}, off a deck {deck_miss}; Full {} Coarse {} Stat {})  vehicles car {} van {} train {} flyer {} foot {} ({riders} aboard)  events {}",

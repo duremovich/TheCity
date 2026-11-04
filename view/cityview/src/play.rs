@@ -49,6 +49,12 @@
 //! game`, `nobody I` (play the I-th nobody of the list), `look I`, `fresh`, `newcity`, `save NAME`, `load NAME`,
 //! `provoke [lethal]` (the adult near you with the best odds goes for you: a proof's cheat), `unpause`, `autopause
 //! on|off`, `await idle|player`; a line's tick `*` is the line before's (the next frame).
+//!
+//! T2 (docs/TIME_MODEL.md, the clock): the speed row reads multiples of the walk-matched rate (1x a body walks
+//! `[view] walk_m_s`), on one line, and while auto-speed runs why ("auto: asleep, 600x"); auto-speed's tick box sits
+//! by the auto-pause's in the HUD and in the Esc menu. Script: `live SECS` (the sim runs paced at the speed for that
+//! many real seconds, auto-speed and all, where the other lines hold it to their ticks), `autospeed on|off`, `click
+//! ~DX,DY` (the tile that far from the subject's).
 
 use bevy::{
     app::AppExit,
@@ -123,6 +129,8 @@ pub struct Play {
     /// M18 P5: a load was sent: once done, play goes on if the save held a body, else the pick.
     pending_load: bool,
     saves_dir: PathBuf,
+    /// T2: a script's `live SECS`: paced play until then.
+    live_until: Option<Instant>,
 }
 
 /// C5: a body's procedural pose on the existing rig: a lunge at `toward` or a stagger away from it.
@@ -195,6 +203,7 @@ pub fn add(app: &mut App, shared: Arc<Shared>, vcfg: &citysim::config::ViewCfg, 
             epoch_seen: 0,
             pending_load: false,
             saves_dir: slice.unwrap_or_default(),
+            live_until: None,
         })
         .add_systems(Update, (keys, click, run_script))
         .add_systems(EguiPrimaryContextPass, (hud, menu, board, news, day_end, death, fight, wounds, replay, start_menu, help));
@@ -415,6 +424,15 @@ fn run_script(
     }
     // the frame's tick: the HUD's state was published with it
     let Some(tick) = sim.clock_tick else { return };
+    // T2: a `live SECS`: paced play (no hold) until then, auto-speed and all
+    if let Some(u) = p.live_until {
+        if Instant::now() < u {
+            p.shared.hold.store(u64::MAX, Ordering::Relaxed);
+            return;
+        }
+        p.live_until = None;
+        info!("play script live: over at frame {tick}");
+    }
     // C5: a `wait SECS`: the sim runs on to the next later line's tick (a fight's beats a `beat_s` apart) until then
     if let Some((u, later)) = p.wait_until {
         if Instant::now() < u {
@@ -441,8 +459,18 @@ fn run_script(
     }
     match verb {
         "click" => {
+            // T2: `click ~DX,DY`: that far from the subject's tile
+            let (rel, arg) = arg.strip_prefix('~').map_or((false, arg), |a| (true, a));
             let (x, y) = arg.split_once(',').expect("click TX,TY");
-            let t: [f32; 2] = [x.trim().parse().expect("click TX"), y.trim().parse().expect("click TY")];
+            let mut t: [f32; 2] = [x.trim().parse().expect("click TX"), y.trim().parse().expect("click TY")];
+            if rel {
+                let Some(me) = sim.subject.and_then(|k| sim.frames.last()?.agents.iter().find(|a| a.id == k).map(|a| a.t)) else {
+                    warn!("play script click ~{arg}: no subject drawn");
+                    return;
+                };
+                t = [me[0] + t[0], me[1] + t[1]];
+                info!("play script click ~{arg}: the tile ({}, {})", t[0], t[1]);
+            }
             let m = Vec2::new(sim.x0 + (t[0] + 0.5) * sim.tile_m, sim.y1 - (t[1] + 0.5) * sim.tile_m);
             // the top of what stands there (a lot's box, a roof), else the ground: what a player clicks on
             let ground = stream.ground_z(m.x, m.y).unwrap_or(view.ground_z);
@@ -737,19 +765,20 @@ fn run_script(
         "provoke" => p.shared.send(UiCmd::Provoke(arg == "lethal")),
         "unpause" => p.shared.paused.store(false, Ordering::Relaxed),
         "autopause" => p.shared.autopause.store(arg == "on", Ordering::Relaxed),
+        // T2: auto-speed's toggle; paced play for SECS real seconds
+        "autospeed" => p.shared.auto_on.store(arg == "on", Ordering::Relaxed),
+        "live" => {
+            let secs: f32 = arg.parse().expect("live SECS");
+            p.live_until = Some(Instant::now() + Duration::from_secs_f32(secs.max(0.0)));
+            p.shared.hold.store(u64::MAX, Ordering::Relaxed);
+        }
         o => panic!("--play: unknown action '{o}'"),
     }
 }
 
-/// P5b: a play speed in game time per real time (the speed is game minutes per real minute).
+/// T2 (docs/TIME_MODEL.md § 2): a play speed as a multiple of the walk-matched rate (1x: a body walks at a walk).
 fn speed_label(s: f64) -> String {
-    if s < 60.0 {
-        format!("{s:.0} min/min")
-    } else if s < 3600.0 {
-        format!("{:.0} h/min", s / 60.0)
-    } else {
-        format!("{:.0} h/s", s / 3600.0)
-    }
+    format!("{s:.0}x")
 }
 
 fn bar(ui: &mut bevy_egui::egui::Ui, name: &str, v: f32) {
@@ -791,6 +820,8 @@ fn hud(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
     let paused = p.shared.paused.load(Ordering::Relaxed);
     let alert = p.shared.slice.lock().unwrap().alert.clone();
     let mut autopause = p.shared.autopause.load(Ordering::Relaxed);
+    let mut autospeed = p.shared.auto_on.load(Ordering::Relaxed);
+    let auto_line = p.shared.auto_line.lock().unwrap().clone();
     let speeds = p.speeds.clone();
     let speed_i = p.speed_i;
     let mut speed_to = None;
@@ -815,15 +846,18 @@ fn hud(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
                 if h.autopilot { "AUTOPILOT" } else { "you drive" },
                 if paused { "   PAUSED" } else { "" }
             ));
-            // P5b: the clock's speed, every step a button
-            ui.horizontal_wrapped(|ui| {
+            // P5b: the clock's speed, every step a button; T2: multiples on one line, and auto-speed's why
+            ui.horizontal(|ui| {
                 ui.label("speed:");
                 for (i, s) in speeds.iter().enumerate() {
-                    if ui.selectable_label(i == speed_i, speed_label(*s)).clicked() {
+                    if ui.selectable_label(i == speed_i && auto_line.is_empty(), speed_label(*s)).clicked() {
                         speed_to = Some(i);
                     }
                 }
             });
+            if !auto_line.is_empty() {
+                ui.colored_label(egui::Color32::from_rgb(120, 200, 255), format!("auto: {auto_line}"));
+            }
             // M18 P5: the auto-pause's reason while the clock it stopped is stopped
             if let Some(a) = &alert {
                 ui.colored_label(egui::Color32::from_rgb(255, 120, 90), format!("PAUSED: {a} (Space goes on)"));
@@ -896,6 +930,14 @@ fn hud(mut contexts: EguiContexts, mut p: ResMut<Play>) -> Result {
                 .changed()
             {
                 p.shared.autopause.store(autopause, Ordering::Relaxed);
+            }
+            // T2: auto-speed's toggle
+            if ui
+                .checkbox(&mut autospeed, "run the clock fast while nothing happens")
+                .on_hover_text("asleep, at work, riding, queued, serving time: back to your speed when it ends or someone comes")
+                .changed()
+            {
+                p.shared.auto_on.store(autospeed, Ordering::Relaxed);
             }
             ui.small("click: a person or a building for its menu, the street to walk");
         },
@@ -1678,6 +1720,16 @@ fn start_menu(mut contexts: EguiContexts, mut p: ResMut<Play>, mut exit: Message
                 if ui.button("Quit the game").clicked() {
                     go = Some(4);
                 }
+                // T2: the clock's two tick boxes (the HUD has them too)
+                ui.separator();
+                let mut ap = p.shared.autopause.load(Ordering::Relaxed);
+                if ui.checkbox(&mut ap, "stop the clock when someone goes for me").changed() {
+                    p.shared.autopause.store(ap, Ordering::Relaxed);
+                }
+                let mut au = p.shared.auto_on.load(Ordering::Relaxed);
+                if ui.checkbox(&mut au, "run the clock fast while nothing happens").changed() {
+                    p.shared.auto_on.store(au, Ordering::Relaxed);
+                }
                 ui.separator();
                 ui.small("Death is for good: the city goes on, and you pick another nobody. Save to come back.");
                 busy(ui);
@@ -1719,7 +1771,7 @@ fn help(mut contexts: EguiContexts, p: Res<Play>) -> Result {
             );
             ui.small(
                 "Backspace: stop.   Esc: menu (save, load, quit).   Right-drag or Q / E: turn the camera, wheel: zoom.   \
-                 The clock stops by itself when someone goes for you (the HUD's tick box).",
+                 The clock stops by itself when someone goes for you, and runs fast while you sleep or work (the HUD's tick boxes).",
             );
         });
     });

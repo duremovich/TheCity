@@ -114,8 +114,11 @@ fn run(a: RecArgs, sh: Arc<Shared>) {
             }
             seq += 1;
             let caption = format!("{}\n{}", cur.1, camera_line(&cur.0, h.view));
-            let p = Arc::new(Published { frame: cur.0.clone(), subject: h.subject, caption, at: Instant::now(), seq });
             let mut s = sh.slots.lock().unwrap();
+            // T2: a frame a tick at the recording's rate (its ways ahead are the recorded tick's)
+            let from_tick = s.latest.as_ref().map_or(tick.saturating_sub(1), |l| l.frame.tick);
+            let span_s = (tick.saturating_sub(from_tick).max(1) as f64 / rate.max(1e-9)) as f32;
+            let p = Arc::new(Published { frame: cur.0.clone(), subject: h.subject, caption, at: Instant::now(), seq, from_tick, span_s });
             s.prev = s.latest.take();
             s.latest = Some(p);
             next_at = next_at.max(Instant::now());

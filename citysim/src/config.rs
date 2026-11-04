@@ -856,8 +856,8 @@ pub struct ViewCfg {
     /// The recording's gzip level (0-9; flate2's `Compression`).
     pub record_gzip_level: u32,
     /// M18 P1 (cityview's player HUD): the play speeds, multiples of the
-    /// walk-matched rate, the `,` / `.` keys step through (the first is the
-    /// start).
+    /// walk-matched rate (1x: a body on screen walks `walk_m_s`), the `,` /
+    /// `.` keys step through (T2, docs/TIME_MODEL.md § 2).
     pub play_speeds: Vec<f64>,
     /// M18 P1: a click farther than this many metres along the camera ray
     /// hits nothing.
@@ -919,9 +919,22 @@ pub struct ViewCfg {
     pub autopause: bool,
     pub autopause_tiles: u16,
     pub away_s: f64,
-    /// P5b: a slice game (a new one, a load) starts at this index of `play_speeds` (the first, a game minute a real
-    /// minute, looks frozen).
+    /// P5b: a slice game (a new one, a load) starts at this index of `play_speeds` (T2: 0, 1x).
     pub start_speed_i: usize,
+    /// T2 (docs/TIME_MODEL.md § 3): auto-speed. Through a stretch of the possessed body's day with nothing to watch
+    /// (asleep, on shift inside, riding, queued, serving time, an autopilot indoor activity) the clock runs at
+    /// `auto_speed` x the walk-matched rate (capped by what the sim thread manages), ramped over `auto_ramp_s` real
+    /// seconds each way; `auto_speed_on` is the toggle's start.
+    pub auto_speed: f64,
+    pub auto_ramp_s: f64,
+    pub auto_speed_on: bool,
+    /// T2 (§ 4): when the render thread falls behind the sim thread, a published frame carries the ways walked over
+    /// at most this many ticks (then it is published anyway).
+    pub trail_max_ticks: u32,
+    /// T2 (§ 4): a body whose way ahead does not reach its next drawn place (a walk begun inside the tick, a door
+    /// left) has the street way between the two searched when they lie within this many tiles; farther it is a
+    /// jump in the sim (a placement), drawn as one.
+    pub trail_repair_tiles: u16,
     /// M18 P5: a play script's `provoke lethal` (a proof's cheat, never the
     /// player's): the fight's kill chance on a loss.
     pub provoke_kill_p: f32,
@@ -990,7 +1003,7 @@ impl Default for ViewCfg {
             crowd_gap_m: 0.9,
             record_half_tiles: 48,
             record_gzip_level: 6,
-            play_speeds: vec![1.0, 60.0, 600.0, 3600.0, 14400.0],
+            play_speeds: vec![1.0, 2.0, 5.0, 20.0, 60.0],
             pick_reach_m: 3000.0,
             pick_step_m: 0.5,
             pick_snap_tiles: 2,
@@ -1035,7 +1048,12 @@ impl Default for ViewCfg {
             autopause: true,
             autopause_tiles: 8,
             away_s: 30.0,
-            start_speed_i: 1,
+            start_speed_i: 0,
+            auto_speed: 600.0,
+            auto_ramp_s: 1.0,
+            auto_speed_on: true,
+            trail_max_ticks: 60,
+            trail_repair_tiles: 64,
             provoke_kill_p: 1.0,
         }
     }
