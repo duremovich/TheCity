@@ -70,8 +70,9 @@ lift hop: a 17 m one-frame drop -> over ten ticks (`floor_pop` 78 -> 59 at 5x, 1
 
 ## Next, in order
 
-1. **Dylan watches the reel**, then plays 30 minutes cold (the slice's exit, skipped this session):
-   `cargo run --release -p cityview -- --slice`. His notes become OPEN rows owned by the next pass.
+1. **The next session opens with the reel and the cold play** (Dylan 2026-11-04): Dylan has notes on the reel and
+   brings them then; then he plays 30 minutes cold (the slice's exit): `cargo run --release -p cityview -- --slice`.
+   Both sets of notes become OPEN rows, triaged with him before anything is spawned.
 2. The movement rows still open: `OPEN-321` (a walk the view hands a body is re-thought like any plan),
    `322` (the lift hop drawn as a ramp, no car), `323` (the fight's staging snaps; fists pass into the struck), `324`
    (the step off the El jumps at 20x), `309` (the walk onto the car is drawn; check and close), `316` (the zebra:
