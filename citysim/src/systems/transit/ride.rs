@@ -16,6 +16,53 @@ fn walk_leg(world: &World, id: EntityId, target: GotoTarget, lod: Lod) -> ExecSt
     }
 }
 
+/// S1 (`OPEN-309`): stop `stop`'s platform, when it has one.
+pub fn platform_of(world: &World, stop: u16) -> Option<&Platform> {
+    world.transit.net.platforms.get(usize::from(stop))?.as_ref()
+}
+
+/// S1 (`OPEN-309`): a Full rider's walk to stop `stop`: with a platform, the
+/// street to the stairs' (lift's) foot, up them (the portal's run, as any
+/// deck's stairs are walked) and along the deck to the waiting place;
+/// without, to the stop tile.
+fn access_walk(world: &World, id: EntityId, stop: u16) -> Option<ExecState> {
+    let tile = world.transit.net.stops[usize::from(stop)];
+    let plat = platform_of(world, stop).filter(|_| world.big_paths());
+    let Some(plat) = plat else {
+        return crate::exec::walking_goto(world, id, GotoTarget { dest: LocationKey::Street, tile, building: None });
+    };
+    let foot = GotoTarget { dest: LocationKey::Street, tile: plat.foot, building: None };
+    let mut state = crate::exec::walking_goto(world, id, foot)?;
+    if let ExecState::Goto { target, path, levels, .. } = &mut state {
+        // The path is reversed (its last element the next step): the deck's
+        // steps go in at its front, the waiting place first.
+        if levels.len() != path.len() {
+            *levels = vec![0; path.len()];
+        }
+        for &(t, l) in &plat.way {
+            path.insert(0, t);
+            levels.insert(0, l);
+        }
+        target.tile = plat.wait().0;
+    }
+    Some(state)
+}
+
+/// S1 (`OPEN-309`): stand `id` at stop `stop`, on its platform's waiting
+/// place when it has one (boarding or alighting there, level with the car),
+/// else on the stop tile.
+pub(super) fn stand_at_stop(world: &mut World, id: EntityId, stop: u16) {
+    let (tile, level) = match platform_of(world, stop) {
+        Some(p) => p.wait(),
+        None => (world.transit.net.stops[usize::from(stop)], 0),
+    };
+    if let Some(p) = world.comp_mut::<Position>(id) {
+        p.tile = tile;
+        p.building = None;
+        p.floor = level;
+    }
+}
+
 /// A `GoTo` toward `target` starts on foot (no vehicle): ride if `choose`
 /// says so. Files the `Ride` and returns the first leg's state (the walk to
 /// the board stop); `None` walks as before. A no-op with transit off.
@@ -37,10 +84,13 @@ pub fn try_ride(world: &mut World, id: EntityId, target: &GotoTarget, lod: Lod) 
     };
     let (plan_started, plan_step) = plan_key(world, id)?;
     let board_tile = world.transit.net.stops[usize::from(route.board)];
-    let access = GotoTarget { dest: LocationKey::Street, tile: board_tile, building: None };
     let state = match lod {
-        Lod::Full => crate::exec::walking_goto(world, id, access)?,
-        _ => crate::exec::timed_goto(world, id, access),
+        Lod::Full => access_walk(world, id, route.board)?,
+        _ => crate::exec::timed_goto(
+            world,
+            id,
+            GotoTarget { dest: LocationKey::Street, tile: board_tile, building: None },
+        ),
     };
     // The island pass phase 6: the legs the route scheduled.
     let legs =
@@ -174,6 +224,12 @@ pub(super) fn board(world: &mut World, id: EntityId, mut ride: Ride, lod: Lod) {
         }
     }
     count_boarding(world, ride.board, depart);
+    // S1 (`OPEN-309`): the wait is on the platform. A Full rider walked up;
+    // a Coarse one (a timed walk to the stop tile) or one whose way up was
+    // lost stands there now.
+    if platform_of(world, ride.board).is_some() && world.comp::<Position>(id).is_some_and(|p| p.floor == 0) {
+        stand_at_stop(world, id, ride.board);
+    }
     ride.depart = depart;
     ride.arrive = depart + Tick::from(ride.hop_ticks);
     let mut state = ExecState::Ride { target: ride.target.clone(), depart, arrive_tick: ride.arrive };
@@ -205,12 +261,8 @@ fn count_boarding(world: &mut World, stop: u16, at: Tick) {
 pub(super) fn alight(world: &mut World, id: EntityId, ride: &Ride, lod: Lod) {
     world.rides.remove(&id);
     crate::systems::motion::alight_now(world, id);
-    let tile = world.transit.net.stops[usize::from(ride.alight)];
-    if let Some(p) = world.comp_mut::<Position>(id) {
-        p.tile = tile;
-        p.building = None;
-        p.floor = 0;
-    }
+    // S1 (`OPEN-309`): onto the platform (the walk on goes down its stairs).
+    stand_at_stop(world, id, ride.alight);
     if world.commute_start.contains_key(&id) {
         world.transit.rode.insert(id);
     }

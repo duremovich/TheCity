@@ -363,12 +363,8 @@ pub(super) fn transfer(world: &mut World, id: EntityId, mut ride: Ride, lod: Lod
         abandon(world, id, &ride, lod);
         return;
     };
-    let tile = net.stops[usize::from(stop)];
-    if let Some(p) = world.comp_mut::<Position>(id) {
-        p.tile = tile;
-        p.building = None;
-        p.floor = 0;
-    }
+    // S1 (`OPEN-309`): across to the next train's platform.
+    stand_at_stop(world, id, stop);
     let ready = world.tick + Tick::from(world.config.transit.transfer_ticks);
     let depart = departure_at(world, leg.line, leg.forward, leg.from, ready).filter(|_| !line_cut(world, leg.line));
     let Some(depart) = depart else {

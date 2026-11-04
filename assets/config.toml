@@ -959,14 +959,18 @@ city_ice = 2
 # trashed with a 48 ring, a death or brawl 254 heaped) and capped at 254; an event inside a building
 # lands outside its door. decay 1 and 12 sweepers x clean_per_shift 120 needed no change: the
 # dirtiest district holds 0.26-0.28 (in 0.15-0.50 on 96-98 % of days 14-120, seeds 42-44) and the
-# Vats under 0.01. Effects stay bounded: a step costs at most step_ticks[3] = 2 steps more, a Coarse
+# Vats under 0.01. Effects stay bounded: a step costs at most step_share[3] = 0.4 of a step more (S1), a Coarse
 # walk 1 + timed_mult x share (<= +23 % at 0.46), Sleep safety at most -sleep_penalty (0.15), mood
 # -mood x share (<= -0.09), witnesses x (1 - 0.3 x share) (>= 0.86).
 enabled = true                     # off() = false: no deposits, no delay, no sanitation
 decay = 1
 deposit_mult = 8.0
 visible = 32
-step_ticks = [0, 0, 1, 2]          # per band: clean, littered, trashed, heaped: extra walker steps (round 9 Y4: one tick each before, when a step was a tick; T1: a whole step at the pace, [exec] step_units, so a heap slows a body on screen as before)
+step_share = [0.0, 0.0, 0.2, 0.4]  # per band: clean, littered, trashed, heaped: the share of a walker step ([exec] step_units)
+                                   # added to a Full mover's step onto it. S1 (OPEN-317): was step_ticks [0, 0, 1, 2], whole
+                                   # steps, and a walker crawled the heap at a Cemetery's door (745-750,596, d21) at a third of
+                                   # the pace on screen; picking a way through rubbish costs a person a fifth to two fifths of a
+                                   # stride (round 9 Y4: one tick each, when a step was a tick)
 timed_mult = 0.5
 sleep_penalty = 0.15
 mood = 0.2
@@ -3506,6 +3510,15 @@ transfer_ticks = 5             # per transfer: the walk across the station (writ
 stop_spacing = 100             # track tiles between stops on a line without stations (besides its waypoints and shared
                                # tiles; a line with stations stops at them, its ends and shared tiles only). Round 9 Y4:
                                # 16 -> 100 (400 m; 16 tiles is 64 m, a stop a block: a minute a stop made the El a walk)
+platform_reach_tiles = 6       # S1 (OPEN-309): a stop's waiting place is the station platform's deck point (a map `P
+                               # platform` end) nearest its stop tile within this Manhattan reach, climbed to by the
+                               # station's stairs or lift (the `P` portal down to the way nearest along the deck): a
+                               # rider waits on the deck, boards and alights there, and walks down after. None in reach
+                               # (a tram stop, a map without portals; 0: off): the wait is on the stop tile, as before.
+                               # 6: the island's El stops sit 0-4 tiles from their platform's nearest deck point
+stop_zebra_margin_tiles = 1    # S1 (OPEN-309): a stop tile snaps off every marked crossing (`X` rect) grown by this many
+                               # tiles: the Mid-Levels and Hillside lines' shared stop at 823,619 stood its riders on the
+                               # painted zebra of 821-824,617-618 (the import's rect a tile off the paint, OPEN-316)
 stop_candidates = 3            # nearest stops tried at each end
 min_ride_tiles = 24            # no ride under this Manhattan distance
 min_saving_ticks = 15

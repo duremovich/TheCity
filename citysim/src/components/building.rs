@@ -297,6 +297,67 @@ impl Building {
         (y0..y1).flat_map(move |y| (x0..x1).map(move |x| TilePos { x: x as u16, y: y as u16 }))
     }
 
+    /// The interior's inclusive bounds `(x0, y0, x1, y1)`; `None` for a
+    /// rect under 3 x 3 (no tile inside the perimeter).
+    fn interior_bounds(&self) -> Option<(u16, u16, u16, u16)> {
+        let r = self.rect;
+        (r.w >= 3 && r.h >= 3).then(|| (r.x + 1, r.y + 1, r.x + r.w - 2, r.y + r.h - 2))
+    }
+
+    /// S1 (`OPEN-307`): the interior tile just inside the door (the door
+    /// clamped into the interior); `None` with no interior.
+    pub fn inside_door(&self) -> Option<TilePos> {
+        let (x0, y0, x1, y1) = self.interior_bounds()?;
+        Some(TilePos::new(self.door.x.clamp(x0, x1), self.door.y.clamp(y0, y1)))
+    }
+
+    /// S1 (`OPEN-307`): one interior tile from `from` toward the door
+    /// (along the axis with more to go, x on a tie); `None` at the tile just
+    /// inside the door (or with no interior).
+    pub fn step_to_door(&self, from: TilePos) -> Option<TilePos> {
+        let to = self.inside_door()?;
+        let (dx, dy) = (i32::from(to.x) - i32::from(from.x), i32::from(to.y) - i32::from(from.y));
+        if dx == 0 && dy == 0 {
+            return None;
+        }
+        Some(if dx.abs() >= dy.abs() {
+            TilePos::new((i32::from(from.x) + dx.signum()) as u16, from.y)
+        } else {
+            TilePos::new(from.x, (i32::from(from.y) + dy.signum()) as u16)
+        })
+    }
+
+    /// S1 (`OPEN-307`): the interior tile nearest the door (Manhattan, ties
+    /// the lower `(y, x)`) not in `taken` (sorted); every one taken: the
+    /// tile just inside the door. `None` with no interior.
+    pub fn slot_by_door(&self, taken: &[TilePos]) -> Option<TilePos> {
+        let (x0, y0, x1, y1) = self.interior_bounds()?;
+        let inside =
+            |x: i32, y: i32| x >= i32::from(x0) && x <= i32::from(x1) && y >= i32::from(y0) && y <= i32::from(y1);
+        let (dx0, dy0) = (i32::from(self.door.x), i32::from(self.door.y));
+        let far = i32::from(self.rect.w) + i32::from(self.rect.h);
+        for d in 1..=far {
+            let mut best: Option<TilePos> = None;
+            for dy in -d..=d {
+                let rest = d - dy.abs();
+                for dx in if rest == 0 { [0, 0] } else { [-rest, rest] } {
+                    let (x, y) = (dx0 + dx, dy0 + dy);
+                    if !inside(x, y) {
+                        continue;
+                    }
+                    let t = TilePos::new(x as u16, y as u16);
+                    if taken.binary_search(&t).is_err() && best.is_none_or(|b| (t.y, t.x) < (b.y, b.x)) {
+                        best = Some(t);
+                    }
+                }
+            }
+            if best.is_some() {
+                return best;
+            }
+        }
+        self.inside_door()
+    }
+
     pub fn is_full(&self) -> bool {
         self.occupants.len() >= usize::from(self.capacity)
     }

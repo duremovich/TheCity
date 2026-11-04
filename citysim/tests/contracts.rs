@@ -601,6 +601,12 @@ fn test_guard_intercepts_attack_on_client() {
     let id = contracts::post(&mut w, posting(client, ContractKind::Guard, client, None)).expect("posted");
     assert!(contracts::accept(&mut w, id, g, &[]));
     contracts::on_guard_start(&mut w, g, Some(client));
+    // S1: the client out on the street first, the guard and the attacker on
+    // its tile (its interior slot is the door's nearest free, not one tile in).
+    w.leave_building(client);
+    if let Some(pp) = w.comp_mut::<Position>(client) {
+        pp.building = None;
+    }
     let tile = w.comp::<Position>(client).map(|p| p.tile).unwrap_or_default();
     for a in [g, attacker] {
         w.leave_building(a);
@@ -608,10 +614,6 @@ fn test_guard_intercepts_attack_on_client() {
             pp.tile = tile;
             pp.building = None;
         }
-    }
-    w.leave_building(client);
-    if let Some(pp) = w.comp_mut::<Position>(client) {
-        pp.building = None;
     }
     assert_eq!(contracts::guard_for(&w, attacker, client), Some(g), "on post beside the client");
     let before = w.events.len();
