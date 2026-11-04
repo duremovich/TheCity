@@ -54,10 +54,15 @@ driven (P5). P5h made the existing Capsule Hotel the hostel rather than a new bu
 
 ## Next, in order
 
-0. **The time model** (`OPEN-304`, `docs/TIME_MODEL.md`, Dylan 2026-11-03): the day compressed 6x (4 real hours
-   at 1x), the sim's walk 21 -> 3.5 tiles a game minute (lives shrink in space, not time). T1 the pace (sim: the
-   pace, transport, every walk-timed number, what the shrink breaks) and T2 the clock (view: speeds, auto-speed, no
-   teleports, the body moving at the click), in flight in parallel, before the cold play.
+0. **The time model is built** (`OPEN-304`, `docs/TIME_MODEL.md`): T1 the pace (`9f4b0d2`: the walk 3.5 tiles a game
+   minute, the El, stairs, lifts and crossings x6, the letting desk by trip, `SAVE_VERSION` 135, the slice save
+   remade) and T2 the clock (`ff75885`: 1x a 4-hour day, steps 1/2/5/20/60, auto-speed to 600x through stretches,
+   no teleports: the lerp had ignored the play speed, the body moving at the click). Reads wrong, for after the play:
+   long commutes for workers placed before the shrink (a 151-min ride, a teacher late at 09:05), 15% of raid marchers
+   still miss, a Sump arrest costs a guard ~1.5 h (one Precinct), tower stairs 2 h to floor 40, the drawn body up to a
+   tick ahead of the sim (a mid-walk click snaps it back), the big building's 15-tile door hop now visible. Violence
+   ~0.5x is a FINDING (Dylan: tweak later). `OPEN-305` (no School out of reach), `306` (the Stat table at the pace:
+   the regen cut off-screen murders 40 -> 1, the old table kept).
 1. **Dylan plays 30 minutes cold** (the slice's exit): `cargo run --release -p cityview -- --slice`. His notes
    become OPEN rows owned by the next pass; triage them with him before spawning anything.
 2. The slice rows that play confirms: `OPEN-298` (fist fights thin), `299` (the guard in Bar#5956 arrests
