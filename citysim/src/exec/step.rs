@@ -29,8 +29,8 @@ pub(super) fn emigrate_step(world: &mut World, id: EntityId) {
     let lod = brain.lod;
     let state = brain.exec.clone();
     let result = match state {
-        ExecState::Goto { target, path, next_move_tick, blocked_since, carry_q, levels } => {
-            advance_goto(world, id, target, path, levels, next_move_tick, blocked_since, carry_q)
+        ExecState::Goto { target, path, next_move_tick, blocked_since, carry_q, levels, hop } => {
+            advance_goto(world, id, target, path, levels, next_move_tick, blocked_since, carry_q, hop)
         }
         ExecState::GotoTimed { target, arrive_tick, blocked_since, .. } => {
             if tick < arrive_tick {
@@ -46,8 +46,15 @@ pub(super) fn emigrate_step(world: &mut World, id: EntityId) {
                 if let Some(p) = world.comp_mut::<Position>(id) {
                     p.floor = 0;
                 }
-                let state =
-                    ExecState::Goto { target, path, next_move_tick: tick, blocked_since: None, carry_q: 0, levels };
+                let state = ExecState::Goto {
+                    target,
+                    path,
+                    next_move_tick: tick,
+                    blocked_since: None,
+                    carry_q: 0,
+                    levels,
+                    hop: None,
+                };
                 if let Some(b) = world.comp_mut::<Brain>(id) {
                     b.exec = state;
                 }
@@ -210,8 +217,8 @@ fn step_agent_at(world: &mut World, id: EntityId, chained: bool) {
 
     let result = match state {
         ExecState::Idle => start_step(world, id, &step, lod),
-        ExecState::Goto { target, path, next_move_tick, blocked_since, carry_q, levels } => {
-            advance_goto(world, id, target, path, levels, next_move_tick, blocked_since, carry_q)
+        ExecState::Goto { target, path, next_move_tick, blocked_since, carry_q, levels, hop } => {
+            advance_goto(world, id, target, path, levels, next_move_tick, blocked_since, carry_q, hop)
         }
         // The city milestone C7: the climb at the door, then the GoTo done
         // (up to the storey) or the walk on (down to the door).
@@ -222,7 +229,7 @@ fn step_agent_at(world: &mut World, id: EntityId, chained: bool) {
                 if let Some(p) = world.comp_mut::<Position>(id) {
                     p.floor = 0;
                 }
-                advance_goto(world, id, target, path, levels, tick, None, 0)
+                advance_goto(world, id, target, path, levels, tick, None, 0, None)
             } else {
                 if let Some(p) = world.comp_mut::<Position>(id) {
                     p.floor = to;
@@ -304,6 +311,16 @@ fn step_agent_at(world: &mut World, id: EntityId, chained: bool) {
         }
         // Round 5 U3 (OPEN-235): the soup line waits out the hour's bowls,
         // then retries the step (never done uneaten).
+        // S3 (`OPEN-318`): a patrol's muster (`start::patrol_muster`) waits
+        // inside, then retries the walk.
+        ExecState::Wait { until } if step.action == ActionKind::GoTo(LocationKey::PatrolWaypoint) => {
+            if tick >= until {
+                if let Some(b) = world.comp_mut::<Brain>(id) {
+                    b.exec = ExecState::Idle;
+                }
+            }
+            StepResult::Running
+        }
         ExecState::Wait { until } if step.action == ActionKind::EatAlms => {
             if tick >= until {
                 if let Some(b) = world.comp_mut::<Brain>(id) {

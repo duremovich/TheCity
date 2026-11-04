@@ -390,14 +390,27 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
             let mut route = crate::systems::law::new_patrol_route(world, id);
             // L2 shadow fixes item 10: the round starts at the stop nearest
             // the guard (it walked 3.7-3.9 h from her door to the first).
+            // S3 (`OPEN-318`): one of the `[law] patrol_first_pick` nearest,
+            // by a keyed draw on the guard and the shift, so a Station's
+            // patrolmen set out on different first legs, not as one knot.
             if route.len() > 1 {
                 let from = crate::exec::walk_origin(world, id).unwrap_or_default();
-                let first = route
+                let mut near: Vec<(u32, usize)> = route
                     .iter()
                     .enumerate()
                     .filter_map(|(i, &b)| world.comp::<Building>(b).map(|bd| (bd.door.manhattan(from), i)))
-                    .min()
-                    .map_or(0, |(_, i)| i);
+                    .collect();
+                near.sort_unstable();
+                let pick = world.config.law.patrol_first_pick.max(1).min(near.len().max(1));
+                let k = if pick > 1 {
+                    let h = crate::rng::splitmix64(
+                        (u64::from(id.index) << 24) ^ key.map_or(0, |k| k as u64) ^ 0x5041_5452_0000_0000,
+                    );
+                    (h % pick as u64) as usize
+                } else {
+                    0
+                };
+                let first = near.get(k).map_or(0, |&(_, i)| i);
                 route.rotate_left(first);
             }
             if let Some(b) = world.comp_mut::<Brain>(id) {

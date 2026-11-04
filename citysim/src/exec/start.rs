@@ -27,6 +27,22 @@ fn commute_started(world: &mut World, id: EntityId, target: &GotoTarget) {
     }
 }
 
+/// S3 (`OPEN-318`): when a guard on a shift's first patrol leg (no leg
+/// walked yet) sets out: the Patrol plan's start plus a keyed draw in
+/// `0..=[law] patrol_muster_ticks` on the guard and the shift. `None`: no
+/// muster (the knob 0, a leg walked, not a Patrol plan).
+pub(super) fn patrol_muster(world: &World, id: EntityId) -> Option<Tick> {
+    let spread = world.config.law.patrol_muster_ticks;
+    let b = world.comp::<Brain>(id)?;
+    let plan = b.plan.as_ref().filter(|p| p.goal == crate::components::GoalKind::Patrol)?;
+    if spread == 0 || b.patrol_legs != 0 {
+        return None;
+    }
+    let shift = b.patrol_shift_key.map_or(0, |k| k as u64);
+    let h = crate::rng::splitmix64((u64::from(id.index) << 24) ^ shift ^ 0x4D55_5354_0000_0000);
+    Some(plan.started_tick + h % (spread + 1))
+}
+
 /// M13 D49: an arrival at the workplace adds its ticks and tiles to the
 /// day's walked or driven sums (`commute_tpt_*`).
 pub(super) fn commute_arrived(world: &mut World, id: EntityId, driving: bool) {
@@ -132,6 +148,17 @@ pub(super) fn start_step(
             };
             if already_there {
                 return StepResult::Done;
+            }
+            // S3 (`OPEN-318`): a shift's first patrol leg out of a building
+            // musters (`[law] patrol_muster_ticks`, keyed): the Station's
+            // patrolmen file out, not all through the door on one tick.
+            if key == LocationKey::PatrolWaypoint && pos.building.is_some() {
+                if let Some(until) = patrol_muster(world, id).filter(|&u| u > tick) {
+                    if let Some(b) = world.comp_mut::<Brain>(id) {
+                        b.exec = ExecState::Wait { until };
+                    }
+                    return StepResult::Running;
+                }
             }
             let target = GotoTarget { dest: key, tile, building };
             // L2 shadow fixes item 6: the street fled from is avoided by the

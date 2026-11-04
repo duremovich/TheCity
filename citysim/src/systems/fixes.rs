@@ -508,16 +508,13 @@ pub fn at_spot_with_company(world: &World, id: EntityId) -> bool {
 /// stand steps to the nearest street tile (ground or road, the island's
 /// streets are road; never a door or a wall) within `spot_spill_tiles`
 /// with fewer (ties by a keyed draw), so a corner's crowd stands round it, not on one tile. A
-/// no-op indoors, on a deck, with the cap 0, no room near, or no view (a
-/// headless run: the spot's tile stands, as before).
+/// no-op indoors, on a deck, with the cap 0 or no room near (S3: headless as
+/// with a view, so the shadows read the played street).
 pub fn spread_spot(world: &mut World, id: EntityId, kind: ActionKind) {
     use crate::components::TileKind;
     let (cap, r) = (world.config.life.spot_cap, world.config.life.spot_spill_tiles);
-    // a view's city only: headless, the tile is the spot (the drawn stack is what it fixes; the fixture
-    // cities' scene tests read the street's history as it was)
     if cap == 0
         || r == 0
-        || world.view_rect.is_none()
         || !matches!(
             kind,
             ActionKind::Beg | ActionKind::Scavenge | ActionKind::Sleep | ActionKind::HangOut | ActionKind::Wander
@@ -568,6 +565,21 @@ pub fn spread_spot(world: &mut World, id: EntityId, kind: ActionKind) {
         if let Some(p) = world.comp_mut::<Position>(id) {
             p.tile = t;
         }
+    }
+}
+
+/// S3 (`OPEN-318`): a walk to a street spot (`GoTo(Spot)`) arriving on a
+/// tile `spot_cap` others stand on steps off it at once, as [`spread_spot`]
+/// does at the stay's start (the plan's next step its kind): walkers
+/// arriving together stood on one tile until their stay began. A HangOut
+/// still joins the spot's registry at the spot (`leisure::on_start`).
+pub fn spill_on_arrival(world: &mut World, id: EntityId) {
+    let next = world.comp::<crate::components::Brain>(id).and_then(|b| {
+        let p = b.plan.as_ref()?;
+        p.steps.get(usize::from(b.plan_step) + 1).map(|s| s.action)
+    });
+    if let Some(kind) = next {
+        spread_spot(world, id, kind);
     }
 }
 

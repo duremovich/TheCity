@@ -451,10 +451,10 @@ fn snap_to_phase_door(world: &mut World, id: EntityId, promotion: bool) {
         .or_else(|| world.local(id, BuildingKind::Market));
     if let Some(b) = building {
         world.stand_at_door(id, b);
-        // S2 (the fast pack): with a view, a promotion to the body's own Home or its workplace puts it inside,
-        // where its schedule has it; at the door it stood on the street and the view drew a 12-tile jump to it (a
-        // venue stays a door: its door policy is the walk in's). Headless (no view) the door stands, as before.
-        if promotion && world.view_rect.is_some() && (Some(b) == home || Some(b) == workplace) {
+        // S2 (the fast pack): a promotion to the body's own Home or its workplace puts it inside, where its
+        // schedule has it; at the door it stood on the street and the view drew a 12-tile jump to it (a venue
+        // stays a door: its door policy is the walk in's). S3: headless as with a view (the shadows' city).
+        if promotion && (Some(b) == home || Some(b) == workplace) {
             world.enter_building(id, b);
         }
     }

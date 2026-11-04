@@ -433,6 +433,14 @@ target_margin = 2
 # loop). 60 is the whole v1 city; on the 256 x 192 map a loop over all 400 Homes could not be walked
 # in a shift, so guards on patrol were never credited a shift and starved on full pay.
 patrol_beat_homes = 60
+# S3 (OPEN-318): a shift's patrol loop starts at one of this many stops nearest the guard (a keyed draw on the
+# guard and the shift; 1: the nearest, so a Station's 44 patrolmen all walked the same first leg as a knot of 18
+# on one tile).
+patrol_first_pick = 3
+# S3 (OPEN-318): a guard leaving a building on a shift's first leg sets out up to this many ticks (game minutes)
+# after the plan starts, a keyed draw on the guard and the shift: at 3.5 tiles a minute the Station's door lets
+# out a file over ~35 tiles, not a crowd on one (0: all at once).
+patrol_muster_ticks = 10
 # M10: a guard chases only warrants last seen within this many tiles (v1: no limit). On the 256 x 192
 # map, with a warrant always open somewhere among 2,000 residents, every guard spent a fifth of the
 # day walking across the city after the nearest one, was never credited a shift, and starved.

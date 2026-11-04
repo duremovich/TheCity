@@ -5,7 +5,8 @@
 //! `stir_flee_tiles` off, away from the fight, at the flight's run, `flee_run_mult`), else, on a keyed draw under
 //! `stir_watch_p`, it stops where it stands and watches for `stir_watch_ticks` (its plan given up for a stand);
 //! the rest walk on. The law on duty comes in through the joiners (`recruit`), not here. At most `stir_max` a fight
-//! a tick, with a view only (headless the street walks past, as before). Nobody the human drives, no one cuffed, down, knocked out, sentenced or aboard.
+//! a tick, headless as with a view (S3: the shadows read the played city). Nobody the human drives, no one
+//! cuffed, down, knocked out, sentenced or aboard.
 
 use super::{hash, key, Engagement};
 use crate::components::{ActionInstance, Brain, GoalKind, Lod, Personality, Position, TileKind, TilePos};
@@ -20,8 +21,7 @@ const PURPOSE_STIR: u64 = 0x434F_0009;
 /// The bystanders of `e` (engagement `eid`) react (see the module doc).
 pub(super) fn bystanders(world: &mut World, e: &Engagement, eid: u32) {
     let c = world.config.combat.clone();
-    // a view's city only: headless nobody is watching (the fixture cities' fights keep their history)
-    if c.stir_tiles == 0 || c.stir_max == 0 || world.view_rect.is_none() {
+    if c.stir_tiles == 0 || c.stir_max == 0 {
         return;
     }
     let Some(front) = e.first[0].or(e.first[1]).or_else(|| e.members().next()) else { return };
@@ -85,7 +85,8 @@ fn run_off(world: &mut World, id: EntityId, fight: TilePos, tiles: u16) -> bool 
     true
 }
 
-/// Stops and watches: the plan given up for a stand of `ticks` where it is (a `Rest` step held that long).
+/// Stops and watches: the plan given up for a stand of `ticks` where it is (a `Rest` step held as a plain `Wait`,
+/// S3: no doze's energy, which a Use of Rest gave on its end).
 fn watch(world: &mut World, id: EntityId, ticks: u16) -> bool {
     let now = world.tick;
     world.abort_plan(id);
@@ -96,7 +97,7 @@ fn watch(world: &mut World, id: EntityId, ticks: u16) -> bool {
     if let Some(b) = world.comp_mut::<Brain>(id) {
         b.current_goal = Some(GoalKind::Idle);
         b.goal_since = now;
-        b.exec = ExecState::Use { kind: ActionKind::Rest, until, started: now };
+        b.exec = ExecState::Wait { until };
         b.action_until = until;
     }
     crate::systems::ownership::jobs2_row(world).stir_watched += 1;
