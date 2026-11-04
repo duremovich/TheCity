@@ -47,7 +47,9 @@
 //! Esc menu in play (Resume, Save, Load, Quit to menu, Quit), the death screen's "pick another nobody" into the same
 //! running city, the auto-pause's tick box and banner, and the cold-start help line. Script: `menu main|pick|load|esc|
 //! game`, `nobody I` (play the I-th nobody of the list), `look I`, `fresh`, `newcity`, `save NAME`, `load NAME`,
-//! `provoke [lethal]` (the adult near you with the best odds goes for you: a proof's cheat), `unpause`, `autopause
+//! `provoke [lethal]` (the adult near you on foot with the best odds goes for you: a proof's cheat; R4: with nobody
+//! at hand, the nearest on foot within `[view] provoke_reach_tiles` walks up first, so a film runs on through the
+//! walk at a faster speed, e.g. `speed 2` and a film, before the fight's film at 1x), `unpause`, `autopause
 //! on|off`, `await idle|player`; a line's tick `*` is the line before's (the next frame).
 //!
 //! T2 (docs/TIME_MODEL.md, the clock): the speed row reads multiples of the walk-matched rate (1x a body walks

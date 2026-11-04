@@ -6710,6 +6710,7 @@ beat_s = 1.0                       # while the possessed body is in a live fight
 lunge_s = 0.45                     # C5: the replay's procedural poses on the existing rig: a swing lunges lunge_m toward the
 lunge_m = 0.45                     # struck and leans lunge_deg forward, a hit of a Wound or worse staggers the struck back as
 lunge_deg = 18.0                   # far; each over lunge_s real seconds (a knocked-out or downed body lies flat)
+lunge_sep_m = 0.55                 # R4: a lunge reaches at most half the way to this far from its mark (two at once meet here)
 fight_ring_m = 1.3                 # C5: indoors, the bodies of the subject's fight stand round it this far (metres), facing it
 cue_s = 1.2                        # a beat's cue (a word over a body, a flash) floats this many real seconds
 # M18 P5 (start and loop): the auto-pause (the HUD's toggle): the clock stops when the possessed body is attacked, or
@@ -6720,6 +6721,10 @@ autopause_tiles = 8                # a fight this near the body (Chebyshev tiles
 start_speed_i = 0                  # a slice game (new, loaded) starts at this index of play_speeds (T2: 1x; P5b's 60x went)
 away_s = 30.0                      # the human is away after this many real seconds with no key or click
 provoke_kill_p = 1.0               # a play script's `provoke lethal` (a proof's cheat): the fight's kill chance on a loss
+provoke_reach_tiles = 48           # R4: a `provoke` with nobody on foot at hand ([combat] join_tiles; a rider passing in a bus is
+                                   # never a foe) has the nearest Full adult on foot on the street within this walk up ...
+provoke_at_tiles = 1               # ... and go for the subject once this near it (Chebyshev tiles) ...
+provoke_wait_ticks = 30            # ... or give it up after this many ticks
 # T2 (docs/TIME_MODEL.md § 3, the clock): auto-speed. The clock runs ahead on its own through a stretch of the possessed
 # body's day it does not steer: asleep, on shift inside its workplace, riding (the El, a cab, a van), in a door's queue
 # or at a letting desk, serving time, and an indoor activity on autopilot. A walk never is. It comes back to the

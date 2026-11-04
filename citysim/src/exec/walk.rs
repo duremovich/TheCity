@@ -335,6 +335,36 @@ pub fn stride(world: &World, id: EntityId) -> Option<f32> {
     Some((1.0 - left as f32 / step as f32).clamp(0.0, 1.0))
 }
 
+/// R4 (`OPEN-319`, the view half): a Full walker's walkway hop under way, for the view to draw over its span: the
+/// near end it stands on (tile, deck level), the far end it steps onto when the hop's time is out (the way's next
+/// tile and level), and the share of the hop gone (`stride`, rising 0 -> 1 over the hop; the far end is the body's
+/// place on the tick the share completes). `None`: no hop running.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HopSpan {
+    pub from: TilePos,
+    pub from_level: u8,
+    pub to: TilePos,
+    pub to_level: u8,
+    pub share: f32,
+}
+
+pub fn hop_span(world: &World, id: EntityId) -> Option<HopSpan> {
+    let b = world.comp::<Brain>(id)?;
+    let ExecState::Goto { path, levels, hop: Some(_), .. } = &b.exec else { return None };
+    let p = world.comp::<Position>(id)?;
+    if p.building.is_some() {
+        return None;
+    }
+    let to = *path.last()?;
+    Some(HopSpan {
+        from: p.tile,
+        from_level: p.floor,
+        to,
+        to_level: levels.last().copied().unwrap_or(0),
+        share: stride(world, id)?,
+    })
+}
+
 /// M12 D18: the extra step units before a Full mover's next step off
 /// `tile`, by the tile's litter band (`[litter] step_share`, a share of a
 /// walker step at the pace, `[exec] step_units`; S1, `OPEN-317`: whole

@@ -458,7 +458,8 @@ pub(super) fn recruit(world: &mut World, e: &mut Engagement, id: Option<u32>, co
         if e.joined >= c.join_max {
             break;
         }
-        if e.sides.iter().any(|s| s.contains(&x)) || engaged(world, x) {
+        // R4: nor does a body aboard a passing vehicle jump in
+        if e.sides.iter().any(|s| s.contains(&x)) || engaged(world, x) || world.aboard.contains_key(&x) {
             continue;
         }
         // One fight at a time: a body that joined one lately is not in the next.
@@ -654,7 +655,10 @@ fn go_live(world: &mut World, e: &Engagement) -> bool {
         }
         w.comp::<Brain>(x).map(|b| b.lod)
     };
-    if ids.iter().any(|&x| lod(world, x).is_none() || engaged(world, x)) {
+    // R4: a body aboard a moving vehicle (a bus's rider, a car's) is carried off by it: its fight is never staged
+    // live on the street it passes (the view's provoke picked a rider passing the arrival and fought him from the
+    // bus 20 tiles off, the foe never drawn)
+    if ids.iter().any(|&x| lod(world, x).is_none() || engaged(world, x) || world.aboard.contains_key(&x)) {
         return false;
     }
     let seen = ids.iter().any(|&x| crate::systems::player::drives(world, x) || world.ring.holds(x));

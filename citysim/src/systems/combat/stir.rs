@@ -85,6 +85,28 @@ fn run_off(world: &mut World, id: EntityId, fight: TilePos, tiles: u16) -> bool 
     true
 }
 
+/// R4: `x` comes for `victim` on foot: its plan given up for a walk (a Fight goal) to the victim's street tile; the
+/// caller starts the fight when it is at hand (the view's `provoke` when nobody stands near: a body walks up on
+/// screen instead of a passing rider being fought from the bus). `false`: not both on the street, `x` not free.
+pub fn come_for(world: &mut World, x: EntityId, victim: EntityId) -> bool {
+    let (Some(p), Some(v)) = (world.comp::<Position>(x).cloned(), world.comp::<Position>(victim).cloned()) else {
+        return false;
+    };
+    if p.building.is_some() || v.building.is_some() || world.aboard.contains_key(&x) || !stirrable(world, x, &p, 0) {
+        return false;
+    }
+    world.abort_plan(x);
+    let step = ActionInstance { action: ActionKind::GoTo(LocationKey::Picked), target: None, tile: Some(v.tile) };
+    let plan = Plan { goal: GoalKind::Fight, target: Some(victim), steps: vec![step], started_tick: world.tick };
+    crate::systems::plan::install(world, x, plan);
+    let now = world.tick;
+    if let Some(b) = world.comp_mut::<Brain>(x) {
+        b.current_goal = Some(GoalKind::Fight);
+        b.goal_since = now;
+    }
+    true
+}
+
 /// Stops and watches: the plan given up for a stand of `ticks` where it is (a `Rest` step held as a plain `Wait`,
 /// S3: no doze's energy, which a Use of Rest gave on its end).
 fn watch(world: &mut World, id: EntityId, ticks: u16) -> bool {

@@ -63,6 +63,9 @@ pub struct Published {
     /// Motion V2 (S1's `citysim::exec::stride`, `OPEN-317`): each Full walker's way through its next step at this
     /// frame's tick (0..1, by body key; none: not on a Full walk), drawn at `tile + stride x (next - tile)`
     pub strides: std::collections::HashMap<u64, f32>,
+    /// R4 (`OPEN-319`, S3's timed hop): each Full walker's walkway hop under way at this frame's tick
+    /// (`citysim::exec::hop_span`: near end, far end, the share gone), drawn over its span, place and height
+    pub hops: std::collections::HashMap<u64, citysim::exec::HopSpan>,
 }
 
 /// T2 (§ 5): the possessed body's way from a click, planned between two ticks (`player::way_now`): the tiles from
@@ -1038,6 +1041,8 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
     let mut last_tile = view::subject_tile(&world, subject);
     // C4: a tick's beats were published (its frame goes with them)
     let mut shown_beats = false;
+    // R4: a provoke's foe walking up (`combat::come_for`): who, lethal, and the tick it gives up
+    let mut provoke_pending: Option<(EntityId, bool, u64)> = None;
     // C5, the combat clock: the beats of the subject's fight stepped since the last tick, and the log entries already
     // told (a tick's `last_beats` repeats them)
     let mut stepped = 0u8;
@@ -1229,25 +1234,16 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
                 }
                 UiCmd::Provoke(lethal) => {
                     if let Some(x) = best_body(&world, subject, "strong") {
-                        let (kill_p, why) = if lethal {
-                            (Some(cfg.provoke_kill_p), citysim::systems::combat::Purpose::Raid)
-                        } else {
-                            (None, citysim::systems::combat::Purpose::Brawl)
-                        };
-                        let mods = citysim::systems::law::FightMods { kill_p, why, ..Default::default() };
-                        eprintln!(
-                            "cityview: tick {} provoke: {} goes for {} (kill_p {kill_p:?})",
-                            world.tick,
-                            who(&world, x),
-                            who(&world, subject)
-                        );
-                        citysim::systems::combat::fight(
-                            &mut world,
-                            x,
-                            subject,
-                            mods,
-                            citysim::systems::combat::Tail::Attack { victim: subject },
-                        );
+                        provoke_now(&mut world, x, subject, lethal);
+                    } else if let Some(x) = nearest_on_foot(&world, subject, cfg.provoke_reach_tiles) {
+                        // R4: nobody at hand on foot (the slice's streets at night): the nearest walks up and goes for
+                        // the subject when at hand (below, each tick), on screen
+                        if citysim::systems::combat::come_for(&mut world, x, subject) {
+                            eprintln!("cityview: tick {} provoke: {} comes for {}", world.tick, who(&world, x), who(&world, subject));
+                            provoke_pending = Some((x, lethal, world.tick + u64::from(cfg.provoke_wait_ticks)));
+                        }
+                    } else {
+                        eprintln!("cityview: tick {} provoke: nobody on foot within {} tiles", world.tick, cfg.provoke_reach_tiles);
                     }
                     continue;
                 }
@@ -1555,6 +1551,25 @@ fn run(a: SimArgs, sh: Arc<Shared>) {
             citysim::tick(&mut world);
             crate::lights::log_crossings(&mut world, subject);
             stepped = 0;
+            if let Some((x, lethal, until)) = provoke_pending {
+                let at = |e: EntityId| world.comp::<citysim::Position>(e).filter(|p| p.building.is_none()).map(|p| p.tile);
+                let off = at(x)
+                    .zip(at(subject))
+                    .map(|(a, b)| (i32::from(a.x) - i32::from(b.x)).abs().max((i32::from(a.y) - i32::from(b.y)).abs()));
+                let near = off.is_some_and(|d| d <= i32::from(cfg.provoke_at_tiles));
+                if near || world.tick >= until || !world.is_alive(x) {
+                    provoke_pending = None;
+                    if near && !citysim::systems::combat::engaged(&world, subject) {
+                        provoke_now(&mut world, x, subject, lethal);
+                    } else if !near {
+                        eprintln!("cityview: tick {} provoke: {} never came", world.tick, who(&world, x));
+                    }
+                } else if world.comp::<Brain>(x).is_some_and(|b| b.current_goal != Some(GoalKind::Fight)) {
+                    // its think took it off the walk (R4: a patrolman's patrol came back 4 tiles short): it comes on
+                    let ok = citysim::systems::combat::come_for(&mut world, x, subject);
+                    eprintln!("cityview: tick {} provoke: {} comes on ({off:?} tiles off): {ok}", world.tick, who(&world, x));
+                }
+            }
         }
         // M18 P2: the possessed body's events to the log (the play session's record: a hire, a theft, an arrest)
         if possessed {
@@ -1876,6 +1891,7 @@ fn publish(
             span_s: b.span_s,
             clocked: true,
             strides: b.strides.clone(),
+            hops: b.hops.clone(),
         });
         sh.slots.lock().unwrap().latest = Some(p);
         return line;
@@ -1893,6 +1909,7 @@ fn publish(
             span_s: b.span_s,
             clocked: b.clocked,
             strides: b.strides.clone(),
+            hops: b.hops.clone(),
         })),
         b => b,
     };
@@ -1919,7 +1936,8 @@ fn publish(
         sh.vt_set(frame.tick as f64);
     }
     let strides = frame.agents.iter().filter_map(|a| citysim::exec::stride(world, a.id).map(|s| (key(a.id), s))).collect();
-    let p = Arc::new(Published { frame, subject, caption, at: at_v, seq: *seq, from_tick, span_s: span_s as f32, clocked, strides });
+    let hops = frame.agents.iter().filter_map(|a| citysim::exec::hop_span(world, a.id).map(|s| (key(a.id), s))).collect();
+    let p = Arc::new(Published { frame, subject, caption, at: at_v, seq: *seq, from_tick, span_s: span_s as f32, clocked, strides, hops });
     let mut s = sh.slots.lock().unwrap();
     s.prev = prev;
     s.latest = Some(p);
@@ -1985,6 +2003,49 @@ fn ring_debug(world: &World, frame: &ViewFrame) {
 
 /// C4: a script's target: of the adults within `[combat] join_tiles` of `me` (or in its building), the one with the
 /// most likely joiners (`friends`), the best odds (`weak`) or the worst (`strong`); the table to the log.
+/// A play script's `provoke`: `x` goes for the subject now (`lethal`: a raid's kill chance on a loss).
+fn provoke_now(world: &mut World, x: EntityId, subject: EntityId, lethal: bool) {
+    let (kill_p, why) = if lethal {
+        (Some(world.config.view.provoke_kill_p), citysim::systems::combat::Purpose::Raid)
+    } else {
+        (None, citysim::systems::combat::Purpose::Brawl)
+    };
+    let mods = citysim::systems::law::FightMods { kill_p, why, ..Default::default() };
+    eprintln!("cityview: tick {} provoke: {} goes for {} (kill_p {kill_p:?})", world.tick, who(world, x), who(world, subject));
+    citysim::systems::combat::fight(world, x, subject, mods, citysim::systems::combat::Tail::Attack { victim: subject });
+}
+
+/// R4: the nearest Full adult on foot on the street within `reach` tiles of `me` (on the street), free to come for
+/// it: not aboard, engaged, down, sentenced, cuffed or driven; the law on patrol last.
+fn nearest_on_foot(world: &World, me: EntityId, reach: u16) -> Option<EntityId> {
+    let p = world.comp::<citysim::Position>(me).filter(|p| p.building.is_none())?;
+    let mut best: Option<(bool, u32, EntityId)> = None;
+    for x in world.bodies() {
+        let Some(q) = world.comp::<citysim::Position>(x) else { continue };
+        let Some(b) = world.comp::<Brain>(x) else { continue };
+        let d = q.tile.manhattan(p.tile);
+        if x == me
+            || q.building.is_some()
+            || d > u32::from(reach)
+            || b.lod != citysim::components::Lod::Full
+            || b.cuffed_by.is_some()
+            || world.aboard.contains_key(&x)
+            || !citysim::systems::demography::is_adult(world, x)
+            || citysim::systems::combat::engaged(world, x)
+            || citysim::systems::wounded::is_down(world, x)
+            || world.has::<citysim::components::Sentence>(x)
+            || citysim::systems::player::drives(world, x)
+        {
+            continue;
+        }
+        let law = b.current_goal == Some(GoalKind::Patrol);
+        if best.is_none_or(|(l, bd, _)| (law, d) < (l, bd)) {
+            best = Some((law, d, x));
+        }
+    }
+    best.map(|b| b.2)
+}
+
 fn best_body(world: &World, me: EntityId, how: &str) -> Option<EntityId> {
     let p = world.comp::<citysim::Position>(me)?;
     let r = i32::from(world.config.combat.join_tiles as u16);
@@ -2001,7 +2062,12 @@ fn best_body(world: &World, me: EntityId, how: &str) -> Option<EntityId> {
             }
             _ => false,
         };
-        if !near || citysim::systems::wounded::is_down(world, x) || world.has::<citysim::components::Sentence>(x) {
+        // R4: a rider passing in a bus or a car is not at hand (fought from the bus, never drawn in the fight)
+        if !near
+            || world.aboard.contains_key(&x)
+            || citysim::systems::wounded::is_down(world, x)
+            || world.has::<citysim::components::Sentence>(x)
+        {
             continue;
         }
         // C5: `out`: a body knocked out at hand (its menu: Go through the pockets)
