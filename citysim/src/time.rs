@@ -18,8 +18,10 @@ pub enum DayPhase {
     Evening,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+/// `Default` (Spring, day 0's) only so `DayRow` derives it.
+#[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub enum Season {
+    #[default]
     Spring,
     Summer,
     Autumn,

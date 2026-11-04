@@ -69,7 +69,7 @@ fn test_ambient_flats_from_the_ratio() {
     // M17 phase 1 appended the Ambient book's columns to the group; phase 2
     // puts the parents' group after it; Jobs & lives phase 1 its own after
     // that (the switch on as shipped).
-    let outside = citysim::stats::OutsideCols::header(w.outside.parents().count());
+    let outside = citysim::stats::OutsideCols::header_for(w.outside.parents().count());
     let jobs2 = citysim::stats::Jobs2Cols::header();
     let tail = format!(
         ",ambient_labour,ambient_food,ambient_food_wanted,ambient_food_bought,ambient_visits_wanted,ambient_visits_made,flow_ambient_food,flow_ambient_visits,ambient_appetite,{outside},{jobs2},ticks_per_sec"

@@ -116,9 +116,11 @@ comment on or above the line.
   `with::<T>()` (all ids holding `T`, ascending).
 - `components.rs`: plain-data components and shared enums. Every component is a `Vec<Option<T>>` field on `World`,
   indexed by `EntityId.index`.
-- `world.rs`: `pub struct World` and the `components!` macro, which is the **registry**: adding a store there wires
-  its `Component` impl and the spawn/despawn grow/clear. A new store also needs a line in `World::resize_stores` if it
-  may be omitted from a save.
+- `world.rs`: `pub struct World`, declared through the `world!` macro, which is the **registry**: its `components { }`
+  section is one line per store (`name: Type`, docs and serde attributes as on a field) and the macro writes the
+  `Vec<Option<Type>>` field, its `Component` impl, the spawn/despawn grow/clear, the post-load resize
+  (`World::resize_stores`) and the empty store `World::new` starts with (`World::assemble`; `new` builds the plain
+  fields as a `WorldParts`).
 - Derived indices are not saved and are rebuilt by `World::rebuild_indices` after a load (neighbours, spouses,
   enemies, tiers, asset indices, Virt indices, hunts, hangouts, contracts).
 - The social graph: `World.edges` (`edge_map.rs`, keyed `(min, max)`, iterates in key order), with `World::edge`,
@@ -335,8 +337,8 @@ Each file's `//!` header names its spec section.
 
 Outside `systems/`: `view.rs` (C2: the camera ring's snapshot for the 3D client, `[view]`; reads, never writes), `reload.rs` (the view milestone V1, OPEN-262: a config file swapped into a running world at a tick boundary, the build-time keys `Config::BUILD_TIME` kept and reported; cityview's R key, file watch and `--reload-at`), `needs.rs`, `mood.rs`, `personality.rs` (agent internals), `word.rs`, `contract.rs`, `virt.rs`,
 `living.rs`, `econ.rs`, `ambient.rs`, `outside.rs`, `ledger.rs` (the milestones' types; logic in the matching
-`systems/` file), `levers.rs` (player commands and lever values), `story.rs` (biographies), `stats.rs` (`DailyStats`,
-`DayRow`), `prof.rs` (the `timed!` profiler, `prof` feature only), `util.rs`.
+`systems/` file), `levers.rs` (player commands and lever values), `story.rs` (biographies), `stats/` (`DailyStats`,
+`DayRow` in `day.rs`, one file per column group, each a `cols!` declaration), `prof.rs` (the `timed!` profiler, `prof` feature only), `util.rs`.
 
 ## 7. Config → system
 
@@ -480,8 +482,8 @@ The config is part of the saved `World`: a save resumes under the config it was 
 - **Saves** (`save.rs`): the whole `World` as compact RON (`to_ron`, `from_ron`, `save_to_file`, `load_from_file`,
   `newest_save`; files `saves/<seed>-<tick>.ron`). Same world ⇒ same bytes. `from_ron` resizes the stores, rebuilds
   indices, districts and the transit network, and runs version migrations gated on `world.save_version`.
-  `SAVE_VERSION` (top of `save.rs`, with a changelog comment) is bumped on every change to the saved shape; new fields
-  use serde defaults.
+  `SAVE_VERSION` (top of `save.rs`; its history is `git log -L` on that line, no changelog comment) is bumped on every
+  change to the saved shape; new fields use serde defaults.
 - **What the tests check**: broken-system signals and one unit test per mechanism (`docs/TESTING.md`). Determinism,
   save round trips, off-switch identity and Full-vs-Statistical parity are no longer tested (2026-10-26); the save
   format is still written and read, and the CLI's `--save-at` / `--load` still work.
@@ -543,8 +545,9 @@ Checklist (the doctrine is in `CLAUDE.md`; test rules in `docs/TESTING.md` and `
 1. **Config key** in its section of `assets/config.toml`, with a comment like its neighbours (what, why, the spec
    item), and the matching field + `Default` value in the section's `Cfg` struct in `config.rs`. No literals in
    systems.
-2. **State**: a field on an existing component, a new component (register it in `components!` and `resize_stores`), or
-   a `World` field. Derived indices are rebuilt in `rebuild_indices`, not saved.
+2. **State**: a field on an existing component, a new component (one line in `world.rs`'s `world! { .. components {
+   .. } }`: `name: Type` with its doc and serde attributes; the macro does the rest), or a `World` field (in
+   `world!`'s `pub struct World`, plus its starting value in `World::new`'s `WorldParts`). Derived indices are rebuilt in `rebuild_indices`, not saved.
 3. **The system fn**, placed in the tick: a `daily`/`hourly` in the owning `systems/` file, called from the `run`
    whose position in `World::tick` gives it the state it reads. Per-tick code reads tier/role indices only (`scan-ok:`
    otherwise). Brain changes: section 5's registration lists.
@@ -553,8 +556,12 @@ Checklist (the doctrine is in `CLAUDE.md`; test rules in `docs/TESTING.md` and `
 6. **The Statistical mirror** in `systems/lod.rs` (a `stat_*` roll, a stat-table row, or a ledger rate), or a written
    reason why none is needed: one sentence in the spec (no parity test since 2026-10-26).
 7. **Visibility**: `World::push_event` for story events; `DailyStats` counters for the run report; gate numbers print
-   as `FINDING` lines (`eprintln!("FINDING …")`), never asserts.
-8. **`SAVE_VERSION`** bumped in `save.rs`, with a line in its changelog comment, if the saved shape changed; new
+   as `FINDING` lines (`eprintln!("FINDING …")`), never asserts. A counter is one line in its group's `cols!` in
+   `citysim/src/stats/<group>.rs` (`pub name: u32,`; `=> fmt("{:.3}")` for a float, `=> skip` for a probe that is no
+   column; see `cols!` in `stats/mod.rs`) plus the `world.stats.current.<group>.name += 1` that bumps it: the field,
+   its header name and its cell come from that line, in field order. A new group is a `cols!` file and a `=> group`
+   field in `day.rs`'s `DayRow` before `ticks_per_sec`.
+8. **`SAVE_VERSION`** bumped in `save.rs` if the saved shape changed (no changelog: the commit message says why); new
    fields take serde defaults. A save must load; an old save need not (no players yet, 2026-10-26).
 9. **The shadow read** (doctrine 2, 2026-10-26): the diaries of the archetypes the mechanism touches
    (`citysim-cli shadow`), quoted in the report. A unit test in a seeded world only where a broken-system signal
@@ -579,7 +586,7 @@ citysim/tests/news.rs` isolates it).
 | 4-5 RNG, money | none drawn, none moved |
 | 6 mirror | none needed: Feeds read the district pools, not the tier |
 | 7 visibility | the story records themselves |
-| 8 save | no bump: no saved shape changed besides the saved config, whose `NewsCfg` is `#[serde(default)]` (the changelog bumps when a new *section* joins the saved config; a single key with a serde default loads either way) |
+| 8 save | no bump: no saved shape changed besides the saved config, whose `NewsCfg` is `#[serde(default)]` (the version bumps when a new *section* joins the saved config; a single key with a serde default loads either way) |
 | 9 test | `tests/news.rs::test_one_deed_in_at_most_outlets_per_deed_feeds`: a seeded city, the pools cleared, one killing posted to every district, `news::daily` called; the control (cap 0) runs it in both Feeds, cap 1 in exactly one. It failed on the base `ce5afe6` |
 | 10 off switch | the key itself (`0` restores the old behaviour); no env var for a one-line fix |
 | 11 spec | the commit message names the bug number; the bug is item 21 in `docs/SHADOW_V4.md` › Bugs |
