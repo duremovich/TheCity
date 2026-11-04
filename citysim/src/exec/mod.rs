@@ -38,6 +38,7 @@ mod step;
 mod walk;
 
 pub use board::*;
+pub use goto::walk_to_core;
 use goto::*;
 pub use start::*;
 pub(crate) use step::*;
@@ -128,6 +129,10 @@ pub enum ExecState {
         path: Vec<TilePos>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         levels: Vec<u8>,
+        /// S4: a climb in begins with the walk across the floor from the door's slot to the core: the tile it
+        /// starts from and the tick it set out (`depart` is the walk's end); `None`: no walk.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        walk: Option<(TilePos, Tick)>,
     },
     Use {
         kind: ActionKind,

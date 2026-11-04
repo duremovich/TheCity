@@ -222,7 +222,7 @@ fn step_agent_at(world: &mut World, id: EntityId, chained: bool) {
         }
         // The city milestone C7: the climb at the door, then the GoTo done
         // (up to the storey) or the walk on (down to the door).
-        ExecState::Climb { target, arrive_tick, to, out, path, levels, .. } => {
+        ExecState::Climb { target, arrive_tick, to, out, path, levels, walk, .. } => {
             if tick < arrive_tick {
                 StepResult::Running
             } else if out {
@@ -241,8 +241,16 @@ fn step_agent_at(world: &mut World, id: EntityId, chained: bool) {
                 }
                 advance_goto(world, id, target, path, levels, tick, None, 0, None)
             } else {
+                // S4: a climb in that began with the walk to the core ends there.
+                let core = walk
+                    .and_then(|_| world.comp::<Position>(id)?.building)
+                    .and_then(|b| world.comp::<Building>(b))
+                    .and_then(|bd| bd.core_tile());
                 if let Some(p) = world.comp_mut::<Position>(id) {
                     p.floor = to;
+                    if let Some(c) = core {
+                        p.tile = c;
+                    }
                 }
                 // V8 (`OPEN-264`): a raider's own climb to the target's floor
                 // (`vertical::climb_column`) ends in the Brawl it was begun
