@@ -313,6 +313,24 @@ impl Building {
         Some(TilePos::new(cx.clamp(x0, x1), cy.clamp(y0, y1)))
     }
 
+    /// S4: the tiles of the walk across the floor from `from` to the core, a tile a step (the axis with more to go
+    /// first, x on a tie), `from` not included; empty at the core or with no interior.
+    pub fn core_walk(&self, from: TilePos) -> Vec<TilePos> {
+        let Some(to) = self.core_tile() else { return Vec::new() };
+        let mut at = from;
+        let mut out = Vec::new();
+        while at != to {
+            let (dx, dy) = (i32::from(to.x) - i32::from(at.x), i32::from(to.y) - i32::from(at.y));
+            at = if dx.abs() >= dy.abs() {
+                TilePos::new((i32::from(at.x) + dx.signum()) as u16, at.y)
+            } else {
+                TilePos::new(at.x, (i32::from(at.y) + dy.signum()) as u16)
+            };
+            out.push(at);
+        }
+        out
+    }
+
     /// S1 (`OPEN-307`): the interior tile just inside the door (the door
     /// clamped into the interior); `None` with no interior.
     pub fn inside_door(&self) -> Option<TilePos> {

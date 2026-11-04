@@ -861,6 +861,8 @@ fn start_climb(world: &mut World, m: EntityId, target: EntityId, core: EntityId,
     if let Some(pos) = world.comp_mut::<Position>(m) {
         pos.floor = 0;
     }
+    // S4 (`OPEN-320`): the walk across the lobby to the core first
+    let (walk, lag) = crate::exec::walk_to_core(world, m, target);
     let state = crate::exec::ExecState::Climb {
         target: crate::exec::GotoTarget {
             dest: crate::goap::LocationKey::RaidTarget,
@@ -870,17 +872,18 @@ fn start_climb(world: &mut World, m: EntityId, target: EntityId, core: EntityId,
         core,
         from: 0,
         to: floor,
-        depart: now,
-        board: now + p.wait,
-        arrive_tick: now + p.ticks,
+        depart: now + lag,
+        board: now + lag + p.wait,
+        arrive_tick: now + lag + p.ticks,
         lift: p.lift,
         out: false,
         path: Vec::new(),
         levels: Vec::new(),
+        walk,
     };
     if let Some(b) = world.comp_mut::<crate::components::Brain>(m) {
         b.exec = state;
-        b.action_until = now + p.ticks;
+        b.action_until = now + lag + p.ticks;
     }
 }
 
