@@ -126,7 +126,8 @@ fn test_street_sweep_in_a_sweep_district_only() {
 #[test]
 fn test_pimp_present_zeroes_the_assault_roll() {
     let run = |pimp: bool| -> u32 {
-        let mut w = world();
+        // T1: the city built at Y4's pace the scene was written on.
+        let mut w = World::new(42, common::y4(citysim::Config::load()));
         // A day run: the districts' residents are binned at the midnight pass.
         w.run_ticks(citysim::TICKS_PER_DAY + 1);
         w.config.vice.p_assault_street = 10.0;

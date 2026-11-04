@@ -55,6 +55,10 @@ pub fn r2_pace(cfg: &mut Config) {
 /// for it ([exec], [vehicles], [transit], the walk-written tile caps).
 pub fn r2(mut cfg: Config) -> Config {
     r2_pace(&mut cfg);
+    t1_seen(&mut cfg);
+    // T1: the letting desk by its 400 tiles, as P5h's scenes were written
+    // (by its trip at R2's crawl the desk is past every cap).
+    cfg.housing.desk_reach_ticks = u64::MAX;
     cfg.vehicles.max_steps_per_tick = 4;
     cfg.vehicles.flyer_ticks_per_tile = 0.3;
     cfg.transit.ride_ticks_per_tile = 0.25;
@@ -81,6 +85,57 @@ pub fn r2(mut cfg: Config) -> Config {
     if let Some(l) = cfg.legs.as_mut() {
         l.leg_replan_tiles = 40;
         l.escort_walk_tiles = 40;
+    }
+    cfg
+}
+
+/// The time model T1 (`OPEN-304`): the physical durations the camera sees,
+/// x6 with the compressed day (the climbs, the lifts, the crossings' cycle),
+/// back to the real-second values a scene written before T1 ran on.
+pub fn t1_seen(cfg: &mut Config) {
+    if let Some(l) = cfg.levels.as_mut() {
+        l.stair_ticks_per_floor = 0.5;
+        l.lift_wait_ticks = 1.0;
+        l.lift_ticks_per_floor = 0.05;
+        l.lift_dwell_ticks = 0.5;
+        l.portal_stair_ticks_per_floor = 0.5;
+        l.portal_lift_wait_ticks = 1.0;
+    }
+    if let Some(c) = cfg.crossings.as_mut() {
+        c.cycle_s = 100.0;
+    }
+}
+
+/// The time model T1 (`OPEN-304`, `[exec]` 21 -> 3.5 tiles a game minute): a
+/// scene on the shipped pace whose premise the 6x slower walk moved (a
+/// contract's reach, a pitch's shift, a doc's back room) is pinned to Y4's
+/// pace it was written for, with the knobs T1 moved for it.
+pub fn y4(mut cfg: Config) -> Config {
+    cfg.exec.move_ticks_full = 1;
+    cfg.exec.walk_tiles_per_tick = 21;
+    cfg.exec.step_res = 20;
+    t1_seen(&mut cfg);
+    cfg.vehicles.flyer_ticks_per_tile = 0.004;
+    cfg.transit.ride_ticks_per_tile = 0.008;
+    cfg.transit.dwell_ticks = 0.5;
+    cfg.life.muster_walk_cap_ticks = 120;
+    cfg.life.rough_min_tiles = 315;
+    cfg.life.bed_margin_tiles = 210;
+    cfg.corps.shop_price_tiles = 252;
+    cfg.jobs2.cab_min_tiles = 420;
+    cfg.housing.desk_reach_ticks = u64::MAX;
+    if let Some(c) = cfg.customers.as_mut() {
+        c.hail_min_tiles = 420;
+    }
+    if let Some(h) = cfg.shift.as_mut().and_then(|s| s.haul.as_mut()) {
+        h.haul_reach = 630;
+    }
+    if let Some(p) = cfg.presence.as_mut() {
+        p.round_reach_tiles = 420;
+    }
+    if let Some(l) = cfg.legs.as_mut() {
+        l.leg_replan_tiles = 420;
+        l.escort_walk_tiles = 400;
     }
     cfg
 }

@@ -379,7 +379,11 @@ pub fn pick(world: &World, a: EntityId) -> Option<(EntityId, EntityId)> {
             _ => {}
         }
         let desk = desk_of(world, h)?;
-        door(world, desk).filter(|d| d.manhattan(from) <= reach)?;
+        // T1 (`OPEN-304`): the desk by its trip (the walk or the El), not its
+        // tiles: at 3.5 tiles a minute the Civic Hall's 400 tiles were a
+        // 2-hour walk, and a desk past the cap is ridden to or passed over.
+        let cap = world.config.housing.desk_reach_ticks;
+        door(world, desk).filter(|&d| crate::systems::distance::trip(world, a, from, d) <= cap)?;
         Some((h, desk))
     })
 }

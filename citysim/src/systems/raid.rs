@@ -609,6 +609,14 @@ pub fn depart(world: &mut World, agent: EntityId) -> Departure {
                 broke_up(world, gid, &came);
                 return Departure::Off;
             }
+            // The time model T1 (`OPEN-304`): the column waits at the muster,
+            // inside its hold, for a member on his way there and due within
+            // `[crew] march_wait_ticks` (at 3.5 tiles a minute the stragglers
+            // trailed the column to the door and found it over: raid_missed
+            // 14 -> 69 at 20k s42 x 30).
+            if now < due + hold && muster_tail_due(world, gid, agent, &came) {
+                return Departure::Hold;
+            }
             if now > due {
                 crate::systems::ownership::jobs2_row(world).raid_held += 1;
                 if let Some(g) = world.comp_mut::<Gang>(gid) {
@@ -785,16 +793,45 @@ pub fn wait_for_crew(world: &World, actor: EntityId) -> bool {
     })
 }
 
+/// T1 (`OPEN-304`): a member of `gid` not yet at the muster (`came`), on
+/// his Raid plan's walk to it (`GoTo(MusterPoint)`), due there within
+/// `[crew] march_wait_ticks` (a timed walk's arrival, a Full body's tiles
+/// at the walking pace).
+fn muster_tail_due(world: &World, gid: EntityId, actor: EntityId, came: &[EntityId]) -> bool {
+    let Some(wait) = crate::systems::crew::cfg(world).map(|c| c.march_wait_ticks).filter(|&t| t > 0) else {
+        return false;
+    };
+    let door = match muster_point(world, actor) {
+        Some(MusterAt::Inside(h)) => world.comp::<Building>(h).map(|b| b.door),
+        Some(MusterAt::Door(t)) => Some(t),
+        None => None,
+    };
+    let Some(door) = door else { return false };
+    let members = world.comp::<Gang>(gid).map(|g| g.members.clone()).unwrap_or_default();
+    members.iter().any(|&m| {
+        !came.contains(&m)
+            && law::living(world, m)
+            && !world.has::<Sentence>(m)
+            && !crate::systems::ages::is_protected(world, m)
+            && eta_on(world, m, crate::goap::LocationKey::MusterPoint, door).is_some_and(|eta| eta <= wait)
+    })
+}
+
 /// Round 7 W2: the ticks until `m`, on his Raid plan's march to the door
 /// (`GoTo(RaidTarget)`), is there: a timed walk's arrival, a Full body's
 /// tiles at the walking pace; `None` off the march.
 fn march_eta(world: &World, m: EntityId, door: TilePos) -> Option<Tick> {
+    eta_on(world, m, crate::goap::LocationKey::RaidTarget, door)
+}
+
+/// The ticks until `m`, on his Raid plan's `GoTo(key)` to `door`, is there.
+fn eta_on(world: &World, m: EntityId, key: crate::goap::LocationKey, door: TilePos) -> Option<Tick> {
     let b = world.comp::<Brain>(m)?;
     if b.current_goal != Some(GoalKind::Raid) {
         return None;
     }
     let step = b.plan.as_ref()?.steps.get(usize::from(b.plan_step))?.action;
-    if step != crate::goap::ActionKind::GoTo(crate::goap::LocationKey::RaidTarget) {
+    if step != crate::goap::ActionKind::GoTo(key) {
         return None;
     }
     match &b.exec {

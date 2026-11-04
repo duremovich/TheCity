@@ -104,6 +104,15 @@ from Full as ever); the 2k and 20k tiers.
   OPEN row; `SAVE_VERSION` bumps and the slice save is remade. Proof: one before/after 20k s42 x 30 run (it moves
   numbers, printed as FINDINGs) and the diaries of the commuter, the El rider, the raider, the guard on an escort,
   the homeless body's FindHome and the schoolchild.
+  **Landed 2026-11-03**: `[exec]` 7 tiles every 2 ticks (the Full executor steps 4, 3, 4 a tick, no burst); the
+  vehicle mults follow; the El's ride, its dwell, the flyers, the stairs, the lifts and the crossings' cycle x6; the
+  tile caps Y4 had written as minutes (`shop_price_tiles`, `rough_min_tiles`, `bed_margin_tiles`, `cab_min_tiles`,
+  `hail_min_tiles`, `haul_reach`, `round_reach_tiles`, `leg_replan_tiles`, `escort_walk_tiles`) back to their minutes
+  (/6); the day's budgets in ticks kept. Judged, not by rule: `transfer_ticks` 5 and `van_call_ticks` 15 kept (a
+  platform change and the nearer van), `muster_walk_cap_ticks` 120 -> 180 (the farthest member posted). Fixed as
+  features: a letting desk is reached by its trip, the walk or the El (`[housing] desk_reach_ticks`), and a raid's
+  muster holds for a member due at it within `[crew] march_wait_ticks`. Deviation: `assets/stat_table.toml` not
+  regenerated (`OPEN-306`); the far schoolchildren are `OPEN-305`.
 - **T2 the clock (view)**: §§ 2-5 in cityview (`play.rs`, `simthread.rs`, `sim.rs`), the `[view]` keys documented.
   Proof: a play script that walks the nobody across a block at 1x, sleeps through a night at auto and is woken by a
   fight, read in the story log and the smoke PNG at 1x and at 60x.

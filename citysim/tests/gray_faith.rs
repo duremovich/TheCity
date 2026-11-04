@@ -235,7 +235,8 @@ fn test_stabilise_draws_a_clinic_organ() {
 /// leaves the post, and the licensed Clinics no longer hire him.
 #[test]
 fn test_struck_off_leaves_the_post() {
-    let mut w = world();
+    // T1: the city built at Y4's pace the scene was written on.
+    let mut w = World::new(42, common::y4(citysim::Config::load()));
     w.config.gray.p_struck_off = 1.0;
     let doc = w
         .citizens()

@@ -1969,16 +1969,17 @@ pub fn walk_reach_tiles(world: &World, id: EntityId, cap: Tick, limit: u32) -> u
 }
 
 /// M12 D18: the extra step units before a Full mover's next step off
-/// `tile`, by the tile's litter band (`[litter] step_ticks`, a walker's
-/// step at `move_ticks_full` 1 each: `step_res` units; round 9 Y4, ticks
-/// before it, when a step was a tick). One byte read on a step already
-/// taken; flow fields never change.
+/// `tile`, by the tile's litter band (`[litter] step_ticks`, whole walker
+/// steps at the pace: `[exec] step_units` each; round 9 Y4, ticks before
+/// it, when a step was a tick; T1, `step_res` units before it, a whole step
+/// only at `move_ticks_full` 1). One byte read on a step already taken;
+/// flow fields never change.
 pub fn litter_delay(world: &World, tile: TilePos) -> Tick {
     if !crate::systems::litter::enabled(world) {
         return 0;
     }
     let band = crate::systems::litter::band(crate::systems::litter::at(world, tile));
-    Tick::from(world.config.litter.step_ticks.get(band).copied().unwrap_or(0)) * world.config.exec.step_res.max(1)
+    Tick::from(world.config.litter.step_ticks.get(band).copied().unwrap_or(0)) * world.config.exec.step_units()
 }
 
 /// A Full Goto: flow field for buildings, A* otherwise. `None` if unreachable.

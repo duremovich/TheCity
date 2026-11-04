@@ -328,7 +328,8 @@ breakout_max_freed = 3
 # of a rival Hideout or a corp prize, so the march started at a corner Hideout 200-230 tiles off and
 # arrived after the window. Raids with >= 3 at the door, seeds 42 / 43 / 44 (with raid_min_members):
 # 48 -> 50 / 33 / 42 % (without it), 180 -> 78 / 94 / 79 %. Round 9 Y4: kept (a tile cap, now the
-# staging ground near the door: 180 tiles is a 9-min walk at [exec] walk_tiles_per_tick 21).
+# staging ground near the door: 180 tiles is a 9-min walk at [exec] walk_tiles_per_tick 21). T1 (OPEN-304): kept as
+# a place on the map (720 m), now a 51-min walk at 3.5 tiles a minute, inside the march window.
 muster_near_tiles = 180
 muster_candidates = 12             # round 8 X4 (OPEN-241): a raid ordered musters at whichever of the Hideout and this many
                                    # held Homes nearest the target (within muster_near_tiles) the most fit members reach from
@@ -553,19 +554,20 @@ starving_steal_lawfulness = 0.7
 # The walking pace: a walker crosses walk_tiles_per_tick tiles every move_ticks_full ticks (minutes), the one pace every
 # walk, commute estimate, travel cap's tile reach and vehicle mult reads (`ExecCfg::walk_ticks` / `walk_tiles`; a
 # vehicle's [vehicles] mult and timed_mult are shares of it). The pressure pass R2 (OPEN-215): move_ticks_full 2 -> 1.
-# The v1 pace (2 a tile, a toy map's) made the island's 4 m tiles a 2 m-a-minute crawl: 20k seed 42 x 30 walked at
-# 2.06 min a Manhattan tile (Full 2.24: the road's detour; no stall, no re-plan), a 158-tile same-district commute
-# 383 min. Round 9 Y4 (Dylan 2026-10-30; OPEN-215, OPEN-221): R2's one tile a minute was still 0.24 km/h, 1/21 of a
-# walk, the root under six rounds of far travel. walk_tiles_per_tick 1 -> 21: 21 of the 4 m tiles a minute is
-# 5.04 km/h, a 1 km leg 12 min, the 20k island (1,500 x 938 tiles) crossed corner to corner in ~2 h. The Full
-# executor takes the steps inside the tick one tile at a time (sub-tick steps in step_res units of a walker's step:
-# the litter, a driver's crash tile, the path's re-find read the tile stepped onto; the door, its queue and the
-# arrival stop the burst at their tile and are the next tick's).
-move_ticks_full = 1
-walk_tiles_per_tick = 21
-step_res = 20                      # Y4: units of one walker's step; a vehicle's mult resolves to 1/20 of it (the M13
-                                   # quarters, 4, read the Car's road 0.2, the Motorcycle's 0.25 and the Truck's 0.3
-                                   # alike as a quarter step at one tile a tick)
+# Round 9 Y4 (Dylan 2026-10-30; OPEN-215, OPEN-221): walk_tiles_per_tick 1 -> 21, 21 of the 4 m tiles a minute, a real
+# 5.04 km/h in game time. The time model T1 (Dylan 2026-11-03, docs/TIME_MODEL.md § 1, OPEN-304): the day is
+# compressed 6x (at 1x a game minute is 10 real seconds) and a body walks 1.4 m/s on screen, so in game time the walk
+# is 6x slower: 7 tiles every 2 minutes, 3.5 tiles (14 m) a game minute, a 1 km leg 72 min, the reach of a 2-hour cap
+# 1.7 km. A person's day keeps its game hours; what shrinks is each life's reach in metres. The Full executor steps
+# evenly (step units: step_res x walk_tiles_per_tick a tick, a walker's step step_res x move_ticks_full, the remainder
+# carried: 4 tiles, then 3, then 4), never a 2-tick burst; the steps inside a tick go one tile at a time (the litter, a
+# driver's crash tile, the path's re-find read the tile stepped onto; the door, its queue and the arrival stop the
+# burst at their tile and are the next tick's).
+move_ticks_full = 2
+walk_tiles_per_tick = 7
+step_res = 20                      # Y4: units of one walker's step per move_ticks_full; a walker's step is 40 units, a
+                                   # vehicle's mult resolves to 1/40 of it (the Car's road 0.2 is 8 units, the
+                                   # Motorcycle's 0.25 10, the Truck's 0.3 12)
 interrupt_check_ticks = 30
 door_capacity_per_tick = 2
 door_queue_max_ticks = 30
@@ -641,8 +643,8 @@ ring_coarse_max = 4000
 ring_band_tiles = 24
 ring_hold_tiles = 8
 ring_max_side_tiles = 256
-ring_lead_max_tiles = 96             # the ring reaches ahead by the camera's last move (a walker 21 tiles a tick, a rider
-                                     # ~50: the frame is drawn after the tick); a longer move is a cut, no lead
+ring_lead_max_tiles = 96             # the ring reaches ahead by the camera's last move (a walker 4 tiles a tick since T1,
+                                     # a car 18, the El 21: the frame is drawn after the tick); a longer move is a cut, no lead
 
 # M10 holes and the binder (docs/M10_SCALE.md § 3). Weight per candidate:
 # (1 - lawfulness)^lawfulness_power x (1 + gang_claim_mult*gang*claims) x (1 + enemy_mult*enemy) x (1 + statistical_mult*stat),
@@ -805,8 +807,9 @@ upkeep = { farm = 245, market = 600, bar = 15, home = [0, 1, 2], security_office
 raided_days = 7
 raided_losses = 0.5
 value = { farm = 1000, market = 1000, security_office = 500, clinic = 600, garage = 800, lab = 1200, feed = 800, mission = 300, camp = 800 }  # D28; M13 D16; M14; M15; Real economy E26, E37
-shop_price_tiles = 252             # D15: one coin of price is worth this many tiles of walking. Round 9 Y4: 12 -> 252, the
-                                   # same 12 minutes a coin at [exec] walk_tiles_per_tick 21 (12 tiles was 12 min at R2's pace)
+shop_price_tiles = 42              # D15: one coin of price is worth this many tiles of walking. Round 9 Y4: 12 -> 252, the
+                                   # same 12 minutes a coin at 21 tiles a minute. T1 (OPEN-304): 252 -> 42, the same 12
+                                   # minutes at 3.5 (a time: what a coin of a person's day is worth)
 grow_cooldown_days = 7             # D23
 secure_per_day = 2                 # D24
 private_pursuit_radius = 16        # D18
@@ -963,7 +966,7 @@ enabled = true                     # off() = false: no deposits, no delay, no sa
 decay = 1
 deposit_mult = 8.0
 visible = 32
-step_ticks = [0, 0, 1, 2]          # per band: clean, littered, trashed, heaped: extra walker steps (a step at [exec] move_ticks_full 1; round 9 Y4: one tick each before, when a step was a tick)
+step_ticks = [0, 0, 1, 2]          # per band: clean, littered, trashed, heaped: extra walker steps (round 9 Y4: one tick each before, when a step was a tick; T1: a whole step at the pace, [exec] step_units, so a heap slows a body on screen as before)
 timed_mult = 0.5
 sleep_penalty = 0.15
 mood = 0.2
@@ -1146,11 +1149,12 @@ gang_chrome_floor = 80             # plan D44 (phase 3): a gang's Arms purchase 
 # M13 § 2 (plan phase 2, D19-D27).
 road_share = 0.7                   # D21: the road share a Coarse trip's timed_mult assumes
 max_steps_per_tick = 120           # D19: a Full driver's steps per executor call. Round 9 Y4: 4 -> 120. At one tile a
-                                   # walker's tick 4 was a 4x walk; at [exec] walk_tiles_per_tick 21 it held a car to a
-                                   # fifth of a walk. 120 bounds the burst over the Car's road mult (0.2: 105 tiles a
-                                   # tick, 25 km/h) and the Motorcycle's (0.25: 84)
-flyer_ticks_per_tile = 0.004       # D22: Chebyshev tiles, over walls. Round 9 Y4: 0.3 -> 0.004 (250 tiles a minute,
-                                   # 60 km/h over the roofs; 0.3 was 3.3 tiles a minute, 0.8 km/h: a sixth of the walk)
+                                   # walker's tick 4 was a 4x walk. A bound, not a pace: the mults are shares of the walk,
+                                   # so a vehicle keeps its real speed on screen and its game pace follows the walk's (T1,
+                                   # docs/TIME_MODEL.md § 1: the Car's road 0.2 is 17.5 tiles a tick, the Motorcycle's 14)
+flyer_ticks_per_tile = 0.024       # D22: Chebyshev tiles, over walls. Round 9 Y4: 0.3 -> 0.004 (60 km/h over the roofs).
+                                   # T1 (OPEN-304): 0.004 -> 0.024, x6 with the walk: the same 60 km/h on screen, 42
+                                   # tiles a game minute
 mult = { motorcycle = [0.25, 0.6, 0.8], car = [0.2, 1.0, 1.0], truck = [0.3, 1.0, 0.6] }   # road, ground, farmland
 haul = { motorcycle = 1, car = 2, truck = 6, flyer = 1 }
 crash_per_tile = 0.0001            # phase 5: 0.00004 -> 0.0001 (crash deaths 0 on seed 42; 1-6 a run now, band 1-10)
@@ -1653,7 +1657,10 @@ apply_mins = 20                    # the Apply step at the desk
 flat = 0.55                        # the FindHome goal's flat score
 curve = [0.4, 0.6]                 # Linear (m, b) over min(days homeless / urgency_days, 1)
 urgency_days = 7.0
-reach_tiles = 400                  # a desk past this many tiles is not walked to
+reach_tiles = 400                  # a Home past this many tiles from where the applicant stands is not asked about (a place)
+desk_reach_ticks = 120             # T1 (OPEN-304): ... nor one whose letting desk is past this trip (travel minutes, the walk
+                                   # or the El: the 400 tiles were 19 min at 21 tiles a minute, 2 h at 3.5; the city's desk is
+                                   # the Civic Hall's alone, so the Sump rides to it)
 menu_rows = 6                      # the player's rows at a desk: at most this many places
 locker_rob_p = 0.03                # a capsule holder's nightly chance his locker is robbed (03:00) ...
 locker_rob_share = 0.5             # ... of this share of his coins, to a fellow guest of the racks (else the owner)
@@ -1709,12 +1716,12 @@ sleep_min_ticks = 240               # a sleep the commute gate cannot cut
 exhausted_energy = 0.12
 exhausted_flat = 0.6
 night_sleep_flat = 0.2              # Sleep's flat at Night (off shift)
-rough_min_tiles = 315               # the exhausted lie down where they are when every bed is further. Round 9 Y4: 45 -> 315
-                                   # (a 15-min walk at [exec] walk_tiles_per_tick 21; 45 tiles was 45 min at R2's crawl and
-                                   # 2 min at the pace: the exhausted would lie down a block from their bed)
+rough_min_tiles = 52                # the exhausted lie down where they are when every bed is further. Round 9 Y4: 45 -> 315
+                                   # (a 15-min walk at [exec] walk_tiles_per_tick 21). T1 (OPEN-304): 315 -> 52, the
+                                   # same 15 min at the 3.5 tiles a minute (a time, kept as one)
 housed_day_sleep = 0.25             # a housed agent's Sleep phase factor by day (Evening 0.7, Night 1.0)
-bed_margin_tiles = 210             # a Hideout or Hotel bed this much nearer than Home is taken instead. Round 9 Y4: 20 -> 210
-                                   # (10 min saved at [exec] walk_tiles_per_tick 21; 20 tiles is a minute at the pace)
+bed_margin_tiles = 35              # a Hideout or Hotel bed this much nearer than Home is taken instead. Round 9 Y4: 20 -> 210
+                                   # (10 min saved at 21 tiles a minute). T1 (OPEN-304): 210 -> 35, the same 10 min at 3.5
 hotel_reserve_meals = 2
 hotel_reach_homeless = 120
 dole_in_place = true                # the daily dole paid where the agent is at 09:00 (the Hall walk was 2-4 h for 4c)
@@ -1786,8 +1793,10 @@ noshow_fire_days = 7                # 11: seven missed workdays end the job (no 
 # Day gaps (2026-10-11): a holder with secure wealth who has missed this many workdays running quits (a vacancy
 # for someone who will work it): seed 42's rich clinic owner held a Bar's post at Full and worked none in 7 days
 secure_quit_days = 2
-muster_walk_cap_ticks = 120         # 15: a Muster waits for the farthest member's walk, up to this. Round 9 Y4: 480 -> 120
-                                    # (8 h was the crawl's farthest member; the island's corner-to-corner walk is ~2 h)
+muster_walk_cap_ticks = 180         # 15: a Muster waits for the farthest member's walk, up to this. Round 9 Y4: 480 -> 120
+                                    # (8 h was the crawl's farthest member; the island's corner-to-corner walk was ~2 h).
+                                    # T1 (OPEN-304): 120 -> 180, a wait that covers travel: the farthest member posted to
+                                    # it ([crew] duty_reach_ticks 180; corner to corner is ~12 h at 3.5 tiles a minute)
 deal_busy_from = 720                # 16: Deal shifts start 12:00 ...
 deal_busy_to = 120                  # ... to 02:00
 told_cooldown_days = 3              # 17: one telling per teller, listener and deed in 3 days
@@ -3478,14 +3487,18 @@ premium_payout_share = 0.5
 enabled = true
 fare = 1                       # coins per ride, transfers free
 headway = 10                   # ticks between departures from each terminus
-ride_ticks_per_tile = 0.008    # round 9 Y4: 0.25 -> 0.008 (125 tiles a minute, 30 km/h between stops; 0.25 was 4 tiles a
-                               # minute, "~8x walking" at the v1 pace and a fifth of [exec] walk_tiles_per_tick 21)
-dwell_ticks = 0.5              # per stop passed (TheCityGraphics' rail.json dwell_s 30). Round 9 Y4: 1 -> 0, each stretch
+ride_ticks_per_tile = 0.048    # round 9 Y4: 0.25 -> 0.008 (125 tiles a minute, 30 km/h between stops). T1 (OPEN-304,
+                               # docs/TIME_MODEL.md § 1): 0.008 -> 0.048, x6 with the walk: the same 30 km/h on screen,
+                               # ~21 tiles a game minute, 6x [exec]'s 3.5
+dwell_ticks = 3.0              # per stop passed (TheCityGraphics' rail.json dwell_s 30). T1: 0.5 -> 3, the 30 s the camera
+                               # sees at a stop is 3 game minutes at 1x (a physical duration, x6). Round 9 Y4: 1 -> 0, each stretch
                                # ceil'd to a whole tick. The view milestone V9 (OPEN-255): the ride and the dwells are
                                # summed unrounded and each offset is their ceiling, and a map line's stops are its
                                # stations (`L` waypoints marked `*`), not its bends: the island's lines had a stop every
                                # ~35 tiles at a minute each (the Terrace Line's 1,169 tiles in 28 min, twice the walk)
-transfer_ticks = 5             # per transfer (half a headway)
+transfer_ticks = 5             # per transfer: the walk across the station (written as half a headway before the trains
+                               # ran; the wait for the next train is the timetable's). T1: kept, 17 tiles (70 m) at the
+                               # pace, 50 real seconds at 1x: a change of platforms
 stop_spacing = 100             # track tiles between stops on a line without stations (besides its waypoints and shared
                                # tiles; a line with stations stops at them, its ends and shared tiles only). Round 9 Y4:
                                # 16 -> 100 (400 m; 16 tiles is 64 m, a stop a block: a minute a stop made the El a walk)
@@ -3832,8 +3845,8 @@ backlog_units = 300
 parcels_per_building = 0.5         # a corp with two or more buildings sends this many parcels a building a day
 parcels_per_courier = 12
 parcel_fee = 1
-cab_min_tiles = 420                # off screen, a commute this long or longer ... (round 9 Y4: 60 -> 420, a 20-min walk at
-                                   # [exec] walk_tiles_per_tick 21; 60 tiles is 3 min at the pace, an hour at R2's)
+cab_min_tiles = 70                 # off screen, a commute this long or longer ... (round 9 Y4: 60 -> 420, a 20-min walk at
+                                   # 21 tiles a minute; T1 (OPEN-304): 420 -> 70, the same 20 min at 3.5) ...
 cab_reserve = 30                   # ... with the fare and this many coins to spare ...
 cab_wage_share = 0.5               # ... (round 6 V4) a fare at most this share of the day's wage (a leg is never a day's pay) ...
 cab_flush_coins = 80               # ... unless holding this many coins (flush: = [customers] hail_rich_coins) ...
@@ -4340,7 +4353,7 @@ p_spread = 0.001
 enabled = true
 seed_max_years = 75.0              # the seeded ages run to this (Dylan's answer 5; [world] age_max_years off)
 schools = 2                        # seeded per copy (Mid and up, the city's deed; where: school_by_reach)
-school_trip_ticks = 60             # round 4 T2 (OPEN-232, Dylan 2026-10-27: reach by travel time, not a School per district): a child goes to the nearest School with room within this of its Home door, walked (round 9 Y4: 1,260 tiles, 5 km, at [exec] walk_tiles_per_tick 21; 60 tiles at R2's pace) or by the El when quicker; none: home ("no School within 1 h")
+school_trip_ticks = 60             # round 4 T2 (OPEN-232, Dylan 2026-10-27: reach by travel time, not a School per district): a child goes to the nearest School with room within this of its Home door, walked (T1, OPEN-304: a day's budget, kept in ticks: 210 tiles, 840 m, at [exec]'s 3.5 tiles a minute; 1,260 at Y4's 21) or by the El when quicker; none: home ("no School within 1 h")
 school_el_fares = 2                # ... by the El the household pays this many [transit] fares a day (there and back; a child never rides on a dodge)
 school_places_per_teacher = 30     # ... a School's roll holds this a teacher on its staff ([[serves]] teacher per_hour 30); full, the next child is turned away; no teacher, no roll
 school_by_reach = true             # ... and each seeded School stands on the Lot (Mid and up) whose door has the most Home residents not yet within the walk of school_trip_ticks of one (false: S6's district centroid, 20 Schools at five centroids, 15 % of the 20k island's school-age children within an hour of one; 42 % by reach)
@@ -4954,9 +4967,9 @@ haul_cutoff_min = 60               # no trip starts that would end within this m
                                    # rest is worked at the post, where the shift closes and is paid (the round's
                                    # ROUND_CUTOFF was two hours for a whole round; a trip is one leg out and back)
 haul_handle_min = 15               # the load at the stock tile and the unload at the destination, minutes each
-haul_reach = 630                   # a destination's door at most this many tiles from the post's door (half an hour's
-                                   # walk each way at [exec] walk_tiles_per_tick 21; round 9 Y4: 30 -> 630, the same half
-                                   # hour: 30 tiles was it at R2's pace, 1.4 min at the real one); none in reach: the
+haul_reach = 105                   # a destination's door at most this many tiles from the post's door (half an hour's
+                                   # walk each way at [exec]'s 3.5 tiles a minute; round 9 Y4: 30 -> 630, the same half
+                                   # hour at 21; T1 (OPEN-304): 630 -> 105, the half hour kept); none in reach: the
                                    # trips run inside the post
 haul_dests_max = 4                 # the most destinations one shift's trips turn through (nearest first)
 drive = ["driver"]                 # these trades take the post's fleet truck when one is parked there
@@ -5181,8 +5194,9 @@ text = "{me} has lunch sent up and eats it with {them}"
 # OPEN-154): an encounter posts when, and only when, both bodies are present, else it waits or is narrated off
 # screen. Without it encounters settle by link. Placeholders.
 [presence]
-round_reach_tiles = 420            # OPEN-154: a round's stops at most this many tiles from the post's door (20 min at
-                                   # [exec] walk_tiles_per_tick 21; round 9 Y4: 20 -> 420, the same 20 min: 20 tiles was
+round_reach_tiles = 70             # OPEN-154: a round's stops at most this many tiles from the post's door (20 min at
+                                   # [exec]'s 3.5 tiles a minute; T1 (OPEN-304): 420 -> 70, the 20 min kept; round 9 Y4:
+                                   # 20 -> 420, the same 20 min at 21: 20 tiles was
                                    # it at R2's pace, 40 min before R2; super 596's near-home stops spanned 64 tiles, 514 of
                                    # 540 min walked)
 stat_home_p = 0.5                  # an off-screen counterpart at home (off shift, not the night 00-06) is met at this
@@ -5210,19 +5224,21 @@ super_leg_days = 7                 # a tenant he saw to (a repair, a complaint) 
 # remainder, OPEN-156): the long legs at 20k. Without it a map's `L+` lines are dropped too.
 # Placeholders.
 [legs]
-leg_replan_tiles = 420             # a Full or Coarse walking GoTo past this (Manhattan tiles, 20 min at [exec]
-                                   # walk_tiles_per_tick 21; round 9 Y4: 40 -> 420: 40 tiles was 40 min at R2's pace and
-                                   # 2 min at the real one, a re-plan every other minute) walks in segments of this
+leg_replan_tiles = 70              # a Full or Coarse walking GoTo past this (Manhattan tiles, 20 min at [exec]'s 3.5 tiles
+                                   # a minute; T1 (OPEN-304): 420 -> 70, the 20 min kept; round 9 Y4: 40 -> 420: 40 tiles
+                                   # was 40 min at R2's pace, a re-plan every other minute at 21) walks in segments of this
                                    # length; each end re-plans the rest
                                    # (the cab, the El, the next segment): the body is seen en route, never frozen at
                                    # its door for the whole leg (V6 corp 1: a CEO still 724 min at home)
 segment_snap = 6                   # a Coarse segment's end snaps to a walkable Road tile within this radius (none: one leg);
                                    # a Full one ends leg_replan_tiles steps along its own route
-escort_walk_tiles = 400            # P12: an escort walks, at walking speed, up to this; past it the guard calls the van.
-                                   # Round 9 Y4: 40 -> 400: the walk while it is no longer than the van's call (15) and
-                                   # drive (the Car's road 5x): ~19 min at [exec] walk_tiles_per_tick 21 (40 was 2 min)
+escort_walk_tiles = 65             # P12: an escort walks, at walking speed, up to this; past it the guard calls the van.
+                                   # Round 9 Y4: 40 -> 400. T1 (OPEN-304): 400 -> 65, the same rule at 3.5 tiles a minute:
+                                   # the walk while it is no longer than the van's call (15) and drive (the Car's road 5x):
+                                   # w / 3.5 = 15 + w / 17.5 at w ~ 65 tiles, ~19 min on foot
 van_call_ticks = 15                # P12: the van reaches the arrest this long after the call, then drives guard and
-                                   # suspect at the Car's speed ([vehicles] mult)
+                                   # suspect at the Car's speed ([vehicles] mult). T1: kept, a wait in a person's day (the
+                                   # van on its beat is within 15 game minutes' drive, ~1 km at the Car's pace)
 exec_ride_home = true              # OPEN-140: an exec driven to his Hq ([service] exec_ride) is driven home the same way
 bed_by_ride = true                 # OPEN-140: the away bed ([life] bed_margin_tiles) reads the trip home by ride (the
                                    # El, the exec's car), not the walk: a guard's patrol ending 150 tiles out sleeps home
@@ -5481,19 +5497,24 @@ hours = [                          # per kind, [from, to) minutes of the day; to
 # wait grows when a crowd calls it (the evening rush in a 40-storey tower) and the crowd takes the stairs once the
 # stairs are quicker. The walkways (the map's P lines from walkways_sim.json) cost their run walked at [exec]
 # walk_tiles_per_tick plus their stairs' storeys. Ticks are game minutes, fractions allowed (a climb rounds up).
-# Absent: no climb, a portal costs its run. Placeholders at the real pace (Y4: 21 tiles a minute).
+# Absent: no climb, a portal costs its run. Placeholders written in real seconds at Y4's real pace; T1 (OPEN-304,
+# docs/TIME_MODEL.md § 1): a climb and a lift are physical durations the camera sees, so each tick count is x6 (a real
+# second is a tenth of a game minute at 1x, not a sixtieth); the stairs keep their share of the walk (30 s a storey is
+# 42 m walked, then and now).
 [levels]
-stair_ticks_per_floor = 0.5        # 30 s a storey up the stairs, an ordinary adult's sustained climb with the landings:
-                                   # the 40th floor is 20 min, the 6th of a walk-up 3 min (C7; the spec's "most of an
-                                   # hour" was the pre-Y4 pace's two tiles a flight at a tile a minute)
-stair_down_mult = 0.5              # down is twice as quick (15 s a storey)
-lift_wait_ticks = 1.0              # a minute for the car to come to an empty lobby
-lift_ticks_per_floor = 0.05        # 3 s a storey ridden, its stops spread over it: the 40th floor is 2 min aboard
-lift_dwell_ticks = 0.5             # 30 s at each end of the car's round trip: a 45-storey lift cycles in 5.5 min
+stair_ticks_per_floor = 3.0        # 30 real s a storey up the stairs (T1: 0.5 -> 3), an ordinary adult's sustained climb
+                                   # with the landings: the 40th floor is 2 h of game time, the 6th of a walk-up 18 min
+                                   # (C7; the spec's "most of an hour" was the pre-Y4 pace's two tiles a flight)
+stair_down_mult = 0.5              # down is twice as quick (15 real s a storey)
+lift_wait_ticks = 6.0              # a real minute for the car to come to an empty lobby (T1: 1 -> 6)
+lift_ticks_per_floor = 0.3         # 3 real s a storey ridden, its stops spread over it (T1: 0.05 -> 0.3): the 40th floor
+                                   # is 12 game min aboard
+lift_dwell_ticks = 3.0             # 30 real s at each end of the car's round trip (T1: 0.5 -> 3): a 45-storey lift cycles
+                                   # in 33 game min
 lift_capacity = 13                 # a 1,000 kg car
 lift_min_floors = 3                # three storeys or fewer: the stairs (a lift climb is more)
-portal_stair_ticks_per_floor = 0.5 # a footbridge's or a station's stairs: a storey (3 m) of rise at the stairs' rate
-portal_lift_wait_ticks = 1.0       # a station lift's call; the ride at lift_ticks_per_floor
+portal_stair_ticks_per_floor = 3.0 # a footbridge's or a station's stairs: a storey (3 m) of rise at the stairs' rate (T1: x6)
+portal_lift_wait_ticks = 6.0       # a station lift's call (T1: x6); the ride at lift_ticks_per_floor
 escalator_speed = 1.5              # walking on the moving stair: 1.4 m/s walked + ~0.7 m/s of the stair (the path search's
                                    # Manhattan step drops to the escalator's cost a tile, so its bound stays admissible)
 
@@ -5508,10 +5529,12 @@ escalator_speed = 1.5              # walking on the moving stair: 1.4 m/s walked
 # a Manhattan tile at the expected wait. Ground vehicles stop at red later (OPEN-275, signals::vehicle_go). A lane's 4 m
 # carriageway has no carriageway tile at 4 m and is crossed anywhere. Absent: crossing a street costs nothing.
 [crossings]
-cycle_s = 100.0                    # an HK junction's cycle, the walk phase and the clearance in it
-walk_share = 0.25                  # 25 s green man of 100: an arrival at random waits 28 s on average
+cycle_s = 600.0                    # an HK junction's cycle, the walk phase and the clearance in it, in game seconds (a tick
+                                   # is 60 of them): T1 (OPEN-304, docs/TIME_MODEL.md § 1): 100 -> 600, the same 100 real
+                                   # seconds on screen at 1x (a physical duration, x6), still ~10 steps of expected wait
+walk_share = 0.25                  # 25 real s green man of 100: an arrival at random waits 28 real s (169 game s) on average
 jaywalk_tenths = 150               # ~21 steps' price a carriageway tile: a 16 m street (two tiles) jaywalked costs 41
-                                   # steps more than walked, so a crossing (two steps and the 28 s wait, ~10 steps) up
+                                   # steps more than walked, so a crossing (two steps and the 28 real s wait, ~10 steps) up
                                    # to ~15 tiles off either way is taken
 timed_crossings_per_tile = 0.0033  # V7's 20k seed 42 x 7: Full walkers made 11,521 crossings over 3.45 M Manhattan tiles
                                    # of walk legs (0.0032 a step walked: the report's crossings_walked / walk_steps),
@@ -5891,8 +5914,8 @@ back_onco_mult = 0.5               # ... buys the back room's: this x the Clinic
 back_room_adults = 4000            # the back room's founder: while fewer stand than one per this many adults ...
 rogue_lawful = 0.45                # ... a struck-off doc, else the least lawful licensed Ripperdoc under this, opens one
 back_reach_ticks = 300             # a back room is walked to from this far (travel minutes; [distance.reach] clinic_ticks 120)
-hail_min_tiles = 420               # the cab: a body's trip (not the commute) this many tiles or more ... (round 9 Y4: 50 ->
-                                   # 420, a 20-min walk at [exec] walk_tiles_per_tick 21; 50 tiles is 2.4 min at the pace)
+hail_min_tiles = 70                # the cab: a body's trip (not the commute) this many tiles or more ... (round 9 Y4: 50 ->
+                                   # 420, a 20-min walk at 21 tiles a minute; T1 (OPEN-304): 420 -> 70, the 20 min at 3.5)
 hail_rich_coins = 80               # ... hails a cab when it holds this many coins (flush) or is hurried (Treat, Flee,
                                    # Rescue: the hurt, the frightened, the carrier), with the fare and [jobs2] cab_reserve ...
 p_hail = 0.5                       # ... on this (a hash of the rider and the day; one a day)
@@ -6111,7 +6134,9 @@ raid_target_reach_ticks = 240      # a corp raid's prize lies within this travel
 court_work_excused = true          # a court summons missed at work takes standing, not the colours (R5's judgement of 5b's
                                    # attrition: after the stall fixes the daily court rota was 2/3 of the misses behind a loss)
 march_wait_ticks = 60              # round 7 W2 (OPEN-241): the first at a raid's door hold the brawl for the column's tail, a
-                                   # marcher due at the door within this many ticks (V15: three went in, the rest behind)
+                                   # marcher due at the door within this many ticks (V15: three went in, the rest behind);
+                                   # T1 (OPEN-304): and the muster holds (inside muster_hold_ticks) for a member due at it
+                                   # within this (at 3.5 tiles a minute the stragglers trailed the column, 14 -> 69 missed)
 muster_hold_ticks = 90             # V8b (OPEN-276): a gang raid's muster waits past its hour, up to this, until [gangs]
                                    # raid_min_members stand there, then leaves (the march clock from then); short of them it
                                    # breaks up at the muster with who came and where the rest were (20k: a lone member walked
