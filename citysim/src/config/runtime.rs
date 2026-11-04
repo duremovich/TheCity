@@ -18,6 +18,8 @@ pub struct ViewCfg {
     /// The view milestone V1 (OPEN-262): real seconds between two looks at the config file's mtime (cityview's
     /// reload on a file change).
     pub reload_poll_s: f64,
+    /// The frame cap (Dylan 2026-11-03; cityview `pace.rs`): at most this many frames a real second, 0 uncapped.
+    pub fps_cap: u16,
     /// The view milestone V3 (cityview `people.rs`): a body within this many
     /// metres of the subject is drawn skinned and animated (walk / idle);
     /// past it, a static posed mesh.
@@ -210,6 +212,7 @@ impl Default for ViewCfg {
             ring_half_tiles: 48,
             way_margin_tiles: 64,
             reload_poll_s: 1.0,
+            fps_cap: 30,
             people_anim_m: 40.0,
             people_anim_max: 48,
             cam_fov_deg: 30.0,

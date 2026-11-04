@@ -48,6 +48,9 @@ driven (P5). P5h made the existing Capsule Hotel the hostel rather than a new bu
 - **The build and the layout** (35th session): the release profile is incremental (a ~3 % slower sim for a 9x faster
   edit loop); no ECS framework, SoA or crate split (the `Vec<Option<T>>` World already is an ECS; the friction was
   the hot files); files split at domain seams under a 1,500-line warning, never a gate.
+- **The game is capped at 30 fps** (35th session): `[view] fps_cap` (0 uncapped, `--fps N` overrides; benches always
+  uncapped; cityview `pace.rs`), the CPU past it left to the sim thread. Engine optimization waits for the end or a
+  bottleneck; this session's efficiency work was for the agents' loop.
 
 - **The time model** (34th session, `OPEN-304`, `docs/TIME_MODEL.md`): true realtime at 1x was too slow ("I don't
   know of any games that work that way"); the day is compressed 6x and space gives, not time: the walk 3.5 tiles a

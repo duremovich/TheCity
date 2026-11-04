@@ -10,6 +10,7 @@
 //! cargo run --release -p cityview -- [--city city/isle_m] [--at X,Y] [--zoom W] [--yaw DEG] [--pitch DEG] [--overview]
 //!                        [--res WxH] [--no-player | --player] [--squad N] [--day] [--occ off]
 //!                        [--bench stream|overview|hold|shots|one] [--speed M_S] [--tag T] [--out DIR]
+//!                        [--fps N] (the frame cap, default `[view] fps_cap`; 0 uncapped; benches uncapped)
 //! (--bench one: a single screenshot of the view the args set up, named --tag; --zoom is the frame's width at the
 //! subject in metres, --yaw the camera's bearing from it (0 = south, 90 = east), --pitch its angle above the
 //! horizon; with --overview they set the overview orbit; --occ off: no cutaway, the A/B)
@@ -50,6 +51,7 @@ mod lights;
 mod lots;
 mod mesh;
 mod occ;
+mod pace;
 mod people;
 mod play;
 mod recplay;
@@ -122,6 +124,8 @@ struct Args {
     play: Option<String>,
     /// M18 P5: --slice: the start menu (play.rs), the pre-run save by default
     slice: bool,
+    /// --fps N: the frame cap (pace.rs; default `[view] fps_cap`, 0 uncapped)
+    fps: Option<u16>,
 }
 
 /// M18 P5: the slice's pre-run city and the player saves, under the workspace root.
@@ -173,6 +177,7 @@ impl Args {
             config: None,
             reload_at: None,
             capsules: false,
+            fps: None,
             watch_vehicle: None,
             possess: None,
             play: None,
@@ -220,6 +225,10 @@ impl Args {
                 }
                 "--speed" => {
                     a.speed = next(i).parse().unwrap();
+                    i += 1;
+                }
+                "--fps" => {
+                    a.fps = Some(next(i).parse().expect("--fps N (0: uncapped)"));
                     i += 1;
                 }
                 "--tag" => {
@@ -638,6 +647,11 @@ fn main() {
     // V3: people drawn as people (people.rs)
     if args.sim.is_some() || args.save.is_some() || args.slice {
         people::add(&mut app, args.capsules);
+    }
+    // the frame cap (pace.rs): benches measure the uncapped frame, so they never pace
+    let fps = if args.bench.is_some() { 0 } else { args.fps.unwrap_or(vcfg.fps_cap) };
+    if let Some(p) = pace::FramePace::new(fps) {
+        app.insert_resource(p).add_systems(Last, pace::pace);
     }
     if args.bench.is_some() {
         app.add_systems(Update, bench::run_bench.before(cam::controls).run_if(resource_exists::<bench::Bench>));

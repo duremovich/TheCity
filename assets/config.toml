@@ -6502,6 +6502,10 @@ way_margin_tiles = 64              # a Coarse walk is placed on its way (one roa
 # mtime look on the sim thread between ticks, every reload_poll_s real seconds); the live keys swap in at a tick
 # boundary, the build-time ones (Config::BUILD_TIME) are kept and reported.
 reload_poll_s = 1.0
+# The frame cap (Dylan 2026-11-03; cityview pace.rs): cityview draws at most this many frames a real second, the CPU
+# past it left to the sim thread (which paces itself by the wall clock, so the cap never slows the city). 0 uncapped;
+# --fps N overrides; the benches (--bench) always run uncapped. Read at startup only.
+fps_cap = 30
 # The view milestone V3 (cityview people.rs): residents drawn as TheCityGraphics' street NPCs, the walk and idle
 # clips from the Mixamo set. Read from this file by the view at startup (a save's copy of [view] predates them).
 people_anim_m = 40.0               # within this many metres of the subject a body is skinned and animated; past it a
