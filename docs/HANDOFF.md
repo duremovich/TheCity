@@ -1,13 +1,13 @@
 # Handoff: now
 
 Rewritten at every session end; never appended. The session logs are `docs/history/SESSIONS.md`. Last rewrite:
-**2026-11-03, the thirty-fourth session: the time model designed and built (T1 the pace, T2 the clock).** The
-thirty-third session's slice work (combat C1-C5, P5, P5b, P5h) is summarised below as it stood; this session's
-additions are step 0 of Next, the Decided list's first entry, and the cost table.
+**2026-11-03, the thirty-fifth session: the build loop and the code layout** (on top of the thirty-fourth's time
+model; the slice work of the thirty-third is summarised below as it stood). This session's additions are step 0 of
+Next, the Decided list's first entry, the process notes and the cost table.
 
 ## Main
 
-Main (`b9a69ae` or later, pushed) holds **the player slice through P5h plus the time model** (a 4-hour day at 1x,
+Main (`6911120` or later) holds **the player slice through P5h plus the time model** (a 4-hour day at 1x,
 `SAVE_VERSION` 135; **the slice save is still v134 and must be remade before play**: `cargo run --release -p
 citysim-cli -- run --days 21 --seed 42 --population 20000 --scaled --ambient-flats 50 --map
 assets/maps/isle_m_k2.txt --save-at 30240 --saves-dir saves/slice`, then rename `42-30240.ron` to `20k_s42_d21.ron`): the slice is playable end to end and waits on its
@@ -45,6 +45,10 @@ driven (P5). P5h made the existing Capsule Hotel the hostel rather than a new bu
 
 ## Decided (Dylan, this session)
 
+- **The build and the layout** (35th session): the release profile is incremental (a ~3 % slower sim for a 9x faster
+  edit loop); no ECS framework, SoA or crate split (the `Vec<Option<T>>` World already is an ECS; the friction was
+  the hot files); files split at domain seams under a 1,500-line warning, never a gate.
+
 - **The time model** (34th session, `OPEN-304`, `docs/TIME_MODEL.md`): true realtime at 1x was too slow ("I don't
   know of any games that work that way"); the day is compressed 6x and space gives, not time: the walk 3.5 tiles a
   game minute, lives shrink to a few blocks, the El is the long link. The violence drop it brought (~0.5x) is left
@@ -63,9 +67,14 @@ driven (P5). P5h made the existing Capsule Hotel the hostel rather than a new bu
 
 ## Next, in order
 
-0. **A compile-time and code-efficiency pass** (Dylan 2026-11-03, the next session's first work): build times
-   (the cold Bevy build ~11 min, the sim's release build, incremental rebuilds) and the code's own efficiency. Design
-   it with Dylan before spawning; measure before and after.
+0. **Done this session: the build loop and the layout** (`93c6bc3`, `67cd864`, `6911120`). A one-file edit to
+   built tests 6m13s -> ~41 s (the release profile incremental, 256 codegen units; `--profile dist` for benches; the
+   tier footer prints `build`); a worktree's cold build is still ~7 min and its `target/` ~20 GB. A stats counter is
+   one `cols!` line in `stats/<group>.rs`, a component one line in `world!`'s `components { }`, no save changelog
+   (`docs/ARCHITECTURE.md` § 12). The god files are directories (`config/`, `components/`, `world/`, 25 systems, the
+   CLI), every old path re-exported; lint warns past 1,500 lines. **Not done**: the sim's runtime efficiency (the
+   other half of Dylan's item), merging the 104 test binaries into one (cold-build CPU), sharing a Bevy build across
+   worktrees (the 11-min cold view build), rust-lld on the view (untested).
 0b. **The time model is built** (`OPEN-304`, `docs/TIME_MODEL.md`): T1 the pace (`9f4b0d2`: the walk 3.5 tiles a game
    minute, the El, stairs, lifts and crossings x6, the letting desk by trip, `SAVE_VERSION` 135; the slice
    save not yet remade, see Main) and T2 the clock (`ff75885`: 1x a 4-hour day, steps 1/2/5/20/60, auto-speed to 600x through stretches,
@@ -90,17 +99,26 @@ Frozen until the slice reads: `OPEN-278`, `285`, `287`, `265`, traffic (`275`), 
 
 ## Process notes from this session
 
-- **The view tier's 7-minute budget is unrealistic for a cold worktree**: a fresh worktree's Bevy release build took
-  11m05s-11m10s (C5 hit 7m00s exactly). Either raise the budget for a cold target or share a Bevy build cache across
-  worktrees; until then a breach on a new worktree is the build, not a regression.
-- **Repeated "waiting on its own background work" notices** (Dylan asked): a coder with a long foreground job shows
-  as waiting each time it yields; nothing was stuck. Coders that hand back early with a job still running keep their
-  worktree locked (unlock after the agent ends).
-- **Two branches on the same client files** (P5b polish and P5h both in `play.rs`, `simthread.rs`) merged cleanly;
-  the orchestrator ran one `cargo check -p cityview` on the merged tree before pushing, as Dylan was about to play.
-- Phases ran 324-437 turns against ~300; the cityview play sessions remain the turn sink.
+- **Measure the build, not just the tier**: the change tier's "~2 min" never counted the compile; the footer now
+  prints it. The first build after a profile change is a full one (7m05s on main).
+- **Subagents cannot write the orchestrator's scratchpad** (the harness refused P2's report file): briefs ask for the
+  report in the hand-back reply; P3 wrote its own scratch dir instead.
+- **Pure-refactor phases proved by one 3-day CSV diff** (timing columns skipped) plus the change tier; P3's moves also
+  needed `no_per_tick_scan` (hardcoded source paths) and `test.py`'s `shadow.rs` path updated. The orchestrator ran
+  `clippy -p glclient -p cityview` on the merged tree (green, 42 s): the coders never build the view.
+- Worktrees of finished agents stay locked; `git worktree unlock` then `remove --force` after the agent ends.
 
 ## Cost (API-rate $ equivalent, `tools/session_cost.py`)
+
+The thirty-fifth session:
+
+| part | agent | turns | median ctx | $ |
+|---|---|---|---|---|
+| P2 the append points | Opus | 181 | 184k | 13 |
+| P3 the file splits | Opus | 356 | 185k | 21 |
+| orchestrator (build measurements, profile, briefs, merges, close) | Opus | ~120 | 116k | 6 |
+
+The session ≈ $40. No coders or worktrees left.
 
 The thirty-fourth session:
 
@@ -111,21 +129,3 @@ The thirty-fourth session:
 | orchestrator (the design with Dylan, the probe, briefs, merges, close) | Opus | ~90 | 107k | 6 |
 
 The session ≈ $54. T1 ran 416 turns against ~300 (43 log reads, 208 shell calls). No coders or worktrees left.
-
-The thirty-third session (≈ $280):
-
-| part | agent | turns | median ctx | $ |
-|---|---|---|---|---|
-| C1 the beat | Opus | 363 | 239k | 26 |
-| C2 wounds that last | Opus | 364 | 257k | 26 |
-| C3a live engagement | Opus | 437 | 332k | **39** |
-| C3b numbers, joiners, chrome | Opus | 364 | 260k | 28 |
-| C4 the player | Opus | 324 | 339k | 33 |
-| C5 feel pass | Opus | 395 | 363k | 38 |
-| P5 start and loop | Opus | 355 | 326k | 33 |
-| P5b cold-start polish | Sonnet | 147 | 124k | 6 |
-| P5h housing as an errand | Opus | 396 | 266k | 29 |
-| orchestrator (combat design, briefs, merges, close) | Opus | 150 | 147k | 22 |
-
-The session ≈ $280: combat C1-C5 $190, the slice's start, polish and housing $68. No coders or worktrees left; the
-stale `agent-a2d06b9d9985759f3` folder is deleted.

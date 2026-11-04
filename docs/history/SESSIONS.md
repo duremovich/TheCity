@@ -1117,3 +1117,14 @@ x6, Y4's minute-caps restored, the letting desk by trip, raids' muster; `SAVE_VE
 1/2/5/20/60x, auto-speed to 600x, the teleport found: the lerp ignored the play speed; the body moves at the click).
 `OPEN-305`, `306` opened. The slice save is not yet remade at v135 (the rebuild was stopped at the close). Next:
 a compile-time and code-efficiency pass, then the cold play. Cost ≈ $54 (HANDOFF § Cost).
+
+**2026-11-03, the thirty-fifth session: the build loop and the code layout.** Dylan asked about compile time and
+whether the code was split well for agents. The change tier's build had never been timed: a one-file edit cost
+6m13s before a test ran (the release profile non-incremental, the 189k-line citysim re-optimized whole). The
+release profile went incremental with 256 codegen units and line tables (41 s, the sims ~3 % slower; rust-lld bought
+nothing; `--profile dist` keeps the old build plus thin LTO; the footer now prints the build). Advice taken against:
+no ECS framework, no SoA, no crate split (the hand-rolled `Vec<Option<T>>` World is already an ECS; the friction was
+hot files). Two Opus phases, both pure refactors proven by a byte-identical 3-day CSV: P2 removed the append points
+(the save changelog, the CSV header literal, a component's three registration lists: `cols!`, `world!`), P3 split the
+god files (config/, components/, world/, 25 systems, exec, levers, the CLI) under a 1,500-line warning. Cost ≈ $40
+(HANDOFF § Cost).
