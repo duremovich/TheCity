@@ -40,8 +40,8 @@ mod walk;
 pub use board::*;
 use goto::*;
 pub use start::*;
-pub use step::*;
-pub(crate) use walk::*;
+pub(crate) use step::*;
+pub use walk::*;
 
 /// Where a Goto is heading. Shared by the Full and Coarse variants so an LOD
 /// change can convert one into the other without re-resolving.
