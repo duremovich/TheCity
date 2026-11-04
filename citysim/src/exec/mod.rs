@@ -350,7 +350,7 @@ fn emigrate_step(world: &mut World, id: EntityId) {
 }
 
 /// Run the current step's state machine for one tick.
-fn step_agent(world: &mut World, id: EntityId) {
+pub(crate) fn step_agent(world: &mut World, id: EntityId) {
     let Some(brain) = world.comp::<Brain>(id) else { return };
     // M18 P4: an offer to a body the human drives that ran out says so.
     if brain.player.as_ref().is_some_and(|p| p.offers.iter().any(|o| o.until <= world.tick)) {

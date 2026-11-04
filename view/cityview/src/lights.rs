@@ -145,14 +145,11 @@ fn poles(c: &MapCrossing, tm: f32, x0: f32, y1: f32) -> [Vec2; 2] {
     }
 }
 
-/// The view's game time, ms: the newer frame's tick less one plus the lerp's `u` (1 while a bench holds).
+/// The view's game time, ms (T2: `Shared::view_tick`, the older frame's tick and the lerp's `u` of the way to the
+/// newer's; the newer's while a bench holds).
 fn game_ms(sim: &Sim) -> Option<u64> {
-    let live = sim.live.as_ref()?;
-    let (_, latest) = live.pair();
-    let latest = latest?;
-    let held = live.hold.load(std::sync::atomic::Ordering::Relaxed) != u64::MAX;
-    let u = if held { 1.0 } else { (latest.at.elapsed().as_secs_f64() * f64::from(live.rate())).clamp(0.0, 1.0) };
-    Some(((latest.frame.tick.saturating_sub(1) as f64 + u) * citysim::signals::MS_PER_TICK as f64) as u64)
+    let t = sim.live.as_ref()?.view_tick()?;
+    Some((t * citysim::signals::MS_PER_TICK as f64) as u64)
 }
 
 fn lamp_lit(cfg: &CrossingsCfg, j: TilePos, t: u64, lamp: Lamp) -> bool {
