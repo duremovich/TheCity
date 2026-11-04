@@ -7,7 +7,7 @@ use crate::world::World;
 
 /// The save format (`World::save_version`): bump it when the saved shape changes.
 /// The history is `git log -L '/pub const SAVE_VERSION/,+1:citysim/src/save.rs'`.
-pub const SAVE_VERSION: u16 = 135;
+pub const SAVE_VERSION: u16 = 136;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

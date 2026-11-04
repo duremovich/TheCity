@@ -25,8 +25,21 @@ pub(super) fn track(waypoints: &[[u16; 2]]) -> Vec<TilePos> {
     out
 }
 
+/// S1 (`OPEN-309`): is `t` on a marked crossing's zebra (a map `X` rect,
+/// grown by `[transit] stop_zebra_margin_tiles`: the import's downsampled
+/// rect and the painted zebra are a tile apart, `OPEN-316`)?
+fn on_zebra(world: &World, t: TilePos) -> bool {
+    let m = world.config.transit.stop_zebra_margin_tiles;
+    let (x, y) = (u32::from(t.x), u32::from(t.y));
+    world.map.crossings.iter().any(|c| {
+        x + m >= u32::from(c.a.x) && x <= u32::from(c.b.x) + m && y + m >= u32::from(c.a.y) && y <= u32::from(c.b.y) + m
+    })
+}
+
 /// The nearest walkable Road tile to `p` within `SNAP_RADIUS` (Manhattan),
-/// ties the lower `(y, x)`; `p` itself when it is one.
+/// ties the lower `(y, x)`; `p` itself when it is one. S1 (`OPEN-309`):
+/// never a crossing's zebra (the Mid-Levels and Hillside lines' shared stop
+/// at 823,619 stood its riders on one).
 fn snap(world: &World, p: TilePos) -> Option<TilePos> {
     let (px, py) = (i32::from(p.x), i32::from(p.y));
     for r in 0..=SNAP_RADIUS {
@@ -39,7 +52,7 @@ fn snap(world: &World, p: TilePos) -> Option<TilePos> {
                     continue;
                 }
                 let t = TilePos::new(x as u16, y as u16);
-                if world.map.tile_at(t) != TileKind::Road {
+                if world.map.tile_at(t) != TileKind::Road || on_zebra(world, t) {
                     continue;
                 }
                 if best.is_none_or(|b| (t.y, t.x) < (b.y, b.x)) {
@@ -141,10 +154,81 @@ pub fn build(world: &mut World) {
     net.cells_w = w.div_ceil(NEAR_CELL);
     net.map_w = w;
     net.map_h = h;
+    world.transit.net.platforms = platforms(world, &stops);
     world.transit.net.lines = lines;
     world.transit.net.stops = stops;
     let open = open_lines(world);
     rebuild_table(world, open);
+}
+
+/// S1 (`OPEN-309`): each stop's waiting place on its station's deck: the
+/// platform deck point (a `P platform` end) nearest the stop tile within
+/// `[transit] platform_reach_tiles` (ties the lower node), and the way up to
+/// it: the stairs or lift (a `P stairs`/`P lift` from the way, level 0, to
+/// a platform point) whose foot is nearest along the deck (its run plus the
+/// platform's), then the platform's points to the waiting place. `None`: no
+/// deck in reach (a tram stop), or no way down from it.
+fn platforms(world: &World, stops: &[TilePos]) -> Vec<Option<Platform>> {
+    use crate::map::PortalKind as K;
+    type Node = (TilePos, u8);
+    let reach = world.config.transit.platform_reach_tiles;
+    let portals = &world.map.portals;
+    if reach == 0 || portals.is_empty() {
+        return vec![None; stops.len()];
+    }
+    let mut adj: BTreeMap<Node, Vec<(Node, u32)>> = BTreeMap::new();
+    for p in portals.iter().filter(|p| p.kind == K::Platform && p.a.1 > 0 && p.b.1 > 0) {
+        adj.entry(p.a).or_default().push((p.b, u32::from(p.tiles)));
+        adj.entry(p.b).or_default().push((p.a, u32::from(p.tiles)));
+    }
+    // A platform point's ways down: (foot, the run).
+    let mut downs: BTreeMap<Node, (TilePos, u32)> = BTreeMap::new();
+    for p in portals.iter().filter(|p| matches!(p.kind, K::Stairs | K::Lift)) {
+        for (top, foot) in [(p.a, p.b), (p.b, p.a)] {
+            if top.1 > 0 && foot.1 == 0 && adj.contains_key(&top) {
+                let run = u32::from(p.tiles);
+                if downs.get(&top).is_none_or(|&(f, r)| (run, foot.0) < (r, f)) {
+                    downs.insert(top, (foot.0, run));
+                }
+            }
+        }
+    }
+    stops
+        .iter()
+        .map(|&s| {
+            let (&wait, _) =
+                adj.iter().filter(|(n, _)| n.0.manhattan(s) <= reach).min_by_key(|(n, _)| (n.0.manhattan(s), **n))?;
+            // Dijkstra over the deck from the waiting place.
+            let mut dist: BTreeMap<Node, (u32, Node)> = BTreeMap::new();
+            let mut open = BinaryHeap::new();
+            dist.insert(wait, (0, wait));
+            open.push(std::cmp::Reverse((0u32, wait)));
+            while let Some(std::cmp::Reverse((d, n))) = open.pop() {
+                if dist.get(&n).is_some_and(|&(e, _)| e < d) {
+                    continue;
+                }
+                for &(m, c) in adj.get(&n).into_iter().flatten() {
+                    let nd = d + c;
+                    if dist.get(&m).is_none_or(|&(e, _)| nd < e) {
+                        dist.insert(m, (nd, n));
+                        open.push(std::cmp::Reverse((nd, m)));
+                    }
+                }
+            }
+            let (top, foot) = dist
+                .iter()
+                .filter_map(|(n, &(d, _))| downs.get(n).map(|&(f, run)| (d + run, *n, f)))
+                .min()
+                .map(|(_, n, f)| (n, f))?;
+            let mut way = vec![top];
+            let mut at = top;
+            while at != wait {
+                at = dist.get(&at)?.1;
+                way.push(at);
+            }
+            Some(Platform { foot, way })
+        })
+        .collect()
 }
 
 /// `Net::near`'s index: per `NEAR_CELL` cell (row-major), the offsets into

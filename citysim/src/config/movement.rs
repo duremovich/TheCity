@@ -441,6 +441,13 @@ pub struct TransitCfg {
     pub transfer_ticks: u32,
     /// Track tiles between stops.
     pub stop_spacing: u32,
+    /// S1 (`OPEN-309`): the farthest (Manhattan tiles) a stop's waiting
+    /// place on a station platform's deck may lie from its stop tile
+    /// (`transit::Platform`); 0: none, the wait on the stop tile.
+    pub platform_reach_tiles: u32,
+    /// S1 (`OPEN-309`): a stop tile snaps off every marked crossing's rect
+    /// grown by this many tiles (the painted zebra a tile off the import's).
+    pub stop_zebra_margin_tiles: u32,
     /// The nearest stops tried at each end of a trip.
     pub stop_candidates: usize,
     /// No ride under this Manhattan distance.
@@ -519,6 +526,8 @@ impl Default for TransitCfg {
             dwell_ticks: 1.0,
             transfer_ticks: 5,
             stop_spacing: 16,
+            platform_reach_tiles: 0,
+            stop_zebra_margin_tiles: 0,
             stop_candidates: 3,
             min_ride_tiles: 24,
             min_saving_ticks: 15,

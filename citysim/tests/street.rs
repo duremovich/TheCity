@@ -207,9 +207,12 @@ fn test_littered_step_delays_next_move_and_keeps_flow_fields() {
     // Round 9 Y4: the M12 step arithmetic this pins is R2's (one tile a
     // tick, the quarter-tick units); at the real pace a walker takes 21
     // steps a tick and a heaped tile's delay is two steps' units.
+    // S1 (`OPEN-317`): the shipped delay is a share of a step
+    // (`[litter] step_share`); the arithmetic pinned here is whole steps.
     let mut cfg = street_cfg();
     cfg.exec.walk_tiles_per_tick = 1;
     cfg.exec.step_res = 4;
+    cfg.litter.step_share = [0.0, 0.0, 1.0, 2.0];
     let mut w = World::new(7, cfg);
     let market = w.buildings_of_kind(BuildingKind::Market)[0];
     let a = civilians(&w)[0];

@@ -245,12 +245,20 @@ impl World {
         fallback.unwrap_or(b.door)
     }
 
-    /// Put the agent inside `b` on the first free interior tile.
+    /// Put the agent inside `b` on the free interior tile nearest its door
+    /// (S1, `OPEN-307`: the first free tile row-major from the rect's
+    /// north-west corner put a big building's newcomer 9-23 tiles from the
+    /// door it came through, crossed in one tick both ways).
     pub fn enter_building(&mut self, agent: EntityId, b: EntityId) {
         let Some(bd) = self.comp::<Building>(b) else { return };
-        let taken: Vec<TilePos> =
-            bd.occupants.iter().filter_map(|&o| self.comp::<Position>(o).map(|p| p.tile)).collect();
-        let slot = bd.interior().find(|t| !taken.contains(t)).unwrap_or(bd.door);
+        let mut taken: Vec<TilePos> = bd
+            .occupants
+            .iter()
+            .filter(|&&o| o != agent)
+            .filter_map(|&o| self.comp::<Position>(o).map(|p| p.tile))
+            .collect();
+        taken.sort_unstable();
+        let slot = bd.slot_by_door(&taken).unwrap_or(bd.door);
         if let Some(bd) = self.comp_mut::<Building>(b) {
             if let Err(i) = bd.occupants.binary_search(&agent) {
                 bd.occupants.insert(i, agent);
