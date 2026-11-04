@@ -20,6 +20,12 @@ pub struct LifeCfg {
     /// `ENERGY_SATISFIED`: the goal is skipped above it).
     pub night_sleep_flat: f32,
     pub rough_min_tiles: u32,
+    /// S2 (`OPEN-289`, `OPEN-318`): a body starting a Beg, Scavenge or Sleep
+    /// on a street tile where `spot_cap` others already stand steps to the
+    /// nearest walkable tile within `spot_spill_tiles` with fewer
+    /// (`fixes::spread_spot`; 0: off, a whole crowd on one tile).
+    pub spot_cap: u16,
+    pub spot_spill_tiles: u16,
     /// A housed agent's Sleep phase factor outside the Night and Evening
     /// (was 0.4 for everyone).
     pub housed_day_sleep: f32,
@@ -314,6 +320,8 @@ impl Default for LifeCfg {
             exhausted_flat: 0.6,
             night_sleep_flat: 0.2,
             rough_min_tiles: 45,
+            spot_cap: 3,
+            spot_spill_tiles: 3,
             housed_day_sleep: 0.25,
             bed_margin_tiles: 20,
             hotel_reserve_meals: 2,

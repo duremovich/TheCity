@@ -201,6 +201,16 @@ fn union(a: Rect, b: Rect) -> Rect {
     Rect { x, y, w: (x1 - u32::from(x)) as u16, h: (y1 - u32::from(y)) as u16 }
 }
 
+/// S2 (`OPEN-312`, `OPEN-318`): the ring run now, between two ticks, on a view that is new or cut (a load, a
+/// possession, the camera on another body): every body in it is promoted and placed before a frame is drawn, so
+/// the first frame shows no Statistical or Coarse body in the camera's sight (the tick's own run comes a frame
+/// late). No lead: a cut is not a camera move. `World::view_now` is its caller.
+pub fn prime(world: &mut World) {
+    world.ring.last_centre = None;
+    run(world);
+    crate::systems::bind::drain_queue(world);
+}
+
 /// The ring's tick (see the module doc): after the hourly assignment, before the Statistical hour.
 pub fn run(world: &mut World) {
     let t0 = std::time::Instant::now();
@@ -417,8 +427,12 @@ fn run_inner(world: &mut World) {
             None => {
                 let tier = higher(t, now);
                 if tier != now {
-                    let at = place.get(&id).and_then(|&(_, b)| b);
-                    crate::systems::lod::set_lod_at(world, id, tier, at);
+                    match place.get(&id).and_then(|&(_, b)| b) {
+                        // S2 (`OPEN-312`): a Statistical body with no place of its own (homeless off shift) is
+                        // promoted where it stands, not snapped to a phase door in the camera's sight.
+                        None if now == Lod::Statistical => crate::systems::lod::set_lod_here(world, id, tier),
+                        at => crate::systems::lod::set_lod_at(world, id, tier, at),
+                    }
                 }
                 world.ring.held.insert(id, Hold { tier, base: now });
                 c.taken += 1;

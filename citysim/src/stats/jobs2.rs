@@ -1298,6 +1298,12 @@ cols! {
         pub arrest_escapes: u32,
         #[serde(default, skip_serializing_if = "is_zero_u32")]
         pub fled_runs: u32,
+        /// S2 (`OPEN-313`): a live fight's bystanders who ran off and who
+        /// stopped to watch (`combat::stir`)
+        #[serde(default, skip_serializing_if = "is_zero_u32")]
+        pub stir_fled: u32,
+        #[serde(default, skip_serializing_if = "is_zero_u32")]
+        pub stir_watched: u32,
         /// The combat model C3b: joiners taken into fights (and raiders into a
         /// live raid); the lone body's duels against 2 and against 3 or more
         /// (and won); Sandevistan uses, Kerenzikov dodges, chrome limbs and

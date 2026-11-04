@@ -1723,6 +1723,10 @@ night_sleep_flat = 0.2              # Sleep's flat at Night (off shift)
 rough_min_tiles = 52                # the exhausted lie down where they are when every bed is further. Round 9 Y4: 45 -> 315
                                    # (a 15-min walk at [exec] walk_tiles_per_tick 21). T1 (OPEN-304): 315 -> 52, the
                                    # same 15 min at the 3.5 tiles a minute (a time, kept as one)
+spot_cap = 3                        # S2 (OPEN-289, OPEN-318): a Beg, Scavenge or Sleep started on a street tile where this
+spot_spill_tiles = 3                # many already stand steps to the nearest walkable tile this near with fewer (0: off,
+                                   # the crowd on one tile: 222 beggars at d21 19:20); with a view only (headless the
+                                   # spot's tile stands)
 housed_day_sleep = 0.25             # a housed agent's Sleep phase factor by day (Evening 0.7, Night 1.0)
 bed_margin_tiles = 35              # a Hideout or Hotel bed this much nearer than Home is taken instead. Round 9 Y4: 20 -> 210
                                    # (10 min saved at 21 tiles a minute). T1 (OPEN-304): 210 -> 35, the same 10 min at 3.5
@@ -4068,6 +4072,17 @@ ko_head_minutes = [0, 20, 60]      # head wound (graze, wound, grave); it wakes 
 ko_rob_lawful = 0.4                # the winner goes through a knocked-out loser's pockets when its lawfulness is under this
 ko_rob_share = 1.0                 # (no guard, no arrest, no bout), taking this share of the coins
 flee_tiles = 10                    # a flight whose refuge is the building it fled (or none) runs out to a street tile this far
+flee_run_mult = 0.5                # a body fleeing runs: its step on foot costs this share of a walk's (0.5: twice the walk's
+                                   # pace, 1.0 walks; S2, OPEN-314; with a view only, headless the flight walks)
+stir_tiles = 8                     # S2 (OPEN-313): a live fight's bystanders, the Full bodies this near its front in its
+                                   # place (the street, or the building) and not in it, react once in stir_cool_ticks
+                                   # (combat::stir; 0: off, the street walks past; with a view only): ...
+stir_flee_courage = 0.35           # ... courage under this runs (a Flee, at flee_run_mult) ...
+stir_flee_tiles = 12               # ... to a street tile this far off, away from the fight ...
+stir_watch_p = 0.6                 # ... else, on a keyed draw under this, it stops where it stands and watches ...
+stir_watch_ticks = 4               # ... this long; the rest walk on; the law on duty comes in as joiners (recruit)
+stir_cool_ticks = 30
+stir_max = 12                      # bystanders reacting a fight a tick, at most
 subdue_ko_p = 0.08                 # a subdue stance goes for the knockout: any blow it lands puts the body down on this x (1 + its fatigue)
 odds_trials = 200                  # the odds on an Attack row: this many mock fights (combat::odds: the beat's rules, the
                                    # likely joiners at their join chance, no world writes)

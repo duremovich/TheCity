@@ -69,6 +69,7 @@ mod duel;
 mod fighter;
 mod odds;
 mod orders;
+mod stir;
 mod view;
 mod wounds;
 

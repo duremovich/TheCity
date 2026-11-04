@@ -483,6 +483,16 @@ impl World {
         }
     }
 
+    /// S2 (`OPEN-312`): the view set at once, not at the next tick's commands, and the camera ring run on it now
+    /// (`ring::prime`): for a view that is new or cut (a load, a possession, the camera moved to another body),
+    /// called before the first frame of it is drawn, so nobody in the camera's sight is drawn Statistical or Coarse
+    /// on a stale place first. A pending `SetView` is dropped (this one is newer).
+    pub fn view_now(&mut self, rect: Option<Rect>) {
+        self.command_queue.retain(|c| !matches!(c, PlayerCommand::SetView(_)));
+        self.view_rect = rect;
+        crate::systems::ring::prime(self);
+    }
+
     // -----------------------------------------------------------------------
     // Tick
     // -----------------------------------------------------------------------

@@ -286,6 +286,25 @@ fn way_span(way: &[TilePos], done0: u64, done1: u64) -> Vec<TilePos> {
 }
 
 /// A timed way's place at `tick` and its way on to `tick + 1`.
+/// S2 (`OPEN-312`): a Statistical body standing on the street in a ring (its `Position` the demotion's snapshot,
+/// stale for hours): the building its schedule has it in now (`ring::schedule_door`), that building's door and the
+/// storey it would stand on; `None` off the street, outside the rings, or with no place of its own (homeless off
+/// shift: its `Position` stands).
+fn stat_place(
+    world: &World,
+    e: EntityId,
+    p: &Position,
+    brain: Option<&Brain>,
+    in_rings: &impl Fn(TilePos) -> bool,
+) -> Option<(EntityId, TilePos, u8)> {
+    if p.building.is_some() || brain.is_none_or(|b| b.lod != Lod::Statistical) || !in_rings(p.tile) {
+        return None;
+    }
+    let d = crate::systems::ring::schedule_door(world, e)?;
+    let door = world.comp::<Building>(d)?.door;
+    Some((d, door, crate::systems::floors::floor_in(world, e, d)))
+}
+
 fn timed_place(way: &[TilePos], depart: Tick, arrive: Tick, tick: Tick) -> (TilePos, Vec<TilePos>) {
     let now = timed_pos(way, depart, arrive, tick);
     if tick >= arrive || arrive <= depart {
@@ -505,6 +524,12 @@ pub fn snapshot_many_cached(world: &World, rings: &[Rect], mut cache: Option<&mu
             b = None;
             ahead = way;
             t
+        } else if let Some(d) = stat_place(world, e, p, brain, &in_rings) {
+            // S2 (`OPEN-312`): a Statistical body on the street is a stale snapshot; it is drawn where its schedule
+            // has it (inside its home or workplace), where the ring's promotion will put it
+            b = Some(d.0);
+            floor = d.2;
+            d.1
         } else {
             p.tile
         };
