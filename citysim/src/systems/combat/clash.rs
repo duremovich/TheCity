@@ -217,6 +217,9 @@ pub struct Live {
     pub stepper: Option<EntityId>,
     /// C5 (`OPEN-295`): the knocked out, down and still until they come to.
     pub out: std::collections::BTreeMap<EntityId, Out>,
+    /// S2 (`OPEN-313`): a bystander who reacted to a fight (or walked on) is
+    /// not asked again until (`stir::bystanders`).
+    pub stirred: std::collections::BTreeMap<EntityId, Tick>,
 }
 
 /// C5: a knockout in progress: until when, who did it, what was taken.
@@ -1135,6 +1138,8 @@ pub fn step(world: &mut World) {
         let Some(mut e) = world.combat.engagements.remove(&id) else { continue };
         // C3b: joiners each tick a live fight runs.
         recruit(world, &mut e, Some(id), false);
+        // S2 (`OPEN-313`): and the rest of the street reacts.
+        super::stir::bystanders(world, &e, id);
         // C4: the human's orders, at the next beat.
         apply_orders(world, &mut e);
         if advance(world, &mut e, n) {
@@ -1160,6 +1165,7 @@ pub fn beat(world: &mut World, id: EntityId) -> Option<(Vec<BeatLog>, bool)> {
     if e.recruited != Some(world.tick) {
         e.recruited = Some(world.tick);
         recruit(world, &mut e, Some(eid), false);
+        super::stir::bystanders(world, &e, eid);
     }
     apply_orders(world, &mut e);
     let over = advance(world, &mut e, 1);

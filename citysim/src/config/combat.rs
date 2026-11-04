@@ -630,6 +630,23 @@ pub struct CombatCfg {
     /// C5: a flight whose refuge is the building it fled (or none) runs out to
     /// a street tile this far from the door.
     pub flee_tiles: u16,
+    /// S2 (`OPEN-314`): a body fleeing runs: its step on foot costs this
+    /// share of a walk's (`vehicles::run_mult`; 0.5 is twice the walk's
+    /// pace, 1.0 walks).
+    pub flee_run_mult: f32,
+    /// S2 (`OPEN-313`): a live fight's bystanders (`combat::stir`): the Full
+    /// bodies within `stir_tiles` of its front, in its place, not in it,
+    /// react once in `stir_cool_ticks`: one with courage under
+    /// `stir_flee_courage` runs to a street tile `stir_flee_tiles` off, away
+    /// from it; else, on a keyed draw under `stir_watch_p`, it stops and
+    /// watches `stir_watch_ticks`; at most `stir_max` a fight a tick (0: off).
+    pub stir_tiles: u16,
+    pub stir_flee_courage: f32,
+    pub stir_flee_tiles: u16,
+    pub stir_watch_p: f32,
+    pub stir_watch_ticks: u16,
+    pub stir_cool_ticks: u16,
+    pub stir_max: usize,
     /// C5: a subdue stance goes for the knockout: any blow it lands puts the
     /// body down on this x (1 + the body's fatigue).
     pub subdue_ko_p: f32,
@@ -768,6 +785,14 @@ impl Default for CombatCfg {
             ko_rob_lawful: 0.4,
             ko_rob_share: 1.0,
             flee_tiles: 10,
+            flee_run_mult: 0.5,
+            stir_tiles: 8,
+            stir_flee_courage: 0.35,
+            stir_flee_tiles: 12,
+            stir_watch_p: 0.6,
+            stir_watch_ticks: 4,
+            stir_cool_ticks: 30,
+            stir_max: 12,
             subdue_ko_p: 0.08,
             odds_trials: 200,
             hint_waver: 0.12,

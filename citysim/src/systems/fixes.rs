@@ -502,6 +502,71 @@ pub fn at_spot_with_company(world: &World, id: EntityId) -> bool {
     world.hangouts.iter().any(|(t, v)| t.manhattan(p.tile) <= 2 && v.iter().any(|&o| o != id))
 }
 
+/// S2 (`OPEN-289`, `OPEN-318`): a body starting a street stay (`Beg`,
+/// `Scavenge`, `Sleep`, `HangOut`, `Wander`; a HangOut after it joined the
+/// spot's registry, which it keeps: `leisure::spot_tile`) on a tile where `[life] spot_cap` others already
+/// stand steps to the nearest walkable ground tile within
+/// `spot_spill_tiles` with fewer (off the road and the doors; ties by a
+/// keyed draw), so a corner's crowd stands round it, not on one tile. A
+/// no-op indoors, on a deck, with the cap 0 or no room near.
+pub fn spread_spot(world: &mut World, id: EntityId, kind: ActionKind) {
+    use crate::components::TileKind;
+    let (cap, r) = (world.config.life.spot_cap, world.config.life.spot_spill_tiles);
+    if cap == 0
+        || r == 0
+        || !matches!(
+            kind,
+            ActionKind::Beg | ActionKind::Scavenge | ActionKind::Sleep | ActionKind::HangOut | ActionKind::Wander
+        )
+    {
+        return;
+    }
+    let Some(here) = world.comp::<Position>(id).filter(|p| p.building.is_none() && p.floor == 0).map(|p| p.tile) else {
+        return;
+    };
+    let near = world.agents_near(here, u32::from(r), None);
+    let mut count: std::collections::BTreeMap<TilePos, u16> = std::collections::BTreeMap::new();
+    for o in near {
+        if o == id {
+            continue;
+        }
+        if let Some(p) = world.comp::<Position>(o).filter(|p| p.building.is_none() && p.floor == 0) {
+            *count.entry(p.tile).or_default() += 1;
+        }
+    }
+    let n = |t: TilePos| count.get(&t).copied().unwrap_or(0);
+    if n(here) < cap {
+        return;
+    }
+    let (w, h) = (world.map.w() as i32, world.map.h() as i32);
+    let mut best: Option<(i32, u64, TilePos)> = None;
+    for dy in -i32::from(r)..=i32::from(r) {
+        for dx in -i32::from(r)..=i32::from(r) {
+            let (x, y) = (i32::from(here.x) + dx, i32::from(here.y) + dy);
+            if (dx, dy) == (0, 0) || x < 0 || y < 0 || x >= w || y >= h {
+                continue;
+            }
+            let t = TilePos { x: x as u16, y: y as u16 };
+            if world.map.tile_at(t) != TileKind::Ground || n(t) >= cap {
+                continue;
+            }
+            let key = (
+                dx.abs().max(dy.abs()),
+                crate::rng::splitmix64(u64::from(id.index) << 32 ^ u64::from(t.x) << 16 ^ u64::from(t.y)),
+                t,
+            );
+            if best.is_none_or(|b| (key.0, key.1) < (b.0, b.1)) {
+                best = Some(key);
+            }
+        }
+    }
+    if let Some((_, _, t)) = best {
+        if let Some(p) = world.comp_mut::<Position>(id) {
+            p.tile = t;
+        }
+    }
+}
+
 /// Item 10: the guard-prisoner pair in the cells (one employed at the
 /// building, the other serving a sentence).
 pub fn guard_and_prisoner(world: &World, a: EntityId, b: EntityId, building: EntityId) -> bool {

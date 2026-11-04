@@ -113,13 +113,15 @@ fn column(world: &World, tile: TilePos) -> usize {
 /// × mult))` (`[exec] step_units`, `step_res × move_ticks_full`; round 9
 /// Y4, the quarter ticks `4 × move_ticks_full` before it), `mult` the road
 /// vehicle's column when driving, else `Kit.walk_mult`. An unchromed
-/// walker is exactly `step_units`. Litter is added by the caller.
+/// walker is exactly `step_units`. Litter is added by the caller. S2
+/// (`OPEN-314`): a body on foot fleeing runs, `[combat] flee_run_mult` of
+/// its walk's step ([`run_mult`]).
 pub fn step_q(world: &World, agent: EntityId, tile: TilePos) -> u32 {
     let base = world.config.exec.step_units() as u32;
     let Some(k) = world.comp::<Kit>(agent) else { return base };
     let mult = match k.driving {
         Some(kind) if kind.is_road_vehicle() => world.config.vehicles.mult_of(kind, column(world, tile)),
-        _ => k.walk_mult,
+        _ => k.walk_mult * run_mult(world, agent),
     };
     if mult == 1.0 {
         return base;
@@ -146,10 +148,25 @@ pub fn note_step(world: &mut World, agent: EntityId, tile: TilePos) {
 /// road_share) × mult_ground` when driving a road vehicle, else
 /// `Kit.walk_mult` (1.0 walking unchromed).
 pub fn timed_mult(world: &World, agent: EntityId) -> f32 {
-    let Some(k) = world.comp::<Kit>(agent) else { return 1.0 };
+    let Some(k) = world.comp::<Kit>(agent) else { return run_mult(world, agent) };
     match k.driving {
         Some(kind) if kind.is_road_vehicle() => timed_mult_of(world, kind),
-        _ => k.walk_mult,
+        _ => k.walk_mult * run_mult(world, agent),
+    }
+}
+
+/// S2 (`OPEN-314`): a body whose goal is Flee runs: its step on foot costs
+/// `[combat] flee_run_mult` of a walk's (0.5: twice the walk's pace); 1.0
+/// for anyone else.
+pub fn run_mult(world: &World, agent: EntityId) -> f32 {
+    let fleeing = world.comp::<crate::components::Brain>(agent).is_some_and(|b| {
+        b.current_goal == Some(crate::components::GoalKind::Flee)
+            && b.plan.as_ref().is_some_and(|p| p.goal == crate::components::GoalKind::Flee)
+    });
+    if fleeing {
+        world.config.combat.flee_run_mult.clamp(0.05, 1.0)
+    } else {
+        1.0
     }
 }
 

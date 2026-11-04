@@ -102,7 +102,7 @@ pub(super) fn preach_done(world: &mut World, id: EntityId) {
         b.gang_task_day = Some(today);
     }
     let Some(gang) = world.gang_of(id) else { return };
-    let tile = world.comp::<Position>(id).map(|p| p.tile);
+    let tile = crate::systems::leisure::spot_tile(world, id);
     let listener = tile
         .and_then(|t| world.hangouts.get(&t))
         .map(|v| {
