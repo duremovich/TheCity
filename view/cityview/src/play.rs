@@ -59,7 +59,9 @@
 //! Films (film.rs, docs/TESTING.md "Filming motion"): `film NAME SECS [FPS]` runs the sim live at the play speed for
 //! SECS film seconds, like `live`, writing FPS (10) frames a second to `<out>/NAME/frame_00001.png` .. (the `shot`
 //! capture, HUD and all) on a fixed-step clock (each frame 1/FPS of game-real time, however slow the capture), with the
-//! motion trace `trace.csv` and `meta.json`; the next line runs once the frames are written.
+//! motion trace `trace.csv` and `meta.json`; the next line runs once the frames are written. Motion V1: `film NAME
+//! SECS [FPS] &` goes on to the next lines inside the film, `filmat SECS` holding the line after it until the film's
+//! clock reaches SECS (a click mid-walk on film); a line not behind a `filmat` waits for the film's end.
 
 use bevy::{
     app::AppExit,
@@ -136,6 +138,11 @@ pub struct Play {
     saves_dir: PathBuf,
     /// T2: a script's `live SECS`: paced play until then.
     live_until: Option<Instant>,
+    /// Motion V1: a `film ... &` runs (the lines go on inside it), the next line's gate on the film's clock
+    /// (`filmat SECS`), and a gate passed (the next line runs now)
+    film_go: bool,
+    film_gate: Option<f64>,
+    film_pass: bool,
 }
 
 /// C5: a body's procedural pose on the existing rig: a lunge at `toward` or a stagger away from it.
@@ -209,6 +216,9 @@ pub fn add(app: &mut App, shared: Arc<Shared>, vcfg: &citysim::config::ViewCfg, 
             pending_load: false,
             saves_dir: slice.unwrap_or_default(),
             live_until: None,
+            film_go: false,
+            film_gate: None,
+            film_pass: false,
         })
         .add_systems(Update, (keys, click, run_script))
         .add_systems(EguiPrimaryContextPass, (hud, menu, board, news, day_end, death, fight, wounds, replay, start_menu, help));
@@ -430,10 +440,31 @@ fn run_script(
     }
     // the frame's tick: the HUD's state was published with it
     let Some(tick) = sim.clock_tick else { return };
-    // a `film`: paced play on the film's clock until its frames are written
-    if film.as_ref().is_some_and(|f| f.busy()) {
+    // a `film`: paced play on the film's clock until its frames are written. Motion V1: in a `film ... &` the lines
+    // go on inside it, each `filmat SECS` holding the next line until the film's clock reaches SECS; any other line
+    // waits for the film's end
+    let filming = film.as_ref().is_some_and(|f| f.busy());
+    if filming {
         p.shared.hold.store(u64::MAX, Ordering::Relaxed);
-        return;
+        if !p.film_go || p.next >= p.script.len() {
+            return;
+        }
+        match p.film_gate {
+            Some(t) if p.shared.film_t().is_some_and(|ft| ft >= t) => {
+                p.film_gate = None;
+                p.film_pass = true;
+            }
+            Some(_) => return,
+            None => {}
+        }
+        let gate = p.script[p.next].action.starts_with("filmat");
+        if !gate && !std::mem::take(&mut p.film_pass) {
+            return;
+        }
+    } else {
+        p.film_go = false;
+        p.film_gate = None;
+        p.film_pass = false;
     }
     // T2: a `live SECS`: paced play (no hold) until then, auto-speed and all
     if let Some(u) = p.live_until {
@@ -455,11 +486,11 @@ fn run_script(
     // M18 P2: the sim is held at the next line's tick (`Shared::hold`, the bench's hold): a line runs at its own tick,
     // not wherever the sim had got to by the frame (at the fast speeds that was tens of minutes late), and the sim runs
     // flat out between lines. Without a script the hold is never touched.
-    if !p.script.is_empty() {
+    if !p.script.is_empty() && !filming {
         let hold = p.script.get(p.next).map_or(u64::MAX, |s| s.tick);
         p.shared.hold.store(hold, Ordering::Relaxed);
     }
-    if p.next >= p.script.len() || p.script[p.next].tick > tick {
+    if p.next >= p.script.len() || (p.script[p.next].tick > tick && !filming) {
         return;
     }
     let step = p.script[p.next].clone();
@@ -779,9 +810,15 @@ fn run_script(
         // T2: auto-speed's toggle; paced play for SECS real seconds
         "autospeed" => p.shared.auto_on.store(arg == "on", Ordering::Relaxed),
         "film" => match film.as_mut() {
-            Some(f) => f.start(crate::film::FilmReq::parse(arg), &sim),
+            Some(f) => {
+                // Motion V1: `film NAME SECS [FPS] &`: the lines after it run inside the film (`filmat SECS`)
+                let (arg, go) = arg.strip_suffix('&').map_or((arg, false), |a| (a.trim(), true));
+                p.film_go = go;
+                f.start(crate::film::FilmReq::parse(arg), &sim)
+            }
             None => warn!("play script film {arg}: no live sim to film"),
         },
+        "filmat" => p.film_gate = Some(arg.parse().expect("filmat SECS")),
         "live" => {
             let secs: f32 = arg.parse().expect("live SECS");
             p.live_until = Some(Instant::now() + Duration::from_secs_f32(secs.max(0.0)));
@@ -1278,9 +1315,10 @@ pub fn replay(
 ) -> Result {
     use bevy_egui::egui;
     let bp = p.shared.beats.lock().unwrap().clone();
+    // Motion V1: the poses and cues on the pacing's clock (`Shared::now`: a film's own while one runs), not the wall's
     if bp.seq != p.beats_seq {
         p.beats_seq = bp.seq;
-        let now = Instant::now();
+        let now = p.shared.now();
         let mut fresh = Vec::new();
         let mut poses = Vec::new();
         for (g, b) in &bp.beats {
@@ -1292,13 +1330,13 @@ pub fn replay(
         p.poses.extend(poses);
     }
     let lunge = Duration::from_secs_f32(p.lunge_s.max(0.05));
-    let now = Instant::now();
+    let now = p.shared.now();
     p.poses.retain(|x| now < x.at + lunge);
     let poses = p.poses.clone();
     if let Ok(mut l) = p.shared.poses.lock() {
         *l = poses;
     }
-    let now = Instant::now();
+    let now = p.shared.now();
     let life = Duration::from_secs_f32(p.cue_s.max(0.1));
     p.cues.retain(|c| now < c.at + life);
     if p.cues.is_empty() {

@@ -80,6 +80,12 @@ toggle sits beside the auto-pause one in the Esc menu (`[view] auto_speed_on` tr
   the path since the last published one (concatenated `ahead`). Where the way does not reach the newer place, `along`
   falls back to a straight lerp through the block: that fallback is the bug to remove, not a draw mode.
 - A body going in or out of a door mid-tick is drawn to the door and through it, then hidden.
+- Motion V1 (the films' fix pass): **one clock for the lerp and the pacing** (simthread `ViewClock`): the view's game
+  time runs at the speed now, the lerp's `u` is it between the pair's ticks, and the sim runs the next tick when it
+  reaches the newest, so a new pair starts where the last ended (a speed change, a pause, a hold, a load: no freeze, no
+  forward snap). Each drawn body keeps a track (cityview `motion.rs`): its offset (a lane, a crowd's slot) eases, a
+  drawn place never steps off its way past a frame's walk (it closes the gap instead), the facing turns at a rate, the
+  walk clip plays at the drawn speed; a click's way is walked from where the body is drawn (`motion::rejoin`).
 - At auto-speed the camera's subject is asleep, at work or riding; the street blurs, which is what passing time
   looks like. Nothing is skipped: the sim ticks every minute at every speed.
 

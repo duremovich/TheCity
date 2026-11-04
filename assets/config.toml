@@ -6541,7 +6541,8 @@ cam_pitch_max_deg = 65.0           # higher and the people are hats)
 cam_zoom_min_m = 12.0              # the zoom's range, the frame's width at the subject: a body's room ...
 cam_zoom_max_m = 1000.0            # ... to a district (the overview, Tab, for the island)
 cam_follow_half_life_s = 0.25      # the aim halves its gap to the subject this fast (a walk trails by ~0.5 m; a lift's floor
-                                   # change eases in over ~1 s)
+                                   # change eases in over ~1 s); Motion V1: over the play speed (at 60x the walk is 60x
+                                   # as fast and the ease as tight, so it still trails ~0.5 m, never off the screen)
 cam_snap_m = 40.0                  # a jump of the subject this far snaps (boarding, a building subject's ring centre)
 cam_look_up_m = 1.0                # the aim sits this far over the feet (the body's middle at frame centre)
 cam_rotate_deg_s = 90.0            # Q / E
@@ -6599,8 +6600,33 @@ stair_radius_m = 1.5               # a stairs climber walks round the core at th
 storey_slab_m = 0.5                # V10: a body indoors stands on its lot's massing box whose height holds its storey's floor +
                                    # this (a tower storey on the tower's plate, not anywhere on the lot: the wall line)
 crowd_spread_m = 10.0              # bodies standing on one tile spread over the walkable ground (sidewalk, ped, open, stairs)
-crowd_gap_m = 0.9                  # within this radius, about this far apart (a disc 2.5 x the crowd's area, widening
-                                   # where it meets a wall or a road); stable per body (a hash of its id)
+crowd_gap_m = 0.9                  # about this far apart, on a spiral of slots round the tile's centre (the walkable
+                                   # ones, out to crowd_spread_m); Motion V1: a body's slot a hash of its id
+crowd_slots = 8                    # Motion V1: a crowd's slots, this many (a bigger crowd: the next multiple), so it keeps
+                                   # its places as bodies come and go (a body leaving frees its slot, nobody else moves)
+# Motion V1 (cityview motion.rs; the films of docs/TESTING.md "Filming motion"): no body ever teleports. Each drawn body
+# keeps a track: its offset (a lane's jitter walking, a crowd slot standing) moves toward a new one at
+# motion_offset_m_s (x the square root of the play speed), so a walker stopping steps into its slot; a drawn place
+# stepping past motion_jump_k x the faster of the walk and its own last speed a frame + motion_jump_floor_m (a re-plan,
+# a click's way handing back to the lerp) stays where it was and closes the gap at motion_catch_k x the walk; past
+# motion_snap_m (or the sim's own placement, a way that does not reach, a flat-out run to a hold) it is drawn as the
+# jump it is.
+motion_offset_m_s = 1.0
+motion_jump_k = 2.0
+motion_jump_floor_m = 0.3
+motion_snap_m = 16.0               # 4 tiles: farther is the sim's placement (a door hop, a ride's end)
+motion_catch_k = 0.5               # the gap closes at half a walk: a body ahead of its place slows, never walks back fast
+motion_speed_half_life_s = 0.15    # the drawn ground speed (the clip's rate, walk or idle) eases over this (real s)
+walk_on_m_s = 0.4                  # the walk clip plays once a body is drawn moving faster than this (m/s on screen) ...
+walk_off_m_s = 0.15                # ... and the idle again under this (no walk in place, no idle sliding)
+walk_clip_m_s = 1.4                # the Mixamo walk's own ground speed at rate 1 (its 1.03 s cycle, two steps)
+walk_clip_rate_min = 0.3           # the walk clip's rate is the drawn speed over walk_clip_m_s, clamped to this ...
+walk_clip_rate_max = 6.0           # ... and this: past it the stride cycles faster than a 30 fps frame reads (5x
+                                   # walks match, 20x and 60x slide; a run clip is not in the set)
+turn_deg_s = 360.0                 # a body turns this fast at 1x (x the square root of the play speed: 2,800 deg/s at 60x
+                                   # rounds a corner in a frame or two) toward the way it walks (standing: its heading)
+way_rejoin_tiles = 1.5             # a click's way is walked from where the body is drawn (the sim's place is up to a tick
+                                   # ahead), straight on to the way where it passes this near, else to its start
 # The view milestone V6 (OPEN-270): `citysim-cli shadow --record` writes each pick's ring a tick (`citysim::view`'s
 # recording, city-simrec/0.1: one gzip'd JSON-lines file per pick per diary day, a frame a tick as a delta on the last)
 # for cityview `--sim FILE` to play. The ring is the pick's surroundings as the shadow's world has them (no view set).
