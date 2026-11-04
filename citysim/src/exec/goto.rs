@@ -10,11 +10,12 @@ use super::*;
 /// sub-tick step is taken tile by tile: the litter on the tile stepped
 /// onto, a driver's step count and crash tile (`vehicles::note_step`), the
 /// path's re-find on a big map (`big_step`) all read the tile they happen
-/// on. The burst stops before the door (the door and its queue are
-/// `try_enter`'s on the next call, never in a burst) and at the path's end
-/// (the arrival is the next call's). Stepping out of a building costs one
-/// step and the walk goes on in the same tick. At the pace before Y4 (one
-/// tile a tick, `step_res` 4) this is the M12/M13 arithmetic exactly.
+/// on. The burst goes in at the door (S1, `OPEN-317`: it stopped before it,
+/// the door and its queue the next call's, and the walker stood a tick at
+/// every door) and stops at the path's end (the arrival is the next call's;
+/// a segment's end is its arrival now, `OPEN-311`). Stepping out of a
+/// building walks the floor to the door, a tile a step, then two steps
+/// through it, and the walk goes on in the same tick (`OPEN-307`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn advance_goto(
     world: &mut World,
@@ -45,8 +46,36 @@ pub(super) fn advance_goto(
         if let Some(r) = climb_out(world, id, &target, here, pos.floor, &path, &levels) {
             return r;
         }
+        // S1 (`OPEN-307`): across the floor to the door at the walk, a tile
+        // a step (a station spot behind the counter is a walk from the
+        // door), then through it onto the street: two steps, the door's
+        // tile and the street's. The leave put the body outside the door
+        // from anywhere on the plate in one step.
+        let walk = if on_foot(world, id) {
+            u64::from(crate::systems::vehicles::step_q(world, id, pos.tile))
+        } else {
+            world.config.exec.step_units()
+        };
+        let mut tile = pos.tile;
+        let mut out_of_time = false;
+        if let Some(bd) = world.comp::<Building>(here).filter(|bd| bd.rect.contains(pos.tile)) {
+            while let Some(n) = bd.step_to_door(tile) {
+                tile = n;
+                next_q += walk;
+                if next_q >= end_q {
+                    out_of_time = true;
+                    break;
+                }
+            }
+        }
+        if tile != pos.tile {
+            move_to(world, id, tile);
+        }
+        if out_of_time {
+            return set_goto(world, id, target, path, levels, next_q / upt, None, (next_q % upt) as u32);
+        }
         world.leave_building(id);
-        next_q += world.config.exec.step_units();
+        next_q += 2 * walk;
         if next_q >= end_q {
             return set_goto(world, id, target, path, levels, next_q / upt, None, (next_q % upt) as u32);
         }
@@ -70,10 +99,7 @@ pub(super) fn advance_goto(
             Some(b) => {
                 let door = world.comp::<Building>(b).map(|bd| bd.door);
                 if door == Some(here) && lvl == 0 {
-                    if steps == 0 {
-                        return try_enter(world, id, target, path, levels, blocked_since);
-                    }
-                    break;
+                    return try_enter(world, id, target, path, levels, blocked_since);
                 }
                 let step = match (big, door) {
                     (false, _) => world.flow_step(b, here).map(|n| (n, 0)),
@@ -82,10 +108,7 @@ pub(super) fn advance_goto(
                 };
                 match step {
                     Some((n, 0)) if door == Some(n) => {
-                        if steps == 0 {
-                            return try_enter(world, id, target, path, levels, blocked_since);
-                        }
-                        break;
+                        return try_enter(world, id, target, path, levels, blocked_since);
                     }
                     Some(s) => s,
                     // The field never reached this tile: there is no way there.
@@ -95,7 +118,12 @@ pub(super) fn advance_goto(
             }
             None => {
                 // C7: a walk over the walkways re-checks its next hop.
-                let s = if big_map && (!levels.is_empty() || lvl > 0) {
+                // S1 (`OPEN-309`): at the way's end on a deck (an El
+                // platform's waiting place) the walk is there; the re-find
+                // below would take it down to the ground under it.
+                let s = if path.is_empty() && here == target.tile {
+                    None
+                } else if big_map && (!levels.is_empty() || lvl > 0) {
                     big_step(world, id, &mut path, &mut levels, (here, lvl), target.tile, false)
                 } else {
                     path.pop().map(|n| (n, 0))
@@ -149,7 +177,21 @@ pub(super) fn advance_goto(
         }
     }
     let carry = (next_q % upt) as u32;
-    set_goto(world, id, target, path, levels, next_q / upt, None, carry)
+    // S1 (`OPEN-311`): a segment's end reached with time left in the tick
+    // is its arrival now (the step re-starts at once, `step_agent`, the
+    // time left carried into the next segment); the next call's arrival
+    // stood the walker two ticks mid-street at every segment end.
+    let segment_end = target.building.is_none()
+        && path.is_empty()
+        && here == target.tile
+        && next_q < end_q
+        && !world.segments.is_empty()
+        && world.segments.contains_key(&id);
+    let r = set_goto(world, id, target, path, levels, next_q / upt, None, carry);
+    if segment_end {
+        return StepResult::Done;
+    }
+    r
 }
 
 /// The view milestone V7: a Full walker stepping from `here` onto `next`
@@ -527,6 +569,11 @@ pub(super) fn arrive(world: &mut World, id: EntityId, target: GotoTarget, blocke
         None => {
             world.leave_building(id);
             move_to(world, id, target.tile);
+            // S1: a timed walk ends on the ground (one set out from an El
+            // platform's deck kept its level).
+            if let Some(p) = world.comp_mut::<Position>(id) {
+                p.floor = 0;
+            }
             StepResult::Done
         }
     }

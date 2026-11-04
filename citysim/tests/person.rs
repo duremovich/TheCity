@@ -289,7 +289,10 @@ fn probe_broke_immigrant_finds_food_or_work() {
     let (mut ate, mut hired) = (false, false);
     let end = w.tick + 5 * TICKS_PER_DAY;
     run_to(&mut w, a, end, |w| {
-        ate |= law::living(w, a) && is_eat(step(w, a));
+        // S1: a bin's dive is a meal too (after S1's walk changes the seed's
+        // immigrant walked to a bin and ate there, which this did not read).
+        let s = step(w, a);
+        ate |= law::living(w, a) && (is_eat(s) || s == Some(ActionKind::DumpsterDive));
         hired |= w.comp::<Job>(a).is_some();
     });
     eprintln!("immigrant: ate {ate}, hired {hired}, hunger {:.2}", w.comp::<Needs>(a).map_or(0.0, |n| n.hunger));

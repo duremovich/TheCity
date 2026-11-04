@@ -289,18 +289,43 @@ pub fn walk_reach_tiles(world: &World, id: EntityId, cap: Tick, limit: u32) -> u
     lo
 }
 
+/// S1 (`OPEN-317`), for the view: how far a Full walker is through the step
+/// to the next tile of its way, at the tick boundary just run (`World::tick`
+/// read after the tick, as the view reads it), in `[0, 1]`. The executor
+/// steps whole tiles at sub-tick times (`[exec] units_per_tick`, 3.5 tiles a
+/// tick at the T1 pace: 4, 3, 4, ...), so a body's tile alone surges 25 %
+/// tick on tick; drawn at `tile + stride × (next − tile)`, `next` the first
+/// tile of its way ahead, it covers the same ground every tick. 0 standing
+/// (a kerb's wait, a door's queue), 1 a step landing on the boundary.
+/// `None`: not a Full walk.
+pub fn stride(world: &World, id: EntityId) -> Option<f32> {
+    let b = world.comp::<Brain>(id)?;
+    let ExecState::Goto { next_move_tick, carry_q, blocked_since, .. } = &b.exec else { return None };
+    if blocked_since.is_some() {
+        return Some(0.0);
+    }
+    let upt = world.config.exec.units_per_tick();
+    let tile = world.comp::<Position>(id)?.tile;
+    let step = u64::from(crate::systems::vehicles::step_q(world, id, tile)).max(1);
+    let next_q = next_move_tick * upt + u64::from(*carry_q);
+    let now_q = world.tick * upt;
+    let left = next_q.saturating_sub(now_q);
+    Some((1.0 - left as f32 / step as f32).clamp(0.0, 1.0))
+}
+
 /// M12 D18: the extra step units before a Full mover's next step off
-/// `tile`, by the tile's litter band (`[litter] step_ticks`, whole walker
-/// steps at the pace: `[exec] step_units` each; round 9 Y4, ticks before
-/// it, when a step was a tick; T1, `step_res` units before it, a whole step
-/// only at `move_ticks_full` 1). One byte read on a step already taken;
-/// flow fields never change.
+/// `tile`, by the tile's litter band (`[litter] step_share`, a share of a
+/// walker step at the pace, `[exec] step_units`; S1, `OPEN-317`: whole
+/// steps before, so a heap's walker crawled at a third of the pace; round 9
+/// Y4, ticks before it, when a step was a tick). One byte read on a step
+/// already taken; flow fields never change.
 pub fn litter_delay(world: &World, tile: TilePos) -> Tick {
     if !crate::systems::litter::enabled(world) {
         return 0;
     }
     let band = crate::systems::litter::band(crate::systems::litter::at(world, tile));
-    Tick::from(world.config.litter.step_ticks.get(band).copied().unwrap_or(0)) * world.config.exec.step_units()
+    let share = world.config.litter.step_share.get(band).copied().unwrap_or(0.0).max(0.0);
+    (share * world.config.exec.step_units() as f32).round() as Tick
 }
 
 /// A Full Goto: flow field for buildings, A* otherwise. `None` if unreachable.
