@@ -1,12 +1,16 @@
 # Handoff: now
 
 Rewritten at every session end; never appended. The session logs are `docs/history/SESSIONS.md`. Last rewrite:
-**2026-11-03, the thirty-third session: the combat model designed and built (C1-C5), the slice's start and loop (P5,
-P5b), housing as an errand (P5h).**
+**2026-11-03, the thirty-fourth session: the time model designed and built (T1 the pace, T2 the clock).** The
+thirty-third session's slice work (combat C1-C5, P5, P5b, P5h) is summarised below as it stood; this session's
+additions are step 0 of Next, the Decided list's first entry, and the cost table.
 
 ## Main
 
-Main (`faad61e`, pushed) holds **the player slice through P5h**: the slice is playable end to end and waits on its
+Main (`b9a69ae` or later, pushed) holds **the player slice through P5h plus the time model** (a 4-hour day at 1x,
+`SAVE_VERSION` 135; **the slice save is still v134 and must be remade before play**: `cargo run --release -p
+citysim-cli -- run --days 21 --seed 42 --population 20000 --scaled --ambient-flats 50 --map
+assets/maps/isle_m_k2.txt --save-at 30240 --saves-dir saves/slice`, then rename `42-30240.ron` to `20k_s42_d21.ron`): the slice is playable end to end and waits on its
 exit, **Dylan's 30-minute cold play**. Combat is a live engagement in beats (`docs/COMBAT.md`), the game starts from
 a menu (pick a nobody or arrive fresh), dies for good, saves and loads, and a homeless body has to go and find a
 place to live. Change tier green on every merge (last: P5h `[change] GREEN; BUDGET OK 2m33s of 4m00s`; view green,
@@ -41,6 +45,11 @@ driven (P5). P5h made the existing Capsule Hotel the hostel rather than a new bu
 
 ## Decided (Dylan, this session)
 
+- **The time model** (34th session, `OPEN-304`, `docs/TIME_MODEL.md`): true realtime at 1x was too slow ("I don't
+  know of any games that work that way"); the day is compressed 6x and space gives, not time: the walk 3.5 tiles a
+  game minute, lives shrink to a few blocks, the El is the long link. The violence drop it brought (~0.5x) is left
+  ("we can tweak later"); fix what the shrink breaks (done in T1).
+
 - **The combat model** (`OPEN-179`, `docs/COMBAT.md`, addendum 26): the four recommended forks (above).
 - **The ladder** (`OPEN-294`, addendum 27, a note for later): start brutal like Kenshi and get better; megacorps hunt
   you, a new identity costs your name; no cap on the power fantasy (an epic grind to storm the top corp's HQ); the
@@ -54,9 +63,12 @@ driven (P5). P5h made the existing Capsule Hotel the hostel rather than a new bu
 
 ## Next, in order
 
-0. **The time model is built** (`OPEN-304`, `docs/TIME_MODEL.md`): T1 the pace (`9f4b0d2`: the walk 3.5 tiles a game
-   minute, the El, stairs, lifts and crossings x6, the letting desk by trip, `SAVE_VERSION` 135, the slice save
-   remade) and T2 the clock (`ff75885`: 1x a 4-hour day, steps 1/2/5/20/60, auto-speed to 600x through stretches,
+0. **A compile-time and code-efficiency pass** (Dylan 2026-11-03, the next session's first work): build times
+   (the cold Bevy build ~11 min, the sim's release build, incremental rebuilds) and the code's own efficiency. Design
+   it with Dylan before spawning; measure before and after.
+0b. **The time model is built** (`OPEN-304`, `docs/TIME_MODEL.md`): T1 the pace (`9f4b0d2`: the walk 3.5 tiles a game
+   minute, the El, stairs, lifts and crossings x6, the letting desk by trip, `SAVE_VERSION` 135; the slice
+   save not yet remade, see Main) and T2 the clock (`ff75885`: 1x a 4-hour day, steps 1/2/5/20/60, auto-speed to 600x through stretches,
    no teleports: the lerp had ignored the play speed, the body moving at the click). Reads wrong, for after the play:
    long commutes for workers placed before the shrink (a 151-min ride, a teacher late at 09:05), 15% of raid marchers
    still miss, a Sump arrest costs a guard ~1.5 h (one Precinct), tower stairs 2 h to floor 40, the drawn body up to a
@@ -89,6 +101,18 @@ Frozen until the slice reads: `OPEN-278`, `285`, `287`, `265`, traffic (`275`), 
 - Phases ran 324-437 turns against ~300; the cityview play sessions remain the turn sink.
 
 ## Cost (API-rate $ equivalent, `tools/session_cost.py`)
+
+The thirty-fourth session:
+
+| part | agent | turns | median ctx | $ |
+|---|---|---|---|---|
+| T1 the pace (sim) | Opus | 416 | 236k | 26 |
+| T2 the clock (view) | Opus | 242 | 272k | 22 |
+| orchestrator (the design with Dylan, the probe, briefs, merges, close) | Opus | ~90 | 107k | 6 |
+
+The session ≈ $54. T1 ran 416 turns against ~300 (43 log reads, 208 shell calls). No coders or worktrees left.
+
+The thirty-third session (≈ $280):
 
 | part | agent | turns | median ctx | $ |
 |---|---|---|---|---|

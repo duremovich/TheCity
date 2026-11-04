@@ -1107,3 +1107,13 @@ later, `OPEN-301`), the auto-pause, permadeath, save and load, and retired `city
 the cold start. Dylan then turned housing into an errand (P5h): letting desks by landlord, refusals, deposits for
 all, the capsule bed as the first rung; homeless at d30 193 -> 146. The slice waits on Dylan's 30-minute cold play.
 `OPEN-294` to `303` opened; `295` to `297` closed. Cost ≈ $280 (HANDOFF § Cost).
+
+**2026-11-03, the thirty-fourth session: the time model (T1, T2).** Dylan first took "1x is real time, auto-speed
+compresses the day", then asked whether true realtime was too slow; it was, and the day is compressed 6x instead (a
+4-hour day at 1x, `docs/TIME_MODEL.md`): the walk stays 1.4 m/s on screen and drops to 3.5 tiles a game minute, so
+lives shrink in space, not time. A config-only 20k probe held (no starvation, housing and jobs flat, El rides 5x,
+violence ~0.55x left as a FINDING). Two Opus phases ran in parallel: T1 the pace (the El, stairs, lifts and crossings
+x6, Y4's minute-caps restored, the letting desk by trip, raids' muster; `SAVE_VERSION` 135) and T2 the clock (speeds
+1/2/5/20/60x, auto-speed to 600x, the teleport found: the lerp ignored the play speed; the body moves at the click).
+`OPEN-305`, `306` opened. The slice save is not yet remade at v135 (the rebuild was stopped at the close). Next:
+a compile-time and code-efficiency pass, then the cold play. Cost ≈ $54 (HANDOFF § Cost).
