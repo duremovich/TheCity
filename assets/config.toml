@@ -6662,6 +6662,13 @@ lane_count = 5                     # each in id order (at most this many lanes; 
                                    # inside each other (V1's 7990 and 24801); the lane eases in like a crowd's slot
 sit_hips_m = 0.12                  # a body sitting (a sitting Use: rest, drink, eat, beg, jacked in) sits on the floor, its
                                    # hips this high, legs out (a procedural pose on the rig, people.rs pose_bones; no chairs)
+run_from_x = 1.4                   # V3: a body drawn running (its game-real ground speed over walk_m_s) from this many walks
+run_full_x = 2.0                   # ... to this many (Flee runs at 2x) leans its spine forward (run_lean_deg) and bends its
+run_lean_deg = 14.0                # forearms (run_arm_bend, 0..1) to the full: the clip's rate already follows the ground
+run_arm_bend = 0.8
+way_pair_max_tiles = 8.0           # V3: a way inside one tick pair longer than this (a repaired detour: 38 m in a tick) is drawn as its chord
+hop_max_tiles = 8.0                # V3: a walkway hop (a Full step of over 1.5 tiles: S3's lift or stairs, standing at the near end
+                                   # while `exec::stride` runs the hop) up to this far is drawn over its span, place and height
 fight_gap_m = 1.0                  # OPEN-314: the subject's fight on the street: each foe drawn this far from the subject
 fight_circle_deg_s = 8.0           # (striking range), facing it, circling it this fast; the subject faces its last mark
 fight_close_m_s = 4.0              # a fighter drawn off its sim place closes in this fast (x the square root of the play

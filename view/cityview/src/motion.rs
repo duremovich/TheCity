@@ -53,6 +53,8 @@ pub struct Drawn {
     pub yaw: f32,
     pub walking: bool,
     pub clip_rate: f32,
+    /// V3: the run look 0..1 from the game-real ground speed (`run_from_x` .. `run_full_x` walks)
+    pub run: f32,
 }
 
 /// The per-body tracks (sim.rs `Sim::motion`).
@@ -126,7 +128,7 @@ impl Motion {
                     seen: frame,
                 },
             );
-            return Drawn { at, yaw: heading, walking: false, clip_rate: 1.0 };
+            return Drawn { at, yaw: heading, walking: false, clip_rate: 1.0, run: 0.0 };
         };
         t.seen = frame;
         let along = base - t.base;
@@ -198,7 +200,9 @@ impl Motion {
         t.at = at;
         let clip_rate =
             if t.walking { (t.speed / c.walk_clip_m_s.max(0.1)).clamp(c.walk_clip_rate_min, c.walk_clip_rate_max) } else { 1.0 };
-        Drawn { at, yaw: t.yaw, walking: t.walking, clip_rate }
+        let x = t.speed / walk.max(1e-3);
+        let run = if t.walking { ((x - c.run_from_x) / (c.run_full_x - c.run_from_x).max(0.05)).clamp(0.0, 1.0) } else { 0.0 };
+        Drawn { at, yaw: t.yaw, walking: t.walking, clip_rate, run }
     }
 
     /// Motion V2: where body `id` was drawn last (metres).
