@@ -247,6 +247,27 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
 /// `set_lod`, with a promotion out of Statistical placed inside `place` and a demotion to Statistical at its door
 /// (the camera ring's: the building its schedule has it in now, `ring::schedule_door`) instead of its phase's door.
 pub fn set_lod_at(world: &mut World, id: EntityId, lod: Lod, place: Option<EntityId>) {
+    set_lod_with(world, id, lod, place.map_or(Place::Phase, Place::In));
+}
+
+/// S2 (`OPEN-312`): `set_lod`, with a promotion out of Statistical leaving the body where it stands (the camera
+/// ring's homeless off shift: no place of its own, so no door to snap it to in the camera's sight).
+pub fn set_lod_here(world: &mut World, id: EntityId, lod: Lod) {
+    set_lod_with(world, id, lod, Place::Here);
+}
+
+/// Where a promotion out of (or a demotion to) Statistical puts the body.
+#[derive(Clone, Copy)]
+enum Place {
+    /// The door its day phase implies (`snap_to_phase_door`).
+    Phase,
+    /// Inside this building (a demotion: at its door).
+    In(EntityId),
+    /// Where it stands (a promotion; a demotion snaps to its phase's door).
+    Here,
+}
+
+fn set_lod_with(world: &mut World, id: EntityId, lod: Lod, place: Place) {
     let Some(brain) = world.comp::<Brain>(id) else { return };
     let from = brain.lod;
     if from == lod {
@@ -307,8 +328,8 @@ pub fn set_lod_at(world: &mut World, id: EntityId, lod: Lod, place: Option<Entit
             world.held_since.insert(id, now);
         } else {
             match place {
-                Some(b) => world.stand_at_door(id, b),
-                None => snap_to_phase_door(world, id, false),
+                Place::In(b) => world.stand_at_door(id, b),
+                Place::Phase | Place::Here => snap_to_phase_door(world, id, false),
             }
         }
         // M15 W2: off screen the heard store holds 3 rumours and no sighting.
@@ -333,11 +354,12 @@ pub fn set_lod_at(world: &mut World, id: EntityId, lod: Lod, place: Option<Entit
         // L2 (L21): a prisoner promoted out of the hold is still inside.
         if !(held_on(world) && world.has::<Sentence>(id)) {
             match place {
-                Some(b) => {
+                Place::In(b) => {
                     world.stand_at_door(id, b);
                     world.enter_building(id, b);
                 }
-                None => snap_to_phase_door(world, id, true),
+                Place::Phase => snap_to_phase_door(world, id, true),
+                Place::Here => {}
             }
         }
         // The island pass phase 7: a prisoner on a transfer run gets his
@@ -429,5 +451,11 @@ fn snap_to_phase_door(world: &mut World, id: EntityId, promotion: bool) {
         .or_else(|| world.local(id, BuildingKind::Market));
     if let Some(b) = building {
         world.stand_at_door(id, b);
+        // S2 (the fast pack): with a view, a promotion to the body's own Home or its workplace puts it inside,
+        // where its schedule has it; at the door it stood on the street and the view drew a 12-tile jump to it (a
+        // venue stays a door: its door policy is the walk in's). Headless (no view) the door stands, as before.
+        if promotion && world.view_rect.is_some() && (Some(b) == home || Some(b) == workplace) {
+            world.enter_building(id, b);
+        }
     }
 }

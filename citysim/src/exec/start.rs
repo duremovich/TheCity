@@ -406,7 +406,15 @@ pub(super) fn start_step(
                 }
             }
             let dur = actions::duration(world, id, kind);
+            // S2 (`OPEN-289`): a street stay on a crowded tile stands beside it (a HangOut once it is on the
+            // spot's registry, which keeps the spot's tile).
+            if kind != ActionKind::HangOut {
+                crate::systems::fixes::spread_spot(world, id, kind);
+            }
             actions::on_start(world, id, kind, step.target);
+            if kind == ActionKind::HangOut {
+                crate::systems::fixes::spread_spot(world, id, kind);
+            }
             if let Some(b) = world.comp_mut::<Brain>(id) {
                 b.exec = ExecState::Use { kind, until: tick + dur, started: tick };
                 b.action_until = tick + dur;

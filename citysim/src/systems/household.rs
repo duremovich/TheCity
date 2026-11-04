@@ -317,9 +317,8 @@ pub fn empty_leave(world: &World, id: EntityId, started: Tick) -> bool {
     }
     match hanging_at_home(world, id) {
         Some(h) => !any_inside(world, h, id),
-        None => world
-            .comp::<Position>(id)
-            .and_then(|p| world.hangouts.get(&p.tile))
+        None => crate::systems::leisure::spot_tile(world, id)
+            .and_then(|t| world.hangouts.get(&t))
             .is_none_or(|v| !v.iter().any(|&o| o != id)),
     }
 }

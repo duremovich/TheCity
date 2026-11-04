@@ -419,13 +419,32 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
     }
 }
 
+/// S2 (`OPEN-318`): the HangOut registry's tile that holds `id`: its own
+/// tile, else one within `[life] spot_spill_tiles` (a crowd's spot it was
+/// spread off, `fixes::spread_spot`); with none, its own tile.
+pub fn spot_tile(world: &World, id: EntityId) -> Option<TilePos> {
+    let here = world.comp::<Position>(id).map(|p| p.tile)?;
+    if world.hangouts.get(&here).is_some_and(|v| v.contains(&id)) {
+        return Some(here);
+    }
+    let r = u32::from(world.config.life.spot_spill_tiles);
+    let lo = TilePos { x: here.x.saturating_sub(r as u16), y: here.y.saturating_sub(r as u16) };
+    let found = world
+        .hangouts
+        .range(lo..)
+        .take_while(|(t, _)| t.x <= here.x.saturating_add(r as u16))
+        .find(|(t, v)| t.manhattan(here) <= 2 * r && v.contains(&id))
+        .map(|(t, _)| *t);
+    Some(found.unwrap_or(here))
+}
+
 /// Leave the HangOut registry (a step's end, an abort; review fix: also a
 /// death and an emigration, which drop the Brain without `abort_plan`).
 pub fn leave_spot(world: &mut World, id: EntityId) {
     if world.hangouts.is_empty() {
         return;
     }
-    let t = world.comp::<Position>(id).map(|p| p.tile);
+    let t = spot_tile(world, id);
     let mut emptied = None;
     if let Some(list) = t.and_then(|t| world.hangouts.get_mut(&t)) {
         list.retain(|x| *x != id);
@@ -596,7 +615,7 @@ pub(super) fn phase4_visit(world: &mut World, id: EntityId, b: EntityId) {
 /// is the live path, `gossip::exchange(.., Chat)`; kin note the day they
 /// met; street dice between two bored co-hangers.
 fn hangout_done(world: &mut World, id: EntityId, started: Tick) {
-    let tile = world.comp::<Position>(id).map(|p| p.tile);
+    let tile = spot_tile(world, id);
     let hours = world.tick.saturating_sub(started) as f32 / TICKS_PER_HOUR as f32;
     // Lives at work phase 2 (§ 3.1): inside a Home the company is the
     // household present, not the street registry.
