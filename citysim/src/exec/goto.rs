@@ -377,6 +377,7 @@ fn climb_out(
                 out: false,
                 path: Vec::new(),
                 levels: Vec::new(),
+                walk: None,
             };
             if let Some(b) = world.comp_mut::<Brain>(id) {
                 b.exec = state;
@@ -400,6 +401,7 @@ fn climb_out(
         out: true,
         path: path.to_vec(),
         levels: levels.to_vec(),
+        walk: None,
     };
     if let Some(b) = world.comp_mut::<Brain>(id) {
         b.exec = state;
@@ -423,23 +425,41 @@ fn climb_in(world: &mut World, id: EntityId, target: &GotoTarget, b: EntityId) -
     if let Some(pos) = world.comp_mut::<Position>(id) {
         pos.floor = 0;
     }
+    // S4 (`OPEN-320`): the walk across the lobby from the door's slot to the core is its own ticks, then the climb.
+    let (walk, lag) = walk_to_core(world, id, b);
     let state = ExecState::Climb {
         target: target.clone(),
         core,
         from: 0,
         to: floor,
-        depart: tick,
-        board: tick + p.wait,
-        arrive_tick: tick + p.ticks,
+        depart: tick + lag,
+        board: tick + lag + p.wait,
+        arrive_tick: tick + lag + p.ticks,
         lift: p.lift,
         out: false,
         path: Vec::new(),
         levels: Vec::new(),
+        walk,
     };
     if let Some(br) = world.comp_mut::<Brain>(id) {
         br.exec = state;
     }
     StepResult::Running
+}
+
+/// S4 (`OPEN-320`): the walk of `id`, just in `b`, from where it stands across the floor to the core at its own
+/// pace (a step a tile, `Building::core_walk`): the walk's start (the tile and the tick) and its ticks (rounded up;
+/// none at the core or with no interior).
+pub fn walk_to_core(world: &World, id: EntityId, b: EntityId) -> (Option<(TilePos, Tick)>, Tick) {
+    let Some(pos) = world.comp::<Position>(id) else { return (None, 0) };
+    let Some(bd) = world.comp::<Building>(b) else { return (None, 0) };
+    let n = bd.core_walk(pos.tile).len() as u64;
+    if n == 0 {
+        return (None, 0);
+    }
+    let q = u64::from(crate::systems::vehicles::step_q(world, id, pos.tile));
+    let upt = world.config.exec.units_per_tick();
+    (Some((pos.tile, world.tick)), (n * q).div_ceil(upt).max(1))
 }
 
 fn move_to(world: &mut World, id: EntityId, tile: TilePos) {

@@ -111,9 +111,25 @@ pub fn climb_place(world: &World, id: EntityId) -> Option<(TilePos, EntityId, f3
     let b = world.comp::<Brain>(id)?;
     let tick = world.tick;
     match &b.exec {
-        ExecState::Climb { from, to, depart, board, arrive_tick, .. } => {
+        ExecState::Climb { from, to, depart, board, arrive_tick, walk, .. } => {
             let p = world.comp::<Position>(id)?;
-            Some((p.tile, p.building?, storey_at(*from, *to, *depart, *board, *arrive_tick, tick)))
+            let bd = p.building?;
+            // S4 (`OPEN-320`): a climb in begins with the walk from the door's slot to the core, its own ticks.
+            let tile = match walk {
+                Some((from_tile, start)) if tick < *depart => {
+                    let way = world.comp::<Building>(bd).map(|b| b.core_walk(*from_tile)).unwrap_or_default();
+                    let span = depart.saturating_sub(*start).max(1);
+                    let k = (way.len() as u64 * tick.saturating_sub(*start) / span) as usize;
+                    if k == 0 {
+                        *from_tile
+                    } else {
+                        way[k.min(way.len()) - 1]
+                    }
+                }
+                Some(_) => world.comp::<Building>(bd).and_then(|b| b.core_tile()).unwrap_or(p.tile),
+                None => p.tile,
+            };
+            Some((tile, bd, storey_at(*from, *to, *depart, *board, *arrive_tick, tick)))
         }
         ExecState::GotoTimed { target, arrive_tick, climb: Some(c), .. } => {
             if let Some(d) = c.down {
