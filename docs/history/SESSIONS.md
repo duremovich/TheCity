@@ -1128,3 +1128,16 @@ hot files). Two Opus phases, both pure refactors proven by a byte-identical 3-da
 (the save changelog, the CSV header literal, a component's three registration lists: `cols!`, `world!`), P3 split the
 god files (config/, components/, world/, 25 systems, exec, levers, the CLI) under a 1,500-line warning. Cost ≈ $40
 (HANDOFF § Cost).
+
+**2026-11-04, the thirty-sixth session: films and the movement pass.** Dylan skipped the cold play, left for ten hours
+and asked for a way to see the game move in time ("movement of npcs and the player through the world needs a lot of
+work that we are missing with still frames"). Film P1 built it: a `film` play verb and CLI flag on a fixed-step film
+clock, a per-frame `trace.csv`, and `tools/film.py` (an mp4 for Dylan; `paths.png`, sheets, strips and FINDING lines
+for agents, who read images). An audit by film (`docs/MOVEMENT_AUDIT.md`) opened `OPEN-307` to `318`; then sim and
+view coders ran in parallel: V1/V2/V3 (one view clock, motion tracks, crowd slots, doors drawn as a walk, fight
+staging, procedural poses: lying, sitting, guard, strike, stagger, the run look) and S1-S4 (door slots, steady
+strides, El platforms, the first frame after a load, spot caps, bystanders stir, Flee runs, the 12-hour sleep cap,
+timed hops and climbs; `SAVE_VERSION` 136). S2's view gates were undone by S3 so the shadowed city stays the played
+one. R4 found the fight "regression" was provoke picking a bus rider. Films before/after: teleports 47 -> 0 (60x walk),
+375 -> 0 (a crowd), the 73 m tower pop and the 33 m El leap gone. A side-by-side reel is in
+`target/films/reel/`. `OPEN-307` to `324` opened; thirteen closed. No test added. Cost ≈ $248 (HANDOFF § Cost).
