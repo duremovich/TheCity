@@ -26,6 +26,8 @@ One command each (`python tools/test.py <tier>`); each runs its cargo steps one 
 
 Plus the human judge at every milestone: a shadow pass (`citysim-cli shadow --assert --out shadow_out`, critics read one diary per archetype, `docs/SHADOW_V4.md` is the pattern). The bounds catch regressions between reads; the read is the verdict on "alive".
 
+**The build** is outside the budget but printed in the footer beside it (`; build 41s`, `build` in `summary.json`, 2026-11-03): the loop an edit pays is build + wall. The release profile is incremental with 256 codegen units (root `Cargo.toml`): a one-file edit rebuilds in ~41 s (it was 6m13s), the sims ~3 % slower; a cold worktree build is still ~6.5 min. `--profile dist` is the old non-incremental build plus thin LTO, for a bench or a shipped binary only.
+
 **Budgets** are wall time after compile with the tier alone on this box. A breach prints loudly and never fails (the box is noisy, Blender renders on it): **the phase that breached pays it back before it closes** (retire, merge into a shared run, or speed up). The numbers are `BUDGETS` in `tools/test.py`; change one only with a line in the commit message. `core_sanity`'s ticks/s floor is read only from a run alone; perf regressions are judged by alternating A/B of two binaries.
 
 ## The caps (`test.py lint`)

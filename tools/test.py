@@ -324,11 +324,15 @@ def cmd_tier(tier, args):
         os.environ[THREADS_ENV] = TIER_THREADS[tier]
     else:
         os.environ.pop(THREADS_ENV, None)
+    build_secs = None
     if not args.no_build:
         print(f"[{tier}] building (release, all targets)...")
+        build_start = time.time()
         b = subprocess.run(CARGO + ["test", "--release", "--no-run"], cwd=ROOT,
                            capture_output=True, text=True, encoding="utf-8", errors="replace")
+        build_secs = round(time.time() - build_start, 1)
         (out / "0-build.log").write_text(b.stdout + b.stderr, encoding="utf-8")
+        print(f"  {build_secs:6.1f}s  {'build':<24} {'ok' if b.returncode == 0 else 'FAILED'}")
         if b.returncode != 0:
             print("  build FAILED; see", (out / "0-build.log").relative_to(ROOT))
             for l in (b.stdout + b.stderr).splitlines():
@@ -362,9 +366,14 @@ def cmd_tier(tier, args):
     verdict = "GREEN" if not failed else "RED (" + ", ".join(r["step"] for r in failed) + ")"
     budget_line = (f"BUDGET OK {fmt_secs(wall)} of {fmt_secs(budget)}" if wall <= budget
                    else f"BUDGET BREACHED {fmt_secs(wall)} of {fmt_secs(budget)}: the phase that breached pays it back before it closes")
-    print(f"[{tier}] {verdict}; {budget_line}")
+    # The build is outside the budget (it is the compile, not the tier) but printed beside it: the loop an edit
+    # pays is build + wall, and the build went unmeasured until 2026-11-03 (6m13s for a one-file edit, 41s once
+    # the release profile went incremental).
+    build_note = f"; build {fmt_secs(build_secs)}" if build_secs is not None else ""
+    print(f"[{tier}] {verdict}; {budget_line}{build_note}")
     (out / "summary.json").write_text(json.dumps({"tier": tier, "stamp": stamp, "wall": round(wall, 1), "budget": budget,
-                                                  "green": not failed, "steps": results}, indent=1), encoding="utf-8")
+                                                  "build": build_secs, "green": not failed, "steps": results},
+                                                 indent=1), encoding="utf-8")
     return 0 if not failed else 1
 
 

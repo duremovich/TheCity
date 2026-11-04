@@ -19,8 +19,23 @@ license = "MIT"
 bevy_pbr = { path = "view/vendor/bevy_pbr" }
 bevy_render = { path = "view/vendor/bevy_render" }
 
+# The everyday optimized build: the tiers, shadows, `run --release` and the view all build in it. Incremental with
+# 256 codegen units (2026-11-03, measured on a one-file edit to systems/leisure.rs): `cargo test --release --no-run`
+# 6m13s -> 41s (the citysim lib 283 s -> 28 s, the 104 test binaries 1,934 -> 286 CPU-s); the sims ~3 % slower
+# (wages 14.8 -> 15.2 s, bodies 15.0 -> 15.4 s). rust-lld bought nothing on the sim (41 s vs 42 s). The cost is
+# disk: an incremental target/ runs ~20 GB. Line tables are enough for backtraces and a sampling profiler.
 [profile.release]
-debug = 1
+debug = "line-tables-only"
+incremental = true
+codegen-units = 256
+
+# The full-speed build, for a bench or a shipped binary only (`--profile dist`, target/dist): what release was
+# before 2026-11-03, plus thin LTO. Never a tier's profile: it re-optimizes the whole crate on every edit.
+[profile.dist]
+inherits = "release"
+incremental = false
+codegen-units = 16
+lto = "thin"
 
 # The view's dev profile (a member's own [profile] is ignored): the client at opt-level 1, its dependencies (Bevy)
 # at 3. The sim's own crates keep the dev default; its tiers build in release.
