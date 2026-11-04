@@ -117,6 +117,19 @@ pub struct LifeCfg {
     /// the next shift, not woken at the cap to walk hours home at night
     /// (false: the cap ends it).
     pub rough_sleep_on: bool,
+    /// S3 (`OPEN-302`): no Sleep runs past this many ticks from its start,
+    /// rested or not (0: no cap; the 22-hour sleep of P5's cold start).
+    #[serde(default)]
+    pub sleep_cap_ticks: u64,
+    /// S3 (`OPEN-302`): a sleeper on the street wakes in the day
+    /// (`sleep_day_from..sleep_day_to`, minutes of the day) once rested to
+    /// this (the street wakes you; above 1.0: off).
+    #[serde(default = "off_energy")]
+    pub sleep_day_wake_energy: f32,
+    #[serde(default)]
+    pub sleep_day_from: u16,
+    #[serde(default)]
+    pub sleep_day_to: u16,
     pub idle_sleep_energy: f32,
     pub energy_brake: f32,
     /// Item 5: the free spot's walk cap (else the nearest spot), the lone
@@ -363,6 +376,10 @@ impl Default for LifeCfg {
             shift_hunger_break: 0.12,
             sleep_wake_energy: 0.99,
             rough_sleep_on: false,
+            sleep_cap_ticks: 0,
+            sleep_day_wake_energy: 2.0,
+            sleep_day_from: 0,
+            sleep_day_to: 0,
             idle_sleep_energy: 0.9,
             energy_brake: 0.5,
             spot_walk_cap_tiles: 22,
@@ -808,4 +825,8 @@ impl Default for BudgetCfg {
 
 fn default_commute_long_ticks() -> u64 {
     180
+}
+
+fn off_energy() -> f32 {
+    2.0
 }

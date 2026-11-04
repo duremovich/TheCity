@@ -591,8 +591,13 @@ fn probe_gun_never_takes_a_hit_on_kin() {
         cfg.household.enabled = false;
         cfg.work_beat = None;
         cfg.housing.enabled = false;
+        // S3: and the patrol stagger off, and re-pinned to day 5 12:00 (the stagger, the
+        // headless stir and the street's sleep wake moved the 4-day city off the gun: he
+        // took nothing in 3 days set up at 4.5, 5 or 6 days; at 5.5 he does).
+        cfg.law.patrol_first_pick = 1;
+        cfg.law.patrol_muster_ticks = 0;
         let mut w = World::new(42, cfg);
-        w.run_ticks(4 * TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
+        w.run_ticks(5 * TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
         let civ = civilians(&w);
         let a = civ
             .iter()

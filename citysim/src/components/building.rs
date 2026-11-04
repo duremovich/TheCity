@@ -304,6 +304,15 @@ impl Building {
         (r.w >= 3 && r.h >= 3).then(|| (r.x + 1, r.y + 1, r.x + r.w - 2, r.y + r.h - 2))
     }
 
+    /// S3 (motion-v2's request (b)): the core's tile, where a climb ends on
+    /// the ground: the interior tile at the rect's centre (the view's core
+    /// is the top storey's footprint centre); `None` with no interior.
+    pub fn core_tile(&self) -> Option<TilePos> {
+        let (x0, y0, x1, y1) = self.interior_bounds()?;
+        let (cx, cy) = (self.rect.x + self.rect.w / 2, self.rect.y + self.rect.h / 2);
+        Some(TilePos::new(cx.clamp(x0, x1), cy.clamp(y0, y1)))
+    }
+
     /// S1 (`OPEN-307`): the interior tile just inside the door (the door
     /// clamped into the interior); `None` with no interior.
     pub fn inside_door(&self) -> Option<TilePos> {

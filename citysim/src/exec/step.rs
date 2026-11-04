@@ -226,8 +226,18 @@ fn step_agent_at(world: &mut World, id: EntityId, chained: bool) {
             if tick < arrive_tick {
                 StepResult::Running
             } else if out {
+                // S3: the climb ends at the core (`Building::core_tile`), and
+                // the walk from it to the door is walked over its own ticks.
+                let core = world
+                    .comp::<Position>(id)
+                    .and_then(|p| p.building)
+                    .and_then(|b| world.comp::<Building>(b))
+                    .and_then(|bd| bd.core_tile());
                 if let Some(p) = world.comp_mut::<Position>(id) {
                     p.floor = 0;
+                    if let Some(c) = core {
+                        p.tile = c;
+                    }
                 }
                 advance_goto(world, id, target, path, levels, tick, None, 0, None)
             } else {
